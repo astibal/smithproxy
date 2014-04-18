@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 2.8)
 
-SET(CABALA_DIR "/home/astib/pro/cabala")
+SET(CABALA_DIR "../cabala")
 
 project(cabala CXX)
 include_directories ("${CABALA_DIR}/proxylib")
