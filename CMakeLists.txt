@@ -5,7 +5,9 @@ SET(CABALA_DIR "/home/astib/pro/cabala")
 project(cabala CXX)
 include_directories ("${CABALA_DIR}/proxylib")
 include_directories ("${CABALA_DIR}/toollib")
-include_directories ("${CABALA_DIR}")
+#include_directories ("${CABALA_DIR}")
+include_directories ("${PROJECT_SOURCE_DIR}")
+
 add_subdirectory(${CABALA_DIR}/proxylib proxylib)
 add_subdirectory(${CABALA_DIR}/toollib toollib)
 
