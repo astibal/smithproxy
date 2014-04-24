@@ -4,13 +4,13 @@
 .TH SMITHPROXY 1 "APR 2014" Linux "User Manuals"
 .SH NAME
 .B smithproxy 
-\- Agent Smith's favourite mitm proxy
+\- agent Smith's favorite mitm proxy
 .SH SYNOPSIS
 .B smithproxy [--debug|--diagnose|--dump] [--ssl] --port 
 .I <listen_port> 
 
 .SH DESCRIPTION
-smithproxy \- Agent Smith's favourite mitm proxy, brought to you by Ales Stibal
+smithproxy \- agent Smith's favorite mitm proxy, brought to you by Ales Stibal
 <astibal@gmail.com>
 
 .SH Introduction
@@ -82,30 +82,30 @@ at least following configuration:
 
 .nf
 # if you don't have routing enabled, set it like this (uncomment):
-# sysctl -w net.ipv4.ip_forward=1
+.B "# sysctl -w net.ipv4.ip_forward=1"
 
 # create a new iptables chain, name it DIVERT
 iptables -t mangle -N DIVERT
 
 # PREROUTING phase: process all connections matching local socket 
 # in DIVERT chain, mark it and accept
-iptables -t mangle -A PREROUTING -p tcp -m socket -j DIVERT
-iptables -t mangle -A DIVERT -j MARK --set-mark 1
-iptables -t mangle -A DIVERT -j ACCEPT
+.B "iptables -t mangle -A PREROUTING -p tcp -m socket -j DIVERT"
+.B "iptables -t mangle -A DIVERT -j MARK --set-mark 1"
+.B "iptables -t mangle -A DIVERT -j ACCEPT"
 
 # add custom routing rule for above marked packets to be processed 
 # through loopback interface
-ip rule add fwmark 1 lookup 100
-ip route add local 0.0.0.0/0 dev lo table 100
+.B "ip rule add fwmark 1 lookup 100"
+.B "ip route add local 0.0.0.0/0 dev lo table 100"
 
 # this is rather for new connections (local socket is  not created 
 # for them yet - smithproxy will create it):
 
-iptables -t mangle -A PREROUTING -p tcp -i eth1 --dport 80 -j TPROXY \\
-   --tproxy-mark 0x1/0x1 --on-port 50080
+.B "iptables -t mangle -A PREROUTING -p tcp -i eth1 --dport 80 -j TPROXY \\\\ "
+.B "  --tproxy-mark 0x1/0x1 --on-port 50080"
 
-iptables -t mangle -A PREROUTING -p tcp -i eth1 --dport 443 -j TPROXY \\
-   --tproxy-mark 0x1/0x1 --on-port 50443
+.B " iptables -t mangle -A PREROUTING -p tcp -i eth1 --dport 443 -j TPROXY \\\\ "
+.B "  --tproxy-mark 0x1/0x1 --on-port 50443"
 
 .fi
 As the next step you probably want to run smithproxy and accept connections 
