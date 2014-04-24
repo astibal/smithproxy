@@ -1,0 +1,203 @@
+.\" Process this file with
+.\" groff -man -Tascii smithproxy.1
+.\"
+.TH SMITHPROXY 1 "APR 2014" Linux "User Manuals"
+.SH NAME
+.B smithproxy 
+\- Agent Smith's favourite mitm proxy
+.SH SYNOPSIS
+.B smithproxy [--debug|--diagnose|--dump] [--ssl] --port 
+.I <listen_port> 
+
+.SH DESCRIPTION
+smithproxy \- Agent Smith's favourite mitm proxy, brought to you by Ales Stibal
+<astibal@gmail.com>
+
+.SH Introduction
+.B Smithproxy
+is capturing, plain-text or SSL man-in-the-middle proxy for Linux iptables TPROXY target.
+It supports SSL certificate spoofing - cloning the original certificate including
+Subject and SAN, signing it with it's own CA certificate.
+.br
+It works the way that it terminates traffic intended to be forwarded on itself, and 
+originating new session to the traffic target. Those sessions are then proxied by
+copying bytes from one socket to another.
+
+.B "Diagram"
+.nf
+    Normally without any mitm proxy:
+    
+      Client (conn A) ----> (Linux Router) -----X target server 
+.fi
+
+.nf
+    Intercepted with smithproxy:
+    
+      Client (conn A) ----> (Linux Router).-----X target server
+                                |         | 
+                               TPROXY     (conn B) 
+                                |         ^
+                                `---X smithproxy
+
+.fi
+
+.br
+.IP 
+.B SSL:
+Certificate spoofing uses default server certificate's private and public keys; 
+certificates produced this way are cached for further use.
+.br
+If you are testing something, you are probably bored with certificate warning messages. 
+In that case you want to install 
+.B "ca-cert.pem" 
+file into your 'Trusted Root CA' certificate store.
+
+.SH OPTIONS
+
+.IP "-p,--port <port> (optional, with default value)"  
+specify port this smithproxy process should be listening on. You want to properly combine it with
+iptables setting aiming it to this port (see USAGE). Default: 8080
+
+.IP "--ssl (optional)"
+toggle SSL mode. All incoming traffic is considered SSL. Target server certificates will be spoofed 
+automatically and will presented to the SSL client.
+
+.IP "--diagnose (optional)"
+toggle diagnose mode; it will print out quite number of diagnostics. Those aim to be 
+human, non-programmer readable and could help you to identify where potential problem is.
+
+.IP "--debug (optional, not recommended)"
+toggle non-practical verbose logging mode, extremely chatty especially for SSL traffic. 
+You probably don't want to use it, unless you really need to know state machine cycle
+updates and similar info needed to troubleshoot the program itself.
+
+.IP "--dump (optional, not recommended)"
+toggle this to make your terminal busy. Most of 'Dump' level logging really dumps read/write 
+buffers and prints out memory allocation pointers. Added for completeness and just for the case.
+
+
+.SH USAGE
+Smithproxy is usually best applicable on linux router. To make it work, you need
+at least following configuration:
+
+.nf
+# if you don't have routing enabled, set it like this (uncomment):
+# sysctl -w net.ipv4.ip_forward=1
+
+# create a new iptables chain, name it DIVERT
+iptables -t mangle -N DIVERT
+
+# PREROUTING phase: process all connections matching local socket 
+# in DIVERT chain, mark it and accept
+iptables -t mangle -A PREROUTING -p tcp -m socket -j DIVERT
+iptables -t mangle -A DIVERT -j MARK --set-mark 1
+iptables -t mangle -A DIVERT -j ACCEPT
+
+# add custom routing rule for above marked packets to be processed 
+# through loopback interface
+ip rule add fwmark 1 lookup 100
+ip route add local 0.0.0.0/0 dev lo table 100
+
+# this is rather for new connections (local socket is  not created 
+# for them yet - smithproxy will create it):
+
+iptables -t mangle -A PREROUTING -p tcp -i eth1 --dport 80 -j TPROXY \\
+   --tproxy-mark 0x1/0x1 --on-port 50080
+
+iptables -t mangle -A PREROUTING -p tcp -i eth1 --dport 443 -j TPROXY \\
+   --tproxy-mark 0x1/0x1 --on-port 50443
+
+.fi
+As the next step you probably want to run smithproxy and accept connections 
+at ports you configured (50080 and 50443 in the example above). One 
+of them handling plain-text (50080) and the other SSL traffic (50443).
+
+You can do it this way:
+.br
+router:/dir/of/smithproxy$ ./smithproxy -p 50080
+.br
+or for SSL:
+.br
+router:/dir/of/smithproxy$ ./smithproxy --ssl ---port 50443
+.br
+
+.SH OUTPUT
+.IP Logging
+Standard logging is informing about new/closed connections, and general
+status messages, depending on logging level set on command line. By default
+it's set to 'Informational'.
+.br
+It doesn't contain any packet captures.
+
+.IP "Capture directory"
+Captures are organized in the structure:
+.nf
+   mitm/
+      <source IP>/
+         <date of capture>/
+            mitm_dump_<proxy connection ID> -- capture file
+.fi
+
+This structure is automatically created, so you don't need to worry
+to just delete it if your tests are over, or you are running out of disk space.
+
+.IP "Capture file format"
+Capture file is text file, similar to `hexdump -C' output.  If the traffic was SSL,
+smithproxy prints out also original server's certificate.
+
+
+.SH LIMITATIONS
+* Smithproxy is changing source IP address and source port (won't fix).
+.br
+* Smithproxy is running in foreground 
+.br
+* Logs to standard output
+.br
+* Uses relative path for certificate and capture files 
+.br
+* Captures are text files not usable by e.g. wireshark 
+.br
+* Since no higher layer protocol parser is implemented yet, 
+
+.SH FILES
+.nf 
+certs/
+  ca-cert.pem  -- Spoofing CA certificate, issuer for spoofing server 
+                  connection certificate
+                  - this file should be loaded to Trusted Root CA to
+                     get rid of browser certificate warnings
+  ca-key.pem   -- Spoofing CA private key, signing spoofed server
+                  certificate
+  cl-cert.pem  -- Default server-side connection certificate 
+  cl-key.pem   -- Default server-side connection private key
+  srv-cert.pem -- Default client-side connection certificate 
+  srv-key.pem  -- Default client-side connection private key
+  
+mitm/
+               -- Directory containing packet captures. 
+.fi
+.RS
+
+.SH BUGS
+See LIMITATIONS above. All known limitations are on short list for fixes to new release, 
+unless explicitly explained.
+.br
+Smithproxy has been  tested with valgrind tool and didn't exhibit any leaks.
+
+.SH COPYLEFT
+This software is released under BSD 3-clause license. 
+
+.SH AUTHOR
+.B "Ales Stibal" 
+<astibal@gmail.com>, (c) 2014
+.br
+
+.br
+I would prefer you won't use it for sneaking into other's privacy, as it's intended 
+to be used as testing/troubleshooting tool.
+.br
+
+.br
+Big thanks to my family and my wife Katka for their endless patience with me while hacking this
+tool for you!
+
