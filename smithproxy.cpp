@@ -1,5 +1,8 @@
 #include <csignal>
 #include <ctime>
+#include <getopt.h>
+
+#include <proxylib.hpp>
 
 #include <logger.hpp>
 #include <hostcx.hpp>
@@ -12,8 +15,6 @@
 
 #include <smithproxy.hpp>
 #include <traflog.hpp>
-
-std::string target_appl;
 
 
 class MySSLMitmCom : public SSLMitmCom {
@@ -129,6 +130,8 @@ public:
 		DEB_("on_left_error[%s]: proxy marked dead",(this->error_on_read ? "read" : "write"));
 		DUMS_(this->hr());
 		tlog.left_write("Client side connection closed: " + cx->name() + "\n");
+        INF_("Proxy 0x%08x closed by client: sent=%d/%dB received=%d/%dB",this,cx->meter_read_count,cx->meter_read_bytes,
+             cx->meter_write_count, cx->meter_write_bytes);
 		
 		this->dead(true); 
 	};
@@ -136,7 +139,8 @@ public:
 	virtual void on_right_error(baseHostCX<Com >* cx) { 
 		DEB_("on_right_error[%s]: proxy marked dead",(this->error_on_read ? "read" : "write"));
 		tlog.right_write("Server side connection closed: " + cx->name() + "\n");
-		
+		INF_("Proxy 0x%08x closed by server: sent=%d/%dB received=%d/%dB",this,cx->meter_write_count, cx->meter_write_bytes,
+                        cx->meter_read_count,cx->meter_read_bytes);
 		this->dead(true); 
 	};	
 
@@ -197,6 +201,12 @@ class MitmMasterProxy : public ThreadedWorkerProxy<Com,MyProxy<Com>> {
 			new_proxy->tlog.left_write("Connection start\n");
 			// FINAL point: adding new child proxy to the list
 			this->proxies().push_back(new_proxy);
+            
+            const char* f = just_accepted_cx->host().c_str();
+            const char* f_p = just_accepted_cx->port().c_str();
+            const char* t =  just_accepted_cx->nonlocal_host().c_str();
+            unsigned int t_p = just_accepted_cx->nonlocal_port();
+            INF_("Created new proxy 0x%08x from %s:%s to %s:%d",new_proxy,f,f_p, t,t_p );
 		}
 		
 		DEBS_("MitmMasterProxy::on_left_new: finished");
@@ -223,30 +233,70 @@ void my_terminate (int param)
   exit(1);
 }
 
+
+static int  debug_flag = INF;
+static int   ssl_flag = 0;
+static std::string listen_port;
+static struct option long_options[] =
+    {
+    /* These options set a flag. */
+    {"debug",   no_argument,       &debug_flag, DEB},
+    {"diagnose",   no_argument,       &debug_flag, DIA},
+    {"dump",   no_argument,       &debug_flag, DUM},
+    {"ssl",  no_argument, &ssl_flag, 1},
+    {"port",    required_argument, 0, 'p'},
+    {0, 0, 0, 0}
+};  
+
 int main(int argc, char *argv[]) {
 	
 	// setting logging facility level
-	lout.level(DIA);
+	lout.level(INF);
 	
-	INF_("Starting tmitm %s",SMITH_VERSION);
+	INF_("Starting Smithproxy %s (proxylib %s)",SMITH_VERSION,PROXYLIB_VERSION);
 	
-	// some idiot-proof help
-	if (argc != 3) {
-		ERR_("Usage: %s <listen_port> <443 = SSL, any value cleartext>",argv[0]);
-		return -1;
-	}
-	
-	target_appl = argv[2] ;
+    while(1) {
+    /* getopt_long stores the option index here. */
+        int option_index = 0;
+    
+        char c = getopt_long (argc, argv, "p:",
+                        long_options, &option_index);
+        if (c < 0) break;
 
-	int mode = std::stol(target_appl);
+        switch(c) {
+            case 0:
+                break;
+            
+            case 'p':
+                listen_port = std::string(optarg);        
+                break;
 
-	if( mode == 443) {
-		INF_("Entering SSL mode: %d",mode);
+            default:
+               abort();                 
+        }
+    }
+	
+	
+	lout.level(debug_flag);
+    int port=8080;
+    
+    if(listen_port.size()) {
+        try {
+        port = std::stoi(listen_port);
+        }
+        catch(std::invalid_argument e) {
+            ERR_("Invalid port specified: %s",listen_port.c_str());
+            abort();
+        }
+    }
+
+	if(ssl_flag) {
+		INF_("Entering SSL mode on port %d",port);
 		auto p = new theSSLAcceptor();
 		p->nonlocal(true);
 
 		// bind with master proxy (.. and create child proxies for new connections)
-		if (p->bind(std::stoul(argv[1]),'L') < 0) {
+		if (p->bind(port,'L') < 0) {
 			FATS_("Error binding port, exiting");
 			return -1;
 		};
@@ -255,11 +305,11 @@ int main(int argc, char *argv[]) {
 		
 		main_proxy = (Proxy*)p;
 	} else {
-		INF_("Entering plaintext mode: %d",mode);
+		INF_("Entering plaintext mode on port %d",port);
 		auto p = new theAcceptor();
 		p->nonlocal(true);
 		// bind with master proxy (.. and create child proxies for new connections)
-		if (p->bind(std::stoul(argv[1]),'L') < 0) {
+		if (p->bind(port,'L') < 0) {
 			FATS_("Error binding port, exiting");
 			return -1;
 		};
