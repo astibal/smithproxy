@@ -57,10 +57,6 @@ public:
 };
 
 
-
-
-
-
 /*
  now let's override baseProxy, and use on_left/right_bytes method!
  this proxy is working with *already accepted* sockets
@@ -223,30 +219,76 @@ class MitmMasterProxy : public ThreadedWorkerProxy<Com,MyProxy<Com>> {
 typedef ThreadedAcceptor<TCPCom,MitmMasterProxy<TCPCom>,MyProxy<TCPCom>> theAcceptor;
 typedef ThreadedAcceptor<MySSLMitmCom,MitmMasterProxy<MySSLMitmCom>,MyProxy<MySSLMitmCom>> theSSLAcceptor;
 
+
+class MyPlainAcceptor : public theAcceptor {
+};
+
+
 // Now let's do the Ctrl-C magic
-static Proxy* main_proxy;
+static theAcceptor* plain_proxy = NULL;
+static theSSLAcceptor* ssl_proxy = NULL;
+
+std::thread* plain_thread = NULL;
+std::thread* ssl_thread = NULL;
 
 void my_terminate (int param)
 {
   FATS_("Terminating ...");
-  main_proxy->shutdown();
-  exit(1);
+  if (plain_proxy != NULL) {
+    plain_proxy->dead(true);
+  }
+  if(ssl_proxy != NULL) {
+    ssl_proxy->dead(true);
+  }
 }
 
 
 static int  debug_flag = INF;
-static int   ssl_flag = 0;
+// static int   ssl_flag = 0;
 static std::string listen_port;
+static std::string ssl_listen_port;
+
 static struct option long_options[] =
     {
     /* These options set a flag. */
     {"debug",   no_argument,       &debug_flag, DEB},
     {"diagnose",   no_argument,       &debug_flag, DIA},
     {"dump",   no_argument,       &debug_flag, DUM},
-    {"ssl",  no_argument, &ssl_flag, 1},
+
+    {"ssl-port",  required_argument, 0, 's'},
     {"port",    required_argument, 0, 'p'},
     {0, 0, 0, 0}
 };  
+
+
+template <class Acceptor>
+Acceptor* prepare_acceptor(std::string& str_port,const char* friendly_name,int def_port) {
+    
+    int port = def_port;
+    
+    if(str_port.size()) {
+        try {
+         port = std::stoi(str_port);
+        }
+        catch(std::invalid_argument e) {
+            ERR_("Invalid port specified: %s",listen_port.c_str());
+            return NULL;
+        }
+    }
+    
+    INF_("Entering %s mode on port %d",friendly_name,port);
+    auto s_p = new Acceptor();
+    s_p->nonlocal(true);
+
+    // bind with master proxy (.. and create child proxies for new connections)
+    if (s_p->bind(port,'L') < 0) {
+        FATS_("Error binding port, exiting");
+        delete s_p;
+        return NULL;
+    };
+    
+    return s_p;
+}
 
 int main(int argc, char *argv[]) {
 	
@@ -271,6 +313,10 @@ int main(int argc, char *argv[]) {
                 listen_port = std::string(optarg);        
                 break;
 
+            case 's':
+                ssl_listen_port = std::string(optarg);        
+                break;
+                
             default:
                abort();                 
         }
@@ -278,49 +324,13 @@ int main(int argc, char *argv[]) {
 	
 	
 	lout.level(debug_flag);
-    int port=8080;
     
-    if(listen_port.size()) {
-        try {
-        port = std::stoi(listen_port);
-        }
-        catch(std::invalid_argument e) {
-            ERR_("Invalid port specified: %s",listen_port.c_str());
-            abort();
-        }
-    }
+   
 
-	if(ssl_flag) {
-		INF_("Entering SSL mode on port %d",port);
-		auto p = new theSSLAcceptor();
-		p->nonlocal(true);
-
-		// bind with master proxy (.. and create child proxies for new connections)
-		if (p->bind(port,'L') < 0) {
-			FATS_("Error binding port, exiting");
-			return -1;
-		};
-
-		p->run();
-		
-		main_proxy = (Proxy*)p;
-	} else {
-		INF_("Entering plaintext mode on port %d",port);
-		auto p = new theAcceptor();
-		p->nonlocal(true);
-		// bind with master proxy (.. and create child proxies for new connections)
-		if (p->bind(port,'L') < 0) {
-			FATS_("Error binding port, exiting");
-			return -1;
-		};
-
-		p->run();
-		
-		main_proxy = (Proxy*)p;
-	}
-	
-	
-	
+    plain_proxy = prepare_acceptor<theAcceptor>(listen_port,"plain-text",50080);
+    ssl_proxy = prepare_acceptor<theSSLAcceptor>(ssl_listen_port,"SSL",50443);
+    
+    
 	// install signal handler, we do want to release the memory properly
 		// signal handler installation
 	void (*prev_fn)(int);
@@ -330,7 +340,16 @@ int main(int argc, char *argv[]) {
 	prev_fn = signal (SIGINT,my_terminate);
 	if (prev_fn==SIG_IGN) signal (SIGINT,SIG_IGN);
 	
-// 	main_proxy->run();
-
-	delete main_proxy;
+    
+    
+    plain_thread = new std::thread([]() { plain_proxy->run(); plain_proxy->shutdown(); } );
+    ssl_thread = new std::thread([] () { ssl_proxy->run(); ssl_proxy->shutdown();  } );    
+    
+    
+    if(plain_thread) {
+        plain_thread->join();
+    }
+    if(ssl_thread) {
+        ssl_thread->join();
+    }
 }

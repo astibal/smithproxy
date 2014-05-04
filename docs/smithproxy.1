@@ -56,11 +56,11 @@ file into your 'Trusted Root CA' certificate store.
 
 .IP "-p,--port <port> (optional, with default value)"  
 specify port this smithproxy process should be listening on. You want to properly combine it with
-iptables setting aiming it to this port (see USAGE). Default: 8080
+iptables setting aiming it to this port (see USAGE). Default: 50080
 
-.IP "--ssl (optional)"
-toggle SSL mode. All incoming traffic is considered SSL. Target server certificates will be spoofed 
-automatically and will presented to the SSL client.
+.IP "-s, --ssl-port (optional, with default value)"
+toggle SSL mode. All incoming traffic on that port is considered SSL. Target server certificates will be spoofed 
+automatically and will presented to the SSL client. Default: 50443
 
 .IP "--diagnose (optional)"
 toggle diagnose mode; it will print out quite number of diagnostics. Those aim to be 
@@ -114,11 +114,11 @@ of them handling plain-text (50080) and the other SSL traffic (50443).
 
 You can do it this way:
 .br
-router:/dir/of/smithproxy$ ./smithproxy -p 50080
+router:/dir/of/smithproxy$ ./smithproxy --port 50080 --ssl-port 50443
 .br
-or for SSL:
+or just simply (above example uses defaults):
 .br
-router:/dir/of/smithproxy$ ./smithproxy --ssl ---port 50443
+router:/dir/of/smithproxy$ ./smithproxy 
 .br
 
 .SH OUTPUT
@@ -157,7 +157,8 @@ smithproxy prints out also original server's certificate.
 .br
 * Captures are text files not usable by e.g. wireshark 
 .br
-* Since no higher layer protocol parser is implemented yet, 
+* Since no higher layer protocol parser is implemented yet, STARTTLS traffic is not intercepted. 
+
 
 .SH FILES
 .nf 
