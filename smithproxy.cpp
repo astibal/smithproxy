@@ -188,7 +188,7 @@ class MitmMasterProxy : public ThreadedWorkerProxy<Com,MyProxy<Com>> {
             DIA_("About to name socket after: %s:%s",h.c_str(),p.c_str());
             
             int bind_status = target_cx->namesocket(target_cx->socket(),h,(unsigned short) std::stoi(p));
-			if (bind_status < 0) {
+			if (bind_status != 0) {
                 
                 char abc[256];
                 
