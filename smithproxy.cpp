@@ -193,7 +193,7 @@ class MitmMasterProxy : public ThreadedWorkerProxy<Com,MyProxy<Com>> {
                 char abc[256];
                 
                 strerror_r(bind_status,abc,255);
-                DIAS_("cannot bind this port: %s",abc);
+                DIA_("cannot bind this port: %s",abc);
             }
             target_cx->connect(false);
 
