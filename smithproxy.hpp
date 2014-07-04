@@ -1,1 +1,1 @@
-#define SMITH_VERSION "0.2.2"
+#define SMITH_VERSION "0.2.3"
