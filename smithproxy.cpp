@@ -181,7 +181,14 @@ class MitmMasterProxy : public ThreadedWorkerProxy<Com,MyProxy<Com>> {
 											   string_format("%d",just_accepted_cx->nonlocal_port()).c_str()
 											  );
 			// connect it! - btw ... we don't want to block of course...
-			
+            
+            std::string h;
+            std::string p;
+            just_accepted_cx->resolve_socket_src(just_accepted_cx->socket(),&h,&p);
+            DIA_("About to name socket after: %s:%s",h.c_str(),p.c_str());
+			if (target_cx->namesocket(target_cx->socket(),h,(unsigned short) std::stoi(p)) < 0) {
+                DIAS_("cannot bind this port");
+            }
             target_cx->connect(false);
 
             just_accepted_cx->peer(target_cx);
