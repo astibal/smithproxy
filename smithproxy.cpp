@@ -186,8 +186,14 @@ class MitmMasterProxy : public ThreadedWorkerProxy<Com,MyProxy<Com>> {
             std::string p;
             just_accepted_cx->resolve_socket_src(just_accepted_cx->socket(),&h,&p);
             DIA_("About to name socket after: %s:%s",h.c_str(),p.c_str());
-			if (target_cx->namesocket(target_cx->socket(),h,(unsigned short) std::stoi(p)) < 0) {
-                DIAS_("cannot bind this port");
+            
+            int bind_status = target_cx->namesocket(target_cx->socket(),h,(unsigned short) std::stoi(p));
+			if (bind_status < 0) {
+                
+                char abc[256];
+                
+                strerror_r(bind_status,abc,255);
+                DIAS_("cannot bind this port: %s",abc);
             }
             target_cx->connect(false);
 
