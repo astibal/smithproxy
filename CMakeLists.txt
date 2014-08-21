@@ -22,5 +22,5 @@ target_link_libraries(smithproxy socle_lib socle_common_lib pthread ssl crypto)
 
 if(UNIX)
 	install(TARGETS smithproxy DESTINATION bin)
-        install(FILES docs/smithproxy.1 DESTINATION share/man/man1)
+        install(FILES man/smithproxy.1 DESTINATION share/man/man1)
 endif()
