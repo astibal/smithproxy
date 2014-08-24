@@ -355,8 +355,17 @@ int main(int argc, char *argv[]) {
 	
     
     
-    plain_thread = new std::thread([]() { plain_proxy->run(); plain_proxy->shutdown(); } );
-    ssl_thread = new std::thread([] () { ssl_proxy->run(); ssl_proxy->shutdown();  } );    
+    plain_thread = new std::thread([]() { 
+        plain_proxy->run(); 
+        DIAS_("plaintext workers torn down."); 
+        plain_proxy->shutdown(); 
+    } );
+    
+    ssl_thread = new std::thread([] () { 
+        ssl_proxy->run(); 
+        DIAS_("ssl workers torn down."); 
+        ssl_proxy->shutdown();  
+    } );    
     
     
     if(plain_thread) {
