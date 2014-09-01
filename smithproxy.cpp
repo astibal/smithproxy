@@ -25,6 +25,7 @@
 
 #include <logger.hpp>
 #include <hostcx.hpp>
+#include <apphostcx.hpp>
 #include <baseproxy.hpp>
 #include <masterproxy.hpp>
 #include <threadedproxy.hpp>
@@ -39,7 +40,7 @@
 class MySSLMitmCom : public SSLMitmCom {
 public:
        virtual bool spoof_cert(X509* x) {
-           log().append(SSLCertStore::print_cert(x));
+           log().append("\n ==== Server certificate:\n" + SSLCertStore::print_cert(x) + "\n ====\n");
            bool r = SSLMitmCom::spoof_cert(x);
            
            
@@ -48,30 +49,52 @@ public:
 };
 
 template <class Com>
-class MitmHostCX : public baseHostCX<Com> {
+class MitmHostCX : public AppHostCX<Com> {
 public:
 	
 	// surprise, constructor filling hostname and port
-	MitmHostCX( const char* h, const char* p ) : baseHostCX<Com>::baseHostCX(h,p) {
+	MitmHostCX( const char* h, const char* p ) : AppHostCX<Com>::AppHostCX(h,p) {
 		DEB_("MitmHostCX: constructor %s:%s",h,p);
+        load_signatures();
 	};
-	MitmHostCX( int s ) : baseHostCX<Com>::baseHostCX(s) {
+	MitmHostCX( int s ) : AppHostCX<Com>::AppHostCX(s) {
 		DEB_("MitmHostCX: constructor %d",s);
+        load_signatures();
 	};
 	
-	// first useful code: overriding process() method: do something with read buffer when bytes arrived into the socket
     virtual int process() {
 		
-		// IMPORTANT: where are those incoming data? In the readbuf() !!!
+		// incoming data are in the readbuf
 		unsigned char *ptr = baseHostCX<Com>::readbuf()->data();
 		unsigned int len = baseHostCX<Com>::readbuf()->size();
 		
 		// our only processing: hex dup the payload to the log
 		DEBS_("Incoming data(" + this->name() + "):\n" +hex_dump(ptr,len));
 		
-		// IMPORTANT: with returning len, read buffer will be truncated by 'len' bytes. Note: truncated bytes are LOST.
+		//  read buffer will be truncated by 'len' bytes. Note: truncated bytes are LOST.
 		return len;
 	};
+    
+    virtual void load_signatures() {
+        
+        DEBS_("MitmHostCX::load_signatures: start");
+        
+        duplexSignature sig_test_http;
+        
+        sig_test_http.category = "www";
+        sig_test_http.name = "http/get|post";
+        sig_test_http.add('r',new regexMatch("GET|POST"));
+        sig_test_http.add('w',new regexMatch("HTTP/1.[01]"));        
+        
+        this->sensor().push_back(std::pair<duplexSignature,bool>(sig_test_http,false));
+        
+        DEBS_("MitmHostCX::load_signatures: stop");
+    };
+
+    virtual void on_detect(duplexSignature& sig_sig, vector_range& r) {
+        INF_("Proxy %s matching signature: cat='%s', name='%s' at %s",this->c_name(), sig_sig.category.c_str(), sig_sig.name.c_str(), vrangetos(r).c_str());
+        this->log().append( string_format("\nDetected application: cat='%s', name='%s'\n",sig_sig.category.c_str(), sig_sig.name.c_str()));
+    }
     
 };
 
@@ -86,8 +109,6 @@ public:
  left-right is more generic and follows common sense.
 */
 
-// NEW: Just for the case you are wondering if here is anything new: no, it's not! :)
-// 		L<->R copy mechanism stays the same.
 
 template <class Com>
 class MyProxy : public baseProxy<Com> {
@@ -107,7 +128,7 @@ public:
 	virtual void on_left_bytes(baseHostCX<Com>* cx) {
 		
         if(cx->log().size()) {
-            tlog.write('R'," ==== Server certificate:\n"+cx->log()+"\n ====\n");
+            tlog.write('L', cx->log());
             cx->log() = "";
         }
         
@@ -129,7 +150,7 @@ public:
     virtual void on_right_bytes(baseHostCX<Com>* cx) {
         
         if(cx->log().size()) {
-            tlog.write('R'," ==== Server certificate:\n"+cx->log()+"\n====\n");
+            tlog.write('R',cx->log());
             cx->log() = "";
         }
         
