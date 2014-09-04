@@ -35,7 +35,7 @@
 
 #include <smithproxy.hpp>
 #include <traflog.hpp>
-
+#include <display.hpp>
 
 class MySSLMitmCom : public SSLMitmCom {
 public:
@@ -92,7 +92,7 @@ public:
     };
 
     virtual void on_detect(duplexSignature& sig_sig, vector_range& r) {
-        INF_("Proxy %s matching signature: cat='%s', name='%s' at %s",this->c_name(), sig_sig.category.c_str(), sig_sig.name.c_str(), vrangetos(r).c_str());
+        WAR_("Connection from %s matching signature: cat='%s', name='%s' at %s",this->full_name('L').c_str(), sig_sig.category.c_str(), sig_sig.name.c_str(), vrangetos(r).c_str());
         this->log().append( string_format("\nDetected application: cat='%s', name='%s'\n",sig_sig.category.c_str(), sig_sig.name.c_str()));
     }
     
@@ -166,8 +166,12 @@ public:
 		DEB_("on_left_error[%s]: proxy marked dead",(this->error_on_read ? "read" : "write"));
 		DUMS_(this->hr());
 		tlog.left_write("Client side connection closed: " + cx->name() + "\n");
-        INF_("Proxy 0x%08x closed by client: sent=%d/%dB received=%d/%dB",this,cx->meter_read_count,cx->meter_read_bytes,
+        
+
+        INF_("Connection from %s closed, sent=%d/%dB received=%d/%dB",cx->full_name('L').c_str(),cx->meter_read_count,cx->meter_read_bytes,
              cx->meter_write_count, cx->meter_write_bytes);
+//         INF_("Proxy 0x%08x closed by client: sent=%d/%dB received=%d/%dB",this,cx->meter_read_count,cx->meter_read_bytes,
+//              cx->meter_write_count, cx->meter_write_bytes);
 		
 		this->dead(true); 
 	};
@@ -175,8 +179,14 @@ public:
 	virtual void on_right_error(baseHostCX<Com >* cx) { 
 		DEB_("on_right_error[%s]: proxy marked dead",(this->error_on_read ? "read" : "write"));
 		tlog.right_write("Server side connection closed: " + cx->name() + "\n");
-		INF_("Proxy 0x%08x closed by server: sent=%d/%dB received=%d/%dB",this,cx->meter_write_count, cx->meter_write_bytes,
+        
+//         INF_("Created new proxy 0x%08x from %s:%s to %s:%d",new_proxy,f,f_p, t,t_p );
+        
+		INF_("Connection from %s closed, sent=%d/%dB received=%d/%dB",cx->full_name('R').c_str(), cx->meter_write_count, cx->meter_write_bytes,
                         cx->meter_read_count,cx->meter_read_bytes);
+//         INF_("Proxy 0x%08x closed by server: sent=%d/%dB received=%d/%dB",this,cx->meter_write_count, cx->meter_write_bytes,
+//                         cx->meter_read_count,cx->meter_read_bytes);
+        
 		this->dead(true); 
 	};	
 
@@ -251,11 +261,7 @@ class MitmMasterProxy : public ThreadedWorkerProxy<Com,MyProxy<Com>> {
 			// FINAL point: adding new child proxy to the list
 			this->proxies().push_back(new_proxy);
             
-            const char* f = just_accepted_cx->host().c_str();
-            const char* f_p = just_accepted_cx->port().c_str();
-            const char* t =  just_accepted_cx->nonlocal_host().c_str();
-            unsigned int t_p = just_accepted_cx->nonlocal_port();
-            INF_("Created new proxy 0x%08x from %s:%s to %s:%d",new_proxy,f,f_p, t,t_p );
+            INF_("Connection from %s established", just_accepted_cx->full_name('L').c_str());
 		}
 		
 		DEBS_("MitmMasterProxy::on_left_new: finished");
