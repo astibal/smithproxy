@@ -37,6 +37,11 @@
 #include <traflog.hpp>
 #include <display.hpp>
 
+
+duplexFlowMatch* sig_http_get;
+duplexFlowMatch* sig_smtp_starttls;
+
+
 class MySSLMitmCom : public SSLMitmCom {
 public:
        virtual bool spoof_cert(X509* x) {
@@ -79,14 +84,21 @@ public:
         
         DEBS_("MitmHostCX::load_signatures: start");
         
-        duplexSignature sig_test_http;
+        duplexStateSignature sig_test_http;
         
         sig_test_http.category = "www";
         sig_test_http.name = "http/get|post";
-        sig_test_http.add('r',new regexMatch("GET|POST"));
-        sig_test_http.add('w',new regexMatch("HTTP/1.[01]"));        
+
+        // FIXME: following is just for the test only, signature will point to some VERY central storage
+        //   !!! I am keeping this deliberately LEAKING, until central signature database is implemented
+        sig_test_http.signature = sig_http_get;
+        this->sensor().push_back(std::pair<duplexStateSignature,bool>(sig_test_http,false));
         
-        this->sensor().push_back(std::pair<duplexSignature,bool>(sig_test_http,false));
+        duplexStateSignature sig_test_smtp_starttls;
+        sig_test_smtp_starttls.category = "mail";
+        sig_test_smtp_starttls.name = "smtp/starttls";    
+        sig_test_smtp_starttls.signature = sig_smtp_starttls;
+        this->starttls_sensor().push_back(std::pair<duplexStateSignature,bool>(sig_test_smtp_starttls,false));
         
         DEBS_("MitmHostCX::load_signatures: stop");
     };
@@ -96,6 +108,10 @@ public:
         this->log().append( string_format("\nDetected application: cat='%s', name='%s'\n",sig_sig.category.c_str(), sig_sig.name.c_str()));
     }
     
+    
+    virtual void on_starttls() {
+        DIAS_("we should now handover myself to SSL worker");
+    }
 };
 
 
@@ -120,6 +136,23 @@ public:
 	virtual ~MyProxy() {
 		if(tlog.active()) {
 			DEBS_("MyProxy::destructor: syncing writer");
+
+            for(typename std::vector<baseHostCX<Com>*>::iterator j = this->left_sockets.begin(); j != this->left_sockets.end(); ++j) {
+                auto cx = (*j);
+                if(cx->log().size()) {
+                    tlog.write('L', cx->log());
+                    cx->log() = "";
+                }
+            }               
+            
+            for(typename std::vector<baseHostCX<Com>*>::iterator j = this->right_sockets.begin(); j != this->right_sockets.end(); ++j) {
+                auto cx = (*j);
+                if(cx->log().size()) {
+                    tlog.write('R', cx->log());
+                    cx->log() = "";
+                }
+            }         
+            
 			tlog.left_write("Connection stop\n");
 		}
 	}
@@ -248,7 +281,9 @@ class MitmMasterProxy : public ThreadedWorkerProxy<Com,MyProxy<Com>> {
             target_cx->connect(false);
 
             just_accepted_cx->peer(target_cx);
+            ((AppHostCX<Com>*)just_accepted_cx)->mode(AppHostCX<Com>::MODE_PRE);
             target_cx->peer(just_accepted_cx);
+            target_cx->mode(AppHostCX<Com>::MODE_NONE);
                         
 			//NEW: end of new
 			
@@ -350,7 +385,19 @@ Acceptor* prepare_acceptor(std::string& str_port,const char* friendly_name,int d
 }
 
 int main(int argc, char *argv[]) {
-	
+
+    
+    sig_http_get= new duplexFlowMatch();                // this is basically container with (possibly) more 'match' types, aware of direction
+                                                                    // direction is based on unsigned char value r - read buff, w - write buff
+    sig_http_get->add('r',new regexMatch("^(GET|POST) +([^ ]+)",0,16));
+    sig_http_get->add('w',new regexMatch("HTTP/1.[01] +([1-5][0-9][0-9]) ",0,16));        
+            
+    
+    sig_smtp_starttls = new duplexFlowMatch();
+    
+    sig_smtp_starttls->add('r',new regexMatch("^STARTTLS",0,16));
+    sig_smtp_starttls->add('w',new regexMatch("^200 ",0,16));        
+    
 	// setting logging facility level
 	lout.level(INF);
 	
