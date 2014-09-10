@@ -44,6 +44,7 @@ duplexFlowMatch* sig_smtp_starttls;
 
 class MySSLMitmCom : public SSLMitmCom {
 public:
+       virtual baseCom* replicate() { return new SSLMitmCom(); };    
        virtual bool spoof_cert(X509* x) {
            log().append("\n ==== Server certificate:\n" + SSLCertStore::print_cert(x) + "\n ====\n");
            bool r = SSLMitmCom::spoof_cert(x);
@@ -53,16 +54,15 @@ public:
        }
 };
 
-template <class Com>
-class MitmHostCX : public AppHostCX<Com> {
+class MitmHostCX : public AppHostCX {
 public:
 	
 	// surprise, constructor filling hostname and port
-	MitmHostCX( const char* h, const char* p ) : AppHostCX<Com>::AppHostCX(h,p) {
+	MitmHostCX(baseCom* c, const char* h, const char* p ) : AppHostCX::AppHostCX(c,h,p) {
 		DEB_("MitmHostCX: constructor %s:%s",h,p);
         load_signatures();
 	};
-	MitmHostCX( int s ) : AppHostCX<Com>::AppHostCX(s) {
+	MitmHostCX( baseCom* c, int s ) : AppHostCX::AppHostCX(c,s) {
 		DEB_("MitmHostCX: constructor %d",s);
         load_signatures();
 	};
@@ -70,8 +70,8 @@ public:
     virtual int process() {
 		
 		// incoming data are in the readbuf
-		unsigned char *ptr = baseHostCX<Com>::readbuf()->data();
-		unsigned int len = baseHostCX<Com>::readbuf()->size();
+		unsigned char *ptr = baseHostCX::readbuf()->data();
+		unsigned int len = baseHostCX::readbuf()->size();
 		
 		// our only processing: hex dup the payload to the log
 		DEBS_("Incoming data(" + this->name() + "):\n" +hex_dump(ptr,len));
@@ -126,10 +126,9 @@ public:
 */
 
 
-template <class Com>
-class MyProxy : public baseProxy<Com> {
+class MyProxy : public baseProxy {
 public:	
-	explicit MyProxy() : baseProxy<Com>(),
+	explicit MyProxy(baseCom* c) : baseProxy(c),
 	tlog(this) {
 	};
     
@@ -137,7 +136,7 @@ public:
 		if(tlog.active()) {
 			DEBS_("MyProxy::destructor: syncing writer");
 
-            for(typename std::vector<baseHostCX<Com>*>::iterator j = this->left_sockets.begin(); j != this->left_sockets.end(); ++j) {
+            for(typename std::vector<baseHostCX*>::iterator j = this->left_sockets.begin(); j != this->left_sockets.end(); ++j) {
                 auto cx = (*j);
                 if(cx->log().size()) {
                     tlog.write('L', cx->log());
@@ -145,7 +144,7 @@ public:
                 }
             }               
             
-            for(typename std::vector<baseHostCX<Com>*>::iterator j = this->right_sockets.begin(); j != this->right_sockets.end(); ++j) {
+            for(typename std::vector<baseHostCX*>::iterator j = this->right_sockets.begin(); j != this->right_sockets.end(); ++j) {
                 auto cx = (*j);
                 if(cx->log().size()) {
                     tlog.write('R', cx->log());
@@ -158,7 +157,7 @@ public:
 	}
 	
 	// this virtual method is called whenever there are new bytes in any LEFT host context!
-	virtual void on_left_bytes(baseHostCX<Com>* cx) {
+	virtual void on_left_bytes(baseHostCX* cx) {
 		
         if(cx->log().size()) {
             tlog.write('L', cx->log());
@@ -168,7 +167,7 @@ public:
 		tlog.left_write(cx->to_read());
 		
 		// because we have left bytes, let's copy them into all right side sockets!
-		for(typename std::vector<baseHostCX<Com>*>::iterator j = this->right_sockets.begin(); j != this->right_sockets.end(); j++) {
+		for(typename std::vector<baseHostCX*>::iterator j = this->right_sockets.begin(); j != this->right_sockets.end(); j++) {
 
 			// to_read: returns readbuf's buffer "view" of previously processed bytes 
 			// to_write: this is appending to caller's write buffer
@@ -180,7 +179,7 @@ public:
 	};
 	
 	// let's make this one short
-    virtual void on_right_bytes(baseHostCX<Com>* cx) {
+    virtual void on_right_bytes(baseHostCX* cx) {
         
         if(cx->log().size()) {
             tlog.write('R',cx->log());
@@ -188,14 +187,14 @@ public:
         }
         
 		tlog.right_write(cx->to_read());
-		for(typename std::vector<baseHostCX<Com>*>::iterator j = this->left_sockets.begin(); j != this->left_sockets.end(); j++) {
+		for(typename std::vector<baseHostCX*>::iterator j = this->left_sockets.begin(); j != this->left_sockets.end(); j++) {
 			(*j)->to_write(cx->to_read());
 		}
 	}
 	
 	// ... and also when there is error on L/R side, claim the proxy DEAD. When marked dead, it will be safely 
 	// closed by it's master proxy next cycle.
-    virtual void on_left_error(baseHostCX<Com >* cx) { 
+    virtual void on_left_error(baseHostCX* cx) { 
 		DEB_("on_left_error[%s]: proxy marked dead",(this->error_on_read ? "read" : "write"));
 		DUMS_(this->hr());
 		tlog.left_write("Client side connection closed: " + cx->name() + "\n");
@@ -209,7 +208,7 @@ public:
 		this->dead(true); 
 	};
 	
-	virtual void on_right_error(baseHostCX<Com >* cx) { 
+	virtual void on_right_error(baseHostCX* cx) { 
 		DEB_("on_right_error[%s]: proxy marked dead",(this->error_on_read ? "read" : "write"));
 		tlog.right_write("Server side connection closed: " + cx->name() + "\n");
         
@@ -223,34 +222,37 @@ public:
 		this->dead(true); 
 	};	
 
-      trafLog<Com> tlog;
+      trafLog tlog;
 
 };
 
 
-template<class Com>
-class MitmMasterProxy : public ThreadedWorkerProxy<Com,MyProxy<Com>> {
+class MitmMasterProxy : public ThreadedWorkerProxy<MyProxy> {
+
+public:
+    
+    MitmMasterProxy(baseCom* c) : ThreadedWorkerProxy< MyProxy >(c) {};
 	
-	virtual baseHostCX<Com>* new_cx(int s) { 
-        auto r = new MitmHostCX<Com>(s);
+	virtual baseHostCX* new_cx(int s) { 
+        auto r = new MitmHostCX(com()->replicate(),s);
         DEB_("Pausing new connection %s",r->c_name());
         r->paused(true);
 		return r; 
 	};	
 	
-    virtual void on_left_new(baseHostCX<Com >* just_accepted_cx) {
+    virtual void on_left_new(baseHostCX* just_accepted_cx) {
 		// ok, we just accepted socket, created context for it (using new_cx) and we probably need ... 
 		// to create child proxy and attach this cx to it.
 		
 		// NEW: whole method is reorganized 
 
-		if(! just_accepted_cx->nonlocal_resolved()) {
+		if(! just_accepted_cx->com()->nonlocal_resolved()) {
 			ERRS_("Was not possible to resolve original destination!");
 			just_accepted_cx->close();
 			delete just_accepted_cx;
 		} 
 		else {
-			MyProxy<Com> *new_proxy = new MyProxy<Com>();
+			MyProxy* new_proxy = new MyProxy(com()->replicate());
 			
 			// let's add this just_accepted_cx into new_proxy
             if(just_accepted_cx->paused()) {
@@ -260,17 +262,17 @@ class MitmMasterProxy : public ThreadedWorkerProxy<Com,MyProxy<Com>> {
                 DEBS_("MitmMasterProxy::on_left_new: ladd the new cx (unpaused)");
                 new_proxy->ladd(just_accepted_cx);
             }
-			MitmHostCX<Com> *target_cx = new MitmHostCX<Com>(just_accepted_cx->nonlocal_host().c_str(), 
-											   string_format("%d",just_accepted_cx->nonlocal_port()).c_str()
+			MitmHostCX *target_cx = new MitmHostCX(com()->replicate(), just_accepted_cx->com()->nonlocal_host().c_str(), 
+											   string_format("%d",just_accepted_cx->com()->nonlocal_port()).c_str()
 											  );
 			// connect it! - btw ... we don't want to block of course...
             
             std::string h;
             std::string p;
-            just_accepted_cx->resolve_socket_src(just_accepted_cx->socket(),&h,&p);
+            just_accepted_cx->com()->resolve_socket_src(just_accepted_cx->socket(),&h,&p);
             DIA_("About to name socket after: %s:%s",h.c_str(),p.c_str());
             
-            int bind_status = target_cx->namesocket(target_cx->socket(),h,(unsigned short) std::stoi(p));
+            int bind_status = target_cx->com()->namesocket(target_cx->socket(),h,(unsigned short) std::stoi(p));
 			if (bind_status != 0) {
                 
                 char abc[256];
@@ -281,9 +283,10 @@ class MitmMasterProxy : public ThreadedWorkerProxy<Com,MyProxy<Com>> {
             target_cx->connect(false);
 
             just_accepted_cx->peer(target_cx);
-            ((AppHostCX<Com>*)just_accepted_cx)->mode(AppHostCX<Com>::MODE_PRE);
             target_cx->peer(just_accepted_cx);
-            target_cx->mode(AppHostCX<Com>::MODE_NONE);
+
+            ((AppHostCX*)just_accepted_cx)->mode(AppHostCX::MODE_PRE);
+            target_cx->mode(AppHostCX::MODE_NONE);
                         
 			//NEW: end of new
 			
@@ -305,13 +308,13 @@ class MitmMasterProxy : public ThreadedWorkerProxy<Com,MyProxy<Com>> {
 	virtual int run_once() {
         //T_DIAS_("slist",5,this->hr()+"\n===============\n");
 		
-		return ThreadedWorkerProxy<Com,MyProxy<Com>>::run_once();
+		return ThreadedWorkerProxy<MyProxy>::run_once();
 	}
 
 };
 
-typedef ThreadedAcceptor<TCPCom,MitmMasterProxy<TCPCom>,MyProxy<TCPCom>> theAcceptor;
-typedef ThreadedAcceptor<MySSLMitmCom,MitmMasterProxy<MySSLMitmCom>,MyProxy<MySSLMitmCom>> theSSLAcceptor;
+typedef ThreadedAcceptor<MitmMasterProxy,MyProxy> theAcceptor;
+typedef ThreadedAcceptor<MitmMasterProxy,MyProxy> theSSLAcceptor;
 
 
 class MyPlainAcceptor : public theAcceptor {
@@ -355,8 +358,8 @@ static struct option long_options[] =
 };  
 
 
-template <class Acceptor>
-Acceptor* prepare_acceptor(std::string& str_port,const char* friendly_name,int def_port) {
+template <class Com>
+theAcceptor* prepare_acceptor(std::string& str_port,const char* friendly_name,int def_port) {
     
     int port = def_port;
     
@@ -371,8 +374,8 @@ Acceptor* prepare_acceptor(std::string& str_port,const char* friendly_name,int d
     }
     
     INF_("Entering %s mode on port %d",friendly_name,port);
-    auto s_p = new Acceptor();
-    s_p->nonlocal(true);
+    auto s_p = new theAcceptor(new Com());
+    s_p->com()->nonlocal(true);
 
     // bind with master proxy (.. and create child proxies for new connections)
     if (s_p->bind(port,'L') < 0) {
@@ -396,7 +399,7 @@ int main(int argc, char *argv[]) {
     sig_smtp_starttls = new duplexFlowMatch();
     
     sig_smtp_starttls->add('r',new regexMatch("^STARTTLS",0,16));
-    sig_smtp_starttls->add('w',new regexMatch("^200 ",0,16));        
+    sig_smtp_starttls->add('w',new regexMatch("^2[0-5]0 ",0,16));        
     
 	// setting logging facility level
 	lout.level(INF);
@@ -433,8 +436,8 @@ int main(int argc, char *argv[]) {
     
    
 
-    plain_proxy = prepare_acceptor<theAcceptor>(listen_port,"plain-text",50080);
-    ssl_proxy = prepare_acceptor<theSSLAcceptor>(ssl_listen_port,"SSL",50443);
+    plain_proxy = prepare_acceptor<TCPCom>(listen_port,"plain-text",50080);
+    ssl_proxy = prepare_acceptor<MySSLMitmCom>(ssl_listen_port,"SSL",50443);
     
     
 	// install signal handler, we do want to release the memory properly
