@@ -111,6 +111,29 @@ public:
     
     virtual void on_starttls() {
         DIAS_("we should now handover myself to SSL worker");
+        
+        // we know this side is client
+//         delete com();
+//         delete peercom();
+
+        com_ = std::make_shared<baseCom*>(new MySSLMitmCom());
+        com()->init();
+        
+        peer()->com_ = std::make_shared<baseCom*>(new SSLMitmCom());
+        peer(peer()); // this will re-init
+        peer()->peer(this);
+        
+        DIAS_("peers set");
+        
+        // set flag to wait for the peer to finish spoofing
+
+        paused(true);
+        ((SSLCom*)peercom())->upgrade_client_socket(peer()->socket());
+        ((SSLCom*)com())->upgrade_server_socket(socket());        
+        
+        log().append("\n STARTTLS: plain connection upgraded to SSL/TLS, continuing with inspection.\n\n");
+        
+        DIAS_("on_starttls finished");
     }
 };
 
