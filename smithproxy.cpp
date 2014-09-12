@@ -39,7 +39,8 @@
 
 
 duplexFlowMatch* sig_http_get;
-duplexFlowMatch* sig_smtp_starttls;
+duplexFlowMatch* sig_starttls_smtp;
+duplexFlowMatch* sig_starttls_imap;
 
 
 class MySSLMitmCom : public SSLMitmCom {
@@ -94,11 +95,18 @@ public:
         sig_test_http.signature = sig_http_get;
         this->sensor().push_back(std::pair<duplexStateSignature,bool>(sig_test_http,false));
         
-        duplexStateSignature sig_test_smtp_starttls;
-        sig_test_smtp_starttls.category = "mail";
-        sig_test_smtp_starttls.name = "smtp/starttls";    
-        sig_test_smtp_starttls.signature = sig_smtp_starttls;
-        this->starttls_sensor().push_back(std::pair<duplexStateSignature,bool>(sig_test_smtp_starttls,false));
+        duplexStateSignature sig_test_starttls_smtp;
+        sig_test_starttls_smtp.category = "mail";
+        sig_test_starttls_smtp.name = "smtp/starttls";    
+        sig_test_starttls_smtp.signature = sig_starttls_smtp;
+        this->starttls_sensor().push_back(std::pair<duplexStateSignature,bool>(sig_test_starttls_smtp,false));
+
+        duplexStateSignature sig_test_starttls_imap;
+        sig_test_starttls_imap.category = "mail";
+        sig_test_starttls_imap.name = "imap/starttls";    
+        sig_test_starttls_imap.signature = sig_starttls_imap;
+        this->starttls_sensor().push_back(std::pair<duplexStateSignature,bool>(sig_test_starttls_imap,false));
+
         
         DEBS_("MitmHostCX::load_signatures: stop");
     };
@@ -419,10 +427,16 @@ int main(int argc, char *argv[]) {
     sig_http_get->add('w',new regexMatch("HTTP/1.[01] +([1-5][0-9][0-9]) ",0,16));        
             
     
-    sig_smtp_starttls = new duplexFlowMatch();
+    sig_starttls_smtp = new duplexFlowMatch();
+    sig_starttls_smtp->add('r',new regexMatch("^STARTTLS",0,16));
+    sig_starttls_smtp->add('w',new regexMatch("^2[0-5]0 ",0,16));        
     
-    sig_smtp_starttls->add('r',new regexMatch("^STARTTLS",0,16));
-    sig_smtp_starttls->add('w',new regexMatch("^2[0-5]0 ",0,16));        
+
+    sig_starttls_imap = new duplexFlowMatch();
+    sig_starttls_imap->add('r',new regexMatch(". STARTTLS\r\n",0,16));
+    sig_starttls_imap->add('w',new regexMatch(". OK",0,64));        
+    
+    
     
 	// setting logging facility level
 	lout.level(INF);
