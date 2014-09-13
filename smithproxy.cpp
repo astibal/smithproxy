@@ -41,7 +41,11 @@
 duplexFlowMatch* sig_http_get;
 duplexFlowMatch* sig_starttls_smtp;
 duplexFlowMatch* sig_starttls_imap;
+duplexFlowMatch* sig_starttls_pop3;
+duplexFlowMatch* sig_starttls_ftp; //openssl s_client -host secureftp-test.com -port 21 -starttls ftp
+duplexFlowMatch* sig_starttls_xmpp; //openssl s_client -connect isj3cmx.webexconnect.com:5222 -starttls xmpp
 
+duplexFlowMatch* sig_virus_eicar;
 
 class MySSLMitmCom : public SSLMitmCom {
 public:
@@ -107,6 +111,30 @@ public:
         sig_test_starttls_imap.signature = sig_starttls_imap;
         this->starttls_sensor().push_back(std::pair<duplexStateSignature,bool>(sig_test_starttls_imap,false));
 
+        duplexStateSignature sig_test_starttls_pop3;
+        sig_test_starttls_pop3.category = "mail";
+        sig_test_starttls_pop3.name = "pop3/starttls";    
+        sig_test_starttls_pop3.signature = sig_starttls_pop3;
+        this->starttls_sensor().push_back(std::pair<duplexStateSignature,bool>(sig_test_starttls_pop3,false));
+
+        duplexStateSignature sig_test_starttls_ftp;
+        sig_test_starttls_ftp.category = "files";
+        sig_test_starttls_ftp.name = "ftp/starttls";    
+        sig_test_starttls_ftp.signature = sig_starttls_ftp;
+        this->starttls_sensor().push_back(std::pair<duplexStateSignature,bool>(sig_test_starttls_ftp,false));
+
+        duplexStateSignature sig_test_starttls_xmpp;
+        sig_test_starttls_xmpp.category = "im";
+        sig_test_starttls_xmpp.name = "xmpp/starttls";    
+        sig_test_starttls_xmpp.signature = sig_starttls_xmpp;
+        this->starttls_sensor().push_back(std::pair<duplexStateSignature,bool>(sig_test_starttls_xmpp,false));        
+        
+        
+        duplexStateSignature sig_test_virus_eicar;
+        sig_test_virus_eicar.category = "av";
+        sig_test_virus_eicar.name = "virus/eicar";    
+        sig_test_virus_eicar.signature = sig_virus_eicar;
+        this->sensor().push_back(std::pair<duplexStateSignature,bool>(sig_test_virus_eicar,false));
         
         DEBS_("MitmHostCX::load_signatures: stop");
     };
@@ -436,7 +464,25 @@ int main(int argc, char *argv[]) {
     sig_starttls_imap->add('r',new regexMatch(". STARTTLS\r\n",0,16));
     sig_starttls_imap->add('w',new regexMatch(". OK",0,64));        
     
+
+    sig_starttls_pop3 = new duplexFlowMatch();
+    sig_starttls_pop3->add('r',new regexMatch("^STLS\r\n",0,10));
+    sig_starttls_pop3->add('w',new regexMatch("^[+]OK",0,5));        
+
+    sig_starttls_ftp = new duplexFlowMatch();
+    sig_starttls_ftp->add('r',new regexMatch("^AUTH TLS\r\n",0,10));
+    sig_starttls_ftp->add('w',new regexMatch("^[2][0-9][0-9] AUTH",0,10));        
     
+    //<starttls xmlns='urn:ietf:params:xml:ns:xmpp-tls'/>
+    //<proceed xmlns='urn:ietf:params:xml:ns:xmpp-tls'/>
+    sig_starttls_xmpp = new duplexFlowMatch();
+    sig_starttls_xmpp->add('r',new regexMatch("^<starttls [^>/]+xmpp-tls[^>/]/>",0,64));
+    sig_starttls_xmpp->add('w',new regexMatch("^<proceed [^>/]+xmpp-tls[^>/]/>",0,64));        
+        
+
+    sig_virus_eicar = new duplexFlowMatch();
+    sig_virus_eicar->add('w',new simpleMatch("X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"));        
+    //X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*
     
 	// setting logging facility level
 	lout.level(INF);
