@@ -49,6 +49,10 @@ duplexFlowMatch* sig_virus_eicar;
 
 class MySSLMitmCom : public SSLMitmCom {
 public:
+    virtual ~MySSLMitmCom() {};
+    
+    
+    
        virtual baseCom* replicate() { return new SSLMitmCom(); };    
        virtual bool spoof_cert(X509* x) {
            log().append("\n ==== Server certificate:\n" + SSLCertStore::print_cert(x) + "\n ====\n");
@@ -62,6 +66,9 @@ public:
 class MitmHostCX : public AppHostCX {
 public:
 	
+    
+    virtual ~MitmHostCX() {};
+    
 	// surprise, constructor filling hostname and port
 	MitmHostCX(baseCom* c, const char* h, const char* p ) : AppHostCX::AppHostCX(c,h,p) {
 		DEB_("MitmHostCX: constructor %s:%s",h,p);
@@ -152,10 +159,10 @@ public:
 //         delete com();
 //         delete peercom();
 
-        com_ = std::make_shared<baseCom*>(new MySSLMitmCom());
+        com_ = new MySSLMitmCom();
         com()->init();
         
-        peer()->com_ = std::make_shared<baseCom*>(new SSLMitmCom());
+        peer()->com_ = new SSLMitmCom();
         peer(peer()); // this will re-init
         peer()->peer(this);
         
@@ -331,14 +338,14 @@ public:
             just_accepted_cx->com()->resolve_socket_src(just_accepted_cx->socket(),&h,&p);
             DIA_("About to name socket after: %s:%s",h.c_str(),p.c_str());
             
-            int bind_status = target_cx->com()->namesocket(target_cx->socket(),h,(unsigned short) std::stoi(p));
-			if (bind_status != 0) {
-                
-                char abc[256];
-                
-                strerror_r(bind_status,abc,255);
-                DIA_("cannot bind this port: %s",abc);
-            }
+//             int bind_status = target_cx->com()->namesocket(target_cx->socket(),h,(unsigned short) std::stoi(p));
+// 			if (bind_status != 0) {
+//                 
+//                 char abc[256];
+//                 
+//                 strerror_r(bind_status,abc,255);
+//                 DIA_("cannot bind this port: %s",abc);
+//             }
             target_cx->connect(false);
 
             just_accepted_cx->peer(target_cx);
@@ -447,7 +454,9 @@ theAcceptor* prepare_acceptor(std::string& str_port,const char* friendly_name,in
 }
 
 int main(int argc, char *argv[]) {
-
+//     CRYPTO_malloc_debug_init();
+//     CRYPTO_dbg_set_options(V_CRYPTO_MDEBUG_ALL);
+    CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON);
     
     sig_http_get= new duplexFlowMatch();                // this is basically container with (possibly) more 'match' types, aware of direction
                                                                     // direction is based on unsigned char value r - read buff, w - write buff
@@ -553,4 +562,14 @@ int main(int argc, char *argv[]) {
     if(ssl_thread) {
         ssl_thread->join();
     }
+    
+    CRYPTO_cleanup_all_ex_data();
+    ERR_free_strings();
+    ERR_remove_state(0);
+    EVP_cleanup();    
+    
+    auto s = new SSLCom();
+    s->certstore()->destroy();
+    delete s;
+
 }
