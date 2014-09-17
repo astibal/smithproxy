@@ -193,19 +193,30 @@ public:
 
 
 class MyProxy : public baseProxy {
+    
+protected:
+    trafLog tlog_;
+    
+    bool write_payload_ = false;
+    
 public:	
+    bool write_payload(void) { return write_payload_; } 
+    void write_payload(bool b) { write_payload_ = b; }
+    
+    trafLog& tlog() { return tlog_; }
+    
 	explicit MyProxy(baseCom* c) : baseProxy(c),
-	tlog(this) {
+	tlog_(this) {
 	};
     
 	virtual ~MyProxy() {
-		if(tlog.active()) {
+		if(write_payload()) {
 			DEBS_("MyProxy::destructor: syncing writer");
 
             for(typename std::vector<baseHostCX*>::iterator j = this->left_sockets.begin(); j != this->left_sockets.end(); ++j) {
                 auto cx = (*j);
                 if(cx->log().size()) {
-                    tlog.write('L', cx->log());
+                    tlog().write('L', cx->log());
                     cx->log() = "";
                 }
             }               
@@ -213,25 +224,27 @@ public:
             for(typename std::vector<baseHostCX*>::iterator j = this->right_sockets.begin(); j != this->right_sockets.end(); ++j) {
                 auto cx = (*j);
                 if(cx->log().size()) {
-                    tlog.write('R', cx->log());
+                    tlog().write('R', cx->log());
                     cx->log() = "";
                 }
             }         
             
-			tlog.left_write("Connection stop\n");
+			tlog().left_write("Connection stop\n");
 		}
 	}
 	
 	// this virtual method is called whenever there are new bytes in any LEFT host context!
 	virtual void on_left_bytes(baseHostCX* cx) {
 		
-        if(cx->log().size()) {
-            tlog.write('L', cx->log());
-            cx->log() = "";
+        if(write_payload()) {
+            if(cx->log().size()) {
+                tlog().write('L', cx->log());
+                cx->log() = "";
+            }
+            
+            tlog().left_write(cx->to_read());
         }
         
-		tlog.left_write(cx->to_read());
-		
 		// because we have left bytes, let's copy them into all right side sockets!
 		for(typename std::vector<baseHostCX*>::iterator j = this->right_sockets.begin(); j != this->right_sockets.end(); j++) {
 
@@ -247,12 +260,15 @@ public:
 	// let's make this one short
     virtual void on_right_bytes(baseHostCX* cx) {
         
-        if(cx->log().size()) {
-            tlog.write('R',cx->log());
-            cx->log() = "";
+        if(write_payload()) {
+            if(cx->log().size()) {
+                tlog().write('R',cx->log());
+                cx->log() = "";
+            }
+            
+            tlog().right_write(cx->to_read());
         }
         
-		tlog.right_write(cx->to_read());
 		for(typename std::vector<baseHostCX*>::iterator j = this->left_sockets.begin(); j != this->left_sockets.end(); j++) {
 			(*j)->to_write(cx->to_read());
 		}
@@ -263,7 +279,10 @@ public:
     virtual void on_left_error(baseHostCX* cx) { 
 		DEB_("on_left_error[%s]: proxy marked dead",(this->error_on_read ? "read" : "write"));
 		DUMS_(this->hr());
-		tlog.left_write("Client side connection closed: " + cx->name() + "\n");
+        
+        if(write_payload()) {
+            tlog().left_write("Client side connection closed: " + cx->name() + "\n");
+        }
         
 
         INF_("Connection from %s closed, sent=%d/%dB received=%d/%dB",cx->full_name('L').c_str(),cx->meter_read_count,cx->meter_read_bytes,
@@ -276,7 +295,10 @@ public:
 	
 	virtual void on_right_error(baseHostCX* cx) { 
 		DEB_("on_right_error[%s]: proxy marked dead",(this->error_on_read ? "read" : "write"));
-		tlog.right_write("Server side connection closed: " + cx->name() + "\n");
+        
+        if(write_payload()) {
+            tlog().right_write("Server side connection closed: " + cx->name() + "\n");
+        }
         
 //         INF_("Created new proxy 0x%08x from %s:%s to %s:%d",new_proxy,f,f_p, t,t_p );
         
@@ -287,9 +309,6 @@ public:
         
 		this->dead(true); 
 	};	
-
-      trafLog tlog;
-
 };
 
 
@@ -335,10 +354,13 @@ public:
             
             std::string h;
             std::string p;
+            just_accepted_cx->name();
             just_accepted_cx->com()->resolve_socket_src(just_accepted_cx->socket(),&h,&p);
-            DIA_("About to name socket after: %s:%s",h.c_str(),p.c_str());
             
-//             int bind_status = target_cx->com()->namesocket(target_cx->socket(),h,(unsigned short) std::stoi(p));
+//          // Keep it here: would be good if we can do something like this in the future
+//            
+//          DIA_("About to name socket after: %s:%s",h.c_str(),p.c_str());
+//          int bind_status = target_cx->com()->namesocket(target_cx->socket(),h,(unsigned short) std::stoi(p));
 // 			if (bind_status != 0) {
 //                 
 //                 char abc[256];
@@ -360,8 +382,10 @@ public:
 			new_proxy->radd(target_cx);
 
             
-			// write start message
-			new_proxy->tlog.left_write("Connection start\n");
+            if(new_proxy->write_payload()) {
+                new_proxy->tlog().left_write("Connection start\n");
+            }
+            
 			// FINAL point: adding new child proxy to the list
 			this->proxies().push_back(new_proxy);
             
