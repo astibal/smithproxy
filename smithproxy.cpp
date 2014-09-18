@@ -23,7 +23,7 @@
 #include <ctime>
 #include <getopt.h>
 
-#include <proxylib.hpp>
+#include <socle.hpp>
 
 #include <logger.hpp>
 #include <hostcx.hpp>
@@ -643,7 +643,7 @@ int main(int argc, char *argv[]) {
 	// setting logging facility level
 	lout.level(INF);
     
-	INF_("Starting Smithproxy %s (proxylib %s)",SMITH_VERSION,PROXYLIB_VERSION);
+	INF_("Starting Smithproxy %s (socle %s)",SMITH_VERSION,SOCLE_VERSION);
 	
     while(1) {
     /* getopt_long stores the option index here. */
