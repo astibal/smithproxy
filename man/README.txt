@@ -1,13 +1,15 @@
 This document should describe how to run smithproxy and how to test it's features.
 
 INSTALLATION
+============
 
 1. apply content of tpoxy.txt in the router. You can add there as many ports as you want, just bear in mind that redirection to 50080 
    will run in plaintext only, UNLESS it detects STARTTLS procedure. Traffic redirected to 50043 will start SSL immediatelly.
 2. check your certificates, they should be in certs/ directory under smithproxy $CWD. Smithproxy will complain what's missing.
 3. run ./smithproxy # possibly with --diagnose or --debug flags 
 
-BASIC CONNECTIVITY TESTS
+BASIC CONNECTIVITY
+==================
 
 1. run webserver
 2. run wget stuff
@@ -23,7 +25,8 @@ You should see similar output (taken from version Smithproxy 0.3.5)
 14-09-17 13:21:27.1410952887 <140591749068544>  Warning - Connection from 192.168.100.40:45042 to 192.168.132.1:443 matching signature: cat='www', name='http/get|post' at <0,15>,<0,12>
 14-09-17 13:23:23.1410953003 <140591749068544> Informal - Connection from 192.168.100.40:45042 to 192.168.132.1:443 closed, sent=1/115B received=51/102618B
 
-STARTTLS SUPPORT TEST
+STARTTLS SUPPORT
+================
 Below you can find some starttls sites. Always check logs if */starttls should appear AND issuer in s_client output.
 
 openssl s_client -host smtp.gmail.com -port 25 -starttls smtp
@@ -39,6 +42,8 @@ openssl s_client -connect isj3cmx.webexconnect.com:5222 -starttls xmpp
 
 
 APP,AV SIGNATURES
+=================
+
 1. create file 'eicar' with X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H* somewhere in the content in your webserver /
 2. try download:
 wget -c http://192.168.132.1/eicar -O /dev/null

@@ -17,6 +17,8 @@
     
 */    
 
+#include <vector>
+
 #include <csignal>
 #include <ctime>
 #include <getopt.h>
@@ -37,15 +39,23 @@
 #include <traflog.hpp>
 #include <display.hpp>
 
+#include <libconfig.h++>
 
 duplexFlowMatch* sig_http_get;
+duplexFlowMatch* sig_virus_eicar;
+
 duplexFlowMatch* sig_starttls_smtp;
 duplexFlowMatch* sig_starttls_imap;
 duplexFlowMatch* sig_starttls_pop3;
 duplexFlowMatch* sig_starttls_ftp; //openssl s_client -host secureftp-test.com -port 21 -starttls ftp
 duplexFlowMatch* sig_starttls_xmpp; //openssl s_client -connect isj3cmx.webexconnect.com:5222 -starttls xmpp
 
-duplexFlowMatch* sig_virus_eicar;
+
+std::vector<duplexFlowMatch*> sigs_starttls;
+std::vector<duplexFlowMatch*> sigs_detection;
+
+
+
 
 class MySSLMitmCom : public SSLMitmCom {
 public:
@@ -61,6 +71,15 @@ public:
            
            return r;
        }
+};
+
+
+class MyDuplexFlowMatch : public duplexFlowMatch {
+    
+public:    
+    std::string name;
+    std::string sig_side;
+    std::string cat;
 };
 
 class MitmHostCX : public AppHostCX {
@@ -435,6 +454,8 @@ static int  debug_flag = INF;
 static std::string listen_port;
 static std::string ssl_listen_port;
 
+static std::string config_file;
+
 static struct option long_options[] =
     {
     /* These options set a flag. */
@@ -442,6 +463,7 @@ static struct option long_options[] =
     {"diagnose",   no_argument,       &debug_flag, DIA},
     {"dump",   no_argument,       &debug_flag, DUM},
 
+    {"config-file", required_argument, 0, 'c'},
     {"ssl-port",  required_argument, 0, 's'},
     {"port",    required_argument, 0, 'p'},
     {0, 0, 0, 0}
@@ -477,9 +499,109 @@ theAcceptor* prepare_acceptor(std::string& str_port,const char* friendly_name,in
     return s_p;
 }
 
+
+
+int load_signatures(libconfig::Config& cfg, const char* name, std::vector<duplexFlowMatch*>& target) {
+    using namespace libconfig;
+    
+    const Setting& root = cfg.getRoot();
+    const Setting& cfg_startrls_signatures = root[name];
+    int sigs_starttls_len = cfg_startrls_signatures.getLength();
+
+    
+    DIA_("Loading %s: %d",name,sigs_starttls_len);
+    for ( unsigned int i = 0 ; i < sigs_starttls_len; i++) {
+        MyDuplexFlowMatch* newsig = new MyDuplexFlowMatch();
+        
+        
+        const Setting& signature = cfg_startrls_signatures[i];
+        signature.lookupValue("name", newsig->name);
+        signature.lookupValue("side", newsig->sig_side);
+        signature.lookupValue("cat", newsig->cat);                
+
+        const Setting& signature_flow = cfg_startrls_signatures[i]["flow"];
+        int flow_count = signature_flow.getLength();
+        
+        DIA_("Loading signature '%s' with %d flow matches",newsig->name.c_str(),flow_count);
+
+        
+        for ( unsigned int j = 0; j < flow_count; j++ ) {
+
+            std::string side;
+            std::string type;
+            std::string sigtext;
+            int bytes_start;
+            int bytes_max;
+            
+            if(!(signature_flow[j].lookupValue("side", side)
+                && signature_flow[j].lookupValue("type", type)
+                && signature_flow[j].lookupValue("signature", sigtext)
+                && signature_flow[j].lookupValue("bytes_start", bytes_start)
+                && signature_flow[j].lookupValue("bytes_max", bytes_max))) {
+                
+                WAR_("Starttls signature %s failed to load: index %d",i);
+                continue;
+            }
+            
+            if( type == "regex") {
+                DEB_(" [%d]: new regex flow match",j);
+                newsig->add(side[0],new regexMatch(sigtext,bytes_start,bytes_max));
+            } else
+            if ( type == "simple") {
+                DEB_(" [%d]: new simple flow match",j);
+                newsig->add(side[0],new simpleMatch(sigtext,bytes_start,bytes_max));
+            }
+        }
+        
+        target.push_back(newsig);
+    }    
+    
+    return sigs_starttls_len;
+}
+
+int load_config(std::string& config_f) {
+    using namespace libconfig;
+    Config cfg;
+    
+    DIAS_("Reading config file");
+    
+    // Read the file. If there is an error, report it and exit.
+    try {
+        cfg.readFile(config_f.c_str());
+    }
+    catch(const FileIOException &fioex)
+    {
+        ERR_("I/O error while reading config file: %s",config_f.c_str());
+        exit(-1);   
+    }
+    catch(const ParseException &pex)
+    {
+        ERR_("Parse error in %s at %s:%d - %s", config_f.c_str(), pex.getFile(), pex.getLine(), pex.getError());
+        exit(-2);
+    }
+    
+    
+    try {
+        load_signatures(cfg,"starttls_signatures",sigs_starttls);
+        load_signatures(cfg,"detection_signatures",sigs_detection);
+        
+        cfg.getRoot()["settings"].lookupValue("certs_path",SSLCertStore::certs_path);
+        cfg.getRoot()["settings"].lookupValue("certs_ca_key_password",SSLCertStore::password);
+    }
+    catch(const SettingNotFoundException &nfex) {
+    
+        FATS_("Setting not found: %s",nfex.getPath());
+        exit(-66);
+    }
+}
+
 int main(int argc, char *argv[]) {
+    
+    config_file = "etc/smithproxy.cfg";
+    
 //     CRYPTO_malloc_debug_init();
 //     CRYPTO_dbg_set_options(V_CRYPTO_MDEBUG_ALL);
+    
     CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON);
     
     sig_http_get= new duplexFlowMatch();                // this is basically container with (possibly) more 'match' types, aware of direction
@@ -487,6 +609,9 @@ int main(int argc, char *argv[]) {
     sig_http_get->add('r',new regexMatch("^(GET|POST) +([^ ]+)",0,16));
     sig_http_get->add('w',new regexMatch("HTTP/1.[01] +([1-5][0-9][0-9]) ",0,16));        
             
+    sig_virus_eicar = new duplexFlowMatch();
+    sig_virus_eicar->add('w',new simpleMatch("X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"));        
+    //X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*
     
     sig_starttls_smtp = new duplexFlowMatch();
     sig_starttls_smtp->add('r',new regexMatch("^STARTTLS",0,16));
@@ -513,13 +638,11 @@ int main(int argc, char *argv[]) {
     sig_starttls_xmpp->add('w',new regexMatch("^<proceed [^>/]+xmpp-tls[^>/]/>",0,64));        
         
 
-    sig_virus_eicar = new duplexFlowMatch();
-    sig_virus_eicar->add('w',new simpleMatch("X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"));        
-    //X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*
+
     
 	// setting logging facility level
 	lout.level(INF);
-	
+    
 	INF_("Starting Smithproxy %s (proxylib %s)",SMITH_VERSION,PROXYLIB_VERSION);
 	
     while(1) {
@@ -542,6 +665,10 @@ int main(int argc, char *argv[]) {
                 ssl_listen_port = std::string(optarg);        
                 break;
                 
+            case 'c':
+                config_file = std::string(optarg);        
+                break;                
+                
             default:
                abort();                 
         }
@@ -550,7 +677,7 @@ int main(int argc, char *argv[]) {
 	
 	lout.level(debug_flag);
     
-   
+    load_config(config_file);   
 
     plain_proxy = prepare_acceptor<TCPCom>(listen_port,"plain-text",50080);
     ssl_proxy = prepare_acceptor<MySSLMitmCom>(ssl_listen_port,"SSL",50443);

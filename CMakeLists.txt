@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 2.8)
 SET(SOCLE_DIR "../socle")
 SET(SOCLE_COMMON_DIR "../socle/common")
 
-project(cabala CXX)
+project(smithproxy CXX)
 include_directories ("${SOCLE_DIR}")
 include_directories ("${SOCLE_COMMON_DIR}")
 #include_directories ("${SOCLE_DIR}")
@@ -17,6 +17,15 @@ if(UNIX)
 endif()
 
 add_executable(smithproxy  smithproxy.cpp)
+
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}")
+find_package (LibConfig REQUIRED)
+if (LIBCONFIGPP_FOUND)
+  include_directories(${LIBCONFIGPP_INCLUDE_DIRS})
+  target_link_libraries (smithproxy ${LIBCONFIGPP_LIBRARIES})
+endif (LIBCONFIGPP_FOUND)
+
+
 
 target_link_libraries(smithproxy socle_lib socle_common_lib pthread ssl crypto)
 
