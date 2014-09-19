@@ -41,16 +41,6 @@
 
 #include <libconfig.h++>
 
-duplexFlowMatch* sig_http_get;
-duplexFlowMatch* sig_virus_eicar;
-
-duplexFlowMatch* sig_starttls_smtp;
-duplexFlowMatch* sig_starttls_imap;
-duplexFlowMatch* sig_starttls_pop3;
-duplexFlowMatch* sig_starttls_ftp; //openssl s_client -host secureftp-test.com -port 21 -starttls ftp
-duplexFlowMatch* sig_starttls_xmpp; //openssl s_client -connect isj3cmx.webexconnect.com:5222 -starttls xmpp
-
-
 std::vector<duplexFlowMatch*> sigs_starttls;
 std::vector<duplexFlowMatch*> sigs_detection;
 
@@ -77,9 +67,8 @@ public:
 class MyDuplexFlowMatch : public duplexFlowMatch {
     
 public:    
-    std::string name;
     std::string sig_side;
-    std::string cat;
+    std::string category;
 };
 
 class MitmHostCX : public AppHostCX {
@@ -115,59 +104,18 @@ public:
         
         DEBS_("MitmHostCX::load_signatures: start");
         
-        duplexStateSignature sig_test_http;
-        
-        sig_test_http.category = "www";
-        sig_test_http.name = "http/get|post";
-
-        // FIXME: following is just for the test only, signature will point to some VERY central storage
-        //   !!! I am keeping this deliberately LEAKING, until central signature database is implemented
-        sig_test_http.signature = sig_http_get;
-        this->sensor().push_back(std::pair<duplexStateSignature,bool>(sig_test_http,false));
-        
-        duplexStateSignature sig_test_starttls_smtp;
-        sig_test_starttls_smtp.category = "mail";
-        sig_test_starttls_smtp.name = "smtp/starttls";    
-        sig_test_starttls_smtp.signature = sig_starttls_smtp;
-        this->starttls_sensor().push_back(std::pair<duplexStateSignature,bool>(sig_test_starttls_smtp,false));
-
-        duplexStateSignature sig_test_starttls_imap;
-        sig_test_starttls_imap.category = "mail";
-        sig_test_starttls_imap.name = "imap/starttls";    
-        sig_test_starttls_imap.signature = sig_starttls_imap;
-        this->starttls_sensor().push_back(std::pair<duplexStateSignature,bool>(sig_test_starttls_imap,false));
-
-        duplexStateSignature sig_test_starttls_pop3;
-        sig_test_starttls_pop3.category = "mail";
-        sig_test_starttls_pop3.name = "pop3/starttls";    
-        sig_test_starttls_pop3.signature = sig_starttls_pop3;
-        this->starttls_sensor().push_back(std::pair<duplexStateSignature,bool>(sig_test_starttls_pop3,false));
-
-        duplexStateSignature sig_test_starttls_ftp;
-        sig_test_starttls_ftp.category = "files";
-        sig_test_starttls_ftp.name = "ftp/starttls";    
-        sig_test_starttls_ftp.signature = sig_starttls_ftp;
-        this->starttls_sensor().push_back(std::pair<duplexStateSignature,bool>(sig_test_starttls_ftp,false));
-
-        duplexStateSignature sig_test_starttls_xmpp;
-        sig_test_starttls_xmpp.category = "im";
-        sig_test_starttls_xmpp.name = "xmpp/starttls";    
-        sig_test_starttls_xmpp.signature = sig_starttls_xmpp;
-        this->starttls_sensor().push_back(std::pair<duplexStateSignature,bool>(sig_test_starttls_xmpp,false));        
-        
-        
-        duplexStateSignature sig_test_virus_eicar;
-        sig_test_virus_eicar.category = "av";
-        sig_test_virus_eicar.name = "virus/eicar";    
-        sig_test_virus_eicar.signature = sig_virus_eicar;
-        this->sensor().push_back(std::pair<duplexStateSignature,bool>(sig_test_virus_eicar,false));
+        zip_signatures(starttls_sensor(),sigs_starttls);
+        zip_signatures(sensor(),sigs_detection);
         
         DEBS_("MitmHostCX::load_signatures: stop");
     };
 
-    virtual void on_detect(duplexSignature& sig_sig, vector_range& r) {
-        WAR_("Connection from %s matching signature: cat='%s', name='%s' at %s",this->full_name('L').c_str(), sig_sig.category.c_str(), sig_sig.name.c_str(), vrangetos(r).c_str());
-        this->log().append( string_format("\nDetected application: cat='%s', name='%s'\n",sig_sig.category.c_str(), sig_sig.name.c_str()));
+    virtual void on_detect(duplexFlowMatch* x_sig, flowMatchState& s, vector_range& r) {
+        
+        MyDuplexFlowMatch* sig_sig = (MyDuplexFlowMatch*)x_sig;
+        
+        WAR_("Connection from %s matching signature: cat='%s', name='%s' at %s",this->full_name('L').c_str(), sig_sig->category.c_str(), sig_sig->name().c_str(), vrangetos(r).c_str());
+        this->log().append( string_format("\nDetected application: cat='%s', name='%s'\n",sig_sig->category.c_str(), sig_sig->name().c_str()));
     }
     
     
@@ -510,22 +458,22 @@ int load_signatures(libconfig::Config& cfg, const char* name, std::vector<duplex
 
     
     DIA_("Loading %s: %d",name,sigs_starttls_len);
-    for ( unsigned int i = 0 ; i < sigs_starttls_len; i++) {
+    for ( int i = 0 ; i < sigs_starttls_len; i++) {
         MyDuplexFlowMatch* newsig = new MyDuplexFlowMatch();
         
         
         const Setting& signature = cfg_startrls_signatures[i];
-        signature.lookupValue("name", newsig->name);
+        signature.lookupValue("name", newsig->name());
         signature.lookupValue("side", newsig->sig_side);
-        signature.lookupValue("cat", newsig->cat);                
+        signature.lookupValue("cat", newsig->category);                
 
         const Setting& signature_flow = cfg_startrls_signatures[i]["flow"];
         int flow_count = signature_flow.getLength();
         
-        DIA_("Loading signature '%s' with %d flow matches",newsig->name.c_str(),flow_count);
+        DIA_("Loading signature '%s' with %d flow matches",newsig->name().c_str(),flow_count);
 
         
-        for ( unsigned int j = 0; j < flow_count; j++ ) {
+        for ( int j = 0; j < flow_count; j++ ) {
 
             std::string side;
             std::string type;
@@ -559,7 +507,7 @@ int load_signatures(libconfig::Config& cfg, const char* name, std::vector<duplex
     return sigs_starttls_len;
 }
 
-int load_config(std::string& config_f) {
+void load_config(std::string& config_f) {
     using namespace libconfig;
     Config cfg;
     
@@ -603,42 +551,6 @@ int main(int argc, char *argv[]) {
 //     CRYPTO_dbg_set_options(V_CRYPTO_MDEBUG_ALL);
     
     CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON);
-    
-    sig_http_get= new duplexFlowMatch();                // this is basically container with (possibly) more 'match' types, aware of direction
-                                                                    // direction is based on unsigned char value r - read buff, w - write buff
-    sig_http_get->add('r',new regexMatch("^(GET|POST) +([^ ]+)",0,16));
-    sig_http_get->add('w',new regexMatch("HTTP/1.[01] +([1-5][0-9][0-9]) ",0,16));        
-            
-    sig_virus_eicar = new duplexFlowMatch();
-    sig_virus_eicar->add('w',new simpleMatch("X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"));        
-    //X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*
-    
-    sig_starttls_smtp = new duplexFlowMatch();
-    sig_starttls_smtp->add('r',new regexMatch("^STARTTLS",0,16));
-    sig_starttls_smtp->add('w',new regexMatch("^2[0-5]0 ",0,16));        
-    
-
-    sig_starttls_imap = new duplexFlowMatch();
-    sig_starttls_imap->add('r',new regexMatch(". STARTTLS\r\n",0,16));
-    sig_starttls_imap->add('w',new regexMatch(". OK",0,64));        
-    
-
-    sig_starttls_pop3 = new duplexFlowMatch();
-    sig_starttls_pop3->add('r',new regexMatch("^STLS\r\n",0,10));
-    sig_starttls_pop3->add('w',new regexMatch("^[+]OK",0,5));        
-
-    sig_starttls_ftp = new duplexFlowMatch();
-    sig_starttls_ftp->add('r',new regexMatch("^AUTH TLS\r\n",0,10));
-    sig_starttls_ftp->add('w',new regexMatch("^[2][0-9][0-9] AUTH",0,10));        
-    
-    //<starttls xmlns='urn:ietf:params:xml:ns:xmpp-tls'/>
-    //<proceed xmlns='urn:ietf:params:xml:ns:xmpp-tls'/>
-    sig_starttls_xmpp = new duplexFlowMatch();
-    sig_starttls_xmpp->add('r',new regexMatch("^<starttls [^>/]+xmpp-tls[^>/]/>",0,64));
-    sig_starttls_xmpp->add('w',new regexMatch("^<proceed [^>/]+xmpp-tls[^>/]/>",0,64));        
-        
-
-
     
 	// setting logging facility level
 	lout.level(INF);
