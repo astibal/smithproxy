@@ -397,23 +397,22 @@ void my_terminate (int param)
 }
 
 
-static int  debug_flag = INF;
+static int  args_debug_flag = NON;
 // static int   ssl_flag = 0;
-static std::string listen_port;
-static std::string ssl_listen_port;
+static std::string cfg_listen_port;
+static std::string cfg_ssl_listen_port;
 
 static std::string config_file;
+static int cfg_log_level = INF;
 
 static struct option long_options[] =
     {
     /* These options set a flag. */
-    {"debug",   no_argument,       &debug_flag, DEB},
-    {"diagnose",   no_argument,       &debug_flag, DIA},
-    {"dump",   no_argument,       &debug_flag, DUM},
+    {"debug",   no_argument,       &args_debug_flag, DEB},
+    {"diagnose",   no_argument,       &args_debug_flag, DIA},
+    {"dump",   no_argument,       &args_debug_flag, DUM},
 
     {"config-file", required_argument, 0, 'c'},
-    {"ssl-port",  required_argument, 0, 's'},
-    {"port",    required_argument, 0, 'p'},
     {0, 0, 0, 0}
 };  
 
@@ -428,12 +427,12 @@ theAcceptor* prepare_acceptor(std::string& str_port,const char* friendly_name,in
          port = std::stoi(str_port);
         }
         catch(std::invalid_argument e) {
-            ERR_("Invalid port specified: %s",listen_port.c_str());
+            ERR_("Invalid port specified: %s",str_port.c_str());
             return NULL;
         }
     }
     
-    INF_("Entering %s mode on port %d",friendly_name,port);
+    NOT_("Entering %s mode on port %d",friendly_name,port);
     auto s_p = new theAcceptor(new Com());
     s_p->com()->nonlocal(true);
 
@@ -535,6 +534,9 @@ void load_config(std::string& config_f) {
         
         cfg.getRoot()["settings"].lookupValue("certs_path",SSLCertStore::certs_path);
         cfg.getRoot()["settings"].lookupValue("certs_ca_key_password",SSLCertStore::password);
+        cfg.getRoot()["settings"].lookupValue("plaintext_port",cfg_listen_port);
+        cfg.getRoot()["settings"].lookupValue("ssl_port",cfg_ssl_listen_port);
+        cfg.getRoot()["settings"].lookupValue("log_level",cfg_log_level);
     }
     catch(const SettingNotFoundException &nfex) {
     
@@ -552,7 +554,7 @@ int main(int argc, char *argv[]) {
     
     CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON);
     
-	// setting logging facility level
+	// setting logging facility level to show banner :)
 	lout.level(INF);
     
 	INF_("Starting Smithproxy %s (socle %s)",SMITH_VERSION,SOCLE_VERSION);
@@ -568,14 +570,6 @@ int main(int argc, char *argv[]) {
         switch(c) {
             case 0:
                 break;
-            
-            case 'p':
-                listen_port = std::string(optarg);        
-                break;
-
-            case 's':
-                ssl_listen_port = std::string(optarg);        
-                break;
                 
             case 'c':
                 config_file = std::string(optarg);        
@@ -585,14 +579,15 @@ int main(int argc, char *argv[]) {
                abort();                 
         }
     }
-	
-	
-	lout.level(debug_flag);
-    
-    load_config(config_file);   
 
-    plain_proxy = prepare_acceptor<TCPCom>(listen_port,"plain-text",50080);
-    ssl_proxy = prepare_acceptor<MySSLMitmCom>(ssl_listen_port,"SSL",50443);
+    // set level to what's in the config
+    load_config(config_file);	
+    
+    // override config setting if CLI option is used
+	lout.level(args_debug_flag > NON ? args_debug_flag : cfg_log_level );
+
+    plain_proxy = prepare_acceptor<TCPCom>(cfg_listen_port,"plain-text",50080);
+    ssl_proxy = prepare_acceptor<MySSLMitmCom>(cfg_ssl_listen_port,"SSL",50443);
     
     
 	// install signal handler, we do want to release the memory properly
@@ -636,3 +631,4 @@ int main(int argc, char *argv[]) {
     delete s;
 
 }
+
