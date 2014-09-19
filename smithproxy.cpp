@@ -557,7 +557,7 @@ int main(int argc, char *argv[]) {
 	// setting logging facility level to show banner :)
 	lout.level(INF);
     
-	INF_("Starting Smithproxy %s (socle %s)",SMITH_VERSION,SOCLE_VERSION);
+	CRI_("Starting Smithproxy %s (socle %s)",SMITH_VERSION,SOCLE_VERSION);
 	
     while(1) {
     /* getopt_long stores the option index here. */
