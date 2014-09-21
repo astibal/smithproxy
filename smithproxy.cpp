@@ -629,6 +629,12 @@ int main(int argc, char *argv[]) {
     auto s = new SSLCom();
     s->certstore()->destroy();
     delete s;
-
+    
+    delete plain_thread;
+    delete ssl_thread;
+    
+    DIAS_("Debug SSL statistics: ");
+    DIA_("SSL_accept: %d",SSLCom::counter_ssl_accept);
+    DIA_("SSL_connect: %d",SSLCom::counter_ssl_connect);
 }
 
