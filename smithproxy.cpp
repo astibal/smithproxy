@@ -252,8 +252,12 @@ public:
         }
         
 
-        INF_("Connection from %s closed, sent=%d/%dB received=%d/%dB",cx->full_name('L').c_str(),cx->meter_read_count,cx->meter_read_bytes,
-             cx->meter_write_count, cx->meter_write_bytes);
+        INF_("Connection from %s closed, sent=%d/%dB received=%d/%dB, flags=%c",
+                            cx->full_name('L').c_str(),
+                                            cx->meter_read_count,cx->meter_read_bytes,
+                                                                cx->meter_write_count, cx->meter_write_bytes,
+                                                                            'L');
+                                                                       
 //         INF_("Proxy 0x%08x closed by client: sent=%d/%dB received=%d/%dB",this,cx->meter_read_count,cx->meter_read_bytes,
 //              cx->meter_write_count, cx->meter_write_bytes);
 		
@@ -269,8 +273,11 @@ public:
         
 //         INF_("Created new proxy 0x%08x from %s:%s to %s:%d",new_proxy,f,f_p, t,t_p );
         
-		INF_("Connection from %s closed, sent=%d/%dB received=%d/%dB",cx->full_name('R').c_str(), cx->meter_write_count, cx->meter_write_bytes,
-                        cx->meter_read_count,cx->meter_read_bytes);
+		INF_("Connection from %s closed, sent=%d/%dB received=%d/%dB, flags=%c",
+                              cx->full_name('R').c_str(), 
+                                              cx->meter_write_count, cx->meter_write_bytes,
+                                                              cx->meter_read_count,cx->meter_read_bytes,
+                                                                      'R');
 //         INF_("Proxy 0x%08x closed by server: sent=%d/%dB received=%d/%dB",this,cx->meter_write_count, cx->meter_write_bytes,
 //                         cx->meter_read_count,cx->meter_read_bytes);
         
@@ -537,6 +544,7 @@ void load_config(std::string& config_f) {
         cfg.getRoot()["settings"].lookupValue("plaintext_port",cfg_listen_port);
         cfg.getRoot()["settings"].lookupValue("ssl_port",cfg_ssl_listen_port);
         cfg.getRoot()["settings"].lookupValue("log_level",cfg_log_level);
+        cfg.getRoot()["debug"].lookupValue("log_data_crc",baseCom::debug_log_data_crc);
     }
     catch(const SettingNotFoundException &nfex) {
     
