@@ -21,6 +21,7 @@
 
 #include <csignal>
 #include <ctime>
+#include <cstdlib>
 #include <getopt.h>
 
 #include <socle.hpp>
@@ -113,8 +114,10 @@ public:
     virtual void on_detect(duplexFlowMatch* x_sig, flowMatchState& s, vector_range& r) {
         
         MyDuplexFlowMatch* sig_sig = (MyDuplexFlowMatch*)x_sig;
+
+        WAR_("Connection from %s matching signature: cat='%s', name='%s'",this->full_name('L').c_str(), sig_sig->category.c_str(), sig_sig->name().c_str());
+        DEB_("Connection from %s matching signature: cat='%s', name='%s' at %s",this->full_name('L').c_str(), sig_sig->category.c_str(), sig_sig->name().c_str(), vrangetos(r).c_str());
         
-        WAR_("Connection from %s matching signature: cat='%s', name='%s' at %s",this->full_name('L').c_str(), sig_sig->category.c_str(), sig_sig->name().c_str(), vrangetos(r).c_str());
         this->log().append( string_format("\nDetected application: cat='%s', name='%s'\n",sig_sig->category.c_str(), sig_sig->name().c_str()));
     }
     
@@ -628,6 +631,7 @@ int main(int argc, char *argv[]) {
     if(ssl_thread) {
         ssl_thread->join();
     }
+    
     
     CRYPTO_cleanup_all_ex_data();
     ERR_free_strings();
