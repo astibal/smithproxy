@@ -372,10 +372,10 @@ public:
 		DEBS_("MitmMasterProxy::on_left_new: finished");
 	}
 
-	virtual int run_once() {
+	virtual int handle_sockets_once(baseCom* c) {
         //T_DIAS_("slist",5,this->hr()+"\n===============\n");
 		
-		return ThreadedWorkerProxy<MyProxy>::run_once();
+		return ThreadedWorkerProxy<MyProxy>::handle_sockets_once(c);
 	}
 
 };
@@ -421,7 +421,8 @@ static struct option long_options[] =
     {"debug",   no_argument,       &args_debug_flag, DEB},
     {"diagnose",   no_argument,       &args_debug_flag, DIA},
     {"dump",   no_argument,       &args_debug_flag, DUM},
-
+    {"extreme",   no_argument,       &args_debug_flag, EXT},
+    
     {"config-file", required_argument, 0, 'c'},
     {0, 0, 0, 0}
 };  
