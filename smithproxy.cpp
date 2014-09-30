@@ -31,9 +31,11 @@
 #include <apphostcx.hpp>
 #include <baseproxy.hpp>
 #include <masterproxy.hpp>
-#include <threadedproxy.hpp>
+#include <threadedacceptor.hpp>
+#include <threadedreceiver.hpp>
 #include <sslcom.hpp>
 #include <sslmitmcom.hpp>
+#include <udpcom.hpp>
 #include <display.hpp>
 
 #include <smithproxy.hpp>
@@ -289,11 +291,11 @@ public:
 };
 
 
-class MitmMasterProxy : public ThreadedWorkerProxy<MyProxy> {
+class MitmMasterProxy : public ThreadedAcceptorProxy<MyProxy> {
 
 public:
     
-    MitmMasterProxy(baseCom* c) : ThreadedWorkerProxy< MyProxy >(c) {};
+    MitmMasterProxy(baseCom* c) : ThreadedAcceptorProxy< MyProxy >(c) {};
 	
 	virtual baseHostCX* new_cx(int s) { 
         auto r = new MitmHostCX(com()->replicate(),s);
@@ -375,14 +377,13 @@ public:
 	virtual int handle_sockets_once(baseCom* c) {
         //T_DIAS_("slist",5,this->hr()+"\n===============\n");
 		
-		return ThreadedWorkerProxy<MyProxy>::handle_sockets_once(c);
+		return ThreadedAcceptorProxy<MyProxy>::handle_sockets_once(c);
 	}
 
 };
 
 typedef ThreadedAcceptor<MitmMasterProxy,MyProxy> theAcceptor;
-typedef ThreadedAcceptor<MitmMasterProxy,MyProxy> theSSLAcceptor;
-
+typedef ThreadedReceiver<ThreadedReceiverProxy<MyProxy>,MyProxy> theReceiver;
 
 class MyPlainAcceptor : public theAcceptor {
 };
@@ -390,10 +391,12 @@ class MyPlainAcceptor : public theAcceptor {
 
 // Now let's do the Ctrl-C magic
 static theAcceptor* plain_proxy = NULL;
-static theSSLAcceptor* ssl_proxy = NULL;
+static theAcceptor* ssl_proxy = NULL;
+static theReceiver* udp_proxy = NULL;
 
 std::thread* plain_thread = NULL;
 std::thread* ssl_thread = NULL;
+std::thread* udp_thread = NULL;
 
 void my_terminate (int param)
 {
@@ -404,6 +407,9 @@ void my_terminate (int param)
   if(ssl_proxy != NULL) {
     ssl_proxy->dead(true);
   }
+  if(udp_proxy != NULL) {
+    udp_proxy->dead(true);
+  }  
 }
 
 
@@ -411,6 +417,7 @@ static int  args_debug_flag = NON;
 // static int   ssl_flag = 0;
 static std::string cfg_listen_port;
 static std::string cfg_ssl_listen_port;
+static std::string cfg_udp_port;
 
 static std::string config_file;
 static int cfg_log_level = INF;
@@ -428,8 +435,8 @@ static struct option long_options[] =
 };  
 
 
-template <class Com>
-theAcceptor* prepare_acceptor(std::string& str_port,const char* friendly_name,int def_port) {
+template <class Listener, class Com>
+Listener* prepare_listener(std::string& str_port,const char* friendly_name,int def_port) {
     
     int port = def_port;
     
@@ -444,12 +451,13 @@ theAcceptor* prepare_acceptor(std::string& str_port,const char* friendly_name,in
     }
     
     NOT_("Entering %s mode on port %d",friendly_name,port);
-    auto s_p = new theAcceptor(new Com());
+    auto s_p = new Listener(new Com());
     s_p->com()->nonlocal(true);
 
     // bind with master proxy (.. and create child proxies for new connections)
-    if (s_p->bind(port,'L') < 0) {
-        FATS_("Error binding port, exiting");
+    int s = s_p->bind(port,'L');
+    if (s < 0) {
+        FAT_("Error binding %s port (%d), exiting",friendly_name,s);
         delete s_p;
         return NULL;
     };
@@ -547,6 +555,7 @@ void load_config(std::string& config_f) {
         cfg.getRoot()["settings"].lookupValue("certs_ca_key_password",SSLCertStore::password);
         cfg.getRoot()["settings"].lookupValue("plaintext_port",cfg_listen_port);
         cfg.getRoot()["settings"].lookupValue("ssl_port",cfg_ssl_listen_port);
+        cfg.getRoot()["settings"].lookupValue("udp_port",cfg_udp_port);
         cfg.getRoot()["settings"].lookupValue("log_level",cfg_log_level);
         cfg.getRoot()["debug"].lookupValue("log_data_crc",baseCom::debug_log_data_crc);
     }
@@ -598,8 +607,9 @@ int main(int argc, char *argv[]) {
     // override config setting if CLI option is used
 	lout.level(args_debug_flag > NON ? args_debug_flag : cfg_log_level );
 
-    plain_proxy = prepare_acceptor<TCPCom>(cfg_listen_port,"plain-text",50080);
-    ssl_proxy = prepare_acceptor<MySSLMitmCom>(cfg_ssl_listen_port,"SSL",50443);
+    plain_proxy = prepare_listener<theAcceptor,TCPCom>(cfg_listen_port,"plain-text",50080);
+    ssl_proxy = prepare_listener<theAcceptor,MySSLMitmCom>(cfg_ssl_listen_port,"SSL",50443);
+    udp_proxy = prepare_listener<theReceiver,UDPCom>(cfg_udp_port,"plain-udp",50081);
     
     
 	// install signal handler, we do want to release the memory properly
@@ -624,7 +634,12 @@ int main(int argc, char *argv[]) {
         DIAS_("ssl workers torn down."); 
         ssl_proxy->shutdown();  
     } );    
-    
+
+    udp_thread = new std::thread([] () { 
+        udp_proxy->run(); 
+        DIAS_("ssl workers torn down."); 
+        udp_proxy->shutdown();  
+    } );       
     
     if(plain_thread) {
         plain_thread->join();
@@ -632,7 +647,9 @@ int main(int argc, char *argv[]) {
     if(ssl_thread) {
         ssl_thread->join();
     }
-    
+    if(udp_thread) {
+        udp_thread->join();
+    }    
     
     CRYPTO_cleanup_all_ex_data();
     ERR_free_strings();
@@ -645,6 +662,7 @@ int main(int argc, char *argv[]) {
     
     delete plain_thread;
     delete ssl_thread;
+    delete udp_thread;
     
     DIAS_("Debug SSL statistics: ");
     DIA_("SSL_accept: %d",SSLCom::counter_ssl_accept);
