@@ -16,7 +16,7 @@ if(UNIX)
     SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g  -Wall -std=c++11")
 endif()
 
-add_executable(smithproxy  smithproxy.cpp)
+add_executable(smithproxy smithproxy.cpp mitmhost.cpp mitmproxy.cpp)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}")
 find_package (LibConfig REQUIRED)
@@ -27,7 +27,7 @@ endif (LIBCONFIGPP_FOUND)
 
 
 
-target_link_libraries(smithproxy socle_lib socle_common_lib pthread ssl crypto)
+target_link_libraries(smithproxy socle_lib pthread ssl crypto)
 
 if(UNIX)
 	install(TARGETS smithproxy DESTINATION bin)

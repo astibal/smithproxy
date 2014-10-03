@@ -12,7 +12,13 @@ BASIC CONNECTIVITY
 ==================
 
 1. run webserver
+
+For example:
+sudo webfsd -F -S -p 443 -A certs/ca-cert.pem -C certs/srv-cert.pem -K certs/srv-key.pem
+sudo webfsd -F -p 80
+
 2. run wget stuff
+
 HTTP:
 wget -c http://192.168.132.1/100k -O /dev/null
 wget http://speedtest.diino.com/largefiles/file-10M.bin -O /dev/null
@@ -34,7 +40,7 @@ openssl s_client -host imap.seznam.cz -port 143 -starttls imap
 openssl s_client -host mail2.fortinet.com -port 110 -starttls pop3
 openssl s_client -host secureftp-test.com -port 21 -starttls ftp
 openssl s_client -connect isj3cmx.webexconnect.com:5222 -starttls xmpp
-# lsap with starttls is not yet supported
+# ldap with starttls is not yet supported
 
 14-09-17 13:56:21.1410954981 <140465965889280> Informal - Connection from 192.168.100.40:52542 to 64.65.53.241:21 established
 14-09-17 13:56:22.1410954982 <140465965889280>  Warning - Connection from 192.168.100.40:52542 to 64.65.53.241:21 matching signature: cat='files', name='ftp/starttls' at <0,-1>,<0,9>,<0,7>

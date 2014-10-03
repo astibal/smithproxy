@@ -1,46 +1,65 @@
 
-root@deb-router-1:~# cat run_tproxy.sh
+# root@deb-router-1:~# cat run_tproxy.sh
+# enable ipv4 routing
 
 sysctl -w net.ipv4.ip_forward=1
-
-iptables -t mangle -N DIVERT
-iptables -t mangle -A PREROUTING -p tcp -m socket -j DIVERT
-iptables -t mangle -A DIVERT -j MARK --set-mark 1
-iptables -t mangle -A DIVERT -j ACCEPT
-
-ip rule add fwmark 1 lookup 100
-ip route add local 0.0.0.0/0 dev lo table 100
-
-iptables -t mangle -A PREROUTING -p tcp -i eth1 --dport 80 -j TPROXY \
-   --tproxy-mark 0x1/0x1 --on-port 50080
-
-iptables -t mangle -A PREROUTING -p tcp -i eth1 --dport 25 -j TPROXY \
-   --tproxy-mark 0x1/0x1 --on-port 50080
-
-iptables -t mangle -A PREROUTING -p tcp -i eth1 --dport 587 -j TPROXY \
-   --tproxy-mark 0x1/0x1 --on-port 50080   
-   
-iptables -t mangle -A PREROUTING -p tcp -i eth1 --dport 21 -j TPROXY \
-   --tproxy-mark 0x1/0x1 --on-port 50080   
-   
-iptables -t mangle -A PREROUTING -p tcp -i eth1 --dport 143 -j TPROXY \
-   --tproxy-mark 0x1/0x1 --on-port 50080   
-   
-iptables -t mangle -A PREROUTING -p tcp -i eth1 --dport 110 -j TPROXY \
-   --tproxy-mark 0x1/0x1 --on-port 50080   
-
-iptables -t mangle -A PREROUTING -p tcp -i eth1 --dport 5222 -j TPROXY \
-   --tproxy-mark 0x1/0x1 --on-port 50080   
-   
-   
-iptables -t mangle -A PREROUTING -p tcp -i eth1 --dport 443 -j TPROXY \
-   --tproxy-mark 0x1/0x1 --on-port 50443
-
-iptables -t mangle -A PREROUTING -p tcp -i eth1 --dport 465 -j TPROXY \
-   --tproxy-mark 0x1/0x1 --on-port 50443
-   
 
 # also possibly this for allowing non-local binds!
 echo 1 > /proc/sys/net/ipv4/ip_nonlocal_bind
 
+
+iptables -t mangle -F PREROUTING
+iptables -t mangle -F DIVERT
+
+iptables -t mangle -N DIVERT
+iptables -t mangle -A PREROUTING -p tcp -m socket -j DIVERT
+iptables -t mangle -A PREROUTING -p udp -m socket -j DIVERT
+iptables -t mangle -A DIVERT -j MARK --set-mark 1
+iptables -t mangle -A DIVERT -j ACCEPT
+iptables -t mangle -N SMITH
+iptables -t mangle -A PREROUTING -j SMITH
+
+
 iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+ip rule add fwmark 1 lookup 100
+ip route add local 0.0.0.0/0 dev lo table 100
+
+
+
+
+
+iptables -t mangle -A SMITH -p tcp -i eth1 --dport 80 -j TPROXY \
+   --tproxy-mark 0x1/0x1 --on-port 50080
+
+iptables -t mangle -A SMITH -p tcp -i eth1 --dport 25 -j TPROXY \
+   --tproxy-mark 0x1/0x1 --on-port 50080
+
+iptables -t mangle -A SMITH -p tcp -i eth1 --dport 587 -j TPROXY \
+   --tproxy-mark 0x1/0x1 --on-port 50080   
+   
+iptables -t mangle -A SMITH -p tcp -i eth1 --dport 21 -j TPROXY \
+   --tproxy-mark 0x1/0x1 --on-port 50080   
+   
+iptables -t mangle -A SMITH -p tcp -i eth1 --dport 143 -j TPROXY \
+   --tproxy-mark 0x1/0x1 --on-port 50080   
+   
+iptables -t mangle -A SMITH -p tcp -i eth1 --dport 110 -j TPROXY \
+   --tproxy-mark 0x1/0x1 --on-port 50080   
+
+iptables -t mangle -A SMITH -p tcp -i eth1 --dport 5222 -j TPROXY \
+   --tproxy-mark 0x1/0x1 --on-port 50080   
+   
+iptables -t mangle -A SMITH -p tcp -i eth1 --dport 443 -j TPROXY \
+   --tproxy-mark 0x1/0x1 --on-port 50443
+
+iptables -t mangle -A SMITH -p tcp -i eth1 --dport 465 -j TPROXY \
+   --tproxy-mark 0x1/0x1 --on-port 50443
+   
+
+iptables -t mangle -A SMITH -p udp -i eth1 --dport 53 -j TPROXY \
+   --tproxy-mark 0x1/0x1 --on-port 50081   
+
+ 
+
+   
+
