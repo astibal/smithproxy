@@ -234,7 +234,7 @@ void load_config(std::string& config_f) {
 
 int main(int argc, char *argv[]) {
     
-    config_file = "etc/smithproxy.cfg";
+    config_file = "/etc/smithproxy/smithproxy.cfg";
     
 //     CRYPTO_malloc_debug_init();
 //     CRYPTO_dbg_set_options(V_CRYPTO_MDEBUG_ALL);
