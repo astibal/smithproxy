@@ -17,4 +17,4 @@
     
 */    
 
-#define SMITH_VERSION "0.4.0alpha"
+#define SMITH_VERSION "0.4.0beta1"
