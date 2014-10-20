@@ -20,6 +20,7 @@
 #include <mitmproxy.hpp>
 #include <mitmhost.hpp>
 #include <logger.hpp>
+#include <cfgapi.hpp>
 
 MyProxy::~MyProxy() {
     
@@ -185,6 +186,10 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
         // almost done, just add this target_cx to right side of new proxy
         new_proxy->radd(target_cx);
 
+        bool cfg_wrt;
+        if(cfgapi.getRoot()["settings"].lookupValue("default_write_payload",cfg_wrt)) {
+            new_proxy->write_payload(cfg_wrt);
+        }
         
         if(new_proxy->write_payload()) {
             new_proxy->tlog().left_write("Connection start\n");
@@ -236,4 +241,8 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
     this->proxies().push_back(new_proxy);
     
     INF_("Connection from %s established", just_accepted_cx->full_name('L').c_str());        
+
+    if(new_proxy->write_payload()) {
+        new_proxy->tlog().left_write("Connection start\n");
+    }    
 }

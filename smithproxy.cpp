@@ -46,6 +46,7 @@
 
 #include <mitmhost.hpp>
 #include <mitmproxy.hpp>
+#include <cfgapi.hpp>
 
 typedef ThreadedAcceptor<MitmMasterProxy,MyProxy> theAcceptor;
 typedef ThreadedReceiver<MitmUdpProxy,MyProxy> theReceiver;
@@ -192,13 +193,12 @@ int load_signatures(libconfig::Config& cfg, const char* name, std::vector<duplex
 
 void load_config(std::string& config_f) {
     using namespace libconfig;
-    Config cfg;
     
     DIAS_("Reading config file");
     
     // Read the file. If there is an error, report it and exit.
     try {
-        cfg.readFile(config_f.c_str());
+        cfgapi.readFile(config_f.c_str());
     }
     catch(const FileIOException &fioex)
     {
@@ -213,16 +213,17 @@ void load_config(std::string& config_f) {
     
     
     try {
-        load_signatures(cfg,"starttls_signatures",sigs_starttls);
-        load_signatures(cfg,"detection_signatures",sigs_detection);
+        load_signatures(cfgapi,"starttls_signatures",sigs_starttls);
+        load_signatures(cfgapi,"detection_signatures",sigs_detection);
         
-        cfg.getRoot()["settings"].lookupValue("certs_path",SSLCertStore::certs_path);
-        cfg.getRoot()["settings"].lookupValue("certs_ca_key_password",SSLCertStore::password);
-        cfg.getRoot()["settings"].lookupValue("plaintext_port",cfg_listen_port);
-        cfg.getRoot()["settings"].lookupValue("ssl_port",cfg_ssl_listen_port);
-        cfg.getRoot()["settings"].lookupValue("udp_port",cfg_udp_port);
-        cfg.getRoot()["settings"].lookupValue("log_level",cfg_log_level);
-        cfg.getRoot()["debug"].lookupValue("log_data_crc",baseCom::debug_log_data_crc);
+        cfgapi.getRoot()["settings"].lookupValue("certs_path",SSLCertStore::certs_path);
+        cfgapi.getRoot()["settings"].lookupValue("certs_ca_key_password",SSLCertStore::password);
+        cfgapi.getRoot()["settings"].lookupValue("plaintext_port",cfg_listen_port);
+        cfgapi.getRoot()["settings"].lookupValue("ssl_port",cfg_ssl_listen_port);
+        cfgapi.getRoot()["settings"].lookupValue("udp_port",cfg_udp_port);
+        cfgapi.getRoot()["settings"].lookupValue("log_level",cfg_log_level);
+        cfgapi.getRoot()["debug"].lookupValue("log_data_crc",baseCom::debug_log_data_crc);
+        cfgapi.getRoot()["debug"].lookupValue("log_sockets",baseHostCX::socket_in_name);
     }
     catch(const SettingNotFoundException &nfex) {
     
