@@ -48,6 +48,8 @@
 #include <mitmproxy.hpp>
 #include <cfgapi.hpp>
 
+extern "C" void __libc_freeres(void);
+
 typedef ThreadedAcceptor<MitmMasterProxy,MyProxy> theAcceptor;
 typedef ThreadedReceiver<MitmUdpProxy,MyProxy> theReceiver;
 
@@ -234,6 +236,7 @@ void load_config(std::string& config_f) {
 
 int main(int argc, char *argv[]) {
     
+    atexit(__libc_freeres);
     config_file = "/etc/smithproxy/smithproxy.cfg";
     
 //     CRYPTO_malloc_debug_init();
@@ -333,5 +336,7 @@ int main(int argc, char *argv[]) {
     DIAS_("Debug SSL statistics: ");
     DIA_("SSL_accept: %d",SSLCom::counter_ssl_accept);
     DIA_("SSL_connect: %d",SSLCom::counter_ssl_connect);
+    
+    __libc_freeres();
 }
 
