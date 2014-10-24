@@ -213,6 +213,7 @@ int cfgapi_load_obj_policy() {
             std::string sport;
             std::string profile_detection;
             std::string profile_content;
+            std::string action;
             
             bool error = false;
             
@@ -281,6 +282,25 @@ int cfgapi_load_obj_policy() {
                 
             }
             
+            if(cur_object.lookupValue("action",action)) {
+                int r_a = 1;
+                if(action == "deny") {
+                    DIA_("cfgapi_load_policy[#%d]: action: deny",i);
+                    r_a = 0;
+                } else if (action == "accept"){
+                    DIA_("cfgapi_load_policy[#%d]: action: accept",i);
+                    r_a = 1;
+                } else {
+                    DIA_("cfgapi_load_policy[#%d]: action: unknown action '%s'",i,action.c_str());
+                    r_a  = 0;
+                    error = true;
+                }
+                
+                rule->action = r_a;
+            } else {
+                rule->action = 1;
+            }
+            
             if(!error){
                 DIA_("cfgapi_load_policy[#%d]: ok",i);
                 cfg_obj_policy.push_back(rule);
@@ -310,3 +330,17 @@ int cfgapi_obj_policy_match(baseProxy* proxy) {
     DIAS_("cfgapi_obj_policy_match: implicit deny");
     return -1;
 }
+
+int cfgapi_obj_policy_action(int index) {
+    if(index < 0) {
+        return -1;
+    }
+    
+    if(index < (signed int)cfg_obj_policy.size()) {
+        return cfg_obj_policy.at(index)->action;
+    } else {
+        DIA_("cfg_obj_policy_action[#%d]: out of bounds, deny",index);
+        return POLICY_ACTION_DENY;
+    }
+}
+

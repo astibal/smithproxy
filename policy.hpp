@@ -28,6 +28,10 @@
 #include <cidr.hpp>
 #include <ranges.hpp>
 
+#define POLICY_ACTION_DENY  0
+#define POLICY_ACTION_PASS  1
+
+
 class PolicyRule {
 
 public:
@@ -44,6 +48,7 @@ public:
        std::vector<range> dst_ports;
        bool dst_ports_default = true;
 
+       int action = POLICY_ACTION_PASS;
       
        bool match(baseProxy*);
        virtual ~PolicyRule();

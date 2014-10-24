@@ -51,5 +51,6 @@ int  cfgapi_load_obj_proto();
 int  cfgapi_load_obj_policy();
 
 int cfgapi_obj_policy_match(baseProxy*);
+int cfgapi_obj_policy_action(int index);
 
 #endif

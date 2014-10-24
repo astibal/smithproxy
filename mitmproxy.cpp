@@ -187,7 +187,8 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
         new_proxy->radd(target_cx);
         
         int policy_num = cfgapi_obj_policy_match(new_proxy);
-        if(policy_num >= 0) {
+        int verdict = cfgapi_obj_policy_action(policy_num);
+        if(verdict == POLICY_ACTION_PASS) {
             bool cfg_wrt;
             if(cfgapi.getRoot()["settings"].lookupValue("default_write_payload",cfg_wrt)) {
                 new_proxy->write_payload(cfg_wrt);
@@ -203,7 +204,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
             INF_("Connection %s accepted by policy #%d",just_accepted_cx->full_name('L').c_str(),policy_num);
             
         } else {
-            INF_("Connection %s denied.",just_accepted_cx->full_name('L').c_str());
+            INF_("Connection %s denied by policy #%d.",just_accepted_cx->full_name('L').c_str(),policy_num);
             delete new_proxy;
         }
     }
