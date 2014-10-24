@@ -196,25 +196,18 @@ int load_signatures(libconfig::Config& cfg, const char* name, std::vector<duplex
 void load_config(std::string& config_f) {
     using namespace libconfig;
     
-    DIAS_("Reading config file");
-    
-    // Read the file. If there is an error, report it and exit.
-    try {
-        cfgapi.readFile(config_f.c_str());
-    }
-    catch(const FileIOException &fioex)
-    {
-        ERR_("I/O error while reading config file: %s",config_f.c_str());
-        exit(-1);   
-    }
-    catch(const ParseException &pex)
-    {
-        ERR_("Parse error in %s at %s:%d - %s", config_f.c_str(), pex.getFile(), pex.getLine(), pex.getError());
+    if(! cfgapi_init(config_f.c_str()) ) {
+        FATS_("Unable to load config, which is mandatory to run smithproxy. Bailing out.");
         exit(-2);
     }
     
-    
     try {
+        
+        cfgapi_load_obj_address();
+        cfgapi_load_obj_port();
+        cfgapi_load_obj_proto();
+        cfgapi_load_obj_policy();
+        
         load_signatures(cfgapi,"starttls_signatures",sigs_starttls);
         load_signatures(cfgapi,"detection_signatures",sigs_detection);
         
@@ -245,7 +238,7 @@ int main(int argc, char *argv[]) {
     CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON);
     
 	// setting logging facility level to show banner :)
-	lout.level(INF);
+	lout.level(DIA);
     
 	CRI_("Starting Smithproxy %s (socle %s)",SMITH_VERSION,SOCLE_VERSION);
 	
@@ -320,14 +313,14 @@ int main(int argc, char *argv[]) {
         udp_thread->join();
     }    
     
+    auto s = new SSLCom();
+    s->certstore()->destroy();
+    delete s;
+
     CRYPTO_cleanup_all_ex_data();
     ERR_free_strings();
     ERR_remove_state(0);
     EVP_cleanup();    
-    
-    auto s = new SSLCom();
-    s->certstore()->destroy();
-    delete s;
     
     delete plain_thread;
     delete ssl_thread;

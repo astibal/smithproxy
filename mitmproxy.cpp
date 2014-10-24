@@ -185,20 +185,27 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
         
         // almost done, just add this target_cx to right side of new proxy
         new_proxy->radd(target_cx);
+        
+        int policy_num = cfgapi_obj_policy_match(new_proxy);
+        if(policy_num >= 0) {
+            bool cfg_wrt;
+            if(cfgapi.getRoot()["settings"].lookupValue("default_write_payload",cfg_wrt)) {
+                new_proxy->write_payload(cfg_wrt);
+            }
+            
+            if(new_proxy->write_payload()) {
+                new_proxy->tlog().left_write("Connection start\n");
+            }
+            
+            // FINAL point: adding new child proxy to the list
+            this->proxies().push_back(new_proxy);
 
-        bool cfg_wrt;
-        if(cfgapi.getRoot()["settings"].lookupValue("default_write_payload",cfg_wrt)) {
-            new_proxy->write_payload(cfg_wrt);
+            INF_("Connection %s accepted by policy #%d",just_accepted_cx->full_name('L').c_str(),policy_num);
+            
+        } else {
+            INF_("Connection %s denied.",just_accepted_cx->full_name('L').c_str());
+            delete new_proxy;
         }
-        
-        if(new_proxy->write_payload()) {
-            new_proxy->tlog().left_write("Connection start\n");
-        }
-        
-        // FINAL point: adding new child proxy to the list
-        this->proxies().push_back(new_proxy);
-        
-        INF_("Connection from %s established", just_accepted_cx->full_name('L').c_str());
     }
     
     DEBS_("MitmMasterProxy::on_left_new: finished");

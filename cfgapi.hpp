@@ -20,9 +20,36 @@
 #ifndef CFGAPI_HPP
  #define CFGAPI_HPP
 
+#include <vector>
+#include <map>
+ 
 #include <libconfig.h++>
+#include <cidr.hpp>
+#include <ranges.hpp>
+#include <policy.hpp>
+
+#define PROTO_ICMP 1
+#define PROTO_TCP  6
+#define PROTO_UDP  17
 
 using namespace libconfig;
 extern Config cfgapi;
+extern std::map<std::string,CIDR*> cfg_obj_address;
+extern std::map<std::string,range> cfg_obj_port;
+extern std::map<std::string,int> cfg_obj_proto;
+extern std::vector<PolicyRule*> cfg_obj_policy;
+
+bool  cfgapi_init(const char* fnm);
+
+CIDR* cfgapi_lookup_address(const char* name);
+range cfgapi_lookup_port(const char* name);
+int   cfgapi_lookup_proto(const char* name);
+
+int  cfgapi_load_obj_address();
+int  cfgapi_load_obj_port();
+int  cfgapi_load_obj_proto();
+int  cfgapi_load_obj_policy();
+
+int cfgapi_obj_policy_match(baseProxy*);
 
 #endif
