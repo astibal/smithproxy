@@ -31,6 +31,8 @@
 #define POLICY_ACTION_DENY  0
 #define POLICY_ACTION_PASS  1
 
+struct ProfileDetection;
+struct ProfileContent;
 
 class PolicyRule {
 
@@ -58,6 +60,28 @@ public:
        bool match_rangegrp_cx(std::vector<range>& ranges,baseHostCX* cx);
        bool match_rangegrp_vecx(std::vector<range>& ranges,std::vector<baseHostCX*>& vecx);
        
+       ProfileContent* profile_content = nullptr;
+       ProfileDetection* profile_detection = nullptr;
+       
 };
+
+struct ProfileDetection {
+    /*
+     *  0   MODE_NONE
+     *  1   MODE_POST -- works in all scenarios, but sometimes we can read data, which should 
+     *                   have been processed by upgraded com. Use MODE_PRE if possible.
+     *  2   MODE_PRE  -- should be default, but not safe when cannot peek()
+     */
+    int mode = 0;
+};
+
+struct ProfileContent {
+    /*
+     *  Quite obvious: if true, content of proxy transmission will be written to the 
+     *                 mitm/ file.
+     */
+    bool write_payload = false;
+};
+
  
 #endif

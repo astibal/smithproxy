@@ -206,6 +206,9 @@ void load_config(std::string& config_f) {
         cfgapi_load_obj_address();
         cfgapi_load_obj_port();
         cfgapi_load_obj_proto();
+        cfgapi_load_obj_profile_detection();
+        cfgapi_load_obj_profile_content();
+        
         cfgapi_load_obj_policy();
         
         load_signatures(cfgapi,"starttls_signatures",sigs_starttls);

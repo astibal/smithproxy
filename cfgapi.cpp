@@ -28,6 +28,8 @@ std::map<std::string,CIDR*> cfgapi_obj_address;
 std::map<std::string,range> cfgapi_obj_port;
 std::map<std::string,int> cfgapi_obj_proto;
 std::vector<PolicyRule*> cfg_obj_policy;
+std::map<std::string,ProfileDetection*> cfg_obj_profile_detection;
+std::map<std::string,ProfileContent*> cfg_obj_profile_content;
 
 bool cfgapi_init(const char* fnm) {
     DIAS_("Reading config file");
@@ -73,6 +75,23 @@ int cfgapi_lookup_proto(const char* name) {
     
     return 0;
 }
+
+ProfileContent* cfgapi_lookup_profile_content(const char* name) {
+    if(cfg_obj_profile_content.find(name) != cfg_obj_profile_content.end()) {
+        return cfg_obj_profile_content[name];
+    }    
+    
+    return nullptr;
+}
+
+ProfileDetection* cfgapi_lookup_profile_detection(const char* name) {
+    if(cfg_obj_profile_detection.find(name) != cfg_obj_profile_detection.end()) {
+        return cfg_obj_profile_detection[name];
+    }    
+    
+    return nullptr;
+}
+
 
 int cfgapi_load_obj_address() {
     int num = 0;
@@ -301,11 +320,42 @@ int cfgapi_load_obj_policy() {
                 rule->action = 1;
             }
             
+            
+            /* try to load policy profiles */
+            
+            if(rule->action == 1) {
+                // makes sense to load profiles only when action is accept! 
+                std::string name_content;
+                std::string name_detection;
+                
+                if(cur_object.lookupValue("detection_profile",name_detection)) {
+                    ProfileDetection* prf  = cfgapi_lookup_profile_detection(name_detection.c_str());
+                    if(prf != nullptr) {
+                        DIA_("cfgapi_load_policy[#%d]: detect profile %s",i,name_detection.c_str());
+                        rule->profile_detection = prf;
+                    } else {
+                        DIA_("cfgapi_load_policy[#%d]: detect profile %s cannot be loaded",i,name_detection.c_str());
+                        error = true;
+                    }
+                }
+                
+                if(cur_object.lookupValue("content_profile",name_content)) {
+                    ProfileContent* prf  = cfgapi_lookup_profile_content(name_content.c_str());
+                    if(prf != nullptr) {
+                        DIA_("cfgapi_load_policy[#%d]: content profile %s",i,name_content.c_str());
+                        rule->profile_content = prf;
+                    } else {
+                        DIA_("cfgapi_load_policy[#%d]: content profile %s cannot be loaded",i,name_content.c_str());
+                        error = true;
+                    }
+                }                
+            }
+            
             if(!error){
                 DIA_("cfgapi_load_policy[#%d]: ok",i);
                 cfg_obj_policy.push_back(rule);
             } else {
-                DIA_("cfgapi_load_policy[#%d]: not ok",i);
+                DIA_("cfgapi_load_policy[#%d]: not ok (will not process traffic)",i);
             }
         }
     }
@@ -344,3 +394,102 @@ int cfgapi_obj_policy_action(int index) {
     }
 }
 
+ProfileContent* cfgapi_obj_policy_profile_content(int index) {
+    if(index < 0) {
+        return nullptr;
+    }
+    
+    if(index < (signed int)cfg_obj_policy.size()) {
+        return cfg_obj_policy.at(index)->profile_content;
+    } else {
+        DIA_("cfgapi_obj_policy_profile_content[#%d]: out of bounds, nullptr",index);
+        return nullptr;
+    }
+}
+
+ProfileDetection* cfgapi_obj_policy_profile_detection(int index) {
+    if(index < 0) {
+        return nullptr;
+    }
+    
+    if(index < (signed int)cfg_obj_policy.size()) {
+        return cfg_obj_policy.at(index)->profile_detection;
+    } else {
+        DIA_("cfgapi_obj_policy_profile_detection[#%d]: out of bounds, nullptr",index);
+        return nullptr;
+    }
+}
+
+
+int cfgapi_load_obj_profile_detection() {
+    int num = 0;
+    
+    DIAS_("cfgapi_load_obj_profile_detect: start");
+    
+    if(cfgapi.getRoot().exists("detection_profiles")) {
+
+        num = cfgapi.getRoot()["detection_profiles"].getLength();
+        DIA_("cfgapi_load_obj_profile_detect: found %d objects",num);
+        
+        Setting& curr_set = cfgapi.getRoot()["detection_profiles"];
+        
+        for( int i = 0; i < num; i++) {
+            std::string name;
+            ProfileDetection* a = new ProfileDetection;
+            
+            Setting& cur_object = curr_set[i];
+           
+            name = cur_object.getName();
+           
+            DIA_("cfgapi_load_obj_profile_detect: processing '%s'",name.c_str());
+            
+            if( cur_object.lookupValue("mode",a->mode) ) {
+                
+                cfg_obj_profile_detection[name] = a;
+                
+                DIA_("cfgapi_load_obj_profile_detect: '%s': ok",name.c_str());
+            } else {
+                DIA_("cfgapi_load_obj_profile_detect: '%s': not ok",name.c_str());
+            }
+        }
+    }
+    
+    return num;
+}
+
+
+int cfgapi_load_obj_profile_content() {
+    int num = 0;
+    
+    DIAS_("cfgapi_load_obj_profile_content: start");
+    
+    if(cfgapi.getRoot().exists("content_profiles")) {
+
+        num = cfgapi.getRoot()["content_profiles"].getLength();
+        DIA_("cfgapi_load_obj_profile_content: found %d objects",num);
+        
+        Setting& curr_set = cfgapi.getRoot()["content_profiles"];
+
+        for( int i = 0; i < num; i++) {
+            std::string name;
+            ProfileContent* a = new ProfileContent;
+            
+            Setting& cur_object = curr_set[i];
+            
+            name = cur_object.getName();
+
+            DEB_("cfgapi_load_obj_profile_content: processing '%s'",name.c_str());
+            
+            if( cur_object.lookupValue("write_payload",a->write_payload) ) {
+                
+                cfg_obj_profile_content[name] = a;
+                
+                DIA_("cfgapi_load_obj_profile_content: '%s': ok",name.c_str());
+            } else {
+                DIA_("cfgapi_load_obj_profile_content: '%s': not ok",name.c_str());
+            }
+        }
+    }
+    
+    return num;
+}

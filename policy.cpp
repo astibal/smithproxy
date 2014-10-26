@@ -32,11 +32,11 @@ bool PolicyRule::match_addrgrp_cx(std::vector< CIDR* >& cidrs, baseHostCX* cx) {
             CIDR* comp = (*j);
             
             if(cidr_contains(comp,l) >= 0) {
-                DIA_("PolicyRule::match_addrgrp_cx: comparing %s with %s: matched",cidr_to_str(comp),cidr_to_str(l));
+                DIA_("PolicyRule::match_addrgrp_cx: comparing %s with %s: matched",cidr_to_str(l),cidr_to_str(comp));
                 match = true;
                 break;
             } else {
-                DIA_("PolicyRule::match_addrgrp_cx: comparing %s with %s: not matched",cidr_to_str(comp),cidr_to_str(l));
+                DIA_("PolicyRule::match_addrgrp_cx: comparing %s with %s: not matched",cidr_to_str(l),cidr_to_str(comp));
             }
         }
     }

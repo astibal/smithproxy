@@ -177,9 +177,6 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
 
         just_accepted_cx->peer(target_cx);
         target_cx->peer(just_accepted_cx);
-
-        ((AppHostCX*)just_accepted_cx)->mode(AppHostCX::MODE_PRE);
-        target_cx->mode(AppHostCX::MODE_NONE);
                     
         //NEW: end of new
         
@@ -190,13 +187,36 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
         int verdict = cfgapi_obj_policy_action(policy_num);
         if(verdict == POLICY_ACTION_PASS) {
             bool cfg_wrt;
-            if(cfgapi.getRoot()["settings"].lookupValue("default_write_payload",cfg_wrt)) {
+            
+            ProfileContent* pc  = cfgapi_obj_policy_profile_content(policy_num);
+            ProfileDetection* pd = cfgapi_obj_policy_profile_detection(policy_num);
+            
+            /* Processing content profile */
+            
+            if(pc != nullptr) {
+                DIA_("MitmMasterProxy::on_left_new: policy content profile: write payload: %d", pc->write_payload);
+                new_proxy->write_payload(pc->write_payload);
+            }
+            else if(cfgapi.getRoot()["settings"].lookupValue("default_write_payload",cfg_wrt)) {
+                DIA_("MitmMasterProxy::on_left_new: global content profile: %d", cfg_wrt);
                 new_proxy->write_payload(cfg_wrt);
             }
             
             if(new_proxy->write_payload()) {
                 new_proxy->tlog().left_write("Connection start\n");
             }
+            
+            
+            /* Processing detection profile */
+            
+            // we scan connection on client's side
+            target_cx->mode(AppHostCX::MODE_NONE);
+            ((AppHostCX*)just_accepted_cx)->mode(AppHostCX::MODE_NONE);
+            if(pd != nullptr)  {
+                DIA_("MitmMasterProxy::on_left_new: policy detection profile: mode: %d", pd->mode);
+                ((AppHostCX*)just_accepted_cx)->mode(pd->mode);
+            }
+            
             
             // FINAL point: adding new child proxy to the list
             this->proxies().push_back(new_proxy);

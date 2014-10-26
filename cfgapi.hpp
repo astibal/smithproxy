@@ -38,19 +38,27 @@ extern std::map<std::string,CIDR*> cfg_obj_address;
 extern std::map<std::string,range> cfg_obj_port;
 extern std::map<std::string,int> cfg_obj_proto;
 extern std::vector<PolicyRule*> cfg_obj_policy;
+extern std::map<std::string,ProfileDetection*> cfg_obj_profile_detection;
+extern std::map<std::string,ProfileContent*> cfg_obj_profile_content;
 
 bool  cfgapi_init(const char* fnm);
 
 CIDR* cfgapi_lookup_address(const char* name);
 range cfgapi_lookup_port(const char* name);
 int   cfgapi_lookup_proto(const char* name);
+ProfileDetection* cfgapi_lookup_profile_detection(const char* name);
+ProfileContent*   cfgapi_lookup_profile_content(const char* name);
 
 int  cfgapi_load_obj_address();
 int  cfgapi_load_obj_port();
 int  cfgapi_load_obj_proto();
 int  cfgapi_load_obj_policy();
+int  cfgapi_load_obj_profile_content();
+int  cfgapi_load_obj_profile_detection();
 
 int cfgapi_obj_policy_match(baseProxy*);
 int cfgapi_obj_policy_action(int index);
+ProfileContent* cfgapi_obj_policy_profile_content(int index);
+ProfileDetection* cfgapi_obj_policy_profile_detection(int index);
 
 #endif
