@@ -445,6 +445,7 @@ int cfgapi_load_obj_profile_detection() {
             
             if( cur_object.lookupValue("mode",a->mode) ) {
                 
+                a->name = name;
                 cfg_obj_profile_detection[name] = a;
                 
                 DIA_("cfgapi_load_obj_profile_detect: '%s': ok",name.c_str());
@@ -482,6 +483,7 @@ int cfgapi_load_obj_profile_content() {
             
             if( cur_object.lookupValue("write_payload",a->write_payload) ) {
                 
+                a->name = name;
                 cfg_obj_profile_content[name] = a;
                 
                 DIA_("cfgapi_load_obj_profile_content: '%s': ok",name.c_str());

@@ -73,6 +73,7 @@ struct ProfileDetection {
      *  2   MODE_PRE  -- should be default, but not safe when cannot peek()
      */
     int mode = 0;
+    std::string name;
 };
 
 struct ProfileContent {
@@ -81,6 +82,7 @@ struct ProfileContent {
      *                 mitm/ file.
      */
     bool write_payload = false;
+    std::string name;
 };
 
  

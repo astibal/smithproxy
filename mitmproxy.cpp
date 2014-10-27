@@ -190,16 +190,21 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
             
             ProfileContent* pc  = cfgapi_obj_policy_profile_content(policy_num);
             ProfileDetection* pd = cfgapi_obj_policy_profile_detection(policy_num);
+            const char* pc_name = "none";
+            const char* pc_global_write = "global_yes";
+            const char* pd_name = "none";
             
             /* Processing content profile */
             
             if(pc != nullptr) {
                 DIA_("MitmMasterProxy::on_left_new: policy content profile: write payload: %d", pc->write_payload);
                 new_proxy->write_payload(pc->write_payload);
+                pc_name = pc->name.c_str();
             }
             else if(cfgapi.getRoot()["settings"].lookupValue("default_write_payload",cfg_wrt)) {
                 DIA_("MitmMasterProxy::on_left_new: global content profile: %d", cfg_wrt);
                 new_proxy->write_payload(cfg_wrt);
+                pc_name = pc_global_write;
             }
             
             if(new_proxy->write_payload()) {
@@ -215,13 +220,14 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
             if(pd != nullptr)  {
                 DIA_("MitmMasterProxy::on_left_new: policy detection profile: mode: %d", pd->mode);
                 ((AppHostCX*)just_accepted_cx)->mode(pd->mode);
+                pd_name = pd->name.c_str();
             }
             
             
             // FINAL point: adding new child proxy to the list
             this->proxies().push_back(new_proxy);
 
-            INF_("Connection %s accepted by policy #%d",just_accepted_cx->full_name('L').c_str(),policy_num);
+            INF_("Connection %s accepted by policy #%d, prof_c=%s, prof_d=%s",just_accepted_cx->full_name('L').c_str(),policy_num,pc_name,pd_name);
             
         } else {
             INF_("Connection %s denied by policy #%d.",just_accepted_cx->full_name('L').c_str(),policy_num);

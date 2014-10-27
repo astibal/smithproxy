@@ -139,21 +139,21 @@ int load_signatures(libconfig::Config& cfg, const char* name, std::vector<duplex
     using namespace libconfig;
     
     const Setting& root = cfg.getRoot();
-    const Setting& cfg_startrls_signatures = root[name];
-    int sigs_starttls_len = cfg_startrls_signatures.getLength();
+    const Setting& cfg_signatures = root[name];
+    int sigs_len = cfg_signatures.getLength();
 
     
-    DIA_("Loading %s: %d",name,sigs_starttls_len);
-    for ( int i = 0 ; i < sigs_starttls_len; i++) {
+    DIA_("Loading %s: %d",name,sigs_len);
+    for ( int i = 0 ; i < sigs_len; i++) {
         MyDuplexFlowMatch* newsig = new MyDuplexFlowMatch();
         
         
-        const Setting& signature = cfg_startrls_signatures[i];
+        const Setting& signature = cfg_signatures[i];
         signature.lookupValue("name", newsig->name());
         signature.lookupValue("side", newsig->sig_side);
         signature.lookupValue("cat", newsig->category);                
 
-        const Setting& signature_flow = cfg_startrls_signatures[i]["flow"];
+        const Setting& signature_flow = cfg_signatures[i]["flow"];
         int flow_count = signature_flow.getLength();
         
         DIA_("Loading signature '%s' with %d flow matches",newsig->name().c_str(),flow_count);
@@ -190,7 +190,7 @@ int load_signatures(libconfig::Config& cfg, const char* name, std::vector<duplex
         target.push_back(newsig);
     }    
     
-    return sigs_starttls_len;
+    return sigs_len;
 }
 
 void load_config(std::string& config_f) {
@@ -211,8 +211,9 @@ void load_config(std::string& config_f) {
         
         cfgapi_load_obj_policy();
         
-        load_signatures(cfgapi,"starttls_signatures",sigs_starttls);
+        
         load_signatures(cfgapi,"detection_signatures",sigs_detection);
+        load_signatures(cfgapi,"starttls_signatures",sigs_starttls);
         
         cfgapi.getRoot()["settings"].lookupValue("certs_path",SSLCertStore::certs_path);
         cfgapi.getRoot()["settings"].lookupValue("certs_ca_key_password",SSLCertStore::password);
