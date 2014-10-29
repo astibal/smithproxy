@@ -34,14 +34,15 @@
 
 using namespace libconfig;
 extern Config cfgapi;
-extern std::map<std::string,CIDR*> cfg_obj_address;
-extern std::map<std::string,range> cfg_obj_port;
-extern std::map<std::string,int> cfg_obj_proto;
-extern std::vector<PolicyRule*> cfg_obj_policy;
-extern std::map<std::string,ProfileDetection*> cfg_obj_profile_detection;
-extern std::map<std::string,ProfileContent*> cfg_obj_profile_content;
+extern std::map<std::string,CIDR*> cfgapi_obj_address;
+extern std::map<std::string,range> cfgapi_obj_port;
+extern std::map<std::string,int> cfgapi_obj_proto;
+extern std::vector<PolicyRule*> cfgapi_obj_policy;
+extern std::map<std::string,ProfileDetection*> cfgapi_obj_profile_detection;
+extern std::map<std::string,ProfileContent*> cfgapi_obj_profile_content;
 
 bool  cfgapi_init(const char* fnm);
+void  cfgapi_cleanup();
 
 CIDR* cfgapi_lookup_address(const char* name);
 range cfgapi_lookup_port(const char* name);
@@ -55,6 +56,13 @@ int  cfgapi_load_obj_proto();
 int  cfgapi_load_obj_policy();
 int  cfgapi_load_obj_profile_content();
 int  cfgapi_load_obj_profile_detection();
+
+int  cfgapi_cleanup_obj_address();
+int  cfgapi_cleanup_obj_port();
+int  cfgapi_cleanup_obj_proto();
+int  cfgapi_cleanup_obj_policy();
+int  cfgapi_cleanup_obj_profile_content();
+int  cfgapi_cleanup_obj_profile_detection();
 
 int cfgapi_obj_policy_match(baseProxy*);
 int cfgapi_obj_policy_action(int index);

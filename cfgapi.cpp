@@ -27,9 +27,9 @@ Config cfgapi;
 std::map<std::string,CIDR*> cfgapi_obj_address;
 std::map<std::string,range> cfgapi_obj_port;
 std::map<std::string,int> cfgapi_obj_proto;
-std::vector<PolicyRule*> cfg_obj_policy;
-std::map<std::string,ProfileDetection*> cfg_obj_profile_detection;
-std::map<std::string,ProfileContent*> cfg_obj_profile_content;
+std::vector<PolicyRule*> cfgapi_obj_policy;
+std::map<std::string,ProfileDetection*> cfgapi_obj_profile_detection;
+std::map<std::string,ProfileContent*> cfgapi_obj_profile_content;
 
 bool cfgapi_init(const char* fnm) {
     DIAS_("Reading config file");
@@ -77,16 +77,16 @@ int cfgapi_lookup_proto(const char* name) {
 }
 
 ProfileContent* cfgapi_lookup_profile_content(const char* name) {
-    if(cfg_obj_profile_content.find(name) != cfg_obj_profile_content.end()) {
-        return cfg_obj_profile_content[name];
+    if(cfgapi_obj_profile_content.find(name) != cfgapi_obj_profile_content.end()) {
+        return cfgapi_obj_profile_content[name];
     }    
     
     return nullptr;
 }
 
 ProfileDetection* cfgapi_lookup_profile_detection(const char* name) {
-    if(cfg_obj_profile_detection.find(name) != cfg_obj_profile_detection.end()) {
-        return cfg_obj_profile_detection[name];
+    if(cfgapi_obj_profile_detection.find(name) != cfgapi_obj_profile_detection.end()) {
+        return cfgapi_obj_profile_detection[name];
     }    
     
     return nullptr;
@@ -353,7 +353,7 @@ int cfgapi_load_obj_policy() {
             
             if(!error){
                 DIA_("cfgapi_load_policy[#%d]: ok",i);
-                cfg_obj_policy.push_back(rule);
+                cfgapi_obj_policy.push_back(rule);
             } else {
                 DIA_("cfgapi_load_policy[#%d]: not ok (will not process traffic)",i);
             }
@@ -365,7 +365,7 @@ int cfgapi_load_obj_policy() {
 
 int cfgapi_obj_policy_match(baseProxy* proxy) {
     int x = 0;
-    for( std::vector<PolicyRule*>::iterator i = cfg_obj_policy.begin(); i != cfg_obj_policy.end(); ++i) {
+    for( std::vector<PolicyRule*>::iterator i = cfgapi_obj_policy.begin(); i != cfgapi_obj_policy.end(); ++i) {
         PolicyRule* rule = (*i);
         bool r = rule->match(proxy);
         
@@ -386,8 +386,8 @@ int cfgapi_obj_policy_action(int index) {
         return -1;
     }
     
-    if(index < (signed int)cfg_obj_policy.size()) {
-        return cfg_obj_policy.at(index)->action;
+    if(index < (signed int)cfgapi_obj_policy.size()) {
+        return cfgapi_obj_policy.at(index)->action;
     } else {
         DIA_("cfg_obj_policy_action[#%d]: out of bounds, deny",index);
         return POLICY_ACTION_DENY;
@@ -399,8 +399,8 @@ ProfileContent* cfgapi_obj_policy_profile_content(int index) {
         return nullptr;
     }
     
-    if(index < (signed int)cfg_obj_policy.size()) {
-        return cfg_obj_policy.at(index)->profile_content;
+    if(index < (signed int)cfgapi_obj_policy.size()) {
+        return cfgapi_obj_policy.at(index)->profile_content;
     } else {
         DIA_("cfgapi_obj_policy_profile_content[#%d]: out of bounds, nullptr",index);
         return nullptr;
@@ -412,8 +412,8 @@ ProfileDetection* cfgapi_obj_policy_profile_detection(int index) {
         return nullptr;
     }
     
-    if(index < (signed int)cfg_obj_policy.size()) {
-        return cfg_obj_policy.at(index)->profile_detection;
+    if(index < (signed int)cfgapi_obj_policy.size()) {
+        return cfgapi_obj_policy.at(index)->profile_detection;
     } else {
         DIA_("cfgapi_obj_policy_profile_detection[#%d]: out of bounds, nullptr",index);
         return nullptr;
@@ -446,7 +446,7 @@ int cfgapi_load_obj_profile_detection() {
             if( cur_object.lookupValue("mode",a->mode) ) {
                 
                 a->name = name;
-                cfg_obj_profile_detection[name] = a;
+                cfgapi_obj_profile_detection[name] = a;
                 
                 DIA_("cfgapi_load_obj_profile_detect: '%s': ok",name.c_str());
             } else {
@@ -484,7 +484,7 @@ int cfgapi_load_obj_profile_content() {
             if( cur_object.lookupValue("write_payload",a->write_payload) ) {
                 
                 a->name = name;
-                cfg_obj_profile_content[name] = a;
+                cfgapi_obj_profile_content[name] = a;
                 
                 DIA_("cfgapi_load_obj_profile_content: '%s': ok",name.c_str());
             } else {
@@ -494,4 +494,87 @@ int cfgapi_load_obj_profile_content() {
     }
     
     return num;
+}
+
+int cfgapi_cleanup_obj_address() {
+    int r = cfgapi_obj_address.size();
+    
+    for (std::map<std::string,CIDR*>::iterator i = cfgapi_obj_address.begin(); i != cfgapi_obj_address.end(); ++i)
+    {
+        std::pair<std::string,CIDR*> a = (*i);
+        CIDR* c = a.second;
+        if (c != nullptr) cidr_free(c);
+
+        a.second = nullptr;
+    }
+    
+    cfgapi_obj_address.clear();
+    
+    DEB_("cfgapi_cleanup_obj_address: %d objects freed",r);
+    return r;
+}
+
+int cfgapi_cleanup_obj_policy() {
+    int r = cfgapi_obj_policy.size();
+    for(std::vector<PolicyRule*>::iterator i = cfgapi_obj_policy.begin(); i < cfgapi_obj_policy.end(); ++i) {
+        PolicyRule* ptr = (*i);
+        if (ptr != nullptr) delete ptr;
+        (*i) = nullptr;
+    }
+    
+    cfgapi_obj_policy.clear();
+    
+    DEB_("cfgapi_cleanup_obj_policy: %d objects freed",r);
+    return r;
+}
+
+int cfgapi_cleanup_obj_port() {
+    int r = cfgapi_obj_port.size();
+    cfgapi_obj_port.clear();
+    
+    return r;
+}
+
+int cfgapi_cleanup_obj_proto() {
+    int r = cfgapi_obj_proto.size();
+    cfgapi_obj_proto.clear();
+    
+    return r;
+}
+
+
+int cfgapi_cleanup_obj_profile_content() {
+    int r = cfgapi_obj_profile_content.size();
+    for(std::map<std::string, ProfileContent*>::iterator i = cfgapi_obj_profile_content.begin(); i != cfgapi_obj_profile_content.end(); ++i) {
+        std::pair<std::string,ProfileContent*> t = (*i);
+        ProfileContent* c = t.second;
+        if (c != nullptr) delete c;
+    }
+    cfgapi_obj_profile_content.clear();
+    
+    return r;
+}
+int cfgapi_cleanup_obj_profile_detection() {
+    int r = cfgapi_obj_profile_detection.size();
+    for(std::map<std::string, ProfileDetection*>::iterator i = cfgapi_obj_profile_detection.begin(); i != cfgapi_obj_profile_detection.end(); ++i) {
+        std::pair<std::string,ProfileDetection*> t = (*i);
+        ProfileDetection* c = t.second;
+        if (c != nullptr) delete c;
+    }
+    cfgapi_obj_profile_detection.clear();
+    
+    return r;
+}
+
+
+
+
+void cfgapi_cleanup()
+{
+  cfgapi_cleanup_obj_policy();
+  cfgapi_cleanup_obj_address();
+  cfgapi_cleanup_obj_port();
+  cfgapi_cleanup_obj_proto();
+  cfgapi_cleanup_obj_profile_content();
+  cfgapi_cleanup_obj_profile_detection();
 }

@@ -39,6 +39,7 @@ bool PolicyRule::match_addrgrp_cx(std::vector< CIDR* >& cidrs, baseHostCX* cx) {
                 DIA_("PolicyRule::match_addrgrp_cx: comparing %s with %s: not matched",cidr_to_str(l),cidr_to_str(comp));
             }
         }
+        cidr_free(l);
     }
 
     return match;
@@ -147,15 +148,5 @@ bool PolicyRule::match(baseProxy* p) {
     return false;
 }
 
-PolicyRule::~PolicyRule() {
-
-    for (auto i = src.begin(); i != src.end(); ++i) {
-        delete (*i);
-        (*i) = (CIDR*)nullptr;
-    }
-    for (auto i = dst.begin(); i != dst.end(); ++i) {
-        delete (*i);
-        (*i) = (CIDR*)nullptr;
-    }           
-}
+PolicyRule::~PolicyRule() {}
 
