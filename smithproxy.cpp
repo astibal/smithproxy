@@ -23,6 +23,7 @@
 #include <ctime>
 #include <cstdlib>
 #include <getopt.h>
+#include <execinfo.h>
 
 #include <socle.hpp>
 
@@ -65,6 +66,29 @@ static theReceiver* udp_proxy = NULL;
 std::thread* plain_thread = NULL;
 std::thread* ssl_thread = NULL;
 std::thread* udp_thread = NULL;
+
+
+static void segv_handler(int sig) {
+ 
+   fprintf( stderr, "\n********* SEGMENTATION FAULT *********\n\n" );
+ 
+   void *trace[64];
+   size_t size, i;
+   char **strings;
+ 
+   size    = backtrace( trace, 64 );
+   strings = backtrace_symbols( trace, size );
+ 
+   fprintf( stderr, "\nBACKTRACE:\n\n" );
+ 
+   for( i = 0; i < size; i++ ){
+    fprintf( stderr, "  %s\n", strings[i] );
+   }
+ 
+   fprintf( stderr, "\n***************************************\n" );
+
+  exit(-1);
+}
 
 void my_terminate (int param)
 {
@@ -286,7 +310,13 @@ int main(int argc, char *argv[]) {
 
 	prev_fn = signal (SIGINT,my_terminate);
 	if (prev_fn==SIG_IGN) signal (SIGINT,SIG_IGN);
-	
+
+    
+    struct sigaction act;
+    sigemptyset(&act.sa_mask);
+    act.sa_flags = 0;
+    act.sa_handler = segv_handler;
+    sigaction( SIGSEGV, &act, NULL);
     
     
     plain_thread = new std::thread([]() { 
