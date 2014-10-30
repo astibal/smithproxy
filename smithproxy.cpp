@@ -69,39 +69,41 @@ std::thread* udp_thread = NULL;
 
 
 static void segv_handler(int sig) {
- 
-   fprintf( stderr, "\n********* SEGMENTATION FAULT *********\n\n" );
- 
-   void *trace[64];
-   size_t size, i;
-   char **strings;
- 
-   size    = backtrace( trace, 64 );
-   strings = backtrace_symbols( trace, size );
- 
-   fprintf( stderr, "\nBACKTRACE:\n\n" );
- 
-   for( i = 0; i < size; i++ ){
-    fprintf( stderr, "  %s\n", strings[i] );
-   }
- 
-   fprintf( stderr, "\n***************************************\n" );
 
-  exit(-1);
+    fprintf( stderr, "\n========= Smithproxy exception handler  =========\n" );
+    
+    fprintf( stderr, "  Received signal %d",sig );
+
+    void *trace[64];
+    size_t size, i;
+    char **strings;
+
+    size    = backtrace( trace, 64 );
+    strings = backtrace_symbols( trace, size );
+
+    fprintf( stderr, "\n  Traceback:\n\n" );
+
+    for( i = 0; i < size; i++ ) {
+        fprintf( stderr, "  %s\n", strings[i] );
+    }
+    
+    fprintf( stderr, "\n=================================================\n" );
+
+    exit(-1);
 }
 
-void my_terminate (int param)
-{
-  FATS_("Terminating ...");
-  if (plain_proxy != NULL) {
-    plain_proxy->dead(true);
-  }
-  if(ssl_proxy != NULL) {
-    ssl_proxy->dead(true);
-  }
-  if(udp_proxy != NULL) {
-    udp_proxy->dead(true);
-  }  
+void my_terminate (int param) {
+    
+    FATS_("Terminating ...");
+    if (plain_proxy != NULL) {
+        plain_proxy->dead(true);
+    }
+    if(ssl_proxy != NULL) {
+        ssl_proxy->dead(true);
+    }
+    if(udp_proxy != NULL) {
+        udp_proxy->dead(true);
+    }
 }
 
 
