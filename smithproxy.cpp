@@ -311,6 +311,8 @@ int main(int argc, char *argv[]) {
 	prev_fn = signal (SIGINT,my_terminate);
 	if (prev_fn==SIG_IGN) signal (SIGINT,SIG_IGN);
 
+    prev_fn = signal(SIGABRT, segv_handler);
+    if (prev_fn==SIG_IGN) signal (SIGABRT,SIG_IGN);
     
     struct sigaction act;
     sigemptyset(&act.sa_mask);
