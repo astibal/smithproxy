@@ -191,7 +191,10 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
             ProfileContent* pc  = cfgapi_obj_policy_profile_content(policy_num);
             ProfileDetection* pd = cfgapi_obj_policy_profile_detection(policy_num);
             const char* pc_name = "none";
-            const char* pc_global_write = "global_yes";
+            const char* pc_global_no = "global_no";
+            const char* pc_global_yes = "global_yes";
+            const char* pc_global = pc_global_no;
+            
             const char* pd_name = "none";
             
             /* Processing content profile */
@@ -204,7 +207,11 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
             else if(cfgapi.getRoot()["settings"].lookupValue("default_write_payload",cfg_wrt)) {
                 DIA_("MitmMasterProxy::on_left_new: global content profile: %d", cfg_wrt);
                 new_proxy->write_payload(cfg_wrt);
-                pc_name = pc_global_write;
+                if(cfg_wrt) {
+                    pc_global = pc_global_yes;
+                }
+                
+                pc_name = pc_global;
             }
             
             if(new_proxy->write_payload()) {
