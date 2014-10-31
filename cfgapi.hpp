@@ -66,6 +66,8 @@ int  cfgapi_cleanup_obj_profile_detection();
 
 int cfgapi_obj_policy_match(baseProxy*);
 int cfgapi_obj_policy_action(int index);
+baseProxy* cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* proxy);
+
 ProfileContent* cfgapi_obj_policy_profile_content(int index);
 ProfileDetection* cfgapi_obj_policy_profile_detection(int index);
 

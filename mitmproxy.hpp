@@ -38,7 +38,7 @@
 #include <threadedreceiver.hpp>
 #include <traflog.hpp>
 
-class MyProxy : public baseProxy {
+class MitmProxy : public baseProxy {
     
 protected:
     trafLog tlog_;
@@ -51,8 +51,8 @@ public:
     
     trafLog& tlog() { return tlog_; }
     
-    explicit MyProxy(baseCom* c) : baseProxy(c), tlog_(this) {};
-    virtual ~MyProxy();
+    explicit MitmProxy(baseCom* c) : baseProxy(c), tlog_(this) {};
+    virtual ~MitmProxy();
     
     // this virtual method is called whenever there are new bytes in any LEFT host context!
     virtual void on_left_bytes(baseHostCX* cx);    
@@ -65,11 +65,11 @@ public:
     virtual void on_right_error(baseHostCX* cx);
 };
 
-class MitmMasterProxy : public ThreadedAcceptorProxy<MyProxy> {
+class MitmMasterProxy : public ThreadedAcceptorProxy<MitmProxy> {
 
 public:
     
-    MitmMasterProxy(baseCom* c, int worker_id) : ThreadedAcceptorProxy< MyProxy >(c,worker_id) {};
+    MitmMasterProxy(baseCom* c, int worker_id) : ThreadedAcceptorProxy< MitmProxy >(c,worker_id) {};
     
     virtual baseHostCX* new_cx(int s);
     virtual void on_left_new(baseHostCX* just_accepted_cx);
@@ -77,9 +77,9 @@ public:
 };
 
 
-class MitmUdpProxy : public ThreadedReceiverProxy<MyProxy> {
+class MitmUdpProxy : public ThreadedReceiverProxy<MitmProxy> {
 public:
-    MitmUdpProxy(baseCom* c, int worker_id) : ThreadedReceiverProxy< MyProxy >(c,worker_id) {};
+    MitmUdpProxy(baseCom* c, int worker_id) : ThreadedReceiverProxy< MitmProxy >(c,worker_id) {};
     virtual void on_left_new(baseHostCX* just_accepted_cx);
 };
 

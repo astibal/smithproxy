@@ -22,6 +22,8 @@
 #include <cfgapi.hpp>
 #include <logger.hpp>
 #include <policy.hpp>
+#include <mitmproxy.hpp>
+#include <mitmhost.hpp>
 
 Config cfgapi;
 std::map<std::string,CIDR*> cfgapi_obj_address;
@@ -564,6 +566,76 @@ int cfgapi_cleanup_obj_profile_detection() {
     cfgapi_obj_profile_detection.clear();
     
     return r;
+}
+
+baseProxy* cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
+    
+    int policy_num = cfgapi_obj_policy_match(new_proxy);
+    int verdict = cfgapi_obj_policy_action(policy_num);
+    if(verdict == POLICY_ACTION_PASS) {
+        bool cfg_wrt;
+        
+        ProfileContent* pc  = cfgapi_obj_policy_profile_content(policy_num);
+        ProfileDetection* pd = cfgapi_obj_policy_profile_detection(policy_num);
+        const char* pc_name = "none";
+        const char* pc_global_no = "global_no";
+        const char* pc_global_yes = "global_yes";
+        const char* pc_global = pc_global_no;
+        
+        const char* pd_name = "none";
+        
+        /* Processing content profile */
+        
+        MitmProxy* mitm_proxy = static_cast<MitmProxy*>(new_proxy);
+        AppHostCX* mitm_originator = static_cast<AppHostCX*>(originator);
+        
+        if(mitm_proxy != nullptr) {
+            if(pc != nullptr) {
+                DIA_("MitmMasterProxy::on_left_new: policy content profile: write payload: %d", pc->write_payload);
+                mitm_proxy->write_payload(pc->write_payload);
+                pc_name = pc->name.c_str();
+            }
+            else if(cfgapi.getRoot()["settings"].lookupValue("default_write_payload",cfg_wrt)) {
+                DIA_("MitmMasterProxy::on_left_new: global content profile: %d", cfg_wrt);
+                mitm_proxy->write_payload(cfg_wrt);
+                if(cfg_wrt) {
+                    pc_global = pc_global_yes;
+                }
+                
+                pc_name = pc_global;
+            }
+            
+            if(mitm_proxy->write_payload()) {
+                mitm_proxy->tlog().left_write("Connection start\n");
+            }
+        } else {
+            WARS_("cfgapi_obj_policy_apply: cannot apply content profile: cast to MitmProxy failed.");
+        }
+        
+        /* Processing detection profile */
+        
+        // we scan connection on client's side
+        if(mitm_originator != nullptr) {
+            mitm_originator->mode(AppHostCX::MODE_NONE);
+            if(pd != nullptr)  {
+                DIA_("MitmMasterProxy::on_left_new: policy detection profile: mode: %d", pd->mode);
+                mitm_originator->mode(pd->mode);
+                pd_name = pd->name.c_str();
+            }
+        } else {
+            WARS_("cfgapi_obj_policy_apply: cannot apply detection profile: cast to AppHostCX failed.");
+        }
+
+        INF_("Connection %s accepted by policy #%d, prof_c=%s, prof_d=%s",originator->full_name('L').c_str(),policy_num,pc_name,pd_name);
+        
+    } else {
+        INF_("Connection %s denied by policy #%d.",originator->full_name('L').c_str(),policy_num);
+        delete new_proxy;
+        
+        return nullptr;
+    }
+    
+    return new_proxy;
 }
 
 

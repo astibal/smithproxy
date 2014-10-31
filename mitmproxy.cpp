@@ -22,10 +22,10 @@
 #include <logger.hpp>
 #include <cfgapi.hpp>
 
-MyProxy::~MyProxy() {
+MitmProxy::~MitmProxy() {
     
     if(write_payload()) {
-        DEBS_("MyProxy::destructor: syncing writer");
+        DEBS_("MitmProxy::destructor: syncing writer");
 
         for(typename std::vector<baseHostCX*>::iterator j = this->left_sockets.begin(); j != this->left_sockets.end(); ++j) {
             auto cx = (*j);
@@ -47,7 +47,7 @@ MyProxy::~MyProxy() {
     }    
 }
 
-void MyProxy::on_left_bytes(baseHostCX* cx) {
+void MitmProxy::on_left_bytes(baseHostCX* cx) {
         
     if(write_payload()) {
         if(cx->log().size()) {
@@ -70,7 +70,7 @@ void MyProxy::on_left_bytes(baseHostCX* cx) {
     }    
 }
 
-void MyProxy::on_right_bytes(baseHostCX* cx) {
+void MitmProxy::on_right_bytes(baseHostCX* cx) {
         
     if(write_payload()) {
         if(cx->log().size()) {
@@ -86,7 +86,7 @@ void MyProxy::on_right_bytes(baseHostCX* cx) {
     }
 }
 
-void MyProxy::on_left_error(baseHostCX* cx) {
+void MitmProxy::on_left_error(baseHostCX* cx) {
     
     DEB_("on_left_error[%s]: proxy marked dead",(this->error_on_read ? "read" : "write"));
     DUMS_(this->hr());
@@ -104,7 +104,7 @@ void MyProxy::on_left_error(baseHostCX* cx) {
     this->dead(true); 
 }
 
-void MyProxy::on_right_error(baseHostCX* cx)
+void MitmProxy::on_right_error(baseHostCX* cx)
 {
     DEB_("on_right_error[%s]: proxy marked dead",(this->error_on_read ? "read" : "write"));
     
@@ -142,7 +142,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
         delete just_accepted_cx;
     } 
     else {
-        MyProxy* new_proxy = new MyProxy(com()->replicate());
+        MitmProxy* new_proxy = new MitmProxy(com()->replicate());
         
         // let's add this just_accepted_cx into new_proxy
         if(just_accepted_cx->paused()) {
@@ -183,62 +183,10 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
         // almost done, just add this target_cx to right side of new proxy
         new_proxy->radd(target_cx);
         
-        int policy_num = cfgapi_obj_policy_match(new_proxy);
-        int verdict = cfgapi_obj_policy_action(policy_num);
-        if(verdict == POLICY_ACTION_PASS) {
-            bool cfg_wrt;
-            
-            ProfileContent* pc  = cfgapi_obj_policy_profile_content(policy_num);
-            ProfileDetection* pd = cfgapi_obj_policy_profile_detection(policy_num);
-            const char* pc_name = "none";
-            const char* pc_global_no = "global_no";
-            const char* pc_global_yes = "global_yes";
-            const char* pc_global = pc_global_no;
-            
-            const char* pd_name = "none";
-            
-            /* Processing content profile */
-            
-            if(pc != nullptr) {
-                DIA_("MitmMasterProxy::on_left_new: policy content profile: write payload: %d", pc->write_payload);
-                new_proxy->write_payload(pc->write_payload);
-                pc_name = pc->name.c_str();
-            }
-            else if(cfgapi.getRoot()["settings"].lookupValue("default_write_payload",cfg_wrt)) {
-                DIA_("MitmMasterProxy::on_left_new: global content profile: %d", cfg_wrt);
-                new_proxy->write_payload(cfg_wrt);
-                if(cfg_wrt) {
-                    pc_global = pc_global_yes;
-                }
-                
-                pc_name = pc_global;
-            }
-            
-            if(new_proxy->write_payload()) {
-                new_proxy->tlog().left_write("Connection start\n");
-            }
-            
-            
-            /* Processing detection profile */
-            
-            // we scan connection on client's side
-            target_cx->mode(AppHostCX::MODE_NONE);
-            ((AppHostCX*)just_accepted_cx)->mode(AppHostCX::MODE_NONE);
-            if(pd != nullptr)  {
-                DIA_("MitmMasterProxy::on_left_new: policy detection profile: mode: %d", pd->mode);
-                ((AppHostCX*)just_accepted_cx)->mode(pd->mode);
-                pd_name = pd->name.c_str();
-            }
-            
-            
-            // FINAL point: adding new child proxy to the list
+        // apply policy and get result
+        baseProxy* verdict = cfgapi_obj_policy_apply(just_accepted_cx,new_proxy);
+        if(verdict != nullptr) {
             this->proxies().push_back(new_proxy);
-
-            INF_("Connection %s accepted by policy #%d, prof_c=%s, prof_d=%s",just_accepted_cx->full_name('L').c_str(),policy_num,pc_name,pd_name);
-            
-        } else {
-            INF_("Connection %s denied by policy #%d.",just_accepted_cx->full_name('L').c_str(),policy_num);
-            delete new_proxy;
         }
     }
     
@@ -247,13 +195,13 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
 
 int MitmMasterProxy::handle_sockets_once(baseCom* c) {
     //T_DIAS_("slist",5,this->hr()+"\n===============\n");
-    return ThreadedAcceptorProxy<MyProxy>::handle_sockets_once(c);
+    return ThreadedAcceptorProxy<MitmProxy>::handle_sockets_once(c);
 }
 
 
 void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
 {
-    MyProxy* new_proxy = new MyProxy(com()->replicate());
+    MitmProxy* new_proxy = new MitmProxy(com()->replicate());
     // let's add this just_accepted_cx into new_proxy
     if(just_accepted_cx->paused()) {
         DEBS_("MitmMasterProxy::on_left_new: ldaadd the new paused cx");
@@ -278,12 +226,19 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
     
     new_proxy->radd(target_cx);
 
-    // FINAL point: adding new child proxy to the list
-    this->proxies().push_back(new_proxy);
+    // apply policy and get result
+    baseProxy* verdict = cfgapi_obj_policy_apply(just_accepted_cx,new_proxy);
+    if(verdict != nullptr) {
+        this->proxies().push_back(new_proxy);
+    }
     
-    INF_("Connection from %s established", just_accepted_cx->full_name('L').c_str());        
-
-    if(new_proxy->write_payload()) {
-        new_proxy->tlog().left_write("Connection start\n");
-    }    
+    
+    // FINAL point: adding new child proxy to the list
+//     this->proxies().push_back(new_proxy);
+//     
+//     INF_("Connection from %s established", just_accepted_cx->full_name('L').c_str());        
+// 
+//     if(new_proxy->write_payload()) {
+//         new_proxy->tlog().left_write("Connection start\n");
+//     }    
 }

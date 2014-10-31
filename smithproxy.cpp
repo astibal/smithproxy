@@ -51,8 +51,8 @@
 
 extern "C" void __libc_freeres(void);
 
-typedef ThreadedAcceptor<MitmMasterProxy,MyProxy> theAcceptor;
-typedef ThreadedReceiver<MitmUdpProxy,MyProxy> theReceiver;
+typedef ThreadedAcceptor<MitmMasterProxy,MitmProxy> theAcceptor;
+typedef ThreadedReceiver<MitmUdpProxy,MitmProxy> theReceiver;
 
 class MyPlainAcceptor : public theAcceptor {
 };
