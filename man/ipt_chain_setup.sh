@@ -60,5 +60,7 @@ for P in ${SMITH_DTLS_PORTS}; do
     --tproxy-mark 0x1/0x1 --on-port ${SMITH_DTLS_TPROXY}
 done;
 
+iptables -t mangle -A ${SMITH_CHAIN_NAME} -j RETURN
+
 echo 
 echo "tproxy chain setup finished."

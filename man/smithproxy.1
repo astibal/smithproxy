@@ -6,18 +6,20 @@
 .B smithproxy 
 \- agent Smith's favorite mitm proxy
 .SH SYNOPSIS
-.B smithproxy [--debug|--diagnose|--dump] [--ssl] --port 
-.I <listen_port> 
+.B smithproxy [--debug|--diagnose|--dump] [--conf <non-default-config>]
 
 .SH DESCRIPTION
 smithproxy \- agent Smith's favorite mitm proxy, brought to you by Ales Stibal
-<astibal@gmail.com>
+<astib@mag0.net>
 
 .SH Introduction
 .B Smithproxy
 is capturing, plain-text or SSL man-in-the-middle proxy for Linux iptables TPROXY target.
 It supports SSL certificate spoofing - cloning the original certificate including
 Subject and SAN, signing it with it's own CA certificate.
+.br
+Smitproxy can also proxy UDP plaintext traffic.
+
 .br
 It works the way that it terminates traffic intended to be forwarded on itself, and 
 originating new session to the traffic target. Those sessions are then proxied by
@@ -42,32 +44,33 @@ copying bytes from one socket to another.
 .fi
 
 .br
-.IP 
-.B SSL:
+
+.B "SSL:"
+.br
 Certificate spoofing uses default server certificate's private and public keys; 
 certificates produced this way are cached for further use.
+
 .br
-If you are testing something, you are probably bored with certificate warning messages. 
-In that case you want to install 
-.B "ca-cert.pem" 
-file into your 'Trusted Root CA' certificate store.
+When would use SSL inspection (enabled by default), certificate warning messages
+will appear. This is because target servers' SSL certificates are resigned by 
+internal CA. 
+
+.B "SSL: How to avoid certificate warnings"
+.br
+You may want to install this ca root certificate "/etc/smithproxy/certs/ca-cert.pem"
+file) into your 'Trusted Root CA' certificate store.
+.br
+.B "WARNING:"
+in such a case you will unconditionally trust all certificates it resigned!
 
 .SH OPTIONS
-
-.IP "-p,--port <port> (optional, with default value)"  
-specify port this smithproxy process should be listening on. You want to properly combine it with
-iptables setting aiming it to this port (see USAGE). Default: 50080
-
-.IP "-s, --ssl-port (optional, with default value)"
-toggle SSL mode. All incoming traffic on that port is considered SSL. Target server certificates will be spoofed 
-automatically and will presented to the SSL client. Default: 50443
 
 .IP "--diagnose (optional)"
 toggle diagnose mode; it will print out quite number of diagnostics. Those aim to be 
 human, non-programmer readable and could help you to identify where potential problem is.
 
 .IP "--debug (optional, not recommended)"
-toggle non-practical verbose logging mode, extremely chatty especially for SSL traffic. 
+toggle impractically verbose logging mode, extremely chatty especially for SSL traffic. 
 You probably don't want to use it, unless you really need to know state machine cycle
 updates and similar info needed to troubleshoot the program itself.
 
@@ -75,52 +78,53 @@ updates and similar info needed to troubleshoot the program itself.
 toggle this to make your terminal busy. Most of 'Dump' level logging really dumps read/write 
 buffers and prints out memory allocation pointers. Added for completeness and just for the case.
 
+.IP "--conf (optional, default: /etc/smithproxy/smithproxy.cfg)"
+You can override config file to be used by this setting. Usually not needed.
+
+.SH CONFIG FILE
+As you see, there are not much options for the command line. This is because 
+we utilize quite large config file, which should be however very well readable and
+self-explaining.
+.br
+Config file is usually located in 
+.B "/etc/smithproxy/smithproxy.cfg"
+, however you may override it with 
+.B "--conf"
+command line option.
 
 .SH USAGE
-Smithproxy is usually best applicable on linux router. To make it work, you need
-at least following configuration:
+To make smithproxy work, you need at least following configuration:
+
 
 .nf
-# if you don't have routing enabled, set it like this (uncomment):
-.B "# sysctl -w net.ipv4.ip_forward=1"
+  # if you don't have routing enabled yet, set it like this:
+  sysctl -w net.ipv4.ip_forward=1
+  
+  # create a new iptables chain, name it DIVERT
+  iptables -t mangle -N DIVERT
+  iptables -t mangle -A DIVERT -j MARK --set-mark 1
+  iptables -t mangle -A DIVERT -j ACCEPT
+ 
+  # process all non-local connections matching socket locally
+  iptables -t mangle -A PREROUTING -p tcp -m socket -j DIVERT
+  iptables -t mangle -A PREROUTING -p udp -m socket -j DIVERT
 
-# create a new iptables chain, name it DIVERT
-iptables -t mangle -N DIVERT
-
-# PREROUTING phase: process all connections matching local socket 
-# in DIVERT chain, mark it and accept
-.B "iptables -t mangle -A PREROUTING -p tcp -m socket -j DIVERT"
-.B "iptables -t mangle -A DIVERT -j MARK --set-mark 1"
-.B "iptables -t mangle -A DIVERT -j ACCEPT"
-
-# add custom routing rule for above marked packets to be processed 
-# through loopback interface
-.B "ip rule add fwmark 1 lookup 100"
-.B "ip route add local 0.0.0.0/0 dev lo table 100"
-
-# this is rather for new connections (local socket is  not created 
-# for them yet - smithproxy will create it):
-
-.B "iptables -t mangle -A PREROUTING -p tcp -i eth1 --dport 80 -j TPROXY \\\\ "
-.B "  --tproxy-mark 0x1/0x1 --on-port 50080"
-
-.B " iptables -t mangle -A PREROUTING -p tcp -i eth1 --dport 443 -j TPROXY \\\\ "
-.B "  --tproxy-mark 0x1/0x1 --on-port 50443"
-
+  # add custom routing rule for above marked packets to be processed 
+  # through loopback interface
+  ip rule add fwmark 1 lookup 100
+  ip route add local 0.0.0.0/0 dev lo table 100
+  
+  # redirect new traffic to chain SMITH
+  iptables -t mangle -N SMITH
+  iptables -t mangle -A PREROUTING -j SMITH
+  
+  # You can utilize /usr/share/smithptoxy/utils/ipt_chain_setup.sh to create
+  # chain SMITH for you. If you want to do it manually, fell free ;)
+  
+  # if you are finished, run smithproxy
+  smithproxy 
 .fi
-As the next step you probably want to run smithproxy and accept connections 
-at ports you configured (50080 and 50443 in the example above). One 
-of them handling plain-text (50080) and the other SSL traffic (50443).
-
-You can do it this way:
-.br
-router:/dir/of/smithproxy$ ./smithproxy --port 50080 --ssl-port 50443
-.br
-or just simply (above example uses defaults):
-.br
-router:/dir/of/smithproxy$ ./smithproxy 
-.br
-
+   
 .SH OUTPUT
 .IP Logging
 Standard logging is informing about new/closed connections, and general
@@ -132,18 +136,21 @@ It doesn't contain any packet captures.
 .IP "Capture directory"
 Captures are organized in the structure:
 .nf
-   mitm/
-      <source IP>/
-         <date of capture>/
-            mitm_dump_<proxy connection ID> -- capture file
+   <write_payload_dir>/
+      [source IP]/
+         [date of capture]/
+            <write_payload_file_prefix>[proxy connection ID].<write_payload_file_suffix> -- capture file
+   
+   Note: entries in square-brackets cannot be changed, angle-brackets values
+         could be changed in config file.
 .fi
 
 This structure is automatically created, so you don't need to worry
 to just delete it if your tests are over, or you are running out of disk space.
 
 .IP "Capture file format"
-Capture file is text file, similar to `hexdump -C' output.  If the traffic was SSL,
-smithproxy prints out also original server's certificate.
+Capture file is text file, similar to `hexdump -C' output. You can however find
+several notes in there; for example if the traffic was SSL, smithproxy logs also original server's certificate.
 
 
 .SH LIMITATIONS
@@ -153,16 +160,14 @@ smithproxy prints out also original server's certificate.
 .br
 * Logs to standard output
 .br
-* Uses relative path for certificate and capture files 
-.br
 * Captures are text files not usable by e.g. wireshark 
-.br
-* Since no higher layer protocol parser is implemented yet, STARTTLS traffic is not intercepted. 
 
 
 .SH FILES
 .nf 
-certs/
+/etc/smithproxy.cfg
+               -- config file
+/etc/smithproxy/certs/
   ca-cert.pem  -- Spoofing CA certificate, issuer for spoofing server 
                   connection certificate
                   - this file should be loaded to Trusted Root CA to
@@ -187,10 +192,12 @@ Smithproxy has been  tested with valgrind tool and didn't exhibit any leaks.
 
 .SH COPYLEFT
 This software is released under GNU GPL license (version 2 or later). 
+The underlying Socle library taking care of all that proxying/spoofing is 
+licensed with LGPL version 2 or later.
 
 .SH AUTHOR
 .B "Ales Stibal" 
-<astibal@gmail.com>, (c) 2014
+<astibal@mag0.net>, (c) 2014
 .br
 
 .br

@@ -37,7 +37,7 @@ Below you can find some starttls sites. Always check logs if */starttls should a
 
 openssl s_client -host smtp.gmail.com -port 25 -starttls smtp
 openssl s_client -host imap.seznam.cz -port 143 -starttls imap
-openssl s_client -host mail2.fortinet.com -port 110 -starttls pop3
+openssl s_client -host <pop3_starttls_server> -port 110 -starttls pop3
 openssl s_client -host secureftp-test.com -port 21 -starttls ftp
 openssl s_client -connect isj3cmx.webexconnect.com:5222 -starttls xmpp
 # ldap with starttls is not yet supported
