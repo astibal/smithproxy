@@ -595,7 +595,7 @@ baseProxy* cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy)
                 mitm_proxy->write_payload(pc->write_payload);
                 pc_name = pc->name.c_str();
             }
-            else if(cfgapi.getRoot()["settings"].lookupValue("default_write_payload",cfg_wrt)) {
+            else if(cfgapi.getRoot()["settings"].lookupValue("default__payload",cfg_wrt)) {
                 DIA_("MitmMasterProxy::on_left_new: global content profile: %d", cfg_wrt);
                 mitm_proxy->write_payload(cfg_wrt);
                 if(cfg_wrt) {
@@ -606,7 +606,7 @@ baseProxy* cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy)
             }
             
             if(mitm_proxy->write_payload()) {
-                mitm_proxy->tlog().left_write("Connection start\n");
+                mitm_proxy->tlog()->left_write("Connection start\n");
             }
         } else {
             WARS_("cfgapi_obj_policy_apply: cannot apply content profile: cast to MitmProxy failed.");

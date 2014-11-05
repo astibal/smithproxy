@@ -22,6 +22,21 @@
 #include <logger.hpp>
 #include <cfgapi.hpp>
 
+
+MitmProxy::MitmProxy(baseCom* c): baseProxy(c) {
+
+    std::string data_dir = "mitm";
+    std::string file_pref = "";
+    std::string file_suff = "smcap";
+    
+    cfgapi.getRoot()["settings"].lookupValue("write_payload_dir",data_dir);
+    cfgapi.getRoot()["settings"].lookupValue("write_payload_file_prefix",file_pref);
+    cfgapi.getRoot()["settings"].lookupValue("write_payload_file_suffix",file_suff);
+    
+    tlog_ = new trafLog(this,data_dir.c_str(),file_pref.c_str(),file_suff.c_str());
+}
+
+
 MitmProxy::~MitmProxy() {
     
     if(write_payload()) {
@@ -30,7 +45,7 @@ MitmProxy::~MitmProxy() {
         for(typename std::vector<baseHostCX*>::iterator j = this->left_sockets.begin(); j != this->left_sockets.end(); ++j) {
             auto cx = (*j);
             if(cx->log().size()) {
-                tlog().write('L', cx->log());
+                tlog()->write('L', cx->log());
                 cx->log() = "";
             }
         }               
@@ -38,24 +53,26 @@ MitmProxy::~MitmProxy() {
         for(typename std::vector<baseHostCX*>::iterator j = this->right_sockets.begin(); j != this->right_sockets.end(); ++j) {
             auto cx = (*j);
             if(cx->log().size()) {
-                tlog().write('R', cx->log());
+                tlog()->write('R', cx->log());
                 cx->log() = "";
             }
         }         
         
-        tlog().left_write("Connection stop\n");
-    }    
+        tlog()->left_write("Connection stop\n");
+    }
+    
+    delete tlog_;
 }
 
 void MitmProxy::on_left_bytes(baseHostCX* cx) {
         
     if(write_payload()) {
         if(cx->log().size()) {
-            tlog().write('L', cx->log());
+            tlog()->write('L', cx->log());
             cx->log() = "";
         }
         
-        tlog().left_write(cx->to_read());
+        tlog()->left_write(cx->to_read());
     }
     
     // because we have left bytes, let's copy them into all right side sockets!
@@ -74,11 +91,11 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
         
     if(write_payload()) {
         if(cx->log().size()) {
-            tlog().write('R',cx->log());
+            tlog()->write('R',cx->log());
             cx->log() = "";
         }
         
-        tlog().right_write(cx->to_read());
+        tlog()->right_write(cx->to_read());
     }
     
     for(typename std::vector<baseHostCX*>::iterator j = this->left_sockets.begin(); j != this->left_sockets.end(); j++) {
@@ -92,7 +109,7 @@ void MitmProxy::on_left_error(baseHostCX* cx) {
     DUMS_(this->hr());
     
     if(write_payload()) {
-        tlog().left_write("Client side connection closed: " + cx->name() + "\n");
+        tlog()->left_write("Client side connection closed: " + cx->name() + "\n");
     }
     
 
@@ -109,7 +126,7 @@ void MitmProxy::on_right_error(baseHostCX* cx)
     DEB_("on_right_error[%s]: proxy marked dead",(this->error_on_read ? "read" : "write"));
     
     if(write_payload()) {
-        tlog().right_write("Server side connection closed: " + cx->name() + "\n");
+        tlog()->right_write("Server side connection closed: " + cx->name() + "\n");
     }
     
 //         INF_("Created new proxy 0x%08x from %s:%s to %s:%d",new_proxy,f,f_p, t,t_p );

@@ -41,7 +41,7 @@
 class MitmProxy : public baseProxy {
     
 protected:
-    trafLog tlog_;
+    trafLog *tlog_;
     
     bool write_payload_ = false;
     
@@ -49,9 +49,9 @@ public:
     bool write_payload(void) { return write_payload_; } 
     void write_payload(bool b) { write_payload_ = b; }
     
-    trafLog& tlog() { return tlog_; }
+    trafLog* tlog() { return tlog_; }
     
-    explicit MitmProxy(baseCom* c) : baseProxy(c), tlog_(this) {};
+    explicit MitmProxy(baseCom* c);
     virtual ~MitmProxy();
     
     // this virtual method is called whenever there are new bytes in any LEFT host context!
