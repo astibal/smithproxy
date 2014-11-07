@@ -22,6 +22,10 @@
 #include <csignal>
 #include <ctime>
 #include <cstdlib>
+
+#include <ostream>
+#include <ios>
+
 #include <getopt.h>
 #include <execinfo.h>
 
@@ -48,6 +52,7 @@
 #include <mitmhost.hpp>
 #include <mitmproxy.hpp>
 #include <cfgapi.hpp>
+#include <daemon.hpp>
 
 extern "C" void __libc_freeres(void);
 
@@ -70,9 +75,9 @@ std::thread* udp_thread = NULL;
 
 static void segv_handler(int sig) {
 
-    fprintf( stderr, "\n========= Smithproxy exception handler  =========\n" );
+    FAT_("  [%d] ========= Smithproxy exception handler  =========",sig );
     
-    fprintf( stderr, "  Received signal %d",sig );
+    FAT_("  [%d] Received signal %d",sig,sig );
 
     void *trace[64];
     size_t size, i;
@@ -81,13 +86,13 @@ static void segv_handler(int sig) {
     size    = backtrace( trace, 64 );
     strings = backtrace_symbols( trace, size );
 
-    fprintf( stderr, "\n  Traceback:\n\n" );
+    FAT_("  [%d] Traceback:",sig );
 
     for( i = 0; i < size; i++ ) {
-        fprintf( stderr, "  %s\n", strings[i] );
+        FAT_("  [%d] %s", sig, strings[i] );
     }
     
-    fprintf( stderr, "\n=================================================\n" );
+    FAT_("  [%d] =================================================", sig );
 
     exit(-1);
 }
@@ -114,7 +119,8 @@ static std::string cfg_ssl_listen_port;
 static std::string cfg_udp_port;
 
 static std::string config_file;
-static int cfg_log_level = INF;
+static unsigned int cfg_log_level = INF;
+static bool cfg_daemonize = false;
 
 static struct option long_options[] =
     {
@@ -125,6 +131,7 @@ static struct option long_options[] =
     {"extreme",   no_argument,       &args_debug_flag, EXT},
     
     {"config-file", required_argument, 0, 'c'},
+    {"daemonize", no_argument, 0, 'D'},
     {0, 0, 0, 0}
 };  
 
@@ -249,6 +256,18 @@ void load_config(std::string& config_f) {
         cfgapi.getRoot()["settings"].lookupValue("log_level",cfg_log_level);
         cfgapi.getRoot()["debug"].lookupValue("log_data_crc",baseCom::debug_log_data_crc);
         cfgapi.getRoot()["debug"].lookupValue("log_sockets",baseHostCX::socket_in_name);
+        
+        std::string log_target;
+        bool log_console;
+        if(cfgapi.getRoot()["settings"].lookupValue("log_file",log_target)) {
+            
+            lout.target(new std::ofstream(log_target.c_str(),std::ios::app));
+            lout.dup2_cout(false);
+            
+            if(cfgapi.getRoot()["settings"].lookupValue("log_console",log_console)) {
+                lout.dup2_cout(log_console);
+            }
+        }        
     }
     catch(const SettingNotFoundException &nfex) {
     
@@ -259,16 +278,10 @@ void load_config(std::string& config_f) {
 
 int main(int argc, char *argv[]) {
     
-    atexit(__libc_freeres);
-    config_file = "/etc/smithproxy/smithproxy.cfg";
-    
-//     CRYPTO_malloc_debug_init();
-//     CRYPTO_dbg_set_options(V_CRYPTO_MDEBUG_ALL);
-    
-    CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON);
-    
-	// setting logging facility level to show banner :)
-	lout.level(DIA);
+
+    config_file = "/etc/smithproxy/smithproxy.cfg";    
+
+	lout.level(WAR);
     
 	CRI_("Starting Smithproxy %s (socle %s)",SMITH_VERSION,SOCLE_VERSION);
 	
@@ -288,16 +301,45 @@ int main(int argc, char *argv[]) {
                 config_file = std::string(optarg);        
                 break;                
                 
+            case 'D':
+                cfg_daemonize = true;
+                break;
+                
             default:
+                ERRS_("unknown option: '%c'",c);
                abort();                 
         }
     }
 
-    // set level to what's in the config
-    load_config(config_file);	
     
-    // override config setting if CLI option is used
-	lout.level(args_debug_flag > NON ? args_debug_flag : cfg_log_level );
+    // if logging set in cmd line, use it 
+    if(args_debug_flag > NON) {
+        lout.level(args_debug_flag);
+    }
+        
+    // set level to what's in the config
+    load_config(config_file);
+    
+    // if there is loglevel specified in config file and is bigger than we currently have set, use it
+    if(cfg_log_level > lout.level()) {
+        lout.level(cfg_log_level);
+    }
+    
+    if(cfg_daemonize) {
+        if(lout.target() == nullptr) {
+            FATS_("Cannot daemonize without logging to file.");
+            exit(-5);
+        }
+        
+        lout.dup2_cout(false);
+        daemonize();
+    }
+    
+    //     atexit(__libc_freeres);    
+    //     CRYPTO_malloc_debug_init();
+    //     CRYPTO_dbg_set_options(V_CRYPTO_MDEBUG_ALL);
+    CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON);
+	
 
     plain_proxy = prepare_listener<theAcceptor,TCPCom>(cfg_listen_port,"plain-text",50080);
     ssl_proxy = prepare_listener<theAcceptor,MySSLMitmCom>(cfg_ssl_listen_port,"SSL",50443);
@@ -341,6 +383,8 @@ int main(int argc, char *argv[]) {
         udp_proxy->shutdown();  
     } );       
     
+    CRI_("Smithproxy %s (socle %s) started",SMITH_VERSION,SOCLE_VERSION);
+    
     if(plain_thread) {
         plain_thread->join();
     }
@@ -369,6 +413,9 @@ int main(int argc, char *argv[]) {
     DIA_("SSL_connect: %d",SSLCom::counter_ssl_connect);
 
     cfgapi_cleanup();
-    __libc_freeres();
+
+    if(cfg_daemonize) {    
+        daemon_unlink_pidfile();
+    }
 }
 

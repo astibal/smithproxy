@@ -17,4 +17,11 @@
     
 */    
 
-#define SMITH_VERSION "0.4.0~rc2"
+#ifndef __DAEMON_HPP
+#define __DAEMON_HPP
+
+extern "C" void daemonize(void);
+extern "C" void daemon_write_pidfile(void);
+extern "C" void daemon_unlink_pidfile(void);
+
+#endif
