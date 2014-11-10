@@ -6,7 +6,7 @@
 .B smithproxy 
 \- agent Smith's favorite mitm proxy
 .SH SYNOPSIS
-.B smithproxy [--debug|--diagnose|--dump] [--conf <non-default-config>]
+.B smithproxy [--debug|--diagnose|--dump] [--conf <non-default-config>] [--daemonize]
 
 .SH DESCRIPTION
 smithproxy \- agent Smith's favorite mitm proxy, brought to you by Ales Stibal
@@ -80,6 +80,11 @@ buffers and prints out memory allocation pointers. Added for completeness and ju
 
 .IP "--conf (optional, default: /etc/smithproxy/smithproxy.cfg)"
 You can override config file to be used by this setting. Usually not needed.
+
+.IP "--daemonize (optional)"
+Run smithproxy in the background. Settings to log to stdout/stderr are ignored,
+only logging to the file could be used.
+
 
 .SH CONFIG FILE
 As you see, there are not much options for the command line. This is because 
@@ -156,10 +161,6 @@ several notes in there; for example if the traffic was SSL, smithproxy logs also
 .SH LIMITATIONS
 * Smithproxy is changing source IP address and source port (won't fix).
 .br
-* Smithproxy is running in foreground 
-.br
-* Logs to standard output
-.br
 * Captures are text files not usable by e.g. wireshark 
 
 
@@ -167,7 +168,7 @@ several notes in there; for example if the traffic was SSL, smithproxy logs also
 .nf 
 /etc/smithproxy.cfg
                -- config file
-/etc/smithproxy/certs/
+/etc/smithproxy/certs/defaults/
   ca-cert.pem  -- Spoofing CA certificate, issuer for spoofing server 
                   connection certificate
                   - this file should be loaded to Trusted Root CA to

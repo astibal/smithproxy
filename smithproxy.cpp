@@ -94,6 +94,8 @@ static void segv_handler(int sig) {
     
     FAT_("  [%d] =================================================", sig );
 
+    daemon_unlink_pidfile();
+    
     exit(-1);
 }
 

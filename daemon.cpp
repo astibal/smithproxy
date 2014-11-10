@@ -35,7 +35,7 @@
 extern "C" {
 #endif
 
-#define PID_FILE "/var/run/smithproxy"
+#define PID_FILE "/var/run/smithproxy.pid"
     
 void daemonize(void) {
         
