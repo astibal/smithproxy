@@ -155,7 +155,7 @@ Listener* prepare_listener(std::string& str_port,const char* friendly_name,int d
     
     NOT_("Entering %s mode on port %d",friendly_name,port);
     auto s_p = new Listener(new Com());
-    s_p->com()->nonlocal(true);
+    s_p->com()->nonlocal_dst(true);
 
     // bind with master proxy (.. and create child proxies for new connections)
     int s = s_p->bind(port,'L');

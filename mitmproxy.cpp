@@ -153,7 +153,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
     
     // NEW: whole method is reorganized 
 
-    if(! just_accepted_cx->com()->nonlocal_resolved()) {
+    if(! just_accepted_cx->com()->nonlocal_dst_resolved()) {
         ERRS_("Was not possible to resolve original destination!");
         just_accepted_cx->close();
         delete just_accepted_cx;
@@ -169,8 +169,8 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
             DEBS_("MitmMasterProxy::on_left_new: ladd the new cx (unpaused)");
             new_proxy->ladd(just_accepted_cx);
         }
-        MitmHostCX *target_cx = new MitmHostCX(com()->replicate(), just_accepted_cx->com()->nonlocal_host().c_str(), 
-                                            string_format("%d",just_accepted_cx->com()->nonlocal_port()).c_str()
+        MitmHostCX *target_cx = new MitmHostCX(com()->replicate(), just_accepted_cx->com()->nonlocal_dst_host().c_str(), 
+                                            string_format("%d",just_accepted_cx->com()->nonlocal_dst_port()).c_str()
                                             );
         // connect it! - btw ... we don't want to block of course...
         
@@ -179,22 +179,15 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
         just_accepted_cx->name();
         just_accepted_cx->com()->resolve_socket_src(just_accepted_cx->socket(),&h,&p);
         
-//          // Keep it here: would be good if we can do something like this in the future
-//            
-//          DIA_("About to name socket after: %s:%s",h.c_str(),p.c_str());
-//          int bind_status = target_cx->com()->namesocket(target_cx->socket(),h,(unsigned short) std::stoi(p));
-//          if (bind_status != 0) {
-//                 
-//                 char abc[256];
-//                 
-//                 strerror_r(bind_status,abc,255);
-//                 DIA_("cannot bind this port: %s",abc);
-//         }
-        target_cx->connect(false);
-
+        
         just_accepted_cx->peer(target_cx);
         target_cx->peer(just_accepted_cx);
-                    
+
+        target_cx->com()->nonlocal_src(true); //FIXME
+        target_cx->com()->nonlocal_src_host() = h;
+        target_cx->com()->nonlocal_src_port() = std::stoi(p);
+        
+        target_cx->connect(false);        
         //NEW: end of new
         
         // almost done, just add this target_cx to right side of new proxy
@@ -228,16 +221,25 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
         new_proxy->ladd(just_accepted_cx);
     }
     
-    MitmHostCX *target_cx = new MitmHostCX(com()->replicate(), just_accepted_cx->com()->nonlocal_host().c_str(), 
-                                    string_format("%d",just_accepted_cx->com()->nonlocal_port()).c_str()
+    MitmHostCX *target_cx = new MitmHostCX(com()->replicate(), just_accepted_cx->com()->nonlocal_dst_host().c_str(), 
+                                    string_format("%d",just_accepted_cx->com()->nonlocal_dst_port()).c_str()
                                     );
     
+
+    std::string h;
+    std::string p;
     just_accepted_cx->name();
-    target_cx->connect(false);
+    just_accepted_cx->com()->resolve_socket_src(just_accepted_cx->socket(),&h,&p);
     
     just_accepted_cx->peer(target_cx);
     target_cx->peer(just_accepted_cx);
 
+    target_cx->com()->nonlocal_src(true); //FIXME
+    target_cx->com()->nonlocal_src_host() = h;
+    target_cx->com()->nonlocal_src_port() = std::stoi(p);    
+    
+    target_cx->connect(false);    
+    
     ((AppHostCX*)just_accepted_cx)->mode(AppHostCX::MODE_NONE);
     target_cx->mode(AppHostCX::MODE_NONE);
     

@@ -20,7 +20,7 @@ iptables -t mangle -N SMITH
 iptables -t mangle -A PREROUTING -j SMITH
 
 
-iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+
 ip rule add fwmark 1 lookup 100
 ip route add local 0.0.0.0/0 dev lo table 100
 
