@@ -124,6 +124,10 @@ static std::string config_file;
 static unsigned int cfg_log_level = INF;
 static bool cfg_daemonize = false;
 
+static int cfg_tcp_workers = 0;
+static int cfg_ssl_workers = 0;
+static int cfg_udp_workers = 0;
+
 static struct option long_options[] =
     {
     /* These options set a flag. */
@@ -139,7 +143,7 @@ static struct option long_options[] =
 
 
 template <class Listener, class Com>
-Listener* prepare_listener(std::string& str_port,const char* friendly_name,int def_port) {
+Listener* prepare_listener(std::string& str_port,const char* friendly_name,int def_port,int sub_workers) {
     
     int port = def_port;
     
@@ -156,6 +160,7 @@ Listener* prepare_listener(std::string& str_port,const char* friendly_name,int d
     NOT_("Entering %s mode on port %d",friendly_name,port);
     auto s_p = new Listener(new Com());
     s_p->com()->nonlocal_dst(true);
+    s_p->worker_count_preference(sub_workers);
 
     // bind with master proxy (.. and create child proxies for new connections)
     int s = s_p->bind(port,'L');
@@ -253,8 +258,11 @@ void load_config(std::string& config_f) {
         cfgapi.getRoot()["settings"].lookupValue("certs_path",SSLCertStore::certs_path);
         cfgapi.getRoot()["settings"].lookupValue("certs_ca_key_password",SSLCertStore::password);
         cfgapi.getRoot()["settings"].lookupValue("plaintext_port",cfg_listen_port);
+        cfgapi.getRoot()["settings"].lookupValue("plaintext_workers",cfg_tcp_workers);
         cfgapi.getRoot()["settings"].lookupValue("ssl_port",cfg_ssl_listen_port);
+        cfgapi.getRoot()["settings"].lookupValue("ssl_workers",cfg_ssl_workers);
         cfgapi.getRoot()["settings"].lookupValue("udp_port",cfg_udp_port);
+        cfgapi.getRoot()["settings"].lookupValue("udp_workers",cfg_udp_workers);
         cfgapi.getRoot()["settings"].lookupValue("log_level",cfg_log_level);
         cfgapi.getRoot()["debug"].lookupValue("log_data_crc",baseCom::debug_log_data_crc);
         cfgapi.getRoot()["debug"].lookupValue("log_sockets",baseHostCX::socket_in_name);
@@ -343,9 +351,9 @@ int main(int argc, char *argv[]) {
     CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON);
 	
 
-    plain_proxy = prepare_listener<theAcceptor,TCPCom>(cfg_listen_port,"plain-text",50080);
-    ssl_proxy = prepare_listener<theAcceptor,MySSLMitmCom>(cfg_ssl_listen_port,"SSL",50443);
-    udp_proxy = prepare_listener<theReceiver,UDPCom>(cfg_udp_port,"plain-udp",50081);
+    plain_proxy = prepare_listener<theAcceptor,TCPCom>(cfg_listen_port,"plain-text",50080,cfg_tcp_workers);
+    ssl_proxy = prepare_listener<theAcceptor,MySSLMitmCom>(cfg_ssl_listen_port,"SSL",50443,cfg_ssl_workers);
+    udp_proxy = prepare_listener<theReceiver,UDPCom>(cfg_udp_port,"plain-udp",50081,cfg_udp_workers);
     
     
 	// install signal handler, we do want to release the memory properly

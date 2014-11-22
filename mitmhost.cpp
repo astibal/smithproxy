@@ -85,13 +85,13 @@ void MitmHostCX::on_starttls() {
     DIAS_("we should now handover myself to SSL worker");
     
     // we know this side is client
-//         delete com();
+//         delete ();
 //         delete peercom();
 
     com_ = new MySSLMitmCom();
-    com()->init();
+    com()->init(this);
     
-    peer()->com_ = new SSLMitmCom();
+    peer()->com(new SSLMitmCom());
     peer(peer()); // this will re-init
     peer()->peer(this);
     
