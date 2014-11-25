@@ -6,11 +6,11 @@ Smithproxy is free transparent proxy software. It utilizes TPROXY and is capable
 * SSL Mitm with certificate resigning -- trusted CA in browser will prevent certificate warnings
 * STARTTLS support for of starttls capable protocols, including SMTP,FTP,IMAP and POP3.
 
-##Builds:##
+##Binary builds:##
 You can obtain smithproxy in DEB packages here:
 http://www.mag0.net/out/smithproxy/
 
-##Manual build:##
+##Building from sources:##
 If you want to build smithproxy from sources, feel free. Current setup is done the way that you have to have socle and smithproxy
 directories in the same folder.  
 I am using simple script which makes it easy (I am just editing it):
