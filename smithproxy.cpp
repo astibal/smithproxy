@@ -58,19 +58,23 @@ extern "C" void __libc_freeres(void);
 
 typedef ThreadedAcceptor<MitmMasterProxy,MitmProxy> theAcceptor;
 typedef ThreadedReceiver<MitmUdpProxy,MitmProxy> theReceiver;
+typedef ThreadedAcceptor<MitmSocksProxy,SocksProxy> socksAcceptor;
 
 class MyPlainAcceptor : public theAcceptor {
 };
 
 
 // Now let's do the Ctrl-C magic
-static theAcceptor* plain_proxy = NULL;
-static theAcceptor* ssl_proxy = NULL;
-static theReceiver* udp_proxy = NULL;
+static theAcceptor* plain_proxy = nullptr;
+static theAcceptor* ssl_proxy = nullptr;
+static theReceiver* udp_proxy = nullptr;
+static socksAcceptor* socks_proxy = nullptr;
 
-std::thread* plain_thread = NULL;
-std::thread* ssl_thread = NULL;
-std::thread* udp_thread = NULL;
+
+std::thread* plain_thread = nullptr;
+std::thread* ssl_thread = nullptr;
+std::thread* udp_thread = nullptr;
+std::thread* socks_thread = nullptr;
 
 
 static void segv_handler(int sig) {
@@ -102,14 +106,17 @@ static void segv_handler(int sig) {
 void my_terminate (int param) {
     
     FATS_("Terminating ...");
-    if (plain_proxy != NULL) {
+    if (plain_proxy != nullptr) {
         plain_proxy->dead(true);
     }
-    if(ssl_proxy != NULL) {
+    if(ssl_proxy != nullptr) {
         ssl_proxy->dead(true);
     }
-    if(udp_proxy != NULL) {
+    if(udp_proxy != nullptr) {
         udp_proxy->dead(true);
+    }
+    if(socks_proxy != nullptr) {
+        socks_proxy->dead(true);
     }
 }
 
@@ -119,6 +126,7 @@ static int  args_debug_flag = NON;
 static std::string cfg_listen_port;
 static std::string cfg_ssl_listen_port;
 static std::string cfg_udp_port;
+static std::string cfg_socks_port;
 
 static std::string config_file;
 static unsigned int cfg_log_level = INF;
@@ -127,6 +135,7 @@ static bool cfg_daemonize = false;
 static int cfg_tcp_workers = 0;
 static int cfg_ssl_workers = 0;
 static int cfg_udp_workers = 0;
+static int cfg_socks_workers = 0;
 
 static struct option long_options[] =
     {
@@ -354,7 +363,7 @@ int main(int argc, char *argv[]) {
     plain_proxy = prepare_listener<theAcceptor,TCPCom>(cfg_listen_port,"plain-text",50080,cfg_tcp_workers);
     ssl_proxy = prepare_listener<theAcceptor,MySSLMitmCom>(cfg_ssl_listen_port,"SSL",50443,cfg_ssl_workers);
     udp_proxy = prepare_listener<theReceiver,UDPCom>(cfg_udp_port,"plain-udp",50081,cfg_udp_workers);
-    
+    socks_proxy = prepare_listener<socksAcceptor,TCPCom>(cfg_socks_port,"socks",1080,cfg_socks_workers);
     
 	// install signal handler, we do want to release the memory properly
 		// signal handler installation
@@ -392,6 +401,11 @@ int main(int argc, char *argv[]) {
         DIAS_("udp workers torn down."); 
         udp_proxy->shutdown();  
     } );       
+    socks_thread = new std::thread([] () { 
+        socks_proxy->run(); 
+        DIAS_("socks workers torn down."); 
+        socks_proxy->shutdown();  
+    } );   
     
     CRI_("Smithproxy %s (socle %s) started",SMITH_VERSION,SOCLE_VERSION);
     
@@ -404,7 +418,10 @@ int main(int argc, char *argv[]) {
     if(udp_thread) {
         udp_thread->join();
     }    
-    
+    if(socks_thread) {
+        socks_thread->join();
+    }        
+
     auto s = new SSLCom();
     s->certstore()->destroy();
     delete s;
@@ -417,6 +434,7 @@ int main(int argc, char *argv[]) {
     delete plain_thread;
     delete ssl_thread;
     delete udp_thread;
+    delete socks_thread;
     
     DIAS_("Debug SSL statistics: ");
     DIA_("SSL_accept: %d",SSLCom::counter_ssl_accept);

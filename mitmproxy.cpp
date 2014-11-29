@@ -21,6 +21,7 @@
 #include <mitmhost.hpp>
 #include <logger.hpp>
 #include <cfgapi.hpp>
+#include <sockshostcx.hpp>
 
 
 MitmProxy::MitmProxy(baseCom* c): baseProxy(c) {
@@ -162,7 +163,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
         MitmProxy* new_proxy = new MitmProxy(com()->replicate());
         
         // let's add this just_accepted_cx into new_proxy
-        if(just_accepted_cx->paused()) {
+        if(just_accepted_cx->paused_read()) {
             DEBS_("MitmMasterProxy::on_left_new: ldaadd the new paused cx");
             new_proxy->ldaadd(just_accepted_cx);
         } else{
@@ -213,7 +214,7 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
 {
     MitmProxy* new_proxy = new MitmProxy(com()->replicate());
     // let's add this just_accepted_cx into new_proxy
-    if(just_accepted_cx->paused()) {
+    if(just_accepted_cx->paused_read()) {
         DEBS_("MitmMasterProxy::on_left_new: ldaadd the new paused cx");
         new_proxy->ldaadd(just_accepted_cx);
     } else{
@@ -260,4 +261,132 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
 //     if(new_proxy->write_payload()) {
 //         new_proxy->tlog().left_write("Connection start\n");
 //     }    
+}
+
+
+#include <sslcom.hpp>
+#include <tcpcom.hpp>
+
+
+SocksProxy::SocksProxy(baseCom* c): MitmProxy(c) {}
+SocksProxy::~SocksProxy() {}
+
+void SocksProxy::on_left_message(baseHostCX* basecx) {
+
+    socksServerCX* cx = static_cast<socksServerCX*>(basecx);
+    if(cx != nullptr) {
+        switch(cx->state_) {
+            case WAIT_POLICY:
+                INFS_("SocksProxy::on_left_message: policy check: accepted");
+                cx->verdict(ACCEPT);
+                break;
+            
+            case HANDOFF:
+                INFS_("SocksProxy::on_left_message: socksHostCX handoff msg received");
+                cx->state(ZOMBIE);
+                
+                socks5_handoff(cx);
+                break;
+            default:
+                INFS_("SocksProxy::on_left_message: unknown message");
+                break;
+        }
+    }
+}
+
+void SocksProxy::socks5_handoff(socksServerCX* cx) {
+
+    INFS_("SocksProxy::socks5_handoff: start");
+    
+    int s = ::dup(cx->socket());
+    bool ssl = false;
+    
+    baseCom* new_com = nullptr;
+    switch(cx->com()->nonlocal_dst_port()) {
+        case 443:
+        case 465:
+        case 636:
+        case 993:
+        case 995:
+            new_com = new socksSSLMitmCom();
+            ssl = true;
+            break;
+        default:
+            new_com = new socksTCPCom();
+    }
+    
+    MitmHostCX* n_cx = new MitmHostCX(new_com, s);
+    n_cx->paused(true);
+    n_cx->com()->name();
+    n_cx->name();
+    n_cx->com()->nonlocal_dst(true);
+    n_cx->com()->nonlocal_dst_host() = cx->com()->nonlocal_dst_host();
+    n_cx->com()->nonlocal_dst_port() = cx->com()->nonlocal_dst_port();
+    n_cx->com()->nonlocal_dst_resolved(true);
+//     n_cx->writebuf()->append(cx->writebuf()->data(),cx->writebuf()->size());
+    
+    // get rid of it
+    cx->socket(0);
+    delete cx;
+    
+    left_sockets.clear();
+    ldaadd(n_cx);
+    n_cx->on_delay_socket(s);
+    
+    MitmHostCX *target_cx = new MitmHostCX(n_cx->com()->replicate(), n_cx->com()->nonlocal_dst_host().c_str(), 
+                                        string_format("%d",n_cx->com()->nonlocal_dst_port()).c_str()
+                                        );
+    std::string h;
+    std::string p;
+    n_cx->name();
+    n_cx->com()->resolve_socket_src(n_cx->socket(),&h,&p);
+    
+    
+    n_cx->peer(target_cx);
+    target_cx->peer(n_cx);
+
+    target_cx->com()->nonlocal_src(true); //FIXME
+    target_cx->com()->nonlocal_src_host() = h;
+    target_cx->com()->nonlocal_src_port() = std::stoi(p);
+    
+    target_cx->connect(false);       
+    
+    if(ssl) {
+        ((SSLCom*)n_cx->com())->upgrade_server_socket(n_cx->socket());
+        INFS_("SocksProxy::socks5_handoff: mark1");        
+        
+        ((SSLCom*)target_cx->com())->upgrade_client_socket(target_cx->socket());
+    }
+    
+    radd(target_cx);
+        
+    INFS_("SocksProxy::socks5_handoff: finished");
+}
+
+
+
+
+
+
+
+baseHostCX* MitmSocksProxy::new_cx(int s) {
+    auto r = new socksServerCX(com()->replicate(),s);
+    return r; 
+}
+
+void MitmSocksProxy::on_left_new(baseHostCX* just_accepted_cx) {
+
+    SocksProxy* new_proxy = new SocksProxy(com()->replicate());
+    
+    // let's add this just_accepted_cx into new_proxy
+    std::string h;
+    std::string p;
+    just_accepted_cx->name();
+    just_accepted_cx->com()->resolve_socket_src(just_accepted_cx->socket(),&h,&p);
+    
+    new_proxy->ladd(just_accepted_cx);    
+    
+    this->proxies().push_back(new_proxy);
+    
+    DEBS_("MitmMasterProxy::on_left_new: finished");
 }
