@@ -277,18 +277,18 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
     if(cx != nullptr) {
         switch(cx->state_) {
             case WAIT_POLICY:
-                INFS_("SocksProxy::on_left_message: policy check: accepted");
+                DIAS_("SocksProxy::on_left_message: policy check: accepted");
                 cx->verdict(ACCEPT);
                 break;
             
             case HANDOFF:
-                INFS_("SocksProxy::on_left_message: socksHostCX handoff msg received");
+                DIAS_("SocksProxy::on_left_message: socksHostCX handoff msg received");
                 cx->state(ZOMBIE);
                 
                 socks5_handoff(cx);
                 break;
             default:
-                INFS_("SocksProxy::on_left_message: unknown message");
+                WARS_("SocksProxy::on_left_message: unknown message");
                 break;
         }
     }
@@ -296,7 +296,7 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
 
 void SocksProxy::socks5_handoff(socksServerCX* cx) {
 
-    INFS_("SocksProxy::socks5_handoff: start");
+    DEBS_("SocksProxy::socks5_handoff: start");
     
     int s = ::dup(cx->socket());
     bool ssl = false;
@@ -353,14 +353,14 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     
     if(ssl) {
         ((SSLCom*)n_cx->com())->upgrade_server_socket(n_cx->socket());
-        INFS_("SocksProxy::socks5_handoff: mark1");        
+        DEBS_("SocksProxy::socks5_handoff: mark1");        
         
         ((SSLCom*)target_cx->com())->upgrade_client_socket(target_cx->socket());
     }
     
     radd(target_cx);
         
-    INFS_("SocksProxy::socks5_handoff: finished");
+    DIAS_("SocksProxy::socks5_handoff: finished");
 }
 
 

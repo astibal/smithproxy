@@ -276,6 +276,10 @@ void load_config(std::string& config_f) {
         cfgapi.getRoot()["debug"].lookupValue("log_data_crc",baseCom::debug_log_data_crc);
         cfgapi.getRoot()["debug"].lookupValue("log_sockets",baseHostCX::socket_in_name);
         
+        cfgapi.getRoot()["debug"]["log"].lookupValue("sslcom",SSLCom::log_level_ref());
+        cfgapi.getRoot()["debug"]["log"].lookupValue("sslmitmcom",SSLMitmCom::log_level_ref());
+        cfgapi.getRoot()["debug"]["log"].lookupValue("sslcertstore",SSLCertStore::log_level_ref());
+        
         std::string log_target;
         bool log_console;
         if(cfgapi.getRoot()["settings"].lookupValue("log_file",log_target)) {
