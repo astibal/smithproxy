@@ -307,6 +307,20 @@ int main(int argc, char *argv[]) {
 	lout.level(WAR);
     
 	CRI_("Starting Smithproxy %s (socle %s)",SMITH_VERSION,SOCLE_VERSION);
+    
+    if(SOCLE_DEVEL) {
+        WAR_("*** Socle library version %s is marked as development! ***",SOCLE_VERSION);
+    }
+    if(SMITH_DEVEL) {
+        WAR_("*** Smithproxy version %s is marked as development! ***",SMITH_VERSION);
+    }
+    if(SOCLE_DEVEL || SMITH_DEVEL) {
+        WARS_("");
+        WARS_("  ... start will continue in 5 sec.");
+        sleep(5);
+    }
+    
+       
 	
     while(1) {
     /* getopt_long stores the option index here. */
@@ -389,23 +403,27 @@ int main(int argc, char *argv[]) {
     
     
     plain_thread = new std::thread([]() { 
+        pthread_setname_np(plain_thread->native_handle(),"smithproxy_tcp");
         plain_proxy->run(); 
         DIAS_("plaintext workers torn down."); 
         plain_proxy->shutdown(); 
     } );
     
     ssl_thread = new std::thread([] () { 
+        pthread_setname_np(ssl_thread->native_handle(),"smithproxy_tls");
         ssl_proxy->run(); 
         DIAS_("ssl workers torn down."); 
         ssl_proxy->shutdown();  
     } );    
 
-    udp_thread = new std::thread([] () { 
+    udp_thread = new std::thread([] () {
+        pthread_setname_np(udp_thread->native_handle(),"smithproxy_udp");
         udp_proxy->run(); 
         DIAS_("udp workers torn down."); 
         udp_proxy->shutdown();  
     } );       
     socks_thread = new std::thread([] () { 
+        pthread_setname_np(plain_thread->native_handle(),"smithproxy_sk5");
         socks_proxy->run(); 
         DIAS_("socks workers torn down."); 
         socks_proxy->shutdown();  

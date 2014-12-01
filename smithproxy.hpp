@@ -17,4 +17,5 @@
     
 */    
 
-#define SMITH_VERSION "0.5.1-dev"
+#define SMITH_VERSION "0.5.2-dev"
+#define SMITH_DEVEL    1
