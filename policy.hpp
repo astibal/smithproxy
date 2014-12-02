@@ -31,6 +31,10 @@
 #define POLICY_ACTION_DENY  0
 #define POLICY_ACTION_PASS  1
 
+#define POLICY_NAT_NONE     0
+#define POLICY_NAT_AUTO     1
+#define POLICY_NAT_POOL     2
+
 struct ProfileDetection;
 struct ProfileContent;
 
@@ -51,6 +55,7 @@ public:
        bool dst_ports_default = true;
 
        int action = POLICY_ACTION_PASS;
+       int nat    = POLICY_NAT_NONE;
       
        bool match(baseProxy*);
        virtual ~PolicyRule();

@@ -184,20 +184,20 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
         just_accepted_cx->peer(target_cx);
         target_cx->peer(just_accepted_cx);
 
-        target_cx->com()->nonlocal_src(true); //FIXME
-        target_cx->com()->nonlocal_src_host() = h;
-        target_cx->com()->nonlocal_src_port() = std::stoi(p);
-        
-        target_cx->connect(false);        
-        //NEW: end of new
-        
         // almost done, just add this target_cx to right side of new proxy
         new_proxy->radd(target_cx);
         
         // apply policy and get result
-        baseProxy* verdict = cfgapi_obj_policy_apply(just_accepted_cx,new_proxy);
-        if(verdict != nullptr) {
+        int policy_num = cfgapi_obj_policy_apply(just_accepted_cx,new_proxy);
+        if(policy_num >= 0) {
             this->proxies().push_back(new_proxy);
+            
+            if(cfgapi_obj_policy.at(policy_num)->nat == POLICY_NAT_NONE) {
+                target_cx->com()->nonlocal_src(true);
+                target_cx->com()->nonlocal_src_host() = h;
+                target_cx->com()->nonlocal_src_port() = std::stoi(p);               
+            }
+            target_cx->connect(false);        
         }
     }
     
@@ -235,11 +235,7 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
     just_accepted_cx->peer(target_cx);
     target_cx->peer(just_accepted_cx);
 
-    target_cx->com()->nonlocal_src(true); //FIXME
-    target_cx->com()->nonlocal_src_host() = h;
-    target_cx->com()->nonlocal_src_port() = std::stoi(p);    
-    
-    target_cx->connect(false);    
+
     
     ((AppHostCX*)just_accepted_cx)->mode(AppHostCX::MODE_NONE);
     target_cx->mode(AppHostCX::MODE_NONE);
@@ -247,20 +243,19 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
     new_proxy->radd(target_cx);
 
     // apply policy and get result
-    baseProxy* verdict = cfgapi_obj_policy_apply(just_accepted_cx,new_proxy);
-    if(verdict != nullptr) {
+    int policy_num = cfgapi_obj_policy_apply(just_accepted_cx,new_proxy);
+    if(policy_num >= 0) {
         this->proxies().push_back(new_proxy);
+        
+        if(cfgapi_obj_policy.at(policy_num)->nat == POLICY_NAT_NONE) {
+            target_cx->com()->nonlocal_src(true);
+            target_cx->com()->nonlocal_src_host() = h;
+            target_cx->com()->nonlocal_src_port() = std::stoi(p);               
+        }
+        target_cx->connect(false);        
     }
-    
-    
-    // FINAL point: adding new child proxy to the list
-//     this->proxies().push_back(new_proxy);
-//     
-//     INF_("Connection from %s established", just_accepted_cx->full_name('L').c_str());        
-// 
-//     if(new_proxy->write_payload()) {
-//         new_proxy->tlog().left_write("Connection start\n");
-//     }    
+        
+    DEBS_("MitmUDPProxy::on_left_new: finished");    
 }
 
 

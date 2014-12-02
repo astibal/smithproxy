@@ -235,6 +235,7 @@ int cfgapi_load_obj_policy() {
             std::string profile_detection;
             std::string profile_content;
             std::string action;
+            std::string nat;
             
             bool error = false;
             
@@ -300,7 +301,6 @@ int cfgapi_load_obj_policy() {
                    DIA_("cfgapi_load_policy[#%d]: dst_port object not found: %s",i,dport.c_str());
                    error = true;
                }
-                
             }
             
             if(cur_object.lookupValue("action",action)) {
@@ -321,6 +321,26 @@ int cfgapi_load_obj_policy() {
             } else {
                 rule->action = 1;
             }
+
+            if(cur_object.lookupValue("nat",nat)) {
+                int nat_a = POLICY_NAT_NONE;
+                
+                if(nat == "none") {
+                    DIA_("cfgapi_load_policy[#%d]: nat: none",i);
+                    nat_a = POLICY_NAT_NONE;
+                } else if (nat == "auto"){
+                    DIA_("cfgapi_load_policy[#%d]: nat: auto",i);
+                    nat_a = POLICY_NAT_AUTO;
+                } else {
+                    DIA_("cfgapi_load_policy[#%d]: nat: unknown nat method '%s'",i,nat.c_str());
+                    nat_a  = POLICY_NAT_AUTO;
+                    error = true;
+                }
+                
+                rule->nat = nat_a;
+            } else {
+                rule->nat = POLICY_NAT_NONE;
+            }            
             
             
             /* try to load policy profiles */
@@ -568,7 +588,7 @@ int cfgapi_cleanup_obj_profile_detection() {
     return r;
 }
 
-baseProxy* cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
+int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
     
     int policy_num = cfgapi_obj_policy_match(new_proxy);
     int verdict = cfgapi_obj_policy_action(policy_num);
@@ -631,11 +651,9 @@ baseProxy* cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy)
     } else {
         INF_("Connection %s denied by policy #%d.",originator->full_name('L').c_str(),policy_num);
         delete new_proxy;
-        
-        return nullptr;
     }
     
-    return new_proxy;
+    return policy_num;
 }
 
 
