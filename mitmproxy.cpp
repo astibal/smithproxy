@@ -298,7 +298,7 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
 
     DEBS_("SocksProxy::socks5_handoff: start");
     
-    int s = ::dup(cx->socket());
+    int s = cx->socket();
     bool ssl = false;
     
     baseCom* new_com = nullptr;
