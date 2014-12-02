@@ -273,8 +273,11 @@ void load_config(std::string& config_f) {
         cfgapi.getRoot()["settings"].lookupValue("udp_port",cfg_udp_port);
         cfgapi.getRoot()["settings"].lookupValue("udp_workers",cfg_udp_workers);
         cfgapi.getRoot()["settings"].lookupValue("log_level",cfg_log_level);
+        
         cfgapi.getRoot()["debug"].lookupValue("log_data_crc",baseCom::debug_log_data_crc);
         cfgapi.getRoot()["debug"].lookupValue("log_sockets",baseHostCX::socket_in_name);
+        cfgapi.getRoot()["debug"].lookupValue("log_srclines",lout.print_srcline());
+        cfgapi.getRoot()["debug"].lookupValue("log_srclines_always",lout.print_srcline_always());
         
         cfgapi.getRoot()["debug"]["log"].lookupValue("sslcom",SSLCom::log_level_ref());
         cfgapi.getRoot()["debug"]["log"].lookupValue("sslmitmcom",SSLMitmCom::log_level_ref());
@@ -308,13 +311,14 @@ int main(int argc, char *argv[]) {
     
 	CRI_("Starting Smithproxy %s (socle %s)",SMITH_VERSION,SOCLE_VERSION);
     
-    if(SOCLE_DEVEL) {
-        WAR_("*** Socle library version %s is marked as development! ***",SOCLE_VERSION);
-    }
-    if(SMITH_DEVEL) {
-        WAR_("*** Smithproxy version %s is marked as development! ***",SMITH_VERSION);
-    }
     if(SOCLE_DEVEL || SMITH_DEVEL) {
+        WARS_("");
+        if(SOCLE_DEVEL) {
+            WAR_("*** Socle library version %s is marked as development! ***",SOCLE_VERSION);
+        }
+        if(SMITH_DEVEL) {
+            WAR_("*** Smithproxy version %s is marked as development! ***",SMITH_VERSION);
+        }        
         WARS_("");
         WARS_("  ... start will continue in 5 sec.");
         sleep(5);
