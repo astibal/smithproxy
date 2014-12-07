@@ -51,6 +51,8 @@
 
 #include <mitmhost.hpp>
 #include <mitmproxy.hpp>
+#include <socksproxy.hpp>
+
 #include <cfgapi.hpp>
 #include <daemon.hpp>
 
@@ -282,6 +284,7 @@ void load_config(std::string& config_f) {
         cfgapi.getRoot()["debug"]["log"].lookupValue("sslcom",SSLCom::log_level_ref());
         cfgapi.getRoot()["debug"]["log"].lookupValue("sslmitmcom",SSLMitmCom::log_level_ref());
         cfgapi.getRoot()["debug"]["log"].lookupValue("sslcertstore",SSLCertStore::log_level_ref());
+        cfgapi.getRoot()["debug"]["log"].lookupValue("proxy",baseProxy::log_level_ref());
         
         std::string log_target;
         bool log_console;
@@ -297,7 +300,7 @@ void load_config(std::string& config_f) {
     }
     catch(const SettingNotFoundException &nfex) {
     
-        FATS_("Setting not found: %s",nfex.getPath());
+        FAT_("Setting not found: %s",nfex.getPath());
         exit(-66);
     }
 }
@@ -347,7 +350,7 @@ int main(int argc, char *argv[]) {
                 break;
                 
             default:
-                ERRS_("unknown option: '%c'",c);
+                ERR_("unknown option: '%c'",c);
                abort();                 
         }
     }

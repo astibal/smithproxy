@@ -25,7 +25,7 @@ bool PolicyRule::match_addrgrp_cx(std::vector< CIDR* >& cidrs, baseHostCX* cx) {
     
     if(cidrs.size() == 0) {
         match = true;
-//                 DIA_("PolicyRule: matched ");
+//                 DIAS_("PolicyRule: matched ");
     } else {
         CIDR* l = cidr_from_str(cx->host().c_str());
         for(std::vector<CIDR*>::iterator j = cidrs.begin(); j != cidrs.end(); ++j ) {
@@ -50,7 +50,7 @@ bool PolicyRule::match_rangegrp_cx(std::vector< range >& ranges, baseHostCX* cx)
     
     if(ranges.size() == 0) {
         match = true;
-//                 DIA_("PolicyRule: matched ");
+//                 DIAS_("PolicyRule: matched ");
     } else {
         int p = std::stoi(cx->port());
         for(std::vector<range>::iterator j = ranges.begin(); j != ranges.end(); ++j ) {

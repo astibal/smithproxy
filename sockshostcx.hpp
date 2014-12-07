@@ -21,6 +21,7 @@
   #define _SOCKS5HOST_HPP_
 
 #include <threadedacceptor.hpp>
+#include <mitmhost.hpp>
 #include <mitmproxy.hpp>
 #include <hostcx.hpp>
 #include <tcpcom.hpp>
@@ -38,7 +39,7 @@ public:
     virtual const char* name() { return "s5+tcp"; };
 };
 
-class socksSSLMitmCom: public SSLMitmCom {
+class socksSSLMitmCom: public MySSLMitmCom {
 public:
     virtual const char* name() { return "s5+ssl+insp"; };
 };

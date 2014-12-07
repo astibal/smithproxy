@@ -67,15 +67,7 @@ public:
 };
 
 
-class socksServerCX;
-class SocksProxy : public MitmProxy {
-public:
-    explicit SocksProxy(baseCom*);
-    virtual ~SocksProxy();
-    virtual void on_left_message(baseHostCX* cx);
-    
-    virtual void socks5_handoff(socksServerCX* cx);
-};
+
 
 class MitmMasterProxy : public ThreadedAcceptorProxy<MitmProxy> {
 public:
@@ -91,16 +83,6 @@ public:
 class MitmUdpProxy : public ThreadedReceiverProxy<MitmProxy> {
 public:
     MitmUdpProxy(baseCom* c, int worker_id) : ThreadedReceiverProxy< MitmProxy >(c,worker_id) {};
-    virtual void on_left_new(baseHostCX* just_accepted_cx);
-};
-
-
-class MitmSocksProxy : public ThreadedAcceptorProxy<SocksProxy> {
-public:
-    
-    MitmSocksProxy(baseCom* c, int worker_id) : ThreadedAcceptorProxy<SocksProxy>(c,worker_id) {};
-    
-    virtual baseHostCX* new_cx(int s);
     virtual void on_left_new(baseHostCX* just_accepted_cx);
 };
 

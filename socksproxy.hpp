@@ -15,7 +15,35 @@
     You should have received a copy of the GNU General Public License
     along with Smithproxy.  If not, see <http://www.gnu.org/licenses/>.
     
-*/    
+*/ 
 
-#define SMITH_VERSION "0.5.5-dev"
-#define SMITH_DEVEL    1
+#ifndef __SOCKSPROXY_HPP__
+  #define __SOCKSPROXY_HPP__
+
+#include <threadedacceptor.hpp>
+
+#include <mitmproxy.hpp>
+#include <sockshostcx.hpp>
+
+
+class SocksProxy : public MitmProxy {
+public:
+    explicit SocksProxy(baseCom*);
+    virtual ~SocksProxy();
+    virtual void on_left_message(baseHostCX* cx);
+    
+    virtual void socks5_handoff(socksServerCX* cx);
+};
+
+
+class MitmSocksProxy : public ThreadedAcceptorProxy<SocksProxy> {
+public:
+    
+    MitmSocksProxy(baseCom* c, int worker_id) : ThreadedAcceptorProxy<SocksProxy>(c,worker_id) {};
+    
+    virtual baseHostCX* new_cx(int s);
+    virtual void on_left_new(baseHostCX* just_accepted_cx);
+};
+
+
+#endif
