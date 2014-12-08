@@ -388,7 +388,7 @@ int main(int argc, char *argv[]) {
     plain_proxy = prepare_listener<theAcceptor,TCPCom>(cfg_listen_port,"plain-text",50080,cfg_tcp_workers);
     ssl_proxy = prepare_listener<theAcceptor,MySSLMitmCom>(cfg_ssl_listen_port,"SSL",50443,cfg_ssl_workers);
     udp_proxy = prepare_listener<theReceiver,UDPCom>(cfg_udp_port,"plain-udp",50081,cfg_udp_workers);
-    socks_proxy = prepare_listener<socksAcceptor,TCPCom>(cfg_socks_port,"socks",1080,cfg_socks_workers);
+    socks_proxy = prepare_listener<socksAcceptor,socksTCPCom>(cfg_socks_port,"socks",1080,cfg_socks_workers);
     
 	// install signal handler, we do want to release the memory properly
 		// signal handler installation

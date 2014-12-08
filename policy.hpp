@@ -58,6 +58,7 @@ public:
        int nat    = POLICY_NAT_NONE;
       
        bool match(baseProxy*);
+       bool match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r);
        virtual ~PolicyRule();
        
        bool match_addrgrp_cx(std::vector<CIDR*>& cidrs,baseHostCX* cx);

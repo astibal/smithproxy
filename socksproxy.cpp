@@ -4,6 +4,7 @@
 #include <sockshostcx.hpp>
 #include <socksproxy.hpp>
 #include <mitmhost.hpp>
+#include <cfgapi.hpp>
 
 
 SocksProxy::SocksProxy(baseCom* c): MitmProxy(c) {}
@@ -13,21 +14,28 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
 
     socksServerCX* cx = static_cast<socksServerCX*>(basecx);
     if(cx != nullptr) {
-        switch(cx->state_) {
-            case WAIT_POLICY:
-                DIAS_("SocksProxy::on_left_message: policy check: accepted");
-                cx->verdict(ACCEPT);
-                break;
+        if(cx->state_ == WAIT_POLICY) {
+            DIAS_("SocksProxy::on_left_message: policy check: accepted");
+            std::vector<baseHostCX*> l;
+            std::vector<baseHostCX*> r;
+            l.push_back(cx);
+            r.push_back(cx->right);
             
-            case HANDOFF:
-                DIAS_("SocksProxy::on_left_message: socksHostCX handoff msg received");
-                cx->state(ZOMBIE);
-                
-                socks5_handoff(cx);
-                break;
-            default:
-                WARS_("SocksProxy::on_left_message: unknown message");
-                break;
+            int policy_num = cfgapi_obj_policy_match(l,r);
+            bool verdict = cfgapi_obj_policy_action(policy_num);
+            DIA_("socksProxy::on_left_message: policy check result: %s", verdict ? "accept" : "reject" );
+            
+            socks5_policy s5_verdict = verdict ? ACCEPT : REJECT;
+            cx->verdict(s5_verdict);
+        }
+        else if(cx->state_ == HANDOFF) {
+            DIAS_("SocksProxy::on_left_message: socksHostCX handoff msg received");
+            cx->state(ZOMBIE);
+            
+            socks5_handoff(cx);
+        } else {
+
+            WARS_("SocksProxy::on_left_message: unknown message");
         }
     }
 }
@@ -64,7 +72,8 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
 //     n_cx->writebuf()->append(cx->writebuf()->data(),cx->writebuf()->size());
     
     // get rid of it
-    cx->socket(0);
+    //cx->socket(0);
+    cx->remove_socket();
     delete cx;
     
     left_sockets.clear();
@@ -97,6 +106,8 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     }
     
     radd(target_cx);
+    
+    cfgapi_obj_policy_apply(n_cx,this);
         
     DIAS_("SocksProxy::socks5_handoff: finished");
 }

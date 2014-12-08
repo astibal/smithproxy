@@ -37,11 +37,13 @@ typedef enum socks5_message_ { POLICY, UPGRADE } socks5_message;
 class socksTCPCom: public TCPCom {
 public:
     virtual const char* name() { return "s5+tcp"; };
+    virtual baseCom* replicate() { return new socksTCPCom(); };
 };
 
 class socksSSLMitmCom: public MySSLMitmCom {
 public:
     virtual const char* name() { return "s5+ssl+insp"; };
+    virtual baseCom* replicate() { return new socksSSLMitmCom(); };
 };
 
 class socksServerCX : public baseHostCX {
@@ -61,6 +63,12 @@ public:
     
     socks5_policy verdict_ = PENDING;
     socks5_state state_;
+    
+    //before handoff, prepare already new CX. 
+    MitmHostCX* left = nullptr;
+    MitmHostCX* right = nullptr;
+    bool handoff_as_ssl = false;
+    
 private:
     socks5_atype req_atype;
     in_addr req_addr;

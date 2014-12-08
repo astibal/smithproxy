@@ -64,7 +64,8 @@ int  cfgapi_cleanup_obj_policy();
 int  cfgapi_cleanup_obj_profile_content();
 int  cfgapi_cleanup_obj_profile_detection();
 
-int cfgapi_obj_policy_match(baseProxy*);
+int cfgapi_obj_policy_match(baseProxy* proxy);
+int cfgapi_obj_policy_match(std::vector<baseHostCX*>& left, std::vector<baseHostCX*>& right);
 int cfgapi_obj_policy_action(int index);
 int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* proxy);
 

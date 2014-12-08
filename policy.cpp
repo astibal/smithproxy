@@ -148,5 +148,38 @@ bool PolicyRule::match(baseProxy* p) {
     return false;
 }
 
+bool PolicyRule::match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r) {
+    bool lmatch = false;
+    bool lpmatch = false;
+    bool rmatch = false;
+    bool rpmatch = false;
+    
+
+    DIAS_("PolicyRule::match_lr");
+    
+    lmatch = match_addrgrp_vecx(src,l);
+    if(!lmatch) goto end;
+
+    lpmatch = match_rangegrp_vecx(src_ports,l);
+    if(!lpmatch) goto end;
+
+    rmatch = match_addrgrp_vecx(dst,r);
+    if(!rmatch) goto end;
+
+    rpmatch = match_rangegrp_vecx(src_ports,r);
+    if(!rpmatch) goto end;
+    
+    end:
+    
+    if (lmatch && lmatch && rmatch && rpmatch) {
+        DIAS_("PolicyRule::match_lr ok");
+        return true;
+    } else {
+        DIA_("PolicyRule::match_lr failed: %d:%d->%d:%d",lmatch,lpmatch,rmatch,rpmatch);
+    }
+
+    return false;
+}
+
 PolicyRule::~PolicyRule() {}
 

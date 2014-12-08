@@ -105,6 +105,7 @@ int socksServerCX::process_socks_request() {
         if(atype == IPV4) {
             req_atype = IPV4;
             state_ = REQ_RECEIVED;
+            DIA_("socksServerCX::process_socks_request: request received, type %d", atype);
             
             uint32_t dst = readbuf()->get_at<uint32_t>(4);
             req_port = ntohs(readbuf()->get_at<uint16_t>(8));
@@ -117,9 +118,70 @@ int socksServerCX::process_socks_request() {
             com()->nonlocal_dst_resolved(true);
             com()->nonlocal_src(true);
             DIA_("socksServerCX::process_socks_request: request for %s -> %s:%d",c_name(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
+
+
+            // prepare a new CX!
+            
+            
+            // LEFT
+            int s = socket();
+            
+            baseCom* new_com = nullptr;
+            switch(com()->nonlocal_dst_port()) {
+                case 443:
+                case 465:
+                case 636:
+                case 993:
+                case 995:
+                    new_com = new SSLMitmCom();
+                    handoff_as_ssl = true;
+                    break;
+                default:
+                    new_com = new TCPCom();
+            }
+            
+            MitmHostCX* n_cx = new MitmHostCX(new_com, s);
+            n_cx->paused(true);
+            n_cx->com()->name();
+            n_cx->name();
+            n_cx->com()->nonlocal_dst(true);
+            n_cx->com()->nonlocal_dst_host() = com()->nonlocal_dst_host();
+            n_cx->com()->nonlocal_dst_port() = com()->nonlocal_dst_port();
+            n_cx->com()->nonlocal_dst_resolved(true);
+            
+            
+            // RIGHT
+
+
+            MitmHostCX *target_cx = new MitmHostCX(n_cx->com()->replicate(), n_cx->com()->nonlocal_dst_host().c_str(), 
+                                                string_format("%d",n_cx->com()->nonlocal_dst_port()).c_str()
+                                                );
+            target_cx->paused(true);
+            
+            std::string h;
+            std::string p;
+            n_cx->name();
+            n_cx->com()->resolve_socket_src(n_cx->socket(),&h,&p);
+            
+            
+            target_cx->com()->nonlocal_src(false); //FIXME
+            target_cx->com()->nonlocal_src_host() = h;
+            target_cx->com()->nonlocal_src_port() = std::stoi(p); 
+            
+            
+            
+            left = n_cx;
+            DIA_("socksServerCX::process_socks_request: prepared left: %s",left->c_name());
+            right = target_cx;
+            DIA_("socksServerCX::process_socks_request: prepared right: %s",right->c_name());
+            
+            // peers are now prepared for handover. Owning proxy will wipe this CX (it will be empty)
+            // and if policy allows, left and right will be set (also in proxy owning this cx).
             
             state_ = WAIT_POLICY;
             paused_read(true);
+            
+            DIAS_("socksServerCX::process_socks_request: waiting for policy check");
             // now 
             return readbuf()->size();
         }
@@ -174,7 +236,7 @@ int socksServerCX::process_socks_reply() {
     writebuf()->append(b,cur);
     state_ = REQRES_SENT;
     
-    DEB_("Response dump:\n%s",hex_dump(b,cur).c_str());
+    DEB_("socksServerCX::process_socks_reply: response dump:\n%s",hex_dump(b,cur).c_str());
     
     return cur;
 }
@@ -183,7 +245,7 @@ void socksServerCX::pre_write() {
     DEB_("socksServerCX::pre_write[%s]: writebuf=%d, readbuf=%d",c_name(),writebuf()->size(),readbuf()->size());
     if(state_ == REQRES_SENT ) {
         if(writebuf()->size() == 0) {
-            DIA_("socksServerCX::pre_write[%s]: all flushed, state change to HANDOFF writebuf=%d, readbuf=%d",c_name(),writebuf()->size(),readbuf()->size());
+            DIA_("socksServerCX::pre_write[%s]: all flushed, state change to HANDOFF: writebuf=%d, readbuf=%d",c_name(),writebuf()->size(),readbuf()->size());
             paused(true);
             state(HANDOFF);
         }

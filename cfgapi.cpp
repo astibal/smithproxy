@@ -403,6 +403,24 @@ int cfgapi_obj_policy_match(baseProxy* proxy) {
     return -1;
 }
 
+int cfgapi_obj_policy_match(std::vector<baseHostCX*>& left, std::vector<baseHostCX*>& right) {
+    int x = 0;
+    for( std::vector<PolicyRule*>::iterator i = cfgapi_obj_policy.begin(); i != cfgapi_obj_policy.end(); ++i) {
+        PolicyRule* rule = (*i);
+        bool r = rule->match(left,right);
+        
+        if(r) {
+            DIA_("cfgapi_obj_policy_match_lr: matched #%d",x);
+            return x;
+        }
+        
+        x++;
+    }
+    
+    DIAS_("cfgapi_obj_policy_match_lr: implicit deny");
+    return -1;
+}    
+
 int cfgapi_obj_policy_action(int index) {
     if(index < 0) {
         return -1;
@@ -606,7 +624,8 @@ int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
         
         /* Processing content profile */
         
-        MitmProxy* mitm_proxy = static_cast<MitmProxy*>(new_proxy);
+        MitmProxy* mitm_proxy = static_cast<MitmProxy*>(new_proxy); 
+        
         AppHostCX* mitm_originator = static_cast<AppHostCX*>(originator);
         
         if(mitm_proxy != nullptr) {
