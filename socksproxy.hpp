@@ -33,6 +33,7 @@ public:
     virtual void on_left_message(baseHostCX* cx);
     
     virtual void socks5_handoff(socksServerCX* cx);
+    int policy_num = -1;
 };
 
 

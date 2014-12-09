@@ -21,7 +21,7 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
             l.push_back(cx);
             r.push_back(cx->right);
             
-            int policy_num = cfgapi_obj_policy_match(l,r);
+            policy_num = cfgapi_obj_policy_match(l,r);
             bool verdict = cfgapi_obj_policy_action(policy_num);
             DIA_("socksProxy::on_left_message: policy check result: %s", verdict ? "accept" : "reject" );
             
@@ -43,6 +43,17 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
 void SocksProxy::socks5_handoff(socksServerCX* cx) {
 
     DEBS_("SocksProxy::socks5_handoff: start");
+    
+    if(policy_num < 0) {
+        DIA_("SocksProxy::sock5_handoff: matching policy: %d: dropping.",policy_num);
+        dead(true);
+        return;
+    } 
+    else if(policy_num >= cfgapi_obj_policy.size()) {
+        DIA_("SocksProxy::sock5_handoff: matching policy out of policy index table: %d/%d: dropping.",policy_num,cfgapi_obj_policy.size());
+        dead(true);
+        return;
+    }
     
     int s = cx->socket();
     bool ssl = false;
@@ -92,10 +103,12 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     n_cx->peer(target_cx);
     target_cx->peer(n_cx);
 
-    target_cx->com()->nonlocal_src(true); //FIXME
-    target_cx->com()->nonlocal_src_host() = h;
-    target_cx->com()->nonlocal_src_port() = std::stoi(p);
-    
+    if(cfgapi_obj_policy.at(policy_num)->nat == POLICY_NAT_NONE) {
+        target_cx->com()->nonlocal_src(true);
+        target_cx->com()->nonlocal_src_host() = h;
+        target_cx->com()->nonlocal_src_port() = std::stoi(p);
+    }
+        
     target_cx->connect(false);       
     
     if(ssl) {
