@@ -451,10 +451,6 @@ int main(int argc, char *argv[]) {
         socks_thread->join();
     }        
 
-    auto s = new SSLCom();
-    s->certstore()->destroy();
-    delete s;
-
     CRYPTO_cleanup_all_ex_data();
     ERR_free_strings();
     ERR_remove_state(0);
@@ -471,6 +467,10 @@ int main(int argc, char *argv[]) {
 
     cfgapi_cleanup();
 
+    auto s = new SSLCom();
+    s->certstore()->destroy();
+    delete s;    
+    
     if(cfg_daemonize) {    
         daemon_unlink_pidfile();
     }
