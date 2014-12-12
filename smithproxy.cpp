@@ -55,6 +55,7 @@
 
 #include <cfgapi.hpp>
 #include <daemon.hpp>
+#include <cmdserver.hpp>
 
 extern "C" void __libc_freeres(void);
 
@@ -77,6 +78,7 @@ std::thread* plain_thread = nullptr;
 std::thread* ssl_thread = nullptr;
 std::thread* udp_thread = nullptr;
 std::thread* socks_thread = nullptr;
+std::thread* cli_thread = nullptr;
 
 
 static void segv_handler(int sig) {
@@ -120,6 +122,7 @@ void my_terminate (int param) {
     if(socks_proxy != nullptr) {
         socks_proxy->dead(true);
     }
+
 }
 
 
@@ -312,22 +315,8 @@ int main(int argc, char *argv[]) {
 
 	lout.level(WAR);
     
-	CRI_("Starting Smithproxy %s (socle %s)",SMITH_VERSION,SOCLE_VERSION);
-    
-    if(SOCLE_DEVEL || SMITH_DEVEL) {
-        WARS_("");
-        if(SOCLE_DEVEL) {
-            WAR_("*** Socle library version %s is marked as development! ***",SOCLE_VERSION);
-        }
-        if(SMITH_DEVEL) {
-            WAR_("*** Smithproxy version %s is marked as development! ***",SMITH_VERSION);
-        }        
-        WARS_("");
-        WARS_("  ... start will continue in 5 sec.");
-        sleep(5);
-    }
-    
-       
+
+    cfgapi_log_version();
 	
     while(1) {
     /* getopt_long stores the option index here. */
@@ -435,8 +424,18 @@ int main(int argc, char *argv[]) {
         DIAS_("socks workers torn down."); 
         socks_proxy->shutdown();  
     } );   
+
+    cli_thread = new std::thread([] () { 
+        pthread_setname_np(plain_thread->native_handle(),"smithproxy_cli");
+        cli_loop(50000);
+        DIAS_("cli workers torn down."); 
+    } );      
     
     CRI_("Smithproxy %s (socle %s) started",SMITH_VERSION,SOCLE_VERSION);
+    
+    
+
+    
     
     if(plain_thread) {
         plain_thread->join();

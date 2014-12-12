@@ -17,5 +17,11 @@
     
 */    
 
-#define SMITH_VERSION "0.5.7-dev"
-#define SMITH_DEVEL    1
+#ifndef _CMDSERVER_HPP_
+   #define _CMDSERVER_HPP_
+   
+#include <libcli.h>
+
+void cli_loop(unsigned short port=50000);
+
+#endif

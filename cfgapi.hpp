@@ -69,6 +69,8 @@ int cfgapi_obj_policy_match(std::vector<baseHostCX*>& left, std::vector<baseHost
 int cfgapi_obj_policy_action(int index);
 int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* proxy);
 
+void cfgapi_log_version(bool warn_delay=true);
+
 ProfileContent* cfgapi_obj_policy_profile_content(int index);
 ProfileDetection* cfgapi_obj_policy_profile_detection(int index);
 

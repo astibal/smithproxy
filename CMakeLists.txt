@@ -15,15 +15,21 @@ if(UNIX)
     SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g  -Wall -std=c++11")
 endif()
 
-add_executable(smithproxy smithproxy.cpp mitmhost.cpp mitmproxy.cpp cfgapi.cpp cidr.cpp policy.cpp daemon.cpp sockshostcx.cpp socksproxy.cpp)
+add_executable(smithproxy smithproxy.cpp mitmhost.cpp mitmproxy.cpp cfgapi.cpp cidr.cpp policy.cpp daemon.cpp sockshostcx.cpp socksproxy.cpp cmdserver.cpp)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}")
+
 find_package (LibConfig REQUIRED)
 if (LIBCONFIGPP_FOUND)
   include_directories(${LIBCONFIGPP_INCLUDE_DIRS})
   target_link_libraries (smithproxy ${LIBCONFIGPP_LIBRARIES})
 endif (LIBCONFIGPP_FOUND)
 
+find_package (LibCli REQUIRED)
+if (LIBCLI_FOUND)
+  include_directories(${LIBCLI_INCLUDE_DIRS})
+  target_link_libraries (smithproxy ${LIBCLI_LIBRARY})
+endif (LIBCLI_FOUND)
 
 
 target_link_libraries(smithproxy socle_lib pthread ssl crypto)

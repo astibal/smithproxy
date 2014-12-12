@@ -25,6 +25,9 @@
 #include <mitmproxy.hpp>
 #include <mitmhost.hpp>
 
+#include <socle.hpp>
+#include <smithproxy.hpp>
+
 Config cfgapi;
 std::map<std::string,CIDR*> cfgapi_obj_address;
 std::map<std::string,range> cfgapi_obj_port;
@@ -687,3 +690,27 @@ void cfgapi_cleanup()
   cfgapi_cleanup_obj_profile_content();
   cfgapi_cleanup_obj_profile_detection();
 }
+
+
+void cfgapi_log_version(bool warn_delay)
+{
+    CRI_("Starting Smithproxy %s (socle %s)",SMITH_VERSION,SOCLE_VERSION);
+    
+    if(SOCLE_DEVEL || SMITH_DEVEL) {
+        WARS_("");
+        if(SOCLE_DEVEL) {
+            WAR_("*** Socle library version %s is marked as development! ***",SOCLE_VERSION);
+        }
+        if(SMITH_DEVEL) {
+            WAR_("*** Smithproxy version %s is marked as development! ***",SMITH_VERSION);
+        }        
+        WARS_("");
+        
+        if(warn_delay) {
+            WARS_("  ... start will continue in 3 sec.");
+            sleep(3);
+        }
+    }
+}
+
+
