@@ -49,7 +49,7 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
         dead(true);
         return;
     } 
-    else if(policy_num >= cfgapi_obj_policy.size()) {
+    else if(policy_num >= (signed int)cfgapi_obj_policy.size()) {
         DIA_("SocksProxy::sock5_handoff: matching policy out of policy index table: %d/%d: dropping.",policy_num,cfgapi_obj_policy.size());
         dead(true);
         return;

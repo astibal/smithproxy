@@ -293,7 +293,7 @@ void load_config(std::string& config_f) {
         bool log_console;
         if(cfgapi.getRoot()["settings"].lookupValue("log_file",log_target)) {
             
-            lout.target(new std::ofstream(log_target.c_str(),std::ios::app));
+            lout.targets(new std::ofstream(log_target.c_str(),std::ios::app));
             lout.dup2_cout(false);
             
             if(cfgapi.getRoot()["settings"].lookupValue("log_console",log_console)) {
@@ -359,7 +359,7 @@ int main(int argc, char *argv[]) {
     }
     
     if(cfg_daemonize) {
-        if(lout.target() == nullptr) {
+        if(lout.targets().size() <= 0) {
             FATS_("Cannot daemonize without logging to file.");
             exit(-5);
         }

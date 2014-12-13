@@ -18,6 +18,8 @@
 */    
 
 #include <string>
+#include <thread>
+
 #include <cstring>
 #include <ctime>
 #include <csignal>
@@ -30,14 +32,18 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <logger.hpp>
 #include <cmdserver.hpp>
 #include <cfgapi.hpp>
 #include <socle.hpp>
 #include <smithproxy.hpp>
 
 
-void cmd_show_version(struct cli_def* cli) {
+static int current_socket = 0;
 
+void cmd_show_version(struct cli_def* cli) {
+    
+    cli_print(cli,":connected using socket %d",cli->client->_fileno);
     cli_print(cli,"Smithproxy: %s%s",SMITH_VERSION,SMITH_DEVEL ? " -- !! development version !!" : "");
     cli_print(cli, "Socle     : %s%s",SOCLE_VERSION,SOCLE_DEVEL ? " -- !! development version !!" : "");
 }
@@ -49,30 +55,69 @@ int cli_show_version(struct cli_def *cli, const char *command, char *argv[], int
     return CLI_OK;
 }
 
+int cli_diag_level(struct cli_def *cli, const char *command, char *argv[], int argc)
+{
+    //cli_print(cli, "called %s with %s, argc %d\r\n", __FUNCTION__, command, argc);
+    logger_profile* lp = lout.target_profiles()[(uint64_t)current_socket];
+    lp->level_ = std::atoi(argv[0]);
+    return CLI_OK;
+}
+
+
+struct cli_ext : public cli_def {
+    int socket;
+};
+
+void client_thread(int client_socket) {
+        struct cli_command *show;
+        struct cli_command *diag;
+        
+        struct cli_def *cli;
+
+        // Must be called first to setup data structures
+        cli = cli_init();
+
+        // Set the hostname (shown in the the prompt)
+        cli_set_hostname(cli, "smithproxy");
+
+        // Set the greeting
+        cli_set_banner(cli, "Smithproxy command line utility.");
+
+        // Enable 2 username / password combinations
+        cli_allow_user(cli, "admin", "");
+
+        // Set up 2 commands "show counters" and "show junk"
+        show  = cli_register_command(cli, NULL, "show", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, NULL);
+            cli_register_command(cli, show, "version", cli_show_version, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show smithproxy version");
+        
+        diag = cli_register_command(cli, NULL, "diag", NULL, PRIVILEGE_PRIVILEGED, MODE_EXEC, "diagnostic commands");
+            cli_register_command(cli, diag, "level", cli_diag_level, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set level to console");
+        
+        current_socket = client_socket;
+        
+        // Pass the connection off to libcli
+        lout.remote_targets(client_socket);
+
+        logger_profile lp;
+        lp.level_ = ERR;
+        lout.target_profiles()[(uint64_t)client_socket] = &lp;
+        
+        cli_loop(cli, client_socket);
+        
+        lout.remote_targets().remove(client_socket);
+        lout.target_profiles().erase(client_socket);
+        close(client_socket);
+        
+        // Free data structures
+        cli_done(cli);    
+}
+
 void cli_loop(short unsigned int port) {
     struct sockaddr_in servaddr;
-    struct cli_command *c;
-    struct cli_def *cli;
-    int on = 1, x, s;
-
-    // Must be called first to setup data structures
-    cli = cli_init();
-
-    // Set the hostname (shown in the the prompt)
-    cli_set_hostname(cli, "smithproxy");
-
-    // Set the greeting
-    cli_set_banner(cli, "Smithproxy command line utility.");
-
-    // Enable 2 username / password combinations
-    cli_allow_user(cli, "admin", "");
-
-    // Set up 2 commands "show counters" and "show junk"
-    c = cli_register_command(cli, NULL, "show", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, NULL);
-        cli_register_command(cli, c, "version", cli_show_version, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show smithproxy version");
+    int on = 1;
 
     // Create a socket
-    s = socket(AF_INET, SOCK_STREAM, 0);
+    int s = socket(AF_INET, SOCK_STREAM, 0);
     setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
 
     memset(&servaddr, 0, sizeof(servaddr));
@@ -84,14 +129,9 @@ void cli_loop(short unsigned int port) {
     // Wait for a connection
     listen(s, 50);
 
-    while ((x = accept(s, NULL, 0)))
+    int client_socket = 0;
+    while ((client_socket = accept(s, NULL, 0)))
     {
-        // Pass the connection off to libcli
-        cli_loop(cli, x);
-        close(x);
+        std::thread* n = new std::thread(client_thread,client_socket);
     }
-
-    // Free data structures
-    cli_done(cli);
-
 }
