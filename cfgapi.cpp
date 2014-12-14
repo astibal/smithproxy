@@ -35,8 +35,13 @@ std::map<std::string,int> cfgapi_obj_proto;
 std::vector<PolicyRule*> cfgapi_obj_policy;
 std::map<std::string,ProfileDetection*> cfgapi_obj_profile_detection;
 std::map<std::string,ProfileContent*> cfgapi_obj_profile_content;
+std::recursive_mutex cfgapi_write_lock;
+
 
 bool cfgapi_init(const char* fnm) {
+    
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    
     DIAS_("Reading config file");
     
     // Read the file. If there is an error, report it and exit.
@@ -58,6 +63,8 @@ bool cfgapi_init(const char* fnm) {
 }
 
 CIDR* cfgapi_lookup_address(const char* name) {
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    
     if(cfgapi_obj_address.find(name) != cfgapi_obj_address.end()) {
         return cfgapi_obj_address[name];
     }
@@ -66,6 +73,8 @@ CIDR* cfgapi_lookup_address(const char* name) {
 }
 
 range cfgapi_lookup_port(const char* name) {
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    
     if(cfgapi_obj_port.find(name) != cfgapi_obj_port.end()) {
         return cfgapi_obj_port[name];
     }    
@@ -74,6 +83,8 @@ range cfgapi_lookup_port(const char* name) {
 }
 
 int cfgapi_lookup_proto(const char* name) {
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    
     if(cfgapi_obj_proto.find(name) != cfgapi_obj_proto.end()) {
         return cfgapi_obj_proto[name];
     }    
@@ -90,6 +101,8 @@ ProfileContent* cfgapi_lookup_profile_content(const char* name) {
 }
 
 ProfileDetection* cfgapi_lookup_profile_detection(const char* name) {
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    
     if(cfgapi_obj_profile_detection.find(name) != cfgapi_obj_profile_detection.end()) {
         return cfgapi_obj_profile_detection[name];
     }    
@@ -99,6 +112,8 @@ ProfileDetection* cfgapi_lookup_profile_detection(const char* name) {
 
 
 int cfgapi_load_obj_address() {
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    
     int num = 0;
     
     DIAS_("cfgapi_load_addresses: start");
@@ -137,6 +152,9 @@ int cfgapi_load_obj_address() {
 }
 
 int cfgapi_load_obj_port() {
+    
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    
     int num = 0;
     
     DIAS_("cfgapi_load_ports: start");
@@ -179,6 +197,9 @@ int cfgapi_load_obj_port() {
 }
 
 int cfgapi_load_obj_proto() {
+    
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    
     int num = 0;
     
     DIAS_("cfgapi_load_proto: start");
@@ -216,6 +237,9 @@ int cfgapi_load_obj_proto() {
 
 
 int cfgapi_load_obj_policy() {
+    
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    
     int num = 0;
     
     DIAS_("cfgapi_load_policy: start");
@@ -389,6 +413,8 @@ int cfgapi_load_obj_policy() {
 }
 
 int cfgapi_obj_policy_match(baseProxy* proxy) {
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    
     int x = 0;
     for( std::vector<PolicyRule*>::iterator i = cfgapi_obj_policy.begin(); i != cfgapi_obj_policy.end(); ++i) {
         PolicyRule* rule = (*i);
@@ -407,6 +433,8 @@ int cfgapi_obj_policy_match(baseProxy* proxy) {
 }
 
 int cfgapi_obj_policy_match(std::vector<baseHostCX*>& left, std::vector<baseHostCX*>& right) {
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    
     int x = 0;
     for( std::vector<PolicyRule*>::iterator i = cfgapi_obj_policy.begin(); i != cfgapi_obj_policy.end(); ++i) {
         PolicyRule* rule = (*i);
@@ -425,6 +453,8 @@ int cfgapi_obj_policy_match(std::vector<baseHostCX*>& left, std::vector<baseHost
 }    
 
 int cfgapi_obj_policy_action(int index) {
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    
     if(index < 0) {
         return -1;
     }
@@ -438,6 +468,8 @@ int cfgapi_obj_policy_action(int index) {
 }
 
 ProfileContent* cfgapi_obj_policy_profile_content(int index) {
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    
     if(index < 0) {
         return nullptr;
     }
@@ -451,6 +483,8 @@ ProfileContent* cfgapi_obj_policy_profile_content(int index) {
 }
 
 ProfileDetection* cfgapi_obj_policy_profile_detection(int index) {
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    
     if(index < 0) {
         return nullptr;
     }
@@ -465,6 +499,8 @@ ProfileDetection* cfgapi_obj_policy_profile_detection(int index) {
 
 
 int cfgapi_load_obj_profile_detection() {
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    
     int num = 0;
     
     DIAS_("cfgapi_load_obj_profile_detect: start");
@@ -503,6 +539,8 @@ int cfgapi_load_obj_profile_detection() {
 
 
 int cfgapi_load_obj_profile_content() {
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    
     int num = 0;
     
     DIAS_("cfgapi_load_obj_profile_content: start");
@@ -540,6 +578,8 @@ int cfgapi_load_obj_profile_content() {
 }
 
 int cfgapi_cleanup_obj_address() {
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    
     int r = cfgapi_obj_address.size();
     
     for (std::map<std::string,CIDR*>::iterator i = cfgapi_obj_address.begin(); i != cfgapi_obj_address.end(); ++i)
@@ -558,6 +598,8 @@ int cfgapi_cleanup_obj_address() {
 }
 
 int cfgapi_cleanup_obj_policy() {
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    
     int r = cfgapi_obj_policy.size();
     for(std::vector<PolicyRule*>::iterator i = cfgapi_obj_policy.begin(); i < cfgapi_obj_policy.end(); ++i) {
         PolicyRule* ptr = (*i);
@@ -572,6 +614,8 @@ int cfgapi_cleanup_obj_policy() {
 }
 
 int cfgapi_cleanup_obj_port() {
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    
     int r = cfgapi_obj_port.size();
     cfgapi_obj_port.clear();
     
@@ -579,6 +623,8 @@ int cfgapi_cleanup_obj_port() {
 }
 
 int cfgapi_cleanup_obj_proto() {
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    
     int r = cfgapi_obj_proto.size();
     cfgapi_obj_proto.clear();
     
@@ -587,6 +633,8 @@ int cfgapi_cleanup_obj_proto() {
 
 
 int cfgapi_cleanup_obj_profile_content() {
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    
     int r = cfgapi_obj_profile_content.size();
     for(std::map<std::string, ProfileContent*>::iterator i = cfgapi_obj_profile_content.begin(); i != cfgapi_obj_profile_content.end(); ++i) {
         std::pair<std::string,ProfileContent*> t = (*i);
@@ -598,6 +646,8 @@ int cfgapi_cleanup_obj_profile_content() {
     return r;
 }
 int cfgapi_cleanup_obj_profile_detection() {
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    
     int r = cfgapi_obj_profile_detection.size();
     for(std::map<std::string, ProfileDetection*>::iterator i = cfgapi_obj_profile_detection.begin(); i != cfgapi_obj_profile_detection.end(); ++i) {
         std::pair<std::string,ProfileDetection*> t = (*i);
@@ -610,6 +660,7 @@ int cfgapi_cleanup_obj_profile_detection() {
 }
 
 int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
     int policy_num = cfgapi_obj_policy_match(new_proxy);
     int verdict = cfgapi_obj_policy_action(policy_num);

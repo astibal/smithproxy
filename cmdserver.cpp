@@ -39,7 +39,7 @@
 #include <smithproxy.hpp>
 
 
-static int current_socket = 0;
+static const char* debug_levels="set level to console:\n\t0\tNONE\n\t1\tFATAL\n\t2\tCRITICAL\n\t3\tERROR\n\t4\tWARNING\n\t5\tNOTIFY\n\t6\tINFORMATIONAL\n\t7\tDIAGNOSE\t(may impact performance)\n\t8\tDEBUG\t(impacts performance)\n\t9\tEXTREME\t(severe performance drop)\n\t10\tDUMPALL\t(performance killer)";
 
 void cmd_show_version(struct cli_def* cli) {
     
@@ -51,15 +51,29 @@ void cmd_show_version(struct cli_def* cli) {
 int cli_show_version(struct cli_def *cli, const char *command, char *argv[], int argc)
 {
     //cli_print(cli, "called %s with %s, argc %d\r\n", __FUNCTION__, command, argc);
+
+    
     cmd_show_version(cli);
     return CLI_OK;
 }
 
-int cli_diag_level(struct cli_def *cli, const char *command, char *argv[], int argc)
+int cli_debug_level(struct cli_def *cli, const char *command, char *argv[], int argc)
 {
-    //cli_print(cli, "called %s with %s, argc %d\r\n", __FUNCTION__, command, argc);
-    logger_profile* lp = lout.target_profiles()[(uint64_t)current_socket];
-    lp->level_ = std::atoi(argv[0]);
+    
+    if(argc > 0) {
+        std::string a1 = argv[0];
+        if(a1 == "?") {
+            cli_print(cli,"valid parameters: %s",debug_levels);
+        } else {
+            //cli_print(cli, "called %s with %s, argc %d\r\n", __FUNCTION__, command, argc);
+            logger_profile* lp = lout.target_profiles()[(uint64_t)cli->client->_fileno];
+            lp->level_ = std::atoi(argv[0]);
+        }
+    } else {
+        int l = lout.target_profiles()[(uint64_t)cli->client->_fileno]->level_;
+        cli_print(cli,"Current debug level is set to: %d",l);
+    }
+    
     return CLI_OK;
 }
 
@@ -90,10 +104,8 @@ void client_thread(int client_socket) {
         show  = cli_register_command(cli, NULL, "show", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, NULL);
             cli_register_command(cli, show, "version", cli_show_version, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show smithproxy version");
         
-        diag = cli_register_command(cli, NULL, "diag", NULL, PRIVILEGE_PRIVILEGED, MODE_EXEC, "diagnostic commands");
-            cli_register_command(cli, diag, "level", cli_diag_level, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set level to console");
-        
-        current_socket = client_socket;
+        diag = cli_register_command(cli, NULL, "debug", NULL, PRIVILEGE_PRIVILEGED, MODE_EXEC, "diagnostic commands");
+            cli_register_command(cli, diag, "level", cli_debug_level, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set level of logging to this console");
         
         // Pass the connection off to libcli
         lout.remote_targets(client_socket);

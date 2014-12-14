@@ -22,6 +22,7 @@
 
 #include <vector>
 #include <map>
+#include <mutex>
  
 #include <libconfig.h++>
 #include <cidr.hpp>
@@ -40,6 +41,8 @@ extern std::map<std::string,int> cfgapi_obj_proto;
 extern std::vector<PolicyRule*> cfgapi_obj_policy;
 extern std::map<std::string,ProfileDetection*> cfgapi_obj_profile_detection;
 extern std::map<std::string,ProfileContent*> cfgapi_obj_profile_content;
+
+extern std::recursive_mutex cfgapi_write_lock;
 
 bool  cfgapi_init(const char* fnm);
 void  cfgapi_cleanup();
