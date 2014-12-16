@@ -39,7 +39,7 @@
 #include <smithproxy.hpp>
 
 
-static const char* debug_levels="set level to console:\n\t0\tNONE\n\t1\tFATAL\n\t2\tCRITICAL\n\t3\tERROR\n\t4\tWARNING\n\t5\tNOTIFY\n\t6\tINFORMATIONAL\n\t7\tDIAGNOSE\t(may impact performance)\n\t8\tDEBUG\t(impacts performance)\n\t9\tEXTREME\t(severe performance drop)\n\t10\tDUMPALL\t(performance killer)";
+static const char* debug_levels="set level to console:\n\t0\tNONE\n\t1\tFATAL\n\t2\tCRITICAL\n\t3\tERROR\n\t4\tWARNING\n\t5\tNOTIFY\n\t6\tINFORMATIONAL\n\t7\tDIAGNOSE\t(may impact performance)\n\t8\tDEBUG\t(impacts performance)\n\t9\tEXTREME\t(severe performance drop)\n\t10\tDUMPALL\t(performance killer)\n\treset\treset back to level configured in config file";
 
 void cmd_show_version(struct cli_def* cli) {
     
@@ -57,21 +57,37 @@ int cli_show_version(struct cli_def *cli, const char *command, char *argv[], int
     return CLI_OK;
 }
 
-int cli_debug_level(struct cli_def *cli, const char *command, char *argv[], int argc)
-{
+int cli_debug_level(struct cli_def *cli, const char *command, char *argv[], int argc) {
     
+    logger_profile* lp = lout.target_profiles()[(uint64_t)cli->client->_fileno];
     if(argc > 0) {
+        
         std::string a1 = argv[0];
+
         if(a1 == "?") {
             cli_print(cli,"valid parameters: %s",debug_levels);
-        } else {
-            //cli_print(cli, "called %s with %s, argc %d\r\n", __FUNCTION__, command, argc);
-            logger_profile* lp = lout.target_profiles()[(uint64_t)cli->client->_fileno];
             lp->level_ = std::atoi(argv[0]);
+            lout.level(lp->level_);
+        } 
+        else if(a1 == "reset") {
+            lp->level_ = cfgapi_table.logging.cli_init_level;
+            lout.level(cfgapi_table.logging.level);
+        }
+        else {
+            //cli_print(cli, "called %s with %s, argc %d\r\n", __FUNCTION__, command, argc);
+            lp->level_ = std::atoi(argv[0]);
+            lout.level(lp->level_);
         }
     } else {
-        int l = lout.target_profiles()[(uint64_t)cli->client->_fileno]->level_;
-        cli_print(cli,"Current debug level is set to: %d",l);
+        
+        cli_print(cli,"This cli debug level is set to: %d",lp->level_);
+        cli_print(cli,"General logging level set to: %d",lout.level());
+        for(auto i = lout.remote_targets().begin(); i != lout.remote_targets().end(); ++i) {
+            cli_print(cli, "Logging level for: %s: %d",lout.target_name((uint64_t)(*i)),lout.target_profiles()[(uint64_t)(*i)]->level_);
+        }
+        for(auto i = lout.targets().begin(); i != lout.targets().end(); ++i) {
+            cli_print(cli, "Logging level for: %s: %d",lout.target_name((uint64_t)(*i)),lout.target_profiles()[(uint64_t)(*i)]->level_);
+        }        
     }
     
     return CLI_OK;
@@ -108,10 +124,10 @@ void client_thread(int client_socket) {
             cli_register_command(cli, diag, "level", cli_debug_level, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set level of logging to this console");
         
         // Pass the connection off to libcli
-        lout.remote_targets(client_socket);
+        lout.remote_targets(string_format("cli-%d",client_socket),client_socket);
 
         logger_profile lp;
-        lp.level_ = ERR;
+        lp.level_ = cfgapi_table.logging.cli_init_level;
         lout.target_profiles()[(uint64_t)client_socket] = &lp;
         
         cli_loop(cli, client_socket);

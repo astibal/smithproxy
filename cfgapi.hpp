@@ -33,6 +33,13 @@
 #define PROTO_TCP  6
 #define PROTO_UDP  17
 
+
+#define CFGAPI_LOCKED(x)    \
+    {                       \
+        std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);\
+        (x);                \
+    }                       \
+
 using namespace libconfig;
 extern Config cfgapi;
 extern std::map<std::string,CIDR*> cfgapi_obj_address;
@@ -43,6 +50,20 @@ extern std::map<std::string,ProfileDetection*> cfgapi_obj_profile_detection;
 extern std::map<std::string,ProfileContent*> cfgapi_obj_profile_content;
 
 extern std::recursive_mutex cfgapi_write_lock;
+
+
+struct logging_{
+    unsigned int level = INF;
+    unsigned int cli_init_level = ERR;
+} ;
+
+struct cfgapi_table_ {
+    logging_ logging;
+};
+
+
+extern struct cfgapi_table_ cfgapi_table;
+
 
 bool  cfgapi_init(const char* fnm);
 void  cfgapi_cleanup();

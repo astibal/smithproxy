@@ -37,6 +37,7 @@ std::map<std::string,ProfileDetection*> cfgapi_obj_profile_detection;
 std::map<std::string,ProfileContent*> cfgapi_obj_profile_content;
 std::recursive_mutex cfgapi_write_lock;
 
+struct cfgapi_table_ cfgapi_table;
 
 bool cfgapi_init(const char* fnm) {
     

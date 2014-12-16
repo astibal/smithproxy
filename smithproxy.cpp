@@ -87,11 +87,11 @@ static void segv_handler(int sig) {
     
     FAT_("  [%d] Received signal %d",sig,sig );
 
-    void *trace[64];
+    void *trace[2048];
     size_t size, i;
     char **strings;
 
-    size    = backtrace( trace, 64 );
+    size    = backtrace( trace, 2048 );
     strings = backtrace_symbols( trace, size );
 
     FAT_("  [%d] Traceback:",sig );
@@ -134,7 +134,7 @@ static std::string cfg_udp_port;
 static std::string cfg_socks_port;
 
 static std::string config_file;
-static unsigned int cfg_log_level = INF;
+//static unsigned int cfg_log_level = INF;
 static bool cfg_daemonize = false;
 
 static int cfg_tcp_workers = 0;
@@ -249,7 +249,6 @@ int load_signatures(libconfig::Config& cfg, const char* name, std::vector<duplex
 
 void load_config(std::string& config_f) {
     using namespace libconfig;
-    
     if(! cfgapi_init(config_f.c_str()) ) {
         FATS_("Unable to load config, which is mandatory to run smithproxy. Bailing out.");
         exit(-2);
@@ -277,7 +276,8 @@ void load_config(std::string& config_f) {
         cfgapi.getRoot()["settings"].lookupValue("ssl_workers",cfg_ssl_workers);
         cfgapi.getRoot()["settings"].lookupValue("udp_port",cfg_udp_port);
         cfgapi.getRoot()["settings"].lookupValue("udp_workers",cfg_udp_workers);
-        cfgapi.getRoot()["settings"].lookupValue("log_level",cfg_log_level);
+        //cfgapi.getRoot()["settings"].lookupValue("log_level",cfg_log_level);
+        cfgapi.getRoot()["settings"].lookupValue("log_level",cfgapi_table.logging.level);
         
         cfgapi.getRoot()["debug"].lookupValue("log_data_crc",baseCom::debug_log_data_crc);
         cfgapi.getRoot()["debug"].lookupValue("log_sockets",baseHostCX::socket_in_name);
@@ -293,8 +293,16 @@ void load_config(std::string& config_f) {
         bool log_console;
         if(cfgapi.getRoot()["settings"].lookupValue("log_file",log_target)) {
             
-            lout.targets(new std::ofstream(log_target.c_str(),std::ios::app));
+            std::ofstream * o = new std::ofstream(log_target.c_str(),std::ios::app);
+            lout.targets(log_target,o);
             lout.dup2_cout(false);
+            lout.level(cfgapi_table.logging.level);
+            
+            logger_profile* lp = new logger_profile();
+            lp->print_srcline_ = lout.print_srcline();
+            lp->print_srcline_always_ = lout.print_srcline_always();
+            lp->level_ = cfgapi_table.logging.level;
+            lout.target_profiles()[(uint64_t)o] = lp;
             
             if(cfgapi.getRoot()["settings"].lookupValue("log_console",log_console)) {
                 lout.dup2_cout(log_console);
@@ -354,8 +362,8 @@ int main(int argc, char *argv[]) {
     load_config(config_file);
     
     // if there is loglevel specified in config file and is bigger than we currently have set, use it
-    if(cfg_log_level > lout.level()) {
-        lout.level(cfg_log_level);
+    if(cfgapi_table.logging.level > lout.level()) {
+        lout.level(cfgapi_table.logging.level);
     }
     
     if(cfg_daemonize) {
