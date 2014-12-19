@@ -80,20 +80,25 @@ std::thread* udp_thread = nullptr;
 std::thread* socks_thread = nullptr;
 std::thread* cli_thread = nullptr;
 
+static int cnt_terminate = 0;
 
 static void segv_handler(int sig) {
 
     FAT_("  [%d] ========= Smithproxy exception handler  =========",sig );
-    
-    FAT_("  [%d] Received signal %d",sig,sig );
 
-    void *trace[2048];
+    void *trace[64];
     size_t size, i;
     char **strings;
 
-    size    = backtrace( trace, 2048 );
+    size    = backtrace( trace, 64 );
     strings = backtrace_symbols( trace, size );
 
+    if (strings == NULL) {
+        FATS_("failure: backtrace_symbols");
+        exit(EXIT_FAILURE);
+    }
+    
+    
     FAT_("  [%d] Traceback:",sig );
 
     for( i = 0; i < size; i++ ) {
@@ -102,8 +107,10 @@ static void segv_handler(int sig) {
     
     FAT_("  [%d] =================================================", sig );
 
+    
     daemon_unlink_pidfile();
     
+    free(strings);
     exit(-1);
 }
 
@@ -123,6 +130,14 @@ void my_terminate (int param) {
         socks_proxy->dead(true);
     }
 
+    cnt_terminate++;
+    if(cnt_terminate == 3) {
+        WARS_("Failed to terminate gracefully. Next attempt will be enforced.");
+    }
+    if(cnt_terminate > 3) {
+        WARS_("Enforced exit.");
+        abort();
+    }
 }
 
 
@@ -281,6 +296,7 @@ void load_config(std::string& config_f) {
         
         cfgapi.getRoot()["debug"].lookupValue("log_data_crc",baseCom::debug_log_data_crc);
         cfgapi.getRoot()["debug"].lookupValue("log_sockets",baseHostCX::socket_in_name);
+        cfgapi.getRoot()["debug"].lookupValue("log_online_cx_name",baseHostCX::online_name);
         cfgapi.getRoot()["debug"].lookupValue("log_srclines",lout.print_srcline());
         cfgapi.getRoot()["debug"].lookupValue("log_srclines_always",lout.print_srcline_always());
         
@@ -399,15 +415,20 @@ int main(int argc, char *argv[]) {
     prev_fn = signal(SIGABRT, segv_handler);
     if (prev_fn==SIG_IGN) signal (SIGABRT,SIG_IGN);
     
-    struct sigaction act;
-    sigemptyset(&act.sa_mask);
-    act.sa_flags = 0;
-    act.sa_handler = segv_handler;
-    sigaction( SIGSEGV, &act, NULL);
+    struct sigaction act_segv;
+    sigemptyset(&act_segv.sa_mask);
+    act_segv.sa_flags = 0;
+    act_segv.sa_handler = segv_handler;
+    sigaction( SIGSEGV, &act_segv, NULL);
+    
+    struct sigaction act_pipe;
+    sigemptyset(&act_pipe.sa_mask);    
+    sigaction( SIGPIPE, &act_pipe, NULL);
     
     
     plain_thread = new std::thread([]() { 
         pthread_setname_np(plain_thread->native_handle(),"smithproxy_tcp");
+        signal(SIGPIPE, SIG_IGN);
         plain_proxy->run(); 
         DIAS_("plaintext workers torn down."); 
         plain_proxy->shutdown(); 

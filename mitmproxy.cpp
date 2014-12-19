@@ -160,7 +160,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
 
     if(! just_accepted_cx->com()->nonlocal_dst_resolved()) {
         ERRS_("Was not possible to resolve original destination!");
-        just_accepted_cx->close();
+        just_accepted_cx->shutdown();
         delete just_accepted_cx;
     } 
     else {
