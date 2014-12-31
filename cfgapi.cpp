@@ -724,7 +724,6 @@ int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
         
     } else {
         INF_("Connection %s denied by policy #%d.",originator->full_name('L').c_str(),policy_num);
-        delete new_proxy;
     }
     
     return policy_num;

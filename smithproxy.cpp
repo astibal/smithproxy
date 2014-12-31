@@ -332,6 +332,14 @@ void load_config(std::string& config_f) {
     }
 }
 
+void ignore_sigpipe() {
+    struct sigaction act_segv;
+    sigemptyset(&act_segv.sa_mask);
+    act_segv.sa_flags = 0;
+    act_segv.sa_handler = segv_handler;
+    sigaction( SIGSEGV, &act_segv, NULL);
+}
+
 int main(int argc, char *argv[]) {
     
 
@@ -403,6 +411,11 @@ int main(int argc, char *argv[]) {
     udp_proxy = prepare_listener<theReceiver,UDPCom>(cfg_udp_port,"plain-udp",50081,cfg_udp_workers);
     socks_proxy = prepare_listener<socksAcceptor,socksTCPCom>(cfg_socks_port,"socks",1080,cfg_socks_workers);
     
+    if( plain_proxy == nullptr || ssl_proxy == nullptr || udp_proxy == nullptr || socks_proxy == nullptr) {
+        FATS_("Failed to setup proxies. Bailing!");
+        exit(-1);
+    }
+    
 	// install signal handler, we do want to release the memory properly
 		// signal handler installation
 	void (*prev_fn)(int);
@@ -415,11 +428,8 @@ int main(int argc, char *argv[]) {
     prev_fn = signal(SIGABRT, segv_handler);
     if (prev_fn==SIG_IGN) signal (SIGABRT,SIG_IGN);
     
-    struct sigaction act_segv;
-    sigemptyset(&act_segv.sa_mask);
-    act_segv.sa_flags = 0;
-    act_segv.sa_handler = segv_handler;
-    sigaction( SIGSEGV, &act_segv, NULL);
+
+    ignore_sigpipe();
     
     struct sigaction act_pipe;
     sigemptyset(&act_pipe.sa_mask);    
@@ -427,38 +437,44 @@ int main(int argc, char *argv[]) {
     
     
     plain_thread = new std::thread([]() { 
-        pthread_setname_np(plain_thread->native_handle(),"smithproxy_tcp");
-        signal(SIGPIPE, SIG_IGN);
+        ignore_sigpipe();
         plain_proxy->run(); 
         DIAS_("plaintext workers torn down."); 
         plain_proxy->shutdown(); 
     } );
+    pthread_setname_np(plain_thread->native_handle(),"smithproxy_tcp");
     
     ssl_thread = new std::thread([] () { 
-        pthread_setname_np(ssl_thread->native_handle(),"smithproxy_tls");
+        ignore_sigpipe();
         ssl_proxy->run(); 
         DIAS_("ssl workers torn down."); 
         ssl_proxy->shutdown();  
     } );    
+    pthread_setname_np(ssl_thread->native_handle(),"smithproxy_tls");
 
     udp_thread = new std::thread([] () {
-        pthread_setname_np(udp_thread->native_handle(),"smithproxy_udp");
+        ignore_sigpipe();
         udp_proxy->run(); 
         DIAS_("udp workers torn down."); 
         udp_proxy->shutdown();  
     } );       
+    pthread_setname_np(udp_thread->native_handle(),"smithproxy_udp");
+
+
     socks_thread = new std::thread([] () { 
-        pthread_setname_np(plain_thread->native_handle(),"smithproxy_sk5");
+        ignore_sigpipe();
         socks_proxy->run(); 
         DIAS_("socks workers torn down."); 
         socks_proxy->shutdown();  
     } );   
+    pthread_setname_np(plain_thread->native_handle(),"smithproxy_sk5");
 
     cli_thread = new std::thread([] () { 
-        pthread_setname_np(plain_thread->native_handle(),"smithproxy_cli");
+        ignore_sigpipe();
         cli_loop(50000);
         DIAS_("cli workers torn down."); 
     } );      
+    pthread_setname_np(plain_thread->native_handle(),"smithproxy_cli");
     
     CRI_("Smithproxy %s (socle %s) started",SMITH_VERSION,SOCLE_VERSION);
     

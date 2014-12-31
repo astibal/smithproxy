@@ -202,6 +202,8 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                 target_cx->com()->nonlocal_src_port() = std::stoi(p);               
             }
             target_cx->connect(false);        
+        } else {
+            delete new_proxy;
         }
     }
     

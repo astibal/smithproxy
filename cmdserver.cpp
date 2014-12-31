@@ -98,17 +98,22 @@ struct cli_ext : public cli_def {
     int socket;
 };
 
+
 void client_thread(int client_socket) {
         struct cli_command *show;
         struct cli_command *diag;
         
         struct cli_def *cli;
+        
+        char hostname[64]; memset(hostname,0,64);
+        gethostname(hostname,63);
+        
 
         // Must be called first to setup data structures
         cli = cli_init();
 
         // Set the hostname (shown in the the prompt)
-        cli_set_hostname(cli, "smithproxy");
+        cli_set_hostname(cli, string_format("%s:(smithproxy)",hostname).c_str());
 
         // Set the greeting
         cli_set_banner(cli, "Smithproxy command line utility.");

@@ -112,15 +112,20 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     target_cx->connect(false);       
     
     if(ssl) {
-        ((SSLCom*)n_cx->com())->upgrade_server_socket(n_cx->socket());
+//         ((SSLCom*)n_cx->com())->upgrade_server_socket(n_cx->socket());
         DEBS_("SocksProxy::socks5_handoff: mark1");        
         
-        ((SSLCom*)target_cx->com())->upgrade_client_socket(target_cx->socket());
+//         ((SSLCom*)target_cx->com())->upgrade_client_socket(target_cx->socket());
     }
     
     radd(target_cx);
     
-    cfgapi_obj_policy_apply(n_cx,this);
+    if (cfgapi_obj_policy_apply(n_cx,this) < 0) {
+        // strange, but it can happen if the sockets is closed between policy match and this profile application
+        // mark dead.
+        DIAS_("SocksProxy::socks5_handoff: session failed policy application");
+        dead(true);
+    };
         
     DIAS_("SocksProxy::socks5_handoff: finished");
 }
@@ -146,7 +151,7 @@ void MitmSocksProxy::on_left_new(baseHostCX* just_accepted_cx) {
     just_accepted_cx->name();
     just_accepted_cx->com()->resolve_socket_src(just_accepted_cx->socket(),&h,&p);
     
-    new_proxy->ladd(just_accepted_cx);    
+    new_proxy->ladd(just_accepted_cx);
     
     this->proxies().push_back(new_proxy);
     
