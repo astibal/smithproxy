@@ -155,8 +155,6 @@ baseHostCX* MitmMasterProxy::new_cx(int s) {
 void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
     // ok, we just accepted socket, created context for it (using new_cx) and we probably need ... 
     // to create child proxy and attach this cx to it.
-    
-    // NEW: whole method is reorganized 
 
     if(! just_accepted_cx->com()->nonlocal_dst_resolved()) {
         ERRS_("Was not possible to resolve original destination!");
@@ -185,8 +183,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
         just_accepted_cx->com()->resolve_socket_src(just_accepted_cx->socket(),&h,&p);
         
         
-        just_accepted_cx->peer(target_cx);
-        target_cx->peer(just_accepted_cx);
+
 
         // almost done, just add this target_cx to right side of new proxy
         new_proxy->radd(target_cx);
@@ -201,6 +198,10 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                 target_cx->com()->nonlocal_src_host() = h;
                 target_cx->com()->nonlocal_src_port() = std::stoi(p);               
             }
+            
+            just_accepted_cx->peer(target_cx);
+            target_cx->peer(just_accepted_cx);            
+            
             target_cx->connect(false);        
         } else {
             delete new_proxy;

@@ -48,6 +48,7 @@ extern std::map<std::string,int> cfgapi_obj_proto;
 extern std::vector<PolicyRule*> cfgapi_obj_policy;
 extern std::map<std::string,ProfileDetection*> cfgapi_obj_profile_detection;
 extern std::map<std::string,ProfileContent*> cfgapi_obj_profile_content;
+extern std::map<std::string,ProfileTls*> cfgapi_obj_profile_tls;
 
 extern std::recursive_mutex cfgapi_write_lock;
 
@@ -73,6 +74,7 @@ range cfgapi_lookup_port(const char* name);
 int   cfgapi_lookup_proto(const char* name);
 ProfileDetection* cfgapi_lookup_profile_detection(const char* name);
 ProfileContent*   cfgapi_lookup_profile_content(const char* name);
+ProfileTls*   cfgapi_lookup_profile_tls(const char* name);
 
 int  cfgapi_load_obj_address();
 int  cfgapi_load_obj_port();
@@ -80,6 +82,7 @@ int  cfgapi_load_obj_proto();
 int  cfgapi_load_obj_policy();
 int  cfgapi_load_obj_profile_content();
 int  cfgapi_load_obj_profile_detection();
+int  cfgapi_load_obj_profile_tls();
 
 int  cfgapi_cleanup_obj_address();
 int  cfgapi_cleanup_obj_port();
@@ -87,6 +90,7 @@ int  cfgapi_cleanup_obj_proto();
 int  cfgapi_cleanup_obj_policy();
 int  cfgapi_cleanup_obj_profile_content();
 int  cfgapi_cleanup_obj_profile_detection();
+int  cfgapi_cleanup_obj_profile_tls();
 
 int cfgapi_obj_policy_match(baseProxy* proxy);
 int cfgapi_obj_policy_match(std::vector<baseHostCX*>& left, std::vector<baseHostCX*>& right);
@@ -97,5 +101,6 @@ void cfgapi_log_version(bool warn_delay=true);
 
 ProfileContent* cfgapi_obj_policy_profile_content(int index);
 ProfileDetection* cfgapi_obj_policy_profile_detection(int index);
+ProfileTls* cfgapi_obj_policy_profile_tls(int index);
 
 #endif

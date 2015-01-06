@@ -37,6 +37,7 @@
 
 struct ProfileDetection;
 struct ProfileContent;
+struct ProfileTls;
 
 class PolicyRule {
 
@@ -68,7 +69,7 @@ public:
        
        ProfileContent* profile_content = nullptr;
        ProfileDetection* profile_detection = nullptr;
-       
+       ProfileTls* profile_tls = nullptr;
 };
 
 struct ProfileDetection {
@@ -91,5 +92,12 @@ struct ProfileContent {
     std::string name;
 };
 
- 
+struct ProfileTls {
+    bool inspect = false;
+    bool allow_untrusted_issuers = false;
+    bool allow_invalid_certs = false;
+    bool allow_self_signed = false;
+    std::string name;
+};
+
 #endif

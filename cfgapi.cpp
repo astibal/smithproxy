@@ -35,6 +35,7 @@ std::map<std::string,int> cfgapi_obj_proto;
 std::vector<PolicyRule*> cfgapi_obj_policy;
 std::map<std::string,ProfileDetection*> cfgapi_obj_profile_detection;
 std::map<std::string,ProfileContent*> cfgapi_obj_profile_content;
+std::map<std::string,ProfileTls*> cfgapi_obj_profile_tls;
 std::recursive_mutex cfgapi_write_lock;
 
 struct cfgapi_table_ cfgapi_table;
@@ -94,6 +95,8 @@ int cfgapi_lookup_proto(const char* name) {
 }
 
 ProfileContent* cfgapi_lookup_profile_content(const char* name) {
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    
     if(cfgapi_obj_profile_content.find(name) != cfgapi_obj_profile_content.end()) {
         return cfgapi_obj_profile_content[name];
     }    
@@ -106,6 +109,16 @@ ProfileDetection* cfgapi_lookup_profile_detection(const char* name) {
     
     if(cfgapi_obj_profile_detection.find(name) != cfgapi_obj_profile_detection.end()) {
         return cfgapi_obj_profile_detection[name];
+    }    
+    
+    return nullptr;
+}
+
+ProfileTls* cfgapi_lookup_profile_tls(const char* name) {
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    
+    if(cfgapi_obj_profile_tls.find(name) != cfgapi_obj_profile_tls.end()) {
+        return cfgapi_obj_profile_tls[name];
     }    
     
     return nullptr;
@@ -377,6 +390,7 @@ int cfgapi_load_obj_policy() {
                 // makes sense to load profiles only when action is accept! 
                 std::string name_content;
                 std::string name_detection;
+                std::string name_tls;
                 
                 if(cur_object.lookupValue("detection_profile",name_detection)) {
                     ProfileDetection* prf  = cfgapi_lookup_profile_detection(name_detection.c_str());
@@ -399,6 +413,16 @@ int cfgapi_load_obj_policy() {
                         error = true;
                     }
                 }                
+                if(cur_object.lookupValue("tls_profile",name_tls)) {
+                    ProfileTls* tls  = cfgapi_lookup_profile_tls(name_tls.c_str());
+                    if(tls != nullptr) {
+                        DIA_("cfgapi_load_policy[#%d]: tls profile %s",i,name_tls.c_str());
+                        rule->profile_tls= tls;
+                    } else {
+                        DIA_("cfgapi_load_policy[#%d]: tls profile %s cannot be loaded",i,name_tls.c_str());
+                        error = true;
+                    }
+                }                      
             }
             
             if(!error){
@@ -498,6 +522,21 @@ ProfileDetection* cfgapi_obj_policy_profile_detection(int index) {
     }
 }
 
+ProfileTls* cfgapi_obj_policy_profile_tls(int index) {
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    
+    if(index < 0) {
+        return nullptr;
+    }
+    
+    if(index < (signed int)cfgapi_obj_policy.size()) {
+        return cfgapi_obj_policy.at(index)->profile_tls;
+    } else {
+        DIA_("cfgapi_obj_policy_profile_tls[#%d]: out of bounds, nullptr",index);
+        return nullptr;
+    }
+}
+
 
 int cfgapi_load_obj_profile_detection() {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
@@ -577,6 +616,50 @@ int cfgapi_load_obj_profile_content() {
     
     return num;
 }
+
+int cfgapi_load_obj_profile_tls() {
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    
+    int num = 0;
+    
+    DIAS_("cfgapi_load_obj_profile_tls: start");
+    
+    if(cfgapi.getRoot().exists("tls_profiles")) {
+
+        num = cfgapi.getRoot()["tls_profiles"].getLength();
+        DIA_("cfgapi_load_obj_profile_tls: found %d objects",num);
+        
+        Setting& curr_set = cfgapi.getRoot()["tls_profiles"];
+
+        for( int i = 0; i < num; i++) {
+            std::string name;
+            ProfileTls* a = new ProfileTls;
+            
+            Setting& cur_object = curr_set[i];
+            
+            name = cur_object.getName();
+
+            DEB_("cfgapi_load_obj_profile_tls: processing '%s'",name.c_str());
+            
+            if( cur_object.lookupValue("inspect",a->inspect) ) {
+                
+                a->name = name;
+                cur_object.lookupValue("allow_untrusted_issuers",a->allow_untrusted_issuers);
+                cur_object.lookupValue("allow_invalid_certs",a->allow_invalid_certs);
+                cur_object.lookupValue("allow_self_signed",a->allow_self_signed);
+                
+                cfgapi_obj_profile_tls[name] = a;
+                
+                DIA_("cfgapi_load_obj_profile_tls: '%s': ok",name.c_str());
+            } else {
+                DIA_("cfgapi_load_obj_profile_tls: '%s': not ok",name.c_str());
+            }
+        }
+    }
+    
+    return num;
+}
+
 
 int cfgapi_cleanup_obj_address() {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
@@ -659,6 +742,19 @@ int cfgapi_cleanup_obj_profile_detection() {
     
     return r;
 }
+int cfgapi_cleanup_obj_profile_tls() {
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    
+    int r = cfgapi_obj_profile_tls.size();
+    for(std::map<std::string, ProfileTls*>::iterator i = cfgapi_obj_profile_tls.begin(); i != cfgapi_obj_profile_tls.end(); ++i) {
+        std::pair<std::string,ProfileTls*> t = (*i);
+        ProfileTls* c = t.second;
+        if (c != nullptr) delete c;
+    }
+    cfgapi_obj_profile_tls.clear();
+    
+    return r;
+}
 
 int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
@@ -670,12 +766,15 @@ int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
         
         ProfileContent* pc  = cfgapi_obj_policy_profile_content(policy_num);
         ProfileDetection* pd = cfgapi_obj_policy_profile_detection(policy_num);
+        ProfileTls* pt = cfgapi_obj_policy_profile_tls(policy_num);
+        
         const char* pc_name = "none";
         const char* pc_global_no = "global_no";
         const char* pc_global_yes = "global_yes";
         const char* pc_global = pc_global_no;
         
         const char* pd_name = "none";
+        const char* pt_name = "none";
         
         /* Processing content profile */
         
@@ -685,12 +784,12 @@ int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
         
         if(mitm_proxy != nullptr) {
             if(pc != nullptr) {
-                DIA_("MitmMasterProxy::on_left_new: policy content profile: write payload: %d", pc->write_payload);
+                DIA_("cfgapi_obj_policy_apply: policy content profile: write payload: %d", pc->write_payload);
                 mitm_proxy->write_payload(pc->write_payload);
                 pc_name = pc->name.c_str();
             }
             else if(cfgapi.getRoot()["settings"].lookupValue("default__payload",cfg_wrt)) {
-                DIA_("MitmMasterProxy::on_left_new: global content profile: %d", cfg_wrt);
+                DIA_("cfgapi_obj_policy_apply: global content profile: %d", cfg_wrt);
                 mitm_proxy->write_payload(cfg_wrt);
                 if(cfg_wrt) {
                     pc_global = pc_global_yes;
@@ -712,7 +811,7 @@ int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
         if(mitm_originator != nullptr) {
             mitm_originator->mode(AppHostCX::MODE_NONE);
             if(pd != nullptr)  {
-                DIA_("MitmMasterProxy::on_left_new: policy detection profile: mode: %d", pd->mode);
+                DIA_("cfgapi_obj_policy_apply: policy detection profile: mode: %d", pd->mode);
                 mitm_originator->mode(pd->mode);
                 pd_name = pd->name.c_str();
             }
@@ -720,7 +819,31 @@ int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
             WARS_("cfgapi_obj_policy_apply: cannot apply detection profile: cast to AppHostCX failed.");
         }
 
-        INF_("Connection %s accepted by policy #%d, prof_c=%s, prof_d=%s",originator->full_name('L').c_str(),policy_num,pc_name,pd_name);
+        
+        /* Processing Tls profile */
+        if(pt != nullptr) {
+            bool tls_applied = false;
+            
+            for( cx_iterator i = mitm_proxy->rs().begin(); i != mitm_proxy->rs().end() ; ++i ) {
+                baseHostCX* cx = (*i);
+                baseCom* xcom = cx->com();
+                
+                SSLCom* sslcom = dynamic_cast<SSLCom*>(xcom);
+                if(sslcom != nullptr) {
+                    sslcom->opt_allow_unknown_issuer = pt->allow_untrusted_issuers;
+                    sslcom->opt_allow_self_signed_chain = pt->allow_untrusted_issuers;
+                    sslcom->opt_allow_not_valid_cert = pt->allow_invalid_certs;
+                    sslcom->opt_allow_self_signed_cert = pt->allow_self_signed;
+                    
+                    tls_applied = true;
+                }
+            }
+            
+            if(tls_applied) {
+                pt_name = pt->name.c_str();
+            }
+        } 
+        INF_("Connection %s accepted by policy #%d, prof_c=%s, prof_d=%s prof_tls=%s",originator->full_name('L').c_str(),policy_num,pc_name,pd_name,pt_name);
         
     } else {
         INF_("Connection %s denied by policy #%d.",originator->full_name('L').c_str(),policy_num);

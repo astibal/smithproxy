@@ -276,6 +276,7 @@ void load_config(std::string& config_f) {
         cfgapi_load_obj_proto();
         cfgapi_load_obj_profile_detection();
         cfgapi_load_obj_profile_content();
+        cfgapi_load_obj_profile_tls();
         
         cfgapi_load_obj_policy();
         
@@ -467,7 +468,7 @@ int main(int argc, char *argv[]) {
         DIAS_("socks workers torn down."); 
         socks_proxy->shutdown();  
     } );   
-    pthread_setname_np(plain_thread->native_handle(),"smithproxy_sk5");
+    pthread_setname_np(plain_thread->native_handle(),"smithproxy_skx");
 
     cli_thread = new std::thread([] () { 
         ignore_sigpipe();
@@ -495,11 +496,6 @@ int main(int argc, char *argv[]) {
         socks_thread->join();
     }        
 
-    CRYPTO_cleanup_all_ex_data();
-    ERR_free_strings();
-    ERR_remove_state(0);
-    EVP_cleanup();    
-    
     delete plain_thread;
     delete ssl_thread;
     delete udp_thread;
@@ -518,5 +514,10 @@ int main(int argc, char *argv[]) {
     if(cfg_daemonize) {    
         daemon_unlink_pidfile();
     }
+    
+    CRYPTO_cleanup_all_ex_data();
+    ERR_free_strings();
+    ERR_remove_state(0);
+    EVP_cleanup();     
 }
 
