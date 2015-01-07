@@ -56,6 +56,11 @@ public:
 
     virtual void on_detect(duplexFlowMatch* x_sig, flowMatchState& s, vector_range& r);    
     virtual void on_starttls();
+
+    int matched_policy() { return matched_policy_; }
+    void matched_policy(int p) { matched_policy_ = p; }
+protected:    
+    int matched_policy_ = -1;
 };
 
 #endif

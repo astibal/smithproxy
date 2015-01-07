@@ -191,6 +191,16 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
         // apply policy and get result
         int policy_num = cfgapi_obj_policy_apply(just_accepted_cx,new_proxy);
         if(policy_num >= 0) {
+            
+            MitmHostCX* src;
+            src = dynamic_cast<MitmHostCX*>(just_accepted_cx);
+            if (src != nullptr) {
+                src->matched_policy(policy_num);
+            } else {
+                DIA_("MitmMasterProxy::on_left_new: %s cannot be converted to MitmHostCx",just_accepted_cx->c_name());
+            }
+            target_cx->matched_policy(policy_num);
+            
             this->proxies().push_back(new_proxy);
             
             if(cfgapi_obj_policy.at(policy_num)->nat == POLICY_NAT_NONE) {

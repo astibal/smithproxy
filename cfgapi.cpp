@@ -828,15 +828,7 @@ int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
                 baseHostCX* cx = (*i);
                 baseCom* xcom = cx->com();
                 
-                SSLCom* sslcom = dynamic_cast<SSLCom*>(xcom);
-                if(sslcom != nullptr) {
-                    sslcom->opt_allow_unknown_issuer = pt->allow_untrusted_issuers;
-                    sslcom->opt_allow_self_signed_chain = pt->allow_untrusted_issuers;
-                    sslcom->opt_allow_not_valid_cert = pt->allow_invalid_certs;
-                    sslcom->opt_allow_self_signed_cert = pt->allow_self_signed;
-                    
-                    tls_applied = true;
-                }
+                tls_applied = cfgapi_obj_policy_apply_tls(pt,xcom);
             }
             
             if(tls_applied) {
@@ -853,6 +845,29 @@ int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
 }
 
 
+bool cfgapi_obj_policy_apply_tls(int policy_num, baseCom* xcom) {
+    ProfileTls* pt = cfgapi_obj_policy_profile_tls(policy_num);
+    return cfgapi_obj_policy_apply_tls(pt,xcom);
+}
+
+bool cfgapi_obj_policy_apply_tls(ProfileTls* pt, baseCom* xcom) {
+
+    bool tls_applied = false;     
+    
+    if(pt != nullptr) {
+        SSLCom* sslcom = dynamic_cast<SSLCom*>(xcom);
+        if(sslcom != nullptr) {
+            sslcom->opt_allow_unknown_issuer = pt->allow_untrusted_issuers;
+            sslcom->opt_allow_self_signed_chain = pt->allow_untrusted_issuers;
+            sslcom->opt_allow_not_valid_cert = pt->allow_invalid_certs;
+            sslcom->opt_allow_self_signed_cert = pt->allow_self_signed;
+            
+            tls_applied = true;
+        }        
+    }
+    
+    return tls_applied;
+}
 
 
 void cfgapi_cleanup()

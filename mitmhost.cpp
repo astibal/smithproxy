@@ -20,6 +20,7 @@
 #include <mitmhost.hpp>
 #include <display.hpp>
 #include <logger.hpp>
+#include <cfgapi.hpp>
 
 std::vector<duplexFlowMatch*> sigs_starttls;
 std::vector<duplexFlowMatch*> sigs_detection;
@@ -91,19 +92,27 @@ void MitmHostCX::on_starttls() {
 //         delete peercom();
 
     com_ = new MySSLMitmCom();
-    com()->init(this);
+    baseCom* pcom = new MySSLMitmCom();
     
-    peer()->com(new SSLMitmCom());
+    //com()->init(this);
+    
+    peer()->com(pcom);
     peer(peer()); // this will re-init
     peer()->peer(this);
     
     DIAS_("peers set");
     
     // set flag to wait for the peer to finish spoofing
-
+    
     paused(true);
+    
+    
+    
     ((SSLCom*)peercom())->upgrade_client_socket(peer()->socket());
     ((SSLCom*)com())->upgrade_server_socket(socket());        
+    
+    cfgapi_obj_policy_apply_tls(matched_policy(),com());
+    cfgapi_obj_policy_apply_tls(matched_policy(),peercom());
     
     log().append("\n STARTTLS: plain connection upgraded to SSL/TLS, continuing with inspection.\n\n");
     
