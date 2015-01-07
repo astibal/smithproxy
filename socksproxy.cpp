@@ -108,6 +108,9 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
         target_cx->com()->nonlocal_src_host() = h;
         target_cx->com()->nonlocal_src_port() = std::stoi(p);
     }
+    
+    n_cx->matched_policy(policy_num);
+    target_cx->matched_policy(policy_num);
         
     target_cx->connect(false);       
     

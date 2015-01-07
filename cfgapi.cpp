@@ -828,7 +828,9 @@ int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
                 baseHostCX* cx = (*i);
                 baseCom* xcom = cx->com();
                 
-                tls_applied = cfgapi_obj_policy_apply_tls(pt,xcom);
+                if(cfgapi_obj_policy_apply_tls(pt,xcom) == true && tls_applied == false) {
+                    tls_applied = true;
+                }
             }
             
             if(tls_applied) {
