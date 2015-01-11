@@ -286,6 +286,8 @@ void load_config(std::string& config_f) {
         
         cfgapi.getRoot()["settings"].lookupValue("certs_path",SSLCertStore::certs_path);
         cfgapi.getRoot()["settings"].lookupValue("certs_ca_key_password",SSLCertStore::password);
+	cfgapi.getRoot()["settings"].lookupValue("certs_ca_path",SSLCertStore::def_cl_capath);
+	
         cfgapi.getRoot()["settings"].lookupValue("plaintext_port",cfg_listen_port);
         cfgapi.getRoot()["settings"].lookupValue("plaintext_workers",cfg_tcp_workers);
         cfgapi.getRoot()["settings"].lookupValue("ssl_port",cfg_ssl_listen_port);

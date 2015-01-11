@@ -27,7 +27,7 @@ endif (LIBCONFIGPP_FOUND)
 
 find_package (LibCli REQUIRED)
 if (LIBCLI_FOUND)
-  include_directories(${LIBCLI_INCLUDE_DIRS})
+  include_directories(${LIBCLI_INCLUDE_DIR})
   target_link_libraries (smithproxy ${LIBCLI_LIBRARY})
 endif (LIBCLI_FOUND)
 
