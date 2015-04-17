@@ -126,7 +126,7 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     if (cfgapi_obj_policy_apply(n_cx,this) < 0) {
         // strange, but it can happen if the sockets is closed between policy match and this profile application
         // mark dead.
-        DIAS_("SocksProxy::socks5_handoff: session failed policy application");
+        INFS_("SocksProxy::socks5_handoff: session failed policy application");
         dead(true);
     };
         

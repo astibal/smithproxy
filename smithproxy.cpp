@@ -351,7 +351,7 @@ int main(int argc, char *argv[]) {
 	lout.level(WAR);
     
 
-    cfgapi_log_version();
+    cfgapi_log_version(false);  // don't delay, but display warning
 	
     while(1) {
     /* getopt_long stores the option index here. */
@@ -402,6 +402,9 @@ int main(int argc, char *argv[]) {
         lout.dup2_cout(false);
         daemonize();
     }
+    // write out PID file
+    daemon_write_pidfile();
+
     
     //     atexit(__libc_freeres);    
     //     CRYPTO_malloc_debug_init();

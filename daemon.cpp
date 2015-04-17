@@ -92,11 +92,7 @@ void daemonize(void) {
     
     close(STDOUT_FILENO);
     close(STDERR_FILENO);
-    
-    /* Daemon-specific initialization goes here */
-    
-    daemon_write_pidfile();
-    
+        
     DIAS_("daemonize: finished");
 }
 
