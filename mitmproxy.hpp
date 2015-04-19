@@ -64,6 +64,8 @@ public:
     
     virtual void on_left_error(baseHostCX* cx);
     virtual void on_right_error(baseHostCX* cx);
+    
+    virtual void handle_replacement(MitmHostCX* cx);
 };
 
 

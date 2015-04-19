@@ -17,6 +17,9 @@
     
 */    
 
+#include <cstdlib>
+#include <ctime>
+
 #include <mitmproxy.hpp>
 #include <mitmhost.hpp>
 #include <logger.hpp>
@@ -76,15 +79,26 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
         tlog()->left_write(cx->to_read());
     }
     
+    bool redirected = false;
+    
+    MitmHostCX* mh = dynamic_cast<MitmHostCX*>(cx);
+    if(mh != nullptr) {
+	if(mh->replacement() > MitmHostCX::REPLACE_NONE) {
+	    redirected = true;
+	    handle_replacement(mh);
+	}
+    }
+    
+    
     // because we have left bytes, let's copy them into all right side sockets!
     for(typename std::vector<baseHostCX*>::iterator j = this->right_sockets.begin(); j != this->right_sockets.end(); j++) {
-
-        // to_read: returns readbuf's buffer "view" of previously processed bytes 
-        // to_write: this is appending to caller's write buffer
-
-        // next line therefore calls processing context to return new processed bytes (to_read is like to offer: I have new processed data, read it if you want)
-        // those processed data will be wiped by next read() call, so let's now write them all to right socket!
-        (*j)->to_write(cx->to_read());
+	if(!redirected) {
+	    (*j)->to_write(cx->to_read());
+	} else {
+	  
+	  // rest of connections should be closed when sending replacement to a client
+	  (*j)->shutdown();
+	}
     }    
 }
 
@@ -142,6 +156,40 @@ void MitmProxy::on_right_error(baseHostCX* cx)
                                                             cx->meter_read_count,cx->meter_read_bytes,
                                                                     'R');
     this->dead(true); 
+}
+
+
+
+void MitmProxy::handle_replacement(MitmHostCX* cx) {
+  
+    //std::string redir("<script>window.location=\"http://www.mojebanka.cz/\";</script>");
+    std::string redir_pre("<script>window.location=\"");
+    std::string redir_suf("\";</script>");  
+    std::string repl;
+    int 	redir_hint = 0;
+    
+    std::string block("<!DOCTYPE html><html><body><h1>Page has been blocked</h1><p>Access has been blocked by smithproxy. Get over it.</p></body></html>");
+    
+    switch(cx->replacement()) {
+	case MitmHostCX::REPLACE_REDIRECT:
+	  
+	  srand(time(nullptr) % ((unsigned long)cx));
+	  redir_hint = rand();
+	  
+	  repl = redir_pre + "http://127.0.0.1:65444/smithredir?hint=" + std::to_string(redir_hint) + redir_suf;
+	  cx->to_write((unsigned char*)repl.c_str(),repl.size());
+	  cx->close_after_write(true);
+	  break;
+
+	case MitmHostCX::REPLACE_BLOCK:
+	  repl = block;
+	  cx->to_write((unsigned char*)repl.c_str(),repl.size());
+	  cx->close_after_write(true);
+	  
+	  break;
+	case MitmHostCX::REPLACE_NONE:
+	    DIAS_("void MitmProxy::handle_replacement: asked to handle NONE. No-op.");
+    } 
 }
 
 

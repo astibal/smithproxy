@@ -39,14 +39,28 @@ public:
     virtual ~MySSLMitmCom() {};
 
     virtual baseCom* replicate();
-    virtual bool spoof_cert(X509* x);
+    virtual bool spoof_cert(X509* x, SpoofOptions& spo);
+};
+
+
+struct ApplicationData {
+    virtual ~ApplicationData() {};
+    virtual std::string hr() = 0;
+};
+struct app_HttpRequest : public ApplicationData {
+    virtual ~app_HttpRequest() {};
+  
+    std::string host;
+    std::string uri;
+    std::string params;
+    virtual std::string hr() { return host+uri+params; }
 };
 
 class MitmHostCX : public AppHostCX {
 public:
+    ApplicationData* request = nullptr;
     
-    
-    virtual ~MitmHostCX() {};
+    virtual ~MitmHostCX() { delete request; };
     
     MitmHostCX(baseCom* c, const char* h, const char* p );
     MitmHostCX( baseCom* c, int s );
@@ -59,8 +73,14 @@ public:
 
     int matched_policy() { return matched_policy_; }
     void matched_policy(int p) { matched_policy_ = p; }
+
+    typedef enum { REPLACE_NONE=0, REPLACE_REDIRECT=1, REPLACE_BLOCK=2 } replace_flags;    
+    void replacement(replace_flags i) { replacement_ = i; }
+    replace_flags replacement(void)   { return replacement_; }
 protected:    
     int matched_policy_ = -1;
+    
+    replace_flags replacement_ = REPLACE_NONE;
 };
 
 #endif

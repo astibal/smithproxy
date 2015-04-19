@@ -29,10 +29,11 @@ baseCom* MySSLMitmCom::replicate() {
     return new SSLMitmCom(); 
 }
 
-bool MySSLMitmCom::spoof_cert(X509* x) {
+bool MySSLMitmCom::spoof_cert(X509* x, SpoofOptions& spo) {
     std::string cert = SSLCertStore::print_cert(x);
     log().append("\n ==== Server certificate:\n" + cert  + "\n ====\n");
-    bool r = SSLMitmCom::spoof_cert(x);
+    
+    bool r = SSLMitmCom::spoof_cert(x,spo);
     
     EXT_("MySSLMitmCom::spoof_cert: cert:\n%s",cert.c_str());
     
@@ -81,6 +82,75 @@ void MitmHostCX::on_detect(duplexFlowMatch* x_sig, flowMatchState& s, vector_ran
     DEB_("Connection from %s matching signature: cat='%s', name='%s' at %s",this->full_name('L').c_str(), sig_sig->category.c_str(), sig_sig->name().c_str(), vrangetos(r).c_str());
     
     this->log().append( string_format("\nDetected application: cat='%s', name='%s'\n",sig_sig->category.c_str(), sig_sig->name().c_str()));
+    
+    
+    if(sig_sig->category ==  "www" && sig_sig->name() == "http/get|post") {
+
+      if(r.size() > 0) {
+	std::pair<unsigned char,buffer*>& get = flow().flow()[0];
+	std::pair<unsigned char,buffer*>& status = flow().flow()[0];
+	
+	buffer* buffer_get = get.second;
+	buffer* buffer_status = status.second;
+	std::string buffer_data_string((const char*)buffer_get->data(),0,buffer_get->size());
+	
+	//INFS_(std::string((const char*)buffer_get->data(),0,buffer_get->size()));
+	std::regex re_get("(GET|POST) *([^ \?]+)([^ ]+)");
+	std::smatch m_get;
+		
+
+	std::regex re_host("Host: *([^ ]+)\r\n");
+	std::smatch m_host;
+	
+	
+	std::string str_temp;
+	std::string print_request;
+	
+	if(std::regex_search (buffer_data_string, m_host, re_host))  {
+	    if(m_host.size() > 0) {
+		str_temp = m_host[1].str();
+		print_request += str_temp;
+
+		if(request == nullptr) {
+		    request = new app_HttpRequest;
+		}
+		
+		app_HttpRequest* app_request = dynamic_cast<app_HttpRequest*>(request);
+		if(app_request != nullptr) {
+		  app_request->host = str_temp;
+		}
+	    }     
+	}
+	if(std::regex_search (buffer_data_string, m_get, re_get)) {
+	    if(m_get.size() > 1) {
+		str_temp = m_get[2].str();
+		print_request += str_temp;
+		
+		if(request == nullptr) {
+		    request = new app_HttpRequest;
+		}
+		
+		app_HttpRequest* app_request = dynamic_cast<app_HttpRequest*>(request);
+		if(app_request != nullptr) {
+		  app_request->uri = str_temp;
+		}		
+		
+		if(m_get.size() > 2) {
+		    str_temp = m_get[3].str();
+		    app_request->params = str_temp;
+		
+		    //print_request += str_temp;
+		}
+	    }
+	}
+	
+	INF_("Connection www request: %s",print_request.c_str());
+	
+	// this is the right way
+	// replacement(REPLACE_REDIRECT);
+	// replacement(REPLACE_BLOCK);
+      }
+    }
 }
 
 void MitmHostCX::on_starttls() {
