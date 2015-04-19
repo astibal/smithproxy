@@ -824,6 +824,9 @@ int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
         if(pt != nullptr) {
             bool tls_applied = false;
             
+	    // we should also apply tls profile to originating side! Verification is not in effect, but BYPASS is!
+	    cfgapi_obj_policy_apply_tls(pt,mitm_originator->com());
+	    
             for( cx_iterator i = mitm_proxy->rs().begin(); i != mitm_proxy->rs().end() ; ++i ) {
                 baseHostCX* cx = (*i);
                 baseCom* xcom = cx->com();
@@ -859,6 +862,7 @@ bool cfgapi_obj_policy_apply_tls(ProfileTls* pt, baseCom* xcom) {
     if(pt != nullptr) {
         SSLCom* sslcom = dynamic_cast<SSLCom*>(xcom);
         if(sslcom != nullptr) {
+	    sslcom->opt_bypass = !pt->inspect;
             sslcom->opt_allow_unknown_issuer = pt->allow_untrusted_issuers;
             sslcom->opt_allow_self_signed_chain = pt->allow_untrusted_issuers;
             sslcom->opt_allow_not_valid_cert = pt->allow_invalid_certs;

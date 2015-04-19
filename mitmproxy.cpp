@@ -230,7 +230,8 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
         just_accepted_cx->name();
         just_accepted_cx->com()->resolve_socket_src(just_accepted_cx->socket(),&h,&p);
         
-        
+	just_accepted_cx->peer(target_cx);
+        target_cx->peer(just_accepted_cx);          
 
 
         // almost done, just add this target_cx to right side of new proxy
@@ -257,8 +258,8 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                 target_cx->com()->nonlocal_src_port() = std::stoi(p);               
             }
             
-            just_accepted_cx->peer(target_cx);
-            target_cx->peer(just_accepted_cx);            
+/*            just_accepted_cx->peer(target_cx);
+            target_cx->peer(just_accepted_cx);  */          
             
             target_cx->connect(false);        
         } else {
