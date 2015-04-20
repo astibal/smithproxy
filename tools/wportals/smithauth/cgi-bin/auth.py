@@ -39,7 +39,7 @@ page = """
 <body>
 <form action="/cgi-bin/auth2.py?a=z" method="post">
 <div>
-  <table class="login" align="center">
+  <table align="center">
     <tr><th colspan="2">Authentication required:</th><tr>
     <tr><td colspan="2"></td></tr>
     <tr><td>Username:</td><td><input type="text" name="username"</td></tr>
