@@ -167,6 +167,7 @@ static struct option long_options[] =
     
     {"config-file", required_argument, 0, 'c'},
     {"daemonize", no_argument, 0, 'D'},
+    {"version", no_argument, 0, 'v'},
     {0, 0, 0, 0}
 };  
 
@@ -348,16 +349,11 @@ int main(int argc, char *argv[]) {
 
     config_file = "/etc/smithproxy/smithproxy.cfg";    
 
-	lout.level(WAR);
-    
-
-    cfgapi_log_version(false);  // don't delay, but display warning
-	
     while(1) {
     /* getopt_long stores the option index here. */
         int option_index = 0;
     
-        char c = getopt_long (argc, argv, "p:",
+        char c = getopt_long (argc, argv, "p:v",
                         long_options, &option_index);
         if (c < 0) break;
 
@@ -373,12 +369,19 @@ int main(int argc, char *argv[]) {
                 cfg_daemonize = true;
                 break;
                 
+            case 'v':
+                std::cout << SMITH_VERSION << "+" << SOCLE_VERSION << std::endl;
+                exit(0);
+                
+                
             default:
                 ERR_("unknown option: '%c'",c);
                abort();                 
         }
     }
-
+    
+    lout.level(WAR);
+    cfgapi_log_version(false);  // don't delay, but display warning
     
     // if logging set in cmd line, use it 
     if(args_debug_flag > NON) {
