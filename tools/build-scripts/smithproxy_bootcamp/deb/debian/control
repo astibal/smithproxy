@@ -1,0 +1,21 @@
+Source: smithproxy
+Maintainer: Ales Stibal <astib@mag0.net>
+Section: misc
+Priority: optional
+Standards-Version: 3.9.6
+Build-Depends: debhelper (>= 9)
+
+Package: smithproxy
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, libstdc++6 (>= 4.9.0), libssl1.0.0 (>=1.0.0), libconfig++9, libcli1.9 (>=1.9.6)
+Description: Universal transparent and SOCKS5 proxy supporting TCP/UDP/SSL
+ Use iptables TPROXY rules to divert traffic to smithproxy listening ports,
+ control traffic with access-list, deep SSL inspection and content search
+ features, allowing sort of IPS/Application control.
+ Apart of TPROXY there is possibility to use smithproxy as SOCKS5 proxy.
+ In all modes (TPROXY, SOCKS5) traffic could be proxied with full transpa-
+ rency, or you can allow nat.
+ It is also able to write traffic to files, which makes smithproxy quite
+ good companion while troubleshooting.
+ 
+
