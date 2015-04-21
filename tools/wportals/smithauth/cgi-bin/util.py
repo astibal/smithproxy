@@ -30,7 +30,7 @@ def print_message(pagename,caption,message,redirect_url=None,redirect_time=5):
         <body>
         <div>
         <tablealign="center">
-        <tr><th colspan="2">$caption<hr></th></tr>
+        <tr><th colspan="2">$caption</th></tr>
         <tr><td>
         $message
         </td></tr>
