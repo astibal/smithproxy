@@ -30,7 +30,9 @@ form = cgi.FieldStorage()
 # Get data from fields
 username = form.getvalue('username')
 password = form.getvalue('password')
-
+token = None
+if "token" in form.keys():
+  token = form["token"].value
 
 def authenticate(username,password):
 
@@ -44,10 +46,10 @@ def authenticate(username,password):
 
     try:
 	bend = SOAPpy.SOAPProxy("http://localhost:65456/")
-        success = bend.authenticate(username,password)
+        success = bend.authenticate(username,password,token)
      
         if success:
-	    util.print_message(pagename_ok, caption_ok,msg_ok,redirect_url="http://www.root.cz",redirect_time=0)
+	    util.print_message(pagename_ok, caption_ok,msg_ok,redirect_url="http://"+success,redirect_time=0)
 	else:
 	    util.print_message(pagename_authfailed,caption_authfailed,msg_authfailed)
 	    

@@ -1,96 +1,80 @@
-"""
-    Smithproxy- transparent proxy with SSL inspection capabilities.
-    Copyright (c) 2014, Ales Stibal <astib@mag0.net>, All rights reserved.
-
-    Smithproxy is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
-
-    Smithproxy is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with Smithproxy.  If not, see <http://www.gnu.org/licenses/>.  """
-
 import time
 import mmap
 import os
 import sys
 import struct
 import posix_ipc
+import socket
 
-PY_MAJOR_VERSION = sys.version_info[0]
+from shmbuffer import ShmBuffer
 
-import SOAPpy
+class ShmTable(ShmBuffer):
+    def __init__(self,row_size):
+	ShmBuffer.__init__(self)
+	self.version = 0
+	self.header_size = 12
+	#self.row_size = 4+64+128
+	self.row_size = row_size
+	self.normalizing = False		# should we fix database in key conflict?
+	self.normalize = False			# temp status
+	self.entries = []
+	
+    def write_header(self, inc_version=False):
+	self.seek(0)
+	
+	if inc_version:
+            self.version = self.version + 1
 
-class ShmTable:
+	self.write(struct.pack('III',self.version,len(self.entries),self.row_size))
+	
 
-    def __init__(self):
-	  self.header_size = 0
-	  self.memory_size = 0
-	  self.memory_name = ""
-	  self.semaphore_name = ""
-	  
-	  self.memory = None
-	  self.semaphore = None
-	  self.mapfile = None
-	  self.my_version = None
+    def read_header(self):
+	self.seek(0)
+	s = self.read(self.header_size)
+	version,no_entries,rowsize = struct.unpack('III',s)
 
-    def setup(self,mem_name, mem_size, sem_name):
-
-	  self.memory_size = mem_size
-	  self.memory_name = mem_name
-	  self.semaphore_name = sem_name
-	  
-	  self.memory = posix_ipc.SharedMemory(self.memory_name, posix_ipc.O_CREX, size=self.memory_size)
-	  self.semaphore = posix_ipc.Semaphore(self.semaphore_name, posix_ipc.O_CREX)
-
-	  self.mapfile = mmap.mmap(self.memory.fd, self.memory.size)
-
-	  # Once I've mmapped the file descriptor, I can close it without interfering with the mmap. 
-	  self.memory.close_fd()
-	  
-	  self.semaphore.release()
-
-	  ### now init
-	  
-    def clear(self):	  
-	  self.seek(0)
-	  self.write("\x00"*self.memory_size)
-
-    def release(self):
-	  self.semaphore.release()
-	  
-    def acquire(self):
-	  self.semaphore.acquire()
-
-    def write(self, s):
-	self.semaphore.release()
-	self.semaphore.acquire()
-
-	if PY_MAJOR_VERSION > 2:
-	    s = s.encode()
-	    
-	self.mapfile.write(s)
-
-    def read(self,num):
-	return self.mapfile.read(num)
-
-
-    def seek(self,pos):
-	self.mapfile.seek(pos)
-
-    def cleanup(self):
-	self.semaphore.release()
-	time.sleep(5)
-	self.semaphore.acquire()
-
-	self.mapfile.close()
-	posix_ipc.unlink_shared_memory(self.memory_name)
-
-	self.semaphore.release()
-	self.semaphore.unlink()
+	return version,no_entries,rowsize
       
+    def is_updated(self, v):
+	if v != self.version:
+	   return True
+	 
+    def ack_updated(self, a):
+	self.version = a
+
+    def load(self):
+        print "---load:"
+	self.seek(0)
+	v,n,r = self.read_header()
+	
+	if r != self.row_size:
+            print "Incompatible rowsize! Expecting %d, got %d" % (self.row_size,r)
+            return False
+	
+	if not self.is_updated(v):
+	    print "---same version: %d, entries: %d, rowsize: %s" % (v,n,r)
+	else:
+	    print "---updated version: %d, entries: %d" % (v,n)
+	
+	    self.on_new_version(self.version,v)
+
+	    
+	    for i in range(0,n):
+		s = self.read(self.row_size)
+		self.on_new_entry(s)
+
+	    self.ack_updated(v)
+	    self.on_new_finished()
+	    
+	    if self.normalize:
+		self.dump(True)    # despite this is not really necessary, we will do so, in order to act following common-sense.
+		print "NORMALIZED"
+
+    def on_new_version(self,o,n):
+	 self.entries = []
+	 
+    def on_new_entry(self,s):
+	 self.entries.append(s)
+	 
+    def on_new_finished(self):
+	 pass

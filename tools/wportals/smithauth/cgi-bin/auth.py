@@ -20,13 +20,18 @@
 
 import SOAPpy
 import time
-
+import cgi, cgitb 
 import util
 
 #	removed head:
 # 	<link rel=stylesheet type="text/css" href="/css/styles.css">	
 #	<script type="text/javascript" src="/js/keyboard.js" charset="UTF-8"></script>
 # 	<link rel="stylesheet" type="text/css" href="/css/keyboard.css">
+form = cgi.FieldStorage() 
+
+token = None
+if "token" in form.keys():
+  token = form["token"].value
 
 page = """
 <html>
@@ -37,7 +42,7 @@ page = """
 	</script>
 </head>
 <body>
-<form action="/cgi-bin/auth2.py?a=z" method="post">
+<form action="/cgi-bin/auth2.py?a=z%s" method="post">
 <div>
   <table align="center">
     <tr><th colspan="2">Authentication required:</th><tr>
@@ -55,7 +60,11 @@ page = """
 # use class="keyboardInput" for virtual keyboard below the input field
 
 try:
-        print page
+	if token:
+	  tok_str = "&token="+str(token)
+	  print page % (tok_str,)
+	else:
+	  print page % ('',)
 
 except Exception, e:
 	util.print_message("Error","Error occured:", str(e),"/error.html")
