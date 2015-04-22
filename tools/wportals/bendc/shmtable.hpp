@@ -1,7 +1,27 @@
+/*
+    Smithproxy- transparent proxy with SSL inspection capabilities.
+    Copyright (c) 2014, Ales Stibal <astib@mag0.net>, All rights reserved.
+
+    Smithproxy is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    Smithproxy is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with Smithproxy.  If not, see <http://www.gnu.org/licenses/>.
+    
+*/  
+
 #ifndef SHMTABLE_HPP
-#define SHMTABLE_HPP
+  #define SHMTABLE_HPP
 
 
+#include <cstring>
 #include <vector>
 #include <shmbuffer.hpp>
 
@@ -59,10 +79,10 @@ public:
             for (int n = 0 ; n < header_entries() ; n++) {
                 RowType* rec = (RowType*)records;
                 //printf("%s: %16s \t groups: %s\n",inet_ntoa(*(in_addr*)rec->ip),rec->username,rec->groups);
-		
-		on_new_entry(rec);
-		//entries().push_back(*rec);
                 
+                on_new_entry(rec);
+                //entries().push_back(*rec);
+                    
                 records+=sizeof(RowType);
             }
             
@@ -74,7 +94,47 @@ public:
         
         return 0;
   }
+  
+  
+  unsigned int write_header(bool increase_version=false, int n_entries=-1) {
+      
+      if(increase_version) {
+          seen_version(seen_version()+1);
+          cur_data_header.version++;
+          cur_data_header.entries = entries().size();
+          
+          if(n_entries >= 0) {
+              cur_data_header.entries = n_entries;
+          }
+      }
+      memcpy(data(),&cur_data_header,sizeof(struct shared_table_header));
+     
+      return sizeof(shared_table_header);
+  }
+  
+  int save(bool increase_version=false) {
+      
+      write_header(increase_version);
+      
+      unsigned char* curpos = data() + sizeof(struct shared_table_header);
+      for(typename std::vector<RowType>::iterator i = entries().begin(); i != entries().end() ; ++i) {
+          RowType& r = (*i);
+          unsigned int s = on_write_entry(curpos,r);
+          
+          if(s > 0) {
+                curpos += s;
+          } else {
+                // try  to do auto-magic
+                curpos += sizeof(RowType);
+          }
+      }      
+  };
 
+  virtual unsigned int on_write_entry(unsigned char* ptr, RowType& r) {
+      memcpy(ptr,&r,sizeof(RowType));
+      return sizeof(RowType);
+  }
+  
   virtual void on_new_version(int o, int n) {
       entries().clear();
   }

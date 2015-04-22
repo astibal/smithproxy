@@ -31,76 +31,110 @@ import SOAPpy
 
 
 
-class LogonTable(ShmTable):		
+class LogonTable(ShmTable):             
 
     def __init__(self):
-	ShmTable.__init__(self,4+64+128)
-	self.logons = {}
-	self.normalizing = True
+        ShmTable.__init__(self,4+64+128)
+        self.logons = {}
+        self.normalizing = True
 
     def add(self,ip,user,groups):
-	if ip in self.logons.keys():
-	    return False
-	
-	
-	self.logons[ip] = [ip,user,groups]
-	self.dump(True)
-	
-    def rem(self,ip):
-	if ip in self.logons.keys():
-	    self.logons.pop(ip, None)
-	    self.dump(True)
-	    
-    def dump(self, inc_version=False):
-	self.seek(0)
-	self.clear()
-	self.write_header(inc_version)
-	for k in self.logons.keys():
-	      try:
-		  self.write(struct.pack("4s64s128s",k,self.logons[k][1],self.logons[k][2]))
-	      except IndexError:
-		  continue
 
-	self.normalize = False # each dump effectively normalizes db
+        self.logons[ip] = [ip,user,groups]
+        self.save(True)
+        
+    def rem(self,ip):
+        if ip in self.logons.keys():
+            self.logons.pop(ip, None)
+            self.save(True)
+            
+    def save(self, inc_version=False):
+        self.seek(0)
+        self.clear()
+        self.write_header(inc_version,len(self.logons.keys()))
+        
+        for k in self.logons.keys():
+              try:
+                  self.write(struct.pack("4s64s128s",socket.inet_aton(k),self.logons[k][1],self.logons[k][2]))
+              except IndexError:
+                  continue
+
+        self.normalize = False # each dump effectively normalizes db
 
     def on_new_version(self,o,n):
-	self.logons = {}
-	
+        self.logons = {}
+        
     def on_new_entry(self,blob):
-	ShmTable.on_new_entry(self)
-	
-	ip,u,g = struct.unpack("4s64s128s",blob)
-	
-	if ip in self.logons.keys():
-	    print "IP %s already in database. will rewrite older entries." % (socket.inet_ntoa(ip),)
-	    self.logons.pop(ip,None)
-	    if self.normalizing:
-		self.normalize = True
+        
+        i,u,g = struct.unpack("4s64s128s",blob)
+        ip = socket.inet_ntoa(i)
+        
+        tag = ''
+        if ip in self.logons.keys():
+            tag = ' (dup)'
 
-	self.logons[ip] = [ip,u.strip(),g.strip()]
-	print socket.inet_ntoa(ip)
-	print u.strip()
-	print g.strip()      
+        if self.normalizing:
+            self.normalize = True
+
+        self.logons[ip] = [ip,u.strip(),g.strip()]
+        print "on_new_entry: added " + ip + tag + ", " + u.strip() + ", " + g.strip()
+        
+
+        return True
 
     def on_new_finished(self):
-	pass
+        pass
 
 
 
 class TokenTable(ShmTable):
     def __init__(self):
         ShmTable.__init__(self,576)
-	self.tokens = {}   # token => url
+        self.tokens = {}   # token => url
+        self.used_tokens = []  # used throw here - delete when appropriate
+        self.active_queue = []    # add everything here. After size grows to some point, start
+                               # deleting also active unused yed tokens
+    
+        self.delete_used_threshold =   1   # 1 means immediately
+        self.delete_active_threshold = 10  # mark oldest tokens above this margin as used
     
     def on_new_table(self):
-	ShmTable.on_new_table(self)
-	self.tokens = {}
+        ShmTable.on_new_table(self)
+        self.tokens = {}
 
     def on_new_entry(self,blob):
-	ShmTable.on_new_entry(self,blob)
-	t,u = struct.unpack('64s512s',blob)
-        self.tokens[t] = u
-	
+        ShmTable.on_new_entry(self,blob)
+        t,u = struct.unpack('64s512s',blob)
+        
+        t_i = t.find('\x00',0,512)
+        u_i = u.find('\x00',0,512)
+        tt = t[:t_i]
+        uu = u[:u_i]
+        
+        #print "on_new_entry: " + tt + ":" + uu
+        self.tokens[tt] = uu
+        self.life_queue(tt)
+        
+    def toggle_used(self,token):
+        self.used_tokens.append(token)
+        if len(self.used_tokens) > self.delete_used_threshold:
+            
+            # delete all used tokens from DB
+            for t in self.used_tokens:
+                print "toggle_used: wiping used token " + t
+                self.tokens.pop(t,None)
+                
+            self.used_tokens = []
+            
+            
+    def life_queue(self,token):
+        self.active_queue.append(token)
+        if len(self.active_queue) > self.delete_active_threshold:
+            print "life_queue: too many active tokens, dropping " + token
+            self.toggle_used(token)
+        
+    
+        
 
 
 st = LogonTable()
@@ -109,7 +143,7 @@ st.clear()
 st.write_header()
 
 su = TokenTable()
-su.setup("/smithproxy_auth_tok",1024*1024,"/smithproxy_auth_tok.sem")
+su.setup("/smithproxy_auth_token",1024*1024,"/smithproxy_auth_token.sem")
 su.clear();
 
 su.seek(0)
@@ -117,13 +151,38 @@ su.write(struct.pack('III',1,1,576))
 test1_token = "233474357"
 test1_url   = "idnes.cz"
 su.write(struct.pack('64s512s',test1_token,test1_url))
-su.load()
+#su.load()
 
 def token_url(token):
-    if(token == test1_token):
-	  return test1_url
-	
-    return "www.root.cz"
+    
+    su.acquire()
+    su.load()
+    su.release()
+    
+    #print(str(su.tokens.keys()))
+
+    # some pretty-printing
+    if token in su.tokens.keys():
+        print "TOKEN " + token + " FOUND!"
+        print "     : " + su.tokens[token]
+        if token in su.used_tokens:
+            print "     : used"
+
+
+    # say farewell
+    if token in su.used_tokens:
+        return "http://localhost/token_reuse_fobidden"
+
+    # hit - send a link and invalidate
+    if token in su.tokens.keys():
+        res = su.tokens[token]
+        su.toggle_used(token) # now is token already invalidated, and MAY be deleted
+        return res
+    
+    # token was not found.
+    print "TOKEN " + token + " NOT found ..."
+    # have some reading.
+    return "http://www.mag0.net/out/smithproxy/Linux-Debian-8.0/0.5/changelog"
 
 
 def authenticate(username, password,token, _SOAPContext = None):
@@ -132,36 +191,47 @@ def authenticate(username, password,token, _SOAPContext = None):
     ipa = socket.inet_aton(ip)
     print "user IP is %s (%s)" % (ip,str(ipa))
     if token:
-	print "   token %s" % str(token)
+        print "   token %s" % str(token)
     
     ret = False
-  
-    st.acquire()
+
+    if not username:
+        username = '<guest>'
     
     if username == password:
-	st.load()
+        print "authenticate: user " + username + " auth failed from " + ip
+        # this will fail authentication, but triggers shm table load
+    
+        st.acquire()
+        st.load()
+        st.release()
+        ret = False
     else:
+        
+        print "authenticate: user " + username + " auth successfull from " + ip
         
         #this is just bloody test
         
-	st.seek(0)
-	r,n,s = st.read_header()
-	print "current version: %d" % (r,)
-	st.read(n*(4+64+128))
-	
-	# end of entries
-	st.write(struct.pack('4s64s128s',ipa,username,"groups_of_"+username))
-	st.seek(0)
-	st.write(struct.pack('III',r+1,n+1,st.row_size))
+        st.acquire()
+        st.load()       # load new data!
+        st.add(ip,username,username+"_group")
+        st.release()
+        
+        #st.seek(0)
+        #r,n,s = st.read_header()
+        #print "current version: %d" % (r,)
+        #st.read(n*(4+64+128))
+        
+        ## end of entries
+        #st.write(struct.pack('4s64s128s',ipa,username,"groups_of_"+username))
+        #st.seek(0)
+        #st.write(struct.pack('III',r+1,n+1,st.row_size))
 
-	# :-D
-	ret = True
-	if token:
-	    ret = token_url(token)
+        # :-D
+        ret = True
+        if token:
+            ret = token_url(token)
 
-    
-    st.release()
-    
     return ret
     
     

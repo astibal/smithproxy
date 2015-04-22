@@ -36,22 +36,32 @@ if "token" in form.keys():
 
 def authenticate(username,password):
 
-    pagename_ok = "Authentication succeeded"
-    caption_ok = "<i>Authentication succeeded</i>"
-    msg_ok = 'You will be now redirected to orignal site.'
-
-    pagename_authfailed = "Authentication failed"
-    caption_authfailed = "<i>Authentication failed... </i>"
-    msg_authfailed = 'Authentication failed. '
+    pagename = "Authentication %s"
+    caption = "<i>Authentication %s</i>"
+    msg_redir = '<small>You will be now redirected to <a href="%s">orignal site</a>.</small>'
+    msg = '<p>... <small>authentication %s!</small></p>'
 
     try:
-	bend = SOAPpy.SOAPProxy("http://localhost:65456/")
+        bend = SOAPpy.SOAPProxy("http://localhost:65456/")
         success = bend.authenticate(username,password,token)
      
         if success:
-	    util.print_message(pagename_ok, caption_ok,msg_ok,redirect_url="http://"+success,redirect_time=0)
+            r = None
+            m = msg % ("succeeded",)
+            
+            # if success is positive, check if it's True, or some string
+            if success != True:
+                # string - this means it's redirection URL
+                if success.startswith('http://') or success.startswith('https://'):
+                    r = success
+                else:
+                    r = "http://" + success
+                    
+                m = msg_redir % r
+                
+	    util.print_message(pagename % ("succeeded",), caption % ("succeeded",),m,redirect_url=r,redirect_time=0)
 	else:
-	    util.print_message(pagename_authfailed,caption_authfailed,msg_authfailed)
+	    util.print_message(pagename % ("failed",),caption % ("failed",),msg % ("failed",))
 	    
     except Exception,e:
 	util.print_message("Whoops!","Exception caught!",str(e))
