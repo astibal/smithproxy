@@ -18,9 +18,12 @@
 
 import sys
 import re
+import zlib
 import fileinput
 import pprint
 import binascii
+
+from smcap_http import *
 
 def list(fnm):
     for line in fileinput.input(files=[fnm,]):
@@ -142,44 +145,99 @@ def pythonize(packets,origins,global_comment="",init_comment="",nice_crlf=True):
     c += "class SmcapData:\n\n"
     c += "    def __init__(self):\n"
     c += "        # let's init this: " + init_comment + "\n"
-    c += "        self.packets = []\n"
+    c += "        self.packets = []  # packet bytes data\n"
+    c += "        self.lines=[]      # durable member attribute containing list of line-based data\n"    
     
     i = 0
+    
+    # DUPLICATE GENERATED OBJECT HERE
+    gen = {}
+    gen['comments']= []
+    gen['packets'] = []
+    gen['lines']   = []
+    gen['packets'] = []
+    gen['origins'] = []
+    
     for p in packets:
         side = "SERVER"
         index = -1
+        lines_index = -1
         if i in origins['client']:
             side = "CLIENT"
             index = origins['client'].index(i)
         else:
             index = origins['server'].index(i)
             
-        c += "        # %d: %s:%d size=%dB\n" % (i,side,index,len(p))
+        com = "        # %d: %s:%d size=%dB\n" % (i,side,index,len(p))
+        c+=com
+        gen['comments'].append(com)
         
         if nice_crlf:
             sep_p = p.split('\r\n')
             if len(sep_p) > 1:
-                c += "        _lines=[]\n"
+                c += "        _lines=[]   # temporary line variable\n"
+                _temp_lines = []
+                
+                c += "        self.have_lines = True\n"   # indicate that we have self.lines attribute
+                gen['have_lines'] = True
+                
                 for s in sep_p:
                     c += "        _lines.append(%s)\n" % repr(str(s),)
+                    _temp_lines.append(str(s))
                 
                 c += "        self.packets.append(\"\\r\\n\".join(_lines))\n\n"
+                gen['packets'].append('\r\n'.join(_temp_lines))
+                
+                c += "        self.lines.append(_lines)\n\n"
+                gen['lines'].append(_temp_lines)
                 
             else:
+                c += "        self.have_lines = False"
+                gen['have_lines'] = True
+                
                 c += "        self.packets.append(%s)\n\n" % repr(str(p),)
+                gen['packets'].append(repr(str(p)))
         else:
+            
             c += "        self.packets.append(%s)\n\n" % repr(str(p),)
+            gen['packets'].append(repr(str(p)))
+                                  
         i += 1
 
     c += "        self.origins = {}\n\n"
+    gen['origins'] = {}
+    
     for k in origins.keys():
         c+= "        self.origins['%s']=%s\n" % (k,origins[k])
+        gen['origins'][k] = origins[k]
 
     c+="\n\n"
-    c+="""
-    """
+    
+    if(detect_http(gen)):
+        c+= "        # detected as HTTP traffic\n"
+        
+        gen['have_http'] = True
+        c+= " "*8 + "self.have_http = True\n"
+        
+        gen['http'] = {}
+        c+= " "*8 + "self.http = {}\n"
+        
+        c+= process_http(gen)
+
+
+
+
+
+
+
+
+
+    #c+= " "*8 + "# -- alternative dict ---------------------------------\n "
+    #c+= " "*8 + str(gen)
+    #c+= "\n\n"
 
     return c
+
 
 def pythonize_file(fnm):
     p,o = read(fnm)
