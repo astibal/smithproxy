@@ -37,7 +37,7 @@
 
 #include <string>
 #include <vector>
-
+#include <iostream>
 
 
 /*
@@ -116,7 +116,7 @@ void test_suite(Shared_Buffer_Type& b, RowType (*generator)(int),const char* mem
             for(typename std::vector<RowType>::iterator i = b.entries().begin(); i != b.entries().end() ; ++i) {
                 RowType& rt = (*i);
                 //printf("%s: %16s \t groups: %s\n",inet_ntoa(*(in_addr*)li.ip),li.username,li.groups);
-                rt.hr();
+                std::cout << rt.hr();
             }
         }
 

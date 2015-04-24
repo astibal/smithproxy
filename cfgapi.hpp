@@ -29,6 +29,8 @@
 #include <ranges.hpp>
 #include <policy.hpp>
 
+#include <cfgapi_auth.hpp>
+
 #define PROTO_ICMP 1
 #define PROTO_TCP  6
 #define PROTO_UDP  17
@@ -49,6 +51,7 @@ extern std::vector<PolicyRule*> cfgapi_obj_policy;
 extern std::map<std::string,ProfileDetection*> cfgapi_obj_profile_detection;
 extern std::map<std::string,ProfileContent*> cfgapi_obj_profile_content;
 extern std::map<std::string,ProfileTls*> cfgapi_obj_profile_tls;
+extern std::map<std::string,ProfileAuth*> cfgapi_obj_profile_auth;
 
 extern std::recursive_mutex cfgapi_write_lock;
 
@@ -75,6 +78,7 @@ int   cfgapi_lookup_proto(const char* name);
 ProfileDetection* cfgapi_lookup_profile_detection(const char* name);
 ProfileContent*   cfgapi_lookup_profile_content(const char* name);
 ProfileTls*   cfgapi_lookup_profile_tls(const char* name);
+ProfileAuth*   cfgapi_lookup_profile_auth(const char* name);
 
 int  cfgapi_load_obj_address();
 int  cfgapi_load_obj_port();
@@ -83,6 +87,7 @@ int  cfgapi_load_obj_policy();
 int  cfgapi_load_obj_profile_content();
 int  cfgapi_load_obj_profile_detection();
 int  cfgapi_load_obj_profile_tls();
+int  cfgapi_load_obj_profile_auth();
 
 int  cfgapi_cleanup_obj_address();
 int  cfgapi_cleanup_obj_port();
@@ -91,6 +96,7 @@ int  cfgapi_cleanup_obj_policy();
 int  cfgapi_cleanup_obj_profile_content();
 int  cfgapi_cleanup_obj_profile_detection();
 int  cfgapi_cleanup_obj_profile_tls();
+int  cfgapi_cleanup_obj_profile_auth();
 
 int cfgapi_obj_policy_match(baseProxy* proxy);
 int cfgapi_obj_policy_match(std::vector<baseHostCX*>& left, std::vector<baseHostCX*>& right);
@@ -105,5 +111,6 @@ void cfgapi_log_version(bool warn_delay=true);
 ProfileContent* cfgapi_obj_policy_profile_content(int index);
 ProfileDetection* cfgapi_obj_policy_profile_detection(int index);
 ProfileTls* cfgapi_obj_policy_profile_tls(int index);
+ProfileAuth* cfgapi_obj_policy_profile_auth(int index);
 
 #endif

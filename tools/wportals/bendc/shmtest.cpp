@@ -19,7 +19,7 @@
 
 /*
  *  Compile and link:
- *  g++ -I. shmtest.cpp -std=c++11 -o shmtest -pthread -lrt
+ *  g++ -I. -I ../../../../socle/common/ shmtest.cpp -std=c++11 -o shmtest -pthread -lrt
  */
 
 #include <cstdio> 
@@ -51,21 +51,8 @@
 
 #include <shmtable.hpp>
 #include <shmtestsuite.hpp>
+#include <cfgapi_auth.hpp>
 
-struct logon_info {
-    char  ip[4];
-    char  username[64];
-    char  groups[128];
-    
-    void hr() { printf("%s : %16s \t groups: %s\n",inet_ntoa(*(in_addr*)ip),username,groups); }
-};
-
-struct logon_token {
-    char   token[64];
-    char   url[512];
-    
-    void hr() { printf("%s : %16s\n",token,url); };
-};
 
 logon_info generator_li(int i) {
     

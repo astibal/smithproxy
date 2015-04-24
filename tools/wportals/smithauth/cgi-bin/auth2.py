@@ -22,6 +22,7 @@
 # Import modules for CGI handling 
 import cgi, cgitb 
 import util
+import os
 import SOAPpy
 
 # Create instance of FieldStorage 
@@ -34,6 +35,8 @@ token = None
 if "token" in form.keys():
   token = form["token"].value
 
+ip = os.environ["REMOTE_ADDR"]
+
 def authenticate(username,password):
 
     pagename = "Authentication %s"
@@ -43,7 +46,7 @@ def authenticate(username,password):
 
     try:
         bend = SOAPpy.SOAPProxy("http://localhost:65456/")
-        success = bend.authenticate(username,password,token)
+        success = bend.authenticate(ip,username,password,token)
      
         if success:
             r = None
@@ -59,12 +62,12 @@ def authenticate(username,password):
                     
                 m = msg_redir % r
                 
-	    util.print_message(pagename % ("succeeded",), caption % ("succeeded",),m,redirect_url=r,redirect_time=0)
-	else:
-	    util.print_message(pagename % ("failed",),caption % ("failed",),msg % ("failed",))
-	    
+            util.print_message(pagename % ("succeeded",), caption % ("succeeded",),m,redirect_url=r,redirect_time=0)
+        else:
+            util.print_message(pagename % ("failed",),caption % ("failed",),msg % ("failed",))
+        
     except Exception,e:
-	util.print_message("Whoops!","Exception caught!",str(e))
+        util.print_message("Whoops!","Exception caught!",str(e))
 
 authenticate(username,password)
 

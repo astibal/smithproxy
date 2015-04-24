@@ -24,6 +24,7 @@
 #include <mitmhost.hpp>
 #include <logger.hpp>
 #include <cfgapi.hpp>
+#include <cfgapi_auth.hpp>
 #include <sockshostcx.hpp>
 
 
@@ -68,6 +69,41 @@ MitmProxy::~MitmProxy() {
     delete tlog_;
 }
 
+bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
+    
+    if(identity_resolved())
+        return true;
+    
+    bool ret = false;
+    
+    DIA_("identity check: source IP: %s",cx->host().c_str());
+    
+    cfgapi_auth_shm_ip_table_refresh();
+    DEB_("identity check: table size: %d", auth_ip_map.size());
+    auto ip = auth_ip_map.find(cx->host());
+
+    if (ip != auth_ip_map.end()) {
+        logon_info& li = (*ip).second;
+        DIA_("identity check: user %s groups: %s",li.username, li.groups);
+        
+        identity(li);
+        identity_resolved(true);    
+        
+        ret = true;
+    } else {
+        if (insert_guest == true) {
+            logon_info li = logon_info(cx->host().c_str(),"guest","");
+            identity(li);
+            identity_resolved(true);
+            
+            ret = true;
+        }
+    }
+    
+    return ret;
+}
+
+
 void MitmProxy::on_left_bytes(baseHostCX* cx) {
         
     if(write_payload()) {
@@ -83,10 +119,22 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
     
     MitmHostCX* mh = dynamic_cast<MitmHostCX*>(cx);
     if(mh != nullptr) {
-	if(mh->replacement() > MitmHostCX::REPLACE_NONE) {
-	    redirected = true;
-	    handle_replacement(mh);
-	}
+        
+        if(opt_auth_authenticate || opt_auth_resolve) {
+        
+            resolve_identity(cx);
+            
+            if(!identity_resolved()) {        
+                INFS_("identity check: unknown");
+                
+                if(opt_auth_authenticate && mh->replace_type == MitmHostCX::REPLACETYPE_HTTP) {
+                
+                    mh->replacement(MitmHostCX::REPLACE_REDIRECT);
+                    redirected = true;
+                    handle_replacement(mh);
+                }
+            }
+        }
     }
     
     
@@ -129,9 +177,12 @@ void MitmProxy::on_left_error(baseHostCX* cx) {
         tlog()->left_write("Client side connection closed: " + cx->name() + "\n");
     }
     
+    if(opt_auth_resolve)
+        resolve_identity(cx);
 
-    INF_("Connection from %s closed, sent=%d/%dB received=%d/%dB, flags=%c",
+    INF_("Connection from %s closed, user=%s, sent=%d/%dB received=%d/%dB, flags=%c",
                         cx->full_name('L').c_str(),
+                                     (identity_resolved() ? identity().username : ""),
                                         cx->meter_read_count,cx->meter_read_bytes,
                                                             cx->meter_write_count, cx->meter_write_bytes,
                                                                         'L');
@@ -149,9 +200,13 @@ void MitmProxy::on_right_error(baseHostCX* cx)
     }
     
 //         INF_("Created new proxy 0x%08x from %s:%s to %s:%d",new_proxy,f,f_p, t,t_p );
+
+    if(opt_auth_resolve)
+        resolve_identity(cx);
     
-    INF_("Connection from %s closed, sent=%d/%dB received=%d/%dB, flags=%c",
+    INF_("Connection from %s closed, user=%s, sent=%d/%dB received=%d/%dB, flags=%c",
                             cx->full_name('R').c_str(), 
+                                     (identity_resolved() ? identity().username : ""),         
                                             cx->meter_write_count, cx->meter_write_bytes,
                                                             cx->meter_read_count,cx->meter_read_bytes,
                                                                     'R');
@@ -170,24 +225,37 @@ void MitmProxy::handle_replacement(MitmHostCX* cx) {
     
     std::string block("<!DOCTYPE html><html><body><h1>Page has been blocked</h1><p>Access has been blocked by smithproxy. Get over it.</p></body></html>");
     
-    switch(cx->replacement()) {
-	case MitmHostCX::REPLACE_REDIRECT:
-	  
-	  srand(time(nullptr) % ((unsigned long)cx));
-	  redir_hint = rand();
-	  
-	  repl = redir_pre + "http://127.0.0.1:65444/smithredir?hint=" + std::to_string(redir_hint) + redir_suf;
+    //cx->host().c_str()
+    
+    if (cx->replacement() == MitmHostCX::REPLACE_REDIRECT) {
+	  //srand(time(nullptr) % ((unsigned long)cx));
+	  //redir_hint = rand();
+
+      logon_token tok = logon_token(cx->request->original_request().c_str());
+      
+      INF_("MitmProxy::handle_replacement: new auth token %s for request: %s",tok.token,cx->request->hr().c_str());
+      repl = redir_pre + "http://192.168.254.1:8008/cgi-bin/auth.py?token=" + tok.token + redir_suf;
+      
 	  cx->to_write((unsigned char*)repl.c_str(),repl.size());
 	  cx->close_after_write(true);
-	  break;
+      
+      cfgapi_auth_shm_token_table_refresh();
+      
+      auth_shm_token_map.entries().push_back(tok);
+      auth_shm_token_map.acquire();
+      auth_shm_token_map.save(true);
+      auth_shm_token_map.release();
+      INFS_("MitmProxy::handle_replacement: token table updated");
+      
+    } else
+    if (cx->replacement() == MitmHostCX::REPLACE_BLOCK) {
 
-	case MitmHostCX::REPLACE_BLOCK:
 	  repl = block;
 	  cx->to_write((unsigned char*)repl.c_str(),repl.size());
 	  cx->close_after_write(true);
 	  
-	  break;
-	case MitmHostCX::REPLACE_NONE:
+    } else
+    if (cx->replacement() == MitmHostCX::REPLACE_NONE) {
 	    DIAS_("void MitmProxy::handle_replacement: asked to handle NONE. No-op.");
     } 
 }
@@ -230,7 +298,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
         just_accepted_cx->name();
         just_accepted_cx->com()->resolve_socket_src(just_accepted_cx->socket(),&h,&p);
         
-	just_accepted_cx->peer(target_cx);
+        just_accepted_cx->peer(target_cx);
         target_cx->peer(just_accepted_cx);          
 
 

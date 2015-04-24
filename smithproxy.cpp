@@ -278,6 +278,7 @@ void load_config(std::string& config_f) {
         cfgapi_load_obj_profile_detection();
         cfgapi_load_obj_profile_content();
         cfgapi_load_obj_profile_tls();
+        cfgapi_load_obj_profile_auth();
         
         cfgapi_load_obj_policy();
         

@@ -38,6 +38,7 @@
 #include <threadedacceptor.hpp>
 #include <threadedreceiver.hpp>
 #include <traflog.hpp>
+#include <cfgapi_auth.hpp>
 
 class MitmProxy : public baseProxy {
     
@@ -46,7 +47,19 @@ protected:
     
     bool write_payload_ = false;
     
+    bool       identity_resolved_ = false;    // meant if attempt has been done, regardless of it's result.
+    logon_info identity_;
 public: 
+    bool opt_auth_authenticate = false;
+    bool opt_auth_resolve = false;
+    
+    
+    inline bool identity_resolved() { return identity_resolved_; };
+    inline void identity_resolved(bool b) { identity_resolved_ = b; };
+    logon_info& identity() { return identity_; }
+    void identity(logon_info& i) { identity_ = i; }
+    bool resolve_identity(baseHostCX*,bool);
+    
     bool write_payload(void) { return write_payload_; } 
     void write_payload(bool b) { write_payload_ = b; }
     

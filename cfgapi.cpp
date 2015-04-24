@@ -28,6 +28,8 @@
 #include <socle.hpp>
 #include <smithproxy.hpp>
 
+#include <shmtable.hpp>
+
 Config cfgapi;
 std::map<std::string,CIDR*> cfgapi_obj_address;
 std::map<std::string,range> cfgapi_obj_port;
@@ -36,6 +38,8 @@ std::vector<PolicyRule*> cfgapi_obj_policy;
 std::map<std::string,ProfileDetection*> cfgapi_obj_profile_detection;
 std::map<std::string,ProfileContent*> cfgapi_obj_profile_content;
 std::map<std::string,ProfileTls*> cfgapi_obj_profile_tls;
+std::map<std::string,ProfileAuth*> cfgapi_obj_profile_auth;
+
 std::recursive_mutex cfgapi_write_lock;
 
 struct cfgapi_table_ cfgapi_table;
@@ -119,6 +123,17 @@ ProfileTls* cfgapi_lookup_profile_tls(const char* name) {
     
     if(cfgapi_obj_profile_tls.find(name) != cfgapi_obj_profile_tls.end()) {
         return cfgapi_obj_profile_tls[name];
+    }    
+    
+    return nullptr;
+}
+
+
+ProfileAuth* cfgapi_lookup_profile_auth(const char* name) {
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    
+    if(cfgapi_obj_profile_auth.find(name) != cfgapi_obj_profile_auth.end()) {
+        return cfgapi_obj_profile_auth[name];
     }    
     
     return nullptr;
@@ -391,6 +406,7 @@ int cfgapi_load_obj_policy() {
                 std::string name_content;
                 std::string name_detection;
                 std::string name_tls;
+                std::string name_auth;
                 
                 if(cur_object.lookupValue("detection_profile",name_detection)) {
                     ProfileDetection* prf  = cfgapi_lookup_profile_detection(name_detection.c_str());
@@ -398,7 +414,7 @@ int cfgapi_load_obj_policy() {
                         DIA_("cfgapi_load_policy[#%d]: detect profile %s",i,name_detection.c_str());
                         rule->profile_detection = prf;
                     } else {
-                        DIA_("cfgapi_load_policy[#%d]: detect profile %s cannot be loaded",i,name_detection.c_str());
+                        ERR_("cfgapi_load_policy[#%d]: detect profile %s cannot be loaded",i,name_detection.c_str());
                         error = true;
                     }
                 }
@@ -409,7 +425,7 @@ int cfgapi_load_obj_policy() {
                         DIA_("cfgapi_load_policy[#%d]: content profile %s",i,name_content.c_str());
                         rule->profile_content = prf;
                     } else {
-                        DIA_("cfgapi_load_policy[#%d]: content profile %s cannot be loaded",i,name_content.c_str());
+                        ERR_("cfgapi_load_policy[#%d]: content profile %s cannot be loaded",i,name_content.c_str());
                         error = true;
                     }
                 }                
@@ -419,17 +435,27 @@ int cfgapi_load_obj_policy() {
                         DIA_("cfgapi_load_policy[#%d]: tls profile %s",i,name_tls.c_str());
                         rule->profile_tls= tls;
                     } else {
-                        DIA_("cfgapi_load_policy[#%d]: tls profile %s cannot be loaded",i,name_tls.c_str());
+                        ERR_("cfgapi_load_policy[#%d]: tls profile %s cannot be loaded",i,name_tls.c_str());
                         error = true;
                     }
-                }                      
+                }         
+                if(cur_object.lookupValue("auth_profile",name_auth)) {
+                    ProfileAuth* auth  = cfgapi_lookup_profile_auth(name_auth.c_str());
+                    if(auth != nullptr) {
+                        DIA_("cfgapi_load_policy[#%d]: auth profile %s",i,name_auth.c_str());
+                        rule->profile_auth= auth;
+                    } else {
+                        ERR_("cfgapi_load_policy[#%d]: auth profile %s cannot be loaded",i,name_auth.c_str());
+                        error = true;
+                    }
+                }                  
             }
             
             if(!error){
                 DIA_("cfgapi_load_policy[#%d]: ok",i);
                 cfgapi_obj_policy.push_back(rule);
             } else {
-                DIA_("cfgapi_load_policy[#%d]: not ok (will not process traffic)",i);
+                ERR_("cfgapi_load_policy[#%d]: not ok (will not process traffic)",i);
             }
         }
     }
@@ -536,6 +562,22 @@ ProfileTls* cfgapi_obj_policy_profile_tls(int index) {
         return nullptr;
     }
 }
+
+ProfileAuth* cfgapi_obj_policy_profile_auth(int index) {
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    
+    if(index < 0) {
+        return nullptr;
+    }
+    
+    if(index < (signed int)cfgapi_obj_policy.size()) {
+        return cfgapi_obj_policy.at(index)->profile_auth;
+    } else {
+        DIA_("cfgapi_obj_policy_profile_auth[#%d]: out of bounds, nullptr",index);
+        return nullptr;
+    }
+}
+
 
 
 int cfgapi_load_obj_profile_detection() {
@@ -661,6 +703,47 @@ int cfgapi_load_obj_profile_tls() {
 }
 
 
+
+int cfgapi_load_obj_profile_auth() {
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    
+    int num = 0;
+    
+    INFS_("cfgapi_load_obj_profile_auth: start");
+    
+    if(cfgapi.getRoot().exists("auth_profiles")) {
+
+        num = cfgapi.getRoot()["auth_profiles"].getLength();
+        INF_("cfgapi_load_obj_profile_auth: found %d objects",num);
+        
+        Setting& curr_set = cfgapi.getRoot()["auth_profiles"];
+
+        for( int i = 0; i < num; i++) {
+            std::string name;
+            ProfileAuth* a = new ProfileAuth;
+            
+            Setting& cur_object = curr_set[i];
+            
+            name = cur_object.getName();
+
+            DEB_("cfgapi_load_obj_profile_auth: processing '%s'",name.c_str());
+            
+            a->name = name;
+            cur_object.lookupValue("authenticate",a->authenticate);
+            cur_object.lookupValue("resolve",a->resolve);
+            
+            cfgapi_obj_profile_auth[name] = a;
+            
+            DIA_("cfgapi_load_obj_profile_auth: '%s': ok",name.c_str());
+        }
+    }
+    
+    return num;
+}
+
+
+
+
 int cfgapi_cleanup_obj_address() {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
@@ -756,6 +839,21 @@ int cfgapi_cleanup_obj_profile_tls() {
     return r;
 }
 
+int cfgapi_cleanup_obj_profile_auth() {
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    
+    int r = cfgapi_obj_profile_auth.size();
+    for(std::map<std::string, ProfileAuth*>::iterator i = cfgapi_obj_profile_auth.begin(); i != cfgapi_obj_profile_auth.end(); ++i) {
+        std::pair<std::string,ProfileAuth*> t = (*i);
+        ProfileAuth* c = t.second;
+        if (c != nullptr) delete c;
+    }
+    cfgapi_obj_profile_auth.clear();
+    
+    return r;
+}
+
+
 int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
@@ -767,6 +865,7 @@ int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
         ProfileContent* pc  = cfgapi_obj_policy_profile_content(policy_num);
         ProfileDetection* pd = cfgapi_obj_policy_profile_detection(policy_num);
         ProfileTls* pt = cfgapi_obj_policy_profile_tls(policy_num);
+        ProfileAuth* pa = cfgapi_obj_policy_profile_auth(policy_num);
         
         const char* pc_name = "none";
         const char* pc_global_no = "global_no";
@@ -775,6 +874,7 @@ int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
         
         const char* pd_name = "none";
         const char* pt_name = "none";
+        const char* pa_name = "none";
         
         /* Processing content profile */
         
@@ -824,9 +924,9 @@ int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
         if(pt != nullptr) {
             bool tls_applied = false;
             
-	    // we should also apply tls profile to originating side! Verification is not in effect, but BYPASS is!
-	    cfgapi_obj_policy_apply_tls(pt,mitm_originator->com());
-	    
+            // we should also apply tls profile to originating side! Verification is not in effect, but BYPASS is!
+            cfgapi_obj_policy_apply_tls(pt,mitm_originator->com());
+            
             for( cx_iterator i = mitm_proxy->rs().begin(); i != mitm_proxy->rs().end() ; ++i ) {
                 baseHostCX* cx = (*i);
                 baseCom* xcom = cx->com();
@@ -840,7 +940,17 @@ int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
                 pt_name = pt->name.c_str();
             }
         } 
-        INF_("Connection %s accepted by policy #%d, prof_c=%s, prof_d=%s prof_tls=%s",originator->full_name('L').c_str(),policy_num,pc_name,pd_name,pt_name);
+        
+        /* Processing Auth profile */
+        if(pa != nullptr) {
+            // auth is applied on proxy
+            mitm_proxy->opt_auth_authenticate = pa->authenticate;
+            mitm_proxy->opt_auth_resolve = pa->resolve;
+            
+            pa_name = pa->name.c_str();
+        } 
+        
+        INF_("Connection %s accepted by policy #%d, prof_c=%s, prof_d=%s prof_tls=%s prof_auth=%s",originator->full_name('L').c_str(),policy_num,pc_name,pd_name,pt_name,pa_name);
         
     } else {
         INF_("Connection %s denied by policy #%d.",originator->full_name('L').c_str(),policy_num);

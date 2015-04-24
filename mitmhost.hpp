@@ -46,6 +46,8 @@ public:
 struct ApplicationData {
     virtual ~ApplicationData() {};
     virtual std::string hr() = 0;
+    virtual std::string original_request() = 0; // parent request
+    virtual std::string request() = 0;
 };
 struct app_HttpRequest : public ApplicationData {
     virtual ~app_HttpRequest() {};
@@ -53,7 +55,27 @@ struct app_HttpRequest : public ApplicationData {
     std::string host;
     std::string uri;
     std::string params;
-    virtual std::string hr() { return host+uri+params; }
+    std::string referer;
+    
+    // this function returns most usable link for visited site from the request.
+    virtual std::string original_request() {
+        if(referer.size() > 0) {
+            INF_("std::string original_request: using referer: %s",referer.c_str());
+            return referer;
+        }
+        
+        INF_("std::string original_request: using request: %s",request().c_str());
+        return request();
+    }
+    virtual std::string request() {
+        
+        if(uri == "/favicon.ico") {
+            INFS_("std::string original_request: avoiding favicon.ico");
+            return host;
+        }
+        return host+uri+params;
+    };
+    virtual std::string hr() { std::string ret = host+uri+params; if(referer.size()>0) { ret +=(" via "+referer); }; return ret; }
 };
 
 class MitmHostCX : public AppHostCX {
@@ -73,6 +95,9 @@ public:
 
     int matched_policy() { return matched_policy_; }
     void matched_policy(int p) { matched_policy_ = p; }
+
+    typedef enum { REPLACETYPE_NONE=0, REPLACETYPE_HTTP=1} replacetype_flags;    
+    replacetype_flags replace_type = REPLACETYPE_NONE; 
 
     typedef enum { REPLACE_NONE=0, REPLACE_REDIRECT=1, REPLACE_BLOCK=2 } replace_flags;    
     void replacement(replace_flags i) { replacement_ = i; }

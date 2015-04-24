@@ -85,7 +85,7 @@ class ShmBuffer:
 
     def cleanup(self):
         self.semaphore.release()
-        time.sleep(5)
+        time.sleep(2)
         self.semaphore.acquire()
 
         self.mapfile.close()

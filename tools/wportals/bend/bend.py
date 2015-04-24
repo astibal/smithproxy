@@ -95,8 +95,8 @@ class TokenTable(ShmTable):
         self.active_queue = []    # add everything here. After size grows to some point, start
                                # deleting also active unused yed tokens
     
-        self.delete_used_threshold =   1   # 1 means immediately
-        self.delete_active_threshold = 10  # mark oldest tokens above this margin as used
+        self.delete_used_threshold =   5   # 1 means immediately
+        self.delete_active_threshold = 200  # mark oldest tokens above this margin as used
     
     def on_new_table(self):
         ShmTable.on_new_table(self)
@@ -125,15 +125,36 @@ class TokenTable(ShmTable):
                 self.tokens.pop(t,None)
                 
             self.used_tokens = []
+            self.save(True)
             
-            
+
     def life_queue(self,token):
         self.active_queue.append(token)
-        if len(self.active_queue) > self.delete_active_threshold:
-            print "life_queue: too many active tokens, dropping " + token
-            self.toggle_used(token)
+        
+        while len(self.active_queue) > self.delete_active_threshold:
+            oldest_token = self.active_queue[0]
+            print "life_queue: too many active tokens, dropping oldest one " + oldest_token
+            self.toggle_used(oldest_token)
+            self.active_queue = self.active_queue[1:]
         
     
+    def save(self, inc_version=False):
+        self.seek(0)
+        self.clear()
+        self.write_header(inc_version,len(self.tokens.keys()))
+        
+        write_cnt = 0
+        for k in self.tokens.keys():
+              try:
+                  self.write(struct.pack("64s512s",k,self.tokens[k]))
+                  write_cnt = write_cnt + 1
+              except IndexError:
+                  continue
+
+        print "save: %d tokens written to table" % (write_cnt,)
+
+        
+        self.normalize = False # each dump effectively normalizes db
         
 
 
@@ -155,9 +176,14 @@ su.write(struct.pack('64s512s',test1_token,test1_url))
 
 def token_url(token):
     
+    print "token_url: start, acquiring semaphore"
+    
     su.acquire()
+    print "token_url: start, semaphore acquired, loading.."
     su.load()
+    print "token_url: start, token  table loaded"
     su.release()
+    print "token_url: start, semaphore released"
     
     #print(str(su.tokens.keys()))
 
@@ -185,11 +211,11 @@ def token_url(token):
     return "http://www.mag0.net/out/smithproxy/Linux-Debian-8.0/0.5/changelog"
 
 
-def authenticate(username, password,token, _SOAPContext = None):
+def authenticate(ip, username, password,token, _SOAPContext = None):
 
-    ip  = _SOAPContext.connection.getpeername()[0]
+    #ip  = _SOAPContext.connection.getpeername()[0]
     ipa = socket.inet_aton(ip)
-    print "user IP is %s (%s)" % (ip,str(ipa))
+    print "authenticate: request: user %s from %s" % (username,ip)
     if token:
         print "   token %s" % str(token)
     
