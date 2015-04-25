@@ -45,6 +45,8 @@ public:
 
 struct ApplicationData {
     virtual ~ApplicationData() {};
+    bool is_ssl = false;
+    
     virtual std::string hr() = 0;
     virtual std::string original_request() = 0; // parent request
     virtual std::string request() = 0;
@@ -57,6 +59,7 @@ struct app_HttpRequest : public ApplicationData {
     std::string params;
     std::string referer;
     std::string proto;
+    
     
     // this function returns most usable link for visited site from the request.
     virtual std::string original_request() {

@@ -106,5 +106,9 @@ extern std::unordered_map<std::string,logon_info> auth_ip_map;
 extern shared_table<logon_info>  auth_shm_ip_map;
 extern shared_table<logon_token> auth_shm_token_map;
 
+// authentication token cache
+extern std::recursive_mutex cfgapi_identity_token_lock;
+extern std::unordered_map<std::string,std::pair<unsigned int,std::string>> cfgapi_identity_token_cache; // per-ip token cache. Entry is valid for
+extern unsigned int cfgapi_identity_token_timeout; // token expires _from_cache_ after this timeout (in seconds).
 
 #endif

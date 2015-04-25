@@ -217,13 +217,19 @@ void MitmProxy::on_right_error(baseHostCX* cx)
 
 void MitmProxy::handle_replacement(MitmHostCX* cx) {
   
-    //std::string redir("<script>window.location=\"http://www.mojebanka.cz/\";</script>");
-    std::string redir_pre("<script>window.location=\"");
-    std::string redir_suf("\";</script>");  
+    std::string redir_pre("<!DOCTYPE html><html><head><script>window.location=\"");
+    std::string redir_suf("\";</script></head><body></body></html>");  
+  
+//     std::string redir_pre("HTTP/1.0 301 Moved Permanently\r\nLocation: ");
+//     std::string redir_suf("\r\n\r\n");  
+  
+    
     std::string repl;
+    std::string repl_port = "8008";
+    std::string repl_proto = "http";
     int 	redir_hint = 0;
     
-    std::string block("<!DOCTYPE html><html><body><h1>Page has been blocked</h1><p>Access has been blocked by smithproxy. Get over it.</p></body></html>");
+    std::string block("HTTP/1.0 OK\r\n<!DOCTYPE html><html><body><h1>Page has been blocked</h1><p>Access has been blocked by smithproxy. Get over it.</p></body></html>");
     
     //cx->host().c_str()
     
@@ -231,22 +237,56 @@ void MitmProxy::handle_replacement(MitmHostCX* cx) {
 	  //srand(time(nullptr) % ((unsigned long)cx));
 	  //redir_hint = rand();
 
-      logon_token tok = logon_token(cx->request->original_request().c_str());
-      
-      INF_("MitmProxy::handle_replacement: new auth token %s for request: %s",tok.token,cx->request->hr().c_str());
-      repl = redir_pre + "http://192.168.254.1:8008/cgi-bin/auth.py?token=" + tok.token + redir_suf;
-      
-	  cx->to_write((unsigned char*)repl.c_str(),repl.size());
-	  cx->close_after_write(true);
-      
-      cfgapi_auth_shm_token_table_refresh();
-      
-      auth_shm_token_map.entries().push_back(tok);
-      auth_shm_token_map.acquire();
-      auth_shm_token_map.save(true);
-      auth_shm_token_map.release();
-      INFS_("MitmProxy::handle_replacement: token table updated");
-      
+	  cfgapi_identity_token_lock.lock();
+	  auto id_token = cfgapi_identity_token_cache.find(cx->host());
+	  
+	  if(id_token != cfgapi_identity_token_cache.end()) {
+	      INF_("found a cached token for %s",cx->host().c_str());
+	      std::pair<unsigned int,std::string>& cache_entry = (*id_token).second;
+	      
+	      unsigned int now      = time(nullptr);
+	      unsigned int token_ts = cache_entry.first;
+	      std::string& token_tk = cache_entry.second;
+	      
+	      if(now - token_ts < cfgapi_identity_token_timeout) {
+		  INF_("MitmProxy::handle_replacement: cached token %s for request: %s",token_tk.c_str(),cx->request->hr().c_str());
+		  
+		  if(cx->request->is_ssl) {
+		      repl_proto = "https";
+		      repl_port = "8043";
+		  }
+		  
+		  repl = redir_pre + repl_proto + "://192.168.254.1:"+repl_port+"/cgi-bin/auth.py?token=" + token_tk + redir_suf;
+		  cx->to_write((unsigned char*)repl.c_str(),repl.size());
+		  cx->close_after_write(true);
+	      } else {
+		  INF_("MitmProxy::handle_replacement: expired token %s for request: %s",token_tk.c_str(),cx->request->hr().c_str());
+		  goto new_token;
+	      }
+	  } else {
+	  
+	      new_token:
+	    
+	      logon_token tok = logon_token(cx->request->original_request().c_str());
+	      
+	      INF_("MitmProxy::handle_replacement: new auth token %s for request: %s",tok.token,cx->request->hr().c_str());
+	      repl = redir_pre + "http://192.168.254.1:8008/cgi-bin/auth.py?token=" + tok.token + redir_suf;
+	      
+		  cx->to_write((unsigned char*)repl.c_str(),repl.size());
+		  cx->close_after_write(true);
+	      
+	      cfgapi_auth_shm_token_table_refresh();
+	      
+	      auth_shm_token_map.entries().push_back(tok);
+	      auth_shm_token_map.acquire();
+	      auth_shm_token_map.save(true);
+	      auth_shm_token_map.release();
+	      
+	      INFS_("MitmProxy::handle_replacement: token table updated");
+	      cfgapi_identity_token_cache[cx->host()] = std::pair<unsigned int,std::string>(time(nullptr),tok.token);
+	  }
+	  
+	  cfgapi_identity_token_lock.unlock();
     } else
     if (cx->replacement() == MitmHostCX::REPLACE_BLOCK) {
 

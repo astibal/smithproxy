@@ -22,12 +22,15 @@ import SOAPpy
 import time
 import cgi, cgitb 
 import util
+import os
 
 #	removed head:
 # 	<link rel=stylesheet type="text/css" href="/css/styles.css">	
 #	<script type="text/javascript" src="/js/keyboard.js" charset="UTF-8"></script>
 # 	<link rel="stylesheet" type="text/css" href="/css/keyboard.css">
 form = cgi.FieldStorage() 
+
+ref = os.environ["HTTP_REFERER"]
 
 token = None
 if "token" in form.keys():
@@ -65,6 +68,11 @@ try:
 	  print page % (tok_str,)
 	else:
 	  print page % ('',)
+	  
+        bend = SOAPpy.SOAPProxy("http://localhost:65456/")
+        
+        if ref:
+	    bend.save_referer(token,ref)
 
 except Exception, e:
 	util.print_message("Error","Error occured:", str(e),"/error.html")

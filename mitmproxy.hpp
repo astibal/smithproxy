@@ -49,6 +49,7 @@ protected:
     
     bool       identity_resolved_ = false;    // meant if attempt has been done, regardless of it's result.
     logon_info identity_;
+    
 public: 
     bool opt_auth_authenticate = false;
     bool opt_auth_resolve = false;

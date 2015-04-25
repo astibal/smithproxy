@@ -31,6 +31,8 @@ import SOAPpy
 
 
 
+global_token_referer = {}
+
 class LogonTable(ShmTable):             
 
     def __init__(self):
@@ -256,16 +258,27 @@ def authenticate(ip, username, password,token, _SOAPContext = None):
         # :-D
         ret = True
         if token:
+	    if token in global_token_referer.keys():
+	        ref = global_token_referer[token]
+		print "token " + token + " global referer: " + ref
+		return ref
             ret = token_url(token)
 
     return ret
+
+def save_referer(token,ref):
+    print "Saving global referer: "
+    print "   token: " + token
+    print "   referer: " + ref
     
+    global_token_referer[token] = ref
     
 try:
 
     server = SOAPpy.SOAPServer(("localhost", 65456))
 
     server.registerFunction( SOAPpy.MethodSig(authenticate, keywords=0, context=1))
+    server.registerFunction(save_referer)
     server.serve_forever()
     
 except KeyboardInterrupt, e:

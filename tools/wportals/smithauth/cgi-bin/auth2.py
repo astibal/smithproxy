@@ -36,6 +36,7 @@ if "token" in form.keys():
   token = form["token"].value
 
 ip = os.environ["REMOTE_ADDR"]
+ref= os.environ["HTTP_REFERER"]
 
 def authenticate(username,password):
 

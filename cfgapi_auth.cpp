@@ -7,6 +7,11 @@ std::unordered_map<std::string,logon_info> auth_ip_map;
 shared_table<logon_info>  auth_shm_ip_map;
 shared_table<logon_token> auth_shm_token_map;
 
+// authentication token cache
+std::recursive_mutex cfgapi_identity_token_lock;
+std::unordered_map<std::string,std::pair<unsigned int,std::string>> cfgapi_identity_token_cache; // per-ip token cache. Entry is valid for
+unsigned int cfgapi_identity_token_timeout = 60; // token expires _from_cache_ after this timeout (in seconds).
+
 
 int cfgapi_auth_shm_ip_table_refresh()  {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
@@ -71,6 +76,5 @@ int cfgapi_auth_shm_token_table_refresh()  {
     }
     
     return 0;
-}
-
+};
 

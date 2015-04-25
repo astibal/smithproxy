@@ -47,7 +47,7 @@ class ShmTable(ShmBuffer):
         self.version = a
 
     def load(self):
-        print "---load:"
+        # print "---load:"
         self.seek(0)
         v,n,r = self.read_header()
         
@@ -56,9 +56,11 @@ class ShmTable(ShmBuffer):
             return False
         
         if not self.is_updated(v):
-            print "---same version: %d, entries: %d, rowsize: %s" % (v,n,r)
+            #print "---same version: %d, entries: %d, rowsize: %s" % (v,n,r)
+            pass
         else:
-            print "---updated version: %d, entries: %d" % (v,n)
+            #print "---updated version: %d, entries: %d" % (v,n)
+            pass
         
             self.on_new_version(self.version,v)
 
@@ -73,7 +75,7 @@ class ShmTable(ShmBuffer):
             if self.normalize:
                 self.save(True)    
                 # despite this is not really necessary, we will do so, in order to act following common-sense.
-                print "NORMALIZED"
+                # print "NORMALIZED"
 
 
     def save(self, inc_version=False):
