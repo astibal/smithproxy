@@ -56,6 +56,7 @@ struct app_HttpRequest : public ApplicationData {
     std::string uri;
     std::string params;
     std::string referer;
+    std::string proto;
     
     // this function returns most usable link for visited site from the request.
     virtual std::string original_request() {
@@ -73,9 +74,9 @@ struct app_HttpRequest : public ApplicationData {
             INFS_("std::string original_request: avoiding favicon.ico");
             return host;
         }
-        return host+uri+params;
+        return proto+host+uri+params;
     };
-    virtual std::string hr() { std::string ret = host+uri+params; if(referer.size()>0) { ret +=(" via "+referer); }; return ret; }
+    virtual std::string hr() { std::string ret = proto+host+uri+params; if(referer.size()>0) { ret +=(" via "+referer); }; return ret; }
 };
 
 class MitmHostCX : public AppHostCX {

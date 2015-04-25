@@ -173,9 +173,15 @@ void MitmHostCX::on_detect(duplexFlowMatch* x_sig, flowMatchState& s, vector_ran
                     }
                 }
             }
+            
 
             app_HttpRequest* app_request = dynamic_cast<app_HttpRequest*>(request);
             if(app_request != nullptr) {
+                // detect protocol (plain vs ssl)
+		SSLCom* proto_com = dynamic_cast<SSLCom*>(com());
+		proto_com != nullptr ? app_request->proto="https://" : app_request->proto="http://" ;
+
+	      
                 INF_("Connection www request: %s",app_request->hr().c_str());
             } else {
                 INF_("Connection www request: %s (app_request cast failed)",print_request.c_str());
