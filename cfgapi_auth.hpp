@@ -111,4 +111,8 @@ extern std::recursive_mutex cfgapi_identity_token_lock;
 extern std::unordered_map<std::string,std::pair<unsigned int,std::string>> cfgapi_identity_token_cache; // per-ip token cache. Entry is valid for
 extern unsigned int cfgapi_identity_token_timeout; // token expires _from_cache_ after this timeout (in seconds).
 
+extern std::string cfgapi_identity_portal_address;
+extern std::string cfgapi_identity_portal_port_http;
+extern std::string cfgapi_identity_portal_port_https;
+
 #endif

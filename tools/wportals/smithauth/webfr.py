@@ -18,14 +18,62 @@
 
 
 
-import BaseHTTPServer
+import BaseHTTPServer, SimpleHTTPServer
+import ssl
 import CGIHTTPServer
+import pylibconfig2 as cfg
+import sys
+import os
+import time
 
-def run(server_class=BaseHTTPServer.HTTPServer,
+
+
+def run_plaintext(cfg_api, server_class=BaseHTTPServer.HTTPServer,
         handler_class=CGIHTTPServer.CGIHTTPRequestHandler):
-    server_address = ('', 8008)
+  
+    port = cfg_api.settings.auth_portal.http_port
+    server_address = ('', int(port))
     handler_class.cgi_directories = ['/cgi-bin']
     httpd = server_class(server_address, handler_class)
     httpd.serve_forever()
 
+
+def run_ssl(cfg_api,server_class=BaseHTTPServer.HTTPServer,
+        handler_class=CGIHTTPServer.CGIHTTPRequestHandler):
+  
+    port = cfg_api.settings.auth_portal.https_port
+    
+    cert_root = cfg_api.settings.certs_path
+    key  = cert_root+cfg_api.settings.auth_portal.ssl_key
+    cert = cert_root+cfg_api.settings.auth_portal.ssl_cert
+  
+    server_address = ('', int(port))
+    handler_class.cgi_directories = ['/cgi-bin']
+    httpd = server_class(server_address, handler_class)
+    httpd.socket = ssl.wrap_socket (httpd.socket, keyfile=key,certfile=cert, server_side=True)
+    CGIHTTPServer.CGIHTTPRequestHandler.have_fork=False
+    httpd.serve_forever()
+
+
+def run():
+
+    c = cfg.Config()
+    c.read_file("/etc/smithproxy/smithproxy.cfg")  
+  
+    for ps_name,callable in [("http",run_plaintext),
+                            ("https",run_ssl)]:
+        r,w = os.pipe()
+        pid = os.fork()
+
+        if pid == 0:
+            continue
+        else:
+            print "Starting %s process..." % (ps_name,)
+            callable(c)
+            time.sleep(1)
+
 run()
+
+
+
+

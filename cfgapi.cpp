@@ -711,6 +711,12 @@ int cfgapi_load_obj_profile_auth() {
     
     INFS_("cfgapi_load_obj_profile_auth: start");
     
+    INFS_("cfgapi_load_obj_profile_auth: portal settings");
+    cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("address",cfgapi_identity_portal_address);
+    cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("http_port",cfgapi_identity_portal_port_http);
+    cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("https_port",cfgapi_identity_portal_port_https);    
+    
+    INFS_("cfgapi_load_obj_profile_auth: profiles");
     if(cfgapi.getRoot().exists("auth_profiles")) {
 
         num = cfgapi.getRoot()["auth_profiles"].getLength();

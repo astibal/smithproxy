@@ -12,6 +12,9 @@ std::recursive_mutex cfgapi_identity_token_lock;
 std::unordered_map<std::string,std::pair<unsigned int,std::string>> cfgapi_identity_token_cache; // per-ip token cache. Entry is valid for
 unsigned int cfgapi_identity_token_timeout = 60; // token expires _from_cache_ after this timeout (in seconds).
 
+std::string cfgapi_identity_portal_address = "192.168.0.1";
+std::string cfgapi_identity_portal_port_http = "8008";
+std::string cfgapi_identity_portal_port_https = "8043";
 
 int cfgapi_auth_shm_ip_table_refresh()  {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);

@@ -225,9 +225,14 @@ void MitmProxy::handle_replacement(MitmHostCX* cx) {
   
     
     std::string repl;
-    std::string repl_port = "8008";
+    std::string repl_port = cfgapi_identity_portal_port_http;
     std::string repl_proto = "http";
     int 	redir_hint = 0;
+    
+    if(cx->request->is_ssl) {
+	repl_proto = "https";
+	repl_port = cfgapi_identity_portal_port_https;
+    }    
     
     std::string block("HTTP/1.0 OK\r\n<!DOCTYPE html><html><body><h1>Page has been blocked</h1><p>Access has been blocked by smithproxy. Get over it.</p></body></html>");
     
@@ -251,12 +256,7 @@ void MitmProxy::handle_replacement(MitmHostCX* cx) {
 	      if(now - token_ts < cfgapi_identity_token_timeout) {
 		  INF_("MitmProxy::handle_replacement: cached token %s for request: %s",token_tk.c_str(),cx->request->hr().c_str());
 		  
-		  if(cx->request->is_ssl) {
-		      repl_proto = "https";
-		      repl_port = "8043";
-		  }
-		  
-		  repl = redir_pre + repl_proto + "://192.168.254.1:"+repl_port+"/cgi-bin/auth.py?token=" + token_tk + redir_suf;
+		  repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + token_tk + redir_suf;
 		  cx->to_write((unsigned char*)repl.c_str(),repl.size());
 		  cx->close_after_write(true);
 	      } else {
@@ -270,7 +270,7 @@ void MitmProxy::handle_replacement(MitmHostCX* cx) {
 	      logon_token tok = logon_token(cx->request->original_request().c_str());
 	      
 	      INF_("MitmProxy::handle_replacement: new auth token %s for request: %s",tok.token,cx->request->hr().c_str());
-	      repl = redir_pre + "http://192.168.254.1:8008/cgi-bin/auth.py?token=" + tok.token + redir_suf;
+	      repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + tok.token + redir_suf;
 	      
 		  cx->to_write((unsigned char*)repl.c_str(),repl.size());
 		  cx->close_after_write(true);
