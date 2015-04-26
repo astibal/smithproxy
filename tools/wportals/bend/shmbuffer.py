@@ -45,8 +45,15 @@ class ShmBuffer:
           self.memory_name = mem_name
           self.semaphore_name = sem_name
           
-          self.memory = posix_ipc.SharedMemory(self.memory_name, posix_ipc.O_CREX, size=self.memory_size)
-          self.semaphore = posix_ipc.Semaphore(self.semaphore_name, posix_ipc.O_CREX)
+          try:
+	      self.memory = posix_ipc.SharedMemory(self.memory_name, posix_ipc.O_CREX, size=self.memory_size)
+	      self.semaphore = posix_ipc.Semaphore(self.semaphore_name, posix_ipc.O_CREX)
+	    
+	  except posix_ipc.ExistentialError, e:
+	      # if memory already exists, let's connect to it
+	      self.memory = posix_ipc.SharedMemory(self.memory_name, posix_ipc.O_RDWR, size=self.memory_size)
+	      self.semaphore = posix_ipc.Semaphore(self.semaphore_name, posix_ipc.O_RDWR)
+	      
 
           self.mapfile = mmap.mmap(self.memory.fd, self.memory.size)
 

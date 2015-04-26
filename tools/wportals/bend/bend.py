@@ -30,9 +30,6 @@ PY_MAJOR_VERSION = sys.version_info[0]
 import SOAPpy
 
 
-
-global_token_referer = {}
-
 class LogonTable(ShmTable):             
 
     def __init__(self):
@@ -160,130 +157,154 @@ class TokenTable(ShmTable):
         
 
 
-st = LogonTable()
-st.setup("/smithproxy_auth_ok",1024*1024,"/smithproxy_auth_ok.sem")
-st.clear()
-st.write_header()
 
-su = TokenTable()
-su.setup("/smithproxy_auth_token",1024*1024,"/smithproxy_auth_token.sem")
-su.clear();
+class AuthManager:
 
-su.seek(0)
-su.write(struct.pack('III',1,1,576))
-test1_token = "233474357"
-test1_url   = "idnes.cz"
-su.write(struct.pack('64s512s',test1_token,test1_url))
-#su.load()
-
-def token_url(token):
+    def __init__(self):
+      self.logon_shm = None
+      self.token_shm = None
+      self.global_token_referer = {}
+      self.server = SOAPpy.SOAPServer(("localhost", 65456))
     
-    print "token_url: start, acquiring semaphore"
-    
-    su.acquire()
-    print "token_url: start, semaphore acquired, loading.."
-    su.load()
-    print "token_url: start, token  table loaded"
-    su.release()
-    print "token_url: start, semaphore released"
-    
-    #print(str(su.tokens.keys()))
+    def setup_logon_tables(self,mem_name,mem_size,sem_name):
 
-    # some pretty-printing
-    if token in su.tokens.keys():
-        print "TOKEN " + token + " FOUND!"
-        print "     : " + su.tokens[token]
-        if token in su.used_tokens:
-            print "     : used"
+      self.logon_shm = LogonTable()
+      self.logon_shm.setup("/smithproxy_auth_ok",1024*1024,"/smithproxy_auth_ok.sem")
+      self.logon_shm.clear()
+      self.logon_shm.write_header()
 
+    def setup_token_tables(self,mem_name,mem_size,sem_name):
+      self.token_shm = TokenTable()
+      self.token_shm.setup("/smithproxy_auth_token",1024*1024,"/smithproxy_auth_token.sem")
+      self.token_shm.clear();
+      
+      # test data
+      self.token_shm.seek(0)
+      self.token_shm.write(struct.pack('III',1,1,576))
+      test1_token = "233474357"
+      test1_url   = "idnes.cz"
+      self.token_shm.write(struct.pack('64s512s',test1_token,test1_url))
 
-    # say farewell
-    if token in su.used_tokens:
-        return "http://localhost/token_reuse_fobidden"
-
-    # hit - send a link and invalidate
-    if token in su.tokens.keys():
-        res = su.tokens[token]
-        su.toggle_used(token) # now is token already invalidated, and MAY be deleted
-        return res
-    
-    # token was not found.
-    print "TOKEN " + token + " NOT found ..."
-    # have some reading.
-    return "http://www.mag0.net/out/smithproxy/Linux-Debian-8.0/0.5/changelog"
+    def cleanup(self):
+        self.token_shm.cleanup()
+        self.logon_shm.cleanup()
 
 
-def authenticate(ip, username, password,token, _SOAPContext = None):
 
-    #ip  = _SOAPContext.connection.getpeername()[0]
-    ipa = socket.inet_aton(ip)
-    print "authenticate: request: user %s from %s" % (username,ip)
-    if token:
-        print "   token %s" % str(token)
-    
-    ret = False
-
-    if not username:
-        username = '<guest>'
-    
-    if username == password:
-        print "authenticate: user " + username + " auth failed from " + ip
-        # this will fail authentication, but triggers shm table load
-    
-        st.acquire()
-        st.load()
-        st.release()
-        ret = False
-    else:
+    def token_url(self, token):
         
-        print "authenticate: user " + username + " auth successfull from " + ip
+        print "token_url: start, acquiring semaphore"
         
-        #this is just bloody test
+        self.token_shm.acquire()
+        print "token_url: start, semaphore acquired, loading.."
+        self.token_shm.load()
+        print "token_url: start, token  table loaded"
+        self.token_shm.release()
+        print "token_url: start, semaphore released"
         
-        st.acquire()
-        st.load()       # load new data!
-        st.add(ip,username,username+"_group")
-        st.release()
-        
-        #st.seek(0)
-        #r,n,s = st.read_header()
-        #print "current version: %d" % (r,)
-        #st.read(n*(4+64+128))
-        
-        ## end of entries
-        #st.write(struct.pack('4s64s128s',ipa,username,"groups_of_"+username))
-        #st.seek(0)
-        #st.write(struct.pack('III',r+1,n+1,st.row_size))
+        #print(str(self.token_shm.tokens.keys()))
 
-        # :-D
-        ret = True
+        # some pretty-printing
+        if token in self.token_shm.tokens.keys():
+            print "TOKEN " + token + " FOUND!"
+            print "     : " + self.token_shm.tokens[token]
+            if token in self.token_shm.used_tokens:
+                print "     : used"
+
+
+        # say farewell
+        if token in self.token_shm.used_tokens:
+            return "http://localhost/token_reuse_fobidden"
+
+        # hit - send a link and invalidate
+        if token in self.token_shm.tokens.keys():
+            res = self.token_shm.tokens[token]
+            self.token_shm.toggle_used(token) # now is token already invalidated, and MAY be deleted
+            return res
+        
+        # token was not found.
+        print "TOKEN " + token + " NOT found ..."
+        # have some reading.
+        return "http://www.mag0.net/out/smithproxy/Linux-Debian-8.0/0.5/changelog"
+
+
+    def authenticate(self, ip, username, password,token):
+
+        ipa = socket.inet_aton(ip)
+        print "authenticate: request: user %s from %s" % (username,ip)
         if token:
-	    if token in global_token_referer.keys():
-	        ref = global_token_referer[token]
-		print "token " + token + " global referer: " + ref
-		return ref
-            ret = token_url(token)
+            print "   token %s" % str(token)
+        
+        ret = False
 
-    return ret
+        if not username:
+            username = '<guest>'
+        
+        if username == password:
+            print "authenticate: user " + username + " auth failed from " + ip
+            # this will fail authentication, but triggers shm table load
+        
+            self.logon_shm.acquire()
+            self.logon_shm.load()
+            self.logon_shm.release()
+            ret = False
+        else:
+            
+            print "authenticate: user " + username + " auth successfull from " + ip
+            
+            #this is just bloody test
+            
+            self.logon_shm.acquire()
+            self.logon_shm.load()       # load new data!
+            self.logon_shm.add(ip,username,username+"_group")
+            self.logon_shm.release()
+            
+            #self.logon_shm.seek(0)
+            #r,n,s = self.logon_shm.read_header()
+            #print "current version: %d" % (r,)
+            #self.logon_shm.read(n*(4+64+128))
+            
+            ## end of entries
+            #self.logon_shm.write(struct.pack('4s64s128s',ipa,username,"groups_of_"+username))
+            #self.logon_shm.seek(0)
+            #self.token_shm.write(struct.pack('III',r+1,n+1,self.toke_shm.row_size))
 
-def save_referer(token,ref):
-    print "Saving global referer: "
-    print "   token: " + token
-    print "   referer: " + ref
-    
-    global_token_referer[token] = ref
-    
-try:
+            # :-D
+            ret = True
+            if token:
+                if token in self.global_token_referer.keys():
+                    ref = self.global_token_referer[token]
+                    print "token " + token + " global referer: " + ref
+                    return ref
+                ret = token_url(token)
 
-    server = SOAPpy.SOAPServer(("localhost", 65456))
+        return ret
 
-    server.registerFunction( SOAPpy.MethodSig(authenticate, keywords=0, context=1))
-    server.registerFunction(save_referer)
-    server.serve_forever()
+    def save_referer(self,token,ref):
+        print "Saving global referer: "
+        print "   token: " + token
+        print "   referer: " + ref
+        
+        self.global_token_referer[token] = ref
+
+    def serve_forever(self):
+          self.server.registerFunction(self.authenticate)
+          self.server.registerFunction(self.save_referer)
+          self.server.serve_forever()
+
+
+
+
+def run():    
+    a = AuthManager()
+    a.setup_logon_tables("/smithproxy_auth_ok",1024*1024,"/smithproxy_auth_ok.sem")
+    a.setup_token_tables("/smithproxy_auth_token",1024*1024,"/smithproxy_auth_token.sem")
     
-except KeyboardInterrupt, e:
-    print "Ctrl-C pressed. Wait to close shmem."
-    st.cleanup()
-    su.cleanup()
-    
-    
+    try:
+        a.serve_forever()
+    except KeyboardInterrupt, e:
+        print "Ctrl-C pressed. Wait to close shmem."
+        a.cleanup()
+
+
+run()
