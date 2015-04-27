@@ -22,6 +22,7 @@ import sys
 import struct
 import posix_ipc
 import socket
+import pylibconfig2 as cfg
 
 from shmtable import ShmTable
 
@@ -165,6 +166,11 @@ class AuthManager:
       self.token_shm = None
       self.global_token_referer = {}
       self.server = SOAPpy.SOAPServer(("localhost", 65456))
+      
+      self.portal_address = None
+      self.portal_port = None
+    
+      self.user_db = {}
     
     def setup_logon_tables(self,mem_name,mem_size,sem_name):
 
@@ -191,30 +197,32 @@ class AuthManager:
 
 
 
-    def token_url(self, token):
+    def token_data(self, token):
         
-        print "token_url: start, acquiring semaphore"
+        print "token_data: start, acquiring semaphore"
         
         self.token_shm.acquire()
-        print "token_url: start, semaphore acquired, loading.."
+        print "token_data: start, semaphore acquired, loading.."
         self.token_shm.load()
-        print "token_url: start, token  table loaded"
+        print "token_data: start, token  table loaded"
         self.token_shm.release()
-        print "token_url: start, semaphore released"
+        print "token_data: start, semaphore released"
         
         #print(str(self.token_shm.tokens.keys()))
 
         # some pretty-printing
         if token in self.token_shm.tokens.keys():
-            print "TOKEN " + token + " FOUND!"
-            print "     : " + self.token_shm.tokens[token]
             if token in self.token_shm.used_tokens:
-                print "     : used"
+                print "token " + token + " already used"
+            else:
+                print "token " + token + " found"
+        else:
+            print "token " + token + " not found ..."
 
 
         # say farewell
         if token in self.token_shm.used_tokens:
-            return "http://localhost/token_reuse_fobidden"
+            return None
 
         # hit - send a link and invalidate
         if token in self.token_shm.tokens.keys():
@@ -222,34 +230,19 @@ class AuthManager:
             self.token_shm.toggle_used(token) # now is token already invalidated, and MAY be deleted
             return res
         
-        # token was not found.
-        print "TOKEN " + token + " NOT found ..."
-        # have some reading.
-        return "http://www.mag0.net/out/smithproxy/Linux-Debian-8.0/0.5/changelog"
+        return None
 
 
     def authenticate(self, ip, username, password,token):
 
         ipa = socket.inet_aton(ip)
-        print "authenticate: request: user %s from %s" % (username,ip)
-        if token:
-            print "   token %s" % str(token)
-        
+        print "authenticate: request: user %s from %s - token %s" % (username,ip,str(token))
         ret = False
 
         if not username:
             username = '<guest>'
         
-        if username == password:
-            print "authenticate: user " + username + " auth failed from " + ip
-            # this will fail authentication, but triggers shm table load
-        
-            self.logon_shm.acquire()
-            self.logon_shm.load()
-            self.logon_shm.release()
-            ret = False
-        else:
-            
+        if self.authenticate_check_db(ip,username,password,token):
             print "authenticate: user " + username + " auth successfull from " + ip
             
             #this is just bloody test
@@ -259,16 +252,6 @@ class AuthManager:
             self.logon_shm.add(ip,username,username+"_group")
             self.logon_shm.release()
             
-            #self.logon_shm.seek(0)
-            #r,n,s = self.logon_shm.read_header()
-            #print "current version: %d" % (r,)
-            #self.logon_shm.read(n*(4+64+128))
-            
-            ## end of entries
-            #self.logon_shm.write(struct.pack('4s64s128s',ipa,username,"groups_of_"+username))
-            #self.logon_shm.seek(0)
-            #self.token_shm.write(struct.pack('III',r+1,n+1,self.toke_shm.row_size))
-
             # :-D
             ret = True
             if token:
@@ -276,14 +259,17 @@ class AuthManager:
                     ref = self.global_token_referer[token]
                     print "token " + token + " global referer: " + ref
                     return ref
-                ret = token_url(token)
+                else:
+                    return "http://"+self.portal_address+":"+self.portal_port+"/authenticated.html"
+
+        else:
+            print "authenticate: user " + username + " auth failed from " + ip
+
 
         return ret
 
     def save_referer(self,token,ref):
-        print "Saving global referer: "
-        print "   token: " + token
-        print "   referer: " + ref
+        print "incoming referer: " + token + " -> " + ref
         
         self.global_token_referer[token] = ref
 
@@ -292,11 +278,59 @@ class AuthManager:
           self.server.registerFunction(self.save_referer)
           self.server.serve_forever()
 
+    def load_config_users(self,user_items):
+        for user in user_items:
+            print "user: " + user[0]
+            #print user[1].items()
+            
+            d = {}
+            d["type"] = "static"
+            d["username"] = user[0]
+            for pair in user[1].items():
+                d[pair[0]] = pair[1]
+                
+            print str(d)
+            self.user_db[user[0]] = d
 
+    def authenticate_local_decrypt(self,salt,ciphertext):
+        # FIXME!!!
+        return ciphertext
 
+    def authenticate_check_db(self,ip,username,password,token):
+        
+        try:
+            if username in self.user_db:
+                if "type" in self.user_db[username]:
+                    if self.user_db[username]["type"] == "static":
+                        if self.user_db[username]['password'] == password:
+                            return True
+                        if authenticate_local_decrypt("ABC",self.user_db[username]['encrypted_password']) == password:
+                            return True
+                        
+        except KeyError, e:
+            pass
+        except IndexError, e:
+            pass
 
-def run():    
+        return False
+
+def run():   
+    c = cfg.Config()
+    c.read_file("/etc/smithproxy/smithproxy.cfg")    
+    u = cfg.Config()
+    u.read_file("/etc/smithproxy/users.cfg")
+    
+    
     a = AuthManager()
+    a.portal_address = c.settings.auth_portal.address
+    a.portal_port = c.settings.auth_portal.http_port
+    print "Portal settings:"
+    print " IP   " + a.portal_address
+    print " port " + a.portal_port
+    
+    print "Loading users"
+    a.load_config_users(u.users.items())
+    
     a.setup_logon_tables("/smithproxy_auth_ok",1024*1024,"/smithproxy_auth_ok.sem")
     a.setup_token_tables("/smithproxy_auth_token",1024*1024,"/smithproxy_auth_token.sem")
     
