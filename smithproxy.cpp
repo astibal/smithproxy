@@ -81,6 +81,7 @@ std::thread* socks_thread = nullptr;
 std::thread* cli_thread = nullptr;
 
 static int cnt_terminate = 0;
+static bool cfg_daemonize = false;
 
 static void segv_handler(int sig) {
 
@@ -116,7 +117,8 @@ static void segv_handler(int sig) {
 
 void my_terminate (int param) {
     
-    FATS_("Terminating ...");
+    if (!cfg_daemonize)
+    printf("Terminating ...\n");
     if (plain_proxy != nullptr) {
         plain_proxy->dead(true);
     }
@@ -132,10 +134,12 @@ void my_terminate (int param) {
 
     cnt_terminate++;
     if(cnt_terminate == 3) {
-        WARS_("Failed to terminate gracefully. Next attempt will be enforced.");
+        if (!cfg_daemonize)
+        printf("Failed to terminate gracefully. Next attempt will be enforced.\n");
     }
     if(cnt_terminate > 3) {
-        WARS_("Enforced exit.");
+        if (!cfg_daemonize)
+        printf("Enforced exit.\n");
         abort();
     }
 }
@@ -150,7 +154,7 @@ static std::string cfg_socks_port;
 
 static std::string config_file;
 //static unsigned int cfg_log_level = INF;
-static bool cfg_daemonize = false;
+
 
 static int cfg_tcp_workers = 0;
 static int cfg_ssl_workers = 0;
