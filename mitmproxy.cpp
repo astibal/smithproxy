@@ -127,11 +127,17 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
             if(!identity_resolved()) {        
                 INFS_("identity check: unknown");
                 
-                if(opt_auth_authenticate && mh->replace_type == MitmHostCX::REPLACETYPE_HTTP) {
+                if(opt_auth_authenticate) {
+                    if(mh->replace_type == MitmHostCX::REPLACETYPE_HTTP) {
                 
-                    mh->replacement(MitmHostCX::REPLACE_REDIRECT);
-                    redirected = true;
-                    handle_replacement(mh);
+                        mh->replacement(MitmHostCX::REPLACE_REDIRECT);
+                        redirected = true;
+                        handle_replacement(mh);
+                    } 
+                    else {
+                        // we cannot use replacements and identity is not resolved... what we can do. Shutdown.
+                        dead(true);
+                    }
                 }
             }
         }
