@@ -129,7 +129,7 @@ bool PolicyRule::match(baseProxy* p) {
         rmatch = match_addrgrp_vecx(dst,p->rs()) || match_addrgrp_vecx(dst,p->rda());
         if(!rmatch) goto end;
 
-        rpmatch = match_rangegrp_vecx(src_ports,p->rs()) || match_rangegrp_vecx(src_ports,p->rda());
+        rpmatch = match_rangegrp_vecx(dst_ports,p->rs()) || match_rangegrp_vecx(dst_ports,p->rda());
         if(!rpmatch) goto end;
         
     } else {
