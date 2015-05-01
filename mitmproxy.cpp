@@ -83,7 +83,7 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
     auto ip = auth_ip_map.find(cx->host());
 
     if (ip != auth_ip_map.end()) {
-        logon_info& li = (*ip).second;
+        logon_info& li = (*ip).second.last_logon_info;
         DIA_("identity check: user %s groups: %s",li.username, li.groups);
         
         identity(li);

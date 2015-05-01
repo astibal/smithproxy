@@ -34,6 +34,7 @@
 
 
 
+// structure exchanged with backend daemon
 struct logon_info {
     char  ip[LOGON_INFO_IP_SZ];
     char  username[LOGON_INFO_USERNAME_SZ];
@@ -61,6 +62,8 @@ struct logon_info {
     }
 };
 
+
+// structure exchanged with backend daemon
 struct logon_token {
     char   token[64];
     char   url[512];
@@ -95,6 +98,41 @@ struct logon_token {
     };
 }; 
  
+
+//structure kept in the smithproxy to track IP address identity and history
+struct IdentityInfo {
+    static unsigned int global_idle_timeout;
+    
+    unsigned int idle_timeout = 0;
+
+    unsigned int created;
+    std::string  ip_address;
+    std::string  username;
+    std::string  groups;
+    unsigned int rx_bytes = 0;
+    unsigned int tx_bytes = 0;
+    
+    unsigned int last_seen_at;
+    unsigned int last_seen_policy;
+    struct logon_info last_logon_info;
+    
+    IdentityInfo() {
+        idle_timeout = global_idle_timeout; 
+        created = time(nullptr);
+    }
+    
+    inline void touch() { last_seen_at = time(nullptr); }
+    inline bool i_timeout() { return ( (time(nullptr) - last_seen_at) > idle_timeout ); }
+};
+
+
+class shared_0_4b_map : public shared_map<std::string,logon_info> {
+    virtual std::string get_row_key(logon_info* r) {
+        return std::string((const char*)r,4);
+    }
+};
+typedef shared_0_4b_map shared_ip_map;
+
 // refresh from shared memory
 extern int cfgapi_auth_shm_ip_table_refresh();
 extern int cfgapi_auth_shm_token_table_refresh(); 
@@ -102,8 +140,9 @@ extern int cfgapi_auth_shm_token_table_refresh();
 // lookup by ip -> returns pointer IN the auth_ip_map
 extern logon_info* cfgapi_auth_get_ip(std::string&);
 
-extern std::unordered_map<std::string,logon_info> auth_ip_map;
-extern shared_table<logon_info>  auth_shm_ip_map;
+extern std::unordered_map<std::string,IdentityInfo> auth_ip_map;
+//extern shared_table<logon_info>  auth_shm_ip_map;
+extern shared_ip_map  auth_shm_ip_map;
 extern shared_table<logon_token> auth_shm_token_map;
 
 // authentication token cache

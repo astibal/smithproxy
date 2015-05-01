@@ -3,14 +3,18 @@
 #include <cfgapi_auth.hpp>
 #include <logger.hpp>
 
-std::unordered_map<std::string,logon_info> auth_ip_map;
-shared_table<logon_info>  auth_shm_ip_map;
+
+unsigned int IdentityInfo::global_idle_timeout = 3600;
+
+std::unordered_map<std::string,IdentityInfo> auth_ip_map;
+//shared_table<logon_info>  auth_shm_ip_map;
+shared_ip_map auth_shm_ip_map;
 shared_table<logon_token> auth_shm_token_map;
 
 // authentication token cache
 std::recursive_mutex cfgapi_identity_token_lock;
 std::unordered_map<std::string,std::pair<unsigned int,std::string>> cfgapi_identity_token_cache; // per-ip token cache. Entry is valid for
-unsigned int cfgapi_identity_token_timeout = 60; // token expires _from_cache_ after this timeout (in seconds).
+unsigned int cfgapi_identity_token_timeout = 20; // token expires _from_cache_ after this timeout (in seconds).
 
 std::string cfgapi_identity_portal_address = "192.168.0.1";
 std::string cfgapi_identity_portal_port_http = "8008";
@@ -43,8 +47,17 @@ int cfgapi_auth_shm_ip_table_refresh()  {
             
             std::string ip = std::string(inet_ntoa(*(in_addr*)&rt.ip));
             
-            //std::unordered_map <std::string, logon_info >::iterator found = auth_ip_map.find(ip);
-            auth_ip_map[ip] = rt;
+            std::unordered_map <std::string, IdentityInfo >::iterator found = auth_ip_map.find(ip);
+            if(found != auth_ip_map.end()) {
+                INF_("Updating identity in database: %s",ip.c_str());
+                IdentityInfo& id = (*found).second;
+                id.last_logon_info = rt;
+            } else {
+                INF_("New identity in database: %s ",ip.c_str());
+                IdentityInfo i;
+                i.last_logon_info = rt;
+                auth_ip_map[ip] = i;
+            }
             DIA_("cfgapi_auth_shm_ip_table_refresh: loaded: %d,%s,%s",ip.c_str(),rt.username,rt.groups);
         }        
         return l_ip;
