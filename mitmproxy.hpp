@@ -60,6 +60,7 @@ public:
     logon_info& identity() { return identity_; }
     void identity(logon_info& i) { identity_ = i; }
     bool resolve_identity(baseHostCX*,bool);
+    bool update_identity(baseHostCX*);
     
     bool write_payload(void) { return write_payload_; } 
     void write_payload(bool b) { write_payload_ = b; }

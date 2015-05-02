@@ -71,20 +71,27 @@ MitmProxy::~MitmProxy() {
 
 bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
     
-    if(identity_resolved())
-        return true;
+    if(identity_resolved()) {
+        if(update_identity(cx)) {
+            return true;
+        } else {
+            identity_resolved(false);
+        }
+    }
     
     bool ret = false;
     
-    DIA_("identity check: source IP: %s",cx->host().c_str());
+    INF_("identity check: source IP: %s",cx->host().c_str());
     
     cfgapi_auth_shm_ip_table_refresh();
-    DEB_("identity check: table size: %d", auth_ip_map.size());
+    INF_("identity check: table size: %d", auth_ip_map.size());
+    
+    cfgapi_identity_ip_lock.lock();
     auto ip = auth_ip_map.find(cx->host());
 
     if (ip != auth_ip_map.end()) {
         logon_info& li = (*ip).second.last_logon_info;
-        DIA_("identity check: user %s groups: %s",li.username, li.groups);
+        INF_("identity check: user %s groups: %s",li.username, li.groups);
         
         identity(li);
         identity_resolved(true);    
@@ -100,6 +107,61 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
         }
     }
     
+    
+    cfgapi_identity_ip_lock.unlock();
+    INF_("identity check: return %d",ret);
+    return ret;
+}
+
+
+bool MitmProxy::update_identity(baseHostCX* cx) {
+
+    bool ret = false;
+    
+    cfgapi_identity_ip_lock.lock();    
+    auto ip = auth_ip_map.find(cx->host());
+
+    INF_("update_identity: start for %s",cx->host().c_str());
+    
+    if (ip != auth_ip_map.end()) {
+        IdentityInfo& id = (*ip).second;
+        INF_("updating identity: user %s from %s (groups: %s)",id.last_logon_info.username, cx->host().c_str(), id.last_logon_info.groups);
+
+        if (!id.i_timeout()) {
+            id.touch();
+            ret = true;
+        } else {
+            INF_("identity timeout: user %s from %s (groups: %s)",id.last_logon_info.username, cx->host().c_str(), id.last_logon_info.groups);
+            
+            // erase internal ip map entry
+
+            auth_ip_map.erase(ip);
+            
+            // erase shared ip map entry
+            
+            auth_shm_ip_map.acquire();
+            auto sh_it = auth_shm_ip_map.map_entries().find(cx->host());
+            
+            for(auto& x_it: auth_shm_ip_map.map_entries()) {
+                INF_("::%s::",x_it.first.c_str());
+            }
+            
+            if(sh_it != auth_shm_ip_map.map_entries().end()) {
+                INFS_("Identity timeout: entry found in shared table: deleted. Saving.");
+                auth_shm_ip_map.map_entries().erase(sh_it);
+                
+                INFS_("After:");
+                for(auto& x_it: auth_shm_ip_map.map_entries()) {
+                    INF_("::%s::",x_it.first.c_str());
+                }                
+                auth_shm_ip_map.save(true);
+            }
+            auth_shm_ip_map.release();
+            
+        }
+    }
+
+    cfgapi_identity_ip_lock.unlock();
     return ret;
 }
 
@@ -135,8 +197,11 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
                         handle_replacement(mh);
                     } 
                     else {
-                        // we cannot use replacements and identity is not resolved... what we can do. Shutdown.
-                        dead(true);
+                        // wait, if header won't come in some time, kill the proxy
+                        if(cx->meter_read_bytes > 200) {
+                            // we cannot use replacements and identity is not resolved... what we can do. Shutdown.
+                            dead(true);
+                        }
                     }
                 }
             }
@@ -207,9 +272,7 @@ void MitmProxy::on_right_error(baseHostCX* cx)
     
 //         INF_("Created new proxy 0x%08x from %s:%s to %s:%d",new_proxy,f,f_p, t,t_p );
 
-    if(opt_auth_resolve)
-        resolve_identity(cx);
-    
+
     INF_("Connection from %s closed, user=%s, sent=%d/%dB received=%d/%dB, flags=%c",
                             cx->full_name('R').c_str(), 
                                      (identity_resolved() ? identity().username : ""),         

@@ -4,7 +4,7 @@
 #include <logger.hpp>
 
 
-unsigned int IdentityInfo::global_idle_timeout = 3600;
+unsigned int IdentityInfo::global_idle_timeout = 300;
 
 std::unordered_map<std::string,IdentityInfo> auth_ip_map;
 //shared_table<logon_info>  auth_shm_ip_map;
@@ -13,6 +13,7 @@ shared_table<logon_token> auth_shm_token_map;
 
 // authentication token cache
 std::recursive_mutex cfgapi_identity_token_lock;
+std::recursive_mutex cfgapi_identity_ip_lock;
 std::unordered_map<std::string,std::pair<unsigned int,std::string>> cfgapi_identity_token_cache; // per-ip token cache. Entry is valid for
 unsigned int cfgapi_identity_token_timeout = 20; // token expires _from_cache_ after this timeout (in seconds).
 
@@ -41,6 +42,8 @@ int cfgapi_auth_shm_ip_table_refresh()  {
     
     if(l_ip > 0) {
         // new data!
+        cfgapi_identity_ip_lock.lock();
+        
         DIA_("cfgapi_auth_shm_ip_table_refresh: new data: version %d, entries %d",auth_shm_ip_map.header_version(),auth_shm_ip_map.header_entries());
         for(typename std::vector<logon_info>::iterator i = auth_shm_ip_map.entries().begin(); i != auth_shm_ip_map.entries().end() ; ++i) {
             logon_info& rt = (*i);
@@ -59,7 +62,9 @@ int cfgapi_auth_shm_ip_table_refresh()  {
                 auth_ip_map[ip] = i;
             }
             DIA_("cfgapi_auth_shm_ip_table_refresh: loaded: %d,%s,%s",ip.c_str(),rt.username,rt.groups);
-        }        
+        }
+        cfgapi_identity_ip_lock.unlock();
+        
         return l_ip;
     }
     return 0;

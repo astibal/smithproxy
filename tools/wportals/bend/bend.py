@@ -302,10 +302,13 @@ class AuthManager:
             if username in self.user_db:
                 if "type" in self.user_db[username]:
                     if self.user_db[username]["type"] == "static":
-                        if self.user_db[username]['password'] == password:
-                            return True
-                        if authenticate_local_decrypt("ABC",self.user_db[username]['encrypted_password']) == password:
-                            return True
+                        if "password" in self.user_db[username]:
+                            if self.user_db[username]['password'] == password:
+                                return True
+                        else:
+                            if "encrypted_password" in self.user_db[username]:
+                                if authenticate_local_decrypt("ABC",self.user_db[username]['encrypted_password']) == password:
+                                    return True
                         
         except KeyError, e:
             pass

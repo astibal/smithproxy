@@ -119,19 +119,28 @@ struct IdentityInfo {
     IdentityInfo() {
         idle_timeout = global_idle_timeout; 
         created = time(nullptr);
+        last_seen_at = created;
     }
     
     inline void touch() { last_seen_at = time(nullptr); }
     inline bool i_timeout() { return ( (time(nullptr) - last_seen_at) > idle_timeout ); }
 };
 
-
+// not used now
 class shared_0_4b_map : public shared_map<std::string,logon_info> {
     virtual std::string get_row_key(logon_info* r) {
         return std::string((const char*)r,4);
     }
 };
-typedef shared_0_4b_map shared_ip_map;
+
+class shared_0_4b_ntoa_map : public shared_map<std::string,logon_info> {
+    virtual std::string get_row_key(logon_info* r) {
+        in_addr* ptr = (in_addr*)&r->ip;
+        return std::string(inet_ntoa(*ptr));
+    }
+};
+
+typedef shared_0_4b_ntoa_map shared_ip_map;
 
 // refresh from shared memory
 extern int cfgapi_auth_shm_ip_table_refresh();
@@ -140,6 +149,7 @@ extern int cfgapi_auth_shm_token_table_refresh();
 // lookup by ip -> returns pointer IN the auth_ip_map
 extern logon_info* cfgapi_auth_get_ip(std::string&);
 
+extern std::recursive_mutex cfgapi_identity_ip_lock;
 extern std::unordered_map<std::string,IdentityInfo> auth_ip_map;
 //extern shared_table<logon_info>  auth_shm_ip_map;
 extern shared_ip_map  auth_shm_ip_map;
