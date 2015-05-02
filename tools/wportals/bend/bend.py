@@ -57,6 +57,7 @@ class LogonTable(ShmTable):
               try:
                   self.write(struct.pack("4s64s128s",socket.inet_aton(k),self.logons[k][1],self.logons[k][2]))
               except IndexError:
+                  print "LogonTable: IndexError: not in logons: " + k + " " + str(e)
                   continue
 
         self.normalize = False # each dump effectively normalizes db

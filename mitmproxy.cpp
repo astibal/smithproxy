@@ -92,18 +92,23 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
     if (ip != auth_ip_map.end()) {
         logon_info& li = (*ip).second.last_logon_info;
         INF_("identity check: user %s groups: %s",li.username, li.groups);
-        
-        identity(li);
-        identity_resolved(true);    
-        
-        ret = true;
+
+        // if update_identity fails, identity is no longer valid!
+        ret = update_identity(cx);
+        identity_resolved(ret);
+        if(ret) { 
+            identity(li); 
+        }
+
     } else {
         if (insert_guest == true) {
             logon_info li = logon_info(cx->host().c_str(),"guest","");
-            identity(li);
-            identity_resolved(true);
             
-            ret = true;
+            ret = update_identity(cx);
+            identity_resolved(ret);
+            if(ret) { 
+                identity(li); 
+            }
         }
     }
     
