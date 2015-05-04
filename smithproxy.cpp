@@ -292,8 +292,8 @@ void load_config(std::string& config_f) {
         
         cfgapi.getRoot()["settings"].lookupValue("certs_path",SSLCertStore::certs_path);
         cfgapi.getRoot()["settings"].lookupValue("certs_ca_key_password",SSLCertStore::password);
-	cfgapi.getRoot()["settings"].lookupValue("certs_ca_path",SSLCertStore::def_cl_capath);
-	
+        cfgapi.getRoot()["settings"].lookupValue("certs_ca_path",SSLCertStore::def_cl_capath);
+        
         cfgapi.getRoot()["settings"].lookupValue("plaintext_port",cfg_listen_port);
         cfgapi.getRoot()["settings"].lookupValue("plaintext_workers",cfg_tcp_workers);
         cfgapi.getRoot()["settings"].lookupValue("ssl_port",cfg_ssl_listen_port);
@@ -430,14 +430,14 @@ int main(int argc, char *argv[]) {
         exit(-1);
     }
     
-	// install signal handler, we do want to release the memory properly
-		// signal handler installation
-	void (*prev_fn)(int);
-	prev_fn = signal (SIGTERM,my_terminate);
-	if (prev_fn==SIG_IGN) signal (SIGTERM,SIG_IGN);
+    // install signal handler, we do want to release the memory properly
+        // signal handler installation
+    void (*prev_fn)(int);
+    prev_fn = signal (SIGTERM,my_terminate);
+    if (prev_fn==SIG_IGN) signal (SIGTERM,SIG_IGN);
 
-	prev_fn = signal (SIGINT,my_terminate);
-	if (prev_fn==SIG_IGN) signal (SIGINT,SIG_IGN);
+    prev_fn = signal (SIGINT,my_terminate);
+    if (prev_fn==SIG_IGN) signal (SIGINT,SIG_IGN);
 
     prev_fn = signal(SIGABRT, segv_handler);
     if (prev_fn==SIG_IGN) signal (SIGABRT,SIG_IGN);
