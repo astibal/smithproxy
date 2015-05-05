@@ -318,7 +318,7 @@ class AuthManager:
 
         return False
 
-def run():   
+def run_bend():   
     c = cfg.Config()
     c.read_file("/etc/smithproxy/smithproxy.cfg")    
     u = cfg.Config()
@@ -344,5 +344,5 @@ def run():
         print "Ctrl-C pressed. Wait to close shmem."
         a.cleanup()
 
-
-run()
+if __name__ == "__main__":
+    run_bend()
