@@ -114,8 +114,8 @@ static unsigned int mystrlen(const char* str, int max) {
 static void btrace_handler(int sig) {
 
     int CRLOG = open((const char*)crashlog_file,O_CREAT | O_RDWR);
-    write(STDERR_FILENO," ======== Smithproxy exception handler =========\n",50);
-    write(CRLOG," ======== Smithproxy exception handler =========\n",50);
+    TEMP_FAILURE_RETRY(write(STDERR_FILENO," ======== Smithproxy exception handler =========\n",50));
+    TEMP_FAILURE_RETRY(write(CRLOG," ======== Smithproxy exception handler =========\n",50));
     //FAT_("  [%d] ========= Smithproxy exception handler  =========",sig );
 
     void *trace[64];
@@ -127,30 +127,31 @@ static void btrace_handler(int sig) {
 
     if (strings == NULL) {
         //FATS_("failure: backtrace_symbols");
-        write(STDERR_FILENO,"failure: backtrace_symbols\n",28);
-        write(CRLOG,"failure: backtrace_symbols\n",28);
+        TEMP_FAILURE_RETRY(write(STDERR_FILENO,"failure: backtrace_symbols\n",28));
+        TEMP_FAILURE_RETRY(write(CRLOG,"failure: backtrace_symbols\n",28));
+        close(CRLOG);
         exit(EXIT_FAILURE);
     }
     
     
     //FAT_("  [%d] Traceback:",sig );
-    write(STDERR_FILENO,"Traceback:\n",11);
-    write(CRLOG,"Traceback:\n",11);
+    TEMP_FAILURE_RETRY(write(STDERR_FILENO,"Traceback:\n",11));
+    TEMP_FAILURE_RETRY(write(CRLOG,"Traceback:\n",11));
 
      for( i = 0; i < size; i++ ) {
 //         //FAT_("  [%d] %s", sig, strings[i] );
-         write(STDERR_FILENO,"    ",4);
-         write(CRLOG,"    ",4);
-         write(STDERR_FILENO,strings[i],mystrlen(strings[i],256));
-         write(CRLOG,strings[i],mystrlen(strings[i],256));
-         write(STDERR_FILENO,"\n",1);
-         write(CRLOG,"\n",1);
+         TEMP_FAILURE_RETRY(write(STDERR_FILENO,"    ",4));
+         TEMP_FAILURE_RETRY(write(CRLOG,"    ",4));
+         TEMP_FAILURE_RETRY(write(STDERR_FILENO,strings[i],mystrlen(strings[i],256)));
+         TEMP_FAILURE_RETRY(write(CRLOG,strings[i],mystrlen(strings[i],256)));
+         TEMP_FAILURE_RETRY(write(STDERR_FILENO,"\n",1));
+         TEMP_FAILURE_RETRY(write(CRLOG,"\n",1));
      }
     //backtrace_symbols_fd((void* const*)strings,64,STDERR_FILENO);
     
     //FAT_("  [%d] =================================================", sig );
-    write(STDERR_FILENO," ===============================================\n",50);
-    write(CRLOG," ===============================================\n",50);
+    TEMP_FAILURE_RETRY(write(STDERR_FILENO," ===============================================\n",50));
+    TEMP_FAILURE_RETRY(write(CRLOG," ===============================================\n",50));
     close(CRLOG);
     
     daemon_unlink_pidfile();
