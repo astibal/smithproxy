@@ -36,6 +36,7 @@ SMITH_UDP_TPROXY='50081'
 SMITH_TLS_PORTS='443 465 636 993 995 10443'
 SMITH_TLS_TPROXY='50443'
 SMITH_DTLS_PORTS=''
+TEMP_DTLS_DROP='443'            # DTLS is being used for example by google, and evades smithproxy if not blocked
 SMITH_DTLS_TPROXY='50444'
 
 DIVERT_FWMARK=1
@@ -86,10 +87,15 @@ case "$1" in
     echo " tproxy for DTLS"
     for P in ${SMITH_DTLS_PORTS}; do
         echo "  tproxy port ${SMITH_INTERFACE}/${P}->${SMITH_DTLS_TPROXY}"
-        iptables -t mangle -A ${SMITH_CHAIN_NAME} -p tcp -i ${SMITH_INTERFACE} --dport ${P} -j TPROXY \
+        iptables -t mangle -A ${SMITH_CHAIN_NAME} -p udp -i ${SMITH_INTERFACE} --dport ${P} -j TPROXY \
         --tproxy-mark 0x1/0x1 --on-port ${SMITH_DTLS_TPROXY}
     done;
-
+    echo " drop DTLS ports (until DTLS inspection is implemented)"
+    for P in ${TEMP_DTLS_DROP}; do
+        echo "  drop port ${SMITH_INTERFACE}/${P}->${TEMP_DTLS_DROP}"
+        iptables -t mangle -A ${SMITH_CHAIN_NAME} -p udp -i ${SMITH_INTERFACE} --dport ${P} -j DROP
+    done;
+    
     iptables -t mangle -A ${SMITH_CHAIN_NAME} -j RETURN
 
     echo " tproxy chain setup finished."
