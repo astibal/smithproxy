@@ -81,17 +81,17 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
     
     bool ret = false;
     
-    INF_("identity check: source IP: %s",cx->host().c_str());
+    DIA_("identity check: source IP: %s",cx->host().c_str());
     
     cfgapi_auth_shm_ip_table_refresh();
-    INF_("identity check: table size: %d", auth_ip_map.size());
+    DEB_("identity check: table size: %d", auth_ip_map.size());
     
     cfgapi_identity_ip_lock.lock();
     auto ip = auth_ip_map.find(cx->host());
 
     if (ip != auth_ip_map.end()) {
         logon_info& li = (*ip).second.last_logon_info;
-        INF_("identity check: user %s groups: %s",li.username, li.groups);
+        DIA_("identity found for IP %s: user: %s groups: %s",cx->host().c_str(),li.username, li.groups);
 
         // if update_identity fails, identity is no longer valid!
         ret = update_identity(cx);
@@ -114,7 +114,7 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
     
     
     cfgapi_identity_ip_lock.unlock();
-    INF_("identity check: return %d",ret);
+    DEB_("identity check: return %d",ret);
     return ret;
 }
 
@@ -126,11 +126,11 @@ bool MitmProxy::update_identity(baseHostCX* cx) {
     cfgapi_identity_ip_lock.lock();    
     auto ip = auth_ip_map.find(cx->host());
 
-    INF_("update_identity: start for %s",cx->host().c_str());
+    DEB_("update_identity: start for %s",cx->host().c_str());
     
     if (ip != auth_ip_map.end()) {
         IdentityInfo& id = (*ip).second;
-        INF_("updating identity: user %s from %s (groups: %s)",id.last_logon_info.username, cx->host().c_str(), id.last_logon_info.groups);
+        DIA_("updating identity: user %s from %s (groups: %s)",id.last_logon_info.username, cx->host().c_str(), id.last_logon_info.groups);
 
         if (!id.i_timeout()) {
             id.touch();
@@ -152,13 +152,15 @@ bool MitmProxy::update_identity(baseHostCX* cx) {
             }
             
             if(sh_it != auth_shm_ip_map.map_entries().end()) {
-                INFS_("Identity timeout: entry found in shared table: deleted. Saving.");
+                DIAS_("Identity timeout: entry found in shared table: deleted. Saving.");
                 auth_shm_ip_map.map_entries().erase(sh_it);
                 
-                INFS_("After:");
-                for(auto& x_it: auth_shm_ip_map.map_entries()) {
-                    INF_("::%s::",x_it.first.c_str());
-                }                
+                if(LEV_(DEB)) {
+                    DEBS_("Identity timeout: After:");
+                    for(auto& x_it: auth_shm_ip_map.map_entries()) {
+                        DEB_("::%s::",x_it.first.c_str());
+                    }                
+                }
                 auth_shm_ip_map.save(true);
             }
             auth_shm_ip_map.release();
@@ -192,7 +194,7 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
             resolve_identity(cx);
             
             if(!identity_resolved()) {        
-                INFS_("identity check: unknown");
+                DEBS_("identity check: unknown");
                 
                 if(opt_auth_authenticate) {
                     if(mh->replace_type == MitmHostCX::REPLACETYPE_HTTP) {
@@ -205,6 +207,7 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
                         // wait, if header won't come in some time, kill the proxy
                         if(cx->meter_read_bytes > 200) {
                             // we cannot use replacements and identity is not resolved... what we can do. Shutdown.
+                            EXTS_("not enough data received to ensure right replacement-aware protocol.");
                             dead(true);
                         }
                     }
@@ -422,29 +425,43 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
         // apply policy and get result
         int policy_num = cfgapi_obj_policy_apply(just_accepted_cx,new_proxy);
         if(policy_num >= 0) {
+
+            //traffic is allowed
             
-            MitmHostCX* src;
-            src = dynamic_cast<MitmHostCX*>(just_accepted_cx);
-            if (src != nullptr) {
-                src->matched_policy(policy_num);
+            MitmHostCX* src_cx;
+            src_cx = dynamic_cast<MitmHostCX*>(just_accepted_cx);
+            if (src_cx != nullptr) {
+                
+                // we know proxy can be properly configured now, both peers are MitmHostCX types
+                
+                // let know CX what policy it matched (it is handly CX will know under some circumstances like upgrade to SSL)
+                src_cx->matched_policy(policy_num);
+                target_cx->matched_policy(policy_num);
+
+                // resolve source information - is there un identity info for that IP?
+                if(new_proxy->opt_auth_authenticate && new_proxy->opt_auth_resolve) {
+                    new_proxy->resolve_identity(src_cx);
+                }
+                
+                // setup NAT
+                if(cfgapi_obj_policy.at(policy_num)->nat == POLICY_NAT_NONE) {
+                    target_cx->com()->nonlocal_src(true);
+                    target_cx->com()->nonlocal_src_host() = h;
+                    target_cx->com()->nonlocal_src_port() = std::stoi(p);               
+                }
+                
+                // finalize connection acceptance by adding new proxy to proxies and connect
+                this->proxies().push_back(new_proxy);
+                target_cx->connect(false);
+                
             } else {
-                DIA_("MitmMasterProxy::on_left_new: %s cannot be converted to MitmHostCx",just_accepted_cx->c_name());
+                delete new_proxy;
+                NOT_("MitmMasterProxy::on_left_new: %s cannot be converted to MitmHostCx",just_accepted_cx->c_name());
             }
-            target_cx->matched_policy(policy_num);
-            
-            this->proxies().push_back(new_proxy);
-            
-            if(cfgapi_obj_policy.at(policy_num)->nat == POLICY_NAT_NONE) {
-                target_cx->com()->nonlocal_src(true);
-                target_cx->com()->nonlocal_src_host() = h;
-                target_cx->com()->nonlocal_src_port() = std::stoi(p);               
-            }
-            
-/*            just_accepted_cx->peer(target_cx);
-            target_cx->peer(just_accepted_cx);  */          
-            
-            target_cx->connect(false);        
+  
         } else {
+            
+            // hmm. traffic is denied.
             delete new_proxy;
         }
     }
