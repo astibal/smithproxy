@@ -80,12 +80,43 @@ std::thread* udp_thread = nullptr;
 std::thread* socks_thread = nullptr;
 std::thread* cli_thread = nullptr;
 
-static int cnt_terminate = 0;
+volatile static int cnt_terminate = 0;
 static bool cfg_daemonize = false;
 
-static void segv_handler(int sig) {
+static int  args_debug_flag = NON;
+// static int   ssl_flag = 0;
+static std::string cfg_listen_port;
+static std::string cfg_ssl_listen_port;
+static std::string cfg_udp_port;
+static std::string cfg_socks_port;
 
-    FAT_("  [%d] ========= Smithproxy exception handler  =========",sig );
+static std::string config_file;
+
+#define LOG_FILENAME_SZ 512
+volatile char crashlog_file[LOG_FILENAME_SZ];
+//static unsigned int cfg_log_level = INF;
+
+
+static int cfg_tcp_workers = 0;
+static int cfg_ssl_workers = 0;
+static int cfg_udp_workers = 0;
+static int cfg_socks_workers = 0;
+
+static unsigned int mystrlen(const char* str, int max) {
+    for(int i = 0; i < max; i++ ) {
+        if(str[i] == 0) {
+            return i;
+        }
+    }
+    return max;
+}
+
+static void btrace_handler(int sig) {
+
+    int CRLOG = open((const char*)crashlog_file,O_CREAT | O_RDWR);
+    write(STDERR_FILENO," ======== Smithproxy exception handler =========\n",50);
+    write(CRLOG," ======== Smithproxy exception handler =========\n",50);
+    //FAT_("  [%d] ========= Smithproxy exception handler  =========",sig );
 
     void *trace[64];
     size_t size, i;
@@ -95,19 +126,32 @@ static void segv_handler(int sig) {
     strings = backtrace_symbols( trace, size );
 
     if (strings == NULL) {
-        FATS_("failure: backtrace_symbols");
+        //FATS_("failure: backtrace_symbols");
+        write(STDERR_FILENO,"failure: backtrace_symbols\n",28);
+        write(CRLOG,"failure: backtrace_symbols\n",28);
         exit(EXIT_FAILURE);
     }
     
     
-    FAT_("  [%d] Traceback:",sig );
+    //FAT_("  [%d] Traceback:",sig );
+    write(STDERR_FILENO,"Traceback:\n",11);
+    write(CRLOG,"Traceback:\n",11);
 
-    for( i = 0; i < size; i++ ) {
-        FAT_("  [%d] %s", sig, strings[i] );
-    }
+     for( i = 0; i < size; i++ ) {
+//         //FAT_("  [%d] %s", sig, strings[i] );
+         write(STDERR_FILENO,"    ",4);
+         write(CRLOG,"    ",4);
+         write(STDERR_FILENO,strings[i],mystrlen(strings[i],256));
+         write(CRLOG,strings[i],mystrlen(strings[i],256));
+         write(STDERR_FILENO,"\n",1);
+         write(CRLOG,"\n",1);
+     }
+    //backtrace_symbols_fd((void* const*)strings,64,STDERR_FILENO);
     
-    FAT_("  [%d] =================================================", sig );
-
+    //FAT_("  [%d] =================================================", sig );
+    write(STDERR_FILENO," ===============================================\n",50);
+    write(CRLOG," ===============================================\n",50);
+    close(CRLOG);
     
     daemon_unlink_pidfile();
     
@@ -144,22 +188,13 @@ void my_terminate (int param) {
     }
 }
 
-
-static int  args_debug_flag = NON;
-// static int   ssl_flag = 0;
-static std::string cfg_listen_port;
-static std::string cfg_ssl_listen_port;
-static std::string cfg_udp_port;
-static std::string cfg_socks_port;
-
-static std::string config_file;
-//static unsigned int cfg_log_level = INF;
-
-
-static int cfg_tcp_workers = 0;
-static int cfg_ssl_workers = 0;
-static int cfg_udp_workers = 0;
-static int cfg_socks_workers = 0;
+bool load_config(std::string& config_f, bool reload = false);
+void my_usr1 (int param) {
+    INFS_("USR1 signal handler started");
+    INFS_("reloading policies and it's objects (no support for reloading other settings!)");
+    load_config(config_file,true);
+    INFS_("USR1 signal handler finished");
+}
 
 static struct option long_options[] =
     {
@@ -267,11 +302,13 @@ int load_signatures(libconfig::Config& cfg, const char* name, std::vector<duplex
     return sigs_len;
 }
 
-void load_config(std::string& config_f) {
+bool load_config(std::string& config_f, bool reload) {
+    bool ret = true;
+    
     using namespace libconfig;
     if(! cfgapi_init(config_f.c_str()) ) {
-        FATS_("Unable to load config, which is mandatory to run smithproxy. Bailing out.");
-        exit(-2);
+        FATS_("Unable to load config.");
+        ret = false;
     }
     
     try {
@@ -287,13 +324,15 @@ void load_config(std::string& config_f) {
         cfgapi_load_obj_policy();
         
         
-        load_signatures(cfgapi,"detection_signatures",sigs_detection);
-        load_signatures(cfgapi,"starttls_signatures",sigs_starttls);
+        if(!reload)  {
+            load_signatures(cfgapi,"detection_signatures",sigs_detection);
+            load_signatures(cfgapi,"starttls_signatures",sigs_starttls);
+        }
         
         cfgapi.getRoot()["settings"].lookupValue("certs_path",SSLCertStore::certs_path);
         cfgapi.getRoot()["settings"].lookupValue("certs_ca_key_password",SSLCertStore::password);
-	cfgapi.getRoot()["settings"].lookupValue("certs_ca_path",SSLCertStore::def_cl_capath);
-	
+        cfgapi.getRoot()["settings"].lookupValue("certs_ca_path",SSLCertStore::def_cl_capath);
+        
         cfgapi.getRoot()["settings"].lookupValue("plaintext_port",cfg_listen_port);
         cfgapi.getRoot()["settings"].lookupValue("plaintext_workers",cfg_tcp_workers);
         cfgapi.getRoot()["settings"].lookupValue("ssl_port",cfg_ssl_listen_port);
@@ -314,38 +353,52 @@ void load_config(std::string& config_f) {
         cfgapi.getRoot()["debug"]["log"].lookupValue("sslcertstore",SSLCertStore::log_level_ref());
         cfgapi.getRoot()["debug"]["log"].lookupValue("proxy",baseProxy::log_level_ref());
         
-        std::string log_target;
-        bool log_console;
-        if(cfgapi.getRoot()["settings"].lookupValue("log_file",log_target)) {
+        // don't mess with logging if just reloading
+        if(! reload) {
+            std::string log_target;
+            bool log_console;
             
-            std::ofstream * o = new std::ofstream(log_target.c_str(),std::ios::app);
-            lout.targets(log_target,o);
-            lout.dup2_cout(false);
-            lout.level(cfgapi_table.logging.level);
+            //init crashlog file with dafe default
+            strcpy((char*)crashlog_file,"/tmp/smithproxy_crash.log");
             
-            logger_profile* lp = new logger_profile();
-            lp->print_srcline_ = lout.print_srcline();
-            lp->print_srcline_always_ = lout.print_srcline_always();
-            lp->level_ = cfgapi_table.logging.level;
-            lout.target_profiles()[(uint64_t)o] = lp;
-            
-            if(cfgapi.getRoot()["settings"].lookupValue("log_console",log_console)) {
-                lout.dup2_cout(log_console);
+            if(cfgapi.getRoot()["settings"].lookupValue("log_file",log_target)) {
+                
+                // prepare custom crashlog file
+                std::string crlog = log_target + ".crashlog.log";
+                memset((void*)crashlog_file,0,LOG_FILENAME_SZ);
+                strncpy((char*)crashlog_file,crlog.c_str(),LOG_FILENAME_SZ-1);
+                
+                std::ofstream * o = new std::ofstream(log_target.c_str(),std::ios::app);
+                lout.targets(log_target,o);
+                lout.dup2_cout(false);
+                lout.level(cfgapi_table.logging.level);
+                
+                logger_profile* lp = new logger_profile();
+                lp->print_srcline_ = lout.print_srcline();
+                lp->print_srcline_always_ = lout.print_srcline_always();
+                lp->level_ = cfgapi_table.logging.level;
+                lout.target_profiles()[(uint64_t)o] = lp;
+                
+                if(cfgapi.getRoot()["settings"].lookupValue("log_console",log_console)) {
+                    lout.dup2_cout(log_console);
+                }
             }
-        }        
+        }
     }
     catch(const SettingNotFoundException &nfex) {
     
         FAT_("Setting not found: %s",nfex.getPath());
-        exit(-66);
+        ret = false;
     }
+    
+    return ret;
 }
 
 void ignore_sigpipe() {
     struct sigaction act_segv;
     sigemptyset(&act_segv.sa_mask);
     act_segv.sa_flags = 0;
-    act_segv.sa_handler = segv_handler;
+    act_segv.sa_handler = btrace_handler;
     sigaction( SIGSEGV, &act_segv, NULL);
 }
 
@@ -394,7 +447,9 @@ int main(int argc, char *argv[]) {
     }
         
     // set level to what's in the config
-    load_config(config_file);
+    if (!load_config(config_file)) {
+        FATS_("Error loading config file on startup.");
+    }
     
     // if there is loglevel specified in config file and is bigger than we currently have set, use it
     if(cfgapi_table.logging.level > lout.level()) {
@@ -439,9 +494,12 @@ int main(int argc, char *argv[]) {
 	prev_fn = signal (SIGINT,my_terminate);
 	if (prev_fn==SIG_IGN) signal (SIGINT,SIG_IGN);
 
-    prev_fn = signal(SIGABRT, segv_handler);
+    prev_fn = signal(SIGABRT, btrace_handler);
     if (prev_fn==SIG_IGN) signal (SIGABRT,SIG_IGN);
     
+    prev_fn = signal(SIGUSR1, my_usr1);
+    if (prev_fn==SIG_IGN) signal (SIGUSR1,SIG_IGN);
+
 
     ignore_sigpipe();
     
@@ -520,9 +578,7 @@ int main(int argc, char *argv[]) {
 
     cfgapi_cleanup();
 
-    auto s = new SSLCom();
-    s->certstore()->destroy();
-    delete s;    
+    SSLCom::certstore()->destroy();
     
     if(cfg_daemonize) {    
         daemon_unlink_pidfile();
