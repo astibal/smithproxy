@@ -25,7 +25,7 @@ import pylibconfig2 as cfg
 import sys
 import os
 import time
-
+import logging
 
 
 def run_plaintext(cfg_api, server_class=BaseHTTPServer.HTTPServer,
@@ -55,7 +55,7 @@ def run_ssl(cfg_api,server_class=BaseHTTPServer.HTTPServer,
     httpd.serve_forever()
 
 
-def run():
+def run_portal_all_background():
 
     c = cfg.Config()
     c.read_file("/etc/smithproxy/smithproxy.cfg")  
@@ -68,11 +68,31 @@ def run():
         if pid == 0:
             continue
         else:
-            print "Starting %s process..." % (ps_name,)
+            logging.info("Starting %s process..." % (ps_name,))
             callable(c)
             time.sleep(1)
 
-run()
+
+def run_portal_plain():
+    logging.info("run_portal_plain: start")
+    c = cfg.Config()
+    c.read_file("/etc/smithproxy/smithproxy.cfg")  
+    run_plaintext(c)
+       
+def run_portal_ssl():
+
+    ret = True
+
+    try:
+        c = cfg.Config()
+        c.read_file("/etc/smithproxy/smithproxy.cfg")  
+        run_ssl(c)
+    except Exception, e: 
+        ret = False;
+        logging.error("run_portal_ssl: exception caught: %s" % (str(e)))
+        
+    return str(ret)
+
 
 
 
