@@ -45,7 +45,7 @@ void daemonize(void) {
     DIAS_("daemonize start");
     
     struct stat st;
-    if( stat("/var/run/smithproxy",&st) == 0) {
+    if( stat(PID_FILE,&st) == 0) {
         ERRS_("There seems to be smithproxy already running in the system. Aborting.");
         exit(EXIT_FAILURE);
     }

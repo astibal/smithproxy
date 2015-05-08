@@ -504,10 +504,10 @@ int main(int argc, char *argv[]) {
 
     ignore_sigpipe();
     
-    struct sigaction act_pipe;
-    sigemptyset(&act_pipe.sa_mask);    
-    sigaction( SIGPIPE, &act_pipe, NULL);
-    
+//     struct sigaction act_pipe;
+//     sigemptyset(&act_pipe.sa_mask);    
+//     sigaction( SIGPIPE, &act_pipe, NULL);
+//     
     
     plain_thread = new std::thread([]() { 
         ignore_sigpipe();
@@ -533,7 +533,6 @@ int main(int argc, char *argv[]) {
     } );       
     pthread_setname_np(udp_thread->native_handle(),"smithproxy_udp");
 
-
     socks_thread = new std::thread([] () { 
         ignore_sigpipe();
         socks_proxy->run(); 
@@ -551,13 +550,10 @@ int main(int argc, char *argv[]) {
     
     CRI_("Smithproxy %s (socle %s) started",SMITH_VERSION,SOCLE_VERSION);
     
-    
-
-    
-    
     if(plain_thread) {
         plain_thread->join();
     }
+    
     if(ssl_thread) {
         ssl_thread->join();
     }
