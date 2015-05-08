@@ -23,6 +23,7 @@ import time
 import cgi, cgitb 
 import util
 import os
+import logging
 
 #	removed head:
 # 	<link rel=stylesheet type="text/css" href="/css/styles.css">	
@@ -76,4 +77,5 @@ try:
 
 except Exception, e:
 	util.print_message("Error","Error occured:", str(e),"/error.html")
+	logging.error("auth.py: exception caught: " + str(e))
 

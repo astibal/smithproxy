@@ -31,7 +31,7 @@ from portal import webfr
 class PortalDaemon(Daemon):
     def __init__(self, nicename, pidfile, stdin='/dev/null', stdout='/dev/null', stderr='/dev/null'):
         Daemon.__init__(self,nicename,pidfile,stdin,stdout,stderr)
-        
+
     def run(self):
         e = None
         logging.info("PortalDaemon.run: starting "+self.nicename)
@@ -41,16 +41,15 @@ class PortalDaemon(Daemon):
         else:
             logging.info("PortalDaemon.run: starting plain ("+self.nicename+")")
             e = webfr.run_portal_plain()
-        
+
         if(e):
             logging.error("portal finished with error: %s",str(e))
         else:
             logging.info("portal finished...")
-            
+
         time.sleep(1)
         sys.exit(1)
-        
-    
+
 
 class SmithProxyDog(Daemon):
     def __init__(self,poll_interval=0.2, stdin='/dev/null', stdout='/dev/null', stderr='/dev/null'): 
@@ -58,9 +57,9 @@ class SmithProxyDog(Daemon):
         self.exec_info = []     # tuples of nicename,executable,pidfile_of_executable
         self.sub_daemons = []   # daemons which we are starting via Daemon class interface
         self.poll_interval = poll_interval
-    
+
     def status(self,print_stdout=False,auto_restart=True):
-        
+
         ret = True
         r = SmithProxyDog.check_running_pidfile(self.pidfile)
         if not r: 
@@ -71,21 +70,21 @@ class SmithProxyDog(Daemon):
                 logging.error(msg)
                 if print_stdout:
                     print msg
-                
-        
-    
+
+
+
         for (nicename,exe,pidfile) in self.exec_info:
             r = SmithProxyDog.check_running_pidfile(pidfile)
             if not r: 
                 SmithProxyDog.print_process_status(r,nicename,print_stdout)
                 ret = r
-                if auto_restart:                
+                if auto_restart:
                     msg = "fixing: " + exe
                     logging.info(msg)
                     if print_stdout:
                         print msg
                     # some real fixing action
-         
+
 
         for d in self.sub_daemons:
             r = SmithProxyDog.check_running_pidfile(d.pidfile)
@@ -98,19 +97,28 @@ class SmithProxyDog(Daemon):
                     if print_stdout:
                         print msg
 
+                    # do restart in child. For all cases, child is just a temporary thing, so exit.
                     p = os.fork()
-                    if p == 0:                        
-                        d.start()
-                
-        
-        if ret:   
+                    if p == 0:
+                        logging.info("fixing sub-daemon: child process: %d" % (os.getpid(),) )
+                        os.setsid()
+                        d.daemonize()
+                        d.run()
+                        sys.exit(0)
+                    else:
+                        logging.info("fixing sub-daemon: parent process: %d waiting for %d to finish" % (os.getpid(),p) )
+                        os.waitpid(p,1)   # wait for 'p'
+                        logging.info("fixing sub-daemon: parent process: %d waiting for %d finished" % (os.getpid(),p) )
+
+
+        if ret:
             msg = "Status of all monitored processes is OK"
             logging.info(msg)
             if print_stdout:
                 print msg
-                
+
         return ret
-    
+
     def run(self):
         while True:
             self.status(False)
@@ -128,20 +136,20 @@ class SmithProxyDog(Daemon):
 
     @staticmethod
     def check_running_pidfile(pidfile):
-        
+
         running = False
         try:
             pid = Daemon.readpid(pidfile)
             if pid:
                 os.kill(pid,0)
                 running = True
-            
+
         except OSError, e:
             pass
-        
+
         return running
 
-    
+
 if __name__ == "__main__":
     logging.basicConfig(filename='/var/log/smithproxy_dog.log', level=logging.INFO, format='%(asctime)s [%(process)d] %(message)s')
 
@@ -149,17 +157,17 @@ if __name__ == "__main__":
     daemon.keeppid = True
 
     daemon.exec_info.append(('smithproxy daemon','/usr/local/bin/smithproxy','/var/run/smithproxy.pid'))
-    
+
     ### Portal INIT 
-    
+
     portal = PortalDaemon('portal','/var/run/smithproxy_portal.pid')
-    #portal.should_chdir = False
+    portal.pwd = "portal/"
     daemon.sub_daemons.append(portal)
-    
+
     portal_ssl = PortalDaemon('portal_ssl','/var/run/smithproxy_portal_ssl.pid')
-    #portal_ssl.should_chdir = False
+    portal_ssl.pwd = "portal/"
     daemon.sub_daemons.append(portal_ssl)
-    
+
     if len(sys.argv) == 2:
         if 'start' == sys.argv[1]:
                 logging.info("starting daemons!")
@@ -170,10 +178,13 @@ if __name__ == "__main__":
                     if p == 0:
                         d.start()
                         print "finished " + d.nicename
-            
+                        sys.exit(0)
+                    else:
+                        os.waitpid(p,1)   # wait for 'p'
+
                 time.sleep(2)
-                
-                print "starting " + daemon.nicename                
+
+                print "starting " + daemon.nicename
                 daemon.start()
 
 
@@ -184,21 +195,18 @@ if __name__ == "__main__":
                 daemon.keeppid = False
                 daemon.stop()
                 time.sleep(5)
-                
+
                 for d in daemon.sub_daemons:
                     print "stopping " + d.nicename
                     d.stop()
-                    
 
-                
-                
         elif 'restart' == sys.argv[1]:
                 for d in daemon.sub_daemons:
                     print "restarting " + d.nicename
                     d.restart()
-            
+
                 daemon.restart()
-                
+
         elif 'status' ==  sys.argv[1]:
                 daemon.status(True,auto_restart=False)
 

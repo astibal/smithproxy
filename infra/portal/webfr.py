@@ -35,6 +35,7 @@ def run_plaintext(cfg_api, server_class=BaseHTTPServer.HTTPServer,
     server_address = ('', int(port))
     handler_class.cgi_directories = ['/cgi-bin']
     httpd = server_class(server_address, handler_class)
+    CGIHTTPServer.CGIHTTPRequestHandler.have_fork=False    
     httpd.serve_forever()
 
 
@@ -74,16 +75,22 @@ def run_portal_all_background():
 
 
 def run_portal_plain():
-    logging.info("run_portal_plain: start")
-    c = cfg.Config()
-    c.read_file("/etc/smithproxy/smithproxy.cfg")  
-    run_plaintext(c)
+    ret = True
+    try:
+        logging.info("run_portal_plain: start")
+        c = cfg.Config()
+        c.read_file("/etc/smithproxy/smithproxy.cfg")  
+        run_plaintext(c)
+    except Exception, e: 
+        ret = False;
+        logging.error("run_portal_plain: exception caught: %s" % (str(e)))
+        
+    return str(ret)
        
 def run_portal_ssl():
-
     ret = True
-
     try:
+        logging.info("run_portal_ssl: start")
         c = cfg.Config()
         c.read_file("/etc/smithproxy/smithproxy.cfg")  
         run_ssl(c)

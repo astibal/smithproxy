@@ -27,6 +27,7 @@ import sys, os, time, atexit
 import pwd, grp
 from signal import SIGTERM 
 import logging
+import signal
 
 class Daemon:
     """
@@ -41,8 +42,8 @@ class Daemon:
         self.pidfile = pidfile
         self.nicename = nicename
         self.should_chdir = True
-        self.master = False
         self.keeppid = False
+        self.pwd = None
     
     
     def daemonize(self):
@@ -56,18 +57,26 @@ class Daemon:
             if pid > 0:
                 # exit first parent
                 logging.info(self.nicename + ": fork #1 master exit")
-                self.master = True
                 sys.exit(0)
+
                 
             logging.info(self.nicename + ": fork #1 slave ok")
+            signal.signal(signal.SIGCHLD, signal.SIG_IGN)
             
         except OSError, e: 
             logging.error(self.nicename + ": fork #1 failed: %d (%s)" % (e.errno, e.strerror))
             return False
     
         # decouple from parent environment
-        if self.should_chdir:
-            os.chdir("/") 
+        try:
+            if self.should_chdir:
+                if not self.pwd:
+                    os.chdir("/") 
+                else:
+                    os.chdir(self.pwd)
+        except OSError, e: 
+            logging.error(self.nicename + ": fork #1 parameters problems: %d (%s)" % (e.errno, e.strerror))
+
         os.setsid() 
         os.umask(0) 
     
@@ -77,9 +86,10 @@ class Daemon:
             if pid > 0:
                 # exit from second parent
                 logging.info(self.nicename + ": fork #2 master exit")
-                self.master = True
                 sys.exit(0) 
             logging.info(self.nicename + ": fork #2 slave ok")
+            signal.signal(signal.SIGCHLD, signal.SIG_IGN)
+
         except OSError, e: 
             logging.error(self.nicename + ": fork #2 failed: %d (%s)" % (e.errno, e.strerror))
             return False
@@ -95,13 +105,11 @@ class Daemon:
         os.dup2(se.fileno(), sys.stderr.fileno())
     
         # write pidfile
-        if not self.master:
-            atexit.register(self.delpid)
-            pid = str(os.getpid())
-            file(self.pidfile,'w+').write("%s" % pid)
+        atexit.register(self.delpid)
+        pid = str(os.getpid())
+        file(self.pidfile,'w+').write("%s" % pid)
             
         # reset if this will be called again! 
-        self.master = False
         
         logging.info(self.nicename + ": daemonize returning " + str(True))
         return True
@@ -120,10 +128,10 @@ class Daemon:
             pid = int(pf.read().strip())
             pf.close()
         except IOError,e:
-            logging.debug("cannot read pidfile: " + fnm + ": " + str(e))
+            logging.debug("Daemon.readpid" + ": " +"cannot read pidfile: " + fnm + ": " + str(e))
             pid = None   
         except ValueError,e:
-            logging.debug("cannot read pidfile: " + fnm + ": " + str(e))
+            logging.debug("Daemon.readpid" + ": " +"cannot read pidfile: " + fnm + ": " + str(e))
             pid = None   
             
         return pid
@@ -139,12 +147,12 @@ class Daemon:
     
         if pid:
             message = "pidfile %s already exist. Daemon already running?"
-            logging.error(message % self.pidfile)
+            logging.error(self.nicename + ": " + message % self.pidfile)
             return
         
         # Start the daemon
         if not self.daemonize():
-            #logging.error("failed to daemonize, cannot run!")
+            logging.error(self.nicename + ": " + "failed to daemonize, cannot run!")
             return
             
         self.run()
@@ -166,7 +174,7 @@ class Daemon:
     
         if not pid:
             message = "pidfile %s does not exist. Daemon not running?"
-            logging.error(message % self.pidfile)
+            logging.error(self.nicename + ": " + message % self.pidfile)
             return # not an error in a restart
 
         # Try killing the daemon process    
