@@ -27,6 +27,7 @@ import os
 import pprint
 
 from portal import webfr
+from bend   import bend
 
 class PortalDaemon(Daemon):
     def __init__(self, nicename, pidfile, stdin='/dev/null', stdout='/dev/null', stderr='/dev/null'):
@@ -34,7 +35,7 @@ class PortalDaemon(Daemon):
 
     def run(self):
         e = None
-        logging.info("PortalDaemon.run: starting "+self.nicename)
+        logging.debug("PortalDaemon.run: starting "+self.nicename)
         if(self.nicename.endswith("ssl")):
             logging.info("PortalDaemon.run: starting ssl ("+self.nicename+")")
             e = webfr.run_portal_ssl()
@@ -45,11 +46,36 @@ class PortalDaemon(Daemon):
         if(e):
             logging.error("portal finished with error: %s",str(e))
         else:
-            logging.info("portal finished...")
+            logging.debug("portal finished...")
 
         time.sleep(1)
         sys.exit(1)
 
+
+class BendDaemon(Daemon):
+    def __init__(self, nicename, pidfile, stdin='/dev/null', stdout='/dev/null', stderr='/dev/null'):
+        Daemon.__init__(self,nicename,pidfile,stdin,stdout,stderr)    
+    def run(self):
+        bend.run_bend()
+
+
+def start_exec(nicename, path, pidfile, additional_arguments=None):
+    if(SmithProxyDog.check_running_pidfile(pidfile)):
+        logging.info("process "+ nicename + "already running")
+    else:
+        opt = [path, '--daemonize']
+        if additional_arguments:
+            opt += additional_arguments
+
+        r = subprocess.call(opt)        
+        if r != 0:
+            logging.error("process "+ nicename + " haven't stated!")
+        else:
+            logging.info("process " + nicename + " started correctly.")
+            
+def stop_exec(nicename,pidfile):
+    Daemon.kill(pidfile)
+    logging.info("process " + nicename + " terminated.")
 
 class SmithProxyDog(Daemon):
     def __init__(self,poll_interval=0.2, stdin='/dev/null', stdout='/dev/null', stderr='/dev/null'): 
@@ -57,6 +83,7 @@ class SmithProxyDog(Daemon):
         self.exec_info = []     # tuples of nicename,executable,pidfile_of_executable
         self.sub_daemons = []   # daemons which we are starting via Daemon class interface
         self.poll_interval = poll_interval
+
 
     def status(self,print_stdout=False,auto_restart=True):
 
@@ -79,12 +106,19 @@ class SmithProxyDog(Daemon):
                 SmithProxyDog.print_process_status(r,nicename,print_stdout)
                 ret = r
                 if auto_restart:
-                    msg = "fixing: " + exe
+                    msg = "fixing: " + nicename
                     logging.info(msg)
                     if print_stdout:
                         print msg
-                    # some real fixing action
 
+                    p = os.fork()
+                    if p == 0:
+                        start_exec(nicename,exe,pidfile)
+                        sys.exit(0)
+                    else:
+                        logging.debug("fixing exec: parent process: %d waiting for %d to finish" % (os.getpid(),p) )
+                        os.waitpid(p,1)   # wait for 'p'
+                        logging.debug("fixing exec: parent process: %d waiting for %d finished" % (os.getpid(),p) )
 
         for d in self.sub_daemons:
             r = SmithProxyDog.check_running_pidfile(d.pidfile)
@@ -106,9 +140,9 @@ class SmithProxyDog(Daemon):
                         d.run()
                         sys.exit(0)
                     else:
-                        logging.info("fixing sub-daemon: parent process: %d waiting for %d to finish" % (os.getpid(),p) )
+                        logging.debug("fixing sub-daemon: parent process: %d waiting for %d to finish" % (os.getpid(),p) )
                         os.waitpid(p,1)   # wait for 'p'
-                        logging.info("fixing sub-daemon: parent process: %d waiting for %d finished" % (os.getpid(),p) )
+                        logging.debug("fixing sub-daemon: parent process: %d waiting for %d finished" % (os.getpid(),p) )
 
 
         if ret:
@@ -145,10 +179,18 @@ class SmithProxyDog(Daemon):
                 running = True
 
         except OSError, e:
-            pass
+            err = str(e)
+            if err.find("No such process") > 0:
+                if os.path.exists(pidfile):
+                    os.remove(pidfile)
+                    logging.warning("Removing stale pidfile " + pidfile)
 
         return running
 
+
+
+SMITHPROXY_PATH = '/root/smithproxy_bootcamp/src/smithproxy_master_sl_master/smithproxy/build/smithproxy'
+SMITHPROXY_PIDFILE = '/var/run/smithproxy.pid'
 
 if __name__ == "__main__":
     logging.basicConfig(filename='/var/log/smithproxy_dog.log', level=logging.INFO, format='%(asctime)s [%(process)d] %(message)s')
@@ -156,19 +198,24 @@ if __name__ == "__main__":
     daemon = SmithProxyDog(5)
     daemon.keeppid = True
 
-    daemon.exec_info.append(('smithproxy daemon','/usr/local/bin/smithproxy','/var/run/smithproxy.pid'))
+    daemon.exec_info.append(('smithproxy daemon', SMITHPROXY_PATH, SMITHPROXY_PIDFILE))
+
+    ### Backend INIT
+    bend_ = BendDaemon('bend','/var/run/smithproxy_bend.pid')
+    bend_.pwd = "bend/" 
+    daemon.sub_daemons.append(bend_)
 
     ### Portal INIT 
 
-    portal = PortalDaemon('portal','/var/run/smithproxy_portal.pid')
-    portal.pwd = "portal/"
-    daemon.sub_daemons.append(portal)
+    portal_ = PortalDaemon('portal','/var/run/smithproxy_portal.pid')
+    portal_.pwd = "portal/"
+    daemon.sub_daemons.append(portal_)
 
-    portal_ssl = PortalDaemon('portal_ssl','/var/run/smithproxy_portal_ssl.pid')
-    portal_ssl.pwd = "portal/"
-    daemon.sub_daemons.append(portal_ssl)
+    portal_ssl_ = PortalDaemon('portal_ssl','/var/run/smithproxy_portal_ssl.pid')
+    portal_ssl_.pwd = "portal/"
+    daemon.sub_daemons.append(portal_ssl_)
 
-    if len(sys.argv) == 2:
+    if len(sys.argv) >= 2:
         if 'start' == sys.argv[1]:
                 logging.info("starting daemons!")
 
@@ -181,6 +228,16 @@ if __name__ == "__main__":
                         sys.exit(0)
                     else:
                         os.waitpid(p,1)   # wait for 'p'
+
+                for (n,e,p) in daemon.exec_info:
+                    print "starting " + n
+                    ppp = os.fork()
+                    if ppp == 0:
+                        start_exec(n,e,p)
+                        print "finished " + n
+                        sys.exit(0)
+                    else:
+                        os.waitpid(ppp,1)   # wait for 'p'
 
                 time.sleep(2)
 
@@ -199,6 +256,10 @@ if __name__ == "__main__":
                 for d in daemon.sub_daemons:
                     print "stopping " + d.nicename
                     d.stop()
+                    
+                for (n,e,p) in daemon.exec_info:
+                    print "stopping " + n
+                    stop_exec(n,p)
 
         elif 'restart' == sys.argv[1]:
                 for d in daemon.sub_daemons:
@@ -211,7 +272,12 @@ if __name__ == "__main__":
                 daemon.status(True,auto_restart=False)
 
         elif 'fix' ==  sys.argv[1] or 'repair' ==  sys.argv[1]:
-                daemon.status(True,auto_restart=True)                
+                daemon.status(True,auto_restart=True)
+                
+        elif 'test' == sys.argv[1]:
+                if len(sys.argv) >= 3:
+                    if 'bend' == sys.argv[2]:
+                        bend_.run()
         else:
                 print "Unknown command"
                 sys.exit(2)

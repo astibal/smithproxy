@@ -158,24 +158,33 @@ class Daemon:
         self.run()
 
     def stop(self):
+        Daemon.kill(self.pidfile)
+
+    @staticmethod
+    def kill(pidfile):
+        
+        ret = False
+        
         """
         Stop the daemon
         """
         # Get the pid from the pidfile
         try:
-            pf = file(self.pidfile,'r')
+            pf = file(pidfile,'r')
             pid = int(pf.read().strip())
             pf.close()
         except IOError:
             pid = None
+            ret = False
         except ValueError:
             pid = None
+            ret = False
 
     
         if not pid:
             message = "pidfile %s does not exist. Daemon not running?"
-            logging.error(self.nicename + ": " + message % self.pidfile)
-            return # not an error in a restart
+            logging.error("kill: " + message % pidfile)
+            return ret # not an error in a restart
 
         # Try killing the daemon process    
         try:
@@ -185,11 +194,13 @@ class Daemon:
         except OSError, err:
             err = str(err)
             if err.find("No such process") > 0:
-                if os.path.exists(self.pidfile):
-                    os.remove(self.pidfile)
+                if os.path.exists(pidfile):
+                    os.remove(pidfile)
+                ret = True
             else:
-                print str(err)
-                return
+                logging.error("cannot kill process at" + pidfile + ": " + str(err))
+                ret = False
+        return ret
 
     def is_running(self):
         try:
