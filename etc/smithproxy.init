@@ -10,10 +10,12 @@ case "$1" in
   start)
     echo "Starting smithproxy"
     /etc/smithproxy/smithproxy.startup.sh start
+    python2 /usr/share/smithproxy/infra/smithdog.py start
     ;;
   stop)
     echo "Stopping smithproxy"
     /etc/smithproxy/smithproxy.startup.sh stop
+    python2 /usr/share/smithproxy/infra/smithdog.py stop
     ;;
   *)
     echo "Usage: /etc/init.d/smithproxy {start|stop}"
