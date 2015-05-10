@@ -69,7 +69,7 @@ def run_portal_all_background():
         if pid == 0:
             continue
         else:
-            logging.info("Starting %s process..." % (ps_name,))
+            logging.debug("Starting %s process..." % (ps_name,))
             callable(c)
             time.sleep(1)
 
@@ -77,7 +77,7 @@ def run_portal_all_background():
 def run_portal_plain():
     ret = True
     try:
-        logging.info("run_portal_plain: start")
+        logging.debug("run_portal_plain: start")
         c = cfg.Config()
         c.read_file("/etc/smithproxy/smithproxy.cfg")  
         run_plaintext(c)
@@ -90,7 +90,7 @@ def run_portal_plain():
 def run_portal_ssl():
     ret = True
     try:
-        logging.info("run_portal_ssl: start")
+        logging.debug("run_portal_ssl: start")
         c = cfg.Config()
         c.read_file("/etc/smithproxy/smithproxy.cfg")  
         run_ssl(c)

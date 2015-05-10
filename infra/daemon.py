@@ -112,7 +112,7 @@ class Daemon:
             
         # reset if this will be called again! 
         
-        logging.info(self.nicename + ": daemonize returning " + str(True))
+        logging.debug(self.nicename + ": daemonize returning " + str(True))
         return True
     
     def delpid(self):
