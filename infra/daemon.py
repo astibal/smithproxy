@@ -56,11 +56,11 @@ class Daemon:
             pid = os.fork() 
             if pid > 0:
                 # exit first parent
-                logging.info(self.nicename + ": fork #1 master exit")
+                logging.debug(self.nicename + ": fork #1 master exit")
                 sys.exit(0)
 
                 
-            logging.info(self.nicename + ": fork #1 slave ok")
+            logging.debug(self.nicename + ": fork #1 slave ok")
             signal.signal(signal.SIGCHLD, signal.SIG_IGN)
             
         except OSError, e: 
@@ -85,9 +85,10 @@ class Daemon:
             pid = os.fork() 
             if pid > 0:
                 # exit from second parent
-                logging.info(self.nicename + ": fork #2 master exit")
+                logging.debug(self.nicename + ": fork #2 master exit")
                 sys.exit(0) 
-            logging.info(self.nicename + ": fork #2 slave ok")
+            logging.debug(self.nicename + ": fork #2 slave ok")
+            logging.debug(self.nicename + ": daemon slave process ok")
             signal.signal(signal.SIGCHLD, signal.SIG_IGN)
 
         except OSError, e: 

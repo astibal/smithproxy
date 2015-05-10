@@ -464,6 +464,7 @@ int main(int argc, char *argv[]) {
         }
         
         lout.dup2_cout(false);
+        INFS_("entering daemon mode");
         daemonize();
     }
     // write out PID file

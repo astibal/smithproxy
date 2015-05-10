@@ -18,6 +18,18 @@
     along with Smithproxy.  If not, see <http://www.gnu.org/licenses/>.  """
 
 
+"""
+    SmithDog:
+    This is the maintenance/monitoring script keeping all smithproxy 
+    components up and running.
+    It's checking PID files, PIDs in them and if necessary, restarts 
+    component if needed. It's very likely used by your init.d startup 
+    script.
+    It's not a good idea to mess with anything here, unless absolutely
+    necessary.
+    You can call this script yourself to see the status.
+"""
+
 import sys, time
 from daemon import Daemon
 import subprocess
@@ -25,6 +37,30 @@ import distutils
 import logging
 import os
 import pprint
+
+
+"""
+   WARNING: this is not intended to be edited by end users !! 
+"""
+
+SMITHPROXY_PATH = '/usr/bin/smithproxy'
+SMITHPROXY_PIDFILE = '/var/run/smithproxy.pid'
+
+SMITHDOG_PIDFILE='/var/run/smithproxy_dog.pid'
+SMITHDOG_LOGFILE='/var/log/smithproxy_dog.log'
+
+WWW_PATH='/var/www/smithproxy/'
+PORTAL_PATH=WWW_PATH+"portal/"
+PORTAL_PIDFILE='/var/run/smithproxy_portal.pid'
+PORTALSSL_PIDFILE='/var/run/smithproxy_portal_ssl.pid'
+
+INFRA_PATH='/usr/share/smithproxy/infra/'
+BEND_PIDFILE='/var/run/smithproxy_bend.pid'
+
+
+
+sys.path.append(WWW_PATH)
+sys.path.append(INFRA_PATH)
 
 from portal import webfr
 from bend   import bend
@@ -34,6 +70,8 @@ class PortalDaemon(Daemon):
         Daemon.__init__(self,nicename,pidfile,stdin,stdout,stderr)
 
     def run(self):
+        os.chdir(PORTAL_PATH)
+        
         e = None
         logging.debug("PortalDaemon.run: starting "+self.nicename)
         if(self.nicename.endswith("ssl")):
@@ -56,6 +94,7 @@ class BendDaemon(Daemon):
     def __init__(self, nicename, pidfile, stdin='/dev/null', stdout='/dev/null', stderr='/dev/null'):
         Daemon.__init__(self,nicename,pidfile,stdin,stdout,stderr)    
     def run(self):
+        os.chdir(INFRA_PATH)
         bend.run_bend()
 
 
@@ -79,7 +118,7 @@ def stop_exec(nicename,pidfile):
 
 class SmithProxyDog(Daemon):
     def __init__(self,poll_interval=0.2, stdin='/dev/null', stdout='/dev/null', stderr='/dev/null'): 
-        Daemon.__init__(self,'smithdog','/var/run/smithproxy_dog.pid',stdin,stdout,stderr)
+        Daemon.__init__(self,'smithdog',SMITHDOG_PIDFILE,stdin,stdout,stderr)
         self.exec_info = []     # tuples of nicename,executable,pidfile_of_executable
         self.sub_daemons = []   # daemons which we are starting via Daemon class interface
         self.poll_interval = poll_interval
@@ -188,31 +227,27 @@ class SmithProxyDog(Daemon):
         return running
 
 
-
-SMITHPROXY_PATH = '/root/smithproxy_bootcamp/src/smithproxy_master_sl_master/smithproxy/build/smithproxy'
-SMITHPROXY_PIDFILE = '/var/run/smithproxy.pid'
-
 if __name__ == "__main__":
-    logging.basicConfig(filename='/var/log/smithproxy_dog.log', level=logging.INFO, format='%(asctime)s [%(process)d] %(message)s')
+    logging.basicConfig(filename=SMITHDOG_LOGFILE, level=logging.INFO, format='%(asctime)s [%(process)d] %(message)s')
 
     daemon = SmithProxyDog(5)
     daemon.keeppid = True
 
-    daemon.exec_info.append(('smithproxy daemon', SMITHPROXY_PATH, SMITHPROXY_PIDFILE))
+    daemon.exec_info.append(('smithproxy core', SMITHPROXY_PATH, SMITHPROXY_PIDFILE))
 
     ### Backend INIT
-    bend_ = BendDaemon('bend','/var/run/smithproxy_bend.pid')
-    bend_.pwd = "bend/" 
+    bend_ = BendDaemon('bend',BEND_PIDFILE)
+    bend_.pwd = INFRA_PATH 
     daemon.sub_daemons.append(bend_)
 
     ### Portal INIT 
 
-    portal_ = PortalDaemon('portal','/var/run/smithproxy_portal.pid')
-    portal_.pwd = "portal/"
+    portal_ = PortalDaemon('portal',PORTAL_PIDFILE)
+    portal_.pwd = PORTAL_PATH
     daemon.sub_daemons.append(portal_)
 
-    portal_ssl_ = PortalDaemon('portal_ssl','/var/run/smithproxy_portal_ssl.pid')
-    portal_ssl_.pwd = "portal/"
+    portal_ssl_ = PortalDaemon('portal_ssl',PORTALSSL_PIDFILE)
+    portal_ssl_.pwd = PORTAL_PATH
     daemon.sub_daemons.append(portal_ssl_)
 
     if len(sys.argv) >= 2:

@@ -35,6 +35,7 @@ endif (LIBCLI_FOUND)
 target_link_libraries(smithproxy socle_lib pthread ssl crypto rt)
 
 if(UNIX)
+    SET(CMAKE_INSTALL_PREFIX /usr)
     install(TARGETS smithproxy DESTINATION bin)
     install(FILES man/smithproxy.1 DESTINATION share/man/man1)
     install(FILES etc/smithproxy.cfg DESTINATION /etc/smithproxy)
@@ -43,5 +44,14 @@ if(UNIX)
     install(FILES etc/smithproxy.init DESTINATION /etc/init.d RENAME smithproxy)
     file(GLOB def_certs "etc/certs/default/*.pem")
     install(FILES ${def_certs} DESTINATION /etc/smithproxy/certs/default)
-    install(FILES man/TESTING_README.txt DESTINATION share/smithproxy)
+    install(FILES man/TESTING_README.txt DESTINATION share/smithproxy/docs)
+    
+    # backend install in /usr/share/smithproxy
+    install(DIRECTORY infra/bend DESTINATION share/smithproxy/infra)
+    file(GLOB infra_py "infra/*.py")
+    install(FILES ${infra_py} DESTINATION share/smithproxy/infra)
+
+    # portal installation
+    install(DIRECTORY infra/portal DESTINATION /var/www/smithproxy)
+
 endif()
