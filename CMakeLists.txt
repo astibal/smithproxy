@@ -85,5 +85,3 @@ if(UNIX)
     install(CODE "MESSAGE(\" +----------------------------------------------------------------------------------------+\")")
 
 endif()
-
-add_subdirectory(infra/bend/auth)
