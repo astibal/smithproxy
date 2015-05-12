@@ -153,7 +153,7 @@ int socksServerCX::process_socks_request() {
             // RIGHT
 
 
-            MitmHostCX *target_cx = new MitmHostCX(n_cx->com()->replicate(), n_cx->com()->nonlocal_dst_host().c_str(), 
+            MitmHostCX *target_cx = new MitmHostCX(n_cx->com()->slave(), n_cx->com()->nonlocal_dst_host().c_str(), 
                                                 string_format("%d",n_cx->com()->nonlocal_dst_port()).c_str()
                                                 );
             target_cx->paused(true);

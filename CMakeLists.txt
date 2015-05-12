@@ -86,4 +86,3 @@ if(UNIX)
 
 endif()
 
-add_subdirectory(infra/bend/auth)

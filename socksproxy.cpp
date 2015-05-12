@@ -91,7 +91,7 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     ldaadd(n_cx);
     n_cx->on_delay_socket(s);
     
-    MitmHostCX *target_cx = new MitmHostCX(n_cx->com()->replicate(), n_cx->com()->nonlocal_dst_host().c_str(), 
+    MitmHostCX *target_cx = new MitmHostCX(n_cx->com()->slave(), n_cx->com()->nonlocal_dst_host().c_str(), 
                                         string_format("%d",n_cx->com()->nonlocal_dst_port()).c_str()
                                         );
     std::string h;
@@ -140,13 +140,13 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
 
 
 baseHostCX* MitmSocksProxy::new_cx(int s) {
-    auto r = new socksServerCX(com()->replicate(),s);
+    auto r = new socksServerCX(com()->slave(),s);
     return r; 
 }
 
 void MitmSocksProxy::on_left_new(baseHostCX* just_accepted_cx) {
 
-    SocksProxy* new_proxy = new SocksProxy(com()->replicate());
+    SocksProxy* new_proxy = new SocksProxy(com()->slave());
     
     // let's add this just_accepted_cx into new_proxy
     std::string h;
