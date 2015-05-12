@@ -380,7 +380,7 @@ void MitmProxy::handle_replacement(MitmHostCX* cx) {
 
 
 baseHostCX* MitmMasterProxy::new_cx(int s) {
-    auto r = new MitmHostCX(com()->replicate(),s);
+    auto r = new MitmHostCX(com()->slave(),s);
     DEB_("Pausing new connection %s",r->c_name());
     r->paused(true);
     return r; 
@@ -395,7 +395,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
         delete just_accepted_cx;
     } 
     else {
-        MitmProxy* new_proxy = new MitmProxy(com()->replicate());
+        MitmProxy* new_proxy = new MitmProxy(com()->slave());
         
         // let's add this just_accepted_cx into new_proxy
         if(just_accepted_cx->paused_read()) {
@@ -405,7 +405,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
             DEBS_("MitmMasterProxy::on_left_new: ladd the new cx (unpaused)");
             new_proxy->ladd(just_accepted_cx);
         }
-        MitmHostCX *target_cx = new MitmHostCX(com()->replicate(), just_accepted_cx->com()->nonlocal_dst_host().c_str(), 
+        MitmHostCX *target_cx = new MitmHostCX(com()->slave(), just_accepted_cx->com()->nonlocal_dst_host().c_str(), 
                                             string_format("%d",just_accepted_cx->com()->nonlocal_dst_port()).c_str()
                                             );
         // connect it! - btw ... we don't want to block of course...
@@ -477,7 +477,7 @@ int MitmMasterProxy::handle_sockets_once(baseCom* c) {
 
 void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
 {
-    MitmProxy* new_proxy = new MitmProxy(com()->replicate());
+    MitmProxy* new_proxy = new MitmProxy(com()->slave());
     // let's add this just_accepted_cx into new_proxy
     if(just_accepted_cx->paused_read()) {
         DEBS_("MitmMasterProxy::on_left_new: ldaadd the new paused cx");
@@ -487,7 +487,7 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
         new_proxy->ladd(just_accepted_cx);
     }
     
-    MitmHostCX *target_cx = new MitmHostCX(com()->replicate(), just_accepted_cx->com()->nonlocal_dst_host().c_str(), 
+    MitmHostCX *target_cx = new MitmHostCX(com()->slave(), just_accepted_cx->com()->nonlocal_dst_host().c_str(), 
                                     string_format("%d",just_accepted_cx->com()->nonlocal_dst_port()).c_str()
                                     );
     
