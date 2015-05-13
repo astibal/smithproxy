@@ -166,7 +166,7 @@ class AuthManager:
       self.logon_shm = None
       self.token_shm = None
       self.global_token_referer = {}
-      self.server = SOAPpy.SOAPServer(("localhost", 65456))
+      self.server = SOAPpy.ThreadingSOAPServer(("localhost", 65456))
       
       self.portal_address = None
       self.portal_port = None

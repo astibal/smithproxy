@@ -17,8 +17,16 @@ case "$1" in
     /etc/smithproxy/smithproxy.startup.sh stop
     python2 /usr/share/smithproxy/infra/smithdog.py stop
     ;;
+  status)
+    echo "Smithproxy status"
+    python2 /usr/share/smithproxy/infra/smithdog.py status
+    ;;
+  reload)
+    echo "Reloading smithproxy policies"
+    kill -USR1 `cat /var/run/smithproxy.pid`
+    ;;
   *)
-    echo "Usage: /etc/init.d/smithproxy {start|stop}"
+    echo "Usage: /etc/init.d/smithproxy {start|stop|status|reload}"
     exit 1
     ;;
 esac
