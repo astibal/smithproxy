@@ -1,5 +1,6 @@
 
 import sys
+import logging
 import pprint
 
 
@@ -70,17 +71,25 @@ class AAAResolver:
         
 
 if __name__ == "__main__":
-    c = "smithproxy.cfg"
+    #logging.basicConfig(filename=SMITHAUTH_LOGFILE, level=logging.INFO, format='%(asctime)s [%(process)d] [%(levelname)s] %(message)s')
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s [%(process)d] [%(levelname)s] %(message)s')
+    c = "/etc/smithproxy/users.cfg"
     c = load_config(c)
     c = cfg_2_dict(c)
     a = AAAResolver()
+
+    #e = {}
+    #e["bind_uri"] = "ldap://192.168.254.1" 
+    #e["bind_dn"] = 'cn=admin,dc=nodomain'
+    #e["bind_pw"] = 'smithproxy'
+    #e["base"] = 'dc=nodomain'
+    #e["filter"] = ['uid','info','mobile','email','memberOf']
     
-    
-    for server in c.auth_servers.items():
-        #pprint.pprint(server)
-        #pprint.pprint(cfg_2_dict(server))
-        a.create_profile(server)
-        
-        
-        
-    
+    l = ldapcon.LdapSearch()
+    l.updateProfile(c["sources"]["ldap"]["example_ldap"])
+    pprint.pprint(l.profile)
+    print "-------"
+    l.init()
+    l.bind()
+    pprint.pprint(l.authenticate_user("sdfs","sdfsdf"))
+    pprint.pprint(l.authenticate_user("astib","smithproxy"))

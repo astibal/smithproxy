@@ -1,7 +1,11 @@
 #!/usr/bin/env python
 
-import ldap, pprint
-import sys, time, string
+import ldap
+import pprint
+import logging
+import sys
+import time
+import string
 
 # Some favorite LDAP search queries. 
 # $cnid -- attribute which represents logon name (openldap: uid, windows AD: sAMAccountName)
@@ -34,7 +38,7 @@ def pprint_result(r):
 #
 # network_timeout: how long we should wait until some response arrives
 # bind_dn:  bind using some specific account
-# bind_pwd: bind_dn password
+# bind_pw: bind_dn password
 # bind_uri: URI for the connection
 
 
@@ -49,38 +53,68 @@ class LdapCon(object):
 	_ldapcon = None
 	self.flushProfile()
 
+    @staticmethod
+    def empty_profile():
+        profile = {}
+        profile["network_timeout"] = 1000
+        profile["bind_dn"] = 'dc='
+        profile["bind_pw"] = ''
+        profile["bind_uri"] = ''
+        profile["cnid"] = 'uid'
+        
+        return profile
+
     def flushProfile(self):
-	self.profile = {}
-	self.profile["network_timeout"] = 1000
-	self.profile["bind_dn"] = 'dc='
-	self.profile["bind_pwd"] = ''
-	self.profile["bind_uri"] = 'ldap://'
-	self.profile["cnid"] = 'uid'
+        self.profile = LdapCon.empty_profile()
+
+    def updateProfile(self,u):
+        self.profile.update(u)
 
     def init(self):
         self._ldapcon = None
+        
+        logging.debug("ldapcon.init:")
+        
+        if self.profile["bind_uri"] == '' and "ip" in self.profile.keys():
+            self.profile["bind_uri"] = "ldap://" + self.profile["ip"]
+            logging.debug("ldapcon.init: specifying uri using ip key")
+            
+            if "port" in self.profile:
+                if self.profile["port"] != '' or not self.profile["port"]:
+                    self.profile["bind_uri"]+=":"+str(self.profile["port"])
+
+        logging.debug("ldapcon.init: uri: " + self.profile["bind_uri"])
+
         self._ldapcon = ldap.initialize(self.profile["bind_uri"])
         self.network_timeout = self.profile["network_timeout"]
         
+        logging.debug("ldapcon.init: ok")
+        
     def bind(self,custom_u=None,custom_p=None):
+        
+        logging.debug("ldapcon.bind:")
         u = self.profile["bind_dn"]
-        p = self.profile["bind_pwd"]
+        p = self.profile["bind_pw"]
         
         if custom_u:
             u = custom_u
         if custom_p:
             p = custom_p
     
-        #print "bind:"
-        #print u
-        #print p
+        #logging.debug("ldapcon.bind: about to bind with user '%s' and password '%s'" % (u,p)) # :->
+        logging.debug("ldapcon.bind: about to bind with user '%s' " % (u,))
+        
         r = self._ldapcon.bind(u,p)
+        logging.debug("ldapcon.bind: bind result: '%s'" % (str(r),))
+        
         #print "bind returns: %d" % r
         rr = self._ldapcon.whoami_s()
+        logging.debug("ldapcon.bind: whoami test result '" + str(rr) + "'")
         #print "whoami returns: '%s'" % rr
         if rr == '':
-            print "WARNING: invalid credentials!"
+            logging.info(self.profile["bind_uri"] + ": invalid credentials check for user '%s'" % (str(u),))
         
+        logging.debug("ldapcon.bind: result: '%s'" % (str(r),))
         return r
     
     def raw_query(self, base, query, filter=None, scope=ldap.SCOPE_SUBTREE):
@@ -109,43 +143,73 @@ class LdapSearch(LdapCon):
 
     def __init__(self):
         LdapCon.__init__(self)
-        self.profile["user"] = LDAP_SEARCH_USER
-        self.profile["base"] = ""
-        self.profile["filter"] = []
-        self.profile["scope"] = ldap.SCOPE_SUBTREE
-        self.profile["recursive_member_attr"] = "uniqueMember"
+        self.profile = LdapSearch.empty_profile()
+
+    @staticmethod
+    def empty_profile():
+        d = LdapCon.empty_profile()
+        e = {}
+        e["user"] = LDAP_SEARCH_USER
+        e["base_dn"] = ""
+        e["filter"] = []
+        e["scope"] = ldap.SCOPE_SUBTREE
+        e["recursive_member_attr"] = "uniqueMember"
+        
+        d.update(e)
+        
+        return d
+
+        
 
     def search_user_dn(self, username, query_dict=None):
-        template = string.Template(self.profile["user"])
+        r = None
+        logging.debug("ldapsearch.search_user_dn: ")
+        try:
+            logging.debug("ldapsearch.search_user_dn: using template: " + self.profile["user"])
+            template = string.Template(self.profile["user"])
+            
+            q = template.substitute(cnid=self.profile["cnid"],user=username) 
+            logging.debug("ldapsearch.search_user_dn: query: " + q)
+            #print "DEBUG: searchUser query=\'%s\'" % q
 
-        q = template.substitute(cnid=self.profile["cnid"],user=username) 
-        #print "DEBUG: searchUser query=\'%s\'" % q
+            r = self.raw_query(self.profile["base_dn"], q, 
+                                self.profile["filter"],
+                                self.profile["scope"])
+            logging.debug("ldapsearch.search_user_dn: query result: " + str(q))
+        except ldap.error,e:
+            logging.debug("ldapsearch.search_user_dn: query exception caught: " + str(e))
+        except KeyError,e:
+            logging.debug("ldapsearch.search_user_dn: query exception caught: " + str(e))
 
-        r = self.raw_query(self.profile["base"], q, 
-                            self.profile["filter"],
-                            self.profile["scope"])
-
+        logging.debug("ldapsearch.search_user_dn: returning %d objects" % (len(r),))
         return r
 
     def authenticate_user(self,username,password):
+        logging.debug("ldapsearch.authenticate_user: FIND")
         r = self.search_user_dn(username)
         if r:
+            logging.debug("ldapsearch.authenticate_user: BIND")
             self.init()
             res = self.bind(r[0][0],password)
             #print "Authenticate: %d" % res
             if res == '':
-                #print "Authentication failed!"
+                logging.debug("ldapsearch.authenticate_user: FAILED")
                 return None
             
-            return r[0][0]
+            logging.debug("ldapsearch.authenticate_user: GROUPS")
+            groups = self.groups_user_dn(r[0][0])
+            logging.debug("ldapsearch.authenticate_user: %d group(s) found" % (len(groups),))
             
+            return (r[0][0],groups)
+        
+        logging.debug("ldapsearch.authenticate_user: NOT FOUND")
         return None
     
     def groups_user_dn(self,user_dn):
         ret = []
         
         self.init()
-        res = self.raw_query(self.profile["base"],"%s=%s" % (self.profile["recursive_member_attr"],user_dn))
+        res = self.raw_query(self.profile["base_dn"],"%s=%s" % (self.profile["recursive_member_attr"],user_dn))
         if res:
             for r in res:
                 ret.append(r[0])
@@ -163,8 +227,8 @@ def test_LdapSearch(ip):
     myldap = LdapSearch()
     myldap.profile["bind_uri"] += ip
     myldap.profile["bind_dn"] = 'cn=admin,dc=nodomain'
-    myldap.profile["bind_pwd"] = 'smithproxy'
-    myldap.profile["base"] = 'dc=nodomain'
+    myldap.profile["bind_pw"] = 'smithproxy'
+    myldap.profile["base_dn"] = 'dc=nodomain'
     myldap.profile["filter"] = ['uid','info','mobile','email','memberOf']
 
     try:
