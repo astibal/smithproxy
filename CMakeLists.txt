@@ -34,12 +34,41 @@ endif (LIBCLI_FOUND)
 
 target_link_libraries(smithproxy socle_lib pthread ssl crypto rt)
 
+
+
+# taken from http://public.kitware.com/Bug/view.php?id=12646
+function(install_if_not_exists src dest)
+  if(NOT IS_ABSOLUTE "${src}")
+    set(src "${CMAKE_CURRENT_SOURCE_DIR}/${src}")
+  endif()
+  get_filename_component(src_name "${src}" NAME)
+  if (NOT IS_ABSOLUTE "${dest}")
+    set(dest "${CMAKE_INSTALL_PREFIX}/${dest}")
+  endif()
+  install(CODE "
+    if(NOT EXISTS \"\$ENV{DESTDIR}${dest}/${src_name}\")
+      #file(INSTALL \"${src}\" DESTINATION \"${dest}\")
+      message(STATUS \"Installing: \$ENV{DESTDIR}${dest}/${src_name}\")
+      execute_process(COMMAND \${CMAKE_COMMAND} -E copy \"${src}\"
+                      \"\$ENV{DESTDIR}${dest}/${src_name}\"
+                      RESULT_VARIABLE copy_result
+                      ERROR_VARIABLE error_output)
+      if(copy_result)
+        message(FATAL_ERROR \${error_output})
+      endif()
+    else()
+      message(STATUS \"Skipping  : \$ENV{DESTDIR}${dest}/${src_name}\")
+    endif()
+  ")
+endfunction(install_if_not_exists)
+
+
 if(UNIX)
     SET(CMAKE_INSTALL_PREFIX /usr)
     install(TARGETS smithproxy DESTINATION bin)
     install(FILES man/smithproxy.1 DESTINATION share/man/man1)
-    install(FILES etc/smithproxy.cfg DESTINATION /etc/smithproxy PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ)
-    install(FILES etc/smithproxy.startup.cfg DESTINATION /etc/smithproxy PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ)
+    install_if_not_exists(etc/smithproxy.cfg /etc/smithproxy)
+    install_if_not_exists(etc/smithproxy.startup.cfg /etc/smithproxy)
     install(FILES etc/smithproxy.startup.sh DESTINATION /etc/smithproxy 
                 PERMISSIONS 
                     OWNER_READ OWNER_WRITE OWNER_EXECUTE 
