@@ -1,4 +1,4 @@
-#! /bin/sh
+#!/bin/bash
 # /etc/init.d/smithproxy
 #
 
@@ -6,16 +6,30 @@
 # touch /var/lock/smithproxy
 
 # Carry out specific functions when asked to by the system
-case "$1" in
-  start)
+
+function do_start {
     echo "Starting smithproxy"
     /etc/smithproxy/smithproxy.startup.sh start
     python2 /usr/share/smithproxy/infra/smithdog.py start
-    ;;
-  stop)
+}
+
+function do_stop {
     echo "Stopping smithproxy"
     /etc/smithproxy/smithproxy.startup.sh stop
     python2 /usr/share/smithproxy/infra/smithdog.py stop
+}
+
+case "$1" in
+  start)
+    do_start
+    ;;
+  stop)
+    do_stop
+    ;;
+  restart)
+    do_stop
+    sleep 2
+    do_start
     ;;
   status)
     echo "Smithproxy status"
