@@ -689,6 +689,7 @@ int cfgapi_load_obj_profile_tls() {
                 cur_object.lookupValue("allow_untrusted_issuers",a->allow_untrusted_issuers);
                 cur_object.lookupValue("allow_invalid_certs",a->allow_invalid_certs);
                 cur_object.lookupValue("allow_self_signed",a->allow_self_signed);
+                cur_object.lookupValue("use_pfs",a->use_pfs);
                 
                 cfgapi_obj_profile_tls[name] = a;
                 
@@ -983,6 +984,7 @@ bool cfgapi_obj_policy_apply_tls(ProfileTls* pt, baseCom* xcom) {
             sslcom->opt_allow_self_signed_chain = pt->allow_untrusted_issuers;
             sslcom->opt_allow_not_valid_cert = pt->allow_invalid_certs;
             sslcom->opt_allow_self_signed_cert = pt->allow_self_signed;
+            sslcom->opt_pfs = pt->use_pfs;
             
             tls_applied = true;
         }        

@@ -99,6 +99,7 @@ struct ProfileTls {
     bool allow_untrusted_issuers = false;
     bool allow_invalid_certs = false;
     bool allow_self_signed = false;
+    bool use_pfs = true;
     std::string name;
 };
 
