@@ -63,11 +63,39 @@ function(install_if_not_exists src dest)
 endfunction(install_if_not_exists)
 
 
+macro(InstallSymlink _filepath _sympath)
+    get_filename_component(_symname ${_sympath} NAME)
+    get_filename_component(_installdir ${_sympath} PATH)
+
+    if (BINARY_PACKAGING_MODE)
+        execute_process(COMMAND "${CMAKE_COMMAND}" -E create_symlink
+                        ${_filepath}
+                        ${CMAKE_CURRENT_BINARY_DIR}/${_symname})
+        install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${_symname}
+                DESTINATION ${_installdir})
+    else ()
+        # scripting the symlink installation at install time should work
+        # for CMake 2.6.x and 2.8.x
+        install(CODE "
+            if (\"\$ENV{DESTDIR}\" STREQUAL \"\")
+                execute_process(COMMAND \"${CMAKE_COMMAND}\" -E create_symlink
+                                ${_filepath}
+                                ${_installdir}/${_symname})
+            else ()
+                execute_process(COMMAND \"${CMAKE_COMMAND}\" -E create_symlink
+                                ${_filepath}
+                                \$ENV{DESTDIR}/${_installdir}/${_symname})
+            endif ()
+        ")
+    endif ()
+endmacro(InstallSymlink)
+
 if(UNIX)
     SET(CMAKE_INSTALL_PREFIX /usr)
     install(TARGETS smithproxy DESTINATION bin)
     install(FILES man/smithproxy.1 DESTINATION share/man/man1)
     install_if_not_exists(etc/smithproxy.cfg /etc/smithproxy)
+    install_if_not_exists(etc/users.cfg /etc/smithproxy)
     install_if_not_exists(etc/smithproxy.startup.cfg /etc/smithproxy)
     install(FILES etc/smithproxy.startup.sh DESTINATION /etc/smithproxy 
                 PERMISSIONS 
@@ -83,6 +111,11 @@ if(UNIX)
     )
     file(GLOB def_certs "etc/certs/default/*.pem")
     install(FILES ${def_certs} DESTINATION /etc/smithproxy/certs/default)
+    
+    # create CA dir
+    install(DIRECTORY DESTINATION /etc/smithproxy/certs/ca)
+    InstallSymlink(/etc/ssl/certs /etc/smithproxy/certs/ca/default)
+    
     install(FILES man/TESTING_README.txt DESTINATION share/smithproxy/docs)
     
     # backend install in /usr/share/smithproxy/infra/bend/
