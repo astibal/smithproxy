@@ -96,6 +96,7 @@ if(UNIX)
     install(FILES man/smithproxy.1 DESTINATION share/man/man1)
     install_if_not_exists(etc/smithproxy.cfg /etc/smithproxy)
     install_if_not_exists(etc/users.cfg /etc/smithproxy)
+    install_if_not_exists(etc/users.key /etc/smithproxy)
     install_if_not_exists(etc/smithproxy.startup.cfg /etc/smithproxy)
     install(FILES etc/smithproxy.startup.sh DESTINATION /etc/smithproxy 
                 PERMISSIONS 

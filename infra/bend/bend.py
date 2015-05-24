@@ -24,6 +24,7 @@ import posix_ipc
 import socket
 import pylibconfig2 as cfg
 import logging
+import auth.crypto as mycrypto
 
 from shmtable import ShmTable
 
@@ -33,6 +34,7 @@ import SOAPpy
 
 
 BEND_LOGFILE="/var/log/smithproxy_bend.log"
+BEND_KEYFILE="/etc/smithproxy/users.key"
 
 flog = logging.getLogger('bend')
 hdlr = logging.FileHandler(BEND_LOGFILE)
@@ -184,8 +186,18 @@ class AuthManager:
       self.portal_port = None
     
       self.user_db = {}
+      self.a1 = None
 
 
+    def load_a1(self):
+        try:
+            f = open(BEND_KEYFILE,"r")
+            a = f.read()
+            if a:
+                self.a1 = a
+            f.close()
+        except IOError, e:
+            flog.error("cannot open a1 file: " + str(e))
     
     def setup_logon_tables(self,mem_name,mem_size,sem_name):
 
@@ -309,9 +321,9 @@ class AuthManager:
             print str(d)
             self.user_db[user[0]] = d
 
-    def authenticate_local_decrypt(self,salt,ciphertext):
-        # FIXME!!!
-        return ciphertext
+    def authenticate_local_decrypt(self,ciphertext):
+        #flog.debug("authenticating user with " + ciphertext)
+        return mycrypto.xor_salted_decrypt(ciphertext,self.a1)
 
     def authenticate_check_db(self,ip,username,password,token):
         
@@ -324,7 +336,7 @@ class AuthManager:
                                 return True
                         else:
                             if "encrypted_password" in self.user_db[username]:
-                                if authenticate_local_decrypt("ABC",self.user_db[username]['encrypted_password']) == password:
+                                if self.authenticate_local_decrypt(self.user_db[username]['encrypted_password']) == password:
                                     return True
                         
         except KeyError, e:
@@ -344,6 +356,7 @@ def run_bend():
     
     
     a = AuthManager()
+    a.load_a1()
     a.portal_address = c.settings.auth_portal.address
     a.portal_port = c.settings.auth_portal.http_port
     
