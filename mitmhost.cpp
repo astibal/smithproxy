@@ -26,7 +26,7 @@ std::vector<duplexFlowMatch*> sigs_starttls;
 std::vector<duplexFlowMatch*> sigs_detection;
 
 baseCom* MySSLMitmCom::replicate() {
-    return new SSLMitmCom();
+    return new MySSLMitmCom();
 }
 
 bool MySSLMitmCom::spoof_cert(X509* x, SpoofOptions& spo) {
