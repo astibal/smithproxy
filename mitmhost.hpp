@@ -95,6 +95,8 @@ public:
     virtual void load_signatures();
 
     virtual void on_detect(duplexFlowMatch* x_sig, flowMatchState& s, vector_range& r);    
+    virtual void on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, vector_range& r);
+    
     virtual void on_starttls();
 
     int matched_policy() { return matched_policy_; }

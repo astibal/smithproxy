@@ -74,6 +74,124 @@ void MitmHostCX::load_signatures() {
     DEBS_("MitmHostCX::load_signatures: stop");
 };
 
+void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, vector_range& r) {
+    if(r.size() > 0) {
+        std::pair<unsigned char,buffer*>& get = flow().flow()[0];
+        std::pair<unsigned char,buffer*>& status = flow().flow()[0];
+
+        buffer* buffer_get = get.second;
+        buffer* buffer_status = status.second;
+        std::string buffer_data_string((const char*)buffer_get->data(),0,buffer_get->size());
+
+        //INFS_(std::string((const char*)buffer_get->data(),0,buffer_get->size()));
+        std::regex re_get("(GET|POST) *([^ \r\n\?]+)([^ \r\n]*)");
+        std::smatch m_get;
+
+        std::regex re_ref("Referer: *([^ \r\n]+)");
+        std::smatch m_ref;
+
+        std::regex re_host("Host: *([^ \r\n]+)");
+        std::smatch m_host;
+
+
+        std::string str_temp;
+        std::string print_request;
+
+        bool b_get = false;
+        bool b_host = false;
+        bool b_ref = false;
+
+        if(std::regex_search (buffer_data_string, m_ref, re_ref)) {
+
+            str_temp = m_ref[1].str();
+
+            //don't add referer to log.
+            //print_request += str_temp;
+
+            if(request == nullptr) {
+                request = new app_HttpRequest;
+            }
+
+            app_HttpRequest* app_request = dynamic_cast<app_HttpRequest*>(request);
+            if(app_request != nullptr) {
+                app_request->referer = str_temp;
+                DIA_("Referer: %s",app_request->referer.c_str());
+            }
+
+
+        }
+
+        if(std::regex_search (buffer_data_string, m_host, re_host))  {
+            if(m_host.size() > 0) {
+                str_temp = m_host[1].str();
+                print_request += str_temp;
+
+                if(request == nullptr) {
+                    request = new app_HttpRequest;
+                }
+
+                app_HttpRequest* app_request = dynamic_cast<app_HttpRequest*>(request);
+                if(app_request != nullptr) {
+                    app_request->host = str_temp;
+                    DIA_("Host: %s",app_request->host.c_str());
+                }
+            }
+        }
+
+        if(std::regex_search (buffer_data_string, m_get, re_get)) {
+            if(m_get.size() > 1) {
+                str_temp = m_get[2].str();
+                print_request += str_temp;
+
+                if(request == nullptr) {
+                    request = new app_HttpRequest;
+                }
+
+                app_HttpRequest* app_request = dynamic_cast<app_HttpRequest*>(request);
+                if(app_request != nullptr) {
+                    app_request->uri = str_temp;
+                    DIA_("URI: %s",app_request->uri.c_str());
+                }
+
+                if(m_get.size() > 2) {
+                    str_temp = m_get[3].str();
+                    app_request->params = str_temp;
+                    DIA_("params: %s",app_request->params.c_str());
+
+                    //print_request += str_temp;
+                }
+            }
+        }
+
+
+        app_HttpRequest* app_request = dynamic_cast<app_HttpRequest*>(request);
+        if(app_request != nullptr) {
+            // detect protocol (plain vs ssl)
+            SSLCom* proto_com = dynamic_cast<SSLCom*>(com());
+            if(proto_com != nullptr) {
+                app_request->proto="https://";
+                app_request->is_ssl = true;
+            } else {
+                app_request->proto="http://" ;
+            }
+
+
+            INF_("Connection www request: %s",app_request->hr().c_str());
+        } else {
+            INF_("Connection www request: %s (app_request cast failed)",print_request.c_str());
+        }
+
+
+        // this is the right way, but not here
+        // replacement(REPLACE_REDIRECT);
+        // replacement(REPLACE_BLOCK);
+
+        // we have to specify that we are replaceable!
+        replace_type = REPLACETYPE_HTTP;
+    }
+}
+
+
 void MitmHostCX::on_detect(duplexFlowMatch* x_sig, flowMatchState& s, vector_range& r) {
 
     MyDuplexFlowMatch* sig_sig = (MyDuplexFlowMatch*)x_sig;
@@ -85,121 +203,7 @@ void MitmHostCX::on_detect(duplexFlowMatch* x_sig, flowMatchState& s, vector_ran
 
 
     if(sig_sig->category ==  "www" && sig_sig->name() == "http/get|post") {
-
-        if(r.size() > 0) {
-            std::pair<unsigned char,buffer*>& get = flow().flow()[0];
-            std::pair<unsigned char,buffer*>& status = flow().flow()[0];
-
-            buffer* buffer_get = get.second;
-            buffer* buffer_status = status.second;
-            std::string buffer_data_string((const char*)buffer_get->data(),0,buffer_get->size());
-
-            //INFS_(std::string((const char*)buffer_get->data(),0,buffer_get->size()));
-            std::regex re_get("(GET|POST) *([^ \r\n\?]+)([^ \r\n]*)");
-            std::smatch m_get;
-
-            std::regex re_ref("Referer: *([^ \r\n]+)");
-            std::smatch m_ref;
-
-            std::regex re_host("Host: *([^ \r\n]+)");
-            std::smatch m_host;
-
-
-            std::string str_temp;
-            std::string print_request;
-            
-            bool b_get = false;
-            bool b_host = false;
-            bool b_ref = false;
-
-            if(std::regex_search (buffer_data_string, m_ref, re_ref)) {       
-                
-                str_temp = m_ref[1].str();
-                
-                //don't add referer to log.
-                //print_request += str_temp;
-                
-                if(request == nullptr) {
-                    request = new app_HttpRequest;
-                }
-
-                app_HttpRequest* app_request = dynamic_cast<app_HttpRequest*>(request);
-                if(app_request != nullptr) {
-                    app_request->referer = str_temp;
-                    DIA_("Referer: %s",app_request->referer.c_str());
-                }                
-                
-
-            } 
-                
-            if(std::regex_search (buffer_data_string, m_host, re_host))  {
-                if(m_host.size() > 0) {
-                    str_temp = m_host[1].str();
-                    print_request += str_temp;
-
-                    if(request == nullptr) {
-                        request = new app_HttpRequest;
-                    }
-
-                    app_HttpRequest* app_request = dynamic_cast<app_HttpRequest*>(request);
-                    if(app_request != nullptr) {
-                        app_request->host = str_temp;
-                        DIA_("Host: %s",app_request->host.c_str());
-                    }
-                }
-            }
-
-            if(std::regex_search (buffer_data_string, m_get, re_get)) {
-                if(m_get.size() > 1) {
-                    str_temp = m_get[2].str();
-                    print_request += str_temp;
-
-                    if(request == nullptr) {
-                        request = new app_HttpRequest;
-                    }
-
-                    app_HttpRequest* app_request = dynamic_cast<app_HttpRequest*>(request);
-                    if(app_request != nullptr) {
-                        app_request->uri = str_temp;
-                        DIA_("URI: %s",app_request->uri.c_str());
-                    }
-
-                    if(m_get.size() > 2) {
-                        str_temp = m_get[3].str();
-                        app_request->params = str_temp;
-                        DIA_("params: %s",app_request->params.c_str());
-
-                        //print_request += str_temp;
-                    }
-                }
-            }
-            
-
-            app_HttpRequest* app_request = dynamic_cast<app_HttpRequest*>(request);
-            if(app_request != nullptr) {
-                // detect protocol (plain vs ssl)
-		SSLCom* proto_com = dynamic_cast<SSLCom*>(com());
-		if(proto_com != nullptr) {
-		    app_request->proto="https://"; 
-		    app_request->is_ssl = true; 
-		} else {
-		    app_request->proto="http://" ;
-		}
-
-	      
-                INF_("Connection www request: %s",app_request->hr().c_str());
-            } else {
-                INF_("Connection www request: %s (app_request cast failed)",print_request.c_str());
-            } 
-
-
-            // this is the right way, but not here
-            // replacement(REPLACE_REDIRECT);
-            // replacement(REPLACE_BLOCK);
-            
-            // we have to specify that we are replaceable!
-            replace_type = REPLACETYPE_HTTP;
-        }
+        on_detect_www_get(x_sig,s,r);
     }
 }
 
