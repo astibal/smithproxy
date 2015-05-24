@@ -66,6 +66,14 @@ sys.path.append(INFRA_PATH)
 from portal import webfr
 from bend   import bend
 
+
+flog = logging.getLogger('dog')
+hdlr = logging.FileHandler(SMITHDOG_LOGFILE)
+formatter = logging.Formatter('%(asctime)s [%(process)d] [%(levelname)s] %(message)s')
+hdlr.setFormatter(formatter)
+flog.addHandler(hdlr) 
+flog.setLevel(logging.INFO)
+
 class PortalDaemon(Daemon):
     def __init__(self, nicename, pidfile, stdin='/dev/null', stdout='/dev/null', stderr='/dev/null'):
         Daemon.__init__(self,nicename,pidfile,stdin,stdout,stderr)
@@ -74,20 +82,20 @@ class PortalDaemon(Daemon):
         os.chdir(PORTAL_PATH)
         
         e = None
-        logging.debug("PortalDaemon.run: starting "+self.nicename)
+        flog.debug("PortalDaemon.run: starting "+self.nicename)
         if(self.nicename.endswith("ssl")):
-            logging.debug("PortalDaemon.run: Starting https portal")
+            flog.debug("PortalDaemon.run: Starting https portal")
             self.drop_privileges()
             e = webfr.run_portal_ssl()
         else:
-            logging.debug("PortalDaemon.run: Starting http portal")
+            flog.debug("PortalDaemon.run: Starting http portal")
             self.drop_privileges()
             e = webfr.run_portal_plain()
 
         if(e):
-            logging.error("PortalDaemon.run: finished with error: %s",str(e))
+            flog.error("PortalDaemon.run: finished with error: %s",str(e))
         else:
-            logging.debug("PortalDaemon.run: finished...")
+            flog.debug("PortalDaemon.run: finished...")
 
         time.sleep(1)
         sys.exit(1)
@@ -104,22 +112,22 @@ class BendDaemon(Daemon):
 
 def start_exec(nicename, path, pidfile, additional_arguments=None):
     if(SmithProxyDog.check_running_pidfile(pidfile)):
-        logging.info("process "+ nicename + "already running")
+        flog.info("process "+ nicename + "already running")
     else:
         opt = [path, '--daemonize']
         if additional_arguments:
             opt += additional_arguments
 
-        logging.debug("start_exec: Starting " + nicename )
+        flog.debug("start_exec: Starting " + nicename )
         r = subprocess.call(opt)
         if r != 0:
-            logging.error("start_exec: finished with error: %d" % (r,))
+            flog.error("start_exec: finished with error: %d" % (r,))
         else:
-            logging.debug("start_exec: finished...")
+            flog.debug("start_exec: finished...")
             
 def stop_exec(nicename,pidfile):
     Daemon.kill(pidfile)
-    logging.debug("process " + nicename + " terminated.")
+    flog.debug("process " + nicename + " terminated.")
 
 class SmithProxyDog(Daemon):
     def __init__(self,poll_interval=0.2, stdin='/dev/null', stdout='/dev/null', stderr='/dev/null'): 
@@ -149,7 +157,7 @@ class SmithProxyDog(Daemon):
             ret = r
             if auto_restart:
                 msg = "Cannot automatically fix myself: please run the 'start' parameter"
-                logging.error(msg)
+                flog.error(msg)
                 if print_stdout:
                     print msg
 
@@ -162,7 +170,7 @@ class SmithProxyDog(Daemon):
                 ret = r
                 if auto_restart:
                     msg = "fixing: " + nicename
-                    logging.warning(msg)
+                    flog.warning(msg)
                     if print_stdout:
                         print msg
 
@@ -171,9 +179,9 @@ class SmithProxyDog(Daemon):
                         start_exec(nicename,exe,pidfile)
                         sys.exit(0)
                     else:
-                        logging.debug("fixing exec: parent process: %d waiting for %d to finish" % (os.getpid(),p) )
+                        flog.debug("fixing exec: parent process: %d waiting for %d to finish" % (os.getpid(),p) )
                         os.waitpid(p,1)   # wait for 'p'
-                        logging.debug("fixing exec: parent process: %d waiting for %d finished" % (os.getpid(),p) )
+                        flog.debug("fixing exec: parent process: %d waiting for %d finished" % (os.getpid(),p) )
 
         for d in self.sub_daemons:
             r = SmithProxyDog.check_running_pidfile(d.pidfile)
@@ -182,28 +190,28 @@ class SmithProxyDog(Daemon):
                 ret = r
                 if auto_restart:                
                     msg = "fixing: " + d.nicename
-                    logging.info(msg)
+                    flog.info(msg)
                     if print_stdout:
                         print msg
 
                     # do restart in child. For all cases, child is just a temporary thing, so exit.
                     p = os.fork()
                     if p == 0:
-                        logging.debug("fixing sub-daemon: child process: %d" % (os.getpid(),) )
+                        flog.debug("fixing sub-daemon: child process: %d" % (os.getpid(),) )
                         os.setsid()
                         d.daemonize()
                         d.run()
                         sys.exit(0)
                     else:
-                        logging.debug("fixing sub-daemon: parent process: %d waiting for %d to finish" % (os.getpid(),p) )
+                        flog.debug("fixing sub-daemon: parent process: %d waiting for %d to finish" % (os.getpid(),p) )
                         os.waitpid(p,1)   # wait for 'p'
-                        logging.debug("fixing sub-daemon: parent process: %d waiting for %d finished" % (os.getpid(),p) )
+                        flog.debug("fixing sub-daemon: parent process: %d waiting for %d finished" % (os.getpid(),p) )
 
 
         if ret:
             msg = "Status of all monitored processes is OK"
             if self.should_log_ok():
-                logging.info(msg)
+                flog.info(msg)
                 
             if print_stdout:
                 # stdout printing is not dependent on counters
@@ -227,9 +235,9 @@ class SmithProxyDog(Daemon):
                 prep = ''
             if not print_stdout:
                 if not r:
-                    logging.warning("Status of '" + nicename + "': " + statmsg)  
+                    flog.warning("Status of '" + nicename + "': " + statmsg)  
                 else:
-                    logging.info("Status of '" + nicename + "': " + statmsg)  
+                    flog.info("Status of '" + nicename + "': " + statmsg)  
             else:
                 print prep + "Status of '" + nicename + "': " + statmsg
 
@@ -248,13 +256,12 @@ class SmithProxyDog(Daemon):
             if err.find("No such process") > 0:
                 if os.path.exists(pidfile):
                     os.remove(pidfile)
-                    logging.warning("Removing stale pidfile " + pidfile)
+                    flog.warning("Removing stale pidfile " + pidfile)
 
         return running
 
 
 if __name__ == "__main__":
-    logging.basicConfig(filename=SMITHDOG_LOGFILE, level=logging.INFO, format='%(asctime)s [%(process)d] [%(levelname)s] %(message)s')
 
     daemon = SmithProxyDog(0.5)
     daemon.keeppid = True
@@ -278,57 +285,57 @@ if __name__ == "__main__":
 
     if len(sys.argv) >= 2:
         if 'start' == sys.argv[1]:
-                logging.info("STARTING ALL DAEMONS!")
+                flog.info("STARTING ALL DAEMONS!")
                 print "STARTING ALL DAEMONS!"
 
                 for d in daemon.sub_daemons:
-                    logging.info("Starting " + d.nicename)
+                    flog.info("Starting " + d.nicename)
                     p = os.fork()
                     if p == 0:
                         d.start()
-                        #logging.info("  finished ")
+                        #flog.info("  finished ")
                         sys.exit(0)
                     else:
                         os.waitpid(p,1)   # wait for 'p'
 
                 for (n,e,p) in daemon.exec_info:
-                    logging.info("Starting " + n)
+                    flog.info("Starting " + n)
                     ppp = os.fork()
                     if ppp == 0:
                         start_exec(n,e,p)
-                        #logging.info("  finished")
+                        #flog.info("  finished")
                         sys.exit(0)
                     else:
                         os.waitpid(ppp,1)   # wait for 'p'
 
                 time.sleep(2)
 
-                logging.info("Starting " + daemon.nicename)
+                flog.info("Starting " + daemon.nicename)
                 daemon.start()
-                #logging.info("  finished")
+                #flog.info("  finished")
 
                 daemon.status(True,auto_restart=False)
 
         elif 'stop' == sys.argv[1]:
                 wait_time = 3
-                logging.info("STOPPING ALL DEAMONS!")
+                flog.info("STOPPING ALL DEAMONS!")
                 print "STOPPING ALL DEAMONS!"
 
-                logging.info("Stopping " + daemon.nicename + " (wait "+str(wait_time)+"s)")
+                flog.info("Stopping " + daemon.nicename + " (wait "+str(wait_time)+"s)")
                 daemon.keeppid = False
                 daemon.stop()
                 time.sleep(wait_time)
-                #logging.info("  finished")
+                #flog.info("  finished")
 
                 for d in daemon.sub_daemons:
-                    logging.info("Stopping " + d.nicename)
+                    flog.info("Stopping " + d.nicename)
                     d.stop()
-                    #logging.info("  finished")
+                    #flog.info("  finished")
 
                 for (n,e,p) in daemon.exec_info:
-                    logging.info("Stopping " + n)
+                    flog.info("Stopping " + n)
                     stop_exec(n,p)
-                    #logging.info("  finished")
+                    #flog.info("  finished")
 
                 daemon.status(True,auto_restart=False)
 

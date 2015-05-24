@@ -23,12 +23,24 @@ import struct
 import posix_ipc
 import socket
 import pylibconfig2 as cfg
+import logging
 
 from shmtable import ShmTable
 
 PY_MAJOR_VERSION = sys.version_info[0]
 
 import SOAPpy
+
+
+BEND_LOGFILE="/var/log/smithproxy_bend.log"
+
+flog = logging.getLogger('bend')
+hdlr = logging.FileHandler(BEND_LOGFILE)
+formatter = logging.Formatter('%(asctime)s [%(process)d] [%(levelname)s] %(message)s')
+hdlr.setFormatter(formatter)
+flog.addHandler(hdlr) 
+flog.setLevel(logging.INFO)
+
 
 
 class LogonTable(ShmTable):             
@@ -57,7 +69,7 @@ class LogonTable(ShmTable):
               try:
                   self.write(struct.pack("4s64s128s",socket.inet_aton(k),self.logons[k][1],self.logons[k][2]))
               except IndexError:
-                  print "LogonTable: IndexError: not in logons: " + k + " " + str(e)
+                  flog.warning("LogonTable: IndexError: not in logons: " + k + " " + str(e))
                   continue
 
         self.normalize = False # each dump effectively normalizes db
@@ -78,7 +90,7 @@ class LogonTable(ShmTable):
             self.normalize = True
 
         self.logons[ip] = [ip,u.strip(),g.strip()]
-        print "on_new_entry: added " + ip + tag + ", " + u.strip() + ", " + g.strip()
+        flog.debug("on_new_entry: added " + ip + tag + ", " + u.strip() + ", " + g.strip())
         
 
         return True
@@ -122,7 +134,7 @@ class TokenTable(ShmTable):
             
             # delete all used tokens from DB
             for t in self.used_tokens:
-                print "toggle_used: wiping used token " + t
+                flog.debug("toggle_used: wiping used token " + t)
                 self.tokens.pop(t,None)
                 
             self.used_tokens = []
@@ -134,7 +146,7 @@ class TokenTable(ShmTable):
         
         while len(self.active_queue) > self.delete_active_threshold:
             oldest_token = self.active_queue[0]
-            print "life_queue: too many active tokens, dropping oldest one " + oldest_token
+            flog.debug("life_queue: too many active tokens, dropping oldest one " + oldest_token)
             self.toggle_used(oldest_token)
             self.active_queue = self.active_queue[1:]
         
@@ -152,7 +164,7 @@ class TokenTable(ShmTable):
               except IndexError:
                   continue
 
-        print "save: %d tokens written to table" % (write_cnt,)
+        flog.debug("save: %d tokens written to table" % (write_cnt,))
 
         
         self.normalize = False # each dump effectively normalizes db
@@ -172,6 +184,8 @@ class AuthManager:
       self.portal_port = None
     
       self.user_db = {}
+
+
     
     def setup_logon_tables(self,mem_name,mem_size,sem_name):
 
@@ -200,25 +214,25 @@ class AuthManager:
 
     def token_data(self, token):
         
-        print "token_data: start, acquiring semaphore"
+        flog.debug("token_data: start, acquiring semaphore")
         
         self.token_shm.acquire()
-        print "token_data: start, semaphore acquired, loading.."
+        flog.debug("token_data: start, semaphore acquired, loading..")
         self.token_shm.load()
-        print "token_data: start, token  table loaded"
+        flog.debug("token_data: start, token  table loaded")
         self.token_shm.release()
-        print "token_data: start, semaphore released"
+        flog.debug("token_data: start, semaphore released")
         
         #print(str(self.token_shm.tokens.keys()))
 
         # some pretty-printing
         if token in self.token_shm.tokens.keys():
             if token in self.token_shm.used_tokens:
-                print "token " + token + " already used"
+                flog.warning("token " + token + " already used")
             else:
-                print "token " + token + " found"
+                flog.debug("token " + token + " found")
         else:
-            print "token " + token + " not found ..."
+            flog.debug("token " + token + " not found ...")
 
 
         # say farewell
@@ -237,14 +251,14 @@ class AuthManager:
     def authenticate(self, ip, username, password,token):
 
         ipa = socket.inet_aton(ip)
-        print "authenticate: request: user %s from %s - token %s" % (username,ip,str(token))
+        flog.debug("authenticate: request: user %s from %s - token %s" % (username,ip,str(token)))
         ret = False
 
         if not username:
             username = '<guest>'
         
         if self.authenticate_check_db(ip,username,password,token):
-            print "authenticate: user " + username + " auth successfull from " + ip
+            flog.info("authenticate: user " + username + " auth successfull from " + ip)
             
             #this is just bloody test
             
@@ -258,30 +272,32 @@ class AuthManager:
             if token:
                 if token in self.global_token_referer.keys():
                     ref = self.global_token_referer[token]
-                    print "token " + token + " global referer: " + ref
+                    flog.debug("token " + token + " global referer: " + ref)
                     return ref
                 else:
                     return "http://"+self.portal_address+":"+self.portal_port+"/authenticated.html"
 
         else:
-            print "authenticate: user " + username + " auth failed from " + ip
+            flog.warning("authenticate: user " + username + " auth failed from " + ip)
 
 
         return ret
 
     def save_referer(self,token,ref):
-        print "incoming referer: " + token + " -> " + ref
+        flog.debug("incoming referer: " + token + " -> " + ref)
         
         self.global_token_referer[token] = ref
 
     def serve_forever(self):
-          self.server.registerFunction(self.authenticate)
-          self.server.registerFunction(self.save_referer)
-          self.server.serve_forever()
+        
+        flog.info("Launching portal on " + self.portal_address + ":" + str(self.portal_port))
+        self.server.registerFunction(self.authenticate)
+        self.server.registerFunction(self.save_referer)
+        self.server.serve_forever()
 
     def load_config_users(self,user_items):
         for user in user_items:
-            print "user: " + user[0]
+            flog.debug("user: " + user[0])
             #print user[1].items()
             
             d = {}
@@ -318,7 +334,9 @@ class AuthManager:
 
         return False
 
-def run_bend():   
+
+
+def run_bend():
     c = cfg.Config()
     c.read_file("/etc/smithproxy/smithproxy.cfg")    
     u = cfg.Config()
@@ -328,11 +346,8 @@ def run_bend():
     a = AuthManager()
     a.portal_address = c.settings.auth_portal.address
     a.portal_port = c.settings.auth_portal.http_port
-    print "Portal settings:"
-    print " IP   " + a.portal_address
-    print " port " + a.portal_port
     
-    print "Loading users"
+    flog.debug("Loading users")
     a.load_config_users(u.users.items())
     
     a.setup_logon_tables("/smithproxy_auth_ok",1024*1024,"/smithproxy_auth_ok.sem")
