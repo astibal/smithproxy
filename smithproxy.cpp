@@ -113,7 +113,7 @@ static unsigned int mystrlen(const char* str, int max) {
 
 static void btrace_handler(int sig) {
 
-    int CRLOG = open((const char*)crashlog_file,O_CREAT | O_RDWR);
+    int CRLOG = open((const char*)crashlog_file,O_CREAT | O_WRONLY | O_TRUNC,S_IRUSR|S_IWUSR);
     TEMP_FAILURE_RETRY(write(STDERR_FILENO," ======== Smithproxy exception handler =========\n",50));
     TEMP_FAILURE_RETRY(write(CRLOG," ======== Smithproxy exception handler =========\n",50));
     //FAT_("  [%d] ========= Smithproxy exception handler  =========",sig );
