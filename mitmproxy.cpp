@@ -378,9 +378,42 @@ void MitmProxy::handle_replacement(MitmHostCX* cx) {
 }
 
 
+bool MitmMasterProxy::ssl_autodetect = false;
 
+#define NEW_CX_PEEK_BUFFER_SZ  10
 baseHostCX* MitmMasterProxy::new_cx(int s) {
-    auto r = new MitmHostCX(com()->slave(),s);
+    
+    bool is_ssl = false;
+    
+    SSLCom* my_sslcom = dynamic_cast<SSLCom*>(com());
+    baseCom* c = nullptr;
+    
+    if(my_sslcom == nullptr && ssl_autodetect) {
+        // my com is NOT ssl-based, trigger auto-detect
+        if (s > 0) {
+            char peek_buffer[NEW_CX_PEEK_BUFFER_SZ];
+            int b = ::recv(s,peek_buffer,NEW_CX_PEEK_BUFFER_SZ,MSG_PEEK);
+            if(b > 6) {
+                if (peek_buffer[0] == 0x16 && peek_buffer[1] == 0x03 && peek_buffer[5] == 0x01) {
+                    DIAS_("SSL ClientHello detected on plaintext port!");
+                    is_ssl = true;
+                }
+            }
+        }
+        
+        if(! is_ssl) {
+            c = com()->slave();
+        } else {
+            c = new SSLMitmCom();
+            c->master(com());
+        } 
+    }
+    
+    if(c == nullptr) {
+        c = com()->slave();
+    }
+    
+    auto r = new MitmHostCX(c,s);
     DEB_("Pausing new connection %s",r->c_name());
     r->paused(true);
     return r; 
@@ -395,7 +428,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
         delete just_accepted_cx;
     } 
     else {
-        MitmProxy* new_proxy = new MitmProxy(com()->slave());
+        MitmProxy* new_proxy = new MitmProxy(just_accepted_cx->com()->slave());
         
         // let's add this just_accepted_cx into new_proxy
         if(just_accepted_cx->paused_read()) {
@@ -405,7 +438,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
             DEBS_("MitmMasterProxy::on_left_new: ladd the new cx (unpaused)");
             new_proxy->ladd(just_accepted_cx);
         }
-        MitmHostCX *target_cx = new MitmHostCX(com()->slave(), just_accepted_cx->com()->nonlocal_dst_host().c_str(), 
+        MitmHostCX *target_cx = new MitmHostCX(just_accepted_cx->com()->slave(), just_accepted_cx->com()->nonlocal_dst_host().c_str(), 
                                             string_format("%d",just_accepted_cx->com()->nonlocal_dst_port()).c_str()
                                             );
         // connect it! - btw ... we don't want to block of course...

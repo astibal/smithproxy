@@ -30,6 +30,7 @@ DIVERT_CHAIN_NAME='DIVERT'
 
 SMITH_INTERFACE='eth1'
 SMITH_TCP_PORTS='80 25 587 21 143 110 5222'
+SMITH_TCP_PORTS_ALL=0
 SMITH_TCP_TPROXY='50080'
 SMITH_UDP_PORTS='53'
 SMITH_UDP_TPROXY='50081'
@@ -72,6 +73,12 @@ case "$1" in
         iptables -t mangle -A ${SMITH_CHAIN_NAME} -p tcp -i ${SMITH_INTERFACE} --dport ${P} -j TPROXY \
         --tproxy-mark 0x1/0x1 --on-port ${SMITH_TCP_TPROXY}
     done;
+    if [[ SMITH_TCP_PORTS_ALL > 0 ]]; then
+        echo " tproxy for all TCP traffic"
+        iptables -t mangle -A ${SMITH_CHAIN_NAME} -p tcp -i ${SMITH_INTERFACE} -j TPROXY \
+        --tproxy-mark 0x1/0x1 --on-port ${SMITH_TCP_TPROXY}
+    fi
+    
     echo " tproxy for UDP"
     for P in ${SMITH_UDP_PORTS}; do
         echo "  tproxy port ${SMITH_INTERFACE}/${P}->${SMITH_UDP_TPROXY}"

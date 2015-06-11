@@ -94,6 +94,8 @@ public:
     virtual baseHostCX* new_cx(int s);
     virtual void on_left_new(baseHostCX* just_accepted_cx);
     virtual int handle_sockets_once(baseCom* c);
+    
+    static bool ssl_autodetect;
 };
 
 
