@@ -2,6 +2,14 @@
 # /etc/init.d/smithproxy
 #
 
+### BEGIN INIT INFO
+# Provides:          smithproxy
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Start smithproxy daemons at boot time
+# Description:       Enable service provided by daemon.
+### END INIT INFO
+
 # Some things that run always
 # touch /var/lock/smithproxy
 
@@ -26,9 +34,9 @@ case "$1" in
   stop)
     do_stop
     ;;
-  restart)
+  restart | force-reload)
     do_stop
-    sleep 2
+    sleep 1
     do_start
     ;;
   status)

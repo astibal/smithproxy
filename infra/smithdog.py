@@ -49,7 +49,7 @@ SMITHPROXY_PIDFILE = '/var/run/smithproxy.pid'
 SMITHDOG_PIDFILE='/var/run/smithproxy_dog.pid'
 SMITHDOG_LOGFILE='/var/log/smithproxy_dog.log'
 
-WWW_PATH='/var/www/smithproxy/'
+WWW_PATH='/usr/share/smithproxy/www/'
 PORTAL_PATH=WWW_PATH+"portal/"
 PORTAL_PIDFILE='/var/run/smithproxy_portal.pid'
 PORTALSSL_PIDFILE='/var/run/smithproxy_portal_ssl.pid'

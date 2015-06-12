@@ -134,7 +134,7 @@ if(UNIX)
     )
 
     # portal installation
-    install(DIRECTORY infra/portal DESTINATION /var/www/smithproxy)
+    install(DIRECTORY infra/portal DESTINATION share/smithproxy/www)
     
     # message: edit defaults and add to init.d to start at boot!
     install(CODE "MESSAGE(\" +----------------------------------------------------------------------------------------+\")")
