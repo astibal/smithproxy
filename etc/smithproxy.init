@@ -4,6 +4,8 @@
 
 ### BEGIN INIT INFO
 # Provides:          smithproxy
+# Required-Start:    $remote_fs $syslog
+# Required-Stop:     $remote_fs $syslog
 # Default-Start:     2 3 4 5
 # Default-Stop:      0 1 6
 # Short-Description: Start smithproxy daemons at boot time
@@ -14,6 +16,9 @@
 # touch /var/lock/smithproxy
 
 # Carry out specific functions when asked to by the system
+
+
+. /lib/lsb/init-functions
 
 function do_start {
     echo "Starting smithproxy"

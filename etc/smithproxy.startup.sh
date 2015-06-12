@@ -1,3 +1,4 @@
+#!/bin/sh
 #
 #     Smithproxy- transparent proxy with SSL inspection capabilities.
 #     Copyright (c) 2014, Ales Stibal <astib@mag0.net>, All rights reserved.
