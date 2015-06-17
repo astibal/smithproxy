@@ -43,7 +43,18 @@
 #include <smithproxy.hpp>
 
 
-static const char* debug_levels="set level to console:\n\t0\tNONE\n\t1\tFATAL\n\t2\tCRITICAL\n\t3\tERROR\n\t4\tWARNING\n\t5\tNOTIFY\n\t6\tINFORMATIONAL\n\t7\tDIAGNOSE\t(may impact performance)\n\t8\tDEBUG\t(impacts performance)\n\t9\tEXTREME\t(severe performance drop)\n\t10\tDUMPALL\t(performance killer)\n\treset\treset back to level configured in config file";
+static const char* debug_levels="\n\t0\tNONE\n\t1\tFATAL\n\t2\tCRITICAL\n\t3\tERROR\n\t4\tWARNING\n\t5\tNOTIFY\n\t6\tINFORMATIONAL\n\t7\tDIAGNOSE\t(may impact performance)\n\t8\tDEBUG\t(impacts performance)\n\t9\tEXTREME\t(severe performance drop)\n\t10\tDUMPALL\t(performance killer)\n\treset\treset back to level configured in config file";
+
+int orig_ssl_loglevel = 0;
+int orig_sslmitm_loglevel = 0;
+int orig_sslca_loglevel = 0;
+
+
+void load_defaults() {
+    orig_ssl_loglevel = SSLCom::log_level_ref();
+    orig_sslmitm_loglevel = SSLMitmCom::log_level_ref();
+    orig_sslca_loglevel= SSLCertStore::log_level_ref();
+}
 
 void cmd_show_version(struct cli_def* cli) {
     
@@ -112,8 +123,8 @@ int cli_debug_level(struct cli_def *cli, const char *command, char *argv[], int 
 
         if(a1 == "?") {
             cli_print(cli,"valid parameters: %s",debug_levels);
-            lp->level_ = std::atoi(argv[0]);
-            lout.level(lp->level_);
+//             lp->level_ = std::atoi(argv[0]);
+//             lout.level(lp->level_);
         } 
         else if(a1 == "reset") {
             lp->level_ = cfgapi_table.logging.cli_init_level;
@@ -134,6 +145,38 @@ int cli_debug_level(struct cli_def *cli, const char *command, char *argv[], int 
         for(auto i = lout.targets().begin(); i != lout.targets().end(); ++i) {
             cli_print(cli, "Logging level for: %s: %d",lout.target_name((uint64_t)(*i)),lout.target_profiles()[(uint64_t)(*i)]->level_);
         }        
+    }
+    
+    return CLI_OK;
+}
+
+int cli_debug_ssl(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    if(argc > 0) {
+        std::string a1 = argv[0];
+        if(a1 == "?") {
+            cli_print(cli,"valid parameters: %s",debug_levels);
+        } 
+        else if(a1 == "reset") {
+            SSLCom::log_level_ref() = orig_ssl_loglevel;
+            SSLMitmCom::log_level_ref() = orig_sslmitm_loglevel;
+            SSLCertStore::log_level_ref() = orig_sslca_loglevel;
+        }
+        else {
+            int lev = std::atoi(argv[0]);
+            SSLCom::log_level_ref() = lev;
+            SSLMitmCom::log_level_ref() = lev;
+            SSLCertStore::log_level_ref() = lev;
+            
+        }
+    } else {
+        int l = SSLCom::log_level_ref();
+        cli_print(cli,"SSL debug level: %d",l);
+        l = SSLMitmCom::log_level_ref();
+        cli_print(cli,"SSL MitM debug level: %d",l);
+        l = SSLCertStore::log_level_ref();
+        cli_print(cli,"SSL CA debug level: %d",l);
+        cli_print(cli,"\n");
+        cli_print(cli,"valid parameters: %s",debug_levels);
     }
     
     return CLI_OK;
@@ -178,9 +221,10 @@ void client_thread(int client_socket) {
             diag_ssl = cli_register_command(cli, diag, "ssl", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "ssl related troubleshooting commands");
                   diag_ssl_cache = cli_register_command(cli, diag_ssl, "cache", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl certificate cache");
                             cli_register_command(cli, diag_ssl_cache, "stats", cli_diag_ssl_cache_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "display ssl cert cache statistics");
-                            cli_register_command(cli, diag_ssl_cache, "list", cli_diag_ssl_cache_list, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "list all ssl cert cache entries");
+                            cli_register_command(cli, diag_ssl_cache, "list", cli_diag_ssl_cache_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all ssl cert cache entries");
         debuk = cli_register_command(cli, NULL, "debug", NULL, PRIVILEGE_PRIVILEGED, MODE_EXEC, "diagnostic commands");
             cli_register_command(cli, debuk, "level", cli_debug_level, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set level of logging to this console");
+            cli_register_command(cli, debuk, "ssl", cli_debug_ssl, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set ssl file logging level");
         
         // Pass the connection off to libcli
         lout.remote_targets(string_format("cli-%d",client_socket),client_socket);
@@ -189,6 +233,8 @@ void client_thread(int client_socket) {
         lp.level_ = cfgapi_table.logging.cli_init_level;
         lout.target_profiles()[(uint64_t)client_socket] = &lp;
         
+        
+        load_defaults();
         cli_loop(cli, client_socket);
         
         lout.remote_targets().remove(client_socket);
