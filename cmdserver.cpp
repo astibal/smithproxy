@@ -114,7 +114,20 @@ int cli_diag_ssl_cache_list(struct cli_def *cli, const char *command, char *argv
     return CLI_OK;
 }
 
-int cli_debug_level(struct cli_def *cli, const char *command, char *argv[], int argc) {
+void cli_print_log_levels(struct cli_def *cli) {
+    logger_profile* lp = lout.target_profiles()[(uint64_t)cli->client->_fileno];
+    
+    cli_print(cli,"This cli debug level is set to: %d",lp->level_);
+    cli_print(cli,"General logging level set to: %d",lout.level());
+    for(auto i = lout.remote_targets().begin(); i != lout.remote_targets().end(); ++i) {
+        cli_print(cli, "Logging level for: %s: %d",lout.target_name((uint64_t)(*i)),lout.target_profiles()[(uint64_t)(*i)]->level_);
+    }
+    for(auto i = lout.targets().begin(); i != lout.targets().end(); ++i) {
+        cli_print(cli, "Logging level for: %s: %d",lout.target_name((uint64_t)(*i)),lout.target_profiles()[(uint64_t)(*i)]->level_);
+    }         
+}
+
+int cli_debug_terminal(struct cli_def *cli, const char *command, char *argv[], int argc) {
     
     logger_profile* lp = lout.target_profiles()[(uint64_t)cli->client->_fileno];
     if(argc > 0) {
@@ -123,28 +136,42 @@ int cli_debug_level(struct cli_def *cli, const char *command, char *argv[], int 
 
         if(a1 == "?") {
             cli_print(cli,"valid parameters: %s",debug_levels);
-//             lp->level_ = std::atoi(argv[0]);
-//             lout.level(lp->level_);
         } 
         else if(a1 == "reset") {
-            lp->level_ = cfgapi_table.logging.cli_init_level;
-            lout.level(cfgapi_table.logging.level);
+            lp->level_ = NON;
+            //lout.level(cfgapi_table.logging.level);
         }
         else {
             //cli_print(cli, "called %s with %s, argc %d\r\n", __FUNCTION__, command, argc);
             lp->level_ = std::atoi(argv[0]);
-            lout.level(lp->level_);
+            //lout.level(lp->level_);
         }
     } else {
         
-        cli_print(cli,"This cli debug level is set to: %d",lp->level_);
-        cli_print(cli,"General logging level set to: %d",lout.level());
-        for(auto i = lout.remote_targets().begin(); i != lout.remote_targets().end(); ++i) {
-            cli_print(cli, "Logging level for: %s: %d",lout.target_name((uint64_t)(*i)),lout.target_profiles()[(uint64_t)(*i)]->level_);
+        cli_print_log_levels(cli);
+    }
+    
+    return CLI_OK;
+}
+
+
+int cli_debug_logfile(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    
+    if(argc > 0) {
+        
+        std::string a1 = argv[0];
+
+        if(a1 == "?") {
+            cli_print(cli,"valid parameters: %s",debug_levels);
+        } 
+        else if(a1 == "reset") {
+            lout.level(cfgapi_table.logging.level);
         }
-        for(auto i = lout.targets().begin(); i != lout.targets().end(); ++i) {
-            cli_print(cli, "Logging level for: %s: %d",lout.target_name((uint64_t)(*i)),lout.target_profiles()[(uint64_t)(*i)]->level_);
-        }        
+        else {
+            lout.level(std::atoi(argv[0]));
+        }
+    } else {
+        cli_print_log_levels(cli);
     }
     
     return CLI_OK;
@@ -223,7 +250,8 @@ void client_thread(int client_socket) {
                             cli_register_command(cli, diag_ssl_cache, "stats", cli_diag_ssl_cache_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "display ssl cert cache statistics");
                             cli_register_command(cli, diag_ssl_cache, "list", cli_diag_ssl_cache_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all ssl cert cache entries");
         debuk = cli_register_command(cli, NULL, "debug", NULL, PRIVILEGE_PRIVILEGED, MODE_EXEC, "diagnostic commands");
-            cli_register_command(cli, debuk, "level", cli_debug_level, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set level of logging to this console");
+            cli_register_command(cli, debuk, "term", cli_debug_terminal, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set level of logging to this terminal");
+            cli_register_command(cli, debuk, "file", cli_debug_logfile, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set level of logging of standard log file");
             cli_register_command(cli, debuk, "ssl", cli_debug_ssl, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set ssl file logging level");
         
         // Pass the connection off to libcli
