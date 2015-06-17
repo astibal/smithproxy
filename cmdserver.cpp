@@ -35,7 +35,11 @@
 #include <logger.hpp>
 #include <cmdserver.hpp>
 #include <cfgapi.hpp>
+
 #include <socle.hpp>
+#include <sslcom.hpp>
+#include <sslcertstore.hpp>
+
 #include <smithproxy.hpp>
 
 
@@ -54,6 +58,48 @@ int cli_show_version(struct cli_def *cli, const char *command, char *argv[], int
 
     
     cmd_show_version(cli);
+    return CLI_OK;
+}
+
+int cli_diag_ssl_cache_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    
+    SSLCertStore* store = SSLCom::certstore();
+
+    store->lock();
+    int n_cache = store->cache().size();
+    int n_fqdn_cache = store->fqdn_cache().size();
+    store->unlock();
+
+    cli_print(cli,"certificate store stats: ");
+    cli_print(cli,"    CN cert cache size: %d ",n_cache);
+    cli_print(cli,"    FQDN to CN cache size: %d ",n_fqdn_cache);
+    
+    return CLI_OK;
+}
+
+
+int cli_diag_ssl_cache_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    
+    SSLCertStore* store = SSLCom::certstore();
+    store->lock();
+    
+    cli_print(cli,"certificate store entries: ");
+
+    for (auto x = store->cache().begin(); x != store->cache().end(); ++x ) {
+        std::string fqdn = x->first;
+        X509_PAIR* ptr = x->second;
+        cli_print(cli,"    %s",fqdn.c_str());
+    }
+        
+    cli_print(cli,"\ncertificate fqdn cache: ");
+    for (auto x = store->fqdn_cache().begin(); x != store->fqdn_cache().end(); ++x ) {
+        std::string fqdn = x->first;
+        std::string cn = x->second;
+        cli_print(cli,"    %s -> %s",fqdn.c_str(), cn.c_str());
+    }
+
+    store->unlock();
+    
     return CLI_OK;
 }
 
@@ -101,7 +147,11 @@ struct cli_ext : public cli_def {
 
 void client_thread(int client_socket) {
         struct cli_command *show;
+        struct cli_command *debuk;
         struct cli_command *diag;
+            struct cli_command *diag_ssl;
+                struct cli_command *diag_ssl_cache;
+        
         
         struct cli_def *cli;
         
@@ -122,11 +172,15 @@ void client_thread(int client_socket) {
         cli_allow_user(cli, "admin", "");
 
         // Set up 2 commands "show counters" and "show junk"
-        show  = cli_register_command(cli, NULL, "show", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, NULL);
-            cli_register_command(cli, show, "version", cli_show_version, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show smithproxy version");
-        
-        diag = cli_register_command(cli, NULL, "debug", NULL, PRIVILEGE_PRIVILEGED, MODE_EXEC, "diagnostic commands");
-            cli_register_command(cli, diag, "level", cli_debug_level, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set level of logging to this console");
+        show  = cli_register_command(cli, NULL, "show", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show basic information");
+                cli_register_command(cli, show, "version", cli_show_version, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show smithproxy version");
+        diag  = cli_register_command(cli, NULL, "diag", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose commands helping to troubleshoot");
+            diag_ssl = cli_register_command(cli, diag, "ssl", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "ssl related troubleshooting commands");
+                  diag_ssl_cache = cli_register_command(cli, diag_ssl, "cache", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl certificate cache");
+                            cli_register_command(cli, diag_ssl_cache, "stats", cli_diag_ssl_cache_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "display ssl cert cache statistics");
+                            cli_register_command(cli, diag_ssl_cache, "list", cli_diag_ssl_cache_list, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "list all ssl cert cache entries");
+        debuk = cli_register_command(cli, NULL, "debug", NULL, PRIVILEGE_PRIVILEGED, MODE_EXEC, "diagnostic commands");
+            cli_register_command(cli, debuk, "level", cli_debug_level, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set level of logging to this console");
         
         // Pass the connection off to libcli
         lout.remote_targets(string_format("cli-%d",client_socket),client_socket);
