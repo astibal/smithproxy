@@ -32,6 +32,17 @@ function do_stop {
     python2 /usr/share/smithproxy/infra/smithdog.py stop
 }
 
+function do_bypass {
+    echo "Bypassing smithproxy"
+    /etc/smithproxy/smithproxy.startup.sh bypass
+}
+
+function do_unbypass {
+    echo "Un-bypassing smithproxy"
+    /etc/smithproxy/smithproxy.startup.sh unbypass
+}
+
+
 case "$1" in
   start)
     do_start
@@ -52,8 +63,14 @@ case "$1" in
     echo "Reloading smithproxy policies"
     kill -USR1 `cat /var/run/smithproxy.pid`
     ;;
+  bypass)
+    do_bypass
+    ;;
+  unbypass)
+    do_unbypass
+    ;;
   *)
-    echo "Usage: /etc/init.d/smithproxy {start|stop|status|reload}"
+    echo "Usage: /etc/init.d/smithproxy {start|stop|status|reload|restart|force-reload|bypass|unbypass}"
     exit 1
     ;;
 esac

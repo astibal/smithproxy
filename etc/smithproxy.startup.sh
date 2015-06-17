@@ -153,6 +153,14 @@ case "$1" in
     echo "Smithproxy iptables chains setup script - stop: finished"
     
     ;;
+    
+  bypass)
+    iptables -t mangle -I $SMITH_CHAIN_NAME 1 -j ACCEPT
+    ;;
+  unbypass)
+    iptables -t mangle -D $SMITH_CHAIN_NAME -j ACCEPT
+    ;;
+    
   *)
     echo "Usage: $0 {start|stop}"
     exit 1

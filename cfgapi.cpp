@@ -1014,6 +1014,9 @@ void cfgapi_log_version(bool warn_delay)
         if(SOCLE_DEVEL) {
             WAR_("*** Socle library version %s is marked as development! ***",SOCLE_VERSION);
         }
+#ifdef SOCLE_MEM_PROFILE
+        WARS_("*** PERFORMANCE: Socle library has extra memory profiling enabled! ***");
+#endif
         if(SMITH_DEVEL) {
             WAR_("*** Smithproxy version %s is marked as development! ***",SMITH_VERSION);
         }        

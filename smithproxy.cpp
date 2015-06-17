@@ -57,6 +57,12 @@
 #include <daemon.hpp>
 #include <cmdserver.hpp>
 
+#define MEM_DEBUG 1
+#ifdef MEM_DEBUG
+    #include <mcheck.h>
+#endif
+
+
 extern "C" void __libc_freeres(void);
 
 typedef ThreadedAcceptor<MitmMasterProxy,MitmProxy> theAcceptor;
@@ -406,7 +412,10 @@ void ignore_sigpipe() {
 }
 
 int main(int argc, char *argv[]) {
-    
+
+#ifdef MEM_DEBUG
+    mtrace();
+#endif
 
     config_file = "/etc/smithproxy/smithproxy.cfg";    
 

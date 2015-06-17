@@ -19,6 +19,7 @@
 
 #include <string>
 #include <thread>
+#include <set>
 
 #include <cstring>
 #include <ctime>
@@ -210,6 +211,64 @@ int cli_debug_ssl(struct cli_def *cli, const char *command, char *argv[], int ar
 }
 
 
+int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    cli_print(cli,"Memory buffers stats: ");
+    cli_print(cli,"memory alloc   bytes: %lld",buffer::alloc_bytes);
+    cli_print(cli,"memory free    bytes: %lld",buffer::free_bytes);
+    cli_print(cli,"memory current bytes: %lld",buffer::alloc_bytes-buffer::free_bytes);
+    cli_print(cli,"\nmemory alloc   counter: %lld",buffer::alloc_count);
+    cli_print(cli,"memory free    counter: %lld",buffer::free_count);
+    cli_print(cli,"memory current counter: %lld",buffer::alloc_count-buffer::free_count);
+#ifdef SOCLE_MEM_PROFILE
+    if(argc > 0) {
+        
+        std::string arg1(argv[0]);
+        if(arg1 == "?") {
+            cli_print(cli,"buffers        print all still allocated buffers' traces");
+            cli_print(cli,"buffers_all    print all buffers' traces, including properly freed");
+            cli_print(cli,"clear          remove all buffer tracking entries");
+            return CLI_OK;
+        }
+        
+        bool b = false;
+        bool ba = false;
+        bool clr = false;
+        
+        if(arg1 == "buffers") { b = true; }
+        if(arg1 == "buffers_all") { b = true; ba = true; }
+        if(arg1 == "clear") { clr = true; }
+        
+        if(b) {
+            cli_print(cli,"\nExtra memory traces: ");
+            buffer::alloc_map_lock();
+            for( auto it = buffer::alloc_map.begin(); it != buffer::alloc_map.end(); ++it) {
+                std::string bt = it->first;
+                int& counter = it->second;
+                
+                if(counter > 0 || ba) {
+                    cli_print(cli,"\nActive trace: %d references %s",counter,bt.c_str());
+                }
+            }
+            buffer::alloc_map_unlock();
+        }
+        else if (clr) {
+            buffer::alloc_bytes = 0;
+            buffer::free_bytes = 0;
+            buffer::alloc_count = 0;
+            buffer::free_count = 0;
+            cli_print(cli,"buffer usage counters reset.");
+
+            int n = buffer::alloc_map.size();
+            buffer::counter_clear_bt();
+            cli_print(cli,"%d entries from buffer tracker database deleted.",n);
+        }
+    }
+
+    buffer::alloc_map_unlock();
+#endif
+    return CLI_OK;
+}
+
 struct cli_ext : public cli_def {
     int socket;
 };
@@ -221,6 +280,8 @@ void client_thread(int client_socket) {
         struct cli_command *diag;
             struct cli_command *diag_ssl;
                 struct cli_command *diag_ssl_cache;
+            struct cli_command *diag_mem;
+                struct cli_command *diag_mem_buffers;
         
         
         struct cli_def *cli;
@@ -246,9 +307,13 @@ void client_thread(int client_socket) {
                 cli_register_command(cli, show, "version", cli_show_version, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show smithproxy version");
         diag  = cli_register_command(cli, NULL, "diag", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose commands helping to troubleshoot");
             diag_ssl = cli_register_command(cli, diag, "ssl", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "ssl related troubleshooting commands");
-                  diag_ssl_cache = cli_register_command(cli, diag_ssl, "cache", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl certificate cache");
-                            cli_register_command(cli, diag_ssl_cache, "stats", cli_diag_ssl_cache_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "display ssl cert cache statistics");
-                            cli_register_command(cli, diag_ssl_cache, "list", cli_diag_ssl_cache_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all ssl cert cache entries");
+                diag_ssl_cache = cli_register_command(cli, diag_ssl, "cache", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl certificate cache");
+                        cli_register_command(cli, diag_ssl_cache, "stats", cli_diag_ssl_cache_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "display ssl cert cache statistics");
+                        cli_register_command(cli, diag_ssl_cache, "list", cli_diag_ssl_cache_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all ssl cert cache entries");
+            diag_mem = cli_register_command(cli, diag, "mem", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory related troubleshooting commands");
+                diag_mem_buffers = cli_register_command(cli, diag_mem, "buffers", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory buffers troubleshooting commands");
+                        cli_register_command(cli, diag_mem_buffers, "stats", cli_diag_mem_buffers_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory buffers statistics");
+            
         debuk = cli_register_command(cli, NULL, "debug", NULL, PRIVILEGE_PRIVILEGED, MODE_EXEC, "diagnostic commands");
             cli_register_command(cli, debuk, "term", cli_debug_terminal, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set level of logging to this terminal");
             cli_register_command(cli, debuk, "file", cli_debug_logfile, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set level of logging of standard log file");
