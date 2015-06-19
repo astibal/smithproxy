@@ -74,7 +74,7 @@ case "$1" in
         iptables -t mangle -A ${SMITH_CHAIN_NAME} -p tcp -i ${SMITH_INTERFACE} --dport ${P} -j TPROXY \
         --tproxy-mark 0x1/0x1 --on-port ${SMITH_TCP_TPROXY}
     done;
-    if [[ SMITH_TCP_PORTS_ALL > 0 ]]; then
+    if [ ${SMITH_TCP_PORTS_ALL} -gt 0 ]; then
         echo " tproxy for all TCP traffic"
         iptables -t mangle -A ${SMITH_CHAIN_NAME} -p tcp -i ${SMITH_INTERFACE} -j TPROXY \
         --tproxy-mark 0x1/0x1 --on-port ${SMITH_TCP_TPROXY}
