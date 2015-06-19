@@ -110,6 +110,13 @@ if(UNIX)
                     GROUP_READ GROUP_EXECUTE 
                     WORLD_READ WORLD_EXECUTE 
     )
+    install(FILES etc/smithproxy_cli DESTINATION bin 
+            PERMISSIONS 
+                    OWNER_READ OWNER_WRITE OWNER_EXECUTE 
+                    GROUP_READ GROUP_EXECUTE 
+                    WORLD_READ WORLD_EXECUTE 
+    )
+    
     file(GLOB def_certs "etc/certs/default/*.pem")
     install(FILES ${def_certs} DESTINATION /etc/smithproxy/certs/default)
     

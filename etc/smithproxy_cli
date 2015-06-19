@@ -1,0 +1,4 @@
+#!/bin/sh
+PORT=`cat /etc/smithproxy/smithproxy.cfg | grep 'cli \+= *{\|port *=' | grep 'cli \+= *{' -A1 | grep port | awk -F= '{ print $2 }' |  grep -o '[0-9]\+'`
+telnet localhost $PORT
+echo "Terminated."

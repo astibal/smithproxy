@@ -43,6 +43,9 @@
 
 #include <smithproxy.hpp>
 
+int cli_port = 50000;
+std::string cli_enable_password = "";
+
 
 static const char* debug_levels="\n\t0\tNONE\n\t1\tFATAL\n\t2\tCRITICAL\n\t3\tERROR\n\t4\tWARNING\n\t5\tNOTIFY\n\t6\tINFORMATIONAL\n\t7\tDIAGNOSE\t(may impact performance)\n\t8\tDEBUG\t(impacts performance)\n\t9\tEXTREME\t(severe performance drop)\n\t10\tDUMPALL\t(performance killer)\n\treset\treset back to level configured in config file";
 
@@ -294,13 +297,12 @@ void client_thread(int client_socket) {
         cli = cli_init();
 
         // Set the hostname (shown in the the prompt)
-        cli_set_hostname(cli, string_format("%s:(smithproxy)",hostname).c_str());
+        cli_set_hostname(cli, string_format("smithproxy(%s) ",hostname).c_str());
 
         // Set the greeting
-        cli_set_banner(cli, "Smithproxy command line utility.");
+        cli_set_banner(cli, "--== Smithproxy command line utility ==--");
 
-        // Enable 2 username / password combinations
-        cli_allow_user(cli, "admin", "");
+        cli_allow_enable(cli, cli_enable_password.c_str());
 
         // Set up 2 commands "show counters" and "show junk"
         show  = cli_register_command(cli, NULL, "show", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show basic information");

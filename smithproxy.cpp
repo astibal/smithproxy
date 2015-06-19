@@ -362,6 +362,9 @@ bool load_config(std::string& config_f, bool reload) {
         cfgapi.getRoot()["debug"]["log"].lookupValue("sslcertstore",SSLCertStore::log_level_ref());
         cfgapi.getRoot()["debug"]["log"].lookupValue("proxy",baseProxy::log_level_ref());
         
+        cfgapi.getRoot()["settings"]["cli"].lookupValue("port",cli_port);
+        cfgapi.getRoot()["settings"]["cli"].lookupValue("enable_password",cli_enable_password);
+        
         // don't mess with logging if just reloading
         if(! reload) {
             std::string log_target;
@@ -555,7 +558,7 @@ int main(int argc, char *argv[]) {
 
     cli_thread = new std::thread([] () { 
         ignore_sigpipe();
-        cli_loop(50000);
+        cli_loop(cli_port);
         DIAS_("cli workers torn down."); 
     } );      
     pthread_setname_np(plain_thread->native_handle(),"smithproxy_cli");
