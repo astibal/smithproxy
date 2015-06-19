@@ -348,7 +348,7 @@ void cli_loop(short unsigned int port) {
 
     memset(&servaddr, 0, sizeof(servaddr));
     servaddr.sin_family = AF_INET;
-    servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+    servaddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     servaddr.sin_port = htons(port);
     bind(s, (struct sockaddr *)&servaddr, sizeof(servaddr));
 
