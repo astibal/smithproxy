@@ -1,4 +1,13 @@
 #!/bin/sh
+DEFAULT_PORT="50000"
 PORT=`cat /etc/smithproxy/smithproxy.cfg | grep 'cli \+= *{\|port *=' | grep 'cli \+= *{' -A1 | grep port | awk -F= '{ print $2 }' |  grep -o '[0-9]\+'`
-telnet localhost $PORT
+
+if [ "$PORT" != "" ]; then
+   telnet localhost $PORT
+else
+   echo
+   echo "WARNING: cannot obtain CLI port! Trying default $DEFAULT_PORT"
+   echo
+   telnet localhost $DEFAULT_PORT
+fi
 echo "Terminated."
