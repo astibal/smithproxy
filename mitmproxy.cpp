@@ -245,6 +245,12 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
         (*j)->to_write(cx->to_read());
         DIA_("mitmproxy::on_right_bytes: %d copied",cx->to_read().size())
     }
+    
+    if(cx->port() == "53" ) {
+        // this is hack to make DNS timeout sooner
+        DIA_("%s: DNS reply received, shortening idle timeout.",cx->hr().c_str());
+        cx->idle_delay(1); // set 1s for DNS to timeout
+    }
 }
 
 void MitmProxy::on_left_error(baseHostCX* cx) {
@@ -555,8 +561,9 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
             target_cx->com()->nonlocal_src_host() = h;
             target_cx->com()->nonlocal_src_port() = std::stoi(p);               
         }
-        target_cx->connect(false);     
+
         int real_socket = target_cx->connect(false);
+        INF_("UDP: real target socket is: %d",real_socket);        
         com()->set_monitor(real_socket);
     }
         
