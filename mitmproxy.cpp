@@ -487,6 +487,9 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                 this->proxies().push_back(new_proxy);
                 target_cx->connect(false);
                 
+                //FIXME: this is really ugly!! :) It's here since radd has been called before socket for target_cx was created.
+                com()->set_monitor(target_cx->socket());
+                
             } else {
                 delete new_proxy;
                 NOT_("MitmMasterProxy::on_left_new: %s cannot be converted to MitmHostCx",just_accepted_cx->c_name());

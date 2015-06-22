@@ -554,14 +554,14 @@ int main(int argc, char *argv[]) {
         DIAS_("socks workers torn down."); 
         socks_proxy->shutdown();  
     } );   
-    pthread_setname_np(plain_thread->native_handle(),"smithproxy_skx");
+    pthread_setname_np(socks_thread->native_handle(),"smithproxy_skx");
 
     cli_thread = new std::thread([] () { 
         ignore_sigpipe();
         cli_loop(cli_port);
         DIAS_("cli workers torn down."); 
     } );      
-    pthread_setname_np(plain_thread->native_handle(),"smithproxy_cli");
+    pthread_setname_np(cli_thread->native_handle(),"smithproxy_cli");
     
     CRI_("Smithproxy %s (socle %s) started",SMITH_VERSION,SOCLE_VERSION);
     
