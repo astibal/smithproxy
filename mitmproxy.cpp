@@ -485,10 +485,10 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                 
                 // finalize connection acceptance by adding new proxy to proxies and connect
                 this->proxies().push_back(new_proxy);
-                target_cx->connect(false);
                 
                 //FIXME: this is really ugly!! :) It's here since radd has been called before socket for target_cx was created.
-                com()->set_monitor(target_cx->socket());
+                int real_socket = target_cx->connect(false);
+                com()->set_monitor(real_socket);
                 
             } else {
                 delete new_proxy;
