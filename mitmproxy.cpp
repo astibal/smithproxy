@@ -221,6 +221,7 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
     for(typename std::vector<baseHostCX*>::iterator j = this->right_sockets.begin(); j != this->right_sockets.end(); j++) {
 	if(!redirected) {
 	    (*j)->to_write(cx->to_read());
+        DIA_("mitmproxy::on_left_bytes: %d copied",cx->to_read().size())
 	} else {
 	  
 	  // rest of connections should be closed when sending replacement to a client
@@ -242,6 +243,7 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
     
     for(typename std::vector<baseHostCX*>::iterator j = this->left_sockets.begin(); j != this->left_sockets.end(); j++) {
         (*j)->to_write(cx->to_read());
+        DIA_("mitmproxy::on_right_bytes: %d copied",cx->to_read().size())
     }
 }
 
@@ -553,7 +555,9 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
             target_cx->com()->nonlocal_src_host() = h;
             target_cx->com()->nonlocal_src_port() = std::stoi(p);               
         }
-        target_cx->connect(false);        
+        target_cx->connect(false);     
+        int real_socket = target_cx->connect(false);
+        com()->set_monitor(real_socket);
     }
         
     DEBS_("MitmUDPProxy::on_left_new: finished");    
