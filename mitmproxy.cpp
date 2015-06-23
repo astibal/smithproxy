@@ -497,6 +497,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                 //FIXME: this is really ugly!! :) It's here since radd has been called before socket for target_cx was created.
                 int real_socket = target_cx->connect(false);
                 com()->set_monitor(real_socket);
+                com()->set_poll_handler(real_socket,new_proxy);
                 
             } else {
                 delete new_proxy;
@@ -564,6 +565,7 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
 
         int real_socket = target_cx->connect(false);
         com()->set_monitor(real_socket);
+        com()->set_poll_handler(real_socket,new_proxy);
     }
         
     DEBS_("MitmUDPProxy::on_left_new: finished");    
