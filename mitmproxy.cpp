@@ -563,7 +563,6 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
         }
 
         int real_socket = target_cx->connect(false);
-        INF_("UDP: real target socket is: %d",real_socket);        
         com()->set_monitor(real_socket);
     }
         
