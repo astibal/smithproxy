@@ -240,6 +240,9 @@ void MitmHostCX::on_starttls() {
 
     log().append("\n STARTTLS: plain connection upgraded to SSL/TLS, continuing with inspection.\n\n");
 
+    // mark as opening to not wait for SSL handshake (typically) 1 hour
+    opening(true);
+    
     DIAS_("on_starttls finished");
 }
 
