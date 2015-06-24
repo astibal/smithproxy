@@ -418,7 +418,7 @@ baseHostCX* MitmMasterProxy::new_cx(int s) {
         // my com is NOT ssl-based, trigger auto-detect
         if (s > 0) {
             char peek_buffer[NEW_CX_PEEK_BUFFER_SZ];
-            int b = ::recv(s,peek_buffer,NEW_CX_PEEK_BUFFER_SZ,MSG_PEEK);
+            int b = ::recv(s,peek_buffer,NEW_CX_PEEK_BUFFER_SZ,MSG_PEEK|MSG_DONTWAIT);
             if(b > 6) {
                 if (peek_buffer[0] == 0x16 && peek_buffer[1] == 0x03 && peek_buffer[5] == 0x01) {
                     DIAS_("SSL ClientHello detected on plaintext port!");
