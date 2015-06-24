@@ -219,15 +219,26 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
     
     // because we have left bytes, let's copy them into all right side sockets!
     for(typename std::vector<baseHostCX*>::iterator j = this->right_sockets.begin(); j != this->right_sockets.end(); j++) {
-	if(!redirected) {
-	    (*j)->to_write(cx->to_read());
-        DIA_("mitmproxy::on_left_bytes: %d copied",cx->to_read().size())
-	} else {
-	  
-	  // rest of connections should be closed when sending replacement to a client
-	  (*j)->shutdown();
-	}
+        if(!redirected) {
+            (*j)->to_write(cx->to_read());
+            DIA_("mitmproxy::on_left_bytes: %d copied",cx->to_read().size())
+        } else {
+        
+        // rest of connections should be closed when sending replacement to a client
+        (*j)->shutdown();
+        }
     }    
+    for(typename std::vector<baseHostCX*>::iterator j = this->right_delayed_accepts.begin(); j != this->right_delayed_accepts.end(); j++) {
+        if(!redirected) {
+            (*j)->to_write(cx->to_read());
+            DIA_("mitmproxy::on_left_bytes: %d copied to delayed",cx->to_read().size())
+        } else {
+        
+        // rest of connections should be closed when sending replacement to a client
+        (*j)->shutdown();
+        }
+    }    
+    
 }
 
 void MitmProxy::on_right_bytes(baseHostCX* cx) {
@@ -245,6 +256,11 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
         (*j)->to_write(cx->to_read());
         DIA_("mitmproxy::on_right_bytes: %d copied",cx->to_read().size())
     }
+    for(typename std::vector<baseHostCX*>::iterator j = this->left_delayed_accepts.begin(); j != this->left_delayed_accepts.end(); j++) {
+        (*j)->to_write(cx->to_read());
+        DIA_("mitmproxy::on_right_bytes: %d copied to delayed",cx->to_read().size())
+    }
+    
     
     if(cx->port() == "53" ) {
         // this is hack to make DNS timeout sooner
@@ -390,6 +406,8 @@ bool MitmMasterProxy::ssl_autodetect = false;
 
 #define NEW_CX_PEEK_BUFFER_SZ  10
 baseHostCX* MitmMasterProxy::new_cx(int s) {
+    
+    DEBS_("MitmMasterProxy::new_cx: new_cx start");
     
     bool is_ssl = false;
     
