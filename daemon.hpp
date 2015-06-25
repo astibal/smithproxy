@@ -23,5 +23,8 @@
 extern "C" void daemonize(void);
 extern "C" void daemon_write_pidfile(void);
 extern "C" void daemon_unlink_pidfile(void);
+extern "C" int daemon_get_limit_fd();
+extern "C" void daemon_set_limit_fd(int max);
+
 
 #endif

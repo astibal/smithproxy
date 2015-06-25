@@ -27,9 +27,12 @@
 #include <unistd.h>
 #include <syslog.h>
 #include <string.h>
+#include <sys/time.h>
+#include <sys/resource.h>
 
 #include <logger.hpp>
 #include <daemon.hpp>
+#include <display.hpp>
 
 #ifdef __cplusplus
 extern "C" {
@@ -105,6 +108,35 @@ void daemon_write_pidfile() {
 void daemon_unlink_pidfile() {
     unlink(PID_FILE);
 }
+
+int daemon_get_limit_fd() {
+    struct rlimit r;
+    int ret = getrlimit(RLIMIT_NOFILE,&r);
+    if(ret < 0) {
+        ERR_("daemon_get_limit_fd: cannot obtain fd limits: %s", string_error().c_str());
+        return -1;
+    }
+
+    return r.rlim_cur;
+}
+
+void daemon_set_limit_fd(int max) {
+    int n = max;
+    if(max == 0) 
+        n = 100000;
+
+    struct rlimit r;
+    r.rlim_cur = n;
+    r.rlim_max = 100000;
+    
+    int ret = setrlimit(RLIMIT_NOFILE,&r);
+
+    if(ret < 0) {
+        ERR_("daemon_set_limit_fd: cannot set fd limits: %s", string_error().c_str());
+    }
+}
+
+
 
 #ifdef __cplusplus
 }

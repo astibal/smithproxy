@@ -526,6 +526,8 @@ int main(int argc, char *argv[]) {
     
     plain_thread = new std::thread([]() { 
         ignore_sigpipe();
+        DIA_("smithproxy_tcp: max file descriptors: %d",daemon_get_limit_fd());
+        
         plain_proxy->run(); 
         DIAS_("plaintext workers torn down."); 
         plain_proxy->shutdown(); 
@@ -534,6 +536,9 @@ int main(int argc, char *argv[]) {
     
     ssl_thread = new std::thread([] () { 
         ignore_sigpipe();
+        daemon_set_limit_fd(0);
+        DIA_("smithproxy_tls: max file descriptors: %d",daemon_get_limit_fd());
+        
         ssl_proxy->run(); 
         DIAS_("ssl workers torn down."); 
         ssl_proxy->shutdown();  
@@ -542,6 +547,9 @@ int main(int argc, char *argv[]) {
 
     udp_thread = new std::thread([] () {
         ignore_sigpipe();
+        daemon_set_limit_fd(0);
+        DIA_("smithproxy_udp: max file descriptors: %d",daemon_get_limit_fd());
+        
         udp_proxy->run(); 
         DIAS_("udp workers torn down."); 
         udp_proxy->shutdown();  
@@ -550,6 +558,9 @@ int main(int argc, char *argv[]) {
 
     socks_thread = new std::thread([] () { 
         ignore_sigpipe();
+        daemon_set_limit_fd(0);
+        DIA_("smithproxy_skx: max file descriptors: %d",daemon_get_limit_fd());
+        
         socks_proxy->run(); 
         DIAS_("socks workers torn down."); 
         socks_proxy->shutdown();  
@@ -558,6 +569,8 @@ int main(int argc, char *argv[]) {
 
     cli_thread = new std::thread([] () { 
         ignore_sigpipe();
+        DIA_("smithproxy_cli: max file descriptors: %d",daemon_get_limit_fd());
+        
         cli_loop(cli_port);
         DIAS_("cli workers torn down."); 
     } );      
