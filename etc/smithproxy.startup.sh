@@ -74,11 +74,6 @@ case "$1" in
         iptables -t mangle -A ${SMITH_CHAIN_NAME} -p tcp -i ${SMITH_INTERFACE} --dport ${P} -j TPROXY \
         --tproxy-mark 0x1/0x1 --on-port ${SMITH_TCP_TPROXY}
     done;
-    if [ ${SMITH_TCP_PORTS_ALL} -gt 0 ]; then
-        echo " tproxy for all TCP traffic"
-        iptables -t mangle -A ${SMITH_CHAIN_NAME} -p tcp -i ${SMITH_INTERFACE} -j TPROXY \
-        --tproxy-mark 0x1/0x1 --on-port ${SMITH_TCP_TPROXY}
-    fi
     
     echo " tproxy for UDP"
     for P in ${SMITH_UDP_PORTS}; do
@@ -103,7 +98,11 @@ case "$1" in
         echo "  drop port ${SMITH_INTERFACE}/${P}->${TEMP_DTLS_DROP}"
         iptables -t mangle -A ${SMITH_CHAIN_NAME} -p udp -i ${SMITH_INTERFACE} --dport ${P} -j DROP
     done;
-    
+    if [ ${SMITH_TCP_PORTS_ALL} -gt 0 ]; then
+        echo " tproxy for all TCP traffic"
+        iptables -t mangle -A ${SMITH_CHAIN_NAME} -p tcp -i ${SMITH_INTERFACE} -j TPROXY \
+        --tproxy-mark 0x1/0x1 --on-port ${SMITH_TCP_TPROXY}
+    fi
     iptables -t mangle -A ${SMITH_CHAIN_NAME} -j RETURN
 
     echo " tproxy chain setup finished."
