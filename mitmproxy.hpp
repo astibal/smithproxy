@@ -65,6 +65,8 @@ public:
     bool write_payload(void) { return write_payload_; } 
     void write_payload(bool b) { write_payload_ = b; }
     
+    bool detect_dns(MitmHostCX* mh);
+    
     trafLog* tlog() { return tlog_; }
     
     explicit MitmProxy(baseCom* c);
@@ -105,6 +107,7 @@ class MitmUdpProxy : public ThreadedReceiverProxy<MitmProxy> {
 public:
     MitmUdpProxy(baseCom* c, int worker_id) : ThreadedReceiverProxy< MitmProxy >(c,worker_id) {};
     virtual void on_left_new(baseHostCX* just_accepted_cx);
+    baseHostCX* new_cx(int s);
 };
 
 #endif //MITMPROXY_HPP

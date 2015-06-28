@@ -112,6 +112,16 @@ protected:
     int matched_policy_ = -1;
     
     replace_flags replacement_ = REPLACE_NONE;
+    
+public:
+    bool is_ssl = false;
+    bool is_ssl_port = false;
+    
+    bool is_http = false;
+    bool is_http_port = false;
+
+    bool is_dns = false;
+    bool is_dns_port = false;
 };
 
 #endif

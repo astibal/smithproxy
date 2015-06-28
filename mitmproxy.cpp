@@ -173,6 +173,52 @@ bool MitmProxy::update_identity(baseHostCX* cx) {
     return ret;
 }
 
+bool MitmProxy::detect_dns(MitmHostCX* mh)  {
+    
+    DIAS_("MitmProxy::detect_dns: start");
+    mh->is_dns_port = true;
+    
+    std::string rq;
+
+#define DNS_HEADER_SZ 12
+            
+    if(mh->readbuf()->size() > DNS_HEADER_SZ) {
+        uint16_t trans_id = ntohs(mh->readbuf()->get_at<unsigned short>(0));
+        uint16_t  rq_type = ntohs(mh->readbuf()->get_at<unsigned short>(2));
+        //std::string    rq((const char*)&mh->readbuf()->data()[DNS_HEADER_SZ]);
+        
+        int s = 0;
+        for(unsigned int i = DNS_HEADER_SZ; i < mh->readbuf()->size();) {
+            s = mh->readbuf()->get_at<uint8_t>(i);
+            if(s + i >= mh->readbuf()->size()) break;
+            
+            // last part of the fqdn?
+            if(s == 0) {
+                uint16_t type = ntohs(mh->readbuf()->get_at<unsigned short>(i+1));
+                uint16_t cls =  ntohs(mh->readbuf()->get_at<unsigned short>(i+1+2));
+                DEB_("type=%d,class=%d",type,cls);
+                break;
+            } else {
+                if(rq.size() != 0) rq += ".";
+                
+                std::string t((const char*)&mh->readbuf()->data()[i+1],s);
+                
+                i += (s + 1);
+                rq += t;
+                DEB_("size = %d, i = %d",mh->readbuf()->size(),i);
+            }
+        }
+        INF_("DNS request: %s",rq.c_str());
+    }
+    
+    if(rq.size() > 0) {
+        DIA_("%s: DNS request received, shortening idle timeout.",mh->hr().c_str());
+        mh->idle_delay(10); // set 1s for DNS to timeout
+        mh->is_dns = true;
+    }
+
+    return (rq.size() > 0);
+}
 
 void MitmProxy::on_left_bytes(baseHostCX* cx) {
         
@@ -185,10 +231,16 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
         tlog()->left_write(cx->to_read());
     }
     
+
     bool redirected = false;
     
     MitmHostCX* mh = dynamic_cast<MitmHostCX*>(cx);
+
     if(mh != nullptr) {
+
+        if(mh->com()->nonlocal_dst_port() == 53 and mh->meter_read_count == 1) {
+            detect_dns(mh);
+        } 
         
         if(opt_auth_authenticate || opt_auth_resolve) {
         
@@ -448,11 +500,16 @@ baseHostCX* MitmMasterProxy::new_cx(int s) {
     DEBS_("MitmMasterProxy::new_cx: new_cx start");
     
     bool is_ssl = false;
+    bool is_ssl_port = false;
     
     SSLCom* my_sslcom = dynamic_cast<SSLCom*>(com());
     baseCom* c = nullptr;
     
-    if(my_sslcom == nullptr && ssl_autodetect) {
+    if(my_sslcom != nullptr) {
+        is_ssl_port = true;
+    }
+    else
+    if(ssl_autodetect) {
         // my com is NOT ssl-based, trigger auto-detect
 
         is_ssl = detect_ssl_on_plain_socket(s);
@@ -469,7 +526,15 @@ baseHostCX* MitmMasterProxy::new_cx(int s) {
     }
     
     auto r = new MitmHostCX(c,s);
-    if (is_ssl) INF_("Connection %s: SSL detected on unusual port.",r->c_name());
+    if (is_ssl) {
+        INF_("Connection %s: SSL detected on unusual port.",r->c_name());
+        r->is_ssl = true;
+        r->is_ssl_port = is_ssl_port;
+    }
+    if(is_ssl_port) {
+        r->is_ssl = true;
+    }
+    
     DEB_("Pausing new connection %s",r->c_name());
     r->paused(true);
     return r; 
@@ -617,4 +682,8 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
     }
         
     DEBS_("MitmUDPProxy::on_left_new: finished");    
+}
+
+baseHostCX* MitmUdpProxy::MitmUdpProxy::new_cx(int s) {
+    return new MitmHostCX(com()->slave(),s);
 }
