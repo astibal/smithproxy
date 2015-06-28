@@ -96,6 +96,8 @@ public:
     virtual int handle_sockets_once(baseCom* c);
     
     static bool ssl_autodetect;
+    static bool ssl_autodetect_harder;
+    bool detect_ssl_on_plain_socket(int s);
 };
 
 

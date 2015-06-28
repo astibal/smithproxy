@@ -19,6 +19,7 @@
 
 #include <cstdlib>
 #include <ctime>
+#include <time.h>
 
 #include <mitmproxy.hpp>
 #include <mitmhost.hpp>
@@ -403,8 +404,45 @@ void MitmProxy::handle_replacement(MitmHostCX* cx) {
 
 
 bool MitmMasterProxy::ssl_autodetect = false;
+bool MitmMasterProxy::ssl_autodetect_harder = true;
 
 #define NEW_CX_PEEK_BUFFER_SZ  10
+bool MitmMasterProxy::detect_ssl_on_plain_socket(int s) {
+    
+    int ret = false;
+
+    int time_increment = 2500; // 2.5ms
+    int time_max = time_increment*5;
+    int time_taken = 0;
+    
+    if (s > 0) {
+        again:
+        
+        char peek_buffer[NEW_CX_PEEK_BUFFER_SZ];
+        int b = ::recv(s,peek_buffer,NEW_CX_PEEK_BUFFER_SZ,MSG_PEEK|MSG_DONTWAIT);
+        
+        if(b > 6) {
+            if (peek_buffer[0] == 0x16 && peek_buffer[1] == 0x03 && ( peek_buffer[5] == 0x00 || peek_buffer[5] == 0x01 || peek_buffer[5] == 0x02 )) {
+                INF_("detect_ssl_on_plain_socket: SSL detected on socket %d",s);
+                ret = true;
+            }
+        } else {
+            if(ssl_autodetect_harder && time_taken < time_max) {
+                struct timespec t;
+                t.tv_sec = 0;
+                t.tv_nsec = time_increment;
+                
+                ::nanosleep(&t,nullptr);
+                time_taken += time_increment;
+                DIA_("detect_ssl_on_plain_socket: SSL strict detection on socket %d: dalayed by %dnsec",s,time_increment);
+                goto again;
+            }
+        }
+    }
+    
+    return ret;
+}
+
 baseHostCX* MitmMasterProxy::new_cx(int s) {
     
     DEBS_("MitmMasterProxy::new_cx: new_cx start");
@@ -416,17 +454,8 @@ baseHostCX* MitmMasterProxy::new_cx(int s) {
     
     if(my_sslcom == nullptr && ssl_autodetect) {
         // my com is NOT ssl-based, trigger auto-detect
-        if (s > 0) {
-            char peek_buffer[NEW_CX_PEEK_BUFFER_SZ];
-            int b = ::recv(s,peek_buffer,NEW_CX_PEEK_BUFFER_SZ,MSG_PEEK|MSG_DONTWAIT);
-            if(b > 6) {
-                if (peek_buffer[0] == 0x16 && peek_buffer[1] == 0x03 && peek_buffer[5] == 0x01) {
-                    DIAS_("SSL ClientHello detected on plaintext port!");
-                    is_ssl = true;
-                }
-            }
-        }
-        
+
+        is_ssl = detect_ssl_on_plain_socket(s);
         if(! is_ssl) {
             c = com()->slave();
         } else {
@@ -440,6 +469,7 @@ baseHostCX* MitmMasterProxy::new_cx(int s) {
     }
     
     auto r = new MitmHostCX(c,s);
+    if (is_ssl) INF_("Connection %s: SSL detected on unusual port.",r->c_name());
     DEB_("Pausing new connection %s",r->c_name());
     r->paused(true);
     return r; 
