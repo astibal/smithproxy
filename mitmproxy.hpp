@@ -15,18 +15,8 @@
     You should have received a copy of the GNU General Public License
     along with Smithproxy.  If not, see <http://www.gnu.org/licenses/>.
     
-*/    
-
-
-/*
- now let's override baseProxy, and use on_left/right_bytes method!
- this proxy is working with *already accepted* sockets
-
- basically Proxy class recognizes LEFT and RIGHT side. You can organize those contexts on both sides.
- it's up to you what will do with them, it doesn't have any particular technical meaning; it just 
- follows the principle that you are usually proxying 2 sides (most commonly clients with servers, but 
- left-right is more generic and follows common sense.
 */
+
 
 #ifndef MITMPROXY_HPP
  #define MITMPROXY_HPP
@@ -65,7 +55,7 @@ public:
     bool write_payload(void) { return write_payload_; } 
     void write_payload(bool b) { write_payload_ = b; }
     
-    bool detect_dns(MitmHostCX* mh);
+    bool detect_dns(MitmHostCX* mh, unsigned char side);
     
     trafLog* tlog() { return tlog_; }
     

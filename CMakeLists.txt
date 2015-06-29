@@ -15,7 +15,7 @@ if(UNIX)
     SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g  -Wall -std=c++11")
 endif()
 
-add_executable(smithproxy smithproxy.cpp mitmhost.cpp mitmproxy.cpp cfgapi.cpp cidr.cpp policy.cpp daemon.cpp sockshostcx.cpp socksproxy.cpp cmdserver.cpp cfgapi_auth.cpp)
+add_executable(smithproxy smithproxy.cpp mitmhost.cpp mitmproxy.cpp cfgapi.cpp cidr.cpp policy.cpp daemon.cpp sockshostcx.cpp socksproxy.cpp cmdserver.cpp cfgapi_auth.cpp dns.cpp)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}")
 
