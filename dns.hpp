@@ -36,6 +36,7 @@
 
 #define DNS_HEADER_SZ 12
 
+
 typedef enum DNS_Record_Type_ { 
     UNKNOWN=0,
     A=1,
@@ -135,5 +136,6 @@ public:
 
 typedef ptr_cache<std::string,DNS_Response> dns_cache;
 
+extern dns_cache inspect_dns_cache;
 
 #endif

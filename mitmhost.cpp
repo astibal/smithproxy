@@ -76,8 +76,8 @@ void MitmHostCX::load_signatures() {
 
 void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, vector_range& r) {
     if(r.size() > 0) {
-        std::pair<unsigned char,buffer*>& get = flow().flow()[0];
-        std::pair<unsigned char,buffer*>& status = flow().flow()[0];
+        std::pair<char,buffer*>& get = flow().flow()[0];
+        std::pair<char,buffer*>& status = flow().flow()[0];
 
         buffer* buffer_get = get.second;
         buffer* buffer_status = status.second;
@@ -188,6 +188,16 @@ void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, ve
 
         // we have to specify that we are replaceable!
         replace_type = REPLACETYPE_HTTP;
+    }
+}
+
+
+void MitmHostCX::inspect() {
+    AppHostCX::inspect();
+    if(com()->nonlocal_dst_port() == 53) {
+        if(!inspector_dns.completed()) {
+            inspector_dns.update(this);
+        }
     }
 }
 

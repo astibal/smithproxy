@@ -17,6 +17,40 @@
     
 */
 
+#include <basecom.hpp>
+#include <tcpcom.hpp>
 #include <dns.hpp>
+#include <signature.hpp>
+#include <apphostcx.hpp>
 
-extern dns_cache inspect_dns;
+class Inspector {
+public:
+    virtual ~Inspector() {}
+    virtual void update(AppHostCX* cx) = 0;
+    
+    inline bool completed() const   { return completed_; }
+    inline bool in_progress() const { return in_progress_; }
+    inline bool result() const { return result_; }
+
+protected:
+    bool completed_ = false;
+    void completed(bool b) { completed_ = b; }
+    bool in_progress_ = false;
+    void in_progress(bool b) { in_progress_ = b; }
+    bool result_ = false;
+    void result(bool b) { result_ = b; }
+    
+    int stage = 0;
+};
+
+
+class DNS_Inspector : public Inspector {
+public:
+    virtual ~DNS_Inspector() {};  
+    virtual void update(AppHostCX* cx);
+private:
+    bool is_tcp = false;
+
+    DNS_Request req_;
+    DNS_Response resp_;
+};

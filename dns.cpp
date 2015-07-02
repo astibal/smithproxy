@@ -24,6 +24,8 @@
 #include <logger.hpp>
 
 
+dns_cache inspect_dns_cache;
+
 const char* dns_record_type_str(int a) {
     switch(a) {
         case A: return str_a;

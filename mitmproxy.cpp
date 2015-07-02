@@ -27,7 +27,7 @@
 #include <cfgapi.hpp>
 #include <cfgapi_auth.hpp>
 #include <sockshostcx.hpp>
-#include <dns.hpp>
+
 
 MitmProxy::MitmProxy(baseCom* c): baseProxy(c) {
 
@@ -173,66 +173,6 @@ bool MitmProxy::update_identity(baseHostCX* cx) {
     return ret;
 }
 
-bool MitmProxy::detect_dns(MitmHostCX* mh, unsigned char side)  {
-    
-    DIAS_("MitmProxy::detect_dns: start");
-    
-    // this is initialization (client is first)
-    if(side == 'l') {
-        mh->is_dns_port = true;
-        mh->is_dns = false;
-    }
-    
-    DNS_Packet* r;
-    
-    if(side == 'l') {
-        r = new DNS_Request();
-    } else {
-        r = new DNS_Response();
-    }
-    
-    bool rr = false;
-    
-    /* LOADING PACKET */
-    TCPCom* is_tcp = dynamic_cast<TCPCom*>(mh->com());
-    if(is_tcp) {
-        DIA_("%s: DNS over TCP",mh->hr().c_str());
-        
-        // TODO: there could be MORE dns data, or less. This is too optimistic.
-        unsigned short bytes = ntohs(mh->readbuf()->get_at<unsigned short>(0));
-        buffer x = mh->readbuf()->view(2,bytes);
-        rr = r->load(&x);
-        
-        //TODO: print at least warning message.
-        if(bytes + sizeof(unsigned short) != mh->readbuf()->size()) {
-            WAR_("%s: DNS inspection: processed %d, but len was %d",bytes,mh->readbuf()->size());
-        }
-    } else {
-        DIA_("%s: DNS over UDP",mh->hr().c_str());
-        rr = r->load(mh->readbuf());
-    }    
-    
-    if(rr) {
-        if(side == 'r') {
-            std::string ip = r->answer_str().c_str();
-            if(ip.size() > 0) {
-                INF_("DNS response: %s is at%s",r->question_str_0().c_str(),ip.c_str()); //ip is already prepended with " "
-            }
-            else {
-                INF_("DNS non-A response: %s",r->question_str_0().c_str());
-            }
-            DIA_("DNS response: %s",r->hr().c_str());
-            mh->is_dns = true;
-        } else {
-            DIA_("DNS request: %s",r->hr().c_str());
-        }
-    }
-
-
-    delete r;
-    
-    return rr;
-}
 
 void MitmProxy::on_left_bytes(baseHostCX* cx) {
         
@@ -252,9 +192,6 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
 
     if(mh != nullptr) {
 
-        if(mh->com()->nonlocal_dst_port() == 53 and mh->meter_read_count == 1) {
-            detect_dns(mh,'l');
-        } 
         
         if(opt_auth_authenticate || opt_auth_resolve) {
         
@@ -329,19 +266,6 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
     }
 
 
-    if(cx->port() == "53" ) {
-        // this is hack to make DNS timeout sooner
-        DIA_("%s: DNS reply received, shortening idle timeout.",cx->hr().c_str());
-
-        MitmHostCX* mh = dynamic_cast<MitmHostCX*>(cx);
-        if(mh != nullptr) {
-            bool rr = detect_dns(mh,'r');
-
-            if(rr) {
-                mh->idle_delay(1); // set 1s for DNS to timeout
-            }
-        }
-    }
 }
 
 void MitmProxy::on_left_error(baseHostCX* cx) {
