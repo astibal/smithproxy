@@ -90,6 +90,10 @@ void DNS_Inspector::update(AppHostCX* cx) {
     if(rr) {
         stage++;
         // consider stage 2 and more as succesfull inspection
+        if(stage == 1) {
+            cx->idle_delay(10); // request has been recognized as DNS, we expect reply will come very soon. 10 is very conservative.
+        }
+        else
         if(stage >= 2){
             completed(true);
             result(true);
@@ -115,6 +119,7 @@ void DNS_Inspector::update(AppHostCX* cx) {
                     WAR_("DNS inspection: blind DNS reply attack: request ID 0x%x doesn't match response ID 0x%x.",req_.id(),resp_.id());
                 }
                 
+                cx->idle_delay(1);
             } else {
                 DIA_("DNS request: %s",req_.hr().c_str());
             }
