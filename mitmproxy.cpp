@@ -229,6 +229,8 @@ bool MitmProxy::detect_dns(MitmHostCX* mh, unsigned char side)  {
     }
 
 
+    delete r;
+    
     return rr;
 }
 

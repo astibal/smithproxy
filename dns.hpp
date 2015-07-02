@@ -102,6 +102,7 @@ protected:
     std::vector<DNS_Answer> answers_list;
 
 public:    
+    virtual ~DNS_Packet() {}
     bool load(buffer* src); // initialize from memory
     virtual std::string hr() const;
 
@@ -121,12 +122,14 @@ public:
 class DNS_Request : public DNS_Packet {
 public:
     DNS_Request(): DNS_Packet() {};        // we won't allow parsing in constructor
+    virtual ~DNS_Request() {};
 };
 
 
 class DNS_Response : public DNS_Packet {
 public:
     DNS_Response(): DNS_Packet() {};        // we won't allow parsing in constructor
+    virtual ~DNS_Response() {};
 };
 
 

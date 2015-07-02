@@ -88,6 +88,7 @@ std::thread* cli_thread = nullptr;
 
 volatile static int cnt_terminate = 0;
 static bool cfg_daemonize = false;
+static bool cfg_mtrace_enable = false;
 
 static int  args_debug_flag = NON;
 // static int   ssl_flag = 0;
@@ -362,6 +363,7 @@ bool load_config(std::string& config_f, bool reload) {
         cfgapi.getRoot()["debug"]["log"].lookupValue("sslmitmcom",SSLMitmCom::log_level_ref());
         cfgapi.getRoot()["debug"]["log"].lookupValue("sslcertstore",SSLCertStore::log_level_ref());
         cfgapi.getRoot()["debug"]["log"].lookupValue("proxy",baseProxy::log_level_ref());
+        cfgapi.getRoot()["debug"]["log"].lookupValue("mtrace",cfg_mtrace_enable);
         
         cfgapi.getRoot()["settings"]["cli"].lookupValue("port",cli_port);
         cfgapi.getRoot()["settings"]["cli"].lookupValue("enable_password",cli_enable_password);
@@ -417,10 +419,6 @@ void ignore_sigpipe() {
 
 int main(int argc, char *argv[]) {
 
-#ifdef MEM_DEBUG
-    mtrace();
-#endif
-
     config_file = "/etc/smithproxy/smithproxy.cfg";    
 
     while(1) {
@@ -466,6 +464,13 @@ int main(int argc, char *argv[]) {
     if (!load_config(config_file)) {
         FATS_("Error loading config file on startup.");
     }
+    
+
+    if(cfg_mtrace_enable) {
+        putenv("MALLOC_TRACE=/var/log/smithproxy_mtrace.log");
+        mtrace();
+    }
+
     
     // if there is loglevel specified in config file and is bigger than we currently have set, use it
     if(cfgapi_table.logging.level > lout.level()) {
