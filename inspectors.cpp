@@ -119,7 +119,10 @@ void DNS_Inspector::update(AppHostCX* cx) {
                     WAR_("DNS inspection: blind DNS reply attack: request ID 0x%x doesn't match response ID 0x%x.",req_.id(),resp_.id());
                 }
                 
-                cx->idle_delay(1);
+                if(is_tcp)
+                    cx->idle_delay(30);
+                else
+                    cx->idle_delay(1);
             } else {
                 DIA_("DNS request: %s",req_.hr().c_str());
             }
