@@ -70,7 +70,7 @@ void DNS_Inspector::update(AppHostCX* cx) {
         // TODO: there could be MORE dns data, or less. This is too optimistic.
         if(buf->size() >= 2) {
             unsigned short bytes = ntohs(buf->get_at<unsigned short>(0));
-            INF_("%s: DNS over TCP (%d bytes, buffer size %d)",cx->hr().c_str(),bytes,buf->size());
+            DIA_("%s: DNS over TCP (%d bytes, buffer size %d)",cx->hr().c_str(),bytes,buf->size());
             buffer x = buf->view(2,bytes);
             rr = ptr->load(&x);
             
@@ -104,6 +104,17 @@ void DNS_Inspector::update(AppHostCX* cx) {
                     INF_("DNS inspection: non-A response for %s",resp_.question_str_0().c_str());
                 }
                 DIA_("DNS response: %s",resp_.hr().c_str());
+                
+                
+                /* RULES */
+                if(req_.id() == resp_.id()) {
+                    DIA_("DNS inspection: request and response ID 0x%x match.",req_.id());
+                } else {
+                    cx->writebuf()->clear();
+                    cx->error(true);
+                    WAR_("DNS inspection: blind DNS reply attack: request ID 0x%x doesn't match response ID 0x%x.",req_.id(),resp_.id());
+                }
+                
             } else {
                 DIA_("DNS request: %s",req_.hr().c_str());
             }
