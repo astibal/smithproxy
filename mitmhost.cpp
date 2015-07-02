@@ -108,11 +108,11 @@ void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, ve
             //don't add referer to log.
             //print_request += str_temp;
 
-            if(request == nullptr) {
-                request = new app_HttpRequest;
+            if(application_data == nullptr) {
+                application_data = new app_HttpRequest;
             }
 
-            app_HttpRequest* app_request = dynamic_cast<app_HttpRequest*>(request);
+            app_HttpRequest* app_request = dynamic_cast<app_HttpRequest*>(application_data);
             if(app_request != nullptr) {
                 app_request->referer = str_temp;
                 DIA_("Referer: %s",app_request->referer.c_str());
@@ -126,11 +126,11 @@ void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, ve
                 str_temp = m_host[1].str();
                 print_request += str_temp;
 
-                if(request == nullptr) {
-                    request = new app_HttpRequest;
+                if(application_data == nullptr) {
+                    application_data = new app_HttpRequest;
                 }
 
-                app_HttpRequest* app_request = dynamic_cast<app_HttpRequest*>(request);
+                app_HttpRequest* app_request = dynamic_cast<app_HttpRequest*>(application_data);
                 if(app_request != nullptr) {
                     app_request->host = str_temp;
                     DIA_("Host: %s",app_request->host.c_str());
@@ -143,11 +143,11 @@ void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, ve
                 str_temp = m_get[2].str();
                 print_request += str_temp;
 
-                if(request == nullptr) {
-                    request = new app_HttpRequest;
+                if(application_data == nullptr) {
+                    application_data = new app_HttpRequest;
                 }
 
-                app_HttpRequest* app_request = dynamic_cast<app_HttpRequest*>(request);
+                app_HttpRequest* app_request = dynamic_cast<app_HttpRequest*>(application_data);
                 if(app_request != nullptr) {
                     app_request->uri = str_temp;
                     DIA_("URI: %s",app_request->uri.c_str());
@@ -164,7 +164,7 @@ void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, ve
         }
 
 
-        app_HttpRequest* app_request = dynamic_cast<app_HttpRequest*>(request);
+        app_HttpRequest* app_request = dynamic_cast<app_HttpRequest*>(application_data);
         if(app_request != nullptr) {
             // detect protocol (plain vs ssl)
             SSLCom* proto_com = dynamic_cast<SSLCom*>(com());

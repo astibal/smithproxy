@@ -22,6 +22,7 @@
 
 #include <sslmitmcom.hpp>
 #include <apphostcx.hpp>
+#include <dns.hpp>
 
 extern std::vector<duplexFlowMatch*> sigs_starttls;
 extern std::vector<duplexFlowMatch*> sigs_detection;
@@ -47,9 +48,9 @@ struct ApplicationData {
     virtual ~ApplicationData() {};
     bool is_ssl = false;
     
-    virtual std::string hr() = 0;
-    virtual std::string original_request() = 0; // parent request
-    virtual std::string request() = 0;
+    virtual std::string hr() { return std::string(""); };
+    virtual std::string original_request() { return request(); }; // parent request
+    virtual std::string request() { return std::string(""); };
 };
 struct app_HttpRequest : public ApplicationData {
     virtual ~app_HttpRequest() {};
@@ -82,11 +83,16 @@ struct app_HttpRequest : public ApplicationData {
     virtual std::string hr() { std::string ret = proto+host+uri+params; if(referer.size()>0) { ret +=(" via "+referer); }; return ret; }
 };
 
+struct app_DNS : public ApplicationData {
+    DNS_Request*  request = nullptr;
+    DNS_Response* response = nullptr;
+};
+
 class MitmHostCX : public AppHostCX {
 public:
-    ApplicationData* request = nullptr;
+    ApplicationData* application_data = nullptr;
     
-    virtual ~MitmHostCX() { delete request; };
+    virtual ~MitmHostCX() { delete application_data; };
     
     MitmHostCX(baseCom* c, const char* h, const char* p );
     MitmHostCX( baseCom* c, int s );

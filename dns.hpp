@@ -22,11 +22,14 @@
 
 #include <string>
 #include <vector>
+#include <mutex>
+#include <unordered_map>
 
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
+#include <ptr_cache.hpp>
 #include <buffer.hpp>
 #include <display.hpp>
 #include <logger.hpp>
@@ -125,6 +128,9 @@ class DNS_Response : public DNS_Packet {
 public:
     DNS_Response(): DNS_Packet() {};        // we won't allow parsing in constructor
 };
+
+
+typedef ptr_cache<std::string,DNS_Response> dns_cache;
 
 
 #endif

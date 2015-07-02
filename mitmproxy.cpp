@@ -403,7 +403,7 @@ void MitmProxy::handle_replacement(MitmHostCX* cx) {
     std::string repl_proto = "http";
     int 	redir_hint = 0;
     
-    if(cx->request->is_ssl) {
+    if(cx->application_data->is_ssl) {
 	repl_proto = "https";
 	repl_port = cfgapi_identity_portal_port_https;
     }    
@@ -428,22 +428,22 @@ void MitmProxy::handle_replacement(MitmHostCX* cx) {
 	      std::string& token_tk = cache_entry.second;
 	      
 	      if(now - token_ts < cfgapi_identity_token_timeout) {
-		  INF_("MitmProxy::handle_replacement: cached token %s for request: %s",token_tk.c_str(),cx->request->hr().c_str());
+		  INF_("MitmProxy::handle_replacement: cached token %s for request: %s",token_tk.c_str(),cx->application_data->hr().c_str());
 		  
 		  repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + token_tk + redir_suf;
 		  cx->to_write((unsigned char*)repl.c_str(),repl.size());
 		  cx->close_after_write(true);
 	      } else {
-		  INF_("MitmProxy::handle_replacement: expired token %s for request: %s",token_tk.c_str(),cx->request->hr().c_str());
+		  INF_("MitmProxy::handle_replacement: expired token %s for request: %s",token_tk.c_str(),cx->application_data->hr().c_str());
 		  goto new_token;
 	      }
 	  } else {
 	  
 	      new_token:
 	    
-	      logon_token tok = logon_token(cx->request->original_request().c_str());
+	      logon_token tok = logon_token(cx->application_data->original_request().c_str());
 	      
-	      INF_("MitmProxy::handle_replacement: new auth token %s for request: %s",tok.token,cx->request->hr().c_str());
+	      INF_("MitmProxy::handle_replacement: new auth token %s for request: %s",tok.token,cx->application_data->hr().c_str());
 	      repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + tok.token + redir_suf;
 	      
 		  cx->to_write((unsigned char*)repl.c_str(),repl.size());
