@@ -100,12 +100,14 @@ void DNS_Inspector::update(AppHostCX* cx) {
             
             
             if(stage == 2) {
+                bool is_a_record = true;
                 std::string ip = resp_.answer_str().c_str();
                 if(ip.size() > 0) {
                     INF_("DNS inspection: %s is at%s",resp_.question_str_0().c_str(),ip.c_str()); //ip is already prepended with " "
                 }
                 else {
                     INF_("DNS inspection: non-A response for %s",resp_.question_str_0().c_str());
+                    is_a_record = false;
                 }
                 DIA_("DNS response: %s",resp_.hr().c_str());
                 
@@ -117,6 +119,13 @@ void DNS_Inspector::update(AppHostCX* cx) {
                     cx->writebuf()->clear();
                     cx->error(true);
                     WAR_("DNS inspection: blind DNS reply attack: request ID 0x%x doesn't match response ID 0x%x.",req_.id(),resp_.id());
+                }
+                
+                if(is_a_record) {
+                    inspect_dns_cache.lock();
+                    inspect_dns_cache.set(resp_.question_str_0(),new DNS_Response(resp_));
+                    INF_("DNS_Inspector::update: %s added to cache (%d elements of max %d)",resp_.question_str_0().c_str(),inspect_dns_cache.cache().size(), inspect_dns_cache.max_size());
+                    inspect_dns_cache.unlock();
                 }
                 
                 if(is_tcp)
