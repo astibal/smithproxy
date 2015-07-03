@@ -222,6 +222,10 @@ static struct option long_options[] =
 template <class Listener, class Com>
 Listener* prepare_listener(std::string& str_port,const char* friendly_name,int def_port,int sub_workers) {
     
+    if(sub_workers < 0) {
+        return nullptr;
+    }
+    
     int port = def_port;
     
     if(str_port.size()) {
@@ -350,7 +354,9 @@ bool load_config(std::string& config_f, bool reload) {
         
         cfgapi.getRoot()["settings"].lookupValue("udp_port",cfg_udp_port);
         cfgapi.getRoot()["settings"].lookupValue("udp_workers",cfg_udp_workers);
-        //cfgapi.getRoot()["settings"].lookupValue("log_level",cfg_log_level);
+
+        cfgapi.getRoot()["settings"].lookupValue("socks_workers",cfg_socks_workers);
+        
         cfgapi.getRoot()["settings"].lookupValue("log_level",cfgapi_table.logging.level);
         
         cfgapi.getRoot()["debug"].lookupValue("log_data_crc",baseCom::debug_log_data_crc);
@@ -502,7 +508,11 @@ int main(int argc, char *argv[]) {
     udp_proxy = prepare_listener<theReceiver,UDPCom>(cfg_udp_port,"plain-udp",50081,cfg_udp_workers);
     socks_proxy = prepare_listener<socksAcceptor,socksTCPCom>(cfg_socks_port,"socks",1080,cfg_socks_workers);
     
-    if( plain_proxy == nullptr || ssl_proxy == nullptr || udp_proxy == nullptr || socks_proxy == nullptr) {
+    if( (plain_proxy == nullptr && cfg_tcp_workers >= 0) || 
+        (ssl_proxy == nullptr && cfg_ssl_workers >= 0)   || 
+        (udp_proxy == nullptr && cfg_udp_workers >= 0 )  || 
+        (socks_proxy == nullptr && cfg_socks_workers >= 0)    ) {
+        
         FATS_("Failed to setup proxies. Bailing!");
         exit(-1);
     }
@@ -529,51 +539,64 @@ int main(int argc, char *argv[]) {
 //     sigemptyset(&act_pipe.sa_mask);    
 //     sigaction( SIGPIPE, &act_pipe, NULL);
 //     
-    
-    plain_thread = new std::thread([]() { 
-        ignore_sigpipe();
-        DIA_("smithproxy_tcp: max file descriptors: %d",daemon_get_limit_fd());
-        
-        plain_proxy->run(); 
-        DIAS_("plaintext workers torn down."); 
-        plain_proxy->shutdown(); 
-    } );
-    pthread_setname_np(plain_thread->native_handle(),"smithproxy_tcp");
-    
-    ssl_thread = new std::thread([] () { 
-        ignore_sigpipe();
-        daemon_set_limit_fd(0);
-        DIA_("smithproxy_tls: max file descriptors: %d",daemon_get_limit_fd());
-        
-        ssl_proxy->run(); 
-        DIAS_("ssl workers torn down."); 
-        ssl_proxy->shutdown();  
-    } );    
-    pthread_setname_np(ssl_thread->native_handle(),"smithproxy_tls");
 
-    udp_thread = new std::thread([] () {
-        ignore_sigpipe();
-        daemon_set_limit_fd(0);
-        DIA_("smithproxy_udp: max file descriptors: %d",daemon_get_limit_fd());
-        
-        udp_proxy->run(); 
-        DIAS_("udp workers torn down."); 
-        udp_proxy->shutdown();  
-    } );       
-    pthread_setname_np(udp_thread->native_handle(),"smithproxy_udp");
+    if(plain_proxy) {
+        INFS_("Starting TCP listener");
+        plain_thread = new std::thread([]() { 
+            ignore_sigpipe();
+            DIA_("smithproxy_tcp: max file descriptors: %d",daemon_get_limit_fd());
+            
+            plain_proxy->run(); 
+            DIAS_("plaintext workers torn down."); 
+            plain_proxy->shutdown(); 
+        } );
+        pthread_setname_np(plain_thread->native_handle(),"smithproxy_tcp");
+    }
+    
+    if(ssl_proxy) {
+        INFS_("Starting TLS listener");        
+        ssl_thread = new std::thread([] () { 
+            ignore_sigpipe();
+            daemon_set_limit_fd(0);
+            DIA_("smithproxy_tls: max file descriptors: %d",daemon_get_limit_fd());
+            
+            ssl_proxy->run(); 
+            DIAS_("ssl workers torn down."); 
+            ssl_proxy->shutdown();  
+        } );    
+        pthread_setname_np(ssl_thread->native_handle(),"smithproxy_tls");
+    }
 
-    socks_thread = new std::thread([] () { 
-        ignore_sigpipe();
-        daemon_set_limit_fd(0);
-        DIA_("smithproxy_skx: max file descriptors: %d",daemon_get_limit_fd());
-        
-        socks_proxy->run(); 
-        DIAS_("socks workers torn down."); 
-        socks_proxy->shutdown();  
-    } );   
-    pthread_setname_np(socks_thread->native_handle(),"smithproxy_skx");
+    if(udp_proxy) {
+        INFS_("Starting UDP listener");        
+        udp_thread = new std::thread([] () {
+            ignore_sigpipe();
+            daemon_set_limit_fd(0);
+            DIA_("smithproxy_udp: max file descriptors: %d",daemon_get_limit_fd());
+            
+            udp_proxy->run(); 
+            DIAS_("udp workers torn down."); 
+            udp_proxy->shutdown();  
+        } );       
+        pthread_setname_np(udp_thread->native_handle(),"smithproxy_udp");
+    }
+    
+    if(socks_proxy) {
+        INFS_("Starting SOCKS5 listener");
+        socks_thread = new std::thread([] () { 
+            ignore_sigpipe();
+            daemon_set_limit_fd(0);
+            DIA_("smithproxy_skx: max file descriptors: %d",daemon_get_limit_fd());
+            
+            socks_proxy->run(); 
+            DIAS_("socks workers torn down."); 
+            socks_proxy->shutdown();  
+        } );   
+        pthread_setname_np(socks_thread->native_handle(),"smithproxy_skx");
+    }
 
     cli_thread = new std::thread([] () { 
+        INFS_("Starting CLI");
         ignore_sigpipe();
         DIA_("smithproxy_cli: max file descriptors: %d",daemon_get_limit_fd());
         
@@ -587,7 +610,6 @@ int main(int argc, char *argv[]) {
     if(plain_thread) {
         plain_thread->join();
     }
-    
     if(ssl_thread) {
         ssl_thread->join();
     }
@@ -598,10 +620,14 @@ int main(int argc, char *argv[]) {
         socks_thread->join();
     }        
 
-    delete plain_thread;
-    delete ssl_thread;
-    delete udp_thread;
-    delete socks_thread;
+    if(plain_thread)
+        delete plain_thread;
+    if(ssl_thread)
+        delete ssl_thread;
+    if(udp_thread)
+        delete udp_thread;
+    if(socks_thread)
+        delete socks_thread;
     
     DIAS_("Debug SSL statistics: ");
     DIA_("SSL_accept: %d",SSLCom::counter_ssl_accept);
