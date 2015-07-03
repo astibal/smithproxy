@@ -42,6 +42,8 @@
 #include <sslcertstore.hpp>
 
 #include <smithproxy.hpp>
+#include <dns.hpp>
+#include <inspectors.hpp>
 
 int cli_port = 50000;
 std::string cli_enable_password = "";
@@ -116,6 +118,20 @@ int cli_diag_ssl_cache_list(struct cli_def *cli, const char *command, char *argv
     store->unlock();
     
     return CLI_OK;
+}
+
+int cli_diag_dns_cache_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    inspect_dns_cache.lock();
+    
+    cli_print(cli,"\nDNS cache populated from traffic: ");
+    for(auto it = inspect_dns_cache.cache().begin(); it != inspect_dns_cache.cache().end() ; ++it ) {
+        std::string s = it->first;
+        DNS_Response* r = it->second;
+        
+        cli_print(cli,"    %s  ->%s",s.c_str(),r->answer_str().c_str());
+    }
+    
+    inspect_dns_cache.unlock();
 }
 
 void cli_print_log_levels(struct cli_def *cli) {
@@ -285,7 +301,8 @@ void client_thread(int client_socket) {
                 struct cli_command *diag_ssl_cache;
             struct cli_command *diag_mem;
                 struct cli_command *diag_mem_buffers;
-        
+            struct cli_command *diag_dns;
+                struct cli_command *diag_dns_cache;
         
         struct cli_def *cli;
         
@@ -315,6 +332,9 @@ void client_thread(int client_socket) {
             diag_mem = cli_register_command(cli, diag, "mem", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory related troubleshooting commands");
                 diag_mem_buffers = cli_register_command(cli, diag_mem, "buffers", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory buffers troubleshooting commands");
                         cli_register_command(cli, diag_mem_buffers, "stats", cli_diag_mem_buffers_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory buffers statistics");
+            diag_dns = cli_register_command(cli, diag, "dns", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "DNS traffic related troubleshooting commands");
+                diag_dns_cache = cli_register_command(cli, diag_dns, "cache", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "DNS traffic cache troubleshooting commands");
+                        cli_register_command(cli, diag_dns_cache, "list", cli_diag_dns_cache_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all DNS traffic cache entries");
             
         debuk = cli_register_command(cli, NULL, "debug", NULL, PRIVILEGE_PRIVILEGED, MODE_EXEC, "diagnostic commands");
             cli_register_command(cli, debuk, "term", cli_debug_terminal, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set level of logging to this terminal");
