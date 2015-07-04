@@ -132,7 +132,26 @@ int cli_diag_dns_cache_list(struct cli_def *cli, const char *command, char *argv
     }
     
     inspect_dns_cache.unlock();
+    
+    return CLI_OK;
 }
+
+int cli_diag_dns_cache_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    cli_print(cli,"\nDNS cache statistics: ");
+    inspect_dns_cache.lock();
+    int cache_size = inspect_dns_cache.cache().size();
+    int max_size = inspect_dns_cache.max_size();
+    bool del = inspect_dns_cache.auto_delete();
+    inspect_dns_cache.unlock();
+
+    cli_print(cli,"  Current size: %5d",cache_size);
+    cli_print(cli,"  Maximum size: %5d",max_size);
+    cli_print(cli,"\n    Autodelete: %5d",del);
+
+    return CLI_OK;
+}
+
 
 void cli_print_log_levels(struct cli_def *cli) {
     logger_profile* lp = lout.target_profiles()[(uint64_t)cli->client->_fileno];
@@ -335,6 +354,7 @@ void client_thread(int client_socket) {
             diag_dns = cli_register_command(cli, diag, "dns", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "DNS traffic related troubleshooting commands");
                 diag_dns_cache = cli_register_command(cli, diag_dns, "cache", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "DNS traffic cache troubleshooting commands");
                         cli_register_command(cli, diag_dns_cache, "list", cli_diag_dns_cache_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all DNS traffic cache entries");
+                        cli_register_command(cli, diag_dns_cache, "stats", cli_diag_dns_cache_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "DNS traffic cache statistics");
             
         debuk = cli_register_command(cli, NULL, "debug", NULL, PRIVILEGE_PRIVILEGED, MODE_EXEC, "diagnostic commands");
             cli_register_command(cli, debuk, "term", cli_debug_terminal, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set level of logging to this terminal");
