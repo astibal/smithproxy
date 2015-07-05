@@ -131,7 +131,7 @@ void DNS_Inspector::update(AppHostCX* cx) {
                 if(is_a_record) {
                     inspect_dns_cache.lock();
                     inspect_dns_cache.set(resp_.question_str_0(),new DNS_Response(resp_));
-                    INF_("DNS_Inspector::update: %s added to cache (%d elements of max %d)",resp_.question_str_0().c_str(),inspect_dns_cache.cache().size(), inspect_dns_cache.max_size());
+                    DIA_("DNS_Inspector::update: %s added to cache (%d elements of max %d)",resp_.question_str_0().c_str(),inspect_dns_cache.cache().size(), inspect_dns_cache.max_size());
                     inspect_dns_cache.unlock();
                 }
                 
