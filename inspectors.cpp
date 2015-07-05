@@ -19,6 +19,11 @@
 
 #include <inspectors.hpp>
 
+bool DNS_Inspector::interested(AppHostCX* cx) {
+    if(cx->com()->nonlocal_dst_port() == 53)
+        return true;
+    return false;
+}
 
 void DNS_Inspector::update(AppHostCX* cx) {
 
@@ -113,14 +118,16 @@ void DNS_Inspector::update(AppHostCX* cx) {
                 
                 
                 /* RULES */
-                if(req_.id() == resp_.id()) {
-                    DIA_("DNS inspection: request and response ID 0x%x match.",req_.id());
-                } else {
-                    cx->writebuf()->clear();
-                    cx->error(true);
-                    WAR_("DNS inspection: blind DNS reply attack: request ID 0x%x doesn't match response ID 0x%x.",req_.id(),resp_.id());
+                if(opt_match_id) {
+                    DIAS_("DNS_Inspector::update: matching ID enabled");
+                    if(req_.id() == resp_.id()) {
+                        DIA_("DNS inspection: request and response ID 0x%x match.",req_.id());
+                    } else {
+                        cx->writebuf()->clear();
+                        cx->error(true);
+                        WAR_("DNS inspection: blind DNS reply attack: request ID 0x%x doesn't match response ID 0x%x.",req_.id(),resp_.id());
+                    }
                 }
-                
                 if(is_a_record) {
                     inspect_dns_cache.lock();
                     inspect_dns_cache.set(resp_.question_str_0(),new DNS_Response(resp_));

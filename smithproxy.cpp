@@ -332,6 +332,7 @@ bool load_config(std::string& config_f, bool reload) {
         cfgapi_load_obj_profile_content();
         cfgapi_load_obj_profile_tls();
         cfgapi_load_obj_profile_auth();
+        cfgapi_load_obj_profile_alg_dns();
         
         cfgapi_load_obj_policy();
         

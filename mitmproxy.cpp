@@ -282,7 +282,7 @@ void MitmProxy::on_left_error(baseHostCX* cx) {
     if(opt_auth_resolve)
         resolve_identity(cx);
 
-    INF_("Connection from %s closed, user=%s, sent=%d/%dB received=%d/%dB, flags=%c",
+    INF_("Connection from %s closed: user=%s up=%d/%dB dw=%d/%dB flags=%c",
                         cx->full_name('L').c_str(),
                                      (identity_resolved() ? identity().username : ""),
                                         cx->meter_read_count,cx->meter_read_bytes,
@@ -304,7 +304,7 @@ void MitmProxy::on_right_error(baseHostCX* cx)
 //         INF_("Created new proxy 0x%08x from %s:%s to %s:%d",new_proxy,f,f_p, t,t_p );
 
 
-    INF_("Connection from %s closed, user=%s, sent=%d/%dB received=%d/%dB, flags=%c",
+    INF_("Connection from %s closed: user=%s up=%d/%dB dw=%d/%dB flags=%c",
                             cx->full_name('R').c_str(), 
                                      (identity_resolved() ? identity().username : ""),         
                                             cx->meter_write_count, cx->meter_write_bytes,

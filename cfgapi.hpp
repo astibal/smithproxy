@@ -52,6 +52,7 @@ extern std::map<std::string,ProfileDetection*> cfgapi_obj_profile_detection;
 extern std::map<std::string,ProfileContent*> cfgapi_obj_profile_content;
 extern std::map<std::string,ProfileTls*> cfgapi_obj_profile_tls;
 extern std::map<std::string,ProfileAuth*> cfgapi_obj_profile_auth;
+extern std::map<std::string,ProfileAlgDns*> cfgapi_obj_profile_alg_dns;
 
 extern std::recursive_mutex cfgapi_write_lock;
 
@@ -79,6 +80,7 @@ ProfileDetection* cfgapi_lookup_profile_detection(const char* name);
 ProfileContent*   cfgapi_lookup_profile_content(const char* name);
 ProfileTls*   cfgapi_lookup_profile_tls(const char* name);
 ProfileAuth*   cfgapi_lookup_profile_auth(const char* name);
+ProfileAlgDns*   cfgapi_lookup_profile_alg_dns(const char* name);
 
 int  cfgapi_load_obj_address();
 int  cfgapi_load_obj_port();
@@ -88,6 +90,7 @@ int  cfgapi_load_obj_profile_content();
 int  cfgapi_load_obj_profile_detection();
 int  cfgapi_load_obj_profile_tls();
 int  cfgapi_load_obj_profile_auth();
+int  cfgapi_load_obj_profile_alg_dns();
 
 int  cfgapi_cleanup_obj_address();
 int  cfgapi_cleanup_obj_port();
@@ -97,6 +100,7 @@ int  cfgapi_cleanup_obj_profile_content();
 int  cfgapi_cleanup_obj_profile_detection();
 int  cfgapi_cleanup_obj_profile_tls();
 int  cfgapi_cleanup_obj_profile_auth();
+int  cfgapi_cleanup_obj_profile_alg_dns();
 
 int cfgapi_obj_policy_match(baseProxy* proxy);
 int cfgapi_obj_policy_match(std::vector<baseHostCX*>& left, std::vector<baseHostCX*>& right);
@@ -112,5 +116,6 @@ ProfileContent* cfgapi_obj_policy_profile_content(int index);
 ProfileDetection* cfgapi_obj_policy_profile_detection(int index);
 ProfileTls* cfgapi_obj_policy_profile_tls(int index);
 ProfileAuth* cfgapi_obj_policy_profile_auth(int index);
+ProfileAlgDns* cfgapi_obj_policy_profile_alg_dns(int index);
 
 #endif

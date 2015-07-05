@@ -27,6 +27,7 @@ class Inspector {
 public:
     virtual ~Inspector() {}
     virtual void update(AppHostCX* cx) = 0;
+    virtual bool interested(AppHostCX*) = 0;
     
     inline bool completed() const   { return completed_; }
     inline bool in_progress() const { return in_progress_; }
@@ -48,6 +49,11 @@ class DNS_Inspector : public Inspector {
 public:
     virtual ~DNS_Inspector() {};  
     virtual void update(AppHostCX* cx);
+    virtual bool interested(AppHostCX*cx);
+    
+    bool opt_match_id = false;
+    bool opt_randomize_id = false;
+    
 private:
     bool is_tcp = false;
 

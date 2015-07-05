@@ -39,6 +39,7 @@ struct ProfileDetection;
 struct ProfileContent;
 struct ProfileTls;
 struct ProfileAuth;
+struct ProfileAlgDns;
 
 class PolicyRule {
 
@@ -72,6 +73,7 @@ public:
        ProfileDetection* profile_detection = nullptr;
        ProfileTls* profile_tls = nullptr;
        ProfileAuth* profile_auth = nullptr;
+       ProfileAlgDns* profile_alg_dns = nullptr;
 };
 
 struct ProfileDetection {
@@ -106,6 +108,12 @@ struct ProfileTls {
 struct ProfileAuth {
     bool authenticate = false;
     bool resolve = false;  // resolve traffic by ip in auth table
+    std::string name;
+};
+
+struct ProfileAlgDns {
+    bool match_request_id = false;
+    bool randomize_id = false;
     std::string name;
 };
 

@@ -25,6 +25,7 @@
 
 
 dns_cache inspect_dns_cache(200,true);
+std::unordered_map<std::string,ptr_cache<std::string,DNS_Response>*> inspect_per_ip_dns_cache;
 
 const char* dns_record_type_str(int a) {
     switch(a) {

@@ -194,9 +194,10 @@ void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, ve
 
 void MitmHostCX::inspect() {
     AppHostCX::inspect();
-    if(com()->nonlocal_dst_port() == 53) {
-        if(!inspector_dns.completed()) {
-            inspector_dns.update(this);
+    
+    for(Inspector* inspector: inspectors_) {
+        if(inspector->interested(this) && (! inspector->completed() )) {
+            inspector->update(this);
         }
     }
 }

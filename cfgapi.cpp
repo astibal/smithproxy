@@ -39,6 +39,7 @@ std::map<std::string,ProfileDetection*> cfgapi_obj_profile_detection;
 std::map<std::string,ProfileContent*> cfgapi_obj_profile_content;
 std::map<std::string,ProfileTls*> cfgapi_obj_profile_tls;
 std::map<std::string,ProfileAuth*> cfgapi_obj_profile_auth;
+std::map<std::string,ProfileAlgDns*> cfgapi_obj_profile_alg_dns;
 
 std::recursive_mutex cfgapi_write_lock;
 
@@ -126,6 +127,17 @@ ProfileTls* cfgapi_lookup_profile_tls(const char* name) {
     }    
     
     return nullptr;
+}
+
+ProfileAlgDns* cfgapi_lookup_profile_alg_dns(const char* name) {
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    
+    if(cfgapi_obj_profile_alg_dns.find(name) != cfgapi_obj_profile_alg_dns.end()) {
+        return cfgapi_obj_profile_alg_dns[name];
+    }    
+    
+    return nullptr;
+
 }
 
 
@@ -407,6 +419,7 @@ int cfgapi_load_obj_policy() {
                 std::string name_detection;
                 std::string name_tls;
                 std::string name_auth;
+                std::string name_alg_dns;
                 
                 if(cur_object.lookupValue("detection_profile",name_detection)) {
                     ProfileDetection* prf  = cfgapi_lookup_profile_detection(name_detection.c_str());
@@ -448,7 +461,17 @@ int cfgapi_load_obj_policy() {
                         ERR_("cfgapi_load_policy[#%d]: auth profile %s cannot be loaded",i,name_auth.c_str());
                         error = true;
                     }
-                }                  
+                }
+                if(cur_object.lookupValue("alg_dns_profile",name_alg_dns)) {
+                    ProfileAlgDns* dns  = cfgapi_lookup_profile_alg_dns(name_alg_dns.c_str());
+                    if(dns != nullptr) {
+                        DIA_("cfgapi_load_policy[#%d]: DNS alg profile %s",i,name_alg_dns.c_str());
+                        rule->profile_alg_dns = dns;
+                    } else {
+                        ERR_("cfgapi_load_policy[#%d]: DNS alg %s cannot be loaded",i,name_alg_dns.c_str());
+                        error = true;
+                    }
+                }                    
             }
             
             if(!error){
@@ -562,6 +585,23 @@ ProfileTls* cfgapi_obj_policy_profile_tls(int index) {
         return nullptr;
     }
 }
+
+
+ProfileAlgDns* cfgapi_obj_policy_profile_alg_dns(int index) {
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    
+    if(index < 0) {
+        return nullptr;
+    }
+    
+    if(index < (signed int)cfgapi_obj_policy.size()) {
+        return cfgapi_obj_policy.at(index)->profile_alg_dns;
+    } else {
+        DIA_("cfgapi_obj_policy_profile_alg_dns[#%d]: out of bounds, nullptr",index);
+        return nullptr;
+    }
+}
+
 
 ProfileAuth* cfgapi_obj_policy_profile_auth(int index) {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
@@ -703,6 +743,37 @@ int cfgapi_load_obj_profile_tls() {
     return num;
 }
 
+int cfgapi_load_obj_profile_alg_dns() {
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+
+    int num = 0;
+    DIAS_("cfgapi_load_obj_alg_dns_profile: start");
+    if(cfgapi.getRoot().exists("alg_dns_profiles")) {
+        num = cfgapi.getRoot()["alg_dns_profiles"].getLength();
+        DIA_("cfgapi_load_obj_alg_dns_profile: found %d objects",num);
+        
+        Setting& curr_set = cfgapi.getRoot()["alg_dns_profiles"];
+
+        for( int i = 0; i < num; i++) {
+            std::string name;
+            ProfileAlgDns* a = new ProfileAlgDns;
+            
+            Setting& cur_object = curr_set[i];
+            
+            name = cur_object.getName();
+
+            DEB_("cfgapi_load_obj_alg_dns_profile: processing '%s'",name.c_str());
+            
+            a->name = name;
+            cur_object.lookupValue("match_request_id",a->match_request_id);
+            cur_object.lookupValue("randomize_id",a->randomize_id);
+            
+            cfgapi_obj_profile_alg_dns[name] = a;
+        }
+    }
+    
+    return num;
+}
 
 
 int cfgapi_load_obj_profile_auth() {
@@ -846,6 +917,22 @@ int cfgapi_cleanup_obj_profile_tls() {
     return r;
 }
 
+int cfgapi_cleanup_obj_profile_alg_dns() {
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    
+    int r = cfgapi_obj_profile_alg_dns.size();
+    for(std::map<std::string, ProfileAlgDns*>::iterator i = cfgapi_obj_profile_alg_dns.begin(); i != cfgapi_obj_profile_alg_dns.end(); ++i) {
+        std::pair<std::string,ProfileAlgDns*> t = (*i);
+        ProfileAlgDns* c = t.second;
+        if (c != nullptr) delete c;
+    }
+    cfgapi_obj_profile_alg_dns.clear();
+    
+    return r;
+}
+
+
+
 int cfgapi_cleanup_obj_profile_auth() {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
@@ -873,6 +960,7 @@ int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
         ProfileDetection* pd = cfgapi_obj_policy_profile_detection(policy_num);
         ProfileTls* pt = cfgapi_obj_policy_profile_tls(policy_num);
         ProfileAuth* pa = cfgapi_obj_policy_profile_auth(policy_num);
+        ProfileAlgDns* p_alg_dns  = cfgapi_obj_policy_profile_alg_dns(policy_num);
         
         const char* pc_name = "none";
         const char* pc_global_no = "global_no";
@@ -882,6 +970,10 @@ int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
         const char* pd_name = "none";
         const char* pt_name = "none";
         const char* pa_name = "none";
+        
+        //Algs will be list of single letter abreviations
+        // DNS alg: D
+        std::string algs_name = ""; 
         
         /* Processing content profile */
         
@@ -957,10 +1049,26 @@ int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
             pa_name = pa->name.c_str();
         } 
         
-        INF_("Connection %s accepted by policy #%d, prof_c=%s, prof_d=%s prof_tls=%s prof_auth=%s",originator->full_name('L').c_str(),policy_num,pc_name,pd_name,pt_name,pa_name);
+        // ALGS can operate only on MitmHostCX classes
+        MitmHostCX* mh = dynamic_cast<MitmHostCX*>(mitm_originator);
+        if(mh != nullptr) {
+            
+            // DNS ALG
+            if(p_alg_dns != nullptr) {
+                algs_name += "D";
+                DNS_Inspector* n = new DNS_Inspector();
+                n->opt_match_id = p_alg_dns->match_request_id;
+                n->opt_randomize_id = p_alg_dns->randomize_id;
+                mh->inspectors_.push_back(n);
+            }
+        } else {
+            NOT_("Connection %s cannot be inspected by ALGs",originator->full_name('L').c_str());
+        }
+        
+        INF_("Connection %s accepted: policy=%d cont=%s det=%s tls=%s auth=%s algs=%s",originator->full_name('L').c_str(),policy_num,pc_name,pd_name,pt_name,pa_name,algs_name.c_str());
         
     } else {
-        INF_("Connection %s denied by policy #%d.",originator->full_name('L').c_str(),policy_num);
+        INF_("Connection %s denied: policy=%d",originator->full_name('L').c_str(),policy_num);
     }
     
     return policy_num;
@@ -1002,6 +1110,9 @@ void cfgapi_cleanup()
   cfgapi_cleanup_obj_proto();
   cfgapi_cleanup_obj_profile_content();
   cfgapi_cleanup_obj_profile_detection();
+  cfgapi_cleanup_obj_profile_tls();
+  cfgapi_cleanup_obj_profile_auth();
+  cfgapi_cleanup_obj_profile_alg_dns();
 }
 
 

@@ -137,5 +137,6 @@ public:
 typedef ptr_cache<std::string,DNS_Response> dns_cache;
 
 extern dns_cache inspect_dns_cache;
+extern std::unordered_map<std::string,ptr_cache<std::string,DNS_Response>*> inspect_per_ip_dns_cache;
 
 #endif
