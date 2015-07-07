@@ -26,6 +26,7 @@
 import sys, os, time, atexit
 import pwd, grp
 from signal import SIGTERM 
+from signal import SIGKILL
 import logging
 import signal
 
@@ -189,9 +190,18 @@ class Daemon:
 
         # Try killing the daemon process    
         try:
+            attempts = 0
+            kill_attempts = 20 # wait 2 seconds, then send KILL
             while 1:
-                os.kill(pid, SIGTERM)
+                sig = SIGTERM
+                if attempts == kill_attempts:
+                    logging.warning("trying to terminate with SIGKILL")
+                    sig = SIGKILL
+                    
+                os.kill(pid, sig)
                 time.sleep(0.1)
+                attempts = attempts + 1
+                
         except OSError, err:
             err = str(err)
             if err.find("No such process") > 0:

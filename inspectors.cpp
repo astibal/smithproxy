@@ -232,8 +232,8 @@ void DNS_Inspector::update(AppHostCX* cx) {
 bool DNS_Inspector::validate_response(short unsigned int id) {
     DNS_Request* req = find_request(id);
     if(req) {
-        DIA_("DNS_Inspector::validate_response: request 0x%x found",id);
+        INF_("DNS_Inspector::validate_response: request 0x%x found",id);
     } else {
-        DIA_("DNS_Inspector::validate_response: request 0x%x not found",id);
+        INF_("DNS_Inspector::validate_response: request 0x%x not found",id);
     }
 }
