@@ -89,6 +89,18 @@ struct DNS_Answer {
     };
 };
 
+
+struct DNS_AdditionalInfo {
+    uint8_t  name_ = 0; // 0 - ROOT
+    uint16_t opt_ = 0;  // 0x29 - EDNS0
+    uint16_t udp_size_ = 0;
+    uint8_t  higher_bits_rcode_ = 0;
+    uint8_t  edns0_version_ = 0;
+    uint16_t z_ = 0;
+    uint16_t datalen_ = 0;
+    buffer   data_;
+};
+
 class DNS_Packet {
 protected:
     uint16_t    id_ = 0;
@@ -101,10 +113,12 @@ protected:
 
     std::vector<DNS_Question> questions_list;
     std::vector<DNS_Answer> answers_list;
+    std::vector<DNS_Answer> authorities_list;
+    std::vector<DNS_AdditionalInfo> additionals_list;
 
 public:    
     virtual ~DNS_Packet() {}
-    bool load(buffer* src); // initialize from memory
+    int load(buffer* src); // initialize from memory. if non-zero is returned, there is yet another data and new DNS_packet should be read.
     virtual std::string hr() const;
 
     inline uint16_t id() const { return id_; }

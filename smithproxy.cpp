@@ -167,6 +167,70 @@ static void btrace_handler(int sig) {
     exit(-1);
 }
 
+
+#define UNW_LOCAL_ONLY
+#include <libunwind.h>
+#include <stdio.h>
+
+static void uw_btrace_handler(int sig) {
+    unw_cursor_t cursor; unw_context_t uc;
+    unw_word_t ip, sp;
+
+    unw_getcontext(&uc);
+    unw_init_local(&cursor, &uc);
+    
+    int CRLOG = open((const char*)crashlog_file,O_CREAT | O_WRONLY | O_TRUNC,S_IRUSR|S_IWUSR);
+    TEMP_FAILURE_RETRY(write(STDERR_FILENO," ======== Smithproxy exception handler =========\n",50));
+    TEMP_FAILURE_RETRY(write(CRLOG," ======== Smithproxy exception handler =========\n",50));
+    //FAT_("  [%d] ========= Smithproxy exception handler  =========",sig );
+
+    void *trace[64];
+    size_t size, i;
+    char **strings;
+
+    size    = backtrace( trace, 64 );
+    strings = backtrace_symbols( trace, size );
+
+    if (strings == NULL) {
+        //FATS_("failure: backtrace_symbols");
+        TEMP_FAILURE_RETRY(write(STDERR_FILENO,"failure: backtrace_symbols\n",28));
+        TEMP_FAILURE_RETRY(write(CRLOG,"failure: backtrace_symbols\n",28));
+        close(CRLOG);
+        exit(EXIT_FAILURE);
+    }
+    
+    
+    //FAT_("  [%d] Traceback:",sig );
+    TEMP_FAILURE_RETRY(write(STDERR_FILENO,"Traceback:\n",11));
+    TEMP_FAILURE_RETRY(write(CRLOG,"Traceback:\n",11));
+
+    while (unw_step(&cursor) > 0) {
+        char buf_line[256];
+        memset(buf_line,0,256);
+        char buf_fun[256];
+        memset(buf_fun,0,256);
+
+        unw_word_t  offset;
+        unw_get_proc_name(&cursor, buf_fun, sizeof(buf_fun), &offset);
+        unw_get_reg(&cursor, UNW_REG_IP, &ip);
+        unw_get_reg(&cursor, UNW_REG_SP, &sp);
+        
+        snprintf (buf_line, 255, "ip = %lx, sp = %lx: (%s+0x%x) [%p]\n", (long) ip, (long) sp, buf_fun, offset, ip);
+        int n = strnlen(buf_line,255);
+         TEMP_FAILURE_RETRY(write(CRLOG,buf_line,n));
+         TEMP_FAILURE_RETRY(write(STDERR_FILENO,buf_line,n));
+    }
+    
+    TEMP_FAILURE_RETRY(write(STDERR_FILENO," ===============================================\n",50));
+    TEMP_FAILURE_RETRY(write(CRLOG," ===============================================\n",50));
+    close(CRLOG);
+    
+    daemon_unlink_pidfile();
+    
+    free(strings);
+    exit(-1);
+}
+
 void my_terminate (int param) {
     
     if (!cfg_daemonize)
@@ -420,7 +484,7 @@ void ignore_sigpipe() {
     struct sigaction act_segv;
     sigemptyset(&act_segv.sa_mask);
     act_segv.sa_flags = 0;
-    act_segv.sa_handler = btrace_handler;
+    act_segv.sa_handler = uw_btrace_handler;
     sigaction( SIGSEGV, &act_segv, NULL);
 }
 
@@ -527,7 +591,7 @@ int main(int argc, char *argv[]) {
     prev_fn = signal (SIGINT,my_terminate);
     if (prev_fn==SIG_IGN) signal (SIGINT,SIG_IGN);
 
-    prev_fn = signal(SIGABRT, btrace_handler);
+    prev_fn = signal(SIGABRT, uw_btrace_handler);
     if (prev_fn==SIG_IGN) signal (SIGABRT,SIG_IGN);
     
     prev_fn = signal(SIGUSR1, my_usr1);

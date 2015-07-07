@@ -25,7 +25,7 @@ bool DNS_Inspector::interested(AppHostCX* cx) {
     return false;
 }
 
-void DNS_Inspector::update(AppHostCX* cx) {
+void DNS_Inspector::old_update(AppHostCX* cx) {
 
     duplexFlow& f = cx->flow();
     DEB_("DNS_Inspector::update: stage %d start (flow size %d)",stage, f.flow().size());
@@ -77,7 +77,7 @@ void DNS_Inspector::update(AppHostCX* cx) {
             unsigned short bytes = ntohs(buf->get_at<unsigned short>(0));
             DIA_("%s: DNS over TCP (%d bytes, buffer size %d)",cx->hr().c_str(),bytes,buf->size());
             buffer x = buf->view(2,bytes);
-            rr = ptr->load(&x);
+            rr = (ptr->load(&x) == 0);
             
             //TODO: print at least warning message.
             if(bytes + sizeof(unsigned short) != buf->size()) {
@@ -88,7 +88,7 @@ void DNS_Inspector::update(AppHostCX* cx) {
         }
     } else {
         DIA_("%s: DNS over UDP (buffer size %d)",cx->hr().c_str(),buf->size());
-        rr = ptr->load(buf);
+        rr = ( ptr->load(buf) == 0 );
     } 
     
     // on success, raise stage counter
@@ -151,4 +151,89 @@ void DNS_Inspector::update(AppHostCX* cx) {
         result(false);
     }
     
+}
+
+void DNS_Inspector::update(AppHostCX* cx) {
+    
+    duplexFlow& f = cx->flow();
+    DIA_("DNS_Inspector::update[%s]: stage %d start (flow size %d, last flow entry data length %d)",cx->c_name(),stage, f.flow().size(),f.flow().back().second->size());
+    
+    /* INIT */
+    
+    if(!in_progress()) {
+        baseCom* com = cx->com();
+        TCPCom* tcp_com = dynamic_cast<TCPCom*>(com);
+        if(tcp_com) 
+            is_tcp = true;
+    }
+    
+    
+    std::pair<char,buffer*> cur_pos = cx->flow().flow().back();
+    
+    DNS_Packet* ptr = nullptr;
+    buffer *xbuf = cur_pos.second;
+    buffer buf = xbuf->view(0,xbuf->size());
+    if(is_tcp) {
+        unsigned short data_size = ntohs(buf.get_at<unsigned short>(0));
+        buf = buf.view(2,xbuf->size());
+        if(buf.size() < data_size) {
+            DIA_("DNS_Inspector::update[%s]: not enough DNS data in TCP stream: expected %d, but having %d. Waiting to more.",cx->c_name(), data_size, buf.size());
+            return;
+        }
+    }
+    
+    int red = 0;
+    int mem_pos = 0;
+    int mem_len = buf.size();
+    int max_it = 10; // "emergency" counter.
+    switch(cur_pos.first)  {
+        case 'r':
+            for(int it = 0; red < buf.size() && it < 10; it++) {
+                ptr = new DNS_Request();
+                buf = buf.view(red,buf.size()-red);
+                red = ptr->load(&buf);
+                
+                // on success write to requests_
+                if(red >= 0) {
+                    DIA_("DNS_Inspector::update[%s]: adding key 0x%x red=%d, buffer_size=%d",cx->c_name(),ptr->id(),red,buf.size());
+                    requests_[ptr->id()] = (DNS_Request*)ptr;
+                }
+                
+                // on failure or last data exit loop
+                if(red <= 0) {
+                    DIA_("DNS_Inspector::update[%s]: finishing reading from buffers: red=%d, buffer_size=%d",cx->c_name(),red,buf.size());
+                    break;
+                }
+            }
+            break;
+        case 'w':
+            for(int it = 0; red < buf.size() && it < 10; it++) {
+                ptr = new DNS_Response();
+                buf = buf.view(red,buf.size()-red);
+                red = ptr->load(&buf);
+                
+                // on success write to responses_
+                if(red >= 0) {
+                    mem_pos += red;
+                    DIA_("DNS_Inspector::update[%s]: loaded new response (at %d size %d out of %d)",cx->c_name(),red,mem_pos,mem_len);
+                    responses_[ptr->id()] = (DNS_Response*)ptr;
+                    validate_response(ptr->id());
+                }
+                
+                // on failure or last data exit loop
+                if(red <= 0) break;
+            }
+            break;
+    }
+    
+    DIA_("DNS_Inspector::update[%s]: stage %d end (flow size %d)",cx->c_name(),stage, f.flow().size());
+}
+
+bool DNS_Inspector::validate_response(short unsigned int id) {
+    DNS_Request* req = find_request(id);
+    if(req) {
+        DIA_("DNS_Inspector::validate_response: request 0x%x found",id);
+    } else {
+        DIA_("DNS_Inspector::validate_response: request 0x%x not found",id);
+    }
 }

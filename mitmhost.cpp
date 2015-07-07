@@ -134,6 +134,16 @@ void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, ve
                 if(app_request != nullptr) {
                     app_request->host = str_temp;
                     DIA_("Host: %s",app_request->host.c_str());
+                    
+                    bool check_inspect_dns_cache = true;
+                    if(check_inspect_dns_cache) {
+                        DNS_Response* dns_resp = inspect_dns_cache.get(app_request->host);
+                        if(dns_resp) {
+                            INF_("HTTP inspection: Host header matches DNS: %s",dns_resp->question_str_0().c_str());
+                        } else {
+                            WARS_("HTTP inspection: Host header DOESN'T match DNS!");
+                        }
+                    }
                 }
             }
         }
@@ -195,10 +205,29 @@ void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, ve
 void MitmHostCX::inspect() {
     AppHostCX::inspect();
     
-    for(Inspector* inspector: inspectors_) {
-        if(inspector->interested(this) && (! inspector->completed() )) {
-            inspector->update(this);
+    if(flow().flow().size() > inspect_cur_flow_size) {
+        DIA_("MitmHostCX::inspect: flow size change: %d",flow().flow().size());
+        inspect_flow_same_bytes = 0;
+    }
+    
+    if(flow().flow().size() > inspect_cur_flow_size || 
+                (flow().flow().size() == inspect_cur_flow_size && flow().flow().back().second->size() > inspect_flow_same_bytes) ) {
+
+        if(flow().flow().size() == inspect_cur_flow_size) {
+            INF_("MitmHostCX::inspect: new data in the  same flow size %d", flow().flow().size());
+            //return;
         }
+        
+        DIAS_("MitmHostCX::inspect: inspector loop:");
+        for(Inspector* inspector: inspectors_) {
+            if(inspector->interested(this) && (! inspector->completed() )) {
+                inspector->update(this);
+            }
+        }
+        DIAS_("MitmHostCX::inspect: inspector loop end.");
+        
+        inspect_cur_flow_size = flow().flow().size();
+        inspect_flow_same_bytes  = flow().flow().back().second->size();
     }
 }
 

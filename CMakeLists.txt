@@ -32,7 +32,7 @@ if (LIBCLI_FOUND)
 endif (LIBCLI_FOUND)
 
 
-target_link_libraries(smithproxy socle_lib pthread ssl crypto rt)
+target_link_libraries(smithproxy socle_lib pthread ssl crypto rt unwind)
 
 
 

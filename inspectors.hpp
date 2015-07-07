@@ -48,15 +48,21 @@ protected:
 class DNS_Inspector : public Inspector {
 public:
     virtual ~DNS_Inspector() {};  
+    virtual void old_update(AppHostCX* cx);
     virtual void update(AppHostCX* cx);
     virtual bool interested(AppHostCX*cx);
     
     bool opt_match_id = false;
     bool opt_randomize_id = false;
     
+    DNS_Request* find_request(unsigned int r) { auto it = requests_.find(r); if(it == requests_.end()) { return nullptr; } else { return it->second; }  }
+    DNS_Response* find_response(unsigned int r) { auto it = responses_.find(r); if(it == responses_.end()) { return nullptr; } else { return it->second; }  }
+    bool validate_response(unsigned short id);
 private:
     bool is_tcp = false;
 
     DNS_Request req_;
     DNS_Response resp_;
+    std::unordered_map<unsigned int,DNS_Request*>  requests_;
+    std::unordered_map<unsigned int,DNS_Response*> responses_;
 };

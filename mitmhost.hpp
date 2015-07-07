@@ -132,6 +132,10 @@ public:
 
     bool is_dns = false;
     bool is_dns_port = false;
+
+private:
+    int inspect_cur_flow_size = 0;
+    int inspect_flow_same_bytes = 0;
 };
 
 #endif
