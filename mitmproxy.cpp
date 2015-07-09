@@ -623,6 +623,7 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
         }
 
         int real_socket = target_cx->connect(false);
+        target_cx->rename();
         com()->set_monitor(real_socket);
         com()->set_poll_handler(real_socket,new_proxy);
     }

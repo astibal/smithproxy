@@ -69,8 +69,21 @@ case "$1" in
   unbypass)
     do_unbypass
     ;;
+    
+  fin)
+    # leave TPROXY targets. Good for troubleshooting.
+    python2 /usr/share/smithproxy/infra/smithdog.py stop
+    ;;
+
+  val)
+    valgrind --leak-check=full --trace-children=yes --log-file=/var/log/smithproxy_val.log /usr/bin/smithproxy --daemonize
+    ;;
+
   *)
     echo "Usage: /etc/init.d/smithproxy {start|stop|status|reload|restart|force-reload|bypass|unbypass}"
+    echo "Debugs: /etc/init.d/smithproxy {fin|val}"
+    echo "        fin - just terminate daemons, keep TPROXY rules up! This will disrupt traffic severely."
+    echo "        val - run valgrind on smithproxy. Run it once, if it crashes, it stops Log goes to /var/log/smithproxy_val.log."
     exit 1
     ;;
 esac

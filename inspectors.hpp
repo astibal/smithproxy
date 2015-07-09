@@ -47,7 +47,10 @@ protected:
 
 class DNS_Inspector : public Inspector {
 public:
-    virtual ~DNS_Inspector() {};  
+    virtual ~DNS_Inspector() {
+        for(auto x: requests_) { if(x.second) {delete x.second; } };
+        for(auto x: responses_) { if(x.second) {delete x.second; } };
+    };  
     virtual void old_update(AppHostCX* cx);
     virtual void update(AppHostCX* cx);
     virtual bool interested(AppHostCX*cx);
