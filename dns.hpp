@@ -44,10 +44,10 @@ typedef enum DNS_Record_Type_ {
     AAAA=28 
 } DNS_Record_Type;
 
-static const char* _unknown = "unknown";
-static const char* str_a = "A";
-static const char* str_aaaa = "AAAA";
-static const char* str_cname = "CNAME";
+extern const char* _unknown;
+extern const char* str_a;
+extern const char* str_aaaa;
+extern const char* str_cname;
 
 const char* dns_record_type_str(int a);
 
@@ -127,7 +127,7 @@ public:
     inline int answers() { return questions_list.size(); }
 
     // helper inline functions to operate on most common content
-    std::string question_str_0() const { if(questions_list.size()) { return questions_list.at(0).rec_str; } return std::string(""); };
+    std::string question_str_0() const { if(questions_list.size()) { return questions_list.at(0).rec_str; } return std::string("? "); };
     uint16_t question_type_0() const { if(questions_list.size()) { return questions_list.at(0).rec_type; } return 0; };
     uint16_t question_class_0() const { if(questions_list.size()) { return questions_list.at(0).rec_class; } return 0; };
     

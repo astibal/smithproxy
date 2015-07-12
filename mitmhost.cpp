@@ -115,7 +115,7 @@ void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, ve
             app_HttpRequest* app_request = dynamic_cast<app_HttpRequest*>(application_data);
             if(app_request != nullptr) {
                 app_request->referer = str_temp;
-                DIA_("Referer: %s",app_request->referer.c_str());
+                DIA_("Referer: %s",ESC(app_request->referer));
             }
 
 
@@ -139,7 +139,7 @@ void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, ve
                     if(check_inspect_dns_cache) {
                         DNS_Response* dns_resp = inspect_dns_cache.get(app_request->host);
                         if(dns_resp) {
-                            DIA_("HTTP inspection: Host header matches DNS: %s",dns_resp->question_str_0().c_str());
+                            DIA_("HTTP inspection: Host header matches DNS: %s",ESC(dns_resp->question_str_0()));
                         } else {
                             WARS_("HTTP inspection: Host header DOESN'T match DNS!");
                         }
@@ -160,13 +160,13 @@ void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, ve
                 app_HttpRequest* app_request = dynamic_cast<app_HttpRequest*>(application_data);
                 if(app_request != nullptr) {
                     app_request->uri = str_temp;
-                    DIA_("URI: %s",app_request->uri.c_str());
+                    DIA_("URI: %s",ESC(app_request->uri));
                 }
 
                 if(m_get.size() > 2) {
                     str_temp = m_get[3].str();
                     app_request->params = str_temp;
-                    DIA_("params: %s",app_request->params.c_str());
+                    DIA_("params: %s",ESC(app_request->params));
 
                     //print_request += str_temp;
                 }
@@ -186,9 +186,9 @@ void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, ve
             }
 
 
-            INF_("Connection www request: %s",app_request->hr().c_str());
+            INF_("Connection www request: %s",ESC(app_request->hr()));
         } else {
-            INF_("Connection www request: %s (app_request cast failed)",print_request.c_str());
+            INF_("Connection www request: %s (app_request cast failed)",ESC(print_request));
         }
 
 
