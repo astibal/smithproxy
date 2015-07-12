@@ -75,7 +75,7 @@ struct DNS_Answer {
             uint32_t ip = data_.get_at<uint32_t>(0);
             in_addr a;
             a.s_addr = ip;
-            std::string rr = string_format("%s",inet_ntoa(a));
+            std::string rr = string_format(" ip: %s",inet_ntoa(a));
             ret += rr;
         }
         
@@ -119,7 +119,7 @@ protected:
 public:    
     virtual ~DNS_Packet() {}
     int load(buffer* src); // initialize from memory. if non-zero is returned, there is yet another data and new DNS_packet should be read.
-    virtual std::string hr() const;
+    virtual std::string to_string() const;
 
     inline uint16_t id() const { return id_; }
     inline uint16_t flags() const { return flags_; } // todo: split and inspect all bits of this field
@@ -132,18 +132,21 @@ public:
     uint16_t question_class_0() const { if(questions_list.size()) { return questions_list.at(0).rec_class; } return 0; };
     
     std::string answer_str() const;
+
+    DEFINE_C_NAME("DNS Packet");
+    DECLARE_LOGGING_INFO(to_string);
 };
 
 class DNS_Request : public DNS_Packet {
 public:
-    DNS_Request(): DNS_Packet() {};        // we won't allow parsing in constructor
+    DNS_Request(): DNS_Packet() { name_ = "DNS Request"; };        // we won't allow parsing in constructor
     virtual ~DNS_Request() {};
 };
 
 
 class DNS_Response : public DNS_Packet {
 public:
-    DNS_Response(): DNS_Packet() {};        // we won't allow parsing in constructor
+    DNS_Response(): DNS_Packet() { name_ = "DNS Response"; };        // we won't allow parsing in constructor
     virtual ~DNS_Response() {};
 };
 

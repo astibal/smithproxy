@@ -139,7 +139,7 @@ void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, ve
                     if(check_inspect_dns_cache) {
                         DNS_Response* dns_resp = inspect_dns_cache.get(app_request->host);
                         if(dns_resp) {
-                            INF_("HTTP inspection: Host header matches DNS: %s",dns_resp->question_str_0().c_str());
+                            DIA_("HTTP inspection: Host header matches DNS: %s",dns_resp->question_str_0().c_str());
                         } else {
                             WARS_("HTTP inspection: Host header DOESN'T match DNS!");
                         }
@@ -202,8 +202,8 @@ void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, ve
 }
 
 
-void MitmHostCX::inspect() {
-    AppHostCX::inspect();
+void MitmHostCX::inspect(char side) {
+    AppHostCX::inspect(side);
     
     if(flow().flow().size() > inspect_cur_flow_size) {
         DIA_("MitmHostCX::inspect: flow size change: %d",flow().flow().size());
@@ -214,7 +214,7 @@ void MitmHostCX::inspect() {
                 (flow().flow().size() == inspect_cur_flow_size && flow().flow().back().second->size() > inspect_flow_same_bytes) ) {
 
         if(flow().flow().size() == inspect_cur_flow_size) {
-            INF_("MitmHostCX::inspect: new data in the  same flow size %d", flow().flow().size());
+            DIA_("MitmHostCX::inspect: new data in the  same flow size %d", flow().flow().size());
             //return;
         }
         

@@ -103,7 +103,7 @@ public:
 
     
     std::vector<Inspector*> inspectors_;
-    virtual void inspect();
+    virtual void inspect(char side);
     virtual void on_detect(duplexFlowMatch* x_sig, flowMatchState& s, vector_range& r);    
     virtual void on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, vector_range& r);
     

@@ -48,10 +48,9 @@ protected:
 class DNS_Inspector : public Inspector {
 public:
     virtual ~DNS_Inspector() {
+        // clear local request cache
         for(auto x: requests_) { if(x.second) {delete x.second; } };
-        for(auto x: responses_) { if(x.second) {delete x.second; } };
     };  
-    virtual void old_update(AppHostCX* cx);
     virtual void update(AppHostCX* cx);
     virtual bool interested(AppHostCX*cx);
     
@@ -59,13 +58,15 @@ public:
     bool opt_randomize_id = false;
     
     DNS_Request* find_request(unsigned int r) { auto it = requests_.find(r); if(it == requests_.end()) { return nullptr; } else { return it->second; }  }
-    DNS_Response* find_response(unsigned int r) { auto it = responses_.find(r); if(it == responses_.end()) { return nullptr; } else { return it->second; }  }
-    bool validate_response(unsigned short id);
+    bool validate_response(DNS_Response* ptr);
+   
 private:
     bool is_tcp = false;
 
     DNS_Request req_;
     DNS_Response resp_;
     std::unordered_map<unsigned int,DNS_Request*>  requests_;
-    std::unordered_map<unsigned int,DNS_Response*> responses_;
+
+    DEFINE_C_NAME("DNS ALG");
+    DECLARE_LOGGING_INFO(c_name);
 };
