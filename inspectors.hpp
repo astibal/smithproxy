@@ -68,6 +68,6 @@ private:
     DNS_Response resp_;
     std::unordered_map<unsigned int,DNS_Request*>  requests_;
 
-    DEFINE_C_NAME("DNS ALG");
+    DECLARE_C_NAME("DNS ALG");
     DECLARE_LOGGING_INFO(c_name);
 };

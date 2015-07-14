@@ -102,6 +102,8 @@ struct ProfileTls {
     bool allow_invalid_certs = false;
     bool allow_self_signed = false;
     bool use_pfs = true;
+    
+    bool oscp_stapling_loose = false;
     std::string name;
 };
 

@@ -133,7 +133,7 @@ public:
     
     std::string answer_str() const;
 
-    DEFINE_C_NAME("DNS Packet");
+    DECLARE_C_NAME("DNS_Packet");
     DECLARE_LOGGING_INFO(to_string);
 };
 
