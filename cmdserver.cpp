@@ -42,6 +42,7 @@
 #include <sslcertstore.hpp>
 
 #include <smithproxy.hpp>
+#include <sobject.hpp>
 #include <dns.hpp>
 #include <inspectors.hpp>
 
@@ -307,6 +308,27 @@ int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *a
     return CLI_OK;
 }
 
+int cli_diag_mem_objects_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    socle::sobject_db.lock();
+    int count = socle::sobject_db.cache().size();
+    socle::sobject_db.unlock();
+    
+    cli_print(cli,"Socle objects in total: %5d",count);
+    return CLI_OK;
+
+}
+
+
+int cli_diag_mem_objects_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    socle::sobject_db.lock();
+    std::string r = socle::sobject_db_to_string();
+    socle::sobject_db.unlock();
+    
+    cli_print(cli,"ALL socle objects:\n%s",r.c_str());
+    return CLI_OK;
+}
+
+
 struct cli_ext : public cli_def {
     int socket;
 };
@@ -320,6 +342,7 @@ void client_thread(int client_socket) {
                 struct cli_command *diag_ssl_cache;
             struct cli_command *diag_mem;
                 struct cli_command *diag_mem_buffers;
+                struct cli_command *diag_mem_objects;
             struct cli_command *diag_dns;
                 struct cli_command *diag_dns_cache;
         
@@ -336,7 +359,7 @@ void client_thread(int client_socket) {
         cli_set_hostname(cli, string_format("smithproxy(%s) ",hostname).c_str());
 
         // Set the greeting
-        cli_set_banner(cli, "--== Smithproxy command line utility ==--");
+        cli_set_banner(cli, "--==[ Smithproxy command line utility ]==--");
 
         cli_allow_enable(cli, cli_enable_password.c_str());
 
@@ -351,6 +374,9 @@ void client_thread(int client_socket) {
             diag_mem = cli_register_command(cli, diag, "mem", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory related troubleshooting commands");
                 diag_mem_buffers = cli_register_command(cli, diag_mem, "buffers", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory buffers troubleshooting commands");
                         cli_register_command(cli, diag_mem_buffers, "stats", cli_diag_mem_buffers_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory buffers statistics");
+                diag_mem_objects = cli_register_command(cli, diag_mem, "objects", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory object troubleshooting commands");                        
+                        cli_register_command(cli, diag_mem_objects, "stats", cli_diag_mem_objects_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory objects statistics");
+                        cli_register_command(cli, diag_mem_objects, "list", cli_diag_mem_objects_list, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory objects list");
             diag_dns = cli_register_command(cli, diag, "dns", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "DNS traffic related troubleshooting commands");
                 diag_dns_cache = cli_register_command(cli, diag_dns, "cache", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "DNS traffic cache troubleshooting commands");
                         cli_register_command(cli, diag_dns_cache, "list", cli_diag_dns_cache_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all DNS traffic cache entries");
