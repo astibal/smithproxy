@@ -40,6 +40,8 @@ void DNS_Inspector::update(AppHostCX* cx) {
         TCPCom* tcp_com = dynamic_cast<TCPCom*>(com);
         if(tcp_com) 
             is_tcp = true;
+        
+        in_progress(true);
     }
     
     
@@ -48,21 +50,24 @@ void DNS_Inspector::update(AppHostCX* cx) {
     DNS_Packet* ptr = nullptr;
     buffer *xbuf = cur_pos.second;
     buffer buf = xbuf->view(0,xbuf->size());
+
+    int mem_pos = 0;
+    int red = 0;
+    
     if(is_tcp) {
         unsigned short data_size = ntohs(buf.get_at<unsigned short>(0));
-        buf = buf.view(2,xbuf->size());
         if(buf.size() < data_size) {
             DIA___("DNS_Inspector::update[%s]: not enough DNS data in TCP stream: expected %d, but having %d. Waiting to more.",cx->c_name(), data_size, buf.size());
             return;
         }
+        red += 2;
     }
     
-    int red = 0;
-    int mem_pos = 0;
     int mem_len = buf.size();
     int max_it = 10; // "emergency" counter.
     switch(cur_pos.first)  {
         case 'r':
+            stage = 0;
             for(int it = 0; red < buf.size() && it < 10; it++) {
                 ptr = new DNS_Request();
                 buffer cur_buf = buf.view(red,cur_buf.size()-red);
@@ -82,6 +87,7 @@ void DNS_Inspector::update(AppHostCX* cx) {
             }
             break;
         case 'w':
+            stage = 1;
             for(int it = 0; red < buf.size() && it < 10; it++) {
                 ptr = new DNS_Response();
                 buffer cur_buf = buf.view(red,cur_buf.size()-red);
@@ -101,10 +107,12 @@ void DNS_Inspector::update(AppHostCX* cx) {
                     }
                     else {
                         // DNS response is valid
+                        responses_ ++;
 
                         DIA___("DNS_Inspector::update[%s]: valid response",cx->c_name());
 
                         if(store((DNS_Response*)ptr)) {
+                            stored_ = true;
                             // DNS response is interesting (A record present) - we stored it , ptr is VALID
                             DIA___("DNS_Inspector::update[%s]: contains interesting info, stored",cx->c_name());
                             
@@ -171,4 +179,12 @@ bool DNS_Inspector::validate_response(DNS_Response* ptr) {
     }
     
     return false;
+}
+
+std::string DNS_Inspector::to_string() {
+    std::string r = Inspector::to_string()+"\n";
+    
+    r += string_format("%s: tcp: %d requests: %d valid responses: %d stored: %d",c_name(),is_tcp,requests_.size(),responses_,stored_);
+    
+    return r;
 }

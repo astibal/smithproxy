@@ -23,10 +23,13 @@
 #include <signature.hpp>
 #include <apphostcx.hpp>
 
-class Inspector {
+#include <sobject.hpp>
+
+class Inspector : public socle::sobject {
 public:
     virtual ~Inspector() {}
     virtual void update(AppHostCX* cx) = 0;
+    virtual bool l4_prefilter(AppHostCX* cx) = 0;
     virtual bool interested(AppHostCX*) = 0;
     
     inline bool completed() const   { return completed_; }
@@ -42,6 +45,13 @@ protected:
     void result(bool b) { result_ = b; }
     
     int stage = 0;
+    
+    virtual bool ask_destroy() { return false; };
+    virtual std::string to_string() { return string_format("%s: in-progress: %d stage: %d completed: %d result: %d",
+                                                c_name(),in_progress(), stage, completed(),result()); };
+    virtual std::string to_string_full() { return  to_string() + "\n    " + string_format("memory size: %d",Inspector::size_of()) ; };
+    
+    DECLARE_C_NAME("Inspector");
 };
 
 
@@ -52,6 +62,8 @@ public:
         for(auto x: requests_) { if(x.second) {delete x.second; } };
     };  
     virtual void update(AppHostCX* cx);
+
+    virtual bool l4_prefilter(AppHostCX* cx) { return interested(cx); };
     virtual bool interested(AppHostCX*cx);
     
     bool opt_match_id = false;
@@ -61,13 +73,16 @@ public:
     bool validate_response(DNS_Response* ptr);
     bool store(DNS_Response* ptr);
    
+    virtual std::string to_string();
 private:
     bool is_tcp = false;
 
     DNS_Request req_;
     DNS_Response resp_;
     std::unordered_map<unsigned int,DNS_Request*>  requests_;
+    int responses_ = 0;
+    bool stored_ = false;
 
-    DECLARE_C_NAME("DNS ALG");
+    DECLARE_C_NAME("DNS_Inspector");
     DECLARE_LOGGING_INFO(c_name);
 };
