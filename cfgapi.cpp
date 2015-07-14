@@ -1057,9 +1057,14 @@ int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
             if(p_alg_dns != nullptr) {
                 algs_name += "D";
                 DNS_Inspector* n = new DNS_Inspector();
-                n->opt_match_id = p_alg_dns->match_request_id;
-                n->opt_randomize_id = p_alg_dns->randomize_id;
-                mh->inspectors_.push_back(n);
+                if(n->l4_prefilter(mh)) {
+                    n->opt_match_id = p_alg_dns->match_request_id;
+                    n->opt_randomize_id = p_alg_dns->randomize_id;
+                    mh->inspectors_.push_back(n);
+                }
+                else {
+                    delete n;
+                }
             }
         } else {
             NOT_("Connection %s cannot be inspected by ALGs",originator->full_name('L').c_str());
