@@ -59,6 +59,7 @@ public:
     
     DNS_Request* find_request(unsigned int r) { auto it = requests_.find(r); if(it == requests_.end()) { return nullptr; } else { return it->second; }  }
     bool validate_response(DNS_Response* ptr);
+    bool store(DNS_Response* ptr);
    
 private:
     bool is_tcp = false;

@@ -36,8 +36,8 @@ bool PolicyRule::match_addrgrp_cx(std::vector< CIDR* >& cidrs, baseHostCX* cx) {
                     char* a = cidr_to_str(l);
                     char* m = cidr_to_str(comp);
                     DIA_("PolicyRule::match_addrgrp_cx: comparing %s with %s: matched",a,m);
-                    delete a;
-                    delete m;
+                    delete[] a;
+                    delete[] m;
                 }
                 match = true;
                 break;
@@ -46,8 +46,8 @@ bool PolicyRule::match_addrgrp_cx(std::vector< CIDR* >& cidrs, baseHostCX* cx) {
                     char* a = cidr_to_str(l);
                     char* m = cidr_to_str(comp);
                     DIA_("PolicyRule::match_addrgrp_cx: comparing %s with %s: not matched",a,m);
-                    delete a;
-                    delete m;                    
+                    delete[] a;
+                    delete[] m;                    
                 }
             }
         }
