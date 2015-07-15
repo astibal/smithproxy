@@ -320,11 +320,31 @@ int cli_diag_mem_objects_stats(struct cli_def *cli, const char *command, char *a
 
 
 int cli_diag_mem_objects_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    
+    std::string object_filter;
+    
+    if(argc > 0) {
+        std::string a1 = argv[0];
+        if(a1 == "?") {
+            cli_print(cli,"valid parameters:");
+            cli_print(cli,"         <empty>");
+            cli_print(cli,"         DNS_Inspector");
+            cli_print(cli,"         DNS_Response");
+            cli_print(cli,"         DNS_Request");
+            cli_print(cli,"         DNS_Packet");
+            
+            return CLI_OK;
+        } else {
+            // a1 is param for the lookup
+            object_filter = a1.c_str();
+        }
+    }
+    
     socle::sobject_db.lock();
-    std::string r = socle::sobject_db_to_string();
+    std::string r = socle::sobject_db_to_string((object_filter.size() == 0) ? nullptr : object_filter.c_str());
     socle::sobject_db.unlock();
     
-    cli_print(cli,"ALL socle objects:\n%s",r.c_str());
+    cli_print(cli,"Smithproxy objects (filter: %s):\n%s\nFinished.",(object_filter.size() == 0) ? "ALL" : object_filter.c_str() ,r.c_str());
     return CLI_OK;
 }
 

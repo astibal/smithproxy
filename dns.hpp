@@ -143,15 +143,17 @@ public:
 
 class DNS_Request : public DNS_Packet {
 public:
-    DNS_Request(): DNS_Packet() { name_ = "DNS_Request"; };        // we won't allow parsing in constructor
+    DNS_Request(): DNS_Packet() {};        // we won't allow parsing in constructor
     virtual ~DNS_Request() {};
+    DECLARE_C_NAME("DNS_Request");
 };
 
 
 class DNS_Response : public DNS_Packet {
 public:
-    DNS_Response(): DNS_Packet() { name_ = "DNS_Response"; };        // we won't allow parsing in constructor
+    DNS_Response(): DNS_Packet() {};        // we won't allow parsing in constructor
     virtual ~DNS_Response() {};
+    DECLARE_C_NAME("DNS_Response");
 };
 
 

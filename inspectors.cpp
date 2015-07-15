@@ -186,9 +186,9 @@ bool DNS_Inspector::validate_response(DNS_Response* ptr) {
 }
 
 std::string DNS_Inspector::to_string() {
-    std::string r = Inspector::to_string()+"\n";
+    std::string r = Inspector::to_string()+"\n  ";
     
-    r += string_format("%s: tcp: %d requests: %d valid responses: %d stored: %d",c_name(),is_tcp,requests_.size(),responses_,stored_);
+    r += string_format("tcp: %d requests: %d valid responses: %d stored: %d",is_tcp,requests_.size(),responses_,stored_);
     
     return r;
 }
