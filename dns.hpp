@@ -29,6 +29,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
+#include <sobject.hpp>
 #include <ptr_cache.hpp>
 #include <buffer.hpp>
 #include <display.hpp>
@@ -101,7 +102,7 @@ struct DNS_AdditionalInfo {
     buffer   data_;
 };
 
-class DNS_Packet {
+class DNS_Packet : public socle::sobject {
 protected:
     uint16_t    id_ = 0;
     uint16_t    flags_ = 0;
@@ -115,11 +116,14 @@ protected:
     std::vector<DNS_Answer> answers_list;
     std::vector<DNS_Answer> authorities_list;
     std::vector<DNS_AdditionalInfo> additionals_list;
-
+    
 public:    
+    virtual std::string to_string();
+    virtual std::string to_string_full() { return  to_string() + "\n    " + string_format("id: %d", id()) ; };    
+    virtual bool ask_destroy() { return false; };
+
     virtual ~DNS_Packet() {}
     int load(buffer* src); // initialize from memory. if non-zero is returned, there is yet another data and new DNS_packet should be read.
-    virtual std::string to_string() const;
 
     inline uint16_t id() const { return id_; }
     inline uint16_t flags() const { return flags_; } // todo: split and inspect all bits of this field
@@ -139,14 +143,14 @@ public:
 
 class DNS_Request : public DNS_Packet {
 public:
-    DNS_Request(): DNS_Packet() { name_ = "DNS Request"; };        // we won't allow parsing in constructor
+    DNS_Request(): DNS_Packet() { name_ = "DNS_Request"; };        // we won't allow parsing in constructor
     virtual ~DNS_Request() {};
 };
 
 
 class DNS_Response : public DNS_Packet {
 public:
-    DNS_Response(): DNS_Packet() { name_ = "DNS Response"; };        // we won't allow parsing in constructor
+    DNS_Response(): DNS_Packet() { name_ = "DNS_Response"; };        // we won't allow parsing in constructor
     virtual ~DNS_Response() {};
 };
 

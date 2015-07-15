@@ -77,8 +77,7 @@ public:
 private:
     bool is_tcp = false;
 
-    DNS_Request req_;
-    DNS_Response resp_;
+
     std::unordered_map<unsigned int,DNS_Request*>  requests_;
     int responses_ = 0;
     bool stored_ = false;

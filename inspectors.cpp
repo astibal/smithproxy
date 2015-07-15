@@ -70,13 +70,15 @@ void DNS_Inspector::update(AppHostCX* cx) {
             stage = 0;
             for(int it = 0; red < buf.size() && it < 10; it++) {
                 ptr = new DNS_Request();
-                buffer cur_buf = buf.view(red,cur_buf.size()-red);
+                buffer cur_buf = buf.view(red,buf.size()-red);
                 red = ptr->load(&cur_buf);
                 
                 // on success write to requests_
                 if(red >= 0) {
                     DIA___("DNS_Inspector::update[%s]: adding key 0x%x red=%d, buffer_size=%d",cx->c_name(),ptr->id(),red,cur_buf.size());
                     requests_[ptr->id()] = (DNS_Request*)ptr;
+                } else {
+                    delete ptr;
                 }
                 
                 // on failure or last data exit loop
@@ -90,7 +92,7 @@ void DNS_Inspector::update(AppHostCX* cx) {
             stage = 1;
             for(int it = 0; red < buf.size() && it < 10; it++) {
                 ptr = new DNS_Response();
-                buffer cur_buf = buf.view(red,cur_buf.size()-red);
+                buffer cur_buf = buf.view(red,buf.size()-red);
                 red = ptr->load(&cur_buf);
                 
                 
@@ -128,6 +130,8 @@ void DNS_Inspector::update(AppHostCX* cx) {
                         else
                             cx->idle_delay(1);  
                     }
+                } else {
+                    delete ptr;
                 }
                 
                 // on failure or last data exit loop
