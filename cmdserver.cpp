@@ -323,6 +323,7 @@ int cli_diag_mem_objects_stats(struct cli_def *cli, const char *command, char *a
 int cli_diag_mem_objects_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
     
     std::string object_filter;
+    int verbosity = INF;
     
     if(argc > 0) {
         std::string a1 = argv[0];
@@ -338,12 +339,21 @@ int cli_diag_mem_objects_list(struct cli_def *cli, const char *command, char *ar
             return CLI_OK;
         } else {
             // a1 is param for the lookup
-            object_filter = a1.c_str();
+            if("*" == a1 || "ALL" == a1) {
+                object_filter = "";
+            } else {
+                object_filter = a1.c_str();
+            }
+        }
+        
+        if(argc > 1) {
+            std::string a2 = argv[1];
+            verbosity = atoi(a2.c_str());
         }
     }
     
     socle::sobject_db.lock();
-    std::string r = socle::sobject_db_to_string((object_filter.size() == 0) ? nullptr : object_filter.c_str());
+    std::string r = socle::sobject_db_to_string((object_filter.size() == 0) ? nullptr : object_filter.c_str(),nullptr,verbosity);
     socle::sobject_db.unlock();
     
     cli_print(cli,"Smithproxy objects (filter: %s):\n%s\nFinished.",(object_filter.size() == 0) ? "ALL" : object_filter.c_str() ,r.c_str());
@@ -392,9 +402,15 @@ int cli_diag_mem_objects_clear(struct cli_def *cli, const char *command, char *a
 }
 
 int cli_diag_proxy_session_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
-    char *a[1];
+    char *a[2];
     a[0] = "MitmProxy";
-    return cli_diag_mem_objects_list(cli,command,a,1);
+    a[1] = nullptr;
+    
+    if(argc > 0) {
+        a[1] = argv[0];
+    }
+    
+    return cli_diag_mem_objects_list(cli,command,a,argc > 0 ? 2 : 1);
 }
 
 int cli_diag_proxy_session_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
