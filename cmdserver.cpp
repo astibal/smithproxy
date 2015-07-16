@@ -329,6 +329,7 @@ int cli_diag_mem_objects_list(struct cli_def *cli, const char *command, char *ar
         if(a1 == "?") {
             cli_print(cli,"valid parameters:");
             cli_print(cli,"         <empty>");
+            cli_print(cli,"         MitmProxy");
             cli_print(cli,"         DNS_Inspector");
             cli_print(cli,"         DNS_Response");
             cli_print(cli,"         DNS_Request");
@@ -390,6 +391,16 @@ int cli_diag_mem_objects_clear(struct cli_def *cli, const char *command, char *a
     return CLI_OK;
 }
 
+int cli_diag_proxy_session_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    char *a[1];
+    a[0] = "MitmProxy";
+    return cli_diag_mem_objects_list(cli,command,a,1);
+}
+
+int cli_diag_proxy_session_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    return cli_diag_mem_objects_clear(cli,command,argv,argc);
+}
+
 struct cli_ext : public cli_def {
     int socket;
 };
@@ -406,6 +417,8 @@ void client_thread(int client_socket) {
                 struct cli_command *diag_mem_objects;
             struct cli_command *diag_dns;
                 struct cli_command *diag_dns_cache;
+            struct cli_command *diag_proxy;
+                struct cli_command *diag_proxy_session;
         
         struct cli_def *cli;
         
@@ -443,6 +456,10 @@ void client_thread(int client_socket) {
                 diag_dns_cache = cli_register_command(cli, diag_dns, "cache", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "DNS traffic cache troubleshooting commands");
                         cli_register_command(cli, diag_dns_cache, "list", cli_diag_dns_cache_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all DNS traffic cache entries");
                         cli_register_command(cli, diag_dns_cache, "stats", cli_diag_dns_cache_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "DNS traffic cache statistics");
+            diag_proxy = cli_register_command(cli, diag, "proxy",NULL, PRIVILEGE_PRIVILEGED, MODE_EXEC, "proxy related troubleshooting commands");
+                diag_proxy_session = cli_register_command(cli,diag_proxy,"session",NULL,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session commands");
+                        cli_register_command(cli, diag_proxy_session,"list",cli_diag_proxy_session_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session list");
+                        cli_register_command(cli, diag_proxy_session,"clear",cli_diag_proxy_session_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session clear");
             
         debuk = cli_register_command(cli, NULL, "debug", NULL, PRIVILEGE_PRIVILEGED, MODE_EXEC, "diagnostic commands");
             cli_register_command(cli, debuk, "term", cli_debug_terminal, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set level of logging to this terminal");
