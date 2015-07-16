@@ -72,7 +72,12 @@ MitmProxy::~MitmProxy() {
 }
 
 std::string MitmProxy::to_string(int verbosity) { 
-    return "MitmProxy:" + baseProxy::to_string(verbosity); 
+    std::string r =  "MitmProxy:" + baseProxy::to_string(verbosity); 
+    if(verbosity >= DEB) {
+        r += string_format("\n    identity: %d",identity_resolved());
+    }
+    
+    return r;
 }
 
 
