@@ -118,8 +118,7 @@ protected:
     std::vector<DNS_AdditionalInfo> additionals_list;
     
 public:    
-    virtual std::string to_string();
-    virtual std::string to_string_full() { return  to_string() + "\n    " + string_format("id: %d", id()) ; };    
+    virtual std::string to_string(int verbosity=INF);
     virtual bool ask_destroy() { return false; };
 
     virtual ~DNS_Packet() {}
@@ -138,7 +137,7 @@ public:
     std::string answer_str() const;
 
     DECLARE_C_NAME("DNS_Packet");
-    DECLARE_LOGGING_INFO(to_string);
+    DECLARE_LOGGING(to_string);
 };
 
 class DNS_Request : public DNS_Packet {

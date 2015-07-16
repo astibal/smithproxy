@@ -22,6 +22,7 @@
 #include <set>
 
 #include <cstring>
+#include <cstdlib>
 #include <ctime>
 #include <csignal>
 #include <sys/types.h>
@@ -348,6 +349,46 @@ int cli_diag_mem_objects_list(struct cli_def *cli, const char *command, char *ar
     return CLI_OK;
 }
 
+int cli_diag_mem_objects_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    std::string address;
+    
+    if(argc > 0) {
+        std::string a1 = argv[0];
+        if(a1 == "?") {
+            cli_print(cli,"valid parameters:");
+            cli_print(cli,"         <object id>");
+            
+            return CLI_OK;
+        } else {
+            // a1 is param for the lookup
+            address = a1.c_str();
+            
+            uint64_t key = strtol(address.c_str(),nullptr,16);
+            cli_print(cli,"Trying to clear 0x%lx",key);
+            
+            socle::sobject_db.lock();
+            int ret = socle::sobject_db_ask_destroy((void*)key);
+            socle::sobject_db.unlock();
+            
+            switch(ret) {
+                case 1:
+                    cli_print(cli,"object agrees to terminate.");
+                    break;
+                case 0:
+                    cli_print(cli,"object doesn't agree to terminate, or doesn't support it.");
+                    break;
+                case -1:
+                    cli_print(cli, "object not found.");
+                    break;
+                default:
+                    cli_print(cli, "unknown result.");
+                    break;
+            }
+        }
+    }
+
+    return CLI_OK;
+}
 
 struct cli_ext : public cli_def {
     int socket;
@@ -397,6 +438,7 @@ void client_thread(int client_socket) {
                 diag_mem_objects = cli_register_command(cli, diag_mem, "objects", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory object troubleshooting commands");                        
                         cli_register_command(cli, diag_mem_objects, "stats", cli_diag_mem_objects_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory objects statistics");
                         cli_register_command(cli, diag_mem_objects, "list", cli_diag_mem_objects_list, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory objects list");
+                        cli_register_command(cli, diag_mem_objects, "clear", cli_diag_mem_objects_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clears memory object");
             diag_dns = cli_register_command(cli, diag, "dns", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "DNS traffic related troubleshooting commands");
                 diag_dns_cache = cli_register_command(cli, diag_dns, "cache", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "DNS traffic cache troubleshooting commands");
                         cli_register_command(cli, diag_dns_cache, "list", cli_diag_dns_cache_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all DNS traffic cache entries");

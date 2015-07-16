@@ -30,7 +30,7 @@
 #include <traflog.hpp>
 #include <cfgapi_auth.hpp>
 
-class MitmProxy : public baseProxy {
+class MitmProxy : public baseProxy, public socle::sobject {
     
 protected:
     trafLog *tlog_;
@@ -73,6 +73,12 @@ public:
     virtual void on_right_error(baseHostCX* cx);
     
     virtual void handle_replacement(MitmHostCX* cx);
+    
+    virtual bool ask_destroy() { dead(true); return true; };
+    virtual std::string to_string(int verbosity=INF);
+    
+    DECLARE_C_NAME("MitmProxy");
+    DECLARE_LOGGING(to_string);
 };
 
 

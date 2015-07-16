@@ -24,7 +24,7 @@
 #include <logger.hpp>
 
 
-DEFINE_LOGGING_INFO(DNS_Packet);
+DEFINE_LOGGING(DNS_Packet);
 
 const char* _unknown = "unknown";
 const char* str_a = "A";
@@ -225,7 +225,7 @@ int DNS_Packet::load(buffer* src) {
 };
 
 
-std::string DNS_Packet::to_string() {
+std::string DNS_Packet::to_string(int verbosity) {
     std::string r = string_format("%s: id: %d, type 0x%x [ ",c_name(),id_,flags_);
     for(auto x = questions_list.begin(); x != questions_list.end(); ++x) {
         r += x->hr();

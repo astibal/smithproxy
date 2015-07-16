@@ -47,9 +47,8 @@ protected:
     int stage = 0;
     
     virtual bool ask_destroy() { return false; };
-    virtual std::string to_string() { return string_format("%s: in-progress: %d stage: %d completed: %d result: %d",
+    virtual std::string to_string(int verbosity=INF) { return string_format("%s: in-progress: %d stage: %d completed: %d result: %d",
                                                 c_name(),in_progress(), stage, completed(),result()); };
-    virtual std::string to_string_full() { return  to_string() + "\n    " + string_format("memory size: %d",Inspector::size_of()) ; };
     
     DECLARE_C_NAME("Inspector");
 };
@@ -73,7 +72,7 @@ public:
     bool validate_response(DNS_Response* ptr);
     bool store(DNS_Response* ptr);
    
-    virtual std::string to_string();
+    virtual std::string to_string(int verbosity=INF);
 private:
     bool is_tcp = false;
 
@@ -83,5 +82,5 @@ private:
     bool stored_ = false;
 
     DECLARE_C_NAME("DNS_Inspector");
-    DECLARE_LOGGING_INFO(c_name);
+    DECLARE_LOGGING(name);
 };

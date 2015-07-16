@@ -20,7 +20,7 @@
 #include <inspectors.hpp>
 
 
-DEFINE_LOGGING_INFO(DNS_Inspector)
+DEFINE_LOGGING(DNS_Inspector)
 
 bool DNS_Inspector::interested(AppHostCX* cx) {
     if(cx->com()->nonlocal_dst_port() == 53)
@@ -185,7 +185,7 @@ bool DNS_Inspector::validate_response(DNS_Response* ptr) {
     return false;
 }
 
-std::string DNS_Inspector::to_string() {
+std::string DNS_Inspector::to_string(int verbosity) {
     std::string r = Inspector::to_string()+"\n  ";
     
     r += string_format("tcp: %d requests: %d valid responses: %d stored: %d",is_tcp,requests_.size(),responses_,stored_);

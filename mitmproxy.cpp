@@ -28,8 +28,9 @@
 #include <cfgapi_auth.hpp>
 #include <sockshostcx.hpp>
 
+DEFINE_LOGGING(MitmProxy);
 
-MitmProxy::MitmProxy(baseCom* c): baseProxy(c) {
+MitmProxy::MitmProxy(baseCom* c): baseProxy(c), sobject() {
 
     std::string data_dir = "mitm";
     std::string file_pref = "";
@@ -69,6 +70,11 @@ MitmProxy::~MitmProxy() {
     
     delete tlog_;
 }
+
+std::string MitmProxy::to_string(int verbosity) { 
+    return "MitmProxy:" + baseProxy::to_string(verbosity); 
+}
+
 
 bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
     
@@ -273,7 +279,7 @@ void MitmProxy::on_left_error(baseHostCX* cx) {
     if(this->dead()) return;  // don't process errors twice
     
     DEB_("on_left_error[%s]: proxy marked dead",(this->error_on_read ? "read" : "write"));
-    DUMS_(this->hr());
+    DUMS_(to_string().c_str());
     
     if(write_payload()) {
         tlog()->left_write("Client side connection closed: " + cx->name() + "\n");
@@ -568,6 +574,8 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
             // hmm. traffic is denied.
             delete new_proxy;
         }
+        
+        new_proxy->name(new_proxy->to_string(INF));
     }
     
     DEBS_("MitmMasterProxy::on_left_new: finished");
@@ -627,7 +635,8 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
         com()->set_monitor(real_socket);
         com()->set_poll_handler(real_socket,new_proxy);
     }
-        
+    
+    new_proxy->name(new_proxy->to_string());
     DEBS_("MitmUDPProxy::on_left_new: finished");    
 }
 
