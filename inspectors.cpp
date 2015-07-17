@@ -76,7 +76,12 @@ void DNS_Inspector::update(AppHostCX* cx) {
                 // on success write to requests_
                 if(red >= 0) {
                     DIA___("DNS_Inspector::update[%s]: adding key 0x%x red=%d, buffer_size=%d",cx->c_name(),ptr->id(),red,cur_buf.size());
+                    if(requests_[ptr->id()] != nullptr) {
+                        INF___("DNS_Inspector::update[%s]: detected re-sent request",cx->c_name());
+                        delete requests_[ptr->id()];
+                    }
                     requests_[ptr->id()] = (DNS_Request*)ptr;
+                    cx->idle_delay(30);
                 } else {
                     delete ptr;
                 }
