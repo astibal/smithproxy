@@ -313,7 +313,7 @@ int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *a
 int cli_diag_mem_objects_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
     
     cli_print(cli,"Statistics:\n");
-    cli_print(cli,socle::sobject_db_stats_string(nullptr).c_str());
+    cli_print(cli,"%s",socle::sobject_db_stats_string(nullptr).c_str());
     return CLI_OK;
 
 }
@@ -415,7 +415,7 @@ int cli_diag_proxy_session_list(struct cli_def *cli, const char *command, char *
     
     unsigned long l = socle::time_get_counter_sec(&MitmProxy::cnt_left_bytes_second,&MitmProxy::meter_left_bytes_second,1);
     unsigned long r = socle::time_get_counter_sec(&MitmProxy::cnt_right_bytes_second,&MitmProxy::meter_right_bytes_second,1);
-    cli_print(cli,"\nProxy performance: upload %ld, download %ld in last second",l,r);
+    cli_print(cli,"\nProxy performance: upload %sbps, download %sbps in last second",number_suffixed(l*8).c_str(),number_suffixed(r*8).c_str());
     
     return ret;
 
