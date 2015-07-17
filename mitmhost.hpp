@@ -89,7 +89,7 @@ struct app_DNS : public ApplicationData {
     DNS_Response* response = nullptr;
 };
 
-class MitmHostCX : public AppHostCX {
+class MitmHostCX : public AppHostCX, public socle::sobject {
 public:
     ApplicationData* application_data = nullptr;
     
@@ -133,9 +133,14 @@ public:
     bool is_dns = false;
     bool is_dns_port = false;
 
+    virtual bool ask_destroy();
+    virtual std::string to_string(int verbosity = INF);    
+    
 private:
     int inspect_cur_flow_size = 0;
     int inspect_flow_same_bytes = 0;
+    
+    DECLARE_C_NAME("MitmHostCX");
 };
 
 #endif

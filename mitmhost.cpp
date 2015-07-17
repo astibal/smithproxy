@@ -25,6 +25,17 @@
 std::vector<duplexFlowMatch*> sigs_starttls;
 std::vector<duplexFlowMatch*> sigs_detection;
 
+bool MitmHostCX::ask_destroy() {
+    error(true);
+    return true;
+}
+
+std::string MitmHostCX::to_string(int verbosity) {
+    return "MitmHostCX: " + AppHostCX::name();
+}
+
+
+
 baseCom* MySSLMitmCom::replicate() {
     return new MySSLMitmCom();
 }
