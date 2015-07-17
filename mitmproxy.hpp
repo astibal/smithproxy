@@ -77,6 +77,14 @@ public:
     virtual bool ask_destroy() { dead(true); return true; };
     virtual std::string to_string(int verbosity=INF);
     
+public:
+
+    static unsigned long meter_left_bytes_second;
+    static unsigned long meter_right_bytes_second;
+    static time_t cnt_left_bytes_second;
+    static time_t cnt_right_bytes_second;
+
+    
     DECLARE_C_NAME("MitmProxy");
     DECLARE_LOGGING(to_string);
 };

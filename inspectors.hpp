@@ -17,6 +17,9 @@
     
 */
 
+#ifndef INSPECTORS_HPP_
+#define INSPECTORS_HPP_
+
 #include <basecom.hpp>
 #include <tcpcom.hpp>
 #include <dns.hpp>
@@ -84,3 +87,6 @@ private:
     DECLARE_C_NAME("DNS_Inspector");
     DECLARE_LOGGING(name);
 };
+
+
+#endif //INSPECTORS_HPP_

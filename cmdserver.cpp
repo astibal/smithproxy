@@ -43,6 +43,7 @@
 #include <sslcertstore.hpp>
 
 #include <smithproxy.hpp>
+#include <mitmproxy.hpp>
 #include <sobject.hpp>
 #include <dns.hpp>
 #include <inspectors.hpp>
@@ -310,11 +311,7 @@ int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *a
 }
 
 int cli_diag_mem_objects_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
-    socle::sobject_db.lock();
-    int count = socle::sobject_db.cache().size();
-    socle::sobject_db.unlock();
     
-    cli_print(cli,"Socle objects in total: %5d",count);
     cli_print(cli,"Statistics:\n");
     cli_print(cli,socle::sobject_db_stats_string(nullptr).c_str());
     return CLI_OK;
@@ -413,7 +410,15 @@ int cli_diag_proxy_session_list(struct cli_def *cli, const char *command, char *
         a[1] = argv[0];
     }
     
-    return cli_diag_mem_objects_list(cli,command,a,argc > 0 ? 2 : 1);
+    int ret = cli_diag_mem_objects_list(cli,command,a,argc > 0 ? 2 : 1);
+
+    
+    unsigned long l = socle::time_get_counter_sec(&MitmProxy::cnt_left_bytes_second,&MitmProxy::meter_left_bytes_second,1);
+    unsigned long r = socle::time_get_counter_sec(&MitmProxy::cnt_right_bytes_second,&MitmProxy::meter_right_bytes_second,1);
+    cli_print(cli,"\nProxy performance: upload %ld, download %ld in last second",l,r);
+    
+    return ret;
+
 }
 
 int cli_diag_proxy_session_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {

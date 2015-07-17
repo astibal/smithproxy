@@ -30,6 +30,11 @@
 
 DEFINE_LOGGING(MitmProxy);
 
+unsigned long MitmProxy::meter_left_bytes_second;
+unsigned long MitmProxy::meter_right_bytes_second;
+time_t MitmProxy::cnt_left_bytes_second;
+time_t MitmProxy::cnt_right_bytes_second;
+
 MitmProxy::MitmProxy(baseCom* c): baseProxy(c), sobject() {
 
     std::string data_dir = "mitm";
@@ -253,7 +258,8 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
         (*j)->shutdown();
         }
     }    
-    
+ 
+    socle::time_update_counter_sec(&cnt_left_bytes_second,&meter_left_bytes_second,1,cx->to_read().size());
 }
 
 void MitmProxy::on_right_bytes(baseHostCX* cx) {
@@ -276,7 +282,7 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
         DIA_("mitmproxy::on_right_bytes: %d copied to delayed",cx->to_read().size())
     }
 
-
+    socle::time_update_counter_sec(&cnt_right_bytes_second,&meter_right_bytes_second,1,cx->to_read().size());
 }
 
 void MitmProxy::on_left_error(baseHostCX* cx) {
