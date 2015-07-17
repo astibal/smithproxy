@@ -315,6 +315,8 @@ int cli_diag_mem_objects_stats(struct cli_def *cli, const char *command, char *a
     socle::sobject_db.unlock();
     
     cli_print(cli,"Socle objects in total: %5d",count);
+    cli_print(cli,"Statistics:\n");
+    cli_print(cli,socle::sobject_db_stats_string(nullptr).c_str());
     return CLI_OK;
 
 }
@@ -352,9 +354,10 @@ int cli_diag_mem_objects_list(struct cli_def *cli, const char *command, char *ar
         }
     }
     
-    socle::sobject_db.lock();
+    
     std::string r = socle::sobject_db_to_string((object_filter.size() == 0) ? nullptr : object_filter.c_str(),nullptr,verbosity);
-    socle::sobject_db.unlock();
+                r += "\n" + socle::sobject_db_stats_string((object_filter.size() == 0) ? nullptr : object_filter.c_str());
+
     
     cli_print(cli,"Smithproxy objects (filter: %s):\n%s\nFinished.",(object_filter.size() == 0) ? "ALL" : object_filter.c_str() ,r.c_str());
     return CLI_OK;
