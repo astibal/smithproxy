@@ -34,6 +34,8 @@
 #include <buffer.hpp>
 #include <display.hpp>
 #include <logger.hpp>
+#include <cidr.hpp>
+#include <addrobj.hpp>
 
 #define DNS_HEADER_SZ 12
 
@@ -82,6 +84,19 @@ struct DNS_Answer {
         
         return ret;
     }
+    
+    CIDR* cidr() const {
+        if(type_ == A && data_.size() == 4) {
+            uint32_t ip = data_.get_at<uint32_t>(0);
+            in_addr a;
+            a.s_addr = ip;
+            
+            return cidr_from_inaddr(&a);
+        } 
+        
+        return nullptr;
+    }
+    
     std::string hr() const { 
         
         std::string ret = string_format("type: %s, class: %d, ttl: %d",dns_record_type_str(type_),class_,ttl_);
@@ -135,6 +150,7 @@ public:
     uint16_t question_class_0() const { if(questions_list.size()) { return questions_list.at(0).rec_class; } return 0; };
     
     std::string answer_str() const;
+    std::vector<CidrAddress*> get_a_anwsers();
 
     DECLARE_C_NAME("DNS_Packet");
     DECLARE_LOGGING(to_string);

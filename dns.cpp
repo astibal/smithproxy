@@ -262,3 +262,16 @@ std::string DNS_Packet::answer_str() const {
     
     return ret;
 }
+
+std::vector< CidrAddress*> DNS_Packet::get_a_anwsers() {
+    std::vector<CidrAddress*> ret;
+    
+    for(auto x = answers_list.begin(); x != answers_list.end(); ++x) {
+        if(x->type_ == A) {
+            ret.push_back(new CidrAddress(x->cidr()));
+        }
+    }
+    
+    return ret;
+}
+
