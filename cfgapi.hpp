@@ -44,7 +44,7 @@
 
 using namespace libconfig;
 extern Config cfgapi;
-extern std::map<std::string,CIDR*> cfgapi_obj_address;
+extern std::map<std::string,AddressObject*> cfgapi_obj_address;
 extern std::map<std::string,range> cfgapi_obj_port;
 extern std::map<std::string,int> cfgapi_obj_proto;
 extern std::vector<PolicyRule*> cfgapi_obj_policy;
@@ -73,7 +73,7 @@ extern struct cfgapi_table_ cfgapi_table;
 bool  cfgapi_init(const char* fnm);
 void  cfgapi_cleanup();
 
-CIDR* cfgapi_lookup_address(const char* name);
+AddressObject* cfgapi_lookup_address(const char* name);
 range cfgapi_lookup_port(const char* name);
 int   cfgapi_lookup_proto(const char* name);
 ProfileDetection* cfgapi_lookup_profile_detection(const char* name);

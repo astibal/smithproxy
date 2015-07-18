@@ -31,7 +31,7 @@
 #include <shmtable.hpp>
 
 Config cfgapi;
-std::map<std::string,CIDR*> cfgapi_obj_address;
+std::map<std::string,AddressObject*> cfgapi_obj_address;
 std::map<std::string,range> cfgapi_obj_port;
 std::map<std::string,int> cfgapi_obj_proto;
 std::vector<PolicyRule*> cfgapi_obj_policy;
@@ -69,7 +69,7 @@ bool cfgapi_init(const char* fnm) {
     return true;
 }
 
-CIDR* cfgapi_lookup_address(const char* name) {
+AddressObject* cfgapi_lookup_address(const char* name) {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
     if(cfgapi_obj_address.find(name) != cfgapi_obj_address.end()) {
@@ -181,7 +181,7 @@ int cfgapi_load_obj_address() {
                 cur_object.lookupValue("cidr",address)   ) {
                 
                 CIDR* c = cidr_from_str(address.c_str());
-                cfgapi_obj_address[name] = c;
+                cfgapi_obj_address[name] = new CidrAddress(c);
                 DIA_("cfgapi_load_addresses: '%s': ok",name.c_str());
             } else {
                 DIA_("cfgapi_load_addresses: '%s': not ok",name.c_str());
@@ -324,9 +324,9 @@ int cfgapi_load_obj_policy() {
             }
             
             if(cur_object.lookupValue("src",src)) {
-                CIDR* r = cfgapi_lookup_address(src.c_str());
+                AddressObject* r = cfgapi_lookup_address(src.c_str());
                 if(r != nullptr) {
-                    rule->src.push_back(new CidrAddress(r));
+                    rule->src.push_back(r);
                     rule->src_default = false;
                     DIA_("cfgapi_load_policy[#%d]: src address object: %s",i,src.c_str());
                 } else {
@@ -348,9 +348,9 @@ int cfgapi_load_obj_policy() {
             }
             
             if(cur_object.lookupValue("dst",dst)) {
-                CIDR* r = cfgapi_lookup_address(dst.c_str());
+                AddressObject* r = cfgapi_lookup_address(dst.c_str());
                 if(r != nullptr) {
-                    rule->dst.push_back(new CidrAddress(r));
+                    rule->dst.push_back(r);
                     rule->dst_default = false;
                     DIA_("cfgapi_load_policy[#%d]: dst address object: %s",i,dst.c_str());
                 } else {
@@ -829,11 +829,11 @@ int cfgapi_cleanup_obj_address() {
     
     int r = cfgapi_obj_address.size();
     
-    for (std::map<std::string,CIDR*>::iterator i = cfgapi_obj_address.begin(); i != cfgapi_obj_address.end(); ++i)
+    for (std::map<std::string,AddressObject*>::iterator i = cfgapi_obj_address.begin(); i != cfgapi_obj_address.end(); ++i)
     {
-        std::pair<std::string,CIDR*> a = (*i);
-        CIDR* c = a.second;
-        if (c != nullptr) cidr_free(c);
+        std::pair<std::string,AddressObject*> a = (*i);
+        AddressObject* c = a.second;
+        if (c != nullptr) delete c;
 
         a.second = nullptr;
     }
