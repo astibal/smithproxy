@@ -177,12 +177,23 @@ int cfgapi_load_obj_address() {
 
             DEB_("cfgapi_load_addresses: processing '%s'",name.c_str());
             
-            if( cur_object.lookupValue("type",type) &&
-                cur_object.lookupValue("cidr",address)   ) {
-                
-                CIDR* c = cidr_from_str(address.c_str());
-                cfgapi_obj_address[name] = new CidrAddress(c);
-                DIA_("cfgapi_load_addresses: '%s': ok",name.c_str());
+            if( cur_object.lookupValue("type",type)) {
+                switch(type) {
+                    case 0: // CIDR notation
+                        if (cur_object.lookupValue("cidr",address)) {
+                            CIDR* c = cidr_from_str(address.c_str());
+                            cfgapi_obj_address[name] = new CidrAddress(c);
+                            DIA_("cfgapi_load_addresses: cidr '%s': ok",name.c_str());
+                        }
+                    break;
+                    case 1: // FQDN notation
+                        if (cur_object.lookupValue("fqdn",address))  {
+                            FqdnAddress* f = new FqdnAddress(address);
+                            cfgapi_obj_address[name] = f;
+                            DIA_("cfgapi_load_addresses: fqdn '%s': ok",name.c_str());
+                        }
+                    break;
+                }
             } else {
                 DIA_("cfgapi_load_addresses: '%s': not ok",name.c_str());
             }
