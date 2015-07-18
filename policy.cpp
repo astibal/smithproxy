@@ -31,7 +31,7 @@ bool PolicyRule::match_addrgrp_cx(std::vector< AddressObject* >& sources, baseHo
         for(std::vector<AddressObject*>::iterator j = sources.begin(); j != sources.end(); ++j ) {
             AddressObject* comp = (*j);
             
-            if(comp->match(l) >= 0) {
+            if(comp->match(l)) {
                 if(LEV_(DIA)) {
                     char* a = cidr_to_str(l);
                     DIA_("PolicyRule::match_addrgrp_cx: comparing %s with rule %s: matched",a,comp->to_string().c_str());
