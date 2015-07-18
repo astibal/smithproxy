@@ -27,6 +27,7 @@
 #include <baseproxy.hpp>
 #include <cidr.hpp>
 #include <ranges.hpp>
+#include <addrobj.hpp>
 
 #define POLICY_ACTION_DENY  0
 #define POLICY_ACTION_PASS  1
@@ -47,12 +48,12 @@ public:
        int proto = 6;
        bool proto_default = true;
     
-       std::vector<CIDR*> src;
+       std::vector<AddressObject*> src;
        bool src_default = true;
        std::vector<range> src_ports;
        bool src_ports_default = true;
        
-       std::vector<CIDR*> dst;
+       std::vector<AddressObject*> dst;
        bool dst_default = true;
        std::vector<range> dst_ports;
        bool dst_ports_default = true;
@@ -64,8 +65,8 @@ public:
        bool match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r);
        virtual ~PolicyRule();
        
-       bool match_addrgrp_cx(std::vector<CIDR*>& cidrs,baseHostCX* cx);
-       bool match_addrgrp_vecx(std::vector<CIDR*>& cidrs,std::vector<baseHostCX*>& vecx);
+       bool match_addrgrp_cx(std::vector<AddressObject*>& cidrs,baseHostCX* cx);
+       bool match_addrgrp_vecx(std::vector<AddressObject*>& cidrs,std::vector<baseHostCX*>& vecx);
        bool match_rangegrp_cx(std::vector<range>& ranges,baseHostCX* cx);
        bool match_rangegrp_vecx(std::vector<range>& ranges,std::vector<baseHostCX*>& vecx);
        

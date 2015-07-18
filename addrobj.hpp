@@ -27,17 +27,21 @@
 class AddressObject {
 public:
     virtual bool match(CIDR* c) = 0;
+    virtual std::string to_string() = 0;
     virtual ~AddressObject() {};
 };
 
 
 class CidrAddress : public AddressObject {
 public:
-    CidrAddress(CIDR* c) {}
+    CidrAddress(CIDR* c) : c_(c) { }
     CIDR* cidr() { return c_; }
 
     int contains(CIDR *other);
-    virtual bool match(CIDR* c) { return (contains(c) >= 0);};
+    virtual bool match(CIDR* c) { return (contains(c) >= 0); };
+    
+    virtual std::string to_string() { char* temp = cidr_to_str(c_); std::string ret(temp); delete temp; return ret;  }
+    
     
     virtual ~CidrAddress() { cidr_free(c_); };
 protected:

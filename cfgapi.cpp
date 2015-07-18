@@ -326,7 +326,7 @@ int cfgapi_load_obj_policy() {
             if(cur_object.lookupValue("src",src)) {
                 CIDR* r = cfgapi_lookup_address(src.c_str());
                 if(r != nullptr) {
-                    rule->src.push_back(r);
+                    rule->src.push_back(new CidrAddress(r));
                     rule->src_default = false;
                     DIA_("cfgapi_load_policy[#%d]: src address object: %s",i,src.c_str());
                 } else {
@@ -350,7 +350,7 @@ int cfgapi_load_obj_policy() {
             if(cur_object.lookupValue("dst",dst)) {
                 CIDR* r = cfgapi_lookup_address(dst.c_str());
                 if(r != nullptr) {
-                    rule->dst.push_back(r);
+                    rule->dst.push_back(new CidrAddress(r));
                     rule->dst_default = false;
                     DIA_("cfgapi_load_policy[#%d]: dst address object: %s",i,dst.c_str());
                 } else {

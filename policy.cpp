@@ -20,34 +20,30 @@
 #include <policy.hpp>
 
 
-bool PolicyRule::match_addrgrp_cx(std::vector< CIDR* >& cidrs, baseHostCX* cx) {
+bool PolicyRule::match_addrgrp_cx(std::vector< AddressObject* >& sources, baseHostCX* cx) {
     bool match = false;
     
-    if(cidrs.size() == 0) {
+    if(sources.size() == 0) {
         match = true;
 //                 DIAS_("PolicyRule: matched ");
     } else {
         CIDR* l = cidr_from_str(cx->host().c_str());
-        for(std::vector<CIDR*>::iterator j = cidrs.begin(); j != cidrs.end(); ++j ) {
-            CIDR* comp = (*j);
+        for(std::vector<AddressObject*>::iterator j = sources.begin(); j != sources.end(); ++j ) {
+            AddressObject* comp = (*j);
             
-            if(cidr_contains(comp,l) >= 0) {
+            if(comp->match(l) >= 0) {
                 if(LEV_(DIA)) {
                     char* a = cidr_to_str(l);
-                    char* m = cidr_to_str(comp);
-                    DIA_("PolicyRule::match_addrgrp_cx: comparing %s with %s: matched",a,m);
-                    delete[] a;
-                    delete[] m;
+                    DIA_("PolicyRule::match_addrgrp_cx: comparing %s with rule %s: matched",a,comp->to_string().c_str());
+                    delete a;
                 }
                 match = true;
                 break;
             } else {
                 if(LEV_(DIA)) {
                     char* a = cidr_to_str(l);
-                    char* m = cidr_to_str(comp);
-                    DIA_("PolicyRule::match_addrgrp_cx: comparing %s with %s: not matched",a,m);
+                    DIA_("PolicyRule::match_addrgrp_cx: comparing %s with rule %s: not matched",a,comp->to_string().c_str());
                     delete[] a;
-                    delete[] m;                    
                 }
             }
         }
@@ -101,7 +97,7 @@ bool PolicyRule::match_rangegrp_vecx(std::vector< range >& ranges, std::vector< 
 }
 
 
-bool PolicyRule::match_addrgrp_vecx(std::vector< CIDR* >& cidrs, std::vector< baseHostCX* >& vecx) {
+bool PolicyRule::match_addrgrp_vecx(std::vector< AddressObject* >& sources, std::vector< baseHostCX* >& vecx) {
     bool match = false;
     
     int idx = -1;
@@ -109,7 +105,7 @@ bool PolicyRule::match_addrgrp_vecx(std::vector< CIDR* >& cidrs, std::vector< ba
         ++idx;
         baseHostCX* cx = (*i);
         
-        match = match_addrgrp_cx(cidrs,cx);
+        match = match_addrgrp_cx(sources,cx);
         if(match) {
             DIA_("PolicyRule::match_addrgrp_vecx: %s matched",cx->c_name())
             break;
@@ -193,5 +189,8 @@ bool PolicyRule::match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r)
     return false;
 }
 
-PolicyRule::~PolicyRule() {}
+PolicyRule::~PolicyRule() {
+    for(auto x: src) {  delete  x; };
+    for(auto x: dst) {  delete  x; };
+}
 
