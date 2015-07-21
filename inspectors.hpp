@@ -25,6 +25,7 @@
 #include <dns.hpp>
 #include <signature.hpp>
 #include <apphostcx.hpp>
+#include <regex>
 
 #include <sobject.hpp>
 
@@ -49,10 +50,15 @@ protected:
     
     int stage = 0;
     
+    
     virtual bool ask_destroy() { return false; };
     virtual std::string to_string(int verbosity=INF) { return string_format("%s: in-progress: %d stage: %d completed: %d result: %d",
                                                 c_name(),in_progress(), stage, completed(),result()); };
     
+                                                
+    static std::string remove_redundant_dots(std::string);
+    static std::vector<std::string> split(std::string, unsigned char delimiter);
+                                                
     DECLARE_C_NAME("Inspector");
 };
 
@@ -74,8 +80,10 @@ public:
     DNS_Request* find_request(unsigned int r) { auto it = requests_.find(r); if(it == requests_.end()) { return nullptr; } else { return it->second; }  }
     bool validate_response(DNS_Response* ptr);
     bool store(DNS_Response* ptr);
-   
+    
     virtual std::string to_string(int verbosity=INF);
+
+    static std::regex wildcard;
 private:
     bool is_tcp = false;
 

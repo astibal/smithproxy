@@ -22,6 +22,60 @@
 
 DEFINE_LOGGING(DNS_Inspector)
 
+std::string Inspector::remove_redundant_dots(std::string orig) {
+    std::string norm;  
+
+    int dot_mark = 1;
+    for(int i = 0; i < orig.size(); i++) {
+        if(orig[i] == '.') {
+            if(dot_mark > 0) continue;
+            
+            norm +=orig[i];
+            dot_mark++;
+        } else {
+            dot_mark = 0;
+            norm +=orig[i];
+        }
+    }
+    if(dot_mark > 0) {
+        norm = norm.substr(0,norm.size()-dot_mark);
+    }
+    
+    return norm;
+}
+
+std::vector< std::string > Inspector::split(std::string str, unsigned char delimiter) {
+    std::vector<std::string> ret;
+    
+    bool empty_back = true;
+    for(unsigned int i = 0; i < str.size() ; i++) {
+        if(i == 0)
+            ret.push_back("");
+            
+        if(str[i] == delimiter) {
+            
+            if(ret.size() > 0)
+                if(ret.back().size() == 0) ret.pop_back();
+
+            ret.push_back("");
+            empty_back = true;
+        } else {
+            ret.back()+= str[i];
+            empty_back = false;
+        }
+    }
+    
+    if(empty_back) {
+        ret.pop_back();
+    }
+    
+    return ret;    
+}
+
+
+
+std::regex DNS_Inspector::wildcard = std::regex("[^.]+\.(.*)$");
+
 bool DNS_Inspector::interested(AppHostCX* cx) {
     if(cx->com()->nonlocal_dst_port() == 53)
         return true;
