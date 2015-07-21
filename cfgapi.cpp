@@ -336,7 +336,7 @@ int cfgapi_load_obj_policy() {
             
             const Setting& sett_src = cur_object["src"];
             if(sett_src.isScalar()) {
-                ERR_("cfgapi_load_policy[#%d]: scalar src address object",i);
+                DIA_("cfgapi_load_policy[#%d]: scalar src address object",i);
                 if(cur_object.lookupValue("src",src)) {
                     
                     AddressObject* r = cfgapi_lookup_address(src.c_str());
@@ -351,7 +351,7 @@ int cfgapi_load_obj_policy() {
                 }
             } else {
                 int sett_src_count = sett_src.getLength();
-                ERR_("cfgapi_load_policy[#%d]: src address list",i);
+                DIA_("cfgapi_load_policy[#%d]: src address list",i);
                 for(int y = 0; y < sett_src_count; y++) {
                     const char* obj_name = sett_src[y];
                     
@@ -383,7 +383,7 @@ int cfgapi_load_obj_policy() {
                 }
             } else {
                 int sett_sport_count = sett_sport.getLength();
-                ERR_("cfgapi_load_policy[#%d]: sport list",i);
+                DIA_("cfgapi_load_policy[#%d]: sport list",i);
                 for(int y = 0; y < sett_sport_count; y++) {
                     const char* obj_name = sett_sport[y];
                     
@@ -414,7 +414,7 @@ int cfgapi_load_obj_policy() {
                 }
             } else {
                 int sett_dst_count = sett_dst.getLength();
-                ERR_("cfgapi_load_policy[#%d]: dst list",i);
+                DIA_("cfgapi_load_policy[#%d]: dst list",i);
                 for(int y = 0; y < sett_dst_count; y++) {
                     const char* obj_name = sett_dst[y];
 
@@ -446,7 +446,7 @@ int cfgapi_load_obj_policy() {
                 }
             } else {
                 int sett_dport_count = sett_dport.getLength();
-                ERR_("cfgapi_load_policy[#%d]: dst_port object list",i);
+                DIA_("cfgapi_load_policy[#%d]: dst_port object list",i);
                 for(int y = 0; y < sett_dport_count; y++) {
                     const char* obj_name = sett_dport[y];
                     
