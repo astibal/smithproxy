@@ -359,7 +359,7 @@ int cfgapi_load_obj_policy() {
                     if(r != nullptr) {
                         rule->src.push_back(r);
                         rule->src_default = false;
-                        ERR_("cfgapi_load_policy[#%d]: src address object: %s",i,obj_name);
+                        DIA_("cfgapi_load_policy[#%d]: src address object: %s",i,obj_name);
                     } else {
                         DIA_("cfgapi_load_policy[#%d]: src address object not found: %s",i,obj_name);
                         error = true;
@@ -391,7 +391,7 @@ int cfgapi_load_obj_policy() {
                     if(r != NULLRANGE) {
                         rule->src_ports.push_back(r);
                         rule->src_ports_default = false;
-                        ERR_("cfgapi_load_policy[#%d]: src_port object: %s",i,obj_name);
+                        DIA_("cfgapi_load_policy[#%d]: src_port object: %s",i,obj_name);
                     } else {
                         DIA_("cfgapi_load_policy[#%d]: src_port object not found: %s",i,obj_name);
                         error = true;
@@ -422,7 +422,7 @@ int cfgapi_load_obj_policy() {
                     if(r != nullptr) {
                         rule->dst.push_back(r);
                         rule->dst_default = false;
-                        ERR_("cfgapi_load_policy[#%d]: dst address object: %s",i,obj_name);
+                        DIA_("cfgapi_load_policy[#%d]: dst address object: %s",i,obj_name);
                     } else {
                         DIA_("cfgapi_load_policy[#%d]: dst address object not found: %s",i,obj_name);
                         error = true;
@@ -454,7 +454,7 @@ int cfgapi_load_obj_policy() {
                     if(r != NULLRANGE) {
                         rule->dst_ports.push_back(r);
                         rule->dst_ports_default = false;
-                        ERR_("cfgapi_load_policy[#%d]: dst_port object: %s",i,obj_name);
+                        DIA_("cfgapi_load_policy[#%d]: dst_port object: %s",i,obj_name);
                     } else {
                         DIA_("cfgapi_load_policy[#%d]: dst_port object not found: %s",i,obj_name);
                         error = true;
