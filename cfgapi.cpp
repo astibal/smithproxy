@@ -321,7 +321,7 @@ int cfgapi_load_obj_policy() {
             DEB_("cfgapi_load_policy: processing #%d",i);
             
             PolicyRule* rule = new PolicyRule();
-            
+
             if(cur_object.lookupValue("proto",proto)) {
                 int r = cfgapi_lookup_proto(proto.c_str());
                 if(r != 0) {
@@ -334,52 +334,132 @@ int cfgapi_load_obj_policy() {
                 }
             }
             
-            if(cur_object.lookupValue("src",src)) {
-                AddressObject* r = cfgapi_lookup_address(src.c_str());
-                if(r != nullptr) {
-                    rule->src.push_back(r);
-                    rule->src_default = false;
-                    DIA_("cfgapi_load_policy[#%d]: src address object: %s",i,src.c_str());
-                } else {
-                    DIA_("cfgapi_load_policy[#%d]: src address object not found: %s",i,src.c_str());
-                    error = true;
+            const Setting& sett_src = cur_object["src"];
+            if(sett_src.isScalar()) {
+                ERR_("cfgapi_load_policy[#%d]: scalar src address object",i);
+                if(cur_object.lookupValue("src",src)) {
+                    
+                    AddressObject* r = cfgapi_lookup_address(src.c_str());
+                    if(r != nullptr) {
+                        rule->src.push_back(r);
+                        rule->src_default = false;
+                        DIA_("cfgapi_load_policy[#%d]: src address object: %s",i,src.c_str());
+                    } else {
+                        DIA_("cfgapi_load_policy[#%d]: src address object not found: %s",i,src.c_str());
+                        error = true;
+                    }
+                }
+            } else {
+                int sett_src_count = sett_src.getLength();
+                ERR_("cfgapi_load_policy[#%d]: src address list",i);
+                for(int y = 0; y < sett_src_count; y++) {
+                    const char* obj_name = sett_src[y];
+                    
+                    AddressObject* r = cfgapi_lookup_address(obj_name);
+                    if(r != nullptr) {
+                        rule->src.push_back(r);
+                        rule->src_default = false;
+                        ERR_("cfgapi_load_policy[#%d]: src address object: %s",i,obj_name);
+                    } else {
+                        DIA_("cfgapi_load_policy[#%d]: src address object not found: %s",i,obj_name);
+                        error = true;
+                    }
+
                 }
             }
             
-            if(cur_object.lookupValue("sport",sport)) {
-               range r = cfgapi_lookup_port(sport.c_str());
-               if(r != NULLRANGE) {
-                   rule->src_ports.push_back(r);
-                   rule->src_ports_default = false;
-                   DIA_("cfgapi_load_policy[#%d]: src_port object: %s",i,sport.c_str());
-               } else {
-                   DIA_("cfgapi_load_policy[#%d]: src_port object not found: %s",i,sport.c_str());
-                   error = true;
-               }
+            const Setting& sett_sport = cur_object["sport"];
+            if(sett_sport.isScalar()) {
+                if(cur_object.lookupValue("sport",sport)) {
+                    range r = cfgapi_lookup_port(sport.c_str());
+                    if(r != NULLRANGE) {
+                        rule->src_ports.push_back(r);
+                        rule->src_ports_default = false;
+                        DIA_("cfgapi_load_policy[#%d]: src_port object: %s",i,sport.c_str());
+                    } else {
+                        DIA_("cfgapi_load_policy[#%d]: src_port object not found: %s",i,sport.c_str());
+                        error = true;
+                    }
+                }
+            } else {
+                int sett_sport_count = sett_sport.getLength();
+                ERR_("cfgapi_load_policy[#%d]: sport list",i);
+                for(int y = 0; y < sett_sport_count; y++) {
+                    const char* obj_name = sett_sport[y];
+                    
+                    range r = cfgapi_lookup_port(obj_name);
+                    if(r != NULLRANGE) {
+                        rule->src_ports.push_back(r);
+                        rule->src_ports_default = false;
+                        ERR_("cfgapi_load_policy[#%d]: src_port object: %s",i,obj_name);
+                    } else {
+                        DIA_("cfgapi_load_policy[#%d]: src_port object not found: %s",i,obj_name);
+                        error = true;
+                    }
+                }
+            }
+
+            const Setting& sett_dst = cur_object["dst"];
+            if(sett_dst.isScalar()) {
+                if(cur_object.lookupValue("dst",dst)) {
+                    AddressObject* r = cfgapi_lookup_address(dst.c_str());
+                    if(r != nullptr) {
+                        rule->dst.push_back(r);
+                        rule->dst_default = false;
+                        DIA_("cfgapi_load_policy[#%d]: dst address object: %s",i,dst.c_str());
+                    } else {
+                        DIA_("cfgapi_load_policy[#%d]: dst address object not found: %s",i,dst.c_str());
+                        error = true;
+                    }                
+                }
+            } else {
+                int sett_dst_count = sett_dst.getLength();
+                ERR_("cfgapi_load_policy[#%d]: dst list",i);
+                for(int y = 0; y < sett_dst_count; y++) {
+                    const char* obj_name = sett_dst[y];
+
+                    AddressObject* r = cfgapi_lookup_address(obj_name);
+                    if(r != nullptr) {
+                        rule->dst.push_back(r);
+                        rule->dst_default = false;
+                        ERR_("cfgapi_load_policy[#%d]: dst address object: %s",i,obj_name);
+                    } else {
+                        DIA_("cfgapi_load_policy[#%d]: dst address object not found: %s",i,obj_name);
+                        error = true;
+                    }                
+                }
             }
             
-            if(cur_object.lookupValue("dst",dst)) {
-                AddressObject* r = cfgapi_lookup_address(dst.c_str());
-                if(r != nullptr) {
-                    rule->dst.push_back(r);
-                    rule->dst_default = false;
-                    DIA_("cfgapi_load_policy[#%d]: dst address object: %s",i,dst.c_str());
-                } else {
-                    DIA_("cfgapi_load_policy[#%d]: dst address object not found: %s",i,dst.c_str());
-                    error = true;
-                }                
-            }
             
-            if(cur_object.lookupValue("dport",dport)) {
-               range r = cfgapi_lookup_port(dport.c_str());
-               if(r != NULLRANGE) {
-                   rule->dst_ports.push_back(r);
-                   rule->dst_ports_default = false;
-                   DIA_("cfgapi_load_policy[#%d]: dst_port object: %s",i,dport.c_str());
-               } else {
-                   DIA_("cfgapi_load_policy[#%d]: dst_port object not found: %s",i,dport.c_str());
-                   error = true;
-               }
+            const Setting& sett_dport = cur_object["dport"];
+            if(sett_dport.isScalar()) { 
+                if(cur_object.lookupValue("dport",dport)) {
+                    range r = cfgapi_lookup_port(dport.c_str());
+                    if(r != NULLRANGE) {
+                        rule->dst_ports.push_back(r);
+                        rule->dst_ports_default = false;
+                        DIA_("cfgapi_load_policy[#%d]: dst_port object: %s",i,dport.c_str());
+                    } else {
+                        DIA_("cfgapi_load_policy[#%d]: dst_port object not found: %s",i,dport.c_str());
+                        error = true;
+                    }
+                }
+            } else {
+                int sett_dport_count = sett_dport.getLength();
+                ERR_("cfgapi_load_policy[#%d]: dst_port object list",i);
+                for(int y = 0; y < sett_dport_count; y++) {
+                    const char* obj_name = sett_dport[y];
+                    
+                    range r = cfgapi_lookup_port(obj_name);
+                    if(r != NULLRANGE) {
+                        rule->dst_ports.push_back(r);
+                        rule->dst_ports_default = false;
+                        ERR_("cfgapi_load_policy[#%d]: dst_port object: %s",i,obj_name);
+                    } else {
+                        DIA_("cfgapi_load_policy[#%d]: dst_port object not found: %s",i,obj_name);
+                        error = true;
+                    }                    
+                }
             }
             
             if(cur_object.lookupValue("action",action)) {
