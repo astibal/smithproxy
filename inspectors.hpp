@@ -17,6 +17,13 @@
     
 */
 
+//
+/// \file  inspector.hpp
+/// \brief Inspection modules called/updated usually MitmHostCX::inspect()
+/// \sa MitmHostCX::inspect
+//
+
+
 #ifndef INSPECTORS_HPP_
 #define INSPECTORS_HPP_
 
@@ -29,15 +36,28 @@
 
 #include <sobject.hpp>
 
+//
+/// \brief Abstract class intended to be parent for all inspector modules.
+///        Serves as an interface.
+///
+//
 class Inspector : public socle::sobject {
 public:
     virtual ~Inspector() {}
+    //! called always when there are new data in the flow. \see class Flow.
     virtual void update(AppHostCX* cx) = 0;
+    //! called before inserting to inspector list. 
+    //! \return false if you don't want insert inspector to the list (and save some CPU cycles).
     virtual bool l4_prefilter(AppHostCX* cx) = 0;
+    
+    //! called before each update to indicate if update() should be called.
     virtual bool interested(AppHostCX*) = 0;
     
+    //! indicate if inspection is complete. Completed inspectors are not updated.
     inline bool completed() const   { return completed_; }
+    //! indicate if inspection started already.
     inline bool in_progress() const { return in_progress_; }
+    //! indicate if inspector was able to parse and process the payload.
     inline bool result() const { return result_; }
 
 protected:
@@ -48,6 +68,7 @@ protected:
     bool result_ = false;
     void result(bool b) { result_ = b; }
     
+    //! internal stage counter. It could be used 
     int stage = 0;
     
     
