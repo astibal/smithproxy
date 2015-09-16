@@ -301,7 +301,7 @@ class AuthManager:
         if not username:
             username = '<guest>'
         
-        if self.authenticate_check_db(ip,username,password,token):
+        if self.authenticate_check_local(ip,username,password,token):
             flog.info("authenticate: user " + username + " auth successfull from " + ip)
             
             #this is just bloody test
@@ -358,7 +358,7 @@ class AuthManager:
         #flog.debug("authenticating user with " + ciphertext)
         return mycrypto.xor_salted_decrypt(ciphertext,self.a1)
 
-    def authenticate_check_db(self,ip,username,password,token):
+    def authenticate_check_local(self,ip,username,password,token):
         
         try:
             if username in self.user_db:
