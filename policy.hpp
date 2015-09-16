@@ -113,6 +113,7 @@ struct ProfileAuth {
     bool authenticate = false;
     bool resolve = false;  // resolve traffic by ip in auth table
     std::string name;
+    std::string identities;
 };
 
 struct ProfileAlgDns {

@@ -44,6 +44,18 @@ flog.addHandler(hdlr)
 flog.setLevel(logging.INFO)
 
 
+def cfgloglevel_to_py(cfglevel):
+    if(cfglevel >= 7):
+        return logging.DEBUG
+    elif(cfglevel >= 5):
+        return logging.INFO
+    elif(cfglevel == 4):
+        return logging.WARNING
+    elif(cfglevel == 3):
+        return logging.ERROR
+    else:
+        return logging.FATAL
+    
 
 class LogonTable(ShmTable):             
 
@@ -126,7 +138,7 @@ class TokenTable(ShmTable):
         tt = t[:t_i]
         uu = u[:u_i]
         
-        #print "on_new_entry: " + tt + ":" + uu
+        flog.info("TokenTable::on_new_entry: " + tt + ":" + uu)
         self.tokens[tt] = uu
         self.life_queue(tt)
         
@@ -265,6 +277,26 @@ class AuthManager:
         ipa = socket.inet_aton(ip)
         flog.debug("authenticate: request: user %s from %s - token %s" % (username,ip,str(token)))
         ret = False
+        identities = None
+
+
+        self.token_shm.acquire()
+        self.token_shm.load()
+        self.token_shm.release()
+
+        if token in self.token_shm.tokens.keys():
+            res = self.token_shm.tokens[token]
+            flog.debug("authenticate: token data: " + str(res))
+            
+            token_data = res.split(" |")
+            if len(token_data) > 1:
+                identities = token_data[1:]
+                flog.debug("authenticate: token identities: " + str(identities))
+                
+        else:
+            flog.warning("authenticate: token data not received")
+
+        flog.info("authenticate: request for user %s from %s - against identities %s" % (username,ip,str(identities)))
 
         if not username:
             username = '<guest>'
@@ -282,6 +314,7 @@ class AuthManager:
             # :-D
             ret = True
             if token:
+                
                 if token in self.global_token_referer.keys():
                     ref = self.global_token_referer[token]
                     flog.debug("token " + token + " global referer: " + ref)
@@ -359,6 +392,7 @@ def run_bend():
     a.load_a1()
     a.portal_address = c.settings.auth_portal.address
     a.portal_port = c.settings.auth_portal.http_port
+    flog.setLevel(cfgloglevel_to_py(c.settings.log_level));
     
     flog.debug("Loading users")
     a.load_config_users(u.users.items())

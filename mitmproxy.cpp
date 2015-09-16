@@ -384,7 +384,8 @@ void MitmProxy::handle_replacement(MitmHostCX* cx) {
 	  
 	      new_token:
 	    
-	      logon_token tok = logon_token(cx->application_data->original_request().c_str());
+          std::string token_text = cx->application_data->original_request() + " |" + cfgapi_obj_policy_profile_auth( cx->matched_policy())->identities;
+          logon_token tok = logon_token(token_text.c_str());
 	      
 	      INF_("MitmProxy::handle_replacement: new auth token %s for request: %s",tok.token,cx->application_data->hr().c_str());
 	      repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + tok.token + redir_suf;

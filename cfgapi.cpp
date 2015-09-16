@@ -902,6 +902,7 @@ int cfgapi_load_obj_profile_auth() {
             a->name = name;
             cur_object.lookupValue("authenticate",a->authenticate);
             cur_object.lookupValue("resolve",a->resolve);
+            cur_object.lookupValue("identities",a->identities);
             
             cfgapi_obj_profile_auth[name] = a;
             
