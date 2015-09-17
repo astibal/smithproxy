@@ -175,7 +175,7 @@ class LdapSearch(LdapCon):
             r = self.raw_query(self.profile["base_dn"], q, 
                                 self.profile["filter"],
                                 self.profile["scope"])
-            logging.debug("ldapsearch.search_user_dn: query result: " + str(q))
+            logging.debug("ldapsearch.search_user_dn: query result: " + str(r))
         except ldap.error,e:
             logging.debug("ldapsearch.search_user_dn: query exception caught: " + str(e))
         except KeyError,e:

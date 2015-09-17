@@ -26,6 +26,7 @@ import socket
 import pylibconfig2 as cfg
 import logging
 import auth.crypto as mycrypto
+import auth.ldapaaa as myldap
 
 from shmtable import ShmTable
 
@@ -260,6 +261,7 @@ class AuthManager:
       self.sources_groups['local'] = []
       
       self.address_identities = {}
+      self.objects_identities = {}
       
       self.a1 = None
 
@@ -384,6 +386,14 @@ class AuthManager:
                                     ret += 1
                                     if i not in self.address_identities[ip]:
                                         self.address_identities[ip].append(i)
+                                        
+                                    flog.debug("authenticate_check: investigating member target %s: looking for other identities" % (m,))
+                                    if m in self.objects_identities.keys():
+                                        for alt_identity in self.objects_identities[m]:
+                                            if alt_identity not in self.address_identities[ip]:
+                                                flog.debug("authenticate_check: investigating member target %s: alternative identity: %s" % (m,alt_identity))
+                                                self.address_identities[ip].append(alt_identity)
+                                                ret += 1
                                 else:
                                     flog.debug("authenticate_check: investigating member target %s: authentication failed!" % (m,))
                                     
@@ -574,6 +584,18 @@ class AuthManager:
                         if str(gi) in self.group_db.keys():
                             flog.debug("identities: referenced group %s in database." % str(gi))
                             d["groups"].append(str(gi))
+                            
+                            # dereference groups and fill all objects -> identities  
+                            # so single object can be identified as member of more identities at once
+                            
+                            members = unique_list(self.recursive_group_members(gi))
+                            for m in members:
+                                if m not in self.objects_identities.keys():
+                                    self.objects_identities[m] = []
+                                    
+                                self.objects_identities[m].append(i[0])
+                                
+                            
                         else:
                             flog.debug("identities: referenced group %s NOT in database." % str(gi))
                         
@@ -582,7 +604,9 @@ class AuthManager:
                     
             flog.debug("identities: " + i[0] + " -> " + str(d))
             self.identities_db[i[0]] = d
-              
+            
+            
+        flog.debug("identities: dereferenced objects -> identities: " + str(self.objects_identities))
               
     def load_config_sources(self,sources_items):
         for si in sources_items:
@@ -634,6 +658,9 @@ class AuthManager:
 
         return False
 
+
+    def authenticate_check_ldap(self,ip,username,password,identities,target):
+        pass
 
 
 def run_bend():
