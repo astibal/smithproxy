@@ -15,6 +15,7 @@
     You should have received a copy of the GNU General Public License
     along with Smithproxy.  If not, see <http://www.gnu.org/licenses/>.  """
 
+import traceback
 import time
 import mmap
 import os
@@ -86,6 +87,26 @@ def cfg_to_dict(cfg_element):
 
 def intersect_lists(l1,l2):
     return [filter(lambda x: x in l1, sublist) for sublist in l2]
+
+
+def unique_list(l):
+    ret = []
+    for ll in l:
+        if ll not in ret:
+            ret.append(ll)
+            
+    return ret
+
+def unique_prefixes(lst,delim):
+    u = []
+    
+    for l in lst:
+        if l.find(delim) >= 0:
+            prefix = l.split(delim)
+            if prefix not in u:
+                u.append(prefix)
+    return u
+    
 
 
 class LogonTable(ShmTable):             
@@ -236,6 +257,9 @@ class AuthManager:
       self.sources_ldap_db = {}
       
       self.sources_groups = {}
+      self.sources_groups['local'] = []
+      
+      self.address_identities = {}
       
       self.a1 = None
 
@@ -310,6 +334,74 @@ class AuthManager:
         
         return None
 
+    
+
+    def recursive_group_members(self, group):
+        non_groups = []
+        if group in self.group_db.keys():
+            for member in self.group_db[group]["members"]:
+                if member.find('local@') >= 0:
+                    non_groups.extend(self.recursive_group_members(member.split('local@')[1])) 
+                else:
+                    non_groups.append(member)
+                    
+        return non_groups
+                    
+
+    def authenticate_check(self, ip, username, password, identities):
+        
+        if ip not in self.address_identities.keys():
+            self.address_identities[ip] = []
+            
+        ret = 0
+        
+        for i in identities:
+            flog.info("authenticate_check: matching against identity %s " % (i,))
+            if i in self.identities_db.keys():
+                ii = self.identities_db[i]
+                
+                for g in ii["groups"]:
+                    flog.debug("authenticate_check: checking group %s" % (g,))
+                    
+                    exploded_members = unique_list(self.recursive_group_members(g))
+                    flog.debug("authenticate_check: full member list of %s: %s" % (g,str(exploded_members)))
+                    
+                    for m in exploded_members:
+                        flog.debug("authenticate_check: investigating member target %s" % (m,))
+                        if m.find(':') >= 0:
+                            flog.debug("authenticate_check: investigating member target %s: user" % (m,))
+                            pairlet = m.split(":")
+                            source = pairlet[0]
+                            user = pairlet[1]
+                            
+                            if user != username:
+                                continue
+                                flog.debug("authenticate_check: investigating member target %s: user doesn't match" % (m,))
+                            else:
+                                flog.debug("authenticate_check: investigating member target %s: user matches" % (m,))
+                                if self.authenticate_check_local(ip,username,password,identities):
+                                    flog.debug("authenticate_check: investigating member target %s: authentication OK!" % (m,))
+                                    ret += 1
+                                    if i not in self.address_identities[ip]:
+                                        self.address_identities[ip].append(i)
+                                else:
+                                    flog.debug("authenticate_check: investigating member target %s: authentication failed!" % (m,))
+                                    
+                        elif m.find('@') >= 0:
+                            flog.debug("authenticate_check: investigating member target %s: non-local source - NYI!" % (m,))
+        
+        if ret > 0:
+            return ret
+        
+        if self.authenticate_check_local(ip,username,password,identities):
+            flog.info("authenticate_check: user " + username + " local auth successfull from " + ip + " -- fallback authentication")
+            return 1
+        
+        
+        # reset authentication on failure
+        self.address_identities[ip] = []
+        return 0
+
 
     def authenticate(self, ip, username, password,token):
 
@@ -340,14 +432,21 @@ class AuthManager:
         if not username:
             username = '<guest>'
         
-        if self.authenticate_check_local(ip,username,password,token):
+        if self.authenticate_check(ip,username,password,identities) > 0:
             flog.info("authenticate: user " + username + " auth successfull from " + ip)
             
-            #this is just bloody test
+            # normalize identities
+            identities_to_send = username
+            if ip in self.address_identities.keys():
+                x = self.address_identities[ip]
+                if len(x) > 0:
+                    for i in x:
+                        identities_to_send += "+"
+                        identities_to_send += i
             
             self.logon_shm.acquire()
             self.logon_shm.load()       # load new data!
-            self.logon_shm.add(ip,username,username+"_group")
+            self.logon_shm.add(ip,username,identities_to_send)
             self.logon_shm.release()
             
             # :-D
@@ -514,7 +613,7 @@ class AuthManager:
         #flog.debug("authenticating user with " + ciphertext)
         return mycrypto.xor_salted_decrypt(ciphertext,self.a1)
 
-    def authenticate_check_local(self,ip,username,password,token):
+    def authenticate_check_local(self,ip,username,password,identities):
         
         try:
             if username in self.user_db:
@@ -551,10 +650,17 @@ def run_bend():
     flog.setLevel(cfgloglevel_to_py(c.settings.log_level));
     
     flog.debug("loading config file")
-    a.load_config_sources(u.sources.items())
-    a.load_config_users(u.users.items())
-    a.load_config_groups(u.groups.items())
-    a.load_config_identities(u.identities.items())
+    
+    
+    try:
+        a.load_config_sources(u.sources.items())
+        a.load_config_users(u.users.items())
+        a.load_config_groups(u.groups.items())
+        a.load_config_identities(u.identities.items())
+    except Exception, e:
+        exc_type, exc_value, exc_traceback = sys.exc_info()
+        flog.error("Error loading config: %s" % (str(e),))
+        flog.error("Error loading config: %s" % (repr(traceback.format_tb(exc_traceback)),))
     
     a.setup_logon_tables("/smithproxy_auth_ok",1024*1024,"/smithproxy_auth_ok.sem")
     a.setup_token_tables("/smithproxy_auth_token",1024*1024,"/smithproxy_auth_token.sem")
