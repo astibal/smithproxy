@@ -57,6 +57,37 @@ def cfgloglevel_to_py(cfglevel):
         return logging.FATAL
     
 
+def cfg_to_dict(cfg_element):
+    # this is materialization of the shame of pylibconfig2. 
+    # It cannot convert ConfigGroup into dictionary. Poor.
+    if isinstance(cfg_element,cfg.ConfGroup):
+        d = {}
+        for c in cfg_element.items():
+            k = c[0]
+            v = c[1]
+            if isinstance(v,cfg.ConfGroup) or isinstance(v,cfg.ConfList):
+                v = cfg_2_dict(v)
+            d[k] = v
+    elif isinstance(cfg_element,cfg.ConfList):
+        d = []
+        for l in cfg_element:
+            d.append(cfg_2_dict(l))
+    elif isinstance(cfg_element,tuple):
+        d = {}
+        if isinstance(cfg_element[1],cfg.ConfGroup) or isinstance(cfg_element[1],cfg.ConfList):
+            d[cfg_element[0]] = cfg_2_dict(cfg_element[1])
+        else:
+            d[cfg_element[0]] = cfg_element[1]
+    else:
+        return cfg_element
+
+    
+    return d
+
+def intersect_lists(l1,l2):
+    return [filter(lambda x: x in l1, sublist) for sublist in l2]
+
+
 class LogonTable(ShmTable):             
 
     def __init__(self):
@@ -198,6 +229,14 @@ class AuthManager:
       self.portal_port = None
     
       self.user_db = {}
+      self.group_db = {}
+      self.identities_db = {}
+      self.sources_db = {}
+      self.sources_local_db = {}
+      self.sources_ldap_db = {}
+      
+      self.sources_groups = {}
+      
       self.a1 = None
 
 
@@ -351,8 +390,125 @@ class AuthManager:
             for pair in user[1].items():
                 d[pair[0]] = pair[1]
                 
-            print str(d)
             self.user_db[user[0]] = d
+            flog.debug("user: " + user[0] + " -> " + str(d))
+
+    def load_config_groups(self, groups_items):
+        flog.debug("groups: ")
+        for i in groups_items:
+            d = {}
+            d["name"] = i[0]
+            flog.debug("groups: " + i[0])
+            
+            for gi in i[1].items():
+                
+                if gi[0] == "members":
+                    if "members" not in d.keys():
+                        d["members"] = []
+                    
+                    # check and append groups into the list
+                    for gii in gi[1]:
+                        
+                        pairlet = gii.split(":")
+                        if len(pairlet) > 1:
+                            user = pairlet[1]
+                            source = pairlet[0]
+                            flog.debug("groups: member %s is an user %s in source %s" % (gii,user,source))
+                            
+                            if source in self.sources_db.keys() or source == "local":
+                                flog.debug("groups: member %s source %s check OK" % (gii,source))
+                                d["members"].append(str(gii))
+                            else:
+                                flog.error("groups: member %s source %s check not OK, invalidated" % (gii,source))
+
+                        else:
+                            pairlet = gii.split("@")
+                            if len(pairlet) > 1:
+                                group = pairlet[1]
+                                source = pairlet[0]
+                                flog.debug("groups: member %s is a group %s in source %s" % (gii,group,source))
+
+                                if source in self.sources_db.keys() or source == "local":
+                                    flog.debug("groups: member %s source %s check OK" % (gii,source))
+                                    d["members"].append(str(gii))
+                                    
+                                    ## groups require special care. Since we have flat authentication scheme,
+                                    ## we need to gather all groups which we are interested in for each source
+                                    ## this is because user can get authenticated with policy requiring membership in "group_A"
+                                    ## but later user hits policy which requires membership in "group_B".
+                                    ## we have to query all groups at once to avoid unnecessary authentication popups.
+                                    
+                                    if group not in self.sources_groups[source]:
+                                        self.sources_groups[source].append(group)
+                                    
+                                else:
+                                    flog.error("groups: member %s source %s check not OK, invalidated" % (gii,source))
+                        
+                else:    
+                
+                    d[pair[0]] = pair[1]
+
+                flog.debug("groups: " + i[0] + " -> " + str(d))
+                
+            self.group_db[i[0]] = d
+            
+        for s in self.sources_groups.keys():
+            flog.debug("Interesting groups in source %s: %s" % (s,str(self.sources_groups[s])))
+            
+        
+
+    def load_config_identities(self, identities_items):
+        flog.debug("identities: ")
+
+        for i in identities_items:
+            d = {}
+            d["name"] = i[0]
+            flog.debug("identities: " + i[0])
+            
+            for pair in i[1].items():
+                
+                if pair[0] == "groups":
+                    if "groups" not in d.keys():
+                        d["groups"] = []
+                    
+                    for gi in pair[1]:
+                        if str(gi) in self.group_db.keys():
+                            flog.debug("identities: referenced group %s in database." % str(gi))
+                            d["groups"].append(str(gi))
+                        else:
+                            flog.debug("identities: referenced group %s NOT in database." % str(gi))
+                        
+                else:
+                    d[pair[0]] = pair[1]
+                    
+            flog.debug("identities: " + i[0] + " -> " + str(d))
+            self.identities_db[i[0]] = d
+              
+              
+    def load_config_sources(self,sources_items):
+        for si in sources_items:
+            source_type = si[0]
+            flog.debug("sources: type %s" % (source_type,))
+            
+            for sii in si[1].items():
+                flog.debug("sources: %s (%s)" % (sii[0], source_type,))
+                name = sii[0]
+                body = sii[1]
+                body = cfg_to_dict(body)
+                self.sources_db[name] = body
+                
+                # add this source to interesting groups structure
+                self.sources_groups[name] = []
+                
+                flog.debug("sources: %s (%s) -> %s" % (name, source_type,str(body)))
+            
+                if source_type == "ldap":
+                    self.sources_ldap_db[name] = body
+                elif source_type == "local":
+                    self.sources_local_db[name] = body
+                
+            
+                
 
     def authenticate_local_decrypt(self,ciphertext):
         #flog.debug("authenticating user with " + ciphertext)
@@ -394,8 +550,11 @@ def run_bend():
     a.portal_port = c.settings.auth_portal.http_port
     flog.setLevel(cfgloglevel_to_py(c.settings.log_level));
     
-    flog.debug("Loading users")
+    flog.debug("loading config file")
+    a.load_config_sources(u.sources.items())
     a.load_config_users(u.users.items())
+    a.load_config_groups(u.groups.items())
+    a.load_config_identities(u.identities.items())
     
     a.setup_logon_tables("/smithproxy_auth_ok",1024*1024,"/smithproxy_auth_ok.sem")
     a.setup_token_tables("/smithproxy_auth_token",1024*1024,"/smithproxy_auth_token.sem")
