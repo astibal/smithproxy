@@ -113,6 +113,7 @@ class LdapCon(object):
         #print "whoami returns: '%s'" % rr
         if rr == '':
             logging.info(self.profile["bind_uri"] + ": invalid credentials check for user '%s'" % (str(u),))
+            r = ''
         
         logging.debug("ldapcon.bind: result: '%s'" % (str(r),))
         return r
@@ -184,7 +185,7 @@ class LdapSearch(LdapCon):
         logging.debug("ldapsearch.search_user_dn: returning %d objects" % (len(r),))
         return r
 
-    def authenticate_user(self,username,password):
+    def authenticate_user(self,username,password,lookup_only=False):
         logging.debug("ldapsearch.authenticate_user: FIND")
         r = self.search_user_dn(username)
         if r:
@@ -192,9 +193,9 @@ class LdapSearch(LdapCon):
             self.init()
             res = self.bind(r[0][0],password)
             #print "Authenticate: %d" % res
-            if res == '':
+            if res == '' and not lookup_only:
                 logging.debug("ldapsearch.authenticate_user: FAILED")
-                return None
+                return (None,None)
             
             logging.debug("ldapsearch.authenticate_user: GROUPS")
             groups = self.groups_user_dn(r[0][0])
@@ -203,7 +204,7 @@ class LdapSearch(LdapCon):
             return (r[0][0],groups)
         
         logging.debug("ldapsearch.authenticate_user: NOT FOUND")
-        return None
+        return (None,None)
     
     def groups_user_dn(self,user_dn):
         ret = []

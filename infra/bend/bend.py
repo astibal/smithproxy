@@ -26,7 +26,8 @@ import socket
 import pylibconfig2 as cfg
 import logging
 import auth.crypto as mycrypto
-import auth.ldapaaa as myldap
+import auth.ldapaaa as ldapaaa
+import auth.ldapcon as ldapcon
 
 from shmtable import ShmTable
 
@@ -370,35 +371,57 @@ class AuthManager:
                     
                     for m in exploded_members:
                         flog.debug("authenticate_check: investigating member target %s" % (m,))
+
+                        source = ''
+                        user = ''
+                        group = ''
+                        is_user = False
+
                         if m.find(':') >= 0:
-                            flog.debug("authenticate_check: investigating member target %s: user" % (m,))
+                           is_user = True
+                            
+                        flog.debug("authenticate_check: investigating member target %s: user" % (m,))
+                        
+                        if is_user:
                             pairlet = m.split(":")
                             source = pairlet[0]
                             user = pairlet[1]
                             
-                            if user != username:
-                                continue
-                                flog.debug("authenticate_check: investigating member target %s: user doesn't match" % (m,))
-                            else:
-                                flog.debug("authenticate_check: investigating member target %s: user matches" % (m,))
-                                if self.authenticate_check_local(ip,username,password,identities):
-                                    flog.debug("authenticate_check: investigating member target %s: authentication OK!" % (m,))
-                                    ret += 1
-                                    if i not in self.address_identities[ip]:
-                                        self.address_identities[ip].append(i)
-                                        
-                                    flog.debug("authenticate_check: investigating member target %s: looking for other identities" % (m,))
-                                    if m in self.objects_identities.keys():
-                                        for alt_identity in self.objects_identities[m]:
-                                            if alt_identity not in self.address_identities[ip]:
-                                                flog.debug("authenticate_check: investigating member target %s: alternative identity: %s" % (m,alt_identity))
-                                                self.address_identities[ip].append(alt_identity)
-                                                ret += 1
-                                else:
-                                    flog.debug("authenticate_check: investigating member target %s: authentication failed!" % (m,))
-                                    
                         elif m.find('@') >= 0:
-                            flog.debug("authenticate_check: investigating member target %s: non-local source - NYI!" % (m,))
+                            pairlet = m.split("@")
+                            source = pairlet[0]
+                            group = pairlet[1]
+                            
+                        
+                        if is_user and user != username:
+                            continue
+                            flog.debug("authenticate_check: investigating member target %s: user doesn't match" % (m,))
+                        else:
+                            flog.debug("authenticate_check: investigating member target %s: user matches" % (m,))
+                            ret = False
+                            
+                            if is_user:
+                                ret = self.authenticate_check_local(ip,username,password,identities)
+                            else:
+                                #flog.debug("authenticate_check: investigating member target %s: non-local users not yet implemented" % (m,))
+                                ret = self.authenticate_check_ldap(ip,username,password,identities,m)
+                                
+                            if ret:
+                                flog.debug("authenticate_check: investigating member target %s: authentication OK!" % (m,))
+                                ret += 1
+                                if i not in self.address_identities[ip]:
+                                    self.address_identities[ip].append(i)
+                                    
+                                flog.debug("authenticate_check: investigating member target %s: looking for other identities" % (m,))
+                                if m in self.objects_identities.keys():
+                                    for alt_identity in self.objects_identities[m]:
+                                        if alt_identity not in self.address_identities[ip]:
+                                            flog.debug("authenticate_check: investigating member target %s: alternative identity: %s" % (m,alt_identity))
+                                            self.address_identities[ip].append(alt_identity)
+                                            ret += 1
+                            else:
+                                flog.debug("authenticate_check: investigating member target %s: authentication failed!" % (m,))
+                                    
         
         if ret > 0:
             return ret
@@ -660,7 +683,28 @@ class AuthManager:
 
 
     def authenticate_check_ldap(self,ip,username,password,identities,target):
-        pass
+        
+        flog.debug("authenticate_check_ldap: result: start")
+        
+        if target.find('@') < 0:
+            return False
+
+        source = target.split("@")[0]
+        group = target.split("@")[1]
+        
+        l = ldapcon.LdapSearch()
+        l.updateProfile(self.sources_ldap_db[source])
+        l.init()
+        l.bind()
+        user_dn, group_list = l.authenticate_user(username,password)
+    
+        flog.debug("authenticate_check_ldap: result: %s:%s"  % (str(user_dn),str(group_list)))
+
+        if user_dn:
+            return True
+        
+        return False
+        
 
 
 def run_bend():
