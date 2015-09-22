@@ -109,11 +109,16 @@ struct ProfileTls {
     std::string name;
 };
 
+
+struct ProfileSubAuth {
+    std::string name;
+};
+
 struct ProfileAuth {
     bool authenticate = false;
     bool resolve = false;  // resolve traffic by ip in auth table
     std::string name;
-    std::string identities;
+    std::unordered_map<std::string,ProfileSubAuth*> sub_policies;
 };
 
 struct ProfileAlgDns {

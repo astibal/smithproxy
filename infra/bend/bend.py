@@ -398,13 +398,12 @@ class AuthManager:
                             flog.debug("authenticate_check: investigating member target %s: user doesn't match" % (m,))
                         else:
                             flog.debug("authenticate_check: investigating member target %s: user matches" % (m,))
-                            ret = False
-                            
+
                             if is_user:
-                                ret = self.authenticate_check_local(ip,username,password,identities)
+                                ret += self.authenticate_check_local(ip,username,password,identities)
                             else:
                                 #flog.debug("authenticate_check: investigating member target %s: non-local users not yet implemented" % (m,))
-                                ret = self.authenticate_check_ldap(ip,username,password,identities,m)
+                                ret += self.authenticate_check_ldap(ip,username,password,identities,m)
                                 
                             if ret:
                                 flog.debug("authenticate_check: investigating member target %s: authentication OK!" % (m,))

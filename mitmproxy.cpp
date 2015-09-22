@@ -384,7 +384,12 @@ void MitmProxy::handle_replacement(MitmHostCX* cx) {
 	  
 	      new_token:
 	    
-          std::string token_text = cx->application_data->original_request() + " |" + cfgapi_obj_policy_profile_auth( cx->matched_policy())->identities;
+          std::string token_text = cx->application_data->original_request();
+          
+          for(auto i: cfgapi_obj_policy_profile_auth( cx->matched_policy())->sub_policies) {
+            DIA_("MitmProxy::handle_replacement: token: requesting identity %s",i.second->name.c_str());
+            token_text  += " |" + i.second->name;
+          }
           logon_token tok = logon_token(token_text.c_str());
 	      
 	      INF_("MitmProxy::handle_replacement: new auth token %s for request: %s",tok.token,cx->application_data->hr().c_str());
@@ -523,8 +528,9 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
             DEBS_("MitmMasterProxy::on_left_new: ladd the new cx (unpaused)");
             new_proxy->ladd(just_accepted_cx);
         }
+        short unsigned int target_port = just_accepted_cx->com()->nonlocal_dst_port();
         MitmHostCX *target_cx = new MitmHostCX(just_accepted_cx->com()->slave(), just_accepted_cx->com()->nonlocal_dst_host().c_str(), 
-                                            string_format("%d",just_accepted_cx->com()->nonlocal_dst_port()).c_str()
+                                            string_format("%d",target_port).c_str()
                                             );
         // connect it! - btw ... we don't want to block of course...
         
@@ -539,6 +545,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
 
         // almost done, just add this target_cx to right side of new proxy
         new_proxy->radd(target_cx);
+        bool delete_proxy = false;
         
         // apply policy and get result
         int policy_num = cfgapi_obj_policy_apply(just_accepted_cx,new_proxy);
@@ -558,7 +565,38 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
 
                 // resolve source information - is there un identity info for that IP?
                 if(new_proxy->opt_auth_authenticate && new_proxy->opt_auth_resolve) {
-                    new_proxy->resolve_identity(src_cx);
+                    bool res = new_proxy->resolve_identity(src_cx);
+
+                    if(!res) {
+                        if(target_port != 80 && target_port != 443){
+                            delete_proxy = true;
+                            INF_("Dropping connection %s due to unknown source IP",just_accepted_cx->c_name());
+                            
+                            goto end;
+                        }
+                    } else {
+                        bool bad_auth = true;
+                        cfgapi_identity_ip_lock.lock();    
+                        auto ip = auth_ip_map.find(just_accepted_cx->host());
+                        
+                        if (ip != auth_ip_map.end()) {
+                            IdentityInfo& id = (*ip).second;
+                            std::string groups = id.last_logon_info.groups;
+                            
+                            if(cfgapi_obj_policy_profile_auth(policy_num) != nullptr)
+                            for ( auto i: cfgapi_obj_policy_profile_auth(policy_num)->sub_policies) {
+                                INF_("Comparing %s with %s",groups.c_str(),i.second->name.c_str());
+                                bad_auth = false;
+                            }
+                            
+                        }
+                        cfgapi_identity_ip_lock.unlock();
+                        
+                        if(bad_auth) {
+                            delete_proxy = true;
+                            goto end;
+                        }
+                    }
                 }
                 
                 // setup NAT
@@ -577,17 +615,24 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                 com()->set_poll_handler(real_socket,new_proxy);
                 
             } else {
-                delete new_proxy;
+                delete_proxy = true;
                 NOT_("MitmMasterProxy::on_left_new: %s cannot be converted to MitmHostCx",just_accepted_cx->c_name());
             }
   
         } else {
             
             // hmm. traffic is denied.
-            delete new_proxy;
+            delete_proxy = true;
         }
         
+        end:
+        
         new_proxy->name(new_proxy->to_string(INF));
+        
+        if(delete_proxy) {
+            INF_("Dropping proxy %s",new_proxy->c_name());
+            delete new_proxy;
+        }        
     }
     
     DEBS_("MitmMasterProxy::on_left_new: finished");

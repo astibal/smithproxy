@@ -902,8 +902,20 @@ int cfgapi_load_obj_profile_auth() {
             a->name = name;
             cur_object.lookupValue("authenticate",a->authenticate);
             cur_object.lookupValue("resolve",a->resolve);
-            cur_object.lookupValue("identities",a->identities);
             
+            if(cur_object.exists("identities")) {
+                INFS_("cfgapi_load_obj_profile_auth: profiles: subpolicies exists");
+                int sub_pol_num = cur_object["identities"].getLength();
+                INF_("cfgapi_load_obj_profile_auth: profiles: %d subpolicies detected",sub_pol_num);
+                for (int j = 0; j < sub_pol_num; j++) {
+                    Setting& cur_subpol = cur_object["identities"][j];
+                    
+                    ProfileSubAuth* n_subpol = new ProfileSubAuth();
+                    n_subpol->name = cur_subpol.getName();
+                    a->sub_policies[name] = n_subpol;
+                    INF_("cfgapi_load_obj_profile_auth: profiles: %d:%s",j,n_subpol->name.c_str());
+                }
+            }
             cfgapi_obj_profile_auth[name] = a;
             
             DIA_("cfgapi_load_obj_profile_auth: '%s': ok",name.c_str());
@@ -1034,6 +1046,11 @@ int cfgapi_cleanup_obj_profile_auth() {
     for(std::map<std::string, ProfileAuth*>::iterator i = cfgapi_obj_profile_auth.begin(); i != cfgapi_obj_profile_auth.end(); ++i) {
         std::pair<std::string,ProfileAuth*> t = (*i);
         ProfileAuth* c = t.second;
+        
+        for(auto j: c->sub_policies) {
+            delete j.second;
+        }
+        
         if (c != nullptr) delete c;
     }
     cfgapi_obj_profile_auth.clear();
