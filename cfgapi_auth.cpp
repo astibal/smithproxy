@@ -55,10 +55,12 @@ int cfgapi_auth_shm_ip_table_refresh()  {
                 INF_("Updating identity in database: %s",ip.c_str());
                 IdentityInfo& id = (*found).second;
                 id.last_logon_info = rt;
+                id.update_groups_vec();
             } else {
                 INF_("New identity in database: %s ",ip.c_str());
                 IdentityInfo i;
                 i.last_logon_info = rt;
+                i.update_groups_vec();
                 auth_ip_map[ip] = i;
             }
             DIA_("cfgapi_auth_shm_ip_table_refresh: loaded: %d,%s,%s",ip.c_str(),rt.username,rt.groups);

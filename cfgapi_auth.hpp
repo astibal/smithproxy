@@ -109,6 +109,8 @@ struct IdentityInfo {
     std::string  ip_address;
     std::string  username;
     std::string  groups;
+    std::vector<std::string> groups_vec;
+    
     unsigned int rx_bytes = 0;
     unsigned int tx_bytes = 0;
     
@@ -124,6 +126,28 @@ struct IdentityInfo {
     
     inline void touch() { last_seen_at = time(nullptr); }
     inline bool i_timeout() { return ( (time(nullptr) - last_seen_at) > idle_timeout ); }
+    void update_groups_vec() {
+        groups = last_logon_info.groups;
+        groups_vec.clear();
+        
+        int old_pos = 0;
+        int pos = 0;
+        while(true) {
+            pos = groups.find("+",pos);
+            if(pos > old_pos && pos != std::string::npos) {
+                std::string x  = groups.substr(old_pos,pos-old_pos);
+                groups_vec.push_back(x);
+                
+                old_pos = pos + 1;
+                pos++;
+                groups.find('+',pos);
+            } else {
+                std::string x  = groups.substr(old_pos,groups.size()-old_pos);
+                groups_vec.push_back(x);
+                break;
+            }
+        }
+    }
 };
 
 // not used now

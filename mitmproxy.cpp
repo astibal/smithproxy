@@ -585,10 +585,17 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                             
                             if(cfgapi_obj_policy_profile_auth(policy_num) != nullptr)
                             for ( auto i: cfgapi_obj_policy_profile_auth(policy_num)->sub_policies) {
-                                INF_("Comparing %s with %s",groups.c_str(),i.second->name.c_str());
-                                bad_auth = false;
+                                for(auto x: id.groups_vec) {
+                                    DEB_("Connection identities: ip identity '%s' against policy '%s'",x.c_str(),i.second->name.c_str());
+                                    if(x == i.second->name) {
+                                        DIA_("Connection identities: ip identity '%s' matches policy '%s'",x.c_str(),i.second->name.c_str());
+                                        bad_auth = false;
+                                    }
+                                }
                             }
-                            
+                            if(bad_auth) {
+                                INF_("Dropping connection %s due to non-matching identity",just_accepted_cx->c_name());
+                            }
                         }
                         cfgapi_identity_ip_lock.unlock();
                         
