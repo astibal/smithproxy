@@ -40,6 +40,7 @@ protected:
     bool       identity_resolved_ = false;    // meant if attempt has been done, regardless of it's result.
     logon_info identity_;
     
+    std::vector<baseHostCX*> backends_;
 public: 
     bool opt_auth_authenticate = false;
     bool opt_auth_resolve = false;
@@ -51,6 +52,7 @@ public:
     void identity(logon_info& i) { identity_ = i; }
     bool resolve_identity(baseHostCX*,bool);
     bool update_identity(baseHostCX*);
+    std::vector<baseHostCX*>& backends() { return backends_; };
     
     bool write_payload(void) { return write_payload_; } 
     void write_payload(bool b) { write_payload_ = b; }
@@ -73,9 +75,13 @@ public:
     virtual void on_right_error(baseHostCX* cx);
     
     virtual void handle_replacement(MitmHostCX* cx);
+    virtual void handle_internal_data(baseHostCX* cx);
     
     virtual bool ask_destroy() { dead(true); return true; };
     virtual std::string to_string(int verbosity=INF);
+    
+    bool is_backend_cx(baseHostCX*);
+    void erase_backend_cx(baseHostCX*);
     
 public:
 

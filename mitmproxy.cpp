@@ -27,6 +27,9 @@
 #include <cfgapi.hpp>
 #include <cfgapi_auth.hpp>
 #include <sockshostcx.hpp>
+#include <uxcom.hpp>
+
+#include <algorithm>
 
 DEFINE_LOGGING(MitmProxy);
 
@@ -191,7 +194,14 @@ bool MitmProxy::update_identity(baseHostCX* cx) {
 
 
 void MitmProxy::on_left_bytes(baseHostCX* cx) {
-        
+    
+    if(is_backend_cx(cx)) {
+        INF_("on_left_bytes[%s]: left internal connection new data arrived",cx->full_name('L').c_str());
+        handle_internal_data(cx);
+        return;
+    }    
+    
+    
     if(write_payload()) {
         if(cx->log().size()) {
             tlog()->write('L', cx->log());
@@ -263,7 +273,13 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
 }
 
 void MitmProxy::on_right_bytes(baseHostCX* cx) {
-        
+
+    if(is_backend_cx(cx)) {
+        INF_("on_right_bytes[%s]: right internal connection new data arrived",cx->full_name('R').c_str());
+        handle_internal_data(cx);
+        return;
+    }    
+    
     if(write_payload()) {
         if(cx->log().size()) {
             tlog()->write('R',cx->log());
@@ -285,9 +301,35 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
     socle::time_update_counter_sec(&cnt_right_bytes_second,&meter_right_bytes_second,1,cx->to_read().size());
 }
 
+
+bool MitmProxy::is_backend_cx(baseHostCX* cx) {
+    std::vector<baseHostCX*>:: iterator it = std::find(backends_.begin(),backends_.end(),cx);
+    return (it != backends_.end());
+}
+
+void MitmProxy::erase_backend_cx(baseHostCX* cx) {
+    std::vector<baseHostCX*>:: iterator it = std::find(backends_.begin(),backends_.end(),cx);
+    if(it != backends_.end()) {
+        backends_.erase(it);
+        
+        // TODO: find a reference in proxy and set it to nullptr. Example:
+        // if(cx == backend_webfilter_cx) backend_webfilter_cx = nullptr;
+    }
+}
+
+
 void MitmProxy::on_left_error(baseHostCX* cx) {
 
     if(this->dead()) return;  // don't process errors twice
+
+    if(is_backend_cx(cx)) {
+        // we will ignore backend cx, since they can close/open at will during life of the proxy
+        INF_("on_left_error[%s]: left internal connection closed",cx->full_name('L').c_str());
+        erase_backend_cx(cx);
+        
+        // don't harm proxy, leave.
+        return;
+    }
     
     DEB_("on_left_error[%s]: proxy marked dead",(this->error_on_read ? "read" : "write"));
     DUMS_(to_string().c_str());
@@ -311,6 +353,15 @@ void MitmProxy::on_left_error(baseHostCX* cx) {
 void MitmProxy::on_right_error(baseHostCX* cx)
 {
     if(this->dead()) return;  // don't process errors twice
+
+    if(is_backend_cx(cx)) {
+        // we will ignore backend cx, since they can close/open at will during life of the proxy
+        INF_("on_right_error[%s]: right internal connection closed",cx->full_name('R').c_str());
+        erase_backend_cx(cx);
+        
+        // don't harm proxy, leave.
+        return;
+    }    
     
     DEB_("on_right_error[%s]: proxy marked dead",(this->error_on_read ? "read" : "write"));
     
@@ -422,6 +473,12 @@ void MitmProxy::handle_replacement(MitmHostCX* cx) {
 	    DIAS_("void MitmProxy::handle_replacement: asked to handle NONE. No-op.");
     } 
 }
+
+void MitmProxy::handle_internal_data(baseHostCX* cx) {
+    int len = cx->readbuf()->size();
+    INF_("handle_internal_data[%s]: %d bytes arrived",cx->full_name('L').c_str(),len);
+}
+
 
 
 bool MitmMasterProxy::ssl_autodetect = false;
@@ -635,6 +692,22 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
         end:
         
         new_proxy->name(new_proxy->to_string(INF));
+        
+        /*
+        // test for unix socket backend infra!
+            UxCom* u = new UxCom();
+            u->master(com()->master());
+            baseHostCX *backend_cx = new baseHostCX(u,"/tmp/test","0");
+            new_proxy->backends().push_back(backend_cx);
+            new_proxy->ladd(backend_cx);
+
+            int real_socket = backend_cx->connect(false); 
+            if(real_socket > 0) {
+                com()->set_monitor(real_socket);
+                com()->set_poll_handler(real_socket,new_proxy);
+            }
+        //un-test
+        */
         
         if(delete_proxy) {
             INF_("Dropping proxy %s",new_proxy->c_name());
