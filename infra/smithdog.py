@@ -57,6 +57,9 @@ PORTALSSL_PIDFILE='/var/run/smithproxy_portal_ssl.pid'
 INFRA_PATH='/usr/share/smithproxy/infra/'
 BEND_PIDFILE='/var/run/smithproxy_bend.pid'
 
+WOTD_PIDFILE='/var/run/smithproxy_wotd.pid'
+WOTD_SOCKFILE='/var/run/smithproxy_wotd-socket'
+
 LOG_OK_INTERVAL = 60
 
 
@@ -65,6 +68,9 @@ sys.path.append(INFRA_PATH)
 
 from portal import webfr
 from bend   import bend
+
+# inital setup
+from uxserv import ThreadedUxServerDaemon,Responder_OK
 
 
 flog = logging.getLogger('dog')
@@ -282,6 +288,11 @@ if __name__ == "__main__":
     portal_ssl_ = PortalDaemon('portal_ssl',PORTALSSL_PIDFILE)
     portal_ssl_.pwd = PORTAL_PATH
     daemon.sub_daemons.append(portal_ssl_)
+
+
+    wotd_ = ThreadedUxServerDaemon("wotd",WOTD_PIDFILE,WOTD_SOCKFILE,Responder_OK)
+    wotd_.pwd = "/var/run/"
+    daemon.sub_daemons.append(wotd_)
 
     if len(sys.argv) >= 2:
         if 'start' == sys.argv[1]:
