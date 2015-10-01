@@ -150,14 +150,19 @@ class Daemon:
         if pid:
             message = "pidfile %s already exist. Daemon already running?"
             logging.error(self.nicename + ": " + message % self.pidfile)
-            return
+            return False
         
         # Start the daemon
         if not self.daemonize():
             logging.error(self.nicename + ": " + "failed to daemonize, cannot run!")
-            return
+            return False
             
-        self.run()
+        if not self.run():
+            return False
+        
+        return True
+        
+
 
     def stop(self):
         Daemon.kill(self.pidfile)
@@ -215,7 +220,11 @@ class Daemon:
 
     def is_running(self):
         try:
-            os.kill(pid, 0)
+            pid = self.getpid()
+            if pid:
+                os.kill(pid, 0)
+                return True
+                
         except OSError, err:
             err = str(err)
             if err.find("No such process") > 0:
@@ -224,12 +233,16 @@ class Daemon:
                 return False
             else:
                 return True
+            
+        return False
 
     def restart(self):
         """
         Restart the daemon
         """
-        self.stop()
+        if self.is_running():
+            self.stop()
+            
         self.start()
 
     def run(self):
@@ -238,6 +251,7 @@ class Daemon:
         daemonized by start() or restart().
         """
         logging.info(self.nicename + ": default run routine!")
+        return True
 
     def drop_privileges(self,uid_name='nobody', gid_name='nogroup'):
         if os.getuid() != 0:
