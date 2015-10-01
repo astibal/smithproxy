@@ -60,7 +60,7 @@ class WotResult:
             k = self.result.keys()[0]
             return self.result[k][comp]
                 
-        except IndexError:astiba
+        except IndexError:
             pass
         except KeyError:
             pass

@@ -68,10 +68,8 @@ sys.path.append(INFRA_PATH)
 
 from portal import webfr
 from bend   import bend
-
-# inital setup
+from bend.wot   import wotresponder
 from uxserv import ThreadedUxServerDaemon,Responder_OK
-
 
 flog = create_logger("dog",SMITHDOG_LOGFILE)
 
@@ -285,7 +283,7 @@ if __name__ == "__main__":
     daemon.sub_daemons.append(portal_ssl_)
 
 
-    wotd_ = ThreadedUxServerDaemon("wotd",WOTD_PIDFILE,WOTD_SOCKFILE,Responder_OK)
+    wotd_ = ThreadedUxServerDaemon("wotd",WOTD_PIDFILE,WOTD_SOCKFILE,wotresponder.WotResponder)
     wotd_.pwd = "/var/run/"
     daemon.sub_daemons.append(wotd_)
 
