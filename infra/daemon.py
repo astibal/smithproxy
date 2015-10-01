@@ -30,6 +30,18 @@ from signal import SIGKILL
 import logging
 import signal
 
+
+def create_logger(nickname, location):
+
+    flog = logging.getLogger(nickname)
+    hdlr = logging.FileHandler(location)
+    formatter = logging.Formatter('%(asctime)s [%(process)d] [%(levelname)s] %(message)s')
+    hdlr.setFormatter(formatter)
+    flog.addHandler(hdlr) 
+    flog.setLevel(logging.INFO)
+    
+    return flog
+
 class Daemon:
     """
     A generic daemon class.

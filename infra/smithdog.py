@@ -31,7 +31,7 @@
 """
 
 import sys, time
-from daemon import Daemon
+from daemon import Daemon,create_logger
 import subprocess
 import distutils
 import logging
@@ -73,12 +73,7 @@ from bend   import bend
 from uxserv import ThreadedUxServerDaemon,Responder_OK
 
 
-flog = logging.getLogger('dog')
-hdlr = logging.FileHandler(SMITHDOG_LOGFILE)
-formatter = logging.Formatter('%(asctime)s [%(process)d] [%(levelname)s] %(message)s')
-hdlr.setFormatter(formatter)
-flog.addHandler(hdlr) 
-flog.setLevel(logging.INFO)
+flog = create_logger("dog",SMITHDOG_LOGFILE)
 
 class PortalDaemon(Daemon):
     def __init__(self, nicename, pidfile, stdin='/dev/null', stdout='/dev/null', stderr='/dev/null'):
