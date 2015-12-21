@@ -1,6 +1,7 @@
 # Smithproxy README#
 
 Smithproxy is free transparent proxy software. It utilizes TPROXY and is capable to proxy TCP and UDP connnections.
+It does have its own web page: [www.smithproxy.org](http://www.smithproxy.org)
 
 ##Features:##
 * SSL Mitm with certificate resigning -- trusted CA in browser will prevent certificate warnings
