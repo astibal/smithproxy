@@ -31,6 +31,8 @@
 #include <shmtable.hpp>
 
 Config cfgapi;
+time_t system_started;
+
 std::map<std::string,AddressObject*> cfgapi_obj_address;
 std::map<std::string,range> cfgapi_obj_port;
 std::map<std::string,int> cfgapi_obj_proto;
@@ -65,6 +67,8 @@ bool cfgapi_init(const char* fnm) {
         ERR_("Parse error in %s at %s:%d - %s", fnm, pex.getFile(), pex.getLine(), pex.getError());
         return false;
     }
+    
+    system_started = ::time(nullptr);
     
     return true;
 }

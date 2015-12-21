@@ -23,6 +23,7 @@
 #include <vector>
 #include <map>
 #include <mutex>
+#include <ctime>
  
 #include <libconfig.h++>
 #include <cidr.hpp>
@@ -43,6 +44,8 @@
     }                       \
 
 using namespace libconfig;
+
+extern time_t system_started;
 extern Config cfgapi;
 extern std::map<std::string,AddressObject*> cfgapi_obj_address;
 extern std::map<std::string,range> cfgapi_obj_port;

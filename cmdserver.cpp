@@ -37,6 +37,7 @@
 #include <logger.hpp>
 #include <cmdserver.hpp>
 #include <cfgapi.hpp>
+#include <timeops.hpp>
 
 #include <socle.hpp>
 #include <sslcom.hpp>
@@ -65,19 +66,24 @@ void load_defaults() {
     orig_sslca_loglevel= SSLCertStore::log_level_ref();
 }
 
-void cmd_show_version(struct cli_def* cli) {
+void cmd_show_status(struct cli_def* cli) {
     
-    cli_print(cli,":connected using socket %d",cli->client->_fileno);
-    cli_print(cli,"Smithproxy: %s%s",SMITH_VERSION,SMITH_DEVEL ? " -- !! development version !!" : "");
-    cli_print(cli, "Socle     : %s%s",SOCLE_VERSION,SOCLE_DEVEL ? " -- !! development version !!" : "");
+    //cli_print(cli,":connected using socket %d",cli->client->_fileno);
+  
+    cli_print(cli,"Version: %s%s",SMITH_VERSION,SMITH_DEVEL ? " (dev)" : "");
+    cli_print(cli,"Socle: %s%s",SOCLE_VERSION,SOCLE_DEVEL ? " (dev)" : "");
+    cli_print(cli,"");
+    time_t uptime = time(nullptr) - system_started;
+    cli_print(cli,"Uptime: %s",uptime_string(uptime).c_str());
+ 
 }
 
-int cli_show_version(struct cli_def *cli, const char *command, char *argv[], int argc)
+int cli_show_status(struct cli_def *cli, const char *command, char *argv[], int argc)
 {
     //cli_print(cli, "called %s with %s, argc %d\r\n", __FUNCTION__, command, argc);
 
     
-    cmd_show_version(cli);
+    cmd_show_status(cli);
     return CLI_OK;
 }
 
@@ -463,7 +469,7 @@ void client_thread(int client_socket) {
 
         // Set up 2 commands "show counters" and "show junk"
         show  = cli_register_command(cli, NULL, "show", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show basic information");
-                cli_register_command(cli, show, "version", cli_show_version, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show smithproxy version");
+                cli_register_command(cli, show, "status", cli_show_status, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show smithproxy status");
         diag  = cli_register_command(cli, NULL, "diag", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose commands helping to troubleshoot");
             diag_ssl = cli_register_command(cli, diag, "ssl", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "ssl related troubleshooting commands");
                 diag_ssl_cache = cli_register_command(cli, diag_ssl, "cache", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl certificate cache");
