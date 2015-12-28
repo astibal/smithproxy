@@ -19,6 +19,8 @@
 
 
 import BaseHTTPServer, SimpleHTTPServer
+from SocketServer import ThreadingMixIn
+
 import ssl
 import CGIHTTPServer
 import pylibconfig2 as cfg
@@ -28,7 +30,11 @@ import time
 import logging
 
 
-def run_plaintext(cfg_api, server_class=BaseHTTPServer.HTTPServer,
+class ThreadingCGIServer(ThreadingMixIn,BaseHTTPServer.HTTPServer):
+    pass
+
+
+def run_plaintext(cfg_api, server_class=ThreadingCGIServer,
         handler_class=CGIHTTPServer.CGIHTTPRequestHandler):
   
     port = cfg_api.settings.auth_portal.http_port
@@ -39,7 +45,7 @@ def run_plaintext(cfg_api, server_class=BaseHTTPServer.HTTPServer,
     httpd.serve_forever()
 
 
-def run_ssl(cfg_api,server_class=BaseHTTPServer.HTTPServer,
+def run_ssl(cfg_api,server_class=ThreadingCGIServer,
         handler_class=CGIHTTPServer.CGIHTTPRequestHandler):
   
     port = cfg_api.settings.auth_portal.https_port
