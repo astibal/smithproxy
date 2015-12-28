@@ -38,6 +38,8 @@ LDAP_SEARCH_USER='(&(objectClass=person)(${cnid}=${user}))'
 LDAP_MS_DSTN="sAMAccountName"
 LDAP_UX_DSTN="uid"
 
+flog = logging.getLogger('bend')
+
 
 # Some printinng useful for debugging, nothing more.
 def pprint_result(r):
@@ -130,10 +132,16 @@ class LdapCon(object):
         #logging.debug("ldapcon.bind: about to bind with user '%s' and password '%s'" % (u,p)) # :->
         logging.debug("ldapcon.bind: about to bind with user '%s' " % (u,))
         
-        r = self._ldapcon.bind(u,p)
+        r = ''
+        try:
+            r = self._ldapcon.bind(u,p)
+        except ldap.LDAPError, e:
+            flog.error("ldap.bind failure: %s" % (str(e),))
+            return r
+            
         logging.debug("ldapcon.bind: bind result: '%s'" % (str(r),))
         
-        #print "bind returns: %d" % r
+
         rr = self._ldapcon.whoami_s()
         logging.debug("ldapcon.bind: whoami test result '" + str(rr) + "'")
         #print "whoami returns: '%s'" % rr

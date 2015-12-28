@@ -691,11 +691,22 @@ class AuthManager:
         source = target.split("@")[0]
         group = target.split("@")[1]
         
+        user_dn = None
+        group_list = []
+        
         l = ldapcon.LdapSearch()
         l.updateProfile(self.sources_ldap_db[source])
         l.init()
-        l.bind()
-        user_dn, group_list = l.authenticate_user(username,password)
+        if l.bind() != '':
+            flog.debug("authenticate: LDAP: searching for user'%s' in '%s'" % (username,target))
+            user_dn, group_list = l.authenticate_user(username,password)
+            if user_dn:
+                flog.debug("authenticate: LDAP: found user'%s' in '%s': DN=%s, GROUPS=%s" % (username,target,user_dn,str(group_list)))
+            else:
+                flog.error("authenticate: LDAP: unable to find user'%s' in '%s'" % (username,target))
+                
+        else:
+            flog.error("authenticate: LDAP: unable to bind to search for user'%s' in '%s'" % (username,target))
     
         flog.debug("authenticate_check_ldap: result: %s:%s"  % (str(user_dn),str(group_list)))
 
