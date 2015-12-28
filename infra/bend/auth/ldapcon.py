@@ -75,7 +75,7 @@ class LdapCon(object):
     @staticmethod
     def empty_profile():
         profile = {}
-        profile["network_timeout"] = 1000
+        profile["network_timeout"] = 10
         profile["bind_dn"] = 'dc='
         profile["bind_pw"] = ''
         profile["bind_uri"] = ''
@@ -90,7 +90,7 @@ class LdapCon(object):
         self.profile.update(u)
 
     # initialize internal ldap connection
-    def init(self,timeout=5):
+    def init(self):
         self._ldapcon = None
         
         logging.debug("ldapcon.init:")
@@ -106,9 +106,13 @@ class LdapCon(object):
         logging.debug("ldapcon.init: uri: " + self.profile["bind_uri"])
 
         self._ldapcon = ldap.initialize(self.profile["bind_uri"])
-        self._ldapcon.set_option(ldap.OPT_NETWORK_TIMEOUT,timeout)
+
+        try:
+            self.network_timeout = self.profile["network_timeout"]
+        except KeyError:
+            pass
         
-        self.network_timeout = self.profile["network_timeout"]
+        self._ldapcon.set_option(ldap.OPT_NETWORK_TIMEOUT,self.network_timeout)
         
         logging.debug("ldapcon.init: ok")
         
