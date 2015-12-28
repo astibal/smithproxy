@@ -192,7 +192,7 @@ class TokenTable(ShmTable):
         tt = t[:t_i]
         uu = u[:u_i]
         
-        flog.info("TokenTable::on_new_entry: " + tt + ":" + uu)
+        flog.debug("TokenTable::on_new_entry: " + tt + ":" + uu)
         self.tokens[tt] = uu
         self.life_queue(tt)
         
