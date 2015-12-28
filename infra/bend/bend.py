@@ -399,15 +399,18 @@ class AuthManager:
                         else:
                             flog.debug("authenticate_check: investigating member target %s: user matches" % (m,))
 
+                            cur_ret = 0
+
                             if is_user:
-                                ret += self.authenticate_check_local(ip,username,password,identities)
+                                cur_ret = self.authenticate_check_local(ip,username,password,identities)
+                                ret += cur_ret
                             else:
-                                #flog.debug("authenticate_check: investigating member target %s: non-local users not yet implemented" % (m,))
-                                ret += self.authenticate_check_ldap(ip,username,password,identities,m)
+                                cur_ret = self.authenticate_check_ldap(ip,username,password,identities,m)
+                                ret += cur_ret
                                 
-                            if ret:
-                                flog.debug("authenticate_check: investigating member target %s: authentication OK!" % (m,))
-                                ret += 1
+                            if cur_ret > 0:
+                                flog.info("authenticate: user %s authenticated in element %s in %s" % (username,m,i))
+                                #ret += 1
                                 if i not in self.address_identities[ip]:
                                     self.address_identities[ip].append(i)
                                     

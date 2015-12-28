@@ -95,17 +95,17 @@ class LdapCon(object):
     def init(self):
         self._ldapcon = None
         
-        logging.debug("ldapcon.init:")
+        flog.debug("ldapcon.init:")
         
         if self.profile["bind_uri"] == '' and "ip" in self.profile.keys():
             self.profile["bind_uri"] = "ldap://" + self.profile["ip"]
-            logging.debug("ldapcon.init: specifying uri using ip key")
+            flog.debug("ldapcon.init: specifying uri using ip key")
             
             if "port" in self.profile:
                 if self.profile["port"] != '' or not self.profile["port"]:
                     self.profile["bind_uri"]+=":"+str(self.profile["port"])
 
-        logging.debug("ldapcon.init: uri: " + self.profile["bind_uri"])
+        flog.debug("ldapcon.init: uri: " + self.profile["bind_uri"])
 
         self._ldapcon = ldap.initialize(self.profile["bind_uri"])
 
@@ -116,11 +116,11 @@ class LdapCon(object):
         
         self._ldapcon.set_option(ldap.OPT_NETWORK_TIMEOUT,self.network_timeout)
         
-        logging.debug("ldapcon.init: ok")
+        flog.debug("ldapcon.init: ok")
         
     def bind(self,custom_u=None,custom_p=None):
         
-        logging.debug("ldapcon.bind:")
+        flog.debug("ldapcon.bind:")
         u = self.profile["bind_dn"]
         p = self.profile["bind_pw"]
         
@@ -129,8 +129,8 @@ class LdapCon(object):
         if custom_p:
             p = custom_p
     
-        #logging.debug("ldapcon.bind: about to bind with user '%s' and password '%s'" % (u,p)) # :->
-        logging.debug("ldapcon.bind: about to bind with user '%s' " % (u,))
+        #flog.debug("ldapcon.bind: about to bind with user '%s' and password '%s'" % (u,p)) # :->
+        flog.debug("ldapcon.bind: about to bind with user '%s' " % (u,))
         
         r = ''
         try:
@@ -139,17 +139,17 @@ class LdapCon(object):
             flog.error("ldap.bind failure: %s" % (str(e),))
             return r
             
-        logging.debug("ldapcon.bind: bind result: '%s'" % (str(r),))
+        flog.debug("ldapcon.bind: bind result: '%s'" % (str(r),))
         
 
         rr = self._ldapcon.whoami_s()
-        logging.debug("ldapcon.bind: whoami test result '" + str(rr) + "'")
+        flog.debug("ldapcon.bind: whoami test result '" + str(rr) + "'")
         #print "whoami returns: '%s'" % rr
         if rr == '':
-            logging.info(self.profile["bind_uri"] + ": invalid credentials check for user '%s'" % (str(u),))
+            flog.info(self.profile["bind_uri"] + ": invalid credentials check for user '%s'" % (str(u),))
             r = ''
         
-        logging.debug("ldapcon.bind: result: '%s'" % (str(r),))
+        flog.debug("ldapcon.bind: result: '%s'" % (str(r),))
         return r
     
     def raw_query(self, base, query, filter=None, scope=ldap.SCOPE_SUBTREE):
@@ -198,46 +198,46 @@ class LdapSearch(LdapCon):
 
     def search_user_dn(self, username, query_dict=None):
         r = None
-        logging.debug("ldapsearch.search_user_dn: ")
+        flog.debug("ldapsearch.search_user_dn: ")
         try:
-            logging.debug("ldapsearch.search_user_dn: using template: " + self.profile["user"])
+            flog.debug("ldapsearch.search_user_dn: using template: " + self.profile["user"])
             template = string.Template(self.profile["user"])
             
             q = template.substitute(cnid=self.profile["cnid"],user=username) 
-            logging.debug("ldapsearch.search_user_dn: query: " + q)
+            flog.debug("ldapsearch.search_user_dn: query: " + q)
             #print "DEBUG: searchUser query=\'%s\'" % q
 
             r = self.raw_query(self.profile["base_dn"], q, 
                                 self.profile["filter"],
                                 self.profile["scope"])
-            logging.debug("ldapsearch.search_user_dn: query result: " + str(r))
+            flog.debug("ldapsearch.search_user_dn: query result: " + str(r))
         except ldap.error,e:
-            logging.debug("ldapsearch.search_user_dn: query exception caught: " + str(e))
+            flog.debug("ldapsearch.search_user_dn: query exception caught: " + str(e))
         except KeyError,e:
-            logging.debug("ldapsearch.search_user_dn: query exception caught: " + str(e))
+            flog.debug("ldapsearch.search_user_dn: query exception caught: " + str(e))
 
-        logging.debug("ldapsearch.search_user_dn: returning %d objects" % (len(r),))
+        flog.debug("ldapsearch.search_user_dn: returning %d objects" % (len(r),))
         return r
 
     def authenticate_user(self,username,password,lookup_only=False):
-        logging.debug("ldapsearch.authenticate_user: FIND")
+        flog.debug("ldapsearch.authenticate_user: FIND")
         r = self.search_user_dn(username)
         if r:
-            logging.debug("ldapsearch.authenticate_user: BIND")
+            flog.debug("ldapsearch.authenticate_user: BIND")
             self.init()
             res = self.bind(r[0][0],password)
             #print "Authenticate: %d" % res
             if res == '' and not lookup_only:
-                logging.debug("ldapsearch.authenticate_user: FAILED")
+                flog.debug("ldapsearch.authenticate_user: FAILED")
                 return (None,None)
             
-            logging.debug("ldapsearch.authenticate_user: GROUPS")
+            flog.debug("ldapsearch.authenticate_user: GROUPS")
             groups = self.groups_user_dn(r[0][0])
-            logging.debug("ldapsearch.authenticate_user: %d group(s) found" % (len(groups),))
+            flog.debug("ldapsearch.authenticate_user: %d group(s) found" % (len(groups),))
             
             return (r[0][0],groups)
         
-        logging.debug("ldapsearch.authenticate_user: NOT FOUND")
+        flog.debug("ldapsearch.authenticate_user: NOT FOUND")
         return (None,None)
     
     def groups_user_dn(self,user_dn):
