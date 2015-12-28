@@ -784,6 +784,31 @@ int cfgapi_load_obj_profile_content() {
                 a->name = name;
                 cfgapi_obj_profile_content[name] = a;
                 
+                if(cur_object.exists("replace_rules")) {
+                    int jnum = cur_object["replace_rules"].getLength();
+                    DIA_("replace rules in profile '%s', size %d",name.c_str(),jnum);
+                    for (int j = 0; j < jnum; j++) {
+                        Setting& cur_replace_rule = cur_object["replace_rules"][j];
+
+                        std::string m;
+                        std::string r;
+                        cur_replace_rule.lookupValue("match",m);
+                        cur_replace_rule.lookupValue("replace",r);
+                        
+                        if(m.size() > 0 && r.size() > 0) {
+                            DIA_("    [%d] match '%s' and replace with '%s'",j,m.c_str(),r.c_str());
+                            ProfileContentReplace p;
+                            p.match = m;
+                            p.replace = r;
+                            a->replace_rules.push_back(p);
+                            
+                        } else {
+                            ERR_("    [%d] unfinished replace policy",j);
+                        }
+                    }
+                }
+                
+                
                 DIA_("cfgapi_load_obj_profile_content: '%s': ok",name.c_str());
             } else {
                 DIA_("cfgapi_load_obj_profile_content: '%s': not ok",name.c_str());

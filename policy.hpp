@@ -88,6 +88,11 @@ struct ProfileDetection {
     std::string name;
 };
 
+struct ProfileContentReplace {
+    std::string match;
+    std::string replace;
+};
+
 struct ProfileContent {
     /*
      *  Quite obvious: if true, content of proxy transmission will be written to the 
@@ -95,7 +100,10 @@ struct ProfileContent {
      */
     bool write_payload = false;
     std::string name;
+    
+    std::vector<ProfileContentReplace> replace_rules;
 };
+
 
 struct ProfileTls {
     bool inspect = false;
