@@ -1126,6 +1126,12 @@ int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
                 DIA_("cfgapi_obj_policy_apply: policy content profile: write payload: %d", pc->write_payload);
                 mitm_proxy->write_payload(pc->write_payload);
                 pc_name = pc->name.c_str();
+		
+		if(pc->replace_rules.size() > 0) {
+		    DIA_("cfgapi_obj_policy_apply: policy content profile: applying content replace rules, size %d", pc->replace_rules.size());
+		    mitm_proxy->init_content_replace();
+		    mitm_proxy->content_replace(pc->replace_rules);
+		}
             }
             else if(cfgapi.getRoot()["settings"].lookupValue("default__payload",cfg_wrt)) {
                 DIA_("cfgapi_obj_policy_apply: global content profile: %d", cfg_wrt);
