@@ -42,7 +42,7 @@ protected:
     logon_info identity_;
     
     std::vector<baseHostCX*> backends_;
-    std::vector<ProfileContentReplace>* content_replace_ = nullptr; //save some space and store it as a pointer. Init it only when needed and delete in dtor.
+    std::vector<ProfileContentRule>* content_rule_ = nullptr; //save some space and store it as a pointer. Init it only when needed and delete in dtor.
     
 public: 
     bool opt_auth_authenticate = false;
@@ -87,10 +87,10 @@ public:
     void erase_backend_cx(baseHostCX*);
     
     void init_content_replace();
-    std::vector<ProfileContentReplace>* content_replace() { return content_replace_; }    
-    void content_replace(std::vector<ProfileContentReplace>& x) { 
+    std::vector<ProfileContentRule>* content_rule() { return content_rule_; }    
+    void content_replace(std::vector<ProfileContentRule>& x) { 
 	for(auto i: x) {
-	    content_replace_->push_back(i);
+	    content_rule_->push_back(i);
 	}
     }
     

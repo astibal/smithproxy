@@ -88,9 +88,10 @@ struct ProfileDetection {
     std::string name;
 };
 
-struct ProfileContentReplace {
+struct ProfileContentRule {
     std::string match;
     std::string replace;
+    bool fill_length = false;
 };
 
 struct ProfileContent {
@@ -101,7 +102,7 @@ struct ProfileContent {
     bool write_payload = false;
     std::string name;
     
-    std::vector<ProfileContentReplace> replace_rules;
+    std::vector<ProfileContentRule> content_rules;
 };
 
 

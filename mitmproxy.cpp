@@ -77,8 +77,8 @@ MitmProxy::~MitmProxy() {
         tlog()->left_write("Connection stop\n");
     }
     
-    if(content_replace_ != nullptr) {
-      delete content_replace_;
+    if(content_rule_ != nullptr) {
+      delete content_rule_;
     }
     
     delete tlog_;
@@ -255,10 +255,10 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
     // because we have left bytes, let's copy them into all right side sockets!
     for(typename std::vector<baseHostCX*>::iterator j = this->right_sockets.begin(); j != this->right_sockets.end(); j++) {
         if(!redirected) {
-	    if(content_replace() != nullptr) {
+	    if(content_rule() != nullptr) {
 		buffer b = content_replace_apply(cx->to_read());
 		(*j)->to_write(b);
-		DIA_("mitmproxy::on_left_bytes: original %d bytes replaced with %d bytes",cx->to_read().size(),b.size())
+		DIA___("mitmproxy::on_left_bytes: original %d bytes replaced with %d bytes",cx->to_read().size(),b.size())
 	    } else {
 		(*j)->to_write(cx->to_read());
 		DIA_("mitmproxy::on_left_bytes: %d copied",cx->to_read().size())
@@ -271,10 +271,10 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
     }    
     for(typename std::vector<baseHostCX*>::iterator j = this->right_delayed_accepts.begin(); j != this->right_delayed_accepts.end(); j++) {
         if(!redirected) {
-	    if(content_replace() != nullptr) {
+	    if(content_rule() != nullptr) {
 		buffer b = content_replace_apply(cx->to_read());
 		(*j)->to_write(b);
-		DIA_("mitmproxy::on_left_bytes: original %d bytes replaced with %d bytes into delayed",cx->to_read().size(),b.size())
+		DIA___("mitmproxy::on_left_bytes: original %d bytes replaced with %d bytes into delayed",cx->to_read().size(),b.size())
 	    } else {	  
 		(*j)->to_write(cx->to_read());
 		DIA_("mitmproxy::on_left_bytes: %d copied to delayed",cx->to_read().size())
@@ -307,22 +307,22 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
     }
     
     for(typename std::vector<baseHostCX*>::iterator j = this->left_sockets.begin(); j != this->left_sockets.end(); j++) {
-	if(content_replace() != nullptr) {
+	if(content_rule() != nullptr) {
 	    buffer b = content_replace_apply(cx->to_read());
 	    (*j)->to_write(b);
-	    DIA_("mitmproxy::on_right_bytes: original %d bytes replaced with %d bytes",cx->to_read().size(),b.size())
+	    DIA___("mitmproxy::on_right_bytes: original %d bytes replaced with %d bytes",cx->to_read().size(),b.size())
 	} else {      
 	    (*j)->to_write(cx->to_read());
 	    DIA_("mitmproxy::on_right_bytes: %d copied",cx->to_read().size())
 	}
     }
     for(typename std::vector<baseHostCX*>::iterator j = this->left_delayed_accepts.begin(); j != this->left_delayed_accepts.end(); j++) {
-	if(content_replace() != nullptr) {
+	if(content_rule() != nullptr) {
 	    buffer b = content_replace_apply(cx->to_read());
 	    (*j)->to_write(b);
-	    DIA_("mitmproxy::on_right_bytes: original %d bytes replaced with %d bytes into delayed",cx->to_read().size(),b.size())
+	    DIA___("mitmproxy::on_right_bytes: original %d bytes replaced with %d bytes into delayed",cx->to_read().size(),b.size())
 	} else {      
-	    (*j)->to_write(cx->to_read());
+	    (*j)->to_write(cx->to_read()); 
 	    DIA_("mitmproxy::on_right_bytes: %d copied to delayed",cx->to_read().size())
 	}
     }
@@ -511,12 +511,12 @@ void MitmProxy::handle_internal_data(baseHostCX* cx) {
 
 void MitmProxy::init_content_replace() {
     
-    if(content_replace_ != nullptr) {
+    if(content_rule_ != nullptr) {
 	DIAS_("MitmProxy::init_content_replace: deleting old replace rules");
-	delete content_replace_;
+	delete content_rule_;
     }
     
-    content_replace_ = new std::vector<ProfileContentReplace>;
+    content_rule_ = new std::vector<ProfileContentRule>;
 }
 
 buffer MitmProxy::content_replace_apply(buffer b) {
@@ -524,15 +524,20 @@ buffer MitmProxy::content_replace_apply(buffer b) {
     std::string result = data;
     
     int stage = 0;
-    for(auto i = content_replace()->begin(); i != content_replace()->end(); ++i) {
-	ProfileContentReplace& profile = (*i);
+    for(auto i = content_rule()->begin(); i != content_rule()->end(); ++i) {
+	ProfileContentRule& profile = (*i);
 	
 	try {
-	  std::regex re_match(profile.match.c_str());
-	  std::string repl = profile.replace;
-	  
-	  result = std::regex_replace(result, re_match, repl);
-	  DEB_("Replacing bytes[stage %d]:",stage);
+            std::regex re_match(profile.match.c_str());
+            std::string repl = profile.replace;
+            
+            if(profile.fill_length) {
+                result = regex_replace_fill(result, profile.match, repl);
+            }
+            else {
+                result = std::regex_replace(result, re_match, repl);              
+            }
+            DIA___("Replacing bytes[stage %d]:",stage);
 	}
 	catch(std::regex_error e) {
 	  NOT_("MitmProxy::content_replace_apply: failed to replace string: %s",e.what());
@@ -548,7 +553,7 @@ buffer MitmProxy::content_replace_apply(buffer b) {
     buffer ret_b;
     ret_b.append(result.c_str(),result.size());
     
-    DUM_("Replacing bytes (%d):\n%s\n# with bytes(%d):\n%s",data.size(),hex_dump(b).c_str(),ret_b.size(),hex_dump(ret_b).c_str());
+    DUM___("Replacing bytes (%d):\n%s\n# with bytes(%d):\n%s",data.size(),hex_dump(b).c_str(),ret_b.size(),hex_dump(ret_b).c_str());
     return ret_b;
 }
 
