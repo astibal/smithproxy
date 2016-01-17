@@ -553,6 +553,7 @@ buffer MitmProxy::content_replace_apply(buffer b) {
     buffer ret_b;
     ret_b.append(result.c_str(),result.size());
     
+    DIA___("content rewritten: original %d bytes with new %d bytes.",b.size(),ret_b.size());
     DUM___("Replacing bytes (%d):\n%s\n# with bytes(%d):\n%s",data.size(),hex_dump(b).c_str(),ret_b.size(),hex_dump(ret_b).c_str());
     return ret_b;
 }
