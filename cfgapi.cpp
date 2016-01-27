@@ -795,6 +795,7 @@ int cfgapi_load_obj_profile_content() {
                         bool action_defined = false;
                         
                         bool fill_length = false;
+                        int replace_each_nth = 0;
                         
                         cur_replace_rule.lookupValue("match",m);
                         
@@ -804,6 +805,7 @@ int cfgapi_load_obj_profile_content() {
                         
                         //optional
                         cur_replace_rule.lookupValue("fill_length",fill_length);
+                        cur_replace_rule.lookupValue("replace_each_nth",replace_each_nth);
                         
                         if(m.size() > 0 && action_defined) {
                             DIA_("    [%d] match '%s' and replace with '%s'",j,m.c_str(),r.c_str());
@@ -811,6 +813,8 @@ int cfgapi_load_obj_profile_content() {
                             p.match = m;
                             p.replace = r;
                             p.fill_length = fill_length;
+                            p.replace_each_nth = replace_each_nth;
+
                             a->content_rules.push_back(p);
                             
                         } else {

@@ -92,6 +92,8 @@ struct ProfileContentRule {
     std::string match;
     std::string replace;
     bool fill_length = false;
+    int replace_each_nth = 0;
+    int replace_each_counter_ = 0;
 };
 
 struct ProfileContent {

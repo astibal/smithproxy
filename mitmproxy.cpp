@@ -525,25 +525,49 @@ buffer MitmProxy::content_replace_apply(buffer b) {
     
     int stage = 0;
     for(auto i = content_rule()->begin(); i != content_rule()->end(); ++i) {
-	ProfileContentRule& profile = (*i);
-	
-	try {
+        ProfileContentRule& profile = (*i);
+        
+        try {
             std::regex re_match(profile.match.c_str());
             std::string repl = profile.replace;
             
-            if(profile.fill_length) {
-                result = regex_replace_fill(result, profile.match, repl);
+            if(profile.replace_each_nth != 0) {
+
+                // unfortunately std::regex_replace doesn't return if it really replaced something
+                // ... which is no problem if we don't care. But in case we want to replace only 
+                // .... nth occurence, we have to do extra search to check (requiring one extra regex match).
+                std::smatch sm;
+                bool is_there = std::regex_search(result,sm,re_match);
+
+                if(is_there) {
+                    profile.replace_each_counter_++;
+                    if(profile.replace_each_counter_ >= profile.replace_each_nth) {
+                        
+                        if(profile.fill_length) {
+                            result = regex_replace_fill(result, profile.match, repl);
+                        } else {
+                            result = std::regex_replace(result, re_match, repl);              
+                        }
+                        profile.replace_each_counter_ = 0;
+                        DIA___("Replacing bytes[stage %d]: n-th counter hit",stage);
+                    }
+                }
+                
+            } else {
+                if(profile.fill_length) {
+                    result = regex_replace_fill(result, profile.match, repl);
+                } else {
+                    result = std::regex_replace(result, re_match, repl);              
+                }
             }
-            else {
-                result = std::regex_replace(result, re_match, repl);              
-            }
+
             DIA___("Replacing bytes[stage %d]:",stage);
-	}
-	catch(std::regex_error e) {
-	  NOT_("MitmProxy::content_replace_apply: failed to replace string: %s",e.what());
-	}
-	
-	++stage;
+        }
+        catch(std::regex_error e) {
+        NOT_("MitmProxy::content_replace_apply: failed to replace string: %s",e.what());
+        }
+        
+        ++stage;
     }
     
     
