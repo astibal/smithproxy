@@ -1276,10 +1276,11 @@ bool cfgapi_obj_policy_apply_tls(ProfileTls* pt, baseCom* xcom) {
             sslcom->opt_pfs = pt->use_pfs;
             sslcom->opt_ocsp_enabled = pt->ocsp_stapling;
             sslcom->opt_ocsp_mode = pt->ocsp_stapling_mode;
-            
-            if(pt->sni_filter_bypass.ptr()->size() > 0) {
-                sslcom->sni_filter_to_bypass().ref(pt->sni_filter_bypass);
-            }
+       
+            if(pt->sni_filter_bypass.valid())
+                if(pt->sni_filter_bypass.ptr()->size() > 0) {
+                    sslcom->sni_filter_to_bypass().ref(pt->sni_filter_bypass);
+                }
             
             tls_applied = true;
         }        
