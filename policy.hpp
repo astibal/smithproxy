@@ -29,6 +29,8 @@
 #include <ranges.hpp>
 #include <addrobj.hpp>
 
+#include <sobject.hpp>
+
 #define POLICY_ACTION_DENY  0
 #define POLICY_ACTION_PASS  1
 
@@ -118,6 +120,8 @@ struct ProfileTls {
     bool ocsp_stapling = false;
     int  ocsp_stapling_mode = 0; // 0 = loose, 1 = strict, 2 = require
     std::string name;
+    
+    socle::spointer_vector_string sni_filter_bypass;
 };
 
 

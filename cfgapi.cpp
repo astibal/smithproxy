@@ -868,6 +868,21 @@ int cfgapi_load_obj_profile_tls() {
                 cur_object.lookupValue("ocsp_stapling",a->ocsp_stapling);
                 cur_object.lookupValue("ocsp_stapling_mode",a->ocsp_stapling_mode);
                 
+                if(cur_object.exists("sni_filter_bypass")) {
+                        Setting& sni_filter = cur_object["sni_filter_bypass"];
+                        
+                        //init only when there is something
+                        int sni_filter_len = sni_filter.getLength();
+                        if(sni_filter_len > 0) {
+                                a->sni_filter_bypass.ptr(new std::vector<std::string>);
+                                for(int j = 0; j < sni_filter_len; ++j) {
+                                    const char* elem = sni_filter[j];
+                                    a->sni_filter_bypass.ptr()->push_back(elem);
+                                }
+                        }
+                }
+                
+                
                 cfgapi_obj_profile_tls[name] = a;
                 
                 DIA_("cfgapi_load_obj_profile_tls: '%s': ok",name.c_str());
@@ -1261,6 +1276,10 @@ bool cfgapi_obj_policy_apply_tls(ProfileTls* pt, baseCom* xcom) {
             sslcom->opt_pfs = pt->use_pfs;
             sslcom->opt_ocsp_enabled = pt->ocsp_stapling;
             sslcom->opt_ocsp_mode = pt->ocsp_stapling_mode;
+            
+            if(pt->sni_filter_bypass.ptr()->size() > 0) {
+                sslcom->sni_filter_to_bypass().ref(pt->sni_filter_bypass);
+            }
             
             tls_applied = true;
         }        
