@@ -98,6 +98,7 @@ static std::string cfg_udp_port;
 static std::string cfg_socks_port;
 
 static std::string config_file;
+bool config_file_check_only = false;
 
 #define LOG_FILENAME_SZ 512
 volatile char crashlog_file[LOG_FILENAME_SZ];
@@ -277,6 +278,7 @@ static struct option long_options[] =
     {"extreme",   no_argument,       &args_debug_flag, EXT},
     
     {"config-file", required_argument, 0, 'c'},
+    {"config-check-only",no_argument,0,'o'},
     {"daemonize", no_argument, 0, 'D'},
     {"version", no_argument, 0, 'v'},
     {0, 0, 0, 0}
@@ -509,7 +511,10 @@ int main(int argc, char *argv[]) {
                 
             case 'c':
                 config_file = std::string(optarg);        
-                break;                
+                break;      
+                
+            case 'o':
+                config_file_check_only = true;
                 
             case 'D':
                 cfg_daemonize = true;
@@ -536,9 +541,18 @@ int main(int argc, char *argv[]) {
         
     // set level to what's in the config
     if (!load_config(config_file)) {
-        FATS_("Error loading config file on startup.");
+        if(config_file_check_only) {
+            FATS_("Config check: error loading config file.");
+        }
+        else {
+            FATS_("Error loading config file on startup.");
+        }
     }
     
+    if(config_file_check_only) {
+        INFS_("Exiting, asked to check config file only.");
+        exit(1);
+    }
 
     if(cfg_mtrace_enable) {
         putenv("MALLOC_TRACE=/var/log/smithproxy_mtrace.log");
