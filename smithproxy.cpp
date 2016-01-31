@@ -263,7 +263,7 @@ void my_terminate (int param) {
 bool load_config(std::string& config_f, bool reload = false);
 void my_usr1 (int param) {
     INFS_("USR1 signal handler started");
-    INFS_("reloading policies and it's objects (no support for reloading other settings!)");
+    INFS_("reloading policies and its objects (no support for reloading other settings!)");
     load_config(config_file,true);
     INFS_("USR1 signal handler finished");
 }
