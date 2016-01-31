@@ -933,18 +933,18 @@ int cfgapi_load_obj_profile_auth() {
     
     int num = 0;
     
-    INFS_("cfgapi_load_obj_profile_auth: start");
+    DIAS_("cfgapi_load_obj_profile_auth: start");
     
-    INFS_("cfgapi_load_obj_profile_auth: portal settings");
+    DIAS_("cfgapi_load_obj_profile_auth: portal settings");
     cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("address",cfgapi_identity_portal_address);
     cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("http_port",cfgapi_identity_portal_port_http);
     cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("https_port",cfgapi_identity_portal_port_https);    
     
-    INFS_("cfgapi_load_obj_profile_auth: profiles");
+    DIAS_("cfgapi_load_obj_profile_auth: profiles");
     if(cfgapi.getRoot().exists("auth_profiles")) {
 
         num = cfgapi.getRoot()["auth_profiles"].getLength();
-        INF_("cfgapi_load_obj_profile_auth: found %d objects",num);
+        DIA_("cfgapi_load_obj_profile_auth: found %d objects",num);
         
         Setting& curr_set = cfgapi.getRoot()["auth_profiles"];
 
@@ -963,16 +963,16 @@ int cfgapi_load_obj_profile_auth() {
             cur_object.lookupValue("resolve",a->resolve);
             
             if(cur_object.exists("identities")) {
-                INFS_("cfgapi_load_obj_profile_auth: profiles: subpolicies exists");
+                DIAS_("cfgapi_load_obj_profile_auth: profiles: subpolicies exists");
                 int sub_pol_num = cur_object["identities"].getLength();
-                INF_("cfgapi_load_obj_profile_auth: profiles: %d subpolicies detected",sub_pol_num);
+                DIA_("cfgapi_load_obj_profile_auth: profiles: %d subpolicies detected",sub_pol_num);
                 for (int j = 0; j < sub_pol_num; j++) {
                     Setting& cur_subpol = cur_object["identities"][j];
                     
                     ProfileSubAuth* n_subpol = new ProfileSubAuth();
                     n_subpol->name = cur_subpol.getName();
                     a->sub_policies[name] = n_subpol;
-                    INF_("cfgapi_load_obj_profile_auth: profiles: %d:%s",j,n_subpol->name.c_str());
+                    DIA_("cfgapi_load_obj_profile_auth: profiles: %d:%s",j,n_subpol->name.c_str());
                 }
             }
             cfgapi_obj_profile_auth[name] = a;
