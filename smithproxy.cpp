@@ -264,7 +264,7 @@ void my_terminate (int param) {
 bool load_config(std::string& config_f, bool reload = false);
 void my_usr1 (int param) {
     DIAS_("USR1 signal handler started");
-    INFS_("reloading policies and its objects.");
+    NOTS_("reloading policies and its objects !!");
     load_config(config_file,true);
     DIAS_("USR1 signal handler finished");
 }
