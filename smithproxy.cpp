@@ -509,7 +509,7 @@ int main(int argc, char *argv[]) {
     /* getopt_long stores the option index here. */
         int option_index = 0;
     
-        char c = getopt_long (argc, argv, "p:v",
+        char c = getopt_long (argc, argv, "p:vo",
                         long_options, &option_index);
         if (c < 0) break;
 
@@ -551,6 +551,7 @@ int main(int argc, char *argv[]) {
     if (!load_config(config_file)) {
         if(config_file_check_only) {
             FATS_("Config check: error loading config file.");
+            exit(1);
         }
         else {
             FATS_("Error loading config file on startup.");
@@ -558,8 +559,8 @@ int main(int argc, char *argv[]) {
     }
     
     if(config_file_check_only) {
-        INFS_("Exiting, asked to check config file only.");
-        exit(1);
+        DIAS_("Exiting, asked to check config file only.");
+        exit(0);
     }
 
     if(cfg_mtrace_enable) {
