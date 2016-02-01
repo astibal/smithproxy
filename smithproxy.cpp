@@ -391,6 +391,10 @@ bool load_config(std::string& config_f, bool reload) {
     
     try {
         
+        if(reload) {
+            cfgapi_cleanup();
+        }
+        
         cfgapi_load_obj_address();
         cfgapi_load_obj_port();
         cfgapi_load_obj_proto();

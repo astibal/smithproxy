@@ -190,7 +190,5 @@ bool PolicyRule::match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r)
 }
 
 PolicyRule::~PolicyRule() {
-    for(auto x: src) {  delete  x; };
-    for(auto x: dst) {  delete  x; };
 }
 
