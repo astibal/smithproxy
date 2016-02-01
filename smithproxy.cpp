@@ -263,10 +263,10 @@ void my_terminate (int param) {
 
 bool load_config(std::string& config_f, bool reload = false);
 void my_usr1 (int param) {
-    INFS_("USR1 signal handler started");
-    INFS_("reloading policies and its objects (no support for reloading other settings!)");
+    DIAS_("USR1 signal handler started");
+    INFS_("reloading policies and its objects.");
     load_config(config_file,true);
-    INFS_("USR1 signal handler finished");
+    DIAS_("USR1 signal handler finished");
 }
 
 static struct option long_options[] =
@@ -389,6 +389,10 @@ bool load_config(std::string& config_f, bool reload) {
         ret = false;
     }
     
+    
+    // Add another level of lock. File is already loaded. We need to apply its content.
+    // lock is needed here to not try to match against potentially empty/partial policy list
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     try {
         
         if(reload) {
