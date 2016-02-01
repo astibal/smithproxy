@@ -134,9 +134,10 @@ case "$1" in
     echo " done"
     echo
 
-    echo "Enabling routing and non-local binds"
+    echo "Enabling routing, non-local binds and stack tuning"
     sysctl -w net.ipv4.ip_forward=1
     sysctl -w net.ipv4.ip_nonlocal_bind=1
+    sysctl -w net.ipv4.tcp_low_latency=1
     echo " done"
 
     echo "Smithproxy iptables chains setup script - start: finished"
