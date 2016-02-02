@@ -99,6 +99,8 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     std::string p;
     n_cx->name();
     n_cx->com()->resolve_socket_src(n_cx->socket(),&h,&p);
+    n_cx->host() = h;
+    n_cx->port() = p;
     
     
     n_cx->peer(target_cx);
