@@ -71,6 +71,7 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
         default:
             new_com = new socksTCPCom();
     }
+    new_com->master(com()->master());
     
     MitmHostCX* n_cx = new MitmHostCX(new_com, s);
     n_cx->paused(true);
@@ -112,7 +113,9 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     n_cx->matched_policy(policy_num);
     target_cx->matched_policy(policy_num);
         
-    target_cx->connect(false);       
+    int real_socket = target_cx->connect(false);
+    com()->set_monitor(real_socket);
+    com()->set_poll_handler(real_socket,this);    
     
     if(ssl) {
 //         ((SSLCom*)n_cx->com())->upgrade_server_socket(n_cx->socket());
