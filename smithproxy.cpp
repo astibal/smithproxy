@@ -535,7 +535,7 @@ int main(int argc, char *argv[]) {
                 
             default:
                 ERR_("unknown option: '%c'",c);
-               abort();                 
+                exit(1);                 
         }
     }
     
@@ -572,6 +572,12 @@ int main(int argc, char *argv[]) {
     // if there is loglevel specified in config file and is bigger than we currently have set, use it
     if(cfgapi_table.logging.level > lout.level()) {
         lout.level(cfgapi_table.logging.level);
+    }
+    
+    if(daemon_exists_pidfile()) {
+        FATS_("There is PID file already in the system.");
+        FATS_("Please make sure smithproxy is not running, remove /var/run/smithproxy.pid and try again.");
+        exit(-5);
     }
     
     if(cfg_daemonize) {

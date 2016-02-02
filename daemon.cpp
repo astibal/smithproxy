@@ -109,6 +109,12 @@ void daemon_unlink_pidfile() {
     unlink(PID_FILE);
 }
 
+bool daemon_exists_pidfile() {
+    struct stat st;
+    int result = stat(PID_FILE, &st);
+    return result == 0;
+}
+
 int daemon_get_limit_fd() {
     struct rlimit r;
     int ret = getrlimit(RLIMIT_NOFILE,&r);
