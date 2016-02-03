@@ -24,6 +24,40 @@ import cgi, cgitb
 import util
 import os
 import SOAPpy
+import traceback
+
+print_exceptions = False
+
+def authenticate(username,password,token):
+    global print_exceptions
+
+    pagename = "Authentication %s"
+    caption = "Authentication %s"
+    msg = 'authentication %s!'
+
+    try:
+        bend = SOAPpy.SOAPProxy("http://localhost:65456/")
+        success,ref = bend.authenticate(ip,username,password,token)
+     
+        if success:
+            util.print_message(pagename % ("succeeded",), 
+                                caption % ("succeeded",),
+                                msg % ("successful! You will be now redirected to originally requested site",),
+                                redirect_url=ref,
+                                redirect_time=0)
+        else:
+            util.print_message(pagename % ("failed",),
+                               caption % ("failed",),
+                               msg % ("failed",),
+                               redirect_url=ref,
+                               redirect_time=1)
+        
+    except Exception,e:
+        if print_exceptions:
+            util.print_message("Whoops!","Exception caught!",str(e) +" " + traceback.format_exc(100))
+        else:
+            util.print_message("Authentication failed","Authentication failed","There was a problem to validate your credentials. Please contact system administrator.")
+
 
 # Create instance of FieldStorage 
 form = cgi.FieldStorage() 
@@ -38,34 +72,5 @@ if "token" in form.keys():
 ip = os.environ["REMOTE_ADDR"]
 ref= os.environ["HTTP_REFERER"]
 
-def authenticate(username,password):
-
-    pagename = "Authentication %s"
-    caption = "<i>Authentication %s</i>"
-    msg_redir = '<small>You will be now redirected to <a href="%s">orignal site</a>.</small>'
-    msg = '<p>... <small>authentication %s!</small></p>'
-
-    try:
-        bend = SOAPpy.SOAPProxy("http://localhost:65456/")
-        success,ref = bend.authenticate(ip,username,password,token)
-     
-        if success:
-            util.print_message(pagename % ("succeeded",), 
-                                caption % ("succeeded",),
-                                msg % ("was successful! You will be now redirected to originally requested site",),
-                                redirect_url=ref,
-                                redirect_time=0)
-        else:
-            util.print_message(pagename % ("failed",),
-                               caption % ("failed",),
-                               msg % ("was not successful!",),
-                               redirect_url=ref,
-                               redirect_time=1)
-        
-    except Exception,e:
-        util.print_message("Whoops!","Exception caught!",str(e))
-
-authenticate(username,password)
-
-
+authenticate(username,password,token)
 

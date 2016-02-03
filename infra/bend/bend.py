@@ -443,7 +443,9 @@ class AuthManager:
         ipa = socket.inet_aton(ip)
         flog.debug("authenticate: request: user %s from %s - token %s" % (username,ip,str(token)))
         ret = False
-        identities = None
+        
+        # make identities as broad as possible. This is safest default, identities are later narrowed down by token data
+        identities = self.identities_db.keys()
 
 
         self.token_shm.acquire()
@@ -487,6 +489,7 @@ class AuthManager:
             # :-D
             ret = True
             if token:
+                # we have some token from www form
                 
                 if token in self.global_token_referer.keys():
                     ref = self.global_token_referer[token]
@@ -494,6 +497,9 @@ class AuthManager:
                     return True,ref
                 else:
                     return True,"http://"+self.portal_address+":"+self.portal_port+"/authenticated.html"
+            else:
+                # we dont have any token from www form
+                return True,"http://"+self.portal_address+":"+self.portal_port+"/authenticated.html"
 
         else:
             flog.warning("authenticate: user " + username + " auth failed from " + ip)
@@ -503,7 +509,7 @@ class AuthManager:
                 flog.debug("token " + token + " global referer: " + ref)
                 return False,"http://"+self.portal_address+":"+self.portal_port+"/cgi-bin/auth.py?token=%s"%(token)
             else:
-                return False,"http://"+self.portal_address+":"+self.portal_port+"/authfail.html"
+                return False,"http://"+self.portal_address+":"+self.portal_port+"/cgi-bin/auth.py?token=0"
 
 
 
