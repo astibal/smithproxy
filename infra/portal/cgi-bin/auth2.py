@@ -47,25 +47,20 @@ def authenticate(username,password):
 
     try:
         bend = SOAPpy.SOAPProxy("http://localhost:65456/")
-        success = bend.authenticate(ip,username,password,token)
+        success,ref = bend.authenticate(ip,username,password,token)
      
         if success:
-            r = None
-            m = msg % ("succeeded",)
-            
-            # if success is positive, check if it's True, or some string
-            if success != True:
-                # string - this means it's redirection URL
-                if success.startswith('http://') or success.startswith('https://'):
-                    r = success
-                else:
-                    r = "http://" + success
-                    
-                m = msg_redir % r
-                
-            util.print_message(pagename % ("succeeded",), caption % ("succeeded",),m,redirect_url=r,redirect_time=0)
+            util.print_message(pagename % ("succeeded",), 
+                                caption % ("succeeded",),
+                                msg % ("was successful! You will be now redirected to originally requested site",),
+                                redirect_url=ref,
+                                redirect_time=0)
         else:
-            util.print_message(pagename % ("failed",),caption % ("failed",),msg % ("failed",))
+            util.print_message(pagename % ("failed",),
+                               caption % ("failed",),
+                               msg % ("was not successful!",),
+                               redirect_url=ref,
+                               redirect_time=1)
         
     except Exception,e:
         util.print_message("Whoops!","Exception caught!",str(e))

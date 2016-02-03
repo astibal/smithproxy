@@ -491,15 +491,21 @@ class AuthManager:
                 if token in self.global_token_referer.keys():
                     ref = self.global_token_referer[token]
                     flog.debug("token " + token + " global referer: " + ref)
-                    return ref
+                    return True,ref
                 else:
-                    return "http://"+self.portal_address+":"+self.portal_port+"/authenticated.html"
+                    return True,"http://"+self.portal_address+":"+self.portal_port+"/authenticated.html"
 
         else:
             flog.warning("authenticate: user " + username + " auth failed from " + ip)
 
+            if token in self.global_token_referer.keys():
+                ref = self.global_token_referer[token]
+                flog.debug("token " + token + " global referer: " + ref)
+                return False,"http://"+self.portal_address+":"+self.portal_port+"/cgi-bin/auth.py?token=%s"%(token)
+            else:
+                return False,"http://"+self.portal_address+":"+self.portal_port+"/authfail.html"
 
-        return ret
+
 
     def save_referer(self,token,ref):
         flog.debug("incoming referer: " + token + " -> " + ref)
