@@ -4,7 +4,7 @@
 #include <logger.hpp>
 
 
-unsigned int IdentityInfo::global_idle_timeout = 3600;
+unsigned int IdentityInfo::global_idle_timeout = 600;
 
 std::unordered_map<std::string,IdentityInfo> auth_ip_map;
 //shared_table<logon_info>  auth_shm_ip_map;
