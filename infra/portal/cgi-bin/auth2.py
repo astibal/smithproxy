@@ -36,21 +36,39 @@ def authenticate(username,password,token):
     msg = 'authentication %s!'
 
     try:
-        bend = SOAPpy.SOAPProxy("http://localhost:65456/")
-        success,ref = bend.authenticate(ip,username,password,token)
-     
-        if success:
-            util.print_message(pagename % ("succeeded",), 
-                                caption % ("succeeded",),
-                                msg % ("successful! You will be now redirected to originally requested site",),
-                                redirect_url=ref,
-                                redirect_time=0)
+        if username:
+            bend = SOAPpy.SOAPProxy("http://localhost:65456/")
+            success,ref = bend.authenticate(ip,username,password,token)
+        
+        
+            xref = ref
+            if token == "0":
+                xref = "/cgi-bin/auth.py?a=z&token=0"
+        
+            if success:
+                xmsg = msg % ("successful! You will be now redirected to originally requested site",)
+                if token == 0:
+                    xmsg = msg % ("successful! You will be redirected to your status page",)
+                
+                util.print_message(pagename % ("succeeded",), 
+                                    caption % ("succeeded",),
+                                    xmsg,
+                                    redirect_url=xref,
+                                    redirect_time=0)
+                    
+            else:
+                util.print_message(pagename % ("failed",),
+                                caption % ("failed",),
+                                msg % ("failed",),
+                                redirect_url=xref,
+                                redirect_time=1)
         else:
-            util.print_message(pagename % ("failed",),
-                               caption % ("failed",),
-                               msg % ("failed",),
-                               redirect_url=ref,
-                               redirect_time=1)
+            util.print_message(" ",
+                            " ",
+                            "...",
+                            redirect_url="/cgi-bin/auth.py?token=%s" % (token,),
+                            redirect_time=0)
+
         
     except Exception,e:
         if print_exceptions:
@@ -65,7 +83,7 @@ form = cgi.FieldStorage()
 # Get data from fields
 username = form.getvalue('username')
 password = form.getvalue('password')
-token = None
+token = "0"
 if "token" in form.keys():
   token = form["token"].value
 

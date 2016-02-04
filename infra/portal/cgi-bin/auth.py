@@ -31,20 +31,18 @@ import logging
 # 	<link rel="stylesheet" type="text/css" href="/css/keyboard.css">
 form = cgi.FieldStorage() 
 
+ip = os.environ["REMOTE_ADDR"]
 ref = os.environ["HTTP_REFERER"]
 
-token = None
+token = "0"
 if "token" in form.keys():
   token = form["token"].value
 
-
-page = """
-<html>
-<head>
-	<title>Authentication required</title>
-	<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=utf-8">
-	<script type="text/javascript">
-	</script>
+logoff = "0";
+if "logoff" in form.keys():
+  logoff = form["logoff"].value
+  
+style = """
     <style media="screen" type="text/css">
         * {
         box-sizing: border-box;
@@ -124,7 +122,17 @@ page = """
         display: block;
         margin-top: 12px;
         }
-    </style>	
+    </style>
+"""
+
+auth_page = """
+<html>
+<head>
+	<title>Authentication required</title>
+	<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=utf-8">
+	<script type="text/javascript">
+	</script>
+    %s
 </head>
 <body>
 
@@ -156,18 +164,60 @@ page = """
 </body>
 </html>"""
 
+
+logged_page = """
+<html>
+<head>
+    <title>Already logged in</title>
+    <META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=utf-8">
+    <script type="text/javascript">
+    </script>
+    %s
+</head>
+<body>
+        <form action="/cgi-bin/auth.py?a=z&logoff=1" method="POST">
+        <div class="login">
+        <div class="login-screen">
+        <div class="app-title">
+        <h2>Logged in</h2>
+            as '<strong>%s</strong>'
+            </br>
+            <small>...</small>
+        </div>
+
+        <input type="submit" value="Login as different user" class="btn btn-primary btn-large btn-block" ></br>
+        </div>
+        </div>
+        </div>        
+        </form>
+</body>
+"""
+
 # use class="keyboardInput" for virtual keyboard below the input field
 
 try:
-    if token:
-        tok_str = "&token="+str(token)
-        print page % (tok_str,)
-    else:
-        print page % ("0",)
-        
     if ref:
         bend = SOAPpy.SOAPProxy("http://localhost:65456/")
         bend.save_referer(token,ref)
+        
+    if token != "0":
+        tok_str = "&token="+str(token)
+        print   auth_page % (style,tok_str,)
+    else:
+        if ip:
+            bend = SOAPpy.SOAPProxy("http://localhost:65456/")
+            logon_info = bend.whois(ip)
+            
+            if logon_info != []:
+                if logoff == "0":
+                    print logged_page % (style,logon_info[1])
+                else:
+                    bend.deauthenticate(ip)
+                    print auth_page % (style,"0",)
+                    
+            else:
+                print   auth_page % (style,"0",)
+                
 
 except Exception, e:
     util.print_message("Error","Error occured:", str(e),"/error.html")

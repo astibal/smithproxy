@@ -31,6 +31,7 @@
 #include <uxcom.hpp>
 
 #include <algorithm>
+#include <ctime>
 
 DEFINE_LOGGING(MitmProxy);
 
@@ -91,6 +92,14 @@ std::string MitmProxy::to_string(int verbosity) {
     }
     
     return r;
+}
+
+
+void MitmProxy::identity_resolved(bool b) {
+    identity_resolved_ = b;
+}
+bool MitmProxy::identity_resolved() {
+    return identity_resolved_;
 }
 
 
@@ -736,6 +745,13 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                         }
                     } else {
                         bool bad_auth = true;
+                        
+                        time_t now = time(nullptr);
+                        if(now > auth_table_refreshed + 5) {
+                            cfgapi_auth_shm_ip_table_refresh();
+                            auth_table_refreshed = now;
+                        }
+                        
                         cfgapi_identity_ip_lock.lock();    
                         auto ip = auth_ip_map.find(just_accepted_cx->host());
                         

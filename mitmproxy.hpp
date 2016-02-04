@@ -38,7 +38,8 @@ protected:
     
     bool write_payload_ = false;
     
-    bool       identity_resolved_ = false;    // meant if attempt has been done, regardless of it's result.
+    bool identity_resolved_ = false;    // meant if attempt has been done, regardless of it's result.
+    bool identity_resolved_time = 0;
     logon_info identity_;
     
     std::vector<baseHostCX*> backends_;
@@ -49,8 +50,8 @@ public:
     bool opt_auth_resolve = false;
     
     
-    inline bool identity_resolved() { return identity_resolved_; };
-    inline void identity_resolved(bool b) { identity_resolved_ = b; };
+    inline bool identity_resolved();
+    inline void identity_resolved(bool b);
     logon_info& identity() { return identity_; }
     void identity(logon_info& i) { identity_ = i; }
     bool resolve_identity(baseHostCX*,bool);
@@ -123,6 +124,8 @@ public:
     static bool ssl_autodetect;
     static bool ssl_autodetect_harder;
     bool detect_ssl_on_plain_socket(int s);
+    
+    time_t auth_table_refreshed = 0;
 };
 
 

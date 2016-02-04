@@ -351,6 +351,19 @@ class AuthManager:
         return non_groups
                     
 
+    def whois(self,ip):
+        if ip in self.logon_shm.logons.keys():
+            return self.logon_shm.logons[ip]
+        
+        return []
+
+    def deauthenticate(self,ip):
+        flog.info("deauthenticate request for IP %s " % (ip,))
+        self.logon_shm.acquire()
+        self.logon_shm.load()       # load new data!
+        self.logon_shm.rem(ip)
+        self.logon_shm.release()
+
     def authenticate_check(self, ip, username, password, identities):
         
         if ip not in self.address_identities.keys():
@@ -522,7 +535,9 @@ class AuthManager:
         
         flog.info("Launching portal on " + self.portal_address + ":" + str(self.portal_port))
         self.server.registerFunction(self.authenticate)
+        self.server.registerFunction(self.deauthenticate)
         self.server.registerFunction(self.save_referer)
+        self.server.registerFunction(self.whois)
         self.server.serve_forever()
 
     def load_config_users(self,user_items):
