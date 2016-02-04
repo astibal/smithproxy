@@ -159,18 +159,17 @@ page = """
 # use class="keyboardInput" for virtual keyboard below the input field
 
 try:
-	if token:
-	  tok_str = "&token="+str(token)
-	  print page % (tok_str,)
-	else:
-	  print page % ('',)
-	  
-        bend = SOAPpy.SOAPProxy("http://localhost:65456/")
+    if token:
+        tok_str = "&token="+str(token)
+        print page % (tok_str,)
+    else:
+        print page % ("0",)
         
-        if ref:
-	    bend.save_referer(token,ref)
+    if ref:
+        bend = SOAPpy.SOAPProxy("http://localhost:65456/")
+        bend.save_referer(token,ref)
 
 except Exception, e:
-	util.print_message("Error","Error occured:", str(e),"/error.html")
-	logging.error("auth.py: exception caught: " + str(e))
+    util.print_message("Error","Error occured:", str(e),"/error.html")
+    logging.error("auth.py: exception caught: " + str(e))
 
