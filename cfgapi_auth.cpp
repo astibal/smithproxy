@@ -40,9 +40,14 @@ int cfgapi_auth_shm_ip_table_refresh()  {
     auth_shm_ip_map.release();
     DEBS_("cfgapi_auth_shm_ip_table_refresh: semaphore released");
     
-    if(l_ip > 0) {
+    if(l_ip >= 0) {
         // new data!
         cfgapi_identity_ip_lock.lock();
+        
+        if(l_ip == 0 && auth_ip_map.size() > 0) {
+            DIAS_("cfgapi_auth_shm_ip_table_refresh: zero sized table received, flusing ip map");
+            auth_ip_map.clear();
+        }
         
         DIA_("cfgapi_auth_shm_ip_table_refresh: new data: version %d, entries %d",auth_shm_ip_map.header_version(),auth_shm_ip_map.header_entries());
         for(typename std::vector<logon_info>::iterator i = auth_shm_ip_map.entries().begin(); i != auth_shm_ip_map.entries().end() ; ++i) {
