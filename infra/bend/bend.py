@@ -157,7 +157,7 @@ class LogonTable(ShmTable):
         if self.normalizing:
             self.normalize = True
 
-        self.logons[ip] = [ip,u.strip(),g.strip()]
+        self.logons[ip] = [ip,u.strip('\x00').strip(),g.strip('\x00').strip()]
         flog.debug("on_new_entry: added " + ip + tag + ", " + u.strip() + ", " + g.strip())
         
 
@@ -245,6 +245,8 @@ class AuthManager:
     def __init__(self):
       self.logon_shm = None
       self.token_shm = None
+      self.last_refresh = time.time()
+      
       self.global_token_referer = {}
       self.server = SOAPpy.ThreadingSOAPServer(("localhost", 65456))
       
@@ -349,11 +351,32 @@ class AuthManager:
                     non_groups.append(member)
                     
         return non_groups
-                    
+    
+    
+    def refresh(self):
+        now = time.time()
+        if now > self.last_refresh + 5:
+            flog.debug("refreshing logon list")
+            self.logon_shm.acquire()
+            self.logon_shm.load()       # load new data!
+            self.logon_shm.release()
+            
+            self.token_shm.acquire()
+            self.token_shm.load()       # load new data!
+            self.token_shm.release()
+            
+            self.last_refresh = now
+            
 
     def whois(self,ip):
+        
+        self.refresh()
+
+        
         if ip in self.logon_shm.logons.keys():
-            return self.logon_shm.logons[ip]
+            ret = self.logon_shm.logons[ip]
+            flog.debug("whois request for IP %s: %s " % (ip,str(ret)))
+            return ret
         
         return []
 
