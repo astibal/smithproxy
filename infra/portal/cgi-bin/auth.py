@@ -53,7 +53,7 @@ style = """
         }
         body {
         font-family: Arial;
-        background-color: #3498DB;
+        background-color: #48617B;
         padding: 50px;
         }
         .login {
