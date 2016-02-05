@@ -173,6 +173,7 @@ extern int cfgapi_auth_shm_token_table_refresh();
 // lookup by ip -> returns pointer IN the auth_ip_map
 extern IdentityInfo* cfgapi_ip_auth_get(std::string&);
 extern void cfgapi_ip_auth_remove(std::string&);
+extern void cfgapi_ip_auth_timeout_check(void);
 
 extern std::recursive_mutex cfgapi_identity_ip_lock;
 extern std::unordered_map<std::string,IdentityInfo> auth_ip_map;

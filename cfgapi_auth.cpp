@@ -57,16 +57,18 @@ int cfgapi_auth_shm_ip_table_refresh()  {
             
             std::unordered_map <std::string, IdentityInfo >::iterator found = auth_ip_map.find(ip);
             if(found != auth_ip_map.end()) {
-                INF_("Updating identity in database: %s",ip.c_str());
+                DIA_("Updating identity in database: %s",ip.c_str());
                 IdentityInfo& id = (*found).second;
                 id.last_logon_info = rt;
+                id.username = rt.username;
                 id.update_groups_vec();
             } else {
-                INF_("New identity in database: %s ",ip.c_str());
                 IdentityInfo i;
                 i.last_logon_info = rt;
+                i.username = rt.username;
                 i.update_groups_vec();
                 auth_ip_map[ip] = i;
+                INF_("New identity in database: ip: %s, username: %s, groups: %s ",ip.c_str(),i.username.c_str(),i.groups.c_str());
             }
             DIA_("cfgapi_auth_shm_ip_table_refresh: loaded: %d,%s,%s",ip.c_str(),rt.username,rt.groups);
         }
@@ -165,5 +167,31 @@ void cfgapi_ip_auth_remove(std::string& host) {
         }
         auth_shm_ip_map.release();
     }
+    cfgapi_identity_ip_lock.unlock();
+}
+
+
+void cfgapi_ip_auth_timeout_check(void) {
+    DIAS_("cfgapi_ip_auth_timeout_check: started");
+    cfgapi_identity_ip_lock.lock();
+    
+    std::set<std::string> to_remove;
+    
+    for(auto& e: auth_ip_map) {
+        const std::string&  ip = e.first;
+        IdentityInfo& id = e.second;
+        
+        DIA_("cfgapi_ip_auth_timeout_check: %s", ip.c_str());
+        if(id.i_timeout()) {
+            DIA_("cfgapi_ip_auth_timeout_check: idle timeout, adding to list %s", ip.c_str());
+            to_remove.insert(ip);
+        }
+    }
+    
+    for(auto tr: to_remove) {
+        cfgapi_ip_auth_remove(tr);
+        INF_("IP address %s identity timed out.", tr.c_str());
+    }
+    
     cfgapi_identity_ip_lock.unlock();
 }
