@@ -170,6 +170,7 @@ logged_page = """
 <head>
     <title>Already logged in</title>
     <META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=utf-8">
+    <meta http-equiv="refresh" content="10">
     <script type="text/javascript">
     </script>
     %s
