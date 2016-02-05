@@ -25,7 +25,7 @@
 
 
 
-struct logon_info {
+struct shm_logon_info {
     char  ip[4];
     char  username[64];
     char  groups[128];
@@ -37,7 +37,7 @@ struct login_token {
 };
 
 int main(void) {
-    shared_table<logon_info> b;
+    shared_table<shm_logon_info> b;
     b.attach(MEM_NAME,MEM_SIZE,SEM_NAME);
 
     printf("smithproxy shared memory tables analyzer:\n");
@@ -56,8 +56,8 @@ int main(void) {
         b.release();
         
 	if(loaded > 0) {
-	    for(std::vector<logon_info>::iterator i = b.entries().begin(); i != b.entries().end() ; ++i) {
-		logon_info& li = (*i);
+	    for(std::vector<shm_logon_info>::iterator i = b.entries().begin(); i != b.entries().end() ; ++i) {
+		shm_logon_info& li = (*i);
 		printf("%s: %16s \t groups: %s\n",inet_ntoa(*(in_addr*)li.ip),li.username,li.groups);
 	    }
 	}

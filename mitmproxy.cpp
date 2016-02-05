@@ -124,7 +124,7 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
     auto ip = auth_ip_map.find(cx->host());
 
     if (ip != auth_ip_map.end()) {
-        logon_info& li = (*ip).second.last_logon_info;
+        shm_logon_info& li = (*ip).second.last_logon_info;
         DIA_("identity found for IP %s: user: %s groups: %s",cx->host().c_str(),li.username, li.groups);
 
         // if update_identity fails, identity is no longer valid!
@@ -136,7 +136,7 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
 
     } else {
         if (insert_guest == true) {
-            logon_info li = logon_info(cx->host().c_str(),"guest","");
+            shm_logon_info li = shm_logon_info(cx->host().c_str(),"guest","");
             
             ret = update_identity(cx);
             identity_resolved(ret);
@@ -164,6 +164,7 @@ bool MitmProxy::update_identity(baseHostCX* cx) {
     
     if (ip != auth_ip_map.end()) {
         IdentityInfo& id = (*ip).second;
+        
         DIA_("updating identity: user %s from %s (groups: %s)",id.last_logon_info.username, cx->host().c_str(), id.last_logon_info.groups);
 
         if (!id.i_timeout()) {
@@ -173,32 +174,7 @@ bool MitmProxy::update_identity(baseHostCX* cx) {
             INF_("identity timeout: user %s from %s (groups: %s)",id.last_logon_info.username, cx->host().c_str(), id.last_logon_info.groups);
             
             // erase internal ip map entry
-
-            auth_ip_map.erase(ip);
-            
-            // erase shared ip map entry
-            
-            auth_shm_ip_map.acquire();
-            auto sh_it = auth_shm_ip_map.map_entries().find(cx->host());
-            
-            for(auto& x_it: auth_shm_ip_map.map_entries()) {
-                INF_("::%s::",x_it.first.c_str());
-            }
-            
-            if(sh_it != auth_shm_ip_map.map_entries().end()) {
-                DIAS_("Identity timeout: entry found in shared table: deleted. Saving.");
-                auth_shm_ip_map.map_entries().erase(sh_it);
-                
-                if(LEV_(DEB)) {
-                    DEBS_("Identity timeout: After:");
-                    for(auto& x_it: auth_shm_ip_map.map_entries()) {
-                        DEB_("::%s::",x_it.first.c_str());
-                    }                
-                }
-                auth_shm_ip_map.save(true);
-            }
-            auth_shm_ip_map.release();
-            
+            cfgapi_ip_auth_remove(cx->host());
         }
     }
 
@@ -479,7 +455,7 @@ void MitmProxy::handle_replacement(MitmHostCX* cx) {
             DIA_("MitmProxy::handle_replacement: token: requesting identity %s",i.second->name.c_str());
             token_text  += " |" + i.second->name;
           }
-          logon_token tok = logon_token(token_text.c_str());
+          shm_logon_token tok = shm_logon_token(token_text.c_str());
 	      
 	      INF_("MitmProxy::handle_replacement: new auth token %s for request: %s",tok.token,cx->application_data->hr().c_str());
 	      repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + tok.token + redir_suf;

@@ -9,7 +9,7 @@ unsigned int IdentityInfo::global_idle_timeout = 600;
 std::unordered_map<std::string,IdentityInfo> auth_ip_map;
 //shared_table<logon_info>  auth_shm_ip_map;
 shared_ip_map auth_shm_ip_map;
-shared_table<logon_token> auth_shm_token_map;
+shared_table<shm_logon_token> auth_shm_token_map;
 
 // authentication token cache
 std::recursive_mutex cfgapi_identity_token_lock;
@@ -50,8 +50,8 @@ int cfgapi_auth_shm_ip_table_refresh()  {
         }
         
         DIA_("cfgapi_auth_shm_ip_table_refresh: new data: version %d, entries %d",auth_shm_ip_map.header_version(),auth_shm_ip_map.header_entries());
-        for(typename std::vector<logon_info>::iterator i = auth_shm_ip_map.entries().begin(); i != auth_shm_ip_map.entries().end() ; ++i) {
-            logon_info& rt = (*i);
+        for(typename std::vector<shm_logon_info>::iterator i = auth_shm_ip_map.entries().begin(); i != auth_shm_ip_map.entries().end() ; ++i) {
+            shm_logon_info& rt = (*i);
             
             std::string ip = std::string(inet_ntoa(*(in_addr*)&rt.ip));
             
@@ -106,3 +106,64 @@ int cfgapi_auth_shm_token_table_refresh()  {
     return 0;
 };
 
+IdentityInfo* cfgapi_ip_auth_get(std::string& host) {
+    IdentityInfo* ret = nullptr;
+
+    cfgapi_identity_ip_lock.lock();    
+    auto ip = auth_ip_map.find(host);
+
+    if (ip != auth_ip_map.end()) {
+        IdentityInfo& id = (*ip).second;
+        ret  = &id;
+    }
+    
+    cfgapi_identity_ip_lock.unlock();
+    return ret;
+   
+}
+
+
+// remove IP from AUTH IP MAP and synchronize with SHM AUTH IP TABLE (table which is used to communicate with bend daemon)
+void cfgapi_ip_auth_remove(std::string& host) {
+
+    cfgapi_identity_ip_lock.lock();    
+    auto ip = auth_ip_map.find(host);
+
+    if (ip != auth_ip_map.end()) {
+        IdentityInfo& id = (*ip).second;
+        
+        // erase internal ip map entry
+
+        DIA_("cfgapi_ip_map_remove: auth ip map - removing: %s",host.c_str());
+        auth_ip_map.erase(ip);
+
+        // for debug only: print all shm table entries
+        if(LEV_(DEB)) {
+            DEBS_(":: - SHM AUTH IP map - before removal::");
+            for(auto& x_it: auth_shm_ip_map.map_entries()) {
+                DEB_("::  %s::",x_it.first.c_str());
+            }
+        }
+        
+        auth_shm_ip_map.acquire();
+
+        // erase shared ip map entry
+        auto sh_it = auth_shm_ip_map.map_entries().find(host);
+
+        if(sh_it != auth_shm_ip_map.map_entries().end()) {
+            DIA_("cfgapi_ip_map_remove: shm auth ip table  - removing: %s",host.c_str());
+            auth_shm_ip_map.map_entries().erase(sh_it);
+            
+            if(LEV_(DEB)) {
+                DEBS_(":: - SHM AUTH IP map - after removal::");
+                for(auto& x_it: auth_shm_ip_map.map_entries()) {
+                        DEB_("::   %s::",x_it.first.c_str());
+                }                
+                
+            }
+            auth_shm_ip_map.save(true);
+        }
+        auth_shm_ip_map.release();
+    }
+    cfgapi_identity_ip_lock.unlock();
+}

@@ -35,17 +35,17 @@
 
 
 // structure exchanged with backend daemon
-struct logon_info {
+struct shm_logon_info {
     char  ip[LOGON_INFO_IP_SZ];
     char  username[LOGON_INFO_USERNAME_SZ];
     char  groups[LOGON_INFO_GROUPS_SZ];
     
-    logon_info() {
+    shm_logon_info() {
         memset(ip,0,LOGON_INFO_IP_SZ);
         memset(username,0,LOGON_INFO_USERNAME_SZ);
         memset(groups,0,LOGON_INFO_GROUPS_SZ);
     }
-    logon_info(const char* i,const char* u,const char* g) {
+    shm_logon_info(const char* i,const char* u,const char* g) {
         memset(ip,0,LOGON_INFO_IP_SZ);
         memset(username,0,LOGON_INFO_USERNAME_SZ);
         memset(groups,0,LOGON_INFO_GROUPS_SZ);
@@ -64,16 +64,16 @@ struct logon_info {
 
 
 // structure exchanged with backend daemon
-struct logon_token {
+struct shm_logon_token {
     char   token[64];
     char   url[512];
     
-    logon_token() {
+    shm_logon_token() {
         memset(token,0,LOGON_TOKEN_TOKEN_SZ);
         memset(url,0,LOGON_TOKEN_URL_SZ);
     }
     
-    logon_token(const char* u) {
+    shm_logon_token(const char* u) {
         memset(token,0,LOGON_TOKEN_TOKEN_SZ);
         memset(url,0,LOGON_TOKEN_URL_SZ);
         
@@ -83,7 +83,7 @@ struct logon_token {
         strncpy(url,u,LOGON_TOKEN_URL_SZ-1);
     }
     
-    logon_token(const char* t, const char* u) {
+    shm_logon_token(const char* t, const char* u) {
         memset(token,0,LOGON_TOKEN_TOKEN_SZ);
         memset(url,0,LOGON_TOKEN_URL_SZ);
         
@@ -116,7 +116,7 @@ struct IdentityInfo {
     
     unsigned int last_seen_at;
     unsigned int last_seen_policy;
-    struct logon_info last_logon_info;
+    struct shm_logon_info last_logon_info;
     
     IdentityInfo() {
         idle_timeout = global_idle_timeout; 
@@ -151,14 +151,14 @@ struct IdentityInfo {
 };
 
 // not used now
-class shared_0_4b_map : public shared_map<std::string,logon_info> {
-    virtual std::string get_row_key(logon_info* r) {
+class shared_0_4b_map : public shared_map<std::string,shm_logon_info> {
+    virtual std::string get_row_key(shm_logon_info* r) {
         return std::string((const char*)r,4);
     }
 };
 
-class shared_0_4b_ntoa_map : public shared_map<std::string,logon_info> {
-    virtual std::string get_row_key(logon_info* r) {
+class shared_0_4b_ntoa_map : public shared_map<std::string,shm_logon_info> {
+    virtual std::string get_row_key(shm_logon_info* r) {
         in_addr* ptr = (in_addr*)&r->ip;
         return std::string(inet_ntoa(*ptr));
     }
@@ -171,13 +171,14 @@ extern int cfgapi_auth_shm_ip_table_refresh();
 extern int cfgapi_auth_shm_token_table_refresh(); 
 
 // lookup by ip -> returns pointer IN the auth_ip_map
-extern logon_info* cfgapi_auth_get_ip(std::string&);
+extern IdentityInfo* cfgapi_ip_auth_get(std::string&);
+extern void cfgapi_ip_auth_remove(std::string&);
 
 extern std::recursive_mutex cfgapi_identity_ip_lock;
 extern std::unordered_map<std::string,IdentityInfo> auth_ip_map;
 //extern shared_table<logon_info>  auth_shm_ip_map;
 extern shared_ip_map  auth_shm_ip_map;
-extern shared_table<logon_token> auth_shm_token_map;
+extern shared_table<shm_logon_token> auth_shm_token_map;
 
 // authentication token cache
 extern std::recursive_mutex cfgapi_identity_token_lock;

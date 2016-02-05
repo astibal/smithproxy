@@ -54,11 +54,11 @@
 #include <cfgapi_auth.hpp>
 
 
-logon_info generator_li(int i) {
+shm_logon_info generator_li(int i) {
     
-    logon_info n;
+    shm_logon_info n;
     int pid = getpid();            
-    memset(&n,0,sizeof(logon_info));
+    memset(&n,0,sizeof(shm_logon_info));
     
     inet_aton("192.168.1.1",(in_addr*)&n.ip);
     snprintf(n.username,63,"astib_%d_%d",pid,i);
@@ -67,14 +67,14 @@ logon_info generator_li(int i) {
     return n;
 }
 
-logon_token generator_to(int i) {
-    logon_token t;
+shm_logon_token generator_to(int i) {
+    shm_logon_token t;
 
     int pid = getpid();    
     
     srand(time(nullptr));
     int ran = rand();
-    memset(&t,0,sizeof(logon_info));
+    memset(&t,0,sizeof(shm_logon_info));
 
     snprintf(t.token,63,"%d-%010d",pid,ran);
     snprintf(t.url,512,"http://www.mag0.net/smithtest/%d/%010d.html",pid,ran);
@@ -99,12 +99,12 @@ int main(int argc, char** argv) {
         std::string a(argv[1]);
         
         if(a == "logon") {
-            shared_table<logon_info> b;
-            test_suite<shared_table<logon_info>,logon_info>(b,generator_li,I_MEM_NAME,I_MEM_SIZE,I_SEM_NAME);
+            shared_table<shm_logon_info> b;
+            test_suite<shared_table<shm_logon_info>,shm_logon_info>(b,generator_li,I_MEM_NAME,I_MEM_SIZE,I_SEM_NAME);
         } 
         else if (a == "token") {
-            shared_table<logon_token> b;
-            test_suite<shared_table<logon_token>,logon_token>(b,generator_to,T_MEM_NAME,T_MEM_SIZE,T_SEM_NAME);
+            shared_table<shm_logon_token> b;
+            test_suite<shared_table<shm_logon_token>,shm_logon_token>(b,generator_to,T_MEM_NAME,T_MEM_SIZE,T_SEM_NAME);
         }
     } 
 
