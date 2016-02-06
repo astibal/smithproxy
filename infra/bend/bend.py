@@ -29,7 +29,6 @@ import auth.crypto as mycrypto
 import auth.ldapaaa as ldapaaa
 import auth.ldapcon as ldapcon
 
-from shmtable import ShmTable
 
 PY_MAJOR_VERSION = sys.version_info[0]
 
@@ -47,197 +46,10 @@ flog.addHandler(hdlr)
 flog.setLevel(logging.INFO)
 
 
-def cfgloglevel_to_py(cfglevel):
-    if(cfglevel >= 7):
-        return logging.DEBUG
-    elif(cfglevel >= 5):
-        return logging.INFO
-    elif(cfglevel == 4):
-        return logging.WARNING
-    elif(cfglevel == 3):
-        return logging.ERROR
-    else:
-        return logging.FATAL
-    
-
-def cfg_to_dict(cfg_element):
-    # this is materialization of the shame of pylibconfig2. 
-    # It cannot convert ConfigGroup into dictionary. Poor.
-    if isinstance(cfg_element,cfg.ConfGroup):
-        d = {}
-        for c in cfg_element.items():
-            k = c[0]
-            v = c[1]
-            if isinstance(v,cfg.ConfGroup) or isinstance(v,cfg.ConfList):
-                v = cfg_2_dict(v)
-            d[k] = v
-    elif isinstance(cfg_element,cfg.ConfList):
-        d = []
-        for l in cfg_element:
-            d.append(cfg_2_dict(l))
-    elif isinstance(cfg_element,tuple):
-        d = {}
-        if isinstance(cfg_element[1],cfg.ConfGroup) or isinstance(cfg_element[1],cfg.ConfList):
-            d[cfg_element[0]] = cfg_2_dict(cfg_element[1])
-        else:
-            d[cfg_element[0]] = cfg_element[1]
-    else:
-        return cfg_element
-
-    
-    return d
-
-def intersect_lists(l1,l2):
-    return [filter(lambda x: x in l1, sublist) for sublist in l2]
-
-
-def unique_list(l):
-    ret = []
-    for ll in l:
-        if ll not in ret:
-            ret.append(ll)
-            
-    return ret
-
-def unique_prefixes(lst,delim):
-    u = []
-    
-    for l in lst:
-        if l.find(delim) >= 0:
-            prefix = l.split(delim)
-            if prefix not in u:
-                u.append(prefix)
-    return u
-    
-
-
-class LogonTable(ShmTable):             
-
-    def __init__(self):
-        ShmTable.__init__(self,4+64+128)
-        self.logons = {}
-        self.normalizing = True
-
-    def add(self,ip,user,groups):
-
-        self.logons[ip] = [ip,user,groups]
-        self.save(True)
-        
-    def rem(self,ip):
-        if ip in self.logons.keys():
-            self.logons.pop(ip, None)
-            self.save(True)
-            
-    def save(self, inc_version=False):
-        self.seek(0)
-        self.clear()
-        self.write_header(inc_version,len(self.logons.keys()))
-        
-        for k in self.logons.keys():
-              try:
-                  self.write(struct.pack("4s64s128s",socket.inet_aton(k),self.logons[k][1],self.logons[k][2]))
-              except IndexError:
-                  flog.warning("LogonTable: IndexError: not in logons: " + k + " " + str(e))
-                  continue
-
-        self.normalize = False # each dump effectively normalizes db
-
-    def on_new_version(self,o,n):
-        self.logons = {}
-        
-    def on_new_entry(self,blob):
-        
-        i,u,g = struct.unpack("4s64s128s",blob)
-        ip = socket.inet_ntoa(i)
-        
-        tag = ''
-        if ip in self.logons.keys():
-            tag = ' (dup)'
-
-        if self.normalizing:
-            self.normalize = True
-
-        self.logons[ip] = [ip,u.strip('\x00').strip(),g.strip('\x00').strip()]
-        flog.debug("on_new_entry: added " + ip + tag + ", " + u.strip() + ", " + g.strip())
-        
-
-        return True
-
-    def on_new_finished(self):
-        pass
-
-
-
-class TokenTable(ShmTable):
-    def __init__(self):
-        ShmTable.__init__(self,576)
-        self.tokens = {}   # token => url
-        self.used_tokens = []  # used throw here - delete when appropriate
-        self.active_queue = []    # add everything here. After size grows to some point, start
-                               # deleting also active unused yed tokens
-    
-        self.delete_used_threshold =   5   # 1 means immediately
-        self.delete_active_threshold = 200  # mark oldest tokens above this margin as used
-    
-    def on_new_table(self):
-        ShmTable.on_new_table(self)
-        self.tokens = {}
-
-    def on_new_entry(self,blob):
-        ShmTable.on_new_entry(self,blob)
-        t,u = struct.unpack('64s512s',blob)
-        
-        t_i = t.find('\x00',0,512)
-        u_i = u.find('\x00',0,512)
-        tt = t[:t_i]
-        uu = u[:u_i]
-        
-        flog.debug("TokenTable::on_new_entry: " + tt + ":" + uu)
-        self.tokens[tt] = uu
-        self.life_queue(tt)
-        
-    def toggle_used(self,token):
-        self.used_tokens.append(token)
-        if len(self.used_tokens) > self.delete_used_threshold:
-            
-            # delete all used tokens from DB
-            for t in self.used_tokens:
-                flog.debug("toggle_used: wiping used token " + t)
-                self.tokens.pop(t,None)
-                
-            self.used_tokens = []
-            self.save(True)
-            
-
-    def life_queue(self,token):
-        self.active_queue.append(token)
-        
-        while len(self.active_queue) > self.delete_active_threshold:
-            oldest_token = self.active_queue[0]
-            flog.debug("life_queue: too many active tokens, dropping oldest one " + oldest_token)
-            self.toggle_used(oldest_token)
-            self.active_queue = self.active_queue[1:]
-        
-    
-    def save(self, inc_version=False):
-        self.seek(0)
-        self.clear()
-        self.write_header(inc_version,len(self.tokens.keys()))
-        
-        write_cnt = 0
-        for k in self.tokens.keys():
-              try:
-                  self.write(struct.pack("64s512s",k,self.tokens[k]))
-                  write_cnt = write_cnt + 1
-              except IndexError:
-                  continue
-
-        flog.debug("save: %d tokens written to table" % (write_cnt,))
-
-        
-        self.normalize = False # each dump effectively normalizes db
-        
-
+from bendutil import *
+from shmtable import ShmTable
+from logontable import LogonTable
+from tokentable import TokenTable
 
 
 class AuthManager:
@@ -791,6 +603,7 @@ def run_bend():
         a.load_config_users(u.users.items())
         a.load_config_groups(u.groups.items())
         a.load_config_identities(u.identities.items())
+        
     except Exception, e:
         exc_type, exc_value, exc_traceback = sys.exc_info()
         flog.error("Error loading config: %s" % (str(e),))

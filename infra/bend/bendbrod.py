@@ -18,7 +18,10 @@
 
 import SOAPpy
 from M2Crypto import SSL
-from pprint import pprint
+import pylibconfig2 as cfg
+
+BEND_LOGFILE="/var/log/smithproxy_bend.log"
+
 
 class BendBroker:
 
