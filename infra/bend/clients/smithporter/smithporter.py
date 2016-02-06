@@ -26,15 +26,20 @@ class SystemTrayIcon(QtGui.QSystemTrayIcon):
     def __init__(self, icon, parent=None):
         QtGui.QSystemTrayIcon.__init__(self, icon, parent)
         self.menu = QtGui.QMenu(parent)
-        statusAction = self.menu.addAction("Status")
+        detailAction = self.menu.addAction("Details")
+        statusAction = self.menu.addAction("Firewall")
         exitAction = self.menu.addAction("Exit")
 
+        detailAction.triggered.connect(self.my_detail)
         statusAction.triggered.connect(self.my_status)
         exitAction.triggered.connect(QtGui.qApp.quit)
 
         self.setContextMenu(self.menu)
 
     def my_status(position):
+        webbrowser.open('http://192.168.254.1:8008')
+
+    def my_detail(position):
         webbrowser.open('http://192.168.254.1:8008')
 
 def main():
