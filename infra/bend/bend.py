@@ -276,9 +276,11 @@ class AuthManager:
         if ret > 0:
             return ret
         
-        if self.authenticate_check_local(ip,username,password,identities):
-            flog.info("authenticate_check: user " + username + " local auth successfull from " + ip + " -- fallback authentication")
-            return 1
+        # this is just for debug purposes.
+        #if self.authenticate_check_local(ip,username,password,identities):
+        #    flog.info("authenticate_check: user " + username + " local auth successfull from " + ip + " -- fallback authentication")
+        #    self.address_identities[ip] = []
+        #    return 1
         
         
         # reset authentication on failure
@@ -307,7 +309,7 @@ class AuthManager:
             token_data = res.split(" |")
             if len(token_data) > 1:
                 identities = token_data[1:]
-                flog.debug("authenticate: token identities: " + str(identities))
+                flog.debug("authenticate: token specific identities: " + str(identities))
                 
         else:
             flog.warning("authenticate: token data not received")
@@ -344,10 +346,10 @@ class AuthManager:
                     flog.debug("token " + token + " global referer: " + ref)
                     return True,ref
                 else:
-                    return True,"http://"+self.portal_address+":"+self.portal_port+"/authenticated.html"
+                    return True,"/authenticated.html"
             else:
                 # we dont have any token from www form
-                return True,"http://"+self.portal_address+":"+self.portal_port+"/authenticated.html"
+                return True,"/authenticated.html"
 
         else:
             flog.warning("authenticate: user " + username + " auth failed from " + ip)
@@ -355,9 +357,9 @@ class AuthManager:
             if token in self.global_token_referer.keys():
                 ref = self.global_token_referer[token]
                 flog.debug("token " + token + " global referer: " + ref)
-                return False,"http://"+self.portal_address+":"+self.portal_port+"/cgi-bin/auth.py?token=%s"%(token)
+                return False,"/cgi-bin/auth.py?token=%s"%(token)
             else:
-                return False,"http://"+self.portal_address+":"+self.portal_port+"/cgi-bin/auth.py?token=0"
+                return False,"/cgi-bin/auth.py?token=0"
 
 
 
