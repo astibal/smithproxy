@@ -232,6 +232,15 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
                         }
                     }
                 }
+            } else {
+                if(auth_block_identity) {
+                    if(mh->replace_type == MitmHostCX::REPLACETYPE_HTTP) {
+                        DIAS_("MitmProxy::on_left_bytes: we should block it");
+                        mh->replacement(MitmHostCX::REPLACE_BLOCK);
+                        redirected = true;
+                        handle_replacement(mh);
+                    }
+                }
             }
         }
     }
@@ -416,7 +425,9 @@ void MitmProxy::handle_replacement(MitmHostCX* cx) {
 	repl_port = cfgapi_identity_portal_port_https;
     }    
     
-    std::string block("HTTP/1.0 OK\r\n<!DOCTYPE html><html><body><h1>Page has been blocked</h1><p>Access has been blocked by smithproxy. Get over it.</p></body></html>");
+    std::string block_pre("<!DOCTYPE html><html><head></head><body><h1>Page has been blocked</h1><p>Access has been blocked by smithproxy.</p>\
+    <p>To check your user privileges go to status page <a href=");
+    std::string block_post(">here</a></p></body></html>");
     
     //cx->host().c_str()
     
@@ -478,7 +489,8 @@ void MitmProxy::handle_replacement(MitmHostCX* cx) {
     } else
     if (cx->replacement() == MitmHostCX::REPLACE_BLOCK) {
 
-	  repl = block;
+      DIAS_("instructed to replace block");
+	  repl = block_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port + "/cgi-bin/auth.py?a=z" + block_post;
 	  cx->to_write((unsigned char*)repl.c_str(),repl.size());
 	  cx->close_after_write(true);
 	  
@@ -726,8 +738,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                     if(!res) {
                         if(target_port != 80 && target_port != 443){
                             delete_proxy = true;
-                            INF_("Dropping connection %s due to unknown source IP",just_accepted_cx->c_name());
-                            
+                            INF_("Dropping non-replaceable connection %s due to unknown source IP",just_accepted_cx->c_name());
                             goto end;
                         }
                     } else {
@@ -751,7 +762,16 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                                 }
                             }
                             if(bad_auth) {
-                                INF_("Dropping connection %s due to non-matching identity",just_accepted_cx->c_name());
+                                if(target_port != 80 && target_port != 443) {
+                                    INF_("Dropping non-replaceable connection %s due to non-matching identity",just_accepted_cx->c_name());
+                                }
+                                else {
+                                    INF_("Connection %s with non-matching identity (to be replaced)",just_accepted_cx->c_name());
+                                    // set bad_auth true, because despite authentication failed, it could be replaced (we can let user know 
+                                    // he is not allowed to proceed
+                                    bad_auth = false;
+                                    new_proxy->auth_block_identity = true;
+                                }
                             }
                         }
                         cfgapi_identity_ip_lock.unlock();

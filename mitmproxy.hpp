@@ -48,6 +48,7 @@ protected:
 public: 
     bool opt_auth_authenticate = false;
     bool opt_auth_resolve = false;
+    bool auth_block_identity = false;
     
     
     inline bool identity_resolved();
