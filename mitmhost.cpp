@@ -41,12 +41,13 @@ baseCom* MySSLMitmCom::replicate() {
 }
 
 bool MySSLMitmCom::spoof_cert(X509* x, SpoofOptions& spo) {
-    std::string cert = SSLCertStore::print_cert(x);
-    log().append("\n ==== Server certificate:\n" + cert  + "\n ====\n");
+    
+    //std::string cert = SSLCertStore::print_cert(x);
+    //log().append("\n ==== Server certificate:\n" + cert  + "\n ====\n");
 
     bool r = SSLMitmCom::spoof_cert(x,spo);
 
-    EXT_("MySSLMitmCom::spoof_cert: cert:\n%s",cert.c_str());
+    //EXT_("MySSLMitmCom::spoof_cert: cert:\n%s",cert.c_str());
 
     return r;
 }
