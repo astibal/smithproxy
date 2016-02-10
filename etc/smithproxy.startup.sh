@@ -138,6 +138,7 @@ case "$1" in
     sysctl -w net.ipv4.ip_forward=1
     sysctl -w net.ipv4.ip_nonlocal_bind=1
     sysctl -w net.ipv4.tcp_low_latency=1
+    sysctl -w net.ipv4.tcp_syn_retries=3
     echo " done"
 
     echo "Smithproxy iptables chains setup script - start: finished"
