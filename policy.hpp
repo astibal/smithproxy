@@ -117,6 +117,7 @@ struct ProfileTls {
     bool allow_self_signed = false;
     bool use_pfs = true;
     
+    int ocsp_mode = 0;           //  0 = disable OCSP checks ; 1 = check only end certificate ; 2 = check all certificates
     bool ocsp_stapling = false;
     int  ocsp_stapling_mode = 0; // 0 = loose, 1 = strict, 2 = require
     std::string name;
