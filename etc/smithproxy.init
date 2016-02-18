@@ -20,59 +20,70 @@
 
 . /lib/lsb/init-functions
 
+
+# Let initialize tenant ID
+tenant_id="0"
+if [[ "$2" != "" ]]; then
+    tenant_id="$2"
+fi
+
 function do_start {
-    echo "Starting smithproxy"
-    /etc/smithproxy/smithproxy.startup.sh start
-    python2 /usr/share/smithproxy/infra/smithdog.py start
+
+    echo "Starting smithproxy - tenant $tenant_id"
+    /etc/smithproxy/smithproxy.startup.sh start $tenant_id
+    python2 /usr/share/smithproxy/infra/smithdog.py start $tenant_id
 }
 
 function do_stop {
-    echo "Stopping smithproxy"
-    /etc/smithproxy/smithproxy.startup.sh stop
-    python2 /usr/share/smithproxy/infra/smithdog.py stop
+
+    echo "Stopping smithproxy - tenant $tenant_id"
+    /etc/smithproxy/smithproxy.startup.sh stop $tenant_id
+    python2 /usr/share/smithproxy/infra/smithdog.py stop $tenant_id
 }
 
 function do_bypass {
-    echo "Bypassing smithproxy"
-    /etc/smithproxy/smithproxy.startup.sh bypass
+    
+    echo "Bypassing smithproxy - tenant $tenant_id"
+    /etc/smithproxy/smithproxy.startup.sh bypass $tenant_id 
 }
 
 function do_unbypass {
-    echo "Un-bypassing smithproxy"
-    /etc/smithproxy/smithproxy.startup.sh unbypass
+
+    echo "Un-bypassing smithproxy - tenant $tenant_id"
+    /etc/smithproxy/smithproxy.startup.sh unbypass $tenant_id
 }
 
 
 case "$1" in
   start)
-    do_start
+    do_start $tenant_id
     ;;
   stop)
-    do_stop
+    do_stop $tenant_id
     ;;
   restart | force-reload)
-    do_stop
+    do_stop $tenant_id
     sleep 1
-    do_start
+    do_start $tenant_id
     ;;
   status)
-    echo "Smithproxy status"
+    echo "Smithproxy status $tenant_id"
     python2 /usr/share/smithproxy/infra/smithdog.py status
     ;;
   reload)
-    echo "Reloading smithproxy policies"
-    kill -USR1 `cat /var/run/smithproxy.pid`
+    echo "Reloading smithproxy policies $tenant_id"
+    kill -USR1 `cat /var/run/smithproxy.${tenant_id}.pid`
     ;;
   bypass)
-    do_bypass
+    do_bypass $tenant_id
     ;;
   unbypass)
-    do_unbypass
+    do_unbypass $tenant_id
     ;;
     
   fin)
     # leave TPROXY targets. Good for troubleshooting.
-    python2 /usr/share/smithproxy/infra/smithdog.py stop
+    python2 /usr/share/smithproxy/infra/smithdog.py stop $tenant_id
     ;;
 
   val)
@@ -80,10 +91,11 @@ case "$1" in
     ;;
 
   *)
-    echo "Usage: /etc/init.d/smithproxy {start|stop|status|reload|restart|force-reload|bypass|unbypass}"
+    echo "Usage: /etc/init.d/smithproxy {start|stop|status|reload|restart|force-reload|bypass|unbypass} [tenant UUID]"
     echo "Debugs: /etc/init.d/smithproxy {fin|val}"
     echo "        fin - just terminate daemons, keep TPROXY rules up! This will disrupt traffic severely."
     echo "        val - run valgrind on smithproxy. Run it once, if it crashes, it stops Log goes to /var/log/smithproxy_val.log."
+    echo "            - doesn't support tenants)"
     exit 1
     ;;
 esac

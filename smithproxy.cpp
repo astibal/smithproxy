@@ -92,10 +92,10 @@ static bool cfg_mtrace_enable = false;
 
 static int  args_debug_flag = NON;
 // static int   ssl_flag = 0;
-static std::string cfg_listen_port;
-static std::string cfg_ssl_listen_port;
-static std::string cfg_udp_port;
-static std::string cfg_socks_port;
+static std::string cfg_listen_port = "50080";
+static std::string cfg_ssl_listen_port = "50443";
+static std::string cfg_udp_port = "50080";
+static std::string cfg_socks_port = "1080";
 
 static std::string config_file;
 bool config_file_check_only = false;
@@ -109,6 +109,9 @@ static int cfg_tcp_workers = 0;
 static int cfg_ssl_workers = 0;
 static int cfg_udp_workers = 0;
 static int cfg_socks_workers = 0;
+
+static std::string cfg_tenant_index;
+static std::string cfg_tenant_name;
 
 
 /*
@@ -437,6 +440,7 @@ bool load_config(std::string& config_f, bool reload) {
         cfgapi.getRoot()["settings"].lookupValue("udp_port",cfg_udp_port);
         cfgapi.getRoot()["settings"].lookupValue("udp_workers",cfg_udp_workers);
 
+        cfgapi.getRoot()["settings"].lookupValue("socks_port",cfg_socks_port);
         cfgapi.getRoot()["settings"].lookupValue("socks_workers",cfg_socks_workers);
         
         cfgapi.getRoot()["settings"].lookupValue("log_level",cfgapi_table.logging.level);
@@ -508,6 +512,28 @@ void ignore_sigpipe() {
     sigaction( SIGSEGV, &act_segv, NULL);
 }
 
+int apply_index(std::string& what , const std::string& idx) {
+    INF_("apply_index: what=%s idx=%s",what.c_str(),idx.c_str());
+    int port = std::stoi(what);
+    int index = std::stoi(idx);
+    what = std::to_string(port + index);
+    
+    return 0;
+}
+
+bool apply_tenant_config() {
+    int ret = 0;
+    
+    if(cfg_tenant_index.size() > 0 && cfg_tenant_name.size() > 0) {
+        ret += apply_index(cfg_listen_port,cfg_tenant_index);
+        ret += apply_index(cfg_ssl_listen_port,cfg_tenant_index);
+        ret += apply_index(cfg_udp_port,cfg_tenant_index);
+        ret += apply_index(cfg_socks_port,cfg_tenant_index);
+    }
+    
+    return (ret == 0);
+}
+
 int main(int argc, char *argv[]) {
 
     config_file = "/etc/smithproxy/smithproxy.cfg";    
@@ -535,6 +561,15 @@ int main(int argc, char *argv[]) {
                 cfg_daemonize = true;
                 break;
                 
+            case 'i':
+                cfg_tenant_index = std::string(optarg);
+                break;
+                
+            case 't':
+                cfg_tenant_name = std::string(optarg);
+                break;
+
+                
             case 'v':
                 std::cout << SMITH_VERSION << "+" << SOCLE_VERSION << std::endl;
                 exit(0);
@@ -549,6 +584,23 @@ int main(int argc, char *argv[]) {
     lout.level(WAR);
     cfgapi_log_version(false);  // don't delay, but display warning
     
+    if(cfg_tenant_index.size() > 0 && cfg_tenant_name.size() > 0) {
+        WAR_("Starting tenant: '%s', index %s",cfg_tenant_name.c_str(),cfg_tenant_index.c_str());
+        WARS_(" ");
+        daemon_set_tenant(cfg_tenant_name);
+    } 
+    else if (cfg_tenant_index.size() > 0 || cfg_tenant_name.size() > 0){
+        
+        FATS_("You have to specify both options: --tenant-name AND --tenant-index");
+        exit(-20);
+    }
+    else {
+        WARS_("Starting tenant: 0 (default)");
+        WARS_(" ");
+        daemon_set_tenant("0"); 
+    }
+    
+    
     // if logging set in cmd line, use it 
     if(args_debug_flag > NON) {
         lout.level(args_debug_flag);
@@ -562,7 +614,13 @@ int main(int argc, char *argv[]) {
         }
         else {
             FATS_("Error loading config file on startup.");
+            exit(1);
         }
+    }
+    
+    if(!apply_tenant_config()) {
+        FATS_("Failed to apply tenant specific configuration!");
+        exit(2);
     }
     
     if(config_file_check_only) {
@@ -583,7 +641,7 @@ int main(int argc, char *argv[]) {
     
     if(daemon_exists_pidfile()) {
         FATS_("There is PID file already in the system.");
-        FATS_("Please make sure smithproxy is not running, remove /var/run/smithproxy.pid and try again.");
+        FAT_("Please make sure smithproxy is not running, remove %s and try again.",PID_FILE.c_str());
         exit(-5);
     }
     

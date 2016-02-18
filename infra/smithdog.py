@@ -44,7 +44,7 @@ import pprint
 """
 
 SMITHPROXY_PATH = '/usr/bin/smithproxy'
-SMITHPROXY_PIDFILE = '/var/run/smithproxy.pid'
+SMITHPROXY_PIDFILE = '/var/run/smithproxy.0.pid'
 
 SMITHDOG_PIDFILE='/var/run/smithproxy_dog.pid'
 SMITHDOG_LOGFILE='/var/log/smithproxy_dog.log'

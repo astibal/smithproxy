@@ -38,8 +38,12 @@
 extern "C" {
 #endif
 
-#define PID_FILE "/var/run/smithproxy.pid"
-    
+std::string PID_FILE(PID_FILE_DEFAULT);
+
+void daemon_set_tenant(const std::string& tenant_id) {
+    PID_FILE = string_format("/var/run/smithproxy.%s.pid",tenant_id.c_str());
+}
+
 void daemonize(void) {
         
     /* Our process ID and Session ID */
@@ -48,7 +52,7 @@ void daemonize(void) {
     DIAS_("daemonize start");
     
     struct stat st;
-    if( stat(PID_FILE,&st) == 0) {
+    if( stat(PID_FILE.c_str(),&st) == 0) {
         ERRS_("There seems to be smithproxy already running in the system. Aborting.");
         exit(EXIT_FAILURE);
     }
@@ -100,18 +104,18 @@ void daemonize(void) {
 }
 
 void daemon_write_pidfile() {
-    FILE* pf = fopen(PID_FILE,"w");
+    FILE* pf = fopen(PID_FILE.c_str(),"w");
     fprintf(pf,"%d",getpid());
     fclose(pf);
 }
 
 void daemon_unlink_pidfile() {
-    unlink(PID_FILE);
+    unlink(PID_FILE.c_str());
 }
 
 bool daemon_exists_pidfile() {
     struct stat st;
-    int result = stat(PID_FILE, &st);
+    int result = stat(PID_FILE.c_str(), &st);
     return result == 0;
 }
 

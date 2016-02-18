@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 #
 #     Smithproxy- transparent proxy with SSL inspection capabilities.
 #     Copyright (c) 2014, Ales Stibal <astib@mag0.net>, All rights reserved.
@@ -26,8 +26,42 @@
 # this is pre-defined defaults. Please don't modify this file, use 
 # /etc/defaults/smithproxy to override values from here
 
-SMITH_CHAIN_NAME='SMITH'
-DIVERT_CHAIN_NAME='DIVERT'
+# init tenant id
+
+tenant_table="/etc/smithproxy/smithproxy.tenants.cfg"
+tenant_id="0"
+tenant_index="0"
+tenant_range="0.0.0.0/0"
+
+
+if [[ "$2" != "" ]]; then
+    tenant_id="$2"
+fi
+
+if [[ "$tenant_id" != "0" ]]; then
+    if [[ ! -f "$tenant_table" ]]; then
+        echo "ERROR: Tenant table file not found." 
+        exit 1
+    else 
+        L=`cat $tenant_table | grep ";$tenant_id;"`
+        if [[ $L  == "" ]]; then
+            echo "ERROR: Tenant '$tenant_id' not found in the table."
+            exit 1;
+        fi
+        
+        tenant_index=`echo $L | awk -F\; '{ print $1 }'`
+        tenant_range=`echo $L | awk -F\; '{ print $3 }'`
+        
+        if [[ "$tenant_id" != "" && "$tenant_range" != "" && "$tenant_index" != "" ]]; then
+            echo "Tenant: $tenant_id with index $tenant_index diverted from $tenant_range"
+        else
+            echo "ERROR: configuration error in tenant table, tenant $tenant_id"
+        fi
+    fi
+fi
+
+SMITH_CHAIN_NAME="SX.${tenant_id}"
+DIVERT_CHAIN_NAME="DX.${tenant_id}"
 
 SMITH_INTERFACE='eth1'
 SMITH_TCP_PORTS='80 25 587 21 143 110 5222'
@@ -46,6 +80,13 @@ DIVERT_IP_RULE=100
 
 # #### DON'T modify anything below, unless you really know what you are doing ####
 
+SMITH_TCP_TPROXY=`expr $SMITH_TCP_TPROXY + $tenant_index`
+SMITH_UDP_TPROXY=`expr $SMITH_UDP_TPROXY + $tenant_index`
+SMITH_TLS_TPROXY=`expr $SMITH_TLS_TPROXY + $tenant_index`
+SMITH_DTLS_TPROXY=`expr $SMITH_DTLS_TPROXY + $tenant_index`
+DIVERT_FWMARK=`expr $DIVERT_FWMARK + $tenant_index`
+DIVERT_IP_RULE=`expr $DIVERT_IP_RULE + $tenant_index`
+
 
 # source defaults - could be used to override variables above
 if [ -f /etc/smithproxy/smithproxy.startup.cfg ]; then
@@ -54,7 +95,7 @@ fi
 
 case "$1" in
   start)
-    echo "Smithproxy iptables chains setup script - start:"
+    echo "Smithproxy iptables chains setup script - start tenant: $tenant_id"
     echo 
 
     echo "Preparing chain ${SMITH_CHAIN_NAME} capturing traffic on ${SMITH_INTERFACE}"
@@ -122,9 +163,9 @@ case "$1" in
     echo
 
     echo "Applying chains $DIVERT_CHAIN_NAME and $SMITH_CHAIN_NAME into mangle prerouting"
-    iptables -t mangle -A PREROUTING -p tcp -m socket -j $DIVERT_CHAIN_NAME
-    iptables -t mangle -A PREROUTING -p udp -m socket -j $DIVERT_CHAIN_NAME
-    iptables -t mangle -A PREROUTING -j $SMITH_CHAIN_NAME
+    iptables -t mangle -A PREROUTING -s $tenant_range -p tcp -m socket -j $DIVERT_CHAIN_NAME
+    iptables -t mangle -A PREROUTING -s $tenant_range -p udp -m socket -j $DIVERT_CHAIN_NAME
+    iptables -t mangle -A PREROUTING -s $tenant_range -j $SMITH_CHAIN_NAME
     echo " done"
     echo
 
@@ -163,7 +204,7 @@ case "$1" in
     ;;
     
   *)
-    echo "Usage: $0 {start|stop}"
+    echo "Usage: $0 {start|stop} [tenant ID]"
     exit 1
     ;;
 esac
