@@ -283,6 +283,11 @@ static struct option long_options[] =
     {"config-check-only",no_argument,0,'o'},
     {"daemonize", no_argument, 0, 'D'},
     {"version", no_argument, 0, 'v'},
+    
+    // multi-tenancy support: listening ports will be shifted by number 'i', while 't' controls logging, pidfile, etc.
+    // both, or none of them have to be set
+    {"tenant-index", required_argument, 0, 'i'},
+    {"tenant-name", required_argument, 0, 't'},
     {0, 0, 0, 0}
 };  
 
