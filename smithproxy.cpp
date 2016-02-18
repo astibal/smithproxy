@@ -110,6 +110,8 @@ static int cfg_ssl_workers = 0;
 static int cfg_udp_workers = 0;
 static int cfg_socks_workers = 0;
 
+
+/*
 static unsigned int mystrlen(const char* str, int max) {
     for(int i = 0; i < max; i++ ) {
         if(str[i] == 0) {
@@ -118,7 +120,6 @@ static unsigned int mystrlen(const char* str, int max) {
     }
     return max;
 }
-
 static void btrace_handler(int sig) {
 
     int CRLOG = open((const char*)crashlog_file,O_CREAT | O_WRONLY | O_TRUNC,S_IRUSR|S_IWUSR);
@@ -167,6 +168,7 @@ static void btrace_handler(int sig) {
     free(strings);
     exit(-1);
 }
+*/
 
 
 #define UNW_LOCAL_ONLY
@@ -216,7 +218,7 @@ static void uw_btrace_handler(int sig) {
         unw_get_reg(&cursor, UNW_REG_IP, &ip);
         unw_get_reg(&cursor, UNW_REG_SP, &sp);
         
-        snprintf (buf_line, 255, "ip = %lx, sp = %lx: (%s+0x%x) [%p]\n", (long) ip, (long) sp, buf_fun, offset, ip);
+        snprintf (buf_line, 255, "ip = %lx, sp = %lx: (%s+0x%x) [%p]\n", (long) ip, (unsigned long) sp, buf_fun, (unsigned int) offset, (void*)ip);
         int n = strnlen(buf_line,255);
          TEMP_FAILURE_RETRY(write(CRLOG,buf_line,n));
          TEMP_FAILURE_RETRY(write(STDERR_FILENO,buf_line,n));
