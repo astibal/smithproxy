@@ -110,11 +110,16 @@ class BendDaemon(Daemon):
     def __init__(self, nicename, pidfile, stdin='/dev/null', stdout='/dev/null', stderr='/dev/null'):
         Daemon.__init__(self,nicename,pidfile,stdin,stdout,stderr)    
     def run(self):
+        global TENANT_NAME,TENANT_IDX
+        
         os.chdir(INFRA_PATH)
         #self.drop_privileges() # not ready for this yet
         
         flog.info("DOG => BEND: tenant=%s index=%s" % (TENANT_NAME,TENANT_IDX))
-        bend.run_bend(tenant_name=TENANT_NAME,tename_index=TENANT_IDX)
+        try:
+            bend.run_bend(tenant_name=TENANT_NAME,tenant_index=TENANT_IDX)
+        except Exception, e:
+            flog.info("Failure during execution: %s" % (str(e)))
 
 
 def start_exec(nicename, path, pidfile, additional_arguments=None):
