@@ -24,7 +24,7 @@ std::string cfgapi_identity_portal_port_https = "8043";
 int cfgapi_auth_shm_ip_table_refresh()  {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
-    auth_shm_ip_map.attach(AUTH_IP_MEM_NAME,AUTH_IP_MEM_SIZE,AUTH_IP_SEM_NAME);
+    auth_shm_ip_map.attach(string_format(AUTH_IP_MEM_NAME,cfgapi_tenant_name.c_str()).c_str(),AUTH_IP_MEM_SIZE,string_format(AUTH_IP_SEM_NAME,cfgapi_tenant_name.c_str()).c_str());
     
     DEBS_("cfgapi_auth_shm_ip_table_refresh: acquring semaphore");
     int rc = auth_shm_ip_map.acquire();
@@ -82,7 +82,7 @@ int cfgapi_auth_shm_ip_table_refresh()  {
 int cfgapi_auth_shm_token_table_refresh()  {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
-    auth_shm_token_map.attach(AUTH_TOKEN_MEM_NAME,AUTH_TOKEN_MEM_SIZE,AUTH_TOKEN_SEM_NAME);
+    auth_shm_token_map.attach(string_format(AUTH_TOKEN_MEM_NAME,cfgapi_tenant_name.c_str()).c_str(),AUTH_TOKEN_MEM_SIZE,string_format(AUTH_TOKEN_SEM_NAME,cfgapi_tenant_name.c_str()).c_str());
 
     DEBS_("cfgapi_auth_shm_token_table_refresh: acquring semaphore");
     int rc = auth_shm_token_map.acquire();

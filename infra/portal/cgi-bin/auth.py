@@ -31,8 +31,26 @@ import logging
 # 	<link rel="stylesheet" type="text/css" href="/css/keyboard.css">
 form = cgi.FieldStorage() 
 
-ip = os.environ["REMOTE_ADDR"]
-ref = os.environ["HTTP_REFERER"]
+ip = "unknown"
+if "REMOTE_ADDR" in os.environ.keys():
+    ip = os.environ["REMOTE_ADDR"]
+
+ref = "unknown"    
+if "HTTP_REFERER" in os.environ.keys():
+    ref = os.environ["HTTP_REFERER"]
+
+port = "unknown"
+if "SERVER_PORT" in os.environ.keys():
+    port = os.environ["SERVER_PORT"]
+
+tenant_name = "default"
+if "TENANT_NAME" in os.environ.keys():
+    tenant_name = os.environ["TENANT_NAME"]
+
+tenant_index = 0
+if "TENANT_IDX" in os.environ.keys():
+    tenant_index = int(os.environ["TENANT_IDX"])
+
 
 token = "0"
 if "token" in form.keys():
@@ -140,7 +158,8 @@ auth_page = """
  <div class="login">
  <div class="login-screen">
  <div class="app-title">
- <h2>Authentication required</h2>
+ <!-- port %s -->
+ <h2>Authentication required:</h2>
  </div>
  
  <div class="login-form">
@@ -196,17 +215,19 @@ logged_page = """
 
 # use class="keyboardInput" for virtual keyboard below the input field
 
+bend_url = "http://127.0.0.1:%d/" % (64000+tenant_index)
+
 try:
     if ref:
-        bend = SOAPpy.SOAPProxy("http://localhost:64003/")
+        bend = SOAPpy.SOAPProxy(bend_url)
         bend.save_referer(token,ref)
         
     if token != "0":
         tok_str = "&token="+str(token)
-        print   auth_page % (style,tok_str,)
+        print   auth_page % (style,tok_str,str(port)+"-"+tenant_name+"-"+str(tenant_index))
     else:
         if ip:
-            bend = SOAPpy.SOAPProxy("http://localhost:64003/")
+            bend = SOAPpy.SOAPProxy(bend_url)
             logon_info = bend.whois(ip)
             
             if logon_info != []:
@@ -214,10 +235,10 @@ try:
                     print logged_page % (style,logon_info[1])
                 else:
                     bend.deauthenticate(ip)
-                    print auth_page % (style,"0",)
+                    print auth_page % (style,"0",str(port)+"-"+tenant_name+"-"+str(tenant_index))
                     
             else:
-                print   auth_page % (style,"0",)
+                print   auth_page % (style,"0",str(port)+"-"+tenant_name+"-"+str(tenant_index))
                 
 
 except Exception, e:

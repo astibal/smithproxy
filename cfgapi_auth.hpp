@@ -14,14 +14,14 @@
 #include <shmtable.hpp>
 
 
-#define AUTH_IP_MEM_NAME "/smithproxy_auth_ok"
+#define AUTH_IP_MEM_NAME "/smithproxy_auth_ok_%s"
 #define AUTH_IP_MEM_SIZE 64*1024*1024
-#define AUTH_IP_SEM_NAME "/smithproxy_auth_ok.sem"
+#define AUTH_IP_SEM_NAME "/smithproxy_auth_ok_%s.sem"
 
 
-#define AUTH_TOKEN_MEM_NAME "/smithproxy_auth_token"
+#define AUTH_TOKEN_MEM_NAME "/smithproxy_auth_token_%s"
 #define AUTH_TOKEN_MEM_SIZE AUTH_IP_MEM_SIZE 
-#define AUTH_TOKEN_SEM_NAME "/smithproxy_auth_token.sem"    
+#define AUTH_TOKEN_SEM_NAME "/smithproxy_auth_token_%s.sem"    
  
 #define LOGON_INFO_IP_SZ           4
 #define LOGON_INFO_USERNAME_SZ    64

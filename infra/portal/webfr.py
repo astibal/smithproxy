@@ -86,6 +86,8 @@ def run_portal_plain(tenant_name,tenant_idx):
     global TENANT_NAME,TENANT_IDX
     TENANT_NAME = tenant_name
     TENANT_IDX  = tenant_idx
+    os.environ['TENANT_NAME'] = tenant_name
+    os.environ['TENANT_IDX'] = tenant_idx
     
     ret = True
     try:
@@ -103,6 +105,9 @@ def run_portal_ssl(tenant_name,tenant_idx):
     global TENANT_NAME,TENANT_IDX
     TENANT_NAME = tenant_name
     TENANT_IDX  = tenant_idx
+
+    os.environ['TENANT_NAME'] = tenant_name
+    os.environ['TENANT_IDX'] = tenant_idx
     
     ret = True
     try:

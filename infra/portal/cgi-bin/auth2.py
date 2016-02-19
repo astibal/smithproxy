@@ -26,10 +26,21 @@ import os
 import SOAPpy
 import traceback
 
-print_exceptions = False
+print_exceptions = True
+
+tenant_name = "default"
+if "TENANT_NAME" in os.environ.keys():
+    tenant_name = os.environ["TENANT_NAME"]
+
+tenant_index = 0
+if "TENANT_IDX" in os.environ.keys():
+    tenant_index = int(os.environ["TENANT_IDX"])
+
+
+bend_url = "http://127.0.0.1:%d/" % (tenant_index+64000,)
 
 def authenticate(username,password,token):
-    global print_exceptions
+    global print_exceptions,bend_url
 
     pagename = "Authentication %s"
     caption = "Authentication %s"
@@ -37,7 +48,7 @@ def authenticate(username,password,token):
 
     try:
         if username:
-            bend = SOAPpy.SOAPProxy("http://localhost:65456/")
+            bend = SOAPpy.SOAPProxy(bend_url)
             success,ref = bend.authenticate(ip,username,password,token)
         
         
@@ -72,7 +83,7 @@ def authenticate(username,password,token):
         
     except Exception,e:
         if print_exceptions:
-            util.print_message("Whoops!","Exception caught!",str(e) +" " + traceback.format_exc(100))
+            util.print_message("Whoops!","Exception caught!",str(e) +" " + traceback.format_exc(100)) + " backend URL %s" % (bend_url,)
         else:
             util.print_message("Authentication failed","Authentication failed","There was a problem to validate your credentials. Please contact system administrator.")
 
