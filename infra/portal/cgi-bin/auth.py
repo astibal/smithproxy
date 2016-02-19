@@ -198,7 +198,7 @@ logged_page = """
 
 try:
     if ref:
-        bend = SOAPpy.SOAPProxy("http://localhost:65456/")
+        bend = SOAPpy.SOAPProxy("http://localhost:64003/")
         bend.save_referer(token,ref)
         
     if token != "0":
@@ -206,7 +206,7 @@ try:
         print   auth_page % (style,tok_str,)
     else:
         if ip:
-            bend = SOAPpy.SOAPProxy("http://localhost:65456/")
+            bend = SOAPpy.SOAPProxy("http://localhost:64003/")
             logon_info = bend.whois(ip)
             
             if logon_info != []:

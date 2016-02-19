@@ -29,6 +29,8 @@ import os
 import time
 import logging
 
+global TENANT_NAME
+global TENANT_IDX
 
 class ThreadingCGIServer(ThreadingMixIn,BaseHTTPServer.HTTPServer):
     pass
@@ -37,7 +39,7 @@ class ThreadingCGIServer(ThreadingMixIn,BaseHTTPServer.HTTPServer):
 def run_plaintext(cfg_api, server_class=ThreadingCGIServer,
         handler_class=CGIHTTPServer.CGIHTTPRequestHandler):
   
-    port = cfg_api.settings.auth_portal.http_port
+    port = int(cfg_api.settings.auth_portal.http_port)  + int(TENANT_IDX)
     server_address = ('', int(port))
     handler_class.cgi_directories = ['/cgi-bin']
     httpd = server_class(server_address, handler_class)
@@ -48,7 +50,7 @@ def run_plaintext(cfg_api, server_class=ThreadingCGIServer,
 def run_ssl(cfg_api,server_class=ThreadingCGIServer,
         handler_class=CGIHTTPServer.CGIHTTPRequestHandler):
   
-    port = cfg_api.settings.auth_portal.https_port
+    port = int(cfg_api.settings.auth_portal.https_port) + int(TENANT_IDX)
     
     cert_root = cfg_api.settings.certs_path
     key  = cert_root+cfg_api.settings.auth_portal.ssl_key
@@ -80,7 +82,11 @@ def run_portal_all_background():
             time.sleep(1)
 
 
-def run_portal_plain():
+def run_portal_plain(tenant_name,tenant_idx):
+    global TENANT_NAME,TENANT_IDX
+    TENANT_NAME = tenant_name
+    TENANT_IDX  = tenant_idx
+    
     ret = True
     try:
         logging.debug("run_portal_plain: start")
@@ -93,7 +99,11 @@ def run_portal_plain():
         
     return str(ret)
        
-def run_portal_ssl():
+def run_portal_ssl(tenant_name,tenant_idx):
+    global TENANT_NAME,TENANT_IDX
+    TENANT_NAME = tenant_name
+    TENANT_IDX  = tenant_idx
+    
     ret = True
     try:
         logging.debug("run_portal_ssl: start")

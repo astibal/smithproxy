@@ -34,17 +34,12 @@ PY_MAJOR_VERSION = sys.version_info[0]
 
 import SOAPpy
 
-
-BEND_LOGFILE="/var/log/smithproxy_bend.log"
-BEND_KEYFILE="/etc/smithproxy/users.key"
-
-flog = logging.getLogger('bend')
-hdlr = logging.FileHandler(BEND_LOGFILE)
-formatter = logging.Formatter('%(asctime)s [%(process)d] [%(levelname)s] %(message)s')
-hdlr.setFormatter(formatter)
-flog.addHandler(hdlr) 
-flog.setLevel(logging.INFO)
-
+global TENANT_NAME
+global TENANT_IDX
+global BEND_LOGFILE
+global BEND_KEYFILE
+global BEND_PORT
+global flog
 
 from bendutil import *
 from shmtable import ShmTable
@@ -54,13 +49,13 @@ from tokentable import TokenTable
 
 class AuthManager:
 
-    def __init__(self):
+    def __init__(self, server_port):
       self.logon_shm = None
       self.token_shm = None
       self.last_refresh = time.time()
       
       self.global_token_referer = {}
-      self.server = SOAPpy.ThreadingSOAPServer(("localhost", 65456))
+      self.server = SOAPpy.ThreadingSOAPServer(("localhost", server_port))
       
       self.portal_address = None
       self.portal_port = None
@@ -94,13 +89,13 @@ class AuthManager:
     def setup_logon_tables(self,mem_name,mem_size,sem_name):
 
       self.logon_shm = LogonTable()
-      self.logon_shm.setup("/smithproxy_auth_ok",1024*1024,"/smithproxy_auth_ok.sem")
+      self.logon_shm.setup(mem_name,mem_size,sem_name)
       self.logon_shm.clear()
       self.logon_shm.write_header()
 
     def setup_token_tables(self,mem_name,mem_size,sem_name):
       self.token_shm = TokenTable()
-      self.token_shm.setup("/smithproxy_auth_token",1024*1024,"/smithproxy_auth_token.sem")
+      self.token_shm.setup(mem_name,mem_size,sem_name)
       self.token_shm.clear();
       
       # test data
@@ -584,17 +579,33 @@ class AuthManager:
         
 
 
-def run_bend():
+def run_bend(tenant_name="default",tenant_index=0):
+    global BEND_LOGFILE,BEND_KEYFILE,BEND_PORT,flog,TENANT_NAME,TENANT_IDX
+   
     c = cfg.Config()
     c.read_file("/etc/smithproxy/smithproxy.cfg")    
     u = cfg.Config()
     u.read_file("/etc/smithproxy/users.cfg")
+
+
+    BEND_LOGFILE="/var/log/smithproxy_bend.%s.log" % (tenant_name,)
+    BEND_KEYFILE="/etc/smithproxy/users.key"
+    BEND_PORT=64000+int(tenant_index)
+    TENANT_NAME=tenant_name
+    TENANT_IDX=tenant_index
+
+    flog = logging.getLogger('bend')
+    hdlr = logging.FileHandler(BEND_LOGFILE)
+    formatter = logging.Formatter('%(asctime)s [%(process)d] [%(levelname)s] %(message)s')
+    hdlr.setFormatter(formatter)
+    flog.addHandler(hdlr) 
+    flog.setLevel(logging.INFO)
     
     
-    a = AuthManager()
+    a = AuthManager(server_port=BEND_PORT)
     a.load_a1()
     a.portal_address = c.settings.auth_portal.address
-    a.portal_port = c.settings.auth_portal.http_port
+    a.portal_port = str(int(c.settings.auth_portal.http_port) + int(tenant_index))
     flog.setLevel(cfgloglevel_to_py(c.settings.log_level));
     
     flog.debug("loading config file")
@@ -610,9 +621,10 @@ def run_bend():
         exc_type, exc_value, exc_traceback = sys.exc_info()
         flog.error("Error loading config: %s" % (str(e),))
         flog.error("Error loading config: %s" % (repr(traceback.format_tb(exc_traceback)),))
+
     
-    a.setup_logon_tables("/smithproxy_auth_ok",1024*1024,"/smithproxy_auth_ok.sem")
-    a.setup_token_tables("/smithproxy_auth_token",1024*1024,"/smithproxy_auth_token.sem")
+    a.setup_logon_tables("/smithproxy_auth_ok_%s" % (TENANT_NAME,),1024*1024,"/smithproxy_auth_ok_%s.sem" % (TENANT_NAME,))
+    a.setup_token_tables("/smithproxy_auth_token_%s" % (TENANT_NAME,),1024*1024,"/smithproxy_auth_token_%s.sem" % (TENANT_NAME,))
     
     try:
         a.serve_forever()

@@ -80,18 +80,18 @@ DIVERT_IP_RULE=100
 
 # #### DON'T modify anything below, unless you really know what you are doing ####
 
-SMITH_TCP_TPROXY=`expr $SMITH_TCP_TPROXY + $tenant_index`
-SMITH_UDP_TPROXY=`expr $SMITH_UDP_TPROXY + $tenant_index`
-SMITH_TLS_TPROXY=`expr $SMITH_TLS_TPROXY + $tenant_index`
-SMITH_DTLS_TPROXY=`expr $SMITH_DTLS_TPROXY + $tenant_index`
-DIVERT_FWMARK=`expr $DIVERT_FWMARK + $tenant_index`
-DIVERT_IP_RULE=`expr $DIVERT_IP_RULE + $tenant_index`
-
 
 # source defaults - could be used to override variables above
 if [ -f /etc/smithproxy/smithproxy.startup.cfg ]; then
  . /etc/smithproxy/smithproxy.startup.cfg $1 "before"
 fi
+
+SMITH_TCP_TPROXY=`expr $SMITH_TCP_TPROXY + $tenant_index`
+SMITH_UDP_TPROXY=`expr $SMITH_UDP_TPROXY + $tenant_index`
+SMITH_TLS_TPROXY=`expr $SMITH_TLS_TPROXY + $tenant_index`
+SMITH_DTLS_TPROXY=`expr $SMITH_DTLS_TPROXY + $tenant_index`
+#DIVERT_FWMARK=`expr $DIVERT_FWMARK + $tenant_index`
+#DIVERT_IP_RULE=`expr $DIVERT_IP_RULE + $tenant_index`
 
 case "$1" in
   start)

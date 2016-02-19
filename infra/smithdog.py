@@ -42,20 +42,25 @@ import pprint
 """
    WARNING: this is not intended to be edited by end users !! 
 """
+global TENANCY, TENANT_IDX, TENANT_NAME
+
+TENANCY = False
+TENANT_NAME = "default"
+TENANT_IDX = "0"
 
 SMITHPROXY_PATH = '/usr/bin/smithproxy'
-SMITHPROXY_PIDFILE = '/var/run/smithproxy.0.pid'
+SMITHPROXY_PIDFILE = '/var/run/smithproxy.%s.pid'
 
-SMITHDOG_PIDFILE='/var/run/smithproxy_dog.pid'
-SMITHDOG_LOGFILE='/var/log/smithproxy_dog.log'
+SMITHDOG_PIDFILE='/var/run/smithproxy_dog.%s.pid'
+SMITHDOG_LOGFILE='/var/log/smithproxy_dog.%s.log'
 
 WWW_PATH='/usr/share/smithproxy/www/'
 PORTAL_PATH=WWW_PATH+"portal/"
-PORTAL_PIDFILE='/var/run/smithproxy_portal.pid'
-PORTALSSL_PIDFILE='/var/run/smithproxy_portal_ssl.pid'
+PORTAL_PIDFILE='/var/run/smithproxy_portal.%s.pid'
+PORTALSSL_PIDFILE='/var/run/smithproxy_portal_ssl.%s.pid'
 
 INFRA_PATH='/usr/share/smithproxy/infra/'
-BEND_PIDFILE='/var/run/smithproxy_bend.pid'
+BEND_PIDFILE='/var/run/smithproxy_bend.%s.pid'
 
 WOTD_PIDFILE='/var/run/smithproxy_wotd.pid'
 WOTD_SOCKFILE='/var/run/smithproxy_wotd-socket'
@@ -71,13 +76,14 @@ from bend   import bend
 from bend.wot   import wotresponder
 from uxserv import ThreadedUxServerDaemon,Responder_OK
 
-flog = create_logger("dog",SMITHDOG_LOGFILE)
+global flog
 
 class PortalDaemon(Daemon):
     def __init__(self, nicename, pidfile, stdin='/dev/null', stdout='/dev/null', stderr='/dev/null'):
         Daemon.__init__(self,nicename,pidfile,stdin,stdout,stderr)
 
     def run(self):
+        global TENANCY,TENANT_IDX,TENANT_NAME
         os.chdir(PORTAL_PATH)
         
         e = None
@@ -85,11 +91,11 @@ class PortalDaemon(Daemon):
         if(self.nicename.endswith("ssl")):
             flog.debug("PortalDaemon.run: Starting https portal")
             self.drop_privileges()
-            e = webfr.run_portal_ssl()
+            e = webfr.run_portal_ssl(TENANT_NAME,TENANT_IDX)
         else:
             flog.debug("PortalDaemon.run: Starting http portal")
             self.drop_privileges()
-            e = webfr.run_portal_plain()
+            e = webfr.run_portal_plain(TENANT_NAME,TENANT_IDX)
 
         if(e):
             flog.error("PortalDaemon.run: finished with error: %s",str(e))
@@ -106,7 +112,9 @@ class BendDaemon(Daemon):
     def run(self):
         os.chdir(INFRA_PATH)
         #self.drop_privileges() # not ready for this yet
-        bend.run_bend()
+        
+        flog.info("DOG => BEND: tenant=%s index=%s" % (TENANT_NAME,TENANT_IDX))
+        bend.run_bend(tenant_name=TENANT_NAME,tename_index=TENANT_IDX)
 
 
 def start_exec(nicename, path, pidfile, additional_arguments=None):
@@ -130,7 +138,7 @@ def stop_exec(nicename,pidfile):
 
 class SmithProxyDog(Daemon):
     def __init__(self,poll_interval=0.2, stdin='/dev/null', stdout='/dev/null', stderr='/dev/null'): 
-        Daemon.__init__(self,'smithdog',SMITHDOG_PIDFILE,stdin,stdout,stderr)
+        Daemon.__init__(self,'smithdog',SMITHDOG_PIDFILE % (TENANT_NAME,),stdin,stdout,stderr)
         self.exec_info = []     # tuples of nicename,executable,pidfile_of_executable
         self.sub_daemons = []   # daemons which we are starting via Daemon class interface
         self.poll_interval = poll_interval
@@ -162,7 +170,7 @@ class SmithProxyDog(Daemon):
 
 
 
-        for (nicename,exe,pidfile) in self.exec_info:
+        for (nicename,exe,pidfile,add) in self.exec_info:
             r = SmithProxyDog.check_running_pidfile(pidfile)
             if not r: 
                 SmithProxyDog.print_process_status(r,nicename,print_stdout)
@@ -175,7 +183,7 @@ class SmithProxyDog(Daemon):
 
                     p = os.fork()
                     if p == 0:
-                        start_exec(nicename,exe,pidfile)
+                        start_exec(nicename,exe,pidfile,add)
                         sys.exit(0)
                     else:
                         flog.debug("fixing exec: parent process: %d waiting for %d to finish" % (os.getpid(),p) )
@@ -262,23 +270,37 @@ class SmithProxyDog(Daemon):
 
 if __name__ == "__main__":
 
+    if len(sys.argv) >= 4:
+        TENANCY = True
+        TENANT_NAME = sys.argv[2]
+        TENANT_IDX = sys.argv[3]
+        
+    flog = create_logger("dog",SMITHDOG_LOGFILE % (TENANT_NAME,))
+        
     daemon = SmithProxyDog(0.5)
     daemon.keeppid = True
 
-    daemon.exec_info.append(('smithproxy core', SMITHPROXY_PATH, SMITHPROXY_PIDFILE))
+    smithproxy_options = []
+    if TENANCY:
+        smithproxy_options.append("--tenant-name")
+        smithproxy_options.append(TENANT_NAME)
+        smithproxy_options.append("--tenant-index")
+        smithproxy_options.append(TENANT_IDX)
+        
+    daemon.exec_info.append(('smithproxy core', SMITHPROXY_PATH, SMITHPROXY_PIDFILE % (TENANT_NAME,), smithproxy_options ))
 
     ### Backend INIT
-    bend_ = BendDaemon('bend',BEND_PIDFILE)
+    bend_ = BendDaemon('bend',BEND_PIDFILE % (TENANT_NAME,))
     bend_.pwd = INFRA_PATH 
     daemon.sub_daemons.append(bend_)
 
     ### Portal INIT 
 
-    portal_ = PortalDaemon('portal',PORTAL_PIDFILE)
+    portal_ = PortalDaemon('portal',PORTAL_PIDFILE % (TENANT_NAME,))
     portal_.pwd = PORTAL_PATH
     daemon.sub_daemons.append(portal_)
 
-    portal_ssl_ = PortalDaemon('portal_ssl',PORTALSSL_PIDFILE)
+    portal_ssl_ = PortalDaemon('portal_ssl',PORTALSSL_PIDFILE % (TENANT_NAME,))
     portal_ssl_.pwd = PORTAL_PATH
     daemon.sub_daemons.append(portal_ssl_)
 
@@ -288,6 +310,8 @@ if __name__ == "__main__":
     daemon.sub_daemons.append(wotd_)
 
     if len(sys.argv) >= 2:
+        
+        
         if 'start' == sys.argv[1]:
                 flog.info("STARTING ALL DAEMONS!")
                 print "STARTING ALL DAEMONS!"
@@ -302,11 +326,11 @@ if __name__ == "__main__":
                     else:
                         os.waitpid(p,1)   # wait for 'p'
 
-                for (n,e,p) in daemon.exec_info:
+                for (n,e,p,a) in daemon.exec_info:
                     flog.info("Starting " + n)
                     ppp = os.fork()
                     if ppp == 0:
-                        start_exec(n,e,p)
+                        start_exec(n,e,p,a)
                         #flog.info("  finished")
                         sys.exit(0)
                     else:
@@ -336,7 +360,7 @@ if __name__ == "__main__":
                     d.stop()
                     #flog.info("  finished")
 
-                for (n,e,p) in daemon.exec_info:
+                for (n,e,p,a) in daemon.exec_info:
                     flog.info("Stopping " + n)
                     stop_exec(n,p)
                     #flog.info("  finished")
