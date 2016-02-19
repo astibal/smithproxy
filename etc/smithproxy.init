@@ -31,23 +31,32 @@ function do_cmd {
     CMD=$1
     TENID=$2
 
-    if [[ "$TENID"  != "" ]]; then
-        echo "${CMD}ing smithproxy - tenant $TENID"
-        /etc/smithproxy/smithproxy.startup.sh ${CMD} $TENID
-        python2 /usr/share/smithproxy/infra/smithdog.py ${CMD} $TENID
+    
+    if [[ ! -f "/etc/smithproxy/smithproxy.tenants.cfg" ]]; then
+        TENID="0"
+        
+        echo "${CMD}ing smithproxy"
+        /etc/smithproxy/smithproxy.startup.sh ${CMD}
+        python2 /usr/share/smithproxy/infra/smithdog.py ${CMD} "0" "0"   # <cmd> <tenant_name> <tenant_index>
+
     else
-    
-        if [[ ! -f "/etc/smithproxy/smithproxy.tenants.cfg" ]]; then
-            TENID="0"
-            do_cmd $CMD $TENID
-            return
+        if [[ "$TENID"  != "" ]]; then
+
+            TENIDX=`cat /etc/smithproxy/smithproxy.tenants.cfg | grep ";$TENID;" | awk -F\; '{ print $1 }'`
+            echo "${CMD}ing smithproxy - tenant $TENID, index ${TENIDX}"
+            
+            # startup.sh will calculate tenant index on its own
+            /etc/smithproxy/smithproxy.startup.sh ${CMD} $TENID
+            python2 /usr/share/smithproxy/infra/smithdog.py ${CMD} $TENID ${TENIDX}
+        
+        else
+
+            echo "${CMD}ing smithproxy - all tenants"
+            for l in `cat /etc/smithproxy/smithproxy.tenants.cfg | awk -F\; '{ print $2 }'`; do 
+                echo " ${CMD}ing tenant $l"; 
+                do_cmd ${CMD} "$l"
+            done;
         fi
-    
-        echo "${CMD}ing smithproxy - all tenants"
-        for l in `cat /etc/smithproxy/smithproxy.tenants.cfg | awk -F\; '{ print $2 }'`; do 
-            echo " ${CMD}ing tenant $l"; 
-            do_cmd ${CMD} "$l"
-        done;
     fi
 }
 
