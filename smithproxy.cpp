@@ -473,6 +473,8 @@ bool load_config(std::string& config_f, bool reload) {
             
             if(cfgapi.getRoot()["settings"].lookupValue("log_file",log_target)) {
                 
+                
+                log_target = string_format(log_target,cfgapi_tenant_name.c_str());
                 // prepare custom crashlog file
                 std::string crlog = log_target + ".crashlog.log";
                 memset((void*)crashlog_file,0,LOG_FILENAME_SZ);
