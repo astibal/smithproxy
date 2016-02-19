@@ -43,6 +43,11 @@ std::map<std::string,ProfileTls*> cfgapi_obj_profile_tls;
 std::map<std::string,ProfileAuth*> cfgapi_obj_profile_auth;
 std::map<std::string,ProfileAlgDns*> cfgapi_obj_profile_alg_dns;
 
+
+// multi-tenancy support
+std::string cfgapi_tenant_name = "default";
+unsigned int cfgapi_tenant_index = 0;
+
 std::recursive_mutex cfgapi_write_lock;
 
 struct cfgapi_table_ cfgapi_table;

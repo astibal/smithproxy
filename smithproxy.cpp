@@ -513,7 +513,7 @@ void ignore_sigpipe() {
 }
 
 int apply_index(std::string& what , const std::string& idx) {
-    INF_("apply_index: what=%s idx=%s",what.c_str(),idx.c_str());
+    DEB_("apply_index: what=%s idx=%s",what.c_str(),idx.c_str());
     int port = std::stoi(what);
     int index = std::stoi(idx);
     what = std::to_string(port + index);
@@ -529,6 +529,8 @@ bool apply_tenant_config() {
         ret += apply_index(cfg_ssl_listen_port,cfg_tenant_index);
         ret += apply_index(cfg_udp_port,cfg_tenant_index);
         ret += apply_index(cfg_socks_port,cfg_tenant_index);
+        ret += apply_index(cfgapi_identity_portal_port_http,cfg_tenant_index);
+        ret += apply_index(cfgapi_identity_portal_port_https,cfg_tenant_index);
     }
     
     return (ret == 0);
@@ -588,6 +590,8 @@ int main(int argc, char *argv[]) {
         WAR_("Starting tenant: '%s', index %s",cfg_tenant_name.c_str(),cfg_tenant_index.c_str());
         WARS_(" ");
         daemon_set_tenant(cfg_tenant_name);
+        cfgapi_tenant_index = std::stoi(cfg_tenant_index);
+        cfgapi_tenant_name  = cfg_tenant_name;
     } 
     else if (cfg_tenant_index.size() > 0 || cfg_tenant_name.size() > 0){
         
@@ -663,7 +667,13 @@ int main(int argc, char *argv[]) {
     //     CRYPTO_malloc_debug_init();
     //     CRYPTO_dbg_set_options(V_CRYPTO_MDEBUG_ALL);
     CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON);
-	
+
+    std::string friendly_thread_name_tcp = string_format("sxy_tcp_%d",cfgapi_tenant_index);
+    std::string friendly_thread_name_udp = string_format("sxy_udp_%d",cfgapi_tenant_index);
+    std::string friendly_thread_name_tls = string_format("sxy_tls_%d",cfgapi_tenant_index);
+    std::string friendly_thread_name_skx = string_format("sxy_skx_%d",cfgapi_tenant_index);
+    std::string friendly_thread_name_cli = string_format("sxy_cli_%d",cfgapi_tenant_index);
+    std::string friendly_thread_name_own = string_format("sxy_own_%d",cfgapi_tenant_index);
 
     plain_proxy = prepare_listener<theAcceptor,TCPCom>(cfg_listen_port,"plain-text",50080,cfg_tcp_workers);
     ssl_proxy = prepare_listener<theAcceptor,MySSLMitmCom>(cfg_ssl_listen_port,"SSL",50443,cfg_ssl_workers);
@@ -712,7 +722,7 @@ int main(int argc, char *argv[]) {
             DIAS_("plaintext workers torn down."); 
             plain_proxy->shutdown(); 
         } );
-        pthread_setname_np(plain_thread->native_handle(),"smithproxy_tcp");
+        pthread_setname_np(plain_thread->native_handle(),friendly_thread_name_tcp.c_str());
     }
     
     if(ssl_proxy) {
@@ -726,7 +736,7 @@ int main(int argc, char *argv[]) {
             DIAS_("ssl workers torn down."); 
             ssl_proxy->shutdown();  
         } );    
-        pthread_setname_np(ssl_thread->native_handle(),"smithproxy_tls");
+        pthread_setname_np(ssl_thread->native_handle(),friendly_thread_name_tls.c_str());
     }
 
     if(udp_proxy) {
@@ -740,7 +750,7 @@ int main(int argc, char *argv[]) {
             DIAS_("udp workers torn down."); 
             udp_proxy->shutdown();  
         } );       
-        pthread_setname_np(udp_thread->native_handle(),"smithproxy_udp");
+        pthread_setname_np(udp_thread->native_handle(),friendly_thread_name_udp.c_str());
     }
     
     if(socks_proxy) {
@@ -754,7 +764,7 @@ int main(int argc, char *argv[]) {
             DIAS_("socks workers torn down."); 
             socks_proxy->shutdown();  
         } );   
-        pthread_setname_np(socks_thread->native_handle(),"smithproxy_skx");
+        pthread_setname_np(socks_thread->native_handle(),friendly_thread_name_skx.c_str());
     }
 
     cli_thread = new std::thread([] () { 
@@ -765,9 +775,11 @@ int main(int argc, char *argv[]) {
         cli_loop(cli_port);
         DIAS_("cli workers torn down."); 
     } );      
-    pthread_setname_np(cli_thread->native_handle(),"smithproxy_cli");
+    pthread_setname_np(cli_thread->native_handle(),friendly_thread_name_cli.c_str());
     
     CRI_("Smithproxy %s (socle %s) started",SMITH_VERSION,SOCLE_VERSION);
+    
+    pthread_setname_np(pthread_self(),friendly_thread_name_own.c_str());
     
     if(plain_thread) {
         plain_thread->join();
