@@ -22,6 +22,8 @@
 #include <csignal>
 #include <ctime>
 #include <cstdlib>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #include <ostream>
 #include <ios>
@@ -540,8 +542,11 @@ bool apply_tenant_config() {
 
 int main(int argc, char *argv[]) {
 
-    config_file = "/etc/smithproxy/smithproxy.cfg";    
-
+    config_file = "/etc/smithproxy/smithproxy.cfg";
+    bool custom_config_file = false;
+    
+    std::string config_file_tenant = "/etc/smithproxy/smithproxy.%s.cfg";
+    
     while(1) {
     /* getopt_long stores the option index here. */
         int option_index = 0;
@@ -555,7 +560,8 @@ int main(int argc, char *argv[]) {
                 break;
                 
             case 'c':
-                config_file = std::string(optarg);        
+                config_file = std::string(optarg);    
+                custom_config_file = true;
                 break;      
                 
             case 'o':
@@ -590,7 +596,7 @@ int main(int argc, char *argv[]) {
     
     if(cfg_tenant_index.size() > 0 && cfg_tenant_name.size() > 0) {
         WAR_("Starting tenant: '%s', index %s",cfg_tenant_name.c_str(),cfg_tenant_index.c_str());
-        WARS_(" ");
+
         daemon_set_tenant(cfg_tenant_name);
         cfgapi_tenant_index = std::stoi(cfg_tenant_index);
         cfgapi_tenant_name  = cfg_tenant_name;
@@ -602,7 +608,6 @@ int main(int argc, char *argv[]) {
     }
     else {
         WARS_("Starting tenant: 0 (default)");
-        WARS_(" ");
         daemon_set_tenant("0"); 
     }
     
@@ -612,6 +617,22 @@ int main(int argc, char *argv[]) {
         lout.level(args_debug_flag);
     }
         
+        
+    if(! custom_config_file and cfgapi_tenant_index > 0) {
+        // look for tenant config (no override set)
+        
+        std::string tenant_cfg = string_format(config_file_tenant.c_str(),cfgapi_tenant_name.c_str());
+        
+        struct stat s;
+        if (stat(tenant_cfg.c_str(),&s) == 0) {
+            WAR_("Tenant config: %s",tenant_cfg.c_str());
+            config_file = tenant_cfg;
+        } else {
+            WAR_("Tenant config %s not found. Using default.",tenant_cfg.c_str());
+        }
+    }
+    
+    WARS_(" ");
     // set level to what's in the config
     if (!load_config(config_file)) {
         if(config_file_check_only) {
