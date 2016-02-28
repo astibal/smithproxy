@@ -581,18 +581,16 @@ class AuthManager:
 
 def run_bend(tenant_name="default",tenant_index=0):
     global BEND_LOGFILE,BEND_KEYFILE,BEND_PORT,flog,TENANT_NAME,TENANT_IDX
-   
-    c = cfg.Config()
-    c.read_file("/etc/smithproxy/smithproxy.cfg")    
-    u = cfg.Config()
-    u.read_file("/etc/smithproxy/users.cfg")
 
+    TENANT_NAME  = tenant_name
+    TENANT_IDX   = tenant_index
 
-    BEND_LOGFILE="/var/log/smithproxy_bend.%s.log" % (tenant_name,)
-    BEND_KEYFILE="/etc/smithproxy/users.key"
-    BEND_PORT=64000+int(tenant_index)
-    TENANT_NAME=tenant_name
-    TENANT_IDX=tenant_index
+    user_file = "/etc/smithproxy/users.cfg"
+    key_file = "/etc/smithproxy/users.key"
+
+    BEND_LOGFILE = "/var/log/smithproxy_bend.%s.log" % (tenant_name,)
+    BEND_KEYFILE = key_file
+    BEND_PORT    = 64000 + int(tenant_index)
 
     flog = logging.getLogger('bend')
     hdlr = logging.FileHandler(BEND_LOGFILE)
@@ -600,7 +598,34 @@ def run_bend(tenant_name="default",tenant_index=0):
     hdlr.setFormatter(formatter)
     flog.addHandler(hdlr) 
     flog.setLevel(logging.INFO)
+   
     
+    c = cfg.Config()
+    c.read_file("/etc/smithproxy/smithproxy.cfg")    
+    u = cfg.Config()
+    
+    
+    # check if there is specific tenant user.cfg
+    if tenant_index != 0:
+        try:
+            tenant_user_file = "/etc/smithproxy/users." + TENANT_NAME + ".cfg"
+            s = os.stat(tenant_user_file)
+            user_file = tenant_user_file
+            flog.info("Tenant user file: " + user_file)
+
+        except OSError:
+            flog.info("Tenant is using default user file: " + user_file)
+
+        try:
+            tenant_key_file = "/etc/smithproxy/users." + TENANT_NAME + ".key"
+            s = os.stat(tenant_key_file)
+            key_file = tenant_key_file
+            
+        except OSError:
+            flog.info("Tenant is using default key file: " + key_file)
+       
+    u.read_file(user_file)
+
     
     a = AuthManager(server_port=BEND_PORT)
     a.load_a1()
