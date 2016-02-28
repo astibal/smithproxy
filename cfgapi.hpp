@@ -61,6 +61,7 @@ extern std::recursive_mutex cfgapi_write_lock;
 
 extern std::string cfgapi_tenant_name;
 extern unsigned int cfgapi_tenant_index;
+extern std::string cfgapi_tenant_magic_ip;
 
 
 struct logging_{

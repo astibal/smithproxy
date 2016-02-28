@@ -47,6 +47,7 @@ std::map<std::string,ProfileAlgDns*> cfgapi_obj_profile_alg_dns;
 // multi-tenancy support
 std::string cfgapi_tenant_name = "default";
 unsigned int cfgapi_tenant_index = 0;
+std::string cfgapi_tenant_magic_ip;
 
 std::recursive_mutex cfgapi_write_lock;
 

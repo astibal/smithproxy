@@ -675,6 +675,11 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
         delete just_accepted_cx;
     } 
     else {
+        std::string h;
+        std::string p;
+        just_accepted_cx->name();
+        just_accepted_cx->com()->resolve_socket_src(just_accepted_cx->socket(),&h,&p);
+
         MitmProxy* new_proxy = new MitmProxy(just_accepted_cx->com()->slave());
         
         // let's add this just_accepted_cx into new_proxy
@@ -689,16 +694,25 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
         bool matched_vip = false; //did it match virtual IP?
         
         std::string target_host = just_accepted_cx->com()->nonlocal_dst_host();
+        std::string orig_target_host;
         short unsigned int target_port = just_accepted_cx->com()->nonlocal_dst_port();
+        short unsigned int orig_target_port;
 
-        if( target_host == "1.2.3.4") {
-            INFS_("Redirection hit");
+        if( target_host == cfgapi_tenant_magic_ip) {
+            
+            orig_target_host = target_host;
+            orig_target_port = target_port;
+            
             if(target_port != 443) {
                 target_port = std::stoi(cfgapi_identity_portal_port_http);
             } else {
                 target_port = std::stoi(cfgapi_identity_portal_port_https);
             }
             target_host = "127.0.0.1";
+            
+            DIA_("Connection from %s to %s:%d: traffic redirected from magic IP to %s:%d",just_accepted_cx->c_name(), 
+                 orig_target_host.c_str(), orig_target_port,
+                 target_host.c_str(), target_port);
             matched_vip = true;
         }
         
@@ -709,10 +723,6 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
         
         // connect it! - btw ... we don't want to block of course...
         
-        std::string h;
-        std::string p;
-        just_accepted_cx->name();
-        just_accepted_cx->com()->resolve_socket_src(just_accepted_cx->socket(),&h,&p);
         
         just_accepted_cx->peer(target_cx);
         target_cx->peer(just_accepted_cx);          

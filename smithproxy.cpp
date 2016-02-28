@@ -453,6 +453,10 @@ bool load_config(std::string& config_f, bool reload) {
         cfgapi.getRoot()["debug"].lookupValue("log_srclines",lout.print_srcline());
         cfgapi.getRoot()["debug"].lookupValue("log_srclines_always",lout.print_srcline_always());
         
+        if(cfgapi.getRoot().exists("settings")) {
+            cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("magic_ip",cfgapi_tenant_magic_ip);
+        }
+        
         cfgapi.getRoot()["debug"]["log"].lookupValue("sslcom",SSLCom::log_level_ref());
         cfgapi.getRoot()["debug"]["log"].lookupValue("sslmitmcom",SSLMitmCom::log_level_ref());
         cfgapi.getRoot()["debug"]["log"].lookupValue("sslcertstore",SSLCertStore::log_level_ref());
