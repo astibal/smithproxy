@@ -685,10 +685,28 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
             DEBS_("MitmMasterProxy::on_left_new: ladd the new cx (unpaused)");
             new_proxy->ladd(just_accepted_cx);
         }
+        
+        bool matched_vip = false; //did it match virtual IP?
+        
+        std::string target_host = just_accepted_cx->com()->nonlocal_dst_host();
         short unsigned int target_port = just_accepted_cx->com()->nonlocal_dst_port();
-        MitmHostCX *target_cx = new MitmHostCX(just_accepted_cx->com()->slave(), just_accepted_cx->com()->nonlocal_dst_host().c_str(), 
+
+        if( target_host == "1.2.3.4") {
+            INFS_("Redirection hit");
+            if(target_port != 443) {
+                target_port = std::stoi(cfgapi_identity_portal_port_http);
+            } else {
+                target_port = std::stoi(cfgapi_identity_portal_port_https);
+            }
+            target_host = "127.0.0.1";
+            matched_vip = true;
+        }
+        
+        MitmHostCX *target_cx = new MitmHostCX(just_accepted_cx->com()->slave(), target_host.c_str(), 
                                             string_format("%d",target_port).c_str()
                                             );
+        
+        
         // connect it! - btw ... we don't want to block of course...
         
         std::string h;
@@ -706,6 +724,21 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
         
         // apply policy and get result
         int policy_num = cfgapi_obj_policy_apply(just_accepted_cx,new_proxy);
+
+        // bypass ssl com to VIP
+        if(matched_vip) {
+            SSLCom* scom = dynamic_cast<SSLCom*>(just_accepted_cx->com());
+            if(scom != nullptr) {
+                scom->opt_bypass = true;
+            }
+            
+            scom = dynamic_cast<SSLCom*>(target_cx->com());
+            if(scom != nullptr) {
+                scom->opt_bypass = true;
+            }
+            
+        }
+        
         if(policy_num >= 0) {
 
             //traffic is allowed
@@ -784,7 +817,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                 }
                 
                 // setup NAT
-                if(cfgapi_obj_policy.at(policy_num)->nat == POLICY_NAT_NONE) {
+                if(cfgapi_obj_policy.at(policy_num)->nat == POLICY_NAT_NONE && ! matched_vip) {
                     target_cx->com()->nonlocal_src(true);
                     target_cx->com()->nonlocal_src_host() = h;
                     target_cx->com()->nonlocal_src_port() = std::stoi(p);               
