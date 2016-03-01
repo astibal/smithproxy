@@ -63,7 +63,7 @@ fi
 SMITH_CHAIN_NAME="SX.${tenant_id}"
 DIVERT_CHAIN_NAME="DX.${tenant_id}"
 
-SMITH_INTERFACE='eth1'
+SMITH_INTERFACE='eth1 eth0'
 SMITH_TCP_PORTS='80 25 587 21 143 110 5222 65000'
 SMITH_TCP_PORTS_ALL=0
 SMITH_TCP_TPROXY='50080'
@@ -109,41 +109,48 @@ case "$1" in
             iptables -t mangle -A ${SMITH_CHAIN_NAME} -d ${I} -j ACCEPT
     done
 
-    echo " tproxy for TCP"
-    for P in ${SMITH_TCP_PORTS}; do
-        echo "  tproxy port ${SMITH_INTERFACE}/${P}->${SMITH_TCP_TPROXY}"
-        iptables -t mangle -A ${SMITH_CHAIN_NAME} -p tcp -i ${SMITH_INTERFACE} --dport ${P} -j TPROXY \
-        --tproxy-mark 0x1/0x1 --on-port ${SMITH_TCP_TPROXY}
-    done;
+    for IF in ${SMITH_INTERFACE}; do
+        echo " -- Setting up intercept rules for interface '${IF}'"
     
-    echo " tproxy for UDP"
-    for P in ${SMITH_UDP_PORTS}; do
-        echo "  tproxy port ${SMITH_INTERFACE}/${P}->${SMITH_UDP_TPROXY}"
-        iptables -t mangle -A ${SMITH_CHAIN_NAME} -p udp -i ${SMITH_INTERFACE} --dport ${P} -j TPROXY \
-        --tproxy-mark 0x1/0x1 --on-port ${SMITH_UDP_TPROXY}
-    done;
-    echo " tproxy for TLS"
-    for P in ${SMITH_TLS_PORTS}; do
-        echo "  tproxy port ${SMITH_INTERFACE}/${P}->${SMITH_TLS_TPROXY}"
-        iptables -t mangle -A ${SMITH_CHAIN_NAME} -p tcp -i ${SMITH_INTERFACE} --dport ${P} -j TPROXY \
-        --tproxy-mark 0x1/0x1 --on-port ${SMITH_TLS_TPROXY}
-    done;
-    echo " tproxy for DTLS"
-    for P in ${SMITH_DTLS_PORTS}; do
-        echo "  tproxy port ${SMITH_INTERFACE}/${P}->${SMITH_DTLS_TPROXY}"
-        iptables -t mangle -A ${SMITH_CHAIN_NAME} -p udp -i ${SMITH_INTERFACE} --dport ${P} -j TPROXY \
-        --tproxy-mark 0x1/0x1 --on-port ${SMITH_DTLS_TPROXY}
-    done;
-    echo " drop DTLS ports (until DTLS inspection is implemented)"
-    for P in ${TEMP_DTLS_DROP}; do
-        echo "  drop port ${SMITH_INTERFACE}/${P}->${TEMP_DTLS_DROP}"
-        iptables -t mangle -A ${SMITH_CHAIN_NAME} -p udp -i ${SMITH_INTERFACE} --dport ${P} -j DROP
-    done;
-    if [ ${SMITH_TCP_PORTS_ALL} -gt 0 ]; then
-        echo " tproxy for all TCP traffic"
-        iptables -t mangle -A ${SMITH_CHAIN_NAME} -p tcp -i ${SMITH_INTERFACE} -j TPROXY \
-        --tproxy-mark 0x1/0x1 --on-port ${SMITH_TCP_TPROXY}
-    fi
+        echo " tproxy for TCP"
+        for P in ${SMITH_TCP_PORTS}; do
+            echo "  tproxy port ${IF}/${P}->${SMITH_TCP_TPROXY}"
+            iptables -t mangle -A ${SMITH_CHAIN_NAME} -p tcp -i ${IF} --dport ${P} -j TPROXY \
+            --tproxy-mark 0x1/0x1 --on-port ${SMITH_TCP_TPROXY}
+        done;
+        
+        echo " tproxy for UDP"
+        for P in ${SMITH_UDP_PORTS}; do
+            echo "  tproxy port ${IF}/${P}->${SMITH_UDP_TPROXY}"
+            iptables -t mangle -A ${SMITH_CHAIN_NAME} -p udp -i ${IF} --dport ${P} -j TPROXY \
+            --tproxy-mark 0x1/0x1 --on-port ${SMITH_UDP_TPROXY}
+        done;
+        echo " tproxy for TLS"
+        for P in ${SMITH_TLS_PORTS}; do
+            echo "  tproxy port ${IF}/${P}->${SMITH_TLS_TPROXY}"
+            iptables -t mangle -A ${SMITH_CHAIN_NAME} -p tcp -i ${IF} --dport ${P} -j TPROXY \
+            --tproxy-mark 0x1/0x1 --on-port ${SMITH_TLS_TPROXY}
+        done;
+        echo " tproxy for DTLS"
+        for P in ${SMITH_DTLS_PORTS}; do
+            echo "  tproxy port ${IF}/${P}->${SMITH_DTLS_TPROXY}"
+            iptables -t mangle -A ${SMITH_CHAIN_NAME} -p udp -i ${IF} --dport ${P} -j TPROXY \
+            --tproxy-mark 0x1/0x1 --on-port ${SMITH_DTLS_TPROXY}
+        done;
+        echo " drop DTLS ports (until DTLS inspection is implemented)"
+        for P in ${TEMP_DTLS_DROP}; do
+            echo "  drop port ${IF}/${P}->${TEMP_DTLS_DROP}"
+            iptables -t mangle -A ${SMITH_CHAIN_NAME} -p udp -i ${IF} --dport ${P} -j DROP
+        done;
+        if [ ${SMITH_TCP_PORTS_ALL} -gt 0 ]; then
+            echo " tproxy for all TCP traffic"
+            iptables -t mangle -A ${SMITH_CHAIN_NAME} -p tcp -i ${IF} -j TPROXY \
+            --tproxy-mark 0x1/0x1 --on-port ${SMITH_TCP_TPROXY}
+        fi
+        
+        echo " --"
+    done
+    
     iptables -t mangle -A ${SMITH_CHAIN_NAME} -j RETURN
 
     echo " tproxy chain setup finished."
@@ -165,7 +172,11 @@ case "$1" in
     echo "Applying chains $DIVERT_CHAIN_NAME and $SMITH_CHAIN_NAME into mangle prerouting"
     iptables -t mangle -A PREROUTING -s $tenant_range -p tcp -m socket -j $DIVERT_CHAIN_NAME
     iptables -t mangle -A PREROUTING -s $tenant_range -p udp -m socket -j $DIVERT_CHAIN_NAME
+    iptables -t mangle -A PREROUTING -d $tenant_range -p tcp -m socket -j $DIVERT_CHAIN_NAME
+    iptables -t mangle -A PREROUTING -d $tenant_range -p udp -m socket -j $DIVERT_CHAIN_NAME
+
     iptables -t mangle -A PREROUTING -s $tenant_range -j $SMITH_CHAIN_NAME
+    iptables -t mangle -A PREROUTING -d $tenant_range -j $SMITH_CHAIN_NAME
     echo " done"
     echo
 
