@@ -539,6 +539,8 @@ bool apply_tenant_config() {
         ret += apply_index(cfg_socks_port,cfg_tenant_index);
         ret += apply_index(cfgapi_identity_portal_port_http,cfg_tenant_index);
         ret += apply_index(cfgapi_identity_portal_port_https,cfg_tenant_index);
+        
+        cli_port += std::stoi(cfg_tenant_index);
     }
     
     return (ret == 0);
