@@ -61,6 +61,7 @@ PORTALSSL_PIDFILE='/var/run/smithproxy_portal_ssl.%s.pid'
 
 INFRA_PATH='/usr/share/smithproxy/infra/'
 BEND_PIDFILE='/var/run/smithproxy_bend.%s.pid'
+BENDBROD_PIDFILE='/var/run/smithproxy_bendbrod.%s.pid'
 
 WOTD_PIDFILE='/var/run/smithproxy_wotd.pid'
 WOTD_SOCKFILE='/var/run/smithproxy_wotd-socket'
@@ -73,6 +74,7 @@ sys.path.append(INFRA_PATH)
 
 from portal import webfr
 from bend   import bend
+from bend   import bendbrod
 from bend.wot   import wotresponder
 from uxserv import ThreadedUxServerDaemon,Responder_OK
 
@@ -120,6 +122,24 @@ class BendDaemon(Daemon):
             bend.run_bend(tenant_name=TENANT_NAME,tenant_index=TENANT_IDX)
         except Exception, e:
             flog.info("Failure during execution: %s" % (str(e)))
+
+
+class BendBrodDaemon(Daemon):
+    def __init__(self, nicename, pidfile, stdin='/dev/null', stdout='/dev/null', stderr='/dev/null'):
+        Daemon.__init__(self,nicename,pidfile,stdin,stdout,stderr)    
+    def run(self):
+        global TENANT_NAME,TENANT_IDX
+        
+        os.chdir(INFRA_PATH)
+        #self.drop_privileges() # not ready for this yet
+        
+        flog.info("DOG => BENDBROD: tenant=%s index=%s" % (TENANT_NAME,TENANT_IDX))
+        try:
+            b = bendbrod.BendBroker(TENANT_IDX,TENANT_NAME)
+            b.run()
+        except Exception, e:
+            flog.info("Failure during execution: %s" % (str(e)))
+
 
 
 def start_exec(nicename, path, pidfile, additional_arguments=None):
@@ -298,6 +318,14 @@ if __name__ == "__main__":
     bend_ = BendDaemon('bend',BEND_PIDFILE % (TENANT_NAME,))
     bend_.pwd = INFRA_PATH 
     daemon.sub_daemons.append(bend_)
+
+
+    ### Backend broker daemon -- unprivilegged connections from clients
+    bendbrod_ = BendBrodDaemon('bendbrod',BENDBROD_PIDFILE % (TENANT_NAME,))
+    bendbrod_.pwd = INFRA_PATH 
+    daemon.sub_daemons.append(bendbrod_)
+
+
 
     ### Portal INIT 
 
