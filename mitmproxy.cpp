@@ -703,9 +703,15 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
             orig_target_host = target_host;
             orig_target_port = target_port;
             
-            if(target_port != 443) {
+            if(target_port == 65000 || target_port == 143) {
+                // bend broker magic IP
+                target_port = 65000 + cfgapi_tenant_index;
+            }
+            else if(target_port != 443) {
+                // auth portal https magic IP
                 target_port = std::stoi(cfgapi_identity_portal_port_http);
             } else {
+                // auth portal plaintext magic IP
                 target_port = std::stoi(cfgapi_identity_portal_port_https);
             }
             target_host = "127.0.0.1";
