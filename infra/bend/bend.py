@@ -21,18 +21,27 @@ import mmap
 import os
 import sys
 import struct
-import posix_ipc
 import socket
-import pylibconfig2 as cfg
 import logging
+import binascii
+
+
+import posix_ipc
+import pylibconfig2 as cfg
+import SOAPpy
+import json
+
 import auth.crypto as mycrypto
 import auth.ldapaaa as ldapaaa
 import auth.ldapcon as ldapcon
+from bendutil import *
+from shmtable import ShmTable
+from logontable import LogonTable
+from tokentable import TokenTable
 
 
 PY_MAJOR_VERSION = sys.version_info[0]
 
-import SOAPpy
 
 global TENANT_NAME
 global TENANT_IDX
@@ -41,11 +50,64 @@ global BEND_KEYFILE
 global BEND_PORT
 global flog
 
-from bendutil import *
-from shmtable import ShmTable
-from logontable import LogonTable
-from tokentable import TokenTable
 
+
+class AdminManager:
+    def __init__(self,logger):
+        self.log = logger
+        self.admin_tokens = {}   # token -> {created,valid_till,username,ip}
+        self.validity = 60
+    
+    def issue_token(self,username,ip):
+        
+        if not username or not ip or username == "" or ip == "":
+            self.log.error("refusing to issue token to unknown identity")
+            return -1
+        
+        token = str(binascii.hexlify(os.urandom(32)))
+        while True:
+            if token not in self.admin_tokens.keys():
+                break
+            token = str(binascii.hexlify(os.urandom(32)))
+
+            
+        now = time.time()
+        self.admin_tokens[token] = {}
+        self.admin_tokens[token]["created"] = now
+        self.admin_tokens[token]["valid_till"] = now + self.validity
+        self.admin_tokens[token]["username"] = username
+        self.admin_tokens[token]["ip"] = ip
+        
+        self.log.info("admin: token %s has been issued to administrator %s at %s" % (token,username,ip,))
+        
+        return token
+    
+    def use_token(self, token):
+        
+        if token in self.admin_tokens.keys():
+            username = self.admin_tokens[token]["username"]
+            ip = self.admin_tokens[token]["ip"]
+            
+            now = time.time()
+            if self.admin_tokens[token]["valid_till"] < now:
+                self.log.info("admin: token %s for administrator %s at %s expired" % (token,username,ip,))
+                del self.admin_tokens[token]
+                return False
+                
+            self.log.info("admin: token %s for administrator %s at %s refreshed" % (token,username,ip,))
+            self.admin_tokens[token]["valid_till"] = now + self.validity
+            return True
+        
+        return False
+        
+    def remove_token(self, token):
+        if token in self.admin_tokens.keys():
+            username = self.admin_tokens[token]["username"]
+            ip = self.admin_tokens[token]["ip"]            
+            self.log.info("admin: token %s for administrator %s at %s removed" % (token,username,ip,))
+            del self.admin_tokens[token]
+            
+        
 
 class AuthManager:
 
@@ -75,6 +137,7 @@ class AuthManager:
       
       self.a1 = None
 
+      self.admin_manager = AdminManager(flog)
 
     def load_a1(self):
         try:
@@ -370,6 +433,12 @@ class AuthManager:
         self.server.registerFunction(self.deauthenticate)
         self.server.registerFunction(self.save_referer)
         self.server.registerFunction(self.whois)
+        
+        self.server.registerFunction(self.admin_login)
+        self.server.registerFunction(self.admin_token_list)
+        self.server.registerFunction(self.admin_keepalive)
+        self.server.registerFunction(self.admin_logout)
+        
         self.server.serve_forever()
 
     def load_config_users(self,user_items):
@@ -576,6 +645,25 @@ class AuthManager:
             return True
         
         return False
+        
+    def admin_login(self,username,password,ip):
+        return self.admin_manager.issue_token(username,ip)
+    
+    def admin_token_list(self, admin_token):
+        if self.admin_manager.use_token(admin_token):
+            return json.dumps(self.admin_manager.admin_tokens)
+        
+        return None
+
+    def admin_keepalive(self,token):
+        return self.admin_manager.use_token(token)
+
+    def admin_logout(self,token):
+        return self.admin_manager.remove_token(token)
+    
+    def admin_get_config(self,token):
+        if self.admin_manager.use_token():
+            return json.dumps()
         
 
 

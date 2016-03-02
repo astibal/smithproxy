@@ -46,6 +46,13 @@ class BendBroker:
         self.l_server.registerFunction( SOAPpy.MethodSig(self.ping, keywords=0, context=1) )
         self.l_server.registerFunction( SOAPpy.MethodSig(self.whoami, keywords=0, context=1) )
         self.l_server.registerFunction( SOAPpy.MethodSig(self.authenticate, keywords=0, context=1) )
+        
+        self.l_server.registerFunction( SOAPpy.MethodSig(self.admin_login, keywords=0, context=1) )
+        self.l_server.registerFunction( SOAPpy.MethodSig(self.admin_token_list, keywords=0, context=1) )
+        
+        self.l_server.registerFunction( SOAPpy.MethodSig(self.admin_keepalive, keywords=0, context=1) )
+        self.l_server.registerFunction( SOAPpy.MethodSig(self.admin_logout, keywords=0, context=1) )
+
 
         self.create_logger()
         self.load_config()
@@ -92,6 +99,23 @@ class BendBroker:
             return self.r_server.authenticate(ip,username,password,"0")
 
         return False,"http://auth-portal-url/"
+
+    def admin_login(self, username, password, _SOAPContext = None):
+        if _SOAPContext:
+            ip = _SOAPContext.connection.getpeername()[0]
+            return self.r_server.admin_login(username,password,ip)
+        
+        return -1
+    
+    def admin_token_list(self, admin_token, _SOAPContext = None):
+        return self.r_server.admin_token_list(admin_token)
+        
+    def admin_keepalive(self, admin_token, _SOAPContext = None):
+        return self.r_server.admin_keepalive(admin_token)
+
+    def admin_logout(self, admin_token, _SOAPContext = None):
+        return self.r_server.admin_logout(admin_token)
+
 
     def run(self):
         self.log.warning("Backend broker daemon started (tenant name %s, index %d)" % (self.tenant_name,self.tenant_index) )
