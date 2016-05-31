@@ -31,6 +31,18 @@
 #include <policy.hpp>
 #include <cfgapi_auth.hpp>
 
+class leafProxy : public baseProxy, public socle::sobject {
+public:
+    
+    explicit leafProxy(baseProxy* parent): baseProxy(parent->com()) {}
+    virtual ~leafProxy() {};
+    
+    virtual std::string to_string(int verbosity=INF) { return std::string("leafProxy"); };
+        
+    DECLARE_C_NAME("leafProxy");
+    DECLARE_LOGGING(to_string);
+};
+
 class MitmProxy : public baseProxy, public socle::sobject {
     
 protected:
@@ -49,6 +61,17 @@ public:
     bool opt_auth_authenticate = false;
     bool opt_auth_resolve = false;
     bool auth_block_identity = false;
+    
+    bool opt_av_check = true;
+    #define AV_STAT_FAILED -1
+    #define AV_STAT_NONE 0
+    #define AV_STAT_OK 1
+    #define AV_RESULT_OK 2
+    #define AV_RESULT_INFECTED 64
+    #define AV_FINISHED 192
+    int av_backend_status = AV_STAT_NONE;
+    int av_backend_init();
+    baseHostCX* av_proxy = nullptr;
     
     
     inline bool identity_resolved();
@@ -85,8 +108,10 @@ public:
     virtual bool ask_destroy() { dead(true); return true; };
     virtual std::string to_string(int verbosity=INF);
     
+    virtual int handle_sockets_once(baseCom*);
+    
     bool is_backend_cx(baseHostCX*);
-    void erase_backend_cx(baseHostCX*);
+    void on_backend_error(baseHostCX*);
     
     void init_content_replace();
     std::vector<ProfileContentRule>* content_rule() { return content_rule_; }    

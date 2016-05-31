@@ -33,6 +33,7 @@
 #include <algorithm>
 #include <ctime>
 
+DEFINE_LOGGING(leafProxy);
 DEFINE_LOGGING(MitmProxy);
 
 unsigned long MitmProxy::meter_left_bytes_second;
@@ -80,6 +81,10 @@ MitmProxy::~MitmProxy() {
     
     if(content_rule_ != nullptr) {
       delete content_rule_;
+    }
+    
+    if(av_proxy != nullptr) {
+        delete av_proxy;
     }
     
     delete tlog_;
@@ -182,6 +187,17 @@ bool MitmProxy::update_identity(baseHostCX* cx) {
     return ret;
 }
 
+int MitmProxy::handle_sockets_once(baseCom* xcom) {
+    
+    if(av_proxy != nullptr) {
+        if(xcom->master()->poller.in_read_set(av_proxy->socket())) {
+            handle_internal_data(av_proxy);
+        }
+    }
+    
+    return baseProxy::handle_sockets_once(xcom);
+}
+
 
 void MitmProxy::on_left_bytes(baseHostCX* cx) {
     
@@ -248,6 +264,8 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
     
     // because we have left bytes, let's copy them into all right side sockets!
     for(typename std::vector<baseHostCX*>::iterator j = this->right_sockets.begin(); j != this->right_sockets.end(); j++) {
+        if( is_backend_cx(*j) ) continue;
+        
         if(!redirected) {
 	    if(content_rule() != nullptr) {
 		buffer b = content_replace_apply(cx->to_read());
@@ -264,6 +282,8 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
         }
     }    
     for(typename std::vector<baseHostCX*>::iterator j = this->right_delayed_accepts.begin(); j != this->right_delayed_accepts.end(); j++) {
+        if( is_backend_cx(*j) ) continue;
+        
         if(!redirected) {
 	    if(content_rule() != nullptr) {
 		buffer b = content_replace_apply(cx->to_read());
@@ -300,7 +320,27 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
         tlog()->right_write(cx->to_read());
     }
     
+    
+    if(av_backend_status >= AV_STAT_OK && av_proxy != nullptr) {
+        
+        int32_t data_len = htonl(cx->to_read().size());
+        
+        av_proxy->to_write((unsigned char*)&data_len,4);
+        av_proxy->to_write(cx->to_read());
+        
+        // test: terminate 
+        int32_t zero = 0;
+        av_proxy->to_write((unsigned char*)&zero,4);
+        
+        //INF___("Sent to AV:\n%s",hex_dump(av_proxy->writebuf()).c_str());
+        
+        av_proxy->write();
+    }
+    
+    
     for(typename std::vector<baseHostCX*>::iterator j = this->left_sockets.begin(); j != this->left_sockets.end(); j++) {
+        if( is_backend_cx(*j) ) continue;
+        
 	if(content_rule() != nullptr) {
 	    buffer b = content_replace_apply(cx->to_read());
 	    (*j)->to_write(b);
@@ -311,6 +351,8 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
 	}
     }
     for(typename std::vector<baseHostCX*>::iterator j = this->left_delayed_accepts.begin(); j != this->left_delayed_accepts.end(); j++) {
+        if( is_backend_cx(*j) ) continue;
+        
 	if(content_rule() != nullptr) {
 	    buffer b = content_replace_apply(cx->to_read());
 	    (*j)->to_write(b);
@@ -330,13 +372,27 @@ bool MitmProxy::is_backend_cx(baseHostCX* cx) {
     return (it != backends_.end());
 }
 
-void MitmProxy::erase_backend_cx(baseHostCX* cx) {
-    std::vector<baseHostCX*>:: iterator it = std::find(backends_.begin(),backends_.end(),cx);
+void MitmProxy::on_backend_error(baseHostCX* cx) {
+
+    DIA___("on_backend_error: %s",cx->c_name());
+    
+    com()->master()->unset_monitor(cx->socket());
+    cx->shutdown();
+
+    auto it = std::find(backends_.begin(),backends_.end(),cx);
     if(it != backends_.end()) {
-        backends_.erase(it);
-        
-        // TODO: find a reference in proxy and set it to nullptr. Example:
-        // if(cx == backend_webfilter_cx) backend_webfilter_cx = nullptr;
+        //backends_.erase(it);
+    }
+    
+    auto itl = std::find(left_sockets.begin(),left_sockets.end(),cx);
+    if(itl != left_sockets.end()) {
+        left_sockets.erase(itl);
+        return;
+    }
+    auto itr = std::find(right_sockets.begin(),right_sockets.end(),cx);
+    if(itr != right_sockets.end()) {
+        right_sockets.erase(itr);
+        return;
     }
 }
 
@@ -345,11 +401,14 @@ void MitmProxy::on_left_error(baseHostCX* cx) {
 
     if(this->dead()) return;  // don't process errors twice
 
+    
     if(is_backend_cx(cx)) {
-        // we will ignore backend cx, since they can close/open at will during life of the proxy
-        INF_("on_left_error[%s]: left internal connection closed",cx->full_name('L').c_str());
-        erase_backend_cx(cx);
         
+        on_backend_error(cx);
+        if(cx->socket() > 0) {
+            // we will ignore backend cx, since they can close/open at will during life of the proxy
+            INF_("on_left_error[%s]: left internal connection closed",cx->full_name('L').c_str());
+        }
         // don't harm proxy, leave.
         return;
     }
@@ -380,7 +439,7 @@ void MitmProxy::on_right_error(baseHostCX* cx)
     if(is_backend_cx(cx)) {
         // we will ignore backend cx, since they can close/open at will during life of the proxy
         INF_("on_right_error[%s]: right internal connection closed",cx->full_name('R').c_str());
-        erase_backend_cx(cx);
+        on_backend_error(cx);
         
         // don't harm proxy, leave.
         return;
@@ -501,8 +560,18 @@ void MitmProxy::handle_replacement(MitmHostCX* cx) {
 }
 
 void MitmProxy::handle_internal_data(baseHostCX* cx) {
+    if( cx->read() == 0) {
+        DIAS___("backend channel closed on read.");
+        cx->shutdown();
+        return;
+    }        
+    
     int len = cx->readbuf()->size();
     INF_("handle_internal_data[%s]: %d bytes arrived",cx->full_name('L').c_str(),len);
+    
+    if(cx == av_proxy) {
+        INF___("handle_internal_data[%s]: AV message: %s",cx->full_name('L').c_str(), hex_dump(cx->readbuf()).c_str());
+    }
 }
 
 
@@ -579,6 +648,34 @@ buffer MitmProxy::content_replace_apply(buffer b) {
     return ret_b;
 }
 
+int MitmProxy::av_backend_init() {
+
+    if(av_backend_status == AV_STAT_NONE && opt_av_check) {
+        UxCom* u = new UxCom();
+        u->master(com()->master());
+        baseHostCX *backend_cx = new baseHostCX(u,"/var/run/clamav/clamd.ctl","0");
+        backends().push_back(backend_cx);
+
+        int real_socket = backend_cx->connect(false); 
+        if(real_socket > 0) {
+            com()->set_monitor(real_socket);
+            com()->set_poll_handler(real_socket,this);
+            
+            std::string init_str = "nINSTREAM\n";
+            backend_cx->to_write((unsigned char*)init_str.c_str(),init_str.size());
+            backend_cx->write();
+            
+            av_backend_status = AV_STAT_OK;
+            av_proxy = backend_cx;
+            
+            DIA___("AV backend initialized successfully on socket %d", real_socket);
+        } else {
+            ERRS___("AV backend initialization failed")
+        }
+    }
+    
+    return av_backend_status;
+}
 
 
 bool MitmMasterProxy::ssl_autodetect = false;
@@ -858,25 +955,15 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
             delete_proxy = true;
         }
         
+        // if set, initialize AV socket
+        if(new_proxy->opt_av_check && ( target_port == 80 || target_port == 443 ) ) {
+           new_proxy->av_backend_init();
+        }
+        
         end:
         
         new_proxy->name(new_proxy->to_string(INF));
         
-        /*
-        // test for unix socket backend infra!
-            UxCom* u = new UxCom();
-            u->master(com()->master());
-            baseHostCX *backend_cx = new baseHostCX(u,"/tmp/test","0");
-            new_proxy->backends().push_back(backend_cx);
-            new_proxy->ladd(backend_cx);
-
-            int real_socket = backend_cx->connect(false); 
-            if(real_socket > 0) {
-                com()->set_monitor(real_socket);
-                com()->set_poll_handler(real_socket,new_proxy);
-            }
-        //un-test
-        */
         
         if(delete_proxy) {
             INF_("Dropping proxy %s",new_proxy->c_name());
