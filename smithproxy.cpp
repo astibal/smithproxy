@@ -58,6 +58,7 @@
 #include <cfgapi.hpp>
 #include <daemon.hpp>
 #include <cmdserver.hpp>
+#include <srvutils.hpp>
 
 #define MEM_DEBUG 1
 #ifdef MEM_DEBUG
@@ -94,7 +95,7 @@ static bool cfg_mtrace_enable = false;
 
 static int  args_debug_flag = NON;
 // static int   ssl_flag = 0;
-static std::string cfg_listen_port = "50080";
+static std::string cfg_webr_listen_port = "50080";
 static std::string cfg_ssl_listen_port = "50443";
 static std::string cfg_udp_port = "50080";
 static std::string cfg_socks_port = "1080";
@@ -116,65 +117,6 @@ static std::string cfg_tenant_index;
 static std::string cfg_tenant_name;
 
 
-/*
-static unsigned int mystrlen(const char* str, int max) {
-    for(int i = 0; i < max; i++ ) {
-        if(str[i] == 0) {
-            return i;
-        }
-    }
-    return max;
-}
-static void btrace_handler(int sig) {
-
-    int CRLOG = open((const char*)crashlog_file,O_CREAT | O_WRONLY | O_TRUNC,S_IRUSR|S_IWUSR);
-    TEMP_FAILURE_RETRY(write(STDERR_FILENO," ======== Smithproxy exception handler =========\n",50));
-    TEMP_FAILURE_RETRY(write(CRLOG," ======== Smithproxy exception handler =========\n",50));
-    //FAT_("  [%d] ========= Smithproxy exception handler  =========",sig );
-
-    void *trace[64];
-    size_t size, i;
-    char **strings;
-
-    size    = backtrace( trace, 64 );
-    strings = backtrace_symbols( trace, size );
-
-    if (strings == NULL) {
-        //FATS_("failure: backtrace_symbols");
-        TEMP_FAILURE_RETRY(write(STDERR_FILENO,"failure: backtrace_symbols\n",28));
-        TEMP_FAILURE_RETRY(write(CRLOG,"failure: backtrace_symbols\n",28));
-        close(CRLOG);
-        exit(EXIT_FAILURE);
-    }
-    
-    
-    //FAT_("  [%d] Traceback:",sig );
-    TEMP_FAILURE_RETRY(write(STDERR_FILENO,"Traceback:\n",11));
-    TEMP_FAILURE_RETRY(write(CRLOG,"Traceback:\n",11));
-
-     for( i = 0; i < size; i++ ) {
-//         //FAT_("  [%d] %s", sig, strings[i] );
-         TEMP_FAILURE_RETRY(write(STDERR_FILENO,"    ",4));
-         TEMP_FAILURE_RETRY(write(CRLOG,"    ",4));
-         TEMP_FAILURE_RETRY(write(STDERR_FILENO,strings[i],mystrlen(strings[i],256)));
-         TEMP_FAILURE_RETRY(write(CRLOG,strings[i],mystrlen(strings[i],256)));
-         TEMP_FAILURE_RETRY(write(STDERR_FILENO,"\n",1));
-         TEMP_FAILURE_RETRY(write(CRLOG,"\n",1));
-     }
-    //backtrace_symbols_fd((void* const*)strings,64,STDERR_FILENO);
-    
-    //FAT_("  [%d] =================================================", sig );
-    TEMP_FAILURE_RETRY(write(STDERR_FILENO," ===============================================\n",50));
-    TEMP_FAILURE_RETRY(write(CRLOG," ===============================================\n",50));
-    close(CRLOG);
-    
-    daemon_unlink_pidfile();
-    
-    free(strings);
-    exit(-1);
-}
-*/
-
 
 #define UNW_LOCAL_ONLY
 #include <libunwind.h>
@@ -190,7 +132,6 @@ static void uw_btrace_handler(int sig) {
     int CRLOG = open((const char*)crashlog_file,O_CREAT | O_WRONLY | O_TRUNC,S_IRUSR|S_IWUSR);
     TEMP_FAILURE_RETRY(write(STDERR_FILENO," ======== Smithproxy exception handler =========\n",50));
     TEMP_FAILURE_RETRY(write(CRLOG," ======== Smithproxy exception handler =========\n",50));
-    //FAT_("  [%d] ========= Smithproxy exception handler  =========",sig );
 
     void *trace[64];
     size_t size, i;
@@ -297,40 +238,7 @@ static struct option long_options[] =
 };  
 
 
-template <class Listener, class Com>
-Listener* prepare_listener(std::string& str_port,const char* friendly_name,int def_port,int sub_workers) {
-    
-    if(sub_workers < 0) {
-        return nullptr;
-    }
-    
-    int port = def_port;
-    
-    if(str_port.size()) {
-        try {
-         port = std::stoi(str_port);
-        }
-        catch(std::invalid_argument e) {
-            ERR_("Invalid port specified: %s",str_port.c_str());
-            return NULL;
-        }
-    }
-    
-    NOT_("Entering %s mode on port %d",friendly_name,port);
-    auto s_p = new Listener(new Com());
-    s_p->com()->nonlocal_dst(true);
-    s_p->worker_count_preference(sub_workers);
 
-    // bind with master proxy (.. and create child proxies for new connections)
-    int s = s_p->bind(port,'L');
-    if (s < 0) {
-        FAT_("Error binding %s port (%d), exiting",friendly_name,s);
-        delete s_p;
-        return NULL;
-    };
-    
-    return s_p;
-}
 
 
 
@@ -432,7 +340,7 @@ bool load_config(std::string& config_f, bool reload) {
         cfgapi.getRoot()["settings"].lookupValue("certs_ca_key_password",SSLCertStore::password);
         cfgapi.getRoot()["settings"].lookupValue("certs_ca_path",SSLCertStore::def_cl_capath);
         
-        cfgapi.getRoot()["settings"].lookupValue("plaintext_port",cfg_listen_port);
+        cfgapi.getRoot()["settings"].lookupValue("plaintext_port",cfg_webr_listen_port);
         cfgapi.getRoot()["settings"].lookupValue("plaintext_workers",cfg_tcp_workers);
         cfgapi.getRoot()["settings"].lookupValue("ssl_port",cfg_ssl_listen_port);
         cfgapi.getRoot()["settings"].lookupValue("ssl_workers",cfg_ssl_workers);
@@ -533,7 +441,7 @@ bool apply_tenant_config() {
     int ret = 0;
     
     if(cfg_tenant_index.size() > 0 && cfg_tenant_name.size() > 0) {
-        ret += apply_index(cfg_listen_port,cfg_tenant_index);
+        ret += apply_index(cfg_webr_listen_port,cfg_tenant_index);
         ret += apply_index(cfg_ssl_listen_port,cfg_tenant_index);
         ret += apply_index(cfg_udp_port,cfg_tenant_index);
         ret += apply_index(cfg_socks_port,cfg_tenant_index);
@@ -704,7 +612,7 @@ int main(int argc, char *argv[]) {
     std::string friendly_thread_name_cli = string_format("sxy_cli_%d",cfgapi_tenant_index);
     std::string friendly_thread_name_own = string_format("sxy_own_%d",cfgapi_tenant_index);
 
-    plain_proxy = prepare_listener<theAcceptor,TCPCom>(cfg_listen_port,"plain-text",50080,cfg_tcp_workers);
+    plain_proxy = prepare_listener<theAcceptor,TCPCom>(cfg_webr_listen_port,"plain-text",50080,cfg_tcp_workers);
     ssl_proxy = prepare_listener<theAcceptor,MySSLMitmCom>(cfg_ssl_listen_port,"SSL",50443,cfg_ssl_workers);
     udp_proxy = prepare_listener<theReceiver,UDPCom>(cfg_udp_port,"plain-udp",50080,cfg_udp_workers);
     socks_proxy = prepare_listener<socksAcceptor,socksTCPCom>(cfg_socks_port,"socks",1080,cfg_socks_workers);

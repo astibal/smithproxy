@@ -15,7 +15,8 @@ if(UNIX)
     SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g  -Wall -std=c++11")
 endif()
 
-add_executable(smithproxy smithproxy.cpp mitmhost.cpp mitmproxy.cpp cfgapi.cpp cidr.cpp policy.cpp daemon.cpp sockshostcx.cpp socksproxy.cpp cmdserver.cpp cfgapi_auth.cpp dns.cpp inspectors.cpp addrobj.cpp)
+add_executable(smithproxy smithproxy.cpp mitmhost.cpp mitmproxy.cpp cfgapi.cpp cidr.cpp policy.cpp daemon.cpp sockshostcx.cpp socksproxy.cpp cmdserver.cpp cfgapi_auth.cpp dns.cpp inspectors.cpp addrobj.cpp srvutils.cpp)
+add_executable(smithmerged merged.cpp daemon.cpp)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}")
 
@@ -23,17 +24,19 @@ find_package (LibConfig REQUIRED)
 if (LIBCONFIGPP_FOUND)
   include_directories(${LIBCONFIGPP_INCLUDE_DIRS})
   target_link_libraries (smithproxy ${LIBCONFIGPP_LIBRARIES})
+  target_link_libraries (smithmerged ${LIBCONFIGPP_LIBRARIES})
 endif (LIBCONFIGPP_FOUND)
 
 find_package (LibCli REQUIRED)
 if (LIBCLI_FOUND)
   include_directories(${LIBCLI_INCLUDE_DIR})
   target_link_libraries (smithproxy ${LIBCLI_LIBRARY})
+  target_link_libraries (smithmerged ${LIBCLI_LIBRARY})
 endif (LIBCLI_FOUND)
 
 
 target_link_libraries(smithproxy socle_lib pthread ssl crypto rt unwind)
-
+target_link_libraries(smithmerged socle_lib pthread ssl crypto rt unwind)
 
 
 # taken from http://public.kitware.com/Bug/view.php?id=12646
@@ -93,6 +96,7 @@ endmacro(InstallSymlink)
 if(UNIX)
     SET(CMAKE_INSTALL_PREFIX /usr)
     install(TARGETS smithproxy DESTINATION bin)
+    install(TARGETS smithmerged DESTINATION bin)
     install(FILES man/smithproxy.1 DESTINATION share/man/man1)
     install_if_not_exists(etc/smithproxy.cfg /etc/smithproxy)
     install_if_not_exists(etc/users.cfg /etc/smithproxy)

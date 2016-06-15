@@ -654,10 +654,11 @@ int MitmProxy::av_backend_init() {
         UxCom* u = new UxCom();
         u->master(com()->master());
         baseHostCX *backend_cx = new baseHostCX(u,"/var/run/clamav/clamd.ctl","0");
-        backends().push_back(backend_cx);
 
         int real_socket = backend_cx->connect(false); 
         if(real_socket > 0) {
+            backends().push_back(backend_cx);
+            
             com()->set_monitor(real_socket);
             com()->set_poll_handler(real_socket,this);
             
@@ -670,7 +671,9 @@ int MitmProxy::av_backend_init() {
             
             DIA___("AV backend initialized successfully on socket %d", real_socket);
         } else {
+            av_backend_status = AV_STAT_FAILED;
             ERRS___("AV backend initialization failed")
+            delete backend_cx;
         }
     }
     
