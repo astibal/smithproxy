@@ -95,7 +95,7 @@ static bool cfg_mtrace_enable = false;
 
 static int  args_debug_flag = NON;
 // static int   ssl_flag = 0;
-static std::string cfg_webr_listen_port = "50080";
+static std::string cfg_tcp_listen_port = "50080";
 static std::string cfg_ssl_listen_port = "50443";
 static std::string cfg_udp_port = "50080";
 static std::string cfg_socks_port = "1080";
@@ -340,7 +340,7 @@ bool load_config(std::string& config_f, bool reload) {
         cfgapi.getRoot()["settings"].lookupValue("certs_ca_key_password",SSLCertStore::password);
         cfgapi.getRoot()["settings"].lookupValue("certs_ca_path",SSLCertStore::def_cl_capath);
         
-        cfgapi.getRoot()["settings"].lookupValue("plaintext_port",cfg_webr_listen_port);
+        cfgapi.getRoot()["settings"].lookupValue("plaintext_port",cfg_tcp_listen_port);
         cfgapi.getRoot()["settings"].lookupValue("plaintext_workers",cfg_tcp_workers);
         cfgapi.getRoot()["settings"].lookupValue("ssl_port",cfg_ssl_listen_port);
         cfgapi.getRoot()["settings"].lookupValue("ssl_workers",cfg_ssl_workers);
@@ -441,7 +441,7 @@ bool apply_tenant_config() {
     int ret = 0;
     
     if(cfg_tenant_index.size() > 0 && cfg_tenant_name.size() > 0) {
-        ret += apply_index(cfg_webr_listen_port,cfg_tenant_index);
+        ret += apply_index(cfg_tcp_listen_port,cfg_tenant_index);
         ret += apply_index(cfg_ssl_listen_port,cfg_tenant_index);
         ret += apply_index(cfg_udp_port,cfg_tenant_index);
         ret += apply_index(cfg_socks_port,cfg_tenant_index);
@@ -612,7 +612,7 @@ int main(int argc, char *argv[]) {
     std::string friendly_thread_name_cli = string_format("sxy_cli_%d",cfgapi_tenant_index);
     std::string friendly_thread_name_own = string_format("sxy_own_%d",cfgapi_tenant_index);
 
-    plain_proxy = prepare_listener<theAcceptor,TCPCom>(cfg_webr_listen_port,"plain-text",50080,cfg_tcp_workers);
+    plain_proxy = prepare_listener<theAcceptor,TCPCom>(cfg_tcp_listen_port,"plain-text",50080,cfg_tcp_workers);
     ssl_proxy = prepare_listener<theAcceptor,MySSLMitmCom>(cfg_ssl_listen_port,"SSL",50443,cfg_ssl_workers);
     udp_proxy = prepare_listener<theReceiver,UDPCom>(cfg_udp_port,"plain-udp",50080,cfg_udp_workers);
     socks_proxy = prepare_listener<socksAcceptor,socksTCPCom>(cfg_socks_port,"socks",1080,cfg_socks_workers);

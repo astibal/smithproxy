@@ -20,8 +20,6 @@
 #ifndef SRVUTILS_HPP_
 #define SRVUTILS_HPP_
  
-template <class Listener, class Com>
-Listener* prepare_listener(std::string& str_port,const char* friendly_name,int def_port,int sub_workers);
 
 template <class Listener, class Com>
 Listener* prepare_listener(std::string& str_port,const char* friendly_name,int def_port,int sub_workers) {
@@ -57,5 +55,34 @@ Listener* prepare_listener(std::string& str_port,const char* friendly_name,int d
     
     return s_p;
 }
+
+template <class Listener, class Com>
+Listener* prepare_listener(std::string& str_path,const char* friendly_name,std::string def_path,int sub_workers) {
+    
+    if(sub_workers < 0) {
+        return nullptr;
+    }
+    
+    std::string path = str_path;
+    if( path.size() == 0 ) {
+        path = def_path;
+    }
+    
+    NOT_("Entering %s mode on port %s",friendly_name,path.c_str());
+    auto s_p = new Listener(new Com());
+    s_p->com()->nonlocal_dst(true);
+    s_p->worker_count_preference(sub_workers);
+
+    // bind with master proxy (.. and create child proxies for new connections)
+    int s = s_p->bind(path.c_str(),'L');
+    if (s < 0) {
+        FAT_("Error binding %s port (%d), exiting",friendly_name,s);
+        delete s_p;
+        return NULL;
+    };
+    
+    return s_p;
+}
+
 
 #endif

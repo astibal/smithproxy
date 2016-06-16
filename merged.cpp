@@ -332,7 +332,7 @@ int main(int argc, char *argv[]) {
 
     std::string friendly_thread_name_webr = "sxy_mer_webr";
 
-    webr_proxy = prepare_listener<WebrProxy,UxCom>(cfg_webr_listen_port,"plain-text",50080,cfg_webr_workers);
+    webr_proxy = prepare_listener<WebrProxy,UxCom>(cfg_webr_listen_port,"plain-text","/var/run/sxy_webr",cfg_webr_workers);
     
     if(webr_proxy == nullptr && cfg_webr_workers >= 0) {
         
