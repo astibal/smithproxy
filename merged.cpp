@@ -75,28 +75,32 @@ public:
 
 typedef ThreadedAcceptor<UxAcceptor,baseProxy> WebrProxy;
 
-static WebrProxy* webr_proxy = nullptr;
+// running threads and their proxies
 
+static WebrProxy* webr_proxy = nullptr;
 std::thread* webr_thread = nullptr;
 
-volatile static int cnt_terminate = 0;
 
+// Configuration variables
+
+static std::string config_file;
 std::recursive_mutex merged_cfg_write_lock;
 static bool cfg_daemonize = false;
 static bool cfg_mtrace_enable = false;
-
-static int  args_debug_flag = NON;
-// static int   ssl_flag = 0;
+static std::string cfg_log_file;
+static int cfg_log_level = INF;
+static int cfg_log_console = false;
+static int cfg_webr_workers = 0;
 static std::string cfg_webr_listen_port = "/var/run/sxy_webr";
 
-static std::string config_file;
+// Various
+
+volatile static int cnt_terminate = 0;
+static int  args_debug_flag = NON;
 bool config_file_check_only = false;
 
 #define LOG_FILENAME_SZ 512
 volatile char crashlog_file[LOG_FILENAME_SZ];
-//static unsigned int cfg_log_level = INF;
-
-static int cfg_webr_workers = 0;
 
 
 #define UNW_LOCAL_ONLY
@@ -209,12 +213,62 @@ static struct option long_options[] =
 
 bool load_config(std::string& config_f, bool reload) {
     bool ret = true;
+    std::lock_guard<std::recursive_mutex> l(merged_cfg_write_lock);
     
     using namespace libconfig;
+    Config cfgapi;
+
+    DIAS_("Reading config file");
     
-    std::lock_guard<std::recursive_mutex> l(merged_cfg_write_lock);
+    // Read the file. If there is an error, report it and exit.
     try {
+        cfgapi.readFile(config_f.c_str());
         
+        if (cfgapi.getRoot()["settings"].lookupValue("log_file",cfg_log_file)) {
+            
+            std::string& log_target = cfg_log_file;
+            // prepare custom crashlog file
+            std::string crlog = log_target + ".crashlog.log";
+            memset((void*)crashlog_file,0,LOG_FILENAME_SZ);
+            strncpy((char*)crashlog_file,crlog.c_str(),LOG_FILENAME_SZ-1);
+            
+            std::ofstream * o = new std::ofstream(log_target.c_str(),std::ios::app);
+            lout.targets(log_target,o);
+            lout.dup2_cout(false);
+            lout.level(cfg_log_level);
+            
+            logger_profile* lp = new logger_profile();
+            lp->print_srcline_ = lout.print_srcline();
+            lp->print_srcline_always_ = lout.print_srcline_always();
+            lp->level_ = cfg_log_level;
+            lout.target_profiles()[(uint64_t)o] = lp;
+            
+            if(cfgapi.getRoot()["settings"].lookupValue("log_console",cfg_log_console)) {
+                lout.dup2_cout(cfg_log_console);
+            }        
+        }
+
+        cfgapi.getRoot()["settings"].lookupValue("log_level",cfg_log_level);
+    }
+    catch(const FileIOException &fioex)
+    {
+        ERR_("I/O error while reading config file: %s",config_f.c_str());
+        ret = false;   
+    }
+    catch(const ParseException &pex)
+    {
+        ERR_("Parse error in %s at %s:%d - %s", config_f.c_str(), pex.getFile(), pex.getLine(), pex.getError());
+        ret = false;
+    }
+
+    
+    if(! ret ) {
+        FATS_("Unable to load config.");
+        return ret;
+    }
+    
+    try {
+        cfgapi.getRoot()["settings"].lookupValue("log_level",cfg_log_level);
         if(reload) {
         }
     }
@@ -236,6 +290,8 @@ void ignore_sigpipe() {
 }
 
 int main(int argc, char *argv[]) {
+    
+    PID_FILE="/var/run/smithmerged.pid";
 
     config_file = "/etc/smithproxy/merged.cfg";
     bool custom_config_file = false;
@@ -244,7 +300,7 @@ int main(int argc, char *argv[]) {
     /* getopt_long stores the option index here. */
         int option_index = 0;
     
-        char c = getopt_long (argc, argv, "p:vo",
+        char c = getopt_long (argc, argv, "p:voDc",
                         long_options, &option_index);
         if (c < 0) break;
 
@@ -324,7 +380,6 @@ int main(int argc, char *argv[]) {
     // write out PID file
     daemon_write_pidfile();
 
-    
     //     atexit(__libc_freeres);    
     //     CRYPTO_malloc_debug_init();
     //     CRYPTO_dbg_set_options(V_CRYPTO_MDEBUG_ALL);
@@ -358,11 +413,6 @@ int main(int argc, char *argv[]) {
 
     ignore_sigpipe();
     
-//     struct sigaction act_pipe;
-//     sigemptyset(&act_pipe.sa_mask);    
-//     sigaction( SIGPIPE, &act_pipe, NULL);
-//     
-
     if(webr_proxy) {
         INFS_("Starting webr listener");
         webr_thread = new std::thread([]() { 
@@ -377,7 +427,7 @@ int main(int argc, char *argv[]) {
     }
     
     
-    CRI_("Smithproxy %s (socle %s) merged threads started",SMITH_VERSION,SOCLE_VERSION);
+    CRI_("Smithproxy %s merged threads (socle %s)  started",SMITH_VERSION,SOCLE_VERSION);
     
     pthread_setname_np(pthread_self(),"sxy_merged");
     
