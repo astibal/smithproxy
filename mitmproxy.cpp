@@ -108,6 +108,71 @@ bool MitmProxy::identity_resolved() {
 }
 
 
+bool MitmProxy::apply_id_policies(baseHostCX* cx) {
+    
+    cfgapi_identity_ip_lock.lock();
+
+    
+    
+    IdentityInfo* idi = cfgapi_ip_auth_get(cx->host());
+    ProfileSubAuth* final_profile = nullptr;
+    
+    if( idi != nullptr) {
+        DIA_("apply_id_policies: matched policy: %d",matched_policy());        
+        PolicyRule* policy = cfgapi_obj_policy.at(matched_policy());
+        
+        ProfileAuth* auth_policy = policy->profile_auth;
+
+        
+        if(auth_policy != nullptr) {
+            for(auto sub: auth_policy->sub_policies) {
+                ProfileSubAuth* sub_prof = sub;
+                std::string sub_name = sub->name;
+                
+                DIA_("apply_id_policies: checking identity policy for: %s", sub_name.c_str());
+                
+                for(auto my_id: idi->groups_vec) {
+                    DIA_("apply_id_policies: identity in policy: %s, match-test real user group '%s'",sub_prof->name.c_str(), my_id.c_str());
+                    if(sub_prof->name == my_id) {
+                        DIAS_("apply_id_policies: .. matched.");
+                        final_profile = sub_prof;
+                        break;
+                    }
+                }
+                
+                if(final_profile != nullptr) {
+                    break;
+                }
+            }
+        }
+        
+        if(final_profile != nullptr) {
+            
+            const char* pc_name = "none";
+            
+            DIA_("apply_id_policies: assigning sub-profile %s",final_profile->name.c_str());
+            if(final_profile->profile_content != nullptr) {
+                pc_name = final_profile->profile_content->name.c_str();
+                
+                cfgapi_obj_profile_content_apply(cx,this,final_profile->profile_content);
+                DIA_("apply_id_policies: assigning content sub-profile %s",final_profile->profile_content->name.c_str());
+            }
+            
+            
+            // end of custom sub-profiles
+            INF_("Connection %s: identity-based sub-profile: name=%s cont=%s",cx->full_name('L').c_str(),final_profile->name.c_str(),
+                            pc_name
+                            );
+        }
+        
+        cfgapi_identity_ip_lock.unlock();
+        return (final_profile != nullptr);
+    } 
+    
+    cfgapi_identity_ip_lock.unlock();
+    return false;
+}
+
 bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
     
     if(identity_resolved()) {
@@ -138,6 +203,12 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
         if(ret) { 
             identity(li); 
         }
+        
+        // apply specific identity-based profile. 'li' is still valid, since we still hold the lock
+        // get ptr to identity_info
+
+        DIA_("resolve_identity: about to call apply_id_policies, group: %s",li.groups);
+        apply_id_policies(cx);
 
     } else {
         if (insert_guest == true) {
@@ -522,8 +593,8 @@ void MitmProxy::handle_replacement(MitmHostCX* cx) {
           std::string token_text = cx->application_data->original_request();
           
           for(auto i: cfgapi_obj_policy_profile_auth( cx->matched_policy())->sub_policies) {
-            DIA_("MitmProxy::handle_replacement: token: requesting identity %s",i.second->name.c_str());
-            token_text  += " |" + i.second->name;
+            DIA_("MitmProxy::handle_replacement: token: requesting identity %s",i->name.c_str());
+            token_text  += " |" + i->name;
           }
           shm_logon_token tok = shm_logon_token(token_text.c_str());
 	      
@@ -868,6 +939,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                 // let know CX what policy it matched (it is handly CX will know under some circumstances like upgrade to SSL)
                 src_cx->matched_policy(policy_num);
                 target_cx->matched_policy(policy_num);
+                new_proxy->matched_policy(policy_num);
 
                 // resolve source information - is there un identity info for that IP?
                 if(new_proxy->opt_auth_authenticate && new_proxy->opt_auth_resolve) {
@@ -903,9 +975,9 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                             if(cfgapi_obj_policy_profile_auth(policy_num) != nullptr)
                             for ( auto i: cfgapi_obj_policy_profile_auth(policy_num)->sub_policies) {
                                 for(auto x: id.groups_vec) {
-                                    DEB_("Connection identities: ip identity '%s' against policy '%s'",x.c_str(),i.second->name.c_str());
-                                    if(x == i.second->name) {
-                                        DIA_("Connection identities: ip identity '%s' matches policy '%s'",x.c_str(),i.second->name.c_str());
+                                    DEB_("Connection identities: ip identity '%s' against policy '%s'",x.c_str(),i->name.c_str());
+                                    if(x == i->name) {
+                                        DIA_("Connection identities: ip identity '%s' matches policy '%s'",x.c_str(),i->name.c_str());
                                         bad_auth = false;
                                     }
                                 }
@@ -1010,7 +1082,7 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
 
 
     
-    ((AppHostCX*)just_accepted_cx)->mode(AppHostCX::MODE_NONE);
+    ((MitmHostCX*)just_accepted_cx)->mode(AppHostCX::MODE_NONE);
     target_cx->mode(AppHostCX::MODE_NONE);
     
     new_proxy->radd(target_cx);
@@ -1019,6 +1091,10 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
     int policy_num = cfgapi_obj_policy_apply(just_accepted_cx,new_proxy);
     if(policy_num >= 0) {
         this->proxies().push_back(new_proxy);
+        
+        ((MitmHostCX*)just_accepted_cx)->matched_policy(policy_num);
+        target_cx->matched_policy(policy_num);
+        new_proxy->matched_policy(policy_num);
         
         if(cfgapi_obj_policy.at(policy_num)->nat == POLICY_NAT_NONE) {
             target_cx->com()->nonlocal_src(true);

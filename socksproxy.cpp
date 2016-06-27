@@ -55,6 +55,8 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
         return;
     }
     
+    ////// we matched the policy
+    
     int s = cx->socket();
     bool ssl = false;
     

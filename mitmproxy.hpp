@@ -57,6 +57,7 @@ protected:
     std::vector<baseHostCX*> backends_;
     std::vector<ProfileContentRule>* content_rule_ = nullptr; //save some space and store it as a pointer. Init it only when needed and delete in dtor.
     
+    int matched_policy_ = -1;
 public: 
     bool opt_auth_authenticate = false;
     bool opt_auth_resolve = false;
@@ -73,6 +74,8 @@ public:
     int av_backend_init();
     baseHostCX* av_proxy = nullptr;
     
+    int matched_policy() { return matched_policy_; }
+    void matched_policy(int p) { matched_policy_ = p; }    
     
     inline bool identity_resolved();
     inline void identity_resolved(bool b);
@@ -80,6 +83,8 @@ public:
     void identity(shm_logon_info& i) { identity_ = i; }
     bool resolve_identity(baseHostCX*,bool);
     bool update_identity(baseHostCX*);
+    bool apply_id_policies(baseHostCX* cx);
+    
     std::vector<baseHostCX*>& backends() { return backends_; };
     
     bool write_payload(void) { return write_payload_; } 
