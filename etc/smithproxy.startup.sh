@@ -195,8 +195,10 @@ case "$1" in
     echo
 
     echo "Removing $SMITH_CHAIN_NAME and $DIVERT_CHAIN_NAME references from mangle prerouting"
-    iptables -t mangle -L PREROUTING -n -v --line-numbers | egrep "$SMITH_CHAIN_NAME|$DIVERT_CHAIN_NAME" | egrep -o '^[0-9]' | sort -nr | xargs -n1 iptables -t mangle -D PREROUTING
-    ip6tables -t mangle -L PREROUTING -n -v --line-numbers | egrep "$SMITH_CHAIN_NAME|$DIVERT_CHAIN_NAME" | egrep -o '^[0-9]' | sort -nr | xargs -n1 iptables -t mangle -D PREROUTING
+    iptables -t mangle -L PREROUTING -n -v --line-numbers | egrep "$SMITH_CHAIN_NAME" | egrep -o '^[0-9]+' | sort -nr | xargs -n1 iptables -t mangle -D PREROUTING
+    iptables -t mangle -L PREROUTING -n -v --line-numbers | egrep "$DIVERT_CHAIN_NAME" | egrep -o '^[0-9]+' | sort -nr | xargs -n1 iptables -t mangle -D PREROUTING
+    ip6tables -t mangle -L PREROUTING -n -v --line-numbers | egrep "$SMITH_CHAIN_NAME" | egrep -o '^[0-9]+' | sort -nr | xargs -n1 ip6tables -t mangle -D PREROUTING
+    ip6tables -t mangle -L PREROUTING -n -v --line-numbers | egrep "$DIVERT_CHAIN_NAME" | egrep -o '^[0-9]+' | sort -nr | xargs -n1 ip6tables -t mangle -D PREROUTING
     echo " done"
     echo
 
