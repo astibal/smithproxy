@@ -117,6 +117,8 @@ int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* proxy);
 bool cfgapi_obj_policy_apply_tls(int policy_num, baseCom* xcom);
 bool cfgapi_obj_policy_apply_tls(ProfileTls* pt, baseCom* xcom);
 
+bool cfgapi_obj_profile_content_apply(baseHostCX* originator, baseProxy* new_proxy, ProfileContent* pc);
+
 void cfgapi_log_version(bool warn_delay=true);
 
 ProfileContent* cfgapi_obj_policy_profile_content(int index);

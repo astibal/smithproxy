@@ -44,7 +44,16 @@ struct ProfileTls;
 struct ProfileAuth;
 struct ProfileAlgDns;
 
-class PolicyRule {
+
+struct ProfileList {
+       ProfileContent* profile_content = nullptr;
+       ProfileDetection* profile_detection = nullptr;
+       ProfileTls* profile_tls = nullptr;
+       ProfileAuth* profile_auth = nullptr;
+       ProfileAlgDns* profile_alg_dns = nullptr;
+};
+
+class PolicyRule : public ProfileList {
 
 public:
        int proto = 6;
@@ -72,11 +81,6 @@ public:
        bool match_rangegrp_cx(std::vector<range>& ranges,baseHostCX* cx);
        bool match_rangegrp_vecx(std::vector<range>& ranges,std::vector<baseHostCX*>& vecx);
        
-       ProfileContent* profile_content = nullptr;
-       ProfileDetection* profile_detection = nullptr;
-       ProfileTls* profile_tls = nullptr;
-       ProfileAuth* profile_auth = nullptr;
-       ProfileAlgDns* profile_alg_dns = nullptr;
 };
 
 struct ProfileDetection {
@@ -126,7 +130,7 @@ struct ProfileTls {
 };
 
 
-struct ProfileSubAuth {
+struct ProfileSubAuth : public ProfileList {
     std::string name;
 };
 
@@ -134,7 +138,7 @@ struct ProfileAuth {
     bool authenticate = false;
     bool resolve = false;  // resolve traffic by ip in auth table
     std::string name;
-    std::unordered_map<std::string,ProfileSubAuth*> sub_policies;
+    std::vector<ProfileSubAuth*> sub_policies;
 };
 
 struct ProfileAlgDns {
