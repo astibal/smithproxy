@@ -52,7 +52,7 @@ function do_cmd {
         else
 
             echo "${CMD}ing smithproxy - all tenants"
-            for l in `cat /etc/smithproxy/smithproxy.tenants.cfg | awk -F\; '{ print $2 }'`; do 
+            for l in `cat /etc/smithproxy/smithproxy.tenants.cfg | grep -v '^#' | awk -F\; '{ print $2 }'`; do 
                 echo " ${CMD}ing tenant $l"; 
                 do_cmd ${CMD} "$l"
             done;

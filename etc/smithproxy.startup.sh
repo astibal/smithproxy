@@ -43,7 +43,7 @@ if [[ "$tenant_id" != "0" ]]; then
         echo "ERROR: Tenant table file not found." 
         exit 1
     else 
-        L=`cat $tenant_table | grep ";$tenant_id;"`
+        L=`cat $tenant_table | grep -v "^#" | grep ";$tenant_id;"`
         if [[ $L  == "" ]]; then
             echo "ERROR: Tenant '$tenant_id' not found in the table."
             exit 1;
