@@ -1283,26 +1283,25 @@ bool cfgapi_obj_alg_dns_apply(baseHostCX* originator, baseProxy* new_proxy, Prof
     AppHostCX* mitm_originator = static_cast<AppHostCX*>(originator);    
     MitmHostCX* mh = dynamic_cast<MitmHostCX*>(mitm_originator);
 
-    bool ret = true;
+    bool ret = false;
     
     if(mh != nullptr) {
-        
-        // DNS ALG
+
         if(p_alg_dns != nullptr) {
             DNS_Inspector* n = new DNS_Inspector();
             if(n->l4_prefilter(mh)) {
                 n->opt_match_id = p_alg_dns->match_request_id;
                 n->opt_randomize_id = p_alg_dns->randomize_id;
                 mh->inspectors_.push_back(n);
+                ret = true;
             }
             else {
                 delete n;
-                ret = false;
             }
         }
+        
     } else {
         NOT_("Connection %s cannot be inspected by ALGs",originator->full_name('L').c_str());
-        ret = false;
     }    
     
     return ret;
