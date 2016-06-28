@@ -1227,6 +1227,87 @@ bool cfgapi_obj_profile_content_apply(baseHostCX* originator, baseProxy* new_pro
     return ret;
 }
 
+
+bool cfgapi_obj_profile_detect_apply(baseHostCX* originator, baseProxy* new_proxy, ProfileDetection* pd) {
+
+    MitmProxy* mitm_proxy = static_cast<MitmProxy*>(new_proxy); 
+    AppHostCX* mitm_originator = static_cast<AppHostCX*>(originator);
+    
+    const char* pd_name = "none";
+    bool ret = true;
+    
+    // we scan connection on client's side
+    if(mitm_originator != nullptr) {
+        mitm_originator->mode(AppHostCX::MODE_NONE);
+        if(pd != nullptr)  {
+            DIA_("cfgapi_obj_policy_apply: policy detection profile: mode: %d", pd->mode);
+            mitm_originator->mode(pd->mode);
+            pd_name = pd->name.c_str();
+        }
+    } else {
+        WARS_("cfgapi_obj_policy_apply: cannot apply detection profile: cast to AppHostCX failed.");
+        ret = false;
+    }    
+    
+    return ret;
+}
+
+bool cfgapi_obj_profile_tls_apply(baseHostCX* originator, baseProxy* new_proxy, ProfileTls* ps) {
+    
+    MitmProxy* mitm_proxy = static_cast<MitmProxy*>(new_proxy); 
+    AppHostCX* mitm_originator = static_cast<AppHostCX*>(originator);
+    
+    bool tls_applied = false;
+    
+    if(ps != nullptr) {
+        // we should also apply tls profile to originating side! Verification is not in effect, but BYPASS is!
+        if (cfgapi_obj_policy_apply_tls(ps,mitm_originator->com())) {
+            
+            for( cx_iterator i = mitm_proxy->rs().begin(); i != mitm_proxy->rs().end() ; ++i ) {
+                baseHostCX* cx = (*i);
+                baseCom* xcom = cx->com();
+                
+                tls_applied = cfgapi_obj_policy_apply_tls(ps,xcom);
+                if(!tls_applied) {
+                    ERR_("%s: cannot apply TLS profile to target connection %s",new_proxy->c_name(), cx->c_name());
+                }
+            }
+        }
+    } 
+    
+    return tls_applied;
+}
+
+bool cfgapi_obj_alg_dns_apply(baseHostCX* originator, baseProxy* new_proxy, ProfileAlgDns* p_alg_dns) {
+    
+    AppHostCX* mitm_originator = static_cast<AppHostCX*>(originator);    
+    MitmHostCX* mh = dynamic_cast<MitmHostCX*>(mitm_originator);
+
+    bool ret = true;
+    
+    if(mh != nullptr) {
+        
+        // DNS ALG
+        if(p_alg_dns != nullptr) {
+            DNS_Inspector* n = new DNS_Inspector();
+            if(n->l4_prefilter(mh)) {
+                n->opt_match_id = p_alg_dns->match_request_id;
+                n->opt_randomize_id = p_alg_dns->randomize_id;
+                mh->inspectors_.push_back(n);
+            }
+            else {
+                delete n;
+                ret = false;
+            }
+        }
+    } else {
+        NOT_("Connection %s cannot be inspected by ALGs",originator->full_name('L').c_str());
+        ret = false;
+    }    
+    
+    return ret;
+}
+
 int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
@@ -1251,50 +1332,29 @@ int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
         std::string algs_name = ""; 
         
         /* Processing content profile */
-        
         if(cfgapi_obj_profile_content_apply(originator,new_proxy,pc)) {
             pc_name = pc->name.c_str();
         }
         
-        MitmProxy* mitm_proxy = static_cast<MitmProxy*>(new_proxy); 
-        AppHostCX* mitm_originator = static_cast<AppHostCX*>(originator);
-        
         
         /* Processing detection profile */
+        if(cfgapi_obj_profile_detect_apply(originator,new_proxy,pd)) {
+            pd_name = pd->name.c_str();
+        }        
         
-        // we scan connection on client's side
-        if(mitm_originator != nullptr) {
-            mitm_originator->mode(AppHostCX::MODE_NONE);
-            if(pd != nullptr)  {
-                DIA_("cfgapi_obj_policy_apply: policy detection profile: mode: %d", pd->mode);
-                mitm_originator->mode(pd->mode);
-                pd_name = pd->name.c_str();
-            }
-        } else {
-            WARS_("cfgapi_obj_policy_apply: cannot apply detection profile: cast to AppHostCX failed.");
-        }
+        /* Processing TLS profile*/
+        if(cfgapi_obj_profile_tls_apply(originator,new_proxy,pt)) {
+            pt_name = pt->name.c_str();
+        }        
+        
+        /* Processing ALG : DNS*/
+        if(cfgapi_obj_alg_dns_apply(originator,new_proxy,p_alg_dns)) {
+            algs_name += p_alg_dns->name.c_str();
+        }        
 
         
-        /* Processing Tls profile */
-        if(pt != nullptr) {
-            bool tls_applied = false;
-            
-            // we should also apply tls profile to originating side! Verification is not in effect, but BYPASS is!
-            cfgapi_obj_policy_apply_tls(pt,mitm_originator->com());
-            
-            for( cx_iterator i = mitm_proxy->rs().begin(); i != mitm_proxy->rs().end() ; ++i ) {
-                baseHostCX* cx = (*i);
-                baseCom* xcom = cx->com();
-                
-                if(cfgapi_obj_policy_apply_tls(pt,xcom) == true && tls_applied == false) {
-                    tls_applied = true;
-                }
-            }
-            
-            if(tls_applied) {
-                pt_name = pt->name.c_str();
-            }
-        } 
+        MitmProxy* mitm_proxy = static_cast<MitmProxy*>(new_proxy); 
+        AppHostCX* mitm_originator = static_cast<AppHostCX*>(originator);
         
         /* Processing Auth profile */
         if(pa != nullptr) {
@@ -1306,25 +1366,7 @@ int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
         } 
         
         // ALGS can operate only on MitmHostCX classes
-        MitmHostCX* mh = dynamic_cast<MitmHostCX*>(mitm_originator);
-        if(mh != nullptr) {
-            
-            // DNS ALG
-            if(p_alg_dns != nullptr) {
-                algs_name += "D";
-                DNS_Inspector* n = new DNS_Inspector();
-                if(n->l4_prefilter(mh)) {
-                    n->opt_match_id = p_alg_dns->match_request_id;
-                    n->opt_randomize_id = p_alg_dns->randomize_id;
-                    mh->inspectors_.push_back(n);
-                }
-                else {
-                    delete n;
-                }
-            }
-        } else {
-            NOT_("Connection %s cannot be inspected by ALGs",originator->full_name('L').c_str());
-        }
+
         
         INF_("Connection %s accepted: policy=%d cont=%s det=%s tls=%s auth=%s algs=%s",originator->full_name('L').c_str(),policy_num,pc_name,pd_name,pt_name,pa_name,algs_name.c_str());
         

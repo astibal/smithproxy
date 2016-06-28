@@ -149,19 +149,39 @@ bool MitmProxy::apply_id_policies(baseHostCX* cx) {
         if(final_profile != nullptr) {
             
             const char* pc_name = "none";
+            const char* pd_name = "none";
+            const char* pt_name = "none";
+            std::string algs = "";
             
             DIA_("apply_id_policies: assigning sub-profile %s",final_profile->name.c_str());
             if(final_profile->profile_content != nullptr) {
-                pc_name = final_profile->profile_content->name.c_str();
-                
-                cfgapi_obj_profile_content_apply(cx,this,final_profile->profile_content);
-                DIA_("apply_id_policies: assigning content sub-profile %s",final_profile->profile_content->name.c_str());
+                if (cfgapi_obj_profile_content_apply(cx,this,final_profile->profile_content)) {
+                    pc_name = final_profile->profile_content->name.c_str();
+                    DIA_("apply_id_policies: assigning content sub-profile %s",final_profile->profile_content->name.c_str());
+                }
+            }
+            if(final_profile->profile_detection != nullptr) {
+                if (cfgapi_obj_profile_detect_apply(cx,this,final_profile->profile_detection)) {
+                    pd_name = final_profile->profile_detection->name.c_str();
+                    DIA_("apply_id_policies: assigning detection sub-profile %s",final_profile->profile_detection->name.c_str());
+                }
+            }
+            if(final_profile->profile_tls != nullptr) {
+                if(cfgapi_obj_profile_tls_apply(cx,this,final_profile->profile_tls)) {
+                    pt_name = final_profile->profile_tls->name.c_str();
+                    DIA_("apply_id_policies: assigning tls sub-profile %s",final_profile->profile_tls->name.c_str());
+                }
+            }
+            if(final_profile->profile_alg_dns != nullptr) {
+                if(cfgapi_obj_alg_dns_apply(cx,this,final_profile->profile_alg_dns)) {
+                    algs += final_profile->profile_alg_dns->name + " ";
+                    DIA_("apply_id_policies: assigning tls sub-profile %s",final_profile->profile_tls->name.c_str());
+                }
             }
             
-            
             // end of custom sub-profiles
-            INF_("Connection %s: identity-based sub-profile: name=%s cont=%s",cx->full_name('L').c_str(),final_profile->name.c_str(),
-                            pc_name
+            INF_("Connection %s: identity-based sub-profile: name=%s cont=%s det=%s tls=%s algs=%s",cx->full_name('L').c_str(),final_profile->name.c_str(),
+                            pc_name, pd_name, pt_name, algs.c_str()
                             );
         }
         

@@ -118,6 +118,9 @@ bool cfgapi_obj_policy_apply_tls(int policy_num, baseCom* xcom);
 bool cfgapi_obj_policy_apply_tls(ProfileTls* pt, baseCom* xcom);
 
 bool cfgapi_obj_profile_content_apply(baseHostCX* originator, baseProxy* new_proxy, ProfileContent* pc);
+bool cfgapi_obj_profile_detect_apply(baseHostCX* originator, baseProxy* new_proxy, ProfileDetection* pd);
+bool cfgapi_obj_profile_tls_apply(baseHostCX* originator, baseProxy* new_proxy, ProfileTls* ps);
+bool cfgapi_obj_alg_dns_apply(baseHostCX* originator, baseProxy* new_proxy, ProfileAlgDns* p_alg_dns);
 
 void cfgapi_log_version(bool warn_delay=true);
 
