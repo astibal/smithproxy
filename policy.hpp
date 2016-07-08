@@ -119,7 +119,9 @@ struct ProfileTls {
     bool allow_untrusted_issuers = false;
     bool allow_invalid_certs = false;
     bool allow_self_signed = false;
-    bool use_pfs = true;
+    bool use_pfs = true;         // general switch, more conrete take precedence
+    bool left_use_pfs = true;
+    bool right_use_pfs = true;
     
     int ocsp_mode = 0;           //  0 = disable OCSP checks ; 1 = check only end certificate ; 2 = check all certificates
     bool ocsp_stapling = false;
