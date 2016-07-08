@@ -213,7 +213,7 @@ int DNS_Packet::load(buffer* src) {
             }
         }
         
-        if(questions_togo == 0 && answers_togo == 0 && authorities_togo == 0 && additionals_togo == 0) {
+        if(questions_togo == 0 && answers_togo == 0 && authorities_togo == 0 /*&& additionals_togo == 0*/) {
             DIA___("DNS_Packet::load: finished mem_counter=%d buffer_size=%d",mem_counter,src->size());
             if(mem_counter == src->size()) {
                 return 0;
