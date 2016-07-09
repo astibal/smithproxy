@@ -488,6 +488,44 @@ void MitmProxy::on_backend_error(baseHostCX* cx) {
 }
 
 
+void MitmProxy::__debug_zero_connections(baseHostCX* cx) {
+
+    if(cx->meter_write_count == 0 && cx->meter_write_bytes == 0 ) {
+        SSLCom* c = dynamic_cast<SSLCom*>(cx->com());
+        if(c) {
+            c->log_profiling_stats(INF);
+            int p = 0; 
+            int s = cx->socket();
+            if(s == 0) s = cx->closed_socket();
+            if(s != 0) {
+                buffer b(1024);
+                p = cx->com()->peek(s,b.data(),b.capacity(),0);
+                INF_("        cx peek size %d",p);
+            }
+            
+        }
+        
+        if(cx->peer()) {
+            SSLCom* c = dynamic_cast<SSLCom*>(cx->peer()->com());
+            if(c) {
+                c->log_profiling_stats(INF);
+                INF_("        peer transferred bytes: up=%d/%dB dw=%d/%dB",cx->peer()->meter_read_count,cx->peer()->meter_read_bytes,
+                                                                cx->peer()->meter_write_count, cx->peer()->meter_write_bytes);
+                int p = 0; 
+                int s = cx->peer()->socket();
+                if(s == 0) s = cx->peer()->closed_socket();
+                if(s != 0) {
+                    buffer b(1024);
+                    p = cx->peer()->com()->peek(s,b.data(),b.capacity(),0);
+                    INF_("        peer peek size %d",p);
+                }                
+            }
+            
+        }
+    }
+}
+
+
 void MitmProxy::on_left_error(baseHostCX* cx) {
 
     if(this->dead()) return;  // don't process errors twice
@@ -520,6 +558,9 @@ void MitmProxy::on_left_error(baseHostCX* cx) {
                                         cx->meter_read_count,cx->meter_read_bytes,
                                                             cx->meter_write_count, cx->meter_write_bytes,
                                                                         'L');
+
+    __debug_zero_connections(cx);
+    
     this->dead(true); 
 }
 
@@ -551,6 +592,9 @@ void MitmProxy::on_right_error(baseHostCX* cx)
                                             cx->meter_write_count, cx->meter_write_bytes,
                                                             cx->meter_read_count,cx->meter_read_bytes,
                                                                     'R');
+
+    __debug_zero_connections(cx);
+    
     this->dead(true); 
 }
 

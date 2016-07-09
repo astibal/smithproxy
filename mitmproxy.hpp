@@ -128,6 +128,8 @@ public:
     
     buffer content_replace_apply(buffer);
     
+    void __debug_zero_connections(baseHostCX* cx);
+    
 public:
 
     static unsigned long meter_left_bytes_second;
