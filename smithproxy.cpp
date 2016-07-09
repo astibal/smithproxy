@@ -369,6 +369,7 @@ bool load_config(std::string& config_f, bool reload) {
         cfgapi.getRoot()["debug"]["log"].lookupValue("sslmitmcom",SSLMitmCom::log_level_ref());
         cfgapi.getRoot()["debug"]["log"].lookupValue("sslcertstore",SSLCertStore::log_level_ref());
         cfgapi.getRoot()["debug"]["log"].lookupValue("proxy",baseProxy::log_level_ref());
+        cfgapi.getRoot()["debug"]["log"].lookupValue("proxy",epoll::log_level);
         cfgapi.getRoot()["debug"]["log"].lookupValue("mtrace",cfg_mtrace_enable);
         /*DNS ALG EXPLICIT LOG*/
         cfgapi.getRoot()["debug"]["log"].lookupValue("alg_dns",DNS_Inspector::log_level_ref());

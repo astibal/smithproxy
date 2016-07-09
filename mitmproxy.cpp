@@ -559,7 +559,7 @@ void MitmProxy::on_left_error(baseHostCX* cx) {
                                                             cx->meter_write_count, cx->meter_write_bytes,
                                                                         'L');
 
-    __debug_zero_connections(cx);
+    if(LEV_(DEB)) __debug_zero_connections(cx);
     
     this->dead(true); 
 }
@@ -593,7 +593,7 @@ void MitmProxy::on_right_error(baseHostCX* cx)
                                                             cx->meter_read_count,cx->meter_read_bytes,
                                                                     'R');
 
-    __debug_zero_connections(cx);
+    if(LEV_(DEB)) __debug_zero_connections(cx);
     
     this->dead(true); 
 }
