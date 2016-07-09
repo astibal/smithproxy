@@ -873,6 +873,8 @@ int cfgapi_load_obj_profile_tls() {
                 cur_object.lookupValue("use_pfs",a->use_pfs);
                 cur_object.lookupValue("left_use_pfs",a->left_use_pfs);
                 cur_object.lookupValue("right_use_pfs",a->right_use_pfs);
+                cur_object.lookupValue("left_disable_reuse",a->left_disable_reuse);
+                cur_object.lookupValue("right_disable_reuse",a->right_disable_reuse);
                 
                 cur_object.lookupValue("ocsp_mode",a->ocsp_mode);
                 cur_object.lookupValue("ocsp_stapling",a->ocsp_stapling);
@@ -1404,6 +1406,9 @@ bool cfgapi_obj_policy_apply_tls(ProfileTls* pt, baseCom* xcom) {
             
             sslcom->opt_left_pfs = pt->left_use_pfs;
             sslcom->opt_right_pfs = pt->right_use_pfs;
+            
+            sslcom->opt_left_no_tickets = pt->left_disable_reuse;
+            sslcom->opt_right_no_tickets = pt->right_disable_reuse;
             
             sslcom->opt_ocsp_mode = pt->ocsp_mode;
             sslcom->opt_ocsp_stapling_enabled = pt->ocsp_stapling;

@@ -122,6 +122,8 @@ struct ProfileTls {
     bool use_pfs = true;         // general switch, more conrete take precedence
     bool left_use_pfs = true;
     bool right_use_pfs = true;
+    bool left_disable_reuse = false;
+    bool right_disable_reuse = false;
     
     int ocsp_mode = 0;           //  0 = disable OCSP checks ; 1 = check only end certificate ; 2 = check all certificates
     bool ocsp_stapling = false;
