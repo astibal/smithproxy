@@ -105,6 +105,10 @@ void DNS_Inspector::update(AppHostCX* cx) {
     buffer *xbuf = cur_pos.second;
     buffer buf = xbuf->view(0,xbuf->size());
 
+    // check if response is already available
+    DNS_Response* cached_resp = nullptr;
+    bool do_cached_resp_check = false;
+    
     int mem_pos = 0;
     unsigned int red = 0;
     
@@ -148,6 +152,18 @@ void DNS_Inspector::update(AppHostCX* cx) {
                     break;
                 }
             }
+            
+            if(do_cached_resp_check) {
+                inspect_dns_cache.lock();
+                cached_resp = inspect_dns_cache.get(ptr->question_str_0());
+                if(cached_resp != nullptr) {
+                    INF_("DNS answer for %s is already in the cache",cached_resp->question_str_0().c_str());
+                } else {
+                    INF_("DNS answer for %s is not in cache",ptr->question_str_0().c_str());
+                }
+                inspect_dns_cache.unlock();
+            }
+            
             break;
         case 'w':
             stage = 1;
