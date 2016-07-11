@@ -72,7 +72,7 @@ void cmd_show_status(struct cli_def* cli) {
   
     cli_print(cli,"Version: %s%s",SMITH_VERSION,SMITH_DEVEL ? " (dev)" : "");
     cli_print(cli,"Socle: %s%s",SOCLE_VERSION,SOCLE_DEVEL ? " (dev)" : "");
-    cli_print(cli,"");
+    cli_print(cli," ");
     time_t uptime = time(nullptr) - system_started;
     cli_print(cli,"Uptime: %s",uptime_string(uptime).c_str());
  
