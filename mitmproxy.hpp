@@ -63,7 +63,7 @@ public:
     bool opt_auth_resolve = false;
     bool auth_block_identity = false;
     
-    bool opt_av_check = true;
+    bool opt_av_check = false;
     #define AV_STAT_FAILED -1
     #define AV_STAT_NONE 0
     #define AV_STAT_OK 1
