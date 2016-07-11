@@ -72,7 +72,7 @@ int DNS_Packet::load(buffer* src) {
             for(; mem_counter < src->size() && questions_togo > 0 && questions_togo > 0;) {
                 DEB___("DNS_Packet::load: question loop start: current memory pos: %d",mem_counter);
                 DNS_Question question_temp;
-                int field_len = 0;
+                unsigned int field_len = 0;
                 bool failure = false;
                 
                 for(unsigned int cur_mem = mem_counter; cur_mem < src->size() && questions_togo > 0;) {
