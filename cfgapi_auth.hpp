@@ -130,8 +130,8 @@ struct IdentityInfo {
         groups = last_logon_info.groups;
         groups_vec.clear();
         
-        int pos = 0;
-        int old_pos = 0;
+        unsigned int pos = 0;
+        unsigned int old_pos = 0;
         while(true) {
             pos = groups.find("+",pos);
             if(pos > old_pos && pos != std::string::npos) {
