@@ -132,8 +132,6 @@ void cfgapi_ip_auth_remove(std::string& host) {
     auto ip = auth_ip_map.find(host);
 
     if (ip != auth_ip_map.end()) {
-        IdentityInfo& id = (*ip).second;
-        
         // erase internal ip map entry
 
         DIA_("cfgapi_ip_map_remove: auth ip map - removing: %s",host.c_str());
