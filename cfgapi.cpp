@@ -984,7 +984,6 @@ int cfgapi_load_obj_profile_auth() {
                     ProfileSubAuth* n_subpol = new ProfileSubAuth();
                     n_subpol->name = cur_subpol.getName();
                     
-                    bool error = false;
                     std::string name_content;
                     std::string name_detection;
                     std::string name_tls;
@@ -998,7 +997,6 @@ int cfgapi_load_obj_profile_auth() {
                             n_subpol->profile_detection = prf;
                         } else {
                             ERR_("cfgapi_load_obj_profile_auth[sub-profile:%s]: detect profile %s cannot be loaded",n_subpol->name.c_str(),name_detection.c_str());
-                            error = true;
                         }
                     }
                     
@@ -1009,7 +1007,6 @@ int cfgapi_load_obj_profile_auth() {
                             n_subpol->profile_content = prf;
                         } else {
                             ERR_("cfgapi_load_obj_profile_auth[sub-profile:%s]: content profile %s cannot be loaded",n_subpol->name.c_str(),name_content.c_str());
-                            error = true;
                         }
                     }                
                     if(cur_subpol.lookupValue("tls_profile",name_tls)) {
@@ -1019,7 +1016,6 @@ int cfgapi_load_obj_profile_auth() {
                             n_subpol->profile_tls= tls;
                         } else {
                             ERR_("cfgapi_load_obj_profile_auth[sub-profile:%s]: tls profile %s cannot be loaded",n_subpol->name.c_str(),name_tls.c_str());
-                            error = true;
                         }
                     }         
 
@@ -1032,11 +1028,9 @@ int cfgapi_load_obj_profile_auth() {
                             n_subpol->profile_alg_dns = dns;
                         } else {
                             ERR_("cfgapi_load_obj_profile_auth[sub-profile:%s]: DNS alg %s cannot be loaded",n_subpol->name.c_str(),name_alg_dns.c_str());
-                            error = true;
                         }
                     }                    
 
-                    
                     
                     a->sub_policies.push_back(n_subpol);
                     DIA_("cfgapi_load_obj_profile_auth: profiles: %d:%s",j,n_subpol->name.c_str());
@@ -1201,12 +1195,12 @@ bool cfgapi_obj_profile_content_apply(baseHostCX* originator, baseProxy* new_pro
     
     if(mitm_proxy != nullptr) {
         if(pc != nullptr) {
-            DIA_("cfgapi_obj_policy_apply: policy content profile: write payload: %d", pc->write_payload);
-            mitm_proxy->write_payload(pc->write_payload);
             pc_name = pc->name.c_str();
+            DIA_("cfgapi_obj_policy_apply: policy content profile[%s]: write payload: %d", pc_name, pc->write_payload);
+            mitm_proxy->write_payload(pc->write_payload);
     
             if(pc->content_rules.size() > 0) {
-                DIA_("cfgapi_obj_policy_apply: policy content profile: applying content rules, size %d", pc->content_rules.size());
+                DIA_("cfgapi_obj_policy_apply: policy content profile[%s]: applying content rules, size %d", pc_name, pc->content_rules.size());
                 mitm_proxy->init_content_replace();
                 mitm_proxy->content_replace(pc->content_rules);
             }
@@ -1245,9 +1239,9 @@ bool cfgapi_obj_profile_detect_apply(baseHostCX* originator, baseProxy* new_prox
     if(mitm_originator != nullptr) {
         mitm_originator->mode(AppHostCX::MODE_NONE);
         if(pd != nullptr)  {
-            DIA_("cfgapi_obj_policy_apply: policy detection profile: mode: %d", pd->mode);
-            mitm_originator->mode(pd->mode);
             pd_name = pd->name.c_str();
+            DIA_("cfgapi_obj_policy_apply[%s]: policy detection profile: mode: %d", pd_name, pd->mode);
+            mitm_originator->mode(pd->mode);
         }
     } else {
         WARS_("cfgapi_obj_policy_apply: cannot apply detection profile: cast to AppHostCX failed.");
