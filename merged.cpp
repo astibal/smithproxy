@@ -341,6 +341,8 @@ int main(int argc, char *argv[]) {
     WARS_(" ");
     // set level to what's in the config
     if (!load_config(config_file)) {
+        if(custom_config_file); // make compiler happy
+        
         if(config_file_check_only) {
             FATS_("Config check: error loading config file.");
             exit(1);
