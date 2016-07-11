@@ -26,7 +26,7 @@ std::string Inspector::remove_redundant_dots(std::string orig) {
     std::string norm;  
 
     int dot_mark = 1;
-    for(int i = 0; i < orig.size(); i++) {
+    for(unsigned int i = 0; i < orig.size(); i++) {
         if(orig[i] == '.') {
             if(dot_mark > 0) continue;
             
@@ -74,7 +74,7 @@ std::vector< std::string > Inspector::split(std::string str, unsigned char delim
 
 
 
-std::regex DNS_Inspector::wildcard = std::regex("[^.]+\.(.*)$");
+std::regex DNS_Inspector::wildcard = std::regex("[^.]+\\.(.*)$");
 
 bool DNS_Inspector::interested(AppHostCX* cx) {
     if(cx->com()->nonlocal_dst_port() == 53)
@@ -106,7 +106,7 @@ void DNS_Inspector::update(AppHostCX* cx) {
     buffer buf = xbuf->view(0,xbuf->size());
 
     int mem_pos = 0;
-    int red = 0;
+    unsigned int red = 0;
     
     if(is_tcp) {
         unsigned short data_size = ntohs(buf.get_at<unsigned short>(0));
@@ -118,17 +118,18 @@ void DNS_Inspector::update(AppHostCX* cx) {
     }
     
     int mem_len = buf.size();
-    int max_it = 10; // "emergency" counter.
     switch(cur_pos.first)  {
         case 'r':
             stage = 0;
-            for(int it = 0; red < buf.size() && it < 10; it++) {
+            for(unsigned int it = 0; red < buf.size() && it < 10; it++) {
                 ptr = new DNS_Request();
                 buffer cur_buf = buf.view(red,buf.size()-red);
-                red = ptr->load(&cur_buf);
+                int cur_red = ptr->load(&cur_buf);
                 
                 // on success write to requests_
-                if(red >= 0) {
+                if(cur_red >= 0) {
+                    red = cur_red;
+                    
                     DIA___("DNS_Inspector::update[%s]: adding key 0x%x red=%d, buffer_size=%d",cx->c_name(),ptr->id(),red,cur_buf.size());
                     if(requests_[ptr->id()] != nullptr) {
                         INF___("DNS_Inspector::update[%s]: detected re-sent request",cx->c_name());
@@ -137,11 +138,12 @@ void DNS_Inspector::update(AppHostCX* cx) {
                     requests_[ptr->id()] = (DNS_Request*)ptr;
                     cx->idle_delay(30);
                 } else {
+                    red = 0;
                     delete ptr;
                 }
                 
                 // on failure or last data exit loop
-                if(red <= 0) {
+                if(cur_red <= 0) {
                     DIA___("DNS_Inspector::update[%s]: finishing reading from buffers: red=%d, buffer_size=%d",cx->c_name(),red,cur_buf.size());
                     break;
                 }
@@ -149,14 +151,16 @@ void DNS_Inspector::update(AppHostCX* cx) {
             break;
         case 'w':
             stage = 1;
-            for(int it = 0; red < buf.size() && it < 10; it++) {
+            for(unsigned int it = 0; red < buf.size() && it < 10; it++) {
                 ptr = new DNS_Response();
                 buffer cur_buf = buf.view(red,buf.size()-red);
-                red = ptr->load(&cur_buf);
+                int cur_red = ptr->load(&cur_buf);
                 
                 
-                if(red >= 0) {
-                    mem_pos += red;
+                if(cur_red >= 0) {
+                    mem_pos += cur_red;
+                    red = cur_red;
+                    
                     DIA___("DNS_Inspector::update[%s]: loaded new response (at %d size %d out of %d)",cx->c_name(),red,mem_pos,mem_len);
                     if (!validate_response((DNS_Response*)ptr)) {
                         // invalid, delete
@@ -190,6 +194,7 @@ void DNS_Inspector::update(AppHostCX* cx) {
                             cx->idle_delay(1);  
                     }
                 } else {
+                    red = 0;
                     delete ptr;
                 }
                 
