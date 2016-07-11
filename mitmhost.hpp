@@ -146,8 +146,8 @@ public:
     virtual std::string to_string(int verbosity = INF);    
     
 private:
-    int inspect_cur_flow_size = 0;
-    int inspect_flow_same_bytes = 0;
+    unsigned int inspect_cur_flow_size = 0;
+    unsigned int inspect_flow_same_bytes = 0;
     
     DECLARE_C_NAME("MitmHostCX");
 };
