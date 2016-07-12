@@ -358,14 +358,14 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
         if( is_backend_cx(*j) ) continue;
         
         if(!redirected) {
-	    if(content_rule() != nullptr) {
-		buffer b = content_replace_apply(cx->to_read());
-		(*j)->to_write(b);
-		DIA___("mitmproxy::on_left_bytes: original %d bytes replaced with %d bytes",cx->to_read().size(),b.size())
-	    } else {
-		(*j)->to_write(cx->to_read());
-		DIA_("mitmproxy::on_left_bytes: %d copied",cx->to_read().size())
-	    }
+            if(content_rule() != nullptr) {
+                buffer b = content_replace_apply(cx->to_read());
+                (*j)->to_write(b);
+                DIA___("mitmproxy::on_left_bytes: original %d bytes replaced with %d bytes",cx->to_read().size(),b.size())
+            } else {
+                (*j)->to_write(cx->to_read());
+                DIA_("mitmproxy::on_left_bytes: %d copied",cx->to_read().size())
+            }
         } else {
         
         // rest of connections should be closed when sending replacement to a client
@@ -376,14 +376,14 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
         if( is_backend_cx(*j) ) continue;
         
         if(!redirected) {
-	    if(content_rule() != nullptr) {
-		buffer b = content_replace_apply(cx->to_read());
-		(*j)->to_write(b);
-		DIA___("mitmproxy::on_left_bytes: original %d bytes replaced with %d bytes into delayed",cx->to_read().size(),b.size())
-	    } else {	  
-		(*j)->to_write(cx->to_read());
-		DIA_("mitmproxy::on_left_bytes: %d copied to delayed",cx->to_read().size())
-	    }
+            if(content_rule() != nullptr) {
+                buffer b = content_replace_apply(cx->to_read());
+                (*j)->to_write(b);
+                DIA___("mitmproxy::on_left_bytes: original %d bytes replaced with %d bytes into delayed",cx->to_read().size(),b.size())
+            } else {	  
+                (*j)->to_write(cx->to_read());
+                DIA_("mitmproxy::on_left_bytes: %d copied to delayed",cx->to_read().size())
+            }
         } else {
         
         // rest of connections should be closed when sending replacement to a client
@@ -432,26 +432,26 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
     for(typename std::vector<baseHostCX*>::iterator j = this->left_sockets.begin(); j != this->left_sockets.end(); j++) {
         if( is_backend_cx(*j) ) continue;
         
-	if(content_rule() != nullptr) {
-	    buffer b = content_replace_apply(cx->to_read());
-	    (*j)->to_write(b);
-	    DIA___("mitmproxy::on_right_bytes: original %d bytes replaced with %d bytes",cx->to_read().size(),b.size())
-	} else {      
-	    (*j)->to_write(cx->to_read());
-	    DIA_("mitmproxy::on_right_bytes: %d copied",cx->to_read().size())
-	}
+        if(content_rule() != nullptr) {
+            buffer b = content_replace_apply(cx->to_read());
+            (*j)->to_write(b);
+            DIA___("mitmproxy::on_right_bytes: original %d bytes replaced with %d bytes",cx->to_read().size(),b.size())
+        } else {      
+            (*j)->to_write(cx->to_read());
+            DIA_("mitmproxy::on_right_bytes: %d copied",cx->to_read().size())
+        }
     }
     for(typename std::vector<baseHostCX*>::iterator j = this->left_delayed_accepts.begin(); j != this->left_delayed_accepts.end(); j++) {
         if( is_backend_cx(*j) ) continue;
         
-	if(content_rule() != nullptr) {
-	    buffer b = content_replace_apply(cx->to_read());
-	    (*j)->to_write(b);
-	    DIA___("mitmproxy::on_right_bytes: original %d bytes replaced with %d bytes into delayed",cx->to_read().size(),b.size())
-	} else {      
-	    (*j)->to_write(cx->to_read()); 
-	    DIA_("mitmproxy::on_right_bytes: %d copied to delayed",cx->to_read().size())
-	}
+        if(content_rule() != nullptr) {
+            buffer b = content_replace_apply(cx->to_read());
+            (*j)->to_write(b);
+            DIA___("mitmproxy::on_right_bytes: original %d bytes replaced with %d bytes into delayed",cx->to_read().size(),b.size())
+        } else {      
+            (*j)->to_write(cx->to_read()); 
+            DIA_("mitmproxy::on_right_bytes: %d copied to delayed",cx->to_read().size())
+        }
     }
 
     socle::time_update_counter_sec(&cnt_right_bytes_second,&meter_right_bytes_second,1,cx->to_read().size());
@@ -615,8 +615,8 @@ void MitmProxy::handle_replacement(MitmHostCX* cx) {
     int 	redir_hint = 0;
     
     if(cx->application_data->is_ssl) {
-	repl_proto = "https";
-	repl_port = cfgapi_identity_portal_port_https;
+        repl_proto = "https";
+        repl_port = cfgapi_identity_portal_port_https;
     }    
     
     std::string block_pre("<!DOCTYPE html><html><head></head><body><h1>Page has been blocked</h1><p>Access has been blocked by smithproxy.</p>\
@@ -626,71 +626,71 @@ void MitmProxy::handle_replacement(MitmHostCX* cx) {
     //cx->host().c_str()
     
     if (cx->replacement() == MitmHostCX::REPLACE_REDIRECT) {
-	  //srand(time(nullptr) % ((unsigned long)cx));
-	  //redir_hint = rand();
+        //srand(time(nullptr) % ((unsigned long)cx));
+        //redir_hint = rand();
 
-	  cfgapi_identity_token_lock.lock();
-	  auto id_token = cfgapi_identity_token_cache.find(cx->host());
-	  
-	  if(id_token != cfgapi_identity_token_cache.end()) {
-	      INF_("found a cached token for %s",cx->host().c_str());
-	      std::pair<unsigned int,std::string>& cache_entry = (*id_token).second;
-	      
-	      unsigned int now      = time(nullptr);
-	      unsigned int token_ts = cache_entry.first;
-	      std::string& token_tk = cache_entry.second;
-	      
-	      if(now - token_ts < cfgapi_identity_token_timeout) {
-		  INF_("MitmProxy::handle_replacement: cached token %s for request: %s",token_tk.c_str(),cx->application_data->hr().c_str());
-		  
-		  repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + token_tk + redir_suf;
-		  cx->to_write((unsigned char*)repl.c_str(),repl.size());
-		  cx->close_after_write(true);
-	      } else {
-		  INF_("MitmProxy::handle_replacement: expired token %s for request: %s",token_tk.c_str(),cx->application_data->hr().c_str());
-		  goto new_token;
-	      }
-	  } else {
-	  
-	      new_token:
-	    
-          std::string token_text = cx->application_data->original_request();
+        cfgapi_identity_token_lock.lock();
+        auto id_token = cfgapi_identity_token_cache.find(cx->host());
+        
+        if(id_token != cfgapi_identity_token_cache.end()) {
+            INF_("found a cached token for %s",cx->host().c_str());
+            std::pair<unsigned int,std::string>& cache_entry = (*id_token).second;
+            
+            unsigned int now      = time(nullptr);
+            unsigned int token_ts = cache_entry.first;
+            std::string& token_tk = cache_entry.second;
+            
+            if(now - token_ts < cfgapi_identity_token_timeout) {
+                INF_("MitmProxy::handle_replacement: cached token %s for request: %s",token_tk.c_str(),cx->application_data->hr().c_str());
+                
+                repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + token_tk + redir_suf;
+                cx->to_write((unsigned char*)repl.c_str(),repl.size());
+                cx->close_after_write(true);
+            } else {
+                INF_("MitmProxy::handle_replacement: expired token %s for request: %s",token_tk.c_str(),cx->application_data->hr().c_str());
+                goto new_token;
+            }
+        } else {
+        
+            new_token:
+            
+            std::string token_text = cx->application_data->original_request();
           
-          for(auto i: cfgapi_obj_policy_profile_auth( cx->matched_policy())->sub_policies) {
-            DIA_("MitmProxy::handle_replacement: token: requesting identity %s",i->name.c_str());
-            token_text  += " |" + i->name;
-          }
-          shm_logon_token tok = shm_logon_token(token_text.c_str());
-	      
-	      INF_("MitmProxy::handle_replacement: new auth token %s for request: %s",tok.token,cx->application_data->hr().c_str());
-	      repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + tok.token + redir_suf;
-	      
-		  cx->to_write((unsigned char*)repl.c_str(),repl.size());
-		  cx->close_after_write(true);
-	      
-	      cfgapi_auth_shm_token_table_refresh();
-	      
-	      auth_shm_token_map.entries().push_back(tok);
-	      auth_shm_token_map.acquire();
-	      auth_shm_token_map.save(true);
-	      auth_shm_token_map.release();
-	      
-	      INFS_("MitmProxy::handle_replacement: token table updated");
-	      cfgapi_identity_token_cache[cx->host()] = std::pair<unsigned int,std::string>(time(nullptr),tok.token);
-	  }
-	  
-	  cfgapi_identity_token_lock.unlock();
+            for(auto i: cfgapi_obj_policy_profile_auth( cx->matched_policy())->sub_policies) {
+                DIA_("MitmProxy::handle_replacement: token: requesting identity %s",i->name.c_str());
+                token_text  += " |" + i->name;
+            }
+            shm_logon_token tok = shm_logon_token(token_text.c_str());
+            
+            INF_("MitmProxy::handle_replacement: new auth token %s for request: %s",tok.token,cx->application_data->hr().c_str());
+            repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + tok.token + redir_suf;
+            
+            cx->to_write((unsigned char*)repl.c_str(),repl.size());
+            cx->close_after_write(true);
+            
+            cfgapi_auth_shm_token_table_refresh();
+            
+            auth_shm_token_map.entries().push_back(tok);
+            auth_shm_token_map.acquire();
+            auth_shm_token_map.save(true);
+            auth_shm_token_map.release();
+            
+            INFS_("MitmProxy::handle_replacement: token table updated");
+            cfgapi_identity_token_cache[cx->host()] = std::pair<unsigned int,std::string>(time(nullptr),tok.token);
+        }
+        
+        cfgapi_identity_token_lock.unlock();
     } else
     if (cx->replacement() == MitmHostCX::REPLACE_BLOCK) {
 
-      DIAS_("instructed to replace block");
-	  repl = block_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port + "/cgi-bin/auth.py?a=z" + block_post;
-	  cx->to_write((unsigned char*)repl.c_str(),repl.size());
-	  cx->close_after_write(true);
-	  
+        DIAS_("instructed to replace block");
+        repl = block_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port + "/cgi-bin/auth.py?a=z" + block_post;
+        cx->to_write((unsigned char*)repl.c_str(),repl.size());
+        cx->close_after_write(true);
+
     } else
     if (cx->replacement() == MitmHostCX::REPLACE_NONE) {
-	    DIAS_("void MitmProxy::handle_replacement: asked to handle NONE. No-op.");
+        DIAS_("void MitmProxy::handle_replacement: asked to handle NONE. No-op.");
     } 
 }
 
@@ -713,8 +713,8 @@ void MitmProxy::handle_internal_data(baseHostCX* cx) {
 void MitmProxy::init_content_replace() {
     
     if(content_rule_ != nullptr) {
-	DIAS_("MitmProxy::init_content_replace: deleting old replace rules");
-	delete content_rule_;
+        DIAS_("MitmProxy::init_content_replace: deleting old replace rules");
+        delete content_rule_;
     }
     
     content_rule_ = new std::vector<ProfileContentRule>;
