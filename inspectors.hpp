@@ -60,6 +60,11 @@ public:
     //! indicate if inspector was able to parse and process the payload.
     inline bool result() const { return result_; }
 
+    typedef enum { OK=0, BLOCK, CACHED } inspect_verdict;
+    inspect_verdict verdict_ = OK;
+    inspect_verdict verdict() const { return verdict_; };
+    void verdict(inspect_verdict v) { verdict_ = v; }
+    
 protected:
     bool completed_ = false;
     void completed(bool b) { completed_ = b; }

@@ -127,6 +127,8 @@ public:
     typedef enum { REPLACE_NONE=0, REPLACE_REDIRECT=1, REPLACE_BLOCK=2 } replace_flags;    
     void replacement(replace_flags i) { replacement_ = i; }
     replace_flags replacement(void)   { return replacement_; }
+    
+    int inspection_verdict() const { return inspect_verdict; };
 protected:    
     int matched_policy_ = -1;
     
@@ -148,6 +150,7 @@ public:
 private:
     unsigned int inspect_cur_flow_size = 0;
     unsigned int inspect_flow_same_bytes = 0;
+    int inspect_verdict = Inspector::OK;
     
     DECLARE_C_NAME("MitmHostCX");
 };

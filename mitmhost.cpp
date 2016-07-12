@@ -234,6 +234,18 @@ void MitmHostCX::inspect(char side) {
         for(Inspector* inspector: inspectors_) {
             if(inspector->interested(this) && (! inspector->completed() )) {
                 inspector->update(this);
+                
+                inspect_verdict = inspector->verdict();
+                INF_("MitmHostCX::inspect[%s]: verdict %d",inspector->c_name(), inspect_verdict);
+                if(inspect_verdict == Inspector::OK) {
+                    //
+                } else if (inspect_verdict == Inspector::CACHED) {
+                    // if connection can be populated by cache, close right side.
+                    
+                    baseHostCX* p = nullptr;
+                    side == 'l' || side == 'L' ? p = peer() : p = this;
+                    p->error(true);
+                } 
             }
         }
         DIAS_("MitmHostCX::inspect: inspector loop end.");

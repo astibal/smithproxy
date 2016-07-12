@@ -158,6 +158,7 @@ void DNS_Inspector::update(AppHostCX* cx) {
                 cached_resp = inspect_dns_cache.get(ptr->question_str_0());
                 if(cached_resp != nullptr) {
                     INF_("DNS answer for %s is already in the cache",cached_resp->question_str_0().c_str());
+                    verdict(CACHED);
                 } else {
                     INF_("DNS answer for %s is not in cache",ptr->question_str_0().c_str());
                 }
