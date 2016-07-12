@@ -104,7 +104,7 @@ public:
     
     bool opt_match_id = false;
     bool opt_randomize_id = false;
-    bool opt_cached_responses = true;
+    bool opt_cached_responses = false;
     
     DNS_Request* find_request(unsigned int r) { auto it = requests_.find(r); if(it == requests_.end()) { return nullptr; } else { return it->second; }  }
     bool validate_response(DNS_Response* ptr);

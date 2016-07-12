@@ -148,6 +148,7 @@ struct ProfileAuth {
 struct ProfileAlgDns {
     bool match_request_id = false;
     bool randomize_id = false;
+    bool cached_responses = false;
     std::string name;
 };
 

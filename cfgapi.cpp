@@ -931,6 +931,7 @@ int cfgapi_load_obj_profile_alg_dns() {
             a->name = name;
             cur_object.lookupValue("match_request_id",a->match_request_id);
             cur_object.lookupValue("randomize_id",a->randomize_id);
+            cur_object.lookupValue("cached_responses",a->cached_responses);
             
             cfgapi_obj_profile_alg_dns[name] = a;
         }
@@ -1291,6 +1292,7 @@ bool cfgapi_obj_alg_dns_apply(baseHostCX* originator, baseProxy* new_proxy, Prof
             if(n->l4_prefilter(mh)) {
                 n->opt_match_id = p_alg_dns->match_request_id;
                 n->opt_randomize_id = p_alg_dns->randomize_id;
+                n->opt_cached_responses = p_alg_dns->cached_responses;
                 mh->inspectors_.push_back(n);
                 ret = true;
             }
