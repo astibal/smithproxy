@@ -64,6 +64,7 @@ public:
     inspect_verdict verdict_ = OK;
     inspect_verdict verdict() const { return verdict_; };
     void verdict(inspect_verdict v) { verdict_ = v; }
+    virtual void apply_verdict(AppHostCX* cx);
     
 protected:
     bool completed_ = false;
@@ -94,6 +95,7 @@ public:
     virtual ~DNS_Inspector() {
         // clear local request cache
         for(auto x: requests_) { if(x.second) {delete x.second; } };
+        if(cached_response != nullptr) delete cached_response;
     };  
     virtual void update(AppHostCX* cx);
 
@@ -102,10 +104,12 @@ public:
     
     bool opt_match_id = false;
     bool opt_randomize_id = false;
+    bool opt_cached_responses = true;
     
     DNS_Request* find_request(unsigned int r) { auto it = requests_.find(r); if(it == requests_.end()) { return nullptr; } else { return it->second; }  }
     bool validate_response(DNS_Response* ptr);
     bool store(DNS_Response* ptr);
+    virtual void apply_verdict(AppHostCX* cx);
     
     virtual std::string to_string(int verbosity=INF);
 
@@ -113,6 +117,10 @@ public:
 private:
     bool is_tcp = false;
 
+    buffer* cached_response = nullptr;
+    uint16_t cached_response_id = 0;
+    std::vector<int> cached_response_ttl_idx;
+    uint32_t cached_response_decrement = 0;
 
     std::unordered_map<unsigned int,DNS_Request*>  requests_;
     int responses_ = 0;

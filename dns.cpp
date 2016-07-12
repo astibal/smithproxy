@@ -49,6 +49,8 @@ const char* dns_record_type_str(int a) {
  */
 int DNS_Packet::load(buffer* src) {
 
+    loaded_at = ::time(nullptr);
+    
     if(src->size() > DNS_HEADER_SZ) {
         id_ = ntohs(src->get_at<unsigned short>(0));
         flags_ = ntohs(src->get_at<unsigned short>(2));
@@ -149,6 +151,7 @@ int DNS_Packet::load(buffer* src) {
                 answer_temp.name_ = ntohs(src->get_at<unsigned short>(i));
                 answer_temp.type_ = ntohs(src->get_at<unsigned short>(i+2));
                 answer_temp.class_ = ntohs(src->get_at<unsigned short>(i+4));
+                answer_ttl_idx.push_back(i+6);
                 answer_temp.ttl_ = ntohl(src->get_at<uint32_t>(i+6));
                 answer_temp.datalen_ = ntohs(src->get_at<uint32_t>(i+10)); 
                 if(answer_temp.datalen_ > 0)

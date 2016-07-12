@@ -215,6 +215,10 @@ void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, ve
 
 
 void MitmHostCX::inspect(char side) {
+    
+    if(inspect_verdict == Inspector::CACHED)
+        return;
+    
     AppHostCX::inspect(side);
     
     if(flow().flow().size() > inspect_cur_flow_size) {
@@ -236,7 +240,8 @@ void MitmHostCX::inspect(char side) {
                 inspector->update(this);
                 
                 inspect_verdict = inspector->verdict();
-                INF_("MitmHostCX::inspect[%s]: verdict %d",inspector->c_name(), inspect_verdict);
+                
+                DIA_("MitmHostCX::inspect[%s]: verdict %d",inspector->c_name(), inspect_verdict);
                 if(inspect_verdict == Inspector::OK) {
                     //
                 } else if (inspect_verdict == Inspector::CACHED) {
@@ -245,6 +250,14 @@ void MitmHostCX::inspect(char side) {
                     baseHostCX* p = nullptr;
                     side == 'l' || side == 'L' ? p = peer() : p = this;
                     p->error(true);
+                    
+                    AppHostCX* verdict_target = dynamic_cast<AppHostCX*>(p);
+                    if(verdict_target != nullptr) {
+                        inspector->apply_verdict(verdict_target);
+                        break;
+                    } else {
+                        ERRS_("cannot apply verdict on generic cx");
+                    }
                 } 
             }
         }

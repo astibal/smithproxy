@@ -24,6 +24,7 @@
 #include <vector>
 #include <mutex>
 #include <unordered_map>
+#include <ctime>
 
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -133,6 +134,9 @@ protected:
     std::vector<DNS_AdditionalInfo> additionals_list;
     
 public:    
+    std::vector<int> answer_ttl_idx; // should be protected;
+    time_t      loaded_at = 0;
+    
     virtual std::string to_string(int verbosity=INF);
     virtual bool ask_destroy() { return false; };
 
@@ -166,8 +170,12 @@ public:
 
 class DNS_Response : public DNS_Packet {
 public:
+    buffer* cached_packet = nullptr;
+    unsigned int cached_id_idx = 0;
+    
     DNS_Response(): DNS_Packet() {};        // we won't allow parsing in constructor
-    virtual ~DNS_Response() {};
+    virtual ~DNS_Response() { if(cached_packet != nullptr) delete cached_packet; };
+    
     DECLARE_C_NAME("DNS_Response");
 };
 

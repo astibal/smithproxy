@@ -350,6 +350,11 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
                 }
             }
         }
+        
+        if(mh->inspection_verdict() == Inspector::CACHED) {
+            DIAS_("cached content: not proxying");
+            return;
+        }
     }
     
     
@@ -552,12 +557,16 @@ void MitmProxy::on_left_error(baseHostCX* cx) {
     if(opt_auth_resolve)
         resolve_identity(cx);
 
-    INF_("Connection from %s closed: user=%s up=%d/%dB dw=%d/%dB flags=%c",
+    std::string flags = "L";
+    MitmHostCX* mh = dynamic_cast<MitmHostCX*>(cx);
+    if (mh != nullptr && mh->inspection_verdict() == Inspector::CACHED) flags+="C";
+    
+    INF_("Connection from %s closed: user=%s up=%d/%dB dw=%d/%dB flags=%s",
                         cx->full_name('L').c_str(),
                                      (identity_resolved() ? identity().username : ""),
                                         cx->meter_read_count,cx->meter_read_bytes,
                                                             cx->meter_write_count, cx->meter_write_bytes,
-                                                                        'L');
+                                                                        flags.c_str());
 
     if(LEV_(DEB)) __debug_zero_connections(cx);
     
@@ -586,12 +595,16 @@ void MitmProxy::on_right_error(baseHostCX* cx)
 //         INF_("Created new proxy 0x%08x from %s:%s to %s:%d",new_proxy,f,f_p, t,t_p );
 
 
-    INF_("Connection from %s closed: user=%s up=%d/%dB dw=%d/%dB flags=%c",
+    std::string flags = "R";
+    MitmHostCX* mh_peer = dynamic_cast<MitmHostCX*>(cx->peer());
+    if (mh_peer != nullptr && mh_peer->inspection_verdict() == Inspector::CACHED) flags+="C";
+
+    INF_("Connection from %s closed: user=%s up=%d/%dB dw=%d/%dB flags=%s",
                             cx->full_name('R').c_str(), 
                                      (identity_resolved() ? identity().username : ""),         
                                             cx->meter_write_count, cx->meter_write_bytes,
                                                             cx->meter_read_count,cx->meter_read_bytes,
-                                                                    'R');
+                                                                    flags.c_str());
 
     if(LEV_(DEB)) __debug_zero_connections(cx);
     

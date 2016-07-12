@@ -18,7 +18,7 @@
 */
 
 #include <inspectors.hpp>
-
+#include <mitmhost.hpp>
 
 DEFINE_LOGGING(DNS_Inspector)
 
@@ -106,8 +106,7 @@ void DNS_Inspector::update(AppHostCX* cx) {
     buffer buf = xbuf->view(0,xbuf->size());
 
     // check if response is already available
-    DNS_Response* cached_resp = nullptr;
-    bool do_cached_resp_check = false;
+    DNS_Response* cached_entry = nullptr;
     
     int mem_pos = 0;
     unsigned int red = 0;
@@ -153,14 +152,53 @@ void DNS_Inspector::update(AppHostCX* cx) {
                 }
             }
             
-            if(do_cached_resp_check) {
+            if(opt_cached_responses && ((DNS_Request*)ptr)->question_type_0() == A) {
                 inspect_dns_cache.lock();
-                cached_resp = inspect_dns_cache.get(ptr->question_str_0());
-                if(cached_resp != nullptr) {
-                    INF_("DNS answer for %s is already in the cache",cached_resp->question_str_0().c_str());
-                    verdict(CACHED);
+                cached_entry = inspect_dns_cache.get(ptr->question_str_0());
+                if(cached_entry != nullptr) {
+                    DIA___("DNS answer for %s is already in the cache",cached_entry->question_str_0().c_str());
+
+                    
+                    if(cached_entry->cached_packet != nullptr) {
+                        
+                        // do TTL check
+                        DIAS___("cached entry TTL check");
+                        
+                        time_t now = time(nullptr);
+                        bool ttl_check = true;
+                        
+                        for(auto idx: cached_entry->answer_ttl_idx) {
+                            uint32_t ttl = ntohl(cached_entry->cached_packet->get_at<uint32_t>(idx));
+                            DEB___("cached response ttl byte index %d value %d",idx,ttl);
+                            if(now > ttl + cached_entry->loaded_at) {
+                                DEB___("  %ds -- expired", now - (ttl + cached_entry->loaded_at));
+                                ttl_check = false;
+                            } else {
+                                DEB___("  %ds left to expiry", (ttl + cached_entry->loaded_at) - now);
+                            }
+                        }
+                    
+                        if(ttl_check) {
+                            verdict(CACHED);
+                            // this  will copy packet to our cached response
+                            if(cached_response == nullptr) 
+                                    cached_response = new buffer();
+                            
+                            cached_response->clear();
+                            cached_response->append(cached_entry->cached_packet->data(),cached_entry->cached_packet->size());
+                            cached_response_id = ptr->id();
+                            cached_response_ttl_idx = cached_entry->answer_ttl_idx;
+                            cached_response_decrement = now - cached_entry->loaded_at;
+                        
+                            DIAS___("cached entry TTL check: OK");
+                            DEB___("cached response prepared: size=%d, setting overwrite id=%d",cached_response->size(),cached_response_id);
+                        } else {
+                            DIAS___("cached entry TTL check: failed");
+                        }
+
+                    }
                 } else {
-                    INF_("DNS answer for %s is not in cache",ptr->question_str_0().c_str());
+                    DIA___("DNS answer for %s is not in cache",ptr->question_str_0().c_str());
                 }
                 inspect_dns_cache.unlock();
             }
@@ -170,11 +208,26 @@ void DNS_Inspector::update(AppHostCX* cx) {
             stage = 1;
             for(unsigned int it = 0; red < buf.size() && it < 10; it++) {
                 ptr = new DNS_Response();
+                
                 buffer cur_buf = buf.view(red,buf.size()-red);
                 int cur_red = ptr->load(&cur_buf);
                 
                 
                 if(cur_red >= 0) {
+                    if(opt_cached_responses) {
+                        if(((DNS_Response*)ptr)->cached_packet != nullptr) {
+                            delete ((DNS_Response*)ptr)->cached_packet;
+                        }
+                        ((DNS_Response*)ptr)->cached_packet = new buffer();
+                        if(cur_red == 0) {
+                            ((DNS_Response*)ptr)->cached_packet->append(cur_buf.data(),cur_buf.size());
+                        } else {
+                            ((DNS_Response*)ptr)->cached_packet->append(cur_buf.data(),cur_red);
+                        }
+                        
+                        DEB___("caching response packet: size=%d",((DNS_Response*)ptr)->cached_packet->size())
+                    }
+                    
                     mem_pos += cur_red;
                     red = cur_red;
                     
@@ -272,4 +325,50 @@ std::string DNS_Inspector::to_string(int verbosity) {
     r += string_format("tcp: %d requests: %d valid responses: %d stored: %d",is_tcp,requests_.size(),responses_,stored_);
     
     return r;
+}
+
+void Inspector::apply_verdict(AppHostCX* cx) {
+}
+
+void DNS_Inspector::apply_verdict(AppHostCX* cx) {
+    DEBS___("DNS_Inspector::apply_verdict called");
+    
+    //TODO: dirty, make more generic
+    if(cached_response != nullptr) {
+        DEB___("DNS_Inspector::apply_verdict: mangling response id=%d",cached_response_id);
+        *((uint16_t*)cached_response->data()) = htons(cached_response_id);
+        
+        for(auto i: cached_response_ttl_idx) {
+            uint32_t orig_ttl = ntohl(cached_response->get_at<uint32_t>(i));
+            uint32_t new_ttl = orig_ttl - cached_response_decrement;
+            DEB___("DNS_Inspector::apply_verdict: mangling original ttl %d to %d at index %d",orig_ttl,new_ttl,i);
+            
+            uint8_t* ptr = cached_response->data();
+            uint32_t* ptr_ttl  = (uint32_t*)&ptr[i];
+            *ptr_ttl = htonl(new_ttl);
+            
+        }
+        
+        if(! is_tcp) {
+            DEBS___("udp encapsulation"); 
+            cx->to_write(cached_response->data(), cached_response->size());
+            int w = cx->write();
+            DIA___("DNS_Inspector::apply_verdict: %d bytes written of cached response size %d",w,cached_response->size());
+        } else {
+            DEBS___("tcp encapsulation");
+            uint16_t* ptr = (uint16_t*)cached_response->data();
+            uint16_t len = htons(cached_response->size());
+            buffer b;
+            b.append(&len,sizeof(uint16_t));
+            b.append(cached_response->data(),cached_response->size());
+            cx->to_write(b);
+            int w = cx->write();
+            
+            DIA___("DNS_Inspector::apply_verdict: %d bytes written of cached response size %d",w,b.size());
+        }
+        
+    } else {
+        // what to do now?
+        ERRS___("cannot send cached response, original reply not found.");
+    }
 }
