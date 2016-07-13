@@ -561,12 +561,14 @@ void MitmProxy::on_left_error(baseHostCX* cx) {
     MitmHostCX* mh = dynamic_cast<MitmHostCX*>(cx);
     if (mh != nullptr && mh->inspection_verdict() == Inspector::CACHED) flags+="C";
     
-    INF_("Connection from %s closed: user=%s up=%d/%dB dw=%d/%dB flags=%s",
+    INF_("Connection from %s closed: user=%s up=%d/%dB dw=%d/%dB flags=%s+%s",
                         cx->full_name('L').c_str(),
                                      (identity_resolved() ? identity().username : ""),
                                         cx->meter_read_count,cx->meter_read_bytes,
                                                             cx->meter_write_count, cx->meter_write_bytes,
-                                                                        flags.c_str());
+                                                                        flags.c_str(),
+                                                                        com()->full_flags_str().c_str()
+        );
 
     if(LEV_(DEB)) __debug_zero_connections(cx);
     
@@ -596,15 +598,22 @@ void MitmProxy::on_right_error(baseHostCX* cx)
 
 
     std::string flags = "R";
+    std::string comflags = "";
     MitmHostCX* mh_peer = dynamic_cast<MitmHostCX*>(cx->peer());
-    if (mh_peer != nullptr && mh_peer->inspection_verdict() == Inspector::CACHED) flags+="C";
+    if (mh_peer != nullptr) {
+        if(mh_peer->inspection_verdict() == Inspector::CACHED) flags+="C";
+        if(mh_peer->com() != nullptr)
+            comflags = mh_peer->com()->full_flags_str();
+    }
 
-    INF_("Connection from %s closed: user=%s up=%d/%dB dw=%d/%dB flags=%s",
+    INF_("Connection from %s closed: user=%s up=%d/%dB dw=%d/%dB flags=%s+%s",
                             cx->full_name('R').c_str(), 
                                      (identity_resolved() ? identity().username : ""),         
                                             cx->meter_write_count, cx->meter_write_bytes,
                                                             cx->meter_read_count,cx->meter_read_bytes,
-                                                                    flags.c_str());
+                                                                    flags.c_str(),
+                                                                    comflags.c_str()
+        );
 
     if(LEV_(DEB)) __debug_zero_connections(cx);
     
