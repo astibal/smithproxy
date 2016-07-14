@@ -119,6 +119,10 @@ struct ProfileTls {
     bool allow_untrusted_issuers = false;
     bool allow_invalid_certs = false;
     bool allow_self_signed = false;
+    bool failed_certcheck_replacement = true; //instead of resetting connection, spoof and display human-readable explanation why connection failed
+    bool failed_certcheck_override = false;   //failed ssl replacement will contain option to temporarily allow the connection for the source IP.
+    int  failed_certcheck_override_timeout = 600; // if failed ssl override is active, this is the timeout.
+    
     bool use_pfs = true;         // general switch, more conrete take precedence
     bool left_use_pfs = true;
     bool right_use_pfs = true;
