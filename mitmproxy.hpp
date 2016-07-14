@@ -107,7 +107,8 @@ public:
     virtual void on_left_error(baseHostCX* cx);
     virtual void on_right_error(baseHostCX* cx);
     
-    virtual void handle_replacement(MitmHostCX* cx);
+    virtual void handle_replacement_auth(MitmHostCX* cx);
+    virtual void handle_replacement_ssl(MitmHostCX* cx);
     virtual void handle_internal_data(baseHostCX* cx);
     
     virtual bool ask_destroy() { dead(true); return true; };

@@ -121,18 +121,22 @@ public:
     int matched_policy() { return matched_policy_; }
     void matched_policy(int p) { matched_policy_ = p; }
 
-    typedef enum { REPLACETYPE_NONE=0, REPLACETYPE_HTTP=1} replacetype_flags;    
-    replacetype_flags replace_type = REPLACETYPE_NONE; 
-
-    typedef enum { REPLACE_NONE=0, REPLACE_REDIRECT=1, REPLACE_BLOCK=2 } replace_flags;    
-    void replacement(replace_flags i) { replacement_ = i; }
-    replace_flags replacement(void)   { return replacement_; }
+    typedef enum { REPLACETYPE_NONE=0, REPLACETYPE_HTTP=1} replacetype_t;    
+    replacetype_t replacement_type() const { return replacement_type_; }
+    void replacement_type(replacetype_t r) { replacement_type_ = r; }
+    
+    typedef enum { REPLACE_NONE=0, REPLACE_REDIRECT=1, REPLACE_BLOCK=2 } replaceflags_t;    
+    void replacement_flag(replaceflags_t i) { replacement_flags_ = i; }
+    replaceflags_t replacement_flag(void)   { return replacement_flags_; }
+    
+    typedef enum {} replacepurpose_t;
     
     int inspection_verdict() const { return inspect_verdict; };
 protected:    
     int matched_policy_ = -1;
     
-    replace_flags replacement_ = REPLACE_NONE;
+    replacetype_t replacement_type_ = REPLACETYPE_NONE; 
+    replaceflags_t replacement_flags_ = REPLACE_NONE;
     
 public:
     bool is_ssl = false;

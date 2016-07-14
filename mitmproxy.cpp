@@ -324,11 +324,11 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
                 DEBS_("identity check: unknown");
                 
                 if(opt_auth_authenticate) {
-                    if(mh->replace_type == MitmHostCX::REPLACETYPE_HTTP) {
+                    if(mh->replacement_type() == MitmHostCX::REPLACETYPE_HTTP) {
                 
-                        mh->replacement(MitmHostCX::REPLACE_REDIRECT);
+                        mh->replacement_flag(MitmHostCX::REPLACE_REDIRECT);
                         redirected = true;
-                        handle_replacement(mh);
+                        handle_replacement_auth(mh);
                     } 
                     else {
                         // wait, if header won't come in some time, kill the proxy
@@ -341,16 +341,33 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
                 }
             } else {
                 if(auth_block_identity) {
-                    if(mh->replace_type == MitmHostCX::REPLACETYPE_HTTP) {
+                    if(mh->replacement_type() == MitmHostCX::REPLACETYPE_HTTP) {
                         DIAS_("MitmProxy::on_left_bytes: we should block it");
-                        mh->replacement(MitmHostCX::REPLACE_BLOCK);
+                        mh->replacement_flag(MitmHostCX::REPLACE_BLOCK);
                         redirected = true;
-                        handle_replacement(mh);
+                        handle_replacement_auth(mh);
                     }
                 }
             }
         }
-        
+     
+        // check com responses
+        // peer SSLCom
+        SSLCom* scom = dynamic_cast<SSLCom*>(cx->peercom());
+        if(scom && scom->opt_failed_certcheck_replacement) {
+            if(scom->verify_status != SSLCom::VERIFY_OK) {
+                DIAS_("relaxed cert-check: peer sslcom verify not OK");
+                if(mh->replacement_type() == MitmHostCX::REPLACETYPE_HTTP) {
+                    mh->replacement_flag(MitmHostCX::REPLACE_BLOCK);
+                    redirected = true;
+                    handle_replacement_ssl(mh);
+                    
+                } else {
+                    dead(true);
+                }
+            }
+        }
+     
         if(mh->inspection_verdict() == Inspector::CACHED) {
             DIAS_("cached content: not proxying");
             return;
@@ -622,7 +639,7 @@ void MitmProxy::on_right_error(baseHostCX* cx)
 
 
 
-void MitmProxy::handle_replacement(MitmHostCX* cx) {
+void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
   
     std::string redir_pre("<!DOCTYPE html><html><head><script>window.location=\"");
     std::string redir_suf("\";</script></head><body></body></html>");  
@@ -647,7 +664,7 @@ void MitmProxy::handle_replacement(MitmHostCX* cx) {
     
     //cx->host().c_str()
     
-    if (cx->replacement() == MitmHostCX::REPLACE_REDIRECT) {
+    if (cx->replacement_flag() == MitmHostCX::REPLACE_REDIRECT) {
         //srand(time(nullptr) % ((unsigned long)cx));
         //redir_hint = rand();
 
@@ -663,13 +680,13 @@ void MitmProxy::handle_replacement(MitmHostCX* cx) {
             std::string& token_tk = cache_entry.second;
             
             if(now - token_ts < cfgapi_identity_token_timeout) {
-                INF_("MitmProxy::handle_replacement: cached token %s for request: %s",token_tk.c_str(),cx->application_data->hr().c_str());
+                INF_("MitmProxy::handle_replacement_auth: cached token %s for request: %s",token_tk.c_str(),cx->application_data->hr().c_str());
                 
                 repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + token_tk + redir_suf;
                 cx->to_write((unsigned char*)repl.c_str(),repl.size());
                 cx->close_after_write(true);
             } else {
-                INF_("MitmProxy::handle_replacement: expired token %s for request: %s",token_tk.c_str(),cx->application_data->hr().c_str());
+                INF_("MitmProxy::handle_replacement_auth: expired token %s for request: %s",token_tk.c_str(),cx->application_data->hr().c_str());
                 goto new_token;
             }
         } else {
@@ -679,12 +696,12 @@ void MitmProxy::handle_replacement(MitmHostCX* cx) {
             std::string token_text = cx->application_data->original_request();
           
             for(auto i: cfgapi_obj_policy_profile_auth( cx->matched_policy())->sub_policies) {
-                DIA_("MitmProxy::handle_replacement: token: requesting identity %s",i->name.c_str());
+                DIA_("MitmProxy::handle_replacement_auth: token: requesting identity %s",i->name.c_str());
                 token_text  += " |" + i->name;
             }
             shm_logon_token tok = shm_logon_token(token_text.c_str());
             
-            INF_("MitmProxy::handle_replacement: new auth token %s for request: %s",tok.token,cx->application_data->hr().c_str());
+            INF_("MitmProxy::handle_replacement_auth: new auth token %s for request: %s",tok.token,cx->application_data->hr().c_str());
             repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + tok.token + redir_suf;
             
             cx->to_write((unsigned char*)repl.c_str(),repl.size());
@@ -697,22 +714,22 @@ void MitmProxy::handle_replacement(MitmHostCX* cx) {
             auth_shm_token_map.save(true);
             auth_shm_token_map.release();
             
-            INFS_("MitmProxy::handle_replacement: token table updated");
+            INFS_("MitmProxy::handle_replacement_auth: token table updated");
             cfgapi_identity_token_cache[cx->host()] = std::pair<unsigned int,std::string>(time(nullptr),tok.token);
         }
         
         cfgapi_identity_token_lock.unlock();
     } else
-    if (cx->replacement() == MitmHostCX::REPLACE_BLOCK) {
+    if (cx->replacement_flag() == MitmHostCX::REPLACE_BLOCK) {
 
-        DIAS_("instructed to replace block");
+        DIAS_("MitmProxy::handle_replacement_auth: instructed to replace block");
         repl = block_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port + "/cgi-bin/auth.py?a=z" + block_post;
         cx->to_write((unsigned char*)repl.c_str(),repl.size());
         cx->close_after_write(true);
 
     } else
-    if (cx->replacement() == MitmHostCX::REPLACE_NONE) {
-        DIAS_("void MitmProxy::handle_replacement: asked to handle NONE. No-op.");
+    if (cx->replacement_flag() == MitmHostCX::REPLACE_NONE) {
+        DIAS_("MitmProxy::handle_replacement_auth: asked to handle NONE. No-op.");
     } 
 }
 
@@ -731,6 +748,50 @@ void MitmProxy::handle_internal_data(baseHostCX* cx) {
     }
 }
 
+
+void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
+    
+    std::string repl;
+    std::string repl_port = cfgapi_identity_portal_port_http;
+    std::string repl_proto = "http";
+    int     redir_hint = 0;
+    
+    if(cx->application_data->is_ssl) {
+        repl_proto = "https";
+        repl_port = cfgapi_identity_portal_port_https;
+    }    
+    
+    std::string block_pre("<!DOCTYPE html><html><head></head><body><h1>Issue with encrypted page</h1><p>Access has been blocked by smithproxy.</p>");
+    std::string block_post("</body></html>");
+    std::string block_additinal_info;
+    std::string block_target_info;
+    
+    app_HttpRequest* app_request = dynamic_cast<app_HttpRequest*>(cx->application_data);
+    if(app_request != nullptr) {
+        block_target_info = "<p><b>Requested URL:</b></br>" + app_request->request() + "</p>";
+    }
+    
+    SSLCom* scom = dynamic_cast<SSLCom*>(cx->peercom());
+    if(scom) {
+        switch(scom->verify_status) {
+            case SSLCom::SELF_SIGNED:
+                block_additinal_info = "<p><b>Reason:</b></br>Target certificate is self-signed.<p>";
+                break;
+            case SSLCom::UNKNOWN_ISSUER:
+                block_additinal_info = "<p><b>Reason:</b></br>Target certificate is issued by untrusted certificate identity.<p>";
+                break;
+                
+            default:
+                block_additinal_info = "<p><b>Reason:</b></br>Oops, no detailed problem description:(<p>";
+                break;
+        }
+    }
+    
+    DIAS_("MitmProxy::handle_replacement_ssl: instructed to replace block");
+    repl = block_pre + block_target_info + block_additinal_info + block_post;
+    cx->to_write((unsigned char*)repl.c_str(),repl.size());
+    cx->close_after_write(true);
+}
 
 void MitmProxy::init_content_replace() {
     

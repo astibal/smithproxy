@@ -209,7 +209,7 @@ void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, ve
         // replacement(REPLACE_BLOCK);
 
         // we have to specify that we are replaceable!
-        replace_type = REPLACETYPE_HTTP;
+        replacement_type_ = REPLACETYPE_HTTP;
     }
 }
 
