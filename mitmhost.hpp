@@ -71,17 +71,17 @@ struct app_HttpRequest : public ApplicationData {
     // this function returns most usable link for visited site from the request.
     virtual std::string original_request() {
         if(referer.size() > 0) {
-            INF_("std::string original_request: using referer: %s",referer.c_str());
+            DEB_("std::string original_request: using referer: %s",referer.c_str());
             return referer;
         }
         
-        INF_("std::string original_request: using request: %s",request().c_str());
+        DEB_("std::string original_request: using request: %s",request().c_str());
         return request();
     }
     virtual std::string request() {
         
         if(uri == "/favicon.ico") {
-            INFS_("std::string original_request: avoiding favicon.ico");
+            DEBS_("std::string original_request: avoiding favicon.ico");
             return host;
         }
         return proto+host+uri+params;
