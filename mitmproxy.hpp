@@ -43,6 +43,11 @@ public:
     DECLARE_LOGGING(to_string);
 };
 
+struct whitelist_verify_entry {
+};
+
+typedef expiring<whitelist_verify_entry> whitelist_verify_entry_t;
+
 class MitmProxy : public baseProxy, public socle::sobject {
     
 protected:
@@ -58,6 +63,8 @@ protected:
     std::vector<ProfileContentRule>* content_rule_ = nullptr; //save some space and store it as a pointer. Init it only when needed and delete in dtor.
     
     int matched_policy_ = -1;
+    
+    static ptr_cache<std::string,whitelist_verify_entry_t> whitelist_verify;
 public: 
     bool opt_auth_authenticate = false;
     bool opt_auth_resolve = false;
@@ -169,5 +176,7 @@ public:
     virtual void on_left_new(baseHostCX* just_accepted_cx);
     baseHostCX* new_cx(int s);
 };
+
+std::string whitelist_make_key(MitmHostCX*);
 
 #endif //MITMPROXY_HPP
