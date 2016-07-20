@@ -827,7 +827,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             std::string orig_url = "about:blank";
             
             //we require orig_url is the last argument!!!
-            int a = app_request->request().find("orig_url");
+            unsigned int a = app_request->request().find("orig_url");
             if(a != std::string::npos) {
                 //len of "orig_url=" is 9
                 orig_url = app_request->request().substr(a+9);
