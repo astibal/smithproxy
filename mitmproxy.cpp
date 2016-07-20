@@ -676,7 +676,7 @@ void MitmProxy::on_right_error(baseHostCX* cx)
 
 void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
   
-    std::string redir_pre("<!DOCTYPE html><html><head><script>window.location=\"");
+    std::string redir_pre("<!DOCTYPE html><html><head><script>top.location.href=\"");
     std::string redir_suf("\";</script></head><body></body></html>");  
   
 //     std::string redir_pre("HTTP/1.0 301 Moved Permanently\r\nLocation: ");
@@ -904,7 +904,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             
             DIA_("ssl_override: ph1 - redir to / for %s", whitelist_make_key(cx).c_str());
             
-            std::string redir_pre("<!DOCTYPE html><html><head><script>window.location=\"");
+            std::string redir_pre("<!DOCTYPE html><html><head><script>top.location.href=\"");
             std::string redir_suf("\";</script></head><body></body></html>");  
             
             //std::string repl = "<!DOCTYPE html><html><head><meta http-equiv=\"Refresh\" content=\"0; url=/\"></head><body></body></html>";            
