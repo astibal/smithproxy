@@ -794,7 +794,16 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
     if(cx->application_data->is_ssl) {
         repl_proto = "https";
         repl_port = cfgapi_identity_portal_port_https;
-    }    
+    }  
+    
+    SSLCom* scom = dynamic_cast<SSLCom*>(cx->peercom());
+    if(!scom) {
+        std::string error("<!DOCTYPE html><html><head></head><body><p>Internal error</p><p>com object is not ssl-type</p></body></html>");
+        cx->to_write((unsigned char*)error.c_str(),error.size());
+        cx->close_after_write(true);  
+        
+        return;
+    }
     
     std::string block_pre("<!DOCTYPE html><html><head></head><body><h1>Issue with encrypted page</h1><p>Access has been blocked by smithproxy.</p>");
     std::string block_post("</body></html>");
@@ -817,38 +826,51 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
 //         INF_(" --- origuri: %s",app_request->original_request().c_str());
 //         INF_(" --- referer: %s",app_request->referer.c_str());
         
+        
         if(app_request->request().find("/SM/IT/HP/RO/XY/override") != std::string::npos) {
             
             // PHASE IV.
             // perform override action
+                
+                        
+            if(scom->opt_failed_certcheck_override) {
             
-            DIA_("ssl_override: ph4 - asked for verify override for %s", whitelist_make_key(cx).c_str());
-            
-            std::string orig_url = "about:blank";
-            
-            //we require orig_url is the last argument!!!
-            unsigned int a = app_request->request().find("orig_url");
-            if(a != std::string::npos) {
-                //len of "orig_url=" is 9
-                orig_url = app_request->request().substr(a+9);
+                DIA_("ssl_override: ph4 - asked for verify override for %s", whitelist_make_key(cx).c_str());
+                
+                std::string orig_url = "about:blank";
+                
+                //we require orig_url is the last argument!!!
+                unsigned int a = app_request->request().find("orig_url");
+                if(a != std::string::npos) {
+                    //len of "orig_url=" is 9
+                    orig_url = app_request->request().substr(a+9);
+                }
+                
+                
+                std::string override_applied = string_format("<!DOCTYPE html><html><head><meta http-equiv=\"Refresh\" content=\"0; url=%s\"></head><body>applied, redirecting back to %s</body></html>",
+                                                            orig_url.c_str(),orig_url.c_str());
+
+                whitelist_verify_entry v;
+
+                whitelist_verify.lock();
+                whitelist_verify.set(key,new whitelist_verify_entry_t(v,scom->opt_failed_certcheck_override_timeout));
+                whitelist_verify.unlock();
+                
+                cx->to_write((unsigned char*)override_applied.c_str(),override_applied.size());
+                cx->close_after_write(true);
+                
+                WAR_("Connection from %s: SSL override activated for %s",cx->full_name('L').c_str(), app_request->request().c_str());
+                
+                return;
+                
+            } else {
+                // override is not enabled, but client somehow reached this (attack?)
+                std::string error("<!DOCTYPE html><html><head></head><body><p>Failed to override</p><p>Action is denied.</p></body></html>");
+                cx->to_write((unsigned char*)error.c_str(),error.size());
+                cx->close_after_write(true);                  
+                
+                return;
             }
-            
-            
-            std::string override_applied = string_format("<!DOCTYPE html><html><head><meta http-equiv=\"Refresh\" content=\"0; url=%s\"></head><body>applied, redirecting back to %s</body></html>",
-                                                         orig_url.c_str(),orig_url.c_str());
-
-            whitelist_verify_entry v;
-
-            whitelist_verify.lock();
-            whitelist_verify.set(key,new whitelist_verify_entry_t(v,300));
-            whitelist_verify.unlock();
-            
-            cx->to_write((unsigned char*)override_applied.c_str(),override_applied.size());
-            cx->close_after_write(true);
-            
-            WAR_("Connection from %s: SSL override activated for %s",cx->full_name('L').c_str(), app_request->request().c_str());
-            
-            return;
             
         } else 
         if(app_request->request().find("/SM/IT/HP/RO/XY/warning") != std::string::npos){
@@ -860,27 +882,24 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             
             block_target_info = "<p><b>Requested URL:</b></br>" + app_request->request() + "</p>";
             block_override = string_format("orig_url=%s\"><br><input type=\"submit\" value=\"Override\"></form>","/");
+
+            bool is_set = false;
+            if(scom->verify_check(SSLCom::SELF_SIGNED)) {
+                    block_additinal_info += "<p><b>Reason:</b></br>Target certificate is self-signed.<p>"; is_set = true;
+                    
+                    if(scom->opt_failed_certcheck_override)  block_additinal_info += block_override_pre + block_override;
+            }
+            if(scom->verify_check(SSLCom::UNKNOWN_ISSUER)) {
+                    block_additinal_info += "<p><b>Reason:</b></br>Target certificate is issued by untrusted certificate identity.<p>"; is_set = true;
+                    if(scom->opt_failed_certcheck_override)  block_additinal_info += block_override_pre + block_override;
+            }
+            if(scom->verify_check(SSLCom::CLIENT_CERT_RQ)) {
+                    block_additinal_info += "<p><b>Reason:</b></br>Target server asks for client certificate.<p>"; is_set = true;
+                    if(scom->opt_failed_certcheck_override)  block_additinal_info += block_override_pre + block_override;
+            }
             
-            
-            SSLCom* scom = dynamic_cast<SSLCom*>(cx->peercom());
-            if(scom) {
-                bool is_set = false;
-                if(scom->verify_check(SSLCom::SELF_SIGNED)) {
-                        block_additinal_info += "<p><b>Reason:</b></br>Target certificate is self-signed.<p>"; is_set = true;
-                        block_additinal_info += block_override_pre + block_override;
-                }
-                if(scom->verify_check(SSLCom::UNKNOWN_ISSUER)) {
-                        block_additinal_info += "<p><b>Reason:</b></br>Target certificate is issued by untrusted certificate identity.<p>"; is_set = true;
-                        block_additinal_info += block_override_pre + block_override;
-                }
-                if(scom->verify_check(SSLCom::CLIENT_CERT_RQ)) {
-                        block_additinal_info += "<p><b>Reason:</b></br>Target server asks for client certificate.<p>"; is_set = true;
-                        block_additinal_info += block_override_pre + block_override;
-                }
-                
-                if(!is_set) {
-                        block_additinal_info += "<p><b>Reason:</b></br>Oops, no detailed problem description:(<p>";
-                }
+            if(!is_set) {
+                    block_additinal_info += "<p><b>Reason:</b></br>Oops, no detailed problem description:(<p>";
             }
             
             DIAS_("MitmProxy::handle_replacement_ssl: instructed to replace block");
