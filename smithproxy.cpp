@@ -59,6 +59,7 @@
 #include <daemon.hpp>
 #include <cmdserver.hpp>
 #include <srvutils.hpp>
+#include <staticcontent.hpp>
 
 #define MEM_DEBUG 1
 #ifdef MEM_DEBUG
