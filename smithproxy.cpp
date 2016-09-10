@@ -104,6 +104,8 @@ static std::string cfg_socks_port = "1080";
 static std::string config_file;
 bool config_file_check_only = false;
 
+static std::string cfg_messages_dir = "/etc/smithproxy/msg/en/";
+
 #define LOG_FILENAME_SZ 512
 volatile char crashlog_file[LOG_FILENAME_SZ];
 //static unsigned int cfg_log_level = INF;
@@ -355,6 +357,8 @@ bool load_config(std::string& config_f, bool reload) {
         cfgapi.getRoot()["settings"].lookupValue("socks_workers",cfg_socks_workers);
         
         cfgapi.getRoot()["settings"].lookupValue("log_level",cfgapi_table.logging.level);
+        
+        cfgapi.getRoot()["settings"].lookupValue("messages_dir",cfg_messages_dir);
         
         cfgapi.getRoot()["debug"].lookupValue("log_data_crc",baseCom::debug_log_data_crc);
         cfgapi.getRoot()["debug"].lookupValue("log_sockets",baseHostCX::socket_in_name);
@@ -610,6 +614,14 @@ int main(int argc, char *argv[]) {
     // static content cache initialization -- can't be held as external object, since it would cause sobject cache deadlock.
     //  => has to be a pointer initialized AFTER sobject cache. So this seems to be the best place.
     global_staticconent = new StaticContent();
+
+    if(!global_staticconent->load_files(cfg_messages_dir)) {
+        ERR_("Cannot load messages from '%s', replacements will not work correctly !!!", cfg_messages_dir.c_str());
+    } else {
+        std::string test = "test";
+        DIA_("Message testing string: %s", global_staticconent->render_noargs(test).c_str());
+    }
+    
     
     std::string friendly_thread_name_tcp = string_format("sxy_tcp_%d",cfgapi_tenant_index);
     std::string friendly_thread_name_udp = string_format("sxy_udp_%d",cfgapi_tenant_index);
