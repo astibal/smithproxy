@@ -607,6 +607,10 @@ int main(int argc, char *argv[]) {
     //     CRYPTO_dbg_set_options(V_CRYPTO_MDEBUG_ALL);
     CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON);
 
+    // static content cache initialization -- can't be held as external object, since it would cause sobject cache deadlock.
+    //  => has to be a pointer initialized AFTER sobject cache. So this seems to be the best place.
+    global_staticconent = new StaticContent();
+    
     std::string friendly_thread_name_tcp = string_format("sxy_tcp_%d",cfgapi_tenant_index);
     std::string friendly_thread_name_udp = string_format("sxy_udp_%d",cfgapi_tenant_index);
     std::string friendly_thread_name_tls = string_format("sxy_tls_%d",cfgapi_tenant_index);

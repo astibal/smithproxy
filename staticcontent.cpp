@@ -2,4 +2,4 @@
 
 DEFINE_LOGGING(StaticContent);
 
-StaticContent global_staticconent;
+StaticContent* global_staticconent;

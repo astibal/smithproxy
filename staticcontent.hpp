@@ -14,5 +14,5 @@ public:
 };
 
 
-extern StaticContent global_staticconent;
+extern StaticContent* global_staticconent;
 #endif
