@@ -1404,11 +1404,11 @@ bool cfgapi_obj_policy_apply_tls(ProfileTls* pt, baseCom* xcom) {
             sslcom->opt_failed_certcheck_override_timeout = pt->failed_certcheck_override_timeout;
             
             // set accordingly if general "use_pfs" is specified, more conrete settings come later
-            sslcom->opt_left_pfs = pt->use_pfs;
-            sslcom->opt_right_pfs = pt->use_pfs;
+            sslcom->opt_left_kex_dh = pt->use_pfs;
+            sslcom->opt_right_kex_dh = pt->use_pfs;
             
-            sslcom->opt_left_pfs = pt->left_use_pfs;
-            sslcom->opt_right_pfs = pt->right_use_pfs;
+            sslcom->opt_left_kex_dh = pt->left_use_pfs;
+            sslcom->opt_right_kex_dh = pt->right_use_pfs;
             
             sslcom->opt_left_no_tickets = pt->left_disable_reuse;
             sslcom->opt_right_no_tickets = pt->right_disable_reuse;
