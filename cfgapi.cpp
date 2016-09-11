@@ -1273,6 +1273,35 @@ bool cfgapi_obj_profile_tls_apply(baseHostCX* originator, baseProxy* new_proxy, 
                 tls_applied = cfgapi_obj_policy_apply_tls(ps,xcom);
                 if(!tls_applied) {
                     ERR_("%s: cannot apply TLS profile to target connection %s",new_proxy->c_name(), cx->c_name());
+                } else {
+                    
+                    //applying bypass based on DNS cache
+                    
+                    SSLCom* sslcom = dynamic_cast<SSLCom*>(xcom);
+                    if(sslcom && ps->sni_filter_bypass.valid()) {
+                        if(ps->sni_filter_bypass.ptr()->size() > 0) {
+                        
+                            for(std::string& filter_element: *ps->sni_filter_bypass) {
+                                FqdnAddress f(filter_element);
+                                CIDR* c = cidr_from_str(xcom->owner_cx()->host().c_str());
+                                
+                                if(f.match(c)) {
+                                    if(sslcom->peer()) {
+                                        SSLCom* speer = dynamic_cast<SSLCom*>(sslcom->peer());
+                                        
+                                        if(speer) {
+                                            sslcom->opt_bypass = true;
+                                            speer->opt_bypass = true;
+                                            INF_("Connection %s bypassed: DNS cache SNI filter entry hit.",originator->full_name('L').c_str());
+                                        }
+                                    }
+                                }
+                                
+                                delete c;
+                            }                        
+                            
+                        }
+                    }
                 }
             }
         }
