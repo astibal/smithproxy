@@ -72,7 +72,34 @@ std::vector< std::string > Inspector::split(std::string str, unsigned char delim
     return ret;    
 }
 
-
+std::pair<std::string,std::string> Inspector::split_fqdn_subdomain(std::string& fqdn) {
+        std::string topdom;
+        std::string subdom;
+        std::vector<std::string> dotted_fqdn = split(fqdn,'.');
+        
+        if(dotted_fqdn.size() > 2 ) {
+            
+            unsigned int  i = 1;
+            for(auto it = dotted_fqdn.begin(); it != dotted_fqdn.end(); ++it) {
+                if(i <= dotted_fqdn.size() - 2) {
+                    subdom += *it;
+                    
+                    if(i < dotted_fqdn.size() - 2) {
+                        subdom += ".";
+                    }
+                } else {
+                    topdom += *it;
+                    if(i < dotted_fqdn.size()) {
+                        topdom += ".";
+                    }
+                }
+                
+                i++;
+            }
+        }
+        
+        return std::pair<std::string,std::string>(topdom,subdom);
+}
 
 std::regex DNS_Inspector::wildcard = std::regex("[^.]+\\.(.*)$");
 
@@ -295,10 +322,51 @@ bool DNS_Inspector::store(DNS_Response* ptr) {
 
 
     if(is_a_record) {
+        std::string question = ptr->question_str_0();
+        
         inspect_dns_cache.lock();
-        inspect_dns_cache.set(ptr->question_str_0(),ptr);
+        inspect_dns_cache.set(question,ptr);
         DIA___("DNS_Inspector::update: %s added to cache (%d elements of max %d)",ptr->question_str_0().c_str(),inspect_dns_cache.cache().size(), inspect_dns_cache.max_size());
         inspect_dns_cache.unlock();
+        
+        std::pair<std::string,std::string> dom_pair = split_fqdn_subdomain(question);
+        DEB___("topdomain = %s, subdomain = %s",dom_pair.first.c_str(), dom_pair.second.c_str());    
+        
+        if(dom_pair.first.size() > 0 && dom_pair.second.size() > 0) {
+            domain_cache.lock();
+            auto subdom_cache = domain_cache.get(dom_pair.first);
+            if(subdom_cache != nullptr) {
+                subdom_cache->lock();
+                
+                DIA___("Top domain cache entry found for domain %s",dom_pair.first.c_str());
+                if(subdom_cache->get(dom_pair.second) != nullptr) {
+                    DIA___("Sub domain cache entry found for subdomain %s",dom_pair.second.c_str());
+                }
+                
+                
+                if(LEV_(DEB)) {
+                    for( auto subdomain: subdom_cache->cache()) {
+                        std::string  s =  subdomain.first;
+                        expiring_int* i = subdomain.second;
+                        
+                        DEB___("Sub domain cache list: entry %s",s.c_str());
+                    }
+                }
+                
+                subdom_cache->set(dom_pair.second,new expiring_int(1,28000));
+                subdom_cache->unlock();
+            
+            }
+            
+            else {
+                DIA___("Top domain cache entry NOT found for domain %s",dom_pair.first.c_str());
+                domain_cache_entry_t* subdom_cache = new domain_cache_entry_t(string_format("DNS cache for %s",dom_pair.first.c_str()).c_str(),100,true);
+                subdom_cache->set(dom_pair.second,new expiring_int(1,28000));
+                
+                domain_cache.set(dom_pair.first,subdom_cache);
+            }
+            domain_cache.unlock();
+        }
     }    
     
     return is_a_record;

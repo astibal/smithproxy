@@ -185,4 +185,8 @@ typedef ptr_cache<std::string,DNS_Response> dns_cache;
 extern dns_cache inspect_dns_cache;
 extern std::unordered_map<std::string,ptr_cache<std::string,DNS_Response>*> inspect_per_ip_dns_cache;
 
+typedef ptr_cache<std::string,expiring_int> domain_cache_entry_t;
+typedef ptr_cache<std::string,domain_cache_entry_t> domain_cache_t;
+extern domain_cache_t domain_cache;
+
 #endif

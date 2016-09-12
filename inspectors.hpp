@@ -85,6 +85,7 @@ protected:
                                                 
     static std::string remove_redundant_dots(std::string);
     static std::vector<std::string> split(std::string, unsigned char delimiter);
+    static std::pair<std::string,std::string> split_fqdn_subdomain(std::string& fqdn);
                                                 
     DECLARE_C_NAME("Inspector");
 };

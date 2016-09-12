@@ -135,6 +135,24 @@ struct ProfileTls {
     std::string name;
     
     socle::spointer_vector_string sni_filter_bypass;
+    
+    bool sni_filter_use_dns_cache = true;       // if sni_filter_bypass is set, check during policy match if target IP isn't in DNS cache matching SNI filter entries.
+                                                // For example: 
+                                                // Connection to 1.1.1.1 policy check will look in all SNI filter entries ["abc.com","mybank.com"] and will try to find them in DNS cache. 
+                                                // Sni filter entry mybank.com is found in DNS cache pointing to 1.1.1.1. Connection is bypassed.
+                                                // Load increases with SNI filter length lineary, but DNS cache lookup is fast.
+                                                // DNS cache has to be active this to be working.
+    bool sni_filter_use_dns_domain_tree = true;
+                                                // check IP address in full domain tree for each SNI filter entry.
+                                                // if SNI filter entry can't be found in DNS cache, try to look in all DNS subdomains of SNI filter entries.
+                                                // Example:
+                                                // Consider SNI filter from previous example. You are now connecting to ip 2.2.2.2. 
+                                                // Based on previous DNS traffic, there is subdomain cache for "mybank.com" filled with entries "www" and "ecom".
+                                                // Both "www" and "ecom" are searched in DNS cache. www points to 1.1.1.1, but ecom points to 2.2.2.2. 
+                                                // Connection is bypassed.
+                                                // DNS cache has to active and sni_filter_use_dns_cache enabled before this feature can be activated.
+                                                // Load increases with SNI filter size and subdomain cache, both lineary, so it's intensive feature.
+
 };
 
 

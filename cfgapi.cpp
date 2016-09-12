@@ -1279,25 +1279,49 @@ bool cfgapi_obj_profile_tls_apply(baseHostCX* originator, baseProxy* new_proxy, 
                     
                     SSLCom* sslcom = dynamic_cast<SSLCom*>(xcom);
                     if(sslcom && ps->sni_filter_bypass.valid()) {
-                        if(ps->sni_filter_bypass.ptr()->size() > 0) {
+                        if(ps->sni_filter_bypass.ptr()->size() > 0 && ps->sni_filter_use_dns_cache) {
                         
+                            bool interrupt = false;
                             for(std::string& filter_element: *ps->sni_filter_bypass) {
                                 FqdnAddress f(filter_element);
                                 CIDR* c = cidr_from_str(xcom->owner_cx()->host().c_str());
                                 
                                 if(f.match(c)) {
-                                    if(sslcom->peer()) {
-                                        SSLCom* speer = dynamic_cast<SSLCom*>(sslcom->peer());
-                                        
-                                        if(speer) {
-                                            sslcom->opt_bypass = true;
-                                            speer->opt_bypass = true;
-                                            INF_("Connection %s bypassed: DNS cache SNI filter entry hit.",originator->full_name('L').c_str());
+                                    if(sslcom->bypass_me_and_peer()) {
+                                        INF_("Connection %s bypassed: IP in DNS cache matching TLS bypass list (%s).",originator->full_name('L').c_str(),filter_element.c_str());
+                                        interrupt = true;
+                                    } else {
+                                        WAR_("Connection %s: cannot be bypassed.",originator->full_name('L').c_str());
+                                    }
+                                } else if (ps->sni_filter_use_dns_domain_tree) {
+                                    domain_cache.lock();
+                                    //INF_("FQDN doesn't match SNI element, looking for sub-domains of %s", filter_element.c_str());
+                                    //FIXME: we assume flter is 2nd level domain... 
+                                    
+                                    auto subdomain_cache = domain_cache.get(filter_element);
+                                    if(subdomain_cache != nullptr) {
+                                        for(auto subdomain: subdomain_cache->cache()) {
+                                            FqdnAddress f(subdomain.first+"."+filter_element);
+                                            
+                                            if(f.match(c)) {
+                                                if(sslcom->bypass_me_and_peer()) {
+                                                    INF_("Connection %s bypassed: IP in DNS subdomain cache matching TLS bypass list (%s).",originator->full_name('L').c_str(),filter_element.c_str());
+                                                } else {
+                                                    WAR_("Connection %s: cannot be bypassed.",originator->full_name('L').c_str());                                                    
+                                                }
+                                                interrupt = true; //exit also from main loop
+                                                break;
+                                            }
                                         }
                                     }
+                                    
+                                    domain_cache.unlock();
                                 }
                                 
                                 delete c;
+                                
+                                if(interrupt) 
+                                    break;
                             }                        
                             
                         }
