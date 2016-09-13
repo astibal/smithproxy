@@ -29,6 +29,7 @@
 #include <cfgapi_auth.hpp>
 #include <sockshostcx.hpp>
 #include <uxcom.hpp>
+#include <staticcontent.hpp>
 
 #include <algorithm>
 #include <ctime>
@@ -805,8 +806,6 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
         return;
     }
     
-    std::string block_pre("<!DOCTYPE html><html><head></head><body><h1>Issue with encrypted page</h1><p>Access has been blocked by smithproxy.</p>");
-    std::string block_post("</body></html>");
     std::string block_additinal_info;
     std::string block_override_pre = "<form action=\"/SM/IT/HP/RO/XY";
     
@@ -903,7 +902,13 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             }
             
             DIAS_("MitmProxy::handle_replacement_ssl: instructed to replace block");
-            repl = block_pre + block_target_info + block_additinal_info + block_post;
+            
+            std::string cap = "warning";
+            std::string meta;
+            std::string war_img = global_staticconent->render_noargs("html_img_warning");
+            std::string msg = string_format("<h3>%s Encryption/Security issue with the page</h3><p>%s</p>",war_img.c_str(),(block_target_info + block_additinal_info).c_str());
+            repl = global_staticconent->render_msg_html_page(cap, meta, msg,"500px");
+            
             cx->to_write((unsigned char*)repl.c_str(),repl.size());
             cx->close_after_write(true);
         } else 
