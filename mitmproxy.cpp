@@ -718,7 +718,20 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
             if(now - token_ts < cfgapi_identity_token_timeout) {
                 INF_("MitmProxy::handle_replacement_auth: cached token %s for request: %s",token_tk.c_str(),cx->application_data->hr().c_str());
                 
-                repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + token_tk + redir_suf;
+                if(cx->com()) {
+                    if(cx->com()->l3_proto() == AF_INET) {
+                        repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + token_tk + redir_suf;
+                    } else if(cx->com()->l3_proto() == AF_INET6) {
+                        repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address6+":"+repl_port+"/cgi-bin/auth.py?token=" + token_tk + redir_suf;
+                    } 
+                } 
+                
+                if(repl.size() == 0) {
+                    // default to IPv4 address
+                    INFS_("XXX: fallback to IPv4");
+                    repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + token_tk + redir_suf;
+                }
+                
                 cx->to_write((unsigned char*)repl.c_str(),repl.size());
                 cx->close_after_write(true);
             } else {
@@ -738,7 +751,20 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
             shm_logon_token tok = shm_logon_token(token_text.c_str());
             
             INF_("MitmProxy::handle_replacement_auth: new auth token %s for request: %s",tok.token,cx->application_data->hr().c_str());
-            repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + tok.token + redir_suf;
+            
+            if(cx->com()) {
+                if(cx->com()->l3_proto() == AF_INET) {
+                    repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + token_text;
+                } else if(cx->com()->l3_proto() == AF_INET6) {
+                    repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address6+":"+repl_port+"/cgi-bin/auth.py?token=" + token_text;
+                } 
+            } 
+            
+            if(repl.size() == 0) {
+                // default to IPv4 address
+                INFS_("XXX: fallback to IPv4");
+                repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + token_text;
+            }
             
             cx->to_write((unsigned char*)repl.c_str(),repl.size());
             cx->close_after_write(true);

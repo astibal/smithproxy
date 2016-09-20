@@ -18,6 +18,7 @@ std::unordered_map<std::string,std::pair<unsigned int,std::string>> cfgapi_ident
 unsigned int cfgapi_identity_token_timeout = 20; // token expires _from_cache_ after this timeout (in seconds).
 
 std::string cfgapi_identity_portal_address = "192.168.0.1";
+std::string cfgapi_identity_portal_address6 = "";
 std::string cfgapi_identity_portal_port_http = "8008";
 std::string cfgapi_identity_portal_port_https = "8043";
 

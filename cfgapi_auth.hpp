@@ -187,6 +187,7 @@ extern std::unordered_map<std::string,std::pair<unsigned int,std::string>> cfgap
 extern unsigned int cfgapi_identity_token_timeout; // token expires _from_cache_ after this timeout (in seconds).
 
 extern std::string cfgapi_identity_portal_address;
+extern std::string cfgapi_identity_portal_address6;
 extern std::string cfgapi_identity_portal_port_http;
 extern std::string cfgapi_identity_portal_port_https;
 

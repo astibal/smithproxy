@@ -953,6 +953,7 @@ int cfgapi_load_obj_profile_auth() {
     
     DIAS_("cfgapi_load_obj_profile_auth: portal settings");
     cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("address",cfgapi_identity_portal_address);
+    cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("address6",cfgapi_identity_portal_address6);
     cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("http_port",cfgapi_identity_portal_port_http);
     cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("https_port",cfgapi_identity_portal_port_https);    
     
