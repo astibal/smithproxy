@@ -788,20 +788,14 @@ void MitmProxy::handle_internal_data(baseHostCX* cx) {
 void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
     
     std::string repl;
-    std::string repl_port = cfgapi_identity_portal_port_http;
-    std::string repl_proto = "http";
-    int     redir_hint = 0;
-    
-    if(cx->application_data->is_ssl) {
-        repl_proto = "https";
-        repl_port = cfgapi_identity_portal_port_https;
-    }  
     
     SSLCom* scom = dynamic_cast<SSLCom*>(cx->peercom());
     if(!scom) {
         std::string error("<!DOCTYPE html><html><head></head><body><p>Internal error</p><p>com object is not ssl-type</p></body></html>");
         cx->to_write((unsigned char*)error.c_str(),error.size());
         cx->close_after_write(true);  
+        
+        ERRS___("cannot handle replacement for TLS, com is not SSLCom");
         
         return;
     }
@@ -879,27 +873,33 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
         
             DIA_("ssl_override: ph3 - warning replacement for %s", whitelist_make_key(cx).c_str());
             
-            block_target_info = "<p><b>Requested URL:</b></br>" + app_request->request() + "</p>";
+            block_target_info = "<p><b>Requested site at:</b></br>" + app_request->proto + app_request->host + "</p>";
             block_override = string_format("orig_url=%s\"><br><input type=\"submit\" value=\"Override\"></form>","/");
 
-            bool is_set = false;
-            if(scom->verify_check(SSLCom::SELF_SIGNED)) {
-                    block_additinal_info += "<p><b>Reason:</b></br>Target certificate is self-signed.<p>"; is_set = true;
-                    
-                    if(scom->opt_failed_certcheck_override)  block_additinal_info += block_override_pre + block_override;
-            }
-            if(scom->verify_check(SSLCom::UNKNOWN_ISSUER)) {
-                    block_additinal_info += "<p><b>Reason:</b></br>Target certificate is issued by untrusted certificate identity.<p>"; is_set = true;
-                    if(scom->opt_failed_certcheck_override)  block_additinal_info += block_override_pre + block_override;
-            }
-            if(scom->verify_check(SSLCom::CLIENT_CERT_RQ)) {
-                    block_additinal_info += "<p><b>Reason:</b></br>Target server asks for client certificate.<p>"; is_set = true;
-                    if(scom->opt_failed_certcheck_override)  block_additinal_info += block_override_pre + block_override;
+            if(scom->verify_get() > 0) {
+                bool is_set = false;
+                
+                if(scom->verify_check(SSLCom::SELF_SIGNED)) {
+                        block_additinal_info += "<p><b>Reason:</b></br>Target certificate is self-signed.<p>"; is_set = true;
+                }
+                if(scom->verify_check(SSLCom::SELF_SIGNED_CHAIN)) {
+                        block_additinal_info += "<p><b>Reason:</b></br>Target certificate's chain of trust contains self-signed, untrusted CA.<p>"; is_set = true;
+                }
+                if(scom->verify_check(SSLCom::UNKNOWN_ISSUER)) {
+                        block_additinal_info += "<p><b>Reason:</b></br>Target certificate is issued by untrusted certificate identity.<p>"; is_set = true;
+                }
+                if(scom->verify_check(SSLCom::CLIENT_CERT_RQ)) {
+                        block_additinal_info += "<p><b>Reason:</b></br>Target server asks for client certificate.<p>"; is_set = true;
+                }
+                
+                if(!is_set) {
+                        block_additinal_info += string_format("<p><b>Reason:</b></br>Oops, no detailed problem description (code: 0x%04x)<p>",scom->verify_get());
+                }
+            } else {
+                block_additinal_info += string_format("<p><b>Reason:</b></br>Oops, no detailed problem description (code: 0x%04x)<p>",scom->verify_get());
             }
             
-            if(!is_set) {
-                    block_additinal_info += "<p><b>Reason:</b></br>Oops, no detailed problem description:(<p>";
-            }
+            if(scom->opt_failed_certcheck_override)  block_additinal_info += block_override_pre + block_override;
             
             DIAS_("MitmProxy::handle_replacement_ssl: instructed to replace block");
             
@@ -918,7 +918,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             
             DIA_("ssl_override: ph2 - redir to warning replacement for  %s", whitelist_make_key(cx).c_str());
             
-            std::string repl = "<!DOCTYPE html><html><head><meta http-equiv=\"Refresh\" content=\"0; url=/SM/IT/HP/RO/XY/warning\"></head><body></body></html>";
+            std::string repl = "<!DOCTYPE html><html><head><meta http-equiv=\"Refresh\" content=\"0; url=/SM/IT/HP/RO/XY/warning?q=1\"></head><body></body></html>";
             cx->to_write((unsigned char*)repl.c_str(),repl.size());
             cx->close_after_write(true);            
         }   
