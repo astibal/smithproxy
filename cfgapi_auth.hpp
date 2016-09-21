@@ -35,33 +35,41 @@
 
 
 // structure exchanged with backend daemon
-struct shm_logon_info {
-    char  ip[LOGON_INFO_IP_SZ];
+template <int AddressSize>
+struct shm_logon_info_ {
+    char  ip[AddressSize];
     char  username[LOGON_INFO_USERNAME_SZ];
     char  groups[LOGON_INFO_GROUPS_SZ];
     
-    shm_logon_info() {
-        memset(ip,0,LOGON_INFO_IP_SZ);
+    shm_logon_info_() {
+        memset(ip,0,AddressSize);
         memset(username,0,LOGON_INFO_USERNAME_SZ);
         memset(groups,0,LOGON_INFO_GROUPS_SZ);
     }
-    shm_logon_info(const char* i,const char* u,const char* g) {
-        memset(ip,0,LOGON_INFO_IP_SZ);
+    shm_logon_info_(const char* i,const char* u,const char* g) {
+        memset(ip,0,AddressSize);
         memset(username,0,LOGON_INFO_USERNAME_SZ);
         memset(groups,0,LOGON_INFO_GROUPS_SZ);
         
-        inet_aton(i,(in_addr*)ip);
+        if(AddressSize == 4) {
+            inet_pton(AF_INET,i,ip);
+        }
+        else if (AddressSize == 16) {
+            inet_pton(AF_INET6,i,ip);
+        }
         strncpy(username,u,LOGON_INFO_USERNAME_SZ-1);
         strncpy(groups,g,LOGON_INFO_GROUPS_SZ-1);
     }
     
-    std::string hr() { 
-        char out[INFO_HR_OUT_SZ]; memset(out,0,INFO_HR_OUT_SZ);
-        snprintf(out,INFO_HR_OUT_SZ-1,"%s : %16s \t groups: %s\n",inet_ntoa(*(in_addr*)ip),username,groups); 
-        return std::string(out);
-    }
+//     std::string hr() { 
+//         char out[INFO_HR_OUT_SZ]; memset(out,0,INFO_HR_OUT_SZ);
+//         snprintf(out,INFO_HR_OUT_SZ-1,"%s : %16s \t groups: %s\n",inet_ntoa(*(in_addr*)ip),username,groups); 
+//         return std::string(out);
+//     }
 };
 
+typedef shm_logon_info_<4> shm_logon_info;
+typedef shm_logon_info_<16> shm_logon_info6;
 
 // structure exchanged with backend daemon
 struct shm_logon_token {
@@ -100,7 +108,9 @@ struct shm_logon_token {
  
 
 //structure kept in the smithproxy to track IP address identity and history
-struct IdentityInfo {
+
+template <class ShmLogonType>
+struct IdentityInfoType {
     static unsigned int global_idle_timeout;
     
     unsigned int idle_timeout = 0;
@@ -116,9 +126,9 @@ struct IdentityInfo {
     
     unsigned int last_seen_at;
     unsigned int last_seen_policy;
-    struct shm_logon_info last_logon_info;
+    ShmLogonType last_logon_info;
     
-    IdentityInfo() {
+    IdentityInfoType() {
         idle_timeout = global_idle_timeout; 
         created = time(nullptr);
         last_seen_at = created;
@@ -150,21 +160,27 @@ struct IdentityInfo {
     }
 };
 
-// not used now
-class shared_0_4b_map : public shared_map<std::string,shm_logon_info> {
-    virtual std::string get_row_key(shm_logon_info* r) {
-        return std::string((const char*)r,4);
+typedef IdentityInfoType<shm_logon_info> IdentityInfo;
+typedef IdentityInfoType<shm_logon_info6> IdentityInfo6;
+
+template<class ShmLogonType,int AddressSize>
+class shared_logoninfotype_ntoa_map : public shared_map<std::string,ShmLogonType> {
+    virtual std::string get_row_key(ShmLogonType* r) {
+        char b[64];
+        memset(b,0,64);
+        
+        std::string ret;
+        
+        if(AddressSize == 4) {
+            return std::string(inet_ntop(AF_INET,r->ip,b,64));
+        }
+        else if(AddressSize == 16) {
+            return std::string(inet_ntop(AF_INET6,r->ip,b,64));
+        }
     }
 };
 
-class shared_0_4b_ntoa_map : public shared_map<std::string,shm_logon_info> {
-    virtual std::string get_row_key(shm_logon_info* r) {
-        in_addr* ptr = (in_addr*)&r->ip;
-        return std::string(inet_ntoa(*ptr));
-    }
-};
-
-typedef shared_0_4b_ntoa_map shared_ip_map;
+typedef shared_logoninfotype_ntoa_map<shm_logon_info,4> shared_ip_map;
 
 // refresh from shared memory
 extern int cfgapi_auth_shm_ip_table_refresh();

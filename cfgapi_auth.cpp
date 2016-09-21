@@ -3,12 +3,15 @@
 #include <cfgapi_auth.hpp>
 #include <logger.hpp>
 
+template <class ShmLogonType>
+unsigned int IdentityInfoType<ShmLogonType>::global_idle_timeout = 600;
 
-unsigned int IdentityInfo::global_idle_timeout = 600;
 
-std::unordered_map<std::string,IdentityInfo> auth_ip_map;
-//shared_table<logon_info>  auth_shm_ip_map;
+// IPv4 logon shm table and its map
 shared_ip_map auth_shm_ip_map;
+std::unordered_map<std::string,IdentityInfo> auth_ip_map;
+
+
 shared_table<shm_logon_token> auth_shm_token_map;
 
 // authentication token cache
