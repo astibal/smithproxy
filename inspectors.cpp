@@ -179,7 +179,8 @@ void DNS_Inspector::update(AppHostCX* cx) {
                 }
             }
             
-            if(opt_cached_responses && ((DNS_Request*)ptr)->question_type_0() == A) {
+            
+            if(opt_cached_responses && ( ((DNS_Request*)ptr)->question_type_0() == A || ((DNS_Request*)ptr)->question_type_0() == AAAA ) ) {
                 inspect_dns_cache.lock();
                 cached_entry = inspect_dns_cache.get(ptr->question_str_0());
                 if(cached_entry != nullptr) {

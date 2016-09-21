@@ -82,6 +82,13 @@ struct DNS_Answer {
             std::string rr = string_format(" ip: %s",inet_ntoa(a));
             ret += rr;
         }
+        else if(type_ == AAAA && data_.size() == 16) {
+            char b[64];
+            memset(b,0,64);
+            
+            inet_ntop(AF_INET6,data_.data(),b,64);
+            ret += string_format(" ip6: %s",b);
+        }
         
         return ret;
     }
@@ -94,6 +101,11 @@ struct DNS_Answer {
             
             return cidr_from_inaddr(&a);
         } 
+        else if (type_ == AAAA && data_.size() == 16) {
+            in6_addr a;
+            memcpy(&a.s6_addr,data_.data(),16);
+            return cidr_from_in6addr(&a);
+        }
         
         return nullptr;
     }
@@ -149,7 +161,15 @@ public:
     inline int answers() { return questions_list.size(); }
 
     // helper inline functions to operate on most common content
-    std::string question_str_0() const { if(questions_list.size()) { return questions_list.at(0).rec_str; } return std::string("? "); };
+    std::string question_str_0() const { 
+        if(questions_list.size()) { 
+            std::string ret;
+            if(question_type_0() == A) ret = "A:";
+            else if (question_type_0() == AAAA) ret = "AAAA:";
+            return ret += string_format(questions_list.at(0).rec_str); 
+        } 
+        return std::string("? "); 
+    };
     uint16_t question_type_0() const { if(questions_list.size()) { return questions_list.at(0).rec_type; } return 0; };
     uint16_t question_class_0() const { if(questions_list.size()) { return questions_list.at(0).rec_class; } return 0; };
     

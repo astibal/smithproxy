@@ -260,7 +260,7 @@ std::string DNS_Packet::answer_str() const {
     std::string ret = "";
     
     for(auto x = answers_list.begin(); x != answers_list.end(); ++x) {
-        if(x->type_ == A) {
+        if(x->type_ == A || x->type_ == AAAA) {
             ret += " " + x->ip();
         }
     }
@@ -272,7 +272,7 @@ std::vector< CidrAddress*> DNS_Packet::get_a_anwsers() {
     std::vector<CidrAddress*> ret;
     
     for(auto x = answers_list.begin(); x != answers_list.end(); ++x) {
-        if(x->type_ == A) {
+        if(x->type_ == A || x->type_ == AAAA) {
             ret.push_back(new CidrAddress(x->cidr()));
         }
     }
