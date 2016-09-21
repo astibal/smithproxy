@@ -50,6 +50,20 @@ global BEND_KEYFILE
 global BEND_PORT
 global flog
 
+def address_version(ip):
+    try:
+        a = socket.inet_pton(socket.AF_INET,ip)
+        return 4
+    except socket.error:
+        pass
+    
+    try:
+        a = socket.inet_pton(socket.AF_INET6,ip)
+        return 6
+    except socket.error:
+        pass
+
+    return 0
 
 
 class AdminManager:
@@ -113,6 +127,7 @@ class AuthManager:
 
     def __init__(self, server_port):
       self.logon_shm = None
+      self.logon6_shm = None
       self.token_shm = None
       self.last_refresh = time.time()
       
@@ -155,6 +170,14 @@ class AuthManager:
       self.logon_shm.setup(mem_name,mem_size,sem_name)
       self.logon_shm.clear()
       self.logon_shm.write_header()
+
+    def setup_logon_tables6(self,mem_name,mem_size,sem_name):
+
+      self.logon6_shm = LogonTable(6)
+      self.logon6_shm.setup(mem_name,mem_size,sem_name)
+      self.logon6_shm.clear()
+      self.logon6_shm.write_header()
+      
 
     def setup_token_tables(self,mem_name,mem_size,sem_name):
       self.token_shm = TokenTable()
@@ -348,8 +371,18 @@ class AuthManager:
 
     def authenticate(self, ip, username, password,token):
 
-        ipa = socket.inet_aton(ip)
-        flog.debug("authenticate: request: user %s from %s - token %s" % (username,ip,str(token)))
+        flog.info("authenticate: request: user %s from %s - token %s" % (username,ip,str(token)))
+
+        ip_version = address_version(ip)
+        flog.debug("ip version: %d" % ip_version)
+        
+        ip_shm_table = None
+        
+        if ip_version == 4:
+            ip_shm_table = self.logon_shm
+        elif ip_version == 6:
+            ip_shm_table = self.logon6_shm
+        
         ret = False
         
         # make identities as broad as possible. This is safest default, identities are later narrowed down by token data
@@ -389,10 +422,10 @@ class AuthManager:
                         identities_to_send += "+"
                         identities_to_send += i
             
-            self.logon_shm.acquire()
-            self.logon_shm.load()       # load new data!
-            self.logon_shm.add(ip,username,identities_to_send)
-            self.logon_shm.release()
+            ip_shm_table.acquire()
+            ip_shm_table.load()       # load new data!
+            ip_shm_table.add(ip,username,identities_to_send)
+            ip_shm_table.release()
             
             # :-D
             ret = True
@@ -737,6 +770,7 @@ def run_bend(tenant_name="default",tenant_index=0):
 
     
     a.setup_logon_tables("/smithproxy_auth_ok_%s" % (TENANT_NAME,),1024*1024,"/smithproxy_auth_ok_%s.sem" % (TENANT_NAME,))
+    a.setup_logon_tables6("/smithproxy_auth6_ok_%s" % (TENANT_NAME,),1024*1024,"/smithproxy_auth6_ok_%s.sem" % (TENANT_NAME,))
     a.setup_token_tables("/smithproxy_auth_token_%s" % (TENANT_NAME,),1024*1024,"/smithproxy_auth_token_%s.sem" % (TENANT_NAME,))
     
     try:
