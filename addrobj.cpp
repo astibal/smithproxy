@@ -43,7 +43,14 @@ std::string FqdnAddress::to_string(int verbosity) {
 bool FqdnAddress::match(CIDR* c) {
     bool ret = false;
     
-    DNS_Response* r = inspect_dns_cache.get(fqdn_);
+    DNS_Response* r = nullptr;
+    
+    if(c->proto == CIDR_IPV4) {
+        r = inspect_dns_cache.get("A:" + fqdn_);
+    }
+    else if(c->proto == CIDR_IPV6) {
+        r = inspect_dns_cache.get("AAAA:" + fqdn_);
+    }
     if(r != nullptr) {
         DEB_("FqdnAddress::match: found in cache: %s",fqdn_.c_str());
         
