@@ -92,12 +92,10 @@ class PortalDaemon(Daemon):
         flog.debug("PortalDaemon.run: starting "+self.nicename)
         if(self.nicename.endswith("ssl")):
             flog.debug("PortalDaemon.run: Starting https portal")
-            self.drop_privileges()
-            e = webfr.run_portal_ssl(TENANT_NAME,TENANT_IDX)
+            e = webfr.run_portal_ssl(TENANT_NAME,TENANT_IDX,self.drop_privileges)
         else:
             flog.debug("PortalDaemon.run: Starting http portal")
-            self.drop_privileges()
-            e = webfr.run_portal_plain(TENANT_NAME,TENANT_IDX)
+            e = webfr.run_portal_plain(TENANT_NAME,TENANT_IDX,self.drop_privileges)
 
         if(e):
             flog.error("PortalDaemon.run: finished with error: %s",str(e))

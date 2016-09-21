@@ -21,6 +21,7 @@
 import BaseHTTPServer, SimpleHTTPServer
 from SocketServer import ThreadingMixIn
 
+import socket
 import ssl
 import CGIHTTPServer
 import pylibconfig2 as cfg
@@ -31,16 +32,27 @@ import logging
 
 global TENANT_NAME
 global TENANT_IDX
+global flog
 
 class ThreadingCGIServer(ThreadingMixIn,BaseHTTPServer.HTTPServer):
-    pass
+    address_family = socket.AF_INET6
+
+def create_portal_logger(name):
+    ret = logging.getLogger(name)
+    hdlr = logging.FileHandler("/var/log/smithproxy_%s.log" % (name,))
+    formatter = logging.Formatter('%(asctime)s [%(process)d] [%(levelname)s] %(message)s')
+    hdlr.setFormatter(formatter)
+    ret.addHandler(hdlr) 
+    ret.setLevel(logging.INFO)
+    
+    return ret
 
 
 def run_plaintext(cfg_api, server_class=ThreadingCGIServer,
         handler_class=CGIHTTPServer.CGIHTTPRequestHandler):
   
     port = int(cfg_api.settings.auth_portal.http_port)  + int(TENANT_IDX)
-    server_address = ('', int(port))
+    server_address = ('::', int(port))
     handler_class.cgi_directories = ['/cgi-bin']
     httpd = server_class(server_address, handler_class)
     CGIHTTPServer.CGIHTTPRequestHandler.have_fork=False    
@@ -56,7 +68,7 @@ def run_ssl(cfg_api,server_class=ThreadingCGIServer,
     key  = cert_root+cfg_api.settings.auth_portal.ssl_key
     cert = cert_root+cfg_api.settings.auth_portal.ssl_cert
   
-    server_address = ('', int(port))
+    server_address = ('::', int(port))
     handler_class.cgi_directories = ['/cgi-bin']
     httpd = server_class(server_address, handler_class)
     httpd.socket = ssl.wrap_socket (httpd.socket, keyfile=key,certfile=cert, server_side=True)
@@ -82,42 +94,57 @@ def run_portal_all_background():
             time.sleep(1)
 
 
-def run_portal_plain(tenant_name,tenant_idx):
-    global TENANT_NAME,TENANT_IDX
+def run_portal_plain(tenant_name,tenant_idx,drop_privs_routine=None):
+    global TENANT_NAME,TENANT_IDX,flog
     TENANT_NAME = tenant_name
     TENANT_IDX  = tenant_idx
+    flog = create_portal_logger("portal_plain.%s" % (tenant_name,))
+    
     os.environ['TENANT_NAME'] = tenant_name
     os.environ['TENANT_IDX'] = tenant_idx
     
     ret = True
     try:
-        logging.debug("run_portal_plain: start")
+        flog.info("Plaintext portal: start")
         c = cfg.Config()
         c.read_file("/etc/smithproxy/smithproxy.cfg")  
+        
+        if drop_privs_routine:
+            flog.info("dropping privilegges")
+            drop_privs_routine()        
+            flog.info("done")
+            
         run_plaintext(c)
     except Exception, e: 
         ret = False;
-        logging.error("run_portal_plain: exception caught: %s" % (str(e)))
+        flog.error("run_portal_plain: exception caught: %s" % (str(e)))
         
     return str(ret)
        
-def run_portal_ssl(tenant_name,tenant_idx):
-    global TENANT_NAME,TENANT_IDX
+def run_portal_ssl(tenant_name,tenant_idx,drop_privs_routine=None):
+    global TENANT_NAME,TENANT_IDX,flog
     TENANT_NAME = tenant_name
     TENANT_IDX  = tenant_idx
+    flog = create_portal_logger('portal_ssl.%s' % (tenant_name,))
 
     os.environ['TENANT_NAME'] = tenant_name
     os.environ['TENANT_IDX'] = tenant_idx
     
     ret = True
     try:
-        logging.debug("run_portal_ssl: start")
+        flog.info("SSL portal: start")
         c = cfg.Config()
         c.read_file("/etc/smithproxy/smithproxy.cfg")  
+        
+        if drop_privs_routine:
+            flog.info("dropping privilegges")
+            drop_privs_routine()
+            flog.info("done")            
+        
         run_ssl(c)
     except Exception, e: 
         ret = False;
-        logging.error("run_portal_ssl: exception caught: %s" % (str(e)))
+        flog.error("run_portal_ssl: exception caught: %s" % (str(e)))
         
     return str(ret)
 

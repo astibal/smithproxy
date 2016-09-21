@@ -42,6 +42,8 @@ bend_url = "http://127.0.0.1:%d/" % (tenant_index+64000,)
 def authenticate(username,password,token):
     global print_exceptions,bend_url
 
+    
+
     pagename = "Authentication %s"
     caption = "Authentication %s"
     msg = 'authentication %s!'
