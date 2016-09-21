@@ -1262,7 +1262,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                 new_proxy->matched_policy(policy_num);
 
                 // resolve source information - is there an identity info for that IP?
-                if(new_proxy->opt_auth_authenticate || new_proxy->opt_auth_resolve) {
+                if(new_proxy->opt_auth_authenticate && new_proxy->opt_auth_resolve) {
                     bool res = new_proxy->resolve_identity(src_cx);
 
                     // reload table and check timeouts each 5 seconds 
