@@ -1,3 +1,22 @@
+/*
+    Smithproxy- transparent proxy with SSL inspection capabilities.
+    Copyright (c) 2014, Ales Stibal <astib@mag0.net>, All rights reserved.
+
+    Smithproxy is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    Smithproxy is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with Smithproxy.  If not, see <http://www.gnu.org/licenses/>.
+    
+*/
+
 #ifndef CFGAPI_AUTH_HPP
   #define CFGAPI_AUTH_HPP
 
@@ -188,10 +207,10 @@ typedef shared_logoninfotype_ntoa_map<shm_logon_info,4> shared_ip_map;
 typedef shared_logoninfotype_ntoa_map<shm_logon_info6,16> shared_ip6_map;
 
 // refresh from shared memory
-extern int cfgapi_auth_shm_ip_table_refresh();
 extern int cfgapi_auth_shm_token_table_refresh(); 
 
 // lookup by ip -> returns pointer IN the auth_ip_map
+extern int cfgapi_auth_shm_ip_table_refresh();
 extern IdentityInfo* cfgapi_ip_auth_get(std::string&);
 extern void cfgapi_ip_auth_remove(std::string&);
 extern void cfgapi_ip_auth_timeout_check(void);
