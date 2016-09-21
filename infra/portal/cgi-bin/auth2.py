@@ -25,6 +25,7 @@ import util
 import os
 import SOAPpy
 import traceback
+import logging
 
 print_exceptions = True
 
@@ -38,6 +39,18 @@ if "TENANT_IDX" in os.environ.keys():
 
 
 bend_url = "http://127.0.0.1:%d/" % (tenant_index+64000,)
+
+def create_logger(name):
+    ret = logging.getLogger(name)
+    hdlr = logging.FileHandler("/var/log/smithproxy_%s.log" % (name,))
+    formatter = logging.Formatter('%(asctime)s [%(process)d] [%(levelname)s] %(message)s')
+    hdlr.setFormatter(formatter)
+    ret.addHandler(hdlr) 
+    ret.setLevel(logging.INFO)
+    
+    return ret
+
+flog = create_logger("portal_auth2_%s" % (tenant_name,))
 
 def authenticate(username,password,token):
     global print_exceptions,bend_url
@@ -59,6 +72,7 @@ def authenticate(username,password,token):
                 xref = "/cgi-bin/auth.py?a=z&token=0"
         
             if success:
+                flog.info("User %s authentication successful from %s" % (username,ip))
                 xmsg = msg % ("successful! You will be now redirected to originally requested site",)
                 if token == 0:
                     xmsg = msg % ("successful! You will be redirected to your status page",)
@@ -70,6 +84,7 @@ def authenticate(username,password,token):
                                     redirect_time=0)
                     
             else:
+                flog.info("User %s authentication failed from %s" % (username,ip))
                 util.print_message(pagename % ("failed",),
                                 caption % ("failed",),
                                 msg % ("failed",),
@@ -84,6 +99,7 @@ def authenticate(username,password,token):
 
         
     except Exception,e:
+        flog.error("exception caught: %s" % (str(e),))
         if print_exceptions:
             util.print_message("Whoops!","Exception caught!",str(e) +" " + traceback.format_exc(100)) + " backend URL %s" % (bend_url,)
         else:
@@ -101,6 +117,8 @@ if "token" in form.keys():
   token = form["token"].value
 
 ip = os.environ["REMOTE_ADDR"]
+if(ip.startswith("::ffff:")):
+    ip = ip[7:]
 ref= os.environ["HTTP_REFERER"]
 
 authenticate(username,password,token)

@@ -25,6 +25,17 @@ import util
 import os
 import logging
 
+
+def create_logger(name):
+    ret = logging.getLogger(name)
+    hdlr = logging.FileHandler("/var/log/smithproxy_%s.log" % (name,))
+    formatter = logging.Formatter('%(asctime)s [%(process)d] [%(levelname)s] %(message)s')
+    hdlr.setFormatter(formatter)
+    ret.addHandler(hdlr) 
+    ret.setLevel(logging.INFO)
+    
+    return ret
+
 #	removed head:
 # 	<link rel=stylesheet type="text/css" href="/css/styles.css">	
 #	<script type="text/javascript" src="/js/keyboard.js" charset="UTF-8"></script>
@@ -51,6 +62,8 @@ tenant_index = 0
 if "TENANT_IDX" in os.environ.keys():
     tenant_index = int(os.environ["TENANT_IDX"])
 
+
+flog = create_logger("portal_auth1_%s" % (tenant_name,))
 
 token = "0"
 if "token" in form.keys():
@@ -224,6 +237,12 @@ try:
         
     if token != "0":
         tok_str = "&token="+str(token)
+        
+        flog.info("serving authentication page for IP %s, referer %s using token %s" % (ip,ref,token))
+        
+        if(ip.startswith("::ffff:")):
+            ip = ip[7:]
+        
         print   auth_page % (style,tok_str,str(port)+"-"+tenant_name+"-"+str(tenant_index))
     else:
         if ip:
