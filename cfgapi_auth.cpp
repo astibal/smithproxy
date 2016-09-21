@@ -11,6 +11,11 @@ unsigned int IdentityInfoType<ShmLogonType>::global_idle_timeout = 600;
 shared_ip_map auth_shm_ip_map;
 std::unordered_map<std::string,IdentityInfo> auth_ip_map;
 
+// IPv6 logon shm table and its map
+shared_ip6_map auth_shm_ip6_map;
+std::unordered_map<std::string,IdentityInfo6> auth_ip6_map;
+
+
 
 shared_table<shm_logon_token> auth_shm_token_map;
 
@@ -57,17 +62,22 @@ int cfgapi_auth_shm_ip_table_refresh()  {
         for(typename std::vector<shm_logon_info>::iterator i = auth_shm_ip_map.entries().begin(); i != auth_shm_ip_map.entries().end() ; ++i) {
             shm_logon_info& rt = (*i);
             
-            std::string ip = std::string(inet_ntoa(*(in_addr*)&rt.ip));
+            char b[64]; memset(b,0,64);
+            inet_ntop(AF_INET,&rt.ip,b,64);
+            
+            std::string ip = std::string(b);
             
             std::unordered_map <std::string, IdentityInfo >::iterator found = auth_ip_map.find(ip);
             if(found != auth_ip_map.end()) {
                 DIA_("Updating identity in database: %s",ip.c_str());
                 IdentityInfo& id = (*found).second;
+                id.ip_address = ip;
                 id.last_logon_info = rt;
                 id.username = rt.username;
                 id.update_groups_vec();
             } else {
                 IdentityInfo i;
+                i.ip_address = ip;
                 i.last_logon_info = rt;
                 i.username = rt.username;
                 i.update_groups_vec();

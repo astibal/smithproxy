@@ -18,6 +18,10 @@
 #define AUTH_IP_MEM_SIZE 64*1024*1024
 #define AUTH_IP_SEM_NAME "/smithproxy_auth_ok_%s.sem"
 
+#define AUTH_IP6_MEM_NAME "/smithproxy_auth6_ok_%s"
+#define AUTH_IP6_MEM_SIZE 64*1024*1024
+#define AUTH_IP6_SEM_NAME "/smithproxy_auth6_ok_%s.sem"
+
 
 #define AUTH_TOKEN_MEM_NAME "/smithproxy_auth_token_%s"
 #define AUTH_TOKEN_MEM_SIZE AUTH_IP_MEM_SIZE 
@@ -169,18 +173,19 @@ class shared_logoninfotype_ntoa_map : public shared_map<std::string,ShmLogonType
         char b[64];
         memset(b,0,64);
         
-        std::string ret;
-        
         if(AddressSize == 4) {
-            return std::string(inet_ntop(AF_INET,r->ip,b,64));
+            inet_ntop(AF_INET,r->ip,b,64);
+            return std::string(b);
         }
         else if(AddressSize == 16) {
-            return std::string(inet_ntop(AF_INET6,r->ip,b,64));
+            inet_ntop(AF_INET6,r->ip,b,64);
+            return std::string(b);
         }
     }
 };
 
 typedef shared_logoninfotype_ntoa_map<shm_logon_info,4> shared_ip_map;
+typedef shared_logoninfotype_ntoa_map<shm_logon_info6,16> shared_ip6_map;
 
 // refresh from shared memory
 extern int cfgapi_auth_shm_ip_table_refresh();
@@ -192,9 +197,13 @@ extern void cfgapi_ip_auth_remove(std::string&);
 extern void cfgapi_ip_auth_timeout_check(void);
 
 extern std::recursive_mutex cfgapi_identity_ip_lock;
+
 extern std::unordered_map<std::string,IdentityInfo> auth_ip_map;
-//extern shared_table<logon_info>  auth_shm_ip_map;
 extern shared_ip_map  auth_shm_ip_map;
+
+extern std::unordered_map<std::string,IdentityInfo6> auth_ip6_map;
+extern shared_ip6_map auth_shm_ip6_map;
+
 extern shared_table<shm_logon_token> auth_shm_token_map;
 
 // authentication token cache
