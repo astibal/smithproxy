@@ -57,7 +57,7 @@ protected:
     
     bool identity_resolved_ = false;    // meant if attempt has been done, regardless of it's result.
     bool identity_resolved_time = 0;
-    shm_logon_info* identity_ = nullptr;
+    shm_logon_info_base* identity_ = nullptr;
     
     std::vector<baseHostCX*> backends_;
     std::vector<ProfileContentRule>* content_rule_ = nullptr; //save some space and store it as a pointer. Init it only when needed and delete in dtor.
@@ -86,8 +86,8 @@ public:
     
     inline bool identity_resolved();
     inline void identity_resolved(bool b);
-    shm_logon_info* identity() { return identity_; }
-    inline void identity(shm_logon_info* i) { if(identity_ != nullptr) { delete identity_; }  if(i != nullptr) { identity_ = new shm_logon_info(*i); } }
+    shm_logon_info_base* identity() { return identity_; }
+    inline void identity(shm_logon_info_base* i) { if(identity_ != nullptr) { delete identity_; }  if(i != nullptr) { identity_ = i->clone(); } }
     bool resolve_identity(baseHostCX*,bool);
     bool update_auth_ip_map(baseHostCX*);
     bool apply_id_policies(baseHostCX* cx);

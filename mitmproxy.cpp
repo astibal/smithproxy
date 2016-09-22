@@ -222,7 +222,7 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
     
     cfgapi_identity_ip_lock.lock();
     auto ip = auth_ip_map.find(cx->host());
-    shm_logon_info* id_ptr = nullptr;
+    shm_logon_info_base* id_ptr = nullptr;
     
     if (ip != auth_ip_map.end()) {
         shm_logon_info& li = (*ip).second.last_logon_info;
@@ -755,20 +755,20 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
             }
             shm_logon_token tok = shm_logon_token(token_text.c_str());
             
-            INF_("MitmProxy::handle_replacement_auth: new auth token %s for request: %s",tok.token,cx->application_data->hr().c_str());
+            INF_("MitmProxy::handle_replacement_auth: new auth token %s for request: %s",tok.token().c_str(),cx->application_data->hr().c_str());
             
             if(cx->com()) {
                 if(cx->com()->l3_proto() == AF_INET) {
-                    repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + tok.token + redir_suf;
+                    repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + tok.token() + redir_suf;
                 } else if(cx->com()->l3_proto() == AF_INET6) {
-                    repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address6+":"+repl_port+"/cgi-bin/auth.py?token=" + tok.token + redir_suf;
+                    repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address6+":"+repl_port+"/cgi-bin/auth.py?token=" + tok.token() + redir_suf;
                 } 
             } 
             
             if(repl.size() == 0) {
                 // default to IPv4 address
                 INFS_("XXX: fallback to IPv4");
-                repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + tok.token + redir_suf;
+                repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + tok.token() + redir_suf;
             }
             
             cx->to_write((unsigned char*)repl.c_str(),repl.size());
@@ -782,7 +782,7 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
             auth_shm_token_map.release();
             
             INFS_("MitmProxy::handle_replacement_auth: token table updated");
-            cfgapi_identity_token_cache[cx->host()] = std::pair<unsigned int,std::string>(time(nullptr),tok.token);
+            cfgapi_identity_token_cache[cx->host()] = std::pair<unsigned int,std::string>(time(nullptr),tok.token());
         }
         
         cfgapi_identity_token_lock.unlock();

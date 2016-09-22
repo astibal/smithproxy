@@ -30,6 +30,7 @@
 #include <cstdlib>
 #include <ctime>
 
+#include <buffer.hpp>
 #include <shmtable.hpp>
 
 
@@ -56,53 +57,76 @@
 #define INFO_HR_OUT_SZ           256
 
 
+struct shm_logon_info_base {
+    
+    virtual std::string ip() = 0;
+    virtual std::string username() = 0;
+    virtual std::string groups() = 0;
+    
+    virtual shm_logon_info_base* clone() = 0;
+    
+    virtual ~shm_logon_info_base() {};
+};
+
 // structure exchanged with backend daemon
 template <int AddressSize>
-struct shm_logon_info_ {
-    char  ip_[AddressSize];
-    char  username_[LOGON_INFO_USERNAME_SZ];
-    char  groups_[LOGON_INFO_GROUPS_SZ];
+struct shm_logon_info_ : public shm_logon_info_base {
+
+    buffer buffer_;
+    virtual buffer* data() { return &buffer_; }
+    
+    virtual ~shm_logon_info_() {};
     
     shm_logon_info_() {
-        memset(ip_,0,AddressSize);
-        memset(username_,0,LOGON_INFO_USERNAME_SZ);
-        memset(groups_,0,LOGON_INFO_GROUPS_SZ);
-    }
-    shm_logon_info_(const char* i,const char* u,const char* g) {
-        memset(ip_,0,AddressSize);
-        memset(username_,0,LOGON_INFO_USERNAME_SZ);
-        memset(groups_,0,LOGON_INFO_GROUPS_SZ);
-        
-        if(AddressSize == 4) {
-            inet_pton(AF_INET,i,ip_);
-        }
-        else if (AddressSize == 16) {
-            inet_pton(AF_INET6,i,ip_);
-        }
-        strncpy(username_,u,LOGON_INFO_USERNAME_SZ-1);
-        strncpy(groups_,g,LOGON_INFO_GROUPS_SZ-1);
+        buffer_.size(AddressSize+LOGON_INFO_USERNAME_SZ+LOGON_INFO_GROUPS_SZ);
+        buffer_.fill(0);
     }
     
-    std::string ip() const {
+    int load(unsigned char* b) {
+        buffer_.assign(b,AddressSize+LOGON_INFO_USERNAME_SZ+LOGON_INFO_GROUPS_SZ);
+        return buffer_.size();
+    };
+    
+    shm_logon_info_(const char* i,const char* u,const char* g) {
+        buffer_.size(AddressSize+LOGON_INFO_USERNAME_SZ+LOGON_INFO_GROUPS_SZ);
+        buffer_.fill(0);
+        
+        if(AddressSize == 4) {
+            inet_pton(AF_INET,i,buffer_.data());
+        }
+        else if (AddressSize == 16) {
+            inet_pton(AF_INET6,i,buffer_.data());
+        }
+        strncpy((char*)&buffer_.data()[AddressSize],u,LOGON_INFO_USERNAME_SZ-1);
+        strncpy((char*)&buffer_.data()[AddressSize+LOGON_INFO_USERNAME_SZ],g,LOGON_INFO_GROUPS_SZ-1);
+    }
+    
+    virtual std::string ip()  {
         char b[64]; memset(b,0,64);
         
         if(AddressSize == 16) {
-            inet_ntop(AF_INET6,ip_,b,64);
+            inet_ntop(AF_INET6,buffer_.data(),b,64);
             return std::string(b);
         }
         
-        inet_ntop(AF_INET,ip_,b,64);
+        inet_ntop(AF_INET,buffer_.data(),b,64);
         return std::string(b);
     }
     
-    std::string username() const {
-        return std::string(username_);
+    virtual std::string username()  {
+        return std::string((const char*)&buffer_.data()[AddressSize]);
     }
     
-    std::string groups() const {
-        return std::string(groups_);
+    virtual std::string groups()  {
+        return std::string((const char*)&buffer_.data()[AddressSize+LOGON_INFO_USERNAME_SZ]);
     }
     
+    virtual shm_logon_info_base* clone()  {
+        shm_logon_info_* n =  new shm_logon_info_<AddressSize>(); //return a clone of this object
+        *n->data() = *data();
+        
+        return n;
+    }
 //     std::string hr() { 
 //         char out[INFO_HR_OUT_SZ]; memset(out,0,INFO_HR_OUT_SZ);
 //         snprintf(out,INFO_HR_OUT_SZ-1,"%s : %16s \t groups: %s\n",inet_ntoa(*(in_addr*)ip),username,groups); 
@@ -115,36 +139,41 @@ typedef shm_logon_info_<16> shm_logon_info6;
 
 // structure exchanged with backend daemon
 struct shm_logon_token {
-    char   token[64];
-    char   url[512];
+    
+    buffer buffer_;
+    virtual buffer* data() { return &buffer_; }
+    
+    std::string token() const { return std::string((const char*)buffer_.data()); };
+    std::string url() const { return std::string((const char*)&buffer_.data()[LOGON_TOKEN_TOKEN_SZ]);};
     
     shm_logon_token() {
-        memset(token,0,LOGON_TOKEN_TOKEN_SZ);
-        memset(url,0,LOGON_TOKEN_URL_SZ);
+        buffer_.size(LOGON_TOKEN_TOKEN_SZ+LOGON_TOKEN_URL_SZ);
+        buffer_.fill(0);
     }
     
     shm_logon_token(const char* u) {
-        memset(token,0,LOGON_TOKEN_TOKEN_SZ);
-        memset(url,0,LOGON_TOKEN_URL_SZ);
+        buffer_.size(LOGON_TOKEN_TOKEN_SZ+LOGON_TOKEN_URL_SZ);
+        buffer_.fill(0);
         
         std::srand(std::time(0));
         unsigned int r = std::rand();
-        snprintf(token,LOGON_TOKEN_TOKEN_SZ,"%d",r);
-        strncpy(url,u,LOGON_TOKEN_URL_SZ-1);
+        snprintf((char*)buffer_.data(),LOGON_TOKEN_TOKEN_SZ,"%d",r);
+        strncpy((char*)&buffer_.data()[LOGON_TOKEN_TOKEN_SZ],u,LOGON_TOKEN_URL_SZ-1);
     }
     
     shm_logon_token(const char* t, const char* u) {
-        memset(token,0,LOGON_TOKEN_TOKEN_SZ);
-        memset(url,0,LOGON_TOKEN_URL_SZ);
-        
-        strncpy(token,t,LOGON_TOKEN_TOKEN_SZ-1);
-        strncpy(url,u,LOGON_TOKEN_URL_SZ-1);
+        strncpy((char*)buffer_.data(),t,LOGON_TOKEN_TOKEN_SZ-1);
+        strncpy((char*)&buffer_.data()[LOGON_TOKEN_TOKEN_SZ],u,LOGON_TOKEN_URL_SZ-1);
     }
     
+    int load(unsigned char* b) {
+        buffer_.assign(b,LOGON_TOKEN_TOKEN_SZ+LOGON_TOKEN_URL_SZ);
+        
+        return buffer_.size();
+    };    
+    
     std::string hr() { 
-        char out[INFO_HR_OUT_SZ]; memset(out,0,INFO_HR_OUT_SZ);
-        snprintf(out,INFO_HR_OUT_SZ-1,"%s : %16s\n",token,url); 
-        return std::string(out);
+        return string_format("%s : %16s\n",token().c_str(),url().c_str());
     };
 }; 
  
