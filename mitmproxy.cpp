@@ -113,15 +113,36 @@ bool MitmProxy::identity_resolved() {
 
 
 bool MitmProxy::apply_id_policies(baseHostCX* cx) {
-    
-    cfgapi_identity_ip_lock.lock();
 
+
+    int af = AF_INET;
+    if(cx->com()) {
+        af = cx->com()->l3_proto();
+    }
+    std::string str_af = inet_family_str(af); 
     
+    if(af == AF_INET || af == 0) cfgapi_identity_ip_lock.lock();
+    if(af == AF_INET6) cfgapi_identity_ip6_lock.lock();    
+
+    // use common base pointer, so we can use all IdentityInfo types
+    IdentityInfoBase* id_ptr = nullptr;
     
-    IdentityInfo* idi = cfgapi_ip_auth_get(cx->host());
+    if(af == AF_INET || af == 0) {
+        auto ip = auth_ip_map.find(cx->host());
+        if (ip != auth_ip_map.end()) {
+            id_ptr = &(*ip).second;
+        }
+    }
+    else if(af == AF_INET6) {
+        auto ip = auth_ip6_map.find(cx->host());
+        if (ip != auth_ip6_map.end()) {
+            id_ptr = &(*ip).second;
+        }
+    }
+    
     ProfileSubAuth* final_profile = nullptr;
     
-    if( idi != nullptr) {
+    if( id_ptr != nullptr) {
         DIA_("apply_id_policies: matched policy: %d",matched_policy());        
         PolicyRule* policy = cfgapi_obj_policy.at(matched_policy());
         
@@ -135,7 +156,7 @@ bool MitmProxy::apply_id_policies(baseHostCX* cx) {
                 
                 DIA_("apply_id_policies: checking identity policy for: %s", sub_name.c_str());
                 
-                for(auto my_id: idi->groups_vec) {
+                for(auto my_id: id_ptr->groups_vec) {
                     DIA_("apply_id_policies: identity in policy: %s, match-test real user group '%s'",sub_prof->name.c_str(), my_id.c_str());
                     if(sub_prof->name == my_id) {
                         DIAS_("apply_id_policies: .. matched.");
@@ -189,11 +210,13 @@ bool MitmProxy::apply_id_policies(baseHostCX* cx) {
                             );
         }
         
-        cfgapi_identity_ip_lock.unlock();
+        if(af == AF_INET || af == 0) cfgapi_identity_ip_lock.lock();
+        if(af == AF_INET6) cfgapi_identity_ip6_lock.lock();  
         return (final_profile != nullptr);
     } 
-    
-    cfgapi_identity_ip_lock.unlock();
+
+    if(af == AF_INET || af == 0) cfgapi_identity_ip_lock.lock();
+    if(af == AF_INET6) cfgapi_identity_ip6_lock.lock();      
     return false;
 }
 
@@ -1364,7 +1387,6 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                             if (ip != auth_ip6_map.end()) {
                                 id_ptr = &(*ip).second;
                             }
-                            
                         }
                         
                         if(id_ptr != nullptr) {
