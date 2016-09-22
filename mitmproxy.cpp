@@ -1299,10 +1299,12 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                     time_t now = time(nullptr);
                     if(now > auth_table_refreshed + 5) {
                         cfgapi_auth_shm_ip_table_refresh();
+                        cfgapi_auth_shm_ip6_table_refresh();
                         auth_table_refreshed = now;
                         
                         //one day this can run in separate thread to not slow down session setup rate
                         cfgapi_ip_auth_timeout_check();
+                        cfgapi_ip6_auth_timeout_check();
                     }
                     
                     
@@ -1314,17 +1316,40 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                         }
                     } else {
                         bool bad_auth = true;
+
+                        // investigate L3 protocol
+                        int af = AF_INET;
+                        if(just_accepted_cx->com()) {
+                            af = just_accepted_cx->com()->l3_proto();
+                        }
+                        std::string str_af = inet_family_str(af);
                         
-                        cfgapi_identity_ip_lock.lock();    
-                        auto ip = auth_ip_map.find(just_accepted_cx->host());
                         
-                        if (ip != auth_ip_map.end()) {
-                            IdentityInfo& id = (*ip).second;
-                            std::string groups = id.last_logon_info.groups();
+                        cfgapi_identity_ip_lock.lock();
+                        
+                        // use common base pointer, so we can use all IdentityInfo types
+                        IdentityInfoBase* id_ptr = nullptr;
+                        
+                        if(af == AF_INET || af == 0) {
+                            auto ip = auth_ip_map.find(just_accepted_cx->host());
+                            if (ip != auth_ip_map.end()) {
+                                id_ptr = &(*ip).second;
+                            }
+                        }
+                        else if(af == AF_INET6) {
+                            auto ip = auth_ip6_map.find(just_accepted_cx->host());
+                            if (ip != auth_ip6_map.end()) {
+                                id_ptr = &(*ip).second;
+                            }
+                            
+                        }
+                        
+                        if(id_ptr != nullptr) {
+                            //std::string groups = id_ptr->last_logon_info.groups();
                             
                             if(cfgapi_obj_policy_profile_auth(policy_num) != nullptr)
                             for ( auto i: cfgapi_obj_policy_profile_auth(policy_num)->sub_policies) {
-                                for(auto x: id.groups_vec) {
+                                for(auto x: id_ptr->groups_vec) {
                                     DEB_("Connection identities: ip identity '%s' against policy '%s'",x.c_str(),i->name.c_str());
                                     if(x == i->name) {
                                         DIA_("Connection identities: ip identity '%s' matches policy '%s'",x.c_str(),i->name.c_str());
