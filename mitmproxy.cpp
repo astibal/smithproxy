@@ -207,7 +207,7 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
         }
     }
     
-    bool ret = false;
+    bool valid_ip_auth = false;
     
     DIA_("identity check: source IP: %s",cx->host().c_str());
     
@@ -231,9 +231,10 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
         DIA_("identity found for IP %s: user: %s groups: %s",cx->host().c_str(),id_ptr->username().c_str(), id_ptr->groups().c_str());
 
         // if update_auth_ip_map fails, identity is no longer valid!
-        ret = update_auth_ip_map(cx);
-        identity_resolved(ret);
-        if(ret) { 
+        valid_ip_auth = update_auth_ip_map(cx);
+        
+        identity_resolved(valid_ip_auth);
+        if(valid_ip_auth) { 
             identity(id_ptr);
         }
         
@@ -245,8 +246,8 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
     }
     
     cfgapi_identity_ip_lock.unlock();
-    DEB_("identity check: return %d",ret);
-    return ret;
+    DEB_("identity check: return %d",valid_ip_auth);
+    return valid_ip_auth;
 }
 
 
