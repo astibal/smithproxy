@@ -22,8 +22,8 @@
 #include <logger.hpp>
 
 std::recursive_mutex cfgapi_identity_ip6_lock;
-template <class ShmLogonType>
-unsigned int IdentityInfoType<ShmLogonType>::global_idle_timeout = 600;
+// template <class ShmLogonType>
+// unsigned int IdentityInfoType<ShmLogonType>::global_idle_timeout = 600;
 
 int cfgapi_auth_shm_ip6_table_refresh()  {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
@@ -63,16 +63,16 @@ int cfgapi_auth_shm_ip6_table_refresh()  {
             if(found != auth_ip6_map.end()) {
                 DIA_("Updating identity in database: %s",ip.c_str());
                 IdentityInfo6& id = (*found).second;
-                id.ip_address = ip;
+                id.ip = ip;
                 id.last_logon_info = rt;
                 id.username = rt.username();
-                id.update_groups_vec();
+                id.update();
             } else {
                 IdentityInfo6 i;
-                i.ip_address = ip;
+                i.ip = ip;
                 i.last_logon_info = rt;
                 i.username = rt.username();
-                i.update_groups_vec();
+                i.update();
                 auth_ip6_map[ip] = i;
                 INF_("New identity in database: ip: %s, username: %s, groups: %s ",ip.c_str(),i.username.c_str(),i.groups.c_str());
             }

@@ -22,8 +22,7 @@
 #include <cfgapi_auth.hpp>
 #include <logger.hpp>
 
-template <class ShmLogonType>
-unsigned int IdentityInfoType<ShmLogonType>::global_idle_timeout = 600;
+unsigned int IdentityInfoBase::global_idle_timeout = 600;
 
 
 // IPv4 logon shm table and its map
@@ -87,16 +86,16 @@ int cfgapi_auth_shm_ip_table_refresh()  {
             if(found != auth_ip_map.end()) {
                 DIA_("Updating identity in database: %s",ip.c_str());
                 IdentityInfo& id = (*found).second;
-                id.ip_address = ip;
+                id.ip = ip;
                 id.last_logon_info = rt;
                 id.username = rt.username();
-                id.update_groups_vec();
+                id.update();
             } else {
                 IdentityInfo i;
-                i.ip_address = ip;
+                i.ip = ip;
                 i.last_logon_info = rt;
                 i.username = rt.username();
-                i.update_groups_vec();
+                i.update();
                 auth_ip_map[ip] = i;
                 INF_("New identity in database: ip: %s, username: %s, groups: %s ",ip.c_str(),i.username.c_str(),i.groups.c_str());
             }

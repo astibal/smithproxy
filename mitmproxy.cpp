@@ -206,7 +206,12 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
     std::string str_af = inet_family_str(af);
     
     if(identity_resolved()) {
-        if(update_auth_ip_map(cx)) {
+        
+        bool update_status = false;
+        if(af == AF_INET || af == 0) update_status = update_auth_ip_map(cx);
+        if(af == AF_INET6) update_status = true; // FIXME=HIGH: do not mess atm
+        
+        if(update_status) {
             return true;
         } else {
             identity_resolved(false);
@@ -217,27 +222,47 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
     
     DIA_("identity check[%s]: source: %s",str_af.c_str(), cx->host().c_str());
     
-    cfgapi_auth_shm_ip_table_refresh();
-    DEB_("identity check[%s]: table size: %d",str_af.c_str(), auth_ip_map.size());
+    if(af == AF_INET) cfgapi_auth_shm_ip_table_refresh();
+    if(af == AF_INET6) cfgapi_auth_shm_ip6_table_refresh();
+    
     
     cfgapi_identity_ip_lock.lock();
-    auto ip = auth_ip_map.find(cx->host());
     shm_logon_info_base* id_ptr = nullptr;
     
-    if (ip != auth_ip_map.end()) {
-        shm_logon_info& li = (*ip).second.last_logon_info;
-        id_ptr = &li;
-    } else {
-        if (insert_guest == true) {
-            id_ptr = new shm_logon_info(cx->host().c_str(),"guest","");
+    if(af == AF_INET || af == 0) {
+        DEB_("identity check[%s]: table size: %d",str_af.c_str(), auth_ip_map.size());
+        auto ip = auth_ip_map.find(cx->host());
+        if (ip != auth_ip_map.end()) {
+            shm_logon_info& li = (*ip).second.last_logon_info;
+            id_ptr = &li;
+        } else {
+            if (insert_guest == true) {
+                id_ptr = new shm_logon_info(cx->host().c_str(),"guest","guest+guests+guests_ipv4");
+            }
         }
+    }
+    else if(af == AF_INET6) {
+        /* maintain in sync with previous if block */
+        DEB_("identity check[%s]: table size: %d",str_af.c_str(), auth_ip6_map.size());
+        auto ip = auth_ip6_map.find(cx->host());
+        if (ip != auth_ip6_map.end()) {
+            shm_logon_info6& li = (*ip).second.last_logon_info;
+            id_ptr = &li;
+        } else {
+            if (insert_guest == true) {
+                id_ptr = new shm_logon_info6(cx->host().c_str(),"guest","guest+guests+guests_ipv6");
+            }
+        }    
     }
 
     if(id_ptr != nullptr) {
         DIA_("identity found for %s %s: user: %s groups: %s",str_af.c_str(),cx->host().c_str(),id_ptr->username().c_str(), id_ptr->groups().c_str());
 
         // if update_auth_ip_map fails, identity is no longer valid!
-        valid_ip_auth = update_auth_ip_map(cx);
+        
+        if(af == AF_INET || af == 0) valid_ip_auth = update_auth_ip_map(cx);
+        if(af == AF_INET6) valid_ip_auth = true; // FIXME-HIGH: do not mess with IPv4 atm.
+            
         
         identity_resolved(valid_ip_auth);
         if(valid_ip_auth) { 

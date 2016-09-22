@@ -180,16 +180,19 @@ struct shm_logon_token {
 
 //structure kept in the smithproxy to track IP address identity and history
 
-template <class ShmLogonType>
-struct IdentityInfoType {
+
+
+struct IdentityInfoBase {
+   
     static unsigned int global_idle_timeout;
     
     unsigned int idle_timeout = 0;
 
     unsigned int created;
-    std::string  ip_address;
+    std::string  ip;
     std::string  username;
     std::string  groups;
+    
     std::vector<std::string> groups_vec;
     
     unsigned int rx_bytes = 0;
@@ -197,9 +200,8 @@ struct IdentityInfoType {
     
     unsigned int last_seen_at;
     unsigned int last_seen_policy;
-    ShmLogonType last_logon_info;
     
-    IdentityInfoType() {
+    IdentityInfoBase() {
         idle_timeout = global_idle_timeout; 
         created = time(nullptr);
         last_seen_at = created;
@@ -207,7 +209,16 @@ struct IdentityInfoType {
     
     inline void touch() { last_seen_at = time(nullptr); }
     inline bool i_timeout() { return ( (time(nullptr) - last_seen_at) > idle_timeout ); }
-    void update_groups_vec() {
+    virtual void update() {};
+};
+
+template <class ShmLogonType>
+struct IdentityInfoType : public IdentityInfoBase {
+    ShmLogonType last_logon_info;
+    
+    IdentityInfoType() : IdentityInfoBase() {}
+
+    virtual void update() {
         groups = last_logon_info.groups();
         groups_vec.clear();
         
@@ -228,7 +239,7 @@ struct IdentityInfoType {
                 break;
             }
         }
-    }
+    }    
 };
 
 typedef IdentityInfoType<shm_logon_info> IdentityInfo;
