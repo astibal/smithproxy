@@ -728,7 +728,6 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
                 
                 if(repl.size() == 0) {
                     // default to IPv4 address
-                    INFS_("XXX: fallback to IPv4");
                     repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + token_tk + redir_suf;
                 }
                 
