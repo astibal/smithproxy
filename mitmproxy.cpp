@@ -210,13 +210,13 @@ bool MitmProxy::apply_id_policies(baseHostCX* cx) {
                             );
         }
         
-        if(af == AF_INET || af == 0) cfgapi_identity_ip_lock.lock();
-        if(af == AF_INET6) cfgapi_identity_ip6_lock.lock();  
+        if(af == AF_INET || af == 0) cfgapi_identity_ip_lock.unlock();
+        if(af == AF_INET6) cfgapi_identity_ip6_lock.unlock();  
         return (final_profile != nullptr);
     } 
 
-    if(af == AF_INET || af == 0) cfgapi_identity_ip_lock.lock();
-    if(af == AF_INET6) cfgapi_identity_ip6_lock.lock();      
+    if(af == AF_INET || af == 0) cfgapi_identity_ip_lock.unlock();
+    if(af == AF_INET6) cfgapi_identity_ip6_lock.unlock();      
     return false;
 }
 
