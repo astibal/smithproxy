@@ -1296,7 +1296,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
         
         // connect it! - btw ... we don't want to block of course...
         
-        
+        target_cx->com()->l3_proto(just_accepted_cx->com()->l3_proto());
         just_accepted_cx->peer(target_cx);
         target_cx->peer(just_accepted_cx);          
 
@@ -1496,6 +1496,7 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
     std::string p;
     just_accepted_cx->name();
     just_accepted_cx->com()->resolve_socket_src(just_accepted_cx->socket(),&h,&p);
+    target_cx->com()->l3_proto(just_accepted_cx->com()->l3_proto());
     
     just_accepted_cx->peer(target_cx);
     target_cx->peer(just_accepted_cx);
