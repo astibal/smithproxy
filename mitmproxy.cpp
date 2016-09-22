@@ -200,7 +200,7 @@ bool MitmProxy::apply_id_policies(baseHostCX* cx) {
 bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
     
     if(identity_resolved()) {
-        if(update_identity(cx)) {
+        if(update_auth_ip_map(cx)) {
             return true;
         } else {
             identity_resolved(false);
@@ -230,8 +230,8 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
     if(id_ptr != nullptr) {
         DIA_("identity found for IP %s: user: %s groups: %s",cx->host().c_str(),id_ptr->username().c_str(), id_ptr->groups().c_str());
 
-        // if update_identity fails, identity is no longer valid!
-        ret = update_identity(cx);
+        // if update_auth_ip_map fails, identity is no longer valid!
+        ret = update_auth_ip_map(cx);
         identity_resolved(ret);
         if(ret) { 
             identity(id_ptr);
@@ -250,19 +250,19 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
 }
 
 
-bool MitmProxy::update_identity(baseHostCX* cx) {
+bool MitmProxy::update_auth_ip_map(baseHostCX* cx) {
 
     bool ret = false;
     
     cfgapi_identity_ip_lock.lock();    
     auto ip = auth_ip_map.find(cx->host());
 
-    DEB_("update_identity: start for %s",cx->host().c_str());
+    DEB_("update_auth_ip_map: start for %s",cx->host().c_str());
     
     if (ip != auth_ip_map.end()) {
         IdentityInfo& id = (*ip).second;
         
-        DIA_("updating identity: user %s from %s (groups: %s)",id.last_logon_info.username().c_str(), cx->host().c_str(), id.last_logon_info.groups().c_str());
+        DIA_("update_auth_ip_map: user %s from %s (groups: %s)",id.last_logon_info.username().c_str(), cx->host().c_str(), id.last_logon_info.groups().c_str());
 
         if (!id.i_timeout()) {
             id.touch();
