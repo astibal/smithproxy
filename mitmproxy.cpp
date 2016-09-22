@@ -199,6 +199,12 @@ bool MitmProxy::apply_id_policies(baseHostCX* cx) {
 
 bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
     
+    int af = AF_INET;
+    if(cx->com()) {
+        af = cx->com()->l3_proto();
+    }
+    std::string str_af = inet_family_str(af);
+    
     if(identity_resolved()) {
         if(update_auth_ip_map(cx)) {
             return true;
@@ -209,10 +215,10 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
     
     bool valid_ip_auth = false;
     
-    DIA_("identity check: source IP: %s",cx->host().c_str());
+    DIA_("identity check[%s]: source: %s",str_af.c_str(), cx->host().c_str());
     
     cfgapi_auth_shm_ip_table_refresh();
-    DEB_("identity check: table size: %d", auth_ip_map.size());
+    DEB_("identity check[%s]: table size: %d",str_af.c_str(), auth_ip_map.size());
     
     cfgapi_identity_ip_lock.lock();
     auto ip = auth_ip_map.find(cx->host());
@@ -228,7 +234,7 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
     }
 
     if(id_ptr != nullptr) {
-        DIA_("identity found for IP %s: user: %s groups: %s",cx->host().c_str(),id_ptr->username().c_str(), id_ptr->groups().c_str());
+        DIA_("identity found for %s %s: user: %s groups: %s",str_af.c_str(),cx->host().c_str(),id_ptr->username().c_str(), id_ptr->groups().c_str());
 
         // if update_auth_ip_map fails, identity is no longer valid!
         valid_ip_auth = update_auth_ip_map(cx);
@@ -241,12 +247,12 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
         // apply specific identity-based profile. 'li' is still valid, since we still hold the lock
         // get ptr to identity_info
 
-        DIA_("resolve_identity: about to call apply_id_policies, group: %s",id_ptr->groups().c_str());
+        DIA_("resolve_identity[%s]: about to call apply_id_policies, group: %s",str_af.c_str(), id_ptr->groups().c_str());
         apply_id_policies(cx);
     }
     
     cfgapi_identity_ip_lock.unlock();
-    DEB_("identity check: return %d",valid_ip_auth);
+    DEB_("identity check[%s]: return %d",str_af.c_str(), valid_ip_auth);
     return valid_ip_auth;
 }
 
