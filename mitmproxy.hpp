@@ -89,7 +89,7 @@ public:
     shm_logon_info_base* identity() { return identity_; }
     inline void identity(shm_logon_info_base* i) { if(identity_ != nullptr) { delete identity_; }  if(i != nullptr) { identity_ = i->clone(); } }
     bool resolve_identity(baseHostCX*,bool);
-    bool update_auth_ip_map(baseHostCX*);
+    bool update_auth_ipX_map(baseHostCX*);
     bool apply_id_policies(baseHostCX* cx);
     
     std::vector<baseHostCX*>& backends() { return backends_; };

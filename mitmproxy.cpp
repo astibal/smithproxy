@@ -208,8 +208,8 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
     if(identity_resolved()) {
         
         bool update_status = false;
-        if(af == AF_INET || af == 0) update_status = update_auth_ip_map(cx);
-        if(af == AF_INET6) update_status = true; // FIXME=HIGH: do not mess atm
+        if(af == AF_INET || af == 0) update_status = update_auth_ipX_map(cx);
+        if(af == AF_INET6) update_status = update_auth_ipX_map(cx); 
         
         if(update_status) {
             return true;
@@ -260,8 +260,8 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
 
         // if update_auth_ip_map fails, identity is no longer valid!
         
-        if(af == AF_INET || af == 0) valid_ip_auth = update_auth_ip_map(cx);
-        if(af == AF_INET6) valid_ip_auth = true; // FIXME-HIGH: do not mess with IPv4 atm.
+        if(af == AF_INET || af == 0) valid_ip_auth = update_auth_ipX_map(cx);
+        if(af == AF_INET6) valid_ip_auth = update_auth_ipX_map(cx);
             
         
         identity_resolved(valid_ip_auth);
@@ -282,32 +282,55 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
 }
 
 
-bool MitmProxy::update_auth_ip_map(baseHostCX* cx) {
+bool MitmProxy::update_auth_ipX_map(baseHostCX* cx) {
 
     bool ret = false;
     
-    cfgapi_identity_ip_lock.lock();    
-    auto ip = auth_ip_map.find(cx->host());
-
-    DEB_("update_auth_ip_map: start for %s",cx->host().c_str());
+    int af = AF_INET;
+    if(cx->com()) {
+        af = cx->com()->l3_proto();
+    }
+    std::string str_af = inet_family_str(af);    
     
-    if (ip != auth_ip_map.end()) {
-        IdentityInfo& id = (*ip).second;
-        
-        DIA_("update_auth_ip_map: user %s from %s (groups: %s)",id.last_logon_info.username().c_str(), cx->host().c_str(), id.last_logon_info.groups().c_str());
+    if(af == AF_INET || af == 0) cfgapi_identity_ip_lock.lock();
+    if(af == AF_INET6) cfgapi_identity_ip6_lock.lock();
 
-        if (!id.i_timeout()) {
-            id.touch();
+    DEB_("update_auth_ip_map: start for %s %s",str_af.c_str(), cx->host().c_str());
+    
+    IdentityInfoBase* id_ptr = nullptr;
+    
+    if(af == AF_INET || af == 0) {
+        auto ip = auth_ip_map.find(cx->host());
+        if (ip != auth_ip_map.end()) {
+            id_ptr = &(*ip).second;
+        }
+    }
+    else if(af == AF_INET6) {
+        auto ip = auth_ip6_map.find(cx->host());
+        if (ip != auth_ip6_map.end()) {
+            id_ptr = &(*ip).second;
+        }
+    }
+    
+    if(id_ptr != nullptr) {
+        DIA_("update_auth_ip_map: user %s from %s %s (groups: %s)",id_ptr->username.c_str(), str_af.c_str(), cx->host().c_str(), id_ptr->groups.c_str());
+
+        if (!id_ptr->i_timeout()) {
+            id_ptr->touch();
             ret = true;
         } else {
-            INF_("identity timeout: user %s from %s (groups: %s)",id.last_logon_info.username().c_str(), cx->host().c_str(), id.last_logon_info.groups().c_str());
+            INF_("identity timeout: user %s from %s %s (groups: %s)",id_ptr->username.c_str(), str_af.c_str(), cx->host().c_str(), id_ptr->groups.c_str());
             
             // erase internal ip map entry
-            cfgapi_ip_auth_remove(cx->host());
+            if(af == AF_INET || af == 0) cfgapi_ip_auth_remove(cx->host());
+            if(af == AF_INET6) cfgapi_ip6_auth_remove(cx->host());
         }
     }
 
-    cfgapi_identity_ip_lock.unlock();
+    if(af == AF_INET || af == 0) cfgapi_identity_ip_lock.unlock();
+    if(af == AF_INET6) cfgapi_identity_ip6_lock.unlock();
+    
+    DEB_("update_auth_ip_map: finished for %s %s, result %d",str_af.c_str(), cx->host().c_str(),ret);
     return ret;
 }
 
