@@ -56,32 +56,51 @@
 #define INFO_HR_OUT_SZ           256
 
 
-
 // structure exchanged with backend daemon
 template <int AddressSize>
 struct shm_logon_info_ {
-    char  ip[AddressSize];
-    char  username[LOGON_INFO_USERNAME_SZ];
-    char  groups[LOGON_INFO_GROUPS_SZ];
+    char  ip_[AddressSize];
+    char  username_[LOGON_INFO_USERNAME_SZ];
+    char  groups_[LOGON_INFO_GROUPS_SZ];
     
     shm_logon_info_() {
-        memset(ip,0,AddressSize);
-        memset(username,0,LOGON_INFO_USERNAME_SZ);
-        memset(groups,0,LOGON_INFO_GROUPS_SZ);
+        memset(ip_,0,AddressSize);
+        memset(username_,0,LOGON_INFO_USERNAME_SZ);
+        memset(groups_,0,LOGON_INFO_GROUPS_SZ);
     }
     shm_logon_info_(const char* i,const char* u,const char* g) {
-        memset(ip,0,AddressSize);
-        memset(username,0,LOGON_INFO_USERNAME_SZ);
-        memset(groups,0,LOGON_INFO_GROUPS_SZ);
+        memset(ip_,0,AddressSize);
+        memset(username_,0,LOGON_INFO_USERNAME_SZ);
+        memset(groups_,0,LOGON_INFO_GROUPS_SZ);
         
         if(AddressSize == 4) {
-            inet_pton(AF_INET,i,ip);
+            inet_pton(AF_INET,i,ip_);
         }
         else if (AddressSize == 16) {
-            inet_pton(AF_INET6,i,ip);
+            inet_pton(AF_INET6,i,ip_);
         }
-        strncpy(username,u,LOGON_INFO_USERNAME_SZ-1);
-        strncpy(groups,g,LOGON_INFO_GROUPS_SZ-1);
+        strncpy(username_,u,LOGON_INFO_USERNAME_SZ-1);
+        strncpy(groups_,g,LOGON_INFO_GROUPS_SZ-1);
+    }
+    
+    std::string ip() const {
+        char b[64]; memset(b,0,64);
+        
+        if(AddressSize == 16) {
+            inet_ntop(AF_INET6,ip_,b,64);
+            return std::string(b);
+        }
+        
+        inet_ntop(AF_INET,ip_,b,64);
+        return std::string(b);
+    }
+    
+    std::string username() const {
+        return std::string(username_);
+    }
+    
+    std::string groups() const {
+        return std::string(groups_);
     }
     
 //     std::string hr() { 
@@ -160,7 +179,7 @@ struct IdentityInfoType {
     inline void touch() { last_seen_at = time(nullptr); }
     inline bool i_timeout() { return ( (time(nullptr) - last_seen_at) > idle_timeout ); }
     void update_groups_vec() {
-        groups = last_logon_info.groups;
+        groups = last_logon_info.groups();
         groups_vec.clear();
         
         int pos = 0;
@@ -188,19 +207,7 @@ typedef IdentityInfoType<shm_logon_info6> IdentityInfo6;
 
 template<class ShmLogonType,int AddressSize>
 class shared_logoninfotype_ntoa_map : public shared_map<std::string,ShmLogonType> {
-    virtual std::string get_row_key(ShmLogonType* r) {
-        char b[64];
-        memset(b,0,64);
-        
-        if(AddressSize == 4) {
-            inet_ntop(AF_INET,r->ip,b,64);
-            return std::string(b);
-        }
-        else if(AddressSize == 16) {
-            inet_ntop(AF_INET6,r->ip,b,64);
-            return std::string(b);
-        }
-    }
+    virtual std::string get_row_key(ShmLogonType* r) { return r->ip(); }
 };
 
 typedef shared_logoninfotype_ntoa_map<shm_logon_info,4> shared_ip_map;
@@ -224,10 +231,10 @@ extern void cfgapi_ip6_auth_timeout_check(void);
 
 
 extern std::recursive_mutex cfgapi_identity_ip_lock;
-
 extern std::unordered_map<std::string,IdentityInfo> auth_ip_map;
 extern shared_ip_map  auth_shm_ip_map;
 
+extern std::recursive_mutex cfgapi_identity_ip6_lock;
 extern std::unordered_map<std::string,IdentityInfo6> auth_ip6_map;
 extern shared_ip6_map auth_shm_ip6_map;
 
