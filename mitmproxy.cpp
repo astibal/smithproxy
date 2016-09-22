@@ -90,6 +90,8 @@ MitmProxy::~MitmProxy() {
     }
     
     delete tlog_;
+    
+    if(identity_ != nullptr) { delete identity_; }
 }
 
 std::string MitmProxy::to_string(int verbosity) { 
@@ -214,36 +216,33 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
     
     cfgapi_identity_ip_lock.lock();
     auto ip = auth_ip_map.find(cx->host());
-
+    shm_logon_info* id_ptr = nullptr;
+    
     if (ip != auth_ip_map.end()) {
         shm_logon_info& li = (*ip).second.last_logon_info;
-        DIA_("identity found for IP %s: user: %s groups: %s",cx->host().c_str(),li.username().c_str(), li.groups().c_str());
+        id_ptr = &li;
+    } else {
+        if (insert_guest == true) {
+            id_ptr = new shm_logon_info(cx->host().c_str(),"guest","");
+        }
+    }
+
+    if(id_ptr != nullptr) {
+        DIA_("identity found for IP %s: user: %s groups: %s",cx->host().c_str(),id_ptr->username().c_str(), id_ptr->groups().c_str());
 
         // if update_identity fails, identity is no longer valid!
         ret = update_identity(cx);
         identity_resolved(ret);
         if(ret) { 
-            identity(li); 
+            identity(id_ptr);
         }
         
         // apply specific identity-based profile. 'li' is still valid, since we still hold the lock
         // get ptr to identity_info
 
-        DIA_("resolve_identity: about to call apply_id_policies, group: %s",li.groups().c_str());
+        DIA_("resolve_identity: about to call apply_id_policies, group: %s",id_ptr->groups().c_str());
         apply_id_policies(cx);
-
-    } else {
-        if (insert_guest == true) {
-            shm_logon_info li = shm_logon_info(cx->host().c_str(),"guest","");
-            
-            ret = update_identity(cx);
-            identity_resolved(ret);
-            if(ret) { 
-                identity(li); 
-            }
-        }
     }
-    
     
     cfgapi_identity_ip_lock.unlock();
     DEB_("identity check: return %d",ret);
@@ -616,7 +615,7 @@ void MitmProxy::on_left_error(baseHostCX* cx) {
     
     INF_("Connection from %s closed: user=%s up=%d/%dB dw=%d/%dB flags=%s+%s",
                         cx->full_name('L').c_str(),
-                                     (identity_resolved() ? identity().username().c_str() : ""),
+                                     (identity_resolved() ? identity()->username().c_str() : ""),
                                         cx->meter_read_count,cx->meter_read_bytes,
                                                             cx->meter_write_count, cx->meter_write_bytes,
                                                                         flags.c_str(),
@@ -661,7 +660,7 @@ void MitmProxy::on_right_error(baseHostCX* cx)
 
     INF_("Connection from %s closed: user=%s up=%d/%dB dw=%d/%dB flags=%s+%s",
                             cx->full_name('R').c_str(), 
-                                     (identity_resolved() ? identity().username().c_str() : ""),         
+                                     (identity_resolved() ? identity()->username().c_str() : ""),         
                                             cx->meter_write_count, cx->meter_write_bytes,
                                                             cx->meter_read_count,cx->meter_read_bytes,
                                                                     flags.c_str(),
