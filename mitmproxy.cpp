@@ -852,7 +852,7 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
             auth_shm_token_map.save(true);
             auth_shm_token_map.release();
             
-            INFS_("MitmProxy::handle_replacement_auth: token table updated");
+            DIAS_("MitmProxy::handle_replacement_auth: token table updated");
             cfgapi_identity_token_cache[cx->host()] = std::pair<unsigned int,std::string>(time(nullptr),tok.token());
         }
         
@@ -1497,6 +1497,8 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
     just_accepted_cx->name();
     just_accepted_cx->com()->resolve_socket_src(just_accepted_cx->socket(),&h,&p);
     target_cx->com()->l3_proto(just_accepted_cx->com()->l3_proto());
+    
+    //DEB_("UDP proxy: src l3 = %s dst l3 = %s",inet_family_str(just_accepted_cx->com()->l3_proto()).c_str(), inet_family_str(target_cx->com()->l3_proto()).c_str());
     
     just_accepted_cx->peer(target_cx);
     target_cx->peer(just_accepted_cx);
