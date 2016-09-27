@@ -993,6 +993,9 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
                 if(scom->verify_check(SSLCom::CLIENT_CERT_RQ)) {
                         block_additinal_info += "<p><b>Reason:</b></br>Target server asks for client certificate.<p>"; is_set = true;
                 }
+                if(scom->verify_check(SSLCom::REVOKED)) {
+                        block_additinal_info += "<p><b>Reason:</b></br>Target server is REVOKED. This is a serious issue.<p>"; is_set = true;
+                }                
                 
                 if(!is_set) {
                         block_additinal_info += string_format("<p><b>Reason:</b></br>Oops, no detailed problem description (code: 0x%04x)<p>",scom->verify_get());
