@@ -663,6 +663,8 @@ void MitmProxy::__debug_zero_connections(baseHostCX* cx) {
 
 void MitmProxy::on_left_error(baseHostCX* cx) {
 
+    if(cx == nullptr) return;
+    
     if(this->dead()) return;  // don't process errors twice
 
     
@@ -690,19 +692,28 @@ void MitmProxy::on_left_error(baseHostCX* cx) {
     std::string flags = "L";
     MitmHostCX* mh = dynamic_cast<MitmHostCX*>(cx);
     if (mh != nullptr && mh->inspection_verdict() == Inspector::CACHED) flags+="C";
-    
-    INF_("Connection from %s closed: user=%s up=%d/%dB dw=%d/%dB flags=%s+%s",
-                        cx->full_name('L').c_str(),
-                                     (identity_resolved() ? identity()->username().c_str() : ""),
-                                        cx->meter_read_count,cx->meter_read_bytes,
-                                                            cx->meter_write_count, cx->meter_write_bytes,
-                                                                        flags.c_str(),
-                                                                        com()->full_flags_str().c_str()
-        );
 
-    if(LEV_(DEB)) __debug_zero_connections(cx);
+    std::string detail = string_format("user=%s up=%d/%dB dw=%d/%dB flags=%s+%s",
+                                        (identity_resolved() ? identity()->username().c_str() : ""),
+                                            cx->meter_read_count,cx->meter_read_bytes,
+                                                                cx->meter_write_count, cx->meter_write_bytes,
+                                                                            flags.c_str(),
+                                                                            com()->full_flags_str().c_str()
+            );
     
-    this->dead(true); 
+    
+    if(cx->peer() && cx->peer()->writebuf()->size() == 0) {
+        std::string msg = string_format("Connection from %s closed: %s",cx->full_name('L').c_str(),detail.c_str());
+        INFS_(msg.c_str());
+        if(LEV_(DEB)) __debug_zero_connections(cx);
+        
+        this->dead(true); 
+    } else {
+        std::string msg = string_format("Connection from %s left half-closed: %s",cx->full_name('L').c_str(),detail.c_str());
+        INFS_(msg.c_str());
+        
+        // cannot set dead now, there are bytes pending
+    }
 }
 
 void MitmProxy::on_right_error(baseHostCX* cx)
@@ -736,18 +747,27 @@ void MitmProxy::on_right_error(baseHostCX* cx)
             comflags = mh_peer->com()->full_flags_str();
     }
 
-    INF_("Connection from %s closed: user=%s up=%d/%dB dw=%d/%dB flags=%s+%s",
-                            cx->full_name('R').c_str(), 
-                                     (identity_resolved() ? identity()->username().c_str() : ""),         
-                                            cx->meter_write_count, cx->meter_write_bytes,
-                                                            cx->meter_read_count,cx->meter_read_bytes,
-                                                                    flags.c_str(),
-                                                                    comflags.c_str()
-        );
-
-    if(LEV_(DEB)) __debug_zero_connections(cx);
+    std::string detail = string_format("user=%s up=%d/%dB dw=%d/%dB flags=%s+%s",
+                                        (identity_resolved() ? identity()->username().c_str() : ""),
+                                            cx->meter_read_count,cx->meter_read_bytes,
+                                                                cx->meter_write_count, cx->meter_write_bytes,
+                                                                            flags.c_str(),
+                                                                            com()->full_flags_str().c_str()
+            );
     
-    this->dead(true); 
+    
+    if(cx->peer() && cx->peer()->writebuf()->size() == 0) {
+        std::string msg = string_format("Connection from %s closed: %s",cx->full_name('R').c_str(),detail.c_str());
+        INFS_(msg.c_str());
+        if(LEV_(DEB)) __debug_zero_connections(cx);
+        
+        this->dead(true); 
+    } else {
+        std::string msg = string_format("Connection from %s right half-closed: %s",cx->full_name('R').c_str(),detail.c_str());
+        INFS_(msg.c_str());
+        
+        // cannot set dead now, there are bytes pending
+    } 
 }
 
 

@@ -102,7 +102,7 @@ class MitmHostCX : public AppHostCX, public socle::sobject {
 public:
     ApplicationData* application_data = nullptr;
     
-    virtual ~MitmHostCX() { delete application_data; for(auto i: inspectors_) { delete i; } };
+    virtual ~MitmHostCX() { if(application_data) { delete application_data; } ; for(auto i: inspectors_) { delete i; } };
     
     MitmHostCX(baseCom* c, const char* h, const char* p );
     MitmHostCX( baseCom* c, int s );
