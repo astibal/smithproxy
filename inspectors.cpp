@@ -383,6 +383,7 @@ bool DNS_Inspector::validate_response(DNS_Response* ptr) {
       
     } else {
         INF___("DNS_Inspector::validate_response: request 0x%x not found",id);
+        return true; // FIXME: for debug
     }
     
     return false;

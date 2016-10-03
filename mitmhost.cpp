@@ -309,8 +309,11 @@ void MitmHostCX::on_starttls() {
 
 
 
-    ((SSLCom*)peercom())->upgrade_client_socket(peer()->socket());
-    ((SSLCom*)com())->upgrade_server_socket(socket());
+    SSLCom* ptr;
+    ptr = dynamic_cast<SSLCom*>(peercom());
+    if (ptr != nullptr) ptr->upgrade_client_socket(peer()->socket());
+    ptr = dynamic_cast<SSLCom*>(com());
+    if (ptr != nullptr) ptr->upgrade_server_socket(socket());
 
     cfgapi_obj_policy_apply_tls(matched_policy(),com());
     cfgapi_obj_policy_apply_tls(matched_policy(),peercom());
