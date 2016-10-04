@@ -81,11 +81,13 @@ class MyPlainAcceptor : public theAcceptor {
 static theAcceptor* plain_proxy = nullptr;
 static theAcceptor* ssl_proxy = nullptr;
 static theReceiver* udp_proxy = nullptr;
+static theReceiver* dtls_proxy = nullptr;
 static socksAcceptor* socks_proxy = nullptr;
 
 
 std::thread* plain_thread = nullptr;
 std::thread* ssl_thread = nullptr;
+std::thread* dtls_thread = nullptr;
 std::thread* udp_thread = nullptr;
 std::thread* socks_thread = nullptr;
 std::thread* cli_thread = nullptr;
@@ -98,6 +100,7 @@ static int  args_debug_flag = NON;
 // static int   ssl_flag = 0;
 static std::string cfg_tcp_listen_port = "50080";
 static std::string cfg_ssl_listen_port = "50443";
+static std::string cfg_dtls_port = "50443";
 static std::string cfg_udp_port = "50080";
 static std::string cfg_socks_port = "1080";
 
@@ -113,6 +116,7 @@ volatile char crashlog_file[LOG_FILENAME_SZ];
 
 static int cfg_tcp_workers = 0;
 static int cfg_ssl_workers = 0;
+static int cfg_dtls_workers = 0;
 static int cfg_udp_workers = 0;
 static int cfg_socks_workers = 0;
 
@@ -192,6 +196,9 @@ void my_terminate (int param) {
     }
     if(ssl_proxy != nullptr) {
         ssl_proxy->dead(true);
+    }
+    if(dtls_proxy != nullptr) {
+        dtls_proxy->dead(true);
     }
     if(udp_proxy != nullptr) {
         udp_proxy->dead(true);
@@ -371,7 +378,8 @@ bool load_config(std::string& config_f, bool reload) {
         }
         
         cfgapi.getRoot()["debug"]["log"].lookupValue("sslcom",SSLCom::log_level_ref());
-        cfgapi.getRoot()["debug"]["log"].lookupValue("sslmitmcom",SSLMitmCom::log_level_ref());
+        cfgapi.getRoot()["debug"]["log"].lookupValue("sslmitmcom",baseSSLMitmCom<SSLCom>::log_level_ref());
+        cfgapi.getRoot()["debug"]["log"].lookupValue("sslmitmcom",baseSSLMitmCom<DTLSCom>::log_level_ref());
         cfgapi.getRoot()["debug"]["log"].lookupValue("sslcertstore",SSLCertStore::log_level_ref());
         cfgapi.getRoot()["debug"]["log"].lookupValue("proxy",baseProxy::log_level_ref());
         cfgapi.getRoot()["debug"]["log"].lookupValue("proxy",epoll::log_level);
@@ -449,6 +457,7 @@ bool apply_tenant_config() {
     if(cfg_tenant_index.size() > 0 && cfg_tenant_name.size() > 0) {
         ret += apply_index(cfg_tcp_listen_port,cfg_tenant_index);
         ret += apply_index(cfg_ssl_listen_port,cfg_tenant_index);
+        ret += apply_index(cfg_dtls_port,cfg_tenant_index);
         ret += apply_index(cfg_udp_port,cfg_tenant_index);
         ret += apply_index(cfg_socks_port,cfg_tenant_index);
         ret += apply_index(cfgapi_identity_portal_port_http,cfg_tenant_index);
@@ -626,17 +635,20 @@ int main(int argc, char *argv[]) {
     std::string friendly_thread_name_tcp = string_format("sxy_tcp_%d",cfgapi_tenant_index);
     std::string friendly_thread_name_udp = string_format("sxy_udp_%d",cfgapi_tenant_index);
     std::string friendly_thread_name_tls = string_format("sxy_tls_%d",cfgapi_tenant_index);
+    std::string friendly_thread_name_dls = string_format("sxy_dls_%d",cfgapi_tenant_index);
     std::string friendly_thread_name_skx = string_format("sxy_skx_%d",cfgapi_tenant_index);
     std::string friendly_thread_name_cli = string_format("sxy_cli_%d",cfgapi_tenant_index);
     std::string friendly_thread_name_own = string_format("sxy_own_%d",cfgapi_tenant_index);
 
     plain_proxy = prepare_listener<theAcceptor,TCPCom>(cfg_tcp_listen_port,"plain-text",50080,cfg_tcp_workers);
     ssl_proxy = prepare_listener<theAcceptor,MySSLMitmCom>(cfg_ssl_listen_port,"SSL",50443,cfg_ssl_workers);
+    dtls_proxy = prepare_listener<theReceiver,MyDTLSMitmCom>(cfg_dtls_port,"DTLS",50443,cfg_dtls_workers);
     udp_proxy = prepare_listener<theReceiver,UDPCom>(cfg_udp_port,"plain-udp",50080,cfg_udp_workers);
     socks_proxy = prepare_listener<socksAcceptor,socksTCPCom>(cfg_socks_port,"socks",1080,cfg_socks_workers);
     
     if( (plain_proxy == nullptr && cfg_tcp_workers >= 0) || 
-        (ssl_proxy == nullptr && cfg_ssl_workers >= 0)   || 
+        (ssl_proxy == nullptr && cfg_ssl_workers >= 0)   ||
+        (dtls_proxy == nullptr && cfg_dtls_workers >= 0)   || 
         (udp_proxy == nullptr && cfg_udp_workers >= 0 )  || 
         (socks_proxy == nullptr && cfg_socks_workers >= 0)    ) {
         
@@ -694,6 +706,20 @@ int main(int argc, char *argv[]) {
         pthread_setname_np(ssl_thread->native_handle(),friendly_thread_name_tls.c_str());
     }
 
+    if(dtls_proxy) {
+        INFS_("Starting DTLS listener");        
+        ssl_thread = new std::thread([] () { 
+            ignore_sigpipe();
+            daemon_set_limit_fd(0);
+            DIA_("smithproxy_tls: max file descriptors: %d",daemon_get_limit_fd());
+            
+            dtls_proxy->run(); 
+            DIAS_("dtls workers torn down."); 
+            dtls_proxy->shutdown();  
+        } );    
+        pthread_setname_np(ssl_thread->native_handle(),friendly_thread_name_dls.c_str());
+    }
+    
     if(udp_proxy) {
         INFS_("Starting UDP listener");        
         udp_thread = new std::thread([] () {

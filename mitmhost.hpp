@@ -36,12 +36,16 @@ public:
 };
 
 
-class MySSLMitmCom : public SSLMitmCom {
+class MySSLMitmCom : public baseSSLMitmCom<SSLCom> {
 public:
     virtual ~MySSLMitmCom() {};
 
     virtual baseCom* replicate();
     virtual bool spoof_cert(X509* x, SpoofOptions& spo);
+};
+
+class MyDTLSMitmCom : public baseSSLMitmCom<DTLSCom> {
+    virtual ~MyDTLSMitmCom() {};
 };
 
 

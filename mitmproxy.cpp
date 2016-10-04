@@ -1232,7 +1232,7 @@ baseHostCX* MitmMasterProxy::new_cx(int s) {
         if(! is_ssl) {
             c = com()->slave();
         } else {
-            c = new SSLMitmCom();
+            c = new baseSSLMitmCom<SSLCom>();
             c->master(com());
         } 
     }

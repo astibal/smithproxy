@@ -177,6 +177,7 @@ public:
     baseHostCX* new_cx(int s);
 };
 
+
 std::string whitelist_make_key(MitmHostCX*);
 
 #endif //MITMPROXY_HPP

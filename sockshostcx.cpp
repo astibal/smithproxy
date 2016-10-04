@@ -133,7 +133,7 @@ int socksServerCX::process_socks_request() {
                 case 636:
                 case 993:
                 case 995:
-                    new_com = new SSLMitmCom();
+                    new_com = new baseSSLMitmCom<SSLCom>();
                     handoff_as_ssl = true;
                     break;
                 default:
