@@ -52,6 +52,7 @@ Listener* prepare_listener(std::string& str_port,const char* friendly_name,int d
         delete s_p;
         return NULL;
     };
+    s_p->com()->unblock(s);
     
     return s_p;
 }
