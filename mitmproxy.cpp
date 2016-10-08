@@ -474,7 +474,18 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
                         redirected = true;
                         handle_replacement_ssl(mh);
                         
-                    } else {
+                    } 
+                    else if(scom->verify_check(SSLCom::CLIENT_CERT_RQ) && scom->opt_client_cert_action > 0) {
+                        //we should not block
+                        if(scom->opt_client_cert_action >= 2) {
+                            whitelist_verify.lock();
+                            
+                            whitelist_verify_entry v;
+                            whitelist_verify.set(key,new whitelist_verify_entry_t(v,scom->opt_failed_certcheck_override_timeout));
+                            whitelist_verify.unlock();
+                        }
+                    }
+                    else {
                         dead(true);
                     }
                 }
