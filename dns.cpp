@@ -31,10 +31,10 @@ const char* str_a = "A";
 const char* str_aaaa = "AAAA";
 const char* str_cname = "CNAME";
 
-dns_cache inspect_dns_cache("DNS cache - global",200,true);
+dns_cache inspect_dns_cache("DNS cache - global",2000,true);
 std::unordered_map<std::string,ptr_cache<std::string,DNS_Response>*> inspect_per_ip_dns_cache;
 
-domain_cache_t domain_cache("DNS 3l domain cache",500,true);
+domain_cache_t domain_cache("DNS 3l domain cache",2000,true);
 
 const char* dns_record_type_str(int a) {
     switch(a) {
