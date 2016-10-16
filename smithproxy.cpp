@@ -359,6 +359,14 @@ bool load_config(std::string& config_f, bool reload) {
         
         cfgapi.getRoot()["settings"].lookupValue("udp_port",cfg_udp_port);
         cfgapi.getRoot()["settings"].lookupValue("udp_workers",cfg_udp_workers);
+        
+        if(cfgapi.getRoot()["settings"].exists("udp_quick_ports")) {
+            int num = cfgapi.getRoot()["settings"]["udp_quick_ports"].getLength();
+            for(int i = 0; i < num; ++i) {
+                int port = cfgapi.getRoot()["settings"]["udp_quick_ports"][i];
+                cfgapi_obj_udp_quick_ports.push_back(port);
+            }
+        }
 
         cfgapi.getRoot()["settings"].lookupValue("socks_port",cfg_socks_port);
         cfgapi.getRoot()["settings"].lookupValue("socks_workers",cfg_socks_workers);
@@ -721,6 +729,9 @@ int main(int argc, char *argv[]) {
     }
     
     if(udp_proxy) {
+        
+        udp_proxy->set_quick_list(&cfgapi_obj_udp_quick_ports);
+        
         INFS_("Starting UDP listener");        
         udp_thread = new std::thread([] () {
             ignore_sigpipe();

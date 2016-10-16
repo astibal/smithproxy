@@ -57,6 +57,8 @@ extern std::map<std::string,ProfileTls*> cfgapi_obj_profile_tls;
 extern std::map<std::string,ProfileAuth*> cfgapi_obj_profile_auth;
 extern std::map<std::string,ProfileAlgDns*> cfgapi_obj_profile_alg_dns;
 
+extern std::vector<int> cfgapi_obj_udp_quick_ports;
+
 extern std::recursive_mutex cfgapi_write_lock;
 
 extern std::string cfgapi_tenant_name;
