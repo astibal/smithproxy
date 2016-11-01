@@ -129,6 +129,30 @@ int cli_diag_ssl_cache_list(struct cli_def *cli, const char *command, char *argv
     return CLI_OK;
 }
 
+int cli_diag_ssl_wl_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    
+    cli_print(cli,"\nSSL whitelist:");
+    std::string out;
+    
+    MitmProxy::whitelist_verify.lock();
+    for(auto we: MitmProxy::whitelist_verify.cache()) {
+        out += "\n\t" + we.first;
+    }
+    MitmProxy::whitelist_verify.unlock();
+    
+    cli_print(cli,"%s",out.c_str());
+    return CLI_OK;
+}
+
+int cli_diag_ssl_wl_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    
+    
+    MitmProxy::whitelist_verify.lock();
+    MitmProxy::whitelist_verify.clear();
+    MitmProxy::whitelist_verify.unlock();
+    return CLI_OK;
+}
+
 int cli_diag_dns_cache_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
     inspect_dns_cache.lock();
     
@@ -466,6 +490,7 @@ void client_thread(int client_socket) {
         struct cli_command *diag;
             struct cli_command *diag_ssl;
                 struct cli_command *diag_ssl_cache;
+                struct cli_command *diag_ssl_wl;
             struct cli_command *diag_mem;
                 struct cli_command *diag_mem_buffers;
                 struct cli_command *diag_mem_objects;
@@ -500,6 +525,9 @@ void client_thread(int client_socket) {
                 diag_ssl_cache = cli_register_command(cli, diag_ssl, "cache", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl certificate cache");
                         cli_register_command(cli, diag_ssl_cache, "stats", cli_diag_ssl_cache_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "display ssl cert cache statistics");
                         cli_register_command(cli, diag_ssl_cache, "list", cli_diag_ssl_cache_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all ssl cert cache entries");
+                diag_ssl_wl = cli_register_command(cli, diag_ssl, "whitelist", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl temporary verification whitelist");                        
+                        cli_register_command(cli, diag_ssl_wl, "list", cli_diag_ssl_wl_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all verification whitelist entries");
+                        cli_register_command(cli, diag_ssl_wl, "clear", cli_diag_ssl_wl_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clear all verification whitelist entries");
             diag_mem = cli_register_command(cli, diag, "mem", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory related troubleshooting commands");
                 diag_mem_buffers = cli_register_command(cli, diag_mem, "buffers", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory buffers troubleshooting commands");
                         cli_register_command(cli, diag_mem_buffers, "stats", cli_diag_mem_buffers_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory buffers statistics");

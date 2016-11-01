@@ -64,8 +64,9 @@ protected:
     
     int matched_policy_ = -1;
     
-    static ptr_cache<std::string,whitelist_verify_entry_t> whitelist_verify;
 public: 
+    static ptr_cache<std::string,whitelist_verify_entry_t> whitelist_verify;
+    
     bool opt_auth_authenticate = false;
     bool opt_auth_resolve = false;
     bool auth_block_identity = false;
