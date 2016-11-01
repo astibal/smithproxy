@@ -161,6 +161,30 @@ int cli_diag_dns_cache_stats(struct cli_def *cli, const char *command, char *arg
     return CLI_OK;
 }
 
+int cli_diag_dns_domain_cache_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    cli_print(cli, "\n Domain cache list:");
+    std::string out;
+    domain_cache.lock();
+    
+    for(auto sub_domain_cache: domain_cache.cache()) {
+        
+        std::string domain = sub_domain_cache.first;
+        std::string str;
+        
+        for(auto sub_e: sub_domain_cache.second->cache()) {
+           str += " " + sub_e.first;
+        }
+        out += string_format("\n\t%s: \t%s",domain.c_str(),str.c_str());
+        
+    }
+    
+    domain_cache.unlock();
+    cli_print(cli,"%s",out.c_str());
+    
+    return CLI_OK;
+}
+
+
 
 void cli_print_log_levels(struct cli_def *cli) {
     logger_profile* lp = lout.target_profiles()[(uint64_t)cli->client->_fileno];
@@ -447,6 +471,7 @@ void client_thread(int client_socket) {
                 struct cli_command *diag_mem_objects;
             struct cli_command *diag_dns;
                 struct cli_command *diag_dns_cache;
+                struct cli_command *diag_dns_domains;
             struct cli_command *diag_proxy;
                 struct cli_command *diag_proxy_session;
         
@@ -486,6 +511,8 @@ void client_thread(int client_socket) {
                 diag_dns_cache = cli_register_command(cli, diag_dns, "cache", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "DNS traffic cache troubleshooting commands");
                         cli_register_command(cli, diag_dns_cache, "list", cli_diag_dns_cache_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all DNS traffic cache entries");
                         cli_register_command(cli, diag_dns_cache, "stats", cli_diag_dns_cache_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "DNS traffic cache statistics");
+                diag_dns_domains = cli_register_command(cli, diag_dns, "domain", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "DNS domain cache troubleshooting commands");
+                        cli_register_command(cli, diag_dns_domains, "list", cli_diag_dns_domain_cache_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "DNS sub-domain list");
             diag_proxy = cli_register_command(cli, diag, "proxy",NULL, PRIVILEGE_PRIVILEGED, MODE_EXEC, "proxy related troubleshooting commands");
                 diag_proxy_session = cli_register_command(cli,diag_proxy,"session",NULL,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session commands");
                         cli_register_command(cli, diag_proxy_session,"list",cli_diag_proxy_session_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session list");
