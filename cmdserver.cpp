@@ -219,7 +219,7 @@ int cli_diag_identity_ip_list(struct cli_def *cli, const char *command, char *ar
         std::string s;
         IdentityInfo& id = ip.second;
         
-        s +=   "    ipv4: " + ip.first + ", user: " + id.username + ", groups: " + id.groups + ", rx/tx: " + number_suffixed(id.rx_bytes) + "/" + number_suffixed(id.tx_bytes);
+        s +=   "    ipv4: " + ip.first + ", user: " + id.username + ", groups: " + id.groups + ", rx/tx: " + number_suffixed(id.tx_bytes) + "/" + number_suffixed(id.rx_bytes);
         s += "\n          uptime: " + std::to_string(id.uptime()) + ", idle: " + std::to_string(id.i_time());
         s += "\n          status: " + std::to_string(!id.i_timeout()) + ", last policy: " + std::to_string(id.last_seen_policy);
         out += s;
@@ -238,7 +238,7 @@ int cli_diag_identity_ip_list(struct cli_def *cli, const char *command, char *ar
         std::string s;
         IdentityInfo6& id = ip.second;
         
-        s +=   "    ipv6: " + ip.first + ", user: " + id.username + ", groups: " + id.groups + ", rx/tx: " + number_suffixed(id.rx_bytes) + "/" + number_suffixed(id.tx_bytes);
+        s +=   "    ipv6: " + ip.first + ", user: " + id.username + ", groups: " + id.groups + ", rx/tx: " + number_suffixed(id.tx_bytes) + "/" + number_suffixed(id.rx_bytes);
         s += "\n          uptime: " + std::to_string(id.uptime()) + ", idle: " + std::to_string(id.i_time());        
         s += "\n          status: " + std::to_string(!id.i_timeout()) + ", last policy: " + std::to_string(id.last_seen_policy);
         out += s;
