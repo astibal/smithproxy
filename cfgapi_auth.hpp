@@ -208,7 +208,9 @@ struct IdentityInfoBase {
     }
     
     inline void touch() { last_seen_at = time(nullptr); }
-    inline bool i_timeout() { return ( (time(nullptr) - last_seen_at) > idle_timeout ); }
+    inline bool i_timeout() const { return ( (time(nullptr) - last_seen_at) > idle_timeout ); }
+    inline int i_time() const { return time(nullptr) - last_seen_at; }
+    inline int uptime() const { return time(nullptr) - created; }
     virtual void update() {};
 };
 
@@ -259,15 +261,21 @@ extern int cfgapi_auth_shm_token_table_refresh();
 // lookup by ip -> returns pointer IN the auth_ip_map
 extern int cfgapi_auth_shm_ip_table_refresh();
 extern IdentityInfo* cfgapi_ip_auth_get(std::string&);
+extern bool  cfgapi_ip_auth_inc_counters(std::string& host, unsigned int rx, unsigned int tx);
 extern void cfgapi_ip_auth_remove(std::string&);
 extern void cfgapi_ip_auth_timeout_check(void);
 
 // lookup by ip -> returns pointer IN the auth_ip_map
 extern int cfgapi_auth_shm_ip6_table_refresh();
 extern IdentityInfo6* cfgapi_ip6_auth_get(std::string&);
+extern bool  cfgapi_ip6_auth_inc_counters(std::string& host, unsigned int rx, unsigned int tx);
 extern void cfgapi_ip6_auth_remove(std::string&);
 extern void cfgapi_ip6_auth_timeout_check(void);
 
+
+class baseHostCX;
+bool cfgapi_ipX_auth_inc_counters(baseHostCX* cx, unsigned int rx, unsigned int tx);
+bool cfgapi_ipX_auth_inc_counters(baseHostCX* cx);
 
 
 extern std::recursive_mutex cfgapi_identity_ip_lock;

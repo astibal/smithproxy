@@ -338,6 +338,8 @@ bool MitmProxy::update_auth_ipX_map(baseHostCX* cx) {
     if(id_ptr != nullptr) {
         DIA_("update_auth_ip_map: user %s from %s %s (groups: %s)",id_ptr->username.c_str(), str_af.c_str(), cx->host().c_str(), id_ptr->groups.c_str());
 
+        id_ptr->last_seen_policy = matched_policy();
+        
         if (!id_ptr->i_timeout()) {
             id_ptr->touch();
             ret = true;
@@ -712,7 +714,6 @@ void MitmProxy::on_left_error(baseHostCX* cx) {
                                                                             com()->full_flags_str().c_str()
             );
     
-    
     if(cx->peer() && cx->peer()->writebuf()->size() == 0) {
         std::string msg = string_format("Connection from %s closed: %s",cx->full_name('L').c_str(),detail.c_str());
         INFS_(msg.c_str());
@@ -724,6 +725,10 @@ void MitmProxy::on_left_error(baseHostCX* cx) {
         INFS_(msg.c_str());
         
         // cannot set dead now, there are bytes pending
+    }
+    
+    if(cx) {
+        cfgapi_ipX_auth_inc_counters(cx);
     }
 }
 
@@ -779,6 +784,10 @@ void MitmProxy::on_right_error(baseHostCX* cx)
         
         // cannot set dead now, there are bytes pending
     } 
+    
+    if(cx->peer()) {
+        cfgapi_ipX_auth_inc_counters(cx->peer());        
+    }
 }
 
 

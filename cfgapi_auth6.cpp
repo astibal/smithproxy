@@ -101,6 +101,25 @@ IdentityInfo6* cfgapi_ip6_auth_get(std::string& host) {
    
 }
 
+
+bool  cfgapi_ip6_auth_inc_counters(std::string& host, unsigned int rx, unsigned int tx) {
+    bool ret = false;
+    
+    cfgapi_identity_ip6_lock.lock();    
+    auto ip = auth_ip6_map.find(host);
+
+    if (ip != auth_ip6_map.end()) {
+        IdentityInfo6& id = (*ip).second;
+        id.rx_bytes += rx;
+        id.tx_bytes += tx;
+        ret = true;
+    }
+    
+    cfgapi_identity_ip6_lock.unlock();
+    
+    return ret;
+}
+
 // remove IP from AUTH IP MAP and synchronize with SHM AUTH IP TABLE (table which is used to communicate with bend daemon)
 void cfgapi_ip6_auth_remove(std::string& host) {
 

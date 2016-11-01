@@ -154,6 +154,26 @@ IdentityInfo* cfgapi_ip_auth_get(std::string& host) {
 }
 
 
+bool  cfgapi_ip_auth_inc_counters(std::string& host, unsigned int rx, unsigned int tx) {
+    bool ret = false;
+    
+    cfgapi_identity_ip_lock.lock();    
+    auto ip = auth_ip_map.find(host);
+
+    if (ip != auth_ip_map.end()) {
+        IdentityInfo& id = (*ip).second;
+        id.rx_bytes += rx;
+        id.tx_bytes += tx;
+        ret = true;
+    }
+    
+    cfgapi_identity_ip_lock.unlock();
+    
+    return ret;
+}
+
+
+
 // remove IP from AUTH IP MAP and synchronize with SHM AUTH IP TABLE (table which is used to communicate with bend daemon)
 void cfgapi_ip_auth_remove(std::string& host) {
 
@@ -221,4 +241,26 @@ void cfgapi_ip_auth_timeout_check(void) {
     }
     
     cfgapi_identity_ip_lock.unlock();
+}
+
+
+bool cfgapi_ipX_auth_inc_counters(baseHostCX* cx, unsigned int rx, unsigned int tx) {
+    if(cx && cx->com()) {
+        if(cx->com()->l3_proto() == AF_INET6) {
+            return cfgapi_ip6_auth_inc_counters(cx->host(),rx,tx);
+        } else
+        if(cx->com()->l3_proto() == AF_INET || cx->com()->l3_proto() == 0)  {
+            return cfgapi_ip_auth_inc_counters(cx->host(),rx,tx);
+        }
+    }
+    
+    return false;
+}
+
+bool cfgapi_ipX_auth_inc_counters(baseHostCX* cx) {
+    if(cx) {
+        return cfgapi_ipX_auth_inc_counters(cx,cx->meter_read_bytes,cx->meter_write_bytes);
+    }
+    
+    return false;
 }

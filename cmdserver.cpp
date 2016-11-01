@@ -209,6 +209,46 @@ int cli_diag_dns_domain_cache_list(struct cli_def *cli, const char *command, cha
 }
 
 
+int cli_diag_identity_ip_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    
+    cli_print(cli, "\nIPv4 identities:");
+    std::string out;
+    
+    cfgapi_identity_ip_lock.lock();
+    for (auto ip: auth_ip_map) {
+        std::string s;
+        IdentityInfo& id = ip.second;
+        
+        s +=   "    ipv4: " + ip.first + ", user: " + id.username + ", groups: " + id.groups + ", rx/tx: " + number_suffixed(id.rx_bytes) + "/" + number_suffixed(id.tx_bytes);
+        s += "\n          uptime: " + std::to_string(id.uptime()) + ", idle: " + std::to_string(id.i_time());
+        s += "\n          status: " + std::to_string(!id.i_timeout()) + ", last policy: " + std::to_string(id.last_seen_policy);
+        out += s;
+    }
+    cfgapi_identity_ip_lock.unlock();
+    cli_print(cli, "%s", out.c_str());
+    
+
+    out.clear();
+    
+    cli_print(cli, "\nIPv6 identities:");
+    
+
+    cfgapi_identity_ip6_lock.lock();
+    for (auto ip: auth_ip6_map) {
+        std::string s;
+        IdentityInfo6& id = ip.second;
+        
+        s +=   "    ipv6: " + ip.first + ", user: " + id.username + ", groups: " + id.groups + ", rx/tx: " + number_suffixed(id.rx_bytes) + "/" + number_suffixed(id.tx_bytes);
+        s += "\n          uptime: " + std::to_string(id.uptime()) + ", idle: " + std::to_string(id.i_time());        
+        s += "\n          status: " + std::to_string(!id.i_timeout()) + ", last policy: " + std::to_string(id.last_seen_policy);
+        out += s;
+    }
+    cfgapi_identity_ip6_lock.unlock();
+    cli_print(cli, "%s", out.c_str());    
+    
+    return CLI_OK;
+}
+
 
 void cli_print_log_levels(struct cli_def *cli) {
     logger_profile* lp = lout.target_profiles()[(uint64_t)cli->client->_fileno];
@@ -499,6 +539,8 @@ void client_thread(int client_socket) {
                 struct cli_command *diag_dns_domains;
             struct cli_command *diag_proxy;
                 struct cli_command *diag_proxy_session;
+            struct cli_command *diag_identity;
+                struct cli_command *diag_identity_user;
         
         struct cli_def *cli;
         
@@ -545,7 +587,11 @@ void client_thread(int client_socket) {
                 diag_proxy_session = cli_register_command(cli,diag_proxy,"session",NULL,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session commands");
                         cli_register_command(cli, diag_proxy_session,"list",cli_diag_proxy_session_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session list");
                         cli_register_command(cli, diag_proxy_session,"clear",cli_diag_proxy_session_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session clear");
-            
+            diag_identity = cli_register_command(cli,diag,"identity",NULL,PRIVILEGE_PRIVILEGED, MODE_EXEC,"identity related commands");
+                diag_identity_user = cli_register_command(cli, diag_identity,"user",NULL, PRIVILEGE_PRIVILEGED, MODE_EXEC,"identity commands related to users");
+                        cli_register_command(cli, diag_identity_user,"list",cli_diag_identity_ip_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"list all known users");
+                        
+                        
         debuk = cli_register_command(cli, NULL, "debug", NULL, PRIVILEGE_PRIVILEGED, MODE_EXEC, "diagnostic commands");
             cli_register_command(cli, debuk, "term", cli_debug_terminal, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set level of logging to this terminal");
             cli_register_command(cli, debuk, "file", cli_debug_logfile, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set level of logging of standard log file");
