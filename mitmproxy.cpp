@@ -721,9 +721,13 @@ void MitmProxy::on_left_error(baseHostCX* cx) {
         
         this->dead(true); 
     } else {
-        std::string msg = string_format("Connection from %s left half-closed: %s",cx->full_name('L').c_str(),detail.c_str());
-        INFS_(msg.c_str());
         
+        if(!_half_closed_log) {
+            std::string msg = string_format("Connection from %s left half-closed: %s",cx->full_name('L').c_str(),detail.c_str());
+            INFS_(msg.c_str());
+            
+            _half_closed_log = true;
+        }
         // cannot set dead now, there are bytes pending
     }
     
@@ -779,9 +783,13 @@ void MitmProxy::on_right_error(baseHostCX* cx)
         
         this->dead(true); 
     } else {
-        std::string msg = string_format("Connection from %s right half-closed: %s",cx->full_name('R').c_str(),detail.c_str());
-        INFS_(msg.c_str());
         
+        if(!_half_closed_log) {
+            std::string msg = string_format("Connection from %s right half-closed: %s",cx->full_name('R').c_str(),detail.c_str());
+            INFS_(msg.c_str());
+            
+            _half_closed_log = true;
+        }
         // cannot set dead now, there are bytes pending
     } 
     

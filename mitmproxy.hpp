@@ -63,6 +63,7 @@ protected:
     std::vector<ProfileContentRule>* content_rule_ = nullptr; //save some space and store it as a pointer. Init it only when needed and delete in dtor.
     
     int matched_policy_ = -1;
+    bool _half_closed_log = false;
     
 public: 
     static ptr_cache<std::string,whitelist_verify_entry_t> whitelist_verify;
