@@ -1,6 +1,29 @@
-#!/bin/sh
+#!/bin/bash
+num_re='^[0-9]+'
 DEFAULT_PORT="50000"
+
 PORT=`cat /etc/smithproxy/smithproxy.cfg | grep 'cli \+= *{\|port *=' | grep 'cli \+= *{' -A1 | grep port | awk -F= '{ print $2 }' |  grep -o '[0-9]\+'`
+
+if [ -f /etc/smithproxy/smithproxy.tenants.cfg ]; then
+
+    if [ "$1" != "" ]; then
+        PORT_INDEX=`cat /etc/smithproxy/smithproxy.tenants.cfg | grep -v '^ *#' | grep "; *$1 *;" | awk -F";" '{ print $1 }' `
+        PORT=`expr $PORT + $PORT_INDEX`
+        
+        echo "port: $PORT"
+        
+        if ! [[ $PORT =~ $num_re ]] ; then
+            echo "Cannot determine tenant port!" >&2; exit 1
+        fi
+        
+    else
+        echo "Specify one of tenant names as the argument: "
+        cat /etc/smithproxy/smithproxy.tenants.cfg | grep -v '^ *#' | awk -F";" '{ print $2 }'
+        echo
+        echo
+        exit
+    fi
+fi
 
 if [ "$PORT" != "" ]; then
    telnet localhost $PORT
