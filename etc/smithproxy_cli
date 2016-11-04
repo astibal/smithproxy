@@ -1,5 +1,5 @@
 #!/bin/bash
-num_re='^[0-9]+'
+num_re='^[0-9]+$'
 DEFAULT_PORT="50000"
 
 PORT=`cat /etc/smithproxy/smithproxy.cfg | grep 'cli \+= *{\|port *=' | grep 'cli \+= *{' -A1 | grep port | awk -F= '{ print $2 }' |  grep -o '[0-9]\+'`
