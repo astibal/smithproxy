@@ -107,7 +107,7 @@ public:
     bool opt_randomize_id = false;
     bool opt_cached_responses = false;
     
-    DNS_Request* find_request(unsigned int r) { auto it = requests_.find(r); if(it == requests_.end()) { return nullptr; } else { return it->second; }  }
+    DNS_Request* find_request(uint16_t r) { auto it = requests_.find(r); if(it == requests_.end()) { return nullptr; } else { return it->second; }  }
     bool validate_response(DNS_Response* ptr);
     bool store(DNS_Response* ptr);
     virtual void apply_verdict(AppHostCX* cx);
@@ -123,7 +123,7 @@ private:
     std::vector<int> cached_response_ttl_idx;
     uint32_t cached_response_decrement = 0;
 
-    std::unordered_map<unsigned int,DNS_Request*>  requests_;
+    std::unordered_map<uint16_t,DNS_Request*>  requests_;
     int responses_ = 0;
     bool stored_ = false;
 

@@ -156,16 +156,24 @@ void DNS_Inspector::update(AppHostCX* cx) {
                 buffer cur_buf = buf.view(red,buf.size()-red);
                 int cur_red = ptr->load(&cur_buf);
                 
+                DEB___("DNS_Inspector::update[%s]: red  %d, load returned %d", cx->c_name(), red, cur_red);
+                DEB___("DNS_Inspector::update[%s]: flow: %s", cx->c_name(), cx->flow().hr().c_str());
+                
                 // on success write to requests_
                 if(cur_red >= 0) {
-                    red = cur_red;
+                    red += cur_red;
                     
-                    DIA___("DNS_Inspector::update[%s]: adding key 0x%x red=%d, buffer_size=%d",cx->c_name(),ptr->id(),red,cur_buf.size());
                     if(requests_[ptr->id()] != nullptr) {
                         INF___("DNS_Inspector::update[%s]: detected re-sent request",cx->c_name());
                         delete requests_[ptr->id()];
+                        requests_.erase(ptr->id());
                     }
+                    
+                    DIA___("DNS_Inspector::update[%s]: adding key 0x%x red=%d, buffer_size=%d, ptr=0x%x",cx->c_name(),ptr->id(),red,cur_buf.size(),ptr);
                     requests_[ptr->id()] = (DNS_Request*)ptr;
+                    
+                    DEB___("DNS_Inspector::update[%s]: this 0x%x, requests size %d",cx->c_name(),this, requests_.size());
+                    
                     cx->idle_delay(30);
                 } else {
                     red = 0;
@@ -382,8 +390,9 @@ bool DNS_Inspector::validate_response(DNS_Response* ptr) {
         return true;
       
     } else {
-        INF___("DNS_Inspector::validate_response: request 0x%x not found",id);
-        return true; // FIXME: for debug
+        DIA___("DNS_Inspector::validate_response: request 0x%x not found",id);
+        ERR___("validating DNS response for %s failed.",ptr->to_string().c_str());
+        return false; // FIXME: for debug
     }
     
     return false;
