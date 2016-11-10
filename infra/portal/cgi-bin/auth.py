@@ -262,5 +262,5 @@ try:
 
 except Exception, e:
     util.print_message("Error","Error occured:", str(e),"/error.html")
-    logging.error("auth.py: exception caught: " + str(e))
+    flog.error("auth.py: exception caught: " + str(e))
 
