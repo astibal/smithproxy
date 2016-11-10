@@ -359,6 +359,9 @@ bool load_config(std::string& config_f, bool reload) {
         
         cfgapi.getRoot()["settings"].lookupValue("udp_port",cfg_udp_port);
         cfgapi.getRoot()["settings"].lookupValue("udp_workers",cfg_udp_workers);
+
+        cfgapi.getRoot()["settings"].lookupValue("dtls_port",cfg_dtls_port);
+        cfgapi.getRoot()["settings"].lookupValue("dtls_workers",cfg_dtls_workers);
         
         if(cfgapi.getRoot()["settings"].exists("udp_quick_ports")) {
             int num = cfgapi.getRoot()["settings"]["udp_quick_ports"].getLength();
