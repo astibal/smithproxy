@@ -378,8 +378,8 @@ bool load_config(std::string& config_f, bool reload) {
         cfgapi.getRoot()["debug"].lookupValue("log_data_crc",baseCom::debug_log_data_crc);
         cfgapi.getRoot()["debug"].lookupValue("log_sockets",baseHostCX::socket_in_name);
         cfgapi.getRoot()["debug"].lookupValue("log_online_cx_name",baseHostCX::online_name);
-        cfgapi.getRoot()["debug"].lookupValue("log_srclines",lout.print_srcline());
-        cfgapi.getRoot()["debug"].lookupValue("log_srclines_always",lout.print_srcline_always());
+        cfgapi.getRoot()["debug"].lookupValue("log_srclines",get_logger()->print_srcline());
+        cfgapi.getRoot()["debug"].lookupValue("log_srclines_always",get_logger()->print_srcline_always());
         
         if(cfgapi.getRoot().exists("settings")) {
             cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("magic_ip",cfgapi_tenant_magic_ip);
@@ -417,18 +417,18 @@ bool load_config(std::string& config_f, bool reload) {
                 strncpy((char*)crashlog_file,crlog.c_str(),LOG_FILENAME_SZ-1);
                 
                 std::ofstream * o = new std::ofstream(log_target.c_str(),std::ios::app);
-                lout.targets(log_target,o);
-                lout.dup2_cout(false);
-                lout.level(cfgapi_table.logging.level);
+                get_logger()->targets(log_target,o);
+                get_logger()->dup2_cout(false);
+                get_logger()->level(cfgapi_table.logging.level);
                 
                 logger_profile* lp = new logger_profile();
-                lp->print_srcline_ = lout.print_srcline();
-                lp->print_srcline_always_ = lout.print_srcline_always();
+                lp->print_srcline_ = get_logger()->print_srcline();
+                lp->print_srcline_always_ = get_logger()->print_srcline_always();
                 lp->level_ = cfgapi_table.logging.level;
-                lout.target_profiles()[(uint64_t)o] = lp;
+                get_logger()->target_profiles()[(uint64_t)o] = lp;
                 
                 if(cfgapi.getRoot()["settings"].lookupValue("log_console",log_console)) {
-                    lout.dup2_cout(log_console);
+                    get_logger()->dup2_cout(log_console);
                 }
             }
         }
@@ -528,7 +528,7 @@ int main(int argc, char *argv[]) {
         }
     }
     
-    lout.level(WAR);
+    get_logger()->level(WAR);
     cfgapi_log_version(false);  // don't delay, but display warning
     
     if(cfg_tenant_index.size() > 0 && cfg_tenant_name.size() > 0) {
@@ -551,7 +551,7 @@ int main(int argc, char *argv[]) {
     
     // if logging set in cmd line, use it 
     if(args_debug_flag > NON) {
-        lout.level(args_debug_flag);
+        get_logger()->level(args_debug_flag);
     }
         
         
@@ -599,8 +599,8 @@ int main(int argc, char *argv[]) {
 
     
     // if there is loglevel specified in config file and is bigger than we currently have set, use it
-    if(cfgapi_table.logging.level > lout.level()) {
-        lout.level(cfgapi_table.logging.level);
+    if(cfgapi_table.logging.level > get_logger()->level()) {
+        get_logger()->level(cfgapi_table.logging.level);
     }
     
     if(daemon_exists_pidfile()) {
@@ -610,12 +610,12 @@ int main(int argc, char *argv[]) {
     }
     
     if(cfg_daemonize) {
-        if(lout.targets().size() <= 0) {
+        if(get_logger()->targets().size() <= 0) {
             FATS_("Cannot daemonize without logging to file.");
             exit(-5);
         }
         
-        lout.dup2_cout(false);
+        get_logger()->dup2_cout(false);
         INFS_("entering daemon mode");
         daemonize();
     }

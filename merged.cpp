@@ -233,18 +233,18 @@ bool load_config(std::string& config_f, bool reload) {
             strncpy((char*)crashlog_file,crlog.c_str(),LOG_FILENAME_SZ-1);
             
             std::ofstream * o = new std::ofstream(log_target.c_str(),std::ios::app);
-            lout.targets(log_target,o);
-            lout.dup2_cout(false);
-            lout.level(cfg_log_level);
+            get_logger()->targets(log_target,o);
+            get_logger()->dup2_cout(false);
+            get_logger()->level(cfg_log_level);
             
             logger_profile* lp = new logger_profile();
-            lp->print_srcline_ = lout.print_srcline();
-            lp->print_srcline_always_ = lout.print_srcline_always();
+            lp->print_srcline_ = get_logger()->print_srcline();
+            lp->print_srcline_always_ = get_logger()->print_srcline_always();
             lp->level_ = cfg_log_level;
-            lout.target_profiles()[(uint64_t)o] = lp;
+            get_logger()->target_profiles()[(uint64_t)o] = lp;
             
             if(cfgapi.getRoot()["settings"].lookupValue("log_console",cfg_log_console)) {
-                lout.dup2_cout(cfg_log_console);
+                get_logger()->dup2_cout(cfg_log_console);
             }        
         }
 
@@ -331,11 +331,11 @@ int main(int argc, char *argv[]) {
         }
     }
     
-    lout.level(WAR);
+    get_logger()->level(WAR);
     
     // if logging set in cmd line, use it 
     if(args_debug_flag > NON) {
-        lout.level(args_debug_flag);
+        get_logger()->level(args_debug_flag);
     }
         
     WARS_(" ");
@@ -370,12 +370,12 @@ int main(int argc, char *argv[]) {
     }
     
     if(cfg_daemonize) {
-        if(lout.targets().size() <= 0) {
+        if(get_logger()->targets().size() <= 0) {
             FATS_("Cannot daemonize without logging to file.");
             exit(-5);
         }
         
-        lout.dup2_cout(false);
+        get_logger()->dup2_cout(false);
         INFS_("entering daemon mode");
         daemonize();
     }

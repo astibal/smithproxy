@@ -251,21 +251,21 @@ int cli_diag_identity_ip_list(struct cli_def *cli, const char *command, char *ar
 
 
 void cli_print_log_levels(struct cli_def *cli) {
-    logger_profile* lp = lout.target_profiles()[(uint64_t)cli->client->_fileno];
+    logger_profile* lp = get_logger()->target_profiles()[(uint64_t)cli->client->_fileno];
     
     cli_print(cli,"This cli debug level is set to: %d",lp->level_);
-    cli_print(cli,"General logging level set to: %d",lout.level());
-    for(auto i = lout.remote_targets().begin(); i != lout.remote_targets().end(); ++i) {
-        cli_print(cli, "Logging level for: %s: %d",lout.target_name((uint64_t)(*i)),lout.target_profiles()[(uint64_t)(*i)]->level_);
+    cli_print(cli,"General logging level set to: %d",get_logger()->level());
+    for(auto i = get_logger()->remote_targets().begin(); i != get_logger()->remote_targets().end(); ++i) {
+        cli_print(cli, "Logging level for: %s: %d",get_logger()->target_name((uint64_t)(*i)),get_logger()->target_profiles()[(uint64_t)(*i)]->level_);
     }
-    for(auto i = lout.targets().begin(); i != lout.targets().end(); ++i) {
-        cli_print(cli, "Logging level for: %s: %d",lout.target_name((uint64_t)(*i)),lout.target_profiles()[(uint64_t)(*i)]->level_);
+    for(auto i = get_logger()->targets().begin(); i != get_logger()->targets().end(); ++i) {
+        cli_print(cli, "Logging level for: %s: %d",get_logger()->target_name((uint64_t)(*i)),get_logger()->target_profiles()[(uint64_t)(*i)]->level_);
     }         
 }
 
 int cli_debug_terminal(struct cli_def *cli, const char *command, char *argv[], int argc) {
     
-    logger_profile* lp = lout.target_profiles()[(uint64_t)cli->client->_fileno];
+    logger_profile* lp = get_logger()->target_profiles()[(uint64_t)cli->client->_fileno];
     if(argc > 0) {
         
         std::string a1 = argv[0];
@@ -275,12 +275,12 @@ int cli_debug_terminal(struct cli_def *cli, const char *command, char *argv[], i
         } 
         else if(a1 == "reset") {
             lp->level_ = NON;
-            //lout.level(cfgapi_table.logging.level);
+            //get_logger()->level(cfgapi_table.logging.level);
         }
         else {
             //cli_print(cli, "called %s with %s, argc %d\r\n", __FUNCTION__, command, argc);
             lp->level_ = std::atoi(argv[0]);
-            //lout.level(lp->level_);
+            //get_logger()->level(lp->level_);
         }
     } else {
         
@@ -301,10 +301,10 @@ int cli_debug_logfile(struct cli_def *cli, const char *command, char *argv[], in
             cli_print(cli,"valid parameters: %s",debug_levels);
         } 
         else if(a1 == "reset") {
-            lout.level(cfgapi_table.logging.level);
+            get_logger()->level(cfgapi_table.logging.level);
         }
         else {
-            lout.level(std::atoi(argv[0]));
+            get_logger()->level(std::atoi(argv[0]));
         }
     } else {
         cli_print_log_levels(cli);
@@ -598,18 +598,18 @@ void client_thread(int client_socket) {
             cli_register_command(cli, debuk, "ssl", cli_debug_ssl, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set ssl file logging level");
         
         // Pass the connection off to libcli
-        lout.remote_targets(string_format("cli-%d",client_socket),client_socket);
+        get_logger()->remote_targets(string_format("cli-%d",client_socket),client_socket);
 
         logger_profile lp;
         lp.level_ = cfgapi_table.logging.cli_init_level;
-        lout.target_profiles()[(uint64_t)client_socket] = &lp;
+        get_logger()->target_profiles()[(uint64_t)client_socket] = &lp;
         
         
         load_defaults();
         cli_loop(cli, client_socket);
         
-        lout.remote_targets().remove(client_socket);
-        lout.target_profiles().erase(client_socket);
+        get_logger()->remote_targets().remove(client_socket);
+        get_logger()->target_profiles().erase(client_socket);
         close(client_socket);
         
         // Free data structures
