@@ -60,6 +60,8 @@
 #include <cmdserver.hpp>
 #include <srvutils.hpp>
 #include <staticcontent.hpp>
+#include <smithlog.hpp>
+
 
 #define MEM_DEBUG 1
 #ifdef MEM_DEBUG
@@ -482,6 +484,8 @@ bool apply_tenant_config() {
 
 int main(int argc, char *argv[]) {
 
+    set_logger(new QueueLogger());
+    
     config_file = "/etc/smithproxy/smithproxy.cfg";
     bool custom_config_file = false;
     
