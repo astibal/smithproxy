@@ -1303,7 +1303,12 @@ bool cfgapi_obj_profile_tls_apply(baseHostCX* originator, baseProxy* new_proxy, 
                                     auto subdomain_cache = domain_cache.get(filter_element);
                                     if(subdomain_cache != nullptr) {
                                         for(auto subdomain: subdomain_cache->cache()) {
-                                            FqdnAddress f(subdomain.first+"."+filter_element);
+                                            
+                                            std::vector<std::string> prefix_n_domainname = string_split(subdomain.first,':');
+                                            if(prefix_n_domainname.size() < 2) continue; // don't continue if we can't strip A: or AAAA:
+                                            
+                                            FqdnAddress f(prefix_n_domainname.at(1)+"."+filter_element);
+                                            DEB_("Connection %s: subdomain check: test if %s matches %s",originator->full_name('L').c_str(),f.to_string().c_str(),xcom->owner_cx()->host().c_str());
                                             
                                             if(f.match(c)) {
                                                 if(sslcom->bypass_me_and_peer()) {
