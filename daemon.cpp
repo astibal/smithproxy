@@ -20,6 +20,8 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <csignal>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <fcntl.h>
@@ -33,6 +35,9 @@
 #include <logger.hpp>
 #include <daemon.hpp>
 #include <display.hpp>
+
+#define UNW_LOCAL_ONLY
+#include <libunwind.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -146,6 +151,15 @@ void daemon_set_limit_fd(int max) {
     }
 }
 
+void daemon_signals(void (*segv_handler)(int)) {
+    struct sigaction act_segv;
+    sigemptyset(&act_segv.sa_mask);
+    act_segv.sa_flags = 0;
+    
+    if(segv_handler != nullptr)  act_segv.sa_handler = segv_handler;
+    
+    sigaction( SIGSEGV, &act_segv, NULL);
+}
 
 
 #ifdef __cplusplus

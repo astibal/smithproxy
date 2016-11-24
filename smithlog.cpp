@@ -19,25 +19,69 @@
 
 #include <display.hpp>
 #include <smithlog.hpp>
+#include <daemon.hpp>
+#include <unistd.h>
+
+QueueLogger::QueueLogger(): logger(), lockable() {
+}
 
 int QueueLogger::write_log(unsigned int l, std::string& sss) {
 
     locked_guard<QueueLogger> ll(this);
     
-    if(l <= level() ) {
-        logs_.push(sss);
-    }
+     if(l <= level() ) {
+        logs_.push(log_entry(l,sss));
+     }
     
     if(logs_.size() >= max_len) {
         logs_.pop();
-        
     }
     
-    // this is transitional code. It will be removed once queue picker is implemented
-    if(logs_.size() > 0) {
-        std::string msg = logs_.front(); logs_.pop();
-        return logger::write_log(l, msg);
-    }
+    // process on my mark!
     
     return 0;
+}
+
+int QueueLogger::write_disk(unsigned int l, std::string& sss) {
+    return logger::write_log(l,sss);
+}
+
+
+void QueueLogger::run_queue(QueueLogger* log_src) {
+
+    if(log_src == nullptr) {
+        return;
+    }
+    
+    while (!log_src->sig_terminate) {
+        log_src->lock();
+        
+        if(log_src->logs_.size() > 0) {
+            log_entry e = log_src->logs_.front(); log_src->logs_.pop();
+
+            //copy elements and unlock before write_log.
+            int l = e.first;
+            std::string msg = e.second;
+
+            log_src->unlock();
+            log_src->write_disk(l, msg);
+            
+        } else {
+            log_src->unlock();
+            usleep(10000); // wait 10ms if there is nothing to read
+        }
+    }
+}
+
+std::thread* create_log_writer(logger* log_ptr) {
+    std::thread * writer_thread = new std::thread([]() { 
+        logger* log_ptr = get_logger();
+        QueueLogger* q_logger = dynamic_cast<QueueLogger*>(log_ptr);
+        
+        if(q_logger != nullptr) {
+            QueueLogger::run_queue(q_logger);
+        }
+    } );
+       
+    return writer_thread;
 }

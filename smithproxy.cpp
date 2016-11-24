@@ -19,7 +19,6 @@
 
 #include <vector>
 
-#include <csignal>
 #include <ctime>
 #include <cstdlib>
 #include <sys/stat.h>
@@ -93,6 +92,7 @@ std::thread* dtls_thread = nullptr;
 std::thread* udp_thread = nullptr;
 std::thread* socks_thread = nullptr;
 std::thread* cli_thread = nullptr;
+std::thread* log_thread = nullptr;
 
 volatile static int cnt_terminate = 0;
 static bool cfg_daemonize = false;
@@ -129,7 +129,6 @@ static std::string cfg_tenant_name;
 
 #define UNW_LOCAL_ONLY
 #include <libunwind.h>
-#include <stdio.h>
 
 static void uw_btrace_handler(int sig) {
     unw_cursor_t cursor; unw_context_t uc;
@@ -447,14 +446,6 @@ bool load_config(std::string& config_f, bool reload) {
     return ret;
 }
 
-void ignore_sigpipe() {
-    struct sigaction act_segv;
-    sigemptyset(&act_segv.sa_mask);
-    act_segv.sa_flags = 0;
-    act_segv.sa_handler = uw_btrace_handler;
-    sigaction( SIGSEGV, &act_segv, NULL);
-}
-
 int apply_index(std::string& what , const std::string& idx) {
     DEB_("apply_index: what=%s idx=%s",what.c_str(),idx.c_str());
     int port = std::stoi(what);
@@ -484,7 +475,6 @@ bool apply_tenant_config() {
 
 int main(int argc, char *argv[]) {
 
-    set_logger(new QueueLogger());
     
     config_file = "/etc/smithproxy/smithproxy.cfg";
     bool custom_config_file = false;
@@ -533,6 +523,15 @@ int main(int argc, char *argv[]) {
                 ERR_("unknown option: '%c'",c);
                 exit(1);                 
         }
+    }
+    
+    set_logger(new QueueLogger());
+    
+    if(!cfg_daemonize) {
+        std::thread* log_thread  = create_log_writer(get_logger());
+        if(log_thread != nullptr) {
+            pthread_setname_np(log_thread->native_handle(),string_format("sxy_lwr_%s",cfg_tenant_index.c_str()).c_str());
+        }    
     }
     
     get_logger()->level(WAR);
@@ -625,6 +624,14 @@ int main(int argc, char *argv[]) {
         get_logger()->dup2_cout(false);
         INFS_("entering daemon mode");
         daemonize();
+
+        // we have to create logger after daemonize is called
+        log_thread  = create_log_writer(get_logger());
+        if(log_thread != nullptr) {
+            pthread_setname_np(log_thread->native_handle(),string_format("sxy_lwr_%s",cfg_tenant_index.c_str()).c_str());
+        }    
+        
+        
     }
     // write out PID file
     daemon_write_pidfile();
@@ -687,7 +694,7 @@ int main(int argc, char *argv[]) {
     if (prev_fn==SIG_IGN) signal (SIGUSR1,SIG_IGN);
 
 
-    ignore_sigpipe();
+    daemon_signals(uw_btrace_handler);
     
 //     struct sigaction act_pipe;
 //     sigemptyset(&act_pipe.sa_mask);    
@@ -697,7 +704,7 @@ int main(int argc, char *argv[]) {
     if(plain_proxy) {
         INFS_("Starting TCP listener");
         plain_thread = new std::thread([]() { 
-            ignore_sigpipe();
+            daemon_signals(uw_btrace_handler);
             DIA_("smithproxy_tcp: max file descriptors: %d",daemon_get_limit_fd());
             
             plain_proxy->run(); 
@@ -710,7 +717,7 @@ int main(int argc, char *argv[]) {
     if(ssl_proxy) {
         INFS_("Starting TLS listener");        
         ssl_thread = new std::thread([] () { 
-            ignore_sigpipe();
+            daemon_signals(uw_btrace_handler);
             daemon_set_limit_fd(0);
             DIA_("smithproxy_tls: max file descriptors: %d",daemon_get_limit_fd());
             
@@ -723,8 +730,8 @@ int main(int argc, char *argv[]) {
 
     if(dtls_proxy) {
         INFS_("Starting DTLS listener");        
-        ssl_thread = new std::thread([] () { 
-            ignore_sigpipe();
+        dtls_thread = new std::thread([] () { 
+            daemon_signals(uw_btrace_handler);
             daemon_set_limit_fd(0);
             DIA_("smithproxy_tls: max file descriptors: %d",daemon_get_limit_fd());
             
@@ -732,7 +739,7 @@ int main(int argc, char *argv[]) {
             DIAS_("dtls workers torn down."); 
             dtls_proxy->shutdown();  
         } );    
-        pthread_setname_np(ssl_thread->native_handle(),friendly_thread_name_dls.c_str());
+        pthread_setname_np(dtls_thread->native_handle(),friendly_thread_name_dls.c_str());
     }
     
     if(udp_proxy) {
@@ -741,7 +748,7 @@ int main(int argc, char *argv[]) {
         
         INFS_("Starting UDP listener");        
         udp_thread = new std::thread([] () {
-            ignore_sigpipe();
+            daemon_signals(uw_btrace_handler);
             daemon_set_limit_fd(0);
             DIA_("smithproxy_udp: max file descriptors: %d",daemon_get_limit_fd());
             
@@ -755,7 +762,7 @@ int main(int argc, char *argv[]) {
     if(socks_proxy) {
         INFS_("Starting SOCKS5 listener");
         socks_thread = new std::thread([] () { 
-            ignore_sigpipe();
+            daemon_signals(uw_btrace_handler);
             daemon_set_limit_fd(0);
             DIA_("smithproxy_skx: max file descriptors: %d",daemon_get_limit_fd());
             
@@ -768,7 +775,7 @@ int main(int argc, char *argv[]) {
 
     cli_thread = new std::thread([] () { 
         INFS_("Starting CLI");
-        ignore_sigpipe();
+        daemon_signals(uw_btrace_handler);
         DIA_("smithproxy_cli: max file descriptors: %d",daemon_get_limit_fd());
         
         cli_loop(cli_port);
@@ -786,12 +793,20 @@ int main(int argc, char *argv[]) {
     if(ssl_thread) {
         ssl_thread->join();
     }
+    if(dtls_thread) {
+        dtls_thread->join();
+    }    
     if(udp_thread) {
         udp_thread->join();
     }    
     if(socks_thread) {
         socks_thread->join();
-    }        
+    }
+    QueueLogger* ql = dynamic_cast<QueueLogger*>(get_logger());
+    if(ql) {
+        ql->sig_terminate = true;
+        log_thread->join();
+    }
 
     if(plain_thread)
         delete plain_thread;
@@ -801,6 +816,8 @@ int main(int argc, char *argv[]) {
         delete udp_thread;
     if(socks_thread)
         delete socks_thread;
+    if(log_thread)
+        delete log_thread;
     
     DIAS_("Debug SSL statistics: ");
     DIA_("SSL_accept: %d",SSLCom::counter_ssl_accept);
@@ -817,6 +834,7 @@ int main(int argc, char *argv[]) {
     CRYPTO_cleanup_all_ex_data();
     ERR_free_strings();
     ERR_remove_state(0);
-    EVP_cleanup();     
+    EVP_cleanup();
+    
 }
 
