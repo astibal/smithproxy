@@ -67,6 +67,7 @@ DIVERT_CHAIN_NAME="DX.${tenant_id}"
 SMITH_INTERFACE='eth1 eth0'
 SMITH_TCP_PORTS='80 25 587 21 143 110 5222 65000'
 SMITH_TCP_PORTS_ALL=0
+SMITH_IPV6_UDP_BYPASS=0
 SMITH_TCP_TPROXY='50080'
 SMITH_UDP_PORTS='53'
 SMITH_UDP_TPROXY='50080'
@@ -145,8 +146,13 @@ case "$1" in
             echo "  tproxy port ${IF}/${P}->${SMITH_TLS_TPROXY}"
             iptables -t mangle -A ${SMITH_CHAIN_NAME} -p tcp -i ${IF} --dport ${P} -j TPROXY \
             --tproxy-mark 0x1/0x1 --on-port ${SMITH_TLS_TPROXY}
-            ip6tables -t mangle -A ${SMITH_CHAIN_NAME} -p tcp -i ${IF} --dport ${P} -j TPROXY \
-            --tproxy-mark 0x1/0x1 --on-port ${SMITH_TLS_TPROXY}            
+            
+            if [ ${SMITH_IPV6_UDP_BYPASS} -gt 0 ]; then
+                echo "  bypassing IPv6 UDP traffic (old kernel?)"
+            else
+                ip6tables -t mangle -A ${SMITH_CHAIN_NAME} -p tcp -i ${IF} --dport ${P} -j TPROXY \
+                --tproxy-mark 0x1/0x1 --on-port ${SMITH_TLS_TPROXY}            
+            fi
         done;
         echo " tproxy for DTLS"
         for P in ${SMITH_DTLS_PORTS}; do

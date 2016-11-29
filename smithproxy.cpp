@@ -615,6 +615,14 @@ int main(int argc, char *argv[]) {
         exit(-5);
     }
     
+    // detect kernel version, and adapt UDP socket family
+    if(!version_check(get_kernel_version(),"4.3")) {    
+        WARS_("Kernel can't use IPv6 for transparenting UDP. Kernel upgrade is highly recommended.");
+        WARS_("IPv6/UDP smithproxy forwarding will not work.");
+        WARS_("Set SMITH_IPV6_UDP_BYPASS=1 variable in smithproxy.startup.cfg");
+        UDPCom::default_sock_family = AF_INET;
+    }
+    
     if(cfg_daemonize) {
         if(get_logger()->targets().size() <= 0) {
             FATS_("Cannot daemonize without logging to file.");
