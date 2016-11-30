@@ -107,14 +107,26 @@ int cli_diag_ssl_cache_stats(struct cli_def *cli, const char *command, char *arg
 int cli_diag_ssl_cache_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
     
     SSLCertStore* store = SSLCom::certstore();
+    bool print_refs = false;
+    
+    if(argc > 0) {
+        std::string a1 = argv[0];
+        if(a1 == "7") print_refs = true;
+    }
+    
+    
     store->lock();
     
     cli_print(cli,"certificate store entries: ");
-
+    
     for (auto x = store->cache().begin(); x != store->cache().end(); ++x ) {
         std::string fqdn = x->first;
         X509_PAIR* ptr = x->second;
+        
         cli_print(cli,"    %s",fqdn.c_str());
+        if(print_refs)
+            cli_print(cli,"            refcounts: key=%d cert=%d",ptr->first->references, ptr->second->references);
+
     }
         
     cli_print(cli,"\ncertificate fqdn cache: ");
@@ -123,6 +135,37 @@ int cli_diag_ssl_cache_list(struct cli_def *cli, const char *command, char *argv
         std::string cn = x->second;
         cli_print(cli,"    %s -> %s",fqdn.c_str(), cn.c_str());
     }
+
+    store->unlock();
+    
+    return CLI_OK;
+}
+
+int cli_diag_ssl_cache_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    
+    SSLCertStore* store = SSLCom::certstore();
+    store->lock();
+    
+    for (auto x = store->cache().begin(); x != store->cache().end(); ++x ) {
+        std::string fqdn = x->first;
+        cli_print(cli,"removing    %s",fqdn.c_str());
+        X509_PAIR* ptr = x->second;
+        
+        if(argc > 0) {
+            std::string a1 = argv[0];
+            if(a1 == "7") cli_print(cli,"            refcounts: key=%d cert=%d",ptr->first->references, ptr->second->references);
+        }
+        
+        EVP_PKEY_free(ptr->first);
+        X509_free(ptr->second);
+    }
+    store->cache().clear();
+        
+    for (auto x = store->fqdn_cache().begin(); x != store->fqdn_cache().end(); ++x ) {
+        std::string fqdn = x->first;
+        std::string cn = x->second;
+    }
+    store->fqdn_cache().clear();
 
     store->unlock();
     
@@ -567,6 +610,7 @@ void client_thread(int client_socket) {
                 diag_ssl_cache = cli_register_command(cli, diag_ssl, "cache", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl certificate cache");
                         cli_register_command(cli, diag_ssl_cache, "stats", cli_diag_ssl_cache_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "display ssl cert cache statistics");
                         cli_register_command(cli, diag_ssl_cache, "list", cli_diag_ssl_cache_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all ssl cert cache entries");
+                        cli_register_command(cli, diag_ssl_cache, "clear", cli_diag_ssl_cache_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "remove all ssl cert cache entries");
                 diag_ssl_wl = cli_register_command(cli, diag_ssl, "whitelist", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl temporary verification whitelist");                        
                         cli_register_command(cli, diag_ssl_wl, "list", cli_diag_ssl_wl_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all verification whitelist entries");
                         cli_register_command(cli, diag_ssl_wl, "clear", cli_diag_ssl_wl_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clear all verification whitelist entries");
