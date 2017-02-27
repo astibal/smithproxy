@@ -156,7 +156,10 @@ void DNS_Inspector::update(AppHostCX* cx) {
                 buffer cur_buf = buf.view(red,buf.size()-red);
                 int cur_red = ptr->load(&cur_buf);
                 
-                DEB___("DNS_Inspector::update[%s]: red  %d, load returned %d", cx->c_name(), red, cur_red);
+                // because of non-standard return value from above load(), we need to adjust red bytes manually
+                if(cur_red == 0) { cur_red = cur_buf.size(); }
+                
+                DIA___("DNS_Inspector::update[%s]: red  %d, load returned %d", cx->c_name(), red, cur_red);
                 DEB___("DNS_Inspector::update[%s]: flow: %s", cx->c_name(), cx->flow().hr().c_str());
                 
                 // on success write to requests_
