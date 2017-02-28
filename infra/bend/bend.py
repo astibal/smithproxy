@@ -47,8 +47,17 @@ global TENANT_NAME
 global TENANT_IDX
 global BEND_LOGFILE
 global BEND_KEYFILE
+global BEND_USERFILE
 global BEND_PORT
 global flog
+
+global BEND_KEYFILE_MTIME
+global BEND_USERFILE_MTIME
+
+
+BEND_KEYFILE_MTIME = 0
+BEND_USERFILE_MTIME = 0
+
 
 def address_version(ip):
     try:
@@ -168,21 +177,27 @@ class AuthManager:
 
       self.logon_shm = LogonTable()
       self.logon_shm.setup(mem_name,mem_size,sem_name)
-      self.logon_shm.clear()
-      self.logon_shm.write_header()
+
+      if self.clear_shm:
+          self.logon_shm.clear()
+          self.logon_shm.write_header()
 
     def setup_logon_tables6(self,mem_name,mem_size,sem_name):
 
       self.logon6_shm = LogonTable(6)
       self.logon6_shm.setup(mem_name,mem_size,sem_name)
-      self.logon6_shm.clear()
-      self.logon6_shm.write_header()
+
+      if self.clear_shm:      
+          self.logon6_shm.clear()
+          self.logon6_shm.write_header()
       
 
     def setup_token_tables(self,mem_name,mem_size,sem_name):
       self.token_shm = TokenTable()
-      self.token_shm.setup(mem_name,mem_size,sem_name)
-      self.token_shm.clear();
+      
+      if self.clear_shm:      
+          self.token_shm.setup(mem_name,mem_size,sem_name)
+          self.token_shm.clear();
       
       # test data
       self.token_shm.seek(0)
@@ -459,6 +474,21 @@ class AuthManager:
         
         self.global_token_referer[token] = ref
 
+    def test(self):
+        flog.info("test routine executed")
+
+        flog.info("backend file mtime check")
+        u = os.stat(BEND_USERFILE).st_mtime
+        k = os.stat(BEND_KEYFILE).st_mtime
+
+        flog.debug("%s: %s" % (BEND_USERFILE,str(u)))
+        flog.debug("%s: %s" % (BEND_KEYFILE,str(k)))
+        
+        if BEND_USERFILE_MTIME != u or BEND_KEYFILE_MTIME != k:
+            flog.warning("files have been modified, restart")
+            self.server.shutdown()
+
+
     def serve_forever(self):
         
         flog.info("Launching portal on " + self.portal_address + ":" + str(self.portal_port))
@@ -471,6 +501,8 @@ class AuthManager:
         self.server.registerFunction(self.admin_token_list)
         self.server.registerFunction(self.admin_keepalive)
         self.server.registerFunction(self.admin_logout)
+        
+        self.server.registerFunction(self.test)
         
         self.server.serve_forever()
 
@@ -700,8 +732,8 @@ class AuthManager:
         
 
 
-def run_bend(tenant_name="default",tenant_index=0):
-    global BEND_LOGFILE,BEND_KEYFILE,BEND_PORT,flog,TENANT_NAME,TENANT_IDX
+def run_bend(tenant_name="default",tenant_index=0,clear_shm=True):
+    global BEND_LOGFILE,BEND_KEYFILE,BEND_USERFILE,BEND_PORT,flog,TENANT_NAME,TENANT_IDX, BEND_KEYFILE_MTIME, BEND_USERFILE_MTIME
 
     TENANT_NAME  = tenant_name
     TENANT_IDX   = tenant_index
@@ -744,6 +776,14 @@ def run_bend(tenant_name="default",tenant_index=0):
             
         except OSError:
             flog.info("Tenant is using default key file: " + key_file)
+            
+            
+        BEND_USERFILE = user_file
+        BEND_USERFILE_MTIME = os.stat(BEND_USERFILE).st_mtime
+        
+        BEND_KEYFILE  = key_file
+        BEND_KEYFILE_MTIME = os.stat(BEND_KEYFILE).st_mtime
+        
        
     u.read_file(user_file)
 
@@ -768,6 +808,8 @@ def run_bend(tenant_name="default",tenant_index=0):
         flog.error("Error loading config: %s" % (str(e),))
         flog.error("Error loading config: %s" % (repr(traceback.format_tb(exc_traceback)),))
 
+
+    a.clear_shm = clear_shm
     
     a.setup_logon_tables("/smithproxy_auth_ok_%s" % (TENANT_NAME,),1024*1024,"/smithproxy_auth_ok_%s.sem" % (TENANT_NAME,))
     a.setup_logon_tables6("/smithproxy_auth6_ok_%s" % (TENANT_NAME,),1024*1024,"/smithproxy_auth6_ok_%s.sem" % (TENANT_NAME,))
@@ -777,7 +819,13 @@ def run_bend(tenant_name="default",tenant_index=0):
         a.serve_forever()
     except KeyboardInterrupt, e:
         print "Ctrl-C pressed. Wait to close shmem."
-        a.cleanup()
+
+    a.cleanup()
+    flog.info("backend process terminated.")
 
 if __name__ == "__main__":
-    run_bend()
+    
+    _clear_shm = True
+    while True:
+        run_bend(clear_shm=_clear_shm)
+        _clear_shm = False
