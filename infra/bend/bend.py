@@ -24,6 +24,7 @@ import struct
 import socket
 import logging
 import binascii
+import threading
 
 
 import posix_ipc
@@ -53,6 +54,10 @@ global flog
 
 global BEND_KEYFILE_MTIME
 global BEND_USERFILE_MTIME
+
+global GLOBAL_CFG_FILE
+global USER_CFG_FILE
+global USER_CFG_FILE_STRUCT
 
 
 BEND_KEYFILE_MTIME = 0
@@ -474,10 +479,10 @@ class AuthManager:
         
         self.global_token_referer[token] = ref
 
-    def test(self):
-        flog.info("test routine executed")
+    def test_internal(self):
+        flog.debug("test routine executed")
 
-        flog.info("backend file mtime check")
+        flog.debug("backend file mtime check")
         u = os.stat(BEND_USERFILE).st_mtime
         k = os.stat(BEND_KEYFILE).st_mtime
 
@@ -502,9 +507,19 @@ class AuthManager:
         self.server.registerFunction(self.admin_keepalive)
         self.server.registerFunction(self.admin_logout)
         
-        self.server.registerFunction(self.test)
+        self.server.registerFunction(self.test_internal)
+        #self.server.registerFunction(self.dump_user_cfg)
         
         self.server.serve_forever()
+
+    #def dump_user_cfg(self):
+    #    global USER_CFG_FILE,USER_CFG_FILE_STRUCT
+    #    
+    #    with open("/tmp/users.cfg.bak", "w") as struct_file:
+    #        struct_file.write(USER_CFG_FILE_STRUCT.__repr__())
+    #        
+    #        return USER_CFG_FILE_STRUCT.__repr__()
+
 
     def load_config_users(self,user_items):
         for user in user_items:
@@ -732,8 +747,8 @@ class AuthManager:
         
 
 
-def run_bend(tenant_name="default",tenant_index=0,clear_shm=True):
-    global BEND_LOGFILE,BEND_KEYFILE,BEND_USERFILE,BEND_PORT,flog,TENANT_NAME,TENANT_IDX, BEND_KEYFILE_MTIME, BEND_USERFILE_MTIME
+def prepare_bend(tenant_name="default",tenant_index=0,clear_shm=True):
+    global BEND_LOGFILE,BEND_KEYFILE,BEND_USERFILE,BEND_PORT,flog,TENANT_NAME,TENANT_IDX, BEND_KEYFILE_MTIME, BEND_USERFILE_MTIME, USER_CFG_FILE, USER_CFG_FILE_STRUCT,GLOBAL_CFG_FILE
 
     TENANT_NAME  = tenant_name
     TENANT_IDX   = tenant_index
@@ -753,8 +768,8 @@ def run_bend(tenant_name="default",tenant_index=0,clear_shm=True):
     flog.setLevel(logging.INFO)
    
     
-    c = cfg.Config()
-    c.read_file("/etc/smithproxy/smithproxy.cfg")    
+    GLOBAL_CFG_FILE = cfg.Config()
+    GLOBAL_CFG_FILE.read_file("/etc/smithproxy/smithproxy.cfg")    
     u = cfg.Config()
     
     
@@ -784,24 +799,33 @@ def run_bend(tenant_name="default",tenant_index=0,clear_shm=True):
         BEND_KEYFILE  = key_file
         BEND_KEYFILE_MTIME = os.stat(BEND_KEYFILE).st_mtime
         
-       
-    u.read_file(user_file)
 
+
+    
+    with open(user_file, 'r') as myfile:
+        USER_CFG_FILE=myfile.read()
+       
+    u.read_string(USER_CFG_FILE)
+    USER_CFG_FILE_STRUCT = u
+    
+
+def run_bend_once(tenant_name="default",tenant_index=0,clear_shm=True):
+    global BEND_LOGFILE,BEND_KEYFILE,BEND_USERFILE,BEND_PORT,flog,TENANT_NAME,TENANT_IDX, BEND_KEYFILE_MTIME, BEND_USERFILE_MTIME, USER_CFG_FILE, USER_CFG_FILE_STRUCT,GLOBAL_CFG_FILE
     
     a = AuthManager(server_port=BEND_PORT)
     a.load_a1()
-    a.portal_address = c.settings.auth_portal.address
-    a.portal_port = str(int(c.settings.auth_portal.http_port) + int(tenant_index))
-    flog.setLevel(cfgloglevel_to_py(c.settings.log_level));
+    a.portal_address = GLOBAL_CFG_FILE.settings.auth_portal.address
+    a.portal_port = str(int(GLOBAL_CFG_FILE.settings.auth_portal.http_port) + int(tenant_index))
+    flog.setLevel(cfgloglevel_to_py(GLOBAL_CFG_FILE.settings.log_level));
     
     flog.debug("loading config file")
     
     
     try:
-        a.load_config_sources(u.sources.items())
-        a.load_config_users(u.users.items())
-        a.load_config_groups(u.groups.items())
-        a.load_config_identities(u.identities.items())
+        a.load_config_sources(USER_CFG_FILE_STRUCT.sources.items())
+        a.load_config_users(USER_CFG_FILE_STRUCT.users.items())
+        a.load_config_groups(USER_CFG_FILE_STRUCT.groups.items())
+        a.load_config_identities(USER_CFG_FILE_STRUCT.identities.items())
         
     except Exception, e:
         exc_type, exc_value, exc_traceback = sys.exc_info()
@@ -823,9 +847,34 @@ def run_bend(tenant_name="default",tenant_index=0,clear_shm=True):
     a.cleanup()
     flog.info("backend process terminated.")
 
-if __name__ == "__main__":
+
+class TesterThread(threading.Thread):
+    def __init__(self, port):
+        threading.Thread.__init__(self)
+        self.port = port
     
-    _clear_shm = True
+    def run(self):
+        bend = SOAPpy.SOAPProxy("http://127.0.0.1:%s" % (str(self.port),))
+        
+        while True:
+            time.sleep(5)
+            bend.test_internal()
+        
+
+def run_bend(tenant_name="default",tenant_index=0,clear_shm=True):
+    global BEND_LOGFILE,BEND_KEYFILE,BEND_USERFILE,BEND_PORT,flog,TENANT_NAME,TENANT_IDX, BEND_KEYFILE_MTIME, BEND_USERFILE_MTIME, USER_CFG_FILE, USER_CFG_FILE_STRUCT,GLOBAL_CFG_FILE
+    
+    first_start = clear_shm
     while True:
-        run_bend(clear_shm=_clear_shm)
-        _clear_shm = False
+        prepare_bend(tenant_name,tenant_index,first_start)
+        if first_start:
+            t = TesterThread(BEND_PORT)
+            t.setDaemon(True)
+            t.start()
+        
+        run_bend_once(tenant_name,tenant_index,first_start)
+        first_start = False
+
+if __name__ == "__main__":
+    run_bend()
+    
