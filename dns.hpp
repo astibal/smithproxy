@@ -119,7 +119,7 @@ struct DNS_Answer {
 };
 
 
-struct DNS_AdditionalInfo {
+struct DNS_DnssecAdditionalInfo {
     uint8_t  name_ = 0; // 0 - ROOT
     uint16_t opt_ = 0;  // 0x29 - EDNS0
     uint16_t udp_size_ = 0;
@@ -143,7 +143,8 @@ protected:
     std::vector<DNS_Question> questions_list;
     std::vector<DNS_Answer> answers_list;
     std::vector<DNS_Answer> authorities_list;
-    std::vector<DNS_AdditionalInfo> additionals_list;
+    //std::vector<DNS_AdditionalInfo> additionals_list;
+    std::vector<DNS_Answer> additionals_list;
     
 public:    
     std::vector<int> answer_ttl_idx; // should be protected;
