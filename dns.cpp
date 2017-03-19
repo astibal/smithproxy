@@ -30,6 +30,8 @@ const char* _unknown = "unknown";
 const char* str_a = "A";
 const char* str_aaaa = "AAAA";
 const char* str_cname = "CNAME";
+const char* str_txt= "TXT";
+const char* str_opt = "OPT";
 
 dns_cache inspect_dns_cache("DNS cache - global",2000,true);
 std::unordered_map<std::string,ptr_cache<std::string,DNS_Response>*> inspect_per_ip_dns_cache;
@@ -41,10 +43,46 @@ const char* dns_record_type_str(int a) {
         case A: return str_a;
         case AAAA: return str_aaaa;
         case CNAME: return str_cname;
+        case TXT: return str_txt;
+        case OPT: return str_opt;
         
         default: return _unknown;
     }
 }
+
+
+int load_qname(unsigned char* ptr, unsigned int maxlen, std::string* str_storage=nullptr) {
+    int xi = 0;
+    int name_i = 0;
+    
+    DEB_("load_qname:\n%s",hex_dump(ptr,maxlen).c_str());
+    
+    
+    if(ptr[xi] == 0) {
+        xi++;
+        DEBS_("zero label");
+    } 
+    else if(ptr[xi] < 0xC0) {
+        std::string lab;
+        for(; xi < maxlen; ++xi) {
+            uint8_t c = ptr[xi];
+            if (c == 0) break;
+            lab += c;
+        }
+        ++xi;
+        
+        if(str_storage) str_storage->assign(lab);
+        
+        DEB_("plain label: %s",ESC(lab.c_str())); 
+    } else {
+        uint8_t label = ptr[++xi];
+        DEB_("ref label: %d",label);
+        ++xi;
+    }
+    
+    return xi;
+}
+
 
 /*
  * returns 0 on OK, >0 if  there are still some bytes to read and -1 on error.
@@ -102,7 +140,7 @@ int DNS_Packet::load(buffer* src) {
                         question_temp.rec_type = ntohs(src->get_at<unsigned short>(cur_mem+1));           DEB___("DNS_Packet::load: read 'type' at index %d", cur_mem+1);
                         question_temp.rec_class =  ntohs(src->get_at<unsigned short>(cur_mem+1+2));       DEB___("DNS_Packet::load: read 'class' at index %d", cur_mem+1+2);
                         DEB___("type=%d,class=%d",question_temp.rec_type,question_temp.rec_class);
-                        mem_counter += 1+(2*2);
+                        mem_counter += 1+ (2*2);
                         DEB___("DNS_Packet::load: s==0, mem counter changed to: %d (0x%x)",mem_counter,mem_counter);
                         
                         if(questions_togo > 0) {
@@ -197,34 +235,41 @@ int DNS_Packet::load(buffer* src) {
         if(additionals_togo > 0) {
             for(unsigned int i = mem_counter; i < src->size() && additionals_togo > 0; ) {
   
-                unsigned short pre_type = ntohs(src->get_at<unsigned short>(i+1));
                 
-                if(pre_type == 41) {
+                int xi = load_qname(src->data()+i,src->size()-i);
+                
+                //unsigned short pre_type = ntohs(src->get_at<unsigned short>(i+1));
+                unsigned short pre_type = ntohs(src->get_at<unsigned short>(i+xi));                
+                i += (xi + 2);
+                
+               
+                DEB_("DNS inspect: packet pre_type = %s(%d)",dns_record_type_str(pre_type), pre_type);
+                
+                if(pre_type == OPT) {
                     //THIS IS DNSSEC ADDITIONALS - we need to handle it better, now remove                
                 
                     DNS_DnssecAdditionalInfo answer_temp;
-                    answer_temp.name_ = src->get_at<uint8_t>(i);
-                    answer_temp.opt_ = ntohs(src->get_at<unsigned short>(i+1));
-                    answer_temp.udp_size_ = ntohs(src->get_at<unsigned short>(i+3));
-                    answer_temp.higher_bits_rcode_ = src->get_at<uint8_t>(i+5);
-                    answer_temp.edns0_version_ = src->get_at<uint8_t>(i+6);
-                    answer_temp.z_ = ntohs(src->get_at<uint16_t>(i+7)); 
-                    answer_temp.datalen_ = ntohs(src->get_at<uint16_t>(i+9)); 
+                    //answer_temp.name_ = src->get_at<uint8_t>(i);
+                    answer_temp.opt_ = pre_type;
+                    answer_temp.udp_size_ = ntohs(src->get_at<unsigned short>(i)); i+=2;
+                    answer_temp.higher_bits_rcode_ = src->get_at<uint8_t>(i);      i+=1;
+                    answer_temp.edns0_version_ = src->get_at<uint8_t>(i);          i+=1; 
+                    answer_temp.z_ = ntohs(src->get_at<uint16_t>(i));              i+=2;
+                    answer_temp.datalen_ = ntohs(src->get_at<uint16_t>(i));        i+=2;
                     
-                    int data_len = answer_temp.datalen_;
-                    int record_len = 11 + data_len;
                     
-                    if(i + record_len < src->size()) {
+                    if(i + answer_temp.datalen_ <= src->size()) {
                         
-                        if(answer_temp.datalen_ > 0)
-                            answer_temp.data_.append(src->view(i+11,answer_temp.datalen_));
-                        int inc = 11 + answer_temp.datalen_;
+                        if(answer_temp.datalen_ > 0) {
+                            answer_temp.data_.append(src->view(i,answer_temp.datalen_));
+                            i += answer_temp.datalen_;
+                        }
 
-                        mem_counter += inc ;
-                        i += inc;
-                        
                         DIA___("DNS_Packet::load: additional DNSSEC info[%d]: name: %d, opt: %d, udp: %d, hb_rcode: %d, edns0: %d, z: %d, len %d, buflen: %d", additionals_togo,
                                             answer_temp.name_,answer_temp.opt_,answer_temp.udp_size_,answer_temp.higher_bits_rcode_,answer_temp.edns0_version_,answer_temp.z_,answer_temp.datalen_,answer_temp.data_.size()  );
+                        
+                        mem_counter = i;
+                        
                         
                         additionals_togo--;
                     } else {
@@ -232,25 +277,39 @@ int DNS_Packet::load(buffer* src) {
                         i = src->size();
                     }
                 }
-                else {
+                else if (pre_type == A || pre_type == AAAA || pre_type == TXT) {
                     DNS_Answer answer_temp;
-                    answer_temp.name_ = ntohs(src->get_at<unsigned short>(i));
-                    answer_temp.type_ = ntohs(src->get_at<unsigned short>(i+2));
-                    answer_temp.class_ = ntohs(src->get_at<unsigned short>(i+4));
-                    answer_ttl_idx.push_back(i+6);
-                    answer_temp.ttl_ = ntohl(src->get_at<uint32_t>(i+6));
-                    answer_temp.datalen_ = ntohs(src->get_at<uint32_t>(i+10)); 
-                    if(answer_temp.datalen_ > 0)
-                        answer_temp.data_.append(src->view(i+12,answer_temp.datalen_));
-                    int inc = 12 + answer_temp.datalen_;
+                    //answer_temp.name_ = ntohs(src->get_at<unsigned short>(i));
+                    
+                    
+                    
+                    answer_temp.type_ = pre_type;
+                    answer_temp.class_ = ntohs(src->get_at<unsigned short>(i));    i+=2;
+                    answer_ttl_idx.push_back(i);
+                    answer_temp.ttl_ = ntohl(src->get_at<uint32_t>(i));            i+=4;
+                    answer_temp.datalen_ = ntohs(src->get_at<uint16_t>(i));        i+=2;
 
-                    mem_counter += inc ;
-                    i += inc;
+                    if(answer_temp.datalen_ > 0) {
+                        answer_temp.data_.append(src->view(i,answer_temp.datalen_));
+                        i += answer_temp.datalen_;
+                    }
+
+                    mem_counter = i;
+                    
+                    DEB___("mem_counter: %d, size %d",i, src->size());
                     
                     DIA___("DNS_Packet::load: additional answer[%d]: name: %d, type: %d, class: %d, ttl: %d, len: %d, buflen: %d",additionals_togo,
                                         answer_temp.name_,answer_temp.type_,answer_temp.class_,answer_temp.ttl_,answer_temp.datalen_,answer_temp.data_.size()  );
                     additionals_list.push_back(answer_temp);
                     additionals_togo--;
+                }
+                else {
+                    
+                    WARS___("unsupported additional message, skipping the rest of message.");
+                    
+                    mem_counter = src->size();
+                    i = mem_counter;
+                    break;
                 }
             }
             

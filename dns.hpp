@@ -45,13 +45,17 @@ typedef enum DNS_Record_Type_ {
     UNKNOWN=0,
     A=1,
     CNAME=5,
-    AAAA=28 
+    TXT=16,
+    AAAA=28,
+    OPT=41
 } DNS_Record_Type;
 
 extern const char* _unknown;
 extern const char* str_a;
 extern const char* str_aaaa;
 extern const char* str_cname;
+extern const char* str_txt;
+extern const char* str_opt;
 
 const char* dns_record_type_str(int a);
 
