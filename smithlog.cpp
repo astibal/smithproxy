@@ -29,7 +29,7 @@ int QueueLogger::write_log(unsigned int l, std::string& sss) {
 
     locked_guard<QueueLogger> ll(this);
     
-     if(l <= level() ) {
+     if(l <= level() || forced_ ) {
         logs_.push(log_entry(l,sss));
      }
     
