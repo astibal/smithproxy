@@ -59,11 +59,16 @@ int orig_ssl_loglevel = 0;
 int orig_sslmitm_loglevel = 0;
 int orig_sslca_loglevel = 0;
 
+int orig_dns_insp_loglevel = 0;
+int orig_dns_packet_loglevel = 0;
 
 void load_defaults() {
     orig_ssl_loglevel = SSLCom::log_level_ref();
     orig_sslmitm_loglevel = SSLMitmCom::log_level_ref();
     orig_sslca_loglevel= SSLCertStore::log_level_ref();
+    
+    orig_dns_insp_loglevel = DNS_Inspector::log_level_ref();
+    orig_dns_packet_loglevel = DNS_Packet::log_level_ref();
 }
 
 void cmd_show_status(struct cli_def* cli) {
@@ -400,6 +405,35 @@ int cli_debug_ssl(struct cli_def *cli, const char *command, char *argv[], int ar
 }
 
 
+int cli_debug_dns(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    if(argc > 0) {
+        std::string a1 = argv[0];
+        if(a1 == "?") {
+            cli_print(cli,"valid parameters: %s",debug_levels);
+        } 
+        else if(a1 == "reset") {
+            DNS_Inspector::log_level_ref() = orig_dns_insp_loglevel;
+            DNS_Packet::log_level_ref() = orig_dns_packet_loglevel;
+        }
+        else {
+            int lev = std::atoi(argv[0]);
+            DNS_Inspector::log_level_ref() = lev;
+            DNS_Packet::log_level_ref() = lev;
+            
+        }
+    } else {
+        int l = DNS_Inspector::log_level_ref();
+        cli_print(cli,"DNS Inspector debug level: %d",l);
+        l = DNS_Packet::log_level_ref();
+        cli_print(cli,"DNS Packet debug level: %d",l);
+        cli_print(cli,"\n");
+        cli_print(cli,"valid parameters: %s",debug_levels);
+    }
+    
+    return CLI_OK;
+}
+
+
 int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
     cli_print(cli,"Memory buffers stats: ");
     cli_print(cli,"memory alloc   bytes: %lld",buffer::alloc_bytes);
@@ -652,6 +686,7 @@ void client_thread(int client_socket) {
             cli_register_command(cli, debuk, "term", cli_debug_terminal, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set level of logging to this terminal");
             cli_register_command(cli, debuk, "file", cli_debug_logfile, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set level of logging of standard log file");
             cli_register_command(cli, debuk, "ssl", cli_debug_ssl, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set ssl file logging level");
+            cli_register_command(cli, debuk, "dns", cli_debug_dns, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set dns file logging level");
         
         // Pass the connection off to libcli
         get_logger()->remote_targets(string_format("cli-%d",client_socket),client_socket);
