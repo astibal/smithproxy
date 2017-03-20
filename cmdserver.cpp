@@ -267,6 +267,20 @@ int cli_diag_dns_domain_cache_list(struct cli_def *cli, const char *command, cha
     return CLI_OK;
 }
 
+int cli_diag_dns_domain_cache_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    cli_print(cli, "\n Clearing domain cache:");
+    std::string out;
+    domain_cache.lock();
+    
+    domain_cache.clear();
+    
+    domain_cache.unlock();
+    cli_print(cli," done.");
+    
+    return CLI_OK;
+}
+
+
 
 int cli_diag_identity_ip_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
     
@@ -673,6 +687,7 @@ void client_thread(int client_socket) {
                         cli_register_command(cli, diag_dns_cache, "clear", cli_diag_dns_cache_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clear DNS traffic cache");
                 diag_dns_domains = cli_register_command(cli, diag_dns, "domain", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "DNS domain cache troubleshooting commands");
                         cli_register_command(cli, diag_dns_domains, "list", cli_diag_dns_domain_cache_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "DNS sub-domain list");
+                        cli_register_command(cli, diag_dns_domains, "clear", cli_diag_dns_domain_cache_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clear DNS sub-domain cache");
             diag_proxy = cli_register_command(cli, diag, "proxy",NULL, PRIVILEGE_PRIVILEGED, MODE_EXEC, "proxy related troubleshooting commands");
                 diag_proxy_session = cli_register_command(cli,diag_proxy,"session",NULL,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session commands");
                         cli_register_command(cli, diag_proxy_session,"list",cli_diag_proxy_session_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session list");
