@@ -20,6 +20,9 @@
 #include <sockshostcx.hpp>
 #include <logger.hpp>
 
+std::string socksTCPCom::sockstcpcom_name_ = "sock5";
+std::string socksSSLMitmCom::sockssslmitmcom_name_ = "s5+ssl+insp";
+
 socksServerCX::socksServerCX(baseCom* c, unsigned int s) : baseHostCX(c,s) {
     state_ = INIT;
 }

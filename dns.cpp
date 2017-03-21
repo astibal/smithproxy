@@ -25,6 +25,8 @@
 
 
 DEFINE_LOGGING(DNS_Packet);
+DEFINE_LOGGING(DNS_Request);
+DEFINE_LOGGING(DNS_Response);
 
 const char* _unknown = "unknown";
 const char* str_a = "A";

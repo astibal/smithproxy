@@ -36,13 +36,17 @@ typedef enum socks5_message_ { POLICY, UPGRADE } socks5_message;
 
 class socksTCPCom: public TCPCom {
 public:
-    virtual const char* name() { return "s5+tcp"; };
+    static std::string sockstcpcom_name_;
+    
+    virtual std::string& name() { return sockstcpcom_name_; };
     virtual baseCom* replicate() { return new socksTCPCom(); };
 };
 
 class socksSSLMitmCom: public MySSLMitmCom {
 public:
-    virtual const char* name() { return "s5+ssl+insp"; };
+    static std::string sockssslmitmcom_name_;
+    
+    virtual std::string& name() { return sockssslmitmcom_name_; };
     virtual baseCom* replicate() { return new socksSSLMitmCom(); };
 };
 

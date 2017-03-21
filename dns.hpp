@@ -190,6 +190,7 @@ public:
     DNS_Request(): DNS_Packet() {};        // we won't allow parsing in constructor
     virtual ~DNS_Request() {};
     DECLARE_C_NAME("DNS_Request");
+    DECLARE_LOGGING(to_string);
 };
 
 
@@ -202,6 +203,7 @@ public:
     virtual ~DNS_Response() { if(cached_packet != nullptr) delete cached_packet; };
     
     DECLARE_C_NAME("DNS_Response");
+    DECLARE_LOGGING(to_string);
 };
 
 
