@@ -125,8 +125,11 @@ int DNS_Packet::load(buffer* src) {
                     field_len = src->get_at<uint8_t>(cur_mem);
                     
                     // 
-                    if(cur_mem + field_len >= src->size()) 
+                    if(cur_mem + field_len >= src->size()) {
+                        DIA___("DNS_Packet::load: incomplete question data in the preamble, position %d, field_len %d out of buffer bounds %d",cur_mem, field_len, src->size());
+                        failure = true;
                         break;
+                    }
                     
                     DEB___("DNS_Packet::load: question field_len=%d i=%d buffer_size=%d",field_len,cur_mem,src->size());
                     
