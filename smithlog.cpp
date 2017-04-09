@@ -43,6 +43,8 @@ int QueueLogger::write_log(unsigned int l, std::string& sss) {
 }
 
 int QueueLogger::write_disk(unsigned int l, std::string& sss) {
+    locked_guard<QueueLogger> ll(this);
+  
     return logger::write_log(l,sss);
 }
 
