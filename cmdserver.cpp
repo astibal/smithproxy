@@ -211,6 +211,27 @@ int cli_diag_ssl_wl_clear(struct cli_def *cli, const char *command, char *argv[]
     return CLI_OK;
 }
 
+int cli_diag_ssl_crl_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    
+    SSLCertStore* store = SSLCom::certstore();
+    std::string out;
+    
+    out += "Downloaded CRLs:\n\n";
+    
+    store->crl_cache.lock();
+    for (auto x: store->crl_cache.cache()) {
+       std::string uri = x.first;
+       
+       out += "    " + uri + "\n";
+    }
+    store->crl_cache.unlock();
+    
+    cli_print(cli,"\n%s",out.c_str());
+    
+    return CLI_OK;
+}
+
+
 int cli_diag_dns_cache_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
     inspect_dns_cache.lock();
     
@@ -687,6 +708,7 @@ void client_thread(int client_socket) {
             struct cli_command *diag_ssl;
                 struct cli_command *diag_ssl_cache;
                 struct cli_command *diag_ssl_wl;
+                struct cli_command *diag_ssl_crl;
             struct cli_command *diag_mem;
                 struct cli_command *diag_mem_buffers;
                 struct cli_command *diag_mem_objects;
@@ -727,6 +749,8 @@ void client_thread(int client_socket) {
                 diag_ssl_wl = cli_register_command(cli, diag_ssl, "whitelist", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl temporary verification whitelist");                        
                         cli_register_command(cli, diag_ssl_wl, "list", cli_diag_ssl_wl_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all verification whitelist entries");
                         cli_register_command(cli, diag_ssl_wl, "clear", cli_diag_ssl_wl_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clear all verification whitelist entries");
+                diag_ssl_crl = cli_register_command(cli, diag_ssl, "crl", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose dynamically downloaded CRLs");                           
+                        cli_register_command(cli, diag_ssl_crl, "list", cli_diag_ssl_crl_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all CRLs");
             diag_mem = cli_register_command(cli, diag, "mem", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory related troubleshooting commands");
                 diag_mem_buffers = cli_register_command(cli, diag_mem, "buffers", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory buffers troubleshooting commands");
                         cli_register_command(cli, diag_mem_buffers, "stats", cli_diag_mem_buffers_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory buffers statistics");
