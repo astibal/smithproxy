@@ -73,11 +73,11 @@ public:
     UxAcceptor(baseCom* c, int worker_id) : ThreadedAcceptorProxy< baseProxy>(c,worker_id) {};    
 };
 
-typedef ThreadedAcceptor<UxAcceptor,baseProxy> WebrProxy;
+typedef ThreadedAcceptor<UxAcceptor,baseProxy> UxProxy;
 
 // running threads and their proxies
 
-static WebrProxy* webr_proxy = nullptr;
+static UxProxy* webr_proxy = nullptr;
 std::thread* webr_thread = nullptr;
 
 
@@ -389,7 +389,7 @@ int main(int argc, char *argv[]) {
 
     std::string friendly_thread_name_webr = "sxy_mer_webr";
 
-    webr_proxy = prepare_listener<WebrProxy,UxCom>(cfg_webr_listen_port,"plain-text","/var/run/sxy_webr",cfg_webr_workers);
+    webr_proxy = prepare_listener<UxProxy,UxCom>(cfg_webr_listen_port,"plain-text","/var/run/sxy_webr",cfg_webr_workers);
     
     if(webr_proxy == nullptr && cfg_webr_workers >= 0) {
         
