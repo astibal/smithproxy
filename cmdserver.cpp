@@ -236,14 +236,21 @@ int cli_diag_dns_cache_list(struct cli_def *cli, const char *command, char *argv
     inspect_dns_cache.lock();
     
     cli_print(cli,"\nDNS cache populated from traffic: ");
+    std::string out; 
+    
     for(auto it = inspect_dns_cache.cache().begin(); it != inspect_dns_cache.cache().end() ; ++it ) {
         std::string s = it->first;
         DNS_Response* r = it->second;
-        
-        cli_print(cli,"    %s  ->%s",s.c_str(),r->answer_str().c_str());
+
+        if (r != nullptr && r->answers().size() > 0) {
+            int ttl = (r->loaded_at + r->answers().at(0).ttl_) - time(nullptr);
+            std::string t = string_format("    %s  -> [ttl:%d]%s",s.c_str(),ttl,r->answer_str().c_str());
+            out += t + "\n";
+        }
     }
-    
     inspect_dns_cache.unlock();
+    
+    cli_print(cli, "%s", out.c_str());
     
     return CLI_OK;
 }
