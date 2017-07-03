@@ -154,7 +154,7 @@ int DNS_Packet::load(buffer* src) {
                         DEB___("DNS_Packet::load: s==0, mem counter changed to: %d (0x%x)",mem_counter,mem_counter);
                         
                         if(questions_togo > 0) {
-                            questions_list.push_back(question_temp);
+                            questions_list_.push_back(question_temp);
                             questions_togo--;
                         }
                         // we don't currently process authorities and additional records
@@ -215,7 +215,7 @@ int DNS_Packet::load(buffer* src) {
                 
                 DIA___("DNS_Packet::load: answer[%d]: name: %d, type: %d, class: %d, ttl: %d, len: %d, buflen: %d",answers_togo,
                                     answer_temp.name_,answer_temp.type_,answer_temp.class_,answer_temp.ttl_,answer_temp.datalen_,answer_temp.data_.size()  );
-                answers_list.push_back(answer_temp);
+                answers_list_.push_back(answer_temp);
                 answers_togo--;
             }
         }
@@ -256,7 +256,7 @@ int DNS_Packet::load(buffer* src) {
                     
                     DIA___("DNS_Packet::load: authorities[%d]: name: %d, type: %d, class: %d, ttl: %d, len: %d, buflen: %d",authorities_togo,
                                         answer_temp.name_,answer_temp.type_,answer_temp.class_,answer_temp.ttl_,answer_temp.datalen_,answer_temp.data_.size()  );
-                    authorities_list.push_back(answer_temp);
+                    authorities_list_.push_back(answer_temp);
                     authorities_togo--;
                 } 
                 else {
@@ -341,7 +341,7 @@ int DNS_Packet::load(buffer* src) {
                     
                     DIA___("DNS_Packet::load: additional answer[%d]: name: %d, type: %d, class: %d, ttl: %d, len: %d, buflen: %d",additionals_togo,
                                         answer_temp.name_,answer_temp.type_,answer_temp.class_,answer_temp.ttl_,answer_temp.datalen_,answer_temp.data_.size()  );
-                    additionals_list.push_back(answer_temp);
+                    additionals_list_.push_back(answer_temp);
                     additionals_togo--;
                 }
                 else {
@@ -357,7 +357,7 @@ int DNS_Packet::load(buffer* src) {
             }
             
             //fix additionals number, for case we omitted some
-            additionals_ = additionals_list.size();
+            additionals_ = additionals_list_.size();
         }
         
         if(questions_togo == 0 && answers_togo == 0 && authorities_togo == 0 /*&& additionals_togo == 0*/) {
@@ -374,19 +374,19 @@ int DNS_Packet::load(buffer* src) {
 
 std::string DNS_Packet::to_string(int verbosity) {
     std::string r = string_format("%s: id: %d, type 0x%x [ ",c_name(),id_,flags_);
-    for(auto x = questions_list.begin(); x != questions_list.end(); ++x) {
+    for(auto x = questions_list_.begin(); x != questions_list_.end(); ++x) {
         r += x->hr();
-        if(x+1 != questions_list.end()) {
+        if(x+1 != questions_list_.end()) {
             r += ",";
         }
     }
     r+=" ]";
     
-    if(answers_list.size() > 0) {
+    if(answers_list_.size() > 0) {
         r += " -> [";
-        for(auto x = answers_list.begin(); x != answers_list.end(); ++x) {
+        for(auto x = answers_list_.begin(); x != answers_list_.end(); ++x) {
             r += x->hr();
-            if(x+1 != answers_list.end()) {
+            if(x+1 != answers_list_.end()) {
                 r += " | ";
             }
         }
@@ -401,7 +401,7 @@ std::string DNS_Packet::to_string(int verbosity) {
 std::string DNS_Packet::answer_str() const {
     std::string ret = "";
     
-    for(auto x = answers_list.begin(); x != answers_list.end(); ++x) {
+    for(auto x = answers_list_.begin(); x != answers_list_.end(); ++x) {
         if(x->type_ == A || x->type_ == AAAA) {
             ret += " " + x->ip();
         }
@@ -413,7 +413,7 @@ std::string DNS_Packet::answer_str() const {
 std::vector< CidrAddress*> DNS_Packet::get_a_anwsers() {
     std::vector<CidrAddress*> ret;
     
-    for(auto x = answers_list.begin(); x != answers_list.end(); ++x) {
+    for(auto x = answers_list_.begin(); x != answers_list_.end(); ++x) {
         if(x->type_ == A || x->type_ == AAAA) {
             ret.push_back(new CidrAddress(x->cidr()));
         }

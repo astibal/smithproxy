@@ -146,11 +146,11 @@ protected:
     uint16_t    authorities_ = 0;
     uint16_t    additionals_ = 0;
 
-    std::vector<DNS_Question> questions_list;
-    std::vector<DNS_Answer> answers_list;
-    std::vector<DNS_Answer> authorities_list;
+    std::vector<DNS_Question> questions_list_;
+    std::vector<DNS_Answer> answers_list_;
+    std::vector<DNS_Answer> authorities_list_;
     //std::vector<DNS_AdditionalInfo> additionals_list;
-    std::vector<DNS_Answer> additionals_list;
+    std::vector<DNS_Answer> additionals_list_;
     
 public:    
     std::vector<int> answer_ttl_idx; // should be protected;
@@ -164,25 +164,29 @@ public:
 
     inline uint16_t id() const { return id_; }
     inline uint16_t flags() const { return flags_; } // todo: split and inspect all bits of this field
-    inline int questions() { return questions_list.size(); }
-    inline int answers() { return questions_list.size(); }
 
     // helper inline functions to operate on most common content
     std::string question_str_0() const { 
-        if(questions_list.size()) { 
+        if(questions_list_.size()) { 
             std::string ret;
             if(question_type_0() == A) ret = "A:";
             else if (question_type_0() == AAAA) ret = "AAAA:";
-            return ret += string_format(questions_list.at(0).rec_str); 
+            return ret += string_format(questions_list_.at(0).rec_str); 
         } 
         return std::string("? "); 
     };
-    uint16_t question_type_0() const { if(questions_list.size()) { return questions_list.at(0).rec_type; } return 0; };
-    uint16_t question_class_0() const { if(questions_list.size()) { return questions_list.at(0).rec_class; } return 0; };
+    uint16_t question_type_0() const { if(questions_list_.size()) { return questions_list_.at(0).rec_type; } return 0; };
+    uint16_t question_class_0() const { if(questions_list_.size()) { return questions_list_.at(0).rec_class; } return 0; };
     
     std::string answer_str() const;
     std::vector<CidrAddress*> get_a_anwsers();
 
+    inline std::vector<DNS_Question>& questions() { return questions_list_; };
+    inline std::vector<DNS_Answer>& answers() { return answers_list_; };
+    inline std::vector<DNS_Answer>& authorities() { return authorities_list_; };
+    inline std::vector<DNS_Answer>& additionals() { return additionals_list_; };
+    
+    
     DECLARE_C_NAME("DNS_Packet");
     DECLARE_LOGGING(to_string);
 };
