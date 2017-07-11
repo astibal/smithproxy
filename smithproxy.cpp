@@ -111,10 +111,6 @@ bool config_file_check_only = false;
 
 static std::string cfg_messages_dir = "/etc/smithproxy/msg/en/";
 
-#define LOG_FILENAME_SZ 512
-volatile char crashlog_file[LOG_FILENAME_SZ];
-//static unsigned int cfg_log_level = INF;
-
 
 static int cfg_tcp_workers = 0;
 static int cfg_ssl_workers = 0;
@@ -126,67 +122,6 @@ static std::string cfg_tenant_index;
 static std::string cfg_tenant_name;
 
 
-
-#define UNW_LOCAL_ONLY
-#include <libunwind.h>
-
-static void uw_btrace_handler(int sig) {
-    unw_cursor_t cursor; unw_context_t uc;
-    unw_word_t ip, sp;
-
-    unw_getcontext(&uc);
-    unw_init_local(&cursor, &uc);
-    
-    int CRLOG = open((const char*)crashlog_file,O_CREAT | O_WRONLY | O_TRUNC,S_IRUSR|S_IWUSR);
-    TEMP_FAILURE_RETRY(write(STDERR_FILENO," ======== Smithproxy exception handler =========\n",50));
-    TEMP_FAILURE_RETRY(write(CRLOG," ======== Smithproxy exception handler =========\n",50));
-
-    void *trace[64];
-    size_t size, i;
-    char **strings;
-
-    size    = backtrace( trace, 64 );
-    strings = backtrace_symbols( trace, size );
-
-    if (strings == NULL) {
-        //FATS_("failure: backtrace_symbols");
-        TEMP_FAILURE_RETRY(write(STDERR_FILENO,"failure: backtrace_symbols\n",28));
-        TEMP_FAILURE_RETRY(write(CRLOG,"failure: backtrace_symbols\n",28));
-        close(CRLOG);
-        exit(EXIT_FAILURE);
-    }
-    
-    
-    //FAT_("  [%d] Traceback:",sig );
-    TEMP_FAILURE_RETRY(write(STDERR_FILENO,"Traceback:\n",11));
-    TEMP_FAILURE_RETRY(write(CRLOG,"Traceback:\n",11));
-
-    while (unw_step(&cursor) > 0) {
-        char buf_line[256];
-        memset(buf_line,0,256);
-        char buf_fun[256];
-        memset(buf_fun,0,256);
-
-        unw_word_t  offset;
-        unw_get_proc_name(&cursor, buf_fun, sizeof(buf_fun), &offset);
-        unw_get_reg(&cursor, UNW_REG_IP, &ip);
-        unw_get_reg(&cursor, UNW_REG_SP, &sp);
-        
-        snprintf (buf_line, 255, "ip = %lx, sp = %lx: (%s+0x%x) [%p]\n", (long) ip, (unsigned long) sp, buf_fun, (unsigned int) offset, (void*)ip);
-        int n = strnlen(buf_line,255);
-         TEMP_FAILURE_RETRY(write(CRLOG,buf_line,n));
-         TEMP_FAILURE_RETRY(write(STDERR_FILENO,buf_line,n));
-    }
-    
-    TEMP_FAILURE_RETRY(write(STDERR_FILENO," ===============================================\n",50));
-    TEMP_FAILURE_RETRY(write(CRLOG," ===============================================\n",50));
-    close(CRLOG);
-    
-    daemon_unlink_pidfile();
-    
-    free(strings);
-    exit(-1);
-}
 
 void my_terminate (int param) {
     
@@ -409,7 +344,7 @@ bool load_config(std::string& config_f, bool reload) {
             bool log_console;
             
             //init crashlog file with dafe default
-            strcpy((char*)crashlog_file,"/tmp/smithproxy_crash.log");
+            set_crashlog("/tmp/smithproxy_crash.log");
             
             if(cfgapi.getRoot()["settings"].lookupValue("log_file",log_target)) {
                 
@@ -417,8 +352,7 @@ bool load_config(std::string& config_f, bool reload) {
                 log_target = string_format(log_target,cfgapi_tenant_name.c_str());
                 // prepare custom crashlog file
                 std::string crlog = log_target + ".crashlog.log";
-                memset((void*)crashlog_file,0,LOG_FILENAME_SZ);
-                strncpy((char*)crashlog_file,crlog.c_str(),LOG_FILENAME_SZ-1);
+                set_crashlog(crlog.c_str());
                 
                 std::ofstream * o = new std::ofstream(log_target.c_str(),std::ios::app);
                 get_logger()->targets(log_target,o);
@@ -686,33 +620,12 @@ int main(int argc, char *argv[]) {
         exit(-1);
     }
     
-    // install signal handler, we do want to release the memory properly
-        // signal handler installation
-    void (*prev_fn)(int);
-    prev_fn = signal (SIGTERM,my_terminate);
-    if (prev_fn==SIG_IGN) signal (SIGTERM,SIG_IGN);
-
-    prev_fn = signal (SIGINT,my_terminate);
-    if (prev_fn==SIG_IGN) signal (SIGINT,SIG_IGN);
-
-    prev_fn = signal(SIGABRT, uw_btrace_handler);
-    if (prev_fn==SIG_IGN) signal (SIGABRT,SIG_IGN);
+    set_daemon_signals(my_terminate,my_usr1);
     
-    prev_fn = signal(SIGUSR1, my_usr1);
-    if (prev_fn==SIG_IGN) signal (SIGUSR1,SIG_IGN);
-
-
-    daemon_signals(uw_btrace_handler);
-    
-//     struct sigaction act_pipe;
-//     sigemptyset(&act_pipe.sa_mask);    
-//     sigaction( SIGPIPE, &act_pipe, NULL);
-//     
-
     if(plain_proxy) {
         INFS_("Starting TCP listener");
         plain_thread = new std::thread([]() { 
-            daemon_signals(uw_btrace_handler);
+            set_daemon_signals(my_terminate,my_usr1);
             DIA_("smithproxy_tcp: max file descriptors: %d",daemon_get_limit_fd());
             
             plain_proxy->run(); 
@@ -725,7 +638,7 @@ int main(int argc, char *argv[]) {
     if(ssl_proxy) {
         INFS_("Starting TLS listener");        
         ssl_thread = new std::thread([] () { 
-            daemon_signals(uw_btrace_handler);
+            set_daemon_signals(my_terminate,my_usr1);
             daemon_set_limit_fd(0);
             DIA_("smithproxy_tls: max file descriptors: %d",daemon_get_limit_fd());
             
@@ -739,7 +652,7 @@ int main(int argc, char *argv[]) {
     if(dtls_proxy) {
         INFS_("Starting DTLS listener");        
         dtls_thread = new std::thread([] () { 
-            daemon_signals(uw_btrace_handler);
+            set_daemon_signals(my_terminate,my_usr1);
             daemon_set_limit_fd(0);
             DIA_("smithproxy_tls: max file descriptors: %d",daemon_get_limit_fd());
             
@@ -756,7 +669,7 @@ int main(int argc, char *argv[]) {
         
         INFS_("Starting UDP listener");        
         udp_thread = new std::thread([] () {
-            daemon_signals(uw_btrace_handler);
+            set_daemon_signals(my_terminate,my_usr1);
             daemon_set_limit_fd(0);
             DIA_("smithproxy_udp: max file descriptors: %d",daemon_get_limit_fd());
             
@@ -770,7 +683,7 @@ int main(int argc, char *argv[]) {
     if(socks_proxy) {
         INFS_("Starting SOCKS5 listener");
         socks_thread = new std::thread([] () { 
-            daemon_signals(uw_btrace_handler);
+            set_daemon_signals(my_terminate,my_usr1);
             daemon_set_limit_fd(0);
             DIA_("smithproxy_skx: max file descriptors: %d",daemon_get_limit_fd());
             
@@ -783,7 +696,7 @@ int main(int argc, char *argv[]) {
 
     cli_thread = new std::thread([] () { 
         INFS_("Starting CLI");
-        daemon_signals(uw_btrace_handler);
+        set_daemon_signals(my_terminate,my_usr1);
         DIA_("smithproxy_cli: max file descriptors: %d",daemon_get_limit_fd());
         
         cli_loop(cli_port);

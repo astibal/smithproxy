@@ -31,6 +31,7 @@
 #include <string.h>
 #include <sys/time.h>
 #include <sys/resource.h>
+#include <execinfo.h>
 
 #include <logger.hpp>
 #include <daemon.hpp>
@@ -43,6 +44,7 @@
 extern "C" {
 #endif
 
+    
 std::string PID_FILE(PID_FILE_DEFAULT);
 
 void daemon_set_tenant(const std::string& tenant_id) {
@@ -151,16 +153,94 @@ void daemon_set_limit_fd(int max) {
     }
 }
 
-void daemon_signals(void (*segv_handler)(int)) {
+void set_signal(unsigned int SIG, void (*sig_handler)(int)) {
     struct sigaction act_segv;
     sigemptyset(&act_segv.sa_mask);
     act_segv.sa_flags = 0;
     
-    if(segv_handler != nullptr)  act_segv.sa_handler = segv_handler;
+    if(sig_handler != nullptr)  act_segv.sa_handler = sig_handler;
     
-    sigaction( SIGSEGV, &act_segv, NULL);
+    sigaction( SIG, &act_segv, NULL);
 }
 
+#define LOG_FILENAME_SZ 512
+volatile char crashlog_file[LOG_FILENAME_SZ];
+
+void set_crashlog(const char* file) {
+    memset((void*)crashlog_file,0,LOG_FILENAME_SZ);
+    strncpy((char*)crashlog_file,file,LOG_FILENAME_SZ-1);
+}
+
+static void uw_btrace_handler(int sig) {
+    unw_cursor_t cursor; unw_context_t uc;
+    unw_word_t ip, sp;
+
+    unw_getcontext(&uc);
+    unw_init_local(&cursor, &uc);
+    
+    int CRLOG = open((const char*)crashlog_file,O_CREAT | O_WRONLY | O_TRUNC,S_IRUSR|S_IWUSR);
+    TEMP_FAILURE_RETRY(write(STDERR_FILENO," ======== Smithproxy exception handler =========\n",50));
+    TEMP_FAILURE_RETRY(write(CRLOG," ======== Smithproxy exception handler =========\n",50));
+
+    void *trace[64];
+    int size;
+    char **strings;
+
+    size    = backtrace( trace, 64 );
+    strings = backtrace_symbols( trace, size );
+
+    if (strings == NULL) {
+        //FATS_("failure: backtrace_symbols");
+        TEMP_FAILURE_RETRY(write(STDERR_FILENO,"failure: backtrace_symbols\n",28));
+        TEMP_FAILURE_RETRY(write(CRLOG,"failure: backtrace_symbols\n",28));
+        close(CRLOG);
+        exit(EXIT_FAILURE);
+    }
+    
+    
+    //FAT_("  [%d] Traceback:",sig );
+    TEMP_FAILURE_RETRY(write(STDERR_FILENO,"Traceback:\n",11));
+    TEMP_FAILURE_RETRY(write(CRLOG,"Traceback:\n",11));
+
+    while (unw_step(&cursor) > 0) {
+        char buf_line[256];
+        memset(buf_line,0,256);
+        char buf_fun[256];
+        memset(buf_fun,0,256);
+
+        unw_word_t  offset;
+        unw_get_proc_name(&cursor, buf_fun, sizeof(buf_fun), &offset);
+        unw_get_reg(&cursor, UNW_REG_IP, &ip);
+        unw_get_reg(&cursor, UNW_REG_SP, &sp);
+        
+        snprintf (buf_line, 255, "ip = %lx, sp = %lx: (%s+0x%x) [%p]\n", (long) ip, (unsigned long) sp, buf_fun, (unsigned int) offset, (void*)ip);
+        int n = strnlen(buf_line,255);
+         TEMP_FAILURE_RETRY(write(CRLOG,buf_line,n));
+         TEMP_FAILURE_RETRY(write(STDERR_FILENO,buf_line,n));
+    }
+    
+    TEMP_FAILURE_RETRY(write(STDERR_FILENO," ===============================================\n",50));
+    TEMP_FAILURE_RETRY(write(CRLOG," ===============================================\n",50));
+    close(CRLOG);
+    
+    daemon_unlink_pidfile();
+    
+    free(strings);
+    exit(-1);
+}
+
+void set_daemon_signals(void (*terminate_handler)(int),void (*reload_handler)(int)) {
+    // install signal handler, we do want to release the memory properly
+        // signal handler installation
+    
+    set_signal(SIGTERM,terminate_handler);
+    set_signal(SIGINT,terminate_handler);
+    
+    set_signal(SIGUSR1,reload_handler);
+    
+    set_signal(SIGABRT,uw_btrace_handler);
+    set_signal(SIGSEGV,uw_btrace_handler);
+}
 
 #ifdef __cplusplus
 }
