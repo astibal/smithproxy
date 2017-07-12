@@ -21,3 +21,11 @@
     This is standalone client utility for smithd backend server.
 */
 
+#include <socle.hpp>
+#include <baseproxy.hpp>
+#include <uxcom.hpp>
+#include <smithdcx.hpp>
+
+
+int main(int argc, char *argv[]) {
+}

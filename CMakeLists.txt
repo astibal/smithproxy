@@ -2,23 +2,25 @@ cmake_minimum_required(VERSION 2.8)
 
 SET(SOCLE_DIR "../socle")
 SET(SOCLE_COMMON_DIR "../socle/common")
+SET(SMITHD_DIR "smithbackd")
 
 project(smithproxy CXX)
 include_directories ("${SOCLE_DIR}")
 include_directories ("${SOCLE_COMMON_DIR}")
 include_directories ("${PROJECT_SOURCE_DIR}")
+include_directories ("${SMITHD_DIR}")
 
 add_subdirectory(${SOCLE_DIR} socle_lib)
 add_subdirectory(${SOCLE_COMMON_DIR} socle_common_lib)
-
-add_subdirectory(smithbackd)
+add_subdirectory(${SMITHD_DIR})
 
 if(UNIX)
     SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g  -Wall -std=c++11")
 endif()
 
 add_executable(smithproxy smithproxy.cpp mitmhost.cpp mitmproxy.cpp cfgapi.cpp cidr.cpp policy.cpp daemon.cpp sockshostcx.cpp socksproxy.cpp cmdserver.cpp cfgapi_auth.cpp dns.cpp inspectors.cpp addrobj.cpp srvutils.cpp staticcontent.cpp nltemplate.cpp cfgapi_auth6.cpp smithlog.cpp)
-add_executable(smithd smithbackd/smithd.cpp daemon.cpp smithlog.cpp)
+add_executable(smithd ${SMITHD_DIR}/smithd.cpp ${SMITHD_DIR}/smithdcx.cpp daemon.cpp smithlog.cpp)
+add_executable(smithdc ${SMITHD_DIR}/smithdc.cpp ${SMITHD_DIR}/smithdcx.cpp smithlog.cpp)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}")
 
@@ -39,7 +41,7 @@ endif (LIBCLI_FOUND)
 
 target_link_libraries(smithproxy socle_lib pthread ssl crypto rt unwind)
 target_link_libraries(smithd socle_lib pthread ssl crypto rt unwind)
-
+target_link_libraries(smithdc socle_lib pthread ssl crypto rt unwind)
 
 # taken from http://public.kitware.com/Bug/view.php?id=12646
 function(install_if_not_exists src dest)
