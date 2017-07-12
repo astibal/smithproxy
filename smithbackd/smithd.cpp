@@ -91,7 +91,7 @@ static bool cfg_mtrace_enable = false;
 static std::string cfg_log_file;
 static int cfg_log_level = INF;
 static int cfg_log_console = false;
-static int cfg_webr_workers = 0;
+static int cfg_smithd_workers = 0;
 static std::string cfg_smithd_listen_port = "/var/run/sxy_smithd";
 
 // Various
@@ -322,11 +322,11 @@ int main(int argc, char *argv[]) {
     //     CRYPTO_dbg_set_options(V_CRYPTO_MDEBUG_ALL);
     CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON);
 
-    std::string friendly_thread_name_webr = "sxy_mer_webr";
+    std::string friendly_thread_name_smithd = "sxy_smithd";
 
-    backend_proxy = prepare_listener<UxProxy,UxCom>(cfg_smithd_listen_port,"plain-text","/var/run/sxy_webr",cfg_webr_workers);
+    backend_proxy = prepare_listener<UxProxy,UxCom>(cfg_smithd_listen_port,"plain-text","/var/run/sxy_smithd",cfg_smithd_workers);
     
-    if(backend_proxy == nullptr && cfg_webr_workers >= 0) {
+    if(backend_proxy == nullptr && cfg_smithd_workers >= 0) {
         
         FATS_("Failed to setup proxies. Bailing!");
         exit(-1);
@@ -341,10 +341,10 @@ int main(int argc, char *argv[]) {
             DIA_("smithd: max file descriptors: %d",daemon_get_limit_fd());
             
             backend_proxy->run(); 
-            DIAS_("webr workers torn down."); 
+            DIAS_("smithd workers torn down."); 
             backend_proxy->shutdown(); 
         } );
-        pthread_setname_np(backend_thread->native_handle(),friendly_thread_name_webr.c_str());
+        pthread_setname_np(backend_thread->native_handle(),friendly_thread_name_smithd.c_str());
     }
     
     
