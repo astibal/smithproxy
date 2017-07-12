@@ -77,8 +77,8 @@ typedef ThreadedAcceptor<UxAcceptor,baseProxy> UxProxy;
 
 // running threads and their proxies
 
-static UxProxy* webr_proxy = nullptr;
-std::thread* webr_thread = nullptr;
+static UxProxy* backend_proxy = nullptr;
+std::thread* backend_thread = nullptr;
 
 
 // Configuration variables
@@ -104,8 +104,8 @@ void my_terminate (int param) {
     
     if (!cfg_daemonize)
     printf("Terminating ...\n");
-    if (webr_proxy != nullptr) {
-        webr_proxy->dead(true);
+    if (backend_proxy != nullptr) {
+        backend_proxy->dead(true);
     }
 
     cnt_terminate++;
@@ -314,9 +314,9 @@ int main(int argc, char *argv[]) {
 
     std::string friendly_thread_name_webr = "sxy_mer_webr";
 
-    webr_proxy = prepare_listener<UxProxy,UxCom>(cfg_webr_listen_port,"plain-text","/var/run/sxy_webr",cfg_webr_workers);
+    backend_proxy = prepare_listener<UxProxy,UxCom>(cfg_webr_listen_port,"plain-text","/var/run/sxy_webr",cfg_webr_workers);
     
-    if(webr_proxy == nullptr && cfg_webr_workers >= 0) {
+    if(backend_proxy == nullptr && cfg_webr_workers >= 0) {
         
         FATS_("Failed to setup proxies. Bailing!");
         exit(-1);
@@ -324,17 +324,17 @@ int main(int argc, char *argv[]) {
 
     set_daemon_signals(my_terminate,my_usr1);
     
-    if(webr_proxy) {
+    if(backend_proxy) {
         INFS_("Starting webr listener");
-        webr_thread = new std::thread([]() { 
+        backend_thread = new std::thread([]() { 
             set_daemon_signals(my_terminate,my_usr1);
             DIA_("smithproxy_webr: max file descriptors: %d",daemon_get_limit_fd());
             
-            webr_proxy->run(); 
+            backend_proxy->run(); 
             DIAS_("webr workers torn down."); 
-            webr_proxy->shutdown(); 
+            backend_proxy->shutdown(); 
         } );
-        pthread_setname_np(webr_thread->native_handle(),friendly_thread_name_webr.c_str());
+        pthread_setname_np(backend_thread->native_handle(),friendly_thread_name_webr.c_str());
     }
     
     
@@ -342,12 +342,12 @@ int main(int argc, char *argv[]) {
     
     pthread_setname_np(pthread_self(),"sxy_merged");
     
-    if(webr_thread) {
-        webr_thread->join();
+    if(backend_thread) {
+        backend_thread->join();
     }
 
-    if(webr_thread)
-        delete webr_thread;
+    if(backend_thread)
+        delete backend_thread;
     
     DIAS_("Debug SSL statistics: ");
     DIA_("SSL_accept: %d",SSLCom::counter_ssl_accept);
