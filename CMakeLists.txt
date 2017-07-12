@@ -18,7 +18,7 @@ if(UNIX)
 endif()
 
 add_executable(smithproxy smithproxy.cpp mitmhost.cpp mitmproxy.cpp cfgapi.cpp cidr.cpp policy.cpp daemon.cpp sockshostcx.cpp socksproxy.cpp cmdserver.cpp cfgapi_auth.cpp dns.cpp inspectors.cpp addrobj.cpp srvutils.cpp staticcontent.cpp nltemplate.cpp cfgapi_auth6.cpp smithlog.cpp)
-add_executable(smithd smithbackd/smithd.cpp daemon.cpp)
+add_executable(smithd smithbackd/smithd.cpp daemon.cpp smithlog.cpp)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}")
 
@@ -104,7 +104,7 @@ if(UNIX)
     install_if_not_exists(etc/users.cfg /etc/smithproxy)
     install_if_not_exists(etc/users.key /etc/smithproxy)
     install_if_not_exists(etc/smithproxy.startup.cfg /etc/smithproxy)
-    install_if_not_exists(etc/merged.cfg /etc/smithproxy)
+    install_if_not_exists(etc/smithd.cfg /etc/smithproxy)
     install(FILES etc/smithproxy.startup.sh DESTINATION /etc/smithproxy 
                 PERMISSIONS 
                     OWNER_READ OWNER_WRITE OWNER_EXECUTE 

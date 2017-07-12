@@ -58,6 +58,7 @@
 #include <daemon.hpp>
 #include <cmdserver.hpp>
 #include <srvutils.hpp>
+#include <smithlog.hpp>
 
 
 #define MEM_DEBUG 1
@@ -91,7 +92,7 @@ static std::string cfg_log_file;
 static int cfg_log_level = INF;
 static int cfg_log_console = false;
 static int cfg_webr_workers = 0;
-static std::string cfg_webr_listen_port = "/var/run/sxy_webr";
+static std::string cfg_smithd_listen_port = "/var/run/sxy_smithd";
 
 // Various
 
@@ -216,9 +217,9 @@ bool load_config(std::string& config_f, bool reload) {
 
 int main(int argc, char *argv[]) {
     
-    PID_FILE="/var/run/smithmerged.pid";
+    PID_FILE="/var/run/smithd.pid";
 
-    config_file = "/etc/smithproxy/merged.cfg";
+    config_file = "/etc/smithproxy/smithd.cfg";
     bool custom_config_file = false;
     
     while(1) {
@@ -256,6 +257,15 @@ int main(int argc, char *argv[]) {
         }
     }
     
+    set_logger(new QueueLogger());
+    
+    if(!cfg_daemonize) {
+        std::thread* log_thread  = create_log_writer(get_logger());
+        if(log_thread != nullptr) {
+            pthread_setname_np(log_thread->native_handle(),"sxd_lwr");
+        }    
+    }    
+    
     get_logger()->level(WAR);
     
     // if logging set in cmd line, use it 
@@ -284,13 +294,13 @@ int main(int argc, char *argv[]) {
     }
 
     if(cfg_mtrace_enable) {
-        putenv("MALLOC_TRACE=/var/log/smithproxy_mtrace.log");
+        putenv("MALLOC_TRACE=/var/log/smithd_mtrace.log");
         mtrace();
     }
   
     if(daemon_exists_pidfile()) {
         FATS_("There is PID file already in the system.");
-        FAT_("Please make sure smithproxy is not running, remove %s and try again.",PID_FILE.c_str());
+        FAT_("Please make sure smithd is not running, remove %s and try again.",PID_FILE.c_str());
         exit(-5);
     }
     
@@ -314,7 +324,7 @@ int main(int argc, char *argv[]) {
 
     std::string friendly_thread_name_webr = "sxy_mer_webr";
 
-    backend_proxy = prepare_listener<UxProxy,UxCom>(cfg_webr_listen_port,"plain-text","/var/run/sxy_webr",cfg_webr_workers);
+    backend_proxy = prepare_listener<UxProxy,UxCom>(cfg_smithd_listen_port,"plain-text","/var/run/sxy_webr",cfg_webr_workers);
     
     if(backend_proxy == nullptr && cfg_webr_workers >= 0) {
         
@@ -325,10 +335,10 @@ int main(int argc, char *argv[]) {
     set_daemon_signals(my_terminate,my_usr1);
     
     if(backend_proxy) {
-        INFS_("Starting webr listener");
+        INFS_("Starting smithd listener");
         backend_thread = new std::thread([]() { 
             set_daemon_signals(my_terminate,my_usr1);
-            DIA_("smithproxy_webr: max file descriptors: %d",daemon_get_limit_fd());
+            DIA_("smithd: max file descriptors: %d",daemon_get_limit_fd());
             
             backend_proxy->run(); 
             DIAS_("webr workers torn down."); 
@@ -338,9 +348,9 @@ int main(int argc, char *argv[]) {
     }
     
     
-    CRI_("Smithproxy %s merged threads (socle %s)  started",SMITH_VERSION,SOCLE_VERSION);
+    CRI_("Smithd backend (smithproxy %s, socle %s)  started",SMITH_VERSION,SOCLE_VERSION);
     
-    pthread_setname_np(pthread_self(),"sxy_merged");
+    pthread_setname_np(pthread_self(),"smithd");
     
     if(backend_thread) {
         backend_thread->join();
@@ -365,3 +375,4 @@ int main(int argc, char *argv[]) {
     EVP_cleanup();     
 }
 
+ 
