@@ -73,5 +73,4 @@ int main(int argc, char *argv[]) {
     cx->close_after_write(true);
     
     p.run();
-    sleep(5);
 }
