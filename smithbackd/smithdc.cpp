@@ -50,7 +50,7 @@ public:
 int main(int argc, char *argv[]) {
     
     get_logger()->dup2_cout(true);
-    get_logger()->level(EXT);
+    get_logger()->level(INF);
     
     SmithdProxy p = SmithdProxy(new UxCom());
     p.pollroot(true);
