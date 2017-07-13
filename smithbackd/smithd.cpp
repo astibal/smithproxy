@@ -18,48 +18,30 @@
 */    
 
 #include <vector>
-
-#include <csignal>
-#include <ctime>
-#include <cstdlib>
-#include <sys/stat.h>
-#include <sys/types.h>
-
 #include <ostream>
 #include <ios>
 
 #include <getopt.h>
-#include <execinfo.h>
 
 #include <socle.hpp>
 
 #include <logger.hpp>
 #include <hostcx.hpp>
-#include <apphostcx.hpp>
 #include <baseproxy.hpp>
 #include <masterproxy.hpp>
 #include <threadedacceptor.hpp>
-#include <threadedreceiver.hpp>
-#include <sslcom.hpp>
-#include <sslmitmcom.hpp>
-#include <udpcom.hpp>
 #include <display.hpp>
 
 #include <smithproxy.hpp>
-#include <traflog.hpp>
 #include <display.hpp>
 
 #include <libconfig.h++>
 
-#include <mitmhost.hpp>
-#include <mitmproxy.hpp>
-#include <socksproxy.hpp>
-
 #include <daemon.hpp>
-#include <cmdserver.hpp>
 #include <srvutils.hpp>
 #include <smithlog.hpp>
 
+#include <smithdcx.hpp>
 
 #define MEM_DEBUG 1
 #ifdef MEM_DEBUG
@@ -67,14 +49,46 @@
 #endif
 
 
-extern "C" void __libc_freeres(void);
-
-class UxAcceptor : public ThreadedAcceptorProxy<baseProxy> {
+class SmithServerCX : public SmithProtoCX {
 public:
-    UxAcceptor(baseCom* c, int worker_id) : ThreadedAcceptorProxy< baseProxy>(c,worker_id) {};    
+    SmithServerCX(baseCom* c, unsigned int s) : SmithProtoCX(c,s) {};
+    SmithServerCX(baseCom* c, const char* h, const char* p) : SmithProtoCX(c,h,p) {};
+    virtual ~SmithServerCX() {};
+    
+    virtual void process_package(LTVEntry* e) {
+        INF_("Package dump: \n%s",e->hr().c_str());
+    };
 };
 
-typedef ThreadedAcceptor<UxAcceptor,baseProxy> UxProxy;
+
+class SmithdProxy : public baseProxy {
+public:
+    SmithdProxy(baseCom* c) : baseProxy(c) {};
+    virtual ~SmithdProxy() {};
+
+    virtual void on_left_error(baseHostCX*) {  dead(true); };
+    virtual void on_right_error(baseHostCX*) { dead(true); };    
+    
+    virtual void on_left_bytes(baseHostCX* cx) {
+        INF_("Left %d bytes arrived to 0x%x",cx->readbuf()->size(), cx);
+    }
+};
+    
+
+class UxAcceptor : public ThreadedAcceptorProxy<SmithdProxy> {
+public:
+    UxAcceptor(baseCom* c, int worker_id) : ThreadedAcceptorProxy<SmithdProxy>(c,worker_id) {};
+    
+    virtual baseHostCX* new_cx(const char* h, const char* p) { return new SmithServerCX(com()->slave(),h,p); };
+    virtual baseHostCX* new_cx(int s) { return new SmithServerCX(com()->slave(), s); };
+    virtual void on_left_new(baseHostCX* cx) {
+        SmithdProxy* p = new SmithdProxy(com()->slave());
+        p->ladd(cx);
+        this->proxies().push_back(p);
+    }
+};
+
+typedef ThreadedAcceptor<UxAcceptor,SmithdProxy> UxProxy;
 
 // running threads and their proxies
 
@@ -89,10 +103,10 @@ std::recursive_mutex merged_cfg_write_lock;
 static bool cfg_daemonize = false;
 static bool cfg_mtrace_enable = false;
 static std::string cfg_log_file;
-static int cfg_log_level = INF;
+static int cfg_log_level = EXT;
 static int cfg_log_console = false;
 static int cfg_smithd_workers = 0;
-static std::string cfg_smithd_listen_port = "/var/run/sxy_smithd";
+static std::string cfg_smithd_listen_port = "/var/run/smithd.sock";
 
 // Various
 
@@ -324,7 +338,7 @@ int main(int argc, char *argv[]) {
 
     std::string friendly_thread_name_smithd = "sxy_smithd";
 
-    backend_proxy = prepare_listener<UxProxy,UxCom>(cfg_smithd_listen_port,"plain-text","/var/run/sxy_smithd",cfg_smithd_workers);
+    backend_proxy = prepare_listener<UxProxy,UxCom>(cfg_smithd_listen_port,"plain-text","/var/run/smithd.sock",cfg_smithd_workers);
     
     if(backend_proxy == nullptr && cfg_smithd_workers >= 0) {
         
@@ -359,20 +373,9 @@ int main(int argc, char *argv[]) {
     if(backend_thread)
         delete backend_thread;
     
-    DIAS_("Debug SSL statistics: ");
-    DIA_("SSL_accept: %d",SSLCom::counter_ssl_accept);
-    DIA_("SSL_connect: %d",SSLCom::counter_ssl_connect);
-
-    SSLCom::certstore()->destroy();
-    
-    if(cfg_daemonize) {    
-        daemon_unlink_pidfile();
-    }
-    
-    CRYPTO_cleanup_all_ex_data();
-    ERR_free_strings();
-    ERR_remove_state(0);
-    EVP_cleanup();     
+    // cleanup
+    daemon_unlink_pidfile();
+    unlink(cfg_smithd_listen_port.c_str());
 }
 
  

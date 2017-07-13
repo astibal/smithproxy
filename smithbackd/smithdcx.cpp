@@ -66,6 +66,8 @@ int SmithProtoCX::unpack() {
 
 int SmithProtoCX::unpack(buffer* b) {
 
+    DEB_("SmithProtoCX::unpack: buffer size %d",b->size());
+    
     unsigned int r = 0;
     do {
         LTVEntry *l = new LTVEntry();
