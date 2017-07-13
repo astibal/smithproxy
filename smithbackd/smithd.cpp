@@ -56,8 +56,75 @@ public:
     virtual ~SmithServerCX() {};
     
     virtual void process_package(LTVEntry* e) {
-        INF_("Package dump: \n%s",e->hr().c_str());
+        DEB_("Package dump: \n%s",e->hr().c_str());
+        
+        
+        LTVEntry* m = e->search({CL_REQTYPE});
+        if(m && m->data_int() == RQT_RATEURL) {
+        
+            LTVEntry* rating_rq = e->search({CL_PAYLOAD,RQT_RATEURL});
+            if(rating_rq) {
+                INF_("found rating URI: %s",rating_rq->data_str().c_str());
+                
+                LTVEntry* resp = pkg_rating_response(111);
+                resp->pack();
+                
+                send(resp);
+            } else {
+                ERRS_("No payload or rating URL entry.");
+                LTVEntry* resp = pkg_error_response("nothing to rate");
+                resp->pack();
+                send(resp);
+            }
+            
+        } else if (m && false) {
+            /*another ID*/
+        } else {
+            if(m) {
+                ERR_("Unsupported request type %d", m->id());
+            } else {
+                ERRS_("Request type unspecified, ignoring message.");
+            }
+            
+            LTVEntry* resp = pkg_error_response("unknown request");
+            resp->pack();
+            send(resp);
+        }
     };
+    
+    
+    LTVEntry* pkg_error_response(const char* text = nullptr) {
+        LTVEntry* e = new LTVEntry();
+        e->container(CL_INIT);
+ 
+        LTVEntry* err = new LTVEntry();
+        err->set_num(255,LTVEntry::num,255);
+        e->add(err);
+        
+        if(text != nullptr) {
+            LTVEntry* err2 = new LTVEntry();
+            err2->set_str(254,LTVEntry::str,text);
+            e->add(err2);
+        }
+        
+        return e;
+    }
+    
+    LTVEntry* pkg_rating_response(int category) {
+        LTVEntry* e = new LTVEntry();
+        e->container(CL_INIT);
+        
+        LTVEntry* r = new LTVEntry();
+        r->container(RQT_RATEURL);
+        
+        LTVEntry* x = new LTVEntry();
+        x->set_num(RATEURL_CAT,LTVEntry::num,category);
+        r->add(x);
+        
+        e->add(r);
+        
+        return e;
+    }
 };
 
 

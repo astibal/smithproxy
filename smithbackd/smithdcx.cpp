@@ -105,7 +105,7 @@ int SmithProtoCX::process() {
         if(id == id_keepalive) {
             process_keepalive(*i);
         } else {
-            LTVEntry* k_a = (*i)->search("1");
+            LTVEntry* k_a = (*i)->search({1});
             if(k_a) {
                 DEB_("SmithProtoCX::process[%s]: non-keepalive msg contains sync data: %d (current %d)",c_name(), k_a->data_int(),hb_peer);
                 DUMS_(k_a->hr());

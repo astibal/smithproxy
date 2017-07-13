@@ -32,9 +32,55 @@ public:
     SmithClientCX(baseCom* c, const char* h, const char* p) : SmithProtoCX(c,h,p) {};
     virtual ~SmithClientCX() {};
     
+
+   
     virtual void process_package(LTVEntry* e) {
-        INF_("Package dump: \n",e->hr().c_str());
+        DEB_("Package dump: \n%s",e->hr().c_str());
+        
+        LTVEntry* m = e->search({1,1});
+        if (m) {
+            INF_("URL category: %d",m->data_int())
+        } else {
+            INF_("Unknown response: \n%s",e->hr().c_str());
+        }
+        
+        error(true);
     };
+    
+    LTVEntry* pkg_create_envelope(uint32_t req_id, int32_t req_t) {
+
+        LTVEntry* packet = new LTVEntry();
+        packet->container(100);
+        
+        LTVEntry* x = new LTVEntry();
+        x->set_num(id_client::CL_VERSION,LTVEntry::num,0xF0);
+        packet->add(x);
+                
+        x = new LTVEntry();
+        x->set_num(id_client::CL_REQID,LTVEntry::num,req_id);
+        packet->add(x);
+        
+        x = new LTVEntry();
+        x->set_num(id_client::CL_REQTYPE,LTVEntry::num,req_t);
+        packet->add(x);
+        
+        return packet;
+    }
+    
+    LTVEntry* pkg_create_rateurl_request(uint32_t req_id, const char* URI) {
+        LTVEntry* envelope = pkg_create_envelope(req_id,req_type::RQT_RATEURL);
+        
+        LTVEntry* inner = new LTVEntry();
+        inner->container(CL_PAYLOAD);
+        
+        LTVEntry* x = new LTVEntry();
+        x->set_str(RQT_RATEURL,LTVEntry::str,URI);
+        inner->add(x);
+        
+        envelope->add(inner);
+        
+        return envelope;
+    }
 };
 
 class SmithdProxy : public baseProxy {
@@ -59,18 +105,12 @@ int main(int argc, char *argv[]) {
     cx->connect(true);
     
     p.ladd(cx);
+        
+    LTVEntry* m = cx->pkg_create_rateurl_request(1,"www.smithproxy.org");
     
-    LTVEntry* m  = new LTVEntry();
-    m->container(100);
     
-    LTVEntry* e  = new LTVEntry();
-    e->set_num(16,3,32); // value 32 seen while testing
-    m->add(e);
-
     m->pack();
-    
     cx->send(m);
-    cx->close_after_write(true);
     
     p.run();
 }

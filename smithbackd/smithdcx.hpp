@@ -63,6 +63,11 @@ public:
     inline void         peer_hb_reset() { time(&hb_peer_received); hb_peer_timeout_counter = 0; } 
     
     const unsigned int id_keepalive = 1;
+
+    enum id_client { CL_INIT=100, CL_VERSION=2, CL_REQID=3, CL_REQTYPE=127, CL_PAYLOAD=255 };
+    enum req_type  { RQT_NONE=0, RQT_RATEURL=1 };
+    
+    enum rate_url { RATEURL_CAT=1 };
     
 protected:
     std::vector<LTVEntry*> packages_;
