@@ -101,7 +101,16 @@ int main(int argc, char *argv[]) {
     SmithdProxy p = SmithdProxy(new UxCom());
     p.pollroot(true);
     
+   
     SmithClientCX* cx = new SmithClientCX(p.com()->slave(),"/var/run/smithd.sock","");
+    
+    // measure RTT for getting response
+    struct timeb t_start, t_current;                           
+    int t_diff;
+    
+    ftime(&t_start);                                            
+    
+    
     cx->connect(true);
     
     p.ladd(cx);
@@ -113,4 +122,13 @@ int main(int argc, char *argv[]) {
     cx->send(m);
     
     p.run();
+    
+    ftime(&t_current);                                      
+    t_diff = (int) (1000.0 * (t_current.time - t_start.time) + (t_current.millitm - t_start.millitm));
+
+    
+    INF_("Server RTT: %dms",t_diff);
+    
+    usleep(1*1000);
+    
 }

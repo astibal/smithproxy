@@ -70,11 +70,16 @@ public:
                 resp->pack();
                 
                 send(resp);
+                
+                delete resp;
+                
             } else {
                 ERRS_("No payload or rating URL entry.");
                 LTVEntry* resp = pkg_error_response("nothing to rate");
                 resp->pack();
                 send(resp);
+                
+                delete resp;
             }
             
         } else if (m && false) {
@@ -89,6 +94,8 @@ public:
             LTVEntry* resp = pkg_error_response("unknown request");
             resp->pack();
             send(resp);
+            
+            delete resp;
         }
     };
     
