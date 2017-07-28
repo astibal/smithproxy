@@ -14,7 +14,7 @@ BASIC CONNECTIVITY
 1. run webserver
 
 For example:
-sudo webfsd -F -S -p 443 -A certs/ca-cert.pem -C certs/srv-cert.pem -K certs/srv-key.pem
+sudo webfsd -F -S -p 443 -A certs/default/ca-cert.pem -C certs/default/srv-cert.pem -K certs/default/srv-key.pem
 sudo webfsd -F -p 80
 
 2. run wget stuff
