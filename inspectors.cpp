@@ -110,6 +110,11 @@ bool DNS_Inspector::interested(AppHostCX* cx) {
 }
 
 void DNS_Inspector::update(AppHostCX* cx) {
+  
+  
+    lock_guard_me;
+    std::lock_guard<std::mutex> l(DatagramCom::lock);
+    
     
     duplexFlow& f = cx->flow();
     DIA___("DNS_Inspector::update[%s]: stage %d start (flow size %d, last flow entry data length %d)",cx->c_name(),stage, f.flow().size(),f.flow().back().second->size());
@@ -181,6 +186,8 @@ void DNS_Inspector::update(AppHostCX* cx) {
                 } else {
                     red = 0;
                     delete ptr;
+                    ptr = (DNS_Packet*)0xCABA1A;
+                    ERR_("BUG CAUGHT: buffer:\n%s",hex_dump(cur_buf).c_str());
                 }
                 
                 // on failure or last data exit loop
@@ -190,6 +197,12 @@ void DNS_Inspector::update(AppHostCX* cx) {
                 }
             }
             
+            if(ptr == (DNS_Packet*)0xCABA1A) {
+	       ERRS_("BUG CAUGHT.");
+	       
+	       
+	       goto fail;
+	    }
             
             if(opt_cached_responses && ( ((DNS_Request*)ptr)->question_type_0() == A || ((DNS_Request*)ptr)->question_type_0() == AAAA ) ) {
                 inspect_dns_cache.lock();
@@ -312,6 +325,8 @@ void DNS_Inspector::update(AppHostCX* cx) {
             }
             break;
     }
+    
+    fail:
     
     DIA___("DNS_Inspector::update[%s]: stage %d end (flow size %d)",cx->c_name(),stage, f.flow().size());
 }
