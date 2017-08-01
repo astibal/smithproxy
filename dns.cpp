@@ -110,6 +110,7 @@ int DNS_Packet::load(buffer* src) {
         uint16_t additionals_togo = additionals_;
         
         DIA___("DNS_Packet::load: processing [0x%x] Q: %d, A: %d, AU: %d, AD: %d  (buffer length=%d)",id_, questions_,answers_,authorities_,additionals_,src->size());
+        DEB___("DNS Packet dump:\n%s",hex_dump(src->data(),src->size()).c_str());
         
         unsigned int mem_counter = DNS_HEADER_SZ;
             
@@ -125,6 +126,10 @@ int DNS_Packet::load(buffer* src) {
                 unsigned int field_len = 0;
                 
                 for(unsigned int cur_mem = mem_counter; cur_mem < src->size() && questions_togo > 0;) {
+                    
+                    
+                    buffer tmp_b = src->view(cur_mem,src->size()-cur_mem);
+                    DUM__("current buffer: %s", hex_dump(tmp_b).c_str());
                     
                     // load next field length
                     field_len = src->get_at<uint8_t>(cur_mem);
@@ -150,7 +155,7 @@ int DNS_Packet::load(buffer* src) {
                         question_temp.rec_type = ntohs(src->get_at<unsigned short>(cur_mem+1));           DEB___("DNS_Packet::load: read 'type' at index %d", cur_mem+1);
                         question_temp.rec_class =  ntohs(src->get_at<unsigned short>(cur_mem+1+2));       DEB___("DNS_Packet::load: read 'class' at index %d", cur_mem+1+2);
                         DEB___("type=%d,class=%d",question_temp.rec_type,question_temp.rec_class);
-                        mem_counter += 1+ (2*2);
+                        mem_counter += (1 + (2*2));
                         DEB___("DNS_Packet::load: s==0, mem counter changed to: %d (0x%x)",mem_counter,mem_counter);
                         
                         if(questions_togo > 0) {
@@ -365,6 +370,7 @@ int DNS_Packet::load(buffer* src) {
             if(mem_counter == src->size()) {
                 return 0;
             }
+
             return mem_counter;
         }
     }

@@ -35,13 +35,14 @@
 #include <regex>
 
 #include <sobject.hpp>
+#include <lockable.hpp>
 
 //
 /// \brief Abstract class intended to be parent for all inspector modules.
 ///        Serves as an interface.
 ///
 //
-class Inspector : public socle::sobject {
+class Inspector : public socle::sobject, public lockable {
 public:
     virtual ~Inspector() {}
     //! called always when there are new data in the flow. \see class Flow.
