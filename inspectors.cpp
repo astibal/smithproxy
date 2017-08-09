@@ -111,9 +111,7 @@ bool DNS_Inspector::interested(AppHostCX* cx) {
 
 void DNS_Inspector::update(AppHostCX* cx) {
   
-  
-    lock_guard_me;
-    std::lock_guard<std::mutex> l(DatagramCom::lock);
+    std::lock_guard<std::recursive_mutex> l(DatagramCom::lock);
     
     
     duplexFlow& f = cx->flow();
