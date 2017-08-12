@@ -230,6 +230,9 @@ logged_page = """
 
 bend_url = "http://127.0.0.1:%d/" % (64000+tenant_index)
 
+if(ip.startswith("::ffff:")):
+    ip = ip[7:]
+    
 try:
     if ref:
         bend = SOAPpy.SOAPProxy(bend_url)
@@ -240,14 +243,14 @@ try:
         
         flog.info("serving authentication page for IP %s, referer %s using token %s" % (ip,ref,token))
         
-        if(ip.startswith("::ffff:")):
-            ip = ip[7:]
         
         print   auth_page % (style,tok_str,str(port)+"-"+tenant_name+"-"+str(tenant_index))
     else:
         if ip:
             bend = SOAPpy.SOAPProxy(bend_url)
             logon_info = bend.whois(ip)
+            
+            flog.debug("logon_info: " + str(logon_info))
             
             if logon_info != []:
                 if logoff == "0":
@@ -263,4 +266,3 @@ try:
 except Exception, e:
     util.print_message("Error","Error occured:", str(e),"/error.html")
     flog.error("auth.py: exception caught: " + str(e))
-
