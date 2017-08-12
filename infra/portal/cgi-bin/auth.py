@@ -73,6 +73,97 @@ logoff = "0";
 if "logoff" in form.keys():
   logoff = form["logoff"].value
   
+status = 0;
+if "status" in form.keys():
+  status = form["status"].value
+
+
+
+style_small = """
+    <style media="screen" type="text/css">
+        * {
+        box-sizing: border-box;
+        }
+        
+        *:focus {
+        outline: none;
+        }
+        body {
+        font-family: Arial;
+        background-color: #48617B;
+        padding: 20px;
+        }
+        .login {
+        margin: 10px auto;
+        width: 200px;
+        }        
+        
+        .login-screen {
+        background-color: #FFF;
+        padding: 10px;
+        border-radius: 5px
+        }
+        
+        .app-title {
+        text-align: center;
+        color: #777;
+        }
+        
+        .login-form {
+        text-align: center;
+        }
+        .control-group {
+        margin-bottom: 10px;
+        }
+        
+        input {
+        text-align: center;
+        background-color: #ECF0F1;
+        border: 2px solid transparent;
+        border-radius: 3px;
+        font-size: 16px;
+        font-weight: 200;
+        padding: 5px 0;
+        width: 250px;
+        transition: border .5s;
+        }
+        
+        input:focus {
+        border: 2px solid #3498DB;
+        box-shadow: none;
+        }
+        
+        .btn {
+        border: 2px solid transparent;
+        background: #3498DB;
+        color: #ffffff;
+        font-size: 14px;
+        line-height: 23px;
+        padding: 4px 0;
+        text-decoration: none;
+        text-shadow: none;
+        border-radius: 3px;
+        box-shadow: none;
+        transition: 0.25s;
+        display: block;
+        width: 230px;
+        margin: 0 auto;
+        }
+        
+        .btn:hover {
+        background-color: #2980B9;
+        }
+        
+        .login-link {
+        font-size: 12px;
+        color: #444;
+        display: block;
+        margin-top: 12px;
+        }
+    </style>
+"""
+
+  
 style = """
     <style media="screen" type="text/css">
         * {
@@ -91,6 +182,12 @@ style = """
         margin: 20px auto;
         width: 300px;
         }
+        .login_small {
+        margin: 10px auto;
+        width: 200px;
+        }
+        
+        
         .login-screen {
         background-color: #FFF;
         padding: 20px;
@@ -197,9 +294,10 @@ auth_page = """
 </html>"""
 
 
-logged_page = """
+logged_page_small = """
 <html>
 <head>
+
     <title>Already logged in</title>
     <META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=utf-8">
     <meta http-equiv="refresh" content="10">
@@ -208,6 +306,51 @@ logged_page = """
     %s
 </head>
 <body>
+    <script>
+    function resize_me() {
+        window.resizeTo(400,500);
+    }
+    </script>
+    
+	<form action="/cgi-bin/auth.py?a=z&logoff=1" method="POST">
+        <div class="login_small">
+        <div class="login-screen">
+        <div class="app-title">
+        <h2>Logged in</h2>
+            as '<strong>%s</strong>'
+            </br>
+            <small>...</small>
+        </div>
+        </div>        
+        </div>
+
+        <input type="submit" onclick="resize_me()" value="Login as different user" class="btn btn-primary btn-large btn-block" ></br>
+        </div>        
+        </form>
+</body>
+"""
+
+
+logged_page = """
+<html>
+<head>
+
+    <title>Already logged in</title>
+    <META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=utf-8">
+    <meta http-equiv="refresh" content="10">
+    <script type="text/javascript">
+    </script>
+    %s
+</head>
+<body>
+
+	<script>
+	function dettach() {
+	    var statusWindow = window.open("/cgi-bin/auth.py?status=1", "LogonStatus", "width=320,height=250");
+	    statusWindow.focus();
+	}
+	</script>
+
         <form action="/cgi-bin/auth.py?a=z&logoff=1" method="POST">
         <div class="login">
         <div class="login-screen">
@@ -219,10 +362,11 @@ logged_page = """
         </div>
 
         <input type="submit" value="Login as different user" class="btn btn-primary btn-large btn-block" ></br>
+        </form>
+        <button type="button" onclick="dettach()" class="btn btn-large btn-block">Dettach status</button>
         </div>
         </div>
         </div>        
-        </form>
 </body>
 """
 
@@ -253,8 +397,12 @@ try:
             flog.debug("logon_info: " + str(logon_info))
             
             if logon_info != []:
+
                 if logoff == "0":
-                    print logged_page % (style,logon_info[1])
+                    if status > 0:
+                        print logged_page_small % (style_small,logon_info[1])
+                    else:
+                        print logged_page % (style,logon_info[1])
                 else:
                     bend.deauthenticate(ip)
                     print auth_page % (style,"0",str(port)+"-"+tenant_name+"-"+str(tenant_index))
