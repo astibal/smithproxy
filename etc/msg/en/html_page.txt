@@ -12,9 +12,10 @@
                     outline: none;
                     }
                     body {
-                    font-family: Tahoma,sans-serif;
+                    font-family: Arial;
                     background-color: #48617B;
                     padding: 30px;
+                    color: #333;
                     }
                     .windowlet {
                     margin: 20px auto;
@@ -26,8 +27,14 @@
                     border-radius: 5px
                     }
                     
+                    h2 {
+                     font-family: Arial;
+                     color: #999;
+                     vertical-align: middle;
+                    }
+
                     h3 {
-                     font-family: Tahoma,sans-serif;
+                     font-family: Arial;
                      color: #777;
                      vertical-align: middle;
                     }
@@ -67,20 +74,50 @@
                     color: #ffffff;
                     font-size: 16px;
                     line-height: 25px;
-                    padding: 5px 5px;
+                    padding: 5px 8px;
                     text-decoration: none;
                     text-shadow: none;
                     border-radius: 3px;
                     box-shadow: none;
                     transition: 0.25s;
                     display: block;
-                    width: 250px;
+                    <!-- width: 250px; -->
                     margin: 0 auto;
+                    }
+                    
+                    .btn-red {
+                    border: 2px solid transparent;
+                    background: #DB3333;
+                    color: #ffffff;
+                    font-size: 16px;
+                    line-height: 25px;
+                    padding: 5px 8px;
+                    text-decoration: none;
+                    text-shadow: none;
+                    border-radius: 3px;
+                    box-shadow: none;
+                    transition: 0.25s;
+                    display: block;
+                    <!-- width: 250px; -->
+                    margin: 0 auto;
+                    }
+                    
+                    .fg-red {
+                      color: #DB3333;
+                    }
+
+                    .bg-red {
+                      background: #DB3333;
                     }
                     
                     .btn:hover {
                     background-color: #2980B9;
                     }
+
+                    .btn-red:hover {
+                    background-color: #FD3333;
+                    }
+
                     
                     .windowlet-link {
                     font-size: 12px;

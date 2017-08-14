@@ -990,7 +990,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
                 }
                 
                 
-                std::string override_applied = string_format("<!DOCTYPE html><html><head><meta http-equiv=\"Refresh\" content=\"0; url=%s\"></head><body>applied, redirecting back to %s</body></html>",
+                std::string override_applied = string_format("<!DOCTYPE html><html><head><meta http-equiv=\"Refresh\" content=\"0; url=%s\"></head><body><!-- applied, redirecting back to %s --></body></html>",
                                                             orig_url.c_str(),orig_url.c_str());
 
                 whitelist_verify_entry v;
@@ -1023,43 +1023,43 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
         
             DIA___("ssl_override: ph3 - warning replacement for %s", whitelist_make_key(cx).c_str());
             
-            block_target_info = "<p><b>Requested site at:</b></br>" + app_request->proto + app_request->host + "</p>";
-            block_override = string_format("orig_url=%s\"><br><input type=\"submit\" value=\"Override\"></form>","/");
+            block_target_info = "<p><h3 class=\"fg-red\">Requested site:</h3>" + app_request->proto + app_request->host + "</p>";
+            block_override = string_format("orig_url=%s\"><input type=\"submit\" value=\"Override\" class=\"btn-red\"></form>","/");
 
             if(scom->verify_get() > 0) {
                 bool is_set = false;
                 
                 if(scom->verify_check(SSLCom::SELF_SIGNED)) {
-                        block_additinal_info += "<p><b>Reason:</b></br>Target certificate is self-signed.<p>"; is_set = true;
+                        block_additinal_info += "<p><h3 class=\"fg-red\">Reason:</h3>Target certificate is self-signed.</p>"; is_set = true;
                 }
                 if(scom->verify_check(SSLCom::SELF_SIGNED_CHAIN)) {
-                        block_additinal_info += "<p><b>Reason:</b></br>Target certificate's chain of trust contains self-signed, untrusted CA.<p>"; is_set = true;
+                        block_additinal_info += "<p><h3 class=\"fg-red\">Reason:</h3>Server certificate's chain contains self-signed, untrusted CA certificate.</p>"; is_set = true;
                 }
                 if(scom->verify_check(SSLCom::UNKNOWN_ISSUER)) {
-                        block_additinal_info += "<p><b>Reason:</b></br>Target certificate is issued by untrusted certificate identity.<p>"; is_set = true;
+                        block_additinal_info += "<p><h class=\"fg-red\"3>Reason:</h3>Server certificate is issued by untrusted certificate authority.</p>"; is_set = true;
                 }
                 if(scom->verify_check(SSLCom::CLIENT_CERT_RQ)) {
-                        block_additinal_info += "<p><b>Reason:</b></br>Target server asks for client certificate.<p>"; is_set = true;
+                        block_additinal_info += "<p><h3 class=\"fg-red\">Reason:</h3>Server is asking for a client certificate.<p>"; is_set = true;
                 }
                 if(scom->verify_check(SSLCom::REVOKED)) {
-                        block_additinal_info += "<p><b>Reason:</b></br>Target server is REVOKED. This is a serious issue.<p>"; is_set = true;
+                        block_additinal_info += "<p><h3 class=\"fg-red\">Reason:</h3>Server's certificate is REVOKED. This is a serious issue, it's highly recommended to not continue to this page.</p>"; is_set = true;
                 }                
                 
                 if(!is_set) {
-                        block_additinal_info += string_format("<p><b>Reason:</b></br>Oops, no detailed problem description (code: 0x%04x)<p>",scom->verify_get());
+                        block_additinal_info += string_format("<p><h3 class=\"fg-red\">Reason:</h3>Oops, no detailed problem description (code: 0x%04x)</p>",scom->verify_get());
                 }
             } else {
-                block_additinal_info += string_format("<p><b>Reason:</b></br>Oops, no detailed problem description (code: 0x%04x)<p>",scom->verify_get());
+                block_additinal_info += string_format("<p><h3 class=\"fg-red\">Reason:</h3>Oops, no detailed problem description (code: 0x%04x)</p>",scom->verify_get());
             }
             
             if(scom->opt_failed_certcheck_override)  block_additinal_info += block_override_pre + block_override;
             
             DIAS___("MitmProxy::handle_replacement_ssl: instructed to replace block");
             
-            std::string cap = "warning";
+            std::string cap = "TLS security warning";
             std::string meta;
             std::string war_img = global_staticconent->render_noargs("html_img_warning");
-            std::string msg = string_format("<h3>%s Encryption/Security issue with the page</h3><p>%s</p>",war_img.c_str(),(block_target_info + block_additinal_info).c_str());
+            std::string msg = string_format("<h2 class=\"fg-red\">%s TLS security warning</h2>%s",war_img.c_str(),(block_target_info + block_additinal_info).c_str());
             repl = global_staticconent->render_msg_html_page(cap, meta, msg,"500px");
             
             cx->to_write((unsigned char*)repl.c_str(),repl.size());
