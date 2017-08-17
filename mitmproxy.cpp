@@ -30,11 +30,12 @@
 #include <sockshostcx.hpp>
 #include <uxcom.hpp>
 #include <staticcontent.hpp>
+#include <filterproxy.hpp>
 
 #include <algorithm>
 #include <ctime>
 
-DEFINE_LOGGING(leafProxy);
+
 DEFINE_LOGGING(MitmProxy);
 
 unsigned long MitmProxy::meter_left_bytes_second;
@@ -84,11 +85,7 @@ MitmProxy::~MitmProxy() {
     if(content_rule_ != nullptr) {
       delete content_rule_;
     }
-    
-    if(av_proxy != nullptr) {
-        delete av_proxy;
-    }
-    
+        
     delete tlog_;
     
     if(identity_ != nullptr) { delete identity_; }
@@ -361,10 +358,11 @@ bool MitmProxy::update_auth_ipX_map(baseHostCX* cx) {
 
 int MitmProxy::handle_sockets_once(baseCom* xcom) {
     
-    if(av_proxy != nullptr) {
-        if(xcom->master()->poller.in_read_set(av_proxy->socket())) {
-            handle_internal_data(av_proxy);
-        }
+    for(auto filter_pair: filters_) {
+        std::string& filter_name = filter_pair.first;
+        baseProxy* filter_proxy = filter_pair.second;
+        
+        DEB___("MitmProxy::handle_sockets_once: running filter %s", filter_name.c_str());
     }
     
     return baseProxy::handle_sockets_once(xcom);
@@ -385,14 +383,112 @@ std::string whitelist_make_key(MitmHostCX* cx)  {
 }
 
 
+bool MitmProxy::handle_authentication(MitmHostCX* mh)
+{
+    bool redirected = false;
+    
+    if(opt_auth_authenticate || opt_auth_resolve) {
+    
+        resolve_identity(mh);
+        
+        if(!identity_resolved()) {        
+            DEBS___("identity check: unknown");
+            
+            if(opt_auth_authenticate) {
+                if(mh->replacement_type() == MitmHostCX::REPLACETYPE_HTTP) {
+            
+                    mh->replacement_flag(MitmHostCX::REPLACE_REDIRECT);
+                    redirected = true;
+                    handle_replacement_auth(mh);
+                } 
+                else {
+                    // wait, if header won't come in some time, kill the proxy
+                    if(mh->meter_read_bytes > 200) {
+                        // we cannot use replacements and identity is not resolved... what we can do. Shutdown.
+                        EXTS___("not enough data received to ensure right replacement-aware protocol.");
+                        dead(true);
+                    }
+                }
+            }
+        } else {
+            if(auth_block_identity) {
+                if(mh->replacement_type() == MitmHostCX::REPLACETYPE_HTTP) {
+                    DIAS___("MitmProxy::on_left_bytes: we should block it");
+                    mh->replacement_flag(MitmHostCX::REPLACE_BLOCK);
+                    redirected = true;
+                    handle_replacement_auth(mh);
+                }
+            }
+        }
+    }
+    return redirected;
+}
+
+
+bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
+{
+    bool redirected = false;
+    
+    SSLCom* scom = dynamic_cast<SSLCom*>(mh->peercom());
+    if(scom && scom->opt_failed_certcheck_replacement) {
+        if(scom->verify_status != SSLCom::VERIFY_OK) {
+            
+            bool whitelist_found = false;
+            
+            //look for whitelisted entry
+            std::string key = whitelist_make_key(mh);
+            if(key.size() > 0 && key != "?") {
+                whitelist_verify.lock();
+                whitelist_verify_entry_t* wh = whitelist_verify.get(key);
+                DIA___("whitelist_verify[%s]: %s",key.c_str(), wh ? "found" : "not found" );
+                whitelist_verify.unlock();
+                
+                // !!! wh might be already invalid here, unlocked !!!
+                if(wh != nullptr) {
+                    whitelist_found = true;
+                } 
+            }
+            
+            
+            if(!whitelist_found) {
+                DIAS___("relaxed cert-check: peer sslcom verify not OK, not in whitelist");
+                if(mh->replacement_type() == MitmHostCX::REPLACETYPE_HTTP) {
+                    mh->replacement_flag(MitmHostCX::REPLACE_BLOCK);
+                    redirected = true;
+                    handle_replacement_ssl(mh);
+                    
+                } 
+                else if(scom->verify_check(SSLCom::CLIENT_CERT_RQ) && scom->opt_client_cert_action > 0) {
+                    //we should not block
+                    if(scom->opt_client_cert_action >= 2) {
+                        whitelist_verify.lock();
+                        
+                        whitelist_verify_entry v;
+                        whitelist_verify.set(key,new whitelist_verify_entry_t(v,scom->opt_failed_certcheck_override_timeout));
+                        whitelist_verify.unlock();
+                    }
+                }
+                else {
+                    dead(true);
+                }
+            }
+        }
+    }
+    
+    return redirected;
+}
+
+bool MitmProxy::handle_cached_response(MitmHostCX* mh) {
+    
+    if(mh->inspection_verdict() == Inspector::CACHED) {
+        DIAS___("cached content: not proxying");
+        return true;
+    }
+    
+    return false;
+}
+
 void MitmProxy::on_left_bytes(baseHostCX* cx) {
-    
-    if(is_backend_cx(cx)) {
-        INF___("on_left_bytes[%s]: left internal connection new data arrived",cx->full_name('L').c_str());
-        handle_internal_data(cx);
-        return;
-    }    
-    
     
     if(write_payload()) {
         if(cx->log().size()) {
@@ -410,132 +506,50 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
 
     if(mh != nullptr) {
 
-        
-        if(opt_auth_authenticate || opt_auth_resolve) {
-        
-            resolve_identity(cx);
-            
-            if(!identity_resolved()) {        
-                DEBS___("identity check: unknown");
-                
-                if(opt_auth_authenticate) {
-                    if(mh->replacement_type() == MitmHostCX::REPLACETYPE_HTTP) {
-                
-                        mh->replacement_flag(MitmHostCX::REPLACE_REDIRECT);
-                        redirected = true;
-                        handle_replacement_auth(mh);
-                    } 
-                    else {
-                        // wait, if header won't come in some time, kill the proxy
-                        if(cx->meter_read_bytes > 200) {
-                            // we cannot use replacements and identity is not resolved... what we can do. Shutdown.
-                            EXTS___("not enough data received to ensure right replacement-aware protocol.");
-                            dead(true);
-                        }
-                    }
-                }
-            } else {
-                if(auth_block_identity) {
-                    if(mh->replacement_type() == MitmHostCX::REPLACETYPE_HTTP) {
-                        DIAS___("MitmProxy::on_left_bytes: we should block it");
-                        mh->replacement_flag(MitmHostCX::REPLACE_BLOCK);
-                        redirected = true;
-                        handle_replacement_auth(mh);
-                    }
-                }
-            }
-        }
+        // check authentication
+        redirected = handle_authentication(mh);
      
         // check com responses
-        // peer SSLCom
-        SSLCom* scom = dynamic_cast<SSLCom*>(cx->peercom());
-        if(scom && scom->opt_failed_certcheck_replacement) {
-            if(scom->verify_status != SSLCom::VERIFY_OK) {
-                
-                bool whitelist_found = false;
-                
-                //look for whitelisted entry
-                std::string key = whitelist_make_key(mh);
-                if(key.size() > 0 && key != "?") {
-                    whitelist_verify.lock();
-                    whitelist_verify_entry_t* wh = whitelist_verify.get(key);
-                    DIA___("whitelist_verify[%s]: %s",key.c_str(), wh ? "found" : "not found" );
-                    whitelist_verify.unlock();
-                    
-                    // !!! wh might be already invalid here, unlocked !!!
-                    if(wh != nullptr) {
-                        whitelist_found = true;
-                    } 
-                }
-                
-                
-                if(!whitelist_found) {
-                    DIAS___("relaxed cert-check: peer sslcom verify not OK, not in whitelist");
-                    if(mh->replacement_type() == MitmHostCX::REPLACETYPE_HTTP) {
-                        mh->replacement_flag(MitmHostCX::REPLACE_BLOCK);
-                        redirected = true;
-                        handle_replacement_ssl(mh);
-                        
-                    } 
-                    else if(scom->verify_check(SSLCom::CLIENT_CERT_RQ) && scom->opt_client_cert_action > 0) {
-                        //we should not block
-                        if(scom->opt_client_cert_action >= 2) {
-                            whitelist_verify.lock();
-                            
-                            whitelist_verify_entry v;
-                            whitelist_verify.set(key,new whitelist_verify_entry_t(v,scom->opt_failed_certcheck_override_timeout));
-                            whitelist_verify.unlock();
-                        }
-                    }
-                    else {
-                        dead(true);
-                    }
-                }
-            }
-        }
-     
-        if(mh->inspection_verdict() == Inspector::CACHED) {
-            DIAS___("cached content: not proxying");
-            return;
-        }
+        redirected = handle_com_response_ssl(mh);
+        
+        
+        if(handle_cached_response(mh) == true) { return; }
     }
     
     
     // because we have left bytes, let's copy them into all right side sockets!
-    for(typename std::vector<baseHostCX*>::iterator j = this->right_sockets.begin(); j != this->right_sockets.end(); j++) {
-        if( is_backend_cx(*j) ) continue;
+    for(auto j: right_sockets) {
         
         if(!redirected) {
             if(content_rule() != nullptr) {
                 buffer b = content_replace_apply(cx->to_read());
-                (*j)->to_write(b);
+                j->to_write(b);
                 DIA___("mitmproxy::on_left_bytes: original %d bytes replaced with %d bytes",cx->to_read().size(),b.size())
             } else {
-                (*j)->to_write(cx->to_read());
+                j->to_write(cx->to_read());
                 DIA___("mitmproxy::on_left_bytes: %d copied",cx->to_read().size())
             }
         } else {
         
-        // rest of connections should be closed when sending replacement to a client
-        (*j)->shutdown();
+            // rest of connections should be closed when sending replacement to a client
+            j->shutdown();
         }
     }    
-    for(typename std::vector<baseHostCX*>::iterator j = this->right_delayed_accepts.begin(); j != this->right_delayed_accepts.end(); j++) {
-        if( is_backend_cx(*j) ) continue;
+    for(auto j: right_delayed_accepts) {
         
         if(!redirected) {
             if(content_rule() != nullptr) {
                 buffer b = content_replace_apply(cx->to_read());
-                (*j)->to_write(b);
+                j->to_write(b);
                 DIA___("mitmproxy::on_left_bytes: original %d bytes replaced with %d bytes into delayed",cx->to_read().size(),b.size())
             } else {	  
-                (*j)->to_write(cx->to_read());
+                j->to_write(cx->to_read());
                 DIA___("mitmproxy::on_left_bytes: %d copied to delayed",cx->to_read().size())
             }
         } else {
         
-        // rest of connections should be closed when sending replacement to a client
-        (*j)->shutdown();
+            // rest of connections should be closed when sending replacement to a client
+            j->shutdown();
         }
     }    
  
@@ -543,12 +557,6 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
 }
 
 void MitmProxy::on_right_bytes(baseHostCX* cx) {
-
-    if(is_backend_cx(cx)) {
-        INF___("on_right_bytes[%s]: right internal connection new data arrived",cx->full_name('R').c_str());
-        handle_internal_data(cx);
-        return;
-    }    
     
     if(write_payload()) {
         if(cx->log().size()) {
@@ -560,79 +568,30 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
     }
     
     
-    if(av_backend_status >= AV_STAT_OK && av_proxy != nullptr) {
-        
-        int32_t data_len = htonl(cx->to_read().size());
-        
-        av_proxy->to_write((unsigned char*)&data_len,4);
-        av_proxy->to_write(cx->to_read());
-        
-        // test: terminate 
-        int32_t zero = 0;
-        av_proxy->to_write((unsigned char*)&zero,4);
-        
-        //INF___("Sent to AV:\n%s",hex_dump(av_proxy->writebuf()).c_str());
-        
-        av_proxy->write();
-    }
-    
-    
-    for(typename std::vector<baseHostCX*>::iterator j = this->left_sockets.begin(); j != this->left_sockets.end(); j++) {
-        if( is_backend_cx(*j) ) continue;
+    for(auto j: left_sockets) {
         
         if(content_rule() != nullptr) {
             buffer b = content_replace_apply(cx->to_read());
-            (*j)->to_write(b);
+            j->to_write(b);
             DIA___("mitmproxy::on_right_bytes: original %d bytes replaced with %d bytes",cx->to_read().size(),b.size())
         } else {      
-            (*j)->to_write(cx->to_read());
+            j->to_write(cx->to_read());
             DIA___("mitmproxy::on_right_bytes: %d copied",cx->to_read().size())
         }
     }
-    for(typename std::vector<baseHostCX*>::iterator j = this->left_delayed_accepts.begin(); j != this->left_delayed_accepts.end(); j++) {
-        if( is_backend_cx(*j) ) continue;
+    for(auto j: left_delayed_accepts) {
         
         if(content_rule() != nullptr) {
             buffer b = content_replace_apply(cx->to_read());
-            (*j)->to_write(b);
+            j->to_write(b);
             DIA___("mitmproxy::on_right_bytes: original %d bytes replaced with %d bytes into delayed",cx->to_read().size(),b.size())
         } else {      
-            (*j)->to_write(cx->to_read()); 
+            j->to_write(cx->to_read()); 
             DIA___("mitmproxy::on_right_bytes: %d copied to delayed",cx->to_read().size())
         }
     }
 
     socle::time_update_counter_sec(&cnt_right_bytes_second,&meter_right_bytes_second,1,cx->to_read().size());
-}
-
-
-bool MitmProxy::is_backend_cx(baseHostCX* cx) {
-    std::vector<baseHostCX*>:: iterator it = std::find(backends_.begin(),backends_.end(),cx);
-    return (it != backends_.end());
-}
-
-void MitmProxy::on_backend_error(baseHostCX* cx) {
-
-    DIA___("on_backend_error: %s",cx->c_name());
-    
-    com()->master()->unset_monitor(cx->socket());
-    cx->shutdown();
-
-    auto it = std::find(backends_.begin(),backends_.end(),cx);
-    if(it != backends_.end()) {
-        //backends_.erase(it);
-    }
-    
-    auto itl = std::find(left_sockets.begin(),left_sockets.end(),cx);
-    if(itl != left_sockets.end()) {
-        left_sockets.erase(itl);
-        return;
-    }
-    auto itr = std::find(right_sockets.begin(),right_sockets.end(),cx);
-    if(itr != right_sockets.end()) {
-        right_sockets.erase(itr);
-        return;
-    }
 }
 
 
@@ -681,17 +640,6 @@ void MitmProxy::on_left_error(baseHostCX* cx) {
     if(this->dead()) return;  // don't process errors twice
 
     
-    if(is_backend_cx(cx)) {
-        
-        on_backend_error(cx);
-        if(cx->socket() > 0) {
-            // we will ignore backend cx, since they can close/open at will during life of the proxy
-            INF___("on_left_error[%s]: left internal connection closed",cx->full_name('L').c_str());
-        }
-        // don't harm proxy, leave.
-        return;
-    }
-    
     DEB___("on_left_error[%s]: proxy marked dead",(this->error_on_read ? "read" : "write"));
     DUMS___(to_string().c_str());
     
@@ -739,15 +687,6 @@ void MitmProxy::on_left_error(baseHostCX* cx) {
 void MitmProxy::on_right_error(baseHostCX* cx)
 {
     if(this->dead()) return;  // don't process errors twice
-
-    if(is_backend_cx(cx)) {
-        // we will ignore backend cx, since they can close/open at will during life of the proxy
-        INF___("on_right_error[%s]: right internal connection closed",cx->full_name('R').c_str());
-        on_backend_error(cx);
-        
-        // don't harm proxy, leave.
-        return;
-    }    
     
     DEB___("on_right_error[%s]: proxy marked dead",(this->error_on_read ? "read" : "write"));
     
@@ -917,21 +856,6 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
     if (cx->replacement_flag() == MitmHostCX::REPLACE_NONE) {
         DIAS___("MitmProxy::handle_replacement_auth: asked to handle NONE. No-op.");
     } 
-}
-
-void MitmProxy::handle_internal_data(baseHostCX* cx) {
-    if( cx->read() == 0) {
-        DIAS___("backend channel closed on read.");
-        cx->shutdown();
-        return;
-    }        
-    
-    int len = cx->readbuf()->size();
-    INF___("handle_internal_data[%s]: %d bytes arrived",cx->full_name('L').c_str(),len);
-    
-    if(cx == av_proxy) {
-        INF___("handle_internal_data[%s]: AV message: %s",cx->full_name('L').c_str(), hex_dump(cx->readbuf()).c_str());
-    }
 }
 
 
@@ -1166,37 +1090,35 @@ buffer MitmProxy::content_replace_apply(buffer b) {
     return ret_b;
 }
 
-int MitmProxy::av_backend_init() {
+void MitmProxy::tap() {
 
-    if(av_backend_status == AV_STAT_NONE && opt_av_check) {
-        UxCom* u = new UxCom();
-        u->master(com()->master());
-        baseHostCX *backend_cx = new baseHostCX(u,"/var/run/clamav/clamd.ctl","0");
-
-        int real_socket = backend_cx->connect(false); 
-        if(real_socket > 0) {
-            backends().push_back(backend_cx);
-            
-            com()->set_monitor(real_socket);
-            com()->set_poll_handler(real_socket,this);
-            
-            std::string init_str = "nINSTREAM\n";
-            backend_cx->to_write((unsigned char*)init_str.c_str(),init_str.size());
-            backend_cx->write();
-            
-            av_backend_status = AV_STAT_OK;
-            av_proxy = backend_cx;
-            
-            DIA___("AV backend initialized successfully on socket %d", real_socket);
-        } else {
-            av_backend_status = AV_STAT_FAILED;
-            ERRS___("AV backend initialization failed")
-            delete backend_cx;
-        }
-    }
+    DIAS___("MitmProxy::tap: start");
     
-    return av_backend_status;
+    for (auto cx: left_sockets) {
+        com()->unset_monitor(cx->socket());
+        cx->paused(true);
+    }
+    for (auto cx: right_sockets) {
+        com()->unset_monitor(cx->socket());
+        cx->paused(true);
+    }
 }
+
+void MitmProxy::untap() {
+
+    DIAS___("MitmProxy::untap: start");
+
+    for (auto cx: left_sockets) {
+        com()->set_monitor(cx->socket());
+        cx->paused(false);
+    }
+    for (auto cx: right_sockets) {
+        com()->set_monitor(cx->socket());
+        cx->paused(false);
+    }
+}
+
+
 
 
 bool MitmMasterProxy::ssl_autodetect = false;
@@ -1501,11 +1423,6 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
             delete_proxy = true;
         }
         
-        // if set, initialize AV socket
-        if(new_proxy->opt_av_check && ( target_port == 80 || target_port == 443 ) ) {
-           new_proxy->av_backend_init();
-        }
-        
         end:
         
         new_proxy->name(new_proxy->to_string(INF));
@@ -1589,3 +1506,4 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
 baseHostCX* MitmUdpProxy::MitmUdpProxy::new_cx(int s) {
     return new MitmHostCX(com()->slave(),s);
 }
+

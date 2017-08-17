@@ -30,23 +30,14 @@
 #include <traflog.hpp>
 #include <policy.hpp>
 #include <cfgapi_auth.hpp>
-
-class leafProxy : public baseProxy, public socle::sobject {
-public:
-    
-    explicit leafProxy(baseProxy* parent): baseProxy(parent->com()) {}
-    virtual ~leafProxy() {};
-    
-    virtual std::string to_string(int verbosity=INF) { return std::string("leafProxy"); };
-        
-    DECLARE_C_NAME("leafProxy");
-    DECLARE_LOGGING(to_string);
-};
+#include <filterproxy.hpp>
 
 struct whitelist_verify_entry {
 };
 
 typedef expiring<whitelist_verify_entry> whitelist_verify_entry_t;
+
+class FilterProxy;
 
 class MitmProxy : public baseProxy, public socle::sobject {
     
@@ -59,7 +50,6 @@ protected:
     bool identity_resolved_time = 0;
     shm_logon_info_base* identity_ = nullptr;
     
-    std::vector<baseHostCX*> backends_;
     std::vector<ProfileContentRule>* content_rule_ = nullptr; //save some space and store it as a pointer. Init it only when needed and delete in dtor.
     
     int matched_policy_ = -1;
@@ -72,16 +62,14 @@ public:
     bool opt_auth_resolve = false;
     bool auth_block_identity = false;
     
-    bool opt_av_check = false;
-    #define AV_STAT_FAILED -1
-    #define AV_STAT_NONE 0
-    #define AV_STAT_OK 1
-    #define AV_RESULT_OK 2
-    #define AV_RESULT_INFECTED 64
-    #define AV_FINISHED 192
-    int av_backend_status = AV_STAT_NONE;
-    int av_backend_init();
-    baseHostCX* av_proxy = nullptr;
+    
+    // Remote filters - use other proxy to filter content of this proxy.
+    // Elements are pair of "name" and pointer to the filter proxy 
+    std::vector<std::pair<std::string,FilterProxy*>> filters_;
+    // tap proxy - unmonitor all left and right sockets, pause contexts
+    virtual void tap();
+    // untap proxy - monitor back again all L and R sockets, unpause contexts
+    virtual void untap();
     
     int matched_policy() { return matched_policy_; }
     void matched_policy(int p) { matched_policy_ = p; }    
@@ -93,8 +81,7 @@ public:
     bool resolve_identity(baseHostCX*,bool);
     bool update_auth_ipX_map(baseHostCX*);
     bool apply_id_policies(baseHostCX* cx);
-    
-    std::vector<baseHostCX*>& backends() { return backends_; };
+   
     
     bool write_payload(void) { return write_payload_; } 
     void write_payload(bool b) { write_payload_ = b; }
@@ -116,17 +103,21 @@ public:
     virtual void on_left_error(baseHostCX* cx);
     virtual void on_right_error(baseHostCX* cx);
     
+    // check authentication status and return true if redirected
+    virtual bool handle_authentication(MitmHostCX* cx);
     virtual void handle_replacement_auth(MitmHostCX* cx);
+    
+    // check sslcom response and return true if redirected
+    virtual bool handle_com_response_ssl(MitmHostCX* cx);
     virtual void handle_replacement_ssl(MitmHostCX* cx);
-    virtual void handle_internal_data(baseHostCX* cx);
+    
+    // check if content has been pulled from cache and return true if so
+    virtual bool handle_cached_response(MitmHostCX* cx);
     
     virtual bool ask_destroy() { dead(true); return true; };
     virtual std::string to_string(int verbosity=INF);
     
     virtual int handle_sockets_once(baseCom*);
-    
-    bool is_backend_cx(baseHostCX*);
-    void on_backend_error(baseHostCX*);
     
     void init_content_replace();
     std::vector<ProfileContentRule>* content_rule() { return content_rule_; }    
