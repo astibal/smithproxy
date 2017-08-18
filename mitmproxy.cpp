@@ -356,6 +356,23 @@ bool MitmProxy::update_auth_ipX_map(baseHostCX* cx) {
     return ret;
 }
 
+
+void MitmProxy::add_filter(std::string name, FilterProxy* fp) {
+
+    filters_.push_back(std::pair<std::string,FilterProxy*>(name,fp));
+    
+    for(auto s: fp->ls()) {
+        com()->set_monitor(s->socket());
+        com()->set_poll_handler(s->socket(),this);
+    }
+    
+    for(auto s: fp->rs()) {
+        com()->set_monitor(s->socket());
+        com()->set_poll_handler(s->socket(),this);
+    }    
+}
+
+
 int MitmProxy::handle_sockets_once(baseCom* xcom) {
     
     for(auto filter_pair: filters_) {
@@ -363,6 +380,7 @@ int MitmProxy::handle_sockets_once(baseCom* xcom) {
         baseProxy* filter_proxy = filter_pair.second;
         
         DEB___("MitmProxy::handle_sockets_once: running filter %s", filter_name.c_str());
+        filter_proxy->handle_sockets_once(xcom);
     }
     
     return baseProxy::handle_sockets_once(xcom);

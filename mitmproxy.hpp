@@ -66,10 +66,14 @@ public:
     // Remote filters - use other proxy to filter content of this proxy.
     // Elements are pair of "name" and pointer to the filter proxy 
     std::vector<std::pair<std::string,FilterProxy*>> filters_;
+    void add_filter(std::string name, FilterProxy* fp);
+    
     // tap proxy - unmonitor all left and right sockets, pause contexts
     virtual void tap();
     // untap proxy - monitor back again all L and R sockets, unpause contexts
     virtual void untap();
+    
+    
     
     int matched_policy() { return matched_policy_; }
     void matched_policy(int p) { matched_policy_ = p; }    
@@ -85,8 +89,6 @@ public:
     
     bool write_payload(void) { return write_payload_; } 
     void write_payload(bool b) { write_payload_ = b; }
-    
-    bool detect_dns(MitmHostCX* mh, unsigned char side);
     
     trafLog* tlog() { return tlog_; }
     
