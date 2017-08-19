@@ -1,11 +1,18 @@
+# mark branches you want to build
+SOCLE_BRANCH=master
+SMITHPROXY_BRANCH=master
+
 # clean it!
 ./clean.sh
 
 # create a clone of smithproxy directory
 # git clone -l ../smithproxy/ smithproxy-git
 
-git clone git@bitbucket.org:astibal/smithproxy.git smithproxy-git
-git clone git@bitbucket.org:astibal/socle.git socle
+git clone http://bitbucket.org/astibal/smithproxy.git smithproxy-git
+cd smithproxy-git; git fetch; git checkout $SMITHPROXY_BRANCH; cd ..
+
+git clone http://bitbucket.org/astibal/socle.git socle
+cd socle; git fetch; git checkout $SOCLE_BRANCH; cd ..
 
 VERSION=`cat smithproxy-git/smithproxy.hpp | awk -F\" '{ print \$2 }' | strings`
 echo "Cloned version from sources is $VERSION ."
