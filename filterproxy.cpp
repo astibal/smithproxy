@@ -22,7 +22,9 @@
 
 DEFINE_LOGGING(FilterProxy);
 
-FilterProxy::FilterProxy(MitmProxy* parent) : baseProxy(parent->com()->slave()) {}
+FilterProxy::FilterProxy(MitmProxy* parent) : baseProxy(parent->com()->slave()) {
+    result_ = new FilterResult();
+}
 
 
 TestFilter::TestFilter(MitmProxy* parent, int seconds): FilterProxy(parent) {
