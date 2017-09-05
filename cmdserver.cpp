@@ -67,6 +67,8 @@ int orig_epoll_loglevel = 0;
 int orig_mitmproxy_loglevel = 0;
 int orig_mitmmasterproxy_loglevel = 0;
 
+extern bool cfg_openssl_mem_dbg;
+
 void load_defaults() {
     orig_ssl_loglevel = SSLCom::log_level_ref();
     orig_sslmitm_loglevel = SSLMitmCom::log_level_ref();
@@ -227,6 +229,33 @@ int cli_diag_ssl_crl_list(struct cli_def *cli, const char *command, char *argv[]
     store->crl_cache.unlock();
     
     cli_print(cli,"\n%s",out.c_str());
+    
+    return CLI_OK;
+}
+#include <biostring.hpp>
+
+int cli_diag_ssl_memcheck_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    
+    std::string out;
+    BIO* b_out = BIO_new_string(&out);
+    
+    CRYPTO_mem_leaks(b_out);
+    cli_print(cli,"OpenSSL memory leaks:\n%s",out.c_str());
+    BIO_free(b_out);
+    
+    return CLI_OK;
+}
+
+int cli_diag_ssl_memcheck_enable(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ENABLE);
+    
+    return CLI_OK;
+}
+
+int cli_diag_ssl_memcheck_disable(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_DISABLE);
     
     return CLI_OK;
 }
@@ -716,6 +745,7 @@ void client_thread(int client_socket) {
                 struct cli_command *diag_ssl_cache;
                 struct cli_command *diag_ssl_wl;
                 struct cli_command *diag_ssl_crl;
+                struct cli_command *diag_ssl_memcheck;
             struct cli_command *diag_mem;
                 struct cli_command *diag_mem_buffers;
                 struct cli_command *diag_mem_objects;
@@ -758,6 +788,14 @@ void client_thread(int client_socket) {
                         cli_register_command(cli, diag_ssl_wl, "clear", cli_diag_ssl_wl_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clear all verification whitelist entries");
                 diag_ssl_crl = cli_register_command(cli, diag_ssl, "crl", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose dynamically downloaded CRLs");                           
                         cli_register_command(cli, diag_ssl_crl, "list", cli_diag_ssl_crl_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all CRLs");
+
+            if(cfg_openssl_mem_dbg) {
+                diag_ssl_memcheck = cli_register_command(cli, diag_ssl, "memcheck", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose openssl memcheck");                           
+                        cli_register_command(cli, diag_ssl_memcheck, "list", cli_diag_ssl_memcheck_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "print out OpenSSL memcheck status");
+                        cli_register_command(cli, diag_ssl_memcheck, "enable", cli_diag_ssl_memcheck_enable, PRIVILEGE_PRIVILEGED, MODE_EXEC, "enable OpenSSL debug collection");
+                        cli_register_command(cli, diag_ssl_memcheck, "disable", cli_diag_ssl_memcheck_disable, PRIVILEGE_PRIVILEGED, MODE_EXEC, "disable OpenSSL debug collection");
+            }
+                
             diag_mem = cli_register_command(cli, diag, "mem", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory related troubleshooting commands");
                 diag_mem_buffers = cli_register_command(cli, diag_mem, "buffers", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory buffers troubleshooting commands");
                         cli_register_command(cli, diag_mem_buffers, "stats", cli_diag_mem_buffers_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory buffers statistics");

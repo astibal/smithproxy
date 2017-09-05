@@ -97,6 +97,7 @@ std::thread* log_thread = nullptr;
 volatile static int cnt_terminate = 0;
 static bool cfg_daemonize = false;
 static bool cfg_mtrace_enable = false;
+extern bool cfg_openssl_mem_dbg = false;
 
 static int  args_debug_flag = NON;
 // static int   ssl_flag = 0;
@@ -120,7 +121,6 @@ static int cfg_socks_workers = 0;
 
 static std::string cfg_tenant_index;
 static std::string cfg_tenant_name;
-
 
 
 void my_terminate (int param) {
@@ -331,6 +331,7 @@ bool load_config(std::string& config_f, bool reload) {
         cfgapi.getRoot()["debug"]["log"].lookupValue("proxy",baseProxy::log_level_ref());
         cfgapi.getRoot()["debug"]["log"].lookupValue("proxy",epoll::log_level);
         cfgapi.getRoot()["debug"]["log"].lookupValue("mtrace",cfg_mtrace_enable);
+        cfgapi.getRoot()["debug"]["log"].lookupValue("openssl_mem_dbg",cfg_openssl_mem_dbg);
         /*DNS ALG EXPLICIT LOG*/
         cfgapi.getRoot()["debug"]["log"].lookupValue("alg_dns",DNS_Inspector::log_level_ref());
         cfgapi.getRoot()["debug"]["log"].lookupValue("alg_dns",DNS_Packet::log_level_ref());
@@ -579,11 +580,15 @@ int main(int argc, char *argv[]) {
     daemon_write_pidfile();
 
     
-    //     atexit(__libc_freeres);    
-    //     CRYPTO_malloc_debug_init();
-    //     CRYPTO_dbg_set_options(V_CRYPTO_MDEBUG_ALL);
-    CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON);
+    //     atexit(__libc_freeres);   
 
+    if(cfg_openssl_mem_dbg) {
+        CRYPTO_malloc_debug_init();
+        CRYPTO_dbg_set_options(V_CRYPTO_MDEBUG_ALL);
+        CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON);
+        CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_DISABLE);
+    }
+    
     // static content cache initialization -- can't be held as external object, since it would cause sobject cache deadlock.
     //  => has to be a pointer initialized AFTER sobject cache. So this seems to be the best place.
     global_staticconent = new StaticContent();
