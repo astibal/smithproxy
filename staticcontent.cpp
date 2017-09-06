@@ -59,7 +59,6 @@ std::string StaticContent::render_server_response(std::string& message) {
     
     out += "\r\n";
     out += message;
-    out += "\r\n";
     
     return out;
 }
