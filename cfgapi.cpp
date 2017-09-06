@@ -748,7 +748,7 @@ int cfgapi_load_obj_profile_detection() {
             
             if( cur_object.lookupValue("mode",a->mode) ) {
                 
-                a->name = name;
+                a->prof_name = name;
                 cfgapi_obj_profile_detection[name] = a;
                 
                 DIA_("cfgapi_load_obj_profile_detect: '%s': ok",name.c_str());
@@ -788,7 +788,7 @@ int cfgapi_load_obj_profile_content() {
             
             if( cur_object.lookupValue("write_payload",a->write_payload) ) {
                 
-                a->name = name;
+                a->prof_name = name;
                 cfgapi_obj_profile_content[name] = a;
                 
                 if(cur_object.exists("content_rules")) {
@@ -867,7 +867,7 @@ int cfgapi_load_obj_profile_tls() {
             
             if( cur_object.lookupValue("inspect",a->inspect) ) {
                 
-                a->name = name;
+                a->prof_name = name;
                 cur_object.lookupValue("allow_untrusted_issuers",a->allow_untrusted_issuers);
                 cur_object.lookupValue("allow_invalid_certs",a->allow_invalid_certs);
                 cur_object.lookupValue("allow_self_signed",a->allow_self_signed);
@@ -1216,7 +1216,7 @@ bool cfgapi_obj_profile_content_apply(baseHostCX* originator, baseProxy* new_pro
     
     if(mitm_proxy != nullptr) {
         if(pc != nullptr) {
-            pc_name = pc->name.c_str();
+            pc_name = pc->prof_name.c_str();
             DIA_("cfgapi_obj_policy_apply: policy content profile[%s]: write payload: %d", pc_name, pc->write_payload);
             mitm_proxy->write_payload(pc->write_payload);
     
@@ -1260,7 +1260,7 @@ bool cfgapi_obj_profile_detect_apply(baseHostCX* originator, baseProxy* new_prox
     if(mitm_originator != nullptr) {
         mitm_originator->mode(AppHostCX::MODE_NONE);
         if(pd != nullptr)  {
-            pd_name = pd->name.c_str();
+            pd_name = pd->prof_name.c_str();
             DIA_("cfgapi_obj_policy_apply[%s]: policy detection profile: mode: %d", pd_name, pd->mode);
             mitm_originator->mode(pd->mode);
         }
@@ -1411,18 +1411,18 @@ int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
         
         /* Processing content profile */
         if(cfgapi_obj_profile_content_apply(originator,new_proxy,pc)) {
-            pc_name = pc->name.c_str();
+            pc_name = pc->prof_name.c_str();
         }
         
         
         /* Processing detection profile */
         if(cfgapi_obj_profile_detect_apply(originator,new_proxy,pd)) {
-            pd_name = pd->name.c_str();
+            pd_name = pd->prof_name.c_str();
         }        
         
         /* Processing TLS profile*/
         if(cfgapi_obj_profile_tls_apply(originator,new_proxy,pt)) {
-            pt_name = pt->name.c_str();
+            pt_name = pt->prof_name.c_str();
         }        
         
         /* Processing ALG : DNS*/

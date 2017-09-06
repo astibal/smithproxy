@@ -188,26 +188,26 @@ bool MitmProxy::apply_id_policies(baseHostCX* cx) {
             DIA___("apply_id_policies: assigning sub-profile %s",final_profile->name.c_str());
             if(final_profile->profile_content != nullptr) {
                 if (cfgapi_obj_profile_content_apply(cx,this,final_profile->profile_content)) {
-                    pc_name = final_profile->profile_content->name.c_str();
-                    DIA___("apply_id_policies: assigning content sub-profile %s",final_profile->profile_content->name.c_str());
+                    pc_name = final_profile->profile_content->prof_name.c_str();
+                    DIA___("apply_id_policies: assigning content sub-profile %s",final_profile->profile_content->prof_name.c_str());
                 }
             }
             if(final_profile->profile_detection != nullptr) {
                 if (cfgapi_obj_profile_detect_apply(cx,this,final_profile->profile_detection)) {
-                    pd_name = final_profile->profile_detection->name.c_str();
-                    DIA___("apply_id_policies: assigning detection sub-profile %s",final_profile->profile_detection->name.c_str());
+                    pd_name = final_profile->profile_detection->prof_name.c_str();
+                    DIA___("apply_id_policies: assigning detection sub-profile %s",final_profile->profile_detection->prof_name.c_str());
                 }
             }
             if(final_profile->profile_tls != nullptr) {
                 if(cfgapi_obj_profile_tls_apply(cx,this,final_profile->profile_tls)) {
-                    pt_name = final_profile->profile_tls->name.c_str();
-                    DIA___("apply_id_policies: assigning tls sub-profile %s",final_profile->profile_tls->name.c_str());
+                    pt_name = final_profile->profile_tls->prof_name.c_str();
+                    DIA___("apply_id_policies: assigning tls sub-profile %s",final_profile->profile_tls->prof_name.c_str());
                 }
             }
             if(final_profile->profile_alg_dns != nullptr) {
                 if(cfgapi_obj_alg_dns_apply(cx,this,final_profile->profile_alg_dns)) {
                     algs += final_profile->profile_alg_dns->name + " ";
-                    DIA___("apply_id_policies: assigning tls sub-profile %s",final_profile->profile_tls->name.c_str());
+                    DIA___("apply_id_policies: assigning tls sub-profile %s",final_profile->profile_tls->prof_name.c_str());
                 }
             }
             

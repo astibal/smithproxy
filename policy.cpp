@@ -48,9 +48,17 @@ std::string PolicyRule::to_string(int verbosity) {
         to += string_format("(%d,%d) ",it.first,it.second);
     }
     
-    INFS_("PolicyRule::to_string");
+    std::string out = from + " -> " + to;
     
-    std::string out = from + " -> " + to ;
+    if(verbosity >= INF) {
+        out+=": ";
+        if(profile_auth) out += string_format("auth=0x%x ",profile_auth);
+        if(profile_tls) out += string_format("tls=0x%x ",profile_tls);
+        if(profile_detection) out += string_format("det=0x%x ",profile_detection);
+        if(profile_content) out += string_format("cont=0x%x ",profile_content);
+        if(profile_alg_dns) out += string_format("alg_dns=0x%x ",profile_alg_dns);
+    }
+    
     return out;
 }
 

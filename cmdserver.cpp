@@ -635,12 +635,9 @@ int cli_diag_mem_objects_list(struct cli_def *cli, const char *command, char *ar
         std::string a1 = argv[0];
         if(a1 == "?") {
             cli_print(cli,"valid parameters:");
-            cli_print(cli,"         <empty>");
-            cli_print(cli,"         MitmProxy");
-            cli_print(cli,"         DNS_Inspector");
-            cli_print(cli,"         DNS_Response");
-            cli_print(cli,"         DNS_Request");
-            cli_print(cli,"         DNS_Packet");
+            cli_print(cli,"         <empty> - all entries will be printed out");
+            cli_print(cli,"         0x prefixed string - only object with matching Id will be printed out");
+            cli_print(cli,"         any other string   - only objects with class matching this string will be printed out");
             
             return CLI_OK;
         } else {
@@ -659,13 +656,51 @@ int cli_diag_mem_objects_list(struct cli_def *cli, const char *command, char *ar
     }
     
     
-    std::string r = socle::sobject_db_to_string((object_filter.size() == 0) ? nullptr : object_filter.c_str(),nullptr,verbosity);
+    std::string r = socle::sobject_db_list((object_filter.size() == 0) ? nullptr : object_filter.c_str(),nullptr,verbosity);
                 r += "\n" + socle::sobject_db_stats_string((object_filter.size() == 0) ? nullptr : object_filter.c_str());
 
     
     cli_print(cli,"Smithproxy objects (filter: %s):\n%s\nFinished.",(object_filter.size() == 0) ? "ALL" : object_filter.c_str() ,r.c_str());
     return CLI_OK;
 }
+
+
+int cli_diag_mem_objects_search(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    
+    std::string object_filter;
+    int verbosity = INF;
+    
+    if(argc > 0) {
+        std::string a1 = argv[0];
+        if(a1 == "?") {
+            cli_print(cli,"valid parameters:");
+            cli_print(cli,"         <empty>     - all entries will be printed out");
+            cli_print(cli,"         any string  - objects with descriptions containing this string will be printed out");
+            
+            return CLI_OK;
+        } else {
+            // a1 is param for the lookup
+            if("*" == a1 || "ALL" == a1) {
+                object_filter = "";
+            } else {
+                object_filter = a1.c_str();
+            }
+        }
+        
+        if(argc > 1) {
+            std::string a2 = argv[1];
+            verbosity = atoi(a2.c_str());
+        }
+    }
+    
+    
+    std::string r = socle::sobject_db_list(nullptr,nullptr,verbosity,object_filter.c_str());
+    
+    cli_print(cli,"Smithproxy objects (filter: %s):\n%s\nFinished.",(object_filter.size() == 0) ? "ALL" : object_filter.c_str() ,r.c_str());
+    return CLI_OK;
+}
+
+
 
 int cli_diag_mem_objects_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
     std::string address;
@@ -803,6 +838,7 @@ void client_thread(int client_socket) {
                 diag_mem_objects = cli_register_command(cli, diag_mem, "objects", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory object troubleshooting commands");                        
                         cli_register_command(cli, diag_mem_objects, "stats", cli_diag_mem_objects_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory objects statistics");
                         cli_register_command(cli, diag_mem_objects, "list", cli_diag_mem_objects_list, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory objects list");
+                        cli_register_command(cli, diag_mem_objects, "search", cli_diag_mem_objects_search, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory objects search");
                         cli_register_command(cli, diag_mem_objects, "clear", cli_diag_mem_objects_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clears memory object");
             diag_dns = cli_register_command(cli, diag, "dns", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "DNS traffic related troubleshooting commands");
                 diag_dns_cache = cli_register_command(cli, diag_dns, "cache", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "DNS traffic cache troubleshooting commands");
