@@ -766,6 +766,7 @@ void client_thread(int client_socket) {
         // Must be called first to setup data structures
         cli = cli_init();
 
+
         // Set the hostname (shown in the the prompt)
         cli_set_hostname(cli, string_format("smithproxy(%s) ",hostname).c_str());
 

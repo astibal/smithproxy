@@ -92,9 +92,19 @@ MitmProxy::~MitmProxy() {
 }
 
 std::string MitmProxy::to_string(int verbosity) { 
-    std::string r =  "MitmProxy:" + baseProxy::to_string(verbosity); 
-    if(verbosity >= DEB) {
-        r += string_format("\n    identity: %d",identity_resolved());
+    std::string r =  "MitmProxy:" + baseProxy::to_string(verbosity);
+    
+    if(verbosity >= INF) {
+        r += string_format(" policy: %d",matched_policy());
+        r += string_format(" identity: %d",identity_resolved());
+        if(verbosity > INF) { 
+                r += string_format("\n    PolicyRule Id: 0x%x",cfgapi_obj_policy.at(matched_policy()));
+
+            if(identity_resolved()) {
+                r += string_format("\n    User:   %s",identity_->username().c_str()); 
+                r += string_format("\n    Groups: %s",identity_->groups().c_str()); 
+            }
+        }        
     }
     
     return r;

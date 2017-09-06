@@ -19,6 +19,41 @@
 
 #include <policy.hpp>
 
+DEFINE_LOGGING(PolicyRule);
+
+std::string PolicyRule::to_string(int verbosity) {
+
+    std::string from = "PolicyRule:";
+    
+    if(src_default) from += "*";
+    for(auto it: src) {
+        from += " ";
+        from += it->to_string();
+    }
+    from += ":";
+    if(src_ports_default) from += "*";
+    for(auto it: src_ports) {
+        from += string_format("(%d,%d) ",it.first,it.second);
+    }
+    
+    std::string to = "";
+    if(dst_default) to += "*";
+    for(auto it: dst) {
+        to += " ";
+        to += it->to_string();
+    }
+    to += ":";
+    if(dst_ports_default) to+="*";
+    for(auto it: dst_ports) {
+        to += string_format("(%d,%d) ",it.first,it.second);
+    }
+    
+    INFS_("PolicyRule::to_string");
+    
+    std::string out = from + " -> " + to ;
+    return out;
+}
+
 
 bool PolicyRule::match_addrgrp_cx(std::vector< AddressObject* >& sources, baseHostCX* cx) {
     bool match = false;

@@ -53,7 +53,7 @@ struct ProfileList {
        ProfileAlgDns* profile_alg_dns = nullptr;
 };
 
-class PolicyRule : public ProfileList {
+class PolicyRule : public ProfileList , public socle::sobject {
 
 public:
        int proto = 6;
@@ -72,15 +72,22 @@ public:
        int action = POLICY_ACTION_PASS;
        int nat    = POLICY_NAT_NONE;
       
+       PolicyRule() : ProfileList(), socle::sobject() {};
+       virtual ~PolicyRule();
+       
        bool match(baseProxy*);
        bool match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r);
-       virtual ~PolicyRule();
        
        bool match_addrgrp_cx(std::vector<AddressObject*>& cidrs,baseHostCX* cx);
        bool match_addrgrp_vecx(std::vector<AddressObject*>& cidrs,std::vector<baseHostCX*>& vecx);
        bool match_rangegrp_cx(std::vector<range>& ranges,baseHostCX* cx);
        bool match_rangegrp_vecx(std::vector<range>& ranges,std::vector<baseHostCX*>& vecx);
        
+       virtual bool ask_destroy() { return false; }
+       virtual std::string to_string(int verbosity = 6);
+       
+       DECLARE_C_NAME("PolicyRule");
+       DECLARE_LOGGING(to_string);       
 };
 
 struct ProfileDetection {
