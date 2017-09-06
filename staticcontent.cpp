@@ -50,6 +50,20 @@ std::string StaticContent::render_noargs(std::string name) {
     return "";
 }
 
+std::string StaticContent::render_server_response(std::string& message) {
+    std::string out;
+    out += "HTTP/1.1 OK\r\n";
+    out += "Server: Smithproxy/1.1\r\n";
+    out += "Content-Type: text/html\r\n";
+    out += "Content-Length: " + std::to_string(message.length()); out += "\r\n";
+    
+    out += "\r\n";
+    out += message;
+    out += "\r\n";
+    
+    return out;
+}
+
 std::string StaticContent::render_msg_html_page(std::string& caption, std::string& meta, std::string& content, const char* window_width) {
     Template* t = get("html_page");
     t->set("title",caption);

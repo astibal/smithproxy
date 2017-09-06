@@ -898,6 +898,21 @@ int cfgapi_load_obj_profile_tls() {
                         }
                 }
                 
+
+                if(cur_object.exists("redirect_warning_ports")) {
+                        Setting& rwp = cur_object["redirect_warning_ports"];
+                        
+                        //init only when there is something
+                        int rwp_len = rwp.getLength();
+                        if(rwp_len > 0) {
+                                a->redirect_warning_ports.ptr(new std::set<int>);
+                                for(int j = 0; j < rwp_len; ++j) {
+                                    int elem = rwp[j];
+                                    a->redirect_warning_ports.ptr()->insert(elem);
+                                }
+                        }
+                }
+                
                 
                 cfgapi_obj_profile_tls[name] = a;
                 
@@ -1446,6 +1461,45 @@ bool cfgapi_obj_policy_apply_tls(int policy_num, baseCom* xcom) {
     return cfgapi_obj_policy_apply_tls(pt,xcom);
 }
 
+bool should_redirect_warning_port(ProfileTls* pt, SSLCom* com) {
+    
+    bool ret = false;
+    
+    DEB_("should_redirect_warning_port[%s]",com->hr());
+    
+    if(com && com->owner_cx()) {
+        
+        try {
+            int num_port = std::stoi(com->owner_cx()->port());
+            DEB_("should_redirect_warning_port[%s]: owner port %d",com->hr(), num_port);
+            
+            
+            if(pt->redirect_warning_ports.ptr()) {
+                // we have port redirection list (which ports should be redirected/replaced for cert issue warning)
+                DEB_("should_redirect_warning_port[%s]: checking port list present",com->hr());
+                
+                auto it = pt->redirect_warning_ports.ptr()->find(num_port);
+                
+                if(it != pt->redirect_warning_ports.ptr()->end()) {
+                    DIA_("should_redirect_warning_port[%s]: port %d in redirect list",com->hr(),num_port);
+                    ret = true;
+                }
+            }
+            else {
+                // if we have list empty (uninitialized), we assume only 443 should be redirected
+                if(num_port == 443) {
+                    DEB_("should_redirect_warning_port[%s]: implicit 443 redirection allowed (no port list)",com->hr());
+                    ret = true;
+                }
+            }
+        }
+        catch(std::invalid_argument) {}
+        catch(std::out_of_range) {}
+    }
+    
+    return ret;
+}
+
 bool cfgapi_obj_policy_apply_tls(ProfileTls* pt, baseCom* xcom) {
 
     bool tls_applied = false;     
@@ -1459,9 +1513,12 @@ bool cfgapi_obj_policy_apply_tls(ProfileTls* pt, baseCom* xcom) {
             sslcom->opt_allow_not_valid_cert = pt->allow_invalid_certs;
             sslcom->opt_allow_self_signed_cert = pt->allow_self_signed;
 
-            sslcom->opt_failed_certcheck_replacement = pt->failed_certcheck_replacement;
-            sslcom->opt_failed_certcheck_override = pt->failed_certcheck_override;
-            sslcom->opt_failed_certcheck_override_timeout = pt->failed_certcheck_override_timeout;
+            
+            if(pt->failed_certcheck_replacement && should_redirect_warning_port(pt,sslcom)) {
+                sslcom->opt_failed_certcheck_replacement = pt->failed_certcheck_replacement;
+                sslcom->opt_failed_certcheck_override = pt->failed_certcheck_override;
+                sslcom->opt_failed_certcheck_override_timeout = pt->failed_certcheck_override_timeout;
+            }
             
             // set accordingly if general "use_pfs" is specified, more conrete settings come later
             sslcom->opt_left_kex_dh = pt->use_pfs;

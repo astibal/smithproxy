@@ -135,6 +135,7 @@ struct ProfileTls {
     std::string name;
     
     socle::spointer_vector_string sni_filter_bypass;
+    socle::spointer_set_int redirect_warning_ports;
     
     bool sni_filter_use_dns_cache = true;       // if sni_filter_bypass is set, check during policy match if target IP isn't in DNS cache matching SNI filter entries.
                                                 // For example: 

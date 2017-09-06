@@ -759,7 +759,7 @@ void MitmProxy::on_right_error(baseHostCX* cx)
 
 void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
   
-    std::string redir_pre("<!DOCTYPE html><html><head><script>top.location.href=\"");
+    std::string redir_pre("<html><head><script>top.location.href=\"");
     std::string redir_suf("\";</script></head><body></body></html>");  
   
 //     std::string redir_pre("HTTP/1.0 301 Moved Permanently\r\nLocation: ");
@@ -776,7 +776,7 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
         repl_port = cfgapi_identity_portal_port_https;
     }    
     
-    std::string block_pre("<!DOCTYPE html><html><head></head><body><h1>Page has been blocked</h1><p>Access has been blocked by smithproxy.</p>\
+    std::string block_pre("<html><head></head><body><h1>Page has been blocked</h1><p>Access has been blocked by smithproxy.</p>\
     <p>To check your user privileges go to status page <a href=");
     std::string block_post(">here</a></p></body></html>");
     
@@ -813,6 +813,8 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
                     repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + token_tk + redir_suf;
                 }
                 
+                repl = global_staticconent->render_server_response(repl);
+                
                 cx->to_write((unsigned char*)repl.c_str(),repl.size());
                 cx->close_after_write(true);
             } else {
@@ -847,6 +849,8 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
                 repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + tok.token() + redir_suf;
             }
             
+            repl = global_staticconent->render_server_response(repl);
+            
             cx->to_write((unsigned char*)repl.c_str(),repl.size());
             cx->close_after_write(true);
             
@@ -867,6 +871,9 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
 
         DIAS___("MitmProxy::handle_replacement_auth: instructed to replace block");
         repl = block_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port + "/cgi-bin/auth.py?a=z" + block_post;
+        
+        repl = global_staticconent->render_server_response(repl);
+        
         cx->to_write((unsigned char*)repl.c_str(),repl.size());
         cx->close_after_write(true);
 
@@ -883,7 +890,9 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
     
     SSLCom* scom = dynamic_cast<SSLCom*>(cx->peercom());
     if(!scom) {
-        std::string error("<!DOCTYPE html><html><head></head><body><p>Internal error</p><p>com object is not ssl-type</p></body></html>");
+        std::string error("<html><head></head><body><p>Internal error</p><p>com object is not ssl-type</p></body></html>");
+        error = global_staticconent->render_server_response(error);
+        
         cx->to_write((unsigned char*)error.c_str(),error.size());
         cx->close_after_write(true);  
         
@@ -932,7 +941,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
                 }
                 
                 
-                std::string override_applied = string_format("<!DOCTYPE html><html><head><meta http-equiv=\"Refresh\" content=\"0; url=%s\"></head><body><!-- applied, redirecting back to %s --></body></html>",
+                std::string override_applied = string_format("<html><head><meta http-equiv=\"Refresh\" content=\"0; url=%s\"></head><body><!-- applied, redirecting back to %s --></body></html>",
                                                             orig_url.c_str(),orig_url.c_str());
 
                 whitelist_verify_entry v;
@@ -940,6 +949,8 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
                 whitelist_verify.lock();
                 whitelist_verify.set(key,new whitelist_verify_entry_t(v,scom->opt_failed_certcheck_override_timeout));
                 whitelist_verify.unlock();
+                
+                override_applied = global_staticconent->render_server_response(override_applied);
                 
                 cx->to_write((unsigned char*)override_applied.c_str(),override_applied.size());
                 cx->close_after_write(true);
@@ -950,7 +961,8 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
                 
             } else {
                 // override is not enabled, but client somehow reached this (attack?)
-                std::string error("<!DOCTYPE html><html><head></head><body><p>Failed to override</p><p>Action is denied.</p></body></html>");
+                std::string error("<html><head></head><body><p>Failed to override</p><p>Action is denied.</p></body></html>");
+                error = global_staticconent->render_server_response(error);
                 cx->to_write((unsigned char*)error.c_str(),error.size());
                 cx->close_after_write(true);                  
                 
@@ -1003,6 +1015,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             std::string war_img = global_staticconent->render_noargs("html_img_warning");
             std::string msg = string_format("<h2 class=\"fg-red\">%s TLS security warning</h2>%s",war_img.c_str(),(block_target_info + block_additinal_info).c_str());
             repl = global_staticconent->render_msg_html_page(cap, meta, msg,"500px");
+            repl = global_staticconent->render_server_response(repl);
             
             cx->to_write((unsigned char*)repl.c_str(),repl.size());
             cx->close_after_write(true);
@@ -1013,7 +1026,8 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             
             DIA___("ssl_override: ph2 - redir to warning replacement for  %s", whitelist_make_key(cx).c_str());
             
-            std::string repl = "<!DOCTYPE html><html><head><meta http-equiv=\"Refresh\" content=\"0; url=/SM/IT/HP/RO/XY/warning?q=1\"></head><body></body></html>";
+            std::string repl = "<html><head><meta http-equiv=\"Refresh\" content=\"0; url=/SM/IT/HP/RO/XY/warning?q=1\"></head><body></body></html>";
+            repl = global_staticconent->render_server_response(repl);
             cx->to_write((unsigned char*)repl.c_str(),repl.size());
             cx->close_after_write(true);            
         }   
@@ -1023,11 +1037,13 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             
             DIA___("ssl_override: ph1 - redir to / for %s", whitelist_make_key(cx).c_str());
             
-            std::string redir_pre("<!DOCTYPE html><html><head><script>top.location.href=\"");
+            std::string redir_pre("<html><head><script>top.location.href=\"");
             std::string redir_suf("\";</script></head><body></body></html>");  
             
-            //std::string repl = "<!DOCTYPE html><html><head><meta http-equiv=\"Refresh\" content=\"0; url=/\"></head><body></body></html>";            
-            std::string repl = redir_pre + "/" + redir_suf;            
+            //std::string repl = "<html><head><meta http-equiv=\"Refresh\" content=\"0; url=/\"></head><body></body></html>";            
+            std::string repl = redir_pre + "/" + redir_suf;   
+            repl = global_staticconent->render_server_response(repl);
+            
             cx->to_write((unsigned char*)repl.c_str(),repl.size());
             cx->close_after_write(true);            
         }
