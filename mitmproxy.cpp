@@ -786,9 +786,9 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
         repl_port = cfgapi_identity_portal_port_https;
     }    
     
-    std::string block_pre("<html><head></head><body><h1>Page has been blocked</h1><p>Access has been blocked by smithproxy.</p>\
-    <p>To check your user privileges go to status page <a href=");
-    std::string block_post(">here</a></p></body></html>");
+    std::string block_pre("<h2 class=\"fg-red\">Page has been blocked</h2><p>Access has been blocked by smithproxy.</p>\
+    <p>To check your user privileges go to status page<p><p> <form action=\"");
+    std::string block_post("\"><input type=\"submit\" value=\"User Info\" class=\"btn-red\"></form>");
     
     //cx->host().c_str()
     
@@ -882,6 +882,9 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
         DIAS___("MitmProxy::handle_replacement_auth: instructed to replace block");
         repl = block_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port + "/cgi-bin/auth.py?a=z" + block_post;
         
+        std::string cap  = "Page Blocked";
+        std::string meta = "";
+        repl = global_staticconent->render_msg_html_page(cap,meta, repl,"500px");
         repl = global_staticconent->render_server_response(repl);
         
         cx->to_write((unsigned char*)repl.c_str(),repl.size());
