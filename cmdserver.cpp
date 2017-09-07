@@ -764,8 +764,45 @@ int cli_diag_proxy_session_list(struct cli_def *cli, const char *command, char *
 }
 
 int cli_diag_proxy_session_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
-    return cli_diag_mem_objects_clear(cli,command,argv,argc);
+    
+    //return cli_diag_mem_objects_clear(cli,command,argv,argc);
+    
+    cli_print(cli,"To be implemented, sorry.");
+    return CLI_OK;
 }
+
+int cli_diag_proxy_policy_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    std::string filter = "";
+    int verbosity = 6;
+    
+    if(argc > 0) {
+        if(argv[0][0] == '?') {
+            
+            cli_print(cli,"specify verbosity, default is 6s");
+            return CLI_OK;
+        }
+        else {
+        verbosity = safe_val(argv[0],6);
+        }
+    }
+    if(argc > 1) filter = argv[1];
+    
+    std::string out;
+    
+    cfgapi_write_lock.lock();
+    for(auto it: cfgapi_obj_policy) {
+        out += it->to_string(verbosity);
+        out += "\n\n";
+    }
+    cfgapi_write_lock.unlock();
+    
+    cli_print(cli, "%s", out.c_str());
+    return CLI_OK;
+}
+
+
+
 
 struct cli_ext : public cli_def {
     int socket;
@@ -788,6 +825,7 @@ void client_thread(int client_socket) {
                 struct cli_command *diag_dns_cache;
                 struct cli_command *diag_dns_domains;
             struct cli_command *diag_proxy;
+                struct cli_command *diag_proxy_policy;
                 struct cli_command *diag_proxy_session;
             struct cli_command *diag_identity;
                 struct cli_command *diag_identity_user;
@@ -849,6 +887,8 @@ void client_thread(int client_socket) {
                         cli_register_command(cli, diag_dns_domains, "list", cli_diag_dns_domain_cache_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "DNS sub-domain list");
                         cli_register_command(cli, diag_dns_domains, "clear", cli_diag_dns_domain_cache_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clear DNS sub-domain cache");
             diag_proxy = cli_register_command(cli, diag, "proxy",NULL, PRIVILEGE_PRIVILEGED, MODE_EXEC, "proxy related troubleshooting commands");
+                diag_proxy_policy = cli_register_command(cli,diag_proxy,"policy",NULL,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy policy commands");
+                        cli_register_command(cli, diag_proxy_policy,"list",cli_diag_proxy_policy_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy policy list");
                 diag_proxy_session = cli_register_command(cli,diag_proxy,"session",NULL,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session commands");
                         cli_register_command(cli, diag_proxy_session,"list",cli_diag_proxy_session_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session list");
                         cli_register_command(cli, diag_proxy_session,"clear",cli_diag_proxy_session_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session clear");
