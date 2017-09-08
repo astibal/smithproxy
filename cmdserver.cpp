@@ -755,8 +755,8 @@ int cli_diag_proxy_session_list(struct cli_def *cli, const char *command, char *
     int ret = cli_diag_mem_objects_list(cli,command,a,argc > 0 ? 2 : 1);
 
     
-    unsigned long l = socle::time_get_counter_sec(&MitmProxy::cnt_left_bytes_second,&MitmProxy::meter_left_bytes_second,1);
-    unsigned long r = socle::time_get_counter_sec(&MitmProxy::cnt_right_bytes_second,&MitmProxy::meter_right_bytes_second,1);
+    unsigned long l = MitmProxy::left_speed.get();
+    unsigned long r = MitmProxy::right_speed.get();
     cli_print(cli,"\nProxy performance: upload %sbps, download %sbps in last second",number_suffixed(l*8).c_str(),number_suffixed(r*8).c_str());
     
     return ret;

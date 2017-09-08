@@ -39,15 +39,10 @@
 DEFINE_LOGGING(MitmProxy);
 
 
-// speed in last second (this is correct value if you are looking for speed)
-unsigned long MitmProxy::meter_left_bytes_second;
-unsigned long MitmProxy::meter_right_bytes_second;
 
-// actual speed in this second
-unsigned long MitmProxy::curr_meter_left_bytes_second;
-unsigned long MitmProxy::curr_meter_right_bytes_second;
-time_t MitmProxy::cnt_left_bytes_second;
-time_t MitmProxy::cnt_right_bytes_second;
+socle::meter MitmProxy::left_speed;
+socle::meter MitmProxy::right_speed;
+
 ptr_cache<std::string,whitelist_verify_entry_t> MitmProxy::whitelist_verify("whitelist - verify",500,true,whitelist_verify_entry_t::is_expired);
 
 MitmProxy::MitmProxy(baseCom* c): baseProxy(c), sobject() {
@@ -587,7 +582,8 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
         }
     }    
  
-    socle::time_update_counter_sec(&cnt_left_bytes_second,&meter_left_bytes_second,&curr_meter_left_bytes_second,1,cx->to_read().size());
+    //socle::time_update_counter_sec(&cnt_left_bytes_second,&meter_left_bytes_second,&curr_meter_left_bytes_second,1,cx->to_read().size());
+    left_speed.update(cx->to_read().size());
 }
 
 void MitmProxy::on_right_bytes(baseHostCX* cx) {
@@ -625,7 +621,8 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
         }
     }
 
-    socle::time_update_counter_sec(&cnt_right_bytes_second,&meter_right_bytes_second, &curr_meter_right_bytes_second,1,cx->to_read().size());
+    //socle::time_update_counter_sec(&cnt_right_bytes_second,&meter_right_bytes_second, &curr_meter_right_bytes_second,1,cx->to_read().size());
+    right_speed.update(cx->to_read().size());
 }
 
 
