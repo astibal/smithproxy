@@ -137,6 +137,9 @@ public:
 
     static unsigned long meter_left_bytes_second;
     static unsigned long meter_right_bytes_second;
+    
+    static unsigned long curr_meter_left_bytes_second;
+    static unsigned long curr_meter_right_bytes_second;
     static time_t cnt_left_bytes_second;
     static time_t cnt_right_bytes_second;
 
