@@ -172,8 +172,10 @@ void set_crashlog(const char* file) {
 }
 
 static void uw_btrace_handler(int sig) {
-    unw_cursor_t cursor; unw_context_t uc;
-    unw_word_t ip, sp;
+    thread_local unw_cursor_t cursor; 
+    thread_local unw_context_t uc;
+    thread_local unw_word_t ip;
+    thread_local unw_word_t sp;
 
     unw_getcontext(&uc);
     unw_init_local(&cursor, &uc);
