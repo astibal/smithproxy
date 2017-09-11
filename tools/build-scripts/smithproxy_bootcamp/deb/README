@@ -1,0 +1,9 @@
+DEPENDENCIES NOTE:
+
+python-pylibconfig2 is not provided as streamline .deb package.
+This is why we prepared one for you. It's based on pip version,
+just converted to .deb.
+
+All other dependencies should be possible to solve by apt.
+
+   
