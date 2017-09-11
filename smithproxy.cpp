@@ -349,27 +349,59 @@ bool load_config(std::string& config_f, bool reload) {
             
             if(cfgapi.getRoot()["settings"].lookupValue("log_file",log_target)) {
                 
-                
-                log_target = string_format(log_target,cfgapi_tenant_name.c_str());
-                // prepare custom crashlog file
-                std::string crlog = log_target + ".crashlog.log";
-                set_crashlog(crlog.c_str());
-                
-                std::ofstream * o = new std::ofstream(log_target.c_str(),std::ios::app);
-                get_logger()->targets(log_target,o);
-                get_logger()->dup2_cout(false);
-                get_logger()->level(cfgapi_table.logging.level);
-                
-                logger_profile* lp = new logger_profile();
-                lp->print_srcline_ = get_logger()->print_srcline();
-                lp->print_srcline_always_ = get_logger()->print_srcline_always();
-                lp->level_ = cfgapi_table.logging.level;
-                get_logger()->target_profiles()[(uint64_t)o] = lp;
-                
-                if(cfgapi.getRoot()["settings"].lookupValue("log_console",log_console)) {
-                    get_logger()->dup2_cout(log_console);
+                if(log_target.size() > 0) {
+                    
+                    log_target = string_format(log_target,cfgapi_tenant_name.c_str());
+                    // prepare custom crashlog file
+                    std::string crlog = log_target + ".crashlog.log";
+                    set_crashlog(crlog.c_str());
+                    
+                    std::ofstream * o = new std::ofstream(log_target.c_str(),std::ios::app);
+                    get_logger()->targets(log_target,o);
+                    get_logger()->dup2_cout(false);
+                    get_logger()->level(cfgapi_table.logging.level);
+                    
+                    logger_profile* lp = new logger_profile();
+                    lp->print_srcline_ = get_logger()->print_srcline();
+                    lp->print_srcline_always_ = get_logger()->print_srcline_always();
+                    lp->level_ = cfgapi_table.logging.level;
+                    get_logger()->target_profiles()[(uint64_t)o] = lp;
+                    
                 }
             }
+            
+            if(cfgapi.getRoot()["settings"].lookupValue("log_console",log_console)) {
+                get_logger()->dup2_cout(log_console);
+            }
+            
+/*            
+            // SYSLOG EXPERIMENTAL CODE - START
+            // create UDP socket
+            int syslog_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP); 
+
+            struct sockaddr_storage syslog_in;
+            memset(&syslog_in, 0, sizeof(struct sockaddr_storage));
+            syslog_in.ss_family                = AF_INET;
+            ((sockaddr_in*)&syslog_in)->sin_addr.s_addr = inet_addr("192.168.122.1");     
+            ((sockaddr_in*)&syslog_in)->sin_port = htons(514); 
+            ::connect(syslog_socket,(sockaddr*)&syslog_in,sizeof(sockaddr_storage));
+            
+            get_logger()->remote_targets(string_format("syslog-udp-%d",syslog_socket),syslog_socket);
+
+            logger_profile* lp = new logger_profile();
+            
+            lp->logger_type = logger_profile::REMOTE_SYSLOG;
+            lp->level_ = INF;
+            
+            // raising internal logging level
+            if(lp->level_ > get_logger()->level()) get_logger()->level(lp->level_);
+            
+            lp->syslog_settings.severity = lp->level_;
+            lp->syslog_settings.facility = 23;
+            
+            get_logger()->target_profiles()[(uint64_t)syslog_socket] = lp;            
+            // SYSLOG EXPERIMENTAL CODE - END
+*/            
         }
     }
     catch(const SettingNotFoundException &nfex) {

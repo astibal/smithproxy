@@ -419,13 +419,26 @@ int cli_debug_terminal(struct cli_def *cli, const char *command, char *argv[], i
         }
         else {
             //cli_print(cli, "called %s with %s, argc %d\r\n", __FUNCTION__, command, argc);
-            lp->level_ = std::atoi(argv[0]);
-            //get_logger()->level(lp->level_);
+            int newlev = safe_val(argv[0]);
+            if(newlev >= 0) {
+                lp->level_ = newlev;
+                
+                // elevate logging sent to log writer, if necessary
+                if(lp->level_ > get_logger()->level()) {
+                    cli_print(cli,"Raising internal logging level to %d",lp->level_);
+                    get_logger()->level(lp->level_);
+                    
+                }
+            } else {
+                cli_print(cli,"Incorrect value for logging level: %d",newlev);
+            }
         }
     } else {
         
         cli_print_log_levels(cli);
     }
+    
+    
     
     return CLI_OK;
 }
