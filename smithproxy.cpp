@@ -122,6 +122,12 @@ static int cfg_socks_workers = 0;
 static std::string cfg_tenant_index;
 static std::string cfg_tenant_name;
 
+static std::string cfg_syslog_server   = "";
+static int         cfg_syslog_port     = 514;
+static int         cfg_syslog_facility =  23; //local7
+static int         cfg_syslog_level = INF;
+static int         cfg_syslog_family = 4;
+
 
 void my_terminate (int param) {
     
@@ -246,6 +252,60 @@ int load_signatures(libconfig::Config& cfg, const char* name, std::vector<duplex
     return sigs_len;
 }
 
+bool init_syslog() {
+
+
+    // create UDP socket
+    int syslog_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP); 
+
+    struct sockaddr_storage syslog_in;
+    memset(&syslog_in, 0, sizeof(struct sockaddr_storage));
+    
+    if(cfg_syslog_family != 6) {
+        cfg_syslog_family = 4;
+        syslog_in.ss_family                = AF_INET;
+        ((sockaddr_in*)&syslog_in)->sin_addr.s_addr = inet_addr(cfg_syslog_server.c_str());
+        if(((sockaddr_in*)&syslog_in)->sin_addr.s_addr == INADDR_NONE) {
+            ERR_("Error initializing syslog server: %s",cfg_syslog_server.c_str());
+            return false;
+        }
+        
+        ((sockaddr_in*)&syslog_in)->sin_port = htons(cfg_syslog_port); 
+    } else {
+        cfg_syslog_family = 6;
+        syslog_in.ss_family                = AF_INET6;
+        int ret = inet_pton(AF_INET6,cfg_syslog_server.c_str(),(unsigned char*)&((sockaddr_in6*)&syslog_in)->sin6_addr.s6_addr);
+        if(ret <= 0) {
+            ERR_("Error initializing syslog server: %s",cfg_syslog_server.c_str());
+            return false;
+        }
+        ((sockaddr_in6*)&syslog_in)->sin6_port = htons(cfg_syslog_port); 
+    }
+    
+    
+    ::connect(syslog_socket,(sockaddr*)&syslog_in,sizeof(sockaddr_storage));
+    
+    get_logger()->remote_targets(string_format("syslog-udp%d-%d",cfg_syslog_family,syslog_socket),syslog_socket);
+
+    logger_profile* lp = new logger_profile();
+    
+    lp->logger_type = logger_profile::REMOTE_SYSLOG;
+    lp->level_ = cfg_syslog_level;
+    
+    // raising internal logging level
+    if(lp->level_ > get_logger()->level()) {
+        NOT_("Internal logging raised from %d to %d due to syslog server loglevel.",get_logger()->level(), lp->level_);
+        get_logger()->level(lp->level_);
+    }
+    
+    lp->syslog_settings.severity = lp->level_;
+    lp->syslog_settings.facility = cfg_syslog_facility;
+    
+    get_logger()->target_profiles()[(uint64_t)syslog_socket] = lp;
+    
+    return true;
+}
+
 bool load_config(std::string& config_f, bool reload) {
     bool ret = true;
     
@@ -312,6 +372,14 @@ bool load_config(std::string& config_f, bool reload) {
         
         cfgapi.getRoot()["settings"].lookupValue("log_level",cfgapi_table.logging.level);
         
+        cfgapi.getRoot()["settings"].lookupValue("syslog_server",cfg_syslog_server);
+        cfgapi.getRoot()["settings"].lookupValue("syslog_port",cfg_syslog_port);
+        cfgapi.getRoot()["settings"].lookupValue("cfg_syslog_facility",cfg_syslog_facility);
+        cfgapi.getRoot()["settings"].lookupValue("syslog_level",cfg_syslog_level);
+        cfgapi.getRoot()["settings"].lookupValue("syslog_family",cfg_syslog_family);
+        
+        
+        
         cfgapi.getRoot()["settings"].lookupValue("messages_dir",cfg_messages_dir);
         
         cfgapi.getRoot()["debug"].lookupValue("log_data_crc",baseCom::debug_log_data_crc);
@@ -370,37 +438,19 @@ bool load_config(std::string& config_f, bool reload) {
                 }
             }
             
+            if(cfg_syslog_server.size() > 0) {
+                bool have_syslog = init_syslog();
+                if(! have_syslog) {
+                    ERRS_("syslog logging not set.");
+                }
+            }
+            
             if(cfgapi.getRoot()["settings"].lookupValue("log_console",log_console)) {
                 get_logger()->dup2_cout(log_console);
             }
             
 /*            
-            // SYSLOG EXPERIMENTAL CODE - START
-            // create UDP socket
-            int syslog_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP); 
-
-            struct sockaddr_storage syslog_in;
-            memset(&syslog_in, 0, sizeof(struct sockaddr_storage));
-            syslog_in.ss_family                = AF_INET;
-            ((sockaddr_in*)&syslog_in)->sin_addr.s_addr = inet_addr("192.168.122.1");     
-            ((sockaddr_in*)&syslog_in)->sin_port = htons(514); 
-            ::connect(syslog_socket,(sockaddr*)&syslog_in,sizeof(sockaddr_storage));
-            
-            get_logger()->remote_targets(string_format("syslog-udp-%d",syslog_socket),syslog_socket);
-
-            logger_profile* lp = new logger_profile();
-            
-            lp->logger_type = logger_profile::REMOTE_SYSLOG;
-            lp->level_ = INF;
-            
-            // raising internal logging level
-            if(lp->level_ > get_logger()->level()) get_logger()->level(lp->level_);
-            
-            lp->syslog_settings.severity = lp->level_;
-            lp->syslog_settings.facility = 23;
-            
-            get_logger()->target_profiles()[(uint64_t)syslog_socket] = lp;            
-            // SYSLOG EXPERIMENTAL CODE - END
+ *          init_syslog();
 */            
         }
     }

@@ -393,13 +393,14 @@ int cli_diag_identity_ip_list(struct cli_def *cli, const char *command, char *ar
 void cli_print_log_levels(struct cli_def *cli) {
     logger_profile* lp = get_logger()->target_profiles()[(uint64_t)cli->client->_fileno];
     
-    cli_print(cli,"This cli debug level is set to: %d",lp->level_);
-    cli_print(cli,"General logging level set to: %d",get_logger()->level());
+    cli_print(cli,"THIS cli logging level set to: %d",lp->level_);
+    cli_print(cli,"Internal logging level set to: %d",get_logger()->level());
+    cli_print(cli,"\n");
     for(auto i = get_logger()->remote_targets().begin(); i != get_logger()->remote_targets().end(); ++i) {
-        cli_print(cli, "Logging level for: %s: %d",get_logger()->target_name((uint64_t)(*i)),get_logger()->target_profiles()[(uint64_t)(*i)]->level_);
+        cli_print(cli, "Logging level for remote: %s: %d",get_logger()->target_name((uint64_t)(*i)),get_logger()->target_profiles()[(uint64_t)(*i)]->level_);
     }
     for(auto i = get_logger()->targets().begin(); i != get_logger()->targets().end(); ++i) {
-        cli_print(cli, "Logging level for: %s: %d",get_logger()->target_name((uint64_t)(*i)),get_logger()->target_profiles()[(uint64_t)(*i)]->level_);
+        cli_print(cli, "Logging level for target: %s: %d",get_logger()->target_name((uint64_t)(*i)),get_logger()->target_profiles()[(uint64_t)(*i)]->level_);
     }         
 }
 
@@ -410,31 +411,29 @@ int cli_debug_terminal(struct cli_def *cli, const char *command, char *argv[], i
         
         std::string a1 = argv[0];
 
+        int lev_diff = 0;
+        
         if(a1 == "?") {
             cli_print(cli,"valid parameters: %s",debug_levels);
         } 
         else if(a1 == "reset") {
             lp->level_ = NON;
-            //get_logger()->level(cfgapi_table.logging.level);
+            lev_diff = get_logger()->adjust_level();
         }
         else {
             //cli_print(cli, "called %s with %s, argc %d\r\n", __FUNCTION__, command, argc);
             int newlev = safe_val(argv[0]);
             if(newlev >= 0) {
                 lp->level_ = newlev;
+                lev_diff = get_logger()->adjust_level();
                 
-                // elevate logging sent to log writer, if necessary
-                if(lp->level_ > get_logger()->level()) {
-                    cli_print(cli,"Raising internal logging level to %d",lp->level_);
-                    get_logger()->level(lp->level_);
-                    
-                }
             } else {
                 cli_print(cli,"Incorrect value for logging level: %d",newlev);
             }
         }
-    } else {
+        if(lev_diff != 0) cli_print(cli, "internal logging level changed by %d",lev_diff);
         
+    } else {
         cli_print_log_levels(cli);
     }
     
@@ -453,11 +452,23 @@ int cli_debug_logfile(struct cli_def *cli, const char *command, char *argv[], in
         if(a1 == "?") {
             cli_print(cli,"valid parameters: %s",debug_levels);
         } 
-        else if(a1 == "reset") {
-            get_logger()->level(cfgapi_table.logging.level);
-        }
         else {
-            get_logger()->level(std::atoi(argv[0]));
+            
+            int newlev = 0;
+            if(a1 == "reset") {
+                newlev = cfgapi_table.logging.level;
+            } else {
+                newlev = safe_val(argv[0]);
+            }
+            
+            if(newlev >= 0) {
+                for(auto i = get_logger()->targets().begin(); i != get_logger()->targets().end(); ++i) {
+                    get_logger()->target_profiles()[(uint64_t)(*i)]->level_ = newlev;
+                }
+                
+                int lev_diff = get_logger()->adjust_level();
+                if(lev_diff != 0) cli_print(cli, "internal logging level changed by %d",lev_diff);
+            }
         }
     } else {
         cli_print_log_levels(cli);
