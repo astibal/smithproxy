@@ -133,6 +133,9 @@ public:
     
     void __debug_zero_connections(baseHostCX* cx);
     
+    MitmHostCX* first_left();
+    MitmHostCX* first_right();
+    
 public:
 
     socle::meter mtr_down;

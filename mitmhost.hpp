@@ -53,12 +53,12 @@ struct ApplicationData: public socle::sobject {
     virtual ~ApplicationData() {};
     bool is_ssl = false;
     
-    virtual std::string hr() { return std::string(""); };
+    virtual std::string hr(int verbosity=INF) { return std::string(""); };
     virtual std::string original_request() { return request(); }; // parent request
     virtual std::string request() { return std::string(""); };
     
     virtual bool ask_destroy() { return false; };
-    virtual std::string to_string(int verbosity = INF) { return name() + ": " + hr(); };
+    virtual std::string to_string(int verbosity = INF) { return name() + ": " + hr(verbosity); };
     
     DECLARE_C_NAME("ApplicationData");
 };
@@ -90,7 +90,7 @@ struct app_HttpRequest : public ApplicationData {
         }
         return proto+host+uri+params;
     };
-    virtual std::string hr() { std::string ret = proto+host+uri+params; if(referer.size()>0) { ret +=(" via "+referer); }; return ret; }
+    virtual std::string hr(int verbosity=INF) { std::string ret = proto+host+uri+params; if(verbosity> INF && referer.size()>0) { ret +=(" via "+referer); }; return ret; }
     
     DECLARE_C_NAME("app_HttpRequest");
 };

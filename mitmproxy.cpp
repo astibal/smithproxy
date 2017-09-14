@@ -93,28 +93,31 @@ MitmProxy::~MitmProxy() {
 }
 
 std::string MitmProxy::to_string(int verbosity) { 
-    std::string r =  "MitmProxy:" + baseProxy::to_string(verbosity);
+    std::stringstream r;
+    r <<  "MitmProxy:" + baseProxy::to_string(verbosity);
     
     if(verbosity >= INF) {
-        r += string_format(" policy: %d",matched_policy());
+        r << string_format(" policy: %d ",matched_policy());
         
         if(identity_resolved()) {
-            r += string_format(" identity: %s",identity_->username().c_str());
+            r << string_format("identity: %s ",identity_->username().c_str());
         }
-        r += string_format(" up: %s",number_suffixed(mtr_up.get()*8).c_str());
-        r += string_format(" down: %s",number_suffixed(mtr_down.get()*8).c_str());
+        
+        if(verbosity > INF) r << "\n    ";
+        
+        r << string_format("up/down: %s/%s",number_suffixed(mtr_up.get()*8).c_str(),number_suffixed(mtr_down.get()*8).c_str());
         
         if(verbosity > INF) { 
-                r += string_format("\n    PolicyRule Id: 0x%x",cfgapi_obj_policy.at(matched_policy()));
+                r << string_format("\n    PolicyRule Id: 0x%x",cfgapi_obj_policy.at(matched_policy()));
 
             if(identity_resolved()) {
-                r += string_format("\n    User:   %s",identity_->username().c_str()); 
-                r += string_format("\n    Groups: %s",identity_->groups().c_str()); 
+                r << string_format("\n    User:   %s",identity_->username().c_str()); 
+                r << string_format("\n    Groups: %s",identity_->groups().c_str()); 
             }
         }        
     }
     
-    return r;
+    return r.str();
 }
 
 
@@ -1176,6 +1179,33 @@ void MitmProxy::untap() {
     }
 }
 
+MitmHostCX* MitmProxy::first_left() {
+    MitmHostCX* ret{};
+    
+    if(ls().size()) {
+        ret = dynamic_cast<MitmHostCX*>(ls().at(0));
+    }
+    else 
+    if(lda().size()) {
+        ret = dynamic_cast<MitmHostCX*>(lda().at(0));
+    }
+        
+    return ret;
+}
+
+MitmHostCX* MitmProxy::first_right() {
+    MitmHostCX* ret{};
+    
+    if(rs().size()) {
+        ret = dynamic_cast<MitmHostCX*>(rs().at(0));
+    }
+    else 
+    if(rda().size()) {
+        ret = dynamic_cast<MitmHostCX*>(rda().at(0));
+    }
+        
+    return ret;
+}
 
 
 

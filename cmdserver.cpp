@@ -92,6 +92,10 @@ void cmd_show_status(struct cli_def* cli) {
     cli_print(cli," ");
     time_t uptime = time(nullptr) - system_started;
     cli_print(cli,"Uptime: %s",uptime_string(uptime).c_str());
+    cli_print(cli,"Objects: %ld",socle::sobject_db.cache().size());
+    unsigned long l = MitmProxy::total_mtr_up.get();
+    unsigned long r = MitmProxy::total_mtr_down.get();
+    cli_print(cli,"Proxy performance: upload %sbps, download %sbps in last second",number_suffixed(l*8).c_str(),number_suffixed(r*8).c_str());    
  
 }
 
@@ -675,7 +679,7 @@ int cli_diag_mem_objects_list(struct cli_def *cli, const char *command, char *ar
         
         if(argc > 1) {
             std::string a2 = argv[1];
-            verbosity = atoi(a2.c_str());
+            verbosity = safe_val(a2,INF);
         }
     }
     
@@ -713,7 +717,7 @@ int cli_diag_mem_objects_search(struct cli_def *cli, const char *command, char *
         
         if(argc > 1) {
             std::string a2 = argv[1];
-            verbosity = atoi(a2.c_str());
+            verbosity = safe_val(a2,INF);
         }
     }
     
@@ -768,22 +772,65 @@ int cli_diag_mem_objects_clear(struct cli_def *cli, const char *command, char *a
 }
 
 int cli_diag_proxy_session_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
-    char *a[2];
-    a[0] = "MitmProxy";
-    a[1] = nullptr;
     
-    if(argc > 0) {
-        a[1] = argv[0];
+    std::string a1,a2;
+    int verbosity = INF;
+    if(argc > 0) { 
+        a1 = argv[0];
+        verbosity = safe_val(a1,INF);
     }
+    if(argc > 1) a2 = argv[1];
     
-    int ret = cli_diag_mem_objects_list(cli,command,a,argc > 0 ? 2 : 1);
+    std::stringstream ss;
+    
+    
+    
+    socle::sobject_db.lock();
+    for(auto it: socle::sobject_db.cache()) {
+        socle::sobject*       ptr = it.first;
 
+        if(!ptr) continue;
+        
+        if(ptr->class_name() == "MitmProxy") {
+            socle::sobject_info*  si = it.second;
+            ss << ptr->to_string(verbosity);
+            
+            if(verbosity >= DEB && si) {
+                    ss <<  si->to_string(verbosity);
+            }
+
+            if(verbosity > INF) {
+                MitmProxy* curr_proxy = dynamic_cast<MitmProxy*>(ptr);
+                if(curr_proxy) {
+                    MitmHostCX* lf = curr_proxy->first_left();
+                    if(lf) {
+                        if(verbosity > INF) ss << "\n    ";
+                        if(lf->application_data) {
+                            std::string desc = lf->application_data->hr();
+                            if (verbosity < DEB && desc.size() > 120) {
+                             desc = desc.substr(0,117);
+                             desc += "...";
+                            }
+                            ss << "app_data: " << desc << "\n";
+                        } else {
+                            ss << "app_data: none\n";
+                        }
+                    }
+                }
+            }
+            ss << "\n";
+        }
+    }
+    socle::sobject_db.unlock();
+
+    cli_print(cli,"%s",ss.str().c_str());
+    
     
     unsigned long l = MitmProxy::total_mtr_up.get();
     unsigned long r = MitmProxy::total_mtr_down.get();
     cli_print(cli,"\nProxy performance: upload %sbps, download %sbps in last second",number_suffixed(l*8).c_str(),number_suffixed(r*8).c_str());
     
-    return ret;
+    return CLI_OK;
 
 }
 
