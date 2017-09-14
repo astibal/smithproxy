@@ -40,8 +40,8 @@ DEFINE_LOGGING(MitmProxy);
 
 
 
-socle::meter MitmProxy::left_speed;
-socle::meter MitmProxy::right_speed;
+socle::meter MitmProxy::total_mtr_up;
+socle::meter MitmProxy::total_mtr_down;
 
 ptr_cache<std::string,whitelist_verify_entry_t> MitmProxy::whitelist_verify("whitelist - verify",500,true,whitelist_verify_entry_t::is_expired);
 
@@ -97,7 +97,13 @@ std::string MitmProxy::to_string(int verbosity) {
     
     if(verbosity >= INF) {
         r += string_format(" policy: %d",matched_policy());
-        r += string_format(" identity: %d",identity_resolved());
+        
+        if(identity_resolved()) {
+            r += string_format(" identity: %s",identity_->username().c_str());
+        }
+        r += string_format(" up: %s",number_suffixed(mtr_up.get()*8).c_str());
+        r += string_format(" down: %s",number_suffixed(mtr_down.get()*8).c_str());
+        
         if(verbosity > INF) { 
                 r += string_format("\n    PolicyRule Id: 0x%x",cfgapi_obj_policy.at(matched_policy()));
 
@@ -581,9 +587,10 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
             j->shutdown();
         }
     }    
- 
-    //socle::time_update_counter_sec(&cnt_left_bytes_second,&meter_left_bytes_second,&curr_meter_left_bytes_second,1,cx->to_read().size());
-    left_speed.update(cx->to_read().size());
+
+    //update meters
+    total_mtr_up.update(cx->to_read().size());
+    mtr_up.update(cx->to_read().size());
 }
 
 void MitmProxy::on_right_bytes(baseHostCX* cx) {
@@ -621,8 +628,9 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
         }
     }
 
-    //socle::time_update_counter_sec(&cnt_right_bytes_second,&meter_right_bytes_second, &curr_meter_right_bytes_second,1,cx->to_read().size());
-    right_speed.update(cx->to_read().size());
+    // update meters
+    total_mtr_down.update(cx->to_read().size());
+    mtr_down.update(cx->to_read().size());
 }
 
 

@@ -779,8 +779,8 @@ int cli_diag_proxy_session_list(struct cli_def *cli, const char *command, char *
     int ret = cli_diag_mem_objects_list(cli,command,a,argc > 0 ? 2 : 1);
 
     
-    unsigned long l = MitmProxy::left_speed.get();
-    unsigned long r = MitmProxy::right_speed.get();
+    unsigned long l = MitmProxy::total_mtr_up.get();
+    unsigned long r = MitmProxy::total_mtr_down.get();
     cli_print(cli,"\nProxy performance: upload %sbps, download %sbps in last second",number_suffixed(l*8).c_str(),number_suffixed(r*8).c_str());
     
     return ret;

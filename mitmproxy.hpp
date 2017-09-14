@@ -135,8 +135,11 @@ public:
     
 public:
 
-    static socle::meter left_speed;
-    static socle::meter right_speed;
+    socle::meter mtr_down;
+    socle::meter mtr_up;    
+    
+    static socle::meter total_mtr_up;
+    static socle::meter total_mtr_down;
 
     
     DECLARE_C_NAME("MitmProxy");
