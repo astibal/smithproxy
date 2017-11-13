@@ -1237,6 +1237,7 @@ bool cfgapi_obj_profile_content_apply(baseHostCX* originator, baseProxy* new_pro
         }
         
         if(mitm_proxy->write_payload()) {
+            mitm_proxy->toggle_tlog();
             mitm_proxy->tlog()->left_write("Connection start\n");
         }
     } else {

@@ -47,15 +47,46 @@ ptr_cache<std::string,whitelist_verify_entry_t> MitmProxy::whitelist_verify("whi
 
 MitmProxy::MitmProxy(baseCom* c): baseProxy(c), sobject() {
 
-    std::string data_dir = "mitm";
-    std::string file_pref = "";
-    std::string file_suff = "smcap";
+}
+
+void MitmProxy::toggle_tlog() {
     
-    cfgapi.getRoot()["settings"].lookupValue("write_payload_dir",data_dir);
-    cfgapi.getRoot()["settings"].lookupValue("write_payload_file_prefix",file_pref);
-    cfgapi.getRoot()["settings"].lookupValue("write_payload_file_suffix",file_suff);
+    // create traffic logger if it doesn't exist
+    if(tlog_ == nullptr) {
+        std::string data_dir = "mitm";
+        std::string file_pref = "";
+        std::string file_suff = "smcap";
+        
+        cfgapi.getRoot()["settings"].lookupValue("write_payload_dir",data_dir);
+        cfgapi.getRoot()["settings"].lookupValue("write_payload_file_prefix",file_pref);
+        cfgapi.getRoot()["settings"].lookupValue("write_payload_file_suffix",file_suff);
+        
+        tlog_ = new trafLog(this,data_dir.c_str(),file_pref.c_str(),file_suff.c_str());
+    }
     
-    tlog_ = new trafLog(this,data_dir.c_str(),file_pref.c_str(),file_suff.c_str());
+    // check if we have there status file
+    if(tlog_) {
+        std::string data_dir = "mitm";
+        cfgapi.getRoot()["settings"].lookupValue("write_payload_dir",data_dir);
+
+        data_dir += "/disabled";
+        
+        struct stat st;
+        int result = stat(data_dir.c_str(), &st);
+        bool present = (result == 0);
+        
+        if(present) {
+            if(tlog()->status() == true) {
+                WARS___("capture disabled by disabled-file");
+            }
+            tlog()->status(false);
+        } else {
+            if(tlog()->status() == false) {
+                WARS___("capture re-enabled from previous disabled-file state");
+            }            
+            tlog()->status(true);
+        }
+    }
 }
 
 
@@ -67,7 +98,7 @@ MitmProxy::~MitmProxy() {
         for(typename std::vector<baseHostCX*>::iterator j = this->left_sockets.begin(); j != this->left_sockets.end(); ++j) {
             auto cx = (*j);
             if(cx->log().size()) {
-                tlog()->write('L', cx->log());
+                if(tlog()) tlog()->write('L', cx->log());
                 cx->log() = "";
             }
         }               
@@ -75,12 +106,12 @@ MitmProxy::~MitmProxy() {
         for(typename std::vector<baseHostCX*>::iterator j = this->right_sockets.begin(); j != this->right_sockets.end(); ++j) {
             auto cx = (*j);
             if(cx->log().size()) {
-                tlog()->write('R', cx->log());
+                if(tlog()) tlog()->write('R', cx->log());
                 cx->log() = "";
             }
         }         
         
-        tlog()->left_write("Connection stop\n");
+        if(tlog()) tlog()->left_write("Connection stop\n");
     }
     
     if(content_rule_ != nullptr) {
@@ -529,12 +560,15 @@ bool MitmProxy::handle_cached_response(MitmHostCX* mh) {
 void MitmProxy::on_left_bytes(baseHostCX* cx) {
     
     if(write_payload()) {
+        
+        toggle_tlog();
+        
         if(cx->log().size()) {
-            tlog()->write('L', cx->log());
+            if(tlog()) tlog()->write('L', cx->log());
             cx->log() = "";
         }
         
-        tlog()->left_write(cx->to_read());
+        if(tlog()) tlog()->left_write(cx->to_read());
     }
     
 
@@ -599,12 +633,15 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
 void MitmProxy::on_right_bytes(baseHostCX* cx) {
     
     if(write_payload()) {
+
+        toggle_tlog();
+        
         if(cx->log().size()) {
-            tlog()->write('R',cx->log());
+            if(tlog()) tlog()->write('R',cx->log());
             cx->log() = "";
         }
         
-        tlog()->right_write(cx->to_read());
+        if(tlog()) tlog()->right_write(cx->to_read());
     }
     
     
@@ -686,7 +723,8 @@ void MitmProxy::on_left_error(baseHostCX* cx) {
     DUMS___(to_string().c_str());
     
     if(write_payload()) {
-        tlog()->left_write("Client side connection closed: " + cx->name() + "\n");
+        toggle_tlog();
+        if(tlog()) tlog()->left_write("Client side connection closed: " + cx->name() + "\n");
     }
     
     if(opt_auth_resolve)
@@ -733,7 +771,8 @@ void MitmProxy::on_right_error(baseHostCX* cx)
     DEB___("on_right_error[%s]: proxy marked dead",(this->error_on_read ? "read" : "write"));
     
     if(write_payload()) {
-        tlog()->right_write("Server side connection closed: " + cx->name() + "\n");
+        toggle_tlog();
+        if(tlog()) tlog()->right_write("Server side connection closed: " + cx->name() + "\n");
     }
     
 //         INF___("Created new proxy 0x%08x from %s:%s to %s:%d",new_proxy,f,f_p, t,t_p );

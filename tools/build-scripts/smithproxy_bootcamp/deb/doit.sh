@@ -21,6 +21,7 @@ echo "Filling changelog..."
 export DEBEMAIL="$DEBEMAIL"
 export DEBFULLNAME="$DEBFULLNAME"
 
+echo "Attempting to download ${DOWNLOAD_URL}/${DISTRO}/${VER_MAJ}/changelog"
 wget ${DOWNLOAD_URL}/${DISTRO}/${VER_MAJ}/changelog -O debian/changelog.dnld
 #wget ${DOWNLOAD_URL}/${DISTRO}/changelog -O debian/changelog
 

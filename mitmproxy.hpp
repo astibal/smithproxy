@@ -42,7 +42,7 @@ class FilterProxy;
 class MitmProxy : public baseProxy, public socle::sobject {
     
 protected:
-    trafLog *tlog_;
+    trafLog *tlog_ = nullptr;
     
     bool write_payload_ = false;
     
@@ -91,6 +91,7 @@ public:
     void write_payload(bool b) { write_payload_ = b; }
     
     trafLog* tlog() { return tlog_; }
+    void toggle_tlog();
     
     explicit MitmProxy(baseCom* c);
     virtual ~MitmProxy();
