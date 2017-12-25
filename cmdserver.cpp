@@ -236,6 +236,73 @@ int cli_diag_ssl_crl_list(struct cli_def *cli, const char *command, char *argv[]
     
     return CLI_OK;
 }
+
+int cli_diag_ssl_verify_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    
+    SSLCertStore* store = SSLCom::certstore();
+    std::string out;
+    
+    out += "Verify status list:\n\n";
+    
+    store->ocsp_result_cache.lock();
+    for (auto x: store->ocsp_result_cache.cache()) {
+       std::string cn = x.first;
+       expiring_ocsp_result* cached_result = x.second;
+       int ttl = 0;
+       if (cached_result) {
+           ttl = cached_result->expired_at - ::time(nullptr);
+           out += string_format("    %s, ttl=%d",cn.c_str(),ttl);
+           
+           if (ttl <= 0) {
+               out += "  *expired*";
+           }
+           out += "\n";
+       }
+       else {
+           out += string_format("    %s, ttl=?\n",cn.c_str());
+       }
+       
+    }
+    store->ocsp_result_cache.unlock();
+    
+    cli_print(cli,"\n%s",out.c_str());
+    
+    return CLI_OK;
+}
+
+
+int cli_diag_ssl_ticket_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    
+    SSLCertStore* store = SSLCom::certstore();
+    std::string out;
+    
+    out += "SSL ticket/sessionid list:\n\n";
+    
+    store->session_cache.lock();
+    for (auto x: store->session_cache.cache()) {
+        std::string key = x.first;
+        session_holder* session_keys = x.second;
+        
+        if(session_keys->ptr->session_id_length > 0) {
+            std::string sessionid = hex_print(session_keys->ptr->session_id, session_keys->ptr->session_id_length);
+            out += string_format("    %s, sessionid: %s\n",key.c_str(),sessionid.c_str());
+        }
+        
+        if (session_keys->ptr->tlsext_ticklen > 0) {
+            std::string tick = hex_print(session_keys->ptr->tlsext_tick, session_keys->ptr->tlsext_ticklen);
+            out += string_format("    %s,    ticket: %s\n",key.c_str(),tick.c_str());
+        }
+        
+       
+    }
+    store->session_cache.unlock();
+    
+    cli_print(cli,"\n%s",out.c_str());
+    
+    return CLI_OK;
+}
+
+
 #include <biostring.hpp>
 
 int cli_diag_ssl_memcheck_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
@@ -888,6 +955,8 @@ void client_thread(int client_socket) {
                 struct cli_command *diag_ssl_cache;
                 struct cli_command *diag_ssl_wl;
                 struct cli_command *diag_ssl_crl;
+                struct cli_command *diag_ssl_verify;
+                struct cli_command *diag_ssl_ticket;
                 struct cli_command *diag_ssl_memcheck;
             struct cli_command *diag_mem;
                 struct cli_command *diag_mem_buffers;
@@ -933,6 +1002,11 @@ void client_thread(int client_socket) {
                         cli_register_command(cli, diag_ssl_wl, "clear", cli_diag_ssl_wl_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clear all verification whitelist entries");
                 diag_ssl_crl = cli_register_command(cli, diag_ssl, "crl", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose dynamically downloaded CRLs");                           
                         cli_register_command(cli, diag_ssl_crl, "list", cli_diag_ssl_crl_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all CRLs");
+                diag_ssl_verify = cli_register_command(cli, diag_ssl, "verify", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose certificate verification status cache");                           
+                        cli_register_command(cli, diag_ssl_verify, "list", cli_diag_ssl_verify_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list certificate verification status cache content");
+                diag_ssl_ticket = cli_register_command(cli, diag_ssl, "ticket", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose abbreviated handshake session/ticket cache");
+                        cli_register_command(cli, diag_ssl_ticket, "list", cli_diag_ssl_ticket_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list abbreviated handshake session/ticket cache");
+                        
 
             if(cfg_openssl_mem_dbg) {
                 diag_ssl_memcheck = cli_register_command(cli, diag_ssl, "memcheck", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose openssl memcheck");                           
