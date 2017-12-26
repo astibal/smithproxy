@@ -282,16 +282,31 @@ int cli_diag_ssl_ticket_list(struct cli_def *cli, const char *command, char *arg
     for (auto x: store->session_cache.cache()) {
         std::string key = x.first;
         session_holder* session_keys = x.second;
-        
-        if(session_keys->ptr->session_id_length > 0) {
-            std::string sessionid = hex_print(session_keys->ptr->session_id, session_keys->ptr->session_id_length);
-            out += string_format("    %s, sessionid: %s\n",key.c_str(),sessionid.c_str());
+
+        bool showall = false;
+
+        if(argc > 0) {
+            int lev = safe_val(argv[0]);
+            if(lev >= 7) {
+                showall = true;
+            }
         }
+        bool ticket = false;
         
         if (session_keys->ptr->tlsext_ticklen > 0) {
+            ticket = true;
             std::string tick = hex_print(session_keys->ptr->tlsext_tick, session_keys->ptr->tlsext_ticklen);
             out += string_format("    %s,    ticket: %s\n",key.c_str(),tick.c_str());
         }
+        
+        if(! ticket || showall) {
+            if(session_keys->ptr->session_id_length > 0) {
+                std::string sessionid = hex_print(session_keys->ptr->session_id, session_keys->ptr->session_id_length);
+                out += string_format("    %s, sessionid: %s\n",key.c_str(),sessionid.c_str());
+            }
+            out += string_format("    usage cnt: %d\n",session_keys->cnt_loaded);
+        }
+        
         
        
     }
