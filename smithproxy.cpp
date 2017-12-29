@@ -17,6 +17,14 @@
     
 */    
 
+
+//#define MEM_DEBUG 1
+#ifdef MEM_DEBUG
+    #include <mcheck.h>
+    #define SOCLE_MEM_PROFILE
+#endif
+
+
 #include <vector>
 
 #include <ctime>
@@ -61,13 +69,6 @@
 #include <staticcontent.hpp>
 #include <smithlog.hpp>
 
-
-#define MEM_DEBUG 1
-#ifdef MEM_DEBUG
-    #include <mcheck.h>
-#endif
-
-
 extern "C" void __libc_freeres(void);
 
 typedef ThreadedAcceptor<MitmMasterProxy,MitmProxy> theAcceptor;
@@ -96,8 +97,14 @@ std::thread* log_thread = nullptr;
 
 volatile static int cnt_terminate = 0;
 static bool cfg_daemonize = false;
-static bool cfg_mtrace_enable = false;
+
+#ifndef MEM_DEBUG
 extern bool cfg_openssl_mem_dbg = false;
+static bool cfg_mtrace_enable = false;
+#else
+extern bool cfg_openssl_mem_dbg = true;
+static bool cfg_mtrace_enable = true;
+#endif
 
 static int  args_debug_flag = NON;
 // static int   ssl_flag = 0;
@@ -616,8 +623,10 @@ int main(int argc, char *argv[]) {
     }
 
     if(cfg_mtrace_enable) {
+#ifdef MEM_DEBUG
         putenv("MALLOC_TRACE=/var/log/smithproxy_mtrace.log");
         mtrace();
+#endif
     }
 
     

@@ -83,6 +83,9 @@ void load_defaults() {
     orig_mitmmasterproxy_loglevel = MitmMasterProxy::log_level_ref();
 }
 
+
+
+
 void cmd_show_status(struct cli_def* cli) {
     
     //cli_print(cli,":connected using socket %d",cli->client->_fileno);
@@ -217,6 +220,25 @@ int cli_diag_ssl_wl_clear(struct cli_def *cli, const char *command, char *argv[]
     return CLI_OK;
 }
 
+
+int cli_diag_ssl_wl_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    
+    MitmProxy::whitelist_verify.lock();
+    int n_sz_cache = MitmProxy::whitelist_verify.cache().size();
+    int n_max_cache = MitmProxy::whitelist_verify.max_size();
+    bool n_autorem = MitmProxy::whitelist_verify.auto_delete();
+    std::string n_name = MitmProxy::whitelist_verify.name();
+    
+    MitmProxy::whitelist_verify.unlock();
+
+    cli_print(cli,"'%s' cache stats: ",n_name.c_str());
+    cli_print(cli,"    current size: %d ",n_sz_cache);
+    cli_print(cli,"    maximum size: %d ",n_max_cache);
+    cli_print(cli,"      autodelete: %d ",n_autorem);
+    
+    return CLI_OK;
+}
+
 int cli_diag_ssl_crl_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
     
     SSLCertStore* store = SSLCom::certstore();
@@ -236,6 +258,28 @@ int cli_diag_ssl_crl_list(struct cli_def *cli, const char *command, char *argv[]
     
     return CLI_OK;
 }
+
+int cli_diag_ssl_crl_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    
+    ptr_cache<std::string, expiring_crl>& cache = SSLCertStore::crl_cache;
+    
+    cache.lock();
+    int n_sz_cache = cache.cache().size();
+    int n_max_cache = cache.max_size();
+    bool n_autorem = cache.auto_delete();
+    std::string n_name = cache.name();
+    
+    cache.unlock();
+
+    cli_print(cli,"'%s' cache stats: ",n_name.c_str());
+    cli_print(cli,"    current size: %d ",n_sz_cache);
+    cli_print(cli,"    maximum size: %d ",n_max_cache);
+    cli_print(cli,"      autodelete: %d ",n_autorem);
+    
+    return CLI_OK;
+}
+
+
 
 int cli_diag_ssl_verify_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
     
@@ -266,6 +310,26 @@ int cli_diag_ssl_verify_list(struct cli_def *cli, const char *command, char *arg
     store->ocsp_result_cache.unlock();
     
     cli_print(cli,"\n%s",out.c_str());
+    
+    return CLI_OK;
+}
+
+int cli_diag_ssl_verify_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    
+    ptr_cache<std::string, expiring_ocsp_result>& cache = SSLCom::certstore()->ocsp_result_cache;
+    
+    cache.lock();
+    int n_sz_cache = cache.cache().size();
+    int n_max_cache = cache.max_size();
+    bool n_autorem = cache.auto_delete();
+    std::string n_name = cache.name();
+    
+    cache.unlock();
+
+    cli_print(cli,"'%s' cache stats: ",n_name.c_str());
+    cli_print(cli,"    current size: %d ",n_sz_cache);
+    cli_print(cli,"    maximum size: %d ",n_max_cache);
+    cli_print(cli,"      autodelete: %d ",n_autorem);
     
     return CLI_OK;
 }
@@ -317,6 +381,45 @@ int cli_diag_ssl_ticket_list(struct cli_def *cli, const char *command, char *arg
     return CLI_OK;
 }
 
+int cli_diag_ssl_ticket_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    
+    ptr_cache<std::string, session_holder>& cache = SSLCom::certstore()->session_cache;
+    
+    cache.lock();
+    int n_sz_cache = cache.cache().size();
+    int n_max_cache = cache.max_size();
+    bool n_autorem = cache.auto_delete();
+    std::string n_name = cache.name();
+    
+    cache.unlock();
+
+    cli_print(cli,"'%s' cache stats: ",n_name.c_str());
+    cli_print(cli,"    current size: %d ",n_sz_cache);
+    cli_print(cli,"    maximum size: %d ",n_max_cache);
+    cli_print(cli,"      autodelete: %d ",n_autorem);
+    
+    return CLI_OK;
+}
+
+int cli_diag_ssl_ticket_size(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    
+    ptr_cache<std::string, session_holder>& cache = SSLCom::certstore()->session_cache;
+    
+    cache.lock();
+    int n_sz_cache = cache.cache().size();
+    int n_max_cache = cache.max_size();
+    bool n_autorem = cache.auto_delete();
+    std::string n_name = cache.name();
+    
+    cache.unlock();
+
+    cli_print(cli,"'%s' cache stats: ",n_name.c_str());
+    cli_print(cli,"    current size: %d ",n_sz_cache);
+    cli_print(cli,"    maximum size: %d ",n_max_cache);
+    cli_print(cli,"      autodelete: %d ",n_autorem);
+    
+    return CLI_OK;
+}
 
 #include <biostring.hpp>
 
@@ -1015,12 +1118,16 @@ void client_thread(int client_socket) {
                 diag_ssl_wl = cli_register_command(cli, diag_ssl, "whitelist", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl temporary verification whitelist");                        
                         cli_register_command(cli, diag_ssl_wl, "list", cli_diag_ssl_wl_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all verification whitelist entries");
                         cli_register_command(cli, diag_ssl_wl, "clear", cli_diag_ssl_wl_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clear all verification whitelist entries");
+                        cli_register_command(cli, diag_ssl_wl, "stats", cli_diag_ssl_wl_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "verification whitelist cache stats");
                 diag_ssl_crl = cli_register_command(cli, diag_ssl, "crl", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose dynamically downloaded CRLs");                           
                         cli_register_command(cli, diag_ssl_crl, "list", cli_diag_ssl_crl_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all CRLs");
+                        cli_register_command(cli, diag_ssl_crl, "stats", cli_diag_ssl_crl_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "CRLs cache stats");
                 diag_ssl_verify = cli_register_command(cli, diag_ssl, "verify", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose certificate verification status cache");                           
                         cli_register_command(cli, diag_ssl_verify, "list", cli_diag_ssl_verify_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list certificate verification status cache content");
+                        cli_register_command(cli, diag_ssl_verify, "stats", cli_diag_ssl_verify_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "certificate verification status cache stats");
                 diag_ssl_ticket = cli_register_command(cli, diag_ssl, "ticket", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose abbreviated handshake session/ticket cache");
                         cli_register_command(cli, diag_ssl_ticket, "list", cli_diag_ssl_ticket_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list abbreviated handshake session/ticket cache");
+                        cli_register_command(cli, diag_ssl_ticket, "stats", cli_diag_ssl_ticket_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "abbreviated handshake session/ticket cache stats");
                         
 
             if(cfg_openssl_mem_dbg) {
