@@ -988,6 +988,7 @@ int cli_diag_proxy_session_list(struct cli_def *cli, const char *command, char *
                 MitmProxy* curr_proxy = dynamic_cast<MitmProxy*>(ptr);
                 if(curr_proxy) {
                     MitmHostCX* lf = curr_proxy->first_left();
+                    MitmHostCX* rg = curr_proxy->first_right();
                     if(lf) {
                         if(verbosity > INF) ss << "\n    ";
                         if(lf->application_data) {
@@ -1000,7 +1001,26 @@ int cli_diag_proxy_session_list(struct cli_def *cli, const char *command, char *
                         } else {
                             ss << "app_data: none\n";
                         }
+                        
+                        if(verbosity > DIA) {
+                            ss << "    obj_debug: " << curr_proxy->get_this_log_level() << "\n";
+                        }
                     }
+                    
+                    if(lf && verbosity > DIA) {
+                            ss << "     lf_debug: " << lf->get_this_log_level() << "\n";
+                            if(lf->com()) {
+                                ss << "       lf_com: " << lf->com()->get_this_log_level() << "\n";
+                            }
+                    }
+                    if(rg && verbosity > DIA) {
+                            ss << "     rg_debug: " << rg->get_this_log_level() << "\n";
+                            if(rg->com()) {
+                                ss << "       rg_com: " << rg->com()->get_this_log_level() << "\n";
+                            }
+                            
+                    }
+
                 }
             }
             ss << "\n";

@@ -161,6 +161,7 @@ private:
     int inspect_verdict = Inspector::OK;
     
     DECLARE_C_NAME("MitmHostCX");
+    DECLARE_LOGGING(to_string);
 };
 
 #endif

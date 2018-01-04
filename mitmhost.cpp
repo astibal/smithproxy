@@ -22,6 +22,8 @@
 #include <logger.hpp>
 #include <cfgapi.hpp>
 
+DEFINE_LOGGING(MitmHostCX)
+
 std::vector<duplexFlowMatch*> sigs_starttls;
 std::vector<duplexFlowMatch*> sigs_detection;
 
