@@ -16,7 +16,7 @@ public:
     StaticContent() : socle::sobject::sobject() { templates_ = new ptr_cache<std::string,Template> ("replacement message cache"); };
     virtual ~StaticContent() { templates_->invalidate(); delete templates_; };
     virtual bool ask_destroy() { return false; };
-    virtual std::string to_string(int verbosity=INF) { return std::string("StaticContent"); };
+    virtual std::string to_string(int verbosity=iINF) { return std::string("StaticContent"); };
 
     bool load_files(std::string& dir);
     

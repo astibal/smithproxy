@@ -679,7 +679,7 @@ void MitmProxy::__debug_zero_connections(baseHostCX* cx) {
     if(cx->meter_write_count == 0 && cx->meter_write_bytes == 0 ) {
         SSLCom* c = dynamic_cast<SSLCom*>(cx->com());
         if(c) {
-            c->log_profiling_stats(INF);
+            c->log_profiling_stats(iINF);
             int p = 0; 
             int s = cx->socket();
             if(s == 0) s = cx->closed_socket();
@@ -694,7 +694,7 @@ void MitmProxy::__debug_zero_connections(baseHostCX* cx) {
         if(cx->peer()) {
             SSLCom* c = dynamic_cast<SSLCom*>(cx->peer()->com());
             if(c) {
-                c->log_profiling_stats(INF);
+                c->log_profiling_stats(iINF);
                 INF___("        peer transferred bytes: up=%d/%dB dw=%d/%dB",cx->peer()->meter_read_count,cx->peer()->meter_read_bytes,
                                                                 cx->peer()->meter_write_count, cx->peer()->meter_write_bytes);
                 int p = 0; 
@@ -1552,7 +1552,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
         
         end:
         
-        new_proxy->name(new_proxy->to_string(INF));
+        new_proxy->name(new_proxy->to_string(iINF));
         
         
         if(delete_proxy) {

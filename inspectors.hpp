@@ -80,7 +80,7 @@ protected:
     
     
     virtual bool ask_destroy() { return false; };
-    virtual std::string to_string(int verbosity=INF) { return string_format("%s: in-progress: %d stage: %d completed: %d result: %d",
+    virtual std::string to_string(int verbosity=iINF) { return string_format("%s: in-progress: %d stage: %d completed: %d result: %d",
                                                 c_name(),in_progress(), stage, completed(),result()); };
     
                                                 
@@ -113,7 +113,7 @@ public:
     bool store(DNS_Response* ptr);
     virtual void apply_verdict(AppHostCX* cx);
     
-    virtual std::string to_string(int verbosity=INF);
+    virtual std::string to_string(int verbosity=iINF);
 
     static std::regex wildcard;
 private:

@@ -22,20 +22,24 @@
 
 #include <queue>
 #include <mutex>
+#include <map>
+#include <string>
+#include <vector>
 
 #include <string>
 #include <utility>
 #include <lockable.hpp>
 #include <logger.hpp>
 
-typedef std::pair<int,std::string> log_entry;
+typedef std::pair<loglevel,std::string> log_entry;
+typedef std::map<std::ofstream*,std::vector<std::string>> ofstream_queue;
 
 class QueueLogger : public logger, public lockable {
 public:
     QueueLogger();
     virtual ~QueueLogger() {};
-    virtual int write_log(unsigned int l, std::string& sss);
-    virtual int write_disk(unsigned int l, std::string& sss);
+    virtual int write_log(loglevel l, std::string& sss);
+    virtual int write_disk(loglevel l, std::string& sss);
     
     static void run_queue(QueueLogger* logger_src);
     

@@ -28,7 +28,7 @@
 class AddressObject : public socle::sobject {
 public:
     virtual bool match(CIDR* c) = 0;
-    virtual std::string to_string(int=INF) = 0;
+    virtual std::string to_string(int=iINF) = 0;
     virtual ~AddressObject() {};
 };
 
@@ -42,7 +42,7 @@ public:
     virtual bool match(CIDR* c) { return (contains(c) >= 0); };
     virtual bool ask_destroy() { return false; };
     
-    virtual std::string to_string(int verbosity=INF) { char* temp = cidr_to_str(c_); std::string ret = string_format("CidrAddress: %s",temp); delete temp; return ret;  }
+    virtual std::string to_string(int verbosity=iINF) { char* temp = cidr_to_str(c_); std::string ret = string_format("CidrAddress: %s",temp); delete temp; return ret;  }
     
     
     virtual ~CidrAddress() { cidr_free(c_); };
@@ -57,7 +57,7 @@ public:
     FqdnAddress(std::string s) : fqdn_(s) { }
     virtual bool match(CIDR* c);
     virtual bool ask_destroy() { return false; };
-    virtual std::string to_string(int verbosity=INF);
+    virtual std::string to_string(int verbosity=iINF);
 protected:
     std::string fqdn_;
 

@@ -67,8 +67,8 @@ extern std::string cfgapi_tenant_magic_ip;
 
 
 struct logging_{
-    unsigned int level = INF;
-    unsigned int cli_init_level = NON;
+    loglevel level = INF;
+    loglevel cli_init_level = NON;
 } ;
 
 struct cfgapi_table_ {

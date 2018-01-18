@@ -106,7 +106,7 @@ extern bool cfg_openssl_mem_dbg = true;
 static bool cfg_mtrace_enable = true;
 #endif
 
-static int  args_debug_flag = NON;
+static loglevel  args_debug_flag = NON;
 // static int   ssl_flag = 0;
 static std::string cfg_tcp_listen_port = "50080";
 static std::string cfg_ssl_listen_port = "50443";
@@ -132,7 +132,7 @@ static std::string cfg_tenant_name;
 static std::string cfg_syslog_server   = "";
 static int         cfg_syslog_port     = 514;
 static int         cfg_syslog_facility =  23; //local7
-static int         cfg_syslog_level = INF;
+static loglevel         cfg_syslog_level = INF;
 static int         cfg_syslog_family = 4;
 
 
@@ -179,10 +179,10 @@ void my_usr1 (int param) {
 static struct option long_options[] =
     {
     /* These options set a flag. */
-    {"debug",   no_argument,       &args_debug_flag, DEB},
-    {"diagnose",   no_argument,       &args_debug_flag, DIA},
-    {"dump",   no_argument,       &args_debug_flag, DUM},
-    {"extreme",   no_argument,       &args_debug_flag, EXT},
+    {"debug",   no_argument,       (int*)&args_debug_flag.level_, iDEB},
+    {"diagnose",   no_argument,       (int*)&args_debug_flag.level_, iDIA},
+    {"dump",   no_argument,       (int*)&args_debug_flag.level_, iDUM},
+    {"extreme",   no_argument,      (int*)&args_debug_flag.level_, iEXT},
     
     {"config-file", required_argument, 0, 'c'},
     {"config-check-only",no_argument,0,'o'},
@@ -305,7 +305,7 @@ bool init_syslog() {
         get_logger()->level(lp->level_);
     }
     
-    lp->syslog_settings.severity = lp->level_;
+    lp->syslog_settings.severity = lp->level_.level_;
     lp->syslog_settings.facility = cfg_syslog_facility;
     
     get_logger()->target_profiles()[(uint64_t)syslog_socket] = lp;
@@ -377,12 +377,12 @@ bool load_config(std::string& config_f, bool reload) {
         cfgapi.getRoot()["settings"].lookupValue("socks_port",cfg_socks_port);
         cfgapi.getRoot()["settings"].lookupValue("socks_workers",cfg_socks_workers);
         
-        cfgapi.getRoot()["settings"].lookupValue("log_level",cfgapi_table.logging.level);
+        cfgapi.getRoot()["settings"].lookupValue("log_level",cfgapi_table.logging.level.level_);
         
         cfgapi.getRoot()["settings"].lookupValue("syslog_server",cfg_syslog_server);
         cfgapi.getRoot()["settings"].lookupValue("syslog_port",cfg_syslog_port);
         cfgapi.getRoot()["settings"].lookupValue("cfg_syslog_facility",cfg_syslog_facility);
-        cfgapi.getRoot()["settings"].lookupValue("syslog_level",cfg_syslog_level);
+        cfgapi.getRoot()["settings"].lookupValue("syslog_level",cfg_syslog_level.level_);
         cfgapi.getRoot()["settings"].lookupValue("syslog_family",cfg_syslog_family);
         
         
@@ -399,17 +399,17 @@ bool load_config(std::string& config_f, bool reload) {
             cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("magic_ip",cfgapi_tenant_magic_ip);
         }
         
-        cfgapi.getRoot()["debug"]["log"].lookupValue("sslcom",SSLCom::log_level_ref());
-        cfgapi.getRoot()["debug"]["log"].lookupValue("sslmitmcom",baseSSLMitmCom<SSLCom>::log_level_ref());
-        cfgapi.getRoot()["debug"]["log"].lookupValue("sslmitmcom",baseSSLMitmCom<DTLSCom>::log_level_ref());
-        cfgapi.getRoot()["debug"]["log"].lookupValue("sslcertstore",SSLCertStore::log_level_ref());
-        cfgapi.getRoot()["debug"]["log"].lookupValue("proxy",baseProxy::log_level_ref());
-        cfgapi.getRoot()["debug"]["log"].lookupValue("proxy",epoll::log_level);
+        cfgapi.getRoot()["debug"]["log"].lookupValue("sslcom",SSLCom::log_level_ref().level_);
+        cfgapi.getRoot()["debug"]["log"].lookupValue("sslmitmcom",baseSSLMitmCom<SSLCom>::log_level_ref().level_);
+        cfgapi.getRoot()["debug"]["log"].lookupValue("sslmitmcom",baseSSLMitmCom<DTLSCom>::log_level_ref().level_);
+        cfgapi.getRoot()["debug"]["log"].lookupValue("sslcertstore",SSLCertStore::log_level_ref().level_);
+        cfgapi.getRoot()["debug"]["log"].lookupValue("proxy",baseProxy::log_level_ref().level_);
+        cfgapi.getRoot()["debug"]["log"].lookupValue("proxy",epoll::log_level.level_);
         cfgapi.getRoot()["debug"]["log"].lookupValue("mtrace",cfg_mtrace_enable);
         cfgapi.getRoot()["debug"]["log"].lookupValue("openssl_mem_dbg",cfg_openssl_mem_dbg);
         /*DNS ALG EXPLICIT LOG*/
-        cfgapi.getRoot()["debug"]["log"].lookupValue("alg_dns",DNS_Inspector::log_level_ref());
-        cfgapi.getRoot()["debug"]["log"].lookupValue("alg_dns",DNS_Packet::log_level_ref());
+        cfgapi.getRoot()["debug"]["log"].lookupValue("alg_dns",DNS_Inspector::log_level_ref().level_);
+        cfgapi.getRoot()["debug"]["log"].lookupValue("alg_dns",DNS_Packet::log_level_ref().level_);
         
         cfgapi.getRoot()["settings"]["cli"].lookupValue("port",cli_port);
         cfgapi.getRoot()["settings"]["cli"].lookupValue("enable_password",cli_enable_password);

@@ -177,7 +177,7 @@ std::recursive_mutex merged_cfg_write_lock;
 static bool cfg_daemonize = false;
 static bool cfg_mtrace_enable = false;
 static std::string cfg_log_file;
-static int cfg_log_level = INF;
+static loglevel cfg_log_level = INF;
 static int cfg_log_console = false;
 static int cfg_smithd_workers = 0;
 static std::string cfg_smithd_listen_port = "/var/run/smithd.sock";
@@ -185,7 +185,7 @@ static std::string cfg_smithd_listen_port = "/var/run/smithd.sock";
 // Various
 
 volatile static int cnt_terminate = 0;
-static int  args_debug_flag = NON;
+static loglevel  args_debug_flag = NON;
 bool config_file_check_only = false;
 
 
@@ -220,10 +220,10 @@ void my_usr1 (int param) {
 static struct option long_options[] =
     {
     /* These options set a flag. */
-    {"debug",   no_argument,       &args_debug_flag, DEB},
-    {"diagnose",   no_argument,       &args_debug_flag, DIA},
-    {"dump",   no_argument,       &args_debug_flag, DUM},
-    {"extreme",   no_argument,       &args_debug_flag, EXT},
+    {"debug",   no_argument,       (int*)&args_debug_flag.level_, iDEB},
+    {"diagnose",   no_argument,       (int*)&args_debug_flag.level_, iDIA},
+    {"dump",   no_argument,       (int*)&args_debug_flag.level_, iDUM},
+    {"extreme",   no_argument,       (int*)&args_debug_flag.level_, iEXT},
     
     {"config-file", required_argument, 0, 'c'},
     {"config-check-only",no_argument,0,'o'},
@@ -270,7 +270,7 @@ bool load_config(std::string& config_f, bool reload) {
             }        
         }
 
-        cfgapi.getRoot()["settings"].lookupValue("log_level",cfg_log_level);
+        cfgapi.getRoot()["settings"].lookupValue("log_level",cfg_log_level.level_);
     }
     catch(const FileIOException &fioex)
     {
@@ -290,7 +290,7 @@ bool load_config(std::string& config_f, bool reload) {
     }
     
     try {
-        cfgapi.getRoot()["settings"].lookupValue("log_level",cfg_log_level);
+        cfgapi.getRoot()["settings"].lookupValue("log_level",cfg_log_level.level_);
         if(reload) {
         }
     }

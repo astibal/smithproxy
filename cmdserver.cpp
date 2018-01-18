@@ -55,17 +55,17 @@ std::string cli_enable_password = "";
 
 static const char* debug_levels="\n\t0\tNONE\n\t1\tFATAL\n\t2\tCRITICAL\n\t3\tERROR\n\t4\tWARNING\n\t5\tNOTIFY\n\t6\tINFORMATIONAL\n\t7\tDIAGNOSE\t(may impact performance)\n\t8\tDEBUG\t(impacts performance)\n\t9\tEXTREME\t(severe performance drop)\n\t10\tDUMPALL\t(performance killer)\n\treset\treset back to level configured in config file";
 
-int orig_ssl_loglevel = 0;
-int orig_sslmitm_loglevel = 0;
-int orig_sslca_loglevel = 0;
+loglevel orig_ssl_loglevel = NON;
+loglevel orig_sslmitm_loglevel = NON;
+loglevel orig_sslca_loglevel = NON;
 
-int orig_dns_insp_loglevel = 0;
-int orig_dns_packet_loglevel = 0;
+loglevel orig_dns_insp_loglevel = NON;
+loglevel orig_dns_packet_loglevel = NON;
 
-int orig_baseproxy_loglevel = 0;
-int orig_epoll_loglevel = 0;
-int orig_mitmproxy_loglevel = 0;
-int orig_mitmmasterproxy_loglevel = 0;
+loglevel orig_baseproxy_loglevel = NON;
+loglevel orig_epoll_loglevel = NON;
+loglevel orig_mitmproxy_loglevel = NON;
+loglevel orig_mitmmasterproxy_loglevel = NON;
 
 extern bool cfg_openssl_mem_dbg;
 
@@ -582,14 +582,14 @@ int cli_diag_identity_ip_list(struct cli_def *cli, const char *command, char *ar
 void cli_print_log_levels(struct cli_def *cli) {
     logger_profile* lp = get_logger()->target_profiles()[(uint64_t)cli->client->_fileno];
     
-    cli_print(cli,"THIS cli logging level set to: %d",lp->level_);
-    cli_print(cli,"Internal logging level set to: %d",get_logger()->level());
+    cli_print(cli,"THIS cli logging level set to: %d",lp->level_.level());
+    cli_print(cli,"Internal logging level set to: %d",get_logger()->level().level());
     cli_print(cli,"\n");
     for(auto i = get_logger()->remote_targets().begin(); i != get_logger()->remote_targets().end(); ++i) {
-        cli_print(cli, "Logging level for remote: %s: %d",get_logger()->target_name((uint64_t)(*i)),get_logger()->target_profiles()[(uint64_t)(*i)]->level_);
+        cli_print(cli, "Logging level for remote: %s: %d",get_logger()->target_name((uint64_t)(*i)),get_logger()->target_profiles()[(uint64_t)(*i)]->level_.level());
     }
     for(auto i = get_logger()->targets().begin(); i != get_logger()->targets().end(); ++i) {
-        cli_print(cli, "Logging level for target: %s: %d",get_logger()->target_name((uint64_t)(*i)),get_logger()->target_profiles()[(uint64_t)(*i)]->level_);
+        cli_print(cli, "Logging level for target: %s: %d",get_logger()->target_name((uint64_t)(*i)),get_logger()->target_profiles()[(uint64_t)(*i)]->level_.level());
     }         
 }
 
@@ -607,14 +607,14 @@ int cli_debug_terminal(struct cli_def *cli, const char *command, char *argv[], i
         } 
         else if(a1 == "reset") {
             lp->level_ = NON;
-            lev_diff = get_logger()->adjust_level();
+            lev_diff = get_logger()->adjust_level().level();
         }
         else {
             //cli_print(cli, "called %s with %s, argc %d\r\n", __FUNCTION__, command, argc);
             int newlev = safe_val(argv[0]);
             if(newlev >= 0) {
-                lp->level_ = newlev;
-                lev_diff = get_logger()->adjust_level();
+                lp->level_.level(newlev);
+                lev_diff = get_logger()->adjust_level().level();
                 
             } else {
                 cli_print(cli,"Incorrect value for logging level: %d",newlev);
@@ -645,17 +645,17 @@ int cli_debug_logfile(struct cli_def *cli, const char *command, char *argv[], in
             
             int newlev = 0;
             if(a1 == "reset") {
-                newlev = cfgapi_table.logging.level;
+                newlev = cfgapi_table.logging.level.level();
             } else {
                 newlev = safe_val(argv[0]);
             }
             
             if(newlev >= 0) {
                 for(auto i = get_logger()->targets().begin(); i != get_logger()->targets().end(); ++i) {
-                    get_logger()->target_profiles()[(uint64_t)(*i)]->level_ = newlev;
+                    get_logger()->target_profiles()[(uint64_t)(*i)]->level_.level(newlev);
                 }
                 
-                int lev_diff = get_logger()->adjust_level();
+                int lev_diff = get_logger()->adjust_level().level();
                 if(lev_diff != 0) cli_print(cli, "internal logging level changed by %d",lev_diff);
             }
         }
@@ -679,17 +679,17 @@ int cli_debug_ssl(struct cli_def *cli, const char *command, char *argv[], int ar
         }
         else {
             int lev = std::atoi(argv[0]);
-            SSLCom::log_level_ref() = lev;
-            SSLMitmCom::log_level_ref() = lev;
-            SSLCertStore::log_level_ref() = lev;
+            SSLCom::log_level_ref().level(lev);
+            SSLMitmCom::log_level_ref().level(lev);
+            SSLCertStore::log_level_ref().level(lev);
             
         }
     } else {
-        int l = SSLCom::log_level_ref();
+        int l = SSLCom::log_level_ref().level();
         cli_print(cli,"SSL debug level: %d",l);
-        l = SSLMitmCom::log_level_ref();
+        l = SSLMitmCom::log_level_ref().level();
         cli_print(cli,"SSL MitM debug level: %d",l);
-        l = SSLCertStore::log_level_ref();
+        l = SSLCertStore::log_level_ref().level();
         cli_print(cli,"SSL CA debug level: %d",l);
         cli_print(cli,"\n");
         cli_print(cli,"valid parameters: %s",debug_levels);
@@ -711,14 +711,14 @@ int cli_debug_dns(struct cli_def *cli, const char *command, char *argv[], int ar
         }
         else {
             int lev = std::atoi(argv[0]);
-            DNS_Inspector::log_level_ref() = lev;
-            DNS_Packet::log_level_ref() = lev;
+            DNS_Inspector::log_level_ref().level(lev);
+            DNS_Packet::log_level_ref().level(lev);
             
         }
     } else {
-        int l = DNS_Inspector::log_level_ref();
+        int l = DNS_Inspector::log_level_ref().level();
         cli_print(cli,"DNS Inspector debug level: %d",l);
-        l = DNS_Packet::log_level_ref();
+        l = DNS_Packet::log_level_ref().level();
         cli_print(cli,"DNS Packet debug level: %d",l);
         cli_print(cli,"\n");
         cli_print(cli,"valid parameters: %s",debug_levels);
@@ -742,24 +742,24 @@ int cli_debug_proxy(struct cli_def *cli, const char *command, char *argv[], int 
         }
         else {
             int lev = std::atoi(argv[0]);
-            baseProxy::log_level_ref() = lev;
-            epoll::log_level = lev;
-            MitmMasterProxy::log_level_ref() = lev;
-            MitmProxy::log_level_ref() = lev;
+            baseProxy::log_level_ref().level(lev);
+            epoll::log_level.level(lev);
+            MitmMasterProxy::log_level_ref().level(lev);
+            MitmProxy::log_level_ref().level(lev);
             
             
         }
     } else {
-        int l = baseProxy::log_level_ref();
+        int l = baseProxy::log_level_ref().level();
         cli_print(cli,"baseProxy debug level: %d",l);
 
-        l = epoll::log_level;
+        l = epoll::log_level.level();
         cli_print(cli,"epoll debug level: %d",l);
 
-        l = MitmMasterProxy::log_level_ref();
+        l = MitmMasterProxy::log_level_ref().level();
         cli_print(cli,"MitmMasterProxy debug level: %d",l);
 
-        l = MitmProxy::log_level_ref();
+        l = MitmProxy::log_level_ref().level();
         cli_print(cli,"MitmProxy debug level: %d",l);
 
 
@@ -842,7 +842,7 @@ int cli_diag_mem_objects_stats(struct cli_def *cli, const char *command, char *a
 int cli_diag_mem_objects_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
     
     std::string object_filter;
-    int verbosity = INF;
+    int verbosity = iINF;
     
     if(argc > 0) {
         std::string a1 = argv[0];
@@ -864,7 +864,7 @@ int cli_diag_mem_objects_list(struct cli_def *cli, const char *command, char *ar
         
         if(argc > 1) {
             std::string a2 = argv[1];
-            verbosity = safe_val(a2,INF);
+            verbosity = safe_val(a2,iINF);
         }
     }
     
@@ -881,7 +881,7 @@ int cli_diag_mem_objects_list(struct cli_def *cli, const char *command, char *ar
 int cli_diag_mem_objects_search(struct cli_def *cli, const char *command, char *argv[], int argc) {
     
     std::string object_filter;
-    int verbosity = INF;
+    int verbosity = iINF;
     
     if(argc > 0) {
         std::string a1 = argv[0];
@@ -902,7 +902,7 @@ int cli_diag_mem_objects_search(struct cli_def *cli, const char *command, char *
         
         if(argc > 1) {
             std::string a2 = argv[1];
-            verbosity = safe_val(a2,INF);
+            verbosity = safe_val(a2,iINF);
         }
     }
     
@@ -959,10 +959,10 @@ int cli_diag_mem_objects_clear(struct cli_def *cli, const char *command, char *a
 int cli_diag_proxy_session_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
     
     std::string a1,a2;
-    int verbosity = INF;
+    int verbosity = iINF;
     if(argc > 0) { 
         a1 = argv[0];
-        verbosity = safe_val(a1,INF);
+        verbosity = safe_val(a1,iINF);
     }
     if(argc > 1) a2 = argv[1];
     
@@ -1003,20 +1003,20 @@ int cli_diag_proxy_session_list(struct cli_def *cli, const char *command, char *
                         }
                         
                         if(verbosity > DIA) {
-                            ss << "    obj_debug: " << curr_proxy->get_this_log_level() << "\n";
+                            ss << "    obj_debug: " << curr_proxy->get_this_log_level().to_string() << "\n";
                         }
                     }
                     
                     if(lf && verbosity > DIA) {
-                            ss << "     lf_debug: " << lf->get_this_log_level() << "\n";
+                            ss << "     lf_debug: " << lf->get_this_log_level().to_string() << "\n";
                             if(lf->com()) {
-                                ss << "       lf_com: " << lf->com()->get_this_log_level() << "\n";
+                                ss << "       lf_com: " << lf->com()->get_this_log_level().to_string() << "\n";
                             }
                     }
                     if(rg && verbosity > DIA) {
-                            ss << "     rg_debug: " << rg->get_this_log_level() << "\n";
+                            ss << "     rg_debug: " << rg->get_this_log_level().to_string() << "\n";
                             if(rg->com()) {
-                                ss << "       rg_com: " << rg->com()->get_this_log_level() << "\n";
+                                ss << "       rg_com: " << rg->com()->get_this_log_level().to_string() << "\n";
                             }
                             
                     }

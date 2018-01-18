@@ -156,7 +156,7 @@ public:
     std::vector<int> answer_ttl_idx; // should be protected;
     time_t      loaded_at = 0;
     
-    virtual std::string to_string(int verbosity=INF);
+    virtual std::string to_string(int verbosity=iINF);
     virtual bool ask_destroy() { return false; };
 
     virtual ~DNS_Packet() {}

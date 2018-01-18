@@ -118,7 +118,7 @@ public:
     virtual bool handle_cached_response(MitmHostCX* cx);
     
     virtual bool ask_destroy() { dead(true); return true; };
-    virtual std::string to_string(int verbosity=INF);
+    virtual std::string to_string(int verbosity=iINF);
     
     virtual int handle_sockets_once(baseCom*);
     

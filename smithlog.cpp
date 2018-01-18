@@ -25,11 +25,11 @@
 QueueLogger::QueueLogger(): logger(), lockable() {
 }
 
-int QueueLogger::write_log(unsigned int l, std::string& sss) {
+int QueueLogger::write_log(loglevel l, std::string& sss) {
 
     locked_guard<QueueLogger> ll(this);
     
-     if(l <= level() || forced_ ) {
+     if(l.level() <= level() || forced_ ) {
         logs_.push(log_entry(l,sss));
      }
     
@@ -42,7 +42,7 @@ int QueueLogger::write_log(unsigned int l, std::string& sss) {
     return 0;
 }
 
-int QueueLogger::write_disk(unsigned int l, std::string& sss) {
+int QueueLogger::write_disk(loglevel l, std::string& sss) {
     locked_guard<QueueLogger> ll(this);
   
     return logger::write_log(l,sss);
@@ -62,7 +62,7 @@ void QueueLogger::run_queue(QueueLogger* log_src) {
             log_entry e = log_src->logs_.front(); log_src->logs_.pop();
 
             //copy elements and unlock before write_log.
-            int l = e.first;
+            loglevel l = e.first;
             std::string msg = e.second;
 
             log_src->unlock();
