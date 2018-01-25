@@ -417,6 +417,8 @@ bool load_config(std::string& config_f, bool reload) {
         // don't mess with logging if just reloading
         if(! reload) {
             std::string log_target;
+            std::string sslkeylog_target;
+            
             bool log_console;
             
             //init crashlog file with dafe default
@@ -444,6 +446,26 @@ bool load_config(std::string& config_f, bool reload) {
                     
                 }
             }
+            //
+            if(cfgapi.getRoot()["settings"].lookupValue("sslkeylog_file",sslkeylog_target)) {
+                
+                if(sslkeylog_target.size() > 0) {
+                    
+                    sslkeylog_target = string_format(sslkeylog_target,cfgapi_tenant_name.c_str());
+                    std::ofstream * o = new std::ofstream(sslkeylog_target.c_str(),std::ios::app);
+                    get_logger()->targets(sslkeylog_target,o);
+                    get_logger()->dup2_cout(false);
+                    get_logger()->level(cfgapi_table.logging.level);
+                    
+                    logger_profile* lp = new logger_profile();
+                    lp->print_srcline_ = get_logger()->print_srcline();
+                    lp->print_srcline_always_ = get_logger()->print_srcline_always();
+                    lp->level_ = loglevel(iINF,flag_add(iNOT,CRT|KEYS));
+                    get_logger()->target_profiles()[(uint64_t)o] = lp;
+                    
+                }
+            }
+            
             
             if(cfg_syslog_server.size() > 0) {
                 bool have_syslog = init_syslog();
@@ -524,6 +546,7 @@ int main(int argc, char *argv[]) {
                 
             case 'o':
                 config_file_check_only = true;
+                get_logger()->dup2_cout(true);
                 
             case 'D':
                 cfg_daemonize = true;

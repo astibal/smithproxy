@@ -912,7 +912,7 @@ int cfgapi_load_obj_profile_tls() {
                                 }
                         }
                 }
-                
+                cur_object.lookupValue("sslkeylog",a->sslkeylog);
                 
                 cfgapi_obj_profile_tls[name] = a;
                 
@@ -1508,7 +1508,7 @@ bool cfgapi_obj_policy_apply_tls(ProfileTls* pt, baseCom* xcom) {
     if(pt != nullptr) {
         SSLCom* sslcom = dynamic_cast<SSLCom*>(xcom);
         if(sslcom != nullptr) {
-	    sslcom->opt_bypass = !pt->inspect;
+            sslcom->opt_bypass = !pt->inspect;
             sslcom->opt_allow_unknown_issuer = pt->allow_untrusted_issuers;
             sslcom->opt_allow_self_signed_chain = pt->allow_untrusted_issuers;
             sslcom->opt_allow_not_valid_cert = pt->allow_invalid_certs;
@@ -1535,10 +1535,13 @@ bool cfgapi_obj_policy_apply_tls(ProfileTls* pt, baseCom* xcom) {
             sslcom->opt_ocsp_stapling_enabled = pt->ocsp_stapling;
             sslcom->opt_ocsp_stapling_mode = pt->ocsp_stapling_mode;
        
-            if(pt->sni_filter_bypass.valid())
+            if(pt->sni_filter_bypass.valid()) {
                 if(pt->sni_filter_bypass.ptr()->size() > 0) {
                     sslcom->sni_filter_to_bypass().ref(pt->sni_filter_bypass);
                 }
+            }
+            
+            sslcom->sslkeylog = pt->sslkeylog;
             
             tls_applied = true;
         }        

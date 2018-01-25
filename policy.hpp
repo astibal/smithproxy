@@ -194,6 +194,8 @@ public:
                                                 // Connection is bypassed.
                                                 // DNS cache has to active and sni_filter_use_dns_cache enabled before this feature can be activated.
                                                 // Load increases with SNI filter size and subdomain cache, both lineary, so it's intensive feature.
+    
+    bool sslkeylog = false;                     // disable or enable ssl keylogging on this profile
 
 
     virtual bool ask_destroy() { return false; };
