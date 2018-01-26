@@ -21,9 +21,19 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
             l.push_back(cx);
             r.push_back(cx->right);
             
-            policy_num = cfgapi_obj_policy_match(l,r);
-            bool verdict = cfgapi_obj_policy_action(policy_num);
-            DIA_("socksProxy::on_left_message: policy check result: %s", verdict ? "accept" : "reject" );
+            
+            cfgapi_write_lock.lock();
+            matched_policy(cfgapi_obj_policy_match(l,r));
+            bool verdict = cfgapi_obj_policy_action(matched_policy());
+            
+            PolicyRule* p = nullptr;
+            if(matched_policy() >= 0) {
+                p = cfgapi_obj_policy.at(matched_policy());
+            }
+            
+            DIA_("socksProxy::on_left_message: policy check result: policy# %d policyid 0x%x verdict %s", matched_policy(), p, verdict ? "accept" : "reject" );
+            
+            cfgapi_write_lock.unlock();
             
             socks5_policy s5_verdict = verdict ? ACCEPT : REJECT;
             cx->verdict(s5_verdict);
@@ -44,13 +54,13 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
 
     DEBS_("SocksProxy::socks5_handoff: start");
     
-    if(policy_num < 0) {
-        DIA_("SocksProxy::sock5_handoff: matching policy: %d: dropping.",policy_num);
+    if(matched_policy() < 0) {
+        DIA_("SocksProxy::sock5_handoff: matching policy: %d: dropping.",matched_policy());
         dead(true);
         return;
     } 
-    else if(policy_num >= (signed int)cfgapi_obj_policy.size()) {
-        DIA_("SocksProxy::sock5_handoff: matching policy out of policy index table: %d/%d: dropping.",policy_num,cfgapi_obj_policy.size());
+    else if(matched_policy() >= (signed int)cfgapi_obj_policy.size()) {
+        DIA_("SocksProxy::sock5_handoff: matching policy out of policy index table: %d/%d: dropping.",matched_policy(),cfgapi_obj_policy.size());
         dead(true);
         return;
     }
@@ -108,14 +118,14 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     n_cx->peer(target_cx);
     target_cx->peer(n_cx);
 
-    if(cfgapi_obj_policy.at(policy_num)->nat == POLICY_NAT_NONE) {
+    if(cfgapi_obj_policy.at(matched_policy())->nat == POLICY_NAT_NONE) {
         target_cx->com()->nonlocal_src(true);
         target_cx->com()->nonlocal_src_host() = h;
         target_cx->com()->nonlocal_src_port() = std::stoi(p);
     }
     
-    n_cx->matched_policy(policy_num);
-    target_cx->matched_policy(policy_num);
+    n_cx->matched_policy(matched_policy());
+    target_cx->matched_policy(matched_policy());
         
     int real_socket = target_cx->connect(false);
     com()->set_monitor(real_socket);

@@ -27,6 +27,9 @@ std::string PolicyRule::to_string(int verbosity) {
     
     if(src_default) from += "*";
     for(auto it: src) {
+        if(verbosity > iINF) {
+            from += string_format("(0x%x)",this);
+        }
         from += " ";
         from += it->to_string();
     }
@@ -217,12 +220,20 @@ bool PolicyRule::match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r)
     rmatch = match_addrgrp_vecx(dst,r);
     if(!rmatch) goto end;
 
-    rpmatch = match_rangegrp_vecx(src_ports,r);
+    rpmatch = match_rangegrp_vecx(dst_ports,r);
     if(!rpmatch) goto end;
     
+    
+    if(LEV >= DEB ) {
+        for(auto i: l) DUM_("PolicyRule::match_lr L: %s", i->to_string().c_str());
+        for(auto i: r) DUM_("PolicyRule::match_lr R: %s", i->to_string().c_str());
+        DEB_("PolicyRule::match_lr Success: %d:%d->%d:%d",lmatch,lpmatch,rmatch,rpmatch);
+    }
+
     end:
     
-    if (lmatch && lmatch && rmatch && rpmatch) {
+    
+    if (lmatch && lpmatch && rmatch && rpmatch) {
         DIAS_("PolicyRule::match_lr ok");
         return true;
     } else {
