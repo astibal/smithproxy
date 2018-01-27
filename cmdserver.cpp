@@ -727,6 +727,26 @@ int cli_debug_dns(struct cli_def *cli, const char *command, char *argv[], int ar
     return CLI_OK;
 }
 
+int cli_debug_sobject(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    
+    bool cur = socle::sobject_info::enable_bt_;
+    
+    if(argc != 0) {
+        cli_print(cli, "Current sobject trace flag switched to: %d",cur);
+        return CLI_OK;
+    }
+    
+    
+    cur = !cur;
+    
+    socle::sobject_info::enable_bt_ = cur;
+    
+    cli_print(cli, "Current sobject trace flag switched to: %d",cur);
+    if(cur)
+        cli_print(cli, "!!! backtrace logging may affect performance !!!");
+    
+    return CLI_OK;
+}
 
 int cli_debug_proxy(struct cli_def *cli, const char *command, char *argv[], int argc) {
     if(argc > 0) {
@@ -1190,6 +1210,7 @@ void client_thread(int client_socket) {
             cli_register_command(cli, debuk, "ssl", cli_debug_ssl, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set ssl file logging level");
             cli_register_command(cli, debuk, "dns", cli_debug_dns, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set dns file logging level");
             cli_register_command(cli, debuk, "proxy", cli_debug_proxy, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set proxy file logging level");
+            cli_register_command(cli, debuk, "sobject", cli_debug_sobject, PRIVILEGE_PRIVILEGED, MODE_EXEC, "toggle on/off sobject creation tracing (affect performance)");
         
         // Pass the connection off to libcli
         get_logger()->remote_targets(string_format("cli-%d",client_socket),client_socket);

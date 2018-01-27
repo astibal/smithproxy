@@ -53,6 +53,7 @@ public:
 class socksServerCX : public baseHostCX {
 public:
     socksServerCX(baseCom* c, unsigned int s);  
+    virtual ~socksServerCX();
 
 
     virtual int process();

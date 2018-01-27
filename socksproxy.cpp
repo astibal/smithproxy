@@ -98,6 +98,11 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     // get rid of it
     //cx->socket(0);
     cx->remove_socket();
+    if(cx->left) { 
+        // we are using the socket, so we don't want it to be cleared in cx->left destructor.
+        cx->left->remove_socket();
+    }
+    
     delete cx;
     
     left_sockets.clear();
@@ -146,7 +151,7 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
         INFS_("SocksProxy::socks5_handoff: session failed policy application");
         dead(true);
     };
-        
+
     DIAS_("SocksProxy::socks5_handoff: finished");
 }
 

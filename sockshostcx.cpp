@@ -27,6 +27,13 @@ socksServerCX::socksServerCX(baseCom* c, unsigned int s) : baseHostCX(c,s) {
     state_ = INIT;
 }
 
+socksServerCX::~socksServerCX() {
+
+    if(left)  { delete left; }
+    if(right) { delete right; }
+}
+
+
 int socksServerCX::process() {
     switch(state_) {
         case INIT:
