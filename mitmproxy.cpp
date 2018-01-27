@@ -138,15 +138,16 @@ std::string MitmProxy::to_string(int verbosity) {
         
         r << string_format("up/down: %s/%s",number_suffixed(mtr_up.get()*8).c_str(),number_suffixed(mtr_down.get()*8).c_str());
         
-        r << string_format("\n    Policy  index: %d",matched_policy());
         if(verbosity > INF) { 
-                PolicyRule* p = nullptr;
-                
-                if(matched_policy() >= 0) {
-                    p = cfgapi_obj_policy.at(matched_policy());
-                }
-                
-                r << string_format("\n    PolicyRule Id: 0x%x",p);
+            r << string_format("\n    Policy  index: %d",matched_policy());
+
+            PolicyRule* p = nullptr;
+            
+            if(matched_policy() >= 0) {
+                p = cfgapi_obj_policy.at(matched_policy());
+            }
+            
+            r << string_format("\n    PolicyRule Id: 0x%x",p);
 
             if(identity_resolved()) {
                 r << string_format("\n    User:   %s",identity_->username().c_str()); 
@@ -254,7 +255,7 @@ bool MitmProxy::apply_id_policies(baseHostCX* cx) {
             }
             if(final_profile->profile_alg_dns != nullptr) {
                 if(cfgapi_obj_alg_dns_apply(cx,this,final_profile->profile_alg_dns)) {
-                    algs += final_profile->profile_alg_dns->name + " ";
+                    algs += final_profile->profile_alg_dns->prof_name + " ";
                     DIA___("apply_id_policies: assigning tls sub-profile %s",final_profile->profile_tls->prof_name.c_str());
                 }
             }

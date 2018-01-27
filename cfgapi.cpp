@@ -947,7 +947,7 @@ int cfgapi_load_obj_profile_alg_dns() {
 
             DEB_("cfgapi_load_obj_alg_dns_profile: processing '%s'",name.c_str());
             
-            a->name = name;
+            a->prof_name = name;
             cur_object.lookupValue("match_request_id",a->match_request_id);
             cur_object.lookupValue("randomize_id",a->randomize_id);
             cur_object.lookupValue("cached_responses",a->cached_responses);
@@ -991,7 +991,7 @@ int cfgapi_load_obj_profile_auth() {
 
             DEB_("cfgapi_load_obj_profile_auth: processing '%s'",name.c_str());
             
-            a->name = name;
+            a->prof_name = name;
             cur_object.lookupValue("authenticate",a->authenticate);
             cur_object.lookupValue("resolve",a->resolve);
             
@@ -1428,7 +1428,7 @@ int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
         
         /* Processing ALG : DNS*/
         if(cfgapi_obj_alg_dns_apply(originator,new_proxy,p_alg_dns)) {
-            algs_name += p_alg_dns->name.c_str();
+            algs_name += p_alg_dns->prof_name.c_str();
         }        
 
         
@@ -1441,7 +1441,7 @@ int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
             mitm_proxy->opt_auth_authenticate = pa->authenticate;
             mitm_proxy->opt_auth_resolve = pa->resolve;
             
-            pa_name = pa->name.c_str();
+            pa_name = pa->prof_name.c_str();
         } 
         
         // ALGS can operate only on MitmHostCX classes
