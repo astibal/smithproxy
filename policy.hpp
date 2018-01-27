@@ -56,6 +56,8 @@ struct ProfileList {
 class PolicyRule : public ProfileList , public socle::sobject {
 
 public:
+       unsigned int cnt_matches = 0;
+    
        int proto = 6;
        bool proto_default = true;
     

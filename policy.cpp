@@ -25,6 +25,17 @@ std::string PolicyRule::to_string(int verbosity) {
 
     std::string from = "PolicyRule:";
     
+    switch(proto) {
+        case 6:
+            from += " [tcp] ";
+            break;
+        case 17:
+            from += " [udp] ";
+            break;
+        default:
+            from += string_format(" [%3d] ",proto);
+    }
+    
     if(src_default) from += "*";
     for(auto it: src) {
         if(verbosity > iINF) {
@@ -51,15 +62,15 @@ std::string PolicyRule::to_string(int verbosity) {
         to += string_format("(%d,%d) ",it.first,it.second);
     }
     
-    std::string out = from + " -> " + to;
+    std::string out = from + " -> " + to + "[" + std::to_string(cnt_matches) + "]";
     
-    if(verbosity >= INF) {
+    if(verbosity > INF) {
         out+=": ";
-        if(profile_auth) out += string_format("auth=%s(0x%x) ",profile_auth->prof_name.c_str(),profile_auth);
-        if(profile_tls) out += string_format("tls=%s(0x%x) ",profile_tls->prof_name.c_str(),profile_tls);
-        if(profile_detection) out += string_format("det=%s(0x%x) ",profile_detection->prof_name.c_str(),profile_detection);
-        if(profile_content) out += string_format("cont=%s(0x%x) ",profile_content->prof_name.c_str(),profile_content);
-        if(profile_alg_dns) out += string_format("alg_dns=%s(0x%x) ",profile_alg_dns->prof_name.c_str(),profile_alg_dns);
+        if(profile_auth) out += string_format("\n    auth=%s  (0x%x) ",profile_auth->prof_name.c_str(),profile_auth);
+        if(profile_tls) out += string_format("\n    tls=%s  (0x%x) ",profile_tls->prof_name.c_str(),profile_tls);
+        if(profile_detection) out += string_format("\n    det=%s  (0x%x) ",profile_detection->prof_name.c_str(),profile_detection);
+        if(profile_content) out += string_format("\n    cont=%s  (0x%x) ",profile_content->prof_name.c_str(),profile_content);
+        if(profile_alg_dns) out += string_format("\n    alg_dns=%s  (0x%x) ",profile_alg_dns->prof_name.c_str(),profile_alg_dns);
     }
     
     return out;
@@ -194,6 +205,8 @@ bool PolicyRule::match(baseProxy* p) {
     
     if (lmatch && lmatch && rmatch && rpmatch) {
         DIAS_("PolicyRule::match ok");
+        cnt_matches++;
+        
         return true;
     } else {
         DIA_("PolicyRule::match failed: %d:%d->%d:%d",lmatch,lpmatch,rmatch,rpmatch);
@@ -235,6 +248,8 @@ bool PolicyRule::match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r)
     
     if (lmatch && lpmatch && rmatch && rpmatch) {
         DIAS_("PolicyRule::match_lr ok");
+        cnt_matches++;
+        
         return true;
     } else {
         DIA_("PolicyRule::match_lr failed: %d:%d->%d:%d",lmatch,lpmatch,rmatch,rpmatch);
