@@ -62,7 +62,35 @@ std::string PolicyRule::to_string(int verbosity) {
         to += string_format("(%d,%d) ",it.first,it.second);
     }
     
-    std::string out = from + " -> " + to + "[" + std::to_string(cnt_matches) + "]";
+    std::string out = from + " -> " + to + "= ";
+    
+    switch(action) {
+        case POLICY_ACTION_PASS:
+            out += "ACCEPT";
+            break;
+        case POLICY_ACTION_DENY:
+            out += "REJECT";
+            break;
+        default:
+            out += "???";
+    }
+    
+    switch(nat) {
+        case POLICY_NAT_NONE:
+            out += "(nonat)";
+            break;
+        case POLICY_NAT_AUTO:
+            out += "(iface)";
+            break;
+        case POLICY_NAT_POOL:
+            out += "( pool)";
+            break;
+        default:
+            out += "(  ?  )";
+            break;
+    }
+    
+    out += " [" + std::to_string(cnt_matches) + "]";
     
     if(verbosity > INF) {
         out+=": ";
