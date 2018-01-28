@@ -61,7 +61,7 @@ void MitmProxy::toggle_tlog() {
         cfgapi.getRoot()["settings"].lookupValue("write_payload_file_prefix",file_pref);
         cfgapi.getRoot()["settings"].lookupValue("write_payload_file_suffix",file_suff);
         
-        tlog_ = new trafLog(this,data_dir.c_str(),file_pref.c_str(),file_suff.c_str());
+        tlog_ = new socle::trafLog(this,data_dir.c_str(),file_pref.c_str(),file_suff.c_str());
     }
     
     // check if we have there status file
