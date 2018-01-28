@@ -99,10 +99,10 @@ volatile static int cnt_terminate = 0;
 static bool cfg_daemonize = false;
 
 #ifndef MEM_DEBUG
-extern bool cfg_openssl_mem_dbg = false;
+bool cfg_openssl_mem_dbg = false;
 static bool cfg_mtrace_enable = false;
 #else
-extern bool cfg_openssl_mem_dbg = true;
+bool cfg_openssl_mem_dbg = true;
 static bool cfg_mtrace_enable = true;
 #endif
 
