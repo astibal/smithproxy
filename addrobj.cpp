@@ -28,9 +28,23 @@ int CidrAddress::contains(CIDR* other) {
 std::string FqdnAddress::to_string(int verbosity) {
     std::string ret = "FqdnAddress: " + fqdn_;
  
+    bool cached_a = false;
+    bool cached_4a= false;
     if(verbosity > INF) {
-        if(inspect_dns_cache.get(fqdn_) != nullptr) {
-            ret += " (cached)";
+        inspect_dns_cache.lock();
+        if(inspect_dns_cache.get("A:"+fqdn_) != nullptr) {
+            cached_a = true;
+        }
+        if(inspect_dns_cache.get("AAAA:"+fqdn_) != nullptr) {
+            cached_4a = true;
+        }
+        inspect_dns_cache.unlock();
+        
+        if(cached_4a or cached_a) {
+            ret += " (cached";
+            if(cached_a) ret += " A";
+            if(cached_4a) ret += " AAAA";
+            ret += ")";
         } else {
             ret += " (not cached)";
         }
