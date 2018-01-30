@@ -44,6 +44,7 @@ std::map<std::string,ProfileAuth*> cfgapi_obj_profile_auth;
 std::map<std::string,ProfileAlgDns*> cfgapi_obj_profile_alg_dns;
 
 std::vector<int> cfgapi_obj_udp_quick_ports;
+std::vector<std::string> cfgapi_obj_nameservers;
 
 // multi-tenancy support
 std::string cfgapi_tenant_name = "default";

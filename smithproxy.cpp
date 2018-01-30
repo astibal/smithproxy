@@ -348,6 +348,15 @@ bool load_config(std::string& config_f, bool reload) {
             load_signatures(cfgapi,"detection_signatures",sigs_detection);
             load_signatures(cfgapi,"starttls_signatures",sigs_starttls);
         }
+
+        
+        if(cfgapi.getRoot()["settings"].exists("nameservers")) {
+            int num = cfgapi.getRoot()["settings"]["nameservers"].getLength();
+            for(int i = 0; i < num; ++i) {
+                std::string ns = cfgapi.getRoot()["settings"]["nameservers"][i];
+                cfgapi_obj_nameservers.push_back(ns);
+            }
+        }
         
         cfgapi.getRoot()["settings"].lookupValue("certs_path",SSLCertStore::certs_path);
         cfgapi.getRoot()["settings"].lookupValue("certs_ca_key_password",SSLCertStore::password);

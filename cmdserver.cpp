@@ -138,7 +138,7 @@ int cli_test_dns_genrequest(struct cli_def *cli, const char *command, char *argv
 }
 
 
-DNS_Response* send_dns_request(struct cli_def *cli, std::string hostname, DNS_Record_Type t) {
+DNS_Response* send_dns_request(struct cli_def *cli, std::string hostname, DNS_Record_Type t, std::string nameserver) {
     
     buffer b(0);
     int parsed = -1;
@@ -156,7 +156,7 @@ DNS_Response* send_dns_request(struct cli_def *cli, std::string hostname, DNS_Re
     struct sockaddr_storage addr;
     memset(&addr, 0, sizeof(struct sockaddr_storage));        
     addr.ss_family                = AF_INET;
-    ((sockaddr_in*)&addr)->sin_addr.s_addr = inet_addr("8.8.8.8");
+    ((sockaddr_in*)&addr)->sin_addr.s_addr = inet_addr(nameserver.c_str());
     ((sockaddr_in*)&addr)->sin_port = htons(53);
     
     ::connect(send_socket,(sockaddr*)&addr,sizeof(sockaddr_storage));
@@ -177,7 +177,7 @@ DNS_Response* send_dns_request(struct cli_def *cli, std::string hostname, DNS_Re
     rv = select(send_socket + 1, &confds, NULL, NULL, &tv);
     if(rv == 1) {
         buffer r(1500);
-        int l = ::recv(send_socket,r.data(),r.capacity(),0);
+         int l = ::recv(send_socket,r.data(),r.capacity(),0);
         if(l > 0) { 
             r.size(l);
             
@@ -222,7 +222,12 @@ int cli_test_dns_sendrequest(struct cli_def *cli, const char *command, char *arg
             return CLI_OK;
         }
         
-        DNS_Response* resp = send_dns_request(cli,argv0,A);
+        std::string nameserver = "8.8.8.8";
+        if(cfgapi_obj_nameservers.size()) {
+            nameserver = cfgapi_obj_nameservers.at(0);
+        }
+        
+        DNS_Response* resp = send_dns_request(cli,argv0,A,nameserver);
         if(resp) {
             DNS_Inspector di;
             if(di.store(resp)) {
@@ -260,10 +265,15 @@ int cli_test_dns_refreshallfqdns(struct cli_def *cli, const char *command, char 
     }
     cfgapi_write_lock.unlock();
     
+
+    std::string nameserver = "8.8.8.8";
+    if(cfgapi_obj_nameservers.size()) {
+        nameserver = cfgapi_obj_nameservers.at(0);
+    }
     
     DNS_Inspector di;
     for(auto a: fqdns) {
-        DNS_Response* resp =  send_dns_request(cli,a,A);
+        DNS_Response* resp =  send_dns_request(cli,a,A,nameserver);
         if(resp) {
             if(di.store(resp)) {
                 cli_print(cli, "Entry successfully stored in cache.");
@@ -272,7 +282,7 @@ int cli_test_dns_refreshallfqdns(struct cli_def *cli, const char *command, char 
             }
         }
         
-        resp = send_dns_request(cli,a,AAAA);
+        resp = send_dns_request(cli,a,AAAA,nameserver);
         if(resp) {
             if(di.store(resp)) {
                 cli_print(cli, "Entry successfully stored in cache.");
@@ -1330,8 +1340,8 @@ void client_thread(int client_socket) {
         test  = cli_register_command(cli, NULL, "test", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "various testing commands");
                 test_dns = cli_register_command(cli, test, "dns", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "dns related testing commands");
                     cli_register_command(cli, test_dns, "genrequest", cli_test_dns_genrequest, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "generate dns request");
-                    cli_register_command(cli, test_dns, "sendrequest", cli_test_dns_sendrequest, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "generate and send dns request to 8.8.8.8");
-                    cli_register_command(cli, test_dns, "refreshallfqdns", cli_test_dns_refreshallfqdns, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "refresh all configured FQDN address objects against 8.8.8.8");
+                    cli_register_command(cli, test_dns, "sendrequest", cli_test_dns_sendrequest, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "generate and send dns request to configured nameserver");
+                    cli_register_command(cli, test_dns, "refreshallfqdns", cli_test_dns_refreshallfqdns, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "refresh all configured FQDN address objects against configured nameserver");
                 
         diag  = cli_register_command(cli, NULL, "diag", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose commands helping to troubleshoot");
             diag_ssl = cli_register_command(cli, diag, "ssl", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "ssl related troubleshooting commands");

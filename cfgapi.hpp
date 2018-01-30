@@ -66,6 +66,8 @@ extern unsigned int cfgapi_tenant_index;
 extern std::string cfgapi_tenant_magic_ip;
 
 
+extern std::vector<std::string> cfgapi_obj_nameservers;
+
 struct logging_{
     loglevel level = INF;
     loglevel cli_init_level = NON;

@@ -20,6 +20,7 @@
 #include <sys/socket.h>
 #include <openssl/rand.h>
 
+#include <cfgapi.hpp>
 #include <sockshostcx.hpp>
 #include <logger.hpp>
 #include <dns.hpp>
@@ -90,7 +91,11 @@ int socksServerCX::process_socks_hello() {
 }
 
 
-DNS_Response* socksServerCX::send_dns_request(std::string hostname, DNS_Record_Type t) {
+DNS_Response* socksServerCX::send_dns_request(std::string hostname, DNS_Record_Type t, std::string nameserver) {
+    
+    if(nameserver.size() == 0) {
+        ERR_("socksServerCX::send_dns_request: query %s for type %s: missing nameserver",hostname.c_str(),dns_record_type_str(t));
+    }
     
     buffer b(0);
     int parsed = -1;
@@ -108,7 +113,7 @@ DNS_Response* socksServerCX::send_dns_request(std::string hostname, DNS_Record_T
     struct sockaddr_storage addr;
     memset(&addr, 0, sizeof(struct sockaddr_storage));        
     addr.ss_family                = AF_INET;
-    ((sockaddr_in*)&addr)->sin_addr.s_addr = inet_addr("8.8.8.8");
+    ((sockaddr_in*)&addr)->sin_addr.s_addr = inet_addr(nameserver.c_str());
     ((sockaddr_in*)&addr)->sin_port = htons(53);
     
     ::connect(send_socket,(sockaddr*)&addr,sizeof(sockaddr_storage));
@@ -237,7 +242,12 @@ int socksServerCX::process_socks_request() {
             
             if(target_ips.size() <= 0) {
                 // no targets, send DNS query
-                DNS_Response* resp = send_dns_request(fqdn,A);
+                
+                std::string nameserver = "8.8.8.8";
+                if(cfgapi_obj_nameservers.size()) {
+                    nameserver = cfgapi_obj_nameservers.at(0);
+                }
+                DNS_Response* resp = send_dns_request(fqdn,A,nameserver);
                 bool del_resp = true;
                 
                 if(resp) {
