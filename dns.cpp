@@ -87,6 +87,71 @@ int load_qname(unsigned char* ptr, unsigned int maxlen, std::string* str_storage
     return xi;
 }
 
+int generate_dns_request(unsigned short id, buffer& b,const std::string h, DNS_Record_Type t) {
+    
+    std::string hostname = "." + h;
+    //need to add dot at the beginning
+    
+    if(!b.size(hostname.size()+DNS_REQUEST_OVERHEAD)) return -1;
+
+    unsigned char* ptr = b.data();
+    
+    // transaction ID
+    unsigned short* transaction_id = (unsigned short*)&ptr[0];
+    *transaction_id = htons(id);
+    
+    //
+    unsigned short* flags = (unsigned short*)&ptr[2];
+    *flags = htons(0x0100);
+    
+    unsigned short* nquestions = (unsigned short*)&ptr[4];
+    *nquestions = htons(1);
+    
+    unsigned short* nanswers = (unsigned short*)&ptr[6];
+    *nanswers= 0;
+    
+    unsigned short* nauthorities = (unsigned short*)&ptr[8];
+    *nauthorities = 0;
+   
+    unsigned short* nadditionals = (unsigned short*)&ptr[10];
+    *nadditionals = 0;
+    
+    unsigned char* queries = &ptr[12];
+    
+    unsigned char* len_ptr = queries;
+    unsigned int piece_sz = 0;
+    
+    for(unsigned int i = 0; i < hostname.size(); ++i) {
+        char A = hostname[i];
+        if(A == '.') {
+            // write a len of previous piece
+            *len_ptr = piece_sz;
+            
+            // mark this byte as lenght field and reset piece size
+            len_ptr = &queries[i];
+            piece_sz = 0;
+        } else {
+            
+            //write character into target buffer
+            queries[i] = A;
+            piece_sz++;
+        }
+    }
+    // set last piece size
+    *len_ptr = piece_sz;
+    
+    unsigned char* trailer = &queries[hostname.size()];
+    trailer[0] = 0x00;
+    
+    unsigned short* typ = (unsigned short*)&trailer[1];
+    *typ = htons(t);
+    
+    unsigned short* clas = (unsigned short*)&trailer[3];
+    *clas = htons(0x0001);
+    
+    return b.size();
+}
+
 
 /*
  * returns 0 on OK, >0 if  there are still some bytes to read and -1 on error.

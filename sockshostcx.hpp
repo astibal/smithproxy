@@ -74,9 +74,13 @@ public:
     MitmHostCX* right = nullptr;
     bool handoff_as_ssl = false;
     
+    //FIXME
+    DNS_Response* send_dns_request(std::string hostname, DNS_Record_Type t);
+    
 private:
     socks5_atype req_atype;
     in_addr req_addr;
+    std::string req_str_addr;
     unsigned short req_port;
 };
 

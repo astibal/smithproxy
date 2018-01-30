@@ -55,6 +55,8 @@ DECLARE_C_NAME("CidrAddress");
 class FqdnAddress : public AddressObject {
 public:
     FqdnAddress(std::string s) : fqdn_(s) { }
+    std::string fqdn() const { return fqdn_; }
+    
     virtual bool match(CIDR* c);
     virtual bool ask_destroy() { return false; };
     virtual std::string to_string(int verbosity=iINF);

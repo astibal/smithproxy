@@ -34,6 +34,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <openssl/rand.h>
+
 #include <logger.hpp>
 #include <cmdserver.hpp>
 #include <cfgapi.hpp>
@@ -110,6 +112,179 @@ int cli_show_status(struct cli_def *cli, const char *command, char *argv[], int 
     cmd_show_status(cli);
     return CLI_OK;
 }
+
+
+int cli_test_dns_genrequest(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    buffer b(0);
+    
+    if(argc > 0) {
+        std::string argv0(argv[0]);
+        if( argv0 == "?" || argv0 == "\t") {
+            cli_print(cli,"specify hostname.");
+            return CLI_OK;
+        }
+
+        unsigned char rand_pool[2];
+        RAND_pseudo_bytes(rand_pool,2);
+        unsigned short id = *(unsigned short*)rand_pool;        
+        
+        int s = generate_dns_request(id,b,argv[0],A);
+        cli_print(cli,"DNS generated request: \n%s",hex_dump(b).c_str());
+    } else {
+        cli_print(cli,"you need to specify hostname");
+    }
+    
+    return CLI_OK;
+}
+
+
+DNS_Response* send_dns_request(struct cli_def *cli, std::string hostname, DNS_Record_Type t) {
+    
+    buffer b(0);
+    int parsed = -1;
+    DNS_Response* ret = nullptr;
+    
+    unsigned char rand_pool[2];
+    RAND_pseudo_bytes(rand_pool,2);
+    unsigned short id = *(unsigned short*)rand_pool;
+    
+    int s = generate_dns_request(id,b,hostname,t);
+    cli_print(cli,"DNS generated request: \n%s",hex_dump(b).c_str());
+    
+    // create UDP socket
+    int send_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);         
+    struct sockaddr_storage addr;
+    memset(&addr, 0, sizeof(struct sockaddr_storage));        
+    addr.ss_family                = AF_INET;
+    ((sockaddr_in*)&addr)->sin_addr.s_addr = inet_addr("8.8.8.8");
+    ((sockaddr_in*)&addr)->sin_port = htons(53);
+    
+    ::connect(send_socket,(sockaddr*)&addr,sizeof(sockaddr_storage));
+    
+    if(::send(send_socket,b.data(),b.size(),0) < 0) {
+        std::string r = string_format("logger::write_log: cannot write remote socket: %d",send_socket);
+        cli_print(cli,"%s",r.c_str());
+        return CLI_OK;
+    }
+
+    int rv;
+    fd_set confds;
+    struct timeval tv;
+    tv.tv_usec = 0;
+    tv.tv_sec = 2;  
+    FD_ZERO(&confds);
+    FD_SET(send_socket, &confds);
+    rv = select(send_socket + 1, &confds, NULL, NULL, &tv);
+    if(rv == 1) {
+        buffer r(1500);
+        int l = ::recv(send_socket,r.data(),r.capacity(),0);
+        if(l > 0) { 
+            r.size(l);
+            
+            cli_print(cli, "received %d bytes",l);
+            cli_print(cli, "\n%s\n",hex_dump(r).c_str());
+
+
+            DNS_Response* resp = new DNS_Response();
+            parsed = resp->load(&r);
+            cli_print(cli, "parsed %d bytes (0 means all)",parsed);
+            cli_print(cli, "DNS response: \n %s",resp->to_string().c_str());
+            
+            // save only fully parsed messages
+            if(parsed == 0) {
+                ret = resp;
+                
+            } else {
+                delete resp;
+            }
+            
+        } else {
+            cli_print(cli, "recv() returned %d",l);
+        }
+        
+    } else {
+        cli_print(cli, "timeout, or an error occured.");
+    }
+    
+    
+    ::close(send_socket);    
+    
+    return ret;
+}
+
+int cli_test_dns_sendrequest(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    if(argc > 0) {
+        
+        std::string argv0(argv[0]);
+        if( argv0 == "?" || argv0 == "\t") {
+            cli_print(cli,"specify hostname.");
+            return CLI_OK;
+        }
+        
+        DNS_Response* resp = send_dns_request(cli,argv0,A);
+        if(resp) {
+            DNS_Inspector di;
+            if(di.store(resp)) {
+                cli_print(cli, "Entry successfully stored in cache.");
+            } else {
+                delete resp;
+            }
+        }
+        
+    } else {
+        cli_print(cli,"you need to specify hostname");
+    }
+    
+    return CLI_OK;
+}
+
+
+int cli_test_dns_refreshallfqdns(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    if(argc > 0) {
+        std::string argv0(argv[0]);
+        if( argv0 == "?" || argv0 == "\t") {
+            return CLI_OK;
+        }
+    }
+    
+    
+    std::vector<std::string> fqdns;
+    cfgapi_write_lock.lock();
+    for (auto a: cfgapi_obj_address) {
+        FqdnAddress* fa = dynamic_cast<FqdnAddress*>(a.second);
+        if(fa) {
+            fqdns.push_back(fa->fqdn());
+        }
+    }
+    cfgapi_write_lock.unlock();
+    
+    
+    DNS_Inspector di;
+    for(auto a: fqdns) {
+        DNS_Response* resp =  send_dns_request(cli,a,A);
+        if(resp) {
+            if(di.store(resp)) {
+                cli_print(cli, "Entry successfully stored in cache.");
+            } else {
+                delete resp;
+            }
+        }
+        
+        resp = send_dns_request(cli,a,AAAA);
+        if(resp) {
+            if(di.store(resp)) {
+                cli_print(cli, "Entry successfully stored in cache.");
+            } else {
+                delete resp;
+            }
+        }
+    }
+    
+    return CLI_OK;
+}
+
 
 int cli_diag_ssl_cache_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
     
@@ -1107,6 +1282,8 @@ struct cli_ext : public cli_def {
 
 void client_thread(int client_socket) {
         struct cli_command *show;
+        struct cli_command *test;
+            struct cli_command *test_dns;
         struct cli_command *debuk;
         struct cli_command *diag;
             struct cli_command *diag_ssl;
@@ -1149,6 +1326,13 @@ void client_thread(int client_socket) {
         // Set up 2 commands "show counters" and "show junk"
         show  = cli_register_command(cli, NULL, "show", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show basic information");
                 cli_register_command(cli, show, "status", cli_show_status, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show smithproxy status");
+
+        test  = cli_register_command(cli, NULL, "test", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "various testing commands");
+                test_dns = cli_register_command(cli, test, "dns", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "dns related testing commands");
+                    cli_register_command(cli, test_dns, "genrequest", cli_test_dns_genrequest, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "generate dns request");
+                    cli_register_command(cli, test_dns, "sendrequest", cli_test_dns_sendrequest, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "generate and send dns request to 8.8.8.8");
+                    cli_register_command(cli, test_dns, "refreshallfqdns", cli_test_dns_refreshallfqdns, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "refresh all configured FQDN address objects against 8.8.8.8");
+                
         diag  = cli_register_command(cli, NULL, "diag", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose commands helping to troubleshoot");
             diag_ssl = cli_register_command(cli, diag, "ssl", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "ssl related troubleshooting commands");
                 diag_ssl_cache = cli_register_command(cli, diag_ssl, "cache", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl certificate cache");

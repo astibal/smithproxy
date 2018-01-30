@@ -79,21 +79,28 @@ struct DNS_Answer {
     uint16_t datalen_ = 0;
     buffer data_;
     
-    std::string ip() const { 
+    std::string ip(bool nice=true) const { 
         std::string ret;
         if(type_ == A && data_.size() == 4) {
             uint32_t ip = data_.get_at<uint32_t>(0);
             in_addr a;
             a.s_addr = ip;
-            std::string rr = string_format(" ip: %s",inet_ntoa(a));
-            ret += rr;
+            
+            if(nice) 
+                ret += string_format(" ip: %s",inet_ntoa(a));
+            else
+                ret += string_format("%s",inet_ntoa(a));
         }
         else if(type_ == AAAA && data_.size() == 16) {
             char b[64];
             memset(b,0,64);
             
             inet_ntop(AF_INET6,data_.data(),b,64);
-            ret += string_format(" ip6: %s",b);
+            
+            if(nice)
+                ret += string_format(" ip6: %s",b);
+            else
+                ret += string_format("%s",b);
         }
         
         return ret;
@@ -190,6 +197,9 @@ public:
     DECLARE_C_NAME("DNS_Packet");
     DECLARE_LOGGING(to_string);
 };
+
+#define DNS_REQUEST_OVERHEAD 17
+int generate_dns_request(unsigned short id, buffer& b,const std::string hostname, DNS_Record_Type t);
 
 class DNS_Request : public DNS_Packet {
 public:
