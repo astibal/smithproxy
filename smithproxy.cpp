@@ -68,6 +68,8 @@
 #include <srvutils.hpp>
 #include <staticcontent.hpp>
 #include <smithlog.hpp>
+#include <smithdnsupd.hpp>
+
 
 extern "C" void __libc_freeres(void);
 
@@ -94,6 +96,7 @@ std::thread* udp_thread = nullptr;
 std::thread* socks_thread = nullptr;
 std::thread* cli_thread = nullptr;
 std::thread* log_thread = nullptr;
+std::thread* dns_thread = nullptr;
 
 volatile static int cnt_terminate = 0;
 static bool cfg_daemonize = false;
@@ -697,6 +700,11 @@ int main(int argc, char *argv[]) {
         log_thread  = create_log_writer(get_logger());
         if(log_thread != nullptr) {
             pthread_setname_np(log_thread->native_handle(),string_format("sxy_lwr_%s",cfg_tenant_index.c_str()).c_str());
+        }    
+        
+        dns_thread = create_dns_updater();
+        if(dns_thread != nullptr) {
+            pthread_setname_np(dns_thread->native_handle(),string_format("sxy_dns_%s",cfg_tenant_index.c_str()).c_str());
         }    
         
         

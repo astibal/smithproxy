@@ -18,12 +18,12 @@
 */    
 
 #include <sys/socket.h>
-#include <openssl/rand.h>
 
 #include <cfgapi.hpp>
 #include <sockshostcx.hpp>
 #include <logger.hpp>
 #include <dns.hpp>
+#include <smithdnsupd.hpp>
 
 std::string socksTCPCom::sockstcpcom_name_ = "sock5";
 std::string socksSSLMitmCom::sockssslmitmcom_name_ = "s5+ssl+insp";
@@ -89,89 +89,6 @@ int socksServerCX::process_socks_hello() {
     // flush all data, assuming 
     return b->size();
 }
-
-
-DNS_Response* socksServerCX::send_dns_request(std::string hostname, DNS_Record_Type t, std::string nameserver) {
-    
-    if(nameserver.size() == 0) {
-        ERR_("socksServerCX::send_dns_request: query %s for type %s: missing nameserver",hostname.c_str(),dns_record_type_str(t));
-    }
-    
-    buffer b(0);
-    int parsed = -1;
-    DNS_Response* ret = nullptr;
-    
-    unsigned char rand_pool[2];
-    RAND_pseudo_bytes(rand_pool,2);
-    unsigned short id = *(unsigned short*)rand_pool;
-    
-    int s = generate_dns_request(id,b,hostname,t);
-    DIA_("DNS generated request: \n%s",hex_dump(b).c_str());
-    
-    // create UDP socket
-    int send_socket = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);         
-    struct sockaddr_storage addr;
-    memset(&addr, 0, sizeof(struct sockaddr_storage));        
-    addr.ss_family                = AF_INET;
-    ((sockaddr_in*)&addr)->sin_addr.s_addr = inet_addr(nameserver.c_str());
-    ((sockaddr_in*)&addr)->sin_port = htons(53);
-    
-    ::connect(send_socket,(sockaddr*)&addr,sizeof(sockaddr_storage));
-    
-    if(::send(send_socket,b.data(),b.size(),0) < 0) {
-        std::string r = string_format("logger::write_log: cannot write remote socket: %d",send_socket);
-        DIA_("%s",r.c_str());
-        return nullptr;
-    }
-
-    int rv;
-    fd_set confds;
-    struct timeval tv;
-    tv.tv_usec = 0;
-    tv.tv_sec = 2;  
-    FD_ZERO(&confds);
-    FD_SET(send_socket, &confds);
-    rv = select(send_socket + 1, &confds, NULL, NULL, &tv);
-    if(rv == 1) {
-        buffer r(1500);
-        int l = ::recv(send_socket,r.data(),r.capacity(),0);
-        if(l > 0) { 
-            r.size(l);
-            
-            DEB_("received %d bytes",l);
-            DUM_("\n%s\n",hex_dump(r).c_str());
-
-
-            DNS_Response* resp = new DNS_Response();
-            parsed = resp->load(&r);
-            DIA_("parsed %d bytes (0 means all)",parsed);
-            DIA_("DNS response: \n %s",resp->to_string().c_str());
-            
-            // save only fully parsed messages
-            if(parsed == 0) {
-                ret = resp;
-                
-            } else {
-                ret = resp;
-                ERR_("Something went wrong with parsing %s (keeping response)",hostname.c_str());
-                //delete resp;
-            }
-            
-        } else {
-            DIA_("recv() returned %d",l);
-        }
-        
-    } else {
-        DIAS_("timeout, or an error occured.");
-    }
-    
-    
-    ::close(send_socket);    
-    
-    return ret;
-}
-
-
 
 int socksServerCX::process_socks_request() {
 

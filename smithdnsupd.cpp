@@ -1,0 +1,207 @@
+/*
+    Smithproxy- transparent proxy with SSL inspection capabilities.
+    Copyright (c) 2014, Ales Stibal <astib@mag0.net>, All rights reserved.
+
+    Smithproxy is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    Smithproxy is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with Smithproxy.  If not, see <http://www.gnu.org/licenses/>.
+    
+*/
+#include <sys/socket.h>
+#include <openssl/rand.h>
+
+#include <thread>
+#include <vector>
+#include <set>
+#include <time.h>
+
+#include <addrobj.hpp>
+#include <dns.hpp>
+#include <inspectors.hpp>
+#include <cfgapi.hpp>
+#include <smithdnsupd.hpp>
+
+DNS_Response* send_dns_request(std::string hostname, DNS_Record_Type t, std::string nameserver) {
+    
+    if(nameserver.size() == 0) {
+        ERR_("send_dns_request: query %s for type %s: missing nameserver",hostname.c_str(),dns_record_type_str(t));
+    }
+    
+    buffer b(0);
+    int parsed = -1;
+    DNS_Response* ret = nullptr;
+    
+    unsigned char rand_pool[2];
+    RAND_pseudo_bytes(rand_pool,2);
+    unsigned short id = *(unsigned short*)rand_pool;
+    
+    int s = generate_dns_request(id,b,hostname,t);
+    DUM_("DNS generated request: size %db\n%s",s,hex_dump(b).c_str());
+    
+    // create UDP socket
+    int send_socket = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);         
+    struct sockaddr_storage addr;
+    memset(&addr, 0, sizeof(struct sockaddr_storage));        
+    addr.ss_family                = AF_INET;
+    ((sockaddr_in*)&addr)->sin_addr.s_addr = inet_addr(nameserver.c_str());
+    ((sockaddr_in*)&addr)->sin_port = htons(53);
+    
+    ::connect(send_socket,(sockaddr*)&addr,sizeof(sockaddr_storage));
+    
+    if(::send(send_socket,b.data(),b.size(),0) < 0) {
+        std::string r = string_format("send_dns_request: cannot write remote socket: %d",send_socket);
+        DIA_("%s",r.c_str());
+        return nullptr;
+    }
+
+    int rv;
+    fd_set confds;
+    struct timeval tv;
+    tv.tv_usec = 0;
+    tv.tv_sec = 2;  
+    FD_ZERO(&confds);
+    FD_SET(send_socket, &confds);
+    rv = select(send_socket + 1, &confds, NULL, NULL, &tv);
+    if(rv == 1) {
+        buffer r(1500);
+        int l = ::recv(send_socket,r.data(),r.capacity(),0);
+        if(l > 0) { 
+            r.size(l);
+            
+            DEB_("received %d bytes",l);
+            DUM_("\n%s\n",hex_dump(r).c_str());
+
+
+            DNS_Response* resp = new DNS_Response();
+            parsed = resp->load(&r);
+            DIA_("parsed %d bytes (0 means all)",parsed);
+            DIA_("DNS response: \n %s",resp->to_string().c_str());
+            
+            // save only fully parsed messages
+            if(parsed == 0) {
+                ret = resp;
+                
+            } else {
+                ret = resp;
+                ERR_("Something went wrong with parsing %s (keeping response)",hostname.c_str());
+                //delete resp;
+            }
+            
+        } else {
+            DIA_("recv() returned %d",l);
+        }
+        
+    } else {
+        DIAS_("timeout, or an error occured.");
+    }
+    
+    
+    ::close(send_socket);    
+    
+    return ret;
+}
+
+
+std::thread* create_dns_updater() {
+    std::thread * dns_thread = new std::thread([]() { 
+    
+    int sleep_time = 3;
+    int requery_ttl = 60;
+    std::set<std::string> record_blacklist;
+    
+    for(unsigned int i = 1; ; i++) {
+        
+        DIA_("dns_updater: refresh round %d",i);
+        
+        std::vector<std::string> fqdns;
+        cfgapi_write_lock.lock();
+        for (auto a: cfgapi_obj_address) {
+            FqdnAddress* fa = dynamic_cast<FqdnAddress*>(a.second);
+            if(fa) {
+                std::vector<std::string> recs;
+                recs.push_back("A:" + fa->fqdn());
+                recs.push_back("AAAA:" + fa->fqdn());
+                
+                inspect_dns_cache.lock();
+                for(auto rec: recs) {
+                    DNS_Response* r = inspect_dns_cache.get(rec);
+                    if(r) {
+                        int ttl = (r->loaded_at + r->answers().at(0).ttl_) - ::time(nullptr);
+                        
+                        DIA_("fqdn %s ttl %d",rec.c_str(),ttl);
+                        
+                        //re-query only about-to-expire existing DNS entries for FQDN addresses
+                        if(ttl < requery_ttl) {
+                            fqdns.push_back(rec);
+                        }
+                    }
+                    else {
+                        // query FQDNs without DNS cache entry
+                        if(record_blacklist.find(rec) == record_blacklist.end()) {
+                            fqdns.push_back(rec);
+                        } else {
+                            DIA_("fqdn %s is blacklisted",rec.c_str());
+                        }
+                    }
+                }
+                inspect_dns_cache.unlock();
+                
+            }
+        }
+        cfgapi_write_lock.unlock();
+        
+
+        std::string nameserver = "8.8.8.8";
+        if(cfgapi_obj_nameservers.size()) {
+            nameserver = cfgapi_obj_nameservers.at(i % cfgapi_obj_nameservers.size());
+        }
+        
+        DNS_Inspector di;
+        for(auto t_a: fqdns) {
+            DIA_("refreshing fqdn: %s",t_a.c_str());
+
+            std::string a;
+            DNS_Record_Type t;
+            
+            if(t_a.size() < 5) continue;
+                                               
+            if(t_a.find("A:") == 0) { t = A; a = t_a.substr(2,-1); }
+            else
+            if(t_a.find("AAAA:") == 0) { t = AAAA; a = t_a.substr(5,-1); }
+            else
+            continue;
+            
+
+            DNS_Response* resp =  send_dns_request(a,t,nameserver);
+            if(resp) {
+                if(di.store(resp)) {
+                    DIAS_("Entry successfully stored in cache.");
+                } else {
+                    WAR_("entry for %s was not stored, blacklisted!",t_a.c_str());
+                    record_blacklist.insert(t_a);
+                    delete resp;
+                }
+            }
+        } 
+        
+        // do some rescans of blacklisted entries
+        if(i % (20*sleep_time) == 0) {
+            record_blacklist.clear();
+        }
+
+        
+        ::sleep(sleep_time);
+    } } );
+      
+    
+    return dns_thread;
+}
