@@ -18,7 +18,30 @@ if(UNIX)
     SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g  -Wall -std=c++11")
 endif()
 
-add_executable(smithproxy smithproxy.cpp mitmhost.cpp mitmproxy.cpp cfgapi.cpp cidr.cpp policy.cpp daemon.cpp sockshostcx.cpp socksproxy.cpp cmdserver.cpp cfgapi_auth.cpp dns.cpp inspectors.cpp addrobj.cpp srvutils.cpp staticcontent.cpp nltemplate.cpp cfgapi_auth6.cpp smithlog.cpp filterproxy.cpp smithdnsupd.cpp)
+add_executable(smithproxy   
+                            smithproxy.cpp 
+                            mitmhost.cpp 
+                            mitmproxy.cpp 
+                            cfgapi.cpp 
+                            cidr.cpp 
+                            policy.cpp 
+                            daemon.cpp 
+                            sockshostcx.cpp 
+                            socksproxy.cpp 
+                            cmdserver.cpp 
+                            cfgapi_auth.cpp 
+                            dns.cpp 
+                            inspectors.cpp 
+                            addrobj.cpp 
+                            srvutils.cpp 
+                            staticcontent.cpp 
+                            nltemplate.cpp 
+                            cfgapi_auth6.cpp 
+                            smithlog.cpp 
+                            filterproxy.cpp 
+                            smithdnsupd.cpp
+                            loadb.cpp
+                )
 add_executable(smithd ${SMITHD_DIR}/smithd.cpp ${SMITHD_DIR}/smithdcx.cpp daemon.cpp smithlog.cpp)
 add_executable(smithdc ${SMITHD_DIR}/smithdc.cpp ${SMITHD_DIR}/smithdcx.cpp smithlog.cpp)
 
