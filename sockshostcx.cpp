@@ -138,24 +138,34 @@ int socksServerCX::process_socks_request() {
             
             std::vector<std::string> target_ips;
             
-            inspect_dns_cache.lock();
-            DNS_Response* dns_resp = inspect_dns_cache.get("A:"+fqdn);
-            if(dns_resp) {
-                if (dns_resp->answers().size() > 0) {
-                    int ttl = (dns_resp->loaded_at + dns_resp->answers().at(0).ttl_) - time(nullptr);                
-                    if(ttl > 0) {
-                        for( DNS_Answer& a: dns_resp->answers() ) {
-                            std::string a_ip = a.ip(false);
-                            if(a_ip.size()) {
-                                DIA_("cache candidate: %s",a_ip.c_str());
-                                target_ips.push_back(a_ip);
+            // Some implementations use atype FQDN eventhough the target is already IP
+            CIDR* adr_as_fqdn = cidr_from_str(fqdn.c_str());
+            if(adr_as_fqdn != nullptr) {
+                // hmm, it's an address
+                cidr_free(adr_as_fqdn);
+                
+                target_ips.push_back(fqdn);
+            } else {
+                // really FQDN.
+                
+                inspect_dns_cache.lock();
+                DNS_Response* dns_resp = inspect_dns_cache.get("A:"+fqdn);
+                if(dns_resp) {
+                    if (dns_resp->answers().size() > 0) {
+                        int ttl = (dns_resp->loaded_at + dns_resp->answers().at(0).ttl_) - time(nullptr);                
+                        if(ttl > 0) {
+                            for( DNS_Answer& a: dns_resp->answers() ) {
+                                std::string a_ip = a.ip(false);
+                                if(a_ip.size()) {
+                                    DIA_("cache candidate: %s",a_ip.c_str());
+                                    target_ips.push_back(a_ip);
+                                }
                             }
                         }
                     }
                 }
+                inspect_dns_cache.unlock();
             }
-            inspect_dns_cache.unlock();
-            
             
             if(target_ips.size() <= 0) {
                 // no targets, send DNS query
@@ -200,7 +210,7 @@ int socksServerCX::process_socks_request() {
                 goto error;
             }
         }
-        
+        else
         if(atype == IPV4) {
             req_atype = IPV4;
             state_ = REQ_RECEIVED;
