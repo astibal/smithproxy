@@ -1072,6 +1072,10 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
                 if(scom->verify_check(SSLCom::REVOKED)) {
                         block_additinal_info += "<p><h3 class=\"fg-red\">Reason:</h3>Server's certificate is REVOKED. This is a serious issue, it's highly recommended to not continue to this page.</p>"; is_set = true;
                 }                
+                if(scom->verify_check(SSLCom::HOSTNAME_FAILED)) {
+                        block_additinal_info += "<p><h3 class=\"fg-red\">Reason:</h3>Client application asked for server (sni) server is not offering.</p>"; is_set = true;
+                }                
+
                 
                 if(!is_set) {
                         block_additinal_info += string_format("<p><h3 class=\"fg-red\">Reason:</h3>Oops, no detailed problem description (code: 0x%04x)</p>",scom->verify_get());
