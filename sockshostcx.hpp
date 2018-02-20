@@ -59,6 +59,7 @@ public:
     virtual int process();
     virtual int process_socks_hello();
     virtual int process_socks_request();
+    virtual bool setup_target();
     virtual int process_socks_reply();
     virtual void pre_write();
     
@@ -75,6 +76,7 @@ public:
     bool handoff_as_ssl = false;
     
 private:
+    unsigned char version;
     socks5_atype req_atype;
     in_addr req_addr;
     std::string req_str_addr;

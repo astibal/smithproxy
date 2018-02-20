@@ -61,7 +61,7 @@ int socksServerCX::process_socks_hello() {
         // minimal size of "client hello" is 3 bytes
         return 0;
     }
-    unsigned char version = b->get_at<unsigned char>(0);
+                   version = b->get_at<unsigned char>(0);
     unsigned char nmethods = b->get_at<unsigned char>(1);
     
     if(b->size() < (unsigned int)(2 + nmethods)) {
@@ -70,24 +70,28 @@ int socksServerCX::process_socks_hello() {
     
     // at this stage we have full client hello received
     if(version == 5) {
-        // this is ok.
+        DIA_("socksServerCX::process_socks_init: version %d", version);
+        
+        unsigned char server_hello[2];
+        server_hello[0] = 5; // version
+        server_hello[1] = 0; // no authentication
+        
+        writebuf()->append(server_hello,2);
+        state_ = HELLO_SENT;
+        state_ = WAIT_REQUEST;
+        
+        // flush all data, assuming 
+        return b->size();
+    }
+    else if(version == 4) {
+        DIA_("socksServerCX::process_socks_init: version %d", version);
+        return process_socks_request();
     } else {
-        DIAS_("socksServerCX::process_socks_init: hello version mismatch");
+        DIAS_("socksServerCX::process_socks_init: unsupported socks version");
         error(true);
     }
-    
-    DIAS_("socksServerCX::process_socks_init");
-    
-    unsigned char server_hello[2];
-    server_hello[0] = 5; // version
-    server_hello[1] = 0; // no authentication
-    
-    writebuf()->append(server_hello,2);
-    state_ = HELLO_SENT;
-    state_ = WAIT_REQUEST;
-    
-    // flush all data, assuming 
-    return b->size();
+
+    return 0;
 }
 
 int socksServerCX::process_socks_request() {
@@ -101,130 +105,160 @@ int socksServerCX::process_socks_request() {
     DIAS_("socksServerCX::process_socks_request");
     DEB_("Request dump:\n%s",hex_dump(readbuf()->data(),readbuf()->size()).c_str());
     
-    unsigned char version = readbuf()->get_at<unsigned char>(0);
-    unsigned char cmd     = readbuf()->get_at<unsigned char>(1);
+              version = readbuf()->get_at<unsigned char>(0);
+    unsigned char cmd = readbuf()->get_at<unsigned char>(1);
     //@2 is reserved
-    unsigned char atype   = readbuf()->get_at<unsigned char>(3);
     
-    if(version != 5) {
+    if(version < 4 or version > 5) {
         e = UNSUPPORTED_VERSION;
         goto error;
     }
     
-    if(atype != IPV4 && atype != FQDN) {
-        e = UNSUPPORTED_ATYPE;
-        goto error;
-    }
-    
-    if(readbuf()->size() >= 10) {
-        
-        if(atype == FQDN) {
-            req_atype = FQDN;
-            state_ = REQ_RECEIVED;            
+       
+        if(version == 5) {
             
-            unsigned char fqdn_sz = readbuf()->get_at<unsigned char>(4);
-            if((unsigned int)fqdn_sz + 4 + 2 >= readbuf()->size()) {
-                ERRS_("protocol error: request header out of boundary.");
+            if(readbuf()->size() < 10) {
+                DIAS_("process_socks_request: socks5 request header too short");
                 goto error;
             }
             
-            DIA_("socks5 protocol: fqdn size: %d",fqdn_sz);
-            std::string fqdn((const char*)&readbuf()->data()[5],fqdn_sz);
-            DIA_("socks5 protocol: fqdn requested: %s",fqdn.c_str());
-            req_str_addr = fqdn;
+            unsigned char atype   = readbuf()->get_at<unsigned char>(3);
             
-            req_port = ntohs(readbuf()->get_at<uint16_t>(5+fqdn_sz));
-            DIA_("socks5 protocol: port requested: %d",req_port);
+            if(atype != IPV4 && atype != FQDN) {
+                e = UNSUPPORTED_ATYPE;
+                goto error;
+            }
             
-            std::vector<std::string> target_ips;
-            
-            // Some implementations use atype FQDN eventhough the target is already IP
-            CIDR* adr_as_fqdn = cidr_from_str(fqdn.c_str());
-            if(adr_as_fqdn != nullptr) {
-                // hmm, it's an address
-                cidr_free(adr_as_fqdn);
+            if(atype == FQDN) {
+                req_atype = FQDN;
+                state_ = REQ_RECEIVED;            
                 
-                target_ips.push_back(fqdn);
-            } else {
-                // really FQDN.
+                unsigned char fqdn_sz = readbuf()->get_at<unsigned char>(4);
+                if((unsigned int)fqdn_sz + 4 + 2 >= readbuf()->size()) {
+                    ERRS_("protocol error: request header out of boundary.");
+                    goto error;
+                }
                 
-                inspect_dns_cache.lock();
-                DNS_Response* dns_resp = inspect_dns_cache.get("A:"+fqdn);
-                if(dns_resp) {
-                    if (dns_resp->answers().size() > 0) {
-                        int ttl = (dns_resp->loaded_at + dns_resp->answers().at(0).ttl_) - time(nullptr);                
-                        if(ttl > 0) {
-                            for( DNS_Answer& a: dns_resp->answers() ) {
-                                std::string a_ip = a.ip(false);
-                                if(a_ip.size()) {
-                                    DIA_("cache candidate: %s",a_ip.c_str());
-                                    target_ips.push_back(a_ip);
+                DIA_("socks5 protocol: fqdn size: %d",fqdn_sz);
+                std::string fqdn((const char*)&readbuf()->data()[5],fqdn_sz);
+                DIA_("socks5 protocol: fqdn requested: %s",fqdn.c_str());
+                req_str_addr = fqdn;
+                
+                req_port = ntohs(readbuf()->get_at<uint16_t>(5+fqdn_sz));
+                DIA_("socks5 protocol: port requested: %d",req_port);
+                
+                std::vector<std::string> target_ips;
+                
+                // Some implementations use atype FQDN eventhough the target is already IP
+                CIDR* adr_as_fqdn = cidr_from_str(fqdn.c_str());
+                if(adr_as_fqdn != nullptr) {
+                    // hmm, it's an address
+                    cidr_free(adr_as_fqdn);
+                    
+                    target_ips.push_back(fqdn);
+                } else {
+                    // really FQDN.
+                    
+                    inspect_dns_cache.lock();
+                    DNS_Response* dns_resp = inspect_dns_cache.get("A:"+fqdn);
+                    if(dns_resp) {
+                        if (dns_resp->answers().size() > 0) {
+                            int ttl = (dns_resp->loaded_at + dns_resp->answers().at(0).ttl_) - time(nullptr);                
+                            if(ttl > 0) {
+                                for( DNS_Answer& a: dns_resp->answers() ) {
+                                    std::string a_ip = a.ip(false);
+                                    if(a_ip.size()) {
+                                        DIA_("cache candidate: %s",a_ip.c_str());
+                                        target_ips.push_back(a_ip);
+                                    }
                                 }
                             }
                         }
                     }
+                    inspect_dns_cache.unlock();
                 }
-                inspect_dns_cache.unlock();
-            }
-            
-            if(target_ips.size() <= 0) {
-                // no targets, send DNS query
                 
-                std::string nameserver = "8.8.8.8";
-                if(cfgapi_obj_nameservers.size()) {
-                    nameserver = cfgapi_obj_nameservers.at(0);
-                }
-                DNS_Response* resp = send_dns_request(fqdn,A,nameserver);
-                bool del_resp = true;
-                
-                if(resp) {
-                    for( DNS_Answer& a: resp->answers() ) {
-                        std::string a_ip = a.ip(false);
-                        if(a_ip.size()) {
-                            DIA_("fresh candidate: %s",a_ip.c_str());
-                            target_ips.push_back(a_ip);
+                if(target_ips.size() <= 0) {
+                    // no targets, send DNS query
+                    
+                    std::string nameserver = "8.8.8.8";
+                    if(cfgapi_obj_nameservers.size()) {
+                        nameserver = cfgapi_obj_nameservers.at(0);
+                    }
+                    DNS_Response* resp = send_dns_request(fqdn,A,nameserver);
+                    bool del_resp = true;
+                    
+                    if(resp) {
+                        for( DNS_Answer& a: resp->answers() ) {
+                            std::string a_ip = a.ip(false);
+                            if(a_ip.size()) {
+                                DIA_("fresh candidate: %s",a_ip.c_str());
+                                target_ips.push_back(a_ip);
+                            }
+                        }
+                        
+                        if(target_ips.size()) {
+                            inspect_dns_cache.lock();
+                            DNS_Inspector di;
+                            del_resp = ! di.store(resp);
+                            inspect_dns_cache.unlock();
+                        }
+                        
+                        if(del_resp) {
+                            delete resp;
                         }
                     }
+                }
+                
+                if(target_ips.size()) {
+                    // for now use just first one (cleaned up from empty ones)
+                    std::string t = target_ips.at(0);
                     
-                    if(target_ips.size()) {
-                        inspect_dns_cache.lock();
-                        DNS_Inspector di;
-                        del_resp = ! di.store(resp);
-                        inspect_dns_cache.unlock();
-                    }
+                    DIA_("chosen target: %s",t.c_str());
+                    com()->nonlocal_dst_host() = t;
                     
-                    if(del_resp) {
-                        delete resp;
-                    }
+                } else {
+                    goto error;
                 }
             }
-            
-            if(target_ips.size()) {
-                // for now use just first one (cleaned up from empty ones)
-                std::string t = target_ips.at(0);
+            else
+            if(atype == IPV4) {
+                req_atype = IPV4;
+                state_ = REQ_RECEIVED;
+                DIA_("socksServerCX::process_socks_request: request received, type %d", atype);
                 
-                DIA_("chosen target: %s",t.c_str());
-                com()->nonlocal_dst_host() = t;
+                uint32_t dst = readbuf()->get_at<uint32_t>(4);
+                req_port = ntohs(readbuf()->get_at<uint16_t>(8));
+
                 
-            } else {
-                goto error;
+                req_addr.s_addr=dst;
+                
+                com()->nonlocal_dst_host() = string_format("%s",inet_ntoa(req_addr));
             }
         }
-        else
-        if(atype == IPV4) {
+        
+        else if (version == 4) {
+            if(readbuf()->size() < 8) {
+                DIAS_("process_socks_request: socks4 request header too short");
+                goto error;
+            }            
+            
             req_atype = IPV4;
             state_ = REQ_RECEIVED;
-            DIA_("socksServerCX::process_socks_request: request received, type %d", atype);
+            DIAS_("socksServerCX::process_socks_request: socks4 request received");
             
+            req_port = ntohs(readbuf()->get_at<uint16_t>(2));
             uint32_t dst = readbuf()->get_at<uint32_t>(4);
-            req_port = ntohs(readbuf()->get_at<uint16_t>(8));
 
             
             req_addr.s_addr=dst;
             
-            com()->nonlocal_dst_host() = string_format("%s",inet_ntoa(req_addr));
+            com()->nonlocal_dst_host() = string_format("%s",inet_ntoa(req_addr));            
         }
-        
+        else {
+            DIAS_("process_socks_request: unexpected socks version");
+            goto error;
+        }
         
         com()->nonlocal_dst_port() = req_port;
         com()->nonlocal_dst_resolved(true);
@@ -232,8 +266,20 @@ int socksServerCX::process_socks_request() {
         DIA_("socksServerCX::process_socks_request: request for %s -> %s:%d",c_name(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
 
 
-        // prepare a new CX!
         
+        setup_target();
+        DIAS_("socksServerCX::process_socks_request: waiting for policy check");
+        // now 
+        return readbuf()->size();
+
+    error:
+        DIA_("socksServerCX::process_socks_request: error %d",e);
+        error(true);
+        return readbuf()->size();
+}
+
+bool socksServerCX::setup_target() {
+        // prepare a new CX!
         
         // LEFT
         int s = socket();
@@ -293,18 +339,7 @@ int socksServerCX::process_socks_request() {
         state_ = WAIT_POLICY;
         paused_read(true);
         
-        DIAS_("socksServerCX::process_socks_request: waiting for policy check");
-        // now 
-        return readbuf()->size();
-        
-    } else {
-        return 0;
-    }
-    
-    error:
-        DIA_("socksServerCX::process_socks_request: error %d",e);
-        error(true);
-        return readbuf()->size();
+        return true;
 }
 
 bool socksServerCX::new_message() {
@@ -328,40 +363,60 @@ void socksServerCX::verdict(socks5_policy p) {
 }
 
 int socksServerCX::process_socks_reply() {
-    unsigned char b[128];
-    
-    b[0] = 5;
-    b[1] = 2; // denied
-    if(verdict_ == ACCEPT) b[1] = 0; //accept
-    b[2] = 0;
-    b[3] = req_atype;
-    
-    int cur = 4;
-    
-    if(req_atype == IPV4) {
-        *((uint32_t*)&b[cur]) = req_addr.s_addr;
-        cur += sizeof(uint32_t);
-    }
-    else if(req_atype == FQDN) {
+    if(version == 5) {
         
-        b[cur] = (unsigned char)req_str_addr.size();
-        cur++;
+        unsigned char b[128];
         
-        for (char c: req_str_addr) {
-            b[cur] = c;
-            cur++;
+        b[0] = 5;
+        b[1] = 2; // denied
+        if(verdict_ == ACCEPT) b[1] = 0; //accept
+        b[2] = 0;
+        b[3] = req_atype;
+        
+        int cur = 4;
+        
+        if(req_atype == IPV4) {
+            *((uint32_t*)&b[cur]) = req_addr.s_addr;
+            cur += sizeof(uint32_t);
         }
-    }
+        else if(req_atype == FQDN) {
+            
+            b[cur] = (unsigned char)req_str_addr.size();
+            cur++;
+            
+            for (char c: req_str_addr) {
+                b[cur] = c;
+                cur++;
+            }
+        }
+            
+        *((uint16_t*)&b[cur]) = htons(req_port);
+        cur += sizeof(uint16_t);
         
-    *((uint16_t*)&b[cur]) = htons(req_port);
-    cur += sizeof(uint16_t);
+        writebuf()->append(b,cur);
+        state_ = REQRES_SENT;
+        
+        DEB_("socksServerCX::process_socks_reply: response dump:\n%s",hex_dump(b,cur).c_str());
+        
+        return cur;
+    } 
+    else if(version == 4) {
+        unsigned char b[8];
+        
+        b[0] = 0;
+        b[1] = 91; // denied
+        if(verdict_ == ACCEPT) b[1] = 90; //accept    
+        
+        *((uint16_t*)&b[2]) = htons(req_port);
+        *((uint32_t*)&b[4]) = req_addr.s_addr;
+        
+        writebuf()->append(b,8);        
+        state_ = REQRES_SENT;
+        
+        return 8;
+    }
     
-    writebuf()->append(b,cur);
-    state_ = REQRES_SENT;
-    
-    DEB_("socksServerCX::process_socks_reply: response dump:\n%s",hex_dump(b,cur).c_str());
-    
-    return cur;
+    return 0;
 }
 
 void socksServerCX::pre_write() {
