@@ -123,11 +123,13 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     n_cx->peer(target_cx);
     target_cx->peer(n_cx);
 
+    cfgapi_write_lock.lock();
     if(cfgapi_obj_policy.at(matched_policy())->nat == POLICY_NAT_NONE) {
         target_cx->com()->nonlocal_src(true);
         target_cx->com()->nonlocal_src_host() = h;
         target_cx->com()->nonlocal_src_port() = std::stoi(p);
     }
+    cfgapi_write_lock.unlock();
     
     n_cx->matched_policy(matched_policy());
     target_cx->matched_policy(matched_policy());

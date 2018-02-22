@@ -1412,22 +1412,26 @@ int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
         std::string algs_name = ""; 
         
         /* Processing content profile */
+        if(pc)
         if(cfgapi_obj_profile_content_apply(originator,new_proxy,pc)) {
             pc_name = pc->prof_name.c_str();
         }
         
         
         /* Processing detection profile */
+        if(pd)
         if(cfgapi_obj_profile_detect_apply(originator,new_proxy,pd)) {
             pd_name = pd->prof_name.c_str();
         }        
         
         /* Processing TLS profile*/
+        if(pt)
         if(cfgapi_obj_profile_tls_apply(originator,new_proxy,pt)) {
             pt_name = pt->prof_name.c_str();
         }        
         
         /* Processing ALG : DNS*/
+        if(p_alg_dns)
         if(cfgapi_obj_alg_dns_apply(originator,new_proxy,p_alg_dns)) {
             algs_name += p_alg_dns->prof_name.c_str();
         }        
@@ -1437,7 +1441,7 @@ int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
         AppHostCX* mitm_originator = static_cast<AppHostCX*>(originator);
         
         /* Processing Auth profile */
-        if(pa != nullptr) {
+        if(pa) {
             // auth is applied on proxy
             mitm_proxy->opt_auth_authenticate = pa->authenticate;
             mitm_proxy->opt_auth_resolve = pa->resolve;

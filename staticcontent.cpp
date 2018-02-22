@@ -50,9 +50,9 @@ std::string StaticContent::render_noargs(std::string name) {
     return "";
 }
 
-std::string StaticContent::render_server_response(std::string& message) {
+std::string StaticContent::render_server_response(std::string& message, unsigned int code) {
     std::string out;
-    out += "HTTP/1.1 OK\r\n";
+    out += string_format("HTTP/1.1 %3d OK\r\n",code);
     out += "Server: Smithproxy/1.1\r\n";
     out += "Content-Type: text/html\r\n";
     out += "Content-Length: " + std::to_string(message.length()); out += "\r\n";
