@@ -329,9 +329,9 @@ bool socksServerCX::setup_target() {
         
         
         left = n_cx;
-        DIA_("socksServerCX::process_socks_request: prepared left: %s",left->c_name());
+        DIA_("socksServerCX::setup_target: prepared left: %s",left->c_name());
         right = target_cx;
-        DIA_("socksServerCX::process_socks_request: prepared right: %s",right->c_name());
+        DIA_("socksServerCX::setup_target: prepared right: %s",right->c_name());
         
         // peers are now prepared for handover. Owning proxy will wipe this CX (it will be empty)
         // and if policy allows, left and right will be set (also in proxy owning this cx).
