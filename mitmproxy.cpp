@@ -39,6 +39,7 @@
 DEFINE_LOGGING(MitmProxy);
 
 
+unsigned int MitmProxy::half_timeout = 30;
 
 socle::meter MitmProxy::total_mtr_up;
 socle::meter MitmProxy::total_mtr_down;
@@ -720,6 +721,34 @@ void MitmProxy::__debug_zero_connections(baseHostCX* cx) {
 }
 
 
+void MitmProxy::on_half_close(baseHostCX* cx) {
+    if(cx->peer() && cx->peercom() && cx->peercom()) {
+        // we have existing peer with non-zero write queue - set hold timer 
+        if(half_holdtimer > 0) {
+            
+            // we count timer already!
+            int expiry = half_holdtimer + half_timeout - ::time(nullptr);
+            
+            if(expiry > 0) {
+                EXT___("half-closed: live peer with pending data: keeping up for %ds",expiry);
+            } else {
+                DIA___("half-closed: timer's up (%d). closing prematurely.",expiry);
+                this->dead(true);
+            }
+            
+            
+        } else {
+            DIA___("half-closed: live peer with pending data: keeping up for %ds",half_timeout);
+            half_holdtimer = ::time(nullptr);
+        }
+        
+    } else {
+        // if peer doesn't exist or peercom doesn't exit, mark proxy dead -- noone to speak to
+        DIAS___("half-closed: peer with pending write-data is dead.")
+        this->dead(true);
+    }
+}
+
 void MitmProxy::on_left_error(baseHostCX* cx) {
 
     if(cx == nullptr) return;
@@ -757,14 +786,12 @@ void MitmProxy::on_left_error(baseHostCX* cx) {
         
         this->dead(true); 
     } else {
-        
-        if(!_half_closed_log) {
+        on_half_close(cx);
+        if(this->dead()) {
+            // status dead is new, since we check dead status at the begining
             std::string msg = string_format("Connection from %s left half-closed: %s",cx->full_name('L').c_str(),detail.c_str());
-            INFS_(msg.c_str());
-            
-            _half_closed_log = true;
+            INFS___(msg);
         }
-        // cannot set dead now, there are bytes pending
     }
     
     if(cx) {
@@ -811,14 +838,13 @@ void MitmProxy::on_right_error(baseHostCX* cx)
         
         this->dead(true); 
     } else {
-        
-        if(!_half_closed_log) {
+
+        on_half_close(cx);
+        if(this->dead()) {
+            // status dead is new, since we check dead status at the begining
             std::string msg = string_format("Connection from %s right half-closed: %s",cx->full_name('R').c_str(),detail.c_str());
-            INFS_(msg.c_str());
-            
-            _half_closed_log = true;
+            INFS___(msg);
         }
-        // cannot set dead now, there are bytes pending
     } 
     
     if(cx->peer()) {

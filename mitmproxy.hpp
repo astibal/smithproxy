@@ -53,9 +53,11 @@ protected:
     std::vector<ProfileContentRule>* content_rule_ = nullptr; //save some space and store it as a pointer. Init it only when needed and delete in dtor.
     
     int matched_policy_ = -1;
-    bool _half_closed_log = false;
     
 public: 
+    time_t half_holdtimer = 0;
+    static unsigned int half_timeout;
+    
     static ptr_cache<std::string,whitelist_verify_entry_t> whitelist_verify;
     
     bool opt_auth_authenticate = false;
@@ -107,6 +109,7 @@ public:
     virtual void on_right_error(baseHostCX* cx);
     
     // check authentication status and return true if redirected
+    virtual void on_half_close(baseHostCX* cx);
     virtual bool handle_authentication(MitmHostCX* cx);
     virtual void handle_replacement_auth(MitmHostCX* cx);
     

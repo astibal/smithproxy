@@ -1173,7 +1173,7 @@ int cli_diag_proxy_session_list(struct cli_def *cli, const char *command, char *
     
     std::stringstream ss;
     
-    
+    time_t  curtime = time(nullptr);
     
     socle::sobject_db.lock();
     for(auto it: socle::sobject_db.cache()) {
@@ -1207,8 +1207,13 @@ int cli_diag_proxy_session_list(struct cli_def *cli, const char *command, char *
                             ss << "app_data: none\n";
                         }
                         
-                        if(verbosity > DIA) {
+                        if(verbosity > INF) {
                             ss << "    obj_debug: " << curr_proxy->get_this_log_level().to_string() << "\n";
+                            int expiry = -1;
+                            if(curr_proxy->half_holdtimer > 0) {
+                                expiry = curr_proxy->half_holdtimer + MitmProxy::half_timeout - curtime;
+                            }
+                            ss << "    half_hold: " << expiry << "\n";
                         }
                     }
                     
