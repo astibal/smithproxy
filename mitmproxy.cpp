@@ -771,7 +771,26 @@ void MitmProxy::on_left_error(baseHostCX* cx) {
     MitmHostCX* mh = dynamic_cast<MitmHostCX*>(cx);
     if (mh != nullptr && mh->inspection_verdict() == Inspector::CACHED) flags+="C";
 
-    std::string detail = string_format("user=%s up=%d/%dB dw=%d/%dB flags=%s+%s",
+    std::string detail;
+    
+    if(cx->peercom()) {
+        SSLMitmCom* sc = dynamic_cast<SSLMitmCom*>(cx->peercom());
+        if(sc) {
+            detail += string_format("sni=%s ",sc->get_peer_sni().c_str());
+        }
+    }
+    if(mh && mh->application_data) {
+        
+        app_HttpRequest* http = dynamic_cast<app_HttpRequest*>(mh->application_data);
+        if(http) {
+            detail += string_format("app=%s%s ",http->proto.c_str(),http->host.c_str()); 
+        }
+        else {
+            detail += string_format("app=%s ",mh->application_data->hr().c_str()); 
+        }
+    }
+    
+    detail += string_format("user=%s up=%d/%dB dw=%d/%dB flags=%s+%s",
                                         (identity_resolved() ? identity()->username().c_str() : ""),
                                             cx->meter_read_count,cx->meter_read_bytes,
                                                                 cx->meter_write_count, cx->meter_write_bytes,
@@ -822,7 +841,22 @@ void MitmProxy::on_right_error(baseHostCX* cx)
             comflags = mh_peer->com()->full_flags_str();
     }
 
-    std::string detail = string_format("user=%s up=%d/%dB dw=%d/%dB flags=%s+%s",
+    
+    std::string detail;
+    SSLMitmCom* sc = dynamic_cast<SSLMitmCom*>(cx->com());
+    if(sc) {
+        detail += string_format("sni=%s ",sc->get_peer_sni().c_str());
+    }
+    if(mh_peer && mh_peer->application_data) {
+        app_HttpRequest* http = dynamic_cast<app_HttpRequest*>(mh_peer->application_data);
+        if(http) {
+            detail += string_format("app=%s%s ",http->proto.c_str(),http->host.c_str()); 
+        }
+        else {
+            detail += string_format("app=%s ",mh_peer->application_data->hr().c_str()); 
+        }
+    }
+    detail += string_format("user=%s up=%d/%dB dw=%d/%dB flags=%s+%s",
                                         (identity_resolved() ? identity()->username().c_str() : ""),
                                             cx->meter_read_count,cx->meter_read_bytes,
                                                                 cx->meter_write_count, cx->meter_write_bytes,
