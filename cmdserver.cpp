@@ -28,6 +28,8 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/ioctl.h>
+#include <linux/sockios.h>
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <fcntl.h>
@@ -1217,18 +1219,64 @@ int cli_diag_proxy_session_list(struct cli_def *cli, const char *command, char *
                         }
                     }
                     
-                    if(lf && verbosity > DIA) {
+                    if(lf) {
+                        if(verbosity > INF) {
+                            if(lf->socket() > 0) {
+                                unsigned int in_pending, out_pending;
+                                buffer::size_type in_buf, out_buf;
+                                
+                                ::ioctl(lf->socket(), SIOCINQ, &in_pending);
+                                ::ioctl(lf->socket(), SIOCOUTQ, &out_pending);
+                                
+                                in_buf  = lf->readbuf()->size();
+                                out_buf = lf->writebuf()->size();
+                                
+                                ss << "     lf_os_recv-q: " <<  in_pending << " lf_os_send-q: " <<  out_pending << "\n";
+                                ss << "     lf_sx_recv-q: " <<  in_buf << " lf_sx_send-q: " <<  out_buf << "\n";
+                                
+                                // fun stuff
+                                if(verbosity >= EXT) {
+                                    if(in_buf) {
+                                        ss << "     Last left read data: \n" << hex_dump(lf->readbuf(),6) << "\n";
+                                    }
+                                }
+                            }
+                        }
+                            
+                        if(verbosity > DIA) {
                             ss << "     lf_debug: " << lf->get_this_log_level().to_string() << "\n";
                             if(lf->com()) {
                                 ss << "       lf_com: " << lf->com()->get_this_log_level().to_string() << "\n";
                             }
+                        }
                     }
-                    if(rg && verbosity > DIA) {
+                    if(rg) {
+                        if(verbosity > INF) {
+                            if(rg->socket() > 0) {
+                                unsigned int in_pending, out_pending;
+                                buffer::size_type in_buf, out_buf;
+                                ::ioctl(rg->socket(), SIOCINQ, &in_pending);
+                                ::ioctl(rg->socket(), SIOCOUTQ, &out_pending);
+                                in_buf  = rg->readbuf()->size();
+                                out_buf = rg->writebuf()->size();
+                                
+                                ss << "     rg_os_recv-q: " <<  in_pending << " rg_os_send-q: " <<  out_pending << "\n";
+                                ss << "     rg_sx_recv-q: " <<  in_buf << " rg_sx_send-q: " <<  out_buf << "\n";
+
+                                // fun stuff
+                                if(verbosity >= EXT) {
+                                    if(in_buf) {
+                                        ss << "     Last right read data: \n" << hex_dump(rg->readbuf(),6) << "\n";
+                                    }
+                                }
+                            }
+                        }
+                        if(verbosity > DIA) {
                             ss << "     rg_debug: " << rg->get_this_log_level().to_string() << "\n";
                             if(rg->com()) {
                                 ss << "       rg_com: " << rg->com()->get_this_log_level().to_string() << "\n";
                             }
-                            
+                        }
                     }
 
                 }
