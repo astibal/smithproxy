@@ -1219,27 +1219,33 @@ int cli_diag_proxy_session_list(struct cli_def *cli, const char *command, char *
                         }
                     }
                     
+                    
+                    auto print_queue_stats = [](std::stringstream &ss, int verbosity, MitmHostCX* cx, const char* sm, const char* bg) {
+                        unsigned int in_pending, out_pending;
+                        buffer::size_type in_buf, out_buf;
+                        
+                        ::ioctl(cx->socket(), SIOCINQ, &in_pending);
+                        ::ioctl(cx->socket(), SIOCOUTQ, &out_pending);
+                        
+                        in_buf  = cx->readbuf()->size();
+                        out_buf = cx->writebuf()->size();
+                        
+                        ss << "     " << sm << "_os_recv-q: " <<  in_pending << " " << sm << "_os_send-q: " <<  out_pending << "\n";
+                        ss << "     " << sm << "_sx_recv-q: " <<  in_buf     << " " << sm << "_sx_send-q: " <<  out_buf << "\n";
+                        
+                        // fun stuff
+                        if(verbosity >= EXT) {
+                            if(in_buf) {
+                                ss << "     " << bg << " last-seen read data: \n" << hex_dump(cx->readbuf(),6) << "\n";
+                            }
+                        }                        
+                    };
+                    
+                    
                     if(lf) {
                         if(verbosity > INF) {
                             if(lf->socket() > 0) {
-                                unsigned int in_pending, out_pending;
-                                buffer::size_type in_buf, out_buf;
-                                
-                                ::ioctl(lf->socket(), SIOCINQ, &in_pending);
-                                ::ioctl(lf->socket(), SIOCOUTQ, &out_pending);
-                                
-                                in_buf  = lf->readbuf()->size();
-                                out_buf = lf->writebuf()->size();
-                                
-                                ss << "     lf_os_recv-q: " <<  in_pending << " lf_os_send-q: " <<  out_pending << "\n";
-                                ss << "     lf_sx_recv-q: " <<  in_buf << " lf_sx_send-q: " <<  out_buf << "\n";
-                                
-                                // fun stuff
-                                if(verbosity >= EXT) {
-                                    if(in_buf) {
-                                        ss << "     Last left read data: \n" << hex_dump(lf->readbuf(),6) << "\n";
-                                    }
-                                }
+                                print_queue_stats(ss, verbosity, lf,"lf","Left");
                             }
                         }
                             
@@ -1253,22 +1259,7 @@ int cli_diag_proxy_session_list(struct cli_def *cli, const char *command, char *
                     if(rg) {
                         if(verbosity > INF) {
                             if(rg->socket() > 0) {
-                                unsigned int in_pending, out_pending;
-                                buffer::size_type in_buf, out_buf;
-                                ::ioctl(rg->socket(), SIOCINQ, &in_pending);
-                                ::ioctl(rg->socket(), SIOCOUTQ, &out_pending);
-                                in_buf  = rg->readbuf()->size();
-                                out_buf = rg->writebuf()->size();
-                                
-                                ss << "     rg_os_recv-q: " <<  in_pending << " rg_os_send-q: " <<  out_pending << "\n";
-                                ss << "     rg_sx_recv-q: " <<  in_buf << " rg_sx_send-q: " <<  out_buf << "\n";
-
-                                // fun stuff
-                                if(verbosity >= EXT) {
-                                    if(in_buf) {
-                                        ss << "     Last right read data: \n" << hex_dump(rg->readbuf(),6) << "\n";
-                                    }
-                                }
+                                print_queue_stats(ss,verbosity, rg,"rg","Right");
                             }
                         }
                         if(verbosity > DIA) {
