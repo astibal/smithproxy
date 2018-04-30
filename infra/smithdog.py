@@ -51,6 +51,9 @@ TENANT_IDX = "0"
 SMITHPROXY_PATH = '/usr/bin/smithproxy'
 SMITHPROXY_PIDFILE = '/var/run/smithproxy.%s.pid'
 
+SMITHD_PATH = '/usr/bin/smithd'
+SMITHD_PIDFILE = '/var/run/smithd.%s.pid'
+
 SMITHDOG_PIDFILE='/var/run/smithproxy_dog.%s.pid'
 SMITHDOG_LOGFILE='/var/log/smithproxy_dog.%s.log'
 
@@ -313,6 +316,8 @@ if __name__ == "__main__":
         smithproxy_options.append(TENANT_IDX)
         
     daemon.exec_info.append(('smithproxy core', SMITHPROXY_PATH, SMITHPROXY_PIDFILE % (TENANT_NAME,), smithproxy_options ))
+    
+    daemon.exec_info.append(('smithproxy smithd', SMITHD_PATH, SMITHD_PIDFILE % (TENANT_NAME,), smithproxy_options ))
 
     ### Backend INIT
     bend_ = BendDaemon('bend',BEND_PIDFILE % (TENANT_NAME,))

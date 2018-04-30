@@ -25,7 +25,7 @@
 #define PID_FILE_DEFAULT "/var/run/smithproxy.0.pid"
 
 extern "C" std::string PID_FILE;
-extern "C" void daemon_set_tenant(const std::string& tenant_id);
+extern "C" void daemon_set_tenant(const std::string& name, const std::string& tenant_id);
 
 extern "C" void daemonize(void);
 extern "C" void daemon_write_pidfile(void);

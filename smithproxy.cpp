@@ -601,7 +601,7 @@ int main(int argc, char *argv[]) {
     if(cfg_tenant_index.size() > 0 && cfg_tenant_name.size() > 0) {
         WAR_("Starting tenant: '%s', index %s",cfg_tenant_name.c_str(),cfg_tenant_index.c_str());
 
-        daemon_set_tenant(cfg_tenant_name);
+        daemon_set_tenant("smithproxy",cfg_tenant_name);
         cfgapi_tenant_index = std::stoi(cfg_tenant_index);
         cfgapi_tenant_name  = cfg_tenant_name;
     } 
@@ -612,7 +612,7 @@ int main(int argc, char *argv[]) {
     }
     else {
         WARS_("Starting tenant: 0 (default)");
-        daemon_set_tenant("0"); 
+        daemon_set_tenant("smithproxy","0"); 
     }
     
     

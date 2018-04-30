@@ -47,8 +47,8 @@ extern "C" {
     
 std::string PID_FILE(PID_FILE_DEFAULT);
 
-void daemon_set_tenant(const std::string& tenant_id) {
-    PID_FILE = string_format("/var/run/smithproxy.%s.pid",tenant_id.c_str());
+void daemon_set_tenant(const std::string& name, const std::string& tenant_id) {
+    PID_FILE = string_format("/var/run/%s.%s.pid",name.c_str(), tenant_id.c_str());
 }
 
 void daemonize(void) {

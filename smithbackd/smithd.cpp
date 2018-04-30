@@ -180,10 +180,13 @@ static std::string cfg_log_file;
 static loglevel cfg_log_level = INF;
 static int cfg_log_console = false;
 static int cfg_smithd_workers = 0;
-static std::string cfg_smithd_listen_port = "/var/run/smithd.sock";
+static std::string cfg_smithd_listen_port = "/var/run/smithd.%d.sock";
+
+// Tenant configuration
+static std::string cfg_tenant_index;
+static std::string cfg_tenant_name;
 
 // Various
-
 volatile static int cnt_terminate = 0;
 static loglevel  args_debug_flag = NON;
 bool config_file_check_only = false;
@@ -230,6 +233,10 @@ static struct option long_options[] =
     {"daemonize", no_argument, 0, 'D'},
     {"version", no_argument, 0, 'v'},
     
+    // multi-tenancy support: listening ports will be shifted by number 'i', while 't' controls logging, pidfile, etc.
+    // both, or none of them have to be set
+    {"tenant-index", required_argument, 0, 'i'},
+    {"tenant-name", required_argument, 0, 't'},    
     {0, 0, 0, 0}
 };  
 
@@ -249,7 +256,11 @@ bool load_config(std::string& config_f, bool reload) {
         
         if (cfgapi.getRoot()["settings"].lookupValue("log_file",cfg_log_file)) {
             
-            std::string& log_target = cfg_log_file;
+            std::string log_target = cfg_log_file;
+            log_target = string_format(log_target,cfg_tenant_name.c_str());
+            
+            std::cout << "log target" << log_target << std::endl;
+            
             // prepare custom crashlog file
             std::string crlog = log_target + ".crashlog.log";
             set_crashlog(crlog.c_str());
@@ -303,18 +314,41 @@ bool load_config(std::string& config_f, bool reload) {
     return ret;
 }
 
+int apply_index(std::string& what , const std::string& idx) {
+    DEB_("apply_index: what=%s idx=%s",what.c_str(),idx.c_str());
+    int port = std::stoi(what);
+    int index = std::stoi(idx);
+    what = std::to_string(port + index);
+    
+    return 0;
+}
+
+bool apply_tenant_config() {
+    int ret = 0;
+    
+    if(cfg_tenant_index.size() > 0 && cfg_tenant_name.size() > 0) {
+        cfg_smithd_listen_port = string_format(cfg_smithd_listen_port,std::stoi(cfg_tenant_index));
+    }
+    
+    
+    return (ret == 0);
+}
+
 int main(int argc, char *argv[]) {
     
-    PID_FILE="/var/run/smithd.pid";
+    PID_FILE="/var/run/smithd.%s.pid";
 
     config_file = "/etc/smithproxy/smithd.cfg";
+    std::string config_file_tenant = "/etc/smithproxy/smithd.%s.cfg";
     bool custom_config_file = false;
+    
+    std::cout << "START" << std::endl;
     
     while(1) {
     /* getopt_long stores the option index here. */
         int option_index = 0;
     
-        char c = getopt_long (argc, argv, "p:voDc",
+        char c = getopt_long (argc, argv, "p:voDcit",
                         long_options, &option_index);
         if (c < 0) break;
 
@@ -337,7 +371,14 @@ int main(int argc, char *argv[]) {
             case 'v':
                 std::cout << SMITH_VERSION << "+" << SOCLE_VERSION << std::endl;
                 exit(0);
+
+            case 'i':
+                cfg_tenant_index = std::string(optarg);
+                break;
                 
+            case 't':
+                cfg_tenant_name = std::string(optarg);
+                break;                
                 
             default:
                 ERR_("unknown option: '%c'",c);
@@ -354,13 +395,71 @@ int main(int argc, char *argv[]) {
         }    
     }    
     
-    get_logger()->level(WAR);
+    get_logger()->level(DEB);
+    
+    std::cout << "tenant" << std::endl;
+
+    if(cfg_tenant_index.size() > 0 && cfg_tenant_name.size() > 0) {
+        WAR_("Starting tenant: '%s', index %s",cfg_tenant_name.c_str(),cfg_tenant_index.c_str());
+        std::cout << "tenant " << cfg_tenant_name.c_str() << "/" << cfg_tenant_index.c_str() << std::endl;
+
+        daemon_set_tenant("smithd",cfg_tenant_name);
+    } 
+    else if (cfg_tenant_index.size() > 0 || cfg_tenant_name.size() > 0){
+        
+        FATS_("You have to specify both options: --tenant-name AND --tenant-index");
+        exit(-20);
+    }
+    else {
+        WARS_("Starting tenant: 0 (default)");
+        daemon_set_tenant("smithd","0"); 
+    }
+    
     
     // if logging set in cmd line, use it 
     if(args_debug_flag > NON) {
         get_logger()->level(args_debug_flag);
     }
+    
+    if(! custom_config_file) {
+        // look for tenant config (no override set)
         
+        std::string tenant_cfg = string_format(config_file_tenant.c_str(),cfg_tenant_name.c_str());
+        
+        std::cout << "tenant config " << tenant_cfg << std::endl;
+        
+        struct stat s;
+        if (stat(tenant_cfg.c_str(),&s) == 0) {
+            WAR_("Tenant config: %s",tenant_cfg.c_str());
+            config_file = tenant_cfg;
+        } else {
+            WAR_("Tenant config %s not found. Using default.",tenant_cfg.c_str());
+        }
+    }
+    
+    WARS_(" ");
+    // set level to what's in the config
+    
+    std::cout << "loading config from " << config_file << std::endl;
+    
+    if (!load_config(config_file)) {
+        if(config_file_check_only) {
+            FATS_("Config check: error loading config file.");
+            exit(1);
+        }
+        else {
+            FATS_("Error loading config file on startup.");
+            std::cout << "error loading config" << std::endl;
+            exit(1);
+        }
+    }
+    
+    if(!apply_tenant_config()) {
+        FATS_("Failed to apply tenant specific configuration!");
+        exit(2);
+    }      
+      
+      
     WARS_(" ");
     // set level to what's in the config
     if (!load_config(config_file)) {
@@ -412,7 +511,7 @@ int main(int argc, char *argv[]) {
 
     std::string friendly_thread_name_smithd = "sxy_smithd";
 
-    backend_proxy = prepare_listener<UxProxy,UxCom>(cfg_smithd_listen_port,"plain-text","/var/run/smithd.sock",cfg_smithd_workers);
+    backend_proxy = prepare_listener<UxProxy,UxCom>(cfg_smithd_listen_port,"ux-plain","/var/run/smithd.sock",cfg_smithd_workers);
     
     if(backend_proxy == nullptr && cfg_smithd_workers >= 0) {
         
@@ -432,7 +531,7 @@ int main(int argc, char *argv[]) {
             DIAS_("smithd workers torn down."); 
             backend_proxy->shutdown(); 
         } );
-        pthread_setname_np(backend_thread->native_handle(),friendly_thread_name_smithd.c_str());
+        pthread_setname_np(backend_thread->native_handle(),string_format("smithd_%s",cfg_tenant_index.c_str()).c_str());
     }
     
     
