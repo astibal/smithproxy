@@ -180,7 +180,7 @@ static std::string cfg_log_file;
 static loglevel cfg_log_level = INF;
 static int cfg_log_console = false;
 static int cfg_smithd_workers = 0;
-static std::string cfg_smithd_listen_port = "/var/run/smithd.%d.sock";
+static std::string cfg_smithd_listen_port = "/var/run/smithd.%s.sock";
 
 // Tenant configuration
 static std::string cfg_tenant_index;
@@ -327,7 +327,7 @@ bool apply_tenant_config() {
     int ret = 0;
     
     if(cfg_tenant_index.size() > 0 && cfg_tenant_name.size() > 0) {
-        cfg_smithd_listen_port = string_format(cfg_smithd_listen_port,std::stoi(cfg_tenant_index));
+        cfg_smithd_listen_port = string_format(cfg_smithd_listen_port,cfg_tenant_name.c_str());
     }
     
     
