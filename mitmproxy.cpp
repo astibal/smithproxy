@@ -47,6 +47,8 @@ socle::meter MitmProxy::total_mtr_down;
 ptr_cache<std::string,whitelist_verify_entry_t> MitmProxy::whitelist_verify("whitelist - verify",500,true,whitelist_verify_entry_t::is_expired);
 
 MitmProxy::MitmProxy(baseCom* c): baseProxy(c), sobject() {
+    
+    add_filter("test",new TestFilter(this,5));
 
 }
 
@@ -122,6 +124,11 @@ MitmProxy::~MitmProxy() {
     delete tlog_;
     
     if(identity_ != nullptr) { delete identity_; }
+    
+    // delete all filters
+    for (auto p: filters_) {
+        delete p.second;
+    }
 }
 
 std::string MitmProxy::to_string(int verbosity) { 

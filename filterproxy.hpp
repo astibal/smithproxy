@@ -27,9 +27,8 @@
 #include <sobject.hpp>
 #include <display.hpp>
 #include <baseproxy.hpp>
-#include <mitmproxy.hpp>
 
-class MitmProxy;
+
 
 struct FilterResult : public socle::sobject {
     // NONE - Send some data
@@ -38,11 +37,11 @@ struct FilterResult : public socle::sobject {
     // FINISHED_OK   - filtering has been finished. Don't send anything more. Proxy as needed.
     // FINISHED_DROP - filtering has been finished. Don't send anything more, data considered as harmful, drop parent proxy.
     typedef enum { NONE=0x0000, WANT_MORE_LEFT=0x0001, WANT_MORE_RIGHT=0x0002, FINISHED_DROP=0x4000, FINISHED_OK=0x8000 } status_flags;
-    int status = NONE;
+    int status_ = NONE;
     
     
-    bool is_flag(status_flags sf) { return flag_check<int>(&status,(int)sf); };
-    void set_flag(status_flags sf) { flag_set<int>(&status,(int)sf); }
+    bool is_flag(status_flags sf) { return flag_check<int>(&status_,(int)sf); };
+    void set_flag(status_flags sf) { flag_set<int>(&status_,(int)sf); }
     
     lockbuffer left_in;   // what you read from left side of proxy (-> filtering will put it in right_out)
     lockbuffer left_out;  // what you should write to left side of proxy
@@ -54,17 +53,20 @@ struct FilterResult : public socle::sobject {
     virtual bool ask_destroy() { return false; };    
 };
 
+class MitmProxy;
+
 class FilterProxy : public baseProxy, public socle::sobject {
 public:
     
     FilterProxy(MitmProxy* parent);
     virtual ~FilterProxy() { if(result_) delete result_; };
     
-    virtual std::string to_string(int verbosity=iINF) { return std::string("filterProxy"); };
-
+    virtual std::string to_string(int verbosity=iINF) { return std::string("FilterProxy"); };
+    virtual bool ask_destroy() { return false; };
+    
     FilterResult* result() { return result_; }
     
-    DECLARE_C_NAME("filterProxy");
+    DECLARE_C_NAME("FilterProxy");
     DECLARE_LOGGING(to_string);
     
 protected:
@@ -80,7 +82,9 @@ public:
     TestFilter(MitmProxy* parent, int seconds);
     virtual int handle_sockets_once(baseCom*);
     
+    
     time_t trigger_at;
+    int counter = 0;
 };
 
 #endif //__FILTER_PROXY

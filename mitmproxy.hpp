@@ -30,7 +30,7 @@
 #include <traflog.hpp>
 #include <policy.hpp>
 #include <cfgapi_auth.hpp>
-#include <filterproxy.hpp>
+
 
 struct whitelist_verify_entry {
 };
@@ -152,8 +152,6 @@ public:
     DECLARE_C_NAME("MitmProxy");
     DECLARE_LOGGING(to_string);
 };
-
-
 
 
 class MitmMasterProxy : public ThreadedAcceptorProxy<MitmProxy> {

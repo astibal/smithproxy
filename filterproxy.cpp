@@ -19,12 +19,16 @@
 
 
 #include <filterproxy.hpp>
+#include <mitmproxy.hpp>
 
 DEFINE_LOGGING(FilterProxy);
 
-FilterProxy::FilterProxy(MitmProxy* parent) : baseProxy(parent->com()->slave()) {
+FilterProxy::FilterProxy(MitmProxy* parent) : baseProxy(parent->com()->slave()), parent_(parent) {
     result_ = new FilterResult();
 }
+
+
+
 
 
 TestFilter::TestFilter(MitmProxy* parent, int seconds): FilterProxy(parent) {
@@ -32,5 +36,15 @@ TestFilter::TestFilter(MitmProxy* parent, int seconds): FilterProxy(parent) {
 }
 
 int TestFilter::handle_sockets_once(baseCom* xcom) {
+    
+    if(time(nullptr) >= trigger_at) {
+        counter++;
+        trigger_at = time(nullptr) + 5;
+
+        auto parent_name = [this](){ if(parent_) return parent_->to_string(iNOT); else return std::string("???"); };
+        
+        INF___("%s: filter triggered event counter %d", parent_name().c_str() ,counter);
+    }
+    
     return baseProxy::handle_sockets_once(xcom);
 }
