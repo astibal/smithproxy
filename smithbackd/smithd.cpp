@@ -158,7 +158,7 @@ public:
     virtual void on_left_new(baseHostCX* cx) {
         SmithdProxy* p = new SmithdProxy(com()->slave());
         p->ladd(cx);
-        this->proxies().push_back(p);
+        this->proxies().insert(p);
     }
 };
 
@@ -511,6 +511,8 @@ int main(int argc, char *argv[]) {
 
     std::string friendly_thread_name_smithd = "sxy_smithd";
 
+    // no mercy here.
+    unlink(cfg_smithd_listen_port.c_str());
     backend_proxy = prepare_listener<UxProxy,UxCom>(cfg_smithd_listen_port,"ux-plain","/var/run/smithd.sock",cfg_smithd_workers);
     
     if(backend_proxy == nullptr && cfg_smithd_workers >= 0) {

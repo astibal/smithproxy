@@ -180,7 +180,7 @@ void MitmSocksProxy::on_left_new(baseHostCX* just_accepted_cx) {
     
     new_proxy->ladd(just_accepted_cx);
     
-    this->proxies().push_back(new_proxy);
+    this->proxies().insert(new_proxy);
     
     DEBS_("MitmMasterProxy::on_left_new: finished");
 }

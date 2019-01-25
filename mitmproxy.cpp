@@ -1611,7 +1611,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                 }
                 
                 // finalize connection acceptance by adding new proxy to proxies and connect
-                this->proxies().push_back(new_proxy);
+                this->proxies().insert(new_proxy);
                 
                 //FIXME: this is really ugly!! :) It's here since radd has been called before socket for target_cx was created.
                 int real_socket = target_cx->connect(false);
@@ -1687,7 +1687,7 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
     // apply policy and get result
     int policy_num = cfgapi_obj_policy_apply(just_accepted_cx,new_proxy);
     if(policy_num >= 0) {
-        this->proxies().push_back(new_proxy);
+        this->proxies().insert(new_proxy);
         
         ((MitmHostCX*)just_accepted_cx)->matched_policy(policy_num);
         target_cx->matched_policy(policy_num);

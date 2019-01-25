@@ -54,6 +54,9 @@ Listener* prepare_listener(std::string& str_port,const char* friendly_name,int d
     };
     s_p->com()->unblock(s);
     
+    s_p->com()->set_monitor(s);
+    s_p->com()->set_poll_handler(s,s_p);
+    
     return s_p;
 }
 
