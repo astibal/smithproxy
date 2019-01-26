@@ -19,9 +19,9 @@ echo "Downloading pylibconfig2 package"
 wget https://bitbucket.org/astibal/smithproxy/downloads/${PYLIBCONFIG2_FILE} -O ${PYLIBCONFIG2_FILE}
 
 echo "File(s) being uploaded now."
-curl -tlsv1.2 --ftp-ssl-control --ftp-create-dirs -T smithproxy_${VER}-${DEB_CUR}*.deb -k ${UPLOAD_URL}/${DISTRO}/${VER_MAJ}/
-curl -tlsv1.2 --ftp-ssl-control --ftp-create-dirs -T smithproxy-${VER}/debian/changelog -k ${UPLOAD_URL}/${DISTRO}/${VER_MAJ}/
-curl -tlsv1.2 --ftp-ssl-control --ftp-create-dirs -T ${PYLIBCONFIG2_FILE} -k ${UPLOAD_URL}/${DISTRO}/${VER_MAJ}/
-curl -tlsv1.2 --ftp-ssl-control --ftp-create-dirs -T README -k ${UPLOAD_URL}/${DISTRO}/${VER_MAJ}/
+curl -tlsv1.2 --ftp-ssl-control --ftp-create-dirs -T smithproxy_${VER}-${DEB_CUR}*.deb -k ${UPLOAD_URL}/${VER_MAJ}/${DISTRO}/
+curl -tlsv1.2 --ftp-ssl-control --ftp-create-dirs -T smithproxy-${VER}/debian/changelog -k ${UPLOAD_URL}/${VER_MAJ}/${DISTRO}/
+curl -tlsv1.2 --ftp-ssl-control --ftp-create-dirs -T ${PYLIBCONFIG2_FILE} -k ${UPLOAD_URL}/${VER_MAJ}/${DISTRO}/
+curl -tlsv1.2 --ftp-ssl-control --ftp-create-dirs -T README -k ${UPLOAD_URL}/${VER_MAJ}/${DISTRO}/
 echo "Uploaded."
 

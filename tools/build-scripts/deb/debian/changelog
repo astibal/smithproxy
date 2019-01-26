@@ -1,12 +1,5 @@
-smithproxy (0.8.1-1) UNRELEASED; urgency=medium
-
-    * conditional disk writer (based on 'disabled' file in data dir)
-
-    -- Smithproxy Support <support@smithproxy.org>  Tue, 14 Nov 2017 08:50:47 +0100
-
-smithproxy (0.8.0-1) unstable; urgency=medium
+smithproxy (0.8.3-1) unstable; urgency=medium
 
     * initial build for this version/platform
 
-    -- Smithproxy Support <support@smithproxy.org>  Mon, 11 Sep 2017 12:57:33 +0200
-
+ -- Smithproxy Support <support@smithproxy.org>  Sat, 26 Jan 2019 16:36:30 +0100
