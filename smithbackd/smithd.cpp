@@ -480,10 +480,12 @@ int main(int argc, char *argv[]) {
         exit(0);
     }
 
+#ifdef MEM_DEBUG
     if(cfg_mtrace_enable) {
         putenv("MALLOC_TRACE=/var/log/smithd_mtrace.log");
         mtrace();
     }
+#endif
   
     if(daemon_exists_pidfile()) {
         FATS_("There is PID file already in the system.");
