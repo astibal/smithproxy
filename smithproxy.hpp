@@ -17,8 +17,8 @@
     
 */    
 
-#define SMITH_VERSION "0.8.3"
-#define SMITH_DEVEL    1
+#define SMITH_VERSION "0.8.4"
+#define SMITH_DEVEL    0
 
 
 extern bool cfg_openssl_mem_dbg;
