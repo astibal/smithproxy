@@ -59,7 +59,7 @@
 #include <daemon.hpp>
 #include <cmdserver.hpp>
 
-#define MEM_DEBUG 1
+//#define MEM_DEBUG 1
 #ifdef MEM_DEBUG
     #include <mcheck.h>
 #endif
