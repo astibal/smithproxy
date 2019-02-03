@@ -181,28 +181,10 @@ static void uw_btrace_handler(int sig) {
     unw_init_local(&cursor, &uc);
     
     int CRLOG = open((const char*)crashlog_file,O_CREAT | O_WRONLY | O_TRUNC,S_IRUSR|S_IWUSR);
-    TEMP_FAILURE_RETRY(write(STDERR_FILENO," ======== Smithproxy exception handler =========\n",50));
-    TEMP_FAILURE_RETRY(write(CRLOG," ======== Smithproxy exception handler =========\n",50));
-
-    void *trace[64];
-    int size;
-    char **strings;
-
-    size    = backtrace( trace, 64 );
-    strings = backtrace_symbols( trace, size );
-
-    if (strings == NULL) {
-        //FATS_("failure: backtrace_symbols");
-        TEMP_FAILURE_RETRY(write(STDERR_FILENO,"failure: backtrace_symbols\n",28));
-        TEMP_FAILURE_RETRY(write(CRLOG,"failure: backtrace_symbols\n",28));
-        close(CRLOG);
-        exit(EXIT_FAILURE);
-    }
-    
-    
-    //FAT_("  [%d] Traceback:",sig );
-    TEMP_FAILURE_RETRY(write(STDERR_FILENO,"Traceback:\n",11));
-    TEMP_FAILURE_RETRY(write(CRLOG,"Traceback:\n",11));
+    write(STDERR_FILENO," ======== Smithproxy exception handler =========\n",50);
+    write(CRLOG," ======== Smithproxy exception handler =========\n",50);
+    write(STDERR_FILENO,"Traceback:\n",11);
+    write(CRLOG,"Traceback:\n",11);
 
     while (unw_step(&cursor) > 0) {
         char buf_line[256];
@@ -217,17 +199,16 @@ static void uw_btrace_handler(int sig) {
         
         snprintf (buf_line, 255, "ip = %lx, sp = %lx: (%s+0x%x) [%p]\n", (long) ip, (unsigned long) sp, buf_fun, (unsigned int) offset, (void*)ip);
         int n = strnlen(buf_line,255);
-         TEMP_FAILURE_RETRY(write(CRLOG,buf_line,n));
-         TEMP_FAILURE_RETRY(write(STDERR_FILENO,buf_line,n));
+         write(CRLOG,buf_line,n);
+         write(STDERR_FILENO,buf_line,n);
     }
     
-    TEMP_FAILURE_RETRY(write(STDERR_FILENO," ===============================================\n",50));
-    TEMP_FAILURE_RETRY(write(CRLOG," ===============================================\n",50));
+    write(STDERR_FILENO," ===============================================\n",50);
+    write(CRLOG," ===============================================\n",50);
     close(CRLOG);
     
     daemon_unlink_pidfile();
     
-    free(strings);
     exit(-1);
 }
 

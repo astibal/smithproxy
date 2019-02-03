@@ -56,9 +56,8 @@ const char* dns_record_type_str(int a) {
 
 
 int load_qname(unsigned char* ptr, unsigned int maxlen, std::string* str_storage=nullptr) {
-    int xi = 0;
-    int name_i = 0;
-    
+    unsigned int xi = 0;
+
     DEB_("load_qname:\n%s",hex_dump(ptr,maxlen).c_str());
     
     
