@@ -92,7 +92,7 @@ void load_defaults() {
 
 void cmd_show_status(struct cli_def* cli) {
     
-    //cli_print(cli,":connected using socket %d",cli->client->_fileno);
+    //cli_print(cli,":connected using socket %d",fileno(cli->client));
   
     cli_print(cli,"Version: %s%s",SMITH_VERSION,SMITH_DEVEL ? " (dev)" : "");
     cli_print(cli,"Socle: %s%s",SOCLE_VERSION,SOCLE_DEVEL ? " (dev)" : "");
@@ -767,7 +767,7 @@ int cli_diag_identity_ip_list(struct cli_def *cli, const char *command, char *ar
 
 
 void cli_print_log_levels(struct cli_def *cli) {
-    logger_profile* lp = get_logger()->target_profiles()[(uint64_t)cli->client->_fileno];
+    logger_profile* lp = get_logger()->target_profiles()[(uint64_t)fileno(cli->client)];
     
     cli_print(cli,"THIS cli logging level set to: %d",lp->level_.level());
     cli_print(cli,"Internal logging level set to: %d",get_logger()->level().level());
@@ -782,7 +782,7 @@ void cli_print_log_levels(struct cli_def *cli) {
 
 int cli_debug_terminal(struct cli_def *cli, const char *command, char *argv[], int argc) {
     
-    logger_profile* lp = get_logger()->target_profiles()[(uint64_t)cli->client->_fileno];
+    logger_profile* lp = get_logger()->target_profiles()[(uint64_t)fileno(cli->client)];
     if(argc > 0) {
         
         std::string a1 = argv[0];
