@@ -16,6 +16,11 @@ add_subdirectory(${SMITHD_DIR})
 
 if(UNIX)
     SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g  -Wall -std=c++11")
+
+    # detect Alpine - and disable backtrace_* function use
+    if(EXISTS "/etc/alpine-release")
+        SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DLIBC_MUSL")
+    endif()
 endif()
 
 add_executable(smithproxy   
