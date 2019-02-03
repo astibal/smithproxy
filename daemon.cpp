@@ -179,15 +179,17 @@ static void uw_btrace_handler(int sig) {
 
     unw_getcontext(&uc);
     unw_init_local(&cursor, &uc);
-    
+
+    char buf_line[256];
+    int chars = snprintf(buf_line,255," ======== Smithproxy exception handler (sig %d) =========\n",sig);
+
     int CRLOG = open((const char*)crashlog_file,O_CREAT | O_WRONLY | O_TRUNC,S_IRUSR|S_IWUSR);
-    write(STDERR_FILENO," ======== Smithproxy exception handler =========\n",50);
-    write(CRLOG," ======== Smithproxy exception handler =========\n",50);
+    write(STDERR_FILENO,buf_line,chars);
+    write(CRLOG,buf_line,chars);
     write(STDERR_FILENO,"Traceback:\n",11);
     write(CRLOG,"Traceback:\n",11);
 
     while (unw_step(&cursor) > 0) {
-        char buf_line[256];
         memset(buf_line,0,256);
         char buf_fun[256];
         memset(buf_fun,0,256);
@@ -197,10 +199,10 @@ static void uw_btrace_handler(int sig) {
         unw_get_reg(&cursor, UNW_REG_IP, &ip);
         unw_get_reg(&cursor, UNW_REG_SP, &sp);
         
-        snprintf (buf_line, 255, "ip = %lx, sp = %lx: (%s+0x%x) [%p]\n", (long) ip, (unsigned long) sp, buf_fun, (unsigned int) offset, (void*)ip);
-        int n = strnlen(buf_line,255);
-         write(CRLOG,buf_line,n);
-         write(STDERR_FILENO,buf_line,n);
+        int chars = snprintf(buf_line, 255, "ip = %lx, sp = %lx: (%s+0x%x) [%p]\n", (long) ip, (unsigned long) sp, buf_fun, (unsigned int) offset, (void*)ip);
+
+        write(CRLOG,buf_line,chars);
+        write(STDERR_FILENO,buf_line,chars);
     }
     
     write(STDERR_FILENO," ===============================================\n",50);
