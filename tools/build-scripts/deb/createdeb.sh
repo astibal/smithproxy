@@ -1,17 +1,55 @@
 #!/usr/bin/env bash
-CUR_DIR=`pwd`
+ORIG_DIR=`pwd`
 
+
+CUR_DIR=/tmp/smithproxy_build
+mkdir ${CUR_DIR}
+cp *.sh ${CUR_DIR}
+cp -r debian ${CUR_DIR}
+cd ${CUR_DIR}
 
 ##
 ## trap Ctrl-C, don't continue with script if hit in longer task (ie. make)
 ##
 trap ctrl_c INT
 function ctrl_c() {
-        echo "Ctrl-C: bailing out."
-        cd $CUR_DIR
+        echo "Ctrl-C: exiting working directory $CUR_DIR"
+        cd $ORIG_DIR
         exit -1
 }
 
+
+# cleanup directory
+function cleanup () {
+    (
+    rm ${CUR_DIR}/smithoproxy_*.orig.tar.gz
+    rm -rf ${CUR_DIR}/smithproxy_*
+    rm -rf ${CUR_DIR}/smithproxy-*
+    rm -rf ${CUR_DIR}/socle*
+    ) > /dev/null 2>&1
+
+}
+
+# download source from git
+# @param1 - socle branch
+# @param2 - smithproxy branch
+function sync() {
+    SOCLE_BRANCH=$1
+    SMITHPROXY_BRANCH=$2
+
+    O=`pwd`
+    cd $CUR_DIR
+
+    cleanup
+
+    git clone http://bitbucket.org/astibal/smithproxy.git smithproxy
+    cd smithproxy; git fetch; git checkout $SMITHPROXY_BRANCH; cd ..
+
+    git clone http://bitbucket.org/astibal/socle.git socle
+    cd socle; git fetch; git checkout $SOCLE_BRANCH; cd ..
+
+    cd $O
+}
 # upload file function
 upload() {
     FILE=$1
@@ -35,10 +73,17 @@ safe_upload() {
 
 
 ##
+## get source !!
+##
+
+sync
+
+##
 ## get proper versions from GIT. We set debian patch-level to distance from
 ## latest --tag.
 ##
-cd smithproxy_src
+
+cd smithproxy
 
 GIT_DESCR=`git describe --tags`
 GIT_TAG=`echo ${GIT_DESCR} | awk -F'-' '{ print $1 }'`
@@ -48,6 +93,16 @@ GIT_PATCH=`echo ${GIT_DESCR} | awk -F'-' '{ print $3 }'`
 if [ "${GIT_PATCH_DIST}" == "" ]; then
     GIT_PATCH_DIST="0"
 fi
+cd ..
+
+mv smithproxy smithproxy-${GIT_TAG}
+ln -s smithproxy-${GIT_TAG} smithproxy_src
+
+# create tarball for build
+tar cfz smithproxy_${GIT_TAG}.orig.tar.gz --exclude-vcs smithproxy-${GIT_TAG}
+
+cd smithproxy_src
+
 
 # initialize debian versioning
 DEB_CUR=$GIT_PATCH_DIST
@@ -182,3 +237,7 @@ else
 
     echo "Finished."
 fi
+
+
+echo "Finished: exiting working directory $CUR_DIR (please clean it up)"
+cd $ORIG_DIR
