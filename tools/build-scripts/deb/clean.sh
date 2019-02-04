@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 (
 rm smithoproxy_*.orig.tar.gz
 rm -rf smithproxy_*

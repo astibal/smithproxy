@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # mark branches you want to build
 SOCLE_BRANCH=master
 SMITHPROXY_BRANCH=master
@@ -13,7 +14,8 @@ cd socle; git fetch; git checkout $SOCLE_BRANCH; cd ..
 
 VERSION=`cat smithproxy/smithproxy.hpp | awk -F\" '{ print \$2 }' | strings`
 echo "Cloned version from sources is $VERSION ."
-mv smithproxy smithproxy-${VERSION} 
+mv smithproxy smithproxy-${VERSION}
+ln -s smithproxy-${VERSION} smithproxy_src
 
 if [ "${VERSION}" != "`cat VERSION`" ]; then
    echo "Version bump detected. Zeroize deb version."
