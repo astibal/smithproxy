@@ -125,7 +125,7 @@ public:
     int matched_policy() { return matched_policy_; }
     void matched_policy(int p) { matched_policy_ = p; }
 
-    typedef enum { REPLACETYPE_NONE=0, REPLACETYPE_HTTP=1, REPLACETYPE_=2 } replacetype_t;
+    typedef enum { REPLACETYPE_NONE=0, REPLACETYPE_HTTP=1 } replacetype_t;
     replacetype_t replacement_type() const { return replacement_type_; }
     void replacement_type(replacetype_t r) { replacement_type_ = r; }
     
