@@ -397,7 +397,21 @@ int socksServerCX::process_socks_reply() {
         state_ = REQRES_SENT;
         
         DEB_("socksServerCX::process_socks_reply: response dump:\n%s",hex_dump(b,cur).c_str());
-        
+
+        // response is about to be sent. In most cases client sends data on left,
+        // but in case it's waiting ie. for banner, we must trigger proxy code to
+        // actually connect the right side.
+        // Because now are all data handled, there is no way how we get to proxy code,
+        // unless:
+        //      * new data appears on left
+        //      * some error occurs on left
+        //      * other way how socket appears in epoll result.
+        //
+        // we can acheive that to simply put left socket to write monitor.
+        // This will make left socket writable (dummy - we don't have anything to write),
+        // but also triggers proxy's on_message().
+
+        com()->set_write_monitor(socket());
         return cur;
     } 
     else if(version == 4) {

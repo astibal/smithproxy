@@ -537,23 +537,37 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
             
             if(!whitelist_found) {
                 DIAS___("relaxed cert-check: peer sslcom verify not OK, not in whitelist");
-                if(mh->replacement_type() == MitmHostCX::REPLACETYPE_HTTP) {
+
+                if(mh->replacement_type() == MitmHostCX::REPLACETYPE_NONE) {
+                    DIAS___(" -> replacement: none - letting go");
+                }
+                else if(mh->replacement_type() == MitmHostCX::REPLACETYPE_HTTP) {
+                    DIAS___(" -> replacement: HTTP - redirecting");
                     mh->replacement_flag(MitmHostCX::REPLACE_BLOCK);
                     redirected = true;
                     handle_replacement_ssl(mh);
                     
                 } 
                 else if(scom->verify_check(SSLCom::CLIENT_CERT_RQ) && scom->opt_client_cert_action > 0) {
-                    //we should not block
+
+                    DIA___(" -> client-cert request:  opt_client_cert_action=%d", scom->opt_client_cert_action);
+
                     if(scom->opt_client_cert_action >= 2) {
+                        //we should not block
+                        DIAS___(" -> client-cert request: auto-whitelist");
+
                         whitelist_verify.lock();
                         
                         whitelist_verify_entry v;
                         whitelist_verify.set(key,new whitelist_verify_entry_t(v,scom->opt_failed_certcheck_override_timeout));
                         whitelist_verify.unlock();
+                    } else {
+                        DIAS___(" -> client-cert request: none");
                     }
+
                 }
                 else {
+                    DIAS___(" -> replacement unknown: killing proxy");
                     dead(true);
                 }
             }
