@@ -6,15 +6,18 @@ WORKDIR /app
 
 RUN apt update && apt install -y \
 wget \
-python-pip 
+python-pip dnsutils
 
-RUN wget http://www.mag0.net/out/smithproxy/0.8/Linux-Ubuntu-18.04/smithproxy_0.8.4-1_amd64.deb &&  \
-wget http://www.mag0.net/out/smithproxy/0.8/python-pylibconfig2_0.2.5-1_all.deb && \
-apt install -y libcli1.9 libconfig++9v5 libssl1.0.0 libunwind8 libconfig++ python-pip && \
-dpkg -i  python-pylibconfig2_0.2.5-1_all.deb && \
+RUN apt install -y wget dnsutils; \
+\
+SX1=`dig +short latest.ubuntu1804.deb.smithproxy.org TXT | tr -d '"'` ; echo "marked for download: $SX1"; \
+SX2=`dig +short latest-pylibconfig2.ubuntu1804.deb.smithproxy.org TXT | tr -d '"'`; echo "marked for download: $SX2"; \
+\
+apt install -y libcli1.9 libconfig++9v5 libssl1.0.0 libunwind8 python-pip && \
+wget $SX2 && dpkg -i `basename $SX2` && \
 apt install -y iptables python-ldap python-pyparsing python-posix-ipc python-soappy python-m2crypto telnet iproute2 && \
-dpkg -i  smithproxy_0.8.4-1_amd64.deb && \
-apt remove -y g++ gcc perl manpages && apt -y autoremove 
+wget $SX1 && dpkg -i `basename $SX1` && \
+apt remove -y g++ gcc perl manpages && apt -y autoremove
 
 
 
