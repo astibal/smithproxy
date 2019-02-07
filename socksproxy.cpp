@@ -86,7 +86,7 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     new_com->master(com()->master());
     
     MitmHostCX* n_cx = new MitmHostCX(new_com, s);
-    n_cx->paused(true);
+    n_cx->waiting_for_peercom(true);
     n_cx->com()->name();
     n_cx->name();
     n_cx->com()->nonlocal_dst(true);

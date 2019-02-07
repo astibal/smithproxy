@@ -311,7 +311,7 @@ void MitmHostCX::on_starttls() {
 
     // set flag to wait for the peer to finish spoofing
 
-    paused(true);
+    waiting_for_peercom(true);
 
 
 

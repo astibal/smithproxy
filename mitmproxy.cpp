@@ -1289,11 +1289,11 @@ void MitmProxy::tap() {
     
     for (auto cx: left_sockets) {
         com()->unset_monitor(cx->socket());
-        cx->paused(true);
+        cx->waiting_for_peercom(true);
     }
     for (auto cx: right_sockets) {
         com()->unset_monitor(cx->socket());
-        cx->paused(true);
+        cx->waiting_for_peercom(true);
     }
 }
 
@@ -1303,11 +1303,11 @@ void MitmProxy::untap() {
 
     for (auto cx: left_sockets) {
         com()->set_monitor(cx->socket());
-        cx->paused(false);
+        cx->waiting_for_peercom(false);
     }
     for (auto cx: right_sockets) {
         com()->set_monitor(cx->socket());
-        cx->paused(false);
+        cx->waiting_for_peercom(false);
     }
 }
 
@@ -1422,7 +1422,7 @@ baseHostCX* MitmMasterProxy::new_cx(int s) {
     }
     
     DEB___("Pausing new connection %s",r->c_name());
-    r->paused(true);
+    r->waiting_for_peercom(true);
     return r; 
 }
 void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
@@ -1443,8 +1443,8 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
         MitmProxy* new_proxy = new MitmProxy(just_accepted_cx->com()->slave());
         
         // let's add this just_accepted_cx into new_proxy
-        if(just_accepted_cx->paused_read()) {
-            DEBS___("MitmMasterProxy::on_left_new: ldaadd the new paused cx");
+        if(just_accepted_cx->read_waiting_for_peercom()) {
+            DEBS___("MitmMasterProxy::on_left_new: ldaadd the new waiting_for_peercom cx");
             new_proxy->ldaadd(just_accepted_cx);
         } else{
             DEBS___("MitmMasterProxy::on_left_new: ladd the new cx (unpaused)");
@@ -1667,8 +1667,8 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
 {
     MitmProxy* new_proxy = new MitmProxy(com()->slave());
     // let's add this just_accepted_cx into new_proxy
-    if(just_accepted_cx->paused_read()) {
-        DEBS___("MitmMasterProxy::on_left_new: ldaadd the new paused cx");
+    if(just_accepted_cx->read_waiting_for_peercom()) {
+        DEBS___("MitmMasterProxy::on_left_new: ldaadd the new waiting_for_peercom cx");
         new_proxy->ldaadd(just_accepted_cx);
     } else{
         DEBS___("MitmMasterProxy::on_left_new: ladd the new cx (unpaused)");

@@ -299,7 +299,7 @@ bool socksServerCX::setup_target() {
         }
         
         MitmHostCX* n_cx = new MitmHostCX(new_com, s);
-        n_cx->paused(true);
+    n_cx->waiting_for_peercom(true);
         n_cx->com()->name();
         n_cx->name();
         n_cx->com()->nonlocal_dst(true);
@@ -314,7 +314,7 @@ bool socksServerCX::setup_target() {
         MitmHostCX *target_cx = new MitmHostCX(n_cx->com()->slave(), n_cx->com()->nonlocal_dst_host().c_str(), 
                                             string_format("%d",n_cx->com()->nonlocal_dst_port()).c_str()
                                             );
-        target_cx->paused(true);
+    target_cx->waiting_for_peercom(true);
         
         std::string h;
         std::string p;
@@ -337,7 +337,7 @@ bool socksServerCX::setup_target() {
         // and if policy allows, left and right will be set (also in proxy owning this cx).
         
         state_ = WAIT_POLICY;
-        paused_read(true);
+    read_waiting_for_peercom(true);
         
         return true;
 }
@@ -438,7 +438,7 @@ void socksServerCX::pre_write() {
     if(state_ == REQRES_SENT ) {
         if(writebuf()->size() == 0) {
             DIA_("socksServerCX::pre_write[%s]: all flushed, state change to HANDOFF: writebuf=%d, readbuf=%d",c_name(),writebuf()->size(),readbuf()->size());
-            paused(true);
+            waiting_for_peercom(true);
             state(HANDOFF);
         }
     }
