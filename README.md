@@ -66,18 +66,19 @@ mentioning here full paths how they look inside of container.
  
 
 ###### sxyvar volume
-* `/var/log/smithproxy*` - various logging files. 
+`/var/log/smithproxy*` - various logging files. 
   * `smithproxy.cfg` - general logging of smithproxy daemon
 
 ###### sxydumps volume
-* `/var/local/smithproxy/data` - content writer target directory (disabled by default)
+`/var/local/smithproxy/data` - content writer target directory (disabled by default)
   
 
 #### smithproxy CLI
 
 `smithproxy_cli` is your friend. Once you got CLI, type `enable` to elevate your privileges.
 CLI looks like this:
-```root@pixie:/app# smithproxy_cli 
+```
+    root@pixie:/app# smithproxy_cli 
     Trying 127.0.0.1...
     Connected to localhost.
     Escape character is '^]'.
