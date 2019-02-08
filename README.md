@@ -60,7 +60,7 @@ All your files should be accessible from docker host, if you used volumes, as su
 mentioning here full paths how they look inside of container. 
 
 ###### sxy volume
-`/etc/smithproxy/` - all config fules
+`/etc/smithproxy/` - all config rules 
   * `smithproxy.cfg` - policies and profiles. There is a ton and half of things to play with.  
   * `users.cfg` - user databases and realms (disabled by default)
  
