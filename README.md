@@ -60,24 +60,24 @@ All your files should be accessible from docker host, if you used volumes, as su
 mentioning here full paths how they look inside of container. 
 
 ###### sxy volume
-``/etc/smithproxy/`` - all config fules
+`/etc/smithproxy/` - all config fules
   * `smithproxy.cfg` - policies and profiles. There is a ton and half of things to play with.  
   * `users.cfg` - user databases and realms (disabled by default)
  
 
 ###### sxyvar volume
-* ``/var/log/smithproxy*`` - various logging files. 
+* `/var/log/smithproxy*` - various logging files. 
   * `smithproxy.cfg` - general logging of smithproxy daemon
 
 ###### sxydumps volume
-* ``/var/local/smithproxy/data`` - content writer target directory (disabled by default)
+* `/var/local/smithproxy/data` - content writer target directory (disabled by default)
   
 
 #### smithproxy CLI
 
-``smithproxy_cli`` is your friend. Once you got CLI, type `enable` to elevate your privileges.
+`smithproxy_cli` is your friend. Once you got CLI, type `enable` to elevate your privileges.
 CLI looks like this:
-````root@pixie:/app# smithproxy_cli 
+```root@pixie:/app# smithproxy_cli 
     Trying 127.0.0.1...
     Connected to localhost.
     Escape character is '^]'.
@@ -91,16 +91,16 @@ CLI looks like this:
     MitmProxy: l:tcp_192.168.122.1:54942 <+> r:tcp_109.233.72.84:80  policy: 1 up/down: 0/35.35M
     MitmProxy: l:ssli_192.168.122.1:47030 <+> r:ssli_181.160.161.165:443  policy: 1 up/down: 0/0
     MitmProxy: l:ssli_192.168.122.1:47040 <+> r:ssli_172.240.130.251:443  policy: 1 up/down: 0/12k
-````
+```
 ... yes, it's telnet to localhost. If you don't like it, submit patches. And yes, you can see 
 actual connection speed in the rightmost column.
 
 #### Restarting smithproxy
 
 You might need it one day. 
-````
+```
 /etc/init.d/smithproxy restart
-````
+```
 You will see many privilege-related errors. You can ignore them in this testing image. 
 Image is intended to be used in non-privileged mode, therefore only SOCKS4 or SOCKS5 could be used.
 Transparent proxying might not work properly, as you need to route traffic directly to container.
