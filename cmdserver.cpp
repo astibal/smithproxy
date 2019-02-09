@@ -471,10 +471,8 @@ int cli_diag_ssl_crl_list(struct cli_def *cli, const char *command, char *argv[]
             out += string_format(", ttl=?");
         }
 
-        out  + "\n";
+        out  += "\n";
     }
-    int ttl = 0;
-
 
     store->crl_cache.unlock();
     
