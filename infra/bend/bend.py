@@ -365,8 +365,8 @@ class AuthManager:
                             
                         
                         if is_user and user != username:
-                            continue
                             flog.debug("authenticate_check: investigating member target %s: user doesn't match" % (m,))
+                            continue
                         else:
                             flog.debug("authenticate_check: investigating member target %s: user matches" % (m,))
 
@@ -401,7 +401,7 @@ class AuthManager:
         
         # this is just for debug purposes.
         #if self.authenticate_check_local(ip,username,password,identities):
-        #    flog.info("authenticate_check: user " + username + " local auth successfull from " + ip + " -- fallback authentication")
+        #    flog.info("authenticate_check: user " + username + " local auth successful from " + ip + " -- fallback authentication")
         #    self.address_identities[ip] = []
         #    return 1
         
@@ -453,7 +453,7 @@ class AuthManager:
             username = '<guest>'
         
         if self.authenticate_check(ip,username,password,identities) > 0:
-            flog.info("authenticate: user " + username + " auth successfull from " + ip)
+            flog.info("authenticate: user " + username + " auth successful from " + ip)
             
             # normalize identities
             identities_to_send = username
