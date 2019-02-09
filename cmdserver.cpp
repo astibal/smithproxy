@@ -435,10 +435,27 @@ int cli_diag_ssl_crl_list(struct cli_def *cli, const char *command, char *argv[]
     
     store->crl_cache.lock();
     for (auto x: store->crl_cache.cache()) {
-       std::string uri = x.first;
+        std::string uri = x.first;
+        auto cached_result = x.second;
        
-       out += "    " + uri + "\n";
+        out += "    " + uri;
+        if (cached_result) {
+            int ttl = cached_result->expired_at - ::time(nullptr);
+            out += string_format(", ttl=%d",ttl);
+
+            if (ttl <= 0) {
+                out += "  *expired*";
+            }
+        }
+        else {
+            out += string_format(", ttl=?");
+        }
+
+        out  + "\n";
     }
+    int ttl = 0;
+
+
     store->crl_cache.unlock();
     
     cli_print(cli,"\n%s",out.c_str());
