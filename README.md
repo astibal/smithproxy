@@ -16,7 +16,7 @@ sudo docker volume create sxy
 sudo docker volume create sxyvar
 
 # -- create packet dump volume
-sudo docker volume create sxyvar
+sudo docker volume create sxydumps
 
 
 # -- run actual smithproxy container
