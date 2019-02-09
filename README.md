@@ -1,5 +1,13 @@
 
-* **>>>** For general information go here: [www.smithproxy.org](http://www.smithproxy.org) **<<<** *
+**>>>** For general information go here: [www.smithproxy.org](http://www.smithproxy.org) **<<<**  
+
+
+You can reach us also here:  
+[Discord server](https://discord.gg/vf4Qwwt)
+
+Mailing lists:  
+[smithproxy-users](mailto:smithproxy-users@googlegroups.com)  
+[smithproxy-announce](mailto:smithproxy-announce@googlegroups.com)
 
 
 
