@@ -195,7 +195,7 @@ def generate_csr(key, profile, sans_dns=[], sans_ip=[], isca=False):
 
     return csr
 
-def sign_csr(key, csr, caprofile, valid=30, isca=False):
+def sign_csr(key, csr, caprofile, valid=30, isca=False,cacert=None):
     global SETTINGS
 
     one_day = datetime.timedelta(1, 0, 0)
@@ -210,6 +210,21 @@ def sign_csr(key, csr, caprofile, valid=30, isca=False):
     builder = builder.serial_number(x509.random_serial_number())
     builder = builder.public_key(csr.public_key())
 
+    builder = builder.add_extension(x509.SubjectKeyIdentifier.from_public_key(csr.public_key()),critical=False)
+
+    # more info about issuer
+
+    has_ski = False
+    try:
+        if cacert:
+            ski = cacert.extensions.get_extension_for_class(x509.SubjectKeyIdentifier)
+            builder = builder.add_extension(x509.AuthorityKeyIdentifier.from_issuer_subject_key_identifier(ski),critical=False)
+            has_ski = True
+    except x509.extensions.ExtensionNotFound as e:
+        has_ski = False
+
+    if not has_ski:
+        builder = builder.add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(key.public_key()),critical=False)
 
     print("sign CSR: == extensions ==")
     for e in csr.extensions:
@@ -228,6 +243,8 @@ def sign_csr(key, csr, caprofile, valid=30, isca=False):
                     print("           allowed by rule")
 
         builder = builder.add_extension(e.value, e.critical)
+
+
 
     certificate = builder.sign(private_key=key, algorithm=hashes.SHA256(),backend=default_backend())
     return certificate
@@ -260,7 +277,7 @@ if __name__ == "__main__":
     # generate default server key and certificate & sign by CA
     srv_key = generate_rsa_key(2048)
     srv_csr = generate_csr(srv_key,"srv",sans_dns=["portal.demo.smithproxy.net",])
-    srv_cert = sign_csr(ca_key,srv_csr,"ca")
+    srv_cert = sign_csr(ca_key,srv_csr,"ca",valid=30,cacert=ca_cert)
     save_certificate(srv_cert,"srv-cert.pem")
 
 
