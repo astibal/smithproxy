@@ -61,8 +61,13 @@ SETTINGS = {
     "path": "/tmp/"
 }
 
+def pref_choice(*args):
+    for a in args:
+        if a:
+            return a
+    return None
 
-def _write_default_settings():
+def init_settings(cn, c, ou=None, o=None, l=None, s=None, def_subj_ca=None, def_subj_srv=None, def_subj_clt=None ):
     global SETTINGS
 
     # we want to extend, but not overwrite already existing settings
@@ -75,15 +80,15 @@ def _write_default_settings():
             r[k] = {}
 
     for k in ["ca", "srv", "clt", "prt"]:
-        if "ou" not in r[k]: r[k]["ou"] = None
-        if "o" not in r[k]:  r[k]["o"] = "Smithproxy Software"
-        if "s" not in r[k]:  r[k]["s"] = None
-        if "l" not in r[k]:  r[k]["l"] = None
-        if "c" not in r[k]:  r[k]["c"] = "CZ"
+        if "ou" not in r[k]: r[k]["ou"] = pref_choice(ou)
+        if "o" not in r[k]:  r[k]["o"] = pref_choice("Smithproxy Software")
+        if "s" not in r[k]:  r[k]["s"] = pref_choice(s)
+        if "l" not in r[k]:  r[k]["l"] = pref_choice(l)
+        if "c" not in r[k]:  r[k]["c"] = pref_choice("CZ",c)
 
-    if "cn" not in r["ca"]:  r["ca"]["cn"] = "Smithproxy Root CA"
-    if "cn" not in r["srv"]:  r["srv"]["cn"] = "Smithproxy Server Certificate"
-    if "cn" not in r["clt"]:  r["clt"]["cn"] = "Smithproxy Client Certificate"
+    if "cn" not in r["ca"]:   r["ca"]["cn"]  = pref_choice(def_subj_ca, "Smithproxy Root CA")
+    if "cn" not in r["srv"]:  r["srv"]["cn"] = pref_choice(def_subj_srv, "Smithproxy Server Certificate")
+    if "cn" not in r["clt"]:  r["clt"]["cn"] = pref_choice(def_subj_clt, "Smithproxy Client Certificate")
     if "cn" not in r["prt"]:  r["prt"]["cn"] = "Smithproxy Portal Certificate"
 
 
@@ -124,7 +129,7 @@ def load_key(fnm, pwd=None):
 
 
 
-def generate_ec_key(curve):
+def generate_ec_key(curve=ec.SECP256R1):
     return ec.generate_private_key(curve=curve, backend=default_backend())
 
 
@@ -157,8 +162,12 @@ NameOIDMap = {
     "c": NameOID.COUNTRY_NAME
 }
 
-def construct_sn(profile, override={}):
+def construct_sn(profile, sn_override=None):
     snlist = []
+
+    override = sn_override
+    if not sn_override:
+        override = {}
 
     for subj_entry in ["cn", "ou", "o", "l", "s", "c"]:
         if  subj_entry in override and subj_entry in NameOIDMap:
@@ -170,7 +179,7 @@ def construct_sn(profile, override={}):
     return snlist
 
 
-def generate_csr(key, profile, sans_dns=None, sans_ip=None, isca=False, custom_subj={}):
+def generate_csr(key, profile, sans_dns=None, sans_ip=None, isca=False, custom_subj=None):
     global SETTINGS
 
     sn = x509.Name(construct_sn(profile, custom_subj))

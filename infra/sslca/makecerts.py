@@ -54,7 +54,7 @@ def should_generate_cert(certname):
 
         return False
     else:
-        print("    cert file '%s'not found"% (fnm_cert,))
+        print("    cert file '%s'not found" % (fnm_cert, ))
 
     return True
 
@@ -133,7 +133,7 @@ def generate_portal_cert(ca_key,ca_cert):
 
 
     prt_key = sxyca.generate_rsa_key(2048)
-    prt_csr = sxyca.generate_csr(prt_key, "prt",sans_dns=sans, sans_ip=ips, custom_subj = {"cn": portal_cn })
+    prt_csr = sxyca.generate_csr(prt_key, "prt", sans_dns=sans, sans_ip=ips, custom_subj = {"cn": portal_cn })
     prt_cert = sxyca.sign_csr(ca_key, prt_csr, "prt", valid=30, cacert=ca_cert)
 
     sxyca.save_key(prt_key, "portal-key.pem")
@@ -141,14 +141,26 @@ def generate_portal_cert(ca_key,ca_cert):
 
     return prt_key, prt_cert
 
+#
+# @type: 'rsa' or 'ec'
+# @key_size: size of RSA key (ignored for EC)
+# @returns: (key, cert) tuple
+#
+def generate_ca(type='rsa', key_size=2048, custom_subject=None):
+    print("== generating a new CA == ")
 
-def generate_ca():
-    # generate CA RSA key
-    ca_key = sxyca.generate_rsa_key(2048)
-    sxyca.save_key(ca_key, "ca-key.pem", None)
+    if type != 'ec':
+        # generate CA RSA key
+        ca_key = sxyca.generate_rsa_key(2048)
+        sxyca.save_key(ca_key, "ca-key.pem", None)
+    else:
+        # generate CA RSA key
+        ca_key = sxyca.generate_ec_key()
+        sxyca.save_key(ca_key, "ca-key.pem", None)
+
 
     # generate CA CSR for self-signing & self-sign
-    ca_csr = sxyca.generate_csr(ca_key, "ca", isca=True)
+    ca_csr = sxyca.generate_csr(ca_key, "ca", isca=True, custom_subj=custom_subject)
     ca_cert = sxyca.sign_csr(ca_key, ca_csr, "ca", valid=2 * 30, isca=True)
     sxyca.save_certificate(ca_cert, "ca-cert.pem")
 
@@ -169,6 +181,7 @@ def generate_server_cert(ca_key, ca_cert):
 
 def check_certificates(etc_dir):
 
+    print("== Checking installed certificates ==")
     sxyca.SETTINGS["path"] = etc_dir
 
 
@@ -190,7 +203,7 @@ def check_certificates(etc_dir):
 
 
     sxyca.SETTINGS["path"] = os.path.join(sxyca.SETTINGS["path"], "certs/", "default/")
-    sxyca._write_default_settings()
+    sxyca.init_settings(cn=None, c=None)
     sxyca.load_settings()
 
 
@@ -259,8 +272,14 @@ def check_certificates(etc_dir):
         gen_srv = True
         gen_prt = True
 
-        print("generating a new CA")
-        ca_key, ca_cert = generate_ca()
+
+        assy_type = 'rsa'
+        try:
+            if "type" in sxyca.SETTINGS["ca"]["settings"]:
+                assy_type = sxyca.SETTINGS["ca"]["settings"]["type"]
+        except KeyError:
+            pass
+        ca_key, ca_cert = generate_ca(type=assy_type)
 
     else:
         ca_key = sxyca.load_key(os.path.join(sxyca.SETTINGS["path"],"ca-key.pem"))
@@ -275,4 +294,4 @@ def check_certificates(etc_dir):
 
 
 if __name__ == "__main__":
-    check_certificates("/tmp/etc/smithproxy")
+    check_certificates("/etc/smithproxy")
