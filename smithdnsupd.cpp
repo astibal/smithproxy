@@ -90,7 +90,7 @@ std::pair<DNS_Response*,int>  recv_dns_response(int send_socket, unsigned int ti
     int l = 0;
 
     if(send_socket <= 0) {
-        return std::pair<DNS_Response*,int>(nullptr,-1);
+        return {nullptr,-1};
     }
 
     int rv = 1;
@@ -146,7 +146,7 @@ std::pair<DNS_Response*,int>  recv_dns_response(int send_socket, unsigned int ti
         ::close(send_socket);
     }
 
-    return std::pair<DNS_Response*,int>(ret,l);
+    return {ret,l};
 }
 
 DNS_Response* resolve_dns_s (std::string hostname, DNS_Record_Type t, std::string nameserver, unsigned int timeout_s) {
