@@ -52,7 +52,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
-
+from cryptography.x509.oid import AuthorityInformationAccessOID
 SETTINGS = {
     "ca": {},
     "srv": {},
@@ -185,7 +185,7 @@ def generate_csr(key, profile, sans_dns=None, sans_ip=None, isca=False):
     return csr
 
 
-def sign_csr(key, csr, caprofile, valid=30, isca=False, cacert=None):
+def sign_csr(key, csr, caprofile, valid=30, isca=False, cacert=None, aia_issuers=None,ocsp_responders=None):
     global SETTINGS
 
     one_day = datetime.timedelta(1, 0, 0)
@@ -218,6 +218,22 @@ def sign_csr(key, csr, caprofile, valid=30, isca=False, cacert=None):
         builder = builder.add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(key.public_key()),
                                         critical=False)
 
+
+    all_aias = []
+    if aia_issuers:
+        for loc in aia_issuers:
+            aia_uri = x509.AccessDescription(AuthorityInformationAccessOID.CA_ISSUERS,x509.UniformResourceIdentifier(loc))
+            all_aias.append(aia_uri)
+
+    if ocsp_responders:
+        for resp in ocsp_responders:
+            aia_uri = x509.AccessDescription(AuthorityInformationAccessOID.OCSP,x509.UniformResourceIdentifier(resp))
+            all_aias.append(aia_uri)
+
+    if all_aias:
+        alist = x509.AuthorityInformationAccess(all_aias)
+        builder = builder.add_extension(alist,critical=False)
+
     print("sign CSR: == extensions ==")
     for e in csr.extensions:
         if isinstance(e.value, x509.BasicConstraints):
@@ -228,7 +244,7 @@ def sign_csr(key, csr, caprofile, valid=30, isca=False, cacert=None):
 
                 if isca and not SETTINGS["ca"]["grant_ca"]:
                     print("           not allowed but overridden")
-                if not SETTINGS["ca"]["grant_ca"]:
+                elif not SETTINGS["ca"]["grant_ca"]:
                     print("           not allowed by rule")
                     continue
                 else:
@@ -250,30 +266,4 @@ def save_certificate(cert, certfile):
         print("save_certificate: exception caught: " + str(e))
 
 
-if __name__ == "__main__":
-    _write_default_settings()
-    load_settings()
 
-    # generate CA RSA key
-    ca_key = generate_rsa_key(2048)
-    save_key(ca_key, "ca-key.pem", None)
-
-    # generate CA CSR for self-signing & self-sign
-    ca_csr = generate_csr(ca_key, "ca", isca=True)
-    ca_cert = sign_csr(ca_key, ca_csr, "ca", valid=3 * 30, isca=True)
-    save_certificate(ca_cert, "ca-cert.pem")
-
-    # generate default server key and certificate & sign by CA
-    srv_key = generate_rsa_key(2048)
-    srv_csr = generate_csr(srv_key, "srv", sans_dns=["portal.demo.smithproxy.net", ])
-    srv_cert = sign_csr(ca_key, srv_csr, "ca", valid=30, cacert=ca_cert)
-    save_certificate(srv_cert, "srv-cert.pem")
-
-    # Experimental: generate EC CA key
-    ec_ca_key = generate_ec_key(ec.SECP256K1())
-    save_key(ec_ca_key, "ec-ca-key.pem", None)
-
-    # self-sign
-    ec_ca_csr = generate_csr(ec_ca_key, "ca", isca=True)
-    ec_ca_cert = sign_csr(ec_ca_key, ec_ca_csr, "ca", valid=6 * 30, isca=True)
-    save_certificate(ec_ca_cert, "ec-ca-cert.pem")
