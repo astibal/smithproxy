@@ -40,7 +40,18 @@
 #ifndef _SMITHDNSUPD_HPP_
 #define _SMITHDNSUPD_HPP_
 
-DNS_Response* send_dns_request(std::string hostname, DNS_Record_Type t, std::string nameserver);
+// send DNS request out to network. Return socket FD, or non-positive on error.
+// you want to call this for async request
+int send_dns_request (std::string hostname, DNS_Record_Type t, std::string nameserver);
+
+// @returns: response and return from receive - well. I don't like it this way either,
+// but we can't actually return nullptr, since it could be legit return value on non-blocking socket
+// you want to call this for async receive - ideally if socket is in readset.
+std::pair<DNS_Response*,int> recv_dns_response(int send_socket, unsigned int timeout_sec=2);
+
+
+// this is easiest way to resolve. Just do the thing, with blocking ... and waiting.
+DNS_Response* resolve_dns_s (std::string hostname, DNS_Record_Type t, std::string nameserver, unsigned int timeout_s=2);
 std::thread* create_dns_updater();
 
 #endif
