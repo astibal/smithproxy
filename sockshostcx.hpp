@@ -70,7 +70,7 @@ public:
     virtual baseCom* replicate() { return new socksSSLMitmCom(); };
 };
 
-class socksServerCX : public baseHostCX {
+class socksServerCX : public baseHostCX, public epoll_handler {
 public:
     socksServerCX(baseCom* c, unsigned int s);  
     virtual ~socksServerCX();
@@ -94,7 +94,10 @@ public:
     MitmHostCX* left = nullptr;
     MitmHostCX* right = nullptr;
     bool handoff_as_ssl = false;
-    
+
+
+    void handle_event (baseCom *com) override;
+
 private:
     unsigned char version;
     socks5_atype req_atype;

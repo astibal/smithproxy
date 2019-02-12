@@ -205,7 +205,7 @@ int socksServerCX::process_socks_request() {
                     if(cfgapi_obj_nameservers.size()) {
                         nameserver = cfgapi_obj_nameservers.at(0);
                     }
-                    DNS_Response* resp = send_dns_request(fqdn,A,nameserver);
+                    DNS_Response* resp = resolve_dns_s(fqdn, A, nameserver);
                     bool del_resp = true;
                     
                     if(resp) {
@@ -463,3 +463,8 @@ void socksServerCX::pre_write() {
         }
     }
 }
+
+void socksServerCX::handle_event (baseCom *com) {
+
+}
+
