@@ -121,7 +121,7 @@ DNS_Response* send_dns_request(std::string hostname, DNS_Record_Type t, std::str
         }
         
     } else {
-        DIAS_("timeout, or an error occured.");
+        DIAS_("timeout, or an error occurred.");
     }
     
     
