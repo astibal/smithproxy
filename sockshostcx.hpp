@@ -104,6 +104,17 @@ private:
     in_addr req_addr;
     std::string req_str_addr;
     unsigned short req_port;
+
+    bool process_dns_response(DNS_Response* resp);
+    bool choose_server_ip(std::vector<std::string>& target_ips);
+
+    bool async_dns = false;
+    int async_dns_socket = 0;
+
+private:
+    // implement advanced logging
+    DECLARE_C_NAME("sockHostCX");
+    DECLARE_LOGGING(c_name);
 };
 
 #endif //_SOCKS5HOST_HPP_
