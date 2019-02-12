@@ -57,6 +57,7 @@ SETTINGS = {
     "ca": {},
     "srv": {},
     "clt": {},
+    "prt": {},
     "path": "/tmp/"
 }
 
@@ -69,21 +70,27 @@ def _write_default_settings():
 
     r = SETTINGS
 
-    if "cn" not in r["ca"]:  r["ca"]["cn"] = "Smithproxy Root CA"
-    if "ou" not in r["ca"]:  r["ca"]["ou"] = None
-    if "o" not in r["ca"]:   r["ca"]["o"] = "Smithproxy Software"
-    if "s" not in r["ca"]:   r["ca"]["s"] = None
-    if "l" not in r["ca"]:   r["ca"]["l"] = None
-    if "c" not in r["ca"]:   r["ca"]["c"] = "CZ"
-    if "grant_ca" not in r["ca"]:
-                             r["ca"]["grant_ca"] = False
+    for k in ["ca", "srv", "clt", "prt"]:
+        if k not in r:
+            r[k] = {}
 
-    if "cn" not in r["srv"]: r["srv"]["cn"] = "Smithproxy Default Server Certificate"
-    if "ou" not in r["srv"]: r["srv"]["ou"] = None
-    if "o" not in r["srv"]:  r["srv"]["o"] = "Smithproxy Software"
-    if "s" not in r["srv"]:  r["srv"]["s"] = None
-    if "l" not in r["srv"]:  r["srv"]["l"] = None
-    if "c" not in r["srv"]:  r["srv"]["c"] = "CZ"
+    for k in ["ca", "srv", "clt", "prt"]:
+        if "ou" not in r[k]: r[k]["ou"] = None
+        if "o" not in r[k]:  r[k]["o"] = "Smithproxy Software"
+        if "s" not in r[k]:  r[k]["s"] = None
+        if "l" not in r[k]:  r[k]["l"] = None
+        if "c" not in r[k]:  r[k]["c"] = "CZ"
+
+    if "cn" not in r["ca"]:  r["ca"]["cn"] = "Smithproxy Root CA"
+    if "cn" not in r["srv"]:  r["srv"]["cn"] = "Smithproxy Server Certificate"
+    if "cn" not in r["clt"]:  r["clt"]["cn"] = "Smithproxy Client Certificate"
+    if "cn" not in r["prt"]:  r["prt"]["cn"] = "Smithproxy Portal Certificate"
+
+
+    if "settings" not in r["ca"]: r["ca"]["settings"] = {
+        "grant_ca": "false"
+    }
+
 
     # print("config to be written: %s" % (r,))
 
@@ -111,12 +118,19 @@ def load_settings():
 def generate_rsa_key(size):
     return rsa.generate_private_key(public_exponent=65537, key_size=size, backend=default_backend())
 
+def load_key(fnm, pwd=None):
+    with open(fnm, "rb") as key_file:
+        return serialization.load_pem_private_key(key_file.read(),password=pwd, backend=default_backend())
+
+
 
 def generate_ec_key(curve):
     return ec.generate_private_key(curve=curve, backend=default_backend())
 
 
-def save_key(key, keyfile, passphrase):
+def save_key(key, keyfile, passphrase=None):
+
+    #inner function
     def choose_enc(pwd):
         if not pwd:
             return serialization.NoEncryption()
@@ -134,29 +148,32 @@ def save_key(key, keyfile, passphrase):
         print("save_key: exception caught: " + str(e))
 
 
-def construct_sn(profile):
+NameOIDMap = {
+    "cn": NameOID.COMMON_NAME,
+    "ou": NameOID.ORGANIZATIONAL_UNIT_NAME,
+    "o": NameOID.ORGANIZATION_NAME,
+    "l": NameOID.LOCALITY_NAME,
+    "s": NameOID.STATE_OR_PROVINCE_NAME,
+    "c": NameOID.COUNTRY_NAME
+}
+
+def construct_sn(profile, override={}):
     snlist = []
 
-    if "cn" in SETTINGS[profile] and SETTINGS[profile]["cn"]:
-        snlist.append(x509.NameAttribute(NameOID.COMMON_NAME, SETTINGS[profile]["cn"]))
-    if "ou" in SETTINGS[profile] and SETTINGS[profile]["ou"]:
-        snlist.append(x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, SETTINGS[profile]["ou"]))
-    if "o" in SETTINGS[profile] and SETTINGS[profile]["o"]:
-        snlist.append(x509.NameAttribute(NameOID.ORGANIZATION_NAME, SETTINGS[profile]["o"]))
-    if "l" in SETTINGS[profile] and SETTINGS[profile]["l"]:
-        snlist.append(x509.NameAttribute(NameOID.LOCALITY_NAME, SETTINGS[profile]["l"]))
-    if "s" in SETTINGS[profile] and SETTINGS[profile]["s"]:
-        snlist.append(x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, SETTINGS[profile]["s"]))
-    if "c" in SETTINGS[profile] and SETTINGS[profile]["c"]:
-        snlist.append(x509.NameAttribute(NameOID.COUNTRY_NAME, SETTINGS[profile]["c"]))
+    for subj_entry in ["cn", "ou", "o", "l", "s", "c"]:
+        if  subj_entry in override and subj_entry in NameOIDMap:
+            snlist.append(x509.NameAttribute(NameOIDMap[subj_entry], override[subj_entry]))
+
+        elif subj_entry in SETTINGS[profile] and SETTINGS[profile][subj_entry] and subj_entry in NameOIDMap:
+            snlist.append(x509.NameAttribute(NameOIDMap[subj_entry], SETTINGS[profile][subj_entry]))
 
     return snlist
 
 
-def generate_csr(key, profile, sans_dns=None, sans_ip=None, isca=False):
+def generate_csr(key, profile, sans_dns=None, sans_ip=None, isca=False, custom_subj={}):
     global SETTINGS
 
-    sn = x509.Name(construct_sn(profile))
+    sn = x509.Name(construct_sn(profile, custom_subj))
 
     sans_list = []
 
@@ -166,8 +183,9 @@ def generate_csr(key, profile, sans_dns=None, sans_ip=None, isca=False):
 
     if sans_ip:
         for i in sans_ip:
-            ii = ipaddress.IPv4Address(i)
+            ii = ipaddress.ip_address(i)
             sans_list.append(x509.IPAddress(ii))
+
 
     sans = x509.SubjectAlternativeName(sans_list)
 
@@ -192,9 +210,12 @@ def sign_csr(key, csr, caprofile, valid=30, isca=False, cacert=None, aia_issuers
 
     builder = x509.CertificateBuilder()
     builder = builder.subject_name(csr.subject)
-    builder = builder.issuer_name(
-        x509.Name(construct_sn(caprofile))
-    )
+
+    if not cacert:
+        builder = builder.issuer_name(x509.Name(construct_sn(caprofile)))
+    else:
+        builder = builder.issuer_name(cacert.subject)
+
     builder = builder.not_valid_before(datetime.datetime.today() - one_day)
     builder = builder.not_valid_after(datetime.datetime.today() + (one_day * valid))
     builder = builder.serial_number(x509.random_serial_number())
@@ -242,9 +263,9 @@ def sign_csr(key, csr, caprofile, valid=30, isca=False, cacert=None, aia_issuers
             if e.value.ca:
                 print("           CA=TRUE requested")
 
-                if isca and not SETTINGS["ca"]["grant_ca"]:
+                if isca and not SETTINGS["ca"]["settings"]["grant_ca"]:
                     print("           not allowed but overridden")
-                elif not SETTINGS["ca"]["grant_ca"]:
+                elif not SETTINGS["ca"]["settings"]["grant_ca"]:
                     print("           not allowed by rule")
                     continue
                 else:
@@ -265,5 +286,8 @@ def save_certificate(cert, certfile):
     except Exception as e:
         print("save_certificate: exception caught: " + str(e))
 
-
+def load_certificate(fnm):
+    with open(fnm,'r',encoding='utf-8') as f:
+        ff = f.read()
+        return x509.load_pem_x509_certificate(ff.encode('ascii'), backend=default_backend())
 
