@@ -284,6 +284,8 @@ int socksServerCX::process_socks_request() {
                             INF___("dns request sent: %s", fqdn.c_str());
                             com()->set_monitor(async_dns_socket);
                             com()->set_poll_handler(async_dns_socket,this);
+
+                            com()->set_idle_watch(async_dns_socket);
                         } else {
                             error(true);
                         }
@@ -526,6 +528,15 @@ void socksServerCX::pre_write() {
 void socksServerCX::handle_event (baseCom *xcom) {
     // we are handling only DNS, so this is easy
     if(async_dns_socket > 0) {
+
+
+        if(com()->in_idleset(async_dns_socket)) {
+            INF___("handle_event: idling dns socket %d, closing", async_dns_socket);
+            error(true);
+
+            return;
+        }
+
         // timeout is zero - we won't wait
         std::pair<DNS_Response *, int> rresp = recv_dns_response(async_dns_socket,0);
         DNS_Response* resp = rresp.first;

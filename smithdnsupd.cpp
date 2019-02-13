@@ -142,17 +142,17 @@ std::pair<DNS_Response*,int>  recv_dns_response(int send_socket, unsigned int ti
         DIAS_("synchronous mode: timeout, or an error occurred.");
     }
 
-    if(l < 0) {
-        ::close(send_socket);
-    }
-
     return {ret,l};
 }
 
 DNS_Response* resolve_dns_s (std::string hostname, DNS_Record_Type t, std::string nameserver, unsigned int timeout_s) {
 
     int send_socket = send_dns_request(hostname, t, nameserver);
-    return recv_dns_response(send_socket,timeout_s).first;
+    auto resp = recv_dns_response(send_socket,timeout_s);
+
+    ::close(send_socket);
+    return resp.first;
+
 }
 
 
