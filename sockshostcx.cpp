@@ -523,7 +523,7 @@ void socksServerCX::pre_write() {
     }
 }
 
-void socksServerCX::handle_event (baseCom *com) {
+void socksServerCX::handle_event (baseCom *xcom) {
     // we are handling only DNS, so this is easy
     if(async_dns_socket > 0) {
         // timeout is zero - we won't wait
@@ -532,15 +532,29 @@ void socksServerCX::handle_event (baseCom *com) {
         int red = rresp.second;
 
         if(red <= 0) {
-            INF___("socket event, but socket read returned %d",red);
+            INF___("handle_event: socket read returned %d",red);
             error(true);
             if(resp) {
                 // unlikely I will get result on error, but one never knows
                 delete resp;
             }
         } else {
-            auto target_ips = process_dns_response(resp);
+            INF___("handle_event: OK - socket read returned %d",red);
+            if(process_dns_response(resp)) {
+                INFS___("handle_event: OK, done");
+            } else {
+                ERRS___("handle_event: processing DNS response failed.");
+            }
         }
+
+
+        // at any rate, we got all we need. Unmonitor, unhandle and close socket
+        com()->unset_monitor(async_dns_socket);
+        com()->set_poll_handler(async_dns_socket,nullptr);
+
+        ::close(async_dns_socket);
+    } else {
+        WARS___("handle_event: should not be here. Socket %d, async enabled: %d", async_dns_socket, async_dns);
     }
 }
 

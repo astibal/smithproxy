@@ -139,7 +139,7 @@ std::pair<DNS_Response*,int>  recv_dns_response(int send_socket, unsigned int ti
         }
 
     } else {
-        DIAS_("timeout, or an error occurred.");
+        DIAS_("synchronous mode: timeout, or an error occurred.");
     }
 
     if(l < 0) {
