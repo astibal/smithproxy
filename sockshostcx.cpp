@@ -48,10 +48,16 @@
 std::string socksTCPCom::sockstcpcom_name_ = "sock5";
 std::string socksSSLMitmCom::sockssslmitmcom_name_ = "s5+ssl+insp";
 
+bool socksServerCX::global_async_dns = true;
+
 DEFINE_LOGGING(socksServerCX);
 
 socksServerCX::socksServerCX(baseCom* c, unsigned int s) : baseHostCX(c,s) {
     state_ = INIT;
+
+    // copy setting from global/static variable - don't allow to change async
+    // flag on the background during the object life
+    async_dns = global_async_dns;
 }
 
 socksServerCX::~socksServerCX() {

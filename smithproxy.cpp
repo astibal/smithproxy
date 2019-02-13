@@ -410,7 +410,13 @@ bool load_config(std::string& config_f, bool reload) {
 
         cfgapi.getRoot()["settings"].lookupValue("socks_port",cfg_socks_port);
         cfgapi.getRoot()["settings"].lookupValue("socks_workers",cfg_socks_workers);
-        
+
+        if(cfgapi.getRoot().exists("settings")) {
+            if(cfgapi.getRoot()["settings"].exists("socks")) {
+                cfgapi.getRoot()["settings"]["socks"].lookupValue("async_dns", socksServerCX::global_async_dns);
+            }
+        }
+
         cfgapi.getRoot()["settings"].lookupValue("log_level",cfgapi_table.logging.level.level_);
         
         cfgapi.getRoot()["settings"].lookupValue("syslog_server",cfg_syslog_server);
@@ -430,7 +436,9 @@ bool load_config(std::string& config_f, bool reload) {
         cfgapi.getRoot()["debug"].lookupValue("log_srclines_always",get_logger()->print_srcline_always());
         
         if(cfgapi.getRoot().exists("settings")) {
-            cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("magic_ip",cfgapi_tenant_magic_ip);
+            if(cfgapi.getRoot()["settings"].exists("auth_portal")) {
+                cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("magic_ip", cfgapi_tenant_magic_ip);
+            }
         }
         
         cfgapi.getRoot()["debug"]["log"].lookupValue("sslcom",SSLCom::log_level_ref().level_);

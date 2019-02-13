@@ -98,16 +98,19 @@ public:
 
     void handle_event (baseCom *com) override;
 
+public:
+    static bool global_async_dns;
+
 private:
     unsigned char version;
     socks5_atype req_atype;
     in_addr req_addr;
     std::string req_str_addr;
+
     unsigned short req_port;
-
     bool process_dns_response(DNS_Response* resp);
-    bool choose_server_ip(std::vector<std::string>& target_ips);
 
+    bool choose_server_ip(std::vector<std::string>& target_ips);
     bool async_dns = true;
     int async_dns_socket = 0;
 
