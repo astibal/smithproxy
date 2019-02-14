@@ -177,6 +177,17 @@ if(UNIX)
                     WORLD_READ WORLD_EXECUTE 
     )
 
+    file(GLOB sslca_makecerts "infra/sslca/makecerts.py")
+    install(DIRECTORY infra/sslca DESTINATION share/smithproxy/infra)
+    install(FILES ${sslca_makecerts} DESTINATION share/smithproxy/infra/sslca
+            PERMISSIONS
+            OWNER_READ OWNER_WRITE OWNER_EXECUTE
+            GROUP_READ GROUP_EXECUTE
+            WORLD_READ WORLD_EXECUTE
+            )
+
+    InstallSymlink(/usr/share/smithproxy/infra/sslca/makecerts.py /usr/bin/sx_regencerts)
+
     # portal installation
     install(DIRECTORY infra/portal DESTINATION share/smithproxy/www)
     
