@@ -7,7 +7,7 @@ Build-Depends: debhelper (>= 9)
 
 Package: smithproxy
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}, libstdc++6 (>= 4.9.0), libssl1.0.0 (>=1.0.0), libconfig++9v5, libcli1.9 (>=1.9.6), iptables, python, python-ldap, python-pylibconfig2, python-pyparsing, python-posix-ipc, python-soappy, python-m2crypto, iproute2, telnet
+Depends: ${shlibs:Depends}, ${misc:Depends}, libstdc++6 (>= 4.9.0), libssl1.0.0 (>=1.0.0), libconfig++9v5, libcli1.9 (>=1.9.6), iptables, python, python-ldap, python-pylibconfig2, python-pyparsing, python-posix-ipc, python-soappy, python-m2crypto, iproute2, telnet, python3, python3-cryptography, python3-pyroute2
 Description: Universal transparent and SOCKS5 proxy supporting TCP/UDP/SSL
  Use iptables TPROXY rules to divert traffic to smithproxy listening ports,
  control traffic with access-list, deep SSL inspection and content search
