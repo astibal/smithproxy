@@ -207,6 +207,26 @@ def generate_csr(key, profile, sans_dns=None, sans_ip=None, isca=False, custom_s
     builder = builder.add_extension(
         x509.BasicConstraints(ca=isca, path_length=None), critical=True)
 
+    if(isca):
+        builder = builder.add_extension(x509.KeyUsage(crl_sign=True, key_cert_sign=True,
+                                                      digital_signature=False, content_commitment=False,
+                                                      key_encipherment=False, data_encipherment=False,
+                                                      key_agreement=False, encipher_only=False,
+                                                      decipher_only=False),
+                                                      critical=True)
+
+    else:
+        builder = builder.add_extension(x509.KeyUsage(crl_sign=False, key_cert_sign=False,
+                                                      digital_signature=True, content_commitment=False,
+                                                      key_encipherment=True, data_encipherment=False,
+                                                      key_agreement=False, encipher_only=False,
+                                                      decipher_only=False),
+                                                      critical=True)
+        ex = []
+        ex.append(x509.oid.ExtendedKeyUsageOID.SERVER_AUTH)
+        ex.append(x509.oid.ExtendedKeyUsageOID.CLIENT_AUTH)
+        builder = builder.add_extension(x509.ExtendedKeyUsage(ex),critical=False)
+
     csr = builder.sign(key, hashes.SHA256(), default_backend())
 
     return csr
@@ -227,7 +247,8 @@ def sign_csr(key, csr, caprofile, valid=30, isca=False, cacert=None, aia_issuers
 
     builder = builder.not_valid_before(datetime.datetime.today() - one_day)
     builder = builder.not_valid_after(datetime.datetime.today() + (one_day * valid))
-    builder = builder.serial_number(x509.random_serial_number())
+    #builder = builder.serial_number(x509.random_serial_number()) # too new to some systems
+    builder = builder.serial_number(int.from_bytes(os.urandom(20), byteorder="big"))
     builder = builder.public_key(csr.public_key())
 
     builder = builder.add_extension(x509.SubjectKeyIdentifier.from_public_key(csr.public_key()), critical=False)
@@ -241,6 +262,10 @@ def sign_csr(key, csr, caprofile, valid=30, isca=False, cacert=None, aia_issuers
             builder = builder.add_extension(x509.AuthorityKeyIdentifier.from_issuer_subject_key_identifier(ski),
                                             critical=False)
             has_ski = True
+    except AttributeError:
+        # this is workaround for older versions of python cryptography, not having from_issuer_subject_key_identifier
+        # -> which throws AttributeError
+        has_ski = False
     except x509.extensions.ExtensionNotFound:
         has_ski = False
 

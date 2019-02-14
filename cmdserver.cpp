@@ -671,6 +671,13 @@ int cli_diag_ssl_memcheck_disable(struct cli_def *cli, const char *command, char
     return CLI_OK;
 }
 
+int cli_diag_ssl_ca_reload(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    cli_print(cli,"Not yet implemented");
+
+    return CLI_OK;
+}
+
 
 int cli_diag_dns_cache_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
     inspect_dns_cache.lock();
@@ -1382,7 +1389,8 @@ void client_thread(int client_socket) {
                 struct cli_command *diag_ssl_verify;
                 struct cli_command *diag_ssl_ticket;
                 struct cli_command *diag_ssl_memcheck;
-            struct cli_command *diag_mem;
+                struct cli_command *diag_ssl_ca;
+    struct cli_command *diag_mem;
                 struct cli_command *diag_mem_buffers;
                 struct cli_command *diag_mem_objects;
             struct cli_command *diag_dns;
@@ -1441,6 +1449,9 @@ void client_thread(int client_socket) {
                 diag_ssl_ticket = cli_register_command(cli, diag_ssl, "ticket", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose abbreviated handshake session/ticket cache");
                         cli_register_command(cli, diag_ssl_ticket, "list", cli_diag_ssl_ticket_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list abbreviated handshake session/ticket cache");
                         cli_register_command(cli, diag_ssl_ticket, "stats", cli_diag_ssl_ticket_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "abbreviated handshake session/ticket cache stats");
+                diag_ssl_ca     = cli_register_command(cli, diag_ssl, "ca", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose SSL signing CA");
+                        cli_register_command(cli, diag_ssl_ca, "reload", cli_diag_ssl_ca_reload, PRIVILEGE_PRIVILEGED, MODE_EXEC, "reload signing CA key and certificate");
+
                         
 
             if(cfg_openssl_mem_dbg) {
