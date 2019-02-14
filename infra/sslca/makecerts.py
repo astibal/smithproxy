@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 from __future__ import print_function
 
 
@@ -294,4 +296,7 @@ def check_certificates(etc_dir):
 
 
 if __name__ == "__main__":
+    import sys
+    sys.path.append('/usr/share/smithproxy/infra/sslca')
+
     check_certificates("/etc/smithproxy")
