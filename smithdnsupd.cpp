@@ -110,7 +110,7 @@ std::pair<DNS_Response*,int>  recv_dns_response(int send_socket, unsigned int ti
     if(rv == 1) {
         buffer r(1500);
         l = ::recv(send_socket,r.data(),r.capacity(), timeout_sec > 0 ? 0 : MSG_DONTWAIT);
-        DEB_("recv_dns_response(%d,%ud): recv() returned %d",send_socket, timeout_sec, l);
+        DEB_("recv_dns_response(%d,%d): recv() returned %d",send_socket, timeout_sec, l);
 
         if(l > 0) {
             int parsed = -1;

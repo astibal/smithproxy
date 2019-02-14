@@ -64,6 +64,7 @@ socksServerCX::~socksServerCX() {
 
     if(left)  { delete left; }
     if(right) { delete right; }
+    if(async_dns_socket) { ::close(async_dns_socket); }
 }
 
 
@@ -287,12 +288,13 @@ int socksServerCX::process_socks_request() {
                     } else {
                         async_dns_socket = send_dns_request(fqdn, A, nameserver);
                         if(async_dns_socket) {
-                            INF___("dns request sent: %s", fqdn.c_str());
+                            DIA___("dns request sent: %s", fqdn.c_str());
                             com()->set_monitor(async_dns_socket);
                             com()->set_poll_handler(async_dns_socket,this);
 
                             com()->set_idle_watch(async_dns_socket);
                         } else {
+                            ERR___("failed to send dns request: %s", fqdn.c_str());
                             error(true);
                         }
                     }
@@ -570,8 +572,12 @@ void socksServerCX::handle_event (baseCom *xcom) {
         com()->set_poll_handler(async_dns_socket,nullptr);
 
         ::close(async_dns_socket);
+        async_dns_socket = 0;
     } else {
         WARS___("handle_event: should not be here. Socket %d, async enabled: %d", async_dns_socket, async_dns);
     }
+
+    //provoke proxy to act.
+    com()->set_write_monitor(socket());
 }
 
