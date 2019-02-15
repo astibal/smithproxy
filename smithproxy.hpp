@@ -37,7 +37,7 @@
     which carries forward this exception.
 */    
 
-#define SMITH_VERSION "0.8.4"
+#define SMITH_VERSION "0.8.5"
 #define SMITH_DEVEL    0
 
 
