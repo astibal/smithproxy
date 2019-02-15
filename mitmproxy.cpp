@@ -67,8 +67,9 @@ socle::meter MitmProxy::total_mtr_down;
 ptr_cache<std::string,whitelist_verify_entry_t> MitmProxy::whitelist_verify("whitelist - verify",500,true,whitelist_verify_entry_t::is_expired);
 
 MitmProxy::MitmProxy(baseCom* c): baseProxy(c), sobject() {
-    
-    add_filter("test",new TestFilter(this,5));
+
+    // FIXME: testing filter - get back to it later!
+    //add_filter("test",new TestFilter(this,5));
 
 }
 
