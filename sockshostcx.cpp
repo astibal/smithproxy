@@ -186,6 +186,12 @@ int socksServerCX::process_socks_request() {
     }
     
     DIAS_("socksServerCX::process_socks_request");
+
+    if(state_ == DNS_QUERY_SENT) {
+        DIAS_("socksServerCX::process_socks_request: triggered when waiting for DNS response");
+        return 0;
+    }
+
     DEB_("Request dump:\n%s",hex_dump(readbuf()->data(),readbuf()->size()).c_str());
     
               version = readbuf()->get_at<unsigned char>(0);
@@ -293,6 +299,9 @@ int socksServerCX::process_socks_request() {
                             com()->set_poll_handler(async_dns_socket,this);
 
                             com()->set_idle_watch(async_dns_socket);
+                            com()->unset_monitor(socket());
+
+                            state_ = DNS_QUERY_SENT;
                         } else {
                             ERR___("failed to send dns request: %s", fqdn.c_str());
                             error(true);
@@ -549,6 +558,7 @@ void socksServerCX::handle_event (baseCom *xcom) {
         std::pair<DNS_Response *, int> rresp = recv_dns_response(async_dns_socket,0);
         DNS_Response* resp = rresp.first;
         int red = rresp.second;
+        state_ = DNS_RESP_RECV;
 
         if(red <= 0) {
             INF___("handle_event: socket read returned %d",red);
@@ -577,7 +587,9 @@ void socksServerCX::handle_event (baseCom *xcom) {
         WARS___("handle_event: should not be here. Socket %d, async enabled: %d", async_dns_socket, async_dns);
     }
 
+
     //provoke proxy to act.
+    com()->set_monitor(socket());
     com()->set_write_monitor(socket());
 }
 
