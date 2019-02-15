@@ -327,7 +327,7 @@ if __name__ == "__main__":
         
     flog = create_logger("dog",SMITHDOG_LOGFILE % (TENANT_NAME,))
         
-    daemon = SmithProxyDog(0.5)
+    daemon = SmithProxyDog(1)
     daemon.keeppid = True
 
     smithproxy_options = []
