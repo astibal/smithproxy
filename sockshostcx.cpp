@@ -192,7 +192,7 @@ int socksServerCX::process_socks_request() {
         return 0;
     }
 
-    DEB_("Request dump:\n%s",hex_dump(readbuf()->data(),readbuf()->size()).c_str());
+    DUM_("Request dump:\n%s",hex_dump(readbuf()->data(),readbuf()->size()).c_str());
     
               version = readbuf()->get_at<unsigned char>(0);
     unsigned char cmd = readbuf()->get_at<unsigned char>(1);
@@ -494,7 +494,7 @@ int socksServerCX::process_socks_reply() {
         writebuf()->append(b,cur);
         state_ = REQRES_SENT;
         
-        DEB_("socksServerCX::process_socks_reply: response dump:\n%s",hex_dump(b,cur).c_str());
+        DUM_("socksServerCX::process_socks_reply: response dump:\n%s",hex_dump(b,cur).c_str());
 
         // response is about to be sent. In most cases client sends data on left,
         // but in case it's waiting ie. for banner, we must trigger proxy code to
