@@ -53,14 +53,15 @@ public:
     virtual void on_left_message(baseHostCX* cx);
     
     virtual void socks5_handoff(socksServerCX* cx);
+
+    time_t auth_table_refreshed = 0;
 };
 
 
 class MitmSocksProxy : public ThreadedAcceptorProxy<SocksProxy> {
 public:
-    
+
     MitmSocksProxy(baseCom* c, int worker_id) : ThreadedAcceptorProxy<SocksProxy>(c,worker_id) {};
-    
     virtual baseHostCX* new_cx(int s);
     virtual void on_left_new(baseHostCX* just_accepted_cx);
 };

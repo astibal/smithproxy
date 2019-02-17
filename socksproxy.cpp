@@ -69,7 +69,7 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
             if(matched_policy() >= 0) {
                 p = cfgapi_obj_policy.at(matched_policy());
             }
-            
+
             DIA_("socksProxy::on_left_message: policy check result: policy# %d policyid 0x%x verdict %s", matched_policy(), p, verdict ? "accept" : "reject" );
             
             cfgapi_write_lock.unlock();
@@ -191,7 +191,128 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
         // mark dead.
         INFS_("SocksProxy::socks5_handoff: session failed policy application");
         dead(true);
-    };
+    } else {
+
+        baseHostCX* src_cx = n_cx;
+        bool delete_proxy = false;
+        // apply policy and get result
+
+        std::string target_host = n_cx->com()->nonlocal_dst_host();
+        short unsigned int target_port = n_cx->com()->nonlocal_dst_port();
+
+        if (src_cx != nullptr) {
+
+            // resolve source information - is there an identity info for that IP?
+            if (opt_auth_authenticate || opt_auth_resolve) {
+
+                DIAS___("authentication required or optionally resolved");
+
+                // reload table and check timeouts each 5 seconds
+                time_t now = time(nullptr);
+                if (now > auth_table_refreshed + 5) {
+                    cfgapi_auth_shm_ip_table_refresh();
+                    cfgapi_auth_shm_ip6_table_refresh();
+                    auth_table_refreshed = now;
+
+                    //one day this can run in separate thread to not slow down session setup rate
+                    cfgapi_ip_auth_timeout_check();
+                    cfgapi_ip6_auth_timeout_check();
+                }
+
+                bool identity_resolved = resolve_identity(src_cx, false);
+
+
+                if (!identity_resolved) {
+                    // identity is unknown!
+
+                    if(opt_auth_authenticate) {
+                        if (target_port != 80 && target_port != 443) {
+                            delete_proxy = true;
+                            INF___("Connection %s closed: authorization failed (unknown identity)",
+                                   n_cx->c_name());
+                        }
+                    }
+                    else {
+                        DIA___("Connection %s: authentication info optional, continuing.",n_cx->c_name());
+                    }
+
+                } else if(opt_auth_authenticate) {
+
+
+                    bool bad_auth = true;
+
+                    // investigate L3 protocol
+                    int af = AF_INET;
+                    if (n_cx->com()) {
+                        af = n_cx->com()->l3_proto();
+                    }
+                    std::string str_af = inet_family_str(af);
+
+
+                    cfgapi_identity_ip_lock.lock();
+
+                    // use common base pointer, so we can use all IdentityInfo types
+                    IdentityInfoBase *id_ptr = nullptr;
+
+                    if (af == AF_INET || af == 0) {
+                        auto ip = auth_ip_map.find(n_cx->host());
+                        if (ip != auth_ip_map.end()) {
+                            id_ptr = &(*ip).second;
+                        }
+                    } else if (af == AF_INET6) {
+                        auto ip = auth_ip6_map.find(n_cx->host());
+                        if (ip != auth_ip6_map.end()) {
+                            id_ptr = &(*ip).second;
+                        }
+                    }
+
+                    if (id_ptr != nullptr) {
+                        //std::string groups = id_ptr->last_logon_info.groups();
+
+                        if (cfgapi_obj_policy_profile_auth(matched_policy()) != nullptr)
+                            for (auto i: cfgapi_obj_policy_profile_auth(matched_policy())->sub_policies) {
+                                for (auto x: id_ptr->groups_vec) {
+                                    DEB___("Connection identities: ip identity '%s' against policy '%s'", x.c_str(),
+                                           i->name.c_str());
+                                    if (x == i->name) {
+                                        DIA___("Connection identities: ip identity '%s' matches policy '%s'", x.c_str(),
+                                               i->name.c_str());
+                                        bad_auth = false;
+                                    }
+                                }
+                            }
+                        if (bad_auth) {
+                            if (target_port != 80 && target_port != 443) {
+                                INF___("Connection %s closed: authorization failed (non-matching identity criteria)",
+                                       n_cx->c_name());
+                            } else {
+                                INF___("Connection %s closed: authorization failed (non-matching identity criteria)(with replacement)",
+                                       n_cx->c_name());
+                                // set bad_auth true, because despite authentication failed, it could be replaced (we can let user know
+                                // he is not allowed to proceed
+                                bad_auth = false;
+                                auth_block_identity = true;
+                            }
+                        }
+                    }
+                    cfgapi_identity_ip_lock.unlock();
+
+                    if (bad_auth) {
+                        delete_proxy = true;
+                    }
+                }
+            } else {
+                DIA___("Connection %s: authentication info optional, continuing.",n_cx->c_name());
+            }
+        }
+
+
+        if(delete_proxy) {
+            DEB___("deleting proxy %s", c_name());
+            dead(true);
+        }
+    }
+
 
     DIAS_("SocksProxy::socks5_handoff: finished");
 }
@@ -210,16 +331,13 @@ baseHostCX* MitmSocksProxy::new_cx(int s) {
 void MitmSocksProxy::on_left_new(baseHostCX* just_accepted_cx) {
 
     SocksProxy* new_proxy = new SocksProxy(com()->slave());
-    
     // let's add this just_accepted_cx into new_proxy
     std::string h;
     std::string p;
     just_accepted_cx->name();
     just_accepted_cx->com()->resolve_socket_src(just_accepted_cx->socket(),&h,&p);
-    
+
     new_proxy->ladd(just_accepted_cx);
-    
     this->proxies().insert(new_proxy);
-    
     DEBS_("MitmMasterProxy::on_left_new: finished");
 }
