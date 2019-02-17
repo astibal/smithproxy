@@ -75,7 +75,7 @@ int cfgapi_auth_shm_ip_table_refresh()  {
     
     DEBS_("cfgapi_auth_shm_ip_table_refresh: acquring semaphore");
     int rc = auth_shm_ip_map.acquire();
-    DIAS_("cfgapi_auth_shm_ip_table_refresh: acquring semaphore: done");
+    DEBS_("cfgapi_auth_shm_ip_table_refresh: acquring semaphore: done");
     if(rc) {
         WARS_("cfgapi_auth_shm_ip_table_refresh: cannot acquire semaphore for token table");
         return -1;
@@ -83,7 +83,8 @@ int cfgapi_auth_shm_ip_table_refresh()  {
     
     DEBS_("cfgapi_auth_shm_ip_table_refresh: loading table");
     int l_ip = auth_shm_ip_map.load();
-    DIAS_("cfgapi_auth_shm_ip_table_refresh: loading table: done, releasing semaphore");
+    DIAS_("shared memory ip user table loaded");
+    DEBS_("cfgapi_auth_shm_ip_table_refresh: loading table: done, releasing semaphore");
     auth_shm_ip_map.release();
     DEBS_("cfgapi_auth_shm_ip_table_refresh: semaphore released");
     
@@ -135,7 +136,7 @@ int cfgapi_auth_shm_token_table_refresh()  {
 
     DEBS_("cfgapi_auth_shm_token_table_refresh: acquring semaphore");
     int rc = auth_shm_token_map.acquire();
-    DIAS_("cfgapi_auth_shm_token_table_refresh: acquring semaphore: done");
+    DEBS_("cfgapi_auth_shm_token_table_refresh: acquring semaphore: done");
     if(rc) {
         WARS_("cfgapi_auth_shm_token_table_refresh: cannot acquire semaphore for token table");
         return -1;
@@ -143,7 +144,8 @@ int cfgapi_auth_shm_token_table_refresh()  {
     
     DEBS_("cfgapi_auth_shm_token_table_refresh: loading table");
     int l_tok = auth_shm_token_map.load();
-    DIAS_("cfgapi_auth_shm_token_table_refresh: loading table: done, releasing semaphore");
+    DIAS_("shared memory auth tokem table loaded");
+    DEBS_("cfgapi_auth_shm_token_table_refresh: loading table: done, releasing semaphore");
     auth_shm_token_map.release();
     DEBS_("cfgapi_auth_shm_token_table_refresh: semaphore released");
 
@@ -203,14 +205,14 @@ void cfgapi_ip_auth_remove(std::string& host) {
     if (ip != auth_ip_map.end()) {
         // erase internal ip map entry
 
-        DIA_("cfgapi_ip_map_remove: auth ip map - removing: %s",host.c_str());
+        DEB_("cfgapi_ip_map_remove: auth ip map - removing: %s",host.c_str());
         auth_ip_map.erase(ip);
 
         // for debug only: print all shm table entries
-        if(LEV_(DEB)) {
-            DEBS_(":: - SHM AUTH IP map - before removal::");
+        if(LEV_(DUM)) {
+            DUMS_(":: - SHM AUTH IP map - before removal::");
             for(auto& x_it: auth_shm_ip_map.map_entries()) {
-                DEB_("::  %s::",x_it.first.c_str());
+                DUM_("::  %s::",x_it.first.c_str());
             }
         }
         
@@ -220,13 +222,13 @@ void cfgapi_ip_auth_remove(std::string& host) {
         auto sh_it = auth_shm_ip_map.map_entries().find(host);
 
         if(sh_it != auth_shm_ip_map.map_entries().end()) {
-            DIA_("cfgapi_ip_map_remove: shm auth ip table  - removing: %s",host.c_str());
+            DEB_("cfgapi_ip_map_remove: shm auth ip table  - removing: %s",host.c_str());
             auth_shm_ip_map.map_entries().erase(sh_it);
             
-            if(LEV_(DEB)) {
-                DEBS_(":: - SHM AUTH IP map - after removal::");
+            if(LEV_(DUM)) {
+                DUMS_(":: - SHM AUTH IP map - after removal::");
                 for(auto& x_it: auth_shm_ip_map.map_entries()) {
-                        DEB_("::   %s::",x_it.first.c_str());
+                        DUM_("::   %s::",x_it.first.c_str());
                 }                
                 
             }
@@ -239,7 +241,7 @@ void cfgapi_ip_auth_remove(std::string& host) {
 
 
 void cfgapi_ip_auth_timeout_check(void) {
-    DIAS_("cfgapi_ip_auth_timeout_check: started");
+    DEBS_("cfgapi_ip_auth_timeout_check: started");
     cfgapi_identity_ip_lock.lock();
     
     std::set<std::string> to_remove;
@@ -248,7 +250,7 @@ void cfgapi_ip_auth_timeout_check(void) {
         const std::string&  ip = e.first;
         IdentityInfo& id = e.second;
         
-        DIA_("cfgapi_ip_auth_timeout_check: %s", ip.c_str());
+        DEB_("cfgapi_ip_auth_timeout_check: %s", ip.c_str());
         if(id.i_timeout()) {
             DIA_("cfgapi_ip_auth_timeout_check: idle timeout, adding to list %s", ip.c_str());
             to_remove.insert(ip);
