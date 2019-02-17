@@ -197,7 +197,7 @@ class AuthManager:
             if a:
                 self.a1 = a
             f.close()
-        except IOError, e:
+        except IOError as e:
             flog.error("cannot open a1 file: " + str(e))
     
     def setup_logon_tables(self,mem_name,mem_size,sem_name):
@@ -706,9 +706,9 @@ class AuthManager:
                                 if self.authenticate_local_decrypt(self.user_db[username]['encrypted_password']) == password:
                                     return True
                         
-        except KeyError, e:
+        except KeyError as e:
             pass
-        except IndexError, e:
+        except IndexError as e:
             pass
 
         return False
@@ -849,7 +849,7 @@ def run_bend_once(tenant_name="default",tenant_index=0,clear_shm=True):
         a.load_config_groups(USER_CFG_FILE_STRUCT.groups.items())
         a.load_config_identities(USER_CFG_FILE_STRUCT.identities.items())
         
-    except Exception, e:
+    except Exception as e:
         exc_type, exc_value, exc_traceback = sys.exc_info()
         flog.error("Error loading config: %s" % (str(e),))
         flog.error("Error loading config: %s" % (repr(traceback.format_tb(exc_traceback)),))
@@ -863,7 +863,7 @@ def run_bend_once(tenant_name="default",tenant_index=0,clear_shm=True):
     
     try:
         a.serve_forever()
-    except KeyboardInterrupt, e:
+    except KeyboardInterrupt as e:
         print "Ctrl-C pressed. Wait to close shmem."
 
     a.cleanup()
