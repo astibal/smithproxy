@@ -64,24 +64,6 @@ from bendutil import *
 
 PY_MAJOR_VERSION = sys.version_info[0]
 
-global TENANT_NAME
-global TENANT_IDX
-global BEND_LOGFILE
-global BEND_KEYFILE
-global BEND_USERFILE
-global BEND_PORT
-global flog
-
-global BEND_KEYFILE_MTIME
-global BEND_USERFILE_MTIME
-
-global GLOBAL_CFG_FILE
-global USER_CFG_FILE
-global USER_CFG_FILE_STRUCT
-
-BEND_KEYFILE_MTIME = 0
-BEND_USERFILE_MTIME = 0
-
 
 def address_version(ip):
     try:
@@ -156,9 +138,192 @@ class AdminManager:
             del self.admin_tokens[token]
 
 
-class AuthManager:
+class AuthConfig(object):
 
-    def __init__(self, server_port):
+    formatter = logging.Formatter('%(asctime)s [%(process)d] [%(levelname)s] %(message)s')
+
+    def __init__(self, logger=None):
+
+        if not logger:
+            self.log = logging.getLogger()
+            self.log.setLevel(logging.INFO)
+
+            handler = logging.StreamHandler(sys.stdout)
+            handler.setLevel(logging.INFO)
+            handler.setFormatter(AuthConfig.formatter)
+            self.log.addHandler(handler)
+        else:
+            self.log = logger
+
+        self.a1 = None
+
+        self.log_file = "/var/log/smithproxy_bend.log"
+
+        self.key_file = None
+        self.user_file = None
+        self.user_cfg = None
+
+        self.sx_file = None
+        self.sx_cfg = None
+
+        self.tenant_name = "default"
+        self.tenant_index = 0
+        self.bend_port = 64000
+
+        self.user_file_mtime = 0
+        self.key_file_mtime = 0
+
+    @staticmethod
+    def create_logger(log_file=None, to_stdout=False):
+
+        log = logging.getLogger('bend')
+        log.handlers = []
+
+        if not log_file or to_stdout:
+            handler = logging.StreamHandler(sys.stdout)
+            handler.setLevel(logging.INFO)
+            handler.setFormatter(AuthConfig.formatter)
+
+        if log_file:
+            hdlr = logging.FileHandler(log_file)
+            hdlr.setFormatter(AuthConfig.formatter)
+            log.addHandler(hdlr)
+
+        log.setLevel(logging.INFO)
+
+        return log
+
+    def set_logger(self, log_file):
+        self.log = AuthConfig.create_logger(log_file)
+
+    def load_key(self):
+        try:
+            f = open(self.key_file, "r")
+            a = f.read()
+            if a:
+                self.a1 = a
+            f.close()
+        except IOError as e:
+            self.log.error("cannot open key file: " + str(e))
+
+    def authenticate_local_decrypt(self, ciphertext):
+        return mycrypto.xor_salted_decrypt(ciphertext, self.a1)
+
+    def authenticate_local_encrypt(self, plaintext):
+        return mycrypto.xor_encrypt(plaintext, self.a1)
+
+    def set_filenames(self, tenant_name=None):
+
+        self.sx_file = "/etc/smithproxy/smithproxy.cfg"
+        self.user_file = "/etc/smithproxy/users.cfg"
+        self.key_file = "/etc/smithproxy/users.key"
+        self.tenant_name = "default"
+
+        # check if there is specific tenant user.cfg
+        if tenant_name:
+
+            # USERS CFG
+            try:
+                self.tenant_name = tenant_name
+                tenant_user_file = "/etc/smithproxy/users." + tenant_name + ".cfg"
+                s = os.stat(tenant_user_file)
+                self.user_file = tenant_user_file
+
+                if self.log:
+                    self.log.info("Tenant user file: " + self.user_file)
+
+            except OSError:
+                if self.log:
+                    self.log.info("Tenant is using default user file: " + self.user_file)
+
+
+            # KEY CFG
+            try:
+                tenant_key_file = "/etc/smithproxy/users." + tenant_name + ".key"
+                s = os.stat(tenant_key_file)
+                self.key_file = tenant_key_file
+
+            except OSError:
+                self.log.info("Tenant is using default key file: " + self.key_file)
+
+
+            # SX CFG
+            try:
+                tenant_sx_file = "/etc/smithproxy/users." + tenant_name + ".key"
+                s = os.stat(tenant_sx_file)
+                self.sx_file = tenant_sx_file
+
+            except OSError:
+                self.log.info("Tenant is using default key file: " + self.key_file)
+
+        return self.key_file, self.user_file, self.sx_file
+
+    @staticmethod
+    def load_users_file(user_file):
+        u = cfg.Config()
+
+        flat_file = None
+        config_struct = None
+
+        with open(user_file, 'r') as myfile:
+            flat_file = myfile.read()
+
+        u.read_string(flat_file)
+        config_struct = u
+
+        return flat_file, config_struct
+
+    def load_users(self):
+
+        flat, c_struct = AuthConfig.load_users_file(self.user_file)
+        self.user_cfg = c_struct
+
+    @staticmethod
+    def load_sx_file(sx_file):
+
+        s = cfg.Config()
+        with open(sx_file, 'r') as myfile:
+            flat_file = myfile.read()
+        s.read_string(flat_file)
+
+        return flat_file, s
+
+    def load_sx(self):
+        flat, cfg = AuthConfig.load_sx_file(self.sx_file)
+
+        self.sx_cfg = cfg
+
+    def update_mtimes(self):
+        self.user_file_mtime = os.stat(self.user_file).st_mtime
+        self.key_file_mtime= os.stat(self.key_file).st_mtime
+
+    def prepare(self, tenant_name="default", tenant_index=0, clear_shm=True):
+
+        # set tenant information
+        self.tenant_name = tenant_name
+        self.tenant_index = tenant_index
+        self.log_file = "/var/log/smithproxy_bend.%s.log" % (tenant_name,)
+
+        # setup logger
+        self.set_logger(self.log_file)
+
+        # set listening port
+        self.bend_port = 64000 + int(tenant_index)
+
+        self.set_filenames(self.tenant_name)
+
+        self.load_key()
+        self.load_users()
+        self.load_sx()
+
+        self.update_mtimes()
+
+
+class AuthManager(AuthConfig):
+
+    def __init__(self):
+        super(AuthManager, self).__init__(None)
+
         self.logon_shm = None
         self.logon6_shm = None
         self.token_shm = None
@@ -166,7 +331,7 @@ class AuthManager:
         self.clear_shm = False
 
         self.global_token_referer = {}
-        self.server = SOAPpy.ThreadingSOAPServer(("localhost", server_port))
+        self.server = None
 
         self.portal_address = None
         self.portal_port = None
@@ -184,20 +349,14 @@ class AuthManager:
         self.address_identities = {}
         self.objects_identities = {}
 
-        self.a1 = None
+        self.admin_manager = AdminManager(self.log)
 
-        self.admin_manager = AdminManager(flog)
+    def prepare(self, tenant_name="default", tenant_index=0, clear_shm=True):
+        super(AuthManager, self).prepare(tenant_name, tenant_index, clear_shm)
 
-    def load_a1(self):
+        self.server = SOAPpy.ThreadingSOAPServer(("localhost", self.bend_port))
 
-        try:
-            f = open(BEND_KEYFILE, "r")
-            a = f.read()
-            if a:
-                self.a1 = a
-            f.close()
-        except IOError as e:
-            flog.error("cannot open a1 file: " + str(e))
+
 
     def setup_logon_tables(self, mem_name, mem_size, sem_name):
 
@@ -239,25 +398,25 @@ class AuthManager:
 
     def token_data(self, token):
 
-        flog.debug("token_data: start, acquiring semaphore")
+        self.log.debug("token_data: start, acquiring semaphore")
 
         self.token_shm.acquire()
-        flog.debug("token_data: start, semaphore acquired, loading..")
+        self.log.debug("token_data: start, semaphore acquired, loading..")
         self.token_shm.load()
-        flog.debug("token_data: start, token  table loaded")
+        self.log.debug("token_data: start, token  table loaded")
         self.token_shm.release()
-        flog.debug("token_data: start, semaphore released")
+        self.log.debug("token_data: start, semaphore released")
 
         # print(str(self.token_shm.tokens.keys()))
 
         # some pretty-printing
         if token in self.token_shm.tokens.keys():
             if token in self.token_shm.used_tokens:
-                flog.warning("token " + token + " already used")
+                self.log.warning("token " + token + " already used")
             else:
-                flog.debug("token " + token + " found")
+                self.log.debug("token " + token + " found")
         else:
-            flog.debug("token " + token + " not found ...")
+            self.log.debug("token " + token + " not found ...")
 
         # say farewell
         if token in self.token_shm.used_tokens:
@@ -286,7 +445,7 @@ class AuthManager:
     def refresh(self):
         now = time.time()
         if now > self.last_refresh + 5:
-            flog.debug("refreshing logon list")
+            self.log.debug("refreshing logon list")
             self.logon_shm.acquire()
             self.logon_shm.load()  # load new data!
             self.logon_shm.release()
@@ -303,13 +462,13 @@ class AuthManager:
 
         if ip in self.logon_shm.logons.keys():
             ret = self.logon_shm.logons[ip]
-            flog.debug("whois request for IP %s: %s " % (ip, str(ret)))
+            self.log.debug("whois request for IP %s: %s " % (ip, str(ret)))
             return ret
 
         return []
 
     def deauthenticate(self, ip):
-        flog.info("deauthenticate request for IP %s " % (ip,))
+        self.log.info("deauthenticate request for IP %s " % (ip,))
         self.logon_shm.acquire()
         self.logon_shm.load()  # load new data!
         self.logon_shm.rem(ip)
@@ -323,18 +482,18 @@ class AuthManager:
         ret = 0
 
         for i in identities:
-            flog.info("authenticate_check: matching against identity %s " % (i,))
+            self.log.info("authenticate_check: matching against identity %s " % (i,))
             if i in self.identities_db.keys():
                 ii = self.identities_db[i]
 
                 for g in ii["groups"]:
-                    flog.debug("authenticate_check: checking group %s" % (g,))
+                    self.log.debug("authenticate_check: checking group %s" % (g,))
 
                     exploded_members = unique_list(self.recursive_group_members(g))
-                    flog.debug("authenticate_check: full member list of %s: %s" % (g, str(exploded_members)))
+                    self.log.debug("authenticate_check: full member list of %s: %s" % (g, str(exploded_members)))
 
                     for m in exploded_members:
-                        flog.debug("authenticate_check: investigating member target %s" % (m,))
+                        self.log.debug("authenticate_check: investigating member target %s" % (m,))
 
                         source = ''
                         user = ''
@@ -344,7 +503,7 @@ class AuthManager:
                         if m.find(':') >= 0:
                             is_user = True
 
-                        flog.debug("authenticate_check: investigating member target %s: user" % (m,))
+                        self.log.debug("authenticate_check: investigating member target %s: user" % (m,))
 
                         if is_user:
                             pairlet = m.split(":")
@@ -357,10 +516,10 @@ class AuthManager:
                             group = pairlet[1]
 
                         if is_user and user != username:
-                            flog.debug("authenticate_check: investigating member target %s: user doesn't match" % (m,))
+                            self.log.debug("authenticate_check: investigating member target %s: user doesn't match" % (m,))
                             continue
                         else:
-                            flog.debug("authenticate_check: investigating member target %s: user matches" % (m,))
+                            self.log.debug("authenticate_check: investigating member target %s: user matches" % (m,))
 
                             cur_ret = 0
 
@@ -372,25 +531,25 @@ class AuthManager:
                                 ret += cur_ret
 
                             if cur_ret > 0:
-                                flog.info(
+                                self.log.info(
                                     "authenticate_check: user %s authenticated in element %s in %s" % (username, m, i))
                                 # ret += 1
                                 if i not in self.address_identities[ip]:
                                     self.address_identities[ip].append(i)
 
-                                flog.debug(
+                                self.log.debug(
                                     "authenticate_check: checking member target %s: looking for other identities" % (
                                     m,))
                                 if m in self.objects_identities.keys():
                                     for alt_identity in self.objects_identities[m]:
                                         if alt_identity not in self.address_identities[ip]:
-                                            flog.debug(
+                                            self.log.debug(
                                                 "authenticate_check: checking member target %s: alt. identity: %s" % (
                                                 m, alt_identity))
                                             self.address_identities[ip].append(alt_identity)
                                             ret += 1
                             else:
-                                flog.debug(
+                                self.log.debug(
                                     "authenticate_check: investigating member target %s: authentication failed!" % (m,))
 
         if ret > 0:
@@ -398,7 +557,7 @@ class AuthManager:
 
         # this is just for debug purposes.
         # if self.authenticate_check_local(ip,username,password,identities):
-        #    flog.info("authenticate_check: user " + username + " local auth successful from " + ip + " -- fallback authentication")
+        #    self.log.info("authenticate_check: user " + username + " local auth successful from " + ip + " -- fallback authentication")
         #    self.address_identities[ip] = []
         #    return 1
 
@@ -408,10 +567,10 @@ class AuthManager:
 
     def authenticate(self, ip, username, password, token):
 
-        flog.info("authenticate: request: user %s from %s - token %s" % (username, ip, str(token)))
+        self.log.info("authenticate: request: user %s from %s - token %s" % (username, ip, str(token)))
 
         ip_version = address_version(ip)
-        flog.debug("ip version: %d" % ip_version)
+        self.log.debug("ip version: %d" % ip_version)
 
         ip_shm_table = None
 
@@ -431,23 +590,23 @@ class AuthManager:
 
         if token in self.token_shm.tokens.keys():
             res = self.token_shm.tokens[token]
-            flog.debug("authenticate: token data: " + str(res))
+            self.log.debug("authenticate: token data: " + str(res))
 
             token_data = res.split(" |")
             if len(token_data) > 1:
                 identities = token_data[1:]
-                flog.debug("authenticate: token specific identities: " + str(identities))
+                self.log.debug("authenticate: token specific identities: " + str(identities))
 
         else:
-            flog.warning("authenticate: token data not received")
+            self.log.warning("authenticate: token data not received")
 
-        flog.info("authenticate: request for user %s from %s - against identities %s" % (username, ip, str(identities)))
+        self.log.info("authenticate: request for user %s from %s - against identities %s" % (username, ip, str(identities)))
 
         if not username:
             username = '<guest>'
 
         if self.authenticate_check(ip, username, password, identities) > 0:
-            flog.info("authenticate: user " + username + " auth successful from " + ip)
+            self.log.info("authenticate: user " + username + " auth successful from " + ip)
 
             # normalize identities
             identities_to_send = username
@@ -470,7 +629,7 @@ class AuthManager:
 
                 if token in self.global_token_referer.keys():
                     ref = self.global_token_referer[token]
-                    flog.debug("token " + token + " global referer: " + ref)
+                    self.log.debug("token " + token + " global referer: " + ref)
                     return True, ref
                 else:
                     return True, "/authenticated.html"
@@ -479,37 +638,37 @@ class AuthManager:
                 return True, "/authenticated.html"
 
         else:
-            flog.warning("authenticate: user " + username + " auth failed from " + ip)
+            self.log.warning("authenticate: user " + username + " auth failed from " + ip)
 
             if token in self.global_token_referer.keys():
                 ref = self.global_token_referer[token]
-                flog.debug("token " + token + " global referer: " + ref)
+                self.log.debug("token " + token + " global referer: " + ref)
                 return False, "/cgi-bin/auth.py?token=%s" % (token)
             else:
                 return False, "/cgi-bin/auth.py?token=0"
 
     def save_referer(self, token, ref):
-        flog.debug("incoming referer: " + token + " -> " + ref)
+        self.log.debug("incoming referer: " + token + " -> " + ref)
 
         self.global_token_referer[token] = ref
 
     def test_internal(self):
-        flog.debug("test routine executed")
+        self.log.debug("test routine executed")
 
-        flog.debug("backend file mtime check")
-        u = os.stat(BEND_USERFILE).st_mtime
-        k = os.stat(BEND_KEYFILE).st_mtime
+        self.log.debug("backend file mtime check")
+        u = os.stat(self.user_file).st_mtime
+        k = os.stat(self.key_file).st_mtime
 
-        flog.debug("%s: %s" % (BEND_USERFILE, str(u)))
-        flog.debug("%s: %s" % (BEND_KEYFILE, str(k)))
+        self.log.debug("%s: %s" % (self.user_file, str(u)))
+        self.log.debug("%s: %s" % (self.key_file, str(k)))
 
-        if BEND_USERFILE_MTIME != u or BEND_KEYFILE_MTIME != k:
-            flog.warning("files have been modified, restart")
+        if self.user_file_mtime != u or self.key_file_mtime!= k:
+            self.log.warning("files have been modified, restart")
             self.server.shutdown()
 
     def serve_forever(self):
 
-        flog.info("Launching portal on " + self.portal_address + ":" + str(self.portal_port))
+        self.log.info("Launching portal on " + self.portal_address + ":" + str(self.portal_port))
         self.server.registerFunction(self.authenticate)
         self.server.registerFunction(self.deauthenticate)
         self.server.registerFunction(self.save_referer)
@@ -521,21 +680,12 @@ class AuthManager:
         self.server.registerFunction(self.admin_logout)
 
         self.server.registerFunction(self.test_internal)
-        # self.server.registerFunction(self.dump_user_cfg)
 
         self.server.serve_forever()
 
-    # def dump_user_cfg(self):
-    #    global USER_CFG_FILE,USER_CFG_FILE_STRUCT
-    #    
-    #    with open("/tmp/users.cfg.bak", "w") as struct_file:
-    #        struct_file.write(USER_CFG_FILE_STRUCT.__repr__())
-    #        
-    #        return USER_CFG_FILE_STRUCT.__repr__()
-
     def load_config_users(self, user_items):
         for user in user_items:
-            flog.debug("user: " + user[0])
+            self.log.debug("user: " + user[0])
             # print user[1].items()
 
             d = {}
@@ -545,14 +695,14 @@ class AuthManager:
                 d[pair[0]] = pair[1]
 
             self.user_db[user[0]] = d
-            flog.debug("user: " + user[0] + " -> " + str(d))
+            self.log.debug("user: " + user[0] + " -> " + str(d))
 
     def load_config_groups(self, groups_items):
-        flog.debug("groups: ")
+        self.log.debug("groups: ")
         for i in groups_items:
             d = {}
             d["name"] = i[0]
-            flog.debug("groups: " + i[0])
+            self.log.debug("groups: " + i[0])
 
             for gi in i[1].items():
 
@@ -567,23 +717,23 @@ class AuthManager:
                         if len(pairlet) > 1:
                             user = pairlet[1]
                             source = pairlet[0]
-                            flog.debug("groups: member %s is an user %s in source %s" % (gii, user, source))
+                            self.log.debug("groups: member %s is an user %s in source %s" % (gii, user, source))
 
                             if source in self.sources_db.keys() or source == "local":
-                                flog.debug("groups: member %s source %s check OK" % (gii, source))
+                                self.log.debug("groups: member %s source %s check OK" % (gii, source))
                                 d["members"].append(str(gii))
                             else:
-                                flog.error("groups: member %s source %s check not OK, invalidated" % (gii, source))
+                                self.log.error("groups: member %s source %s check not OK, invalidated" % (gii, source))
 
                         else:
                             pairlet = gii.split("@")
                             if len(pairlet) > 1:
                                 group = pairlet[1]
                                 source = pairlet[0]
-                                flog.debug("groups: member %s is a group %s in source %s" % (gii, group, source))
+                                self.log.debug("groups: member %s is a group %s in source %s" % (gii, group, source))
 
                                 if source in self.sources_db.keys() or source == "local":
-                                    flog.debug("groups: member %s source %s check OK" % (gii, source))
+                                    self.log.debug("groups: member %s source %s check OK" % (gii, source))
                                     d["members"].append(str(gii))
 
                                     # groups require special care. Since we have flat authentication scheme,
@@ -596,27 +746,27 @@ class AuthManager:
                                         self.sources_groups[source].append(group)
 
                                 else:
-                                    flog.error("groups: member %s source %s check not OK, invalidated" % (gii, source))
+                                    self.log.error("groups: member %s source %s check not OK, invalidated" % (gii, source))
 
                 else:
 
                     d[pair[0]] = pair[1]
 
-                flog.debug("groups: " + i[0] + " -> " + str(d))
+                self.log.debug("groups: " + i[0] + " -> " + str(d))
 
             self.group_db[i[0]] = d
 
         for s in self.sources_groups.keys():
-            flog.debug("Interesting groups in source %s: %s" % (s, str(self.sources_groups[s])))
+            self.log.debug("Interesting groups in source %s: %s" % (s, str(self.sources_groups[s])))
 
     def load_config_identities(self, identities_items):
-        flog.debug("identities: ")
+        self.log.debug("identities: ")
 
         for i in identities_items:
 
             d = {}
             d["name"] = i[0]
-            flog.debug("identities: " + i[0])
+            self.log.debug("identities: " + i[0])
 
             for pair in i[1].items():
 
@@ -626,7 +776,7 @@ class AuthManager:
 
                     for gi in pair[1]:
                         if str(gi) in self.group_db.keys():
-                            flog.debug("identities: referenced group %s in database." % str(gi))
+                            self.log.debug("identities: referenced group %s in database." % str(gi))
                             d["groups"].append(str(gi))
 
                             # dereference groups and fill all objects -> identities  
@@ -641,23 +791,23 @@ class AuthManager:
 
 
                         else:
-                            flog.debug("identities: referenced group %s NOT in database." % str(gi))
+                            self.log.debug("identities: referenced group %s NOT in database." % str(gi))
 
                 else:
                     d[pair[0]] = pair[1]
 
-            flog.debug("identities: " + i[0] + " -> " + str(d))
+            self.log.debug("identities: " + i[0] + " -> " + str(d))
             self.identities_db[i[0]] = d
 
-        flog.debug("identities: dereferenced objects -> identities: " + str(self.objects_identities))
+        self.log.debug("identities: dereferenced objects -> identities: " + str(self.objects_identities))
 
     def load_config_sources(self, sources_items):
         for si in sources_items:
             source_type = si[0]
-            flog.debug("sources: type %s" % (source_type,))
+            self.log.debug("sources: type %s" % (source_type,))
 
             for sii in si[1].items():
-                flog.debug("sources: %s (%s)" % (sii[0], source_type,))
+                self.log.debug("sources: %s (%s)" % (sii[0], source_type,))
                 name = sii[0]
                 body = sii[1]
                 body = cfg_to_dict(body)
@@ -666,16 +816,12 @@ class AuthManager:
                 # add this source to interesting groups structure
                 self.sources_groups[name] = []
 
-                flog.debug("sources: %s (%s) -> %s" % (name, source_type, str(body)))
+                self.log.debug("sources: %s (%s) -> %s" % (name, source_type, str(body)))
 
                 if source_type == "ldap":
                     self.sources_ldap_db[name] = body
                 elif source_type == "local":
                     self.sources_local_db[name] = body
-
-    def authenticate_local_decrypt(self, ciphertext):
-        # flog.debug("authenticating user with " + ciphertext)
-        return mycrypto.xor_salted_decrypt(ciphertext, self.a1)
 
     def authenticate_check_local(self, ip, username, password, identities):
 
@@ -701,7 +847,7 @@ class AuthManager:
 
     def authenticate_check_ldap(self, ip, username, password, identities, target):
 
-        flog.debug("authenticate_check_ldap: result: start")
+        self.log.debug("authenticate_check_ldap: result: start")
 
         if target.find('@') < 0:
             return False
@@ -716,18 +862,18 @@ class AuthManager:
         l.updateProfile(self.sources_ldap_db[source])
         l.init()
         if l.bind() != '':
-            flog.debug("authenticate: LDAP: searching for user'%s' in '%s'" % (username, target))
+            self.log.debug("authenticate: LDAP: searching for user'%s' in '%s'" % (username, target))
             user_dn, group_list = l.authenticate_user(username, password)
             if user_dn:
-                flog.debug("authenticate: LDAP: found user'%s' in '%s': DN=%s, GROUPS=%s" % (
+                self.log.debug("authenticate: LDAP: found user'%s' in '%s': DN=%s, GROUPS=%s" % (
                 username, target, user_dn, str(group_list)))
             else:
-                flog.error("authenticate: LDAP: unable to find user'%s' in '%s'" % (username, target))
+                self.log.error("authenticate: LDAP: unable to find user'%s' in '%s'" % (username, target))
 
         else:
-            flog.error("authenticate: LDAP: unable to bind to search for user'%s' in '%s'" % (username, target))
+            self.log.error("authenticate: LDAP: unable to bind to search for user'%s' in '%s'" % (username, target))
 
-        flog.debug("authenticate_check_ldap: result: %s:%s" % (str(user_dn), str(group_list)))
+        self.log.debug("authenticate_check_ldap: result: %s:%s" % (str(user_dn), str(group_list)))
 
         if user_dn:
             return True
@@ -753,101 +899,43 @@ class AuthManager:
         if self.admin_manager.use_token():
             return json.dumps()
 
+    def run(self, clear_shm=True):
 
-def prepare_bend(tenant_name="default", tenant_index=0, clear_shm=True):
-    global BEND_LOGFILE, BEND_KEYFILE, BEND_USERFILE, BEND_PORT, flog, TENANT_NAME, TENANT_IDX, BEND_KEYFILE_MTIME, BEND_USERFILE_MTIME, USER_CFG_FILE, USER_CFG_FILE_STRUCT, GLOBAL_CFG_FILE
+        self.portal_address = self.sx_cfg.settings.auth_portal.address
+        self.portal_port = str(int(self.sx_cfg.settings.auth_portal.http_port) + int(self.tenant_index))
+        self.log.setLevel(cfgloglevel_to_py(self.sx_cfg.settings.log_level))
 
-    TENANT_NAME = tenant_name
-    TENANT_IDX = tenant_index
-
-    user_file = "/etc/smithproxy/users.cfg"
-    key_file = "/etc/smithproxy/users.key"
-
-    BEND_LOGFILE = "/var/log/smithproxy_bend.%s.log" % (tenant_name,)
-    BEND_KEYFILE = key_file
-    BEND_PORT = 64000 + int(tenant_index)
-
-    flog = logging.getLogger('bend')
-    hdlr = logging.FileHandler(BEND_LOGFILE)
-    formatter = logging.Formatter('%(asctime)s [%(process)d] [%(levelname)s] %(message)s')
-    hdlr.setFormatter(formatter)
-    flog.addHandler(hdlr)
-    flog.setLevel(logging.INFO)
-
-    GLOBAL_CFG_FILE = cfg.Config()
-    GLOBAL_CFG_FILE.read_file("/etc/smithproxy/smithproxy.cfg")
-    u = cfg.Config()
-
-    # check if there is specific tenant user.cfg
-    if tenant_index != 0:
-        try:
-            tenant_user_file = "/etc/smithproxy/users." + TENANT_NAME + ".cfg"
-            s = os.stat(tenant_user_file)
-            user_file = tenant_user_file
-            flog.info("Tenant user file: " + user_file)
-
-        except OSError:
-            flog.info("Tenant is using default user file: " + user_file)
+        self.log.debug("loading config file")
 
         try:
-            tenant_key_file = "/etc/smithproxy/users." + TENANT_NAME + ".key"
-            s = os.stat(tenant_key_file)
-            key_file = tenant_key_file
+            self.load_config_sources(self.user_cfg.sources.items())
+            self.load_config_users(self.user_cfg.users.items())
+            self.load_config_groups(self.user_cfg.groups.items())
+            self.load_config_identities(self.user_cfg.identities.items())
 
-        except OSError:
-            flog.info("Tenant is using default key file: " + key_file)
+        except Exception as e:
 
-        BEND_USERFILE = user_file
-        BEND_USERFILE_MTIME = os.stat(BEND_USERFILE).st_mtime
+            exc_type, exc_value, exc_traceback = sys.exc_info()
+            self.log.error("Error loading config: %s" % (str(e),))
+            self.log.error("Error loading config: %s" % (repr(traceback.format_tb(exc_traceback)),))
 
-        BEND_KEYFILE = key_file
-        BEND_KEYFILE_MTIME = os.stat(BEND_KEYFILE).st_mtime
+        self.clear_shm = clear_shm
 
-    with open(user_file, 'r') as myfile:
-        USER_CFG_FILE = myfile.read()
+        self.setup_logon_tables("/smithproxy_auth_ok_%s" % (self.tenant_name,), 1024 * 1024,
+                             "/smithproxy_auth_ok_%s.sem" % (self.tenant_name,))
+        self.setup_logon_tables6("/smithproxy_auth6_ok_%s" % (self.tenant_name,), 1024 * 1024,
+                              "/smithproxy_auth6_ok_%s.sem" % (self.tenant_name,))
+        self.setup_token_tables("/smithproxy_auth_token_%s" % (self.tenant_name,), 1024 * 1024,
+                             "/smithproxy_auth_token_%s.sem" % (self.tenant_name,))
 
-    u.read_string(USER_CFG_FILE)
-    USER_CFG_FILE_STRUCT = u
+        try:
+            self.serve_forever()
+        except KeyboardInterrupt as e:
+            print "Ctrl-C pressed. Wait to close shmem."
 
+        self.cleanup()
+        self.log.info("backend process terminated.")
 
-def run_bend_once(tenant_name="default", tenant_index=0, clear_shm=True):
-    global BEND_LOGFILE, BEND_KEYFILE, BEND_USERFILE, BEND_PORT, flog, TENANT_NAME, TENANT_IDX, BEND_KEYFILE_MTIME, BEND_USERFILE_MTIME, USER_CFG_FILE, USER_CFG_FILE_STRUCT, GLOBAL_CFG_FILE
-
-    a = AuthManager(server_port=BEND_PORT)
-    a.load_a1()
-    a.portal_address = GLOBAL_CFG_FILE.settings.auth_portal.address
-    a.portal_port = str(int(GLOBAL_CFG_FILE.settings.auth_portal.http_port) + int(tenant_index))
-    flog.setLevel(cfgloglevel_to_py(GLOBAL_CFG_FILE.settings.log_level));
-
-    flog.debug("loading config file")
-
-    try:
-        a.load_config_sources(USER_CFG_FILE_STRUCT.sources.items())
-        a.load_config_users(USER_CFG_FILE_STRUCT.users.items())
-        a.load_config_groups(USER_CFG_FILE_STRUCT.groups.items())
-        a.load_config_identities(USER_CFG_FILE_STRUCT.identities.items())
-
-    except Exception as e:
-        exc_type, exc_value, exc_traceback = sys.exc_info()
-        flog.error("Error loading config: %s" % (str(e),))
-        flog.error("Error loading config: %s" % (repr(traceback.format_tb(exc_traceback)),))
-
-    a.clear_shm = clear_shm
-
-    a.setup_logon_tables("/smithproxy_auth_ok_%s" % (TENANT_NAME,), 1024 * 1024,
-                         "/smithproxy_auth_ok_%s.sem" % (TENANT_NAME,))
-    a.setup_logon_tables6("/smithproxy_auth6_ok_%s" % (TENANT_NAME,), 1024 * 1024,
-                          "/smithproxy_auth6_ok_%s.sem" % (TENANT_NAME,))
-    a.setup_token_tables("/smithproxy_auth_token_%s" % (TENANT_NAME,), 1024 * 1024,
-                         "/smithproxy_auth_token_%s.sem" % (TENANT_NAME,))
-
-    try:
-        a.serve_forever()
-    except KeyboardInterrupt as e:
-        print "Ctrl-C pressed. Wait to close shmem."
-
-    a.cleanup()
-    flog.info("backend process terminated.")
 
 
 class TesterThread(threading.Thread):
@@ -864,17 +952,18 @@ class TesterThread(threading.Thread):
 
 
 def run_bend(tenant_name="default", tenant_index=0, clear_shm=True):
-    global BEND_LOGFILE, BEND_KEYFILE, BEND_USERFILE, BEND_PORT, flog, TENANT_NAME, TENANT_IDX, BEND_KEYFILE_MTIME, BEND_USERFILE_MTIME, USER_CFG_FILE, USER_CFG_FILE_STRUCT, GLOBAL_CFG_FILE
 
     first_start = clear_shm
     while True:
-        prepare_bend(tenant_name, tenant_index, first_start)
+        a = AuthManager()
+        a.log.info("starting main loop")
+        a.prepare(tenant_name, tenant_index, first_start)
         if first_start:
-            t = TesterThread(BEND_PORT)
+            t = TesterThread(a.bend_port)
             t.setDaemon(True)
             t.start()
 
-        run_bend_once(tenant_name, tenant_index, first_start)
+        a.run()
         first_start = False
 
 

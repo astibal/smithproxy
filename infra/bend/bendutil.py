@@ -40,15 +40,21 @@
 import logging
 import pylibconfig2 as cfg
 
+
 def cfgloglevel_to_py(cfglevel):
-    if(cfglevel >= 7):
+
+    if cfglevel >= 7:
         return logging.DEBUG
-    elif(cfglevel >= 5):
+
+    elif cfglevel >= 5:
         return logging.INFO
-    elif(cfglevel == 4):
+
+    elif cfglevel == 4:
         return logging.WARNING
-    elif(cfglevel == 3):
+
+    elif cfglevel == 3:
         return logging.ERROR
+
     else:
         return logging.FATAL
     
@@ -62,16 +68,16 @@ def cfg_to_dict(cfg_element):
             k = c[0]
             v = c[1]
             if isinstance(v,cfg.ConfGroup) or isinstance(v,cfg.ConfList):
-                v = cfg_2_dict(v)
+                v = cfg_to_dict(v)
             d[k] = v
     elif isinstance(cfg_element,cfg.ConfList):
         d = []
         for l in cfg_element:
-            d.append(cfg_2_dict(l))
+            d.append(cfg_to_dict(l))
     elif isinstance(cfg_element,tuple):
         d = {}
         if isinstance(cfg_element[1],cfg.ConfGroup) or isinstance(cfg_element[1],cfg.ConfList):
-            d[cfg_element[0]] = cfg_2_dict(cfg_element[1])
+            d[cfg_element[0]] = cfg_to_dict(cfg_element[1])
         else:
             d[cfg_element[0]] = cfg_element[1]
     else:
