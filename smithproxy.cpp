@@ -58,6 +58,8 @@
 #include <getopt.h>
 #include <execinfo.h>
 
+#include <openssl/crypto.h>
+
 #include <socle.hpp>
 
 #include <logger.hpp>
@@ -562,6 +564,10 @@ bool apply_tenant_config() {
 }
 
 int main(int argc, char *argv[]) {
+
+
+    if(buffer::use_pool)
+        CRYPTO_set_mem_functions(mempool_alloc, mempool_realloc, mempool_free);
 
     
     config_file = "/etc/smithproxy/smithproxy.cfg";
