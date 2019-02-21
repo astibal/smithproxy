@@ -1029,6 +1029,40 @@ int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *a
     cli_print(cli,"\nmemory alloc   counter: %lld",buffer::alloc_count);
     cli_print(cli,"memory free    counter: %lld",buffer::free_count);
     cli_print(cli,"memory current counter: %lld",buffer::alloc_count-buffer::free_count);
+
+
+    if (buffer::use_pool) {
+
+        std::lock_guard<std::mutex> g(buffer::pool.lock);
+
+        cli_print(cli, "\nMemory pool stats:");
+        cli_print(cli, "acquires: %lld", memPool::stat_acq);
+        cli_print(cli, "releases: %lld", memPool::stat_ret);
+        cli_print(cli," ");
+        cli_print(cli, "ack bytes: %lld", memPool::stat_acq_size);
+        cli_print(cli, "rel bytes: %lld", memPool::stat_ret_size);
+        cli_print(cli, "\nAdditional allocations:");
+        cli_print(cli, "allocations: %lld", memPool::stat_alloc);
+        cli_print(cli, "frees      : %lld", memPool::stat_free);
+        cli_print(cli," ");
+        cli_print(cli, "alloc. bytes: %lld", memPool::stat_alloc_size);
+        cli_print(cli, "freed  bytes: %lld", memPool::stat_free_size);
+        cli_print(cli," ");
+        cli_print(cli,"256B pool size: %ld/%ld", buffer::pool.available_256.size(), buffer::pool.sz256);
+        cli_print(cli," 1kB pool size: %ld/%ld", buffer::pool.available_1k.size(), buffer::pool.sz1k);
+        cli_print(cli," 5kB pool size: %ld/%ld", buffer::pool.available_5k.size(), buffer::pool.sz5k);
+        cli_print(cli,"10kB pool size: %ld/%ld", buffer::pool.available_10k.size(), buffer::pool.sz10k);
+        cli_print(cli,"20kB pool size: %ld/%ld", buffer::pool.available_20k.size(), buffer::pool.sz20k);
+        cli_print(cli," big pool size: %ld", buffer::pool.available_big.size());
+
+        unsigned long long total_pools = buffer::pool.available_256.size() + buffer::pool.available_1k.size() +
+                                         buffer::pool.available_5k.size() + buffer::pool.available_10k.size() +
+                                         buffer::pool.available_20k.size();
+
+        cli_print(cli,"   total pools: %lld", total_pools);
+
+    }
+
 #ifdef SOCLE_MEM_PROFILE
     if(argc > 0) {
         
