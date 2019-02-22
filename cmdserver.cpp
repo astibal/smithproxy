@@ -1035,19 +1035,26 @@ int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *a
 
         std::lock_guard<std::mutex> g(buffer::pool.lock);
 
-        cli_print(cli, "\nMemory pool stats:");
-        cli_print(cli, "acquires: %lld", memPool::stat_acq);
-        cli_print(cli, "releases: %lld", memPool::stat_ret);
+        cli_print(cli, "\nMemory pool API stats:");
+        cli_print(cli, "acquires: %lld/%lldB", memPool::stat_acq, memPool::stat_acq_size);
+        cli_print(cli, "releases: %lld/%lldB", memPool::stat_ret, memPool::stat_ret_size);
+        cli_print(cli, "outside releases: %lld/%lldB", memPool::stat_out_free, memPool::stat_out_free_size);
+
+        cli_print(cli,"\nNon-API allocations:");
+        cli_print(cli, "mp_allocs: %lld", stat_mempool_alloc);
+        cli_print(cli, "mp_reallocs: %lld", stat_mempool_realloc);
+        cli_print(cli, "mp_frees: %lld", stat_mempool_free);
+        cli_print(cli, "mp_realloc cache miss: %lld", stat_mempool_realloc_miss);
+        cli_print(cli, "mp_realloc fitting returns: %lld", stat_mempool_realloc_fitting);
+        cli_print(cli, "mp_free cache miss: %lld", stat_mempool_free_miss);
+        cli_print(cli, "mp ptr cache size: %ld", mempool_ptr_map.size());
+
         cli_print(cli," ");
-        cli_print(cli, "ack bytes: %lld", memPool::stat_acq_size);
-        cli_print(cli, "rel bytes: %lld", memPool::stat_ret_size);
-        cli_print(cli, "\nAdditional allocations:");
-        cli_print(cli, "allocations: %lld", memPool::stat_alloc);
-        cli_print(cli, "frees      : %lld", memPool::stat_free);
-        cli_print(cli," ");
-        cli_print(cli, "alloc. bytes: %lld", memPool::stat_alloc_size);
-        cli_print(cli, "freed  bytes: %lld", memPool::stat_free_size);
-        cli_print(cli," ");
+        cli_print(cli, "API allocations above limits:");
+        cli_print(cli, "allocations: %lld/%lld", memPool::stat_alloc, memPool::stat_alloc_size);
+        cli_print(cli, "frees      : %lld/%lld", memPool::stat_free, memPool::stat_free_size);
+
+        cli_print(cli,"\nPool capacities (available/limits):");
         cli_print(cli," 32B pool size: %ld/%ld", buffer::pool.available_32.size(), 10* buffer::pool.sz256);
         cli_print(cli," 64B pool size: %ld/%ld", buffer::pool.available_64.size(), buffer::pool.sz256);
         cli_print(cli,"128B pool size: %ld/%ld", buffer::pool.available_128.size(), buffer::pool.sz256);
