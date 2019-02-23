@@ -816,6 +816,7 @@ int cli_diag_identity_ip_clear(struct cli_def *cli, const char *command, char *a
     auth_ip_map.clear();
     auth_shm_ip_map.acquire();
     auth_shm_ip_map.map_entries().clear();
+    auth_shm_ip_map.entries().clear();
     auth_shm_ip_map.save(true);
     auth_shm_ip_map.release();
     cfgapi_identity_ip_lock.unlock();
@@ -825,6 +826,7 @@ int cli_diag_identity_ip_clear(struct cli_def *cli, const char *command, char *a
     auth_ip6_map.clear();
     auth_shm_ip6_map.acquire();
     auth_shm_ip6_map.map_entries().clear();
+    auth_shm_ip6_map.entries().clear();
     auth_shm_ip6_map.save(true);
     auth_shm_ip6_map.release();
     cfgapi_identity_ip6_lock.unlock();
