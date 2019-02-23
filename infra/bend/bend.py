@@ -249,12 +249,12 @@ class AuthConfig(object):
 
             # SX CFG
             try:
-                tenant_sx_file = "/etc/smithproxy/users." + tenant_name + ".key"
+                tenant_sx_file = "/etc/smithproxy/smithproxy." + tenant_name + ".cfg"
                 s = os.stat(tenant_sx_file)
                 self.sx_file = tenant_sx_file
 
             except OSError:
-                self.log.info("Tenant is using default key file: " + self.key_file)
+                self.log.info("Tenant is using default  sx file: " + self.key_file)
 
         return self.key_file, self.user_file, self.sx_file
 
@@ -312,7 +312,7 @@ class AuthConfig(object):
         self.user_file_mtime = os.stat(self.user_file).st_mtime
         self.key_file_mtime= os.stat(self.key_file).st_mtime
 
-    def prepare(self, tenant_name="default", tenant_index=0, clear_shm=True):
+    def prepare(self, tenant_name="default", tenant_index=0, clear_shm=None):
 
         # set tenant information
         self.tenant_name = tenant_name
@@ -366,7 +366,7 @@ class AuthManager(AuthConfig):
 
         self.admin_manager = AdminManager(self.log)
 
-    def prepare(self, tenant_name="default", tenant_index=0, clear_shm=True):
+    def prepare(self, tenant_name="default", tenant_index=0, clear_shm=None):
         super(AuthManager, self).prepare(tenant_name, tenant_index, clear_shm)
 
         self.server = SOAPpy.ThreadingSOAPServer(("localhost", self.bend_port))
@@ -410,6 +410,7 @@ class AuthManager(AuthConfig):
 
         self.token_shm.cleanup()
         self.logon_shm.cleanup()
+        self.logon6_shm.cleanup()
 
     def token_data(self, token):
 
@@ -645,6 +646,7 @@ class AuthManager(AuthConfig):
             ip_shm_table.acquire()
             ip_shm_table.load()  # load new data!
             ip_shm_table.add(ip, username, identities_to_send)
+            ip_shm_table.save(True)
             ip_shm_table.release()
 
             # :-D
@@ -678,9 +680,9 @@ class AuthManager(AuthConfig):
         self.global_token_referer[token] = ref
 
     def test_internal(self):
-        self.log.debug("test routine executed")
+        #self.log.debug("test routine executed")
 
-        self.log.debug("backend file mtime check")
+        #self.log.debug("backend file mtime check")
         u = os.stat(self.user_file).st_mtime
         k = os.stat(self.key_file).st_mtime
 
@@ -691,6 +693,8 @@ class AuthManager(AuthConfig):
             self.log.warning("files have been modified, restart")
 
             if self.server:
+                # don't clear shared memory on restart!
+                self.clear_shm = False
                 self.server.shutdown()
 
     def serve_forever(self):
@@ -929,7 +933,7 @@ class AuthManager(AuthConfig):
         if self.admin_manager.use_token():
             return json.dumps()
 
-    def init_data(self, clear_shm=False):
+    def init_data(self, clear_shm=None):
         self.portal_address = self.sx_cfg.settings.auth_portal.address
         self.portal_port = str(int(self.sx_cfg.settings.auth_portal.http_port) + int(self.tenant_index))
         self.log.setLevel(cfgloglevel_to_py(self.sx_cfg.settings.log_level))
@@ -948,25 +952,32 @@ class AuthManager(AuthConfig):
             self.log.error("Error loading config: %s" % (str(e),))
             self.log.error("Error loading config: %s" % (repr(traceback.format_tb(exc_traceback)),))
 
-        self.clear_shm = clear_shm
 
-        self.setup_logon_tables("/smithproxy_auth_ok_%s" % (self.tenant_name,), 1024 * 1024,
+        # toggle one-time clearing tables
+        if clear_shm:
+            self.clear_shm = True
+
+        if not self.logon_shm or clear_shm:
+            self.setup_logon_tables("/smithproxy_auth_ok_%s" % (self.tenant_name,), 1024 * 1024,
                                 "/smithproxy_auth_ok_%s.sem" % (self.tenant_name,))
-        self.setup_logon_tables6("/smithproxy_auth6_ok_%s" % (self.tenant_name,), 1024 * 1024,
+
+        if not self.logon6_shm or clear_shm:
+            self.setup_logon_tables6("/smithproxy_auth6_ok_%s" % (self.tenant_name,), 1024 * 1024,
                                  "/smithproxy_auth6_ok_%s.sem" % (self.tenant_name,))
-        self.setup_token_tables("/smithproxy_auth_token_%s" % (self.tenant_name,), 1024 * 1024,
+
+        if not self.token_shm or clear_shm:
+            self.setup_token_tables("/smithproxy_auth_token_%s" % (self.tenant_name,), 1024 * 1024,
                                 "/smithproxy_auth_token_%s.sem" % (self.tenant_name,))
 
-    def run(self, clear_shm=True):
+        if clear_shm:
+            self.clear_shm = False
+
+
+    def run(self, clear_shm=None):
 
         self.init_data(clear_shm)
-        try:
-            self.serve_forever()
-        except KeyboardInterrupt as e:
-            print "Ctrl-C pressed. Wait to close shmem."
-
-        self.cleanup()
-        self.log.info("backend process terminated.")
+        self.serve_forever()
+        self.log.info("serve_forever finished.")
 
 
 
@@ -983,22 +994,28 @@ class TesterThread(threading.Thread):
             bend.test_internal()
 
 
-def run_bend(tenant_name="default", tenant_index=0, clear_shm=True):
+def run_bend(tenant_name="default", tenant_index=0, clear_shm=None):
 
-    first_start = clear_shm
+    first_start = True
+    a = AuthManager()
+
     while True:
-        a = AuthManager()
         a.prepare(tenant_name, tenant_index, first_start)
-
-        a.log.info("starting main loop, clearing tables=" + str(first_start))
+        a.log.info("starting main loop")
         if first_start:
             t = TesterThread(a.bend_port)
             t.setDaemon(True)
             t.start()
 
-        a.run(first_start)
         first_start = False
+        a.run(first_start)
+
 
 
 if __name__ == "__main__":
-    run_bend()
+    try:
+        run_bend()
+    except KeyboardInterrupt as e:
+        print "Ctrl-C pressed."
+
+
