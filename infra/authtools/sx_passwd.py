@@ -51,7 +51,7 @@ from pprint import pprint
 sys.path.append('/usr/share/smithproxy/infra/bend')
 sys.path.append('/usr/share/smithproxy/infra/sslca')
 
-from bend import AuthConfig
+from bend import AuthManager
 
 if __name__ == "__main__":
 
@@ -61,17 +61,84 @@ if __name__ == "__main__":
     ts = parser.add_argument_group("Tenant info")
     ts.add_argument('--tenant-name', nargs=1, help='tenant name')
 
+    ac = parser.add_argument_group("Actions")
+    group1 = ac.add_mutually_exclusive_group()
+    group1.add_argument('--inspect', action='store_true', help='dump users configuration')
+    group1.add_argument('--user', nargs=1, help='user related actions')
 
-    us = parser.add_argument_group("User info")
-    us.add_argument('--user', nargs=1, help='username')
+    ac.add_argument('--password', nargs='?', help='change password. if empty, read from input')
 
     args = parser.parse_args(sys.argv[1:])
 
     tenant_name = "default"
 
-    a = AuthConfig()
+    a = AuthManager()
     a.set_filenames(tenant_name=args.tenant_name[0])
     a.load_key()
     a.load_users()
+    a.load_sx()
+    a.init_data()
 
-    #pprint(a.user_cfg)
+    if args.inspect:
+        pprint(a.user_cfg)
+    elif args.user:
+        username = args.user[0]
+
+        user_cx = a.user_cfg.lookup('users.'+username)
+        if user_cx:
+            a.log.info("switching context to user %s" % (username,))
+
+            pw = None
+            epw = None
+            plain_pw = False
+
+            try:
+                pw = user_cx.password
+                plain_pw = True
+            except AttributeError as e:
+                pass
+
+            try:
+                epw = user_cx.encrypted_password
+            except AttributeError as e:
+                pass
+
+
+            if epw:
+                pw = a.authenticate_local_decrypt(epw)
+
+
+            if pw:
+                a.log.debug("Plaintext pass: " + str(pw))
+            if epw:
+                a.log.debug("Encrypted pass: " + str(epw))
+
+            if args.password:
+                a.log.info("about to set password: " + args.password)
+                new_pass = a.authenticate_local_encrypt(args.password)
+                print "New password is: " + new_pass
+
+                user_cx.set('encrypted_password', new_pass)
+
+                if plain_pw:
+                    delattr(user_cx, 'password')
+
+
+                #print "back-decrypted pass: " + a.authenticate_local_decrypt(new_pass)
+
+
+                #pprint(a.user_cfg)
+
+                if new_pass and a.authenticate_local_decrypt(new_pass) == args.password and args.password != pw:
+
+                    a.save_users()
+
+
+
+
+
+
+
+
+
+
