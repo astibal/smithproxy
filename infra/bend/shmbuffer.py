@@ -61,30 +61,29 @@ class ShmBuffer:
           self.mapfile = None
           self.my_version = None
 
-    def setup(self,mem_name, mem_size, sem_name):
+    def setup(self, mem_name, mem_size, sem_name):
 
-          self.memory_size = mem_size
-          self.memory_name = mem_name
-          self.semaphore_name = sem_name
-          
-          try:
-	      self.memory = posix_ipc.SharedMemory(self.memory_name, posix_ipc.O_CREX, size=self.memory_size)
-	      self.semaphore = posix_ipc.Semaphore(self.semaphore_name, posix_ipc.O_CREX)
-	    
-	  except posix_ipc.ExistentialError, e:
-	      # if memory already exists, let's connect to it
-	      self.memory = posix_ipc.SharedMemory(self.memory_name, posix_ipc.O_RDWR, size=self.memory_size)
-	      self.semaphore = posix_ipc.Semaphore(self.semaphore_name, posix_ipc.O_RDWR)
-	      
+        self.memory_size = mem_size
+        self.memory_name = mem_name
+        self.semaphore_name = sem_name
 
-          self.mapfile = mmap.mmap(self.memory.fd, self.memory.size)
+        try:
+            self.memory = posix_ipc.SharedMemory(self.memory_name, posix_ipc.O_CREX, size=self.memory_size)
+            self.semaphore = posix_ipc.Semaphore(self.semaphore_name, posix_ipc.O_CREX)
 
-          # Once I've mmapped the file descriptor, I can close it without interfering with the mmap. 
-          self.memory.close_fd()
-          
-          self.semaphore.release()
+        except posix_ipc.ExistentialError as e:
+            # if memory already exists, let's connect to it
+            self.memory = posix_ipc.SharedMemory(self.memory_name, posix_ipc.O_RDWR, size=self.memory_size)
+            self.semaphore = posix_ipc.Semaphore(self.semaphore_name, posix_ipc.O_RDWR)
 
-          ### now init
+        self.mapfile = mmap.mmap(self.memory.fd, self.memory.size)
+
+        # Once I've mmapped the file descriptor, I can close it without interfering with the mmap.
+        self.memory.close_fd()
+
+        self.semaphore.release()
+
+        ### now init
           
     def clear(self):      
           self.seek(0)

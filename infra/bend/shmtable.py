@@ -85,7 +85,7 @@ class ShmTable(ShmBuffer):
     def ack_updated(self, a):
         self.version = a
 
-    def load(self):
+    def load(self, forced=False):
         # print "---load:"
         self.seek(0)
         v,n,r = self.read_header()
@@ -94,7 +94,7 @@ class ShmTable(ShmBuffer):
             print "Incompatible rowsize! Expecting %d, got %d" % (self.row_size,r)
             return False
         
-        if not self.is_updated(v):
+        if not self.is_updated(v) and not forced:
             #print "---same version: %d, entries: %d, rowsize: %s" % (v,n,r)
             pass
         else:
