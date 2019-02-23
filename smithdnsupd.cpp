@@ -56,7 +56,7 @@ int send_dns_request (std::string hostname, DNS_Record_Type t, std::string names
         ERR_("resolve_dns_s: query %s for type %s: missing nameserver", hostname.c_str(), dns_record_type_str(t));
     }
 
-    buffer b(0);
+    buffer b(256);
 
     unsigned char rand_pool[2];
     RAND_pseudo_bytes(rand_pool, 2);
@@ -111,6 +111,8 @@ std::pair<DNS_Response*,int>  recv_dns_response(int send_socket, unsigned int ti
         buffer r(1500);
         l = ::recv(send_socket,r.data(),r.capacity(), timeout_sec > 0 ? 0 : MSG_DONTWAIT);
         DEB_("recv_dns_response(%d,%d): recv() returned %d",send_socket, timeout_sec, l);
+
+        DEB_("buffer: ptr=0x%x, size=%d, capacity=%d",r.data(),r.size(),r.capacity());
 
         if(l > 0) {
             int parsed = -1;

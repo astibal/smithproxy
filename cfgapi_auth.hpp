@@ -96,19 +96,23 @@ struct shm_logon_info_ : public shm_logon_info_base {
     virtual buffer* data() { return &buffer_; }
     
     virtual ~shm_logon_info_() {};
-    
+
+    static unsigned int record_size () {
+        return AddressSize+LOGON_INFO_USERNAME_SZ+LOGON_INFO_GROUPS_SZ;
+    }
+
     shm_logon_info_() {
-        buffer_.size(AddressSize+LOGON_INFO_USERNAME_SZ+LOGON_INFO_GROUPS_SZ);
+        buffer_.size(record_size());
         buffer_.fill(0);
     }
     
     int load(unsigned char* b) {
-        buffer_.assign(b,AddressSize+LOGON_INFO_USERNAME_SZ+LOGON_INFO_GROUPS_SZ);
+        buffer_.assign(b,record_size());
         return buffer_.size();
     };
     
     shm_logon_info_(const char* i,const char* u,const char* g) {
-        buffer_.size(AddressSize+LOGON_INFO_USERNAME_SZ+LOGON_INFO_GROUPS_SZ);
+        buffer_.size(record_size());
         buffer_.fill(0);
         
         if(AddressSize == 4) {
@@ -165,6 +169,8 @@ struct shm_logon_token {
     
     std::string token() const { return std::string((const char*)buffer_.data()); };
     std::string url() const { return std::string((const char*)&buffer_.data()[LOGON_TOKEN_TOKEN_SZ]);};
+
+    static unsigned int record_size() { return LOGON_TOKEN_TOKEN_SZ+LOGON_TOKEN_URL_SZ; }
     
     shm_logon_token() {
         buffer_.size(LOGON_TOKEN_TOKEN_SZ+LOGON_TOKEN_URL_SZ);

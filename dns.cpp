@@ -111,7 +111,7 @@ int generate_dns_request(unsigned short id, buffer& b,const std::string h, DNS_R
     std::string hostname = "." + h;
     //need to add dot at the beginning
     
-    if(!b.size(hostname.size()+DNS_REQUEST_OVERHEAD)) return -1;
+    if(b.capacity() < (hostname.size()+DNS_REQUEST_OVERHEAD)) return -1;
 
     unsigned char* ptr = b.data();
     
@@ -167,7 +167,9 @@ int generate_dns_request(unsigned short id, buffer& b,const std::string h, DNS_R
     
     unsigned short* clas = (unsigned short*)&trailer[3];
     *clas = htons(0x0001);
-    
+
+
+    b.size(hostname.size()+DNS_REQUEST_OVERHEAD);
     return b.size();
 }
 

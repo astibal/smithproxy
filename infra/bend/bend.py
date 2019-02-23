@@ -210,7 +210,7 @@ class AuthConfig(object):
         return mycrypto.xor_salted_decrypt(ciphertext, self.a1)
 
     def authenticate_local_encrypt(self, plaintext):
-        return mycrypto.xor_encrypt(plaintext, self.a1)
+        return mycrypto.xor_salted_encrypt(plaintext, self.a1)
 
     def set_filenames(self, tenant_name=None):
 
@@ -277,6 +277,21 @@ class AuthConfig(object):
 
         flat, c_struct = AuthConfig.load_users_file(self.user_file)
         self.user_cfg = c_struct
+
+    def save_users(self):
+        if self.user_cfg and self.user_file:
+            self.log.info("saving new user file: " + self.user_file)
+            with open(self.user_file, 'w') as f:
+
+                f.write(str(self.user_cfg))
+                f.close()
+
+            self.log.info("done")
+            return True
+        else:
+            return False
+
+
 
     @staticmethod
     def load_sx_file(sx_file):
@@ -379,17 +394,17 @@ class AuthManager(AuthConfig):
     def setup_token_tables(self, mem_name, mem_size, sem_name):
 
         self.token_shm = TokenTable()
+        self.token_shm.setup(mem_name, mem_size, sem_name)
 
         if self.clear_shm:
-            self.token_shm.setup(mem_name, mem_size, sem_name)
             self.token_shm.clear()
 
         # test data
-        self.token_shm.seek(0)
-        self.token_shm.write(struct.pack('III', 1, 1, 576))
-        test1_token = "233474357"
-        test1_url = "idnes.cz"
-        self.token_shm.write(struct.pack('64s512s', test1_token, test1_url))
+        # self.token_shm.seek(0)
+        # self.token_shm.write(struct.pack('III', 1, 1, 576))
+        # test1_token = "233474357"
+        # test1_url = "idnes.cz"
+        # self.token_shm.write(struct.pack('64s512s', test1_token, test1_url))
 
     def cleanup(self):
 
@@ -584,9 +599,19 @@ class AuthManager(AuthConfig):
         # make identities as broad as possible. This is safest default, identities are later narrowed down by token data
         identities = self.identities_db.keys()
 
-        self.token_shm.acquire()
-        self.token_shm.load()
-        self.token_shm.release()
+        self.log.debug("acquiring token shm - %s" % (self.token_shm.memory_name,))
+        try:
+            self.log.debug("Last seen token table version: %d, rowsize: %d" % (self.token_shm.version, self.token_shm.row_size))
+
+            self.token_shm.acquire()
+            self.token_shm.load(forced=True)
+            self.token_shm.release()
+
+            self.log.debug("Token table version: %d" % (self.token_shm.version,))
+
+        except Exception as e:
+            self.log.error("error loading token shm: " + str(e))
+        self.log.debug("released token shm")
 
         if token in self.token_shm.tokens.keys():
             res = self.token_shm.tokens[token]
@@ -659,29 +684,34 @@ class AuthManager(AuthConfig):
         u = os.stat(self.user_file).st_mtime
         k = os.stat(self.key_file).st_mtime
 
-        self.log.debug("%s: %s" % (self.user_file, str(u)))
-        self.log.debug("%s: %s" % (self.key_file, str(k)))
+        # self.log.debug("%s: %s" % (self.user_file, str(u)))
+        # self.log.debug("%s: %s" % (self.key_file, str(k)))
 
         if self.user_file_mtime != u or self.key_file_mtime!= k:
             self.log.warning("files have been modified, restart")
-            self.server.shutdown()
+
+            if self.server:
+                self.server.shutdown()
 
     def serve_forever(self):
 
-        self.log.info("Launching portal on " + self.portal_address + ":" + str(self.portal_port))
-        self.server.registerFunction(self.authenticate)
-        self.server.registerFunction(self.deauthenticate)
-        self.server.registerFunction(self.save_referer)
-        self.server.registerFunction(self.whois)
+        if self.server:
+            self.log.info("Launching portal on " + self.portal_address + ":" + str(self.portal_port))
+            self.server.registerFunction(self.authenticate)
+            self.server.registerFunction(self.deauthenticate)
+            self.server.registerFunction(self.save_referer)
+            self.server.registerFunction(self.whois)
 
-        self.server.registerFunction(self.admin_login)
-        self.server.registerFunction(self.admin_token_list)
-        self.server.registerFunction(self.admin_keepalive)
-        self.server.registerFunction(self.admin_logout)
+            self.server.registerFunction(self.admin_login)
+            self.server.registerFunction(self.admin_token_list)
+            self.server.registerFunction(self.admin_keepalive)
+            self.server.registerFunction(self.admin_logout)
 
-        self.server.registerFunction(self.test_internal)
+            self.server.registerFunction(self.test_internal)
 
-        self.server.serve_forever()
+            self.server.serve_forever()
+        else:
+            self.log.error("Server not initialized.")
 
     def load_config_users(self, user_items):
         for user in user_items:
@@ -899,8 +929,7 @@ class AuthManager(AuthConfig):
         if self.admin_manager.use_token():
             return json.dumps()
 
-    def run(self, clear_shm=True):
-
+    def init_data(self, clear_shm=False):
         self.portal_address = self.sx_cfg.settings.auth_portal.address
         self.portal_port = str(int(self.sx_cfg.settings.auth_portal.http_port) + int(self.tenant_index))
         self.log.setLevel(cfgloglevel_to_py(self.sx_cfg.settings.log_level))
@@ -922,12 +951,15 @@ class AuthManager(AuthConfig):
         self.clear_shm = clear_shm
 
         self.setup_logon_tables("/smithproxy_auth_ok_%s" % (self.tenant_name,), 1024 * 1024,
-                             "/smithproxy_auth_ok_%s.sem" % (self.tenant_name,))
+                                "/smithproxy_auth_ok_%s.sem" % (self.tenant_name,))
         self.setup_logon_tables6("/smithproxy_auth6_ok_%s" % (self.tenant_name,), 1024 * 1024,
-                              "/smithproxy_auth6_ok_%s.sem" % (self.tenant_name,))
+                                 "/smithproxy_auth6_ok_%s.sem" % (self.tenant_name,))
         self.setup_token_tables("/smithproxy_auth_token_%s" % (self.tenant_name,), 1024 * 1024,
-                             "/smithproxy_auth_token_%s.sem" % (self.tenant_name,))
+                                "/smithproxy_auth_token_%s.sem" % (self.tenant_name,))
 
+    def run(self, clear_shm=True):
+
+        self.init_data(clear_shm)
         try:
             self.serve_forever()
         except KeyboardInterrupt as e:
@@ -956,14 +988,15 @@ def run_bend(tenant_name="default", tenant_index=0, clear_shm=True):
     first_start = clear_shm
     while True:
         a = AuthManager()
-        a.log.info("starting main loop")
         a.prepare(tenant_name, tenant_index, first_start)
+
+        a.log.info("starting main loop, clearing tables=" + str(first_start))
         if first_start:
             t = TesterThread(a.bend_port)
             t.setDaemon(True)
             t.start()
 
-        a.run()
+        a.run(first_start)
         first_start = False
 
 
