@@ -807,6 +807,30 @@ int cli_diag_identity_ip_list(struct cli_def *cli, const char *command, char *ar
     return CLI_OK;
 }
 
+int cli_diag_identity_ip_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    cli_print(cli, "\nClearing all identities:");
+    std::string out;
+
+    cfgapi_identity_ip_lock.lock();
+    auth_ip_map.clear();
+    auth_shm_ip_map.acquire();
+    auth_shm_ip_map.map_entries().clear();
+    auth_shm_ip_map.save(true);
+    auth_shm_ip_map.release();
+    cfgapi_identity_ip_lock.unlock();
+
+
+    cfgapi_identity_ip6_lock.lock();
+    auth_ip6_map.clear();
+    auth_shm_ip6_map.acquire();
+    auth_shm_ip6_map.map_entries().clear();
+    auth_shm_ip6_map.save(true);
+    auth_shm_ip6_map.release();
+    cfgapi_identity_ip6_lock.unlock();
+
+    return CLI_OK;
+}
 
 void cli_print_log_levels(struct cli_def *cli) {
     logger_profile* lp = get_logger()->target_profiles()[(uint64_t)fileno(cli->client)];
@@ -1530,6 +1554,7 @@ void client_thread(int client_socket) {
             diag_identity = cli_register_command(cli,diag,"identity",NULL,PRIVILEGE_PRIVILEGED, MODE_EXEC,"identity related commands");
                 diag_identity_user = cli_register_command(cli, diag_identity,"user",NULL, PRIVILEGE_PRIVILEGED, MODE_EXEC,"identity commands related to users");
                         cli_register_command(cli, diag_identity_user,"list",cli_diag_identity_ip_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"list all known users");
+                        cli_register_command(cli, diag_identity_user,"clear",cli_diag_identity_ip_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC,"CLEAR all known users");
                         
                         
         debuk = cli_register_command(cli, NULL, "debug", NULL, PRIVILEGE_PRIVILEGED, MODE_EXEC, "diagnostic commands");
