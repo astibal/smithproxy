@@ -177,8 +177,9 @@ if(UNIX)
                     WORLD_READ WORLD_EXECUTE 
     )
 
-    file(GLOB sslca_makecerts "infra/sslca/makecerts.py")
     install(DIRECTORY infra/sslca DESTINATION share/smithproxy/infra)
+
+    file(GLOB sslca_makecerts "infra/sslca/makecerts.py")
     install(FILES ${sslca_makecerts} DESTINATION share/smithproxy/infra/sslca
             PERMISSIONS
             OWNER_READ OWNER_WRITE OWNER_EXECUTE
@@ -186,7 +187,18 @@ if(UNIX)
             WORLD_READ WORLD_EXECUTE
             )
 
+
+    install(DIRECTORY infra/authtools DESTINATION share/smithproxy/infra)
+    file(GLOB sx_auth_tools "infra/authtools/sx_*.py")
+    install(FILES ${sx_auth_tools} DESTINATION share/smithproxy/infra/authtools
+            PERMISSIONS
+            OWNER_READ OWNER_WRITE OWNER_EXECUTE
+            GROUP_READ GROUP_EXECUTE
+            WORLD_READ WORLD_EXECUTE
+            )
+
     InstallSymlink(/usr/share/smithproxy/infra/sslca/makecerts.py /usr/bin/sx_regencerts)
+    InstallSymlink(/usr/share/smithproxy/infra/authtools/sx_passwd.py /usr/bin/sx_passwd)
 
     # portal installation
     install(DIRECTORY infra/portal DESTINATION share/smithproxy/www)
