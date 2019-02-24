@@ -570,6 +570,12 @@ std::thread* create_identity_refresh_thread() {
     std::thread * id_thread = new std::thread([]() {
         unsigned int sleep_time = 1;
 
+        // give some time to init shm - don't run immediately
+        // this is workaround for rare(?) race condition when shm is not
+        // initialized yet.
+
+        ::sleep(20);
+
         for (unsigned i = 0; ; i++) {
 
             DEBS_("id_thread: refreshing identities");
