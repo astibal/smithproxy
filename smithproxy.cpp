@@ -119,6 +119,7 @@ std::thread* socks_thread = nullptr;
 std::thread* cli_thread = nullptr;
 std::thread* log_thread = nullptr;
 std::thread* dns_thread = nullptr;
+std::thread* id_thread = nullptr;
 
 volatile static int cnt_terminate = 0;
 static bool cfg_daemonize = false;
@@ -563,6 +564,29 @@ bool apply_tenant_config() {
     return (ret == 0);
 }
 
+std::thread* create_identity_refresh_thread() {
+
+
+    std::thread * id_thread = new std::thread([]() {
+        unsigned int sleep_time = 1;
+
+        for (unsigned i = 0; ; i++) {
+
+            DEBS_("id_thread: refreshing identities");
+
+            cfgapi_auth_shm_ip_table_refresh();
+            cfgapi_auth_shm_ip6_table_refresh();
+            cfgapi_auth_shm_token_table_refresh();
+
+            DUMS_("id_thread: finished");
+
+            ::sleep(sleep_time);
+        }
+    });
+
+    return id_thread;
+};
+
 int main(int argc, char *argv[]) {
 
 
@@ -739,9 +763,12 @@ int main(int argc, char *argv[]) {
         dns_thread = create_dns_updater();
         if(dns_thread != nullptr) {
             pthread_setname_np(dns_thread->native_handle(),string_format("sxy_dns_%s",cfg_tenant_index.c_str()).c_str());
-        }    
-        
-        
+        }
+
+        id_thread = create_identity_refresh_thread();
+        if(id_thread != nullptr) {
+            pthread_setname_np(id_thread->native_handle(),string_format("sxy_idu_%s",cfg_tenant_index.c_str()).c_str());
+        }
     }
     // write out PID file
     daemon_write_pidfile();
