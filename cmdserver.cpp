@@ -1164,6 +1164,101 @@ int cli_diag_mem_objects_stats(struct cli_def *cli, const char *command, char *a
 
 }
 
+int cli_diag_mem_trace_mark (struct cli_def *cli, const char *command, char **argv, int argc) {
+
+#ifdef MEMPOOL_DEBUG
+
+    std::lock_guard<std::mutex> l(mempool_ptr_map_lock);
+
+    for ( auto it = mempool_ptr_map.begin() ; it != mempool_ptr_map.end() ; ++it) {
+        it->second.mark = 1;
+    }
+
+    return CLI_OK;
+#else
+
+    cli_print("memory tracing not enabled.");
+#endif
+}
+
+
+
+int cli_diag_mem_trace_list (struct cli_def *cli, const char *command, char **argv, int argc) {
+#ifdef MEMPOOL_DEBUG
+    int n = 100;
+    uint32_t filter = 0;
+
+    try {
+        if (argc > 0) {
+            n = std::stoi(std::string(argv[0]));
+        }
+
+    } catch (const std::exception& e) {
+        cli_print(cli, "invalid argument: %s", argv[0]);
+        return CLI_OK;
+    }
+
+
+    if(mem_chunk::trace_enabled)
+    {
+        std::unordered_map<std::string, long long int> occ;
+        {
+            std::lock_guard<std::mutex> l(mempool_ptr_map_lock);
+
+            for (auto mem: mempool_ptr_map) {
+                auto mch = mem.second;
+                if ( (!mch.in_pool) && mch.mark == filter) {
+                    std::string k;
+
+                    //k = mch.str_trace();
+                    k.resize((size_t)(sizeof(void*))*mch.trace_size);
+                    ::memcpy((void*)k.data(), mch.trace, (size_t)(sizeof(void*))*mch.trace_size);
+
+
+                    auto i = occ.find(k);
+                    if (i != occ.end()) {
+
+                        occ[k]++;
+                    } else {
+                        occ[k] = 1;
+                    }
+                }
+            }
+
+            cli_print(cli, "Allocation traces: processed %ld used mempool entries", mempool_ptr_map.size());
+        }
+        cli_print(cli, "Allocation traces: parsed %ld unique entries.", occ.size());
+
+        std::map<long long int, std::string> ordered;
+        for(auto i: occ) {
+            ordered[i.second] = i.first;
+        }
+
+        cli_print(cli, "\nAllocation traces (top-%d):", n);
+
+        auto i = ordered.rbegin();
+        while(i != ordered.rend() && n > 0) {
+            mem_chunk_t m;
+
+            memcpy(&m.trace, i->second.data(), i->second.size());
+            m.trace_size = (int) i->second.size()/sizeof(void*);
+
+            cli_print(cli, "\nNumber of traces: %lld\n%s", i->first, m.str_trace().c_str());
+            ++i;
+            --n;
+        }
+    };
+
+
+#else
+
+    cli_print("memory tracing not enabled.");
+
+#endif
+    return CLI_OK;
+}
+
+
 
 int cli_diag_mem_objects_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
     
@@ -1187,7 +1282,7 @@ int cli_diag_mem_objects_list(struct cli_def *cli, const char *command, char *ar
                 object_filter = a1.c_str();
             }
         }
-        
+
         if(argc > 1) {
             std::string a2 = argv[1];
             verbosity = safe_val(a2,iINF);
@@ -1470,6 +1565,7 @@ void client_thread(int client_socket) {
     struct cli_command *diag_mem;
                 struct cli_command *diag_mem_buffers;
                 struct cli_command *diag_mem_objects;
+                struct cli_command *diag_mem_trace;
             struct cli_command *diag_dns;
                 struct cli_command *diag_dns_cache;
                 struct cli_command *diag_dns_domains;
@@ -1546,6 +1642,9 @@ void client_thread(int client_socket) {
                         cli_register_command(cli, diag_mem_objects, "list", cli_diag_mem_objects_list, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory objects list");
                         cli_register_command(cli, diag_mem_objects, "search", cli_diag_mem_objects_search, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory objects search");
                         cli_register_command(cli, diag_mem_objects, "clear", cli_diag_mem_objects_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clears memory object");
+                diag_mem_trace = cli_register_command(cli, diag_mem, "trace", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory tracing commands");
+                        cli_register_command(cli, diag_mem_trace, "list", cli_diag_mem_trace_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "print out memory allocation traces (arg: number of top entries to print)");
+                        cli_register_command(cli, diag_mem_trace, "mark", cli_diag_mem_trace_mark, PRIVILEGE_PRIVILEGED, MODE_EXEC, "mark all currently existing allocations as seen.");
             diag_dns = cli_register_command(cli, diag, "dns", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "DNS traffic related troubleshooting commands");
                 diag_dns_cache = cli_register_command(cli, diag_dns, "cache", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "DNS traffic cache troubleshooting commands");
                         cli_register_command(cli, diag_dns_cache, "list", cli_diag_dns_cache_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all DNS traffic cache entries");

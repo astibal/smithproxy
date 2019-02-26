@@ -36,10 +36,9 @@
     this exception also makes it possible to release a modified version
     which carries forward this exception.
     """
+from __future__ import print_function
 
 import logging
-import pylibconfig2 as cfg
-
 
 def cfgloglevel_to_py(cfglevel):
 
@@ -60,6 +59,9 @@ def cfgloglevel_to_py(cfglevel):
     
 
 def cfg_to_dict(cfg_element):
+
+    import pylibconfig2 as cfg
+
     # this is materialization of the shame of pylibconfig2. 
     # It cannot convert ConfigGroup into dictionary. Poor.
     if isinstance(cfg_element,cfg.ConfGroup):
@@ -107,3 +109,54 @@ def unique_prefixes(lst,delim):
             if prefix not in u:
                 u.append(prefix)
     return u
+
+
+#
+# Ask question, until you get answer from the list.
+# Default is the first choice, choices are case insensitive.
+# If choices start with same letters, shortcut response is ambiguous and first in the choice list will be returned.
+# So you want avoid ambiguous choices ;-)
+#
+def ask_bot(answers, question):
+
+
+    norm_answers = []
+    for a in answers:
+        norm_answers.append(a.strip().lower())
+
+    trailer = '['
+    for a in answers:
+        trailer += a
+        trailer += '/'
+
+    # remove last /
+    trailer = trailer[:-1]
+    trailer += ']'
+
+    ask_question = question + " " + trailer + "? "
+
+    ret = None
+    while True:
+        response = input(ask_question)
+        rr = response.strip().lower()
+
+        # print("response: '" + rr + "'")
+
+        i = 0
+        for a in norm_answers:
+            # print(a + "?" + rr)
+
+            if a.startswith(rr):
+                ret = answers[i]
+
+                # print("ret="+a)
+                break
+            i += 1
+
+        if ret:
+            # print("ret="+a)
+            break
+    return ret
+
+
+
