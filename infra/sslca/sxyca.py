@@ -248,7 +248,7 @@ def sign_csr(key, csr, caprofile, valid=30, isca=False, cacert=None, aia_issuers
     builder = builder.not_valid_before(datetime.datetime.today() - one_day)
     builder = builder.not_valid_after(datetime.datetime.today() + (one_day * valid))
     #builder = builder.serial_number(x509.random_serial_number()) # too new to some systems
-    builder = builder.serial_number(int.from_bytes(os.urandom(20), byteorder="big"))
+    builder = builder.serial_number(int.from_bytes(os.urandom(10), byteorder="big"))
     builder = builder.public_key(csr.public_key())
 
     builder = builder.add_extension(x509.SubjectKeyIdentifier.from_public_key(csr.public_key()), critical=False)
