@@ -1071,7 +1071,6 @@ int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *a
         cli_print(cli, "\nMemory pool API stats:");
         cli_print(cli, "acquires: %lld/%lldB", memPool::stat_acq, memPool::stat_acq_size);
         cli_print(cli, "releases: %lld/%lldB", memPool::stat_ret, memPool::stat_ret_size);
-        cli_print(cli, "outside releases: %lld/%lldB", memPool::stat_out_free, memPool::stat_out_free_size);
 
         cli_print(cli,"\nNon-API allocations:");
         cli_print(cli, "mp_allocs: %lld", stat_mempool_alloc);
@@ -1084,8 +1083,8 @@ int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *a
 
         cli_print(cli," ");
         cli_print(cli, "API allocations above limits:");
-        cli_print(cli, "allocations: %lld/%lld", memPool::stat_alloc, memPool::stat_alloc_size);
-        cli_print(cli, "frees      : %lld/%lld", memPool::stat_free, memPool::stat_free_size);
+        cli_print(cli, "allocations: %lld/%lldB", memPool::stat_alloc, memPool::stat_alloc_size);
+        cli_print(cli, "   releases: %lld/%lldB", memPool::stat_out_free, memPool::stat_out_free_size);
 
         cli_print(cli,"\nPool capacities (available/limits):");
         cli_print(cli," 32B pool size: %ld/%ld", buffer::pool.available_32.size(), 10* buffer::pool.sz256);
