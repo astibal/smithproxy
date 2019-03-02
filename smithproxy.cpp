@@ -132,34 +132,7 @@ bool cfg_openssl_mem_dbg = true;
 static bool cfg_mtrace_enable = true;
 #endif
 
-static loglevel  args_debug_flag = NON;
-// static int   ssl_flag = 0;
-static std::string cfg_tcp_listen_port = "50080";
-static std::string cfg_ssl_listen_port = "50443";
-static std::string cfg_dtls_port = "50443";
-static std::string cfg_udp_port = "50080";
-static std::string cfg_socks_port = "1080";
 
-static std::string config_file;
-bool config_file_check_only = false;
-
-static std::string cfg_messages_dir = "/etc/smithproxy/msg/en/";
-
-
-static int cfg_tcp_workers = 0;
-static int cfg_ssl_workers = 0;
-static int cfg_dtls_workers = 0;
-static int cfg_udp_workers = 0;
-static int cfg_socks_workers = 0;
-
-static std::string cfg_tenant_index;
-static std::string cfg_tenant_name;
-
-static std::string cfg_syslog_server   = "";
-static int         cfg_syslog_port     = 514;
-static int         cfg_syslog_facility =  23; //local7
-static loglevel         cfg_syslog_level = INF;
-static int         cfg_syslog_family = 4;
 
 
 void my_terminate (int param) {

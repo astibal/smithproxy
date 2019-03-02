@@ -65,6 +65,36 @@
 
 using namespace libconfig;
 
+
+extern loglevel  args_debug_flag;
+
+extern std::string cfg_tcp_listen_port;
+extern std::string cfg_ssl_listen_port;
+extern std::string cfg_dtls_port;
+extern std::string cfg_udp_port;
+extern std::string cfg_socks_port;
+
+extern std::string config_file;
+extern bool config_file_check_only;
+
+extern std::string cfg_messages_dir;
+
+
+extern int cfg_tcp_workers;
+extern int cfg_ssl_workers;
+extern int cfg_dtls_workers;
+extern int cfg_udp_workers;
+extern int cfg_socks_workers;
+
+extern std::string cfg_tenant_index;
+extern std::string cfg_tenant_name;
+
+extern std::string cfg_syslog_server;
+extern int         cfg_syslog_port;
+extern int         cfg_syslog_facility;
+extern loglevel    cfg_syslog_level;
+extern int         cfg_syslog_family;
+
 extern time_t system_started;
 extern Config cfgapi;
 extern std::map<std::string,AddressObject*> cfgapi_obj_address;

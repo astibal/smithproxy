@@ -50,6 +50,36 @@
 
 #include <shmtable.hpp>
 
+loglevel  args_debug_flag = NON;
+
+std::string cfg_tcp_listen_port = "50080";
+std::string cfg_ssl_listen_port = "50443";
+std::string cfg_dtls_port = "50443";
+std::string cfg_udp_port = "50080";
+std::string cfg_socks_port = "1080";
+
+std::string config_file;
+bool config_file_check_only = false;
+
+std::string cfg_messages_dir = "/etc/smithproxy/msg/en/";
+
+
+int cfg_tcp_workers   = 0;
+int cfg_ssl_workers   = 0;
+int cfg_dtls_workers  = 0;
+int cfg_udp_workers   = 0;
+int cfg_socks_workers = 0;
+
+std::string cfg_tenant_index;
+std::string cfg_tenant_name;
+
+std::string cfg_syslog_server   = "";
+int         cfg_syslog_port     = 514;
+int         cfg_syslog_facility =  23; //local7
+loglevel    cfg_syslog_level    = INF;
+int         cfg_syslog_family   = 4;
+
+
 Config cfgapi;
 time_t system_started;
 
