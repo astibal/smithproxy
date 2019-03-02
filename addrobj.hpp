@@ -50,6 +50,8 @@ public:
     virtual bool match(CIDR* c) = 0;
     virtual std::string to_string(int=iINF) = 0;
     virtual ~AddressObject() {};
+
+    std::string prof_name;
 };
 
 
@@ -62,7 +64,17 @@ public:
     virtual bool match(CIDR* c) { return (contains(c) >= 0); };
     virtual bool ask_destroy() { return false; };
     
-    virtual std::string to_string(int verbosity=iINF) { char* temp = cidr_to_str(c_); std::string ret = string_format("CidrAddress: %s",temp); delete temp; return ret;  }
+    virtual std::string to_string(int verbosity=iINF) {
+        char* temp = cidr_to_str(c_);
+
+        std::string ret = string_format("CidrAddress: %s",temp);
+
+        if(! prof_name.empty()) {
+            ret += string_format(" (name=%s)", prof_name.c_str());
+        }
+
+        delete temp; return ret;
+    }
     
     
     virtual ~CidrAddress() { cidr_free(c_); };

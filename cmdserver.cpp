@@ -1243,6 +1243,302 @@ int save_config_proto_objects(Config& ex) {
 }
 
 
+int save_config_debug(Config& ex) {
+
+    if(!ex.exists("debug"))
+        ex.getRoot().add("debug", Setting::TypeGroup);
+
+    Setting& deb_objects = ex.getRoot()["debug"];
+
+    deb_objects.add("log_data_crc", Setting::TypeBoolean) =  baseCom::debug_log_data_crc;
+    deb_objects.add("log_sockets", Setting::TypeBoolean) = baseHostCX::socket_in_name;
+    deb_objects.add("log_online_cx_name", Setting::TypeBoolean) = baseHostCX::online_name;
+    deb_objects.add("log_srclines", Setting::TypeBoolean) = get_logger()->print_srcline();
+    deb_objects.add("log_srclines_always", Setting::TypeBoolean) = get_logger()->print_srcline_always();
+
+
+    Setting& deb_log_objects = deb_objects.add("log", Setting::TypeGroup);
+    deb_log_objects.add("sslcom", Setting::TypeInt) = (int)SSLCom::log_level_ref().level_;
+    deb_log_objects.add("sslmitmcom", Setting::TypeInt) = (int)baseSSLMitmCom<DTLSCom>::log_level_ref().level_;
+    deb_log_objects.add("sslcertstore", Setting::TypeInt) = (int)SSLCertStore::log_level_ref().level_;
+    deb_log_objects.add("proxy", Setting::TypeInt) = (int)baseProxy::log_level_ref().level_;
+    deb_log_objects.add("epoll", Setting::TypeInt) = (int)epoll::log_level.level_;
+    deb_log_objects.add("mtrace", Setting::TypeBoolean) = cfg_mtrace_enable;
+    deb_log_objects.add("openssl_mem_dbg", Setting::TypeBoolean) = cfg_openssl_mem_dbg;
+    deb_log_objects.add("alg_dns", Setting::TypeInt) = (int)DNS_Inspector::log_level_ref().level_;
+    deb_log_objects.add("pkt_dns", Setting::TypeInt) = (int)DNS_Packet::log_level_ref().level_;
+
+
+    return 0;
+}
+
+
+int save_config_detection_profiles(Config& ex) {
+
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+
+    Setting& objects = ex.getRoot().add("detection_profiles", Setting::TypeGroup);
+
+    int n_saved = 0;
+
+    for (auto it: cfgapi_obj_profile_detection) {
+        auto name = it.first;
+        auto obj = it.second;
+
+        Setting& item = objects.add(name, Setting::TypeGroup);
+        item.add("mode", Setting::TypeInt) = obj->mode;
+
+        n_saved++;
+    }
+
+    return n_saved;
+}
+
+int save_config_content_profiles(Config& ex) {
+
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+
+    Setting& objects = ex.getRoot().add("content_profiles", Setting::TypeGroup);
+
+    int n_saved = 0;
+
+    for (auto it: cfgapi_obj_profile_content) {
+        auto name = it.first;
+        auto obj = it.second;
+
+        Setting& item = objects.add(name, Setting::TypeGroup);
+        item.add("write_payload", Setting::TypeBoolean) = obj->write_payload;
+
+        if(! obj->content_rules.empty() ) {
+
+            Setting& cr_rules = item.add("content_rules", Setting::TypeList);
+
+            for(auto cr: obj->content_rules) {
+                Setting& cr_rule = cr_rules.add(Setting::TypeGroup);
+                cr_rule.add("match", Setting::TypeString) = cr.match;
+                cr_rule.add("replace", Setting::TypeString) = cr.replace;
+                cr_rule.add("replace_each_nth", Setting::TypeInt) = cr.replace_each_nth;
+            }
+        }
+
+        n_saved++;
+    }
+
+    return n_saved;
+}
+
+
+int save_config_tls_ca(Config& ex) {
+
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+
+    Setting& objects = ex.getRoot().add("tls_ca", Setting::TypeGroup);
+
+    int n_saved = 0;
+
+//    for (auto it: cfgapi_obj_tls_ca) {
+//        auto name = it.first;
+//        auto obj = it.second;
+//
+//        Setting& item = objects.add(name, Setting::TypeGroup);
+//        item.add("path", Setting::TypeString) = obj.path;
+//
+//        n_saved++;
+//    }
+
+    return n_saved;
+}
+
+int save_config_tls_profiles(Config& ex) {
+
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+
+    Setting& objects = ex.getRoot().add("tls_profiles", Setting::TypeGroup);
+
+    int n_saved = 0;
+
+    for (auto it: cfgapi_obj_profile_tls) {
+        auto name = it.first;
+        auto obj = it.second;
+
+        Setting& item = objects.add(name, Setting::TypeGroup);
+
+        item.add("inspect", Setting::TypeBoolean) = obj->inspect;
+
+        item.add("use_pfs", Setting::TypeBoolean) = obj->use_pfs;
+        item.add("left_use_pfs", Setting::TypeBoolean) = obj->left_use_pfs;
+        item.add("right_use_pfs", Setting::TypeBoolean) = obj->right_use_pfs;
+
+        item.add("allow_untrusted_issuers", Setting::TypeBoolean) = obj->allow_untrusted_issuers;
+        item.add("allow_invalid_certs", Setting::TypeBoolean) = obj->allow_invalid_certs;
+        item.add("allow_self_signed", Setting::TypeBoolean) = obj->allow_self_signed;
+
+        item.add("ocsp_mode", Setting::TypeInt) = obj->ocsp_mode;
+        item.add("ocsp_stapling", Setting::TypeBoolean) = obj->ocsp_stapling;
+        item.add("ocsp_stapling_mode", Setting::TypeInt) = obj->ocsp_stapling_mode;
+
+        // add sni bypass list
+        if(obj->sni_filter_bypass.ptr() && obj->sni_filter_bypass.ptr()->size() > 0 ) {
+            Setting& sni_flist = item.add("sni_filter_bypass", Setting::TypeList);
+
+            for( auto snif: *obj->sni_filter_bypass.ptr()) {
+                sni_flist.add(Setting::TypeString) = snif;
+            }
+        }
+
+        // add redirected ports (for replacements)
+        if( obj->redirect_warning_ports.ptr() && obj->redirect_warning_ports.ptr()->size() > 0 ) {
+
+            Setting& rport_list = item.add("redirect_warning_ports", Setting::TypeList);
+
+            for( auto rport: *obj->redirect_warning_ports.ptr()) {
+                rport_list.add(Setting::TypeInt) = rport;
+            }
+        }
+        item.add("failed_certcheck_replacement", Setting::TypeBoolean) = obj->failed_certcheck_replacement;
+        item.add("failed_certcheck_override", Setting::TypeBoolean) = obj->failed_certcheck_override;
+        item.add("failed_certcheck_override_timeout", Setting::TypeInt) = obj->failed_certcheck_override_timeout;
+
+
+        item.add("left_disable_reuse", Setting::TypeBoolean) = obj->left_disable_reuse;
+        item.add("right_disable_reuse", Setting::TypeBoolean) = obj->right_disable_reuse;
+        item.add("sslkeylog", Setting::TypeBoolean) = obj->sslkeylog;
+
+        n_saved++;
+    }
+
+
+
+    return n_saved;
+}
+
+
+int save_config_alg_dns_profiles(Config& ex) {
+
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+
+    Setting& objects = ex.getRoot().add("dns_profiles", Setting::TypeGroup);
+
+    int n_saved = 0;
+
+    for (auto it: cfgapi_obj_profile_alg_dns) {
+        auto name = it.first;
+        auto obj = it.second;
+
+        Setting& item = objects.add(name, Setting::TypeGroup);
+        item.add("match_request_id", Setting::TypeBoolean) = obj->match_request_id;
+        item.add("randomize_id", Setting::TypeBoolean) = obj->randomize_id;
+        item.add("cached_responses", Setting::TypeBoolean) = obj->cached_responses;
+
+        n_saved++;
+    }
+
+    return n_saved;
+}
+
+
+int save_config_auth_profiles(Config& ex) {
+
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+
+    Setting& objects = ex.getRoot().add("auth_profiles", Setting::TypeGroup);
+
+    int n_saved = 0;
+
+    for (auto it: cfgapi_obj_profile_auth) {
+        auto name = it.first;
+        auto obj = it.second;
+
+        Setting& item = objects.add(name, Setting::TypeGroup);
+        item.add("authenticate", Setting::TypeBoolean) = obj->authenticate;
+        item.add("resolve", Setting::TypeBoolean) = obj->resolve;
+
+        if(obj->sub_policies.size() > 0) {
+
+            for( auto identity: obj->sub_policies) {
+                Setting& subid = item.add(identity->name, Setting::TypeGroup);
+
+                if(identity->profile_detection)
+                    subid.add("detection_profile", Setting::TypeString) = identity->profile_detection->prof_name;
+
+                if(identity->profile_tls)
+                    subid.add("tls_profile", Setting::TypeString) = identity->profile_tls->prof_name;
+
+                if(identity->profile_content)
+                    subid.add("content_profile", Setting::TypeString) = identity->profile_content->prof_name;
+
+                if(identity->profile_alg_dns)
+                    subid.add("alg_dns_profile", Setting::TypeString) = identity->profile_alg_dns->prof_name;
+
+            }
+        }
+
+        n_saved++;
+    }
+
+    return n_saved;
+}
+
+
+int save_config_policy(Config& ex) {
+
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+
+    Setting& objects = ex.getRoot().add("policy", Setting::TypeList);
+
+    int n_saved = 0;
+
+    for (PolicyRule* pol: cfgapi_obj_policy) {
+
+        if(! pol)
+            continue;
+
+        Setting& item = objects.add(Setting::TypeGroup);
+
+        item.add("proto", Setting::TypeString) = pol->proto_name;
+
+        // SRC
+        Setting& src_list = item.add("src", Setting::TypeList);
+        for(auto s: pol->src) {
+            src_list.add(Setting::TypeString) = s->prof_name;
+        }
+        Setting& srcport_list = item.add("sport", Setting::TypeList);
+        for(auto sp: pol->src_ports_names) {
+            srcport_list.add(Setting::TypeString) = sp;
+        }
+
+
+        // DST
+        Setting& dst_list = item.add("dst", Setting::TypeList);
+        for(auto d: pol->dst) {
+            dst_list.add(Setting::TypeString) = d->prof_name;
+        }
+        Setting& dstport_list = item.add("dport", Setting::TypeList);
+        for(auto sp: pol->dst_ports_names) {
+            dstport_list.add(Setting::TypeString) = sp;
+        }
+
+        item.add("action", Setting::TypeString) = pol->action_name;
+        item.add("nat", Setting::TypeString) = pol->nat_name;
+
+        if(pol->profile_tls)
+            item.add("tls_profile", Setting::TypeString) = pol->profile_tls->prof_name;
+        if(pol->profile_detection)
+            item.add("detection_profile", Setting::TypeString) = pol->profile_detection->prof_name;
+        if(pol->profile_content)
+            item.add("content_profile", Setting::TypeString) = pol->profile_content->prof_name;
+        if(pol->profile_auth)
+            item.add("auth_profile", Setting::TypeString) = pol->profile_auth->prof_name;
+        if(pol->profile_alg_dns)
+            item.add("alg_dns_profile", Setting::TypeString) = pol->profile_alg_dns->prof_name;
+
+        n_saved++;
+    }
+
+    return n_saved;
+}
+
+
 int save_config_settings(Config& ex) {
 
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
@@ -1322,24 +1618,6 @@ int save_config_settings(Config& ex) {
     auth_objects.add("ssl_cert", Setting::TypeString) = cfg_auth_sslcert;
     auth_objects.add("magic_ip", Setting::TypeString) = cfgapi_tenant_magic_ip;
 
-    Setting& deb_objects = objects.add("debug", Setting::TypeGroup);
-    deb_objects.add("log_data_crc", Setting::TypeBoolean) =  baseCom::debug_log_data_crc;
-    deb_objects.add("log_sockets", Setting::TypeBoolean) = baseHostCX::socket_in_name;
-    deb_objects.add("log_online_cx_name", Setting::TypeBoolean) = baseHostCX::online_name;
-    deb_objects.add("log_srclines", Setting::TypeBoolean) = get_logger()->print_srcline();
-    deb_objects.add("log_srclines_always", Setting::TypeBoolean) = get_logger()->print_srcline_always();
-
-
-    Setting& deb_log_objects = deb_objects.add("log", Setting::TypeGroup);
-    deb_log_objects.add("sslcom", Setting::TypeInt) = (int)SSLCom::log_level_ref().level_;
-    deb_log_objects.add("sslmitmcom", Setting::TypeInt) = (int)baseSSLMitmCom<DTLSCom>::log_level_ref().level_;
-    deb_log_objects.add("sslcertstore", Setting::TypeInt) = (int)SSLCertStore::log_level_ref().level_;
-    deb_log_objects.add("proxy", Setting::TypeInt) = (int)baseProxy::log_level_ref().level_;
-    deb_log_objects.add("epoll", Setting::TypeInt) = (int)epoll::log_level.level_;
-    deb_log_objects.add("mtrace", Setting::TypeBoolean) = cfg_mtrace_enable;
-    deb_log_objects.add("openssl_mem_dbg", Setting::TypeBoolean) = cfg_openssl_mem_dbg;
-    deb_log_objects.add("alg_dns", Setting::TypeInt) = (int)DNS_Inspector::log_level_ref().level_;
-    deb_log_objects.add("pkt_dns", Setting::TypeInt) = (int)DNS_Packet::log_level_ref().level_;
 
     return 0;
 }
@@ -1350,11 +1628,15 @@ int cli_save_config(struct cli_def *cli, const char *command, char *argv[], int 
 
     Config ex;
     ex.setOptions(Setting::OptionOpenBraceOnSeparateLine);
+    ex.setTabWidth(4);
 
     int n = 0;
 
     n = save_config_settings(ex);
-    cli_print(cli, "... settings");
+    cli_print(cli, "... common settings");
+
+    n = save_config_debug(ex);
+    cli_print(cli, "... debug settings");
 
     n = save_config_address_objects(ex);
     cli_print(cli, "%d address_objects", n);
@@ -1365,7 +1647,37 @@ int cli_save_config(struct cli_def *cli, const char *command, char *argv[], int 
     n = save_config_proto_objects(ex);
     cli_print(cli, "%d proto_objects", n);
 
+    n = save_config_detection_profiles(ex);
+    cli_print(cli, "%d detection_profiles", n);
+
+    n = save_config_content_profiles(ex);
+    cli_print(cli, "%d content_profiles", n);
+
+    n = save_config_tls_ca(ex);
+    cli_print(cli, "%d tls_ca", n);
+
+    n = save_config_tls_profiles(ex);
+    cli_print(cli, "%d tls_profiles", n);
+
+    n = save_config_alg_dns_profiles(ex);
+    cli_print(cli, "%d alg_dns_profiles", n);
+
+    n = save_config_auth_profiles(ex);
+    cli_print(cli, "%d auth_profiles", n);
+
+    n = save_config_policy(ex);
+    cli_print(cli, "%d policy", n);
+
     ex.writeFile("/tmp/saved_config.cfg");
+
+    return CLI_OK;
+}
+
+int cli_show_config(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+
+    cfgapi.write(cli->client);
 
     return CLI_OK;
 }
@@ -1814,6 +2126,7 @@ void client_thread(int client_socket) {
 
         show  = cli_register_command(cli, NULL, "show", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show basic information");
                 cli_register_command(cli, show, "status", cli_show_status, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show smithproxy status");
+                cli_register_command(cli, show, "config", cli_show_config, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show smithproxy configuration");
 
         test  = cli_register_command(cli, NULL, "test", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "various testing commands");
                 test_dns = cli_register_command(cli, test, "dns", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "dns related testing commands");

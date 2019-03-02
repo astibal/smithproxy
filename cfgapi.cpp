@@ -257,6 +257,7 @@ int cfgapi_load_obj_address() {
                         if (cur_object.lookupValue("cidr",address)) {
                             CIDR* c = cidr_from_str(address.c_str());
                             cfgapi_obj_address[name] = new CidrAddress(c);
+                            cfgapi_obj_address[name]->prof_name = name;
                             DIA_("cfgapi_load_addresses: cidr '%s': ok",name.c_str());
                         }
                     break;
@@ -264,6 +265,7 @@ int cfgapi_load_obj_address() {
                         if (cur_object.lookupValue("fqdn",address))  {
                             FqdnAddress* f = new FqdnAddress(address);
                             cfgapi_obj_address[name] = f;
+                            cfgapi_obj_address[name]->prof_name = name;
                             DIA_("cfgapi_load_addresses: fqdn '%s': ok",name.c_str());
                         }
                     break;
@@ -399,6 +401,7 @@ int cfgapi_load_obj_policy() {
             if(cur_object.lookupValue("proto",proto)) {
                 int r = cfgapi_lookup_proto(proto.c_str());
                 if(r != 0) {
+                    rule->proto_name = proto;
                     rule->proto = r;
                     rule->proto_default = false;
                     DIA_("cfgapi_load_policy[#%d]: proto object: %s",i,proto.c_str());
@@ -448,6 +451,7 @@ int cfgapi_load_obj_policy() {
                     range r = cfgapi_lookup_port(sport.c_str());
                     if(r != NULLRANGE) {
                         rule->src_ports.push_back(r);
+                        rule->src_ports_names.push_back(sport);
                         rule->src_ports_default = false;
                         DIA_("cfgapi_load_policy[#%d]: src_port object: %s",i,sport.c_str());
                     } else {
@@ -464,6 +468,7 @@ int cfgapi_load_obj_policy() {
                     range r = cfgapi_lookup_port(obj_name);
                     if(r != NULLRANGE) {
                         rule->src_ports.push_back(r);
+                        rule->src_ports_names.push_back(obj_name);
                         rule->src_ports_default = false;
                         DIA_("cfgapi_load_policy[#%d]: src_port object: %s",i,obj_name);
                     } else {
@@ -511,6 +516,7 @@ int cfgapi_load_obj_policy() {
                     range r = cfgapi_lookup_port(dport.c_str());
                     if(r != NULLRANGE) {
                         rule->dst_ports.push_back(r);
+                        rule->dst_ports_names.push_back(dport);
                         rule->dst_ports_default = false;
                         DIA_("cfgapi_load_policy[#%d]: dst_port object: %s",i,dport.c_str());
                     } else {
@@ -527,6 +533,7 @@ int cfgapi_load_obj_policy() {
                     range r = cfgapi_lookup_port(obj_name);
                     if(r != NULLRANGE) {
                         rule->dst_ports.push_back(r);
+                        rule->dst_ports_names.push_back(obj_name);
                         rule->dst_ports_default = false;
                         DIA_("cfgapi_load_policy[#%d]: dst_port object: %s",i,obj_name);
                     } else {
@@ -540,19 +547,23 @@ int cfgapi_load_obj_policy() {
                 int r_a = 1;
                 if(action == "deny") {
                     DIA_("cfgapi_load_policy[#%d]: action: deny",i);
-                    r_a = 0;
+                    r_a = POLICY_ACTION_DENY;
+                    rule->action_name = action;
+
                 } else if (action == "accept"){
                     DIA_("cfgapi_load_policy[#%d]: action: accept",i);
-                    r_a = 1;
+                    r_a = POLICY_ACTION_PASS;
+                    rule->action_name = action;
                 } else {
                     DIA_("cfgapi_load_policy[#%d]: action: unknown action '%s'",i,action.c_str());
-                    r_a  = 0;
+                    r_a  = POLICY_ACTION_DENY;
                     error = true;
                 }
                 
                 rule->action = r_a;
             } else {
-                rule->action = 1;
+                rule->action = POLICY_ACTION_DENY;
+                rule->action_name = "deny";
             }
 
             if(cur_object.lookupValue("nat",nat)) {
@@ -561,12 +572,16 @@ int cfgapi_load_obj_policy() {
                 if(nat == "none") {
                     DIA_("cfgapi_load_policy[#%d]: nat: none",i);
                     nat_a = POLICY_NAT_NONE;
+                    rule->nat_name = nat;
+
                 } else if (nat == "auto"){
                     DIA_("cfgapi_load_policy[#%d]: nat: auto",i);
                     nat_a = POLICY_NAT_AUTO;
+                    rule->nat_name = nat;
                 } else {
                     DIA_("cfgapi_load_policy[#%d]: nat: unknown nat method '%s'",i,nat.c_str());
-                    nat_a  = POLICY_NAT_AUTO;
+                    nat_a  = POLICY_NAT_NONE;
+                    rule->nat_name = "none";
                     error = true;
                 }
                 

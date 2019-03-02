@@ -79,20 +79,25 @@ public:
        unsigned int cnt_matches = 0;
     
        int proto = 6;
+       std::string proto_name;
        bool proto_default = true;
     
        std::vector<AddressObject*> src;
        bool src_default = true;
        std::vector<range> src_ports;
+       std::vector<std::string> src_ports_names;
        bool src_ports_default = true;
        
        std::vector<AddressObject*> dst;
        bool dst_default = true;
        std::vector<range> dst_ports;
+       std::vector<std::string> dst_ports_names;
        bool dst_ports_default = true;
 
        int action = POLICY_ACTION_PASS;
+       std::string action_name;
        int nat    = POLICY_NAT_NONE;
+       std::string nat_name;
       
        PolicyRule() : ProfileList(), socle::sobject() {};
        virtual ~PolicyRule();

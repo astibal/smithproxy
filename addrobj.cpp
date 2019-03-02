@@ -70,7 +70,11 @@ std::string FqdnAddress::to_string(int verbosity) {
             ret += " (not cached)";
         }
     }
-    
+
+    if(! prof_name.empty()) {
+        ret += string_format(" (name=%s)", prof_name.c_str());
+    }
+
     return ret;
 }
 
