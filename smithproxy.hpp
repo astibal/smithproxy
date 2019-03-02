@@ -42,3 +42,4 @@
 
 
 extern bool cfg_openssl_mem_dbg;
+extern bool cfg_mtrace_enable;

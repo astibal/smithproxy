@@ -195,7 +195,7 @@ std::thread* backend_thread = nullptr;
 static std::string config_file;
 std::recursive_mutex merged_cfg_write_lock;
 static bool cfg_daemonize = false;
-static bool cfg_mtrace_enable = false;
+bool cfg_mtrace_enable = false;
 static std::string cfg_log_file;
 static loglevel cfg_log_level = INF;
 static int cfg_log_console = false;

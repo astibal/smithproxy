@@ -1155,6 +1155,221 @@ int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *a
     return CLI_OK;
 }
 
+
+int save_config_address_objects(Config& ex) {
+
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+
+    Setting& address_objects = ex.getRoot().add("address_objects", Setting::TypeGroup);
+
+    int n_saved = 0;
+
+    for (auto it: cfgapi_obj_address) {
+        auto name = it.first;
+        auto obj = it.second;
+
+        Setting& item = address_objects.add(name, Setting::TypeGroup);
+
+        if(obj->c_name() == std::string("FqdnAddress")) {
+            Setting &s_type = item.add("type", Setting::TypeInt);
+            Setting &s_fqdn = item.add("fqdn", Setting::TypeString);
+
+            s_type = 1;
+            s_fqdn = ((FqdnAddress*)(obj))->fqdn();
+
+            n_saved++;
+        }
+        else
+        if(obj->c_name() == std::string("CidrAddress")) {
+            Setting &s_type = item.add("type", Setting::TypeInt);
+            Setting &s_cidr = item.add("cidr", Setting::TypeString);
+
+            s_type = 0;
+            const char* addr = cidr_to_str(((CidrAddress*)(obj))->cidr());
+            s_cidr =  addr;
+            delete[] addr;
+
+            n_saved++;
+        }
+
+    }
+
+    return n_saved;
+}
+
+
+int save_config_port_objects(Config& ex) {
+
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+
+    Setting& objects = ex.getRoot().add("port_objects", Setting::TypeGroup);
+
+    int n_saved = 0;
+
+    for (auto it: cfgapi_obj_port) {
+        auto name = it.first;
+        auto obj = it.second;
+
+        Setting& item = objects.add(name, Setting::TypeGroup);
+        item.add("start", Setting::TypeInt) = obj.first;
+        item.add("end", Setting::TypeInt) = obj.second;
+
+        n_saved++;
+    }
+
+    return n_saved;
+}
+
+
+int save_config_proto_objects(Config& ex) {
+
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+
+    Setting& objects = ex.getRoot().add("proto_objects", Setting::TypeGroup);
+
+    int n_saved = 0;
+
+    for (auto it: cfgapi_obj_proto) {
+        auto name = it.first;
+        auto obj = it.second;
+
+        Setting& item = objects.add(name, Setting::TypeGroup);
+        item.add("id", Setting::TypeInt) = obj;
+
+        n_saved++;
+    }
+
+    return n_saved;
+}
+
+
+int save_config_settings(Config& ex) {
+
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+
+    if(!ex.exists("settings"))
+        ex.getRoot().add("settings", Setting::TypeGroup);
+
+    Setting& objects = ex.getRoot()["settings"];
+
+    // nameservers
+    Setting& it_ns  = objects.add("nameservers",Setting::TypeList);
+    for(auto ns: cfgapi_obj_nameservers) {
+        it_ns.add(Setting::TypeString) = ns;
+    }
+
+    objects.add("certs_path", Setting::TypeString) = SSLCertStore::certs_path;
+    objects.add("certs_ca_key_password", Setting::TypeString) = SSLCertStore::certs_path;
+    objects.add("certs_ca_path", Setting::TypeString) = SSLCertStore::def_cl_capath;
+
+    objects.add("plaintext_port", Setting::TypeString) = cfg_tcp_listen_port;
+    objects.add("plaintext_workers", Setting::TypeInt) = cfg_tcp_workers;
+
+    objects.add("ssl_port", Setting::TypeString) = cfg_ssl_listen_port;
+    objects.add("ssl_workers", Setting::TypeInt) = cfg_ssl_workers;
+    objects.add("ssl_autodetect", Setting::TypeBoolean) = MitmMasterProxy::ssl_autodetect;
+    objects.add("ssl_autodetect_harder", Setting::TypeBoolean) = MitmMasterProxy::ssl_autodetect_harder;
+    objects.add("ssl_ocsp_status_ttl", Setting::TypeInt) = SSLCertStore::ssl_ocsp_status_ttl;
+    objects.add("ssl_crl_status_ttl", Setting::TypeInt) = SSLCertStore::ssl_crl_status_ttl;
+
+    objects.add("udp_port", Setting::TypeString) = cfg_udp_port;
+    objects.add("udp_workers", Setting::TypeInt) = cfg_udp_workers;
+
+    objects.add("dtls_port", Setting::TypeString) = cfg_dtls_port;
+    objects.add("dtls_workers", Setting::TypeInt) = cfg_dtls_workers;
+
+    //udp quick ports
+    Setting& it_quick  = objects.add("udp",Setting::TypeList);
+    if(cfgapi_obj_udp_quick_ports.empty()) {
+        it_quick.add(Setting::TypeInt) = 0;
+    }
+    else {
+        for (auto p: cfgapi_obj_udp_quick_ports) {
+            it_quick.add(Setting::TypeInt) = p;
+        }
+    }
+
+    objects.add("socks_port", Setting::TypeString) = cfg_socks_port;
+    objects.add("socks_workers", Setting::TypeInt) = cfg_socks_workers;
+
+    Setting& socks_objects = objects.add("socks", Setting::TypeGroup);
+    socks_objects.add("async_dns", Setting::TypeBoolean) = socksServerCX::global_async_dns;
+
+
+    objects.add("log_level", Setting::TypeInt) = (int)cfgapi_table.logging.level.level_;
+    objects.add("log_file", Setting::TypeString) = cfg_log_target;
+    objects.add("log_console", Setting::TypeBoolean)  = cfg_log_console;
+
+    objects.add("syslog_server", Setting::TypeString) = cfg_syslog_server;
+    objects.add("syslog_port", Setting::TypeInt) = cfg_syslog_port;
+    objects.add("syslog_facility", Setting::TypeInt) = cfg_syslog_facility;
+    objects.add("syslog_level", Setting::TypeInt) = (int)cfg_syslog_level.level_;
+    objects.add("syslog_family", Setting::TypeInt) = cfg_syslog_family;
+
+    objects.add("sslkeylog_file", Setting::TypeString) = cfg_sslkeylog_target;
+    objects.add("messages_dir", Setting::TypeString) = cfg_messages_dir;
+
+    Setting& cli_objects = objects.add("cli", Setting::TypeGroup);
+    cli_objects.add("port", Setting::TypeInt) = cli_port;
+    cli_objects.add("enable_password", Setting::TypeString) = cli_enable_password;
+
+
+    Setting& auth_objects = objects.add("auth_portal", Setting::TypeGroup);
+    auth_objects.add("address",Setting::TypeString) = cfg_auth_address;
+    auth_objects.add("http_port", Setting::TypeString) = cfg_auth_http;
+    auth_objects.add("https_port", Setting::TypeString) = cfg_auth_https;
+    auth_objects.add("ssl_key", Setting::TypeString) = cfg_auth_sslkey;
+    auth_objects.add("ssl_cert", Setting::TypeString) = cfg_auth_sslcert;
+    auth_objects.add("magic_ip", Setting::TypeString) = cfgapi_tenant_magic_ip;
+
+    Setting& deb_objects = objects.add("debug", Setting::TypeGroup);
+    deb_objects.add("log_data_crc", Setting::TypeBoolean) =  baseCom::debug_log_data_crc;
+    deb_objects.add("log_sockets", Setting::TypeBoolean) = baseHostCX::socket_in_name;
+    deb_objects.add("log_online_cx_name", Setting::TypeBoolean) = baseHostCX::online_name;
+    deb_objects.add("log_srclines", Setting::TypeBoolean) = get_logger()->print_srcline();
+    deb_objects.add("log_srclines_always", Setting::TypeBoolean) = get_logger()->print_srcline_always();
+
+
+    Setting& deb_log_objects = deb_objects.add("log", Setting::TypeGroup);
+    deb_log_objects.add("sslcom", Setting::TypeInt) = (int)SSLCom::log_level_ref().level_;
+    deb_log_objects.add("sslmitmcom", Setting::TypeInt) = (int)baseSSLMitmCom<DTLSCom>::log_level_ref().level_;
+    deb_log_objects.add("sslcertstore", Setting::TypeInt) = (int)SSLCertStore::log_level_ref().level_;
+    deb_log_objects.add("proxy", Setting::TypeInt) = (int)baseProxy::log_level_ref().level_;
+    deb_log_objects.add("epoll", Setting::TypeInt) = (int)epoll::log_level.level_;
+    deb_log_objects.add("mtrace", Setting::TypeBoolean) = cfg_mtrace_enable;
+    deb_log_objects.add("openssl_mem_dbg", Setting::TypeBoolean) = cfg_openssl_mem_dbg;
+    deb_log_objects.add("alg_dns", Setting::TypeInt) = (int)DNS_Inspector::log_level_ref().level_;
+    deb_log_objects.add("pkt_dns", Setting::TypeInt) = (int)DNS_Packet::log_level_ref().level_;
+
+    return 0;
+}
+
+int cli_save_config(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+
+    Config ex;
+    ex.setOptions(Setting::OptionOpenBraceOnSeparateLine);
+
+    int n = 0;
+
+    n = save_config_settings(ex);
+    cli_print(cli, "... settings");
+
+    n = save_config_address_objects(ex);
+    cli_print(cli, "%d address_objects", n);
+
+    n = save_config_port_objects(ex);
+    cli_print(cli, "%d port_objects", n);
+
+    n = save_config_proto_objects(ex);
+    cli_print(cli, "%d proto_objects", n);
+
+    ex.writeFile("/tmp/saved_config.cfg");
+
+    return CLI_OK;
+}
+
 int cli_diag_mem_objects_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
     
     cli_print(cli,"Statistics:\n");
@@ -1250,7 +1465,6 @@ int cli_diag_mem_trace_list (struct cli_def *cli, const char *command, char **ar
 
 
 #else
-
     cli_print("memory tracing not enabled.");
 
 #endif
@@ -1548,6 +1762,7 @@ struct cli_ext : public cli_def {
 
 
 void client_thread(int client_socket) {
+        struct cli_command *save;
         struct cli_command *show;
         struct cli_command *test;
             struct cli_command *test_dns;
@@ -1593,6 +1808,10 @@ void client_thread(int client_socket) {
         cli_allow_enable(cli, cli_enable_password.c_str());
 
         // Set up 2 commands "show counters" and "show junk"
+
+        save  = cli_register_command(cli, NULL, "save", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "save configs");
+                cli_register_command(cli, save, "config", cli_save_config, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "save config file");
+
         show  = cli_register_command(cli, NULL, "show", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show basic information");
                 cli_register_command(cli, show, "status", cli_show_status, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show smithproxy status");
 

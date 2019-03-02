@@ -126,7 +126,7 @@ static bool cfg_daemonize = false;
 
 #ifndef MEM_DEBUG
 bool cfg_openssl_mem_dbg = false;
-static bool cfg_mtrace_enable = false;
+bool cfg_mtrace_enable = false;
 #else
 bool cfg_openssl_mem_dbg = true;
 static bool cfg_mtrace_enable = true;
@@ -400,23 +400,31 @@ bool load_config(std::string& config_f, bool reload) {
         cfgapi.getRoot()["settings"].lookupValue("syslog_facility",cfg_syslog_facility);
         cfgapi.getRoot()["settings"].lookupValue("syslog_level",cfg_syslog_level.level_);
         cfgapi.getRoot()["settings"].lookupValue("syslog_family",cfg_syslog_family);
-        
-        
-        
+
         cfgapi.getRoot()["settings"].lookupValue("messages_dir",cfg_messages_dir);
+
+        cfgapi.getRoot()["settings"]["cli"].lookupValue("port",cli_port);
+        cfgapi.getRoot()["settings"]["cli"].lookupValue("enable_password",cli_enable_password);
+
         
+        if(cfgapi.getRoot().exists("settings")) {
+            if(cfgapi.getRoot()["settings"].exists("auth_portal")) {
+                cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("address", cfg_auth_address);
+                cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("http_port", cfg_auth_http);
+                cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("https_port", cfg_auth_https);
+                cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("ssl_key", cfg_auth_sslkey);
+                cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("ssl_cert", cfg_auth_sslcert);
+                cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("magic_ip", cfgapi_tenant_magic_ip);
+            }
+        }
+
+
         cfgapi.getRoot()["debug"].lookupValue("log_data_crc",baseCom::debug_log_data_crc);
         cfgapi.getRoot()["debug"].lookupValue("log_sockets",baseHostCX::socket_in_name);
         cfgapi.getRoot()["debug"].lookupValue("log_online_cx_name",baseHostCX::online_name);
         cfgapi.getRoot()["debug"].lookupValue("log_srclines",get_logger()->print_srcline());
         cfgapi.getRoot()["debug"].lookupValue("log_srclines_always",get_logger()->print_srcline_always());
-        
-        if(cfgapi.getRoot().exists("settings")) {
-            if(cfgapi.getRoot()["settings"].exists("auth_portal")) {
-                cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("magic_ip", cfgapi_tenant_magic_ip);
-            }
-        }
-        
+
         cfgapi.getRoot()["debug"]["log"].lookupValue("sslcom",SSLCom::log_level_ref().level_);
         cfgapi.getRoot()["debug"]["log"].lookupValue("sslmitmcom",baseSSLMitmCom<SSLCom>::log_level_ref().level_);
         cfgapi.getRoot()["debug"]["log"].lookupValue("sslmitmcom",baseSSLMitmCom<DTLSCom>::log_level_ref().level_);
@@ -429,30 +437,26 @@ bool load_config(std::string& config_f, bool reload) {
         cfgapi.getRoot()["debug"]["log"].lookupValue("alg_dns",DNS_Inspector::log_level_ref().level_);
         cfgapi.getRoot()["debug"]["log"].lookupValue("alg_dns",DNS_Packet::log_level_ref().level_);
         
-        cfgapi.getRoot()["settings"]["cli"].lookupValue("port",cli_port);
-        cfgapi.getRoot()["settings"]["cli"].lookupValue("enable_password",cli_enable_password);
+
         
         // don't mess with logging if just reloading
         if(! reload) {
-            std::string log_target;
-            std::string sslkeylog_target;
-            
-            bool log_console;
+
             
             //init crashlog file with dafe default
             set_crashlog("/tmp/smithproxy_crash.log");
             
-            if(cfgapi.getRoot()["settings"].lookupValue("log_file",log_target)) {
+            if(cfgapi.getRoot()["settings"].lookupValue("log_file",cfg_log_target)) {
                 
-                if(log_target.size() > 0) {
+                if(cfg_log_target.size() > 0) {
                     
-                    log_target = string_format(log_target,cfgapi_tenant_name.c_str());
+                    cfg_log_target = string_format(cfg_log_target,cfgapi_tenant_name.c_str());
                     // prepare custom crashlog file
-                    std::string crlog = log_target + ".crashlog.log";
+                    std::string crlog = cfg_log_target + ".crashlog.log";
                     set_crashlog(crlog.c_str());
                     
-                    std::ofstream * o = new std::ofstream(log_target.c_str(),std::ios::app);
-                    get_logger()->targets(log_target,o);
+                    std::ofstream * o = new std::ofstream(cfg_log_target.c_str(),std::ios::app);
+                    get_logger()->targets(cfg_log_target,o);
                     get_logger()->dup2_cout(false);
                     get_logger()->level(cfgapi_table.logging.level);
                     
@@ -465,13 +469,13 @@ bool load_config(std::string& config_f, bool reload) {
                 }
             }
             //
-            if(cfgapi.getRoot()["settings"].lookupValue("sslkeylog_file",sslkeylog_target)) {
+            if(cfgapi.getRoot()["settings"].lookupValue("sslkeylog_file",cfg_sslkeylog_target)) {
                 
-                if(sslkeylog_target.size() > 0) {
+                if(cfg_sslkeylog_target.size() > 0) {
                     
-                    sslkeylog_target = string_format(sslkeylog_target,cfgapi_tenant_name.c_str());
-                    std::ofstream * o = new std::ofstream(sslkeylog_target.c_str(),std::ios::app);
-                    get_logger()->targets(sslkeylog_target,o);
+                    cfg_sslkeylog_target = string_format(cfg_sslkeylog_target,cfgapi_tenant_name.c_str());
+                    std::ofstream * o = new std::ofstream(cfg_sslkeylog_target.c_str(),std::ios::app);
+                    get_logger()->targets(cfg_sslkeylog_target,o);
                     get_logger()->dup2_cout(false);
                     get_logger()->level(cfgapi_table.logging.level);
                     
@@ -492,8 +496,8 @@ bool load_config(std::string& config_f, bool reload) {
                 }
             }
             
-            if(cfgapi.getRoot()["settings"].lookupValue("log_console",log_console)) {
-                get_logger()->dup2_cout(log_console);
+            if(cfgapi.getRoot()["settings"].lookupValue("cfg_log_console",cfg_log_console)) {
+                get_logger()->dup2_cout(cfg_log_console);
             }
             
 /*            

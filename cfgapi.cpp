@@ -79,6 +79,10 @@ int         cfg_syslog_facility =  23; //local7
 loglevel    cfg_syslog_level    = INF;
 int         cfg_syslog_family   = 4;
 
+std::string cfg_log_target;
+std::string cfg_sslkeylog_target;
+bool cfg_log_console;
+
 
 Config cfgapi;
 time_t system_started;
@@ -99,7 +103,15 @@ std::vector<std::string> cfgapi_obj_nameservers;
 // multi-tenancy support
 std::string cfgapi_tenant_name = "default";
 unsigned int cfgapi_tenant_index = 0;
+
+//portal variables
+std::string cfg_auth_address;
+std::string cfg_auth_http;
+std::string cfg_auth_https;
+std::string cfg_auth_sslkey;
+std::string cfg_auth_sslcert;
 std::string cfgapi_tenant_magic_ip;
+
 
 std::recursive_mutex cfgapi_write_lock;
 

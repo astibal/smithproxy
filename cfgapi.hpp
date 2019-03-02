@@ -95,6 +95,12 @@ extern int         cfg_syslog_facility;
 extern loglevel    cfg_syslog_level;
 extern int         cfg_syslog_family;
 
+extern std::string cfg_log_target;
+extern std::string cfg_sslkeylog_target;
+extern bool cfg_log_console;
+
+
+
 extern time_t system_started;
 extern Config cfgapi;
 extern std::map<std::string,AddressObject*> cfgapi_obj_address;
@@ -113,7 +119,16 @@ extern std::recursive_mutex cfgapi_write_lock;
 
 extern std::string cfgapi_tenant_name;
 extern unsigned int cfgapi_tenant_index;
+
+
+extern std::string cfg_auth_address;
+extern std::string cfg_auth_http;
+extern std::string cfg_auth_https;
+extern std::string cfg_auth_sslkey;
+extern std::string cfg_auth_sslcert;
 extern std::string cfgapi_tenant_magic_ip;
+
+
 
 
 extern std::vector<std::string> cfgapi_obj_nameservers;
