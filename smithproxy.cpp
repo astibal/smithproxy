@@ -397,7 +397,7 @@ bool load_config(std::string& config_f, bool reload) {
         
         cfgapi.getRoot()["settings"].lookupValue("syslog_server",cfg_syslog_server);
         cfgapi.getRoot()["settings"].lookupValue("syslog_port",cfg_syslog_port);
-        cfgapi.getRoot()["settings"].lookupValue("cfg_syslog_facility",cfg_syslog_facility);
+        cfgapi.getRoot()["settings"].lookupValue("syslog_facility",cfg_syslog_facility);
         cfgapi.getRoot()["settings"].lookupValue("syslog_level",cfg_syslog_level.level_);
         cfgapi.getRoot()["settings"].lookupValue("syslog_family",cfg_syslog_family);
         
