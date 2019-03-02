@@ -361,19 +361,19 @@ bool load_config(std::string& config_f, bool reload) {
         cfgapi.getRoot()["settings"].lookupValue("certs_ca_key_password",SSLCertStore::password);
         cfgapi.getRoot()["settings"].lookupValue("certs_ca_path",SSLCertStore::def_cl_capath);
         
-        cfgapi.getRoot()["settings"].lookupValue("plaintext_port",cfg_tcp_listen_port);
+        cfgapi.getRoot()["settings"].lookupValue("plaintext_port",cfg_tcp_listen_port_base); cfg_tcp_listen_port = cfg_tcp_listen_port_base;
         cfgapi.getRoot()["settings"].lookupValue("plaintext_workers",cfg_tcp_workers);
-        cfgapi.getRoot()["settings"].lookupValue("ssl_port",cfg_ssl_listen_port);
+        cfgapi.getRoot()["settings"].lookupValue("ssl_port",cfg_ssl_listen_port_base); cfg_ssl_listen_port = cfg_ssl_listen_port_base;
         cfgapi.getRoot()["settings"].lookupValue("ssl_workers",cfg_ssl_workers);
         cfgapi.getRoot()["settings"].lookupValue("ssl_autodetect",MitmMasterProxy::ssl_autodetect);
         cfgapi.getRoot()["settings"].lookupValue("ssl_autodetect_harder",MitmMasterProxy::ssl_autodetect_harder);
         cfgapi.getRoot()["settings"].lookupValue("ssl_ocsp_status_ttl",SSLCertStore::ssl_ocsp_status_ttl);
         cfgapi.getRoot()["settings"].lookupValue("ssl_crl_status_ttl",SSLCertStore::ssl_crl_status_ttl);
         
-        cfgapi.getRoot()["settings"].lookupValue("udp_port",cfg_udp_port);
+        cfgapi.getRoot()["settings"].lookupValue("udp_port",cfg_udp_port_base); cfg_udp_port = cfg_udp_port_base;
         cfgapi.getRoot()["settings"].lookupValue("udp_workers",cfg_udp_workers);
 
-        cfgapi.getRoot()["settings"].lookupValue("dtls_port",cfg_dtls_port);
+        cfgapi.getRoot()["settings"].lookupValue("dtls_port",cfg_dtls_port_base);  cfg_dtls_port = cfg_dtls_port_base;
         cfgapi.getRoot()["settings"].lookupValue("dtls_workers",cfg_dtls_workers);
         
         if(cfgapi.getRoot()["settings"].exists("udp_quick_ports")) {
@@ -384,7 +384,7 @@ bool load_config(std::string& config_f, bool reload) {
             }
         }
 
-        cfgapi.getRoot()["settings"].lookupValue("socks_port",cfg_socks_port);
+        cfgapi.getRoot()["settings"].lookupValue("socks_port",cfg_socks_port_base); cfg_socks_port = cfg_socks_port_base;
         cfgapi.getRoot()["settings"].lookupValue("socks_workers",cfg_socks_workers);
 
         if(cfgapi.getRoot().exists("settings")) {
@@ -436,9 +436,15 @@ bool load_config(std::string& config_f, bool reload) {
         /*DNS ALG EXPLICIT LOG*/
         cfgapi.getRoot()["debug"]["log"].lookupValue("alg_dns",DNS_Inspector::log_level_ref().level_);
         cfgapi.getRoot()["debug"]["log"].lookupValue("alg_dns",DNS_Packet::log_level_ref().level_);
-        
 
-        
+
+        cfgapi.getRoot()["settings"].lookupValue("write_payload_dir",cfg_traflog_dir);
+        cfgapi.getRoot()["settings"].lookupValue("write_payload_file_prefix",cfg_traflog_file_pref);
+        cfgapi.getRoot()["settings"].lookupValue("write_payload_file_suffix",cfg_traflog_file_suff);
+
+
+
+
         // don't mess with logging if just reloading
         if(! reload) {
 
@@ -446,8 +452,11 @@ bool load_config(std::string& config_f, bool reload) {
             //init crashlog file with dafe default
             set_crashlog("/tmp/smithproxy_crash.log");
             
-            if(cfgapi.getRoot()["settings"].lookupValue("log_file",cfg_log_target)) {
-                
+            if(cfgapi.getRoot()["settings"].lookupValue("log_file",cfg_log_target_base)) {
+
+                cfg_log_target = cfg_sslkeylog_target_base;
+
+
                 if(cfg_log_target.size() > 0) {
                     
                     cfg_log_target = string_format(cfg_log_target,cfgapi_tenant_name.c_str());
@@ -469,8 +478,10 @@ bool load_config(std::string& config_f, bool reload) {
                 }
             }
             //
-            if(cfgapi.getRoot()["settings"].lookupValue("sslkeylog_file",cfg_sslkeylog_target)) {
-                
+            if(cfgapi.getRoot()["settings"].lookupValue("sslkeylog_file",cfg_sslkeylog_target_base)) {
+
+                cfg_sslkeylog_target = cfg_sslkeylog_target_base;
+
                 if(cfg_sslkeylog_target.size() > 0) {
                     
                     cfg_sslkeylog_target = string_format(cfg_sslkeylog_target,cfgapi_tenant_name.c_str());

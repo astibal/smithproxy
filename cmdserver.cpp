@@ -1538,6 +1538,93 @@ int save_config_policy(Config& ex) {
     return n_saved;
 }
 
+int save_config_sig(Config& ex, const std::string& sigset) {
+
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+
+    Setting& objects = ex.getRoot().add(sigset, Setting::TypeList);
+
+    int n_saved = 0;
+
+    auto map_sigsets = [](std::string s) {
+        if(s == "starttls") return sigs_starttls;
+
+        return sigs_detection;
+    };
+
+    const std::vector<duplexFlowMatch*>& target_ref = map_sigsets(sigset);
+
+    for (auto sig: target_ref) {
+
+        Setting& item = objects.add(Setting::TypeGroup);
+
+        item.add("name", Setting::TypeString) = sig->name();
+
+
+        auto my_sig = dynamic_cast<MyDuplexFlowMatch*>(sig);
+
+        if(my_sig) {
+            item.add("cat", Setting::TypeString) = my_sig->category;
+            item.add("side", Setting::TypeString) = my_sig->sig_side;
+        }
+
+        if( ! sig->sig_chain().empty() ) {
+
+            Setting& flow = item.add("flow", Setting::TypeList);
+
+            for (auto f: sig->sig_chain()) {
+
+
+                bool sig_correct = false;
+
+                char        sig_side = f.first;
+                baseMatch*        bm = f.second;
+
+
+                unsigned int sig_bytes_start = bm->match_limits_offset;
+                unsigned int sig_bytes_max   = bm->match_limits_bytes;
+                std::string sig_type;
+                std::string sig_expr;
+
+
+                // follow the inheritance (regex can also be cast to simple)
+                auto rm = dynamic_cast<regexMatch*>(bm);
+                if(rm) {
+                    sig_type = "regex";
+                    sig_expr = rm->expr();
+                    sig_correct = true;
+                }
+                else {
+                    auto sm = dynamic_cast<simpleMatch*>(bm);
+                    if(sm) {
+                        sig_type = "simple";
+                        sig_expr = sm->expr();
+                        sig_correct = true;
+                    }
+                }
+
+
+                if(sig_correct) {
+                    Setting& flow_match = flow.add(Setting::TypeGroup);
+                    flow_match.add("side", Setting::TypeString) = string_format("%c",sig_side);
+                    flow_match.add("type", Setting::TypeString) = sig_type;
+                    flow_match.add("bytes_start", Setting::TypeInt) = (int)sig_bytes_start;
+                    flow_match.add("bytes_max", Setting::TypeInt) = (int)sig_bytes_max;
+                    flow_match.add("signature", Setting::TypeString) = sig_expr;
+                } else {
+                    Setting& flow_match = flow.add(Setting::TypeGroup);
+                    flow_match.add("comment", Setting::TypeString) = "???";
+                }
+            }
+        }
+
+
+        n_saved++;
+    }
+
+    return n_saved;
+
+}
 
 int save_config_settings(Config& ex) {
 
@@ -1555,27 +1642,27 @@ int save_config_settings(Config& ex) {
     }
 
     objects.add("certs_path", Setting::TypeString) = SSLCertStore::certs_path;
-    objects.add("certs_ca_key_password", Setting::TypeString) = SSLCertStore::certs_path;
+    objects.add("certs_ca_key_password", Setting::TypeString) = SSLCertStore::password;
     objects.add("certs_ca_path", Setting::TypeString) = SSLCertStore::def_cl_capath;
 
-    objects.add("plaintext_port", Setting::TypeString) = cfg_tcp_listen_port;
+    objects.add("plaintext_port", Setting::TypeString) = cfg_tcp_listen_port_base;
     objects.add("plaintext_workers", Setting::TypeInt) = cfg_tcp_workers;
 
-    objects.add("ssl_port", Setting::TypeString) = cfg_ssl_listen_port;
+    objects.add("ssl_port", Setting::TypeString) = cfg_ssl_listen_port_base;
     objects.add("ssl_workers", Setting::TypeInt) = cfg_ssl_workers;
     objects.add("ssl_autodetect", Setting::TypeBoolean) = MitmMasterProxy::ssl_autodetect;
     objects.add("ssl_autodetect_harder", Setting::TypeBoolean) = MitmMasterProxy::ssl_autodetect_harder;
     objects.add("ssl_ocsp_status_ttl", Setting::TypeInt) = SSLCertStore::ssl_ocsp_status_ttl;
     objects.add("ssl_crl_status_ttl", Setting::TypeInt) = SSLCertStore::ssl_crl_status_ttl;
 
-    objects.add("udp_port", Setting::TypeString) = cfg_udp_port;
+    objects.add("udp_port", Setting::TypeString) = cfg_udp_port_base;
     objects.add("udp_workers", Setting::TypeInt) = cfg_udp_workers;
 
-    objects.add("dtls_port", Setting::TypeString) = cfg_dtls_port;
+    objects.add("dtls_port", Setting::TypeString) = cfg_dtls_port_base;
     objects.add("dtls_workers", Setting::TypeInt) = cfg_dtls_workers;
 
     //udp quick ports
-    Setting& it_quick  = objects.add("udp",Setting::TypeList);
+    Setting& it_quick  = objects.add("udp_quick_ports",Setting::TypeList);
     if(cfgapi_obj_udp_quick_ports.empty()) {
         it_quick.add(Setting::TypeInt) = 0;
     }
@@ -1585,7 +1672,7 @@ int save_config_settings(Config& ex) {
         }
     }
 
-    objects.add("socks_port", Setting::TypeString) = cfg_socks_port;
+    objects.add("socks_port", Setting::TypeString) = cfg_socks_port_base;
     objects.add("socks_workers", Setting::TypeInt) = cfg_socks_workers;
 
     Setting& socks_objects = objects.add("socks", Setting::TypeGroup);
@@ -1593,7 +1680,7 @@ int save_config_settings(Config& ex) {
 
 
     objects.add("log_level", Setting::TypeInt) = (int)cfgapi_table.logging.level.level_;
-    objects.add("log_file", Setting::TypeString) = cfg_log_target;
+    objects.add("log_file", Setting::TypeString) = cfg_log_target_base;
     objects.add("log_console", Setting::TypeBoolean)  = cfg_log_console;
 
     objects.add("syslog_server", Setting::TypeString) = cfg_syslog_server;
@@ -1602,7 +1689,7 @@ int save_config_settings(Config& ex) {
     objects.add("syslog_level", Setting::TypeInt) = (int)cfg_syslog_level.level_;
     objects.add("syslog_family", Setting::TypeInt) = cfg_syslog_family;
 
-    objects.add("sslkeylog_file", Setting::TypeString) = cfg_sslkeylog_target;
+    objects.add("sslkeylog_file", Setting::TypeString) = cfg_sslkeylog_target_base;
     objects.add("messages_dir", Setting::TypeString) = cfg_messages_dir;
 
     Setting& cli_objects = objects.add("cli", Setting::TypeGroup);
@@ -1617,6 +1704,11 @@ int save_config_settings(Config& ex) {
     auth_objects.add("ssl_key", Setting::TypeString) = cfg_auth_sslkey;
     auth_objects.add("ssl_cert", Setting::TypeString) = cfg_auth_sslcert;
     auth_objects.add("magic_ip", Setting::TypeString) = cfgapi_tenant_magic_ip;
+
+
+    objects.add("write_payload_dir", Setting::TypeString) = cfg_traflog_dir;
+    objects.add("write_payload_file_prefix", Setting::TypeString) = cfg_traflog_file_pref;
+    objects.add("write_payload_file_suffix", Setting::TypeString) = cfg_traflog_file_suff;
 
 
     return 0;
@@ -1667,6 +1759,13 @@ int cli_save_config(struct cli_def *cli, const char *command, char *argv[], int 
 
     n = save_config_policy(ex);
     cli_print(cli, "%d policy", n);
+
+    n = save_config_sig(ex, "starttls");
+    cli_print(cli, "%d %s signatures", n, "starttls");
+
+    n = save_config_sig(ex, "detection");
+    cli_print(cli, "%d %s signatures", n, "detection");
+
 
     ex.writeFile("/tmp/saved_config.cfg");
 

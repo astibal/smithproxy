@@ -77,21 +77,13 @@ void MitmProxy::toggle_tlog() {
     
     // create traffic logger if it doesn't exist
     if(tlog_ == nullptr) {
-        std::string data_dir = "mitm";
-        std::string file_pref = "";
-        std::string file_suff = "smcap";
-        
-        cfgapi.getRoot()["settings"].lookupValue("write_payload_dir",data_dir);
-        cfgapi.getRoot()["settings"].lookupValue("write_payload_file_prefix",file_pref);
-        cfgapi.getRoot()["settings"].lookupValue("write_payload_file_suffix",file_suff);
-        
-        tlog_ = new socle::trafLog(this,data_dir.c_str(),file_pref.c_str(),file_suff.c_str());
+
+        tlog_ = new socle::trafLog(this,cfg_traflog_dir.c_str(),cfg_traflog_file_pref.c_str(),cfg_traflog_file_suff.c_str());
     }
     
     // check if we have there status file
     if(tlog_) {
-        std::string data_dir = "mitm";
-        cfgapi.getRoot()["settings"].lookupValue("write_payload_dir",data_dir);
+        std::string data_dir = cfg_traflog_dir;
 
         data_dir += "/disabled";
         

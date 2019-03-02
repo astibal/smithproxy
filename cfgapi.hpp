@@ -68,6 +68,12 @@ using namespace libconfig;
 
 extern loglevel  args_debug_flag;
 
+extern std::string cfg_tcp_listen_port_base;
+extern std::string cfg_ssl_listen_port_base;
+extern std::string cfg_dtls_port_base;
+extern std::string cfg_udp_port_base;
+extern std::string cfg_socks_port_base;
+
 extern std::string cfg_tcp_listen_port;
 extern std::string cfg_ssl_listen_port;
 extern std::string cfg_dtls_port;
@@ -94,6 +100,10 @@ extern int         cfg_syslog_port;
 extern int         cfg_syslog_facility;
 extern loglevel    cfg_syslog_level;
 extern int         cfg_syslog_family;
+
+
+extern std::string cfg_log_target_base;
+extern std::string cfg_sslkeylog_target_base;
 
 extern std::string cfg_log_target;
 extern std::string cfg_sslkeylog_target;
@@ -128,6 +138,10 @@ extern std::string cfg_auth_sslkey;
 extern std::string cfg_auth_sslcert;
 extern std::string cfgapi_tenant_magic_ip;
 
+
+extern std::string cfg_traflog_dir;
+extern std::string cfg_traflog_file_pref;
+extern std::string cfg_traflog_file_suff;
 
 
 

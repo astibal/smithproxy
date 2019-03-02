@@ -58,6 +58,12 @@ std::string cfg_dtls_port = "50443";
 std::string cfg_udp_port = "50080";
 std::string cfg_socks_port = "1080";
 
+std::string cfg_tcp_listen_port_base = "50080";
+std::string cfg_ssl_listen_port_base = "50443";
+std::string cfg_dtls_port_base = "50443";
+std::string cfg_udp_port_base = "50080";
+std::string cfg_socks_port_base = "1080";
+
 std::string config_file;
 bool config_file_check_only = false;
 
@@ -78,6 +84,10 @@ int         cfg_syslog_port     = 514;
 int         cfg_syslog_facility =  23; //local7
 loglevel    cfg_syslog_level    = INF;
 int         cfg_syslog_family   = 4;
+
+
+std::string cfg_log_target_base;
+std::string cfg_sslkeylog_target_base;
 
 std::string cfg_log_target;
 std::string cfg_sslkeylog_target;
@@ -111,6 +121,12 @@ std::string cfg_auth_https;
 std::string cfg_auth_sslkey;
 std::string cfg_auth_sslcert;
 std::string cfgapi_tenant_magic_ip;
+
+
+std::string cfg_traflog_dir = "/var/local/smithproxy/data";
+std::string cfg_traflog_file_pref = "";
+std::string cfg_traflog_file_suff = "smcap";
+
 
 
 std::recursive_mutex cfgapi_write_lock;
