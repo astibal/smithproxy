@@ -1772,11 +1772,62 @@ int cli_save_config(struct cli_def *cli, const char *command, char *argv[], int 
     return CLI_OK;
 }
 
+int cfg_write(Config& cfg, FILE* where, unsigned long iobufsz = 0) {
+
+    int fds[2];
+    int fret = pipe(fds);
+    if(0 != fret) {
+        return -1;
+    }
+
+    FILE* fw = fdopen(fds[1], "w");
+    FILE* fr = fdopen(fds[0], "r");
+
+
+    // set pipe buffer size to 10MB - we need to fit whole config into it.
+    unsigned long nbytes = 10*1024*1024;
+    if(iobufsz > 0) {
+        nbytes = iobufsz;
+    }
+
+    ioctl(fds[0], FIONREAD, &nbytes);
+    ioctl(fds[1], FIONREAD, &nbytes);
+
+    cfg.write(fw);
+    fclose(fw);
+
+
+    int c = EOF;
+    do {
+        c = fgetc(fr);
+        //cli_print(cli, ">>> 0x%x", c);
+
+        switch(c) {
+            case EOF:
+                break;
+
+            case '\n':
+                fputc('\r', where);
+                // omit break - so we write also '\n'
+
+            default:
+                fputc(c, where);
+        }
+
+    } while(c != EOF);
+
+
+    fclose(fr);
+
+}
+
 int cli_show_config(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
 
-    cfgapi.write(cli->client);
+    if(cfg_write(cfgapi, cli->client) != 0) {
+        cli_print(cli, "error: config print failed");
+    }
 
     return CLI_OK;
 }
