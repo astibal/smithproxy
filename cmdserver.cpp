@@ -1833,11 +1833,78 @@ int cli_show_config_full (struct cli_def *cli, const char *command, char **argv,
     return CLI_OK;
 }
 
+// libconfig API is lacking cloning facility despite it's really trivial to implement:
+
+void cfg_clone_setting(Setting& dst, Setting& orig  /* , struct cli_def *debug_cli */ ) {
+
+
+    //cli_print(debug_cli, "clone start: name: %s, len: %d", orig.getName(), orig.getLength());
+
+    for (unsigned int i = 0; i < (unsigned int) orig.getLength(); i++) {
+        Setting &cur_object = orig[i];
+
+
+        Setting::Type type = cur_object.getType();
+        //cli_print(debug_cli, "clone      : type: %d", type);
+
+        std::string name;
+        if(cur_object.getName()) {
+            name = cur_object.getName();
+            //cli_print(debug_cli, "clone      : type: %d, name: %s", type, name.c_str());
+        }
+
+
+        Setting& new_setting =  name.empty() ? dst.add(type) : dst.add(name.c_str(), type);
+
+        if(cur_object.isScalar()) {
+            switch(type) {
+                case Setting::TypeInt:
+                    new_setting = (int)cur_object;
+                    break;
+
+                case Setting::TypeInt64:
+                    new_setting = (long long int)cur_object;
+
+                    break;
+
+                case Setting::TypeString:
+                    new_setting = (const char*)cur_object;
+                    break;
+
+                case Setting::TypeFloat:
+                    new_setting = (float)cur_object;
+                    break;
+
+                case Setting::TypeBoolean:
+                    new_setting = (bool)cur_object;
+                    break;
+
+                default:
+                    // well, that sucks. Unknown type and no way to convert or report
+                    break;
+            }
+        }
+        else {
+
+            //cli_print(debug_cli, "clone      : --- entering non-scalar");
+
+            cfg_clone_setting(new_setting, cur_object /*, debug_cli */ );
+        }
+    }
+}
+
 int cli_show_config_setting(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
 
-    cli_print(cli, "sorry, not yet implemented");
+    Setting& s = cfgapi.getRoot()["settings"];
+
+    Config nc;
+    cfg_clone_setting(nc.getRoot(), s /*, cli */ );
+
+    cfg_write(nc, cli->client, 200*1024);
+
+
 
     return CLI_OK;
 }
