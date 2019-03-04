@@ -454,7 +454,7 @@ bool load_config(std::string& config_f, bool reload) {
             
             if(cfgapi.getRoot()["settings"].lookupValue("log_file",cfg_log_target_base)) {
 
-                cfg_log_target = cfg_sslkeylog_target_base;
+                cfg_log_target = cfg_log_target_base;
 
 
                 if(cfg_log_target.size() > 0) {

@@ -1819,15 +1819,25 @@ int cfg_write(Config& cfg, FILE* where, unsigned long iobufsz = 0) {
 
     fclose(fr);
 
+    return 0;
 }
 
-int cli_show_config(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_show_config_full (struct cli_def *cli, const char *command, char **argv, int argc) {
 
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
 
     if(cfg_write(cfgapi, cli->client) != 0) {
         cli_print(cli, "error: config print failed");
     }
+
+    return CLI_OK;
+}
+
+int cli_show_config_setting(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+
+    cli_print(cli, "sorry, not yet implemented");
 
     return CLI_OK;
 }
@@ -2226,6 +2236,7 @@ struct cli_ext : public cli_def {
 void client_thread(int client_socket) {
         struct cli_command *save;
         struct cli_command *show;
+            struct cli_command *show_config;
         struct cli_command *test;
             struct cli_command *test_dns;
         struct cli_command *debuk;
@@ -2276,13 +2287,15 @@ void client_thread(int client_socket) {
 
         show  = cli_register_command(cli, NULL, "show", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show basic information");
                 cli_register_command(cli, show, "status", cli_show_status, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show smithproxy status");
-                cli_register_command(cli, show, "config", cli_show_config, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show smithproxy configuration");
+                show_config = cli_register_command(cli, show, "config", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show smithproxy configuration related commands");
+                        cli_register_command(cli, show_config, "full", cli_show_config_full, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show smithproxy full configuration");
+                        cli_register_command(cli, show_config, "settings", cli_show_config_setting, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show smithproxy config section: settings");
 
         test  = cli_register_command(cli, NULL, "test", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "various testing commands");
                 test_dns = cli_register_command(cli, test, "dns", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "dns related testing commands");
-                    cli_register_command(cli, test_dns, "genrequest", cli_test_dns_genrequest, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "generate dns request");
-                    cli_register_command(cli, test_dns, "sendrequest", cli_test_dns_sendrequest, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "generate and send dns request to configured nameserver");
-                    cli_register_command(cli, test_dns, "refreshallfqdns", cli_test_dns_refreshallfqdns, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "refresh all configured FQDN address objects against configured nameserver");
+                        cli_register_command(cli, test_dns, "genrequest", cli_test_dns_genrequest, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "generate dns request");
+                        cli_register_command(cli, test_dns, "sendrequest", cli_test_dns_sendrequest, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "generate and send dns request to configured nameserver");
+                        cli_register_command(cli, test_dns, "refreshallfqdns", cli_test_dns_refreshallfqdns, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "refresh all configured FQDN address objects against configured nameserver");
                 
         diag  = cli_register_command(cli, NULL, "diag", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose commands helping to troubleshoot");
             diag_ssl = cli_register_command(cli, diag, "ssl", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "ssl related troubleshooting commands");
