@@ -262,6 +262,11 @@ int cfgapi_load_obj_address() {
             int type;
             
             Setting& cur_object = curr_set[i];
+
+            if (  ! cur_object.getName() ) {
+                DIA_("cfgapi_load_address: unnamed object index %d: not ok", i);
+                continue;
+            }
             
             name = cur_object.getName();
 
@@ -316,7 +321,12 @@ int cfgapi_load_obj_port() {
             int b;
             
             Setting& cur_object = curr_set[i];
-            
+
+            if (  ! cur_object.getName() ) {
+                DIA_("cfgapi_load_ports: unnamed object index %d: not ok", i);
+                continue;
+            }
+
             name = cur_object.getName();
 
             DEB_("cfgapi_load_ports: processing '%s'",name.c_str());
@@ -360,6 +370,11 @@ int cfgapi_load_obj_proto() {
             int a;
             
             Setting& cur_object = curr_set[i];
+
+            if (  ! cur_object.getName() ) {
+                DIA_("cfgapi_load_proto: unnamed object index %d: not ok", i);
+                continue;
+            }
             
             name = cur_object.getName();
 
@@ -835,7 +850,12 @@ int cfgapi_load_obj_profile_detection() {
             ProfileDetection* a = new ProfileDetection;
             
             Setting& cur_object = curr_set[i];
-           
+
+            if (  ! cur_object.getName() ) {
+                DIA_("cfgapi_load_obj_profile_detect: unnamed object index %d: not ok", i);
+                continue;
+            }
+
             name = cur_object.getName();
            
             DIA_("cfgapi_load_obj_profile_detect: processing '%s'",name.c_str());
@@ -875,7 +895,12 @@ int cfgapi_load_obj_profile_content() {
             ProfileContent* a = new ProfileContent;
             
             Setting& cur_object = curr_set[i];
-            
+
+            if (  ! cur_object.getName() ) {
+                DIA_("cfgapi_load_obj_profile_content: unnamed object index %d: not ok", i);
+                continue;
+            }
+
             name = cur_object.getName();
 
             DEB_("cfgapi_load_obj_profile_content: processing '%s'",name.c_str());
@@ -954,7 +979,12 @@ int cfgapi_load_obj_profile_tls() {
             ProfileTls* a = new ProfileTls;
             
             Setting& cur_object = curr_set[i];
-            
+
+            if (  ! cur_object.getName() ) {
+                DIA_("cfgapi_load_obj_profile_tls: unnamed object index %d: not ok", i);
+                continue;
+            }
+
             name = cur_object.getName();
 
             DEB_("cfgapi_load_obj_profile_tls: processing '%s'",name.c_str());
@@ -1036,6 +1066,11 @@ int cfgapi_load_obj_profile_alg_dns() {
             ProfileAlgDns* a = new ProfileAlgDns;
             
             Setting& cur_object = curr_set[i];
+
+            if (  ! cur_object.getName() ) {
+                DIA_("cfgapi_load_obj_alg_dns_profile: unnamed object index %d: not ok", i);
+                continue;
+            }
             
             name = cur_object.getName();
 
@@ -1080,6 +1115,11 @@ int cfgapi_load_obj_profile_auth() {
             ProfileAuth* a = new ProfileAuth;
             
             Setting& cur_object = curr_set[i];
+
+            if (  ! cur_object.getName() ) {
+                DIA_("cfgapi_load_obj_profile_auth: unnamed object index %d: not ok", i);
+                continue;
+            }
             
             name = cur_object.getName();
 
@@ -1097,6 +1137,12 @@ int cfgapi_load_obj_profile_auth() {
                     Setting& cur_subpol = cur_object["identities"][j];
                     
                     ProfileSubAuth* n_subpol = new ProfileSubAuth();
+
+                    if (  ! cur_subpol.getName() ) {
+                        DIA_("cfgapi_load_obj_profile_auth: profiles: unnamed object index %d: not ok", j);
+                        continue;
+                    }
+
                     n_subpol->name = cur_subpol.getName();
                     
                     std::string name_content;
