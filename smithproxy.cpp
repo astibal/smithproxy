@@ -403,7 +403,7 @@ bool load_config(std::string& config_f, bool reload) {
 
         cfgapi.getRoot()["settings"].lookupValue("messages_dir",cfg_messages_dir);
 
-        cfgapi.getRoot()["settings"]["cli"].lookupValue("port",cli_port);
+        cfgapi.getRoot()["settings"]["cli"].lookupValue("port",cli_port_base); cli_port = cli_port_base;
         cfgapi.getRoot()["settings"]["cli"].lookupValue("enable_password",cli_enable_password);
 
         

@@ -43,6 +43,7 @@
 #include <libcli.h>
 
 extern int cli_port;
+extern int cli_port_base;
 extern std::string cli_enable_password;
 
 void cli_loop(unsigned short port=50000);

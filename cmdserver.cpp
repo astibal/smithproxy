@@ -74,6 +74,7 @@
 #include <inspectors.hpp>
 
 int cli_port = 50000;
+int cli_port_base = 50000;
 std::string cli_enable_password = "";
 
 
@@ -1444,7 +1445,7 @@ int save_config_alg_dns_profiles(Config& ex) {
 
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
 
-    Setting& objects = ex.getRoot().add("dns_profiles", Setting::TypeGroup);
+    Setting& objects = ex.getRoot().add("alg_dns_profiles", Setting::TypeGroup);
 
     int n_saved = 0;
 
@@ -1574,7 +1575,7 @@ int save_config_sig(Config& ex, const std::string& sigset) {
     int n_saved = 0;
 
     auto map_sigsets = [](std::string s) {
-        if(s == "starttls") return sigs_starttls;
+        if(s == "starttls_signatures") return sigs_starttls;
 
         return sigs_detection;
     };
@@ -1720,7 +1721,7 @@ int save_config_settings(Config& ex) {
     objects.add("messages_dir", Setting::TypeString) = cfg_messages_dir;
 
     Setting& cli_objects = objects.add("cli", Setting::TypeGroup);
-    cli_objects.add("port", Setting::TypeInt) = cli_port;
+    cli_objects.add("port", Setting::TypeString) = string_format("%d", cli_port_base).c_str();
     cli_objects.add("enable_password", Setting::TypeString) = cli_enable_password;
 
 
@@ -1787,10 +1788,10 @@ int cli_save_config(struct cli_def *cli, const char *command, char *argv[], int 
     n = save_config_policy(ex);
     cli_print(cli, "%d policy", n);
 
-    n = save_config_sig(ex, "starttls");
+    n = save_config_sig(ex, "starttls_signatures");
     cli_print(cli, "%d %s signatures", n, "starttls");
 
-    n = save_config_sig(ex, "detection");
+    n = save_config_sig(ex, "detection_signatures");
     cli_print(cli, "%d %s signatures", n, "detection");
 
 
