@@ -109,24 +109,42 @@ void load_defaults() {
 }
 
 std::unordered_map<std::string, std::string> cli_context_help;
+std::unordered_map<std::string, std::string> cli_qmark_help;
 
 void cli_help_add( std::string k, std::string v ) {
     cli_context_help[std::move(k)] = std::move(v);
 }
 
-std::string& cli_help(const std::string& section, const std::string& key) {
+void cli_qmark_add( std::string k, std::string v ) {
+    cli_qmark_help[std::move(k)] = std::move(v);
+}
 
-    auto i = cli_context_help.find(section + "/" + key);
-    if(i != cli_context_help.end()) {
+typedef enum { HELP_CONTEXT=0, HELP_QMARK } help_type_t;
+
+std::string& cli_help(help_type_t htype, const std::string& section, const std::string& key) {
+
+    std::unordered_map<std::string, std::string>& ref = cli_context_help;
+
+    switch(htype) {
+        case HELP_QMARK:
+            ref = cli_qmark_help;
+            break;
+
+        default:
+            ;
+    }
+
+    auto i = ref.find(section + "/" + key);
+    if(i != ref.end()) {
         return i->second;
     } else {
 
-        auto i = cli_context_help.find("default");
-        if(i != cli_context_help.end()) {
+        auto i = ref.find("default");
+        if(i != ref.end()) {
             return i->second;
         } else {
-            cli_context_help["default"] = "";
-            return cli_context_help["default"];
+            ref["default"] = "";
+            return ref["default"];
         }
     }
 }
@@ -134,6 +152,9 @@ std::string& cli_help(const std::string& section, const std::string& key) {
 void init_cli_help() {
     cli_help_add("default","");
     cli_help_add("settings/certs_path", "directory for TLS-resigning CA certificate and key");
+
+    cli_qmark_add("default", "enter <value>");
+    cli_qmark_add("settings/certs_path", "<string> with path to a directory");
 }
 
 
@@ -165,7 +186,7 @@ int cli_show_status(struct cli_def *cli, const char *command, char *argv[], int 
 
 
 int cli_test_dns_genrequest(struct cli_def *cli, const char *command, char *argv[], int argc) {
-    buffer b(0);
+    buffer b(1024);
     
     if(argc > 0) {
         std::string argv0(argv[0]);
@@ -190,7 +211,7 @@ int cli_test_dns_genrequest(struct cli_def *cli, const char *command, char *argv
 
 DNS_Response* send_dns_request(struct cli_def *cli, std::string hostname, DNS_Record_Type t, std::string nameserver) {
     
-    buffer b(0);
+    buffer b(1024);
     int parsed = -1;
     DNS_Response* ret = nullptr;
     
@@ -1865,12 +1886,22 @@ int cli_show_config_full (struct cli_def *cli, const char *command, char **argv,
 
 // libconfig API is lacking cloning facility despite it's really trivial to implement:
 
-void cfg_clone_setting(Setting& dst, Setting& orig  /* , struct cli_def *debug_cli */ ) {
+void cfg_clone_setting(Setting& dst, Setting& orig, int index/*, struct cli_def *debug_cli*/ ) {
 
 
-    //cli_print(debug_cli, "clone start: name: %s, len: %d", orig.getName(), orig.getLength());
+    std::string orig_name;
+    if(orig.getName()) {
+        orig_name = orig.getName();
+    }
+
+    //cli_print(debug_cli, "clone start: name: %s, len: %d", orig_name.c_str(), orig.getLength());
 
     for (unsigned int i = 0; i < (unsigned int) orig.getLength(); i++) {
+
+        if( index >= 0 && index != (int)i) {
+            continue;
+        }
+
         Setting &cur_object = orig[i];
 
 
@@ -1918,7 +1949,8 @@ void cfg_clone_setting(Setting& dst, Setting& orig  /* , struct cli_def *debug_c
 
             //cli_print(debug_cli, "clone      : --- entering non-scalar");
 
-            cfg_clone_setting(new_setting, cur_object /*, debug_cli */ );
+            // index is always here -1, we don't filter sub-items
+            cfg_clone_setting(new_setting, cur_object, -1 /*, debug_cli */ );
         }
     }
 }
@@ -1990,7 +2022,7 @@ cli_command* cfg_generate_cli_callbacks(Setting& s, struct cli_def* cli, cli_com
 
                 std::string help;
                 if(context_help) {
-                    std::string h = cli_help(context_help, here_n);
+                    std::string h = cli_help(HELP_CONTEXT, context_help, here_n);
                     if(h.empty()) {
                         help = string_format("modify '%s'", here_n.c_str());
                     }
@@ -2095,8 +2127,16 @@ int cli_uni_set_cb(Setting& conf, struct cli_def *cli, const char *command, char
     if( argv0 != "?" ) {
         std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
         cfg_write_value(conf, false, varname, argv0, cli);
+    } else {
+        if(!conf.isRoot() &&  conf.getName()) {
+
+            auto h = cli_help(HELP_QMARK, conf.getName(), varname);
+
+            cli_print(cli, "hint:  %s", h.c_str());
+        }
     }
 
+    return CLI_OK;
 }
 
 
@@ -2111,7 +2151,7 @@ int cli_uni_set_cb(Setting& conf, struct cli_def *cli, const char *command, char
 int cli_config_setting_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
     cli_set_configmode(cli, MODE_CONFIG, "settings");
 
-    CLI_PRINT_ARGS(cli, command, argv, argc);
+    //CLI_PRINT_ARGS(cli, command, argv, argc);
 
     if(argc > 0) {
         std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
@@ -2173,22 +2213,128 @@ int cli_config_setting_socks_cb(struct cli_def *cli, const char *command, char *
     return CLI_OK;
 }
 
-
-int cli_show_config_setting(struct cli_def *cli, const char *command, char *argv[], int argc) {
+// index < 0 means all
+void cli_print_section(cli_def* cli, const std::string& name, int index , unsigned long pipe_sz ) {
 
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
 
-    Setting& s = cfgapi.getRoot()["settings"];
+    if(cfgapi.getRoot().exists(name.c_str())) {
+        Setting &s = cfgapi.getRoot()[name.c_str()];
 
-    Config nc;
-    cfg_clone_setting(nc.getRoot(), s /*, cli */ );
+        Config nc;
+        nc.getRoot().add(name.c_str(), s.getType());
+        nc.setOptions(Setting::OptionOpenBraceOnSeparateLine);
 
-    cfg_write(nc, cli->client, 200*1024);
+        cfg_clone_setting(nc.getRoot()[name.c_str()], s , index /*, cli */ );
 
+        cfg_write(nc, cli->client, pipe_sz);
 
+    } else {
+        cli_print(cli, "'%s' config section doesn't exist", name.c_str());
+    }
+}
 
+int cli_show_config_setting(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    cli_print_section(cli, "settings", -1, 200 * 1024);
     return CLI_OK;
 }
+
+int cli_show_config_policy(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    int index = -1;
+    if(argc > 0) {
+        index = std::stoi(argv[0]);
+    }
+    cli_print_section(cli, "policy", index, 10 * 1024 * 1024);
+    return CLI_OK;
+}
+
+int cli_show_config_objects(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    cli_print_section(cli, "proto_objects", -1,  1 * 1024 * 1024);
+    cli_print_section(cli, "port_objects", -1, 1 * 1024 * 1024);
+    cli_print_section(cli, "address_objects", -1,  1 * 1024 * 1024);
+    return CLI_OK;
+}
+
+int cli_show_config_proto_objects(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    cli_print_section(cli, "proto_objects", -1, 1 * 1024 * 1024);
+    return CLI_OK;
+}
+
+int cli_show_config_port_objects(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    cli_print_section(cli, "port_objects", -1, 1 * 1024 * 1024);
+    return CLI_OK;
+}
+
+int cli_show_config_address_objects(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    cli_print_section(cli, "address_objects", -1, 1 * 1024 * 1024);
+    return CLI_OK;
+}
+
+int cli_show_config_debug(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    cli_print_section(cli, "debug", -1, 1 * 1024 * 1024);
+    return CLI_OK;
+}
+
+
+int cli_show_config_detection(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    cli_print_section(cli, "detection_profiles", -1, 1 * 1024 * 1024);
+    return CLI_OK;
+}
+
+
+int cli_show_config_content(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    cli_print_section(cli, "content_profiles", -1, 1 * 1024 * 1024);
+    return CLI_OK;
+}
+
+
+int cli_show_config_tls_ca(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    cli_print_section(cli, "tls_ca", -1, 1 * 1024 * 1024);
+    return CLI_OK;
+}
+
+
+int cli_show_config_tls_profiles(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    cli_print_section(cli, "tls_profiles", -1, 1 * 1024 * 1024);
+    return CLI_OK;
+}
+
+int cli_show_config_alg_dns(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    cli_print_section(cli, "alg_dns_profiles", -1, 1 * 1024 * 1024);
+    return CLI_OK;
+}
+
+int cli_show_config_auth_profiles(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    cli_print_section(cli, "auth_profiles", -1,  1 * 1024 * 1024);
+    return CLI_OK;
+}
+
+int cli_show_config_starttls_sig(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    cli_print_section(cli, "starttls_signatures", -1, 1 * 1024 * 1024);
+    return CLI_OK;
+}
+
+int cli_show_config_detection_sig(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    cli_print_section(cli, "detection_signatures", -1, 1 * 1024 * 1024);
+    return CLI_OK;
+}
+
+
 
 int cli_diag_mem_objects_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
     
@@ -2581,6 +2727,34 @@ struct cli_ext : public cli_def {
 };
 
 
+void cli_generate_set_settings(cli_def* cli, cli_command* set_settings) {
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+
+
+    if (cfgapi.getRoot()["settings"].exists("auth_portal")) {
+        cfg_generate_cli_callbacks(cfgapi.getRoot()["settings"]["auth_portal"], cli,
+                                                       set_settings,
+                                                       cli_config_setting_auth_cb,
+                                                       cli_config_setting_auth_cb, "settings/auth_portal");
+    }
+
+    if (cfgapi.getRoot()["settings"].exists("cli")) {
+        cfg_generate_cli_callbacks(cfgapi.getRoot()["settings"]["cli"], cli,
+                                                      set_settings,
+                                                      cli_config_setting_cli_cb,
+                                                      cli_config_setting_cli_cb, "settings/cli");
+    }
+
+    if (cfgapi.getRoot()["settings"].exists("socks")) {
+        cfg_generate_cli_callbacks(cfgapi.getRoot()["settings"]["socks"], cli,
+                                                      set_settings,
+                                                      cli_config_setting_socks_cb,
+                                                      cli_config_setting_socks_cb, "settings/socks");
+    }
+
+}
+
+
 void client_thread(int client_socket) {
         struct cli_command *save;
         struct cli_command *show;
@@ -2636,80 +2810,94 @@ void client_thread(int client_socket) {
         // Set up 2 commands "show counters" and "show junk"
 
         save  = cli_register_command(cli, NULL, "save", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "save configs");
-                cli_register_command(cli, save, "config", cli_save_config, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "save config file");
+            cli_register_command(cli, save, "config", cli_save_config, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "save config file");
 
         show  = cli_register_command(cli, NULL, "show", NULL, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show basic information");
-                cli_register_command(cli, show, "status", cli_show_status, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show smithproxy status");
-                show_config = cli_register_command(cli, show, "config", NULL, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy configuration related commands");
-                        cli_register_command(cli, show_config, "full", cli_show_config_full, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy full configuration");
-                        cli_register_command(cli, show_config, "settings", cli_show_config_setting, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy config section: settings");
+            cli_register_command(cli, show, "status", cli_show_status, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show smithproxy status");
+            show_config = cli_register_command(cli, show, "config", NULL, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy configuration related commands");
+                cli_register_command(cli, show_config, "full", cli_show_config_full, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy full configuration");
+                cli_register_command(cli, show_config, "settings", cli_show_config_setting, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy config section: settings");
+                cli_register_command(cli, show_config, "policy", cli_show_config_policy, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy config section: policy");
+                cli_register_command(cli, show_config, "objects", cli_show_config_objects, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy config section: all objects");
+                cli_register_command(cli, show_config, "proto_objects", cli_show_config_proto_objects, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy config section: proto_objects");
+                cli_register_command(cli, show_config, "port_objects", cli_show_config_port_objects, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy config section: port_objects");
+                cli_register_command(cli, show_config, "address_objects", cli_show_config_address_objects, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy config section: address_objects");
+                cli_register_command(cli, show_config, "detection_profiles", cli_show_config_detection, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy config section: detection_profiles");
+                cli_register_command(cli, show_config, "content_profiles", cli_show_config_content, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy config section: content_profiles");
+                cli_register_command(cli, show_config, "tls_ca", cli_show_config_tls_ca, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy config section: tls_ca profiles");
+                cli_register_command(cli, show_config, "tls_profiles", cli_show_config_tls_profiles, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy config section: tls_profiles");
+                cli_register_command(cli, show_config, "alg_dns_profiles", cli_show_config_alg_dns, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy config section: alg_dns_profiles");
+                cli_register_command(cli, show_config, "auth_profiles", cli_show_config_auth_profiles, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy config section: auth_profiles");
+
+                cli_register_command(cli, show_config, "starttls_signatures", cli_show_config_starttls_sig, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy config section: starttls_signatures");
+                cli_register_command(cli, show_config, "detection_signatures", cli_show_config_detection_sig, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy config section: detection_signatures");
 
         test  = cli_register_command(cli, NULL, "test", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "various testing commands");
-                test_dns = cli_register_command(cli, test, "dns", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "dns related testing commands");
-                        cli_register_command(cli, test_dns, "genrequest", cli_test_dns_genrequest, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "generate dns request");
-                        cli_register_command(cli, test_dns, "sendrequest", cli_test_dns_sendrequest, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "generate and send dns request to configured nameserver");
-                        cli_register_command(cli, test_dns, "refreshallfqdns", cli_test_dns_refreshallfqdns, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "refresh all configured FQDN address objects against configured nameserver");
+            test_dns = cli_register_command(cli, test, "dns", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "dns related testing commands");
+                cli_register_command(cli, test_dns, "genrequest", cli_test_dns_genrequest, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "generate dns request");
+                cli_register_command(cli, test_dns, "sendrequest", cli_test_dns_sendrequest, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "generate and send dns request to configured nameserver");
+                cli_register_command(cli, test_dns, "refreshallfqdns", cli_test_dns_refreshallfqdns, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "refresh all configured FQDN address objects against configured nameserver");
                 
         diag  = cli_register_command(cli, NULL, "diag", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose commands helping to troubleshoot");
             diag_ssl = cli_register_command(cli, diag, "ssl", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "ssl related troubleshooting commands");
                 diag_ssl_cache = cli_register_command(cli, diag_ssl, "cache", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl certificate cache");
-                        cli_register_command(cli, diag_ssl_cache, "stats", cli_diag_ssl_cache_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "display ssl cert cache statistics");
-                        cli_register_command(cli, diag_ssl_cache, "list", cli_diag_ssl_cache_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all ssl cert cache entries");
-                        cli_register_command(cli, diag_ssl_cache, "clear", cli_diag_ssl_cache_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "remove all ssl cert cache entries");
+                    cli_register_command(cli, diag_ssl_cache, "stats", cli_diag_ssl_cache_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "display ssl cert cache statistics");
+                    cli_register_command(cli, diag_ssl_cache, "list", cli_diag_ssl_cache_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all ssl cert cache entries");
+                    cli_register_command(cli, diag_ssl_cache, "clear", cli_diag_ssl_cache_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "remove all ssl cert cache entries");
                 diag_ssl_wl = cli_register_command(cli, diag_ssl, "whitelist", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl temporary verification whitelist");                        
-                        cli_register_command(cli, diag_ssl_wl, "list", cli_diag_ssl_wl_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all verification whitelist entries");
-                        cli_register_command(cli, diag_ssl_wl, "clear", cli_diag_ssl_wl_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clear all verification whitelist entries");
-                        cli_register_command(cli, diag_ssl_wl, "stats", cli_diag_ssl_wl_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "verification whitelist cache stats");
+                    cli_register_command(cli, diag_ssl_wl, "list", cli_diag_ssl_wl_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all verification whitelist entries");
+                    cli_register_command(cli, diag_ssl_wl, "clear", cli_diag_ssl_wl_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clear all verification whitelist entries");
+                    cli_register_command(cli, diag_ssl_wl, "stats", cli_diag_ssl_wl_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "verification whitelist cache stats");
                 diag_ssl_crl = cli_register_command(cli, diag_ssl, "crl", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose dynamically downloaded CRLs");                           
-                        cli_register_command(cli, diag_ssl_crl, "list", cli_diag_ssl_crl_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all CRLs");
-                        cli_register_command(cli, diag_ssl_crl, "stats", cli_diag_ssl_crl_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "CRLs cache stats");
+                    cli_register_command(cli, diag_ssl_crl, "list", cli_diag_ssl_crl_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all CRLs");
+                    cli_register_command(cli, diag_ssl_crl, "stats", cli_diag_ssl_crl_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "CRLs cache stats");
                 diag_ssl_verify = cli_register_command(cli, diag_ssl, "verify", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose certificate verification status cache");                           
-                        cli_register_command(cli, diag_ssl_verify, "list", cli_diag_ssl_verify_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list certificate verification status cache content");
-                        cli_register_command(cli, diag_ssl_verify, "stats", cli_diag_ssl_verify_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "certificate verification status cache stats");
+                    cli_register_command(cli, diag_ssl_verify, "list", cli_diag_ssl_verify_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list certificate verification status cache content");
+                    cli_register_command(cli, diag_ssl_verify, "stats", cli_diag_ssl_verify_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "certificate verification status cache stats");
                 diag_ssl_ticket = cli_register_command(cli, diag_ssl, "ticket", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose abbreviated handshake session/ticket cache");
-                        cli_register_command(cli, diag_ssl_ticket, "list", cli_diag_ssl_ticket_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list abbreviated handshake session/ticket cache");
-                        cli_register_command(cli, diag_ssl_ticket, "stats", cli_diag_ssl_ticket_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "abbreviated handshake session/ticket cache stats");
+                    cli_register_command(cli, diag_ssl_ticket, "list", cli_diag_ssl_ticket_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list abbreviated handshake session/ticket cache");
+                    cli_register_command(cli, diag_ssl_ticket, "stats", cli_diag_ssl_ticket_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "abbreviated handshake session/ticket cache stats");
                 diag_ssl_ca     = cli_register_command(cli, diag_ssl, "ca", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose SSL signing CA");
-                        cli_register_command(cli, diag_ssl_ca, "reload", cli_diag_ssl_ca_reload, PRIVILEGE_PRIVILEGED, MODE_EXEC, "reload signing CA key and certificate");
+                    cli_register_command(cli, diag_ssl_ca, "reload", cli_diag_ssl_ca_reload, PRIVILEGE_PRIVILEGED, MODE_EXEC, "reload signing CA key and certificate");
 
                         
 
             if(cfg_openssl_mem_dbg) {
                 diag_ssl_memcheck = cli_register_command(cli, diag_ssl, "memcheck", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose openssl memcheck");                           
-                        cli_register_command(cli, diag_ssl_memcheck, "list", cli_diag_ssl_memcheck_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "print out OpenSSL memcheck status");
-                        cli_register_command(cli, diag_ssl_memcheck, "enable", cli_diag_ssl_memcheck_enable, PRIVILEGE_PRIVILEGED, MODE_EXEC, "enable OpenSSL debug collection");
-                        cli_register_command(cli, diag_ssl_memcheck, "disable", cli_diag_ssl_memcheck_disable, PRIVILEGE_PRIVILEGED, MODE_EXEC, "disable OpenSSL debug collection");
+                    cli_register_command(cli, diag_ssl_memcheck, "list", cli_diag_ssl_memcheck_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "print out OpenSSL memcheck status");
+                    cli_register_command(cli, diag_ssl_memcheck, "enable", cli_diag_ssl_memcheck_enable, PRIVILEGE_PRIVILEGED, MODE_EXEC, "enable OpenSSL debug collection");
+                    cli_register_command(cli, diag_ssl_memcheck, "disable", cli_diag_ssl_memcheck_disable, PRIVILEGE_PRIVILEGED, MODE_EXEC, "disable OpenSSL debug collection");
             }
                 
             diag_mem = cli_register_command(cli, diag, "mem", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory related troubleshooting commands");
                 diag_mem_buffers = cli_register_command(cli, diag_mem, "buffers", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory buffers troubleshooting commands");
-                        cli_register_command(cli, diag_mem_buffers, "stats", cli_diag_mem_buffers_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory buffers statistics");
+                    cli_register_command(cli, diag_mem_buffers, "stats", cli_diag_mem_buffers_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory buffers statistics");
                 diag_mem_objects = cli_register_command(cli, diag_mem, "objects", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory object troubleshooting commands");                        
-                        cli_register_command(cli, diag_mem_objects, "stats", cli_diag_mem_objects_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory objects statistics");
-                        cli_register_command(cli, diag_mem_objects, "list", cli_diag_mem_objects_list, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory objects list");
-                        cli_register_command(cli, diag_mem_objects, "search", cli_diag_mem_objects_search, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory objects search");
-                        cli_register_command(cli, diag_mem_objects, "clear", cli_diag_mem_objects_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clears memory object");
+                    cli_register_command(cli, diag_mem_objects, "stats", cli_diag_mem_objects_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory objects statistics");
+                    cli_register_command(cli, diag_mem_objects, "list", cli_diag_mem_objects_list, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory objects list");
+                    cli_register_command(cli, diag_mem_objects, "search", cli_diag_mem_objects_search, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory objects search");
+                    cli_register_command(cli, diag_mem_objects, "clear", cli_diag_mem_objects_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clears memory object");
                 diag_mem_trace = cli_register_command(cli, diag_mem, "trace", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory tracing commands");
-                        cli_register_command(cli, diag_mem_trace, "list", cli_diag_mem_trace_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "print out memory allocation traces (arg: number of top entries to print)");
-                        cli_register_command(cli, diag_mem_trace, "mark", cli_diag_mem_trace_mark, PRIVILEGE_PRIVILEGED, MODE_EXEC, "mark all currently existing allocations as seen.");
+                    cli_register_command(cli, diag_mem_trace, "list", cli_diag_mem_trace_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "print out memory allocation traces (arg: number of top entries to print)");
+                    cli_register_command(cli, diag_mem_trace, "mark", cli_diag_mem_trace_mark, PRIVILEGE_PRIVILEGED, MODE_EXEC, "mark all currently existing allocations as seen.");
             diag_dns = cli_register_command(cli, diag, "dns", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "DNS traffic related troubleshooting commands");
                 diag_dns_cache = cli_register_command(cli, diag_dns, "cache", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "DNS traffic cache troubleshooting commands");
-                        cli_register_command(cli, diag_dns_cache, "list", cli_diag_dns_cache_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all DNS traffic cache entries");
-                        cli_register_command(cli, diag_dns_cache, "stats", cli_diag_dns_cache_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "DNS traffic cache statistics");
-                        cli_register_command(cli, diag_dns_cache, "clear", cli_diag_dns_cache_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clear DNS traffic cache");
+                    cli_register_command(cli, diag_dns_cache, "list", cli_diag_dns_cache_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all DNS traffic cache entries");
+                    cli_register_command(cli, diag_dns_cache, "stats", cli_diag_dns_cache_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "DNS traffic cache statistics");
+                    cli_register_command(cli, diag_dns_cache, "clear", cli_diag_dns_cache_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clear DNS traffic cache");
                 diag_dns_domains = cli_register_command(cli, diag_dns, "domain", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "DNS domain cache troubleshooting commands");
-                        cli_register_command(cli, diag_dns_domains, "list", cli_diag_dns_domain_cache_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "DNS sub-domain list");
-                        cli_register_command(cli, diag_dns_domains, "clear", cli_diag_dns_domain_cache_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clear DNS sub-domain cache");
+                    cli_register_command(cli, diag_dns_domains, "list", cli_diag_dns_domain_cache_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "DNS sub-domain list");
+                    cli_register_command(cli, diag_dns_domains, "clear", cli_diag_dns_domain_cache_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clear DNS sub-domain cache");
             diag_proxy = cli_register_command(cli, diag, "proxy",NULL, PRIVILEGE_PRIVILEGED, MODE_EXEC, "proxy related troubleshooting commands");
                 diag_proxy_policy = cli_register_command(cli,diag_proxy,"policy",NULL,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy policy commands");
-                        cli_register_command(cli, diag_proxy_policy,"list",cli_diag_proxy_policy_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy policy list");
+                    cli_register_command(cli, diag_proxy_policy,"list",cli_diag_proxy_policy_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy policy list");
                 diag_proxy_session = cli_register_command(cli,diag_proxy,"session",NULL,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session commands");
-                        cli_register_command(cli, diag_proxy_session,"list",cli_diag_proxy_session_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session list");
-                        cli_register_command(cli, diag_proxy_session,"clear",cli_diag_proxy_session_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session clear");
+                    cli_register_command(cli, diag_proxy_session,"list",cli_diag_proxy_session_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session list");
+                    cli_register_command(cli, diag_proxy_session,"clear",cli_diag_proxy_session_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session clear");
             diag_identity = cli_register_command(cli,diag,"identity",NULL,PRIVILEGE_PRIVILEGED, MODE_EXEC,"identity related commands");
                 diag_identity_user = cli_register_command(cli, diag_identity,"user",NULL, PRIVILEGE_PRIVILEGED, MODE_EXEC,"identity commands related to users");
-                        cli_register_command(cli, diag_identity_user,"list",cli_diag_identity_ip_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"list all known users");
-                        cli_register_command(cli, diag_identity_user,"clear",cli_diag_identity_ip_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC,"CLEAR all known users");
+                    cli_register_command(cli, diag_identity_user,"list",cli_diag_identity_ip_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"list all known users");
+                    cli_register_command(cli, diag_identity_user,"clear",cli_diag_identity_ip_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC,"CLEAR all known users");
                         
                         
         debuk = cli_register_command(cli, NULL, "debug", NULL, PRIVILEGE_PRIVILEGED, MODE_EXEC, "diagnostic commands");
@@ -2737,31 +2925,7 @@ void client_thread(int client_socket) {
                                        cli_config_setting_cb,
                                        cli_config_setting_cb, "settings");
             if(set_settings){
-                std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
-
-
-                if (cfgapi.getRoot()["settings"].exists("auth_portal")) {
-                    set_settings_auth = cfg_generate_cli_callbacks(cfgapi.getRoot()["settings"]["auth_portal"], cli,
-                                               set_settings,
-                                               cli_config_setting_auth_cb,
-                                               cli_config_setting_auth_cb, "settings/auth_portal");
-                }
-
-                if (cfgapi.getRoot()["settings"].exists("cli")) {
-                    set_settings_cli = cfg_generate_cli_callbacks(cfgapi.getRoot()["settings"]["cli"], cli,
-                                                                   set_settings,
-                                                                   cli_config_setting_cli_cb,
-                                                                   cli_config_setting_cli_cb, "settings/cli");
-                }
-
-                if (cfgapi.getRoot()["settings"].exists("socks")) {
-                    set_settings_cli = cfg_generate_cli_callbacks(cfgapi.getRoot()["settings"]["socks"], cli,
-                                                                  set_settings,
-                                                                  cli_config_setting_socks_cb,
-                                                                  cli_config_setting_socks_cb, "settings/socks");
-                }
-
-
+                cli_generate_set_settings(cli, set_settings);
             }
         }
 
