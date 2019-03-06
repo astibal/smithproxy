@@ -1483,8 +1483,10 @@ int save_config_auth_profiles(Config& ex) {
 
         if(obj->sub_policies.size() > 0) {
 
+            Setting& ident = item.add("identities", Setting::TypeGroup);
+
             for( auto identity: obj->sub_policies) {
-                Setting& subid = item.add(identity->name, Setting::TypeGroup);
+                Setting& subid = ident.add(identity->name, Setting::TypeGroup);
 
                 if(identity->profile_detection)
                     subid.add("detection_profile", Setting::TypeString) = identity->profile_detection->prof_name;
