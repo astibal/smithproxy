@@ -107,6 +107,33 @@ void load_defaults() {
     orig_mitmmasterproxy_loglevel = MitmMasterProxy::log_level_ref();
 }
 
+std::unordered_map<std::string, std::string> cli_context_help;
+
+void cli_help_add( std::string k, std::string v ) {
+    cli_context_help[std::move(k)] = std::move(v);
+}
+
+std::string& cli_help(const std::string& section, const std::string& key) {
+
+    auto i = cli_context_help.find(section + "/" + key);
+    if(i != cli_context_help.end()) {
+        return i->second;
+    } else {
+
+        auto i = cli_context_help.find("default");
+        if(i != cli_context_help.end()) {
+            return i->second;
+        } else {
+            cli_context_help["default"] = "";
+            return cli_context_help["default"];
+        }
+    }
+}
+
+void init_cli_help() {
+    cli_help_add("default","");
+    cli_help_add("settings/certs_path", "directory for TLS-resigning CA certificate and key");
+}
 
 
 
@@ -1893,6 +1920,201 @@ void cfg_clone_setting(Setting& dst, Setting& orig  /* , struct cli_def *debug_c
     }
 }
 
+void cfg_generate_cli_hints(Setting& setting, std::vector<std::string>* this_level_names,
+                                                std::vector<unsigned int>* this_level_indexes,
+        std::vector<std::string>* next_level_names,
+        std::vector<unsigned int>* next_level_indexes) {
+
+    for (unsigned int i = 0; i < (unsigned int) setting.getLength(); i++) {
+        Setting &cur_object = setting[i];
+
+        Setting::Type type = cur_object.getType();
+
+        std::string name;
+        if(cur_object.getName()) {
+            name = cur_object.getName();
+        }
+
+        if(cur_object.isScalar()) {
+            if( ! name.empty() ) {
+                if(this_level_names)
+                    this_level_names->push_back(name);
+            } else {
+                if(this_level_indexes)
+                    this_level_indexes->push_back(i);
+            }
+        } else {
+            if( ! name.empty() ) {
+                if(next_level_names)
+                    next_level_names->push_back(name);
+            } else {
+                if(next_level_indexes)
+                    next_level_indexes->push_back(i);
+            }
+        }
+    }
+}
+
+
+cli_command* cfg_generate_cli_callbacks(Setting& s, struct cli_def* cli, cli_command* cli_parent,
+            int(*set_cb)(struct cli_def*, const char*, char*[], int),
+            int(*config_cb)(struct cli_def*, const char*, char*[], int),
+                    const char* context_help) {
+
+    if(! cli_parent)
+        return nullptr;
+
+    std::vector<std::string> here_name, next_name;
+    std::vector<unsigned int> here_index, next_index;
+
+    cli_print(cli, "calling cfg_generate_cli_hints");
+
+    cfg_generate_cli_hints(s, &here_name, &here_index, &next_name, &next_index);
+
+    cli_print(cli, "hint results: named: %d, indexed %d, next-level named: %d, next-level indexed: %d",
+              (int)here_name.size(), (int)here_index.size(),
+              (int)next_name.size(), (int)next_index.size());
+
+    if( (! here_index.empty() ) || (! here_name.empty()) ) {
+
+        std::string name;
+        if(s.getName()) {
+            cli_command* cli_here = cli_register_command(cli, cli_parent, s.getName(), set_cb, PRIVILEGE_PRIVILEGED, MODE_CONFIG, "modify variables");
+
+            for( const auto& here_n: here_name) {
+
+                // create type information, and (possibly) some help text
+
+                std::string help;
+                if(context_help) {
+                    std::string h = cli_help(context_help, here_n);
+                    if(h.empty()) {
+                        help = string_format("modify '%s'", here_n.c_str());
+                    }
+                    else {
+                        help = " - " + h;
+                    }
+                } else {
+                    help = string_format("modify '%s'", here_n.c_str());
+                }
+
+                cli_register_command(cli, cli_here, here_n.c_str(), set_cb, PRIVILEGE_PRIVILEGED, MODE_CONFIG,
+                                     help.c_str() );
+            }
+
+            return cli_here;
+        }
+    }
+
+    return nullptr;
+}
+
+
+bool cfg_write_value(Setting& parent, bool create, std::string& varname, std::string value, cli_def* cli) {
+
+    if( parent.exists(varname.c_str()) ) {
+
+        cli_print(cli, "config item exists %s", varname.c_str());
+
+        Setting& s = parent[varname.c_str()];
+        auto t = s.getType();
+
+
+        int i;
+        long long int lli;
+        bool b;
+        float f;
+
+        std::string lvalue;
+
+        try {
+            switch (t) {
+                case Setting::TypeInt:
+                    i = std::stoi(value);
+                    s = i;
+
+                    break;
+
+                case Setting::TypeInt64:
+                    lli = std::stoll(value);
+                    s = lli;
+
+                    break;
+
+                case Setting::TypeBoolean:
+
+                    lvalue = string_tolower(value);
+
+                    if( lvalue == "true" || lvalue == "1" ) {
+                        s = true;
+                    }
+                    else if ( lvalue == "false" || lvalue == "0" ) {
+                        s = false;
+                    }
+
+                    break;
+
+                case Setting::TypeFloat:
+                    f = std::stof(value);
+                    s = f;
+
+                    break;
+
+                case Setting::TypeString:
+                    s = value;
+
+                    break;
+
+                default:
+                    ;
+            }
+        } catch(std::exception& e) {
+            return false;
+        }
+    }
+    else if(create) {
+
+    }
+
+    return false;
+}
+
+int cli_config_setting_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    cli_set_configmode(cli, MODE_CONFIG, "settings");
+
+    cli_print(cli, "called: '%s' with '%s' args: %d", __FUNCTION__, command, argc);
+
+    for(int i = 0 ; i < argc ; i++) {
+        cli_print(cli, "arg%d = %s", i, argv[i]);
+    }
+
+    if(argc > 0) {
+
+        auto cmd = string_split(command, ' ');
+        std::string varname = cmd[cmd.size()-1];
+
+        cli_print(cli, "var: %s", varname.c_str());
+
+
+        std::string argv0(argv[0]);
+
+            if( argv0 != "?" ) {
+                std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+                cfg_write_value(cfgapi.getRoot()["settings"], false, varname, argv0, cli);
+        }
+
+    }
+    return CLI_OK;
+}
+
+int cli_config_setting_auth_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    cli_set_configmode(cli, MODE_CONFIG, "settings-auth");
+
+    cli_print(cli, "called %s with %s\r\n", __FUNCTION__, command);
+    return CLI_OK;
+}
+
+
 int cli_show_config_setting(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
@@ -2316,7 +2538,7 @@ void client_thread(int client_socket) {
                 struct cli_command *diag_ssl_ticket;
                 struct cli_command *diag_ssl_memcheck;
                 struct cli_command *diag_ssl_ca;
-    struct cli_command *diag_mem;
+            struct cli_command *diag_mem;
                 struct cli_command *diag_mem_buffers;
                 struct cli_command *diag_mem_objects;
                 struct cli_command *diag_mem_trace;
@@ -2328,6 +2550,9 @@ void client_thread(int client_socket) {
                 struct cli_command *diag_proxy_session;
             struct cli_command *diag_identity;
                 struct cli_command *diag_identity_user;
+
+        struct cli_command *conft_configure;
+            struct cli_command *conft_settings_auth;
         
         struct cli_def *cli;
         
@@ -2338,6 +2563,8 @@ void client_thread(int client_socket) {
         // Must be called first to setup data structures
         cli = cli_init();
 
+        // init contextual help
+        init_cli_help();
 
         // Set the hostname (shown in the the prompt)
         cli_set_hostname(cli, string_format("smithproxy(%s) ",hostname).c_str());
@@ -2352,11 +2579,11 @@ void client_thread(int client_socket) {
         save  = cli_register_command(cli, NULL, "save", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "save configs");
                 cli_register_command(cli, save, "config", cli_save_config, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "save config file");
 
-        show  = cli_register_command(cli, NULL, "show", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show basic information");
+        show  = cli_register_command(cli, NULL, "show", NULL, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show basic information");
                 cli_register_command(cli, show, "status", cli_show_status, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show smithproxy status");
-                show_config = cli_register_command(cli, show, "config", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show smithproxy configuration related commands");
-                        cli_register_command(cli, show_config, "full", cli_show_config_full, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show smithproxy full configuration");
-                        cli_register_command(cli, show_config, "settings", cli_show_config_setting, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show smithproxy config section: settings");
+                show_config = cli_register_command(cli, show, "config", NULL, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy configuration related commands");
+                        cli_register_command(cli, show_config, "full", cli_show_config_full, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy full configuration");
+                        cli_register_command(cli, show_config, "settings", cli_show_config_setting, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy config section: settings");
 
         test  = cli_register_command(cli, NULL, "test", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "various testing commands");
                 test_dns = cli_register_command(cli, test, "dns", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "dns related testing commands");
@@ -2433,7 +2660,36 @@ void client_thread(int client_socket) {
             cli_register_command(cli, debuk, "dns", cli_debug_dns, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set dns file logging level");
             cli_register_command(cli, debuk, "proxy", cli_debug_proxy, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set proxy file logging level");
             cli_register_command(cli, debuk, "sobject", cli_debug_sobject, PRIVILEGE_PRIVILEGED, MODE_EXEC, "toggle on/off sobject creation tracing (affect performance)");
-        
+
+
+        // generate dynamically content of config
+
+        conft_configure = cli_register_command(cli, NULL, "set", nullptr, PRIVILEGE_PRIVILEGED, MODE_CONFIG, "configure smithproxy settings");
+        cli_command* set_settings = nullptr;
+            cli_command* set_settings_auth = nullptr;
+
+
+        if( cfgapi.getRoot().exists("settings") ) {
+            std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+
+            set_settings = cfg_generate_cli_callbacks(cfgapi.getRoot()["settings"], cli, conft_configure,
+                                       cli_config_setting_cb,
+                                       cli_config_setting_cb, "settings");
+            if(set_settings){
+                std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+
+
+                if (cfgapi.getRoot()["settings"].exists("auth_portal")) {
+                    set_settings_auth = cfg_generate_cli_callbacks(cfgapi.getRoot()["settings"]["auth_portal"], cli,
+                                               set_settings,
+                                               cli_config_setting_cb,
+                                               cli_config_setting_cb, "settings/auth_portal");
+                }
+            }
+        }
+
+
+
         // Pass the connection off to libcli
         get_logger()->remote_targets(string_format("cli-%d",client_socket),client_socket);
 
@@ -2475,4 +2731,4 @@ void cli_loop(short unsigned int port) {
     {
         std::thread* n = new std::thread(client_thread,client_socket);
     }
-}
+};
