@@ -53,11 +53,16 @@
 num_re='^[0-9]+$'
 DEFAULT_PORT="50000"
 
-PORT=`cat /etc/smithproxy/smithproxy.cfg | grep 'cli \+= *{\|port *=' | grep 'cli \+= *{' -A1 | grep port | awk -F= '{ print $2 }' |  grep -o '[0-9]\+'`
+PORT=`cat /etc/smithproxy/smithproxy.cfg | grep 'cli \+= *\|port *=' | grep 'cli \+= *' -A1 | grep port | awk -F= '{ print $2 }' |  grep -o '[0-9]\+'`
 
 if [ -f /etc/smithproxy/smithproxy.tenants.cfg ]; then
 
     if [ "$1" != "" ]; then
+
+        if [ -f /etc/smithproxy/smithproxy.${1}.cfg ]; then
+            PORT=`cat /etc/smithproxy/smithproxy.${1}.cfg | grep 'cli \+= *\|port *=' | grep 'cli \+= *' -A1 | grep port | awk -F= '{ print $2 }' |  grep -o '[0-9]\+'`
+        fi
+
         PORT_INDEX=`cat /etc/smithproxy/smithproxy.tenants.cfg | grep -v '^ *#' | grep "; *$1 *;" | awk -F";" '{ print $1 }' `
         PORT=`expr $PORT + $PORT_INDEX`
         
