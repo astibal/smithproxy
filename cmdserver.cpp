@@ -2082,38 +2082,94 @@ bool cfg_write_value(Setting& parent, bool create, std::string& varname, std::st
     return false;
 }
 
+int cli_uni_set_cb(Setting& conf, struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    auto cmd = string_split(command, ' ');
+    std::string varname = cmd[cmd.size()-1];
+
+    cli_print(cli, "var: %s", varname.c_str());
+
+
+    std::string argv0(argv[0]);
+
+    if( argv0 != "?" ) {
+        std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+        cfg_write_value(conf, false, varname, argv0, cli);
+    }
+
+}
+
+
+#define CLI_PRINT_ARGS( cli, command , argv, argc ) \
+    cli_print(cli, "called: '%s' with '%s' args: %d", __FUNCTION__, command, argc); \
+    for(int i = 0 ; i < argc ; i++) {       \
+        cli_print(cli, "arg[%d] = '%s'", i, argv[i]);   \
+    }
+
+
+
 int cli_config_setting_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
     cli_set_configmode(cli, MODE_CONFIG, "settings");
 
-    cli_print(cli, "called: '%s' with '%s' args: %d", __FUNCTION__, command, argc);
-
-    for(int i = 0 ; i < argc ; i++) {
-        cli_print(cli, "arg%d = %s", i, argv[i]);
-    }
+    CLI_PRINT_ARGS(cli, command, argv, argc);
 
     if(argc > 0) {
+        std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
 
-        auto cmd = string_split(command, ' ');
-        std::string varname = cmd[cmd.size()-1];
-
-        cli_print(cli, "var: %s", varname.c_str());
-
-
-        std::string argv0(argv[0]);
-
-            if( argv0 != "?" ) {
-                std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
-                cfg_write_value(cfgapi.getRoot()["settings"], false, varname, argv0, cli);
+        if(cfgapi.getRoot().exists("settings")) {
+            Setting &curconf = cfgapi.getRoot()["settings"];
+            cli_uni_set_cb(curconf, cli, command, argv, argc);
         }
-
     }
+
     return CLI_OK;
 }
 
 int cli_config_setting_auth_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
-    cli_set_configmode(cli, MODE_CONFIG, "settings-auth");
 
-    cli_print(cli, "called %s with %s\r\n", __FUNCTION__, command);
+    if(argc > 0) {
+        std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+
+        if(cfgapi.getRoot().exists("settings")) {
+            if(cfgapi.getRoot()["settings"].exists("auth")) {
+                Setting &curconf = cfgapi.getRoot()["settings"]["auth"];
+                cli_uni_set_cb(curconf, cli, command, argv, argc);
+            }
+        }
+    }
+
+    return CLI_OK;
+}
+
+int cli_config_setting_cli_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    if(argc > 0) {
+        std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+
+        if(cfgapi.getRoot().exists("settings")) {
+            if(cfgapi.getRoot()["settings"].exists("cli")) {
+                Setting &curconf = cfgapi.getRoot()["settings"]["cli"];
+                cli_uni_set_cb(curconf, cli, command, argv, argc);
+            }
+        }
+    }
+
+    return CLI_OK;
+}
+
+int cli_config_setting_socks_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    if(argc > 0) {
+        std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+
+        if(cfgapi.getRoot().exists("settings")) {
+            if(cfgapi.getRoot()["settings"].exists("socks")) {
+                Setting &curconf = cfgapi.getRoot()["settings"]["socks"];
+                cli_uni_set_cb(curconf, cli, command, argv, argc);
+            }
+        }
+    }
+
     return CLI_OK;
 }
 
@@ -2670,6 +2726,8 @@ void client_thread(int client_socket) {
         conft_configure = cli_register_command(cli, NULL, "set", nullptr, PRIVILEGE_PRIVILEGED, MODE_CONFIG, "configure smithproxy settings");
         cli_command* set_settings = nullptr;
             cli_command* set_settings_auth = nullptr;
+            cli_command* set_settings_cli = nullptr;
+            cli_command* set_settings_socks = nullptr;
 
 
         if( cfgapi.getRoot().exists("settings") ) {
@@ -2685,9 +2743,25 @@ void client_thread(int client_socket) {
                 if (cfgapi.getRoot()["settings"].exists("auth_portal")) {
                     set_settings_auth = cfg_generate_cli_callbacks(cfgapi.getRoot()["settings"]["auth_portal"], cli,
                                                set_settings,
-                                               cli_config_setting_cb,
-                                               cli_config_setting_cb, "settings/auth_portal");
+                                               cli_config_setting_auth_cb,
+                                               cli_config_setting_auth_cb, "settings/auth_portal");
                 }
+
+                if (cfgapi.getRoot()["settings"].exists("cli")) {
+                    set_settings_cli = cfg_generate_cli_callbacks(cfgapi.getRoot()["settings"]["cli"], cli,
+                                                                   set_settings,
+                                                                   cli_config_setting_cli_cb,
+                                                                   cli_config_setting_cli_cb, "settings/cli");
+                }
+
+                if (cfgapi.getRoot()["settings"].exists("socks")) {
+                    set_settings_cli = cfg_generate_cli_callbacks(cfgapi.getRoot()["settings"]["socks"], cli,
+                                                                  set_settings,
+                                                                  cli_config_setting_socks_cb,
+                                                                  cli_config_setting_socks_cb, "settings/socks");
+                }
+
+
             }
         }
 
