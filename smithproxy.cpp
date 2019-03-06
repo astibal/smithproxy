@@ -592,7 +592,7 @@ int main(int argc, char *argv[]) {
     bool custom_config_file = false;
     
     std::string config_file_tenant = "/etc/smithproxy/smithproxy.%s.cfg";
-    
+
     while(1) {
     /* getopt_long stores the option index here. */
         int option_index = 0;
@@ -637,8 +637,15 @@ int main(int argc, char *argv[]) {
                 exit(1);                 
         }
     }
-    
-    set_logger(new QueueLogger());
+
+    if(config_file_check_only) {
+
+        // set synchronous logger for config-check
+        set_logger(new logger());
+
+    } else {
+        set_logger(new QueueLogger());
+    }
     
     if(!cfg_daemonize) {
         std::thread* log_thread  = create_log_writer(get_logger());
