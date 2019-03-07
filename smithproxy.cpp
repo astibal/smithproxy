@@ -167,7 +167,7 @@ void my_terminate (int param) {
     }
 }
 
-bool load_config(std::string& config_f, bool reload = false);
+
 void my_usr1 (int param) {
     DIAS_("USR1 signal handler started");
     NOTS_("reloading policies and its objects !!");
@@ -194,10 +194,6 @@ static struct option long_options[] =
     {"tenant-name", required_argument, 0, 't'},
     {0, 0, 0, 0}
 };  
-
-
-
-
 
 
 int load_signatures(libconfig::Config& cfg, const char* name, std::vector<duplexFlowMatch*>& target) {

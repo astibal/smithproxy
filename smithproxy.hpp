@@ -43,3 +43,5 @@
 
 extern bool cfg_openssl_mem_dbg;
 extern bool cfg_mtrace_enable;
+
+bool load_config(std::string& config_f, bool reload = false);
