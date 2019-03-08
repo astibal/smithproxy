@@ -152,9 +152,74 @@ std::string& cli_help(help_type_t htype, const std::string& section, const std::
 void init_cli_help() {
     cli_help_add("default","");
     cli_help_add("settings/certs_path", "directory for TLS-resigning CA certificate and key");
+    cli_help_add("settings/certs_ca_key_password","TLS-resigning CA private key protection password");
+    cli_help_add("settings/certs_ca_path", "");
+    cli_help_add("settings/plaintext_port", "");
+    cli_help_add("settings/plaintext_workers", "");
+    cli_help_add("settings/ssl_port", "");
+    cli_help_add("settings/ssl_workers", "");
+    cli_help_add("settings/ssl_autodetect", "");
+    cli_help_add("settings/ssl_autodetect_harder", "");
+    cli_help_add("settings/ssl_ocsp_status_ttl", "");
+    cli_help_add("settings/ssl_crl_status_ttl", "");
+    cli_help_add("settings/udp_port", "");
+    cli_help_add("settings/udp_workers", "");
+    cli_help_add("settings/dtls_port", "");
+    cli_help_add("settings/dtls_workers", "");
+    cli_help_add("settings/socks_port", "");
+    cli_help_add("settings/socks_workers", "");
+    cli_help_add("settings/log_level", "");
+    cli_help_add("settings/log_file", "");
+    cli_help_add("settings/log_console", "");
+    cli_help_add("settings/syslog_server", "");
+    cli_help_add("settings/syslog_port", "");
+    cli_help_add("settings/syslog_facility", "");
+    cli_help_add("settings/syslog_level", "");
+    cli_help_add("settings/syslog_family", "");
+    cli_help_add("settings/sslkeylog_file", "");
+    cli_help_add("settings/messages_dir", "");
+    cli_help_add("settings/write_payload_dir", "");
+    cli_help_add("settings/write_payload_file_prefix", "");
+    cli_help_add("settings/write_payload_file_suffix", "");
+    cli_help_add("settings/auth_portal", "");
+    cli_help_add("settings/cli", "");
+    cli_help_add("settings/socks", "");
+
 
     cli_qmark_add("default", "enter <value>");
     cli_qmark_add("settings/certs_path", "<string> with path to a directory");
+    cli_qmark_add("settings/certs_ca_key_password","");
+    cli_qmark_add("settings/certs_ca_path", "");
+    cli_qmark_add("settings/plaintext_port", "");
+    cli_qmark_add("settings/plaintext_workers", "");
+    cli_qmark_add("settings/ssl_port", "");
+    cli_qmark_add("settings/ssl_workers", "");
+    cli_qmark_add("settings/ssl_autodetect", "");
+    cli_qmark_add("settings/ssl_autodetect_harder", "");
+    cli_qmark_add("settings/ssl_ocsp_status_ttl", "");
+    cli_qmark_add("settings/ssl_crl_status_ttl", "");
+    cli_qmark_add("settings/udp_port", "");
+    cli_qmark_add("settings/udp_workers", "");
+    cli_qmark_add("settings/dtls_port", "");
+    cli_qmark_add("settings/dtls_workers", "");
+    cli_qmark_add("settings/socks_port", "");
+    cli_qmark_add("settings/socks_workers", "");
+    cli_qmark_add("settings/log_level", "");
+    cli_qmark_add("settings/log_file", "");
+    cli_qmark_add("settings/log_console", "");
+    cli_qmark_add("settings/syslog_server", "");
+    cli_qmark_add("settings/syslog_port", "");
+    cli_qmark_add("settings/syslog_facility", "");
+    cli_qmark_add("settings/syslog_level", "");
+    cli_qmark_add("settings/syslog_family", "");
+    cli_qmark_add("settings/sslkeylog_file", "");
+    cli_qmark_add("settings/messages_dir", "");
+    cli_qmark_add("settings/write_payload_dir", "");
+    cli_qmark_add("settings/write_payload_file_prefix", "");
+    cli_qmark_add("settings/write_payload_file_suffix", "");
+    cli_qmark_add("settings/auth_portal", "");
+    cli_qmark_add("settings/cli", "");
+    cli_qmark_add("settings/socks", "");
 }
 
 
