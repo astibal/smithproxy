@@ -2052,8 +2052,8 @@ bool cfg_write_value(Setting& parent, bool create, std::string& varname, std::st
         cli_print(cli, "config item exists %s", varname.c_str());
 
         Setting& s = parent[varname.c_str()];
-        auto t = s.getType();
 
+        auto t = s.getType();
 
         int i;
         long long int lli;
@@ -2114,25 +2114,34 @@ bool cfg_write_value(Setting& parent, bool create, std::string& varname, std::st
     return false;
 }
 
-int cli_uni_set_cb(Setting& conf, struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_uni_set_cb(std::string confpath, struct cli_def *cli, const char *command, char *argv[], int argc) {
 
-    auto cmd = string_split(command, ' ');
-    std::string varname = cmd[cmd.size()-1];
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
 
-    cli_print(cli, "var: %s", varname.c_str());
+    if (argc > 0 && cfgapi.exists(confpath)) {
+
+        Setting& conf = cfgapi.lookup(confpath);
+
+        auto cmd = string_split(command, ' ');
+        std::string varname = cmd[cmd.size() - 1];
+
+        cli_print(cli, "var: %s", varname.c_str());
 
 
-    std::string argv0(argv[0]);
+        std::string argv0(argv[0]);
 
-    if( argv0 != "?" ) {
-        std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
-        cfg_write_value(conf, false, varname, argv0, cli);
-    } else {
-        if(!conf.isRoot() &&  conf.getName()) {
+        if (argv0 != "?") {
 
-            auto h = cli_help(HELP_QMARK, conf.getName(), varname);
+            std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+            cfg_write_value(conf, false, varname, argv0, cli);
 
-            cli_print(cli, "hint:  %s", h.c_str());
+        } else {
+            if (!conf.isRoot() && conf.getName()) {
+
+                auto h = cli_help(HELP_QMARK, conf.getPath(), varname);
+
+                cli_print(cli, "hint:  %s (%s)", h.c_str(), conf.getPath().c_str());
+            }
         }
     }
 
@@ -2147,70 +2156,30 @@ int cli_uni_set_cb(Setting& conf, struct cli_def *cli, const char *command, char
     }
 
 
-
 int cli_config_setting_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
     cli_set_configmode(cli, MODE_CONFIG, "settings");
 
-    //CLI_PRINT_ARGS(cli, command, argv, argc);
-
-    if(argc > 0) {
-        std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
-
-        if(cfgapi.getRoot().exists("settings")) {
-            Setting &curconf = cfgapi.getRoot()["settings"];
-            cli_uni_set_cb(curconf, cli, command, argv, argc);
-        }
-    }
-
-    return CLI_OK;
+    return cli_uni_set_cb("settings", cli, command, argv, argc);
 }
 
 int cli_config_setting_auth_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    cli_set_configmode(cli, MODE_CONFIG, "settings.auth");
 
-    if(argc > 0) {
-        std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
-
-        if(cfgapi.getRoot().exists("settings")) {
-            if(cfgapi.getRoot()["settings"].exists("auth")) {
-                Setting &curconf = cfgapi.getRoot()["settings"]["auth"];
-                cli_uni_set_cb(curconf, cli, command, argv, argc);
-            }
-        }
-    }
-
-    return CLI_OK;
+    return cli_uni_set_cb("settings.auth", cli, command, argv, argc);
 }
 
 int cli_config_setting_cli_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
-    if(argc > 0) {
-        std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    cli_set_configmode(cli, MODE_CONFIG, "settings.cli");
 
-        if(cfgapi.getRoot().exists("settings")) {
-            if(cfgapi.getRoot()["settings"].exists("cli")) {
-                Setting &curconf = cfgapi.getRoot()["settings"]["cli"];
-                cli_uni_set_cb(curconf, cli, command, argv, argc);
-            }
-        }
-    }
-
-    return CLI_OK;
+    return cli_uni_set_cb("settings.cli", cli, command, argv, argc);
 }
 
 int cli_config_setting_socks_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
-    if(argc > 0) {
-        std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    cli_set_configmode(cli, MODE_CONFIG, "settings.cli");
 
-        if(cfgapi.getRoot().exists("settings")) {
-            if(cfgapi.getRoot()["settings"].exists("socks")) {
-                Setting &curconf = cfgapi.getRoot()["settings"]["socks"];
-                cli_uni_set_cb(curconf, cli, command, argv, argc);
-            }
-        }
-    }
-
-    return CLI_OK;
+    return cli_uni_set_cb("settings.cli", cli, command, argv, argc);
 }
 
 // index < 0 means all
