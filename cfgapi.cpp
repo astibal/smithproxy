@@ -44,6 +44,7 @@
 #include <policy.hpp>
 #include <mitmproxy.hpp>
 #include <mitmhost.hpp>
+#include <cmdserver.hpp>
 
 #include <socle.hpp>
 #include <smithproxy.hpp>
@@ -239,6 +240,97 @@ ProfileAuth* cfgapi_lookup_profile_auth(const char* name) {
     }    
     
     return nullptr;
+}
+
+bool cfgapi_load_settings() {
+
+    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+
+    if(! cfgapi.getRoot().exists("settings"))
+        return false;
+
+    if(cfgapi.getRoot()["settings"].exists("nameservers")) {
+
+        if(!cfgapi_obj_nameservers.empty()) {
+            DEBS_("cfgapi_load_settings: clearing existing entries in: nameservers");
+            cfgapi_obj_nameservers.clear();
+        }
+
+        int num = cfgapi.getRoot()["settings"]["nameservers"].getLength();
+        for(int i = 0; i < num; ++i) {
+            std::string ns = cfgapi.getRoot()["settings"]["nameservers"][i];
+            cfgapi_obj_nameservers.push_back(ns);
+        }
+    }
+
+    cfgapi.getRoot()["settings"].lookupValue("certs_path",SSLCertStore::certs_path);
+    cfgapi.getRoot()["settings"].lookupValue("certs_ca_key_password",SSLCertStore::password);
+    cfgapi.getRoot()["settings"].lookupValue("certs_ca_path",SSLCertStore::def_cl_capath);
+
+    cfgapi.getRoot()["settings"].lookupValue("plaintext_port",cfg_tcp_listen_port_base); cfg_tcp_listen_port = cfg_tcp_listen_port_base;
+    cfgapi.getRoot()["settings"].lookupValue("plaintext_workers",cfg_tcp_workers);
+    cfgapi.getRoot()["settings"].lookupValue("ssl_port",cfg_ssl_listen_port_base); cfg_ssl_listen_port = cfg_ssl_listen_port_base;
+    cfgapi.getRoot()["settings"].lookupValue("ssl_workers",cfg_ssl_workers);
+    cfgapi.getRoot()["settings"].lookupValue("ssl_autodetect",MitmMasterProxy::ssl_autodetect);
+    cfgapi.getRoot()["settings"].lookupValue("ssl_autodetect_harder",MitmMasterProxy::ssl_autodetect_harder);
+    cfgapi.getRoot()["settings"].lookupValue("ssl_ocsp_status_ttl",SSLCertStore::ssl_ocsp_status_ttl);
+    cfgapi.getRoot()["settings"].lookupValue("ssl_crl_status_ttl",SSLCertStore::ssl_crl_status_ttl);
+
+    cfgapi.getRoot()["settings"].lookupValue("udp_port",cfg_udp_port_base); cfg_udp_port = cfg_udp_port_base;
+    cfgapi.getRoot()["settings"].lookupValue("udp_workers",cfg_udp_workers);
+
+    cfgapi.getRoot()["settings"].lookupValue("dtls_port",cfg_dtls_port_base);  cfg_dtls_port = cfg_dtls_port_base;
+    cfgapi.getRoot()["settings"].lookupValue("dtls_workers",cfg_dtls_workers);
+
+    if(cfgapi.getRoot()["settings"].exists("udp_quick_ports")) {
+
+        if(!cfgapi_obj_udp_quick_ports.empty()) {
+            DEBS_("cfgapi_load_settings: clearing existing entries in: udp_quick_ports");
+            cfgapi_obj_udp_quick_ports.clear();
+        }
+
+        int num = cfgapi.getRoot()["settings"]["udp_quick_ports"].getLength();
+        for(int i = 0; i < num; ++i) {
+            int port = cfgapi.getRoot()["settings"]["udp_quick_ports"][i];
+            cfgapi_obj_udp_quick_ports.push_back(port);
+        }
+    }
+
+    cfgapi.getRoot()["settings"].lookupValue("socks_port",cfg_socks_port_base); cfg_socks_port = cfg_socks_port_base;
+    cfgapi.getRoot()["settings"].lookupValue("socks_workers",cfg_socks_workers);
+
+    if(cfgapi.getRoot().exists("settings")) {
+        if(cfgapi.getRoot()["settings"].exists("socks")) {
+            cfgapi.getRoot()["settings"]["socks"].lookupValue("async_dns", socksServerCX::global_async_dns);
+        }
+    }
+
+    cfgapi.getRoot()["settings"].lookupValue("log_level",cfgapi_table.logging.level.level_);
+
+    cfgapi.getRoot()["settings"].lookupValue("syslog_server",cfg_syslog_server);
+    cfgapi.getRoot()["settings"].lookupValue("syslog_port",cfg_syslog_port);
+    cfgapi.getRoot()["settings"].lookupValue("syslog_facility",cfg_syslog_facility);
+    cfgapi.getRoot()["settings"].lookupValue("syslog_level",cfg_syslog_level.level_);
+    cfgapi.getRoot()["settings"].lookupValue("syslog_family",cfg_syslog_family);
+
+    cfgapi.getRoot()["settings"].lookupValue("messages_dir",cfg_messages_dir);
+
+    cfgapi.getRoot()["settings"]["cli"].lookupValue("port",cli_port_base); cli_port = cli_port_base;
+    cfgapi.getRoot()["settings"]["cli"].lookupValue("enable_password",cli_enable_password);
+
+
+    if(cfgapi.getRoot().exists("settings")) {
+        if(cfgapi.getRoot()["settings"].exists("auth_portal")) {
+            cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("address", cfg_auth_address);
+            cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("http_port", cfg_auth_http);
+            cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("https_port", cfg_auth_https);
+            cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("ssl_key", cfg_auth_sslkey);
+            cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("ssl_cert", cfg_auth_sslcert);
+            cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("magic_ip", cfgapi_tenant_magic_ip);
+        }
+    }
+
+    return true;
 }
 
 

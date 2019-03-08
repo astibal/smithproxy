@@ -172,6 +172,7 @@ ProfileTls*   cfgapi_lookup_profile_tls(const char* name);
 ProfileAuth*   cfgapi_lookup_profile_auth(const char* name);
 ProfileAlgDns*   cfgapi_lookup_profile_alg_dns(const char* name);
 
+bool cfgapi_load_settings();
 int  cfgapi_load_obj_address();
 int  cfgapi_load_obj_port();
 int  cfgapi_load_obj_proto();
