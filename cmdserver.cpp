@@ -40,6 +40,7 @@
 #include <string>
 #include <thread>
 #include <set>
+#include <array>
 
 #include <cstring>
 #include <cstdlib>
@@ -153,37 +154,37 @@ void init_cli_help() {
     cli_help_add("default","");
     cli_help_add("settings/certs_path", "directory for TLS-resigning CA certificate and key");
     cli_help_add("settings/certs_ca_key_password","TLS-resigning CA private key protection password");
-    cli_help_add("settings/certs_ca_path", "");
-    cli_help_add("settings/plaintext_port", "");
-    cli_help_add("settings/plaintext_workers", "");
-    cli_help_add("settings/ssl_port", "");
-    cli_help_add("settings/ssl_workers", "");
-    cli_help_add("settings/ssl_autodetect", "");
-    cli_help_add("settings/ssl_autodetect_harder", "");
-    cli_help_add("settings/ssl_ocsp_status_ttl", "");
-    cli_help_add("settings/ssl_crl_status_ttl", "");
-    cli_help_add("settings/udp_port", "");
-    cli_help_add("settings/udp_workers", "");
-    cli_help_add("settings/dtls_port", "");
-    cli_help_add("settings/dtls_workers", "");
-    cli_help_add("settings/socks_port", "");
-    cli_help_add("settings/socks_workers", "");
-    cli_help_add("settings/log_level", "");
-    cli_help_add("settings/log_file", "");
-    cli_help_add("settings/log_console", "");
-    cli_help_add("settings/syslog_server", "");
-    cli_help_add("settings/syslog_port", "");
-    cli_help_add("settings/syslog_facility", "");
-    cli_help_add("settings/syslog_level", "");
-    cli_help_add("settings/syslog_family", "");
-    cli_help_add("settings/sslkeylog_file", "");
-    cli_help_add("settings/messages_dir", "");
-    cli_help_add("settings/write_payload_dir", "");
-    cli_help_add("settings/write_payload_file_prefix", "");
-    cli_help_add("settings/write_payload_file_suffix", "");
-    cli_help_add("settings/auth_portal", "");
-    cli_help_add("settings/cli", "");
-    cli_help_add("settings/socks", "");
+    cli_help_add("settings/certs_ca_path", "trusted CA store path (to verify server-side connections)");
+    cli_help_add("settings/plaintext_port", "base divert port for non-SSL TCP traffic");
+    cli_help_add("settings/plaintext_workers", "non-SSL TCP traffic worker thread count");
+    cli_help_add("settings/ssl_port", "base divert port for SSL TCP traffic");
+    cli_help_add("settings/ssl_workers", "SSL TCP traffic worker thread count");
+    cli_help_add("settings/ssl_autodetect", "Detect TLS ClientHello on unusual ports");
+    cli_help_add("settings/ssl_autodetect_harder", "Detect TSL ClientHello - wait a bit longer");
+    cli_help_add("settings/ssl_ocsp_status_ttl", "hardcoded TTL for OCSP response validity");
+    cli_help_add("settings/ssl_crl_status_ttl", "hardcoded TTL for downloaded CRL files");
+    cli_help_add("settings/udp_port", "base divert port for non-DTLS UDP traffic");
+    cli_help_add("settings/udp_workers", "non-DTLS traffic worker thread count");
+    cli_help_add("settings/dtls_port", "base divert port for DTLS UDP traffic");
+    cli_help_add("settings/dtls_workers", "DTLS traffic worker thread count");
+    cli_help_add("settings/socks_port", "base SOCKS proxy listening port");
+    cli_help_add("settings/socks_workers", "SOCKS proxy traffic thread count");
+    cli_help_add("settings/log_level", "file logging verbosity level");
+    cli_help_add("settings/log_file", "log file");
+    cli_help_add("settings/log_console", "toggle logging to standard output");
+    cli_help_add("settings/syslog_server", "IP address of syslog server");
+    cli_help_add("settings/syslog_port", "syslog server port");
+    cli_help_add("settings/syslog_facility", "syslog facility");
+    cli_help_add("settings/syslog_level", "syslog logging verbosity level");
+    cli_help_add("settings/syslog_family", "IPv4 or IPv6?");
+    cli_help_add("settings/sslkeylog_file", "where to dump TLS keying material");
+    cli_help_add("settings/messages_dir", "replacement text directory");
+    cli_help_add("settings/write_payload_dir", "root directory for packet dumps");
+    cli_help_add("settings/write_payload_file_prefix", "packet dumps file prefix");
+    cli_help_add("settings/write_payload_file_suffix", "packet dumps file suffix");
+    cli_help_add("settings/auth_portal", "** configure authentication portal settings");
+    cli_help_add("settings/cli", "** configure CLI specific settings");
+    cli_help_add("settings/socks", "** configure SOCKS specific settings");
 
 
     cli_qmark_add("default", "enter <value>");
