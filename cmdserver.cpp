@@ -2389,11 +2389,13 @@ int cli_diag_mem_trace_mark (struct cli_def *cli, const char *command, char **ar
         it->second.mark = 1;
     }
 
-    return CLI_OK;
+
 #else
 
-    cli_print("memory tracing not enabled.");
+    cli_print(cli, "memory tracing not enabled.");
 #endif
+
+    return CLI_OK;
 }
 
 
@@ -2466,7 +2468,7 @@ int cli_diag_mem_trace_list (struct cli_def *cli, const char *command, char **ar
 
 
 #else
-    cli_print("memory tracing not enabled.");
+    cli_print(cli, "memory tracing not enabled.");
 
 #endif
     return CLI_OK;
