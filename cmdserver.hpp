@@ -48,4 +48,7 @@ extern std::string cli_enable_password;
 
 void cli_loop(unsigned short port=50000);
 
+typedef enum session_list_filter_flags { SL_NONE=0x0000 , SL_IO_OSBUF_NZ=0x0001 } session_list_filter_flags;
+int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, char *argv[], int argc, session_list_filter_flags sl_flags);
+
 #endif

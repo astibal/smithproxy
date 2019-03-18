@@ -2593,7 +2593,14 @@ int cli_diag_mem_objects_clear(struct cli_def *cli, const char *command, char *a
     return CLI_OK;
 }
 
+
+
 int cli_diag_proxy_session_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    return cli_diag_proxy_session_list_extra(cli, command, argv, argc, SL_NONE);
+}
+
+int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, char *argv[], int argc, session_list_filter_flags sl_flags) {
     
     std::string a1,a2;
     int verbosity = iINF;
@@ -2614,11 +2621,14 @@ int cli_diag_proxy_session_list(struct cli_def *cli, const char *command, char *
         if(!ptr) continue;
         
         if(ptr->class_name() == "MitmProxy") {
+
+            std::stringstream cur_obj_ss;
+
             socle::sobject_info*  si = it.second;
-            ss << ptr->to_string(verbosity);
+            cur_obj_ss << ptr->to_string(verbosity);
             
             if(verbosity >= DEB && si) {
-                    ss <<  si->to_string(verbosity);
+                cur_obj_ss <<  si->to_string(verbosity);
             }
 
             if(verbosity > INF) {
@@ -2634,18 +2644,18 @@ int cli_diag_proxy_session_list(struct cli_def *cli, const char *command, char *
                              desc = desc.substr(0,117);
                              desc += "...";
                             }
-                            ss << "app_data: " << desc << "\n";
+                            cur_obj_ss << "app_data: " << desc << "\n";
                         } else {
-                            ss << "app_data: none\n";
+                            cur_obj_ss << "app_data: none\n";
                         }
                         
                         if(verbosity > INF) {
-                            ss << "    obj_debug: " << curr_proxy->get_this_log_level().to_string() << "\n";
+                            cur_obj_ss << "    obj_debug: " << curr_proxy->get_this_log_level().to_string() << "\n";
                             int expiry = -1;
                             if(curr_proxy->half_holdtimer > 0) {
                                 expiry = curr_proxy->half_holdtimer + MitmProxy::half_timeout - curtime;
                             }
-                            ss << "    half_hold: " << expiry << "\n";
+                            cur_obj_ss << "    half_hold: " << expiry << "\n";
                         }
                     }
                     
@@ -2659,7 +2669,7 @@ int cli_diag_proxy_session_list(struct cli_def *cli, const char *command, char *
                         
                         in_buf  = cx->readbuf()->size();
                         out_buf = cx->writebuf()->size();
-                        
+
                         ss << "     " << sm << "_os_recv-q: " <<  in_pending << " " << sm << "_os_send-q: " <<  out_pending << "\n";
                         ss << "     " << sm << "_sx_recv-q: " <<  in_buf     << " " << sm << "_sx_send-q: " <<  out_buf << "\n";
                         
@@ -2675,34 +2685,34 @@ int cli_diag_proxy_session_list(struct cli_def *cli, const char *command, char *
                     if(lf) {
                         if(verbosity > INF) {
                             if(lf->socket() > 0) {
-                                print_queue_stats(ss, verbosity, lf,"lf","Left");
+                                print_queue_stats(cur_obj_ss, verbosity, lf,"lf","Left");
                             }
                         }
                             
                         if(verbosity > DIA) {
-                            ss << "     lf_debug: " << lf->get_this_log_level().to_string() << "\n";
+                            cur_obj_ss << "     lf_debug: " << lf->get_this_log_level().to_string() << "\n";
                             if(lf->com()) {
-                                ss << "       lf_com: " << lf->com()->get_this_log_level().to_string() << "\n";
+                                cur_obj_ss << "       lf_com: " << lf->com()->get_this_log_level().to_string() << "\n";
                             }
                         }
                     }
                     if(rg) {
                         if(verbosity > INF) {
                             if(rg->socket() > 0) {
-                                print_queue_stats(ss,verbosity, rg,"rg","Right");
+                                print_queue_stats(cur_obj_ss,verbosity, rg,"rg","Right");
                             }
                         }
                         if(verbosity > DIA) {
-                            ss << "     rg_debug: " << rg->get_this_log_level().to_string() << "\n";
+                            cur_obj_ss << "     rg_debug: " << rg->get_this_log_level().to_string() << "\n";
                             if(rg->com()) {
-                                ss << "       rg_com: " << rg->com()->get_this_log_level().to_string() << "\n";
+                                cur_obj_ss << "       rg_com: " << rg->com()->get_this_log_level().to_string() << "\n";
                             }
                         }
                     }
 
                 }
             }
-            ss << "\n";
+            ss << cur_obj_ss.str() << "\n";
         }
     }
     socle::sobject_db.unlock();
