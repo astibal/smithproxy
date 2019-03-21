@@ -35,7 +35,7 @@
     gives permission to release a modified version without this exception;
     this exception also makes it possible to release a modified version
     which carries forward this exception.
-*/    
+*/
 
 #include <vector>
 
@@ -77,6 +77,7 @@ int cfg_dtls_workers  = 0;
 int cfg_udp_workers   = 0;
 int cfg_socks_workers = 0;
 
+std::string cfg_config_file;
 std::string cfg_tenant_index;
 std::string cfg_tenant_name;
 
@@ -1825,4 +1826,30 @@ void cfgapi_log_version(bool warn_delay)
     }
 }
 
+int apply_index(std::string& what , const std::string& idx) {
+    DEB_("apply_index: what=%s idx=%s",what.c_str(),idx.c_str());
+    int port = std::stoi(what);
+    int index = std::stoi(idx);
+    what = std::to_string(port + index);
 
+    return 0;
+}
+
+
+bool cfgapi_apply_tenant_config () {
+    int ret = 0;
+
+    if(cfg_tenant_index.size() > 0 && cfg_tenant_name.size() > 0) {
+        ret += apply_index(cfg_tcp_listen_port,cfg_tenant_index);
+        ret += apply_index(cfg_ssl_listen_port,cfg_tenant_index);
+        ret += apply_index(cfg_dtls_port,cfg_tenant_index);
+        ret += apply_index(cfg_udp_port,cfg_tenant_index);
+        ret += apply_index(cfg_socks_port,cfg_tenant_index);
+        ret += apply_index(cfgapi_identity_portal_port_http,cfg_tenant_index);
+        ret += apply_index(cfgapi_identity_portal_port_https,cfg_tenant_index);
+
+        cli_port += std::stoi(cfg_tenant_index);
+    }
+
+    return (ret == 0);
+}

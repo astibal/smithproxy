@@ -1884,7 +1884,7 @@ int cli_save_config(struct cli_def *cli, const char *command, char *argv[], int 
     cli_print(cli, "%d %s signatures", n, "detection");
 
 
-    ex.writeFile("/tmp/saved_config.cfg");
+    ex.writeFile(cfg_config_file.c_str());
 
     return CLI_OK;
 }
@@ -2177,6 +2177,20 @@ bool cfg_write_value(Setting& parent, bool create, std::string& varname, std::st
 
     }
 
+    return true;
+}
+
+bool apply_setting(std::string conf, std::string varname, struct cli_def *cli) {
+
+    cli_print(cli, "apply_setting: start");
+
+    if( "settings" == conf ) {
+
+        cli_print(cli, "apply_setting: %s", conf.c_str());
+
+        return cfgapi_load_settings();
+    }
+
     return false;
 }
 
@@ -2199,7 +2213,19 @@ int cli_uni_set_cb(std::string confpath, struct cli_def *cli, const char *comman
         if (argv0 != "?") {
 
             std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
-            cfg_write_value(conf, false, varname, argv0, cli);
+
+            if (cfg_write_value(conf, false, varname, argv0, cli)) {
+                // cli_print(cli, "change written to current config");
+
+                if ( apply_setting( conf.getPath(), varname , cli )) {
+                    cli_print(cli, "change applied to current config");
+                } else {
+                    // FIXME
+                    cli_print(cli, "change NOT applied to current config - reverting NYI, sorry");
+                    cli_print(cli, "change will be visible in show config, but not written to mapped variables");
+                    cli_print(cli, "therefore 'save config' won't write them to file.");
+                }
+            }
 
         } else {
             if (!conf.isRoot() && conf.getName()) {
@@ -2982,8 +3008,8 @@ void client_thread(int client_socket) {
 
         // Set up 2 commands "show counters" and "show junk"
 
-        save  = cli_register_command(cli, NULL, "save", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "save configs");
-            cli_register_command(cli, save, "config", cli_save_config, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "save config file");
+        save  = cli_register_command(cli, NULL, "save", NULL, PRIVILEGE_PRIVILEGED, MODE_ANY, "save configs");
+            cli_register_command(cli, save, "config", cli_save_config, PRIVILEGE_PRIVILEGED, MODE_ANY, "save config file");
 
         show  = cli_register_command(cli, NULL, "show", NULL, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show basic information");
             cli_register_command(cli, show, "status", cli_show_status, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show smithproxy status");

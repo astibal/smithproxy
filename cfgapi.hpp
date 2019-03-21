@@ -127,6 +127,7 @@ extern std::vector<int> cfgapi_obj_udp_quick_ports;
 
 extern std::recursive_mutex cfgapi_write_lock;
 
+extern std::string cfg_config_file;
 extern std::string cfgapi_tenant_name;
 extern unsigned int cfgapi_tenant_index;
 
@@ -172,6 +173,7 @@ ProfileTls*   cfgapi_lookup_profile_tls(const char* name);
 ProfileAuth*   cfgapi_lookup_profile_auth(const char* name);
 ProfileAlgDns*   cfgapi_lookup_profile_alg_dns(const char* name);
 
+bool cfgapi_apply_tenant_config();
 bool cfgapi_load_settings();
 int  cfgapi_load_obj_address();
 int  cfgapi_load_obj_port();

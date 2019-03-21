@@ -316,7 +316,8 @@ bool load_config(std::string& config_f, bool reload) {
         FATS_("Unable to load config.");
         ret = false;
     }
-    
+
+    cfg_config_file = config_f;
     
     // Add another level of lock. File is already loaded. We need to apply its content.
     // lock is needed here to not try to match against potentially empty/partial policy list
@@ -452,32 +453,6 @@ bool load_config(std::string& config_f, bool reload) {
     return ret;
 }
 
-int apply_index(std::string& what , const std::string& idx) {
-    DEB_("apply_index: what=%s idx=%s",what.c_str(),idx.c_str());
-    int port = std::stoi(what);
-    int index = std::stoi(idx);
-    what = std::to_string(port + index);
-    
-    return 0;
-}
-
-bool apply_tenant_config() {
-    int ret = 0;
-    
-    if(cfg_tenant_index.size() > 0 && cfg_tenant_name.size() > 0) {
-        ret += apply_index(cfg_tcp_listen_port,cfg_tenant_index);
-        ret += apply_index(cfg_ssl_listen_port,cfg_tenant_index);
-        ret += apply_index(cfg_dtls_port,cfg_tenant_index);
-        ret += apply_index(cfg_udp_port,cfg_tenant_index);
-        ret += apply_index(cfg_socks_port,cfg_tenant_index);
-        ret += apply_index(cfgapi_identity_portal_port_http,cfg_tenant_index);
-        ret += apply_index(cfgapi_identity_portal_port_https,cfg_tenant_index);
-        
-        cli_port += std::stoi(cfg_tenant_index);
-    }
-    
-    return (ret == 0);
-}
 
 std::thread* create_identity_refresh_thread() {
 
@@ -635,7 +610,7 @@ int main(int argc, char *argv[]) {
         }
     }
     
-    if(!apply_tenant_config()) {
+    if(!cfgapi_apply_tenant_config()) {
         FATS_("Failed to apply tenant specific configuration!");
         exit(2);
     }
