@@ -333,7 +333,7 @@ bool load_config(std::string& config_f, bool reload) {
     return ret;
 }
 
-int apply_index(std::string& what , const std::string& idx) {
+int smithd_apply_index(std::string& what , const std::string& idx) {
     DEB_("apply_index: what=%s idx=%s",what.c_str(),idx.c_str());
     int port = std::stoi(what);
     int index = std::stoi(idx);
@@ -342,7 +342,7 @@ int apply_index(std::string& what , const std::string& idx) {
     return 0;
 }
 
-bool apply_tenant_config() {
+bool smithd_apply_tenant_config() {
     int ret = 0;
     
     if(cfg_tenant_index.size() > 0 && cfg_tenant_name.size() > 0) {
@@ -473,7 +473,7 @@ int main(int argc, char *argv[]) {
         }
     }
     
-    if(!apply_tenant_config()) {
+    if(!smithd_apply_tenant_config()) {
         FATS_("Failed to apply tenant specific configuration!");
         exit(2);
     }      
