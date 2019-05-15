@@ -526,6 +526,13 @@ int cli_diag_ssl_wl_list(struct cli_def *cli, const char *command, char *argv[],
     MitmProxy::whitelist_verify.lock();
     for(auto we: MitmProxy::whitelist_verify.cache()) {
         out += "\n\t" + we.first;
+
+        int ttl = we.second->expired_at - ::time(nullptr);
+
+        out += string_format(" ttl: %d", ttl);
+        if(ttl <= 0) {
+            out += " *expired*";
+        }
     }
     MitmProxy::whitelist_verify.unlock();
     

@@ -138,21 +138,37 @@ static bool cfg_mtrace_enable = true;
 void my_terminate (int param) {
     
     if (!cfg_daemonize)
-    printf("Terminating ...\n");
+        printf("Terminating ...\n");
+
     if (plain_proxy != nullptr) {
         plain_proxy->dead(true);
+
+        delete plain_thread;
+        plain_thread = nullptr;
     }
     if(ssl_proxy != nullptr) {
         ssl_proxy->dead(true);
+
+        delete ssl_thread;
+        ssl_thread = nullptr;
     }
     if(dtls_proxy != nullptr) {
         dtls_proxy->dead(true);
+
+        delete dtls_thread;
+        dtls_thread = nullptr;
     }
     if(udp_proxy != nullptr) {
         udp_proxy->dead(true);
+
+        delete udp_thread;
+        udp_thread = nullptr;
     }
     if(socks_proxy != nullptr) {
         socks_proxy->dead(true);
+
+        delete socks_thread;
+        socks_thread = nullptr;
     }
 
     cnt_terminate++;
