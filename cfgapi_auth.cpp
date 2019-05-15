@@ -69,10 +69,13 @@ std::string cfgapi_identity_portal_port_http = "8008";
 std::string cfgapi_identity_portal_port_https = "8043";
 
 int cfgapi_auth_shm_ip_table_refresh()  {
-    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
-    
-    auth_shm_ip_map.attach(string_format(AUTH_IP_MEM_NAME,cfgapi_tenant_name.c_str()).c_str(),AUTH_IP_MEM_SIZE,string_format(AUTH_IP_SEM_NAME,cfgapi_tenant_name.c_str()).c_str());
-    
+
+
+    {
+        std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+        auth_shm_ip_map.attach(string_format(AUTH_IP_MEM_NAME, cfgapi_tenant_name.c_str()).c_str(), AUTH_IP_MEM_SIZE,
+                               string_format(AUTH_IP_SEM_NAME, cfgapi_tenant_name.c_str()).c_str() );
+    }
     DEBS_("cfgapi_auth_shm_ip_table_refresh: acquring semaphore");
     int rc = auth_shm_ip_map.acquire();
     DEBS_("cfgapi_auth_shm_ip_table_refresh: acquring semaphore: done");
@@ -90,7 +93,7 @@ int cfgapi_auth_shm_ip_table_refresh()  {
     
     if(l_ip >= 0) {
         // new data!
-        cfgapi_identity_ip_lock.lock();
+        std::lock_guard<std::recursive_mutex> l(cfgapi_identity_ip_lock);
         
         if(l_ip == 0 && auth_ip_map.size() > 0) {
             DIAS_("cfgapi_auth_shm_ip_table_refresh: zero sized table received, flusing ip map");
@@ -122,17 +125,21 @@ int cfgapi_auth_shm_ip_table_refresh()  {
             }
             DIA_("cfgapi_auth_shm_ip_table_refresh: loaded: %d,%s,%s",ip.c_str(),rt.username().c_str(),rt.groups().c_str());
         }
-        cfgapi_identity_ip_lock.unlock();
-        
+
         return l_ip;
     }
     return 0;
 }
 
 int cfgapi_auth_shm_token_table_refresh()  {
-    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
-    
-    auth_shm_token_map.attach(string_format(AUTH_TOKEN_MEM_NAME,cfgapi_tenant_name.c_str()).c_str(),AUTH_TOKEN_MEM_SIZE,string_format(AUTH_TOKEN_SEM_NAME,cfgapi_tenant_name.c_str()).c_str());
+
+    {
+        std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+
+        auth_shm_token_map.attach(string_format(AUTH_TOKEN_MEM_NAME, cfgapi_tenant_name.c_str()).c_str(),
+                                  AUTH_TOKEN_MEM_SIZE,
+                                  string_format(AUTH_TOKEN_SEM_NAME, cfgapi_tenant_name.c_str()).c_str());
+    }
 
     DEBS_("cfgapi_auth_shm_token_table_refresh: acquring semaphore");
     int rc = auth_shm_token_map.acquire();
