@@ -190,8 +190,10 @@ public:
     bool failed_certcheck_replacement = true; //instead of resetting connection, spoof and display human-readable explanation why connection failed
     bool failed_certcheck_override = false;   //failed ssl replacement will contain option to temporarily allow the connection for the source IP.
     int  failed_certcheck_override_timeout = 600; // if failed ssl override is active, this is the timeout.
+    int  failed_certcheck_override_timeout_type = 0; // 0 - just expire after the timeout
+                                                     // 1 - reset timeout on traffic (aka idle timer)
     
-    bool use_pfs = true;         // general switch, more conrete take precedence
+    bool use_pfs = true;         // general switch, more concrete take precedence
     bool left_use_pfs = true;
     bool right_use_pfs = true;
     bool left_disable_reuse = false;
@@ -236,6 +238,7 @@ public:
             ret += string_format("\n        failed cert check html warnings: %d",failed_certcheck_replacement);
             ret += string_format("\n        failed cert check allow user override: %d",failed_certcheck_override);
             ret += string_format("\n        failed cert check user override timeout: %d",failed_certcheck_override_timeout);
+            ret += string_format("\n        failed cert check user override timeout type: %d",failed_certcheck_override_timeout_type);
             
             bool sni_out = false;
             if(sni_filter_bypass.ptr())

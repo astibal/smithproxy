@@ -1520,6 +1520,7 @@ int save_config_tls_profiles(Config& ex) {
         item.add("failed_certcheck_replacement", Setting::TypeBoolean) = obj->failed_certcheck_replacement;
         item.add("failed_certcheck_override", Setting::TypeBoolean) = obj->failed_certcheck_override;
         item.add("failed_certcheck_override_timeout", Setting::TypeInt) = obj->failed_certcheck_override_timeout;
+        item.add("failed_certcheck_override_timeout_type", Setting::TypeInt) = obj->failed_certcheck_override_timeout_type;
 
 
         item.add("left_disable_reuse", Setting::TypeBoolean) = obj->left_disable_reuse;
