@@ -1099,7 +1099,7 @@ int cfgapi_load_obj_profile_tls() {
                 cur_object.lookupValue("ocsp_stapling_mode",a->ocsp_stapling_mode);
                 cur_object.lookupValue("failed_certcheck_replacement",a->failed_certcheck_replacement);
                 cur_object.lookupValue("failed_certcheck_override",a->failed_certcheck_override);
-                cur_object.lookupValue("failed_certcheck_override_timout",a->failed_certcheck_override_timeout);
+                cur_object.lookupValue("failed_certcheck_override_timeout",a->failed_certcheck_override_timeout);
                 
                 if(cur_object.exists("sni_filter_bypass")) {
                         Setting& sni_filter = cur_object["sni_filter_bypass"];
@@ -1751,11 +1751,20 @@ bool cfgapi_obj_policy_apply_tls(ProfileTls* pt, baseCom* xcom) {
             sslcom->opt_allow_not_valid_cert = pt->allow_invalid_certs;
             sslcom->opt_allow_self_signed_cert = pt->allow_self_signed;
 
-            
-            if(pt->failed_certcheck_replacement && should_redirect_warning_port(pt,sslcom)) {
-                sslcom->opt_failed_certcheck_replacement = pt->failed_certcheck_replacement;
-                sslcom->opt_failed_certcheck_override = pt->failed_certcheck_override;
-                sslcom->opt_failed_certcheck_override_timeout = pt->failed_certcheck_override_timeout;
+            SSLCom* peer_sslcom = dynamic_cast<SSLCom*>(sslcom->peer());
+
+            if( peer_sslcom &&
+                    pt->failed_certcheck_replacement &&
+                    should_redirect_warning_port(pt,peer_sslcom)) {
+
+                DEB_("cfgapi_obj_policy_apply_tls: applying profile, repl=%d, repl_ovrd=%d, repl_ovrd_tmo=%d",
+                     pt->failed_certcheck_replacement,
+                     pt->failed_certcheck_override,
+                     pt->failed_certcheck_override_timeout );
+
+                peer_sslcom->opt_failed_certcheck_replacement = pt->failed_certcheck_replacement;
+                peer_sslcom->opt_failed_certcheck_override = pt->failed_certcheck_override;
+                peer_sslcom->opt_failed_certcheck_override_timeout = pt->failed_certcheck_override_timeout;
             }
             
             // set accordingly if general "use_pfs" is specified, more conrete settings come later
