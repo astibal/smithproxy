@@ -1,5 +1,7 @@
+build/**
 .idea/**
 .vscode/**
+.kdev4/**
 smithproxy.kdev4
 **/*.pyc
 **/*.deb
