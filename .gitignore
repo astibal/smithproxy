@@ -1,0 +1,6 @@
+.idea/**
+.vscode/**
+smithproxy.kdev4
+**/*.pyc
+**/*.deb
+tools/build-scripts/deb/debian/changelog
