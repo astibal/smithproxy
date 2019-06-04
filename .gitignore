@@ -1,4 +1,4 @@
-build/**
+**/build/**
 .idea/**
 .vscode/**
 .kdev4/**
