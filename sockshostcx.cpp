@@ -64,7 +64,6 @@ socksServerCX::~socksServerCX() {
 
     if(left)  { delete left; }
     if(right) { delete right; }
-    if(async_dns_socket) { ::close(async_dns_socket); }
 }
 
 
@@ -292,13 +291,13 @@ int socksServerCX::process_socks_request() {
                         setup_target();
 
                     } else {
-                        async_dns_socket = send_dns_request(fqdn, A, nameserver);
-                        if(async_dns_socket) {
+                        int dns_sock = send_dns_request(fqdn, A, nameserver);
+                        if(dns_sock) {
                             DIA___("dns request sent: %s", fqdn.c_str());
-                            com()->set_monitor(async_dns_socket);
-                            com()->set_poll_handler(async_dns_socket,this);
 
-                            com()->set_idle_watch(async_dns_socket);
+                            async_dns_socket.set(dns_sock, this, com());
+                            async_dns_socket.opening();
+
                             com()->unset_monitor(socket());
 
                             state_ = DNS_QUERY_SENT;
@@ -524,7 +523,6 @@ int socksServerCX::process_socks_reply() {
         
         writebuf()->append(b,8);        
         state_ = REQRES_SENT;
-        
         return 8;
     }
     
@@ -544,18 +542,18 @@ void socksServerCX::pre_write() {
 
 void socksServerCX::handle_event (baseCom *xcom) {
     // we are handling only DNS, so this is easy
-    if(async_dns_socket > 0) {
+    if(async_dns_socket.socket_ > 0) {
 
 
-        if(com()->in_idleset(async_dns_socket)) {
-            INF___("handle_event: idling dns socket %d, closing", async_dns_socket);
+        if(com()->in_idleset(async_dns_socket.socket_)) {
+            INF___("handle_event: idling dns socket %d, closing", async_dns_socket.socket_);
             error(true);
 
             return;
         }
 
         // timeout is zero - we won't wait
-        std::pair<DNS_Response *, int> rresp = recv_dns_response(async_dns_socket,0);
+        std::pair<DNS_Response *, int> rresp = recv_dns_response(async_dns_socket.socket_,0);
         DNS_Response* resp = rresp.first;
         int red = rresp.second;
         state_ = DNS_RESP_RECV;
@@ -578,13 +576,10 @@ void socksServerCX::handle_event (baseCom *xcom) {
 
 
         // at any rate, we got all we need. Unmonitor, unhandle and close socket
-        com()->unset_monitor(async_dns_socket);
-        com()->set_poll_handler(async_dns_socket,nullptr);
+        async_dns_socket.closing();
 
-        ::close(async_dns_socket);
-        async_dns_socket = 0;
     } else {
-        WARS___("handle_event: should not be here. Socket %d, async enabled: %d", async_dns_socket, async_dns);
+        WARS___("handle_event: should not be here. Socket %d, async enabled: %d", async_dns_socket.socket_, async_dns);
     }
 
 

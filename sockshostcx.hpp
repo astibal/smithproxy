@@ -112,7 +112,7 @@ private:
 
     bool choose_server_ip(std::vector<std::string>& target_ips);
     bool async_dns = true;
-    int async_dns_socket = 0;
+    socket_state async_dns_socket;
 
 private:
     // implement advanced logging
