@@ -2802,7 +2802,7 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
                          desc = desc.substr(0,117);
                          desc += "...";
                         }
-                        cur_obj_ss << "app_data: " << desc << "\n";
+                        cur_obj_ss << "\n    app_data: " << desc << "\n";
                     } else {
                         cur_obj_ss << "app_data: none\n";
                     }
