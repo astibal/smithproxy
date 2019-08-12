@@ -58,6 +58,8 @@
 #include <unistd.h>
 
 #include <openssl/rand.h>
+#include <openssl/crypto.h>
+#include <biostring.hpp>
 
 #include <logger.hpp>
 #include <cmdserver.hpp>
@@ -262,7 +264,11 @@ int cli_test_dns_genrequest(struct cli_def *cli, const char *command, char *argv
         }
 
         unsigned char rand_pool[2];
+#ifdef USE_OPENSSL11
+        RAND_bytes(rand_pool,2);
+#else
         RAND_pseudo_bytes(rand_pool,2);
+#endif
         unsigned short id = *(unsigned short*)rand_pool;        
         
         int s = generate_dns_request(id,b,argv[0],A);
@@ -282,7 +288,11 @@ DNS_Response* send_dns_request(struct cli_def *cli, std::string hostname, DNS_Re
     DNS_Response* ret = nullptr;
     
     unsigned char rand_pool[2];
+#ifdef USE_OPENSSL11
+    RAND_bytes(rand_pool,2);
+#else
     RAND_pseudo_bytes(rand_pool,2);
+#endif
     unsigned short id = *(unsigned short*)rand_pool;
     
     int s = generate_dns_request(id,b,hostname,t);
@@ -470,9 +480,10 @@ int cli_diag_ssl_cache_list(struct cli_def *cli, const char *command, char *argv
         X509_PAIR* ptr = x->second;
         
         cli_print(cli,"    %s",fqdn.c_str());
+#ifndef USE_OPENSSL11
         if(print_refs)
             cli_print(cli,"            refcounts: key=%d cert=%d",ptr->first->references, ptr->second->references);
-
+#endif
     }
         
     cli_print(cli,"\ncertificate fqdn cache: ");
@@ -499,7 +510,13 @@ int cli_diag_ssl_cache_clear(struct cli_def *cli, const char *command, char *arg
         
         if(argc > 0) {
             std::string a1 = argv[0];
-            if(a1 == "7") cli_print(cli,"            refcounts: key=%d cert=%d",ptr->first->references, ptr->second->references);
+            if(a1 == "7") {
+#ifndef USE_OPENSSL11
+                cli_print(cli, "            refcounts: key=%d cert=%d",
+                          ptr->first->references,
+                          ptr->second->references);
+#endif
+            }
         }
         
         EVP_PKEY_free(ptr->first);
@@ -700,7 +717,36 @@ int cli_diag_ssl_ticket_list(struct cli_def *cli, const char *command, char *arg
             }
         }
         bool ticket = false;
-        
+
+#ifdef USE_OPENSSL11
+
+        if(session_keys->ptr) {
+
+            if(SSL_SESSION_has_ticket(session_keys->ptr)) {
+                size_t ticket_len = 0;
+                const unsigned char *ticket_ptr = nullptr;
+
+                SSL_SESSION_get0_ticket(session_keys->ptr, &ticket_ptr, &ticket_len);
+                if (ticket_ptr && ticket_len) {
+                    ticket = true;
+                    std::string tick = hex_print((unsigned char *) ticket_ptr, ticket_len);
+                    out += string_format("    %s,    ticket: %s\n", key.c_str(), tick.c_str());
+
+                }
+            }
+
+            unsigned int session_id_len = 0;
+            const unsigned char* session_id = SSL_SESSION_get_id(session_keys->ptr, &session_id_len);
+            if(! ticket || showall) {
+                if(session_id_len > 0) {
+                    std::string sessionid = hex_print((unsigned char*)session_id, session_id_len);
+                    out += string_format("    %s, sessionid: %s\n",key.c_str(),sessionid.c_str());
+                }
+                out += string_format("    usage cnt: %d\n",session_keys->cnt_loaded);
+            }
+        }
+
+#else
         if (session_keys->ptr->tlsext_ticklen > 0) {
             ticket = true;
             std::string tick = hex_print(session_keys->ptr->tlsext_tick, session_keys->ptr->tlsext_ticklen);
@@ -714,7 +760,7 @@ int cli_diag_ssl_ticket_list(struct cli_def *cli, const char *command, char *arg
             }
             out += string_format("    usage cnt: %d\n",session_keys->cnt_loaded);
         }
-        
+#endif
         
        
     }
@@ -765,8 +811,8 @@ int cli_diag_ssl_ticket_size(struct cli_def *cli, const char *command, char *arg
     return CLI_OK;
 }
 
-#include <biostring.hpp>
 
+#ifndef USE_OPENSSL11
 int cli_diag_ssl_memcheck_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
     
     std::string out;
@@ -778,6 +824,7 @@ int cli_diag_ssl_memcheck_list(struct cli_def *cli, const char *command, char *a
     
     return CLI_OK;
 }
+
 
 int cli_diag_ssl_memcheck_enable(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
@@ -792,6 +839,7 @@ int cli_diag_ssl_memcheck_disable(struct cli_def *cli, const char *command, char
     
     return CLI_OK;
 }
+#endif
 
 int cli_diag_ssl_ca_reload(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
@@ -3070,10 +3118,12 @@ void client_thread(int client_socket) {
                         
 
             if(cfg_openssl_mem_dbg) {
+#ifndef USE_OPENSSL11
                 diag_ssl_memcheck = cli_register_command(cli, diag_ssl, "memcheck", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose openssl memcheck");                           
                     cli_register_command(cli, diag_ssl_memcheck, "list", cli_diag_ssl_memcheck_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "print out OpenSSL memcheck status");
                     cli_register_command(cli, diag_ssl_memcheck, "enable", cli_diag_ssl_memcheck_enable, PRIVILEGE_PRIVILEGED, MODE_EXEC, "enable OpenSSL debug collection");
                     cli_register_command(cli, diag_ssl_memcheck, "disable", cli_diag_ssl_memcheck_disable, PRIVILEGE_PRIVILEGED, MODE_EXEC, "disable OpenSSL debug collection");
+#endif
             }
                 
             diag_mem = cli_register_command(cli, diag, "mem", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory related troubleshooting commands");

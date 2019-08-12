@@ -696,8 +696,10 @@ int main(int argc, char *argv[]) {
     //     atexit(__libc_freeres);   
 
     if(cfg_openssl_mem_dbg) {
+#ifndef USE_OPENSSL11
         CRYPTO_malloc_debug_init();
         CRYPTO_dbg_set_options(V_CRYPTO_MDEBUG_ALL);
+#endif
         CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON);
         CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_DISABLE);
     }
@@ -872,7 +874,9 @@ int main(int argc, char *argv[]) {
     
     CRYPTO_cleanup_all_ex_data();
     ERR_free_strings();
+#ifndef USE_OPENSSL11
     ERR_remove_state(0);
+#endif
     EVP_cleanup();
     
 }
