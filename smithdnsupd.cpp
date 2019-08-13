@@ -59,7 +59,7 @@ int send_dns_request (std::string hostname, DNS_Record_Type t, std::string names
     buffer b(256);
 
     unsigned char rand_pool[2];
-    RAND_pseudo_bytes(rand_pool, 2);
+    RAND_bytes(rand_pool, 2);
     unsigned short id = *(unsigned short *) rand_pool;
 
     int s = generate_dns_request(id, b, hostname, t);
