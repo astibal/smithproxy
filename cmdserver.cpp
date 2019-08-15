@@ -1797,9 +1797,9 @@ int save_config_settings(Config& ex) {
         it_ns.add(Setting::TypeString) = ns;
     }
 
-    objects.add("certs_path", Setting::TypeString) = SSLCertStore::certs_path;
-    objects.add("certs_ca_key_password", Setting::TypeString) = SSLCertStore::password;
-    objects.add("certs_ca_path", Setting::TypeString) = SSLCertStore::def_cl_capath;
+    objects.add("certs_path", Setting::TypeString) = SSLCertStore::default_cert_path();
+    objects.add("certs_ca_key_password", Setting::TypeString) = SSLCertStore::default_cert_password();
+    objects.add("certs_ca_path", Setting::TypeString) = SSLCertStore::default_client_ca_path();
 
     objects.add("plaintext_port", Setting::TypeString) = cfg_tcp_listen_port_base;
     objects.add("plaintext_workers", Setting::TypeInt) = cfg_tcp_workers;

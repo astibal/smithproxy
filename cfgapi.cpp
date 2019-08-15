@@ -264,9 +264,9 @@ bool cfgapi_load_settings() {
         }
     }
 
-    cfgapi.getRoot()["settings"].lookupValue("certs_path",SSLCertStore::certs_path);
-    cfgapi.getRoot()["settings"].lookupValue("certs_ca_key_password",SSLCertStore::password);
-    cfgapi.getRoot()["settings"].lookupValue("certs_ca_path",SSLCertStore::def_cl_capath);
+    cfgapi.getRoot()["settings"].lookupValue("certs_path",SSLCertStore::default_cert_path());
+    cfgapi.getRoot()["settings"].lookupValue("certs_ca_key_password",SSLCertStore::default_cert_password());
+    cfgapi.getRoot()["settings"].lookupValue("certs_ca_path",SSLCertStore::default_client_ca_path());
 
     cfgapi.getRoot()["settings"].lookupValue("plaintext_port",cfg_tcp_listen_port_base); cfg_tcp_listen_port = cfg_tcp_listen_port_base;
     cfgapi.getRoot()["settings"].lookupValue("plaintext_workers",cfg_tcp_workers);
