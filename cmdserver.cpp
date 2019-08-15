@@ -449,13 +449,11 @@ int cli_diag_ssl_cache_stats(struct cli_def *cli, const char *command, char *arg
 
     store->lock();
     int n_cache = store->cache().size();
-    int n_fqdn_cache = store->fqdn_cache().size();
     store->unlock();
 
     cli_print(cli,"certificate store stats: ");
     cli_print(cli,"    CN cert cache size: %d ",n_cache);
-    cli_print(cli,"    FQDN to CN cache size: %d ",n_fqdn_cache);
-    
+
     return CLI_OK;
 }
 
@@ -485,14 +483,6 @@ int cli_diag_ssl_cache_list(struct cli_def *cli, const char *command, char *argv
             cli_print(cli,"            refcounts: key=%d cert=%d",ptr->first->references, ptr->second->references);
 #endif
     }
-        
-    cli_print(cli,"\ncertificate fqdn cache: ");
-    for (auto x = store->fqdn_cache().begin(); x != store->fqdn_cache().end(); ++x ) {
-        std::string fqdn = x->first;
-        std::string cn = x->second;
-        cli_print(cli,"    %s -> %s",fqdn.c_str(), cn.c_str());
-    }
-
     store->unlock();
     
     return CLI_OK;
@@ -523,13 +513,6 @@ int cli_diag_ssl_cache_clear(struct cli_def *cli, const char *command, char *arg
         X509_free(ptr->second);
     }
     store->cache().clear();
-        
-    for (auto x = store->fqdn_cache().begin(); x != store->fqdn_cache().end(); ++x ) {
-        std::string fqdn = x->first;
-        std::string cn = x->second;
-    }
-    store->fqdn_cache().clear();
-
     store->unlock();
     
     return CLI_OK;
