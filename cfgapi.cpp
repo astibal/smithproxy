@@ -264,9 +264,9 @@ bool cfgapi_load_settings() {
         }
     }
 
-    cfgapi.getRoot()["settings"].lookupValue("certs_path",SSLCertStore::default_cert_path());
-    cfgapi.getRoot()["settings"].lookupValue("certs_ca_key_password",SSLCertStore::default_cert_password());
-    cfgapi.getRoot()["settings"].lookupValue("certs_ca_path",SSLCertStore::default_client_ca_path());
+    cfgapi.getRoot()["settings"].lookupValue("certs_path",SSLFactory::default_cert_path());
+    cfgapi.getRoot()["settings"].lookupValue("certs_ca_key_password",SSLFactory::default_cert_password());
+    cfgapi.getRoot()["settings"].lookupValue("certs_ca_path",SSLFactory::default_client_ca_path());
 
     cfgapi.getRoot()["settings"].lookupValue("plaintext_port",cfg_tcp_listen_port_base); cfg_tcp_listen_port = cfg_tcp_listen_port_base;
     cfgapi.getRoot()["settings"].lookupValue("plaintext_workers",cfg_tcp_workers);
@@ -274,8 +274,8 @@ bool cfgapi_load_settings() {
     cfgapi.getRoot()["settings"].lookupValue("ssl_workers",cfg_ssl_workers);
     cfgapi.getRoot()["settings"].lookupValue("ssl_autodetect",MitmMasterProxy::ssl_autodetect);
     cfgapi.getRoot()["settings"].lookupValue("ssl_autodetect_harder",MitmMasterProxy::ssl_autodetect_harder);
-    cfgapi.getRoot()["settings"].lookupValue("ssl_ocsp_status_ttl",SSLCertStore::ssl_ocsp_status_ttl);
-    cfgapi.getRoot()["settings"].lookupValue("ssl_crl_status_ttl",SSLCertStore::ssl_crl_status_ttl);
+    cfgapi.getRoot()["settings"].lookupValue("ssl_ocsp_status_ttl",SSLFactory::ssl_ocsp_status_ttl);
+    cfgapi.getRoot()["settings"].lookupValue("ssl_crl_status_ttl",SSLFactory::ssl_crl_status_ttl);
 
     cfgapi.getRoot()["settings"].lookupValue("udp_port",cfg_udp_port_base); cfg_udp_port = cfg_udp_port_base;
     cfgapi.getRoot()["settings"].lookupValue("udp_workers",cfg_udp_workers);
@@ -1546,9 +1546,10 @@ bool cfgapi_obj_profile_tls_apply(baseHostCX* originator, baseProxy* new_proxy, 
                                         WAR_("Connection %s: cannot be bypassed.",originator->full_name('L').c_str());
                                     }
                                 } else if (ps->sni_filter_use_dns_domain_tree) {
-                                    domain_cache.lock();
+                                    std::lock_guard<std::recursive_mutex> l_(domain_cache.getlock());
+
                                     //INF_("FQDN doesn't match SNI element, looking for sub-domains of %s", filter_element.c_str());
-                                    //FIXME: we assume flter is 2nd level domain... 
+                                    //FIXME: we assume filter is 2nd level domain...
                                     
                                     auto subdomain_cache = domain_cache.get(filter_element);
                                     if(subdomain_cache != nullptr) {
@@ -1562,7 +1563,7 @@ bool cfgapi_obj_profile_tls_apply(baseHostCX* originator, baseProxy* new_proxy, 
                                             
                                             if(f.match(c)) {
                                                 if(sslcom->bypass_me_and_peer()) {
-                                                    INF_("Connection %s bypassed: IP in DNS subdomain cache matching TLS bypass list (%s).",originator->full_name('L').c_str(),filter_element.c_str());
+                                                    INF_("Connection %s bypassed: IP in DNS sub-domain cache matching TLS bypass list (%s).",originator->full_name('L').c_str(),filter_element.c_str());
                                                 } else {
                                                     WAR_("Connection %s: cannot be bypassed.",originator->full_name('L').c_str());                                                    
                                                 }
@@ -1571,8 +1572,6 @@ bool cfgapi_obj_profile_tls_apply(baseHostCX* originator, baseProxy* new_proxy, 
                                             }
                                         }
                                     }
-                                    
-                                    domain_cache.unlock();
                                 }
                                 
                                 delete c;

@@ -153,10 +153,10 @@ bool socksServerCX::process_dns_response(DNS_Response* resp) {
         }
 
         if (target_ips.size()) {
-            inspect_dns_cache.lock();
+            std::lock_guard<std::recursive_mutex> l_(inspect_dns_cache.getlock());
+
             DNS_Inspector di;
             del_resp = !di.store(resp);
-            inspect_dns_cache.unlock();
         }
 
         if (del_resp) {
@@ -253,8 +253,9 @@ int socksServerCX::process_socks_request() {
                     target_ips.push_back(fqdn);
                 } else {
                     // really FQDN.
-                    
-                    inspect_dns_cache.lock();
+
+                    std::lock_guard<std::recursive_mutex> l_(inspect_dns_cache.getlock());
+
                     DNS_Response* dns_resp = inspect_dns_cache.get("A:"+fqdn);
                     if(dns_resp) {
                         if (dns_resp->answers().size() > 0) {
@@ -270,7 +271,6 @@ int socksServerCX::process_socks_request() {
                             }
                         }
                     }
-                    inspect_dns_cache.unlock();
                 }
 
 

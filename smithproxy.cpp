@@ -372,7 +372,7 @@ bool load_config(std::string& config_f, bool reload) {
         cfgapi.getRoot()["debug"]["log"].lookupValue("sslcom",SSLCom::log_level_ref().level_);
         cfgapi.getRoot()["debug"]["log"].lookupValue("sslmitmcom",baseSSLMitmCom<SSLCom>::log_level_ref().level_);
         cfgapi.getRoot()["debug"]["log"].lookupValue("sslmitmcom",baseSSLMitmCom<DTLSCom>::log_level_ref().level_);
-        cfgapi.getRoot()["debug"]["log"].lookupValue("sslcertstore",SSLCertStore::log_level_ref().level_);
+        cfgapi.getRoot()["debug"]["log"].lookupValue("sslcertstore",SSLFactory::log_level_ref().level_);
         cfgapi.getRoot()["debug"]["log"].lookupValue("proxy",baseProxy::log_level_ref().level_);
         cfgapi.getRoot()["debug"]["log"].lookupValue("proxy",epoll::log_level.level_);
         cfgapi.getRoot()["debug"]["log"].lookupValue("mtrace",cfg_mtrace_enable);

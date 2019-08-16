@@ -158,17 +158,20 @@ DNS_Response* resolve_dns_s (std::string hostname, DNS_Record_Type t, std::strin
 }
 
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmissing-noreturn"
+
 std::thread* create_dns_updater() {
-    std::thread * dns_thread = new std::thread([]() { 
-    
+    std::thread * dns_thread = new std::thread([]() {
+
     int sleep_time = 3;
     int requery_ttl = 60;
     std::set<std::string> record_blacklist;
-    
+
     for(unsigned int i = 1; ; i++) {
-        
+
         DIA_("dns_updater: refresh round %d",i);
-        
+
         std::vector<std::string> fqdns;
         cfgapi_write_lock.lock();
         for (auto a: cfgapi_obj_address) {
@@ -177,15 +180,15 @@ std::thread* create_dns_updater() {
                 std::vector<std::string> recs;
                 recs.push_back("A:" + fa->fqdn());
                 recs.push_back("AAAA:" + fa->fqdn());
-                
-                inspect_dns_cache.lock();
+
+                std::lock_guard<std::recursive_mutex> l_(inspect_dns_cache.getlock());
                 for(auto rec: recs) {
                     DNS_Response* r = inspect_dns_cache.get(rec);
                     if(r) {
                         int ttl = (r->loaded_at + r->answers().at(0).ttl_) - ::time(nullptr);
-                        
+
                         DIA_("fqdn %s ttl %d",rec.c_str(),ttl);
-                        
+
                         //re-query only about-to-expire existing DNS entries for FQDN addresses
                         if(ttl < requery_ttl) {
                             fqdns.push_back(rec);
@@ -200,33 +203,37 @@ std::thread* create_dns_updater() {
                         }
                     }
                 }
-                inspect_dns_cache.unlock();
-                
             }
         }
         cfgapi_write_lock.unlock();
-        
+
 
         std::string nameserver = "8.8.8.8";
         if(cfgapi_obj_nameservers.size()) {
             nameserver = cfgapi_obj_nameservers.at(i % cfgapi_obj_nameservers.size());
         }
-        
+
         DNS_Inspector di;
-        for(auto t_a: fqdns) {
+        for(const auto& t_a: fqdns) {
             DIA_("refreshing fqdn: %s",t_a.c_str());
 
             std::string a;
             DNS_Record_Type t;
-            
+
             if(t_a.size() < 5) continue;
-                                               
-            if(t_a.find("A:") == 0) { t = A; a = t_a.substr(2,-1); }
-            else
-            if(t_a.find("AAAA:") == 0) { t = AAAA; a = t_a.substr(5,-1); }
-            else
-            continue;
-            
+
+            if(t_a.find("A:") == 0) {
+                t = A; a = t_a.substr(2,-1);
+            }
+            else if (t_a.find("AAAA:") == 0) {
+                    t = AAAA;
+                    a = t_a.substr(5, -1);
+            }
+            else {
+                    continue;
+            }
+
+
 
             DNS_Response* resp = resolve_dns_s(a, t, nameserver);
             if(resp) {
@@ -238,17 +245,18 @@ std::thread* create_dns_updater() {
                     delete resp;
                 }
             }
-        } 
-        
+        }
+
         // do some rescans of blacklisted entries
         if(i % (20*sleep_time) == 0) {
             record_blacklist.clear();
         }
 
-        
+
         ::sleep(sleep_time);
     } } );
       
     
     return dns_thread;
 }
+#pragma clang diagnostic pop

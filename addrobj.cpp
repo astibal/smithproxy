@@ -40,6 +40,7 @@
 
 #include <addrobj.hpp>
 #include <dns.hpp>
+#include <strstream>
 
 int CidrAddress::contains(CIDR* other) {
     return cidr_contains(c_,other);
@@ -47,35 +48,39 @@ int CidrAddress::contains(CIDR* other) {
 
 
 std::string FqdnAddress::to_string(int verbosity) {
-    std::string ret = "FqdnAddress: " + fqdn_;
+
+    std::strstream ret;
+
+    ret << "FqdnAddress: " + fqdn_;
  
     bool cached_a = false;
     bool cached_4a= false;
     if(verbosity > INF) {
-        inspect_dns_cache.lock();
+
+        std::lock_guard<std::recursive_mutex> l_(inspect_dns_cache.getlock());
+
         if(inspect_dns_cache.get("A:"+fqdn_) != nullptr) {
             cached_a = true;
         }
         if(inspect_dns_cache.get("AAAA:"+fqdn_) != nullptr) {
             cached_4a = true;
         }
-        inspect_dns_cache.unlock();
-        
+
         if(cached_4a or cached_a) {
-            ret += " (cached";
-            if(cached_a) ret += " A";
-            if(cached_4a) ret += " AAAA";
-            ret += ")";
+            ret << " (cached";
+            if(cached_a) ret << " A";
+            if(cached_4a) ret << " AAAA";
+            ret << ")";
         } else {
-            ret += " (not cached)";
+            ret << " (not cached)";
         }
     }
 
     if(! prof_name.empty()) {
-        ret += string_format(" (name=%s)", prof_name.c_str());
+        ret << string_format(" (name=%s)", prof_name.c_str());
     }
 
-    return ret;
+    return ret.str();
 }
 
 

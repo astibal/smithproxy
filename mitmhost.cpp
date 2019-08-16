@@ -64,7 +64,7 @@ baseCom* MySSLMitmCom::replicate() {
 
 bool MySSLMitmCom::spoof_cert(X509* x, SpoofOptions& spo) {
     
-    //std::string cert = SSLCertStore::print_cert(x);
+    //std::string cert = SSLFactory::print_cert(x);
     //log().append("\n ==== Server certificate:\n" + cert  + "\n ====\n");
 
     bool r = baseSSLMitmCom::spoof_cert(x,spo);

@@ -536,7 +536,8 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
             //look for whitelisted entry
             std::string key = whitelist_make_key(mh);
             if(key.size() > 0 && key != "?") {
-                whitelist_verify.lock();
+                std::lock_guard<std::recursive_mutex> l_(whitelist_verify.getlock());
+
                 whitelist_verify_entry_t* wh = whitelist_verify.get(key);
                 DIA___("whitelist_verify[%s]: %s",key.c_str(), wh ? "found" : "not found" );
 
@@ -548,8 +549,6 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
                         DIA___("whitelist_verify[%s]: timeout reset to %d",key.c_str(), scom->opt_failed_certcheck_override_timeout );
                     }
                 }
-
-                whitelist_verify.unlock();
             }
             
             
@@ -574,11 +573,10 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
                         //we should not block
                         DIAS___(" -> client-cert request: auto-whitelist");
 
-                        whitelist_verify.lock();
+                        std::lock_guard<std::recursive_mutex> l_(whitelist_verify.getlock());
                         
                         whitelist_verify_entry v;
                         whitelist_verify.set(key,new whitelist_verify_entry_t(v,scom->opt_failed_certcheck_override_timeout));
-                        whitelist_verify.unlock();
                     } else {
                         DIAS___(" -> client-cert request: none");
                     }
@@ -1119,9 +1117,11 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
 
                 whitelist_verify_entry v;
 
-                whitelist_verify.lock();
-                whitelist_verify.set(key,new whitelist_verify_entry_t(v,scom->opt_failed_certcheck_override_timeout));
-                whitelist_verify.unlock();
+                {
+                    std::lock_guard<std::recursive_mutex> l_(whitelist_verify.getlock());
+                    whitelist_verify.set(key,
+                                         new whitelist_verify_entry_t(v, scom->opt_failed_certcheck_override_timeout));
+                }
                 
                 override_applied = global_staticconent->render_server_response(override_applied);
                 
