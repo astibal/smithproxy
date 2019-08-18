@@ -51,8 +51,8 @@
 #include <smithdnsupd.hpp>
 
 
-int send_dns_request (std::string hostname, DNS_Record_Type t, std::string nameserver) {
-    if (nameserver.size() == 0) {
+int send_dns_request (std::string const& hostname, DNS_Record_Type t, std::string const& nameserver) {
+    if (nameserver.empty()) {
         ERR_("resolve_dns_s: query %s for type %s: missing nameserver", hostname.c_str(), dns_record_type_str(t));
     }
 

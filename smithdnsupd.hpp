@@ -42,7 +42,7 @@
 
 // send DNS request out to network. Return socket FD, or non-positive on error.
 // you want to call this for async request
-int send_dns_request (std::string hostname, DNS_Record_Type t, std::string nameserver);
+int send_dns_request (std::string const &hostname, DNS_Record_Type t, std::string const &nameserver);
 
 // @returns: response and return from receive - well. I don't like it this way either,
 // but we can't actually return nullptr, since it could be legit return value on non-blocking socket
