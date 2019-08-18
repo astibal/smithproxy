@@ -158,7 +158,7 @@ DNS_Response* resolve_dns_s (std::string hostname, DNS_Record_Type t, std::strin
 }
 
 
-#pragma clang diagnostic push
+
 #pragma clang diagnostic ignored "-Wmissing-noreturn"
 
 std::thread* create_dns_updater() {
@@ -173,8 +173,8 @@ std::thread* create_dns_updater() {
         DIA_("dns_updater: refresh round %d",i);
 
         std::vector<std::string> fqdns;
-        cfgapi_write_lock.lock();
-        for (auto a: cfgapi_obj_address) {
+        CfgFactory::get().cfgapi_write_lock.lock();
+        for (auto a: CfgFactory::get().cfgapi_obj_address) {
             FqdnAddress* fa = dynamic_cast<FqdnAddress*>(a.second);
             if(fa) {
                 std::vector<std::string> recs;
@@ -205,12 +205,12 @@ std::thread* create_dns_updater() {
                 }
             }
         }
-        cfgapi_write_lock.unlock();
+        CfgFactory::get().cfgapi_write_lock.unlock();
 
 
         std::string nameserver = "8.8.8.8";
-        if(cfgapi_obj_nameservers.size()) {
-            nameserver = cfgapi_obj_nameservers.at(i % cfgapi_obj_nameservers.size());
+        if(CfgFactory::get().cfgapi_obj_nameservers.size()) {
+            nameserver = CfgFactory::get().cfgapi_obj_nameservers.at(i % CfgFactory::get().cfgapi_obj_nameservers.size());
         }
 
         DNS_Inspector di;
@@ -259,4 +259,3 @@ std::thread* create_dns_updater() {
     
     return dns_thread;
 }
-#pragma clang diagnostic pop

@@ -187,17 +187,17 @@ void my_terminate (int param) {
 void my_usr1 (int param) {
     DIAS_("USR1 signal handler started");
     NOTS_("reloading policies and its objects !!");
-    load_config(config_file,true);
+    load_config(CfgFactory::get().config_file,true);
     DIAS_("USR1 signal handler finished");
 }
 
 static struct option long_options[] =
     {
     /* These options set a flag. */
-    {"debug",   no_argument,       (int*)&args_debug_flag.level_, iDEB},
-    {"diagnose",   no_argument,       (int*)&args_debug_flag.level_, iDIA},
-    {"dump",   no_argument,       (int*)&args_debug_flag.level_, iDUM},
-    {"extreme",   no_argument,      (int*)&args_debug_flag.level_, iEXT},
+    {"debug",   no_argument,        (int*) &CfgFactory::get().args_debug_flag.level_, iDEB},
+    {"diagnose",   no_argument,     (int*) &CfgFactory::get().args_debug_flag.level_, iDIA},
+    {"dump",   no_argument,         (int*) &CfgFactory::get().args_debug_flag.level_, iDUM},
+    {"extreme",   no_argument,      (int*) &CfgFactory::get().args_debug_flag.level_, iEXT},
     
     {"config-file", required_argument, 0, 'c'},
     {"config-check-only",no_argument,0,'o'},
@@ -279,36 +279,36 @@ bool init_syslog() {
     struct sockaddr_storage syslog_in;
     memset(&syslog_in, 0, sizeof(struct sockaddr_storage));
     
-    if(cfg_syslog_family != 6) {
-        cfg_syslog_family = 4;
+    if(CfgFactory::get().cfg_syslog_family != 6) {
+        CfgFactory::get().cfg_syslog_family = 4;
         syslog_in.ss_family                = AF_INET;
-        ((sockaddr_in*)&syslog_in)->sin_addr.s_addr = inet_addr(cfg_syslog_server.c_str());
+        ((sockaddr_in*)&syslog_in)->sin_addr.s_addr = inet_addr(CfgFactory::get().cfg_syslog_server.c_str());
         if(((sockaddr_in*)&syslog_in)->sin_addr.s_addr == INADDR_NONE) {
-            ERR_("Error initializing syslog server: %s",cfg_syslog_server.c_str());
+            ERR_("Error initializing syslog server: %s", CfgFactory::get().cfg_syslog_server.c_str());
             return false;
         }
         
-        ((sockaddr_in*)&syslog_in)->sin_port = htons(cfg_syslog_port); 
+        ((sockaddr_in*)&syslog_in)->sin_port = htons(CfgFactory::get().cfg_syslog_port);
     } else {
-        cfg_syslog_family = 6;
+        CfgFactory::get().cfg_syslog_family = 6;
         syslog_in.ss_family                = AF_INET6;
-        int ret = inet_pton(AF_INET6,cfg_syslog_server.c_str(),(unsigned char*)&((sockaddr_in6*)&syslog_in)->sin6_addr.s6_addr);
+        int ret = inet_pton(AF_INET6, CfgFactory::get().cfg_syslog_server.c_str(),(unsigned char*)&((sockaddr_in6*)&syslog_in)->sin6_addr.s6_addr);
         if(ret <= 0) {
-            ERR_("Error initializing syslog server: %s",cfg_syslog_server.c_str());
+            ERR_("Error initializing syslog server: %s", CfgFactory::get().cfg_syslog_server.c_str());
             return false;
         }
-        ((sockaddr_in6*)&syslog_in)->sin6_port = htons(cfg_syslog_port); 
+        ((sockaddr_in6*)&syslog_in)->sin6_port = htons(CfgFactory::get().cfg_syslog_port);
     }
     
     
     ::connect(syslog_socket,(sockaddr*)&syslog_in,sizeof(sockaddr_storage));
     
-    get_logger()->remote_targets(string_format("syslog-udp%d-%d",cfg_syslog_family,syslog_socket),syslog_socket);
+    get_logger()->remote_targets(string_format("syslog-udp%d-%d", CfgFactory::get().cfg_syslog_family, syslog_socket),syslog_socket);
 
     logger_profile* lp = new logger_profile();
     
     lp->logger_type = logger_profile::REMOTE_SYSLOG;
-    lp->level_ = cfg_syslog_level;
+    lp->level_ = CfgFactory::get().cfg_syslog_level;
     
     // raising internal logging level
     if(lp->level_ > get_logger()->level()) {
@@ -317,7 +317,7 @@ bool init_syslog() {
     }
     
     lp->syslog_settings.severity = lp->level_.level_;
-    lp->syslog_settings.facility = cfg_syslog_facility;
+    lp->syslog_settings.facility = CfgFactory::get().cfg_syslog_facility;
     
     get_logger()->target_profiles()[(uint64_t)syslog_socket] = lp;
     
@@ -328,63 +328,63 @@ bool load_config(std::string& config_f, bool reload) {
     bool ret = true;
     
     using namespace libconfig;
-    if(! cfgapi_init(config_f.c_str()) ) {
+    if(! CfgFactory::get().cfgapi_init(config_f.c_str()) ) {
         FATS_("Unable to load config.");
         ret = false;
     }
 
-    cfg_config_file = config_f;
+    CfgFactory::get().cfg_config_file = config_f;
     
     // Add another level of lock. File is already loaded. We need to apply its content.
     // lock is needed here to not try to match against potentially empty/partial policy list
-    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    std::lock_guard<std::recursive_mutex> l(CfgFactory::get().cfgapi_write_lock);
     try {
         
         if(reload) {
-            cfgapi_cleanup();
+            CfgFactory::get().cfgapi_cleanup();
         }
-        
-        cfgapi_load_obj_address();
-        cfgapi_load_obj_port();
-        cfgapi_load_obj_proto();
-        cfgapi_load_obj_profile_detection();
-        cfgapi_load_obj_profile_content();
-        cfgapi_load_obj_profile_tls();
-        cfgapi_load_obj_profile_alg_dns();
-        cfgapi_load_obj_profile_auth();
-        
-        cfgapi_load_obj_policy();
+
+        CfgFactory::get().cfgapi_load_obj_address();
+        CfgFactory::get().cfgapi_load_obj_port();
+        CfgFactory::get().cfgapi_load_obj_proto();
+        CfgFactory::get().cfgapi_load_obj_profile_detection();
+        CfgFactory::get().cfgapi_load_obj_profile_content();
+        CfgFactory::get().cfgapi_load_obj_profile_tls();
+        CfgFactory::get().cfgapi_load_obj_profile_alg_dns();
+        CfgFactory::get().cfgapi_load_obj_profile_auth();
+
+        CfgFactory::get().cfgapi_load_obj_policy();
         
         
         if(!reload)  {
-            load_signatures(cfgapi,"detection_signatures",sigs_detection);
-            load_signatures(cfgapi,"starttls_signatures",sigs_starttls);
+            load_signatures(CfgFactory::get().cfgapi,"detection_signatures",sigs_detection);
+            load_signatures(CfgFactory::get().cfgapi,"starttls_signatures",sigs_starttls);
         }
 
-        cfgapi_load_settings();
+        CfgFactory::get().cfgapi_load_settings();
 
-        cfgapi.getRoot()["debug"].lookupValue("log_data_crc",baseCom::debug_log_data_crc);
-        cfgapi.getRoot()["debug"].lookupValue("log_sockets",baseHostCX::socket_in_name);
-        cfgapi.getRoot()["debug"].lookupValue("log_online_cx_name",baseHostCX::online_name);
-        cfgapi.getRoot()["debug"].lookupValue("log_srclines",get_logger()->print_srcline());
-        cfgapi.getRoot()["debug"].lookupValue("log_srclines_always",get_logger()->print_srcline_always());
+        CfgFactory::get().cfgapi.getRoot()["debug"].lookupValue("log_data_crc",baseCom::debug_log_data_crc);
+        CfgFactory::get().cfgapi.getRoot()["debug"].lookupValue("log_sockets",baseHostCX::socket_in_name);
+        CfgFactory::get().cfgapi.getRoot()["debug"].lookupValue("log_online_cx_name",baseHostCX::online_name);
+        CfgFactory::get().cfgapi.getRoot()["debug"].lookupValue("log_srclines",get_logger()->print_srcline());
+        CfgFactory::get().cfgapi.getRoot()["debug"].lookupValue("log_srclines_always",get_logger()->print_srcline_always());
 
-        cfgapi.getRoot()["debug"]["log"].lookupValue("sslcom",SSLCom::log_level_ref().level_);
-        cfgapi.getRoot()["debug"]["log"].lookupValue("sslmitmcom",baseSSLMitmCom<SSLCom>::log_level_ref().level_);
-        cfgapi.getRoot()["debug"]["log"].lookupValue("sslmitmcom",baseSSLMitmCom<DTLSCom>::log_level_ref().level_);
-        cfgapi.getRoot()["debug"]["log"].lookupValue("sslcertstore",SSLFactory::log_level_ref().level_);
-        cfgapi.getRoot()["debug"]["log"].lookupValue("proxy",baseProxy::log_level_ref().level_);
-        cfgapi.getRoot()["debug"]["log"].lookupValue("proxy",epoll::log_level.level_);
-        cfgapi.getRoot()["debug"]["log"].lookupValue("mtrace",cfg_mtrace_enable);
-        cfgapi.getRoot()["debug"]["log"].lookupValue("openssl_mem_dbg",cfg_openssl_mem_dbg);
+        CfgFactory::get().cfgapi.getRoot()["debug"]["log"].lookupValue("sslcom",SSLCom::log_level_ref().level_);
+        CfgFactory::get().cfgapi.getRoot()["debug"]["log"].lookupValue("sslmitmcom",baseSSLMitmCom<SSLCom>::log_level_ref().level_);
+        CfgFactory::get().cfgapi.getRoot()["debug"]["log"].lookupValue("sslmitmcom",baseSSLMitmCom<DTLSCom>::log_level_ref().level_);
+        CfgFactory::get().cfgapi.getRoot()["debug"]["log"].lookupValue("sslcertstore",SSLFactory::log_level_ref().level_);
+        CfgFactory::get().cfgapi.getRoot()["debug"]["log"].lookupValue("proxy",baseProxy::log_level_ref().level_);
+        CfgFactory::get().cfgapi.getRoot()["debug"]["log"].lookupValue("proxy",epoll::log_level.level_);
+        CfgFactory::get().cfgapi.getRoot()["debug"]["log"].lookupValue("mtrace",cfg_mtrace_enable);
+        CfgFactory::get().cfgapi.getRoot()["debug"]["log"].lookupValue("openssl_mem_dbg",cfg_openssl_mem_dbg);
         /*DNS ALG EXPLICIT LOG*/
-        cfgapi.getRoot()["debug"]["log"].lookupValue("alg_dns",DNS_Inspector::log_level_ref().level_);
-        cfgapi.getRoot()["debug"]["log"].lookupValue("alg_dns",DNS_Packet::log_level_ref().level_);
+        CfgFactory::get().cfgapi.getRoot()["debug"]["log"].lookupValue("alg_dns",DNS_Inspector::log_level_ref().level_);
+        CfgFactory::get().cfgapi.getRoot()["debug"]["log"].lookupValue("alg_dns",DNS_Packet::log_level_ref().level_);
 
 
-        cfgapi.getRoot()["settings"].lookupValue("write_payload_dir",cfg_traflog_dir);
-        cfgapi.getRoot()["settings"].lookupValue("write_payload_file_prefix",cfg_traflog_file_pref);
-        cfgapi.getRoot()["settings"].lookupValue("write_payload_file_suffix",cfg_traflog_file_suff);
+        CfgFactory::get().cfgapi.getRoot()["settings"].lookupValue("write_payload_dir",CfgFactory::get().cfg_traflog_dir);
+        CfgFactory::get().cfgapi.getRoot()["settings"].lookupValue("write_payload_file_prefix",CfgFactory::get().cfg_traflog_file_pref);
+        CfgFactory::get().cfgapi.getRoot()["settings"].lookupValue("write_payload_file_suffix",CfgFactory::get().cfg_traflog_file_suff);
 
 
 
@@ -395,21 +395,21 @@ bool load_config(std::string& config_f, bool reload) {
             
             //init crashlog file with dafe default
             set_crashlog("/tmp/smithproxy_crash.log");
-            
-            if(cfgapi.getRoot()["settings"].lookupValue("log_file",cfg_log_target_base)) {
 
-                cfg_log_target = cfg_log_target_base;
+            if(CfgFactory::get().cfgapi.getRoot()["settings"].lookupValue("log_file",CfgFactory::get().cfg_log_target_base)) {
+
+                CfgFactory::get().cfg_log_target = CfgFactory::get().cfg_log_target_base;
 
 
-                if(cfg_log_target.size() > 0) {
-                    
-                    cfg_log_target = string_format(cfg_log_target,cfgapi_tenant_name.c_str());
+                if(CfgFactory::get().cfg_log_target.size() > 0) {
+
+                    CfgFactory::get().cfg_log_target = string_format(CfgFactory::get().cfg_log_target, CfgFactory::get().cfgapi_tenant_name.c_str());
                     // prepare custom crashlog file
-                    std::string crlog = cfg_log_target + ".crashlog.log";
+                    std::string crlog = CfgFactory::get().cfg_log_target + ".crashlog.log";
                     set_crashlog(crlog.c_str());
                     
-                    std::ofstream * o = new std::ofstream(cfg_log_target.c_str(),std::ios::app);
-                    get_logger()->targets(cfg_log_target,o);
+                    std::ofstream * o = new std::ofstream(CfgFactory::get().cfg_log_target.c_str(),std::ios::app);
+                    get_logger()->targets(CfgFactory::get().cfg_log_target, o);
                     get_logger()->dup2_cout(false);
                     get_logger()->level(cfgapi_table.logging.level);
                     
@@ -422,15 +422,17 @@ bool load_config(std::string& config_f, bool reload) {
                 }
             }
             //
-            if(cfgapi.getRoot()["settings"].lookupValue("sslkeylog_file",cfg_sslkeylog_target_base)) {
+            if(CfgFactory::get().cfgapi.getRoot()["settings"].lookupValue("sslkeylog_file", CfgFactory::get().cfg_sslkeylog_target_base)) {
 
-                cfg_sslkeylog_target = cfg_sslkeylog_target_base;
+                CfgFactory::get().cfg_sslkeylog_target = CfgFactory::get().cfg_sslkeylog_target_base;
 
-                if(cfg_sslkeylog_target.size() > 0) {
-                    
-                    cfg_sslkeylog_target = string_format(cfg_sslkeylog_target,cfgapi_tenant_name.c_str());
-                    std::ofstream * o = new std::ofstream(cfg_sslkeylog_target.c_str(),std::ios::app);
-                    get_logger()->targets(cfg_sslkeylog_target,o);
+                if(CfgFactory::get().cfg_sslkeylog_target.size() > 0) {
+
+                    CfgFactory::get().cfg_sslkeylog_target = string_format(CfgFactory::get().cfg_sslkeylog_target,
+                                                                           CfgFactory::get().cfgapi_tenant_name.c_str());
+
+                    std::ofstream * o = new std::ofstream(CfgFactory::get().cfg_sslkeylog_target.c_str(),std::ios::app);
+                    get_logger()->targets(CfgFactory::get().cfg_sslkeylog_target,o);
                     get_logger()->dup2_cout(false);
                     get_logger()->level(cfgapi_table.logging.level);
                     
@@ -444,15 +446,15 @@ bool load_config(std::string& config_f, bool reload) {
             }
             
             
-            if(cfg_syslog_server.size() > 0) {
+            if( ! CfgFactory::get().cfg_syslog_server.empty() ) {
                 bool have_syslog = init_syslog();
                 if(! have_syslog) {
                     ERRS_("syslog logging not set.");
                 }
             }
             
-            if(cfgapi.getRoot()["settings"].lookupValue("cfg_log_console",cfg_log_console)) {
-                get_logger()->dup2_cout(cfg_log_console);
+            if(CfgFactory::get().cfgapi.getRoot()["settings"].lookupValue("cfg_log_console", CfgFactory::get().cfg_log_console)) {
+                get_logger()->dup2_cout(CfgFactory::get().cfg_log_console);
             }
             
 /*            
@@ -505,8 +507,8 @@ int main(int argc, char *argv[]) {
     if(buffer::use_pool)
         CRYPTO_set_mem_functions(mempool_alloc, mempool_realloc, mempool_free);
 
-    
-    config_file = "/etc/smithproxy/smithproxy.cfg";
+
+    CfgFactory::get().config_file = "/etc/smithproxy/smithproxy.cfg";
     bool custom_config_file = false;
     
     std::string config_file_tenant = "/etc/smithproxy/smithproxy.%s.cfg";
@@ -524,12 +526,12 @@ int main(int argc, char *argv[]) {
                 break;
                 
             case 'c':
-                config_file = std::string(optarg);    
+                CfgFactory::get().config_file = std::string(optarg);
                 custom_config_file = true;
                 break;      
                 
             case 'o':
-                config_file_check_only = true;
+                CfgFactory::get().config_file_check_only = true;
                 get_logger()->dup2_cout(true);
                 
             case 'D':
@@ -537,11 +539,11 @@ int main(int argc, char *argv[]) {
                 break;
                 
             case 'i':
-                cfg_tenant_index = std::string(optarg);
+                CfgFactory::get().cfg_tenant_index = std::string(optarg);
                 break;
                 
             case 't':
-                cfg_tenant_name = std::string(optarg);
+                CfgFactory::get().cfg_tenant_name = std::string(optarg);
                 break;
 
                 
@@ -556,7 +558,7 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    if(config_file_check_only) {
+    if(CfgFactory::get().config_file_check_only) {
 
         // set synchronous logger for config-check
         set_logger(new logger());
@@ -568,21 +570,24 @@ int main(int argc, char *argv[]) {
     if(!cfg_daemonize) {
         std::thread* log_thread  = create_log_writer(get_logger());
         if(log_thread != nullptr) {
-            pthread_setname_np(log_thread->native_handle(),string_format("sxy_lwr_%s",cfg_tenant_index.c_str()).c_str());
+            pthread_setname_np(log_thread->native_handle(),string_format("sxy_lwr_%s",
+                    CfgFactory::get().cfg_tenant_index.c_str()).c_str());
         }    
     }
     
     get_logger()->level(WAR);
-    cfgapi_log_version(false);  // don't delay, but display warning
+    CfgFactory::get().cfgapi_log_version(false);  // don't delay, but display warning
     
-    if(cfg_tenant_index.size() > 0 && cfg_tenant_name.size() > 0) {
-        WAR_("Starting tenant: '%s', index %s",cfg_tenant_name.c_str(),cfg_tenant_index.c_str());
+    if(CfgFactory::get().cfg_tenant_index.size() > 0 && CfgFactory::get().cfg_tenant_name.size() > 0) {
+        WAR_("Starting tenant: '%s', index %s",
+                CfgFactory::get().cfg_tenant_name.c_str(),
+                CfgFactory::get().cfg_tenant_index.c_str());
 
-        daemon_set_tenant("smithproxy",cfg_tenant_name);
-        cfgapi_tenant_index = std::stoi(cfg_tenant_index);
-        cfgapi_tenant_name  = cfg_tenant_name;
+        daemon_set_tenant("smithproxy", CfgFactory::get().cfg_tenant_name);
+        CfgFactory::get().cfgapi_tenant_index = std::stoi(CfgFactory::get().cfg_tenant_index);
+        CfgFactory::get().cfgapi_tenant_name  = CfgFactory::get().cfg_tenant_name;
     } 
-    else if (cfg_tenant_index.size() > 0 || cfg_tenant_name.size() > 0){
+    else if (CfgFactory::get().cfg_tenant_index.size() > 0 || CfgFactory::get().cfg_tenant_name.size() > 0){
         
         FATS_("You have to specify both options: --tenant-name AND --tenant-index");
         exit(-20);
@@ -594,20 +599,20 @@ int main(int argc, char *argv[]) {
     
     
     // if logging set in cmd line, use it 
-    if(args_debug_flag > NON) {
-        get_logger()->level(args_debug_flag);
+    if(CfgFactory::get().args_debug_flag > NON) {
+        get_logger()->level(CfgFactory::get().args_debug_flag);
     }
         
         
-    if(! custom_config_file and cfgapi_tenant_index > 0) {
+    if(! custom_config_file and CfgFactory::get().cfgapi_tenant_index > 0) {
         // look for tenant config (no override set)
         
-        std::string tenant_cfg = string_format(config_file_tenant.c_str(),cfgapi_tenant_name.c_str());
+        std::string tenant_cfg = string_format(config_file_tenant.c_str(), CfgFactory::get().cfgapi_tenant_name.c_str());
         
         struct stat s;
         if (stat(tenant_cfg.c_str(),&s) == 0) {
             WAR_("Tenant config: %s",tenant_cfg.c_str());
-            config_file = tenant_cfg;
+            CfgFactory::get().config_file = tenant_cfg;
         } else {
             WAR_("Tenant config %s not found. Using default.",tenant_cfg.c_str());
         }
@@ -615,8 +620,8 @@ int main(int argc, char *argv[]) {
     
     WARS_(" ");
     // set level to what's in the config
-    if (!load_config(config_file)) {
-        if(config_file_check_only) {
+    if (!load_config(CfgFactory::get().config_file)) {
+        if(CfgFactory::get().config_file_check_only) {
             FATS_("Config check: error loading config file.");
             exit(1);
         }
@@ -626,12 +631,12 @@ int main(int argc, char *argv[]) {
         }
     }
     
-    if(!cfgapi_apply_tenant_config()) {
+    if(!CfgFactory::get().cfgapi_apply_tenant_config()) {
         FATS_("Failed to apply tenant specific configuration!");
         exit(2);
     }
     
-    if(config_file_check_only) {
+    if(CfgFactory::get().config_file_check_only) {
         DIAS_("Exiting, asked to check config file only.");
         exit(0);
     }
@@ -676,17 +681,20 @@ int main(int argc, char *argv[]) {
         // we have to create logger after daemonize is called
         log_thread  = create_log_writer(get_logger());
         if(log_thread != nullptr) {
-            pthread_setname_np(log_thread->native_handle(),string_format("sxy_lwr_%s",cfg_tenant_index.c_str()).c_str());
+            pthread_setname_np(log_thread->native_handle(),string_format("sxy_lwr_%s",
+                    CfgFactory::get().cfg_tenant_index.c_str()).c_str());
         }    
         
         dns_thread = create_dns_updater();
         if(dns_thread != nullptr) {
-            pthread_setname_np(dns_thread->native_handle(),string_format("sxy_dns_%s",cfg_tenant_index.c_str()).c_str());
+            pthread_setname_np(dns_thread->native_handle(),string_format("sxy_dns_%s",
+                    CfgFactory::get().cfg_tenant_index.c_str()).c_str());
         }
 
         id_thread = create_identity_refresh_thread();
         if(id_thread != nullptr) {
-            pthread_setname_np(id_thread->native_handle(),string_format("sxy_idu_%s",cfg_tenant_index.c_str()).c_str());
+            pthread_setname_np(id_thread->native_handle(),string_format("sxy_idu_%s",
+                    CfgFactory::get().cfg_tenant_index.c_str()).c_str());
         }
     }
     // write out PID file
@@ -708,33 +716,53 @@ int main(int argc, char *argv[]) {
     //  => has to be a pointer initialized AFTER sobject cache. So this seems to be the best place.
     global_staticconent = new StaticContent();
 
-    if(!global_staticconent->load_files(cfg_messages_dir)) {
-        ERR_("Cannot load messages from '%s', replacements will not work correctly !!!", cfg_messages_dir.c_str());
+    if(!global_staticconent->load_files(CfgFactory::get().cfg_messages_dir)) {
+        ERR_("Cannot load messages from '%s', replacements will not work correctly !!!", CfgFactory::get().cfg_messages_dir.c_str());
     } else {
         std::string test = "test";
         DIA_("Message testing string: %s", global_staticconent->render_noargs(test).c_str());
     }
     
     
-    std::string friendly_thread_name_tcp = string_format("sxy_tcp_%d",cfgapi_tenant_index);
-    std::string friendly_thread_name_udp = string_format("sxy_udp_%d",cfgapi_tenant_index);
-    std::string friendly_thread_name_tls = string_format("sxy_tls_%d",cfgapi_tenant_index);
-    std::string friendly_thread_name_dls = string_format("sxy_dls_%d",cfgapi_tenant_index);
-    std::string friendly_thread_name_skx = string_format("sxy_skx_%d",cfgapi_tenant_index);
-    std::string friendly_thread_name_cli = string_format("sxy_cli_%d",cfgapi_tenant_index);
-    std::string friendly_thread_name_own = string_format("sxy_own_%d",cfgapi_tenant_index);
+    std::string friendly_thread_name_tcp = string_format("sxy_tcp_%d",CfgFactory::get().cfgapi_tenant_index);
+    std::string friendly_thread_name_udp = string_format("sxy_udp_%d",CfgFactory::get().cfgapi_tenant_index);
+    std::string friendly_thread_name_tls = string_format("sxy_tls_%d",CfgFactory::get().cfgapi_tenant_index);
+    std::string friendly_thread_name_dls = string_format("sxy_dls_%d",CfgFactory::get().cfgapi_tenant_index);
+    std::string friendly_thread_name_skx = string_format("sxy_skx_%d",CfgFactory::get().cfgapi_tenant_index);
+    std::string friendly_thread_name_cli = string_format("sxy_cli_%d",CfgFactory::get().cfgapi_tenant_index);
+    std::string friendly_thread_name_own = string_format("sxy_own_%d",CfgFactory::get().cfgapi_tenant_index);
 
-    plain_proxy = prepare_listener<theAcceptor,TCPCom>(cfg_tcp_listen_port,"plain-text",50080,cfg_tcp_workers);
-    ssl_proxy = prepare_listener<theAcceptor,MySSLMitmCom>(cfg_ssl_listen_port,"SSL",50443,cfg_ssl_workers);
-    dtls_proxy = prepare_listener<theReceiver,MyDTLSMitmCom>(cfg_dtls_port,"DTLS",50443,cfg_dtls_workers);
-    udp_proxy = prepare_listener<theReceiver,UDPCom>(cfg_udp_port,"plain-udp",50080,cfg_udp_workers);
-    socks_proxy = prepare_listener<socksAcceptor,socksTCPCom>(cfg_socks_port,"socks",1080,cfg_socks_workers);
+    plain_proxy = prepare_listener<theAcceptor,TCPCom>( CfgFactory::get().cfg_tcp_listen_port,
+                                                         "plain-text",
+                                                         50080,
+                                                         CfgFactory::get().cfg_tcp_workers);
+
+    ssl_proxy = prepare_listener<theAcceptor,MySSLMitmCom>(CfgFactory::get().cfg_ssl_listen_port,
+                                                         "SSL",
+                                                         50443,
+                                                         CfgFactory::get().cfg_ssl_workers);
+
+    dtls_proxy = prepare_listener<theReceiver,MyDTLSMitmCom>(CfgFactory::get().cfg_dtls_port,
+                                                         "DTLS",
+                                                         50443,
+                                                         CfgFactory::get().cfg_dtls_workers);
+
+    udp_proxy = prepare_listener<theReceiver,UDPCom>(CfgFactory::get().cfg_udp_port,
+                                                         "plain-udp",
+                                                         50080,
+                                                         CfgFactory::get().cfg_udp_workers);
+
+    socks_proxy = prepare_listener<socksAcceptor,socksTCPCom>(CfgFactory::get().cfg_socks_port,
+                                                         "socks",
+                                                         1080,
+                                                         CfgFactory::get().cfg_socks_workers);
     
-    if( (plain_proxy == nullptr && cfg_tcp_workers >= 0) || 
-        (ssl_proxy == nullptr && cfg_ssl_workers >= 0)   ||
-        (dtls_proxy == nullptr && cfg_dtls_workers >= 0)   || 
-        (udp_proxy == nullptr && cfg_udp_workers >= 0 )  || 
-        (socks_proxy == nullptr && cfg_socks_workers >= 0)    ) {
+
+    if( (plain_proxy == nullptr && CfgFactory::get().cfg_tcp_workers >= 0) ||
+        (ssl_proxy == nullptr && CfgFactory::get().cfg_ssl_workers >= 0)   ||
+        (dtls_proxy == nullptr && CfgFactory::get().cfg_dtls_workers >= 0)   ||
+        (udp_proxy == nullptr && CfgFactory::get().cfg_udp_workers >= 0 )  ||
+        (socks_proxy == nullptr && CfgFactory::get().cfg_socks_workers >= 0)    ) {
         
         FATS_("Failed to setup proxies. Bailing!");
         exit(-1);
@@ -785,7 +813,7 @@ int main(int argc, char *argv[]) {
     
     if(udp_proxy) {
         
-        udp_proxy->set_quick_list(&cfgapi_obj_udp_quick_ports);
+        udp_proxy->set_quick_list(&CfgFactory::get().cfgapi_obj_udp_quick_ports);
         
         INFS_("Starting UDP listener");        
         udp_thread = new std::thread([] () {
@@ -864,7 +892,7 @@ int main(int argc, char *argv[]) {
     DIA_("SSL_accept: %d",SSLCom::counter_ssl_accept);
     DIA_("SSL_connect: %d",SSLCom::counter_ssl_connect);
 
-    cfgapi_cleanup();
+    CfgFactory::get().cfgapi_cleanup();
 
     SSLCom::certstore()->destroy();
     

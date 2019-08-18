@@ -51,91 +51,53 @@
 
 #include <shmtable.hpp>
 
-loglevel  args_debug_flag = NON;
 
-std::string cfg_tcp_listen_port = "50080";
-std::string cfg_ssl_listen_port = "50443";
-std::string cfg_dtls_port = "50443";
-std::string cfg_udp_port = "50080";
-std::string cfg_socks_port = "1080";
+CfgFactory::CfgFactory(): args_debug_flag(NON), cfg_syslog_level(INF)  {
 
-std::string cfg_tcp_listen_port_base = "50080";
-std::string cfg_ssl_listen_port_base = "50443";
-std::string cfg_dtls_port_base = "50443";
-std::string cfg_udp_port_base = "50080";
-std::string cfg_socks_port_base = "1080";
+    cfg_tcp_listen_port = "50080";
+    cfg_ssl_listen_port = "50443";
+    cfg_dtls_port = "50443";
+    cfg_udp_port = "50080";
+    cfg_socks_port = "1080";
 
-std::string config_file;
-bool config_file_check_only = false;
+    cfg_tcp_listen_port_base = "50080";
+    cfg_ssl_listen_port_base = "50443";
+    cfg_dtls_port_base = "50443";
+    cfg_udp_port_base = "50080";
+    cfg_socks_port_base = "1080";
 
-std::string cfg_messages_dir = "/etc/smithproxy/msg/en/";
+    config_file_check_only = false;
 
-
-int cfg_tcp_workers   = 0;
-int cfg_ssl_workers   = 0;
-int cfg_dtls_workers  = 0;
-int cfg_udp_workers   = 0;
-int cfg_socks_workers = 0;
-
-std::string cfg_config_file;
-std::string cfg_tenant_index;
-std::string cfg_tenant_name;
-
-std::string cfg_syslog_server   = "";
-int         cfg_syslog_port     = 514;
-int         cfg_syslog_facility =  23; //local7
-loglevel    cfg_syslog_level    = INF;
-int         cfg_syslog_family   = 4;
+    cfg_messages_dir = "/etc/smithproxy/msg/en/";
 
 
-std::string cfg_log_target_base;
-std::string cfg_sslkeylog_target_base;
+    cfg_tcp_workers = 0;
+    cfg_ssl_workers = 0;
+    cfg_dtls_workers = 0;
+    cfg_udp_workers = 0;
+    cfg_socks_workers = 0;
 
-std::string cfg_log_target;
-std::string cfg_sslkeylog_target;
-bool cfg_log_console;
-
-
-Config cfgapi;
-time_t system_started;
-
-std::map<std::string,AddressObject*> cfgapi_obj_address;
-std::map<std::string,range> cfgapi_obj_port;
-std::map<std::string,int> cfgapi_obj_proto;
-std::vector<PolicyRule*> cfgapi_obj_policy;
-std::map<std::string,ProfileDetection*> cfgapi_obj_profile_detection;
-std::map<std::string,ProfileContent*> cfgapi_obj_profile_content;
-std::map<std::string,ProfileTls*> cfgapi_obj_profile_tls;
-std::map<std::string,ProfileAuth*> cfgapi_obj_profile_auth;
-std::map<std::string,ProfileAlgDns*> cfgapi_obj_profile_alg_dns;
-
-std::vector<int> cfgapi_obj_udp_quick_ports;
-std::vector<std::string> cfgapi_obj_nameservers;
-
-// multi-tenancy support
-std::string cfgapi_tenant_name = "default";
-unsigned int cfgapi_tenant_index = 0;
-
-//portal variables
-std::string cfg_auth_address;
-std::string cfg_auth_http;
-std::string cfg_auth_https;
-std::string cfg_auth_sslkey;
-std::string cfg_auth_sslcert;
-std::string cfgapi_tenant_magic_ip;
+    cfg_syslog_server = "";
+    cfg_syslog_port = 514;
+    cfg_syslog_facility = 23; //local7
+    cfg_syslog_family = 4;
 
 
-std::string cfg_traflog_dir = "/var/local/smithproxy/data";
-std::string cfg_traflog_file_pref = "";
-std::string cfg_traflog_file_suff = "smcap";
+    // multi-tenancy support
+    cfgapi_tenant_name = "default";
+    cfgapi_tenant_index = 0;
 
 
+    cfg_traflog_dir = "/var/local/smithproxy/data";
+    cfg_traflog_file_pref = "";
+    cfg_traflog_file_suff = "smcap";
+}
 
 std::recursive_mutex cfgapi_write_lock;
 
 struct cfgapi_table_ cfgapi_table;
 
-bool cfgapi_init(const char* fnm) {
+bool CfgFactory::cfgapi_init(const char* fnm) {
     
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
@@ -161,7 +123,7 @@ bool cfgapi_init(const char* fnm) {
     return true;
 }
 
-AddressObject* cfgapi_lookup_address(const char* name) {
+AddressObject* CfgFactory::cfgapi_lookup_address(const char* name) {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
     if(cfgapi_obj_address.find(name) != cfgapi_obj_address.end()) {
@@ -171,7 +133,7 @@ AddressObject* cfgapi_lookup_address(const char* name) {
     return nullptr;
 }
 
-range cfgapi_lookup_port(const char* name) {
+range CfgFactory::cfgapi_lookup_port(const char* name) {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
     if(cfgapi_obj_port.find(name) != cfgapi_obj_port.end()) {
@@ -181,7 +143,7 @@ range cfgapi_lookup_port(const char* name) {
     return NULLRANGE;
 }
 
-int cfgapi_lookup_proto(const char* name) {
+int CfgFactory::cfgapi_lookup_proto(const char* name) {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
     if(cfgapi_obj_proto.find(name) != cfgapi_obj_proto.end()) {
@@ -191,7 +153,7 @@ int cfgapi_lookup_proto(const char* name) {
     return 0;
 }
 
-ProfileContent* cfgapi_lookup_profile_content(const char* name) {
+ProfileContent* CfgFactory::cfgapi_lookup_profile_content(const char* name) {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
     if(cfgapi_obj_profile_content.find(name) != cfgapi_obj_profile_content.end()) {
@@ -201,7 +163,7 @@ ProfileContent* cfgapi_lookup_profile_content(const char* name) {
     return nullptr;
 }
 
-ProfileDetection* cfgapi_lookup_profile_detection(const char* name) {
+ProfileDetection* CfgFactory::cfgapi_lookup_profile_detection(const char* name) {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
     if(cfgapi_obj_profile_detection.find(name) != cfgapi_obj_profile_detection.end()) {
@@ -211,7 +173,7 @@ ProfileDetection* cfgapi_lookup_profile_detection(const char* name) {
     return nullptr;
 }
 
-ProfileTls* cfgapi_lookup_profile_tls(const char* name) {
+ProfileTls* CfgFactory::cfgapi_lookup_profile_tls(const char* name) {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
     if(cfgapi_obj_profile_tls.find(name) != cfgapi_obj_profile_tls.end()) {
@@ -221,7 +183,7 @@ ProfileTls* cfgapi_lookup_profile_tls(const char* name) {
     return nullptr;
 }
 
-ProfileAlgDns* cfgapi_lookup_profile_alg_dns(const char* name) {
+ProfileAlgDns* CfgFactory::cfgapi_lookup_profile_alg_dns(const char* name) {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
     if(cfgapi_obj_profile_alg_dns.find(name) != cfgapi_obj_profile_alg_dns.end()) {
@@ -233,7 +195,7 @@ ProfileAlgDns* cfgapi_lookup_profile_alg_dns(const char* name) {
 }
 
 
-ProfileAuth* cfgapi_lookup_profile_auth(const char* name) {
+ProfileAuth* CfgFactory::cfgapi_lookup_profile_auth(const char* name) {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
     if(cfgapi_obj_profile_auth.find(name) != cfgapi_obj_profile_auth.end()) {
@@ -243,7 +205,7 @@ ProfileAuth* cfgapi_lookup_profile_auth(const char* name) {
     return nullptr;
 }
 
-bool cfgapi_load_settings() {
+bool CfgFactory::cfgapi_load_settings() {
 
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
 
@@ -335,7 +297,7 @@ bool cfgapi_load_settings() {
 }
 
 
-int cfgapi_load_obj_address() {
+int CfgFactory::cfgapi_load_obj_address() {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
     int num = 0;
@@ -393,7 +355,7 @@ int cfgapi_load_obj_address() {
     return num;
 }
 
-int cfgapi_load_obj_port() {
+int CfgFactory::cfgapi_load_obj_port() {
     
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
@@ -443,7 +405,7 @@ int cfgapi_load_obj_port() {
     return num;
 }
 
-int cfgapi_load_obj_proto() {
+int CfgFactory::cfgapi_load_obj_proto() {
     
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
@@ -488,7 +450,7 @@ int cfgapi_load_obj_proto() {
 }
 
 
-int cfgapi_load_obj_policy() {
+int CfgFactory::cfgapi_load_obj_policy() {
     
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
@@ -790,7 +752,7 @@ int cfgapi_load_obj_policy() {
     return num;
 }
 
-int cfgapi_obj_policy_match(baseProxy* proxy) {
+int CfgFactory::cfgapi_obj_policy_match(baseProxy* proxy) {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
     int x = 0;
@@ -810,7 +772,7 @@ int cfgapi_obj_policy_match(baseProxy* proxy) {
     return -1;
 }
 
-int cfgapi_obj_policy_match(std::vector<baseHostCX*>& left, std::vector<baseHostCX*>& right) {
+int CfgFactory::cfgapi_obj_policy_match(std::vector<baseHostCX*>& left, std::vector<baseHostCX*>& right) {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
     int x = 0;
@@ -830,7 +792,7 @@ int cfgapi_obj_policy_match(std::vector<baseHostCX*>& left, std::vector<baseHost
     return -1;
 }    
 
-int cfgapi_obj_policy_action(int index) {
+int CfgFactory::cfgapi_obj_policy_action(int index) {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
     if(index < 0) {
@@ -845,7 +807,7 @@ int cfgapi_obj_policy_action(int index) {
     }
 }
 
-ProfileContent* cfgapi_obj_policy_profile_content(int index) {
+ProfileContent* CfgFactory::cfgapi_obj_policy_profile_content(int index) {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
     if(index < 0) {
@@ -860,7 +822,7 @@ ProfileContent* cfgapi_obj_policy_profile_content(int index) {
     }
 }
 
-ProfileDetection* cfgapi_obj_policy_profile_detection(int index) {
+ProfileDetection* CfgFactory::cfgapi_obj_policy_profile_detection(int index) {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
     if(index < 0) {
@@ -875,7 +837,7 @@ ProfileDetection* cfgapi_obj_policy_profile_detection(int index) {
     }
 }
 
-ProfileTls* cfgapi_obj_policy_profile_tls(int index) {
+ProfileTls* CfgFactory::cfgapi_obj_policy_profile_tls(int index) {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
     if(index < 0) {
@@ -891,7 +853,7 @@ ProfileTls* cfgapi_obj_policy_profile_tls(int index) {
 }
 
 
-ProfileAlgDns* cfgapi_obj_policy_profile_alg_dns(int index) {
+ProfileAlgDns* CfgFactory::cfgapi_obj_policy_profile_alg_dns(int index) {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
     if(index < 0) {
@@ -907,7 +869,7 @@ ProfileAlgDns* cfgapi_obj_policy_profile_alg_dns(int index) {
 }
 
 
-ProfileAuth* cfgapi_obj_policy_profile_auth(int index) {
+ProfileAuth* CfgFactory::cfgapi_obj_policy_profile_auth(int index) {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
     if(index < 0) {
@@ -924,7 +886,7 @@ ProfileAuth* cfgapi_obj_policy_profile_auth(int index) {
 
 
 
-int cfgapi_load_obj_profile_detection() {
+int CfgFactory::cfgapi_load_obj_profile_detection() {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
     int num = 0;
@@ -969,7 +931,7 @@ int cfgapi_load_obj_profile_detection() {
 }
 
 
-int cfgapi_load_obj_profile_content() {
+int CfgFactory::cfgapi_load_obj_profile_content() {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
     int num = 0;
@@ -1053,7 +1015,7 @@ int cfgapi_load_obj_profile_content() {
     return num;
 }
 
-int cfgapi_load_obj_profile_tls() {
+int CfgFactory::cfgapi_load_obj_profile_tls() {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
     int num = 0;
@@ -1144,7 +1106,7 @@ int cfgapi_load_obj_profile_tls() {
     return num;
 }
 
-int cfgapi_load_obj_profile_alg_dns() {
+int CfgFactory::cfgapi_load_obj_profile_alg_dns() {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
 
     int num = 0;
@@ -1183,7 +1145,7 @@ int cfgapi_load_obj_profile_alg_dns() {
 }
 
 
-int cfgapi_load_obj_profile_auth() {
+int CfgFactory::cfgapi_load_obj_profile_auth() {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
     int num = 0;
@@ -1303,7 +1265,7 @@ int cfgapi_load_obj_profile_auth() {
 
 
 
-int cfgapi_cleanup_obj_address() {
+int CfgFactory::cfgapi_cleanup_obj_address() {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
     int r = cfgapi_obj_address.size();
@@ -1323,7 +1285,7 @@ int cfgapi_cleanup_obj_address() {
     return r;
 }
 
-int cfgapi_cleanup_obj_policy() {
+int CfgFactory::cfgapi_cleanup_obj_policy() {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
     int r = cfgapi_obj_policy.size();
@@ -1339,7 +1301,7 @@ int cfgapi_cleanup_obj_policy() {
     return r;
 }
 
-int cfgapi_cleanup_obj_port() {
+int CfgFactory::cfgapi_cleanup_obj_port() {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
     int r = cfgapi_obj_port.size();
@@ -1348,7 +1310,7 @@ int cfgapi_cleanup_obj_port() {
     return r;
 }
 
-int cfgapi_cleanup_obj_proto() {
+int CfgFactory::cfgapi_cleanup_obj_proto() {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
     int r = cfgapi_obj_proto.size();
@@ -1358,7 +1320,7 @@ int cfgapi_cleanup_obj_proto() {
 }
 
 
-int cfgapi_cleanup_obj_profile_content() {
+int CfgFactory::cfgapi_cleanup_obj_profile_content() {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
     int r = cfgapi_obj_profile_content.size();
@@ -1371,7 +1333,7 @@ int cfgapi_cleanup_obj_profile_content() {
     
     return r;
 }
-int cfgapi_cleanup_obj_profile_detection() {
+int CfgFactory::cfgapi_cleanup_obj_profile_detection() {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
     int r = cfgapi_obj_profile_detection.size();
@@ -1384,7 +1346,7 @@ int cfgapi_cleanup_obj_profile_detection() {
     
     return r;
 }
-int cfgapi_cleanup_obj_profile_tls() {
+int CfgFactory::cfgapi_cleanup_obj_profile_tls() {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
     int r = cfgapi_obj_profile_tls.size();
@@ -1398,7 +1360,7 @@ int cfgapi_cleanup_obj_profile_tls() {
     return r;
 }
 
-int cfgapi_cleanup_obj_profile_alg_dns() {
+int CfgFactory::cfgapi_cleanup_obj_profile_alg_dns() {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
     int r = cfgapi_obj_profile_alg_dns.size();
@@ -1414,7 +1376,7 @@ int cfgapi_cleanup_obj_profile_alg_dns() {
 
 
 
-int cfgapi_cleanup_obj_profile_auth() {
+int CfgFactory::cfgapi_cleanup_obj_profile_auth() {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
     int r = cfgapi_obj_profile_auth.size();
@@ -1434,7 +1396,7 @@ int cfgapi_cleanup_obj_profile_auth() {
 }
 
 
-bool cfgapi_obj_profile_content_apply(baseHostCX* originator, baseProxy* new_proxy, ProfileContent* pc) {
+bool CfgFactory::cfgapi_obj_profile_content_apply(baseHostCX* originator, baseProxy* new_proxy, ProfileContent* pc) {
     
     MitmProxy* mitm_proxy = static_cast<MitmProxy*>(new_proxy); 
     AppHostCX* mitm_originator = static_cast<AppHostCX*>(originator);
@@ -1483,7 +1445,7 @@ bool cfgapi_obj_profile_content_apply(baseHostCX* originator, baseProxy* new_pro
 }
 
 
-bool cfgapi_obj_profile_detect_apply(baseHostCX* originator, baseProxy* new_proxy, ProfileDetection* pd) {
+bool CfgFactory::cfgapi_obj_profile_detect_apply(baseHostCX* originator, baseProxy* new_proxy, ProfileDetection* pd) {
 
     MitmProxy* mitm_proxy = static_cast<MitmProxy*>(new_proxy); 
     AppHostCX* mitm_originator = static_cast<AppHostCX*>(originator);
@@ -1507,7 +1469,7 @@ bool cfgapi_obj_profile_detect_apply(baseHostCX* originator, baseProxy* new_prox
     return ret;
 }
 
-bool cfgapi_obj_profile_tls_apply(baseHostCX* originator, baseProxy* new_proxy, ProfileTls* ps) {
+bool CfgFactory::cfgapi_obj_profile_tls_apply(baseHostCX* originator, baseProxy* new_proxy, ProfileTls* ps) {
     
     MitmProxy* mitm_proxy = static_cast<MitmProxy*>(new_proxy); 
     AppHostCX* mitm_originator = static_cast<AppHostCX*>(originator);
@@ -1590,7 +1552,7 @@ bool cfgapi_obj_profile_tls_apply(baseHostCX* originator, baseProxy* new_proxy, 
     return tls_applied;
 }
 
-bool cfgapi_obj_alg_dns_apply(baseHostCX* originator, baseProxy* new_proxy, ProfileAlgDns* p_alg_dns) {
+bool CfgFactory::cfgapi_obj_alg_dns_apply(baseHostCX* originator, baseProxy* new_proxy, ProfileAlgDns* p_alg_dns) {
     
     AppHostCX* mitm_originator = static_cast<AppHostCX*>(originator);    
     MitmHostCX* mh = dynamic_cast<MitmHostCX*>(mitm_originator);
@@ -1620,7 +1582,7 @@ bool cfgapi_obj_alg_dns_apply(baseHostCX* originator, baseProxy* new_proxy, Prof
     return ret;
 }
 
-int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
+int CfgFactory::cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
     std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
     
     int policy_num = cfgapi_obj_policy_match(new_proxy);
@@ -1694,12 +1656,12 @@ int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* new_proxy) {
 }
 
 
-bool cfgapi_obj_policy_apply_tls(int policy_num, baseCom* xcom) {
+bool CfgFactory::cfgapi_obj_policy_apply_tls(int policy_num, baseCom* xcom) {
     ProfileTls* pt = cfgapi_obj_policy_profile_tls(policy_num);
     return cfgapi_obj_policy_apply_tls(pt,xcom);
 }
 
-bool should_redirect_warning_port(ProfileTls* pt, SSLCom* com) {
+bool CfgFactory::should_redirect_warning_port(ProfileTls* pt, SSLCom* com) {
     
     bool ret = false;
     
@@ -1738,7 +1700,7 @@ bool should_redirect_warning_port(ProfileTls* pt, SSLCom* com) {
     return ret;
 }
 
-bool cfgapi_obj_policy_apply_tls(ProfileTls* pt, baseCom* xcom) {
+bool CfgFactory::cfgapi_obj_policy_apply_tls(ProfileTls* pt, baseCom* xcom) {
 
     bool tls_applied = false;     
     
@@ -1799,7 +1761,7 @@ bool cfgapi_obj_policy_apply_tls(ProfileTls* pt, baseCom* xcom) {
 }
 
 
-void cfgapi_cleanup()
+void CfgFactory::cfgapi_cleanup()
 {
   cfgapi_cleanup_obj_policy();
   cfgapi_cleanup_obj_address();
@@ -1813,7 +1775,7 @@ void cfgapi_cleanup()
 }
 
 
-void cfgapi_log_version(bool warn_delay)
+void CfgFactory::cfgapi_log_version(bool warn_delay)
 {
     CRI_("Starting Smithproxy %s (socle %s)",SMITH_VERSION,SOCLE_VERSION);
     
@@ -1837,7 +1799,7 @@ void cfgapi_log_version(bool warn_delay)
     }
 }
 
-int apply_index(std::string& what , const std::string& idx) {
+int CfgFactory::apply_tenant_index(std::string& what, const std::string& idx) {
     DEB_("apply_index: what=%s idx=%s",what.c_str(),idx.c_str());
     int port = std::stoi(what);
     int index = std::stoi(idx);
@@ -1847,17 +1809,17 @@ int apply_index(std::string& what , const std::string& idx) {
 }
 
 
-bool cfgapi_apply_tenant_config () {
+bool CfgFactory::cfgapi_apply_tenant_config () {
     int ret = 0;
 
     if(cfg_tenant_index.size() > 0 && cfg_tenant_name.size() > 0) {
-        ret += apply_index(cfg_tcp_listen_port,cfg_tenant_index);
-        ret += apply_index(cfg_ssl_listen_port,cfg_tenant_index);
-        ret += apply_index(cfg_dtls_port,cfg_tenant_index);
-        ret += apply_index(cfg_udp_port,cfg_tenant_index);
-        ret += apply_index(cfg_socks_port,cfg_tenant_index);
-        ret += apply_index(cfgapi_identity_portal_port_http,cfg_tenant_index);
-        ret += apply_index(cfgapi_identity_portal_port_https,cfg_tenant_index);
+        ret += apply_tenant_index(cfg_tcp_listen_port, cfg_tenant_index);
+        ret += apply_tenant_index(cfg_ssl_listen_port, cfg_tenant_index);
+        ret += apply_tenant_index(cfg_dtls_port, cfg_tenant_index);
+        ret += apply_tenant_index(cfg_udp_port, cfg_tenant_index);
+        ret += apply_tenant_index(cfg_socks_port, cfg_tenant_index);
+        ret += apply_tenant_index(cfgapi_identity_portal_port_http, cfg_tenant_index);
+        ret += apply_tenant_index(cfgapi_identity_portal_port_https, cfg_tenant_index);
 
         cli_port += std::stoi(cfg_tenant_index);
     }

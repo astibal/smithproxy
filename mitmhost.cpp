@@ -341,8 +341,8 @@ void MitmHostCX::on_starttls() {
     ptr = dynamic_cast<SSLCom*>(com());
     if (ptr != nullptr) ptr->upgrade_server_socket(socket());
 
-    cfgapi_obj_policy_apply_tls(matched_policy(),com());
-    cfgapi_obj_policy_apply_tls(matched_policy(),peercom());
+    CfgFactory::get().cfgapi_obj_policy_apply_tls(matched_policy(),com());
+    CfgFactory::get().cfgapi_obj_policy_apply_tls(matched_policy(),peercom());
 
     log().append("\n STARTTLS: plain connection upgraded to SSL/TLS, continuing with inspection.\n\n");
 

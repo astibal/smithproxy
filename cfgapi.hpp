@@ -49,6 +49,7 @@
 #include <cidr.hpp>
 #include <ranges.hpp>
 #include <policy.hpp>
+#include <sslcom.hpp>
 
 #include <cfgapi_auth.hpp>
 
@@ -65,88 +66,160 @@
 
 using namespace libconfig;
 
+class CfgFactory {
 
-extern loglevel  args_debug_flag;
+    CfgFactory();
 
-extern std::string cfg_tcp_listen_port_base;
-extern std::string cfg_ssl_listen_port_base;
-extern std::string cfg_dtls_port_base;
-extern std::string cfg_udp_port_base;
-extern std::string cfg_socks_port_base;
+public:
+    CfgFactory(CfgFactory const &) = delete;
+    void operator=(const CfgFactory&) = delete;
 
-extern std::string cfg_tcp_listen_port;
-extern std::string cfg_ssl_listen_port;
-extern std::string cfg_dtls_port;
-extern std::string cfg_udp_port;
-extern std::string cfg_socks_port;
+    static CfgFactory& get() {
+        static CfgFactory fac;
+        return fac;
+    }
 
-extern std::string config_file;
-extern bool config_file_check_only;
+    loglevel args_debug_flag;
 
-extern std::string cfg_messages_dir;
+    std::string cfg_tcp_listen_port_base;
+    std::string cfg_ssl_listen_port_base;
+    std::string cfg_dtls_port_base;
+    std::string cfg_udp_port_base;
+    std::string cfg_socks_port_base;
 
+    std::string cfg_tcp_listen_port;
+    std::string cfg_ssl_listen_port;
+    std::string cfg_dtls_port;
+    std::string cfg_udp_port;
+    std::string cfg_socks_port;
 
-extern int cfg_tcp_workers;
-extern int cfg_ssl_workers;
-extern int cfg_dtls_workers;
-extern int cfg_udp_workers;
-extern int cfg_socks_workers;
+    std::string config_file;
+    bool config_file_check_only;
 
-extern std::string cfg_tenant_index;
-extern std::string cfg_tenant_name;
-
-extern std::string cfg_syslog_server;
-extern int         cfg_syslog_port;
-extern int         cfg_syslog_facility;
-extern loglevel    cfg_syslog_level;
-extern int         cfg_syslog_family;
+    std::string cfg_messages_dir;
 
 
-extern std::string cfg_log_target_base;
-extern std::string cfg_sslkeylog_target_base;
+    int cfg_tcp_workers;
+    int cfg_ssl_workers;
+    int cfg_dtls_workers;
+    int cfg_udp_workers;
+    int cfg_socks_workers;
 
-extern std::string cfg_log_target;
-extern std::string cfg_sslkeylog_target;
-extern bool cfg_log_console;
+    std::string cfg_tenant_index;
+    std::string cfg_tenant_name;
 
-
-
-extern time_t system_started;
-extern Config cfgapi;
-extern std::map<std::string,AddressObject*> cfgapi_obj_address;
-extern std::map<std::string,range> cfgapi_obj_port;
-extern std::map<std::string,int> cfgapi_obj_proto;
-extern std::vector<PolicyRule*> cfgapi_obj_policy;
-extern std::map<std::string,ProfileDetection*> cfgapi_obj_profile_detection;
-extern std::map<std::string,ProfileContent*> cfgapi_obj_profile_content;
-extern std::map<std::string,ProfileTls*> cfgapi_obj_profile_tls;
-extern std::map<std::string,ProfileAuth*> cfgapi_obj_profile_auth;
-extern std::map<std::string,ProfileAlgDns*> cfgapi_obj_profile_alg_dns;
-
-extern std::vector<int> cfgapi_obj_udp_quick_ports;
-
-extern std::recursive_mutex cfgapi_write_lock;
-
-extern std::string cfg_config_file;
-extern std::string cfgapi_tenant_name;
-extern unsigned int cfgapi_tenant_index;
+    std::string cfg_syslog_server;
+    int cfg_syslog_port;
+    int cfg_syslog_facility;
+    loglevel cfg_syslog_level;
+    int cfg_syslog_family;
 
 
-extern std::string cfg_auth_address;
-extern std::string cfg_auth_http;
-extern std::string cfg_auth_https;
-extern std::string cfg_auth_sslkey;
-extern std::string cfg_auth_sslcert;
-extern std::string cfgapi_tenant_magic_ip;
+    std::string cfg_log_target_base;
+    std::string cfg_sslkeylog_target_base;
+
+    std::string cfg_log_target;
+    std::string cfg_sslkeylog_target;
+    bool cfg_log_console;
 
 
-extern std::string cfg_traflog_dir;
-extern std::string cfg_traflog_file_pref;
-extern std::string cfg_traflog_file_suff;
+    time_t system_started;
+    Config cfgapi;
+    std::map<std::string, AddressObject *> cfgapi_obj_address;
+    std::map<std::string, range> cfgapi_obj_port;
+    std::map<std::string, int> cfgapi_obj_proto;
+    std::vector<PolicyRule *> cfgapi_obj_policy;
+    std::map<std::string, ProfileDetection *> cfgapi_obj_profile_detection;
+    std::map<std::string, ProfileContent *> cfgapi_obj_profile_content;
+    std::map<std::string, ProfileTls *> cfgapi_obj_profile_tls;
+    std::map<std::string, ProfileAuth *> cfgapi_obj_profile_auth;
+    std::map<std::string, ProfileAlgDns *> cfgapi_obj_profile_alg_dns;
+
+    std::vector<int> cfgapi_obj_udp_quick_ports;
+
+    std::recursive_mutex cfgapi_write_lock;
+
+    std::string cfg_config_file;
+    std::string cfgapi_tenant_name;
+    unsigned int cfgapi_tenant_index;
 
 
+    std::string cfg_auth_address;
+    std::string cfg_auth_http;
+    std::string cfg_auth_https;
+    std::string cfg_auth_sslkey;
+    std::string cfg_auth_sslcert;
+    std::string cfgapi_tenant_magic_ip;
 
-extern std::vector<std::string> cfgapi_obj_nameservers;
+
+    std::string cfg_traflog_dir;
+    std::string cfg_traflog_file_pref;
+    std::string cfg_traflog_file_suff;
+
+
+    std::vector<std::string> cfgapi_obj_nameservers;
+
+
+public:
+    bool  cfgapi_init(const char* fnm);
+    void  cfgapi_cleanup();
+
+    AddressObject* cfgapi_lookup_address(const char* name);
+    range cfgapi_lookup_port(const char* name);
+    int   cfgapi_lookup_proto(const char* name);
+    ProfileDetection* cfgapi_lookup_profile_detection(const char* name);
+    ProfileContent*   cfgapi_lookup_profile_content(const char* name);
+    ProfileTls*   cfgapi_lookup_profile_tls(const char* name);
+    ProfileAuth*   cfgapi_lookup_profile_auth(const char* name);
+    ProfileAlgDns*   cfgapi_lookup_profile_alg_dns(const char* name);
+
+    bool cfgapi_apply_tenant_config();
+    int  apply_tenant_index(std::string& what , const std::string& idx);
+
+    bool cfgapi_load_settings();
+    int  cfgapi_load_obj_address();
+    int  cfgapi_load_obj_port();
+    int  cfgapi_load_obj_proto();
+    int  cfgapi_load_obj_policy();
+    int  cfgapi_load_obj_profile_content();
+    int  cfgapi_load_obj_profile_detection();
+    int  cfgapi_load_obj_profile_tls();
+    int  cfgapi_load_obj_profile_auth();
+    int  cfgapi_load_obj_profile_alg_dns();
+
+    int  cfgapi_cleanup_obj_address();
+    int  cfgapi_cleanup_obj_port();
+    int  cfgapi_cleanup_obj_proto();
+    int  cfgapi_cleanup_obj_policy();
+    int  cfgapi_cleanup_obj_profile_content();
+    int  cfgapi_cleanup_obj_profile_detection();
+    int  cfgapi_cleanup_obj_profile_tls();
+    int  cfgapi_cleanup_obj_profile_auth();
+    int  cfgapi_cleanup_obj_profile_alg_dns();
+
+    int cfgapi_obj_policy_match(baseProxy* proxy);
+    int cfgapi_obj_policy_match(std::vector<baseHostCX*>& left, std::vector<baseHostCX*>& right);
+    int cfgapi_obj_policy_action(int index);
+    int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* proxy);
+
+    bool cfgapi_obj_policy_apply_tls(int policy_num, baseCom* xcom);
+    bool cfgapi_obj_policy_apply_tls(ProfileTls* pt, baseCom* xcom);
+
+    bool cfgapi_obj_profile_content_apply(baseHostCX* originator, baseProxy* new_proxy, ProfileContent* pc);
+    bool cfgapi_obj_profile_detect_apply(baseHostCX* originator, baseProxy* new_proxy, ProfileDetection* pd);
+    bool cfgapi_obj_profile_tls_apply(baseHostCX* originator, baseProxy* new_proxy, ProfileTls* ps);
+    bool cfgapi_obj_alg_dns_apply(baseHostCX* originator, baseProxy* new_proxy, ProfileAlgDns* p_alg_dns);
+
+    bool should_redirect_warning_port(ProfileTls* pt, SSLCom* com);
+
+    void cfgapi_log_version(bool warn_delay=true);
+
+    ProfileContent* cfgapi_obj_policy_profile_content(int index);
+    ProfileDetection* cfgapi_obj_policy_profile_detection(int index);
+    ProfileTls* cfgapi_obj_policy_profile_tls(int index);
+    ProfileAuth* cfgapi_obj_policy_profile_auth(int index);
+    ProfileAlgDns* cfgapi_obj_policy_profile_alg_dns(int index);
+};
 
 struct logging_{
     loglevel level = INF;
@@ -161,59 +234,6 @@ struct cfgapi_table_ {
 extern struct cfgapi_table_ cfgapi_table;
 
 
-bool  cfgapi_init(const char* fnm);
-void  cfgapi_cleanup();
 
-AddressObject* cfgapi_lookup_address(const char* name);
-range cfgapi_lookup_port(const char* name);
-int   cfgapi_lookup_proto(const char* name);
-ProfileDetection* cfgapi_lookup_profile_detection(const char* name);
-ProfileContent*   cfgapi_lookup_profile_content(const char* name);
-ProfileTls*   cfgapi_lookup_profile_tls(const char* name);
-ProfileAuth*   cfgapi_lookup_profile_auth(const char* name);
-ProfileAlgDns*   cfgapi_lookup_profile_alg_dns(const char* name);
-
-bool cfgapi_apply_tenant_config();
-bool cfgapi_load_settings();
-int  cfgapi_load_obj_address();
-int  cfgapi_load_obj_port();
-int  cfgapi_load_obj_proto();
-int  cfgapi_load_obj_policy();
-int  cfgapi_load_obj_profile_content();
-int  cfgapi_load_obj_profile_detection();
-int  cfgapi_load_obj_profile_tls();
-int  cfgapi_load_obj_profile_auth();
-int  cfgapi_load_obj_profile_alg_dns();
-
-int  cfgapi_cleanup_obj_address();
-int  cfgapi_cleanup_obj_port();
-int  cfgapi_cleanup_obj_proto();
-int  cfgapi_cleanup_obj_policy();
-int  cfgapi_cleanup_obj_profile_content();
-int  cfgapi_cleanup_obj_profile_detection();
-int  cfgapi_cleanup_obj_profile_tls();
-int  cfgapi_cleanup_obj_profile_auth();
-int  cfgapi_cleanup_obj_profile_alg_dns();
-
-int cfgapi_obj_policy_match(baseProxy* proxy);
-int cfgapi_obj_policy_match(std::vector<baseHostCX*>& left, std::vector<baseHostCX*>& right);
-int cfgapi_obj_policy_action(int index);
-int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* proxy);
-
-bool cfgapi_obj_policy_apply_tls(int policy_num, baseCom* xcom);
-bool cfgapi_obj_policy_apply_tls(ProfileTls* pt, baseCom* xcom);
-
-bool cfgapi_obj_profile_content_apply(baseHostCX* originator, baseProxy* new_proxy, ProfileContent* pc);
-bool cfgapi_obj_profile_detect_apply(baseHostCX* originator, baseProxy* new_proxy, ProfileDetection* pd);
-bool cfgapi_obj_profile_tls_apply(baseHostCX* originator, baseProxy* new_proxy, ProfileTls* ps);
-bool cfgapi_obj_alg_dns_apply(baseHostCX* originator, baseProxy* new_proxy, ProfileAlgDns* p_alg_dns);
-
-void cfgapi_log_version(bool warn_delay=true);
-
-ProfileContent* cfgapi_obj_policy_profile_content(int index);
-ProfileDetection* cfgapi_obj_policy_profile_detection(int index);
-ProfileTls* cfgapi_obj_policy_profile_tls(int index);
-ProfileAuth* cfgapi_obj_policy_profile_auth(int index);
-ProfileAlgDns* cfgapi_obj_policy_profile_alg_dns(int index);
 
 #endif

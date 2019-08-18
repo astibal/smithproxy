@@ -279,8 +279,8 @@ int socksServerCX::process_socks_request() {
                     // no targets, send DNS query
                     
                     std::string nameserver = "8.8.8.8";
-                    if(cfgapi_obj_nameservers.size()) {
-                        nameserver = cfgapi_obj_nameservers.at(0);
+                    if(CfgFactory::get().cfgapi_obj_nameservers.size()) {
+                        nameserver = CfgFactory::get().cfgapi_obj_nameservers.at(0);
                     }
 
                     if(!async_dns) {

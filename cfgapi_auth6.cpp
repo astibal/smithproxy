@@ -46,9 +46,13 @@ std::recursive_mutex cfgapi_identity_ip6_lock;
 // unsigned int IdentityInfoType<ShmLogonType>::global_idle_timeout = 600;
 
 int cfgapi_auth_shm_ip6_table_refresh()  {
-    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
+    std::lock_guard<std::recursive_mutex> l(CfgFactory::get().cfgapi_write_lock);
     
-    auth_shm_ip6_map.attach(string_format(AUTH_IP6_MEM_NAME,cfgapi_tenant_name.c_str()).c_str(),AUTH_IP6_MEM_SIZE,string_format(AUTH_IP6_SEM_NAME,cfgapi_tenant_name.c_str()).c_str());
+    auth_shm_ip6_map.attach(string_format(AUTH_IP6_MEM_NAME,
+                                          CfgFactory::get().cfgapi_tenant_name.c_str()).c_str(),
+                            AUTH_IP6_MEM_SIZE,
+                            string_format(AUTH_IP6_SEM_NAME,
+                                          CfgFactory::get().cfgapi_tenant_name.c_str()).c_str());
     
     DEBS_("cfgapi_auth_shm_ip6_table_refresh: acquring semaphore");
     int rc = auth_shm_ip6_map.acquire();
