@@ -40,7 +40,7 @@
 
 #include <addrobj.hpp>
 #include <dns.hpp>
-#include <strstream>
+#include <sstream>
 
 int CidrAddress::contains(CIDR* other) {
     return cidr_contains(c_,other);
@@ -49,7 +49,7 @@ int CidrAddress::contains(CIDR* other) {
 
 std::string FqdnAddress::to_string(int verbosity) {
 
-    std::strstream ret;
+    std::stringstream ret;
 
     ret << "FqdnAddress: " + fqdn_;
  
@@ -96,17 +96,19 @@ bool FqdnAddress::match(CIDR* c) {
         r = inspect_dns_cache.get("AAAA:" + fqdn_);
     }
     if(r != nullptr) {
-        DEB_("FqdnAddress::match: found in cache: %s",fqdn_.c_str());
+        DEB___("FqdnAddress::match: found in cache: %s",fqdn_.c_str());
         
         std::vector<CidrAddress*> ips = r->get_a_anwsers();
         
         int i = 0;
         for(CidrAddress* ip: ips) {
             if(ip->match(c)) {
-                DEB_("FqdnAddress::match: cached %s matches answer[%d] with %s",fqdn_.c_str(),i,ip->to_string().c_str());
+                DEB___("FqdnAddress::match: cached %s matches answer[%d] with %s",
+                                                fqdn_.c_str(),i,ip->to_string().c_str());
                 ret = true;
             } else {
-                DEB_("FqdnAddress::match: cached %s DOESN'T match answer[%d] with %s",fqdn_.c_str(),i,ip->to_string().c_str());
+                DEB___("FqdnAddress::match: cached %s DOESN'T match answer[%d] with %s",
+                                                fqdn_.c_str(),i,ip->to_string().c_str());
             }
             ++i;
             // delete it straigt away.
@@ -114,7 +116,7 @@ bool FqdnAddress::match(CIDR* c) {
         }
         
     } else {
-        DEB_("FqdnAddress::match: NOT found in cache: %s",fqdn_.c_str());
+        DEB___("FqdnAddress::match: NOT found in cache: %s",fqdn_.c_str());
     }
     
     return ret;
