@@ -79,6 +79,9 @@
 #include "socle_version.h"
 #include "smithproxy_version.h"
 
+using namespace socle;
+
+
 int cli_port = 50000;
 int cli_port_base = 50000;
 std::string cli_enable_password = "";
@@ -248,7 +251,7 @@ void cmd_show_status(struct cli_def* cli) {
     cli_print(cli," ");
     time_t uptime = time(nullptr) - CfgFactory::get().system_started;
     cli_print(cli,"Uptime: %s",uptime_string(uptime).c_str());
-    cli_print(cli,"Objects: %ld",socle::sobject_db.cache().size());
+    cli_print(cli,"Objects: %ld",socle::sobjectDB::db().cache().size());
     unsigned long l = MitmProxy::total_mtr_up.get();
     unsigned long r = MitmProxy::total_mtr_down.get();
     cli_print(cli,"Proxy performance: upload %sbps, download %sbps in last second",number_suffixed(l*8).c_str(),number_suffixed(r*8).c_str());    
@@ -2479,7 +2482,7 @@ int cli_show_config_detection_sig(struct cli_def *cli, const char *command, char
 int cli_diag_mem_objects_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
     
     cli_print(cli,"Statistics:\n");
-    cli_print(cli,"%s",socle::sobject_db_stats_string(nullptr).c_str());
+    cli_print(cli,"%s", sobjectDB::str_stats(nullptr).c_str());
     return CLI_OK;
 
 }
@@ -2611,8 +2614,8 @@ int cli_diag_mem_objects_list(struct cli_def *cli, const char *command, char *ar
     }
     
     
-    std::string r = socle::sobject_db_list((object_filter.size() == 0) ? nullptr : object_filter.c_str(),nullptr,verbosity);
-                r += "\n" + socle::sobject_db_stats_string((object_filter.size() == 0) ? nullptr : object_filter.c_str());
+    std::string r = sobjectDB::str_list((object_filter.size() == 0) ? nullptr : object_filter.c_str(), nullptr, verbosity);
+                r += "\n" + sobjectDB::str_stats((object_filter.size() == 0) ? nullptr : object_filter.c_str());
 
     
     cli_print(cli,"Smithproxy objects (filter: %s):\n%s\nFinished.",(object_filter.size() == 0) ? "ALL" : object_filter.c_str() ,r.c_str());
@@ -2649,7 +2652,7 @@ int cli_diag_mem_objects_search(struct cli_def *cli, const char *command, char *
     }
     
     
-    std::string r = socle::sobject_db_list(nullptr,nullptr,verbosity,object_filter.c_str());
+    std::string r = sobjectDB::str_list(nullptr,nullptr,verbosity,object_filter.c_str());
     
     cli_print(cli,"Smithproxy objects (filter: %s):\n%s\nFinished.",(object_filter.size() == 0) ? "ALL" : object_filter.c_str() ,r.c_str());
     return CLI_OK;
@@ -2677,8 +2680,8 @@ int cli_diag_mem_objects_clear(struct cli_def *cli, const char *command, char *a
 
             int ret = -1;
             {
-                std::lock_guard<std::recursive_mutex> l_(socle::sobject_db.getlock());
-                ret = socle::sobject_db_ask_destroy((void *) key);
+                std::lock_guard<std::recursive_mutex> l_(sobjectDB::db().getlock());
+                ret = sobjectDB::ask_destroy((void *) key);
             }
             
             switch(ret) {
@@ -2734,9 +2737,9 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
 
 
     {
-        std::lock_guard<std::recursive_mutex> l_(socle::sobject_db.getlock());
+        std::lock_guard<std::recursive_mutex> l_(sobjectDB::db().getlock());
 
-        for (auto it: socle::sobject_db.cache()) {
+        for (auto it: sobjectDB::db().cache()) {
 
             socle::sobject *ptr = it.first;
             std::string prefix;
