@@ -1279,7 +1279,7 @@ int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *a
         cli_print(cli, "   releases: %lld/%lldB", memPool::pool().stat_out_free, memPool::pool().stat_out_free_size);
 
         cli_print(cli,"\nPool capacities (available/limits):");
-        cli_print(cli," 32B pool size: %ld/%ld", memPool::pool().mem_32_av(), 10* memPool::pool().mem_32_sz());
+        cli_print(cli," 32B pool size: %ld/%ld", memPool::pool().mem_32_av(), memPool::pool().mem_32_sz());
         cli_print(cli," 64B pool size: %ld/%ld", memPool::pool().mem_64_av(), memPool::pool().mem_64_sz());
         cli_print(cli,"128B pool size: %ld/%ld", memPool::pool().mem_128_av(), memPool::pool().mem_128_sz());
         cli_print(cli,"256B pool size: %ld/%ld", memPool::pool().mem_256_av(), memPool::pool().mem_256_sz());
