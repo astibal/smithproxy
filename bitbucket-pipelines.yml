@@ -1,0 +1,15 @@
+# This is a sample build configuration for C++ – Make.
+# Check our guides at https://confluence.atlassian.com/x/5Q4SMw for more examples.
+# Only use spaces to indent your .yml configuration.
+# -----
+# You can specify a custom docker image from Docker Hub as your build environment.
+image: astibal/testing_base
+
+pipelines:
+  default:
+    - step:
+        script: # Modify the commands below to build your repository.
+          - mkdir smithproxy && cd smithproxy
+          - git clone http://bitbucket.org/astibal/socle.git -b cpp17
+          - git clone http://bitbucket.org/astibal/smithproxy.git -b cpp17
+          - cd smithproxy && mkdir build && cd build && cmake .. && make install
