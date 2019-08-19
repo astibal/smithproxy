@@ -1,0 +1,8 @@
+#ifndef SX_VERSION_H
+#define SX_VERSION_H
+
+#define SX_GIT_BRANCH "@SX_GIT_BRANCH@"
+#define SX_GIT_COMMIT_HASH "@SX_GIT_COMMIT_HASH@"
+#define SX_GIT_VERSION "@SX_GIT_VERSION@"
+
+#endif

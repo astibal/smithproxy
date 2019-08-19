@@ -76,6 +76,9 @@
 #include <dns.hpp>
 #include <inspectors.hpp>
 
+#include "socle_version.h"
+#include "smithproxy_version.h"
+
 int cli_port = 50000;
 int cli_port_base = 50000;
 std::string cli_enable_password = "";
@@ -233,6 +236,15 @@ void cmd_show_status(struct cli_def* cli) {
   
     cli_print(cli,"Version: %s%s",SMITH_VERSION,SMITH_DEVEL ? " (dev)" : "");
     cli_print(cli,"Socle: %s%s",SOCLE_VERSION,SOCLE_DEVEL ? " (dev)" : "");
+#if ( (SMITH_DEVEL > 0) || (SOCLE_DEVEL > 0))
+    cli_print(cli, "Smithproxy source info: %s", SX_GIT_VERSION);
+    cli_print(cli, "                branch: %s commit: %s", SX_GIT_BRANCH, SX_GIT_COMMIT_HASH);
+
+    cli_print(cli, " Socle lib source info: %s", SOCLE_GIT_VERSION);
+    cli_print(cli, "                branch: %s commit: %s", SOCLE_GIT_BRANCH, SOCLE_GIT_COMMIT_HASH);
+    cli_print(cli,"Built: %s", __TIMESTAMP__);
+#endif
+
     cli_print(cli," ");
     time_t uptime = time(nullptr) - CfgFactory::get().system_started;
     cli_print(cli,"Uptime: %s",uptime_string(uptime).c_str());
