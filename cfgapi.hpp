@@ -70,6 +70,9 @@ class CfgFactory {
 
     CfgFactory();
 
+    Config cfgapi;
+    std::recursive_mutex lock_;
+
 public:
     CfgFactory(CfgFactory const &) = delete;
     void operator=(const CfgFactory&) = delete;
@@ -79,52 +82,57 @@ public:
         return fac;
     }
 
+
+    static std::recursive_mutex& lock() { return get().lock_; }
+    static Setting& cfg_root() { return get().cfgapi.getRoot(); }
+    static Config&  cfg_obj() { return get().cfgapi; }
+
     loglevel args_debug_flag;
 
-    std::string cfg_tcp_listen_port_base;
-    std::string cfg_ssl_listen_port_base;
-    std::string cfg_dtls_port_base;
-    std::string cfg_udp_port_base;
-    std::string cfg_socks_port_base;
+    std::string listen_tcp_port_base;
+    std::string listen_tls_port_base;
+    std::string listen_dtls_port_base;
+    std::string listen_udp_port_base;
+    std::string listen_socks_port_base;
 
-    std::string cfg_tcp_listen_port;
-    std::string cfg_ssl_listen_port;
-    std::string cfg_dtls_port;
-    std::string cfg_udp_port;
-    std::string cfg_socks_port;
+    std::string listen_tcp_port;
+    std::string listen_tls_port;
+    std::string listen_dtls_port;
+    std::string listen_udp_port;
+    std::string listen_socks_port;
 
     std::string config_file;
     bool config_file_check_only;
 
-    std::string cfg_messages_dir;
+    std::string dir_msg_templates;
 
 
-    int cfg_tcp_workers;
-    int cfg_ssl_workers;
-    int cfg_dtls_workers;
-    int cfg_udp_workers;
-    int cfg_socks_workers;
+    int num_workers_tcp;
+    int num_workers_tls;
+    int num_workers_dtls;
+    int num_workers_udp;
+    int num_workers_socks;
 
-    std::string cfg_tenant_index;
-    std::string cfg_tenant_name;
+    std::string tenant_index;
+    std::string tenant_name;
 
-    std::string cfg_syslog_server;
-    int cfg_syslog_port;
-    int cfg_syslog_facility;
-    loglevel cfg_syslog_level;
-    int cfg_syslog_family;
-
-
-    std::string cfg_log_target_base;
-    std::string cfg_sslkeylog_target_base;
-
-    std::string cfg_log_target;
-    std::string cfg_sslkeylog_target;
-    bool cfg_log_console;
+    std::string syslog_server;
+    int syslog_port;
+    int syslog_facility;
+    loglevel syslog_level;
+    int syslog_family;
 
 
-    time_t system_started;
-    Config cfgapi;
+    std::string log_file_base;
+    std::string sslkeylog_file_base;
+
+    std::string log_file;
+    std::string sslkeylog_file;
+    bool log_console;
+
+
+    time_t ts_sys_started;
+
     std::map<std::string, AddressObject *> cfgapi_obj_address;
     std::map<std::string, range> cfgapi_obj_port;
     std::map<std::string, int> cfgapi_obj_proto;
@@ -137,7 +145,7 @@ public:
 
     std::vector<int> cfgapi_obj_udp_quick_ports;
 
-    std::recursive_mutex cfgapi_write_lock;
+
 
     std::string cfg_config_file;
     std::string cfgapi_tenant_name;

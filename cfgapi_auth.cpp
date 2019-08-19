@@ -72,7 +72,7 @@ int cfgapi_auth_shm_ip_table_refresh()  {
 
 
     {
-        std::lock_guard<std::recursive_mutex> l(CfgFactory::get().cfgapi_write_lock);
+        std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
         auth_shm_ip_map.attach(string_format(AUTH_IP_MEM_NAME, CfgFactory::get().cfgapi_tenant_name.c_str()).c_str(), AUTH_IP_MEM_SIZE,
                                string_format(AUTH_IP_SEM_NAME, CfgFactory::get().cfgapi_tenant_name.c_str()).c_str() );
     }
@@ -134,7 +134,7 @@ int cfgapi_auth_shm_ip_table_refresh()  {
 int cfgapi_auth_shm_token_table_refresh()  {
 
     {
-        std::lock_guard<std::recursive_mutex> l(CfgFactory::get().cfgapi_write_lock);
+        std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
 
         auth_shm_token_map.attach(string_format(AUTH_TOKEN_MEM_NAME, CfgFactory::get().cfgapi_tenant_name.c_str()).c_str(),
                                   AUTH_TOKEN_MEM_SIZE,

@@ -67,7 +67,8 @@ int send_dns_request (std::string const& hostname, DNS_Record_Type t, std::strin
 
     // create UDP socket
     int send_socket = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    struct sockaddr_storage addr;
+    struct sockaddr_storage addr{};
+
     memset(&addr, 0, sizeof(struct sockaddr_storage));
     addr.ss_family = AF_INET;
     ((sockaddr_in *) &addr)->sin_addr.s_addr = inet_addr(nameserver.c_str());
@@ -90,20 +91,22 @@ std::pair<DNS_Response*,int>  recv_dns_response(int send_socket, unsigned int ti
     int l = 0;
 
     if(send_socket <= 0) {
-        return {nullptr,-1};
+
+        // return negative response immediately
+        return { nullptr, -1 };
     }
 
     int rv = 1;
 
     if(timeout_sec > 0) {
-        struct timeval tv;
+        struct timeval tv{};
         tv.tv_usec = 0;
         tv.tv_sec = timeout_sec;
 
         fd_set confds;
         FD_ZERO(&confds);
         FD_SET(send_socket, &confds);
-        rv = select(send_socket + 1, &confds, NULL, NULL, &tv);
+        rv = select(send_socket + 1, &confds, nullptr, nullptr, &tv);
     } else {
 
     }
@@ -115,16 +118,14 @@ std::pair<DNS_Response*,int>  recv_dns_response(int send_socket, unsigned int ti
         DEB_("buffer: ptr=0x%x, size=%d, capacity=%d",r.data(),r.size(),r.capacity());
 
         if(l > 0) {
-            int parsed = -1;
-
             r.size(l);
 
             DEB_("received %d bytes",l);
             DUM_("\n%s\n",hex_dump(r).c_str());
 
 
-            DNS_Response* resp = new DNS_Response();
-            parsed = resp->load(&r);
+            auto* resp = new DNS_Response();
+            int parsed = resp->load(&r);
             DIA_("parsed %d bytes (0 means all)",parsed);
             DIA_("DNS response: \n %s",resp->to_string().c_str());
 
@@ -147,7 +148,7 @@ std::pair<DNS_Response*,int>  recv_dns_response(int send_socket, unsigned int ti
     return {ret,l};
 }
 
-DNS_Response* resolve_dns_s (std::string hostname, DNS_Record_Type t, std::string nameserver, unsigned int timeout_s) {
+DNS_Response* resolve_dns_s (std::string const& hostname, DNS_Record_Type t, std::string const& nameserver, unsigned int timeout_s) {
 
     int send_socket = send_dns_request(hostname, t, nameserver);
     auto resp = recv_dns_response(send_socket,timeout_s);
@@ -173,43 +174,43 @@ std::thread* create_dns_updater() {
         DIA_("dns_updater: refresh round %d",i);
 
         std::vector<std::string> fqdns;
-        CfgFactory::get().cfgapi_write_lock.lock();
-        for (auto a: CfgFactory::get().cfgapi_obj_address) {
-            FqdnAddress* fa = dynamic_cast<FqdnAddress*>(a.second);
-            if(fa) {
-                std::vector<std::string> recs;
-                recs.push_back("A:" + fa->fqdn());
-                recs.push_back("AAAA:" + fa->fqdn());
 
-                std::lock_guard<std::recursive_mutex> l_(inspect_dns_cache.getlock());
-                for(auto rec: recs) {
-                    DNS_Response* r = inspect_dns_cache.get(rec);
-                    if(r) {
-                        int ttl = (r->loaded_at + r->answers().at(0).ttl_) - ::time(nullptr);
+        {
+            std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
+            for (auto const& a: CfgFactory::get().cfgapi_obj_address) {
+                auto *fa = dynamic_cast<FqdnAddress *>(a.second);
+                if (fa) {
+                    std::vector<std::string> recs;
+                    recs.push_back("A:" + fa->fqdn());
+                    recs.push_back("AAAA:" + fa->fqdn());
 
-                        DIA_("fqdn %s ttl %d",rec.c_str(),ttl);
+                    std::lock_guard<std::recursive_mutex> ll_(inspect_dns_cache.getlock());
+                    for (auto const& rec: recs) {
+                        DNS_Response *r = inspect_dns_cache.get(rec);
+                        if (r) {
+                            int ttl = (r->loaded_at + r->answers().at(0).ttl_) - ::time(nullptr);
 
-                        //re-query only about-to-expire existing DNS entries for FQDN addresses
-                        if(ttl < requery_ttl) {
-                            fqdns.push_back(rec);
-                        }
-                    }
-                    else {
-                        // query FQDNs without DNS cache entry
-                        if(record_blacklist.find(rec) == record_blacklist.end()) {
-                            fqdns.push_back(rec);
+                            DIA_("fqdn %s ttl %d", rec.c_str(), ttl);
+
+                            //re-query only about-to-expire existing DNS entries for FQDN addresses
+                            if (ttl < requery_ttl) {
+                                fqdns.push_back(rec);
+                            }
                         } else {
-                            DIA_("fqdn %s is blacklisted",rec.c_str());
+                            // query FQDNs without DNS cache entry
+                            if (record_blacklist.find(rec) == record_blacklist.end()) {
+                                fqdns.push_back(rec);
+                            } else {
+                                DIA_("fqdn %s is blacklisted", rec.c_str());
+                            }
                         }
                     }
                 }
             }
         }
-        CfgFactory::get().cfgapi_write_lock.unlock();
-
 
         std::string nameserver = "8.8.8.8";
-        if(CfgFactory::get().cfgapi_obj_nameservers.size()) {
+        if(! CfgFactory::get().cfgapi_obj_nameservers.empty() ) {
             nameserver = CfgFactory::get().cfgapi_obj_nameservers.at(i % CfgFactory::get().cfgapi_obj_nameservers.size());
         }
 

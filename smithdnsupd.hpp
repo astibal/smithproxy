@@ -51,7 +51,7 @@ std::pair<DNS_Response*,int> recv_dns_response(int send_socket, unsigned int tim
 
 
 // this is easiest way to resolve. Just do the thing, with blocking ... and waiting.
-DNS_Response* resolve_dns_s (std::string hostname, DNS_Record_Type t, std::string nameserver, unsigned int timeout_s=2);
+DNS_Response* resolve_dns_s (std::string const& hostname, DNS_Record_Type t, std::string const& nameserver, unsigned int timeout_s=2);
 std::thread* create_dns_updater();
 
 #endif

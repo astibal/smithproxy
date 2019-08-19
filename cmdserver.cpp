@@ -249,7 +249,7 @@ void cmd_show_status(struct cli_def* cli) {
 #endif
 
     cli_print(cli," ");
-    time_t uptime = time(nullptr) - CfgFactory::get().system_started;
+    time_t uptime = time(nullptr) - CfgFactory::get().ts_sys_started;
     cli_print(cli,"Uptime: %s",uptime_string(uptime).c_str());
     cli_print(cli,"Objects: %ld",socle::sobjectDB::db().cache().size());
     unsigned long l = MitmProxy::total_mtr_up.get();
@@ -418,15 +418,17 @@ int cli_test_dns_refreshallfqdns(struct cli_def *cli, const char *command, char 
     
     
     std::vector<std::string> fqdns;
-    CfgFactory::get().cfgapi_write_lock.lock();
-    for (auto a: CfgFactory::get().cfgapi_obj_address) {
-        FqdnAddress* fa = dynamic_cast<FqdnAddress*>(a.second);
-        if(fa) {
-            fqdns.push_back(fa->fqdn());
+
+    {
+        std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
+
+        for (auto a: CfgFactory::get().cfgapi_obj_address) {
+            FqdnAddress *fa = dynamic_cast<FqdnAddress *>(a.second);
+            if (fa) {
+                fqdns.push_back(fa->fqdn());
+            }
         }
     }
-    CfgFactory::get().cfgapi_write_lock.unlock();
-    
 
     std::string nameserver = "8.8.8.8";
     if(CfgFactory::get().cfgapi_obj_nameservers.size()) {
@@ -1354,7 +1356,7 @@ int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *a
 
 int save_config_address_objects(Config& ex) {
 
-    std::lock_guard<std::recursive_mutex> l(CfgFactory::get().cfgapi_write_lock);
+    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
 
     Setting& address_objects = ex.getRoot().add("address_objects", Setting::TypeGroup);
 
@@ -1396,7 +1398,7 @@ int save_config_address_objects(Config& ex) {
 
 int save_config_port_objects(Config& ex) {
 
-    std::lock_guard<std::recursive_mutex> l(CfgFactory::get().cfgapi_write_lock);
+    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
 
     Setting& objects = ex.getRoot().add("port_objects", Setting::TypeGroup);
 
@@ -1419,7 +1421,7 @@ int save_config_port_objects(Config& ex) {
 
 int save_config_proto_objects(Config& ex) {
 
-    std::lock_guard<std::recursive_mutex> l(CfgFactory::get().cfgapi_write_lock);
+    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());;
 
     Setting& objects = ex.getRoot().add("proto_objects", Setting::TypeGroup);
 
@@ -1471,7 +1473,7 @@ int save_config_debug(Config& ex) {
 
 int save_config_detection_profiles(Config& ex) {
 
-    std::lock_guard<std::recursive_mutex> l(CfgFactory::get().cfgapi_write_lock);
+    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
 
     Setting& objects = ex.getRoot().add("detection_profiles", Setting::TypeGroup);
 
@@ -1492,7 +1494,7 @@ int save_config_detection_profiles(Config& ex) {
 
 int save_config_content_profiles(Config& ex) {
 
-    std::lock_guard<std::recursive_mutex> l(CfgFactory::get().cfgapi_write_lock);
+    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
 
     Setting& objects = ex.getRoot().add("content_profiles", Setting::TypeGroup);
 
@@ -1526,7 +1528,7 @@ int save_config_content_profiles(Config& ex) {
 
 int save_config_tls_ca(Config& ex) {
 
-    std::lock_guard<std::recursive_mutex> l(CfgFactory::get().cfgapi_write_lock);
+    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
 
     Setting& objects = ex.getRoot().add("tls_ca", Setting::TypeGroup);
 
@@ -1547,7 +1549,7 @@ int save_config_tls_ca(Config& ex) {
 
 int save_config_tls_profiles(Config& ex) {
 
-    std::lock_guard<std::recursive_mutex> l(CfgFactory::get().cfgapi_write_lock);
+    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
 
     Setting& objects = ex.getRoot().add("tls_profiles", Setting::TypeGroup);
 
@@ -1612,7 +1614,7 @@ int save_config_tls_profiles(Config& ex) {
 
 int save_config_alg_dns_profiles(Config& ex) {
 
-    std::lock_guard<std::recursive_mutex> l(CfgFactory::get().cfgapi_write_lock);
+    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
 
     Setting& objects = ex.getRoot().add("alg_dns_profiles", Setting::TypeGroup);
 
@@ -1636,7 +1638,7 @@ int save_config_alg_dns_profiles(Config& ex) {
 
 int save_config_auth_profiles(Config& ex) {
 
-    std::lock_guard<std::recursive_mutex> l(CfgFactory::get().cfgapi_write_lock);
+    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
 
     Setting& objects = ex.getRoot().add("auth_profiles", Setting::TypeGroup);
 
@@ -1681,7 +1683,7 @@ int save_config_auth_profiles(Config& ex) {
 
 int save_config_policy(Config& ex) {
 
-    std::lock_guard<std::recursive_mutex> l(CfgFactory::get().cfgapi_write_lock);
+    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
 
     Setting& objects = ex.getRoot().add("policy", Setting::TypeList);
 
@@ -1739,7 +1741,7 @@ int save_config_policy(Config& ex) {
 
 int save_config_sig(Config& ex, const std::string& sigset) {
 
-    std::lock_guard<std::recursive_mutex> l(CfgFactory::get().cfgapi_write_lock);
+    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
 
     Setting& objects = ex.getRoot().add(sigset, Setting::TypeList);
 
@@ -1827,7 +1829,7 @@ int save_config_sig(Config& ex, const std::string& sigset) {
 
 int save_config_settings(Config& ex) {
 
-    std::lock_guard<std::recursive_mutex> l(CfgFactory::get().cfgapi_write_lock);
+    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
 
     if(!ex.exists("settings"))
         ex.getRoot().add("settings", Setting::TypeGroup);
@@ -1844,21 +1846,21 @@ int save_config_settings(Config& ex) {
     objects.add("certs_ca_key_password", Setting::TypeString) = SSLFactory::default_cert_password();
     objects.add("certs_ca_path", Setting::TypeString) = SSLFactory::default_client_ca_path();
 
-    objects.add("plaintext_port", Setting::TypeString) = CfgFactory::get().cfg_tcp_listen_port_base;
-    objects.add("plaintext_workers", Setting::TypeInt) = CfgFactory::get().cfg_tcp_workers;
+    objects.add("plaintext_port", Setting::TypeString) = CfgFactory::get().listen_tcp_port_base;
+    objects.add("plaintext_workers", Setting::TypeInt) = CfgFactory::get().num_workers_tcp;
 
-    objects.add("ssl_port", Setting::TypeString) = CfgFactory::get().cfg_ssl_listen_port_base;
-    objects.add("ssl_workers", Setting::TypeInt) = CfgFactory::get().cfg_ssl_workers;
+    objects.add("ssl_port", Setting::TypeString) = CfgFactory::get().listen_tls_port_base;
+    objects.add("ssl_workers", Setting::TypeInt) = CfgFactory::get().num_workers_tls;
     objects.add("ssl_autodetect", Setting::TypeBoolean) = MitmMasterProxy::ssl_autodetect;
     objects.add("ssl_autodetect_harder", Setting::TypeBoolean) = MitmMasterProxy::ssl_autodetect_harder;
     objects.add("ssl_ocsp_status_ttl", Setting::TypeInt) = SSLFactory::ssl_ocsp_status_ttl;
     objects.add("ssl_crl_status_ttl", Setting::TypeInt) = SSLFactory::ssl_crl_status_ttl;
 
-    objects.add("udp_port", Setting::TypeString) = CfgFactory::get().cfg_udp_port_base;
-    objects.add("udp_workers", Setting::TypeInt) = CfgFactory::get().cfg_udp_workers;
+    objects.add("udp_port", Setting::TypeString) = CfgFactory::get().listen_udp_port_base;
+    objects.add("udp_workers", Setting::TypeInt) = CfgFactory::get().num_workers_udp;
 
-    objects.add("dtls_port", Setting::TypeString) = CfgFactory::get().cfg_dtls_port_base;
-    objects.add("dtls_workers", Setting::TypeInt) = CfgFactory::get().cfg_dtls_workers;
+    objects.add("dtls_port", Setting::TypeString) = CfgFactory::get().listen_dtls_port_base;
+    objects.add("dtls_workers", Setting::TypeInt) = CfgFactory::get().num_workers_dtls;
 
     //udp quick ports
     Setting& it_quick  = objects.add("udp_quick_ports",Setting::TypeList);
@@ -1871,25 +1873,25 @@ int save_config_settings(Config& ex) {
         }
     }
 
-    objects.add("socks_port", Setting::TypeString) = CfgFactory::get().cfg_socks_port_base;
-    objects.add("socks_workers", Setting::TypeInt) = CfgFactory::get().cfg_socks_workers;
+    objects.add("socks_port", Setting::TypeString) = CfgFactory::get().listen_socks_port_base;
+    objects.add("socks_workers", Setting::TypeInt) = CfgFactory::get().num_workers_socks;
 
     Setting& socks_objects = objects.add("socks", Setting::TypeGroup);
     socks_objects.add("async_dns", Setting::TypeBoolean) = socksServerCX::global_async_dns;
 
 
     objects.add("log_level", Setting::TypeInt) = (int)cfgapi_table.logging.level.level_;
-    objects.add("log_file", Setting::TypeString) = CfgFactory::get().cfg_log_target_base;
-    objects.add("log_console", Setting::TypeBoolean)  = CfgFactory::get().cfg_log_console;
+    objects.add("log_file", Setting::TypeString) = CfgFactory::get().log_file_base;
+    objects.add("log_console", Setting::TypeBoolean)  = CfgFactory::get().log_console;
 
-    objects.add("syslog_server", Setting::TypeString) = CfgFactory::get().cfg_syslog_server;
-    objects.add("syslog_port", Setting::TypeInt) = CfgFactory::get().cfg_syslog_port;
-    objects.add("syslog_facility", Setting::TypeInt) = CfgFactory::get().cfg_syslog_facility;
-    objects.add("syslog_level", Setting::TypeInt) = (int)CfgFactory::get().cfg_syslog_level.level_;
-    objects.add("syslog_family", Setting::TypeInt) = CfgFactory::get().cfg_syslog_family;
+    objects.add("syslog_server", Setting::TypeString) = CfgFactory::get().syslog_server;
+    objects.add("syslog_port", Setting::TypeInt) = CfgFactory::get().syslog_port;
+    objects.add("syslog_facility", Setting::TypeInt) = CfgFactory::get().syslog_facility;
+    objects.add("syslog_level", Setting::TypeInt) = (int)CfgFactory::get().syslog_level.level_;
+    objects.add("syslog_family", Setting::TypeInt) = CfgFactory::get().syslog_family;
 
-    objects.add("sslkeylog_file", Setting::TypeString) = CfgFactory::get().cfg_sslkeylog_target_base;
-    objects.add("messages_dir", Setting::TypeString) = CfgFactory::get().cfg_messages_dir;
+    objects.add("sslkeylog_file", Setting::TypeString) = CfgFactory::get().sslkeylog_file_base;
+    objects.add("messages_dir", Setting::TypeString) = CfgFactory::get().dir_msg_templates;
 
     Setting& cli_objects = objects.add("cli", Setting::TypeGroup);
     cli_objects.add("port", Setting::TypeString) = string_format("%d", cli_port_base).c_str();
@@ -1915,7 +1917,7 @@ int save_config_settings(Config& ex) {
 
 int cli_save_config(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
-    std::lock_guard<std::recursive_mutex> l(CfgFactory::get().cfgapi_write_lock);
+    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
 
     Config ex;
     ex.setOptions(Setting::OptionOpenBraceOnSeparateLine);
@@ -2023,9 +2025,9 @@ int cfg_write(Config& cfg, FILE* where, unsigned long iobufsz = 0) {
 
 int cli_show_config_full (struct cli_def *cli, const char *command, char **argv, int argc) {
 
-    std::lock_guard<std::recursive_mutex> l(CfgFactory::get().cfgapi_write_lock);
+    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
 
-    if(cfg_write(CfgFactory::get().cfgapi, cli->client) != 0) {
+    if(cfg_write(CfgFactory::cfg_obj(), cli->client) != 0) {
         cli_print(cli, "error: config print failed");
     }
 
@@ -2278,11 +2280,11 @@ bool apply_setting(std::string conf, std::string varname, struct cli_def *cli) {
 
 int cli_uni_set_cb(std::string confpath, struct cli_def *cli, const char *command, char *argv[], int argc) {
 
-    std::lock_guard<std::recursive_mutex> l(CfgFactory::get().cfgapi_write_lock);
+    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
 
-    if (argc > 0 && CfgFactory::get().cfgapi.exists(confpath)) {
+    if (argc > 0 && CfgFactory::cfg_obj().exists(confpath)) {
 
-        Setting& conf = CfgFactory::get().cfgapi.lookup(confpath);
+        Setting& conf = CfgFactory::cfg_obj().lookup(confpath);
 
         auto cmd = string_split(command, ' ');
         std::string varname = cmd[cmd.size() - 1];
@@ -2294,7 +2296,7 @@ int cli_uni_set_cb(std::string confpath, struct cli_def *cli, const char *comman
 
         if (argv0 != "?") {
 
-            std::lock_guard<std::recursive_mutex> l(CfgFactory::get().cfgapi_write_lock);
+            std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
 
             if (cfg_write_value(conf, false, varname, argv0, cli)) {
                 // cli_print(cli, "change written to current config");
@@ -2359,10 +2361,10 @@ int cli_config_setting_socks_cb(struct cli_def *cli, const char *command, char *
 // index < 0 means all
 void cli_print_section(cli_def* cli, const std::string& name, int index , unsigned long pipe_sz ) {
 
-    std::lock_guard<std::recursive_mutex> l(CfgFactory::get().cfgapi_write_lock);
+    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
 
-    if(CfgFactory::get().cfgapi.getRoot().exists(name.c_str())) {
-        Setting &s = CfgFactory::get().cfgapi.getRoot()[name.c_str()];
+    if(CfgFactory::cfg_root().exists(name.c_str())) {
+        Setting &s = CfgFactory::cfg_root()[name.c_str()];
 
         Config nc;
         nc.getRoot().add(name.c_str(), s.getType());
@@ -2983,10 +2985,10 @@ int cli_diag_proxy_policy_list(struct cli_def *cli, const char *command, char *a
 
     std::string filter = "";
     int verbosity = 6;
-    
+
     if(argc > 0) {
         if(argv[0][0] == '?') {
-            
+
             cli_print(cli,"specify verbosity, default is 6s");
             return CLI_OK;
         }
@@ -2995,17 +2997,19 @@ int cli_diag_proxy_policy_list(struct cli_def *cli, const char *command, char *a
         }
     }
     if(argc > 1) filter = argv[1];
-    
-    std::string out;
 
-    CfgFactory::get().cfgapi_write_lock.lock();
-    for(auto it: CfgFactory::get().cfgapi_obj_policy) {
-        out += it->to_string(verbosity);
-        out += "\n\n";
+    std::stringstream out;
+
+    {
+        std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
+
+        for (auto it: CfgFactory::get().cfgapi_obj_policy) {
+            out << it->to_string(verbosity);
+            out << "\n\n";
+        }
     }
-    CfgFactory::get().cfgapi_write_lock.unlock();
-    
-    cli_print(cli, "%s", out.c_str());
+
+    cli_print(cli, "%s", out.str().c_str());
     return CLI_OK;
 }
 
@@ -3018,25 +3022,25 @@ struct cli_ext : public cli_def {
 
 
 void cli_generate_set_settings(cli_def* cli, cli_command* set_settings) {
-    std::lock_guard<std::recursive_mutex> l(CfgFactory::get().cfgapi_write_lock);
+    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
 
 
-    if (CfgFactory::get().cfgapi.getRoot()["settings"].exists("auth_portal")) {
-        cfg_generate_cli_callbacks(CfgFactory::get().cfgapi.getRoot()["settings"]["auth_portal"], cli,
+    if (CfgFactory::cfg_root()["settings"].exists("auth_portal")) {
+        cfg_generate_cli_callbacks(CfgFactory::cfg_root()["settings"]["auth_portal"], cli,
                                                        set_settings,
                                                        cli_config_setting_auth_cb,
                                                        cli_config_setting_auth_cb, "settings/auth_portal");
     }
 
-    if (CfgFactory::get().cfgapi.getRoot()["settings"].exists("cli")) {
-        cfg_generate_cli_callbacks(CfgFactory::get().cfgapi.getRoot()["settings"]["cli"], cli,
+    if (CfgFactory::cfg_root()["settings"].exists("cli")) {
+        cfg_generate_cli_callbacks(CfgFactory::cfg_root()["settings"]["cli"], cli,
                                                       set_settings,
                                                       cli_config_setting_cli_cb,
                                                       cli_config_setting_cli_cb, "settings/cli");
     }
 
-    if (CfgFactory::get().cfgapi.getRoot()["settings"].exists("socks")) {
-        cfg_generate_cli_callbacks(CfgFactory::get().cfgapi.getRoot()["settings"]["socks"], cli,
+    if (CfgFactory::cfg_root()["settings"].exists("socks")) {
+        cfg_generate_cli_callbacks(CfgFactory::cfg_root()["settings"]["socks"], cli,
                                                       set_settings,
                                                       cli_config_setting_socks_cb,
                                                       cli_config_setting_socks_cb, "settings/socks");
@@ -3215,10 +3219,10 @@ void client_thread(int client_socket) {
             cli_command* set_settings_socks = nullptr;
 
 
-        if( CfgFactory::get().cfgapi.getRoot().exists("settings") ) {
-            std::lock_guard<std::recursive_mutex> l(CfgFactory::get().cfgapi_write_lock);
+        if( CfgFactory::cfg_root().exists("settings") ) {
+            std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
 
-            set_settings = cfg_generate_cli_callbacks(CfgFactory::get().cfgapi.getRoot()["settings"], cli, conft_configure,
+            set_settings = cfg_generate_cli_callbacks(CfgFactory::cfg_root()["settings"], cli, conft_configure,
                                        cli_config_setting_cb,
                                        cli_config_setting_cb, "settings");
             if(set_settings){
