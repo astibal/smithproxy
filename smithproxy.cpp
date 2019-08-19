@@ -403,7 +403,7 @@ bool load_config(std::string& config_f, bool reload) {
 
                 if(CfgFactory::get().cfg_log_target.size() > 0) {
 
-                    CfgFactory::get().cfg_log_target = string_format(CfgFactory::get().cfg_log_target, CfgFactory::get().cfgapi_tenant_name.c_str());
+                    CfgFactory::get().cfg_log_target = string_format(CfgFactory::get().cfg_log_target.c_str(), CfgFactory::get().cfgapi_tenant_name.c_str());
                     // prepare custom crashlog file
                     std::string crlog = CfgFactory::get().cfg_log_target + ".crashlog.log";
                     set_crashlog(crlog.c_str());
@@ -428,7 +428,7 @@ bool load_config(std::string& config_f, bool reload) {
 
                 if(CfgFactory::get().cfg_sslkeylog_target.size() > 0) {
 
-                    CfgFactory::get().cfg_sslkeylog_target = string_format(CfgFactory::get().cfg_sslkeylog_target,
+                    CfgFactory::get().cfg_sslkeylog_target = string_format(CfgFactory::get().cfg_sslkeylog_target.c_str(),
                                                                            CfgFactory::get().cfgapi_tenant_name.c_str());
 
                     std::ofstream * o = new std::ofstream(CfgFactory::get().cfg_sslkeylog_target.c_str(),std::ios::app);

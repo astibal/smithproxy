@@ -276,7 +276,7 @@ bool load_config(std::string& config_f, bool reload) {
         if (cfgapi.getRoot()["settings"].lookupValue("log_file",cfg_log_file)) {
             
             std::string log_target = cfg_log_file;
-            log_target = string_format(log_target,cfg_tenant_name.c_str());
+            log_target = string_format(log_target.c_str(),cfg_tenant_name.c_str());
             
             std::cout << "log target" << log_target << std::endl;
             
@@ -346,7 +346,7 @@ bool smithd_apply_tenant_config() {
     int ret = 0;
     
     if(cfg_tenant_index.size() > 0 && cfg_tenant_name.size() > 0) {
-        cfg_smithd_listen_port = string_format(cfg_smithd_listen_port,cfg_tenant_name.c_str());
+        cfg_smithd_listen_port = string_format(cfg_smithd_listen_port.c_str(),cfg_tenant_name.c_str());
     }
     
     

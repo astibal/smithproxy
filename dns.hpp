@@ -198,7 +198,7 @@ public:
             std::string ret;
             if(question_type_0() == A) ret = "A:";
             else if (question_type_0() == AAAA) ret = "AAAA:";
-            return ret += string_format(questions_list_.at(0).rec_str); 
+            return ret += string_format("%s", questions_list_.at(0).rec_str.c_str());
         } 
         return std::string("? "); 
     };
