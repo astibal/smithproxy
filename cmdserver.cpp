@@ -594,7 +594,7 @@ int cli_diag_ssl_crl_list(struct cli_def *cli, const char *command, char *argv[]
                     out << "  *expired*";
                 }
             } else {
-                out << string_format(", ttl=?");
+                out << ", ttl=?";
             }
 
             out << "\n";
