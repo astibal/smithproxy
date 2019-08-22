@@ -177,7 +177,7 @@ std::thread* create_dns_updater() {
 
         {
             std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
-            for (auto const& a: CfgFactory::get().cfgapi_obj_address) {
+            for (auto const& a: CfgFactory::get().db_address) {
                 auto *fa = dynamic_cast<FqdnAddress *>(a.second);
                 if (fa) {
                     std::vector<std::string> recs;
@@ -210,8 +210,8 @@ std::thread* create_dns_updater() {
         }
 
         std::string nameserver = "8.8.8.8";
-        if(! CfgFactory::get().cfgapi_obj_nameservers.empty() ) {
-            nameserver = CfgFactory::get().cfgapi_obj_nameservers.at(i % CfgFactory::get().cfgapi_obj_nameservers.size());
+        if(! CfgFactory::get().db_nameservers.empty() ) {
+            nameserver = CfgFactory::get().db_nameservers.at(i % CfgFactory::get().db_nameservers.size());
         }
 
         DNS_Inspector di;

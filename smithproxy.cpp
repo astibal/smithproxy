@@ -333,7 +333,7 @@ bool load_config(std::string& config_f, bool reload) {
         ret = false;
     }
 
-    CfgFactory::get().cfg_config_file = config_f;
+    CfgFactory::get().config_file = config_f;
     
     // Add another level of lock. File is already loaded. We need to apply its content.
     // lock is needed here to not try to match against potentially empty/partial policy list
@@ -383,9 +383,9 @@ bool load_config(std::string& config_f, bool reload) {
         CfgFactory::cfg_root()["debug"]["log"].lookupValue("alg_dns",DNS_Packet::log_level_ref().level_);
 
 
-        CfgFactory::cfg_root()["settings"].lookupValue("write_payload_dir",CfgFactory::get().cfg_traflog_dir);
-        CfgFactory::cfg_root()["settings"].lookupValue("write_payload_file_prefix",CfgFactory::get().cfg_traflog_file_pref);
-        CfgFactory::cfg_root()["settings"].lookupValue("write_payload_file_suffix",CfgFactory::get().cfg_traflog_file_suff);
+        CfgFactory::cfg_root()["settings"].lookupValue("write_payload_dir",CfgFactory::get().traflog_dir);
+        CfgFactory::cfg_root()["settings"].lookupValue("write_payload_file_prefix",CfgFactory::get().traflog_file_prefix);
+        CfgFactory::cfg_root()["settings"].lookupValue("write_payload_file_suffix",CfgFactory::get().traflog_file_suffix);
 
 
 
@@ -404,7 +404,7 @@ bool load_config(std::string& config_f, bool reload) {
 
                 if(CfgFactory::get().log_file.size() > 0) {
 
-                    CfgFactory::get().log_file = string_format(CfgFactory::get().log_file.c_str(), CfgFactory::get().cfgapi_tenant_name.c_str());
+                    CfgFactory::get().log_file = string_format(CfgFactory::get().log_file.c_str(), CfgFactory::get().tenant_name.c_str());
                     // prepare custom crashlog file
                     std::string crlog = CfgFactory::get().log_file + ".crashlog.log";
                     set_crashlog(crlog.c_str());
@@ -430,7 +430,7 @@ bool load_config(std::string& config_f, bool reload) {
                 if(CfgFactory::get().sslkeylog_file.size() > 0) {
 
                     CfgFactory::get().sslkeylog_file = string_format(CfgFactory::get().sslkeylog_file.c_str(),
-                                                                           CfgFactory::get().cfgapi_tenant_name.c_str());
+                                                                           CfgFactory::get().tenant_name.c_str());
 
                     std::ofstream * o = new std::ofstream(CfgFactory::get().sslkeylog_file.c_str(),std::ios::app);
                     get_logger()->targets(CfgFactory::get().sslkeylog_file,o);
@@ -540,7 +540,7 @@ int main(int argc, char *argv[]) {
                 break;
                 
             case 'i':
-                CfgFactory::get().tenant_index = std::string(optarg);
+                CfgFactory::get().tenant_index = std::stoi(std::string(optarg));
                 break;
                 
             case 't':
@@ -571,24 +571,23 @@ int main(int argc, char *argv[]) {
     if(!cfg_daemonize) {
         std::thread* log_thread  = create_log_writer(get_logger());
         if(log_thread != nullptr) {
-            pthread_setname_np(log_thread->native_handle(),string_format("sxy_lwr_%s",
-                    CfgFactory::get().tenant_index.c_str()).c_str());
+            pthread_setname_np(log_thread->native_handle(),string_format("sxy_lwr_%d",
+                    CfgFactory::get().tenant_index).c_str());
         }    
     }
     
     get_logger()->level(WAR);
     CfgFactory::get().cfgapi_log_version(false);  // don't delay, but display warning
     
-    if(CfgFactory::get().tenant_index.size() > 0 && CfgFactory::get().tenant_name.size() > 0) {
-        WAR_("Starting tenant: '%s', index %s",
+    if( CfgFactory::get().tenant_name.size() > 0) {
+        WAR_("Starting tenant: '%s', index %d",
                 CfgFactory::get().tenant_name.c_str(),
-                CfgFactory::get().tenant_index.c_str());
+                CfgFactory::get().tenant_index);
 
         daemon_set_tenant("smithproxy", CfgFactory::get().tenant_name);
-        CfgFactory::get().cfgapi_tenant_index = std::stoi(CfgFactory::get().tenant_index);
-        CfgFactory::get().cfgapi_tenant_name  = CfgFactory::get().tenant_name;
+        CfgFactory::get().tenant_name  = CfgFactory::get().tenant_name;
     } 
-    else if (CfgFactory::get().tenant_index.size() > 0 || CfgFactory::get().tenant_name.size() > 0){
+    else if (CfgFactory::get().tenant_name.size() > 0){
         
         FATS_("You have to specify both options: --tenant-name AND --tenant-index");
         exit(-20);
@@ -605,10 +604,10 @@ int main(int argc, char *argv[]) {
     }
         
         
-    if(! custom_config_file and CfgFactory::get().cfgapi_tenant_index > 0) {
+    if(! custom_config_file and CfgFactory::get().tenant_index > 0) {
         // look for tenant config (no override set)
         
-        std::string tenant_cfg = string_format(config_file_tenant.c_str(), CfgFactory::get().cfgapi_tenant_name.c_str());
+        std::string tenant_cfg = string_format(config_file_tenant.c_str(), CfgFactory::get().tenant_name.c_str());
         
         struct stat s;
         if (stat(tenant_cfg.c_str(),&s) == 0) {
@@ -682,20 +681,20 @@ int main(int argc, char *argv[]) {
         // we have to create logger after daemonize is called
         log_thread  = create_log_writer(get_logger());
         if(log_thread != nullptr) {
-            pthread_setname_np(log_thread->native_handle(),string_format("sxy_lwr_%s",
-                    CfgFactory::get().tenant_index.c_str()).c_str());
+            pthread_setname_np(log_thread->native_handle(),string_format("sxy_lwr_%d",
+                    CfgFactory::get().tenant_index).c_str());
         }    
         
         dns_thread = create_dns_updater();
         if(dns_thread != nullptr) {
-            pthread_setname_np(dns_thread->native_handle(),string_format("sxy_dns_%s",
-                    CfgFactory::get().tenant_index.c_str()).c_str());
+            pthread_setname_np(dns_thread->native_handle(),string_format("sxy_dns_%d",
+                    CfgFactory::get().tenant_index).c_str());
         }
 
         id_thread = create_identity_refresh_thread();
         if(id_thread != nullptr) {
-            pthread_setname_np(id_thread->native_handle(),string_format("sxy_idu_%s",
-                    CfgFactory::get().tenant_index.c_str()).c_str());
+            pthread_setname_np(id_thread->native_handle(),string_format("sxy_idu_%d",
+                    CfgFactory::get().tenant_index).c_str());
         }
     }
     // write out PID file
@@ -725,13 +724,13 @@ int main(int argc, char *argv[]) {
     }
     
     
-    std::string friendly_thread_name_tcp = string_format("sxy_tcp_%d",CfgFactory::get().cfgapi_tenant_index);
-    std::string friendly_thread_name_udp = string_format("sxy_udp_%d",CfgFactory::get().cfgapi_tenant_index);
-    std::string friendly_thread_name_tls = string_format("sxy_tls_%d",CfgFactory::get().cfgapi_tenant_index);
-    std::string friendly_thread_name_dls = string_format("sxy_dls_%d",CfgFactory::get().cfgapi_tenant_index);
-    std::string friendly_thread_name_skx = string_format("sxy_skx_%d",CfgFactory::get().cfgapi_tenant_index);
-    std::string friendly_thread_name_cli = string_format("sxy_cli_%d",CfgFactory::get().cfgapi_tenant_index);
-    std::string friendly_thread_name_own = string_format("sxy_own_%d",CfgFactory::get().cfgapi_tenant_index);
+    std::string friendly_thread_name_tcp = string_format("sxy_tcp_%d",CfgFactory::get().tenant_index);
+    std::string friendly_thread_name_udp = string_format("sxy_udp_%d",CfgFactory::get().tenant_index);
+    std::string friendly_thread_name_tls = string_format("sxy_tls_%d",CfgFactory::get().tenant_index);
+    std::string friendly_thread_name_dls = string_format("sxy_dls_%d",CfgFactory::get().tenant_index);
+    std::string friendly_thread_name_skx = string_format("sxy_skx_%d",CfgFactory::get().tenant_index);
+    std::string friendly_thread_name_cli = string_format("sxy_cli_%d",CfgFactory::get().tenant_index);
+    std::string friendly_thread_name_own = string_format("sxy_own_%d",CfgFactory::get().tenant_index);
 
     plain_proxy = prepare_listener<theAcceptor,TCPCom>( CfgFactory::get().listen_tcp_port,
                                                          "plain-text",
@@ -814,7 +813,7 @@ int main(int argc, char *argv[]) {
     
     if(udp_proxy) {
         
-        udp_proxy->set_quick_list(&CfgFactory::get().cfgapi_obj_udp_quick_ports);
+        udp_proxy->set_quick_list(&CfgFactory::get().db_udp_quick_ports);
         
         INFS_("Starting UDP listener");        
         udp_thread = new std::thread([] () {

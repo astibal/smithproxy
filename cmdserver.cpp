@@ -385,8 +385,8 @@ int cli_test_dns_sendrequest(struct cli_def *cli, const char *command, char *arg
         }
         
         std::string nameserver = "8.8.8.8";
-        if(CfgFactory::get().cfgapi_obj_nameservers.size()) {
-            nameserver = CfgFactory::get().cfgapi_obj_nameservers.at(0);
+        if(CfgFactory::get().db_nameservers.size()) {
+            nameserver = CfgFactory::get().db_nameservers.at(0);
         }
         
         DNS_Response* resp = send_dns_request(cli,argv0,A,nameserver);
@@ -422,7 +422,7 @@ int cli_test_dns_refreshallfqdns(struct cli_def *cli, const char *command, char 
     {
         std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
 
-        for (auto a: CfgFactory::get().cfgapi_obj_address) {
+        for (auto a: CfgFactory::get().db_address) {
             FqdnAddress *fa = dynamic_cast<FqdnAddress *>(a.second);
             if (fa) {
                 fqdns.push_back(fa->fqdn());
@@ -431,8 +431,8 @@ int cli_test_dns_refreshallfqdns(struct cli_def *cli, const char *command, char 
     }
 
     std::string nameserver = "8.8.8.8";
-    if(CfgFactory::get().cfgapi_obj_nameservers.size()) {
-        nameserver = CfgFactory::get().cfgapi_obj_nameservers.at(0);
+    if(CfgFactory::get().db_nameservers.size()) {
+        nameserver = CfgFactory::get().db_nameservers.at(0);
     }
     
     DNS_Inspector di;
@@ -1362,7 +1362,7 @@ int save_config_address_objects(Config& ex) {
 
     int n_saved = 0;
 
-    for (auto it: CfgFactory::get().cfgapi_obj_address) {
+    for (auto it: CfgFactory::get().db_address) {
         auto name = it.first;
         auto obj = it.second;
 
@@ -1404,7 +1404,7 @@ int save_config_port_objects(Config& ex) {
 
     int n_saved = 0;
 
-    for (auto it: CfgFactory::get().cfgapi_obj_port) {
+    for (auto it: CfgFactory::get().db_port) {
         auto name = it.first;
         auto obj = it.second;
 
@@ -1427,7 +1427,7 @@ int save_config_proto_objects(Config& ex) {
 
     int n_saved = 0;
 
-    for (auto it: CfgFactory::get().cfgapi_obj_proto) {
+    for (auto it: CfgFactory::get().db_proto) {
         auto name = it.first;
         auto obj = it.second;
 
@@ -1479,7 +1479,7 @@ int save_config_detection_profiles(Config& ex) {
 
     int n_saved = 0;
 
-    for (auto it: CfgFactory::get().cfgapi_obj_profile_detection) {
+    for (auto it: CfgFactory::get().db_prof_detection) {
         auto name = it.first;
         auto obj = it.second;
 
@@ -1500,7 +1500,7 @@ int save_config_content_profiles(Config& ex) {
 
     int n_saved = 0;
 
-    for (auto it: CfgFactory::get().cfgapi_obj_profile_content) {
+    for (auto it: CfgFactory::get().db_prof_content) {
         auto name = it.first;
         auto obj = it.second;
 
@@ -1555,7 +1555,7 @@ int save_config_tls_profiles(Config& ex) {
 
     int n_saved = 0;
 
-    for (auto it: CfgFactory::get().cfgapi_obj_profile_tls) {
+    for (auto it: CfgFactory::get().db_prof_tls) {
         auto name = it.first;
         auto obj = it.second;
 
@@ -1620,7 +1620,7 @@ int save_config_alg_dns_profiles(Config& ex) {
 
     int n_saved = 0;
 
-    for (auto it: CfgFactory::get().cfgapi_obj_profile_alg_dns) {
+    for (auto it: CfgFactory::get().db_prof_alg_dns) {
         auto name = it.first;
         auto obj = it.second;
 
@@ -1644,7 +1644,7 @@ int save_config_auth_profiles(Config& ex) {
 
     int n_saved = 0;
 
-    for (auto it: CfgFactory::get().cfgapi_obj_profile_auth) {
+    for (auto it: CfgFactory::get().db_prof_auth) {
         auto name = it.first;
         auto obj = it.second;
 
@@ -1689,7 +1689,7 @@ int save_config_policy(Config& ex) {
 
     int n_saved = 0;
 
-    for (PolicyRule* pol: CfgFactory::get().cfgapi_obj_policy) {
+    for (PolicyRule* pol: CfgFactory::get().db_policy) {
 
         if(! pol)
             continue;
@@ -1838,7 +1838,7 @@ int save_config_settings(Config& ex) {
 
     // nameservers
     Setting& it_ns  = objects.add("nameservers",Setting::TypeList);
-    for(auto ns: CfgFactory::get().cfgapi_obj_nameservers) {
+    for(auto ns: CfgFactory::get().db_nameservers) {
         it_ns.add(Setting::TypeString) = ns;
     }
 
@@ -1864,11 +1864,11 @@ int save_config_settings(Config& ex) {
 
     //udp quick ports
     Setting& it_quick  = objects.add("udp_quick_ports",Setting::TypeList);
-    if(CfgFactory::get().cfgapi_obj_udp_quick_ports.empty()) {
+    if(CfgFactory::get().db_udp_quick_ports.empty()) {
         it_quick.add(Setting::TypeInt) = 0;
     }
     else {
-        for (auto p: CfgFactory::get().cfgapi_obj_udp_quick_ports) {
+        for (auto p: CfgFactory::get().db_udp_quick_ports) {
             it_quick.add(Setting::TypeInt) = p;
         }
     }
@@ -1899,17 +1899,17 @@ int save_config_settings(Config& ex) {
 
 
     Setting& auth_objects = objects.add("auth_portal", Setting::TypeGroup);
-    auth_objects.add("address",Setting::TypeString) = CfgFactory::get().cfg_auth_address;
-    auth_objects.add("http_port", Setting::TypeString) = CfgFactory::get().cfg_auth_http;
-    auth_objects.add("https_port", Setting::TypeString) = CfgFactory::get().cfg_auth_https;
-    auth_objects.add("ssl_key", Setting::TypeString) = CfgFactory::get().cfg_auth_sslkey;
-    auth_objects.add("ssl_cert", Setting::TypeString) = CfgFactory::get().cfg_auth_sslcert;
-    auth_objects.add("magic_ip", Setting::TypeString) = CfgFactory::get().cfgapi_tenant_magic_ip;
+    auth_objects.add("address",Setting::TypeString) = CfgFactory::get().auth_address;
+    auth_objects.add("http_port", Setting::TypeString) = CfgFactory::get().auth_http;
+    auth_objects.add("https_port", Setting::TypeString) = CfgFactory::get().auth_https;
+    auth_objects.add("ssl_key", Setting::TypeString) = CfgFactory::get().auth_sslkey;
+    auth_objects.add("ssl_cert", Setting::TypeString) = CfgFactory::get().auth_sslcert;
+    auth_objects.add("magic_ip", Setting::TypeString) = CfgFactory::get().tenant_magic_ip;
 
 
-    objects.add("write_payload_dir", Setting::TypeString) = CfgFactory::get().cfg_traflog_dir;
-    objects.add("write_payload_file_prefix", Setting::TypeString) = CfgFactory::get().cfg_traflog_file_pref;
-    objects.add("write_payload_file_suffix", Setting::TypeString) = CfgFactory::get().cfg_traflog_file_suff;
+    objects.add("write_payload_dir", Setting::TypeString) = CfgFactory::get().traflog_dir;
+    objects.add("write_payload_file_prefix", Setting::TypeString) = CfgFactory::get().traflog_file_prefix;
+    objects.add("write_payload_file_suffix", Setting::TypeString) = CfgFactory::get().traflog_file_suffix;
 
 
     return 0;
@@ -1968,7 +1968,7 @@ int cli_save_config(struct cli_def *cli, const char *command, char *argv[], int 
     cli_print(cli, "%d %s signatures", n, "detection");
 
 
-    ex.writeFile(CfgFactory::get().cfg_config_file.c_str());
+    ex.writeFile(CfgFactory::get().config_file.c_str());
 
     return CLI_OK;
 }
@@ -3003,7 +3003,7 @@ int cli_diag_proxy_policy_list(struct cli_def *cli, const char *command, char *a
     {
         std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
 
-        for (auto it: CfgFactory::get().cfgapi_obj_policy) {
+        for (auto it: CfgFactory::get().db_policy) {
             out << it->to_string(verbosity);
             out << "\n\n";
         }

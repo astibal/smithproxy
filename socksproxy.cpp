@@ -68,7 +68,7 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
             
             PolicyRule* p = nullptr;
             if(matched_policy() >= 0) {
-                p = CfgFactory::get().cfgapi_obj_policy.at(matched_policy());
+                p = CfgFactory::get().db_policy.at(matched_policy());
             }
 
             DIA_("socksProxy::on_left_message: policy check result: policy# %d policyid 0x%x verdict %s", matched_policy(), p, verdict ? "accept" : "reject" );
@@ -97,10 +97,10 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
         dead(true);
         return;
     } 
-    else if(matched_policy() >= (signed int)CfgFactory::get().cfgapi_obj_policy.size()) {
+    else if(matched_policy() >= (signed int)CfgFactory::get().db_policy.size()) {
         DIA_("SocksProxy::sock5_handoff: matching policy out of policy index table: %d/%d: dropping.",
                                          matched_policy(),
-                                         CfgFactory::get().cfgapi_obj_policy.size());
+                                         CfgFactory::get().db_policy.size());
         dead(true);
         return;
     }
@@ -167,7 +167,7 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     {
         std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
 
-        if (CfgFactory::get().cfgapi_obj_policy.at(matched_policy())->nat == POLICY_NAT_NONE) {
+        if (CfgFactory::get().db_policy.at(matched_policy())->nat == POLICY_NAT_NONE) {
             target_cx->com()->nonlocal_src(true);
             target_cx->com()->nonlocal_src_host() = h;
             target_cx->com()->nonlocal_src_port() = std::stoi(p);

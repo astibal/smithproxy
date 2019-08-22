@@ -64,7 +64,7 @@ std::unordered_map<std::string,std::pair<unsigned int,std::string>> cfgapi_ident
 unsigned int cfgapi_identity_token_timeout = 20; // token expires _from_cache_ after this timeout (in seconds).
 
 std::string cfgapi_identity_portal_address = "192.168.0.1";
-std::string cfgapi_identity_portal_address6 = "";
+std::string cfgapi_identity_portal_address6;
 std::string cfgapi_identity_portal_port_http = "8008";
 std::string cfgapi_identity_portal_port_https = "8043";
 
@@ -73,12 +73,12 @@ int cfgapi_auth_shm_ip_table_refresh()  {
 
     {
         std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
-        auth_shm_ip_map.attach(string_format(AUTH_IP_MEM_NAME, CfgFactory::get().cfgapi_tenant_name.c_str()).c_str(), AUTH_IP_MEM_SIZE,
-                               string_format(AUTH_IP_SEM_NAME, CfgFactory::get().cfgapi_tenant_name.c_str()).c_str() );
+        auth_shm_ip_map.attach(string_format(AUTH_IP_MEM_NAME, CfgFactory::get().tenant_name.c_str()).c_str(), AUTH_IP_MEM_SIZE,
+                               string_format(AUTH_IP_SEM_NAME, CfgFactory::get().tenant_name.c_str()).c_str() );
     }
-    DEBS_("cfgapi_auth_shm_ip_table_refresh: acquring semaphore");
+    DEBS_("cfgapi_auth_shm_ip_table_refresh: acquiring semaphore");
     int rc = auth_shm_ip_map.acquire();
-    DEBS_("cfgapi_auth_shm_ip_table_refresh: acquring semaphore: done");
+    DEBS_("cfgapi_auth_shm_ip_table_refresh: acquiring semaphore: done");
     if(rc) {
         WARS_("cfgapi_auth_shm_ip_table_refresh: cannot acquire semaphore for token table");
         return -1;
@@ -95,18 +95,17 @@ int cfgapi_auth_shm_ip_table_refresh()  {
         // new data!
         std::lock_guard<std::recursive_mutex> l(cfgapi_identity_ip_lock);
         
-        if(l_ip == 0 && auth_ip_map.size() > 0) {
+        if(l_ip == 0 && ( ! auth_ip_map.empty() )) {
             DIAS_("cfgapi_auth_shm_ip_table_refresh: zero sized table received, flusing ip map");
             auth_ip_map.clear();
         }
         
         DIA_("cfgapi_auth_shm_ip_table_refresh: new data: version %d, entries %d",auth_shm_ip_map.header_version(),auth_shm_ip_map.header_entries());
-        for(typename std::vector<shm_logon_info>::iterator i = auth_shm_ip_map.entries().begin(); i != auth_shm_ip_map.entries().end() ; ++i) {
-            shm_logon_info& rt = (*i);
-            
+        for(auto& rt: auth_shm_ip_map.entries()) {
+
             std::string ip = rt.ip();
             
-            std::unordered_map <std::string, IdentityInfo >::iterator found = auth_ip_map.find(ip);
+            auto found = auth_ip_map.find(ip);
             if(found != auth_ip_map.end()) {
                 DIA_("Updating identity in database: %s",ip.c_str());
                 IdentityInfo& id = (*found).second;
@@ -136,14 +135,14 @@ int cfgapi_auth_shm_token_table_refresh()  {
     {
         std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
 
-        auth_shm_token_map.attach(string_format(AUTH_TOKEN_MEM_NAME, CfgFactory::get().cfgapi_tenant_name.c_str()).c_str(),
+        auth_shm_token_map.attach(string_format(AUTH_TOKEN_MEM_NAME, CfgFactory::get().tenant_name.c_str()).c_str(),
                                   AUTH_TOKEN_MEM_SIZE,
-                                  string_format(AUTH_TOKEN_SEM_NAME, CfgFactory::get().cfgapi_tenant_name.c_str()).c_str());
+                                  string_format(AUTH_TOKEN_SEM_NAME, CfgFactory::get().tenant_name.c_str()).c_str());
     }
 
-    DEBS_("cfgapi_auth_shm_token_table_refresh: acquring semaphore");
+    DEBS_("cfgapi_auth_shm_token_table_refresh: acquiring semaphore");
     int rc = auth_shm_token_map.acquire();
-    DEBS_("cfgapi_auth_shm_token_table_refresh: acquring semaphore: done");
+    DEBS_("cfgapi_auth_shm_token_table_refresh: acquiring semaphore: done");
     if(rc) {
         WARS_("cfgapi_auth_shm_token_table_refresh: cannot acquire semaphore for token table");
         return -1;

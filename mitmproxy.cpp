@@ -79,14 +79,14 @@ void MitmProxy::toggle_tlog() {
     if(tlog_ == nullptr) {
 
         tlog_ = new socle::trafLog( this,
-                                    CfgFactory::get().cfg_traflog_dir.c_str(),
-                                    CfgFactory::get().cfg_traflog_file_pref.c_str(),
-                                    CfgFactory::get().cfg_traflog_file_suff.c_str());
+                                    CfgFactory::get().traflog_dir.c_str(),
+                                    CfgFactory::get().traflog_file_prefix.c_str(),
+                                    CfgFactory::get().traflog_file_suffix.c_str());
     }
     
     // check if we have there status file
     if(tlog_) {
-        std::string data_dir = CfgFactory::get().cfg_traflog_dir;
+        std::string data_dir = CfgFactory::get().traflog_dir;
 
         data_dir += "/disabled";
         
@@ -168,7 +168,7 @@ std::string MitmProxy::to_string(int verbosity) {
             PolicyRule* p = nullptr;
             
             if(matched_policy() >= 0) {
-                p = CfgFactory::get().cfgapi_obj_policy.at(matched_policy());
+                p = CfgFactory::get().db_policy.at(matched_policy());
             }
             
             r << string_format("\n    PolicyRule Id: 0x%x",p);
@@ -224,7 +224,7 @@ bool MitmProxy::apply_id_policies(baseHostCX* cx) {
     
     if( id_ptr != nullptr) {
         DIA___("apply_id_policies: matched policy: %d",matched_policy());        
-        PolicyRule* policy = CfgFactory::get().cfgapi_obj_policy.at(matched_policy());
+        PolicyRule* policy = CfgFactory::get().db_policy.at(matched_policy());
         
         ProfileAuth* auth_policy = policy->profile_auth;
 
@@ -1479,14 +1479,14 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
         short unsigned int target_port = just_accepted_cx->com()->nonlocal_dst_port();
         short unsigned int orig_target_port;
 
-        if( target_host == CfgFactory::get().cfgapi_tenant_magic_ip) {
+        if( target_host == CfgFactory::get().tenant_magic_ip) {
             
             orig_target_host = target_host;
             orig_target_port = target_port;
             
             if(target_port == 65000 || target_port == 143) {
                 // bend broker magic IP
-                target_port = 65000 + CfgFactory::get().cfgapi_tenant_index;
+                target_port = 65000 + CfgFactory::get().tenant_index;
             }
             else if(target_port != 443) {
                 // auth portal https magic IP
@@ -1639,7 +1639,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                 }
                 
                 // setup NAT
-                if(CfgFactory::get().cfgapi_obj_policy.at(policy_num)->nat == POLICY_NAT_NONE && ! matched_vip) {
+                if(CfgFactory::get().db_policy.at(policy_num)->nat == POLICY_NAT_NONE && ! matched_vip) {
                     target_cx->com()->nonlocal_src(true);
                     target_cx->com()->nonlocal_src_host() = h;
                     target_cx->com()->nonlocal_src_port() = std::stoi(p);               
@@ -1728,7 +1728,7 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
         target_cx->matched_policy(policy_num);
         new_proxy->matched_policy(policy_num);
         
-        if(CfgFactory::get().cfgapi_obj_policy.at(policy_num)->nat == POLICY_NAT_NONE) {
+        if(CfgFactory::get().db_policy.at(policy_num)->nat == POLICY_NAT_NONE) {
             target_cx->com()->nonlocal_src(true);
             target_cx->com()->nonlocal_src_host() = h;
             target_cx->com()->nonlocal_src_port() = std::stoi(p);               

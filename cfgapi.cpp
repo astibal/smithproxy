@@ -84,13 +84,13 @@ CfgFactory::CfgFactory(): args_debug_flag(NON), syslog_level(INF)  {
 
 
     // multi-tenancy support
-    cfgapi_tenant_name = "default";
-    cfgapi_tenant_index = 0;
+    tenant_name = "default";
+    tenant_index = 0;
 
 
-    cfg_traflog_dir = "/var/local/smithproxy/data";
-    cfg_traflog_file_pref = "";
-    cfg_traflog_file_suff = "smcap";
+    traflog_dir = "/var/local/smithproxy/data";
+    //traflog_file_prefix = "";
+    traflog_file_suffix = "smcap";
 
     log_console = false;
     ts_sys_started = std::time(nullptr);
@@ -128,8 +128,8 @@ bool CfgFactory::cfgapi_init(const char* fnm) {
 AddressObject* CfgFactory::cfgapi_lookup_address(const char* name) {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
-    if(cfgapi_obj_address.find(name) != cfgapi_obj_address.end()) {
-        return cfgapi_obj_address[name];
+    if(db_address.find(name) != db_address.end()) {
+        return db_address[name];
     }
     
     return nullptr;
@@ -138,8 +138,8 @@ AddressObject* CfgFactory::cfgapi_lookup_address(const char* name) {
 range CfgFactory::cfgapi_lookup_port(const char* name) {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
-    if(cfgapi_obj_port.find(name) != cfgapi_obj_port.end()) {
-        return cfgapi_obj_port[name];
+    if(db_port.find(name) != db_port.end()) {
+        return db_port[name];
     }    
     
     return NULLRANGE;
@@ -148,8 +148,8 @@ range CfgFactory::cfgapi_lookup_port(const char* name) {
 int CfgFactory::cfgapi_lookup_proto(const char* name) {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
-    if(cfgapi_obj_proto.find(name) != cfgapi_obj_proto.end()) {
-        return cfgapi_obj_proto[name];
+    if(db_proto.find(name) != db_proto.end()) {
+        return db_proto[name];
     }    
     
     return 0;
@@ -158,8 +158,8 @@ int CfgFactory::cfgapi_lookup_proto(const char* name) {
 ProfileContent* CfgFactory::cfgapi_lookup_profile_content(const char* name) {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
-    if(cfgapi_obj_profile_content.find(name) != cfgapi_obj_profile_content.end()) {
-        return cfgapi_obj_profile_content[name];
+    if(db_prof_content.find(name) != db_prof_content.end()) {
+        return db_prof_content[name];
     }    
     
     return nullptr;
@@ -168,8 +168,8 @@ ProfileContent* CfgFactory::cfgapi_lookup_profile_content(const char* name) {
 ProfileDetection* CfgFactory::cfgapi_lookup_profile_detection(const char* name) {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
-    if(cfgapi_obj_profile_detection.find(name) != cfgapi_obj_profile_detection.end()) {
-        return cfgapi_obj_profile_detection[name];
+    if(db_prof_detection.find(name) != db_prof_detection.end()) {
+        return db_prof_detection[name];
     }    
     
     return nullptr;
@@ -178,8 +178,8 @@ ProfileDetection* CfgFactory::cfgapi_lookup_profile_detection(const char* name) 
 ProfileTls* CfgFactory::cfgapi_lookup_profile_tls(const char* name) {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
-    if(cfgapi_obj_profile_tls.find(name) != cfgapi_obj_profile_tls.end()) {
-        return cfgapi_obj_profile_tls[name];
+    if(db_prof_tls.find(name) != db_prof_tls.end()) {
+        return db_prof_tls[name];
     }    
     
     return nullptr;
@@ -188,8 +188,8 @@ ProfileTls* CfgFactory::cfgapi_lookup_profile_tls(const char* name) {
 ProfileAlgDns* CfgFactory::cfgapi_lookup_profile_alg_dns(const char* name) {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
-    if(cfgapi_obj_profile_alg_dns.find(name) != cfgapi_obj_profile_alg_dns.end()) {
-        return cfgapi_obj_profile_alg_dns[name];
+    if(db_prof_alg_dns.find(name) != db_prof_alg_dns.end()) {
+        return db_prof_alg_dns[name];
     }    
     
     return nullptr;
@@ -200,8 +200,8 @@ ProfileAlgDns* CfgFactory::cfgapi_lookup_profile_alg_dns(const char* name) {
 ProfileAuth* CfgFactory::cfgapi_lookup_profile_auth(const char* name) {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
-    if(cfgapi_obj_profile_auth.find(name) != cfgapi_obj_profile_auth.end()) {
-        return cfgapi_obj_profile_auth[name];
+    if(db_prof_auth.find(name) != db_prof_auth.end()) {
+        return db_prof_auth[name];
     }    
     
     return nullptr;
@@ -216,15 +216,15 @@ bool CfgFactory::cfgapi_load_settings() {
 
     if(cfgapi.getRoot()["settings"].exists("nameservers")) {
 
-        if(!cfgapi_obj_nameservers.empty()) {
+        if(!db_nameservers.empty()) {
             DEBS_("cfgapi_load_settings: clearing existing entries in: nameservers");
-            cfgapi_obj_nameservers.clear();
+            db_nameservers.clear();
         }
 
         const int num = cfgapi.getRoot()["settings"]["nameservers"].getLength();
         for(int i = 0; i < num; i++) {
             std::string ns = cfgapi.getRoot()["settings"]["nameservers"][i];
-            cfgapi_obj_nameservers.push_back(ns);
+            db_nameservers.push_back(ns);
         }
     }
 
@@ -249,15 +249,15 @@ bool CfgFactory::cfgapi_load_settings() {
 
     if(cfgapi.getRoot()["settings"].exists("udp_quick_ports")) {
 
-        if(!cfgapi_obj_udp_quick_ports.empty()) {
+        if(!db_udp_quick_ports.empty()) {
             DEBS_("cfgapi_load_settings: clearing existing entries in: udp_quick_ports");
-            cfgapi_obj_udp_quick_ports.clear();
+            db_udp_quick_ports.clear();
         }
 
         int num = cfgapi.getRoot()["settings"]["udp_quick_ports"].getLength();
         for(int i = 0; i < num; ++i) {
             int port = cfgapi.getRoot()["settings"]["udp_quick_ports"][i];
-            cfgapi_obj_udp_quick_ports.push_back(port);
+            db_udp_quick_ports.push_back(port);
         }
     }
 
@@ -286,12 +286,12 @@ bool CfgFactory::cfgapi_load_settings() {
 
     if(cfgapi.getRoot().exists("settings")) {
         if(cfgapi.getRoot()["settings"].exists("auth_portal")) {
-            cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("address", cfg_auth_address);
-            cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("http_port", cfg_auth_http);
-            cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("https_port", cfg_auth_https);
-            cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("ssl_key", cfg_auth_sslkey);
-            cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("ssl_cert", cfg_auth_sslcert);
-            cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("magic_ip", cfgapi_tenant_magic_ip);
+            cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("address", auth_address);
+            cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("http_port", auth_http);
+            cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("https_port", auth_https);
+            cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("ssl_key", auth_sslkey);
+            cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("ssl_cert", auth_sslcert);
+            cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("magic_ip", tenant_magic_ip);
         }
     }
 
@@ -334,16 +334,16 @@ int CfgFactory::cfgapi_load_obj_address() {
                     case 0: // CIDR notation
                         if (cur_object.lookupValue("cidr",address)) {
                             CIDR* c = cidr_from_str(address.c_str());
-                            cfgapi_obj_address[name] = new CidrAddress(c);
-                            cfgapi_obj_address[name]->prof_name = name;
+                            db_address[name] = new CidrAddress(c);
+                            db_address[name]->prof_name = name;
                             DIA_("cfgapi_load_addresses: cidr '%s': ok",name.c_str());
                         }
                     break;
                     case 1: // FQDN notation
                         if (cur_object.lookupValue("fqdn",address))  {
                             FqdnAddress* f = new FqdnAddress(address);
-                            cfgapi_obj_address[name] = f;
-                            cfgapi_obj_address[name]->prof_name = name;
+                            db_address[name] = f;
+                            db_address[name]->prof_name = name;
                             DIA_("cfgapi_load_addresses: fqdn '%s': ok",name.c_str());
                         }
                     break;
@@ -394,9 +394,9 @@ int CfgFactory::cfgapi_load_obj_port() {
                 cur_object.lookupValue("end",b)   ) {
                 
                 if(a <= b) {
-                    cfgapi_obj_port[name] = range(a,b);
+                    db_port[name] = range(a,b);
                 } else {
-                    cfgapi_obj_port[name] = range(b,a);
+                    db_port[name] = range(b,a);
                 }
                 
                 DIA_("cfgapi_load_ports: '%s': ok",name.c_str());
@@ -441,7 +441,7 @@ int CfgFactory::cfgapi_load_obj_proto() {
             
             if( cur_object.lookupValue("id",a) ) {
                 
-                cfgapi_obj_proto[name] = a;
+                db_proto[name] = a;
                 
                 DIA_("cfgapi_load_proto: '%s': ok",name.c_str());
             } else {
@@ -746,7 +746,7 @@ int CfgFactory::cfgapi_load_obj_policy() {
             
             if(!error){
                 DIA_("cfgapi_load_policy[#%d]: ok",i);
-                cfgapi_obj_policy.push_back(rule);
+                db_policy.push_back(rule);
             } else {
                 ERR_("cfgapi_load_policy[#%d]: not ok (will not process traffic)",i);
             }
@@ -760,7 +760,7 @@ int CfgFactory::cfgapi_obj_policy_match(baseProxy* proxy) {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
     int x = 0;
-    for( auto rule: cfgapi_obj_policy) {
+    for( auto rule: db_policy) {
 
         bool r = rule->match(proxy);
         
@@ -780,7 +780,7 @@ int CfgFactory::cfgapi_obj_policy_match(std::vector<baseHostCX*>& left, std::vec
     std::lock_guard<std::recursive_mutex> l(lock_);
     
     int x = 0;
-    for( auto rule: cfgapi_obj_policy) {
+    for( auto rule: db_policy) {
 
         bool r = rule->match(left,right);
         
@@ -803,8 +803,8 @@ int CfgFactory::cfgapi_obj_policy_action(int index) {
         return -1;
     }
     
-    if(index < (signed int)cfgapi_obj_policy.size()) {
-        return cfgapi_obj_policy.at(index)->action;
+    if(index < (signed int)db_policy.size()) {
+        return db_policy.at(index)->action;
     } else {
         DIA_("cfg_obj_policy_action[#%d]: out of bounds, deny",index);
         return POLICY_ACTION_DENY;
@@ -818,8 +818,8 @@ ProfileContent* CfgFactory::cfgapi_obj_policy_profile_content(int index) {
         return nullptr;
     }
     
-    if(index < (signed int)cfgapi_obj_policy.size()) {
-        return cfgapi_obj_policy.at(index)->profile_content;
+    if(index < (signed int)db_policy.size()) {
+        return db_policy.at(index)->profile_content;
     } else {
         DIA_("cfgapi_obj_policy_profile_content[#%d]: out of bounds, nullptr",index);
         return nullptr;
@@ -833,8 +833,8 @@ ProfileDetection* CfgFactory::cfgapi_obj_policy_profile_detection(int index) {
         return nullptr;
     }
     
-    if(index < (signed int)cfgapi_obj_policy.size()) {
-        return cfgapi_obj_policy.at(index)->profile_detection;
+    if(index < (signed int)db_policy.size()) {
+        return db_policy.at(index)->profile_detection;
     } else {
         DIA_("cfgapi_obj_policy_profile_detection[#%d]: out of bounds, nullptr",index);
         return nullptr;
@@ -848,8 +848,8 @@ ProfileTls* CfgFactory::cfgapi_obj_policy_profile_tls(int index) {
         return nullptr;
     }
     
-    if(index < (signed int)cfgapi_obj_policy.size()) {
-        return cfgapi_obj_policy.at(index)->profile_tls;
+    if(index < (signed int)db_policy.size()) {
+        return db_policy.at(index)->profile_tls;
     } else {
         DIA_("cfgapi_obj_policy_profile_tls[#%d]: out of bounds, nullptr",index);
         return nullptr;
@@ -864,8 +864,8 @@ ProfileAlgDns* CfgFactory::cfgapi_obj_policy_profile_alg_dns(int index) {
         return nullptr;
     }
     
-    if(index < (signed int)cfgapi_obj_policy.size()) {
-        return cfgapi_obj_policy.at(index)->profile_alg_dns;
+    if(index < (signed int)db_policy.size()) {
+        return db_policy.at(index)->profile_alg_dns;
     } else {
         DIA_("cfgapi_obj_policy_profile_alg_dns[#%d]: out of bounds, nullptr",index);
         return nullptr;
@@ -880,8 +880,8 @@ ProfileAuth* CfgFactory::cfgapi_obj_policy_profile_auth(int index) {
         return nullptr;
     }
     
-    if(index < (signed int)cfgapi_obj_policy.size()) {
-        return cfgapi_obj_policy.at(index)->profile_auth;
+    if(index < (signed int)db_policy.size()) {
+        return db_policy.at(index)->profile_auth;
     } else {
         DIA_("cfgapi_obj_policy_profile_auth[#%d]: out of bounds, nullptr",index);
         return nullptr;
@@ -922,7 +922,7 @@ int CfgFactory::cfgapi_load_obj_profile_detection() {
             if( cur_object.lookupValue("mode",a->mode) ) {
                 
                 a->prof_name = name;
-                cfgapi_obj_profile_detection[name] = a;
+                db_prof_detection[name] = a;
                 
                 DIA_("cfgapi_load_obj_profile_detect: '%s': ok",name.c_str());
             } else {
@@ -967,7 +967,7 @@ int CfgFactory::cfgapi_load_obj_profile_content() {
             if( cur_object.lookupValue("write_payload",a->write_payload) ) {
                 
                 a->prof_name = name;
-                cfgapi_obj_profile_content[name] = a;
+                db_prof_content[name] = a;
                 
                 if(cur_object.exists("content_rules")) {
                     int jnum = cur_object["content_rules"].getLength();
@@ -1098,7 +1098,7 @@ int CfgFactory::cfgapi_load_obj_profile_tls() {
                 }
                 cur_object.lookupValue("sslkeylog",a->sslkeylog);
                 
-                cfgapi_obj_profile_tls[name] = a;
+                db_prof_tls[name] = a;
                 
                 DIA_("cfgapi_load_obj_profile_tls: '%s': ok",name.c_str());
             } else {
@@ -1141,7 +1141,7 @@ int CfgFactory::cfgapi_load_obj_profile_alg_dns() {
             cur_object.lookupValue("randomize_id",a->randomize_id);
             cur_object.lookupValue("cached_responses",a->cached_responses);
             
-            cfgapi_obj_profile_alg_dns[name] = a;
+            db_prof_alg_dns[name] = a;
         }
     }
     
@@ -1257,7 +1257,7 @@ int CfgFactory::cfgapi_load_obj_profile_auth() {
                     DIA_("cfgapi_load_obj_profile_auth: profiles: %d:%s",j,n_subpol->name.c_str());
                 }
             }
-            cfgapi_obj_profile_auth[name] = a;
+            db_prof_auth[name] = a;
             
             DIA_("cfgapi_load_obj_profile_auth: '%s': ok",name.c_str());
         }
@@ -1272,15 +1272,15 @@ int CfgFactory::cfgapi_load_obj_profile_auth() {
 int CfgFactory::cfgapi_cleanup_obj_address() {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
-    int r = cfgapi_obj_address.size();
+    int r = db_address.size();
 
-    for (auto& a: cfgapi_obj_address)
+    for (auto& a: db_address)
     {
         AddressObject* c = a.second;
         delete c;
     }
     
-    cfgapi_obj_address.clear();
+    db_address.clear();
     
     DEB_("cfgapi_cleanup_obj_address: %d objects freed",r);
     return r;
@@ -1289,12 +1289,12 @@ int CfgFactory::cfgapi_cleanup_obj_address() {
 int CfgFactory::cfgapi_cleanup_obj_policy() {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
-    int r = cfgapi_obj_policy.size();
+    int r = db_policy.size();
 
-    for(auto* ptr: cfgapi_obj_policy) {
+    for(auto* ptr: db_policy) {
         delete ptr;
     }
-    cfgapi_obj_policy.clear();
+    db_policy.clear();
     
     DEB_("cfgapi_cleanup_obj_policy: %d objects freed",r);
     return r;
@@ -1303,8 +1303,8 @@ int CfgFactory::cfgapi_cleanup_obj_policy() {
 int CfgFactory::cfgapi_cleanup_obj_port() {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
-    int r = cfgapi_obj_port.size();
-    cfgapi_obj_port.clear();
+    int r = db_port.size();
+    db_port.clear();
     
     return r;
 }
@@ -1312,8 +1312,8 @@ int CfgFactory::cfgapi_cleanup_obj_port() {
 int CfgFactory::cfgapi_cleanup_obj_proto() {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
-    int r = cfgapi_obj_proto.size();
-    cfgapi_obj_proto.clear();
+    int r = db_proto.size();
+    db_proto.clear();
     
     return r;
 }
@@ -1322,36 +1322,36 @@ int CfgFactory::cfgapi_cleanup_obj_proto() {
 int CfgFactory::cfgapi_cleanup_obj_profile_content() {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
-    int r = cfgapi_obj_profile_content.size();
-    for(auto& t: cfgapi_obj_profile_content) {
+    int r = db_prof_content.size();
+    for(auto& t: db_prof_content) {
         ProfileContent* c = t.second;
         delete c;
     }
-    cfgapi_obj_profile_content.clear();
+    db_prof_content.clear();
     
     return r;
 }
 int CfgFactory::cfgapi_cleanup_obj_profile_detection() {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
-    int r = cfgapi_obj_profile_detection.size();
-    for(auto& t: cfgapi_obj_profile_detection) {
+    int r = db_prof_detection.size();
+    for(auto& t: db_prof_detection) {
         ProfileDetection* c = t.second;
         delete c;
     }
-    cfgapi_obj_profile_detection.clear();
+    db_prof_detection.clear();
     
     return r;
 }
 int CfgFactory::cfgapi_cleanup_obj_profile_tls() {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
-    int r = cfgapi_obj_profile_tls.size();
-    for(auto& t: cfgapi_obj_profile_tls) {
+    int r = db_prof_tls.size();
+    for(auto& t: db_prof_tls) {
         ProfileTls* c = t.second;
         delete c;
     }
-    cfgapi_obj_profile_tls.clear();
+    db_prof_tls.clear();
     
     return r;
 }
@@ -1359,12 +1359,12 @@ int CfgFactory::cfgapi_cleanup_obj_profile_tls() {
 int CfgFactory::cfgapi_cleanup_obj_profile_alg_dns() {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
-    int r = cfgapi_obj_profile_alg_dns.size();
-    for(auto& t: cfgapi_obj_profile_alg_dns) {
+    int r = db_prof_alg_dns.size();
+    for(auto& t: db_prof_alg_dns) {
         ProfileAlgDns* c = t.second;
         delete c;
     }
-    cfgapi_obj_profile_alg_dns.clear();
+    db_prof_alg_dns.clear();
     
     return r;
 }
@@ -1374,8 +1374,8 @@ int CfgFactory::cfgapi_cleanup_obj_profile_alg_dns() {
 int CfgFactory::cfgapi_cleanup_obj_profile_auth() {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
-    int r = cfgapi_obj_profile_auth.size();
-    for(auto& t: cfgapi_obj_profile_auth) {
+    int r = db_prof_auth.size();
+    for(auto& t: db_prof_auth) {
         ProfileAuth* c = t.second;
         
         for(auto j: c->sub_policies) {
@@ -1384,7 +1384,7 @@ int CfgFactory::cfgapi_cleanup_obj_profile_auth() {
         
         delete c;
     }
-    cfgapi_obj_profile_auth.clear();
+    db_prof_auth.clear();
     
     return r;
 }
@@ -1783,11 +1783,10 @@ void CfgFactory::cfgapi_log_version(bool warn_delay)
     }
 }
 
-int CfgFactory::apply_tenant_index(std::string& what, const std::string& idx) {
-    DEB_("apply_index: what=%s idx=%s",what.c_str(),idx.c_str());
+int CfgFactory::apply_tenant_index(std::string& what, unsigned int& idx) {
+    DEB_("apply_index: what=%s idx=%d",what.c_str(),idx);
     int port = std::stoi(what);
-    int index = std::stoi(idx);
-    what = std::to_string(port + index);
+    what = std::to_string(port + idx);
 
     return 0;
 }
@@ -1796,7 +1795,7 @@ int CfgFactory::apply_tenant_index(std::string& what, const std::string& idx) {
 bool CfgFactory::cfgapi_apply_tenant_config () {
     int ret = 0;
 
-    if( ( ! tenant_index.empty() ) && ( ! tenant_name.empty() ) ) {
+    if( (  tenant_index > 0 ) && ( ! tenant_name.empty() ) ) {
         ret += apply_tenant_index(listen_tcp_port, tenant_index);
         ret += apply_tenant_index(listen_tls_port, tenant_index);
         ret += apply_tenant_index(listen_dtls_port, tenant_index);
@@ -1805,7 +1804,7 @@ bool CfgFactory::cfgapi_apply_tenant_config () {
         ret += apply_tenant_index(cfgapi_identity_portal_port_http, tenant_index);
         ret += apply_tenant_index(cfgapi_identity_portal_port_https, tenant_index);
 
-        cli_port += std::stoi(tenant_index);
+        cli_port += tenant_index;
     }
 
     return (ret == 0);

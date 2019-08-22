@@ -92,10 +92,11 @@ public:
     std::string listen_socks_port;
 
     std::string config_file;
-    bool config_file_check_only;
-
+    unsigned int tenant_index;
+    std::string tenant_name;
     std::string dir_msg_templates;
 
+    bool config_file_check_only;
 
     int num_workers_tcp;
     int num_workers_tls;
@@ -103,8 +104,6 @@ public:
     int num_workers_udp;
     int num_workers_socks;
 
-    std::string tenant_index;
-    std::string tenant_name;
 
     std::string syslog_server;
     int syslog_port;
@@ -123,39 +122,33 @@ public:
 
     std::time_t ts_sys_started{};
 
-    std::map<std::string, AddressObject *> cfgapi_obj_address;
-    std::map<std::string, range> cfgapi_obj_port;
-    std::map<std::string, int> cfgapi_obj_proto;
-    std::vector<PolicyRule *> cfgapi_obj_policy;
-    std::map<std::string, ProfileDetection *> cfgapi_obj_profile_detection;
-    std::map<std::string, ProfileContent *> cfgapi_obj_profile_content;
-    std::map<std::string, ProfileTls *> cfgapi_obj_profile_tls;
-    std::map<std::string, ProfileAuth *> cfgapi_obj_profile_auth;
-    std::map<std::string, ProfileAlgDns *> cfgapi_obj_profile_alg_dns;
+    std::map<std::string, AddressObject *> db_address;
+    std::map<std::string, range> db_port;
+    std::map<std::string, int> db_proto;
+    std::vector<PolicyRule *> db_policy;
+    std::map<std::string, ProfileDetection *> db_prof_detection;
+    std::map<std::string, ProfileContent *> db_prof_content;
+    std::map<std::string, ProfileTls *> db_prof_tls;
+    std::map<std::string, ProfileAuth *> db_prof_auth;
+    std::map<std::string, ProfileAlgDns *> db_prof_alg_dns;
 
-    std::vector<int> cfgapi_obj_udp_quick_ports;
-
-
-
-    std::string cfg_config_file;
-    std::string cfgapi_tenant_name;
-    unsigned int cfgapi_tenant_index;
+    std::vector<int> db_udp_quick_ports;
 
 
-    std::string cfg_auth_address;
-    std::string cfg_auth_http;
-    std::string cfg_auth_https;
-    std::string cfg_auth_sslkey;
-    std::string cfg_auth_sslcert;
-    std::string cfgapi_tenant_magic_ip;
+    std::string auth_address;
+    std::string auth_http;
+    std::string auth_https;
+    std::string auth_sslkey;
+    std::string auth_sslcert;
+    std::string tenant_magic_ip;
 
 
-    std::string cfg_traflog_dir;
-    std::string cfg_traflog_file_pref;
-    std::string cfg_traflog_file_suff;
+    std::string traflog_dir;
+    std::string traflog_file_prefix;
+    std::string traflog_file_suffix;
 
 
-    std::vector<std::string> cfgapi_obj_nameservers;
+    std::vector<std::string> db_nameservers;
 
 
 public:
@@ -172,7 +165,7 @@ public:
     ProfileAlgDns*   cfgapi_lookup_profile_alg_dns(const char* name);
 
     bool cfgapi_apply_tenant_config();
-    int  apply_tenant_index(std::string& what , const std::string& idx);
+    int  apply_tenant_index(std::string& what, unsigned int& idx);
 
     bool cfgapi_load_settings();
     int  cfgapi_load_obj_address();
