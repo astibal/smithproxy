@@ -43,7 +43,7 @@
 #include <vector>
 #include <map>
 #include <mutex>
-#include <ctime>
+#include <chrono>
  
 #include <libconfig.h++>
 #include <cidr.hpp>
@@ -118,10 +118,10 @@ public:
 
     std::string log_file;
     std::string sslkeylog_file;
-    bool log_console;
+    bool log_console{};
 
 
-    time_t ts_sys_started;
+    std::time_t ts_sys_started{};
 
     std::map<std::string, AddressObject *> cfgapi_obj_address;
     std::map<std::string, range> cfgapi_obj_port;
