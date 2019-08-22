@@ -53,16 +53,6 @@
 
 #include <cfgapi_auth.hpp>
 
-#define PROTO_ICMP 1
-#define PROTO_TCP  6
-#define PROTO_UDP  17
-
-
-#define CFGAPI_LOCKED(x)    \
-    {                       \
-        std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);\
-        (x);                \
-    }                       \
 
 using namespace libconfig;
 
