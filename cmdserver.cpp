@@ -2272,7 +2272,7 @@ bool apply_setting(std::string conf, std::string varname, struct cli_def *cli) {
 
         cli_print(cli, "apply_setting: %s", conf.c_str());
 
-        return CfgFactory::get().cfgapi_load_settings();
+        return CfgFactory::get().load_settings();
     }
 
     return false;

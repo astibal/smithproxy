@@ -155,61 +155,61 @@ public:
     bool  cfgapi_init(const char* fnm);
     void  cfgapi_cleanup();
 
-    AddressObject* cfgapi_lookup_address(const char* name);
-    range cfgapi_lookup_port(const char* name);
-    int   cfgapi_lookup_proto(const char* name);
-    ProfileDetection* cfgapi_lookup_profile_detection(const char* name);
-    ProfileContent*   cfgapi_lookup_profile_content(const char* name);
-    ProfileTls*   cfgapi_lookup_profile_tls(const char* name);
-    ProfileAuth*   cfgapi_lookup_profile_auth(const char* name);
-    ProfileAlgDns*   cfgapi_lookup_profile_alg_dns(const char* name);
+    AddressObject*    lookup_address (const char *name);
+    range             lookup_port (const char *name);
+    int               lookup_proto (const char *name);
+    ProfileDetection* lookup_prof_detection (const char *name);
+    ProfileContent*   lookup_prof_content (const char *name);
+    ProfileTls*       lookup_prof_tls (const char *name);
+    ProfileAuth*      lookup_prof_auth (const char *name);
+    ProfileAlgDns*    lookup_prof_alg_dns (const char *name);
 
-    bool cfgapi_apply_tenant_config();
+    bool apply_tenant_config ();
     int  apply_tenant_index(std::string& what, unsigned int& idx);
 
-    bool cfgapi_load_settings();
-    int  cfgapi_load_obj_address();
-    int  cfgapi_load_obj_port();
-    int  cfgapi_load_obj_proto();
-    int  cfgapi_load_obj_policy();
-    int  cfgapi_load_obj_profile_content();
-    int  cfgapi_load_obj_profile_detection();
-    int  cfgapi_load_obj_profile_tls();
-    int  cfgapi_load_obj_profile_auth();
-    int  cfgapi_load_obj_profile_alg_dns();
+    bool load_settings ();
+    int  load_db_address ();
+    int  load_db_port ();
+    int  load_db_proto ();
+    int  load_db_policy ();
+    int  load_db_prof_content ();
+    int  load_db_prof_detection ();
+    int  load_db_prof_tls ();
+    int  load_db_prof_auth ();
+    int  load_db_prof_alg_dns ();
 
-    int  cfgapi_cleanup_obj_address();
-    int  cfgapi_cleanup_obj_port();
-    int  cfgapi_cleanup_obj_proto();
-    int  cfgapi_cleanup_obj_policy();
-    int  cfgapi_cleanup_obj_profile_content();
-    int  cfgapi_cleanup_obj_profile_detection();
-    int  cfgapi_cleanup_obj_profile_tls();
-    int  cfgapi_cleanup_obj_profile_auth();
-    int  cfgapi_cleanup_obj_profile_alg_dns();
+    int  cleanup_db_address ();
+    int  cleanup_db_port ();
+    int  cleanup_db_proto ();
+    int  cleanup_db_policy ();
+    int  cleanup_db_prof_content ();
+    int  cleanup_db_prof_detection ();
+    int  cleanup_db_prof_tls ();
+    int  cleanup_db_prof_auth ();
+    int  cleanup_db_prof_alg_dns ();
 
-    int cfgapi_obj_policy_match(baseProxy* proxy);
-    int cfgapi_obj_policy_match(std::vector<baseHostCX*>& left, std::vector<baseHostCX*>& right);
-    int cfgapi_obj_policy_action(int index);
-    int cfgapi_obj_policy_apply(baseHostCX* originator, baseProxy* proxy);
+    int policy_match (baseProxy *proxy);
+    int policy_match (std::vector<baseHostCX *> &left, std::vector<baseHostCX *> &right);
+    int policy_action (int index);
+    int policy_apply (baseHostCX *originator, baseProxy *proxy);
 
-    bool cfgapi_obj_policy_apply_tls(int policy_num, baseCom* xcom);
-    bool cfgapi_obj_policy_apply_tls(ProfileTls* pt, baseCom* xcom);
+    bool policy_apply_tls (int policy_num, baseCom *xcom);
+    bool policy_apply_tls (ProfileTls *pt, baseCom *xcom);
 
-    bool cfgapi_obj_profile_content_apply(baseHostCX* originator, baseProxy* new_proxy, ProfileContent* pc);
-    bool cfgapi_obj_profile_detect_apply(baseHostCX* originator, baseProxy* new_proxy, ProfileDetection* pd);
-    bool cfgapi_obj_profile_tls_apply(baseHostCX* originator, baseProxy* new_proxy, ProfileTls* ps);
-    bool cfgapi_obj_alg_dns_apply(baseHostCX* originator, baseProxy* new_proxy, ProfileAlgDns* p_alg_dns);
+    bool prof_content_apply (baseHostCX *originator, baseProxy *new_proxy, ProfileContent *pc);
+    bool prof_detect_apply (baseHostCX *originator, baseProxy *new_proxy, ProfileDetection *pd);
+    bool prof_tls_apply (baseHostCX *originator, baseProxy *new_proxy, ProfileTls *ps);
+    bool prof_alg_dns_apply (baseHostCX *originator, baseProxy *new_proxy, ProfileAlgDns *p_alg_dns);
 
-    bool should_redirect_warning_port(ProfileTls* pt, SSLCom* com);
+    bool should_redirect (ProfileTls *pt, SSLCom *com);
 
-    void cfgapi_log_version(bool warn_delay=true);
+    void log_version (bool warn_delay = true);
 
-    ProfileContent* cfgapi_obj_policy_profile_content(int index);
-    ProfileDetection* cfgapi_obj_policy_profile_detection(int index);
-    ProfileTls* cfgapi_obj_policy_profile_tls(int index);
-    ProfileAuth* cfgapi_obj_policy_profile_auth(int index);
-    ProfileAlgDns* cfgapi_obj_policy_profile_alg_dns(int index);
+    ProfileContent* policy_prof_content (int index);
+    ProfileDetection* policy_prof_detection (int index);
+    ProfileTls* policy_prof_tls (int index);
+    ProfileAuth* policy_prof_auth (int index);
+    ProfileAlgDns* policy_prof_alg_dns (int index);
 };
 
 struct logging_{

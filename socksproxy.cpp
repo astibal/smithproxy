@@ -63,8 +63,8 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
 
             std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
 
-            matched_policy(CfgFactory::get().cfgapi_obj_policy_match(l,r));
-            bool verdict = CfgFactory::get().cfgapi_obj_policy_action(matched_policy());
+            matched_policy(CfgFactory::get().policy_match(l, r));
+            bool verdict = CfgFactory::get().policy_action(matched_policy());
             
             PolicyRule* p = nullptr;
             if(matched_policy() >= 0) {
@@ -190,7 +190,7 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     
     radd(target_cx);
     
-    if (CfgFactory::get().cfgapi_obj_policy_apply(n_cx,this) < 0) {
+    if (CfgFactory::get().policy_apply(n_cx, this) < 0) {
         // strange, but it can happen if the sockets is closed between policy match and this profile application
         // mark dead.
         INFS_("SocksProxy::socks5_handoff: session failed policy application");
@@ -273,8 +273,8 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
                     if (id_ptr != nullptr) {
                         //std::string groups = id_ptr->last_logon_info.groups();
 
-                        if (CfgFactory::get().cfgapi_obj_policy_profile_auth(matched_policy()) != nullptr)
-                            for (auto i: CfgFactory::get().cfgapi_obj_policy_profile_auth(matched_policy())->sub_policies) {
+                        if (CfgFactory::get().policy_prof_auth(matched_policy()) != nullptr)
+                            for (auto i: CfgFactory::get().policy_prof_auth(matched_policy())->sub_policies) {
                                 for (auto x: id_ptr->groups_vec) {
                                     DEB___("Connection identities: ip identity '%s' against policy '%s'", x.c_str(),
                                            i->name.c_str());

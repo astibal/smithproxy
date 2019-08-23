@@ -344,16 +344,16 @@ bool load_config(std::string& config_f, bool reload) {
             CfgFactory::get().cfgapi_cleanup();
         }
 
-        CfgFactory::get().cfgapi_load_obj_address();
-        CfgFactory::get().cfgapi_load_obj_port();
-        CfgFactory::get().cfgapi_load_obj_proto();
-        CfgFactory::get().cfgapi_load_obj_profile_detection();
-        CfgFactory::get().cfgapi_load_obj_profile_content();
-        CfgFactory::get().cfgapi_load_obj_profile_tls();
-        CfgFactory::get().cfgapi_load_obj_profile_alg_dns();
-        CfgFactory::get().cfgapi_load_obj_profile_auth();
+        CfgFactory::get().load_db_address();
+        CfgFactory::get().load_db_port();
+        CfgFactory::get().load_db_proto();
+        CfgFactory::get().load_db_prof_detection();
+        CfgFactory::get().load_db_prof_content();
+        CfgFactory::get().load_db_prof_tls();
+        CfgFactory::get().load_db_prof_alg_dns();
+        CfgFactory::get().load_db_prof_auth();
 
-        CfgFactory::get().cfgapi_load_obj_policy();
+        CfgFactory::get().load_db_policy();
         
         
         if(!reload)  {
@@ -361,7 +361,7 @@ bool load_config(std::string& config_f, bool reload) {
             load_signatures(CfgFactory::cfg_obj(),"starttls_signatures",sigs_starttls);
         }
 
-        CfgFactory::get().cfgapi_load_settings();
+        CfgFactory::get().load_settings();
 
         CfgFactory::cfg_root()["debug"].lookupValue("log_data_crc",baseCom::debug_log_data_crc);
         CfgFactory::cfg_root()["debug"].lookupValue("log_sockets",baseHostCX::socket_in_name);
@@ -577,7 +577,7 @@ int main(int argc, char *argv[]) {
     }
     
     get_logger()->level(WAR);
-    CfgFactory::get().cfgapi_log_version(false);  // don't delay, but display warning
+    CfgFactory::get().log_version(false);  // don't delay, but display warning
     
     if( CfgFactory::get().tenant_name.size() > 0) {
         WAR_("Starting tenant: '%s', index %d",
@@ -631,7 +631,7 @@ int main(int argc, char *argv[]) {
         }
     }
     
-    if(!CfgFactory::get().cfgapi_apply_tenant_config()) {
+    if(!CfgFactory::get().apply_tenant_config()) {
         FATS_("Failed to apply tenant specific configuration!");
         exit(2);
     }

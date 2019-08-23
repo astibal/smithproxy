@@ -260,25 +260,25 @@ bool MitmProxy::apply_id_policies(baseHostCX* cx) {
             
             DIA___("apply_id_policies: assigning sub-profile %s",final_profile->name.c_str());
             if(final_profile->profile_content != nullptr) {
-                if (CfgFactory::get().cfgapi_obj_profile_content_apply(cx,this,final_profile->profile_content)) {
+                if (CfgFactory::get().prof_content_apply(cx, this, final_profile->profile_content)) {
                     pc_name = final_profile->profile_content->prof_name.c_str();
                     DIA___("apply_id_policies: assigning content sub-profile %s",final_profile->profile_content->prof_name.c_str());
                 }
             }
             if(final_profile->profile_detection != nullptr) {
-                if (CfgFactory::get().cfgapi_obj_profile_detect_apply(cx,this,final_profile->profile_detection)) {
+                if (CfgFactory::get().prof_detect_apply(cx, this, final_profile->profile_detection)) {
                     pd_name = final_profile->profile_detection->prof_name.c_str();
                     DIA___("apply_id_policies: assigning detection sub-profile %s",final_profile->profile_detection->prof_name.c_str());
                 }
             }
             if(final_profile->profile_tls != nullptr) {
-                if(CfgFactory::get().cfgapi_obj_profile_tls_apply(cx,this,final_profile->profile_tls)) {
+                if(CfgFactory::get().prof_tls_apply(cx, this, final_profile->profile_tls)) {
                     pt_name = final_profile->profile_tls->prof_name.c_str();
                     DIA___("apply_id_policies: assigning tls sub-profile %s",final_profile->profile_tls->prof_name.c_str());
                 }
             }
             if(final_profile->profile_alg_dns != nullptr) {
-                if(CfgFactory::get().cfgapi_obj_alg_dns_apply(cx,this,final_profile->profile_alg_dns)) {
+                if(CfgFactory::get().prof_alg_dns_apply(cx, this, final_profile->profile_alg_dns)) {
                     algs += final_profile->profile_alg_dns->prof_name + " ";
                     DIA___("apply_id_policies: assigning tls sub-profile %s",final_profile->profile_tls->prof_name.c_str());
                 }
@@ -998,7 +998,7 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
             
             std::string token_text = cx->application_data->original_request();
           
-            for(auto i: CfgFactory::get().cfgapi_obj_policy_profile_auth( cx->matched_policy())->sub_policies) {
+            for(auto i: CfgFactory::get().policy_prof_auth(cx->matched_policy())->sub_policies) {
                 DIA___("MitmProxy::handle_replacement_auth: token: requesting identity %s",i->name.c_str());
                 token_text  += " |" + i->name;
             }
@@ -1533,7 +1533,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
         bool delete_proxy = false;
         
         // apply policy and get result
-        int policy_num = CfgFactory::get().cfgapi_obj_policy_apply(just_accepted_cx,new_proxy);
+        int policy_num = CfgFactory::get().policy_apply(just_accepted_cx, new_proxy);
 
         // bypass ssl com to VIP
         if(matched_vip) {
@@ -1619,8 +1619,8 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                         if(id_ptr != nullptr) {
                             //std::string groups = id_ptr->last_logon_info.groups();
                             
-                            if(CfgFactory::get().cfgapi_obj_policy_profile_auth(policy_num) != nullptr)
-                            for ( auto i: CfgFactory::get().cfgapi_obj_policy_profile_auth(policy_num)->sub_policies) {
+                            if(CfgFactory::get().policy_prof_auth(policy_num) != nullptr)
+                            for ( auto i: CfgFactory::get().policy_prof_auth(policy_num)->sub_policies) {
                                 for(auto x: id_ptr->groups_vec) {
                                     DEB___("Connection identities: ip identity '%s' against policy '%s'",x.c_str(),i->name.c_str());
                                     if(x == i->name) {
@@ -1733,7 +1733,7 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
     new_proxy->radd(target_cx);
 
     // apply policy and get result
-    int policy_num = CfgFactory::get().cfgapi_obj_policy_apply(just_accepted_cx,new_proxy);
+    int policy_num = CfgFactory::get().policy_apply(just_accepted_cx, new_proxy);
     if(policy_num >= 0) {
         this->proxies().insert(new_proxy);
         
