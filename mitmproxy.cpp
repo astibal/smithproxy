@@ -984,7 +984,7 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
                     repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + token_tk + redir_suf;
                 }
                 
-                repl = global_staticconent->render_server_response(repl);
+                repl = html()->render_server_response(repl);
                 
                 cx->to_write((unsigned char*)repl.c_str(),repl.size());
                 cx->close_after_write(true);
@@ -1020,7 +1020,7 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
                 repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + tok.token() + redir_suf;
             }
             
-            repl = global_staticconent->render_server_response(repl);
+            repl = html()->render_server_response(repl);
             
             cx->to_write((unsigned char*)repl.c_str(),repl.size());
             cx->close_after_write(true);
@@ -1045,8 +1045,8 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
         
         std::string cap  = "Page Blocked";
         std::string meta = "";
-        repl = global_staticconent->render_msg_html_page(cap,meta, repl,"500px");
-        repl = global_staticconent->render_server_response(repl);
+        repl = html()->render_msg_html_page(cap,meta, repl,"700px");
+        repl = html()->render_server_response(repl);
         
         cx->to_write((unsigned char*)repl.c_str(),repl.size());
         cx->close_after_write(true);
@@ -1065,7 +1065,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
     SSLCom* scom = dynamic_cast<SSLCom*>(cx->peercom());
     if(!scom) {
         std::string error("<html><head></head><body><p>Internal error</p><p>com object is not ssl-type</p></body></html>");
-        error = global_staticconent->render_server_response(error);
+        error = html()->render_server_response(error);
         
         cx->to_write((unsigned char*)error.c_str(),error.size());
         cx->close_after_write(true);  
@@ -1126,7 +1126,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
                                          new whitelist_verify_entry_t(v, scom->opt_failed_certcheck_override_timeout));
                 }
                 
-                override_applied = global_staticconent->render_server_response(override_applied);
+                override_applied = html()->render_server_response(override_applied);
                 
                 cx->to_write((unsigned char*)override_applied.c_str(),override_applied.size());
                 cx->close_after_write(true);
@@ -1138,7 +1138,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             } else {
                 // override is not enabled, but client somehow reached this (attack?)
                 std::string error("<html><head></head><body><p>Failed to override</p><p>Action is denied.</p></body></html>");
-                error = global_staticconent->render_server_response(error);
+                error = html()->render_server_response(error);
                 cx->to_write((unsigned char*)error.c_str(),error.size());
                 cx->close_after_write(true);                  
                 
@@ -1160,22 +1160,35 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
                 bool is_set = false;
                 
                 if(scom->verify_check(SSLCom::SELF_SIGNED)) {
-                        block_additinal_info += "<p><h3 class=\"fg-red\">Reason:</h3>Target certificate is self-signed.</p>"; is_set = true;
+                    block_additinal_info
+                    += "<p><h3 class=\"fg-red\">Reason:</h3>Target certificate is self-signed.</p>";
+                    is_set = true;
                 }
                 if(scom->verify_check(SSLCom::SELF_SIGNED_CHAIN)) {
-                        block_additinal_info += "<p><h3 class=\"fg-red\">Reason:</h3>Server certificate's chain contains self-signed, untrusted CA certificate.</p>"; is_set = true;
+                    block_additinal_info += "<p><h3 class=\"fg-red\">Reason:</h3>Server certificate's chain contains "
+                                            "self-signed, untrusted CA certificate.</p>";
+                    is_set = true;
                 }
                 if(scom->verify_check(SSLCom::UNKNOWN_ISSUER)) {
-                        block_additinal_info += "<p><h class=\"fg-red\"3>Reason:</h3>Server certificate is issued by untrusted certificate authority.</p>"; is_set = true;
+                    block_additinal_info += "<p><h class=\"fg-red\"3>Reason:</h3>Server certificate is issued by untrusted "
+                           "certificate authority.</p>";
+                    is_set = true;
                 }
                 if(scom->verify_check(SSLCom::CLIENT_CERT_RQ)) {
-                        block_additinal_info += "<p><h3 class=\"fg-red\">Reason:</h3>Server is asking for a client certificate.<p>"; is_set = true;
+                    block_additinal_info += "<p><h3 class=\"fg-red\">Reason:</h3>Server is asking for a client "
+                                            "certificate.<p>";
+                    is_set = true;
                 }
                 if(scom->verify_check(SSLCom::REVOKED)) {
-                        block_additinal_info += "<p><h3 class=\"fg-red\">Reason:</h3>Server's certificate is REVOKED. This is a serious issue, it's highly recommended to not continue to this page.</p>"; is_set = true;
+                    block_additinal_info += "<p><h3 class=\"fg-red\">Reason:</h3>Server's certificate is REVOKED. "
+                                            "This is a serious issue, it's highly recommended to not continue "
+                                            "to this page.</p>";
+                    is_set = true;
                 }                
                 if(scom->verify_check(SSLCom::HOSTNAME_FAILED)) {
-                        block_additinal_info += "<p><h3 class=\"fg-red\">Reason:</h3>Client application asked for server (sni) server is not offering.</p>"; is_set = true;
+                    block_additinal_info += "<p><h3 class=\"fg-red\">Reason:</h3>Client application asked for "
+                                            "server (sni) server is not offering.</p>";
+                    is_set = true;
                 }                
 
                 
@@ -1192,10 +1205,10 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             
             std::string cap = "TLS security warning";
             std::string meta;
-            std::string war_img = global_staticconent->render_noargs("html_img_warning");
+            std::string war_img = html()->render_noargs("html_img_warning");
             std::string msg = string_format("<h2 class=\"fg-red\">%s TLS security warning</h2>%s",war_img.c_str(),(block_target_info + block_additinal_info).c_str());
-            repl = global_staticconent->render_msg_html_page(cap, meta, msg,"500px");
-            repl = global_staticconent->render_server_response(repl);
+            repl = html()->render_msg_html_page(cap, meta, msg,"700px");
+            repl = html()->render_server_response(repl);
             
             cx->to_write((unsigned char*)repl.c_str(),repl.size());
             cx->close_after_write(true);
@@ -1207,8 +1220,8 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             DIA___("ssl_override: ph2 - redir to warning replacement for  %s", whitelist_make_key(cx).c_str());
             
             std::string repl = "<html><head><meta http-equiv=\"Refresh\" content=\"0; url=/SM/IT/HP/RO/XY/warning?q=1\"></head><body></body></html>";
-            repl = global_staticconent->render_server_response(repl);
-            cx->to_write((unsigned char*)repl.c_str(),repl.size());
+            repl = html()->render_server_response(repl);
+            cx->to_write(repl);
             cx->close_after_write(true);            
         }   
         else {
@@ -1222,7 +1235,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             
             //std::string repl = "<html><head><meta http-equiv=\"Refresh\" content=\"0; url=/\"></head><body></body></html>";            
             std::string repl = redir_pre + "/" + redir_suf;   
-            repl = global_staticconent->render_server_response(repl);
+            repl = html()->render_server_response(repl);
             
             cx->to_write((unsigned char*)repl.c_str(),repl.size());
             cx->close_after_write(true);            

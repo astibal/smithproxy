@@ -712,15 +712,12 @@ int main(int argc, char *argv[]) {
         CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_DISABLE);
     }
     
-    // static content cache initialization -- can't be held as external object, since it would cause sobject cache deadlock.
-    //  => has to be a pointer initialized AFTER sobject cache. So this seems to be the best place.
-    global_staticconent = new StaticContent();
 
-    if(!global_staticconent->load_files(CfgFactory::get().dir_msg_templates)) {
+    if(!html()->load_files(CfgFactory::get().dir_msg_templates)) {
         ERR_("Cannot load messages from '%s', replacements will not work correctly !!!", CfgFactory::get().dir_msg_templates.c_str());
     } else {
         std::string test = "test";
-        DIA_("Message testing string: %s", global_staticconent->render_noargs(test).c_str());
+        DIA_("Message testing string: %s", html()->render_noargs(test).c_str());
     }
     
     
