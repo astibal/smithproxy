@@ -52,7 +52,7 @@
 #include <threadedacceptor.hpp>
 #include <display.hpp>
 
-#include <smithproxy.hpp>
+#include <main.hpp>
 #include <display.hpp>
 
 #include <libconfig.h++>

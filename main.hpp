@@ -35,38 +35,13 @@
     gives permission to release a modified version without this exception;
     this exception also makes it possible to release a modified version
     which carries forward this exception.
-*/
+*/    
 
-#ifndef _STATICCONTENT_HPP
- #define _STATICCONTENT_HPP
+#define SMITH_VERSION "0.8.5"
+#define SMITH_DEVEL    0
 
-#include <sobject.hpp>
-#include <ptr_cache.hpp>
-#include <nltemplate.hpp>
 
-using namespace ext::nltemplate;
+extern bool cfg_openssl_mem_dbg;
+extern bool cfg_mtrace_enable;
 
-class StaticContent {
-
-    ptr_cache<std::string,Template>* templates_;
-    StaticContent() { templates_ = new ptr_cache<std::string,Template> ("replacement message cache"); };
-    ~StaticContent() { templates_->invalidate(); delete templates_; };
-
-public:
-
-    bool load_files(std::string& dir);
-    
-    std::string render_noargs(std::string const& s);
-
-    std::string render_server_response(std::string& message, unsigned int code=200);
-    std::string render_msg_html_page(std::string& caption, std::string& meta, std::string& content,const char* window_width="450px");
-    Template* get(std::string const& s);
-
-    static StaticContent* get() {
-        static StaticContent s;
-        return &s;
-    };
-};
-
-inline StaticContent* html() { return StaticContent::get(); };
-#endif
+bool load_config(std::string& config_f, bool reload = false);

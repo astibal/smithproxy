@@ -47,7 +47,7 @@
 #include <cmdserver.hpp>
 
 #include <socle.hpp>
-#include <smithproxy.hpp>
+#include <main.hpp>
 
 #include <shmtable.hpp>
 

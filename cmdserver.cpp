@@ -70,7 +70,7 @@
 #include <sslcom.hpp>
 #include <sslcertstore.hpp>
 
-#include <smithproxy.hpp>
+#include <main.hpp>
 #include <mitmproxy.hpp>
 #include <sobject.hpp>
 #include <dns.hpp>

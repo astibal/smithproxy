@@ -39,9 +39,6 @@
 
 #include <staticcontent.hpp>
 
-DEFINE_LOGGING(StaticContent);
-
-
 bool StaticContent::load_files(std::string& dir) {
     bool ret = true;
     
@@ -65,9 +62,9 @@ bool StaticContent::load_files(std::string& dir) {
 Template* StaticContent::get(std::string const& name) {
     Template* t = templates_->get(name);
     if(!t) {
-        ERR___("cannot load template '%s'",name.c_str())
+        ERR_("StaticContent::get: cannot load template '%s'",name.c_str())
     }
-    
+
     return t;
 }
 

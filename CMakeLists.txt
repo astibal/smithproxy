@@ -64,8 +64,8 @@ configure_file(
         ${CMAKE_SOURCE_DIR}/smithproxy_version.h
 )
 
-add_executable(smithproxy   
-                            smithproxy.cpp 
+add_executable(smithproxy
+        main.cpp
                             mitmhost.cpp 
                             mitmproxy.cpp 
                             cfgapi.cpp 
@@ -87,7 +87,7 @@ add_executable(smithproxy
                             filterproxy.cpp 
                             smithdnsupd.cpp
                             loadb.cpp
-                )
+        smithproxy.hpp smithproxy.cpp)
 add_executable(smithd ${SMITHD_DIR}/smithd.cpp ${SMITHD_DIR}/smithdcx.cpp daemon.cpp smithlog.cpp)
 add_executable(smithdc ${SMITHD_DIR}/smithdc.cpp ${SMITHD_DIR}/smithdcx.cpp smithlog.cpp)
 

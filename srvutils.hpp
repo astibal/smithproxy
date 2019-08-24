@@ -42,25 +42,13 @@
  
 
 template <class Listener, class Com>
-Listener* prepare_listener(std::string& str_port,const char* friendly_name,int def_port,int sub_workers) {
+Listener* prepare_listener(unsigned int port, std::string const& friendly_name, int def_port, int sub_workers) {
     
     if(sub_workers < 0) {
         return nullptr;
     }
-    
-    int port = def_port;
-    
-    if(str_port.size()) {
-        try {
-         port = std::stoi(str_port);
-        }
-        catch(std::invalid_argument e) {
-            ERR_("Invalid port specified: %s",str_port.c_str());
-            return NULL;
-        }
-    }
-    
-    NOT_("Entering %s mode on port %d",friendly_name,port);
+
+    NOT_("Entering %s mode on port %d", friendly_name.c_str(), port);
     auto s_p = new Listener(new Com());
     s_p->com()->nonlocal_dst(true);
     s_p->worker_count_preference(sub_workers);
@@ -68,7 +56,7 @@ Listener* prepare_listener(std::string& str_port,const char* friendly_name,int d
     // bind with master proxy (.. and create child proxies for new connections)
     int s = s_p->bind(port,'L');
     if (s < 0) {
-        FAT_("Error binding %s port (%d), exiting",friendly_name,s);
+        FAT_("Error binding %s port (%d), exiting", friendly_name.c_str(), s);
         delete s_p;
         return NULL;
     };
@@ -81,18 +69,18 @@ Listener* prepare_listener(std::string& str_port,const char* friendly_name,int d
 }
 
 template <class Listener, class Com>
-Listener* prepare_listener(std::string& str_path,const char* friendly_name,std::string def_path,int sub_workers) {
+Listener* prepare_listener(std::string const& str_path, std::string const& friendly_name, std::string const& def_path, int sub_workers) {
     
     if(sub_workers < 0) {
         return nullptr;
     }
     
     std::string path = str_path;
-    if( path.size() == 0 ) {
+    if( path.empty() ) {
         path = def_path;
     }
     
-    NOT_("Entering %s mode on port %s",friendly_name,path.c_str());
+    NOT_("Entering %s mode on port %s",friendly_name.c_str(),path.c_str());
     auto s_p = new Listener(new Com());
     s_p->com()->nonlocal_dst(true);
     s_p->worker_count_preference(sub_workers);
@@ -100,7 +88,7 @@ Listener* prepare_listener(std::string& str_path,const char* friendly_name,std::
     // bind with master proxy (.. and create child proxies for new connections)
     int s = s_p->bind(path.c_str(),'L');
     if (s < 0) {
-        FAT_("Error binding %s port (%d), exiting",friendly_name,s);
+        FAT_("Error binding %s port (%d), exiting",friendly_name.c_str(),s);
         delete s_p;
         return NULL;
     };

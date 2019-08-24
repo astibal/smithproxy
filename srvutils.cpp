@@ -65,7 +65,7 @@
 #include <udpcom.hpp>
 #include <display.hpp>
 
-#include <smithproxy.hpp>
+#include <main.hpp>
 #include <traflog.hpp>
 #include <display.hpp>
 
