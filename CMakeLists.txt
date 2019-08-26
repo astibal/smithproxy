@@ -66,28 +66,32 @@ configure_file(
 
 add_executable(smithproxy
         main.cpp
-                            mitmhost.cpp 
-                            mitmproxy.cpp 
-                            cfgapi.cpp 
-                            cidr.cpp 
-                            policy.cpp 
-                            daemon.cpp 
-                            sockshostcx.cpp 
-                            socksproxy.cpp 
-                            cmdserver.cpp 
-                            cfgapi_auth.cpp 
-                            dns.cpp 
-                            inspectors.cpp 
-                            addrobj.cpp 
-                            srvutils.cpp 
-                            staticcontent.cpp 
-                            nltemplate.cpp 
-                            cfgapi_auth6.cpp 
-                            smithlog.cpp 
-                            filterproxy.cpp 
-                            smithdnsupd.cpp
-                            loadb.cpp
-        smithproxy.hpp smithproxy.cpp)
+        mitmhost.cpp
+        mitmproxy.cpp
+        cfgapi.cpp
+        policy.cpp
+        daemon.cpp
+        sockshostcx.cpp
+        socksproxy.cpp
+        cmdserver.cpp
+        cfgapi_auth.cpp
+        dns.cpp
+        inspectors.cpp
+        addrobj.cpp
+        srvutils.cpp
+        staticcontent.cpp
+        nltemplate.cpp
+        cfgapi_auth6.cpp
+        smithlog.cpp
+        filterproxy.cpp
+        smithdnsupd.cpp
+        loadb.cpp
+        smithproxy.hpp
+        smithproxy.cpp
+
+        ext/cidr.cpp
+        ext/cxxopts.hpp
+        )
 add_executable(smithd ${SMITHD_DIR}/smithd.cpp ${SMITHD_DIR}/smithdcx.cpp daemon.cpp smithlog.cpp)
 add_executable(smithdc ${SMITHD_DIR}/smithdc.cpp ${SMITHD_DIR}/smithdcx.cpp smithlog.cpp)
 

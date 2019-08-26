@@ -10,7 +10,7 @@
 #include <strings.h>
 #include <arpa/inet.h>
 
-#include <cidr.hpp>
+#include <ext/cidr.hpp>
 
 
 /* Powers of two */

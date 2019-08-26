@@ -55,7 +55,7 @@
 #include <buffer.hpp>
 #include <display.hpp>
 #include <logger.hpp>
-#include <cidr.hpp>
+#include <ext/cidr.hpp>
 #include <addrobj.hpp>
 
 #define DNS_HEADER_SZ 12
