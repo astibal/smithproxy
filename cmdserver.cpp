@@ -464,9 +464,13 @@ int cli_diag_ssl_cache_stats(struct cli_def *cli, const char *command, char *arg
     
     SSLFactory* store = SSLCom::certstore();
 
-    store->lock();
-    int n_cache = store->cache().size();
-    store->unlock();
+
+    int n_cache = 0;
+    {
+        std::lock_guard<std::recursive_mutex> l(store->lock());
+        n_cache = store->cache().size();
+    };
+
 
     cli_print(cli,"certificate store stats: ");
     cli_print(cli,"    CN cert cache size: %d ",n_cache);
@@ -484,54 +488,66 @@ int cli_diag_ssl_cache_list(struct cli_def *cli, const char *command, char *argv
         std::string a1 = argv[0];
         if(a1 == "7") print_refs = true;
     }
-    
-    
-    store->lock();
-    
+
+    std::stringstream ss;
+
     cli_print(cli,"certificate store entries: ");
-    
-    for (auto x = store->cache().begin(); x != store->cache().end(); ++x ) {
-        std::string fqdn = x->first;
-        X509_PAIR* ptr = x->second;
-        
-        cli_print(cli,"    %s",fqdn.c_str());
-#ifndef USE_OPENSSL11
-        if(print_refs)
-            cli_print(cli,"            refcounts: key=%d cert=%d",ptr->first->references, ptr->second->references);
-#endif
+
+    {
+        std::lock_guard<std::recursive_mutex> l_(store->lock());
+
+        for (auto x = store->cache().begin(); x != store->cache().end(); ++x) {
+            std::string fqdn = x->first;
+            X509_PAIR *ptr = x->second;
+
+            ss << string_format("    %s\n", fqdn.c_str());
+
+            #ifndef USE_OPENSSL11
+            if(print_refs)
+               ss << string_format("            refcounts: key=%d cert=%d\n",ptr->first->references, ptr->second->references);
+            #endif
+        }
     }
-    store->unlock();
-    
+
+
+    cli_print(cli, "%s", ss.str().c_str());
+
     return CLI_OK;
 }
 
 int cli_diag_ssl_cache_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
-    
+
     SSLFactory* store = SSLCom::certstore();
-    store->lock();
-    
-    for (auto x = store->cache().begin(); x != store->cache().end(); ++x ) {
-        std::string fqdn = x->first;
-        cli_print(cli,"removing    %s",fqdn.c_str());
-        X509_PAIR* ptr = x->second;
-        
-        if(argc > 0) {
-            std::string a1 = argv[0];
-            if(a1 == "7") {
-#ifndef USE_OPENSSL11
-                cli_print(cli, "            refcounts: key=%d cert=%d",
-                          ptr->first->references,
-                          ptr->second->references);
-#endif
+    std::stringstream ss;
+
+
+    {
+        std::lock_guard<std::recursive_mutex> l_(store->lock());
+
+        for (auto x = store->cache().begin(); x != store->cache().end(); ++x ) {
+            std::string fqdn = x->first;
+            ss << string_format("removing    %s\n",fqdn.c_str());
+            X509_PAIR* ptr = x->second;
+
+            if(argc > 0) {
+                std::string a1 = argv[0];
+                if(a1 == "7") {
+                    #ifndef USE_OPENSSL11
+                    ss << string_format("            refcounts: key=%d cert=%d\n",
+                              ptr->first->references,
+                              ptr->second->references);
+                    #endif
+                }
             }
+
+            EVP_PKEY_free(ptr->first);
+            X509_free(ptr->second);
         }
-        
-        EVP_PKEY_free(ptr->first);
-        X509_free(ptr->second);
+        store->cache().clear();
     }
-    store->cache().clear();
-    store->unlock();
-    
+
+    cli_print(cli, "%s", ss.str().c_str());
+
     return CLI_OK;
 }
 
