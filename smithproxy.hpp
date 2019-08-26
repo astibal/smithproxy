@@ -64,7 +64,7 @@ class MyPlainAcceptor : public theAcceptor {
 class SmithProxy {
 
     explicit SmithProxy() : tenant_index_(0), tenant_name_("default") {};
-    virtual ~SmithProxy () = default;
+    virtual ~SmithProxy ();
 
 
     unsigned int tenant_index_;

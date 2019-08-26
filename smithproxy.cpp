@@ -40,6 +40,21 @@
 #include <smithproxy.hpp>
 #include <cmdserver.hpp>
 
+SmithProxy::~SmithProxy () {
+
+    delete plain_thread;
+    delete ssl_thread;
+    delete dtls_thread;
+    delete udp_thread;
+    delete socks_thread;
+
+
+    delete dns_thread;
+    delete id_thread;
+
+    delete log_thread;
+}
+
 
 std::thread* SmithProxy::create_identity_refresh_thread() {
 
@@ -252,51 +267,25 @@ void SmithProxy::run() {
         ql->sig_terminate = true;
         log_thread->join();
     }
-
-    if(plain_thread)
-        delete plain_thread;
-    if(ssl_thread)
-        delete ssl_thread;
-    if(udp_thread)
-        delete udp_thread;
-    if(socks_thread)
-        delete socks_thread;
-    if(log_thread)
-        delete log_thread;
-
 }
-
 
 void SmithProxy::stop() {
     if (plain_proxy != nullptr) {
         plain_proxy->dead(true);
-
-        delete plain_thread;
-        plain_thread = nullptr;
     }
     if(ssl_proxy != nullptr) {
         ssl_proxy->dead(true);
 
-        delete ssl_thread;
-        ssl_thread = nullptr;
     }
     if(dtls_proxy != nullptr) {
         dtls_proxy->dead(true);
-
-        delete dtls_thread;
-        dtls_thread = nullptr;
     }
     if(udp_proxy != nullptr) {
         udp_proxy->dead(true);
 
-        delete udp_thread;
-        udp_thread = nullptr;
     }
     if(socks_proxy != nullptr) {
         socks_proxy->dead(true);
-
-        delete socks_thread;
-        socks_thread = nullptr;
     }
 }
 
