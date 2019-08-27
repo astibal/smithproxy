@@ -49,6 +49,7 @@
 #include <unordered_map>
 #include <cstdlib>
 #include <ctime>
+#include <random>
 
 #include <buffer.hpp>
 #include <shmtable.hpp>
@@ -85,7 +86,7 @@ struct shm_logon_info_base {
     
     virtual shm_logon_info_base* clone() = 0;
     
-    virtual ~shm_logon_info_base() {};
+    virtual ~shm_logon_info_base() = default;
 };
 
 // structure exchanged with backend daemon
@@ -95,7 +96,7 @@ struct shm_logon_info_ : public shm_logon_info_base {
     buffer buffer_;
     virtual buffer* data() { return &buffer_; }
     
-    virtual ~shm_logon_info_() {};
+    ~shm_logon_info_() override = default;
 
     static unsigned int record_size () {
         return AddressSize+LOGON_INFO_USERNAME_SZ+LOGON_INFO_GROUPS_SZ;
@@ -125,7 +126,7 @@ struct shm_logon_info_ : public shm_logon_info_base {
         strncpy((char*)&buffer_.data()[AddressSize+LOGON_INFO_USERNAME_SZ],g,LOGON_INFO_GROUPS_SZ-1);
     }
     
-    virtual std::string ip()  {
+    std::string ip() override {
         char b[64]; memset(b,0,64);
         
         if(AddressSize == 16) {
@@ -137,16 +138,16 @@ struct shm_logon_info_ : public shm_logon_info_base {
         return std::string(b);
     }
     
-    virtual std::string username()  {
+    std::string username() override {
         return std::string((const char*)&buffer_.data()[AddressSize]);
     }
     
-    virtual std::string groups()  {
+    std::string groups() override {
         return std::string((const char*)&buffer_.data()[AddressSize+LOGON_INFO_USERNAME_SZ]);
     }
     
-    virtual shm_logon_info_base* clone()  {
-        shm_logon_info_* n =  new shm_logon_info_<AddressSize>(); //return a clone of this object
+    shm_logon_info_base* clone() override {
+        auto* n =  new shm_logon_info_<AddressSize>(); //return a clone of this object
         *n->data() = *data();
         
         return n;
@@ -177,12 +178,17 @@ struct shm_logon_token {
         buffer_.fill(0);
     }
     
-    shm_logon_token(const char* u) {
+    explicit shm_logon_token(const char* u) {
         buffer_.size(LOGON_TOKEN_TOKEN_SZ+LOGON_TOKEN_URL_SZ);
         buffer_.fill(0);
-        
-        std::srand(std::time(0));
-        unsigned int r = std::rand();
+
+        std::default_random_engine generator(time(0)+last_random);
+        std::uniform_int_distribution<int> distribution(0xCABA1A);
+
+        int number = distribution(generator);
+        last_random = number;
+
+        unsigned int r = last_random;
         snprintf((char*)buffer_.data(),LOGON_TOKEN_TOKEN_SZ,"%d",r);
         strncpy((char*)&buffer_.data()[LOGON_TOKEN_TOKEN_SZ],u,LOGON_TOKEN_URL_SZ-1);
     }
@@ -201,6 +207,8 @@ struct shm_logon_token {
     std::string hr() { 
         return string_format("%s : %16s\n",token().c_str(),url().c_str());
     };
+private:
+    unsigned int last_random = 0;
 }; 
  
 
