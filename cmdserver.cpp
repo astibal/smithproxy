@@ -498,7 +498,7 @@ int cli_diag_ssl_cache_list(struct cli_def *cli, const char *command, char *argv
 
         for (auto x = store->cache().begin(); x != store->cache().end(); ++x) {
             std::string fqdn = x->first;
-            X509_PAIR *ptr = x->second;
+            SSLFactory::X509_PAIR* ptr = x->second;
 
             ss << string_format("    %s\n", fqdn.c_str());
 
@@ -527,7 +527,7 @@ int cli_diag_ssl_cache_clear(struct cli_def *cli, const char *command, char *arg
         for (auto x = store->cache().begin(); x != store->cache().end(); ++x ) {
             std::string fqdn = x->first;
             ss << string_format("removing    %s\n",fqdn.c_str());
-            X509_PAIR* ptr = x->second;
+            SSLFactory::X509_PAIR* ptr = x->second;
 
             if(argc > 0) {
                 std::string a1 = argv[0];
@@ -676,7 +676,7 @@ int cli_diag_ssl_verify_list(struct cli_def *cli, const char *command, char *arg
         std::lock_guard<std::recursive_mutex> l_(SSLFactory::ocsp_result_cache.getlock());
         for (auto x: SSLFactory::ocsp_result_cache.cache()) {
             std::string cn = x.first;
-            expiring_ocsp_result *cached_result = x.second;
+            SSLFactory::expiring_ocsp_result *cached_result = x.second;
             int ttl = 0;
             if (cached_result) {
                 ttl = cached_result->expired_at - ::time(nullptr);
