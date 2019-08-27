@@ -485,8 +485,10 @@ int cli_diag_ssl_cache_list(struct cli_def *cli, const char *command, char *argv
     bool print_refs = false;
     
     if(argc > 0) {
-        std::string a1 = argv[0];
-        if(a1 == "7") print_refs = true;
+        int lev = safe_val(argv[0]);
+        if(lev >= 7) {
+            print_refs = true;
+        }
     }
 
     std::stringstream ss;
@@ -502,6 +504,10 @@ int cli_diag_ssl_cache_list(struct cli_def *cli, const char *command, char *argv
 
             ss << string_format("    %s\n", fqdn.c_str());
 
+            if(print_refs) {
+                ss << string_format("        : keyptr=0x%x certptr=0x%x\n", ptr->first, ptr->second);
+            }
+
             #ifndef USE_OPENSSL11
             if(print_refs)
                ss << string_format("            refcounts: key=%d cert=%d\n",ptr->first->references, ptr->second->references);
@@ -514,6 +520,50 @@ int cli_diag_ssl_cache_list(struct cli_def *cli, const char *command, char *argv
 
     return CLI_OK;
 }
+
+int cli_diag_ssl_cache_print(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    SSLFactory *store = SSLCom::certstore();
+    bool print_refs = false;
+
+    if (argc > 0) {
+        int lev = safe_val(argv[0]);
+        if (lev >= 7) {
+            print_refs = true;
+        }
+    }
+
+    std::stringstream ss;
+
+    cli_print(cli, "certificate store entries: \n");
+
+    {
+        std::lock_guard<std::recursive_mutex> l_(store->lock());
+
+        for (auto x = store->cache().begin(); x != store->cache().end(); ++x) {
+            std::string fqdn = x->first;
+            SSLFactory::X509_PAIR *ptr = x->second;
+
+            std::regex r("\\+san:");
+            std::string nice_fqdn = std::regex_replace(fqdn, r, "\n    san: ");
+
+            ss << "--------: " << nice_fqdn << "\n-------- ";
+
+            if(print_refs) {
+                ss << string_format("--------: keyptr=0x%x certptr=0x%x\n", ptr->first, ptr->second);
+            }
+
+            ss << SSLFactory::print_cert(ptr->second);
+
+            ss << "\n\n";
+        }
+    }
+
+    cli_print(cli, "%s", ss.str().c_str());
+
+    return CLI_OK;
+}
+
 
 int cli_diag_ssl_cache_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
@@ -2129,8 +2179,6 @@ void cfg_generate_cli_hints(Setting& setting, std::vector<std::string>* this_lev
     for (unsigned int i = 0; i < (unsigned int) setting.getLength(); i++) {
         Setting &cur_object = setting[i];
 
-        Setting::Type type = cur_object.getType();
-
         std::string name;
         if(cur_object.getName()) {
             name = cur_object.getName();
@@ -2223,7 +2271,6 @@ bool cfg_write_value(Setting& parent, bool create, std::string& varname, std::st
 
         int i;
         long long int lli;
-        bool b;
         float f;
 
         std::string lvalue;
@@ -2312,7 +2359,7 @@ int cli_uni_set_cb(std::string confpath, struct cli_def *cli, const char *comman
 
         if (argv0 != "?") {
 
-            std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
+            std::lock_guard<std::recursive_mutex> ll_(CfgFactory::lock());
 
             if (cfg_write_value(conf, false, varname, argv0, cli)) {
                 // cli_print(cli, "change written to current config");
@@ -3154,6 +3201,7 @@ void client_thread(int client_socket) {
                 diag_ssl_cache = cli_register_command(cli, diag_ssl, "cache", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl certificate cache");
                     cli_register_command(cli, diag_ssl_cache, "stats", cli_diag_ssl_cache_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "display ssl cert cache statistics");
                     cli_register_command(cli, diag_ssl_cache, "list", cli_diag_ssl_cache_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all ssl cert cache entries");
+                    cli_register_command(cli, diag_ssl_cache, "print", cli_diag_ssl_cache_print, PRIVILEGE_PRIVILEGED, MODE_EXEC, "print all ssl cert cache entries");
                     cli_register_command(cli, diag_ssl_cache, "clear", cli_diag_ssl_cache_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "remove all ssl cert cache entries");
                 diag_ssl_wl = cli_register_command(cli, diag_ssl, "whitelist", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl temporary verification whitelist");                        
                     cli_register_command(cli, diag_ssl_wl, "list", cli_diag_ssl_wl_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all verification whitelist entries");
