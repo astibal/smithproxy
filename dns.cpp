@@ -56,10 +56,8 @@ const char* str_txt= "TXT";
 const char* str_opt = "OPT";
 const char* str_soa = "SOA";
 
-dns_cache inspect_dns_cache("DNS cache - global",2000,true);
-std::unordered_map<std::string,ptr_cache<std::string,DNS_Response>*> inspect_per_ip_dns_cache;
 
-domain_cache_t domain_cache("DNS 3l domain cache",2000,true);
+//std::unordered_map<std::string, ptr_cache<std::string,DNS_Response>*> inspect_per_ip_dns_cache;
 
 const char* dns_record_type_str(int a) {
     switch(a) {
@@ -96,7 +94,7 @@ int load_qname(unsigned char* ptr, unsigned int maxlen, std::string* str_storage
         
         if(str_storage) str_storage->assign(lab);
         
-        DEB_("plain label: %s",ESC(lab.c_str())); 
+        DEB_("plain label: %s",ESC(lab));
     } else {
         uint8_t label = ptr[++xi];
         DEB_("ref label: %d",label);
@@ -106,7 +104,7 @@ int load_qname(unsigned char* ptr, unsigned int maxlen, std::string* str_storage
     return xi;
 }
 
-int generate_dns_request(unsigned short id, buffer& b,const std::string h, DNS_Record_Type t) {
+int generate_dns_request(unsigned short id, buffer& b, std::string const& h, DNS_Record_Type t) {
     
     std::string hostname = "." + h;
     //need to add dot at the beginning
@@ -265,7 +263,7 @@ int DNS_Packet::load(buffer* src) {
                             
                         }
                         
-                        if(question_temp.rec_str.size() != 0) question_temp.rec_str += ".";
+                        if( ! question_temp.rec_str.empty() ) question_temp.rec_str += ".";
                         
                         std::string t((const char*)&src->data()[cur_mem+1],field_len);
                         
@@ -474,7 +472,7 @@ std::string DNS_Packet::to_string(int verbosity) {
     }
     r+=" ]";
     
-    if(answers_list_.size() > 0) {
+    if( ! answers_list_.empty() ) {
         r += " -> [";
         for(auto x = answers_list_.begin(); x != answers_list_.end(); ++x) {
             r += x->hr();
@@ -491,11 +489,11 @@ std::string DNS_Packet::to_string(int verbosity) {
 
 
 std::string DNS_Packet::answer_str() const {
-    std::string ret = "";
+    std::string ret;
     
-    for(auto x = answers_list_.begin(); x != answers_list_.end(); ++x) {
-        if(x->type_ == A || x->type_ == AAAA) {
-            ret += " " + x->ip();
+    for(auto const& x: answers_list_) {
+        if(x.type_ == A || x.type_ == AAAA) {
+            ret += " " + x.ip();
         }
     }
     
@@ -505,9 +503,9 @@ std::string DNS_Packet::answer_str() const {
 std::vector< CidrAddress*> DNS_Packet::get_a_anwsers() {
     std::vector<CidrAddress*> ret;
     
-    for(auto x = answers_list_.begin(); x != answers_list_.end(); ++x) {
-        if(x->type_ == A || x->type_ == AAAA) {
-            ret.push_back(new CidrAddress(x->cidr()));
+    for(auto const& x: answers_list_) {
+        if(x.type_ == A || x.type_ == AAAA) {
+            ret.push_back(new CidrAddress(x.cidr()));
         }
     }
     

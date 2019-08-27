@@ -184,9 +184,9 @@ std::thread* create_dns_updater() {
                     recs.push_back("A:" + fa->fqdn());
                     recs.push_back("AAAA:" + fa->fqdn());
 
-                    std::lock_guard<std::recursive_mutex> ll_(inspect_dns_cache.getlock());
+                    std::scoped_lock<std::recursive_mutex> ll_(DNS::get_dns_lock());
                     for (auto const& rec: recs) {
-                        DNS_Response *r = inspect_dns_cache.get(rec);
+                        DNS_Response *r = DNS::get_dns_cache().get(rec);
                         if (r) {
                             int ttl = (r->loaded_at + r->answers().at(0).ttl_) - ::time(nullptr);
 

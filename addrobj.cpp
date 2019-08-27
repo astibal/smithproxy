@@ -57,12 +57,12 @@ std::string FqdnAddress::to_string(int verbosity) {
     bool cached_4a= false;
     if(verbosity > INF) {
 
-        std::lock_guard<std::recursive_mutex> l_(inspect_dns_cache.getlock());
+        std::scoped_lock<std::recursive_mutex> l_(DNS::get_dns_lock());
 
-        if(inspect_dns_cache.get("A:"+fqdn_) != nullptr) {
+        if(DNS::get_dns_cache().get("A:"+fqdn_) != nullptr) {
             cached_a = true;
         }
-        if(inspect_dns_cache.get("AAAA:"+fqdn_) != nullptr) {
+        if(DNS::get_dns_cache().get("AAAA:"+fqdn_) != nullptr) {
             cached_4a = true;
         }
 
@@ -88,13 +88,18 @@ bool FqdnAddress::match(CIDR* c) {
     bool ret = false;
     
     DNS_Response* r = nullptr;
-    
-    if(c->proto == CIDR_IPV4) {
-        r = inspect_dns_cache.get("A:" + fqdn_);
+
+
+    {
+        std::scoped_lock<std::recursive_mutex> l_(DNS::get_dns_lock());
+
+        if (c->proto == CIDR_IPV4) {
+            r = DNS::get_dns_cache().get("A:" + fqdn_);
+        } else if (c->proto == CIDR_IPV6) {
+            r = DNS::get_dns_cache().get("AAAA:" + fqdn_);
+        }
     }
-    else if(c->proto == CIDR_IPV6) {
-        r = inspect_dns_cache.get("AAAA:" + fqdn_);
-    }
+
     if(r != nullptr) {
         DEB___("FqdnAddress::match: found in cache: %s",fqdn_.c_str());
         

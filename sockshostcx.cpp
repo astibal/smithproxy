@@ -153,7 +153,7 @@ bool socksServerCX::process_dns_response(DNS_Response* resp) {
         }
 
         if (target_ips.size()) {
-            std::lock_guard<std::recursive_mutex> l_(inspect_dns_cache.getlock());
+            std::lock_guard<std::recursive_mutex> l_(DNS::get_dns_lock());
 
             DNS_Inspector di;
             del_resp = !di.store(resp);
@@ -254,16 +254,16 @@ int socksServerCX::process_socks_request() {
                 } else {
                     // really FQDN.
 
-                    std::lock_guard<std::recursive_mutex> l_(inspect_dns_cache.getlock());
+                    std::scoped_lock<std::recursive_mutex> l_(DNS::get_dns_lock());
 
-                    DNS_Response* dns_resp = inspect_dns_cache.get("A:"+fqdn);
+                    DNS_Response* dns_resp = DNS::get_dns_cache().get("A:"+fqdn);
                     if(dns_resp) {
-                        if (dns_resp->answers().size() > 0) {
+                        if ( ! dns_resp->answers().empty() ) {
                             int ttl = (dns_resp->loaded_at + dns_resp->answers().at(0).ttl_) - time(nullptr);                
                             if(ttl > 0) {
                                 for( DNS_Answer& a: dns_resp->answers() ) {
                                     std::string a_ip = a.ip(false);
-                                    if(a_ip.size()) {
+                                    if(! a_ip.empty() ) {
                                         DIA_("cache candidate: %s",a_ip.c_str());
                                         target_ips.push_back(a_ip);
                                     }

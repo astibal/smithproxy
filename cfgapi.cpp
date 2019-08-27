@@ -1488,12 +1488,12 @@ bool CfgFactory::prof_tls_apply (baseHostCX *originator, baseProxy *new_proxy, P
                                         WAR_("Connection %s: cannot be bypassed.",originator->full_name('L').c_str());
                                     }
                                 } else if (ps->sni_filter_use_dns_domain_tree) {
-                                    std::lock_guard<std::recursive_mutex> l_(domain_cache.getlock());
+                                    std::scoped_lock<std::recursive_mutex> dd_(DNS::get_domain_lock());
 
                                     //INF_("FQDN doesn't match SNI element, looking for sub-domains of %s", filter_element.c_str());
                                     //FIXME: we assume filter is 2nd level domain...
                                     
-                                    auto subdomain_cache = domain_cache.get(filter_element);
+                                    auto subdomain_cache = DNS::get_domain_cache().get(filter_element);
                                     if(subdomain_cache != nullptr) {
                                         for(auto const& subdomain: subdomain_cache->cache()) {
                                             

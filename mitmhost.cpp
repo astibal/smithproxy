@@ -171,8 +171,12 @@ void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, ve
                     
                     bool check_inspect_dns_cache = true;
                     if(check_inspect_dns_cache) {
-                        DNS_Response* dns_resp_a = inspect_dns_cache.get(("A:" + app_request->host).c_str());
-                        DNS_Response* dns_resp_aaaa = inspect_dns_cache.get(("AAAA:" + app_request->host).c_str());
+
+                        std::scoped_lock<std::recursive_mutex> d_(DNS::get().dns_lock());
+
+                        DNS_Response* dns_resp_a = DNS::get().dns_cache().get(("A:" + app_request->host).c_str());
+                        DNS_Response* dns_resp_aaaa = DNS::get().dns_cache().get(("AAAA:" + app_request->host).c_str());
+
                         if(dns_resp_a && com()->l3_proto() == AF_INET) {
                             DIA_("HTTP inspection: Host header matches DNS: %s",ESC(dns_resp_a->question_str_0()));
                         } else if(dns_resp_aaaa && com()->l3_proto() == AF_INET6) {

@@ -287,7 +287,7 @@ int cli_test_dns_genrequest(struct cli_def *cli, const char *command, char *argv
         unsigned short id = *(unsigned short*)rand_pool;        
         
         int s = generate_dns_request(id,b,argv[0],A);
-        cli_print(cli,"DNS generated request: \n%s",hex_dump(b).c_str());
+        cli_print(cli,"DNS generated request: \n%s, %dB",hex_dump(b).c_str(), s);
     } else {
         cli_print(cli,"you need to specify hostname");
     }
@@ -311,7 +311,7 @@ DNS_Response* send_dns_request(struct cli_def *cli, std::string hostname, DNS_Re
     unsigned short id = *(unsigned short*)rand_pool;
     
     int s = generate_dns_request(id,b,hostname,t);
-    cli_print(cli,"DNS generated request: \n%s",hex_dump(b).c_str());
+    cli_print(cli,"DNS generated request: \n%s, %dB",hex_dump(b).c_str(),s);
     
     // create UDP socket
     int send_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);         
@@ -935,14 +935,14 @@ int cli_diag_dns_cache_list(struct cli_def *cli, const char *command, char *argv
 
     std::stringstream out;
     {
-        std::lock_guard<std::recursive_mutex> l_(inspect_dns_cache.getlock());
+        std::scoped_lock<std::recursive_mutex> l_(DNS::get_dns_lock());
 
 
         out << "\nDNS cache populated from traffic: \n";
 
-        for (auto it = inspect_dns_cache.cache().begin(); it != inspect_dns_cache.cache().end(); ++it) {
-            std::string s = it->first;
-            DNS_Response *r = it->second;
+        for (auto const& it: DNS::get_dns_cache().cache()) {
+            std::string s = it.first;
+            DNS_Response *r = it.second;
 
             if (r != nullptr && r->answers().size() > 0) {
                 int ttl = (r->loaded_at + r->answers().at(0).ttl_) - time(nullptr);
@@ -960,12 +960,12 @@ int cli_diag_dns_cache_stats(struct cli_def *cli, const char *command, char *arg
 
     std::stringstream out;
     {
-        std::lock_guard<std::recursive_mutex> l_(inspect_dns_cache.getlock());
+        std::scoped_lock<std::recursive_mutex> l_(DNS::get_dns_lock());
 
         out << "\nDNS cache statistics: \n";
-        int cache_size = inspect_dns_cache.cache().size();
-        int max_size = inspect_dns_cache.max_size();
-        bool del = inspect_dns_cache.auto_delete();
+        int cache_size = DNS::get_dns_cache().cache().size();
+        int max_size = DNS::get_dns_cache().max_size();
+        bool del = DNS::get_dns_cache().auto_delete();
 
 
         out << string_format("  Current size: %5d\n", cache_size);
@@ -980,8 +980,8 @@ int cli_diag_dns_cache_stats(struct cli_def *cli, const char *command, char *arg
 int cli_diag_dns_cache_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
     {
-        std::lock_guard<std::recursive_mutex> l_(inspect_dns_cache.getlock());
-        inspect_dns_cache.clear();
+        std::scoped_lock<std::recursive_mutex> l_(DNS::get_dns_lock());
+        DNS::get_dns_cache().clear();
     }
 
     cli_print(cli,"\nDNS cache cleared.");
@@ -995,9 +995,9 @@ int cli_diag_dns_domain_cache_list(struct cli_def *cli, const char *command, cha
     std::stringstream out;
 
     {
-        std::lock_guard<std::recursive_mutex> l_(domain_cache.getlock());
+        std::scoped_lock<std::recursive_mutex> l_(DNS::get_domain_lock());
 
-        for (auto sub_domain_cache: domain_cache.cache()) {
+        for (auto const& sub_domain_cache: DNS::get_domain_cache().cache()) {
 
             std::string domain = sub_domain_cache.first;
             std::string str;
@@ -1019,8 +1019,8 @@ int cli_diag_dns_domain_cache_clear(struct cli_def *cli, const char *command, ch
     cli_print(cli, "\n Clearing domain cache:");
 
     {
-        std::lock_guard<std::recursive_mutex> l_(domain_cache.getlock());
-        domain_cache.clear();
+        std::scoped_lock<std::recursive_mutex> l_(DNS::get_domain_lock());
+        DNS::get_domain_cache().clear();
     }
 
     cli_print(cli," done.");

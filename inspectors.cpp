@@ -223,9 +223,9 @@ void DNS_Inspector::update(AppHostCX* cx) {
 	    }
             
             if(opt_cached_responses && ( ((DNS_Request*)ptr)->question_type_0() == A || ((DNS_Request*)ptr)->question_type_0() == AAAA ) ) {
-                std::lock_guard<std::recursive_mutex> l_(inspect_dns_cache.getlock());
+                std::scoped_lock<std::recursive_mutex> l_(DNS::get_dns_lock());
 
-                cached_entry = inspect_dns_cache.get(ptr->question_str_0());
+                cached_entry = DNS::get_dns_cache().get(ptr->question_str_0());
                 if(cached_entry != nullptr) {
                     DIA___("DNS answer for %s is already in the cache",cached_entry->question_str_0().c_str());
 
@@ -370,11 +370,11 @@ bool DNS_Inspector::store(DNS_Response* ptr) {
         std::string question = ptr->question_str_0();
 
         {
-            std::lock_guard<std::recursive_mutex> l_(inspect_dns_cache.getlock());
-            inspect_dns_cache.set(question, ptr);
+            std::scoped_lock<std::recursive_mutex> l_(DNS::get_dns_lock());
+            DNS::get_dns_cache().set(question, ptr);
         }
             DIA___("DNS_Inspector::update: %s added to cache (%d elements of max %d)", ptr->question_str_0().c_str(),
-                   inspect_dns_cache.cache().size(), inspect_dns_cache.max_size());
+                   DNS::get_dns_cache().cache().size(), DNS::get_dns_cache().max_size());
 
         
         std::pair<std::string,std::string> dom_pair = split_fqdn_subdomain(question);
@@ -382,9 +382,9 @@ bool DNS_Inspector::store(DNS_Response* ptr) {
         
         if(dom_pair.first.size() > 0 && dom_pair.second.size() > 0) {
 
-            std::lock_guard<std::recursive_mutex> l_(domain_cache.getlock());
+            std::scoped_lock<std::recursive_mutex> ll_(DNS::get_domain_lock());
 
-            auto subdom_cache = domain_cache.get(dom_pair.first);
+            auto subdom_cache = DNS::get_domain_cache().get(dom_pair.first);
             if(subdom_cache != nullptr) {
 
                 std::lock_guard<std::recursive_mutex> sl_(subdom_cache->getlock());
@@ -409,10 +409,10 @@ bool DNS_Inspector::store(DNS_Response* ptr) {
             
             else {
                 DIA___("Top domain cache entry NOT found for domain %s",dom_pair.first.c_str());
-                domain_cache_entry_t* subdom_cache = new domain_cache_entry_t(string_format("DNS cache for %s",dom_pair.first.c_str()).c_str(),100,true);
-                subdom_cache->set(dom_pair.second,new expiring_int(1,28000));
+                auto* subdom_cache = DNS::make_domain_entry(dom_pair.first);
+                      subdom_cache -> set(dom_pair.second, new expiring_int(1, DNS::sub_ttl));
                 
-                domain_cache.set(dom_pair.first,subdom_cache);
+                DNS::get_domain_cache().set(dom_pair.first, subdom_cache);
             }
         }
     }    
