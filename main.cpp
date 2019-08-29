@@ -112,18 +112,18 @@ static bool cfg_mtrace_enable = true;
 void my_terminate (int param) {
 
     if (!cfg_daemonize)
-        printf("Terminating ...\n");
+        ERRS_("Terminating ...\n");
 
     SmithProxy::instance().stop();
 
     cnt_terminate++;
     if(cnt_terminate == 3) {
         if (!cfg_daemonize)
-            printf("Failed to terminate gracefully. Next attempt will be enforced.\n");
+            FATS_("Failed to terminate gracefully. Next attempt will be enforced.\n");
     }
     if(cnt_terminate > 3) {
         if (!cfg_daemonize)
-            printf("Enforced exit.\n");
+            FATS_("Enforced exit.\n");
         abort();
     }
 }
@@ -635,7 +635,6 @@ int main(int argc, char *argv[]) {
     
     
 
-    set_daemon_signals(my_terminate,my_usr1);
 
     SmithProxy::instance().run();
 

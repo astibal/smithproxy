@@ -75,6 +75,8 @@
 #include <sobject.hpp>
 #include <dns.hpp>
 #include <inspectors.hpp>
+#include <authfactory.hpp>
+
 
 #include "socle_version.h"
 #include "smithproxy_version.h"
@@ -1032,40 +1034,48 @@ int cli_diag_dns_domain_cache_clear(struct cli_def *cli, const char *command, ch
 
 int cli_diag_identity_ip_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
     
-    cli_print(cli, "\nIPv4 identities:");
-    std::string out;
-    
-    cfgapi_identity_ip_lock.lock();
-    for (auto ip: auth_ip_map) {
-        std::string s;
-        IdentityInfo& id = ip.second;
-        
-        s +=   "    ipv4: " + ip.first + ", user: " + id.username + ", groups: " + id.groups + ", rx/tx: " + number_suffixed(id.tx_bytes) + "/" + number_suffixed(id.rx_bytes);
-        s += "\n          uptime: " + std::to_string(id.uptime()) + ", idle: " + std::to_string(id.i_time());
-        s += "\n          status: " + std::to_string(!id.i_timeout()) + ", last policy: " + std::to_string(id.last_seen_policy);
-        out += s;
+    cli_print(cli, "\nIPv4 identities:\n");
+    std::stringstream ss;
+
+    {
+        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip4_lock());
+        for (auto ip: AuthFactory::get_ip4_map()) {
+
+            IdentityInfo &id = ip.second;
+
+            ss << "    ipv4: " << ip.first << ", user: " << id.username << ", groups: " << id.groups << ", rx/tx: ";
+            ss <<   number_suffixed(id.tx_bytes) << "/" << number_suffixed(id.rx_bytes);
+
+            ss << "\n          uptime: " << std::to_string(id.uptime()) << ", idle: " << std::to_string(id.i_time());
+            ss << "\n          status: " << std::to_string(!id.i_timeout()) << ", last policy: ";
+            ss <<   std::to_string(id.last_seen_policy);
+
+        }
+
     }
-    cfgapi_identity_ip_lock.unlock();
-    cli_print(cli, "%s", out.c_str());
+    cli_print(cli, "%s", ss.str().c_str());
     
 
-    out.clear();
+    ss.clear();
     
-    cli_print(cli, "\nIPv6 identities:");
-    
+    cli_print(cli, "\nIPv6 identities:\n");
 
-    cfgapi_identity_ip6_lock.lock();
-    for (auto ip: auth_ip6_map) {
-        std::string s;
-        IdentityInfo6& id = ip.second;
-        
-        s +=   "    ipv6: " + ip.first + ", user: " + id.username + ", groups: " + id.groups + ", rx/tx: " + number_suffixed(id.tx_bytes) + "/" + number_suffixed(id.rx_bytes);
-        s += "\n          uptime: " + std::to_string(id.uptime()) + ", idle: " + std::to_string(id.i_time());        
-        s += "\n          status: " + std::to_string(!id.i_timeout()) + ", last policy: " + std::to_string(id.last_seen_policy);
-        out += s;
+
+    {
+        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip4_lock());
+        for (auto ip: AuthFactory::get_ip6_map()) {
+
+            IdentityInfo6 &id = ip.second;
+
+            ss << "    ipv6: " << ip.first << ", user: " << id.username << ", groups: " << id.groups << ", rx/tx: ";
+            ss <<   number_suffixed(id.tx_bytes) << "/" << number_suffixed(id.rx_bytes);
+            ss << "\n          uptime: " << std::to_string(id.uptime()) << ", idle: " << std::to_string(id.i_time());
+            ss << "\n          status: " << std::to_string(!id.i_timeout()) << ", last policy: ";
+            ss <<   std::to_string(id.last_seen_policy);
+
+        }
     }
-    cfgapi_identity_ip6_lock.unlock();
-    cli_print(cli, "%s", out.c_str());    
+    cli_print(cli, "%s", ss.str().c_str());
     
     return CLI_OK;
 }
@@ -1075,31 +1085,31 @@ int cli_diag_identity_ip_clear(struct cli_def *cli, const char *command, char *a
     cli_print(cli, "\nClearing all identities:");
     std::string out;
 
-    cfgapi_identity_ip_lock.lock();
-    auth_ip_map.clear();
-    auth_shm_ip_map.acquire();
-    auth_shm_ip_map.map_entries().clear();
-    auth_shm_ip_map.entries().clear();
-    auth_shm_ip_map.save(true);
+    {
+        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip4_lock());
+        AuthFactory::get_ip4_map().clear();
+        AuthFactory::get().shm_ip4_map.acquire();
+        AuthFactory::get().shm_ip4_map.map_entries().clear();
+        AuthFactory::get().shm_ip4_map.entries().clear();
+        AuthFactory::get().shm_ip4_map.save(true);
 
 
-    auth_shm_ip_map.seen_version(0);
+        AuthFactory::get().shm_ip4_map.seen_version(0);
+        AuthFactory::get().shm_ip4_map.release();
+    }
 
-    auth_shm_ip_map.release();
-    cfgapi_identity_ip_lock.unlock();
+    {
+        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
+        AuthFactory::get_ip6_map().clear();
+        AuthFactory::get().shm_ip6_map.acquire();
+        AuthFactory::get().shm_ip6_map.map_entries().clear();
+        AuthFactory::get().shm_ip6_map.entries().clear();
+        AuthFactory::get().shm_ip6_map.save(true);
 
 
-    cfgapi_identity_ip6_lock.lock();
-    auth_ip6_map.clear();
-    auth_shm_ip6_map.acquire();
-    auth_shm_ip6_map.map_entries().clear();
-    auth_shm_ip6_map.entries().clear();
-    auth_shm_ip6_map.save(true);
-
-    auth_shm_ip6_map.seen_version(0);
-
-    auth_shm_ip6_map.release();
-    cfgapi_identity_ip6_lock.unlock();
+        AuthFactory::get().shm_ip6_map.seen_version(0);
+        AuthFactory::get().shm_ip6_map.release();
+    }
 
     return CLI_OK;
 }

@@ -46,11 +46,11 @@
 #include <mitmhost.hpp>
 #include <logger.hpp>
 #include <cfgapi.hpp>
-#include <cfgapi_auth.hpp>
 #include <sockshostcx.hpp>
 #include <uxcom.hpp>
 #include <staticcontent.hpp>
 #include <filterproxy.hpp>
+#include <authfactory.hpp>
 
 #include <algorithm>
 #include <ctime>
@@ -199,30 +199,50 @@ bool MitmProxy::apply_id_policies(baseHostCX* cx) {
     if(cx->com()) {
         af = cx->com()->l3_proto();
     }
-    std::string str_af = inet_family_str(af); 
-    
-    if(af == AF_INET || af == 0) cfgapi_identity_ip_lock.lock();
-    if(af == AF_INET6) cfgapi_identity_ip6_lock.lock();    
-
-    // use common base pointer, so we can use all IdentityInfo types
+    std::string str_af = inet_family_str(af);
     IdentityInfoBase* id_ptr = nullptr;
-    
+
+    bool found = false;
+    std::vector<std::string> group_vec;
+
     if(af == AF_INET || af == 0) {
-        auto ip = auth_ip_map.find(cx->host());
-        if (ip != auth_ip_map.end()) {
+        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip4_lock());
+
+        // use common base pointer, so we can use all IdentityInfo types
+
+        auto ip = AuthFactory::get_ip4_map().find(cx->host());
+        if (ip != AuthFactory::get_ip4_map().end()) {
             id_ptr = &(*ip).second;
+
+            if(id_ptr) {
+                found = true;
+                for (auto const &my_id: id_ptr->groups_vec) {
+                    group_vec.push_back(my_id);
+                }
+            }
         }
     }
     else if(af == AF_INET6) {
-        auto ip = auth_ip6_map.find(cx->host());
-        if (ip != auth_ip6_map.end()) {
+        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
+        // use common base pointer, so we can use all IdentityInfo types
+
+        auto ip = AuthFactory::get_ip6_map().find(cx->host());
+        if (ip != AuthFactory::get_ip6_map().end()) {
             id_ptr = &(*ip).second;
+
+            if(id_ptr) {
+                found = true;
+                for(auto const& my_id: id_ptr->groups_vec) {
+                    group_vec.push_back(my_id);
+                }
+            }
         }
     }
-    
+
+
     ProfileSubAuth* final_profile = nullptr;
     
-    if( id_ptr != nullptr) {
+    if( found ) {
         DIA___("apply_id_policies: matched policy: %d",matched_policy());        
         PolicyRule* policy = CfgFactory::get().db_policy.at(matched_policy());
         
@@ -236,7 +256,7 @@ bool MitmProxy::apply_id_policies(baseHostCX* cx) {
                 
                 DIA___("apply_id_policies: checking identity policy for: %s", sub_name.c_str());
                 
-                for(auto my_id: id_ptr->groups_vec) {
+                for(auto const& my_id: group_vec) {
                     DIA___("apply_id_policies: identity in policy: %s, match-test real user group '%s'",sub_prof->name.c_str(), my_id.c_str());
                     if(sub_prof->name == my_id) {
                         DIAS___("apply_id_policies: .. matched.");
@@ -256,7 +276,7 @@ bool MitmProxy::apply_id_policies(baseHostCX* cx) {
             const char* pc_name = "none";
             const char* pd_name = "none";
             const char* pt_name = "none";
-            std::string algs = "";
+            std::string algs;
             
             DIA___("apply_id_policies: assigning sub-profile %s",final_profile->name.c_str());
             if(final_profile->profile_content != nullptr) {
@@ -289,14 +309,10 @@ bool MitmProxy::apply_id_policies(baseHostCX* cx) {
                             pc_name, pd_name, pt_name, algs.c_str()
                             );
         }
-        
-        if(af == AF_INET || af == 0) cfgapi_identity_ip_lock.unlock();
-        if(af == AF_INET6) cfgapi_identity_ip6_lock.unlock();  
+
         return (final_profile != nullptr);
     } 
 
-    if(af == AF_INET || af == 0) cfgapi_identity_ip_lock.unlock();
-    if(af == AF_INET6) cfgapi_identity_ip6_lock.unlock();      
     return false;
 }
 
@@ -324,35 +340,38 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
     bool valid_ip_auth = false;
     
     DIA___("identity check[%s]: source: %s",str_af.c_str(), cx->host().c_str());
-    
-    if(af == AF_INET) cfgapi_auth_shm_ip_table_refresh();
-    if(af == AF_INET6) cfgapi_auth_shm_ip6_table_refresh();
-    
-    
-    cfgapi_identity_ip_lock.lock();
+
     shm_logon_info_base* id_ptr = nullptr;
     
     if(af == AF_INET || af == 0) {
-        DEB___("identity check[%s]: table size: %d",str_af.c_str(), auth_ip_map.size());
-        auto ip = auth_ip_map.find(cx->host());
-        if (ip != auth_ip_map.end()) {
+
+        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip4_lock());
+        AuthFactory::get().shm_ip4_table_refresh();
+
+        DEB___("identity check[%s]: table size: %d",str_af.c_str(), AuthFactory::get_ip4_map().size());
+        auto ip = AuthFactory::get_ip4_map().find(cx->host());
+        if (ip != AuthFactory::get_ip4_map().end()) {
             shm_logon_info& li = (*ip).second.last_logon_info;
-            id_ptr = &li;
+            id_ptr = li.clone();
         } else {
-            if (insert_guest == true) {
+            if (insert_guest) {
                 id_ptr = new shm_logon_info(cx->host().c_str(),"guest","guest+guests+guests_ipv4");
             }
         }
     }
     else if(af == AF_INET6) {
         /* maintain in sync with previous if block */
-        DEB___("identity check[%s]: table size: %d",str_af.c_str(), auth_ip6_map.size());
-        auto ip = auth_ip6_map.find(cx->host());
-        if (ip != auth_ip6_map.end()) {
+
+        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
+        AuthFactory::get().shm_ip6_table_refresh();
+
+        DEB___("identity check[%s]: table size: %d",str_af.c_str(), AuthFactory::get_ip6_map().size());
+        auto ip = AuthFactory::get_ip6_map().find(cx->host());
+        if (ip != AuthFactory::get_ip6_map().end()) {
             shm_logon_info6& li = (*ip).second.last_logon_info;
-            id_ptr = &li;
+            id_ptr = li.clone();
         } else {
-            if (insert_guest == true) {
+            if (insert_guest) {
                 id_ptr = new shm_logon_info6(cx->host().c_str(),"guest","guest+guests+guests_ipv6");
             }
         }    
@@ -377,9 +396,13 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
 
         DIA___("resolve_identity[%s]: about to call apply_id_policies, group: %s",str_af.c_str(), id_ptr->groups().c_str());
         apply_id_policies(cx);
+
+
+        // id_ptr is either a clone, or new guest id
+        delete id_ptr;
     }
-    
-    cfgapi_identity_ip_lock.unlock();
+
+
     DEB___("identity check[%s]: return %d",str_af.c_str(), valid_ip_auth);
     return valid_ip_auth;
 }
@@ -395,22 +418,24 @@ bool MitmProxy::update_auth_ipX_map(baseHostCX* cx) {
     }
     std::string str_af = inet_family_str(af);    
     
-    if(af == AF_INET || af == 0) cfgapi_identity_ip_lock.lock();
-    if(af == AF_INET6) cfgapi_identity_ip6_lock.lock();
 
     DEB___("update_auth_ip_map: start for %s %s",str_af.c_str(), cx->host().c_str());
     
     IdentityInfoBase* id_ptr = nullptr;
     
     if(af == AF_INET || af == 0) {
-        auto ip = auth_ip_map.find(cx->host());
-        if (ip != auth_ip_map.end()) {
+        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip4_lock());
+
+        auto ip = AuthFactory::get_ip4_map().find(cx->host());
+        if (ip != AuthFactory::get_ip4_map().end()) {
             id_ptr = &(*ip).second;
         }
     }
     else if(af == AF_INET6) {
-        auto ip = auth_ip6_map.find(cx->host());
-        if (ip != auth_ip6_map.end()) {
+        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
+
+        auto ip = AuthFactory::get_ip6_map().find(cx->host());
+        if (ip != AuthFactory::get_ip6_map().end()) {
             id_ptr = &(*ip).second;
         }
     }
@@ -427,13 +452,16 @@ bool MitmProxy::update_auth_ipX_map(baseHostCX* cx) {
             INF___("identity timeout: user %s from %s %s (groups: %s)",id_ptr->username.c_str(), str_af.c_str(), cx->host().c_str(), id_ptr->groups.c_str());
             
             // erase internal ip map entry
-            if(af == AF_INET || af == 0) cfgapi_ip_auth_remove(cx->host());
-            if(af == AF_INET6) cfgapi_ip6_auth_remove(cx->host());
+            if(af == AF_INET || af == 0) {
+                std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip4_lock());
+                AuthFactory::get().ip4_remove(cx->host());
+            }
+            else if(af == AF_INET6) {
+                std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
+                AuthFactory::get().ip6_remove(cx->host());
+            }
         }
     }
-
-    if(af == AF_INET || af == 0) cfgapi_identity_ip_lock.unlock();
-    if(af == AF_INET6) cfgapi_identity_ip6_lock.unlock();
     
     DEB___("update_auth_ip_map: finished for %s %s, result %d",str_af.c_str(), cx->host().c_str(),ret);
     return ret;
@@ -854,7 +882,7 @@ void MitmProxy::on_left_error(baseHostCX* cx) {
     }
     
     if(cx) {
-        cfgapi_ipX_auth_inc_counters(cx);
+        AuthFactory::get().ipX_inc_counters(cx);
     }
 }
 
@@ -922,7 +950,7 @@ void MitmProxy::on_right_error(baseHostCX* cx)
     } 
     
     if(cx->peer()) {
-        cfgapi_ipX_auth_inc_counters(cx->peer());        
+        AuthFactory::get().ipX_inc_counters(cx->peer());
     }
 }
 
@@ -938,13 +966,13 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
   
     
     std::string repl;
-    std::string repl_port = cfgapi_identity_portal_port_http;
+    std::string repl_port = AuthFactory::get().portal_port_http;
     std::string repl_proto = "http";
     int 	redir_hint = 0;
     
     if(cx->application_data->is_ssl) {
         repl_proto = "https";
-        repl_port = cfgapi_identity_portal_port_https;
+        repl_port =AuthFactory::get().portal_port_https;
     }    
     
     std::string block_pre("<h2 class=\"fg-red\">Page has been blocked</h2><p>Access has been blocked by smithproxy.</p>\
@@ -957,10 +985,10 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
         //srand(time(nullptr) % ((unsigned long)cx));
         //redir_hint = rand();
 
-        cfgapi_identity_token_lock.lock();
-        auto id_token = cfgapi_identity_token_cache.find(cx->host());
+        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_token_lock());
+        auto id_token = AuthFactory::get_token_map().find(cx->host());
         
-        if(id_token != cfgapi_identity_token_cache.end()) {
+        if(id_token != AuthFactory::get_token_map().end()) {
             INF___("found a cached token for %s",cx->host().c_str());
             std::pair<unsigned int,std::string>& cache_entry = (*id_token).second;
             
@@ -968,20 +996,20 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
             unsigned int token_ts = cache_entry.first;
             std::string& token_tk = cache_entry.second;
             
-            if(now - token_ts < cfgapi_identity_token_timeout) {
+            if(now - token_ts < AuthFactory::get().token_timeout) {
                 INF___("MitmProxy::handle_replacement_auth: cached token %s for request: %s",token_tk.c_str(),cx->application_data->hr().c_str());
                 
                 if(cx->com()) {
                     if(cx->com()->l3_proto() == AF_INET) {
-                        repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + token_tk + redir_suf;
+                        repl = redir_pre + repl_proto + "://"+AuthFactory::get().portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + token_tk + redir_suf;
                     } else if(cx->com()->l3_proto() == AF_INET6) {
-                        repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address6+":"+repl_port+"/cgi-bin/auth.py?token=" + token_tk + redir_suf;
+                        repl = redir_pre + repl_proto + "://"+AuthFactory::get().portal_address6+":"+repl_port+"/cgi-bin/auth.py?token=" + token_tk + redir_suf;
                     } 
                 } 
                 
-                if(repl.size() == 0) {
+                if(repl.empty()) {
                     // default to IPv4 address
-                    repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + token_tk + redir_suf;
+                    repl = redir_pre + repl_proto + "://"+AuthFactory::get().portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + token_tk + redir_suf;
                 }
                 
                 repl = html()->render_server_response(repl);
@@ -1008,40 +1036,38 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
             
             if(cx->com()) {
                 if(cx->com()->l3_proto() == AF_INET) {
-                    repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + tok.token() + redir_suf;
+                    repl = redir_pre + repl_proto + "://"+AuthFactory::get().portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + tok.token() + redir_suf;
                 } else if(cx->com()->l3_proto() == AF_INET6) {
-                    repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address6+":"+repl_port+"/cgi-bin/auth.py?token=" + tok.token() + redir_suf;
+                    repl = redir_pre + repl_proto + "://"+AuthFactory::get().portal_address6+":"+repl_port+"/cgi-bin/auth.py?token=" + tok.token() + redir_suf;
                 } 
             } 
             
             if(repl.size() == 0) {
                 // default to IPv4 address
                 INFS___("XXX: fallback to IPv4");
-                repl = redir_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + tok.token() + redir_suf;
+                repl = redir_pre + repl_proto + "://"+AuthFactory::get().portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + tok.token() + redir_suf;
             }
             
             repl = html()->render_server_response(repl);
             
             cx->to_write((unsigned char*)repl.c_str(),repl.size());
             cx->close_after_write(true);
-            
-            cfgapi_auth_shm_token_table_refresh();
-            
-            auth_shm_token_map.entries().push_back(tok);
-            auth_shm_token_map.acquire();
-            auth_shm_token_map.save(true);
-            auth_shm_token_map.release();
+
+            AuthFactory::get().shm_token_table_refresh();
+
+            AuthFactory::get().shm_token_map_.entries().push_back(tok);
+            AuthFactory::get().shm_token_map_.acquire();
+            AuthFactory::get().shm_token_map_.save(true);
+            AuthFactory::get().shm_token_map_.release();
             
             DIAS___("MitmProxy::handle_replacement_auth: token table updated");
-            cfgapi_identity_token_cache[cx->host()] = std::pair<unsigned int,std::string>(time(nullptr),tok.token());
+            AuthFactory::get_token_map()[cx->host()] = std::pair<unsigned int,std::string>(time(nullptr),tok.token());
         }
-        
-        cfgapi_identity_token_lock.unlock();
     } else
     if (cx->replacement_flag() == MitmHostCX::REPLACE_BLOCK) {
 
         DIAS___("MitmProxy::handle_replacement_auth: instructed to replace block");
-        repl = block_pre + repl_proto + "://"+cfgapi_identity_portal_address+":"+repl_port + "/cgi-bin/auth.py?a=z" + block_post;
+        repl = block_pre + repl_proto + "://"+AuthFactory::get().portal_address+":"+repl_port + "/cgi-bin/auth.py?a=z" + block_post;
         
         std::string cap  = "Page Blocked";
         std::string meta = "";
@@ -1503,10 +1529,10 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
             }
             else if(target_port != 443) {
                 // auth portal https magic IP
-                target_port = std::stoi(cfgapi_identity_portal_port_http);
+                target_port = std::stoi(AuthFactory::get().portal_port_http);
             } else {
                 // auth portal plaintext magic IP
-                target_port = std::stoi(cfgapi_identity_portal_port_https);
+                target_port = std::stoi(AuthFactory::get().portal_port_https);
             }
             target_host = "127.0.0.1";
             
@@ -1571,13 +1597,13 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                     // reload table and check timeouts each 5 seconds 
                     time_t now = time(nullptr);
                     if(now > auth_table_refreshed + 5) {
-                        cfgapi_auth_shm_ip_table_refresh();
-                        cfgapi_auth_shm_ip6_table_refresh();
+                        AuthFactory::get().shm_ip4_table_refresh();
+                        AuthFactory::get().shm_ip6_table_refresh();
                         auth_table_refreshed = now;
                         
                         //one day this can run in separate thread to not slow down session setup rate
-                        cfgapi_ip_auth_timeout_check();
-                        cfgapi_ip6_auth_timeout_check();
+                        AuthFactory::get().ip4_timeout_check();
+                        AuthFactory::get().ip6_timeout_check();
                     }
                     
                     
@@ -1598,30 +1624,40 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                         std::string str_af = inet_family_str(af);
                         
                         
-                        cfgapi_identity_ip_lock.lock();
-                        
                         // use common base pointer, so we can use all IdentityInfo types
+
                         IdentityInfoBase* id_ptr = nullptr;
+                        bool found = false;
+                        std::vector<std::string> group_vec;
                         
                         if(af == AF_INET || af == 0) {
-                            auto ip = auth_ip_map.find(just_accepted_cx->host());
-                            if (ip != auth_ip_map.end()) {
-                                id_ptr = &(*ip).second;
+
+                            std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip4_lock());
+
+                            auto ip = AuthFactory::get_ip4_map().find(just_accepted_cx->host());
+                            if (ip != AuthFactory::get_ip4_map().end()) {
+                                found = true;
+                                group_vec = id_ptr->groups_vec;
                             }
                         }
                         else if(af == AF_INET6) {
-                            auto ip = auth_ip6_map.find(just_accepted_cx->host());
-                            if (ip != auth_ip6_map.end()) {
+
+                            std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
+
+                            auto ip = AuthFactory::get_ip6_map().find(just_accepted_cx->host());
+                            if (ip != AuthFactory::get_ip6_map().end()) {
                                 id_ptr = &(*ip).second;
+                                found = true;
+                                group_vec = id_ptr->groups_vec;
                             }
                         }
                         
-                        if(id_ptr != nullptr) {
+                        if( found ) {
                             //std::string groups = id_ptr->last_logon_info.groups();
                             
                             if(CfgFactory::get().policy_prof_auth(policy_num) != nullptr)
                             for ( auto i: CfgFactory::get().policy_prof_auth(policy_num)->sub_policies) {
-                                for(auto x: id_ptr->groups_vec) {
+                                for(auto x: group_vec) {
                                     DEB___("Connection identities: ip identity '%s' against policy '%s'",x.c_str(),i->name.c_str());
                                     if(x == i->name) {
                                         DIA___("Connection identities: ip identity '%s' matches policy '%s'",x.c_str(),i->name.c_str());
@@ -1642,7 +1678,6 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                                 }
                             }
                         }
-                        cfgapi_identity_ip_lock.unlock();
                         
                         if(bad_auth) {
                             delete_proxy = true;

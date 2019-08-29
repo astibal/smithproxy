@@ -39,6 +39,8 @@
 
 #include <smithproxy.hpp>
 #include <cmdserver.hpp>
+#include <authfactory.hpp>
+
 
 SmithProxy::~SmithProxy () {
 
@@ -72,9 +74,9 @@ std::thread* SmithProxy::create_identity_refresh_thread() {
 
             DEBS_("id_thread: refreshing identities");
 
-            cfgapi_auth_shm_ip_table_refresh();
-            cfgapi_auth_shm_ip6_table_refresh();
-            cfgapi_auth_shm_token_table_refresh();
+            AuthFactory::get().shm_ip4_table_refresh();
+            AuthFactory::get().shm_ip6_table_refresh();
+            AuthFactory::get().shm_token_table_refresh();
 
             DUMS_("id_thread: finished");
 

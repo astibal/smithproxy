@@ -233,13 +233,9 @@ struct IdentityInfoBase {
     unsigned int tx_bytes = 0;
     
     unsigned int last_seen_at;
-    unsigned int last_seen_policy;
+    unsigned int last_seen_policy = 0;
     
-    IdentityInfoBase() {
-        idle_timeout = global_idle_timeout; 
-        created = time(nullptr);
-        last_seen_at = created;
-    }
+    IdentityInfoBase();
     
     inline void touch() { last_seen_at = time(nullptr); }
     inline bool i_timeout() const { return ( (time(nullptr) - last_seen_at) > idle_timeout ); }
@@ -254,7 +250,7 @@ struct IdentityInfoType : public IdentityInfoBase {
     
     IdentityInfoType() : IdentityInfoBase() {}
 
-    virtual void update() {
+    void update() override {
         groups = last_logon_info.groups();
         groups_vec.clear();
         
@@ -278,58 +274,15 @@ struct IdentityInfoType : public IdentityInfoBase {
     }    
 };
 
-typedef IdentityInfoType<shm_logon_info> IdentityInfo;
-typedef IdentityInfoType<shm_logon_info6> IdentityInfo6;
 
 template<class ShmLogonType,int AddressSize>
 class shared_logoninfotype_ntoa_map : public shared_map<std::string,ShmLogonType> {
-    virtual std::string get_row_key(ShmLogonType* r) { return r->ip(); }
+    std::string get_row_key(ShmLogonType* r) override { return r->ip(); }
 };
 
-typedef shared_logoninfotype_ntoa_map<shm_logon_info,4> shared_ip_map;
-typedef shared_logoninfotype_ntoa_map<shm_logon_info6,16> shared_ip6_map;
 
-// refresh from shared memory
-extern int cfgapi_auth_shm_token_table_refresh(); 
+typedef IdentityInfoType<shm_logon_info> IdentityInfo;
+typedef IdentityInfoType<shm_logon_info6> IdentityInfo6;
 
-// lookup by ip -> returns pointer IN the auth_ip_map
-extern int cfgapi_auth_shm_ip_table_refresh();
-extern IdentityInfo* cfgapi_ip_auth_get(std::string&);
-extern bool  cfgapi_ip_auth_inc_counters(std::string& host, unsigned int rx, unsigned int tx);
-extern void cfgapi_ip_auth_remove(std::string&);
-extern void cfgapi_ip_auth_timeout_check(void);
-
-// lookup by ip -> returns pointer IN the auth_ip_map
-extern int cfgapi_auth_shm_ip6_table_refresh();
-extern IdentityInfo6* cfgapi_ip6_auth_get(std::string&);
-extern bool  cfgapi_ip6_auth_inc_counters(std::string& host, unsigned int rx, unsigned int tx);
-extern void cfgapi_ip6_auth_remove(std::string&);
-extern void cfgapi_ip6_auth_timeout_check(void);
-
-
-class baseHostCX;
-bool cfgapi_ipX_auth_inc_counters(baseHostCX* cx, unsigned int rx, unsigned int tx);
-bool cfgapi_ipX_auth_inc_counters(baseHostCX* cx);
-
-
-extern std::recursive_mutex cfgapi_identity_ip_lock;
-extern std::unordered_map<std::string,IdentityInfo> auth_ip_map;
-extern shared_ip_map  auth_shm_ip_map;
-
-extern std::recursive_mutex cfgapi_identity_ip6_lock;
-extern std::unordered_map<std::string,IdentityInfo6> auth_ip6_map;
-extern shared_ip6_map auth_shm_ip6_map;
-
-extern shared_table<shm_logon_token> auth_shm_token_map;
-
-// authentication token cache
-extern std::recursive_mutex cfgapi_identity_token_lock;
-extern std::unordered_map<std::string,std::pair<unsigned int,std::string>> cfgapi_identity_token_cache; // per-ip token cache. Entry is valid for
-extern unsigned int cfgapi_identity_token_timeout; // token expires _from_cache_ after this timeout (in seconds).
-
-extern std::string cfgapi_identity_portal_address;
-extern std::string cfgapi_identity_portal_address6;
-extern std::string cfgapi_identity_portal_port_http;
-extern std::string cfgapi_identity_portal_port_https;
 
 #endif

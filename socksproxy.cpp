@@ -44,6 +44,9 @@
 #include <socksproxy.hpp>
 #include <mitmhost.hpp>
 #include <cfgapi.hpp>
+#include <authfactory.hpp>
+
+#include <vector>
 
 
 SocksProxy::SocksProxy(baseCom* c): MitmProxy(c) {}
@@ -214,13 +217,27 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
                 // reload table and check timeouts each 5 seconds
                 time_t now = time(nullptr);
                 if (now > auth_table_refreshed + 5) {
-                    cfgapi_auth_shm_ip_table_refresh();
-                    cfgapi_auth_shm_ip6_table_refresh();
-                    auth_table_refreshed = now;
 
-                    //one day this can run in separate thread to not slow down session setup rate
-                    cfgapi_ip_auth_timeout_check();
-                    cfgapi_ip6_auth_timeout_check();
+                    // refresh and timeout IPv4 entries
+
+                    {
+                        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip4_lock());
+                        DUMS___("authentication: refreshing ip4 shm logons");
+                        AuthFactory::get().shm_ip4_table_refresh();
+
+                        DUMS___("authentication: checking ip4 timeouts");
+                        AuthFactory::get().ip4_timeout_check();
+                    }
+
+                    // refresh and timeout IPv6 entries
+                    {
+                        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
+                        DUMS___("authentication: refreshing ip6 shm logons");
+                        AuthFactory::get().shm_ip6_table_refresh();
+
+                        DUMS___("authentication: checking ip6 timeouts");
+                        AuthFactory::get().ip6_timeout_check();
+                    }
                 }
 
                 bool identity_resolved = resolve_identity(src_cx, false);
@@ -253,29 +270,39 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
                     std::string str_af = inet_family_str(af);
 
 
-                    cfgapi_identity_ip_lock.lock();
-
-                    // use common base pointer, so we can use all IdentityInfo types
-                    IdentityInfoBase *id_ptr = nullptr;
+                    std::vector<std::string> groups_vec;
+                    bool found = false;
 
                     if (af == AF_INET || af == 0) {
-                        auto ip = auth_ip_map.find(n_cx->host());
-                        if (ip != auth_ip_map.end()) {
-                            id_ptr = &(*ip).second;
+                        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip4_lock());
+                        auto ip = AuthFactory::get_ip4_map().find(n_cx->host());
+                        if (ip != AuthFactory::get_ip4_map().end()) {
+                            IdentityInfoBase *id_ptr = &(*ip).second;
+
+                            if(id_ptr) {
+                                found = true;
+                                for (auto const& g: id_ptr->groups_vec) groups_vec.push_back(g);
+                            }
                         }
                     } else if (af == AF_INET6) {
-                        auto ip = auth_ip6_map.find(n_cx->host());
-                        if (ip != auth_ip6_map.end()) {
-                            id_ptr = &(*ip).second;
+                        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
+                        auto ip = AuthFactory::get_ip6_map().find(n_cx->host());
+                        if (ip != AuthFactory::get_ip6_map().end()) {
+                            IdentityInfoBase *id_ptr = &(*ip).second;
+
+                            if(id_ptr) {
+                                found = true;
+                                for (auto const& g: id_ptr->groups_vec) groups_vec.push_back(g);
+                            }
                         }
                     }
 
-                    if (id_ptr != nullptr) {
+                    if ( found ) {
                         //std::string groups = id_ptr->last_logon_info.groups();
 
                         if (CfgFactory::get().policy_prof_auth(matched_policy()) != nullptr)
                             for (auto i: CfgFactory::get().policy_prof_auth(matched_policy())->sub_policies) {
-                                for (auto x: id_ptr->groups_vec) {
+                                for (auto x: groups_vec) {
                                     DEB___("Connection identities: ip identity '%s' against policy '%s'", x.c_str(),
                                            i->name.c_str());
                                     if (x == i->name) {
@@ -299,7 +326,6 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
                             }
                         }
                     }
-                    cfgapi_identity_ip_lock.unlock();
 
                     if (bad_auth) {
                         delete_proxy = true;

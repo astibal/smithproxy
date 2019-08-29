@@ -49,7 +49,7 @@
 #include <socle.hpp>
 #include <main.hpp>
 
-#include <shmtable.hpp>
+#include <authfactory.hpp>
 
 
 CfgFactory::CfgFactory(): args_debug_flag(NON), syslog_level(INF)  {
@@ -1157,10 +1157,10 @@ int CfgFactory::load_db_prof_auth () {
     DIAS_("load_db_prof_auth: start");
     
     DIAS_("load_db_prof_auth: portal settings");
-    cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("address",cfgapi_identity_portal_address);
-    cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("address6",cfgapi_identity_portal_address6);
-    cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("http_port",cfgapi_identity_portal_port_http);
-    cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("https_port",cfgapi_identity_portal_port_https);    
+    cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("address", AuthFactory::get().portal_address);
+    cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("address6", AuthFactory::get().portal_address6);
+    cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("http_port", AuthFactory::get().portal_port_http);
+    cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("https_port", AuthFactory::get().portal_port_https);
     
     DIAS_("load_db_prof_auth: profiles");
     if(cfgapi.getRoot().exists("auth_profiles")) {
@@ -1801,8 +1801,8 @@ bool CfgFactory::apply_tenant_config () {
         ret += apply_tenant_index(listen_dtls_port, tenant_index);
         ret += apply_tenant_index(listen_udp_port, tenant_index);
         ret += apply_tenant_index(listen_socks_port, tenant_index);
-        ret += apply_tenant_index(cfgapi_identity_portal_port_http, tenant_index);
-        ret += apply_tenant_index(cfgapi_identity_portal_port_https, tenant_index);
+        ret += apply_tenant_index(AuthFactory::get().portal_port_http, tenant_index);
+        ret += apply_tenant_index(AuthFactory::get().portal_port_https, tenant_index);
 
         cli_port += tenant_index;
     }

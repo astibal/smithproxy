@@ -38,46 +38,27 @@
 */
 
 
-#include <cfgapi.hpp>
-#include <cfgapi_auth.hpp>
+#include <authfactory.hpp>
 #include <logger.hpp>
-
-unsigned int IdentityInfoBase::global_idle_timeout = 600;
-
-
-// IPv4 logon shm table and its map
-shared_ip_map auth_shm_ip_map;
-std::unordered_map<std::string,IdentityInfo> auth_ip_map;
-
-// IPv6 logon shm table and its map
-shared_ip6_map auth_shm_ip6_map;
-std::unordered_map<std::string,IdentityInfo6> auth_ip6_map;
+#include <cfgapi.hpp>
 
 
+IdentityInfoBase::IdentityInfoBase() {
+    idle_timeout = AuthFactory::get().global_idle_timeout;
+    created = time(nullptr);
+    last_seen_at = created;
+}
 
-shared_table<shm_logon_token> auth_shm_token_map;
-
-// authentication token cache
-std::recursive_mutex cfgapi_identity_token_lock;
-std::recursive_mutex cfgapi_identity_ip_lock;
-std::unordered_map<std::string,std::pair<unsigned int,std::string>> cfgapi_identity_token_cache; // per-ip token cache. Entry is valid for
-unsigned int cfgapi_identity_token_timeout = 20; // token expires _from_cache_ after this timeout (in seconds).
-
-std::string cfgapi_identity_portal_address = "192.168.0.1";
-std::string cfgapi_identity_portal_address6;
-std::string cfgapi_identity_portal_port_http = "8008";
-std::string cfgapi_identity_portal_port_https = "8043";
-
-int cfgapi_auth_shm_ip_table_refresh()  {
+int AuthFactory::shm_ip4_table_refresh()  {
 
 
     {
         std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
-        auth_shm_ip_map.attach(string_format(AUTH_IP_MEM_NAME, CfgFactory::get().tenant_name.c_str()).c_str(), AUTH_IP_MEM_SIZE,
+        shm_ip4_map.attach(string_format(AUTH_IP_MEM_NAME, CfgFactory::get().tenant_name.c_str()).c_str(), AUTH_IP_MEM_SIZE,
                                string_format(AUTH_IP_SEM_NAME, CfgFactory::get().tenant_name.c_str()).c_str() );
     }
     DEBS_("cfgapi_auth_shm_ip_table_refresh: acquiring semaphore");
-    int rc = auth_shm_ip_map.acquire();
+    int rc = shm_ip4_map.acquire();
     DEBS_("cfgapi_auth_shm_ip_table_refresh: acquiring semaphore: done");
     if(rc) {
         WARS_("cfgapi_auth_shm_ip_table_refresh: cannot acquire semaphore for token table");
@@ -85,28 +66,28 @@ int cfgapi_auth_shm_ip_table_refresh()  {
     }
     
     DEBS_("cfgapi_auth_shm_ip_table_refresh: loading table");
-    int l_ip = auth_shm_ip_map.load();
+    int l_ip = shm_ip4_map.load();
     DIAS_("shared memory ip user table loaded");
     DEBS_("cfgapi_auth_shm_ip_table_refresh: loading table: done, releasing semaphore");
-    auth_shm_ip_map.release();
+    shm_ip4_map.release();
     DEBS_("cfgapi_auth_shm_ip_table_refresh: semaphore released");
     
     if(l_ip >= 0) {
         // new data!
-        std::lock_guard<std::recursive_mutex> l(cfgapi_identity_ip_lock);
+        std::scoped_lock<std::recursive_mutex> l(AuthFactory::get_ip4_lock());
         
-        if(l_ip == 0 && ( ! auth_ip_map.empty() )) {
+        if(l_ip == 0 && ( ! ip4_map_.empty() )) {
             DIAS_("cfgapi_auth_shm_ip_table_refresh: zero sized table received, flusing ip map");
-            auth_ip_map.clear();
+            ip4_map_.clear();
         }
         
-        DIA_("cfgapi_auth_shm_ip_table_refresh: new data: version %d, entries %d",auth_shm_ip_map.header_version(),auth_shm_ip_map.header_entries());
-        for(auto& rt: auth_shm_ip_map.entries()) {
+        DIA_("cfgapi_auth_shm_ip_table_refresh: new data: version %d, entries %d",shm_ip4_map.header_version(),shm_ip4_map.header_entries());
+        for(auto& rt: shm_ip4_map.entries()) {
 
             std::string ip = rt.ip();
             
-            auto found = auth_ip_map.find(ip);
-            if(found != auth_ip_map.end()) {
+            auto found = ip4_map_.find(ip);
+            if(found != ip4_map_.end()) {
                 DIA_("Updating identity in database: %s",ip.c_str());
                 IdentityInfo& id = (*found).second;
                 id.ip = ip;
@@ -119,7 +100,7 @@ int cfgapi_auth_shm_ip_table_refresh()  {
                 i.last_logon_info = rt;
                 i.username = rt.username();
                 i.update();
-                auth_ip_map[ip] = i;
+                ip4_map_[ip] = i;
                 INF_("New identity in database: ip: %s, username: %s, groups: %s ",ip.c_str(),i.username.c_str(),i.groups.c_str());
             }
             DIA_("cfgapi_auth_shm_ip_table_refresh: loaded: %d,%s,%s",ip.c_str(),rt.username().c_str(),rt.groups().c_str());
@@ -130,18 +111,18 @@ int cfgapi_auth_shm_ip_table_refresh()  {
     return 0;
 }
 
-int cfgapi_auth_shm_token_table_refresh()  {
+int AuthFactory::shm_token_table_refresh()  {
 
     {
         std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
 
-        auth_shm_token_map.attach(string_format(AUTH_TOKEN_MEM_NAME, CfgFactory::get().tenant_name.c_str()).c_str(),
+        shm_token_map_.attach(string_format(AUTH_TOKEN_MEM_NAME, CfgFactory::get().tenant_name.c_str()).c_str(),
                                   AUTH_TOKEN_MEM_SIZE,
                                   string_format(AUTH_TOKEN_SEM_NAME, CfgFactory::get().tenant_name.c_str()).c_str());
     }
 
     DEBS_("cfgapi_auth_shm_token_table_refresh: acquiring semaphore");
-    int rc = auth_shm_token_map.acquire();
+    int rc = shm_token_map_.acquire();
     DEBS_("cfgapi_auth_shm_token_table_refresh: acquiring semaphore: done");
     if(rc) {
         WARS_("cfgapi_auth_shm_token_table_refresh: cannot acquire semaphore for token table");
@@ -149,53 +130,50 @@ int cfgapi_auth_shm_token_table_refresh()  {
     }
     
     DEBS_("cfgapi_auth_shm_token_table_refresh: loading table");
-    int l_tok = auth_shm_token_map.load();
+    int l_tok = shm_token_map_.load();
     DIAS_("shared memory auth tokem table loaded");
     DEBS_("cfgapi_auth_shm_token_table_refresh: loading table: done, releasing semaphore");
-    auth_shm_token_map.release();
+    shm_token_map_.release();
     DEBS_("cfgapi_auth_shm_token_table_refresh: semaphore released");
 
     if(l_tok > 0) {
-        DIA_("cfgapi_auth_shm_token_table_refresh: new data: version %d, entries %d, rowsize %d",auth_shm_token_map.header_version(),auth_shm_token_map.header_entries(),auth_shm_token_map.header_rowsize());
+        DIA_("cfgapi_auth_shm_token_table_refresh: new data: version %d, entries %d, rowsize %d",shm_token_map_.header_version(),shm_token_map_.header_entries(),shm_token_map_.header_rowsize());
         return l_tok;
     } else {
-        DEB_("cfgapi_auth_shm_token_table_refresh: same data: version %d, entries %d, rowsize %d",auth_shm_token_map.header_version(),auth_shm_token_map.header_entries(),auth_shm_token_map.header_rowsize());
+        DEB_("cfgapi_auth_shm_token_table_refresh: same data: version %d, entries %d, rowsize %d",shm_token_map_.header_version(),shm_token_map_.header_entries(),shm_token_map_.header_rowsize());
     }
     
     return 0;
 };
 
-IdentityInfo* cfgapi_ip_auth_get(std::string& host) {
+IdentityInfo* AuthFactory::ip4_get(std::string& host) {
     IdentityInfo* ret = nullptr;
 
-    cfgapi_identity_ip_lock.lock();    
-    auto ip = auth_ip_map.find(host);
+    std::scoped_lock<std::recursive_mutex> l(AuthFactory::get_ip4_lock());
+    auto ip = ip4_map_.find(host);
 
-    if (ip != auth_ip_map.end()) {
+    if (ip != ip4_map_.end()) {
         IdentityInfo& id = (*ip).second;
         ret  = &id;
     }
-    
-    cfgapi_identity_ip_lock.unlock();
+
     return ret;
    
 }
 
 
-bool  cfgapi_ip_auth_inc_counters(std::string& host, unsigned int rx, unsigned int tx) {
+bool  AuthFactory::ip4_inc_counters(std::string& host, unsigned int rx, unsigned int tx) {
     bool ret = false;
-    
-    cfgapi_identity_ip_lock.lock();    
-    auto ip = auth_ip_map.find(host);
 
-    if (ip != auth_ip_map.end()) {
+    std::scoped_lock<std::recursive_mutex> l(AuthFactory::get_ip4_lock());
+    auto ip = ip4_map_.find(host);
+
+    if (ip != ip4_map_.end()) {
         IdentityInfo& id = (*ip).second;
         id.rx_bytes += rx;
         id.tx_bytes += tx;
         ret = true;
     }
-    
-    cfgapi_identity_ip_lock.unlock();
     
     return ret;
 }
@@ -203,56 +181,55 @@ bool  cfgapi_ip_auth_inc_counters(std::string& host, unsigned int rx, unsigned i
 
 
 // remove IP from AUTH IP MAP and synchronize with SHM AUTH IP TABLE (table which is used to communicate with bend daemon)
-void cfgapi_ip_auth_remove(std::string& host) {
+void AuthFactory::ip4_remove(std::string& host) {
 
-    cfgapi_identity_ip_lock.lock();    
-    auto ip = auth_ip_map.find(host);
+    std::scoped_lock<std::recursive_mutex> l(AuthFactory::get_ip4_lock());
+    auto ip = ip4_map_.find(host);
 
-    if (ip != auth_ip_map.end()) {
+    if (ip != ip4_map_.end()) {
         // erase internal ip map entry
 
         DEB_("cfgapi_ip_map_remove: auth ip map - removing: %s",host.c_str());
-        auth_ip_map.erase(ip);
+        ip4_map_.erase(ip);
 
         // for debug only: print all shm table entries
         if(LEV_(DUM)) {
             DUMS_(":: - SHM AUTH IP map - before removal::");
-            for(auto& x_it: auth_shm_ip_map.map_entries()) {
+            for(auto& x_it: shm_ip4_map.map_entries()) {
                 DUM_("::  %s::",x_it.first.c_str());
             }
         }
         
-        auth_shm_ip_map.acquire();
+        shm_ip4_map.acquire();
 
         // erase shared ip map entry
-        auto sh_it = auth_shm_ip_map.map_entries().find(host);
+        auto sh_it = shm_ip4_map.map_entries().find(host);
 
-        if(sh_it != auth_shm_ip_map.map_entries().end()) {
+        if(sh_it != shm_ip4_map.map_entries().end()) {
             DEB_("cfgapi_ip_map_remove: shm auth ip table  - removing: %s",host.c_str());
-            auth_shm_ip_map.map_entries().erase(sh_it);
+            shm_ip4_map.map_entries().erase(sh_it);
             
             if(LEV_(DUM)) {
                 DUMS_(":: - SHM AUTH IP map - after removal::");
-                for(auto& x_it: auth_shm_ip_map.map_entries()) {
+                for(auto& x_it: shm_ip4_map.map_entries()) {
                         DUM_("::   %s::",x_it.first.c_str());
                 }                
                 
             }
-            auth_shm_ip_map.save(true);
+            shm_ip4_map.save(true);
         }
-        auth_shm_ip_map.release();
+        shm_ip4_map.release();
     }
-    cfgapi_identity_ip_lock.unlock();
 }
 
 
-void cfgapi_ip_auth_timeout_check(void) {
+void AuthFactory::ip4_timeout_check() {
     DEBS_("cfgapi_ip_auth_timeout_check: started");
-    cfgapi_identity_ip_lock.lock();
+    std::scoped_lock<std::recursive_mutex> l(AuthFactory::get_ip4_lock());
     
     std::set<std::string> to_remove;
     
-    for(auto& e: auth_ip_map) {
+    for(auto& e: ip4_map_) {
         const std::string&  ip = e.first;
         IdentityInfo& id = e.second;
         
@@ -264,30 +241,28 @@ void cfgapi_ip_auth_timeout_check(void) {
     }
     
     for(auto tr: to_remove) {
-        cfgapi_ip_auth_remove(tr);
+        ip4_remove(tr);
         INF_("IP address %s identity timed out.", tr.c_str());
     }
-    
-    cfgapi_identity_ip_lock.unlock();
 }
 
 
-bool cfgapi_ipX_auth_inc_counters(baseHostCX* cx, unsigned int rx, unsigned int tx) {
+bool AuthFactory::ipX_inc_counters(baseHostCX* cx, unsigned int rx, unsigned int tx) {
     if(cx && cx->com()) {
         if(cx->com()->l3_proto() == AF_INET6) {
-            return cfgapi_ip6_auth_inc_counters(cx->host(),rx,tx);
+            return ip6_inc_counters(cx->host(),rx,tx);
         } else
         if(cx->com()->l3_proto() == AF_INET || cx->com()->l3_proto() == 0)  {
-            return cfgapi_ip_auth_inc_counters(cx->host(),rx,tx);
+            return ip4_inc_counters(cx->host(),rx,tx);
         }
     }
     
     return false;
 }
 
-bool cfgapi_ipX_auth_inc_counters(baseHostCX* cx) {
+bool AuthFactory::ipX_inc_counters(baseHostCX* cx) {
     if(cx) {
-        return cfgapi_ipX_auth_inc_counters(cx,cx->meter_read_bytes,cx->meter_write_bytes);
+        return ipX_inc_counters(cx,cx->meter_read_bytes,cx->meter_write_bytes);
     }
     
     return false;

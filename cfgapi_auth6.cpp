@@ -38,53 +38,54 @@
 */
 
 #include <cfgapi.hpp>
-#include <cfgapi_auth.hpp>
+#include <authfactory.hpp>
 #include <logger.hpp>
 
-std::recursive_mutex cfgapi_identity_ip6_lock;
-// template <class ShmLogonType>
-// unsigned int IdentityInfoType<ShmLogonType>::global_idle_timeout = 600;
 
-int cfgapi_auth_shm_ip6_table_refresh()  {
-    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
-    
-    auth_shm_ip6_map.attach(string_format(AUTH_IP6_MEM_NAME,
-                                          CfgFactory::get().tenant_name.c_str()).c_str(),
-                            AUTH_IP6_MEM_SIZE,
-                            string_format(AUTH_IP6_SEM_NAME,
-                                          CfgFactory::get().tenant_name.c_str()).c_str());
-    
-    DEBS_("cfgapi_auth_shm_ip6_table_refresh: acquring semaphore");
-    int rc = auth_shm_ip6_map.acquire();
-    DIAS_("cfgapi_auth_shm_ip6_table_refresh: acquring semaphore: done");
-    if(rc) {
-        WARS_("cfgapi_auth_shm_ip6_table_refresh: cannot acquire semaphore for token table");
-        return -1;
+int AuthFactory::shm_ip6_table_refresh()  {
+
+
+    {
+        std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
+
+        shm_ip6_map.attach(string_format(AUTH_IP6_MEM_NAME,
+                                         CfgFactory::get().tenant_name.c_str()).c_str(),
+                           AUTH_IP6_MEM_SIZE,
+                           string_format(AUTH_IP6_SEM_NAME,
+                                         CfgFactory::get().tenant_name.c_str()).c_str());
+
+        DEBS_("cfgapi_auth_shm_ip6_table_refresh: acquring semaphore");
+        int rc = shm_ip6_map.acquire();
+        DIAS_("cfgapi_auth_shm_ip6_table_refresh: acquring semaphore: done");
+        if (rc) {
+            WARS_("cfgapi_auth_shm_ip6_table_refresh: cannot acquire semaphore for token table");
+            return -1;
+        }
     }
-    
+
     DEBS_("cfgapi_auth_shm_ip6_table_refresh: loading table");
-    int l_ip = auth_shm_ip6_map.load();
+    int l_ip = shm_ip6_map.load();
     DIAS_("cfgapi_auth_shm_ip6_table_refresh: loading table: done, releasing semaphore");
-    auth_shm_ip6_map.release();
+    shm_ip6_map.release();
     DEBS_("cfgapi_auth_shm_ip6_table_refresh: semaphore released");
     
     if(l_ip >= 0) {
         // new data!
-        cfgapi_identity_ip6_lock.lock();
+        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
         
-        if(l_ip == 0 && auth_ip6_map.size() > 0) {
+        if(l_ip == 0 && ( ! ip6_map_.empty()) ) {
             DIAS_("cfgapi_auth_shm_ip6_table_refresh: zero sized table received, flusing ip map");
-            auth_ip6_map.clear();
+            ip6_map_.clear();
         }
         
-        DIA_("cfgapi_auth_shm_ip6_table_refresh: new data: version %d, entries %d",auth_shm_ip6_map.header_version(),auth_shm_ip6_map.header_entries());
-        for(typename std::vector<shm_logon_info6>::iterator i = auth_shm_ip6_map.entries().begin(); i != auth_shm_ip6_map.entries().end() ; ++i) {
+        DIA_("cfgapi_auth_shm_ip6_table_refresh: new data: version %d, entries %d",shm_ip6_map.header_version(),shm_ip6_map.header_entries());
+        for(typename std::vector<shm_logon_info6>::iterator i = shm_ip6_map.entries().begin(); i != shm_ip6_map.entries().end() ; ++i) {
             shm_logon_info6& rt = (*i);
             
             std::string ip = rt.ip();
             
-            std::unordered_map <std::string, IdentityInfo6 >::iterator found = auth_ip6_map.find(ip);
-            if(found != auth_ip6_map.end()) {
+            std::unordered_map <std::string, IdentityInfo6 >::iterator found = ip6_map_.find(ip);
+            if(found != ip6_map_.end()) {
                 DIA_("Updating identity in database: %s",ip.c_str());
                 IdentityInfo6& id = (*found).second;
                 id.ip = ip;
@@ -97,104 +98,98 @@ int cfgapi_auth_shm_ip6_table_refresh()  {
                 i.last_logon_info = rt;
                 i.username = rt.username();
                 i.update();
-                auth_ip6_map[ip] = i;
+                ip6_map_[ip] = i;
                 INF_("New identity in database: ip: %s, username: %s, groups: %s ",ip.c_str(),i.username.c_str(),i.groups.c_str());
             }
             DIA_("cfgapi_auth_shm_ip6_table_refresh: loaded: %d,%s,%s",ip.c_str(),rt.username().c_str(),rt.groups().c_str());
         }
-        cfgapi_identity_ip6_lock.unlock();
         
         return l_ip;
     }
     return 0;
 }
 
-IdentityInfo6* cfgapi_ip6_auth_get(std::string& host) {
+IdentityInfo6* AuthFactory::ip6_get(std::string& host) {
     IdentityInfo6* ret = nullptr;
 
-    cfgapi_identity_ip6_lock.lock();    
-    auto ip = auth_ip6_map.find(host);
+    std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
+    auto ip = ip6_map_.find(host);
 
-    if (ip != auth_ip6_map.end()) {
+    if (ip != ip6_map_.end()) {
         IdentityInfo6& id = (*ip).second;
         ret  = &id;
     }
-    
-    cfgapi_identity_ip6_lock.unlock();
+
     return ret;
-   
 }
 
 
-bool  cfgapi_ip6_auth_inc_counters(std::string& host, unsigned int rx, unsigned int tx) {
+bool  AuthFactory::ip6_inc_counters(std::string& host, unsigned int rx, unsigned int tx) {
     bool ret = false;
-    
-    cfgapi_identity_ip6_lock.lock();    
-    auto ip = auth_ip6_map.find(host);
 
-    if (ip != auth_ip6_map.end()) {
+    std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
+    auto ip = ip6_map_.find(host);
+
+    if (ip != ip6_map_.end()) {
         IdentityInfo6& id = (*ip).second;
         id.rx_bytes += rx;
         id.tx_bytes += tx;
         ret = true;
     }
     
-    cfgapi_identity_ip6_lock.unlock();
-    
     return ret;
 }
 
 // remove IP from AUTH IP MAP and synchronize with SHM AUTH IP TABLE (table which is used to communicate with bend daemon)
-void cfgapi_ip6_auth_remove(std::string& host) {
+void AuthFactory::ip6_remove(std::string& host) {
 
-    cfgapi_identity_ip6_lock.lock();    
-    auto ip = auth_ip6_map.find(host);
+    std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
+    auto ip = ip6_map_.find(host);
 
-    if (ip != auth_ip6_map.end()) {
+    if (ip != ip6_map_.end()) {
         // erase internal ip map entry
 
         DIA_("cfgapi_ip_map_remove: auth ip map - removing: %s",host.c_str());
-        auth_ip6_map.erase(ip);
+        ip6_map_.erase(ip);
 
         // for debug only: print all shm table entries
         if(LEV_(DEB)) {
             DEBS_(":: - SHM AUTH IP map - before removal::");
-            for(auto& x_it: auth_shm_ip6_map.map_entries()) {
+            for(auto& x_it: shm_ip6_map.map_entries()) {
                 DEB_("::  %s::",x_it.first.c_str());
             }
         }
         
-        auth_shm_ip6_map.acquire();
+        shm_ip6_map.acquire();
 
         // erase shared ip map entry
-        auto sh_it = auth_shm_ip6_map.map_entries().find(host);
+        auto sh_it = shm_ip6_map.map_entries().find(host);
 
-        if(sh_it != auth_shm_ip6_map.map_entries().end()) {
+        if(sh_it != shm_ip6_map.map_entries().end()) {
             DIA_("cfgapi_ip_map_remove: shm auth ip table  - removing: %s",host.c_str());
-            auth_shm_ip6_map.map_entries().erase(sh_it);
+            shm_ip6_map.map_entries().erase(sh_it);
             
             if(LEV_(DEB)) {
                 DEBS_(":: - SHM AUTH IP map - after removal::");
-                for(auto& x_it: auth_shm_ip6_map.map_entries()) {
+                for(auto& x_it: shm_ip6_map.map_entries()) {
                         DEB_("::   %s::",x_it.first.c_str());
                 }                
                 
             }
-            auth_shm_ip6_map.save(true);
+            shm_ip6_map.save(true);
         }
-        auth_shm_ip6_map.release();
+        shm_ip6_map.release();
     }
-    cfgapi_identity_ip6_lock.unlock();
 }
 
 
-void cfgapi_ip6_auth_timeout_check(void) {
+void AuthFactory::ip6_timeout_check() {
     DIAS_("cfgapi_ip_auth_timeout_check: started");
-    cfgapi_identity_ip6_lock.lock();
+    std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
     
     std::set<std::string> to_remove;
     
-    for(auto& e: auth_ip6_map) {
+    for(auto& e: ip6_map_) {
         const std::string&  ip = e.first;
         IdentityInfo6& id = e.second;
         
@@ -206,9 +201,7 @@ void cfgapi_ip6_auth_timeout_check(void) {
     }
     
     for(auto tr: to_remove) {
-        cfgapi_ip_auth_remove(tr);
+        ip6_remove(tr);
         INF_("IP address %s identity timed out.", tr.c_str());
     }
-    
-    cfgapi_identity_ip6_lock.unlock();
 }
