@@ -236,9 +236,9 @@ void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, ve
             }
 
 
-            INF___("Connection www request: %s",ESC(app_request->hr()));
+            INF___("http request: %s",ESC(app_request->hr()));
         } else {
-            INF___("Connection www request: %s (app_request cast failed)",ESC(print_request));
+            INF___("http request: %s (app_request cast failed)",ESC(print_request));
         }
 
 
