@@ -44,46 +44,41 @@
 #include <apphostcx.hpp>
 #include <dns.hpp>
 #include <inspectors.hpp>
+#include <sxsignature.hpp>
 
 extern std::vector<duplexFlowMatch*> sigs_starttls;
 extern std::vector<duplexFlowMatch*> sigs_detection;
 
-class MyDuplexFlowMatch : public duplexFlowMatch {
-    
-public:    
-    std::string sig_side;
-    std::string category;
-};
 
 
 class MySSLMitmCom : public baseSSLMitmCom<SSLCom> {
 public:
-    virtual ~MySSLMitmCom() {};
+    ~MySSLMitmCom() override = default;
 
-    virtual baseCom* replicate();
-    virtual bool spoof_cert(X509* x, SpoofOptions& spo);
+    baseCom* replicate() override;
+    bool spoof_cert(X509* x, SpoofOptions& spo) override;
 };
 
 class MyDTLSMitmCom : public baseSSLMitmCom<DTLSCom> {
-    virtual ~MyDTLSMitmCom() {};
+    ~MyDTLSMitmCom() override = default;
 };
 
 
 struct ApplicationData: public socle::sobject {
-    virtual ~ApplicationData() {};
+    ~ApplicationData() override = default;
     bool is_ssl = false;
     
     virtual std::string hr(int verbosity=iINF) { return std::string(""); };
     virtual std::string original_request() { return request(); }; // parent request
     virtual std::string request() { return std::string(""); };
     
-    virtual bool ask_destroy() { return false; };
-    virtual std::string to_string(int verbosity = iINF) { return name() + ": " + hr(verbosity); };
+    bool ask_destroy() override { return false; };
+    std::string to_string(int verbosity = iINF) override { return name() + ": " + hr(verbosity); };
     
     DECLARE_C_NAME("ApplicationData");
 };
 struct app_HttpRequest : public ApplicationData {
-    virtual ~app_HttpRequest() {};
+    ~app_HttpRequest() override = default;
   
     std::string host;
     std::string uri;
@@ -93,7 +88,7 @@ struct app_HttpRequest : public ApplicationData {
     
     
     // this function returns most usable link for visited site from the request.
-    virtual std::string original_request() {
+    std::string original_request() override {
         if(referer.size() > 0) {
             DEB_("std::string original_request: using referer: %s",referer.c_str());
             return referer;
@@ -102,7 +97,7 @@ struct app_HttpRequest : public ApplicationData {
         DEB_("std::string original_request: using request: %s",request().c_str());
         return request();
     }
-    virtual std::string request() {
+    std::string request() override {
         
         if(uri == "/favicon.ico") {
             DEBS_("std::string original_request: avoiding favicon.ico");
@@ -110,7 +105,18 @@ struct app_HttpRequest : public ApplicationData {
         }
         return proto+host+uri+params;
     };
-    virtual std::string hr(int verbosity=iINF) { std::string ret = proto+host+uri+params; if(verbosity> INF && referer.size()>0) { ret +=(" via "+referer); }; return ret; }
+
+    std::string hr(int verbosity=iINF) override {
+        std::stringstream ret;
+
+        ret << proto << host << uri << params;
+
+        if(verbosity> INF && referer.size()>0) {
+            ret << " via " << referer;
+        }
+
+        return ret.str();
+    }
     
     DECLARE_C_NAME("app_HttpRequest");
 };
@@ -126,21 +132,21 @@ class MitmHostCX : public AppHostCX, public socle::sobject {
 public:
     ApplicationData* application_data = nullptr;
     
-    virtual ~MitmHostCX() { if(application_data) { delete application_data; } ; for(auto i: inspectors_) { delete i; } };
+    ~MitmHostCX() override { delete application_data; for(auto i: inspectors_) { delete i; } };
     
     MitmHostCX(baseCom* c, const char* h, const char* p );
     MitmHostCX( baseCom* c, int s );
-    
-    virtual int process();
+
+    int process() override;
     virtual void load_signatures();
 
     
     std::vector<Inspector*> inspectors_;
-    virtual void inspect(char side);
-    virtual void on_detect(duplexFlowMatch* x_sig, flowMatchState& s, vector_range& r);    
+    void inspect(char side) override;
+    void on_detect(duplexFlowMatch* x_sig, flowMatchState& s, vector_range& r) override;
     virtual void on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, vector_range& r);
     
-    virtual void on_starttls();
+    void on_starttls() override;
 
     int matched_policy() { return matched_policy_; }
     void matched_policy(int p) { matched_policy_ = p; }
@@ -151,7 +157,7 @@ public:
     
     typedef enum { REPLACE_NONE=0, REPLACE_REDIRECT=1, REPLACE_BLOCK=2 } replaceflags_t;    
     void replacement_flag(replaceflags_t i) { replacement_flags_ = i; }
-    replaceflags_t replacement_flag(void)   { return replacement_flags_; }
+    replaceflags_t replacement_flag()   { return replacement_flags_; }
     
     typedef enum {} replacepurpose_t;
     
@@ -172,10 +178,13 @@ public:
     bool is_dns = false;
     bool is_dns_port = false;
 
-    virtual bool ask_destroy();
-    virtual std::string to_string(int verbosity = iINF);    
+    bool ask_destroy() override;
+    std::string to_string(int verbosity = iINF) override;
     
 private:
+
+    baseProxy* parent_proxy_ = nullptr;
+
     unsigned int inspect_cur_flow_size = 0;
     unsigned int inspect_flow_same_bytes = 0;
     int inspect_verdict = Inspector::OK;

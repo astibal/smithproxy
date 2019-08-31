@@ -155,7 +155,8 @@ int load_signatures(libconfig::Config& cfg, const char* name, std::vector<duplex
         const Setting& signature = cfg_signatures[i];
         signature.lookupValue("name", newsig->name());
         signature.lookupValue("side", newsig->sig_side);
-        signature.lookupValue("cat", newsig->category);                
+        signature.lookupValue("cat", newsig->category);
+        signature.lookupValue("severity", newsig->severity);
 
         const Setting& signature_flow = cfg_signatures[i]["flow"];
         int flow_count = signature_flow.getLength();

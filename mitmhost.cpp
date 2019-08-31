@@ -53,7 +53,16 @@ bool MitmHostCX::ask_destroy() {
 }
 
 std::string MitmHostCX::to_string(int verbosity) {
-    return "MitmHostCX: " + AppHostCX::name();
+
+    std::stringstream ret;
+
+    if(parent_proxy()) {
+        ret << "MitmHostCX[" << parent_flag() << "]:" << parent_proxy()->to_string(iINF);
+    } else {
+        ret << "MitmHostCX: " << AppHostCX::name();
+    }
+
+    return ret.str();
 }
 
 
@@ -69,19 +78,19 @@ bool MySSLMitmCom::spoof_cert(X509* x, SpoofOptions& spo) {
 
     bool r = baseSSLMitmCom::spoof_cert(x,spo);
 
-    //EXT_("MySSLMitmCom::spoof_cert: cert:\n%s",cert.c_str());
+    //EXT___("MySSLMitmCom::spoof_cert: cert:\n%s",cert.c_str());
 
     return r;
 }
 
 
 MitmHostCX::MitmHostCX(baseCom* c, const char* h, const char* p ) : AppHostCX::AppHostCX(c,h,p) {
-    DEB_("MitmHostCX: constructor %s:%s",h,p);
+    DEB___("MitmHostCX: constructor %s:%s",h,p);
     load_signatures();
 };
 
 MitmHostCX::MitmHostCX( baseCom* c, int s ) : AppHostCX::AppHostCX(c,s) {
-    DEB_("MitmHostCX: constructor %d",s);
+    DEB___("MitmHostCX: constructor %d",s);
     load_signatures();
 };
 
@@ -92,7 +101,7 @@ int MitmHostCX::process() {
     unsigned int len = baseHostCX::readbuf()->size();
 
     // our only processing: hex dup the payload to the log
-    DUMS_("Incoming data(" + this->name() + "):\n" +hex_dump(ptr,len));
+    DUMS___("Incoming data(" + this->name() + "):\n" +hex_dump(ptr,len));
 
     //  read buffer will be truncated by 'len' bytes. Note: truncated bytes are LOST.
     return len;
@@ -100,24 +109,24 @@ int MitmHostCX::process() {
 
 void MitmHostCX::load_signatures() {
 
-    DEBS_("MitmHostCX::load_signatures: start");
+    DEBS___("MitmHostCX::load_signatures: start");
 
     zip_signatures(starttls_sensor(),sigs_starttls);
     zip_signatures(sensor(),sigs_detection);
 
-    DEBS_("MitmHostCX::load_signatures: stop");
+    DEBS___("MitmHostCX::load_signatures: stop");
 };
 
 void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, vector_range& r) {
-    if(r.size() > 0) {
+    if(! r.empty()) {
         std::pair<char,buffer*>& get = flow().flow()[0];
         std::pair<char,buffer*>& status = flow().flow()[0];
 
         buffer* buffer_get = get.second;
-        buffer* buffer_status = status.second;
+
         std::string buffer_data_string((const char*)buffer_get->data(),0,buffer_get->size());
 
-        //INFS_(std::string((const char*)buffer_get->data(),0,buffer_get->size()));
+        //INFS___(std::string((const char*)buffer_get->data(),0,buffer_get->size()));
         std::regex re_get("(GET|POST) *([^ \r\n\?]+)([^ \r\n]*)");
         std::smatch m_get;
 
@@ -131,9 +140,6 @@ void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, ve
         std::string str_temp;
         std::string print_request;
 
-        bool b_get = false;
-        bool b_host = false;
-        bool b_ref = false;
 
         if(std::regex_search (buffer_data_string, m_ref, re_ref)) {
 
@@ -146,17 +152,17 @@ void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, ve
                 application_data = new app_HttpRequest;
             }
 
-            app_HttpRequest* app_request = dynamic_cast<app_HttpRequest*>(application_data);
+            auto* app_request = dynamic_cast<app_HttpRequest*>(application_data);
             if(app_request != nullptr) {
                 app_request->referer = str_temp;
-                DIA_("Referer: %s",ESC(app_request->referer));
+                DIA___("Referer: %s",ESC(app_request->referer));
             }
 
 
         }
 
         if(std::regex_search (buffer_data_string, m_host, re_host))  {
-            if(m_host.size() > 0) {
+            if(! m_host.empty()) {
                 str_temp = m_host[1].str();
                 print_request += str_temp;
 
@@ -164,26 +170,28 @@ void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, ve
                     application_data = new app_HttpRequest;
                 }
 
-                app_HttpRequest* app_request = dynamic_cast<app_HttpRequest*>(application_data);
+                auto* app_request = dynamic_cast<app_HttpRequest*>(application_data);
                 if(app_request != nullptr) {
                     app_request->host = str_temp;
-                    DIA_("Host: %s",app_request->host.c_str());
-                    
+                    DIA___("Host: %s",app_request->host.c_str());
+
+
+                    // FIXME: should be some config variable
                     bool check_inspect_dns_cache = true;
                     if(check_inspect_dns_cache) {
 
                         std::scoped_lock<std::recursive_mutex> d_(DNS::get().dns_lock());
 
-                        DNS_Response* dns_resp_a = DNS::get().dns_cache().get(("A:" + app_request->host).c_str());
-                        DNS_Response* dns_resp_aaaa = DNS::get().dns_cache().get(("AAAA:" + app_request->host).c_str());
+                        DNS_Response* dns_resp_a = DNS::get().dns_cache().get("A:" + app_request->host);
+                        DNS_Response* dns_resp_aaaa = DNS::get().dns_cache().get("AAAA:" + app_request->host);
 
                         if(dns_resp_a && com()->l3_proto() == AF_INET) {
-                            DIA_("HTTP inspection: Host header matches DNS: %s",ESC(dns_resp_a->question_str_0()));
+                            DIA___("HTTP inspection: Host header matches DNS: %s",ESC(dns_resp_a->question_str_0()));
                         } else if(dns_resp_aaaa && com()->l3_proto() == AF_INET6) {
-                            DIA_("HTTP inspection: Host header matches IPv6 DNS: %s",ESC(dns_resp_aaaa->question_str_0()));
+                            DIA___("HTTP inspection: Host header matches IPv6 DNS: %s",ESC(dns_resp_aaaa->question_str_0()));
                         }
                         else {
-                            WARS_("HTTP inspection: Host header DOESN'T match DNS!");
+                            WAR___("HTTP inspection: 'Host' header value '%s' DOESN'T match DNS!", app_request->host.c_str());
                         }
                     }
                 }
@@ -199,16 +207,16 @@ void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, ve
                     application_data = new app_HttpRequest;
                 }
 
-                app_HttpRequest* app_request = dynamic_cast<app_HttpRequest*>(application_data);
+                auto* app_request = dynamic_cast<app_HttpRequest*>(application_data);
                 if(app_request != nullptr) {
                     app_request->uri = str_temp;
-                    DIA_("URI: %s",ESC(app_request->uri));
+                    DIA___("URI: %s",ESC(app_request->uri));
                 }
 
-                if(m_get.size() > 2) {
+                if(app_request && m_get.size() > 2) {
                     str_temp = m_get[3].str();
                     app_request->params = str_temp;
-                    DIA_("params: %s",ESC(app_request->params));
+                    DIA___("params: %s",ESC(app_request->params));
 
                     //print_request += str_temp;
                 }
@@ -216,10 +224,10 @@ void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, ve
         }
 
 
-        app_HttpRequest* app_request = dynamic_cast<app_HttpRequest*>(application_data);
+        auto* app_request = dynamic_cast<app_HttpRequest*>(application_data);
         if(app_request != nullptr) {
             // detect protocol (plain vs ssl)
-            SSLCom* proto_com = dynamic_cast<SSLCom*>(com());
+            auto* proto_com = dynamic_cast<SSLCom*>(com());
             if(proto_com != nullptr) {
                 app_request->proto="https://";
                 app_request->is_ssl = true;
@@ -228,9 +236,9 @@ void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, ve
             }
 
 
-            INF_("Connection www request: %s",ESC(app_request->hr()));
+            INF___("Connection www request: %s",ESC(app_request->hr()));
         } else {
-            INF_("Connection www request: %s (app_request cast failed)",ESC(print_request));
+            INF___("Connection www request: %s (app_request cast failed)",ESC(print_request));
         }
 
 
@@ -252,7 +260,7 @@ void MitmHostCX::inspect(char side) {
     AppHostCX::inspect(side);
     
     if(flow().flow().size() > inspect_cur_flow_size) {
-        DIA_("MitmHostCX::inspect: flow size change: %d",flow().flow().size());
+        DIA___("MitmHostCX::inspect: flow size change: %d",flow().flow().size());
         inspect_flow_same_bytes = 0;
     }
     
@@ -260,18 +268,18 @@ void MitmHostCX::inspect(char side) {
                 (flow().flow().size() == inspect_cur_flow_size && flow().flow().back().second->size() > inspect_flow_same_bytes) ) {
 
         if(flow().flow().size() == inspect_cur_flow_size) {
-            DIA_("MitmHostCX::inspect: new data in the  same flow size %d", flow().flow().size());
+            DIA___("MitmHostCX::inspect: new data in the  same flow size %d", flow().flow().size());
             //return;
         }
         
-        DIAS_("MitmHostCX::inspect: inspector loop:");
+        DIAS___("MitmHostCX::inspect: inspector loop:");
         for(Inspector* inspector: inspectors_) {
             if(inspector->interested(this) && (! inspector->completed() )) {
                 inspector->update(this);
                 
                 inspect_verdict = inspector->verdict();
                 
-                DIA_("MitmHostCX::inspect[%s]: verdict %d",inspector->c_name(), inspect_verdict);
+                DIA___("MitmHostCX::inspect[%s]: verdict %d",inspector->c_name(), inspect_verdict);
                 if(inspect_verdict == Inspector::OK) {
                     //
                 } else if (inspect_verdict == Inspector::CACHED) {
@@ -281,17 +289,17 @@ void MitmHostCX::inspect(char side) {
                     side == 'l' || side == 'L' ? p = peer() : p = this;
                     p->error(true);
                     
-                    AppHostCX* verdict_target = dynamic_cast<AppHostCX*>(p);
+                    auto* verdict_target = dynamic_cast<AppHostCX*>(p);
                     if(verdict_target != nullptr) {
                         inspector->apply_verdict(verdict_target);
                         break;
                     } else {
-                        ERRS_("cannot apply verdict on generic cx");
+                        ERRS___("cannot apply verdict on generic cx");
                     }
                 } 
             }
         }
-        DIAS_("MitmHostCX::inspect: inspector loop end.");
+        DIAS___("MitmHostCX::inspect: inspector loop end.");
         
         inspect_cur_flow_size = flow().flow().size();
         inspect_flow_same_bytes  = flow().flow().back().second->size();
@@ -301,22 +309,34 @@ void MitmHostCX::inspect(char side) {
 
 void MitmHostCX::on_detect(duplexFlowMatch* x_sig, flowMatchState& s, vector_range& r) {
 
-    MyDuplexFlowMatch* sig_sig = (MyDuplexFlowMatch*)x_sig;
-
-    WAR_("Connection from %s matching signature: cat='%s', name='%s'",this->full_name('L').c_str(), sig_sig->category.c_str(), sig_sig->name().c_str());
-    DEB_("Connection from %s matching signature: cat='%s', name='%s' at %s",this->full_name('L').c_str(), sig_sig->category.c_str(), sig_sig->name().c_str(), vrangetos(r).c_str());
-
-    this->log().append( string_format("\nDetected application: cat='%s', name='%s'\n",sig_sig->category.c_str(), sig_sig->name().c_str()));
+    auto* sig_sig = dynamic_cast<MyDuplexFlowMatch*>(x_sig);
 
 
-    if(sig_sig->category ==  "www" && sig_sig->name() == "http/get|post") {
-        on_detect_www_get(x_sig,s,r);
+    if(sig_sig) {
+        LOG___(loglevel(sig_sig->severity),"matching signature: cat='%s', name='%s'",
+                sig_sig->category.c_str(),
+                sig_sig->name().c_str());
+        DEB___("matching signature: cat='%s', name='%s' at %s",
+                sig_sig->category.c_str(),
+                sig_sig->name().c_str(),
+                vrangetos(r).c_str());
+
+        this->log().append( string_format("\nDetected application: cat='%s', name='%s'\n",
+                sig_sig->category.c_str(),
+                sig_sig->name().c_str()));
+
+
+        if(sig_sig->category ==  "www" && sig_sig->name() == "http/get|post") {
+            on_detect_www_get(x_sig,s,r);
+        }
+    } else {
+        WAR___("signature of unknown attributes matched: ", x_sig->name());
     }
 }
 
 void MitmHostCX::on_starttls() {
 
-    DIAS_("we should now handover myself to SSL worker");
+    DIAS___("we should now handover myself to SSL worker");
 
     // we know this side is client
 //         delete ();
@@ -331,7 +351,7 @@ void MitmHostCX::on_starttls() {
     peer(peer()); // this will re-init
     peer()->peer(this);
 
-    DIAS_("peers set");
+    DIAS___("peers set");
 
     // set flag to wait for the peer to finish spoofing
 
@@ -353,7 +373,7 @@ void MitmHostCX::on_starttls() {
     // mark as opening to not wait for SSL handshake (typically) 1 hour
     opening(true);
     
-    DIAS_("on_starttls finished");
+    DIAS___("on_starttls finished");
 }
 
 
