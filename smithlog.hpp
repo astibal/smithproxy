@@ -63,10 +63,15 @@ public:
     static void run_queue(QueueLogger* logger_src);
     
     unsigned int max_len = 1000;
+    bool debug_queue = false;
+
     bool sig_terminate = false;
 protected:
 
     std::queue<log_entry> logs_;
+
+private:
+    unsigned int warned = 0;
 };
 
 

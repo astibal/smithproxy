@@ -48,11 +48,36 @@ QueueLogger::QueueLogger(): logger(), lockable() {
 int QueueLogger::write_log(loglevel l, std::string& sss) {
 
     locked_guard<QueueLogger> ll(this);
-    
-     if(l.level() <= level() || forced_ ) {
-        logs_.push(log_entry(l,sss));
-     }
-    
+
+
+    if(debug_queue) {
+        logs_.push(log_entry(l, string_format("[logger=0x%x qsize=%d]", this, logs_.size()) + sss));
+    } else {
+        logs_.push(log_entry(l, sss));
+    }
+
+
+    // set warning condition
+    if(warned  == 0 && logs_.size() >= max_len - max_len/10 ) {
+        auto msg = string_format("logger queue filling up: %d/%d", logs_.size(), max_len);
+        logger::write_log(ERR, msg);
+        warned++;
+    }
+
+
+    // clear warning condition
+    if(warned){
+        if(logs_.size() < max_len/10) {
+            warned = 0;
+        }
+        else
+        if(warned > 50) {
+
+            // warn each 50 messages
+            warned = 0;
+        }
+    }
+
     if(logs_.size() >= max_len) {
         logs_.pop();
     }
@@ -64,7 +89,7 @@ int QueueLogger::write_log(loglevel l, std::string& sss) {
 
 int QueueLogger::write_disk(loglevel l, std::string& sss) {
     locked_guard<QueueLogger> ll(this);
-  
+
     return logger::write_log(l,sss);
 }
 
@@ -78,7 +103,7 @@ void QueueLogger::run_queue(QueueLogger* log_src) {
     while (!log_src->sig_terminate) {
         log_src->lock();
         
-        if(log_src->logs_.size() > 0) {
+        if(! log_src->logs_.empty()) {
             log_entry e = log_src->logs_.front(); log_src->logs_.pop();
 
             //copy elements and unlock before write_log.
@@ -86,11 +111,16 @@ void QueueLogger::run_queue(QueueLogger* log_src) {
             std::string msg = e.second;
 
             log_src->unlock();
+
+            if(log_src->debug_queue) {
+                auto ss = string_format("logsrc=0x%x [%d]| ", log_src, log_src->logs_.size());
+                msg = ss + msg;
+            }
             log_src->write_disk(l, msg);
             
         } else {
             log_src->unlock();
-            usleep(10000); // wait 10ms if there is nothing to read
+            usleep(1000); // wait 10ms if there is nothing to read
         }
     }
 }
@@ -98,7 +128,7 @@ void QueueLogger::run_queue(QueueLogger* log_src) {
 std::thread* create_log_writer(logger* log_ptr) {
     std::thread * writer_thread = new std::thread([]() { 
         logger* log_ptr = get_logger();
-        QueueLogger* q_logger = dynamic_cast<QueueLogger*>(log_ptr);
+        auto* q_logger = dynamic_cast<QueueLogger*>(log_ptr);
         
         if(q_logger != nullptr) {
             QueueLogger::run_queue(q_logger);
