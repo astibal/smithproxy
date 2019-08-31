@@ -51,7 +51,7 @@
 #include <policy.hpp>
 #include <sslcom.hpp>
 
-#include <cfgapi_auth.hpp>
+#include <shmauth.hpp>
 
 
 using namespace libconfig;

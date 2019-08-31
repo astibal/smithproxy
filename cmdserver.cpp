@@ -103,6 +103,8 @@ loglevel orig_epoll_loglevel = NON;
 loglevel orig_mitmproxy_loglevel = NON;
 loglevel orig_mitmmasterproxy_loglevel = NON;
 
+loglevel orig_auth_loglevel = NON;
+
 extern bool cfg_openssl_mem_dbg;
 
 void load_defaults() {
@@ -1120,13 +1122,51 @@ void cli_print_log_levels(struct cli_def *cli) {
     cli_print(cli,"THIS cli logging level set to: %d",lp->level_.level());
     cli_print(cli,"Internal logging level set to: %d",get_logger()->level().level());
     cli_print(cli,"\n");
-    for(auto i = get_logger()->remote_targets().begin(); i != get_logger()->remote_targets().end(); ++i) {
-        cli_print(cli, "Logging level for remote: %s: %d",get_logger()->target_name((uint64_t)(*i)),get_logger()->target_profiles()[(uint64_t)(*i)]->level_.level());
+    for(int const& target: get_logger()->remote_targets()) {
+        cli_print(cli, "Logging level for remote: %s: %d",
+                get_logger()->target_name((uint64_t)target),
+                get_logger()->target_profiles()[(uint64_t)target]->level_.level());
     }
-    for(auto i = get_logger()->targets().begin(); i != get_logger()->targets().end(); ++i) {
-        cli_print(cli, "Logging level for target: %s: %d",get_logger()->target_name((uint64_t)(*i)),get_logger()->target_profiles()[(uint64_t)(*i)]->level_.level());
+    for(auto const* o_ptr: get_logger()->targets()) {
+        cli_print(cli, "Logging level for target: %s: %d",
+                get_logger()->target_name((uint64_t)(o_ptr)),
+                get_logger()->target_profiles()[(uint64_t)(o_ptr)]->level_.level());
     }         
 }
+
+
+int cli_debug_level(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    logger_profile* lp = get_logger()->target_profiles()[(uint64_t)fileno(cli->client)];
+    if(argc > 0) {
+
+        std::string a1 = argv[0];
+
+        if(a1 == "?") {
+            cli_print(cli,"valid parameters: %s",debug_levels);
+        }
+        else if(a1 == "reset") {
+            lp->level_ = NON;
+
+            get_logger()->level(cfgapi_table.logging.level);
+            cli_print(cli, "internal logging level changed to %d",get_logger()->level().level_);
+        }
+        else {
+            //cli_print(cli, "called %s with %s, argc %d\r\n", __FUNCTION__, command, argc);
+            int newlev = safe_val(argv[0]);
+            if(newlev >= 0) {
+                get_logger()->level(loglevel(newlev,0));
+            } else {
+                cli_print(cli,"Incorrect value for logging level: %d",newlev);
+            }
+        }
+    } else {
+        cli_print_log_levels(cli);
+    }
+
+    return CLI_OK;
+}
+
 
 int cli_debug_terminal(struct cli_def *cli, const char *command, char *argv[], int argc) {
     
@@ -1135,28 +1175,25 @@ int cli_debug_terminal(struct cli_def *cli, const char *command, char *argv[], i
         
         std::string a1 = argv[0];
 
-        int lev_diff = 0;
-        
+
         if(a1 == "?") {
             cli_print(cli,"valid parameters: %s",debug_levels);
         } 
         else if(a1 == "reset") {
             lp->level_ = NON;
-            lev_diff = get_logger()->adjust_level().level();
         }
         else {
             //cli_print(cli, "called %s with %s, argc %d\r\n", __FUNCTION__, command, argc);
             int newlev = safe_val(argv[0]);
             if(newlev >= 0) {
                 lp->level_.level(newlev);
-                lev_diff = get_logger()->adjust_level().level();
-                
+                cli_print(cli, "this terminal logging level changed to %d",lp->level_.level_);
+
             } else {
                 cli_print(cli,"Incorrect value for logging level: %d",newlev);
             }
         }
-        if(lev_diff != 0) cli_print(cli, "internal logging level changed by %d",lev_diff);
-        
+
     } else {
         cli_print_log_levels(cli);
     }
@@ -1186,12 +1223,18 @@ int cli_debug_logfile(struct cli_def *cli, const char *command, char *argv[], in
             }
             
             if(newlev >= 0) {
-                for(auto i = get_logger()->targets().begin(); i != get_logger()->targets().end(); ++i) {
-                    get_logger()->target_profiles()[(uint64_t)(*i)]->level_.level(newlev);
+                for(auto const* o_ptr: get_logger()->targets()) {
+
+                    std::string fnm = get_logger()->target_name((uint64_t)(o_ptr));
+
+                    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
+
+                    if( fnm == CfgFactory::get().log_file ) {
+
+                        cli_print(cli, "changing '%s' loglevel to %d", fnm.c_str(), newlev);
+                        get_logger()->target_profiles()[(uint64_t) (o_ptr)]->level_.level(newlev);
+                    }
                 }
-                
-                int lev_diff = get_logger()->adjust_level().level();
-                if(lev_diff != 0) cli_print(cli, "internal logging level changed by %d",lev_diff);
             }
         }
     } else {
@@ -1204,6 +1247,8 @@ int cli_debug_logfile(struct cli_def *cli, const char *command, char *argv[], in
 int cli_debug_ssl(struct cli_def *cli, const char *command, char *argv[], int argc) {
     if(argc > 0) {
         std::string a1 = argv[0];
+
+        int newlev = 0;
         if(a1 == "?") {
             cli_print(cli,"valid parameters: %s",debug_levels);
         } 
@@ -1213,10 +1258,10 @@ int cli_debug_ssl(struct cli_def *cli, const char *command, char *argv[], int ar
             SSLFactory::log_level_ref() = orig_sslca_loglevel;
         }
         else {
-            int lev = std::atoi(argv[0]);
-            SSLCom::log_level_ref().level(lev);
-            SSLMitmCom::log_level_ref().level(lev);
-            SSLFactory::log_level_ref().level(lev);
+            newlev = safe_val(argv[0]);;
+            SSLCom::log_level_ref().level(newlev);
+            SSLMitmCom::log_level_ref().level(newlev);
+            SSLFactory::log_level_ref().level(newlev);
             
         }
     } else {
@@ -1233,6 +1278,31 @@ int cli_debug_ssl(struct cli_def *cli, const char *command, char *argv[], int ar
     return CLI_OK;
 }
 
+int cli_debug_auth(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    if(argc > 0) {
+        std::string a1 = argv[0];
+
+        int newlev = 0;
+        if(a1 == "?") {
+            cli_print(cli,"valid parameters: %s",debug_levels);
+        }
+        else if(a1 == "reset") {
+            AuthFactory::log_level_ref() = orig_auth_loglevel;
+        }
+        else {
+            newlev = safe_val(a1);
+            AuthFactory::log_level_ref().level(newlev);
+
+        }
+    } else {
+        int l = AuthFactory::log_level_ref().level();
+        cli_print(cli,"Auth debug level: %d",l);
+        cli_print(cli,"\n");
+        cli_print(cli,"valid parameters: %s",debug_levels);
+    }
+
+    return CLI_OK;
+}
 
 int cli_debug_dns(struct cli_def *cli, const char *command, char *argv[], int argc) {
     if(argc > 0) {
@@ -3277,10 +3347,12 @@ void client_thread(int client_socket) {
                         
         debuk = cli_register_command(cli, NULL, "debug", NULL, PRIVILEGE_PRIVILEGED, MODE_EXEC, "diagnostic commands");
             cli_register_command(cli, debuk, "term", cli_debug_terminal, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set level of logging to this terminal");
-            cli_register_command(cli, debuk, "file", cli_debug_logfile, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set level of logging of standard log file");
+            cli_register_command(cli, debuk, "file", cli_debug_logfile, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set level of logging to standard log file");
+            cli_register_command(cli, debuk, "level", cli_debug_level, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set general logging level");
             cli_register_command(cli, debuk, "ssl", cli_debug_ssl, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set ssl file logging level");
             cli_register_command(cli, debuk, "dns", cli_debug_dns, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set dns file logging level");
             cli_register_command(cli, debuk, "proxy", cli_debug_proxy, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set proxy file logging level");
+            cli_register_command(cli, debuk, "auth", cli_debug_auth, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set authentication file logging level");
             cli_register_command(cli, debuk, "sobject", cli_debug_sobject, PRIVILEGE_PRIVILEGED, MODE_EXEC, "toggle on/off sobject creation tracing (affect performance)");
 
 

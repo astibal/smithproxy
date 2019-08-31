@@ -41,52 +41,50 @@
 #include <authfactory.hpp>
 #include <logger.hpp>
 
-
 int AuthFactory::shm_ip6_table_refresh()  {
 
-
     {
-        std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
+        std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
         shm_ip6_map.attach(string_format(AUTH_IP6_MEM_NAME,
                                          CfgFactory::get().tenant_name.c_str()).c_str(),
-                           AUTH_IP6_MEM_SIZE,
-                           string_format(AUTH_IP6_SEM_NAME,
-                                         CfgFactory::get().tenant_name.c_str()).c_str());
+                                         AUTH_IP6_MEM_SIZE,
+                           string_format(AUTH_IP6_SEM_NAME, CfgFactory::get().tenant_name.c_str()).c_str());
 
-        DEBS_("cfgapi_auth_shm_ip6_table_refresh: acquring semaphore");
-        int rc = shm_ip6_map.acquire();
-        DIAS_("cfgapi_auth_shm_ip6_table_refresh: acquring semaphore: done");
-        if (rc) {
-            WARS_("cfgapi_auth_shm_ip6_table_refresh: cannot acquire semaphore for token table");
-            return -1;
-        }
     }
 
-    DEBS_("cfgapi_auth_shm_ip6_table_refresh: loading table");
+    DEBS___("AuthFactory::shm_ip6_table_refresh: acquiring semaphore");
+    int rc = shm_ip6_map.acquire();
+    DIAS___("cfgapi_auth_shm_ip6_table_refresh: semaphore acquired");
+    if (rc) {
+        WARS___("cfgapi_auth_shm_ip6_table_refresh: cannot acquire semaphore for token table");
+        return -1;
+    }
+
+
+    DEBS___("cfgapi_auth_shm_ip6_table_refresh: loading table");
     int l_ip = shm_ip6_map.load();
-    DIAS_("cfgapi_auth_shm_ip6_table_refresh: loading table: done, releasing semaphore");
+    DIAS___("cfgapi_auth_shm_ip6_table_refresh: loading table: done, releasing semaphore");
     shm_ip6_map.release();
-    DEBS_("cfgapi_auth_shm_ip6_table_refresh: semaphore released");
+    DEBS___("cfgapi_auth_shm_ip6_table_refresh: semaphore released");
     
     if(l_ip >= 0) {
         // new data!
         std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
         
         if(l_ip == 0 && ( ! ip6_map_.empty()) ) {
-            DIAS_("cfgapi_auth_shm_ip6_table_refresh: zero sized table received, flusing ip map");
+            DIAS___("cfgapi_auth_shm_ip6_table_refresh: zero sized table received, flusing ip map");
             ip6_map_.clear();
         }
         
-        DIA_("cfgapi_auth_shm_ip6_table_refresh: new data: version %d, entries %d",shm_ip6_map.header_version(),shm_ip6_map.header_entries());
-        for(typename std::vector<shm_logon_info6>::iterator i = shm_ip6_map.entries().begin(); i != shm_ip6_map.entries().end() ; ++i) {
-            shm_logon_info6& rt = (*i);
+        DIA___("cfgapi_auth_shm_ip6_table_refresh: new data: version %d, entries %d",shm_ip6_map.header_version(),shm_ip6_map.header_entries());
+        for(auto& rt: shm_ip6_map.entries()) {
             
             std::string ip = rt.ip();
             
-            std::unordered_map <std::string, IdentityInfo6 >::iterator found = ip6_map_.find(ip);
+            auto found = ip6_map_.find(ip);
             if(found != ip6_map_.end()) {
-                DIA_("Updating identity in database: %s",ip.c_str());
+                DIA___("Updating identity in database: %s",ip.c_str());
                 IdentityInfo6& id = (*found).second;
                 id.ip = ip;
                 id.last_logon_info = rt;
@@ -99,9 +97,9 @@ int AuthFactory::shm_ip6_table_refresh()  {
                 i.username = rt.username();
                 i.update();
                 ip6_map_[ip] = i;
-                INF_("New identity in database: ip: %s, username: %s, groups: %s ",ip.c_str(),i.username.c_str(),i.groups.c_str());
+                INF___("New identity in database: ip: %s, username: %s, groups: %s ",ip.c_str(),i.username.c_str(),i.groups.c_str());
             }
-            DIA_("cfgapi_auth_shm_ip6_table_refresh: loaded: %d,%s,%s",ip.c_str(),rt.username().c_str(),rt.groups().c_str());
+            DIA___("cfgapi_auth_shm_ip6_table_refresh: loaded: %d,%s,%s",ip.c_str(),rt.username().c_str(),rt.groups().c_str());
         }
         
         return l_ip;
@@ -149,14 +147,14 @@ void AuthFactory::ip6_remove(std::string& host) {
     if (ip != ip6_map_.end()) {
         // erase internal ip map entry
 
-        DIA_("cfgapi_ip_map_remove: auth ip map - removing: %s",host.c_str());
+        DIA___("cfgapi_ip_map_remove: auth ip map - removing: %s",host.c_str());
         ip6_map_.erase(ip);
 
         // for debug only: print all shm table entries
         if(LEV_(DEB)) {
-            DEBS_(":: - SHM AUTH IP map - before removal::");
+            DEBS___(":: - SHM AUTH IP map - before removal::");
             for(auto& x_it: shm_ip6_map.map_entries()) {
-                DEB_("::  %s::",x_it.first.c_str());
+                DEB___("::  %s::",x_it.first.c_str());
             }
         }
         
@@ -166,13 +164,13 @@ void AuthFactory::ip6_remove(std::string& host) {
         auto sh_it = shm_ip6_map.map_entries().find(host);
 
         if(sh_it != shm_ip6_map.map_entries().end()) {
-            DIA_("cfgapi_ip_map_remove: shm auth ip table  - removing: %s",host.c_str());
+            DIA___("cfgapi_ip_map_remove: shm auth ip table  - removing: %s",host.c_str());
             shm_ip6_map.map_entries().erase(sh_it);
             
             if(LEV_(DEB)) {
-                DEBS_(":: - SHM AUTH IP map - after removal::");
+                DEBS___(":: - SHM AUTH IP map - after removal::");
                 for(auto& x_it: shm_ip6_map.map_entries()) {
-                        DEB_("::   %s::",x_it.first.c_str());
+                        DEB___("::   %s::",x_it.first.c_str());
                 }                
                 
             }
@@ -184,7 +182,7 @@ void AuthFactory::ip6_remove(std::string& host) {
 
 
 void AuthFactory::ip6_timeout_check() {
-    DIAS_("cfgapi_ip_auth_timeout_check: started");
+    DIAS___("cfgapi_ip_auth_timeout_check: started");
     std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
     
     std::set<std::string> to_remove;

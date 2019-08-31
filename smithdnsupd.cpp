@@ -160,7 +160,8 @@ DNS_Response* resolve_dns_s (std::string const& hostname, DNS_Record_Type t, std
 
 
 
-#pragma clang diagnostic ignored "-Wmissing-noreturn"
+#pragma GCC diagnostic ignored "-Wmissing-noreturn"
+#pragma GCC diagnostic push
 
 std::thread* create_dns_updater() {
     std::thread * dns_thread = new std::thread([]() {
@@ -260,3 +261,4 @@ std::thread* create_dns_updater() {
     
     return dns_thread;
 }
+#pragma GCC diagnostic pop

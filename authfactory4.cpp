@@ -37,58 +37,56 @@
     which carries forward this exception.
 */
 
-
-#include <authfactory.hpp>
 #include <logger.hpp>
+#include <authfactory.hpp>
 #include <cfgapi.hpp>
 
-
-IdentityInfoBase::IdentityInfoBase() {
-    idle_timeout = AuthFactory::get().global_idle_timeout;
-    created = time(nullptr);
-    last_seen_at = created;
-}
+DEFINE_LOGGING(AuthFactory);
 
 int AuthFactory::shm_ip4_table_refresh()  {
 
-
     {
-        std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
-        shm_ip4_map.attach(string_format(AUTH_IP_MEM_NAME, CfgFactory::get().tenant_name.c_str()).c_str(), AUTH_IP_MEM_SIZE,
-                               string_format(AUTH_IP_SEM_NAME, CfgFactory::get().tenant_name.c_str()).c_str() );
+        std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
+
+        shm_ip4_map.attach( string_format(AUTH_IP_MEM_NAME,
+                                          CfgFactory::get().tenant_name.c_str()).c_str(),
+                                          AUTH_IP_MEM_SIZE,
+                            string_format(AUTH_IP_SEM_NAME, CfgFactory::get().tenant_name.c_str()).c_str() );
     }
-    DEBS_("cfgapi_auth_shm_ip_table_refresh: acquiring semaphore");
+
+    DEBS_("AuthFactory::shm_ip4_table_refresh: acquiring semaphore");
     int rc = shm_ip4_map.acquire();
-    DEBS_("cfgapi_auth_shm_ip_table_refresh: acquiring semaphore: done");
+    DEBS___("AuthFactory::shm_ip4_table_refresh: semaphore acquired");
     if(rc) {
-        WARS_("cfgapi_auth_shm_ip_table_refresh: cannot acquire semaphore for token table");
+        WARS___("AuthFactory::shm_ip4_table_refresh: cannot acquire semaphore for token table");
         return -1;
     }
-    
-    DEBS_("cfgapi_auth_shm_ip_table_refresh: loading table");
+
+    DEBS___("AuthFactory::shm_ip4_table_refresh: loading table");
     int l_ip = shm_ip4_map.load();
+
     DIAS_("shared memory ip user table loaded");
-    DEBS_("cfgapi_auth_shm_ip_table_refresh: loading table: done, releasing semaphore");
+    DEBS_("AuthFactory::shm_ip4_table_refresh: releasing semaphore");
     shm_ip4_map.release();
-    DEBS_("cfgapi_auth_shm_ip_table_refresh: semaphore released");
-    
+    DEBS_("AuthFactory::shm_ip4_table_refresh: semaphore released");
+
     if(l_ip >= 0) {
         // new data!
         std::scoped_lock<std::recursive_mutex> l(AuthFactory::get_ip4_lock());
-        
+
         if(l_ip == 0 && ( ! ip4_map_.empty() )) {
-            DIAS_("cfgapi_auth_shm_ip_table_refresh: zero sized table received, flusing ip map");
+            DIAS___("AuthFactory::shm_ip4_table_refresh: zero sized table received, flushing ip map");
             ip4_map_.clear();
         }
-        
-        DIA_("cfgapi_auth_shm_ip_table_refresh: new data: version %d, entries %d",shm_ip4_map.header_version(),shm_ip4_map.header_entries());
+
+        DIA___("AuthFactory::shm_ip4_table_refresh: new data: version %d, entries %d",shm_ip4_map.header_version(),shm_ip4_map.header_entries());
         for(auto& rt: shm_ip4_map.entries()) {
 
             std::string ip = rt.ip();
-            
+
             auto found = ip4_map_.find(ip);
             if(found != ip4_map_.end()) {
-                DIA_("Updating identity in database: %s",ip.c_str());
+                DIA___("Updating identity in database: %s",ip.c_str());
                 IdentityInfo& id = (*found).second;
                 id.ip = ip;
                 id.last_logon_info = rt;
@@ -101,9 +99,9 @@ int AuthFactory::shm_ip4_table_refresh()  {
                 i.username = rt.username();
                 i.update();
                 ip4_map_[ip] = i;
-                INF_("New identity in database: ip: %s, username: %s, groups: %s ",ip.c_str(),i.username.c_str(),i.groups.c_str());
+                INF___("New identity in database: ip: %s, username: %s, groups: %s ",ip.c_str(),i.username.c_str(),i.groups.c_str());
             }
-            DIA_("cfgapi_auth_shm_ip_table_refresh: loaded: %d,%s,%s",ip.c_str(),rt.username().c_str(),rt.groups().c_str());
+            DIA___("AuthFactory::shm_ip4_table_refresh: loaded: %d,%s,%s",ip.c_str(),rt.username().c_str(),rt.groups().c_str());
         }
 
         return l_ip;
@@ -114,35 +112,42 @@ int AuthFactory::shm_ip4_table_refresh()  {
 int AuthFactory::shm_token_table_refresh()  {
 
     {
-        std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
+        std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
         shm_token_map_.attach(string_format(AUTH_TOKEN_MEM_NAME, CfgFactory::get().tenant_name.c_str()).c_str(),
-                                  AUTH_TOKEN_MEM_SIZE,
-                                  string_format(AUTH_TOKEN_SEM_NAME, CfgFactory::get().tenant_name.c_str()).c_str());
+                              AUTH_TOKEN_MEM_SIZE,
+                              string_format(AUTH_TOKEN_SEM_NAME, CfgFactory::get().tenant_name.c_str()).c_str());
     }
 
-    DEBS_("cfgapi_auth_shm_token_table_refresh: acquiring semaphore");
+    DEBS___("AuthFactory::shm_token_table_refresh: acquiring semaphore");
     int rc = shm_token_map_.acquire();
-    DEBS_("cfgapi_auth_shm_token_table_refresh: acquiring semaphore: done");
+    DEBS___("AuthFactory::shm_token_table_refresh: semaphore acquired");
     if(rc) {
-        WARS_("cfgapi_auth_shm_token_table_refresh: cannot acquire semaphore for token table");
+        WARS___("AuthFactory::shm_token_table_refresh: cannot acquire semaphore for token table");
         return -1;
     }
-    
-    DEBS_("cfgapi_auth_shm_token_table_refresh: loading table");
+
+    DEBS___("AuthFactory::shm_token_table_refresh: loading table");
     int l_tok = shm_token_map_.load();
-    DIAS_("shared memory auth tokem table loaded");
-    DEBS_("cfgapi_auth_shm_token_table_refresh: loading table: done, releasing semaphore");
+    DIAS___("shared memory auth token table loaded");
+
+    DEBS___("AuthFactory::shm_token_table_refresh: releasing semaphore");
     shm_token_map_.release();
-    DEBS_("cfgapi_auth_shm_token_table_refresh: semaphore released");
+    DEBS___("AuthFactory::shm_token_table_refresh: semaphore released");
 
     if(l_tok > 0) {
-        DIA_("cfgapi_auth_shm_token_table_refresh: new data: version %d, entries %d, rowsize %d",shm_token_map_.header_version(),shm_token_map_.header_entries(),shm_token_map_.header_rowsize());
+        DIA___("new token data: new data: version %d, entries %d, row-size %d",
+             shm_token_map_.header_version(),
+             shm_token_map_.header_entries(),
+             shm_token_map_.header_rowsize());
         return l_tok;
     } else {
-        DEB_("cfgapi_auth_shm_token_table_refresh: same data: version %d, entries %d, rowsize %d",shm_token_map_.header_version(),shm_token_map_.header_entries(),shm_token_map_.header_rowsize());
+        DEB___("AuthFactory::shm_token_table_refresh: same data: version %d, entries %d, row-size %d",
+             shm_token_map_.header_version(),
+             shm_token_map_.header_entries(),
+             shm_token_map_.header_rowsize());
     }
-    
+
     return 0;
 };
 
@@ -158,7 +163,7 @@ IdentityInfo* AuthFactory::ip4_get(std::string& host) {
     }
 
     return ret;
-   
+
 }
 
 
@@ -174,7 +179,7 @@ bool  AuthFactory::ip4_inc_counters(std::string& host, unsigned int rx, unsigned
         id.tx_bytes += tx;
         ret = true;
     }
-    
+
     return ret;
 }
 
@@ -189,32 +194,32 @@ void AuthFactory::ip4_remove(std::string& host) {
     if (ip != ip4_map_.end()) {
         // erase internal ip map entry
 
-        DEB_("cfgapi_ip_map_remove: auth ip map - removing: %s",host.c_str());
+        DEB___("cfgapi_ip_map_remove: auth ip map - removing: %s",host.c_str());
         ip4_map_.erase(ip);
 
         // for debug only: print all shm table entries
         if(LEV_(DUM)) {
-            DUMS_(":: - SHM AUTH IP map - before removal::");
+            DUMS___(":: - SHM AUTH IP map - before removal::");
             for(auto& x_it: shm_ip4_map.map_entries()) {
-                DUM_("::  %s::",x_it.first.c_str());
+                DUM___("::  %s::",x_it.first.c_str());
             }
         }
-        
+
         shm_ip4_map.acquire();
 
         // erase shared ip map entry
         auto sh_it = shm_ip4_map.map_entries().find(host);
 
         if(sh_it != shm_ip4_map.map_entries().end()) {
-            DEB_("cfgapi_ip_map_remove: shm auth ip table  - removing: %s",host.c_str());
+            DEB___("cfgapi_ip_map_remove: shm auth ip table  - removing: %s",host.c_str());
             shm_ip4_map.map_entries().erase(sh_it);
-            
+
             if(LEV_(DUM)) {
-                DUMS_(":: - SHM AUTH IP map - after removal::");
+                DUMS___(":: - SHM AUTH IP map - after removal::");
                 for(auto& x_it: shm_ip4_map.map_entries()) {
-                        DUM_("::   %s::",x_it.first.c_str());
-                }                
-                
+                    DUM___("::   %s::",x_it.first.c_str());
+                }
+
             }
             shm_ip4_map.save(true);
         }
@@ -224,25 +229,25 @@ void AuthFactory::ip4_remove(std::string& host) {
 
 
 void AuthFactory::ip4_timeout_check() {
-    DEBS_("cfgapi_ip_auth_timeout_check: started");
+    DEBS___("cfgapi_ip_auth_timeout_check: started");
     std::scoped_lock<std::recursive_mutex> l(AuthFactory::get_ip4_lock());
-    
+
     std::set<std::string> to_remove;
-    
+
     for(auto& e: ip4_map_) {
         const std::string&  ip = e.first;
         IdentityInfo& id = e.second;
-        
-        DEB_("cfgapi_ip_auth_timeout_check: %s", ip.c_str());
+
+        DEB___("cfgapi_ip_auth_timeout_check: %s", ip.c_str());
         if(id.i_timeout()) {
-            DIA_("cfgapi_ip_auth_timeout_check: idle timeout, adding to list %s", ip.c_str());
+            DIA___("cfgapi_ip_auth_timeout_check: idle timeout, adding to list %s", ip.c_str());
             to_remove.insert(ip);
         }
     }
-    
+
     for(auto tr: to_remove) {
         ip4_remove(tr);
-        INF_("IP address %s identity timed out.", tr.c_str());
+        INF___("IP address %s identity timed out.", tr.c_str());
     }
 }
 
@@ -256,7 +261,7 @@ bool AuthFactory::ipX_inc_counters(baseHostCX* cx, unsigned int rx, unsigned int
             return ip4_inc_counters(cx->host(),rx,tx);
         }
     }
-    
+
     return false;
 }
 
@@ -264,6 +269,6 @@ bool AuthFactory::ipX_inc_counters(baseHostCX* cx) {
     if(cx) {
         return ipX_inc_counters(cx,cx->meter_read_bytes,cx->meter_write_bytes);
     }
-    
+
     return false;
 }

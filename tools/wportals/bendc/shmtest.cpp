@@ -67,7 +67,7 @@
 
 #include <shmtable.hpp>
 #include <shmtestsuite.hpp>
-#include <cfgapi_auth.hpp>
+#include <shmauth.hpp>
 
 
 shm_logon_info generator_li(int i) {

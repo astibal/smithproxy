@@ -74,14 +74,14 @@ add_executable(smithproxy
         sockshostcx.cpp
         socksproxy.cpp
         cmdserver.cpp
-        cfgapi_auth.cpp
+        shmauth.cpp
         dns.cpp
         inspectors.cpp
         addrobj.cpp
         srvutils.cpp
         staticcontent.cpp
         nltemplate.cpp
-        cfgapi_auth6.cpp
+        authfactory6.cpp
         smithlog.cpp
         filterproxy.cpp
         smithdnsupd.cpp
@@ -91,7 +91,7 @@ add_executable(smithproxy
 
         ext/cidr.cpp
         ext/cxxopts.hpp
-        authfactory.hpp)
+        authfactory.hpp authfactory4.cpp)
 add_executable(smithd ${SMITHD_DIR}/smithd.cpp ${SMITHD_DIR}/smithdcx.cpp daemon.cpp smithlog.cpp)
 add_executable(smithdc ${SMITHD_DIR}/smithdc.cpp ${SMITHD_DIR}/smithdcx.cpp smithlog.cpp)
 

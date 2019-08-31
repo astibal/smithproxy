@@ -49,7 +49,7 @@
 #include <threadedreceiver.hpp>
 #include <traflog.hpp>
 #include <policy.hpp>
-#include <cfgapi_auth.hpp>
+#include <shmauth.hpp>
 
 
 struct whitelist_verify_entry {

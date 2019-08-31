@@ -42,7 +42,9 @@
 
 #include <string>
 #include <mutex>
-#include <cfgapi_auth.hpp>
+#include <shmauth.hpp>
+
+#include <logger.hpp>
 
 class baseHostCX;
 
@@ -143,6 +145,10 @@ public:
     bool ipX_inc_counters (baseHostCX *cx);
 
 
+    std::string to_string() const { return "AuthFactory"; };
+
+    DECLARE_C_NAME("AuthFactory");
+    DECLARE_LOGGING(to_string);
 };
 
 #endif //SMITHPROXY_AUTHFACTORY_HPP
