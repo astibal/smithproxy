@@ -72,6 +72,7 @@
 
 #include <main.hpp>
 #include <mitmproxy.hpp>
+#include <socksproxy.hpp>
 #include <sobject.hpp>
 #include <dns.hpp>
 #include <inspectors.hpp>
@@ -102,6 +103,9 @@ loglevel orig_baseproxy_loglevel = NON;
 loglevel orig_epoll_loglevel = NON;
 loglevel orig_mitmproxy_loglevel = NON;
 loglevel orig_mitmmasterproxy_loglevel = NON;
+
+loglevel orig_mitmhostcx_loglevel = NON;
+loglevel orig_socksproxy_loglevel =NON;
 
 loglevel orig_auth_loglevel = NON;
 
@@ -1362,16 +1366,21 @@ int cli_debug_proxy(struct cli_def *cli, const char *command, char *argv[], int 
         else if(a1 == "reset") {
             baseProxy::log_level_ref() = orig_baseproxy_loglevel;
             epoll::log_level = orig_epoll_loglevel;
+
             MitmMasterProxy::log_level_ref() = orig_mitmproxy_loglevel;
+            MitmHostCX::log_level_ref() = orig_mitmhostcx_loglevel;
             MitmProxy::log_level_ref() = orig_mitmproxy_loglevel;
+            SocksProxy::log_level_ref() = orig_socksproxy_loglevel;
         }
         else {
             int lev = std::atoi(argv[0]);
             baseProxy::log_level_ref().level(lev);
             epoll::log_level.level(lev);
+
             MitmMasterProxy::log_level_ref().level(lev);
+            MitmHostCX::log_level_ref().level(lev);
             MitmProxy::log_level_ref().level(lev);
-            
+            SocksProxy::log_level_ref().level(lev);
             
         }
     } else {
@@ -1384,8 +1393,14 @@ int cli_debug_proxy(struct cli_def *cli, const char *command, char *argv[], int 
         l = MitmMasterProxy::log_level_ref().level();
         cli_print(cli,"MitmMasterProxy debug level: %d",l);
 
+        l = MitmHostCX::log_level_ref().level();
+        cli_print(cli,"MitmHostCX debug level: %d",l);
+
         l = MitmProxy::log_level_ref().level();
         cli_print(cli,"MitmProxy debug level: %d",l);
+
+        l = SocksProxy::log_level_ref().level();
+        cli_print(cli,"SocksProxy debug level: %d",l);
 
 
         cli_print(cli,"\n");

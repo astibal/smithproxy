@@ -155,7 +155,7 @@ void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, ve
             auto* app_request = dynamic_cast<app_HttpRequest*>(application_data);
             if(app_request != nullptr) {
                 app_request->referer = str_temp;
-                DIA___("Referer: %s",ESC(app_request->referer));
+                DEB___("Referer: %s",ESC(app_request->referer));
             }
 
 
@@ -186,9 +186,9 @@ void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, ve
                         DNS_Response* dns_resp_aaaa = DNS::get().dns_cache().get("AAAA:" + app_request->host);
 
                         if(dns_resp_a && com()->l3_proto() == AF_INET) {
-                            DIA___("HTTP inspection: Host header matches DNS: %s",ESC(dns_resp_a->question_str_0()));
+                            DEB___("HTTP inspection: Host header matches DNS: %s",ESC(dns_resp_a->question_str_0()));
                         } else if(dns_resp_aaaa && com()->l3_proto() == AF_INET6) {
-                            DIA___("HTTP inspection: Host header matches IPv6 DNS: %s",ESC(dns_resp_aaaa->question_str_0()));
+                            DEB___("HTTP inspection: Host header matches IPv6 DNS: %s",ESC(dns_resp_aaaa->question_str_0()));
                         }
                         else {
                             WAR___("HTTP inspection: 'Host' header value '%s' DOESN'T match DNS!", app_request->host.c_str());
