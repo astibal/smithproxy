@@ -1411,6 +1411,82 @@ int cli_debug_proxy(struct cli_def *cli, const char *command, char *argv[], int 
 }
 
 
+int cli_debug_show(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    int l = baseProxy::log_level_ref().level();
+    cli_print(cli,"baseProxy debug level: %d",l);
+
+    l = epoll::log_level.level();
+    cli_print(cli,"epoll debug level: %d",l);
+
+    l = MitmMasterProxy::log_level_ref().level();
+    cli_print(cli,"MitmMasterProxy debug level: %d",l);
+
+    l = MitmHostCX::log_level_ref().level();
+    cli_print(cli,"MitmHostCX debug level: %d",l);
+
+    l = MitmProxy::log_level_ref().level();
+    cli_print(cli,"MitmProxy debug level: %d",l);
+
+    l = SocksProxy::log_level_ref().level();
+    cli_print(cli,"SocksProxy debug level: %d",l);
+
+
+    cli_print(cli, "\n\nlogan light loggers");
+
+    std::stringstream ss;
+    for(auto i: logan::get().topic_db_) {
+        std::string t = i.first;
+        loglevel l = i.second;
+
+        ss << "    [" << t << "] => level " << l.level_ << " flag: " << l.topic_ << "\n";
+    }
+
+    cli_print(cli, "%s", ss.str().c_str());
+
+    return CLI_OK;
+}
+
+
+
+int cli_debug_set(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    std::set<std::string> topics;
+    std::stringstream topiclist;
+
+    for(auto i: logan::get().topic_db_) {
+        std::string t = i.first;
+        // loglevel l = i.second;
+
+        topics.insert(t);
+        topiclist << t << "\n";
+    }
+    if(argc > 1) {
+        auto var = std::string(argv[0]);
+        int  newlev = safe_val(argv[1]);
+
+        //std::scoped_lock<std::recursive_mutex> l_(logan::get_lock());
+
+        if(logan::get().topic_db_.find(var) != logan::get().topic_db_.end()) {
+            loglevel l = logan::get()[var];
+            logan::get()[var] = loglevel(newlev,0);
+
+            cli_print(cli, "debug level changed: %s => %d => %d", var.c_str(), l.level_, newlev);
+        } else {
+            cli_print(cli, "variable not recognized");
+        }
+    }
+    else {
+        cli_print(cli, "Usage: \n"
+                       "       debug set <string variable> <debug level value 0-10>");
+        cli_print(cli, "         \n");
+        cli_print(cli, "Variable list:\n");
+        cli_print(cli, "%s", topiclist.str().c_str());
+
+    }
+    return CLI_OK;
+}
+
 
 int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
     cli_print(cli,"Memory buffers stats: ");
@@ -3369,6 +3445,10 @@ void client_thread(int client_socket) {
             cli_register_command(cli, debuk, "proxy", cli_debug_proxy, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set proxy file logging level");
             cli_register_command(cli, debuk, "auth", cli_debug_auth, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set authentication file logging level");
             cli_register_command(cli, debuk, "sobject", cli_debug_sobject, PRIVILEGE_PRIVILEGED, MODE_EXEC, "toggle on/off sobject creation tracing (affect performance)");
+            cli_register_command(cli, debuk, "show", cli_debug_show, PRIVILEGE_PRIVILEGED, MODE_EXEC, "show all possible debugs and their settings");
+            cli_register_command(cli, debuk, "set", cli_debug_set, PRIVILEGE_PRIVILEGED, MODE_EXEC, "change light logan loglevels");
+
+
 
 
         // generate dynamically content of config
