@@ -55,6 +55,11 @@ public:
     virtual void socks5_handoff(socksServerCX* cx);
 
     time_t auth_table_refreshed = 0;
+
+    std::string to_string(int lev=iINF) override { static std::string r(string_format("SocksProxy[%s]", MitmProxy::to_string().c_str())); return r; };
+
+    DECLARE_C_NAME("SocksProxy");
+    DECLARE_LOGGING(to_string);
 };
 
 
@@ -64,6 +69,11 @@ public:
     MitmSocksProxy(baseCom* c, int worker_id) : ThreadedAcceptorProxy<SocksProxy>(c,worker_id) {};
     virtual baseHostCX* new_cx(int s);
     virtual void on_left_new(baseHostCX* just_accepted_cx);
+
+    std::string to_string(int lev=iINF) override { static std::string r(string_format("MitmSocksProxy[%s]", baseProxy::to_string().c_str())); return r; };
+
+    DECLARE_C_NAME("MitmSocksProxy");
+    DECLARE_LOGGING(to_string);
 };
 
 

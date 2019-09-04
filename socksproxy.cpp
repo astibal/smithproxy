@@ -49,15 +49,18 @@
 #include <vector>
 
 
+DEFINE_LOGGING(SocksProxy);
+DEFINE_LOGGING(MitmSocksProxy);
+
 SocksProxy::SocksProxy(baseCom* c): MitmProxy(c) {}
 SocksProxy::~SocksProxy() {}
 
 void SocksProxy::on_left_message(baseHostCX* basecx) {
 
-    socksServerCX* cx = static_cast<socksServerCX*>(basecx);
+    auto* cx = static_cast<socksServerCX*>(basecx);
     if(cx != nullptr) {
         if(cx->state_ == WAIT_POLICY) {
-            DIAS_("SocksProxy::on_left_message: policy check: accepted");
+            DIAS___("SocksProxy::on_left_message: policy check: accepted");
             std::vector<baseHostCX*> l;
             std::vector<baseHostCX*> r;
             l.push_back(cx);
@@ -74,34 +77,34 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
                 p = CfgFactory::get().db_policy.at(matched_policy());
             }
 
-            DIA_("socksProxy::on_left_message: policy check result: policy# %d policyid 0x%x verdict %s", matched_policy(), p, verdict ? "accept" : "reject" );
+            DIA___("socksProxy::on_left_message: policy check result: policy# %d policyid 0x%x verdict %s", matched_policy(), p, verdict ? "accept" : "reject" );
 
             socks5_policy s5_verdict = verdict ? ACCEPT : REJECT;
             cx->verdict(s5_verdict);
         }
         else if(cx->state_ == HANDOFF) {
-            DIAS_("SocksProxy::on_left_message: socksHostCX handoff msg received");
+            DIAS___("SocksProxy::on_left_message: socksHostCX handoff msg received");
             cx->state(ZOMBIE);
             
             socks5_handoff(cx);
         } else {
 
-            WARS_("SocksProxy::on_left_message: unknown message");
+            WARS___("SocksProxy::on_left_message: unknown message");
         }
     }
 }
 
 void SocksProxy::socks5_handoff(socksServerCX* cx) {
 
-    DEBS_("SocksProxy::socks5_handoff: start");
+    DEBS___("SocksProxy::socks5_handoff: start");
     
     if(matched_policy() < 0) {
-        DIA_("SocksProxy::sock5_handoff: matching policy: %d: dropping.",matched_policy());
+        DIA___("SocksProxy::sock5_handoff: matching policy: %d: dropping.",matched_policy());
         dead(true);
         return;
     } 
     else if(matched_policy() >= (signed int)CfgFactory::get().db_policy.size()) {
-        DIA_("SocksProxy::sock5_handoff: matching policy out of policy index table: %d/%d: dropping.",
+        DIA___("SocksProxy::sock5_handoff: matching policy out of policy index table: %d/%d: dropping.",
                                          matched_policy(),
                                          CfgFactory::get().db_policy.size());
         dead(true);
@@ -186,7 +189,7 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     
     if(ssl) {
 //         ((SSLCom*)n_cx->com())->upgrade_server_socket(n_cx->socket());
-        DEBS_("SocksProxy::socks5_handoff: mark1");        
+        DEBS___("SocksProxy::socks5_handoff: mark1");
         
 //         ((SSLCom*)target_cx->com())->upgrade_client_socket(target_cx->socket());
     }
@@ -196,7 +199,7 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     if (CfgFactory::get().policy_apply(n_cx, this) < 0) {
         // strange, but it can happen if the sockets is closed between policy match and this profile application
         // mark dead.
-        INFS_("SocksProxy::socks5_handoff: session failed policy application");
+        INFS___("SocksProxy::socks5_handoff: session failed policy application");
         dead(true);
     } else {
 
@@ -369,5 +372,5 @@ void MitmSocksProxy::on_left_new(baseHostCX* just_accepted_cx) {
 
     new_proxy->ladd(just_accepted_cx);
     this->proxies().insert(new_proxy);
-    DEBS_("MitmMasterProxy::on_left_new: finished");
+    DEBS___("MitmMasterProxy::on_left_new: finished");
 }
