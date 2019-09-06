@@ -116,17 +116,17 @@ MitmProxy::~MitmProxy() {
 
         for(typename std::vector<baseHostCX*>::iterator j = this->left_sockets.begin(); j != this->left_sockets.end(); ++j) {
             auto cx = (*j);
-            if(cx->log().size()) {
-                if(tlog()) tlog()->write('L', cx->log());
-                cx->log() = "";
+            if(! cx->comlog().empty()) {
+                if(tlog()) tlog()->write('L', cx->comlog());
+                cx->comlog().clear();
             }
         }               
         
         for(typename std::vector<baseHostCX*>::iterator j = this->right_sockets.begin(); j != this->right_sockets.end(); ++j) {
             auto cx = (*j);
-            if(cx->log().size()) {
-                if(tlog()) tlog()->write('R', cx->log());
-                cx->log() = "";
+            if(! cx->comlog().empty()) {
+                if(tlog()) tlog()->write('R', cx->comlog());
+                cx->comlog().clear();
             }
         }         
         
@@ -640,9 +640,9 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
         
         toggle_tlog();
         
-        if(cx->log().size()) {
-            if(tlog()) tlog()->write('L', cx->log());
-            cx->log() = "";
+        if(! cx->comlog().empty()) {
+            if(tlog()) tlog()->write('L', cx->comlog());
+            cx->comlog().clear();
         }
         
         if(tlog()) tlog()->left_write(cx->to_read());
@@ -713,9 +713,9 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
 
         toggle_tlog();
         
-        if(cx->log().size()) {
-            if(tlog()) tlog()->write('R',cx->log());
-            cx->log() = "";
+        if(! cx->comlog().empty()) {
+            if(tlog()) tlog()->write('R',cx->comlog());
+            cx->comlog().clear();
         }
         
         if(tlog()) tlog()->right_write(cx->to_read());

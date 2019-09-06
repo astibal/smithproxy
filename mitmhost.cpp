@@ -368,7 +368,7 @@ void MitmHostCX::on_starttls() {
     CfgFactory::get().policy_apply_tls(matched_policy(), com());
     CfgFactory::get().policy_apply_tls(matched_policy(), peercom());
 
-    log().append("\n STARTTLS: plain connection upgraded to SSL/TLS, continuing with inspection.\n\n");
+    comlog().append("\n STARTTLS: plain connection upgraded to SSL/TLS, continuing with inspection.\n\n");
 
     // mark as opening to not wait for SSL handshake (typically) 1 hour
     opening(true);
