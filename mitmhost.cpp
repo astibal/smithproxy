@@ -85,11 +85,15 @@ bool MySSLMitmCom::spoof_cert(X509* x, SpoofOptions& spo) {
 
 
 MitmHostCX::MitmHostCX(baseCom* c, const char* h, const char* p ) : AppHostCX::AppHostCX(c,h,p) {
+    log = logan::create("inspect");
+
     DEB___("MitmHostCX: constructor %s:%s",h,p);
     load_signatures();
 };
 
 MitmHostCX::MitmHostCX( baseCom* c, int s ) : AppHostCX::AppHostCX(c,s) {
+    log = logan::create("inspect");
+
     DEB___("MitmHostCX: constructor %d",s);
     load_signatures();
 };
@@ -253,14 +257,15 @@ void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, ve
 
 
 void MitmHostCX::inspect(char side) {
-    
+
+
     if(inspect_verdict == Inspector::CACHED)
         return;
-    
+
     AppHostCX::inspect(side);
     
     if(flow().flow().size() > inspect_cur_flow_size) {
-        DIA___("MitmHostCX::inspect: flow size change: %d",flow().flow().size());
+        log.deb("MitmHostCX::inspect: flow size change: %d",flow().flow().size());
         inspect_flow_same_bytes = 0;
     }
     
@@ -268,18 +273,19 @@ void MitmHostCX::inspect(char side) {
                 (flow().flow().size() == inspect_cur_flow_size && flow().flow().back().second->size() > inspect_flow_same_bytes) ) {
 
         if(flow().flow().size() == inspect_cur_flow_size) {
-            DIA___("MitmHostCX::inspect: new data in the  same flow size %d", flow().flow().size());
-            //return;
+
+            log.deb("MitmHostCX::inspect: new data in the  same flow size %d", flow().flow().size());
+
         }
         
-        DIAS___("MitmHostCX::inspect: inspector loop:");
+        log.deb("MitmHostCX::inspect: inspector loop:");
         for(Inspector* inspector: inspectors_) {
             if(inspector->interested(this) && (! inspector->completed() )) {
                 inspector->update(this);
                 
                 inspect_verdict = inspector->verdict();
                 
-                DIA___("MitmHostCX::inspect[%s]: verdict %d",inspector->c_name(), inspect_verdict);
+                log.dia("MitmHostCX::inspect[%s]: verdict %d",inspector->c_name(), inspect_verdict);
                 if(inspect_verdict == Inspector::OK) {
                     //
                 } else if (inspect_verdict == Inspector::CACHED) {
@@ -294,12 +300,12 @@ void MitmHostCX::inspect(char side) {
                         inspector->apply_verdict(verdict_target);
                         break;
                     } else {
-                        ERRS___("cannot apply verdict on generic cx");
+                        log.err("cannot apply verdict on generic cx");
                     }
                 } 
             }
         }
-        DIAS___("MitmHostCX::inspect: inspector loop end.");
+        log.deb("MitmHostCX::inspect: inspector loop end.");
         
         inspect_cur_flow_size = flow().flow().size();
         inspect_flow_same_bytes  = flow().flow().back().second->size();
@@ -313,15 +319,19 @@ void MitmHostCX::on_detect(duplexFlowMatch* x_sig, flowMatchState& s, vector_ran
 
 
     if(sig_sig) {
-        LOG___(loglevel(sig_sig->severity),"matching signature: cat='%s', name='%s'",
+
+        // log to wildcard logger
+        logan::log(loglevel(sig_sig->severity),"matching signature: cat='%s', name='%s'",
                 sig_sig->category.c_str(),
                 sig_sig->name().c_str());
-        DEB___("matching signature: cat='%s', name='%s' at %s",
+
+        // diagnose on "inspect" topic
+        log.dia("matching signature: cat='%s', name='%s' at %s",
                 sig_sig->category.c_str(),
                 sig_sig->name().c_str(),
                 vrangetos(r).c_str());
 
-        this->log().append( string_format("\nDetected application: cat='%s', name='%s'\n",
+        this->comlog().append( string_format("\nDetected application: cat='%s', name='%s'\n",
                 sig_sig->category.c_str(),
                 sig_sig->name().c_str()));
 
