@@ -66,12 +66,6 @@ Listener* prepare_listener(unsigned int port, std::string const& friendly_name, 
     s_p->com()->set_monitor(s);
     s_p->com()->set_poll_handler(s,s_p);
 
-    logan::get()["srv-utils"] = ERR;
-    logan::err("srv-utils","listener prepared %s", friendly_name.c_str());
-
-    auto n = logan::use<AuthFactory>(AuthFactory::get());
-    logan::err(n, "with authfactory loglevel");
-
     return s_p;
 }
 

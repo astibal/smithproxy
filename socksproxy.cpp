@@ -347,23 +347,6 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     }
 
 
-//    auto topic = logan::use<AuthFactory>(AuthFactory::get());
-//    logan::err(topic, "with auth loglevel");
-//
-//    auto tracer = logan::create(__FUNCTION__);
-//    tracer.level(ERR);
-//    tracer.err("with auth loglevel");
-//
-      auto mylog = logan::touch<SocksProxy>(*this);
-      mylog.err("this is log with the sockproxy context!");
-//
-//
-//    auto m2 = logan::touch<MitmHostCX>(*n_cx);
-//    m2.err("this is log with the mitmhostcx context!");
-//
-//    auto m3 = logan::attach<MitmHostCX>(target_cx);
-//    m3.err("target cx context");
-
     DIAS___("SocksProxy::socks5_handoff: finished");
 }
 
