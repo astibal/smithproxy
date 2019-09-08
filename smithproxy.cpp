@@ -273,21 +273,21 @@ void SmithProxy::run() {
 
 void SmithProxy::stop() {
     if (plain_proxy != nullptr) {
-        plain_proxy->dead(true);
+        plain_proxy->state().dead(true);
     }
     if(ssl_proxy != nullptr) {
-        ssl_proxy->dead(true);
+        ssl_proxy->state().dead(true);
 
     }
     if(dtls_proxy != nullptr) {
-        dtls_proxy->dead(true);
+        dtls_proxy->state().dead(true);
     }
     if(udp_proxy != nullptr) {
-        udp_proxy->dead(true);
+        udp_proxy->state().dead(true);
 
     }
     if(socks_proxy != nullptr) {
-        socks_proxy->dead(true);
+        socks_proxy->state().dead(true);
     }
 }
 

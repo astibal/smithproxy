@@ -128,8 +128,8 @@ class SmithdProxy : public baseProxy {
         virtual baseHostCX* new_cx(const char* h, const char* p) { return new SmithClientCX(com(),h,p); };
         virtual baseHostCX* new_cx(int s) { return new SmithClientCX(com(), s); };
         
-        virtual void on_left_error(baseHostCX*) {  dead(true); };
-        virtual void on_right_error(baseHostCX*) { dead(true); };
+        virtual void on_left_error(baseHostCX*) {  state().dead(true); };
+        virtual void on_right_error(baseHostCX*) { state().dead(true); };
 };
 
 template <class COM, class CX, class PX>

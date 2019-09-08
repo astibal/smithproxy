@@ -535,7 +535,7 @@ bool MitmProxy::handle_authentication(MitmHostCX* mh)
                     if(mh->meter_read_bytes > 200) {
                         // we cannot use replacements and identity is not resolved... what we can do. Shutdown.
                         EXTS___("not enough data received to ensure right replacement-aware protocol.");
-                        dead(true);
+                        state().dead(true);
                     }
                 }
             }
@@ -615,7 +615,7 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
                 }
                 else {
                     DIAS___(" -> replacement unknown: killing proxy");
-                    dead(true);
+                    state().dead(true);
                 }
             }
         }
@@ -801,7 +801,7 @@ void MitmProxy::on_half_close(baseHostCX* cx) {
                 EXT___("half-closed: live peer with pending data: keeping up for %ds",expiry);
             } else {
                 DIA___("half-closed: timer's up (%d). closing prematurely.",expiry);
-                this->dead(true);
+                state().dead(true);
             }
             
             
@@ -813,7 +813,7 @@ void MitmProxy::on_half_close(baseHostCX* cx) {
     } else {
         // if peer doesn't exist or peercom doesn't exit, mark proxy dead -- noone to speak to
         DIAS___("half-closed: peer with pending write-data is dead.")
-        this->dead(true);
+        state().dead(true);
     }
 }
 
@@ -821,10 +821,10 @@ void MitmProxy::on_left_error(baseHostCX* cx) {
 
     if(cx == nullptr) return;
     
-    if(this->dead()) return;  // don't process errors twice
+    if(state().dead()) return;  // don't process errors twice
 
     
-    DEB___("on_left_error[%s]: proxy marked dead",(this->error_on_read ? "read" : "write"));
+    DEB___("on_left_error[%s]: proxy marked dead",(state().error_on_read ? "read" : "write"));
     DUMS___(to_string().c_str());
     
     if(write_payload()) {
@@ -871,10 +871,10 @@ void MitmProxy::on_left_error(baseHostCX* cx) {
         INFS_(msg.c_str());
         if(LEV_(DEB)) __debug_zero_connections(cx);
         
-        this->dead(true); 
+        state().dead(true);
     } else {
         on_half_close(cx);
-        if(this->dead()) {
+        if(state().dead()) {
             // status dead is new, since we check dead status at the begining
             std::string msg = string_format("Connection from %s left half-closed: %s",cx->full_name('L').c_str(),detail.c_str());
             INFS___(msg);
@@ -888,9 +888,9 @@ void MitmProxy::on_left_error(baseHostCX* cx) {
 
 void MitmProxy::on_right_error(baseHostCX* cx)
 {
-    if(this->dead()) return;  // don't process errors twice
+    if(state().dead()) return;  // don't process errors twice
     
-    DEB___("on_right_error[%s]: proxy marked dead",(this->error_on_read ? "read" : "write"));
+    DEB___("on_right_error[%s]: proxy marked dead",(state().error_on_read ? "read" : "write"));
     
     if(write_payload()) {
         toggle_tlog();
@@ -901,8 +901,8 @@ void MitmProxy::on_right_error(baseHostCX* cx)
 
 
     std::string flags = "R";
-    std::string comflags = "";
-    MitmHostCX* mh_peer = dynamic_cast<MitmHostCX*>(cx->peer());
+    std::string comflags;
+    auto* mh_peer = dynamic_cast<MitmHostCX*>(cx->peer());
     if (mh_peer != nullptr) {
         if(mh_peer->inspection_verdict() == Inspector::CACHED) flags+="C";
         if(mh_peer->com() != nullptr)
@@ -911,12 +911,12 @@ void MitmProxy::on_right_error(baseHostCX* cx)
 
     
     std::string detail;
-    SSLMitmCom* sc = dynamic_cast<SSLMitmCom*>(cx->com());
+    auto* sc = dynamic_cast<SSLMitmCom*>(cx->com());
     if(sc) {
         detail += string_format("sni=%s ",sc->get_peer_sni().c_str());
     }
     if(mh_peer && mh_peer->application_data) {
-        app_HttpRequest* http = dynamic_cast<app_HttpRequest*>(mh_peer->application_data);
+        auto* http = dynamic_cast<app_HttpRequest*>(mh_peer->application_data);
         if(http) {
             detail += string_format("app=%s%s ",http->proto.c_str(),http->host.c_str()); 
         }
@@ -933,16 +933,16 @@ void MitmProxy::on_right_error(baseHostCX* cx)
             );
     
     
-    if(cx->peer() && cx->peer()->writebuf()->size() == 0) {
+    if( cx->peer() && cx->peer()->writebuf()->empty() ) {
         std::string msg = string_format("Connection from %s closed: %s",cx->full_name('R').c_str(),detail.c_str());
-        INFS_(msg.c_str());
+        INFS_(msg);
         if(LEV_(DEB)) __debug_zero_connections(cx);
         
-        this->dead(true); 
+        state().dead(true);
     } else {
 
         on_half_close(cx);
-        if(this->dead()) {
+        if(state().dead()) {
             // status dead is new, since we check dead status at the begining
             std::string msg = string_format("Connection from %s right half-closed: %s",cx->full_name('R').c_str(),detail.c_str());
             INFS___(msg);
@@ -975,8 +975,9 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
         repl_port =AuthFactory::get().portal_port_https;
     }    
     
-    std::string block_pre("<h2 class=\"fg-red\">Page has been blocked</h2><p>Access has been blocked by smithproxy.</p>\
-    <p>To check your user privileges go to status page<p><p> <form action=\"");
+    std::string block_pre("<h2 class=\"fg-red\">Page has been blocked</h2><p>Access has been blocked by smithproxy.</p>"
+                          "<p>To check your user privileges go to status page<p><p> <form action=\"");
+
     std::string block_post("\"><input type=\"submit\" value=\"User Info\" class=\"btn-red\"></form>");
     
     //cx->host().c_str()
@@ -1070,7 +1071,7 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
         repl = block_pre + repl_proto + "://"+AuthFactory::get().portal_address+":"+repl_port + "/cgi-bin/auth.py?a=z" + block_post;
         
         std::string cap  = "Page Blocked";
-        std::string meta = "";
+        std::string meta;
         repl = html()->render_msg_html_page(cap,meta, repl,"700px");
         repl = html()->render_server_response(repl);
         
@@ -1088,7 +1089,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
     
     std::string repl;
     
-    SSLCom* scom = dynamic_cast<SSLCom*>(cx->peercom());
+    auto* scom = dynamic_cast<SSLCom*>(cx->peercom());
     if(!scom) {
         std::string error("<html><head></head><body><p>Internal error</p><p>com object is not ssl-type</p></body></html>");
         error = html()->render_server_response(error);
@@ -1112,7 +1113,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
     std::string block_target_info;
     
     
-    app_HttpRequest* app_request = dynamic_cast<app_HttpRequest*>(cx->application_data);
+    auto* app_request = dynamic_cast<app_HttpRequest*>(cx->application_data);
     if(app_request != nullptr) {
         
 //         INF___(" --- request: %s",app_request->request().c_str());
@@ -1134,14 +1135,15 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
                 std::string orig_url = "about:blank";
                 
                 //we require orig_url is the last argument!!!
-                unsigned int a = app_request->request().find("orig_url");
+                auto a = app_request->request().find("orig_url");
                 if(a != std::string::npos) {
                     //len of "orig_url=" is 9
                     orig_url = app_request->request().substr(a+9);
                 }
                 
                 
-                std::string override_applied = string_format("<html><head><meta http-equiv=\"Refresh\" content=\"0; url=%s\"></head><body><!-- applied, redirecting back to %s --></body></html>",
+                std::string override_applied = string_format(
+                        "<html><head><meta http-equiv=\"Refresh\" content=\"0; url=%s\"></head><body><!-- applied, redirecting back to %s --></body></html>",
                                                             orig_url.c_str(),orig_url.c_str());
 
                 whitelist_verify_entry v;

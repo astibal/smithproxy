@@ -160,8 +160,8 @@ public:
     SmithdProxy(baseCom* c) : baseProxy(c) {};
     virtual ~SmithdProxy() {};
 
-    virtual void on_left_error(baseHostCX*) {  dead(true); };
-    virtual void on_right_error(baseHostCX*) { dead(true); };    
+    virtual void on_left_error(baseHostCX*) {  state().dead(true); };
+    virtual void on_right_error(baseHostCX*) { state().dead(true); };
     
     virtual void on_left_bytes(baseHostCX* cx) {
         INF_("Left %d bytes arrived to 0x%x",cx->readbuf()->size(), cx);
@@ -217,7 +217,7 @@ void my_terminate (int param) {
     if (!cfg_daemonize)
     printf("Terminating ...\n");
     if (backend_proxy != nullptr) {
-        backend_proxy->dead(true);
+        backend_proxy->state().dead(true);
     }
 
     cnt_terminate++;

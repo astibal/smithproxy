@@ -100,14 +100,14 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     
     if(matched_policy() < 0) {
         DIA___("SocksProxy::sock5_handoff: matching policy: %d: dropping.",matched_policy());
-        dead(true);
+        state().dead(true);
         return;
     } 
     else if(matched_policy() >= (signed int)CfgFactory::get().db_policy.size()) {
         DIA___("SocksProxy::sock5_handoff: matching policy out of policy index table: %d/%d: dropping.",
                                          matched_policy(),
                                          CfgFactory::get().db_policy.size());
-        dead(true);
+        state().dead(true);
         return;
     }
     
@@ -200,7 +200,7 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
         // strange, but it can happen if the sockets is closed between policy match and this profile application
         // mark dead.
         INFS___("SocksProxy::socks5_handoff: session failed policy application");
-        dead(true);
+        state().dead(true);
     } else {
 
         baseHostCX* src_cx = n_cx;
@@ -342,7 +342,7 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
 
         if(delete_proxy) {
             DEB___("deleting proxy %s", c_name());
-            dead(true);
+            state().dead(true);
         }
     }
 
