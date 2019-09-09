@@ -2983,7 +2983,7 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
 
             if (!ptr) continue;
 
-            if (ptr->class_name() == "MitmProxy") {
+            if (ptr->class_name() == "MitmProxy" || ptr->class_name() == "SocksProxy") {
 
                 MitmProxy *curr_proxy = dynamic_cast<MitmProxy *>(ptr);
                 MitmHostCX *lf = nullptr;
