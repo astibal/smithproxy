@@ -576,7 +576,7 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
                 if(wh != nullptr) {
                     whitelist_found = true;
                     if (scom->opt_failed_certcheck_override_timeout_type == 1) {
-                        wh->expired_at = ::time(nullptr) + scom->opt_failed_certcheck_override_timeout;
+                        wh->expired_at() = ::time(nullptr) + scom->opt_failed_certcheck_override_timeout;
                         DIA___("whitelist_verify[%s]: timeout reset to %d",key.c_str(), scom->opt_failed_certcheck_override_timeout );
                     }
                 }

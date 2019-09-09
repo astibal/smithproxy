@@ -618,7 +618,7 @@ int cli_diag_ssl_wl_list(struct cli_def *cli, const char *command, char *argv[],
     for(auto we: MitmProxy::whitelist_verify.cache()) {
         out += "\n\t" + we.first;
 
-        int ttl = we.second->expired_at - ::time(nullptr);
+        int ttl = we.second->expired_at() - ::time(nullptr);
 
         out += string_format(" ttl: %d", ttl);
         if(ttl <= 0) {
@@ -678,7 +678,7 @@ int cli_diag_ssl_crl_list(struct cli_def *cli, const char *command, char *argv[]
 
             out << "    " + uri;
             if (cached_result) {
-                int ttl = cached_result->expired_at - ::time(nullptr);
+                int ttl = cached_result->expired_at() - ::time(nullptr);
                 out << string_format(", ttl=%d", ttl);
 
                 if (ttl <= 0) {
@@ -737,7 +737,7 @@ int cli_diag_ssl_verify_list(struct cli_def *cli, const char *command, char *arg
             SSLFactory::expiring_ocsp_result *cached_result = x.second;
             int ttl = 0;
             if (cached_result) {
-                ttl = cached_result->expired_at - ::time(nullptr);
+                ttl = cached_result->expired_at() - ::time(nullptr);
                 out << string_format("    %s, ttl=%d", cn.c_str(), ttl);
 
                 if (ttl <= 0) {
