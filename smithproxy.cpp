@@ -264,7 +264,7 @@ void SmithProxy::run() {
     if(socks_thread) {
         socks_thread->join();
     }
-    QueueLogger* ql = dynamic_cast<QueueLogger*>(get_logger());
+    auto* ql = dynamic_cast<QueueLogger*>(get_logger());
     if(ql) {
         ql->sig_terminate = true;
         log_thread->join();
