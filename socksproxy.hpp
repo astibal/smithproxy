@@ -56,7 +56,7 @@ public:
 
     time_t auth_table_refreshed = 0;
 
-    std::string to_string(int lev=iINF) override { static std::string r(string_format("SocksProxy[%s]", MitmProxy::to_string().c_str())); return r; };
+    std::string to_string(int lev=iINF) override { std::string r(string_format("SocksProxy[%s]", MitmProxy::to_string().c_str())); return r; };
 
     DECLARE_C_NAME("SocksProxy");
     DECLARE_LOGGING(to_string);
