@@ -242,10 +242,10 @@ void my_usr1 (int param) {
 static struct option long_options[] =
     {
     /* These options set a flag. */
-    {"debug",   no_argument,       (int*)&args_debug_flag.level_, iDEB},
-    {"diagnose",   no_argument,       (int*)&args_debug_flag.level_, iDIA},
-    {"dump",   no_argument,       (int*)&args_debug_flag.level_, iDUM},
-    {"extreme",   no_argument,       (int*)&args_debug_flag.level_, iEXT},
+    {"debug",   no_argument,       (int*)args_debug_flag.level_ref(), iDEB},
+    {"diagnose",   no_argument,       (int*)args_debug_flag.level_ref(), iDIA},
+    {"dump",   no_argument,       (int*)args_debug_flag.level_ref(), iDUM},
+    {"extreme",   no_argument,       (int*)args_debug_flag.level_ref(), iEXT},
     
     {"config-file", required_argument, 0, 'c'},
     {"config-check-only",no_argument,0,'o'},
@@ -300,7 +300,7 @@ bool load_config(std::string& config_f, bool reload) {
             }        
         }
 
-        cfgapi.getRoot()["settings"].lookupValue("log_level",cfg_log_level.level_);
+        cfgapi.getRoot()["settings"].lookupValue("log_level",cfg_log_level.level_ref());
     }
     catch(const FileIOException &fioex)
     {
@@ -320,7 +320,7 @@ bool load_config(std::string& config_f, bool reload) {
     }
     
     try {
-        cfgapi.getRoot()["settings"].lookupValue("log_level",cfg_log_level.level_);
+        cfgapi.getRoot()["settings"].lookupValue("log_level",cfg_log_level.level_ref());
         if(reload) {
         }
     }

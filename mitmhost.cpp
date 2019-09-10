@@ -78,7 +78,7 @@ bool MySSLMitmCom::spoof_cert(X509* x, SpoofOptions& spo) {
 
     bool r = baseSSLMitmCom::spoof_cert(x,spo);
 
-    //log.ext("MySSLMitmCom::spoof_cert: cert:\n%s",cert.c_str());
+    //_ext("MySSLMitmCom::spoof_cert: cert:\n%s",cert.c_str());
 
     return r;
 }
@@ -87,14 +87,14 @@ bool MySSLMitmCom::spoof_cert(X509* x, SpoofOptions& spo) {
 MitmHostCX::MitmHostCX(baseCom* c, const char* h, const char* p ) : AppHostCX::AppHostCX(c,h,p) {
     log = logan::attach<MitmHostCX>(this, "inspect");
 
-    log.deb("MitmHostCX: constructor %s:%s",h,p);
+    _deb("MitmHostCX: constructor %s:%s",h,p);
     load_signatures();
 };
 
 MitmHostCX::MitmHostCX( baseCom* c, int s ) : AppHostCX::AppHostCX(c,s) {
     log = logan::attach<MitmHostCX>(this, "inspect");
 
-    log.deb("MitmHostCX: constructor %d",s);
+    _deb("MitmHostCX: constructor %d",s);
     load_signatures();
 };
 
@@ -105,7 +105,9 @@ int MitmHostCX::process() {
     unsigned int len = baseHostCX::readbuf()->size();
 
     // our only processing: hex dup the payload to the log
-    log.dum("Incoming data(%s):\n %s", this->name().c_str(), hex_dump(ptr,len));
+    _dum("Incoming data(%s):\n %s", this->name().c_str(), hex_dump(ptr,len));
+
+
 
     //  read buffer will be truncated by 'len' bytes. Note: truncated bytes are LOST.
     return len;
@@ -113,12 +115,12 @@ int MitmHostCX::process() {
 
 void MitmHostCX::load_signatures() {
 
-    log.deb("MitmHostCX::load_signatures: start");
+    _deb("MitmHostCX::load_signatures: start");
 
     zip_signatures(starttls_sensor(),sigs_starttls);
     zip_signatures(sensor(),sigs_detection);
 
-    log.deb("MitmHostCX::load_signatures: stop");
+    _deb("MitmHostCX::load_signatures: stop");
 };
 
 void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, vector_range& r) {
@@ -130,7 +132,7 @@ void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, ve
 
         std::string buffer_data_string((const char*)buffer_get->data(),0,buffer_get->size());
 
-        //log.inf(std::string((const char*)buffer_get->data(),0,buffer_get->size()));
+        //_inf(std::string((const char*)buffer_get->data(),0,buffer_get->size()));
         std::regex re_get("(GET|POST) *([^ \r\n\?]+)([^ \r\n]*)");
         std::smatch m_get;
 
@@ -159,7 +161,7 @@ void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, ve
             auto* app_request = dynamic_cast<app_HttpRequest*>(application_data);
             if(app_request != nullptr) {
                 app_request->referer = str_temp;
-                log.deb("Referer: %s",ESC(app_request->referer));
+                _deb("Referer: %s",ESC(app_request->referer));
             }
 
 
@@ -177,7 +179,7 @@ void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, ve
                 auto* app_request = dynamic_cast<app_HttpRequest*>(application_data);
                 if(app_request != nullptr) {
                     app_request->host = str_temp;
-                    log.dia("Host: %s",app_request->host.c_str());
+                    _dia("Host: %s",app_request->host.c_str());
 
 
                     // FIXME: should be some config variable
@@ -190,12 +192,12 @@ void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, ve
                         DNS_Response* dns_resp_aaaa = DNS::get().dns_cache().get("AAAA:" + app_request->host);
 
                         if(dns_resp_a && com()->l3_proto() == AF_INET) {
-                            log.deb("HTTP inspection: Host header matches DNS: %s",ESC(dns_resp_a->question_str_0()));
+                            _deb("HTTP inspection: Host header matches DNS: %s",ESC(dns_resp_a->question_str_0()));
                         } else if(dns_resp_aaaa && com()->l3_proto() == AF_INET6) {
-                            log.deb("HTTP inspection: Host header matches IPv6 DNS: %s",ESC(dns_resp_aaaa->question_str_0()));
+                            _deb("HTTP inspection: Host header matches IPv6 DNS: %s",ESC(dns_resp_aaaa->question_str_0()));
                         }
                         else {
-                            log.war("HTTP inspection: 'Host' header value '%s' DOESN'T match DNS!", app_request->host.c_str());
+                            _war("HTTP inspection: 'Host' header value '%s' DOESN'T match DNS!", app_request->host.c_str());
                         }
                     }
                 }
@@ -214,13 +216,13 @@ void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, ve
                 auto* app_request = dynamic_cast<app_HttpRequest*>(application_data);
                 if(app_request != nullptr) {
                     app_request->uri = str_temp;
-                    log.dia("URI: %s",ESC(app_request->uri));
+                    _dia("URI: %s",ESC(app_request->uri));
                 }
 
                 if(app_request && m_get.size() > 2) {
                     str_temp = m_get[3].str();
                     app_request->params = str_temp;
-                    log.dia("params: %s",ESC(app_request->params));
+                    _dia("params: %s",ESC(app_request->params));
 
                     //print_request += str_temp;
                 }
@@ -240,9 +242,9 @@ void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, ve
             }
 
 
-            log.inf("http request: %s",ESC(app_request->hr()));
+            _inf("http request: %s",ESC(app_request->hr()));
         } else {
-            log.inf("http request: %s (app_request cast failed)",ESC(print_request));
+            _inf("http request: %s (app_request cast failed)",ESC(print_request));
         }
 
 
@@ -265,7 +267,7 @@ void MitmHostCX::inspect(char side) {
     AppHostCX::inspect(side);
     
     if(flow().flow().size() > inspect_cur_flow_size) {
-        log.deb("MitmHostCX::inspect: flow size change: %d",flow().flow().size());
+        _deb("MitmHostCX::inspect: flow size change: %d",flow().flow().size());
         inspect_flow_same_bytes = 0;
     }
     
@@ -274,18 +276,18 @@ void MitmHostCX::inspect(char side) {
 
         if(flow().flow().size() == inspect_cur_flow_size) {
 
-            log.deb("MitmHostCX::inspect: new data in the  same flow size %d", flow().flow().size());
+            _deb("MitmHostCX::inspect: new data in the  same flow size %d", flow().flow().size());
 
         }
-        
-        log.deb("MitmHostCX::inspect: inspector loop:");
+
+        _deb("MitmHostCX::inspect: inspector loop:");
         for(Inspector* inspector: inspectors_) {
             if(inspector->interested(this) && (! inspector->completed() )) {
                 inspector->update(this);
                 
                 inspect_verdict = inspector->verdict();
-                
-                log.dia("MitmHostCX::inspect[%s]: verdict %d",inspector->c_name(), inspect_verdict);
+
+                _dia("MitmHostCX::inspect[%s]: verdict %d",inspector->c_name(), inspect_verdict);
                 if(inspect_verdict == Inspector::OK) {
                     //
                 } else if (inspect_verdict == Inspector::CACHED) {
@@ -300,12 +302,12 @@ void MitmHostCX::inspect(char side) {
                         inspector->apply_verdict(verdict_target);
                         break;
                     } else {
-                        log.err("cannot apply verdict on generic cx");
+                        _err("cannot apply verdict on generic cx");
                     }
                 } 
             }
         }
-        log.deb("MitmHostCX::inspect: inspector loop end.");
+        _deb("MitmHostCX::inspect: inspector loop end.");
         
         inspect_cur_flow_size = flow().flow().size();
         inspect_flow_same_bytes  = flow().flow().back().second->size();
@@ -326,7 +328,7 @@ void MitmHostCX::on_detect(duplexFlowMatch* x_sig, flowMatchState& s, vector_ran
                 sig_sig->name().c_str());
 
         // diagnose on "inspect" topic
-        log.dia("matching signature: cat='%s', name='%s' at %s",
+        _dia("matching signature: cat='%s', name='%s' at %s",
                 sig_sig->category.c_str(),
                 sig_sig->name().c_str(),
                 vrangetos(r).c_str());
@@ -340,13 +342,13 @@ void MitmHostCX::on_detect(duplexFlowMatch* x_sig, flowMatchState& s, vector_ran
             on_detect_www_get(x_sig,s,r);
         }
     } else {
-        log.war("signature of unknown attributes matched: ", x_sig->name());
+        _war("signature of unknown attributes matched: ", x_sig->name());
     }
 }
 
 void MitmHostCX::on_starttls() {
 
-    log.dia("we should now handover myself to SSL worker");
+    _dia("we should now handover myself to SSL worker");
 
     // we know this side is client
 //         delete ();
@@ -361,7 +363,7 @@ void MitmHostCX::on_starttls() {
     peer(peer()); // this will re-init
     peer()->peer(this);
 
-    log.dia("peers set");
+    _dia("peers set");
 
     // set flag to wait for the peer to finish spoofing
 
@@ -382,8 +384,8 @@ void MitmHostCX::on_starttls() {
 
     // mark as opening to not wait for SSL handshake (typically) 1 hour
     opening(true);
-    
-    log.dia("on_starttls finished");
+
+    _dia("on_starttls finished");
 }
 
 

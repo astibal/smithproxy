@@ -1153,7 +1153,7 @@ int cli_debug_level(struct cli_def *cli, const char *command, char *argv[], int 
             lp->level_ = NON;
 
             get_logger()->level(cfgapi_table.logging.level);
-            cli_print(cli, "internal logging level changed to %d",get_logger()->level().level_);
+            cli_print(cli, "internal logging level changed to %d",get_logger()->level().level_ref());
         }
         else {
             //cli_print(cli, "called %s with %s, argc %d\r\n", __FUNCTION__, command, argc);
@@ -1191,7 +1191,7 @@ int cli_debug_terminal(struct cli_def *cli, const char *command, char *argv[], i
             int newlev = safe_val(argv[0]);
             if(newlev >= 0) {
                 lp->level_.level(newlev);
-                cli_print(cli, "this terminal logging level changed to %d",lp->level_.level_);
+                cli_print(cli, "this terminal logging level changed to %d",lp->level_.level());
 
             } else {
                 cli_print(cli,"Incorrect value for logging level: %d",newlev);
@@ -1437,9 +1437,9 @@ int cli_debug_show(struct cli_def *cli, const char *command, char *argv[], int a
     std::stringstream ss;
     for(auto i: logan::get().topic_db_) {
         std::string t = i.first;
-        loglevel l = i.second;
+        loglevel* l = i.second;
 
-        ss << "    [" << t << "] => level " << l.level_ << " flag: " << l.topic_ << "\n";
+        ss << "    [" << t << "] => level " << l->level() << " flag: " << l->topic() << "\n";
     }
 
     cli_print(cli, "%s", ss.str().c_str());
@@ -1468,10 +1468,12 @@ int cli_debug_set(struct cli_def *cli, const char *command, char *argv[], int ar
         //std::scoped_lock<std::recursive_mutex> l_(logan::get_lock());
 
         if(logan::get().topic_db_.find(var) != logan::get().topic_db_.end()) {
-            loglevel l = logan::get()[var];
-            logan::get()[var] = loglevel(newlev,0);
+            loglevel* l = logan::get()[var];
 
-            cli_print(cli, "debug level changed: %s => %d => %d", var.c_str(), l.level_, newlev);
+            int old_lev = l->level();
+            logan::get()[var]->level(newlev);
+
+            cli_print(cli, "debug level changed: %s => %d => %d", var.c_str(), old_lev, newlev);
         } else {
             cli_print(cli, "variable not recognized");
         }
@@ -1693,15 +1695,15 @@ int save_config_debug(Config& ex) {
 
 
     Setting& deb_log_objects = deb_objects.add("log", Setting::TypeGroup);
-    deb_log_objects.add("sslcom", Setting::TypeInt) = (int)SSLCom::log_level_ref().level_;
-    deb_log_objects.add("sslmitmcom", Setting::TypeInt) = (int)baseSSLMitmCom<DTLSCom>::log_level_ref().level_;
-    deb_log_objects.add("sslcertstore", Setting::TypeInt) = (int)SSLFactory::log_level_ref().level_;
-    deb_log_objects.add("proxy", Setting::TypeInt) = (int)baseProxy::log_level_ref().level_;
-    deb_log_objects.add("epoll", Setting::TypeInt) = (int)epoll::log_level.level_;
+    deb_log_objects.add("sslcom", Setting::TypeInt) = (int)SSLCom::log_level_ref().level_ref();
+    deb_log_objects.add("sslmitmcom", Setting::TypeInt) = (int)baseSSLMitmCom<DTLSCom>::log_level_ref().level_ref();
+    deb_log_objects.add("sslcertstore", Setting::TypeInt) = (int)SSLFactory::log_level_ref().level_ref();
+    deb_log_objects.add("proxy", Setting::TypeInt) = (int)baseProxy::log_level_ref().level_ref();
+    deb_log_objects.add("epoll", Setting::TypeInt) = (int)epoll::log_level.level_ref();
     deb_log_objects.add("mtrace", Setting::TypeBoolean) = cfg_mtrace_enable;
     deb_log_objects.add("openssl_mem_dbg", Setting::TypeBoolean) = cfg_openssl_mem_dbg;
-    deb_log_objects.add("alg_dns", Setting::TypeInt) = (int)DNS_Inspector::log_level_ref().level_;
-    deb_log_objects.add("pkt_dns", Setting::TypeInt) = (int)DNS_Packet::log_level_ref().level_;
+    deb_log_objects.add("alg_dns", Setting::TypeInt) = (int)DNS_Inspector::log_level_ref().level_ref();
+    deb_log_objects.add("pkt_dns", Setting::TypeInt) = (int)DNS_Packet::log_level_ref().level_ref();
 
 
     return 0;
@@ -2117,14 +2119,14 @@ int save_config_settings(Config& ex) {
     socks_objects.add("async_dns", Setting::TypeBoolean) = socksServerCX::global_async_dns;
 
 
-    objects.add("log_level", Setting::TypeInt) = (int)cfgapi_table.logging.level.level_;
+    objects.add("log_level", Setting::TypeInt) = (int)cfgapi_table.logging.level.level_ref();
     objects.add("log_file", Setting::TypeString) = CfgFactory::get().log_file_base;
     objects.add("log_console", Setting::TypeBoolean)  = CfgFactory::get().log_console;
 
     objects.add("syslog_server", Setting::TypeString) = CfgFactory::get().syslog_server;
     objects.add("syslog_port", Setting::TypeInt) = CfgFactory::get().syslog_port;
     objects.add("syslog_facility", Setting::TypeInt) = CfgFactory::get().syslog_facility;
-    objects.add("syslog_level", Setting::TypeInt) = (int)CfgFactory::get().syslog_level.level_;
+    objects.add("syslog_level", Setting::TypeInt) = (int)CfgFactory::get().syslog_level.level_ref();
     objects.add("syslog_family", Setting::TypeInt) = CfgFactory::get().syslog_family;
 
     objects.add("sslkeylog_file", Setting::TypeString) = CfgFactory::get().sslkeylog_file_base;

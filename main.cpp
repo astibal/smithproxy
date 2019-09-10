@@ -244,7 +244,7 @@ bool init_syslog() {
         get_logger()->level(lp->level_);
     }
     
-    lp->syslog_settings.severity = lp->level_.level_;
+    lp->syslog_settings.severity = lp->level_.level();
     lp->syslog_settings.facility = CfgFactory::get().syslog_facility;
     
     get_logger()->target_profiles()[(uint64_t)syslog_socket] = lp;
@@ -297,18 +297,18 @@ bool load_config(std::string& config_f, bool reload) {
         CfgFactory::cfg_root()["debug"].lookupValue("log_srclines",get_logger()->print_srcline());
         CfgFactory::cfg_root()["debug"].lookupValue("log_srclines_always",get_logger()->print_srcline_always());
 
-        CfgFactory::cfg_root()["debug"]["log"].lookupValue("sslcom",SSLCom::log_level_ref().level_);
-        CfgFactory::cfg_root()["debug"]["log"].lookupValue("sslmitmcom",baseSSLMitmCom<SSLCom>::log_level_ref().level_);
-        CfgFactory::cfg_root()["debug"]["log"].lookupValue("sslmitmcom",baseSSLMitmCom<DTLSCom>::log_level_ref().level_);
-        CfgFactory::cfg_root()["debug"]["log"].lookupValue("sslcertstore",SSLFactory::log_level_ref().level_);
-        CfgFactory::cfg_root()["debug"]["log"].lookupValue("proxy",baseProxy::log_level_ref().level_);
-        CfgFactory::cfg_root()["debug"]["log"].lookupValue("proxy",epoll::log_level.level_);
+        CfgFactory::cfg_root()["debug"]["log"].lookupValue("sslcom",SSLCom::log_level_ref().level_ref());
+        CfgFactory::cfg_root()["debug"]["log"].lookupValue("sslmitmcom",baseSSLMitmCom<SSLCom>::log_level_ref().level_ref());
+        CfgFactory::cfg_root()["debug"]["log"].lookupValue("sslmitmcom",baseSSLMitmCom<DTLSCom>::log_level_ref().level_ref());
+        CfgFactory::cfg_root()["debug"]["log"].lookupValue("sslcertstore",SSLFactory::log_level_ref().level_ref());
+        CfgFactory::cfg_root()["debug"]["log"].lookupValue("proxy",baseProxy::log_level_ref().level_ref());
+        CfgFactory::cfg_root()["debug"]["log"].lookupValue("proxy",epoll::log_level.level_ref());
         CfgFactory::cfg_root()["debug"]["log"].lookupValue("mtrace",cfg_mtrace_enable);
         CfgFactory::cfg_root()["debug"]["log"].lookupValue("openssl_mem_dbg",cfg_openssl_mem_dbg);
 
         /*DNS ALG EXPLICIT LOG*/
-        CfgFactory::cfg_root()["debug"]["log"].lookupValue("alg_dns",DNS_Inspector::log_level_ref().level_);
-        CfgFactory::cfg_root()["debug"]["log"].lookupValue("alg_dns",DNS_Packet::log_level_ref().level_);
+        CfgFactory::cfg_root()["debug"]["log"].lookupValue("alg_dns",DNS_Inspector::log_level_ref().level_ref());
+        CfgFactory::cfg_root()["debug"]["log"].lookupValue("alg_dns",DNS_Packet::log_level_ref().level_ref());
 
 
         CfgFactory::cfg_root()["settings"].lookupValue("write_payload_dir",CfgFactory::get().traflog_dir);
@@ -408,10 +408,10 @@ int main(int argc, char *argv[]) {
     static struct option long_options[] =
             {
                     /* These options set a flag. */
-                    {"debug",   no_argument,        (int*) &CfgFactory::get().args_debug_flag.level_, iDEB},
-                    {"diagnose",   no_argument,     (int*) &CfgFactory::get().args_debug_flag.level_, iDIA},
-                    {"dump",   no_argument,         (int*) &CfgFactory::get().args_debug_flag.level_, iDUM},
-                    {"extreme",   no_argument,      (int*) &CfgFactory::get().args_debug_flag.level_, iEXT},
+                    {"debug",   no_argument,        (int*) &CfgFactory::get().args_debug_flag.level_ref(), iDEB},
+                    {"diagnose",   no_argument,     (int*) &CfgFactory::get().args_debug_flag.level_ref(), iDIA},
+                    {"dump",   no_argument,         (int*) &CfgFactory::get().args_debug_flag.level_ref(), iDUM},
+                    {"extreme",   no_argument,      (int*) &CfgFactory::get().args_debug_flag.level_ref(), iEXT},
 
                     {"config-file", required_argument, 0, 'c'},
                     {"config-check-only",no_argument,0,'o'},

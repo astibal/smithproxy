@@ -270,12 +270,12 @@ bool CfgFactory::load_settings () {
         }
     }
 
-    cfgapi.getRoot()["settings"].lookupValue("log_level",cfgapi_table.logging.level.level_);
+    cfgapi.getRoot()["settings"].lookupValue("log_level",cfgapi_table.logging.level.level_ref());
 
     cfgapi.getRoot()["settings"].lookupValue("syslog_server",syslog_server);
     cfgapi.getRoot()["settings"].lookupValue("syslog_port",syslog_port);
     cfgapi.getRoot()["settings"].lookupValue("syslog_facility",syslog_facility);
-    cfgapi.getRoot()["settings"].lookupValue("syslog_level",syslog_level.level_);
+    cfgapi.getRoot()["settings"].lookupValue("syslog_level",syslog_level.level_ref());
     cfgapi.getRoot()["settings"].lookupValue("syslog_family",syslog_family);
 
     cfgapi.getRoot()["settings"].lookupValue("messages_dir",dir_msg_templates);
