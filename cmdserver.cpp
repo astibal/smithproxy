@@ -3137,17 +3137,20 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
                     auto print_queue_stats = [] (std::stringstream &ss, int verbosity, MitmHostCX *cx, const char *sm,
                                                  const char *bg) {
                         unsigned int in_pending, out_pending;
-                        buffer::size_type in_buf, out_buf;
+                        buffer::size_type in_buf, out_buf, in_cap, out_cap;
 
                         ::ioctl(cx->socket(), SIOCINQ, &in_pending);
                         ::ioctl(cx->socket(), SIOCOUTQ, &out_pending);
 
                         in_buf = cx->readbuf()->size();
+                        in_cap  = cx->readbuf()->capacity();
+
                         out_buf = cx->writebuf()->size();
+                        out_cap  = cx->writebuf()->capacity();
 
                         ss << "     " << sm << "_os_recv-q: " << in_pending << " " << sm << "_os_send-q: "
                            << out_pending << "\n";
-                        ss << "     " << sm << "_sx_recv-q: " << in_buf << " " << sm << "_sx_send-q: " << out_buf
+                        ss << "     " << sm << "_sx_recv-q[" << in_cap << "]: " << in_buf << " " << sm << "_sx_send-q[" << out_cap << "]: " << out_buf
                            << "\n";
 
                         // fun stuff
