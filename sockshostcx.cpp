@@ -127,11 +127,18 @@ bool socksServerCX::choose_server_ip(std::vector<std::string>& target_ips) {
     if(target_ips.empty())
         return false;
 
-    // for now use just first one (cleaned up from empty ones)
-    std::string t = target_ips.at(0);
+    uint64_t index = 0;
 
-    DIA___("choose_server_ip: chosen target: %s (out of %d)",t.c_str(),target_ips.size());
-    com()->nonlocal_dst_host() = t;
+    if(target_ips.size() > 1) {
+        //use some semi-random target
+        uint64_t baz = (uint64_t)this * (uint64_t)com() * time(nullptr);
+        index = baz % target_ips.size();
+    }
+
+    std::string target = target_ips.at(index);
+
+    DIA___("choose_server_ip: chosen target: %s (index %d out of size %d)",target.c_str(), index, target_ips.size());
+    com()->nonlocal_dst_host() = target;
     com()->nonlocal_dst_resolved(true);
 
     return true;
