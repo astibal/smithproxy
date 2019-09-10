@@ -322,17 +322,24 @@ void MitmHostCX::on_detect(duplexFlowMatch* x_sig, flowMatchState& s, vector_ran
 
     if(sig_sig) {
 
+        bool reported = false;
+
         // log to wildcard logger
-        logan::log(loglevel(sig_sig->severity), "ssl", "matching signature: cat='%s', name='%s'",
-                sig_sig->category.c_str(),
-                sig_sig->name().c_str());
+        if( logan::get()["inspect"]->level() >= sig_sig->severity) {
+            log.log(loglevel(sig_sig->severity),log.topic(), "matching signature: cat='%s', name='%s'",
+                    sig_sig->category.c_str(),
+                    sig_sig->name().c_str());
 
-        // diagnose on "inspect" topic
-        _dia("matching signature: cat='%s', name='%s' at %s",
-                sig_sig->category.c_str(),
-                sig_sig->name().c_str(),
-                vrangetos(r).c_str());
+            reported = true;
+        }
 
+        if(! reported) {
+            // diagnose on "inspect" topic
+            _dia("matching signature: cat='%s', name='%s' at %s",
+                 sig_sig->category.c_str(),
+                 sig_sig->name().c_str(),
+                 vrangetos(r).c_str());
+        }
         this->comlog().append( string_format("\nDetected application: cat='%s', name='%s'\n",
                 sig_sig->category.c_str(),
                 sig_sig->name().c_str()));
