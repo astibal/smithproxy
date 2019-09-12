@@ -179,8 +179,15 @@ protected:
     std::vector<DNS_Answer> authorities_list_;
     //std::vector<DNS_AdditionalInfo> additionals_list;
     std::vector<DNS_Answer> additionals_list_;
+
+private:
+    logan_attached<DNS_Packet> log;
     
-public:    
+public:
+    explicit DNS_Packet() {
+        log = logan::attach<DNS_Packet>(this, "dns");
+    };
+
     std::vector<int> answer_ttl_idx; // should be protected;
     time_t      loaded_at = 0;
     
@@ -215,7 +222,7 @@ public:
     inline std::vector<DNS_Answer>& authorities() { return authorities_list_; };
     inline std::vector<DNS_Answer>& additionals() { return additionals_list_; };
     
-    
+
     DECLARE_C_NAME("DNS_Packet");
     DECLARE_LOGGING(to_string);
 };
@@ -224,21 +231,43 @@ public:
 int generate_dns_request(unsigned short id, buffer& b, std::string const& hostname, DNS_Record_Type t);
 
 class DNS_Request : public DNS_Packet {
+private:
+    logan_attached<DNS_Request> log;
+
 public:
-    DNS_Request(): DNS_Packet() {};        // we won't allow parsing in constructor
-    ~DNS_Request() override = default;
+    DNS_Request(): DNS_Packet() {
+        log = logan::attach<DNS_Request>(this, "dns");
+        _deb("DNS_Request::c-tor");
+    };
+
+
+    ~DNS_Request() override {
+        _deb("DNS_Request::d-tor");
+    };
     DECLARE_C_NAME("DNS_Request");
     DECLARE_LOGGING(to_string);
 };
 
 
 class DNS_Response : public DNS_Packet {
+private:
+    logan_attached<DNS_Response> log;
+
 public:
     buffer* cached_packet = nullptr;
     unsigned int cached_id_idx = 0;
     
-    DNS_Response(): DNS_Packet() {};        // we won't allow parsing in constructor
-    ~DNS_Response() override { if(cached_packet != nullptr) delete cached_packet; };
+    DNS_Response(): DNS_Packet() {
+        log = logan::attach<DNS_Response>(this,"dns");
+        _deb("DNS_Response::c-tor");
+    };
+    ~DNS_Response() override {
+        _deb("DNS_Request::d-tor");
+        if(cached_packet != nullptr) {
+            _deb("DNS_Request::d-tor deleting cached packet");
+            delete cached_packet;
+        }
+    };
     
     DECLARE_C_NAME("DNS_Response");
     DECLARE_LOGGING(to_string);

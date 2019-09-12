@@ -193,8 +193,8 @@ int DNS_Packet::load(buffer* src) {
         uint16_t authorities_togo = authorities_;
         uint16_t additionals_togo = additionals_;
         
-        DIA___("DNS_Packet::load: processing [0x%x] Q: %d, A: %d, AU: %d, AD: %d  (buffer length=%d)",id_, questions_,answers_,authorities_,additionals_,src->size());
-        DEB___("DNS Packet dump:\n%s",hex_dump(src->data(),src->size()).c_str());
+        _dia("DNS_Packet::load: processing [0x%x] Q: %d, A: %d, AU: %d, AD: %d  (buffer length=%d)",id_, questions_,answers_,authorities_,additionals_,src->size());
+        _deb("DNS Packet dump:\n%s",hex_dump(src->data(),src->size()).c_str());
         
         unsigned int mem_counter = DNS_HEADER_SZ;
             
@@ -202,10 +202,10 @@ int DNS_Packet::load(buffer* src) {
         
         /* QUESTION */
         if(!failure && questions_togo > 0) {
-            DIA___("DNS Inspect: Questions: start (count %d)",questions_togo);            
+            _dia("DNS Inspect: Questions: start (count %d)",questions_togo);
             
             for(; mem_counter < src->size() && questions_togo > 0 && questions_togo > 0;) {
-                DEB___("DNS_Packet::load: question loop start: current memory pos: %d",mem_counter);
+                _deb("DNS_Packet::load: question loop start: current memory pos: %d",mem_counter);
                 DNS_Question question_temp;
                 unsigned int field_len = 0;
                 
@@ -213,34 +213,34 @@ int DNS_Packet::load(buffer* src) {
                     
                     
                     buffer tmp_b = src->view(cur_mem,src->size()-cur_mem);
-                    DUM__("current buffer: %s", hex_dump(tmp_b).c_str());
+                    _dum("current buffer: %s", hex_dump(tmp_b).c_str());
                     
                     // load next field length
                     field_len = src->get_at<uint8_t>(cur_mem);
                     
                     // 
                     if(cur_mem + field_len >= src->size()) {
-                        DIA___("DNS_Packet::load: incomplete question data in the preamble, position %d, field_len %d out of buffer bounds %d",cur_mem, field_len, src->size());
+                        _dia("DNS_Packet::load: incomplete question data in the preamble, position %d, field_len %d out of buffer bounds %d",cur_mem, field_len, src->size());
                         failure = true;
                         break;
                     }
                     
-                    DEB___("DNS_Packet::load: question field_len=%d i=%d buffer_size=%d",field_len,cur_mem,src->size());
+                    _deb("DNS_Packet::load: question field_len=%d i=%d buffer_size=%d",field_len,cur_mem,src->size());
                     
                     // last part of the fqdn?
                     if(field_len == 0) {
                         
                         if(cur_mem+5 > src->size()) {
-                            DIA___("DNS_Packet::load: incomplete question data in the preamble, index+5 = %d is out of buffer bounds %d",cur_mem+5,src->size());
+                            _dia("DNS_Packet::load: incomplete question data in the preamble, index+5 = %d is out of buffer bounds %d",cur_mem+5,src->size());
                             mem_counter = src->size();
                             failure = true;
                             break;
                         }
-                        question_temp.rec_type = ntohs(src->get_at<unsigned short>(cur_mem+1));           DEB___("DNS_Packet::load: read 'type' at index %d", cur_mem+1);
-                        question_temp.rec_class =  ntohs(src->get_at<unsigned short>(cur_mem+1+2));       DEB___("DNS_Packet::load: read 'class' at index %d", cur_mem+1+2);
-                        DEB___("type=%d,class=%d",question_temp.rec_type,question_temp.rec_class);
+                        question_temp.rec_type = ntohs(src->get_at<unsigned short>(cur_mem+1));           _deb("DNS_Packet::load: read 'type' at index %d", cur_mem+1);
+                        question_temp.rec_class =  ntohs(src->get_at<unsigned short>(cur_mem+1+2));       _deb("DNS_Packet::load: read 'class' at index %d", cur_mem+1+2);
+                        _deb("type=%d,class=%d",question_temp.rec_type,question_temp.rec_class);
                         mem_counter += (1 + (2*2));
-                        DEB___("DNS_Packet::load: s==0, mem counter changed to: %d (0x%x)",mem_counter,mem_counter);
+                        _deb("DNS_Packet::load: s==0, mem counter changed to: %d (0x%x)",mem_counter,mem_counter);
                         
                         if(questions_togo > 0) {
                             questions_list_.push_back(question_temp);
@@ -250,13 +250,13 @@ int DNS_Packet::load(buffer* src) {
                         break;
                     } else {
                         if(field_len > src->size()) {
-                            DIA___("DNS_Packet::load: incomplete question data in the preamble, field_len %d is out of buffer bounds %d",field_len,src->size());
+                            _dia("DNS_Packet::load: incomplete question data in the preamble, field_len %d is out of buffer bounds %d",field_len,src->size());
                             mem_counter = src->size();
                             failure = true;
                             break;
                         }
                         if(cur_mem+1 >= src->size()) {
-                            DIA___("DNS_Packet::load: incomplete question data in the preamble, cur_mem+1 = %d is out of buffer bounds %d",cur_mem+1,src->size());
+                            _dia("DNS_Packet::load: incomplete question data in the preamble, cur_mem+1 = %d is out of buffer bounds %d",cur_mem+1,src->size());
                             mem_counter = src->size();
                             failure = true;
                             break;
@@ -274,10 +274,10 @@ int DNS_Packet::load(buffer* src) {
                 }
                 
                 if(!failure) {
-                    DIA___("DNS_Packet::load: OK question[%d]: name: %s, type: %s, class: %d",questions_togo, question_temp.rec_str.c_str(),
+                    _dia("DNS_Packet::load: OK question[%d]: name: %s, type: %s, class: %d",questions_togo, question_temp.rec_str.c_str(),
                                         dns_record_type_str(question_temp.rec_type),question_temp.rec_class);
                 } else {
-                    DIA___("DNS_Packet::load: FAILED question[%d]",questions_togo);
+                    _dia("DNS_Packet::load: FAILED question[%d]",questions_togo);
                     break;
                 }
             }
@@ -285,7 +285,7 @@ int DNS_Packet::load(buffer* src) {
             
         /* ANSWER section */
         if(!failure && answers_togo > 0) {
-            DIA___("DNS Inspect: Answers: start (count %d)",answers_togo);
+            _dia("DNS Inspect: Answers: start (count %d)",answers_togo);
             
             for(unsigned int i = mem_counter; i < src->size() && answers_togo > 0; ) {
                 DNS_Answer answer_temp;
@@ -302,7 +302,7 @@ int DNS_Packet::load(buffer* src) {
                 mem_counter += inc ;
                 i += inc;
                 
-                DIA___("DNS_Packet::load: answer[%d]: name: %d, type: %d, class: %d, ttl: %d, len: %d, buflen: %d",answers_togo,
+                _dia("DNS_Packet::load: answer[%d]: name: %d, type: %d, class: %d, ttl: %d, len: %d, buflen: %d",answers_togo,
                                     answer_temp.name_,answer_temp.type_,answer_temp.class_,answer_temp.ttl_,answer_temp.datalen_,answer_temp.data_.size()  );
                 answers_list_.push_back(answer_temp);
                 answers_togo--;
@@ -312,7 +312,7 @@ int DNS_Packet::load(buffer* src) {
         /* AUTHORITIES sectin */
         if(!failure && authorities_togo > 0) {
             
-            DIA___("DNS Inspect: Authorities: start (count %d)",authorities_togo);
+            _dia("DNS Inspect: Authorities: start (count %d)",authorities_togo);
             
             for(unsigned int i = mem_counter; i < src->size() && authorities_togo > 0; ) {
                 DNS_Answer answer_temp;
@@ -323,7 +323,7 @@ int DNS_Packet::load(buffer* src) {
                 unsigned short pre_type = ntohs(src->get_at<unsigned short>(i+xi));                
                 i += (xi + 2);
                 
-                DUM___("xi: %d, pre-type: %d",xi, pre_type);
+                _dum("xi: %d, pre-type: %d",xi, pre_type);
                 
                 if(pre_type == SOA) {
                     //answer_temp.name_ = ntohs(src->get_at<unsigned short>(i));
@@ -333,7 +333,7 @@ int DNS_Packet::load(buffer* src) {
                     answer_temp.datalen_ = ntohs(src->get_at<uint16_t>(i+6)); 
                 
                     
-                    DUM___("DNS_Packet::load: authorities[%d]: name: %d, type: %d, class: %d, ttl: %d, len: %d",authorities_togo,
+                    _dum("DNS_Packet::load: authorities[%d]: name: %d, type: %d, class: %d, ttl: %d, len: %d",authorities_togo,
                                         answer_temp.name_,answer_temp.type_,answer_temp.class_,answer_temp.ttl_,answer_temp.datalen_);
                     
                     if(answer_temp.datalen_ > 0)
@@ -343,7 +343,7 @@ int DNS_Packet::load(buffer* src) {
                     mem_counter += inc ;
                     i += inc;
                     
-                    DIA___("DNS_Packet::load: authorities[%d]: name: %d, type: %d, class: %d, ttl: %d, len: %d, buflen: %d",authorities_togo,
+                    _dia("DNS_Packet::load: authorities[%d]: name: %d, type: %d, class: %d, ttl: %d, len: %d, buflen: %d",authorities_togo,
                                         answer_temp.name_,answer_temp.type_,answer_temp.class_,answer_temp.ttl_,answer_temp.datalen_,answer_temp.data_.size()  );
                     authorities_list_.push_back(answer_temp);
                     authorities_togo--;
@@ -361,7 +361,7 @@ int DNS_Packet::load(buffer* src) {
         /* ADDITIONALS */
         if(!failure && additionals_togo > 0) {
             
-            DIA___("DNS Inspect: Additionals: start (count %d)",additionals_togo);
+            _dia("DNS Inspect: Additionals: start (count %d)",additionals_togo);
             
             for(unsigned int i = mem_counter; i < src->size() && additionals_togo > 0; ) {
   
@@ -373,7 +373,7 @@ int DNS_Packet::load(buffer* src) {
                 i += (xi + 2);
                 
                
-                DIA___("DNS inspect: Additionals: packet pre_type = %s(%d)",dns_record_type_str(pre_type), pre_type);
+                _dia("DNS inspect: Additionals: packet pre_type = %s(%d)",dns_record_type_str(pre_type), pre_type);
                 
                 if(pre_type == OPT) {
                     //THIS IS DNSSEC ADDITIONALS - we need to handle it better, now remove                
@@ -395,7 +395,7 @@ int DNS_Packet::load(buffer* src) {
                             i += answer_temp.datalen_;
                         }
 
-                        DIA___("DNS_Packet::load: additional DNSSEC info[%d]: name: %d, opt: %d, udp: %d, hb_rcode: %d, edns0: %d, z: %d, len %d, buflen: %d", additionals_togo,
+                        _dia("DNS_Packet::load: additional DNSSEC info[%d]: name: %d, opt: %d, udp: %d, hb_rcode: %d, edns0: %d, z: %d, len %d, buflen: %d", additionals_togo,
                                             answer_temp.name_,answer_temp.opt_,answer_temp.udp_size_,answer_temp.higher_bits_rcode_,answer_temp.edns0_version_,answer_temp.z_,answer_temp.datalen_,answer_temp.data_.size()  );
                         
                         mem_counter = i;
@@ -426,16 +426,16 @@ int DNS_Packet::load(buffer* src) {
 
                     mem_counter = i;
                     
-                    DEB___("mem_counter: %d, size %d",i, src->size());
+                    _deb("mem_counter: %d, size %d",i, src->size());
                     
-                    DIA___("DNS_Packet::load: additional answer[%d]: name: %d, type: %d, class: %d, ttl: %d, len: %d, buflen: %d",additionals_togo,
+                    _dia("DNS_Packet::load: additional answer[%d]: name: %d, type: %d, class: %d, ttl: %d, len: %d, buflen: %d",additionals_togo,
                                         answer_temp.name_,answer_temp.type_,answer_temp.class_,answer_temp.ttl_,answer_temp.datalen_,answer_temp.data_.size()  );
                     additionals_list_.push_back(answer_temp);
                     additionals_togo--;
                 }
                 else {
                     
-                    WARS___("unsupported additional message, skipping the rest of message.");
+                    _war("unsupported additional message, skipping the rest of message.");
                     
                     mem_counter = src->size();
                     i = mem_counter;
@@ -450,7 +450,7 @@ int DNS_Packet::load(buffer* src) {
         }
         
         if(questions_togo == 0 && answers_togo == 0 && authorities_togo == 0 /*&& additionals_togo == 0*/) {
-            DIA___("DNS_Packet::load: finished mem_counter=%d buffer_size=%d",mem_counter,src->size());
+            _dia("DNS_Packet::load: finished mem_counter=%d buffer_size=%d",mem_counter,src->size());
             if(mem_counter == src->size()) {
                 return 0;
             }
