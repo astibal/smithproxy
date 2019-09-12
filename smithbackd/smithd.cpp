@@ -242,10 +242,10 @@ void my_usr1 (int param) {
 static struct option long_options[] =
     {
     /* These options set a flag. */
-    {"debug",   no_argument,       (int*)args_debug_flag.level_ref(), iDEB},
-    {"diagnose",   no_argument,       (int*)args_debug_flag.level_ref(), iDIA},
-    {"dump",   no_argument,       (int*)args_debug_flag.level_ref(), iDUM},
-    {"extreme",   no_argument,       (int*)args_debug_flag.level_ref(), iEXT},
+    {"debug",   no_argument,       (int*)&args_debug_flag.level_ref(), iDEB},
+    {"diagnose",   no_argument,       (int*)&args_debug_flag.level_ref(), iDIA},
+    {"dump",   no_argument,       (int*)&args_debug_flag.level_ref(), iDUM},
+    {"extreme",   no_argument,       (int*)&args_debug_flag.level_ref(), iEXT},
     
     {"config-file", required_argument, 0, 'c'},
     {"config-check-only",no_argument,0,'o'},

@@ -325,7 +325,7 @@ void MitmHostCX::on_detect(duplexFlowMatch* x_sig, flowMatchState& s, vector_ran
         bool reported = false;
 
         // log to wildcard logger
-        if( logan::get()["inspect"]->level() >= sig_sig->severity) {
+        if( logan::get()["inspect"]->level() >= static_cast<unsigned int>(sig_sig->severity)) {
             log.log(loglevel(sig_sig->severity),log.topic(), "matching signature: cat='%s', name='%s'",
                     sig_sig->category.c_str(),
                     sig_sig->name().c_str());
