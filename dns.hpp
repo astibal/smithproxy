@@ -207,7 +207,8 @@ public:
             std::string ret;
             if(question_type_0() == A) ret = "A:";
             else if (question_type_0() == AAAA) ret = "AAAA:";
-            return ret += string_format("%s", questions_list_.at(0).rec_str.c_str());
+            ret += string_format("%s", questions_list_.at(0).rec_str.c_str());
+            return ret;
         } 
         return std::string("? "); 
     };

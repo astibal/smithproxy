@@ -64,7 +64,10 @@
 //
 class Inspector : public socle::sobject, public lockable {
 public:
-    virtual ~Inspector() {}
+    Inspector() {
+        log = logan::attach(this, "alg");
+    }
+    virtual ~Inspector() = default;
     //! called always when there are new data in the flow. \see class Flow.
     virtual void update(AppHostCX* cx) = 0;
     //! called before inserting to inspector list. 
@@ -86,7 +89,9 @@ public:
     inspect_verdict verdict() const { return verdict_; };
     void verdict(inspect_verdict v) { verdict_ = v; }
     virtual void apply_verdict(AppHostCX* cx);
-    
+private:
+    logan_attached<Inspector> log;
+
 protected:
     bool completed_ = false;
     void completed(bool b) { completed_ = b; }
@@ -114,6 +119,9 @@ protected:
 
 class DNS_Inspector : public Inspector {
 public:
+    explicit DNS_Inspector() {
+        log = logan::attach(this, "dns");
+    }
     virtual ~DNS_Inspector() {
         // clear local request cache
         for(auto x: requests_) { if(x.second) {delete x.second; } };
@@ -137,6 +145,7 @@ public:
 
     static std::regex wildcard;
 private:
+    logan_attached<DNS_Inspector> log;
     bool is_tcp = false;
 
     buffer* cached_response = nullptr;
