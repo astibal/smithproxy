@@ -117,8 +117,8 @@ void MitmHostCX::load_signatures() {
 
     _deb("MitmHostCX::load_signatures: start");
 
-    zip_signatures(starttls_sensor(),sigs_starttls);
-    zip_signatures(sensor(),sigs_detection);
+    make_sig_states(starttls_sensor(),sigs_starttls);
+    make_sig_states(sensor(),sigs_detection);
 
     _deb("MitmHostCX::load_signatures: stop");
 };

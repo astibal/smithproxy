@@ -1440,7 +1440,7 @@ bool CfgFactory::prof_detect_apply (baseHostCX *originator, baseProxy *new_proxy
         if(pd != nullptr)  {
             pd_name = pd->prof_name.c_str();
             DIA_("policy_apply[%s]: policy detection profile: mode: %d", pd_name, pd->mode);
-            mitm_originator->mode(pd->mode);
+            mitm_originator->mode(static_cast<AppHostCX::mode_t>(pd->mode));
         }
     } else {
         WARS_("policy_apply: cannot apply detection profile: cast to AppHostCX failed.");
