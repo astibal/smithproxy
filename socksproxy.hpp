@@ -72,8 +72,8 @@ public:
     MitmSocksProxy(baseCom* c, int worker_id) : ThreadedAcceptorProxy<SocksProxy>(c,worker_id) {
         log = logan::attach(this, "masterproxy.socks");
     };
-    virtual baseHostCX* new_cx(int s);
-    virtual void on_left_new(baseHostCX* just_accepted_cx);
+    baseHostCX* new_cx(int s) override;
+    void on_left_new(baseHostCX* just_accepted_cx) override;
 
     std::string to_string(int lev=iINF) override { static std::string r(string_format("MitmSocksProxy[%s]", baseProxy::to_string().c_str())); return r; };
 
