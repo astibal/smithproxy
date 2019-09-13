@@ -52,15 +52,16 @@
 DEFINE_LOGGING(SocksProxy);
 DEFINE_LOGGING(MitmSocksProxy);
 
-SocksProxy::SocksProxy(baseCom* c): MitmProxy(c) {}
-SocksProxy::~SocksProxy() {}
+SocksProxy::SocksProxy(baseCom* c): MitmProxy(c) {
+    log = logan::attach(this, "proxy");
+}
 
 void SocksProxy::on_left_message(baseHostCX* basecx) {
 
-    auto* cx = static_cast<socksServerCX*>(basecx);
+    auto* cx = dynamic_cast<socksServerCX*>(basecx);
     if(cx != nullptr) {
         if(cx->state_ == WAIT_POLICY) {
-            DIAS___("SocksProxy::on_left_message: policy check: accepted");
+            _dia("SocksProxy::on_left_message: policy check: accepted");
             std::vector<baseHostCX*> l;
             std::vector<baseHostCX*> r;
             l.push_back(cx);
@@ -77,34 +78,34 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
                 p = CfgFactory::get().db_policy.at(matched_policy());
             }
 
-            DIA___("socksProxy::on_left_message: policy check result: policy# %d policyid 0x%x verdict %s", matched_policy(), p, verdict ? "accept" : "reject" );
+            _dia("socksProxy::on_left_message: policy check result: policy# %d policyid 0x%x verdict %s", matched_policy(), p, verdict ? "accept" : "reject" );
 
             socks5_policy s5_verdict = verdict ? ACCEPT : REJECT;
             cx->verdict(s5_verdict);
         }
         else if(cx->state_ == HANDOFF) {
-            DIAS___("SocksProxy::on_left_message: socksHostCX handoff msg received");
+            _dia("SocksProxy::on_left_message: socksHostCX handoff msg received");
             cx->state(ZOMBIE);
             
             socks5_handoff(cx);
         } else {
 
-            WARS___("SocksProxy::on_left_message: unknown message");
+            _war("SocksProxy::on_left_message: unknown message");
         }
     }
 }
 
 void SocksProxy::socks5_handoff(socksServerCX* cx) {
 
-    DEBS___("SocksProxy::socks5_handoff: start");
+    _deb("SocksProxy::socks5_handoff: start");
     
     if(matched_policy() < 0) {
-        DIA___("SocksProxy::sock5_handoff: matching policy: %d: dropping.",matched_policy());
+        _dia("SocksProxy::sock5_handoff: matching policy: %d: dropping.",matched_policy());
         state().dead(true);
         return;
     } 
     else if(matched_policy() >= (signed int)CfgFactory::get().db_policy.size()) {
-        DIA___("SocksProxy::sock5_handoff: matching policy out of policy index table: %d/%d: dropping.",
+        _dia("SocksProxy::sock5_handoff: matching policy out of policy index table: %d/%d: dropping.",
                                          matched_policy(),
                                          CfgFactory::get().db_policy.size());
         state().dead(true);
@@ -131,7 +132,7 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     }
     new_com->master(com()->master());
     
-    MitmHostCX* n_cx = new MitmHostCX(new_com, s);
+    auto* n_cx = new MitmHostCX(new_com, s);
     n_cx->waiting_for_peercom(true);
     n_cx->com()->name();
     n_cx->name();
@@ -155,7 +156,7 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     ldaadd(n_cx);
     n_cx->on_delay_socket(s);
     
-    MitmHostCX *target_cx = new MitmHostCX(n_cx->com()->slave(), n_cx->com()->nonlocal_dst_host().c_str(), 
+    auto *target_cx = new MitmHostCX(n_cx->com()->slave(), n_cx->com()->nonlocal_dst_host().c_str(),
                                         string_format("%d",n_cx->com()->nonlocal_dst_port()).c_str()
                                         );
     std::string h;
@@ -189,7 +190,7 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     
     if(ssl) {
 //         ((SSLCom*)n_cx->com())->upgrade_server_socket(n_cx->socket());
-        DEBS___("SocksProxy::socks5_handoff: mark1");
+        _deb("SocksProxy::socks5_handoff: mark1");
         
 //         ((SSLCom*)target_cx->com())->upgrade_client_socket(target_cx->socket());
     }
@@ -199,7 +200,7 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     if (CfgFactory::get().policy_apply(n_cx, this) < 0) {
         // strange, but it can happen if the sockets is closed between policy match and this profile application
         // mark dead.
-        INFS___("SocksProxy::socks5_handoff: session failed policy application");
+        _inf("SocksProxy::socks5_handoff: session failed policy application");
         state().dead(true);
     } else {
 
@@ -215,7 +216,7 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
             // resolve source information - is there an identity info for that IP?
             if (opt_auth_authenticate || opt_auth_resolve) {
 
-                DIAS___("authentication required or optionally resolved");
+                _dia("authentication required or optionally resolved");
 
                 // reload table and check timeouts each 5 seconds
                 time_t now = time(nullptr);
@@ -225,20 +226,20 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
 
                     {
                         std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip4_lock());
-                        DUMS___("authentication: refreshing ip4 shm logons");
+                        _dum("authentication: refreshing ip4 shm logons");
                         AuthFactory::get().shm_ip4_table_refresh();
 
-                        DUMS___("authentication: checking ip4 timeouts");
+                        _dum("authentication: checking ip4 timeouts");
                         AuthFactory::get().ip4_timeout_check();
                     }
 
                     // refresh and timeout IPv6 entries
                     {
                         std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
-                        DUMS___("authentication: refreshing ip6 shm logons");
+                        _dum("authentication: refreshing ip6 shm logons");
                         AuthFactory::get().shm_ip6_table_refresh();
 
-                        DUMS___("authentication: checking ip6 timeouts");
+                        _dum("authentication: checking ip6 timeouts");
                         AuthFactory::get().ip6_timeout_check();
                     }
                 }
@@ -252,12 +253,12 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
                     if(opt_auth_authenticate) {
                         if (target_port != 80 && target_port != 443) {
                             delete_proxy = true;
-                            INF___("Connection %s closed: authorization failed (unknown identity)",
+                            _inf("Connection %s closed: authorization failed (unknown identity)",
                                    n_cx->c_name());
                         }
                     }
                     else {
-                        DIA___("Connection %s: authentication info optional, continuing.",n_cx->c_name());
+                        _dia("Connection %s: authentication info optional, continuing.",n_cx->c_name());
                     }
 
                 } else if(opt_auth_authenticate) {
@@ -305,11 +306,11 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
 
                         if (CfgFactory::get().policy_prof_auth(matched_policy()) != nullptr)
                             for (auto i: CfgFactory::get().policy_prof_auth(matched_policy())->sub_policies) {
-                                for (auto x: groups_vec) {
-                                    DEB___("Connection identities: ip identity '%s' against policy '%s'", x.c_str(),
+                                for (auto const& x: groups_vec) {
+                                    _deb("Connection identities: ip identity '%s' against policy '%s'", x.c_str(),
                                            i->name.c_str());
                                     if (x == i->name) {
-                                        DIA___("Connection identities: ip identity '%s' matches policy '%s'", x.c_str(),
+                                        _dia("Connection identities: ip identity '%s' matches policy '%s'", x.c_str(),
                                                i->name.c_str());
                                         bad_auth = false;
                                     }
@@ -317,10 +318,10 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
                             }
                         if (bad_auth) {
                             if (target_port != 80 && target_port != 443) {
-                                INF___("Connection %s closed: authorization failed (non-matching identity criteria)",
+                                _inf("Connection %s closed: authorization failed (non-matching identity criteria)",
                                        n_cx->c_name());
                             } else {
-                                INF___("Connection %s closed: authorization failed (non-matching identity criteria)(with replacement)",
+                                _inf("Connection %s closed: authorization failed (non-matching identity criteria)(with replacement)",
                                        n_cx->c_name());
                                 // set bad_auth true, because despite authentication failed, it could be replaced (we can let user know
                                 // he is not allowed to proceed
@@ -335,19 +336,19 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
                     }
                 }
             } else {
-                DIA___("Connection %s: authentication info optional, continuing.",n_cx->c_name());
+                _dia("Connection %s: authentication info optional, continuing.",n_cx->c_name());
             }
         }
 
 
         if(delete_proxy) {
-            DEB___("deleting proxy %s", c_name());
+            _deb("deleting proxy %s", c_name());
             state().dead(true);
         }
     }
 
 
-    DIAS___("SocksProxy::socks5_handoff: finished");
+    _dia("SocksProxy::socks5_handoff: finished");
 }
 
 
@@ -363,7 +364,7 @@ baseHostCX* MitmSocksProxy::new_cx(int s) {
 
 void MitmSocksProxy::on_left_new(baseHostCX* just_accepted_cx) {
 
-    SocksProxy* new_proxy = new SocksProxy(com()->slave());
+    auto* new_proxy = new SocksProxy(com()->slave());
     // let's add this just_accepted_cx into new_proxy
     std::string h;
     std::string p;
@@ -372,5 +373,5 @@ void MitmSocksProxy::on_left_new(baseHostCX* just_accepted_cx) {
 
     new_proxy->ladd(just_accepted_cx);
     this->proxies().insert(new_proxy);
-    DEBS___("MitmMasterProxy::on_left_new: finished");
+    _deb("MitmMasterProxy::on_left_new: finished");
 }

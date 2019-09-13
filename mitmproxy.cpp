@@ -71,6 +71,7 @@ MitmProxy::MitmProxy(baseCom* c): baseProxy(c), sobject() {
     // FIXME: testing filter - get back to it later!
     //add_filter("test",new TestFilter(this,5));
 
+    log = logan::attach(this, "proxy");
 }
 
 void MitmProxy::toggle_tlog() {
@@ -96,12 +97,12 @@ void MitmProxy::toggle_tlog() {
         
         if(present) {
             if(tlog()->status() == true) {
-                WARS___("capture disabled by disabled-file");
+                _war("capture disabled by disabled-file");
             }
             tlog()->status(false);
         } else {
             if(tlog()->status() == false) {
-                WARS___("capture re-enabled from previous disabled-file state");
+                _war("capture re-enabled from previous disabled-file state");
             }            
             tlog()->status(true);
         }
@@ -112,7 +113,7 @@ void MitmProxy::toggle_tlog() {
 MitmProxy::~MitmProxy() {
     
     if(write_payload()) {
-        DEBS___("MitmProxy::destructor: syncing writer");
+        _deb("MitmProxy::destructor: syncing writer");
 
         for(typename std::vector<baseHostCX*>::iterator j = this->left_sockets.begin(); j != this->left_sockets.end(); ++j) {
             auto cx = (*j);
@@ -243,7 +244,7 @@ bool MitmProxy::apply_id_policies(baseHostCX* cx) {
     ProfileSubAuth* final_profile = nullptr;
     
     if( found ) {
-        DIA___("apply_id_policies: matched policy: %d",matched_policy());        
+        _dia("apply_id_policies: matched policy: %d",matched_policy());        
         PolicyRule* policy = CfgFactory::get().db_policy.at(matched_policy());
         
         ProfileAuth* auth_policy = policy->profile_auth;
@@ -254,12 +255,12 @@ bool MitmProxy::apply_id_policies(baseHostCX* cx) {
                 ProfileSubAuth* sub_prof = sub;
                 std::string sub_name = sub->name;
                 
-                DIA___("apply_id_policies: checking identity policy for: %s", sub_name.c_str());
+                _dia("apply_id_policies: checking identity policy for: %s", sub_name.c_str());
                 
                 for(auto const& my_id: group_vec) {
-                    DIA___("apply_id_policies: identity in policy: %s, match-test real user group '%s'",sub_prof->name.c_str(), my_id.c_str());
+                    _dia("apply_id_policies: identity in policy: %s, match-test real user group '%s'",sub_prof->name.c_str(), my_id.c_str());
                     if(sub_prof->name == my_id) {
-                        DIAS___("apply_id_policies: .. matched.");
+                        _dia("apply_id_policies: .. matched.");
                         final_profile = sub_prof;
                         break;
                     }
@@ -278,34 +279,34 @@ bool MitmProxy::apply_id_policies(baseHostCX* cx) {
             const char* pt_name = "none";
             std::string algs;
             
-            DIA___("apply_id_policies: assigning sub-profile %s",final_profile->name.c_str());
+            _dia("apply_id_policies: assigning sub-profile %s",final_profile->name.c_str());
             if(final_profile->profile_content != nullptr) {
                 if (CfgFactory::get().prof_content_apply(cx, this, final_profile->profile_content)) {
                     pc_name = final_profile->profile_content->prof_name.c_str();
-                    DIA___("apply_id_policies: assigning content sub-profile %s",final_profile->profile_content->prof_name.c_str());
+                    _dia("apply_id_policies: assigning content sub-profile %s",final_profile->profile_content->prof_name.c_str());
                 }
             }
             if(final_profile->profile_detection != nullptr) {
                 if (CfgFactory::get().prof_detect_apply(cx, this, final_profile->profile_detection)) {
                     pd_name = final_profile->profile_detection->prof_name.c_str();
-                    DIA___("apply_id_policies: assigning detection sub-profile %s",final_profile->profile_detection->prof_name.c_str());
+                    _dia("apply_id_policies: assigning detection sub-profile %s",final_profile->profile_detection->prof_name.c_str());
                 }
             }
             if(final_profile->profile_tls != nullptr) {
                 if(CfgFactory::get().prof_tls_apply(cx, this, final_profile->profile_tls)) {
                     pt_name = final_profile->profile_tls->prof_name.c_str();
-                    DIA___("apply_id_policies: assigning tls sub-profile %s",final_profile->profile_tls->prof_name.c_str());
+                    _dia("apply_id_policies: assigning tls sub-profile %s",final_profile->profile_tls->prof_name.c_str());
                 }
             }
             if(final_profile->profile_alg_dns != nullptr) {
                 if(CfgFactory::get().prof_alg_dns_apply(cx, this, final_profile->profile_alg_dns)) {
                     algs += final_profile->profile_alg_dns->prof_name + " ";
-                    DIA___("apply_id_policies: assigning tls sub-profile %s",final_profile->profile_tls->prof_name.c_str());
+                    _dia("apply_id_policies: assigning tls sub-profile %s",final_profile->profile_tls->prof_name.c_str());
                 }
             }
             
             // end of custom sub-profiles
-            INF___("Connection %s: identity-based sub-profile: name=%s cont=%s det=%s tls=%s algs=%s",cx->full_name('L').c_str(),final_profile->name.c_str(),
+            _inf("Connection %s: identity-based sub-profile: name=%s cont=%s det=%s tls=%s algs=%s",cx->full_name('L').c_str(),final_profile->name.c_str(),
                             pc_name, pd_name, pt_name, algs.c_str()
                             );
         }
@@ -339,7 +340,7 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
     
     bool valid_ip_auth = false;
     
-    DIA___("identity check[%s]: source: %s",str_af.c_str(), cx->host().c_str());
+    _dia("identity check[%s]: source: %s",str_af.c_str(), cx->host().c_str());
 
     shm_logon_info_base* id_ptr = nullptr;
     
@@ -348,7 +349,7 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
         std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip4_lock());
         AuthFactory::get().shm_ip4_table_refresh();
 
-        DEB___("identity check[%s]: table size: %d",str_af.c_str(), AuthFactory::get_ip4_map().size());
+        _deb("identity check[%s]: table size: %d",str_af.c_str(), AuthFactory::get_ip4_map().size());
         auto ip = AuthFactory::get_ip4_map().find(cx->host());
         if (ip != AuthFactory::get_ip4_map().end()) {
             shm_logon_info& li = (*ip).second.last_logon_info;
@@ -365,7 +366,7 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
         std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
         AuthFactory::get().shm_ip6_table_refresh();
 
-        DEB___("identity check[%s]: table size: %d",str_af.c_str(), AuthFactory::get_ip6_map().size());
+        _deb("identity check[%s]: table size: %d",str_af.c_str(), AuthFactory::get_ip6_map().size());
         auto ip = AuthFactory::get_ip6_map().find(cx->host());
         if (ip != AuthFactory::get_ip6_map().end()) {
             shm_logon_info6& li = (*ip).second.last_logon_info;
@@ -378,7 +379,7 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
     }
 
     if(id_ptr != nullptr) {
-        DIA___("identity found for %s %s: user: %s groups: %s",str_af.c_str(),cx->host().c_str(),id_ptr->username().c_str(), id_ptr->groups().c_str());
+        _dia("identity found for %s %s: user: %s groups: %s",str_af.c_str(),cx->host().c_str(),id_ptr->username().c_str(), id_ptr->groups().c_str());
 
         // if update_auth_ip_map fails, identity is no longer valid!
         
@@ -394,7 +395,7 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
         // apply specific identity-based profile. 'li' is still valid, since we still hold the lock
         // get ptr to identity_info
 
-        DIA___("resolve_identity[%s]: about to call apply_id_policies, group: %s",str_af.c_str(), id_ptr->groups().c_str());
+        _dia("resolve_identity[%s]: about to call apply_id_policies, group: %s",str_af.c_str(), id_ptr->groups().c_str());
         apply_id_policies(cx);
 
 
@@ -403,7 +404,7 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
     }
 
 
-    DEB___("identity check[%s]: return %d",str_af.c_str(), valid_ip_auth);
+    _deb("identity check[%s]: return %d",str_af.c_str(), valid_ip_auth);
     return valid_ip_auth;
 }
 
@@ -419,7 +420,7 @@ bool MitmProxy::update_auth_ipX_map(baseHostCX* cx) {
     std::string str_af = inet_family_str(af);    
     
 
-    DEB___("update_auth_ip_map: start for %s %s",str_af.c_str(), cx->host().c_str());
+    _deb("update_auth_ip_map: start for %s %s",str_af.c_str(), cx->host().c_str());
     
     IdentityInfoBase* id_ptr = nullptr;
     
@@ -441,7 +442,7 @@ bool MitmProxy::update_auth_ipX_map(baseHostCX* cx) {
     }
     
     if(id_ptr != nullptr) {
-        DIA___("update_auth_ip_map: user %s from %s %s (groups: %s)",id_ptr->username.c_str(), str_af.c_str(), cx->host().c_str(), id_ptr->groups.c_str());
+        _dia("update_auth_ip_map: user %s from %s %s (groups: %s)",id_ptr->username.c_str(), str_af.c_str(), cx->host().c_str(), id_ptr->groups.c_str());
 
         id_ptr->last_seen_policy = matched_policy();
         
@@ -449,7 +450,7 @@ bool MitmProxy::update_auth_ipX_map(baseHostCX* cx) {
             id_ptr->touch();
             ret = true;
         } else {
-            INF___("identity timeout: user %s from %s %s (groups: %s)",id_ptr->username.c_str(), str_af.c_str(), cx->host().c_str(), id_ptr->groups.c_str());
+            _inf("identity timeout: user %s from %s %s (groups: %s)",id_ptr->username.c_str(), str_af.c_str(), cx->host().c_str(), id_ptr->groups.c_str());
             
             // erase internal ip map entry
             if(af == AF_INET || af == 0) {
@@ -463,14 +464,14 @@ bool MitmProxy::update_auth_ipX_map(baseHostCX* cx) {
         }
     }
     
-    DEB___("update_auth_ip_map: finished for %s %s, result %d",str_af.c_str(), cx->host().c_str(),ret);
+    _deb("update_auth_ip_map: finished for %s %s, result %d",str_af.c_str(), cx->host().c_str(),ret);
     return ret;
 }
 
 
-void MitmProxy::add_filter(std::string name, FilterProxy* fp) {
+void MitmProxy::add_filter(std::string const& name, FilterProxy* fp) {
 
-    filters_.push_back(std::pair<std::string,FilterProxy*>(name,fp));
+    filters_.emplace_back(std::pair<std::string,FilterProxy*>(name,fp));
     
     for(auto s: fp->ls()) {
         com()->set_monitor(s->socket());
@@ -490,7 +491,7 @@ int MitmProxy::handle_sockets_once(baseCom* xcom) {
         std::string& filter_name = filter_pair.first;
         baseProxy* filter_proxy = filter_pair.second;
         
-        DEB___("MitmProxy::handle_sockets_once: running filter %s", filter_name.c_str());
+        _deb("MitmProxy::handle_sockets_once: running filter %s", filter_name.c_str());
         filter_proxy->handle_sockets_once(xcom);
     }
     
@@ -521,7 +522,7 @@ bool MitmProxy::handle_authentication(MitmHostCX* mh)
         resolve_identity(mh);
         
         if(!identity_resolved()) {        
-            DEBS___("identity check: unknown");
+            _deb("identity check: unknown");
             
             if(opt_auth_authenticate) {
                 if(mh->replacement_type() == MitmHostCX::REPLACETYPE_HTTP) {
@@ -534,7 +535,7 @@ bool MitmProxy::handle_authentication(MitmHostCX* mh)
                     // wait, if header won't come in some time, kill the proxy
                     if(mh->meter_read_bytes > 200) {
                         // we cannot use replacements and identity is not resolved... what we can do. Shutdown.
-                        EXTS___("not enough data received to ensure right replacement-aware protocol.");
+                        _ext("not enough data received to ensure right replacement-aware protocol.");
                         state().dead(true);
                     }
                 }
@@ -542,7 +543,7 @@ bool MitmProxy::handle_authentication(MitmHostCX* mh)
         } else {
             if(auth_block_identity) {
                 if(mh->replacement_type() == MitmHostCX::REPLACETYPE_HTTP) {
-                    DIAS___("MitmProxy::on_left_bytes: we should block it");
+                    _dia("MitmProxy::on_left_bytes: we should block it");
                     mh->replacement_flag(MitmHostCX::REPLACE_BLOCK);
                     redirected = true;
                     handle_replacement_auth(mh);
@@ -570,27 +571,27 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
                 std::lock_guard<std::recursive_mutex> l_(whitelist_verify.getlock());
 
                 whitelist_verify_entry_t* wh = whitelist_verify.get(key);
-                DIA___("whitelist_verify[%s]: %s",key.c_str(), wh ? "found" : "not found" );
+                _dia("whitelist_verify[%s]: %s",key.c_str(), wh ? "found" : "not found" );
 
                 // !!! wh might be already invalid here, unlocked !!!
                 if(wh != nullptr) {
                     whitelist_found = true;
                     if (scom->opt_failed_certcheck_override_timeout_type == 1) {
                         wh->expired_at() = ::time(nullptr) + scom->opt_failed_certcheck_override_timeout;
-                        DIA___("whitelist_verify[%s]: timeout reset to %d",key.c_str(), scom->opt_failed_certcheck_override_timeout );
+                        _dia("whitelist_verify[%s]: timeout reset to %d",key.c_str(), scom->opt_failed_certcheck_override_timeout );
                     }
                 }
             }
             
             
             if(!whitelist_found) {
-                DIAS___("relaxed cert-check: peer sslcom verify not OK, not in whitelist");
+                _dia("relaxed cert-check: peer sslcom verify not OK, not in whitelist");
 
                 if(mh->replacement_type() == MitmHostCX::REPLACETYPE_NONE) {
-                    DIAS___(" -> replacement: none - letting go");
+                    _dia(" -> replacement: none - letting go");
                 }
                 else if(mh->replacement_type() == MitmHostCX::REPLACETYPE_HTTP) {
-                    DIAS___(" -> replacement: HTTP - redirecting");
+                    _dia(" -> replacement: HTTP - redirecting");
                     mh->replacement_flag(MitmHostCX::REPLACE_BLOCK);
                     redirected = true;
                     handle_replacement_ssl(mh);
@@ -598,23 +599,23 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
                 } 
                 else if(scom->verify_check(SSLCom::CLIENT_CERT_RQ) && scom->opt_client_cert_action > 0) {
 
-                    DIA___(" -> client-cert request:  opt_client_cert_action=%d", scom->opt_client_cert_action);
+                    _dia(" -> client-cert request:  opt_client_cert_action=%d", scom->opt_client_cert_action);
 
                     if(scom->opt_client_cert_action >= 2) {
                         //we should not block
-                        DIAS___(" -> client-cert request: auto-whitelist");
+                        _dia(" -> client-cert request: auto-whitelist");
 
                         std::lock_guard<std::recursive_mutex> l_(whitelist_verify.getlock());
                         
                         whitelist_verify_entry v;
                         whitelist_verify.set(key,new whitelist_verify_entry_t(v,scom->opt_failed_certcheck_override_timeout));
                     } else {
-                        DIAS___(" -> client-cert request: none");
+                        _dia(" -> client-cert request: none");
                     }
 
                 }
                 else {
-                    DIAS___(" -> replacement unknown: killing proxy");
+                    _dia(" -> replacement unknown: killing proxy");
                     state().dead(true);
                 }
             }
@@ -627,7 +628,7 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
 bool MitmProxy::handle_cached_response(MitmHostCX* mh) {
     
     if(mh->inspection_verdict() == Inspector::CACHED) {
-        DIAS___("cached content: not proxying");
+        _dia("cached content: not proxying");
         return true;
     }
     
@@ -673,10 +674,10 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
             if(content_rule() != nullptr) {
                 buffer b = content_replace_apply(cx->to_read());
                 j->to_write(b);
-                DIA___("mitmproxy::on_left_bytes: original %d bytes replaced with %d bytes",cx->to_read().size(),b.size())
+                _dia("mitmproxy::on_left_bytes: original %d bytes replaced with %d bytes",cx->to_read().size(),b.size());
             } else {
                 j->to_write(cx->to_read());
-                DIA___("mitmproxy::on_left_bytes: %d copied",cx->to_read().size())
+                _dia("mitmproxy::on_left_bytes: %d copied",cx->to_read().size());
             }
         } else {
         
@@ -690,10 +691,10 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
             if(content_rule() != nullptr) {
                 buffer b = content_replace_apply(cx->to_read());
                 j->to_write(b);
-                DIA___("mitmproxy::on_left_bytes: original %d bytes replaced with %d bytes into delayed",cx->to_read().size(),b.size())
+                _dia("mitmproxy::on_left_bytes: original %d bytes replaced with %d bytes into delayed",cx->to_read().size(),b.size());
             } else {	  
                 j->to_write(cx->to_read());
-                DIA___("mitmproxy::on_left_bytes: %d copied to delayed",cx->to_read().size())
+                _dia("mitmproxy::on_left_bytes: %d copied to delayed",cx->to_read().size());
             }
         } else {
         
@@ -727,10 +728,10 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
         if(content_rule() != nullptr) {
             buffer b = content_replace_apply(cx->to_read());
             j->to_write(b);
-            DIA___("mitmproxy::on_right_bytes: original %d bytes replaced with %d bytes",cx->to_read().size(),b.size())
+            _dia("mitmproxy::on_right_bytes: original %d bytes replaced with %d bytes",cx->to_read().size(),b.size());
         } else {      
             j->to_write(cx->to_read());
-            DIA___("mitmproxy::on_right_bytes: %d copied",cx->to_read().size())
+            _dia("mitmproxy::on_right_bytes: %d copied",cx->to_read().size());
         }
     }
     for(auto j: left_delayed_accepts) {
@@ -738,10 +739,10 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
         if(content_rule() != nullptr) {
             buffer b = content_replace_apply(cx->to_read());
             j->to_write(b);
-            DIA___("mitmproxy::on_right_bytes: original %d bytes replaced with %d bytes into delayed",cx->to_read().size(),b.size())
+            _dia("mitmproxy::on_right_bytes: original %d bytes replaced with %d bytes into delayed",cx->to_read().size(),b.size());
         } else {      
             j->to_write(cx->to_read()); 
-            DIA___("mitmproxy::on_right_bytes: %d copied to delayed",cx->to_read().size())
+            _dia("mitmproxy::on_right_bytes: %d copied to delayed",cx->to_read().size());
         }
     }
 
@@ -763,7 +764,7 @@ void MitmProxy::__debug_zero_connections(baseHostCX* cx) {
             if(s != 0) {
                 buffer b(1024);
                 p = cx->com()->peek(s,b.data(),b.capacity(),0);
-                INF___("        cx peek size %d",p);
+                _inf("        cx peek size %d",p);
             }
             
         }
@@ -772,7 +773,7 @@ void MitmProxy::__debug_zero_connections(baseHostCX* cx) {
             SSLCom* c = dynamic_cast<SSLCom*>(cx->peer()->com());
             if(c) {
                 c->log_profiling_stats(iINF);
-                INF___("        peer transferred bytes: up=%d/%dB dw=%d/%dB",cx->peer()->meter_read_count,cx->peer()->meter_read_bytes,
+                _inf("        peer transferred bytes: up=%d/%dB dw=%d/%dB",cx->peer()->meter_read_count,cx->peer()->meter_read_bytes,
                                                                 cx->peer()->meter_write_count, cx->peer()->meter_write_bytes);
                 int p = 0; 
                 int s = cx->peer()->socket();
@@ -780,7 +781,7 @@ void MitmProxy::__debug_zero_connections(baseHostCX* cx) {
                 if(s != 0) {
                     buffer b(1024);
                     p = cx->peer()->com()->peek(s,b.data(),b.capacity(),0);
-                    INF___("        peer peek size %d",p);
+                    _inf("        peer peek size %d",p);
                 }                
             }
             
@@ -798,21 +799,21 @@ void MitmProxy::on_half_close(baseHostCX* cx) {
             int expiry = half_holdtimer + half_timeout - ::time(nullptr);
             
             if(expiry > 0) {
-                EXT___("half-closed: live peer with pending data: keeping up for %ds",expiry);
+                _ext("half-closed: live peer with pending data: keeping up for %ds",expiry);
             } else {
-                DIA___("half-closed: timer's up (%d). closing prematurely.",expiry);
+                _dia("half-closed: timer's up (%d). closing prematurely.",expiry);
                 state().dead(true);
             }
             
             
         } else {
-            DIA___("half-closed: live peer with pending data: keeping up for %ds",half_timeout);
+            _dia("half-closed: live peer with pending data: keeping up for %ds",half_timeout);
             half_holdtimer = ::time(nullptr);
         }
         
     } else {
         // if peer doesn't exist or peercom doesn't exit, mark proxy dead -- noone to speak to
-        DIAS___("half-closed: peer with pending write-data is dead.")
+        _dia("half-closed: peer with pending write-data is dead.");
         state().dead(true);
     }
 }
@@ -824,8 +825,8 @@ void MitmProxy::on_left_error(baseHostCX* cx) {
     if(state().dead()) return;  // don't process errors twice
 
     
-    DEB___("on_left_error[%s]: proxy marked dead",(state().error_on_read ? "read" : "write"));
-    DUMS___(to_string().c_str());
+    _deb("on_left_error[%s]: proxy marked dead",(state().error_on_read ? "read" : "write"));
+    _dum(to_string().c_str());
     
     if(write_payload()) {
         toggle_tlog();
@@ -877,7 +878,7 @@ void MitmProxy::on_left_error(baseHostCX* cx) {
         if(state().dead()) {
             // status dead is new, since we check dead status at the begining
             std::string msg = string_format("Connection from %s left half-closed: %s",cx->full_name('L').c_str(),detail.c_str());
-            INFS___(msg);
+            _inf("%s", msg.c_str());
         }
     }
     
@@ -890,14 +891,14 @@ void MitmProxy::on_right_error(baseHostCX* cx)
 {
     if(state().dead()) return;  // don't process errors twice
     
-    DEB___("on_right_error[%s]: proxy marked dead",(state().error_on_read ? "read" : "write"));
+    _deb("on_right_error[%s]: proxy marked dead",(state().error_on_read ? "read" : "write"));
     
     if(write_payload()) {
         toggle_tlog();
         if(tlog()) tlog()->right_write("Server side connection closed: " + cx->name() + "\n");
     }
     
-//         INF___("Created new proxy 0x%08x from %s:%s to %s:%d",new_proxy,f,f_p, t,t_p );
+//         _inf("Created new proxy 0x%08x from %s:%s to %s:%d",new_proxy,f,f_p, t,t_p );
 
 
     std::string flags = "R";
@@ -945,7 +946,7 @@ void MitmProxy::on_right_error(baseHostCX* cx)
         if(state().dead()) {
             // status dead is new, since we check dead status at the begining
             std::string msg = string_format("Connection from %s right half-closed: %s",cx->full_name('R').c_str(),detail.c_str());
-            INFS___(msg);
+            _inf("%s", msg.c_str());
         }
     } 
     
@@ -990,7 +991,7 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
         auto id_token = AuthFactory::get_token_map().find(cx->host());
         
         if(id_token != AuthFactory::get_token_map().end()) {
-            INF___("found a cached token for %s",cx->host().c_str());
+            _inf("found a cached token for %s",cx->host().c_str());
             std::pair<unsigned int,std::string>& cache_entry = (*id_token).second;
             
             unsigned int now      = time(nullptr);
@@ -998,7 +999,7 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
             std::string& token_tk = cache_entry.second;
             
             if(now - token_ts < AuthFactory::get().token_timeout) {
-                INF___("MitmProxy::handle_replacement_auth: cached token %s for request: %s",token_tk.c_str(),cx->application_data->hr().c_str());
+                _inf("MitmProxy::handle_replacement_auth: cached token %s for request: %s",token_tk.c_str(),cx->application_data->hr().c_str());
                 
                 if(cx->com()) {
                     if(cx->com()->l3_proto() == AF_INET) {
@@ -1018,7 +1019,7 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
                 cx->to_write((unsigned char*)repl.c_str(),repl.size());
                 cx->close_after_write(true);
             } else {
-                INF___("MitmProxy::handle_replacement_auth: expired token %s for request: %s",token_tk.c_str(),cx->application_data->hr().c_str());
+                _inf("MitmProxy::handle_replacement_auth: expired token %s for request: %s",token_tk.c_str(),cx->application_data->hr().c_str());
                 goto new_token;
             }
         } else {
@@ -1028,12 +1029,12 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
             std::string token_text = cx->application_data->original_request();
           
             for(auto i: CfgFactory::get().policy_prof_auth(cx->matched_policy())->sub_policies) {
-                DIA___("MitmProxy::handle_replacement_auth: token: requesting identity %s",i->name.c_str());
+                _dia("MitmProxy::handle_replacement_auth: token: requesting identity %s",i->name.c_str());
                 token_text  += " |" + i->name;
             }
             shm_logon_token tok = shm_logon_token(token_text.c_str());
             
-            INF___("MitmProxy::handle_replacement_auth: new auth token %s for request: %s",tok.token().c_str(),cx->application_data->hr().c_str());
+            _inf("MitmProxy::handle_replacement_auth: new auth token %s for request: %s",tok.token().c_str(),cx->application_data->hr().c_str());
             
             if(cx->com()) {
                 if(cx->com()->l3_proto() == AF_INET) {
@@ -1045,7 +1046,7 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
             
             if(repl.size() == 0) {
                 // default to IPv4 address
-                INFS___("XXX: fallback to IPv4");
+                _inf("XXX: fallback to IPv4");
                 repl = redir_pre + repl_proto + "://"+AuthFactory::get().portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + tok.token() + redir_suf;
             }
             
@@ -1061,13 +1062,13 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
             AuthFactory::get().shm_token_map_.save(true);
             AuthFactory::get().shm_token_map_.release();
             
-            DIAS___("MitmProxy::handle_replacement_auth: token table updated");
+            _dia("MitmProxy::handle_replacement_auth: token table updated");
             AuthFactory::get_token_map()[cx->host()] = std::pair<unsigned int,std::string>(time(nullptr),tok.token());
         }
     } else
     if (cx->replacement_flag() == MitmHostCX::REPLACE_BLOCK) {
 
-        DIAS___("MitmProxy::handle_replacement_auth: instructed to replace block");
+        _dia("MitmProxy::handle_replacement_auth: instructed to replace block");
         repl = block_pre + repl_proto + "://"+AuthFactory::get().portal_address+":"+repl_port + "/cgi-bin/auth.py?a=z" + block_post;
         
         std::string cap  = "Page Blocked";
@@ -1080,7 +1081,7 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
 
     } else
     if (cx->replacement_flag() == MitmHostCX::REPLACE_NONE) {
-        DIAS___("MitmProxy::handle_replacement_auth: asked to handle NONE. No-op.");
+        _dia("MitmProxy::handle_replacement_auth: asked to handle NONE. No-op.");
     } 
 }
 
@@ -1097,7 +1098,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
         cx->to_write((unsigned char*)error.c_str(),error.size());
         cx->close_after_write(true);  
         
-        ERRS___("cannot handle replacement for TLS, com is not SSLCom");
+        _err("cannot handle replacement for TLS, com is not SSLCom");
         
         return;
     }
@@ -1116,10 +1117,10 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
     auto* app_request = dynamic_cast<app_HttpRequest*>(cx->application_data);
     if(app_request != nullptr) {
         
-//         INF___(" --- request: %s",app_request->request().c_str());
-//         INF___(" ---     uri: %s",app_request->uri.c_str());
-//         INF___(" --- origuri: %s",app_request->original_request().c_str());
-//         INF___(" --- referer: %s",app_request->referer.c_str());
+//         _inf(" --- request: %s",app_request->request().c_str());
+//         _inf(" ---     uri: %s",app_request->uri.c_str());
+//         _inf(" --- origuri: %s",app_request->original_request().c_str());
+//         _inf(" --- referer: %s",app_request->referer.c_str());
         
         
         if(app_request->request().find("/SM/IT/HP/RO/XY/override") != std::string::npos) {
@@ -1130,7 +1131,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
                         
             if(scom->opt_failed_certcheck_override) {
             
-                DIA___("ssl_override: ph4 - asked for verify override for %s", whitelist_make_key(cx).c_str());
+                _dia("ssl_override: ph4 - asked for verify override for %s", whitelist_make_key(cx).c_str());
                 
                 std::string orig_url = "about:blank";
                 
@@ -1159,7 +1160,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
                 cx->to_write((unsigned char*)override_applied.c_str(),override_applied.size());
                 cx->close_after_write(true);
                 
-                WAR___("Connection from %s: SSL override activated for %s",cx->full_name('L').c_str(), app_request->request().c_str());
+                _war("Connection from %s: SSL override activated for %s",cx->full_name('L').c_str(), app_request->request().c_str());
                 
                 return;
                 
@@ -1179,7 +1180,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             // PHASE III.
             // display warning and button which will trigger override
         
-            DIA___("ssl_override: ph3 - warning replacement for %s", whitelist_make_key(cx).c_str());
+            _dia("ssl_override: ph3 - warning replacement for %s", whitelist_make_key(cx).c_str());
             
             block_target_info = "<p><h3 class=\"fg-red\">Requested site:</h3>" + app_request->proto + app_request->host + "</p>";
             block_override = string_format("orig_url=%s\"><input type=\"submit\" value=\"Override\" class=\"btn-red\"></form>","/");
@@ -1229,7 +1230,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             
             if(scom->opt_failed_certcheck_override)  block_additinal_info += block_override_pre + block_override;
             
-            DIAS___("MitmProxy::handle_replacement_ssl: instructed to replace block");
+            _dia("MitmProxy::handle_replacement_ssl: instructed to replace block");
             
             std::string cap = "TLS security warning";
             std::string meta;
@@ -1245,7 +1246,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             // PHASE II
             // redir to warning message
             
-            DIA___("ssl_override: ph2 - redir to warning replacement for  %s", whitelist_make_key(cx).c_str());
+            _dia("ssl_override: ph2 - redir to warning replacement for  %s", whitelist_make_key(cx).c_str());
             
             std::string repl = "<html><head><meta http-equiv=\"Refresh\" content=\"0; url=/SM/IT/HP/RO/XY/warning?q=1\"></head><body></body></html>";
             repl = html()->render_server_response(repl);
@@ -1256,7 +1257,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             // PHASE I
             // redirecting to / -- for example some subpages would be displayed incorrectly
             
-            DIA___("ssl_override: ph1 - redir to / for %s", whitelist_make_key(cx).c_str());
+            _dia("ssl_override: ph1 - redir to / for %s", whitelist_make_key(cx).c_str());
             
             std::string redir_pre("<html><head><script>top.location.href=\"");
             std::string redir_suf("\";</script></head><body></body></html>");  
@@ -1275,7 +1276,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
 void MitmProxy::init_content_replace() {
     
     if(content_rule_ != nullptr) {
-        DIAS___("MitmProxy::init_content_replace: deleting old replace rules");
+        _dia("MitmProxy::init_content_replace: deleting old replace rules");
         delete content_rule_;
     }
     
@@ -1312,7 +1313,7 @@ buffer MitmProxy::content_replace_apply(buffer b) {
                             result = std::regex_replace(result, re_match, repl);              
                         }
                         profile.replace_each_counter_ = 0;
-                        DIA___("Replacing bytes[stage %d]: n-th counter hit",stage);
+                        _dia("Replacing bytes[stage %d]: n-th counter hit",stage);
                     }
                 }
                 
@@ -1324,10 +1325,10 @@ buffer MitmProxy::content_replace_apply(buffer b) {
                 }
             }
 
-            DIA___("Replacing bytes[stage %d]:",stage);
+            _dia("Replacing bytes[stage %d]:",stage);
         }
         catch(std::regex_error e) {
-        NOT___("MitmProxy::content_replace_apply: failed to replace string: %s",e.what());
+        _not("MitmProxy::content_replace_apply: failed to replace string: %s",e.what());
         }
         
         ++stage;
@@ -1340,14 +1341,14 @@ buffer MitmProxy::content_replace_apply(buffer b) {
     buffer ret_b;
     ret_b.append(result.c_str(),result.size());
     
-    DIA___("content rewritten: original %d bytes with new %d bytes.",b.size(),ret_b.size());
-    DUM___("Replacing bytes (%d):\n%s\n# with bytes(%d):\n%s",data.size(),hex_dump(b).c_str(),ret_b.size(),hex_dump(ret_b).c_str());
+    _dia("content rewritten: original %d bytes with new %d bytes.",b.size(),ret_b.size());
+    _dum("Replacing bytes (%d):\n%s\n# with bytes(%d):\n%s",data.size(),hex_dump(b).c_str(),ret_b.size(),hex_dump(ret_b).c_str());
     return ret_b;
 }
 
 void MitmProxy::tap() {
 
-    DIAS___("MitmProxy::tap: start");
+    _dia("MitmProxy::tap: start");
     
     for (auto cx: left_sockets) {
         com()->unset_monitor(cx->socket());
@@ -1361,7 +1362,7 @@ void MitmProxy::tap() {
 
 void MitmProxy::untap() {
 
-    DIAS___("MitmProxy::untap: start");
+    _dia("MitmProxy::untap: start");
 
     for (auto cx: left_sockets) {
         com()->set_monitor(cx->socket());
@@ -1423,7 +1424,7 @@ bool MitmMasterProxy::detect_ssl_on_plain_socket(int s) {
         
         if(b > 6) {
             if (peek_buffer[0] == 0x16 && peek_buffer[1] == 0x03 && ( peek_buffer[5] == 0x00 || peek_buffer[5] == 0x01 || peek_buffer[5] == 0x02 )) {
-                INF___("detect_ssl_on_plain_socket: SSL detected on socket %d",s);
+                _inf("detect_ssl_on_plain_socket: SSL detected on socket %d",s);
                 ret = true;
             }
         } else {
@@ -1434,7 +1435,7 @@ bool MitmMasterProxy::detect_ssl_on_plain_socket(int s) {
                 
                 ::nanosleep(&t,nullptr);
                 time_taken += time_increment;
-                DIA___("detect_ssl_on_plain_socket: SSL strict detection on socket %d: dalayed by %dnsec",s,time_increment);
+                _dia("detect_ssl_on_plain_socket: SSL strict detection on socket %d: dalayed by %dnsec",s,time_increment);
                 goto again;
             }
         }
@@ -1445,7 +1446,7 @@ bool MitmMasterProxy::detect_ssl_on_plain_socket(int s) {
 
 baseHostCX* MitmMasterProxy::new_cx(int s) {
     
-    DEBS___("MitmMasterProxy::new_cx: new_cx start");
+    _deb("MitmMasterProxy::new_cx: new_cx start");
     
     bool is_ssl = false;
     bool is_ssl_port = false;
@@ -1475,7 +1476,7 @@ baseHostCX* MitmMasterProxy::new_cx(int s) {
     
     auto r = new MitmHostCX(c,s);
     if (is_ssl) {
-        INF___("Connection %s: SSL detected on unusual port.",r->c_name());
+        _inf("Connection %s: SSL detected on unusual port.",r->c_name());
         r->is_ssl = true;
         r->is_ssl_port = is_ssl_port;
     }
@@ -1483,7 +1484,7 @@ baseHostCX* MitmMasterProxy::new_cx(int s) {
         r->is_ssl = true;
     }
     
-    DEB___("Pausing new connection %s",r->c_name());
+    _deb("Pausing new connection %s",r->c_name());
     r->waiting_for_peercom(true);
     return r; 
 }
@@ -1492,7 +1493,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
     // to create child proxy and attach this cx to it.
 
     if(! just_accepted_cx->com()->nonlocal_dst_resolved()) {
-        ERRS___("Was not possible to resolve original destination!");
+        _err("Was not possible to resolve original destination!");
         just_accepted_cx->shutdown();
         delete just_accepted_cx;
     } 
@@ -1506,10 +1507,10 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
         
         // let's add this just_accepted_cx into new_proxy
         if(just_accepted_cx->read_waiting_for_peercom()) {
-            DEBS___("MitmMasterProxy::on_left_new: ldaadd the new waiting_for_peercom cx");
+            _deb("MitmMasterProxy::on_left_new: ldaadd the new waiting_for_peercom cx");
             new_proxy->ldaadd(just_accepted_cx);
         } else{
-            DEBS___("MitmMasterProxy::on_left_new: ladd the new cx (unpaused)");
+            _deb("MitmMasterProxy::on_left_new: ladd the new cx (unpaused)");
             new_proxy->ladd(just_accepted_cx);
         }
         
@@ -1538,7 +1539,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
             }
             target_host = "127.0.0.1";
             
-            DIA___("Connection from %s to %s:%d: traffic redirected from magic IP to %s:%d",just_accepted_cx->c_name(), 
+            _dia("Connection from %s to %s:%d: traffic redirected from magic IP to %s:%d",just_accepted_cx->c_name(), 
                  orig_target_host.c_str(), orig_target_port,
                  target_host.c_str(), target_port);
             matched_vip = true;
@@ -1612,7 +1613,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                     if(!res) {
                         if(target_port != 80 && target_port != 443){
                             delete_proxy = true;
-                            INF___("Dropping non-replaceable connection %s due to unknown source IP",just_accepted_cx->c_name());
+                            _inf("Dropping non-replaceable connection %s due to unknown source IP",just_accepted_cx->c_name());
                             goto end;
                         }
                     } else {
@@ -1660,19 +1661,19 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                             if(CfgFactory::get().policy_prof_auth(policy_num) != nullptr)
                             for ( auto i: CfgFactory::get().policy_prof_auth(policy_num)->sub_policies) {
                                 for(auto x: group_vec) {
-                                    DEB___("Connection identities: ip identity '%s' against policy '%s'",x.c_str(),i->name.c_str());
+                                    _deb("Connection identities: ip identity '%s' against policy '%s'",x.c_str(),i->name.c_str());
                                     if(x == i->name) {
-                                        DIA___("Connection identities: ip identity '%s' matches policy '%s'",x.c_str(),i->name.c_str());
+                                        _dia("Connection identities: ip identity '%s' matches policy '%s'",x.c_str(),i->name.c_str());
                                         bad_auth = false;
                                     }
                                 }
                             }
                             if(bad_auth) {
                                 if(target_port != 80 && target_port != 443) {
-                                    INF___("Dropping non-replaceable connection %s due to non-matching identity",just_accepted_cx->c_name());
+                                    _inf("Dropping non-replaceable connection %s due to non-matching identity",just_accepted_cx->c_name());
                                 }
                                 else {
-                                    INF___("Connection %s with non-matching identity (to be replaced)",just_accepted_cx->c_name());
+                                    _inf("Connection %s with non-matching identity (to be replaced)",just_accepted_cx->c_name());
                                     // set bad_auth true, because despite authentication failed, it could be replaced (we can let user know 
                                     // he is not allowed to proceed
                                     bad_auth = false;
@@ -1705,7 +1706,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                 
             } else {
                 delete_proxy = true;
-                NOT___("MitmMasterProxy::on_left_new: %s cannot be converted to MitmHostCx",just_accepted_cx->c_name());
+                _not("MitmMasterProxy::on_left_new: %s cannot be converted to MitmHostCx",just_accepted_cx->c_name());
             }
   
         } else {
@@ -1720,16 +1721,16 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
         
         
         if(delete_proxy) {
-            INF___("Dropping proxy %s",new_proxy->c_name());
+            _inf("Dropping proxy %s",new_proxy->c_name());
             delete new_proxy;
         }        
     }
     
-    DEBS___("MitmMasterProxy::on_left_new: finished");
+    _deb("MitmMasterProxy::on_left_new: finished");
 }
 
 int MitmMasterProxy::handle_sockets_once(baseCom* c) {
-    //T_DIAS___("slist",5,this->hr()+"\n===============\n");
+    //T__dia("slist",5,this->hr()+"\n===============\n");
     return ThreadedAcceptorProxy<MitmProxy>::handle_sockets_once(c);
 }
 
@@ -1739,10 +1740,10 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
     MitmProxy* new_proxy = new MitmProxy(com()->slave());
     // let's add this just_accepted_cx into new_proxy
     if(just_accepted_cx->read_waiting_for_peercom()) {
-        DEBS___("MitmMasterProxy::on_left_new: ldaadd the new waiting_for_peercom cx");
+        _deb("MitmMasterProxy::on_left_new: ldaadd the new waiting_for_peercom cx");
         new_proxy->ldaadd(just_accepted_cx);
     } else{
-        DEBS___("MitmMasterProxy::on_left_new: ladd the new cx (unpaused)");
+        _deb("MitmMasterProxy::on_left_new: ladd the new cx (unpaused)");
         new_proxy->ladd(just_accepted_cx);
     }
     
@@ -1757,7 +1758,7 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
     just_accepted_cx->com()->resolve_socket_src(just_accepted_cx->socket(),&h,&p);
     target_cx->com()->l3_proto(just_accepted_cx->com()->l3_proto());
     
-    //DEB___("UDP proxy: src l3 = %s dst l3 = %s",inet_family_str(just_accepted_cx->com()->l3_proto()).c_str(), inet_family_str(target_cx->com()->l3_proto()).c_str());
+    //_deb("UDP proxy: src l3 = %s dst l3 = %s",inet_family_str(just_accepted_cx->com()->l3_proto()).c_str(), inet_family_str(target_cx->com()->l3_proto()).c_str());
     
     just_accepted_cx->peer(target_cx);
     target_cx->peer(just_accepted_cx);
@@ -1791,7 +1792,7 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
     }
     
     new_proxy->name(new_proxy->to_string());
-    DEBS___("MitmUDPProxy::on_left_new: finished");    
+    _deb("MitmUDPProxy::on_left_new: finished");    
 }
 
 baseHostCX* MitmUdpProxy::MitmUdpProxy::new_cx(int s) {

@@ -66,8 +66,7 @@ protected:
     
     bool write_payload_ = false;
     
-    bool identity_resolved_ = false;    // meant if attempt has been done, regardless of it's result.
-    bool identity_resolved_time = 0;
+    bool identity_resolved_ = false;    // meant if attempt has been done, regardless of its result.
     shm_logon_info_base* identity_ = nullptr;
     
     std::vector<ProfileContentRule>* content_rule_ = nullptr; //save some space and store it as a pointer. Init it only when needed and delete in dtor.
@@ -88,7 +87,7 @@ public:
     // Remote filters - use other proxy to filter content of this proxy.
     // Elements are pair of "name" and pointer to the filter proxy 
     std::vector<std::pair<std::string,FilterProxy*>> filters_;
-    void add_filter(std::string name, FilterProxy* fp);
+    void add_filter(std::string const& name, FilterProxy* fp);
     
     // tap proxy - unmonitor all left and right sockets, pause contexts
     virtual void tap();
@@ -171,13 +170,18 @@ public:
     
     DECLARE_C_NAME("MitmProxy");
     DECLARE_LOGGING(to_string);
+
+private:
+    logan_attached<MitmProxy> log;
 };
 
 
 class MitmMasterProxy : public ThreadedAcceptorProxy<MitmProxy> {
 public:
     
-    MitmMasterProxy(baseCom* c, int worker_id) : ThreadedAcceptorProxy< MitmProxy >(c,worker_id) {};
+    MitmMasterProxy(baseCom* c, int worker_id) : ThreadedAcceptorProxy< MitmProxy >(c,worker_id) {
+        log = logan::create("masterproxy.tcp");
+    };
     
     virtual baseHostCX* new_cx(int s);
     virtual void on_left_new(baseHostCX* just_accepted_cx);
@@ -188,14 +192,23 @@ public:
     bool detect_ssl_on_plain_socket(int s);
     
     time_t auth_table_refreshed = 0;
+
+private:
+    logan_lite log;
 };
 
 
 class MitmUdpProxy : public ThreadedReceiverProxy<MitmProxy> {
 public:
-    MitmUdpProxy(baseCom* c, int worker_id) : ThreadedReceiverProxy< MitmProxy >(c,worker_id) {};
+    MitmUdpProxy(baseCom* c, int worker_id) : ThreadedReceiverProxy< MitmProxy >(c,worker_id) {
+        log = logan::create("masterproxy.udp");
+    };
     virtual void on_left_new(baseHostCX* just_accepted_cx);
     baseHostCX* new_cx(int s);
+
+
+private:
+    logan_lite log;
 };
 
 
