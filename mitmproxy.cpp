@@ -1327,7 +1327,7 @@ buffer MitmProxy::content_replace_apply(buffer b) {
 
             _dia("Replacing bytes[stage %d]:",stage);
         }
-        catch(std::regex_error e) {
+        catch(std::regex_error const& e) {
         _not("MitmProxy::content_replace_apply: failed to replace string: %s",e.what());
         }
         
