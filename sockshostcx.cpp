@@ -53,7 +53,7 @@ bool socksServerCX::global_async_dns = true;
 DEFINE_LOGGING(socksServerCX);
 
 socksServerCX::socksServerCX(baseCom* c, unsigned int s) : baseHostCX(c,s) {
-    state_ = INIT;
+    state_ = socks5_state::INIT;
 
     // copy setting from global/static variable - don't allow to change async
     // flag on the background during the object life
@@ -69,11 +69,11 @@ socksServerCX::~socksServerCX() {
 
 int socksServerCX::process() {
     switch(state_) {
-        case INIT:
+        case socks5_state::INIT:
             return process_socks_hello();
-        case HELLO_SENT:
+        case socks5_state::HELLO_SENT:
             return 0; // we sent response to client hello, don't process anything
-        case WAIT_REQUEST:
+        case socks5_state::WAIT_REQUEST:
             return process_socks_request();
         default:
             break;
@@ -105,8 +105,8 @@ int socksServerCX::process_socks_hello() {
         server_hello[1] = 0; // no authentication
         
         writebuf()->append(server_hello,2);
-        state_ = HELLO_SENT;
-        state_ = WAIT_REQUEST;
+        state_ = socks5_state::HELLO_SENT;
+        state_ = socks5_state::WAIT_REQUEST;
         
         // flush all data, assuming 
         return b->size();
@@ -185,7 +185,7 @@ bool socksServerCX::process_dns_response(DNS_Response* resp) {
 
 int socksServerCX::process_socks_request() {
 
-    socks5_request_error e = NONE;
+    socks5_request_error e = socks5_request_error::NONE;
     
     if(readbuf()->size() < 5) {
         return 0; // wait for more complete request
@@ -193,7 +193,7 @@ int socksServerCX::process_socks_request() {
     
     DIAS___("socksServerCX::process_socks_request");
 
-    if(state_ == DNS_QUERY_SENT) {
+    if(state_ == socks5_state::DNS_QUERY_SENT) {
         DIAS___("socksServerCX::process_socks_request: triggered when waiting for DNS response");
         return 0;
     }
@@ -205,7 +205,7 @@ int socksServerCX::process_socks_request() {
     //@2 is reserved
     
     if(version < 4 or version > 5) {
-        e = UNSUPPORTED_VERSION;
+        e = socks5_request_error::UNSUPPORTED_VERSION;
         goto error;
     }
     
@@ -217,16 +217,16 @@ int socksServerCX::process_socks_request() {
                 goto error;
             }
             
-            unsigned char atype   = readbuf()->get_at<unsigned char>(3);
+            socks5_atype atype   = static_cast<socks5_atype>(readbuf()->get_at<unsigned char>(3));
             
-            if(atype != IPV4 && atype != FQDN) {
-                e = UNSUPPORTED_ATYPE;
+            if(atype != socks5_atype::IPV4 && atype != socks5_atype::FQDN) {
+                e = socks5_request_error::UNSUPPORTED_ATYPE;
                 goto error;
             }
             
-            if(atype == FQDN) {
-                req_atype = FQDN;
-                state_ = REQ_RECEIVED;            
+            if(atype == socks5_atype::FQDN) {
+                req_atype = socks5_atype::FQDN;
+                state_ = socks5_state::REQ_RECEIVED;
                 
                 unsigned char fqdn_sz = readbuf()->get_at<unsigned char>(4);
                 if((unsigned int)fqdn_sz + 4 + 2 >= readbuf()->size()) {
@@ -307,7 +307,7 @@ int socksServerCX::process_socks_request() {
 
                             com()->unset_monitor(socket());
 
-                            state_ = DNS_QUERY_SENT;
+                            state_ = socks5_state::DNS_QUERY_SENT;
                         } else {
                             ERR___("failed to send dns request: %s", fqdn.c_str());
                             error(true);
@@ -323,9 +323,9 @@ int socksServerCX::process_socks_request() {
                 }
             }
             else
-            if(atype == IPV4) {
-                req_atype = IPV4;
-                state_ = REQ_RECEIVED;
+            if(atype == socks5_atype::IPV4) {
+                req_atype = socks5_atype::IPV4;
+                state_ = socks5_state::REQ_RECEIVED;
                 DIA___("socksServerCX::process_socks_request: request received, type %d", atype);
                 
                 uint32_t dst = readbuf()->get_at<uint32_t>(4);
@@ -351,8 +351,8 @@ int socksServerCX::process_socks_request() {
                 goto error;
             }            
             
-            req_atype = IPV4;
-            state_ = REQ_RECEIVED;
+            req_atype = socks5_atype::IPV4;
+            state_ = socks5_state::REQ_RECEIVED;
             DIAS___("socksServerCX::process_socks_request: socks4 request received");
             
             req_port = ntohs(readbuf()->get_at<uint16_t>(2));
@@ -440,17 +440,17 @@ bool socksServerCX::setup_target() {
         // peers are now prepared for handover. Owning proxy will wipe this CX (it will be empty)
         // and if policy allows, left and right will be set (also in proxy owning this cx).
         
-        state_ = WAIT_POLICY;
+        state_ = socks5_state::WAIT_POLICY;
         read_waiting_for_peercom(true);
         
         return true;
 }
 
 bool socksServerCX::new_message() {
-    if(state_ == WAIT_POLICY && verdict_ == PENDING) {
+    if(state_ == socks5_state::WAIT_POLICY && verdict_ == socks5_policy::PENDING) {
         return true;
     }
-    if(state_ == HANDOFF) {
+    if(state_ == socks5_state::HANDOFF) {
         return true;
     }
     
@@ -459,9 +459,9 @@ bool socksServerCX::new_message() {
 
 void socksServerCX::verdict(socks5_policy p) {
     verdict_ = p;
-    state_ = POLICY_RECEIVED;
+    state_ = socks5_state::POLICY_RECEIVED;
     
-    if(verdict_ == ACCEPT || verdict_ == REJECT) {
+    if(verdict_ == socks5_policy::ACCEPT || verdict_ == socks5_policy::REJECT) {
         process_socks_reply();
     }
 }
@@ -473,17 +473,17 @@ int socksServerCX::process_socks_reply() {
         
         b[0] = 5;
         b[1] = 2; // denied
-        if(verdict_ == ACCEPT) b[1] = 0; //accept
+        if(verdict_ == socks5_policy::ACCEPT) b[1] = 0; //accept
         b[2] = 0;
-        b[3] = req_atype;
+        b[3] = static_cast<int>(req_atype);
         
         int cur = 4;
         
-        if(req_atype == IPV4) {
+        if(req_atype == socks5_atype::IPV4) {
             *((uint32_t*)&b[cur]) = req_addr.s_addr;
             cur += sizeof(uint32_t);
         }
-        else if(req_atype == FQDN) {
+        else if(req_atype == socks5_atype::FQDN) {
             
             b[cur] = (unsigned char)req_str_addr.size();
             cur++;
@@ -498,7 +498,7 @@ int socksServerCX::process_socks_reply() {
         cur += sizeof(uint16_t);
         
         writebuf()->append(b,cur);
-        state_ = REQRES_SENT;
+        state_ = socks5_state::REQRES_SENT;
         
         DUM___("socksServerCX::process_socks_reply: response dump:\n%s",hex_dump(b,cur).c_str());
 
@@ -523,13 +523,13 @@ int socksServerCX::process_socks_reply() {
         
         b[0] = 0;
         b[1] = 91; // denied
-        if(verdict_ == ACCEPT) b[1] = 90; //accept    
+        if(verdict_ == socks5_policy::ACCEPT) b[1] = 90; //accept
         
         *((uint16_t*)&b[2]) = htons(req_port);
         *((uint32_t*)&b[4]) = req_addr.s_addr;
         
         writebuf()->append(b,8);        
-        state_ = REQRES_SENT;
+        state_ = socks5_state::REQRES_SENT;
         return 8;
     }
     
@@ -538,11 +538,11 @@ int socksServerCX::process_socks_reply() {
 
 void socksServerCX::pre_write() {
     DEB___("socksServerCX::pre_write[%s]: writebuf=%d, readbuf=%d",c_name(),writebuf()->size(),readbuf()->size());
-    if(state_ == REQRES_SENT ) {
+    if(state_ == socks5_state::REQRES_SENT ) {
         if(writebuf()->size() == 0) {
             DIA___("socksServerCX::pre_write[%s]: all flushed, state change to HANDOFF: writebuf=%d, readbuf=%d",c_name(),writebuf()->size(),readbuf()->size());
             waiting_for_peercom(true);
-            state(HANDOFF);
+            state(socks5_state::HANDOFF);
         }
     }
 }
@@ -563,7 +563,7 @@ void socksServerCX::handle_event (baseCom *xcom) {
         std::pair<DNS_Response *, int> rresp = recv_dns_response(async_dns_socket.socket_,0);
         DNS_Response* resp = rresp.first;
         int red = rresp.second;
-        state_ = DNS_RESP_RECV;
+        state_ = socks5_state::DNS_RESP_RECV;
 
         if(red <= 0) {
             DEB___("handle_event: socket read returned %d",red);
