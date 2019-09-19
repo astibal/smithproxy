@@ -1120,6 +1120,38 @@ int cli_diag_identity_ip_clear(struct cli_def *cli, const char *command, char *a
     return CLI_OK;
 }
 
+int cli_diag_writer_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    auto wr = threadedPoolFileWriter::instance();
+
+    std::stringstream ss;
+
+    {
+        std::scoped_lock<std::mutex> l_(wr->queue_lock());
+
+        ss << "Not started files: " << wr->task_files().size() << "\n";
+        ss << "Queue being processed:\n";
+
+        for (auto const& elem: wr->queue()) {
+            auto const& k = elem.first;
+            auto const& q = elem.second;
+
+            ss << "    '" << k << "' : " << q.size() << " chunks\n";
+        }
+    };
+    {
+        std::scoped_lock<std::recursive_mutex> l_(wr->ofstream_lock());
+
+        ss << "Recent (opened files):\n";
+        for (auto const& elem: wr->ofstream_cache().cache()) {
+            ss << "    " << elem.first << "\n";
+        }
+    }
+
+    cli_print(cli, "%s", ss.str().c_str());
+
+    return CLI_OK;
+}
+
 void cli_print_log_levels(struct cli_def *cli) {
     logger_profile* lp = get_logger()->target_profiles()[(uint64_t)fileno(cli->client)];
     
@@ -3439,8 +3471,11 @@ void client_thread(int client_socket) {
                 diag_identity_user = cli_register_command(cli, diag_identity,"user",NULL, PRIVILEGE_PRIVILEGED, MODE_EXEC,"identity commands related to users");
                     cli_register_command(cli, diag_identity_user,"list",cli_diag_identity_ip_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"list all known users");
                     cli_register_command(cli, diag_identity_user,"clear",cli_diag_identity_ip_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC,"CLEAR all known users");
-                        
-                        
+
+            auto diag_writer = cli_register_command(cli,diag,"writer",NULL,PRIVILEGE_PRIVILEGED, MODE_EXEC,"file writer diags");
+                auto diag_writer_stats = cli_register_command(cli,diag_writer,"stats",cli_diag_writer_stats,PRIVILEGE_PRIVILEGED, MODE_EXEC,"file writer statistics");
+
+
         debuk = cli_register_command(cli, NULL, "debug", NULL, PRIVILEGE_PRIVILEGED, MODE_EXEC, "diagnostic commands");
             cli_register_command(cli, debuk, "term", cli_debug_terminal, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set level of logging to this terminal");
             cli_register_command(cli, debuk, "file", cli_debug_logfile, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set level of logging to standard log file");
