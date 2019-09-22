@@ -59,13 +59,6 @@
 DEFINE_LOGGING(MitmProxy);
 
 
-unsigned int MitmProxy::half_timeout = 30;
-
-socle::meter MitmProxy::total_mtr_up;
-socle::meter MitmProxy::total_mtr_down;
-
-ptr_cache<std::string,whitelist_verify_entry_t> MitmProxy::whitelist_verify("whitelist - verify",500,true,whitelist_verify_entry_t::is_expired);
-
 MitmProxy::MitmProxy(baseCom* c): baseProxy(c), sobject() {
 
     // FIXME: testing filter - get back to it later!
@@ -561,16 +554,16 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
     
     SSLCom* scom = dynamic_cast<SSLCom*>(mh->peercom());
     if(scom && scom->opt_failed_certcheck_replacement) {
-        if(scom->verify_status != SSLCom::VERIFY_OK) {
+        if(scom->verify_get() != SSLCom::VERIFY_OK) {
             
             bool whitelist_found = false;
             
             //look for whitelisted entry
             std::string key = whitelist_make_key(mh);
             if(key.size() > 0 && key != "?") {
-                std::lock_guard<std::recursive_mutex> l_(whitelist_verify.getlock());
+                std::lock_guard<std::recursive_mutex> l_(whitelist_verify().getlock());
 
-                whitelist_verify_entry_t* wh = whitelist_verify.get(key);
+                whitelist_verify_entry_t* wh = whitelist_verify().get(key);
                 _dia("whitelist_verify[%s]: %s",key.c_str(), wh ? "found" : "not found" );
 
                 // !!! wh might be already invalid here, unlocked !!!
@@ -605,10 +598,10 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
                         //we should not block
                         _dia(" -> client-cert request: auto-whitelist");
 
-                        std::lock_guard<std::recursive_mutex> l_(whitelist_verify.getlock());
+                        std::lock_guard<std::recursive_mutex> l_(whitelist_verify().getlock());
                         
                         whitelist_verify_entry v;
-                        whitelist_verify.set(key,new whitelist_verify_entry_t(v,scom->opt_failed_certcheck_override_timeout));
+                        whitelist_verify().set(key,new whitelist_verify_entry_t(v,scom->opt_failed_certcheck_override_timeout));
                     } else {
                         _dia(" -> client-cert request: none");
                     }
@@ -704,7 +697,7 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
     }    
 
     //update meters
-    total_mtr_up.update(cx->to_read().size());
+    total_mtr_up().update(cx->to_read().size());
     mtr_up.update(cx->to_read().size());
 }
 
@@ -747,7 +740,7 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
     }
 
     // update meters
-    total_mtr_down.update(cx->to_read().size());
+    total_mtr_down().update(cx->to_read().size());
     mtr_down.update(cx->to_read().size());
 }
 
@@ -796,7 +789,7 @@ void MitmProxy::on_half_close(baseHostCX* cx) {
         if(half_holdtimer > 0) {
             
             // we count timer already!
-            int expiry = half_holdtimer + half_timeout - ::time(nullptr);
+            int expiry = half_holdtimer + half_timeout() - ::time(nullptr);
             
             if(expiry > 0) {
                 _ext("half-closed: live peer with pending data: keeping up for %ds",expiry);
@@ -1150,8 +1143,8 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
                 whitelist_verify_entry v;
 
                 {
-                    std::lock_guard<std::recursive_mutex> l_(whitelist_verify.getlock());
-                    whitelist_verify.set(key,
+                    std::lock_guard<std::recursive_mutex> l_(whitelist_verify().getlock());
+                    whitelist_verify().set(key,
                                          new whitelist_verify_entry_t(v, scom->opt_failed_certcheck_override_timeout));
                 }
                 
@@ -1185,7 +1178,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             block_target_info = "<p><h3 class=\"fg-red\">Requested site:</h3>" + app_request->proto + app_request->host + "</p>";
             block_override = string_format("orig_url=%s\"><input type=\"submit\" value=\"Override\" class=\"btn-red\"></form>","/");
 
-            if(scom->verify_get() > 0) {
+            if(scom->verify_get() != SSLCom::VERIFY_OK) {
                 bool is_set = false;
                 
                 if(scom->verify_check(SSLCom::SELF_SIGNED)) {
