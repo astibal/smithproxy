@@ -75,9 +75,13 @@ protected:
     
 public: 
     time_t half_holdtimer = 0;
-    static unsigned int half_timeout;
-    
-    static ptr_cache<std::string,whitelist_verify_entry_t> whitelist_verify;
+    static unsigned int& half_timeout() { static unsigned int s_half_timetout = 30; return s_half_timetout; };
+
+    using whitelist_map = ptr_cache<std::string,whitelist_verify_entry_t>;
+    static whitelist_map& whitelist_verify() {
+        static whitelist_map m("whitelist - verify", 500, true, whitelist_verify_entry_t::is_expired);
+        return m;
+    }
     
     bool opt_auth_authenticate = false;
     bool opt_auth_resolve = false;
@@ -164,8 +168,8 @@ public:
     socle::meter mtr_down;
     socle::meter mtr_up;    
     
-    static socle::meter total_mtr_up;
-    static socle::meter total_mtr_down;
+    static socle::meter& total_mtr_up()  { static socle::meter t_up; return t_up; };
+    static socle::meter& total_mtr_down() {static socle::meter t_down; return t_down; };
 
     
     DECLARE_C_NAME("MitmProxy");

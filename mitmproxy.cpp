@@ -40,7 +40,6 @@
 #include <regex>
 #include <cstdlib>
 #include <ctime>
-#include <time.h>
 
 #include <mitmproxy.hpp>
 #include <mitmhost.hpp>
@@ -58,13 +57,6 @@
 
 DEFINE_LOGGING(MitmProxy);
 
-
-unsigned int MitmProxy::half_timeout = 30;
-
-socle::meter MitmProxy::total_mtr_up;
-socle::meter MitmProxy::total_mtr_down;
-
-ptr_cache<std::string,whitelist_verify_entry_t> MitmProxy::whitelist_verify("whitelist - verify",500,true,whitelist_verify_entry_t::is_expired);
 
 MitmProxy::MitmProxy(baseCom* c): baseProxy(c), sobject() {
 
@@ -91,17 +83,17 @@ void MitmProxy::toggle_tlog() {
 
         data_dir += "/disabled";
         
-        struct stat st;
+        struct stat st{0};
         int result = stat(data_dir.c_str(), &st);
         bool present = (result == 0);
         
         if(present) {
-            if(tlog()->status() == true) {
+            if(tlog()->status()) {
                 _war("capture disabled by disabled-file");
             }
             tlog()->status(false);
         } else {
-            if(tlog()->status() == false) {
+            if(! tlog()->status()) {
                 _war("capture re-enabled from previous disabled-file state");
             }            
             tlog()->status(true);
@@ -115,16 +107,14 @@ MitmProxy::~MitmProxy() {
     if(write_payload()) {
         _deb("MitmProxy::destructor: syncing writer");
 
-        for(typename std::vector<baseHostCX*>::iterator j = this->left_sockets.begin(); j != this->left_sockets.end(); ++j) {
-            auto cx = (*j);
+        for(auto* cx: ls()) {
             if(! cx->comlog().empty()) {
                 if(tlog()) tlog()->write('L', cx->comlog());
                 cx->comlog().clear();
             }
         }               
         
-        for(typename std::vector<baseHostCX*>::iterator j = this->right_sockets.begin(); j != this->right_sockets.end(); ++j) {
-            auto cx = (*j);
+        for(auto* cx: rs()) {
             if(! cx->comlog().empty()) {
                 if(tlog()) tlog()->write('R', cx->comlog());
                 cx->comlog().clear();
@@ -134,16 +124,12 @@ MitmProxy::~MitmProxy() {
         if(tlog()) tlog()->left_write("Connection stop\n");
     }
     
-    if(content_rule_ != nullptr) {
-      delete content_rule_;
-    }
-        
+    delete content_rule_;
     delete tlog_;
-    
-    if(identity_ != nullptr) { delete identity_; }
+    delete identity_;
     
     // delete all filters
-    for (auto p: filters_) {
+    for (auto const& p: filters_) {
         delete p.second;
     }
 }
@@ -487,8 +473,8 @@ void MitmProxy::add_filter(std::string const& name, FilterProxy* fp) {
 
 int MitmProxy::handle_sockets_once(baseCom* xcom) {
     
-    for(auto filter_pair: filters_) {
-        std::string& filter_name = filter_pair.first;
+    for(auto const& filter_pair: filters_) {
+        std::string const& filter_name = filter_pair.first;
         baseProxy* filter_proxy = filter_pair.second;
         
         _deb("MitmProxy::handle_sockets_once: running filter %s", filter_name.c_str());
@@ -559,18 +545,18 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
 {
     bool redirected = false;
     
-    SSLCom* scom = dynamic_cast<SSLCom*>(mh->peercom());
+    auto* scom = dynamic_cast<SSLCom*>(mh->peercom());
     if(scom && scom->opt_failed_certcheck_replacement) {
-        if(scom->verify_status != SSLCom::VERIFY_OK) {
+        if(scom->verify_get() != SSLCom::VERIFY_OK) {
             
             bool whitelist_found = false;
             
             //look for whitelisted entry
             std::string key = whitelist_make_key(mh);
-            if(key.size() > 0 && key != "?") {
-                std::lock_guard<std::recursive_mutex> l_(whitelist_verify.getlock());
+            if( ( !key.empty() ) && key != "?") {
+                std::lock_guard<std::recursive_mutex> l_(whitelist_verify().getlock());
 
-                whitelist_verify_entry_t* wh = whitelist_verify.get(key);
+                whitelist_verify_entry_t* wh = whitelist_verify().get(key);
                 _dia("whitelist_verify[%s]: %s",key.c_str(), wh ? "found" : "not found" );
 
                 // !!! wh might be already invalid here, unlocked !!!
@@ -605,10 +591,10 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
                         //we should not block
                         _dia(" -> client-cert request: auto-whitelist");
 
-                        std::lock_guard<std::recursive_mutex> l_(whitelist_verify.getlock());
+                        std::lock_guard<std::recursive_mutex> l_(whitelist_verify().getlock());
                         
                         whitelist_verify_entry v;
-                        whitelist_verify.set(key,new whitelist_verify_entry_t(v,scom->opt_failed_certcheck_override_timeout));
+                        whitelist_verify().set(key,new whitelist_verify_entry_t(v,scom->opt_failed_certcheck_override_timeout));
                     } else {
                         _dia(" -> client-cert request: none");
                     }
@@ -652,7 +638,7 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
 
     bool redirected = false;
     
-    MitmHostCX* mh = dynamic_cast<MitmHostCX*>(cx);
+    auto* mh = dynamic_cast<MitmHostCX*>(cx);
 
     if(mh != nullptr) {
 
@@ -663,7 +649,9 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
         redirected = handle_com_response_ssl(mh);
         
         
-        if(handle_cached_response(mh) == true) { return; }
+        if(handle_cached_response(mh)) {
+            return;
+        }
     }
     
     
@@ -704,7 +692,7 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
     }    
 
     //update meters
-    total_mtr_up.update(cx->to_read().size());
+    total_mtr_up().update(cx->to_read().size());
     mtr_up.update(cx->to_read().size());
 }
 
@@ -747,7 +735,7 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
     }
 
     // update meters
-    total_mtr_down.update(cx->to_read().size());
+    total_mtr_down().update(cx->to_read().size());
     mtr_down.update(cx->to_read().size());
 }
 
@@ -755,9 +743,9 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
 void MitmProxy::__debug_zero_connections(baseHostCX* cx) {
 
     if(cx->meter_write_count == 0 && cx->meter_write_bytes == 0 ) {
-        SSLCom* c = dynamic_cast<SSLCom*>(cx->com());
-        if(c) {
-            c->log_profiling_stats(iINF);
+        auto* xcom = dynamic_cast<SSLCom*>(cx->com());
+        if(xcom) {
+            xcom->log_profiling_stats(iINF);
             int p = 0; 
             int s = cx->socket();
             if(s == 0) s = cx->closed_socket();
@@ -770,9 +758,9 @@ void MitmProxy::__debug_zero_connections(baseHostCX* cx) {
         }
         
         if(cx->peer()) {
-            SSLCom* c = dynamic_cast<SSLCom*>(cx->peer()->com());
-            if(c) {
-                c->log_profiling_stats(iINF);
+            auto* xcom_peer = dynamic_cast<SSLCom*>(cx->peer()->com());
+            if(xcom_peer) {
+                xcom_peer->log_profiling_stats(iINF);
                 _inf("        peer transferred bytes: up=%d/%dB dw=%d/%dB",cx->peer()->meter_read_count,cx->peer()->meter_read_bytes,
                                                                 cx->peer()->meter_write_count, cx->peer()->meter_write_bytes);
                 int p = 0; 
@@ -796,12 +784,12 @@ void MitmProxy::on_half_close(baseHostCX* cx) {
         if(half_holdtimer > 0) {
             
             // we count timer already!
-            int expiry = half_holdtimer + half_timeout - ::time(nullptr);
+            long expiry = half_holdtimer + half_timeout() - ::time(nullptr);
             
             if(expiry > 0) {
-                _ext("half-closed: live peer with pending data: keeping up for %ds",expiry);
+                _ext("half-closed: live peer with pending data: keeping up for %ls",expiry);
             } else {
-                _dia("half-closed: timer's up (%d). closing prematurely.",expiry);
+                _dia("half-closed: timer's up (%l). closing prematurely.",expiry);
                 state().dead(true);
             }
             
@@ -837,20 +825,20 @@ void MitmProxy::on_left_error(baseHostCX* cx) {
         resolve_identity(cx);
 
     std::string flags = "L";
-    MitmHostCX* mh = dynamic_cast<MitmHostCX*>(cx);
+    auto* mh = dynamic_cast<MitmHostCX*>(cx);
     if (mh != nullptr && mh->inspection_verdict() == Inspector::CACHED) flags+="C";
 
     std::string detail;
     
     if(cx->peercom()) {
-        SSLMitmCom* sc = dynamic_cast<SSLMitmCom*>(cx->peercom());
+        auto* sc = dynamic_cast<SSLMitmCom*>(cx->peercom());
         if(sc) {
             detail += string_format("sni=%s ",sc->get_peer_sni().c_str());
         }
     }
     if(mh && mh->application_data) {
         
-        app_HttpRequest* http = dynamic_cast<app_HttpRequest*>(mh->application_data);
+        auto* http = dynamic_cast<app_HttpRequest*>(mh->application_data);
         if(http) {
             detail += string_format("app=%s%s ",http->proto.c_str(),http->host.c_str()); 
         }
@@ -867,10 +855,10 @@ void MitmProxy::on_left_error(baseHostCX* cx) {
                                                                             com()->full_flags_str().c_str()
             );
     
-    if(cx->peer() && cx->peer()->writebuf()->size() == 0) {
+    if(cx->peer() && cx->peer()->writebuf()->empty()) {
         std::string msg = string_format("Connection from %s closed: %s",cx->full_name('L').c_str(),detail.c_str());
-        INFS_(msg.c_str());
-        if(LEV_(DEB)) __debug_zero_connections(cx);
+        _inf("%s", msg.c_str());
+        if(*log.level() > DEB) __debug_zero_connections(cx);
         
         state().dead(true);
     } else {
@@ -936,8 +924,8 @@ void MitmProxy::on_right_error(baseHostCX* cx)
     
     if( cx->peer() && cx->peer()->writebuf()->empty() ) {
         std::string msg = string_format("Connection from %s closed: %s",cx->full_name('R').c_str(),detail.c_str());
-        INFS_(msg);
-        if(LEV_(DEB)) __debug_zero_connections(cx);
+        _inf("%s", msg.c_str());
+        if(*log.level() > DEB) __debug_zero_connections(cx);
         
         state().dead(true);
     } else {
@@ -969,8 +957,7 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
     std::string repl;
     std::string repl_port = AuthFactory::get().portal_port_http;
     std::string repl_proto = "http";
-    int 	redir_hint = 0;
-    
+
     if(cx->application_data->is_ssl) {
         repl_proto = "https";
         repl_port =AuthFactory::get().portal_port_https;
@@ -981,11 +968,7 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
 
     std::string block_post("\"><input type=\"submit\" value=\"User Info\" class=\"btn-red\"></form>");
     
-    //cx->host().c_str()
-    
     if (cx->replacement_flag() == MitmHostCX::REPLACE_REDIRECT) {
-        //srand(time(nullptr) % ((unsigned long)cx));
-        //redir_hint = rand();
 
         std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_token_lock());
         auto id_token = AuthFactory::get_token_map().find(cx->host());
@@ -1044,7 +1027,7 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
                 } 
             } 
             
-            if(repl.size() == 0) {
+            if(repl.empty()) {
                 // default to IPv4 address
                 _inf("XXX: fallback to IPv4");
                 repl = redir_pre + repl_proto + "://"+AuthFactory::get().portal_address+":"+repl_port+"/cgi-bin/auth.py?token=" + tok.token() + redir_suf;
@@ -1150,8 +1133,8 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
                 whitelist_verify_entry v;
 
                 {
-                    std::lock_guard<std::recursive_mutex> l_(whitelist_verify.getlock());
-                    whitelist_verify.set(key,
+                    std::lock_guard<std::recursive_mutex> l_(whitelist_verify().getlock());
+                    whitelist_verify().set(key,
                                          new whitelist_verify_entry_t(v, scom->opt_failed_certcheck_override_timeout));
                 }
                 
@@ -1185,7 +1168,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             block_target_info = "<p><h3 class=\"fg-red\">Requested site:</h3>" + app_request->proto + app_request->host + "</p>";
             block_override = string_format("orig_url=%s\"><input type=\"submit\" value=\"Override\" class=\"btn-red\"></form>","/");
 
-            if(scom->verify_get() > 0) {
+            if(scom->verify_get() != SSLCom::VERIFY_OK) {
                 bool is_set = false;
                 
                 if(scom->verify_check(SSLCom::SELF_SIGNED)) {
@@ -1288,8 +1271,7 @@ buffer MitmProxy::content_replace_apply(buffer b) {
     std::string result = data;
     
     int stage = 0;
-    for(auto i = content_rule()->begin(); i != content_rule()->end(); ++i) {
-        ProfileContentRule& profile = (*i);
+    for(auto& profile: *content_rule()) {
         
         try {
             std::regex re_match(profile.match.c_str());
@@ -1299,7 +1281,7 @@ buffer MitmProxy::content_replace_apply(buffer b) {
 
                 // unfortunately std::regex_replace doesn't return if it really replaced something
                 // ... which is no problem if we don't care. But in case we want to replace only 
-                // .... nth occurence, we have to do extra search to check (requiring one extra regex match).
+                // .... nth occurrence, we have to do extra search to check (requiring one extra regex match).
                 std::smatch sm;
                 bool is_there = std::regex_search(result,sm,re_match);
 
@@ -1327,7 +1309,7 @@ buffer MitmProxy::content_replace_apply(buffer b) {
 
             _dia("Replacing bytes[stage %d]:",stage);
         }
-        catch(std::regex_error e) {
+        catch(std::regex_error const& e) {
         _not("MitmProxy::content_replace_apply: failed to replace string: %s",e.what());
         }
         
@@ -1377,11 +1359,10 @@ void MitmProxy::untap() {
 MitmHostCX* MitmProxy::first_left() {
     MitmHostCX* ret{};
     
-    if(ls().size()) {
+    if(! ls().empty()) {
         ret = dynamic_cast<MitmHostCX*>(ls().at(0));
     }
-    else 
-    if(lda().size()) {
+    else if(! lda().empty()) {
         ret = dynamic_cast<MitmHostCX*>(lda().at(0));
     }
         
@@ -1389,16 +1370,15 @@ MitmHostCX* MitmProxy::first_left() {
 }
 
 MitmHostCX* MitmProxy::first_right() {
-    MitmHostCX* ret{};
+    MitmHostCX* ret = nullptr;
     
-    if(rs().size()) {
+    if(! rs().empty()) {
         ret = dynamic_cast<MitmHostCX*>(rs().at(0));
     }
-    else 
-    if(rda().size()) {
-        ret = dynamic_cast<MitmHostCX*>(rda().at(0));
+    else if(! rda().empty()) {
+            ret = dynamic_cast<MitmHostCX*>(rda().at(0));
     }
-        
+
     return ret;
 }
 
@@ -1407,19 +1387,19 @@ MitmHostCX* MitmProxy::first_right() {
 bool MitmMasterProxy::ssl_autodetect = false;
 bool MitmMasterProxy::ssl_autodetect_harder = true;
 
-#define NEW_CX_PEEK_BUFFER_SZ  10
 bool MitmMasterProxy::detect_ssl_on_plain_socket(int s) {
     
     int ret = false;
+    constexpr unsigned int NEW_CX_PEEK_BUFFER_SZ = 10;
+    constexpr int time_increment = 2500; // 2.5ms
+    constexpr int time_max = time_increment*5;
 
-    int time_increment = 2500; // 2.5ms
-    int time_max = time_increment*5;
     int time_taken = 0;
     
     if (s > 0) {
         again:
-        
         char peek_buffer[NEW_CX_PEEK_BUFFER_SZ];
+
         int b = ::recv(s,peek_buffer,NEW_CX_PEEK_BUFFER_SZ,MSG_PEEK|MSG_DONTWAIT);
         
         if(b > 6) {
@@ -1429,7 +1409,7 @@ bool MitmMasterProxy::detect_ssl_on_plain_socket(int s) {
             }
         } else {
             if(ssl_autodetect_harder && time_taken < time_max) {
-                struct timespec t;
+                struct timespec t{0};
                 t.tv_sec = 0;
                 t.tv_nsec = time_increment;
                 
@@ -1451,14 +1431,13 @@ baseHostCX* MitmMasterProxy::new_cx(int s) {
     bool is_ssl = false;
     bool is_ssl_port = false;
     
-    SSLCom* my_sslcom = dynamic_cast<SSLCom*>(com());
+    auto* my_sslcom = dynamic_cast<SSLCom*>(com());
     baseCom* c = nullptr;
     
     if(my_sslcom != nullptr) {
         is_ssl_port = true;
     }
-    else
-    if(ssl_autodetect) {
+    else if(ssl_autodetect) {
         // my com is NOT ssl-based, trigger auto-detect
 
         is_ssl = detect_ssl_on_plain_socket(s);
@@ -1470,7 +1449,7 @@ baseHostCX* MitmMasterProxy::new_cx(int s) {
         } 
     }
     
-    if(c == nullptr) {
+    if(! c) {
         c = com()->slave();
     }
     
@@ -1503,7 +1482,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
         just_accepted_cx->name();
         just_accepted_cx->com()->resolve_socket_src(just_accepted_cx->socket(),&h,&p);
 
-        MitmProxy* new_proxy = new MitmProxy(just_accepted_cx->com()->slave());
+        auto* new_proxy = new MitmProxy(just_accepted_cx->com()->slave());
         
         // let's add this just_accepted_cx into new_proxy
         if(just_accepted_cx->read_waiting_for_peercom()) {
@@ -1545,7 +1524,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
             matched_vip = true;
         }
         
-        MitmHostCX *target_cx = new MitmHostCX(just_accepted_cx->com()->slave(), target_host.c_str(), 
+        auto *target_cx = new MitmHostCX(just_accepted_cx->com()->slave(), target_host.c_str(),
                                             string_format("%d",target_port).c_str()
                                             );
         
@@ -1566,7 +1545,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
 
         // bypass ssl com to VIP
         if(matched_vip) {
-            SSLCom* scom = dynamic_cast<SSLCom*>(just_accepted_cx->com());
+            auto* scom = dynamic_cast<SSLCom*>(just_accepted_cx->com());
             if(scom != nullptr) {
                 scom->opt_bypass = true;
             }
@@ -1639,8 +1618,10 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
 
                             auto ip = AuthFactory::get_ip4_map().find(just_accepted_cx->host());
                             if (ip != AuthFactory::get_ip4_map().end()) {
+                                id_ptr = &(*ip).second;
                                 found = true;
-                                group_vec = id_ptr->groups_vec;
+                                if(id_ptr)
+                                    group_vec = id_ptr->groups_vec;
                             }
                         }
                         else if(af == AF_INET6) {
@@ -1651,23 +1632,26 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                             if (ip != AuthFactory::get_ip6_map().end()) {
                                 id_ptr = &(*ip).second;
                                 found = true;
-                                group_vec = id_ptr->groups_vec;
+                                if(id_ptr)
+                                    group_vec = id_ptr->groups_vec;
                             }
                         }
                         
                         if( found ) {
                             //std::string groups = id_ptr->last_logon_info.groups();
                             
-                            if(CfgFactory::get().policy_prof_auth(policy_num) != nullptr)
-                            for ( auto i: CfgFactory::get().policy_prof_auth(policy_num)->sub_policies) {
-                                for(auto x: group_vec) {
-                                    _deb("Connection identities: ip identity '%s' against policy '%s'",x.c_str(),i->name.c_str());
-                                    if(x == i->name) {
-                                        _dia("Connection identities: ip identity '%s' matches policy '%s'",x.c_str(),i->name.c_str());
-                                        bad_auth = false;
+                            if(CfgFactory::get().policy_prof_auth(policy_num) != nullptr) {
+                                for ( auto i: CfgFactory::get().policy_prof_auth(policy_num)->sub_policies) {
+                                    for(auto const& x: group_vec) {
+                                        _deb("Connection identities: ip identity '%s' against policy '%s'",x.c_str(),i->name.c_str());
+                                        if(x == i->name) {
+                                            _dia("Connection identities: ip identity '%s' matches policy '%s'",x.c_str(),i->name.c_str());
+                                            bad_auth = false;
+                                        }
                                     }
                                 }
                             }
+
                             if(bad_auth) {
                                 if(target_port != 80 && target_port != 443) {
                                     _inf("Dropping non-replaceable connection %s due to non-matching identity",just_accepted_cx->c_name());
@@ -1737,7 +1721,7 @@ int MitmMasterProxy::handle_sockets_once(baseCom* c) {
 
 void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
 {
-    MitmProxy* new_proxy = new MitmProxy(com()->slave());
+    auto* new_proxy = new MitmProxy(com()->slave());
     // let's add this just_accepted_cx into new_proxy
     if(just_accepted_cx->read_waiting_for_peercom()) {
         _deb("MitmMasterProxy::on_left_new: ldaadd the new waiting_for_peercom cx");
@@ -1747,7 +1731,7 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
         new_proxy->ladd(just_accepted_cx);
     }
     
-    MitmHostCX *target_cx = new MitmHostCX(com()->slave(), just_accepted_cx->com()->nonlocal_dst_host().c_str(), 
+    auto *target_cx = new MitmHostCX(com()->slave(), just_accepted_cx->com()->nonlocal_dst_host().c_str(),
                                     string_format("%d",just_accepted_cx->com()->nonlocal_dst_port()).c_str()
                                     );
     

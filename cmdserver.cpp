@@ -260,8 +260,8 @@ void cmd_show_status(struct cli_def* cli) {
     time_t uptime = time(nullptr) - CfgFactory::get().ts_sys_started;
     cli_print(cli,"Uptime: %s",uptime_string(uptime).c_str());
     cli_print(cli,"Objects: %ld",socle::sobjectDB::db().cache().size());
-    unsigned long l = MitmProxy::total_mtr_up.get();
-    unsigned long r = MitmProxy::total_mtr_down.get();
+    unsigned long l = MitmProxy::total_mtr_up().get();
+    unsigned long r = MitmProxy::total_mtr_down().get();
     cli_print(cli,"Proxy performance: upload %sbps, download %sbps in last second",number_suffixed(l*8).c_str(),number_suffixed(r*8).c_str());    
  
 }
@@ -614,8 +614,8 @@ int cli_diag_ssl_wl_list(struct cli_def *cli, const char *command, char *argv[],
     cli_print(cli,"\nSSL whitelist:");
     std::string out;
 
-    std::lock_guard<std::recursive_mutex> l_(MitmProxy::whitelist_verify.getlock());
-    for(auto we: MitmProxy::whitelist_verify.cache()) {
+    std::lock_guard<std::recursive_mutex> l_(MitmProxy::whitelist_verify().getlock());
+    for(auto we: MitmProxy::whitelist_verify().cache()) {
         out += "\n\t" + we.first;
 
         int ttl = we.second->expired_at() - ::time(nullptr);
@@ -632,9 +632,9 @@ int cli_diag_ssl_wl_list(struct cli_def *cli, const char *command, char *argv[],
 
 int cli_diag_ssl_wl_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
-    std::lock_guard<std::recursive_mutex> l_(MitmProxy::whitelist_verify.getlock());
+    std::lock_guard<std::recursive_mutex> l_(MitmProxy::whitelist_verify().getlock());
 
-    MitmProxy::whitelist_verify.clear();
+    MitmProxy::whitelist_verify().clear();
 
     return CLI_OK;
 }
@@ -645,12 +645,12 @@ int cli_diag_ssl_wl_stats(struct cli_def *cli, const char *command, char *argv[]
 
     std::stringstream ss;
 
-    std::lock_guard<std::recursive_mutex> l_(MitmProxy::whitelist_verify.getlock());
+    std::lock_guard<std::recursive_mutex> l_(MitmProxy::whitelist_verify().getlock());
     {
-        int n_sz_cache = MitmProxy::whitelist_verify.cache().size();
-        int n_max_cache = MitmProxy::whitelist_verify.max_size();
-        bool n_autorem = MitmProxy::whitelist_verify.auto_delete();
-        std::string n_name = MitmProxy::whitelist_verify.name();
+        int n_sz_cache = MitmProxy::whitelist_verify().cache().size();
+        int n_max_cache = MitmProxy::whitelist_verify().max_size();
+        bool n_autorem = MitmProxy::whitelist_verify().auto_delete();
+        std::string n_name = MitmProxy::whitelist_verify().name();
 
         ss << string_format("'%s' cache stats: \n",n_name.c_str());
         ss << string_format("    current size: %d\n",n_sz_cache);
@@ -672,7 +672,7 @@ int cli_diag_ssl_crl_list(struct cli_def *cli, const char *command, char *argv[]
 
     {
         std::lock_guard<std::recursive_mutex> l_(SSLFactory::crl_cache.getlock());
-        for (auto x: SSLFactory::crl_cache.cache()) {
+        for (auto const& x: SSLFactory::crl_cache.cache()) {
             std::string uri = x.first;
             auto cached_result = x.second;
 
@@ -732,10 +732,10 @@ int cli_diag_ssl_verify_list(struct cli_def *cli, const char *command, char *arg
 
     {
         std::lock_guard<std::recursive_mutex> l_(SSLFactory::ocsp_result_cache.getlock());
-        for (auto x: SSLFactory::ocsp_result_cache.cache()) {
+        for (auto const& x: SSLFactory::ocsp_result_cache.cache()) {
             std::string cn = x.first;
             SSLFactory::expiring_ocsp_result *cached_result = x.second;
-            int ttl = 0;
+            long ttl = 0;
             if (cached_result) {
                 ttl = cached_result->expired_at() - ::time(nullptr);
                 out << string_format("    %s, ttl=%d", cn.c_str(), ttl);
@@ -789,7 +789,7 @@ int cli_diag_ssl_ticket_list(struct cli_def *cli, const char *command, char *arg
 
         out << "SSL ticket/sessionid list:\n\n";
 
-        for (auto x: SSLFactory::session_cache.cache()) {
+        for (auto const& x: SSLFactory::session_cache.cache()) {
             std::string key = x.first;
             session_holder *session_keys = x.second;
 
@@ -882,7 +882,7 @@ int cli_diag_ssl_ticket_size(struct cli_def *cli, const char *command, char *arg
     std::stringstream out;
 
     {
-        std::lock_guard<std::recursive_mutex> l_(SSLFactory::session_cache.getlock());
+        std::scoped_lock<std::recursive_mutex> l_(SSLFactory::session_cache.getlock());
 
         int n_sz_cache = SSLFactory::session_cache.cache().size();
         int n_max_cache = SSLFactory::session_cache.max_size();
@@ -1116,6 +1116,38 @@ int cli_diag_identity_ip_clear(struct cli_def *cli, const char *command, char *a
         AuthFactory::get().shm_ip6_map.seen_version(0);
         AuthFactory::get().shm_ip6_map.release();
     }
+
+    return CLI_OK;
+}
+
+int cli_diag_writer_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    auto wr = threadedPoolFileWriter::instance();
+
+    std::stringstream ss;
+
+    {
+        std::scoped_lock<std::mutex> l_(wr->queue_lock());
+
+        ss << "Not started files: " << wr->task_files().size() << "\n";
+        ss << "Queue being processed:\n";
+
+        for (auto const& elem: wr->queue()) {
+            auto const& k = elem.first;
+            auto const& q = elem.second;
+
+            ss << "    '" << k << "' : " << q.size() << " chunks\n";
+        }
+    };
+    {
+        std::scoped_lock<std::recursive_mutex> l_(wr->ofstream_lock());
+
+        ss << "Recent (opened files):\n";
+        for (auto const& elem: wr->ofstream_cache().cache()) {
+            ss << "    " << elem.first << "\n";
+        }
+    }
+
+    cli_print(cli, "%s", ss.str().c_str());
 
     return CLI_OK;
 }
@@ -1502,7 +1534,7 @@ int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *a
 
     if (buffer::use_pool) {
 
-        std::lock_guard<std::mutex> g(memPool::pool().lock);
+        std::scoped_lock<std::mutex> g(memPool::pool().lock);
 
         cli_print(cli, "\nMemory pool API stats:");
         cli_print(cli, "acquires: %lld/%lldB", memPool::pool().stat_acq, memPool::pool().stat_acq_size);
@@ -1595,7 +1627,7 @@ int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *a
 
 int save_config_address_objects(Config& ex) {
 
-    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
     Setting& address_objects = ex.getRoot().add("address_objects", Setting::TypeGroup);
 
@@ -1637,7 +1669,7 @@ int save_config_address_objects(Config& ex) {
 
 int save_config_port_objects(Config& ex) {
 
-    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
     Setting& objects = ex.getRoot().add("port_objects", Setting::TypeGroup);
 
@@ -1660,7 +1692,7 @@ int save_config_port_objects(Config& ex) {
 
 int save_config_proto_objects(Config& ex) {
 
-    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());;
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());;
 
     Setting& objects = ex.getRoot().add("proto_objects", Setting::TypeGroup);
 
@@ -1712,7 +1744,7 @@ int save_config_debug(Config& ex) {
 
 int save_config_detection_profiles(Config& ex) {
 
-    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
     Setting& objects = ex.getRoot().add("detection_profiles", Setting::TypeGroup);
 
@@ -1733,7 +1765,7 @@ int save_config_detection_profiles(Config& ex) {
 
 int save_config_content_profiles(Config& ex) {
 
-    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
     Setting& objects = ex.getRoot().add("content_profiles", Setting::TypeGroup);
 
@@ -1767,7 +1799,7 @@ int save_config_content_profiles(Config& ex) {
 
 int save_config_tls_ca(Config& ex) {
 
-    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
     Setting& objects = ex.getRoot().add("tls_ca", Setting::TypeGroup);
 
@@ -1788,7 +1820,7 @@ int save_config_tls_ca(Config& ex) {
 
 int save_config_tls_profiles(Config& ex) {
 
-    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
     Setting& objects = ex.getRoot().add("tls_profiles", Setting::TypeGroup);
 
@@ -1853,7 +1885,7 @@ int save_config_tls_profiles(Config& ex) {
 
 int save_config_alg_dns_profiles(Config& ex) {
 
-    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
     Setting& objects = ex.getRoot().add("alg_dns_profiles", Setting::TypeGroup);
 
@@ -1877,7 +1909,7 @@ int save_config_alg_dns_profiles(Config& ex) {
 
 int save_config_auth_profiles(Config& ex) {
 
-    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
     Setting& objects = ex.getRoot().add("auth_profiles", Setting::TypeGroup);
 
@@ -1922,7 +1954,7 @@ int save_config_auth_profiles(Config& ex) {
 
 int save_config_policy(Config& ex) {
 
-    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
     Setting& objects = ex.getRoot().add("policy", Setting::TypeList);
 
@@ -1980,7 +2012,7 @@ int save_config_policy(Config& ex) {
 
 int save_config_sig(Config& ex, const std::string& sigset) {
 
-    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
     Setting& objects = ex.getRoot().add(sigset, Setting::TypeList);
 
@@ -2068,7 +2100,7 @@ int save_config_sig(Config& ex, const std::string& sigset) {
 
 int save_config_settings(Config& ex) {
 
-    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
     if(!ex.exists("settings"))
         ex.getRoot().add("settings", Setting::TypeGroup);
@@ -2156,7 +2188,7 @@ int save_config_settings(Config& ex) {
 
 int cli_save_config(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
-    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
     Config ex;
     ex.setOptions(Setting::OptionOpenBraceOnSeparateLine);
@@ -2264,7 +2296,7 @@ int cfg_write(Config& cfg, FILE* where, unsigned long iobufsz = 0) {
 
 int cli_show_config_full (struct cli_def *cli, const char *command, char **argv, int argc) {
 
-    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
     if(cfg_write(CfgFactory::cfg_obj(), cli->client) != 0) {
         cli_print(cli, "error: config print failed");
@@ -2516,7 +2548,7 @@ bool apply_setting(std::string conf, std::string varname, struct cli_def *cli) {
 
 int cli_uni_set_cb(std::string confpath, struct cli_def *cli, const char *command, char *argv[], int argc) {
 
-    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
     if (argc > 0 && CfgFactory::cfg_obj().exists(confpath)) {
 
@@ -2532,7 +2564,7 @@ int cli_uni_set_cb(std::string confpath, struct cli_def *cli, const char *comman
 
         if (argv0 != "?") {
 
-            std::lock_guard<std::recursive_mutex> ll_(CfgFactory::lock());
+            std::scoped_lock<std::recursive_mutex> ll_(CfgFactory::lock());
 
             if (cfg_write_value(conf, false, varname, argv0, cli)) {
                 // cli_print(cli, "change written to current config");
@@ -2597,7 +2629,7 @@ int cli_config_setting_socks_cb(struct cli_def *cli, const char *command, char *
 // index < 0 means all
 void cli_print_section(cli_def* cli, const std::string& name, int index , unsigned long pipe_sz ) {
 
-    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
     if(CfgFactory::cfg_root().exists(name.c_str())) {
         Setting &s = CfgFactory::cfg_root()[name.c_str()];
@@ -2729,7 +2761,7 @@ int cli_diag_mem_trace_mark (struct cli_def *cli, const char *command, char **ar
 
 #ifdef MEMPOOL_DEBUG
 
-    std::lock_guard<std::mutex> l(mempool_ptr_map_lock);
+    std::scoped_lock<std::mutex> l(mempool_ptr_map_lock);
 
     for ( auto it = mempool_ptr_map.begin() ; it != mempool_ptr_map.end() ; ++it) {
         it->second.mark = 1;
@@ -2766,7 +2798,7 @@ int cli_diag_mem_trace_list (struct cli_def *cli, const char *command, char **ar
     {
         std::unordered_map<std::string, long long int> occ;
         {
-            std::lock_guard<std::mutex> l(mempool_ptr_map_lock);
+            std::scoped_lock<std::mutex> l(mempool_ptr_map_lock);
 
             for (auto mem: mempool_ptr_map) {
                 auto mch = mem.second;
@@ -2918,7 +2950,7 @@ int cli_diag_mem_objects_clear(struct cli_def *cli, const char *command, char *a
 
             int ret = -1;
             {
-                std::lock_guard<std::recursive_mutex> l_(sobjectDB::db().getlock());
+                std::scoped_lock<std::recursive_mutex> l_(sobjectDB::db().getlock());
                 ret = sobjectDB::ask_destroy((void *) key);
             }
             
@@ -2975,7 +3007,7 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
 
 
     {
-        std::lock_guard<std::recursive_mutex> l_(sobjectDB::db().getlock());
+        std::scoped_lock<std::recursive_mutex> l_(sobjectDB::db().getlock());
 
         for (auto it: sobjectDB::db().cache()) {
 
@@ -3129,7 +3161,7 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
                             cur_obj_ss << "    obj_debug: " << curr_proxy->get_this_log_level().to_string() << "\n";
                             int expiry = -1;
                             if (curr_proxy->half_holdtimer > 0) {
-                                expiry = curr_proxy->half_holdtimer + MitmProxy::half_timeout - curtime;
+                                expiry = curr_proxy->half_holdtimer + MitmProxy::half_timeout() - curtime;
                             }
                             cur_obj_ss << "    half_hold: " << expiry << "\n";
                         }
@@ -3203,8 +3235,8 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
     cli_print(cli,"%s",ss.str().c_str());
     
     if( sl_flags == SL_NONE ) {
-        unsigned long l = MitmProxy::total_mtr_up.get();
-        unsigned long r = MitmProxy::total_mtr_down.get();
+        unsigned long l = MitmProxy::total_mtr_up().get();
+        unsigned long r = MitmProxy::total_mtr_down().get();
         cli_print(cli, "\nProxy performance: upload %sbps, download %sbps in last second",
                                      number_suffixed(l * 8).c_str(), number_suffixed(r * 8).c_str());
     }
@@ -3240,7 +3272,7 @@ int cli_diag_proxy_policy_list(struct cli_def *cli, const char *command, char *a
     std::stringstream out;
 
     {
-        std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
+        std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
         for (auto it: CfgFactory::get().db_policy) {
             out << it->to_string(verbosity);
@@ -3261,7 +3293,7 @@ struct cli_ext : public cli_def {
 
 
 void cli_generate_set_settings(cli_def* cli, cli_command* set_settings) {
-    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
 
     if (CfgFactory::cfg_root()["settings"].exists("auth_portal")) {
@@ -3439,8 +3471,11 @@ void client_thread(int client_socket) {
                 diag_identity_user = cli_register_command(cli, diag_identity,"user",NULL, PRIVILEGE_PRIVILEGED, MODE_EXEC,"identity commands related to users");
                     cli_register_command(cli, diag_identity_user,"list",cli_diag_identity_ip_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"list all known users");
                     cli_register_command(cli, diag_identity_user,"clear",cli_diag_identity_ip_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC,"CLEAR all known users");
-                        
-                        
+
+            auto diag_writer = cli_register_command(cli,diag,"writer",NULL,PRIVILEGE_PRIVILEGED, MODE_EXEC,"file writer diags");
+                auto diag_writer_stats = cli_register_command(cli,diag_writer,"stats",cli_diag_writer_stats,PRIVILEGE_PRIVILEGED, MODE_EXEC,"file writer statistics");
+
+
         debuk = cli_register_command(cli, NULL, "debug", NULL, PRIVILEGE_PRIVILEGED, MODE_EXEC, "diagnostic commands");
             cli_register_command(cli, debuk, "term", cli_debug_terminal, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set level of logging to this terminal");
             cli_register_command(cli, debuk, "file", cli_debug_logfile, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set level of logging to standard log file");
@@ -3466,7 +3501,7 @@ void client_thread(int client_socket) {
 
 
         if( CfgFactory::cfg_root().exists("settings") ) {
-            std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
+            std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
             set_settings = cfg_generate_cli_callbacks(CfgFactory::cfg_root()["settings"], cli, conft_configure,
                                        cli_config_setting_cb,
