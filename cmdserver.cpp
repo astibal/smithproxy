@@ -40,25 +40,19 @@
 #include <string>
 #include <thread>
 #include <set>
-#include <array>
 
 #include <cstring>
 #include <cstdlib>
 #include <ctime>
-#include <csignal>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <linux/sockios.h>
 #include <arpa/inet.h>
-#include <netdb.h>
-#include <fcntl.h>
-#include <time.h>
 #include <unistd.h>
 
 #include <openssl/rand.h>
-#include <openssl/crypto.h>
 #include <biostring.hpp>
 
 #include <logger.hpp>
@@ -87,7 +81,7 @@ using namespace socle;
 
 int cli_port = 50000;
 int cli_port_base = 50000;
-std::string cli_enable_password = "";
+std::string cli_enable_password;
 
 
 static const char* debug_levels="\n\t0\tNONE\n\t1\tFATAL\n\t2\tCRITICAL\n\t3\tERROR\n\t4\tWARNING\n\t5\tNOTIFY\n\t6\tINFORMATIONAL\n\t7\tDIAGNOSE\t(may impact performance)\n\t8\tDEBUG\t(impacts performance)\n\t9\tEXTREME\t(severe performance drop)\n\t10\tDUMPALL\t(performance killer)\n\treset\treset back to level configured in config file";
@@ -262,15 +256,15 @@ void cmd_show_status(struct cli_def* cli) {
     cli_print(cli,"Objects: %ld",socle::sobjectDB::db().cache().size());
     unsigned long l = MitmProxy::total_mtr_up().get();
     unsigned long r = MitmProxy::total_mtr_down().get();
-    cli_print(cli,"Proxy performance: upload %sbps, download %sbps in last second",number_suffixed(l*8).c_str(),number_suffixed(r*8).c_str());    
- 
+    cli_print(cli,"Proxy performance: upload %sbps, download %sbps in last second",number_suffixed(l*8).c_str(),number_suffixed(r*8).c_str());
+
 }
 
 int cli_show_status(struct cli_def *cli, const char *command, char *argv[], int argc)
 {
     //cli_print(cli, "called %s with %s, argc %d\r\n", __FUNCTION__, command, argc);
 
-    
+
     cmd_show_status(cli);
     return CLI_OK;
 }
@@ -278,7 +272,7 @@ int cli_show_status(struct cli_def *cli, const char *command, char *argv[], int 
 
 int cli_test_dns_genrequest(struct cli_def *cli, const char *command, char *argv[], int argc) {
     buffer b(1024);
-    
+
     if(argc > 0) {
         std::string argv0(argv[0]);
         if( argv0 == "?" || argv0 == "\t") {
@@ -292,24 +286,24 @@ int cli_test_dns_genrequest(struct cli_def *cli, const char *command, char *argv
 #else
         RAND_pseudo_bytes(rand_pool,2);
 #endif
-        unsigned short id = *(unsigned short*)rand_pool;        
-        
+        unsigned short id = *(unsigned short*)rand_pool;
+
         int s = generate_dns_request(id,b,argv[0],A);
         cli_print(cli,"DNS generated request: \n%s, %dB",hex_dump(b).c_str(), s);
     } else {
         cli_print(cli,"you need to specify hostname");
     }
-    
+
     return CLI_OK;
 }
 
 
 DNS_Response* send_dns_request(struct cli_def *cli, std::string hostname, DNS_Record_Type t, std::string nameserver) {
-    
+
     buffer b(1024);
     int parsed = -1;
     DNS_Response* ret = nullptr;
-    
+
     unsigned char rand_pool[2];
 #ifdef USE_OPENSSL11
     RAND_bytes(rand_pool,2);
@@ -317,20 +311,20 @@ DNS_Response* send_dns_request(struct cli_def *cli, std::string hostname, DNS_Re
     RAND_pseudo_bytes(rand_pool,2);
 #endif
     unsigned short id = *(unsigned short*)rand_pool;
-    
+
     int s = generate_dns_request(id,b,hostname,t);
     cli_print(cli,"DNS generated request: \n%s, %dB",hex_dump(b).c_str(),s);
-    
+
     // create UDP socket
-    int send_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);         
+    int send_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     struct sockaddr_storage addr;
-    memset(&addr, 0, sizeof(struct sockaddr_storage));        
+    memset(&addr, 0, sizeof(struct sockaddr_storage));
     addr.ss_family                = AF_INET;
     ((sockaddr_in*)&addr)->sin_addr.s_addr = inet_addr(nameserver.c_str());
     ((sockaddr_in*)&addr)->sin_port = htons(53);
-    
+
     ::connect(send_socket,(sockaddr*)&addr,sizeof(sockaddr_storage));
-    
+
     if(::send(send_socket,b.data(),b.size(),0) < 0) {
         std::string r = string_format("logger::write_log: cannot write remote socket: %d",send_socket);
         cli_print(cli,"%s",r.c_str());
@@ -341,16 +335,16 @@ DNS_Response* send_dns_request(struct cli_def *cli, std::string hostname, DNS_Re
     fd_set confds;
     struct timeval tv;
     tv.tv_usec = 0;
-    tv.tv_sec = 2;  
+    tv.tv_sec = 2;
     FD_ZERO(&confds);
     FD_SET(send_socket, &confds);
     rv = select(send_socket + 1, &confds, NULL, NULL, &tv);
     if(rv == 1) {
         buffer r(1500);
          int l = ::recv(send_socket,r.data(),r.capacity(),0);
-        if(l > 0) { 
+        if(l > 0) {
             r.size(l);
-            
+
             cli_print(cli, "received %d bytes",l);
             cli_print(cli, "\n%s\n",hex_dump(r).c_str());
 
@@ -359,44 +353,44 @@ DNS_Response* send_dns_request(struct cli_def *cli, std::string hostname, DNS_Re
             parsed = resp->load(&r);
             cli_print(cli, "parsed %d bytes (0 means all)",parsed);
             cli_print(cli, "DNS response: \n %s",resp->to_string().c_str());
-            
+
             // save only fully parsed messages
             if(parsed == 0) {
                 ret = resp;
-                
+
             } else {
                 delete resp;
             }
-            
+
         } else {
             cli_print(cli, "recv() returned %d",l);
         }
-        
+
     } else {
         cli_print(cli, "timeout, or an error occured.");
     }
-    
-    
-    ::close(send_socket);    
-    
+
+
+    ::close(send_socket);
+
     return ret;
 }
 
 int cli_test_dns_sendrequest(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
     if(argc > 0) {
-        
+
         std::string argv0(argv[0]);
         if( argv0 == "?" || argv0 == "\t") {
             cli_print(cli,"specify hostname.");
             return CLI_OK;
         }
-        
+
         std::string nameserver = "8.8.8.8";
         if(CfgFactory::get().db_nameservers.size()) {
             nameserver = CfgFactory::get().db_nameservers.at(0);
         }
-        
+
         DNS_Response* resp = send_dns_request(cli,argv0,A,nameserver);
         if(resp) {
             DNS_Inspector di;
@@ -406,11 +400,11 @@ int cli_test_dns_sendrequest(struct cli_def *cli, const char *command, char *arg
                 delete resp;
             }
         }
-        
+
     } else {
         cli_print(cli,"you need to specify hostname");
     }
-    
+
     return CLI_OK;
 }
 
@@ -423,8 +417,7 @@ int cli_test_dns_refreshallfqdns(struct cli_def *cli, const char *command, char 
             return CLI_OK;
         }
     }
-    
-    
+
     std::vector<std::string> fqdns;
 
     {
@@ -442,7 +435,7 @@ int cli_test_dns_refreshallfqdns(struct cli_def *cli, const char *command, char 
     if(CfgFactory::get().db_nameservers.size()) {
         nameserver = CfgFactory::get().db_nameservers.at(0);
     }
-    
+
     DNS_Inspector di;
     for(auto a: fqdns) {
         DNS_Response* resp =  send_dns_request(cli,a,A,nameserver);
@@ -453,7 +446,7 @@ int cli_test_dns_refreshallfqdns(struct cli_def *cli, const char *command, char 
                 delete resp;
             }
         }
-        
+
         resp = send_dns_request(cli,a,AAAA,nameserver);
         if(resp) {
             if(di.store(resp)) {
@@ -463,13 +456,13 @@ int cli_test_dns_refreshallfqdns(struct cli_def *cli, const char *command, char 
             }
         }
     }
-    
+
     return CLI_OK;
 }
 
 
 int cli_diag_ssl_cache_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
-    
+
     SSLFactory* store = SSLCom::certstore();
 
 
@@ -488,10 +481,10 @@ int cli_diag_ssl_cache_stats(struct cli_def *cli, const char *command, char *arg
 
 
 int cli_diag_ssl_cache_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
-    
+
     SSLFactory* store = SSLCom::certstore();
     bool print_refs = false;
-    
+
     if(argc > 0) {
         int lev = safe_val(argv[0]);
         if(lev >= 7) {
@@ -610,7 +603,7 @@ int cli_diag_ssl_cache_clear(struct cli_def *cli, const char *command, char *arg
 }
 
 int cli_diag_ssl_wl_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
-    
+
     cli_print(cli,"\nSSL whitelist:");
     std::string out;
 
@@ -665,9 +658,9 @@ int cli_diag_ssl_wl_stats(struct cli_def *cli, const char *command, char *argv[]
 }
 
 int cli_diag_ssl_crl_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
-    
+
     std::stringstream out;
-    
+
     out << "Downloaded CRLs:\n\n";
 
     {
@@ -693,12 +686,12 @@ int cli_diag_ssl_crl_list(struct cli_def *cli, const char *command, char *argv[]
     }
 
     cli_print(cli,"\n%s",out.str().c_str());
-    
+
     return CLI_OK;
 }
 
 int cli_diag_ssl_crl_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
-    
+
     std::stringstream ss;
 
     {
@@ -724,10 +717,10 @@ int cli_diag_ssl_crl_stats(struct cli_def *cli, const char *command, char *argv[
 
 
 int cli_diag_ssl_verify_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
-    
+
 
     std::stringstream out;
-    
+
     out << "Verify status list:\n\n";
 
     {
@@ -750,9 +743,9 @@ int cli_diag_ssl_verify_list(struct cli_def *cli, const char *command, char *arg
 
         }
     }
-    
+
     cli_print(cli,"\n%s",out.str().c_str());
-    
+
     return CLI_OK;
 }
 
@@ -849,9 +842,9 @@ int cli_diag_ssl_ticket_list(struct cli_def *cli, const char *command, char *arg
 
         }
     }
-    
+
     cli_print(cli,"\n%s",out.str().c_str());
-    
+
     return CLI_OK;
 }
 
@@ -903,14 +896,14 @@ int cli_diag_ssl_ticket_size(struct cli_def *cli, const char *command, char *arg
 
 #ifndef USE_OPENSSL11
 int cli_diag_ssl_memcheck_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
-    
+
     std::string out;
     BIO* b_out = BIO_new_string(&out);
-    
+
     CRYPTO_mem_leaks(b_out);
     cli_print(cli,"OpenSSL memory leaks:\n%s",out.c_str());
     BIO_free(b_out);
-    
+
     return CLI_OK;
 }
 
@@ -918,14 +911,14 @@ int cli_diag_ssl_memcheck_list(struct cli_def *cli, const char *command, char *a
 int cli_diag_ssl_memcheck_enable(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
     CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ENABLE);
-    
+
     return CLI_OK;
 }
 
 int cli_diag_ssl_memcheck_disable(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
     CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_DISABLE);
-    
+
     return CLI_OK;
 }
 #endif
@@ -958,9 +951,9 @@ int cli_diag_dns_cache_list(struct cli_def *cli, const char *command, char *argv
             }
         }
     }
-    
+
     cli_print(cli, "%s", out.str().c_str());
-    
+
     return CLI_OK;
 }
 
@@ -993,7 +986,7 @@ int cli_diag_dns_cache_clear(struct cli_def *cli, const char *command, char *arg
     }
 
     cli_print(cli,"\nDNS cache cleared.");
-    
+
     return CLI_OK;
 }
 
@@ -1019,7 +1012,7 @@ int cli_diag_dns_domain_cache_list(struct cli_def *cli, const char *command, cha
     }
 
     cli_print(cli,"%s",out.str().c_str());
-    
+
     return CLI_OK;
 }
 
@@ -1032,14 +1025,14 @@ int cli_diag_dns_domain_cache_clear(struct cli_def *cli, const char *command, ch
     }
 
     cli_print(cli," done.");
-    
+
     return CLI_OK;
 }
 
 
 
 int cli_diag_identity_ip_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
-    
+
     cli_print(cli, "\nIPv4 identities:\n");
     std::stringstream ss;
 
@@ -1060,10 +1053,10 @@ int cli_diag_identity_ip_list(struct cli_def *cli, const char *command, char *ar
 
     }
     cli_print(cli, "%s", ss.str().c_str());
-    
+
 
     ss.clear();
-    
+
     cli_print(cli, "\nIPv6 identities:\n");
 
 
@@ -1082,7 +1075,7 @@ int cli_diag_identity_ip_list(struct cli_def *cli, const char *command, char *ar
         }
     }
     cli_print(cli, "%s", ss.str().c_str());
-    
+
     return CLI_OK;
 }
 
@@ -1154,7 +1147,7 @@ int cli_diag_writer_stats(struct cli_def *cli, const char *command, char *argv[]
 
 void cli_print_log_levels(struct cli_def *cli) {
     logger_profile* lp = get_logger()->target_profiles()[(uint64_t)fileno(cli->client)];
-    
+
     cli_print(cli,"THIS cli logging level set to: %d",lp->level_.level());
     cli_print(cli,"Internal logging level set to: %d",get_logger()->level().level());
     cli_print(cli,"\n");
@@ -1167,7 +1160,7 @@ void cli_print_log_levels(struct cli_def *cli) {
         cli_print(cli, "Logging level for target: %s: %d",
                 get_logger()->target_name((uint64_t)(o_ptr)),
                 get_logger()->target_profiles()[(uint64_t)(o_ptr)]->level_.level());
-    }         
+    }
 }
 
 
@@ -1205,16 +1198,16 @@ int cli_debug_level(struct cli_def *cli, const char *command, char *argv[], int 
 
 
 int cli_debug_terminal(struct cli_def *cli, const char *command, char *argv[], int argc) {
-    
+
     logger_profile* lp = get_logger()->target_profiles()[(uint64_t)fileno(cli->client)];
     if(argc > 0) {
-        
+
         std::string a1 = argv[0];
 
 
         if(a1 == "?") {
             cli_print(cli,"valid parameters: %s",debug_levels);
-        } 
+        }
         else if(a1 == "reset") {
             lp->level_ = NON;
         }
@@ -1233,31 +1226,31 @@ int cli_debug_terminal(struct cli_def *cli, const char *command, char *argv[], i
     } else {
         cli_print_log_levels(cli);
     }
-    
-    
-    
+
+
+
     return CLI_OK;
 }
 
 
 int cli_debug_logfile(struct cli_def *cli, const char *command, char *argv[], int argc) {
-    
+
     if(argc > 0) {
-        
+
         std::string a1 = argv[0];
 
         if(a1 == "?") {
             cli_print(cli,"valid parameters: %s",debug_levels);
-        } 
+        }
         else {
-            
+
             int newlev = 0;
             if(a1 == "reset") {
                 newlev = cfgapi_table.logging.level.level();
             } else {
                 newlev = safe_val(argv[0]);
             }
-            
+
             if(newlev >= 0) {
                 for(auto const* o_ptr: get_logger()->targets()) {
 
@@ -1276,7 +1269,7 @@ int cli_debug_logfile(struct cli_def *cli, const char *command, char *argv[], in
     } else {
         cli_print_log_levels(cli);
     }
-    
+
     return CLI_OK;
 }
 
@@ -1287,7 +1280,7 @@ int cli_debug_ssl(struct cli_def *cli, const char *command, char *argv[], int ar
         int newlev = 0;
         if(a1 == "?") {
             cli_print(cli,"valid parameters: %s",debug_levels);
-        } 
+        }
         else if(a1 == "reset") {
             SSLCom::log_level_ref() = orig_ssl_loglevel;
             SSLMitmCom::log_level_ref() = orig_sslmitm_loglevel;
@@ -1298,7 +1291,7 @@ int cli_debug_ssl(struct cli_def *cli, const char *command, char *argv[], int ar
             SSLCom::log_level_ref().level(newlev);
             SSLMitmCom::log_level_ref().level(newlev);
             SSLFactory::log_level_ref().level(newlev);
-            
+
         }
     } else {
         int l = SSLCom::log_level_ref().level();
@@ -1310,7 +1303,7 @@ int cli_debug_ssl(struct cli_def *cli, const char *command, char *argv[], int ar
         cli_print(cli,"\n");
         cli_print(cli,"valid parameters: %s",debug_levels);
     }
-    
+
     return CLI_OK;
 }
 
@@ -1345,7 +1338,7 @@ int cli_debug_dns(struct cli_def *cli, const char *command, char *argv[], int ar
         std::string a1 = argv[0];
         if(a1 == "?") {
             cli_print(cli,"valid parameters: %s",debug_levels);
-        } 
+        }
         else if(a1 == "reset") {
             DNS_Inspector::log_level_ref() = orig_dns_insp_loglevel;
             DNS_Packet::log_level_ref() = orig_dns_packet_loglevel;
@@ -1354,7 +1347,7 @@ int cli_debug_dns(struct cli_def *cli, const char *command, char *argv[], int ar
             int lev = std::atoi(argv[0]);
             DNS_Inspector::log_level_ref().level(lev);
             DNS_Packet::log_level_ref().level(lev);
-            
+
         }
     } else {
         int l = DNS_Inspector::log_level_ref().level();
@@ -1364,28 +1357,28 @@ int cli_debug_dns(struct cli_def *cli, const char *command, char *argv[], int ar
         cli_print(cli,"\n");
         cli_print(cli,"valid parameters: %s",debug_levels);
     }
-    
+
     return CLI_OK;
 }
 
 int cli_debug_sobject(struct cli_def *cli, const char *command, char *argv[], int argc) {
-    
+
     bool cur = socle::sobject_info::enable_bt_;
-    
+
     if(argc != 0) {
         cli_print(cli, "Current sobject trace flag switched to: %d",cur);
         return CLI_OK;
     }
-    
-    
+
+
     cur = !cur;
-    
+
     socle::sobject_info::enable_bt_ = cur;
-    
+
     cli_print(cli, "Current sobject trace flag switched to: %d",cur);
     if(cur)
         cli_print(cli, "!!! backtrace logging may affect performance !!!");
-    
+
     return CLI_OK;
 }
 
@@ -1394,7 +1387,7 @@ int cli_debug_proxy(struct cli_def *cli, const char *command, char *argv[], int 
         std::string a1 = argv[0];
         if(a1 == "?") {
             cli_print(cli,"valid parameters: %s",debug_levels);
-        } 
+        }
         else if(a1 == "reset") {
             baseProxy::log_level_ref() = orig_baseproxy_loglevel;
             epoll::log_level = orig_epoll_loglevel;
@@ -1413,7 +1406,7 @@ int cli_debug_proxy(struct cli_def *cli, const char *command, char *argv[], int 
             MitmHostCX::log_level_ref().level(lev);
             MitmProxy::log_level_ref().level(lev);
             SocksProxy::log_level_ref().level(lev);
-            
+
         }
     } else {
         int l = baseProxy::log_level_ref().level();
@@ -1438,7 +1431,7 @@ int cli_debug_proxy(struct cli_def *cli, const char *command, char *argv[], int 
         cli_print(cli,"\n");
         cli_print(cli,"valid parameters: %s",debug_levels);
     }
-    
+
     return CLI_OK;
 }
 
@@ -1576,7 +1569,7 @@ int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *a
 
 #ifdef SOCLE_MEM_PROFILE
     if(argc > 0) {
-        
+
         std::string arg1(argv[0]);
         if(arg1 == "?") {
             cli_print(cli,"buffers        print all still allocated buffers' traces");
@@ -1584,22 +1577,22 @@ int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *a
             cli_print(cli,"clear          remove all buffer tracking entries");
             return CLI_OK;
         }
-        
+
         bool b = false;
         bool ba = false;
         bool clr = false;
-        
+
         if(arg1 == "buffers") { b = true; }
         if(arg1 == "buffers_all") { b = true; ba = true; }
         if(arg1 == "clear") { clr = true; }
-        
+
         if(b) {
             cli_print(cli,"\nExtra memory traces: ");
             buffer::alloc_map_lock();
             for( auto it = buffer::alloc_map.begin(); it != buffer::alloc_map.end(); ++it) {
                 std::string bt = it->first;
                 int& counter = it->second;
-                
+
                 if(counter > 0 || ba) {
                     cli_print(cli,"\nActive trace: %d references %s",counter,bt.c_str());
                 }
@@ -2750,7 +2743,7 @@ int cli_show_config_detection_sig(struct cli_def *cli, const char *command, char
 
 
 int cli_diag_mem_objects_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
-    
+
     cli_print(cli,"Statistics:\n");
     cli_print(cli,"%s", sobjectDB::str_stats(nullptr).c_str());
     return CLI_OK;
@@ -2855,10 +2848,10 @@ int cli_diag_mem_trace_list (struct cli_def *cli, const char *command, char **ar
 
 
 int cli_diag_mem_objects_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
-    
+
     std::string object_filter;
     int verbosity = iINF;
-    
+
     if(argc > 0) {
         std::string a1 = argv[0];
         if(a1 == "?") {
@@ -2866,7 +2859,7 @@ int cli_diag_mem_objects_list(struct cli_def *cli, const char *command, char *ar
             cli_print(cli,"         <empty> - all entries will be printed out");
             cli_print(cli,"         0x prefixed string - only object with matching Id will be printed out");
             cli_print(cli,"         any other string   - only objects with class matching this string will be printed out");
-            
+
             return CLI_OK;
         } else {
             // a1 is param for the lookup
@@ -2882,29 +2875,29 @@ int cli_diag_mem_objects_list(struct cli_def *cli, const char *command, char *ar
             verbosity = safe_val(a2,iINF);
         }
     }
-    
-    
+
+
     std::string r = sobjectDB::str_list((object_filter.size() == 0) ? nullptr : object_filter.c_str(), nullptr, verbosity);
                 r += "\n" + sobjectDB::str_stats((object_filter.size() == 0) ? nullptr : object_filter.c_str());
 
-    
+
     cli_print(cli,"Smithproxy objects (filter: %s):\n%s\nFinished.",(object_filter.size() == 0) ? "ALL" : object_filter.c_str() ,r.c_str());
     return CLI_OK;
 }
 
 
 int cli_diag_mem_objects_search(struct cli_def *cli, const char *command, char *argv[], int argc) {
-    
+
     std::string object_filter;
     int verbosity = iINF;
-    
+
     if(argc > 0) {
         std::string a1 = argv[0];
         if(a1 == "?") {
             cli_print(cli,"valid parameters:");
             cli_print(cli,"         <empty>     - all entries will be printed out");
             cli_print(cli,"         any string  - objects with descriptions containing this string will be printed out");
-            
+
             return CLI_OK;
         } else {
             // a1 is param for the lookup
@@ -2914,16 +2907,16 @@ int cli_diag_mem_objects_search(struct cli_def *cli, const char *command, char *
                 object_filter = a1.c_str();
             }
         }
-        
+
         if(argc > 1) {
             std::string a2 = argv[1];
             verbosity = safe_val(a2,iINF);
         }
     }
-    
-    
+
+
     std::string r = sobjectDB::str_list(nullptr,nullptr,verbosity,object_filter.c_str());
-    
+
     cli_print(cli,"Smithproxy objects (filter: %s):\n%s\nFinished.",(object_filter.size() == 0) ? "ALL" : object_filter.c_str() ,r.c_str());
     return CLI_OK;
 }
@@ -2932,18 +2925,18 @@ int cli_diag_mem_objects_search(struct cli_def *cli, const char *command, char *
 
 int cli_diag_mem_objects_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
     std::string address;
-    
+
     if(argc > 0) {
         std::string a1 = argv[0];
         if(a1 == "?") {
             cli_print(cli,"valid parameters:");
             cli_print(cli,"         <object id>");
-            
+
             return CLI_OK;
         } else {
             // a1 is param for the lookup
             address = a1.c_str();
-            
+
             uint64_t key = strtol(address.c_str(),nullptr,16);
             cli_print(cli,"Trying to clear 0x%lx",key);
 
@@ -2953,7 +2946,7 @@ int cli_diag_mem_objects_clear(struct cli_def *cli, const char *command, char *a
                 std::scoped_lock<std::recursive_mutex> l_(sobjectDB::db().getlock());
                 ret = sobjectDB::ask_destroy((void *) key);
             }
-            
+
             switch(ret) {
                 case 1:
                     cli_print(cli,"object agrees to terminate.");
@@ -2992,17 +2985,17 @@ int cli_diag_proxy_session_io_list(struct cli_def *cli, const char *command, cha
 
 
 int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, char *argv[], int argc, int sl_flags) {
-    
+
     std::string a1,a2;
     int verbosity = iINF;
-    if(argc > 0) { 
+    if(argc > 0) {
         a1 = argv[0];
         verbosity = safe_val(a1,iINF);
     }
     if(argc > 1) a2 = argv[1];
-    
+
     std::stringstream ss;
-    
+
     time_t  curtime = time(nullptr);
 
 
@@ -3233,7 +3226,7 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
 
 
     cli_print(cli,"%s",ss.str().c_str());
-    
+
     if( sl_flags == SL_NONE ) {
         unsigned long l = MitmProxy::total_mtr_up().get();
         unsigned long r = MitmProxy::total_mtr_down().get();
@@ -3245,9 +3238,9 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
 }
 
 int cli_diag_proxy_session_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
-    
+
     //return cli_diag_mem_objects_clear(cli,command,argv,argc);
-    
+
     cli_print(cli,"To be implemented, sorry.");
     return CLI_OK;
 }
@@ -3352,12 +3345,12 @@ void client_thread(int client_socket) {
 
         struct cli_command *conft_configure;
             struct cli_command *conft_settings_auth;
-        
+
         struct cli_def *cli;
-        
+
         char hostname[64]; memset(hostname,0,64);
         gethostname(hostname,63);
-        
+
 
         // Must be called first to setup data structures
         cli = cli_init();
@@ -3375,12 +3368,12 @@ void client_thread(int client_socket) {
 
         // Set up 2 commands "show counters" and "show junk"
 
-        save  = cli_register_command(cli, NULL, "save", NULL, PRIVILEGE_PRIVILEGED, MODE_ANY, "save configs");
+        save  = cli_register_command(cli, nullptr, "save", nullptr, PRIVILEGE_PRIVILEGED, MODE_ANY, "save configs");
             cli_register_command(cli, save, "config", cli_save_config, PRIVILEGE_PRIVILEGED, MODE_ANY, "save config file");
 
-        show  = cli_register_command(cli, NULL, "show", NULL, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show basic information");
+        show  = cli_register_command(cli, nullptr, "show", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show basic information");
             cli_register_command(cli, show, "status", cli_show_status, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show smithproxy status");
-            show_config = cli_register_command(cli, show, "config", NULL, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy configuration related commands");
+            show_config = cli_register_command(cli, show, "config", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy configuration related commands");
                 cli_register_command(cli, show_config, "full", cli_show_config_full, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy full configuration");
                 cli_register_command(cli, show_config, "settings", cli_show_config_setting, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy config section: settings");
                 cli_register_command(cli, show_config, "policy", cli_show_config_policy, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy config section: policy");
@@ -3398,85 +3391,85 @@ void client_thread(int client_socket) {
                 cli_register_command(cli, show_config, "starttls_signatures", cli_show_config_starttls_sig, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy config section: starttls_signatures");
                 cli_register_command(cli, show_config, "detection_signatures", cli_show_config_detection_sig, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy config section: detection_signatures");
 
-        test  = cli_register_command(cli, NULL, "test", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "various testing commands");
-            test_dns = cli_register_command(cli, test, "dns", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "dns related testing commands");
+        test  = cli_register_command(cli, nullptr, "test", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "various testing commands");
+            test_dns = cli_register_command(cli, test, "dns", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "dns related testing commands");
                 cli_register_command(cli, test_dns, "genrequest", cli_test_dns_genrequest, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "generate dns request");
                 cli_register_command(cli, test_dns, "sendrequest", cli_test_dns_sendrequest, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "generate and send dns request to configured nameserver");
                 cli_register_command(cli, test_dns, "refreshallfqdns", cli_test_dns_refreshallfqdns, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "refresh all configured FQDN address objects against configured nameserver");
-                
-        diag  = cli_register_command(cli, NULL, "diag", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose commands helping to troubleshoot");
-            diag_ssl = cli_register_command(cli, diag, "ssl", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "ssl related troubleshooting commands");
-                diag_ssl_cache = cli_register_command(cli, diag_ssl, "cache", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl certificate cache");
+
+        diag  = cli_register_command(cli, nullptr, "diag", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose commands helping to troubleshoot");
+            diag_ssl = cli_register_command(cli, diag, "ssl", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "ssl related troubleshooting commands");
+                diag_ssl_cache = cli_register_command(cli, diag_ssl, "cache", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl certificate cache");
                     cli_register_command(cli, diag_ssl_cache, "stats", cli_diag_ssl_cache_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "display ssl cert cache statistics");
                     cli_register_command(cli, diag_ssl_cache, "list", cli_diag_ssl_cache_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all ssl cert cache entries");
                     cli_register_command(cli, diag_ssl_cache, "print", cli_diag_ssl_cache_print, PRIVILEGE_PRIVILEGED, MODE_EXEC, "print all ssl cert cache entries");
                     cli_register_command(cli, diag_ssl_cache, "clear", cli_diag_ssl_cache_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "remove all ssl cert cache entries");
-                diag_ssl_wl = cli_register_command(cli, diag_ssl, "whitelist", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl temporary verification whitelist");                        
+                diag_ssl_wl = cli_register_command(cli, diag_ssl, "whitelist", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl temporary verification whitelist");
                     cli_register_command(cli, diag_ssl_wl, "list", cli_diag_ssl_wl_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all verification whitelist entries");
                     cli_register_command(cli, diag_ssl_wl, "clear", cli_diag_ssl_wl_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clear all verification whitelist entries");
                     cli_register_command(cli, diag_ssl_wl, "stats", cli_diag_ssl_wl_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "verification whitelist cache stats");
-                diag_ssl_crl = cli_register_command(cli, diag_ssl, "crl", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose dynamically downloaded CRLs");                           
+                diag_ssl_crl = cli_register_command(cli, diag_ssl, "crl", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose dynamically downloaded CRLs");
                     cli_register_command(cli, diag_ssl_crl, "list", cli_diag_ssl_crl_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all CRLs");
                     cli_register_command(cli, diag_ssl_crl, "stats", cli_diag_ssl_crl_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "CRLs cache stats");
-                diag_ssl_verify = cli_register_command(cli, diag_ssl, "verify", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose certificate verification status cache");                           
+                diag_ssl_verify = cli_register_command(cli, diag_ssl, "verify", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose certificate verification status cache");
                     cli_register_command(cli, diag_ssl_verify, "list", cli_diag_ssl_verify_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list certificate verification status cache content");
                     cli_register_command(cli, diag_ssl_verify, "stats", cli_diag_ssl_verify_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "certificate verification status cache stats");
-                diag_ssl_ticket = cli_register_command(cli, diag_ssl, "ticket", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose abbreviated handshake session/ticket cache");
+                diag_ssl_ticket = cli_register_command(cli, diag_ssl, "ticket", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose abbreviated handshake session/ticket cache");
                     cli_register_command(cli, diag_ssl_ticket, "list", cli_diag_ssl_ticket_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list abbreviated handshake session/ticket cache");
                     cli_register_command(cli, diag_ssl_ticket, "stats", cli_diag_ssl_ticket_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "abbreviated handshake session/ticket cache stats");
-                diag_ssl_ca     = cli_register_command(cli, diag_ssl, "ca", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose SSL signing CA");
+                diag_ssl_ca     = cli_register_command(cli, diag_ssl, "ca", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose SSL signing CA");
                     cli_register_command(cli, diag_ssl_ca, "reload", cli_diag_ssl_ca_reload, PRIVILEGE_PRIVILEGED, MODE_EXEC, "reload signing CA key and certificate");
 
-                        
+
 
             if(cfg_openssl_mem_dbg) {
 #ifndef USE_OPENSSL11
-                diag_ssl_memcheck = cli_register_command(cli, diag_ssl, "memcheck", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose openssl memcheck");                           
+                diag_ssl_memcheck = cli_register_command(cli, diag_ssl, "memcheck", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose openssl memcheck");
                     cli_register_command(cli, diag_ssl_memcheck, "list", cli_diag_ssl_memcheck_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "print out OpenSSL memcheck status");
                     cli_register_command(cli, diag_ssl_memcheck, "enable", cli_diag_ssl_memcheck_enable, PRIVILEGE_PRIVILEGED, MODE_EXEC, "enable OpenSSL debug collection");
                     cli_register_command(cli, diag_ssl_memcheck, "disable", cli_diag_ssl_memcheck_disable, PRIVILEGE_PRIVILEGED, MODE_EXEC, "disable OpenSSL debug collection");
 #endif
             }
-                
-            diag_mem = cli_register_command(cli, diag, "mem", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory related troubleshooting commands");
-                diag_mem_buffers = cli_register_command(cli, diag_mem, "buffers", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory buffers troubleshooting commands");
+
+            diag_mem = cli_register_command(cli, diag, "mem", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory related troubleshooting commands");
+                diag_mem_buffers = cli_register_command(cli, diag_mem, "buffers", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory buffers troubleshooting commands");
                     cli_register_command(cli, diag_mem_buffers, "stats", cli_diag_mem_buffers_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory buffers statistics");
-                diag_mem_objects = cli_register_command(cli, diag_mem, "objects", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory object troubleshooting commands");                        
+                diag_mem_objects = cli_register_command(cli, diag_mem, "objects", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory object troubleshooting commands");
                     cli_register_command(cli, diag_mem_objects, "stats", cli_diag_mem_objects_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory objects statistics");
                     cli_register_command(cli, diag_mem_objects, "list", cli_diag_mem_objects_list, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory objects list");
                     cli_register_command(cli, diag_mem_objects, "search", cli_diag_mem_objects_search, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory objects search");
                     cli_register_command(cli, diag_mem_objects, "clear", cli_diag_mem_objects_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clears memory object");
-                diag_mem_trace = cli_register_command(cli, diag_mem, "trace", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory tracing commands");
+                diag_mem_trace = cli_register_command(cli, diag_mem, "trace", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory tracing commands");
                     cli_register_command(cli, diag_mem_trace, "list", cli_diag_mem_trace_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "print out memory allocation traces (arg: number of top entries to print)");
                     cli_register_command(cli, diag_mem_trace, "mark", cli_diag_mem_trace_mark, PRIVILEGE_PRIVILEGED, MODE_EXEC, "mark all currently existing allocations as seen.");
-            diag_dns = cli_register_command(cli, diag, "dns", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "DNS traffic related troubleshooting commands");
-                diag_dns_cache = cli_register_command(cli, diag_dns, "cache", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "DNS traffic cache troubleshooting commands");
+            diag_dns = cli_register_command(cli, diag, "dns", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "DNS traffic related troubleshooting commands");
+                diag_dns_cache = cli_register_command(cli, diag_dns, "cache", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "DNS traffic cache troubleshooting commands");
                     cli_register_command(cli, diag_dns_cache, "list", cli_diag_dns_cache_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all DNS traffic cache entries");
                     cli_register_command(cli, diag_dns_cache, "stats", cli_diag_dns_cache_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "DNS traffic cache statistics");
                     cli_register_command(cli, diag_dns_cache, "clear", cli_diag_dns_cache_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clear DNS traffic cache");
-                diag_dns_domains = cli_register_command(cli, diag_dns, "domain", NULL, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "DNS domain cache troubleshooting commands");
+                diag_dns_domains = cli_register_command(cli, diag_dns, "domain", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "DNS domain cache troubleshooting commands");
                     cli_register_command(cli, diag_dns_domains, "list", cli_diag_dns_domain_cache_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "DNS sub-domain list");
                     cli_register_command(cli, diag_dns_domains, "clear", cli_diag_dns_domain_cache_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clear DNS sub-domain cache");
-            diag_proxy = cli_register_command(cli, diag, "proxy",NULL, PRIVILEGE_PRIVILEGED, MODE_EXEC, "proxy related troubleshooting commands");
-                diag_proxy_policy = cli_register_command(cli,diag_proxy,"policy",NULL,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy policy commands");
+            diag_proxy = cli_register_command(cli, diag, "proxy",nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "proxy related troubleshooting commands");
+                diag_proxy_policy = cli_register_command(cli,diag_proxy,"policy",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy policy commands");
                     cli_register_command(cli, diag_proxy_policy,"list",cli_diag_proxy_policy_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy policy list");
-                diag_proxy_session = cli_register_command(cli,diag_proxy,"session",NULL,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session commands");
+                diag_proxy_session = cli_register_command(cli,diag_proxy,"session",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session commands");
                     cli_register_command(cli, diag_proxy_session,"list",cli_diag_proxy_session_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session list");
                     cli_register_command(cli, diag_proxy_session,"clear",cli_diag_proxy_session_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session clear");
 
-                    diag_proxy_io = cli_register_command(cli,diag_proxy,"io",NULL,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy I/O related commands");
+                    diag_proxy_io = cli_register_command(cli,diag_proxy,"io",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy I/O related commands");
                         cli_register_command(cli, diag_proxy_io ,"list",cli_diag_proxy_session_io_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"active proxy sessions");
 
-            diag_identity = cli_register_command(cli,diag,"identity",NULL,PRIVILEGE_PRIVILEGED, MODE_EXEC,"identity related commands");
-                diag_identity_user = cli_register_command(cli, diag_identity,"user",NULL, PRIVILEGE_PRIVILEGED, MODE_EXEC,"identity commands related to users");
+            diag_identity = cli_register_command(cli,diag,"identity",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"identity related commands");
+                diag_identity_user = cli_register_command(cli, diag_identity,"user",nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC,"identity commands related to users");
                     cli_register_command(cli, diag_identity_user,"list",cli_diag_identity_ip_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"list all known users");
                     cli_register_command(cli, diag_identity_user,"clear",cli_diag_identity_ip_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC,"CLEAR all known users");
 
-            auto diag_writer = cli_register_command(cli,diag,"writer",NULL,PRIVILEGE_PRIVILEGED, MODE_EXEC,"file writer diags");
+            auto diag_writer = cli_register_command(cli,diag,"writer",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"file writer diags");
                 auto diag_writer_stats = cli_register_command(cli,diag_writer,"stats",cli_diag_writer_stats,PRIVILEGE_PRIVILEGED, MODE_EXEC,"file writer statistics");
 
 
-        debuk = cli_register_command(cli, NULL, "debug", NULL, PRIVILEGE_PRIVILEGED, MODE_EXEC, "diagnostic commands");
+        debuk = cli_register_command(cli, nullptr, "debug", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "diagnostic commands");
             cli_register_command(cli, debuk, "term", cli_debug_terminal, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set level of logging to this terminal");
             cli_register_command(cli, debuk, "file", cli_debug_logfile, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set level of logging to standard log file");
             cli_register_command(cli, debuk, "level", cli_debug_level, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set general logging level");
@@ -3493,7 +3486,7 @@ void client_thread(int client_socket) {
 
         // generate dynamically content of config
 
-        conft_configure = cli_register_command(cli, NULL, "set", nullptr, PRIVILEGE_PRIVILEGED, MODE_CONFIG, "configure smithproxy settings");
+        conft_configure = cli_register_command(cli, nullptr, "set", nullptr, PRIVILEGE_PRIVILEGED, MODE_CONFIG, "configure smithproxy settings");
         cli_command* set_settings = nullptr;
             cli_command* set_settings_auth = nullptr;
             cli_command* set_settings_cli = nullptr;
@@ -3519,17 +3512,17 @@ void client_thread(int client_socket) {
         logger_profile lp;
         lp.level_ = cfgapi_table.logging.cli_init_level;
         get_logger()->target_profiles()[(uint64_t)client_socket] = &lp;
-        
-        
+
+
         load_defaults();
         cli_loop(cli, client_socket);
-        
+
         get_logger()->remote_targets().remove(client_socket);
         get_logger()->target_profiles().erase(client_socket);
         close(client_socket);
-        
+
         // Free data structures
-        cli_done(cli);    
+        cli_done(cli);
 }
 
 void cli_loop(short unsigned int port) {
@@ -3550,7 +3543,7 @@ void cli_loop(short unsigned int port) {
     listen(s, 50);
 
     int client_socket = 0;
-    while ((client_socket = accept(s, NULL, 0)))
+    while ((client_socket = accept(s, nullptr, 0)))
     {
         std::thread* n = new std::thread(client_thread,client_socket);
     }
