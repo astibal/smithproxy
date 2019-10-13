@@ -37,17 +37,17 @@ function do_cmd {
         
         echo "${CMD}ing smithproxy"
         /etc/smithproxy/smithproxy.startup.sh ${CMD}
-        python2 /usr/share/smithproxy/infra/smithdog.py ${CMD} "0" "0"   # <cmd> <tenant_name> <tenant_index>
+        python3 /usr/share/smithproxy/infra/smithdog.py ${CMD} "0" "0"   # <cmd> <tenant_name> <tenant_index>
 
     else
         if [[ "$TENID"  != "" ]]; then
 
-            TENIDX=`cat /etc/smithproxy/smithproxy.tenants.cfg | grep ";$TENID;" | awk -F\; '{ print $1 }'`
+            TENIDX=`cat /etc/smithproxy/smithproxy.tenants.cfg | grep ";${TENID};" | awk -F\; '{ print $1 }'`
             echo "${CMD}ing smithproxy - tenant $TENID, index ${TENIDX}"
             
             # startup.sh will calculate tenant index on its own
             /etc/smithproxy/smithproxy.startup.sh ${CMD} $TENID
-            python2 /usr/share/smithproxy/infra/smithdog.py ${CMD} $TENID ${TENIDX}
+            python3 /usr/share/smithproxy/infra/smithdog.py ${CMD} ${TENID} ${TENIDX}
         
         else
 
@@ -61,52 +61,52 @@ function do_cmd {
 }
 
 function do_start {
-    do_cmd "start" $tenant_id
+    do_cmd "start" ${tenant_id}
 }
 
 function do_stop {
-    do_cmd "stop" $tenant_id
+    do_cmd "stop" ${tenant_id}
 }
 
 function do_bypass {
-    do_cmd "bypass" $tenant_id
+    do_cmd "bypass" ${tenant_id}
 }
 
 function do_unbypass {
-    do_cmd "unbypass" $tenant_id
+    do_cmd "unbypass" ${tenant_id}
 }
 
 
 case "$1" in
   start)
-    do_start $tenant_id
+    do_start
     ;;
   stop)
-    do_stop $tenant_id
+    do_stop
     ;;
   restart | force-reload)
-    do_stop $tenant_id
+    do_stop
     sleep 1
-    do_start $tenant_id
+    do_start
     ;;
   status)
     echo "Smithproxy status $tenant_id"
-    python2 /usr/share/smithproxy/infra/smithdog.py status
+    python3 /usr/share/smithproxy/infra/smithdog.py status
     ;;
   reapply)
     echo "Reloading smithproxy policies $tenant_id"
     kill -s USR1 `cat /var/run/smithproxy.${tenant_id}.pid`
     ;;
   bypass)
-    do_bypass $tenant_id
+    do_bypass
     ;;
   unbypass)
-    do_unbypass $tenant_id
+    do_unbypass
     ;;
     
   fin)
     # leave TPROXY targets. Good for troubleshooting.
-    python2 /usr/share/smithproxy/infra/smithdog.py stop $tenant_id
+    python3 /usr/share/smithproxy/infra/smithdog.py stop ${tenant_id}
     ;;
 
   val)

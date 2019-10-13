@@ -15,15 +15,16 @@
     You should have received a copy of the GNU General Public License
     along with Smithproxy.  If not, see <http://www.gnu.org/licenses/>.  """
 
-import SocketServer
+import socketserver
 
 from daemon import create_logger
-from wotcon import Wot,WotResult
+from wot.wotcon import Wot,WotResult
 
 flog = create_logger("wotc","/var/log/smithproxy_wotc.log")
 READ_SIZE = 1024
 
-class WotResponder(SocketServer.BaseRequestHandler):
+
+class WotResponder(socketserver.BaseRequestHandler):
 
     def handle(self):
         data = ""

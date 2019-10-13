@@ -93,7 +93,7 @@ class LogonTable(ShmTable):
                       self.write(struct.pack("16s64s128s",socket.inet_pton(socket.AF_INET6,k),self.logons[k][1],self.logons[k][2]))
                   else:
                       raise Exception("invalid IP protocol version")
-              except IndexError:
+              except IndexError as e:
                   flog.warning("LogonTable: IndexError: not in logons: " + k + " " + str(e))
                   continue
 

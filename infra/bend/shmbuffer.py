@@ -46,7 +46,6 @@ import posix_ipc
 
 PY_MAJOR_VERSION = sys.version_info[0]
 
-import SOAPpy
 
 class ShmBuffer:
 

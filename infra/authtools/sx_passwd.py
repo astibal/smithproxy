@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 """
     Smithproxy- transparent proxy with SSL inspection capabilities.
     Copyright (c) 2014, Ales Stibal <astib@mag0.net>, All rights reserved.
@@ -38,26 +38,30 @@
     which carries forward this exception.
     """
 
+import argparse
+import sys
+import time
+from pprint import pprint
+import logging
+
 title = """
     Smithproxy software - Accessory tools
 """
 
-copyright="""Copyleft by Ales Stibal <astib@mag0.net>"""
+copyleft = """Copyleft by Ales Stibal <astib@mag0.net>"""
 
-import sys
-import argparse
-from pprint import pprint
+
 
 sys.path.append('/usr/share/smithproxy/infra/bend')
 sys.path.append('/usr/share/smithproxy/infra/sslca')
 
 from bend import AuthManager
 
-if __name__ == "__main__":
+def main():
 
     parser = argparse.ArgumentParser(
         description=title,
-        epilog=" - %s " % (copyright,))
+        epilog=" - %s " % (copyleft,))
     ts = parser.add_argument_group("Tenant info")
     ts.add_argument('--tenant-name', nargs=1, help='tenant name')
 
@@ -66,14 +70,24 @@ if __name__ == "__main__":
     group1.add_argument('--inspect', action='store_true', help='dump users configuration')
     group1.add_argument('--user', nargs=1, help='user related actions')
 
-    ac.add_argument('--password', nargs='?', help='change password. if empty, read from input')
+    ac.add_argument('--password', nargs='?', default=None, help='change password. if empty, read from input')
+
+    group2 = ac.add_mutually_exclusive_group()
+    group2.add_argument('--check', action='store_true', help='check password')
+    # add some day
+    # group2.add_argument('--create', action='store_true', help='create a new user')
+
 
     args = parser.parse_args(sys.argv[1:])
 
-    tenant_name = "default"
+    if not args.tenant_name:
+        tenant_name = "default"
+    else:
+        tenant_name = args.tenant_name[0]
 
     a = AuthManager()
-    a.set_filenames(tenant_name=args.tenant_name[0])
+    a.log.setLevel(logging.FATAL)
+    a.set_filenames(tenant_name=tenant_name)
     a.load_key()
     a.load_users()
     a.load_sx()
@@ -84,61 +98,68 @@ if __name__ == "__main__":
     elif args.user:
         username = args.user[0]
 
-        user_cx = a.user_cfg.lookup('users.'+username)
+        user_cx = a.user_cfg.lookup('users.' + username)
+
         if user_cx:
             a.log.info("switching context to user %s" % (username,))
 
-            pw = None
-            epw = None
-            plain_pw = False
+            if not args.password:
+                import getpass
 
-            try:
-                pw = user_cx.password
-                plain_pw = True
-            except AttributeError as e:
-                pass
+                p1 = getpass.getpass()
+                if not args.check:
+                    p2 = getpass.getpass("Retype new password: ")
 
-            try:
-                epw = user_cx.encrypted_password
-            except AttributeError as e:
-                pass
-
-
-            if epw:
-                pw = a.authenticate_local_decrypt(epw)
-
-
-            if pw:
-                a.log.debug("Plaintext pass: " + str(pw))
-            if epw:
-                a.log.debug("Encrypted pass: " + str(epw))
+                    if p1 == p2:
+                        args.password = p1
+                    else:
+                        print("Error, passwords don't match.")
+                        sys.exit(1)
+                else:
+                    args.password = p1
 
             if args.password:
-                a.log.info("about to set password: " + args.password)
-                new_pass = a.authenticate_local_encrypt(args.password)
-                print "New password is: " + new_pass
 
-                user_cx.set('encrypted_password', new_pass)
+                if args.check:
+                    epw = bytearray(user_cx.encrypted_password, 'utf8')
+                    pw = a.authenticate_local_decrypt(epw).decode('utf8')
 
-                if plain_pw:
-                    delattr(user_cx, 'password')
+                    time.sleep(1)
+                    if pw == args.password:
+                        print("password check OK")
+                        sys.exit(0)
+                    else:
+                        print("password check failed")
+
+                    sys.exit(1)
+
+                # continue with saving the password
+
+                new_pass = a.authenticate_local_encrypt(bytearray(args.password, 'utf8'))
+
+                # print("New password is: '%s'" % new_pass.decode('utf8'))
+
+                user_cx.set('encrypted_password', new_pass.decode('utf8'))
+
+                if new_pass:
+                    if a.authenticate_local_decrypt(new_pass).decode('utf8') == args.password:
+                        a.save_users()
+                    else:
+                        print("error: integrity check failed")
+
+                        # below is just for debugging
+                        # print("decrypted new password: '%s'" % a.authenticate_local_decrypt(new_pass).decode('utf8'))
+                        # print("args.password: '%s'" % args.password)
+            else:
+                print("error: cannot set blank password")
+
+        else:
+            print("no such user :(")
 
 
-                #print "back-decrypted pass: " + a.authenticate_local_decrypt(new_pass)
-
-
-                #pprint(a.user_cfg)
-
-                if new_pass and a.authenticate_local_decrypt(new_pass) == args.password and args.password != pw:
-
-                    a.save_users()
-
-
-
-
-
-
-
-
-
-
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt as e:
+        print("")
+        pass

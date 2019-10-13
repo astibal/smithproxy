@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 """
     Smithproxy- transparent proxy with SSL inspection capabilities.
@@ -21,7 +21,8 @@
 # curl -v "http://api.mywot.com/0.4/public_link_json2?hosts=root.cz/&callback=process&key=57a92fd16754f60359c4d7fb6dd8b5ea7a26039e"
 
 
-import httplib
+import http.client
+
 import json
 import sys
 
@@ -34,10 +35,10 @@ class WotResult:
         try:
             self.result = None
             self.result = json.loads(self.json_string)
-        except ValueError, e:
-            print str(e)
-            print ":"
-            print self.json_string
+        except ValueError as e:
+            print(str(e))
+            print(":")
+            print(self.json_string)
             pass
         
         return self.result
@@ -207,7 +208,7 @@ class Wot:
         #get_str = "/"+self.api_+"/public_link_json2?hosts="+url+"/&callback="+str(self.req_id)+"&key="+self.key
         get_str = "/"+self.api_+"/public_link_json2?hosts="+url+"/"+"&key="+self.key
         
-        req = httplib.HTTPConnection(self.servername_)
+        req = http.client.HTTPConnection(self.servername_)
         req.request("GET",get_str)
         
         response = req.getresponse()
@@ -224,25 +225,24 @@ if __name__ == "__main__":
         d = w_r.process()
 
         #print str(d)
-        print ":"
+        print(":")
         for chs in  [ w_r.child_safety(), w_r.child_safety_str() ]:
-            print "Child safety: '" + str(chs[0]) + "', confidence: '" + str(chs[1]) + "'"
+            print("Child safety: '" + str(chs[0]) + "', confidence: '" + str(chs[1]) + "'")
 
-        print 
-        print
+        print("")
+        print("")
 
         for t in  [ w_r.trust(), w_r.trust_str() ]:
-            print "Trust: '" + str(t[0]) + "', confidence: '" + str(t[1]) + "'"
+            print("Trust: '" + str(t[0]) + "', confidence: '" + str(t[1]) + "'")
         
-        print 
-        print
+        print("")
+        print("")
         
         for c in [w_r.categories(), w_r.categories_str() ]:
             for k in c.keys():
-                print "Category: '" + str(k) + "', confidence: '" + str(c[k]) + "'"
+                print("Category: '" + str(k) + "', confidence: '" + str(c[k]) + "'")
         
     else:
-        print "Usage:\n%s <website>" % (sys.argv[0],)
-        
-        
-        
+        print("Usage:\n%s <website>" % (sys.argv[0],))
+
+

@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
     Smithproxy- transparent proxy with SSL inspection capabilities.
     Copyright (c) 2014, Ales Stibal <astib@mag0.net>, All rights reserved.
@@ -40,14 +40,16 @@
 
 
 
-import BaseHTTPServer, SimpleHTTPServer
-from SocketServer import ThreadingMixIn
 
-import socket
+
 import ssl
-import CGIHTTPServer
+
+from http.server import CGIHTTPRequestHandler
+from http.server import HTTPServer
+from socketserver import ThreadingMixIn
+
 import pylibconfig2 as cfg
-import sys
+
 import os
 import time
 import logging
@@ -56,8 +58,10 @@ global TENANT_NAME
 global TENANT_IDX
 global flog
 
-class ThreadingCGIServer(ThreadingMixIn,BaseHTTPServer.HTTPServer):
-    address_family = socket.AF_INET6
+
+class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+        pass
+
 
 def create_portal_logger(name):
     ret = logging.getLogger(name)
@@ -70,31 +74,28 @@ def create_portal_logger(name):
     return ret
 
 
-def run_plaintext(cfg_api, server_class=ThreadingCGIServer,
-        handler_class=CGIHTTPServer.CGIHTTPRequestHandler):
+def run_plaintext(cfg_api, server_class=ThreadingHTTPServer, handler_class=CGIHTTPRequestHandler):
   
-    port = int(cfg_api.settings.auth_portal.http_port)  + int(TENANT_IDX)
-    server_address = ('::', int(port))
+    port = int(cfg_api.settings.auth_portal.http_port) + int(TENANT_IDX)
+    server_address = ('', int(port))
     handler_class.cgi_directories = ['/cgi-bin']
     httpd = server_class(server_address, handler_class)
-    CGIHTTPServer.CGIHTTPRequestHandler.have_fork=False    
     httpd.serve_forever()
 
 
-def run_ssl(cfg_api,server_class=ThreadingCGIServer,
-        handler_class=CGIHTTPServer.CGIHTTPRequestHandler):
+def run_ssl(cfg_api,server_class=ThreadingHTTPServer,
+        handler_class=CGIHTTPRequestHandler):
   
     port = int(cfg_api.settings.auth_portal.https_port) + int(TENANT_IDX)
     
     cert_root = cfg_api.settings.certs_path
-    key  = cert_root+cfg_api.settings.auth_portal.ssl_key
+    key = cert_root+cfg_api.settings.auth_portal.ssl_key
     cert = cert_root+cfg_api.settings.auth_portal.ssl_cert
   
-    server_address = ('::', int(port))
+    server_address = ('', int(port))
     handler_class.cgi_directories = ['/cgi-bin']
     httpd = server_class(server_address, handler_class)
     httpd.socket = ssl.wrap_socket (httpd.socket, keyfile=key,certfile=cert, server_side=True)
-    CGIHTTPServer.CGIHTTPRequestHandler.have_fork=False
     httpd.serve_forever()
 
 
@@ -116,7 +117,7 @@ def run_portal_all_background():
             time.sleep(1)
 
 
-def run_portal_plain(tenant_name,tenant_idx,drop_privs_routine=None):
+def run_portal_plain(tenant_name,tenant_idx, drop_privs_routine=None):
     global TENANT_NAME,TENANT_IDX,flog
     TENANT_NAME = tenant_name
     TENANT_IDX  = tenant_idx
@@ -137,7 +138,7 @@ def run_portal_plain(tenant_name,tenant_idx,drop_privs_routine=None):
             flog.info("done")
             
         run_plaintext(c)
-    except Exception, e: 
+    except Exception as e:
         ret = False;
         flog.error("run_portal_plain: exception caught: %s" % (str(e)))
         
@@ -164,7 +165,7 @@ def run_portal_ssl(tenant_name,tenant_idx,drop_privs_routine=None):
             flog.info("done")            
         
         run_ssl(c)
-    except Exception, e: 
+    except Exception as e:
         ret = False;
         flog.error("run_portal_ssl: exception caught: %s" % (str(e)))
         

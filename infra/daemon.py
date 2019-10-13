@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 """
     Smithproxy- transparent proxy with SSL inspection capabilities.
@@ -45,7 +45,7 @@
     ... no licensing there. Thanks.
 """
 
-import sys, os, time, atexit
+import sys, os, time, atexit, io
 import pwd, grp
 from signal import SIGTERM 
 from signal import SIGKILL
@@ -60,7 +60,7 @@ def create_logger(nickname, location):
     formatter = logging.Formatter('%(asctime)s [%(process)d] [%(levelname)s] %(message)s')
     hdlr.setFormatter(formatter)
     flog.addHandler(hdlr) 
-    flog.setLevel(logging.INFO)
+    flog.setLevel(logging.DEBUG)
     
     return flog
 
@@ -70,6 +70,8 @@ class Daemon:
     
     Usage: subclass the Daemon class and override the run() method
     """
+    log = create_logger("daemon", '/var/log/smithproxy_daemons.log')
+
     def __init__(self, nicename, pidfile, stdin='/dev/null', stdout='/dev/null', stderr='/dev/null'):
         self.stdin = stdin
         self.stdout = stdout
@@ -79,8 +81,7 @@ class Daemon:
         self.should_chdir = True
         self.keeppid = False
         self.pwd = None
-    
-    
+
     def daemonize(self):
         """
         do the UNIX double-fork magic, see Stevens' "Advanced 
@@ -91,15 +92,15 @@ class Daemon:
             pid = os.fork() 
             if pid > 0:
                 # exit first parent
-                logging.debug(self.nicename + ": fork #1 master exit")
+                Daemon.log.debug(self.nicename + ": fork #1 master exit")
                 sys.exit(0)
 
-                
-            logging.debug(self.nicename + ": fork #1 slave ok")
+
+            Daemon.log.debug(self.nicename + ": fork #1 slave ok")
             signal.signal(signal.SIGCHLD, signal.SIG_IGN)
             
-        except OSError, e: 
-            logging.error(self.nicename + ": fork #1 failed: %d (%s)" % (e.errno, e.strerror))
+        except OSError as e:
+            Daemon.log.error(self.nicename + ": fork #1 failed: %d (%s)" % (e.errno, e.strerror))
             return False
     
         # decouple from parent environment
@@ -109,8 +110,8 @@ class Daemon:
                     os.chdir("/") 
                 else:
                     os.chdir(self.pwd)
-        except OSError, e: 
-            logging.error(self.nicename + ": fork #1 parameters problems: %d (%s)" % (e.errno, e.strerror))
+        except OSError as e:
+            Daemon.log.error(self.nicename + ": fork #1 parameters problems: %d (%s)" % (e.errno, e.strerror))
 
         os.setsid() 
         os.umask(0) 
@@ -120,22 +121,22 @@ class Daemon:
             pid = os.fork() 
             if pid > 0:
                 # exit from second parent
-                logging.debug(self.nicename + ": fork #2 master exit")
-                sys.exit(0) 
-            logging.debug(self.nicename + ": fork #2 slave ok")
-            logging.debug(self.nicename + ": daemon slave process ok")
+                Daemon.log.debug(self.nicename + ": fork #2 master exit")
+                sys.exit(0)
+            Daemon.log.debug(self.nicename + ": fork #2 slave ok")
+            Daemon.log.debug(self.nicename + ": daemon slave process ok")
             signal.signal(signal.SIGCHLD, signal.SIG_IGN)
 
-        except OSError, e: 
-            logging.error(self.nicename + ": fork #2 failed: %d (%s)" % (e.errno, e.strerror))
+        except OSError as e:
+            Daemon.log.error(self.nicename + ": fork #2 failed: %d (%s)" % (e.errno, e.strerror))
             return False
     
         # redirect standard file descriptors
         sys.stdout.flush()
         sys.stderr.flush()
-        si = file(self.stdin, 'r')
-        so = file(self.stdout, 'a+')
-        se = file(self.stderr, 'a+', 0)
+        si = io.FileIO(self.stdin, 'r')
+        so = io.FileIO(self.stdout, 'a+')
+        se = io.FileIO(self.stderr, 'a+')
         os.dup2(si.fileno(), sys.stdin.fileno())
         os.dup2(so.fileno(), sys.stdout.fileno())
         os.dup2(se.fileno(), sys.stderr.fileno())
@@ -143,16 +144,20 @@ class Daemon:
         # write pidfile
         atexit.register(self.delpid)
         pid = str(os.getpid())
-        file(self.pidfile,'w+').write("%s" % pid)
+
+        Daemon.log.debug("pid = %s", pid)
+
+        with open(self.pidfile, "w+") as f:
+            f.write("%s" % pid)
             
         # reset if this will be called again! 
-        
-        logging.debug(self.nicename + ": daemonize returning " + str(True))
+
+        Daemon.log.debug(self.nicename + ": daemonize returning " + str(True))
         return True
     
     def delpid(self):
         if not self.keeppid:
-            logging.info(self.nicename + ": removing pidfile " + self.pidfile)
+            Daemon.log.info(self.nicename + ": removing pidfile " + self.pidfile)
             os.remove(self.pidfile)
 
     @staticmethod
@@ -160,14 +165,18 @@ class Daemon:
         # Check for a pidfile and the content
         pid = None
         try:
-            pf = file(fnm,'r')
+            pf = io.FileIO(fnm,'r')
             pid = int(pf.read().strip())
             pf.close()
-        except IOError,e:
-            logging.debug("Daemon.readpid" + ": " +"cannot read pidfile: " + fnm + ": " + str(e))
-            pid = None   
-        except ValueError,e:
-            logging.debug("Daemon.readpid" + ": " +"cannot read pidfile: " + fnm + ": " + str(e))
+
+        except FileNotFoundError as e:
+            Daemon.log.debug("Daemon.readpid" + ": " +"cannot read pidfile: " + fnm + ": " + str(e))
+            pid = None
+        except IOError as e:
+            Daemon.log.debug("Daemon.readpid" + ": " +"cannot read pidfile: " + fnm + ": " + str(e))
+            pid = None
+        except ValueError as e:
+            Daemon.log.debug("Daemon.readpid" + ": " +"cannot read pidfile: " + fnm + ": " + str(e))
             pid = None   
             
         return pid
@@ -183,12 +192,12 @@ class Daemon:
     
         if pid:
             message = "pidfile %s already exist. Daemon already running?"
-            logging.error(self.nicename + ": " + message % self.pidfile)
+            Daemon.log.error(self.nicename + ": " + message % self.pidfile)
             return False
         
         # Start the daemon
         if not self.daemonize():
-            logging.error(self.nicename + ": " + "failed to daemonize, cannot run!")
+            Daemon.log.error(self.nicename + ": " + "failed to daemonize, cannot run!")
             return False
             
         if not self.run():
@@ -211,7 +220,7 @@ class Daemon:
         """
         # Get the pid from the pidfile
         try:
-            pf = file(pidfile,'r')
+            pf = io.FileIO(pidfile,'r')
             pid = int(pf.read().strip())
             pf.close()
         except IOError:
@@ -224,7 +233,7 @@ class Daemon:
     
         if not pid:
             message = "pidfile %s does not exist. Daemon not running?"
-            logging.error("kill: " + message % pidfile)
+            Daemon.log.error("kill: " + message % pidfile)
             return ret # not an error in a restart
 
         # Try killing the daemon process    
@@ -234,21 +243,21 @@ class Daemon:
             while 1:
                 sig = SIGTERM
                 if attempts == kill_attempts:
-                    logging.warning("trying to terminate with SIGKILL")
+                    Daemon.log.warning("trying to terminate with SIGKILL")
                     sig = SIGKILL
                     
                 os.kill(pid, sig)
                 time.sleep(0.1)
                 attempts = attempts + 1
                 
-        except OSError, err:
+        except OSError as err:
             err = str(err)
             if err.find("No such process") > 0:
                 if os.path.exists(pidfile):
                     os.remove(pidfile)
                 ret = True
             else:
-                logging.error("cannot kill process at" + pidfile + ": " + str(err))
+                Daemon.log.error("cannot kill process at" + pidfile + ": " + str(err))
                 ret = False
         return ret
 
@@ -259,7 +268,7 @@ class Daemon:
                 os.kill(pid, 0)
                 return True
                 
-        except OSError, err:
+        except OSError as err:
             err = str(err)
             if err.find("No such process") > 0:
                 if os.path.exists(self.pidfile):
@@ -279,12 +288,12 @@ class Daemon:
             
         self.start()
 
-    def run(self):
+    def run(self) -> bool:
         """
         You should override this method when you subclass Daemon. It will be called after the process has been
         daemonized by start() or restart().
         """
-        logging.info(self.nicename + ": default run routine!")
+        Daemon.log.info(self.nicename + ": default run routine!")
         return True
 
     def drop_privileges(self,uid_name='nobody', gid_name='nogroup'):
@@ -304,4 +313,4 @@ class Daemon:
         os.setuid(running_uid)
 
         # Ensure a very conservative umask
-        old_umask = os.umask(077)
+        old_umask = os.umask(0o077)

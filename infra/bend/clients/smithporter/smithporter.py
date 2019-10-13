@@ -37,14 +37,13 @@
     which carries forward this exception.
     """
 
+import sys
+import webbrowser
 
-import sys                                                                                                                                                                                                      
-import webbrowser                                                                                                                                                                                               
-                                                                                                                                                                                                                
-from PyQt4 import QtGui                                                                                                                                                                                         
-import SOAPpy                                                                                                                                                                                                   
-                                                                                                                                                                                                                
-class SystemTrayIcon(QtGui.QSystemTrayIcon):                                                                                                                                                                    
+from PyQt5 import QtGui
+
+
+class SystemTrayIcon(QtGui.QSystemTrayIcon):
     def __init__(self, icon, parent=None):
         QtGui.QSystemTrayIcon.__init__(self, icon, parent)
         self.menu = QtGui.QMenu(parent)
@@ -64,6 +63,7 @@ class SystemTrayIcon(QtGui.QSystemTrayIcon):
     def my_detail(position):
         webbrowser.open('http://192.168.254.1:8008')
 
+
 def main():
     app = QtGui.QApplication(sys.argv)
     style = app.style()
@@ -72,6 +72,7 @@ def main():
 
     trayIcon.show()
     sys.exit(app.exec_())
+
 
 if __name__ == '__main__':
     main()

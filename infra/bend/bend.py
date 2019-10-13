@@ -42,14 +42,29 @@ import time
 import os
 import sys
 import logging
-import struct
+import string
 import socket
 import binascii
 import threading
 
 import posix_ipc
+
+BEND_PATH = '/usr/share/smithproxy/infra/bend'
+sys.path.append(BEND_PATH)
+
+
+from wsgiref.simple_server import make_server
+
+from spyne import Application, ServiceBase, Unicode, rpc
+from spyne.protocol.soap import Soap11
+from spyne.server.wsgi import WsgiApplication
+
+from zeep import Client as SoapClient
+
+
+
 import pylibconfig2 as cfg
-import SOAPpy
+
 import json
 
 import auth.crypto as mycrypto
@@ -198,7 +213,7 @@ class AuthConfig(object):
 
     def load_key(self):
         try:
-            f = open(self.key_file, "r")
+            f = open(self.key_file, "rb")
             a = f.read()
             if a:
                 self.a1 = a
@@ -207,10 +222,17 @@ class AuthConfig(object):
             self.log.error("cannot open key file: " + str(e))
 
     def authenticate_local_decrypt(self, ciphertext):
-        return mycrypto.xor_salted_decrypt(ciphertext, self.a1)
+
+        if ciphertext.startswith(b"X-"):
+            return mycrypto.xor_salted_decrypt(b"-".join(ciphertext.split(b"-")[1:]), self.a1)
+        elif ciphertext.startswith(b"A256-"):
+            return mycrypto.aes_salted_decrypt(b"-".join(ciphertext.split(b"-")[1:]), self.a1)
+        else:
+            return mycrypto.xor_salted_decrypt(ciphertext, self.a1)
 
     def authenticate_local_encrypt(self, plaintext):
-        return mycrypto.xor_salted_encrypt(plaintext, self.a1)
+        # return b"X-" + mycrypto.xor_salted_encrypt(plaintext, self.a1)
+        return b"A256-" + mycrypto.aes_salted_encrypt(plaintext, self.a1)
 
     def set_filenames(self, tenant_name=None):
 
@@ -369,7 +391,19 @@ class AuthManager(AuthConfig):
     def prepare(self, tenant_name="default", tenant_index=0, clear_shm=None):
         super(AuthManager, self).prepare(tenant_name, tenant_index, clear_shm)
 
-        self.server = SOAPpy.ThreadingSOAPServer(("localhost", self.bend_port))
+        # make BendService, set its static 'bend' to this
+
+        BendService.bend = self
+
+        application = Application(
+            services=[BendService],
+            tns='http://smithproxy.org',
+            in_protocol=Soap11(validator='lxml'),
+            out_protocol=Soap11())
+
+        wsgi_app = WsgiApplication(application)
+
+        self.server = make_server('127.0.0.1', self.bend_port, wsgi_app)
 
 
 
@@ -701,17 +735,17 @@ class AuthManager(AuthConfig):
 
         if self.server:
             self.log.info("Launching portal on " + self.portal_address + ":" + str(self.portal_port))
-            self.server.registerFunction(self.authenticate)
-            self.server.registerFunction(self.deauthenticate)
-            self.server.registerFunction(self.save_referer)
-            self.server.registerFunction(self.whois)
-
-            self.server.registerFunction(self.admin_login)
-            self.server.registerFunction(self.admin_token_list)
-            self.server.registerFunction(self.admin_keepalive)
-            self.server.registerFunction(self.admin_logout)
-
-            self.server.registerFunction(self.test_internal)
+            # self.server.registerFunction(self.authenticate)
+            # self.server.registerFunction(self.deauthenticate)
+            # self.server.registerFunction(self.save_referer)
+            # self.server.registerFunction(self.whois)
+            #
+            # self.server.registerFunction(self.admin_login)
+            # self.server.registerFunction(self.admin_token_list)
+            # self.server.registerFunction(self.admin_keepalive)
+            # self.server.registerFunction(self.admin_logout)
+            #
+            # self.server.registerFunction(self.test_internal)
 
             self.server.serve_forever()
         else:
@@ -980,6 +1014,54 @@ class AuthManager(AuthConfig):
         self.log.info("serve_forever finished.")
 
 
+class BendService(ServiceBase):
+
+    bend = None
+
+    def __init(self):
+        pass
+
+    @rpc(Unicode, Unicode, Unicode, _returns=Unicode)
+    def admin_login(self, username, password, ip):
+        return BendService.bend.admin_login(username, ip)
+
+    @rpc(Unicode, _returns=Unicode)
+    def admin_token_list(self, admin_token):
+        return BendService.bend.admin_token_list(admin_token)
+
+
+    @rpc(Unicode, _returns=Unicode)
+    def admin_keepalive(self, token):
+        return BendService.bend.admin_keepalive(token)
+
+    @rpc(Unicode, _returns=Unicode)
+    def admin_logout(self, token):
+        return BendService.bend.admin_logout(token)
+
+    @rpc(Unicode, _returns=Unicode)
+    def admin_get_config(self, token):
+        return BendService.bend.admin_get_config(token)
+
+    @rpc(_returns=Unicode)
+    def test_internal(self):
+        return BendService.bend.test_internal()
+
+    @rpc(Unicode, Unicode, _returns=Unicode)
+    def save_referer(self, token, ref):
+        return BendService.bend.save_referer(token, ref)
+
+    @rpc(Unicode, Unicode, Unicode, Unicode, _returns=Unicode)
+    def authenticate(self, ip, username, password, token):
+        return BendService.bend.authenticate(ip, username, password, token)
+
+    @rpc(Unicode, _returns=Unicode)
+    def whois(self, ip):
+        return BendService.bend.whois(ip)
+
+    @rpc(Unicode, _returns=Unicode)
+    def deauthenticate(self, ip):
+        return BendService.bend.deauthenticate(ip)
+
 
 class TesterThread(threading.Thread):
     def __init__(self, port):
@@ -987,11 +1069,11 @@ class TesterThread(threading.Thread):
         self.port = port
 
     def run(self):
-        bend = SOAPpy.SOAPProxy("http://127.0.0.1:%s" % (str(self.port),))
+        bend = SoapClient("http://127.0.0.1:%s/?wsdl" % (str(self.port),))
 
         while True:
             time.sleep(5)
-            bend.test_internal()
+            bend.service.test_internal()
 
 
 def run_bend(tenant_name="default", tenant_index=0, clear_shm=None):
@@ -1001,7 +1083,7 @@ def run_bend(tenant_name="default", tenant_index=0, clear_shm=None):
 
     while True:
         a.prepare(tenant_name, tenant_index, first_start)
-        a.log.info("starting main loop")
+        a.log.info("bend - starting main loop")
         if first_start:
             t = TesterThread(a.bend_port)
             t.setDaemon(True)
@@ -1016,6 +1098,6 @@ if __name__ == "__main__":
     try:
         run_bend()
     except KeyboardInterrupt as e:
-        print "Ctrl-C pressed."
+        print("Ctrl-C pressed.")
 
 

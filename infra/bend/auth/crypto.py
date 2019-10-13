@@ -37,78 +37,157 @@
     which carries forward this exception.
     """
 
+SALT_LEN = 24
 
-SALT_LEN=24
 
 def load_key_file(f):
     try:
-        f = open(f,"r")
+        f = open(f, "r")
         a = f.read()
+        f.close()
+
         return a
-        f.close()    
-    except IOError, e:
-        print "Error key file. Using filename as the passphrase."
+
+    except IOError as e:
+        print("Error key file. Using filename as the passphrase.")
         return f
-    
+
 
 def gen_rand_bytes(l):
     import os
     return os.urandom(l)
 
-def xor_crypt_string(data, key, encode=False, decode=False):
-    from itertools import izip, cycle
+
+def xor_bytearray(data, key, encode=False, decode=False) -> bytearray:
+    from itertools import cycle
     import base64
+
     if decode:
         data = base64.b64decode(data)
-    xored = ''.join(chr(ord(x) ^ ord(y)) for (x,y) in izip(data, cycle(key)))
+
+    xored = ''.join(chr(ord(x) ^ ord(y)) for (x, y) in
+                    zip(data.decode('ascii', 'ignore'), cycle(key.decode('ascii', 'ignore'))))
+
+    xored = bytearray(xored, 'utf8')
+
     if encode:
-        return base64.b64encode(xored).strip()
+        xored = base64.b64encode(xored)
+
     return xored
 
 
-def xor_encrypt(data,key):
-    return xor_crypt_string(data,key,encode=True,decode=False)
+def xor_encrypt(data, key) -> bytearray:
+    return xor_bytearray(data, key, encode=True, decode=False)
 
-def xor_decrypt(data,key):
-    return xor_crypt_string(data,key,encode=False,decode=True)
-    
-def xor_salted_encrypt(data,key):
+
+def xor_decrypt(data, key) -> bytearray:
+    return xor_bytearray(data, key, encode=False, decode=True)
+
+
+def xor_salted_encrypt(data, key) -> bytearray:
     import base64
-    salt = gen_rand_bytes(SALT_LEN) 
-    #print "salt: " + salt
-    tmp_key = xor_crypt_string(key,salt)
-    #print "tmp_key: " + tmp_key
-    
-    return base64.encodestring(salt).strip()+"-"+xor_encrypt(data,tmp_key)
+    salt = gen_rand_bytes(SALT_LEN)
+    tmp_key = xor_bytearray(key, salt)
 
-def xor_salted_decrypt(data,key):
-    r = data.split("-")
+    return base64.b64encode(salt) + b"-" + xor_encrypt(data, tmp_key)
+
+
+def xor_salted_decrypt(data, key) -> bytearray:
+
+    r = data.split(b"-")
+
     if len(r) > 1:
         import base64
-        salt = base64.decodestring(r[0]).strip()
-        return xor_decrypt(r[1],xor_crypt_string(key,salt))
-        
-    return None
+        b_salt = r[0]
+        salt = base64.b64decode(b_salt)
+        salt = xor_bytearray(key, salt)
+
+        return xor_decrypt(r[1], salt)
+
+    return bytearray([])
+
+
+def aes_salted_encrypt(data, key) -> bytearray:
+    import base64
+    salt = gen_rand_bytes(SALT_LEN)
+
+    from cryptography.fernet import Fernet
+    from cryptography.hazmat.backends import default_backend
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
+    # do stuff
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=bytes(salt),
+        iterations=100000,
+        backend=default_backend()
+    )
+
+    der_key = base64.urlsafe_b64encode(kdf.derive(key))
+    f = Fernet(der_key)
+
+    token = f.encrypt(bytes(data))
+
+    return base64.b64encode(salt) + b"-" + base64.b64encode(token)
+
+
+def aes_salted_decrypt(data, key) -> bytearray:
+
+    from cryptography.fernet import Fernet
+    from cryptography.hazmat.backends import default_backend
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
+    r = data.split(b"-")
+
+    if len(r) > 1:
+        import base64
+        b_salt = r[0]
+        salt = base64.b64decode(b_salt)
+
+        # do stuff
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=bytes(salt),
+            iterations=100000,
+            backend=default_backend()
+            )
+
+        der_key = base64.urlsafe_b64encode(kdf.derive(key))
+        f = Fernet(der_key)
+
+        txt = f.decrypt(base64.b64decode(r[1]))
+        return txt
+
+
+    return bytearray([])
+
 
 if __name__ == "__main__":
     import sys
-    
+
     if len(sys.argv) > 3:
         if "-e" == sys.argv[1]:
             t = sys.argv[2]
             p = load_key_file(sys.argv[3])
-            print xor_encrypt(t,p)
+            print("")
+            xor_encrypt(t, p)
         elif "-d" == sys.argv[1]:
             t = sys.argv[2]
             p = load_key_file(sys.argv[3])
-            print xor_decrypt(t,p)
-            
+            print("")
+            xor_decrypt(t, p)
+
         elif "-es" == sys.argv[1]:
             t = sys.argv[2]
             p = load_key_file(sys.argv[3])
-            print xor_salted_encrypt(t,p)
+            print("")
+            xor_salted_encrypt(t, p)
         elif "-ds" == sys.argv[1]:
             t = sys.argv[2]
             p = load_key_file(sys.argv[3])
-            print xor_salted_decrypt(t,p)            
-            
+            print("")
+            xor_salted_decrypt(t, p)

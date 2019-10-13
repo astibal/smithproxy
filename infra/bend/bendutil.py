@@ -40,8 +40,8 @@ from __future__ import print_function
 
 import logging
 
-def cfgloglevel_to_py(cfglevel):
 
+def cfgloglevel_to_py(cfglevel):
     if cfglevel >= 7:
         return logging.DEBUG
 
@@ -56,39 +56,38 @@ def cfgloglevel_to_py(cfglevel):
 
     else:
         return logging.FATAL
-    
+
 
 def cfg_to_dict(cfg_element):
-
     import pylibconfig2 as cfg
 
     # this is materialization of the shame of pylibconfig2. 
     # It cannot convert ConfigGroup into dictionary. Poor.
-    if isinstance(cfg_element,cfg.ConfGroup):
+    if isinstance(cfg_element, cfg.ConfGroup):
         d = {}
         for c in cfg_element.items():
             k = c[0]
             v = c[1]
-            if isinstance(v,cfg.ConfGroup) or isinstance(v,cfg.ConfList):
+            if isinstance(v, cfg.ConfGroup) or isinstance(v, cfg.ConfList):
                 v = cfg_to_dict(v)
             d[k] = v
-    elif isinstance(cfg_element,cfg.ConfList):
+    elif isinstance(cfg_element, cfg.ConfList):
         d = []
         for l in cfg_element:
             d.append(cfg_to_dict(l))
-    elif isinstance(cfg_element,tuple):
+    elif isinstance(cfg_element, tuple):
         d = {}
-        if isinstance(cfg_element[1],cfg.ConfGroup) or isinstance(cfg_element[1],cfg.ConfList):
+        if isinstance(cfg_element[1], cfg.ConfGroup) or isinstance(cfg_element[1], cfg.ConfList):
             d[cfg_element[0]] = cfg_to_dict(cfg_element[1])
         else:
             d[cfg_element[0]] = cfg_element[1]
     else:
         return cfg_element
 
-    
     return d
 
-def intersect_lists(l1,l2):
+
+def intersect_lists(l1, l2):
     return [filter(lambda x: x in l1, sublist) for sublist in l2]
 
 
@@ -97,12 +96,13 @@ def unique_list(l):
     for ll in l:
         if ll not in ret:
             ret.append(ll)
-            
+
     return ret
 
-def unique_prefixes(lst,delim):
+
+def unique_prefixes(lst, delim):
     u = []
-    
+
     for l in lst:
         if l.find(delim) >= 0:
             prefix = l.split(delim)
@@ -118,8 +118,6 @@ def unique_prefixes(lst,delim):
 # So you want avoid ambiguous choices ;-)
 #
 def ask_bot(answers, question):
-
-
     norm_answers = []
     for a in answers:
         norm_answers.append(a.strip().lower())
@@ -157,6 +155,3 @@ def ask_bot(answers, question):
             # print("ret="+a)
             break
     return ret
-
-
-
