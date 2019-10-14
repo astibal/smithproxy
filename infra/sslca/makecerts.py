@@ -109,7 +109,7 @@ def load_sans_from_config(configfile):
 
 def generate_portal_cert(ca_key,ca_cert):
     portal_cn = None
-    sans, ips = load_sans_from_config("/tmp/etc/smithproxy/smithproxy.cfg")
+    sans, ips = load_sans_from_config("/etc/smithproxy/smithproxy.cfg")
 
     portal_cn = socket.getfqdn()
     sans.append(portal_cn)
