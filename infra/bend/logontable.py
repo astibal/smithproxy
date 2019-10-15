@@ -83,14 +83,29 @@ class LogonTable(ShmTable):
     def save(self, inc_version=False):
         self.seek(0)
         self.clear()
-        self.write_header(inc_version,len(self.logons.keys()))
+        self.write_header(inc_version, len(self.logons.keys()))
         
         for k in self.logons.keys():
               try:
                   if self.ip_version == 4:
-                    self.write(struct.pack("4s64s128s",socket.inet_pton(socket.AF_INET,k),self.logons[k][1],self.logons[k][2]))
+                    self.write(
+                        struct.pack(
+                            "4s64s128s",
+                            socket.inet_pton(socket.AF_INET,k),
+                            self.logons[k][1].encode("utf8"),
+                            self.logons[k][2].encode("utf8")
+                        )
+                    )
+
                   elif self.ip_version == 6:
-                      self.write(struct.pack("16s64s128s",socket.inet_pton(socket.AF_INET6,k),self.logons[k][1],self.logons[k][2]))
+                      self.write(
+                          struct.pack(
+                              "16s64s128s",
+                              socket.inet_pton(socket.AF_INET6,k),
+                              self.logons[k][1].encode("utf8"),
+                              self.logons[k][2].encode("utf8")
+                          )
+                      )
                   else:
                       raise Exception("invalid IP protocol version")
               except IndexError as e:
@@ -125,8 +140,15 @@ class LogonTable(ShmTable):
         if self.normalizing:
             self.normalize = True
 
-        self.logons[ip] = [ip,u.strip('\x00').strip(),g.strip('\x00').strip()]
-        flog.debug("on_new_entry: added " + ip + tag + ", " + u.strip() + ", " + g.strip())
+        self.logons[ip] = [
+            ip,
+            u.strip(b'\x00').strip().decode('utf8'),
+            g.strip(b'\x00').strip().decode("utf8")
+        ]
+        flog.debug("on_new_entry: added " + ip + tag + ", " +
+                   self.logons[ip][1] + ", " +
+                   self.logons[ip][2])
+
         
 
         return True

@@ -86,7 +86,7 @@ class ShmBuffer:
           
     def clear(self):      
           self.seek(0)
-          self.write("\x00"*self.memory_size)
+          self.write(b"\x00"*self.memory_size)
 
     def release(self):
           self.semaphore.release()
@@ -98,8 +98,6 @@ class ShmBuffer:
         self.semaphore.release()
         self.semaphore.acquire()
 
-        if PY_MAJOR_VERSION > 2:
-            s = s.encode()
             
         self.mapfile.write(s)
 

@@ -1034,7 +1034,7 @@ int cli_diag_dns_domain_cache_clear(struct cli_def *cli, const char *command, ch
 int cli_diag_identity_ip_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
     cli_print(cli, "\nIPv4 identities:\n");
-    std::stringstream ss;
+    std::stringstream ss4;
 
     {
         std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip4_lock());
@@ -1042,39 +1042,36 @@ int cli_diag_identity_ip_list(struct cli_def *cli, const char *command, char *ar
 
             IdentityInfo &id = ip.second;
 
-            ss << "    ipv4: " << ip.first << ", user: " << id.username << ", groups: " << id.groups << ", rx/tx: ";
-            ss <<   number_suffixed(id.tx_bytes) << "/" << number_suffixed(id.rx_bytes);
+            ss4 << "    ipv4: " << ip.first << ", user: " << id.username << ", groups: " << id.groups << ", rx/tx: ";
+            ss4 <<   number_suffixed(id.tx_bytes) << "/" << number_suffixed(id.rx_bytes);
 
-            ss << "\n          uptime: " << std::to_string(id.uptime()) << ", idle: " << std::to_string(id.i_time());
-            ss << "\n          status: " << std::to_string(!id.i_timeout()) << ", last policy: ";
-            ss <<   std::to_string(id.last_seen_policy);
+            ss4 << "\n          uptime: " << std::to_string(id.uptime()) << ", idle: " << std::to_string(id.i_time());
+            ss4 << "\n          status: " << std::to_string(!id.i_timeout()) << ", last policy: ";
+            ss4 <<   std::to_string(id.last_seen_policy);
 
         }
 
     }
-    cli_print(cli, "%s", ss.str().c_str());
+    cli_print(cli, "%s", ss4.str().c_str());
 
-
-    ss.clear();
 
     cli_print(cli, "\nIPv6 identities:\n");
-
-
+    std::stringstream ss6;
     {
-        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip4_lock());
+        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
         for (auto ip: AuthFactory::get_ip6_map()) {
 
             IdentityInfo6 &id = ip.second;
 
-            ss << "    ipv6: " << ip.first << ", user: " << id.username << ", groups: " << id.groups << ", rx/tx: ";
-            ss <<   number_suffixed(id.tx_bytes) << "/" << number_suffixed(id.rx_bytes);
-            ss << "\n          uptime: " << std::to_string(id.uptime()) << ", idle: " << std::to_string(id.i_time());
-            ss << "\n          status: " << std::to_string(!id.i_timeout()) << ", last policy: ";
-            ss <<   std::to_string(id.last_seen_policy);
+            ss6 << "    ipv6: " << ip.first << ", user: " << id.username << ", groups: " << id.groups << ", rx/tx: ";
+            ss6 <<   number_suffixed(id.tx_bytes) << "/" << number_suffixed(id.rx_bytes);
+            ss6 << "\n          uptime: " << std::to_string(id.uptime()) << ", idle: " << std::to_string(id.i_time());
+            ss6 << "\n          status: " << std::to_string(!id.i_timeout()) << ", last policy: ";
+            ss6 <<   std::to_string(id.last_seen_policy);
 
         }
     }
-    cli_print(cli, "%s", ss.str().c_str());
+    cli_print(cli, "%s", ss6.str().c_str());
 
     return CLI_OK;
 }

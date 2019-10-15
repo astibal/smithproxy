@@ -461,6 +461,16 @@ if __name__ == "__main__":
                 if 'portal_ssl' == sys.argv[2]:
                     portal_ssl_.start()
 
+        # run them in the foreground (avoid Daemon.start() invocation)
+        elif 'run' == sys.argv[1]:
+            if len(sys.argv) >= 3:
+                if 'bend' == sys.argv[2]:
+                    bend_.run()
+                if 'portal_plain' == sys.argv[2]:
+                    portal_.run()
+                if 'portal_ssl' == sys.argv[2]:
+                    portal_ssl_.run()
+
         else:
             print("Unknown command")
             sys.exit(2)

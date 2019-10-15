@@ -95,7 +95,14 @@ def run_ssl(cfg_api,server_class=ThreadingHTTPServer,
     server_address = ('', int(port))
     handler_class.cgi_directories = ['/cgi-bin']
     httpd = server_class(server_address, handler_class)
-    httpd.socket = ssl.wrap_socket (httpd.socket, keyfile=key,certfile=cert, server_side=True)
+
+    # this is very tricky one! Solving plaintext in TLS traffic
+    # -- https://stackoverflow.com/questions/27303343/python3-cgi-https-server-fails-on-unix
+    handler_class.have_fork=False
+
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(cert, key)
+    httpd.socket = context.wrap_socket(sock=httpd.socket, server_side=True)
     httpd.serve_forever()
 
 

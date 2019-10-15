@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 
 """
     Smithproxy- transparent proxy with SSL inspection capabilities.
@@ -40,17 +40,20 @@
     """
 
 
-import SOAPpy
+from zeep import Client as SoapClient
 import time
 import cgi, cgitb 
 import util
 import os
+import sys
 import logging
 
+# CGI_PATH = '/usr/share/smithproxy/www/portal/cgi-bin'
+# sys.path.append(CGI_PATH)
 
 def create_logger(name):
     ret = logging.getLogger(name)
-    hdlr = logging.FileHandler("/var/log/smithproxy_%s.log" % (name,))
+    hdlr = logging.FileHandler("/tmp/smithproxy_%s.log" % (name,))
     formatter = logging.Formatter('%(asctime)s [%(process)d] [%(levelname)s] %(message)s')
     hdlr.setFormatter(formatter)
     ret.addHandler(hdlr) 
@@ -394,15 +397,15 @@ logged_page = """
 
 # use class="keyboardInput" for virtual keyboard below the input field
 
-bend_url = "http://127.0.0.1:%d/" % (64000+tenant_index)
+bend_url = "http://127.0.0.1:%d/?wsdl" % (64000 + tenant_index)
 
 if(ip.startswith("::ffff:")):
     ip = ip[7:]
     
 try:
     if ref:
-        bend = SOAPpy.SOAPProxy(bend_url)
-        bend.save_referer(token,ref)
+        bend = SoapClient(bend_url)
+        bend.service.save_referer(token,ref)
         
     if token != "0":
         tok_str = "&token="+str(token)
@@ -410,29 +413,33 @@ try:
         flog.info("serving authentication page for IP %s, referer %s using token %s" % (ip,ref,token))
         
         
-        print   auth_page % (style,tok_str,str(port)+"-"+tenant_name+"-"+str(tenant_index))
+        print(auth_page % (style,tok_str,str(port)+"-"+tenant_name+"-"+str(tenant_index)))
     else:
         if ip:
-            bend = SOAPpy.SOAPProxy(bend_url)
-            logon_info = bend.whois(ip)
+
+            flog.info(str(ip))
+
+            bend = SoapClient(bend_url)
+            logon_info = bend.service.whois(ip)
             
             flog.debug("logon_info: " + str(logon_info))
             
-            if logon_info != []:
+            if logon_info:
 
-                if logoff == "0":
-                    if status > 0:
-                        print logged_page_small % (style_small,logon_info[1])
+                if logoff == "0" and len(logon_info) > 1:
+                    if int(status) > 0:
+                        print(logged_page_small % (style_small,logon_info[1]))
                     else:
-                        print logged_page % (style,logon_info[1])
+                        print(logged_page % (style,logon_info[1]))
                 else:
-                    bend.deauthenticate(ip)
-                    print auth_page % (style,"0",str(port)+"-"+tenant_name+"-"+str(tenant_index))
+                    bend.service.deauthenticate(ip)
+                    print(auth_page % (style,"0",str(port)+"-"+tenant_name+"-"+str(tenant_index)))
                     
             else:
-                print   auth_page % (style,"0",str(port)+"-"+tenant_name+"-"+str(tenant_index))
+                print(auth_page % (style,"0",str(port)+"-"+tenant_name+"-"+str(tenant_index)))
                 
 
-except Exception, e:
+except Exception as e:
     util.print_message("Error","Error occured:", str(e),"/error.html")
     flog.error("auth.py: exception caught: " + str(e))
+    raise e

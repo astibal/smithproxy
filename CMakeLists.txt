@@ -246,8 +246,21 @@ if(UNIX)
     InstallSymlink(/usr/share/smithproxy/infra/authtools/sx_passwd.py /usr/bin/sx_passwd)
 
     # portal installation
-    install(DIRECTORY infra/portal DESTINATION share/smithproxy/www)
-    
+    file(GLOB sx_www_cgi "infra/portal/cgi-bin/auth*.py")
+    install(FILES ${sx_www_cgi} DESTINATION share/smithproxy/www/portal/cgi-bin
+            PERMISSIONS
+            OWNER_READ OWNER_WRITE OWNER_EXECUTE
+            GROUP_READ GROUP_EXECUTE
+            WORLD_READ WORLD_EXECUTE
+            )
+    file(GLOB sx_www_cgi_nox "infra/portal/cgi-bin/util.py")
+    install(FILES ${sx_www_cgi_nox} DESTINATION share/smithproxy/www/portal/cgi-bin)
+
+    file(GLOB sx_www "infra/portal/*.*")
+    # install(DIRECTORY infra/portal DESTINATION share/smithproxy/www)
+    install(FILES ${sx_www} DESTINATION share/smithproxy/www/portal/)
+
+
     install(DIRECTORY etc/msg DESTINATION /etc/smithproxy)
     
     # message: edit defaults and add to init.d to start at boot!
