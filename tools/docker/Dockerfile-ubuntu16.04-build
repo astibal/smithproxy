@@ -13,11 +13,10 @@ libconfig-dev libcli-dev libunwind-dev libssl-dev \
 debootstrap devscripts build-essential lintian debhelper vim nano \
 git g++ cmake make && pip install pylibconfig2
 
-RUN git clone https://bitbucket.com/astibal/socle.git socle && git clone https://bitbucket.com/astibal/smithproxy.git smithproxy && \
-cd smithproxy && mkdir build && cd build && cmake .. && make install
+RUN \
+    git clone https://bitbucket.com/astibal/socle.git socle -b 0.8 && \
+    git clone https://bitbucket.com/astibal/smithproxy.git smithproxy -b 0.8 && \
+    \
+    cd smithproxy && mkdir build && cd build && cmake .. && make install
 
-# Define environment variable
-
-# Run smithproxy when the container launches
-CMD echo "Starting smithproxy .... " && ( /etc/init.d/smithproxy start ) > /dev/null 2>&1 && sleep 10 && \
-    echo "SSL MITM CA cert (add to trusted CA's):" && cat /etc/smithproxy/certs/default/ca-cert.pem && smithproxy_cli && bash
+CMD cd /app/smithproxy/tools/build-scripts/deb && echo "run ./createdeb.sh <upload password> <socle_branch> <smithproxy_branch>" && /bin/bash
