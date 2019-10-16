@@ -36,7 +36,7 @@ elif [ "${OS}" = "Linux" ] ; then
 		REV=$DISTRIB_RELEASE
 	elif [ -f /etc/debian_version ] ; then
 		DIST="Debian"
-		REV="`cat /etc/debian_version | awk -F"/" '{ print $1 }'`"
+		REV="`cat /etc/debian_version | awk -F"/" '{ print $1 }' | awk -F"." '{ print $1 }'`"
 	fi
 
 
