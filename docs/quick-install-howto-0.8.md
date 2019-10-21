@@ -292,8 +292,7 @@ We can't cover everything in quick howto document. However, you might be interes
 
 
 ###### Content dumping to files
-
-To write content into files, you need to:
+Content dumping is NOT enabled by default. To write content into files, you need to:
 1) set existing directory where to save .smcap files
 ```
 settings = {
@@ -359,6 +358,21 @@ Mon Oct 21 03:48:44 2019
 
 ```
 PPlay has its own howto on the project landing page here [pplay](https://bitbucket.org/astibal/pplay)
+
+
+###### SSL keylog
+
+To enable keylog dumping, please edit corresponding TLS profile:
+```
+tls_profiles = {
+    default = {
+        // ...
+        sslkeylog = TRUE;   # <-----------------------
+```
+... and restart smithroxy with `service smithproxy restart` to reload configuration.
+
+You should see ssl keylog file `/var/log/smithproxy.0.sslkeylog.log`,  
+directly usable by wireshark in `Protocol preferences > SSL > (Pre)-Master-Secret log filename`.
 
 # Starting smithproxy
 
