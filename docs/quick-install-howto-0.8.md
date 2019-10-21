@@ -39,7 +39,7 @@ apt remove -y g++ gcc perl manpages && apt -y autoremove
 
 Smithproxy is not that simple software. You need to configure it properly, before really using it:
 
-### 1. Networking
+### Networking
 If not done yet, please finalize your network environment. Configure linux interfaces as intended. Ideal is  to have:
 
 * external interface name (ie. ens0)
@@ -59,7 +59,7 @@ SMITH_INTERFACE='ens9'
 ...
 ```
 
-### 2. Certificate authority
+### Certificate authority
 You cannot magically break into or hack TLS. In order to do TLS MitM, you need certificate authority your applications trust which signs all faked certificates for you. There is default one pre-installed by smithproxy. You can use it, but   don't do that, please. There is a script `sx_regencerts` which can create one for you.
 
 ```
@@ -163,11 +163,11 @@ Certificate:
          41:2b:32:87:0d:3a:8e:98:e1:70:2b:11:12:7c:48:43:83
 
 ```
-### 4. Main configuration file */etc/smithproxy/smithproxy.cfg*
+### Main configuration file */etc/smithproxy/smithproxy.cfg*
 This file contains most of smithproxy settings to make it run. It's pre-set for safe values which won't hurt probably anyone. It's not configured for any capture, TLS security, bypass or any from other smithproxy fancy features.
 
 ##### Traffic policies
-Probably first thing you gonna touch are policies. Let's jave a look at one, allowing all traffic. They are processed top-down and contain many other settings and profiles. They look this way in their simplest form:
+Probably first thing you gonna touch are policies. Let's have a look at one, allowing all traffic. They are processed top-down and contain many other settings and profiles. They look this way in their simplest form:
 ```
 policy = (
     {
@@ -285,10 +285,80 @@ These are influencing what *will be done with the connection*:
 * alg_dns_profile - DNS settings, transparent DNS cache
 
 ##### Advanced configuration
-... well, this is here as a placeholder. We won't cover this in quick howto document. However, you might be interested in content dumping.
+We can't cover everything in quick howto document. However, you might be interested in following, most-frequently used features:
+
+* Content dumping
+* TLS parameters suitable for wireshark decryption
 
 
+###### Content dumping to files
 
+To write content into files, you need to:
+1) set existing directory where to save .smcap files
+```
+settings = {
+    // ...
+    write_payload_dir = "/var/local/smithproxy/data";
+    // ...
+}
+```
+2) configure policy profile
+```
+content_profiles = {
+    writer = {
+        write_payload = TRUE;
+        write_limit_client = 0;
+        write_limit_server = 0;
+    }
+```
+3) apply profile created above on the policy 
+```
+policy = (
+    {
+        proto = "tcp";
+        src = "any";
+        sport = "all";
+        dst = "any";
+        dport = "all";
+        tls_profile = "default";
+        detection_profile = "detect";
+        content_profile = "writer";          // <--------------
+        auth_profile = "resolve";
+        alg_dns_profile = "dns_default";
+        action = "accept";
+        nat = "auto";
+    }
+)
+```
+4) restart smithproxy using `service smithproxy restart`
+
+If followed correctly, you should now see in the directory .smcap files:
+```
+root@cr3:/var/local/smithproxy# find .
+.
+./data
+./data/192.168.122.1
+./data/192.168.122.1/2019-10-21
+./data/192.168.122.1/2019-10-21/03-48-44_ssli_192.168.122.1:52098-ssli_172.217.23.202:443.smcap
+./data/192.168.122.1/2019-10-21/04-28-27_ssli_192.168.122.1:57108-ssli_216.58.201.99:443.smcap
+./data/192.168.122.1/2019-10-21/04-28-27_ssli_192.168.122.1:57092-ssli_172.217.23.196:443.smcap
+./data/192.168.122.1/2019-10-21/04-30-57_ssli_192.168.122.1:57512-ssli_93.184.220.42:443.smcap
+``` 
+
+Smcaps are human-readable hexdump text files, later replayable by pplay tool.
+```
+Mon Oct 21 03:48:44 2019
++295518: ssli_192.168.122.1:52098-ssli_172.217.23.202:443(ssli_172.217.23.202:443-ssli_192.168.122.1:52098)
+Connection start
+
+Mon Oct 21 03:48:44 2019
++846830: ssli_192.168.122.1:52098-ssli_172.217.23.202:443(ssli_172.217.23.202:443-ssli_192.168.122.1:52098)
+>[0000]   47 45 54 20 2F 76 34 2F   74 68 72 65 61 74 4C 69   GET./v4/ threatLi
+>[0010]   73 74 55 70 64 61 74 65   73 3A 66 65 74 63 68 3F   stUpdate s:fetch?
+>[0020]   24 63 74 3D 61 70 70 6C   69 63 61 74 69 6F 6E 2F   $ct=appl ication/
+
+```
+PPlay has its own howto on the project landing page here [pplay](https://bitbucket.org/astibal/pplay)
 
 # Starting smithproxy
 
