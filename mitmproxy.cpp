@@ -1684,7 +1684,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                 this->proxies().insert(new_proxy);
                 
                 //FIXME: this is really ugly!! :) It's here since radd has been called before socket for target_cx was created.
-                int real_socket = target_cx->connect(false);
+                int real_socket = target_cx->connect();
                 com()->set_monitor(real_socket);
                 com()->set_poll_handler(real_socket,new_proxy);
                 
@@ -1769,7 +1769,7 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
             target_cx->com()->nonlocal_src_port() = std::stoi(p);               
         }
 
-        int real_socket = target_cx->connect(false);
+        int real_socket = target_cx->connect();
         target_cx->rename();
         com()->set_monitor(real_socket);
         com()->set_poll_handler(real_socket,new_proxy);

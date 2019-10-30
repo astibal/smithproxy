@@ -151,8 +151,8 @@ class SimpleClient : public sigslot::has_slots<sigslot::multi_threaded_local> {
         inline CX* cx() { return cx_; }
         inline PX* px() { return px_; }
         
-        virtual int connect(bool b=false) { 
-            int r = cx()->connect(b); 
+        virtual int connect() {
+            int r = cx()->connect();
             if(r > 0) px()->ladd(cx()); 
             return r; 
         }
@@ -213,7 +213,7 @@ void test_url(const char* url = nullptr) {
     
     // since this is simple client, we will block. Normally it doesn't matter, run() would 
     // eventually take care of it
-    cx->connect(false);
+    cx->connect();
     
     // add cx to left side of proxy (there is no right side at all, we just need handle traffic
     // by proxy object.

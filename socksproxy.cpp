@@ -184,7 +184,7 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     n_cx->matched_policy(matched_policy());
     target_cx->matched_policy(matched_policy());
         
-    int real_socket = target_cx->connect(false);
+    int real_socket = target_cx->connect();
     com()->set_monitor(real_socket);
     com()->set_poll_handler(real_socket,this);
     
