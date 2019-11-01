@@ -184,7 +184,7 @@ class MitmMasterProxy : public ThreadedAcceptorProxy<MitmProxy> {
 public:
     
     MitmMasterProxy(baseCom* c, int worker_id) : ThreadedAcceptorProxy< MitmProxy >(c,worker_id) {
-        log = logan::create("masterproxy.tcp");
+        log.area("acceptor.tcp");
     };
     
     virtual baseHostCX* new_cx(int s);
@@ -197,22 +197,16 @@ public:
     
     time_t auth_table_refreshed = 0;
 
-private:
-    logan_lite log;
 };
 
 
 class MitmUdpProxy : public ThreadedReceiverProxy<MitmProxy> {
 public:
     MitmUdpProxy(baseCom* c, int worker_id) : ThreadedReceiverProxy< MitmProxy >(c,worker_id) {
-        log = logan::create("masterproxy.udp");
+        log.area("acceptor.udp");
     };
     virtual void on_left_new(baseHostCX* just_accepted_cx);
     baseHostCX* new_cx(int s);
-
-
-private:
-    logan_lite log;
 };
 
 
