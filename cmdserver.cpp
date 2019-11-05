@@ -108,7 +108,7 @@ extern bool cfg_openssl_mem_dbg;
 void load_defaults() {
     orig_ssl_loglevel = SSLCom::log_level_ref();
     orig_sslmitm_loglevel = SSLMitmCom::log_level_ref();
-    orig_sslca_loglevel= SSLFactory::log_level_ref();
+    orig_sslca_loglevel = *SSLFactory::get_log().level();
     
     orig_dns_insp_loglevel = DNS_Inspector::log_level_ref();
     orig_dns_packet_loglevel = DNS_Packet::log_level_ref();
@@ -1284,13 +1284,13 @@ int cli_debug_ssl(struct cli_def *cli, const char *command, char *argv[], int ar
         else if(a1 == "reset") {
             SSLCom::log_level_ref() = orig_ssl_loglevel;
             SSLMitmCom::log_level_ref() = orig_sslmitm_loglevel;
-            SSLFactory::log_level_ref() = orig_sslca_loglevel;
+            SSLFactory::get_log().level(orig_sslca_loglevel);
         }
         else {
             newlev = safe_val(argv[0]);;
             SSLCom::log_level_ref().level(newlev);
             SSLMitmCom::log_level_ref().level(newlev);
-            SSLFactory::log_level_ref().level(newlev);
+            SSLFactory::get_log().level(loglevel(newlev));
 
         }
     } else {
@@ -1298,7 +1298,7 @@ int cli_debug_ssl(struct cli_def *cli, const char *command, char *argv[], int ar
         cli_print(cli,"SSL debug level: %d",l);
         l = SSLMitmCom::log_level_ref().level();
         cli_print(cli,"SSL MitM debug level: %d",l);
-        l = SSLFactory::log_level_ref().level();
+        l = SSLFactory::get_log().level()->level();
         cli_print(cli,"SSL CA debug level: %d",l);
         cli_print(cli,"\n");
         cli_print(cli,"valid parameters: %s",debug_levels);
@@ -1722,7 +1722,7 @@ int save_config_debug(Config& ex) {
     Setting& deb_log_objects = deb_objects.add("log", Setting::TypeGroup);
     deb_log_objects.add("sslcom", Setting::TypeInt) = (int)SSLCom::log_level_ref().level_ref();
     deb_log_objects.add("sslmitmcom", Setting::TypeInt) = (int)baseSSLMitmCom<DTLSCom>::log_level_ref().level_ref();
-    deb_log_objects.add("sslcertstore", Setting::TypeInt) = (int)SSLFactory::log_level_ref().level_ref();
+    deb_log_objects.add("sslcertstore", Setting::TypeInt) = (int)SSLFactory::get_log().level()->level_ref();
     deb_log_objects.add("proxy", Setting::TypeInt) = (int)baseProxy::log_level_ref().level_ref();
     deb_log_objects.add("epoll", Setting::TypeInt) = (int)epoll::log_level.level_ref();
     deb_log_objects.add("mtrace", Setting::TypeBoolean) = cfg_mtrace_enable;

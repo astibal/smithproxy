@@ -300,7 +300,7 @@ bool load_config(std::string& config_f, bool reload) {
         CfgFactory::cfg_root()["debug"]["log"].lookupValue("sslcom",SSLCom::log_level_ref().level_ref());
         CfgFactory::cfg_root()["debug"]["log"].lookupValue("sslmitmcom",baseSSLMitmCom<SSLCom>::log_level_ref().level_ref());
         CfgFactory::cfg_root()["debug"]["log"].lookupValue("sslmitmcom",baseSSLMitmCom<DTLSCom>::log_level_ref().level_ref());
-        CfgFactory::cfg_root()["debug"]["log"].lookupValue("sslcertstore",SSLFactory::log_level_ref().level_ref());
+        CfgFactory::cfg_root()["debug"]["log"].lookupValue("sslcertstore",SSLFactory::get_log().level()->level_ref());
         CfgFactory::cfg_root()["debug"]["log"].lookupValue("proxy",baseProxy::log_level_ref().level_ref());
         CfgFactory::cfg_root()["debug"]["log"].lookupValue("proxy",epoll::log_level.level_ref());
         CfgFactory::cfg_root()["debug"]["log"].lookupValue("mtrace",cfg_mtrace_enable);
