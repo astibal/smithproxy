@@ -317,6 +317,9 @@ bool load_config(std::string& config_f, bool reload) {
 
 
 
+        // initialize stubborn logans :)
+        auto _ = inet::Factory::log();
+
 
         // don't mess with logging if just reloading
         if(! reload) {
