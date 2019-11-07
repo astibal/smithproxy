@@ -574,7 +574,34 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
                 _dia("relaxed cert-check: peer sslcom verify not OK, not in whitelist");
 
                 if(mh->replacement_type() == MitmHostCX::REPLACETYPE_NONE) {
-                    _dia(" -> replacement: none - letting go");
+
+                    // _dia(" -> replacement: none - letting go");
+                    // ok - it might happen signature is not yet triggered (and replacement message should happened).
+                    // there are 2 options:
+                    // a) block the connection
+                    // b) reset the connection
+
+                    // certainly there is NO F***ING WAY to letting it go.
+
+                    bool nice_redirect = false;
+
+                    if(first_right()) {
+                        if ("443" == first_right()->port()) {
+                            nice_redirect = true;
+                        }
+                    }
+
+                    if(! nice_redirect) {
+                        _war("certificate not OK on unknown protocol and port - dropping proxy");
+                        state().dead(true);
+                    }
+                    else {
+                        _war("certificate not OK on known port - assuming http");
+                        mh->replacement_type(MitmHostCX::REPLACETYPE_HTTP);
+                        mh->replacement_flag(MitmHostCX::REPLACE_BLOCK);
+                        redirected = true;
+                        handle_replacement_ssl(mh);
+                    }
                 }
                 else if(mh->replacement_type() == MitmHostCX::REPLACETYPE_HTTP) {
                     _dia(" -> replacement: HTTP - redirecting");
@@ -1253,7 +1280,20 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             cx->close_after_write(true);            
         }
     }
-    
+
+    else {
+        _dia("ssl_override: enforced ph1 - redir to / for %s", whitelist_make_key(cx).c_str());
+
+        std::string redir_pre("<html><head><script>top.location.href=\"");
+        std::string redir_suf("\";</script></head><body></body></html>");
+
+        //std::string repl = "<html><head><meta http-equiv=\"Refresh\" content=\"0; url=/\"></head><body></body></html>";
+        std::string repl = redir_pre + "/" + redir_suf;
+        repl = html()->render_server_response(repl);
+
+        cx->to_write((unsigned char*)repl.c_str(),repl.size());
+        cx->close_after_write(true);
+    }
 }
 
 void MitmProxy::init_content_replace() {
