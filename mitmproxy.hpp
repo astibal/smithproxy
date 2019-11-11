@@ -63,16 +63,15 @@ class MitmProxy : public baseProxy, public socle::sobject {
     
 protected:
     socle::trafLog *tlog_ = nullptr;
-    
     bool write_payload_ = false;
     
     bool identity_resolved_ = false;    // meant if attempt has been done, regardless of its result.
     shm_logon_info_base* identity_ = nullptr;
     
     std::vector<ProfileContentRule>* content_rule_ = nullptr; //save some space and store it as a pointer. Init it only when needed and delete in dtor.
-    
     int matched_policy_ = -1;
-    
+
+    std::string replacement_msg;
 public: 
     time_t half_holdtimer = 0;
     static unsigned int& half_timeout() { static unsigned int s_half_timetout = 30; return s_half_timetout; };
@@ -139,6 +138,9 @@ public:
     // check sslcom response and return true if redirected
     virtual bool handle_com_response_ssl(MitmHostCX* cx);
     virtual void handle_replacement_ssl(MitmHostCX* cx);
+    std::string replacement_ssl_page(SSLCom* scom, app_HttpRequest* app_request, std::string const& more_info);
+    std::string replacement_ssl_verify_detail(SSLCom* scom);
+    void set_replacement_msg_ssl(SSLCom* scom); // evaluates SSL verify info and sets replacement_msg string
     
     // check if content has been pulled from cache and return true if so
     virtual bool handle_cached_response(MitmHostCX* cx);

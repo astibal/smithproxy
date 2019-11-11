@@ -845,7 +845,12 @@ void MitmProxy::on_left_error(baseHostCX* cx) {
     
     if(write_payload()) {
         toggle_tlog();
-        if(tlog()) tlog()->left_write("Client side connection closed: " + cx->name() + "\n");
+        if(tlog()) {
+            tlog()->left_write("Client side connection closed: " + cx->name() + "\n");
+            if(! replacement_msg.empty()) {
+                tlog()->left_write(cx->name() + "   dropped by proxy:" + replacement_msg + "\n");
+            }
+        }
     }
     
     if(opt_auth_resolve)
@@ -855,36 +860,41 @@ void MitmProxy::on_left_error(baseHostCX* cx) {
     auto* mh = dynamic_cast<MitmHostCX*>(cx);
     if (mh != nullptr && mh->inspection_verdict() == Inspector::CACHED) flags+="C";
 
-    std::string detail;
+    std::stringstream detail;
     
     if(cx->peercom()) {
         auto* sc = dynamic_cast<SSLMitmCom*>(cx->peercom());
         if(sc) {
-            detail += string_format("sni=%s ",sc->get_peer_sni().c_str());
+            detail << string_format("sni=%s ",sc->get_peer_sni().c_str());
         }
     }
     if(mh && mh->application_data) {
         
         auto* http = dynamic_cast<app_HttpRequest*>(mh->application_data);
         if(http) {
-            detail += string_format("app=%s%s ",http->proto.c_str(),http->host.c_str()); 
+            detail << "app=" << http->proto << http->host << " ";
         }
         else {
-            detail += string_format("app=%s ",mh->application_data->hr().c_str()); 
+            detail << "app=" << mh->application_data->hr() << " ";
         }
     }
     
-    detail += string_format("user=%s up=%d/%dB dw=%d/%dB flags=%s+%s",
+    detail << string_format("user=%s up=%d/%dB dw=%d/%dB flags=%s+%s",
                                         (identity_resolved() ? identity()->username().c_str() : ""),
                                             cx->meter_read_count,cx->meter_read_bytes,
                                                                 cx->meter_write_count, cx->meter_write_bytes,
                                                                             flags.c_str(),
                                                                             com()->full_flags_str().c_str()
             );
-    
+
     if(cx->peer() && cx->peer()->writebuf()->empty()) {
-        std::string msg = string_format("Connection from %s closed: %s",cx->full_name('L').c_str(),detail.c_str());
-        _inf("%s", msg.c_str());
+        std::stringstream msg;
+        msg << "Connection from " << cx->full_name('L') << " closed: " << detail.str();
+        if(! replacement_msg.empty() ) {
+            msg << ", dropped: " << replacement_msg;
+            INF_("%s", msg.str().c_str()); // log to generic logger
+        }
+        _inf("%s", msg.str().c_str());
         if(*log.level() > DEB) __debug_zero_connections(cx);
         
         state().dead(true);
@@ -892,8 +902,9 @@ void MitmProxy::on_left_error(baseHostCX* cx) {
         on_half_close(cx);
         if(state().dead()) {
             // status dead is new, since we check dead status at the begining
-            std::string msg = string_format("Connection from %s left half-closed: %s",cx->full_name('L').c_str(),detail.c_str());
-            _inf("%s", msg.c_str());
+            std::stringstream msg;
+            msg << "Connection from " << cx->full_name('L') << " left half-closed: " << detail.str();
+            _inf("%s", msg.str().c_str());
         }
     }
     
@@ -910,7 +921,12 @@ void MitmProxy::on_right_error(baseHostCX* cx)
     
     if(write_payload()) {
         toggle_tlog();
-        if(tlog()) tlog()->right_write("Server side connection closed: " + cx->name() + "\n");
+        if(tlog()) {
+            tlog()->right_write("Server side connection closed: " + cx->name() + "\n");
+            if(! replacement_msg.empty()) {
+                tlog()->right_write(cx->name() + "   dropped by proxy:" + replacement_msg + "\n");
+            }
+        }
     }
     
 //         _inf("Created new proxy 0x%08x from %s:%s to %s:%d",new_proxy,f,f_p, t,t_p );
@@ -926,21 +942,21 @@ void MitmProxy::on_right_error(baseHostCX* cx)
     }
 
     
-    std::string detail;
+    std::stringstream detail;
     auto* sc = dynamic_cast<SSLMitmCom*>(cx->com());
     if(sc) {
-        detail += string_format("sni=%s ",sc->get_peer_sni().c_str());
+        detail << "sni= " << sc->get_peer_sni();
     }
     if(mh_peer && mh_peer->application_data) {
         auto* http = dynamic_cast<app_HttpRequest*>(mh_peer->application_data);
         if(http) {
-            detail += string_format("app=%s%s ",http->proto.c_str(),http->host.c_str()); 
+            detail << "app=" << http->proto << http->host << " ";
         }
         else {
-            detail += string_format("app=%s ",mh_peer->application_data->hr().c_str()); 
+            detail << "app=" << mh_peer->application_data->hr() << " ";
         }
     }
-    detail += string_format("user=%s up=%d/%dB dw=%d/%dB flags=%s+%s",
+    detail << string_format("user=%s up=%d/%dB dw=%d/%dB flags=%s+%s",
                                         (identity_resolved() ? identity()->username().c_str() : ""),
                                             cx->meter_read_count,cx->meter_read_bytes,
                                                                 cx->meter_write_count, cx->meter_write_bytes,
@@ -950,8 +966,14 @@ void MitmProxy::on_right_error(baseHostCX* cx)
     
     
     if( cx->peer() && cx->peer()->writebuf()->empty() ) {
-        std::string msg = string_format("Connection from %s closed: %s",cx->full_name('R').c_str(),detail.c_str());
-        _inf("%s", msg.c_str());
+        std::stringstream msg;
+        msg << "Connection from " << cx->full_name('R') << " closed: " << detail.str().c_str();
+        if(! replacement_msg.empty() ) {
+            msg << ", dropped: " << replacement_msg;
+            INF_("%s", msg.str().c_str()); // log to generic logger
+        }
+        _inf("%s", msg.str().c_str());
+
         if(*log.level() > DEB) __debug_zero_connections(cx);
         
         state().dead(true);
@@ -960,8 +982,9 @@ void MitmProxy::on_right_error(baseHostCX* cx)
         on_half_close(cx);
         if(state().dead()) {
             // status dead is new, since we check dead status at the begining
-            std::string msg = string_format("Connection from %s right half-closed: %s",cx->full_name('R').c_str(),detail.c_str());
-            _inf("%s", msg.c_str());
+            std::stringstream msg;
+            msg << "Connection from " << cx->full_name('R') << " right half-closed: " << detail.str().c_str();
+            _inf("%s", msg.str().c_str());
         }
     } 
     
@@ -1028,6 +1051,8 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
                 
                 cx->to_write((unsigned char*)repl.c_str(),repl.size());
                 cx->close_after_write(true);
+
+                replacement_msg += "(auth: known token)";
             } else {
                 _inf("MitmProxy::handle_replacement_auth: expired token %s for request: %s",token_tk.c_str(),cx->application_data->hr().c_str());
                 goto new_token;
@@ -1064,6 +1089,7 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
             
             cx->to_write((unsigned char*)repl.c_str(),repl.size());
             cx->close_after_write(true);
+            replacement_msg += "(auth: new token)";
 
             AuthFactory::get().shm_token_table_refresh();
 
@@ -1089,12 +1115,120 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
         cx->to_write((unsigned char*)repl.c_str(),repl.size());
         cx->close_after_write(true);
 
+        replacement_msg += "(auth: blocked)";
+
     } else
     if (cx->replacement_flag() == MitmHostCX::REPLACE_NONE) {
         _dia("MitmProxy::handle_replacement_auth: asked to handle NONE. No-op.");
     } 
 }
 
+std::string verify_flag_string(int code) {
+    switch(code) {
+        case SSLCom::VERIFY_OK:
+            return "Certificate verification successful";
+        case SSLCom::SELF_SIGNED:
+            return "Target certificate is self-signed";
+        case SSLCom::SELF_SIGNED_CHAIN:
+            return "Server certificate's chain contains self-signed, untrusted CA certificate";
+        case SSLCom::UNKNOWN_ISSUER:
+            return "Server certificate is issued by untrusted certificate authority";
+        case SSLCom::CLIENT_CERT_RQ:
+            return "Server is asking client for a certificate";
+        case SSLCom::REVOKED:
+            return "Server's certificate is REVOKED";
+        case SSLCom::HOSTNAME_FAILED:
+            return "Client application asked for SNI server is not offering";
+        default:
+            return "";
+    }
+}
+
+void MitmProxy::set_replacement_msg_ssl(SSLCom* scom) {
+    if(scom && scom->verify_get() != SSLCom::VERIFY_OK) {
+
+        if(scom->verify_check(SSLCom::SELF_SIGNED)) {
+            replacement_msg += "(ssl:" + verify_flag_string(SSLCom::SELF_SIGNED) + ")";
+        }
+        if(scom->verify_check(SSLCom::SELF_SIGNED_CHAIN)) {
+            replacement_msg += "(ssl:" + verify_flag_string(SSLCom::SELF_SIGNED_CHAIN) + ")";
+        }
+        if(scom->verify_check(SSLCom::UNKNOWN_ISSUER)) {
+            replacement_msg += "(ssl:" + verify_flag_string(SSLCom::UNKNOWN_ISSUER) + ")";
+        }
+        if(scom->verify_check(SSLCom::CLIENT_CERT_RQ)) {
+            replacement_msg += "(ssl:" + verify_flag_string(SSLCom::CLIENT_CERT_RQ) + ")";
+        }
+        if(scom->verify_check(SSLCom::REVOKED)) {
+            replacement_msg += "(ssl:" + verify_flag_string(SSLCom::REVOKED) + ")";
+        }
+        if(scom->verify_check(SSLCom::HOSTNAME_FAILED)) {
+            replacement_msg += "(ssl:" + verify_flag_string(SSLCom::HOSTNAME_FAILED) + ")";
+        }
+    }
+}
+
+std::string MitmProxy::replacement_ssl_verify_detail(SSLCom* scom) {
+
+    std::stringstream ss;
+    if(scom && scom->verify_get() != SSLCom::VERIFY_OK) {
+        bool is_set = false;
+
+        if(scom->verify_check(SSLCom::SELF_SIGNED)) {
+            ss << "<p><h3 class=\"fg-red\">Reason:</h3> " << verify_flag_string(SSLCom::SELF_SIGNED) << ".</p>";
+            is_set = true;
+        }
+        if(scom->verify_check(SSLCom::SELF_SIGNED_CHAIN)) {
+            ss << "<p><h3 class=\"fg-red\">Reason:</h3> " <<  verify_flag_string(SSLCom::SELF_SIGNED_CHAIN) << ".</p>";
+            is_set = true;
+        }
+        if(scom->verify_check(SSLCom::UNKNOWN_ISSUER)) {
+            ss << "<p><h class=\"fg-red\"3>Reason:</h3>"<< verify_flag_string(SSLCom::UNKNOWN_ISSUER) <<".</p>";
+            is_set = true;
+        }
+        if(scom->verify_check(SSLCom::CLIENT_CERT_RQ)) {
+            ss << "<p><h3 class=\"fg-red\">Reason:</h3>" << verify_flag_string(SSLCom::CLIENT_CERT_RQ) <<".<p>";
+            is_set = true;
+        }
+        if(scom->verify_check(SSLCom::REVOKED)) {
+            ss <<  "<p><h3 class=\"fg-red\">Reason:</h3>" << verify_flag_string(SSLCom::REVOKED) << ". "
+                                    "This is a serious issue, it's highly recommended to not continue "
+                                    "to this page.</p>";
+            is_set = true;
+        }
+        if(scom->verify_check(SSLCom::HOSTNAME_FAILED)) {
+            ss << "<p><h3 class=\"fg-red\">Reason:</h3>" << verify_flag_string(SSLCom::HOSTNAME_FAILED) << ".</p>";
+            is_set = true;
+        }
+
+
+        if(!is_set) {
+            ss << string_format("<p><h3 class=\"fg-red\">Reason:</h3>Oops, no detailed problem description (code: 0x%04x)</p>",scom->verify_get());
+        }
+    } else {
+        ss << string_format("<p><h3 class=\"fg-red\">Reason:</h3>Oops, no detailed problem description (code: 0x%04x)</p>",scom->verify_get());
+    }
+
+    return ss.str();
+}
+
+
+std::string MitmProxy::replacement_ssl_page(SSLCom* scom, app_HttpRequest* app_request, std::string const& more_info) {
+    std::string repl;
+
+    std::string block_target_info = "<p><h3 class=\"fg-red\">Requested site:</h3>" + app_request->proto + app_request->host + "</p>";
+
+    std::string block_additinal_info = replacement_ssl_verify_detail(scom) + more_info;
+
+    std::string cap = "TLS security warning";
+    std::string meta;
+    std::string war_img = html()->render_noargs("html_img_warning");
+    std::string msg = string_format("<h2 class=\"fg-red\">%s TLS security warning</h2>%s",war_img.c_str(),(block_target_info + block_additinal_info).c_str());
+    repl = html()->render_msg_html_page(cap, meta, msg,"700px");
+    repl = html()->render_server_response(repl);
+
+    return repl;
+}
 
 void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
     
@@ -1106,23 +1240,27 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
         error = html()->render_server_response(error);
         
         cx->to_write((unsigned char*)error.c_str(),error.size());
-        cx->close_after_write(true);  
-        
+        cx->close_after_write(true);
+        set_replacement_msg_ssl(scom);
+
         _err("cannot handle replacement for TLS, com is not SSLCom");
         
         return;
     }
     
     std::string block_additinal_info;
-    std::string block_override_pre = "<form action=\"/SM/IT/HP/RO/XY";
-    
-    std::string key = whitelist_make_key(cx);
-    if(cx->peer()) {
-        block_override_pre += "/override/target=" + key;//cx->peer()->host() + "#" + cx->peer()->port() + "&";
-    }
     std::string block_override;
-    std::string block_target_info;
-    
+
+    if(scom->opt_failed_certcheck_override)   {
+        std::string block_override_pre = "<form action=\"/SM/IT/HP/RO/XY";
+
+        std::string key = whitelist_make_key(cx);
+        if(cx->peer()) {
+            block_override_pre += "/override/target=" + key;//cx->peer()->host() + "#" + cx->peer()->port() + "&";
+        }
+        std::string block_target_info;
+        block_override = block_override_pre + R"(orig_url=/"><input type="submit" value="Override" class="btn-red"></form>)";
+    }
     
     auto* app_request = dynamic_cast<app_HttpRequest*>(cx->application_data);
     if(app_request != nullptr) {
@@ -1161,7 +1299,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
 
                 {
                     std::lock_guard<std::recursive_mutex> l_(whitelist_verify().getlock());
-                    whitelist_verify().set(key,
+                    whitelist_verify().set(whitelist_make_key(cx),
                                          new whitelist_verify_entry_t(v, scom->opt_failed_certcheck_override_timeout));
                 }
                 
@@ -1169,6 +1307,8 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
                 
                 cx->to_write((unsigned char*)override_applied.c_str(),override_applied.size());
                 cx->close_after_write(true);
+                set_replacement_msg_ssl(scom);
+                replacement_msg += "(ssl: override)";
                 
                 _war("Connection from %s: SSL override activated for %s",cx->full_name('L').c_str(), app_request->request().c_str());
                 
@@ -1179,7 +1319,9 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
                 std::string error("<html><head></head><body><p>Failed to override</p><p>Action is denied.</p></body></html>");
                 error = html()->render_server_response(error);
                 cx->to_write((unsigned char*)error.c_str(),error.size());
-                cx->close_after_write(true);                  
+                cx->close_after_write(true);
+                set_replacement_msg_ssl(scom);
+                replacement_msg += "(ssl: override disabled)";
                 
                 return;
             }
@@ -1192,64 +1334,10 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
         
             _dia("ssl_override: ph3 - warning replacement for %s", whitelist_make_key(cx).c_str());
             
-            block_target_info = "<p><h3 class=\"fg-red\">Requested site:</h3>" + app_request->proto + app_request->host + "</p>";
-            block_override = string_format("orig_url=%s\"><input type=\"submit\" value=\"Override\" class=\"btn-red\"></form>","/");
+            repl = replacement_ssl_page(scom, app_request, block_override);
 
-            if(scom->verify_get() != SSLCom::VERIFY_OK) {
-                bool is_set = false;
-                
-                if(scom->verify_check(SSLCom::SELF_SIGNED)) {
-                    block_additinal_info
-                    += "<p><h3 class=\"fg-red\">Reason:</h3>Target certificate is self-signed.</p>";
-                    is_set = true;
-                }
-                if(scom->verify_check(SSLCom::SELF_SIGNED_CHAIN)) {
-                    block_additinal_info += "<p><h3 class=\"fg-red\">Reason:</h3>Server certificate's chain contains "
-                                            "self-signed, untrusted CA certificate.</p>";
-                    is_set = true;
-                }
-                if(scom->verify_check(SSLCom::UNKNOWN_ISSUER)) {
-                    block_additinal_info += "<p><h class=\"fg-red\"3>Reason:</h3>Server certificate is issued by untrusted "
-                           "certificate authority.</p>";
-                    is_set = true;
-                }
-                if(scom->verify_check(SSLCom::CLIENT_CERT_RQ)) {
-                    block_additinal_info += "<p><h3 class=\"fg-red\">Reason:</h3>Server is asking for a client "
-                                            "certificate.<p>";
-                    is_set = true;
-                }
-                if(scom->verify_check(SSLCom::REVOKED)) {
-                    block_additinal_info += "<p><h3 class=\"fg-red\">Reason:</h3>Server's certificate is REVOKED. "
-                                            "This is a serious issue, it's highly recommended to not continue "
-                                            "to this page.</p>";
-                    is_set = true;
-                }                
-                if(scom->verify_check(SSLCom::HOSTNAME_FAILED)) {
-                    block_additinal_info += "<p><h3 class=\"fg-red\">Reason:</h3>Client application asked for "
-                                            "server (sni) server is not offering.</p>";
-                    is_set = true;
-                }                
-
-                
-                if(!is_set) {
-                        block_additinal_info += string_format("<p><h3 class=\"fg-red\">Reason:</h3>Oops, no detailed problem description (code: 0x%04x)</p>",scom->verify_get());
-                }
-            } else {
-                block_additinal_info += string_format("<p><h3 class=\"fg-red\">Reason:</h3>Oops, no detailed problem description (code: 0x%04x)</p>",scom->verify_get());
-            }
-            
-            if(scom->opt_failed_certcheck_override)  block_additinal_info += block_override_pre + block_override;
-            
-            _dia("MitmProxy::handle_replacement_ssl: instructed to replace block");
-            
-            std::string cap = "TLS security warning";
-            std::string meta;
-            std::string war_img = html()->render_noargs("html_img_warning");
-            std::string msg = string_format("<h2 class=\"fg-red\">%s TLS security warning</h2>%s",war_img.c_str(),(block_target_info + block_additinal_info).c_str());
-            repl = html()->render_msg_html_page(cap, meta, msg,"700px");
-            repl = html()->render_server_response(repl);
-            
             cx->to_write((unsigned char*)repl.c_str(),repl.size());
+            set_replacement_msg_ssl(scom);
             cx->close_after_write(true);
         } else 
         if(app_request->uri == "/"){
@@ -1261,7 +1349,8 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             std::string repl = "<html><head><meta http-equiv=\"Refresh\" content=\"0; url=/SM/IT/HP/RO/XY/warning?q=1\"></head><body></body></html>";
             repl = html()->render_server_response(repl);
             cx->to_write(repl);
-            cx->close_after_write(true);            
+            cx->close_after_write(true);
+            set_replacement_msg_ssl(scom);
         }   
         else {
             // PHASE I
@@ -1277,12 +1366,14 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             repl = html()->render_server_response(repl);
             
             cx->to_write((unsigned char*)repl.c_str(),repl.size());
-            cx->close_after_write(true);            
+            cx->close_after_write(true);
+            set_replacement_msg_ssl(scom);
         }
     }
 
     else {
         _dia("ssl_override: enforced ph1 - redir to / for %s", whitelist_make_key(cx).c_str());
+        _inf("readbuf: \n%s", hex_dump(cx->readbuf(), 4).c_str());
 
         std::string redir_pre("<html><head><script>top.location.href=\"");
         std::string redir_suf("\";</script></head><body></body></html>");
@@ -1293,6 +1384,8 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
 
         cx->to_write((unsigned char*)repl.c_str(),repl.size());
         cx->close_after_write(true);
+        set_replacement_msg_ssl(scom);
+        replacement_msg += "(ssl: enforced)";
     }
 }
 
