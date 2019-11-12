@@ -547,7 +547,11 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
     
     auto* scom = dynamic_cast<SSLCom*>(mh->peercom());
     if(scom && scom->opt_failed_certcheck_replacement) {
-        if(scom->verify_get() != SSLCom::VERIFY_OK) {
+        if(!(
+            scom->verify_get() == SSLCom::VERIFY_OK
+             ||
+            scom->verify_get() == ( SSLCom::VERIFY_OK | SSLCom::CLIENT_CERT_RQ )
+            )) {
             
             bool whitelist_found = false;
             
