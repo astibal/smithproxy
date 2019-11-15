@@ -99,8 +99,8 @@ public:
        int nat    = POLICY_NAT_NONE;
        std::string nat_name;
       
-       PolicyRule() : ProfileList(), socle::sobject() {};
-       virtual ~PolicyRule();
+       PolicyRule() : ProfileList(), socle::sobject(), log(this, "policy.rule") {};
+       virtual ~PolicyRule() = default;
        
        bool match(baseProxy*);
        bool match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r);
@@ -114,7 +114,9 @@ public:
        virtual std::string to_string(int verbosity = 6);
        
        DECLARE_C_NAME("PolicyRule");
-       DECLARE_LOGGING(to_string);       
+       DECLARE_LOGGING(to_string);
+
+       logan_attached<PolicyRule> log;
 };
 
 class ProfileDetection : public socle::sobject {

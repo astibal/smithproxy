@@ -51,7 +51,7 @@ std::string FqdnAddress::to_string(int verbosity) {
 
     std::stringstream ret;
 
-    ret << "FqdnAddress: " + fqdn_;
+    ret << "Fqdn: " + fqdn_;
  
     bool cached_a = false;
     bool cached_4a= false;
@@ -76,7 +76,7 @@ std::string FqdnAddress::to_string(int verbosity) {
         }
     }
 
-    if(! prof_name.empty()) {
+    if(! prof_name.empty() && verbosity > iINF) {
         ret << string_format(" (name=%s)", prof_name.c_str());
     }
 
@@ -101,18 +101,18 @@ bool FqdnAddress::match(CIDR* c) {
     }
 
     if(r != nullptr) {
-        DEB___("FqdnAddress::match: found in cache: %s",fqdn_.c_str());
+        _deb("FqdnAddress::match: found in cache: %s",fqdn_.c_str());
         
         std::vector<CidrAddress*> ips = r->get_a_anwsers();
         
         int i = 0;
         for(CidrAddress* ip: ips) {
             if(ip->match(c)) {
-                DEB___("FqdnAddress::match: cached %s matches answer[%d] with %s",
+                _deb("FqdnAddress::match: cached %s matches answer[%d] with %s",
                                                 fqdn_.c_str(),i,ip->to_string().c_str());
                 ret = true;
             } else {
-                DEB___("FqdnAddress::match: cached %s DOESN'T match answer[%d] with %s",
+                _deb("FqdnAddress::match: cached %s DOESN'T match answer[%d] with %s",
                                                 fqdn_.c_str(),i,ip->to_string().c_str());
             }
             ++i;
@@ -121,7 +121,7 @@ bool FqdnAddress::match(CIDR* c) {
         }
         
     } else {
-        DEB___("FqdnAddress::match: NOT found in cache: %s",fqdn_.c_str());
+        _deb("FqdnAddress::match: NOT found in cache: %s",fqdn_.c_str());
     }
     
     return ret;

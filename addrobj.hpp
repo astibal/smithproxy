@@ -51,15 +51,24 @@ class AddressObject : public socle::sobject {
 public:
     virtual bool match(CIDR* c) = 0;
     std::string to_string(int=iINF) override = 0;
+    AddressObject() : log(get_log()) {};
+
     ~AddressObject() override = default;
 
     std::string prof_name;
+
+    static logan_lite& get_log() {
+        static logan_lite l("policy.addr");
+        return l;
+    }
+
+    logan_lite& log;
 };
 
 
 class CidrAddress : public AddressObject {
 public:
-    explicit CidrAddress(CIDR* c) : c_(c) { }
+    explicit CidrAddress(CIDR* c) : AddressObject(), c_(c) { }
     CIDR* cidr() { return c_; }
 
     int contains(CIDR *other);
@@ -69,9 +78,9 @@ public:
     std::string to_string(int verbosity=iINF) override {
         char* temp = cidr_to_str(c_);
 
-        std::string ret = string_format("CidrAddress: %s",temp);
+        std::string ret = string_format("Cidr: %s",temp);
 
-        if(! prof_name.empty()) {
+        if(! prof_name.empty() && verbosity > iINF) {
             ret += string_format(" (name=%s)", prof_name.c_str());
         }
 
@@ -88,7 +97,7 @@ DECLARE_C_NAME("CidrAddress");
 
 class FqdnAddress : public AddressObject {
 public:
-    explicit FqdnAddress(std::string s) : fqdn_(std::move(s)) { }
+    explicit FqdnAddress(std::string s) : AddressObject(), fqdn_(std::move(s)) { }
     std::string fqdn() const { return fqdn_; }
     
     bool match(CIDR* c) override;
