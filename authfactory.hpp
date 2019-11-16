@@ -56,7 +56,7 @@ class AuthFactory {
     mutable std::recursive_mutex ip6_lock_;
 
 
-    AuthFactory () {
+    AuthFactory () : log(get_log()) {
         global_idle_timeout = 600;
         portal_address = "192.168.0.1";
         // cfgapi_identity_portal_address6;
@@ -149,6 +149,13 @@ public:
 
     DECLARE_C_NAME("AuthFactory");
     DECLARE_LOGGING(to_string);
+
+    static logan_lite& get_log() {
+        static logan_lite l("auth");
+        return l;
+    }
+
+    logan_lite& log;
 };
 
 #endif //SMITHPROXY_AUTHFACTORY_HPP
