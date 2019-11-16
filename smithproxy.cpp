@@ -116,27 +116,27 @@ void SmithProxy::create_identity_thread() {
 
 
 void SmithProxy::create_listeners() {
-    plain_proxy = prepare_listener<theAcceptor, TCPCom>(std::stoi(CfgFactory::get().listen_tcp_port),
+    plain_proxy = ServiceFactory::prepare_listener<theAcceptor, TCPCom>(std::stoi(CfgFactory::get().listen_tcp_port),
                                                         "plain-text",
                                                         50080,
                                                         CfgFactory::get().num_workers_tcp);
 
-    ssl_proxy = prepare_listener<theAcceptor, MySSLMitmCom>(std::stoi(CfgFactory::get().listen_tls_port),
+    ssl_proxy = ServiceFactory::prepare_listener<theAcceptor, MySSLMitmCom>(std::stoi(CfgFactory::get().listen_tls_port),
                                                             "SSL",
                                                             50443,
                                                             CfgFactory::get().num_workers_tls);
 
-    dtls_proxy = prepare_listener<theReceiver, MyDTLSMitmCom>(std::stoi(CfgFactory::get().listen_dtls_port),
+    dtls_proxy = ServiceFactory::prepare_listener<theReceiver, MyDTLSMitmCom>(std::stoi(CfgFactory::get().listen_dtls_port),
                                                               "DTLS",
                                                               50443,
                                                               CfgFactory::get().num_workers_dtls);
 
-    udp_proxy = prepare_listener<theReceiver, UDPCom>(std::stoi(CfgFactory::get().listen_udp_port),
+    udp_proxy = ServiceFactory::prepare_listener<theReceiver, UDPCom>(std::stoi(CfgFactory::get().listen_udp_port),
                                                       "plain-udp",
                                                       50080,
                                                       CfgFactory::get().num_workers_udp);
 
-    socks_proxy = prepare_listener<socksAcceptor, socksTCPCom>(std::stoi(CfgFactory::get().listen_socks_port),
+    socks_proxy = ServiceFactory::prepare_listener<socksAcceptor, socksTCPCom>(std::stoi(CfgFactory::get().listen_socks_port),
                                                                "socks",
                                                                1080,
                                                                CfgFactory::get().num_workers_socks);
