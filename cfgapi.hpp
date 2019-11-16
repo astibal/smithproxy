@@ -62,6 +62,12 @@ class CfgFactory {
 
     Config cfgapi;
     std::recursive_mutex lock_;
+    logan_lite& log;
+
+    static logan_lite& get_log() {
+        static logan_lite l("config");
+        return l;
+    }
 
 public:
     CfgFactory(CfgFactory const &) = delete;
