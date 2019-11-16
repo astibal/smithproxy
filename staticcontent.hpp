@@ -49,9 +49,13 @@ using namespace ext::nltemplate;
 class StaticContent {
 
     ptr_cache<std::string,Template>* templates_;
-    StaticContent() { templates_ = new ptr_cache<std::string,Template> ("replacement message cache"); };
+    StaticContent() : log(get_log()) {
+        templates_ = new ptr_cache<std::string,Template> ("replacement message cache");
+
+    };
     ~StaticContent() { templates_->invalidate(); delete templates_; };
 
+    logan_lite& log;
 public:
 
     bool load_files(std::string& dir);
@@ -66,6 +70,11 @@ public:
         static StaticContent s;
         return &s;
     };
+
+    static logan_lite& get_log() {
+        static logan_lite l("renderer");
+        return l;
+    }
 };
 
 inline StaticContent* html() { return StaticContent::get(); };
