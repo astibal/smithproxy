@@ -58,12 +58,12 @@ socksServerCX::socksServerCX(baseCom* c, unsigned int s) : baseHostCX(c,s) {
     // copy setting from global/static variable - don't allow to change async
     // flag on the background during the object life
     async_dns = global_async_dns;
+    log = logan_attached<socksServerCX>(this, "com.socks");
 }
 
 socksServerCX::~socksServerCX() {
-
-    if(left)  { delete left; }
-    if(right) { delete right; }
+    delete left;
+    delete right;
 }
 
 
@@ -98,7 +98,7 @@ int socksServerCX::process_socks_hello() {
     
     // at this stage we have full client hello received
     if(version == 5) {
-        DIA___("socksServerCX::process_socks_init: version %d", version);
+        _dia("socksServerCX::process_socks_init: version %d", version);
         
         unsigned char server_hello[2];
         server_hello[0] = 5; // version
@@ -112,10 +112,10 @@ int socksServerCX::process_socks_hello() {
         return b->size();
     }
     else if(version == 4) {
-        DIA___("socksServerCX::process_socks_init: version %d", version);
+        _dia("socksServerCX::process_socks_init: version %d", version);
         return process_socks_request();
     } else {
-        DIAS___("socksServerCX::process_socks_init: unsupported socks version");
+        _dia("socksServerCX::process_socks_init: unsupported socks version");
         error(true);
     }
 
@@ -137,7 +137,7 @@ bool socksServerCX::choose_server_ip(std::vector<std::string>& target_ips) {
 
     std::string target = target_ips.at(index);
 
-    DIA___("choose_server_ip: chosen target: %s (index %d out of size %d)",target.c_str(), index, target_ips.size());
+    _dia("choose_server_ip: chosen target: %s (index %d out of size %d)",target.c_str(), index, target_ips.size());
     com()->nonlocal_dst_host() = target;
     com()->nonlocal_dst_resolved(true);
 
@@ -153,13 +153,13 @@ bool socksServerCX::process_dns_response(DNS_Response* resp) {
     if (resp) {
         for (DNS_Answer &a: resp->answers()) {
             std::string a_ip = a.ip(false);
-            if (a_ip.size()) {
-                DIA__("process_dns_response: target candidate: %s", a_ip.c_str());
+            if (! a_ip.empty()) {
+                _dia("process_dns_response: target candidate: %s", a_ip.c_str());
                 target_ips.push_back(a_ip);
             }
         }
 
-        if (target_ips.size()) {
+        if (! target_ips.empty()) {
             std::lock_guard<std::recursive_mutex> l_(DNS::get_dns_lock());
 
             DNS_Inspector di;
@@ -173,10 +173,10 @@ bool socksServerCX::process_dns_response(DNS_Response* resp) {
 
     if(!target_ips.empty() && choose_server_ip(target_ips)) {
         setup_target();
-        DIAS___("process_dns_response: waiting for policy check");
+        _dia("process_dns_response: waiting for policy check");
 
     } else {
-        ERRS___("process_dns_response: unable to find destination address for the request");
+        _dia("process_dns_response: unable to find destination address for the request");
         ret = false;
     }
 
@@ -190,15 +190,15 @@ int socksServerCX::process_socks_request() {
     if(readbuf()->size() < 5) {
         return 0; // wait for more complete request
     }
-    
-    DIAS___("socksServerCX::process_socks_request");
+
+    _dia("socksServerCX::process_socks_request");
 
     if(state_ == socks5_state::DNS_QUERY_SENT) {
-        DIAS___("socksServerCX::process_socks_request: triggered when waiting for DNS response");
+        _dia("socksServerCX::process_socks_request: triggered when waiting for DNS response");
         return 0;
     }
 
-    DUM___("Request dump:\n%s",hex_dump(readbuf()->data(),readbuf()->size()).c_str());
+    _dum("Request dump:\n%s",hex_dump(readbuf()->data(),readbuf()->size()).c_str());
     
               version = readbuf()->get_at<unsigned char>(0);
     unsigned char cmd = readbuf()->get_at<unsigned char>(1);
@@ -213,7 +213,7 @@ int socksServerCX::process_socks_request() {
         if(version == 5) {
             
             if(readbuf()->size() < 10) {
-                DIAS___("process_socks_request: socks5 request header too short");
+                _dia("process_socks_request: socks5 request header too short");
                 goto error;
             }
             
@@ -230,21 +230,21 @@ int socksServerCX::process_socks_request() {
                 
                 unsigned char fqdn_sz = readbuf()->get_at<unsigned char>(4);
                 if((unsigned int)fqdn_sz + 4 + 2 >= readbuf()->size()) {
-                    ERRS___("protocol error: request header out of boundary.");
+                    _err("protocol error: request header out of boundary.");
                     goto error;
                 }
-                
-                DIA___("socks5 protocol: fqdn size: %d",fqdn_sz);
+
+                _dia("socks5 protocol: fqdn size: %d",fqdn_sz);
                 std::string fqdn((const char*)&readbuf()->data()[5],fqdn_sz);
-                DIA___("socks5 protocol: fqdn requested: %s",fqdn.c_str());
+                _dia("socks5 protocol: fqdn requested: %s",fqdn.c_str());
                 req_str_addr = fqdn;
                 
                 req_port = ntohs(readbuf()->get_at<uint16_t>(5+fqdn_sz));
-                DIA___("socks5 protocol: port requested: %d",req_port);
+                _dia("socks5 protocol: port requested: %d",req_port);
 
                 com()->nonlocal_dst_port() = req_port;
                 com()->nonlocal_src(true);
-                DIA___("socksServerCX::process_socks_request: request (FQDN) for %s -> %s:%d",c_name(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
+                _dia("socksServerCX::process_socks_request: request (FQDN) for %s -> %s:%d",c_name(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
 
 
 
@@ -271,7 +271,7 @@ int socksServerCX::process_socks_request() {
                                 for( DNS_Answer& a: dns_resp->answers() ) {
                                     std::string a_ip = a.ip(false);
                                     if(! a_ip.empty() ) {
-                                        DIA___("cache candidate: %s",a_ip.c_str());
+                                        _dia("cache candidate: %s",a_ip.c_str());
                                         target_ips.push_back(a_ip);
                                     }
                                 }
@@ -282,11 +282,11 @@ int socksServerCX::process_socks_request() {
 
 
                 // cache is not populated - send out query
-                if(target_ips.size() <= 0) {
+                if(target_ips.empty()) {
                     // no targets, send DNS query
                     
                     std::string nameserver = "8.8.8.8";
-                    if(CfgFactory::get().db_nameservers.size()) {
+                    if(! CfgFactory::get().db_nameservers.empty()) {
                         nameserver = CfgFactory::get().db_nameservers.at(0);
                     }
 
@@ -300,7 +300,7 @@ int socksServerCX::process_socks_request() {
                     } else {
                         int dns_sock = send_dns_request(fqdn, A, nameserver);
                         if(dns_sock) {
-                            DIA___("dns request sent: %s", fqdn.c_str());
+                            _dia("dns request sent: %s", fqdn.c_str());
 
                             async_dns_socket.set(dns_sock, this, com());
                             async_dns_socket.opening();
@@ -309,15 +309,15 @@ int socksServerCX::process_socks_request() {
 
                             state_ = socks5_state::DNS_QUERY_SENT;
                         } else {
-                            ERR___("failed to send dns request: %s", fqdn.c_str());
+                            _err("failed to send dns request: %s", fqdn.c_str());
                             error(true);
                         }
                     }
                 } else {
-                    if(!target_ips.empty() && choose_server_ip(target_ips)) {
+                    if(! target_ips.empty() && choose_server_ip(target_ips)) {
                         setup_target();
                     } else {
-                        ERRS___("process_dns_response: unable to find destination address for the request");
+                        _err("process_dns_response: unable to find destination address for the request");
                         error(true);
                     }
                 }
@@ -326,13 +326,13 @@ int socksServerCX::process_socks_request() {
             if(atype == socks5_atype::IPV4) {
                 req_atype = socks5_atype::IPV4;
                 state_ = socks5_state::REQ_RECEIVED;
-                DIA___("socksServerCX::process_socks_request: request received, type %d", atype);
+                _dia("socksServerCX::process_socks_request: request received, type %d", atype);
                 
                 uint32_t dst = readbuf()->get_at<uint32_t>(4);
                 req_port = ntohs(readbuf()->get_at<uint16_t>(8));
                 com()->nonlocal_dst_port() = req_port;
                 com()->nonlocal_src(true);
-                DIA___("socksServerCX::process_socks_request: request for %s -> %s:%d",c_name(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
+                _dia("socksServerCX::process_socks_request: request for %s -> %s:%d",c_name(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
 
                 
                 req_addr.s_addr=dst;
@@ -340,20 +340,20 @@ int socksServerCX::process_socks_request() {
                 com()->nonlocal_dst_host() = string_format("%s",inet_ntoa(req_addr));
                 com()->nonlocal_dst_port() = req_port;
                 com()->nonlocal_src(true);
-                DIA___("socksServerCX::process_socks_request: request (IPv4) for %s -> %s:%d",c_name(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
+                _dia("socksServerCX::process_socks_request: request (IPv4) for %s -> %s:%d",c_name(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
                 setup_target();
             }
         }
         
         else if (version == 4) {
             if(readbuf()->size() < 8) {
-                DIAS___("process_socks_request: socks4 request header too short");
+                _dia("process_socks_request: socks4 request header too short");
                 goto error;
             }            
             
             req_atype = socks5_atype::IPV4;
             state_ = socks5_state::REQ_RECEIVED;
-            DIAS___("socksServerCX::process_socks_request: socks4 request received");
+            _dia("socksServerCX::process_socks_request: socks4 request received");
             
             req_port = ntohs(readbuf()->get_at<uint16_t>(2));
             uint32_t dst = readbuf()->get_at<uint32_t>(4);
@@ -364,12 +364,12 @@ int socksServerCX::process_socks_request() {
             com()->nonlocal_dst_host() = string_format("%s",inet_ntoa(req_addr));
             com()->nonlocal_dst_port() = req_port;
             com()->nonlocal_src(true);
-            DIA___("socksServerCX::process_socks_request: request (SOCKSv4) for %s -> %s:%d",c_name(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
+            _dia("socksServerCX::process_socks_request: request (SOCKSv4) for %s -> %s:%d",c_name(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
 
             setup_target();
         }
         else {
-            DIAS___("process_socks_request: unexpected socks version");
+            _dia("process_socks_request: unexpected socks version");
             goto error;
         }
         
@@ -377,7 +377,7 @@ int socksServerCX::process_socks_request() {
         return readbuf()->size();
 
     error:
-        DIA___("socksServerCX::process_socks_request: error %d",e);
+        _dia("socksServerCX::process_socks_request: error %d",e);
         error(true);
         return readbuf()->size();
 }
@@ -433,9 +433,9 @@ bool socksServerCX::setup_target() {
         
         
         left = n_cx;
-        DIA___("socksServerCX::setup_target: prepared left: %s",left->c_name());
+        _dia("socksServerCX::setup_target: prepared left: %s",left->c_name());
         right = target_cx;
-        DIA___("socksServerCX::setup_target: prepared right: %s",right->c_name());
+        _dia("socksServerCX::setup_target: prepared right: %s",right->c_name());
         
         // peers are now prepared for handover. Owning proxy will wipe this CX (it will be empty)
         // and if policy allows, left and right will be set (also in proxy owning this cx).
@@ -450,11 +450,8 @@ bool socksServerCX::new_message() {
     if(state_ == socks5_state::WAIT_POLICY && verdict_ == socks5_policy::PENDING) {
         return true;
     }
-    if(state_ == socks5_state::HANDOFF) {
-        return true;
-    }
-    
-    return false;
+    return state_ == socks5_state::HANDOFF;
+
 }
 
 void socksServerCX::verdict(socks5_policy p) {
@@ -499,8 +496,8 @@ int socksServerCX::process_socks_reply() {
         
         writebuf()->append(b,cur);
         state_ = socks5_state::REQRES_SENT;
-        
-        DUM___("socksServerCX::process_socks_reply: response dump:\n%s",hex_dump(b,cur).c_str());
+
+        _dum("socksServerCX::process_socks_reply: response dump:\n%s",hex_dump(b,cur).c_str());
 
         // response is about to be sent. In most cases client sends data on left,
         // but in case it's waiting ie. for banner, we must trigger proxy code to
@@ -537,10 +534,10 @@ int socksServerCX::process_socks_reply() {
 }
 
 void socksServerCX::pre_write() {
-    DEB___("socksServerCX::pre_write[%s]: writebuf=%d, readbuf=%d",c_name(),writebuf()->size(),readbuf()->size());
+    _deb("socksServerCX::pre_write[%s]: writebuf=%d, readbuf=%d",c_name(),writebuf()->size(),readbuf()->size());
     if(state_ == socks5_state::REQRES_SENT ) {
         if(writebuf()->size() == 0) {
-            DIA___("socksServerCX::pre_write[%s]: all flushed, state change to HANDOFF: writebuf=%d, readbuf=%d",c_name(),writebuf()->size(),readbuf()->size());
+            _dia("socksServerCX::pre_write[%s]: all flushed, state change to HANDOFF: writebuf=%d, readbuf=%d",c_name(),writebuf()->size(),readbuf()->size());
             waiting_for_peercom(true);
             state(socks5_state::HANDOFF);
         }
@@ -553,7 +550,7 @@ void socksServerCX::handle_event (baseCom *xcom) {
 
 
         if(com()->in_idleset(async_dns_socket.socket_)) {
-            WAR___("handle_event: idling dns socket %d, closing", async_dns_socket.socket_);
+            _war("handle_event: idling dns socket %d, closing", async_dns_socket.socket_);
             error(true);
 
             return;
@@ -566,18 +563,15 @@ void socksServerCX::handle_event (baseCom *xcom) {
         state_ = socks5_state::DNS_RESP_RECV;
 
         if(red <= 0) {
-            DEB___("handle_event: socket read returned %d",red);
+            _deb("handle_event: socket read returned %d",red);
             error(true);
-            if(resp) {
-                // unlikely I will get result on error, but one never knows
-                delete resp;
-            }
+            delete resp;
         } else {
-            DEB___("handle_event: OK - socket read returned %d",red);
+            _deb("handle_event: OK - socket read returned %d",red);
             if(process_dns_response(resp)) {
-                DEBS___("handle_event: OK, done");
+                _deb("handle_event: OK, done");
             } else {
-                ERRS___("handle_event: processing DNS response failed.");
+                _err("handle_event: processing DNS response failed.");
             }
         }
 
@@ -586,7 +580,7 @@ void socksServerCX::handle_event (baseCom *xcom) {
         async_dns_socket.closing();
 
     } else {
-        WARS___("handle_event: should not be here. Socket %d, async enabled: %d", async_dns_socket.socket_, async_dns);
+        _war("handle_event: should not be here. Socket %d, async enabled: %d", async_dns_socket.socket_, async_dns);
     }
 
 

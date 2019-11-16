@@ -118,6 +118,8 @@ private:
     // implement advanced logging
     DECLARE_C_NAME("sockHostCX");
     DECLARE_LOGGING(c_name);
+
+    logan_attached<socksServerCX> log;
 };
 
 #endif //_SOCKS5HOST_HPP_
