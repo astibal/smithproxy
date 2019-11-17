@@ -254,6 +254,7 @@ bool init_syslog() {
 
 bool load_config(std::string& config_f, bool reload) {
     bool ret = true;
+    auto this_daemon = DaemonFactory::instance();
     
     using namespace libconfig;
     if(! CfgFactory::get().cfgapi_init(config_f.c_str()) ) {
@@ -326,7 +327,7 @@ bool load_config(std::string& config_f, bool reload) {
 
             
             //init crashlog file with dafe default
-            set_crashlog("/tmp/smithproxy_crash.log");
+            this_daemon.set_crashlog("/tmp/smithproxy_crash.log");
 
             if(CfgFactory::cfg_root()["settings"].lookupValue("log_file",CfgFactory::get().log_file_base)) {
 
@@ -338,7 +339,7 @@ bool load_config(std::string& config_f, bool reload) {
                     CfgFactory::get().log_file = string_format(CfgFactory::get().log_file.c_str(), CfgFactory::get().tenant_name.c_str());
                     // prepare custom crashlog file
                     std::string crlog = CfgFactory::get().log_file + ".crashlog.log";
-                    set_crashlog(crlog.c_str());
+                    this_daemon.set_crashlog(crlog.c_str());
                     
                     std::ofstream * o = new std::ofstream(CfgFactory::get().log_file.c_str(),std::ios::app);
                     get_logger()->targets(CfgFactory::get().log_file, o);
@@ -429,6 +430,8 @@ int main(int argc, char *argv[]) {
             };
 
 
+    DaemonFactory& this_daemon = DaemonFactory::instance();
+
     if(buffer::use_pool)
         CRYPTO_set_mem_functions(mempool_alloc, mempool_realloc, mempool_free);
 
@@ -508,7 +511,7 @@ int main(int argc, char *argv[]) {
                 CfgFactory::get().tenant_name.c_str(),
                 CfgFactory::get().tenant_index);
 
-        daemon_set_tenant("smithproxy", CfgFactory::get().tenant_name);
+        this_daemon.set_tenant("smithproxy", CfgFactory::get().tenant_name);
         CfgFactory::get().tenant_name  = CfgFactory::get().tenant_name;
     } 
     else if (CfgFactory::get().tenant_name.size() > 0){
@@ -518,7 +521,7 @@ int main(int argc, char *argv[]) {
     }
     else {
         WARS_("Starting tenant: 0 (default)");
-        daemon_set_tenant("smithproxy","0"); 
+        this_daemon.set_tenant("smithproxy", "0");
     }
     
     
@@ -578,9 +581,9 @@ int main(int argc, char *argv[]) {
         get_logger()->level(cfgapi_table.logging.level);
     }
     
-    if(daemon_exists_pidfile()) {
+    if(this_daemon.exists_pidfile()) {
         FATS_("There is PID file already in the system.");
-        FAT_("Please make sure smithproxy is not running, remove %s and try again.",PID_FILE.c_str());
+        FAT_("Please make sure smithproxy is not running, remove %s and try again.", this_daemon.PID_FILE.c_str());
         exit(-5);
     }
     
@@ -600,7 +603,7 @@ int main(int argc, char *argv[]) {
         
         get_logger()->dup2_cout(false);
         INFS_("entering daemon mode");
-        daemonize();
+        this_daemon.daemonize();
 
 
         SmithProxy::instance().tenant_index(CfgFactory::get().tenant_index);
@@ -615,7 +618,7 @@ int main(int argc, char *argv[]) {
 
     }
     // write out PID file
-    daemon_write_pidfile();
+    this_daemon.write_pidfile();
 
     
     //     atexit(__libc_freeres);   
@@ -654,8 +657,8 @@ int main(int argc, char *argv[]) {
 
     SSLCom::certstore()->destroy();
     
-    if(cfg_daemonize) {    
-        daemon_unlink_pidfile();
+    if(cfg_daemonize) {
+        this_daemon.unlink_pidfile();
     }
     
     CRYPTO_cleanup_all_ex_data();

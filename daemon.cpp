@@ -60,18 +60,12 @@
 #define UNW_LOCAL_ONLY
 #include <libunwind.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
 
-    
-std::string PID_FILE(PID_FILE_DEFAULT);
-
-void daemon_set_tenant(const std::string& name, const std::string& tenant_id) {
+void DaemonFactory::set_tenant(const std::string& name, const std::string& tenant_id) {
     PID_FILE = string_format("/var/run/%s.%s.pid",name.c_str(), tenant_id.c_str());
 }
 
-void daemonize(void) {
+void DaemonFactory::daemonize() {
         
     /* Our process ID and Session ID */
     pid_t pid, sid;
@@ -130,34 +124,34 @@ void daemonize(void) {
     DIAS_("daemonize: finished");
 }
 
-void daemon_write_pidfile() {
+void DaemonFactory::write_pidfile() {
     FILE* pf = fopen(PID_FILE.c_str(),"w");
     fprintf(pf,"%d",getpid());
     fclose(pf);
 }
 
-void daemon_unlink_pidfile() {
+void DaemonFactory::unlink_pidfile() {
     unlink(PID_FILE.c_str());
 }
 
-bool daemon_exists_pidfile() {
+bool DaemonFactory::exists_pidfile() {
     struct stat st;
     int result = stat(PID_FILE.c_str(), &st);
     return result == 0;
 }
 
-int daemon_get_limit_fd() {
+int DaemonFactory::get_limit_fd() {
     struct rlimit r;
     int ret = getrlimit(RLIMIT_NOFILE,&r);
     if(ret < 0) {
-        ERR_("daemon_get_limit_fd: cannot obtain fd limits: %s", string_error().c_str());
+        ERR_("get_limit_fd: cannot obtain fd limits: %s", string_error().c_str());
         return -1;
     }
 
     return r.rlim_cur;
 }
 
-void daemon_set_limit_fd(int max) {
+void DaemonFactory::set_limit_fd(int max) {
     int n = max;
     if(max == 0) 
         n = 100000;
@@ -169,29 +163,27 @@ void daemon_set_limit_fd(int max) {
     int ret = setrlimit(RLIMIT_NOFILE,&r);
 
     if(ret < 0) {
-        ERR_("daemon_set_limit_fd: cannot set fd limits: %s", string_error().c_str());
+        ERR_("set_limit_fd: cannot set fd limits: %s", string_error().c_str());
     }
 }
 
-void set_signal(unsigned int SIG, void (*sig_handler)(int)) {
+void DaemonFactory::set_signal(unsigned int SIG, void (*sig_handler)(int)) {
     struct sigaction act_segv;
     sigemptyset(&act_segv.sa_mask);
     act_segv.sa_flags = 0;
     
     if(sig_handler != nullptr)  act_segv.sa_handler = sig_handler;
     
-    sigaction( SIG, &act_segv, NULL);
+    sigaction( SIG, &act_segv, nullptr);
 }
 
-#define LOG_FILENAME_SZ 512
-volatile char crashlog_file[LOG_FILENAME_SZ];
 
-void set_crashlog(const char* file) {
+void DaemonFactory::set_crashlog(const char* file) {
     memset((void*)crashlog_file,0,LOG_FILENAME_SZ);
     strncpy((char*)crashlog_file,file,LOG_FILENAME_SZ-1);
 }
 
-static void uw_btrace_handler(int sig) {
+void DaemonFactory::uw_btrace_handler(int sig) {
     thread_local unw_cursor_t cursor; 
     thread_local unw_context_t uc;
     thread_local unw_word_t ip;
@@ -200,10 +192,12 @@ static void uw_btrace_handler(int sig) {
     unw_getcontext(&uc);
     unw_init_local(&cursor, &uc);
 
+    DaemonFactory& df = DaemonFactory::instance();
+
     char buf_line[256];
     int chars = snprintf(buf_line,255," ======== Smithproxy exception handler (sig %d) =========\n",sig);
 
-    int CRLOG = open((const char*)crashlog_file,O_CREAT | O_WRONLY | O_TRUNC,S_IRUSR|S_IWUSR);
+    int CRLOG = open((const char*)df.crashlog_file, O_CREAT | O_WRONLY | O_TRUNC,S_IRUSR|S_IWUSR);
     write(STDERR_FILENO,buf_line,chars);
     write(CRLOG,buf_line,chars);
     write(STDERR_FILENO,"Traceback:\n",11);
@@ -228,13 +222,13 @@ static void uw_btrace_handler(int sig) {
     write(STDERR_FILENO," ===============================================\n",50);
     write(CRLOG," ===============================================\n",50);
     close(CRLOG);
-    
-    daemon_unlink_pidfile();
+
+    df.unlink_pidfile();
     
     exit(-1);
 }
 
-void set_daemon_signals(void (*terminate_handler)(int),void (*reload_handler)(int)) {
+void DaemonFactory::set_daemon_signals(void (*terminate_handler)(int),void (*reload_handler)(int)) {
     // install signal handler, we do want to release the memory properly
         // signal handler installation
     
@@ -247,6 +241,3 @@ void set_daemon_signals(void (*terminate_handler)(int),void (*reload_handler)(in
     set_signal(SIGSEGV,uw_btrace_handler);
 }
 
-#ifdef __cplusplus
-}
-#endif

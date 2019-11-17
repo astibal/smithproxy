@@ -167,8 +167,10 @@ void SmithProxy::run() {
     if(plain_proxy) {
         INFS_("Starting TCP listener");
         plain_thread = new std::thread([]() {
-            set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
-            DIA_("smithproxy_tcp: max file descriptors: %d",daemon_get_limit_fd());
+            auto this_daemon = DaemonFactory::instance();
+
+            this_daemon.set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
+            DIA_("smithproxy_tcp: max file descriptors: %d", this_daemon.get_limit_fd());
 
             SmithProxy::instance().plain_proxy->run();
             DIAS_("plaintext workers torn down.");
@@ -180,9 +182,11 @@ void SmithProxy::run() {
     if(ssl_proxy) {
         INFS_("Starting TLS listener");
         ssl_thread = new std::thread([] () {
-            set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
-            daemon_set_limit_fd(0);
-            DIA_("smithproxy_tls: max file descriptors: %d",daemon_get_limit_fd());
+            auto this_daemon = DaemonFactory::instance();
+
+            this_daemon.set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
+            this_daemon.set_limit_fd(0);
+            DIA_("smithproxy_tls: max file descriptors: %d", this_daemon.get_limit_fd());
 
             SmithProxy::instance().ssl_proxy->run();
             DIAS_("ssl workers torn down.");
@@ -194,9 +198,11 @@ void SmithProxy::run() {
     if(dtls_proxy) {
         INFS_("Starting DTLS listener");
         dtls_thread = new std::thread([] () {
-            set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
-            daemon_set_limit_fd(0);
-            DIA_("smithproxy_tls: max file descriptors: %d",daemon_get_limit_fd());
+            auto this_daemon = DaemonFactory::instance();
+
+            this_daemon.set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
+            this_daemon.set_limit_fd(0);
+            DIA_("smithproxy_tls: max file descriptors: %d", this_daemon.get_limit_fd());
 
             SmithProxy::instance().dtls_proxy->run();
             DIAS_("dtls workers torn down.");
@@ -211,9 +217,11 @@ void SmithProxy::run() {
 
         INFS_("Starting UDP listener");
         udp_thread = new std::thread([] () {
-            set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
-            daemon_set_limit_fd(0);
-            DIA_("smithproxy_udp: max file descriptors: %d",daemon_get_limit_fd());
+            auto this_daemon = DaemonFactory::instance();
+
+            this_daemon.set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
+            this_daemon.set_limit_fd(0);
+            DIA_("smithproxy_udp: max file descriptors: %d", this_daemon.get_limit_fd());
 
             SmithProxy::instance().udp_proxy->run();
             DIAS_("udp workers torn down.");
@@ -225,9 +233,11 @@ void SmithProxy::run() {
     if(socks_proxy) {
         INFS_("Starting SOCKS5 listener");
         socks_thread = new std::thread([] () {
-            set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
-            daemon_set_limit_fd(0);
-            DIA_("smithproxy_skx: max file descriptors: %d",daemon_get_limit_fd());
+            auto this_daemon = DaemonFactory::instance();
+
+            this_daemon.set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
+            this_daemon.set_limit_fd(0);
+            DIA_("smithproxy_skx: max file descriptors: %d", this_daemon.get_limit_fd());
 
             SmithProxy::instance().socks_proxy->run();
             DIAS_("socks workers torn down.");
@@ -237,9 +247,11 @@ void SmithProxy::run() {
     }
 
     cli_thread = new std::thread([] () {
+        auto this_daemon = DaemonFactory::instance();
+
         INFS_("Starting CLI");
-        set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
-        DIA_("smithproxy_cli: max file descriptors: %d",daemon_get_limit_fd());
+        this_daemon.set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
+        DIA_("smithproxy_cli: max file descriptors: %d", this_daemon.get_limit_fd());
 
         cli_loop(cli_port);
         DIAS_("cli workers torn down.");
