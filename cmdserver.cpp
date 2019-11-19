@@ -2976,7 +2976,7 @@ int cli_diag_proxy_session_list(struct cli_def *cli, const char *command, char *
 
 int cli_diag_proxy_session_io_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
-    int f;
+    int f = 0;
     flag_set<int>(&f, SL_IO_OSBUF_NZ);
     flag_set<int>(&f, SL_IO_EMPTY);
 
