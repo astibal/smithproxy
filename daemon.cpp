@@ -183,6 +183,15 @@ void DaemonFactory::set_crashlog(const char* file) {
     strncpy((char*)crashlog_file,file,LOG_FILENAME_SZ-1);
 }
 
+void writecrash(int fd, const char* msg, int len)  {
+   int w = 0; int rep = 0;
+   do {
+       int curw = ::write(fd, msg, len);
+       if(curw > 0) w+= w;
+       rep++;
+   } while(w < len || rep < 10);
+}
+
 void DaemonFactory::uw_btrace_handler(int sig) {
     thread_local unw_cursor_t cursor; 
     thread_local unw_context_t uc;
@@ -198,10 +207,10 @@ void DaemonFactory::uw_btrace_handler(int sig) {
     int chars = snprintf(buf_line,255," ======== Smithproxy exception handler (sig %d) =========\n",sig);
 
     int CRLOG = open((const char*)df.crashlog_file, O_CREAT | O_WRONLY | O_TRUNC,S_IRUSR|S_IWUSR);
-    write(STDERR_FILENO,buf_line,chars);
-    write(CRLOG,buf_line,chars);
-    write(STDERR_FILENO,"Traceback:\n",11);
-    write(CRLOG,"Traceback:\n",11);
+    writecrash(STDERR_FILENO,buf_line,chars);
+    writecrash(CRLOG,buf_line,chars);
+    writecrash(STDERR_FILENO,"Traceback:\n",11);
+    writecrash(CRLOG,"Traceback:\n",11);
 
     while (unw_step(&cursor) > 0) {
         memset(buf_line,0,256);
@@ -215,12 +224,12 @@ void DaemonFactory::uw_btrace_handler(int sig) {
         
         int chars = snprintf(buf_line, 255, "ip = %lx, sp = %lx: (%s+0x%x) [%p]\n", (long) ip, (unsigned long) sp, buf_fun, (unsigned int) offset, (void*)ip);
 
-        write(CRLOG,buf_line,chars);
-        write(STDERR_FILENO,buf_line,chars);
+        writecrash(CRLOG,buf_line,chars);
+        writecrash(STDERR_FILENO,buf_line,chars);
     }
-    
-    write(STDERR_FILENO," ===============================================\n",50);
-    write(CRLOG," ===============================================\n",50);
+
+    writecrash(STDERR_FILENO," ===============================================\n",50);
+    writecrash(CRLOG," ===============================================\n",50);
     close(CRLOG);
 
     df.unlink_pidfile();
@@ -239,5 +248,14 @@ void DaemonFactory::set_daemon_signals(void (*terminate_handler)(int),void (*rel
     
     set_signal(SIGABRT,uw_btrace_handler);
     set_signal(SIGSEGV,uw_btrace_handler);
+}
+
+std::string& DaemonFactory::class_name() const {
+    static std::string s("DaemonFactory");
+    return s;
+}
+
+std::string DaemonFactory::hr() const {
+    return string_format("pidfile=(%s)", PID_FILE.c_str());
 }
 

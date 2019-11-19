@@ -46,9 +46,16 @@
 #define LOG_FILENAME_SZ 512
 
 
-struct DaemonFactory {
+struct DaemonFactory : public LoganMate {
     std::string PID_FILE = PID_FILE_DEFAULT;
     volatile char crashlog_file[LOG_FILENAME_SZ];
+
+    [[nodiscard]] std::string &class_name() const override;
+    [[nodiscard]] std::string hr() const override;
+
+    DaemonFactory() : log(logan_attached<DaemonFactory>(this, "service")) {
+        ::memset((void*)crashlog_file, 0, LOG_FILENAME_SZ);
+    }
 
     static DaemonFactory& instance() {
         static DaemonFactory d;
@@ -66,6 +73,8 @@ struct DaemonFactory {
     void set_daemon_signals(void (*terminate_handler)(int),void (*reload_handler)(int));
     void set_crashlog(const char* file);
     static void uw_btrace_handler(int sig);
+
+    logan_attached<DaemonFactory> log;
 };
 
 
