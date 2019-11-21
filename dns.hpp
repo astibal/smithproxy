@@ -71,15 +71,38 @@ typedef enum DNS_Record_Type_ {
     OPT=41
 } DNS_Record_Type;
 
-extern const char* _unknown;
-extern const char* str_a;
-extern const char* str_aaaa;
-extern const char* str_cname;
-extern const char* str_txt;
-extern const char* str_opt;
-extern const char* str_soa;
 
-const char* dns_record_type_str(int a);
+class DNSFactory {
+    const char* _unknown = "unknown";
+    const char* str_a = "A";
+    const char* str_aaaa = "AAAA";
+    const char* str_cname = "CNAME";
+    const char* str_txt= "TXT";
+    const char* str_opt = "OPT";
+    const char* str_soa = "SOA";
+
+
+    DNSFactory() : log(get_log()) {};
+
+    logan_lite& log;
+public:
+    DNSFactory(DNSFactory const&) = delete;
+    void operator=(DNSFactory const&) = delete;
+
+    const char *dns_record_type_str(int a);
+    int load_qname(unsigned char* ptr, unsigned int maxlen, std::string* str_storage);
+    int generate_dns_request(unsigned short id, buffer& b, std::string const& hostname, DNS_Record_Type t);
+
+    static DNSFactory& get() {
+        static DNSFactory d;
+        return d;
+    };
+
+    static logan_lite& get_log() {
+        static logan_lite l("com.dns");
+        return l;
+    }
+};
 
 struct DNS_Question {
     std::string rec_str;
@@ -87,7 +110,7 @@ struct DNS_Question {
     uint16_t rec_class = 0;
     size_t mem_size() const { return rec_str.size()+1 + 2*sizeof(uint16_t); };
     std::string hr() const { return string_format("type: %s class: %d record: %s", 
-                                               dns_record_type_str(rec_type),
+                                               DNSFactory::get().dns_record_type_str(rec_type),
                                                rec_class, rec_str.c_str()); }
 };
 
@@ -146,7 +169,8 @@ struct DNS_Answer {
     
     std::string hr() const { 
         
-        std::string ret = string_format("type: %s, class: %d, ttl: %d",dns_record_type_str(type_),class_,ttl_);
+        std::string ret = string_format("type: %s, class: %d, ttl: %d",
+                                        DNSFactory::get().dns_record_type_str(type_),class_,ttl_);
         ret += ip();
         return ret;
     };
@@ -182,7 +206,7 @@ protected:
 
 private:
     logan_attached<DNS_Packet> log;
-    
+
 public:
     explicit DNS_Packet() {
         log = logan::attach<DNS_Packet>(this, "dns");
@@ -216,7 +240,7 @@ public:
     uint16_t question_class_0() const { if( ! questions_list_.empty() ) { return questions_list_.at(0).rec_class; } return 0; };
     
     std::string answer_str() const;
-    std::vector<CidrAddress*> get_a_anwsers();
+    std::vector<CidrAddress*> get_a_anwsers() const;
 
     inline std::vector<DNS_Question>& questions() { return questions_list_; };
     inline std::vector<DNS_Answer>& answers() { return answers_list_; };
@@ -229,7 +253,6 @@ public:
 };
 
 #define DNS_REQUEST_OVERHEAD 17
-int generate_dns_request(unsigned short id, buffer& b, std::string const& hostname, DNS_Record_Type t);
 
 class DNS_Request : public DNS_Packet {
 private:

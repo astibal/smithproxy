@@ -53,7 +53,8 @@
 
 int send_dns_request (std::string const& hostname, DNS_Record_Type t, std::string const& nameserver) {
     if (nameserver.empty()) {
-        ERR_("resolve_dns_s: query %s for type %s: missing nameserver", hostname.c_str(), dns_record_type_str(t));
+        ERR_("resolve_dns_s: query %s for type %s: missing nameserver", hostname.c_str(),
+             DNSFactory::get().dns_record_type_str(t));
     }
 
     buffer b(256);
@@ -62,7 +63,7 @@ int send_dns_request (std::string const& hostname, DNS_Record_Type t, std::strin
     RAND_bytes(rand_pool, 2);
     unsigned short id = *(unsigned short *) rand_pool;
 
-    int s = generate_dns_request(id, b, hostname, t);
+    int s = DNSFactory::get().generate_dns_request(id, b, hostname, t);
     DUM_("DNS generated request: size %db\n%s", s, hex_dump(b).c_str());
 
     // create UDP socket

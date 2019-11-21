@@ -288,7 +288,7 @@ int cli_test_dns_genrequest(struct cli_def *cli, const char *command, char *argv
 #endif
         unsigned short id = *(unsigned short*)rand_pool;
 
-        int s = generate_dns_request(id,b,argv[0],A);
+        int s = DNSFactory::get().generate_dns_request(id,b,argv[0],A);
         cli_print(cli,"DNS generated request: \n%s, %dB",hex_dump(b).c_str(), s);
     } else {
         cli_print(cli,"you need to specify hostname");
@@ -312,7 +312,7 @@ DNS_Response* send_dns_request(struct cli_def *cli, std::string hostname, DNS_Re
 #endif
     unsigned short id = *(unsigned short*)rand_pool;
 
-    int s = generate_dns_request(id,b,hostname,t);
+    int s = DNSFactory::get().generate_dns_request(id,b,hostname,t);
     cli_print(cli,"DNS generated request: \n%s, %dB",hex_dump(b).c_str(),s);
 
     // create UDP socket

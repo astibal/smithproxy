@@ -70,24 +70,24 @@ void DaemonFactory::daemonize() {
     /* Our process ID and Session ID */
     pid_t pid, sid;
     
-    DIAS_("daemonize start");
+    _dia("daemonize start");
     
     struct stat st;
     if( stat(PID_FILE.c_str(),&st) == 0) {
-        ERRS_("There seems to be smithproxy already running in the system. Aborting.");
+        _err("There seems to be smithproxy already running in the system. Aborting.");
         exit(EXIT_FAILURE);
     }
     
     /* Fork off the parent process */
     pid = fork();
     if (pid < 0) {
-            FATS_("daemonize: failed to fork!");
+            _fat("daemonize: failed to fork!");
             exit(EXIT_FAILURE);
     }
     /* If we got a good PID, then
         we can exit the parent process. */
     if (pid > 0) {
-            DIAS_("daemonize: exiting from master");
+            _dia("daemonize: exiting from master");
             exit(EXIT_SUCCESS);
     }
 
@@ -100,7 +100,7 @@ void DaemonFactory::daemonize() {
     sid = setsid();
     if (sid < 0) {
             /* Log the failure */
-            FATS_("daemonize: failed to setsid!");
+            _fat("daemonize: failed to setsid!");
             exit(EXIT_FAILURE);
     }
     
@@ -109,7 +109,7 @@ void DaemonFactory::daemonize() {
     /* Change the current working directory */
     if ((chdir("/")) < 0) {
             /* Log the failure */
-            FATS_("daemonize: failed to chdir to '/'!");
+            _fat("daemonize: failed to chdir to '/'!");
             exit(EXIT_FAILURE);
     }
     
@@ -121,7 +121,7 @@ void DaemonFactory::daemonize() {
     close(STDOUT_FILENO);
     close(STDERR_FILENO);
         
-    DIAS_("daemonize: finished");
+    _dia("daemonize: finished");
 }
 
 void DaemonFactory::write_pidfile() {
@@ -144,7 +144,7 @@ int DaemonFactory::get_limit_fd() {
     struct rlimit r;
     int ret = getrlimit(RLIMIT_NOFILE,&r);
     if(ret < 0) {
-        ERR_("get_limit_fd: cannot obtain fd limits: %s", string_error().c_str());
+        _err("get_limit_fd: cannot obtain fd limits: %s", string_error().c_str());
         return -1;
     }
 
@@ -163,7 +163,7 @@ void DaemonFactory::set_limit_fd(int max) {
     int ret = setrlimit(RLIMIT_NOFILE,&r);
 
     if(ret < 0) {
-        ERR_("set_limit_fd: cannot set fd limits: %s", string_error().c_str());
+        _err("set_limit_fd: cannot set fd limits: %s", string_error().c_str());
     }
 }
 
@@ -222,7 +222,7 @@ void DaemonFactory::uw_btrace_handler(int sig) {
         unw_get_reg(&cursor, UNW_REG_IP, &ip);
         unw_get_reg(&cursor, UNW_REG_SP, &sp);
         
-        int chars = snprintf(buf_line, 255, "ip = %lx, sp = %lx: (%s+0x%x) [%p]\n", (long) ip, (unsigned long) sp, buf_fun, (unsigned int) offset, (void*)ip);
+        chars = snprintf(buf_line, 255, "ip = %lx, sp = %lx: (%s+0x%x) [%p]\n", (long) ip, (unsigned long) sp, buf_fun, (unsigned int) offset, (void*)ip);
 
         writecrash(CRLOG,buf_line,chars);
         writecrash(STDERR_FILENO,buf_line,chars);

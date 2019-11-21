@@ -48,18 +48,10 @@ DEFINE_LOGGING(DNS_Packet);
 DEFINE_LOGGING(DNS_Request);
 DEFINE_LOGGING(DNS_Response);
 
-const char* _unknown = "unknown";
-const char* str_a = "A";
-const char* str_aaaa = "AAAA";
-const char* str_cname = "CNAME";
-const char* str_txt= "TXT";
-const char* str_opt = "OPT";
-const char* str_soa = "SOA";
-
 
 //std::unordered_map<std::string, ptr_cache<std::string,DNS_Response>*> inspect_per_ip_dns_cache;
 
-const char* dns_record_type_str(int a) {
+const char* DNSFactory::dns_record_type_str(int a) {
     switch(a) {
         case A: return str_a;
         case AAAA: return str_aaaa;
@@ -73,15 +65,15 @@ const char* dns_record_type_str(int a) {
 }
 
 
-int load_qname(unsigned char* ptr, unsigned int maxlen, std::string* str_storage=nullptr) {
+int DNSFactory::load_qname(unsigned char* ptr, unsigned int maxlen, std::string* str_storage = nullptr) {
     unsigned int xi = 0;
 
-    DEB_("load_qname:\n%s",hex_dump(ptr,maxlen).c_str());
+    _deb("load_qname:\n%s",hex_dump(ptr,maxlen).c_str());
     
     
     if(ptr[xi] == 0) {
         xi++;
-        DEBS_("zero label");
+        _deb("zero label");
     } 
     else if(ptr[xi] < 0xC0) {
         std::string lab;
@@ -94,17 +86,17 @@ int load_qname(unsigned char* ptr, unsigned int maxlen, std::string* str_storage
         
         if(str_storage) str_storage->assign(lab);
         
-        DEB_("plain label: %s",ESC(lab));
+        _deb("plain label: %s",ESC(lab));
     } else {
         uint8_t label = ptr[++xi];
-        DEB_("ref label: %d",label);
+        _deb("ref label: %d",label);
         ++xi;
     }
     
     return xi;
 }
 
-int generate_dns_request(unsigned short id, buffer& b, std::string const& h, DNS_Record_Type t) {
+int DNSFactory::generate_dns_request(unsigned short id, buffer& b, std::string const& h, DNS_Record_Type t) {
     
     std::string hostname = "." + h;
     //need to add dot at the beginning
@@ -285,7 +277,7 @@ int DNS_Packet::load(buffer* src) {
                 if(!failure) {
                     _dia("DNS_Packet::load: OK question[%d]: name: %s, type: %s, class: %d",
                             questions_togo, question_temp.rec_str.c_str(),
-                                        dns_record_type_str(question_temp.rec_type),question_temp.rec_class);
+                            DNSFactory::get().dns_record_type_str(question_temp.rec_type),question_temp.rec_class);
                 } else {
                     _dia("DNS_Packet::load: FAILED question[%d]",questions_togo);
                     break;
@@ -328,7 +320,7 @@ int DNS_Packet::load(buffer* src) {
             for(unsigned int i = mem_counter; i < src->size() && authorities_togo > 0; ) {
                 DNS_Answer answer_temp;
                 
-                int xi = load_qname(src->data()+i,src->size()-i);
+                int xi = DNSFactory::get().load_qname(src->data()+i,src->size()-i);
                 
                 //unsigned short pre_type = ntohs(src->get_at<unsigned short>(i+1));
                 unsigned short pre_type = ntohs(src->get_at<unsigned short>(i+xi));                
@@ -379,14 +371,15 @@ int DNS_Packet::load(buffer* src) {
             for(unsigned int i = mem_counter; i < src->size() && additionals_togo > 0; ) {
   
                 
-                int xi = load_qname(src->data()+i,src->size()-i);
+                int xi = DNSFactory::get().load_qname(src->data()+i,src->size()-i);
                 
                 //unsigned short pre_type = ntohs(src->get_at<unsigned short>(i+1));
                 unsigned short pre_type = ntohs(src->get_at<unsigned short>(i+xi));                
                 i += (xi + 2);
                 
                
-                _dia("DNS inspect: Additionals: packet pre_type = %s(%d)",dns_record_type_str(pre_type), pre_type);
+                _dia("DNS inspect: Additionals: packet pre_type = %s(%d)",
+                        DNSFactory::get().dns_record_type_str(pre_type), pre_type);
                 
                 if(pre_type == OPT) {
                     //THIS IS DNSSEC ADDITIONALS - we need to handle it better, now remove                
