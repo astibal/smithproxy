@@ -47,7 +47,7 @@ int CidrAddress::contains(CIDR* other) {
 }
 
 
-std::string FqdnAddress::to_string(int verbosity) {
+std::string FqdnAddress::to_string(int verbosity) const {
 
     std::stringstream ret;
 

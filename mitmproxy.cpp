@@ -134,12 +134,12 @@ MitmProxy::~MitmProxy() {
     }
 }
 
-std::string MitmProxy::to_string(int verbosity) { 
+std::string MitmProxy::to_string(int verbosity) const {
     std::stringstream r;
     r <<  "MitmProxy:" + baseProxy::to_string(verbosity);
     
     if(verbosity >= INF) {
-        r << string_format(" policy: %d ",matched_policy());
+        r << string_format(" policy: %d ", matched_policy());
         
         if(identity_resolved()) {
             r << string_format("identity: %s ",identity_->username().c_str());
@@ -174,7 +174,7 @@ std::string MitmProxy::to_string(int verbosity) {
 void MitmProxy::identity_resolved(bool b) {
     identity_resolved_ = b;
 }
-bool MitmProxy::identity_resolved() {
+bool MitmProxy::identity_resolved() const {
     return identity_resolved_;
 }
 

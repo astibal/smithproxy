@@ -50,7 +50,7 @@
 class AddressObject : public socle::sobject {
 public:
     virtual bool match(CIDR* c) = 0;
-    std::string to_string(int=iINF) override = 0;
+    std::string to_string(int=iINF) const override = 0;
     AddressObject() : log(get_log()) {};
 
     ~AddressObject() override = default;
@@ -75,7 +75,7 @@ public:
     bool match(CIDR* c) override { return (contains(c) >= 0); };
     bool ask_destroy() override { return false; };
     
-    std::string to_string(int verbosity=iINF) override {
+    std::string to_string(int verbosity=iINF) const override {
         char* temp = cidr_to_str(c_);
 
         std::string ret = string_format("Cidr: %s",temp);
@@ -102,7 +102,7 @@ public:
     
     bool match(CIDR* c) override;
     bool ask_destroy() override { return false; };
-    std::string to_string(int verbosity=iINF) override;
+    std::string to_string(int verbosity=iINF) const override;
 protected:
     std::string fqdn_;
 

@@ -52,15 +52,17 @@ bool MitmHostCX::ask_destroy() {
     return true;
 }
 
-std::string MitmHostCX::to_string(int verbosity) {
+std::string MitmHostCX::to_string(int verbosity) const {
 
     std::stringstream ret;
 
+    ret << "MitmHostCX:";
+
     if(parent_proxy()) {
-        ret << "MitmHostCX[" << parent_flag() << "]:" << parent_proxy()->to_string(iINF);
-    } else {
-        ret << "MitmHostCX: " << AppHostCX::name();
+        ret << "[" << parent_flag() << "]:";
     }
+
+    ret << "<" << AppHostCX::to_string(verbosity) << ">";
 
     return ret.str();
 }

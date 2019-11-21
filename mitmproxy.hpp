@@ -99,10 +99,10 @@ public:
     
     
     
-    int matched_policy() { return matched_policy_; }
-    void matched_policy(int p) { matched_policy_ = p; }    
+    int matched_policy() const { return matched_policy_; }
+    void matched_policy(int p)  { matched_policy_ = p; }
     
-    inline bool identity_resolved();
+    inline bool identity_resolved() const;
     inline void identity_resolved(bool b);
     shm_logon_info_base* identity() { return identity_; }
     inline void identity(shm_logon_info_base* i) { if(identity_ != nullptr) { delete identity_; }  if(i != nullptr) { identity_ = i->clone(); } }
@@ -111,10 +111,10 @@ public:
     bool apply_id_policies(baseHostCX* cx);
    
     
-    bool write_payload(void) { return write_payload_; } 
+    bool write_payload() const { return write_payload_; }
     void write_payload(bool b) { write_payload_ = b; }
     
-    socle::trafLog* tlog() { return tlog_; }
+    socle::trafLog* tlog() const { return tlog_; }
     void toggle_tlog();
     
     explicit MitmProxy(baseCom* c);
@@ -145,8 +145,8 @@ public:
     // check if content has been pulled from cache and return true if so
     virtual bool handle_cached_response(MitmHostCX* cx);
     
-    virtual bool ask_destroy() { state().dead(true); return true; };
-    virtual std::string to_string(int verbosity=iINF);
+    bool ask_destroy() override { state().dead(true); return true; };
+    std::string to_string(int verbosity=iINF) const override;
     
     virtual int handle_sockets_once(baseCom*);
     

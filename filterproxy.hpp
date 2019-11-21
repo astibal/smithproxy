@@ -69,8 +69,8 @@ struct FilterResult : public socle::sobject {
     lockbuffer right_in;  // what you read on right side of proxy  (-> filtering will put it in left out)
     lockbuffer right_out; // what you should write to the right side of proxy
     
-    virtual std::string to_string(int verbosity=iINF) { return std::string("FilterResult"); };    
-    virtual bool ask_destroy() { return false; };    
+    std::string to_string(int verbosity=iINF) const override { static std::string r("FilterResult"); return r; };
+    bool ask_destroy() override { return false; };
 };
 
 class MitmProxy;
@@ -81,8 +81,8 @@ public:
     FilterProxy(MitmProxy* parent);
     virtual ~FilterProxy() { if(result_) delete result_; };
     
-    virtual std::string to_string(int verbosity=iINF) { return std::string("FilterProxy"); };
-    virtual bool ask_destroy() { return false; };
+    std::string to_string(int verbosity=iINF) const override { static std::string r("FilterProxy"); return r; };
+    bool ask_destroy() override { return false; };
     
     FilterResult* result() { return result_; }
     

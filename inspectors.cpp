@@ -123,7 +123,7 @@ std::pair<std::string,std::string> Inspector::split_fqdn_subdomain(std::string& 
 
 std::regex DNS_Inspector::wildcard = std::regex("[^.]+\\.(.*)$");
 
-bool DNS_Inspector::interested(AppHostCX* cx) {
+bool DNS_Inspector::interested(AppHostCX* cx) const {
     if(cx->com()->nonlocal_dst_port() == 53)
         return true;
     return false;
@@ -437,7 +437,7 @@ bool DNS_Inspector::validate_response(DNS_Response* ptr) {
     return false;
 }
 
-std::string DNS_Inspector::to_string(int verbosity) {
+std::string DNS_Inspector::to_string(int verbosity) const {
     std::string r = Inspector::to_string()+"\n  ";
     
     r += string_format("tcp: %d requests: %d valid responses: %d stored: %d",is_tcp,requests_.size(),responses_,stored_);

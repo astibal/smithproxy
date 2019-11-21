@@ -473,7 +473,7 @@ int DNS_Packet::load(buffer* src) {
 };
 
 
-std::string DNS_Packet::to_string(int verbosity) {
+std::string DNS_Packet::to_string(int verbosity) const {
     std::string r = string_format("%s: id: %d, type 0x%x [ ",c_name(),id_,flags_);
     for(auto x = questions_list_.begin(); x != questions_list_.end(); ++x) {
         r += x->hr();
@@ -511,7 +511,7 @@ std::string DNS_Packet::answer_str() const {
     return ret;
 }
 
-std::vector< CidrAddress*> DNS_Packet::get_a_anwsers() {
+std::vector< CidrAddress*> DNS_Packet::get_a_anwsers() const {
     std::vector<CidrAddress*> ret;
     
     for(auto const& x: answers_list_) {

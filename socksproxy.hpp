@@ -54,7 +54,7 @@ public:
     
     virtual void socks5_handoff(socksServerCX* cx);
 
-    std::string to_string(int lev=iINF) override { std::string r(string_format("SocksProxy[%s]", MitmProxy::to_string().c_str())); return r; };
+    std::string to_string(int lev=iINF) const override { std::string r(string_format("SocksProxy[%s]", MitmProxy::to_string().c_str())); return r; };
 
     DECLARE_C_NAME("SocksProxy");
     DECLARE_LOGGING(to_string);
@@ -75,7 +75,7 @@ public:
     baseHostCX* new_cx(int s) override;
     void on_left_new(baseHostCX* just_accepted_cx) override;
 
-    std::string to_string(int lev=iINF) override { static std::string r(string_format("MitmSocksProxy[%s]", baseProxy::to_string().c_str())); return r; };
+    std::string to_string(int lev=iINF) const override { static std::string r(string_format("MitmSocksProxy[%s]", baseProxy::to_string().c_str())); return r; };
 
     DECLARE_C_NAME("MitmSocksProxy");
     DECLARE_LOGGING(to_string);

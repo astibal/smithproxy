@@ -41,7 +41,7 @@
 
 DEFINE_LOGGING(PolicyRule);
 
-std::string PolicyRule::to_string(int verbosity) {
+std::string PolicyRule::to_string(int verbosity) const {
 
     std::stringstream from;
     from << "PolicyRule:";

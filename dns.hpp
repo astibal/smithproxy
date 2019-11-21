@@ -215,7 +215,7 @@ public:
     std::vector<int> answer_ttl_idx; // should be protected;
     time_t      loaded_at = 0;
     
-    std::string to_string(int verbosity=iINF) override;
+    std::string to_string(int verbosity=iINF) const override;
     bool ask_destroy() override { return false; };
 
     ~DNS_Packet() override = default;

@@ -75,7 +75,7 @@ public:
     virtual bool l4_prefilter(AppHostCX* cx) = 0;
     
     //! called before each update to indicate if update() should be called.
-    virtual bool interested(AppHostCX*) = 0;
+    virtual bool interested(AppHostCX*) const = 0;
     
     //! indicate if inspection is complete. Completed inspectors are not updated.
     inline bool completed() const   { return completed_; }
@@ -104,9 +104,11 @@ protected:
     int stage = 0;
     
     
-    virtual bool ask_destroy() { return false; };
-    virtual std::string to_string(int verbosity=iINF) { return string_format("%s: in-progress: %d stage: %d completed: %d result: %d",
-                                                c_name(),in_progress(), stage, completed(),result()); };
+    bool ask_destroy() override { return false; };
+    std::string to_string(int verbosity=iINF) const override {
+        return string_format("%s: in-progress: %d stage: %d completed: %d result: %d",
+                             c_name(),in_progress(), stage, completed(),result());
+    };
     
                                                 
     static std::string remove_redundant_dots(std::string);
@@ -127,10 +129,10 @@ public:
         for(auto x: requests_) { if(x.second) {delete x.second; } };
         if(cached_response != nullptr) delete cached_response;
     };  
-    virtual void update(AppHostCX* cx);
+    void update(AppHostCX* cx) override;
 
-    virtual bool l4_prefilter(AppHostCX* cx) { return interested(cx); };
-    virtual bool interested(AppHostCX*cx);
+    bool l4_prefilter(AppHostCX* cx) override { return interested(cx); };
+    bool interested(AppHostCX*cx) const override ;
     
     bool opt_match_id = false;
     bool opt_randomize_id = false;
@@ -139,9 +141,9 @@ public:
     DNS_Request* find_request(uint16_t r) { auto it = requests_.find(r); if(it == requests_.end()) { return nullptr; } else { return it->second; }  }
     bool validate_response(DNS_Response* ptr);
     bool store(DNS_Response* ptr);
-    virtual void apply_verdict(AppHostCX* cx);
+    void apply_verdict(AppHostCX* cx) override;
     
-    virtual std::string to_string(int verbosity=iINF);
+    std::string to_string(int verbosity=iINF) const override;
 
     static std::regex wildcard;
 private:
