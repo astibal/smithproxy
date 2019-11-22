@@ -115,7 +115,7 @@ public:
 
     static std::thread* create_identity_refresh_thread();
 
-    void create_logger();
+    void create_log_writer_thread();
     void create_dns_thread();
     void create_identity_thread();
     void create_listeners();

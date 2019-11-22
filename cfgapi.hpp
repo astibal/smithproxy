@@ -98,7 +98,7 @@ public:
     std::string listen_socks_port;
 
     std::string config_file;
-    unsigned int tenant_index;
+    int tenant_index = -1;
     std::string tenant_name;
     std::string dir_msg_templates;
 
@@ -171,7 +171,7 @@ public:
     ProfileAlgDns*    lookup_prof_alg_dns (const char *name);
 
     bool apply_tenant_config ();
-    int  apply_tenant_index(std::string& what, unsigned int& idx);
+    int  apply_tenant_index(std::string& what, int& idx);
 
     bool load_settings ();
     int  load_db_address ();

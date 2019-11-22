@@ -95,9 +95,121 @@
 #include <smithproxy.hpp>
 
 
+void prepare_queue_logger(loglevel const& lev) {
+
+    // set final logger now
+    set_logger(new QueueLogger());
+
+    // create logging thread
+    std::thread* log_thread  = create_log_writer(get_logger());
+    if(log_thread != nullptr) {
+        pthread_setname_np(log_thread->native_handle(),string_format("sxy_lwr_%d",
+                                                                     CfgFactory::get().tenant_index).c_str());
+    }
+
+    get_logger()->level(lev);
+    CfgFactory::get().log_version(false);  // don't delay, but display warning
+}
 
 
+void prepare_html_renderer() {
 
+    auto& log = DaemonFactory::instance().log;
+
+    if(!html()->load_files(CfgFactory::get().dir_msg_templates)) {
+        _err("Cannot load messages from '%s', replacements will not work correctly !!!", CfgFactory::get().dir_msg_templates.c_str());
+    } else {
+        std::string test = "test";
+        _dia("Message testing string: %s", html()->render_noargs(test).c_str());
+    }
+}
+
+void prepare_mem_debugs() {
+    if(SmithProxy::instance().cfg_openssl_mem_dbg) {
+
+        auto& log = DaemonFactory::instance().log;
+
+        _war("openssl memory debug enabled");
+
+        #ifndef USE_OPENSSL11
+            CRYPTO_malloc_debug_init();
+            CRYPTO_dbg_set_options(V_CRYPTO_MDEBUG_ALL);
+        #endif
+
+        CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON);
+        CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_DISABLE);
+    }
+
+}
+
+void print_stats() {
+    auto& log = DaemonFactory::instance().log;
+
+    _dia("Debug SSL statistics: ");
+    _dia("SSL_accept: %d",SSLCom::counter_ssl_accept);
+    _dia("SSL_connect: %d",SSLCom::counter_ssl_connect);
+}
+
+void do_cleanup() {
+    CfgFactory::get().cfgapi_cleanup();
+    SSLCom::certstore()->destroy();
+
+    if(SmithProxy::instance().cfg_daemonize) {
+        DaemonFactory::instance().unlink_pidfile();
+    }
+
+    CRYPTO_cleanup_all_ex_data();
+    ERR_free_strings();
+#ifndef USE_OPENSSL11
+    ERR_remove_state(0);
+#endif
+    EVP_cleanup();
+}
+
+void prepare_tenanting(bool is_custom_file) {
+
+    auto& log = DaemonFactory::instance().log;
+
+    std::string config_file_tenant = "/etc/smithproxy/smithproxy.%s.cfg";
+    if(is_custom_file) {
+        // if user supplied config file, we will obey instructions (it's already set in factory)
+        config_file_tenant = CfgFactory::get().config_file;
+    }
+
+    auto& this_daemon = DaemonFactory::instance();
+
+    if( (! CfgFactory::get().tenant_name.empty())) {
+
+        if(CfgFactory::get().tenant_index < 0) {
+            _war("... tenant name set, but no index given (assuming idx=0)");
+            CfgFactory::get().tenant_index = 0;
+        }
+
+        _war("Starting tenant: '%s', index %d",
+             CfgFactory::get().tenant_name.c_str(),
+             CfgFactory::get().tenant_index);
+
+
+        std::string tenant_cfg = string_format(config_file_tenant.c_str(), CfgFactory::get().tenant_name.c_str());
+
+        struct stat s;
+        if (stat(tenant_cfg.c_str(),&s) == 0) {
+            _war("Tenant config: %s",tenant_cfg.c_str());
+            CfgFactory::get().config_file = tenant_cfg;
+        } else {
+            _war("Tenant config %s not found. Using default.",tenant_cfg.c_str());
+        }
+
+        this_daemon.set_tenant("smithproxy", std::to_string(CfgFactory::get().tenant_index));
+    }
+    else {
+        _war("Startinng non-tenant configuration");
+        CfgFactory::get().tenant_index = 0;
+        this_daemon.set_tenant("smithproxy", "0");
+    }
+
+    SmithProxy::instance().tenant_index(CfgFactory::get().tenant_index);
+}
 
 
 int main(int argc, char *argv[]) {
@@ -124,15 +236,14 @@ int main(int argc, char *argv[]) {
 
 
     DaemonFactory& this_daemon = DaemonFactory::instance();
+    auto& log = this_daemon.log;
 
     if(buffer::use_pool)
         CRYPTO_set_mem_functions(mempool_alloc, mempool_realloc, mempool_free);
 
 
     CfgFactory::get().config_file = "/etc/smithproxy/smithproxy.cfg";
-    bool custom_config_file = false;
-    
-    std::string config_file_tenant = "/etc/smithproxy/smithproxy.%s.cfg";
+    bool is_custom_config_file = false;
 
     while(1) {
     /* getopt_long stores the option index here. */
@@ -148,7 +259,7 @@ int main(int argc, char *argv[]) {
                 
             case 'c':
                 CfgFactory::get().config_file = std::string(optarg);
-                custom_config_file = true;
+                is_custom_config_file = true;
                 break;      
                 
             case 'o':
@@ -174,91 +285,60 @@ int main(int argc, char *argv[]) {
                 
                 
             default:
-                ERR_("unknown option: '%c'",c);
+                std::cerr << "unknown option: " << c;
                 exit(1);                 
         }
     }
 
+    // set synchronous logger for the beginning
+    set_logger(new logger());
+    get_logger()->level(WAR);
+
+
+    // be ready for tenants, or for standalone execution
+    prepare_tenanting(is_custom_config_file);
+
+
+    // be more verbose if check only requested
+    if(CfgFactory::get().config_file_check_only) {
+        get_logger()->level(DIA);
+    }
+    bool CONFIG_LOADED = SmithProxy::instance().load_config(CfgFactory::get().config_file);
+
+    // exit if that's only about config check - we should not proceed
     if(CfgFactory::get().config_file_check_only) {
 
-        // set synchronous logger for config-check
-        set_logger(new logger());
+        if (! CONFIG_LOADED) {
+            std::cerr <<  "Failed to load config file!" << std::endl;
+        } else {
+            std::cerr <<  "Config file check OK" << std::endl;
+        }
 
-    } else {
-        set_logger(new QueueLogger());
+        if(! CONFIG_LOADED) {
+            exit(-1);
+        }
+        exit(0);
     }
-    
-    if(! SmithProxy::instance().cfg_daemonize) {
-        std::thread* log_thread  = create_log_writer(get_logger());
-        if(log_thread != nullptr) {
-            pthread_setname_np(log_thread->native_handle(),string_format("sxy_lwr_%d",
-                    CfgFactory::get().tenant_index).c_str());
-        }    
-    }
-    
-    get_logger()->level(WAR);
-    CfgFactory::get().log_version(false);  // don't delay, but display warning
-    
-    if( CfgFactory::get().tenant_name.size() > 0) {
-        WAR_("Starting tenant: '%s', index %d",
-                CfgFactory::get().tenant_name.c_str(),
-                CfgFactory::get().tenant_index);
 
-        this_daemon.set_tenant("smithproxy", CfgFactory::get().tenant_name);
-        CfgFactory::get().tenant_name  = CfgFactory::get().tenant_name;
-    } 
-    else if (CfgFactory::get().tenant_name.size() > 0){
-        
-        FATS_("You have to specify both options: --tenant-name AND --tenant-index");
-        exit(-20);
-    }
-    else {
-        WARS_("Starting tenant: 0 (default)");
-        this_daemon.set_tenant("smithproxy", "0");
-    }
-    
-    
+
+
+
     // if logging set in cmd line, use it 
     if(CfgFactory::get().args_debug_flag > NON) {
         get_logger()->level(CfgFactory::get().args_debug_flag);
     }
-        
-        
-    if(! custom_config_file and CfgFactory::get().tenant_index > 0) {
-        // look for tenant config (no override set)
-        
-        std::string tenant_cfg = string_format(config_file_tenant.c_str(), CfgFactory::get().tenant_name.c_str());
-        
-        struct stat s;
-        if (stat(tenant_cfg.c_str(),&s) == 0) {
-            WAR_("Tenant config: %s",tenant_cfg.c_str());
-            CfgFactory::get().config_file = tenant_cfg;
-        } else {
-            WAR_("Tenant config %s not found. Using default.",tenant_cfg.c_str());
-        }
-    }
     
-    WARS_(" ");
     // set level to what's in the config
-    if (! SmithProxy::instance().load_config(CfgFactory::get().config_file)) {
-        if(CfgFactory::get().config_file_check_only) {
-            FATS_("Config check: error loading config file.");
-            exit(1);
-        }
-        else {
-            FATS_("Error loading config file on startup.");
-            exit(1);
-        }
+    if (! CONFIG_LOADED ) {
+        _fat("Config check: error loading config file.");
+        std::cerr << "Config check: error loading config file.";
+        exit(1);
     }
     
     if(!CfgFactory::get().apply_tenant_config()) {
-        FATS_("Failed to apply tenant specific configuration!");
+        _fat("Failed to apply tenant specific configuration!");
+        std::cerr << "Failed to apply tenant specific configuration!";
         exit(2);
-    }
-    
-    if(CfgFactory::get().config_file_check_only) {
-        DIAS_("Exiting, asked to check config file only.");
-        exit(0);
     }
 
     if(cfg_mtrace_enable) {
@@ -275,91 +355,65 @@ int main(int argc, char *argv[]) {
     }
     
     if(this_daemon.exists_pidfile()) {
-        FATS_("There is PID file already in the system.");
-        FAT_("Please make sure smithproxy is not running, remove %s and try again.", this_daemon.PID_FILE.c_str());
+        _fat("There is PID file already in the system.");
+        _fat("Please make sure smithproxy is not running, remove %s and try again.", this_daemon.PID_FILE.c_str());
+
+        std::cerr << "There is PID file already in the system.";
+        std::cerr << "Please make sure smithproxy is not running, remove " << this_daemon.PID_FILE << " and try again.";
+
         exit(-5);
     }
     
     // detect kernel version, and adapt UDP socket family
     if(!version_check(get_kernel_version(),"4.3")) {    
-        WARS_("Kernel can't use IPv6 for transparenting UDP. Kernel upgrade is highly recommended.");
-        WARS_("IPv6/UDP smithproxy forwarding will not work.");
-        WARS_("Set SMITH_IPV6_UDP_BYPASS=1 variable in smithproxy.startup.cfg");
+        _war("Kernel can't use IPv6 for UDP transparency. Kernel upgrade is highly recommended.");
+        _war("IPv6/UDP smithproxy forwarding will not work.");
+        _war("Set SMITH_IPV6_UDP_BYPASS=1 variable in smithproxy.startup.cfg");
+
+        std::cerr << "your kernel is outdated. More info in log.";
         UDPCom::default_sock_family = AF_INET;
     }
     
     if(SmithProxy::instance().cfg_daemonize) {
-        if(get_logger()->targets().size() <= 0) {
-            FATS_("Cannot daemonize without logging to file.");
+        if (get_logger()->targets().size() <= 0) {
+            _fat("Cannot daemonize without logging to file.");
+            std::cerr << "Cannot daemonize without logging to file.";
             exit(-5);
         }
-        
+
         get_logger()->dup2_cout(false);
-        INFS_("entering daemon mode");
+        _inf("Entering daemon mode.");
+        std::cout << "Entering daemon mode.";
+
         this_daemon.daemonize();
-
-
-        SmithProxy::instance().tenant_index(CfgFactory::get().tenant_index);
-
-        // create utility threads
-        SmithProxy::instance().create_logger();
-        SmithProxy::instance().create_dns_thread();
-        SmithProxy::instance().create_identity_thread();
-
-        // launch listeners
-        SmithProxy::instance().create_listeners();
+        this_daemon.write_pidfile();
 
     }
-    // write out PID file
-    this_daemon.write_pidfile();
 
-    
-    //     atexit(__libc_freeres);   
+    // openssl mem debugs
+    prepare_mem_debugs();
 
-    if(SmithProxy::instance().cfg_openssl_mem_dbg) {
-#ifndef USE_OPENSSL11
-        CRYPTO_malloc_debug_init();
-        CRYPTO_dbg_set_options(V_CRYPTO_MDEBUG_ALL);
-#endif
-        CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON);
-        CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_DISABLE);
-    }
-    
+    // prepare templating system
+    prepare_html_renderer();
 
-    if(!html()->load_files(CfgFactory::get().dir_msg_templates)) {
-        ERR_("Cannot load messages from '%s', replacements will not work correctly !!!", CfgFactory::get().dir_msg_templates.c_str());
-    } else {
-        std::string test = "test";
-        DIA_("Message testing string: %s", html()->render_noargs(test).c_str());
-    }
-    
-    
+    // create utility threads
+    SmithProxy::instance().create_log_writer_thread();
+    SmithProxy::instance().init_syslog();
+
+    SmithProxy::instance().create_dns_thread();
+    SmithProxy::instance().create_identity_thread();
+
+    // launch listeners
+    SmithProxy::instance().create_listeners();
 
 
+    _cri("Smithproxy %s (socle %s) starting...", SMITH_VERSION, SOCLE_VERSION);
     SmithProxy::instance().run();
 
-    CRI_("Smithproxy %s (socle %s) started",SMITH_VERSION,SOCLE_VERSION);
 
-    
+    print_stats();
+    do_cleanup();
 
-    DIAS_("Debug SSL statistics: ");
-    DIA_("SSL_accept: %d",SSLCom::counter_ssl_accept);
-    DIA_("SSL_connect: %d",SSLCom::counter_ssl_connect);
-
-    CfgFactory::get().cfgapi_cleanup();
-
-    SSLCom::certstore()->destroy();
-    
-    if(SmithProxy::instance().cfg_daemonize) {
-        this_daemon.unlink_pidfile();
-    }
-    
-    CRYPTO_cleanup_all_ex_data();
-    ERR_free_strings();
-#ifndef USE_OPENSSL11
-    ERR_remove_state(0);
-#endif
-    EVP_cleanup();
-    
+    return 0;
 }
 

@@ -1797,7 +1797,7 @@ void CfgFactory::log_version (bool warn_delay)
     }
 }
 
-int CfgFactory::apply_tenant_index(std::string& what, unsigned int& idx) {
+int CfgFactory::apply_tenant_index(std::string& what, int& idx) {
     _deb("apply_index: what=%s idx=%d",what.c_str(),idx);
     int port = std::stoi(what);
     what = std::to_string(port + idx);
@@ -1809,7 +1809,7 @@ int CfgFactory::apply_tenant_index(std::string& what, unsigned int& idx) {
 bool CfgFactory::apply_tenant_config () {
     int ret = 0;
 
-    if( (  tenant_index > 0 ) && ( ! tenant_name.empty() ) ) {
+    if( (  tenant_index >= 0 ) && ( ! tenant_name.empty() ) ) {
         ret += apply_tenant_index(listen_tcp_port, tenant_index);
         ret += apply_tenant_index(listen_tls_port, tenant_index);
         ret += apply_tenant_index(listen_dtls_port, tenant_index);

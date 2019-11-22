@@ -93,7 +93,7 @@ std::thread* SmithProxy::create_identity_refresh_thread() {
 
 
 
-void SmithProxy::create_logger() {
+void SmithProxy::create_log_writer_thread() {
     // we have to create logger after daemonize is called
     log_thread  = create_log_writer(get_logger());
     if(log_thread != nullptr) {
@@ -603,10 +603,6 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
             if(CfgFactory::cfg_root()["settings"].lookupValue("cfg_log_console", CfgFactory::get().log_console)) {
                 get_logger()->dup2_cout(CfgFactory::get().log_console);
             }
-
-/*
- *          init_syslog();
-*/
         }
     }
     catch(const SettingNotFoundException &nfex) {
