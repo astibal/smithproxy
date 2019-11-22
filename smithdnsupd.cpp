@@ -51,114 +51,6 @@
 #include <smithdnsupd.hpp>
 
 
-int send_dns_request (std::string const& hostname, DNS_Record_Type t, std::string const& nameserver) {
-    if (nameserver.empty()) {
-        ERR_("resolve_dns_s: query %s for type %s: missing nameserver", hostname.c_str(),
-             DNSFactory::get().dns_record_type_str(t));
-    }
-
-    buffer b(256);
-
-    unsigned char rand_pool[2];
-    RAND_bytes(rand_pool, 2);
-    unsigned short id = *(unsigned short *) rand_pool;
-
-    int s = DNSFactory::get().generate_dns_request(id, b, hostname, t);
-    DUM_("DNS generated request: size %db\n%s", s, hex_dump(b).c_str());
-
-    // create UDP socket
-    int send_socket = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    struct sockaddr_storage addr{};
-
-    memset(&addr, 0, sizeof(struct sockaddr_storage));
-    addr.ss_family = AF_INET;
-    ((sockaddr_in *) &addr)->sin_addr.s_addr = inet_addr(nameserver.c_str());
-    ((sockaddr_in *) &addr)->sin_port = htons(53);
-
-    ::connect(send_socket, (sockaddr *) &addr, sizeof(sockaddr_storage));
-
-    if (::send(send_socket, b.data(), b.size(), 0) < 0) {
-        std::string r = string_format("resolve_dns_s: cannot write remote socket: %d", send_socket);
-        DIA_("%s", r.c_str());
-        return -1;
-    }
-
-    return send_socket;
-}
-
-
-std::pair<DNS_Response*,int>  recv_dns_response(int send_socket, unsigned int timeout_sec){
-    DNS_Response *ret = nullptr;
-    int l = 0;
-
-    if(send_socket <= 0) {
-
-        // return negative response immediately
-        return { nullptr, -1 };
-    }
-
-    int rv = 1;
-
-    if(timeout_sec > 0) {
-        struct timeval tv{};
-        tv.tv_usec = 0;
-        tv.tv_sec = timeout_sec;
-
-        fd_set confds;
-        FD_ZERO(&confds);
-        FD_SET(send_socket, &confds);
-        rv = select(send_socket + 1, &confds, nullptr, nullptr, &tv);
-    } else {
-
-    }
-    if(rv == 1) {
-        buffer r(1500);
-        l = ::recv(send_socket,r.data(),r.capacity(), timeout_sec > 0 ? 0 : MSG_DONTWAIT);
-        DEB_("recv_dns_response(%d,%d): recv() returned %d",send_socket, timeout_sec, l);
-
-        DEB_("buffer: ptr=0x%x, size=%d, capacity=%d",r.data(),r.size(),r.capacity());
-
-        if(l > 0) {
-            r.size(l);
-
-            DEB_("received %d bytes",l);
-            DUM_("\n%s\n",hex_dump(r).c_str());
-
-
-            auto* resp = new DNS_Response();
-            int parsed = resp->load(&r);
-            DIA_("parsed %d bytes (0 means all)",parsed);
-            DIA_("DNS response: \n %s",resp->to_string().c_str());
-
-            // save only fully parsed messages
-            if(parsed == 0) {
-                ret = resp;
-
-            } else {
-                ret = resp;
-                ERRS_("Something went wrong with parsing DNS response (keeping response)");
-                //delete resp;
-            }
-
-        }
-
-    } else {
-        DIAS_("synchronous mode: timeout, or an error occurred.");
-    }
-
-    return {ret,l};
-}
-
-DNS_Response* resolve_dns_s (std::string const& hostname, DNS_Record_Type t, std::string const& nameserver, unsigned int timeout_s) {
-
-    int send_socket = send_dns_request(hostname, t, nameserver);
-    auto resp = recv_dns_response(send_socket,timeout_s);
-
-    ::close(send_socket);
-    return resp.first;
-
-}
-
 
 
 #pragma GCC diagnostic ignored "-Wmissing-noreturn"
@@ -238,7 +130,7 @@ std::thread* create_dns_updater() {
 
 
 
-            DNS_Response* resp = resolve_dns_s(a, t, nameserver);
+            DNS_Response* resp = DNSFactory::get().resolve_dns_s(a, t, nameserver);
             if(resp) {
                 if(di.store(resp)) {
                     DIAS_("Entry successfully stored in cache.");

@@ -292,13 +292,13 @@ int socksServerCX::process_socks_request() {
 
                     if(!async_dns) {
 
-                        DNS_Response *resp = resolve_dns_s(fqdn, A, nameserver);
+                        DNS_Response *resp = DNSFactory::get().resolve_dns_s(fqdn, A, nameserver);
 
                         process_dns_response(resp);
                         setup_target();
 
                     } else {
-                        int dns_sock = send_dns_request(fqdn, A, nameserver);
+                        int dns_sock = DNSFactory::get().send_dns_request(fqdn, A, nameserver);
                         if(dns_sock) {
                             _dia("dns request sent: %s", fqdn.c_str());
 
@@ -557,7 +557,7 @@ void socksServerCX::handle_event (baseCom *xcom) {
         }
 
         // timeout is zero - we won't wait
-        std::pair<DNS_Response *, int> rresp = recv_dns_response(async_dns_socket.socket_,0);
+        std::pair<DNS_Response *, int> rresp = DNSFactory::get().recv_dns_response(async_dns_socket.socket_,0);
         DNS_Response* resp = rresp.first;
         int red = rresp.second;
         state_ = socks5_state::DNS_RESP_RECV;

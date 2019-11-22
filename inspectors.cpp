@@ -205,7 +205,7 @@ void DNS_Inspector::update(AppHostCX* cx) {
                     red = 0;
                     delete ptr;
                     ptr = (DNS_Packet*)0xCABA1A;
-                    ERR_("BUG CAUGHT: buffer:\n%s",hex_dump(cur_buf).c_str());
+                    _err("BUG CAUGHT: buffer:\n%s",hex_dump(cur_buf).c_str());
                 }
                 
                 // on failure or last data exit loop
@@ -216,11 +216,10 @@ void DNS_Inspector::update(AppHostCX* cx) {
             }
             
             if(ptr == (DNS_Packet*)0xCABA1A) {
-	       ERRS_("BUG CAUGHT.");
-	       
-	       
-	       goto fail;
-	    }
+	            _err("BUG CAUGHT.");
+
+	            goto fail;
+	        }
             
             if(opt_cached_responses && ( ((DNS_Request*)ptr)->question_type_0() == A || ((DNS_Request*)ptr)->question_type_0() == AAAA ) ) {
                 std::scoped_lock<std::recursive_mutex> l_(DNS::get_dns_lock());

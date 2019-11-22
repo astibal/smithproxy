@@ -65,6 +65,7 @@
 #include <sslcertstore.hpp>
 
 #include <main.hpp>
+#include <smithproxy.hpp>
 #include <mitmproxy.hpp>
 #include <socksproxy.hpp>
 #include <sobject.hpp>
@@ -1725,8 +1726,10 @@ int save_config_debug(Config& ex) {
     deb_log_objects.add("sslcertstore", Setting::TypeInt) = (int)SSLFactory::get_log().level()->level_ref();
     deb_log_objects.add("proxy", Setting::TypeInt) = (int)baseProxy::log_level_ref().level_ref();
     deb_log_objects.add("epoll", Setting::TypeInt) = (int)epoll::log_level.level_ref();
-    deb_log_objects.add("mtrace", Setting::TypeBoolean) = cfg_mtrace_enable;
-    deb_log_objects.add("openssl_mem_dbg", Setting::TypeBoolean) = cfg_openssl_mem_dbg;
+
+    deb_log_objects.add("mtrace", Setting::TypeBoolean) = SmithProxy::instance().cfg_mtrace_enable;
+    deb_log_objects.add("openssl_mem_dbg", Setting::TypeBoolean) = SmithProxy::instance().cfg_openssl_mem_dbg;
+
     deb_log_objects.add("alg_dns", Setting::TypeInt) = (int)DNS_Inspector::log_level_ref().level_ref();
     deb_log_objects.add("pkt_dns", Setting::TypeInt) = (int)DNS_Packet::log_level_ref().level_ref();
 

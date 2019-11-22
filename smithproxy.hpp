@@ -63,7 +63,9 @@ class MyPlainAcceptor : public theAcceptor {
 
 class SmithProxy {
 
-    explicit SmithProxy() : tenant_index_(0), tenant_name_("default") {};
+    explicit SmithProxy() : tenant_index_(0), tenant_name_("default") {
+        log.level(WAR);
+    };
     virtual ~SmithProxy ();
 
 
@@ -73,6 +75,8 @@ class SmithProxy {
     void (*terminate_handler_)(int) = nullptr;
     void (*reload_handler_)(int) = nullptr;
 public:
+    bool cfg_daemonize = false;
+    logan_lite log = logan_lite("service");
 
     theAcceptor* plain_proxy = nullptr;
     theAcceptor* ssl_proxy = nullptr;
@@ -118,6 +122,22 @@ public:
 
     void run();
     void stop();
+
+    static void my_terminate(int param);
+    static void my_usr1 (int param);
+    int load_signatures(libconfig::Config& cfg, const char* name, std::vector<duplexFlowMatch*>& target);
+    bool init_syslog();
+    bool load_config(std::string& config_f, bool reload = false);
+
+    volatile static int cnt_terminate;
+
+    #ifndef MEM_DEBUG
+        bool cfg_openssl_mem_dbg = false;
+        bool cfg_mtrace_enable = false;
+    #else
+        bool cfg_openssl_mem_dbg = true;
+        bool cfg_mtrace_enable = true;
+    #endif
 };
 
 
