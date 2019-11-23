@@ -53,21 +53,21 @@ class SmithProtoCX : public baseHostCX {
 public:
     SmithProtoCX(baseCom*c, unsigned int s);
     SmithProtoCX(baseCom*c, const char* h, const char* p);
-    virtual ~SmithProtoCX();
+    ~SmithProtoCX() override;
         
 
-    virtual int process();
+    int process() override ;
     virtual void process_keepalive(LTVEntry*);
     virtual void process_package(LTVEntry*);
         
-    virtual void on_timer();
-    virtual int check_timeouts();
+    void on_timer() override;
+    virtual unsigned int check_timeouts();
     
-    virtual buffer to_read();
-    virtual ssize_t finish();
-    
-    inline int unpack();
-    int unpack(buffer*);
+    buffer to_read() override;
+    ssize_t finish() override;
+
+    inline unsigned int unpack();
+    unsigned int unpack(buffer*);
     
     inline std::vector<LTVEntry*>& packages() { return packages_; }
     void destroy();
@@ -93,16 +93,16 @@ protected:
     std::vector<LTVEntry*> packages_;
     buffer to_read_buffer; 
 
-    unsigned int hb_me = 0;
+    unsigned long hb_me = 0;
     time_t           hb_me_sent = 0;
     unsigned int hb_me_timeout = 10; 
     
     inline void reset_hb_me() { time(&hb_me_sent); }
     
-    unsigned int hb_peer = 0;
+    unsigned long hb_peer = 0;
     time_t           hb_peer_received = 0;
-    unsigned int hb_peer_timeout = 10;
-    unsigned int hb_peer_timeout_counter = 0;
+    unsigned int  hb_peer_timeout = 10;
+    unsigned int  hb_peer_timeout_counter = 0;
 
 protected:
     virtual void on_hb_timeout_me() { reset_hb_me(); };
