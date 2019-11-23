@@ -19,12 +19,4 @@ RUN \
     \
     cd smithproxy && mkdir build && cd build && cmake .. && make install
 
-<<<<<<< HEAD
-# Define environment variable
-
-# Run app.py when the container launches
-CMD echo "Starting smithproxy .... " && ( /etc/init.d/smithproxy start ) > /dev/null 2>&1 && sleep 10 && \
-    echo "SSL MITM CA cert (add to trusted CA's):" && cat /etc/smithproxy/certs/default/ca-cert.pem && smithproxy_cli && bash
-=======
 CMD cd /app/smithproxy/tools/build-scripts/deb && echo "run ./createdeb.sh <upload password> <socle_branch> <smithproxy_branch>" && /bin/bash
->>>>>>> 19130bc... newer and cleaner Dockerfiles
