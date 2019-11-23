@@ -62,7 +62,7 @@
 
 #include <socle.hpp>
 
-#include <logger.hpp>
+#include <log/logger.hpp>
 #include <hostcx.hpp>
 #include <apphostcx.hpp>
 #include <baseproxy.hpp>

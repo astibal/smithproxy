@@ -53,7 +53,7 @@
 #include <sys/resource.h>
 #include <execinfo.h>
 
-#include <logger.hpp>
+#include <log/logger.hpp>
 #include <daemon.hpp>
 #include <display.hpp>
 

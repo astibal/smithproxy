@@ -55,7 +55,7 @@
 #include <openssl/rand.h>
 #include <biostring.hpp>
 
-#include <logger.hpp>
+#include <log/logger.hpp>
 #include <cmdserver.hpp>
 #include <cfgapi.hpp>
 #include <timeops.hpp>

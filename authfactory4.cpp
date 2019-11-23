@@ -37,7 +37,7 @@
     which carries forward this exception.
 */
 
-#include <logger.hpp>
+#include <log/logger.hpp>
 #include <authfactory.hpp>
 #include <cfgapi.hpp>
 

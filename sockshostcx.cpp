@@ -41,7 +41,7 @@
 
 #include <cfgapi.hpp>
 #include <sockshostcx.hpp>
-#include <logger.hpp>
+#include <log/logger.hpp>
 #include <dns.hpp>
 #include <smithdnsupd.hpp>
 

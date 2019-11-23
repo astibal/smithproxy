@@ -42,7 +42,7 @@
 #include <unistd.h>
 
 #include <dns.hpp>
-#include <logger.hpp>
+#include <log/logger.hpp>
 
 DEFINE_LOGGING(DNS_Packet);
 DEFINE_LOGGING(DNS_Request);

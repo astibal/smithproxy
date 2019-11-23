@@ -43,7 +43,7 @@
 #include <smithdcx.hpp>
 #include <hostcx.hpp>
 #include <ltventry.hpp>
-#include <logger.hpp>
+#include <log/logger.hpp>
 
 
 SmithProtoCX::SmithProtoCX(baseCom*c, const char* h, const char* p): baseHostCX(c, h, p) {

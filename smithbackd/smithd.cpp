@@ -45,7 +45,7 @@
 
 #include <socle.hpp>
 
-#include <logger.hpp>
+#include <log/logger.hpp>
 #include <hostcx.hpp>
 #include <baseproxy.hpp>
 #include <masterproxy.hpp>

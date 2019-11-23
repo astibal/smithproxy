@@ -54,7 +54,7 @@
 #include <ptr_cache.hpp>
 #include <buffer.hpp>
 #include <display.hpp>
-#include <logger.hpp>
+#include <log/logger.hpp>
 #include <ext/cidr.hpp>
 #include <addrobj.hpp>
 

@@ -44,7 +44,7 @@
 
 #include <ext/cidr.hpp>
 #include <display.hpp>
-#include <logger.hpp>
+#include <log/logger.hpp>
 #include <sobject.hpp>
 
 class AddressObject : public socle::sobject {

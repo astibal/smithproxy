@@ -39,7 +39,7 @@
 
 #include <mitmhost.hpp>
 #include <display.hpp>
-#include <logger.hpp>
+#include <log/logger.hpp>
 #include <cfgapi.hpp>
 
 DEFINE_LOGGING(MitmHostCX)

@@ -40,7 +40,7 @@
 #include <vector>
 
 #include <cfgapi.hpp>
-#include <logger.hpp>
+#include <log/logger.hpp>
 #include <policy.hpp>
 #include <mitmproxy.hpp>
 #include <mitmhost.hpp>

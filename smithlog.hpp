@@ -49,7 +49,7 @@
 #include <string>
 #include <utility>
 #include <lockable.hpp>
-#include <logger.hpp>
+#include <log/logger.hpp>
 
 typedef std::pair<loglevel,std::string> log_entry;
 

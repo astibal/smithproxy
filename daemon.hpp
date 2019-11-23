@@ -41,6 +41,7 @@
 #define __DAEMON_HPP
 
 #include <string>
+#include <log/logan.hpp>
 
 #define PID_FILE_DEFAULT "/var/run/smithproxy.0.pid"
 #define LOG_FILENAME_SZ 512
