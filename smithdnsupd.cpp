@@ -59,13 +59,15 @@
 std::thread* create_dns_updater() {
     std::thread * dns_thread = new std::thread([]() {
 
+    logan_lite log = logan_lite("com.dns.updater");
+
     int sleep_time = 3;
     int requery_ttl = 60;
     std::set<std::string> record_blacklist;
 
     for(unsigned int i = 1; ; i++) {
 
-        DIA_("dns_updater: refresh round %d",i);
+        _dia("dns_updater: refresh round %d",i);
 
         std::vector<std::string> fqdns;
 
@@ -84,7 +86,7 @@ std::thread* create_dns_updater() {
                         if (r) {
                             int ttl = (r->loaded_at + r->answers().at(0).ttl_) - ::time(nullptr);
 
-                            DIA_("fqdn %s ttl %d", rec.c_str(), ttl);
+                            _dia("fqdn %s ttl %d", rec.c_str(), ttl);
 
                             //re-query only about-to-expire existing DNS entries for FQDN addresses
                             if (ttl < requery_ttl) {
@@ -95,7 +97,7 @@ std::thread* create_dns_updater() {
                             if (record_blacklist.find(rec) == record_blacklist.end()) {
                                 fqdns.push_back(rec);
                             } else {
-                                DIA_("fqdn %s is blacklisted", rec.c_str());
+                                _dia("fqdn %s is blacklisted", rec.c_str());
                             }
                         }
                     }
@@ -110,7 +112,7 @@ std::thread* create_dns_updater() {
 
         DNS_Inspector di;
         for(const auto& t_a: fqdns) {
-            DIA_("refreshing fqdn: %s",t_a.c_str());
+            _dia("refreshing fqdn: %s",t_a.c_str());
 
             std::string a;
             DNS_Record_Type t;
@@ -133,9 +135,9 @@ std::thread* create_dns_updater() {
             DNS_Response* resp = DNSFactory::get().resolve_dns_s(a, t, nameserver);
             if(resp) {
                 if(di.store(resp)) {
-                    DIAS_("Entry successfully stored in cache.");
+                    _dia("Entry successfully stored in cache.");
                 } else {
-                    WAR_("entry for %s was not stored, blacklisted!",t_a.c_str());
+                    _war("entry for %s was not stored, blacklisted!",t_a.c_str());
                     record_blacklist.insert(t_a);
                     delete resp;
                 }
