@@ -83,7 +83,7 @@ public:
     virtual int process_socks_reply();
     virtual void pre_write();
     
-    virtual bool new_message();
+    bool new_message() const override;
     void verdict(socks5_policy);
     void state(socks5_state s) { state_ = s; };
     

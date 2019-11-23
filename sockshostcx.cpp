@@ -446,7 +446,7 @@ bool socksServerCX::setup_target() {
         return true;
 }
 
-bool socksServerCX::new_message() {
+bool socksServerCX::new_message() const {
     if(state_ == socks5_state::WAIT_POLICY && verdict_ == socks5_policy::PENDING) {
         return true;
     }
