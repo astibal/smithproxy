@@ -896,7 +896,7 @@ void MitmProxy::on_left_error(baseHostCX* cx) {
         msg << "Connection from " << cx->full_name('L') << " closed: " << detail.str();
         if(! replacement_msg.empty() ) {
             msg << ", dropped: " << replacement_msg;
-            INF_("%s", msg.str().c_str()); // log to generic logger
+            _inf("%s", msg.str().c_str()); // log to generic logger
         }
         _inf("%s", msg.str().c_str());
         if(*log.level() > DEB) __debug_zero_connections(cx);
@@ -974,7 +974,7 @@ void MitmProxy::on_right_error(baseHostCX* cx)
         msg << "Connection from " << cx->full_name('R') << " closed: " << detail.str().c_str();
         if(! replacement_msg.empty() ) {
             msg << ", dropped: " << replacement_msg;
-            INF_("%s", msg.str().c_str()); // log to generic logger
+            _inf("%s", msg.str().c_str()); // log to generic logger
         }
         _inf("%s", msg.str().c_str());
 

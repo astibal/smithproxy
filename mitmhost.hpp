@@ -76,6 +76,8 @@ struct ApplicationData: public socle::sobject {
     std::string to_string(int verbosity = iINF) const override { return name() + ": " + hr(verbosity); };
     
     DECLARE_C_NAME("ApplicationData");
+
+    logan_attached<ApplicationData> log = logan_attached<ApplicationData>(this, "inspect");
 };
 struct app_HttpRequest : public ApplicationData {
     ~app_HttpRequest() override = default;
@@ -90,17 +92,17 @@ struct app_HttpRequest : public ApplicationData {
     // this function returns most usable link for visited site from the request.
     std::string original_request() override {
         if(referer.size() > 0) {
-            DEB_("std::string original_request: using referer: %s",referer.c_str());
+            _deb("std::string original_request: using referer: %s",referer.c_str());
             return referer;
         }
         
-        DEB_("std::string original_request: using request: %s",request().c_str());
+        _deb("std::string original_request: using request: %s",request().c_str());
         return request();
     }
     std::string request() override {
         
         if(uri == "/favicon.ico") {
-            DEBS_("std::string original_request: avoiding favicon.ico");
+            _deb("std::string original_request: avoiding favicon.ico");
             return host;
         }
         return proto+host+uri+params;
@@ -121,7 +123,7 @@ struct app_HttpRequest : public ApplicationData {
     DECLARE_C_NAME("app_HttpRequest");
 };
 
-struct app_DNS : public ApplicationData{
+struct app_DNS : public ApplicationData {
     DNS_Request*  request = nullptr;
     DNS_Response* response = nullptr;
     
