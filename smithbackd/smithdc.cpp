@@ -56,12 +56,17 @@ static std::string cfg_ux_socket = "/var/run/smithd.sock";
 
 
 
-class SmithClientCX : public SmithProtoCX {
+class SmithClientCX : public SmithProtoCX, private LoganMate {
 public:
     SmithClientCX(baseCom* c, unsigned int s) : SmithProtoCX(c,s) {};
     SmithClientCX(baseCom* c, const char* h, const char* p) : SmithProtoCX(c,h,p) {};
     virtual ~SmithClientCX() {};
-    
+
+    logan_attached<SmithClientCX> log = logan_attached<SmithClientCX>(this, "com.smithd");
+    friend class logan_attached<SmithClientCX>;
+
+    std::string& class_name() const override {  static std::string s = "SmithServerCX"; return s; };
+    std::string hr() const override { return class_name(); }
 
     //only used in test_url2
     sigslot::signal0<> sig_on_package;
@@ -70,13 +75,13 @@ public:
    
     virtual void process_package(LTVEntry* e) {
         
-	DEB_("Package dump: \n%s",e->hr().c_str());
+	_deb("Package dump: \n%s",e->hr().c_str());
         
         LTVEntry* m = e->search({1,1});
         if (m) {
-            DIA_("URL category: %d",m->data_int())
+            _dia("URL category: %d",m->data_int());
         } else {
-            ERR_("Unknown response: \n%s",e->hr().c_str());
+            _err("Unknown response: \n%s",e->hr().c_str());
         }
         
         //only used in test_url2
@@ -166,10 +171,12 @@ class SimpleClient : public sigslot::has_slots<sigslot::multi_threaded_local> {
 //only used in test_url2
 class PackageHandler :  public sigslot::has_slots<sigslot::multi_threaded_local> {
     public:
-        void on_package() { INFS_("MGR: package received (notify signal)"); };
+        logan_lite log = logan_lite("com.smithd");
+
+        void on_package() { _inf("MGR: package received (notify signal)"); };
         void on_package(SmithClientCX* cx, LTVEntry* pkg) { 
-            INFS_("MGR: package received (detail signal)");
-            DEB_("cx %s: data: \n%s",cx->c_name(), pkg->hr().c_str()); 
+            _inf("MGR: package received (detail signal)");
+            _deb("cx %s: data: \n%s",cx->c_name(), pkg->hr().c_str());
         };
 };
 
@@ -238,9 +245,6 @@ void test_url(const char* url = nullptr) {
 
 int main(int argc, char *argv[]) {
     
-    get_logger()->dup2_cout(true);
-    get_logger()->level(INF);
-
     int loop_count = 1;
     
     // measure RTT for getting response
@@ -266,6 +270,7 @@ int main(int argc, char *argv[]) {
       if(t_diff < t_min || t_min == 0) t_min = t_diff;
       if(t_diff > t_max || t_max == 0) t_max = t_diff;
       
-      INF_(">> Server RTT: %dms  (avg=%.2fms min=%dms max=%dms)",t_diff,((float)t_sum)/t_cnt, t_min, t_max);
+      std::cout << string_format(">> Server RTT: %dms  (avg=%.2fms min=%dms max=%dms)",t_diff,
+              ((float)t_sum)/t_cnt, t_min, t_max);
     }
 }
