@@ -1541,7 +1541,13 @@ int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *a
         cli_print(cli, "mp_realloc cache miss: %lld", stat_mempool_realloc_miss);
         cli_print(cli, "mp_realloc fitting returns: %lld", stat_mempool_realloc_fitting);
         cli_print(cli, "mp_free cache miss: %lld", stat_mempool_free_miss);
-        cli_print(cli, "mp ptr cache size: %ld", mempool_ptr_map.size());
+
+        size_t mp_size = 0L;
+        {
+            std::scoped_lock<std::mutex> l(mpdata::lock());
+            mp_size = mpdata::map().size();
+        }
+        cli_print(cli, "mp ptr cache size: %ld", mp_size);
 
         cli_print(cli," ");
         cli_print(cli, "API allocations above limits:");
