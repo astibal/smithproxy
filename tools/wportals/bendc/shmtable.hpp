@@ -133,8 +133,7 @@ public:
       write_header(increase_version);
       
       unsigned char* curpos = data() + sizeof(struct shared_table_header);
-      for(typename std::vector<RowType>::iterator i = entries().begin(); i != entries().end() ; ++i) {
-          RowType& r = (*i);
+      for(auto& r = entries()) {
           unsigned int s = on_write_entry(curpos,r);
           
           if(s > 0) {

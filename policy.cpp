@@ -142,8 +142,7 @@ bool PolicyRule::match_addrgrp_cx(std::vector< AddressObject* >& sources, baseHo
 //                 _dia("PolicyRule: matched ");
     } else {
         CIDR* l = cidr_from_str(cx->host().c_str());
-        for(std::vector<AddressObject*>::iterator j = sources.begin(); j != sources.end(); ++j ) {
-            AddressObject* comp = (*j);
+        for(auto* comp: sources) {
             
             if(comp->match(l)) {
                 if(*log.level() >= DIA) {
@@ -170,13 +169,13 @@ bool PolicyRule::match_addrgrp_cx(std::vector< AddressObject* >& sources, baseHo
 bool PolicyRule::match_rangegrp_cx(std::vector< range >& ranges, baseHostCX* cx) {
     bool match = false;
     
-    if(ranges.size() == 0) {
+    if(ranges.empty()) {
         match = true;
 //                 _dia("PolicyRule: matched ");
     } else {
         int p = std::stoi(cx->port());
-        for(std::vector<range>::iterator j = ranges.begin(); j != ranges.end(); ++j ) {
-            range& comp = (*j);
+        for(auto const& comp: ranges) {
+
             if((p >= comp.first) && (p <= comp.second)) {
                 _dia("PolicyRule::match_rangergrp_cx: comparing %d with %s: matched",p,rangetos(comp).c_str());
                 match = true;
@@ -194,16 +193,15 @@ bool PolicyRule::match_rangegrp_vecx(std::vector< range >& ranges, std::vector< 
     bool match = false;
     
     int idx = -1;
-    for(std::vector<baseHostCX*>::iterator i = vecx.begin(); i != vecx.end(); ++i ) {
+    for(auto cx: vecx) {
         ++idx;
-        baseHostCX* cx = (*i);
-        
-        match = match_rangegrp_cx(ranges,cx);
+
+        match = match_rangegrp_cx(ranges, cx);
         if(match) {
-            _dia("PolicyRule::match_rangegrp_vecx: %s matched",cx->c_name());
+            _dia("PolicyRule::match_rangegrp_vecx: %s matched", cx->c_name());
             break;
         } else {
-            _deb("PolicyRule::match_rangegrp_vecx: %s not matched",cx->c_name());
+            _deb("PolicyRule::match_rangegrp_vecx: %s not matched", cx->c_name());
         }
     }
     
@@ -215,10 +213,9 @@ bool PolicyRule::match_addrgrp_vecx(std::vector< AddressObject* >& sources, std:
     bool match = false;
     
     int idx = -1;
-    for(std::vector<baseHostCX*>::iterator i = vecx.begin(); i != vecx.end(); ++i ) {
+    for(auto cx: vecx) {
         ++idx;
-        baseHostCX* cx = (*i);
-        
+
         match = match_addrgrp_cx(sources,cx);
         if(match) {
             _dia("PolicyRule::match_addrgrp_vecx: %s matched",cx->c_name());

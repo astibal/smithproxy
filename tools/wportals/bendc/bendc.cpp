@@ -95,8 +95,8 @@ int main(void) {
         b.release();
         
 	if(loaded > 0) {
-	    for(std::vector<shm_logon_info>::iterator i = b.entries().begin(); i != b.entries().end() ; ++i) {
-		shm_logon_info& li = (*i);
+	    for(auto& li: b.entries()) {
+
 		printf("%s: %16s \t groups: %s\n",inet_ntoa(*(in_addr*)li.ip),li.username,li.groups);
 	    }
 	}
