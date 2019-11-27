@@ -138,7 +138,7 @@ public:
     std::map<std::string, ProfileAuth *> db_prof_auth;
     std::map<std::string, ProfileAlgDns *> db_prof_alg_dns;
 
-    std::vector<int> db_udp_quick_ports;
+    mp::vector<int> db_udp_quick_ports;
 
 
     std::string auth_address;
