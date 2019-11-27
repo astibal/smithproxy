@@ -372,6 +372,6 @@ void MitmSocksProxy::on_left_new(baseHostCX* just_accepted_cx) {
     just_accepted_cx->com()->resolve_socket_src(just_accepted_cx->socket(),&h,&p);
 
     new_proxy->ladd(just_accepted_cx);
-    this->proxies().insert(new_proxy);
+    this->proxies().push_back(new_proxy);
     _deb("MitmMasterProxy::on_left_new: finished");
 }
