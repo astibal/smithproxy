@@ -189,7 +189,7 @@ void writecrash(int fd, const char* msg, int len)  {
        int curw = ::write(fd, msg, len);
        if(curw > 0) w+= w;
        rep++;
-   } while(w < len || rep < 10);
+   } while(w < len && rep < 10);
 }
 
 void DaemonFactory::uw_btrace_handler(int sig) {

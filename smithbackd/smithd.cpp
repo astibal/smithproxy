@@ -194,7 +194,7 @@ public:
     void on_left_new(baseHostCX* cx) override {
         auto* p = new SmithdProxy(com()->slave());
         p->ladd(cx);
-        this->proxies().insert(p);
+        this->proxies().push_back(p);
     }
 };
 
