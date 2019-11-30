@@ -417,7 +417,7 @@ bool SmithProxy::init_syslog() {
     // create UDP socket
     int syslog_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 
-    struct sockaddr_storage syslog_in;
+    struct sockaddr_storage syslog_in {0};
     memset(&syslog_in, 0, sizeof(struct sockaddr_storage));
 
     if(CfgFactory::get().syslog_family != 6) {
@@ -436,6 +436,8 @@ bool SmithProxy::init_syslog() {
         int ret = inet_pton(AF_INET6, CfgFactory::get().syslog_server.c_str(),(unsigned char*)&((sockaddr_in6*)&syslog_in)->sin6_addr.s6_addr);
         if(ret <= 0) {
             _err("Error initializing syslog server: %s", CfgFactory::get().syslog_server.c_str());
+
+            ::close(syslog_socket); // coverity: 1407945
             return false;
         }
         ((sockaddr_in6*)&syslog_in)->sin6_port = htons(CfgFactory::get().syslog_port);

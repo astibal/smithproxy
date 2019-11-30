@@ -1132,6 +1132,8 @@ int CfgFactory::load_db_prof_alg_dns () {
 
             if (  ! cur_object.getName() ) {
                 _dia("cfgapi_load_obj_alg_dns_profile: unnamed object index %d: not ok", i);
+
+                delete a; // coverity: 1407948
                 continue;
             }
             
@@ -1181,6 +1183,7 @@ int CfgFactory::load_db_prof_auth () {
 
             if (  ! cur_object.getName() ) {
                 _dia("load_db_prof_auth: unnamed object index %d: not ok", i);
+                delete a; // coverity: 1408003
                 continue;
             }
             
@@ -1203,6 +1206,8 @@ int CfgFactory::load_db_prof_auth () {
 
                     if (  ! cur_subpol.getName() ) {
                         _dia("load_db_prof_auth: profiles: unnamed object index %d: not ok", j);
+
+                        delete n_subpol; // coverity: 1407960
                         continue;
                     }
 

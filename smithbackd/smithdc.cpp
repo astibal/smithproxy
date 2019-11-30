@@ -192,6 +192,7 @@ void test_url2(const char* url = nullptr) {
         // pack. Make buffer data from the object
         m->pack();
         client.cx()->send(m);
+        delete m; // coverity: 1408013
         
         // signal management
         PackageHandler mgr;
@@ -235,7 +236,9 @@ void test_url(const char* url = nullptr) {
     
     // instruct cx to add data for sending
     cx->send(m);
-    
+
+    delete m; // coverity: 1407981
+
     // manage and run all connections until it's stopped. We stop in the client code,
     // where we receive response and close cx. Which will also close the proxy, which in turn terminates
     // run method.

@@ -193,6 +193,8 @@ int DNSFactory::send_dns_request(std::string const& hostname, DNS_Record_Type t,
     if (::send(send_socket, b.data(), b.size(), 0) < 0) {
         std::string r = string_format("resolve_dns_s: cannot write remote socket: %d", send_socket);
         _dia("%s", r.c_str());
+
+        ::close(send_socket);  // coverity: 1407969
         return -1;
     }
 

@@ -318,7 +318,7 @@ DNS_Response* send_dns_request(struct cli_def *cli, std::string hostname, DNS_Re
 
     // create UDP socket
     int send_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    struct sockaddr_storage addr;
+    struct sockaddr_storage addr {0};
     memset(&addr, 0, sizeof(struct sockaddr_storage));
     addr.ss_family                = AF_INET;
     ((sockaddr_in*)&addr)->sin_addr.s_addr = inet_addr(nameserver.c_str());
@@ -329,12 +329,14 @@ DNS_Response* send_dns_request(struct cli_def *cli, std::string hostname, DNS_Re
     if(::send(send_socket,b.data(),b.size(),0) < 0) {
         std::string r = string_format("logger::write_log: cannot write remote socket: %d",send_socket);
         cli_print(cli,"%s",r.c_str());
+
+        ::close(send_socket); // coverity: 1407944
         return CLI_OK;
     }
 
     int rv;
     fd_set confds;
-    struct timeval tv;
+    struct timeval tv {0};
     tv.tv_usec = 0;
     tv.tv_sec = 2;
     FD_ZERO(&confds);
