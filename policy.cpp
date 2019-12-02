@@ -252,7 +252,7 @@ bool PolicyRule::match(baseProxy* p) {
 
         end:
 
-        if (lmatch && lmatch && rmatch && rpmatch) {
+        if (lmatch && lpmatch && rmatch && rpmatch) {
             _inf("PolicyRule::match %s OK", p->to_string(iINF).c_str());
             cnt_matches++;
 
