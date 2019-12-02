@@ -580,8 +580,14 @@ int main(int argc, char *argv[]) {
 
     // no mercy here.
     unlink(cfg_smithd_listen_port.c_str());
-    backend_proxy = ServiceFactory::prepare_listener<UxProxy,UxCom>(cfg_smithd_listen_port,"ux-plain","/var/run/smithd.sock",cfg_smithd_workers);
-    backend_proxy = ServiceFactory::prepare_listener<UxProxy,UxCom>(cfg_smithd_listen_port,"ux-plain","/var/run/smithd.sock",cfg_smithd_workers);
+    backend_proxy = nullptr;
+
+    try {
+        ServiceFactory::prepare_listener<UxProxy,UxCom>(cfg_smithd_listen_port,"ux-plain","/var/run/smithd.sock",cfg_smithd_workers);
+    } catch(socle::com_error const& e) {
+        _fat("Exception caught when creating listener: %s", e.what());
+        backend_proxy = nullptr;
+    }
 
     if(backend_proxy == nullptr && cfg_smithd_workers >= 0) {
         

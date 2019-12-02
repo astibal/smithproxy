@@ -405,8 +405,13 @@ int main(int argc, char *argv[]) {
     SmithProxy::instance().create_identity_thread();
 
     // launch listeners
-    SmithProxy::instance().create_listeners();
 
+    try {
+        SmithProxy::instance().create_listeners();
+    } catch(socle::com_error const& e) {
+        _cri("failed to prepare listeners!");
+        return 1;
+    }
 
     _cri("Smithproxy %s (socle %s) starting...", SMITH_VERSION, SOCLE_VERSION);
     SmithProxy::instance().run();

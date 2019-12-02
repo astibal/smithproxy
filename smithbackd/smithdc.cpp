@@ -262,8 +262,16 @@ int main(int argc, char *argv[]) {
     
     for(int i = 0; i < loop_count; i++) {
     
-      ftime(&t_start);                                            
-      test_url2();
+      ftime(&t_start);
+
+      try {
+          test_url2();
+      } catch(socle::com_error const& e) {
+          std::cerr << "com error: " << e.what();
+          return 1;
+      }
+
+
       ftime(&t_current);
       
       t_diff = (int) (1000.0 * (t_current.time - t_start.time) + (t_current.millitm - t_start.millitm));
