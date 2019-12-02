@@ -265,6 +265,7 @@ int main(int argc, char *argv[]) {
             case 'o':
                 CfgFactory::get().config_file_check_only = true;
                 get_logger()->dup2_cout(true);
+                break;
                 
             case 'D':
                 SmithProxy::instance().cfg_daemonize = true;
