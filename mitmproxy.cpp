@@ -1175,42 +1175,49 @@ void MitmProxy::set_replacement_msg_ssl(SSLCom* scom) {
 std::string MitmProxy::replacement_ssl_verify_detail(SSLCom* scom) {
 
     std::stringstream ss;
-    if(scom && scom->verify_get() != SSLCom::VERIFY_OK) {
-        bool is_set = false;
+    if(scom) {
+        if (scom->verify_get() != SSLCom::VERIFY_OK) {
+            bool is_set = false;
 
-        if(scom->verify_check(SSLCom::SELF_SIGNED)) {
-            ss << "<p><h3 class=\"fg-red\">Reason:</h3> " << verify_flag_string(SSLCom::SELF_SIGNED) << ".</p>";
-            is_set = true;
-        }
-        if(scom->verify_check(SSLCom::SELF_SIGNED_CHAIN)) {
-            ss << "<p><h3 class=\"fg-red\">Reason:</h3> " <<  verify_flag_string(SSLCom::SELF_SIGNED_CHAIN) << ".</p>";
-            is_set = true;
-        }
-        if(scom->verify_check(SSLCom::UNKNOWN_ISSUER)) {
-            ss << "<p><h class=\"fg-red\"3>Reason:</h3>"<< verify_flag_string(SSLCom::UNKNOWN_ISSUER) <<".</p>";
-            is_set = true;
-        }
-        if(scom->verify_check(SSLCom::CLIENT_CERT_RQ)) {
-            ss << "<p><h3 class=\"fg-red\">Reason:</h3>" << verify_flag_string(SSLCom::CLIENT_CERT_RQ) <<".<p>";
-            is_set = true;
-        }
-        if(scom->verify_check(SSLCom::REVOKED)) {
-            ss <<  "<p><h3 class=\"fg-red\">Reason:</h3>" << verify_flag_string(SSLCom::REVOKED) << ". "
-                                    "This is a serious issue, it's highly recommended to not continue "
-                                    "to this page.</p>";
-            is_set = true;
-        }
-        if(scom->verify_check(SSLCom::HOSTNAME_FAILED)) {
-            ss << "<p><h3 class=\"fg-red\">Reason:</h3>" << verify_flag_string(SSLCom::HOSTNAME_FAILED) << ".</p>";
-            is_set = true;
-        }
+            if (scom->verify_check(SSLCom::SELF_SIGNED)) {
+                ss << "<p><h3 class=\"fg-red\">Reason:</h3> " << verify_flag_string(SSLCom::SELF_SIGNED) << ".</p>";
+                is_set = true;
+            }
+            if (scom->verify_check(SSLCom::SELF_SIGNED_CHAIN)) {
+                ss << "<p><h3 class=\"fg-red\">Reason:</h3> " << verify_flag_string(SSLCom::SELF_SIGNED_CHAIN)
+                   << ".</p>";
+                is_set = true;
+            }
+            if (scom->verify_check(SSLCom::UNKNOWN_ISSUER)) {
+                ss << "<p><h class=\"fg-red\"3>Reason:</h3>" << verify_flag_string(SSLCom::UNKNOWN_ISSUER) << ".</p>";
+                is_set = true;
+            }
+            if (scom->verify_check(SSLCom::CLIENT_CERT_RQ)) {
+                ss << "<p><h3 class=\"fg-red\">Reason:</h3>" << verify_flag_string(SSLCom::CLIENT_CERT_RQ) << ".<p>";
+                is_set = true;
+            }
+            if (scom->verify_check(SSLCom::REVOKED)) {
+                ss << "<p><h3 class=\"fg-red\">Reason:</h3>" << verify_flag_string(SSLCom::REVOKED) << ". "
+                                                                                                       "This is a serious issue, it's highly recommended to not continue "
+                                                                                                       "to this page.</p>";
+                is_set = true;
+            }
+            if (scom->verify_check(SSLCom::HOSTNAME_FAILED)) {
+                ss << "<p><h3 class=\"fg-red\">Reason:</h3>" << verify_flag_string(SSLCom::HOSTNAME_FAILED) << ".</p>";
+                is_set = true;
+            }
 
 
-        if(!is_set) {
-            ss << string_format("<p><h3 class=\"fg-red\">Reason:</h3>Oops, no detailed problem description (code: 0x%04x)</p>",scom->verify_get());
+            if (!is_set) {
+                ss << string_format(
+                        "<p><h3 class=\"fg-red\">Reason:</h3>Oops, no detailed problem description (code: 0x%x)</p>",
+                        scom->verify_get());
+            }
+        } else {
+            ss << string_format(
+                    "<p><h3 class=\"fg-red\">Reason:</h3>Oops, no detailed problem description (code: 0x%x)</p>",
+                    scom->verify_get());
         }
-    } else {
-        ss << string_format("<p><h3 class=\"fg-red\">Reason:</h3>Oops, no detailed problem description (code: 0x%04x)</p>",scom->verify_get());
     }
 
     return ss.str();
