@@ -324,7 +324,11 @@ DNS_Response* send_dns_request(struct cli_def *cli, std::string hostname, DNS_Re
     ((sockaddr_in*)&addr)->sin_addr.s_addr = inet_addr(nameserver.c_str());
     ((sockaddr_in*)&addr)->sin_port = htons(53);
 
-    ::connect(send_socket,(sockaddr*)&addr,sizeof(sockaddr_storage));
+    if(0 != ::connect(send_socket,(sockaddr*)&addr,sizeof(sockaddr_storage))) {
+        cli_print(cli, "cannot connect socket");
+        ::close(send_socket);
+        return CLI_OK;
+    }
 
     if(::send(send_socket,b.data(),b.size(),0) < 0) {
         std::string r = string_format("logger::write_log: cannot write remote socket: %d",send_socket);
