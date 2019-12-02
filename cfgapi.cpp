@@ -1529,7 +1529,7 @@ bool CfgFactory::prof_tls_apply (baseHostCX *originator, baseProxy *new_proxy, P
                                     }
                                 }
                                 
-                                delete c;
+                                cidr_free(c);
                                 
                                 if(interrupt) 
                                     break;
