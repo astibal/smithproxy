@@ -137,7 +137,7 @@ std::string PolicyRule::to_string(int verbosity) const {
 bool PolicyRule::match_addrgrp_cx(std::vector< AddressObject* >& sources, baseHostCX* cx) {
     bool match = false;
     
-    if(sources.size() == 0) {
+    if(sources.empty()) {
         match = true;
 //                 _dia("PolicyRule: matched ");
     } else {
@@ -147,16 +147,16 @@ bool PolicyRule::match_addrgrp_cx(std::vector< AddressObject* >& sources, baseHo
             if(comp->match(l)) {
                 if(*log.level() >= DIA) {
                     char* a = cidr_to_str(l);
-                    _dia("PolicyRule::match_addrgrp_cx: comparing %s with rule %s: matched",a,comp->to_string().c_str());
-                    delete a;
+                    _dia("PolicyRule::match_addrgrp_cx: comparing %s with rule %s: matched", a, comp->to_string().c_str());
+                    free(a);
                 }
                 match = true;
                 break;
             } else {
                 if(*log.level() >= DIA) {
                     char* a = cidr_to_str(l);
-                    _deb("PolicyRule::match_addrgrp_cx: comparing %s with rule %s: not matched",a,comp->to_string().c_str());
-                    delete[] a;
+                    _deb("PolicyRule::match_addrgrp_cx: comparing %s with rule %s: not matched", a, comp->to_string().c_str());
+                    free(a);
                 }
             }
         }
