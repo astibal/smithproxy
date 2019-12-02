@@ -361,7 +361,7 @@ int SmithProxy::load_signatures(libconfig::Config& cfg, const char* name, std::v
 
     _dia("Loading %s: %d",name,sigs_len);
     for ( int i = 0 ; i < sigs_len; i++) {
-        MyDuplexFlowMatch* newsig = new MyDuplexFlowMatch();
+        auto* newsig = new MyDuplexFlowMatch();
 
 
         const Setting& signature = cfg_signatures[i];
@@ -390,13 +390,22 @@ int SmithProxy::load_signatures(libconfig::Config& cfg, const char* name, std::v
                  && signature_flow[j].lookupValue("bytes_start", bytes_start)
                  && signature_flow[j].lookupValue("bytes_max", bytes_max))) {
 
-                _war("Starttls signature %s failed to load: index %d",i);
+                _war("Starttls signature %s properties failed to load: index %d",newsig->name().c_str(), i);
                 continue;
             }
 
             if( type == "regex") {
                 _deb(" [%d]: new regex flow match",j);
-                newsig->add(side[0],new regexMatch(sigtext,bytes_start,bytes_max));
+                try {
+                    newsig->add(side[0], new regexMatch(sigtext, bytes_start, bytes_max));
+                } catch(std::regex_error const& e) {
+
+                    _err("Starttls signature %s regex failed to load: index %d, load aborted", newsig->name().c_str() , i);
+
+                    delete newsig;
+                    newsig = nullptr;
+                    break;
+                }
             } else
             if ( type == "simple") {
                 _deb(" [%d]: new simple flow match",j);
@@ -404,7 +413,9 @@ int SmithProxy::load_signatures(libconfig::Config& cfg, const char* name, std::v
             }
         }
 
-        target.push_back(newsig);
+        // load if not set to null due to loading error
+        if(newsig)
+            target.push_back(newsig);
     }
 
     return sigs_len;

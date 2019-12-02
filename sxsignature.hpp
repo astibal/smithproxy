@@ -48,6 +48,8 @@ public:
     std::string sig_side;
     std::string category;
     int severity {7};  // set severity to 7: log only if diagnosing
+
+    ~MyDuplexFlowMatch() override = default;
 };
 
 #endif //SMITHPROXY_SXSIGNATURE_HPP
