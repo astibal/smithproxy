@@ -64,7 +64,7 @@ SmithProxy::~SmithProxy () {
 std::thread* SmithProxy::create_identity_refresh_thread() {
 
 
-    std::thread * id_thread = new std::thread([]() {
+     auto* id_thread = new std::thread([]() {
         unsigned int sleep_time = 1;
         auto& log = instance().log;
 
@@ -455,25 +455,31 @@ bool SmithProxy::init_syslog() {
     }
 
 
-    ::connect(syslog_socket,(sockaddr*)&syslog_in,sizeof(sockaddr_storage));
+    if(0 != ::connect(syslog_socket,(sockaddr*)&syslog_in,sizeof(sockaddr_storage))) {
+        _err("cannot connect syslog socket %d: %s", syslog_socket, string_error().c_str());
+        ::close(syslog_socket);
+    } else {
 
-    get_logger()->remote_targets(string_format("syslog-udp%d-%d", CfgFactory::get().syslog_family, syslog_socket),syslog_socket);
+        get_logger()->remote_targets(string_format("syslog-udp%d-%d", CfgFactory::get().syslog_family, syslog_socket),
+                                     syslog_socket);
 
-    logger_profile* lp = new logger_profile();
+        auto *lp = new logger_profile();
 
-    lp->logger_type = logger_profile::REMOTE_SYSLOG;
-    lp->level_ = CfgFactory::get().syslog_level;
+        lp->logger_type = logger_profile::REMOTE_SYSLOG;
+        lp->level_ = CfgFactory::get().syslog_level;
 
-    // raising internal logging level
-    if(lp->level_ > get_logger()->level()) {
-        _not("Internal logging raised from %d to %d due to syslog server loglevel.",get_logger()->level(), lp->level_);
-        get_logger()->level(lp->level_);
+        // raising internal logging level
+        if (lp->level_ > get_logger()->level()) {
+            _not("Internal logging raised from %d to %d due to syslog server loglevel.", get_logger()->level(),
+                 lp->level_);
+            get_logger()->level(lp->level_);
+        }
+
+        lp->syslog_settings.severity = lp->level_.level();
+        lp->syslog_settings.facility = CfgFactory::get().syslog_facility;
+
+        get_logger()->target_profiles()[(uint64_t) syslog_socket] = lp;
     }
-
-    lp->syslog_settings.severity = lp->level_.level();
-    lp->syslog_settings.facility = CfgFactory::get().syslog_facility;
-
-    get_logger()->target_profiles()[(uint64_t)syslog_socket] = lp;
 
     return true;
 }

@@ -1469,7 +1469,17 @@ bool CfgFactory::prof_tls_apply (baseHostCX *originator, baseProxy *new_proxy, P
     auto* mitm_originator = dynamic_cast<AppHostCX*>(originator);
     
     bool tls_applied = false;
-    
+
+    if(! mitm_proxy) {
+        _err("prof_tls_apply: proxy is null");
+        return false;
+    }
+
+    if(! mitm_originator) {
+        _err("prof_tls_apply: originator cx is null");
+        return false;
+    }
+
     if(ps != nullptr) {
         // we should also apply tls profile to originating side! Verification is not in effect, but BYPASS is!
         if (policy_apply_tls(ps, mitm_originator->com())) {

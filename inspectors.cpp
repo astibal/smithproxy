@@ -153,7 +153,7 @@ void DNS_Inspector::update(AppHostCX* cx) {
     
     DNS_Packet* ptr = nullptr;
     buffer *xbuf = cur_pos.second;
-    buffer buf = xbuf->view(0,xbuf->size());
+    buffer shallow_xbuf = xbuf->view(0, xbuf->size());
 
     // check if response is already available
     DNS_Response* cached_entry = nullptr;
@@ -162,21 +162,21 @@ void DNS_Inspector::update(AppHostCX* cx) {
     unsigned int red = 0;
     
     if(is_tcp) {
-        unsigned short data_size = ntohs(buf.get_at<unsigned short>(0));
-        if(buf.size() < data_size) {
-            _dia("DNS_Inspector::update[%s]: not enough DNS data in TCP stream: expected %d, but having %d. Waiting to more.",cx->c_name(), data_size, buf.size());
+        unsigned short data_size = ntohs(shallow_xbuf.get_at<unsigned short>(0));
+        if(shallow_xbuf.size() < data_size) {
+            _dia("DNS_Inspector::update[%s]: not enough DNS data in TCP stream: expected %d, but having %d. Waiting to more.", cx->c_name(), data_size, shallow_xbuf.size());
             return;
         }
         red += 2;
     }
     
-    int mem_len = buf.size();
+    int mem_len = shallow_xbuf.size();
     switch(cur_pos.first)  {
         case 'r':
             stage = 0;
-            for(unsigned int it = 0; red < buf.size() && it < 10; it++) {
+            for(unsigned int it = 0; red < shallow_xbuf.size() && it < 10; it++) {
                 ptr = new DNS_Request();
-                buffer cur_buf = buf.view(red,buf.size()-red);
+                buffer cur_buf = shallow_xbuf.view(red, shallow_xbuf.size() - red);
                 int cur_red = ptr->load(&cur_buf);
                 
                 // because of non-standard return value from above load(), we need to adjust red bytes manually
@@ -275,10 +275,10 @@ void DNS_Inspector::update(AppHostCX* cx) {
             break;
         case 'w':
             stage = 1;
-            for(unsigned int it = 0; red < buf.size() && it < 10; it++) {
+            for(unsigned int it = 0; red < shallow_xbuf.size() && it < 10; it++) {
                 ptr = new DNS_Response();
                 
-                buffer cur_buf = buf.view(red,buf.size()-red);
+                buffer cur_buf = shallow_xbuf.view(red, shallow_xbuf.size() - red);
                 int cur_red = ptr->load(&cur_buf);
                 
                 
