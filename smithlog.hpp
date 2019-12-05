@@ -49,26 +49,29 @@
 #include <string>
 #include <utility>
 #include <lockable.hpp>
-#include <logger.hpp>
+#include <log/logger.hpp>
 
 typedef std::pair<loglevel,std::string> log_entry;
-typedef std::map<std::ofstream*,std::vector<std::string>> ofstream_queue;
 
 class QueueLogger : public logger, public lockable {
 public:
     QueueLogger();
-    virtual ~QueueLogger() {};
-    virtual int write_log(loglevel l, std::string& sss);
+    ~QueueLogger() override = default;
+    int write_log(loglevel l, std::string& sss) override;
     virtual int write_disk(loglevel l, std::string& sss);
     
     static void run_queue(QueueLogger* logger_src);
     
     unsigned int max_len = 1000;
+    bool debug_queue = false;
+
     bool sig_terminate = false;
 protected:
 
     std::queue<log_entry> logs_;
-    std::thread*  log_writter;
+
+private:
+    unsigned int warned = 0;
 };
 
 

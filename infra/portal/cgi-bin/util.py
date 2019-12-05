@@ -40,10 +40,11 @@
 import string
 import cgi
 
-def print_message(pagename,caption,message,redirect_url=None,redirect_time=5):
-        print "Content-type:text/html\r\n\r\n"
 
-        page = """
+def print_message(pagename, caption, message, redirect_url=None, redirect_time=5):
+    print ("Content-type:text/html\r\n\r\n")
+
+    page = """
         <html>
         <head>
                 <title>$pagename</title>
@@ -139,18 +140,14 @@ def print_message(pagename,caption,message,redirect_url=None,redirect_time=5):
         </body> 
         </html> 
         """
-        	
-        t = string.Template(page)
-        if redirect_url != None:
-            meta = "<meta http-equiv=\"Refresh\" content=\"%d; url=%s\">" % (redirect_time, redirect_url)
-            print t.substitute(pagename=cgi.escape(pagename).encode('ascii', 'xmlcharrefreplace'), 
-                               caption=cgi.escape(caption).encode('ascii', 'xmlcharrefreplace'), 
-                               message=cgi.escape(message).encode('ascii', 'xmlcharrefreplace'), 
-                               redirect_meta=meta)
-            return
 
-        print t.substitute(pagename=cgi.escape(pagename).encode('ascii', 'xmlcharrefreplace'), 
-                           caption=cgi.escape(caption).encode('ascii', 'xmlcharrefreplace'), 
-                           message=cgi.escape(message).encode('ascii', 'xmlcharrefreplace'), 
-                           redirect_meta="")
+    t = string.Template(page)
+    meta = ""
+    if redirect_url != None:
+        meta = "<meta http-equiv=\"Refresh\" content=\"%d; url=%s\">" % (redirect_time, redirect_url)
+
+    print(t.substitute(pagename=cgi.escape(pagename),
+                       caption=cgi.escape(caption),
+                       message=cgi.escape(message),
+                       redirect_meta=meta))
 

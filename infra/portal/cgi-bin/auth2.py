@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 
 """
     Smithproxy- transparent proxy with SSL inspection capabilities.
@@ -45,7 +45,7 @@
 import cgi, cgitb 
 import util
 import os
-import SOAPpy
+from zeep import Client as SoapClient
 import traceback
 import logging
 
@@ -60,11 +60,11 @@ if "TENANT_IDX" in os.environ.keys():
     tenant_index = int(os.environ["TENANT_IDX"])
 
 
-bend_url = "http://127.0.0.1:%d/" % (tenant_index+64000,)
+bend_url = "http://127.0.0.1:%d/?wsdl" % (64000 + tenant_index)
 
 def create_logger(name):
     ret = logging.getLogger(name)
-    hdlr = logging.FileHandler("/var/log/smithproxy_%s.log" % (name,))
+    hdlr = logging.FileHandler("/tmp/smithproxy_%s.log" % (name,))
     formatter = logging.Formatter('%(asctime)s [%(process)d] [%(levelname)s] %(message)s')
     hdlr.setFormatter(formatter)
     ret.addHandler(hdlr) 
@@ -85,15 +85,15 @@ def authenticate(username,password,token):
 
     try:
         if username:
-            bend = SOAPpy.SOAPProxy(bend_url)
-            success,ref = bend.authenticate(ip,username,password,token)
+            bend = bend = SoapClient(bend_url)
+            success, ref = bend.service.authenticate(ip, username, password, token)
         
         
             xref = ref
             if token == "0":
                 xref = "/cgi-bin/auth.py?a=z&token=0"
         
-            if success:
+            if success == "1":
                 flog.info("User %s authentication successful from %s" % (username,ip))
                 xmsg = msg % ("successful! You will be now redirected to originally requested site",)
                 if token == 0:
@@ -120,12 +120,14 @@ def authenticate(username,password,token):
                             redirect_time=0)
 
         
-    except Exception,e:
+    except Exception as e:
         flog.error("exception caught: %s" % (str(e),))
         if print_exceptions:
             util.print_message("Whoops!","Exception caught!",str(e) +" " + traceback.format_exc(100)) + " backend URL %s" % (bend_url,)
         else:
-            util.print_message("Authentication failed","Authentication failed","There was a problem to validate your credentials. Please contact system administrator.")
+            util.print_message(u"Authentication failed",
+                               u"Authentication failed",
+                               u"There was a problem to validate your credentials. Please contact system administrator.")
 
 
 # Create instance of FieldStorage 

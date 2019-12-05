@@ -41,20 +41,43 @@
 #define __DAEMON_HPP
 
 #include <string>
+#include <log/logan.hpp>
 
 #define PID_FILE_DEFAULT "/var/run/smithproxy.0.pid"
+#define LOG_FILENAME_SZ 512
 
-extern "C" std::string PID_FILE;
-extern "C" void daemon_set_tenant(const std::string& name, const std::string& tenant_id);
 
-extern "C" void daemonize(void);
-extern "C" void daemon_write_pidfile(void);
-extern "C" bool daemon_exists_pidfile(void);
-extern "C" void daemon_unlink_pidfile(void);
-extern "C" int daemon_get_limit_fd();
-extern "C" void daemon_set_limit_fd(int max);
-extern "C" void set_signal(unsigned int sig, void (*sig_handler)(int));
-extern "C" void set_daemon_signals(void (*terminate_handler)(int),void (*reload_handler)(int));
-extern "C" void set_crashlog(const char* file);
+struct DaemonFactory : public LoganMate {
+    std::string PID_FILE = PID_FILE_DEFAULT;
+    volatile char crashlog_file[LOG_FILENAME_SZ];
+
+    [[nodiscard]] std::string &class_name() const override;
+    [[nodiscard]] std::string hr() const override;
+
+    DaemonFactory() : log(logan_attached<DaemonFactory>(this, "service")) {
+        ::memset((void*)crashlog_file, 0, LOG_FILENAME_SZ);
+    }
+
+    static DaemonFactory& instance() {
+        static DaemonFactory d;
+        return d;
+    }
+    void set_tenant(const std::string& name, const std::string& tenant_id);
+
+    void daemonize();
+    void write_pidfile();
+    bool exists_pidfile();
+    void unlink_pidfile();
+    int get_limit_fd();
+    void set_limit_fd(int max);
+    void set_signal(unsigned int sig, void (*sig_handler)(int));
+    void set_daemon_signals(void (*terminate_handler)(int),void (*reload_handler)(int));
+    void set_crashlog(const char* file);
+    static void uw_btrace_handler(int sig);
+
+    logan_attached<DaemonFactory> log;
+};
+
+
 
 #endif

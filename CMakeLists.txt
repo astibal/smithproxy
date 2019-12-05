@@ -15,7 +15,13 @@ add_subdirectory(${SOCLE_COMMON_DIR} socle_common_lib)
 add_subdirectory(${SMITHD_DIR})
 
 if(UNIX)
-    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g  -Wall -std=c++11")
+    IF(NOT CMAKE_BUILD_TYPE)
+        SET(CMAKE_BUILD_TYPE Debug)
+    ENDIF(NOT CMAKE_BUILD_TYPE)
+
+    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -std=c++17 -g")
+    SET(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g")
+    SET(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -s -DBUILD_RELEASE")
 
     # detect Alpine - and disable backtrace_* function use
     if(EXISTS "/etc/alpine-release")
@@ -23,31 +29,76 @@ if(UNIX)
     endif()
 endif()
 
-add_executable(smithproxy   
-                            smithproxy.cpp 
-                            mitmhost.cpp 
-                            mitmproxy.cpp 
-                            cfgapi.cpp 
-                            cidr.cpp 
-                            policy.cpp 
-                            daemon.cpp 
-                            sockshostcx.cpp 
-                            socksproxy.cpp 
-                            cmdserver.cpp 
-                            cfgapi_auth.cpp 
-                            dns.cpp 
-                            inspectors.cpp 
-                            addrobj.cpp 
-                            srvutils.cpp 
-                            staticcontent.cpp 
-                            nltemplate.cpp 
-                            cfgapi_auth6.cpp 
-                            smithlog.cpp 
-                            filterproxy.cpp 
-                            smithdnsupd.cpp
-                            loadb.cpp
-                )
-add_executable(smithd ${SMITHD_DIR}/smithd.cpp ${SMITHD_DIR}/smithdcx.cpp daemon.cpp smithlog.cpp)
+
+if(EXISTS "${CMAKE_SOURCE_DIR}/.git")
+    execute_process(
+            COMMAND git rev-parse --abbrev-ref HEAD
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            OUTPUT_VARIABLE SX_GIT_BRANCH
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+
+    execute_process(
+            COMMAND git log -1 --format=%h
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            OUTPUT_VARIABLE SX_GIT_COMMIT_HASH
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+
+    execute_process(
+            COMMAND git describe --tags --dirty
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            OUTPUT_VARIABLE SX_GIT_VERSION
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+
+else(EXISTS "${CMAKE_SOURCE_DIR}/.git")
+    set(SX_GIT_BRANCH "")
+    set(SX_GIT_COMMIT_HASH "")
+    set(SX_GIT_VERSION "")
+
+endif(EXISTS "${CMAKE_SOURCE_DIR}/.git")
+
+message(STATUS "Git current smithproxy branch: ${SX_GIT_BRANCH}")
+message(STATUS "Git commit smithrproxy hash: ${SX_GIT_COMMIT_HASH}")
+message(STATUS "Git commit smithrproxy version: ${SX_GIT_VERSION}")
+
+message(STATUS "Generating smithproxy_version.h")
+
+configure_file(
+        ${CMAKE_SOURCE_DIR}/smithproxy_version.h.in
+        ${CMAKE_SOURCE_DIR}/smithproxy_version.h
+)
+
+add_executable(smithproxy
+        main.cpp
+        mitmhost.cpp
+        mitmproxy.cpp
+        cfgapi.cpp
+        policy.cpp
+        daemon.cpp
+        sockshostcx.cpp
+        socksproxy.cpp
+        cmdserver.cpp
+        shmauth.cpp
+        dns.cpp
+        inspectors.cpp
+        addrobj.cpp
+        srvutils.cpp
+        staticcontent.cpp
+        nltemplate.cpp
+        authfactory6.cpp
+        smithlog.cpp
+        filterproxy.cpp
+        smithdnsupd.cpp
+        loadb.cpp
+        smithproxy.hpp
+        smithproxy.cpp
+
+        ext/cidr.cpp
+        ext/cxxopts.hpp
+        authfactory.hpp authfactory4.cpp sxsignature.hpp)
+add_executable(smithd ${SMITHD_DIR}/smithd.cpp ${SMITHD_DIR}/smithdcx.cpp daemon.cpp smithlog.cpp dns.cpp ext/cidr.cpp addrobj.cpp)
 add_executable(smithdc ${SMITHD_DIR}/smithdc.cpp ${SMITHD_DIR}/smithdcx.cpp smithlog.cpp)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}")
@@ -201,8 +252,21 @@ if(UNIX)
     InstallSymlink(/usr/share/smithproxy/infra/authtools/sx_passwd.py /usr/bin/sx_passwd)
 
     # portal installation
-    install(DIRECTORY infra/portal DESTINATION share/smithproxy/www)
-    
+    file(GLOB sx_www_cgi "infra/portal/cgi-bin/auth*.py")
+    install(FILES ${sx_www_cgi} DESTINATION share/smithproxy/www/portal/cgi-bin
+            PERMISSIONS
+            OWNER_READ OWNER_WRITE OWNER_EXECUTE
+            GROUP_READ GROUP_EXECUTE
+            WORLD_READ WORLD_EXECUTE
+            )
+    file(GLOB sx_www_cgi_nox "infra/portal/cgi-bin/util.py")
+    install(FILES ${sx_www_cgi_nox} DESTINATION share/smithproxy/www/portal/cgi-bin)
+
+    file(GLOB sx_www "infra/portal/*.*")
+    # install(DIRECTORY infra/portal DESTINATION share/smithproxy/www)
+    install(FILES ${sx_www} DESTINATION share/smithproxy/www/portal/)
+
+
     install(DIRECTORY etc/msg DESTINATION /etc/smithproxy)
     
     # message: edit defaults and add to init.d to start at boot!

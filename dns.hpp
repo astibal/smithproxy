@@ -54,9 +54,11 @@
 #include <ptr_cache.hpp>
 #include <buffer.hpp>
 #include <display.hpp>
-#include <logger.hpp>
-#include <cidr.hpp>
+#include <log/logger.hpp>
+#include <ext/cidr.hpp>
 #include <addrobj.hpp>
+
+#include <dns.hpp>
 
 #define DNS_HEADER_SZ 12
 
@@ -71,15 +73,54 @@ typedef enum DNS_Record_Type_ {
     OPT=41
 } DNS_Record_Type;
 
-extern const char* _unknown;
-extern const char* str_a;
-extern const char* str_aaaa;
-extern const char* str_cname;
-extern const char* str_txt;
-extern const char* str_opt;
-extern const char* str_soa;
 
-const char* dns_record_type_str(int a);
+struct DNS_Response;
+
+class DNSFactory {
+    const char* _unknown = "unknown";
+    const char* str_a = "A";
+    const char* str_aaaa = "AAAA";
+    const char* str_cname = "CNAME";
+    const char* str_txt= "TXT";
+    const char* str_opt = "OPT";
+    const char* str_soa = "SOA";
+
+
+    DNSFactory() : log(get_log()) {};
+
+    logan_lite& log;
+public:
+    DNSFactory(DNSFactory const&) = delete;
+    void operator=(DNSFactory const&) = delete;
+
+    const char *dns_record_type_str(int a);
+    int load_qname(unsigned char* ptr, unsigned int maxlen, std::string* str_storage);
+    int generate_dns_request(unsigned short id, buffer& b, std::string const& hostname, DNS_Record_Type t);
+
+    // send DNS request out to network. Return socket FD, or non-positive on error.
+    // you want to call this for async request
+    int send_dns_request (std::string const &hostname, DNS_Record_Type t, std::string const &nameserver);
+
+    // @returns: response and return from receive - well. I don't like it this way either,
+    // but we can't actually return nullptr, since it could be legit return value on non-blocking socket
+    // you want to call this for async receive - ideally if socket is in readset.
+    std::pair<DNS_Response*,int> recv_dns_response(int send_socket, unsigned int timeout_sec=2);
+
+
+    // this is easiest way to resolve. Just do the thing, with blocking ... and waiting.
+    DNS_Response* resolve_dns_s (std::string const& hostname, DNS_Record_Type t, std::string const& nameserver, unsigned int timeout_s=2);
+
+
+    static DNSFactory& get() {
+        static DNSFactory d;
+        return d;
+    };
+
+    static logan_lite& get_log() {
+        static logan_lite l("com.dns");
+        return l;
+    }
+};
 
 struct DNS_Question {
     std::string rec_str;
@@ -87,7 +128,7 @@ struct DNS_Question {
     uint16_t rec_class = 0;
     size_t mem_size() const { return rec_str.size()+1 + 2*sizeof(uint16_t); };
     std::string hr() const { return string_format("type: %s class: %d record: %s", 
-                                               dns_record_type_str(rec_type),
+                                               DNSFactory::get().dns_record_type_str(rec_type),
                                                rec_class, rec_str.c_str()); }
 };
 
@@ -103,13 +144,14 @@ struct DNS_Answer {
         std::string ret;
         if(type_ == A && data_.size() == 4) {
             uint32_t ip = data_.get_at<uint32_t>(0);
-            in_addr a;
+
+            in_addr a{0};
             a.s_addr = ip;
             
             if(nice) 
-                ret += string_format(" ip: %s",inet_ntoa(a));
+                ret = string_format("ip4: %s",inet_ntoa(a));
             else
-                ret += string_format("%s",inet_ntoa(a));
+                ret = string_format("%s",inet_ntoa(a));
         }
         else if(type_ == AAAA && data_.size() == 16) {
             char b[64];
@@ -118,9 +160,9 @@ struct DNS_Answer {
             inet_ntop(AF_INET6,data_.data(),b,64);
             
             if(nice)
-                ret += string_format(" ip6: %s",b);
+                ret = string_format("ip6: %s",b);
             else
-                ret += string_format("%s",b);
+                ret = string_format("%s",b);
         }
         
         return ret;
@@ -129,13 +171,13 @@ struct DNS_Answer {
     CIDR* cidr() const {
         if(type_ == A && data_.size() == 4) {
             uint32_t ip = data_.get_at<uint32_t>(0);
-            in_addr a;
+            in_addr a{0};
             a.s_addr = ip;
             
             return cidr_from_inaddr(&a);
         } 
         else if (type_ == AAAA && data_.size() == 16) {
-            in6_addr a;
+            in6_addr a{0};
             memcpy(&a.s6_addr,data_.data(),16);
             return cidr_from_in6addr(&a);
         }
@@ -145,7 +187,8 @@ struct DNS_Answer {
     
     std::string hr() const { 
         
-        std::string ret = string_format("type: %s, class: %d, ttl: %d",dns_record_type_str(type_),class_,ttl_);
+        std::string ret = string_format("type: %s, class: %d, ttl: %d",
+                                        DNSFactory::get().dns_record_type_str(type_),class_,ttl_);
         ret += ip();
         return ret;
     };
@@ -178,15 +221,23 @@ protected:
     std::vector<DNS_Answer> authorities_list_;
     //std::vector<DNS_AdditionalInfo> additionals_list;
     std::vector<DNS_Answer> additionals_list_;
-    
-public:    
+
+private:
+    logan_attached<DNS_Packet> log;
+
+public:
+    explicit DNS_Packet() {
+        log = logan::attach<DNS_Packet>(this, "com.dns");
+    };
+
     std::vector<int> answer_ttl_idx; // should be protected;
     time_t      loaded_at = 0;
     
-    virtual std::string to_string(int verbosity=iINF);
-    virtual bool ask_destroy() { return false; };
+    std::string to_string(int verbosity=iINF) const override;
+    bool ask_destroy() override { return false; };
 
-    virtual ~DNS_Packet() {}
+    ~DNS_Packet() override = default;
+
     int load(buffer* src); // initialize from memory. if non-zero is returned, there is yet another data and new DNS_packet should be read.
 
     inline uint16_t id() const { return id_; }
@@ -194,62 +245,121 @@ public:
 
     // helper inline functions to operate on most common content
     std::string question_str_0() const { 
-        if(questions_list_.size()) { 
+        if(! questions_list_.empty()) {
             std::string ret;
             if(question_type_0() == A) ret = "A:";
             else if (question_type_0() == AAAA) ret = "AAAA:";
-            return ret += string_format(questions_list_.at(0).rec_str); 
+            ret += string_format("%s", questions_list_.at(0).rec_str.c_str());
+            return ret;
         } 
         return std::string("? "); 
     };
-    uint16_t question_type_0() const { if(questions_list_.size()) { return questions_list_.at(0).rec_type; } return 0; };
-    uint16_t question_class_0() const { if(questions_list_.size()) { return questions_list_.at(0).rec_class; } return 0; };
+    uint16_t question_type_0() const { if( ! questions_list_.empty() ) { return questions_list_.at(0).rec_type; } return 0; };
+    uint16_t question_class_0() const { if( ! questions_list_.empty() ) { return questions_list_.at(0).rec_class; } return 0; };
     
     std::string answer_str() const;
-    std::vector<CidrAddress*> get_a_anwsers();
+    std::vector<CidrAddress*> get_a_anwsers() const;
 
     inline std::vector<DNS_Question>& questions() { return questions_list_; };
     inline std::vector<DNS_Answer>& answers() { return answers_list_; };
     inline std::vector<DNS_Answer>& authorities() { return authorities_list_; };
     inline std::vector<DNS_Answer>& additionals() { return additionals_list_; };
     
-    
+
     DECLARE_C_NAME("DNS_Packet");
     DECLARE_LOGGING(to_string);
 };
 
 #define DNS_REQUEST_OVERHEAD 17
-int generate_dns_request(unsigned short id, buffer& b,const std::string hostname, DNS_Record_Type t);
 
 class DNS_Request : public DNS_Packet {
+private:
+    logan_attached<DNS_Request> log;
+
 public:
-    DNS_Request(): DNS_Packet() {};        // we won't allow parsing in constructor
-    virtual ~DNS_Request() {};
+    DNS_Request(): DNS_Packet() {
+        log = logan::attach<DNS_Request>(this, "dns");
+        _deb("DNS_Request::c-tor");
+    };
+
+
+    ~DNS_Request() override {
+        _deb("DNS_Request::d-tor");
+    };
     DECLARE_C_NAME("DNS_Request");
     DECLARE_LOGGING(to_string);
 };
 
 
 class DNS_Response : public DNS_Packet {
+private:
+    logan_attached<DNS_Response> log;
+
 public:
     buffer* cached_packet = nullptr;
     unsigned int cached_id_idx = 0;
     
-    DNS_Response(): DNS_Packet() {};        // we won't allow parsing in constructor
-    virtual ~DNS_Response() { if(cached_packet != nullptr) delete cached_packet; };
+    DNS_Response(): DNS_Packet() {
+        log = logan::attach<DNS_Response>(this,"dns");
+        _deb("DNS_Response::c-tor");
+    };
+    ~DNS_Response() override {
+        _deb("DNS_Request::d-tor");
+        if(cached_packet != nullptr) {
+            _deb("DNS_Request::d-tor deleting cached packet");
+            delete cached_packet;
+        }
+    };
     
     DECLARE_C_NAME("DNS_Response");
     DECLARE_LOGGING(to_string);
 };
 
 
-typedef ptr_cache<std::string,DNS_Response> dns_cache;
+class DNS {
 
-extern dns_cache inspect_dns_cache;
-extern std::unordered_map<std::string,ptr_cache<std::string,DNS_Response>*> inspect_per_ip_dns_cache;
+public:
+    static const unsigned int cache_size = 2000;
+    static const unsigned int sub_ttl = 3600;
+    static const unsigned int top_ttl = 28000;
 
-typedef ptr_cache<std::string,expiring_int> domain_cache_entry_t;
-typedef ptr_cache<std::string,domain_cache_entry_t> domain_cache_t;
-extern domain_cache_t domain_cache;
+private:
+    typedef ptr_cache<std::string,DNS_Response> dns_cache_t;
+    typedef ptr_cache<std::string,expiring_int> domain_cache_entry_t;
+    typedef ptr_cache<std::string,domain_cache_entry_t> domain_cache_t;
+
+    dns_cache_t dns_cache_;
+    domain_cache_t domain_cache_;
+
+
+    DNS() :
+        dns_cache_("DNS cache - global", cache_size, true),
+        domain_cache_("DNS 3l domain cache", cache_size, true)
+    {}
+
+public:
+
+    inline dns_cache_t& dns_cache() { return dns_cache_; };
+    inline domain_cache_t& domain_cache() { return domain_cache_; };
+
+    inline std::recursive_mutex& dns_lock() { return dns_cache().getlock(); };
+    inline std::recursive_mutex& domain_lock() { return domain_cache().getlock(); };
+
+
+    static dns_cache_t& get_dns_cache() { return get().dns_cache(); };
+    static domain_cache_t& get_domain_cache() { return get().domain_cache(); };
+
+    static std::recursive_mutex& get_dns_lock() { return get().dns_lock(); };
+    static std::recursive_mutex& get_domain_lock() { return get().domain_lock(); };
+
+    static domain_cache_entry_t* make_domain_entry(std::string const& s) {
+        return new domain_cache_entry_t(string_format("DNS cache for %s",s.c_str()).c_str(), DNS::sub_ttl, true);
+    }
+
+    static DNS& get() {
+        static DNS st;
+        return st;
+    }
+};
 
 #endif

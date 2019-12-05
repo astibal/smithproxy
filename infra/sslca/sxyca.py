@@ -41,18 +41,19 @@
 from __future__ import print_function
 
 import datetime
+import ipaddress
 import json
 import os
 
-import ipaddress
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.x509.oid import NameOID
 from cryptography.x509.oid import AuthorityInformationAccessOID
+from cryptography.x509.oid import NameOID
+
 SETTINGS = {
     "ca": {},
     "srv": {},
@@ -61,13 +62,15 @@ SETTINGS = {
     "path": "/tmp/"
 }
 
+
 def pref_choice(*args):
     for a in args:
         if a:
             return a
     return None
 
-def init_settings(cn, c, ou=None, o=None, l=None, s=None, def_subj_ca=None, def_subj_srv=None, def_subj_clt=None ):
+
+def init_settings(cn, c, ou=None, o=None, l=None, s=None, def_subj_ca=None, def_subj_srv=None, def_subj_clt=None):
     global SETTINGS
 
     # we want to extend, but not overwrite already existing settings
@@ -84,18 +87,16 @@ def init_settings(cn, c, ou=None, o=None, l=None, s=None, def_subj_ca=None, def_
         if "o" not in r[k]:  r[k]["o"] = pref_choice("Smithproxy Software")
         if "s" not in r[k]:  r[k]["s"] = pref_choice(s)
         if "l" not in r[k]:  r[k]["l"] = pref_choice(l)
-        if "c" not in r[k]:  r[k]["c"] = pref_choice("CZ",c)
+        if "c" not in r[k]:  r[k]["c"] = pref_choice("CZ", c)
 
-    if "cn" not in r["ca"]:   r["ca"]["cn"]  = pref_choice(def_subj_ca, "Smithproxy Root CA")
+    if "cn" not in r["ca"]:   r["ca"]["cn"] = pref_choice(def_subj_ca, "Smithproxy Root CA")
     if "cn" not in r["srv"]:  r["srv"]["cn"] = pref_choice(def_subj_srv, "Smithproxy Server Certificate")
     if "cn" not in r["clt"]:  r["clt"]["cn"] = pref_choice(def_subj_clt, "Smithproxy Client Certificate")
     if "cn" not in r["prt"]:  r["prt"]["cn"] = "Smithproxy Portal Certificate"
 
-
     if "settings" not in r["ca"]: r["ca"]["settings"] = {
         "grant_ca": "false"
     }
-
 
     # print("config to be written: %s" % (r,))
 
@@ -123,10 +124,10 @@ def load_settings():
 def generate_rsa_key(size):
     return rsa.generate_private_key(public_exponent=65537, key_size=size, backend=default_backend())
 
+
 def load_key(fnm, pwd=None):
     with open(fnm, "rb") as key_file:
-        return serialization.load_pem_private_key(key_file.read(),password=pwd, backend=default_backend())
-
+        return serialization.load_pem_private_key(key_file.read(), password=pwd, backend=default_backend())
 
 
 def generate_ec_key(curve=ec.SECP256R1):
@@ -134,8 +135,7 @@ def generate_ec_key(curve=ec.SECP256R1):
 
 
 def save_key(key, keyfile, passphrase=None):
-
-    #inner function
+    # inner function
     def choose_enc(pwd):
         if not pwd:
             return serialization.NoEncryption()
@@ -162,6 +162,7 @@ NameOIDMap = {
     "c": NameOID.COUNTRY_NAME
 }
 
+
 def construct_sn(profile, sn_override=None):
     snlist = []
 
@@ -170,7 +171,7 @@ def construct_sn(profile, sn_override=None):
         override = {}
 
     for subj_entry in ["cn", "ou", "o", "l", "s", "c"]:
-        if  subj_entry in override and subj_entry in NameOIDMap:
+        if subj_entry in override and subj_entry in NameOIDMap:
             snlist.append(x509.NameAttribute(NameOIDMap[subj_entry], override[subj_entry]))
 
         elif subj_entry in SETTINGS[profile] and SETTINGS[profile][subj_entry] and subj_entry in NameOIDMap:
@@ -195,7 +196,6 @@ def generate_csr(key, profile, sans_dns=None, sans_ip=None, isca=False, custom_s
             ii = ipaddress.ip_address(i)
             sans_list.append(x509.IPAddress(ii))
 
-
     sans = x509.SubjectAlternativeName(sans_list)
 
     builder = x509.CertificateSigningRequestBuilder()
@@ -207,13 +207,13 @@ def generate_csr(key, profile, sans_dns=None, sans_ip=None, isca=False, custom_s
     builder = builder.add_extension(
         x509.BasicConstraints(ca=isca, path_length=None), critical=True)
 
-    if(isca):
+    if (isca):
         builder = builder.add_extension(x509.KeyUsage(crl_sign=True, key_cert_sign=True,
                                                       digital_signature=False, content_commitment=False,
                                                       key_encipherment=False, data_encipherment=False,
                                                       key_agreement=False, encipher_only=False,
                                                       decipher_only=False),
-                                                      critical=True)
+                                        critical=True)
 
     else:
         builder = builder.add_extension(x509.KeyUsage(crl_sign=False, key_cert_sign=False,
@@ -221,18 +221,18 @@ def generate_csr(key, profile, sans_dns=None, sans_ip=None, isca=False, custom_s
                                                       key_encipherment=True, data_encipherment=False,
                                                       key_agreement=False, encipher_only=False,
                                                       decipher_only=False),
-                                                      critical=True)
+                                        critical=True)
         ex = []
         ex.append(x509.oid.ExtendedKeyUsageOID.SERVER_AUTH)
         ex.append(x509.oid.ExtendedKeyUsageOID.CLIENT_AUTH)
-        builder = builder.add_extension(x509.ExtendedKeyUsage(ex),critical=False)
+        builder = builder.add_extension(x509.ExtendedKeyUsage(ex), critical=False)
 
     csr = builder.sign(key, hashes.SHA256(), default_backend())
 
     return csr
 
 
-def sign_csr(key, csr, caprofile, valid=30, isca=False, cacert=None, aia_issuers=None,ocsp_responders=None):
+def sign_csr(key, csr, caprofile, valid=30, isca=False, cacert=None, aia_issuers=None, ocsp_responders=None):
     global SETTINGS
 
     one_day = datetime.timedelta(1, 0, 0)
@@ -247,7 +247,7 @@ def sign_csr(key, csr, caprofile, valid=30, isca=False, cacert=None, aia_issuers
 
     builder = builder.not_valid_before(datetime.datetime.today() - one_day)
     builder = builder.not_valid_after(datetime.datetime.today() + (one_day * valid))
-    #builder = builder.serial_number(x509.random_serial_number()) # too new to some systems
+    # builder = builder.serial_number(x509.random_serial_number()) # too new to some systems
     builder = builder.serial_number(int.from_bytes(os.urandom(10), byteorder="big"))
     builder = builder.public_key(csr.public_key())
 
@@ -273,21 +273,21 @@ def sign_csr(key, csr, caprofile, valid=30, isca=False, cacert=None, aia_issuers
         builder = builder.add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(key.public_key()),
                                         critical=False)
 
-
     all_aias = []
     if aia_issuers:
         for loc in aia_issuers:
-            aia_uri = x509.AccessDescription(AuthorityInformationAccessOID.CA_ISSUERS,x509.UniformResourceIdentifier(loc))
+            aia_uri = x509.AccessDescription(AuthorityInformationAccessOID.CA_ISSUERS,
+                                             x509.UniformResourceIdentifier(loc))
             all_aias.append(aia_uri)
 
     if ocsp_responders:
         for resp in ocsp_responders:
-            aia_uri = x509.AccessDescription(AuthorityInformationAccessOID.OCSP,x509.UniformResourceIdentifier(resp))
+            aia_uri = x509.AccessDescription(AuthorityInformationAccessOID.OCSP, x509.UniformResourceIdentifier(resp))
             all_aias.append(aia_uri)
 
     if all_aias:
         alist = x509.AuthorityInformationAccess(all_aias)
-        builder = builder.add_extension(alist,critical=False)
+        builder = builder.add_extension(alist, critical=False)
 
     print("sign CSR: == extensions ==")
     for e in csr.extensions:
@@ -320,8 +320,8 @@ def save_certificate(cert, certfile):
     except Exception as e:
         print("save_certificate: exception caught: " + str(e))
 
+
 def load_certificate(fnm):
-    with open(fnm,'r',encoding='utf-8') as f:
+    with open(fnm, 'r', encoding='utf-8') as f:
         ff = f.read()
         return x509.load_pem_x509_certificate(ff.encode('ascii'), backend=default_backend())
-

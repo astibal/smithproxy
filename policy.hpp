@@ -45,7 +45,7 @@
 
 #include <hostcx.hpp>
 #include <baseproxy.hpp>
-#include <cidr.hpp>
+#include <ext/cidr.hpp>
 #include <ranges.hpp>
 #include <addrobj.hpp>
 
@@ -99,8 +99,8 @@ public:
        int nat    = POLICY_NAT_NONE;
        std::string nat_name;
       
-       PolicyRule() : ProfileList(), socle::sobject() {};
-       virtual ~PolicyRule();
+       PolicyRule() : ProfileList(), socle::sobject(), log(this, "policy.rule") {};
+       virtual ~PolicyRule() = default;
        
        bool match(baseProxy*);
        bool match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r);
@@ -110,11 +110,13 @@ public:
        bool match_rangegrp_cx(std::vector<range>& ranges,baseHostCX* cx);
        bool match_rangegrp_vecx(std::vector<range>& ranges,std::vector<baseHostCX*>& vecx);
        
-       virtual bool ask_destroy() { return false; }
-       virtual std::string to_string(int verbosity = 6);
+       bool ask_destroy() override { return false; }
+       std::string to_string(int verbosity = 6) const override;
        
        DECLARE_C_NAME("PolicyRule");
-       DECLARE_LOGGING(to_string);       
+       DECLARE_LOGGING(to_string);
+
+       logan_attached<PolicyRule> log;
 };
 
 class ProfileDetection : public socle::sobject {
@@ -129,8 +131,8 @@ public:
     int mode = 0;
     std::string prof_name;
     
-    virtual bool ask_destroy() { return false; };
-    virtual std::string to_string(int verbosity = 6) { 
+    bool ask_destroy() override { return false; };
+    std::string to_string(int verbosity = 6) const override {
         return string_format("ProfileDetection: name=%s mode=%d",prof_name.c_str(),mode); 
     };
     
@@ -146,8 +148,8 @@ public:
     int replace_each_nth = 0;
     int replace_each_counter_ = 0;
     
-    virtual bool ask_destroy() { return false; };
-    virtual std::string to_string(int verbosity = 6) {
+    bool ask_destroy() override { return false; };
+    std::string to_string(int verbosity = 6) const override {
         return string_format("ProfileContentRule: matching %s",ESC_(match));
     }
     
@@ -166,11 +168,11 @@ public:
     std::vector<ProfileContentRule> content_rules;
 
 
-    virtual bool ask_destroy() { return false; };
-    virtual std::string to_string(int verbosity = 6) { 
+    bool ask_destroy() override { return false; };
+    std::string to_string(int verbosity = 6) const override {
         std::string ret = string_format("ProfileContent: name=%s capture=%d",prof_name.c_str(),write_payload); 
         if(verbosity > INF) {
-            for(auto it: content_rules) 
+            for(auto const& it: content_rules)
                 ret += string_format("\n        match: '%s'",ESC_(it.match).c_str());
         }
         
@@ -227,8 +229,8 @@ public:
     bool sslkeylog = false;                     // disable or enable ssl keylogging on this profile
 
 
-    virtual bool ask_destroy() { return false; };
-    virtual std::string to_string(int verbosity = 6) { 
+    bool ask_destroy() override { return false; };
+    std::string to_string(int verbosity = 6) const override {
         std::string ret = string_format("ProfileTls: name=%s inspect=%d ocsp=%d ocsp_stap=%d pfs=%d,%d abr=%d,%d",prof_name.c_str(),inspect,ocsp_mode,ocsp_stapling_mode,left_use_pfs,right_use_pfs,!left_disable_reuse,!right_disable_reuse); 
         if(verbosity > INF) {
             

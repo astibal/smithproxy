@@ -35,446 +35,38 @@
     gives permission to release a modified version without this exception;
     this exception also makes it possible to release a modified version
     which carries forward this exception.
-*/    
-
-
-//#define MEM_DEBUG 1
-#ifdef MEM_DEBUG
-    #include <mcheck.h>
-    #define SOCLE_MEM_PROFILE
-#endif
-
-
-#include <vector>
-
-#include <ctime>
-#include <cstdlib>
-#include <sys/stat.h>
-#include <sys/types.h>
-
-#include <ostream>
-#include <ios>
-
-#include <getopt.h>
-#include <execinfo.h>
-
-#include <openssl/crypto.h>
-
-#include <socle.hpp>
-
-#include <logger.hpp>
-#include <hostcx.hpp>
-#include <apphostcx.hpp>
-#include <baseproxy.hpp>
-#include <masterproxy.hpp>
-#include <threadedacceptor.hpp>
-#include <threadedreceiver.hpp>
-#include <sslcom.hpp>
-#include <sslmitmcom.hpp>
-#include <udpcom.hpp>
-#include <display.hpp>
+*/
 
 #include <smithproxy.hpp>
-#include <traflog.hpp>
-#include <display.hpp>
-
-#include <libconfig.h++>
-
-#include <mitmhost.hpp>
-#include <mitmproxy.hpp>
-#include <socksproxy.hpp>
-
-#include <cfgapi.hpp>
-#include <daemon.hpp>
 #include <cmdserver.hpp>
-#include <srvutils.hpp>
-#include <staticcontent.hpp>
-#include <smithlog.hpp>
-#include <smithdnsupd.hpp>
+#include <authfactory.hpp>
 
-
-extern "C" void __libc_freeres(void);
-
-typedef ThreadedAcceptor<MitmMasterProxy,MitmProxy> theAcceptor;
-typedef ThreadedReceiver<MitmUdpProxy,MitmProxy> theReceiver;
-typedef ThreadedAcceptor<MitmSocksProxy,SocksProxy> socksAcceptor;
-
-class MyPlainAcceptor : public theAcceptor {
-};
-
-
-// Now let's do the Ctrl-C magic
-static theAcceptor* plain_proxy = nullptr;
-static theAcceptor* ssl_proxy = nullptr;
-static theReceiver* udp_proxy = nullptr;
-static theReceiver* dtls_proxy = nullptr;
-static socksAcceptor* socks_proxy = nullptr;
-
-
-std::thread* plain_thread = nullptr;
-std::thread* ssl_thread = nullptr;
-std::thread* dtls_thread = nullptr;
-std::thread* udp_thread = nullptr;
-std::thread* socks_thread = nullptr;
-std::thread* cli_thread = nullptr;
-std::thread* log_thread = nullptr;
-std::thread* dns_thread = nullptr;
-std::thread* id_thread = nullptr;
-
-volatile static int cnt_terminate = 0;
-static bool cfg_daemonize = false;
-
-#ifndef MEM_DEBUG
-bool cfg_openssl_mem_dbg = false;
-bool cfg_mtrace_enable = false;
-#else
-bool cfg_openssl_mem_dbg = true;
-static bool cfg_mtrace_enable = true;
-#endif
+volatile int SmithProxy::cnt_terminate = 0;
 
 
 
+SmithProxy::~SmithProxy () {
 
-void my_terminate (int param) {
-    
-    if (!cfg_daemonize)
-        printf("Terminating ...\n");
+    delete plain_thread;
+    delete ssl_thread;
+    delete dtls_thread;
+    delete udp_thread;
+    delete socks_thread;
 
-    if (plain_proxy != nullptr) {
-        plain_proxy->dead(true);
 
-        delete plain_thread;
-        plain_thread = nullptr;
-    }
-    if(ssl_proxy != nullptr) {
-        ssl_proxy->dead(true);
+    delete dns_thread;
+    delete id_thread;
 
-        delete ssl_thread;
-        ssl_thread = nullptr;
-    }
-    if(dtls_proxy != nullptr) {
-        dtls_proxy->dead(true);
-
-        delete dtls_thread;
-        dtls_thread = nullptr;
-    }
-    if(udp_proxy != nullptr) {
-        udp_proxy->dead(true);
-
-        delete udp_thread;
-        udp_thread = nullptr;
-    }
-    if(socks_proxy != nullptr) {
-        socks_proxy->dead(true);
-
-        delete socks_thread;
-        socks_thread = nullptr;
-    }
-
-    cnt_terminate++;
-    if(cnt_terminate == 3) {
-        if (!cfg_daemonize)
-        printf("Failed to terminate gracefully. Next attempt will be enforced.\n");
-    }
-    if(cnt_terminate > 3) {
-        if (!cfg_daemonize)
-        printf("Enforced exit.\n");
-        abort();
-    }
+    delete log_thread;
 }
 
 
-void my_usr1 (int param) {
-    DIAS_("USR1 signal handler started");
-    NOTS_("reloading policies and its objects !!");
-    load_config(config_file,true);
-    DIAS_("USR1 signal handler finished");
-}
-
-static struct option long_options[] =
-    {
-    /* These options set a flag. */
-    {"debug",   no_argument,       (int*)&args_debug_flag.level_, iDEB},
-    {"diagnose",   no_argument,       (int*)&args_debug_flag.level_, iDIA},
-    {"dump",   no_argument,       (int*)&args_debug_flag.level_, iDUM},
-    {"extreme",   no_argument,      (int*)&args_debug_flag.level_, iEXT},
-    
-    {"config-file", required_argument, 0, 'c'},
-    {"config-check-only",no_argument,0,'o'},
-    {"daemonize", no_argument, 0, 'D'},
-    {"version", no_argument, 0, 'v'},
-    
-    // multi-tenancy support: listening ports will be shifted by number 'i', while 't' controls logging, pidfile, etc.
-    // both, or none of them have to be set
-    {"tenant-index", required_argument, 0, 'i'},
-    {"tenant-name", required_argument, 0, 't'},
-    {0, 0, 0, 0}
-};  
+std::thread* SmithProxy::create_identity_refresh_thread() {
 
 
-int load_signatures(libconfig::Config& cfg, const char* name, std::vector<duplexFlowMatch*>& target) {
-    using namespace libconfig;
-    
-    const Setting& root = cfg.getRoot();
-    const Setting& cfg_signatures = root[name];
-    int sigs_len = cfg_signatures.getLength();
-
-    
-    DIA_("Loading %s: %d",name,sigs_len);
-    for ( int i = 0 ; i < sigs_len; i++) {
-        MyDuplexFlowMatch* newsig = new MyDuplexFlowMatch();
-        
-        
-        const Setting& signature = cfg_signatures[i];
-        signature.lookupValue("name", newsig->name());
-        signature.lookupValue("side", newsig->sig_side);
-        signature.lookupValue("cat", newsig->category);                
-
-        const Setting& signature_flow = cfg_signatures[i]["flow"];
-        int flow_count = signature_flow.getLength();
-        
-        DIA_("Loading signature '%s' with %d flow matches",newsig->name().c_str(),flow_count);
-
-        
-        for ( int j = 0; j < flow_count; j++ ) {
-
-            std::string side;
-            std::string type;
-            std::string sigtext;
-            int bytes_start;
-            int bytes_max;
-            
-            if(!(signature_flow[j].lookupValue("side", side)
-                && signature_flow[j].lookupValue("type", type)
-                && signature_flow[j].lookupValue("signature", sigtext)
-                && signature_flow[j].lookupValue("bytes_start", bytes_start)
-                && signature_flow[j].lookupValue("bytes_max", bytes_max))) {
-                
-                WAR_("Starttls signature %s failed to load: index %d",i);
-                continue;
-            }
-            
-            if( type == "regex") {
-                DEB_(" [%d]: new regex flow match",j);
-                newsig->add(side[0],new regexMatch(sigtext,bytes_start,bytes_max));
-            } else
-            if ( type == "simple") {
-                DEB_(" [%d]: new simple flow match",j);
-                newsig->add(side[0],new simpleMatch(sigtext,bytes_start,bytes_max));
-            }
-        }
-        
-        target.push_back(newsig);
-    }    
-    
-    return sigs_len;
-}
-
-bool init_syslog() {
-
-
-    // create UDP socket
-    int syslog_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP); 
-
-    struct sockaddr_storage syslog_in;
-    memset(&syslog_in, 0, sizeof(struct sockaddr_storage));
-    
-    if(cfg_syslog_family != 6) {
-        cfg_syslog_family = 4;
-        syslog_in.ss_family                = AF_INET;
-        ((sockaddr_in*)&syslog_in)->sin_addr.s_addr = inet_addr(cfg_syslog_server.c_str());
-        if(((sockaddr_in*)&syslog_in)->sin_addr.s_addr == INADDR_NONE) {
-            ERR_("Error initializing syslog server: %s",cfg_syslog_server.c_str());
-            return false;
-        }
-        
-        ((sockaddr_in*)&syslog_in)->sin_port = htons(cfg_syslog_port); 
-    } else {
-        cfg_syslog_family = 6;
-        syslog_in.ss_family                = AF_INET6;
-        int ret = inet_pton(AF_INET6,cfg_syslog_server.c_str(),(unsigned char*)&((sockaddr_in6*)&syslog_in)->sin6_addr.s6_addr);
-        if(ret <= 0) {
-            ERR_("Error initializing syslog server: %s",cfg_syslog_server.c_str());
-            return false;
-        }
-        ((sockaddr_in6*)&syslog_in)->sin6_port = htons(cfg_syslog_port); 
-    }
-    
-    
-    ::connect(syslog_socket,(sockaddr*)&syslog_in,sizeof(sockaddr_storage));
-    
-    get_logger()->remote_targets(string_format("syslog-udp%d-%d",cfg_syslog_family,syslog_socket),syslog_socket);
-
-    logger_profile* lp = new logger_profile();
-    
-    lp->logger_type = logger_profile::REMOTE_SYSLOG;
-    lp->level_ = cfg_syslog_level;
-    
-    // raising internal logging level
-    if(lp->level_ > get_logger()->level()) {
-        NOT_("Internal logging raised from %d to %d due to syslog server loglevel.",get_logger()->level(), lp->level_);
-        get_logger()->level(lp->level_);
-    }
-    
-    lp->syslog_settings.severity = lp->level_.level_;
-    lp->syslog_settings.facility = cfg_syslog_facility;
-    
-    get_logger()->target_profiles()[(uint64_t)syslog_socket] = lp;
-    
-    return true;
-}
-
-bool load_config(std::string& config_f, bool reload) {
-    bool ret = true;
-    
-    using namespace libconfig;
-    if(! cfgapi_init(config_f.c_str()) ) {
-        FATS_("Unable to load config.");
-        ret = false;
-    }
-
-    cfg_config_file = config_f;
-    
-    // Add another level of lock. File is already loaded. We need to apply its content.
-    // lock is needed here to not try to match against potentially empty/partial policy list
-    std::lock_guard<std::recursive_mutex> l(cfgapi_write_lock);
-    try {
-        
-        if(reload) {
-            cfgapi_cleanup();
-        }
-        
-        cfgapi_load_obj_address();
-        cfgapi_load_obj_port();
-        cfgapi_load_obj_proto();
-        cfgapi_load_obj_profile_detection();
-        cfgapi_load_obj_profile_content();
-        cfgapi_load_obj_profile_tls();
-        cfgapi_load_obj_profile_alg_dns();
-        cfgapi_load_obj_profile_auth();
-        
-        cfgapi_load_obj_policy();
-        
-        
-        if(!reload)  {
-            load_signatures(cfgapi,"detection_signatures",sigs_detection);
-            load_signatures(cfgapi,"starttls_signatures",sigs_starttls);
-        }
-
-        cfgapi_load_settings();
-
-        cfgapi.getRoot()["debug"].lookupValue("log_data_crc",baseCom::debug_log_data_crc);
-        cfgapi.getRoot()["debug"].lookupValue("log_sockets",baseHostCX::socket_in_name);
-        cfgapi.getRoot()["debug"].lookupValue("log_online_cx_name",baseHostCX::online_name);
-        cfgapi.getRoot()["debug"].lookupValue("log_srclines",get_logger()->print_srcline());
-        cfgapi.getRoot()["debug"].lookupValue("log_srclines_always",get_logger()->print_srcline_always());
-
-        cfgapi.getRoot()["debug"]["log"].lookupValue("sslcom",SSLCom::log_level_ref().level_);
-        cfgapi.getRoot()["debug"]["log"].lookupValue("sslmitmcom",baseSSLMitmCom<SSLCom>::log_level_ref().level_);
-        cfgapi.getRoot()["debug"]["log"].lookupValue("sslmitmcom",baseSSLMitmCom<DTLSCom>::log_level_ref().level_);
-        cfgapi.getRoot()["debug"]["log"].lookupValue("sslcertstore",SSLCertStore::log_level_ref().level_);
-        cfgapi.getRoot()["debug"]["log"].lookupValue("proxy",baseProxy::log_level_ref().level_);
-        cfgapi.getRoot()["debug"]["log"].lookupValue("proxy",epoll::log_level.level_);
-        cfgapi.getRoot()["debug"]["log"].lookupValue("mtrace",cfg_mtrace_enable);
-        cfgapi.getRoot()["debug"]["log"].lookupValue("openssl_mem_dbg",cfg_openssl_mem_dbg);
-        /*DNS ALG EXPLICIT LOG*/
-        cfgapi.getRoot()["debug"]["log"].lookupValue("alg_dns",DNS_Inspector::log_level_ref().level_);
-        cfgapi.getRoot()["debug"]["log"].lookupValue("alg_dns",DNS_Packet::log_level_ref().level_);
-
-
-        cfgapi.getRoot()["settings"].lookupValue("write_payload_dir",cfg_traflog_dir);
-        cfgapi.getRoot()["settings"].lookupValue("write_payload_file_prefix",cfg_traflog_file_pref);
-        cfgapi.getRoot()["settings"].lookupValue("write_payload_file_suffix",cfg_traflog_file_suff);
-
-
-
-
-        // don't mess with logging if just reloading
-        if(! reload) {
-
-            
-            //init crashlog file with dafe default
-            set_crashlog("/tmp/smithproxy_crash.log");
-            
-            if(cfgapi.getRoot()["settings"].lookupValue("log_file",cfg_log_target_base)) {
-
-                cfg_log_target = cfg_log_target_base;
-
-
-                if(cfg_log_target.size() > 0) {
-                    
-                    cfg_log_target = string_format(cfg_log_target,cfgapi_tenant_name.c_str());
-                    // prepare custom crashlog file
-                    std::string crlog = cfg_log_target + ".crashlog.log";
-                    set_crashlog(crlog.c_str());
-                    
-                    std::ofstream * o = new std::ofstream(cfg_log_target.c_str(),std::ios::app);
-                    get_logger()->targets(cfg_log_target,o);
-                    get_logger()->dup2_cout(false);
-                    get_logger()->level(cfgapi_table.logging.level);
-                    
-                    logger_profile* lp = new logger_profile();
-                    lp->print_srcline_ = get_logger()->print_srcline();
-                    lp->print_srcline_always_ = get_logger()->print_srcline_always();
-                    lp->level_ = cfgapi_table.logging.level;
-                    get_logger()->target_profiles()[(uint64_t)o] = lp;
-                    
-                }
-            }
-            //
-            if(cfgapi.getRoot()["settings"].lookupValue("sslkeylog_file",cfg_sslkeylog_target_base)) {
-
-                cfg_sslkeylog_target = cfg_sslkeylog_target_base;
-
-                if(cfg_sslkeylog_target.size() > 0) {
-                    
-                    cfg_sslkeylog_target = string_format(cfg_sslkeylog_target,cfgapi_tenant_name.c_str());
-                    std::ofstream * o = new std::ofstream(cfg_sslkeylog_target.c_str(),std::ios::app);
-                    get_logger()->targets(cfg_sslkeylog_target,o);
-                    get_logger()->dup2_cout(false);
-                    get_logger()->level(cfgapi_table.logging.level);
-                    
-                    logger_profile* lp = new logger_profile();
-                    lp->print_srcline_ = get_logger()->print_srcline();
-                    lp->print_srcline_always_ = get_logger()->print_srcline_always();
-                    lp->level_ = loglevel(iINF,flag_add(iNOT,CRT|KEYS));
-                    get_logger()->target_profiles()[(uint64_t)o] = lp;
-                    
-                }
-            }
-            
-            
-            if(cfg_syslog_server.size() > 0) {
-                bool have_syslog = init_syslog();
-                if(! have_syslog) {
-                    ERRS_("syslog logging not set.");
-                }
-            }
-            
-            if(cfgapi.getRoot()["settings"].lookupValue("cfg_log_console",cfg_log_console)) {
-                get_logger()->dup2_cout(cfg_log_console);
-            }
-            
-/*            
- *          init_syslog();
-*/            
-        }
-    }
-    catch(const SettingNotFoundException &nfex) {
-    
-        FAT_("Setting not found: %s",nfex.getPath());
-        ret = false;
-    }
-    
-    return ret;
-}
-
-
-std::thread* create_identity_refresh_thread() {
-
-
-    std::thread * id_thread = new std::thread([]() {
+     auto* id_thread = new std::thread([]() {
         unsigned int sleep_time = 1;
+        auto& log = instance().log;
 
         // give some time to init shm - don't run immediately
         // this is workaround for rare(?) race condition when shm is not
@@ -484,13 +76,13 @@ std::thread* create_identity_refresh_thread() {
 
         for (unsigned i = 0; ; i++) {
 
-            DEBS_("id_thread: refreshing identities");
+            _deb("id_thread: refreshing identities");
 
-            cfgapi_auth_shm_ip_table_refresh();
-            cfgapi_auth_shm_ip6_table_refresh();
-            cfgapi_auth_shm_token_table_refresh();
+            AuthFactory::get().shm_ip4_table_refresh();
+            AuthFactory::get().shm_ip6_table_refresh();
+            AuthFactory::get().shm_token_table_refresh();
 
-            DUMS_("id_thread: finished");
+            _dum("id_thread: finished");
 
             ::sleep(sleep_time);
         }
@@ -499,333 +91,186 @@ std::thread* create_identity_refresh_thread() {
     return id_thread;
 };
 
-int main(int argc, char *argv[]) {
 
 
-    if(buffer::use_pool)
-        CRYPTO_set_mem_functions(mempool_alloc, mempool_realloc, mempool_free);
-
-    
-    config_file = "/etc/smithproxy/smithproxy.cfg";
-    bool custom_config_file = false;
-    
-    std::string config_file_tenant = "/etc/smithproxy/smithproxy.%s.cfg";
-
-    while(1) {
-    /* getopt_long stores the option index here. */
-        int option_index = 0;
-    
-        char c = getopt_long (argc, argv, "p:vo",
-                        long_options, &option_index);
-        if (c < 0) break;
-
-        switch(c) {
-            case 0:
-                break;
-                
-            case 'c':
-                config_file = std::string(optarg);    
-                custom_config_file = true;
-                break;      
-                
-            case 'o':
-                config_file_check_only = true;
-                get_logger()->dup2_cout(true);
-                
-            case 'D':
-                cfg_daemonize = true;
-                break;
-                
-            case 'i':
-                cfg_tenant_index = std::string(optarg);
-                break;
-                
-            case 't':
-                cfg_tenant_name = std::string(optarg);
-                break;
-
-                
-            case 'v':
-                std::cout << SMITH_VERSION << "+" << SOCLE_VERSION << std::endl;
-                exit(0);
-                
-                
-            default:
-                ERR_("unknown option: '%c'",c);
-                exit(1);                 
-        }
+void SmithProxy::create_log_writer_thread() {
+    // we have to create logger after daemonize is called
+    log_thread  = create_log_writer(get_logger());
+    if(log_thread != nullptr) {
+        pthread_setname_np( log_thread->native_handle(), string_format("sxy_lwr_%d", tenant_index()).c_str());
     }
+}
 
-    if(config_file_check_only) {
 
-        // set synchronous logger for config-check
-        set_logger(new logger());
+void SmithProxy::create_dns_thread() {
+    dns_thread = create_dns_updater();
+    if(dns_thread != nullptr) {
+        pthread_setname_np( dns_thread->native_handle(),
+                            string_format("sxy_dns_%d",tenant_index()).c_str());
+    }
+}
 
-    } else {
-        set_logger(new QueueLogger());
+void SmithProxy::create_identity_thread() {
+    id_thread = create_identity_refresh_thread();
+    if(id_thread != nullptr) {
+        pthread_setname_np(id_thread->native_handle(),string_format("sxy_idu_%d",
+                                                                    CfgFactory::get().tenant_index).c_str());
     }
-    
-    if(!cfg_daemonize) {
-        std::thread* log_thread  = create_log_writer(get_logger());
-        if(log_thread != nullptr) {
-            pthread_setname_np(log_thread->native_handle(),string_format("sxy_lwr_%s",cfg_tenant_index.c_str()).c_str());
-        }    
-    }
-    
-    get_logger()->level(WAR);
-    cfgapi_log_version(false);  // don't delay, but display warning
-    
-    if(cfg_tenant_index.size() > 0 && cfg_tenant_name.size() > 0) {
-        WAR_("Starting tenant: '%s', index %s",cfg_tenant_name.c_str(),cfg_tenant_index.c_str());
+}
 
-        daemon_set_tenant("smithproxy",cfg_tenant_name);
-        cfgapi_tenant_index = std::stoi(cfg_tenant_index);
-        cfgapi_tenant_name  = cfg_tenant_name;
-    } 
-    else if (cfg_tenant_index.size() > 0 || cfg_tenant_name.size() > 0){
-        
-        FATS_("You have to specify both options: --tenant-name AND --tenant-index");
-        exit(-20);
-    }
-    else {
-        WARS_("Starting tenant: 0 (default)");
-        daemon_set_tenant("smithproxy","0"); 
-    }
-    
-    
-    // if logging set in cmd line, use it 
-    if(args_debug_flag > NON) {
-        get_logger()->level(args_debug_flag);
-    }
-        
-        
-    if(! custom_config_file and cfgapi_tenant_index > 0) {
-        // look for tenant config (no override set)
-        
-        std::string tenant_cfg = string_format(config_file_tenant.c_str(),cfgapi_tenant_name.c_str());
-        
-        struct stat s;
-        if (stat(tenant_cfg.c_str(),&s) == 0) {
-            WAR_("Tenant config: %s",tenant_cfg.c_str());
-            config_file = tenant_cfg;
-        } else {
-            WAR_("Tenant config %s not found. Using default.",tenant_cfg.c_str());
-        }
-    }
-    
-    WARS_(" ");
-    // set level to what's in the config
-    if (!load_config(config_file)) {
-        if(config_file_check_only) {
-            FATS_("Config check: error loading config file.");
-            exit(1);
-        }
-        else {
-            FATS_("Error loading config file on startup.");
-            exit(1);
-        }
-    }
-    
-    if(!cfgapi_apply_tenant_config()) {
-        FATS_("Failed to apply tenant specific configuration!");
-        exit(2);
-    }
-    
-    if(config_file_check_only) {
-        DIAS_("Exiting, asked to check config file only.");
-        exit(0);
-    }
 
-    if(cfg_mtrace_enable) {
-#ifdef MEM_DEBUG
-        putenv("MALLOC_TRACE=/var/log/smithproxy_mtrace.log");
-        mtrace();
-#endif
-    }
+void SmithProxy::create_listeners() {
+    plain_proxy = ServiceFactory::prepare_listener<theAcceptor, TCPCom>(std::stoi(CfgFactory::get().listen_tcp_port),
+                            "plain-text",
+                            50080,
+                            CfgFactory::get().num_workers_tcp);
 
-    
-    // if there is loglevel specified in config file and is bigger than we currently have set, use it
-    if(cfgapi_table.logging.level > get_logger()->level()) {
-        get_logger()->level(cfgapi_table.logging.level);
-    }
-    
-    if(daemon_exists_pidfile()) {
-        FATS_("There is PID file already in the system.");
-        FAT_("Please make sure smithproxy is not running, remove %s and try again.",PID_FILE.c_str());
-        exit(-5);
-    }
-    
-    // detect kernel version, and adapt UDP socket family
-    if(!version_check(get_kernel_version(),"4.3")) {    
-        WARS_("Kernel can't use IPv6 for transparenting UDP. Kernel upgrade is highly recommended.");
-        WARS_("IPv6/UDP smithproxy forwarding will not work.");
-        WARS_("Set SMITH_IPV6_UDP_BYPASS=1 variable in smithproxy.startup.cfg");
-        UDPCom::default_sock_family = AF_INET;
-    }
-    
-    if(cfg_daemonize) {
-        if(get_logger()->targets().size() <= 0) {
-            FATS_("Cannot daemonize without logging to file.");
-            exit(-5);
-        }
-        
-        get_logger()->dup2_cout(false);
-        INFS_("entering daemon mode");
-        daemonize();
+    ssl_proxy = ServiceFactory::prepare_listener<theAcceptor, MySSLMitmCom>(std::stoi(CfgFactory::get().listen_tls_port),
+                            "SSL",
+                            50443,
+                            CfgFactory::get().num_workers_tls);
 
-        // we have to create logger after daemonize is called
-        log_thread  = create_log_writer(get_logger());
-        if(log_thread != nullptr) {
-            pthread_setname_np(log_thread->native_handle(),string_format("sxy_lwr_%s",cfg_tenant_index.c_str()).c_str());
-        }    
-        
-        dns_thread = create_dns_updater();
-        if(dns_thread != nullptr) {
-            pthread_setname_np(dns_thread->native_handle(),string_format("sxy_dns_%s",cfg_tenant_index.c_str()).c_str());
-        }
+    dtls_proxy = ServiceFactory::prepare_listener<theReceiver, MyDTLSMitmCom>(std::stoi(CfgFactory::get().listen_dtls_port),
+                            "DTLS",
+                            50443,
+                            CfgFactory::get().num_workers_dtls);
 
-        id_thread = create_identity_refresh_thread();
-        if(id_thread != nullptr) {
-            pthread_setname_np(id_thread->native_handle(),string_format("sxy_idu_%s",cfg_tenant_index.c_str()).c_str());
-        }
-    }
-    // write out PID file
-    daemon_write_pidfile();
+    udp_proxy = ServiceFactory::prepare_listener<theReceiver, UDPCom>(std::stoi(CfgFactory::get().listen_udp_port),
+                            "plain-udp",
+                            50080,
+                            CfgFactory::get().num_workers_udp);
 
-    
-    //     atexit(__libc_freeres);   
+    socks_proxy = ServiceFactory::prepare_listener<socksAcceptor, socksTCPCom>(std::stoi(CfgFactory::get().listen_socks_port),
+                            "socks",
+                            1080,
+                            CfgFactory::get().num_workers_socks);
 
-    if(cfg_openssl_mem_dbg) {
-        CRYPTO_malloc_debug_init();
-        CRYPTO_dbg_set_options(V_CRYPTO_MDEBUG_ALL);
-        CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON);
-        CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_DISABLE);
-    }
-    
-    // static content cache initialization -- can't be held as external object, since it would cause sobject cache deadlock.
-    //  => has to be a pointer initialized AFTER sobject cache. So this seems to be the best place.
-    global_staticconent = new StaticContent();
 
-    if(!global_staticconent->load_files(cfg_messages_dir)) {
-        ERR_("Cannot load messages from '%s', replacements will not work correctly !!!", cfg_messages_dir.c_str());
-    } else {
-        std::string test = "test";
-        DIA_("Message testing string: %s", global_staticconent->render_noargs(test).c_str());
-    }
-    
-    
-    std::string friendly_thread_name_tcp = string_format("sxy_tcp_%d",cfgapi_tenant_index);
-    std::string friendly_thread_name_udp = string_format("sxy_udp_%d",cfgapi_tenant_index);
-    std::string friendly_thread_name_tls = string_format("sxy_tls_%d",cfgapi_tenant_index);
-    std::string friendly_thread_name_dls = string_format("sxy_dls_%d",cfgapi_tenant_index);
-    std::string friendly_thread_name_skx = string_format("sxy_skx_%d",cfgapi_tenant_index);
-    std::string friendly_thread_name_cli = string_format("sxy_cli_%d",cfgapi_tenant_index);
-    std::string friendly_thread_name_own = string_format("sxy_own_%d",cfgapi_tenant_index);
+    if ((plain_proxy == nullptr && CfgFactory::get().num_workers_tcp >= 0) ||
+        (ssl_proxy == nullptr && CfgFactory::get().num_workers_tls >= 0) ||
+        (dtls_proxy == nullptr && CfgFactory::get().num_workers_dtls >= 0) ||
+        (udp_proxy == nullptr && CfgFactory::get().num_workers_udp >= 0) ||
+        (socks_proxy == nullptr && CfgFactory::get().num_workers_socks >= 0)) {
 
-    plain_proxy = prepare_listener<theAcceptor,TCPCom>(cfg_tcp_listen_port,"plain-text",50080,cfg_tcp_workers);
-    ssl_proxy = prepare_listener<theAcceptor,MySSLMitmCom>(cfg_ssl_listen_port,"SSL",50443,cfg_ssl_workers);
-    dtls_proxy = prepare_listener<theReceiver,MyDTLSMitmCom>(cfg_dtls_port,"DTLS",50443,cfg_dtls_workers);
-    udp_proxy = prepare_listener<theReceiver,UDPCom>(cfg_udp_port,"plain-udp",50080,cfg_udp_workers);
-    socks_proxy = prepare_listener<socksAcceptor,socksTCPCom>(cfg_socks_port,"socks",1080,cfg_socks_workers);
-    
-    if( (plain_proxy == nullptr && cfg_tcp_workers >= 0) || 
-        (ssl_proxy == nullptr && cfg_ssl_workers >= 0)   ||
-        (dtls_proxy == nullptr && cfg_dtls_workers >= 0)   || 
-        (udp_proxy == nullptr && cfg_udp_workers >= 0 )  || 
-        (socks_proxy == nullptr && cfg_socks_workers >= 0)    ) {
-        
-        FATS_("Failed to setup proxies. Bailing!");
+        _fat("Failed to setup proxies. Bailing!");
         exit(-1);
     }
-    
-    set_daemon_signals(my_terminate,my_usr1);
-    
+}
+
+void SmithProxy::run() {
+
+    std::string friendly_thread_name_tcp = string_format("sxy_tcp_%d",CfgFactory::get().tenant_index);
+    std::string friendly_thread_name_udp = string_format("sxy_udp_%d",CfgFactory::get().tenant_index);
+    std::string friendly_thread_name_tls = string_format("sxy_tls_%d",CfgFactory::get().tenant_index);
+    std::string friendly_thread_name_dls = string_format("sxy_dls_%d",CfgFactory::get().tenant_index);
+    std::string friendly_thread_name_skx = string_format("sxy_skx_%d",CfgFactory::get().tenant_index);
+    std::string friendly_thread_name_cli = string_format("sxy_cli_%d",CfgFactory::get().tenant_index);
+    std::string friendly_thread_name_own = string_format("sxy_own_%d",CfgFactory::get().tenant_index);
+
+
     if(plain_proxy) {
-        INFS_("Starting TCP listener");
-        plain_thread = new std::thread([]() { 
-            set_daemon_signals(my_terminate,my_usr1);
-            DIA_("smithproxy_tcp: max file descriptors: %d",daemon_get_limit_fd());
-            
-            plain_proxy->run(); 
-            DIAS_("plaintext workers torn down."); 
-            plain_proxy->shutdown(); 
+        _inf("Starting TCP listener");
+        plain_thread = new std::thread([]() {
+            auto this_daemon = DaemonFactory::instance();
+            auto& log = this_daemon.log;
+
+            this_daemon.set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
+            _dia("smithproxy_tcp: max file descriptors: %d", this_daemon.get_limit_fd());
+
+            SmithProxy::instance().plain_proxy->run();
+            _dia("plaintext workers torn down.");
+            SmithProxy::instance().plain_proxy->shutdown();
         } );
         pthread_setname_np(plain_thread->native_handle(),friendly_thread_name_tcp.c_str());
     }
-    
+
     if(ssl_proxy) {
-        INFS_("Starting TLS listener");        
-        ssl_thread = new std::thread([] () { 
-            set_daemon_signals(my_terminate,my_usr1);
-            daemon_set_limit_fd(0);
-            DIA_("smithproxy_tls: max file descriptors: %d",daemon_get_limit_fd());
-            
-            ssl_proxy->run(); 
-            DIAS_("ssl workers torn down."); 
-            ssl_proxy->shutdown();  
-        } );    
+        _inf("Starting TLS listener");
+        ssl_thread = new std::thread([] () {
+            auto this_daemon = DaemonFactory::instance();
+            auto& log = this_daemon.log;
+
+            this_daemon.set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
+            this_daemon.set_limit_fd(0);
+            _dia("smithproxy_tls: max file descriptors: %d", this_daemon.get_limit_fd());
+
+            SmithProxy::instance().ssl_proxy->run();
+            _dia("ssl workers torn down.");
+            SmithProxy::instance().ssl_proxy->shutdown();
+        } );
         pthread_setname_np(ssl_thread->native_handle(),friendly_thread_name_tls.c_str());
     }
 
     if(dtls_proxy) {
-        INFS_("Starting DTLS listener");        
-        dtls_thread = new std::thread([] () { 
-            set_daemon_signals(my_terminate,my_usr1);
-            daemon_set_limit_fd(0);
-            DIA_("smithproxy_tls: max file descriptors: %d",daemon_get_limit_fd());
-            
-            dtls_proxy->run(); 
-            DIAS_("dtls workers torn down."); 
-            dtls_proxy->shutdown();  
-        } );    
+        _inf("Starting DTLS listener");
+        dtls_thread = new std::thread([] () {
+            auto this_daemon = DaemonFactory::instance();
+            auto& log = this_daemon.log;
+
+            this_daemon.set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
+            this_daemon.set_limit_fd(0);
+            _dia("smithproxy_tls: max file descriptors: %d", this_daemon.get_limit_fd());
+
+            SmithProxy::instance().dtls_proxy->run();
+            _dia("dtls workers torn down.");
+            SmithProxy::instance().dtls_proxy->shutdown();
+        } );
         pthread_setname_np(dtls_thread->native_handle(),friendly_thread_name_dls.c_str());
     }
-    
+
     if(udp_proxy) {
-        
-        udp_proxy->set_quick_list(&cfgapi_obj_udp_quick_ports);
-        
-        INFS_("Starting UDP listener");        
+
+        udp_proxy->set_quick_list(&CfgFactory::get().db_udp_quick_ports);
+
+        _inf("Starting UDP listener");
         udp_thread = new std::thread([] () {
-            set_daemon_signals(my_terminate,my_usr1);
-            daemon_set_limit_fd(0);
-            DIA_("smithproxy_udp: max file descriptors: %d",daemon_get_limit_fd());
-            
-            udp_proxy->run(); 
-            DIAS_("udp workers torn down."); 
-            udp_proxy->shutdown();  
-        } );       
+            auto this_daemon = DaemonFactory::instance();
+            auto& log = this_daemon.log;
+
+            this_daemon.set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
+            this_daemon.set_limit_fd(0);
+            _dia("smithproxy_udp: max file descriptors: %d", this_daemon.get_limit_fd());
+
+            SmithProxy::instance().udp_proxy->run();
+            _dia("udp workers torn down.");
+            SmithProxy::instance().udp_proxy->shutdown();
+        } );
         pthread_setname_np(udp_thread->native_handle(),friendly_thread_name_udp.c_str());
     }
-    
+
     if(socks_proxy) {
-        INFS_("Starting SOCKS5 listener");
-        socks_thread = new std::thread([] () { 
-            set_daemon_signals(my_terminate,my_usr1);
-            daemon_set_limit_fd(0);
-            DIA_("smithproxy_skx: max file descriptors: %d",daemon_get_limit_fd());
-            
-            socks_proxy->run(); 
-            DIAS_("socks workers torn down."); 
-            socks_proxy->shutdown();  
-        } );   
+        _inf("Starting SOCKS5 listener");
+        socks_thread = new std::thread([] () {
+            auto this_daemon = DaemonFactory::instance();
+            auto& log = this_daemon.log;
+
+            this_daemon.set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
+            this_daemon.set_limit_fd(0);
+            _dia("smithproxy_skx: max file descriptors: %d", this_daemon.get_limit_fd());
+
+            SmithProxy::instance().socks_proxy->run();
+            _dia("socks workers torn down.");
+            SmithProxy::instance().socks_proxy->shutdown();
+        } );
         pthread_setname_np(socks_thread->native_handle(),friendly_thread_name_skx.c_str());
     }
 
-    cli_thread = new std::thread([] () { 
-        INFS_("Starting CLI");
-        set_daemon_signals(my_terminate,my_usr1);
-        DIA_("smithproxy_cli: max file descriptors: %d",daemon_get_limit_fd());
-        
+    cli_thread = new std::thread([] () {
+        auto this_daemon = DaemonFactory::instance();
+        auto& log = this_daemon.log;
+
+        _inf("Starting CLI");
+        this_daemon.set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
+        _dia("smithproxy_cli: max file descriptors: %d", this_daemon.get_limit_fd());
+
         cli_loop(cli_port);
-        DIAS_("cli workers torn down."); 
-    } );      
+        _dia("cli workers torn down.");
+    } );
     pthread_setname_np(cli_thread->native_handle(),friendly_thread_name_cli.c_str());
-    
-    CRI_("Smithproxy %s (socle %s) started",SMITH_VERSION,SOCLE_VERSION);
-    
+
+
     pthread_setname_np(pthread_self(),friendly_thread_name_own.c_str());
-    
+
     if(plain_thread) {
         plain_thread->join();
     }
@@ -834,46 +279,358 @@ int main(int argc, char *argv[]) {
     }
     if(dtls_thread) {
         dtls_thread->join();
-    }    
+    }
     if(udp_thread) {
         udp_thread->join();
-    }    
+    }
     if(socks_thread) {
         socks_thread->join();
     }
-    QueueLogger* ql = dynamic_cast<QueueLogger*>(get_logger());
+    auto* ql = dynamic_cast<QueueLogger*>(get_logger());
     if(ql) {
         ql->sig_terminate = true;
         log_thread->join();
     }
-
-    if(plain_thread)
-        delete plain_thread;
-    if(ssl_thread)
-        delete ssl_thread;
-    if(udp_thread)
-        delete udp_thread;
-    if(socks_thread)
-        delete socks_thread;
-    if(log_thread)
-        delete log_thread;
-    
-    DIAS_("Debug SSL statistics: ");
-    DIA_("SSL_accept: %d",SSLCom::counter_ssl_accept);
-    DIA_("SSL_connect: %d",SSLCom::counter_ssl_connect);
-
-    cfgapi_cleanup();
-
-    SSLCom::certstore()->destroy();
-    
-    if(cfg_daemonize) {    
-        daemon_unlink_pidfile();
-    }
-    
-    CRYPTO_cleanup_all_ex_data();
-    ERR_free_strings();
-    ERR_remove_state(0);
-    EVP_cleanup();
-    
 }
+
+void SmithProxy::stop() {
+    if (plain_proxy != nullptr) {
+        plain_proxy->state().dead(true);
+    }
+    if(ssl_proxy != nullptr) {
+        ssl_proxy->state().dead(true);
+
+    }
+    if(dtls_proxy != nullptr) {
+        dtls_proxy->state().dead(true);
+    }
+    if(udp_proxy != nullptr) {
+        udp_proxy->state().dead(true);
+
+    }
+    if(socks_proxy != nullptr) {
+        socks_proxy->state().dead(true);
+    }
+}
+
+
+void SmithProxy::my_terminate (int param) {
+
+    auto& log = instance().log;
+
+    if (! instance().cfg_daemonize )
+        _err("Terminating ...\n");
+
+    SmithProxy::instance().stop();
+
+    cnt_terminate++;
+    if(cnt_terminate == 3) {
+        if (!instance().cfg_daemonize )
+            _fat("Failed to terminate gracefully. Next attempt will be enforced.\n");
+    }
+    if(cnt_terminate > 3) {
+        if (! instance().cfg_daemonize )
+            _fat("Enforced exit.\n");
+        abort();
+    }
+}
+
+
+void SmithProxy::my_usr1 (int param) {
+    auto& log = instance().log;
+
+    _dia("USR1 signal handler started");
+    _not("reloading policies and its objects !!");
+    SmithProxy::instance().load_config(CfgFactory::get().config_file,true);
+    _dia("USR1 signal handler finished");
+}
+
+
+
+
+int SmithProxy::load_signatures(libconfig::Config& cfg, const char* name, std::vector<duplexFlowMatch*>& target) {
+
+    auto& log = instance().log;
+
+    using namespace libconfig;
+
+    const Setting& root = cfg.getRoot();
+    const Setting& cfg_signatures = root[name];
+    int sigs_len = cfg_signatures.getLength();
+
+
+    _dia("Loading %s: %d",name,sigs_len);
+    for ( int i = 0 ; i < sigs_len; i++) {
+        auto* newsig = new MyDuplexFlowMatch();
+
+
+        const Setting& signature = cfg_signatures[i];
+        signature.lookupValue("name", newsig->name());
+        signature.lookupValue("side", newsig->sig_side);
+        signature.lookupValue("cat", newsig->category);
+        signature.lookupValue("severity", newsig->severity);
+
+        const Setting& signature_flow = cfg_signatures[i]["flow"];
+        int flow_count = signature_flow.getLength();
+
+        _dia("Loading signature '%s' with %d flow matches",newsig->name().c_str(),flow_count);
+
+
+        for ( int j = 0; j < flow_count; j++ ) {
+
+            std::string side;
+            std::string type;
+            std::string sigtext;
+            int bytes_start;
+            int bytes_max;
+
+            if(!(signature_flow[j].lookupValue("side", side)
+                 && signature_flow[j].lookupValue("type", type)
+                 && signature_flow[j].lookupValue("signature", sigtext)
+                 && signature_flow[j].lookupValue("bytes_start", bytes_start)
+                 && signature_flow[j].lookupValue("bytes_max", bytes_max))) {
+
+                _war("Starttls signature %s properties failed to load: index %d",newsig->name().c_str(), i);
+                continue;
+            }
+
+            if( type == "regex") {
+                _deb(" [%d]: new regex flow match",j);
+                try {
+                    newsig->add(side[0], new regexMatch(sigtext, bytes_start, bytes_max));
+                } catch(std::regex_error const& e) {
+
+                    _err("Starttls signature %s regex failed to load: index %d, load aborted", newsig->name().c_str() , i);
+
+                    delete newsig;
+                    newsig = nullptr;
+                    break;
+                }
+            } else
+            if ( type == "simple") {
+                _deb(" [%d]: new simple flow match",j);
+                newsig->add(side[0],new simpleMatch(sigtext,bytes_start,bytes_max));
+            }
+        }
+
+        // load if not set to null due to loading error
+        if(newsig)
+            target.push_back(newsig);
+    }
+
+    return sigs_len;
+}
+
+bool SmithProxy::init_syslog() {
+
+    auto& log = instance().log;
+
+    // create UDP socket
+    int syslog_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+
+    struct sockaddr_storage syslog_in {0};
+    memset(&syslog_in, 0, sizeof(struct sockaddr_storage));
+
+    if(CfgFactory::get().syslog_family != 6) {
+        CfgFactory::get().syslog_family = 4;
+        syslog_in.ss_family                = AF_INET;
+        ((sockaddr_in*)&syslog_in)->sin_addr.s_addr = inet_addr(CfgFactory::get().syslog_server.c_str());
+        if(((sockaddr_in*)&syslog_in)->sin_addr.s_addr == INADDR_NONE) {
+            _err("Error initializing syslog server: %s", CfgFactory::get().syslog_server.c_str());
+            return false;
+        }
+
+        ((sockaddr_in*)&syslog_in)->sin_port = htons(CfgFactory::get().syslog_port);
+    } else {
+        CfgFactory::get().syslog_family = 6;
+        syslog_in.ss_family                = AF_INET6;
+        int ret = inet_pton(AF_INET6, CfgFactory::get().syslog_server.c_str(),(unsigned char*)&((sockaddr_in6*)&syslog_in)->sin6_addr.s6_addr);
+        if(ret <= 0) {
+            _err("Error initializing syslog server: %s", CfgFactory::get().syslog_server.c_str());
+
+            ::close(syslog_socket); // coverity: 1407945
+            return false;
+        }
+        ((sockaddr_in6*)&syslog_in)->sin6_port = htons(CfgFactory::get().syslog_port);
+    }
+
+
+    if(0 != ::connect(syslog_socket,(sockaddr*)&syslog_in,sizeof(sockaddr_storage))) {
+        _err("cannot connect syslog socket %d: %s", syslog_socket, string_error().c_str());
+        ::close(syslog_socket);
+    } else {
+
+        get_logger()->remote_targets(string_format("syslog-udp%d-%d", CfgFactory::get().syslog_family, syslog_socket),
+                                     syslog_socket);
+
+        auto *lp = new logger_profile();
+
+        lp->logger_type = logger_profile::REMOTE_SYSLOG;
+        lp->level_ = CfgFactory::get().syslog_level;
+
+        // raising internal logging level
+        if (lp->level_ > get_logger()->level()) {
+            _not("Internal logging raised from %d to %d due to syslog server loglevel.", get_logger()->level(),
+                 lp->level_);
+            get_logger()->level(lp->level_);
+        }
+
+        lp->syslog_settings.severity = lp->level_.level();
+        lp->syslog_settings.facility = CfgFactory::get().syslog_facility;
+
+        get_logger()->target_profiles()[(uint64_t) syslog_socket] = lp;
+    }
+
+    return true;
+}
+
+bool SmithProxy::load_config(std::string& config_f, bool reload) {
+    bool ret = true;
+    auto this_daemon = DaemonFactory::instance();
+    auto& log = instance().log;
+
+    using namespace libconfig;
+    if(! CfgFactory::get().cfgapi_init(config_f.c_str()) ) {
+        _fat("Unable to load config.");
+        ret = false;
+    }
+
+    CfgFactory::get().config_file = config_f;
+
+    // Add another level of lock. File is already loaded. We need to apply its content.
+    // lock is needed here to not try to match against potentially empty/partial policy list
+    std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
+    try {
+
+        if(reload) {
+            CfgFactory::get().cfgapi_cleanup();
+        }
+
+        CfgFactory::get().load_db_address();
+        CfgFactory::get().load_db_port();
+        CfgFactory::get().load_db_proto();
+        CfgFactory::get().load_db_prof_detection();
+        CfgFactory::get().load_db_prof_content();
+        CfgFactory::get().load_db_prof_tls();
+        CfgFactory::get().load_db_prof_alg_dns();
+        CfgFactory::get().load_db_prof_auth();
+
+        CfgFactory::get().load_db_policy();
+
+
+        if(!reload)  {
+            load_signatures(CfgFactory::cfg_obj(),"detection_signatures",sigs_detection);
+            load_signatures(CfgFactory::cfg_obj(),"starttls_signatures",sigs_starttls);
+        }
+
+        CfgFactory::get().load_settings();
+
+        CfgFactory::cfg_root()["debug"].lookupValue("log_data_crc",baseCom::debug_log_data_crc);
+        CfgFactory::cfg_root()["debug"].lookupValue("log_sockets",baseHostCX::socket_in_name);
+        CfgFactory::cfg_root()["debug"].lookupValue("log_online_cx_name",baseHostCX::online_name);
+        CfgFactory::cfg_root()["debug"].lookupValue("log_srclines",get_logger()->print_srcline());
+        CfgFactory::cfg_root()["debug"].lookupValue("log_srclines_always",get_logger()->print_srcline_always());
+
+        CfgFactory::cfg_root()["debug"]["log"].lookupValue("sslcom",SSLCom::log_level_ref().level_ref());
+        CfgFactory::cfg_root()["debug"]["log"].lookupValue("sslmitmcom",baseSSLMitmCom<SSLCom>::log_level_ref().level_ref());
+        CfgFactory::cfg_root()["debug"]["log"].lookupValue("sslmitmcom",baseSSLMitmCom<DTLSCom>::log_level_ref().level_ref());
+        CfgFactory::cfg_root()["debug"]["log"].lookupValue("sslcertstore",SSLFactory::get_log().level()->level_ref());
+        CfgFactory::cfg_root()["debug"]["log"].lookupValue("proxy",baseProxy::log_level_ref().level_ref());
+        CfgFactory::cfg_root()["debug"]["log"].lookupValue("proxy",epoll::log_level.level_ref());
+        CfgFactory::cfg_root()["debug"]["log"].lookupValue("mtrace", SmithProxy::cfg_mtrace_enable);
+        CfgFactory::cfg_root()["debug"]["log"].lookupValue("openssl_mem_dbg", SmithProxy::cfg_openssl_mem_dbg);
+
+        /*DNS ALG EXPLICIT LOG*/
+        CfgFactory::cfg_root()["debug"]["log"].lookupValue("alg_dns",DNS_Inspector::log_level_ref().level_ref());
+        CfgFactory::cfg_root()["debug"]["log"].lookupValue("alg_dns",DNS_Packet::log_level_ref().level_ref());
+
+
+        CfgFactory::cfg_root()["settings"].lookupValue("write_payload_dir",CfgFactory::get().traflog_dir);
+        CfgFactory::cfg_root()["settings"].lookupValue("write_payload_file_prefix",CfgFactory::get().traflog_file_prefix);
+        CfgFactory::cfg_root()["settings"].lookupValue("write_payload_file_suffix",CfgFactory::get().traflog_file_suffix);
+
+
+
+        // initialize stubborn logans :)
+        auto _ = inet::Factory::log();
+
+
+        // don't mess with logging if just reloading
+        if(! reload) {
+
+
+            //init crashlog file with dafe default
+            this_daemon.set_crashlog("/tmp/smithproxy_crash.log");
+
+            if(CfgFactory::cfg_root()["settings"].lookupValue("log_file",CfgFactory::get().log_file_base)) {
+
+                CfgFactory::get().log_file = CfgFactory::get().log_file_base;
+
+
+                if(CfgFactory::get().log_file.size() > 0) {
+
+                    CfgFactory::get().log_file = string_format(CfgFactory::get().log_file.c_str(), CfgFactory::get().tenant_name.c_str());
+                    // prepare custom crashlog file
+                    std::string crlog = CfgFactory::get().log_file + ".crashlog.log";
+                    this_daemon.set_crashlog(crlog.c_str());
+
+                    std::ofstream * o = new std::ofstream(CfgFactory::get().log_file.c_str(),std::ios::app);
+                    get_logger()->targets(CfgFactory::get().log_file, o);
+                    get_logger()->dup2_cout(false);
+                    get_logger()->level(cfgapi_table.logging.level);
+
+                    logger_profile* lp = new logger_profile();
+                    lp->print_srcline_ = get_logger()->print_srcline();
+                    lp->print_srcline_always_ = get_logger()->print_srcline_always();
+                    lp->level_ = cfgapi_table.logging.level;
+                    get_logger()->target_profiles()[(uint64_t)o] = lp;
+
+                }
+            }
+            //
+            if(CfgFactory::cfg_root()["settings"].lookupValue("sslkeylog_file", CfgFactory::get().sslkeylog_file_base)) {
+
+                CfgFactory::get().sslkeylog_file = CfgFactory::get().sslkeylog_file_base;
+
+                if(CfgFactory::get().sslkeylog_file.size() > 0) {
+
+                    CfgFactory::get().sslkeylog_file = string_format(CfgFactory::get().sslkeylog_file.c_str(),
+                                                                     CfgFactory::get().tenant_name.c_str());
+
+                    std::ofstream * o = new std::ofstream(CfgFactory::get().sslkeylog_file.c_str(),std::ios::app);
+                    get_logger()->targets(CfgFactory::get().sslkeylog_file,o);
+                    get_logger()->dup2_cout(false);
+                    get_logger()->level(cfgapi_table.logging.level);
+
+                    logger_profile* lp = new logger_profile();
+                    lp->print_srcline_ = get_logger()->print_srcline();
+                    lp->print_srcline_always_ = get_logger()->print_srcline_always();
+                    lp->level_ = loglevel(iINF,flag_add(iNOT,CRT|KEYS));
+                    get_logger()->target_profiles()[(uint64_t)o] = lp;
+
+                }
+            }
+
+
+            if( ! CfgFactory::get().syslog_server.empty() ) {
+                bool have_syslog = init_syslog();
+                if(! have_syslog) {
+                    _err("syslog logging not set.");
+                }
+            }
+
+            if(CfgFactory::cfg_root()["settings"].lookupValue("cfg_log_console", CfgFactory::get().log_console)) {
+                get_logger()->dup2_cout(CfgFactory::get().log_console);
+            }
+        }
+    }
+    catch(const SettingNotFoundException &nfex) {
+
+        _fat("Setting not found: %s",nfex.getPath());
+        ret = false;
+    }
+
+    return ret;
+}
+
 

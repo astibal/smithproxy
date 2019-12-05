@@ -53,7 +53,7 @@
 
 #include <socle.hpp>
 
-#include <logger.hpp>
+#include <log/logger.hpp>
 #include <hostcx.hpp>
 #include <apphostcx.hpp>
 #include <baseproxy.hpp>
@@ -65,7 +65,7 @@
 #include <udpcom.hpp>
 #include <display.hpp>
 
-#include <smithproxy.hpp>
+#include <main.hpp>
 #include <traflog.hpp>
 #include <display.hpp>
 

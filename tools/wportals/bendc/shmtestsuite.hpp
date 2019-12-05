@@ -129,8 +129,7 @@ void test_suite(Shared_Buffer_Type& b, RowType (*generator)(int),const char* mem
             if(saved > 0) {
                 printf("New table pushed: version %d\n", b.seen_version());
             }
-            for(typename std::vector<RowType>::iterator i = b.entries().begin(); i != b.entries().end() ; ++i) {
-                RowType& rt = (*i);
+            for(auto& rt: b.entries()) {
                 //printf("%s: %16s \t groups: %s\n",inet_ntoa(*(in_addr*)li.ip),li.username,li.groups);
                 std::cout << rt.hr();
             }

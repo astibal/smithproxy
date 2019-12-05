@@ -40,41 +40,51 @@
 import logging
 import socket
 
-import SOAPpy
-from M2Crypto import SSL
 import pylibconfig2 as cfg
+from M2Crypto import SSL
 
-class BendBroker:
+from wsgiref.simple_server import make_server
+from spyne import Application, ServiceBase, Unicode, rpc
+from spyne.protocol.soap import Soap11
 
-    def __init__(self,tenant_index=0,tenant_name=None):
-        
-        self.tenant_index = int(tenant_index) 
+from zeep import Client as SoapClient
+
+class BendBroker(ServiceBase):
+
+    def __init__(self, tenant_index=0, tenant_name=None):
+
+        self.tenant_index = int(tenant_index)
         self.tenant_name = "default"
         if tenant_name:
             self.tenant_name = tenant_name
-        
+
         self.cert_file = '/etc/smithproxy/certs/default/srv-cert.pem'
         self.key_file = '/etc/smithproxy/certs/default/srv-key.pem'
 
         self.context = SSL.Context()
-        self.context.load_cert(self.cert_file,keyfile=self.key_file)
+        self.context.load_cert(self.cert_file, keyfile=self.key_file)
 
         self.service_port = 65000 + self.tenant_index
         self.bend_port = 64000 + self.tenant_index
 
-        self.l_server = SOAPpy.ThreadingSOAPServer(("0.0.0.0", self.service_port),ssl_context = self.context)
-        self.r_server = SOAPpy.SOAPProxy("http://localhost:%d/" % (self.bend_port,))
+        application = Application(
+            services=[BendBroker],
+            tns='http://smithproxy.org',
+            in_protocol=Soap11(validator='lxml'),
+            out_protocol=Soap11())
 
-        self.l_server.registerFunction( SOAPpy.MethodSig(self.ping, keywords=0, context=1) )
-        self.l_server.registerFunction( SOAPpy.MethodSig(self.whoami, keywords=0, context=1) )
-        self.l_server.registerFunction( SOAPpy.MethodSig(self.authenticate, keywords=0, context=1) )
-        
-        self.l_server.registerFunction( SOAPpy.MethodSig(self.admin_login, keywords=0, context=1) )
-        self.l_server.registerFunction( SOAPpy.MethodSig(self.admin_token_list, keywords=0, context=1) )
-        
-        self.l_server.registerFunction( SOAPpy.MethodSig(self.admin_keepalive, keywords=0, context=1) )
-        self.l_server.registerFunction( SOAPpy.MethodSig(self.admin_logout, keywords=0, context=1) )
+        self.l_server = make_server('127.0.0.1', self.service_port, application)
+        self.r_server = SoapClient("http://localhost:%d/?wsdl" % (self.bend_port,))
 
+        # self.l_server.registerFunction(SOAPpy.MethodSig(self.ping, keywords=0, context=1))
+        # self.l_server.registerFunction(SOAPpy.MethodSig(self.whoami, keywords=0, context=1))
+        # self.l_server.registerFunction(SOAPpy.MethodSig(self.authenticate, keywords=0, context=1))
+        #
+        # self.l_server.registerFunction(SOAPpy.MethodSig(self.admin_login, keywords=0, context=1))
+        # self.l_server.registerFunction(SOAPpy.MethodSig(self.admin_token_list, keywords=0, context=1))
+        #
+        # self.l_server.registerFunction(SOAPpy.MethodSig(self.admin_keepalive, keywords=0, context=1))
+        # self.l_server.registerFunction(SOAPpy.MethodSig(self.admin_logout, keywords=0, context=1))
 
         self.create_logger()
         self.load_config()
@@ -84,68 +94,75 @@ class BendBroker:
         hdlr = logging.FileHandler("/var/log/smithproxy_bendbro.%s.log" % (self.tenant_name,))
         formatter = logging.Formatter('%(asctime)s [%(process)d] [%(levelname)s] %(message)s')
         hdlr.setFormatter(formatter)
-        self.log.addHandler(hdlr) 
-        self.log.setLevel(logging.INFO)        
+        self.log.addHandler(hdlr)
+        self.log.setLevel(logging.INFO)
 
     def load_config(self):
         self.cfg = cfg.Config()
-        self.cfg.read_file("/etc/smithproxy/smithproxy.cfg")    
-
+        self.cfg.read_file("/etc/smithproxy/smithproxy.cfg")
 
     """ return addresses where real cotact can be done """
-    def ping(self,_SOAPContext = None):
+
+    @rpc(_returns=Unicode)
+    def ping(self):
         portal_address = self.cfg.settings.auth_portal.address
         portal_port = self.service_port
         fqdn = socket.getfqdn()
-        
-        s = "https://%s:%s/" % (portal_address,portal_port)
-        sq = "https://%s:%s/" % (fqdn,portal_port)
-        
-        r = [s,sq]
-        
+
+        s = "https://%s:%s/" % (portal_address, portal_port)
+        sq = "https://%s:%s/" % (fqdn, portal_port)
+
+        r = [s, sq]
+
         return r
-        
 
-
-    def whoami(self,_SOAPContext = None):
-        if _SOAPContext:
-            ip = _SOAPContext.connection.getpeername()[0]
-            return self.r_server.whois(ip)
+    @rpc(_returns=Unicode)
+    def whoami(self):
 
         return []
 
+    @rpc(Unicode, Unicode, _returns=[bool, Unicode])
+    def authenticate(self, username, password):
 
-    def authenticate(self, username, password, _SOAPContext = None):
-        if _SOAPContext:
-            ip = _SOAPContext.connection.getpeername()[0]
-            return self.r_server.authenticate(ip,username,password,"0")
+        # FIXME
 
-        return False,"http://auth-portal-url/"
+        # if _SOAPContext:
+        #     ip = _SOAPContext.connection.getpeername()[0]
+        #     return self.r_server.authenticate(ip, username, password, "0")
 
-    def admin_login(self, username, password, _SOAPContext = None):
-        if _SOAPContext:
-            ip = _SOAPContext.connection.getpeername()[0]
-            return self.r_server.admin_login(username,password,ip)
-        
+        return False, "http://auth-portal-url/"
+
+    @rpc(Unicode, Unicode, _returns=int)
+    def admin_login(self, username, password,):
+
+        # FIXME
+
+        # if _SOAPContext:
+        #     ip = _SOAPContext.connection.getpeername()[0]
+        #     return self.r_server.admin_login(username, password, ip)
+
         return -1
-    
-    def admin_token_list(self, admin_token, _SOAPContext = None):
+
+    @rpc(Unicode, _returns=Unicode)
+    def admin_token_list(self, admin_token):
         return self.r_server.admin_token_list(admin_token)
-        
-    def admin_keepalive(self, admin_token, _SOAPContext = None):
+
+    @rpc(Unicode, _returns=Unicode)
+    def admin_keepalive(self, admin_token):
         return self.r_server.admin_keepalive(admin_token)
 
-    def admin_logout(self, admin_token, _SOAPContext = None):
+    @rpc(Unicode, _returns=Unicode)
+    def admin_logout(self, admin_token):
         return self.r_server.admin_logout(admin_token)
 
-
     def run(self):
-        self.log.warning("Backend broker daemon started (tenant name %s, index %d)" % (self.tenant_name,self.tenant_index) )
-        self.log.info("listening on port: %d" % (self.service_port,) )
-        self.log.info("backend port set to: %d" % (self.bend_port,) )
+        self.log.warning(
+            "Backend broker daemon started (tenant name %s, index %d)" % (self.tenant_name, self.tenant_index))
+        self.log.info("listening on port: %d" % (self.service_port,))
+        self.log.info("backend port set to: %d" % (self.bend_port,))
         self.l_server.serve_forever()
 
 
 if __name__ == "__main__":
-    b = BendBroker(0,"default")
+    b = BendBroker(0, "default")
     b.run()

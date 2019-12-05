@@ -46,29 +46,36 @@
 
 using namespace ext::nltemplate;
 
-class StaticContent : public socle::sobject {
+class StaticContent {
 
-protected:
     ptr_cache<std::string,Template>* templates_;
-    
+    StaticContent() : log(get_log()) {
+        templates_ = new ptr_cache<std::string,Template> ("replacement message cache");
+
+    };
+    ~StaticContent() { templates_->invalidate(); delete templates_; };
+
+    logan_lite& log;
 public:
-    StaticContent() : socle::sobject::sobject() { templates_ = new ptr_cache<std::string,Template> ("replacement message cache"); };
-    virtual ~StaticContent() { templates_->invalidate(); delete templates_; };
-    virtual bool ask_destroy() { return false; };
-    virtual std::string to_string(int verbosity=iINF) { return std::string("StaticContent"); };
 
     bool load_files(std::string& dir);
     
-    std::string render_noargs(std::string s);
-    std::string render_msg_test();
+    std::string render_noargs(std::string const& s);
+
     std::string render_server_response(std::string& message, unsigned int code=200);
-    std::string render_msg_html_page(std::string& caption, std::string& meta, std::string& content,const char* window_width="300px");
-    Template* get(std::string s);
-    
-    DECLARE_C_NAME("StaticContent");
-    DECLARE_LOGGING(to_string);  
+    std::string render_msg_html_page(std::string& caption, std::string& meta, std::string& content,const char* window_width="450px");
+    Template* get(std::string const& s);
+
+    static StaticContent* get() {
+        static StaticContent s;
+        return &s;
+    };
+
+    static logan_lite& get_log() {
+        static logan_lite l("renderer");
+        return l;
+    }
 };
 
-
-extern StaticContent* global_staticconent;
+inline StaticContent* html() { return StaticContent::get(); };
 #endif

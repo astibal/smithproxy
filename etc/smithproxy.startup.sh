@@ -75,15 +75,15 @@ if [[ "$tenant_id" != "0" ]]; then
         echo "ERROR: Tenant table file not found." 
         exit 1
     else 
-        L=`cat $tenant_table | grep -v "^#" | grep ";$tenant_id;"`
-        if [[ $L  == "" ]]; then
+        L=`cat ${tenant_table} | grep -v "^#" | grep ";$tenant_id;"`
+        if [[ ${L}  == "" ]]; then
             echo "ERROR: Tenant '$tenant_id' not found in the table."
             exit 1;
         fi
         
-        tenant_index=`echo $L | awk -F\; '{ print $1 }'`
-        tenant_range=`echo $L | awk -F\; '{ print $3 }'`
-        tenant_range6=`echo $L | awk -F\; '{ print $4 }'`
+        tenant_index=`echo ${L} | awk -F\; '{ print $1 }'`
+        tenant_range=`echo ${L} | awk -F\; '{ print $3 }'`
+        tenant_range6=`echo ${L} | awk -F\; '{ print $4 }'`
         
         if [[ "$tenant_id" != "" && "$tenant_range" != "" && "$tenant_index" != "" ]]; then
             echo "Tenant: $tenant_id with index $tenant_index ipv4 '$tenant_range' ipv6 '$tenant_range6'"
@@ -116,14 +116,14 @@ DIVERT_IP_RULE=100
 
 
 # source defaults - could be used to override variables above
-if [ -f /etc/smithproxy/smithproxy.startup.cfg ]; then
+if [[ -f /etc/smithproxy/smithproxy.startup.cfg ]]; then
  . /etc/smithproxy/smithproxy.startup.cfg $1 "before"
 fi
 
-SMITH_TCP_TPROXY=`expr $SMITH_TCP_TPROXY + $tenant_index`
-SMITH_UDP_TPROXY=`expr $SMITH_UDP_TPROXY + $tenant_index`
-SMITH_TLS_TPROXY=`expr $SMITH_TLS_TPROXY + $tenant_index`
-SMITH_DTLS_TPROXY=`expr $SMITH_DTLS_TPROXY + $tenant_index`
+SMITH_TCP_TPROXY=`expr ${SMITH_TCP_TPROXY} + ${tenant_index}`
+SMITH_UDP_TPROXY=`expr ${SMITH_UDP_TPROXY} + ${tenant_index}`
+SMITH_TLS_TPROXY=`expr ${SMITH_TLS_TPROXY} + ${tenant_index}`
+SMITH_DTLS_TPROXY=`expr ${SMITH_DTLS_TPROXY} + ${tenant_index}`
 #DIVERT_FWMARK=`expr $DIVERT_FWMARK + $tenant_index`
 #DIVERT_IP_RULE=`expr $DIVERT_IP_RULE + $tenant_index`
 
@@ -179,7 +179,7 @@ case "$1" in
             iptables -t mangle -A ${SMITH_CHAIN_NAME} -p tcp -i ${IF} --dport ${P} -j TPROXY \
             --tproxy-mark 0x1/0x1 --on-port ${SMITH_TLS_TPROXY}
             
-            if [ ${SMITH_IPV6_UDP_BYPASS} -gt 0 ]; then
+            if [[ ${SMITH_IPV6_UDP_BYPASS} -gt 0 ]]; then
                 echo "  bypassing IPv6 UDP traffic (old kernel?)"
             else
                 ip6tables -t mangle -A ${SMITH_CHAIN_NAME} -p tcp -i ${IF} --dport ${P} -j TPROXY \
@@ -200,7 +200,7 @@ case "$1" in
             iptables -t mangle -A ${SMITH_CHAIN_NAME} -p udp -i ${IF} --dport ${P} -j DROP
             ip6tables -t mangle -A ${SMITH_CHAIN_NAME} -p udp -i ${IF} --dport ${P} -j DROP            
         done;
-        if [ ${SMITH_TCP_PORTS_ALL} -gt 0 ]; then
+        if [[ ${SMITH_TCP_PORTS_ALL} -gt 0 ]]; then
             echo " tproxy for all TCP traffic"
             iptables -t mangle -A ${SMITH_CHAIN_NAME} -p tcp -i ${IF} -j TPROXY \
             --tproxy-mark 0x1/0x1 --on-port ${SMITH_TCP_TPROXY}
@@ -218,57 +218,57 @@ case "$1" in
     echo
 
     echo "Preparing divert chain $DIVERT_CHAIN_NAME"
-    iptables -t mangle -F $DIVERT_CHAIN_NAME
-    iptables -t mangle -N $DIVERT_CHAIN_NAME
-    iptables -t mangle -A $DIVERT_CHAIN_NAME -j MARK --set-mark $DIVERT_FWMARK
-    iptables -t mangle -A $DIVERT_CHAIN_NAME -j ACCEPT
+    iptables -t mangle -F ${DIVERT_CHAIN_NAME}
+    iptables -t mangle -N ${DIVERT_CHAIN_NAME}
+    iptables -t mangle -A ${DIVERT_CHAIN_NAME} -j MARK --set-mark ${DIVERT_FWMARK}
+    iptables -t mangle -A ${DIVERT_CHAIN_NAME} -j ACCEPT
 
     
-    ip6tables -t mangle -F $DIVERT_CHAIN_NAME
-    ip6tables -t mangle -N $DIVERT_CHAIN_NAME
-    ip6tables -t mangle -A $DIVERT_CHAIN_NAME -j MARK --set-mark $DIVERT_FWMARK
-    ip6tables -t mangle -A $DIVERT_CHAIN_NAME -j ACCEPT
+    ip6tables -t mangle -F ${DIVERT_CHAIN_NAME}
+    ip6tables -t mangle -N ${DIVERT_CHAIN_NAME}
+    ip6tables -t mangle -A ${DIVERT_CHAIN_NAME} -j MARK --set-mark ${DIVERT_FWMARK}
+    ip6tables -t mangle -A ${DIVERT_CHAIN_NAME} -j ACCEPT
     
     echo " done"
     echo
 
-    echo "Removing $SMITH_CHAIN_NAME and $DIVERT_CHAIN_NAME references from mangle prerouting"
-    iptables -t mangle -L PREROUTING -n -v --line-numbers | egrep "$SMITH_CHAIN_NAME" | egrep -o '^[0-9]+' | sort -nr | xargs -n1 iptables -t mangle -D PREROUTING
-    iptables -t mangle -L PREROUTING -n -v --line-numbers | egrep "$DIVERT_CHAIN_NAME" | egrep -o '^[0-9]+' | sort -nr | xargs -n1 iptables -t mangle -D PREROUTING
-    ip6tables -t mangle -L PREROUTING -n -v --line-numbers | egrep "$SMITH_CHAIN_NAME" | egrep -o '^[0-9]+' | sort -nr | xargs -n1 ip6tables -t mangle -D PREROUTING
-    ip6tables -t mangle -L PREROUTING -n -v --line-numbers | egrep "$DIVERT_CHAIN_NAME" | egrep -o '^[0-9]+' | sort -nr | xargs -n1 ip6tables -t mangle -D PREROUTING
+    echo "Removing ${SMITH_CHAIN_NAME} and ${DIVERT_CHAIN_NAME} references from mangle prerouting"
+    iptables -t mangle -L PREROUTING -n -v --line-numbers | egrep "${SMITH_CHAIN_NAME}" | egrep -o '^[0-9]+' | sort -nr | xargs -n1 iptables -t mangle -D PREROUTING
+    iptables -t mangle -L PREROUTING -n -v --line-numbers | egrep "${DIVERT_CHAIN_NAME}" | egrep -o '^[0-9]+' | sort -nr | xargs -n1 iptables -t mangle -D PREROUTING
+    ip6tables -t mangle -L PREROUTING -n -v --line-numbers | egrep "${SMITH_CHAIN_NAME}" | egrep -o '^[0-9]+' | sort -nr | xargs -n1 ip6tables -t mangle -D PREROUTING
+    ip6tables -t mangle -L PREROUTING -n -v --line-numbers | egrep "${DIVERT_CHAIN_NAME}" | egrep -o '^[0-9]+' | sort -nr | xargs -n1 ip6tables -t mangle -D PREROUTING
     echo " done"
     echo
 
     echo "Applying chains $DIVERT_CHAIN_NAME and $SMITH_CHAIN_NAME into mangle prerouting"
-    iptables -t mangle -A PREROUTING -s $tenant_range -p tcp -m socket -j $DIVERT_CHAIN_NAME
-    iptables -t mangle -A PREROUTING -s $tenant_range -p udp -m socket -j $DIVERT_CHAIN_NAME
-    iptables -t mangle -A PREROUTING -d $tenant_range -p tcp -m socket -j $DIVERT_CHAIN_NAME
-    iptables -t mangle -A PREROUTING -d $tenant_range -p udp -m socket -j $DIVERT_CHAIN_NAME
+    iptables -t mangle -A PREROUTING -s ${tenant_range} -p tcp -m socket -j ${DIVERT_CHAIN_NAME}
+    iptables -t mangle -A PREROUTING -s ${tenant_range} -p udp -m socket -j ${DIVERT_CHAIN_NAME}
+    iptables -t mangle -A PREROUTING -d ${tenant_range} -p tcp -m socket -j ${DIVERT_CHAIN_NAME}
+    iptables -t mangle -A PREROUTING -d ${tenant_range} -p udp -m socket -j ${DIVERT_CHAIN_NAME}
 
-    iptables -t mangle -A PREROUTING -s $tenant_range -j $SMITH_CHAIN_NAME
-    iptables -t mangle -A PREROUTING -d $tenant_range -j $SMITH_CHAIN_NAME
+    iptables -t mangle -A PREROUTING -s ${tenant_range} -j ${SMITH_CHAIN_NAME}
+    iptables -t mangle -A PREROUTING -d ${tenant_range} -j ${SMITH_CHAIN_NAME}
     
     
     if [[ "$tenant_range6" != "" ]]; then
-        ip6tables -t mangle -A PREROUTING -s $tenant_range6 -p tcp -m socket -j $DIVERT_CHAIN_NAME
-        ip6tables -t mangle -A PREROUTING -s $tenant_range6 -p udp -m socket -j $DIVERT_CHAIN_NAME
-        ip6tables -t mangle -A PREROUTING -d $tenant_range6 -p tcp -m socket -j $DIVERT_CHAIN_NAME
-        ip6tables -t mangle -A PREROUTING -d $tenant_range6 -p udp -m socket -j $DIVERT_CHAIN_NAME
+        ip6tables -t mangle -A PREROUTING -s ${tenant_range6} -p tcp -m socket -j ${DIVERT_CHAIN_NAME}
+        ip6tables -t mangle -A PREROUTING -s ${tenant_range6} -p udp -m socket -j ${DIVERT_CHAIN_NAME}
+        ip6tables -t mangle -A PREROUTING -d ${tenant_range6} -p tcp -m socket -j ${DIVERT_CHAIN_NAME}
+        ip6tables -t mangle -A PREROUTING -d ${tenant_range6} -p udp -m socket -j ${DIVERT_CHAIN_NAME}
 
-        ip6tables -t mangle -A PREROUTING -s $tenant_range6 -j $SMITH_CHAIN_NAME
-        ip6tables -t mangle -A PREROUTING -d $tenant_range6 -j $SMITH_CHAIN_NAME
+        ip6tables -t mangle -A PREROUTING -s ${tenant_range6} -j ${SMITH_CHAIN_NAME}
+        ip6tables -t mangle -A PREROUTING -d ${tenant_range6} -j ${SMITH_CHAIN_NAME}
     fi
     
     echo " done"
     echo
 
     echo "Applying local lookup for sockets"
-    ip rule add fwmark $DIVERT_FWMARK lookup $DIVERT_IP_RULE
-    ip route add local 0.0.0.0/0 dev lo table $DIVERT_IP_RULE
+    ip rule add fwmark ${DIVERT_FWMARK} lookup ${DIVERT_IP_RULE}
+    ip route add local 0.0.0.0/0 dev lo table ${DIVERT_IP_RULE}
     
-    ip -6 rule add fwmark $DIVERT_FWMARK lookup $DIVERT_IP_RULE
-    ip -6 route add local ::/0 dev lo table $DIVERT_IP_RULE
+    ip -6 rule add fwmark ${DIVERT_FWMARK} lookup ${DIVERT_IP_RULE}
+    ip -6 route add local ::/0 dev lo table ${DIVERT_IP_RULE}
     
     echo " done"
     echo
@@ -292,23 +292,23 @@ case "$1" in
   stop)
     echo "Smithproxy iptables chains setup script - stop:"
     echo 
-    iptables -t mangle -F $DIVERT_CHAIN_NAME
-    iptables -t mangle -F $SMITH_CHAIN_NAME
+    iptables -t mangle -F ${DIVERT_CHAIN_NAME}
+    iptables -t mangle -F ${SMITH_CHAIN_NAME}
 
-    ip6tables -t mangle -F $DIVERT_CHAIN_NAME
-    ip6tables -t mangle -F $SMITH_CHAIN_NAME
+    ip6tables -t mangle -F ${DIVERT_CHAIN_NAME}
+    ip6tables -t mangle -F ${SMITH_CHAIN_NAME}
     
     echo "Smithproxy iptables chains setup script - stop: finished"
     
     ;;
     
   bypass)
-    iptables -t mangle -I $SMITH_CHAIN_NAME 1 -j ACCEPT
-    ip6tables -t mangle -I $SMITH_CHAIN_NAME 1 -j ACCEPT
+    iptables -t mangle -I ${SMITH_CHAIN_NAME} 1 -j ACCEPT
+    ip6tables -t mangle -I ${SMITH_CHAIN_NAME} 1 -j ACCEPT
     ;;
   unbypass)
-    iptables -t mangle -D $SMITH_CHAIN_NAME -j ACCEPT
-    ip6tables -t mangle -D $SMITH_CHAIN_NAME -j ACCEPT
+    iptables -t mangle -D ${SMITH_CHAIN_NAME} -j ACCEPT
+    ip6tables -t mangle -D ${SMITH_CHAIN_NAME} -j ACCEPT
     ;;
     
   *)
@@ -318,6 +318,6 @@ case "$1" in
 esac
 
 
-if [ -f /etc/smithproxy/smithproxy.startup.cfg ]; then
+if [[ -f /etc/smithproxy/smithproxy.startup.cfg ]]; then
  . /etc/smithproxy/smithproxy.startup.cfg $1 "after"
 fi

@@ -40,42 +40,47 @@
 
 #include <addrobj.hpp>
 #include <dns.hpp>
+#include <sstream>
 
 int CidrAddress::contains(CIDR* other) {
     return cidr_contains(c_,other);
 }
 
 
-std::string FqdnAddress::to_string(int verbosity) {
-    std::string ret = "FqdnAddress: " + fqdn_;
+std::string FqdnAddress::to_string(int verbosity) const {
+
+    std::stringstream ret;
+
+    ret << "Fqdn: " + fqdn_;
  
     bool cached_a = false;
     bool cached_4a= false;
     if(verbosity > INF) {
-        inspect_dns_cache.lock();
-        if(inspect_dns_cache.get("A:"+fqdn_) != nullptr) {
+
+        std::scoped_lock<std::recursive_mutex> l_(DNS::get_dns_lock());
+
+        if(DNS::get_dns_cache().get("A:"+fqdn_) != nullptr) {
             cached_a = true;
         }
-        if(inspect_dns_cache.get("AAAA:"+fqdn_) != nullptr) {
+        if(DNS::get_dns_cache().get("AAAA:"+fqdn_) != nullptr) {
             cached_4a = true;
         }
-        inspect_dns_cache.unlock();
-        
+
         if(cached_4a or cached_a) {
-            ret += " (cached";
-            if(cached_a) ret += " A";
-            if(cached_4a) ret += " AAAA";
-            ret += ")";
+            ret << " (cached";
+            if(cached_a) ret << " A";
+            if(cached_4a) ret << " AAAA";
+            ret << ")";
         } else {
-            ret += " (not cached)";
+            ret << " (not cached)";
         }
     }
 
-    if(! prof_name.empty()) {
-        ret += string_format(" (name=%s)", prof_name.c_str());
+    if(! prof_name.empty() && verbosity > iINF) {
+        ret << string_format(" (name=%s)", prof_name.c_str());
     }
 
-    return ret;
+    return ret.str();
 }
 
 
@@ -83,25 +88,32 @@ bool FqdnAddress::match(CIDR* c) {
     bool ret = false;
     
     DNS_Response* r = nullptr;
-    
-    if(c->proto == CIDR_IPV4) {
-        r = inspect_dns_cache.get("A:" + fqdn_);
+
+
+    {
+        std::scoped_lock<std::recursive_mutex> l_(DNS::get_dns_lock());
+
+        if (c->proto == CIDR_IPV4) {
+            r = DNS::get_dns_cache().get("A:" + fqdn_);
+        } else if (c->proto == CIDR_IPV6) {
+            r = DNS::get_dns_cache().get("AAAA:" + fqdn_);
+        }
     }
-    else if(c->proto == CIDR_IPV6) {
-        r = inspect_dns_cache.get("AAAA:" + fqdn_);
-    }
+
     if(r != nullptr) {
-        DEB_("FqdnAddress::match: found in cache: %s",fqdn_.c_str());
+        _deb("FqdnAddress::match: found in cache: %s",fqdn_.c_str());
         
         std::vector<CidrAddress*> ips = r->get_a_anwsers();
         
         int i = 0;
         for(CidrAddress* ip: ips) {
             if(ip->match(c)) {
-                DEB_("FqdnAddress::match: cached %s matches answer[%d] with %s",fqdn_.c_str(),i,ip->to_string().c_str());
+                _deb("FqdnAddress::match: cached %s matches answer[%d] with %s",
+                                                fqdn_.c_str(),i,ip->to_string().c_str());
                 ret = true;
             } else {
-                DEB_("FqdnAddress::match: cached %s DOESN'T match answer[%d] with %s",fqdn_.c_str(),i,ip->to_string().c_str());
+                _deb("FqdnAddress::match: cached %s DOESN'T match answer[%d] with %s",
+                                                fqdn_.c_str(),i,ip->to_string().c_str());
             }
             ++i;
             // delete it straigt away.
@@ -109,7 +121,7 @@ bool FqdnAddress::match(CIDR* c) {
         }
         
     } else {
-        DEB_("FqdnAddress::match: NOT found in cache: %s",fqdn_.c_str());
+        _deb("FqdnAddress::match: NOT found in cache: %s",fqdn_.c_str());
     }
     
     return ret;

@@ -42,14 +42,34 @@ import time
 import os
 import sys
 import logging
-import struct
+import string
 import socket
 import binascii
 import threading
 
 import posix_ipc
+
+BEND_PATH = '/usr/share/smithproxy/infra/bend'
+sys.path.append(BEND_PATH)
+
+
+from wsgiref.simple_server import make_server, WSGIServer, WSGIRequestHandler
+
+from spyne import Application, ServiceBase, rpc
+from spyne import Unicode, Iterable
+from spyne.model.complex import Iterable
+from spyne.model.primitive import Integer
+from spyne.model.primitive import String
+
+from spyne.protocol.soap import Soap11
+from spyne.server.wsgi import WsgiApplication
+
+from zeep import Client as SoapClient
+
+
+
 import pylibconfig2 as cfg
-import SOAPpy
+
 import json
 
 import auth.crypto as mycrypto
@@ -198,7 +218,7 @@ class AuthConfig(object):
 
     def load_key(self):
         try:
-            f = open(self.key_file, "r")
+            f = open(self.key_file, "rb")
             a = f.read()
             if a:
                 self.a1 = a
@@ -207,10 +227,17 @@ class AuthConfig(object):
             self.log.error("cannot open key file: " + str(e))
 
     def authenticate_local_decrypt(self, ciphertext):
-        return mycrypto.xor_salted_decrypt(ciphertext, self.a1)
+
+        if ciphertext.startswith(b"X-"):
+            return mycrypto.xor_salted_decrypt(b"-".join(ciphertext.split(b"-")[1:]), self.a1)
+        elif ciphertext.startswith(b"A256-"):
+            return mycrypto.aes_salted_decrypt(b"-".join(ciphertext.split(b"-")[1:]), self.a1)
+        else:
+            return mycrypto.xor_salted_decrypt(ciphertext, self.a1)
 
     def authenticate_local_encrypt(self, plaintext):
-        return mycrypto.xor_salted_encrypt(plaintext, self.a1)
+        # return b"X-" + mycrypto.xor_salted_encrypt(plaintext, self.a1)
+        return b"A256-" + mycrypto.aes_salted_encrypt(plaintext, self.a1)
 
     def set_filenames(self, tenant_name=None):
 
@@ -334,6 +361,17 @@ class AuthConfig(object):
         self.update_mtimes()
 
 
+#
+#  TODO: make really work SO_REUSEADDR
+#
+class BendWSGIServer(WSGIServer):
+    allow_reuse_address = True
+
+    def server_bind(self):
+        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        super(WSGIServer, self).server_bind()
+        self.setup_environ()
+
 class AuthManager(AuthConfig):
 
     def __init__(self):
@@ -369,7 +407,25 @@ class AuthManager(AuthConfig):
     def prepare(self, tenant_name="default", tenant_index=0, clear_shm=None):
         super(AuthManager, self).prepare(tenant_name, tenant_index, clear_shm)
 
-        self.server = SOAPpy.ThreadingSOAPServer(("localhost", self.bend_port))
+        # make BendService, set its static 'bend' to this
+
+        BendService.bend = self
+
+        application = Application(
+            services=[BendService],
+            tns='http://smithproxy.org',
+            in_protocol=Soap11(validator='lxml'),
+            out_protocol=Soap11())
+
+        wsgi_app = WsgiApplication(application)
+
+        # this was supposed to work :)
+        # WSGIServer.allow_reuse_address = True
+        self.server = make_server('127.0.0.1', self.bend_port, wsgi_app,
+                                  server_class= BendWSGIServer,
+                                  handler_class=WSGIRequestHandler)
+
+
 
 
 
@@ -497,13 +553,20 @@ class AuthManager(AuthConfig):
 
         ret = 0
 
+        # good for detailed troubleshooting
+        #
+        # from pprint import pformat
+        # self.log.info("self.identities_db:\n %s" % pformat(self.identities_db, indent=4))
+        # self.log.info("self.group_db:\n %s" % pformat(self.group_db, indent=4))
+        # self.log.info("self.user_db:\n %s" % pformat(self.user_db, indent=4))
+
         for i in identities:
             self.log.info("authenticate_check: matching against identity %s " % (i,))
             if i in self.identities_db.keys():
                 ii = self.identities_db[i]
 
                 for g in ii["groups"]:
-                    self.log.debug("authenticate_check: checking group %s" % (g,))
+                    self.log.info("authenticate_check: checking group %s" % (g,))
 
                     exploded_members = unique_list(self.recursive_group_members(g))
                     self.log.debug("authenticate_check: full member list of %s: %s" % (g, str(exploded_members)))
@@ -519,17 +582,18 @@ class AuthManager(AuthConfig):
                         if m.find(':') >= 0:
                             is_user = True
 
-                        self.log.debug("authenticate_check: investigating member target %s: user" % (m,))
 
                         if is_user:
                             pairlet = m.split(":")
                             source = pairlet[0]
                             user = pairlet[1]
+                            self.log.info("authenticate_check: investigating member target %s: user" % (m,))
 
                         elif m.find('@') >= 0:
                             pairlet = m.split("@")
                             source = pairlet[0]
                             group = pairlet[1]
+                            self.log.info("authenticate_check: investigating member target %s: group" % (m,))
 
                         if is_user and user != username:
                             self.log.debug("authenticate_check: investigating member target %s: user doesn't match" % (m,))
@@ -595,8 +659,6 @@ class AuthManager(AuthConfig):
         elif ip_version == 6:
             ip_shm_table = self.logon6_shm
 
-        ret = False
-
         # make identities as broad as possible. This is safest default, identities are later narrowed down by token data
         identities = self.identities_db.keys()
 
@@ -649,8 +711,6 @@ class AuthManager(AuthConfig):
             ip_shm_table.save(True)
             ip_shm_table.release()
 
-            # :-D
-            ret = True
             if token:
                 # we have some token from www form
 
@@ -695,23 +755,25 @@ class AuthManager(AuthConfig):
             if self.server:
                 # don't clear shared memory on restart!
                 self.clear_shm = False
-                self.server.shutdown()
+
+                # self.server.shutdown()
+                threading.Thread(target=self.server.shutdown, daemon=True).start()
 
     def serve_forever(self):
 
         if self.server:
             self.log.info("Launching portal on " + self.portal_address + ":" + str(self.portal_port))
-            self.server.registerFunction(self.authenticate)
-            self.server.registerFunction(self.deauthenticate)
-            self.server.registerFunction(self.save_referer)
-            self.server.registerFunction(self.whois)
-
-            self.server.registerFunction(self.admin_login)
-            self.server.registerFunction(self.admin_token_list)
-            self.server.registerFunction(self.admin_keepalive)
-            self.server.registerFunction(self.admin_logout)
-
-            self.server.registerFunction(self.test_internal)
+            # self.server.registerFunction(self.authenticate)
+            # self.server.registerFunction(self.deauthenticate)
+            # self.server.registerFunction(self.save_referer)
+            # self.server.registerFunction(self.whois)
+            #
+            # self.server.registerFunction(self.admin_login)
+            # self.server.registerFunction(self.admin_token_list)
+            # self.server.registerFunction(self.admin_keepalive)
+            # self.server.registerFunction(self.admin_logout)
+            #
+            # self.server.registerFunction(self.test_internal)
 
             self.server.serve_forever()
         else:
@@ -869,7 +931,8 @@ class AuthManager(AuthConfig):
                         else:
                             if "encrypted_password" in self.user_db[username]:
                                 if self.authenticate_local_decrypt(
-                                        self.user_db[username]['encrypted_password']) == password:
+                                            bytearray(self.user_db[username]['encrypted_password'],'ascii')
+                                        ).decode('utf8') == password:
                                     return True
 
         except KeyError as e:
@@ -980,6 +1043,59 @@ class AuthManager(AuthConfig):
         self.log.info("serve_forever finished.")
 
 
+class BendService(ServiceBase):
+
+    bend = None
+
+    def __init(self):
+        pass
+
+    @rpc(String, String, String, _returns=String)
+    def admin_login(self, username, password, ip):
+        return BendService.bend.admin_login(username, ip)
+
+    @rpc(String, _returns=String)
+    def admin_token_list(self, admin_token):
+        return BendService.bend.admin_token_list(admin_token)
+
+
+    @rpc(String, _returns=String)
+    def admin_keepalive(self, token):
+        return BendService.bend.admin_keepalive(token)
+
+    @rpc(String, _returns=String)
+    def admin_logout(self, token):
+        return BendService.bend.admin_logout(token)
+
+    @rpc(String, _returns=String)
+    def admin_get_config(self, token):
+        return BendService.bend.admin_get_config(token)
+
+    @rpc(_returns=String)
+    def test_internal(self):
+        return BendService.bend.test_internal()
+
+    @rpc(String, String, _returns=String)
+    def save_referer(self, token, ref):
+        return BendService.bend.save_referer(token, ref)
+
+    @rpc(String, String, String, String, _returns=Iterable(String))
+    def authenticate(self, ip, username, password, token):
+        suc, ref =  BendService.bend.authenticate(ip, username, password, token)
+        if suc:
+            suc = "1"
+        else:
+            suc = "0"
+        return [ suc, ref ]
+
+    @rpc(String, _returns=Iterable(String))
+    def whois(self, ip):
+        return BendService.bend.whois(ip)
+
+    @rpc(String, _returns=String)
+    def deauthenticate(self, ip):
+        return BendService.bend.deauthenticate(ip)
+
 
 class TesterThread(threading.Thread):
     def __init__(self, port):
@@ -987,11 +1103,11 @@ class TesterThread(threading.Thread):
         self.port = port
 
     def run(self):
-        bend = SOAPpy.SOAPProxy("http://127.0.0.1:%s" % (str(self.port),))
+        bend = SoapClient("http://127.0.0.1:%s/?wsdl" % (str(self.port),))
 
         while True:
             time.sleep(5)
-            bend.test_internal()
+            bend.service.test_internal()
 
 
 def run_bend(tenant_name="default", tenant_index=0, clear_shm=None):
@@ -1001,7 +1117,7 @@ def run_bend(tenant_name="default", tenant_index=0, clear_shm=None):
 
     while True:
         a.prepare(tenant_name, tenant_index, first_start)
-        a.log.info("starting main loop")
+        a.log.info("bend - starting main loop")
         if first_start:
             t = TesterThread(a.bend_port)
             t.setDaemon(True)
@@ -1016,6 +1132,6 @@ if __name__ == "__main__":
     try:
         run_bend()
     except KeyboardInterrupt as e:
-        print "Ctrl-C pressed."
+        print("Ctrl-C pressed.")
 
 

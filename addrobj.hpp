@@ -1,3 +1,5 @@
+#include <utility>
+
 /*
     Smithproxy- transparent proxy with SSL inspection capabilities.
     Copyright (c) 2014, Ales Stibal <astib@mag0.net>, All rights reserved.
@@ -40,36 +42,45 @@
 #ifndef ADDROBJ_HPP_
 #define ADDROBJ_HPP_
 
-#include <cidr.hpp>
+#include <ext/cidr.hpp>
 #include <display.hpp>
-#include <logger.hpp>
+#include <log/logger.hpp>
 #include <sobject.hpp>
 
 class AddressObject : public socle::sobject {
 public:
     virtual bool match(CIDR* c) = 0;
-    virtual std::string to_string(int=iINF) = 0;
-    virtual ~AddressObject() {};
+    std::string to_string(int=iINF) const override = 0;
+    AddressObject() : log(get_log()) {};
+
+    ~AddressObject() override = default;
 
     std::string prof_name;
+
+    static logan_lite& get_log() {
+        static logan_lite l("policy.addr");
+        return l;
+    }
+
+    logan_lite& log;
 };
 
 
 class CidrAddress : public AddressObject {
 public:
-    CidrAddress(CIDR* c) : c_(c) { }
+    explicit CidrAddress(CIDR* c) : AddressObject(), c_(c) { }
     CIDR* cidr() { return c_; }
 
     int contains(CIDR *other);
-    virtual bool match(CIDR* c) { return (contains(c) >= 0); };
-    virtual bool ask_destroy() { return false; };
+    bool match(CIDR* c) override { return (contains(c) >= 0); };
+    bool ask_destroy() override { return false; };
     
-    virtual std::string to_string(int verbosity=iINF) {
+    std::string to_string(int verbosity=iINF) const override {
         char* temp = cidr_to_str(c_);
 
-        std::string ret = string_format("CidrAddress: %s",temp);
+        std::string ret = string_format("Cidr: %s",temp);
 
-        if(! prof_name.empty()) {
+        if(! prof_name.empty() && verbosity > iINF) {
             ret += string_format(" (name=%s)", prof_name.c_str());
         }
 
@@ -77,7 +88,7 @@ public:
     }
     
     
-    virtual ~CidrAddress() { cidr_free(c_); };
+    ~CidrAddress() override { cidr_free(c_); };
 protected:
     CIDR* c_;
 
@@ -86,12 +97,12 @@ DECLARE_C_NAME("CidrAddress");
 
 class FqdnAddress : public AddressObject {
 public:
-    FqdnAddress(std::string s) : fqdn_(s) { }
+    explicit FqdnAddress(std::string s) : AddressObject(), fqdn_(std::move(s)) { }
     std::string fqdn() const { return fqdn_; }
     
-    virtual bool match(CIDR* c);
-    virtual bool ask_destroy() { return false; };
-    virtual std::string to_string(int verbosity=iINF);
+    bool match(CIDR* c) override;
+    bool ask_destroy() override { return false; };
+    std::string to_string(int verbosity=iINF) const override;
 protected:
     std::string fqdn_;
 

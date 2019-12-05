@@ -39,67 +39,60 @@
 
 #include <staticcontent.hpp>
 
-DEFINE_LOGGING(StaticContent);
-
-StaticContent* global_staticconent;
-
-
 bool StaticContent::load_files(std::string& dir) {
     bool ret = true;
     
     try {
         LoaderFile loader_file;
         std::vector<std::string> names;
-        
-        names.push_back("test");
-        names.push_back("html_page");
-        
-        names.push_back("html_img_warning");
-        
-        for(std::string& name: names) {
-            Template* t_temp = new Template(loader_file);
+
+        for(const std::string& name: { "test", "html_page", "html_img_warning"} ) {
+            _dia("StaticContent::load_files: loading template %s", name.c_str());
+
+            auto* t_temp = new Template(loader_file);
             t_temp->load(dir + name + ".txt");
             templates_->set(name,t_temp);
         }
     }
     catch(std::exception& e) {
+        _err("StaticContent::load_files: exception caught: %s", e.what());
         ret = false;
     }
     
     return ret;
 }
 
-Template* StaticContent::get(std::string name) {
+Template* StaticContent::get(std::string const& name) {
     Template* t = templates_->get(name);
     if(!t) {
-        ERR___("cannot load template '%s'",name.c_str())
+        _err("StaticContent::get: cannot load template '%s'", name.c_str());
     }
-    
+
     return t;
 }
 
 
-std::string StaticContent::render_noargs(std::string name) {
+std::string StaticContent::render_noargs(std::string const& name) {
 
     Template* t = get(name);
     if(t) {
         return t->render();
     } 
     
-    return "";
+    return std::string();
 }
 
 std::string StaticContent::render_server_response(std::string& message, unsigned int code) {
-    std::string out;
-    out += string_format("HTTP/1.1 %3d OK\r\n",code);
-    out += "Server: Smithproxy/1.1\r\n";
-    out += "Content-Type: text/html\r\n";
-    out += "Content-Length: " + std::to_string(message.length()); out += "\r\n";
+    std::stringstream out;
+    out << string_format("HTTP/1.1 %3d OK\r\n", code);
+    out << "Server: Smithproxy/1.1\r\n";
+    out << "Content-Type: text/html\r\n";
+    out << "Content-Length: " + std::to_string(message.length()); out << "\r\n";
     
-    out += "\r\n";
-    out += message;
+    out << "\r\n";
+    out << message;
     
-    return out;
+    return out.str();
 }
 
 std::string StaticContent::render_msg_html_page(std::string& caption, std::string& meta, std::string& content, const char* window_width) {

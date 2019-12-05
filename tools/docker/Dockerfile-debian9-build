@@ -13,8 +13,10 @@ apt install -y libconfig-dev libcli-dev libunwind-dev libssl1.0-dev \
                git g++ cmake make && \
 pip install pylibconfig2
 
-RUN git clone https://bitbucket.com/astibal/socle.git socle && git clone https://bitbucket.com/astibal/smithproxy.git smithproxy && \
-cd smithproxy && mkdir build && cd build && cmake .. && make install && \
-cd ../tools/build-scripts/deb/
+RUN \
+    git clone https://bitbucket.com/astibal/socle.git socle -b 0.8 && \
+    git clone https://bitbucket.com/astibal/smithproxy.git smithproxy -b 0.8 && \
+    \
+    cd smithproxy && mkdir build && cd build && cmake .. && make install
 
-CMD echo "run createdeb.sh <upload password>" && /bin/bash
+CMD cd /app/smithproxy/tools/build-scripts/deb && echo "run ./createdeb.sh <upload password> <socle_branch> <smithproxy_branch>" && /bin/bash

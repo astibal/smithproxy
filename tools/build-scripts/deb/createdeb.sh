@@ -76,7 +76,7 @@ safe_upload() {
 ## get source !!
 ##
 
-sync
+sync $2 $3
 
 ##
 ## get proper versions from GIT. We set debian patch-level to distance from

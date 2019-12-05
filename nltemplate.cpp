@@ -100,7 +100,7 @@ static inline long match_tag_with_param( const char *tag, const char *text, stri
     }
 
     long taglen = strlen( tag );
-    if ( strncmp( text + 3, tag, taglen ) ) {
+    if ( strncmp( text + 3, tag, taglen ) != 0 ) {
         return -1;
     }
 

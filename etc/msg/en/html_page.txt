@@ -12,7 +12,7 @@
                     outline: none;
                     }
                     body {
-                    font-family: Arial;
+                    font-family: sans-serif;
                     background-color: #48617B;
                     padding: 30px;
                     color: #333;
@@ -28,13 +28,13 @@
                     }
                     
                     h2 {
-                     font-family: Arial;
+                     font-family: sans-serif;
                      color: #999;
                      vertical-align: middle;
                     }
 
                     h3 {
-                     font-family: Arial;
+                     font-family: sans-serif;
                      color: #777;
                      vertical-align: middle;
                     }
@@ -56,9 +56,9 @@
                     background-color: #ECF0F1;
                     border: 2px solid transparent;
                     border-radius: 3px;
-                    font-size: 16px;
-                    font-weight: 200;
-                    padding: 5px 5px;
+                    font-size: 14px;
+                    font-weight: 150;
+                    padding: 3px 3px;
                     /*width: 250px;*/
                     transition: border .5s;
                     }
@@ -72,7 +72,7 @@
                     border: 2px solid transparent;
                     background: #3498DB;
                     color: #ffffff;
-                    font-size: 16px;
+                    font-size: 14px;
                     line-height: 25px;
                     padding: 5px 8px;
                     text-decoration: none;
@@ -89,7 +89,7 @@
                     border: 2px solid transparent;
                     background: #DB3333;
                     color: #ffffff;
-                    font-size: 16px;
+                    font-size: 14px;
                     line-height: 25px;
                     padding: 5px 8px;
                     text-decoration: none;
@@ -120,7 +120,7 @@
 
                     
                     .windowlet-link {
-                    font-size: 12px;
+                    font-size: 11px;
                     color: #444;
                     display: block;
                     margin-top: 12px;
@@ -133,5 +133,7 @@
         <div class="windowlet-screen">
 <!--        <div class="app-title">        -->
         {{ message }}
+        </div>
+        </div>
         </body> 
 </html> 

@@ -64,7 +64,10 @@
 //
 class Inspector : public socle::sobject, public lockable {
 public:
-    virtual ~Inspector() {}
+    Inspector() {
+        log = logan::attach(this, "alg");
+    }
+    virtual ~Inspector() = default;
     //! called always when there are new data in the flow. \see class Flow.
     virtual void update(AppHostCX* cx) = 0;
     //! called before inserting to inspector list. 
@@ -72,7 +75,7 @@ public:
     virtual bool l4_prefilter(AppHostCX* cx) = 0;
     
     //! called before each update to indicate if update() should be called.
-    virtual bool interested(AppHostCX*) = 0;
+    virtual bool interested(AppHostCX*) const = 0;
     
     //! indicate if inspection is complete. Completed inspectors are not updated.
     inline bool completed() const   { return completed_; }
@@ -86,7 +89,9 @@ public:
     inspect_verdict verdict() const { return verdict_; };
     void verdict(inspect_verdict v) { verdict_ = v; }
     virtual void apply_verdict(AppHostCX* cx);
-    
+private:
+    logan_attached<Inspector> log;
+
 protected:
     bool completed_ = false;
     void completed(bool b) { completed_ = b; }
@@ -99,9 +104,11 @@ protected:
     int stage = 0;
     
     
-    virtual bool ask_destroy() { return false; };
-    virtual std::string to_string(int verbosity=iINF) { return string_format("%s: in-progress: %d stage: %d completed: %d result: %d",
-                                                c_name(),in_progress(), stage, completed(),result()); };
+    bool ask_destroy() override { return false; };
+    std::string to_string(int verbosity=iINF) const override {
+        return string_format("%s: in-progress: %d stage: %d completed: %d result: %d",
+                             c_name(),in_progress(), stage, completed(),result());
+    };
     
                                                 
     static std::string remove_redundant_dots(std::string);
@@ -114,15 +121,18 @@ protected:
 
 class DNS_Inspector : public Inspector {
 public:
+    explicit DNS_Inspector() {
+        log = logan::attach(this, "dns");
+    }
     virtual ~DNS_Inspector() {
         // clear local request cache
         for(auto x: requests_) { if(x.second) {delete x.second; } };
         if(cached_response != nullptr) delete cached_response;
     };  
-    virtual void update(AppHostCX* cx);
+    void update(AppHostCX* cx) override;
 
-    virtual bool l4_prefilter(AppHostCX* cx) { return interested(cx); };
-    virtual bool interested(AppHostCX*cx);
+    bool l4_prefilter(AppHostCX* cx) override { return interested(cx); };
+    bool interested(AppHostCX*cx) const override ;
     
     bool opt_match_id = false;
     bool opt_randomize_id = false;
@@ -131,12 +141,13 @@ public:
     DNS_Request* find_request(uint16_t r) { auto it = requests_.find(r); if(it == requests_.end()) { return nullptr; } else { return it->second; }  }
     bool validate_response(DNS_Response* ptr);
     bool store(DNS_Response* ptr);
-    virtual void apply_verdict(AppHostCX* cx);
+    void apply_verdict(AppHostCX* cx) override;
     
-    virtual std::string to_string(int verbosity=iINF);
+    std::string to_string(int verbosity=iINF) const override;
 
     static std::regex wildcard;
 private:
+    logan_attached<DNS_Inspector> log;
     bool is_tcp = false;
 
     buffer* cached_response = nullptr;

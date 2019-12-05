@@ -35,13 +35,112 @@
     gives permission to release a modified version without this exception;
     this exception also makes it possible to release a modified version
     which carries forward this exception.
-*/    
-
-#define SMITH_VERSION "0.8.5"
-#define SMITH_DEVEL    0
+*/
 
 
-extern bool cfg_openssl_mem_dbg;
-extern bool cfg_mtrace_enable;
+#ifndef SMITHPROXY_SMITHPROXY_HPP
+#define SMITHPROXY_SMITHPROXY_HPP
 
-bool load_config(std::string& config_f, bool reload = false);
+#include <mitmproxy.hpp>
+#include <socksproxy.hpp>
+#include <threadedacceptor.hpp>
+#include <threadedreceiver.hpp>
+
+#include <cfgapi.hpp>
+#include <daemon.hpp>
+#include <srvutils.hpp>
+#include <smithlog.hpp>
+#include <smithdnsupd.hpp>
+
+typedef ThreadedAcceptor<MitmMasterProxy,MitmProxy> theAcceptor;
+typedef ThreadedReceiver<MitmUdpProxy,MitmProxy> theReceiver;
+typedef ThreadedAcceptor<MitmSocksProxy,SocksProxy> socksAcceptor;
+
+
+class MyPlainAcceptor : public theAcceptor {
+};
+
+
+class SmithProxy {
+
+    explicit SmithProxy() : tenant_index_(0), tenant_name_("default") {
+        log.level(WAR);
+    };
+    virtual ~SmithProxy ();
+
+
+    unsigned int tenant_index_;
+    std::string  tenant_name_;
+
+    void (*terminate_handler_)(int) = nullptr;
+    void (*reload_handler_)(int) = nullptr;
+public:
+    bool cfg_daemonize = false;
+    logan_lite log = logan_lite("service");
+
+    theAcceptor* plain_proxy = nullptr;
+    theAcceptor* ssl_proxy = nullptr;
+    theReceiver* udp_proxy = nullptr;
+    theReceiver* dtls_proxy = nullptr;
+    socksAcceptor* socks_proxy = nullptr;
+
+
+    std::thread* plain_thread = nullptr;
+    std::thread* ssl_thread = nullptr;
+    std::thread* dtls_thread = nullptr;
+    std::thread* udp_thread = nullptr;
+    std::thread* socks_thread = nullptr;
+    std::thread* cli_thread = nullptr;
+    std::thread* log_thread = nullptr;
+    std::thread* dns_thread = nullptr;
+    std::thread* id_thread = nullptr;
+
+    SmithProxy (SmithProxy const&) = delete;
+    SmithProxy& operator= (SmithProxy const& r) = delete;
+
+    static SmithProxy& instance() {
+        static SmithProxy sx;
+        return sx;
+    }
+
+    unsigned int tenant_index () const { return tenant_index_; }
+    void tenant_index (unsigned int tenantIndex) { tenant_index_ = tenantIndex;}
+
+    const std::string& tenant_name () const { return tenant_name_;  }
+    void tenant_name (const std::string &tenantName) { tenant_name_ = tenantName;  }
+
+    void set_handler_term(void (*terminate_handler)(int)) { terminate_handler_ = terminate_handler;  }
+    void set_handler_reload(void (*reload_handler)(int)) { reload_handler_ = reload_handler; }
+
+
+    static std::thread* create_identity_refresh_thread();
+
+    void create_log_writer_thread();
+    void create_dns_thread();
+    void create_identity_thread();
+    void create_listeners();
+
+    void run();
+    void stop();
+
+    static void my_terminate(int param);
+    static void my_usr1 (int param);
+    int load_signatures(libconfig::Config& cfg, const char* name, std::vector<duplexFlowMatch*>& target);
+    bool init_syslog();
+    bool load_config(std::string& config_f, bool reload = false);
+
+    volatile static int cnt_terminate;
+
+    #ifndef MEM_DEBUG
+        bool cfg_openssl_mem_dbg = false;
+        bool cfg_mtrace_enable = false;
+    #else
+        bool cfg_openssl_mem_dbg = true;
+        bool cfg_mtrace_enable = true;
+    #endif
+};
+
+
+
+
+#endif //SMITHPROXY_SMITHPROXY_HPP

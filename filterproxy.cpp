@@ -63,7 +63,7 @@ int TestFilter::handle_sockets_once(baseCom* xcom) {
 
         auto parent_name = [this](){ if(parent_) return parent_->to_string(iNOT); else return std::string("???"); };
         
-        INF___("%s: filter triggered event counter %d", parent_name().c_str() ,counter);
+        _inf("%s: filter triggered event counter %d", parent_name().c_str() ,counter);
     }
     
     return baseProxy::handle_sockets_once(xcom);

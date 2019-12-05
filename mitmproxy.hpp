@@ -49,7 +49,7 @@
 #include <threadedreceiver.hpp>
 #include <traflog.hpp>
 #include <policy.hpp>
-#include <cfgapi_auth.hpp>
+#include <shmauth.hpp>
 
 
 struct whitelist_verify_entry {
@@ -63,22 +63,24 @@ class MitmProxy : public baseProxy, public socle::sobject {
     
 protected:
     socle::trafLog *tlog_ = nullptr;
-    
     bool write_payload_ = false;
     
-    bool identity_resolved_ = false;    // meant if attempt has been done, regardless of it's result.
-    bool identity_resolved_time = 0;
+    bool identity_resolved_ = false;    // meant if attempt has been done, regardless of its result.
     shm_logon_info_base* identity_ = nullptr;
     
     std::vector<ProfileContentRule>* content_rule_ = nullptr; //save some space and store it as a pointer. Init it only when needed and delete in dtor.
-    
     int matched_policy_ = -1;
-    
+
+    std::string replacement_msg;
 public: 
     time_t half_holdtimer = 0;
-    static unsigned int half_timeout;
-    
-    static ptr_cache<std::string,whitelist_verify_entry_t> whitelist_verify;
+    static unsigned int& half_timeout() { static unsigned int s_half_timetout = 30; return s_half_timetout; };
+
+    using whitelist_map = ptr_cache<std::string,whitelist_verify_entry_t>;
+    static whitelist_map& whitelist_verify() {
+        static whitelist_map m("whitelist - verify", 500, true, whitelist_verify_entry_t::is_expired);
+        return m;
+    }
     
     bool opt_auth_authenticate = false;
     bool opt_auth_resolve = false;
@@ -88,7 +90,7 @@ public:
     // Remote filters - use other proxy to filter content of this proxy.
     // Elements are pair of "name" and pointer to the filter proxy 
     std::vector<std::pair<std::string,FilterProxy*>> filters_;
-    void add_filter(std::string name, FilterProxy* fp);
+    void add_filter(std::string const& name, FilterProxy* fp);
     
     // tap proxy - unmonitor all left and right sockets, pause contexts
     virtual void tap();
@@ -97,10 +99,10 @@ public:
     
     
     
-    int matched_policy() { return matched_policy_; }
-    void matched_policy(int p) { matched_policy_ = p; }    
+    int matched_policy() const { return matched_policy_; }
+    void matched_policy(int p)  { matched_policy_ = p; }
     
-    inline bool identity_resolved();
+    inline bool identity_resolved() const;
     inline void identity_resolved(bool b);
     shm_logon_info_base* identity() { return identity_; }
     inline void identity(shm_logon_info_base* i) { if(identity_ != nullptr) { delete identity_; }  if(i != nullptr) { identity_ = i->clone(); } }
@@ -109,10 +111,10 @@ public:
     bool apply_id_policies(baseHostCX* cx);
    
     
-    bool write_payload(void) { return write_payload_; } 
+    bool write_payload() const { return write_payload_; }
     void write_payload(bool b) { write_payload_ = b; }
     
-    socle::trafLog* tlog() { return tlog_; }
+    socle::trafLog* tlog() const { return tlog_; }
     void toggle_tlog();
     
     explicit MitmProxy(baseCom* c);
@@ -136,12 +138,15 @@ public:
     // check sslcom response and return true if redirected
     virtual bool handle_com_response_ssl(MitmHostCX* cx);
     virtual void handle_replacement_ssl(MitmHostCX* cx);
+    std::string replacement_ssl_page(SSLCom* scom, app_HttpRequest* app_request, std::string const& more_info);
+    std::string replacement_ssl_verify_detail(SSLCom* scom);
+    void set_replacement_msg_ssl(SSLCom* scom); // evaluates SSL verify info and sets replacement_msg string
     
     // check if content has been pulled from cache and return true if so
     virtual bool handle_cached_response(MitmHostCX* cx);
     
-    virtual bool ask_destroy() { dead(true); return true; };
-    virtual std::string to_string(int verbosity=iINF);
+    bool ask_destroy() override { state().dead(true); return true; };
+    std::string to_string(int verbosity=iINF) const override;
     
     virtual int handle_sockets_once(baseCom*);
     
@@ -165,19 +170,24 @@ public:
     socle::meter mtr_down;
     socle::meter mtr_up;    
     
-    static socle::meter total_mtr_up;
-    static socle::meter total_mtr_down;
+    static socle::meter& total_mtr_up()  { static socle::meter t_up; return t_up; };
+    static socle::meter& total_mtr_down() {static socle::meter t_down; return t_down; };
 
     
     DECLARE_C_NAME("MitmProxy");
     DECLARE_LOGGING(to_string);
+
+private:
+    logan_attached<MitmProxy> log;
 };
 
 
 class MitmMasterProxy : public ThreadedAcceptorProxy<MitmProxy> {
 public:
     
-    MitmMasterProxy(baseCom* c, int worker_id) : ThreadedAcceptorProxy< MitmProxy >(c,worker_id) {};
+    MitmMasterProxy(baseCom* c, int worker_id) : ThreadedAcceptorProxy< MitmProxy >(c,worker_id) {
+        log.area("acceptor.tcp");
+    };
     
     virtual baseHostCX* new_cx(int s);
     virtual void on_left_new(baseHostCX* just_accepted_cx);
@@ -188,12 +198,15 @@ public:
     bool detect_ssl_on_plain_socket(int s);
     
     time_t auth_table_refreshed = 0;
+
 };
 
 
 class MitmUdpProxy : public ThreadedReceiverProxy<MitmProxy> {
 public:
-    MitmUdpProxy(baseCom* c, int worker_id) : ThreadedReceiverProxy< MitmProxy >(c,worker_id) {};
+    MitmUdpProxy(baseCom* c, int worker_id) : ThreadedReceiverProxy< MitmProxy >(c,worker_id) {
+        log.area("acceptor.udp");
+    };
     virtual void on_left_new(baseHostCX* just_accepted_cx);
     baseHostCX* new_cx(int s);
 };
