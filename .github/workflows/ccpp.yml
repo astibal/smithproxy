@@ -12,7 +12,7 @@ jobs:
     - name: get socle
       run: git clone https://github.com/astibal/socle.git
     - name: make build
-      run: mkdir build && cd build
+      run: mkdir smithproxy/build && cd smithproxy/build
     - name: cmake
       run: cmake .. -DBUILD_TYPE=Release 
     - name: make 
