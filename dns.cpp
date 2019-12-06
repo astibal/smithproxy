@@ -181,24 +181,35 @@ int DNSFactory::send_dns_request(std::string const& hostname, DNS_Record_Type t,
 
     // create UDP socket
     int send_socket = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    struct sockaddr_storage addr{};
 
-    memset(&addr, 0, sizeof(struct sockaddr_storage));
-    addr.ss_family = AF_INET;
-    ((sockaddr_in *) &addr)->sin_addr.s_addr = inet_addr(nameserver.c_str());
-    ((sockaddr_in *) &addr)->sin_port = htons(53);
+    if(send_socket > 0) {
+        struct sockaddr_storage addr{};
 
-    ::connect(send_socket, (sockaddr *) &addr, sizeof(sockaddr_storage));
+        memset(&addr, 0, sizeof(struct sockaddr_storage));
+        addr.ss_family = AF_INET;
+        ((sockaddr_in *) &addr)->sin_addr.s_addr = inet_addr(nameserver.c_str());
+        ((sockaddr_in *) &addr)->sin_port = htons(53);
 
-    if (::send(send_socket, b.data(), b.size(), 0) < 0) {
-        std::string r = string_format("resolve_dns_s: cannot write remote socket: %d", send_socket);
-        _dia("%s", r.c_str());
 
-        ::close(send_socket);  // coverity: 1407969
+        if (0 != ::connect(send_socket, (sockaddr *) &addr, sizeof(sockaddr_storage))) {
+            _err("resolve_dns_s: cannot connect: %s", string_error().c_str());
+            ::close(send_socket);
+            return -2;
+        }
+
+        if (::send(send_socket, b.data(), b.size(), 0) < 0) {
+            std::string r = string_format("resolve_dns_s: cannot write remote socket: %d", send_socket);
+            _dia("%s", r.c_str());
+
+            ::close(send_socket);  // coverity: 1407969
+            return -3;
+        }
+
+        return send_socket;
+    } else {
+        _err("resolve_dns_s: cannot create socketL %s", string_error().c_str());
         return -1;
     }
-
-    return send_socket;
 }
 
 
@@ -268,7 +279,9 @@ DNS_Response* DNSFactory::resolve_dns_s (std::string const& hostname, DNS_Record
     int send_socket = send_dns_request(hostname, t, nameserver);
     auto resp = recv_dns_response(send_socket,timeout_s);
 
-    ::close(send_socket);
+    if(send_socket > 0) {
+        ::close(send_socket);
+    }
     return resp.first;
 
 }

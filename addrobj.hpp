@@ -84,7 +84,8 @@ public:
             ret += string_format(" (name=%s)", prof_name.c_str());
         }
 
-        delete temp; return ret;
+        free(temp);
+        return ret;
     }
     
     

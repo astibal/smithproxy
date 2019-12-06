@@ -3547,6 +3547,8 @@ void client_thread(int client_socket) {
 }
 
 void cli_loop(short unsigned int port) {
+
+    auto log = logan::create("service");
     struct sockaddr_in servaddr;
     int on = 1;
 
@@ -3558,7 +3560,12 @@ void cli_loop(short unsigned int port) {
     servaddr.sin_family = AF_INET;
     servaddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     servaddr.sin_port = htons(port);
-    bind(s, (struct sockaddr *)&servaddr, sizeof(servaddr));
+
+    while(0 != bind(s, (struct sockaddr *)&servaddr, sizeof(servaddr))) {
+        _err("cli main thread - cannot bind %d port: %s", port, string_error().c_str());
+        ::sleep(1);
+        _err("...retrying");
+    }
 
     // Wait for a connection
     listen(s, 50);
@@ -3566,6 +3573,6 @@ void cli_loop(short unsigned int port) {
     int client_socket = 0;
     while ((client_socket = accept(s, nullptr, 0)))
     {
-        std::thread* n = new std::thread(client_thread,client_socket);
+        auto* n = new std::thread(client_thread, client_socket);
     }
 };

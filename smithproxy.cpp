@@ -437,6 +437,7 @@ bool SmithProxy::init_syslog() {
         ((sockaddr_in*)&syslog_in)->sin_addr.s_addr = inet_addr(CfgFactory::get().syslog_server.c_str());
         if(((sockaddr_in*)&syslog_in)->sin_addr.s_addr == INADDR_NONE) {
             _err("Error initializing syslog server: %s", CfgFactory::get().syslog_server.c_str());
+            ::close(syslog_socket); // coverity: 1407945
             return false;
         }
 

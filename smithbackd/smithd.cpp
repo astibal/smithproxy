@@ -432,6 +432,7 @@ int main(int argc, char *argv[]) {
                 
             case 'o':
                 config_file_check_only = true;
+                break;
                 
             case 'D':
                 cfg_daemonize = true;
@@ -528,8 +529,7 @@ int main(int argc, char *argv[]) {
       
     // set level to what's in the config
     if (!load_config(config_file)) {
-        if(custom_config_file); // make compiler happy
-        
+
         if(config_file_check_only) {
             _fat("Config check: error loading config file.");
             exit(1);
