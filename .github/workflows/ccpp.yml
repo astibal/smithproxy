@@ -9,10 +9,10 @@ jobs:
     
     steps:
     - uses: actions/checkout@v1
-    - name: get socle
-      run: git clone https://github.com/astibal/socle.git
+      with:
+        repository: astibal/socle
     - name: make build
-      run: mkdir smithproxy/build && cd smithproxy/build
+      run: mkdir build && cd build
     - name: cmake
       run: cmake .. -DBUILD_TYPE=Release 
     - name: make 
