@@ -1,0 +1,19 @@
+name: C/C++ CI
+
+on: [push]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v1
+    - name: get socle
+      run: git clone https://github.com/astibal/socle.git
+    - name: make build
+      run: mkdir build && cd build
+    - name: cmake
+      run: cmake .. -DBUILD_TYPE=Release 
+    - name: make 
+      run: make 
