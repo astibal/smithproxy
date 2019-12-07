@@ -207,7 +207,7 @@ int DNSFactory::send_dns_request(std::string const& hostname, DNS_Record_Type t,
 
         return send_socket;
     } else {
-        _err("resolve_dns_s: cannot create socketL %s", string_error().c_str());
+        _err("resolve_dns_s: cannot create socket %s", string_error().c_str());
         return -1;
     }
 }
