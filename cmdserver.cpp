@@ -251,6 +251,27 @@ void cmd_show_status(struct cli_def* cli) {
     cli_print(cli,"Built: %s", __TIMESTAMP__);
 #endif
 
+    int sq_plain = SmithProxy::instance().plain_proxy->sq_type();
+    int sq_ssl = SmithProxy::instance().ssl_proxy->sq_type();
+    int sq_udp = SmithProxy::instance().udp_proxy->sq_type();
+    int sq_dtls = SmithProxy::instance().dtls_proxy->sq_type();
+
+    cli_print(cli," ");
+
+    cli_print(cli, "cores detected: %d, acc multi: %d recv multi: %d", std::thread::hardware_concurrency(),
+              SmithProxy::instance().plain_proxy->core_multiplier(),
+              SmithProxy::instance().udp_proxy->core_multiplier());
+
+    cli_print(cli," ");
+
+    cli_print(cli, "TCP   threads: %d", SmithProxy::instance().plain_proxy->task_count());
+    cli_print(cli, "Socks threads: %d", SmithProxy::instance().socks_proxy->task_count());
+    cli_print(cli, "UDP   threads: %d", SmithProxy::instance().udp_proxy->task_count());
+    cli_print(cli, "TLS   threads: %d", SmithProxy::instance().ssl_proxy->task_count());
+    cli_print(cli, "DTLS  threads: %d", SmithProxy::instance().dtls_proxy->task_count());
+    cli_print(cli, "Acceptor hint: tcp:%d, tls:%d, udp:%d, dtls:%d", sq_plain, sq_ssl, sq_udp, sq_dtls);
+
+
     cli_print(cli," ");
     time_t uptime = time(nullptr) - CfgFactory::get().ts_sys_started;
     cli_print(cli,"Uptime: %s",uptime_string(uptime).c_str());
