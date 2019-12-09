@@ -37,8 +37,8 @@
     which carries forward this exception.
 */    
 
-#define SMITH_VERSION "0.9.0"
-#define SMITH_DEVEL    0
+#define SMITH_VERSION "0.9.1"
+#define SMITH_DEVEL    1
 
 
 extern bool cfg_openssl_mem_dbg;
