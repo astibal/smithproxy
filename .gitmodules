@@ -1,0 +1,4 @@
+[submodule "socle"]
+	path = socle
+	url = ssh://git@github.com/astibal/socle
+	branch = master
