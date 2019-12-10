@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 2.8)
 
-SET(SOCLE_DIR "../socle")
-SET(SOCLE_COMMON_DIR "../socle/common")
+SET(SOCLE_DIR "socle")
+SET(SOCLE_COMMON_DIR "socle/common")
 SET(SMITHD_DIR "smithbackd")
 
 project(smithproxy CXX)
