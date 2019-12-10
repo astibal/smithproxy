@@ -50,6 +50,7 @@
 #include <main.hpp>
 
 #include <authfactory.hpp>
+#include <pyinspector.hpp>
 
 
 CfgFactory::CfgFactory(): log(get_log()), args_debug_flag(NON), syslog_level(INF) {
@@ -196,6 +197,16 @@ ProfileAlgDns* CfgFactory::lookup_prof_alg_dns (const char *name) {
 
 }
 
+ProfileScript* CfgFactory::lookup_prof_script(const char * name)  {
+    std::lock_guard<std::recursive_mutex> l(lock_);
+
+    if(db_prof_script.find(name) != db_prof_script.end()) {
+        return db_prof_script[name];
+    }
+
+    return nullptr;
+
+}
 
 ProfileAuth* CfgFactory::lookup_prof_auth (const char *name) {
     std::lock_guard<std::recursive_mutex> l(lock_);
@@ -875,6 +886,22 @@ ProfileAlgDns* CfgFactory::policy_prof_alg_dns (int index) {
     }
 }
 
+ProfileScript* CfgFactory::policy_prof_script(int index) {
+    std::lock_guard<std::recursive_mutex> l(lock_);
+
+    if(index < 0) {
+        return nullptr;
+    }
+
+    if(index < (signed int)db_policy.size()) {
+        return db_policy.at(index)->profile_script;
+    } else {
+        _dia("policy_prof_alg_dns[#%d]: out of bounds, nullptr",index);
+        return nullptr;
+    }
+}
+
+
 
 ProfileAuth* CfgFactory::policy_prof_auth (int index) {
     std::lock_guard<std::recursive_mutex> l(lock_);
@@ -1153,6 +1180,47 @@ int CfgFactory::load_db_prof_alg_dns () {
     return num;
 }
 
+int CfgFactory::load_db_prof_script () {
+    std::lock_guard<std::recursive_mutex> l(lock_);
+
+    int num = 0;
+    _dia("load_db_prof_script: start");
+    if(cfgapi.getRoot().exists("script_profiles")) {
+        num = cfgapi.getRoot()["script_profiles"].getLength();
+        _dia("load_db_prof_script: found %d objects",num);
+
+        Setting& curr_set = cfgapi.getRoot()["script_profiles"];
+
+        for( int i = 0; i < num; i++) {
+            std::string name;
+            auto* a = new ProfileScript;
+
+            Setting& cur_object = curr_set[i];
+
+            if (  ! cur_object.getName() ) {
+                _dia("load_db_prof_script: unnamed object index %d: not ok", i);
+
+                delete a;
+                continue;
+            }
+
+            name = cur_object.getName();
+
+            _dia("load_db_prof_script: processing '%s'",name.c_str());
+
+            a->prof_name = name;
+            cur_object.lookupValue("type", a->script_type);
+            cur_object.lookupValue("script-file",a->module_path);
+
+            db_prof_script[name] = a;
+        }
+    }
+
+    return num;
+}
+
+
+
 
 int CfgFactory::load_db_prof_auth () {
     std::lock_guard<std::recursive_mutex> l(lock_);
@@ -1377,6 +1445,18 @@ int CfgFactory::cleanup_db_prof_alg_dns () {
     return r;
 }
 
+int CfgFactory::cleanup_db_prof_script () {
+    std::lock_guard<std::recursive_mutex> l(lock_);
+
+    int r = db_prof_script.size();
+    for(auto& t: db_prof_script) {
+        ProfileScript* c = t.second;
+        delete c;
+    }
+    db_prof_script.clear();
+
+    return r;
+}
 
 
 int CfgFactory::cleanup_db_prof_auth () {
@@ -1581,11 +1661,56 @@ bool CfgFactory::prof_alg_dns_apply (baseHostCX *originator, baseProxy *new_prox
         }
         
     } else {
-        _not("Connection %s cannot be inspected by ALGs",originator->full_name('L').c_str());
+        _not("CfgFactory::prof_alg_dns_apply: connection %s is not MitmHost",originator->full_name('L').c_str());
     }    
     
     return ret;
 }
+
+
+bool CfgFactory::prof_script_apply (baseHostCX *originator, baseProxy *new_proxy, ProfileScript *p_script) {
+
+    auto log = logan_lite("policy.rule");
+
+    auto* mitm_originator = dynamic_cast<AppHostCX*>(originator);
+    auto* mh = dynamic_cast<MitmHostCX*>(mitm_originator);
+
+    bool ret = false;
+
+    if(mh != nullptr) {
+
+        if(p_script) {
+
+            if(p_script->script_type == ProfileScript::ST_PYTHON) {
+                #ifdef USE_PYHON
+                auto* n = new PythonInspector();
+                if(n->l4_prefilter(mh)) {
+                    mh->inspectors_.push_back(n);
+                    ret = true;
+                }
+                else {
+                    delete n;
+                }
+                #else
+                _err("CfgFactory::prof_script_apply: python scripting not supported by this build");
+                #endif
+            }
+            else if(p_script->script_type == ProfileScript::ST_GOLANG) {
+                _err("CfgFactory::prof_script_apply: golang scripting not yet implemented");
+            }
+            else
+            {
+                _err("CfgFactory::prof_script_apply: unknown script type");
+            }
+        }
+
+    } else {
+        _not("CfgFactory::prof_script_apply: connection %s is not MitmHost",originator->full_name('L').c_str());
+    }
+
+    return ret;
+}
+
 
 int CfgFactory::policy_apply (baseHostCX *originator, baseProxy *proxy) {
 

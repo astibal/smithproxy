@@ -40,6 +40,7 @@
 #define SMITH_VERSION "0.9.1"
 #define SMITH_DEVEL    1
 
+#define USE_PYTHON
 
 extern bool cfg_openssl_mem_dbg;
 extern bool cfg_mtrace_enable;

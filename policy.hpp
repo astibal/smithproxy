@@ -63,6 +63,7 @@ struct ProfileContent;
 struct ProfileTls;
 struct ProfileAuth;
 struct ProfileAlgDns;
+struct ProfileScript;
 
 
 struct ProfileList {
@@ -71,6 +72,7 @@ struct ProfileList {
        ProfileTls* profile_tls = nullptr;
        ProfileAuth* profile_auth = nullptr;
        ProfileAlgDns* profile_alg_dns = nullptr;
+       ProfileScript* profile_script = nullptr;
 };
 
 class PolicyRule : public ProfileList , public socle::sobject {
@@ -282,6 +284,14 @@ struct ProfileAlgDns {
     bool randomize_id = false;
     bool cached_responses = false;
     std::string prof_name;
+};
+
+struct ProfileScript {
+    std::string prof_name;
+    std::string module_path;
+
+    using script_t = enum { ST_PYTHON = 0, ST_GOLANG = 1};
+    int script_type = -1;
 };
 
 #endif

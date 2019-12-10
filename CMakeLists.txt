@@ -101,7 +101,7 @@ add_executable(smithproxy
 
         ext/cidr.cpp
         ext/cxxopts.hpp
-        authfactory.hpp authfactory4.cpp sxsignature.hpp)
+        authfactory.hpp authfactory4.cpp sxsignature.hpp pyinspector.hpp)
 add_executable(smithd ${SMITHD_DIR}/smithd.cpp ${SMITHD_DIR}/smithdcx.cpp daemon.cpp smithlog.cpp dns.cpp ext/cidr.cpp addrobj.cpp)
 add_executable(smithdc ${SMITHD_DIR}/smithdc.cpp ${SMITHD_DIR}/smithdcx.cpp smithlog.cpp)
 
@@ -121,8 +121,11 @@ if (LIBCLI_FOUND)
   target_link_libraries (smithd ${LIBCLI_LIBRARY})
 endif (LIBCLI_FOUND)
 
+find_package(PythonLibs 3 REQUIRED)
+include_directories(${PYTHON_INCLUDE_DIRS})
 
-target_link_libraries(smithproxy socle_lib pthread ssl crypto rt unwind)
+
+target_link_libraries(smithproxy socle_lib pthread ssl crypto rt unwind ${PYTHON_LIBRARIES})
 target_link_libraries(smithd socle_lib pthread ssl crypto rt unwind)
 target_link_libraries(smithdc socle_lib pthread ssl crypto rt unwind)
 
