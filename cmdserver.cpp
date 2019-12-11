@@ -741,7 +741,49 @@ int cli_diag_ssl_crl_stats(struct cli_def *cli, const char *command, char *argv[
 
     return CLI_OK;
 }
+int cli_diag_ssl_verify_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
+
+    mp::vector<std::string> to_delete;
+    mp::stringstream what;
+
+    for(int i = 0 ; i < argc ; i++) {
+        to_delete.push_back(std::string(argv[i]));
+        what << std::string(argv[i]);
+    }
+
+    if(to_delete.empty()) {
+        what << "*";
+    }
+
+    cli_print(cli, "request to clear ocsp cache from: %s", what.str().c_str());
+    std::stringstream out;
+
+    std::lock_guard<std::recursive_mutex> l_(SSLFactory::ocsp_result_cache.getlock());
+    if(to_delete.empty()) {
+        SSLFactory::ocsp_result_cache.clear();
+    }
+    else {
+
+        mp::vector<std::string> to_delete_keys;
+
+        for(auto& i: SSLFactory::ocsp_result_cache.cache()) {
+            for(auto const& k: to_delete)
+            if(i.first.find(k,0) == 0) {
+                to_delete_keys.push_back(i.first);
+            }
+        }
+
+        for(auto const& k: to_delete_keys) {
+            out << "erasing key: " << k << "\n";
+            SSLFactory::ocsp_result_cache.erase(k);
+        }
+    }
+
+    cli_print(cli, "%s", out.str().c_str());
+
+    return CLI_OK;
+}
 
 
 int cli_diag_ssl_verify_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
@@ -759,7 +801,7 @@ int cli_diag_ssl_verify_list(struct cli_def *cli, const char *command, char *arg
             long ttl = 0;
             if (cached_result) {
                 ttl = cached_result->expired_at() - ::time(nullptr);
-                out << string_format("    %s, ttl=%d", cn.c_str(), ttl);
+                out << string_format("    %s, ttl=%d, status=%d", cn.c_str(), ttl, cached_result->value());
 
                 if (ttl <= 0) {
                     out << "  *expired*";
@@ -3456,6 +3498,7 @@ void client_thread(int client_socket) {
                 diag_ssl_verify = cli_register_command(cli, diag_ssl, "verify", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose certificate verification status cache");
                     cli_register_command(cli, diag_ssl_verify, "list", cli_diag_ssl_verify_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list certificate verification status cache content");
                     cli_register_command(cli, diag_ssl_verify, "stats", cli_diag_ssl_verify_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "certificate verification status cache stats");
+                    cli_register_command(cli, diag_ssl_verify, "clear", cli_diag_ssl_verify_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clear certificate verification cache");
                 diag_ssl_ticket = cli_register_command(cli, diag_ssl, "ticket", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose abbreviated handshake session/ticket cache");
                     cli_register_command(cli, diag_ssl_ticket, "list", cli_diag_ssl_ticket_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list abbreviated handshake session/ticket cache");
                     cli_register_command(cli, diag_ssl_ticket, "stats", cli_diag_ssl_ticket_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "abbreviated handshake session/ticket cache stats");
