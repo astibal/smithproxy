@@ -2,3 +2,4 @@
 	path = socle
 	url = ssh://git@github.com/astibal/socle
 	branch = master
+	update = merge
