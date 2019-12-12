@@ -759,15 +759,15 @@ int cli_diag_ssl_verify_clear(struct cli_def *cli, const char *command, char *ar
     cli_print(cli, "request to clear ocsp cache from: %s", what.str().c_str());
     std::stringstream out;
 
-    std::lock_guard<std::recursive_mutex> l_(SSLFactory::ocsp_result_cache.getlock());
+    std::lock_guard<std::recursive_mutex> l_(SSLFactory::factory().verify_cache.getlock());
     if(to_delete.empty()) {
-        SSLFactory::ocsp_result_cache.clear();
+        SSLFactory::factory().verify_cache.clear();
     }
     else {
 
         mp::vector<std::string> to_delete_keys;
 
-        for(auto& i: SSLFactory::ocsp_result_cache.cache()) {
+        for(auto& i: SSLFactory::factory().verify_cache.cache()) {
             for(auto const& k: to_delete)
             if(i.first.find(k,0) == 0) {
                 to_delete_keys.push_back(i.first);
@@ -776,7 +776,7 @@ int cli_diag_ssl_verify_clear(struct cli_def *cli, const char *command, char *ar
 
         for(auto const& k: to_delete_keys) {
             out << "erasing key: " << k << "\n";
-            SSLFactory::ocsp_result_cache.erase(k);
+            SSLFactory::factory().verify_cache.erase(k);
         }
     }
 
@@ -794,10 +794,10 @@ int cli_diag_ssl_verify_list(struct cli_def *cli, const char *command, char *arg
     out << "Verify status list:\n\n";
 
     {
-        std::lock_guard<std::recursive_mutex> l_(SSLFactory::ocsp_result_cache.getlock());
-        for (auto const& x: SSLFactory::ocsp_result_cache.cache()) {
+        std::lock_guard<std::recursive_mutex> l_(SSLFactory::factory().verify_cache.getlock());
+        for (auto const& x: SSLFactory::factory().verify_cache.cache()) {
             std::string cn = x.first;
-            SSLFactory::expiring_ocsp_result *cached_result = x.second;
+            SSLFactory::expiring_verify_result *cached_result = x.second;
             long ttl = 0;
             if (cached_result) {
                 ttl = cached_result->expired_at() - ::time(nullptr);
@@ -823,12 +823,13 @@ int cli_diag_ssl_verify_stats(struct cli_def *cli, const char *command, char *ar
 
     std::stringstream ss;
     {
-        std::lock_guard<std::recursive_mutex> l_(SSLFactory::ocsp_result_cache.getlock());
+        auto& verify_cache = SSLFactory::factory().verify_cache;
+        std::lock_guard<std::recursive_mutex> l_(verify_cache.getlock());
 
-        int n_sz_cache = SSLFactory::ocsp_result_cache.cache().size();
-        int n_max_cache = SSLFactory::ocsp_result_cache.max_size();
-        bool n_autorem = SSLFactory::ocsp_result_cache.auto_delete();
-        std::string n_name = SSLFactory::ocsp_result_cache.name();
+        int n_sz_cache  = verify_cache.cache().size();
+        int n_max_cache = verify_cache.max_size();
+        bool n_autorem  = verify_cache.auto_delete();
+        std::string n_name = verify_cache.name();
 
 
         ss << string_format("'%s' cache stats: \n", n_name.c_str());
