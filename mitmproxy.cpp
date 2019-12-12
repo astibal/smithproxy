@@ -548,9 +548,9 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
     auto* scom = dynamic_cast<SSLCom*>(mh->peercom());
     if(scom && scom->opt_failed_certcheck_replacement) {
         if(!(
-            scom->verify_get() == SSLCom::VERIFY_OK
+            scom->verify_get() == SSLCom::VRF_OK
              ||
-            scom->verify_get() == ( SSLCom::VERIFY_OK | SSLCom::CLIENT_CERT_RQ )
+            scom->verify_get() == ( SSLCom::VRF_OK | SSLCom::VRF_CLIENT_CERT_RQ )
             )) {
             
             bool whitelist_found = false;
@@ -614,7 +614,7 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
                     handle_replacement_ssl(mh);
                     
                 } 
-                else if(scom->verify_check(SSLCom::CLIENT_CERT_RQ) && scom->opt_client_cert_action > 0) {
+                else if(scom->verify_check(SSLCom::VRF_CLIENT_CERT_RQ) && scom->opt_client_cert_action > 0) {
 
                     _dia(" -> client-cert request:  opt_client_cert_action=%d", scom->opt_client_cert_action);
 
@@ -1129,19 +1129,19 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
 
 std::string verify_flag_string(int code) {
     switch(code) {
-        case SSLCom::VERIFY_OK:
+        case SSLCom::VRF_OK:
             return "Certificate verification successful";
-        case SSLCom::SELF_SIGNED:
+        case SSLCom::VRF_SELF_SIGNED:
             return "Target certificate is self-signed";
-        case SSLCom::SELF_SIGNED_CHAIN:
+        case SSLCom::VRF_SELF_SIGNED_CHAIN:
             return "Server certificate's chain contains self-signed, untrusted CA certificate";
-        case SSLCom::UNKNOWN_ISSUER:
+        case SSLCom::VRF_UNKNOWN_ISSUER:
             return "Server certificate is issued by untrusted certificate authority";
-        case SSLCom::CLIENT_CERT_RQ:
+        case SSLCom::VRF_CLIENT_CERT_RQ:
             return "Server is asking client for a certificate";
-        case SSLCom::REVOKED:
+        case SSLCom::VRF_REVOKED:
             return "Server's certificate is REVOKED";
-        case SSLCom::HOSTNAME_FAILED:
+        case SSLCom::VRF_HOSTNAME_FAILED:
             return "Client application asked for SNI server is not offering";
         default:
             return "";
@@ -1149,25 +1149,25 @@ std::string verify_flag_string(int code) {
 }
 
 void MitmProxy::set_replacement_msg_ssl(SSLCom* scom) {
-    if(scom && scom->verify_get() != SSLCom::VERIFY_OK) {
+    if(scom && scom->verify_get() != SSLCom::VRF_OK) {
 
-        if(scom->verify_check(SSLCom::SELF_SIGNED)) {
-            replacement_msg += "(ssl:" + verify_flag_string(SSLCom::SELF_SIGNED) + ")";
+        if(scom->verify_check(SSLCom::VRF_SELF_SIGNED)) {
+            replacement_msg += "(ssl:" + verify_flag_string(SSLCom::VRF_SELF_SIGNED) + ")";
         }
-        if(scom->verify_check(SSLCom::SELF_SIGNED_CHAIN)) {
-            replacement_msg += "(ssl:" + verify_flag_string(SSLCom::SELF_SIGNED_CHAIN) + ")";
+        if(scom->verify_check(SSLCom::VRF_SELF_SIGNED_CHAIN)) {
+            replacement_msg += "(ssl:" + verify_flag_string(SSLCom::VRF_SELF_SIGNED_CHAIN) + ")";
         }
-        if(scom->verify_check(SSLCom::UNKNOWN_ISSUER)) {
-            replacement_msg += "(ssl:" + verify_flag_string(SSLCom::UNKNOWN_ISSUER) + ")";
+        if(scom->verify_check(SSLCom::VRF_UNKNOWN_ISSUER)) {
+            replacement_msg += "(ssl:" + verify_flag_string(SSLCom::VRF_UNKNOWN_ISSUER) + ")";
         }
-        if(scom->verify_check(SSLCom::CLIENT_CERT_RQ)) {
-            replacement_msg += "(ssl:" + verify_flag_string(SSLCom::CLIENT_CERT_RQ) + ")";
+        if(scom->verify_check(SSLCom::VRF_CLIENT_CERT_RQ)) {
+            replacement_msg += "(ssl:" + verify_flag_string(SSLCom::VRF_CLIENT_CERT_RQ) + ")";
         }
-        if(scom->verify_check(SSLCom::REVOKED)) {
-            replacement_msg += "(ssl:" + verify_flag_string(SSLCom::REVOKED) + ")";
+        if(scom->verify_check(SSLCom::VRF_REVOKED)) {
+            replacement_msg += "(ssl:" + verify_flag_string(SSLCom::VRF_REVOKED) + ")";
         }
-        if(scom->verify_check(SSLCom::HOSTNAME_FAILED)) {
-            replacement_msg += "(ssl:" + verify_flag_string(SSLCom::HOSTNAME_FAILED) + ")";
+        if(scom->verify_check(SSLCom::VRF_HOSTNAME_FAILED)) {
+            replacement_msg += "(ssl:" + verify_flag_string(SSLCom::VRF_HOSTNAME_FAILED) + ")";
         }
     }
 }
@@ -1176,34 +1176,34 @@ std::string MitmProxy::replacement_ssl_verify_detail(SSLCom* scom) {
 
     std::stringstream ss;
     if(scom) {
-        if (scom->verify_get() != SSLCom::VERIFY_OK) {
+        if (scom->verify_get() != SSLCom::VRF_OK) {
             bool is_set = false;
 
-            if (scom->verify_check(SSLCom::SELF_SIGNED)) {
-                ss << "<p><h3 class=\"fg-red\">Reason:</h3> " << verify_flag_string(SSLCom::SELF_SIGNED) << ".</p>";
+            if (scom->verify_check(SSLCom::VRF_SELF_SIGNED)) {
+                ss << "<p><h3 class=\"fg-red\">Reason:</h3> " << verify_flag_string(SSLCom::VRF_SELF_SIGNED) << ".</p>";
                 is_set = true;
             }
-            if (scom->verify_check(SSLCom::SELF_SIGNED_CHAIN)) {
-                ss << "<p><h3 class=\"fg-red\">Reason:</h3> " << verify_flag_string(SSLCom::SELF_SIGNED_CHAIN)
+            if (scom->verify_check(SSLCom::VRF_SELF_SIGNED_CHAIN)) {
+                ss << "<p><h3 class=\"fg-red\">Reason:</h3> " << verify_flag_string(SSLCom::VRF_SELF_SIGNED_CHAIN)
                    << ".</p>";
                 is_set = true;
             }
-            if (scom->verify_check(SSLCom::UNKNOWN_ISSUER)) {
-                ss << "<p><h class=\"fg-red\"3>Reason:</h3>" << verify_flag_string(SSLCom::UNKNOWN_ISSUER) << ".</p>";
+            if (scom->verify_check(SSLCom::VRF_UNKNOWN_ISSUER)) {
+                ss << "<p><h class=\"fg-red\"3>Reason:</h3>" << verify_flag_string(SSLCom::VRF_UNKNOWN_ISSUER) << ".</p>";
                 is_set = true;
             }
-            if (scom->verify_check(SSLCom::CLIENT_CERT_RQ)) {
-                ss << "<p><h3 class=\"fg-red\">Reason:</h3>" << verify_flag_string(SSLCom::CLIENT_CERT_RQ) << ".<p>";
+            if (scom->verify_check(SSLCom::VRF_CLIENT_CERT_RQ)) {
+                ss << "<p><h3 class=\"fg-red\">Reason:</h3>" << verify_flag_string(SSLCom::VRF_CLIENT_CERT_RQ) << ".<p>";
                 is_set = true;
             }
-            if (scom->verify_check(SSLCom::REVOKED)) {
-                ss << "<p><h3 class=\"fg-red\">Reason:</h3>" << verify_flag_string(SSLCom::REVOKED) << ". "
+            if (scom->verify_check(SSLCom::VRF_REVOKED)) {
+                ss << "<p><h3 class=\"fg-red\">Reason:</h3>" << verify_flag_string(SSLCom::VRF_REVOKED) << ". "
                                                                                                        "This is a serious issue, it's highly recommended to not continue "
                                                                                                        "to this page.</p>";
                 is_set = true;
             }
-            if (scom->verify_check(SSLCom::HOSTNAME_FAILED)) {
-                ss << "<p><h3 class=\"fg-red\">Reason:</h3>" << verify_flag_string(SSLCom::HOSTNAME_FAILED) << ".</p>";
+            if (scom->verify_check(SSLCom::VRF_HOSTNAME_FAILED)) {
+                ss << "<p><h3 class=\"fg-red\">Reason:</h3>" << verify_flag_string(SSLCom::VRF_HOSTNAME_FAILED) << ".</p>";
                 is_set = true;
             }
 
