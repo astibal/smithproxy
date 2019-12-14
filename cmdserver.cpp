@@ -2490,20 +2490,20 @@ void cfg_generate_cli_hints(Setting& setting, std::vector<std::string>* this_lev
 }
 
 
-cli_command* cfg_generate_cli_callbacks(Setting& s, struct cli_def* cli, cli_command* cli_parent,
+std::vector<cli_command*> cfg_generate_cli_callbacks(int mode, Setting& this_setting, struct cli_def* cli, cli_command* cli_parent,
             int(*set_cb)(struct cli_def*, const char*, char*[], int),
             int(*config_cb)(struct cli_def*, const char*, char*[], int),
                     const char* context_help) {
 
     if(! cli_parent)
-        return nullptr;
+        return {};
 
     std::vector<std::string> here_name, next_name;
     std::vector<unsigned int> here_index, next_index;
 
     cli_print(cli, "calling cfg_generate_cli_hints");
 
-    cfg_generate_cli_hints(s, &here_name, &here_index, &next_name, &next_index);
+    cfg_generate_cli_hints(this_setting, &here_name, &here_index, &next_name, &next_index);
 
     cli_print(cli, "hint results: named: %d, indexed %d, next-level named: %d, next-level indexed: %d",
               (int)here_name.size(), (int)here_index.size(),
@@ -2512,8 +2512,10 @@ cli_command* cfg_generate_cli_callbacks(Setting& s, struct cli_def* cli, cli_com
     if( (! here_index.empty() ) || (! here_name.empty()) ) {
 
         std::string name;
-        if(s.getName()) {
-            cli_command* cli_here = cli_register_command(cli, cli_parent, s.getName(), set_cb, PRIVILEGE_PRIVILEGED, MODE_CONFIG, "modify variables");
+        if(this_setting.getName()) {
+            //cli_command* cli_here = cli_register_command(cli, cli_parent, this_setting.getName(), set_cb, PRIVILEGE_PRIVILEGED, mode, "modify variables");
+
+            std::vector<cli_command*> ret;
 
             for( const auto& here_n: here_name) {
 
@@ -2532,15 +2534,16 @@ cli_command* cfg_generate_cli_callbacks(Setting& s, struct cli_def* cli, cli_com
                     help = string_format("modify '%s'", here_n.c_str());
                 }
 
-                cli_register_command(cli, cli_here, here_n.c_str(), set_cb, PRIVILEGE_PRIVILEGED, MODE_CONFIG,
+                auto* ret_single = cli_register_command(cli, cli_parent, here_n.c_str(), set_cb, PRIVILEGE_PRIVILEGED, mode,
                                      help.c_str() );
+                ret.push_back(ret_single);
             }
 
-            return cli_here;
+            return ret;
         }
     }
 
-    return nullptr;
+    return {};
 }
 
 
@@ -2657,6 +2660,8 @@ int cli_uni_set_cb(std::string confpath, struct cli_def *cli, const char *comman
                     cli_print(cli, "change will be visible in show config, but not written to mapped variables");
                     cli_print(cli, "therefore 'save config' won't write them to file.");
                 }
+            } else {
+                cli_print(cli, "error setting value");
             }
 
         } else {
@@ -2681,29 +2686,23 @@ int cli_uni_set_cb(std::string confpath, struct cli_def *cli, const char *comman
 
 
 int cli_config_setting_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
-    cli_set_configmode(cli, MODE_CONFIG, "settings");
 
     return cli_uni_set_cb("settings", cli, command, argv, argc);
 }
 
 int cli_config_setting_auth_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
-    cli_set_configmode(cli, MODE_CONFIG, "settings.auth");
 
-    return cli_uni_set_cb("settings.auth", cli, command, argv, argc);
+    return cli_uni_set_cb("settings.auth_portal", cli, command, argv, argc);
 }
 
 int cli_config_setting_cli_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
-
-    cli_set_configmode(cli, MODE_CONFIG, "settings.cli");
 
     return cli_uni_set_cb("settings.cli", cli, command, argv, argc);
 }
 
 int cli_config_setting_socks_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
-    cli_set_configmode(cli, MODE_CONFIG, "settings.cli");
-
-    return cli_uni_set_cb("settings.cli", cli, command, argv, argc);
+    return cli_uni_set_cb("settings.socks", cli, command, argv, argc);
 }
 
 // index < 0 means all
@@ -3372,27 +3371,58 @@ struct cli_ext : public cli_def {
 };
 
 
-void cli_generate_set_settings(cli_def* cli, cli_command* set_settings) {
+#define MODE_EDIT_SETTINGS  40000
+#define MODE_EDIT_SETTINGS_AUTH  40001
+#define MODE_EDIT_SETTINGS_CLI  40002
+#define MODE_EDIT_SETTINGS_SOCKS  40003
+
+
+#define CONFIG_MODE_DEF(fn, mode, name) \
+                                        \
+int fn(struct cli_def *cli, const char *command, char *argv[], int argc) { \
+    cli_print(cli, "entering " name ", mode %d", mode);                                      \
+                                                                           \
+    cli_set_configmode(cli, mode, name );                        \
+                                                                 \
+    return CLI_OK;                                               \
+}    \
+
+CONFIG_MODE_DEF(cli_conf_edit_settings, MODE_EDIT_SETTINGS,"settings");
+CONFIG_MODE_DEF(cli_conf_edit_settings_auth, MODE_EDIT_SETTINGS_AUTH,"auth_portal");
+CONFIG_MODE_DEF(cli_conf_edit_settings_cli, MODE_EDIT_SETTINGS_AUTH,"cli");
+CONFIG_MODE_DEF(cli_conf_edit_settings_socks, MODE_EDIT_SETTINGS_AUTH,"socks");
+
+
+
+void cli_generate_set_settings(int mode, cli_def* cli, cli_command* cli_parent) {
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
+
+    auto edit = cli_register_command(cli, cli_parent, "edit", nullptr, PRIVILEGE_PRIVILEGED, mode, "edit settings sub-items");
+        auto edit_auth = cli_register_command(cli, edit, "auth_portal", cli_conf_edit_settings_auth, PRIVILEGE_PRIVILEGED, mode, "edit auth_portal settings");
+        auto edit_cli = cli_register_command(cli, edit, "cli", cli_conf_edit_settings_cli, PRIVILEGE_PRIVILEGED, mode, "edit cli settings");
+        auto edit_socks = cli_register_command(cli, edit, "socks", cli_conf_edit_settings_socks, PRIVILEGE_PRIVILEGED, mode, "edit socks settings");
 
 
     if (CfgFactory::cfg_root()["settings"].exists("auth_portal")) {
-        cfg_generate_cli_callbacks(CfgFactory::cfg_root()["settings"]["auth_portal"], cli,
-                                                       set_settings,
+        auto set_cmd = cli_register_command(cli, nullptr, "set", nullptr, PRIVILEGE_PRIVILEGED, MODE_EDIT_SETTINGS_AUTH, "set auth portal variables");
+        cfg_generate_cli_callbacks(MODE_EDIT_SETTINGS_AUTH, CfgFactory::cfg_root()["settings"]["auth_portal"], cli,
+                                   set_cmd,
                                                        cli_config_setting_auth_cb,
                                                        cli_config_setting_auth_cb, "settings/auth_portal");
     }
 
     if (CfgFactory::cfg_root()["settings"].exists("cli")) {
-        cfg_generate_cli_callbacks(CfgFactory::cfg_root()["settings"]["cli"], cli,
-                                                      set_settings,
+        auto set_cmd = cli_register_command(cli, nullptr, "set", nullptr, PRIVILEGE_PRIVILEGED, MODE_EDIT_SETTINGS_CLI, "set CLI variables");
+        cfg_generate_cli_callbacks(MODE_EDIT_SETTINGS_CLI, CfgFactory::cfg_root()["settings"]["cli"], cli,
+                                   set_cmd,
                                                       cli_config_setting_cli_cb,
                                                       cli_config_setting_cli_cb, "settings/cli");
     }
 
     if (CfgFactory::cfg_root()["settings"].exists("socks")) {
-        cfg_generate_cli_callbacks(CfgFactory::cfg_root()["settings"]["socks"], cli,
-                                                      set_settings,
+        auto set_cmd = cli_register_command(cli, nullptr, "set", nullptr, PRIVILEGE_PRIVILEGED, MODE_EDIT_SETTINGS_SOCKS, "set SOCKS variables");
+        cfg_generate_cli_callbacks(MODE_EDIT_SETTINGS_SOCKS, CfgFactory::cfg_root()["settings"]["socks"], cli,
+                                   set_cmd,
                                                       cli_config_setting_socks_cb,
                                                       cli_config_setting_socks_cb, "settings/socks");
     }
@@ -3401,6 +3431,9 @@ void cli_generate_set_settings(cli_def* cli, cli_command* set_settings) {
 
 
 void client_thread(int client_socket) {
+
+        auto log = logan::create("service");
+
         struct cli_command *save;
         struct cli_command *show;
             struct cli_command *show_config;
@@ -3429,9 +3462,6 @@ void client_thread(int client_socket) {
                     struct cli_command *diag_proxy_io;
             struct cli_command *diag_identity;
                 struct cli_command *diag_identity_user;
-
-        struct cli_command *conft_configure;
-            struct cli_command *conft_settings_auth;
 
         struct cli_def *cli;
 
@@ -3574,24 +3604,25 @@ void client_thread(int client_socket) {
 
         // generate dynamically content of config
 
-        conft_configure = cli_register_command(cli, nullptr, "set", nullptr, PRIVILEGE_PRIVILEGED, MODE_CONFIG, "configure smithproxy settings");
-        cli_command* set_settings = nullptr;
-            cli_command* set_settings_auth = nullptr;
-            cli_command* set_settings_cli = nullptr;
-            cli_command* set_settings_socks = nullptr;
 
+    auto conft_edit = cli_register_command(cli, nullptr, "edit", nullptr, PRIVILEGE_PRIVILEGED, MODE_CONFIG, "configure smithproxy settings");
 
-        if( CfgFactory::cfg_root().exists("settings") ) {
+    if( CfgFactory::cfg_root().exists("settings") ) {
+
+        auto conft_edit_settigns = cli_register_command(cli, conft_edit, "settings", cli_conf_edit_settings, PRIVILEGE_PRIVILEGED, MODE_CONFIG, "edit settings");
+
+        auto set_cmd = cli_register_command(cli, nullptr, "set", nullptr, PRIVILEGE_PRIVILEGED, MODE_EDIT_SETTINGS, "set variables in settings");
+
             std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
-            set_settings = cfg_generate_cli_callbacks(CfgFactory::cfg_root()["settings"], cli, conft_configure,
-                                       cli_config_setting_cb,
-                                       cli_config_setting_cb, "settings");
-            if(set_settings){
-                cli_generate_set_settings(cli, set_settings);
+            std::vector<cli_command*> set_settings = cfg_generate_cli_callbacks(MODE_EDIT_SETTINGS, CfgFactory::cfg_root()["settings"], cli, set_cmd,
+                                                                                cli_config_setting_cb,
+                                                                                cli_config_setting_cb, "settings");
+
+            if(! set_settings.empty()){
+                cli_generate_set_settings(MODE_EDIT_SETTINGS, cli, nullptr);
             }
         }
-
 
 
         // Pass the connection off to libcli
