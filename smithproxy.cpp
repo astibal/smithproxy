@@ -40,6 +40,7 @@
 #include <smithproxy.hpp>
 #include <cmdserver.hpp>
 #include <authfactory.hpp>
+#include "sigfactory.hpp"
 
 volatile int SmithProxy::cnt_terminate = 0;
 
@@ -520,8 +521,8 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
 
 
         if(!reload)  {
-            load_signatures(CfgFactory::cfg_obj(),"detection_signatures",sigs_detection);
-            load_signatures(CfgFactory::cfg_obj(),"starttls_signatures",sigs_starttls);
+            load_signatures(CfgFactory::cfg_obj(),"detection_signatures", SigFactory::get().detection());
+            load_signatures(CfgFactory::cfg_obj(),"starttls_signatures", SigFactory::get().tls());
         }
 
         CfgFactory::get().load_settings();

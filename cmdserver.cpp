@@ -72,6 +72,7 @@
 #include <dns.hpp>
 #include <inspectors.hpp>
 #include <authfactory.hpp>
+#include <sigfactory.hpp>
 
 
 #include "socle_version.h"
@@ -2097,9 +2098,9 @@ int save_config_sig(Config& ex, const std::string& sigset) {
     int n_saved = 0;
 
     auto map_sigsets = [](std::string s) {
-        if(s == "starttls_signatures") return sigs_starttls;
+        if(s == "starttls_signatures") return SigFactory::get().tls();
 
-        return sigs_detection;
+        return SigFactory::get().detection();
     };
 
     const std::vector<duplexFlowMatch*>& target_ref = map_sigsets(sigset);
@@ -2116,6 +2117,7 @@ int save_config_sig(Config& ex, const std::string& sigset) {
         if(my_sig) {
             item.add("cat", Setting::TypeString) = my_sig->category;
             item.add("side", Setting::TypeString) = my_sig->sig_side;
+            item.add("severity", Setting::TypeInt) = my_sig->severity;
         }
 
         if( ! sig->sig_chain().empty() ) {

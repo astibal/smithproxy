@@ -46,10 +46,6 @@
 #include <inspectors.hpp>
 #include <sxsignature.hpp>
 
-extern std::vector<duplexFlowMatch*> sigs_starttls;
-extern std::vector<duplexFlowMatch*> sigs_detection;
-
-
 
 class MySSLMitmCom : public baseSSLMitmCom<SSLCom> {
 public:

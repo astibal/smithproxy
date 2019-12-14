@@ -41,11 +41,10 @@
 #include <display.hpp>
 #include <log/logger.hpp>
 #include <cfgapi.hpp>
+#include <sigfactory.hpp>
 
 DEFINE_LOGGING(MitmHostCX)
 
-std::vector<duplexFlowMatch*> sigs_starttls;
-std::vector<duplexFlowMatch*> sigs_detection;
 
 bool MitmHostCX::ask_destroy() {
     error(true);
@@ -119,8 +118,8 @@ void MitmHostCX::load_signatures() {
 
     _deb("MitmHostCX::load_signatures: start");
 
-    make_sig_states(starttls_sensor(),sigs_starttls);
-    make_sig_states(sensor(),sigs_detection);
+    make_sig_states(starttls_sensor(), SigFactory::get().tls() );
+    make_sig_states(sensor(), SigFactory::get().detection());
 
     _deb("MitmHostCX::load_signatures: stop");
 };
