@@ -340,7 +340,7 @@ void SmithProxy::my_usr1 (int param) {
     auto& log = instance().log;
 
     _dia("USR1 signal handler started");
-    _not("reloading policies and its objects !!");
+    _war("reloading configuration (excluding signatures)");
     SmithProxy::instance().load_config(CfgFactory::get().config_file,true);
     _dia("USR1 signal handler finished");
 }

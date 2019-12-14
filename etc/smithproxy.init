@@ -94,6 +94,10 @@ case "$1" in
     python3 /usr/share/smithproxy/infra/smithdog.py status
     ;;
   reapply)
+    if [ -z $tenant_id ]; then
+        tenant_id="0"
+    fi
+
     echo "Reloading smithproxy policies $tenant_id"
     kill -s USR1 `cat /var/run/smithproxy.${tenant_id}.pid`
     ;;

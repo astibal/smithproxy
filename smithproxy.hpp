@@ -65,6 +65,8 @@ class SmithProxy {
 
     explicit SmithProxy() : tenant_index_(0), tenant_name_("default") {
         log.level(WAR);
+        reload_handler_ = my_usr1;
+        terminate_handler_ = my_terminate;
     };
     virtual ~SmithProxy ();
 
