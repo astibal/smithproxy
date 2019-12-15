@@ -64,6 +64,7 @@ socksServerCX::socksServerCX(baseCom* c, unsigned int s) : baseHostCX(c,s) {
 socksServerCX::~socksServerCX() {
     delete left;
     delete right;
+    delete async_dns_query;
 }
 
 
@@ -302,10 +303,9 @@ int socksServerCX::process_socks_request() {
                         if(dns_sock) {
                             _dia("dns request sent: %s", fqdn.c_str());
 
-                            async_dns_socket.set(dns_sock, this, com());
-                            async_dns_socket.opening();
-
-                            com()->unset_monitor(socket());
+                            using std::placeholders::_1;
+                            async_dns_query = new AsyncDnsQuery(this, std::bind(&socksServerCX::dns_response_callback, this, _1));
+                            async_dns_query->tap(dns_sock);
 
                             state_ = socks5_state::DNS_QUERY_SENT;
                         } else {
@@ -544,48 +544,33 @@ void socksServerCX::pre_write() {
     }
 }
 
-void socksServerCX::handle_event (baseCom *xcom) {
-    // we are handling only DNS, so this is easy
-    if(async_dns_socket.socket_ > 0) {
 
+void socksServerCX::dns_response_callback(std::pair<DNS_Response *, int>& rresp) {
 
-        if(com()->in_idleset(async_dns_socket.socket_)) {
-            _war("handle_event: idling dns socket %d, closing", async_dns_socket.socket_);
-            error(true);
+    DNS_Response* resp = rresp.first;
+    int red = rresp.second;
+    state_ = socks5_state::DNS_RESP_RECV;
 
-            return;
-        }
-
-        // timeout is zero - we won't wait
-        std::pair<DNS_Response *, int> rresp = DNSFactory::get().recv_dns_response(async_dns_socket.socket_,0);
-        DNS_Response* resp = rresp.first;
-        int red = rresp.second;
-        state_ = socks5_state::DNS_RESP_RECV;
-
-        if(red <= 0) {
-            _deb("handle_event: socket read returned %d",red);
-            error(true);
-            delete resp;
-        } else {
-            _deb("handle_event: OK - socket read returned %d",red);
-            if(process_dns_response(resp)) {
-                _deb("handle_event: OK, done");
-            } else {
-                _err("handle_event: processing DNS response failed.");
-            }
-        }
-
-
-        // at any rate, we got all we need. Unmonitor, unhandle and close socket
-        async_dns_socket.closing();
-
+    if(red <= 0) {
+        _deb("handle_event: socket read returned %d",red);
+        error(true);
+        delete resp;
     } else {
-        _war("handle_event: should not be here. Socket %d, async enabled: %d", async_dns_socket.socket_, async_dns);
+        _deb("handle_event: OK - socket read returned %d",red);
+        if(process_dns_response(resp)) {
+            _deb("handle_event: OK, done");
+        } else {
+            _err("handle_event: processing DNS response failed.");
+        }
     }
-
 
     //provoke proxy to act.
     com()->set_monitor(socket());
     com()->set_write_monitor(socket());
+}
+
+
+void socksServerCX::handle_event (baseCom *xcom) {
+
 }
 

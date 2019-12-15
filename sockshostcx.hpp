@@ -46,6 +46,7 @@
 #include <hostcx.hpp>
 #include <tcpcom.hpp>
 #include <sslmitmcom.hpp>
+#include <asyncdns.hpp>
 
 typedef enum class socks5_state_ { INIT=1, HELLO_SENT, WAIT_REQUEST, REQ_RECEIVED, WAIT_POLICY, POLICY_RECEIVED, REQRES_SENT, DNS_QUERY_SENT=15, DNS_RESP_RECV, HANDOFF=31 , ZOMBIE=255 } socks5_state;
 typedef enum class socks5_request_error_ { NONE=0, UNSUPPORTED_VERSION, UNSUPPORTED_ATYPE } socks5_request_error;
@@ -55,85 +56,6 @@ typedef enum class socks5_policy_ { PENDING, ACCEPT, REJECT } socks5_policy;
 typedef enum socks5_message_ { POLICY, UPGRADE } socks5_message;
 
 
-template <class R>
-class IAsyncTask {
-public:
-    enum class state { INIT, RUNNING, FINISHED, TIMEOUT, ERROR };
-
-    virtual R yield() = 0;
-    virtual IAsyncTask::state update() = 0;
-    bool finished() {
-        return update() >= IAsyncTask::FINISHED;
-    }
-
-};
-
-template <class R>
-class AsyncSocket : public IAsyncTask<R>, public epoll_handler {
-public:
-
-    explicit AsyncSocket(baseHostCX* owner) : owner_(owner) {}
-    ~AsyncSocket () override {
-        untap();
-    }
-
-    void tap(int fd) {
-        socket_.set(fd, this, owner_->com(), true);
-        socket_.opening();
-        owner_->com()->unset_monitor(owner_->socket());
-
-        if(pause_owner_) {
-            owner_->io_disabled(true);
-        }
-        if(pause_peer_) {
-            if(owner_->peer())
-                owner_->peer()->io_disabled(true);
-        }
-    }
-
-    void untap() {
-        socket_.closing();
-        owner_->com()->set_monitor(owner_->socket());
-
-        if(pause_owner_) {
-            owner_->io_disabled(false);
-        }
-        if(pause_peer_) {
-            if(owner_->peer())
-                owner_->peer()->io_disabled(false);
-        }
-    }
-    virtual typename IAsyncTask<R>::state update() = 0;
-
-    void handle_event (baseCom *com) override {
-
-        if(com->in_idleset(socket_.socket_)) {
-            state_ = IAsyncTask<R>::TIMEOUT;
-        }
-        // add more termination expressions
-        else {
-            state_ = update();
-        }
-
-
-        if(state_ >= IAsyncTask<R>::FINISHED)
-            untap();
-    }
-
-    void io_pausing(bool owner, bool peer = false) {
-        pause_owner_ = owner;
-        pause_peer_ = peer;
-    }
-
-
-private:
-    typename IAsyncTask<R>::state  state_;
-    baseHostCX* owner_;
-    bool pause_owner_ = false;
-    bool pause_peer_ = false;
-
-    socket_state socket_;
-};
 
 
 
@@ -180,6 +102,7 @@ public:
 
 
     void handle_event (baseCom *com) override;
+    void dns_response_callback(std::pair<DNS_Response *, int>&);
 
 public:
     static bool global_async_dns;
@@ -195,7 +118,9 @@ private:
 
     bool choose_server_ip(std::vector<std::string>& target_ips);
     bool async_dns = true;
-    socket_state async_dns_socket;
+    //socket_state async_dns_socket;
+
+    AsyncDnsQuery* async_dns_query = nullptr;
 
 private:
     // implement advanced logging
