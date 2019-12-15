@@ -176,6 +176,7 @@ public:
     int  apply_tenant_index(std::string& what, int& idx);
 
     bool load_settings ();
+    int  load_debug();
     int  load_db_address ();
     int  load_db_port ();
     int  load_db_proto ();
@@ -186,6 +187,20 @@ public:
     int  load_db_prof_auth ();
     int  load_db_prof_alg_dns ();
     int  load_db_prof_script ();
+
+    int save_address_objects(Config& ex);
+    int save_port_objects(Config& ex);
+    int save_proto_objects(Config& ex);
+    int save_debug(Config& ex);
+    int save_detection_profiles(Config& ex);
+    int save_content_profiles(Config& ex);
+    int save_tls_ca(Config& ex);
+    int save_tls_profiles(Config& ex);
+    int save_alg_dns_profiles(Config& ex);
+    int save_auth_profiles(Config& ex);
+    int save_policy(Config& ex);
+    int save_config();
+
 
     int  cleanup_db_address ();
     int  cleanup_db_port ();
@@ -222,6 +237,14 @@ public:
     ProfileAuth* policy_prof_auth (int index);
     ProfileAlgDns* policy_prof_alg_dns (int index);
     ProfileScript* policy_prof_script (int index);
+
+    #ifndef MEM_DEBUG
+    bool cfg_openssl_mem_dbg = false;
+    bool cfg_mtrace_enable = false;
+    #else
+    bool cfg_openssl_mem_dbg = true;
+        bool cfg_mtrace_enable = true;
+    #endif
 };
 
 struct logging_{

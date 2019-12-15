@@ -125,7 +125,7 @@ void prepare_html_renderer() {
 }
 
 void prepare_mem_debugs() {
-    if(SmithProxy::instance().cfg_openssl_mem_dbg) {
+    if(CfgFactory::get().cfg_openssl_mem_dbg) {
 
         auto& log = DaemonFactory::instance().log;
 
@@ -342,7 +342,7 @@ int main(int argc, char *argv[]) {
         exit(2);
     }
 
-    if(cfg_mtrace_enable) {
+    if(CfgFactory::get().cfg_mtrace_enable) {
 #ifdef MEM_DEBUG
         putenv("MALLOC_TRACE=/var/log/smithproxy_mtrace.log");
         mtrace();

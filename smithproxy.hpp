@@ -132,14 +132,6 @@ public:
     bool load_config(std::string& config_f, bool reload = false);
 
     volatile static int cnt_terminate;
-
-    #ifndef MEM_DEBUG
-        bool cfg_openssl_mem_dbg = false;
-        bool cfg_mtrace_enable = false;
-    #else
-        bool cfg_openssl_mem_dbg = true;
-        bool cfg_mtrace_enable = true;
-    #endif
 };
 
 

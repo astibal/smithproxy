@@ -51,7 +51,7 @@
 
 #include <authfactory.hpp>
 #include <pyinspector.hpp>
-
+#include <sigfactory.hpp>
 
 CfgFactory::CfgFactory(): log(get_log()), args_debug_flag(NON), syslog_level(INF) {
 
@@ -291,24 +291,63 @@ bool CfgFactory::load_settings () {
 
     cfgapi.getRoot()["settings"].lookupValue("messages_dir",dir_msg_templates);
 
-    cfgapi.getRoot()["settings"]["cli"].lookupValue("port",cli_port_base); cli_port = cli_port_base;
-    cfgapi.getRoot()["settings"]["cli"].lookupValue("enable_password",cli_enable_password);
-
-
-    if(cfgapi.getRoot().exists("settings")) {
-        if(cfgapi.getRoot()["settings"].exists("auth_portal")) {
-            cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("address", auth_address);
-            cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("http_port", auth_http);
-            cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("https_port", auth_https);
-            cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("ssl_key", auth_sslkey);
-            cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("ssl_cert", auth_sslcert);
-            cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("magic_ip", tenant_magic_ip);
-        }
+    if(cfgapi.getRoot()["settings"].exists("cli")) {
+        cfgapi.getRoot()["settings"]["cli"].lookupValue("port", cli_port_base); cli_port = cli_port_base;
+        cfgapi.getRoot()["settings"]["cli"].lookupValue("enable_password", cli_enable_password);
     }
+
+    if(cfgapi.getRoot()["settings"].exists("auth_portal")) {
+        cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("address", auth_address);
+        cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("http_port", auth_http);
+        cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("https_port", auth_https);
+        cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("ssl_key", auth_sslkey);
+        cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("ssl_cert", auth_sslcert);
+        cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("magic_ip", tenant_magic_ip);
+    }
+
+    CfgFactory::cfg_root()["settings"].lookupValue("write_payload_dir",CfgFactory::get().traflog_dir);
+    CfgFactory::cfg_root()["settings"].lookupValue("write_payload_file_prefix",CfgFactory::get().traflog_file_prefix);
+    CfgFactory::cfg_root()["settings"].lookupValue("write_payload_file_suffix",CfgFactory::get().traflog_file_suffix);
 
     return true;
 }
 
+
+int CfgFactory::load_debug() {
+
+    std::lock_guard<std::recursive_mutex> l(lock_);
+
+    if(! cfgapi.getRoot().exists("debug")) {
+
+        CfgFactory::cfg_root()["debug"].lookupValue("log_data_crc", baseCom::debug_log_data_crc);
+        CfgFactory::cfg_root()["debug"].lookupValue("log_sockets", baseHostCX::socket_in_name);
+        CfgFactory::cfg_root()["debug"].lookupValue("log_online_cx_name", baseHostCX::online_name);
+        CfgFactory::cfg_root()["debug"].lookupValue("log_srclines", get_logger()->print_srcline());
+        CfgFactory::cfg_root()["debug"].lookupValue("log_srclines_always", get_logger()->print_srcline_always());
+
+        if (cfgapi.getRoot()["debug"].exists("log")) {
+
+            CfgFactory::cfg_root()["debug"]["log"].lookupValue("sslcom", SSLCom::log_level_ref().level_ref());
+            CfgFactory::cfg_root()["debug"]["log"].lookupValue("sslmitmcom",
+                                                               baseSSLMitmCom<SSLCom>::log_level_ref().level_ref());
+            CfgFactory::cfg_root()["debug"]["log"].lookupValue("sslmitmcom",
+                                                               baseSSLMitmCom<DTLSCom>::log_level_ref().level_ref());
+            CfgFactory::cfg_root()["debug"]["log"].lookupValue("sslcertstore",
+                                                               SSLFactory::get_log().level()->level_ref());
+            CfgFactory::cfg_root()["debug"]["log"].lookupValue("proxy", baseProxy::log_level_ref().level_ref());
+            CfgFactory::cfg_root()["debug"]["log"].lookupValue("proxy", epoll::log_level.level_ref());
+            CfgFactory::cfg_root()["debug"]["log"].lookupValue("mtrace", cfg_mtrace_enable);
+            CfgFactory::cfg_root()["debug"]["log"].lookupValue("openssl_mem_dbg", cfg_openssl_mem_dbg);
+
+            /*DNS ALG EXPLICIT LOG*/
+            CfgFactory::cfg_root()["debug"]["log"].lookupValue("alg_dns", DNS_Inspector::log_level_ref().level_ref());
+            CfgFactory::cfg_root()["debug"]["log"].lookupValue("alg_dns", DNS_Packet::log_level_ref().level_ref());
+        }
+        return 1;
+    }
+
+    return -1;
+}
 
 int CfgFactory::load_db_address () {
     std::lock_guard<std::recursive_mutex> l(lock_);
@@ -345,17 +384,24 @@ int CfgFactory::load_db_address () {
                     case 0: // CIDR notation
                         if (cur_object.lookupValue("cidr",address)) {
                             CIDR* c = cidr_from_str(address.c_str());
-                            db_address[name] = new CidrAddress(c);
+                            auto new_addr = new CidrAddress(c);
+
+                            if (db_address.find(name) != db_address.end()) delete db_address[name];
+
+                            db_address[name] = new_addr;
                             db_address[name]->prof_name = name;
-                            _dia("cfgapi_load_addresses: cidr '%s': ok",name.c_str());
+                            _dia("cfgapi_load_addresses: cidr '%s': ok", name.c_str());
                         }
                     break;
                     case 1: // FQDN notation
                         if (cur_object.lookupValue("fqdn",address))  {
-                            FqdnAddress* f = new FqdnAddress(address);
-                            db_address[name] = f;
+                            auto* new_address = new FqdnAddress(address);
+
+                            if (db_address.find(name) != db_address.end()) delete db_address[name];
+
+                            db_address[name] = new_address;
                             db_address[name]->prof_name = name;
-                            _dia("cfgapi_load_addresses: fqdn '%s': ok",name.c_str());
+                            _dia("cfgapi_load_addresses: fqdn '%s': ok", name.c_str());
                         }
                     break;
                     default:
@@ -1803,30 +1849,30 @@ bool CfgFactory::should_redirect (ProfileTls *pt, SSLCom *com) {
     
     bool ret = false;
     
-    _deb("should_redirect[%s]",com->hr());
+    _deb("should_redirect[%s]",com->hr().c_str());
     
     if(com && com->owner_cx()) {
         
         try {
             int num_port = std::stoi(com->owner_cx()->port());
-            _deb("should_redirect[%s]: owner port %d",com->hr(), num_port);
+            _deb("should_redirect[%s]: owner port %d",com->hr().c_str(), num_port);
             
             
             if(pt->redirect_warning_ports.ptr()) {
                 // we have port redirection list (which ports should be redirected/replaced for cert issue warning)
-                _deb("should_redirect[%s]: checking port list present",com->hr());
+                _deb("should_redirect[%s]: checking port list present",com->hr().c_str());
                 
                 auto it = pt->redirect_warning_ports.ptr()->find(num_port);
                 
                 if(it != pt->redirect_warning_ports.ptr()->end()) {
-                    _dia("should_redirect[%s]: port %d allowed to be redirected if needed",com->hr(),num_port);
+                    _dia("should_redirect[%s]: port %d allowed to be redirected if needed",com->hr().c_str(),num_port);
                     ret = true;
                 }
             }
             else {
                 // if we have list empty (uninitialized), we assume only 443 should be redirected
                 if(num_port == 443) {
-                    _deb("should_redirect[%s]: implicit 443 redirection allowed (no port list)",com->hr());
+                    _deb("should_redirect[%s]: implicit 443 redirection allowed (no port list)",com->hr().c_str());
                     ret = true;
                 }
             }
@@ -1962,4 +2008,634 @@ bool CfgFactory::apply_tenant_config () {
     }
 
     return (ret == 0);
+}
+
+
+int CfgFactory::save_address_objects(Config& ex) {
+
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
+
+    Setting& address_objects = ex.getRoot().add("address_objects", Setting::TypeGroup);
+
+    int n_saved = 0;
+
+    for (auto it: CfgFactory::get().db_address) {
+        auto name = it.first;
+        auto obj = it.second;
+
+        Setting& item = address_objects.add(name, Setting::TypeGroup);
+
+        if(obj->c_name() == std::string("FqdnAddress")) {
+            Setting &s_type = item.add("type", Setting::TypeInt);
+            Setting &s_fqdn = item.add("fqdn", Setting::TypeString);
+
+            s_type = 1;
+            s_fqdn = ((FqdnAddress*)(obj))->fqdn();
+
+            n_saved++;
+        }
+        else
+        if(obj->c_name() == std::string("CidrAddress")) {
+            Setting &s_type = item.add("type", Setting::TypeInt);
+            Setting &s_cidr = item.add("cidr", Setting::TypeString);
+
+            s_type = 0;
+            const char* addr = cidr_to_str(((CidrAddress*)(obj))->cidr());
+            s_cidr =  addr;
+            delete[] addr;
+
+            n_saved++;
+        }
+
+    }
+
+    return n_saved;
+}
+
+
+int CfgFactory::save_port_objects(Config& ex) {
+
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
+
+    Setting& objects = ex.getRoot().add("port_objects", Setting::TypeGroup);
+
+    int n_saved = 0;
+
+    for (auto it: CfgFactory::get().db_port) {
+        auto name = it.first;
+        auto obj = it.second;
+
+        Setting& item = objects.add(name, Setting::TypeGroup);
+        item.add("start", Setting::TypeInt) = obj.first;
+        item.add("end", Setting::TypeInt) = obj.second;
+
+        n_saved++;
+    }
+
+    return n_saved;
+}
+
+
+int CfgFactory::save_proto_objects(Config& ex) {
+
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());;
+
+    Setting& objects = ex.getRoot().add("proto_objects", Setting::TypeGroup);
+
+    int n_saved = 0;
+
+    for (auto it: CfgFactory::get().db_proto) {
+        auto name = it.first;
+        auto obj = it.second;
+
+        Setting& item = objects.add(name, Setting::TypeGroup);
+        item.add("id", Setting::TypeInt) = obj;
+
+        n_saved++;
+    }
+
+    return n_saved;
+}
+
+
+int CfgFactory::save_debug(Config& ex) {
+
+    if(!ex.exists("debug"))
+        ex.getRoot().add("debug", Setting::TypeGroup);
+
+    Setting& deb_objects = ex.getRoot()["debug"];
+
+    deb_objects.add("log_data_crc", Setting::TypeBoolean) =  baseCom::debug_log_data_crc;
+    deb_objects.add("log_sockets", Setting::TypeBoolean) = baseHostCX::socket_in_name;
+    deb_objects.add("log_online_cx_name", Setting::TypeBoolean) = baseHostCX::online_name;
+    deb_objects.add("log_srclines", Setting::TypeBoolean) = get_logger()->print_srcline();
+    deb_objects.add("log_srclines_always", Setting::TypeBoolean) = get_logger()->print_srcline_always();
+
+
+    Setting& deb_log_objects = deb_objects.add("log", Setting::TypeGroup);
+    deb_log_objects.add("sslcom", Setting::TypeInt) = (int)SSLCom::log_level_ref().level_ref();
+    deb_log_objects.add("sslmitmcom", Setting::TypeInt) = (int)baseSSLMitmCom<DTLSCom>::log_level_ref().level_ref();
+    deb_log_objects.add("sslcertstore", Setting::TypeInt) = (int)SSLFactory::get_log().level()->level_ref();
+    deb_log_objects.add("proxy", Setting::TypeInt) = (int)baseProxy::log_level_ref().level_ref();
+    deb_log_objects.add("epoll", Setting::TypeInt) = (int)epoll::log_level.level_ref();
+
+    deb_log_objects.add("mtrace", Setting::TypeBoolean) = cfg_mtrace_enable;
+    deb_log_objects.add("openssl_mem_dbg", Setting::TypeBoolean) = cfg_openssl_mem_dbg;
+
+    deb_log_objects.add("alg_dns", Setting::TypeInt) = (int)DNS_Inspector::log_level_ref().level_ref();
+    deb_log_objects.add("pkt_dns", Setting::TypeInt) = (int)DNS_Packet::log_level_ref().level_ref();
+
+
+    return 0;
+}
+
+
+int CfgFactory::save_detection_profiles(Config& ex) {
+
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
+
+    Setting& objects = ex.getRoot().add("detection_profiles", Setting::TypeGroup);
+
+    int n_saved = 0;
+
+    for (auto it: CfgFactory::get().db_prof_detection) {
+        auto name = it.first;
+        auto obj = it.second;
+
+        Setting& item = objects.add(name, Setting::TypeGroup);
+        item.add("mode", Setting::TypeInt) = obj->mode;
+
+        n_saved++;
+    }
+
+    return n_saved;
+}
+
+int CfgFactory::save_content_profiles(Config& ex) {
+
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
+
+    Setting& objects = ex.getRoot().add("content_profiles", Setting::TypeGroup);
+
+    int n_saved = 0;
+
+    for (auto it: CfgFactory::get().db_prof_content) {
+        auto name = it.first;
+        auto obj = it.second;
+
+        Setting& item = objects.add(name, Setting::TypeGroup);
+        item.add("write_payload", Setting::TypeBoolean) = obj->write_payload;
+
+        if(! obj->content_rules.empty() ) {
+
+            Setting& cr_rules = item.add("content_rules", Setting::TypeList);
+
+            for(auto cr: obj->content_rules) {
+                Setting& cr_rule = cr_rules.add(Setting::TypeGroup);
+                cr_rule.add("match", Setting::TypeString) = cr.match;
+                cr_rule.add("replace", Setting::TypeString) = cr.replace;
+                cr_rule.add("replace_each_nth", Setting::TypeInt) = cr.replace_each_nth;
+            }
+        }
+
+        n_saved++;
+    }
+
+    return n_saved;
+}
+
+
+int CfgFactory::save_tls_ca(Config& ex) {
+
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
+
+    Setting& objects = ex.getRoot().add("tls_ca", Setting::TypeGroup);
+
+    int n_saved = 0;
+
+//    for (auto it: cfgapi_obj_tls_ca) {
+//        auto name = it.first;
+//        auto obj = it.second;
+//
+//        Setting& item = objects.add(name, Setting::TypeGroup);
+//        item.add("path", Setting::TypeString) = obj.path;
+//
+//        n_saved++;
+//    }
+
+    return n_saved;
+}
+
+int CfgFactory::save_tls_profiles(Config& ex) {
+
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
+
+    Setting& objects = ex.getRoot().add("tls_profiles", Setting::TypeGroup);
+
+    int n_saved = 0;
+
+    for (auto it: CfgFactory::get().db_prof_tls) {
+        auto name = it.first;
+        auto obj = it.second;
+
+        Setting& item = objects.add(name, Setting::TypeGroup);
+
+        item.add("inspect", Setting::TypeBoolean) = obj->inspect;
+
+        item.add("use_pfs", Setting::TypeBoolean) = obj->use_pfs;
+        item.add("left_use_pfs", Setting::TypeBoolean) = obj->left_use_pfs;
+        item.add("right_use_pfs", Setting::TypeBoolean) = obj->right_use_pfs;
+
+        item.add("allow_untrusted_issuers", Setting::TypeBoolean) = obj->allow_untrusted_issuers;
+        item.add("allow_invalid_certs", Setting::TypeBoolean) = obj->allow_invalid_certs;
+        item.add("allow_self_signed", Setting::TypeBoolean) = obj->allow_self_signed;
+
+        item.add("ocsp_mode", Setting::TypeInt) = obj->ocsp_mode;
+        item.add("ocsp_stapling", Setting::TypeBoolean) = obj->ocsp_stapling;
+        item.add("ocsp_stapling_mode", Setting::TypeInt) = obj->ocsp_stapling_mode;
+
+        // add sni bypass list
+        if(obj->sni_filter_bypass.ptr() && obj->sni_filter_bypass.ptr()->size() > 0 ) {
+            Setting& sni_flist = item.add("sni_filter_bypass", Setting::TypeList);
+
+            for( auto snif: *obj->sni_filter_bypass.ptr()) {
+                sni_flist.add(Setting::TypeString) = snif;
+            }
+        }
+
+        // add redirected ports (for replacements)
+        if( obj->redirect_warning_ports.ptr() && obj->redirect_warning_ports.ptr()->size() > 0 ) {
+
+            Setting& rport_list = item.add("redirect_warning_ports", Setting::TypeList);
+
+            for( auto rport: *obj->redirect_warning_ports.ptr()) {
+                rport_list.add(Setting::TypeInt) = rport;
+            }
+        }
+        item.add("failed_certcheck_replacement", Setting::TypeBoolean) = obj->failed_certcheck_replacement;
+        item.add("failed_certcheck_override", Setting::TypeBoolean) = obj->failed_certcheck_override;
+        item.add("failed_certcheck_override_timeout", Setting::TypeInt) = obj->failed_certcheck_override_timeout;
+        item.add("failed_certcheck_override_timeout_type", Setting::TypeInt) = obj->failed_certcheck_override_timeout_type;
+
+
+        item.add("left_disable_reuse", Setting::TypeBoolean) = obj->left_disable_reuse;
+        item.add("right_disable_reuse", Setting::TypeBoolean) = obj->right_disable_reuse;
+        item.add("sslkeylog", Setting::TypeBoolean) = obj->sslkeylog;
+
+        n_saved++;
+    }
+
+
+
+    return n_saved;
+}
+
+
+int CfgFactory::save_alg_dns_profiles(Config& ex) {
+
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
+
+    Setting& objects = ex.getRoot().add("alg_dns_profiles", Setting::TypeGroup);
+
+    int n_saved = 0;
+
+    for (auto it: CfgFactory::get().db_prof_alg_dns) {
+        auto name = it.first;
+        auto obj = it.second;
+
+        Setting& item = objects.add(name, Setting::TypeGroup);
+        item.add("match_request_id", Setting::TypeBoolean) = obj->match_request_id;
+        item.add("randomize_id", Setting::TypeBoolean) = obj->randomize_id;
+        item.add("cached_responses", Setting::TypeBoolean) = obj->cached_responses;
+
+        n_saved++;
+    }
+
+    return n_saved;
+}
+
+
+int CfgFactory::save_auth_profiles(Config& ex) {
+
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
+
+    Setting& objects = ex.getRoot().add("auth_profiles", Setting::TypeGroup);
+
+    int n_saved = 0;
+
+    for (auto it: CfgFactory::get().db_prof_auth) {
+        auto name = it.first;
+        auto obj = it.second;
+
+        Setting& item = objects.add(name, Setting::TypeGroup);
+        item.add("authenticate", Setting::TypeBoolean) = obj->authenticate;
+        item.add("resolve", Setting::TypeBoolean) = obj->resolve;
+
+        if(obj->sub_policies.size() > 0) {
+
+            Setting& ident = item.add("identities", Setting::TypeGroup);
+
+            for( auto identity: obj->sub_policies) {
+                Setting& subid = ident.add(identity->name, Setting::TypeGroup);
+
+                if(identity->profile_detection)
+                    subid.add("detection_profile", Setting::TypeString) = identity->profile_detection->prof_name;
+
+                if(identity->profile_tls)
+                    subid.add("tls_profile", Setting::TypeString) = identity->profile_tls->prof_name;
+
+                if(identity->profile_content)
+                    subid.add("content_profile", Setting::TypeString) = identity->profile_content->prof_name;
+
+                if(identity->profile_alg_dns)
+                    subid.add("alg_dns_profile", Setting::TypeString) = identity->profile_alg_dns->prof_name;
+
+            }
+        }
+
+        n_saved++;
+    }
+
+    return n_saved;
+}
+
+
+int CfgFactory::save_policy(Config& ex) {
+
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
+
+    Setting& objects = ex.getRoot().add("policy", Setting::TypeList);
+
+    int n_saved = 0;
+
+    for (PolicyRule* pol: CfgFactory::get().db_policy) {
+
+        if(! pol)
+            continue;
+
+        Setting& item = objects.add(Setting::TypeGroup);
+
+        item.add("proto", Setting::TypeString) = pol->proto_name;
+
+        // SRC
+        Setting& src_list = item.add("src", Setting::TypeList);
+        for(auto s: pol->src) {
+            src_list.add(Setting::TypeString) = s->prof_name;
+        }
+        Setting& srcport_list = item.add("sport", Setting::TypeList);
+        for(auto sp: pol->src_ports_names) {
+            srcport_list.add(Setting::TypeString) = sp;
+        }
+
+
+        // DST
+        Setting& dst_list = item.add("dst", Setting::TypeList);
+        for(auto d: pol->dst) {
+            dst_list.add(Setting::TypeString) = d->prof_name;
+        }
+        Setting& dstport_list = item.add("dport", Setting::TypeList);
+        for(auto sp: pol->dst_ports_names) {
+            dstport_list.add(Setting::TypeString) = sp;
+        }
+
+        item.add("action", Setting::TypeString) = pol->action_name;
+        item.add("nat", Setting::TypeString) = pol->nat_name;
+
+        if(pol->profile_tls)
+            item.add("tls_profile", Setting::TypeString) = pol->profile_tls->prof_name;
+        if(pol->profile_detection)
+            item.add("detection_profile", Setting::TypeString) = pol->profile_detection->prof_name;
+        if(pol->profile_content)
+            item.add("content_profile", Setting::TypeString) = pol->profile_content->prof_name;
+        if(pol->profile_auth)
+            item.add("auth_profile", Setting::TypeString) = pol->profile_auth->prof_name;
+        if(pol->profile_alg_dns)
+            item.add("alg_dns_profile", Setting::TypeString) = pol->profile_alg_dns->prof_name;
+
+        n_saved++;
+    }
+
+    return n_saved;
+}
+
+int save_signatures(Config& ex, const std::string& sigset) {
+
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
+
+    Setting& objects = ex.getRoot().add(sigset, Setting::TypeList);
+
+    int n_saved = 0;
+
+    auto map_sigsets = [](std::string s) {
+        if(s == "starttls_signatures") return SigFactory::get().tls();
+
+        return SigFactory::get().detection();
+    };
+
+    const std::vector<duplexFlowMatch*>& target_ref = map_sigsets(sigset);
+
+    for (auto sig: target_ref) {
+
+        Setting& item = objects.add(Setting::TypeGroup);
+
+        item.add("name", Setting::TypeString) = sig->name();
+
+
+        auto my_sig = dynamic_cast<MyDuplexFlowMatch*>(sig);
+
+        if(my_sig) {
+            item.add("cat", Setting::TypeString) = my_sig->category;
+            item.add("side", Setting::TypeString) = my_sig->sig_side;
+            item.add("severity", Setting::TypeInt) = my_sig->severity;
+        }
+
+        if( ! sig->sig_chain().empty() ) {
+
+            Setting& flow = item.add("flow", Setting::TypeList);
+
+            for (auto f: sig->sig_chain()) {
+
+
+                bool sig_correct = false;
+
+                char        sig_side = f.first;
+                baseMatch*        bm = f.second;
+
+
+                unsigned int sig_bytes_start = bm->match_limits_offset;
+                unsigned int sig_bytes_max   = bm->match_limits_bytes;
+                std::string sig_type;
+                std::string sig_expr;
+
+
+                // follow the inheritance (regex can also be cast to simple)
+                auto rm = dynamic_cast<regexMatch*>(bm);
+                if(rm) {
+                    sig_type = "regex";
+                    sig_expr = rm->expr();
+                    sig_correct = true;
+                }
+                else {
+                    auto sm = dynamic_cast<simpleMatch*>(bm);
+                    if(sm) {
+                        sig_type = "simple";
+                        sig_expr = sm->expr();
+                        sig_correct = true;
+                    }
+                }
+
+
+                if(sig_correct) {
+                    Setting& flow_match = flow.add(Setting::TypeGroup);
+                    flow_match.add("side", Setting::TypeString) = string_format("%c",sig_side);
+                    flow_match.add("type", Setting::TypeString) = sig_type;
+                    flow_match.add("bytes_start", Setting::TypeInt) = (int)sig_bytes_start;
+                    flow_match.add("bytes_max", Setting::TypeInt) = (int)sig_bytes_max;
+                    flow_match.add("signature", Setting::TypeString) = sig_expr;
+                } else {
+                    Setting& flow_match = flow.add(Setting::TypeGroup);
+                    flow_match.add("comment", Setting::TypeString) = "???";
+                }
+            }
+        }
+
+
+        n_saved++;
+    }
+
+    return n_saved;
+
+}
+
+int save_settings(Config& ex) {
+
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
+
+    if(!ex.exists("settings"))
+        ex.getRoot().add("settings", Setting::TypeGroup);
+
+    Setting& objects = ex.getRoot()["settings"];
+
+    // nameservers
+    Setting& it_ns  = objects.add("nameservers",Setting::TypeList);
+    for(auto ns: CfgFactory::get().db_nameservers) {
+        it_ns.add(Setting::TypeString) = ns;
+    }
+
+    objects.add("certs_path", Setting::TypeString) = SSLFactory::default_cert_path();
+    objects.add("certs_ca_key_password", Setting::TypeString) = SSLFactory::default_cert_password();
+    objects.add("certs_ca_path", Setting::TypeString) = SSLFactory::default_client_ca_path();
+
+    objects.add("plaintext_port", Setting::TypeString) = CfgFactory::get().listen_tcp_port_base;
+    objects.add("plaintext_workers", Setting::TypeInt) = CfgFactory::get().num_workers_tcp;
+
+    objects.add("ssl_port", Setting::TypeString) = CfgFactory::get().listen_tls_port_base;
+    objects.add("ssl_workers", Setting::TypeInt) = CfgFactory::get().num_workers_tls;
+    objects.add("ssl_autodetect", Setting::TypeBoolean) = MitmMasterProxy::ssl_autodetect;
+    objects.add("ssl_autodetect_harder", Setting::TypeBoolean) = MitmMasterProxy::ssl_autodetect_harder;
+    objects.add("ssl_ocsp_status_ttl", Setting::TypeInt) = SSLFactory::ssl_ocsp_status_ttl;
+    objects.add("ssl_crl_status_ttl", Setting::TypeInt) = SSLFactory::ssl_crl_status_ttl;
+
+    objects.add("udp_port", Setting::TypeString) = CfgFactory::get().listen_udp_port_base;
+    objects.add("udp_workers", Setting::TypeInt) = CfgFactory::get().num_workers_udp;
+
+    objects.add("dtls_port", Setting::TypeString) = CfgFactory::get().listen_dtls_port_base;
+    objects.add("dtls_workers", Setting::TypeInt) = CfgFactory::get().num_workers_dtls;
+
+    //udp quick ports
+    Setting& it_quick  = objects.add("udp_quick_ports",Setting::TypeList);
+    if(CfgFactory::get().db_udp_quick_ports.empty()) {
+        it_quick.add(Setting::TypeInt) = 0;
+    }
+    else {
+        for (auto p: CfgFactory::get().db_udp_quick_ports) {
+            it_quick.add(Setting::TypeInt) = p;
+        }
+    }
+
+    objects.add("socks_port", Setting::TypeString) = CfgFactory::get().listen_socks_port_base;
+    objects.add("socks_workers", Setting::TypeInt) = CfgFactory::get().num_workers_socks;
+
+    Setting& socks_objects = objects.add("socks", Setting::TypeGroup);
+    socks_objects.add("async_dns", Setting::TypeBoolean) = socksServerCX::global_async_dns;
+
+
+    objects.add("log_level", Setting::TypeInt) = (int)cfgapi_table.logging.level.level_ref();
+    objects.add("log_file", Setting::TypeString) = CfgFactory::get().log_file_base;
+    objects.add("log_console", Setting::TypeBoolean)  = CfgFactory::get().log_console;
+
+    objects.add("syslog_server", Setting::TypeString) = CfgFactory::get().syslog_server;
+    objects.add("syslog_port", Setting::TypeInt) = CfgFactory::get().syslog_port;
+    objects.add("syslog_facility", Setting::TypeInt) = CfgFactory::get().syslog_facility;
+    objects.add("syslog_level", Setting::TypeInt) = (int)CfgFactory::get().syslog_level.level_ref();
+    objects.add("syslog_family", Setting::TypeInt) = CfgFactory::get().syslog_family;
+
+    objects.add("sslkeylog_file", Setting::TypeString) = CfgFactory::get().sslkeylog_file_base;
+    objects.add("messages_dir", Setting::TypeString) = CfgFactory::get().dir_msg_templates;
+
+    Setting& cli_objects = objects.add("cli", Setting::TypeGroup);
+    cli_objects.add("port", Setting::TypeString) = string_format("%d", cli_port_base).c_str();
+    cli_objects.add("enable_password", Setting::TypeString) = cli_enable_password;
+
+
+    Setting& auth_objects = objects.add("auth_portal", Setting::TypeGroup);
+    auth_objects.add("address",Setting::TypeString) = CfgFactory::get().auth_address;
+    auth_objects.add("http_port", Setting::TypeString) = CfgFactory::get().auth_http;
+    auth_objects.add("https_port", Setting::TypeString) = CfgFactory::get().auth_https;
+    auth_objects.add("ssl_key", Setting::TypeString) = CfgFactory::get().auth_sslkey;
+    auth_objects.add("ssl_cert", Setting::TypeString) = CfgFactory::get().auth_sslcert;
+    auth_objects.add("magic_ip", Setting::TypeString) = CfgFactory::get().tenant_magic_ip;
+
+
+    objects.add("write_payload_dir", Setting::TypeString) = CfgFactory::get().traflog_dir;
+    objects.add("write_payload_file_prefix", Setting::TypeString) = CfgFactory::get().traflog_file_prefix;
+    objects.add("write_payload_file_suffix", Setting::TypeString) = CfgFactory::get().traflog_file_suffix;
+
+
+    return 0;
+}
+
+
+int CfgFactory::save_config() {
+
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
+
+    Config ex;
+    ex.setOptions(Setting::OptionOpenBraceOnSeparateLine);
+    ex.setTabWidth(4);
+
+    int n = 0;
+
+    n = save_settings(ex);
+    _inf("... common settings");
+
+    n = save_debug(ex);
+    _inf("... debug settings");
+
+    n = save_address_objects(ex);
+    _inf("%d address_objects", n);
+
+    n = save_port_objects(ex);
+    _inf("%d port_objects", n);
+
+    n = save_proto_objects(ex);
+    _inf("%d proto_objects", n);
+
+    n = save_detection_profiles(ex);
+    _inf("%d detection_profiles", n);
+
+    n = save_content_profiles(ex);
+    _inf("%d content_profiles", n);
+
+    n = save_tls_ca(ex);
+    _inf("%d tls_ca", n);
+
+    n = save_tls_profiles(ex);
+    _inf("%d tls_profiles", n);
+
+    n = save_alg_dns_profiles(ex);
+    _inf("%d alg_dns_profiles", n);
+
+    n = save_auth_profiles(ex);
+    _inf("%d auth_profiles", n);
+
+    n = save_policy(ex);
+    _inf("%d policy", n);
+
+    n = save_signatures(ex, "starttls_signatures");
+    _inf("%d %s signatures", n, "starttls");
+
+    n = save_signatures(ex, "detection_signatures");
+    _inf("%d %s signatures", n, "detection");
+
+
+    try {
+        ex.writeFile(CfgFactory::get().config_file.c_str());
+    }
+    catch(ConfigException const& e) {
+        _err("error writing config file %s", e.what());
+        return -1;
+    }
+
+    return n;
 }

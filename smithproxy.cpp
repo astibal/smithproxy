@@ -526,32 +526,7 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
         }
 
         CfgFactory::get().load_settings();
-
-        CfgFactory::cfg_root()["debug"].lookupValue("log_data_crc",baseCom::debug_log_data_crc);
-        CfgFactory::cfg_root()["debug"].lookupValue("log_sockets",baseHostCX::socket_in_name);
-        CfgFactory::cfg_root()["debug"].lookupValue("log_online_cx_name",baseHostCX::online_name);
-        CfgFactory::cfg_root()["debug"].lookupValue("log_srclines",get_logger()->print_srcline());
-        CfgFactory::cfg_root()["debug"].lookupValue("log_srclines_always",get_logger()->print_srcline_always());
-
-        CfgFactory::cfg_root()["debug"]["log"].lookupValue("sslcom",SSLCom::log_level_ref().level_ref());
-        CfgFactory::cfg_root()["debug"]["log"].lookupValue("sslmitmcom",baseSSLMitmCom<SSLCom>::log_level_ref().level_ref());
-        CfgFactory::cfg_root()["debug"]["log"].lookupValue("sslmitmcom",baseSSLMitmCom<DTLSCom>::log_level_ref().level_ref());
-        CfgFactory::cfg_root()["debug"]["log"].lookupValue("sslcertstore",SSLFactory::get_log().level()->level_ref());
-        CfgFactory::cfg_root()["debug"]["log"].lookupValue("proxy",baseProxy::log_level_ref().level_ref());
-        CfgFactory::cfg_root()["debug"]["log"].lookupValue("proxy",epoll::log_level.level_ref());
-        CfgFactory::cfg_root()["debug"]["log"].lookupValue("mtrace", SmithProxy::cfg_mtrace_enable);
-        CfgFactory::cfg_root()["debug"]["log"].lookupValue("openssl_mem_dbg", SmithProxy::cfg_openssl_mem_dbg);
-
-        /*DNS ALG EXPLICIT LOG*/
-        CfgFactory::cfg_root()["debug"]["log"].lookupValue("alg_dns",DNS_Inspector::log_level_ref().level_ref());
-        CfgFactory::cfg_root()["debug"]["log"].lookupValue("alg_dns",DNS_Packet::log_level_ref().level_ref());
-
-
-        CfgFactory::cfg_root()["settings"].lookupValue("write_payload_dir",CfgFactory::get().traflog_dir);
-        CfgFactory::cfg_root()["settings"].lookupValue("write_payload_file_prefix",CfgFactory::get().traflog_file_prefix);
-        CfgFactory::cfg_root()["settings"].lookupValue("write_payload_file_suffix",CfgFactory::get().traflog_file_suffix);
-
-
+        CfgFactory::get().load_debug();
 
         // initialize stubborn logans :)
         auto _ = inet::Factory::log();
