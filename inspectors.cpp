@@ -128,8 +128,9 @@ bool DNS_Inspector::interested(AppHostCX* cx) const {
 }
 
 void DNS_Inspector::update(AppHostCX* cx) {
-  
-    std::lock_guard<std::recursive_mutex> l(DatagramCom::lock);
+
+    // not entirely sure why we lock whole datagramcom, if we operate on flow and write to DNS cache
+    //std::lock_guard<std::recursive_mutex> l(DatagramCom::lock);
     
     
     duplexFlow& f = cx->flow();
