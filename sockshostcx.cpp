@@ -161,7 +161,6 @@ bool socksServerCX::process_dns_response(DNS_Response* resp) {
         }
 
         if (! target_ips.empty()) {
-            std::lock_guard<std::recursive_mutex> l_(DNS::get_dns_lock());
 
             DNS_Inspector di;
             del_resp = !di.store(resp);

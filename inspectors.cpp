@@ -124,9 +124,7 @@ std::pair<std::string,std::string> Inspector::split_fqdn_subdomain(std::string& 
 std::regex DNS_Inspector::wildcard = std::regex("[^.]+\\.(.*)$");
 
 bool DNS_Inspector::interested(AppHostCX* cx) const {
-    if(cx->com()->nonlocal_dst_port() == 53)
-        return true;
-    return false;
+    return cx->com()->nonlocal_dst_port() == 53;
 }
 
 void DNS_Inspector::update(AppHostCX* cx) {
@@ -385,8 +383,6 @@ bool DNS_Inspector::store(DNS_Response* ptr) {
 
             auto subdom_cache = DNS::get_domain_cache().get(dom_pair.first);
             if(subdom_cache != nullptr) {
-
-                std::lock_guard<std::recursive_mutex> sl_(subdom_cache->getlock());
                 
                 _dia("Top domain cache entry found for domain %s",dom_pair.first.c_str());
                 if(subdom_cache->get(dom_pair.second) != nullptr) {

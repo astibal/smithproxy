@@ -1627,32 +1627,46 @@ bool CfgFactory::prof_tls_apply (baseHostCX *originator, baseProxy *new_proxy, P
                             bool interrupt = false;
                             for(std::string& filter_element: *ps->sni_filter_bypass) {
                                 FqdnAddress f(filter_element);
-                                CIDR* c = cidr_from_str(xcom->owner_cx()->host().c_str());
+                                auto host_cidr = std::unique_ptr<CIDR, decltype(&cidr_free)>(
+                                                        cidr_from_str(xcom->owner_cx()->host().c_str()),
+                                                        &cidr_free);
                                 
-                                if(f.match(c)) {
+                                if(f.match(host_cidr.get())) {
                                     if(sslcom->bypass_me_and_peer()) {
                                         _inf("Connection %s bypassed: IP in DNS cache matching TLS bypass list (%s).",originator->full_name('L').c_str(),filter_element.c_str());
                                         interrupt = true;
+                                        break;
                                     } else {
                                         _war("Connection %s: cannot be bypassed.",originator->full_name('L').c_str());
                                     }
                                 } else if (ps->sni_filter_use_dns_domain_tree) {
-                                    std::scoped_lock<std::recursive_mutex> dd_(DNS::get_domain_lock());
 
-                                    //_inf("FQDN doesn't match SNI element, looking for sub-domains of %s", filter_element.c_str());
-                                    //FIXME: we assume filter is 2nd level domain...
-                                    
-                                    auto subdomain_cache = DNS::get_domain_cache().get(filter_element);
-                                    if(subdomain_cache != nullptr) {
-                                        for(auto const& subdomain: subdomain_cache->cache()) {
-                                            
-                                            std::vector<std::string> prefix_n_domainname = string_split(subdomain.first,':');
-                                            if(prefix_n_domainname.size() < 2) continue; // don't continue if we can't strip A: or AAAA:
-                                            
-                                            FqdnAddress ff(prefix_n_domainname.at(1)+"."+filter_element);
+                                    std::vector<std::string> to_match;
+                                    {
+                                        std::scoped_lock<std::recursive_mutex> dd_(DNS::get_domain_lock());
+
+                                        auto subdomain_cache = DNS::get_domain_cache().get(filter_element);
+                                        if(subdomain_cache != nullptr) {
+                                            for (auto const &subdomain: subdomain_cache->cache()) {
+
+                                                std::vector<std::string> prefix_n_domainname = string_split(subdomain.first,
+                                                                                                            ':');
+                                                if (prefix_n_domainname.size() < 2)
+                                                    continue; // don't continue if we can't strip A: or AAAA:
+
+                                                to_match.push_back(prefix_n_domainname.at(1) + "." + filter_element);
+                                            }
+                                        }
+                                    }
+
+                                    if(! to_match.empty()) {
+
+                                        for(auto const& to_match_entry: to_match) {
+                                            FqdnAddress ff(to_match_entry);
                                             _deb("Connection %s: subdomain check: test if %s matches %s",originator->full_name('L').c_str(),ff.to_string().c_str(),xcom->owner_cx()->host().c_str());
-                                            
-                                            if(ff.match(c)) {
+
+                                            // ff.match locks DNS cache
+                                            if(ff.match(host_cidr.get())) {
                                                 if(sslcom->bypass_me_and_peer()) {
                                                     _inf("Connection %s bypassed: IP in DNS sub-domain cache matching TLS bypass list (%s).",originator->full_name('L').c_str(),filter_element.c_str());
                                                 } else {
@@ -1664,13 +1678,11 @@ bool CfgFactory::prof_tls_apply (baseHostCX *originator, baseProxy *new_proxy, P
                                         }
                                     }
                                 }
-                                
-                                cidr_free(c);
-                                
-                                if(interrupt) 
-                                    break;
-                            }                        
-                            
+                            }
+
+                            if(interrupt)
+                                break;
+
                         }
                     }
                 }
@@ -1779,7 +1791,7 @@ int CfgFactory::policy_apply (baseHostCX *originator, baseProxy *proxy) {
         const char *pt_name = "none";
         const char *pa_name = "none";
 
-        //Algs will be list of single letter abreviations
+        //Algs will be list of single letter abbreviations
         // DNS alg: D
         std::string algs_name;
 
