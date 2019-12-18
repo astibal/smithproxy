@@ -46,7 +46,7 @@
 #include <hostcx.hpp>
 #include <tcpcom.hpp>
 #include <sslmitmcom.hpp>
-#include <asyncdns.hpp>
+#include <async/asyncdns.hpp>
 
 typedef enum class socks5_state_ { INIT=1, HELLO_SENT, WAIT_REQUEST, REQ_RECEIVED, WAIT_POLICY, POLICY_RECEIVED, REQRES_SENT, DNS_QUERY_SENT=15, DNS_RESP_RECV, HANDOFF=31 , ZOMBIE=255 } socks5_state;
 typedef enum class socks5_request_error_ { NONE=0, UNSUPPORTED_VERSION, UNSUPPORTED_ATYPE } socks5_request_error;

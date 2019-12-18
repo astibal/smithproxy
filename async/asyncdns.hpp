@@ -39,7 +39,7 @@
 #ifndef ASYNCDNS_HPP
 #define ASYNCDNS_HPP
 
-#include <asyncsocket.hpp>
+#include <async/asyncsocket.hpp>
 #include <dns.hpp>
 
 

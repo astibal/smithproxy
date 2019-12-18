@@ -653,7 +653,7 @@ bool MitmProxy::handle_cached_response(MitmHostCX* mh) {
 }
 
 void MitmProxy::on_left_bytes(baseHostCX* cx) {
-    
+
     if(write_payload()) {
         
         toggle_tlog();
@@ -1479,10 +1479,12 @@ void MitmProxy::tap() {
     for (auto cx: left_sockets) {
         com()->unset_monitor(cx->socket());
         cx->waiting_for_peercom(true);
+        cx->io_disabled(true);
     }
     for (auto cx: right_sockets) {
         com()->unset_monitor(cx->socket());
         cx->waiting_for_peercom(true);
+        cx->io_disabled(true);
     }
 }
 
@@ -1493,10 +1495,12 @@ void MitmProxy::untap() {
     for (auto cx: left_sockets) {
         com()->set_monitor(cx->socket());
         cx->waiting_for_peercom(false);
+        cx->io_disabled(false);
     }
     for (auto cx: right_sockets) {
         com()->set_monitor(cx->socket());
         cx->waiting_for_peercom(false);
+        cx->io_disabled(false);
     }
 }
 

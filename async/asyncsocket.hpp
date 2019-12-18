@@ -71,39 +71,45 @@ public:
         untap();
     }
 
-    void tap(int fd) {
+    virtual void tap(int fd) {
 
         socket_.set(fd, this, owner_->com(), true);
         socket_.opening();
-        owner_->com()->unset_monitor(owner_->socket());
 
         this->state(task_state_t::RUNNING);
 
-        if(pause_owner_) {
-            owner_->io_disabled(true);
-        }
-        if(pause_peer_) {
-            if(owner_->peer())
-                owner_->peer()->io_disabled(true);
+        if(owner_) {
+            owner_->com()->unset_monitor(owner_->socket());
+
+
+            if (pause_owner_) {
+                owner_->io_disabled(true);
+            }
+            if (pause_peer_) {
+                if (owner_->peer())
+                    owner_->peer()->io_disabled(true);
+            }
         }
     }
 
     void untap() {
         socket_.closing();
-        owner_->com()->set_write_monitor(owner_->socket()); // monitor all events on socket
 
-        if(pause_owner_) {
-            owner_->io_disabled(false);
-        }
-        if(pause_peer_) {
-            if(owner_->peer()) {
-                owner_->peer()->io_disabled(false);
+        if(owner_) {
+            owner_->com()->set_write_monitor(owner_->socket()); // monitor all events on socket
 
-                // this usually triggers proxies and it's harmless
-                owner_->peer()->com()->set_write_monitor(owner_->peer()->socket());
+            if (pause_owner_) {
+                owner_->io_disabled(false);
+            }
+            if (pause_peer_) {
+                if (owner_->peer()) {
+                    owner_->peer()->io_disabled(false);
+
+                    // this usually triggers proxies and it's harmless
+                    owner_->peer()->com()->set_write_monitor(owner_->peer()->socket());
+                }
             }
         }
-
         this->state(task_state_t::INIT);
     }
     virtual typename IAsyncTask<R>::state update() = 0;
