@@ -1562,7 +1562,15 @@ int cli_debug_set(struct cli_def *cli, const char *command, char *argv[], int ar
         auto var = std::string(argv[0]);
         int  newlev = safe_val(argv[1]);
 
-        //std::scoped_lock<std::recursive_mutex> l_(logan::get_lock());
+
+        if(var == "all" || var == "*") {
+            for(auto lv: logan::get().topic_db_) {
+
+                auto orig_l = logan::get()[lv.first]->level();
+                logan::get()[lv.first]->level(newlev);
+                cli_print(cli, "debug level changed: %s: %d => %d", lv.first.c_str(), orig_l, newlev);
+            }
+        }
 
         if(logan::get().topic_db_.find(var) != logan::get().topic_db_.end()) {
             loglevel* l = logan::get()[var];
@@ -1570,7 +1578,7 @@ int cli_debug_set(struct cli_def *cli, const char *command, char *argv[], int ar
             int old_lev = l->level();
             logan::get()[var]->level(newlev);
 
-            cli_print(cli, "debug level changed: %s => %d => %d", var.c_str(), old_lev, newlev);
+            cli_print(cli, "debug level changed: %s: %d => %d", var.c_str(), old_lev, newlev);
         } else {
             cli_print(cli, "variable not recognized");
         }
