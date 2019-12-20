@@ -1714,6 +1714,12 @@ int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *a
 int cli_save_config(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
     int n = CfgFactory::get().save_config();
+    if(n < 0) {
+        cli_print(cli, "error writing config file!");
+    }
+    else {
+        cli_print(cli, "config saved successfully.");
+    }
     return CLI_OK;
 }
 
@@ -2839,6 +2845,8 @@ void cli_generate_set_settings(int mode, cli_def* cli, cli_command* cli_parent) 
 }
 
 
+int cli_show(struct cli_def *cli, const char *command, char **argv, int argc);
+
 void client_thread(int client_socket) {
 
         auto log = logan::create("service");
@@ -2897,7 +2905,7 @@ void client_thread(int client_socket) {
         save  = cli_register_command(cli, nullptr, "save", nullptr, PRIVILEGE_PRIVILEGED, MODE_ANY, "save configs");
             cli_register_command(cli, save, "config", cli_save_config, PRIVILEGE_PRIVILEGED, MODE_ANY, "save config file");
 
-        show  = cli_register_command(cli, nullptr, "show", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show basic information");
+        show  = cli_register_command(cli, nullptr, "show", cli_show, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show basic information");
             cli_register_command(cli, show, "status", cli_show_status, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show smithproxy status");
             show_config = cli_register_command(cli, show, "config", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy configuration related commands");
                 cli_register_command(cli, show_config, "full", cli_show_config_full, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy full configuration");
@@ -3083,3 +3091,29 @@ void cli_loop(short unsigned int port) {
         auto* n = new std::thread(client_thread, client_socket);
     }
 };
+
+
+int cli_show(struct cli_def *cli, const char *command, char **argv, int argc) {
+    switch(cli->mode) {
+        case MODE_EDIT_SETTINGS:
+            cli_print_section(cli, "settings", -1, 200 * 1024);
+            return CLI_OK;
+
+        case MODE_EDIT_SETTINGS_AUTH:
+            cli_print_section(cli, "settings.auth_portal", -1, 200 * 1024);
+            return CLI_OK;
+
+        case MODE_EDIT_SETTINGS_CLI:
+            cli_print_section(cli, "settings.cli", -1, 200 * 1024);
+            return CLI_OK;
+
+        case MODE_EDIT_SETTINGS_SOCKS:
+            cli_print_section(cli, "settings.socks", -1, 200 * 1024);
+            return CLI_OK;
+
+        default:
+            cli_print(cli, "don't know how to print this section.");
+    }
+
+    return CLI_OK;
+}
