@@ -51,7 +51,7 @@
 #include <policy.hpp>
 #include <sslcom.hpp>
 
-#include <shmauth.hpp>
+#include <shm/shmauth.hpp>
 
 
 using namespace libconfig;

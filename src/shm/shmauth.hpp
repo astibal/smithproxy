@@ -89,7 +89,7 @@ struct shm_logon_info_base {
     virtual ~shm_logon_info_base() = default;
 };
 
-// structure exchanged with backend daemon
+// structure exchanged with backend service
 template <int AddressSize>
 struct shm_logon_info_ : public shm_logon_info_base {
 
@@ -162,7 +162,7 @@ struct shm_logon_info_ : public shm_logon_info_base {
 typedef shm_logon_info_<4> shm_logon_info;
 typedef shm_logon_info_<16> shm_logon_info6;
 
-// structure exchanged with backend daemon
+// structure exchanged with backend service
 struct shm_logon_token {
     
     buffer buffer_;

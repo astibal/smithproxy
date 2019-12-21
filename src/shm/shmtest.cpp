@@ -67,7 +67,7 @@
 
 #include <shmtable.hpp>
 #include <tools/wportals/bendc/shmtestsuite.hpp>
-#include <shmauth.hpp>
+#include <shm/shmauth.hpp>
 
 
 shm_logon_info generator_li(int i) {

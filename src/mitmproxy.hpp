@@ -49,7 +49,7 @@
 #include <threadedreceiver.hpp>
 #include <traflog.hpp>
 #include <policy.hpp>
-#include <shmauth.hpp>
+#include <shm/shmauth.hpp>
 
 #include <sslcertval.hpp>
 #include <async/asyncsocket.hpp>

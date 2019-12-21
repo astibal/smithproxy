@@ -37,7 +37,7 @@
     which carries forward this exception.
 */
 
-#include <smithproxy.hpp>
+#include <service/smithproxy.hpp>
 #include <cmdserver.hpp>
 #include <authfactory.hpp>
 #include "sigfactory.hpp"

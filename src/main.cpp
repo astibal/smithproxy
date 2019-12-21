@@ -85,14 +85,14 @@
 #include <socksproxy.hpp>
 
 #include <cfgapi.hpp>
-#include <daemon.hpp>
+#include <service/daemon.hpp>
 #include <cmdserver.hpp>
-#include <srvutils.hpp>
+#include <service/srvutils.hpp>
 #include <staticcontent.hpp>
 #include <smithlog.hpp>
 #include <smithdnsupd.hpp>
 
-#include <smithproxy.hpp>
+#include <service/smithproxy.hpp>
 
 
 void prepare_queue_logger(loglevel const& lev) {
@@ -383,8 +383,8 @@ int main(int argc, char *argv[]) {
         }
 
         get_logger()->dup2_cout(false);
-        _inf("Entering daemon mode.");
-        std::cout << "Entering daemon mode.";
+        _inf("Entering service mode.");
+        std::cout << "Entering service mode.";
 
         this_daemon.daemonize();
         this_daemon.write_pidfile();

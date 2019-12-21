@@ -65,7 +65,7 @@
 #include <sslcertstore.hpp>
 
 #include <main.hpp>
-#include <smithproxy.hpp>
+#include <service/smithproxy.hpp>
 #include <mitmproxy.hpp>
 #include <socksproxy.hpp>
 #include <sobject.hpp>

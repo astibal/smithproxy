@@ -57,11 +57,11 @@
 
 #include <libconfig.h++>
 
-#include <daemon.hpp>
-#include <srvutils.hpp>
+#include <service/daemon.hpp>
+#include <service/srvutils.hpp>
 #include <smithlog.hpp>
 
-#include <smithdcx.hpp>
+#include <service/smithdcx.hpp>
 
 //#define MEM_DEBUG 1
 #ifdef MEM_DEBUG
@@ -565,7 +565,7 @@ int main(int argc, char *argv[]) {
         }
         
         get_logger()->dup2_cout(false);
-        _inf("entering daemon mode");
+        _inf("entering service mode");
         this_daemon.daemonize();
     }
     // write out PID file

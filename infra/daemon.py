@@ -66,11 +66,11 @@ def create_logger(nickname, location):
 
 class Daemon:
     """
-    A generic daemon class.
+    A generic service class.
     
     Usage: subclass the Daemon class and override the run() method
     """
-    log = create_logger("daemon", '/var/log/smithproxy_daemons.log')
+    log = create_logger("service", '/var/log/smithproxy_daemons.log')
 
     def __init__(self, nicename, pidfile, stdin='/dev/null', stdout='/dev/null', stderr='/dev/null'):
         self.stdin = stdin
@@ -124,7 +124,7 @@ class Daemon:
                 Daemon.log.debug(self.nicename + ": fork #2 master exit")
                 sys.exit(0)
             Daemon.log.debug(self.nicename + ": fork #2 slave ok")
-            Daemon.log.debug(self.nicename + ": daemon slave process ok")
+            Daemon.log.debug(self.nicename + ": service slave process ok")
             signal.signal(signal.SIGCHLD, signal.SIG_IGN)
 
         except OSError as e:
@@ -186,7 +186,7 @@ class Daemon:
 
     def start(self):
         """
-        Start the daemon
+        Start the service
         """
         pid = self.getpid()
     
@@ -195,7 +195,7 @@ class Daemon:
             Daemon.log.error(self.nicename + ": " + message % self.pidfile)
             return False
         
-        # Start the daemon
+        # Start the service
         if not self.daemonize():
             Daemon.log.error(self.nicename + ": " + "failed to daemonize, cannot run!")
             return False
@@ -216,7 +216,7 @@ class Daemon:
         ret = False
         
         """
-        Stop the daemon
+        Stop the service
         """
         # Get the pid from the pidfile
         try:
@@ -236,7 +236,7 @@ class Daemon:
             Daemon.log.error("kill: " + message % pidfile)
             return ret # not an error in a restart
 
-        # Try killing the daemon process    
+        # Try killing the service process
         try:
             attempts = 0
             kill_attempts = 20 # wait 2 seconds, then send KILL
@@ -281,7 +281,7 @@ class Daemon:
 
     def restart(self):
         """
-        Restart the daemon
+        Restart the service
         """
         if self.is_running():
             self.stop()

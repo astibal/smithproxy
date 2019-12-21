@@ -51,7 +51,7 @@
 #include <sys/resource.h>
 
 #include <log/logger.hpp>
-#include <daemon.hpp>
+#include <service/daemon.hpp>
 #include <display.hpp>
 
 #define UNW_LOCAL_ONLY

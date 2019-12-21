@@ -157,7 +157,7 @@ class BendBroker(ServiceBase):
 
     def run(self):
         self.log.warning(
-            "Backend broker daemon started (tenant name %s, index %d)" % (self.tenant_name, self.tenant_index))
+            "Backend broker service started (tenant name %s, index %d)" % (self.tenant_name, self.tenant_index))
         self.log.info("listening on port: %d" % (self.service_port,))
         self.log.info("backend port set to: %d" % (self.bend_port,))
         self.l_server.serve_forever()

@@ -39,7 +39,7 @@
 
 #include <display.hpp>
 #include <smithlog.hpp>
-#include <daemon.hpp>
+#include <service/daemon.hpp>
 #include <unistd.h>
 
 QueueLogger::QueueLogger(): logger(), lockable() {

@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 2.8)
 
 SET(SOCLE_DIR "socle")
 SET(SOCLE_COMMON_DIR "socle/common")
-SET(SMITHD_DIR "src/smithbackd")
+SET(SMITHD_DIR "src/service")
 
 project(smithproxy CXX)
 include_directories ("${SOCLE_DIR}")
@@ -14,7 +14,6 @@ include_directories ("${SMITHD_DIR}")
 
 add_subdirectory(${SOCLE_DIR} socle_lib)
 add_subdirectory(${SOCLE_COMMON_DIR} socle_common_lib)
-add_subdirectory(${SMITHD_DIR})
 
 if(UNIX)
     IF(NOT CMAKE_BUILD_TYPE)
@@ -82,23 +81,23 @@ add_executable(smithproxy
         src/mitmproxy.cpp
         src/cfgapi.cpp
         src/policy.cpp
-        src/daemon.cpp
+        src/service/daemon.cpp
         src/sockshostcx.cpp
         src/socksproxy.cpp
         src/cmdserver.cpp
-        src/shmauth.cpp
+        src/shm/shmauth.cpp
         src/dns.cpp
         src/inspectors.cpp
         src/addrobj.cpp
-        src/srvutils.cpp
+        src/service/srvutils.cpp
         src/staticcontent.cpp
         src/authfactory6.cpp
         src/smithlog.cpp
         src/filterproxy.cpp
         src/smithdnsupd.cpp
         src/loadb.cpp
-        src/smithproxy.hpp
-        src/smithproxy.cpp
+        src/service/smithproxy.hpp
+        src/service/smithproxy.cpp
 
         src/ext/libcidr/cidr.cpp
         src/ext/cxxopts/cxxopts.hpp
@@ -112,8 +111,19 @@ add_executable(smithproxy
         src/async/asyncsocket.hpp
         src/async/asyncdns.hpp)
 
-add_executable(smithd ${SMITHD_DIR}/smithd.cpp ${SMITHD_DIR}/smithdcx.cpp src/daemon.cpp src/smithlog.cpp src/dns.cpp src/ext/libcidr/cidr.cpp src/addrobj.cpp src/async/asyncocsp.hpp)
-add_executable(smithdc ${SMITHD_DIR}/smithdc.cpp ${SMITHD_DIR}/smithdcx.cpp src/smithlog.cpp)
+add_executable(smithd
+        ${SMITHD_DIR}/smithd.cpp
+        ${SMITHD_DIR}/smithdcx.cpp
+
+        src/service/daemon.cpp
+        src/smithlog.cpp
+        src/dns.cpp src/ext/libcidr/cidr.cpp
+        src/addrobj.cpp src/async/asyncocsp.hpp)
+
+add_executable(smithdc
+        ${SMITHD_DIR}/smithdc.cpp
+        ${SMITHD_DIR}/smithdcx.cpp
+        src/smithlog.cpp)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}")
 

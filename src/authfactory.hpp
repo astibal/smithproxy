@@ -42,7 +42,7 @@
 
 #include <string>
 #include <mutex>
-#include <shmauth.hpp>
+#include <shm/shmauth.hpp>
 
 #include <log/logger.hpp>
 

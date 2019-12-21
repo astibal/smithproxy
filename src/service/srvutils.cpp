@@ -76,7 +76,7 @@
 #include <socksproxy.hpp>
 
 #include <cfgapi.hpp>
-#include <daemon.hpp>
+#include <service/daemon.hpp>
 #include <cmdserver.hpp>
 
 //#define MEM_DEBUG 1

@@ -47,8 +47,8 @@
 #include <threadedreceiver.hpp>
 
 #include <cfgapi.hpp>
-#include <daemon.hpp>
-#include <srvutils.hpp>
+#include <service/daemon.hpp>
+#include <service/srvutils.hpp>
 #include <smithlog.hpp>
 #include <smithdnsupd.hpp>
 

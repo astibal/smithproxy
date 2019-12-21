@@ -185,7 +185,7 @@ bool  AuthFactory::ip4_inc_counters(std::string& host, unsigned int rx, unsigned
 
 
 
-// remove IP from AUTH IP MAP and synchronize with SHM AUTH IP TABLE (table which is used to communicate with bend daemon)
+// remove IP from AUTH IP MAP and synchronize with SHM AUTH IP TABLE (table which is used to communicate with bend service)
 void AuthFactory::ip4_remove(std::string& host) {
 
     std::scoped_lock<std::recursive_mutex> l(AuthFactory::get_ip4_lock());
