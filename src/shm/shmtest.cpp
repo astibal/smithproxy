@@ -66,7 +66,7 @@
 #define T_SEM_NAME "/smithproxy_auth_token.sem"
 
 #include <shmtable.hpp>
-#include <shmtestsuite.hpp>
+#include <tools/wportals/bendc/shmtestsuite.hpp>
 #include <shmauth.hpp>
 
 

@@ -728,7 +728,32 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
 }
 
 void MitmProxy::on_right_bytes(baseHostCX* cx) {
-    
+
+//
+//    if(! ocsp) {
+//        auto* scom = dynamic_cast<SSLCom *>(cx->com());
+//        if (scom) {
+//            if (scom->target_cert() && scom->target_issuer() ) {
+//
+//                using std::placeholders::_1;
+//                ocsp = std::make_unique<AsyncOCSP>(scom->target_cert(), scom->target_issuer(), cx, std::bind(&MitmProxy::ssl_ocsp_callback, this, _1));
+//                //ocsp->io_pausing(true, true);
+//                ocsp->update(); //get socket
+//                ocsp->tap();
+//                ocsp->update(); // set monitors again
+//
+////                int i = 100;
+////                AsyncOCSP::task_state_t t;
+////                do {
+////                    t = ocsp->update();
+////                    i--;
+////                    usleep(20000);
+////                } while(t != AsyncOCSP::task_state_t::FINISHED || i <= 0);
+//            }
+//        }
+//    }
+
+
     if(write_payload()) {
 
         toggle_tlog();

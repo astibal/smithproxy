@@ -42,7 +42,7 @@
 
 #include <sobject.hpp>
 #include <ptr_cache.hpp>
-#include <nltemplate.hpp>
+#include <ext/nltemplate/nltemplate.hpp>
 
 using namespace ext::nltemplate;
 

@@ -45,7 +45,7 @@
 
 #include <hostcx.hpp>
 #include <baseproxy.hpp>
-#include <ext/cidr.hpp>
+#include <ext/libcidr/cidr.hpp>
 #include <ranges.hpp>
 #include <addrobj.hpp>
 

@@ -51,6 +51,9 @@
 #include <policy.hpp>
 #include <shmauth.hpp>
 
+#include <sslcertval.hpp>
+#include <async/asyncsocket.hpp>
+#include <async/asyncocsp.hpp>
 
 struct whitelist_verify_entry {
 };
@@ -59,7 +62,19 @@ typedef expiring<whitelist_verify_entry> whitelist_verify_entry_t;
 
 class FilterProxy;
 
-class MitmProxy : public baseProxy, public socle::sobject {
+
+class IOController {
+public:
+    virtual void tap() = 0;
+    virtual void untap() = 0;
+    IOController const* master() const noexcept { return ! master_ ?  this : master_; }
+    void master(IOController* n) { master_ = n; }
+
+private:
+    IOController* master_ = nullptr ;
+};
+
+class MitmProxy : public baseProxy, public socle::sobject, public IOController {
     
 protected:
     socle::trafLog *tlog_ = nullptr;
@@ -93,10 +108,16 @@ public:
     void add_filter(std::string const& name, FilterProxy* fp);
     
     // tap proxy - unmonitor all left and right sockets, pause contexts
-    virtual void tap();
+    void tap() override;
     // untap proxy - monitor back again all L and R sockets, unpause contexts
-    virtual void untap();
-    
+    void untap() override;
+
+    // testing
+    std::unique_ptr<inet::ocsp::AsyncOCSP> ocsp;
+    void ssl_ocsp_callback(int response) {
+        auto& log = inet::ocsp::OcspFactory::log();
+        _inf("async callback response %d", response);
+    };
     
     
     int matched_policy() const { return matched_policy_; }

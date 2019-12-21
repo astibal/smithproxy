@@ -46,7 +46,7 @@
 #include <chrono>
  
 #include <libconfig.h++>
-#include <ext/cidr.hpp>
+#include <ext/libcidr/cidr.hpp>
 #include <ranges.hpp>
 #include <policy.hpp>
 #include <sslcom.hpp>

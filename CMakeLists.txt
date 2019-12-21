@@ -2,12 +2,14 @@ cmake_minimum_required(VERSION 2.8)
 
 SET(SOCLE_DIR "socle")
 SET(SOCLE_COMMON_DIR "socle/common")
-SET(SMITHD_DIR "smithbackd")
+SET(SMITHD_DIR "src/smithbackd")
 
 project(smithproxy CXX)
 include_directories ("${SOCLE_DIR}")
 include_directories ("${SOCLE_COMMON_DIR}")
 include_directories ("${PROJECT_SOURCE_DIR}")
+include_directories ("${PROJECT_SOURCE_DIR}/src/")
+include_directories ("${PROJECT_SOURCE_DIR}/src/ext")
 include_directories ("${SMITHD_DIR}")
 
 add_subdirectory(${SOCLE_DIR} socle_lib)
@@ -70,40 +72,48 @@ message(STATUS "Git commit smithrproxy version: ${SX_GIT_VERSION}")
 message(STATUS "Generating smithproxy_version.h")
 
 configure_file(
-        ${CMAKE_SOURCE_DIR}/smithproxy_version.h.in
-        ${CMAKE_SOURCE_DIR}/smithproxy_version.h
+        ${CMAKE_SOURCE_DIR}/src/smithproxy_version.h.in
+        ${CMAKE_SOURCE_DIR}/src/smithproxy_version.h
 )
 
 add_executable(smithproxy
-        main.cpp
-        mitmhost.cpp
-        mitmproxy.cpp
-        cfgapi.cpp
-        policy.cpp
-        daemon.cpp
-        sockshostcx.cpp
-        socksproxy.cpp
-        cmdserver.cpp
-        shmauth.cpp
-        dns.cpp
-        inspectors.cpp
-        addrobj.cpp
-        srvutils.cpp
-        staticcontent.cpp
-        nltemplate.cpp
-        authfactory6.cpp
-        smithlog.cpp
-        filterproxy.cpp
-        smithdnsupd.cpp
-        loadb.cpp
-        smithproxy.hpp
-        smithproxy.cpp
+        src/main.cpp
+        src/mitmhost.cpp
+        src/mitmproxy.cpp
+        src/cfgapi.cpp
+        src/policy.cpp
+        src/daemon.cpp
+        src/sockshostcx.cpp
+        src/socksproxy.cpp
+        src/cmdserver.cpp
+        src/shmauth.cpp
+        src/dns.cpp
+        src/inspectors.cpp
+        src/addrobj.cpp
+        src/srvutils.cpp
+        src/staticcontent.cpp
+        src/authfactory6.cpp
+        src/smithlog.cpp
+        src/filterproxy.cpp
+        src/smithdnsupd.cpp
+        src/loadb.cpp
+        src/smithproxy.hpp
+        src/smithproxy.cpp
 
-        ext/cidr.cpp
-        ext/cxxopts.hpp
-        authfactory.hpp authfactory4.cpp sxsignature.hpp pyinspector.hpp sigfactory.hpp async/asyncsocket.hpp async/asyncdns.hpp)
-add_executable(smithd ${SMITHD_DIR}/smithd.cpp ${SMITHD_DIR}/smithdcx.cpp daemon.cpp smithlog.cpp dns.cpp ext/cidr.cpp addrobj.cpp async/asyncocsp.hpp)
-add_executable(smithdc ${SMITHD_DIR}/smithdc.cpp ${SMITHD_DIR}/smithdcx.cpp smithlog.cpp)
+        src/ext/libcidr/cidr.cpp
+        src/ext/cxxopts/cxxopts.hpp
+        src/ext/nltemplate/nltemplate.cpp
+
+        src/authfactory.hpp
+        src/authfactory4.cpp
+        src/sxsignature.hpp
+        src/pyinspector.hpp
+        src/sigfactory.hpp
+        src/async/asyncsocket.hpp
+        src/async/asyncdns.hpp)
+
+add_executable(smithd ${SMITHD_DIR}/smithd.cpp ${SMITHD_DIR}/smithdcx.cpp src/daemon.cpp src/smithlog.cpp src/dns.cpp src/ext/libcidr/cidr.cpp src/addrobj.cpp src/async/asyncocsp.hpp)
+add_executable(smithdc ${SMITHD_DIR}/smithdc.cpp ${SMITHD_DIR}/smithdcx.cpp src/smithlog.cpp)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}")
 

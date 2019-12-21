@@ -55,7 +55,7 @@
 #include <buffer.hpp>
 #include <display.hpp>
 #include <log/logger.hpp>
-#include <ext/cidr.hpp>
+#include <ext/libcidr/cidr.hpp>
 #include <addrobj.hpp>
 
 #include <dns.hpp>

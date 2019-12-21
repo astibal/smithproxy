@@ -42,7 +42,7 @@
 #ifndef ADDROBJ_HPP_
 #define ADDROBJ_HPP_
 
-#include <ext/cidr.hpp>
+#include <ext/libcidr/cidr.hpp>
 #include <display.hpp>
 #include <log/logger.hpp>
 #include <sobject.hpp>
