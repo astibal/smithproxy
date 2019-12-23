@@ -263,15 +263,15 @@ class SmithProxyDog(Daemon):
                     # do restart in child. For all cases, child is just a temporary thing, so exit.
                     p = os.fork()
                     if p == 0:
-                        flog.debug("fixing sub-service: child process: %d" % (os.getpid(),))
+                        flog.debug("fixing sub-daemon: child process: %d" % (os.getpid(),))
                         os.setsid()
                         d.daemonize()
                         d.run()
                         sys.exit(0)
                     else:
-                        flog.debug("fixing sub-service: parent process: %d waiting for %d to finish" % (os.getpid(), p))
+                        flog.debug("fixing sub-daemon: parent process: %d waiting for %d to finish" % (os.getpid(), p))
                         os.waitpid(p, 1)  # wait for 'p'
-                        flog.debug("fixing sub-service: parent process: %d waiting for %d finished" % (os.getpid(), p))
+                        flog.debug("fixing sub-daemon: parent process: %d waiting for %d finished" % (os.getpid(), p))
 
         if ret:
             msg = "Status of all monitored processes is OK"
@@ -362,7 +362,7 @@ if __name__ == "__main__":
     bend_.log = flog
     daemon.sub_daemons.append(bend_)
 
-    # Backend broker service -- unprivilegged connections from clients
+    # Backend broker daemon -- unprivilegged connections from clients
     bendbrod_ = BendBrodDaemon('bendbrod', BENDBROD_PIDFILE % (TENANT_NAME,))
     bendbrod_.pwd = INFRA_PATH
     bendbrod_.log = flog

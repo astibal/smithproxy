@@ -383,8 +383,8 @@ int main(int argc, char *argv[]) {
         }
 
         get_logger()->dup2_cout(false);
-        _inf("Entering service mode.");
-        std::cout << "Entering service mode.";
+        _inf("Entering daemon mode.");
+        std::cout << "Entering daemon mode.";
 
         this_daemon.daemonize();
         this_daemon.write_pidfile();
