@@ -1,12 +1,14 @@
 #
-FROM astibal/smithproxy:testing_base
+FROM astibal/smithproxy:0.9-base
 
 # Set the working directory to /app
 WORKDIR /app
 
 
-RUN git clone https://bitbucket.com/astibal/socle.git socle && git clone https://bitbucket.com/astibal/smithproxy.git smithproxy && \
-cd smithproxy && mkdir build && cd build && cmake .. && make install
+RUN git clone https://github.com/astibal/smithproxy.git -b master smithproxy && \
+cd smithproxy && \
+git clone https://github.com/astibal/socle.git -b master socle && \
+mkdir build && cd build && cmake .. -DCMAKE_BUILD_TYPE=Release && make install
 
 # Define environment variable
 

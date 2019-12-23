@@ -1,5 +1,5 @@
 #
-FROM astibal/smithproxy:testing-cpp17_base
+FROM astibal/smithproxy:cpp17-base
 
 # Set the working directory to /app
 WORKDIR /app
