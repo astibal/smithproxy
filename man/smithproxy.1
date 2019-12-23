@@ -6,19 +6,57 @@
 .B smithproxy 
 \- agent Smith's favorite mitm proxy
 .SH SYNOPSIS
-.B smithproxy [--debug|--diagnose|--dump] [--conf <non-default-config>] [--daemonize]
 
-.SH DESCRIPTION
-smithproxy \- agent Smith's favorite mitm proxy, brought to you by Ales Stibal
-<astib@mag0.net>
+.B Service operation:
+
+.br
+Smithproxy is designed to run as a system service. Please see system service named
+.B smithproxy
+for more infomation.
+.br
+Config files needed to run service:
+.nf
+
+   /etc/smithproxy/
+
+         smithproxy.startup.cfg -- service and interface options
+         smithproxy.cfg         -- smithproxy service configuration
+         users.cfg              -- auth portal configuration (optional)
+
+         # advanced configuration:
+
+         smithproxy.startup.sh  -- called by service script, it runs
+                                   smithproxy startup procedure, setting
+                                   TPROXY, tenants (if present), etc.
+
+                                   Typically, you don't need to run this
+                                   manually.
+
+         smithproxy.tenants.cfg -- OPTIONAL:
+                                   if present, smithproxy multi-tenancy
+                                   is enabled. Each line consists of:
+
+                         <index>;<name>;<ip4-range>;<ip6-range>; comments
+
+                         Note: all features are supported with multi-tenancy
+                                      enabled
+
+.fi
+
+.B Command line operation (this is usually what your DON'T want):
+
+.nf
+    smithproxy [--conf <non-default-config>] [--daemonize]
+.fi
 
 .SH Introduction
 .B Smithproxy
 is capturing, plain-text or SSL man-in-the-middle proxy for Linux iptables TPROXY target.
 It supports SSL certificate spoofing - cloning the original certificate including
-Subject and SAN, signing it with it's own CA certificate.
+Subject and SAN, signing it with its own CA certificate.
 .br
-Smitproxy can also proxy UDP plaintext traffic.
+Smitproxy can also proxy UDP plaintext traffic, understands DNS.
+It also acts as SOCKS5 proxy, if you prefer.
 
 .br
 It works the way that it terminates traffic intended to be forwarded on itself, and 
@@ -33,7 +71,7 @@ copying bytes from one socket to another.
 .fi
 
 .nf
-    Intercepted with smithproxy:
+    Intercepted with smithproxy using TPROXY:
     
       Client (conn A) ----> (Linux Router).-----X target server
                                 |         | 
@@ -43,9 +81,19 @@ copying bytes from one socket to another.
 
 .fi
 
+Despite conn A and B are in fact different connections in OS level,
+.B they have the same source IP and ports.
+.br
+That's why you want to check
+and verify routing is correct up from smithproxy, since the traffic back
+to real Client's IP must find the way.
+If you don't need or want transparent addresses, you can run them off in policy
+in config file by enabling nat setting.
+
+
 .br
 
-.B "SSL:"
+.B "SSL/TLS:"
 .br
 Certificate spoofing uses default server certificate's private and public keys; 
 certificates produced this way are cached for further use.
@@ -63,29 +111,6 @@ file) into your 'Trusted Root CA' certificate store.
 .B "WARNING:"
 in such a case you will unconditionally trust all certificates it resigned!
 
-.SH OPTIONS
-
-.IP "--diagnose (optional)"
-toggle diagnose mode; it will print out quite number of diagnostics. Those aim to be 
-human, non-programmer readable and could help you to identify where potential problem is.
-
-.IP "--debug (optional, not recommended)"
-toggle impractically verbose logging mode, extremely chatty especially for SSL traffic. 
-You probably don't want to use it, unless you really need to know state machine cycle
-updates and similar info needed to troubleshoot the program itself.
-
-.IP "--dump (optional, not recommended)"
-toggle this to make your terminal busy. Most of 'Dump' level logging really dumps read/write 
-buffers and prints out memory allocation pointers. Added for completeness and just for the case.
-
-.IP "--conf (optional, default: /etc/smithproxy/smithproxy.cfg)"
-You can override config file to be used by this setting. Usually not needed.
-
-.IP "--daemonize (optional)"
-Run smithproxy in the background. Settings to log to stdout/stderr are ignored,
-only logging to the file could be used.
-
-
 .SH CONFIG FILE
 As you see, there are not much options for the command line. This is because 
 we utilize quite large config file, which should be however very well readable and
@@ -98,45 +123,16 @@ Config file is usually located in
 command line option.
 
 .SH USAGE
-To make smithproxy work, you need at least following configuration:
+You will typically run smithproxy as a system service. Please use config files to
+control smithproxy behavior.
 
-
-.nf
-  # if you don't have routing enabled yet, set it like this:
-  sysctl -w net.ipv4.ip_forward=1
-  
-  # create a new iptables chain, name it DIVERT
-  iptables -t mangle -N DIVERT
-  iptables -t mangle -A DIVERT -j MARK --set-mark 1
-  iptables -t mangle -A DIVERT -j ACCEPT
- 
-  # process all non-local connections matching socket locally
-  iptables -t mangle -A PREROUTING -p tcp -m socket -j DIVERT
-  iptables -t mangle -A PREROUTING -p udp -m socket -j DIVERT
-
-  # add custom routing rule for above marked packets to be processed 
-  # through loopback interface
-  ip rule add fwmark 1 lookup 100
-  ip route add local 0.0.0.0/0 dev lo table 100
-  
-  # redirect new traffic to chain SMITH
-  iptables -t mangle -N SMITH
-  iptables -t mangle -A PREROUTING -j SMITH
-  
-  # You can utilize /usr/share/smithptoxy/utils/ipt_chain_setup.sh to create
-  # chain SMITH for you. If you want to do it manually, fell free ;)
-  
-  # if you are finished, run smithproxy
-  smithproxy 
-.fi
+To toubleshoot smithproxy, use
+.B smithproxy_cli
+rich CLI and debugging features.
    
 .SH OUTPUT
 .IP Logging
-Standard logging is informing about new/closed connections, and general
-status messages, depending on logging level set on command line. By default
-it's set to 'Informational'.
-.br
-It doesn't contain any packet captures.
+Standard logging is set to errors only. Use CLI tool to set file logging level, or change loglevel in config file.
 
 .IP "Capture directory"
 Captures are organized in the structure:
@@ -144,30 +140,42 @@ Captures are organized in the structure:
    <write_payload_dir>/
       [source IP]/
          [date of capture]/
-            <write_payload_file_prefix>[proxy connection ID].<write_payload_file_suffix> -- capture file
-   
-   Note: entries in square-brackets cannot be changed, angle-brackets values
-         could be changed in config file.
+               <connection_id>.smcap -- capture file
 .fi
 
 This structure is automatically created, so you don't need to worry
 to just delete it if your tests are over, or you are running out of disk space.
 
-.IP "Capture file format"
+.IP "Capture file format - smcap"
 Capture file is text file, similar to `hexdump -C' output. You can however find
 several notes in there; for example if the traffic was SSL, smithproxy logs also original server's certificate.
 
+.B Pplay
+is the tool I wrote to replay it, or use it as data source for your python program (ie. for further analysis).
+.Bpplay
+can be also used to replay it into pcap (with various limitations).
+
+You can simply install it with:
+.nf
+pip install pplay
+.fi
+
+.SH PERFORMANCE on decent machine
+Smithproxy is considerably fast. Using it in transparent mode, you barely recognize it's there.
+It handles gigabits of plaintext traffic, and hundreds of TLS traffic.
+
+Bottleneck is typically disk IO as it is dumping packets to files. This is however asynchronous,
+so you won't see disk IO as biggest issue. It's CPU which needs to format dumped .smcap files.
 
 .SH LIMITATIONS
-* Smithproxy is changing source IP address and source port (won't fix).
-.br
-* Captures are text files not usable by e.g. wireshark 
+  No limitations detected.
 
 
 .SH FILES
 .nf 
-/etc/smithproxy.cfg
-               -- config file
+/etc/smithproxy/*
+               -- config files
+
 /etc/smithproxy/certs/defaults/
   ca-cert.pem  -- Spoofing CA certificate, issuer for spoofing server 
                   connection certificate
@@ -180,16 +188,21 @@ several notes in there; for example if the traffic was SSL, smithproxy logs also
   srv-cert.pem -- Default client-side connection certificate 
   srv-key.pem  -- Default client-side connection private key
   
-mitm/
-               -- Directory containing packet captures. 
+/var/local/smithproxy/data/
+               -- Directory containing packet captures.
+
+/usr/share/smithproxy/
+               -- Smithproxy infrastructure python modules
+
+/usr/share/smithproxy/www
+               -- Smithproxy portal services
 .fi
 .RS
 
 .SH BUGS
-See LIMITATIONS above. All known limitations are on short list for fixes to new release, 
-unless explicitly explained.
 .br
-Smithproxy has been  tested with valgrind tool and didn't exhibit any leaks.
+There are almost certainly some bugs. Please feel free to log an issue on github,
+or come over to our discord server.
 
 .SH COPYLEFT
 This software is released under GNU GPL license (version 2 or later). 
@@ -202,8 +215,8 @@ licensed with LGPL version 2 or later.
 .br
 
 .br
-I would prefer you won't use it for sneaking into other's privacy, as it's intended 
-to be used as testing/troubleshooting tool.
+I would like to hear from you about how are you using smithproxy. If it's not too secret,
+of course :). Drop me a line, thanks!
 .br
 
 .br
