@@ -41,7 +41,7 @@
 #define PYINSPECTOR_HPP
 
 #include <lockable.hpp>
-#include <inspectors.hpp>
+#include <policy/inspectors.hpp>
 
 #ifdef USE_PYTHON
 

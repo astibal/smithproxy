@@ -56,9 +56,8 @@
 #include <display.hpp>
 #include <log/logger.hpp>
 #include <ext/libcidr/cidr.hpp>
-#include <addrobj.hpp>
-
-#include <dns.hpp>
+#include <policy/addrobj.hpp>
+#include <inspect/dns.hpp>
 
 #define DNS_HEADER_SZ 12
 

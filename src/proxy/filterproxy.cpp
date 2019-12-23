@@ -38,8 +38,8 @@
 */
 
 
-#include <filterproxy.hpp>
-#include <mitmproxy.hpp>
+#include <proxy/filterproxy.hpp>
+#include <proxy/mitmproxy.hpp>
 
 DEFINE_LOGGING(FilterProxy);
 

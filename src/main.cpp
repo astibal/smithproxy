@@ -80,9 +80,9 @@
 
 #include <libconfig.h++>
 
-#include <mitmhost.hpp>
-#include <mitmproxy.hpp>
-#include <socksproxy.hpp>
+#include <proxy/mitmhost.hpp>
+#include <proxy/mitmproxy.hpp>
+#include <proxy/socks5/socksproxy.hpp>
 
 #include <cfgapi.hpp>
 #include <service/daemon.hpp>
@@ -90,7 +90,7 @@
 #include <service/srvutils.hpp>
 #include <staticcontent.hpp>
 #include <smithlog.hpp>
-#include <smithdnsupd.hpp>
+#include <service/dnsupd/smithdnsupd.hpp>
 
 #include <service/smithproxy.hpp>
 

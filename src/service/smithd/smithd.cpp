@@ -61,7 +61,7 @@
 #include <service/srvutils.hpp>
 #include <smithlog.hpp>
 
-#include <service/smithdcx.hpp>
+#include <service/smithd/smithdcx.hpp>
 
 //#define MEM_DEBUG 1
 #ifdef MEM_DEBUG

@@ -71,9 +71,9 @@
 
 #include <libconfig.h++>
 
-#include <mitmhost.hpp>
-#include <mitmproxy.hpp>
-#include <socksproxy.hpp>
+#include <proxy/mitmhost.hpp>
+#include <proxy/mitmproxy.hpp>
+#include <proxy/socks5/socksproxy.hpp>
 
 #include <cfgapi.hpp>
 #include <service/daemon.hpp>

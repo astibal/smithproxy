@@ -65,14 +65,15 @@
 #include <sslcertstore.hpp>
 
 #include <main.hpp>
-#include <service/smithproxy.hpp>
-#include <mitmproxy.hpp>
-#include <socksproxy.hpp>
 #include <sobject.hpp>
-#include <dns.hpp>
-#include <inspectors.hpp>
-#include <authfactory.hpp>
-#include <sigfactory.hpp>
+
+#include <service/smithproxy.hpp>
+#include <proxy/mitmproxy.hpp>
+#include <proxy/socks5/socksproxy.hpp>
+#include <policy/inspectors.hpp>
+#include <policy/authfactory.hpp>
+#include <policy/sigfactory.hpp>
+#include <inspect/dnsinspector.hpp>
 
 
 #include "socle_version.h"

@@ -42,9 +42,9 @@
 
 #include <sslmitmcom.hpp>
 #include <apphostcx.hpp>
-#include <dns.hpp>
-#include <inspectors.hpp>
-#include <sxsignature.hpp>
+#include <inspect/dns.hpp>
+#include <policy/inspectors.hpp>
+#include <inspect/sxsignature.hpp>
 
 
 class MySSLMitmCom : public baseSSLMitmCom<SSLCom> {

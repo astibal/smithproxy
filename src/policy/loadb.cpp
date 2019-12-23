@@ -35,54 +35,57 @@
     gives permission to release a modified version without this exception;
     this exception also makes it possible to release a modified version
     which carries forward this exception.
-*/ 
-
-#ifndef __SOCKSPROXY_HPP__
-  #define __SOCKSPROXY_HPP__
-
-#include <threadedacceptor.hpp>
-
-#include <mitmproxy.hpp>
-#include <sockshostcx.hpp>
+*/
 
 
-class SocksProxy : public MitmProxy {
-public:
-    explicit SocksProxy(baseCom*);
-    ~SocksProxy() override = default;
-    void on_left_message(baseHostCX* cx) override;
+#include <policy/loadb.hpp>
+
+template <class HostInfoType>
+HostPool<HostInfoType>::~HostPool() {
     
-    virtual void socks5_handoff(socksServerCX* cx);
+    locked_guard l(this);
+    
+    candidates.clear();
+    
+    for(auto i: host_data_) {
+        delete i.second();
+    }
+}
 
-    std::string to_string(int lev=iINF) const override { std::string r(string_format("SocksProxy[%s]", MitmProxy::to_string().c_str())); return r; };
+template <class HostInfoType>
+bool HostPool<HostInfoType>::insert_new(Host h)  {
 
-    DECLARE_C_NAME("SocksProxy");
-    DECLARE_LOGGING(to_string);
-
-private:
-    time_t auth_table_refreshed = 0;
-
-    logan_attached<SocksProxy> log;
-};
-
-
-class MitmSocksProxy : public ThreadedAcceptorProxy<SocksProxy> {
-public:
-
-    MitmSocksProxy(baseCom* c, int worker_id) : ThreadedAcceptorProxy<SocksProxy>(c,worker_id) {
-        log = logan::attach(this, "masterproxy.socks");
-    };
-    baseHostCX* new_cx(int s) override;
-    void on_left_new(baseHostCX* just_accepted_cx) override;
-
-    std::string to_string(int lev=iINF) const override { static std::string r(string_format("MitmSocksProxy[%s]", baseProxy::to_string().c_str())); return r; };
-
-    DECLARE_C_NAME("MitmSocksProxy");
-    DECLARE_LOGGING(to_string);
-
-private:
-    logan_attached<MitmSocksProxy> log;
-};
+    locked_guard l(this);
+    
+    auto i = host_data_.find(h);
+    
+    if(i != host_data_.end()) {
+        return false;
+    }
+    
+    host_data_[h] = new HostInfoType(h);
+    
+    return true;
+}
 
 
-#endif
+template <class HostInfoType>
+const HostInfoType* HostPool<HostInfoType>::compute() {
+    locked_guard l(this);
+    
+    int i = compute_index();
+    HostInfoType* r = candidates.at(i);
+}
+
+template <class HostInfoType>
+void HostPool<HostInfoType>::refresh() {
+    locked_guard l(this);
+    
+    candidates.clear();
+    for(auto i: host_data_) {
+        HostInfoType* hit = i.second();
+        if(hit->is_active) {
+            candidates.push_back(hit);
+        }
+    }
+}

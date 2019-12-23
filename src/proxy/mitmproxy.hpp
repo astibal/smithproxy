@@ -43,12 +43,12 @@
 
 #include <basecom.hpp>
 #include <hostcx.hpp>
-#include <sockshostcx.hpp>
+#include <proxy/socks5/sockshostcx.hpp>
 #include <baseproxy.hpp>
 #include <threadedacceptor.hpp>
 #include <threadedreceiver.hpp>
 #include <traflog.hpp>
-#include <policy.hpp>
+#include <policy/policy.hpp>
 #include <shm/shmauth.hpp>
 
 #include <sslcertval.hpp>

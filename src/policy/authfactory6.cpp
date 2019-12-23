@@ -38,7 +38,7 @@
 */
 
 #include <cfgapi.hpp>
-#include <authfactory.hpp>
+#include <policy/authfactory.hpp>
 #include <log/logger.hpp>
 
 int AuthFactory::shm_ip6_table_refresh()  {

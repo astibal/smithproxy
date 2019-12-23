@@ -50,7 +50,7 @@
 #include <socle.hpp>
 #include <baseproxy.hpp>
 #include <uxcom.hpp>
-#include <service/smithdcx.hpp>
+#include <service/smithd/smithdcx.hpp>
 
 static std::string cfg_ux_socket = "/var/run/smithd.sock";
 

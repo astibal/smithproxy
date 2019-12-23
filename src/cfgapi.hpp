@@ -48,7 +48,7 @@
 #include <libconfig.h++>
 #include <ext/libcidr/cidr.hpp>
 #include <ranges.hpp>
-#include <policy.hpp>
+#include <policy/policy.hpp>
 #include <sslcom.hpp>
 
 #include <shm/shmauth.hpp>

@@ -2,9 +2,13 @@ cmake_minimum_required(VERSION 2.8)
 
 SET(SOCLE_DIR "socle")
 SET(SOCLE_COMMON_DIR "socle/common")
-SET(SMITHD_DIR "src/service")
+SET(SMITHD_DIR "src/service/smithd")
 
 project(smithproxy CXX)
+
+SET(CMAKE_SOURCE_DIR "src/")
+SET(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}")
+
 include_directories ("${SOCLE_DIR}")
 include_directories ("${SOCLE_COMMON_DIR}")
 include_directories ("${PROJECT_SOURCE_DIR}")
@@ -71,31 +75,31 @@ message(STATUS "Git commit smithrproxy version: ${SX_GIT_VERSION}")
 message(STATUS "Generating smithproxy_version.h")
 
 configure_file(
-        ${CMAKE_SOURCE_DIR}/src/smithproxy_version.h.in
-        ${CMAKE_SOURCE_DIR}/src/smithproxy_version.h
+        ${CMAKE_SOURCE_DIR}/smithproxy_version.h.in
+        ${CMAKE_SOURCE_DIR}/smithproxy_version.h
 )
 
 add_executable(smithproxy
         src/main.cpp
-        src/mitmhost.cpp
-        src/mitmproxy.cpp
+        src/proxy/mitmhost.cpp
+        src/proxy/mitmproxy.cpp
         src/cfgapi.cpp
-        src/policy.cpp
+        src/policy/policy.cpp
         src/service/daemon.cpp
-        src/sockshostcx.cpp
-        src/socksproxy.cpp
+        src/proxy/socks5/sockshostcx.cpp
+        src/proxy/socks5/socksproxy.cpp
         src/cmdserver.cpp
         src/shm/shmauth.cpp
-        src/dns.cpp
-        src/inspectors.cpp
-        src/addrobj.cpp
+        src/inspect/dns.cpp
+        src/policy/inspectors.cpp
+        src/policy/addrobj.cpp
         src/service/srvutils.cpp
         src/staticcontent.cpp
-        src/authfactory6.cpp
+        src/policy/authfactory6.cpp
         src/smithlog.cpp
-        src/filterproxy.cpp
-        src/smithdnsupd.cpp
-        src/loadb.cpp
+        src/proxy/filterproxy.cpp
+        src/service/dnsupd/smithdnsupd.cpp
+        src/policy/loadb.cpp
         src/service/smithproxy.hpp
         src/service/smithproxy.cpp
 
@@ -103,13 +107,13 @@ add_executable(smithproxy
         src/ext/cxxopts/cxxopts.hpp
         src/ext/nltemplate/nltemplate.cpp
 
-        src/authfactory.hpp
-        src/authfactory4.cpp
-        src/sxsignature.hpp
-        src/pyinspector.hpp
-        src/sigfactory.hpp
+        src/policy/authfactory.hpp
+        src/policy/authfactory4.cpp
+        src/inspect/sxsignature.hpp
+        src/inspect/pyinspector.hpp
+        src/policy/sigfactory.hpp
         src/async/asyncsocket.hpp
-        src/async/asyncdns.hpp)
+        src/async/asyncdns.hpp src/inspect/dnsinspector.hpp src/inspect/dnsinspector.cpp)
 
 add_executable(smithd
         ${SMITHD_DIR}/smithd.cpp
@@ -117,8 +121,8 @@ add_executable(smithd
 
         src/service/daemon.cpp
         src/smithlog.cpp
-        src/dns.cpp src/ext/libcidr/cidr.cpp
-        src/addrobj.cpp src/async/asyncocsp.hpp)
+        src/inspect/dns.cpp src/ext/libcidr/cidr.cpp
+        src/policy/addrobj.cpp src/async/asyncocsp.hpp)
 
 add_executable(smithdc
         ${SMITHD_DIR}/smithdc.cpp

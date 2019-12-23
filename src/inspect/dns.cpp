@@ -41,7 +41,7 @@
 #include <openssl/rand.h>
 #include <unistd.h>
 
-#include <dns.hpp>
+#include <inspect/dns.hpp>
 #include <log/logger.hpp>
 
 DEFINE_LOGGING(DNS_Packet);

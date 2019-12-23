@@ -38,8 +38,8 @@
     
 */    
 
-#include <addrobj.hpp>
-#include <dns.hpp>
+#include <policy/addrobj.hpp>
+#include <inspect/dns.hpp>
 #include <sstream>
 
 int CidrAddress::contains(CIDR* other) {

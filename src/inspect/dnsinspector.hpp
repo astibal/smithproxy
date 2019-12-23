@@ -37,87 +37,10 @@
     which carries forward this exception.
 */
 
-//
-/// \file  inspector.hpp
-/// \brief Inspection modules called/updated usually MitmHostCX::inspect()
-/// \sa MitmHostCX::inspect
-//
+#ifndef DNSINSPECTOR_HPP
+#define DNSINSPECTOR_HPP
 
-
-#ifndef INSPECTORS_HPP_
-#define INSPECTORS_HPP_
-
-#include <basecom.hpp>
-#include <tcpcom.hpp>
-#include <dns.hpp>
-#include <signature.hpp>
-#include <apphostcx.hpp>
-#include <regex>
-
-#include <sobject.hpp>
-#include <lockable.hpp>
-
-//
-/// \brief Abstract class intended to be parent for all inspector modules.
-///        Serves as an interface.
-///
-//
-class Inspector : public socle::sobject, public lockable {
-public:
-    Inspector() {
-        log = logan::attach(this, "alg");
-    }
-    virtual ~Inspector() = default;
-    //! called always when there are new data in the flow. \see class Flow.
-    virtual void update(AppHostCX* cx) = 0;
-    //! called before inserting to inspector list. 
-    //! \return false if you don't want insert inspector to the list (and save some CPU cycles).
-    virtual bool l4_prefilter(AppHostCX* cx) = 0;
-    
-    //! called before each update to indicate if update() should be called.
-    virtual bool interested(AppHostCX*) const = 0;
-    
-    //! indicate if inspection is complete. Completed inspectors are not updated.
-    inline bool completed() const   { return completed_; }
-    //! indicate if inspection started already.
-    inline bool in_progress() const { return in_progress_; }
-    //! indicate if inspector was able to parse and process the payload.
-    inline bool result() const { return result_; }
-
-    typedef enum { OK=0, BLOCK, CACHED } inspect_verdict;
-    inspect_verdict verdict_ = OK;
-    inspect_verdict verdict() const { return verdict_; };
-    void verdict(inspect_verdict v) { verdict_ = v; }
-    virtual void apply_verdict(AppHostCX* cx);
-private:
-    logan_attached<Inspector> log;
-
-protected:
-    bool completed_ = false;
-    void completed(bool b) { completed_ = b; }
-    bool in_progress_ = false;
-    void in_progress(bool b) { in_progress_ = b; }
-    bool result_ = false;
-    void result(bool b) { result_ = b; }
-    
-    //! internal stage counter. It could be used 
-    int stage = 0;
-    
-    
-    bool ask_destroy() override { return false; };
-    std::string to_string(int verbosity=iINF) const override {
-        return string_format("%s: in-progress: %d stage: %d completed: %d result: %d",
-                             c_name(),in_progress(), stage, completed(),result());
-    };
-    
-                                                
-    static std::string remove_redundant_dots(std::string);
-    static std::vector<std::string> split(std::string, unsigned char delimiter);
-    static std::pair<std::string,std::string> split_fqdn_subdomain(std::string& fqdn);
-                                                
-    DECLARE_C_NAME("Inspector");
-};
-
+#include <policy/inspectors.hpp>
 
 class DNS_Inspector : public Inspector {
 public:
@@ -128,21 +51,21 @@ public:
         // clear local request cache
         for(auto x: requests_) { if(x.second) {delete x.second; } };
         if(cached_response != nullptr) delete cached_response;
-    };  
+    };
     void update(AppHostCX* cx) override;
 
     bool l4_prefilter(AppHostCX* cx) override { return interested(cx); };
     bool interested(AppHostCX*cx) const override ;
-    
+
     bool opt_match_id = false;
     bool opt_randomize_id = false;
     bool opt_cached_responses = false;
-    
+
     DNS_Request* find_request(uint16_t r) { auto it = requests_.find(r); if(it == requests_.end()) { return nullptr; } else { return it->second; }  }
     bool validate_response(DNS_Response* ptr);
     bool store(DNS_Response* ptr);
     void apply_verdict(AppHostCX* cx) override;
-    
+
     std::string to_string(int verbosity=iINF) const override;
 
     static std::regex wildcard;
@@ -164,4 +87,5 @@ private:
 };
 
 
-#endif //INSPECTORS_HPP_
+
+#endif //DNSINSPECTOR_HPP

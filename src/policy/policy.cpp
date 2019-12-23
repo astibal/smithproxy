@@ -37,7 +37,7 @@
     which carries forward this exception.
 */  
 
-#include <policy.hpp>
+#include <policy/policy.hpp>
 
 DEFINE_LOGGING(PolicyRule);
 

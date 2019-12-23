@@ -39,19 +39,23 @@
 
 #include <vector>
 
-#include <cfgapi.hpp>
-#include <log/logger.hpp>
-#include <policy.hpp>
-#include <mitmproxy.hpp>
-#include <mitmhost.hpp>
-#include <cmdserver.hpp>
-
 #include <socle.hpp>
 #include <main.hpp>
 
-#include <authfactory.hpp>
-#include <pyinspector.hpp>
-#include <sigfactory.hpp>
+
+#include <cfgapi.hpp>
+#include <cmdserver.hpp>
+#include <log/logger.hpp>
+
+#include <policy/policy.hpp>
+#include <policy/authfactory.hpp>
+#include <policy/sigfactory.hpp>
+
+#include <proxy/mitmproxy.hpp>
+#include <proxy/mitmhost.hpp>
+
+#include <inspect/dnsinspector.hpp>
+#include <inspect/pyinspector.hpp>
 
 CfgFactory::CfgFactory(): log(get_log()), args_debug_flag(NON), syslog_level(INF) {
 

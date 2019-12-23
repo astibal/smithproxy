@@ -41,15 +41,15 @@
 #include <cstdlib>
 #include <ctime>
 
-#include <mitmproxy.hpp>
-#include <mitmhost.hpp>
+#include <proxy/mitmproxy.hpp>
+#include <proxy/mitmhost.hpp>
 #include <log/logger.hpp>
 #include <cfgapi.hpp>
-#include <sockshostcx.hpp>
+#include <proxy/socks5/sockshostcx.hpp>
 #include <uxcom.hpp>
 #include <staticcontent.hpp>
-#include <filterproxy.hpp>
-#include <authfactory.hpp>
+#include <proxy/filterproxy.hpp>
+#include <policy/authfactory.hpp>
 
 #include <algorithm>
 #include <ctime>

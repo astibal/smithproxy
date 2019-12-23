@@ -40,7 +40,7 @@
 #ifndef SRVUTILS_HPP_
 #define SRVUTILS_HPP_
 
-#include <authfactory.hpp>
+#include <policy/authfactory.hpp>
 
 class ServiceFactory {
 public:

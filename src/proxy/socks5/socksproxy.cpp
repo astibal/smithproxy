@@ -40,11 +40,11 @@
 #include <sslcom.hpp>
 #include <tcpcom.hpp>
 
-#include <sockshostcx.hpp>
-#include <socksproxy.hpp>
-#include <mitmhost.hpp>
+#include <proxy/socks5/sockshostcx.hpp>
+#include <proxy/socks5/socksproxy.hpp>
+#include <proxy/mitmhost.hpp>
 #include <cfgapi.hpp>
-#include <authfactory.hpp>
+#include <policy/authfactory.hpp>
 
 #include <vector>
 

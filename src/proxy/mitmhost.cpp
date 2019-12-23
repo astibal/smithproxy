@@ -37,11 +37,11 @@
     which carries forward this exception.
 */
 
-#include <mitmhost.hpp>
+#include <proxy/mitmhost.hpp>
 #include <display.hpp>
 #include <log/logger.hpp>
 #include <cfgapi.hpp>
-#include <sigfactory.hpp>
+#include <policy/sigfactory.hpp>
 
 DEFINE_LOGGING(MitmHostCX)
 

@@ -40,7 +40,7 @@
 
 #include <vector>
 
-#include <service/smithdcx.hpp>
+#include <service/smithd/smithdcx.hpp>
 #include <hostcx.hpp>
 #include <ltventry.hpp>
 #include <log/logger.hpp>

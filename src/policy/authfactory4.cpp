@@ -38,7 +38,7 @@
 */
 
 #include <log/logger.hpp>
-#include <authfactory.hpp>
+#include <policy/authfactory.hpp>
 #include <cfgapi.hpp>
 
 DEFINE_LOGGING(AuthFactory);

@@ -37,13 +37,11 @@
     which carries forward this exception.
 */    
 
-#include <sys/socket.h>
-
 #include <cfgapi.hpp>
-#include <sockshostcx.hpp>
 #include <log/logger.hpp>
-#include <dns.hpp>
-#include <smithdnsupd.hpp>
+#include <proxy/socks5/sockshostcx.hpp>
+#include <inspect/dnsinspector.hpp>
+
 
 std::string socksTCPCom::sockstcpcom_name_ = "sock5";
 std::string socksSSLMitmCom::sockssslmitmcom_name_ = "s5+ssl+insp";

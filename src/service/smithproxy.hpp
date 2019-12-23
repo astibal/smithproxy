@@ -41,8 +41,8 @@
 #ifndef SMITHPROXY_SMITHPROXY_HPP
 #define SMITHPROXY_SMITHPROXY_HPP
 
-#include <mitmproxy.hpp>
-#include <socksproxy.hpp>
+#include <proxy/mitmproxy.hpp>
+#include <proxy/socks5/socksproxy.hpp>
 #include <threadedacceptor.hpp>
 #include <threadedreceiver.hpp>
 
@@ -50,7 +50,7 @@
 #include <service/daemon.hpp>
 #include <service/srvutils.hpp>
 #include <smithlog.hpp>
-#include <smithdnsupd.hpp>
+#include <service/dnsupd/smithdnsupd.hpp>
 
 typedef ThreadedAcceptor<MitmMasterProxy,MitmProxy> theAcceptor;
 typedef ThreadedReceiver<MitmUdpProxy,MitmProxy> theReceiver;

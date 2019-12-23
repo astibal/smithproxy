@@ -40,7 +40,7 @@
 #define ASYNCDNS_HPP
 
 #include <async/asyncsocket.hpp>
-#include <dns.hpp>
+#include <inspect/dns.hpp>
 
 
 class AsyncDnsQuery : public AsyncSocket<std::pair<DNS_Response *, int>> {

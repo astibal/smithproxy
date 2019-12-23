@@ -39,8 +39,8 @@
 
 #include <service/smithproxy.hpp>
 #include <cmdserver.hpp>
-#include <authfactory.hpp>
-#include "sigfactory.hpp"
+#include <policy/authfactory.hpp>
+#include "policy/sigfactory.hpp"
 
 volatile int SmithProxy::cnt_terminate = 0;
 

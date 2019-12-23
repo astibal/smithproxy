@@ -44,11 +44,11 @@
 #include <set>
 #include <time.h>
 
-#include <addrobj.hpp>
-#include <dns.hpp>
-#include <inspectors.hpp>
+#include <policy/addrobj.hpp>
+#include <inspect/dns.hpp>
+#include <inspect/dnsinspector.hpp>
 #include <cfgapi.hpp>
-#include <smithdnsupd.hpp>
+#include <service/dnsupd/smithdnsupd.hpp>
 
 
 
