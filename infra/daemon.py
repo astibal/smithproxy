@@ -236,7 +236,7 @@ class Daemon:
             Daemon.log.error("kill: " + message % pidfile)
             return ret # not an error in a restart
 
-        # Try killing the daemon process    
+        # Try killing the daemon process
         try:
             attempts = 0
             kill_attempts = 20 # wait 2 seconds, then send KILL
