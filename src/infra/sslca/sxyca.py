@@ -38,8 +38,6 @@
     this exception also makes it possible to release a modified version
     which carries forward this exception.
     """
-from __future__ import print_function
-
 import datetime
 import ipaddress
 import json
