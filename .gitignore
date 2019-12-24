@@ -1,4 +1,4 @@
-**/build*/**
+/build*/**
 **/cmake-build*/**
 .idea/**
 .vscode/**
@@ -8,3 +8,4 @@ smithproxy.kdev4
 **/*.deb
 tools/build-scripts/deb/debian/changelog
 src/smithproxy_version.h
+/venv/
