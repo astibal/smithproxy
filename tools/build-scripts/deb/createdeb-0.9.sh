@@ -2,9 +2,9 @@
 ORIG_DIR=`pwd`
 
 PW_UPLOAD=$1
-SO_BRANCH="0.8"
-SX_BRANCH="0.8"
-DEBIAN_DIR="debian-0.8"
+SO_BRANCH="master"
+SX_BRANCH="master"
+DEBIAN_DIR="debian-0.9"
 
 
 CUR_DIR=/tmp/smithproxy_build
@@ -12,7 +12,6 @@ mkdir ${CUR_DIR}
 cp *.sh ${CUR_DIR}
 cp -r ${DEBIAN_DIR} ${CUR_DIR}/debian
 cd ${CUR_DIR}
-
 ##
 ## trap Ctrl-C, don't continue with script if hit in longer task (ie. make)
 ##
@@ -151,42 +150,8 @@ echo "cd to $DEB_DIR"
 cd $DEB_DIR
 
 echo "Filling changelog..."
-export DEBEMAIL="$DEBEMAIL"
-export DEBFULLNAME="$DEBFULLNAME"
 
-echo "Attempting to download ${DOWNLOAD_URL}/${VER_MAJ}/${DISTRO}/changelog"
-wget ${DOWNLOAD_URL}/${VER_MAJ}/${DISTRO}/changelog -O debian/changelog.dnld
-#wget ${DOWNLOAD_URL}/${DISTRO}/changelog -O debian/changelog
-
-if [ ! -s debian/changelog.dnld ]; then
-
-    echo "Attempting to download STREAMLINE ${DOWNLOAD_URL}/${VER_MAJ}/changelog"
-    wget ${DOWNLOAD_URL}/${VER_MAJ}/changelog -O debian/changelog.dnld
-    
-    if [ ! -s debian/changelog.dnld ]; then 
-
-        echo "even streamline changelog doesn't exist on server, creating a new one"
-        echo "smithproxy (${VER}-1) unstable; urgency=medium"   > debian/changelog
-        echo ""                                                 >> debian/changelog
-        echo "    * initial build for this version"    >> debian/changelog
-        echo ""                                                 >> debian/changelog
-        echo "    -- Smithproxy Support <support@smithproxy.org>  `date -R`" >> debian/changelog
-        echo ""                                                 >> debian/changelog
-        
-        UPLOAD_STREAMLINE_CHANGELOG="Y"
-    else
-        echo "streamline changelog exists"
-        cp -f debian/changelog.dnld debian/changelog
-    fi
-    
-else
-    echo "using downloaded changelog"
-    cp debian/changelog.dnld debian/changelog
-fi
-
-
-echo "dch -v ${VER}-${DEB_CUR} --package smithproxy"
-dch -v ${VER}-${DEB_CUR} --package smithproxy
+git-dch --ignore-branch --auto
 
 
 echo "Creating debian packages..."

@@ -1,0 +1,33 @@
+Source: smithproxy
+Maintainer: Ales Stibal <astib@mag0.net>
+Section: misc
+Priority: optional
+Standards-Version: 3.9.6
+Build-Depends: debhelper (>= 9)
+
+Package: smithproxy
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends},
+                            libstdc++6 (>= 8.3.0),
+                            libssl1.1 (>=1.1.1),
+                            libconfig++9v5,
+                            libcli1.9 (>=1.9.6),
+                            iptables,
+                            python3,
+                            python3-ldap,
+                            python3-pylibconfig2, ###
+                            python3-pyparsing,
+                            python3-posix-ipc,
+                            python3-spyne, ###
+                            python3-zeep, ###
+                            python3-m2crypto,
+                            iproute2,
+                            telnet,
+                            python3-cryptography,
+                            python3-pyroute2
+
+Description:
+ Feature-rich and fast transparent and SOCKS5 proxy supporting TCP/UDP/SSL.
+ Uses TPROXY rules to divert traffic to smithproxy listening ports,
+ controls traffic with policies and applied feature profiles.
+

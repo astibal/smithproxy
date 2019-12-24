@@ -13,6 +13,6 @@ libcli-dev libconfig-dev  libssl-dev libunwind-dev \
 apt install -y iptables telnet iproute2 && \
 apt install -y python3-ldap python3-pyparsing python3-posix-ipc swig  \
 debootstrap devscripts build-essential lintian debhelper vim nano \
-git g++ cmake make && \
+git g++8 cmake make && \
 pip3 install pyroute2 pylibconfig2 m2crypto spyne zeep
 
