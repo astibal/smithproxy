@@ -15,6 +15,6 @@ git g++ cmake make && pip install pylibconfig2
 
 # download master, containing fresh build scripts - build scripts are always maintained in master
 RUN \
-    git clone https://github.com/astibal/smithproxy.git smithproxy && \
+    git clone https://github.com/astibal/smithproxy.git smithproxy
 
 CMD cd /app/smithproxy/tools/build-scripts/deb && cat README.txt && echo && /bin/bash

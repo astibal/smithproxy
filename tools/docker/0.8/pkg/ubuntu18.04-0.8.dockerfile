@@ -15,6 +15,7 @@ SX2=`dig +short latest-pylibconfig2.ubuntu1804.deb.smithproxy.org TXT | tr -d '"
 \
 apt install -y libcli1.9 libconfig++9v5 libssl1.0.0 libunwind8 python-pip && \
 apt install -y iptables python-ldap python-pyparsing python-posix-ipc python-soappy python-m2crypto telnet iproute2 && \
+apt install -y iptables python-ldap python-pyparsing python-posix-ipc python-soappy python-m2crypto telnet iproute2 && \
 apt install -y python3 python3-pip python3-cryptography python3-pyroute2 && \
 wget $SX2 && dpkg -i `basename $SX2` && \
 wget $SX1 && dpkg -i `basename $SX1` && \
