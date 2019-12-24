@@ -13,10 +13,8 @@ libconfig-dev libcli-dev libunwind-dev libssl1.0-dev \
 debootstrap devscripts build-essential lintian debhelper vim nano \
 git g++ cmake make && pip install pylibconfig2
 
+# download master, containing fresh build scripts - build scripts are always maintained in master
 RUN \
-    git clone https://bitbucket.com/astibal/socle.git socle -b 0.8 && \
-    git clone https://bitbucket.com/astibal/smithproxy.git smithproxy -b 0.8 && \
-    \
-    cd smithproxy && mkdir build && cd build && cmake .. && make install
+    git clone https://github.com/astibal/smithproxy.git smithproxy && \
 
-CMD cd /app/smithproxy/tools/build-scripts/deb && echo "run ./createdeb-0.8.sh <upload password> <socle_branch> <smithproxy_branch>" && /bin/bash
+CMD cd /app/smithproxy/tools/build-scripts/deb && cat README.txt && echo && /bin/bash

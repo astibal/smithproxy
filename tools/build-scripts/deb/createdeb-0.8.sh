@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 ORIG_DIR=`pwd`
 
+PW_UPLOAD=$1
+SO_BRANCH="0.8"
+SX_BRANCH="0.8"
+
 
 CUR_DIR=/tmp/smithproxy_build
 mkdir ${CUR_DIR}
@@ -76,7 +80,7 @@ safe_upload() {
 ## get source !!
 ##
 
-sync $2 $3
+sync $SO_BRANCH $SX_BRANCH
 
 ##
 ## get proper versions from GIT. We set debian patch-level to distance from
