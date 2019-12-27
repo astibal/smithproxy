@@ -19,11 +19,12 @@ Depends: ${shlibs:Depends}, ${misc:Depends},
                             python3-pyparsing,
                             python3-posix-ipc,
                             python3-zeep,
-                            python3-m2crypto,
                             iproute2,
                             telnet,
-                            python3-cryptography,
-                            python3-pyroute2
+                            python3-pyroute2,
+                            python3-dev,
+                            libssl-dev,
+                            swig
 Description:
  Feature-rich and fast transparent and SOCKS5 proxy supporting TCP/UDP/SSL.
  Uses TPROXY rules to divert traffic to smithproxy listening ports,
