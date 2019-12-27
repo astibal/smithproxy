@@ -150,7 +150,7 @@ cp -rv debian $DEB_DIR
 
 echo "Filling changelog based on git log ..."
 
-./gen_changelog.sh smithproxyi_src/ > $DEB_DIR/debian/changelog
+./gen_changelog.sh smithproxy_src/ > $DEB_DIR/debian/changelog
 
 echo "cd to $DEB_DIR"
 cd $DEB_DIR
