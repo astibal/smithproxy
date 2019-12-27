@@ -46,10 +46,12 @@ function sync() {
 
     cleanup
 
-    git clone http://bitbucket.org/astibal/smithproxy.git smithproxy
-    cd smithproxy; git fetch; git checkout $SMITHPROXY_BRANCH; cd ..
+    git clone http://github.com/astibal/smithproxy.git smithproxy
+    cd smithproxy; git fetch; git checkout $SMITHPROXY_BRANCH;
 
-    git clone http://bitbucket.org/astibal/socle.git socle
+    # stay in smithproxy dir, socle is submodule
+
+    git clone http://github.com/astibal/socle.git socle
     cd socle; git fetch; git checkout $SOCLE_BRANCH; cd ..
 
     cd $O
@@ -146,12 +148,12 @@ DEBFULLNAME="Smithproxy Support"
 echo "Preparing version ${VER}-${DEB_CUR}"
 cp -rv debian $DEB_DIR
 
+echo "Filling changelog based on git log ..."
+
+./gen_changelog.sh smithproxyi_src/ > $DEB_DIR/debian/changelog
+
 echo "cd to $DEB_DIR"
 cd $DEB_DIR
-
-echo "Filling changelog..."
-
-git-dch --ignore-branch --auto
 
 
 echo "Creating debian packages..."
@@ -189,17 +191,11 @@ if [ "$UPLOAD_PWD" == "" ]; then
     echo "password was not provided - no uploads"
 else
 
-    PYLIBCONFIG2_FILE="python-pylibconfig2_0.2.5-1_all.deb"
-
-    echo "Downloading pylibconfig2 package"
-    wget https://bitbucket.org/astibal/smithproxy/downloads/${PYLIBCONFIG2_FILE} -O ${PYLIBCONFIG2_FILE}
-
     echo "File(s) being uploaded now."
     DEB_FILE=smithproxy_${VER}-${DEB_CUR}_${ARCH}.deb
     DEB_URL=${UPLOAD_URL}/${VER_MAJ}/${DISTRO}/$DEB_FILE
 
     safe_upload $DEB_FILE $DEB_URL
-    safe_upload ${PYLIBCONFIG2_FILE} ${UPLOAD_URL}/${VER_MAJ}/${DISTRO}/${PYLIBCONFIG2_FILE}
 
     # overwrite files if thy exist
     upload smithproxy-${VER}/debian/changelog ${UPLOAD_URL}/${VER_MAJ}/${DISTRO}/changelog
