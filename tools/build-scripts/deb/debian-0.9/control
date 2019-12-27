@@ -14,12 +14,11 @@ Depends: ${shlibs:Depends}, ${misc:Depends},
                             libcli1.9 (>=1.9.6),
                             iptables,
                             python3,
+                            python3-pip,
                             python3-ldap,
-                            python3-pylibconfig2, ###
                             python3-pyparsing,
                             python3-posix-ipc,
-                            python3-spyne, ###
-                            python3-zeep, ###
+                            python3-zeep,
                             python3-m2crypto,
                             iproute2,
                             telnet,
