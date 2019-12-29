@@ -1,5 +1,6 @@
 #
-FROM astibal/smithproxy:testing_base
+FROM astibal/smithproxy:ubuntu18.04-0.8-base
+LABEL org.smithproxy.docker.image="astibal/smithproxy:ubuntu18.04-0.8-run"
 
 # Set the working directory to /app
 WORKDIR /app
