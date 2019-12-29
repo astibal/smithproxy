@@ -1,6 +1,6 @@
 #
-FROM astibal/smithproxy:ubuntu18.04-0.9-base
-LABEL org.smithproxy.docker.image="astibal/smithproxy:ubuntu18.04-0.9-build"
+FROM astibal/smithproxy:debian10-0.9-base
+LABEL org.smithproxy.docker.image="astibal/smithproxy:debian10-0.9-build"
 
 # Set the working directory to /app
 WORKDIR /app
