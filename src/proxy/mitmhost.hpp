@@ -141,8 +141,8 @@ public:
     
     std::vector<Inspector*> inspectors_;
     void inspect(char side) override;
-    void on_detect(duplexFlowMatch* x_sig, flowMatchState& s, vector_range& r) override;
-    virtual void on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, vector_range& r);
+    void on_detect(std::shared_ptr<duplexFlowMatch> x_sig, flowMatchState& s, vector_range& r) override;
+    virtual void on_detect_www_get(std::shared_ptr<duplexFlowMatch> x_sig, flowMatchState& s, vector_range& r);
     
     void on_starttls() override;
 

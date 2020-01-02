@@ -124,7 +124,7 @@ void MitmHostCX::load_signatures() {
     _deb("MitmHostCX::load_signatures: stop");
 };
 
-void MitmHostCX::on_detect_www_get(duplexFlowMatch* x_sig, flowMatchState& s, vector_range& r) {
+void MitmHostCX::on_detect_www_get(std::shared_ptr<duplexFlowMatch> x_sig, flowMatchState& s, vector_range& r) {
     if(! r.empty()) {
         std::pair<char,buffer*>& get = flow().flow()[0];
         std::pair<char,buffer*>& status = flow().flow()[0];
@@ -316,9 +316,9 @@ void MitmHostCX::inspect(char side) {
 }
 
 
-void MitmHostCX::on_detect(duplexFlowMatch* x_sig, flowMatchState& s, vector_range& r) {
+void MitmHostCX::on_detect(std::shared_ptr<duplexFlowMatch> x_sig, flowMatchState& s, vector_range& r) {
 
-    auto* sig_sig = dynamic_cast<MyDuplexFlowMatch*>(x_sig);
+    auto sig_sig = std::dynamic_pointer_cast<MyDuplexFlowMatch>(x_sig);
 
 
     if(sig_sig) {
