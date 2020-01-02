@@ -41,7 +41,7 @@
 #include <display.hpp>
 #include <log/logger.hpp>
 #include <cfgapi.hpp>
-#include <policy/sigfactory.hpp>
+#include <inspect/sigfactory.hpp>
 
 DEFINE_LOGGING(MitmHostCX)
 

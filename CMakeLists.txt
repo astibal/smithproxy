@@ -111,7 +111,7 @@ add_executable(smithproxy
         src/policy/authfactory4.cpp
         src/inspect/sxsignature.hpp
         src/inspect/pyinspector.hpp
-        src/policy/sigfactory.hpp
+        src/inspect/sigfactory.hpp
         src/async/asyncsocket.hpp
         src/async/asyncdns.hpp src/inspect/dnsinspector.hpp src/inspect/dnsinspector.cpp)
 

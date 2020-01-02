@@ -45,11 +45,11 @@
 class SigFactory  {
 
 public:
-    std::vector<duplexFlowMatch*>& tls() {
+    std::vector<std::shared_ptr<duplexFlowMatch>>& tls() {
         return sigs_starttls;
     }
 
-    std::vector<duplexFlowMatch*>& detection() {
+    std::vector<std::shared_ptr<duplexFlowMatch>>& detection() {
         return sigs_detection;
     }
 
@@ -65,8 +65,8 @@ private:
 
     SigFactory() = default;
 
-    std::vector<duplexFlowMatch*> sigs_starttls;
-    std::vector<duplexFlowMatch*> sigs_detection;
+    std::vector<std::shared_ptr<duplexFlowMatch>> sigs_starttls;
+    std::vector<std::shared_ptr<duplexFlowMatch>> sigs_detection;
 
 };
 

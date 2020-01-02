@@ -49,7 +49,7 @@
 
 #include <policy/policy.hpp>
 #include <policy/authfactory.hpp>
-#include <policy/sigfactory.hpp>
+#include <inspect/sigfactory.hpp>
 
 #include <proxy/mitmproxy.hpp>
 #include <proxy/mitmhost.hpp>
@@ -201,7 +201,7 @@ ProfileAlgDns* CfgFactory::lookup_prof_alg_dns (const char *name) {
 
 }
 
-ProfileScript* CfgFactory::lookup_prof_script(const char * name)  {
+std::shared_ptr<ProfileScript> CfgFactory::lookup_prof_script(const char * name)  {
     std::lock_guard<std::recursive_mutex> l(lock_);
 
     if(db_prof_script.find(name) != db_prof_script.end()) {
@@ -1262,7 +1262,7 @@ int CfgFactory::load_db_prof_script () {
             cur_object.lookupValue("type", a->script_type);
             cur_object.lookupValue("script-file",a->module_path);
 
-            db_prof_script[name] = a;
+            db_prof_script[name] = std::shared_ptr<ProfileScript>(a);
         }
     }
 
@@ -1499,11 +1499,8 @@ int CfgFactory::cleanup_db_prof_script () {
     std::lock_guard<std::recursive_mutex> l(lock_);
 
     int r = db_prof_script.size();
-    for(auto& t: db_prof_script) {
-        ProfileScript* c = t.second;
-        delete c;
-    }
-    db_prof_script.clear();
+    if(r > 0)
+        db_prof_script.clear();
 
     return r;
 }
@@ -2422,13 +2419,8 @@ int save_signatures(Config& ex, const std::string& sigset) {
 
     int n_saved = 0;
 
-    auto map_sigsets = [](std::string s) {
-        if(s == "starttls_signatures") return SigFactory::get().tls();
-
-        return SigFactory::get().detection();
-    };
-
-    const std::vector<duplexFlowMatch*>& target_ref = map_sigsets(sigset);
+    std::vector<std::shared_ptr<duplexFlowMatch>>& target_ref = sigset == "starttls_signatures" ?
+                SigFactory::get().tls() : SigFactory::get().detection();
 
     for (auto sig: target_ref) {
 
@@ -2437,7 +2429,7 @@ int save_signatures(Config& ex, const std::string& sigset) {
         item.add("name", Setting::TypeString) = sig->name();
 
 
-        auto my_sig = dynamic_cast<MyDuplexFlowMatch*>(sig);
+        auto my_sig = dynamic_cast<MyDuplexFlowMatch*>(sig.get());
 
         if(my_sig) {
             item.add("cat", Setting::TypeString) = my_sig->category;

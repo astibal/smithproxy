@@ -137,7 +137,7 @@ public:
     std::map<std::string, ProfileTls *> db_prof_tls;
     std::map<std::string, ProfileAuth *> db_prof_auth;
     std::map<std::string, ProfileAlgDns *> db_prof_alg_dns;
-    std::map<std::string, ProfileScript *> db_prof_script;
+    std::map<std::string, std::shared_ptr<ProfileScript>> db_prof_script;
 
     mp::vector<int> db_udp_quick_ports;
 
@@ -170,7 +170,7 @@ public:
     ProfileTls*       lookup_prof_tls (const char *name);
     ProfileAuth*      lookup_prof_auth (const char *name);
     ProfileAlgDns*    lookup_prof_alg_dns (const char *name);
-    ProfileScript*    lookup_prof_script (const char *name);
+    std::shared_ptr<ProfileScript> lookup_prof_script (const char *name);
 
     bool apply_tenant_config ();
     int  apply_tenant_index(std::string& what, int& idx);

@@ -40,7 +40,7 @@
 #include <service/smithproxy.hpp>
 #include <cmdserver.hpp>
 #include <policy/authfactory.hpp>
-#include "policy/sigfactory.hpp"
+#include <inspect/sigfactory.hpp>
 
 volatile int SmithProxy::cnt_terminate = 0;
 
@@ -349,7 +349,7 @@ void SmithProxy::my_usr1 (int param) {
 
 
 
-int SmithProxy::load_signatures(libconfig::Config& cfg, const char* name, std::vector<duplexFlowMatch*>& target) {
+int SmithProxy::load_signatures(libconfig::Config& cfg, const char* name, std::vector<std::shared_ptr<duplexFlowMatch>>& target) {
 
     auto& log = instance().log;
 
@@ -360,9 +360,14 @@ int SmithProxy::load_signatures(libconfig::Config& cfg, const char* name, std::v
     int sigs_len = cfg_signatures.getLength();
 
 
+    if(! target.empty()) {
+        _dia("Clearing %s, size %d", name, target.size());
+        target.clear();
+    }
+
     _dia("Loading %s: %d",name,sigs_len);
     for ( int i = 0 ; i < sigs_len; i++) {
-        auto* newsig = new MyDuplexFlowMatch();
+        auto newsig = std::make_shared<MyDuplexFlowMatch>(MyDuplexFlowMatch());
 
 
         const Setting& signature = cfg_signatures[i];
@@ -403,7 +408,6 @@ int SmithProxy::load_signatures(libconfig::Config& cfg, const char* name, std::v
 
                     _err("Starttls signature %s regex failed to load: index %d, load aborted", newsig->name().c_str() , i);
 
-                    delete newsig;
                     newsig = nullptr;
                     break;
                 }
@@ -520,10 +524,8 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
         CfgFactory::get().load_db_policy();
 
 
-        if(!reload)  {
-            load_signatures(CfgFactory::cfg_obj(),"detection_signatures", SigFactory::get().detection());
-            load_signatures(CfgFactory::cfg_obj(),"starttls_signatures", SigFactory::get().tls());
-        }
+        load_signatures(CfgFactory::cfg_obj(),"detection_signatures", SigFactory::get().detection());
+        load_signatures(CfgFactory::cfg_obj(),"starttls_signatures", SigFactory::get().tls());
 
         CfgFactory::get().load_settings();
         CfgFactory::get().load_debug();
