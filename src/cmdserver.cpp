@@ -2025,10 +2025,10 @@ bool apply_setting(std::string section, std::string varname, struct cli_def *cli
 
     bool ret = false;
 
-    if( "settings" == section ) {
+    if( 0 == section.find("settings") ) {
         ret = CfgFactory::get().load_settings();
     } else
-    if( "debug" == section ) {
+    if( 0 == section.find("debug") ) {
         ret = CfgFactory::get().load_debug();
     } else {
         cli_print(cli, "config apply");
