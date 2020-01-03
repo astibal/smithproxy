@@ -160,7 +160,7 @@ int CfgFactory::lookup_proto (const char *name) {
     return 0;
 }
 
-ProfileContent* CfgFactory::lookup_prof_content (const char *name) {
+std::shared_ptr<ProfileContent> CfgFactory::lookup_prof_content (const char *name) {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
     if(db_prof_content.find(name) != db_prof_content.end()) {
@@ -751,10 +751,11 @@ int CfgFactory::load_db_policy () {
                 std::string name_tls;
                 std::string name_auth;
                 std::string name_alg_dns;
+                std::string name_script;
                 
                 if(cur_object.lookupValue("detection_profile",name_detection)) {
                     auto prf  = lookup_prof_detection(name_detection.c_str());
-                    if(prf != nullptr) {
+                    if(prf) {
                         _dia("cfgapi_load_policy[#%d]: detect profile %s",i,name_detection.c_str());
                         rule->profile_detection = std::shared_ptr<ProfileDetection>(prf);
                     } else {
@@ -764,8 +765,8 @@ int CfgFactory::load_db_policy () {
                 }
                 
                 if(cur_object.lookupValue("content_profile",name_content)) {
-                    ProfileContent* prf  = lookup_prof_content(name_content.c_str());
-                    if(prf != nullptr) {
+                    auto prf  = lookup_prof_content(name_content.c_str());
+                    if(prf) {
                         _dia("cfgapi_load_policy[#%d]: content profile %s",i,name_content.c_str());
                         rule->profile_content = prf;
                     } else {
@@ -775,7 +776,7 @@ int CfgFactory::load_db_policy () {
                 }                
                 if(cur_object.lookupValue("tls_profile",name_tls)) {
                     auto tls  = lookup_prof_tls(name_tls.c_str());
-                    if(tls != nullptr) {
+                    if(tls) {
                         _dia("cfgapi_load_policy[#%d]: tls profile %s",i,name_tls.c_str());
                         rule->profile_tls= std::shared_ptr<ProfileTls>(tls);
                     } else {
@@ -785,7 +786,7 @@ int CfgFactory::load_db_policy () {
                 }         
                 if(cur_object.lookupValue("auth_profile",name_auth)) {
                     auto auth  = lookup_prof_auth(name_auth.c_str());
-                    if(auth != nullptr) {
+                    if(auth) {
                         _dia("cfgapi_load_policy[#%d]: auth profile %s",i,name_auth.c_str());
                         rule->profile_auth= auth;
                     } else {
@@ -795,14 +796,27 @@ int CfgFactory::load_db_policy () {
                 }
                 if(cur_object.lookupValue("alg_dns_profile",name_alg_dns)) {
                     auto dns  = lookup_prof_alg_dns(name_alg_dns.c_str());
-                    if(dns != nullptr) {
+                    if(dns) {
                         _dia("cfgapi_load_policy[#%d]: DNS alg profile %s",i,name_alg_dns.c_str());
                         rule->profile_alg_dns = dns;
                     } else {
                         _err("cfgapi_load_policy[#%d]: DNS alg %s cannot be loaded",i,name_alg_dns.c_str());
                         error = true;
                     }
-                }                    
+                }
+
+                if(cur_object.lookupValue("script_profile", name_script)) {
+                    auto scr  = lookup_prof_script(name_script.c_str());
+                    if(scr) {
+                        _dia("cfgapi_load_policy[#%d]: script profile %s",i,name_script.c_str());
+                        rule->profile_script = scr;
+                    } else {
+                        _err("cfgapi_load_policy[#%d]: script profile %s cannot be loaded",i,name_script.c_str());
+                        error = true;
+                    }
+                }
+
+
             }
             
             if(!error){
@@ -875,7 +889,7 @@ int CfgFactory::policy_action (int index) {
     }
 }
 
-ProfileContent* CfgFactory::policy_prof_content (int index) {
+std::shared_ptr<ProfileContent> CfgFactory::policy_prof_content (int index) {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
     if(index < 0) {
@@ -1047,7 +1061,7 @@ int CfgFactory::load_db_prof_content () {
             if( cur_object.lookupValue("write_payload",a->write_payload) ) {
                 
                 a->prof_name = name;
-                db_prof_content[name] = a;
+                db_prof_content[name] = std::shared_ptr<ProfileContent>(a);
                 
                 if(cur_object.exists("content_rules")) {
                     int jnum = cur_object["content_rules"].getLength();
@@ -1339,7 +1353,7 @@ int CfgFactory::load_db_prof_auth () {
                     
                     if(cur_subpol.lookupValue("detection_profile",name_detection)) {
                         auto prf  = lookup_prof_detection(name_detection.c_str());
-                        if(prf != nullptr) {
+                        if(prf) {
                             _dia("load_db_prof_auth[sub-profile:%s]: detect profile %s",n_subpol->name.c_str(),name_detection.c_str());
                             n_subpol->profile_detection = prf;
                         } else {
@@ -1348,8 +1362,8 @@ int CfgFactory::load_db_prof_auth () {
                     }
                     
                     if(cur_subpol.lookupValue("content_profile",name_content)) {
-                        ProfileContent* prf  = lookup_prof_content(name_content.c_str());
-                        if(prf != nullptr) {
+                        auto prf  = lookup_prof_content(name_content.c_str());
+                        if(prf) {
                             _dia("load_db_prof_auth[sub-profile:%s]: content profile %s",n_subpol->name.c_str(),name_content.c_str());
                             n_subpol->profile_content = prf;
                         } else {
@@ -1358,7 +1372,7 @@ int CfgFactory::load_db_prof_auth () {
                     }                
                     if(cur_subpol.lookupValue("tls_profile",name_tls)) {
                         auto tls  = lookup_prof_tls(name_tls.c_str());
-                        if(!tls) {
+                        if(tls) {
                             _dia("load_db_prof_auth[sub-profile:%s]: tls profile %s",n_subpol->name.c_str(),name_tls.c_str());
                             n_subpol->profile_tls = std::shared_ptr<ProfileTls>(tls);
                         } else {
@@ -1370,7 +1384,7 @@ int CfgFactory::load_db_prof_auth () {
                     
                     if(cur_subpol.lookupValue("alg_dns_profile",name_alg_dns)) {
                         auto dns  = lookup_prof_alg_dns(name_alg_dns.c_str());
-                        if(dns != nullptr) {
+                        if(dns) {
                             _dia("load_db_prof_auth[sub-profile:%s]: DNS alg profile %s",n_subpol->name.c_str(),name_alg_dns.c_str());
                             n_subpol->profile_alg_dns = dns;
                         } else {
@@ -1449,10 +1463,6 @@ int CfgFactory::cleanup_db_prof_content () {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
     int r = db_prof_content.size();
-    for(auto& t: db_prof_content) {
-        ProfileContent* c = t.second;
-        delete c;
-    }
     db_prof_content.clear();
     
     return r;
@@ -1511,7 +1521,7 @@ int CfgFactory::cleanup_db_prof_auth () {
 }
 
 
-bool CfgFactory::prof_content_apply (baseHostCX *originator, baseProxy *new_proxy, ProfileContent *pc) {
+bool CfgFactory::prof_content_apply (baseHostCX *originator, baseProxy *new_proxy, std::shared_ptr<ProfileContent> pc) {
 
     auto log = logan_lite("policy.rule");
 
@@ -1766,7 +1776,7 @@ int CfgFactory::policy_apply (baseHostCX *originator, baseProxy *proxy) {
     int verdict = policy_action(policy_num);
     if(verdict == POLICY_ACTION_PASS) {
 
-        ProfileContent *pc = policy_prof_content(policy_num);
+        auto pc = policy_prof_content(policy_num);
         auto pd = policy_prof_detection(policy_num);
         auto pt = policy_prof_tls(policy_num);
         auto pa = policy_prof_auth(policy_num);
@@ -1955,6 +1965,7 @@ void CfgFactory::cfgapi_cleanup()
     cleanup_db_prof_tls();
     cleanup_db_prof_auth();
     cleanup_db_prof_alg_dns();
+    cleanup_db_prof_script();
 }
 
 

@@ -67,7 +67,7 @@ struct ProfileScript;
 
 
 struct ProfileList {
-    ProfileContent* profile_content = nullptr;
+    std::shared_ptr<ProfileContent> profile_content = nullptr;
     std::shared_ptr<ProfileDetection> profile_detection = nullptr;
     std::shared_ptr<ProfileTls> profile_tls = nullptr;
     std::shared_ptr<ProfileAuth> profile_auth = nullptr;
