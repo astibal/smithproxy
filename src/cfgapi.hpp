@@ -219,21 +219,21 @@ public:
     int policy_apply (baseHostCX *originator, baseProxy *proxy);
 
     bool policy_apply_tls (int policy_num, baseCom *xcom);
-    bool policy_apply_tls (ProfileTls *pt, baseCom *xcom);
+    bool policy_apply_tls (std::shared_ptr<ProfileTls> pt, baseCom *xcom);
 
     bool prof_content_apply (baseHostCX *originator, baseProxy *new_proxy, ProfileContent *pc);
     bool prof_detect_apply (baseHostCX *originator, baseProxy *new_proxy, ProfileDetection *pd);
-    bool prof_tls_apply (baseHostCX *originator, baseProxy *new_proxy, ProfileTls *ps);
+    bool prof_tls_apply (baseHostCX *originator, baseProxy *new_proxy, std::shared_ptr<ProfileTls> ps);
     bool prof_alg_dns_apply (baseHostCX *originator, baseProxy *new_proxy, std::shared_ptr<ProfileAlgDns> p_alg_dns);
     bool prof_script_apply (baseHostCX *originator, baseProxy *new_proxy, ProfileScript *p_script);
 
-    bool should_redirect (ProfileTls *pt, SSLCom *com);
+    bool should_redirect (std::shared_ptr<ProfileTls> pt, SSLCom *com);
 
     void log_version (bool warn_delay = true);
 
     ProfileContent* policy_prof_content (int index);
     ProfileDetection* policy_prof_detection (int index);
-    ProfileTls* policy_prof_tls (int index);
+    std::shared_ptr<ProfileTls> policy_prof_tls (int index);
     std::shared_ptr<ProfileAuth> policy_prof_auth (int index);
     std::shared_ptr<ProfileAlgDns> policy_prof_alg_dns (int index);
     std::shared_ptr<ProfileScript> policy_prof_script (int index);

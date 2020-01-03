@@ -777,7 +777,7 @@ int CfgFactory::load_db_policy () {
                     ProfileTls* tls  = lookup_prof_tls(name_tls.c_str());
                     if(tls != nullptr) {
                         _dia("cfgapi_load_policy[#%d]: tls profile %s",i,name_tls.c_str());
-                        rule->profile_tls= tls;
+                        rule->profile_tls= std::shared_ptr<ProfileTls>(tls);
                     } else {
                         _err("cfgapi_load_policy[#%d]: tls profile %s cannot be loaded",i,name_tls.c_str());
                         error = true;
@@ -905,7 +905,7 @@ ProfileDetection* CfgFactory::policy_prof_detection (int index) {
     }
 }
 
-ProfileTls* CfgFactory::policy_prof_tls (int index) {
+std::shared_ptr<ProfileTls> CfgFactory::policy_prof_tls (int index) {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
     if(index < 0) {
@@ -1360,7 +1360,7 @@ int CfgFactory::load_db_prof_auth () {
                         ProfileTls* tls  = lookup_prof_tls(name_tls.c_str());
                         if(tls != nullptr) {
                             _dia("load_db_prof_auth[sub-profile:%s]: tls profile %s",n_subpol->name.c_str(),name_tls.c_str());
-                            n_subpol->profile_tls= tls;
+                            n_subpol->profile_tls = std::shared_ptr<ProfileTls>(tls);
                         } else {
                             _err("load_db_prof_auth[sub-profile:%s]: tls profile %s cannot be loaded",n_subpol->name.c_str(),name_tls.c_str());
                         }
@@ -1582,7 +1582,7 @@ bool CfgFactory::prof_detect_apply (baseHostCX *originator, baseProxy *new_proxy
     return ret;
 }
 
-bool CfgFactory::prof_tls_apply (baseHostCX *originator, baseProxy *new_proxy, ProfileTls *ps) {
+bool CfgFactory::prof_tls_apply (baseHostCX *originator, baseProxy *new_proxy, std::shared_ptr<ProfileTls> ps) {
 
     auto log = logan_lite("policy.rule");
 
@@ -1776,7 +1776,7 @@ int CfgFactory::policy_apply (baseHostCX *originator, baseProxy *proxy) {
 
         ProfileContent *pc = policy_prof_content(policy_num);
         ProfileDetection *pd = policy_prof_detection(policy_num);
-        ProfileTls *pt = policy_prof_tls(policy_num);
+        auto pt = policy_prof_tls(policy_num);
         auto pa = policy_prof_auth(policy_num);
         auto p_alg_dns = policy_prof_alg_dns(policy_num);
 
@@ -1846,11 +1846,11 @@ int CfgFactory::policy_apply (baseHostCX *originator, baseProxy *proxy) {
 
 
 bool CfgFactory::policy_apply_tls (int policy_num, baseCom *xcom) {
-    ProfileTls* pt = policy_prof_tls(policy_num);
+    auto pt = policy_prof_tls(policy_num);
     return policy_apply_tls(pt, xcom);
 }
 
-bool CfgFactory::should_redirect (ProfileTls *pt, SSLCom *com) {
+bool CfgFactory::should_redirect (std::shared_ptr<ProfileTls> pt, SSLCom *com) {
 
     auto log = logan_lite("policy.rule");
     
@@ -1891,7 +1891,7 @@ bool CfgFactory::should_redirect (ProfileTls *pt, SSLCom *com) {
     return ret;
 }
 
-bool CfgFactory::policy_apply_tls (ProfileTls *pt, baseCom *xcom) {
+bool CfgFactory::policy_apply_tls (std::shared_ptr<ProfileTls> pt, baseCom *xcom) {
 
     bool tls_applied = false;     
     
