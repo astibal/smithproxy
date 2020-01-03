@@ -233,7 +233,7 @@ bool MitmProxy::apply_id_policies(baseHostCX* cx) {
         _dia("apply_id_policies: matched policy: %d",matched_policy());        
         PolicyRule* policy = CfgFactory::get().db_policy.at(matched_policy());
         
-        ProfileAuth* auth_policy = policy->profile_auth;
+        auto auth_policy = policy->profile_auth;
 
         
         if(auth_policy != nullptr) {

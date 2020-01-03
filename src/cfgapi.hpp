@@ -135,8 +135,8 @@ public:
     std::map<std::string, ProfileDetection *> db_prof_detection;
     std::map<std::string, ProfileContent *> db_prof_content;
     std::map<std::string, ProfileTls *> db_prof_tls;
-    std::map<std::string, ProfileAuth *> db_prof_auth;
-    std::map<std::string, ProfileAlgDns *> db_prof_alg_dns;
+    std::map<std::string, std::shared_ptr<ProfileAuth>> db_prof_auth;
+    std::map<std::string, std::shared_ptr<ProfileAlgDns>> db_prof_alg_dns;
     std::map<std::string, std::shared_ptr<ProfileScript>> db_prof_script;
 
     mp::vector<int> db_udp_quick_ports;
@@ -168,8 +168,8 @@ public:
     ProfileDetection* lookup_prof_detection (const char *name);
     ProfileContent*   lookup_prof_content (const char *name);
     ProfileTls*       lookup_prof_tls (const char *name);
-    ProfileAuth*      lookup_prof_auth (const char *name);
-    ProfileAlgDns*    lookup_prof_alg_dns (const char *name);
+    std::shared_ptr<ProfileAuth> lookup_prof_auth (const char *name);
+    std::shared_ptr<ProfileAlgDns> lookup_prof_alg_dns (const char *name);
     std::shared_ptr<ProfileScript> lookup_prof_script (const char *name);
 
     bool apply_tenant_config ();
@@ -224,7 +224,7 @@ public:
     bool prof_content_apply (baseHostCX *originator, baseProxy *new_proxy, ProfileContent *pc);
     bool prof_detect_apply (baseHostCX *originator, baseProxy *new_proxy, ProfileDetection *pd);
     bool prof_tls_apply (baseHostCX *originator, baseProxy *new_proxy, ProfileTls *ps);
-    bool prof_alg_dns_apply (baseHostCX *originator, baseProxy *new_proxy, ProfileAlgDns *p_alg_dns);
+    bool prof_alg_dns_apply (baseHostCX *originator, baseProxy *new_proxy, std::shared_ptr<ProfileAlgDns> p_alg_dns);
     bool prof_script_apply (baseHostCX *originator, baseProxy *new_proxy, ProfileScript *p_script);
 
     bool should_redirect (ProfileTls *pt, SSLCom *com);
@@ -234,9 +234,9 @@ public:
     ProfileContent* policy_prof_content (int index);
     ProfileDetection* policy_prof_detection (int index);
     ProfileTls* policy_prof_tls (int index);
-    ProfileAuth* policy_prof_auth (int index);
-    ProfileAlgDns* policy_prof_alg_dns (int index);
-    ProfileScript* policy_prof_script (int index);
+    std::shared_ptr<ProfileAuth> policy_prof_auth (int index);
+    std::shared_ptr<ProfileAlgDns> policy_prof_alg_dns (int index);
+    std::shared_ptr<ProfileScript> policy_prof_script (int index);
 
     #ifndef MEM_DEBUG
     bool cfg_openssl_mem_dbg = false;

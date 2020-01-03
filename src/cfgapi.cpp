@@ -190,7 +190,7 @@ ProfileTls* CfgFactory::lookup_prof_tls (const char *name) {
     return nullptr;
 }
 
-ProfileAlgDns* CfgFactory::lookup_prof_alg_dns (const char *name) {
+std::shared_ptr<ProfileAlgDns> CfgFactory::lookup_prof_alg_dns (const char *name) {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
     if(db_prof_alg_dns.find(name) != db_prof_alg_dns.end()) {
@@ -212,7 +212,7 @@ std::shared_ptr<ProfileScript> CfgFactory::lookup_prof_script(const char * name)
 
 }
 
-ProfileAuth* CfgFactory::lookup_prof_auth (const char *name) {
+std::shared_ptr<ProfileAuth> CfgFactory::lookup_prof_auth (const char *name) {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
     if(db_prof_auth.find(name) != db_prof_auth.end()) {
@@ -784,7 +784,7 @@ int CfgFactory::load_db_policy () {
                     }
                 }         
                 if(cur_object.lookupValue("auth_profile",name_auth)) {
-                    ProfileAuth* auth  = lookup_prof_auth(name_auth.c_str());
+                    auto auth  = lookup_prof_auth(name_auth.c_str());
                     if(auth != nullptr) {
                         _dia("cfgapi_load_policy[#%d]: auth profile %s",i,name_auth.c_str());
                         rule->profile_auth= auth;
@@ -794,7 +794,7 @@ int CfgFactory::load_db_policy () {
                     }
                 }
                 if(cur_object.lookupValue("alg_dns_profile",name_alg_dns)) {
-                    ProfileAlgDns* dns  = lookup_prof_alg_dns(name_alg_dns.c_str());
+                    auto dns  = lookup_prof_alg_dns(name_alg_dns.c_str());
                     if(dns != nullptr) {
                         _dia("cfgapi_load_policy[#%d]: DNS alg profile %s",i,name_alg_dns.c_str());
                         rule->profile_alg_dns = dns;
@@ -921,7 +921,7 @@ ProfileTls* CfgFactory::policy_prof_tls (int index) {
 }
 
 
-ProfileAlgDns* CfgFactory::policy_prof_alg_dns (int index) {
+std::shared_ptr<ProfileAlgDns> CfgFactory::policy_prof_alg_dns (int index) {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
     if(index < 0) {
@@ -936,7 +936,7 @@ ProfileAlgDns* CfgFactory::policy_prof_alg_dns (int index) {
     }
 }
 
-ProfileScript* CfgFactory::policy_prof_script(int index) {
+std::shared_ptr<ProfileScript> CfgFactory::policy_prof_script(int index) {
     std::lock_guard<std::recursive_mutex> l(lock_);
 
     if(index < 0) {
@@ -953,7 +953,7 @@ ProfileScript* CfgFactory::policy_prof_script(int index) {
 
 
 
-ProfileAuth* CfgFactory::policy_prof_auth (int index) {
+std::shared_ptr<ProfileAuth> CfgFactory::policy_prof_auth (int index) {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
     if(index < 0) {
@@ -1223,7 +1223,7 @@ int CfgFactory::load_db_prof_alg_dns () {
             cur_object.lookupValue("randomize_id",a->randomize_id);
             cur_object.lookupValue("cached_responses",a->cached_responses);
             
-            db_prof_alg_dns[name] = a;
+            db_prof_alg_dns[name] = std::shared_ptr<ProfileAlgDns>(a);
         }
     }
     
@@ -1369,7 +1369,7 @@ int CfgFactory::load_db_prof_auth () {
                     // we don't need auth profile in auth sub-profile
                     
                     if(cur_subpol.lookupValue("alg_dns_profile",name_alg_dns)) {
-                        ProfileAlgDns* dns  = lookup_prof_alg_dns(name_alg_dns.c_str());
+                        auto dns  = lookup_prof_alg_dns(name_alg_dns.c_str());
                         if(dns != nullptr) {
                             _dia("load_db_prof_auth[sub-profile:%s]: DNS alg profile %s",n_subpol->name.c_str(),name_alg_dns.c_str());
                             n_subpol->profile_alg_dns = dns;
@@ -1383,7 +1383,7 @@ int CfgFactory::load_db_prof_auth () {
                     _dia("load_db_prof_auth: profiles: %d:%s",j,n_subpol->name.c_str());
                 }
             }
-            db_prof_auth[name] = a;
+            db_prof_auth[name] = std::shared_ptr<ProfileAuth>(a);
 
             _dia("load_db_prof_auth: '%s': ok",name.c_str());
         }
@@ -1486,10 +1486,6 @@ int CfgFactory::cleanup_db_prof_alg_dns () {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
     int r = db_prof_alg_dns.size();
-    for(auto& t: db_prof_alg_dns) {
-        ProfileAlgDns* c = t.second;
-        delete c;
-    }
     db_prof_alg_dns.clear();
     
     return r;
@@ -1511,13 +1507,11 @@ int CfgFactory::cleanup_db_prof_auth () {
     
     int r = db_prof_auth.size();
     for(auto& t: db_prof_auth) {
-        ProfileAuth* c = t.second;
+        auto c = t.second;
         
         for(auto j: c->sub_policies) {
             delete j;
         }
-        
-        delete c;
     }
     db_prof_auth.clear();
     
@@ -1694,7 +1688,7 @@ bool CfgFactory::prof_tls_apply (baseHostCX *originator, baseProxy *new_proxy, P
     return tls_applied;
 }
 
-bool CfgFactory::prof_alg_dns_apply (baseHostCX *originator, baseProxy *new_proxy, ProfileAlgDns *p_alg_dns) {
+bool CfgFactory::prof_alg_dns_apply (baseHostCX *originator, baseProxy *new_proxy, std::shared_ptr<ProfileAlgDns> p_alg_dns) {
 
     auto log = logan_lite("policy.rule");
 
@@ -1783,8 +1777,8 @@ int CfgFactory::policy_apply (baseHostCX *originator, baseProxy *proxy) {
         ProfileContent *pc = policy_prof_content(policy_num);
         ProfileDetection *pd = policy_prof_detection(policy_num);
         ProfileTls *pt = policy_prof_tls(policy_num);
-        ProfileAuth *pa = policy_prof_auth(policy_num);
-        ProfileAlgDns *p_alg_dns = policy_prof_alg_dns(policy_num);
+        auto pa = policy_prof_auth(policy_num);
+        auto p_alg_dns = policy_prof_alg_dns(policy_num);
 
 
         const char *pc_name = "none";
