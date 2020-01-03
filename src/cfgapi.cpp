@@ -170,7 +170,7 @@ ProfileContent* CfgFactory::lookup_prof_content (const char *name) {
     return nullptr;
 }
 
-ProfileDetection* CfgFactory::lookup_prof_detection (const char *name) {
+std::shared_ptr<ProfileDetection> CfgFactory::lookup_prof_detection (const char *name) {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
     if(db_prof_detection.find(name) != db_prof_detection.end()) {
@@ -180,7 +180,7 @@ ProfileDetection* CfgFactory::lookup_prof_detection (const char *name) {
     return nullptr;
 }
 
-ProfileTls* CfgFactory::lookup_prof_tls (const char *name) {
+std::shared_ptr<ProfileTls> CfgFactory::lookup_prof_tls (const char *name) {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
     if(db_prof_tls.find(name) != db_prof_tls.end()) {
@@ -753,10 +753,10 @@ int CfgFactory::load_db_policy () {
                 std::string name_alg_dns;
                 
                 if(cur_object.lookupValue("detection_profile",name_detection)) {
-                    ProfileDetection* prf  = lookup_prof_detection(name_detection.c_str());
+                    auto prf  = lookup_prof_detection(name_detection.c_str());
                     if(prf != nullptr) {
                         _dia("cfgapi_load_policy[#%d]: detect profile %s",i,name_detection.c_str());
-                        rule->profile_detection = prf;
+                        rule->profile_detection = std::shared_ptr<ProfileDetection>(prf);
                     } else {
                         _err("cfgapi_load_policy[#%d]: detect profile %s cannot be loaded",i,name_detection.c_str());
                         error = true;
@@ -774,7 +774,7 @@ int CfgFactory::load_db_policy () {
                     }
                 }                
                 if(cur_object.lookupValue("tls_profile",name_tls)) {
-                    ProfileTls* tls  = lookup_prof_tls(name_tls.c_str());
+                    auto tls  = lookup_prof_tls(name_tls.c_str());
                     if(tls != nullptr) {
                         _dia("cfgapi_load_policy[#%d]: tls profile %s",i,name_tls.c_str());
                         rule->profile_tls= std::shared_ptr<ProfileTls>(tls);
@@ -890,7 +890,7 @@ ProfileContent* CfgFactory::policy_prof_content (int index) {
     }
 }
 
-ProfileDetection* CfgFactory::policy_prof_detection (int index) {
+std::shared_ptr<ProfileDetection> CfgFactory::policy_prof_detection (int index) {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
     if(index < 0) {
@@ -1002,7 +1002,7 @@ int CfgFactory::load_db_prof_detection () {
             if( cur_object.lookupValue("mode",a->mode) ) {
                 
                 a->prof_name = name;
-                db_prof_detection[name] = a;
+                db_prof_detection[name] = std::shared_ptr<ProfileDetection>(a);
 
                 _dia("cfgapi_load_obj_profile_detect: '%s': ok",name.c_str());
             } else {
@@ -1178,7 +1178,7 @@ int CfgFactory::load_db_prof_tls () {
                 }
                 cur_object.lookupValue("sslkeylog",a->sslkeylog);
                 
-                db_prof_tls[name] = a;
+                db_prof_tls[name] = std::shared_ptr<ProfileTls>(a);
 
                 _dia("load_db_prof_tls: '%s': ok",name.c_str());
             } else {
@@ -1338,7 +1338,7 @@ int CfgFactory::load_db_prof_auth () {
                     std::string name_alg_dns;
                     
                     if(cur_subpol.lookupValue("detection_profile",name_detection)) {
-                        ProfileDetection* prf  = lookup_prof_detection(name_detection.c_str());
+                        auto prf  = lookup_prof_detection(name_detection.c_str());
                         if(prf != nullptr) {
                             _dia("load_db_prof_auth[sub-profile:%s]: detect profile %s",n_subpol->name.c_str(),name_detection.c_str());
                             n_subpol->profile_detection = prf;
@@ -1357,8 +1357,8 @@ int CfgFactory::load_db_prof_auth () {
                         }
                     }                
                     if(cur_subpol.lookupValue("tls_profile",name_tls)) {
-                        ProfileTls* tls  = lookup_prof_tls(name_tls.c_str());
-                        if(tls != nullptr) {
+                        auto tls  = lookup_prof_tls(name_tls.c_str());
+                        if(!tls) {
                             _dia("load_db_prof_auth[sub-profile:%s]: tls profile %s",n_subpol->name.c_str(),name_tls.c_str());
                             n_subpol->profile_tls = std::shared_ptr<ProfileTls>(tls);
                         } else {
@@ -1461,10 +1461,6 @@ int CfgFactory::cleanup_db_prof_detection () {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
     int r = db_prof_detection.size();
-    for(auto& t: db_prof_detection) {
-        ProfileDetection* c = t.second;
-        delete c;
-    }
     db_prof_detection.clear();
     
     return r;
@@ -1473,10 +1469,6 @@ int CfgFactory::cleanup_db_prof_tls () {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
     int r = db_prof_tls.size();
-    for(auto& t: db_prof_tls) {
-        ProfileTls* c = t.second;
-        delete c;
-    }
     db_prof_tls.clear();
     
     return r;
@@ -1558,7 +1550,7 @@ bool CfgFactory::prof_content_apply (baseHostCX *originator, baseProxy *new_prox
 }
 
 
-bool CfgFactory::prof_detect_apply (baseHostCX *originator, baseProxy *new_proxy, ProfileDetection *pd) {
+bool CfgFactory::prof_detect_apply (baseHostCX *originator, baseProxy *new_proxy, std::shared_ptr<ProfileDetection> pd) {
 
     auto* mitm_originator = dynamic_cast<AppHostCX*>(originator);
     auto log = logan_lite("policy.rule");
@@ -1775,7 +1767,7 @@ int CfgFactory::policy_apply (baseHostCX *originator, baseProxy *proxy) {
     if(verdict == POLICY_ACTION_PASS) {
 
         ProfileContent *pc = policy_prof_content(policy_num);
-        ProfileDetection *pd = policy_prof_detection(policy_num);
+        auto pd = policy_prof_detection(policy_num);
         auto pt = policy_prof_tls(policy_num);
         auto pa = policy_prof_auth(policy_num);
         auto p_alg_dns = policy_prof_alg_dns(policy_num);
