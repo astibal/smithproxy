@@ -1,0 +1,40 @@
+#include <tunables/global>
+
+@{SX_BIN}=/usr/bin/smithproxy
+@{SX_DATA}=/var/local/smithproxy/
+@{CERTSTORE}=/usr/share/ca-certificates/
+
+
+/usr/bin/smithproxy {
+  #include <abstractions/base>
+
+  # read self
+  @{SX_BIN} r,
+
+  # networking
+  network,
+  capability net_admin,
+  capability net_raw,
+  capability net_bind_service,
+  capability dac_read_search,
+  capability dac_override,
+
+  # read etc
+  /etc/smithproxy/** r,
+  /etc/smithproxy/*.cfg rw,
+
+  /etc/hosts r,
+  /etc/gai.conf r,
+
+  # read certificate path
+  @{CERTSTORE}/** r,
+
+  # write semaphores, shm, pidfiles
+  /dev/shm/sem.smithproxy* rw,
+  /dev/shm/smithproxy* rw,
+  /run/smithproxy* rw,
+
+  # write dumpfiles
+  #
+  @{SX_DATA}/** rw,
+}
