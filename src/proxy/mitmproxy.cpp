@@ -152,13 +152,12 @@ std::string MitmProxy::to_string(int verbosity) const {
         if(verbosity > INF) { 
             r << string_format("\n    Policy  index: %d",matched_policy());
 
-            PolicyRule* p = nullptr;
-            
+
             if(matched_policy() >= 0) {
-                p = CfgFactory::get().db_policy.at(matched_policy());
+                auto p = CfgFactory::get().db_policy.at(matched_policy());
+                r << string_format("\n    PolicyRule oid: 0x%x", p->oid());
             }
-            
-            r << string_format("\n    PolicyRule Id: 0x%x",p);
+
 
             if(identity_resolved()) {
                 r << string_format("\n    User:   %s",identity_->username().c_str()); 
@@ -227,18 +226,18 @@ bool MitmProxy::apply_id_policies(baseHostCX* cx) {
     }
 
 
-    ProfileSubAuth* final_profile = nullptr;
+    std::shared_ptr<ProfileSubAuth> final_profile;
     
     if( found ) {
         _dia("apply_id_policies: matched policy: %d",matched_policy());        
-        PolicyRule* policy = CfgFactory::get().db_policy.at(matched_policy());
+        auto policy = CfgFactory::get().db_policy.at(matched_policy());
         
         auto auth_policy = policy->profile_auth;
 
         
-        if(auth_policy != nullptr) {
+        if(auth_policy) {
             for(auto sub: auth_policy->sub_policies) {
-                ProfileSubAuth* sub_prof = sub;
+                auto sub_prof = sub;
                 std::string sub_name = sub->name;
                 
                 _dia("apply_id_policies: checking identity policy for: %s", sub_name.c_str());

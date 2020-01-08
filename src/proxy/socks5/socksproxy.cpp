@@ -72,13 +72,13 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
 
             matched_policy(CfgFactory::get().policy_match(l, r));
             bool verdict = CfgFactory::get().policy_action(matched_policy());
-            
-            PolicyRule* p = nullptr;
+
+            std::shared_ptr<PolicyRule> p;
             if(matched_policy() >= 0) {
                 p = CfgFactory::get().db_policy.at(matched_policy());
             }
 
-            _dia("socksProxy::on_left_message: policy check result: policy# %d policyid 0x%x verdict %s", matched_policy(), p, verdict ? "accept" : "reject" );
+            _dia("socksProxy::on_left_message: policy check result: policy# %d policyoid 0x%x verdict %s", matched_policy(), p->oid(), verdict ? "accept" : "reject" );
 
             socks5_policy s5_verdict = verdict ? socks5_policy::ACCEPT : socks5_policy::REJECT;
             cx->verdict(s5_verdict);

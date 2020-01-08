@@ -541,7 +541,7 @@ int CfgFactory::load_db_policy () {
 
             _dia("cfgapi_load_policy: processing #%d",i);
             
-            auto* rule = new PolicyRule();
+            auto rule = std::make_shared<PolicyRule>();
 
             if(cur_object.lookupValue("proto",proto)) {
                 int r = lookup_proto(proto.c_str());
@@ -1328,12 +1328,10 @@ int CfgFactory::load_db_prof_auth () {
                 for (int j = 0; j < sub_pol_num; j++) {
                     Setting& cur_subpol = cur_object["identities"][j];
                     
-                    auto* n_subpol = new ProfileSubAuth();
+                    auto n_subpol = std::make_shared<ProfileSubAuth>();
 
                     if (  ! cur_subpol.getName() ) {
                         _dia("load_db_prof_auth: profiles: unnamed object index %d: not ok", j);
-
-                        delete n_subpol; // coverity: 1407960
                         continue;
                     }
 
@@ -1417,10 +1415,6 @@ int CfgFactory::cleanup_db_policy () {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
     int r = db_policy.size();
-
-    for(auto* ptr: db_policy) {
-        delete ptr;
-    }
     db_policy.clear();
     
     _deb("cleanup_db_policy: %d objects freed",r);
@@ -1495,13 +1489,6 @@ int CfgFactory::cleanup_db_prof_auth () {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
     int r = db_prof_auth.size();
-    for(auto& t: db_prof_auth) {
-        auto c = t.second;
-        
-        for(auto j: c->sub_policies) {
-            delete j;
-        }
-    }
     db_prof_auth.clear();
     
     return r;
@@ -2352,7 +2339,7 @@ int CfgFactory::save_policy(Config& ex) {
 
     int n_saved = 0;
 
-    for (PolicyRule* pol: CfgFactory::get().db_policy) {
+    for (auto pol: CfgFactory::get().db_policy) {
 
         if(! pol)
             continue;

@@ -276,7 +276,7 @@ struct ProfileAuth {
     bool authenticate = false;
     bool resolve = false;  // resolve traffic by ip in auth table
     std::string prof_name;
-    std::vector<ProfileSubAuth*> sub_policies;
+    std::vector<std::shared_ptr<ProfileSubAuth>> sub_policies;
 };
 
 struct ProfileAlgDns {

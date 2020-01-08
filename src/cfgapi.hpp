@@ -131,7 +131,7 @@ public:
     std::map<std::string, std::shared_ptr<AddressObject>> db_address;
     std::map<std::string, range> db_port;
     std::map<std::string, int> db_proto;
-    std::vector<PolicyRule *> db_policy;
+    std::vector<std::shared_ptr<PolicyRule>> db_policy;
     std::map<std::string, std::shared_ptr<ProfileDetection>> db_prof_detection;
     std::map<std::string, std::shared_ptr<ProfileContent>> db_prof_content;
     std::map<std::string, std::shared_ptr<ProfileTls>> db_prof_tls;
