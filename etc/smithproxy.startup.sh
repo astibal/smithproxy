@@ -96,7 +96,7 @@ fi
 SMITH_CHAIN_NAME="SX.${tenant_id}"
 DIVERT_CHAIN_NAME="DX.${tenant_id}"
 
-SMITH_INTERFACE='eth1 eth0'
+SMITH_INTERFACE='-'
 SMITH_TCP_PORTS='80 25 587 21 143 110 5222 65000'
 SMITH_TCP_PORTS_ALL=0
 SMITH_IPV6_UDP_BYPASS=0
@@ -119,6 +119,24 @@ DIVERT_IP_RULE=100
 if [[ -f /etc/smithproxy/smithproxy.startup.cfg ]]; then
  . /etc/smithproxy/smithproxy.startup.cfg $1 "before"
 fi
+
+
+function smith_interfaces4 {
+    if [[ "${SMITH_INTERFACE}" == '*' ]]; then
+        SMITH_INTERFACE=`ip r | grep -o 'dev [a-z0-9]\+' | cut -c5- | sort | uniq | xargs -n1 echo -n "" | cut -c 2-`
+        echo " intefaces:auto(*) - enabling on all interfaces ${SMITH_INTERFACE}"
+
+    elif [[ "${SMITH_INTERFACE}" == '-' ]]; then
+
+        # default interfaces grep filter, ie. 'ens1\|ens3'
+        DEFI=`ip r | grep '^default' |  grep -o 'dev [a-z0-9]\+' | cut -c5- | sort | uniq | xargs -n1 echo -n "\|" | tr -d ' ' | cut -c3- `
+        SMITH_INTERFACE=`ip r | grep -o 'dev [a-z0-9]\+' | cut -c5- | sort | uniq | grep -v "$DEFI" | xargs -n1 echo -n "" | cut -c 2-`
+
+        echo " interfaces:auto(-) - enabling on all downlinks: ${SMITH_INTERFACE}"
+    else
+       echo " interfaces:manual(${SMITH_INTERFACE})"
+    fi
+}
 
 SMITH_TCP_TPROXY=`expr ${SMITH_TCP_TPROXY} + ${tenant_index}`
 SMITH_UDP_TPROXY=`expr ${SMITH_UDP_TPROXY} + ${tenant_index}`
@@ -151,8 +169,10 @@ case "$1" in
     done
 
     
-    
+    smith_interfaces4
+
     for IF in ${SMITH_INTERFACE}; do
+
         echo " -- Setting up intercept rules for interface '${IF}'"
     
         echo " tproxy for TCP"
