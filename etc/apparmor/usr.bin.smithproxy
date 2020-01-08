@@ -7,12 +7,17 @@
 
 /usr/bin/smithproxy {
   #include <abstractions/base>
+  #include <abstractions/nameservice>
+  #include <abstractions/openssl>
 
   # read self
   @{SX_BIN} r,
 
   # networking
   network,
+
+  # capabilities
+  capability sys_resource,
   capability net_admin,
   capability net_raw,
   capability net_bind_service,
@@ -24,7 +29,9 @@
   /etc/smithproxy/*.cfg rw,
 
   /etc/hosts r,
+  /etc/host.conf r,
   /etc/gai.conf r,
+  /etc/nsswitch.conf r,
 
   # read certificate path
   @{CERTSTORE}/** r,
@@ -33,6 +40,9 @@
   /dev/shm/sem.smithproxy* rw,
   /dev/shm/smithproxy* rw,
   /run/smithproxy* rw,
+
+  # write logs
+  /var/log/smithproxy* rw,
 
   # write dumpfiles
   #
