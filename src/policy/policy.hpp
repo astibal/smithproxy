@@ -67,12 +67,12 @@ struct ProfileScript;
 
 
 struct ProfileList {
-       ProfileContent* profile_content = nullptr;
-       ProfileDetection* profile_detection = nullptr;
-       ProfileTls* profile_tls = nullptr;
-       ProfileAuth* profile_auth = nullptr;
-       ProfileAlgDns* profile_alg_dns = nullptr;
-       ProfileScript* profile_script = nullptr;
+    std::shared_ptr<ProfileContent> profile_content = nullptr;
+    std::shared_ptr<ProfileDetection> profile_detection = nullptr;
+    std::shared_ptr<ProfileTls> profile_tls = nullptr;
+    std::shared_ptr<ProfileAuth> profile_auth = nullptr;
+    std::shared_ptr<ProfileAlgDns> profile_alg_dns = nullptr;
+    std::shared_ptr<ProfileScript> profile_script = nullptr;
 };
 
 class PolicyRule : public ProfileList , public socle::sobject {

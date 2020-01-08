@@ -93,12 +93,12 @@ case "$1" in
     echo "Smithproxy status $tenant_id"
     python3 /usr/share/smithproxy/infra/smithdog.py status
     ;;
-  reapply)
+  reload|reapply)
     if [ -z $tenant_id ]; then
         tenant_id="0"
     fi
 
-    echo "Reloading smithproxy policies $tenant_id"
+    echo "Reloading smithproxy instance $tenant_id"
     kill -s USR1 `cat /var/run/smithproxy.${tenant_id}.pid`
     ;;
   bypass)
@@ -109,7 +109,7 @@ case "$1" in
     ;;
     
   fin)
-    # leave TPROXY targets. Good for troubleshooting.
+    # leave TPROXY targets. Only for troubleshooting.
     python3 /usr/share/smithproxy/infra/smithdog.py stop ${tenant_id}
     ;;
 
@@ -118,7 +118,7 @@ case "$1" in
     ;;
 
   *)
-    echo "Usage: /etc/init.d/smithproxy {start|stop|status|reapply|restart|force-reload|bypass|unbypass} [tenant UUID]"
+    echo "Usage: /etc/init.d/smithproxy {start|stop|status|reload|restart|force-reload|bypass|unbypass} [tenant UUID]"
     echo "Debugs: /etc/init.d/smithproxy {fin|val}"
     echo "        fin - just terminate daemons, keep TPROXY rules up! This will disrupt traffic severely."
     echo "        val - run valgrind on smithproxy. Run it once, if it crashes, it stops Log goes to /var/log/smithproxy_val.log."

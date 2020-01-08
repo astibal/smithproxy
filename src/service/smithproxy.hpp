@@ -127,7 +127,7 @@ public:
 
     static void my_terminate(int param);
     static void my_usr1 (int param);
-    int load_signatures(libconfig::Config& cfg, const char* name, std::vector<duplexFlowMatch*>& target);
+    int load_signatures(libconfig::Config& cfg, const char* name, std::vector<std::shared_ptr<duplexFlowMatch>>& target);
     bool init_syslog();
     bool load_config(std::string& config_f, bool reload = false);
 

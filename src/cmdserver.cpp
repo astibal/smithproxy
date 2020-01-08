@@ -72,7 +72,8 @@
 #include <proxy/socks5/socksproxy.hpp>
 #include <policy/inspectors.hpp>
 #include <policy/authfactory.hpp>
-#include <policy/sigfactory.hpp>
+
+#include <inspect/sigfactory.hpp>
 #include <inspect/dnsinspector.hpp>
 
 
@@ -2025,10 +2026,10 @@ bool apply_setting(std::string section, std::string varname, struct cli_def *cli
 
     bool ret = false;
 
-    if( "settings" == section ) {
+    if( 0 == section.find("settings") ) {
         ret = CfgFactory::get().load_settings();
     } else
-    if( "debug" == section ) {
+    if( 0 == section.find("debug") ) {
         ret = CfgFactory::get().load_debug();
     } else {
         cli_print(cli, "config apply");
@@ -2780,6 +2781,42 @@ int cli_diag_proxy_policy_list(struct cli_def *cli, const char *command, char *a
 }
 
 
+int cli_diag_sig_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    std::stringstream ss;
+
+
+    ss << "\nSignatures:\n\n";
+
+    // explicitly make shared_ptr from the list
+
+    std::vector< std::vector<std::shared_ptr<duplexFlowMatch>>*> lists;
+    lists.push_back(& SigFactory::get().tls());
+    lists.push_back(& SigFactory::get().detection());
+
+    for(auto* list: lists)
+        for(std::shared_ptr<duplexFlowMatch> sig: *list) {
+
+            // print refcnt one less, due to this shared_ptr serving only priting purposes
+            ss << "Name: '" << sig->name() << "' refcnt: " << sig.use_count() - 1 << "\n";
+            ss << "  chain size: " << sig->sig_chain().size() << "\n";
+
+            auto sx_ptr = std::dynamic_pointer_cast<MyDuplexFlowMatch>(sig);
+            if(sx_ptr) {
+                ss << "  category: " << sx_ptr->category << "\n";
+                ss << "  severity: " << sx_ptr->severity << "\n";
+                ss << "  side: " << sx_ptr->sig_side << "\n";
+            }
+
+            ss << "\n";
+        }
+
+
+    cli_print(cli, "%s", ss.str().c_str());
+
+    return CLI_OK;
+}
+
 
 
 struct cli_ext : public cli_def {
@@ -2853,12 +2890,16 @@ void client_thread(int client_socket) {
         auto log = logan::create("service");
 
         struct cli_command *save;
+
         struct cli_command *show;
             struct cli_command *show_config;
+
         struct cli_command *test;
             struct cli_command *test_dns;
+
         struct cli_command *debuk;
         struct cli_command *diag;
+
             struct cli_command *diag_ssl;
                 struct cli_command *diag_ssl_cache;
                 struct cli_command *diag_ssl_wl;
@@ -2867,19 +2908,25 @@ void client_thread(int client_socket) {
                 struct cli_command *diag_ssl_ticket;
                 struct cli_command *diag_ssl_memcheck;
                 struct cli_command *diag_ssl_ca;
+
             struct cli_command *diag_mem;
                 struct cli_command *diag_mem_buffers;
                 struct cli_command *diag_mem_objects;
                 struct cli_command *diag_mem_trace;
+
             struct cli_command *diag_dns;
                 struct cli_command *diag_dns_cache;
                 struct cli_command *diag_dns_domains;
+
             struct cli_command *diag_proxy;
                 struct cli_command *diag_proxy_policy;
                 struct cli_command *diag_proxy_session;
                     struct cli_command *diag_proxy_io;
+
             struct cli_command *diag_identity;
                 struct cli_command *diag_identity_user;
+
+            struct cli_command *diag_sig;
 
         struct cli_def *cli;
 
@@ -2955,7 +3002,8 @@ void client_thread(int client_socket) {
                     cli_register_command(cli, diag_ssl_ticket, "stats", cli_diag_ssl_ticket_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "abbreviated handshake session/ticket cache stats");
                 diag_ssl_ca     = cli_register_command(cli, diag_ssl, "ca", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose SSL signing CA");
                     cli_register_command(cli, diag_ssl_ca, "reload", cli_diag_ssl_ca_reload, PRIVILEGE_PRIVILEGED, MODE_EXEC, "reload signing CA key and certificate");
-
+            diag_sig = cli_register_command(cli, diag, "sig", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "signature engine diagnostics");
+                    cli_register_command(cli, diag_sig, "list", cli_diag_sig_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list engine signatures");
 
 
             if(cfg_openssl_mem_dbg) {
