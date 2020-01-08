@@ -128,7 +128,7 @@ public:
 
     std::time_t ts_sys_started{};
 
-    std::map<std::string, AddressObject *> db_address;
+    std::map<std::string, std::shared_ptr<AddressObject>> db_address;
     std::map<std::string, range> db_port;
     std::map<std::string, int> db_proto;
     std::vector<PolicyRule *> db_policy;
@@ -162,7 +162,7 @@ public:
     bool  cfgapi_init(const char* fnm);
     void  cfgapi_cleanup();
 
-    AddressObject*    lookup_address (const char *name);
+    std::shared_ptr<AddressObject> lookup_address (const char *name);
     range             lookup_port (const char *name);
     int               lookup_proto (const char *name);
     std::shared_ptr<ProfileDetection> lookup_prof_detection (const char *name);

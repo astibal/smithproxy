@@ -130,7 +130,7 @@ bool CfgFactory::cfgapi_init(const char* fnm) {
     return true;
 }
 
-AddressObject* CfgFactory::lookup_address (const char *name) {
+std::shared_ptr<AddressObject> CfgFactory::lookup_address (const char *name) {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
     if(db_address.find(name) != db_address.end()) {
@@ -388,22 +388,16 @@ int CfgFactory::load_db_address () {
                     case 0: // CIDR notation
                         if (cur_object.lookupValue("cidr",address)) {
                             CIDR* c = cidr_from_str(address.c_str());
-                            auto new_addr = new CidrAddress(c);
 
-                            if (db_address.find(name) != db_address.end()) delete db_address[name];
-
-                            db_address[name] = new_addr;
+                            db_address[name] = std::make_shared<CidrAddress>(c);
                             db_address[name]->prof_name = name;
                             _dia("cfgapi_load_addresses: cidr '%s': ok", name.c_str());
                         }
                     break;
                     case 1: // FQDN notation
                         if (cur_object.lookupValue("fqdn",address))  {
-                            auto* new_address = new FqdnAddress(address);
 
-                            if (db_address.find(name) != db_address.end()) delete db_address[name];
-
-                            db_address[name] = new_address;
+                            db_address[name] = std::make_shared<FqdnAddress>(address);
                             db_address[name]->prof_name = name;
                             _dia("cfgapi_load_addresses: fqdn '%s': ok", name.c_str());
                         }
@@ -567,8 +561,8 @@ int CfgFactory::load_db_policy () {
                 _dia("cfgapi_load_policy[#%d]: scalar src address object",i);
                 if(cur_object.lookupValue("src",src)) {
                     
-                    AddressObject* r = lookup_address(src.c_str());
-                    if(r != nullptr) {
+                    auto r = lookup_address(src.c_str());
+                    if(r) {
                         rule->src.push_back(r);
                         rule->src_default = false;
                         _dia("cfgapi_load_policy[#%d]: src address object: %s",i,src.c_str());
@@ -583,8 +577,8 @@ int CfgFactory::load_db_policy () {
                 for(int y = 0; y < sett_src_count; y++) {
                     const char* obj_name = sett_src[y];
                     
-                    AddressObject* r = lookup_address(obj_name);
-                    if(r != nullptr) {
+                    auto r = lookup_address(obj_name);
+                    if(r) {
                         rule->src.push_back(r);
                         rule->src_default = false;
                         _dia("cfgapi_load_policy[#%d]: src address object: %s",i,obj_name);
@@ -632,8 +626,8 @@ int CfgFactory::load_db_policy () {
             const Setting& sett_dst = cur_object["dst"];
             if(sett_dst.isScalar()) {
                 if(cur_object.lookupValue("dst",dst)) {
-                    AddressObject* r = lookup_address(dst.c_str());
-                    if(r != nullptr) {
+                    auto r = lookup_address(dst.c_str());
+                    if(r) {
                         rule->dst.push_back(r);
                         rule->dst_default = false;
                         _dia("cfgapi_load_policy[#%d]: dst address object: %s",i,dst.c_str());
@@ -648,8 +642,8 @@ int CfgFactory::load_db_policy () {
                 for(int y = 0; y < sett_dst_count; y++) {
                     const char* obj_name = sett_dst[y];
 
-                    AddressObject* r = lookup_address(obj_name);
-                    if(r != nullptr) {
+                    auto r = lookup_address(obj_name);
+                    if(r) {
                         rule->dst.push_back(r);
                         rule->dst_default = false;
                         _dia("cfgapi_load_policy[#%d]: dst address object: %s",i,obj_name);
@@ -1413,16 +1407,9 @@ int CfgFactory::cleanup_db_address () {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
     int r = db_address.size();
-
-    for (auto& a: db_address)
-    {
-        AddressObject* c = a.second;
-        delete c;
-    }
-    
     db_address.clear();
     
-    _deb("cleanup_db_address: %d objects freed",r);
+    _deb("cleanup_db_address: %d objects freed", r);
     return r;
 }
 
@@ -2040,7 +2027,10 @@ int CfgFactory::save_address_objects(Config& ex) {
             Setting &s_fqdn = item.add("fqdn", Setting::TypeString);
 
             s_type = 1;
-            s_fqdn = ((FqdnAddress*)(obj))->fqdn();
+            auto fqdn_ptr = std::dynamic_pointer_cast<FqdnAddress>(obj);
+            if(fqdn_ptr) {
+                s_fqdn = fqdn_ptr->fqdn();
+            }
 
             n_saved++;
         }
@@ -2050,9 +2040,13 @@ int CfgFactory::save_address_objects(Config& ex) {
             Setting &s_cidr = item.add("cidr", Setting::TypeString);
 
             s_type = 0;
-            const char* addr = cidr_to_str(((CidrAddress*)(obj))->cidr());
-            s_cidr =  addr;
-            delete[] addr;
+
+            auto cidr_ptr = std::dynamic_pointer_cast<CidrAddress>(obj);
+            if(cidr_ptr) {
+                const char* addr = cidr_to_str(cidr_ptr->cidr());
+                s_cidr =  addr;
+                delete[] addr;
+            }
 
             n_saved++;
         }

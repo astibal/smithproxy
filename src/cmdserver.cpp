@@ -455,7 +455,7 @@ int cli_test_dns_refreshallfqdns(struct cli_def *cli, const char *command, char 
         std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
 
         for (auto a: CfgFactory::get().db_address) {
-            FqdnAddress *fa = dynamic_cast<FqdnAddress *>(a.second);
+            auto fa = std::dynamic_pointer_cast<FqdnAddress>(a.second);
             if (fa) {
                 fqdns.push_back(fa->fqdn());
             }

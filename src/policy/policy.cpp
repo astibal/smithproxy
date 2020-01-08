@@ -134,7 +134,7 @@ std::string PolicyRule::to_string(int verbosity) const {
 }
 
 
-bool PolicyRule::match_addrgrp_cx(std::vector< AddressObject* >& sources, baseHostCX* cx) {
+bool PolicyRule::match_addrgrp_cx(std::vector<std::shared_ptr<AddressObject>> &sources, baseHostCX* cx) {
     bool match = false;
     
     if(sources.empty()) {
@@ -142,7 +142,7 @@ bool PolicyRule::match_addrgrp_cx(std::vector< AddressObject* >& sources, baseHo
 //                 _dia("PolicyRule: matched ");
     } else {
         CIDR* l = cidr_from_str(cx->host().c_str());
-        for(auto* comp: sources) {
+        for(auto comp: sources) {
             
             if(comp->match(l)) {
                 if(*log.level() >= DIA) {
@@ -209,7 +209,7 @@ bool PolicyRule::match_rangegrp_vecx(std::vector< range >& ranges, std::vector< 
 }
 
 
-bool PolicyRule::match_addrgrp_vecx(std::vector< AddressObject* >& sources, std::vector< baseHostCX* >& vecx) {
+bool PolicyRule::match_addrgrp_vecx(std::vector<std::shared_ptr<AddressObject>> &sources, std::vector< baseHostCX* >& vecx) {
     bool match = false;
     
     int idx = -1;

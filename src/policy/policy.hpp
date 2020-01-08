@@ -84,13 +84,13 @@ public:
        std::string proto_name;
        bool proto_default = true;
     
-       std::vector<AddressObject*> src;
+       std::vector<std::shared_ptr<AddressObject>> src;
        bool src_default = true;
        std::vector<range> src_ports;
        std::vector<std::string> src_ports_names;
        bool src_ports_default = true;
        
-       std::vector<AddressObject*> dst;
+       std::vector<std::shared_ptr<AddressObject>> dst;
        bool dst_default = true;
        std::vector<range> dst_ports;
        std::vector<std::string> dst_ports_names;
@@ -107,8 +107,8 @@ public:
        bool match(baseProxy*);
        bool match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r);
        
-       bool match_addrgrp_cx(std::vector<AddressObject*>& cidrs,baseHostCX* cx);
-       bool match_addrgrp_vecx(std::vector<AddressObject*>& cidrs,std::vector<baseHostCX*>& vecx);
+       bool match_addrgrp_cx(std::vector<std::shared_ptr<AddressObject>> &sources, baseHostCX* cx);
+       bool match_addrgrp_vecx(std::vector<std::shared_ptr<AddressObject>> &sources, std::vector<baseHostCX*>& vecx);
        bool match_rangegrp_cx(std::vector<range>& ranges,baseHostCX* cx);
        bool match_rangegrp_vecx(std::vector<range>& ranges,std::vector<baseHostCX*>& vecx);
        
