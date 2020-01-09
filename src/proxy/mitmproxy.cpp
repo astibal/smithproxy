@@ -1141,6 +1141,10 @@ std::string verify_flag_string(int code) {
             return "Server's certificate is REVOKED";
         case SSLCom::VRF_HOSTNAME_FAILED:
             return "Client application asked for SNI server is not offering";
+        case SSLCom::VRF_INVALID:
+            return "Certificate is not valid";
+        case SSLCom::VRF_ALLFAILED:
+            return "It was not possible to obtain certificate status";
         default:
             return "";
     }
@@ -1195,13 +1199,22 @@ std::string MitmProxy::replacement_ssl_verify_detail(SSLCom* scom) {
                 is_set = true;
             }
             if (scom->verify_check(SSLCom::VRF_REVOKED)) {
-                ss << "<p><h3 class=\"fg-red\">Reason:</h3>" << verify_flag_string(SSLCom::VRF_REVOKED) << ". "
-                                                                                                       "This is a serious issue, it's highly recommended to not continue "
-                                                                                                       "to this page.</p>";
+                ss << "<p><h3 class=\"fg-red\">Reason:</h3>" << verify_flag_string(SSLCom::VRF_REVOKED) <<
+                       ". "
+                       "This is a serious issue, it's highly recommended to not continue "
+                       "to this page.</p>";
+                is_set = true;
+            }
+            if (scom->verify_check(SSLCom::VRF_INVALID)) {
+                ss << "<p><h3 class=\"fg-red\">Reason:</h3>" << verify_flag_string(SSLCom::VRF_INVALID) << ".</p>";
                 is_set = true;
             }
             if (scom->verify_check(SSLCom::VRF_HOSTNAME_FAILED)) {
                 ss << "<p><h3 class=\"fg-red\">Reason:</h3>" << verify_flag_string(SSLCom::VRF_HOSTNAME_FAILED) << ".</p>";
+                is_set = true;
+            }
+            if (scom->verify_check(SSLCom::VRF_ALLFAILED)) {
+                ss << "<p><h3 class=\"fg-red\">Reason:</h3>" << verify_flag_string(SSLCom::VRF_ALLFAILED) << ".</p>";
                 is_set = true;
             }
 
