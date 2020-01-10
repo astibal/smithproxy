@@ -86,6 +86,9 @@ public:
     theReceiver* dtls_proxy = nullptr;
     socksAcceptor* socks_proxy = nullptr;
 
+    theAcceptor* redir_plain_proxy = nullptr;
+    theAcceptor* redir_ssl_proxy = nullptr;
+
 
     std::thread* plain_thread = nullptr;
     std::thread* ssl_thread = nullptr;
@@ -96,6 +99,9 @@ public:
     std::thread* log_thread = nullptr;
     std::thread* dns_thread = nullptr;
     std::thread* id_thread = nullptr;
+    std::thread* redir_plain_thread = nullptr;
+    std::thread* redir_ssl_thread = nullptr;
+
 
     SmithProxy (SmithProxy const&) = delete;
     SmithProxy& operator= (SmithProxy const& r) = delete;
