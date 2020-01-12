@@ -68,7 +68,7 @@ private:
 
 class MitmSocksProxy : public ThreadedAcceptorProxy<SocksProxy> {
 public:
-    using proxy_type = threadedProxyWorker::proxy_type;
+    using proxy_type = threadedProxyWorker::proxy_type_t;
 
     MitmSocksProxy(baseCom* c, int worker_id, proxy_type t = proxy_type::PROXY) : ThreadedAcceptorProxy<SocksProxy>(c,worker_id, t) {
         log = logan::attach(this, "masterproxy.socks");

@@ -45,7 +45,7 @@
 class ServiceFactory {
 public:
 
-    using proxy_type = threadedProxyWorker::proxy_type;
+    using proxy_type = threadedProxyWorker::proxy_type_t;
 
     static logan_lite& log() {
         static logan_lite l("service");

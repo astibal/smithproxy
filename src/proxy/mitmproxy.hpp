@@ -205,7 +205,7 @@ private:
 class MitmMasterProxy : public ThreadedAcceptorProxy<MitmProxy> {
 public:
     
-    MitmMasterProxy(baseCom* c, int worker_id, threadedProxyWorker::proxy_type t = proxy_type::TRANSPARENT) :
+    MitmMasterProxy(baseCom* c, int worker_id, threadedProxyWorker::proxy_type_t t = proxy_type_t::TRANSPARENT) :
         ThreadedAcceptorProxy< MitmProxy >(c,worker_id, t) {
 
         log.area("acceptor.tcp");
@@ -226,7 +226,7 @@ public:
 
 class MitmUdpProxy : public ThreadedReceiverProxy<MitmProxy> {
 public:
-    MitmUdpProxy(baseCom* c, int worker_id, threadedProxyWorker::proxy_type t = proxy_type::TRANSPARENT):
+    MitmUdpProxy(baseCom* c, int worker_id, threadedProxyWorker::proxy_type_t t = proxy_type_t::TRANSPARENT):
         ThreadedReceiverProxy< MitmProxy >(c,worker_id, t) {
 
         log.area("acceptor.udp");

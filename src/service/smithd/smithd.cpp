@@ -187,7 +187,7 @@ DEFINE_LOGGING(SmithdProxy);
 
 class UxAcceptor : public ThreadedAcceptorProxy<SmithdProxy> {
 public:
-    UxAcceptor(baseCom* c, int worker_id, proxy_type t = proxy_type::NONE ) :
+    UxAcceptor(baseCom* c, int worker_id, proxy_type_t t = proxy_type_t::NONE ) :
         ThreadedAcceptorProxy<SmithdProxy>(c,worker_id, t) {};
     
     baseHostCX* new_cx(const char* h, const char* p) override { return new SmithServerCX(com()->slave(),h,p); };
