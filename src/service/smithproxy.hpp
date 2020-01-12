@@ -88,6 +88,7 @@ public:
 
     theAcceptor* redir_plain_proxy = nullptr;
     theAcceptor* redir_ssl_proxy = nullptr;
+    theReceiver* redir_udp_proxy = nullptr;
 
 
     std::thread* plain_thread = nullptr;
@@ -101,6 +102,7 @@ public:
     std::thread* id_thread = nullptr;
     std::thread* redir_plain_thread = nullptr;
     std::thread* redir_ssl_thread = nullptr;
+    std::thread* redir_udp_thread = nullptr;
 
 
     SmithProxy (SmithProxy const&) = delete;

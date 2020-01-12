@@ -53,13 +53,15 @@ public:
     }
 
     template <class Listener, class Com>
-    static Listener* prepare_listener(unsigned int port, std::string const& friendly_name, int def_port, int sub_workers, proxy_type type);
+    static Listener *
+    prepare_listener (unsigned int port, std::string const &friendly_name, int sub_workers, proxy_type type);
     template <class Listener, class Com>
     static Listener* prepare_listener(std::string const& str_path, std::string const& friendly_name, std::string const& def_path, int sub_workers, proxy_type type);
 };
 
 template <class Listener, class Com>
-Listener* ServiceFactory::prepare_listener(unsigned int port, std::string const& friendly_name, int def_port, int sub_workers, proxy_type type) {
+Listener * ServiceFactory::prepare_listener (unsigned int port, std::string const &friendly_name, int sub_workers,
+                                             proxy_type type) {
 
     auto log = ServiceFactory::log();
 
