@@ -162,7 +162,7 @@ void SmithProxy::create_listeners() {
 
     redir_udp_proxy = ServiceFactory::prepare_listener<theReceiver, UDPCom>(
             std::stoi(CfgFactory::get().listen_udp_port) + 1000,
-            "udp",
+            "udp-rdr",
             CfgFactory::get().num_workers_udp,
             ServiceFactory::proxy_type::REDIRECT);
 
