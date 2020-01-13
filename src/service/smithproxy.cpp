@@ -161,7 +161,7 @@ void SmithProxy::create_listeners() {
             ServiceFactory::proxy_type::REDIRECT);
 
     redir_udp_proxy = ServiceFactory::prepare_listener<theReceiver, UDPCom>(
-            std::stoi(CfgFactory::get().listen_udp_port) + 1000,
+            std::stoi(CfgFactory::get().listen_udp_port) + 973,  // 973 + default 50080 = 51053: should suggest DNS only
             "udp-rdr",
             CfgFactory::get().num_workers_udp,
             ServiceFactory::proxy_type::REDIRECT);
