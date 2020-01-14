@@ -229,6 +229,16 @@ bool CfgFactory::load_settings () {
     if(! cfgapi.getRoot().exists("settings"))
         return false;
 
+    cfgapi.getRoot()["settings"].lookupValue("plaintext_port",listen_tcp_port_base); listen_tcp_port = listen_tcp_port_base;
+    cfgapi.getRoot()["settings"].lookupValue("plaintext_workers",num_workers_tcp);
+    cfgapi.getRoot()["settings"].lookupValue("ssl_port",listen_tls_port_base); listen_tls_port = listen_tls_port_base;
+    cfgapi.getRoot()["settings"].lookupValue("ssl_workers",num_workers_tls);
+    cfgapi.getRoot()["settings"].lookupValue("udp_port",listen_udp_port_base); listen_udp_port = listen_udp_port_base;
+    cfgapi.getRoot()["settings"].lookupValue("udp_workers",num_workers_udp);
+    cfgapi.getRoot()["settings"].lookupValue("dtls_port",listen_dtls_port_base);  listen_dtls_port = listen_dtls_port_base;
+    cfgapi.getRoot()["settings"].lookupValue("dtls_workers",num_workers_dtls);
+
+
     if(cfgapi.getRoot()["settings"].exists("nameservers")) {
 
         if(!db_nameservers.empty()) {
@@ -236,10 +246,15 @@ bool CfgFactory::load_settings () {
             db_nameservers.clear();
         }
 
+        // receiver proxy will use nameservers for redirected ports
+        ReceiverRedirectMap::instance().map_clear();
+
         const int num = cfgapi.getRoot()["settings"]["nameservers"].getLength();
         for(int i = 0; i < num; i++) {
             std::string ns = cfgapi.getRoot()["settings"]["nameservers"][i];
             db_nameservers.push_back(ns);
+
+            ReceiverRedirectMap::instance().map_add(std::stoi(listen_udp_port) + 973, ReceiverRedirectMap::redir_target_t(ns, 53));  // to make default port 51053 suggesting DNS
         }
     }
 
@@ -247,20 +262,10 @@ bool CfgFactory::load_settings () {
     cfgapi.getRoot()["settings"].lookupValue("certs_ca_key_password",SSLFactory::default_cert_password());
     cfgapi.getRoot()["settings"].lookupValue("certs_ca_path",SSLFactory::default_client_ca_path());
 
-    cfgapi.getRoot()["settings"].lookupValue("plaintext_port",listen_tcp_port_base); listen_tcp_port = listen_tcp_port_base;
-    cfgapi.getRoot()["settings"].lookupValue("plaintext_workers",num_workers_tcp);
-    cfgapi.getRoot()["settings"].lookupValue("ssl_port",listen_tls_port_base); listen_tls_port = listen_tls_port_base;
-    cfgapi.getRoot()["settings"].lookupValue("ssl_workers",num_workers_tls);
     cfgapi.getRoot()["settings"].lookupValue("ssl_autodetect",MitmMasterProxy::ssl_autodetect);
     cfgapi.getRoot()["settings"].lookupValue("ssl_autodetect_harder",MitmMasterProxy::ssl_autodetect_harder);
     cfgapi.getRoot()["settings"].lookupValue("ssl_ocsp_status_ttl",SSLFactory::ssl_ocsp_status_ttl);
     cfgapi.getRoot()["settings"].lookupValue("ssl_crl_status_ttl",SSLFactory::ssl_crl_status_ttl);
-
-    cfgapi.getRoot()["settings"].lookupValue("udp_port",listen_udp_port_base); listen_udp_port = listen_udp_port_base;
-    cfgapi.getRoot()["settings"].lookupValue("udp_workers",num_workers_udp);
-
-    cfgapi.getRoot()["settings"].lookupValue("dtls_port",listen_dtls_port_base);  listen_dtls_port = listen_dtls_port_base;
-    cfgapi.getRoot()["settings"].lookupValue("dtls_workers",num_workers_dtls);
 
     if(cfgapi.getRoot()["settings"].exists("udp_quick_ports")) {
 
