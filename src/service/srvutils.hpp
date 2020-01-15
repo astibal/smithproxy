@@ -44,19 +44,24 @@
 
 class ServiceFactory {
 public:
+
+    using proxy_type = threadedProxyWorker::proxy_type_t;
+
     static logan_lite& log() {
         static logan_lite l("service");
         return l;
     }
 
     template <class Listener, class Com>
-    static Listener* prepare_listener(unsigned int port, std::string const& friendly_name, int def_port, int sub_workers);
+    static Listener *
+    prepare_listener (unsigned int port, std::string const &friendly_name, int sub_workers, proxy_type type);
     template <class Listener, class Com>
-    static Listener* prepare_listener(std::string const& str_path, std::string const& friendly_name, std::string const& def_path, int sub_workers);
+    static Listener* prepare_listener(std::string const& str_path, std::string const& friendly_name, std::string const& def_path, int sub_workers, proxy_type type);
 };
 
 template <class Listener, class Com>
-Listener* ServiceFactory::prepare_listener(unsigned int port, std::string const& friendly_name, int def_port, int sub_workers) {
+Listener * ServiceFactory::prepare_listener (unsigned int port, std::string const &friendly_name, int sub_workers,
+                                             proxy_type type) {
 
     auto log = ServiceFactory::log();
 
@@ -65,7 +70,7 @@ Listener* ServiceFactory::prepare_listener(unsigned int port, std::string const&
     }
 
     _not("Entering %s mode on port %d", friendly_name.c_str(), port);
-    auto s_p = new Listener(new Com());
+    auto s_p = new Listener(new Com(), type);
     s_p->com()->nonlocal_dst(true);
     s_p->worker_count_preference(sub_workers);
 
@@ -85,7 +90,7 @@ Listener* ServiceFactory::prepare_listener(unsigned int port, std::string const&
 }
 
 template <class Listener, class Com>
-Listener* ServiceFactory::prepare_listener(std::string const& str_path, std::string const& friendly_name, std::string const& def_path, int sub_workers) {
+Listener* ServiceFactory::prepare_listener(std::string const& str_path, std::string const& friendly_name, std::string const& def_path, int sub_workers, proxy_type type) {
 
     auto log = ServiceFactory::log();
 
@@ -99,7 +104,7 @@ Listener* ServiceFactory::prepare_listener(std::string const& str_path, std::str
     }
     
     _not("Entering %s mode on port %s",friendly_name.c_str(),path.c_str());
-    auto s_p = new Listener(new Com());
+    auto s_p = new Listener(new Com(), type);
     s_p->com()->nonlocal_dst(true);
     s_p->worker_count_preference(sub_workers);
 

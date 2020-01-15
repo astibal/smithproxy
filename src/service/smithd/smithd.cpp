@@ -187,7 +187,8 @@ DEFINE_LOGGING(SmithdProxy);
 
 class UxAcceptor : public ThreadedAcceptorProxy<SmithdProxy> {
 public:
-    UxAcceptor(baseCom* c, int worker_id) : ThreadedAcceptorProxy<SmithdProxy>(c,worker_id) {};
+    UxAcceptor(baseCom* c, int worker_id, proxy_type_t t = proxy_type_t::NONE ) :
+        ThreadedAcceptorProxy<SmithdProxy>(c,worker_id, t) {};
     
     baseHostCX* new_cx(const char* h, const char* p) override { return new SmithServerCX(com()->slave(),h,p); };
     baseHostCX* new_cx(int s) override { return new SmithServerCX(com()->slave(), s); };
@@ -583,7 +584,12 @@ int main(int argc, char *argv[]) {
     backend_proxy = nullptr;
 
     try {
-        ServiceFactory::prepare_listener<UxProxy,UxCom>(cfg_smithd_listen_port,"ux-plain","/var/run/smithd.sock",cfg_smithd_workers);
+        ServiceFactory::prepare_listener<UxProxy,UxCom>(
+                cfg_smithd_listen_port,
+                "ux-plain",
+                "/var/run/smithd.sock",
+                cfg_smithd_workers,
+                ServiceFactory::proxy_type::NONE);
     } catch(socle::com_error const& e) {
         _fat("Exception caught when creating listener: %s", e.what());
         backend_proxy = nullptr;
