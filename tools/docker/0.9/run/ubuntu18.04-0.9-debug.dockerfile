@@ -7,10 +7,11 @@ LABEL org.smithproxy.docker.image="astibal/smithproxy:ubuntu18.04-0.9-run"
 WORKDIR /app
 
 
-RUN git clone https://github.com/astibal/smithproxy.git -b master smithproxy && \
+RUN apt -y install gdb && \
+git clone https://github.com/astibal/smithproxy.git -b master smithproxy && \
 cd smithproxy && \
 git clone https://github.com/astibal/socle.git -b master socle && \
-mkdir build && cd build && cmake .. -DCMAKE_BUILD_TYPE=Release && make install
+mkdir build && cd build && cmake .. -DCMAKE_BUILD_TYPE=Debug && make install
 
 # Define environment variable
 
