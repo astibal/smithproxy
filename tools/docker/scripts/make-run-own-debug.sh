@@ -2,7 +2,7 @@
 
 # RUN THIS SCRIPT FROM ITS DIR 
 
-BUILD_DIR=`mktmp -d`
+BUILD_DIR=`mktemp -d`
 mkdir $BUILD_DIR/sx
 
 sudo docker build ${BUILD_DIR}/sx -f ../../docker/0.9/run/ubuntu18.04-0.9-base.dockerfile --tag  astibal/smithproxy:ubuntu18.04-0.9-base
