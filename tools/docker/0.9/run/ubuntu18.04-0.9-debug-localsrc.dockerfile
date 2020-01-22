@@ -1,17 +1,16 @@
 #
 FROM astibal/smithproxy:ubuntu18.04-0.9-base
 
-LABEL org.smithproxy.docker.image="astibal/smithproxy:ubuntu18.04-0.9-run-debug"
+LABEL org.smithproxy.docker.image="astibal/smithproxy:ubuntu18.04-0.9-run-debug-localsrc"
 
 # Set the working directory to /app
 WORKDIR /app
 
+COPY smithproxy/ /smithproxy/
 
 RUN apt -y install gdb && \
-git clone https://github.com/astibal/smithproxy.git -b master smithproxy && \
-cd smithproxy && \
-git clone https://github.com/astibal/socle.git -b master socle && \
-mkdir build && cd build && cmake .. -DCMAKE_BUILD_TYPE=Debug && make install
+cd /smithproxy && \
+mkdir build ; cd build && cmake .. -DCMAKE_BUILD_TYPE=Debug && make -j `cat /proc/cpuinfo  | grep processor | wc -l` install
 
 # Define environment variable
 
