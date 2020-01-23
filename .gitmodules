@@ -5,4 +5,4 @@
 	update = merge
 [submodule "ext/argparse"]
 	path = ext/argparse
-	url = https://github.com/astibal/argparse.git
+	url = ssh://git@github.com/astibal/argparse.git
