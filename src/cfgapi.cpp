@@ -2232,7 +2232,7 @@ int CfgFactory::save_tls_profiles(Config& ex) {
 
         // add sni bypass list
         if(obj->sni_filter_bypass.ptr() && obj->sni_filter_bypass.ptr()->size() > 0 ) {
-            Setting& sni_flist = item.add("sni_filter_bypass", Setting::TypeList);
+            Setting& sni_flist = item.add("sni_filter_bypass", Setting::TypeArray);
 
             for( auto snif: *obj->sni_filter_bypass.ptr()) {
                 sni_flist.add(Setting::TypeString) = snif;
@@ -2242,7 +2242,7 @@ int CfgFactory::save_tls_profiles(Config& ex) {
         // add redirected ports (for replacements)
         if( obj->redirect_warning_ports.ptr() && obj->redirect_warning_ports.ptr()->size() > 0 ) {
 
-            Setting& rport_list = item.add("redirect_warning_ports", Setting::TypeList);
+            Setting& rport_list = item.add("redirect_warning_ports", Setting::TypeArray);
 
             for( auto rport: *obj->redirect_warning_ports.ptr()) {
                 rport_list.add(Setting::TypeInt) = rport;
@@ -2354,22 +2354,22 @@ int CfgFactory::save_policy(Config& ex) {
         item.add("proto", Setting::TypeString) = pol->proto_name;
 
         // SRC
-        Setting& src_list = item.add("src", Setting::TypeList);
+        Setting& src_list = item.add("src", Setting::TypeArray);
         for(auto s: pol->src) {
             src_list.add(Setting::TypeString) = s->prof_name;
         }
-        Setting& srcport_list = item.add("sport", Setting::TypeList);
+        Setting& srcport_list = item.add("sport", Setting::TypeArray);
         for(auto sp: pol->src_ports_names) {
             srcport_list.add(Setting::TypeString) = sp;
         }
 
 
         // DST
-        Setting& dst_list = item.add("dst", Setting::TypeList);
+        Setting& dst_list = item.add("dst", Setting::TypeArray);
         for(auto d: pol->dst) {
             dst_list.add(Setting::TypeString) = d->prof_name;
         }
-        Setting& dstport_list = item.add("dport", Setting::TypeList);
+        Setting& dstport_list = item.add("dport", Setting::TypeArray);
         for(auto sp: pol->dst_ports_names) {
             dstport_list.add(Setting::TypeString) = sp;
         }
@@ -2488,7 +2488,7 @@ int save_settings(Config& ex) {
     Setting& objects = ex.getRoot()["settings"];
 
     // nameservers
-    Setting& it_ns  = objects.add("nameservers",Setting::TypeList);
+    Setting& it_ns  = objects.add("nameservers",Setting::TypeArray);
     for(auto ns: CfgFactory::get().db_nameservers) {
         it_ns.add(Setting::TypeString) = ns;
     }
@@ -2514,7 +2514,7 @@ int save_settings(Config& ex) {
     objects.add("dtls_workers", Setting::TypeInt) = CfgFactory::get().num_workers_dtls;
 
     //udp quick ports
-    Setting& it_quick  = objects.add("udp_quick_ports",Setting::TypeList);
+    Setting& it_quick  = objects.add("udp_quick_ports",Setting::TypeArray);
     if(CfgFactory::get().db_udp_quick_ports.empty()) {
         it_quick.add(Setting::TypeInt) = 0;
     }
