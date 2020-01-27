@@ -1870,7 +1870,7 @@ void cfg_generate_cli_hints(Setting& setting, std::vector<std::string>* this_lev
             name = cur_object.getName();
         }
 
-        if(cur_object.isScalar()) {
+        if( cur_object.isScalar() || cur_object.isArray() ) {
             if( ! name.empty() ) {
                 if(this_level_names)
                     this_level_names->push_back(name);
@@ -2004,6 +2004,21 @@ bool cfg_write_value(Setting& parent, bool create, std::string& varname, std::st
 
                     break;
 
+
+                case Setting::TypeArray:
+                    {
+                        auto first_elem_type = Setting::TypeString;
+                        if ( s.getLength() > 0 ) {
+                            first_elem_type = s[0].getType();
+                        }
+
+                        auto values = string_split(value, ',');
+
+                        for(auto i: values)
+                            cli_print(cli, "values: %s", i.c_str());
+
+                    }
+                    break;
                 default:
                     ;
             }
