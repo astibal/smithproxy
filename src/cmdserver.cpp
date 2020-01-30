@@ -83,6 +83,12 @@
 using namespace socle;
 
 
+
+bool config_changed_flag = false;
+bool cli_debug_flag = false;
+
+#define _debug   if(cli_debug_flag) cli_print
+
 int cli_port = 50000;
 int cli_port_base = 50000;
 std::string cli_enable_password;
@@ -108,6 +114,15 @@ loglevel orig_socksproxy_loglevel =NON;
 loglevel orig_auth_loglevel = NON;
 
 extern bool cfg_openssl_mem_dbg;
+
+
+void apply_hostname(cli_def* cli) {
+    char hostname[64]; memset(hostname,0,64);
+    gethostname(hostname,63);
+
+    cli_set_hostname(cli, string_format("smithproxy(%s)%s ", hostname, config_changed_flag ? "<*>" : "").c_str());
+}
+
 
 void load_defaults() {
     orig_ssl_loglevel = SSLCom::log_level_ref();
@@ -282,6 +297,10 @@ void cmd_show_status(struct cli_def* cli) {
     unsigned long l = MitmProxy::total_mtr_up().get();
     unsigned long r = MitmProxy::total_mtr_down().get();
     cli_print(cli,"Proxy performance: upload %sbps, download %sbps in last second",number_suffixed(l*8).c_str(),number_suffixed(r*8).c_str());
+
+    if(config_changed_flag) {
+        cli_print(cli, "\n*** Configuration changes NOT saved ***");
+    }
 
 }
 
@@ -1573,16 +1592,20 @@ int cli_debug_set(struct cli_def *cli, const char *command, char *argv[], int ar
                 cli_print(cli, "debug level changed: %s: %d => %d", lv.first.c_str(), orig_l, newlev);
             }
         }
+        else if(var == "cli") {
+            cli_debug_flag = (newlev > 0);
+        }
+        else {
+            if(logan::get().topic_db_.find(var) != logan::get().topic_db_.end()) {
+                loglevel* l = logan::get()[var];
 
-        if(logan::get().topic_db_.find(var) != logan::get().topic_db_.end()) {
-            loglevel* l = logan::get()[var];
+                int old_lev = l->level();
+                logan::get()[var]->level(newlev);
 
-            int old_lev = l->level();
-            logan::get()[var]->level(newlev);
-
-            cli_print(cli, "debug level changed: %s: %d => %d", var.c_str(), old_lev, newlev);
-        } else {
-            cli_print(cli, "variable not recognized");
+                cli_print(cli, "debug level changed: %s: %d => %d", var.c_str(), old_lev, newlev);
+            } else {
+                cli_print(cli, "variable not recognized");
+            }
         }
     }
     else {
@@ -1721,9 +1744,28 @@ int cli_save_config(struct cli_def *cli, const char *command, char *argv[], int 
     }
     else {
         cli_print(cli, "config saved successfully.");
+        config_changed_flag = false;
+
+        apply_hostname(cli);
     }
     return CLI_OK;
 }
+
+
+int cli_exec_reload(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    config_changed_flag = false;
+    bool CONFIG_LOADED = SmithProxy::instance().load_config(CfgFactory::get().config_file, true);
+
+    if(CONFIG_LOADED) {
+        cli_print(cli, "Configuration file reloaded successfully");
+    } else {
+        cli_print(cli, "Configuration file reload FAILED");
+    }
+
+    return CLI_OK;
+}
+
 
 int cfg_write(Config& cfg, FILE* where, unsigned long iobufsz = 0) {
 
@@ -1948,41 +1990,41 @@ std::vector<cli_command*> cfg_generate_cli_callbacks(int mode, Setting& this_set
 }
 
 
-bool cfg_write_value(Setting& parent, bool create, std::string& varname, std::string value, cli_def* cli) {
+bool cfg_write_value(Setting& parent, bool create, std::string& varname, const std::vector<std::string> &values, cli_def* cli) {
 
     auto log = logan::create("service");
+
+    for(auto const& v: values)
+        _debug(cli, "DEBUG: attempting to write %s:%s ", varname.c_str(), v.c_str());
 
     if( parent.exists(varname.c_str()) ) {
 
         _not("config item exists %s", varname.c_str());
 
         Setting& s = parent[varname.c_str()];
-
         auto t = s.getType();
-
-        int i;
-        long long int lli;
-        float f;
 
         std::string lvalue;
 
         try {
             switch (t) {
                 case Setting::TypeInt:
-                    i = std::stoi(value);
+                {
+                    int i = std::stoi(values[0]);
                     s = i;
-
+                }
                     break;
 
                 case Setting::TypeInt64:
-                    lli = std::stoll(value);
+                {
+                    long long int lli = std::stoll(values[0]);
                     s = lli;
-
+                }
                     break;
 
                 case Setting::TypeBoolean:
 
-                    lvalue = string_tolower(value);
+                    lvalue = string_tolower(values[0]);
 
                     if( lvalue == "true" || lvalue == "1" ) {
                         s = true;
@@ -1994,13 +2036,14 @@ bool cfg_write_value(Setting& parent, bool create, std::string& varname, std::st
                     break;
 
                 case Setting::TypeFloat:
-                    f = std::stof(value);
+                {
+                    float f = std::stof(values[0]);
                     s = f;
-
+                }
                     break;
 
                 case Setting::TypeString:
-                    s = value;
+                    s = values[0];
 
                     break;
 
@@ -2012,17 +2055,53 @@ bool cfg_write_value(Setting& parent, bool create, std::string& varname, std::st
                             first_elem_type = s[0].getType();
                         }
 
-                        auto values = string_split(value, ',');
+                        std::vector<std::string> consolidated_values;
+                        for(auto const &v: values) {
+                            auto arg_values = string_split(v, ',');
 
-                        for(auto i: values)
-                            cli_print(cli, "values: %s", i.c_str());
+                            for (auto const &av: arg_values)
+                                consolidated_values.push_back(av);
+                        }
 
+                        for(auto const& i: consolidated_values)
+                            _debug(cli, "values: %s", i.c_str());
+
+                        if(! consolidated_values.empty()) {
+
+                            // ugly (but only) way to remove
+                            for (int x = s.getLength() - 1; x >= 0; x--) {
+                                _debug(cli, "removing index %d", x);
+                                s.remove(x);
+                            }
+
+                            for(auto const& i: consolidated_values) {
+
+                                if(first_elem_type == Setting::TypeString) {
+                                    _debug(cli, "adding string value: %s", i.c_str());
+                                    s.add(Setting::TypeString) = i.c_str();
+                                }
+                                else if(first_elem_type == Setting::TypeInt) {
+                                    _debug(cli, "adding int value: %s", i.c_str());
+                                    s.add(Setting::TypeInt) = std::stoi(i);
+                                }
+                                else if(first_elem_type == Setting::TypeFloat) {
+                                    _debug(cli, "adding float value: %s", i.c_str());
+                                    s.add(Setting::TypeFloat) = std::stof(i);
+                                }
+                                else {
+                                    throw(std::invalid_argument("unknown array type"));
+                                }
+                            }
+                        } else {
+                            throw(std::invalid_argument("no valid arguments"));
+                        }
                     }
                     break;
                 default:
                     ;
             }
         } catch(std::exception& e) {
+            cli_print(cli , "error writing config variable: %s", e.what());
             _err("error writing config variable: %s", e.what());
             return false;
         }
@@ -2037,7 +2116,7 @@ bool cfg_write_value(Setting& parent, bool create, std::string& varname, std::st
 
 bool apply_setting(std::string section, std::string varname, struct cli_def *cli) {
 
-    cli_print(cli, "apply_setting: %s", section.c_str());
+    _debug(cli, "apply_setting: %s", section.c_str());
 
     bool ret = false;
 
@@ -2055,6 +2134,8 @@ bool apply_setting(std::string section, std::string varname, struct cli_def *cli
         cli_print(cli, "!!! Config was not applied");
         cli_print(cli, " -  saving and reload is necessary to apply your settings.");
     } else {
+        config_changed_flag = true;
+        apply_hostname(cli);
         cli_print(cli, "running config applied (not saved to file).");
     }
 
@@ -2072,16 +2153,20 @@ int cli_uni_set_cb(std::string confpath, struct cli_def *cli, const char *comman
         auto cmd = string_split(command, ' ');
         std::string varname = cmd[cmd.size() - 1];
 
-        cli_print(cli, "var: %s", varname.c_str());
+        _debug(cli, "var: %s", varname.c_str());
 
 
-        std::string argv0(argv[0]);
+        std::vector<std::string> args;
 
-        if (argv0 != "?") {
+        // counting from 1, since 0 is varname
+        for(int i = 0; i < argc ; i++)
+                            args.push_back(std::string(argv[i]));
+
+        if (args[0] != "?") {
 
             std::scoped_lock<std::recursive_mutex> ll_(CfgFactory::lock());
 
-            if (cfg_write_value(conf, false, varname, argv0, cli)) {
+            if (cfg_write_value(conf, false, varname, args, cli)) {
                 // cli_print(cli, "change written to current config");
 
                 if ( apply_setting( conf.getPath(), varname , cli )) {
@@ -2906,6 +2991,9 @@ void client_thread(int client_socket) {
 
         struct cli_command *save;
 
+    struct cli_command *exec;
+        struct cli_command *exec_reload;
+
         struct cli_command *show;
             struct cli_command *show_config;
 
@@ -2945,9 +3033,6 @@ void client_thread(int client_socket) {
 
         struct cli_def *cli;
 
-        char hostname[64]; memset(hostname,0,64);
-        gethostname(hostname,63);
-
 
         // Must be called first to setup data structures
         cli = cli_init();
@@ -2956,7 +3041,7 @@ void client_thread(int client_socket) {
         init_cli_help();
 
         // Set the hostname (shown in the the prompt)
-        cli_set_hostname(cli, string_format("smithproxy(%s) ",hostname).c_str());
+        apply_hostname(cli);
 
         // Set the greeting
         cli_set_banner(cli, "--==[ Smithproxy command line utility ]==--");
@@ -2967,6 +3052,9 @@ void client_thread(int client_socket) {
 
         save  = cli_register_command(cli, nullptr, "save", nullptr, PRIVILEGE_PRIVILEGED, MODE_ANY, "save configs");
             cli_register_command(cli, save, "config", cli_save_config, PRIVILEGE_PRIVILEGED, MODE_ANY, "save config file");
+
+        exec = cli_register_command(cli, nullptr, "execute", nullptr, PRIVILEGE_PRIVILEGED, MODE_ANY, "execute various tasks");
+            exec_reload = cli_register_command(cli, exec, "reload", cli_exec_reload, PRIVILEGE_PRIVILEGED, MODE_ANY, "reload config file");
 
         show  = cli_register_command(cli, nullptr, "show", cli_show, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show basic information");
             cli_register_command(cli, show, "status", cli_show_status, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show smithproxy status");
