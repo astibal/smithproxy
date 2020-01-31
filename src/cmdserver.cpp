@@ -77,65 +77,46 @@
 #include <inspect/dnsinspector.hpp>
 
 
+
+
+#define _debug   if(CliState::get().cli_debug_flag) cli_print
+extern bool cfg_openssl_mem_dbg;
+
 #include "socle_version.h"
 #include "smithproxy_version.h"
 
+
 using namespace socle;
-
-
-
-bool config_changed_flag = false;
-bool cli_debug_flag = false;
-
-#define _debug   if(cli_debug_flag) cli_print
-
-int cli_port = 50000;
-int cli_port_base = 50000;
-std::string cli_enable_password;
-
-
-static const char* debug_levels="\n\t0\tNONE\n\t1\tFATAL\n\t2\tCRITICAL\n\t3\tERROR\n\t4\tWARNING\n\t5\tNOTIFY\n\t6\tINFORMATIONAL\n\t7\tDIAGNOSE\t(may impact performance)\n\t8\tDEBUG\t(impacts performance)\n\t9\tEXTREME\t(severe performance drop)\n\t10\tDUMPALL\t(performance killer)\n\treset\treset back to level configured in config file";
-
-loglevel orig_ssl_loglevel = NON;
-loglevel orig_sslmitm_loglevel = NON;
-loglevel orig_sslca_loglevel = NON;
-
-loglevel orig_dns_insp_loglevel = NON;
-loglevel orig_dns_packet_loglevel = NON;
-
-loglevel orig_baseproxy_loglevel = NON;
-loglevel orig_epoll_loglevel = NON;
-loglevel orig_mitmproxy_loglevel = NON;
-loglevel orig_mitmmasterproxy_loglevel = NON;
-
-loglevel orig_mitmhostcx_loglevel = NON;
-loglevel orig_socksproxy_loglevel =NON;
-
-loglevel orig_auth_loglevel = NON;
-
-extern bool cfg_openssl_mem_dbg;
 
 
 void apply_hostname(cli_def* cli) {
     char hostname[64]; memset(hostname,0,64);
     gethostname(hostname,63);
 
-    cli_set_hostname(cli, string_format("smithproxy(%s)%s ", hostname, config_changed_flag ? "<*>" : "").c_str());
+    cli_set_hostname(cli, string_format("smithproxy(%s)%s ", hostname, CliState::get().config_changed_flag ? "<*>" : "").c_str());
 }
 
+void debug_cli_params(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    _debug(cli, "command: %s", command);
+    for(int i = 0; i < argc; i++) {
+        _debug(cli, "      arg[%d]: %s", i, argv[i]);
+    }
+
+}
 
 void load_defaults() {
-    orig_ssl_loglevel = SSLCom::log_level_ref();
-    orig_sslmitm_loglevel = SSLMitmCom::log_level_ref();
-    orig_sslca_loglevel = *SSLFactory::get_log().level();
-    
-    orig_dns_insp_loglevel = DNS_Inspector::log_level_ref();
-    orig_dns_packet_loglevel = DNS_Packet::log_level_ref();
-    
-    orig_baseproxy_loglevel = baseProxy::log_level_ref();
-    orig_epoll_loglevel = epoll::log_level;
-    orig_mitmproxy_loglevel = MitmProxy::log_level_ref();
-    orig_mitmmasterproxy_loglevel = MitmMasterProxy::log_level_ref();
+    CliState::get().orig_ssl_loglevel = SSLCom::log_level_ref();
+    CliState::get().orig_sslmitm_loglevel = SSLMitmCom::log_level_ref();
+    CliState::get().orig_sslca_loglevel = *SSLFactory::get_log().level();
+
+    CliState::get().orig_dns_insp_loglevel = DNS_Inspector::log_level_ref();
+    CliState::get().orig_dns_packet_loglevel = DNS_Packet::log_level_ref();
+
+    CliState::get().orig_baseproxy_loglevel = baseProxy::log_level_ref();
+    CliState::get().orig_epoll_loglevel = epoll::log_level;
+    CliState::get().orig_mitmproxy_loglevel = MitmProxy::log_level_ref();
+    CliState::get().orig_mitmmasterproxy_loglevel = MitmMasterProxy::log_level_ref();
 }
 
 std::unordered_map<std::string, std::string> cli_context_help;
@@ -298,7 +279,7 @@ void cmd_show_status(struct cli_def* cli) {
     unsigned long r = MitmProxy::total_mtr_down().get();
     cli_print(cli,"Proxy performance: upload %sbps, download %sbps in last second",number_suffixed(l*8).c_str(),number_suffixed(r*8).c_str());
 
-    if(config_changed_flag) {
+    if(CliState::get().config_changed_flag) {
         cli_print(cli, "\n*** Configuration changes NOT saved ***");
     }
 
@@ -306,8 +287,7 @@ void cmd_show_status(struct cli_def* cli) {
 
 int cli_show_status(struct cli_def *cli, const char *command, char *argv[], int argc)
 {
-    //cli_print(cli, "called %s with %s, argc %d\r\n", __FUNCTION__, command, argc);
-
+    debug_cli_params(cli, command, argv, argc);
 
     cmd_show_status(cli);
     return CLI_OK;
@@ -315,6 +295,8 @@ int cli_show_status(struct cli_def *cli, const char *command, char *argv[], int 
 
 
 int cli_test_dns_genrequest(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+
     buffer b(1024);
 
     if(argc > 0) {
@@ -342,7 +324,7 @@ int cli_test_dns_genrequest(struct cli_def *cli, const char *command, char *argv
 }
 
 
-DNS_Response* send_dns_request(struct cli_def *cli, std::string hostname, DNS_Record_Type t, std::string nameserver) {
+DNS_Response* send_dns_request(struct cli_def *cli, std::string const& hostname, DNS_Record_Type t, std::string const& nameserver) {
 
     buffer b(1024);
     int parsed = -1;
@@ -428,6 +410,8 @@ DNS_Response* send_dns_request(struct cli_def *cli, std::string hostname, DNS_Re
 
 int cli_test_dns_sendrequest(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
+    debug_cli_params(cli, command, argv, argc);
+
     if(argc > 0) {
 
         std::string argv0(argv[0]);
@@ -460,6 +444,8 @@ int cli_test_dns_sendrequest(struct cli_def *cli, const char *command, char *arg
 
 
 int cli_test_dns_refreshallfqdns(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    debug_cli_params(cli, command, argv, argc);
 
     if(argc > 0) {
         std::string argv0(argv[0]);
@@ -513,6 +499,8 @@ int cli_test_dns_refreshallfqdns(struct cli_def *cli, const char *command, char 
 
 int cli_diag_ssl_cache_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
+    debug_cli_params(cli, command, argv, argc);
+
     SSLFactory* store = SSLCom::certstore();
 
 
@@ -531,6 +519,8 @@ int cli_diag_ssl_cache_stats(struct cli_def *cli, const char *command, char *arg
 
 
 int cli_diag_ssl_cache_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    debug_cli_params(cli, command, argv, argc);
 
     SSLFactory* store = SSLCom::certstore();
     bool print_refs = false;
@@ -573,6 +563,8 @@ int cli_diag_ssl_cache_list(struct cli_def *cli, const char *command, char *argv
 }
 
 int cli_diag_ssl_cache_print(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    debug_cli_params(cli, command, argv, argc);
 
     SSLFactory *store = SSLCom::certstore();
     bool print_refs = false;
@@ -618,6 +610,8 @@ int cli_diag_ssl_cache_print(struct cli_def *cli, const char *command, char *arg
 
 int cli_diag_ssl_cache_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
+    debug_cli_params(cli, command, argv, argc);
+
     SSLFactory* store = SSLCom::certstore();
     std::stringstream ss;
 
@@ -654,6 +648,8 @@ int cli_diag_ssl_cache_clear(struct cli_def *cli, const char *command, char *arg
 
 int cli_diag_ssl_wl_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
+    debug_cli_params(cli, command, argv, argc);
+
     cli_print(cli,"\nSSL whitelist:");
     std::string out;
 
@@ -675,6 +671,8 @@ int cli_diag_ssl_wl_list(struct cli_def *cli, const char *command, char *argv[],
 
 int cli_diag_ssl_wl_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
+    debug_cli_params(cli, command, argv, argc);
+
     std::lock_guard<std::recursive_mutex> l_(MitmProxy::whitelist_verify().getlock());
 
     MitmProxy::whitelist_verify().clear();
@@ -685,6 +683,7 @@ int cli_diag_ssl_wl_clear(struct cli_def *cli, const char *command, char *argv[]
 
 int cli_diag_ssl_wl_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
+    debug_cli_params(cli, command, argv, argc);
 
     std::stringstream ss;
 
@@ -708,6 +707,8 @@ int cli_diag_ssl_wl_stats(struct cli_def *cli, const char *command, char *argv[]
 }
 
 int cli_diag_ssl_crl_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    debug_cli_params(cli, command, argv, argc);
 
     std::stringstream out;
 
@@ -742,6 +743,8 @@ int cli_diag_ssl_crl_list(struct cli_def *cli, const char *command, char *argv[]
 
 int cli_diag_ssl_crl_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
+    debug_cli_params(cli, command, argv, argc);
+
     std::stringstream ss;
 
     {
@@ -765,6 +768,7 @@ int cli_diag_ssl_crl_stats(struct cli_def *cli, const char *command, char *argv[
 }
 int cli_diag_ssl_verify_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
+    debug_cli_params(cli, command, argv, argc);
 
     mp::vector<std::string> to_delete;
     mp::stringstream what;
@@ -810,6 +814,7 @@ int cli_diag_ssl_verify_clear(struct cli_def *cli, const char *command, char *ar
 
 int cli_diag_ssl_verify_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
+    debug_cli_params(cli, command, argv, argc);
 
     std::stringstream out;
 
@@ -843,6 +848,8 @@ int cli_diag_ssl_verify_list(struct cli_def *cli, const char *command, char *arg
 
 int cli_diag_ssl_verify_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
+    debug_cli_params(cli, command, argv, argc);
+
     std::stringstream ss;
     {
         auto& verify_cache = SSLFactory::factory().verify_cache;
@@ -867,6 +874,8 @@ int cli_diag_ssl_verify_stats(struct cli_def *cli, const char *command, char *ar
 
 
 int cli_diag_ssl_ticket_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    debug_cli_params(cli, command, argv, argc);
 
     std::stringstream out;
 
@@ -943,6 +952,8 @@ int cli_diag_ssl_ticket_list(struct cli_def *cli, const char *command, char *arg
 
 int cli_diag_ssl_ticket_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
+    debug_cli_params(cli, command, argv, argc);
+
     std::stringstream out;
 
     {
@@ -964,6 +975,8 @@ int cli_diag_ssl_ticket_stats(struct cli_def *cli, const char *command, char *ar
 }
 
 int cli_diag_ssl_ticket_size(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    debug_cli_params(cli, command, argv, argc);
 
     std::stringstream out;
 
@@ -1018,6 +1031,8 @@ int cli_diag_ssl_memcheck_disable(struct cli_def *cli, const char *command, char
 
 int cli_diag_ssl_ca_reload(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
+    debug_cli_params(cli, command, argv, argc);
+
     cli_print(cli,"Not yet implemented");
 
     return CLI_OK;
@@ -1026,6 +1041,7 @@ int cli_diag_ssl_ca_reload(struct cli_def *cli, const char *command, char *argv[
 
 int cli_diag_dns_cache_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
+    debug_cli_params(cli, command, argv, argc);
 
     std::stringstream out;
     {
@@ -1052,6 +1068,8 @@ int cli_diag_dns_cache_list(struct cli_def *cli, const char *command, char *argv
 
 int cli_diag_dns_cache_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
+    debug_cli_params(cli, command, argv, argc);
+
     std::stringstream out;
     {
         std::scoped_lock<std::recursive_mutex> l_(DNS::get_dns_lock());
@@ -1073,6 +1091,8 @@ int cli_diag_dns_cache_stats(struct cli_def *cli, const char *command, char *arg
 
 int cli_diag_dns_cache_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
+    debug_cli_params(cli, command, argv, argc);
+
     {
         std::scoped_lock<std::recursive_mutex> l_(DNS::get_dns_lock());
         DNS::get_dns_cache().clear();
@@ -1084,6 +1104,8 @@ int cli_diag_dns_cache_clear(struct cli_def *cli, const char *command, char *arg
 }
 
 int cli_diag_dns_domain_cache_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    debug_cli_params(cli, command, argv, argc);
 
     cli_print(cli, "\n Domain cache list:");
     std::stringstream out;
@@ -1110,6 +1132,8 @@ int cli_diag_dns_domain_cache_list(struct cli_def *cli, const char *command, cha
 }
 
 int cli_diag_dns_domain_cache_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+
     cli_print(cli, "\n Clearing domain cache:");
 
     {
@@ -1125,6 +1149,7 @@ int cli_diag_dns_domain_cache_clear(struct cli_def *cli, const char *command, ch
 
 
 int cli_diag_identity_ip_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
 
     cli_print(cli, "\nIPv4 identities:");
     std::stringstream ss4;
@@ -1173,6 +1198,7 @@ int cli_diag_identity_ip_list(struct cli_def *cli, const char *command, char *ar
 }
 
 int cli_diag_identity_ip_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
 
     cli_print(cli, "\nClearing all identities:");
     std::string out;
@@ -1207,6 +1233,8 @@ int cli_diag_identity_ip_clear(struct cli_def *cli, const char *command, char *a
 }
 
 int cli_diag_writer_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+
     auto wr = threadedPoolFileWriter::instance();
 
     std::stringstream ss;
@@ -1239,6 +1267,7 @@ int cli_diag_writer_stats(struct cli_def *cli, const char *command, char *argv[]
 }
 
 void cli_print_log_levels(struct cli_def *cli) {
+
     logger_profile* lp = get_logger()->target_profiles()[(uint64_t)fileno(cli->client)];
 
     cli_print(cli,"THIS cli logging level set to: %d",lp->level_.level());
@@ -1259,13 +1288,15 @@ void cli_print_log_levels(struct cli_def *cli) {
 
 int cli_debug_level(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
+    debug_cli_params(cli, command, argv, argc);
+
     logger_profile* lp = get_logger()->target_profiles()[(uint64_t)fileno(cli->client)];
     if(argc > 0) {
 
         std::string a1 = argv[0];
 
         if(a1 == "?") {
-            cli_print(cli,"valid parameters: %s",debug_levels);
+            cli_print(cli,"valid parameters: %s", CliState::get().debug_levels);
         }
         else if(a1 == "reset") {
             lp->level_ = NON;
@@ -1291,6 +1322,7 @@ int cli_debug_level(struct cli_def *cli, const char *command, char *argv[], int 
 
 
 int cli_debug_terminal(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
 
     logger_profile* lp = get_logger()->target_profiles()[(uint64_t)fileno(cli->client)];
     if(argc > 0) {
@@ -1299,7 +1331,7 @@ int cli_debug_terminal(struct cli_def *cli, const char *command, char *argv[], i
 
 
         if(a1 == "?") {
-            cli_print(cli,"valid parameters: %s",debug_levels);
+            cli_print(cli,"valid parameters: %s", CliState::get().debug_levels);
         }
         else if(a1 == "reset") {
             lp->level_ = NON;
@@ -1328,12 +1360,14 @@ int cli_debug_terminal(struct cli_def *cli, const char *command, char *argv[], i
 
 int cli_debug_logfile(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
+    debug_cli_params(cli, command, argv, argc);
+
     if(argc > 0) {
 
         std::string a1 = argv[0];
 
         if(a1 == "?") {
-            cli_print(cli,"valid parameters: %s",debug_levels);
+            cli_print(cli,"valid parameters: %s", CliState::get().debug_levels);
         }
         else {
 
@@ -1367,17 +1401,19 @@ int cli_debug_logfile(struct cli_def *cli, const char *command, char *argv[], in
 }
 
 int cli_debug_ssl(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+
     if(argc > 0) {
         std::string a1 = argv[0];
 
         int newlev = 0;
         if(a1 == "?") {
-            cli_print(cli,"valid parameters: %s",debug_levels);
+            cli_print(cli,"valid parameters: %s", CliState::get().debug_levels);
         }
         else if(a1 == "reset") {
-            SSLCom::log_level_ref() = orig_ssl_loglevel;
-            SSLMitmCom::log_level_ref() = orig_sslmitm_loglevel;
-            SSLFactory::get_log().level(orig_sslca_loglevel);
+            SSLCom::log_level_ref() = CliState::get().orig_ssl_loglevel;
+            SSLMitmCom::log_level_ref() = CliState::get().orig_sslmitm_loglevel;
+            SSLFactory::get_log().level(CliState::get().orig_sslca_loglevel);
         }
         else {
             newlev = safe_val(argv[0]);;
@@ -1394,22 +1430,24 @@ int cli_debug_ssl(struct cli_def *cli, const char *command, char *argv[], int ar
         l = SSLFactory::get_log().level()->level();
         cli_print(cli,"SSL CA debug level: %d",l);
         cli_print(cli,"\n");
-        cli_print(cli,"valid parameters: %s",debug_levels);
+        cli_print(cli,"valid parameters: %s", CliState::get().debug_levels);
     }
 
     return CLI_OK;
 }
 
 int cli_debug_auth(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+
     if(argc > 0) {
         std::string a1 = argv[0];
 
         int newlev = 0;
         if(a1 == "?") {
-            cli_print(cli,"valid parameters: %s",debug_levels);
+            cli_print(cli,"valid parameters: %s", CliState::get().debug_levels);
         }
         else if(a1 == "reset") {
-            AuthFactory::log_level_ref() = orig_auth_loglevel;
+            AuthFactory::log_level_ref() = CliState::get().orig_auth_loglevel;
         }
         else {
             newlev = safe_val(a1);
@@ -1420,21 +1458,23 @@ int cli_debug_auth(struct cli_def *cli, const char *command, char *argv[], int a
         int l = AuthFactory::log_level_ref().level();
         cli_print(cli,"Auth debug level: %d",l);
         cli_print(cli,"\n");
-        cli_print(cli,"valid parameters: %s",debug_levels);
+        cli_print(cli,"valid parameters: %s", CliState::get().debug_levels);
     }
 
     return CLI_OK;
 }
 
 int cli_debug_dns(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+
     if(argc > 0) {
         std::string a1 = argv[0];
         if(a1 == "?") {
-            cli_print(cli,"valid parameters: %s",debug_levels);
+            cli_print(cli,"valid parameters: %s", CliState::get().debug_levels);
         }
         else if(a1 == "reset") {
-            DNS_Inspector::log_level_ref() = orig_dns_insp_loglevel;
-            DNS_Packet::log_level_ref() = orig_dns_packet_loglevel;
+            DNS_Inspector::log_level_ref() = CliState::get().orig_dns_insp_loglevel;
+            DNS_Packet::log_level_ref() = CliState::get().orig_dns_packet_loglevel;
         }
         else {
             int lev = std::atoi(argv[0]);
@@ -1448,13 +1488,14 @@ int cli_debug_dns(struct cli_def *cli, const char *command, char *argv[], int ar
         l = DNS_Packet::log_level_ref().level();
         cli_print(cli,"DNS Packet debug level: %d",l);
         cli_print(cli,"\n");
-        cli_print(cli,"valid parameters: %s",debug_levels);
+        cli_print(cli,"valid parameters: %s", CliState::get().debug_levels);
     }
 
     return CLI_OK;
 }
 
 int cli_debug_sobject(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
 
     bool cur = socle::sobject_info::enable_bt_;
 
@@ -1476,22 +1517,24 @@ int cli_debug_sobject(struct cli_def *cli, const char *command, char *argv[], in
 }
 
 int cli_debug_proxy(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+
     if(argc > 0) {
         std::string a1 = argv[0];
         if(a1 == "?") {
-            cli_print(cli,"valid parameters: %s",debug_levels);
+            cli_print(cli,"valid parameters: %s", CliState::get().debug_levels);
         }
         else if(a1 == "reset") {
-            baseProxy::log_level_ref() = orig_baseproxy_loglevel;
-            epoll::log_level = orig_epoll_loglevel;
+            baseProxy::log_level_ref() = CliState::get().orig_baseproxy_loglevel;
+            epoll::log_level = CliState::get().orig_epoll_loglevel;
 
-            MitmMasterProxy::log_level_ref() = orig_mitmproxy_loglevel;
-            MitmHostCX::log_level_ref() = orig_mitmhostcx_loglevel;
-            MitmProxy::log_level_ref() = orig_mitmproxy_loglevel;
-            SocksProxy::log_level_ref() = orig_socksproxy_loglevel;
+            MitmMasterProxy::log_level_ref() = CliState::get().orig_mitmproxy_loglevel;
+            MitmHostCX::log_level_ref() = CliState::get().orig_mitmhostcx_loglevel;
+            MitmProxy::log_level_ref() = CliState::get().orig_mitmproxy_loglevel;
+            SocksProxy::log_level_ref() = CliState::get().orig_socksproxy_loglevel;
         }
         else {
-            int lev = std::atoi(argv[0]);
+            int lev = std::stoi(argv[0]);
             baseProxy::log_level_ref().level(lev);
             epoll::log_level.level(lev);
 
@@ -1502,7 +1545,7 @@ int cli_debug_proxy(struct cli_def *cli, const char *command, char *argv[], int 
 
         }
     } else {
-        int l = baseProxy::log_level_ref().level();
+        unsigned int l = baseProxy::log_level_ref().level();
         cli_print(cli,"baseProxy debug level: %d",l);
 
         l = epoll::log_level.level();
@@ -1522,7 +1565,7 @@ int cli_debug_proxy(struct cli_def *cli, const char *command, char *argv[], int 
 
 
         cli_print(cli,"\n");
-        cli_print(cli,"valid parameters: %s",debug_levels);
+        cli_print(cli,"valid parameters: %s", CliState::get().debug_levels);
     }
 
     return CLI_OK;
@@ -1531,7 +1574,9 @@ int cli_debug_proxy(struct cli_def *cli, const char *command, char *argv[], int 
 
 int cli_debug_show(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
-    int l = baseProxy::log_level_ref().level();
+    debug_cli_params(cli, command, argv, argc);
+
+    unsigned int l = baseProxy::log_level_ref().level();
     cli_print(cli,"baseProxy debug level: %d",l);
 
     l = epoll::log_level.level();
@@ -1569,6 +1614,8 @@ int cli_debug_show(struct cli_def *cli, const char *command, char *argv[], int a
 
 int cli_debug_set(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
+    debug_cli_params(cli, command, argv, argc);
+
     std::set<std::string> topics;
     std::stringstream topiclist;
 
@@ -1593,7 +1640,7 @@ int cli_debug_set(struct cli_def *cli, const char *command, char *argv[], int ar
             }
         }
         else if(var == "cli") {
-            cli_debug_flag = (newlev > 0);
+            CliState::get().cli_debug_flag = (newlev > 0);
         }
         else {
             if(logan::get().topic_db_.find(var) != logan::get().topic_db_.end()) {
@@ -1621,6 +1668,8 @@ int cli_debug_set(struct cli_def *cli, const char *command, char *argv[], int ar
 
 
 int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+
     cli_print(cli,"Memory buffers stats: ");
     cli_print(cli,"memory alloc   bytes: %lld",buffer::alloc_bytes);
     cli_print(cli,"memory free    bytes: %lld",buffer::free_bytes);
@@ -1737,6 +1786,7 @@ int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *a
 
 
 int cli_save_config(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
 
     int n = CfgFactory::get().save_config();
     if(n < 0) {
@@ -1744,7 +1794,7 @@ int cli_save_config(struct cli_def *cli, const char *command, char *argv[], int 
     }
     else {
         cli_print(cli, "config saved successfully.");
-        config_changed_flag = false;
+        CliState::get().config_changed_flag = false;
 
         apply_hostname(cli);
     }
@@ -1753,8 +1803,9 @@ int cli_save_config(struct cli_def *cli, const char *command, char *argv[], int 
 
 
 int cli_exec_reload(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
 
-    config_changed_flag = false;
+    CliState::get().config_changed_flag = false;
     bool CONFIG_LOADED = SmithProxy::instance().load_config(CfgFactory::get().config_file, true);
 
     if(CONFIG_LOADED) {
@@ -1818,6 +1869,7 @@ int cfg_write(Config& cfg, FILE* where, unsigned long iobufsz = 0) {
 }
 
 int cli_show_config_full (struct cli_def *cli, const char *command, char **argv, int argc) {
+    debug_cli_params(cli, command, argv, argc);
 
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
@@ -2134,7 +2186,7 @@ bool apply_setting(std::string section, std::string varname, struct cli_def *cli
         cli_print(cli, "!!! Config was not applied");
         cli_print(cli, " -  saving and reload is necessary to apply your settings.");
     } else {
-        config_changed_flag = true;
+        CliState::get().config_changed_flag = true;
         apply_hostname(cli);
         cli_print(cli, "running config applied (not saved to file).");
     }
@@ -2143,6 +2195,7 @@ bool apply_setting(std::string section, std::string varname, struct cli_def *cli
 }
 
 int cli_uni_set_cb(std::string confpath, struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
 
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
@@ -2203,21 +2256,25 @@ int cli_uni_set_cb(std::string confpath, struct cli_def *cli, const char *comman
 
 
 int cli_config_setting_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
 
     return cli_uni_set_cb("settings", cli, command, argv, argc);
 }
 
 int cli_config_setting_auth_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
 
     return cli_uni_set_cb("settings.auth_portal", cli, command, argv, argc);
 }
 
 int cli_config_setting_cli_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
 
     return cli_uni_set_cb("settings.cli", cli, command, argv, argc);
 }
 
 int cli_config_setting_socks_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
 
     return cli_uni_set_cb("settings.socks", cli, command, argv, argc);
 }
@@ -2231,7 +2288,10 @@ void cli_print_section(cli_def* cli, const std::string& name, int index , unsign
         Setting &s = CfgFactory::cfg_root()[name.c_str()];
 
         Config nc;
-        nc.getRoot().add(name.c_str(), s.getType());
+
+        auto section_nodes = string_split(name, '.');
+        nc.getRoot().add(section_nodes.back(), s.getType());
+
         nc.setOptions(Setting::OptionOpenBraceOnSeparateLine);
 
         cfg_clone_setting(nc.getRoot()[name.c_str()], s , index /*, cli */ );
@@ -2244,12 +2304,14 @@ void cli_print_section(cli_def* cli, const std::string& name, int index , unsign
 }
 
 int cli_show_config_setting(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
 
     cli_print_section(cli, "settings", -1, 200 * 1024);
     return CLI_OK;
 }
 
 int cli_show_config_policy(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
 
     int index = -1;
     if(argc > 0) {
@@ -2260,6 +2322,7 @@ int cli_show_config_policy(struct cli_def *cli, const char *command, char *argv[
 }
 
 int cli_show_config_objects(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
 
     cli_print_section(cli, "proto_objects", -1,  1 * 1024 * 1024);
     cli_print_section(cli, "port_objects", -1, 1 * 1024 * 1024);
@@ -2268,24 +2331,28 @@ int cli_show_config_objects(struct cli_def *cli, const char *command, char *argv
 }
 
 int cli_show_config_proto_objects(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
 
     cli_print_section(cli, "proto_objects", -1, 1 * 1024 * 1024);
     return CLI_OK;
 }
 
 int cli_show_config_port_objects(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
 
     cli_print_section(cli, "port_objects", -1, 1 * 1024 * 1024);
     return CLI_OK;
 }
 
 int cli_show_config_address_objects(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
 
     cli_print_section(cli, "address_objects", -1, 1 * 1024 * 1024);
     return CLI_OK;
 }
 
 int cli_show_config_debug(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
 
     cli_print_section(cli, "debug", -1, 1 * 1024 * 1024);
     return CLI_OK;
@@ -2293,6 +2360,7 @@ int cli_show_config_debug(struct cli_def *cli, const char *command, char *argv[]
 
 
 int cli_show_config_detection(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
 
     cli_print_section(cli, "detection_profiles", -1, 1 * 1024 * 1024);
     return CLI_OK;
@@ -2300,6 +2368,7 @@ int cli_show_config_detection(struct cli_def *cli, const char *command, char *ar
 
 
 int cli_show_config_content(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
 
     cli_print_section(cli, "content_profiles", -1, 1 * 1024 * 1024);
     return CLI_OK;
@@ -2307,6 +2376,7 @@ int cli_show_config_content(struct cli_def *cli, const char *command, char *argv
 
 
 int cli_show_config_tls_ca(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
 
     cli_print_section(cli, "tls_ca", -1, 1 * 1024 * 1024);
     return CLI_OK;
@@ -2314,30 +2384,35 @@ int cli_show_config_tls_ca(struct cli_def *cli, const char *command, char *argv[
 
 
 int cli_show_config_tls_profiles(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
 
     cli_print_section(cli, "tls_profiles", -1, 1 * 1024 * 1024);
     return CLI_OK;
 }
 
 int cli_show_config_alg_dns(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
 
     cli_print_section(cli, "alg_dns_profiles", -1, 1 * 1024 * 1024);
     return CLI_OK;
 }
 
 int cli_show_config_auth_profiles(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
 
     cli_print_section(cli, "auth_profiles", -1,  1 * 1024 * 1024);
     return CLI_OK;
 }
 
 int cli_show_config_starttls_sig(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
 
     cli_print_section(cli, "starttls_signatures", -1, 1 * 1024 * 1024);
     return CLI_OK;
 }
 
 int cli_show_config_detection_sig(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
 
     cli_print_section(cli, "detection_signatures", -1, 1 * 1024 * 1024);
     return CLI_OK;
@@ -2347,6 +2422,8 @@ int cli_show_config_detection_sig(struct cli_def *cli, const char *command, char
 
 int cli_diag_mem_objects_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
+    debug_cli_params(cli, command, argv, argc);
+
     cli_print(cli,"Statistics:\n");
     cli_print(cli,"%s", sobjectDB::str_stats(nullptr).c_str());
     return CLI_OK;
@@ -2354,6 +2431,8 @@ int cli_diag_mem_objects_stats(struct cli_def *cli, const char *command, char *a
 }
 
 int cli_diag_mem_trace_mark (struct cli_def *cli, const char *command, char **argv, int argc) {
+
+    debug_cli_params(cli, command, argv, argc);
 
 #ifdef MEMPOOL_DEBUG
 
@@ -2375,6 +2454,9 @@ int cli_diag_mem_trace_mark (struct cli_def *cli, const char *command, char **ar
 
 
 int cli_diag_mem_trace_list (struct cli_def *cli, const char *command, char **argv, int argc) {
+
+    debug_cli_params(cli, command, argv, argc);
+
 #ifdef MEMPOOL_DEBUG
     int n = 100;
     uint32_t filter = 0;
@@ -2452,6 +2534,8 @@ int cli_diag_mem_trace_list (struct cli_def *cli, const char *command, char **ar
 
 int cli_diag_mem_objects_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
+    debug_cli_params(cli, command, argv, argc);
+
     std::string object_filter;
     int verbosity = iINF;
 
@@ -2491,6 +2575,8 @@ int cli_diag_mem_objects_list(struct cli_def *cli, const char *command, char *ar
 
 int cli_diag_mem_objects_search(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
+    debug_cli_params(cli, command, argv, argc);
+
     std::string object_filter;
     int verbosity = iINF;
 
@@ -2527,6 +2613,9 @@ int cli_diag_mem_objects_search(struct cli_def *cli, const char *command, char *
 
 
 int cli_diag_mem_objects_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    debug_cli_params(cli, command, argv, argc);
+
     std::string address;
 
     if(argc > 0) {
@@ -2574,10 +2663,14 @@ int cli_diag_mem_objects_clear(struct cli_def *cli, const char *command, char *a
 
 int cli_diag_proxy_session_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
+    debug_cli_params(cli, command, argv, argc);
+
     return cli_diag_proxy_session_list_extra(cli, command, argv, argc, SL_NONE);
 }
 
 int cli_diag_proxy_session_io_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    debug_cli_params(cli, command, argv, argc);
 
     int f = 0;
     flag_set<int>(&f, SL_IO_OSBUF_NZ);
@@ -2588,6 +2681,8 @@ int cli_diag_proxy_session_io_list(struct cli_def *cli, const char *command, cha
 
 
 int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, char *argv[], int argc, int sl_flags) {
+
+    debug_cli_params(cli, command, argv, argc);
 
     std::string a1,a2;
     int verbosity = iINF;
@@ -2842,6 +2937,8 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
 
 int cli_diag_proxy_session_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
+    debug_cli_params(cli, command, argv, argc);
+
     //return cli_diag_mem_objects_clear(cli,command,argv,argc);
 
     cli_print(cli,"To be implemented, sorry.");
@@ -2850,7 +2947,9 @@ int cli_diag_proxy_session_clear(struct cli_def *cli, const char *command, char 
 
 int cli_diag_proxy_policy_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
-    std::string filter = "";
+    debug_cli_params(cli, command, argv, argc);
+
+    std::string filter;
     int verbosity = 6;
 
     if(argc > 0) {
@@ -2882,6 +2981,8 @@ int cli_diag_proxy_policy_list(struct cli_def *cli, const char *command, char *a
 
 
 int cli_diag_sig_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    debug_cli_params(cli, command, argv, argc);
 
     std::stringstream ss;
 
@@ -2924,16 +3025,13 @@ struct cli_ext : public cli_def {
 };
 
 
-#define MODE_EDIT_SETTINGS  40000
-#define MODE_EDIT_SETTINGS_AUTH  40001
-#define MODE_EDIT_SETTINGS_CLI  40002
-#define MODE_EDIT_SETTINGS_SOCKS  40003
+enum edit_settings { MODE_EDIT_SETTINGS=40000, MODE_EDIT_SETTINGS_AUTH, MODE_EDIT_SETTINGS_CLI, MODE_EDIT_SETTINGS_SOCKS };
 
 
 #define CONFIG_MODE_DEF(fn, mode, name) \
                                         \
 int fn(struct cli_def *cli, const char *command, char *argv[], int argc) { \
-    cli_print(cli, "entering " name ", mode %d", mode);                                      \
+    _debug(cli, "entering " name ", mode %d", mode);                                      \
                                                                            \
     cli_set_configmode(cli, mode, name );                        \
                                                                  \
@@ -2942,8 +3040,8 @@ int fn(struct cli_def *cli, const char *command, char *argv[], int argc) { \
 
 CONFIG_MODE_DEF(cli_conf_edit_settings, MODE_EDIT_SETTINGS,"settings");
 CONFIG_MODE_DEF(cli_conf_edit_settings_auth, MODE_EDIT_SETTINGS_AUTH,"auth_portal");
-CONFIG_MODE_DEF(cli_conf_edit_settings_cli, MODE_EDIT_SETTINGS_AUTH,"cli");
-CONFIG_MODE_DEF(cli_conf_edit_settings_socks, MODE_EDIT_SETTINGS_AUTH,"socks");
+CONFIG_MODE_DEF(cli_conf_edit_settings_cli, MODE_EDIT_SETTINGS_CLI,"cli");
+CONFIG_MODE_DEF(cli_conf_edit_settings_socks, MODE_EDIT_SETTINGS_SOCKS,"socks");
 
 
 
@@ -3046,7 +3144,7 @@ void client_thread(int client_socket) {
         // Set the greeting
         cli_set_banner(cli, "--==[ Smithproxy command line utility ]==--");
 
-        cli_allow_enable(cli, cli_enable_password.c_str());
+        cli_allow_enable(cli, CliState::get().cli_enable_password.c_str());
 
         // Set up 2 commands "show counters" and "show junk"
 
@@ -3246,6 +3344,9 @@ void cli_loop(short unsigned int port) {
 
 
 int cli_show(struct cli_def *cli, const char *command, char **argv, int argc) {
+
+    debug_cli_params(cli, command, argv, argc);
+
     switch(cli->mode) {
         case MODE_EDIT_SETTINGS:
             cli_print_section(cli, "settings", -1, 200 * 1024);

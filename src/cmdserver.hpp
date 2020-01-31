@@ -42,9 +42,47 @@
    
 #include <libcli.h>
 
-extern int cli_port;
-extern int cli_port_base;
-extern std::string cli_enable_password;
+
+struct CliState {
+    bool config_changed_flag = false;
+    bool cli_debug_flag = false;
+
+    int cli_port = 50000;
+    int cli_port_base = 50000;
+    std::string cli_enable_password;
+
+
+    const char *debug_levels = "\n\t0\tNONE\n\t1\tFATAL\n\t2\tCRITICAL\n\t3\tERROR\n\t4\tWARNING\n\t5\tNOTIFY\n\t6\tINFORMATIONAL\n\t7\tDIAGNOSE\t(may impact performance)\n\t8\tDEBUG\t(impacts performance)\n\t9\tEXTREME\t(severe performance drop)\n\t10\tDUMPALL\t(performance killer)\n\treset\treset back to level configured in config file";
+
+    loglevel orig_ssl_loglevel = NON;
+    loglevel orig_sslmitm_loglevel = NON;
+    loglevel orig_sslca_loglevel = NON;
+
+    loglevel orig_dns_insp_loglevel = NON;
+    loglevel orig_dns_packet_loglevel = NON;
+
+    loglevel orig_baseproxy_loglevel = NON;
+    loglevel orig_epoll_loglevel = NON;
+    loglevel orig_mitmproxy_loglevel = NON;
+    loglevel orig_mitmmasterproxy_loglevel = NON;
+
+    loglevel orig_mitmhostcx_loglevel = NON;
+    loglevel orig_socksproxy_loglevel = NON;
+
+    loglevel orig_auth_loglevel = NON;
+
+    static CliState& get() {
+        static CliState c;
+        return c;
+    }
+
+    CliState(CliState const&) = delete;
+    CliState& operator=(CliState const&) = delete;
+
+private:
+    CliState() = default;
+
+};
 
 void cli_loop(unsigned short port=50000);
 

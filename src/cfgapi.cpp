@@ -301,8 +301,8 @@ bool CfgFactory::load_settings () {
     cfgapi.getRoot()["settings"].lookupValue("messages_dir",dir_msg_templates);
 
     if(cfgapi.getRoot()["settings"].exists("cli")) {
-        cfgapi.getRoot()["settings"]["cli"].lookupValue("port", cli_port_base); cli_port = cli_port_base;
-        cfgapi.getRoot()["settings"]["cli"].lookupValue("enable_password", cli_enable_password);
+        cfgapi.getRoot()["settings"]["cli"].lookupValue("port", CliState::get().cli_port_base); CliState::get().cli_port = CliState::get().cli_port_base;
+        cfgapi.getRoot()["settings"]["cli"].lookupValue("enable_password", CliState::get().cli_enable_password);
     }
 
     if(cfgapi.getRoot()["settings"].exists("auth_portal")) {
@@ -1993,7 +1993,7 @@ bool CfgFactory::apply_tenant_config () {
         ret += apply_tenant_index(AuthFactory::get().portal_port_http, tenant_index);
         ret += apply_tenant_index(AuthFactory::get().portal_port_https, tenant_index);
 
-        cli_port += tenant_index;
+        CliState::get().cli_port += tenant_index;
     }
 
     return (ret == 0);
@@ -2545,8 +2545,8 @@ int save_settings(Config& ex) {
     objects.add("messages_dir", Setting::TypeString) = CfgFactory::get().dir_msg_templates;
 
     Setting& cli_objects = objects.add("cli", Setting::TypeGroup);
-    cli_objects.add("port", Setting::TypeString) = string_format("%d", cli_port_base).c_str();
-    cli_objects.add("enable_password", Setting::TypeString) = cli_enable_password;
+    cli_objects.add("port", Setting::TypeString) = string_format("%d", CliState::get().cli_port_base).c_str();
+    cli_objects.add("enable_password", Setting::TypeString) = CliState::get().cli_enable_password;
 
 
     Setting& auth_objects = objects.add("auth_portal", Setting::TypeGroup);
