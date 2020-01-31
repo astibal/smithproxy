@@ -136,13 +136,8 @@ std::string& cli_help(help_type_t htype, const std::string& section, const std::
 
     std::unordered_map<std::string, std::string>& ref = cli_context_help;
 
-    switch(htype) {
-        case HELP_QMARK:
-            ref = cli_qmark_help;
-            break;
-
-        default:
-            ;
+    if(htype == HELP_QMARK) {
+        ref = cli_qmark_help;
     }
 
     auto i = ref.find(section + "/" + key);
@@ -370,7 +365,7 @@ DNS_Response* send_dns_request(struct cli_def *cli, std::string const& hostname,
     tv.tv_sec = 2;
     FD_ZERO(&confds);
     FD_SET(send_socket, &confds);
-    rv = select(send_socket + 1, &confds, NULL, NULL, &tv);
+    rv = select(send_socket + 1, &confds, nullptr, nullptr, &tv);
     if(rv == 1) {
         buffer r(1500);
          int l = ::recv(send_socket,r.data(),r.capacity(),0);
@@ -381,7 +376,7 @@ DNS_Response* send_dns_request(struct cli_def *cli, std::string const& hostname,
             cli_print(cli, "\n%s\n",hex_dump(r).c_str());
 
 
-            DNS_Response* resp = new DNS_Response();
+            auto* resp = new DNS_Response();
             parsed = resp->load(&r);
             cli_print(cli, "parsed %d bytes (0 means all)",parsed);
             cli_print(cli, "DNS response: \n %s",resp->to_string().c_str());
@@ -421,7 +416,7 @@ int cli_test_dns_sendrequest(struct cli_def *cli, const char *command, char *arg
         }
 
         std::string nameserver = "8.8.8.8";
-        if(CfgFactory::get().db_nameservers.size()) {
+        if(! CfgFactory::get().db_nameservers.empty()) {
             nameserver = CfgFactory::get().db_nameservers.at(0);
         }
 
@@ -468,12 +463,12 @@ int cli_test_dns_refreshallfqdns(struct cli_def *cli, const char *command, char 
     }
 
     std::string nameserver = "8.8.8.8";
-    if(CfgFactory::get().db_nameservers.size()) {
+    if(! CfgFactory::get().db_nameservers.empty()) {
         nameserver = CfgFactory::get().db_nameservers.at(0);
     }
 
     DNS_Inspector di;
-    for(auto a: fqdns) {
+    for(auto const& a: fqdns) {
         DNS_Response* resp =  send_dns_request(cli,a,A,nameserver);
         if(resp) {
             if(di.store(resp)) {
@@ -539,9 +534,9 @@ int cli_diag_ssl_cache_list(struct cli_def *cli, const char *command, char *argv
     {
         std::lock_guard<std::recursive_mutex> l_(store->lock());
 
-        for (auto x = store->cache().begin(); x != store->cache().end(); ++x) {
-            std::string fqdn = x->first;
-            SSLFactory::X509_PAIR* ptr = x->second;
+        for (auto const& x: store->cache()) {
+            std::string fqdn = x.first;
+            SSLFactory::X509_PAIR* ptr = x.second;
 
             ss << string_format("    %s\n", fqdn.c_str());
 
@@ -583,9 +578,9 @@ int cli_diag_ssl_cache_print(struct cli_def *cli, const char *command, char *arg
     {
         std::lock_guard<std::recursive_mutex> l_(store->lock());
 
-        for (auto x = store->cache().begin(); x != store->cache().end(); ++x) {
-            std::string fqdn = x->first;
-            SSLFactory::X509_PAIR *ptr = x->second;
+        for (auto x: store->cache()) {
+            std::string fqdn = x.first;
+            SSLFactory::X509_PAIR *ptr = x.second;
 
             std::regex r("\\+san:");
             std::string nice_fqdn = std::regex_replace(fqdn, r, "\n    san: ");
@@ -619,10 +614,10 @@ int cli_diag_ssl_cache_clear(struct cli_def *cli, const char *command, char *arg
     {
         std::lock_guard<std::recursive_mutex> l_(store->lock());
 
-        for (auto x = store->cache().begin(); x != store->cache().end(); ++x ) {
-            std::string fqdn = x->first;
+        for (auto x: store->cache()) {
+            std::string fqdn = x.first;
             ss << string_format("removing    %s\n",fqdn.c_str());
-            SSLFactory::X509_PAIR* ptr = x->second;
+            SSLFactory::X509_PAIR* ptr = x.second;
 
             if(argc > 0) {
                 std::string a1 = argv[0];
@@ -722,7 +717,7 @@ int cli_diag_ssl_crl_list(struct cli_def *cli, const char *command, char *argv[]
 
             out << "    " + uri;
             if (cached_result) {
-                int ttl = cached_result->expired_at() - ::time(nullptr);
+                long ttl = cached_result->expired_at() - ::time(nullptr);
                 out << string_format(", ttl=%d", ttl);
 
                 if (ttl <= 0) {
@@ -1416,14 +1411,14 @@ int cli_debug_ssl(struct cli_def *cli, const char *command, char *argv[], int ar
             SSLFactory::get_log().level(CliState::get().orig_sslca_loglevel);
         }
         else {
-            newlev = safe_val(argv[0]);;
+            newlev = safe_val(argv[0]);
             SSLCom::log_level_ref().level(newlev);
             SSLMitmCom::log_level_ref().level(newlev);
             SSLFactory::get_log().level(loglevel(newlev));
 
         }
     } else {
-        int l = SSLCom::log_level_ref().level();
+        unsigned int l = SSLCom::log_level_ref().level();
         cli_print(cli,"SSL debug level: %d",l);
         l = SSLMitmCom::log_level_ref().level();
         cli_print(cli,"SSL MitM debug level: %d",l);
@@ -1455,7 +1450,7 @@ int cli_debug_auth(struct cli_def *cli, const char *command, char *argv[], int a
 
         }
     } else {
-        int l = AuthFactory::log_level_ref().level();
+        unsigned int l = AuthFactory::log_level_ref().level();
         cli_print(cli,"Auth debug level: %d",l);
         cli_print(cli,"\n");
         cli_print(cli,"valid parameters: %s", CliState::get().debug_levels);
@@ -1477,13 +1472,13 @@ int cli_debug_dns(struct cli_def *cli, const char *command, char *argv[], int ar
             DNS_Packet::log_level_ref() = CliState::get().orig_dns_packet_loglevel;
         }
         else {
-            int lev = std::atoi(argv[0]);
+            int lev = std::stoi(argv[0]);
             DNS_Inspector::log_level_ref().level(lev);
             DNS_Packet::log_level_ref().level(lev);
 
         }
     } else {
-        int l = DNS_Inspector::log_level_ref().level();
+        unsigned int l = DNS_Inspector::log_level_ref().level();
         cli_print(cli,"DNS Inspector debug level: %d",l);
         l = DNS_Packet::log_level_ref().level();
         cli_print(cli,"DNS Packet debug level: %d",l);
@@ -1598,11 +1593,11 @@ int cli_debug_show(struct cli_def *cli, const char *command, char *argv[], int a
     cli_print(cli, "\n\nlogan light loggers");
 
     std::stringstream ss;
-    for(auto i: logan::get().topic_db_) {
+    for(auto const& i: logan::get().topic_db_) {
         std::string t = i.first;
-        loglevel* l = i.second;
+        loglevel* lev = i.second;
 
-        ss << "    [" << t << "] => level " << l->level() << " flag: " << l->topic() << "\n";
+        ss << "    [" << t << "] => level " << lev->level() << " flag: " << lev->topic() << "\n";
     }
 
     cli_print(cli, "%s", ss.str().c_str());
@@ -1632,7 +1627,7 @@ int cli_debug_set(struct cli_def *cli, const char *command, char *argv[], int ar
 
 
         if(var == "all" || var == "*") {
-            for(auto lv: logan::get().topic_db_) {
+            for(auto const& lv: logan::get().topic_db_) {
 
                 auto orig_l = logan::get()[lv.first]->level();
                 logan::get()[lv.first]->level(newlev);
@@ -1646,7 +1641,7 @@ int cli_debug_set(struct cli_def *cli, const char *command, char *argv[], int ar
             if(logan::get().topic_db_.find(var) != logan::get().topic_db_.end()) {
                 loglevel* l = logan::get()[var];
 
-                int old_lev = l->level();
+                unsigned int old_lev = l->level();
                 logan::get()[var]->level(newlev);
 
                 cli_print(cli, "debug level changed: %s: %d => %d", var.c_str(), old_lev, newlev);
@@ -1898,7 +1893,7 @@ void cfg_clone_setting(Setting& dst, Setting& orig, int index/*, struct cli_def 
             continue;
         }
 
-        Setting &cur_object = orig[i];
+        Setting &cur_object = orig[(int)i];
 
 
         Setting::Type type = cur_object.getType();
@@ -1957,7 +1952,7 @@ void cfg_generate_cli_hints(Setting& setting, std::vector<std::string>* this_lev
         std::vector<unsigned int>* next_level_indexes) {
 
     for (unsigned int i = 0; i < (unsigned int) setting.getLength(); i++) {
-        Setting &cur_object = setting[i];
+        Setting &cur_object = setting[(int)i];
 
         std::string name;
         if(cur_object.getName()) {
@@ -2166,7 +2161,7 @@ bool cfg_write_value(Setting& parent, bool create, std::string& varname, const s
     return true;
 }
 
-bool apply_setting(std::string section, std::string varname, struct cli_def *cli) {
+bool apply_setting(std::string const& section, std::string const& varname, struct cli_def *cli) {
 
     _debug(cli, "apply_setting: %s", section.c_str());
 
@@ -2194,7 +2189,7 @@ bool apply_setting(std::string section, std::string varname, struct cli_def *cli
     return ret;
 }
 
-int cli_uni_set_cb(std::string confpath, struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_uni_set_cb(std::string const& confpath, struct cli_def *cli, const char *command, char *argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
 
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
@@ -2213,7 +2208,7 @@ int cli_uni_set_cb(std::string confpath, struct cli_def *cli, const char *comman
 
         // counting from 1, since 0 is varname
         for(int i = 0; i < argc ; i++)
-                            args.push_back(std::string(argv[i]));
+                            args.emplace_back(std::string(argv[i]));
 
         if (args[0] != "?") {
 
@@ -2553,7 +2548,7 @@ int cli_diag_mem_objects_list(struct cli_def *cli, const char *command, char *ar
             if("*" == a1 || "ALL" == a1) {
                 object_filter = "";
             } else {
-                object_filter = a1.c_str();
+                object_filter = a1;
             }
         }
 
@@ -2564,11 +2559,11 @@ int cli_diag_mem_objects_list(struct cli_def *cli, const char *command, char *ar
     }
 
 
-    std::string r = sobjectDB::str_list((object_filter.size() == 0) ? nullptr : object_filter.c_str(), nullptr, verbosity);
-                r += "\n" + sobjectDB::str_stats((object_filter.size() == 0) ? nullptr : object_filter.c_str());
+    std::string r = sobjectDB::str_list((object_filter.empty()) ? nullptr : object_filter.c_str(), nullptr, verbosity);
+                r += "\n" + sobjectDB::str_stats((object_filter.empty()) ? nullptr : object_filter.c_str());
 
 
-    cli_print(cli,"Smithproxy objects (filter: %s):\n%s\nFinished.",(object_filter.size() == 0) ? "ALL" : object_filter.c_str() ,r.c_str());
+    cli_print(cli,"Smithproxy objects (filter: %s):\n%s\nFinished.",(object_filter.empty()) ? "ALL" : object_filter.c_str() ,r.c_str());
     return CLI_OK;
 }
 
@@ -2593,7 +2588,7 @@ int cli_diag_mem_objects_search(struct cli_def *cli, const char *command, char *
             if("*" == a1 || "ALL" == a1) {
                 object_filter = "";
             } else {
-                object_filter = a1.c_str();
+                object_filter = a1;
             }
         }
 
@@ -2606,7 +2601,7 @@ int cli_diag_mem_objects_search(struct cli_def *cli, const char *command, char *
 
     std::string r = sobjectDB::str_list(nullptr,nullptr,verbosity,object_filter.c_str());
 
-    cli_print(cli,"Smithproxy objects (filter: %s):\n%s\nFinished.",(object_filter.size() == 0) ? "ALL" : object_filter.c_str() ,r.c_str());
+    cli_print(cli,"Smithproxy objects (filter: %s):\n%s\nFinished.",(object_filter.empty()) ? "ALL" : object_filter.c_str() ,r.c_str());
     return CLI_OK;
 }
 
@@ -2710,7 +2705,7 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
 
             if (ptr->class_name() == "MitmProxy" || ptr->class_name() == "SocksProxy") {
 
-                MitmProxy *curr_proxy = dynamic_cast<MitmProxy *>(ptr);
+                auto *curr_proxy = dynamic_cast<MitmProxy *>(ptr);
                 MitmHostCX *lf = nullptr;
                 MitmHostCX *rg = nullptr;
 
@@ -2767,12 +2762,12 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
                         }
                     }
 
-                    if (lf && lf->writebuf() && lf->writebuf()->size() > 0) {
+                    if (lf && lf->writebuf() && (! lf->writebuf()->empty())) {
                         prefix += "LWrBuf ";
                         do_print = true;
                     }
 
-                    if (rg && rg->writebuf() && rg->writebuf()->size() > 0) {
+                    if (rg && rg->writebuf() && (! rg->writebuf()->empty())) {
                         prefix += "RWrBuf ";
                         do_print = true;
 
@@ -2850,7 +2845,7 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
 
                         if (verbosity > INF) {
                             cur_obj_ss << "    obj_debug: " << curr_proxy->get_this_log_level().to_string() << "\n";
-                            int expiry = -1;
+                            long expiry = -1;
                             if (curr_proxy->half_holdtimer > 0) {
                                 expiry = curr_proxy->half_holdtimer + MitmProxy::half_timeout() - curtime;
                             }
@@ -2969,7 +2964,7 @@ int cli_diag_proxy_policy_list(struct cli_def *cli, const char *command, char *a
     {
         std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
-        for (auto it: CfgFactory::get().db_policy) {
+        for (auto const& it: CfgFactory::get().db_policy) {
             out << it->to_string(verbosity);
             out << "\n\n";
         }
@@ -2996,7 +2991,7 @@ int cli_diag_sig_list(struct cli_def *cli, const char *command, char *argv[], in
     lists.push_back(& SigFactory::get().detection());
 
     for(auto* list: lists)
-        for(std::shared_ptr<duplexFlowMatch> sig: *list) {
+        for(std::shared_ptr<duplexFlowMatch> const& sig: *list) {
 
             // print refcnt one less, due to this shared_ptr serving only priting purposes
             ss << "Name: '" << sig->name() << "' refcnt: " << sig.use_count() - 1 << "\n";
@@ -3314,7 +3309,7 @@ void client_thread(int client_socket) {
 void cli_loop(short unsigned int port) {
 
     auto log = logan::create("service");
-    struct sockaddr_in servaddr;
+    sockaddr_in servaddr{0};
     int on = 1;
 
     // Create a socket
