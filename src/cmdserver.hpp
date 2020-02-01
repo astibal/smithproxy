@@ -79,6 +79,13 @@ struct CliState {
     CliState(CliState const&) = delete;
     CliState& operator=(CliState const&) = delete;
 
+    using callback = int (*)(struct cli_def *,const char *,char * *,int);
+    using set_callback = callback;
+    using config_callback = callback;
+
+    using callback_entry = std::tuple<unsigned int, set_callback, config_callback>;
+    std::unordered_map<std::string, callback_entry> callback_map;
+
 private:
     CliState() = default;
 

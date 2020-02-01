@@ -140,7 +140,7 @@ std::string& cli_help(help_type_t htype, const std::string& section, const std::
         ref = cli_qmark_help;
     }
 
-    auto i = ref.find(section + "/" + key);
+    auto i = ref.find(section + "." + key);
     if(i != ref.end()) {
         return i->second;
     } else {
@@ -157,75 +157,75 @@ std::string& cli_help(help_type_t htype, const std::string& section, const std::
 
 void init_cli_help() {
     cli_help_add("default","");
-    cli_help_add("settings/certs_path", "directory for TLS-resigning CA certificate and key");
-    cli_help_add("settings/certs_ca_key_password","TLS-resigning CA private key protection password");
-    cli_help_add("settings/certs_ca_path", "trusted CA store path (to verify server-side connections)");
-    cli_help_add("settings/plaintext_port", "base divert port for non-SSL TCP traffic");
-    cli_help_add("settings/plaintext_workers", "non-SSL TCP traffic worker thread count");
-    cli_help_add("settings/ssl_port", "base divert port for SSL TCP traffic");
-    cli_help_add("settings/ssl_workers", "SSL TCP traffic worker thread count");
-    cli_help_add("settings/ssl_autodetect", "Detect TLS ClientHello on unusual ports");
-    cli_help_add("settings/ssl_autodetect_harder", "Detect TSL ClientHello - wait a bit longer");
-    cli_help_add("settings/ssl_ocsp_status_ttl", "hardcoded TTL for OCSP response validity");
-    cli_help_add("settings/ssl_crl_status_ttl", "hardcoded TTL for downloaded CRL files");
-    cli_help_add("settings/udp_port", "base divert port for non-DTLS UDP traffic");
-    cli_help_add("settings/udp_workers", "non-DTLS traffic worker thread count");
-    cli_help_add("settings/dtls_port", "base divert port for DTLS UDP traffic");
-    cli_help_add("settings/dtls_workers", "DTLS traffic worker thread count");
-    cli_help_add("settings/socks_port", "base SOCKS proxy listening port");
-    cli_help_add("settings/socks_workers", "SOCKS proxy traffic thread count");
-    cli_help_add("settings/log_level", "file logging verbosity level");
-    cli_help_add("settings/log_file", "log file");
-    cli_help_add("settings/log_console", "toggle logging to standard output");
-    cli_help_add("settings/syslog_server", "IP address of syslog server");
-    cli_help_add("settings/syslog_port", "syslog server port");
-    cli_help_add("settings/syslog_facility", "syslog facility");
-    cli_help_add("settings/syslog_level", "syslog logging verbosity level");
-    cli_help_add("settings/syslog_family", "IPv4 or IPv6?");
-    cli_help_add("settings/sslkeylog_file", "where to dump TLS keying material");
-    cli_help_add("settings/messages_dir", "replacement text directory");
-    cli_help_add("settings/write_payload_dir", "root directory for packet dumps");
-    cli_help_add("settings/write_payload_file_prefix", "packet dumps file prefix");
-    cli_help_add("settings/write_payload_file_suffix", "packet dumps file suffix");
-    cli_help_add("settings/auth_portal", "** configure authentication portal settings");
-    cli_help_add("settings/cli", "** configure CLI specific settings");
-    cli_help_add("settings/socks", "** configure SOCKS specific settings");
+    cli_help_add("settings.certs_path", "directory for TLS-resigning CA certificate and key");
+    cli_help_add("settings.certs_ca_key_password","TLS-resigning CA private key protection password");
+    cli_help_add("settings.certs_ca_path", "trusted CA store path (to verify server-side connections)");
+    cli_help_add("settings.plaintext_port", "base divert port for non-SSL TCP traffic");
+    cli_help_add("settings.plaintext_workers", "non-SSL TCP traffic worker thread count");
+    cli_help_add("settings.ssl_port", "base divert port for SSL TCP traffic");
+    cli_help_add("settings.ssl_workers", "SSL TCP traffic worker thread count");
+    cli_help_add("settings.ssl_autodetect", "Detect TLS ClientHello on unusual ports");
+    cli_help_add("settings.ssl_autodetect_harder", "Detect TSL ClientHello - wait a bit longer");
+    cli_help_add("settings.ssl_ocsp_status_ttl", "hardcoded TTL for OCSP response validity");
+    cli_help_add("settings.ssl_crl_status_ttl", "hardcoded TTL for downloaded CRL files");
+    cli_help_add("settings.udp_port", "base divert port for non-DTLS UDP traffic");
+    cli_help_add("settings.udp_workers", "non-DTLS traffic worker thread count");
+    cli_help_add("settings.dtls_port", "base divert port for DTLS UDP traffic");
+    cli_help_add("settings.dtls_workers", "DTLS traffic worker thread count");
+    cli_help_add("settings.socks_port", "base SOCKS proxy listening port");
+    cli_help_add("settings.socks_workers", "SOCKS proxy traffic thread count");
+    cli_help_add("settings.log_level", "file logging verbosity level");
+    cli_help_add("settings.log_file", "log file");
+    cli_help_add("settings.log_console", "toggle logging to standard output");
+    cli_help_add("settings.syslog_server", "IP address of syslog server");
+    cli_help_add("settings.syslog_port", "syslog server port");
+    cli_help_add("settings.syslog_facility", "syslog facility");
+    cli_help_add("settings.syslog_level", "syslog logging verbosity level");
+    cli_help_add("settings.syslog_family", "IPv4 or IPv6?");
+    cli_help_add("settings.sslkeylog_file", "where to dump TLS keying material");
+    cli_help_add("settings.messages_dir", "replacement text directory");
+    cli_help_add("settings.write_payload_dir", "root directory for packet dumps");
+    cli_help_add("settings.write_payload_file_prefix", "packet dumps file prefix");
+    cli_help_add("settings.write_payload_file_suffix", "packet dumps file suffix");
+    cli_help_add("settings.auth_portal", "** configure authentication portal settings");
+    cli_help_add("settings.cli", "** configure CLI specific settings");
+    cli_help_add("settings.socks", "** configure SOCKS specific settings");
 
 
     cli_qmark_add("default", "enter <value>");
-    cli_qmark_add("settings/certs_path", "<string> with path to a directory");
-    cli_qmark_add("settings/certs_ca_key_password","");
-    cli_qmark_add("settings/certs_ca_path", "");
-    cli_qmark_add("settings/plaintext_port", "");
-    cli_qmark_add("settings/plaintext_workers", "");
-    cli_qmark_add("settings/ssl_port", "");
-    cli_qmark_add("settings/ssl_workers", "");
-    cli_qmark_add("settings/ssl_autodetect", "");
-    cli_qmark_add("settings/ssl_autodetect_harder", "");
-    cli_qmark_add("settings/ssl_ocsp_status_ttl", "");
-    cli_qmark_add("settings/ssl_crl_status_ttl", "");
-    cli_qmark_add("settings/udp_port", "");
-    cli_qmark_add("settings/udp_workers", "");
-    cli_qmark_add("settings/dtls_port", "");
-    cli_qmark_add("settings/dtls_workers", "");
-    cli_qmark_add("settings/socks_port", "");
-    cli_qmark_add("settings/socks_workers", "");
-    cli_qmark_add("settings/log_level", "");
-    cli_qmark_add("settings/log_file", "");
-    cli_qmark_add("settings/log_console", "");
-    cli_qmark_add("settings/syslog_server", "");
-    cli_qmark_add("settings/syslog_port", "");
-    cli_qmark_add("settings/syslog_facility", "");
-    cli_qmark_add("settings/syslog_level", "");
-    cli_qmark_add("settings/syslog_family", "");
-    cli_qmark_add("settings/sslkeylog_file", "");
-    cli_qmark_add("settings/messages_dir", "");
-    cli_qmark_add("settings/write_payload_dir", "");
-    cli_qmark_add("settings/write_payload_file_prefix", "");
-    cli_qmark_add("settings/write_payload_file_suffix", "");
-    cli_qmark_add("settings/auth_portal", "");
-    cli_qmark_add("settings/cli", "");
-    cli_qmark_add("settings/socks", "");
+    cli_qmark_add("settings.certs_path", "<string> with path to a directory");
+    cli_qmark_add("settings.certs_ca_key_password","");
+    cli_qmark_add("settings.certs_ca_path", "");
+    cli_qmark_add("settings.plaintext_port", "");
+    cli_qmark_add("settings.plaintext_workers", "");
+    cli_qmark_add("settings.ssl_port", "");
+    cli_qmark_add("settings.ssl_workers", "");
+    cli_qmark_add("settings.ssl_autodetect", "");
+    cli_qmark_add("settings.ssl_autodetect_harder", "");
+    cli_qmark_add("settings.ssl_ocsp_status_ttl", "");
+    cli_qmark_add("settings.ssl_crl_status_ttl", "");
+    cli_qmark_add("settings.udp_port", "");
+    cli_qmark_add("settings.udp_workers", "");
+    cli_qmark_add("settings.dtls_port", "");
+    cli_qmark_add("settings.dtls_workers", "");
+    cli_qmark_add("settings.socks_port", "");
+    cli_qmark_add("settings.socks_workers", "");
+    cli_qmark_add("settings.log_level", "");
+    cli_qmark_add("settings.log_file", "");
+    cli_qmark_add("settings.log_console", "");
+    cli_qmark_add("settings.syslog_server", "");
+    cli_qmark_add("settings.syslog_port", "");
+    cli_qmark_add("settings.syslog_facility", "");
+    cli_qmark_add("settings.syslog_level", "");
+    cli_qmark_add("settings.syslog_family", "");
+    cli_qmark_add("settings.sslkeylog_file", "");
+    cli_qmark_add("settings.messages_dir", "");
+    cli_qmark_add("settings.write_payload_dir", "");
+    cli_qmark_add("settings.write_payload_file_prefix", "");
+    cli_qmark_add("settings.write_payload_file_suffix", "");
+    cli_qmark_add("settings.auth_portal", "");
+    cli_qmark_add("settings.cli", "");
+    cli_qmark_add("settings.socks", "");
 }
 
 
@@ -1980,7 +1980,7 @@ void cfg_generate_cli_hints(Setting& setting, std::vector<std::string>* this_lev
 }
 
 
-std::vector<cli_command*> cfg_generate_cli_callbacks(int mode, Setting& this_setting, struct cli_def* cli, cli_command* cli_parent,
+std::vector<cli_command*> cfg_generate_cmd_callbacks(int mode, Setting& this_setting, struct cli_def* cli, cli_command* cli_parent,
             int(*set_cb)(struct cli_def*, const char*, char*[], int),
             int(*config_cb)(struct cli_def*, const char*, char*[], int),
                     const char* context_help) {
@@ -3040,7 +3040,7 @@ CONFIG_MODE_DEF(cli_conf_edit_settings_socks, MODE_EDIT_SETTINGS_SOCKS,"socks");
 
 
 
-void cli_generate_set_settings(int mode, cli_def* cli, cli_command* cli_parent) {
+void cli_generate_set_commands(int mode, std::string const& section, cli_def* cli, cli_command* cli_parent) {
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
     auto edit = cli_register_command(cli, cli_parent, "edit", nullptr, PRIVILEGE_PRIVILEGED, mode, "edit settings sub-items");
@@ -3049,30 +3049,29 @@ void cli_generate_set_settings(int mode, cli_def* cli, cli_command* cli_parent) 
         auto edit_socks = cli_register_command(cli, edit, "socks", cli_conf_edit_settings_socks, PRIVILEGE_PRIVILEGED, mode, "edit socks settings");
 
 
-    if (CfgFactory::cfg_root()["settings"].exists("auth_portal")) {
-        auto set_cmd = cli_register_command(cli, nullptr, "set", nullptr, PRIVILEGE_PRIVILEGED, MODE_EDIT_SETTINGS_AUTH, "set auth portal variables");
-        cfg_generate_cli_callbacks(MODE_EDIT_SETTINGS_AUTH, CfgFactory::cfg_root()["settings"]["auth_portal"], cli,
-                                   set_cmd,
-                                                       cli_config_setting_auth_cb,
-                                                       cli_config_setting_auth_cb, "settings/auth_portal");
-    }
 
-    if (CfgFactory::cfg_root()["settings"].exists("cli")) {
-        auto set_cmd = cli_register_command(cli, nullptr, "set", nullptr, PRIVILEGE_PRIVILEGED, MODE_EDIT_SETTINGS_CLI, "set CLI variables");
-        cfg_generate_cli_callbacks(MODE_EDIT_SETTINGS_CLI, CfgFactory::cfg_root()["settings"]["cli"], cli,
-                                   set_cmd,
-                                                      cli_config_setting_cli_cb,
-                                                      cli_config_setting_cli_cb, "settings/cli");
-    }
+    for( int i = 0 ; i < CfgFactory::cfg_root()[section.c_str()].getLength() ; i++ ) {
 
-    if (CfgFactory::cfg_root()["settings"].exists("socks")) {
-        auto set_cmd = cli_register_command(cli, nullptr, "set", nullptr, PRIVILEGE_PRIVILEGED, MODE_EDIT_SETTINGS_SOCKS, "set SOCKS variables");
-        cfg_generate_cli_callbacks(MODE_EDIT_SETTINGS_SOCKS, CfgFactory::cfg_root()["settings"]["socks"], cli,
-                                   set_cmd,
-                                                      cli_config_setting_socks_cb,
-                                                      cli_config_setting_socks_cb, "settings/socks");
-    }
+        Setting& current_sub_section = CfgFactory::cfg_root()[section.c_str()][i];
+        std::string cur_sub_section_name = current_sub_section.getName();
 
+        if(current_sub_section.getType() == Setting::TypeGroup) {
+
+            std::string section_path = section;
+            section_path += "." + cur_sub_section_name;
+
+            auto const& callback_entry = CliState::get().callback_map[section_path];
+
+            auto set_cmd = cli_register_command(cli, nullptr, "set", nullptr, PRIVILEGE_PRIVILEGED,
+                                                mode + i,
+                                                std::string("set section " + cur_sub_section_name + "variables").c_str());
+
+            cfg_generate_cmd_callbacks(mode + i, CfgFactory::cfg_root()[section.c_str()][cur_sub_section_name.c_str()], cli,
+                                       set_cmd,
+                                       std::get<1>(callback_entry),
+                                       std::get<2>(callback_entry), section_path.c_str());
+        }
+    }
 }
 
 
@@ -3267,43 +3266,58 @@ void client_thread(int client_socket) {
         // generate dynamically content of config
 
 
+    CliState::get().callback_map["settings"] = CliState::callback_entry(MODE_EDIT_SETTINGS, cli_config_setting_cb, cli_config_setting_cb);
+    CliState::get().callback_map["settings.auth_portal"] = CliState::callback_entry(MODE_EDIT_SETTINGS_AUTH, cli_config_setting_auth_cb, cli_config_setting_auth_cb);
+
     auto conft_edit = cli_register_command(cli, nullptr, "edit", nullptr, PRIVILEGE_PRIVILEGED, MODE_CONFIG, "configure smithproxy settings");
 
-    if( CfgFactory::cfg_root().exists("settings") ) {
 
-        auto conft_edit_settigns = cli_register_command(cli, conft_edit, "settings", cli_conf_edit_settings, PRIVILEGE_PRIVILEGED, MODE_CONFIG, "edit settings");
+    std::string section = "settings";
+
+    if( CfgFactory::cfg_root().exists(section.c_str()) ) {
+
+
+        auto const& cb_entry = CliState::get().callback_map[section];
+
+        auto conft_edit_settings = cli_register_command(cli, conft_edit, section.c_str(), cli_conf_edit_settings, PRIVILEGE_PRIVILEGED, MODE_CONFIG, "edit settings");
 
         auto set_cmd = cli_register_command(cli, nullptr, "set", nullptr, PRIVILEGE_PRIVILEGED, MODE_EDIT_SETTINGS, "set variables in settings");
 
-            std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
+        std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
-            std::vector<cli_command*> set_settings = cfg_generate_cli_callbacks(MODE_EDIT_SETTINGS, CfgFactory::cfg_root()["settings"], cli, set_cmd,
-                                                                                cli_config_setting_cb,
-                                                                                cli_config_setting_cb, "settings");
+        std::vector<cli_command*> set_settings = cfg_generate_cmd_callbacks(
+                std::get<0>(cb_entry),
+                CfgFactory::cfg_root()[section.c_str()],
+                cli,
+                set_cmd,
+                std::get<1>(cb_entry),
+                std::get<2>(cb_entry),
+                section.c_str()
+                );
 
-            if(! set_settings.empty()){
-                cli_generate_set_settings(MODE_EDIT_SETTINGS, cli, nullptr);
-            }
+        if(! set_settings.empty()){
+            cli_generate_set_commands(MODE_EDIT_SETTINGS, section, cli, nullptr);
         }
+    }
 
 
-        // Pass the connection off to libcli
-        get_logger()->remote_targets(string_format("cli-%d",client_socket),client_socket);
+    // Pass the connection off to libcli
+    get_logger()->remote_targets(string_format("cli-%d",client_socket),client_socket);
 
-        logger_profile lp;
-        lp.level_ = cfgapi_table.logging.cli_init_level;
-        get_logger()->target_profiles()[(uint64_t)client_socket] = &lp;
+    logger_profile lp;
+    lp.level_ = cfgapi_table.logging.cli_init_level;
+    get_logger()->target_profiles()[(uint64_t)client_socket] = &lp;
 
 
-        load_defaults();
-        cli_loop(cli, client_socket);
+    load_defaults();
+    cli_loop(cli, client_socket);
 
-        get_logger()->remote_targets().remove(client_socket);
-        get_logger()->target_profiles().erase(client_socket);
-        close(client_socket);
+    get_logger()->remote_targets().remove(client_socket);
+    get_logger()->target_profiles().erase(client_socket);
+    close(client_socket);
 
-        // Free data structures
-        cli_done(cli);
+    // Free data structures
+    cli_done(cli);
 }
 
 void cli_loop(short unsigned int port) {
