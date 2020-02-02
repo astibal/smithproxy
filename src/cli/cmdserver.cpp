@@ -2827,14 +2827,13 @@ struct cli_ext : public cli_def {
 void cli_generate_set_commands(int mode, std::string const& section, cli_def* cli, cli_command* cli_parent) {
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
-    auto edit = cli_register_command(cli, cli_parent, "edit", nullptr, PRIVILEGE_PRIVILEGED, mode, "edit settings sub-items");
-        auto edit_auth = cli_register_command(cli, edit, "auth_portal", cli_conf_edit_settings_auth, PRIVILEGE_PRIVILEGED, mode, "edit auth_portal settings");
-        auto edit_cli = cli_register_command(cli, edit, "cli", cli_conf_edit_settings_cli, PRIVILEGE_PRIVILEGED, mode, "edit cli settings");
-        auto edit_socks = cli_register_command(cli, edit, "socks", cli_conf_edit_settings_socks, PRIVILEGE_PRIVILEGED, mode, "edit socks settings");
+    std::string help = string_format("edit %s sub-items", section.c_str());
 
+    cli_command* edit = nullptr;
 
+    auto &this_section = CfgFactory::cfg_root().lookup(section.c_str());
 
-    for( int i = 0 ; i < CfgFactory::cfg_root()[section.c_str()].getLength() ; i++ ) {
+    for( int i = 0 ; i < this_section.getLength() ; i++ ) {
 
         Setting& current_sub_section = CfgFactory::cfg_root()[section.c_str()][i];
         std::string cur_sub_section_name = current_sub_section.getName();
@@ -2851,12 +2850,16 @@ void cli_generate_set_commands(int mode, std::string const& section, cli_def* cl
                                                 std::string("set section " + cur_sub_section_name + "variables").c_str());
 
             cfg_generate_cmd_callbacks(section_path, cli, set_cmd);
+
+            if(! edit) {
+                edit = cli_register_command(cli, cli_parent, "edit", nullptr, PRIVILEGE_PRIVILEGED, mode, help.c_str());
+            }
+            cli_register_command(cli, edit, cur_sub_section_name.c_str(),
+                    cli_conf_edit_settings_socks, PRIVILEGE_PRIVILEGED, mode,
+                    string_format("edit %s settings", cur_sub_section_name.c_str()).c_str());
         }
     }
 }
-
-
-int cli_show(struct cli_def *cli, const char *command, char **argv, int argc);
 
 
 void cli_register_static(struct cli_def* cli) {

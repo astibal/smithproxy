@@ -104,6 +104,8 @@ void cli_loop(unsigned short port=50000);
 // SL_IO_EMPTY - sessions with no data received and/or sent
 
 typedef enum session_list_filter_flags { SL_NONE=0x0000 , SL_IO_OSBUF_NZ=0x0001 , SL_IO_EMPTY=0x0002 } session_list_filter_flags_t;
+
 int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, char *argv[], int argc, int sl_flags);
+int cli_show(struct cli_def *cli, const char *command, char **argv, int argc);
 
 #endif
