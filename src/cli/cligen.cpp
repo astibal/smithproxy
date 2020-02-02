@@ -119,21 +119,15 @@ std::vector<cli_command*> cfg_generate_cmd_callbacks(std::string& section, struc
 
                 // create type information, and (possibly) some help text
 
-                std::string help = section;
-                if(! help.empty()) {
-                    std::string h = CliHelp::instance().help(CliHelp::help_type_t::HELP_CONTEXT, help, here_n);
-                    if(h.empty()) {
-                        help = string_format("modify '%s'", here_n.c_str());
-                    }
-                    else {
-                        help = " - " + h;
-                    }
-                } else {
+                std::string help = CliHelp::instance().help(CliHelp::help_type_t::HELP_CONTEXT, section, here_n);
+                if(help.empty()) {
                     help = string_format("modify '%s'", here_n.c_str());
                 }
 
+                auto help2 = "\t - " + help;
+
                 auto* ret_single = cli_register_command(cli, cli_parent, here_n.c_str(), set_cb, PRIVILEGE_PRIVILEGED, mode,
-                                                        help.c_str() );
+                                                        help2.c_str() );
                 ret.push_back(ret_single);
             }
 

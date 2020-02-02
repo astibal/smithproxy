@@ -51,7 +51,7 @@ struct CliHelp {
     using help_db = std::unordered_map<std::string, std::string>;
 
     help_db& qmark_help() { return qmark_help_; }
-    help_db& context_help() { return qmark_help_; }
+    help_db& context_help() { return context_help_; }
 
     void init();
 
@@ -69,7 +69,7 @@ struct CliHelp {
     enum class help_type_t { HELP_CONTEXT=0, HELP_QMARK };
     using help_type_t = help_type_t;
 
-    std::string& help(help_type_t htype, const std::string& section, const std::string& key) {
+    std::string help(help_type_t htype, const std::string& section, const std::string& key) {
 
         std::unordered_map<std::string, std::string>& ref = context_help();
 
