@@ -45,6 +45,8 @@
 #include <vector>
 #include <string>
 
+#include <cli/cmdserver.hpp>
+
 void cfg_generate_cli_hints(Setting& setting, std::vector<std::string>* this_level_names,
                             std::vector<unsigned int>* this_level_indexes,
                             std::vector<std::string>* next_level_names,
@@ -52,9 +54,42 @@ void cfg_generate_cli_hints(Setting& setting, std::vector<std::string>* this_lev
 
 
 
-std::vector<cli_command*> cfg_generate_cmd_callbacks(int mode, Setting& this_setting, struct cli_def* cli, cli_command* cli_parent,
-                                                     int(*set_cb)(struct cli_def*, const char*, char*[], int),
-                                                     int(*config_cb)(struct cli_def*, const char*, char*[], int),
-                                                     const char* context_help);
+std::vector<cli_command*> cfg_generate_cmd_callbacks(std::string& section, struct cli_def* cli, cli_command* cli_parent);
+
+
+
+#define CONFIG_MODE_DEC(fn) \
+                            \
+int fn(struct cli_def *cli, const char *command, char *argv[], int argc); \
+
+
+#define CONFIG_MODE_DEF(fn, mode, name) \
+                                        \
+int fn(struct cli_def *cli, const char *command, char *argv[], int argc) { \
+    _debug(cli, "entering " name ", mode %d", mode);                       \
+                                                                           \
+    cli_set_configmode(cli, mode, name );                        \
+                                                                 \
+    return CLI_OK;                                               \
+}    \
+
+#define _debug   if(CliState::get().cli_debug_flag) cli_print
+
+
+
+//
+//  Functions to execute when issuing 'edit <something>' in config term mode
+//
+//      - change to conf-term-something
+//
+
+
+enum edit_settings { MODE_EDIT_SETTINGS=40000, MODE_EDIT_SETTINGS_AUTH, MODE_EDIT_SETTINGS_CLI, MODE_EDIT_SETTINGS_SOCKS };
+
+CONFIG_MODE_DEC(cli_conf_edit_settings);
+CONFIG_MODE_DEC(cli_conf_edit_settings_auth);
+CONFIG_MODE_DEC(cli_conf_edit_settings_cli);
+CONFIG_MODE_DEC(cli_conf_edit_settings_socks);
+
 
 #endif //SMITHPROXY_CLIGEN_HPP

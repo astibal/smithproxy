@@ -43,7 +43,8 @@ fi
 #	 \
 
 sudo docker pull astibal/smithproxy:${TAG}
-sudo docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined\
+sudo docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined \
+    -p 1112:1112 -p 50001:50000 \
 	-v sxy:/etc/smithproxy \
 	${LOG_VOLUME} \
 	-v sxydumps:/var/local/smithproxy \

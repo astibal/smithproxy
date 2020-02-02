@@ -42,6 +42,12 @@
 #include <cli/clihelp.hpp>
 #include <cfgapi.hpp>
 
+CONFIG_MODE_DEF(cli_conf_edit_settings, MODE_EDIT_SETTINGS,"settings");
+CONFIG_MODE_DEF(cli_conf_edit_settings_auth, MODE_EDIT_SETTINGS_AUTH,"auth_portal");
+CONFIG_MODE_DEF(cli_conf_edit_settings_cli, MODE_EDIT_SETTINGS_CLI,"cli");
+CONFIG_MODE_DEF(cli_conf_edit_settings_socks, MODE_EDIT_SETTINGS_SOCKS,"socks");
+
+
 void cfg_generate_cli_hints(Setting& setting, std::vector<std::string>* this_level_names,
                             std::vector<unsigned int>* this_level_indexes,
                             std::vector<std::string>* next_level_names,
@@ -77,13 +83,18 @@ void cfg_generate_cli_hints(Setting& setting, std::vector<std::string>* this_lev
 
 
 
-std::vector<cli_command*> cfg_generate_cmd_callbacks(int mode, Setting& this_setting, struct cli_def* cli, cli_command* cli_parent,
-                                                     int(*set_cb)(struct cli_def*, const char*, char*[], int),
-                                                     int(*config_cb)(struct cli_def*, const char*, char*[], int),
-                                                     const char* context_help) {
+std::vector<cli_command*> cfg_generate_cmd_callbacks(std::string& section, struct cli_def* cli, cli_command* cli_parent) {
 
     if(! cli_parent)
         return {};
+
+    auto& this_setting = CfgFactory::cfg_root().lookup(section.c_str());
+    auto const& cb_entry = CliState::get().callback_map[section];
+    auto set_cb = std::get<1>(cb_entry);
+    auto cfg_cb = std::get<2>(cb_entry);
+
+
+    int mode = std::get<0>(cb_entry);
 
     std::vector<std::string> here_name, next_name;
     std::vector<unsigned int> here_index, next_index;
@@ -108,9 +119,9 @@ std::vector<cli_command*> cfg_generate_cmd_callbacks(int mode, Setting& this_set
 
                 // create type information, and (possibly) some help text
 
-                std::string help;
-                if(context_help) {
-                    std::string h = CliHelp::instance().help(CliHelp::help_type_t::HELP_CONTEXT, context_help, here_n);
+                std::string help = section;
+                if(! help.empty()) {
+                    std::string h = CliHelp::instance().help(CliHelp::help_type_t::HELP_CONTEXT, help, here_n);
                     if(h.empty()) {
                         help = string_format("modify '%s'", here_n.c_str());
                     }
