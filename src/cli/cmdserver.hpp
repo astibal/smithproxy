@@ -45,6 +45,27 @@
 #include <cli/clihelp.hpp>
 
 
+struct CliCallbacks {
+
+    using callback = int (*)(struct cli_def *,const char *,char * *,int);
+
+    callback cmd_set() const { return cmd_set_; }
+    CliCallbacks& cmd_set(callback c) {
+        cmd_set_ = c;
+        return *this;
+    }
+
+    callback cmd_config() const { return cmd_config_; };
+    CliCallbacks& cmd_config(callback c) {
+        cmd_config_ = c;
+        return *this;
+    }
+
+private:
+    callback cmd_set_;
+    callback cmd_config_;
+};
+
 struct CliState {
     bool config_changed_flag = false;
     bool cli_debug_flag = false;
@@ -86,11 +107,9 @@ struct CliState {
     CliState& operator=(CliState const&) = delete;
 
     // command callbacks
-    using callback = int (*)(struct cli_def *,const char *,char * *,int);
-    using set_callback = callback;
-    using config_callback = callback;
+    using callback = CliCallbacks;
 
-    using callback_entry = std::tuple<unsigned int, set_callback, config_callback>;
+    using callback_entry = std::tuple<unsigned int, callback>;
     std::unordered_map<std::string, callback_entry> callback_map;
 
 

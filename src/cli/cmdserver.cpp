@@ -2861,7 +2861,7 @@ void cli_generate_set_commands(int mode, std::string const& section, cli_def* cl
                 edit = cli_register_command(cli, cli_parent, "edit", nullptr, PRIVILEGE_PRIVILEGED, mode, help.c_str());
             }
             cli_register_command(cli, edit, cur_sub_section_name.c_str(),
-                    cli_conf_edit_settings_socks, PRIVILEGE_PRIVILEGED, mode,
+                    std::get<1>(callback_entry).cmd_config(), PRIVILEGE_PRIVILEGED, mode,
                     string_format("edit %s settings", cur_sub_section_name.c_str()).c_str());
         }
     }
@@ -3054,13 +3054,30 @@ void client_thread(int client_socket) {
     // generate dynamically content of config
 
 
-    CliState::get().callback_map["settings"] = CliState::callback_entry(MODE_EDIT_SETTINGS, cli_config_setting_cb, cli_conf_edit_settings);
+    CliState::get().callback_map["settings"]
+        = CliState::callback_entry(MODE_EDIT_SETTINGS, CliCallbacks()
+            .cmd_set(cli_config_setting_cb)
+            .cmd_config(cli_conf_edit_settings));
 
-    CliState::get().callback_map["settings.auth_portal"] = CliState::callback_entry(MODE_EDIT_SETTINGS_AUTH, cli_config_setting_auth_cb, cli_conf_edit_settings_auth);
-    CliState::get().callback_map["settings.socks"] = CliState::callback_entry(MODE_EDIT_SETTINGS_SOCKS, cli_config_setting_socks_cb, cli_conf_edit_settings_socks);
-    CliState::get().callback_map["settings.cli"] = CliState::callback_entry(MODE_EDIT_SETTINGS_CLI, cli_config_setting_cli_cb, cli_conf_edit_settings_cli);
+    CliState::get().callback_map["settings.auth_portal"]
+        = CliState::callback_entry(MODE_EDIT_SETTINGS_AUTH, CliCallbacks()
+            .cmd_set(cli_config_setting_auth_cb)
+            .cmd_config(cli_conf_edit_settings_auth));
 
-    CliState::get().callback_map["debug"] = CliState::callback_entry(MODE_EDIT_DEBUG, cli_config_debug_cb, cli_conf_edit_debug);
+    CliState::get().callback_map["settings.socks"]
+        = CliState::callback_entry(MODE_EDIT_SETTINGS_SOCKS, CliCallbacks()
+            .cmd_set(cli_config_setting_socks_cb)
+            .cmd_config(cli_conf_edit_settings_socks));
+
+    CliState::get().callback_map["settings.cli"]
+        = CliState::callback_entry(MODE_EDIT_SETTINGS_CLI, CliCallbacks()
+            .cmd_set(cli_config_setting_cli_cb)
+            .cmd_config(cli_conf_edit_settings_cli));
+
+    CliState::get().callback_map["debug"]
+        = CliState::callback_entry(MODE_EDIT_DEBUG, CliCallbacks()
+            .cmd_set(cli_config_debug_cb)
+            .cmd_config(cli_conf_edit_debug));
 
     auto conft_edit = cli_register_command(cli, nullptr, "edit", nullptr, PRIVILEGE_PRIVILEGED, MODE_CONFIG, "configure smithproxy settings");
 
@@ -3075,7 +3092,7 @@ void client_thread(int client_socket) {
 
             auto const& callback_entry = CliState::get().callback_map[section];
 
-            cli_register_command(cli, conft_edit, section.c_str(), std::get<2>(callback_entry),
+            cli_register_command(cli, conft_edit, section.c_str(), std::get<1>(callback_entry).cmd_config(),
                                                             PRIVILEGE_PRIVILEGED, MODE_CONFIG, edit_help.c_str());
 
 

@@ -92,9 +92,7 @@ std::vector<cli_command*> cfg_generate_cmd_callbacks(std::string& section, struc
 
     auto& this_setting = CfgFactory::cfg_root().lookup(section.c_str());
     auto const& cb_entry = CliState::get().callback_map[section];
-    auto set_cb = std::get<1>(cb_entry);
-    auto cfg_cb = std::get<2>(cb_entry);
-
+    auto set_cb = std::get<1>(cb_entry).cmd_set();
 
     int mode = std::get<0>(cb_entry);
 
