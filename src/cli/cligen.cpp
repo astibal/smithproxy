@@ -47,6 +47,8 @@ CONFIG_MODE_DEF(cli_conf_edit_settings_auth, MODE_EDIT_SETTINGS_AUTH,"auth_porta
 CONFIG_MODE_DEF(cli_conf_edit_settings_cli, MODE_EDIT_SETTINGS_CLI,"cli");
 CONFIG_MODE_DEF(cli_conf_edit_settings_socks, MODE_EDIT_SETTINGS_SOCKS,"socks");
 
+CONFIG_MODE_DEF(cli_conf_edit_debug, MODE_EDIT_DEBUG, "debug");
+
 
 void cfg_generate_cli_hints(Setting& setting, std::vector<std::string>* this_level_names,
                             std::vector<unsigned int>* this_level_indexes,

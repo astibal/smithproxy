@@ -92,4 +92,7 @@ CONFIG_MODE_DEC(cli_conf_edit_settings_cli);
 CONFIG_MODE_DEC(cli_conf_edit_settings_socks);
 
 
+enum edit_debug { MODE_EDIT_DEBUG=41000, };
+CONFIG_MODE_DEC(cli_conf_edit_debug);
+
 #endif //SMITHPROXY_CLIGEN_HPP

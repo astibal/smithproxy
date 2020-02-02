@@ -2079,6 +2079,12 @@ int cli_config_setting_socks_cb(struct cli_def *cli, const char *command, char *
     return cli_uni_set_cb("settings.socks", cli, command, argv, argc);
 }
 
+int cli_config_debug_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+
+    return cli_uni_set_cb("debug", cli, command, argv, argc);
+}
+
 // index < 0 means all
 void cli_print_section(cli_def* cli, const std::string& name, int index , unsigned long pipe_sz ) {
 
@@ -3048,34 +3054,43 @@ void client_thread(int client_socket) {
     // generate dynamically content of config
 
 
-    CliState::get().callback_map["settings"] = CliState::callback_entry(MODE_EDIT_SETTINGS, cli_config_setting_cb, cli_config_setting_cb);
-    CliState::get().callback_map["settings.auth_portal"] = CliState::callback_entry(MODE_EDIT_SETTINGS_AUTH, cli_config_setting_auth_cb, cli_config_setting_auth_cb);
-    CliState::get().callback_map["settings.socks"] = CliState::callback_entry(MODE_EDIT_SETTINGS_SOCKS, cli_config_setting_socks_cb, cli_config_setting_socks_cb);
-    CliState::get().callback_map["settings.cli"] = CliState::callback_entry(MODE_EDIT_SETTINGS_CLI, cli_config_setting_cli_cb, cli_config_setting_cli_cb);
+    CliState::get().callback_map["settings"] = CliState::callback_entry(MODE_EDIT_SETTINGS, cli_config_setting_cb, cli_conf_edit_settings);
+
+    CliState::get().callback_map["settings.auth_portal"] = CliState::callback_entry(MODE_EDIT_SETTINGS_AUTH, cli_config_setting_auth_cb, cli_conf_edit_settings_auth);
+    CliState::get().callback_map["settings.socks"] = CliState::callback_entry(MODE_EDIT_SETTINGS_SOCKS, cli_config_setting_socks_cb, cli_conf_edit_settings_socks);
+    CliState::get().callback_map["settings.cli"] = CliState::callback_entry(MODE_EDIT_SETTINGS_CLI, cli_config_setting_cli_cb, cli_conf_edit_settings_cli);
+
+    CliState::get().callback_map["debug"] = CliState::callback_entry(MODE_EDIT_DEBUG, cli_config_debug_cb, cli_conf_edit_debug);
 
     auto conft_edit = cli_register_command(cli, nullptr, "edit", nullptr, PRIVILEGE_PRIVILEGED, MODE_CONFIG, "configure smithproxy settings");
 
 
-    std::string section = "settings";
+    std::vector<std::string> sections = { "settings", "debug" };
+    for( auto section : sections) {
 
-    if( CfgFactory::cfg_root().exists(section.c_str()) ) {
+        if (CfgFactory::cfg_root().exists(section.c_str())) {
+
+            std::string edit_help = string_format(" \t - edit %s", section.c_str());
+            std::string set_help = string_format(" \t - modify variables in %s", section.c_str());
+
+            auto const& callback_entry = CliState::get().callback_map[section];
+
+            cli_register_command(cli, conft_edit, section.c_str(), std::get<2>(callback_entry),
+                                                            PRIVILEGE_PRIVILEGED, MODE_CONFIG, edit_help.c_str());
 
 
-        auto const& cb_entry = CliState::get().callback_map[section];
+            std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
-        auto conft_edit_settings = cli_register_command(cli, conft_edit, section.c_str(), cli_conf_edit_settings, PRIVILEGE_PRIVILEGED, MODE_CONFIG, "edit settings");
+            auto set_cmd = cli_register_command(cli, nullptr, "set", nullptr, PRIVILEGE_PRIVILEGED, std::get<0>(callback_entry),
+                                                set_help.c_str());
 
-        auto set_cmd = cli_register_command(cli, nullptr, "set", nullptr, PRIVILEGE_PRIVILEGED, MODE_EDIT_SETTINGS, "set variables in settings");
+            std::vector<cli_command *> set_cmds = cfg_generate_cmd_callbacks(section, cli, set_cmd);
 
-        std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
-
-        std::vector<cli_command*> set_settings = cfg_generate_cmd_callbacks(section, cli,set_cmd);
-
-        if(! set_settings.empty()){
-            cli_generate_set_commands(MODE_EDIT_SETTINGS, section, cli, nullptr);
+            if (!set_cmds.empty()) {
+                cli_generate_set_commands(std::get<0>(callback_entry), section, cli, nullptr);
+            }
         }
     }
-
 
     // Pass the connection off to libcli
     get_logger()->remote_targets(string_format("cli-%d",client_socket),client_socket);
