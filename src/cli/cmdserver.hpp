@@ -39,8 +39,10 @@
 
 #ifndef _CMDSERVER_HPP_
    #define _CMDSERVER_HPP_
-   
+
 #include <libcli.h>
+
+#include <cli/clihelp.hpp>
 
 
 struct CliState {
@@ -76,6 +78,10 @@ struct CliState {
         return c;
     }
 
+    static CliHelp& help() {
+        return get().help_;
+    }
+
     CliState(CliState const&) = delete;
     CliState& operator=(CliState const&) = delete;
 
@@ -87,8 +93,8 @@ struct CliState {
     std::unordered_map<std::string, callback_entry> callback_map;
 
 private:
-    CliState() = default;
-
+    CliState() : help_(CliHelp::instance()) {};
+    CliHelp& help_;
 };
 
 void cli_loop(unsigned short port=50000);

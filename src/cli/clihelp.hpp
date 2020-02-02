@@ -35,53 +35,74 @@
     gives permission to release a modified version without this exception;
     this exception also makes it possible to release a modified version
     which carries forward this exception.
-*/    
+*/
 
-#include <vector>
+#ifndef SMITHPROXY_CLIHELP_HPP
 
-#include <csignal>
-#include <ctime>
-#include <cstdlib>
-#include <sys/stat.h>
-#include <sys/types.h>
+#define SMITHPROXY_CLIHELP_HPP
 
-#include <ostream>
-#include <ios>
+#include <unordered_map>
 
-#include <getopt.h>
-#include <execinfo.h>
+struct CliHelp {
 
-#include <socle.hpp>
+    CliHelp(CliHelp const&) = delete;
+    CliHelp& operator=(CliHelp const&) = delete;
 
-#include <log/logger.hpp>
-#include <hostcx.hpp>
-#include <apphostcx.hpp>
-#include <baseproxy.hpp>
-#include <masterproxy.hpp>
-#include <threadedacceptor.hpp>
-#include <threadedreceiver.hpp>
-#include <sslcom.hpp>
-#include <sslmitmcom.hpp>
-#include <udpcom.hpp>
-#include <display.hpp>
+    using help_db = std::unordered_map<std::string, std::string>;
 
-#include <main.hpp>
-#include <traflog.hpp>
-#include <display.hpp>
+    help_db& qmark_help() { return qmark_help_; }
+    help_db& context_help() { return qmark_help_; }
 
-#include <libconfig.h++>
+    void init();
 
-#include <proxy/mitmhost.hpp>
-#include <proxy/mitmproxy.hpp>
-#include <proxy/socks5/socksproxy.hpp>
+    void help_add( std::string k, std::string v ) {
+        context_help_[std::move(k)] = std::move(v);
+    }
 
-#include <cfgapi.hpp>
-#include <service/daemon.hpp>
-#include <cli/cmdserver.hpp>
+    void qmark_add( std::string k, std::string v ) {
+        qmark_help_[std::move(k)] = std::move(v);
+    }
 
-//#define MEM_DEBUG 1
-#ifdef MEM_DEBUG
-    #include <mcheck.h>
-#endif
+    help_db context_help_;
+    help_db qmark_help_;
+
+    enum class help_type_t { HELP_CONTEXT=0, HELP_QMARK };
+    using help_type_t = help_type_t;
+
+    std::string& help(help_type_t htype, const std::string& section, const std::string& key) {
+
+        std::unordered_map<std::string, std::string>& ref = context_help();
+
+        if(htype == CliHelp::help_type_t::HELP_QMARK) {
+            ref = qmark_help();
+        }
+
+        auto i = ref.find(section + "." + key);
+        if(i != ref.end()) {
+            return i->second;
+        } else {
+
+            i = ref.find("default");
+            if(i != ref.end()) {
+                return i->second;
+            } else {
+                ref["default"] = "";
+                return ref["default"];
+            }
+        }
+    }
 
 
+    static CliHelp& instance() {
+        static CliHelp h;
+        return h;
+    }
+
+private:
+    CliHelp() {
+        init();
+    }
+};
+
+
+#endif //SMITHPROXY_CLIHELP_HPP

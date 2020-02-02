@@ -47,16 +47,12 @@
 
 #include <vector>
 
-#include <ctime>
 #include <cstdlib>
 #include <sys/stat.h>
-#include <sys/types.h>
 
 #include <ostream>
-#include <ios>
 
 #include <getopt.h>
-#include <execinfo.h>
 
 #include <openssl/crypto.h>
 
@@ -64,33 +60,18 @@
 
 #include <log/logger.hpp>
 #include <hostcx.hpp>
-#include <apphostcx.hpp>
-#include <baseproxy.hpp>
-#include <masterproxy.hpp>
-#include <threadedacceptor.hpp>
-#include <threadedreceiver.hpp>
 #include <sslcom.hpp>
-#include <sslmitmcom.hpp>
 #include <udpcom.hpp>
 #include <display.hpp>
 
 #include <main.hpp>
-#include <traflog.hpp>
-#include <display.hpp>
 
 #include <libconfig.h++>
 
-#include <proxy/mitmhost.hpp>
-#include <proxy/mitmproxy.hpp>
-#include <proxy/socks5/socksproxy.hpp>
-
 #include <cfgapi.hpp>
 #include <service/daemon.hpp>
-#include <cmdserver.hpp>
-#include <service/srvutils.hpp>
 #include <staticcontent.hpp>
 #include <smithlog.hpp>
-#include <service/dnsupd/smithdnsupd.hpp>
 
 #include <service/smithproxy.hpp>
 

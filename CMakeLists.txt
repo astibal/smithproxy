@@ -88,7 +88,7 @@ add_executable(smithproxy
         src/service/daemon.cpp
         src/proxy/socks5/sockshostcx.cpp
         src/proxy/socks5/socksproxy.cpp
-        src/cmdserver.cpp
+        src/cli/cmdserver.cpp
         src/shm/shmauth.cpp
         src/inspect/dns.cpp
         src/policy/inspectors.cpp
@@ -113,7 +113,11 @@ add_executable(smithproxy
         src/inspect/pyinspector.hpp
         src/inspect/sigfactory.hpp
         src/async/asyncsocket.hpp
-        src/async/asyncdns.hpp src/inspect/dnsinspector.hpp src/inspect/dnsinspector.cpp)
+        src/async/asyncdns.hpp
+        src/inspect/dnsinspector.hpp
+        src/inspect/dnsinspector.cpp
+        src/cli/clihelp.hpp
+        src/cli/clihelp.cpp src/cli/cligen.hpp src/cli/cligen.cpp)
 
 add_executable(smithd
         ${SMITHD_DIR}/smithd.cpp

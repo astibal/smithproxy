@@ -38,7 +38,7 @@
 */
 
 #include <service/smithproxy.hpp>
-#include <cmdserver.hpp>
+#include <cli/cmdserver.hpp>
 #include <policy/authfactory.hpp>
 #include <inspect/sigfactory.hpp>
 

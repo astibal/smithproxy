@@ -35,53 +35,26 @@
     gives permission to release a modified version without this exception;
     this exception also makes it possible to release a modified version
     which carries forward this exception.
-*/    
-
-#include <vector>
-
-#include <csignal>
-#include <ctime>
-#include <cstdlib>
-#include <sys/stat.h>
-#include <sys/types.h>
-
-#include <ostream>
-#include <ios>
-
-#include <getopt.h>
-#include <execinfo.h>
-
-#include <socle.hpp>
-
-#include <log/logger.hpp>
-#include <hostcx.hpp>
-#include <apphostcx.hpp>
-#include <baseproxy.hpp>
-#include <masterproxy.hpp>
-#include <threadedacceptor.hpp>
-#include <threadedreceiver.hpp>
-#include <sslcom.hpp>
-#include <sslmitmcom.hpp>
-#include <udpcom.hpp>
-#include <display.hpp>
-
-#include <main.hpp>
-#include <traflog.hpp>
-#include <display.hpp>
-
-#include <libconfig.h++>
-
-#include <proxy/mitmhost.hpp>
-#include <proxy/mitmproxy.hpp>
-#include <proxy/socks5/socksproxy.hpp>
+*/
+#ifndef SMITHPROXY_CLIGEN_HPP
+#define SMITHPROXY_CLIGEN_HPP
 
 #include <cfgapi.hpp>
-#include <service/daemon.hpp>
-#include <cli/cmdserver.hpp>
+#include <libcli.h>
 
-//#define MEM_DEBUG 1
-#ifdef MEM_DEBUG
-    #include <mcheck.h>
-#endif
+#include <vector>
+#include <string>
+
+void cfg_generate_cli_hints(Setting& setting, std::vector<std::string>* this_level_names,
+                            std::vector<unsigned int>* this_level_indexes,
+                            std::vector<std::string>* next_level_names,
+                            std::vector<unsigned int>* next_level_indexes);
 
 
+
+std::vector<cli_command*> cfg_generate_cmd_callbacks(int mode, Setting& this_setting, struct cli_def* cli, cli_command* cli_parent,
+                                                     int(*set_cb)(struct cli_def*, const char*, char*[], int),
+                                                     int(*config_cb)(struct cli_def*, const char*, char*[], int),
+                                                     const char* context_help);
+
+#endif //SMITHPROXY_CLIGEN_HPP

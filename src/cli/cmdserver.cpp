@@ -56,7 +56,10 @@
 #include <biostring.hpp>
 
 #include <log/logger.hpp>
-#include <cmdserver.hpp>
+
+#include <cli/cmdserver.hpp>
+#include <cli/cligen.hpp>
+
 #include <cfgapi.hpp>
 #include <timeops.hpp>
 
@@ -117,115 +120,6 @@ void load_defaults() {
     CliState::get().orig_epoll_loglevel = epoll::log_level;
     CliState::get().orig_mitmproxy_loglevel = MitmProxy::log_level_ref();
     CliState::get().orig_mitmmasterproxy_loglevel = MitmMasterProxy::log_level_ref();
-}
-
-std::unordered_map<std::string, std::string> cli_context_help;
-std::unordered_map<std::string, std::string> cli_qmark_help;
-
-void cli_help_add( std::string k, std::string v ) {
-    cli_context_help[std::move(k)] = std::move(v);
-}
-
-void cli_qmark_add( std::string k, std::string v ) {
-    cli_qmark_help[std::move(k)] = std::move(v);
-}
-
-typedef enum { HELP_CONTEXT=0, HELP_QMARK } help_type_t;
-
-std::string& cli_help(help_type_t htype, const std::string& section, const std::string& key) {
-
-    std::unordered_map<std::string, std::string>& ref = cli_context_help;
-
-    if(htype == HELP_QMARK) {
-        ref = cli_qmark_help;
-    }
-
-    auto i = ref.find(section + "." + key);
-    if(i != ref.end()) {
-        return i->second;
-    } else {
-
-        i = ref.find("default");
-        if(i != ref.end()) {
-            return i->second;
-        } else {
-            ref["default"] = "";
-            return ref["default"];
-        }
-    }
-}
-
-void init_cli_help() {
-    cli_help_add("default","");
-    cli_help_add("settings.certs_path", "directory for TLS-resigning CA certificate and key");
-    cli_help_add("settings.certs_ca_key_password","TLS-resigning CA private key protection password");
-    cli_help_add("settings.certs_ca_path", "trusted CA store path (to verify server-side connections)");
-    cli_help_add("settings.plaintext_port", "base divert port for non-SSL TCP traffic");
-    cli_help_add("settings.plaintext_workers", "non-SSL TCP traffic worker thread count");
-    cli_help_add("settings.ssl_port", "base divert port for SSL TCP traffic");
-    cli_help_add("settings.ssl_workers", "SSL TCP traffic worker thread count");
-    cli_help_add("settings.ssl_autodetect", "Detect TLS ClientHello on unusual ports");
-    cli_help_add("settings.ssl_autodetect_harder", "Detect TSL ClientHello - wait a bit longer");
-    cli_help_add("settings.ssl_ocsp_status_ttl", "hardcoded TTL for OCSP response validity");
-    cli_help_add("settings.ssl_crl_status_ttl", "hardcoded TTL for downloaded CRL files");
-    cli_help_add("settings.udp_port", "base divert port for non-DTLS UDP traffic");
-    cli_help_add("settings.udp_workers", "non-DTLS traffic worker thread count");
-    cli_help_add("settings.dtls_port", "base divert port for DTLS UDP traffic");
-    cli_help_add("settings.dtls_workers", "DTLS traffic worker thread count");
-    cli_help_add("settings.socks_port", "base SOCKS proxy listening port");
-    cli_help_add("settings.socks_workers", "SOCKS proxy traffic thread count");
-    cli_help_add("settings.log_level", "file logging verbosity level");
-    cli_help_add("settings.log_file", "log file");
-    cli_help_add("settings.log_console", "toggle logging to standard output");
-    cli_help_add("settings.syslog_server", "IP address of syslog server");
-    cli_help_add("settings.syslog_port", "syslog server port");
-    cli_help_add("settings.syslog_facility", "syslog facility");
-    cli_help_add("settings.syslog_level", "syslog logging verbosity level");
-    cli_help_add("settings.syslog_family", "IPv4 or IPv6?");
-    cli_help_add("settings.sslkeylog_file", "where to dump TLS keying material");
-    cli_help_add("settings.messages_dir", "replacement text directory");
-    cli_help_add("settings.write_payload_dir", "root directory for packet dumps");
-    cli_help_add("settings.write_payload_file_prefix", "packet dumps file prefix");
-    cli_help_add("settings.write_payload_file_suffix", "packet dumps file suffix");
-    cli_help_add("settings.auth_portal", "** configure authentication portal settings");
-    cli_help_add("settings.cli", "** configure CLI specific settings");
-    cli_help_add("settings.socks", "** configure SOCKS specific settings");
-
-
-    cli_qmark_add("default", "enter <value>");
-    cli_qmark_add("settings.certs_path", "<string> with path to a directory");
-    cli_qmark_add("settings.certs_ca_key_password","");
-    cli_qmark_add("settings.certs_ca_path", "");
-    cli_qmark_add("settings.plaintext_port", "");
-    cli_qmark_add("settings.plaintext_workers", "");
-    cli_qmark_add("settings.ssl_port", "");
-    cli_qmark_add("settings.ssl_workers", "");
-    cli_qmark_add("settings.ssl_autodetect", "");
-    cli_qmark_add("settings.ssl_autodetect_harder", "");
-    cli_qmark_add("settings.ssl_ocsp_status_ttl", "");
-    cli_qmark_add("settings.ssl_crl_status_ttl", "");
-    cli_qmark_add("settings.udp_port", "");
-    cli_qmark_add("settings.udp_workers", "");
-    cli_qmark_add("settings.dtls_port", "");
-    cli_qmark_add("settings.dtls_workers", "");
-    cli_qmark_add("settings.socks_port", "");
-    cli_qmark_add("settings.socks_workers", "");
-    cli_qmark_add("settings.log_level", "");
-    cli_qmark_add("settings.log_file", "");
-    cli_qmark_add("settings.log_console", "");
-    cli_qmark_add("settings.syslog_server", "");
-    cli_qmark_add("settings.syslog_port", "");
-    cli_qmark_add("settings.syslog_facility", "");
-    cli_qmark_add("settings.syslog_level", "");
-    cli_qmark_add("settings.syslog_family", "");
-    cli_qmark_add("settings.sslkeylog_file", "");
-    cli_qmark_add("settings.messages_dir", "");
-    cli_qmark_add("settings.write_payload_dir", "");
-    cli_qmark_add("settings.write_payload_file_prefix", "");
-    cli_qmark_add("settings.write_payload_file_suffix", "");
-    cli_qmark_add("settings.auth_portal", "");
-    cli_qmark_add("settings.cli", "");
-    cli_qmark_add("settings.socks", "");
 }
 
 
@@ -1050,7 +944,7 @@ int cli_diag_dns_cache_list(struct cli_def *cli, const char *command, char *argv
             DNS_Response *r = it.second;
 
             if (r != nullptr && r->answers().size() > 0) {
-                int ttl = (r->loaded_at + r->answers().at(0).ttl_) - time(nullptr);
+                long ttl = (r->loaded_at + r->answers().at(0).ttl_) - time(nullptr);
                 out << string_format("    %s  -> [ttl:%d]%s\n", s.c_str(), ttl, r->answer_str().c_str());
             }
         }
@@ -1946,95 +1840,6 @@ void cfg_clone_setting(Setting& dst, Setting& orig, int index/*, struct cli_def 
     }
 }
 
-void cfg_generate_cli_hints(Setting& setting, std::vector<std::string>* this_level_names,
-                                                std::vector<unsigned int>* this_level_indexes,
-        std::vector<std::string>* next_level_names,
-        std::vector<unsigned int>* next_level_indexes) {
-
-    for (unsigned int i = 0; i < (unsigned int) setting.getLength(); i++) {
-        Setting &cur_object = setting[(int)i];
-
-        std::string name;
-        if(cur_object.getName()) {
-            name = cur_object.getName();
-        }
-
-        if( cur_object.isScalar() || cur_object.isArray() ) {
-            if( ! name.empty() ) {
-                if(this_level_names)
-                    this_level_names->push_back(name);
-            } else {
-                if(this_level_indexes)
-                    this_level_indexes->push_back(i);
-            }
-        } else {
-            if( ! name.empty() ) {
-                if(next_level_names)
-                    next_level_names->push_back(name);
-            } else {
-                if(next_level_indexes)
-                    next_level_indexes->push_back(i);
-            }
-        }
-    }
-}
-
-
-std::vector<cli_command*> cfg_generate_cmd_callbacks(int mode, Setting& this_setting, struct cli_def* cli, cli_command* cli_parent,
-            int(*set_cb)(struct cli_def*, const char*, char*[], int),
-            int(*config_cb)(struct cli_def*, const char*, char*[], int),
-                    const char* context_help) {
-
-    if(! cli_parent)
-        return {};
-
-    std::vector<std::string> here_name, next_name;
-    std::vector<unsigned int> here_index, next_index;
-
-    cli_print(cli, "calling cfg_generate_cli_hints");
-
-    cfg_generate_cli_hints(this_setting, &here_name, &here_index, &next_name, &next_index);
-
-    cli_print(cli, "hint results: named: %d, indexed %d, next-level named: %d, next-level indexed: %d",
-              (int)here_name.size(), (int)here_index.size(),
-              (int)next_name.size(), (int)next_index.size());
-
-    if( (! here_index.empty() ) || (! here_name.empty()) ) {
-
-        std::string name;
-        if(this_setting.getName()) {
-            //cli_command* cli_here = cli_register_command(cli, cli_parent, this_setting.getName(), set_cb, PRIVILEGE_PRIVILEGED, mode, "modify variables");
-
-            std::vector<cli_command*> ret;
-
-            for( const auto& here_n: here_name) {
-
-                // create type information, and (possibly) some help text
-
-                std::string help;
-                if(context_help) {
-                    std::string h = cli_help(HELP_CONTEXT, context_help, here_n);
-                    if(h.empty()) {
-                        help = string_format("modify '%s'", here_n.c_str());
-                    }
-                    else {
-                        help = " - " + h;
-                    }
-                } else {
-                    help = string_format("modify '%s'", here_n.c_str());
-                }
-
-                auto* ret_single = cli_register_command(cli, cli_parent, here_n.c_str(), set_cb, PRIVILEGE_PRIVILEGED, mode,
-                                     help.c_str() );
-                ret.push_back(ret_single);
-            }
-
-            return ret;
-        }
-    }
-
-    return {};
-}
 
 
 bool cfg_write_value(Setting& parent, bool create, std::string& varname, const std::vector<std::string> &values, cli_def* cli) {
@@ -2232,7 +2037,7 @@ int cli_uni_set_cb(std::string const& confpath, struct cli_def *cli, const char 
         } else {
             if (!conf.isRoot() && conf.getName()) {
 
-                auto h = cli_help(HELP_QMARK, conf.getPath(), varname);
+                auto h = CliHelp::instance().help(CliHelp::help_type_t::HELP_QMARK, conf.getPath(), varname);
 
                 cli_print(cli, "hint:  %s (%s)", h.c_str(), conf.getPath().c_str());
             }
@@ -3128,9 +2933,6 @@ void client_thread(int client_socket) {
 
         // Must be called first to setup data structures
         cli = cli_init();
-
-        // init contextual help
-        init_cli_help();
 
         // Set the hostname (shown in the the prompt)
         apply_hostname(cli);
