@@ -1699,6 +1699,9 @@ int cli_exec_reload(struct cli_def *cli, const char *command, char *argv[], int 
 
     if(CONFIG_LOADED) {
         cli_print(cli, "Configuration file reloaded successfully");
+        CliState::get().config_changed_flag = false;
+        apply_hostname(cli);
+
     } else {
         cli_print(cli, "Configuration file reload FAILED");
     }
@@ -1846,9 +1849,6 @@ bool cfg_write_value(Setting& parent, bool create, std::string& varname, const s
 
     auto log = logan::create("service");
 
-    for(auto const& v: values)
-        _debug(cli, "DEBUG: attempting to write %s:%s ", varname.c_str(), v.c_str());
-
     if( parent.exists(varname.c_str()) ) {
 
         _not("config item exists %s", varname.c_str());
@@ -1863,6 +1863,7 @@ bool cfg_write_value(Setting& parent, bool create, std::string& varname, const s
                 case Setting::TypeInt:
                 {
                     int i = std::stoi(values[0]);
+                    _debug(cli, "DEBUG: attempting to write %s: (TypeInt)%d ", varname.c_str(), i);
                     s = i;
                 }
                     break;
@@ -1870,6 +1871,7 @@ bool cfg_write_value(Setting& parent, bool create, std::string& varname, const s
                 case Setting::TypeInt64:
                 {
                     long long int lli = std::stoll(values[0]);
+                    _debug(cli, "DEBUG: attempting to write %s: (TypeInt64)%lld ", varname.c_str(), lli);
                     s = lli;
                 }
                     break;
@@ -1877,6 +1879,7 @@ bool cfg_write_value(Setting& parent, bool create, std::string& varname, const s
                 case Setting::TypeBoolean:
 
                     lvalue = string_tolower(values[0]);
+                    _debug(cli, "DEBUG: attempting to write %s: (TypeBool)%s ", varname.c_str(), lvalue.c_str());
 
                     if( lvalue == "true" || lvalue == "1" ) {
                         s = true;
@@ -1890,11 +1893,13 @@ bool cfg_write_value(Setting& parent, bool create, std::string& varname, const s
                 case Setting::TypeFloat:
                 {
                     float f = std::stof(values[0]);
+                    _debug(cli, "DEBUG: attempting to write %s: (TypeFloat)%f ", varname.c_str(), f);
                     s = f;
                 }
                     break;
 
                 case Setting::TypeString:
+                    _debug(cli, "DEBUG: attempting to write %s: (TypeString)%s ", varname.c_str(), values[0].c_str());
                     s = values[0];
 
                     break;
