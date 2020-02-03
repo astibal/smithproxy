@@ -55,8 +55,8 @@ void cfg_generate_cli_hints(Setting& setting, std::vector<std::string>* this_lev
 
 
 std::vector<cli_command *>
-        cfg_generate_set_callbacks (struct cli_def *cli, std::string const& section);
-void cli_generate_set_commands (std::string const &section, cli_def *cli, cli_command *cli_parent);
+        cli_generate_set_commands (struct cli_def *cli, std::string const& section);
+void cli_generate_commands (cli_def *cli, std::string const &section, cli_command *cli_parent);
 
 
 #define CONFIG_MODE_DEC(fn) \
@@ -93,7 +93,7 @@ CONFIG_MODE_DEC(cli_conf_edit_settings_cli);
 CONFIG_MODE_DEC(cli_conf_edit_settings_socks);
 
 
-enum edit_debug { MODE_EDIT_DEBUG=41000, };
+enum edit_debug { MODE_EDIT_DEBUG=41000, MODE_EDIT_DEBUG_LOG};
 CONFIG_MODE_DEC(cli_conf_edit_debug);
 
 enum edit_proto_objects { MODE_EDIT_PROTO_OBJECTS=42000, };

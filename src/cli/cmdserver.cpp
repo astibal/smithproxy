@@ -3087,8 +3087,8 @@ void client_thread(int client_socket) {
             std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
 
-            //std::vector<cli_command *> set_cmds = cfg_generate_set_callbacks(cli, section);
-            cli_generate_set_commands(section, cli, nullptr);
+            //std::vector<cli_command *> set_cmds = cli_generate_set_commands(cli, section);
+            cli_generate_commands(cli, section, nullptr);
         }
     }
 

@@ -89,7 +89,7 @@ void cfg_generate_cli_hints(Setting& setting, std::vector<std::string>* this_lev
 
 
 
-std::vector<cli_command *> cfg_generate_set_callbacks (struct cli_def *cli, std::string const &section) {
+std::vector<cli_command *> cli_generate_set_commands (struct cli_def *cli, std::string const &section) {
 
 
     auto& this_setting = CfgFactory::cfg_root().lookup(section.c_str());
@@ -145,44 +145,56 @@ std::vector<cli_command *> cfg_generate_set_callbacks (struct cli_def *cli, std:
 }
 
 
-void cli_generate_set_commands (std::string const &section, cli_def *cli, cli_command *cli_parent) {
+void cli_generate_commands (cli_def *cli, std::string const &section, cli_command *cli_parent) {
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
 
     // generate set commands for this section first
-    cfg_generate_set_callbacks(cli, section);
+    cli_generate_set_commands(cli, section);
 
     std::string help = string_format("edit %s sub-items", section.c_str());
 
     cli_command* edit = nullptr;
 
     auto &this_section = CfgFactory::cfg_root().lookup(section.c_str());
+    auto this_callback_entry = CliState::get().callback_map[section];
+    int this_mode = std::get<0>(this_callback_entry);
+
 
     for( int i = 0 ; i < this_section.getLength() ; i++ ) {
 
-        Setting& current_sub_section = CfgFactory::cfg_root()[section.c_str()][i];
-        std::string cur_sub_section_name = current_sub_section.getName();
+        Setting& sub_section = this_section[i];
+        std::string sub_section_name = sub_section.getName();
 
-        if(current_sub_section.getType() == Setting::TypeGroup) {
+        if(sub_section.getType() == Setting::TypeGroup) {
 
             std::string section_path = section;
-            section_path += "." + cur_sub_section_name;
+            section_path += "." + sub_section_name;
 
-            auto const& callback_entry = CliState::get().callback_map[section_path];
+            auto& callback_entry = CliState::get().callback_map[section_path];
             int mode = std::get<0>(callback_entry);
 
-            auto set_cmd = cli_register_command(cli, nullptr, "set", nullptr, PRIVILEGE_PRIVILEGED,
-                                                std::get<0>(callback_entry),
-                                                std::string("set section " + cur_sub_section_name + "variables").c_str());
-
-            cli_generate_set_commands(section_path, cli, nullptr);
-
-            if(! edit) {
-                edit = cli_register_command(cli, cli_parent, "edit", nullptr, PRIVILEGE_PRIVILEGED, mode, help.c_str());
+            // specific treatment of dynamic (unknown groups)
+            if( mode == 0 ) {
+                // defaulted to parent section callbacks
+                callback_entry = CliState::get().callback_map[section];
+                mode = static_cast<int> (std::get<0>(callback_entry)) + i;
             }
-            cli_register_command(cli, edit, cur_sub_section_name.c_str(),
-                                 std::get<1>(callback_entry).cmd_config(), PRIVILEGE_PRIVILEGED, mode,
-                                 string_format("edit %s settings", cur_sub_section_name.c_str()).c_str());
+            auto cb_config = std::get<1>(callback_entry).cmd_config();
+
+//            auto set_cmd = cli_register_command(cli, nullptr, "set", nullptr, PRIVILEGE_PRIVILEGED,
+//                                                mode, std::string("set section " + sub_section_name + "variables").c_str());
+
+            cli_generate_commands(cli, section_path, nullptr);
+
+
+            // register 'edit' and 'edit <subsection>' in terms of this "mode ID"
+            if(! edit) {
+                edit = cli_register_command(cli, cli_parent, "edit", nullptr, PRIVILEGE_PRIVILEGED, this_mode, help.c_str());
+            }
+            cli_register_command(cli, edit, sub_section_name.c_str(),
+                                 cb_config, PRIVILEGE_PRIVILEGED, this_mode,
+                                 string_format("edit %s settings", sub_section_name.c_str()).c_str());
         }
     }
 }
