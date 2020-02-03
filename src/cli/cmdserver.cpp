@@ -101,6 +101,7 @@ void apply_hostname(cli_def* cli) {
 
 void debug_cli_params(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
+    _debug(cli, "Cli mode: %d", cli->mode);
     _debug(cli, "command: %s", command);
     for(int i = 0; i < argc; i++) {
         _debug(cli, "      arg[%d]: %s", i, argv[i]);
@@ -3073,7 +3074,7 @@ void client_thread(int client_socket) {
 
 
     std::vector<std::string> sections = { "settings", "debug", "proto_objects", "port_objects" };
-    for( auto section : sections) {
+    for( auto const& section : sections) {
 
         if (CfgFactory::cfg_root().exists(section.c_str())) {
 

@@ -182,9 +182,6 @@ void cli_generate_commands (cli_def *cli, std::string const &section, cli_comman
             }
             auto cb_config = std::get<1>(callback_entry).cmd_config();
 
-//            auto set_cmd = cli_register_command(cli, nullptr, "set", nullptr, PRIVILEGE_PRIVILEGED,
-//                                                mode, std::string("set section " + sub_section_name + "variables").c_str());
-
             cli_generate_commands(cli, section_path, nullptr);
 
 
