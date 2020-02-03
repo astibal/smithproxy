@@ -47,6 +47,8 @@
 
 #include <cli/cmdserver.hpp>
 
+#define _debug   if(CliState::get().cli_debug_flag) cli_print
+
 void cfg_generate_cli_hints(Setting& setting, std::vector<std::string>* this_level_names,
                             std::vector<unsigned int>* this_level_indexes,
                             std::vector<std::string>* next_level_names,
@@ -64,17 +66,26 @@ void cli_generate_commands (cli_def *cli, std::string const &section, cli_comman
 int fn(struct cli_def *cli, const char *command, char *argv[], int argc); \
 
 
+std::pair<int, std::string> generate_dynamic_groups(struct cli_def *cli, const char *command, char **argv, int argc);
+
 #define CONFIG_MODE_DEF(fn, mode, name) \
                                         \
 int fn(struct cli_def *cli, const char *command, char *argv[], int argc) { \
-    _debug(cli, "entering " name ", mode %d", mode);                       \
+    _debug(cli, "entering " name ", mode = %d", mode);                     \
+    debug_cli_params(cli, command, argv, argc);                            \
                                                                            \
-    cli_set_configmode(cli, mode, name );                        \
-                                                                 \
-    return CLI_OK;                                               \
+    int oldmode = cli_set_configmode(cli, mode, name );                    \
+    _debug(cli, "   oldmode = %d", oldmode);                               \
+                                                                           \
+    if(mode == oldmode) {                                                  \
+         auto dynres =                                                     \
+                        generate_dynamic_groups(cli, command, argv, argc); \
+          if (dynres.first > 0) cli_set_configmode(cli, dynres.first, dynres.second.c_str()); \
+    }                                                                      \
+    return CLI_OK;                                                         \
 }    \
 
-#define _debug   if(CliState::get().cli_debug_flag) cli_print
+
 
 
 
@@ -93,7 +104,7 @@ CONFIG_MODE_DEC(cli_conf_edit_settings_cli);
 CONFIG_MODE_DEC(cli_conf_edit_settings_socks);
 
 
-enum edit_debug { MODE_EDIT_DEBUG=41000, MODE_EDIT_DEBUG_LOG};
+enum edit_debug { MODE_EDIT_DEBUG=41000, MODE_EDIT_DEBUG_LOG };
 CONFIG_MODE_DEC(cli_conf_edit_debug);
 
 enum edit_proto_objects { MODE_EDIT_PROTO_OBJECTS=42000, };

@@ -2061,48 +2061,10 @@ int cli_uni_set_cb(std::string const& confpath, struct cli_def *cli, const char 
     }
 
 
-int cli_config_setting_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_generic_set_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
-
-    return cli_uni_set_cb("settings", cli, command, argv, argc);
+    return cli_uni_set_cb(CliState::get().sections(cli->mode), cli, command, argv, argc);
 }
-
-int cli_config_setting_auth_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
-    debug_cli_params(cli, command, argv, argc);
-
-    return cli_uni_set_cb("settings.auth_portal", cli, command, argv, argc);
-}
-
-int cli_config_setting_cli_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
-    debug_cli_params(cli, command, argv, argc);
-
-    return cli_uni_set_cb("settings.cli", cli, command, argv, argc);
-}
-
-int cli_config_setting_socks_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
-    debug_cli_params(cli, command, argv, argc);
-
-    return cli_uni_set_cb("settings.socks", cli, command, argv, argc);
-}
-
-int cli_config_debug_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
-    debug_cli_params(cli, command, argv, argc);
-
-    return cli_uni_set_cb("debug", cli, command, argv, argc);
-}
-
-int cli_config_proto_objects_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
-    debug_cli_params(cli, command, argv, argc);
-
-    return cli_uni_set_cb("proto_objects", cli, command, argv, argc);
-}
-
-int cli_config_port_objects_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
-    debug_cli_params(cli, command, argv, argc);
-
-    return cli_uni_set_cb("port_objects", cli, command, argv, argc);
-}
-
 
 // index < 0 means all
 void cli_print_section(cli_def* cli, const std::string& name, int index , unsigned long pipe_sz ) {
@@ -3035,40 +2997,47 @@ void client_thread(int client_socket) {
     // generate dynamically content of config
 
 
-    CliState::get().callback_map["settings"]
-        = CliState::callback_entry(MODE_EDIT_SETTINGS, CliCallbacks()
-            .cmd_set(cli_config_setting_cb)
-            .cmd_config(cli_conf_edit_settings));
+    CliState::get().callbacks(
+            "settings",
+            CliState::callback_entry(MODE_EDIT_SETTINGS, CliCallbacks()
+                .cmd_set(cli_generic_set_cb)
+                .cmd_config(cli_conf_edit_settings)));
 
-    CliState::get().callback_map["settings.auth_portal"]
-        = CliState::callback_entry(MODE_EDIT_SETTINGS_AUTH, CliCallbacks()
-            .cmd_set(cli_config_setting_auth_cb)
-            .cmd_config(cli_conf_edit_settings_auth));
+    CliState::get().callbacks(
+            "settings.auth_portal",
+            CliState::callback_entry(MODE_EDIT_SETTINGS_AUTH, CliCallbacks()
+                .cmd_set(cli_generic_set_cb)
+                .cmd_config(cli_conf_edit_settings_auth)));
 
-    CliState::get().callback_map["settings.socks"]
-        = CliState::callback_entry(MODE_EDIT_SETTINGS_SOCKS, CliCallbacks()
-            .cmd_set(cli_config_setting_socks_cb)
-            .cmd_config(cli_conf_edit_settings_socks));
+    CliState::get().callbacks(
+            "settings.socks",
+            CliState::callback_entry(MODE_EDIT_SETTINGS_SOCKS, CliCallbacks()
+                .cmd_set(cli_generic_set_cb)
+                .cmd_config(cli_conf_edit_settings_socks)));
 
-    CliState::get().callback_map["settings.cli"]
-        = CliState::callback_entry(MODE_EDIT_SETTINGS_CLI, CliCallbacks()
-            .cmd_set(cli_config_setting_cli_cb)
-            .cmd_config(cli_conf_edit_settings_cli));
+    CliState::get().callbacks(
+            "settings.cli",
+            CliState::callback_entry(MODE_EDIT_SETTINGS_CLI, CliCallbacks()
+                .cmd_set(cli_generic_set_cb)
+                .cmd_config(cli_conf_edit_settings_cli)));
 
-    CliState::get().callback_map["debug"]
-        = CliState::callback_entry(MODE_EDIT_DEBUG, CliCallbacks()
-            .cmd_set(cli_config_debug_cb)
-            .cmd_config(cli_conf_edit_debug));
+    CliState::get().callbacks(
+            "debug",
+            CliState::callback_entry(MODE_EDIT_DEBUG, CliCallbacks()
+                .cmd_set(cli_generic_set_cb)
+                .cmd_config(cli_conf_edit_debug)));
 
-    CliState::get().callback_map["proto_objects"]
-            = CliState::callback_entry(MODE_EDIT_PROTO_OBJECTS, CliCallbacks()
-            .cmd_set(cli_config_proto_objects_cb)
-            .cmd_config(cli_conf_edit_proto_objects));
+    CliState::get().callbacks(
+            "proto_objects",
+            CliState::callback_entry(MODE_EDIT_PROTO_OBJECTS, CliCallbacks()
+                .cmd_set(cli_generic_set_cb)
+                .cmd_config(cli_conf_edit_proto_objects)));
 
-    CliState::get().callback_map["port_objects"]
-            = CliState::callback_entry(MODE_EDIT_PORT_OBJECTS, CliCallbacks()
-            .cmd_set(cli_config_port_objects_cb)
-            .cmd_config(cli_conf_edit_port_objects));
+    CliState::get().callbacks(
+            "port_objects",
+            CliState::callback_entry(MODE_EDIT_PORT_OBJECTS, CliCallbacks()
+                .cmd_set(cli_generic_set_cb)
+                .cmd_config(cli_conf_edit_port_objects)));
 
     auto conft_edit = cli_register_command(cli, nullptr, "edit", nullptr, PRIVILEGE_PRIVILEGED, MODE_CONFIG, "configure smithproxy settings");
 
@@ -3079,7 +3048,7 @@ void client_thread(int client_socket) {
         if (CfgFactory::cfg_root().exists(section.c_str())) {
 
             std::string edit_help = string_format(" \t - edit %s", section.c_str());
-            auto const& callback_entry = CliState::get().callback_map[section];
+            auto const& callback_entry = CliState::get().callbacks(section);
 
             cli_register_command(cli, conft_edit, section.c_str(), std::get<1>(callback_entry).cmd_config(),
                                                             PRIVILEGE_PRIVILEGED, MODE_CONFIG, edit_help.c_str());
@@ -3148,28 +3117,7 @@ int cli_show(struct cli_def *cli, const char *command, char **argv, int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
-
-    // TODO: add cligen mode -> section mapping
-    switch(cli->mode) {
-        case MODE_EDIT_SETTINGS:
-            cli_print_section(cli, "settings", -1, 200 * 1024);
-            return CLI_OK;
-
-        case MODE_EDIT_SETTINGS_AUTH:
-            cli_print_section(cli, "settings.auth_portal", -1, 200 * 1024);
-            return CLI_OK;
-
-        case MODE_EDIT_SETTINGS_CLI:
-            cli_print_section(cli, "settings.cli", -1, 200 * 1024);
-            return CLI_OK;
-
-        case MODE_EDIT_SETTINGS_SOCKS:
-            cli_print_section(cli, "settings.socks", -1, 200 * 1024);
-            return CLI_OK;
-
-        default:
-            cli_print(cli, "don't know how to print this section.");
-    }
+    cli_print_section(cli, CliState::get().sections(cli->mode), -1, 200 * 1024);
 
     return CLI_OK;
 }

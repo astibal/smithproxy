@@ -110,10 +110,26 @@ struct CliState {
     using callback = CliCallbacks;
 
     using callback_entry = std::tuple<unsigned int, callback>;
-    std::unordered_map<std::string, callback_entry> callback_map;
 
+
+    callback_entry& callbacks(std::string const& s) {
+        return callback_map_[s];
+    }
+
+    std::string sections(int mode) {
+        return mode_map[mode];
+    }
+
+    void callbacks(std::string const& s, callback_entry v) {
+        callback_map_[s] = v;            //map SETTING => CALLBACKS
+        mode_map[std::get<0>(v)] = s; //map MODE => SETTING
+    }
 
 private:
+
+    std::unordered_map<std::string, callback_entry> callback_map_;
+    std::unordered_map<int, std::string> mode_map;
+
     CliState() : help_(CliHelp::instance()) {};
     CliHelp& help_;
 };
@@ -129,6 +145,8 @@ typedef enum session_list_filter_flags { SL_NONE=0x0000 , SL_IO_OSBUF_NZ=0x0001 
 
 int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, char *argv[], int argc, int sl_flags);
 int cli_show(struct cli_def *cli, const char *command, char **argv, int argc);
+
 int cli_uni_set_cb(std::string const& confpath, struct cli_def *cli, const char *command, char *argv[], int argc);
+int cli_generic_set_cb(struct cli_def *cli, const char *command, char *argv[], int argc);
 
 #endif

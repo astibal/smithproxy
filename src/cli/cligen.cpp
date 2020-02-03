@@ -54,6 +54,40 @@ CONFIG_MODE_DEF(cli_conf_edit_proto_objects, MODE_EDIT_PROTO_OBJECTS, "proto_obj
 CONFIG_MODE_DEF(cli_conf_edit_port_objects, MODE_EDIT_PORT_OBJECTS, "port_objects");
 
 
+std::pair<int, std::string> generate_dynamic_groups(struct cli_def *cli, const char *command, char **argv, int argc) {
+    auto words = string_split(command, ' ');
+    if(words.size() >= 2) {
+        int static_mode = cli->mode;
+        std::string static_section_path = CliState::get().sections(static_mode);
+
+        // check for existing entry
+        _debug(cli, "creating dynamic groups for section %s, mode %d", static_section_path.c_str(), static_mode);
+
+        try {
+            auto &parent_settings = CfgFactory::cfg_root().lookup(static_section_path);
+            std::string this_setting_path = static_section_path + "." + words[1];
+
+            auto &this_settings = CfgFactory::cfg_root().lookup(this_setting_path);
+            int this_index = this_settings.getIndex();
+            int new_mode = static_mode + 500 + this_index;
+
+            CliState::get().callbacks(
+                    this_setting_path,
+                    CliState::callback_entry(new_mode, CliCallbacks().cmd_set(cli_generic_set_cb)));
+
+            cli_generate_set_commands(cli, this_setting_path);
+
+            return { new_mode, words[1]};
+
+        } catch (ConfigException const& e) {
+            cli_print(cli, "error loading %s.%s: %s", static_section_path.c_str(), words[1].c_str(), e.what());
+        }
+    }
+
+    return { 0, ""};
+}
+
+
 void cfg_generate_cli_hints(Setting& setting, std::vector<std::string>* this_level_names,
                             std::vector<unsigned int>* this_level_indexes,
                             std::vector<std::string>* next_level_names,
@@ -93,7 +127,7 @@ std::vector<cli_command *> cli_generate_set_commands (struct cli_def *cli, std::
 
 
     auto& this_setting = CfgFactory::cfg_root().lookup(section.c_str());
-    auto const& cb_entry = CliState::get().callback_map[section];
+    auto const& cb_entry = CliState::get().callbacks(section);
     auto set_cb = std::get<1>(cb_entry).cmd_set();
 
     std::string set_help = string_format(" \t - modify variables in %s", section.c_str());
@@ -103,25 +137,25 @@ std::vector<cli_command *> cli_generate_set_commands (struct cli_def *cli, std::
     auto cli_parent = cli_register_command(cli, nullptr, "set", nullptr, PRIVILEGE_PRIVILEGED, mode,
                                            set_help.c_str());
 
-    std::vector<std::string> here_name, next_name;
-    std::vector<unsigned int> here_index, next_index;
+    std::vector<std::string> attributes, groups;
+    std::vector<unsigned int> unnamed_attributes, unnamed_groups;
 
     _debug(cli, "calling cfg_generate_cli_hints");
 
-    cfg_generate_cli_hints(this_setting, &here_name, &here_index, &next_name, &next_index);
+    cfg_generate_cli_hints(this_setting, &attributes, &unnamed_attributes, &groups, &unnamed_groups);
 
     _debug(cli, "hint results: named: %d, indexed %d, next-level named: %d, next-level indexed: %d",
-              (int)here_name.size(), (int)here_index.size(),
-              (int)next_name.size(), (int)next_index.size());
+           (int)attributes.size(), (int)unnamed_attributes.size(),
+           (int)groups.size(), (int)unnamed_groups.size());
 
-    if( (! here_index.empty() ) || (! here_name.empty()) ) {
+    if((! unnamed_attributes.empty() ) || (! attributes.empty()) ) {
 
         std::string name;
         if(this_setting.getName()) {
 
             std::vector<cli_command*> ret;
 
-            for( const auto& here_n: here_name) {
+            for( const auto& here_n: attributes) {
 
                 // create type information, and (possibly) some help text
 
@@ -157,7 +191,7 @@ void cli_generate_commands (cli_def *cli, std::string const &section, cli_comman
     cli_command* edit = nullptr;
 
     auto &this_section = CfgFactory::cfg_root().lookup(section.c_str());
-    auto this_callback_entry = CliState::get().callback_map[section];
+    auto this_callback_entry = CliState::get().callbacks(section);
     int this_mode = std::get<0>(this_callback_entry);
 
 
@@ -171,13 +205,13 @@ void cli_generate_commands (cli_def *cli, std::string const &section, cli_comman
             std::string section_path = section;
             section_path += "." + sub_section_name;
 
-            auto& callback_entry = CliState::get().callback_map[section_path];
+            auto& callback_entry = CliState::get().callbacks(section_path);
             int mode = std::get<0>(callback_entry);
 
             // specific treatment of dynamic (unknown groups)
             if( mode == 0 ) {
                 // defaulted to parent section callbacks
-                callback_entry = CliState::get().callback_map[section];
+                callback_entry = CliState::get().callbacks(section);
                 mode = static_cast<int> (std::get<0>(callback_entry)) + i;
             }
             auto cb_config = std::get<1>(callback_entry).cmd_config();
