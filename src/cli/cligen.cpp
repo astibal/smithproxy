@@ -49,6 +49,10 @@ CONFIG_MODE_DEF(cli_conf_edit_settings_socks, MODE_EDIT_SETTINGS_SOCKS,"socks");
 
 CONFIG_MODE_DEF(cli_conf_edit_debug, MODE_EDIT_DEBUG, "debug");
 
+CONFIG_MODE_DEF(cli_conf_edit_proto_objects, MODE_EDIT_PROTO_OBJECTS, "proto_objects");
+
+CONFIG_MODE_DEF(cli_conf_edit_port_objects, MODE_EDIT_PORT_OBJECTS, "port_objects");
+
 
 void cfg_generate_cli_hints(Setting& setting, std::vector<std::string>* this_level_names,
                             std::vector<unsigned int>* this_level_indexes,
@@ -85,25 +89,28 @@ void cfg_generate_cli_hints(Setting& setting, std::vector<std::string>* this_lev
 
 
 
-std::vector<cli_command*> cfg_generate_cmd_callbacks(std::string& section, struct cli_def* cli, cli_command* cli_parent) {
+std::vector<cli_command *> cfg_generate_set_callbacks (struct cli_def *cli, std::string const &section) {
 
-    if(! cli_parent)
-        return {};
 
     auto& this_setting = CfgFactory::cfg_root().lookup(section.c_str());
     auto const& cb_entry = CliState::get().callback_map[section];
     auto set_cb = std::get<1>(cb_entry).cmd_set();
 
+    std::string set_help = string_format(" \t - modify variables in %s", section.c_str());
     int mode = std::get<0>(cb_entry);
+
+    // register anonymous 'set' command bound to CLI 'mode' ID
+    auto cli_parent = cli_register_command(cli, nullptr, "set", nullptr, PRIVILEGE_PRIVILEGED, mode,
+                                           set_help.c_str());
 
     std::vector<std::string> here_name, next_name;
     std::vector<unsigned int> here_index, next_index;
 
-    cli_print(cli, "calling cfg_generate_cli_hints");
+    _debug(cli, "calling cfg_generate_cli_hints");
 
     cfg_generate_cli_hints(this_setting, &here_name, &here_index, &next_name, &next_index);
 
-    cli_print(cli, "hint results: named: %d, indexed %d, next-level named: %d, next-level indexed: %d",
+    _debug(cli, "hint results: named: %d, indexed %d, next-level named: %d, next-level indexed: %d",
               (int)here_name.size(), (int)here_index.size(),
               (int)next_name.size(), (int)next_index.size());
 
@@ -111,7 +118,6 @@ std::vector<cli_command*> cfg_generate_cmd_callbacks(std::string& section, struc
 
         std::string name;
         if(this_setting.getName()) {
-            //cli_command* cli_here = cli_register_command(cli, cli_parent, this_setting.getName(), set_cb, PRIVILEGE_PRIVILEGED, mode, "modify variables");
 
             std::vector<cli_command*> ret;
 
@@ -136,4 +142,47 @@ std::vector<cli_command*> cfg_generate_cmd_callbacks(std::string& section, struc
     }
 
     return {};
+}
+
+
+void cli_generate_set_commands (std::string const &section, cli_def *cli, cli_command *cli_parent) {
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
+
+
+    // generate set commands for this section first
+    cfg_generate_set_callbacks(cli, section);
+
+    std::string help = string_format("edit %s sub-items", section.c_str());
+
+    cli_command* edit = nullptr;
+
+    auto &this_section = CfgFactory::cfg_root().lookup(section.c_str());
+
+    for( int i = 0 ; i < this_section.getLength() ; i++ ) {
+
+        Setting& current_sub_section = CfgFactory::cfg_root()[section.c_str()][i];
+        std::string cur_sub_section_name = current_sub_section.getName();
+
+        if(current_sub_section.getType() == Setting::TypeGroup) {
+
+            std::string section_path = section;
+            section_path += "." + cur_sub_section_name;
+
+            auto const& callback_entry = CliState::get().callback_map[section_path];
+            int mode = std::get<0>(callback_entry);
+
+            auto set_cmd = cli_register_command(cli, nullptr, "set", nullptr, PRIVILEGE_PRIVILEGED,
+                                                std::get<0>(callback_entry),
+                                                std::string("set section " + cur_sub_section_name + "variables").c_str());
+
+            cli_generate_set_commands(section_path, cli, nullptr);
+
+            if(! edit) {
+                edit = cli_register_command(cli, cli_parent, "edit", nullptr, PRIVILEGE_PRIVILEGED, mode, help.c_str());
+            }
+            cli_register_command(cli, edit, cur_sub_section_name.c_str(),
+                                 std::get<1>(callback_entry).cmd_config(), PRIVILEGE_PRIVILEGED, mode,
+                                 string_format("edit %s settings", cur_sub_section_name.c_str()).c_str());
+        }
+    }
 }

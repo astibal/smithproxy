@@ -2090,6 +2090,19 @@ int cli_config_debug_cb(struct cli_def *cli, const char *command, char *argv[], 
     return cli_uni_set_cb("debug", cli, command, argv, argc);
 }
 
+int cli_config_proto_objects_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+
+    return cli_uni_set_cb("proto_objects", cli, command, argv, argc);
+}
+
+int cli_config_port_objects_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+
+    return cli_uni_set_cb("port_objects", cli, command, argv, argc);
+}
+
+
 // index < 0 means all
 void cli_print_section(cli_def* cli, const std::string& name, int index , unsigned long pipe_sz ) {
 
@@ -2835,44 +2848,6 @@ struct cli_ext : public cli_def {
 };
 
 
-void cli_generate_set_commands(int mode, std::string const& section, cli_def* cli, cli_command* cli_parent) {
-    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
-
-    std::string help = string_format("edit %s sub-items", section.c_str());
-
-    cli_command* edit = nullptr;
-
-    auto &this_section = CfgFactory::cfg_root().lookup(section.c_str());
-
-    for( int i = 0 ; i < this_section.getLength() ; i++ ) {
-
-        Setting& current_sub_section = CfgFactory::cfg_root()[section.c_str()][i];
-        std::string cur_sub_section_name = current_sub_section.getName();
-
-        if(current_sub_section.getType() == Setting::TypeGroup) {
-
-            std::string section_path = section;
-            section_path += "." + cur_sub_section_name;
-
-            auto const& callback_entry = CliState::get().callback_map[section_path];
-
-            auto set_cmd = cli_register_command(cli, nullptr, "set", nullptr, PRIVILEGE_PRIVILEGED,
-                                                std::get<0>(callback_entry),
-                                                std::string("set section " + cur_sub_section_name + "variables").c_str());
-
-            cfg_generate_cmd_callbacks(section_path, cli, set_cmd);
-
-            if(! edit) {
-                edit = cli_register_command(cli, cli_parent, "edit", nullptr, PRIVILEGE_PRIVILEGED, mode, help.c_str());
-            }
-            cli_register_command(cli, edit, cur_sub_section_name.c_str(),
-                    std::get<1>(callback_entry).cmd_config(), PRIVILEGE_PRIVILEGED, mode,
-                    string_format("edit %s settings", cur_sub_section_name.c_str()).c_str());
-        }
-    }
-}
-
-
 void cli_register_static(struct cli_def* cli) {
 
     struct cli_command *save;
@@ -3084,17 +3059,25 @@ void client_thread(int client_socket) {
             .cmd_set(cli_config_debug_cb)
             .cmd_config(cli_conf_edit_debug));
 
+    CliState::get().callback_map["proto_objects"]
+            = CliState::callback_entry(MODE_EDIT_PROTO_OBJECTS, CliCallbacks()
+            .cmd_set(cli_config_proto_objects_cb)
+            .cmd_config(cli_conf_edit_proto_objects));
+
+    CliState::get().callback_map["port_objects"]
+            = CliState::callback_entry(MODE_EDIT_PORT_OBJECTS, CliCallbacks()
+            .cmd_set(cli_config_port_objects_cb)
+            .cmd_config(cli_conf_edit_port_objects));
+
     auto conft_edit = cli_register_command(cli, nullptr, "edit", nullptr, PRIVILEGE_PRIVILEGED, MODE_CONFIG, "configure smithproxy settings");
 
 
-    std::vector<std::string> sections = { "settings", "debug" };
+    std::vector<std::string> sections = { "settings", "debug", "proto_objects", "port_objects" };
     for( auto section : sections) {
 
         if (CfgFactory::cfg_root().exists(section.c_str())) {
 
             std::string edit_help = string_format(" \t - edit %s", section.c_str());
-            std::string set_help = string_format(" \t - modify variables in %s", section.c_str());
-
             auto const& callback_entry = CliState::get().callback_map[section];
 
             cli_register_command(cli, conft_edit, section.c_str(), std::get<1>(callback_entry).cmd_config(),
@@ -3103,14 +3086,9 @@ void client_thread(int client_socket) {
 
             std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
-            auto set_cmd = cli_register_command(cli, nullptr, "set", nullptr, PRIVILEGE_PRIVILEGED, std::get<0>(callback_entry),
-                                                set_help.c_str());
 
-            std::vector<cli_command *> set_cmds = cfg_generate_cmd_callbacks(section, cli, set_cmd);
-
-            if (!set_cmds.empty()) {
-                cli_generate_set_commands(std::get<0>(callback_entry), section, cli, nullptr);
-            }
+            //std::vector<cli_command *> set_cmds = cfg_generate_set_callbacks(cli, section);
+            cli_generate_set_commands(section, cli, nullptr);
         }
     }
 
@@ -3169,6 +3147,8 @@ int cli_show(struct cli_def *cli, const char *command, char **argv, int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
+
+    // TODO: add cligen mode -> section mapping
     switch(cli->mode) {
         case MODE_EDIT_SETTINGS:
             cli_print_section(cli, "settings", -1, 200 * 1024);

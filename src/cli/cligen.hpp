@@ -54,8 +54,9 @@ void cfg_generate_cli_hints(Setting& setting, std::vector<std::string>* this_lev
 
 
 
-std::vector<cli_command*> cfg_generate_cmd_callbacks(std::string& section, struct cli_def* cli, cli_command* cli_parent);
-
+std::vector<cli_command *>
+        cfg_generate_set_callbacks (struct cli_def *cli, std::string const& section);
+void cli_generate_set_commands (std::string const &section, cli_def *cli, cli_command *cli_parent);
 
 
 #define CONFIG_MODE_DEC(fn) \
@@ -94,5 +95,12 @@ CONFIG_MODE_DEC(cli_conf_edit_settings_socks);
 
 enum edit_debug { MODE_EDIT_DEBUG=41000, };
 CONFIG_MODE_DEC(cli_conf_edit_debug);
+
+enum edit_proto_objects { MODE_EDIT_PROTO_OBJECTS=42000, };
+CONFIG_MODE_DEC(cli_conf_edit_proto_objects);
+
+
+enum edit_port_objects { MODE_EDIT_PORT_OBJECTS=43000, };
+CONFIG_MODE_DEC(cli_conf_edit_port_objects);
 
 #endif //SMITHPROXY_CLIGEN_HPP
