@@ -5,6 +5,8 @@
 BUILD_DIR=`mktemp -d`
 mkdir $BUILD_DIR/sx
 
+echo 'gdbserver :1112 --attach `pidof smithproxy` &' > $BUILD_DIR/sx/debugsx.sh & chmod +x $BUILD_DIR/sx/debugsx.sh
+
 sudo docker build ${BUILD_DIR}/sx -f ../../docker/0.9/run/ubuntu18.04-0.9-base.dockerfile --tag  astibal/smithproxy:ubuntu18.04-0.9-base
 sudo docker build --no-cache $1 ${BUILD_DIR}/sx -f ../../docker/0.9/run/ubuntu18.04-0.9-debug.dockerfile --tag  astibal/smithproxy:ubuntu18.04-0.9-run-dbg-local
 

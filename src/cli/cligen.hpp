@@ -96,7 +96,9 @@ int fn(struct cli_def *cli, const char *command, char *argv[], int argc) { \
 //
 
 
-enum edit_settings { MODE_EDIT_SETTINGS=40000, MODE_EDIT_SETTINGS_AUTH, MODE_EDIT_SETTINGS_CLI, MODE_EDIT_SETTINGS_SOCKS };
+Setting* cfg_canonize(std::string const& section);
+
+enum edit_settings { MODE_EDIT_SETTINGS=0x10000000, MODE_EDIT_SETTINGS_AUTH, MODE_EDIT_SETTINGS_CLI, MODE_EDIT_SETTINGS_SOCKS };
 
 CONFIG_MODE_DEC(cli_conf_edit_settings);
 CONFIG_MODE_DEC(cli_conf_edit_settings_auth);
@@ -104,14 +106,18 @@ CONFIG_MODE_DEC(cli_conf_edit_settings_cli);
 CONFIG_MODE_DEC(cli_conf_edit_settings_socks);
 
 
-enum edit_debug { MODE_EDIT_DEBUG=41000, MODE_EDIT_DEBUG_LOG };
+enum edit_debug { MODE_EDIT_DEBUG=0x11000000, MODE_EDIT_DEBUG_LOG };
 CONFIG_MODE_DEC(cli_conf_edit_debug);
+CONFIG_MODE_DEC(cli_conf_edit_debug_log);
 
-enum edit_proto_objects { MODE_EDIT_PROTO_OBJECTS=42000, };
+enum edit_proto_objects { MODE_EDIT_PROTO_OBJECTS=0x12000000, };
 CONFIG_MODE_DEC(cli_conf_edit_proto_objects);
 
 
-enum edit_port_objects { MODE_EDIT_PORT_OBJECTS=43000, };
+enum edit_port_objects { MODE_EDIT_PORT_OBJECTS=0x13000000, };
 CONFIG_MODE_DEC(cli_conf_edit_port_objects);
+
+enum edit_policy { MODE_EDIT_POLICY=0x14000000, };
+CONFIG_MODE_DEC(cli_conf_edit_policy);
 
 #endif //SMITHPROXY_CLIGEN_HPP

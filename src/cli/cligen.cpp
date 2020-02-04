@@ -48,10 +48,14 @@ CONFIG_MODE_DEF(cli_conf_edit_settings_cli, MODE_EDIT_SETTINGS_CLI,"cli");
 CONFIG_MODE_DEF(cli_conf_edit_settings_socks, MODE_EDIT_SETTINGS_SOCKS,"socks");
 
 CONFIG_MODE_DEF(cli_conf_edit_debug, MODE_EDIT_DEBUG, "debug");
+CONFIG_MODE_DEF(cli_conf_edit_debug_log, MODE_EDIT_DEBUG_LOG, "log");
 
 CONFIG_MODE_DEF(cli_conf_edit_proto_objects, MODE_EDIT_PROTO_OBJECTS, "proto_objects");
 
 CONFIG_MODE_DEF(cli_conf_edit_port_objects, MODE_EDIT_PORT_OBJECTS, "port_objects");
+
+CONFIG_MODE_DEF(cli_conf_edit_policy, MODE_EDIT_POLICY, "policy");
+
 
 
 std::pair<int, std::string> generate_dynamic_groups(struct cli_def *cli, const char *command, char **argv, int argc) {
@@ -182,7 +186,6 @@ std::vector<cli_command *> cli_generate_set_commands (struct cli_def *cli, std::
 void cli_generate_commands (cli_def *cli, std::string const &section, cli_command *cli_parent) {
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
-
     // generate set commands for this section first
     cli_generate_set_commands(cli, section);
 
@@ -198,12 +201,22 @@ void cli_generate_commands (cli_def *cli, std::string const &section, cli_comman
     for( int i = 0 ; i < this_section.getLength() ; i++ ) {
 
         Setting& sub_section = this_section[i];
-        std::string sub_section_name = sub_section.getName();
 
         if(sub_section.getType() == Setting::TypeGroup) {
 
+            std::string sub_section_name;
+            std::string separator = ".";
+
+            const char* ssn = sub_section.getName();
+            if(ssn) {
+                sub_section_name = ssn;
+            } else {
+                sub_section_name = string_format("%d", i);
+                separator = "#";
+            }
+
             std::string section_path = section;
-            section_path += "." + sub_section_name;
+            section_path += separator + sub_section_name;
 
             auto& callback_entry = CliState::get().callbacks(section_path);
             int mode = std::get<0>(callback_entry);
@@ -228,4 +241,42 @@ void cli_generate_commands (cli_def *cli, std::string const &section, cli_comman
                                  string_format("edit %s settings", sub_section_name.c_str()).c_str());
         }
     }
+}
+
+
+Setting* cfg_canonize(std::string const& section) {
+    auto subparts = string_split(section, '.');
+    try {
+
+        Setting* cur = &CfgFactory::cfg_root();
+
+        // divided into sections, potentially with indexes
+        for(auto const& subpart: subparts) {
+
+            // split out indexes
+            auto sliced = string_split(subpart, '#');
+
+            if(sliced.size() > 1) {
+                // we contain # (index(es))
+                cur = &cur->lookup(sliced[0]);
+                for(int i = 1; i < sliced.size(); i++) {
+                  cur = &cur[std::stoi(sliced[i])];
+                }
+            }
+            else if(! sliced.empty()) {
+                // we contain only section name
+                cur = &cur->lookup(sliced[0]);
+            }
+            else {
+                // we should not be here (fallback code)
+                cur = &cur->lookup(subpart);
+            }
+        }
+
+        return cur;
+
+    } catch (ConfigException const& e) {
+    }
+
+    return nullptr;
 }

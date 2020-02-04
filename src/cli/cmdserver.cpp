@@ -2996,6 +2996,14 @@ void client_thread(int client_socket) {
 
     // generate dynamically content of config
 
+    auto cli_add_static_section = [](std::string const& section, int mode, CliCallbacks::callback edit_cb) {
+        CliState::get().callbacks(
+                section,
+                CliState::callback_entry(mode, CliCallbacks()
+                        .cmd_set(cli_generic_set_cb)
+                        .cmd_config(edit_cb)));
+
+    };
 
     CliState::get().callbacks(
             "settings",
@@ -3021,11 +3029,8 @@ void client_thread(int client_socket) {
                 .cmd_set(cli_generic_set_cb)
                 .cmd_config(cli_conf_edit_settings_cli)));
 
-    CliState::get().callbacks(
-            "debug",
-            CliState::callback_entry(MODE_EDIT_DEBUG, CliCallbacks()
-                .cmd_set(cli_generic_set_cb)
-                .cmd_config(cli_conf_edit_debug)));
+    cli_add_static_section("debug", MODE_EDIT_DEBUG, cli_conf_edit_debug);
+    cli_add_static_section("debug.log", MODE_EDIT_DEBUG_LOG, cli_conf_edit_debug_log);
 
     CliState::get().callbacks(
             "proto_objects",
@@ -3039,10 +3044,14 @@ void client_thread(int client_socket) {
                 .cmd_set(cli_generic_set_cb)
                 .cmd_config(cli_conf_edit_port_objects)));
 
+
+    cli_add_static_section("policy", MODE_EDIT_POLICY, cli_conf_edit_policy);
+
+
     auto conft_edit = cli_register_command(cli, nullptr, "edit", nullptr, PRIVILEGE_PRIVILEGED, MODE_CONFIG, "configure smithproxy settings");
 
 
-    std::vector<std::string> sections = { "settings", "debug", "proto_objects", "port_objects" };
+    std::vector<std::string> sections = { "settings", "debug", "proto_objects", "port_objects" /*, "policy"*/ };
     for( auto const& section : sections) {
 
         if (CfgFactory::cfg_root().exists(section.c_str())) {
