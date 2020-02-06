@@ -131,6 +131,10 @@ std::vector<cli_command *> cli_generate_set_commands (struct cli_def *cli, std::
 
 
     auto& this_setting = CfgFactory::cfg_root().lookup(section.c_str());
+
+    std::string this_setting_path = this_setting.getPath();
+    _debug(cli, "cli_generate_set_commands: path = %s", this_setting.getPath().c_str());
+
     auto const& cb_entry = CliState::get().callbacks(section);
     auto set_cb = std::get<1>(cb_entry).cmd_set();
 
@@ -148,14 +152,14 @@ std::vector<cli_command *> cli_generate_set_commands (struct cli_def *cli, std::
 
     cfg_generate_cli_hints(this_setting, &attributes, &unnamed_attributes, &groups, &unnamed_groups);
 
-    _debug(cli, "hint results: named: %d, indexed %d, next-level named: %d, next-level indexed: %d",
+    _debug(cli, "%s hint results: named: %d, indexed %d, next-level named: %d, next-level indexed: %d", this_setting_path.c_str(),
            (int)attributes.size(), (int)unnamed_attributes.size(),
            (int)groups.size(), (int)unnamed_groups.size());
 
     if((! unnamed_attributes.empty() ) || (! attributes.empty()) ) {
 
         std::string name;
-        if(this_setting.getName()) {
+
 
             std::vector<cli_command*> ret;
 
@@ -176,7 +180,6 @@ std::vector<cli_command *> cli_generate_set_commands (struct cli_def *cli, std::
             }
 
             return ret;
-        }
     }
 
     return {};
@@ -205,18 +208,18 @@ void cli_generate_commands (cli_def *cli, std::string const &section, cli_comman
         if(sub_section.getType() == Setting::TypeGroup) {
 
             std::string sub_section_name;
-            std::string separator = ".";
 
             const char* ssn = sub_section.getName();
+            std::stringstream ss;
+
             if(ssn) {
                 sub_section_name = ssn;
             } else {
-                sub_section_name = string_format("%d", i);
-                separator = "#";
+                sub_section_name = string_format("[%d]", i);
             }
+            ss << section << "." << sub_section_name;
 
-            std::string section_path = section;
-            section_path += separator + sub_section_name;
+            std::string section_path = ss.str();
 
             auto& callback_entry = CliState::get().callbacks(section_path);
             int mode = std::get<0>(callback_entry);

@@ -2080,7 +2080,10 @@ void cli_print_section(cli_def* cli, const std::string& name, int index , unsign
 
         nc.setOptions(Setting::OptionOpenBraceOnSeparateLine);
 
-        cfg_clone_setting(nc.getRoot(), s , index /*, cli */ );
+        Setting* target = &nc.getRoot();
+        target = &target->add(s.getName(), s.getType());
+
+        cfg_clone_setting( *target, s , index /*, cli */ );
 
         cfg_write(nc, cli->client, pipe_sz);
 
@@ -3051,7 +3054,7 @@ void client_thread(int client_socket) {
     auto conft_edit = cli_register_command(cli, nullptr, "edit", nullptr, PRIVILEGE_PRIVILEGED, MODE_CONFIG, "configure smithproxy settings");
 
 
-    std::vector<std::string> sections = { "settings", "debug", "proto_objects", "port_objects" /*, "policy"*/ };
+    std::vector<std::string> sections = { "settings", "debug", "proto_objects", "port_objects" , "policy" };
     for( auto const& section : sections) {
 
         if (CfgFactory::cfg_root().exists(section.c_str())) {
