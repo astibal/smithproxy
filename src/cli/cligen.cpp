@@ -56,6 +56,8 @@ CONFIG_MODE_DEF(cli_conf_edit_port_objects, MODE_EDIT_PORT_OBJECTS, "port_object
 
 CONFIG_MODE_DEF(cli_conf_edit_policy, MODE_EDIT_POLICY, "policy");
 
+CONFIG_MODE_DEF(cli_conf_edit_starttls_signatures, MODE_EDIT_STARTTLS_SIGNTATURES, "starttls_signatures");
+CONFIG_MODE_DEF(cli_conf_edit_detection_signatures, MODE_EDIT_DETECTION_SIGNTATURES, "detection_signatures");
 
 
 std::pair<int, std::string> generate_dynamic_groups(struct cli_def *cli, const char *command, char **argv, int argc) {

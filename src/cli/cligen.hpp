@@ -120,4 +120,12 @@ CONFIG_MODE_DEC(cli_conf_edit_port_objects);
 enum edit_policy { MODE_EDIT_POLICY=0x14000000, };
 CONFIG_MODE_DEC(cli_conf_edit_policy);
 
+enum edit_starttls_signatures { MODE_EDIT_STARTTLS_SIGNTATURES=0x15000000, };
+CONFIG_MODE_DEC(cli_conf_edit_starttls_signatures);
+
+
+enum edit_detection_signatures { MODE_EDIT_DETECTION_SIGNTATURES=0x16000000, };
+CONFIG_MODE_DEC(cli_conf_edit_detection_signatures);
+
+
 #endif //SMITHPROXY_CLIGEN_HPP

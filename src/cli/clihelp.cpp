@@ -109,4 +109,15 @@ void CliHelp::init() {
     qmark_add("settings.auth_portal", "");
     qmark_add("settings.cli", "");
     qmark_add("settings.socks", "");
+
+    qmark_add("debug.log_data_crc","calculate received CRC data (helps to identify proxy bugs)");
+
+    qmark_add("proto_objects", "IP protocols");
+    qmark_add("proto_objects.[0].id", "IP protocol number (tcp=6, udp=17)");
+    qmark_add("port_objects", "TCP/UDP ports");
+
+    qmark_add("port_objects[0].start", "port range start");
+    qmark_add("port_objects[0].end", "port range end");
+
+    qmark_add("policy.[0].proto", "protocol to match (see proto_objects)");
 }

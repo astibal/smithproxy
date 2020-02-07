@@ -3050,11 +3050,13 @@ void client_thread(int client_socket) {
 
     cli_add_static_section("policy", MODE_EDIT_POLICY, cli_conf_edit_policy);
 
+    cli_add_static_section("starttls_signatures", MODE_EDIT_STARTTLS_SIGNTATURES, cli_conf_edit_starttls_signatures);
+    cli_add_static_section("detection_signatures", MODE_EDIT_DETECTION_SIGNTATURES, cli_conf_edit_detection_signatures);
 
     auto conft_edit = cli_register_command(cli, nullptr, "edit", nullptr, PRIVILEGE_PRIVILEGED, MODE_CONFIG, "configure smithproxy settings");
 
 
-    std::vector<std::string> sections = { "settings", "debug", "proto_objects", "port_objects" , "policy" };
+    std::vector<std::string> sections = { "settings", "debug", "proto_objects", "port_objects" , "policy", "starttls_signatures", "detection_signatures" };
     for( auto const& section : sections) {
 
         if (CfgFactory::cfg_root().exists(section.c_str())) {
