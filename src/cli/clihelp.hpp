@@ -63,6 +63,12 @@ struct CliHelp {
         qmark_help_[std::move(k)] = std::move(v);
     }
 
+    bool value_check(std::string const& varname, int v);
+    bool value_check(std::string const& varname, long long int v);
+    bool value_check(std::string const& varname, bool v);
+    bool value_check(std::string const& varname, float v);
+    bool value_check(std::string const& varname, std::string const& v);
+
     help_db context_help_;
     help_db qmark_help_;
 

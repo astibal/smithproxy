@@ -1850,6 +1850,8 @@ bool cfg_write_value(Setting& parent, bool create, std::string& varname, const s
 
     auto log = logan::create("service");
 
+    bool verdict = true;
+
     if( parent.exists(varname.c_str()) ) {
 
         _not("config item exists %s", varname.c_str());
@@ -1865,7 +1867,9 @@ bool cfg_write_value(Setting& parent, bool create, std::string& varname, const s
                 {
                     int i = std::stoi(values[0]);
                     _debug(cli, "DEBUG: attempting to write %s: (TypeInt)%d ", varname.c_str(), i);
-                    s = i;
+
+                    if(CliHelp::instance().value_check(s.getPath(), i))
+                        s = i;
                 }
                     break;
 
@@ -1873,7 +1877,9 @@ bool cfg_write_value(Setting& parent, bool create, std::string& varname, const s
                 {
                     long long int lli = std::stoll(values[0]);
                     _debug(cli, "DEBUG: attempting to write %s: (TypeInt64)%lld ", varname.c_str(), lli);
-                    s = lli;
+
+                    if(CliHelp::instance().value_check(s.getPath(), lli))
+                        s = lli;
                 }
                     break;
 
@@ -1883,10 +1889,13 @@ bool cfg_write_value(Setting& parent, bool create, std::string& varname, const s
                     _debug(cli, "DEBUG: attempting to write %s: (TypeBool)%s ", varname.c_str(), lvalue.c_str());
 
                     if( lvalue == "true" || lvalue == "1" ) {
-                        s = true;
+
+                        if(CliHelp::instance().value_check(s.getPath(), true))
+                            s = true;
                     }
                     else if ( lvalue == "false" || lvalue == "0" ) {
-                        s = false;
+                        if(CliHelp::instance().value_check(s.getPath(), false))
+                            s = false;
                     }
 
                     break;
@@ -1895,13 +1904,17 @@ bool cfg_write_value(Setting& parent, bool create, std::string& varname, const s
                 {
                     float f = std::stof(values[0]);
                     _debug(cli, "DEBUG: attempting to write %s: (TypeFloat)%f ", varname.c_str(), f);
-                    s = f;
+
+                    if(CliHelp::instance().value_check(s.getPath(), f))
+                        s = f;
                 }
                     break;
 
                 case Setting::TypeString:
                     _debug(cli, "DEBUG: attempting to write %s: (TypeString)%s ", varname.c_str(), values[0].c_str());
-                    s = values[0];
+
+                    if(CliHelp::instance().value_check(s.getPath(), values[0]))
+                        s = values[0];
 
                     break;
 
@@ -1921,8 +1934,32 @@ bool cfg_write_value(Setting& parent, bool create, std::string& varname, const s
                                 consolidated_values.push_back(av);
                         }
 
-                        for(auto const& i: consolidated_values)
-                            _debug(cli, "values: %s", i.c_str());
+                        for(auto const& i: consolidated_values) {
+                            _debug(cli, "%s values: %s", s.getPath().c_str(), i.c_str());
+                        }
+
+
+                        // check values
+                        for(auto const& i: consolidated_values) {
+
+                            if(first_elem_type == Setting::TypeString) {
+                                bool r = CliHelp::instance().value_check(s.getPath(), i.c_str());
+                                _debug(cli, "checking string value: %s => %d", i.c_str(), r);
+
+                            }
+                            else if(first_elem_type == Setting::TypeInt) {
+                                bool r = CliHelp::instance().value_check(s.getPath(), std::stoi(i));
+                                _debug(cli, "checking int value: %s => %d", i.c_str(), r);
+
+                            }
+                            else if(first_elem_type == Setting::TypeFloat) {
+                                bool r = CliHelp::instance().value_check(s.getPath(), std::stof(i));
+                                _debug(cli, "checking float value: %s => %d", i.c_str(), r);
+                            }
+                            else {
+                                throw(std::invalid_argument("unknown array type"));
+                            }
+                        }
 
                         if(! consolidated_values.empty()) {
 
@@ -1958,18 +1995,24 @@ bool cfg_write_value(Setting& parent, bool create, std::string& varname, const s
                 default:
                     ;
             }
-        } catch(std::exception& e) {
+        }
+        catch(std::invalid_argument const& e) {
+            cli_print(cli, "invalid argument!");
+            verdict = false;
+
+        }
+        catch(std::exception const& e) {
             cli_print(cli , "error writing config variable: %s", e.what());
             _err("error writing config variable: %s", e.what());
-            return false;
+            verdict = false;
         }
     }
     else if(create) {
         _err("nyi: error writing creating a new config variable: %s", varname.c_str());
-        return false;
+        verdict = false;
     }
 
-    return true;
+    return verdict;
 }
 
 bool apply_setting(std::string const& section, std::string const& varname, struct cli_def *cli) {

@@ -121,3 +121,24 @@ void CliHelp::init() {
 
     qmark_add("policy.[0].proto", "protocol to match (see proto_objects)");
 }
+
+
+bool CliHelp::value_check(std::string const& varname, int v) {
+    return true;
+}
+
+bool CliHelp::value_check(std::string const& varname, long long int v) {
+    return true;
+}
+
+bool CliHelp::value_check(std::string const& varname, bool v) {
+    return true;
+}
+
+bool CliHelp::value_check(std::string const& varname, float v) {
+    return true;
+}
+
+bool CliHelp::value_check(std::string const& varname, std::string const& v) {
+    return true;
+}
