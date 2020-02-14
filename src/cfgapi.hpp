@@ -128,16 +128,26 @@ public:
 
     std::time_t ts_sys_started{};
 
-    std::map<std::string, std::shared_ptr<AddressObject>> db_address;
-    std::map<std::string, range> db_port;
-    std::map<std::string, int> db_proto;
+
+    // macro to define maps attribute, plus accessor functions
+    #define DB_MAP(type, name) \
+    std::map<std::string, type> name; \
+    std::vector<std::string> keys_of_##name() const  {\
+        std::vector<std::string> rr; \
+        for(auto const& it:  name )  rr.push_back(it.first); \
+        return rr; \
+    }
+
+    DB_MAP(std::shared_ptr<AddressObject>, db_address);
+    DB_MAP(range, db_port);
+    DB_MAP(int, db_proto);
     std::vector<std::shared_ptr<PolicyRule>> db_policy;
-    std::map<std::string, std::shared_ptr<ProfileDetection>> db_prof_detection;
-    std::map<std::string, std::shared_ptr<ProfileContent>> db_prof_content;
-    std::map<std::string, std::shared_ptr<ProfileTls>> db_prof_tls;
-    std::map<std::string, std::shared_ptr<ProfileAuth>> db_prof_auth;
-    std::map<std::string, std::shared_ptr<ProfileAlgDns>> db_prof_alg_dns;
-    std::map<std::string, std::shared_ptr<ProfileScript>> db_prof_script;
+    DB_MAP(std::shared_ptr<ProfileDetection>, db_prof_detection);
+    DB_MAP(std::shared_ptr<ProfileContent>, db_prof_content);
+    DB_MAP(std::shared_ptr<ProfileTls>, db_prof_tls);
+    DB_MAP(std::shared_ptr<ProfileAuth>, db_prof_auth);
+    DB_MAP(std::shared_ptr<ProfileAlgDns>, db_prof_alg_dns);
+    DB_MAP(std::shared_ptr<ProfileScript>, db_prof_script);
 
     mp::vector<int> db_udp_quick_ports;
 

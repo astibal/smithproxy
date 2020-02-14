@@ -36,7 +36,14 @@
     this exception also makes it possible to release a modified version
     which carries forward this exception.
 */
+#include <algorithm>
+
+#include <libcli.h>
+
 #include <cli/clihelp.hpp>
+#include <cli/cligen.hpp>
+#include <common/log/logan.hpp>
+#include <cfgapi.hpp>
 
 void CliHelp::init() {
     help_add("default","");
@@ -123,22 +130,53 @@ void CliHelp::init() {
 }
 
 
-bool CliHelp::value_check(std::string const& varname, int v) {
+bool CliHelp::value_check(std::string const& varname, int v, cli_def* cli) {
     return true;
 }
 
-bool CliHelp::value_check(std::string const& varname, long long int v) {
+bool CliHelp::value_check(std::string const& varname, long long int v, cli_def* cli) {
     return true;
 }
 
-bool CliHelp::value_check(std::string const& varname, bool v) {
+bool CliHelp::value_check(std::string const& varname, bool v, cli_def* cli) {
     return true;
 }
 
-bool CliHelp::value_check(std::string const& varname, float v) {
+bool CliHelp::value_check(std::string const& varname, float v, cli_def* cli) {
     return true;
 }
 
-bool CliHelp::value_check(std::string const& varname, std::string const& v) {
+bool CliHelp::value_check(std::string const& varname, std::string const& v, cli_def* cli) {
+
+    _debug(cli, "value_check: varname = %s, value = %s", varname.c_str(), v.c_str());
+
+    auto path_elems = string_split(varname, '.');
+    try {
+        if (varname.find("policy.[") == 0) {
+
+            _debug(cli, "policy values check");
+
+            // check policy
+            if(path_elems[2] == "src" || path_elems[2] == "dst") {
+
+                _debug(cli, "policy values for %s", path_elems[2].c_str());
+
+                auto addrlist = CfgFactory::get().keys_of_db_address();
+                if(std::find(addrlist.begin(), addrlist.end(), v) == addrlist.end()) {
+                    _debug(cli, "policy values for %s: %s not found address db", path_elems[2].c_str(), v.c_str());
+                    return false;
+                }
+            }
+        }
+        else {
+        _debug(cli, "value_check: no specific check procedure programmed");
+        }
+    }
+    catch(std::out_of_range const& e) {
+        _debug(cli, "value_check: returning FAILED: out of range");
+        return false;
+    }
+
+    _debug(cli, "value_check: returning OK");
     return true;
 }

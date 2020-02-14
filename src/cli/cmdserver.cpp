@@ -1868,7 +1868,8 @@ bool cfg_write_value(Setting& parent, bool create, std::string& varname, const s
                     int i = std::stoi(values[0]);
                     _debug(cli, "DEBUG: attempting to write %s: (TypeInt)%d ", varname.c_str(), i);
 
-                    if(CliHelp::instance().value_check(s.getPath(), i))
+                    verdict = CliHelp::instance().value_check(s.getPath(), i, cli);
+                    if(verdict)
                         s = i;
                 }
                     break;
@@ -1878,7 +1879,8 @@ bool cfg_write_value(Setting& parent, bool create, std::string& varname, const s
                     long long int lli = std::stoll(values[0]);
                     _debug(cli, "DEBUG: attempting to write %s: (TypeInt64)%lld ", varname.c_str(), lli);
 
-                    if(CliHelp::instance().value_check(s.getPath(), lli))
+                    verdict = CliHelp::instance().value_check(s.getPath(), lli, cli);
+                    if(verdict)
                         s = lli;
                 }
                     break;
@@ -1890,11 +1892,13 @@ bool cfg_write_value(Setting& parent, bool create, std::string& varname, const s
 
                     if( lvalue == "true" || lvalue == "1" ) {
 
-                        if(CliHelp::instance().value_check(s.getPath(), true))
+                        verdict = CliHelp::instance().value_check(s.getPath(), true, cli);
+                        if(verdict)
                             s = true;
                     }
                     else if ( lvalue == "false" || lvalue == "0" ) {
-                        if(CliHelp::instance().value_check(s.getPath(), false))
+                        verdict = CliHelp::instance().value_check(s.getPath(), false, cli);
+                        if(verdict)
                             s = false;
                     }
 
@@ -1905,7 +1909,8 @@ bool cfg_write_value(Setting& parent, bool create, std::string& varname, const s
                     float f = std::stof(values[0]);
                     _debug(cli, "DEBUG: attempting to write %s: (TypeFloat)%f ", varname.c_str(), f);
 
-                    if(CliHelp::instance().value_check(s.getPath(), f))
+                    verdict = CliHelp::instance().value_check(s.getPath(), f, cli);
+                    if(verdict)
                         s = f;
                 }
                     break;
@@ -1913,7 +1918,8 @@ bool cfg_write_value(Setting& parent, bool create, std::string& varname, const s
                 case Setting::TypeString:
                     _debug(cli, "DEBUG: attempting to write %s: (TypeString)%s ", varname.c_str(), values[0].c_str());
 
-                    if(CliHelp::instance().value_check(s.getPath(), values[0]))
+                    verdict = CliHelp::instance().value_check(s.getPath(), values[0], cli);
+                    if(verdict)
                         s = values[0];
 
                     break;
@@ -1943,52 +1949,54 @@ bool cfg_write_value(Setting& parent, bool create, std::string& varname, const s
                         for(auto const& i: consolidated_values) {
 
                             if(first_elem_type == Setting::TypeString) {
-                                bool r = CliHelp::instance().value_check(s.getPath(), i.c_str());
-                                _debug(cli, "checking string value: %s => %d", i.c_str(), r);
+                                verdict = CliHelp::instance().value_check(s.getPath(), i, cli);
+                                _debug(cli, "checking string value: %s => %d", i.c_str(), verdict);
 
                             }
                             else if(first_elem_type == Setting::TypeInt) {
-                                bool r = CliHelp::instance().value_check(s.getPath(), std::stoi(i));
-                                _debug(cli, "checking int value: %s => %d", i.c_str(), r);
+                                verdict = CliHelp::instance().value_check(s.getPath(), std::stoi(i), cli);
+                                _debug(cli, "checking int value: %s => %d", i.c_str(), verdict);
 
                             }
                             else if(first_elem_type == Setting::TypeFloat) {
-                                bool r = CliHelp::instance().value_check(s.getPath(), std::stof(i));
-                                _debug(cli, "checking float value: %s => %d", i.c_str(), r);
+                                verdict = CliHelp::instance().value_check(s.getPath(), std::stof(i), cli);
+                                _debug(cli, "checking float value: %s => %d", i.c_str(), verdict);
                             }
                             else {
                                 throw(std::invalid_argument("unknown array type"));
                             }
+
+                            if(! verdict)
+                                break;
                         }
 
-                        if(! consolidated_values.empty()) {
+                        if(verdict) {
+                            if (!consolidated_values.empty()) {
 
-                            // ugly (but only) way to remove
-                            for (int x = s.getLength() - 1; x >= 0; x--) {
-                                _debug(cli, "removing index %d", x);
-                                s.remove(x);
+                                // ugly (but only) way to remove
+                                for (int x = s.getLength() - 1; x >= 0; x--) {
+                                    _debug(cli, "removing index %d", x);
+                                    s.remove(x);
+                                }
+
+                                for (auto const &i: consolidated_values) {
+
+                                    if (first_elem_type == Setting::TypeString) {
+                                        _debug(cli, "adding string value: %s", i.c_str());
+                                        s.add(Setting::TypeString) = i.c_str();
+                                    } else if (first_elem_type == Setting::TypeInt) {
+                                        _debug(cli, "adding int value: %s", i.c_str());
+                                        s.add(Setting::TypeInt) = std::stoi(i);
+                                    } else if (first_elem_type == Setting::TypeFloat) {
+                                        _debug(cli, "adding float value: %s", i.c_str());
+                                        s.add(Setting::TypeFloat) = std::stof(i);
+                                    } else {
+                                        throw (std::invalid_argument("unknown array type"));
+                                    }
+                                }
+                            } else {
+                                throw (std::invalid_argument("no valid arguments"));
                             }
-
-                            for(auto const& i: consolidated_values) {
-
-                                if(first_elem_type == Setting::TypeString) {
-                                    _debug(cli, "adding string value: %s", i.c_str());
-                                    s.add(Setting::TypeString) = i.c_str();
-                                }
-                                else if(first_elem_type == Setting::TypeInt) {
-                                    _debug(cli, "adding int value: %s", i.c_str());
-                                    s.add(Setting::TypeInt) = std::stoi(i);
-                                }
-                                else if(first_elem_type == Setting::TypeFloat) {
-                                    _debug(cli, "adding float value: %s", i.c_str());
-                                    s.add(Setting::TypeFloat) = std::stof(i);
-                                }
-                                else {
-                                    throw(std::invalid_argument("unknown array type"));
-                                }
-                            }
-                        } else {
-                            throw(std::invalid_argument("no valid arguments"));
                         }
                     }
                     break;
@@ -2048,12 +2056,20 @@ int cli_uni_set_cb(std::string const& confpath, struct cli_def *cli, const char 
 
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
-    if (argc > 0 && CfgFactory::cfg_obj().exists(confpath)) {
+    if (CfgFactory::cfg_obj().exists(confpath)) {
 
         Setting& conf = CfgFactory::cfg_obj().lookup(confpath);
 
         auto cmd = string_split(command, ' ');
-        std::string varname = cmd[cmd.size() - 1];
+        std::string varname;
+
+        if(argc > 0) {
+            varname = cmd[cmd.size() - 1];
+        } else {
+            if(cmd.size() > 2) {
+                varname = cmd[1];
+            }
+        }
 
         _debug(cli, "var: %s", varname.c_str());
 
@@ -2061,8 +2077,17 @@ int cli_uni_set_cb(std::string const& confpath, struct cli_def *cli, const char 
         std::vector<std::string> args;
 
         // counting from 1, since 0 is varname
-        for(int i = 0; i < argc ; i++)
-                            args.emplace_back(std::string(argv[i]));
+
+        if (argc > 0) {
+            for (int i = 0; i < argc; i++)
+                args.emplace_back(std::string(argv[i]));
+        } else {
+            if(cmd.size() > 2) {
+                for (int i = 2; i < cmd.size(); i++) {
+                    args.emplace_back(std::string(cmd[i]));
+                }
+            }
+        }
 
         if (args[0] != "?") {
 

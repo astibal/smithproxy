@@ -128,6 +128,32 @@ void cfg_generate_cli_hints(Setting& setting, std::vector<std::string>* this_lev
 }
 
 
+std::vector<cli_command*> cli_generate_set_command_args(struct cli_def *cli, cli_command* parent, std::string const &section, std::string const& varname) {
+
+    std::vector<cli_command*> ret;
+
+    auto const& cb_entry = CliState::get().callbacks(section);
+    auto set_cb = std::get<1>(cb_entry).cmd_set();
+    int mode = std::get<0>(cb_entry);
+
+    if(section.find("policy.[") == 0) {
+        if(varname == "dst" || varname == "src") {
+
+            for(auto const& k: CfgFactory::get().keys_of_db_address()) {
+                auto *ret_single = cli_register_command(cli, parent, k.c_str(), set_cb, PRIVILEGE_PRIVILEGED, mode,
+                                                        "value from address object list");
+
+                ret.push_back(ret_single);
+
+
+            }
+        }
+    }
+
+    return ret;
+
+}
+
 
 std::vector<cli_command *> cli_generate_set_commands (struct cli_def *cli, std::string const &section) {
 
@@ -178,6 +204,9 @@ std::vector<cli_command *> cli_generate_set_commands (struct cli_def *cli, std::
 
                 auto* ret_single = cli_register_command(cli, cli_parent, here_n.c_str(), set_cb, PRIVILEGE_PRIVILEGED, mode,
                                                         help2.c_str() );
+
+                cli_generate_set_command_args(cli, ret_single, section, here_n);
+
                 ret.push_back(ret_single);
             }
 
