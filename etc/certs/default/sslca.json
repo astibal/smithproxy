@@ -1,0 +1,38 @@
+{
+    "ca": {
+        "ou": null,
+        "o": "Smithproxy Software",
+        "s": null,
+        "l": null,
+        "c": "CZ",
+        "cn": "Smithproxy Root CA",
+        "settings": {
+            "grant_ca": "false"
+        }
+    },
+    "srv": {
+        "ou": null,
+        "o": "Smithproxy Software",
+        "s": null,
+        "l": null,
+        "c": "CZ",
+        "cn": "Smithproxy Server Certificate"
+    },
+    "clt": {
+        "ou": null,
+        "o": "Smithproxy Software",
+        "s": null,
+        "l": null,
+        "c": "CZ",
+        "cn": "Smithproxy Client Certificate"
+    },
+    "prt": {
+        "ou": null,
+        "o": "Smithproxy Software",
+        "s": null,
+        "l": null,
+        "c": "CZ",
+        "cn": "Smithproxy Portal Certificate"
+    },
+    "path": "/etc/smithproxy/certs/default/"
+}
