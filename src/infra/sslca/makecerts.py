@@ -18,11 +18,11 @@ import sxyca
 
 
 def is_default_ca():
-    fnm_cert = os.path.join(sxyca.SETTINGS["path"],"ca-cert.pem")
+    fnm_cert = os.path.join(sxyca.SETTINGS["path"], "ca-cert.pem")
 
     if os.path.isfile(fnm_cert):
         ff = ""
-        with open(fnm_cert,'r',encoding='utf-8') as f:
+        with open(fnm_cert, 'r', encoding='utf-8') as f:
             ff = f.read()
 
         hh = hashlib.sha1(ff.encode('utf-8')).hexdigest()
@@ -40,7 +40,6 @@ def should_generate_cert(certname):
         expires = cert.not_valid_after
 
         delta = expires - datetime.datetime.now()
-
 
         if delta.days <= 0:
             print("    warning: certificate %s expires, or already expired" % (fnm_cert, ))
@@ -73,7 +72,6 @@ def load_sans_from_config(configfile):
         sxcfg = cfg.Config()
         sxcfg.read_file(configfile)
 
-
         portal_addr = None
         try:
             portal_addr = sxcfg.settings.auth_portal.address
@@ -86,7 +84,6 @@ def load_sans_from_config(configfile):
         except AttributeError:
             # config is not found
             pass
-
 
         portal_addr6 = None
         try:
@@ -104,8 +101,8 @@ def load_sans_from_config(configfile):
     except ImportError as e:
         print("... cannot load pylibconfig2 - cannot specify exact portal FQDN")
 
-
     return [sans, ips]
+
 
 def generate_portal_cert(ca_key,ca_cert):
     portal_cn = None
@@ -113,8 +110,6 @@ def generate_portal_cert(ca_key,ca_cert):
 
     portal_cn = socket.getfqdn()
     sans.append(portal_cn)
-
-
 
     try:
         from pyroute2 import IPRoute
@@ -132,10 +127,8 @@ def generate_portal_cert(ca_key,ca_cert):
     except ImportError as e:
         print("... cannot load pyroute2 - no IP addresses could be added to server cert")
 
-
-
     prt_key = sxyca.generate_rsa_key(2048)
-    prt_csr = sxyca.generate_csr(prt_key, "prt", sans_dns=sans, sans_ip=ips, custom_subj = {"cn": portal_cn })
+    prt_csr = sxyca.generate_csr(prt_key, "prt", sans_dns=sans, sans_ip=ips, custom_subj={"cn": portal_cn})
     prt_cert = sxyca.sign_csr(ca_key, prt_csr, "prt", valid=30, cacert=ca_cert)
 
     sxyca.save_key(prt_key, "portal-key.pem")
@@ -143,23 +136,23 @@ def generate_portal_cert(ca_key,ca_cert):
 
     return prt_key, prt_cert
 
+
 #
 # @type: 'rsa' or 'ec'
 # @key_size: size of RSA key (ignored for EC)
 # @returns: (key, cert) tuple
 #
-def generate_ca(type='rsa', key_size=2048, custom_subject=None):
+def generate_ca(enctype='rsa', key_size=2048, custom_subject=None):
     print("== generating a new CA == ")
 
-    if type != 'ec':
+    if enctype != 'ec':
         # generate CA RSA key
-        ca_key = sxyca.generate_rsa_key(2048)
+        ca_key = sxyca.generate_rsa_key(key_size)
         sxyca.save_key(ca_key, "ca-key.pem", None)
     else:
         # generate CA RSA key
         ca_key = sxyca.generate_ec_key()
         sxyca.save_key(ca_key, "ca-key.pem", None)
-
 
     # generate CA CSR for self-signing & self-sign
     ca_csr = sxyca.generate_csr(ca_key, "ca", isca=True, custom_subj=custom_subject)
@@ -175,8 +168,8 @@ def generate_server_cert(ca_key, ca_cert):
     srv_csr = sxyca.generate_csr(srv_key, "srv")
     srv_cert = sxyca.sign_csr(ca_key, srv_csr, "srv", valid=30, cacert=ca_cert)
 
-    sxyca.save_key(srv_key, os.path.join(sxyca.SETTINGS["path"],"srv-key.pem"))
-    sxyca.save_certificate(srv_cert, os.path.join(sxyca.SETTINGS["path"],"srv-cert.pem"))
+    sxyca.save_key(srv_key, os.path.join(sxyca.SETTINGS["path"], "srv-key.pem"))
+    sxyca.save_certificate(srv_cert, os.path.join(sxyca.SETTINGS["path"], "srv-cert.pem"))
 
     return srv_key, srv_cert
 
@@ -186,11 +179,10 @@ def check_certificates(etc_dir, assume_yes=True, dry_run=False):
     print("== Checking installed certificates ==")
     sxyca.SETTINGS["path"] = etc_dir
 
-
     for X in [
         sxyca.SETTINGS["path"],
-        os.path.join(sxyca.SETTINGS["path"],"certs/"),
-        os.path.join(sxyca.SETTINGS["path"],"certs/","default/") ]:
+        os.path.join(sxyca.SETTINGS["path"], "certs/"),
+        os.path.join(sxyca.SETTINGS["path"], "certs/", "default/")]:
 
         if not os.path.isdir(X):
             try:
@@ -202,8 +194,6 @@ def check_certificates(etc_dir, assume_yes=True, dry_run=False):
                 print("fatal: Permission denied: {}".format(X))
                 return
 
-
-
     sxyca.SETTINGS["path"] = os.path.join(sxyca.SETTINGS["path"], "certs/", "default/")
     sxyca.init_settings(cn=None, c=None)
     sxyca.load_settings()
@@ -213,9 +203,9 @@ def check_certificates(etc_dir, assume_yes=True, dry_run=False):
     gen_srv = False
     gen_prt = False
 
-
     print("== checking CA cert ==")
-    if os.path.isfile(os.path.join(sxyca.SETTINGS["path"],"ca-cert.pem")):
+
+    if os.path.isfile(os.path.join(sxyca.SETTINGS["path"], "ca-cert.pem")):
         if is_default_ca():
 
             def_ca = True
@@ -225,7 +215,7 @@ def check_certificates(etc_dir, assume_yes=True, dry_run=False):
                 print("    New CA will be generated.")
                 gen_ca = True
             else:
-                if ask_bot(["yes","no"],"===> Do you want to generate your own CA?") == 'yes':
+                if ask_bot(["yes", "no"], "===> Do you want to generate your own CA?") == 'yes':
                     gen_ca = True
 
         # check only if previously not detected default ca and not responded with yes
@@ -238,16 +228,15 @@ def check_certificates(etc_dir, assume_yes=True, dry_run=False):
         print("    doesn't exist, generating!")
         gen_ca = True
 
-
     # TODO: following 3 blocks could be generalized
+
     print("== checking default server cert ==")
-    file = os.path.join(sxyca.SETTINGS["path"],"srv-cert.pem")
+    file = os.path.join(sxyca.SETTINGS["path"], "srv-cert.pem")
     if os.path.isfile(file):
         if should_generate_cert(file) or gen_ca:
             reason = "(validity)"
             if gen_ca:
                 reason = "(new CA)"
-
 
             print("    New default server certificate will be generated " + reason )
             gen_srv = True
@@ -255,14 +244,19 @@ def check_certificates(etc_dir, assume_yes=True, dry_run=False):
         print("    doesn't exist, generating!")
         gen_srv = True
 
-
     print("== checking portal cert ==")
-    prt_cert = sxyca.load_certificate(file)
-    ca_cert_temp = sxyca.load_certificate(os.path.join(sxyca.SETTINGS["path"],"ca-cert.pem"))
 
-    file = os.path.join(sxyca.SETTINGS["path"],"portal-cert.pem")
-    if os.path.isfile(file):
+    ca_file = os.path.join(sxyca.SETTINGS["path"], "ca-cert.pem")
+    ca_cert_temp = None
+    if os.path.isfile(ca_file):
+        gen_ca = True
+        ca_cert_temp = sxyca.load_certificate(ca_file)
 
+    file = os.path.join(sxyca.SETTINGS["path"], "portal-cert.pem")
+
+    if ca_cert_temp and os.path.isfile(file):
+
+        prt_cert = sxyca.load_certificate(file)
 
         if prt_cert.issuer == ca_cert_temp.subject:
             # if we control prt-cert, always generate new one!
@@ -279,26 +273,15 @@ def check_certificates(etc_dir, assume_yes=True, dry_run=False):
         else:
             print("    3rd party portal cert, keeping it!")
 
-
-
-
-
-
     else:
         print("    doesn't exist, generating!")
         gen_prt = True
-
-
-    ca_key = None
-    ca_cert = None
-
 
     if not dry_run:
         if gen_ca:
             # new CA - all must be regenerated
             gen_srv = True
             gen_prt = True
-
 
             assy_type = None
             try:
@@ -308,13 +291,13 @@ def check_certificates(etc_dir, assume_yes=True, dry_run=False):
                 pass
 
             if not assy_type:
-                assy_type = ask_bot(['rsa','ec'],"Which CA type you prefer?")
+                assy_type = ask_bot(['rsa', 'ec'], "Which CA type you prefer?")
 
-            ca_key, ca_cert = generate_ca(type=assy_type)
+            ca_key, ca_cert = generate_ca(enctype=assy_type)
 
         else:
-            ca_key = sxyca.load_key(os.path.join(sxyca.SETTINGS["path"],"ca-key.pem"))
-            ca_cert = sxyca.load_certificate(os.path.join(sxyca.SETTINGS["path"],"ca-cert.pem"))
+            ca_key = sxyca.load_key(os.path.join(sxyca.SETTINGS["path"], "ca-key.pem"))
+            ca_cert = sxyca.load_certificate(os.path.join(sxyca.SETTINGS["path"], "ca-cert.pem"))
             print("using current CA")
 
         if gen_srv:
@@ -333,6 +316,11 @@ if __name__ == "__main__":
 
     from bendutil import ask_bot
 
+    sx_path = "/etc/smithproxy"
+
+    if len(sys.argv) > 1:
+        sx_path = sys.argv[1]
+
     dry_run = False
 
     while True:
@@ -346,10 +334,9 @@ if __name__ == "__main__":
         if ask_bot(['No','Yes'], "Do you want to check and generate new certificates?") == "Yes":
 
             print("Checking installed certificates!")
-            check_certificates("/etc/smithproxy", assume_yes=False, dry_run=dry_run)
+            check_certificates(sx_path, assume_yes=False, dry_run=dry_run)
         else:
             print("Ok, not touching CA at all.")
-
 
         print("...")
 

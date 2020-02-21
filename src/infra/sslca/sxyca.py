@@ -181,12 +181,15 @@ def construct_sn(profile, sn_override=None):
 def generate_csr(key, profile, sans_dns=None, sans_ip=None, isca=False, custom_subj=None):
     global SETTINGS
 
+    cn = SETTINGS[profile]["cn"].replace(" ", "-")
     sn = x509.Name(construct_sn(profile, custom_subj))
 
-    sans_list = []
+    sans_list = [x509.DNSName(cn)]
 
     if sans_dns:
         for s in sans_dns:
+            if s == cn:
+                continue
             sans_list.append(x509.DNSName(s))
 
     if sans_ip:
