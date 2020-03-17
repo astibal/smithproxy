@@ -114,17 +114,21 @@ enum edit_proto_objects { MODE_EDIT_PROTO_OBJECTS=0x12000000, };
 CONFIG_MODE_DEC(cli_conf_edit_proto_objects);
 
 
-enum edit_port_objects { MODE_EDIT_PORT_OBJECTS=0x13000000, };
+enum edit_address_objects { MODE_EDIT_ADDRESS_OBJECTS=0x13000000, };
+CONFIG_MODE_DEC(cli_conf_edit_address_objects);
+
+
+enum edit_port_objects { MODE_EDIT_PORT_OBJECTS=0x14000000, };
 CONFIG_MODE_DEC(cli_conf_edit_port_objects);
 
-enum edit_policy { MODE_EDIT_POLICY=0x14000000, };
+enum edit_policy { MODE_EDIT_POLICY=0x15000000, };
 CONFIG_MODE_DEC(cli_conf_edit_policy);
 
-enum edit_starttls_signatures { MODE_EDIT_STARTTLS_SIGNTATURES=0x15000000, };
+enum edit_starttls_signatures { MODE_EDIT_STARTTLS_SIGNTATURES=0x16000000, };
 CONFIG_MODE_DEC(cli_conf_edit_starttls_signatures);
 
 
-enum edit_detection_signatures { MODE_EDIT_DETECTION_SIGNTATURES=0x16000000, };
+enum edit_detection_signatures { MODE_EDIT_DETECTION_SIGNTATURES=0x17000000, };
 CONFIG_MODE_DEC(cli_conf_edit_detection_signatures);
 
 

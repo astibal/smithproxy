@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 
+EXEMPT_USERS="root fahclient boinc"
 
 case "$1" in
 
@@ -12,6 +13,11 @@ start)
     # --
     iptables -t nat -A OUTPUT -p tcp -d 127.0.0.0/8 -j ACCEPT
     iptables -t nat -A OUTPUT -p tcp -s 127.0.0.0/8 -j ACCEPT
+
+    for U in $EXEMPT_USERS; do
+        iptables -t nat -A OUTPUT -m owner --uid-owner ${U} -j ACCEPT
+    done
+
     iptables -t nat -A OUTPUT -p tcp --dport 443 -j REDIRECT --to-port 51443  -m owner ! --uid-owner root
     iptables -t nat -A OUTPUT -p udp --dport 53 -j REDIRECT --to-port 51053  -m owner ! --uid-owner root
     iptables -t nat -A OUTPUT -p tcp -j REDIRECT --to-port 51080  -m owner ! --uid-owner root

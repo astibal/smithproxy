@@ -2034,8 +2034,107 @@ bool apply_setting(std::string const& section, std::string const& varname, struc
     } else
     if( 0 == section.find("debug") ) {
         ret = CfgFactory::get().load_debug();
-    } else {
-        cli_print(cli, "config apply");
+    } else
+    if( 0 == section.find("policy") ) {
+
+        CfgFactory::get().cleanup_db_policy();
+        ret = CfgFactory::get().load_db_policy();
+    } else
+    if( 0 == section.find("port_objects") ) {
+
+        CfgFactory::get().cleanup_db_port();
+        ret = CfgFactory::get().load_db_port();
+
+        if(ret) {
+            CfgFactory::get().cleanup_db_policy();
+            ret = CfgFactory::get().load_db_policy();
+        }
+    } else
+    if( 0 == section.find("proto_objects") ) {
+
+        CfgFactory::get().cleanup_db_proto();
+        ret = CfgFactory::get().load_db_proto();
+
+        if(ret) {
+            CfgFactory::get().cleanup_db_policy();
+            ret = CfgFactory::get().load_db_policy();
+        }
+    } else
+    if( 0 == section.find("address_objects") ) {
+
+        CfgFactory::get().cleanup_db_address();
+        ret = CfgFactory::get().load_db_address();
+
+        if(ret) {
+            CfgFactory::get().cleanup_db_policy();
+            ret = CfgFactory::get().load_db_policy();
+        }
+    } else
+    if( 0 == section.find("detection_profiles") ) {
+
+        CfgFactory::get().cleanup_db_prof_detection();
+        ret = CfgFactory::get().load_db_prof_detection();
+
+        if(ret) {
+            CfgFactory::get().cleanup_db_policy();
+            ret = CfgFactory::get().load_db_policy();
+        }
+    } else
+    if( 0 == section.find("content_profiles") ) {
+
+        CfgFactory::get().cleanup_db_prof_content();
+        ret = CfgFactory::get().load_db_prof_content();
+
+        if(ret) {
+            CfgFactory::get().cleanup_db_policy();
+            ret = CfgFactory::get().load_db_policy();
+        }
+    } else
+    if( 0 == section.find("tls_profiles") ) {
+
+        CfgFactory::get().cleanup_db_prof_tls();
+        ret = CfgFactory::get().load_db_prof_tls();
+
+        if(ret) {
+            CfgFactory::get().cleanup_db_policy();
+            ret = CfgFactory::get().load_db_policy();
+        }
+    } else
+    if( 0 == section.find("alg_dns_profiles") ) {
+
+        CfgFactory::get().cleanup_db_prof_alg_dns();
+        ret = CfgFactory::get().load_db_prof_alg_dns();
+
+        if(ret) {
+            CfgFactory::get().cleanup_db_policy();
+            ret = CfgFactory::get().load_db_policy();
+        }
+    } else
+    if( 0 == section.find("auth_profiles") ) {
+
+        CfgFactory::get().cleanup_db_prof_auth();
+        ret = CfgFactory::get().load_db_prof_auth();
+
+        if(ret) {
+            CfgFactory::get().cleanup_db_policy();
+            ret = CfgFactory::get().load_db_policy();
+        }
+    } else
+    if( 0 == section.find("starttls_signatures") ) {
+        SmithProxy::instance().load_signatures(CfgFactory::cfg_obj(),"starttls_signatures", SigFactory::get().tls());
+
+        CfgFactory::get().cleanup_db_policy();
+        ret = CfgFactory::get().load_db_policy();
+    } else
+    if( 0 == section.find("detection_signatures") ) {
+        SmithProxy::instance().load_signatures(CfgFactory::cfg_obj(),"detection_signatures", SigFactory::get().detection());
+
+        CfgFactory::get().cleanup_db_policy();
+        ret = CfgFactory::get().load_db_policy();
+    }
+
+    else {
+        cli_print(cli, "config apply - unknown config section!");
     }
 
 
@@ -2078,18 +2177,24 @@ int cli_uni_set_cb(std::string const& confpath, struct cli_def *cli, const char 
 
         // counting from 1, since 0 is varname
 
+        bool args_qmark = false;
         if (argc > 0) {
-            for (int i = 0; i < argc; i++)
+            for (int i = 0; i < argc; i++) {
                 args.emplace_back(std::string(argv[i]));
+            }
+            args_qmark = (args[0] == "?");
+
         } else {
             if(cmd.size() > 2) {
-                for (int i = 2; i < cmd.size(); i++) {
+                for (unsigned int i = 2; i < cmd.size(); i++) {
                     args.emplace_back(std::string(cmd[i]));
                 }
+
+                args_qmark = (args[0] == "?");
             }
         }
 
-        if (args[0] != "?") {
+        if (! args_qmark) {
 
             std::scoped_lock<std::recursive_mutex> ll_(CfgFactory::lock());
 
@@ -3110,6 +3215,12 @@ void client_thread(int client_socket) {
                 .cmd_config(cli_conf_edit_proto_objects)));
 
     CliState::get().callbacks(
+            "address_objects",
+            CliState::callback_entry(MODE_EDIT_ADDRESS_OBJECTS, CliCallbacks()
+                    .cmd_set(cli_generic_set_cb)
+                    .cmd_config(cli_conf_edit_address_objects)));
+
+    CliState::get().callbacks(
             "port_objects",
             CliState::callback_entry(MODE_EDIT_PORT_OBJECTS, CliCallbacks()
                 .cmd_set(cli_generic_set_cb)
@@ -3124,7 +3235,7 @@ void client_thread(int client_socket) {
     auto conft_edit = cli_register_command(cli, nullptr, "edit", nullptr, PRIVILEGE_PRIVILEGED, MODE_CONFIG, "configure smithproxy settings");
 
 
-    std::vector<std::string> sections = { "settings", "debug", "proto_objects", "port_objects" , "policy", "starttls_signatures", "detection_signatures" };
+    std::vector<std::string> sections = { "settings", "debug", "proto_objects", "address_objects", "port_objects" , "policy", "starttls_signatures", "detection_signatures" };
     for( auto const& section : sections) {
 
         if (CfgFactory::cfg_root().exists(section.c_str())) {

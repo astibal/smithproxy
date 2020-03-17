@@ -51,7 +51,7 @@ CONFIG_MODE_DEF(cli_conf_edit_debug, MODE_EDIT_DEBUG, "debug");
 CONFIG_MODE_DEF(cli_conf_edit_debug_log, MODE_EDIT_DEBUG_LOG, "log");
 
 CONFIG_MODE_DEF(cli_conf_edit_proto_objects, MODE_EDIT_PROTO_OBJECTS, "proto_objects");
-
+CONFIG_MODE_DEF(cli_conf_edit_address_objects, MODE_EDIT_ADDRESS_OBJECTS, "address_objects");
 CONFIG_MODE_DEF(cli_conf_edit_port_objects, MODE_EDIT_PORT_OBJECTS, "port_objects");
 
 CONFIG_MODE_DEF(cli_conf_edit_policy, MODE_EDIT_POLICY, "policy");
@@ -293,7 +293,7 @@ Setting* cfg_canonize(std::string const& section) {
             if(sliced.size() > 1) {
                 // we contain # (index(es))
                 cur = &cur->lookup(sliced[0]);
-                for(int i = 1; i < sliced.size(); i++) {
+                for(unsigned int i = 1; i < sliced.size(); i++) {
                   cur = &cur[std::stoi(sliced[i])];
                 }
             }
