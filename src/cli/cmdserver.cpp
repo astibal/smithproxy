@@ -3229,13 +3229,51 @@ void client_thread(int client_socket) {
 
     cli_add_static_section("policy", MODE_EDIT_POLICY, cli_conf_edit_policy);
 
-    cli_add_static_section("starttls_signatures", MODE_EDIT_STARTTLS_SIGNTATURES, cli_conf_edit_starttls_signatures);
-    cli_add_static_section("detection_signatures", MODE_EDIT_DETECTION_SIGNTATURES, cli_conf_edit_detection_signatures);
+    CliState::get().callbacks(
+            "detection_profiles",
+            CliState::callback_entry(MODE_EDIT_DETECTION_PROFILES, CliCallbacks()
+                    .cmd_set(cli_generic_set_cb)
+                    .cmd_config(cli_conf_edit_detection_profiles)));
+
+    CliState::get().callbacks(
+            "content_profiles",
+            CliState::callback_entry(MODE_EDIT_CONTENT_PROFILES, CliCallbacks()
+                    .cmd_set(cli_generic_set_cb)
+                    .cmd_config(cli_conf_edit_content_profiles)));
+
+    CliState::get().callbacks(
+            "tls_profiles",
+            CliState::callback_entry(MODE_EDIT_TLS_PROFILES, CliCallbacks()
+                    .cmd_set(cli_generic_set_cb)
+                    .cmd_config(cli_conf_edit_tls_profiles)));
+
+    CliState::get().callbacks(
+            "auth_profiles",
+            CliState::callback_entry(MODE_EDIT_AUTH_PROFILES, CliCallbacks()
+                    .cmd_set(cli_generic_set_cb)
+                    .cmd_config(cli_conf_edit_auth_profiles)));
+
+    CliState::get().callbacks(
+            "alg_dns_profiles",
+            CliState::callback_entry(MODE_EDIT_ALG_DNS_PROFILES, CliCallbacks()
+                    .cmd_set(cli_generic_set_cb)
+                    .cmd_config(cli_conf_edit_alg_dns_profiles)));
+
+
+
+    cli_add_static_section("starttls_signatures", MODE_EDIT_STARTTLS_SIGNATURES, cli_conf_edit_starttls_signatures);
+    cli_add_static_section("detection_signatures", MODE_EDIT_DETECTION_SIGNATURES, cli_conf_edit_detection_signatures);
 
     auto conft_edit = cli_register_command(cli, nullptr, "edit", nullptr, PRIVILEGE_PRIVILEGED, MODE_CONFIG, "configure smithproxy settings");
 
 
-    std::vector<std::string> sections = { "settings", "debug", "proto_objects", "address_objects", "port_objects" , "policy", "starttls_signatures", "detection_signatures" };
+    std::vector<std::string> sections = { "settings", "debug",
+                                          "proto_objects", "address_objects", "port_objects" ,
+                                          "detection_profiles", "content_profiles", "tls_profiles", "auth_profiles",
+                                          "alg_dns_profiles",
+                                          "policy",
+                                          "starttls_signatures",
+                                          "detection_signatures" };
     for( auto const& section : sections) {
 
         if (CfgFactory::cfg_root().exists(section.c_str())) {

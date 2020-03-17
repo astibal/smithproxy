@@ -56,8 +56,14 @@ CONFIG_MODE_DEF(cli_conf_edit_port_objects, MODE_EDIT_PORT_OBJECTS, "port_object
 
 CONFIG_MODE_DEF(cli_conf_edit_policy, MODE_EDIT_POLICY, "policy");
 
-CONFIG_MODE_DEF(cli_conf_edit_starttls_signatures, MODE_EDIT_STARTTLS_SIGNTATURES, "starttls_signatures");
-CONFIG_MODE_DEF(cli_conf_edit_detection_signatures, MODE_EDIT_DETECTION_SIGNTATURES, "detection_signatures");
+CONFIG_MODE_DEF(cli_conf_edit_detection_profiles, MODE_EDIT_DETECTION_PROFILES, "detection_profiles");
+CONFIG_MODE_DEF(cli_conf_edit_content_profiles, MODE_EDIT_CONTENT_PROFILES, "content_profiles");
+CONFIG_MODE_DEF(cli_conf_edit_tls_profiles, MODE_EDIT_TLS_PROFILES, "tls_profiles");
+CONFIG_MODE_DEF(cli_conf_edit_alg_dns_profiles, MODE_EDIT_ALG_DNS_PROFILES, "alg_dns_profiles");
+CONFIG_MODE_DEF(cli_conf_edit_auth_profiles, MODE_EDIT_AUTH_PROFILES, "auth_profiles");
+
+CONFIG_MODE_DEF(cli_conf_edit_starttls_signatures, MODE_EDIT_STARTTLS_SIGNATURES, "starttls_signatures");
+CONFIG_MODE_DEF(cli_conf_edit_detection_signatures, MODE_EDIT_DETECTION_SIGNATURES, "detection_signatures");
 
 
 std::pair<int, std::string> generate_dynamic_groups(struct cli_def *cli, const char *command, char **argv, int argc) {

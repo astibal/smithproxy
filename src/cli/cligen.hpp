@@ -124,11 +124,26 @@ CONFIG_MODE_DEC(cli_conf_edit_port_objects);
 enum edit_policy { MODE_EDIT_POLICY=0x15000000, };
 CONFIG_MODE_DEC(cli_conf_edit_policy);
 
-enum edit_starttls_signatures { MODE_EDIT_STARTTLS_SIGNTATURES=0x16000000, };
+enum edit_detection_profile { MODE_EDIT_DETECTION_PROFILES=0x16000000, };
+CONFIG_MODE_DEC(cli_conf_edit_detection_profiles);
+
+enum edit_content_profile { MODE_EDIT_CONTENT_PROFILES=0x17000000, };
+CONFIG_MODE_DEC(cli_conf_edit_content_profiles);
+
+enum edit_tls_profile { MODE_EDIT_TLS_PROFILES=0x18000000, };
+CONFIG_MODE_DEC(cli_conf_edit_tls_profiles);
+
+enum edit_alg_dns_profile { MODE_EDIT_ALG_DNS_PROFILES=0x19000000, };
+CONFIG_MODE_DEC(cli_conf_edit_alg_dns_profiles);
+
+enum edit_auth_profile { MODE_EDIT_AUTH_PROFILES=0x1a000000, };
+CONFIG_MODE_DEC(cli_conf_edit_auth_profiles);
+
+enum edit_starttls_signatures { MODE_EDIT_STARTTLS_SIGNATURES=0x26000000, };
 CONFIG_MODE_DEC(cli_conf_edit_starttls_signatures);
 
 
-enum edit_detection_signatures { MODE_EDIT_DETECTION_SIGNTATURES=0x17000000, };
+enum edit_detection_signatures { MODE_EDIT_DETECTION_SIGNATURES=0x27000000, };
 CONFIG_MODE_DEC(cli_conf_edit_detection_signatures);
 
 
