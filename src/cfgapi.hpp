@@ -126,9 +126,6 @@ public:
     bool log_console{};
 
 
-    std::time_t ts_sys_started{};
-
-
     // macro to define maps attribute, plus accessor functions
     #define DB_MAP(type, name) \
     std::map<std::string, type> name; \

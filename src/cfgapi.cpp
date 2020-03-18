@@ -98,8 +98,6 @@ CfgFactory::CfgFactory(): log(get_log()), args_debug_flag(NON), syslog_level(INF
     traflog_file_suffix = "smcap";
 
     log_console = false;
-    ts_sys_started = std::time(nullptr);
-
 }
 
 struct cfgapi_table_ cfgapi_table;
@@ -124,8 +122,6 @@ bool CfgFactory::cfgapi_init(const char* fnm) {
         _err("Parse error in %s at %s:%d - %s", fnm, pex.getFile(), pex.getLine(), pex.getError());
         return false;
     }
-    
-    ts_sys_started = ::time(nullptr);
     
     return true;
 }

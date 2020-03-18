@@ -52,6 +52,8 @@
 #include <smithlog.hpp>
 #include <service/dnsupd/smithdnsupd.hpp>
 
+#include <atomic>
+
 typedef ThreadedAcceptor<MitmMasterProxy,MitmProxy> theAcceptor;
 typedef ThreadedReceiver<MitmUdpProxy,MitmProxy> theReceiver;
 typedef ThreadedAcceptor<MitmSocksProxy,SocksProxy> socksAcceptor;
@@ -67,6 +69,8 @@ class SmithProxy {
         log.level(WAR);
         reload_handler_ = my_usr1;
         terminate_handler_ = my_terminate;
+
+        ts_sys_started = ::time(nullptr);
     };
     virtual ~SmithProxy ();
 
@@ -104,6 +108,7 @@ public:
     std::thread* redir_ssl_thread = nullptr;
     std::thread* redir_udp_thread = nullptr;
 
+    std::time_t ts_sys_started{0};
 
     SmithProxy (SmithProxy const&) = delete;
     SmithProxy& operator= (SmithProxy const& r) = delete;
@@ -135,8 +140,8 @@ public:
 
     static void my_terminate(int param);
     static void my_usr1 (int param);
-    int load_signatures(libconfig::Config& cfg, const char* name, std::vector<std::shared_ptr<duplexFlowMatch>>& target);
-    bool init_syslog();
+    static int load_signatures(libconfig::Config& cfg, const char* name, std::vector<std::shared_ptr<duplexFlowMatch>>& target);
+    static bool init_syslog();
     bool load_config(std::string& config_f, bool reload = false);
 
     volatile static int cnt_terminate;

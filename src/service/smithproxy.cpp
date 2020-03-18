@@ -418,7 +418,7 @@ void SmithProxy::my_terminate (int param) {
 void SmithProxy::my_usr1 (int param) {
     auto& log = instance().log;
 
-    _dia("USR1 signal handler started");
+    _dia("USR1 signal handler started (param %d)", param);
     _war("reloading configuration (excluding signatures)");
     SmithProxy::instance().load_config(CfgFactory::get().config_file,true);
     _dia("USR1 signal handler finished");
@@ -559,7 +559,7 @@ bool SmithProxy::init_syslog() {
             get_logger()->level(lp->level_);
         }
 
-        lp->syslog_settings.severity = lp->level_.level();
+        lp->syslog_settings.severity = static_cast<int>(lp->level_.level());
         lp->syslog_settings.facility = CfgFactory::get().syslog_facility;
 
         get_logger()->target_profiles()[(uint64_t) syslog_socket] = lp;
@@ -624,19 +624,19 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
                 CfgFactory::get().log_file = CfgFactory::get().log_file_base;
 
 
-                if(CfgFactory::get().log_file.size() > 0) {
+                if(! CfgFactory::get().log_file.empty()) {
 
                     CfgFactory::get().log_file = string_format(CfgFactory::get().log_file.c_str(), CfgFactory::get().tenant_name.c_str());
                     // prepare custom crashlog file
                     std::string crlog = CfgFactory::get().log_file + ".crashlog.log";
                     this_daemon.set_crashlog(crlog.c_str());
 
-                    std::ofstream * o = new std::ofstream(CfgFactory::get().log_file.c_str(),std::ios::app);
+                    auto* o = new std::ofstream(CfgFactory::get().log_file.c_str(),std::ios::app);
                     get_logger()->targets(CfgFactory::get().log_file, o);
                     get_logger()->dup2_cout(false);
                     get_logger()->level(cfgapi_table.logging.level);
 
-                    logger_profile* lp = new logger_profile();
+                    auto* lp = new logger_profile();
                     lp->print_srcline_ = get_logger()->print_srcline();
                     lp->print_srcline_always_ = get_logger()->print_srcline_always();
                     lp->level_ = cfgapi_table.logging.level;
@@ -649,17 +649,17 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
 
                 CfgFactory::get().sslkeylog_file = CfgFactory::get().sslkeylog_file_base;
 
-                if(CfgFactory::get().sslkeylog_file.size() > 0) {
+                if(! CfgFactory::get().sslkeylog_file.empty()) {
 
                     CfgFactory::get().sslkeylog_file = string_format(CfgFactory::get().sslkeylog_file.c_str(),
                                                                      CfgFactory::get().tenant_name.c_str());
 
-                    std::ofstream * o = new std::ofstream(CfgFactory::get().sslkeylog_file.c_str(),std::ios::app);
+                    auto* o = new std::ofstream(CfgFactory::get().sslkeylog_file.c_str(),std::ios::app);
                     get_logger()->targets(CfgFactory::get().sslkeylog_file,o);
                     get_logger()->dup2_cout(false);
                     get_logger()->level(cfgapi_table.logging.level);
 
-                    logger_profile* lp = new logger_profile();
+                    auto* lp = new logger_profile();
                     lp->print_srcline_ = get_logger()->print_srcline();
                     lp->print_srcline_always_ = get_logger()->print_srcline_always();
                     lp->level_ = loglevel(iINF,flag_add(iNOT,CRT|KEYS));
