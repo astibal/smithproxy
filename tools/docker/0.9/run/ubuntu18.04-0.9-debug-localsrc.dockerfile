@@ -9,7 +9,7 @@ WORKDIR /app
 COPY smithproxy/ /smithproxy/
 COPY *.sh /app
 
-RUN apt -y install gdb && \
+RUN apt -y install gdb valgrind && \
 cd /smithproxy && \
 mkdir build ; cd build && cmake .. -DCMAKE_BUILD_TYPE=Debug && make -j `cat /proc/cpuinfo  | grep processor | wc -l` install
 
