@@ -114,7 +114,8 @@ case "$1" in
     ;;
 
   val)
-    valgrind --leak-check=full --trace-children=yes --log-file=/var/log/smithproxy_val.log /usr/bin/smithproxy --daemonize
+    valgrind --max-threads=1000 --leak-check=full --trace-children=yes \
+      --log-file=/var/log/smithproxy_val.log /usr/bin/smithproxy --daemonize --tenant-index 0 --tenant-name default
     ;;
 
   *)
