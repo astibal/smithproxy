@@ -64,6 +64,8 @@ MitmProxy::MitmProxy(baseCom* c): baseProxy(c), sobject() {
     //add_filter("test",new TestFilter(this,5));
 
     log = logan::attach(this, "proxy");
+
+    total_sessions()++;
 }
 
 void MitmProxy::toggle_tlog() {

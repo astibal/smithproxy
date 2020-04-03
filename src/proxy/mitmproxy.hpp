@@ -54,6 +54,7 @@
 #include <sslcertval.hpp>
 #include <async/asyncsocket.hpp>
 #include <async/asyncocsp.hpp>
+#include <atomic>
 
 struct whitelist_verify_entry {
 };
@@ -190,7 +191,8 @@ public:
 
     socle::meter mtr_down;
     socle::meter mtr_up;    
-    
+
+    static std::atomic_uint64_t& total_sessions() { static std::atomic_uint64_t total; return total; };
     static socle::meter& total_mtr_up()  { static socle::meter t_up; return t_up; };
     static socle::meter& total_mtr_down() {static socle::meter t_down; return t_down; };
 
