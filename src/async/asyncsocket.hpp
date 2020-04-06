@@ -71,7 +71,7 @@ public:
         untap();
     }
 
-    virtual void tap(int fd) {
+    void tap(int fd) {
 
         socket_.set(fd, this, owner_->com(), true);
         socket_.opening();
@@ -113,7 +113,7 @@ public:
         this->state(task_state_t::INIT);
     }
     virtual typename IAsyncTask<R>::state update() = 0;
-    virtual R& yield() = 0;
+    R& yield() override = 0;
 
     void handle_event (baseCom *com) override {
 
@@ -139,8 +139,8 @@ public:
     }
 
 
-    inline int socket() const { return socket_.socket_; }
-    inline baseHostCX* owner() const { return owner_; }
+    [[nodiscard]] inline int socket() const { return socket_.socket_; }
+    [[nodiscard]] inline baseHostCX* owner() const { return owner_; }
 private:
     baseHostCX* owner_;
     callback_t callback_;

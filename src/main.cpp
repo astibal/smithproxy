@@ -203,16 +203,16 @@ int main(int argc, char *argv[]) {
                     {"dump",   no_argument,         (int*) &CfgFactory::get().args_debug_flag.level_ref(), iDUM},
                     {"extreme",   no_argument,      (int*) &CfgFactory::get().args_debug_flag.level_ref(), iEXT},
 
-                    {"config-file", required_argument, 0, 'c'},
-                    {"config-check-only",no_argument,0,'o'},
-                    {"daemonize", no_argument, 0, 'D'},
-                    {"version", no_argument, 0, 'v'},
+                    {"config-file", required_argument, nullptr, 'c'},
+                    {"config-check-only",no_argument,nullptr,'o'},
+                    {"daemonize", no_argument, nullptr, 'D'},
+                    {"version", no_argument, nullptr, 'v'},
 
                     // multi-tenancy support: listening ports will be shifted by number 'i', while 't' controls logging, pidfile, etc.
                     // both, or none of them have to be set
-                    {"tenant-index", required_argument, 0, 'i'},
-                    {"tenant-name", required_argument, 0, 't'},
-                    {0, 0, 0, 0}
+                    {"tenant-index", required_argument, nullptr, 'i'},
+                    {"tenant-name", required_argument, nullptr, 't'},
+                    {nullptr, 0, nullptr, 0}
             };
 
 
@@ -230,7 +230,7 @@ int main(int argc, char *argv[]) {
     /* getopt_long stores the option index here. */
         int option_index = 0;
     
-        char c = getopt_long (argc, argv, "p:vo",
+        int c = getopt_long (argc, argv, "p:vo",
                         long_options, &option_index);
         if (c < 0) break;
 

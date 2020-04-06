@@ -297,8 +297,10 @@ bool CfgFactory::load_settings () {
     cfgapi.getRoot()["settings"].lookupValue("messages_dir",dir_msg_templates);
 
     if(cfgapi.getRoot()["settings"].exists("cli")) {
-        cfgapi.getRoot()["settings"]["cli"].lookupValue("port", CliState::get().cli_port_base); CliState::get().cli_port = CliState::get().cli_port_base;
-        cfgapi.getRoot()["settings"]["cli"].lookupValue("enable_password", CliState::get().cli_enable_password);
+        load_if_exists(cfgapi.getRoot()["settings"]["cli"],"port", CliState::get().cli_port_base);
+        CliState::get().cli_port = CliState::get().cli_port_base;
+
+        load_if_exists(cfgapi.getRoot()["settings"]["cli"], "enable_password", CliState::get().cli_enable_password);
     }
 
     if(cfgapi.getRoot()["settings"].exists("auth_portal")) {
@@ -748,7 +750,7 @@ int CfgFactory::load_db_policy () {
                 std::string name_alg_dns;
                 std::string name_script;
                 
-                if(cur_object.lookupValue("detection_profile",name_detection)) {
+                if(load_if_exists(cur_object, "detection_profile",name_detection)) {
                     auto prf  = lookup_prof_detection(name_detection.c_str());
                     if(prf) {
                         _dia("cfgapi_load_policy[#%d]: detect profile %s",i,name_detection.c_str());
@@ -759,7 +761,7 @@ int CfgFactory::load_db_policy () {
                     }
                 }
                 
-                if(cur_object.lookupValue("content_profile",name_content)) {
+                if(load_if_exists(cur_object, "content_profile",name_content)) {
                     auto prf  = lookup_prof_content(name_content.c_str());
                     if(prf) {
                         _dia("cfgapi_load_policy[#%d]: content profile %s",i,name_content.c_str());
@@ -769,7 +771,7 @@ int CfgFactory::load_db_policy () {
                         error = true;
                     }
                 }                
-                if(cur_object.lookupValue("tls_profile",name_tls)) {
+                if(load_if_exists(cur_object, "tls_profile",name_tls)) {
                     auto tls  = lookup_prof_tls(name_tls.c_str());
                     if(tls) {
                         _dia("cfgapi_load_policy[#%d]: tls profile %s",i,name_tls.c_str());
@@ -779,7 +781,7 @@ int CfgFactory::load_db_policy () {
                         error = true;
                     }
                 }         
-                if(cur_object.lookupValue("auth_profile",name_auth)) {
+                if(load_if_exists(cur_object, "auth_profile",name_auth)) {
                     auto auth  = lookup_prof_auth(name_auth.c_str());
                     if(auth) {
                         _dia("cfgapi_load_policy[#%d]: auth profile %s",i,name_auth.c_str());
@@ -789,7 +791,7 @@ int CfgFactory::load_db_policy () {
                         error = true;
                     }
                 }
-                if(cur_object.lookupValue("alg_dns_profile",name_alg_dns)) {
+                if(load_if_exists(cur_object, "alg_dns_profile",name_alg_dns)) {
                     auto dns  = lookup_prof_alg_dns(name_alg_dns.c_str());
                     if(dns) {
                         _dia("cfgapi_load_policy[#%d]: DNS alg profile %s",i,name_alg_dns.c_str());
@@ -800,7 +802,7 @@ int CfgFactory::load_db_policy () {
                     }
                 }
 
-                if(cur_object.lookupValue("script_profile", name_script)) {
+                if(load_if_exists(cur_object, "script_profile", name_script)) {
                     auto scr  = lookup_prof_script(name_script.c_str());
                     if(scr) {
                         _dia("cfgapi_load_policy[#%d]: script profile %s",i,name_script.c_str());
@@ -1078,7 +1080,10 @@ int CfgFactory::load_db_prof_content () {
                         }
                         
                         //optional
-                        cur_replace_rule.lookupValue("fill_length",fill_length);
+                        // arm version library throws exception here if option is not present
+                        if(cur_replace_rule.exists("fill_length"))
+                            cur_replace_rule.lookupValue("fill_length",fill_length);
+
                         cur_replace_rule.lookupValue("replace_each_nth",replace_each_nth);
                         
                         if( (! m.empty() ) && action_defined) {
@@ -1279,8 +1284,6 @@ int CfgFactory::load_db_prof_script () {
 }
 
 
-
-
 int CfgFactory::load_db_prof_auth () {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
@@ -1290,7 +1293,8 @@ int CfgFactory::load_db_prof_auth () {
 
     _dia("load_db_prof_auth: portal settings");
     cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("address", AuthFactory::get().portal_address);
-    cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("address6", AuthFactory::get().portal_address6);
+
+    load_if_exists<std::string>(cfgapi.getRoot()["settings"]["auth_portal"], "address6", AuthFactory::get().portal_address6);
     cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("http_port", AuthFactory::get().portal_port_http);
     cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("https_port", AuthFactory::get().portal_port_https);
 
@@ -1344,7 +1348,7 @@ int CfgFactory::load_db_prof_auth () {
                     std::string name_auth;
                     std::string name_alg_dns;
                     
-                    if(cur_subpol.lookupValue("detection_profile",name_detection)) {
+                    if(load_if_exists(cur_subpol,"detection_profile",name_detection)) {
                         auto prf  = lookup_prof_detection(name_detection.c_str());
                         if(prf) {
                             _dia("load_db_prof_auth[sub-profile:%s]: detect profile %s",n_subpol->name.c_str(),name_detection.c_str());
@@ -1354,7 +1358,7 @@ int CfgFactory::load_db_prof_auth () {
                         }
                     }
                     
-                    if(cur_subpol.lookupValue("content_profile",name_content)) {
+                    if(load_if_exists(cur_subpol,"content_profile",name_content)) {
                         auto prf  = lookup_prof_content(name_content.c_str());
                         if(prf) {
                             _dia("load_db_prof_auth[sub-profile:%s]: content profile %s",n_subpol->name.c_str(),name_content.c_str());
@@ -1363,7 +1367,7 @@ int CfgFactory::load_db_prof_auth () {
                             _err("load_db_prof_auth[sub-profile:%s]: content profile %s cannot be loaded",n_subpol->name.c_str(),name_content.c_str());
                         }
                     }                
-                    if(cur_subpol.lookupValue("tls_profile",name_tls)) {
+                    if(load_if_exists(cur_subpol, "tls_profile",name_tls)) {
                         auto tls  = lookup_prof_tls(name_tls.c_str());
                         if(tls) {
                             _dia("load_db_prof_auth[sub-profile:%s]: tls profile %s",n_subpol->name.c_str(),name_tls.c_str());
@@ -1375,7 +1379,7 @@ int CfgFactory::load_db_prof_auth () {
 
                     // we don't need auth profile in auth sub-profile
                     
-                    if(cur_subpol.lookupValue("alg_dns_profile",name_alg_dns)) {
+                    if(load_if_exists(cur_subpol,"alg_dns_profile",name_alg_dns)) {
                         auto dns  = lookup_prof_alg_dns(name_alg_dns.c_str());
                         if(dns) {
                             _dia("load_db_prof_auth[sub-profile:%s]: DNS alg profile %s",n_subpol->name.c_str(),name_alg_dns.c_str());
@@ -2541,7 +2545,7 @@ int save_settings(Config& ex) {
     objects.add("messages_dir", Setting::TypeString) = CfgFactory::get().dir_msg_templates;
 
     Setting& cli_objects = objects.add("cli", Setting::TypeGroup);
-    cli_objects.add("port", Setting::TypeString) = string_format("%d", CliState::get().cli_port_base).c_str();
+    cli_objects.add("port", Setting::TypeInt) = CliState::get().cli_port_base;
     cli_objects.add("enable_password", Setting::TypeString) = CliState::get().cli_enable_password;
 
 

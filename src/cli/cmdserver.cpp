@@ -1606,15 +1606,15 @@ int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *a
                       memPool::pool().stat_out_free_size);
 
             cli_print(cli, "\nPool capacities (available/limits):");
-            cli_print(cli, " 32B pool size: %ld/%ld", memPool::pool().mem_32_av(), memPool::pool().mem_32_sz());
-            cli_print(cli, " 64B pool size: %ld/%ld", memPool::pool().mem_64_av(), memPool::pool().mem_64_sz());
-            cli_print(cli, "128B pool size: %ld/%ld", memPool::pool().mem_128_av(), memPool::pool().mem_128_sz());
-            cli_print(cli, "256B pool size: %ld/%ld", memPool::pool().mem_256_av(), memPool::pool().mem_256_sz());
-            cli_print(cli, " 1kB pool size: %ld/%ld", memPool::pool().mem_1k_av(), memPool::pool().mem_1k_sz());
-            cli_print(cli, " 5kB pool size: %ld/%ld", memPool::pool().mem_5k_av(), memPool::pool().mem_5k_sz());
-            cli_print(cli, "10kB pool size: %ld/%ld", memPool::pool().mem_10k_av(), memPool::pool().mem_10k_sz());
-            cli_print(cli, "20kB pool size: %ld/%ld", memPool::pool().mem_20k_av(), memPool::pool().mem_20k_sz());
-            cli_print(cli, " big pool size: %ld", memPool::pool().mem_big_av());
+            cli_print(cli, " 32B pool size: %lu/%lu", memPool::pool().mem_32_av(), memPool::pool().mem_32_sz());
+            cli_print(cli, " 64B pool size: %lu/%lu", memPool::pool().mem_64_av(), memPool::pool().mem_64_sz());
+            cli_print(cli, "128B pool size: %lu/%lu", memPool::pool().mem_128_av(), memPool::pool().mem_128_sz());
+            cli_print(cli, "256B pool size: %lu/%lu", memPool::pool().mem_256_av(), memPool::pool().mem_256_sz());
+            cli_print(cli, " 1kB pool size: %lu/%lu", memPool::pool().mem_1k_av(), memPool::pool().mem_1k_sz());
+            cli_print(cli, " 5kB pool size: %lu/%lu", memPool::pool().mem_5k_av(), memPool::pool().mem_5k_sz());
+            cli_print(cli, "10kB pool size: %lu/%lu", memPool::pool().mem_10k_av(), memPool::pool().mem_10k_sz());
+            cli_print(cli, "20kB pool size: %lu/%lu", memPool::pool().mem_20k_av(), memPool::pool().mem_20k_sz());
+            cli_print(cli, " big pool size: %lu", memPool::pool().mem_big_av());
 
             // (10 for 32 byte pool, and 3 for 64, 128 and 256 pool)
             unsigned long long total_pools = (10 + 3) * memPool::pool().mem_256_sz() + memPool::pool().mem_1k_sz() +
@@ -2596,7 +2596,7 @@ int cli_diag_mem_objects_clear(struct cli_def *cli, const char *command, char *a
             address = a1.c_str();
 
             uint64_t key = strtol(address.c_str(),nullptr,16);
-            cli_print(cli,"Trying to clear 0x%lx",key);
+            cli_print(cli,"Trying to clear 0x%lux",key);
 
 
             int ret = -1;

@@ -266,7 +266,21 @@ struct cfgapi_table_ {
 
 extern struct cfgapi_table_ cfgapi_table;
 
+// HELPERS
 
+// load value from config if the config key exists - this is workaround to some versions
+// of libconfig++ on armhf which don't keep the promise and lookupValue throws an exception
+
+template <class T>
+bool load_if_exists(libconfig::Setting& s, const char* key, T& valref) {
+    if(s.exists(key)) {
+        s.lookupValue(key, valref);
+
+        return true;
+    }
+
+    return false;
+}
 
 
 #endif

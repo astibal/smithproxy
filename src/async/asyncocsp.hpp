@@ -10,15 +10,13 @@
 #include <async/asyncsocket.hpp>
 
 
-namespace inet {
-
-    namespace ocsp {
+namespace inet::ocsp {
 
         class AsyncOCSP : public AsyncSocket<int> {
         public:
 
             AsyncOCSP (X509 *cert, X509 *issuer, baseHostCX *cx, callback_t cb) :
-                    AsyncSocket(cx, cb),
+                    AsyncSocket(cx, std::move(cb)),
                     query_(cert, issuer) {
             };
 
@@ -57,5 +55,4 @@ namespace inet {
             int result_state_ = -100;
         };
     }
-}
 #endif //ASYNCOCSP_HPP

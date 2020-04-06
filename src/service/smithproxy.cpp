@@ -676,7 +676,7 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
                 }
             }
 
-            if(CfgFactory::cfg_root()["settings"].lookupValue("cfg_log_console", CfgFactory::get().log_console)) {
+            if(load_if_exists(CfgFactory::cfg_root()["settings"],"log_console", CfgFactory::get().log_console)) {
                 get_logger()->dup2_cout(CfgFactory::get().log_console);
             }
         }
