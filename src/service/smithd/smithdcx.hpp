@@ -93,16 +93,16 @@ protected:
     std::vector<LTVEntry*> packages_;
     buffer to_read_buffer; 
 
-    unsigned long hb_me = 0;
+    long hb_me = 0;
     time_t           hb_me_sent = 0;
-    unsigned int hb_me_timeout = 10; 
+    int hb_me_timeout = 10;
     
     inline void reset_hb_me() { time(&hb_me_sent); }
     
     unsigned long hb_peer = 0;
     time_t           hb_peer_received = 0;
-    unsigned int  hb_peer_timeout = 10;
-    unsigned int  hb_peer_timeout_counter = 0;
+    int  hb_peer_timeout = 10;
+    int  hb_peer_timeout_counter = 0;
 
 protected:
     virtual void on_hb_timeout_me() { reset_hb_me(); };

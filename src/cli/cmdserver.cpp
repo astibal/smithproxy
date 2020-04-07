@@ -164,14 +164,14 @@ void cmd_show_status(struct cli_def* cli) {
     cli_print(cli," ");
     time_t uptime = time(nullptr) - SmithProxy::instance().ts_sys_started;
     cli_print(cli,"Uptime: %s",uptime_string(uptime).c_str());
-    cli_print(cli,"Objects: %ld",socle::sobjectDB::db().cache().size());
+    cli_print(cli,"Objects: %lu", static_cast<unsigned long>(socle::sobjectDB::db().cache().size()));
     unsigned long l = MitmProxy::total_mtr_up().get();
     unsigned long r = MitmProxy::total_mtr_down().get();
     cli_print(cli,"Performance: upload %sbps, download %sbps in last second",number_suffixed(l*8).c_str(),number_suffixed(r*8).c_str());
 
     unsigned long t = MitmProxy::total_mtr_up().total() + MitmProxy::total_mtr_down().total();
     cli_print(cli,"Transferred: %s bytes", number_suffixed(t).c_str());
-    cli_print(cli,"Total sessions: %lu", MitmProxy::total_sessions().load());
+    cli_print(cli,"Total sessions: %lu", static_cast<unsigned long>(MitmProxy::total_sessions().load()));
 
     if(CliState::get().config_changed_flag) {
         cli_print(cli, "\n*** Configuration changes NOT saved ***");
@@ -1595,7 +1595,7 @@ int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *a
             std::scoped_lock<std::mutex> l(mpdata::lock());
             mp_size = mpdata::map().size();
         }
-        cli_print(cli, "mp ptr cache size: %ld", mp_size);
+        cli_print(cli, "mp ptr cache size: %lu", static_cast<unsigned long>(mp_size));
 
         cli_print(cli," ");
         cli_print(cli, "API allocations above limits:");
@@ -2585,18 +2585,15 @@ int cli_diag_mem_objects_clear(struct cli_def *cli, const char *command, char *a
     std::string address;
 
     if(argc > 0) {
-        std::string a1 = argv[0];
-        if(a1 == "?") {
+        address = argv[0];
+        if(address == "?") {
             cli_print(cli,"valid parameters:");
             cli_print(cli,"         <object id>");
 
             return CLI_OK;
         } else {
-            // a1 is param for the lookup
-            address = a1.c_str();
-
-            uint64_t key = strtol(address.c_str(),nullptr,16);
-            cli_print(cli,"Trying to clear 0x%lux",key);
+            unsigned long key = strtol(address.c_str(),nullptr,16);
+            cli_print(cli,"Trying to clear 0x%lx", key);
 
 
             int ret = -1;

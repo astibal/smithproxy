@@ -158,7 +158,7 @@ void DNS_Inspector::update(AppHostCX* cx) {
                         for(auto idx: cached_entry->answer_ttl_idx) {
                             uint32_t ttl = ntohl(cached_entry->cached_packet->get_at<uint32_t>(idx));
                             _deb("cached response ttl byte index %d value %d",idx,ttl);
-                            if(now > ttl + cached_entry->loaded_at) {
+                            if(now > static_cast<time_t>(ttl) + cached_entry->loaded_at) {
                                 _deb("  %ds -- expired", now - (ttl + cached_entry->loaded_at));
                                 ttl_check = false;
                             } else {
