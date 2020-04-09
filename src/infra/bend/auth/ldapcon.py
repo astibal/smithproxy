@@ -63,19 +63,20 @@ flog = logging.getLogger('bend')
 
 # Some printinng useful for debugging, nothing more.
 def pprint_result(r):
-    username = ""
-    for cn, atts in r:
-        if cn == None:
+
+    for cn, attributes in r:
+
+        if cn is None:
             continue
+
         print("RESULT: %s" % cn)
-        for k in atts.keys():
-            print("\tAttribute \'%s\': %s" % (k, str(atts[k])))
+        for k in attributes.keys():
+            print("\tAttribute \'%s\': %s" % (k, str(attributes[k])))
 
 
 # Used profile entries:
 # crypto_atts: attributes which are known to be encrypted
-# crypto_dstn: key used to distinguish between particular result queries. Usually kind of username 
-#		attribute.
+# crypto_dstn: key used to distinguish between particular result queries. Usually kind of username attribute.
 #
 # network_timeout: how long we should wait until some response arrives
 # bind_dn:  bind using some specific account
@@ -87,17 +88,15 @@ class LdapCon(object):
 
     # allow to create LdapCon without cryptocache
     def __init__(self):
-        _ldapcon = None
+        self._ldapcon = None
+        self.network_timeout = 2
+
         self.flushProfile()
 
     @staticmethod
     def empty_profile():
-        profile = {}
-        profile["network_timeout"] = 10
-        profile["bind_dn"] = 'dc='
-        profile["bind_pw"] = ''
-        profile["bind_uri"] = ''
-        profile["cnid"] = 'uid'
+
+        profile = {"network_timeout": 2, "bind_dn": 'dc=', "bind_pw": '', "bind_uri": '', "cnid": 'uid'}
 
         return profile
 
@@ -159,7 +158,7 @@ class LdapCon(object):
 
         rr = self._ldapcon.whoami_s()
         flog.debug("ldapcon.bind: whoami test result '" + str(rr) + "'")
-        # print "whoami returns: '%s'" % rr
+
         if rr == '':
             flog.info(self.profile["bind_uri"] + ": invalid credentials check for user '%s'" % (str(u),))
             r = ''
@@ -167,15 +166,16 @@ class LdapCon(object):
         flog.debug("ldapcon.bind: result: '%s'" % (str(r),))
         return r
 
-    def raw_query(self, base, query, filter=None, scope=ldap.SCOPE_SUBTREE):
-        r = self._ldapcon.search_s(base, scope, query, filter)
+    def raw_query(self, base, query, xfilter=None, scope=ldap.SCOPE_SUBTREE):
+
+        r = self._ldapcon.search_s(base, scope, query, xfilter)
         nr = []
 
         for cn, atts in r:
             dstn = None
 
             if not cn:
-                # We don't want to return LDAP Refferals. Skip it.
+                # We don't want to return LDAP Referrals. Skip it.
                 continue
 
             nr.append((cn, atts))
@@ -197,35 +197,41 @@ class LdapSearch(LdapCon):
 
     @staticmethod
     def empty_profile():
+
         d = LdapCon.empty_profile()
-        e = {}
-        e["user"] = LDAP_SEARCH_USER
-        e["base_dn"] = ""
-        e["filter"] = []
-        e["scope"] = ldap.SCOPE_SUBTREE
-        e["recursive_member_attr"] = "uniqueMember"
+
+        e = {"user": LDAP_SEARCH_USER,
+             "base_dn": "",
+             "filter": [],
+             "scope": ldap.SCOPE_SUBTREE,
+             "recursive_member_attr": "uniqueMember"
+             }
 
         d.update(e)
 
         return d
 
     def search_user_dn(self, username, query_dict=None):
+
         r = None
         flog.debug("ldapsearch.search_user_dn: ")
+
         try:
             flog.debug("ldapsearch.search_user_dn: using template: " + self.profile["user"])
             template = string.Template(self.profile["user"])
 
             q = template.substitute(cnid=self.profile["cnid"], user=username)
             flog.debug("ldapsearch.search_user_dn: query: " + q)
-            # print "DEBUG: searchUser query=\'%s\'" % q
 
             r = self.raw_query(self.profile["base_dn"], q,
                                self.profile["filter"],
                                self.profile["scope"])
+
             flog.debug("ldapsearch.search_user_dn: query result: " + str(r))
+
         except ldap.error as e:
             flog.debug("ldapsearch.search_user_dn: query exception caught: " + str(e))
+
         except KeyError as e:
             flog.debug("ldapsearch.search_user_dn: query exception caught: " + str(e))
 
@@ -233,25 +239,28 @@ class LdapSearch(LdapCon):
         return r
 
     def authenticate_user(self, username, password, lookup_only=False):
+
         flog.debug("ldapsearch.authenticate_user: FIND")
         r = self.search_user_dn(username)
+
         if r:
             flog.debug("ldapsearch.authenticate_user: BIND")
+
             self.init()
             res = self.bind(r[0][0], password)
-            # print "Authenticate: %d" % res
+
             if res == '' and not lookup_only:
                 flog.debug("ldapsearch.authenticate_user: FAILED")
-                return (None, None)
+                return None, None
 
             flog.debug("ldapsearch.authenticate_user: GROUPS")
             groups = self.groups_user_dn(r[0][0])
             flog.debug("ldapsearch.authenticate_user: %d group(s) found" % (len(groups),))
 
-            return (r[0][0], groups)
+            return r[0][0], groups
 
         flog.debug("ldapsearch.authenticate_user: NOT FOUND")
-        return (None, None)
+        return None, None
 
     def groups_user_dn(self, user_dn):
         ret = []
@@ -267,8 +276,10 @@ class LdapSearch(LdapCon):
     # test cases, examples
 
 
+# Test:
 # ldapsearch -h 192.168.254.1 -x -b dc=nodomain -D cn=admin,dc=nodomain -w smithproxy 'uid=astib'
-# ldapsearch -h 192.168.254.1 -x -b dc=nodomain -D cn=admin,dc=nodomain -w smithproxy 'uniqueMember=cn=Ales Stibal,cn=users,dc=nodomain
+# ldapsearch -h 192.168.254.1 -x -b dc=nodomain -D cn=admin,dc=nodomain -w smithproxy
+#       'uniqueMember=cn=Ales Stibal,cn=users, dc=nodomain
 
 def test_LdapSearch(ip):
     myldap = LdapSearch()
@@ -293,6 +304,7 @@ def test_LdapSearch(ip):
 
     except ldap.LDAPError as e:
         print("LDAP ERROR: %s" % str(e))
+
     else:
         print("OK: All LDAP operations returned sucessfully.")
 

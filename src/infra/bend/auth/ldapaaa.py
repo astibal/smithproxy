@@ -8,9 +8,9 @@ import pylibconfig2 as cfg
 
 def load_config(fnm):
     try:
-        c = cfg.Config()
-        c.read_file(fnm)
-        return c
+        conf = cfg.Config()
+        conf.read_file(fnm)
+        return conf
 
     except Exception as e:
         print("Error loading file: " + str(e))
@@ -50,17 +50,15 @@ class AAAResolver:
         self.profiles = {}  # name->profile ... profile is 
 
     def create_profile(self, cfg_element):  # cfg.ConfGroup
-        key = cfg_element[0]
-        values = cfg_element[1]
 
-        # print str(values)
-        # for s in values.items():
-        #    print str(s)
+        _ = cfg_element[0]
+        values = cfg_element[1]
 
         if "ip" not in values.keys() \
                 or "bind_dn" not in values.keys() \
                 or "bind_pw" not in values.keys() \
                 or "base_dn" not in values.keys():
+
             print("Config is missing mandatory entries!")
             return None
         else:
@@ -69,12 +67,13 @@ class AAAResolver:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s [%(process)d] [%(levelname)s] %(message)s')
-    c = "/etc/smithproxy/users.cfg"
-    c = load_config(c)
-    c = cfg_2_dict(c)
+    config_file = "/etc/smithproxy/users.cfg"
+
+    confed = load_config(config_file)
+    confed = cfg_2_dict(confed)
 
     l = ldapcon.LdapSearch()
-    l.updateProfile(c["sources"]["ldap"]["example_ldap"])
+    l.updateProfile(confed["sources"]["ldap"]["example_ldap"])
     pprint.pprint(l.profile)
     print("-------")
     l.init()

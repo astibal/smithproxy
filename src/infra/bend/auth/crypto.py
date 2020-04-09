@@ -162,7 +162,6 @@ def aes_salted_decrypt(data, key) -> bytearray:
         txt = f.decrypt(base64.b64decode(r[1]))
         return txt
 
-
     return bytearray([])
 
 

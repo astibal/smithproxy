@@ -61,7 +61,6 @@ from daemon import Daemon, create_logger
 """
    WARNING: this is not intended to be edited by end users !! 
 """
-global TENANCY, TENANT_IDX, TENANT_NAME
 
 TENANCY = False
 TENANT_NAME = "default"
@@ -110,20 +109,21 @@ class PortalDaemon(Daemon):
         global TENANCY, TENANT_IDX, TENANT_NAME
         os.chdir(PORTAL_PATH)
 
-        e = None
+        ret_code = None
         flog.debug("PortalDaemon.run: starting " + self.nicename)
 
         if self.nicename.endswith("ssl"):
             flog.debug("PortalDaemon.run: Starting https portal")
             # e = webfr.run_portal_ssl(TENANT_NAME,TENANT_IDX,self.drop_privileges) # -- it breaks cgi-bin scripts logging
-            e = webfr.run_portal_ssl(TENANT_NAME, TENANT_IDX)
+            ret_code = webfr.run_portal_ssl(TENANT_NAME, TENANT_IDX)
+
         else:
             flog.debug("PortalDaemon.run: Starting http portal")
             # e = webfr.run_portal_plain(TENANT_NAME,TENANT_IDX,self.drop_privileges) -- it breaks cgi-bin scripts logging
-            e = webfr.run_portal_plain(TENANT_NAME, TENANT_IDX)
+            ret_code = webfr.run_portal_plain(TENANT_NAME, TENANT_IDX)
 
-        if e:
-            flog.error("PortalDaemon.run: finished with error: %s", str(e))
+        if ret_code:
+            flog.error("PortalDaemon.run: finished with error: %s", str(ret_code))
             return False
         else:
             flog.debug("PortalDaemon.run: finished...")
@@ -144,6 +144,7 @@ class BendDaemon(Daemon):
 
         flog.info("DOG => BEND: tenant=%s index=%s" % (TENANT_NAME, TENANT_IDX))
         print("DOG => BEND: tenant=%s index=%s" % (TENANT_NAME, TENANT_IDX))
+
         try:
             bend.run_bend(tenant_name=TENANT_NAME, tenant_index=TENANT_IDX)
         except Exception as e:
@@ -177,8 +178,10 @@ class BendBrodDaemon(Daemon):
 
 
 def start_exec(nicename, path, pidfile, additional_arguments=None):
-    if (SmithProxyDog.check_running_pidfile(pidfile)):
+
+    if SmithProxyDog.check_running_pidfile(pidfile):
         flog.info("process " + nicename + "already running")
+
     else:
         opt = [path, '--daemonize']
         if additional_arguments:
