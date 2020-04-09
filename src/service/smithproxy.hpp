@@ -59,10 +59,6 @@ typedef ThreadedReceiver<MitmUdpProxy,MitmProxy> theReceiver;
 typedef ThreadedAcceptor<MitmSocksProxy,SocksProxy> socksAcceptor;
 
 
-class MyPlainAcceptor : public theAcceptor {
-};
-
-
 class SmithProxy {
 
     explicit SmithProxy() : tenant_index_(0), tenant_name_("default") {
