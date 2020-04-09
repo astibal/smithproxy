@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
 
-from __future__ import print_function
-
-
 import sys
 import os
 import re
@@ -104,7 +101,7 @@ def load_sans_from_config(configfile):
     return [sans, ips]
 
 
-def generate_portal_cert(ca_key,ca_cert):
+def generate_portal_cert(ca_key, ca_cert):
     portal_cn = None
     sans, ips = load_sans_from_config("/etc/smithproxy/smithproxy.cfg")
 
@@ -177,24 +174,8 @@ def generate_server_cert(ca_key, ca_cert):
 def check_certificates(etc_dir, assume_yes=True, dry_run=False):
 
     print("== Checking installed certificates ==")
-    sxyca.SETTINGS["path"] = etc_dir
 
-    for X in [
-        sxyca.SETTINGS["path"],
-        os.path.join(sxyca.SETTINGS["path"], "certs/"),
-        os.path.join(sxyca.SETTINGS["path"], "certs/", "default/")]:
-
-        if not os.path.isdir(X):
-            try:
-                os.mkdir(X)
-            except FileNotFoundError:
-                print("fatal: path {} doesn't exit".format(X))
-                return
-            except PermissionError:
-                print("fatal: Permission denied: {}".format(X))
-                return
-
-    sxyca.SETTINGS["path"] = os.path.join(sxyca.SETTINGS["path"], "certs/", "default/")
+    sxyca.init_directories(etc_dir)
     sxyca.init_settings(cn=None, c=None)
     sxyca.load_settings()
 

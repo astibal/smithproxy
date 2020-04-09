@@ -242,6 +242,9 @@ if(UNIX)
     
     file(GLOB def_certs "etc/certs/default/*.pem")
     install(FILES ${def_certs} DESTINATION /etc/smithproxy/certs/default)
+
+    file(GLOB def_certs_flags "etc/certs/default/*.info")
+    install(FILES ${def_certs_flags} DESTINATION /etc/smithproxy/certs/default)
     
     # create CA dir
     install(DIRECTORY DESTINATION /etc/smithproxy/certs/ca)
@@ -265,7 +268,7 @@ if(UNIX)
 
     install(DIRECTORY src/infra/sslca DESTINATION share/smithproxy/infra)
 
-    file(GLOB sslca_makecerts "src/infra/sslca/makecerts.py")
+    file(GLOB sslca_makecerts "src/infra/sslca/make*.py")
     install(FILES ${sslca_makecerts} DESTINATION share/smithproxy/infra/sslca
             PERMISSIONS
             OWNER_READ OWNER_WRITE OWNER_EXECUTE
@@ -284,6 +287,7 @@ if(UNIX)
             )
 
     InstallSymlink(/usr/share/smithproxy/infra/sslca/makecerts.py /usr/bin/sx_regencerts)
+    InstallSymlink(/usr/share/smithproxy/infra/sslca/makeportalcert.py /usr/bin/sx_autoportalcert)
     InstallSymlink(/usr/share/smithproxy/infra/authtools/sx_passwd.py /usr/bin/sx_passwd)
 
     # portal installation

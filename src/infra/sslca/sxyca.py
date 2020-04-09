@@ -68,6 +68,31 @@ def pref_choice(*args):
     return None
 
 
+def init_directories(etc_dir):
+
+    global SETTINGS
+
+    SETTINGS["path"] = etc_dir
+
+    for X in [
+        SETTINGS["path"],
+        os.path.join(SETTINGS["path"], "certs/"),
+        os.path.join(SETTINGS["path"], "certs/", "default/")]:
+
+        if not os.path.isdir(X):
+            try:
+                os.mkdir(X)
+            except FileNotFoundError:
+                print("fatal: path {} doesn't exit".format(X))
+                return
+
+            except PermissionError:
+                print("fatal: Permission denied: {}".format(X))
+                return
+
+    SETTINGS["path"] = os.path.join(SETTINGS["path"], "certs/", "default/")
+
+
 def init_settings(cn, c, ou=None, o=None, l=None, s=None, def_subj_ca=None, def_subj_srv=None, def_subj_clt=None):
     global SETTINGS
 

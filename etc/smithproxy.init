@@ -61,6 +61,11 @@ function do_cmd {
 }
 
 function do_start {
+
+    # If flag file is present, regenerate portal certificate
+    if [[ -f /etc/smithproxy/certs/default/portal-gen.info ]]; then
+        /usr/bin/sx_autoportalcert
+    fi
     do_cmd "start" ${tenant_id}
 }
 
