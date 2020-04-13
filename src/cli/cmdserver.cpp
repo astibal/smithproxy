@@ -1195,7 +1195,7 @@ int cli_debug_level(struct cli_def *cli, const char *command, char *argv[], int 
         else if(a1 == "reset") {
             lp->level_ = NON;
 
-            get_logger()->level(cfgapi_table.logging.level);
+            get_logger()->level(CfgFactory::get().internal_init_level);
             cli_print(cli, "internal logging level changed to %d",get_logger()->level().level_ref());
         }
         else {
@@ -1267,7 +1267,7 @@ int cli_debug_logfile(struct cli_def *cli, const char *command, char *argv[], in
 
             int newlev = 0;
             if(a1 == "reset") {
-                newlev = cfgapi_table.logging.level.level();
+                newlev = static_cast<int>(CfgFactory::get().internal_init_level.level());
             } else {
                 newlev = safe_val(argv[0]);
             }
@@ -3298,7 +3298,7 @@ void client_thread(int client_socket) {
     get_logger()->remote_targets(string_format("cli-%d",client_socket),client_socket);
 
     logger_profile lp;
-    lp.level_ = cfgapi_table.logging.cli_init_level;
+    lp.level_ = CfgFactory::get().cli_init_level;
     get_logger()->target_profiles()[(uint64_t)client_socket] = &lp;
 
 

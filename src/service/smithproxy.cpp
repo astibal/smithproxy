@@ -634,12 +634,12 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
                     auto* o = new std::ofstream(CfgFactory::get().log_file.c_str(),std::ios::app);
                     get_logger()->targets(CfgFactory::get().log_file, o);
                     get_logger()->dup2_cout(false);
-                    get_logger()->level(cfgapi_table.logging.level);
+                    get_logger()->level(CfgFactory::get().internal_init_level);
 
                     auto* lp = new logger_profile();
                     lp->print_srcline_ = get_logger()->print_srcline();
                     lp->print_srcline_always_ = get_logger()->print_srcline_always();
-                    lp->level_ = cfgapi_table.logging.level;
+                    lp->level_ = CfgFactory::get().internal_init_level;
                     get_logger()->target_profiles()[(uint64_t)o] = lp;
 
                 }
@@ -657,7 +657,7 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
                     auto* o = new std::ofstream(CfgFactory::get().sslkeylog_file.c_str(),std::ios::app);
                     get_logger()->targets(CfgFactory::get().sslkeylog_file,o);
                     get_logger()->dup2_cout(false);
-                    get_logger()->level(cfgapi_table.logging.level);
+                    get_logger()->level(CfgFactory::get().internal_init_level);
 
                     auto* lp = new logger_profile();
                     lp->print_srcline_ = get_logger()->print_srcline();

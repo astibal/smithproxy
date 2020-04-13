@@ -332,8 +332,8 @@ int main(int argc, char *argv[]) {
 
     
     // if there is loglevel specified in config file and is bigger than we currently have set, use it
-    if(cfgapi_table.logging.level > get_logger()->level()) {
-        get_logger()->level(cfgapi_table.logging.level);
+    if(CfgFactory::get().internal_init_level > get_logger()->level()) {
+        get_logger()->level(CfgFactory::get().internal_init_level);
     }
     
     if(this_daemon.exists_pidfile()) {

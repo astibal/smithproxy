@@ -100,7 +100,6 @@ CfgFactory::CfgFactory(): log(get_log()), args_debug_flag(NON), syslog_level(INF
     log_console = false;
 }
 
-struct cfgapi_table_ cfgapi_table;
 
 bool CfgFactory::cfgapi_init(const char* fnm) {
     
@@ -286,7 +285,7 @@ bool CfgFactory::load_settings () {
         }
     }
 
-    cfgapi.getRoot()["settings"].lookupValue("log_level",cfgapi_table.logging.level.level_ref());
+    cfgapi.getRoot()["settings"].lookupValue("log_level",CfgFactory::get().internal_init_level.level_ref());
 
     cfgapi.getRoot()["settings"].lookupValue("syslog_server",syslog_server);
     cfgapi.getRoot()["settings"].lookupValue("syslog_port",syslog_port);
@@ -2531,7 +2530,7 @@ int save_settings(Config& ex) {
     socks_objects.add("async_dns", Setting::TypeBoolean) = socksServerCX::global_async_dns;
 
 
-    objects.add("log_level", Setting::TypeInt) = (int)cfgapi_table.logging.level.level_ref();
+    objects.add("log_level", Setting::TypeInt) = static_cast<int>(CfgFactory::get().internal_init_level.level_ref());
     objects.add("log_file", Setting::TypeString) = CfgFactory::get().log_file_base;
     objects.add("log_console", Setting::TypeBoolean)  = CfgFactory::get().log_console;
 

@@ -254,17 +254,6 @@ public:
     #endif
 };
 
-struct logging_{
-    loglevel level = INF;
-    loglevel cli_init_level = NON;
-} ;
-
-struct cfgapi_table_ {
-    logging_ logging;
-};
-
-
-extern struct cfgapi_table_ cfgapi_table;
 
 // HELPERS
 
