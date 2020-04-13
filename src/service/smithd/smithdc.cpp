@@ -44,23 +44,24 @@
 #define SIGSLOT_USE_POSIX_THREADS
 #include <sigslot.h>
 
-#include <getopt.h>
 
-
-#include <socle.hpp>
 #include <baseproxy.hpp>
 #include <uxcom.hpp>
 #include <service/smithd/smithdcx.hpp>
 
-static std::string cfg_ux_socket = "/var/run/smithd.sock";
+std::string cfg_ux_socket() {
+    static std::string sock = "/var/run/smithd.sock";
+
+    return sock;
+}
 
 
 
 class SmithClientCX : public SmithProtoCX, private LoganMate {
 public:
-    SmithClientCX(baseCom* c, unsigned int s) : SmithProtoCX(c,s) {};
-    SmithClientCX(baseCom* c, const char* h, const char* p) : SmithProtoCX(c,h,p) {};
-    virtual ~SmithClientCX() {};
+    SmithClientCX(baseCom* c, int s) : SmithProtoCX(c, s) {};
+    SmithClientCX(baseCom* c, const char* h, const char* p) : SmithProtoCX(c, h, p) {};
+    ~SmithClientCX() override = default;
 
     logan_attached<SmithClientCX> log = logan_attached<SmithClientCX>(this, "com.smithd");
     friend class logan_attached<SmithClientCX>;
@@ -73,7 +74,7 @@ public:
     sigslot::signal2<SmithClientCX*,LTVEntry*> sig_package_detail;
     
    
-    virtual void process_package(LTVEntry* e) {
+    void process_package(LTVEntry* e) override {
         
 	_deb("Package dump: \n%s",e->hr().c_str());
         
@@ -93,10 +94,10 @@ public:
     
     LTVEntry* pkg_create_envelope(uint32_t req_id, int32_t req_t) {
 
-        LTVEntry* packet = new LTVEntry();
+        auto* packet = new LTVEntry();
         packet->container(100);
         
-        LTVEntry* x = new LTVEntry();
+        auto* x = new LTVEntry();
         x->set_num(id_client::CL_VERSION,LTVEntry::num,0xF0);
         packet->add(x);
                 
@@ -114,10 +115,10 @@ public:
     LTVEntry* pkg_create_rateurl_request(uint32_t req_id, const char* URI) {
         LTVEntry* envelope = pkg_create_envelope(req_id,req_type::RQT_RATEURL);
         
-        LTVEntry* inner = new LTVEntry();
+        auto* inner = new LTVEntry();
         inner->container(CL_PAYLOAD);
         
-        LTVEntry* x = new LTVEntry();
+        auto* x = new LTVEntry();
         x->set_str(RQT_RATEURL,LTVEntry::str,URI);
         inner->add(x);
         
@@ -129,18 +130,18 @@ public:
 
 class SmithdProxy : public baseProxy {
     public:
-        SmithdProxy(baseCom* c) : baseProxy(c) {};
-        virtual baseHostCX* new_cx(const char* h, const char* p) { return new SmithClientCX(com(),h,p); };
-        virtual baseHostCX* new_cx(int s) { return new SmithClientCX(com(), s); };
+        explicit SmithdProxy(baseCom* c) : baseProxy(c) {};
+        baseHostCX* new_cx(const char* h, const char* p) override { return new SmithClientCX(com(),h,p); };
+        baseHostCX* new_cx(int s) override { return new SmithClientCX(com(), s); };
         
-        virtual void on_left_error(baseHostCX*) {  state().dead(true); };
-        virtual void on_right_error(baseHostCX*) { state().dead(true); };
+        void on_left_error(baseHostCX*) override { state().dead(true); };
+        void on_right_error(baseHostCX*) override { state().dead(true); };
 };
 
 template <class COM, class CX, class PX>
 class SimpleClient : public sigslot::has_slots<sigslot::multi_threaded_local> {
     public:
-        SimpleClient<COM,CX,PX>() {};
+        SimpleClient<COM,CX,PX>() = default;
         SimpleClient<COM,CX,PX>(const char* h, const char* p)  {
         
             px_ = new PX(new COM());
@@ -149,7 +150,7 @@ class SimpleClient : public sigslot::has_slots<sigslot::multi_threaded_local> {
             cx_ = new CX(px_->com()->slave(),h,p);
         };
         
-        virtual ~SimpleClient() {
+        ~SimpleClient() override {
             delete px_;
         }
         
@@ -182,7 +183,7 @@ class PackageHandler :  public sigslot::has_slots<sigslot::multi_threaded_local>
 
 void test_url2(const char* url = nullptr) {
     // Setup location of smithd socket 
-    const char* u = cfg_ux_socket.c_str();
+    const char* u = cfg_ux_socket().c_str();
     if(url != nullptr) u = url;
 
     SimpleClient<UxCom,SmithClientCX,SmithdProxy> client(u,"");
@@ -206,7 +207,7 @@ void test_url2(const char* url = nullptr) {
 void test_url(const char* url = nullptr) {
     
     // Setup location of smithd socket 
-    const char* u = cfg_ux_socket.c_str();
+    const char* u = cfg_ux_socket().c_str();
     if(url != nullptr) u = url;
   
     // Create basic proxy and associate com object (SmithdProxy is child of baseProxy)
@@ -217,7 +218,7 @@ void test_url(const char* url = nullptr) {
    
     // Create client context (cx). Contexts could be attached to Proxy, typically 
     // to left or right. We will create CX with slave com and connect.
-    SmithClientCX* cx = new SmithClientCX(p.com()->slave(),u,"");
+    auto* cx = new SmithClientCX(p.com()->slave(),u,"");
     
     // since this is simple client, we will block. Normally it doesn't matter, run() would 
     // eventually take care of it

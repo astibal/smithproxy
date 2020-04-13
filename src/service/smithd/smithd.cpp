@@ -48,12 +48,9 @@
 #include <log/logger.hpp>
 #include <hostcx.hpp>
 #include <baseproxy.hpp>
-#include <masterproxy.hpp>
 #include <threadedacceptor.hpp>
-#include <display.hpp>
 
 #include <main.hpp>
-#include <display.hpp>
 
 #include <libconfig.h++>
 
@@ -71,7 +68,7 @@
 
 class SmithServerCX : public SmithProtoCX, private LoganMate {
 public:
-    SmithServerCX(baseCom* c, unsigned int s) : SmithProtoCX(c,s) {};
+    SmithServerCX(baseCom* c, int s) : SmithProtoCX(c,s) {};
     SmithServerCX(baseCom* c, const char* h, const char* p) : SmithProtoCX(c,h,p) {};
     ~SmithServerCX() override = default;
 
@@ -108,8 +105,6 @@ public:
                 delete resp;
             }
 
-        } else if (m && false) {
-            /*another ID*/
         } else {
             if(m) {
                 _err("Unsupported request type %d", m->id());
@@ -166,7 +161,7 @@ class SmithdProxy : public baseProxy {
 
     logan_attached<SmithdProxy> log = logan_attached<SmithdProxy>(this, "com.smithd");
 public:
-    SmithdProxy(baseCom* c) : baseProxy(c) {};
+    explicit SmithdProxy(baseCom* c) : baseProxy(c) {};
     ~SmithdProxy() override = default;
 
     std::string to_string(int verbosity=iINF) const override {
@@ -232,7 +227,7 @@ bool config_file_check_only = false;
 class SmithD {
     logan_lite log_ = logan_lite("service");
 public:
-    SmithD() {}
+    SmithD() = default;
 
     static logan_lite& get_log() {
         return instance().log_;
@@ -245,7 +240,7 @@ public:
 
     static void my_terminate (int param) {
 
-        auto& log = instance().get_log();
+        auto& log = get_log();
 
         if (!cfg_daemonize)
             printf("Terminating ...\n");
@@ -267,7 +262,7 @@ public:
 
     static void my_usr1 (int param) {
 
-        auto& log = instance().get_log();
+        auto& log = get_log();
 
         _dia("USR1 signal handler started");
         _not("reloading policies and its objects !!");
@@ -287,16 +282,16 @@ static struct option long_options[] =
     {"dump",   no_argument,       (int*)&args_debug_flag.level_ref(), iDUM},
     {"extreme",   no_argument,       (int*)&args_debug_flag.level_ref(), iEXT},
     
-    {"config-file", required_argument, 0, 'c'},
-    {"config-check-only",no_argument,0,'o'},
-    {"daemonize", no_argument, 0, 'D'},
-    {"version", no_argument, 0, 'v'},
+    {"config-file", required_argument,  nullptr, 'c'},
+    {"config-check-only",no_argument,nullptr,'o'},
+    {"daemonize", no_argument, nullptr, 'D'},
+    {"version", no_argument, nullptr, 'v'},
     
     // multi-tenancy support: listening ports will be shifted by number 'i', while 't' controls logging, pidfile, etc.
     // both, or none of them have to be set
-    {"tenant-index", required_argument, 0, 'i'},
-    {"tenant-name", required_argument, 0, 't'},    
-    {0, 0, 0, 0}
+    {"tenant-index", required_argument, nullptr, 'i'},
+    {"tenant-name", required_argument, nullptr, 't'},
+    {nullptr, 0, nullptr, 0}
 };  
 
 
@@ -322,18 +317,18 @@ bool load_config(std::string& config_f, bool reload) {
             std::string log_target = cfg_log_file;
             log_target = string_format(log_target.c_str(),cfg_tenant_name.c_str());
             
-            std::cout << "log target" << log_target << std::endl;
+            std::cout << "log target: " << log_target << std::endl;
             
             // prepare custom crashlog file
             std::string crlog = log_target + ".crashlog.log";
             this_daemon.set_crashlog(crlog.c_str());
             
-            std::ofstream * o = new std::ofstream(log_target.c_str(),std::ios::app);
+            auto* o = new std::ofstream(log_target.c_str(),std::ios::app);
             get_logger()->targets(log_target,o);
             get_logger()->dup2_cout(false);
             get_logger()->level(cfg_log_level);
             
-            logger_profile* lp = new logger_profile();
+            auto* lp = new logger_profile();
             lp->print_srcline_ = get_logger()->print_srcline();
             lp->print_srcline_always_ = get_logger()->print_srcline_always();
             lp->level_ = cfg_log_level;
@@ -418,7 +413,7 @@ int main(int argc, char *argv[]) {
     /* getopt_long stores the option index here. */
         int option_index = 0;
     
-        char c = getopt_long (argc, argv, "p:voDcit",
+        int c = getopt_long (argc, argv, "p:voDcit",
                         long_options, &option_index);
         if (c < 0) break;
 

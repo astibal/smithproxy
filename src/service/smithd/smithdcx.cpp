@@ -46,12 +46,12 @@
 #include <log/logger.hpp>
 
 
-SmithProtoCX::SmithProtoCX(baseCom*c, const char* h, const char* p): baseHostCX(c, h, p) {
+SmithProtoCX::SmithProtoCX(baseCom *c, const char* h, const char* p): baseHostCX(c, h, p) {
     to_read_buffer = buffer(0);
     reset_hb_me();
     peer_hb_reset();
 }
-SmithProtoCX::SmithProtoCX(baseCom*c, unsigned int s): baseHostCX(c,s) {
+SmithProtoCX::SmithProtoCX(baseCom *c, int s): baseHostCX(c, s) {
     to_read_buffer = buffer(0);
     reset_hb_me();
     peer_hb_reset();
@@ -71,7 +71,7 @@ void SmithProtoCX::destroy_packages() {
     for (auto const& i: packages()) {
         _deb("SmithProtoCX::destroy_packages[%s]: deleting LTVEntry with id %d",c_name(),i->id());
         delete i;
-    };
+    }
 
     _deb("SmithProtoCX::destroy_packages[%s]: clearing, size %d",c_name(),packages().size());
     packages().clear();
@@ -162,7 +162,7 @@ buffer SmithProtoCX::to_read() {
     auto size = 0;
     for (auto const& i: packages()) {
         size += i->len();
-    };
+    }
 
 
     to_read_buffer.clear();
@@ -170,7 +170,7 @@ buffer SmithProtoCX::to_read() {
 
     for (auto const& i: packages()) {
         to_read_buffer.append(i->buffer(), i->len());
-    };
+    }
 
     return to_read_buffer.view();
 }

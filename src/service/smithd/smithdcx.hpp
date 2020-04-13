@@ -51,7 +51,7 @@
 class SmithProtoCX : public baseHostCX {
 
 public:
-    SmithProtoCX(baseCom*c, unsigned int s);
+    SmithProtoCX(baseCom*c, int s);
     SmithProtoCX(baseCom*c, const char* h, const char* p);
     ~SmithProtoCX() override;
         
@@ -75,12 +75,12 @@ public:
     
     inline void send(LTVEntry* e) { buffer b(e->buffer(),e->buflen()); baseHostCX::send(b);  }
     
-    inline unsigned int use_my_hb() { int r = hb_me; hb_me++; return r; }
-    inline unsigned int my_hb() { return hb_me; }
-    inline unsigned int use_peer_hb() { int r = hb_peer; hb_peer++; return r; }
-    inline unsigned int peer_hb() { return hb_peer; }
-    inline unsigned int peer_hb_counter() { return hb_peer_timeout_counter; }
-    inline void         peer_hb_reset() { time(&hb_peer_received); hb_peer_timeout_counter = 0; } 
+    inline unsigned long use_my_hb() { unsigned long r = hb_me; hb_me++; return r; }
+    inline unsigned long my_hb() { return hb_me; }
+    inline unsigned long use_peer_hb() { unsigned long r = hb_peer; hb_peer++; return r; }
+    inline unsigned long peer_hb() { return hb_peer; }
+    inline int peer_hb_counter() { return hb_peer_timeout_counter; }
+    inline void         peer_hb_reset() { time(&hb_peer_received); hb_peer_timeout_counter = 0; }
     
     const unsigned int id_keepalive = 1;
 
@@ -93,7 +93,7 @@ protected:
     std::vector<LTVEntry*> packages_;
     buffer to_read_buffer; 
 
-    long hb_me = 0;
+    unsigned long hb_me = 0;
     time_t           hb_me_sent = 0;
     int hb_me_timeout = 10;
     
