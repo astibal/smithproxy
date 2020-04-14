@@ -42,51 +42,6 @@
 #include <policy/authfactory.hpp>
 #include <inspect/sigfactory.hpp>
 
-
-void Service::my_terminate (int param) {
-
-    Service* service = self();
-    auto& log = service->log;
-
-    if (! service->cfg_daemonize )
-        _err("Terminating ...\n");
-
-    service->stop();
-
-    service->cnt_terminate++;
-    if(service->cnt_terminate == 3) {
-        if (!service->cfg_daemonize )
-            _fat("Failed to terminate gracefully. Next attempt will be enforced.\n");
-    }
-    if(service->cnt_terminate > 3) {
-        if (! service->cfg_daemonize )
-            _fat("Enforced exit.\n");
-        abort();
-    }
-}
-
-
-void Service::my_usr1 (int param) {
-    auto& log = service_log();
-
-    _dia("USR1 signal handler started (param %d)", param);
-    self()->reload();
-}
-
-
-bool Service::abort_sleep(unsigned int steps, unsigned int step) {
-
-    for(unsigned int i = 0; i < steps; i++) {
-        ::sleep(step);
-        if (Service::self()->terminate_flag) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-
 SmithProxy::~SmithProxy () {
 
     delete plain_thread;

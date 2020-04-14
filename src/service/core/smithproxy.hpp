@@ -47,8 +47,11 @@
 #include <threadedreceiver.hpp>
 
 #include <cfgapi.hpp>
+
+#include <service/core/service.hpp>
 #include <service/daemon.hpp>
 #include <service/netservice.hpp>
+
 #include <smithlog.hpp>
 #include <service/dnsupd/smithdnsupd.hpp>
 
@@ -58,59 +61,7 @@ typedef ThreadedAcceptor<MitmMasterProxy,MitmProxy> theAcceptor;
 typedef ThreadedReceiver<MitmUdpProxy,MitmProxy> theReceiver;
 typedef ThreadedAcceptor<MitmSocksProxy,SocksProxy> socksAcceptor;
 
-class Service {
 
-protected:
-
-    explicit Service() : tenant_index_(0), tenant_name_("default"), log(service_log()) {
-
-        self() = this;
-
-        log.level(WAR);
-        reload_handler_ = my_usr1;
-        terminate_handler_ = my_terminate;
-
-        ts_sys_started = ::time(nullptr);
-    }
-    unsigned int tenant_index_;
-    std::string  tenant_name_;
-
-public:
-
-    // flag for threads which don't have mechanics to terminate themselves
-    std::atomic<bool> terminate_flag {false};
-    static bool abort_sleep(unsigned int steps, unsigned int step=1);
-
-    unsigned int tenant_index () const { return tenant_index_; }
-    void tenant_index (unsigned int tenantIndex) { tenant_index_ = tenantIndex; }
-
-    const std::string& tenant_name () const { return tenant_name_;  }
-    void tenant_name (const std::string &tenantName) { tenant_name_ = tenantName;  }
-
-    bool cfg_daemonize = false;
-    std::time_t ts_sys_started{0};
-
-
-    void (*terminate_handler_)(int) = nullptr;
-    void (*reload_handler_)(int) = nullptr;
-
-    logan_lite& log;
-    static logan_lite& service_log() { static logan_lite log = logan_lite("service"); return log; }
-
-
-    // "self" static variable is set by Service c-tor (there could be just one "self" at a time)
-    static Service*& self() { static Service* s(nullptr); return s; };
-    static void my_terminate(int param);
-    static void my_usr1 (int param);
-    void set_handler_term(void (*terminate_handler)(int)) { terminate_handler_ = terminate_handler;  }
-    void set_handler_reload(void (*reload_handler)(int)) { reload_handler_ = reload_handler; }
-
-    volatile int cnt_terminate = 0;
-
-    virtual void run() = 0;
-    virtual void stop() = 0;
-    virtual void reload() = 0;
-};
 
 class SmithProxy : public Service {
 

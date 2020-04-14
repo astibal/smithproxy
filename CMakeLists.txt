@@ -117,7 +117,7 @@ add_executable(smithproxy
         src/inspect/dnsinspector.hpp
         src/inspect/dnsinspector.cpp
         src/cli/clihelp.hpp
-        src/cli/clihelp.cpp src/cli/cligen.hpp src/cli/cligen.cpp)
+        src/cli/clihelp.cpp src/cli/cligen.hpp src/cli/cligen.cpp src/service/core/service.cpp src/service/core/service.hpp)
 
 add_executable(smithd
         ${SMITHD_DIR}/smithd.cpp
