@@ -77,6 +77,10 @@ protected:
 
 public:
 
+    // flag for threads which don't have mechanics to terminate themselves
+    std::atomic<bool> terminate_flag {false};
+    static bool abort_sleep(unsigned int steps, unsigned int step=1);
+
     unsigned int tenant_index () const { return tenant_index_; }
     void tenant_index (unsigned int tenantIndex) { tenant_index_ = tenantIndex; }
 
@@ -94,6 +98,7 @@ public:
     static logan_lite& service_log() { static logan_lite log = logan_lite("service"); return log; }
 
 
+    // "self" static variable is set by Service c-tor (there could be just one "self" at a time)
     static Service*& self() { static Service* s(nullptr); return s; };
     static void my_terminate(int param);
     static void my_usr1 (int param);
@@ -147,8 +152,6 @@ public:
         return sx;
     }
 
-    // flag for threads which don't have mechanics to terminate themseves
-    std::atomic<bool> terminate_flag {false};
     static std::thread* create_identity_refresh_thread();
 
     void create_log_writer_thread();

@@ -74,6 +74,19 @@ void Service::my_usr1 (int param) {
 }
 
 
+bool Service::abort_sleep(unsigned int steps, unsigned int step) {
+
+    for(unsigned int i = 0; i < steps; i++) {
+        ::sleep(step);
+        if (Service::self()->terminate_flag) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+
 SmithProxy::~SmithProxy () {
 
     delete plain_thread;
@@ -99,7 +112,7 @@ void SmithProxy::reload() {
 std::thread* SmithProxy::create_identity_refresh_thread() {
 
 
-     auto* id_thread = new std::thread([]() {
+    auto* id_thread = new std::thread([]() {
         unsigned int sleep_time = 1;
         auto& log = instance().log;
 
@@ -107,9 +120,16 @@ std::thread* SmithProxy::create_identity_refresh_thread() {
         // this is workaround for rare(?) race condition when shm is not
         // initialized yet.
 
-        ::sleep(20);
+        if (abort_sleep(20) ) {
+            return;
+        }
 
         for (unsigned i = 0; ; i++) {
+
+            if(abort_sleep(20)) {
+                _dia("id_thread: terminating");
+                break;
+            }
 
             _deb("id_thread: refreshing identities");
 
@@ -119,12 +139,7 @@ std::thread* SmithProxy::create_identity_refresh_thread() {
 
             _dum("id_thread: finished");
 
-            ::sleep(sleep_time);
 
-            if(SmithProxy::instance().terminate_flag) {
-                _dia("id_thread: terminating");
-                break;
-            }
         }
     });
 

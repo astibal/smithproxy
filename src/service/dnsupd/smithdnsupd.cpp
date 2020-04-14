@@ -36,36 +36,34 @@
     this exception also makes it possible to release a modified version
     which carries forward this exception.
 */
-#include <sys/socket.h>
-#include <openssl/rand.h>
 
 #include <thread>
 #include <vector>
 #include <set>
-#include <time.h>
+#include <ctime>
 
 #include <policy/addrobj.hpp>
 #include <inspect/dns.hpp>
 #include <inspect/dnsinspector.hpp>
 #include <cfgapi.hpp>
-#include <service/dnsupd/smithdnsupd.hpp>
 
+#include <service/core/smithproxy.hpp>
 
-
-
-#pragma GCC diagnostic ignored "-Wmissing-noreturn"
-#pragma GCC diagnostic push
 
 std::thread* create_dns_updater() {
-    std::thread * dns_thread = new std::thread([]() {
+    auto* dns_thread = new std::thread([]() {
 
     logan_lite log = logan_lite("com.dns.updater");
 
-    int sleep_time = 3;
+    unsigned int sleep_time = 3;
     int requery_ttl = 60;
     std::set<std::string> record_blacklist;
 
     for(unsigned int i = 1; ; i++) {
+
+        if(Service::abort_sleep(sleep_time)) {
+            break;
+        }
 
         _dia("dns_updater: refresh round %d",i);
 
@@ -84,7 +82,7 @@ std::thread* create_dns_updater() {
                     for (auto const& rec: recs) {
                         DNS_Response *r = DNS::get_dns_cache().get(rec);
                         if (r) {
-                            int ttl = (r->loaded_at + r->answers().at(0).ttl_) - ::time(nullptr);
+                            long ttl = (r->loaded_at + r->answers().at(0).ttl_) - ::time(nullptr);
 
                             _dia("fqdn %s ttl %d", rec.c_str(), ttl);
 
@@ -149,11 +147,8 @@ std::thread* create_dns_updater() {
             record_blacklist.clear();
         }
 
-
-        ::sleep(sleep_time);
     } } );
       
     
     return dns_thread;
 }
-#pragma GCC diagnostic pop
