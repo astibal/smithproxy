@@ -42,7 +42,7 @@
 
 #include <policy/authfactory.hpp>
 
-class ServiceFactory {
+class NetworkServiceFactory {
 public:
 
     using proxy_type = threadedProxyWorker::proxy_type_t;
@@ -60,10 +60,10 @@ public:
 };
 
 template <class Listener, class Com>
-Listener * ServiceFactory::prepare_listener (unsigned int port, std::string const &friendly_name, int sub_workers,
-                                             proxy_type type) {
+Listener * NetworkServiceFactory::prepare_listener (unsigned int port, std::string const &friendly_name, int sub_workers,
+                                                    proxy_type type) {
 
-    auto log = ServiceFactory::log();
+    auto log = NetworkServiceFactory::log();
 
     if(sub_workers < 0) {
         return nullptr;
@@ -90,9 +90,9 @@ Listener * ServiceFactory::prepare_listener (unsigned int port, std::string cons
 }
 
 template <class Listener, class Com>
-Listener* ServiceFactory::prepare_listener(std::string const& str_path, std::string const& friendly_name, std::string const& def_path, int sub_workers, proxy_type type) {
+Listener* NetworkServiceFactory::prepare_listener(std::string const& str_path, std::string const& friendly_name, std::string const& def_path, int sub_workers, proxy_type type) {
 
-    auto log = ServiceFactory::log();
+    auto log = NetworkServiceFactory::log();
 
     if(sub_workers < 0) {
         return nullptr;

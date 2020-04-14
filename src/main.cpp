@@ -73,7 +73,7 @@
 #include <staticcontent.hpp>
 #include <smithlog.hpp>
 
-#include <service/smithproxy.hpp>
+#include <service/core/smithproxy.hpp>
 
 
 void prepare_queue_logger(loglevel const& lev) {

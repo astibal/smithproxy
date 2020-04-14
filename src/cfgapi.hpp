@@ -56,18 +56,36 @@
 
 using namespace libconfig;
 
-class CfgFactory {
+class CfgFactoryBase {
+public:
+    CfgFactoryBase(): log(get_log()) {}
+    CfgFactoryBase(CfgFactoryBase const &) = delete;
+    void operator=(const CfgFactoryBase&) = delete;
+
+    logan_lite& log;
+    static logan_lite& get_log() {
+        static logan_lite l("config");
+        return l;
+    }
+
+    std::string config_file;
+    int tenant_index = -1;
+    std::string tenant_name;
+
+    loglevel internal_init_level = INF;
+    loglevel cli_init_level = NON;
+
+    virtual bool apply_tenant_config() = 0;
+    int  apply_tenant_index(std::string& what, int& idx);
+};
+
+
+class CfgFactory : public CfgFactoryBase {
 
     CfgFactory();
 
     Config cfgapi;
     std::recursive_mutex lock_;
-    logan_lite& log;
-
-    static logan_lite& get_log() {
-        static logan_lite l("config");
-        return l;
-    }
 
 public:
     CfgFactory(CfgFactory const &) = delete;
@@ -97,9 +115,6 @@ public:
     std::string listen_udp_port;
     std::string listen_socks_port;
 
-    std::string config_file;
-    int tenant_index = -1;
-    std::string tenant_name;
     std::string dir_msg_templates;
 
     bool config_file_check_only;
@@ -179,8 +194,7 @@ public:
     std::shared_ptr<ProfileAlgDns> lookup_prof_alg_dns (const char *name);
     std::shared_ptr<ProfileScript> lookup_prof_script (const char *name);
 
-    bool apply_tenant_config ();
-    int  apply_tenant_index(std::string& what, int& idx);
+    bool apply_tenant_config() override;
 
     bool load_settings ();
     int  load_debug();

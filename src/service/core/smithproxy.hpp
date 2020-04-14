@@ -48,7 +48,7 @@
 
 #include <cfgapi.hpp>
 #include <service/daemon.hpp>
-#include <service/srvutils.hpp>
+#include <service/netservice.hpp>
 #include <smithlog.hpp>
 #include <service/dnsupd/smithdnsupd.hpp>
 
@@ -58,27 +58,61 @@ typedef ThreadedAcceptor<MitmMasterProxy,MitmProxy> theAcceptor;
 typedef ThreadedReceiver<MitmUdpProxy,MitmProxy> theReceiver;
 typedef ThreadedAcceptor<MitmSocksProxy,SocksProxy> socksAcceptor;
 
+class Service {
 
-class SmithProxy {
+protected:
 
-    explicit SmithProxy() : tenant_index_(0), tenant_name_("default") {
+    explicit Service() : tenant_index_(0), tenant_name_("default"), log(service_log()) {
+
+        self() = this;
+
         log.level(WAR);
         reload_handler_ = my_usr1;
         terminate_handler_ = my_terminate;
 
         ts_sys_started = ::time(nullptr);
-    };
-    virtual ~SmithProxy ();
-
-
+    }
     unsigned int tenant_index_;
     std::string  tenant_name_;
 
+public:
+
+    unsigned int tenant_index () const { return tenant_index_; }
+    void tenant_index (unsigned int tenantIndex) { tenant_index_ = tenantIndex; }
+
+    const std::string& tenant_name () const { return tenant_name_;  }
+    void tenant_name (const std::string &tenantName) { tenant_name_ = tenantName;  }
+
+    bool cfg_daemonize = false;
+    std::time_t ts_sys_started{0};
+
+
     void (*terminate_handler_)(int) = nullptr;
     void (*reload_handler_)(int) = nullptr;
+
+    logan_lite& log;
+    static logan_lite& service_log() { static logan_lite log = logan_lite("service"); return log; }
+
+
+    static Service*& self() { static Service* s(nullptr); return s; };
+    static void my_terminate(int param);
+    static void my_usr1 (int param);
+    void set_handler_term(void (*terminate_handler)(int)) { terminate_handler_ = terminate_handler;  }
+    void set_handler_reload(void (*reload_handler)(int)) { reload_handler_ = reload_handler; }
+
+    volatile int cnt_terminate = 0;
+
+    virtual void run() = 0;
+    virtual void stop() = 0;
+    virtual void reload() = 0;
+};
+
+class SmithProxy : public Service {
+
+    SmithProxy() : Service() {};
+    virtual ~SmithProxy ();
+
 public:
-    bool cfg_daemonize = false;
-    logan_lite log = logan_lite("service");
 
     theAcceptor* plain_proxy = nullptr;
     theAcceptor* ssl_proxy = nullptr;
@@ -104,7 +138,6 @@ public:
     std::thread* redir_ssl_thread = nullptr;
     std::thread* redir_udp_thread = nullptr;
 
-    std::time_t ts_sys_started{0};
 
     SmithProxy (SmithProxy const&) = delete;
     SmithProxy& operator= (SmithProxy const& r) = delete;
@@ -114,16 +147,8 @@ public:
         return sx;
     }
 
-    unsigned int tenant_index () const { return tenant_index_; }
-    void tenant_index (unsigned int tenantIndex) { tenant_index_ = tenantIndex;}
-
-    const std::string& tenant_name () const { return tenant_name_;  }
-    void tenant_name (const std::string &tenantName) { tenant_name_ = tenantName;  }
-
-    void set_handler_term(void (*terminate_handler)(int)) { terminate_handler_ = terminate_handler;  }
-    void set_handler_reload(void (*reload_handler)(int)) { reload_handler_ = reload_handler; }
-
-
+    // flag for threads which don't have mechanics to terminate themseves
+    std::atomic<bool> terminate_flag {false};
     static std::thread* create_identity_refresh_thread();
 
     void create_log_writer_thread();
@@ -131,16 +156,13 @@ public:
     void create_identity_thread();
     void create_listeners();
 
-    void run();
-    void stop();
+    void run() override;
+    void stop() override;
+    void reload() override;
 
-    static void my_terminate(int param);
-    static void my_usr1 (int param);
     static int load_signatures(libconfig::Config& cfg, const char* name, std::vector<std::shared_ptr<duplexFlowMatch>>& target);
     static bool init_syslog();
     bool load_config(std::string& config_f, bool reload = false);
-
-    volatile static int cnt_terminate;
 };
 
 

@@ -37,13 +37,41 @@
     which carries forward this exception.
 */
 
-#include <service/smithproxy.hpp>
+#include <service/core/smithproxy.hpp>
 #include <cli/cmdserver.hpp>
 #include <policy/authfactory.hpp>
 #include <inspect/sigfactory.hpp>
 
-volatile int SmithProxy::cnt_terminate = 0;
 
+void Service::my_terminate (int param) {
+
+    Service* service = self();
+    auto& log = service->log;
+
+    if (! service->cfg_daemonize )
+        _err("Terminating ...\n");
+
+    service->stop();
+
+    service->cnt_terminate++;
+    if(service->cnt_terminate == 3) {
+        if (!service->cfg_daemonize )
+            _fat("Failed to terminate gracefully. Next attempt will be enforced.\n");
+    }
+    if(service->cnt_terminate > 3) {
+        if (! service->cfg_daemonize )
+            _fat("Enforced exit.\n");
+        abort();
+    }
+}
+
+
+void Service::my_usr1 (int param) {
+    auto& log = service_log();
+
+    _dia("USR1 signal handler started (param %d)", param);
+    self()->reload();
+}
 
 
 SmithProxy::~SmithProxy () {
@@ -59,6 +87,12 @@ SmithProxy::~SmithProxy () {
     delete id_thread;
 
     delete log_thread;
+}
+
+void SmithProxy::reload() {
+    _war("reloading configuration (excluding signatures)");
+    SmithProxy::instance().load_config(CfgFactory::get().config_file,true);
+    _dia("USR1 signal handler finished");
 }
 
 
@@ -86,6 +120,11 @@ std::thread* SmithProxy::create_identity_refresh_thread() {
             _dum("id_thread: finished");
 
             ::sleep(sleep_time);
+
+            if(SmithProxy::instance().terminate_flag) {
+                _dia("id_thread: terminating");
+                break;
+            }
         }
     });
 
@@ -121,50 +160,50 @@ void SmithProxy::create_identity_thread() {
 
 
 void SmithProxy::create_listeners() {
-    plain_proxy = ServiceFactory::prepare_listener<theAcceptor, TCPCom>(std::stoi(CfgFactory::get().listen_tcp_port),
-                                                                        "plain-tcp",
-                                                                        CfgFactory::get().num_workers_tcp,
-                                                                        ServiceFactory::proxy_type::TRANSPARENT);
+    plain_proxy = NetworkServiceFactory::prepare_listener<theAcceptor, TCPCom>(std::stoi(CfgFactory::get().listen_tcp_port),
+                                                                               "plain-tcp",
+                                                                               CfgFactory::get().num_workers_tcp,
+                                                                               NetworkServiceFactory::proxy_type::TRANSPARENT);
 
-    ssl_proxy = ServiceFactory::prepare_listener<theAcceptor, MySSLMitmCom>(
+    ssl_proxy = NetworkServiceFactory::prepare_listener<theAcceptor, MySSLMitmCom>(
             std::stoi(CfgFactory::get().listen_tls_port),
             "tls",
             CfgFactory::get().num_workers_tls,
-            ServiceFactory::proxy_type::TRANSPARENT);
+            NetworkServiceFactory::proxy_type::TRANSPARENT);
 
-    dtls_proxy = ServiceFactory::prepare_listener<theReceiver, MyDTLSMitmCom>(
+    dtls_proxy = NetworkServiceFactory::prepare_listener<theReceiver, MyDTLSMitmCom>(
             std::stoi(CfgFactory::get().listen_dtls_port),
             "dtls",
             CfgFactory::get().num_workers_dtls,
-            ServiceFactory::proxy_type::TRANSPARENT);
+            NetworkServiceFactory::proxy_type::TRANSPARENT);
 
-    udp_proxy = ServiceFactory::prepare_listener<theReceiver, UDPCom>(std::stoi(CfgFactory::get().listen_udp_port),
-                                                                      "udp",
-                                                                      CfgFactory::get().num_workers_udp,
-                                                                      ServiceFactory::proxy_type::TRANSPARENT);
+    udp_proxy = NetworkServiceFactory::prepare_listener<theReceiver, UDPCom>(std::stoi(CfgFactory::get().listen_udp_port),
+                                                                             "udp",
+                                                                             CfgFactory::get().num_workers_udp,
+                                                                             NetworkServiceFactory::proxy_type::TRANSPARENT);
 
-    socks_proxy = ServiceFactory::prepare_listener<socksAcceptor, socksTCPCom>(
+    socks_proxy = NetworkServiceFactory::prepare_listener<socksAcceptor, socksTCPCom>(
             std::stoi(CfgFactory::get().listen_socks_port),
             "socks",
             CfgFactory::get().num_workers_socks,
-            ServiceFactory::proxy_type::PROXY);
+            NetworkServiceFactory::proxy_type::PROXY);
 
-    redir_plain_proxy = ServiceFactory::prepare_listener<theAcceptor, TCPCom>(
+    redir_plain_proxy = NetworkServiceFactory::prepare_listener<theAcceptor, TCPCom>(
             std::stoi(CfgFactory::get().listen_tcp_port) + 1000,
             "plain-rdr",
             CfgFactory::get().num_workers_tcp,
-            ServiceFactory::proxy_type::REDIRECT);
-    redir_ssl_proxy = ServiceFactory::prepare_listener<theAcceptor, MySSLMitmCom>(
+            NetworkServiceFactory::proxy_type::REDIRECT);
+    redir_ssl_proxy = NetworkServiceFactory::prepare_listener<theAcceptor, MySSLMitmCom>(
             std::stoi(CfgFactory::get().listen_tls_port) + 1000,
             "ssl-rdr",
             CfgFactory::get().num_workers_tcp,
-            ServiceFactory::proxy_type::REDIRECT);
+            NetworkServiceFactory::proxy_type::REDIRECT);
 
-    redir_udp_proxy = ServiceFactory::prepare_listener<theReceiver, UDPCom>(
+    redir_udp_proxy = NetworkServiceFactory::prepare_listener<theReceiver, UDPCom>(
             std::stoi(CfgFactory::get().listen_udp_port) + 973,  // 973 + default 50080 = 51053: should suggest DNS only
             "udp-rdr",
             CfgFactory::get().num_workers_udp,
-            ServiceFactory::proxy_type::REDIRECT);
+            NetworkServiceFactory::proxy_type::REDIRECT);
 
 
     if ((plain_proxy == nullptr && CfgFactory::get().num_workers_tcp >= 0) ||
@@ -373,6 +412,9 @@ void SmithProxy::run() {
 }
 
 void SmithProxy::stop() {
+
+    terminate_flag = true;
+
     if (plain_proxy != nullptr) {
         plain_proxy->state().dead(true);
     }
@@ -391,40 +433,6 @@ void SmithProxy::stop() {
         socks_proxy->state().dead(true);
     }
 }
-
-
-void SmithProxy::my_terminate (int param) {
-
-    auto& log = instance().log;
-
-    if (! instance().cfg_daemonize )
-        _err("Terminating ...\n");
-
-    SmithProxy::instance().stop();
-
-    cnt_terminate++;
-    if(cnt_terminate == 3) {
-        if (!instance().cfg_daemonize )
-            _fat("Failed to terminate gracefully. Next attempt will be enforced.\n");
-    }
-    if(cnt_terminate > 3) {
-        if (! instance().cfg_daemonize )
-            _fat("Enforced exit.\n");
-        abort();
-    }
-}
-
-
-void SmithProxy::my_usr1 (int param) {
-    auto& log = instance().log;
-
-    _dia("USR1 signal handler started (param %d)", param);
-    _war("reloading configuration (excluding signatures)");
-    SmithProxy::instance().load_config(CfgFactory::get().config_file,true);
-    _dia("USR1 signal handler finished");
-}
-
-
 
 
 int SmithProxy::load_signatures(libconfig::Config& cfg, const char* name, std::vector<std::shared_ptr<duplexFlowMatch>>& target) {

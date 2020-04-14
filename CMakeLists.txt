@@ -93,15 +93,15 @@ add_executable(smithproxy
         src/inspect/dns.cpp
         src/policy/inspectors.cpp
         src/policy/addrobj.cpp
-        src/service/srvutils.cpp
+        src/service/netservice.cpp
         src/staticcontent.cpp
         src/policy/authfactory6.cpp
         src/smithlog.cpp
         src/proxy/filterproxy.cpp
         src/service/dnsupd/smithdnsupd.cpp
         src/policy/loadb.cpp
-        src/service/smithproxy.hpp
-        src/service/smithproxy.cpp
+        src/service/core/smithproxy.hpp
+        src/service/core/smithproxy.cpp
 
         src/ext/libcidr/cidr.cpp
         src/ext/cxxopts/cxxopts.hpp

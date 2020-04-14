@@ -53,9 +53,10 @@
 #include <main.hpp>
 
 #include <libconfig.h++>
+#include <cfgapi.hpp>
 
 #include <service/daemon.hpp>
-#include <service/srvutils.hpp>
+#include <service/netservice.hpp>
 #include <smithlog.hpp>
 
 #include <service/smithd/smithdcx.hpp>
@@ -208,15 +209,16 @@ static std::string config_file;
 std::recursive_mutex merged_cfg_write_lock;
 static bool cfg_daemonize = false;
 bool cfg_mtrace_enable = false;
-static std::string cfg_log_file;
 static loglevel cfg_log_level = INF;
 static int cfg_log_console = false;
 static int cfg_smithd_workers = 0;
+
+static std::string cfg_log_file = "/var/log/smithmerged.%s.log";
 static std::string cfg_smithd_listen_port = "/var/run/smithd.%s.sock";
 
 // Tenant configuration
-static std::string cfg_tenant_index;
-static std::string cfg_tenant_name;
+static std::string cfg_tenant_index = "0";
+static std::string cfg_tenant_name = "default";
 
 // Various
 volatile static int cnt_terminate = 0;
@@ -311,35 +313,38 @@ bool load_config(std::string& config_f, bool reload) {
     // Read the file. If there is an error, report it and exit.
     try {
         cfgapi.readFile(config_f.c_str());
-        
-        if (cfgapi.getRoot()["settings"].lookupValue("log_file",cfg_log_file)) {
-            
-            std::string log_target = cfg_log_file;
-            log_target = string_format(log_target.c_str(),cfg_tenant_name.c_str());
-            
-            std::cout << "log target: " << log_target << std::endl;
-            
-            // prepare custom crashlog file
-            std::string crlog = log_target + ".crashlog.log";
-            this_daemon.set_crashlog(crlog.c_str());
-            
-            auto* o = new std::ofstream(log_target.c_str(),std::ios::app);
-            get_logger()->targets(log_target,o);
-            get_logger()->dup2_cout(false);
-            get_logger()->level(cfg_log_level);
-            
-            auto* lp = new logger_profile();
-            lp->print_srcline_ = get_logger()->print_srcline();
-            lp->print_srcline_always_ = get_logger()->print_srcline_always();
-            lp->level_ = cfg_log_level;
-            get_logger()->target_profiles()[(uint64_t)o] = lp;
-            
-            if(cfgapi.getRoot()["settings"].lookupValue("log_console",cfg_log_console)) {
-                get_logger()->dup2_cout(cfg_log_console);
-            }        
+
+        if (cfgapi.getRoot().exists("settings")) {
+            if (load_if_exists(cfgapi.getRoot()["settings"], "log_file", cfg_log_file)) {
+
+                std::string log_target = cfg_log_file;
+                log_target = string_format(log_target.c_str(), cfg_tenant_name.c_str());
+
+                std::cout << "log target: " << log_target << std::endl;
+
+                // prepare custom crashlog file
+                std::string crlog = log_target + ".crashlog.log";
+                this_daemon.set_crashlog(crlog.c_str());
+
+                auto *o = new std::ofstream(log_target.c_str(), std::ios::app);
+                get_logger()->targets(log_target, o);
+                get_logger()->dup2_cout(false);
+                get_logger()->level(cfg_log_level);
+
+                auto *lp = new logger_profile();
+                lp->print_srcline_ = get_logger()->print_srcline();
+                lp->print_srcline_always_ = get_logger()->print_srcline_always();
+                lp->level_ = cfg_log_level;
+                get_logger()->target_profiles()[(uint64_t) o] = lp;
+
+                if (load_if_exists(cfgapi.getRoot()["settings"], "log_console", cfg_log_console)) {
+                    get_logger()->dup2_cout(cfg_log_console);
+                }
+            }
+
+            load_if_exists(cfgapi.getRoot()["settings"], "log_level",cfg_log_level.level_ref());
         }
 
-        cfgapi.getRoot()["settings"].lookupValue("log_level",cfg_log_level.level_ref());
     }
     catch(const FileIOException &fioex)
     {
@@ -359,7 +364,7 @@ bool load_config(std::string& config_f, bool reload) {
     }
     
     try {
-        cfgapi.getRoot()["settings"].lookupValue("log_level",cfg_log_level.level_ref());
+        load_if_exists(cfgapi.getRoot()["settings"], "log_level",cfg_log_level.level_ref());
         if(reload) {
         }
     }
@@ -502,7 +507,11 @@ int main(int argc, char *argv[]) {
             _war("Tenant config %s not found. Using default.",tenant_cfg.c_str());
         }
     }
-    
+
+    if(!smithd_apply_tenant_config()) {
+        _fat("Failed to apply tenant specific configuration!");
+        exit(2);
+    }
 
     std::cout << "loading config from " << config_file << std::endl;
     
@@ -517,25 +526,7 @@ int main(int argc, char *argv[]) {
             exit(1);
         }
     }
-    
-    if(!smithd_apply_tenant_config()) {
-        _fat("Failed to apply tenant specific configuration!");
-        exit(2);
-    }      
-      
-    // set level to what's in the config
-    if (!load_config(config_file)) {
 
-        if(config_file_check_only) {
-            _fat("Config check: error loading config file.");
-            exit(1);
-        }
-        else {
-            _fat("Error loading config file on startup.");
-            exit(1);
-        }
-    }
-    
     if(config_file_check_only) {
         _dia("Exiting, asked to check config file only.");
         exit(0);
@@ -579,12 +570,12 @@ int main(int argc, char *argv[]) {
     backend_proxy = nullptr;
 
     try {
-        ServiceFactory::prepare_listener<UxProxy,UxCom>(
+        backend_proxy = NetworkServiceFactory::prepare_listener<UxProxy,UxCom>(
                 cfg_smithd_listen_port,
                 "ux-plain",
                 "/var/run/smithd.sock",
                 cfg_smithd_workers,
-                ServiceFactory::proxy_type::NONE);
+                NetworkServiceFactory::proxy_type::NONE);
     } catch(socle::com_error const& e) {
         _fat("Exception caught when creating listener: %s", e.what());
         backend_proxy = nullptr;

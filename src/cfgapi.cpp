@@ -57,7 +57,7 @@
 #include <inspect/dnsinspector.hpp>
 #include <inspect/pyinspector.hpp>
 
-CfgFactory::CfgFactory(): log(get_log()), args_debug_flag(NON), syslog_level(INF) {
+CfgFactory::CfgFactory(): CfgFactoryBase() , args_debug_flag(NON), syslog_level(INF) {
 
     listen_tcp_port = "50080";
     listen_tls_port = "50443";
@@ -1971,7 +1971,7 @@ void CfgFactory::log_version (bool warn_delay)
     }
 }
 
-int CfgFactory::apply_tenant_index(std::string& what, int& idx) {
+int CfgFactoryBase::apply_tenant_index(std::string& what, int& idx) {
     _deb("apply_index: what=%s idx=%d",what.c_str(),idx);
     int port = std::stoi(what);
     what = std::to_string(port + idx);

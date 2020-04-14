@@ -70,7 +70,7 @@
 #include <main.hpp>
 #include <sobject.hpp>
 
-#include <service/smithproxy.hpp>
+#include <service/core/smithproxy.hpp>
 #include <proxy/mitmproxy.hpp>
 #include <proxy/socks5/socksproxy.hpp>
 #include <policy/inspectors.hpp>
