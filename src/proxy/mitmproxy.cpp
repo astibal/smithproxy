@@ -311,7 +311,9 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
         af = cx->com()->l3_proto();
     }
     std::string str_af = inet_family_str(af);
-    
+
+    bool new_identity = false;
+
     if(identity_resolved()) {
         
         bool update_status = false;
@@ -323,12 +325,16 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
         } else {
             identity_resolved(false);
         }
-    }
-    
-    bool valid_ip_auth = false;
-    
-    _dia("identity check[%s]: source: %s",str_af.c_str(), cx->host().c_str());
 
+        _deb("resolved identity check[%s]: source: %s", str_af.c_str(), cx->host().c_str());
+    } else {
+
+        new_identity = true;
+        _dia("unresolved identity check[%s]: source: %s", str_af.c_str(), cx->host().c_str());
+    }
+
+
+    bool valid_ip_auth = false;
     shm_logon_info_base* id_ptr = nullptr;
     
     if(af == AF_INET || af == 0) {
@@ -366,7 +372,15 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
     }
 
     if(id_ptr != nullptr) {
-        _dia("identity found for %s %s: user: %s groups: %s",str_af.c_str(),cx->host().c_str(),id_ptr->username().c_str(), id_ptr->groups().c_str());
+
+        if(new_identity) {
+            _inf("unresolved identity found for %s %s: user: %s groups: %s", str_af.c_str(), cx->host().c_str(),
+                 id_ptr->username().c_str(), id_ptr->groups().c_str());
+        } else {
+            _deb("resolved identity found for %s %s: user: %s groups: %s", str_af.c_str(), cx->host().c_str(),
+                 id_ptr->username().c_str(), id_ptr->groups().c_str());
+
+        }
 
         // if update_auth_ip_map fails, identity is no longer valid!
         
@@ -382,7 +396,14 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
         // apply specific identity-based profile. 'li' is still valid, since we still hold the lock
         // get ptr to identity_info
 
-        _dia("resolve_identity[%s]: about to call apply_id_policies, group: %s",str_af.c_str(), id_ptr->groups().c_str());
+        if(new_identity) {
+            _dia("resolve_identity[%s]: about to call apply_id_policies on new identity, group: %s", str_af.c_str(),
+                 id_ptr->groups().c_str());
+        } else {
+            _deb("resolve_identity[%s]: about to call apply_id_policies on known identity, group: %s", str_af.c_str(),
+                 id_ptr->groups().c_str());
+        }
+
         apply_id_policies(cx);
 
 
@@ -391,7 +412,7 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
     }
 
 
-    _deb("identity check[%s]: return %d",str_af.c_str(), valid_ip_auth);
+    _dum("identity check[%s]: return %d",str_af.c_str(), valid_ip_auth);
     return valid_ip_auth;
 }
 
