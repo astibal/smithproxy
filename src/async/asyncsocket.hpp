@@ -137,7 +137,8 @@ public:
 
 
         if(IAsyncTask<R>::state() >= task_state_t::FINISHED) {
-            if(callback_)
+            untap();
+            if(callback_) {
                 callback_(yield());
             untap();
         }
