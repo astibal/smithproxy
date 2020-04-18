@@ -2824,7 +2824,7 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
 
                     auto print_queue_stats = [] (std::stringstream &ss, int verbosity, MitmHostCX *cx, const char *sm,
                                                  const char *bg) {
-                        unsigned int in_pending, out_pending;
+                        int in_pending, out_pending;
                         buffer::size_type in_buf, out_buf, in_cap, out_cap;
 
                         ::ioctl(cx->socket(), SIOCINQ, &in_pending);
