@@ -839,21 +839,21 @@ void MitmProxy::on_half_close(baseHostCX* cx) {
             long expiry = half_holdtimer + half_timeout() - ::time(nullptr);
             
             if(expiry > 0) {
-                _ext("half-closed: live peer with pending data: keeping up for %ls",expiry);
+                _ext("on_half_close: live peer with pending data: keeping up for %ds", expiry);
             } else {
-                _dia("half-closed: timer's up (%l). closing prematurely.",expiry);
+                _dia("on_half_close: timer's up (%ds) - closing.", expiry);
                 state().dead(true);
             }
             
             
         } else {
-            _dia("half-closed: live peer with pending data: keeping up for %ds",half_timeout);
+            _dia("on_half_close: live peer with pending data: keeping up for %ds", half_timeout);
             half_holdtimer = ::time(nullptr);
         }
         
     } else {
-        // if peer doesn't exist or peercom doesn't exit, mark proxy dead -- noone to speak to
-        _dia("half-closed: peer with pending write-data is dead.");
+        // if peer doesn't exist or peercom doesn't exit, mark proxy dead -- no one to speak to
+        _dia("on_half_close: peer with pending write-data is dead.");
         state().dead(true);
     }
 }
