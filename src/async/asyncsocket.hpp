@@ -61,6 +61,7 @@ public:
 
     inline void state(task_state_t n) { state_ = n; };
     inline task_state_t state() const { return state_; };
+    [[nodiscard]] const char* state_str() const { return task_state_str(state()); }
 
     virtual R& yield() = 0;
     virtual task_state_t update() = 0;
@@ -68,6 +69,23 @@ public:
         return update() >= IAsyncTask::FINISHED;
     }
 
+    static const char* task_state_str(task_state_t const& e) {
+        switch(e) {
+            case task_state_t::INIT:
+                return "INIT";
+            case task_state_t::RUNNING:
+                return "RUNNING";
+            case task_state_t::FINISHED:
+                return "FINISHED";
+            case task_state_t::TIMEOUT:
+                return "TIMEOUT";
+            case task_state_t::ERROR:
+                return "ERROR";
+
+            default:
+                return "<?>";
+        }
+    }
 };
 
 template <class R>
