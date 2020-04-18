@@ -66,7 +66,7 @@ public:
     virtual R& yield() = 0;
     virtual task_state_t update() = 0;
     bool finished() {
-        return update() >= IAsyncTask::FINISHED;
+        return update() >= task_state_t::FINISHED;
     }
 
     static const char* task_state_str(task_state_t const& e) {
