@@ -428,7 +428,7 @@ bool MitmProxy::update_auth_ipX_map(baseHostCX* cx) {
     std::string str_af = inet_family_str(af);    
     
 
-    _deb("update_auth_ip_map: start for %s %s",str_af.c_str(), cx->host().c_str());
+    _dum("update_auth_ip_map: start for %s %s",str_af.c_str(), cx->host().c_str());
     
     IdentityInfoBase* id_ptr = nullptr;
     
@@ -450,7 +450,7 @@ bool MitmProxy::update_auth_ipX_map(baseHostCX* cx) {
     }
     
     if(id_ptr != nullptr) {
-        _dia("update_auth_ip_map: user %s from %s %s (groups: %s)",id_ptr->username.c_str(), str_af.c_str(), cx->host().c_str(), id_ptr->groups.c_str());
+        _deb("update_auth_ip_map: user %s from %s %s (groups: %s)",id_ptr->username.c_str(), str_af.c_str(), cx->host().c_str(), id_ptr->groups.c_str());
 
         id_ptr->last_seen_policy = matched_policy();
         
@@ -472,7 +472,7 @@ bool MitmProxy::update_auth_ipX_map(baseHostCX* cx) {
         }
     }
     
-    _deb("update_auth_ip_map: finished for %s %s, result %d",str_af.c_str(), cx->host().c_str(),ret);
+    _dum("update_auth_ip_map: finished for %s %s, result %d",str_af.c_str(), cx->host().c_str(),ret);
     return ret;
 }
 
