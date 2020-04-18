@@ -41,7 +41,17 @@
 #define ASYNCSOCKET_HPP
 
 #include <functional>
+#include <atomic>
 #include <hostcx.hpp>
+
+
+// simple counter-based ID. There is more robust solution using socle::sobject
+struct WithID {
+    WithID() : id(counter()++) {};
+
+    uint64_t id;
+    static std::atomic_uint64_t& counter() { static std::atomic_uint64_t c; return c; };
+};
 
 template <class R>
 class IAsyncTask {

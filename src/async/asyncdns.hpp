@@ -39,18 +39,15 @@
 #ifndef ASYNCDNS_HPP
 #define ASYNCDNS_HPP
 
-#include <atomic>
-
 #include <async/asyncsocket.hpp>
 #include <inspect/dns.hpp>
 
 
-class AsyncDnsQuery : public AsyncSocket<std::pair<DNS_Response *, int>> {
+class AsyncDnsQuery : public AsyncSocket<std::pair<DNS_Response *, int>>, WithID {
 public:
     explicit AsyncDnsQuery(baseHostCX* owner, callback_t callback = nullptr):
             AsyncSocket(owner, std::move(callback)),
-            log(get_log()),
-            id(counter()++)
+            log(get_log())
             {}
     using dns_response_t = std::pair<DNS_Response *, int>;
 
@@ -73,9 +70,6 @@ private:
     dns_response_t response {nullptr, -1};
     logan_lite& log;
     logan_lite& get_log() { static auto l = logan_lite("com.dns.async"); return l; }
-
-    uint64_t id;
-    static std::atomic_uint64_t& counter() { static std::atomic_uint64_t c; return c; };
 };
 
 #endif //ASYNCDNS_HPP
