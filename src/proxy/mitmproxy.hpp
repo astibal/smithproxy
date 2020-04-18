@@ -68,7 +68,7 @@ class IOController {
 public:
     virtual void tap() = 0;
     virtual void untap() = 0;
-    IOController const* master() const noexcept { return ! master_ ?  this : master_; }
+    IOController const* master() const noexcept { return (! master_) ?  this : master_; }
     void master(IOController* n) { master_ = n; }
 
 private:
@@ -90,7 +90,7 @@ protected:
     std::string replacement_msg;
 public: 
     time_t half_holdtimer = 0;
-    static unsigned int& half_timeout() { static unsigned int s_half_timetout = 30; return s_half_timetout; };
+    static long& half_timeout() { static long s_half_timetout = 5; return s_half_timetout; };
 
     using whitelist_map = ptr_cache<std::string,whitelist_verify_entry_t>;
     static whitelist_map& whitelist_verify() {
