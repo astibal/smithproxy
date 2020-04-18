@@ -1487,34 +1487,78 @@ buffer MitmProxy::content_replace_apply(buffer b) {
 
 void MitmProxy::tap() {
 
-    _dia("MitmProxy::tap: start");
-    
-    for (auto cx: left_sockets) {
-        com()->unset_monitor(cx->socket());
-        cx->waiting_for_peercom(true);
-        cx->io_disabled(true);
-    }
-    for (auto cx: right_sockets) {
-        com()->unset_monitor(cx->socket());
-        cx->waiting_for_peercom(true);
-        cx->io_disabled(true);
+void MitmProxy::tap_left() {
+    _dia("MitmProxy::tap left: start");
+
+    auto lefties = { left_sockets, left_delayed_accepts, left_pc_cx, left_bind_sockets };
+
+    for ( auto const& vec: lefties ) {
+        for (auto* cx: vec) {
+            com()->unset_monitor(cx->socket());
+            cx->waiting_for_peercom(true);
+            cx->io_disabled(true);
+        }
     }
 }
 
-void MitmProxy::untap() {
+void MitmProxy::tap_right() {
+    _dia("MitmProxy::tap right: start");
+
+    auto righties = { right_sockets, right_delayed_accepts, right_pc_cx, right_bind_sockets };
+
+    for ( auto const& vec: righties ) {
+        for (auto cx: vec) {
+            com()->unset_monitor(cx->socket());
+            cx->waiting_for_peercom(true);
+            cx->io_disabled(true);
+        }
+    }
+}
+
+void MitmProxy::tap() {
+    tap_left();
+    tap_right();
+}
+
+void MitmProxy::untap_left() {
+    _dia("MitmProxy::untap left: start");
+
+    auto lefties = { left_sockets, left_delayed_accepts, left_pc_cx, left_bind_sockets };
+
+    for ( auto const& vec: lefties ) {
+        for (auto *cx: vec) {
+
+            com()->set_poll_handler(cx->socket(), this);
+            com()->set_write_monitor(cx->socket());
+
+            cx->waiting_for_peercom(false);
+            cx->io_disabled(false);
+        }
+    }
+}
+
+void MitmProxy::untap_right() {
 
     _dia("MitmProxy::untap: start");
 
-    for (auto cx: left_sockets) {
-        com()->set_monitor(cx->socket());
-        cx->waiting_for_peercom(false);
-        cx->io_disabled(false);
+    auto righties = { right_sockets, right_delayed_accepts, right_pc_cx, right_bind_sockets };
+
+    for ( auto const& vec: righties ) {
+        for (auto cx: vec) {
+
+            com()->set_poll_handler(cx->socket(), this);
+            com()->set_write_monitor(cx->socket());
+
+            cx->waiting_for_peercom(false);
+            cx->io_disabled(false);
+        }
     }
-    for (auto cx: right_sockets) {
-        com()->set_monitor(cx->socket());
-        cx->waiting_for_peercom(false);
-        cx->io_disabled(false);
-    }
+}
+
+
+void MitmProxy::untap() {
+    untap_left();
+    untap_right();
 }
 
 MitmHostCX* MitmProxy::first_left() {

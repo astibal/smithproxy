@@ -109,8 +109,12 @@ public:
     void add_filter(std::string const& name, FilterProxy* fp);
     
     // tap proxy - unmonitor all left and right sockets, pause contexts
+    void tap_left();
+    void tap_right();
     void tap() override;
     // untap proxy - monitor back again all L and R sockets, unpause contexts
+    void untap_left();
+    void untap_right();
     void untap() override;
 
     // testing
