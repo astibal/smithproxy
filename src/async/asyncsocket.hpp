@@ -158,7 +158,7 @@ public:
             untap();
             if(callback_) {
                 callback_(yield());
-            untap();
+            }
         }
     }
 
