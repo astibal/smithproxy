@@ -117,14 +117,6 @@ public:
     void untap_right();
     void untap() override;
 
-    // testing
-    std::unique_ptr<inet::ocsp::AsyncOCSP> ocsp;
-    void ssl_ocsp_callback(int response) {
-        auto& log = inet::ocsp::OcspFactory::log();
-        _inf("async callback response %d", response);
-    };
-    
-    
     int matched_policy() const { return matched_policy_; }
     void matched_policy(int p)  { matched_policy_ = p; }
     
@@ -152,7 +144,9 @@ public:
     
     // ... and also when there is error on L/R side, claim the proxy DEAD. When marked dead, it will be safely 
     // closed by it's master proxy next cycle.
-    
+
+    // universal error handler
+    void on_error(baseHostCX* cx, char side, const char* side_label);
     virtual void on_left_error(baseHostCX* cx);
     virtual void on_right_error(baseHostCX* cx);
     
@@ -160,8 +154,16 @@ public:
     virtual void on_half_close(baseHostCX* cx);
     virtual bool handle_authentication(MitmHostCX* cx);
     virtual void handle_replacement_auth(MitmHostCX* cx);
-    
-    // check sslcom response and return true if redirected
+
+    // TLS related methods
+
+    // asynchronous OCSP
+    std::unique_ptr<inet::ocsp::AsyncOCSP> ocsp;
+    void ssl_ocsp_callback(int response);
+
+    //
+    bool ssl_handled = false;
+    // only once: check sslcom response and return true if redirected, set ssl_handled
     virtual bool handle_com_response_ssl(MitmHostCX* cx);
     virtual void handle_replacement_ssl(MitmHostCX* cx);
     std::string replacement_ssl_page(SSLCom* scom, app_HttpRequest* app_request, std::string const& more_info);

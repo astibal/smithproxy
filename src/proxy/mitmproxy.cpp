@@ -562,13 +562,49 @@ bool MitmProxy::handle_authentication(MitmHostCX* mh)
     return redirected;
 }
 
+void MitmProxy::ssl_ocsp_callback(int response) {
+
+    auto& log = inet::ocsp::OcspFactory::log();
+    _inf("async callback response %d", response);
+    untap();
+    handle_sockets_once(com());
+}
+
 
 bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
 {
+    if(ssl_handled) {
+        return false;
+    }
+
     bool redirected = false;
-    
+
     auto* scom = dynamic_cast<SSLCom*>(mh->peercom());
     if(scom && scom->opt_failed_certcheck_replacement) {
+
+        // adhoc async ocsp call
+//        if(scom->verify_check(SSLCom::VRF_DEFERRED) || true) {
+//
+//
+//            if(scom->target_cert() && scom->target_issuer()) {
+//                using std::placeholders::_1;
+//                ocsp = std::make_unique<inet::ocsp::AsyncOCSP>(
+//                        scom->target_cert(),
+//                        scom->target_issuer(),
+//                        mh,
+//                        std::bind(&MitmProxy::ssl_ocsp_callback, this, _1));
+//                ocsp->update();
+//                ocsp->tap();
+//                tap();
+//            } else {
+//                auto& log = inet::ocsp::OcspFactory::log();
+//                _err("peer certificates still null");
+//            }
+//
+//            ssl_handled = true;
+//            return false;
+//        }
+
         if(!(
             scom->verify_get() == SSLCom::VRF_OK
              ||
@@ -636,7 +672,7 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
                     handle_replacement_ssl(mh);
                     
                 } 
-                else if(scom->verify_check(SSLCom::VRF_CLIENT_CERT_RQ) && scom->opt_client_cert_action > 0) {
+                else if(scom->verify_bitcheck(SSLCom::VRF_CLIENT_CERT_RQ) && scom->opt_client_cert_action > 0) {
 
                     _dia(" -> client-cert request:  opt_client_cert_action=%d", scom->opt_client_cert_action);
 
@@ -660,7 +696,9 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
             }
         }
     }
-    
+
+    ssl_handled = true;
+
     return redirected;
 }
 
@@ -858,35 +896,25 @@ void MitmProxy::on_half_close(baseHostCX* cx) {
     }
 }
 
-void MitmProxy::on_left_error(baseHostCX* cx) {
 
-    if(cx == nullptr) return;
-    
-    if(state().dead()) return;  // don't process errors twice
+std::string get_connection_details_str(MitmProxy* px, baseHostCX* cx, char side) {
 
-    
-    _deb("on_left_error[%s]: proxy marked dead",(state().error_on_read ? "read" : "write"));
-    _dum(to_string().c_str());
-    
-    if(write_payload()) {
-        toggle_tlog();
-        if(tlog()) {
-            tlog()->left_write("Client side connection closed: " + cx->name() + "\n");
-            if(! replacement_msg.empty()) {
-                tlog()->left_write(cx->name() + "   dropped by proxy:" + replacement_msg + "\n");
-            }
-        }
+    if(!cx) {
+        return "";
     }
-    
-    if(opt_auth_resolve)
-        resolve_identity(cx);
 
-    std::string flags = "L";
+    std::string flags;
+    flags += side;
+
     auto* mh = dynamic_cast<MitmHostCX*>(cx);
+
+    if(side == 'R' && cx->peer())
+        mh = dynamic_cast<MitmHostCX*>(cx->peer());
+
     if (mh != nullptr && mh->inspection_verdict() == Inspector::CACHED) flags+="C";
 
     std::stringstream detail;
-    
+
     if(cx->peercom()) {
         auto* sc = dynamic_cast<SSLMitmCom*>(cx->peercom());
         if(sc) {
@@ -894,7 +922,7 @@ void MitmProxy::on_left_error(baseHostCX* cx) {
         }
     }
     if(mh && mh->application_data) {
-        
+
         auto* http = dynamic_cast<app_HttpRequest*>(mh->application_data);
         if(http) {
             detail << "app=" << http->proto << http->host << " ";
@@ -903,119 +931,145 @@ void MitmProxy::on_left_error(baseHostCX* cx) {
             detail << "app=" << mh->application_data->hr() << " ";
         }
     }
-    
-    detail << string_format("user=%s up=%d/%dB dw=%d/%dB flags=%s+%s",
-                                        (identity_resolved() ? identity()->username().c_str() : ""),
-                                            cx->meter_read_count,cx->meter_read_bytes,
-                                                                cx->meter_write_count, cx->meter_write_bytes,
-                                                                            flags.c_str(),
-                                                                            com()->full_flags_str().c_str()
-            );
 
-    if(cx->peer() && cx->peer()->writebuf()->empty()) {
-        std::stringstream msg;
-        msg << "Connection from " << cx->full_name('L') << " closed: " << detail.str();
-        if(! replacement_msg.empty() ) {
-            msg << ", dropped: " << replacement_msg;
-            _inf("%s", msg.str().c_str()); // log to generic logger
+    std::string identity;
+    std::string px_flags;
+
+    if(px) {
+        if(px->identity_resolved()) {
+            identity = px->identity()->username();
         }
-        _inf("%s", msg.str().c_str());
-        if(*log.level() > DEB) __debug_zero_connections(cx);
-        
-        state().dead(true);
-    } else {
-        on_half_close(cx);
-        if(state().dead()) {
-            // status dead is new, since we check dead status at the begining
-            std::stringstream msg;
-            msg << "Connection from " << cx->full_name('L') << " left half-closed: " << detail.str();
-            _inf("%s", msg.str().c_str());
+        if(px->com()) {
+            px_flags = px->com()->full_flags_str();
         }
     }
-    
-    if(cx) {
-        AuthFactory::get().ipX_inc_counters(cx);
-    }
+
+    detail << string_format("user=%s up=%d/%dB dw=%d/%dB flags=%s+%s",
+                            identity.c_str(),
+                            cx->meter_read_count,cx->meter_read_bytes,
+                            cx->meter_write_count, cx->meter_write_bytes,
+                            flags.c_str(),
+                            px_flags.c_str()
+    );
+
+    return detail.str();
 }
 
-void MitmProxy::on_right_error(baseHostCX* cx)
-{
-    if(state().dead()) return;  // don't process errors twice
-    
-    _deb("on_right_error[%s]: proxy marked dead",(state().error_on_read ? "read" : "write"));
-    
-    if(write_payload()) {
-        toggle_tlog();
-        if(tlog()) {
-            tlog()->right_write("Server side connection closed: " + cx->name() + "\n");
-            if(! replacement_msg.empty()) {
-                tlog()->right_write(cx->name() + "   dropped by proxy:" + replacement_msg + "\n");
+
+void MitmProxy::on_error(baseHostCX* cx, char side, const char* side_label) {
+    if(cx == nullptr) {
+        std::stringstream msg;
+        msg << "Connection closed (null cx) on " << (state().error_on_read ? "read" : "write") << ": "
+            << get_connection_details_str(this, cx, side);
+        _err("%s", msg.str().c_str());
+
+        state().dead(true);
+        return;
+    }
+
+    // if not dead (yet), do some cleanup/logging chores
+    if( !state().dead()) {
+
+        // don't waste time on low-effort delivery stuff, just get rid of it now.
+        if(com()->l4_proto() == SOCK_DGRAM) {
+            state().dead(true);
+            return;
+        }
+
+        if(cx->peer()) {
+            if(! cx->peer()->writebuf()->empty()) {
+
+                // do half-closed actions, and mark proxy dead if needed
+                on_half_close(cx);
+
+                if (state().dead()) {
+                    // status dead is new, since we check dead status at the begining
+                    std::stringstream msg;
+                    msg << "Connection " << side_label << " half-closed on " << (state().error_on_read ? "read" : "write") << ": "
+                        << get_connection_details_str(this, cx, side);
+                    _inf("%s", msg.str().c_str());
+
+                } else {
+                    // on_half_close did not marked it dead, yet
+                    std::stringstream msg;
+                    msg << "Connection " << side_label << " half-closing on " << (state().error_on_read ? "read" : "write") << ": "
+                        << get_connection_details_str(this, cx, side);
+                    _dia("%s", msg.str().c_str());
+
+                    // provoke write to the peer's socket (could be superfluous)
+                    com()->set_write_monitor(cx->peer()->socket());
+                }
+            } else {
+
+                // duplicate code to DEAD before calling us
+
+                std::stringstream msg;
+                msg << "Connection from " << cx->full_name(side) << " closed: " << get_connection_details_str(this, cx, side);
+                if(! replacement_msg.empty() ) {
+                    msg << ", dropped: " << replacement_msg;
+                    _inf("%s", msg.str().c_str()); // log to generic logger
+                }
+                _inf("%s", msg.str().c_str());
+
+                state().dead(true);
+            }
+        } else {
+            std::stringstream msg;
+            msg << "Connection from " << side_label << " half-closing (peer dead) on " << (state().error_on_read ? "read" : "write") << ": "
+                << get_connection_details_str(this, cx, side);
+            _dia("%s", msg.str().c_str());
+
+            state().dead(true);
+        }
+    } else {
+        // DEAD before calling us!
+
+        if(opt_auth_resolve)
+            resolve_identity(cx);
+
+        if(cx->peer() && cx->peer()->writebuf()->empty()) {
+            std::stringstream msg;
+            msg << "Connection from " << cx->full_name(side) << " closed: " << get_connection_details_str(this, cx, side);
+            if(! replacement_msg.empty() ) {
+                msg << ", dropped: " << replacement_msg;
+                _inf("%s", msg.str().c_str()); // log to generic logger
+            }
+            _inf("%s", msg.str().c_str());
+            if(*log.level() > DEB) __debug_zero_connections(cx);
+
+            state().dead(true);
+        }
+    }
+
+
+    // state could change. Log if we are dead now
+    if(state().dead()){
+        if (write_payload()) {
+            toggle_tlog();
+            if (tlog()) {
+
+                tlog()->write(side, std::string(side_label) + "side connection closed: " + cx->name() + "\n");
+                if (!replacement_msg.empty()) {
+                    tlog()->write(side, cx->name() + "   dropped by proxy:" + replacement_msg + "\n");
+                }
             }
         }
     }
-    
-//         _inf("Created new proxy 0x%08x from %s:%s to %s:%d",new_proxy,f,f_p, t,t_p );
+}
 
+void MitmProxy::on_left_error(baseHostCX* cx) {
+    on_error(cx, 'L', "client");
 
-    std::string flags = "R";
-    std::string comflags;
-    auto* mh_peer = dynamic_cast<MitmHostCX*>(cx->peer());
-    if (mh_peer != nullptr) {
-        if(mh_peer->inspection_verdict() == Inspector::CACHED) flags+="C";
-        if(mh_peer->com() != nullptr)
-            comflags = mh_peer->com()->full_flags_str();
-    }
+    if(state().dead())
+        AuthFactory::get().ipX_inc_counters(cx);
+}
 
-    
-    std::stringstream detail;
-    auto* sc = dynamic_cast<SSLMitmCom*>(cx->com());
-    if(sc) {
-        detail << "sni= " << sc->get_peer_sni();
-    }
-    if(mh_peer && mh_peer->application_data) {
-        auto* http = dynamic_cast<app_HttpRequest*>(mh_peer->application_data);
-        if(http) {
-            detail << "app=" << http->proto << http->host << " ";
-        }
-        else {
-            detail << "app=" << mh_peer->application_data->hr() << " ";
-        }
-    }
-    detail << string_format("user=%s up=%d/%dB dw=%d/%dB flags=%s+%s",
-                                        (identity_resolved() ? identity()->username().c_str() : ""),
-                                            cx->meter_read_count,cx->meter_read_bytes,
-                                                                cx->meter_write_count, cx->meter_write_bytes,
-                                                                            flags.c_str(),
-                                                                            com()->full_flags_str().c_str()
-            );
-    
-    
-    if( cx->peer() && cx->peer()->writebuf()->empty() ) {
-        std::stringstream msg;
-        msg << "Connection from " << cx->full_name('R') << " closed: " << detail.str().c_str();
-        if(! replacement_msg.empty() ) {
-            msg << ", dropped: " << replacement_msg;
-            _inf("%s", msg.str().c_str()); // log to generic logger
-        }
-        _inf("%s", msg.str().c_str());
+void MitmProxy::on_right_error(baseHostCX* cx) {
+    on_error(cx, 'R', "server");
 
-        if(*log.level() > DEB) __debug_zero_connections(cx);
-        
-        state().dead(true);
-    } else {
-
-        on_half_close(cx);
-        if(state().dead()) {
-            // status dead is new, since we check dead status at the begining
-            std::stringstream msg;
-            msg << "Connection from " << cx->full_name('R') << " right half-closed: " << detail.str().c_str();
-            _inf("%s", msg.str().c_str());
-        }
-    } 
-    
-    if(cx->peer()) {
+    if(state().dead() && cx->peer())
         AuthFactory::get().ipX_inc_counters(cx->peer());
-    }
+
 }
 
 
@@ -1176,22 +1230,22 @@ std::string verify_flag_string(int code) {
 void MitmProxy::set_replacement_msg_ssl(SSLCom* scom) {
     if(scom && scom->verify_get() != SSLCom::VRF_OK) {
 
-        if(scom->verify_check(SSLCom::VRF_SELF_SIGNED)) {
+        if(scom->verify_bitcheck(SSLCom::VRF_SELF_SIGNED)) {
             replacement_msg += "(ssl:" + verify_flag_string(SSLCom::VRF_SELF_SIGNED) + ")";
         }
-        if(scom->verify_check(SSLCom::VRF_SELF_SIGNED_CHAIN)) {
+        if(scom->verify_bitcheck(SSLCom::VRF_SELF_SIGNED_CHAIN)) {
             replacement_msg += "(ssl:" + verify_flag_string(SSLCom::VRF_SELF_SIGNED_CHAIN) + ")";
         }
-        if(scom->verify_check(SSLCom::VRF_UNKNOWN_ISSUER)) {
+        if(scom->verify_bitcheck(SSLCom::VRF_UNKNOWN_ISSUER)) {
             replacement_msg += "(ssl:" + verify_flag_string(SSLCom::VRF_UNKNOWN_ISSUER) + ")";
         }
-        if(scom->verify_check(SSLCom::VRF_CLIENT_CERT_RQ)) {
+        if(scom->verify_bitcheck(SSLCom::VRF_CLIENT_CERT_RQ)) {
             replacement_msg += "(ssl:" + verify_flag_string(SSLCom::VRF_CLIENT_CERT_RQ) + ")";
         }
-        if(scom->verify_check(SSLCom::VRF_REVOKED)) {
+        if(scom->verify_bitcheck(SSLCom::VRF_REVOKED)) {
             replacement_msg += "(ssl:" + verify_flag_string(SSLCom::VRF_REVOKED) + ")";
         }
-        if(scom->verify_check(SSLCom::VRF_HOSTNAME_FAILED)) {
+        if(scom->verify_bitcheck(SSLCom::VRF_HOSTNAME_FAILED)) {
             replacement_msg += "(ssl:" + verify_flag_string(SSLCom::VRF_HOSTNAME_FAILED) + ")";
         }
     }
@@ -1204,39 +1258,39 @@ std::string MitmProxy::replacement_ssl_verify_detail(SSLCom* scom) {
         if (scom->verify_get() != SSLCom::VRF_OK) {
             bool is_set = false;
 
-            if (scom->verify_check(SSLCom::VRF_SELF_SIGNED)) {
+            if (scom->verify_bitcheck(SSLCom::VRF_SELF_SIGNED)) {
                 ss << "<p><h3 class=\"fg-red\">Reason:</h3> " << verify_flag_string(SSLCom::VRF_SELF_SIGNED) << ".</p>";
                 is_set = true;
             }
-            if (scom->verify_check(SSLCom::VRF_SELF_SIGNED_CHAIN)) {
+            if (scom->verify_bitcheck(SSLCom::VRF_SELF_SIGNED_CHAIN)) {
                 ss << "<p><h3 class=\"fg-red\">Reason:</h3> " << verify_flag_string(SSLCom::VRF_SELF_SIGNED_CHAIN)
                    << ".</p>";
                 is_set = true;
             }
-            if (scom->verify_check(SSLCom::VRF_UNKNOWN_ISSUER)) {
+            if (scom->verify_bitcheck(SSLCom::VRF_UNKNOWN_ISSUER)) {
                 ss << "<p><h class=\"fg-red\"3>Reason:</h3>" << verify_flag_string(SSLCom::VRF_UNKNOWN_ISSUER) << ".</p>";
                 is_set = true;
             }
-            if (scom->verify_check(SSLCom::VRF_CLIENT_CERT_RQ)) {
+            if (scom->verify_bitcheck(SSLCom::VRF_CLIENT_CERT_RQ)) {
                 ss << "<p><h3 class=\"fg-red\">Reason:</h3>" << verify_flag_string(SSLCom::VRF_CLIENT_CERT_RQ) << ".<p>";
                 is_set = true;
             }
-            if (scom->verify_check(SSLCom::VRF_REVOKED)) {
+            if (scom->verify_bitcheck(SSLCom::VRF_REVOKED)) {
                 ss << "<p><h3 class=\"fg-red\">Reason:</h3>" << verify_flag_string(SSLCom::VRF_REVOKED) <<
                        ". "
                        "This is a serious issue, it's highly recommended to not continue "
                        "to this page.</p>";
                 is_set = true;
             }
-            if (scom->verify_check(SSLCom::VRF_INVALID)) {
+            if (scom->verify_bitcheck(SSLCom::VRF_INVALID)) {
                 ss << "<p><h3 class=\"fg-red\">Reason:</h3>" << verify_flag_string(SSLCom::VRF_INVALID) << ".</p>";
                 is_set = true;
             }
-            if (scom->verify_check(SSLCom::VRF_HOSTNAME_FAILED)) {
+            if (scom->verify_bitcheck(SSLCom::VRF_HOSTNAME_FAILED)) {
                 ss << "<p><h3 class=\"fg-red\">Reason:</h3>" << verify_flag_string(SSLCom::VRF_HOSTNAME_FAILED) << ".</p>";
                 is_set = true;
             }
-            if (scom->verify_check(SSLCom::VRF_ALLFAILED)) {
+            if (scom->verify_bitcheck(SSLCom::VRF_ALLFAILED)) {
                 ss << "<p><h3 class=\"fg-red\">Reason:</h3>" << verify_flag_string(SSLCom::VRF_ALLFAILED) << ".</p>";
                 is_set = true;
             }
@@ -1506,7 +1560,6 @@ buffer MitmProxy::content_replace_apply(buffer b) {
     return ret_b;
 }
 
-void MitmProxy::tap() {
 
 void MitmProxy::tap_left() {
     _dia("MitmProxy::tap left: start");
