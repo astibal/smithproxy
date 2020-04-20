@@ -16,5 +16,5 @@ mkdir build ; cd build && cmake .. -DCMAKE_BUILD_TYPE=Debug && make -j `cat /pro
 # Define environment variable
 
 # Run smithproxy when the container launches
-CMD echo "Starting smithproxy .... " && ( /etc/init.d/smithproxy start ) > /dev/null 2>&1 && sleep 10 && \
+CMD echo "Starting smithproxy .... " && ( /etc/init.d/smithproxy start ) > /dev/null 2>&1 && sleep 3 && \
     echo "SSL MITM CA cert (add to trusted CAs):" && cat /etc/smithproxy/certs/default/ca-cert.pem && echo ; echo "run smithproxy_cli" && bash
