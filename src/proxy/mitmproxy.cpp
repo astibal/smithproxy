@@ -565,7 +565,7 @@ bool MitmProxy::handle_authentication(MitmHostCX* mh)
 void MitmProxy::ssl_ocsp_callback(int response) {
 
     auto& log = inet::ocsp::OcspFactory::log();
-    _inf("async callback response %d", response);
+    _inf("async callback response %s", inet::ocsp::AsyncOCSP::yield_str(response));
     untap();
     handle_sockets_once(com());
 }

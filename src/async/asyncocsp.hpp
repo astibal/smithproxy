@@ -37,7 +37,7 @@ namespace inet::ocsp {
         AsyncOCSP (X509 *cert, X509 *issuer, baseHostCX *cx, callback_t cb) :
                 AsyncSocket(cx, std::move(cb)),
                 socle::sobject(),
-                query_(cert, issuer) {
+                query_(cert, issuer, oid()) {
             log_tracer_("c-tor");
         };
 
@@ -58,8 +58,23 @@ namespace inet::ocsp {
 
             #ifdef ASYNC_OCSP_DEBUG
             time_t now = time(nullptr);
-            for(auto e: tracer.trace) {
-                ss << std::endl << "[" << oid() << "]" << e.first - now << "s - " << e.second;
+
+            std::string prev_msg;
+            int prev_counter = 0;
+            for(auto const& e: tracer.trace) {
+
+                if(prev_msg != e.second) {
+                    ss << std::endl << "[" <<  string_format("0x%lx", oid()) << "] " << std::dec << e.first - now << "s - " << e.second;
+
+                    if(prev_counter > 1) {
+                        ss << ", repeated " << prev_counter  << " times";
+                    }
+
+                    prev_counter = 0;
+                } else {
+                    prev_counter++;
+                }
+                prev_msg = e.second;
             }
             #endif
             return ss.str();
@@ -99,6 +114,8 @@ namespace inet::ocsp {
             log_tracer_("yield");
             return result_;
         }
+
+        static const char* yield_str(int y) { return inet::ocsp::OcspQuery::state_str(y); }
 
         virtual void tap () {
             log_tracer_("tap");
