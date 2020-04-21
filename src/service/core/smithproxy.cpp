@@ -531,8 +531,8 @@ bool SmithProxy::init_syslog() {
 
         // raising internal logging level
         if (lp->level_ > get_logger()->level()) {
-            _not("Internal logging raised from %d to %d due to syslog server loglevel.", get_logger()->level(),
-                 lp->level_);
+            _not("Internal logging raised from %d to %d due to syslog server loglevel.", get_logger()->level().level(),
+                 lp->level_.level());
             get_logger()->level(lp->level_);
         }
 

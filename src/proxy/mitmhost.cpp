@@ -350,7 +350,7 @@ void MitmHostCX::on_detect(std::shared_ptr<duplexFlowMatch> x_sig, flowMatchStat
             on_detect_www_get(x_sig,s,r);
         }
     } else {
-        _war("signature of unknown attributes matched: ", x_sig->name());
+        _war("signature of unknown attributes matched: %s", x_sig->name().c_str());
     }
 }
 
