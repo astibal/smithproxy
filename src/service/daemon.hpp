@@ -48,7 +48,7 @@
 
 
 struct DaemonFactory : public LoganMate {
-    std::string PID_FILE = PID_FILE_DEFAULT;
+    std::string pid_file = PID_FILE_DEFAULT;
     volatile char crashlog_file[LOG_FILENAME_SZ];
 
     [[nodiscard]] std::string &class_name() const override;
@@ -65,13 +65,13 @@ struct DaemonFactory : public LoganMate {
     void set_tenant(const std::string& name, const std::string& tenant_id);
 
     void daemonize();
-    void write_pidfile();
-    bool exists_pidfile();
-    void unlink_pidfile();
+    void write_pidfile() const;
+    bool exists_pidfile() const;
+    void unlink_pidfile() const;
     int get_limit_fd();
     void set_limit_fd(int max);
-    void set_signal(unsigned int sig, void (*sig_handler)(int));
-    void set_daemon_signals(void (*terminate_handler)(int),void (*reload_handler)(int));
+    static void set_signal(int SIG, void (*sig_handler)(int));
+    static void set_daemon_signals(void (*terminate_handler)(int),void (*reload_handler)(int));
     void set_crashlog(const char* file);
     static void uw_btrace_handler(int sig);
 

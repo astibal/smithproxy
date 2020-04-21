@@ -135,7 +135,7 @@ public:
     
     bool ask_destroy() override { return false; };
     std::string to_string(int verbosity = 6) const override {
-        return string_format("ProfileDetection: name=%s mode=%d",prof_name.c_str(),mode); 
+        return string_format("ProfileDetection: name=%s mode=%d",prof_name.c_str(), mode);
     };
     
     DECLARE_C_NAME("ProfileDetection");
@@ -152,7 +152,7 @@ public:
     
     bool ask_destroy() override { return false; };
     std::string to_string(int verbosity = 6) const override {
-        return string_format("ProfileContentRule: matching %s",ESC_(match));
+        return string_format("ProfileContentRule: matching %s", ESC_(match).c_str());
     }
     
     DECLARE_C_NAME("ProfileContentRule");

@@ -148,9 +148,9 @@ struct DNS_Answer {
             a.s_addr = ip;
             
             if(nice) 
-                ret = string_format("ip4: %s",inet_ntoa(a));
+                ret = string_format("ip4: %s", inet_ntoa(a));
             else
-                ret = string_format("%s",inet_ntoa(a));
+                ret = string_format("%s", inet_ntoa(a));
         }
         else if(type_ == AAAA && data_.size() == 16) {
             char b[64];
@@ -159,9 +159,9 @@ struct DNS_Answer {
             inet_ntop(AF_INET6,data_.data(),b,64);
             
             if(nice)
-                ret = string_format("ip6: %s",b);
+                ret = string_format("ip6: %s", b);
             else
-                ret = string_format("%s",b);
+                ret = string_format("%s", b);
         }
         
         return ret;
@@ -187,7 +187,7 @@ struct DNS_Answer {
     std::string hr() const { 
         
         std::string ret = string_format("type: %s, class: %d, ttl: %d",
-                                        DNSFactory::get().dns_record_type_str(type_),class_,ttl_);
+                                        DNSFactory::get().dns_record_type_str(type_), class_, ttl_);
         ret += ip();
         return ret;
     };
@@ -278,12 +278,12 @@ private:
 public:
     DNS_Request(): DNS_Packet() {
         log = logan::attach<DNS_Request>(this, "dns");
-        _deb("DNS_Request::c-tor");
+        _dum("DNS_Request::c-tor");
     };
 
 
     ~DNS_Request() override {
-        _deb("DNS_Request::d-tor");
+        _dum("DNS_Request::d-tor");
     };
     DECLARE_C_NAME("DNS_Request");
     DECLARE_LOGGING(to_string);
@@ -299,13 +299,13 @@ public:
     unsigned int cached_id_idx = 0;
     
     DNS_Response(): DNS_Packet() {
-        log = logan::attach<DNS_Response>(this,"dns");
-        _deb("DNS_Response::c-tor");
+        log = logan::attach<DNS_Response>(this, "dns");
+        _dum("DNS_Response::c-tor");
     };
     ~DNS_Response() override {
-        _deb("DNS_Request::d-tor");
+        _dum("DNS_Request::d-tor");
         if(cached_packet != nullptr) {
-            _deb("DNS_Request::d-tor deleting cached packet");
+            _dum("DNS_Request::d-tor deleting cached packet");
             delete cached_packet;
         }
     };
@@ -352,7 +352,7 @@ public:
     static std::recursive_mutex& get_domain_lock() { return get().domain_lock(); };
 
     static domain_cache_entry_t* make_domain_entry(std::string const& s) {
-        return new domain_cache_entry_t(string_format("DNS cache for %s",s.c_str()).c_str(), DNS::sub_ttl, true);
+        return new domain_cache_entry_t(string_format("DNS cache for %s", s.c_str()).c_str(), DNS::sub_ttl, true);
     }
 
     static DNS& get() {

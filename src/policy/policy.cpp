@@ -39,7 +39,7 @@
 
 #include <policy/policy.hpp>
 
-DEFINE_LOGGING(PolicyRule);
+DEFINE_LOGGING(PolicyRule)
 
 std::string PolicyRule::to_string(int verbosity) const {
 
@@ -54,13 +54,13 @@ std::string PolicyRule::to_string(int verbosity) const {
             from << " [udp] ";
             break;
         default:
-            from << string_format(" [%3d] ",proto);
+            from << string_format(" [proto-%d] ", proto);
     }
     
     if(src_default) from << "*";
-    for(auto it: src) {
+    for(auto const& it: src) {
         if(verbosity > iINF) {
-            from << string_format("(0x%x)",this);
+            from << string_format("(0x%x)", this);
         }
         from << it->to_string() << " ";
     }
@@ -70,13 +70,13 @@ std::string PolicyRule::to_string(int verbosity) const {
         if(it.first == 0 && it.second == 65535)
             from << "(*) ";
         else
-            from << string_format("(%d,%d) ",it.first,it.second);
+            from << string_format("(%d,%d) ", it.first, it.second);
     }
     
     std::stringstream to;
 
     if(dst_default) to << "*";
-    for(auto it: dst) {
+    for(auto const& it: dst) {
         to << it->to_string() << " ";
     }
     to << ":";
@@ -85,7 +85,7 @@ std::string PolicyRule::to_string(int verbosity) const {
         if(it.first == 0 && it.second == 65535)
             to << "(*) ";
         else
-            to << string_format("(%d,%d) ",it.first,it.second);
+            to << string_format("(%d,%d) ", it.first, it.second);
     }
     
     std::stringstream out;
@@ -123,11 +123,11 @@ std::string PolicyRule::to_string(int verbosity) const {
     
     if(verbosity > INF) {
         out << ": ";
-        if(profile_auth) out << string_format("\n    auth=%s  (0x%x) ",profile_auth->prof_name.c_str(), profile_auth.get());
-        if(profile_tls) out << string_format("\n    tls=%s  (0x%x) ",profile_tls->prof_name.c_str(),profile_tls.get());
-        if(profile_detection) out << string_format("\n    det=%s  (0x%x) ",profile_detection->prof_name.c_str(),profile_detection.get());
-        if(profile_content) out << string_format("\n    cont=%s  (0x%x) ",profile_content->prof_name.c_str(),profile_content.get());
-        if(profile_alg_dns) out << string_format("\n    alg_dns=%s  (0x%x) ",profile_alg_dns->prof_name.c_str(),profile_alg_dns.get());
+        if(profile_auth) out << string_format("\n    auth=%s  (0x%x) ", profile_auth->prof_name.c_str(), profile_auth.get());
+        if(profile_tls) out << string_format("\n    tls=%s  (0x%x) ", profile_tls->prof_name.c_str(), profile_tls.get());
+        if(profile_detection) out << string_format("\n    det=%s  (0x%x) ", profile_detection->prof_name.c_str(), profile_detection.get());
+        if(profile_content) out << string_format("\n    cont=%s  (0x%x) ", profile_content->prof_name.c_str(), profile_content.get());
+        if(profile_alg_dns) out << string_format("\n    alg_dns=%s  (0x%x) ", profile_alg_dns->prof_name.c_str(), profile_alg_dns.get());
     }
     
     return out.str();
@@ -142,7 +142,7 @@ bool PolicyRule::match_addrgrp_cx(std::vector<std::shared_ptr<AddressObject>> &s
 //                 _dia("PolicyRule: matched ");
     } else {
         CIDR* l = cidr_from_str(cx->host().c_str());
-        for(auto comp: sources) {
+        for(auto const& comp: sources) {
             
             if(comp->match(l)) {
                 if(*log.level() >= DIA) {
@@ -177,11 +177,11 @@ bool PolicyRule::match_rangegrp_cx(std::vector< range >& ranges, baseHostCX* cx)
         for(auto const& comp: ranges) {
 
             if((p >= comp.first) && (p <= comp.second)) {
-                _deb("PolicyRule::match_rangergrp_cx: comparing %d with %s: matched",p,rangetos(comp).c_str());
+                _deb("PolicyRule::match_rangergrp_cx: comparing %d with %s: matched", p, rangetos(comp).c_str());
                 match = true;
                 break;
             } else {
-                _deb("PolicyRule::match_rangergrp_cx: comapring %d with %s: not matched",p,rangetos(comp).c_str());
+                _deb("PolicyRule::match_rangergrp_cx: comparing %d with %s: not matched", p, rangetos(comp).c_str());
             }
         }
     }
@@ -216,12 +216,12 @@ bool PolicyRule::match_addrgrp_vecx(std::vector<std::shared_ptr<AddressObject>> 
     for(auto cx: vecx) {
         ++idx;
 
-        match = match_addrgrp_cx(sources,cx);
+        match = match_addrgrp_cx(sources, cx);
         if(match) {
-            _deb("PolicyRule::match_addrgrp_vecx: %s matched",cx->c_name());
+            _deb("PolicyRule::match_addrgrp_vecx: %s matched", cx->c_name());
             break;
         } else {
-            _deb("PolicyRule::match_addrgrp_vecx: %s not matched",cx->c_name());
+            _deb("PolicyRule::match_addrgrp_vecx: %s not matched", cx->c_name());
         }
     }
     

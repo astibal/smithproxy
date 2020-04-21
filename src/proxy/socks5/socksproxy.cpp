@@ -49,8 +49,8 @@
 #include <vector>
 
 
-DEFINE_LOGGING(SocksProxy);
-DEFINE_LOGGING(MitmSocksProxy);
+DEFINE_LOGGING(SocksProxy)
+DEFINE_LOGGING(MitmSocksProxy)
 
 SocksProxy::SocksProxy(baseCom* c): MitmProxy(c) {
     log = logan::attach(this, "proxy");

@@ -59,7 +59,7 @@
 
 
 void DaemonFactory::set_tenant(const std::string& name, const std::string& tenant_id) {
-    PID_FILE = string_format("/var/run/%s.%s.pid",name.c_str(), tenant_id.c_str());
+    pid_file = string_format("/var/run/%s.%s.pid", name.c_str(), tenant_id.c_str());
 }
 
 void DaemonFactory::daemonize() {
@@ -69,8 +69,8 @@ void DaemonFactory::daemonize() {
     
     _dia("daemonize start");
     
-    struct stat st;
-    if( stat(PID_FILE.c_str(),&st) == 0) {
+    struct stat st{0};
+    if(stat(pid_file.c_str(), &st) == 0) {
         _err("There seems to be smithproxy already running in the system. Aborting.");
         exit(EXIT_FAILURE);
     }
@@ -121,24 +121,24 @@ void DaemonFactory::daemonize() {
     _dia("daemonize: finished");
 }
 
-void DaemonFactory::write_pidfile() {
-    FILE* pf = fopen(PID_FILE.c_str(),"w");
+void DaemonFactory::write_pidfile() const {
+    FILE* pf = fopen(pid_file.c_str(), "w");
     fprintf(pf,"%d",getpid());
     fclose(pf);
 }
 
-void DaemonFactory::unlink_pidfile() {
-    unlink(PID_FILE.c_str());
+void DaemonFactory::unlink_pidfile() const {
+    unlink(pid_file.c_str());
 }
 
-bool DaemonFactory::exists_pidfile() {
-    struct stat st;
-    int result = stat(PID_FILE.c_str(), &st);
+bool DaemonFactory::exists_pidfile() const {
+    struct stat st{0};
+    int result = stat(pid_file.c_str(), &st);
     return result == 0;
 }
 
 int DaemonFactory::get_limit_fd() {
-    struct rlimit r;
+    struct rlimit r{0};
     int ret = getrlimit(RLIMIT_NOFILE,&r);
     if(ret < 0) {
         _err("get_limit_fd: cannot obtain fd limits: %s", string_error().c_str());
@@ -153,7 +153,7 @@ void DaemonFactory::set_limit_fd(int max) {
     if(max == 0) 
         n = 100000;
 
-    struct rlimit r;
+    struct rlimit r{0};
     r.rlim_cur = n;
     r.rlim_max = 100000;
     
@@ -164,8 +164,11 @@ void DaemonFactory::set_limit_fd(int max) {
     }
 }
 
-void DaemonFactory::set_signal(unsigned int SIG, void (*sig_handler)(int)) {
+void DaemonFactory::set_signal(int SIG, void (*sig_handler)(int)) {
+
     struct sigaction act_segv;
+    memset(&act_segv, 0, sizeof(struct sigaction));
+
     sigemptyset(&act_segv.sa_mask);
     act_segv.sa_flags = 0;
     
@@ -253,6 +256,6 @@ std::string& DaemonFactory::class_name() const {
 }
 
 std::string DaemonFactory::hr() const {
-    return string_format("pidfile=(%s)", PID_FILE.c_str());
+    return string_format("pidfile=(%s)", pid_file.c_str());
 }
 

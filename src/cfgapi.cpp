@@ -113,7 +113,7 @@ bool CfgFactory::cfgapi_init(const char* fnm) {
     }
     catch(const FileIOException &fioex)
     {
-        _err("I/O error while reading config file: %s",fnm);
+        _err("I/O error while reading config file: %s", fnm);
         return false;   
     }
     catch(const ParseException &pex)
@@ -365,7 +365,7 @@ int CfgFactory::load_db_address () {
     if(cfgapi.getRoot().exists("address_objects")) {
 
         num = cfgapi.getRoot()["address_objects"].getLength();
-        _dia("cfgapi_load_addresses: found %d objects",num);
+        _dia("cfgapi_load_addresses: found %d objects", num);
         
         Setting& curr_set = cfgapi.getRoot()["address_objects"];
 
@@ -494,15 +494,15 @@ int CfgFactory::load_db_proto () {
             
             name = cur_object.getName();
 
-            _deb("cfgapi_load_proto: processing '%s'",name.c_str());
+            _deb("cfgapi_load_proto: processing '%s'", name.c_str());
             
             if( cur_object.lookupValue("id",a) ) {
                 
                 db_proto[name] = a;
 
-                _dia("cfgapi_load_proto: '%s': ok",name.c_str());
+                _dia("cfgapi_load_proto: '%s': ok", name.c_str());
             } else {
-                _dia("cfgapi_load_proto: '%s': not ok",name.c_str());
+                _dia("cfgapi_load_proto: '%s': not ok", name.c_str());
             }
         }
     }
@@ -522,7 +522,7 @@ int CfgFactory::load_db_policy () {
     if(cfgapi.getRoot().exists("policy")) {
 
         num = cfgapi.getRoot()["policy"].getLength();
-        _dia("cfgapi_load_policy: found %d objects",num);
+        _dia("cfgapi_load_policy: found %d objects", num);
         
         Setting& curr_set = cfgapi.getRoot()["policy"];
 
@@ -541,7 +541,7 @@ int CfgFactory::load_db_policy () {
             
             bool error = false;
 
-            _dia("cfgapi_load_policy: processing #%d",i);
+            _dia("cfgapi_load_policy: processing #%d", i);
             
             auto rule = std::make_shared<PolicyRule>();
 
@@ -551,31 +551,31 @@ int CfgFactory::load_db_policy () {
                     rule->proto_name = proto;
                     rule->proto = r;
                     rule->proto_default = false;
-                    _dia("cfgapi_load_policy[#%d]: proto object: %s",i,proto.c_str());
+                    _dia("cfgapi_load_policy[#%d]: proto object: %s", i, proto.c_str());
                 } else {
-                    _dia("cfgapi_load_policy[#%d]: proto object not found: %s",i,proto.c_str());
+                    _dia("cfgapi_load_policy[#%d]: proto object not found: %s", i, proto.c_str());
                     error = true;
                 }
             }
             
             const Setting& sett_src = cur_object["src"];
             if(sett_src.isScalar()) {
-                _dia("cfgapi_load_policy[#%d]: scalar src address object",i);
+                _dia("cfgapi_load_policy[#%d]: scalar src address object", i);
                 if(cur_object.lookupValue("src",src)) {
                     
                     auto r = lookup_address(src.c_str());
                     if(r) {
                         rule->src.push_back(r);
                         rule->src_default = false;
-                        _dia("cfgapi_load_policy[#%d]: src address object: %s",i,src.c_str());
+                        _dia("cfgapi_load_policy[#%d]: src address object: %s", i, src.c_str());
                     } else {
-                        _dia("cfgapi_load_policy[#%d]: src address object not found: %s",i,src.c_str());
+                        _dia("cfgapi_load_policy[#%d]: src address object not found: %s", i, src.c_str());
                         error = true;
                     }
                 }
             } else {
                 int sett_src_count = sett_src.getLength();
-                _dia("cfgapi_load_policy[#%d]: src address list",i);
+                _dia("cfgapi_load_policy[#%d]: src address list", i);
                 for(int y = 0; y < sett_src_count; y++) {
                     const char* obj_name = sett_src[y];
                     
@@ -583,9 +583,9 @@ int CfgFactory::load_db_policy () {
                     if(r) {
                         rule->src.push_back(r);
                         rule->src_default = false;
-                        _dia("cfgapi_load_policy[#%d]: src address object: %s",i,obj_name);
+                        _dia("cfgapi_load_policy[#%d]: src address object: %s", i, obj_name);
                     } else {
-                        _dia("cfgapi_load_policy[#%d]: src address object not found: %s",i,obj_name);
+                        _dia("cfgapi_load_policy[#%d]: src address object not found: %s",i, obj_name);
                         error = true;
                     }
 
@@ -600,9 +600,9 @@ int CfgFactory::load_db_policy () {
                         rule->src_ports.push_back(r);
                         rule->src_ports_names.push_back(sport);
                         rule->src_ports_default = false;
-                        _dia("cfgapi_load_policy[#%d]: src_port object: %s",i,sport.c_str());
+                        _dia("cfgapi_load_policy[#%d]: src_port object: %s", i, sport.c_str());
                     } else {
-                        _dia("cfgapi_load_policy[#%d]: src_port object not found: %s",i,sport.c_str());
+                        _dia("cfgapi_load_policy[#%d]: src_port object not found: %s", i, sport.c_str());
                         error = true;
                     }
                 }
@@ -617,9 +617,9 @@ int CfgFactory::load_db_policy () {
                         rule->src_ports.push_back(r);
                         rule->src_ports_names.emplace_back(obj_name);
                         rule->src_ports_default = false;
-                        _dia("cfgapi_load_policy[#%d]: src_port object: %s",i,obj_name);
+                        _dia("cfgapi_load_policy[#%d]: src_port object: %s", i, obj_name);
                     } else {
-                        _dia("cfgapi_load_policy[#%d]: src_port object not found: %s",i,obj_name);
+                        _dia("cfgapi_load_policy[#%d]: src_port object not found: %s", i, obj_name);
                         error = true;
                     }
                 }
@@ -632,15 +632,15 @@ int CfgFactory::load_db_policy () {
                     if(r) {
                         rule->dst.push_back(r);
                         rule->dst_default = false;
-                        _dia("cfgapi_load_policy[#%d]: dst address object: %s",i,dst.c_str());
+                        _dia("cfgapi_load_policy[#%d]: dst address object: %s", i, dst.c_str());
                     } else {
-                        _dia("cfgapi_load_policy[#%d]: dst address object not found: %s",i,dst.c_str());
+                        _dia("cfgapi_load_policy[#%d]: dst address object not found: %s", i, dst.c_str());
                         error = true;
                     }                
                 }
             } else {
                 int sett_dst_count = sett_dst.getLength();
-                _dia("cfgapi_load_policy[#%d]: dst list",i);
+                _dia("cfgapi_load_policy[#%d]: dst list", i);
                 for(int y = 0; y < sett_dst_count; y++) {
                     const char* obj_name = sett_dst[y];
 
@@ -648,9 +648,9 @@ int CfgFactory::load_db_policy () {
                     if(r) {
                         rule->dst.push_back(r);
                         rule->dst_default = false;
-                        _dia("cfgapi_load_policy[#%d]: dst address object: %s",i,obj_name);
+                        _dia("cfgapi_load_policy[#%d]: dst address object: %s", i, obj_name);
                     } else {
-                        _dia("cfgapi_load_policy[#%d]: dst address object not found: %s",i,obj_name);
+                        _dia("cfgapi_load_policy[#%d]: dst address object not found: %s", i, obj_name);
                         error = true;
                     }                
                 }
@@ -665,15 +665,15 @@ int CfgFactory::load_db_policy () {
                         rule->dst_ports.push_back(r);
                         rule->dst_ports_names.push_back(dport);
                         rule->dst_ports_default = false;
-                        _dia("cfgapi_load_policy[#%d]: dst_port object: %s",i,dport.c_str());
+                        _dia("cfgapi_load_policy[#%d]: dst_port object: %s", i, dport.c_str());
                     } else {
-                        _dia("cfgapi_load_policy[#%d]: dst_port object not found: %s",i,dport.c_str());
+                        _dia("cfgapi_load_policy[#%d]: dst_port object not found: %s", i, dport.c_str());
                         error = true;
                     }
                 }
             } else {
                 int sett_dport_count = sett_dport.getLength();
-                _dia("cfgapi_load_policy[#%d]: dst_port object list",i);
+                _dia("cfgapi_load_policy[#%d]: dst_port object list", i);
                 for(int y = 0; y < sett_dport_count; y++) {
                     const char* obj_name = sett_dport[y];
                     
@@ -682,9 +682,9 @@ int CfgFactory::load_db_policy () {
                         rule->dst_ports.push_back(r);
                         rule->dst_ports_names.emplace_back(obj_name);
                         rule->dst_ports_default = false;
-                        _dia("cfgapi_load_policy[#%d]: dst_port object: %s",i,obj_name);
+                        _dia("cfgapi_load_policy[#%d]: dst_port object: %s", i, obj_name);
                     } else {
-                        _dia("cfgapi_load_policy[#%d]: dst_port object not found: %s",i,obj_name);
+                        _dia("cfgapi_load_policy[#%d]: dst_port object not found: %s", i, obj_name);
                         error = true;
                     }                    
                 }
@@ -693,16 +693,16 @@ int CfgFactory::load_db_policy () {
             if(cur_object.lookupValue("action",action)) {
                 int r_a = POLICY_ACTION_PASS;
                 if(action == "deny") {
-                    _dia("cfgapi_load_policy[#%d]: action: deny",i);
+                    _dia("cfgapi_load_policy[#%d]: action: deny", i);
                     r_a = POLICY_ACTION_DENY;
                     rule->action_name = action;
 
                 } else if (action == "accept"){
-                    _dia("cfgapi_load_policy[#%d]: action: accept",i);
+                    _dia("cfgapi_load_policy[#%d]: action: accept", i);
                     r_a = POLICY_ACTION_PASS;
                     rule->action_name = action;
                 } else {
-                    _dia("cfgapi_load_policy[#%d]: action: unknown action '%s'",i,action.c_str());
+                    _dia("cfgapi_load_policy[#%d]: action: unknown action '%s'", i, action.c_str());
                     r_a  = POLICY_ACTION_DENY;
                     error = true;
                 }
@@ -717,12 +717,12 @@ int CfgFactory::load_db_policy () {
                 int nat_a = POLICY_NAT_NONE;
                 
                 if(nat == "none") {
-                    _dia("cfgapi_load_policy[#%d]: nat: none",i);
+                    _dia("cfgapi_load_policy[#%d]: nat: none", i);
                     nat_a = POLICY_NAT_NONE;
                     rule->nat_name = nat;
 
                 } else if (nat == "auto"){
-                    _dia("cfgapi_load_policy[#%d]: nat: auto",i);
+                    _dia("cfgapi_load_policy[#%d]: nat: auto", i);
                     nat_a = POLICY_NAT_AUTO;
                     rule->nat_name = nat;
                 } else {
@@ -752,10 +752,10 @@ int CfgFactory::load_db_policy () {
                 if(load_if_exists(cur_object, "detection_profile",name_detection)) {
                     auto prf  = lookup_prof_detection(name_detection.c_str());
                     if(prf) {
-                        _dia("cfgapi_load_policy[#%d]: detect profile %s",i,name_detection.c_str());
+                        _dia("cfgapi_load_policy[#%d]: detect profile %s", i, name_detection.c_str());
                         rule->profile_detection = std::shared_ptr<ProfileDetection>(prf);
                     } else {
-                        _err("cfgapi_load_policy[#%d]: detect profile %s cannot be loaded",i,name_detection.c_str());
+                        _err("cfgapi_load_policy[#%d]: detect profile %s cannot be loaded", i, name_detection.c_str());
                         error = true;
                     }
                 }
@@ -763,10 +763,10 @@ int CfgFactory::load_db_policy () {
                 if(load_if_exists(cur_object, "content_profile",name_content)) {
                     auto prf  = lookup_prof_content(name_content.c_str());
                     if(prf) {
-                        _dia("cfgapi_load_policy[#%d]: content profile %s",i,name_content.c_str());
+                        _dia("cfgapi_load_policy[#%d]: content profile %s", i, name_content.c_str());
                         rule->profile_content = prf;
                     } else {
-                        _err("cfgapi_load_policy[#%d]: content profile %s cannot be loaded",i,name_content.c_str());
+                        _err("cfgapi_load_policy[#%d]: content profile %s cannot be loaded", i, name_content.c_str());
                         error = true;
                     }
                 }                
@@ -776,27 +776,27 @@ int CfgFactory::load_db_policy () {
                         _dia("cfgapi_load_policy[#%d]: tls profile %s",i,name_tls.c_str());
                         rule->profile_tls= std::shared_ptr<ProfileTls>(tls);
                     } else {
-                        _err("cfgapi_load_policy[#%d]: tls profile %s cannot be loaded",i,name_tls.c_str());
+                        _err("cfgapi_load_policy[#%d]: tls profile %s cannot be loaded", i, name_tls.c_str());
                         error = true;
                     }
                 }         
                 if(load_if_exists(cur_object, "auth_profile",name_auth)) {
                     auto auth  = lookup_prof_auth(name_auth.c_str());
                     if(auth) {
-                        _dia("cfgapi_load_policy[#%d]: auth profile %s",i,name_auth.c_str());
+                        _dia("cfgapi_load_policy[#%d]: auth profile %s", i, name_auth.c_str());
                         rule->profile_auth= auth;
                     } else {
-                        _err("cfgapi_load_policy[#%d]: auth profile %s cannot be loaded",i,name_auth.c_str());
+                        _err("cfgapi_load_policy[#%d]: auth profile %s cannot be loaded", i, name_auth.c_str());
                         error = true;
                     }
                 }
                 if(load_if_exists(cur_object, "alg_dns_profile",name_alg_dns)) {
                     auto dns  = lookup_prof_alg_dns(name_alg_dns.c_str());
                     if(dns) {
-                        _dia("cfgapi_load_policy[#%d]: DNS alg profile %s",i,name_alg_dns.c_str());
+                        _dia("cfgapi_load_policy[#%d]: DNS alg profile %s", i, name_alg_dns.c_str());
                         rule->profile_alg_dns = dns;
                     } else {
-                        _err("cfgapi_load_policy[#%d]: DNS alg %s cannot be loaded",i,name_alg_dns.c_str());
+                        _err("cfgapi_load_policy[#%d]: DNS alg %s cannot be loaded", i, name_alg_dns.c_str());
                         error = true;
                     }
                 }
@@ -804,10 +804,10 @@ int CfgFactory::load_db_policy () {
                 if(load_if_exists(cur_object, "script_profile", name_script)) {
                     auto scr  = lookup_prof_script(name_script.c_str());
                     if(scr) {
-                        _dia("cfgapi_load_policy[#%d]: script profile %s",i,name_script.c_str());
+                        _dia("cfgapi_load_policy[#%d]: script profile %s", i, name_script.c_str());
                         rule->profile_script = scr;
                     } else {
-                        _err("cfgapi_load_policy[#%d]: script profile %s cannot be loaded",i,name_script.c_str());
+                        _err("cfgapi_load_policy[#%d]: script profile %s cannot be loaded", i, name_script.c_str());
                         error = true;
                     }
                 }
@@ -816,10 +816,10 @@ int CfgFactory::load_db_policy () {
             }
             
             if(!error){
-                _dia("cfgapi_load_policy[#%d]: ok",i);
+                _dia("cfgapi_load_policy[#%d]: ok", i);
                 db_policy.push_back(rule);
             } else {
-                _err("cfgapi_load_policy[#%d]: not ok (will not process traffic)",i);
+                _err("cfgapi_load_policy[#%d]: not ok (will not process traffic)", i);
             }
         }
     }
@@ -839,7 +839,7 @@ int CfgFactory::policy_match (baseProxy *proxy) {
         bool r = rule->match(proxy);
         
         if(r) {
-            _deb("policy_match: matched #%d",x);
+            _deb("policy_match: matched #%d", x);
             return x;
         }
         
@@ -859,7 +859,7 @@ int CfgFactory::policy_match (std::vector<baseHostCX *> &left, std::vector<baseH
         bool r = rule->match(left,right);
         
         if(r) {
-            _dia("cfgapi_obj_policy_match_lr: matched #%d",x);
+            _dia("cfgapi_obj_policy_match_lr: matched #%d", x);
             return x;
         }
         
@@ -880,7 +880,7 @@ int CfgFactory::policy_action (int index) {
     if(index < (signed int)db_policy.size()) {
         return db_policy.at(index)->action;
     } else {
-        _dia("cfg_obj_policy_action[#%d]: out of bounds, deny",index);
+        _dia("cfg_obj_policy_action[#%d]: out of bounds, deny", index);
         return POLICY_ACTION_DENY;
     }
 }
@@ -895,7 +895,7 @@ std::shared_ptr<ProfileContent> CfgFactory::policy_prof_content (int index) {
     if(index < (signed int)db_policy.size()) {
         return db_policy.at(index)->profile_content;
     } else {
-        _dia("policy_prof_content[#%d]: out of bounds, nullptr",index);
+        _dia("policy_prof_content[#%d]: out of bounds, nullptr", index);
         return nullptr;
     }
 }
@@ -910,7 +910,7 @@ std::shared_ptr<ProfileDetection> CfgFactory::policy_prof_detection (int index) 
     if(index < (signed int)db_policy.size()) {
         return db_policy.at(index)->profile_detection;
     } else {
-        _dia("policy_prof_detection[#%d]: out of bounds, nullptr",index);
+        _dia("policy_prof_detection[#%d]: out of bounds, nullptr", index);
         return nullptr;
     }
 }
@@ -925,7 +925,7 @@ std::shared_ptr<ProfileTls> CfgFactory::policy_prof_tls (int index) {
     if(index < (signed int)db_policy.size()) {
         return db_policy.at(index)->profile_tls;
     } else {
-        _dia("policy_prof_tls[#%d]: out of bounds, nullptr",index);
+        _dia("policy_prof_tls[#%d]: out of bounds, nullptr", index);
         return nullptr;
     }
 }
@@ -941,7 +941,7 @@ std::shared_ptr<ProfileAlgDns> CfgFactory::policy_prof_alg_dns (int index) {
     if(index < (signed int)db_policy.size()) {
         return db_policy.at(index)->profile_alg_dns;
     } else {
-        _dia("policy_prof_alg_dns[#%d]: out of bounds, nullptr",index);
+        _dia("policy_prof_alg_dns[#%d]: out of bounds, nullptr", index);
         return nullptr;
     }
 }
@@ -956,7 +956,7 @@ std::shared_ptr<ProfileScript> CfgFactory::policy_prof_script(int index) {
     if(index < (signed int)db_policy.size()) {
         return db_policy.at(index)->profile_script;
     } else {
-        _dia("policy_prof_alg_dns[#%d]: out of bounds, nullptr",index);
+        _dia("policy_prof_alg_dns[#%d]: out of bounds, nullptr", index);
         return nullptr;
     }
 }
@@ -973,7 +973,7 @@ std::shared_ptr<ProfileAuth> CfgFactory::policy_prof_auth (int index) {
     if(index < (signed int)db_policy.size()) {
         return db_policy.at(index)->profile_auth;
     } else {
-        _dia("policy_prof_auth[#%d]: out of bounds, nullptr",index);
+        _dia("policy_prof_auth[#%d]: out of bounds, nullptr", index);
         return nullptr;
     }
 }
@@ -990,7 +990,7 @@ int CfgFactory::load_db_prof_detection () {
     if(cfgapi.getRoot().exists("detection_profiles")) {
 
         num = cfgapi.getRoot()["detection_profiles"].getLength();
-        _dia("cfgapi_load_obj_profile_detect: found %d objects",num);
+        _dia("cfgapi_load_obj_profile_detect: found %d objects", num);
         
         Setting& curr_set = cfgapi.getRoot()["detection_profiles"];
         
@@ -1007,16 +1007,16 @@ int CfgFactory::load_db_prof_detection () {
 
             name = cur_object.getName();
 
-            _dia("cfgapi_load_obj_profile_detect: processing '%s'",name.c_str());
+            _dia("cfgapi_load_obj_profile_detect: processing '%s'", name.c_str());
             
             if( cur_object.lookupValue("mode",a->mode) ) {
                 
                 a->prof_name = name;
                 db_prof_detection[name] = std::shared_ptr<ProfileDetection>(a);
 
-                _dia("cfgapi_load_obj_profile_detect: '%s': ok",name.c_str());
+                _dia("cfgapi_load_obj_profile_detect: '%s': ok", name.c_str());
             } else {
-                _dia("cfgapi_load_obj_profile_detect: '%s': not ok",name.c_str());
+                _dia("cfgapi_load_obj_profile_detect: '%s': not ok", name.c_str());
             }
         }
     }
@@ -1035,7 +1035,7 @@ int CfgFactory::load_db_prof_content () {
     if(cfgapi.getRoot().exists("content_profiles")) {
 
         num = cfgapi.getRoot()["content_profiles"].getLength();
-        _dia("load_db_prof_content: found %d objects",num);
+        _dia("load_db_prof_content: found %d objects", num);
         
         Setting& curr_set = cfgapi.getRoot()["content_profiles"];
 
@@ -1061,7 +1061,7 @@ int CfgFactory::load_db_prof_content () {
                 
                 if(cur_object.exists("content_rules")) {
                     int jnum = cur_object["content_rules"].getLength();
-                    _dia("replace rules in profile '%s', size %d",name.c_str(),jnum);
+                    _dia("replace rules in profile '%s', size %d", name.c_str(), jnum);
                     for (int j = 0; j < jnum; j++) {
                         Setting& cur_replace_rule = cur_object["content_rules"][j];
 
@@ -1086,7 +1086,7 @@ int CfgFactory::load_db_prof_content () {
                         cur_replace_rule.lookupValue("replace_each_nth",replace_each_nth);
                         
                         if( (! m.empty() ) && action_defined) {
-                            _dia("    [%d] match '%s' and replace with '%s'",j,m.c_str(),r.c_str());
+                            _dia("    [%d] match '%s' and replace with '%s'", j, m.c_str(), r.c_str());
                             ProfileContentRule p;
                             p.match = m;
                             p.replace = r;
@@ -1096,15 +1096,15 @@ int CfgFactory::load_db_prof_content () {
                             a->content_rules.push_back(p);
                             
                         } else {
-                            _dia("    [%d] unfinished replace policy",j);
+                            _dia("    [%d] unfinished replace policy", j);
                         }
                     }
                 }
 
 
-                _dia("load_db_prof_content: '%s': ok",name.c_str());
+                _dia("load_db_prof_content: '%s': ok", name.c_str());
             } else {
-                _dia("load_db_prof_content: '%s': not ok",name.c_str());
+                _dia("load_db_prof_content: '%s': not ok", name.c_str());
             }
         }
     }
@@ -1122,7 +1122,7 @@ int CfgFactory::load_db_prof_tls () {
     if(cfgapi.getRoot().exists("tls_profiles")) {
 
         num = cfgapi.getRoot()["tls_profiles"].getLength();
-        _dia("load_db_prof_tls: found %d objects",num);
+        _dia("load_db_prof_tls: found %d objects", num);
         
         Setting& curr_set = cfgapi.getRoot()["tls_profiles"];
 
@@ -1210,7 +1210,7 @@ int CfgFactory::load_db_prof_alg_dns () {
     _dia("cfgapi_load_obj_alg_dns_profile: start");
     if(cfgapi.getRoot().exists("alg_dns_profiles")) {
         num = cfgapi.getRoot()["alg_dns_profiles"].getLength();
-        _dia("cfgapi_load_obj_alg_dns_profile: found %d objects",num);
+        _dia("cfgapi_load_obj_alg_dns_profile: found %d objects", num);
         
         Setting& curr_set = cfgapi.getRoot()["alg_dns_profiles"];
 
@@ -1229,7 +1229,7 @@ int CfgFactory::load_db_prof_alg_dns () {
             
             name = cur_object.getName();
 
-            _dia("cfgapi_load_obj_alg_dns_profile: processing '%s'",name.c_str());
+            _dia("cfgapi_load_obj_alg_dns_profile: processing '%s'", name.c_str());
             
             a->prof_name = name;
             cur_object.lookupValue("match_request_id",a->match_request_id);
@@ -1269,7 +1269,7 @@ int CfgFactory::load_db_prof_script () {
 
             name = cur_object.getName();
 
-            _dia("load_db_prof_script: processing '%s'",name.c_str());
+            _dia("load_db_prof_script: processing '%s'", name.c_str());
 
             a->prof_name = name;
             cur_object.lookupValue("type", a->script_type);
@@ -1301,7 +1301,7 @@ int CfgFactory::load_db_prof_auth () {
     if(cfgapi.getRoot().exists("auth_profiles")) {
 
         num = cfgapi.getRoot()["auth_profiles"].getLength();
-        _dia("load_db_prof_auth: found %d objects",num);
+        _dia("load_db_prof_auth: found %d objects", num);
         
         Setting& curr_set = cfgapi.getRoot()["auth_profiles"];
 
@@ -1328,7 +1328,7 @@ int CfgFactory::load_db_prof_auth () {
             if(cur_object.exists("identities")) {
                 _dia("load_db_prof_auth: profiles: subpolicies exists");
                 int sub_pol_num = cur_object["identities"].getLength();
-                _dia("load_db_prof_auth: profiles: %d subpolicies detected",sub_pol_num);
+                _dia("load_db_prof_auth: profiles: %d subpolicies detected", sub_pol_num);
                 for (int j = 0; j < sub_pol_num; j++) {
                     Setting& cur_subpol = cur_object["identities"][j];
                     
@@ -1350,29 +1350,29 @@ int CfgFactory::load_db_prof_auth () {
                     if(load_if_exists(cur_subpol,"detection_profile",name_detection)) {
                         auto prf  = lookup_prof_detection(name_detection.c_str());
                         if(prf) {
-                            _dia("load_db_prof_auth[sub-profile:%s]: detect profile %s",n_subpol->name.c_str(),name_detection.c_str());
+                            _dia("load_db_prof_auth[sub-profile:%s]: detect profile %s", n_subpol->name.c_str(), name_detection.c_str());
                             n_subpol->profile_detection = prf;
                         } else {
-                            _err("load_db_prof_auth[sub-profile:%s]: detect profile %s cannot be loaded",n_subpol->name.c_str(),name_detection.c_str());
+                            _err("load_db_prof_auth[sub-profile:%s]: detect profile %s cannot be loaded", n_subpol->name.c_str(), name_detection.c_str());
                         }
                     }
                     
                     if(load_if_exists(cur_subpol,"content_profile",name_content)) {
                         auto prf  = lookup_prof_content(name_content.c_str());
                         if(prf) {
-                            _dia("load_db_prof_auth[sub-profile:%s]: content profile %s",n_subpol->name.c_str(),name_content.c_str());
+                            _dia("load_db_prof_auth[sub-profile:%s]: content profile %s", n_subpol->name.c_str(), name_content.c_str());
                             n_subpol->profile_content = prf;
                         } else {
-                            _err("load_db_prof_auth[sub-profile:%s]: content profile %s cannot be loaded",n_subpol->name.c_str(),name_content.c_str());
+                            _err("load_db_prof_auth[sub-profile:%s]: content profile %s cannot be loaded", n_subpol->name.c_str(), name_content.c_str());
                         }
                     }                
                     if(load_if_exists(cur_subpol, "tls_profile",name_tls)) {
                         auto tls  = lookup_prof_tls(name_tls.c_str());
                         if(tls) {
-                            _dia("load_db_prof_auth[sub-profile:%s]: tls profile %s",n_subpol->name.c_str(),name_tls.c_str());
+                            _dia("load_db_prof_auth[sub-profile:%s]: tls profile %s", n_subpol->name.c_str(), name_tls.c_str());
                             n_subpol->profile_tls = std::shared_ptr<ProfileTls>(tls);
                         } else {
-                            _err("load_db_prof_auth[sub-profile:%s]: tls profile %s cannot be loaded",n_subpol->name.c_str(),name_tls.c_str());
+                            _err("load_db_prof_auth[sub-profile:%s]: tls profile %s cannot be loaded", n_subpol->name.c_str(), name_tls.c_str());
                         }
                     }         
 
@@ -1381,16 +1381,16 @@ int CfgFactory::load_db_prof_auth () {
                     if(load_if_exists(cur_subpol,"alg_dns_profile",name_alg_dns)) {
                         auto dns  = lookup_prof_alg_dns(name_alg_dns.c_str());
                         if(dns) {
-                            _dia("load_db_prof_auth[sub-profile:%s]: DNS alg profile %s",n_subpol->name.c_str(),name_alg_dns.c_str());
+                            _dia("load_db_prof_auth[sub-profile:%s]: DNS alg profile %s", n_subpol->name.c_str(), name_alg_dns.c_str());
                             n_subpol->profile_alg_dns = dns;
                         } else {
-                            _err("load_db_prof_auth[sub-profile:%s]: DNS alg %s cannot be loaded",n_subpol->name.c_str(),name_alg_dns.c_str());
+                            _err("load_db_prof_auth[sub-profile:%s]: DNS alg %s cannot be loaded", n_subpol->name.c_str(), name_alg_dns.c_str());
                         }
                     }                    
 
                     
                     a->sub_policies.push_back(n_subpol);
-                    _dia("load_db_prof_auth: profiles: %d:%s",j,n_subpol->name.c_str());
+                    _dia("load_db_prof_auth: profiles: %d:%s", j, n_subpol->name.c_str());
                 }
             }
             db_prof_auth[name] = std::shared_ptr<ProfileAuth>(a);
@@ -1499,7 +1499,7 @@ int CfgFactory::cleanup_db_prof_auth () {
 }
 
 
-bool CfgFactory::prof_content_apply (baseHostCX *originator, baseProxy *new_proxy, std::shared_ptr<ProfileContent> pc) {
+bool CfgFactory::prof_content_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileContent> &pc) {
 
     auto log = logan_lite("policy.rule");
 
@@ -1538,7 +1538,7 @@ bool CfgFactory::prof_content_apply (baseHostCX *originator, baseProxy *new_prox
 }
 
 
-bool CfgFactory::prof_detect_apply (baseHostCX *originator, baseProxy *new_proxy, std::shared_ptr<ProfileDetection> pd) {
+bool CfgFactory::prof_detect_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileDetection> &pd) {
 
     auto* mitm_originator = dynamic_cast<AppHostCX*>(originator);
     auto log = logan_lite("policy.rule");
@@ -1562,7 +1562,7 @@ bool CfgFactory::prof_detect_apply (baseHostCX *originator, baseProxy *new_proxy
     return ret;
 }
 
-bool CfgFactory::prof_tls_apply (baseHostCX *originator, baseProxy *new_proxy, std::shared_ptr<ProfileTls> ps) {
+bool CfgFactory::prof_tls_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileTls> &ps) {
 
     auto log = logan_lite("policy.rule");
 
@@ -1668,7 +1668,7 @@ bool CfgFactory::prof_tls_apply (baseHostCX *originator, baseProxy *new_proxy, s
     return tls_applied;
 }
 
-bool CfgFactory::prof_alg_dns_apply (baseHostCX *originator, baseProxy *new_proxy, std::shared_ptr<ProfileAlgDns> p_alg_dns) {
+bool CfgFactory::prof_alg_dns_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileAlgDns> &p_alg_dns) {
 
     auto log = logan_lite("policy.rule");
 
@@ -1701,7 +1701,7 @@ bool CfgFactory::prof_alg_dns_apply (baseHostCX *originator, baseProxy *new_prox
 }
 
 
-bool CfgFactory::prof_script_apply (baseHostCX *originator, baseProxy *new_proxy, ProfileScript *p_script) {
+bool CfgFactory::prof_script_apply (baseHostCX *originator, baseProxy *new_proxy, std::shared_ptr<ProfileScript> const& p_script) {
 
     auto log = logan_lite("policy.rule");
 
@@ -1871,7 +1871,7 @@ bool CfgFactory::should_redirect (std::shared_ptr<ProfileTls> pt, SSLCom *com) {
     return ret;
 }
 
-bool CfgFactory::policy_apply_tls (std::shared_ptr<ProfileTls> pt, baseCom *xcom) {
+bool CfgFactory::policy_apply_tls (const std::shared_ptr<ProfileTls> &pt, baseCom *xcom) {
 
     bool tls_applied = false;     
     

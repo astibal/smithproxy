@@ -41,7 +41,7 @@
 #include <policy/authfactory.hpp>
 #include <cfgapi.hpp>
 
-DEFINE_LOGGING(AuthFactory);
+DEFINE_LOGGING(AuthFactory)
 
 int AuthFactory::shm_ip4_table_refresh()  {
 

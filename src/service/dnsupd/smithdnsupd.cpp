@@ -65,7 +65,7 @@ std::thread* create_dns_updater() {
             break;
         }
 
-        _dia("dns_updater: refresh round %d",i);
+        _dia("dns_updater: refresh round %d", i);
 
         std::vector<std::string> fqdns;
 

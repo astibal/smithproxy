@@ -68,7 +68,6 @@ std::thread* SmithProxy::create_identity_refresh_thread() {
 
 
     auto* id_thread = new std::thread([]() {
-        unsigned int sleep_time = 1;
         auto& log = instance().log;
 
         // give some time to init shm - don't run immediately
@@ -99,7 +98,7 @@ std::thread* SmithProxy::create_identity_refresh_thread() {
     });
 
     return id_thread;
-};
+}
 
 
 
@@ -421,7 +420,7 @@ int SmithProxy::load_signatures(libconfig::Config& cfg, const char* name, std::v
         target.clear();
     }
 
-    _dia("Loading %s: %d",name,sigs_len);
+    _dia("Loading %s: %d", name, sigs_len);
     for ( int i = 0 ; i < sigs_len; i++) {
         auto newsig = std::make_shared<MyDuplexFlowMatch>(MyDuplexFlowMatch());
 
@@ -469,7 +468,7 @@ int SmithProxy::load_signatures(libconfig::Config& cfg, const char* name, std::v
                 }
             } else
             if ( type == "simple") {
-                _deb(" [%d]: new simple flow match",j);
+                _deb(" [%d]: new simple flow match", j);
                 newsig->add(side[0],new simpleMatch(sigtext,bytes_start,bytes_max));
             }
         }

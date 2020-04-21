@@ -168,8 +168,8 @@ struct shm_logon_token {
     buffer buffer_;
     virtual buffer* data() { return &buffer_; }
     
-    std::string token() const { return std::string((const char*)buffer_.data()); };
-    std::string url() const { return std::string((const char*)&buffer_.data()[LOGON_TOKEN_TOKEN_SZ]);};
+    [[nodiscard]] std::string token() const { return std::string((const char*)buffer_.data()); };
+    [[nodiscard]] std::string url() const { return std::string((const char*)&buffer_.data()[LOGON_TOKEN_TOKEN_SZ]);};
 
     static unsigned int record_size() { return LOGON_TOKEN_TOKEN_SZ+LOGON_TOKEN_URL_SZ; }
     
@@ -205,7 +205,7 @@ struct shm_logon_token {
     };    
     
     std::string hr() { 
-        return string_format("%s : %16s\n",token().c_str(),url().c_str());
+        return string_format("%s : %16s\n", token().c_str(), url().c_str());
     };
 private:
     unsigned int last_random = 0;

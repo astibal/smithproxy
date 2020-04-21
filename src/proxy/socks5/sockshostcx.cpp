@@ -264,7 +264,7 @@ int socksServerCX::process_socks_request() {
                     DNS_Response* dns_resp = DNS::get_dns_cache().get("A:"+fqdn);
                     if(dns_resp) {
                         if ( ! dns_resp->answers().empty() ) {
-                            int ttl = (dns_resp->loaded_at + dns_resp->answers().at(0).ttl_) - time(nullptr);                
+                            long ttl = (dns_resp->loaded_at + dns_resp->answers().at(0).ttl_) - time(nullptr);
                             if(ttl > 0) {
                                 for( DNS_Answer& a: dns_resp->answers() ) {
                                     std::string a_ip = a.ip(false);
@@ -325,7 +325,7 @@ int socksServerCX::process_socks_request() {
                 state_ = socks5_state::REQ_RECEIVED;
                 _dia("socksServerCX::process_socks_request: request received, type %d", atype);
                 
-                uint32_t dst = readbuf()->get_at<uint32_t>(4);
+                auto dst = readbuf()->get_at<uint32_t>(4);
                 req_port = ntohs(readbuf()->get_at<uint16_t>(8));
                 com()->nonlocal_dst_port() = req_port;
                 com()->nonlocal_src(true);
@@ -339,6 +339,8 @@ int socksServerCX::process_socks_request() {
                 com()->nonlocal_src(true);
                 _dia("socksServerCX::process_socks_request: request (IPv4) for %s -> %s:%d",c_name(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
                 setup_target();
+            } else {
+                _err("unknown address type %d", atype);
             }
         }
         
@@ -353,7 +355,7 @@ int socksServerCX::process_socks_request() {
             _dia("socksServerCX::process_socks_request: socks4 request received");
             
             req_port = ntohs(readbuf()->get_at<uint16_t>(2));
-            uint32_t dst = readbuf()->get_at<uint32_t>(4);
+            auto dst = readbuf()->get_at<uint32_t>(4);
 
             
             req_addr.s_addr=dst;
@@ -399,7 +401,7 @@ bool socksServerCX::setup_target() {
                 new_com = new TCPCom();
         }
         
-        MitmHostCX* n_cx = new MitmHostCX(new_com, s);
+        auto* n_cx = new MitmHostCX(new_com, s);
         n_cx->waiting_for_peercom(true);
         n_cx->com()->name();
         n_cx->name();
@@ -412,7 +414,7 @@ bool socksServerCX::setup_target() {
         // RIGHT
 
 
-        MitmHostCX *target_cx = new MitmHostCX(n_cx->com()->slave(), n_cx->com()->nonlocal_dst_host().c_str(), 
+        auto *target_cx = new MitmHostCX(n_cx->com()->slave(), n_cx->com()->nonlocal_dst_host().c_str(),
                                             string_format("%d",n_cx->com()->nonlocal_dst_port()).c_str()
                                             );
         target_cx->waiting_for_peercom(true);
@@ -533,7 +535,7 @@ int socksServerCX::process_socks_reply() {
 void socksServerCX::pre_write() {
     _deb("socksServerCX::pre_write[%s]: writebuf=%d, readbuf=%d",c_name(),writebuf()->size(),readbuf()->size());
     if(state_ == socks5_state::REQRES_SENT ) {
-        if(writebuf()->size() == 0) {
+        if(writebuf()->empty()) {
             _dia("socksServerCX::pre_write[%s]: all flushed, state change to HANDOFF: writebuf=%d, readbuf=%d",c_name(),writebuf()->size(),readbuf()->size());
             waiting_for_peercom(true);
             state(socks5_state::HANDOFF);

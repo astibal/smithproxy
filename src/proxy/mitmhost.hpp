@@ -87,12 +87,12 @@ struct app_HttpRequest : public ApplicationData {
     
     // this function returns most usable link for visited site from the request.
     std::string original_request() override {
-        if(referer.size() > 0) {
-            _deb("std::string original_request: using referer: %s",referer.c_str());
+        if(! referer.empty()) {
+            _deb("std::string original_request: using referer: %s", referer.c_str());
             return referer;
         }
         
-        _deb("std::string original_request: using request: %s",request().c_str());
+        _deb("std::string original_request: using request: %s", request().c_str());
         return request();
     }
     std::string request() override {
@@ -136,13 +136,13 @@ public:
     MitmHostCX( baseCom* c, int s );
 
     int process() override;
-    virtual void load_signatures();
+    void load_signatures();
 
     
     std::vector<Inspector*> inspectors_;
     void inspect(char side) override;
     void on_detect(std::shared_ptr<duplexFlowMatch> x_sig, flowMatchState& s, vector_range& r) override;
-    virtual void on_detect_www_get(std::shared_ptr<duplexFlowMatch> x_sig, flowMatchState& s, vector_range& r);
+    virtual void on_detect_www_get(const std::shared_ptr<duplexFlowMatch> &x_sig, flowMatchState& s, vector_range& r);
     
     void on_starttls() override;
 

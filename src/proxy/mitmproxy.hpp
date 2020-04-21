@@ -225,7 +225,7 @@ public:
     
     static bool ssl_autodetect;
     static bool ssl_autodetect_harder;
-    bool detect_ssl_on_plain_socket(int s);
+    bool detect_ssl_on_plain_socket(int sock);
     
     time_t auth_table_refreshed = 0;
 

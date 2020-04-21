@@ -88,16 +88,16 @@ bool MySSLMitmCom::spoof_cert(X509* x, SpoofOptions& spo) {
 MitmHostCX::MitmHostCX(baseCom* c, const char* h, const char* p ) : AppHostCX::AppHostCX(c,h,p) {
     log = logan::attach<MitmHostCX>(this, "inspect");
 
-    _deb("MitmHostCX: constructor %s:%s",h,p);
+    _deb("MitmHostCX: constructor %s:%s", h, p);
     load_signatures();
-};
+}
 
 MitmHostCX::MitmHostCX( baseCom* c, int s ) : AppHostCX::AppHostCX(c,s) {
     log = logan::attach<MitmHostCX>(this, "inspect");
 
-    _deb("MitmHostCX: constructor %d",s);
+    _deb("MitmHostCX: constructor %d", s);
     load_signatures();
-};
+}
 
 int MitmHostCX::process() {
 
@@ -106,13 +106,13 @@ int MitmHostCX::process() {
     unsigned int len = baseHostCX::readbuf()->size();
 
     // our only processing: hex dup the payload to the log
-    _dum("Incoming data(%s):\n %s", this->name().c_str(), hex_dump(ptr,len));
+    _dum("Incoming data(%s):\n %s", this->name().c_str(), hex_dump(ptr, static_cast<int>(len)).c_str());
 
 
 
     //  read buffer will be truncated by 'len' bytes. Note: truncated bytes are LOST.
-    return len;
-};
+    return static_cast<int>(len);
+}
 
 void MitmHostCX::load_signatures() {
 
@@ -122,9 +122,9 @@ void MitmHostCX::load_signatures() {
     make_sig_states(sensor(), SigFactory::get().detection());
 
     _deb("MitmHostCX::load_signatures: stop");
-};
+}
 
-void MitmHostCX::on_detect_www_get(std::shared_ptr<duplexFlowMatch> x_sig, flowMatchState& s, vector_range& r) {
+void MitmHostCX::on_detect_www_get(const std::shared_ptr<duplexFlowMatch> &x_sig, flowMatchState& s, vector_range& r) {
     if(! r.empty()) {
         std::pair<char,buffer*>& get = flow().flow()[0];
         std::pair<char,buffer*>& status = flow().flow()[0];
@@ -162,7 +162,7 @@ void MitmHostCX::on_detect_www_get(std::shared_ptr<duplexFlowMatch> x_sig, flowM
             auto* app_request = dynamic_cast<app_HttpRequest*>(application_data);
             if(app_request != nullptr) {
                 app_request->referer = str_temp;
-                _deb("Referer: %s",ESC(app_request->referer));
+                _deb("Referer: %s", ESC(app_request->referer));
             }
 
 
@@ -180,7 +180,7 @@ void MitmHostCX::on_detect_www_get(std::shared_ptr<duplexFlowMatch> x_sig, flowM
                 auto* app_request = dynamic_cast<app_HttpRequest*>(application_data);
                 if(app_request != nullptr) {
                     app_request->host = str_temp;
-                    _dia("Host: %s",app_request->host.c_str());
+                    _dia("Host: %s", app_request->host.c_str());
 
 
                     // FIXME: should be some config variable
@@ -193,9 +193,9 @@ void MitmHostCX::on_detect_www_get(std::shared_ptr<duplexFlowMatch> x_sig, flowM
                         DNS_Response* dns_resp_aaaa = DNS::get().dns_cache().get("AAAA:" + app_request->host);
 
                         if(dns_resp_a && com()->l3_proto() == AF_INET) {
-                            _deb("HTTP inspection: Host header matches DNS: %s",ESC(dns_resp_a->question_str_0()));
+                            _deb("HTTP inspection: Host header matches DNS: %s", ESC(dns_resp_a->question_str_0()));
                         } else if(dns_resp_aaaa && com()->l3_proto() == AF_INET6) {
-                            _deb("HTTP inspection: Host header matches IPv6 DNS: %s",ESC(dns_resp_aaaa->question_str_0()));
+                            _deb("HTTP inspection: Host header matches IPv6 DNS: %s", ESC(dns_resp_aaaa->question_str_0()));
                         }
                         else {
                             _war("HTTP inspection: 'Host' header value '%s' DOESN'T match DNS!", app_request->host.c_str());
@@ -217,13 +217,13 @@ void MitmHostCX::on_detect_www_get(std::shared_ptr<duplexFlowMatch> x_sig, flowM
                 auto* app_request = dynamic_cast<app_HttpRequest*>(application_data);
                 if(app_request != nullptr) {
                     app_request->uri = str_temp;
-                    _dia("URI: %s",ESC(app_request->uri));
+                    _dia("URI: %s", ESC(app_request->uri));
                 }
 
                 if(app_request && m_get.size() > 2) {
                     str_temp = m_get[3].str();
                     app_request->params = str_temp;
-                    _dia("params: %s",ESC(app_request->params));
+                    _dia("params: %s", ESC(app_request->params));
 
                     //print_request += str_temp;
                 }
@@ -245,7 +245,7 @@ void MitmHostCX::on_detect_www_get(std::shared_ptr<duplexFlowMatch> x_sig, flowM
 
             _inf("http request: %s",ESC(app_request->hr()));
         } else {
-            _inf("http request: %s (app_request cast failed)",ESC(print_request));
+            _inf("http request: %s (app_request cast failed)", ESC(print_request));
         }
 
 
@@ -268,7 +268,7 @@ void MitmHostCX::inspect(char side) {
     AppHostCX::inspect(side);
     
     if(flow().flow().size() > inspect_cur_flow_size) {
-        _deb("MitmHostCX::inspect: flow size change: %d",flow().flow().size());
+        _deb("MitmHostCX::inspect: flow size change: %d", flow().flow().size());
         inspect_flow_same_bytes = 0;
     }
     
@@ -288,7 +288,7 @@ void MitmHostCX::inspect(char side) {
                 
                 inspect_verdict = inspector->verdict();
 
-                _dia("MitmHostCX::inspect[%s]: verdict %d",inspector->c_name(), inspect_verdict);
+                _dia("MitmHostCX::inspect[%s]: verdict %d", inspector->c_name(), inspect_verdict);
                 if(inspect_verdict == Inspector::OK) {
                     //
                 } else if (inspect_verdict == Inspector::CACHED) {

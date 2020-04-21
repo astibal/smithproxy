@@ -406,7 +406,7 @@ int main(int argc, char *argv[]) {
     DaemonFactory& this_daemon = DaemonFactory::instance();
     auto& log = this_daemon.log;
 
-    this_daemon.PID_FILE="/var/run/smithd.%s.pid";
+    this_daemon.pid_file="/var/run/smithd.%s.pid";
 
     config_file = "/etc/smithproxy/smithd.cfg";
     std::string config_file_tenant = "/etc/smithproxy/smithd.%s.cfg";
@@ -541,7 +541,7 @@ int main(int argc, char *argv[]) {
   
     if(this_daemon.exists_pidfile()) {
         _fat("There is PID file already in the system.");
-        _fat("Please make sure smithd is not running, remove %s and try again.", this_daemon.PID_FILE.c_str());
+        _fat("Please make sure smithd is not running, remove %s and try again.", this_daemon.pid_file.c_str());
         exit(-5);
     }
     

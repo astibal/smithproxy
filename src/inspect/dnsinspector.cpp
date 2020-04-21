@@ -202,9 +202,8 @@ void DNS_Inspector::update(AppHostCX* cx) {
 
                 if(cur_red >= 0) {
                     if(opt_cached_responses) {
-                        if(((DNS_Response*)ptr)->cached_packet != nullptr) {
-                            delete ((DNS_Response*)ptr)->cached_packet;
-                        }
+                        delete ((DNS_Response*)ptr)->cached_packet;
+
                         ((DNS_Response*)ptr)->cached_packet = new buffer();
                         if(cur_red == 0) {
                             ((DNS_Response*)ptr)->cached_packet->append(cur_buf.data(),cur_buf.size());
@@ -272,8 +271,8 @@ void DNS_Inspector::update(AppHostCX* cx) {
 bool DNS_Inspector::store(DNS_Response* ptr) {
     bool is_a_record = true;
 
-    std::string ip = ptr->answer_str().c_str();
-    if(ip.size() > 0) {
+    std::string ip = ptr->answer_str();
+    if(! ip.empty()) {
         _not("DNS inspection: %s is at%s",ptr->question_str_0().c_str(),ip.c_str()); //ip is already prepended with " "
     }
     else {
@@ -297,12 +296,12 @@ bool DNS_Inspector::store(DNS_Response* ptr) {
         std::pair<std::string,std::string> dom_pair = split_fqdn_subdomain(question);
         _deb("topdomain = %s, subdomain = %s",dom_pair.first.c_str(), dom_pair.second.c_str());
 
-        if(dom_pair.first.size() > 0 && dom_pair.second.size() > 0) {
+        if( (! dom_pair.first.empty()) && (! dom_pair.second.empty()) ) {
 
             std::scoped_lock<std::recursive_mutex> ll_(DNS::get_domain_lock());
 
             auto subdom_cache = DNS::get_domain_cache().get(dom_pair.first);
-            if(subdom_cache != nullptr) {
+            if(subdom_cache) {
 
                 _dia("Top domain cache entry found for domain %s",dom_pair.first.c_str());
                 if(subdom_cache->get(dom_pair.second) != nullptr) {
@@ -311,7 +310,7 @@ bool DNS_Inspector::store(DNS_Response* ptr) {
 
 
                 if(LEV_(DEB)) {
-                    for( auto subdomain: subdom_cache->cache()) {
+                    for( auto const& subdomain: subdom_cache->cache()) {
                         std::string  s =  subdomain.first;
                         expiring_int* i = subdomain.second;
 
@@ -324,7 +323,7 @@ bool DNS_Inspector::store(DNS_Response* ptr) {
 
             else {
                 _dia("Top domain cache entry NOT found for domain %s",dom_pair.first.c_str());
-                auto* subdom_cache = DNS::make_domain_entry(dom_pair.first);
+                subdom_cache = DNS::make_domain_entry(dom_pair.first);
                 subdom_cache -> set(dom_pair.second, new expiring_int(1, DNS::sub_ttl));
 
                 DNS::get_domain_cache().set(dom_pair.first, subdom_cache);

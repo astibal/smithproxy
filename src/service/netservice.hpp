@@ -70,23 +70,23 @@ Listener * NetworkServiceFactory::prepare_listener (unsigned int port, std::stri
     }
 
     _not("Entering %s mode on port %d", friendly_name.c_str(), port);
-    auto s_p = new Listener(new Com(), type);
-    s_p->com()->nonlocal_dst(true);
-    s_p->worker_count_preference(sub_workers);
+    auto listener = new Listener(new Com(), type);
+    listener->com()->nonlocal_dst(true);
+    listener->worker_count_preference(sub_workers);
 
     // bind with master proxy (.. and create child proxies for new connections)
-    int s = s_p->bind(port,'L');
-    if (s < 0) {
-        _fat("Error binding %s port (%d), exiting", friendly_name.c_str(), s);
-        delete s_p;
+    int sock = listener->bind(port, 'L');
+    if (sock < 0) {
+        _fat("Error binding %s on port %d, exiting", friendly_name.c_str(), sock);
+        delete listener;
         return nullptr;
     };
-    s_p->com()->unblock(s);
+    listener->com()->unblock(sock);
     
-    s_p->com()->set_monitor(s);
-    s_p->com()->set_poll_handler(s,s_p);
+    listener->com()->set_monitor(sock);
+    listener->com()->set_poll_handler(sock, listener);
 
-    return s_p;
+    return listener;
 }
 
 template <class Listener, class Com>
@@ -103,20 +103,21 @@ Listener* NetworkServiceFactory::prepare_listener(std::string const& str_path, s
         path = def_path;
     }
     
-    _not("Entering %s mode on port %s",friendly_name.c_str(),path.c_str());
-    auto s_p = new Listener(new Com(), type);
-    s_p->com()->nonlocal_dst(true);
-    s_p->worker_count_preference(sub_workers);
+    _not("Entering %s mode on path %s", friendly_name.c_str(), path.c_str());
+    auto listener = new Listener(new Com(), type);
+
+    listener->com()->nonlocal_dst(true);
+    listener->worker_count_preference(sub_workers);
 
     // bind with master proxy (.. and create child proxies for new connections)
-    int s = s_p->bind(path.c_str(),'L');
-    if (s < 0) {
-        _fat("Error binding %s port (%d), exiting",friendly_name.c_str(),s);
-        delete s_p;
+    int sock = listener->bind(path.c_str(), 'L');
+    if (sock < 0) {
+        _fat("Error binding %s on path %s, exiting", friendly_name.c_str(), path.c_str());
+        delete listener;
         return nullptr;
     };
     
-    return s_p;
+    return listener;
 }
 
 

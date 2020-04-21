@@ -338,10 +338,10 @@ int main(int argc, char *argv[]) {
     
     if(this_daemon.exists_pidfile()) {
         _fat("There is PID file already in the system.");
-        _fat("Please make sure smithproxy is not running, remove %s and try again.", this_daemon.PID_FILE.c_str());
+        _fat("Please make sure smithproxy is not running, remove %s and try again.", this_daemon.pid_file.c_str());
 
         std::cerr << "There is PID file already in the system.";
-        std::cerr << "Please make sure smithproxy is not running, remove " << this_daemon.PID_FILE << " and try again.";
+        std::cerr << "Please make sure smithproxy is not running, remove " << this_daemon.pid_file << " and try again.";
 
         exit(-5);
     }

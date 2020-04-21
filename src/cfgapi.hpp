@@ -240,13 +240,13 @@ public:
     int policy_apply (baseHostCX *originator, baseProxy *proxy);
 
     bool policy_apply_tls (int policy_num, baseCom *xcom);
-    bool policy_apply_tls (std::shared_ptr<ProfileTls> pt, baseCom *xcom);
+    bool policy_apply_tls (const std::shared_ptr<ProfileTls> &pt, baseCom *xcom);
 
-    bool prof_content_apply (baseHostCX *originator, baseProxy *new_proxy, std::shared_ptr<ProfileContent> pc);
-    bool prof_detect_apply (baseHostCX *originator, baseProxy *new_proxy, std::shared_ptr<ProfileDetection> pd);
-    bool prof_tls_apply (baseHostCX *originator, baseProxy *new_proxy, std::shared_ptr<ProfileTls> ps);
-    bool prof_alg_dns_apply (baseHostCX *originator, baseProxy *new_proxy, std::shared_ptr<ProfileAlgDns> p_alg_dns);
-    bool prof_script_apply (baseHostCX *originator, baseProxy *new_proxy, ProfileScript *p_script);
+    bool prof_content_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileContent> &pc);
+    bool prof_detect_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileDetection> &pd);
+    bool prof_tls_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileTls> &ps);
+    bool prof_alg_dns_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileAlgDns>& p_alg_dns);
+    bool prof_script_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileScript>& p_script);
 
     bool should_redirect (std::shared_ptr<ProfileTls> pt, SSLCom *com);
 
