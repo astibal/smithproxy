@@ -179,7 +179,6 @@ public:
     }
 };
 
-DEFINE_LOGGING(SmithdProxy);
 
 class UxAcceptor : public ThreadedAcceptorProxy<SmithdProxy> {
 public:

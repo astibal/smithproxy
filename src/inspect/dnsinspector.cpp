@@ -39,7 +39,6 @@
 
 #include <inspect/dnsinspector.hpp>
 
-DEFINE_LOGGING(DNS_Inspector)
 std::regex DNS_Inspector::wildcard = std::regex("[^.]+\\.(.*)$");
 
 bool DNS_Inspector::interested(AppHostCX* cx) const {

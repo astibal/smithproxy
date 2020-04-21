@@ -41,8 +41,6 @@
 #include <policy/authfactory.hpp>
 #include <cfgapi.hpp>
 
-DEFINE_LOGGING(AuthFactory)
-
 int AuthFactory::shm_ip4_table_refresh()  {
 
     {
@@ -149,7 +147,7 @@ int AuthFactory::shm_token_table_refresh()  {
     }
 
     return 0;
-};
+}
 
 IdentityInfo* AuthFactory::ip4_get(std::string& host) {
     IdentityInfo* ret = nullptr;

@@ -41,8 +41,6 @@
 #include <proxy/filterproxy.hpp>
 #include <proxy/mitmproxy.hpp>
 
-DEFINE_LOGGING(FilterProxy);
-
 FilterProxy::FilterProxy(MitmProxy* parent) : baseProxy(parent->com()->slave()), parent_(parent) {
     result_ = new FilterResult();
 }

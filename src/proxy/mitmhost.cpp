@@ -43,9 +43,6 @@
 #include <cfgapi.hpp>
 #include <inspect/sigfactory.hpp>
 
-DEFINE_LOGGING(MitmHostCX)
-
-
 bool MitmHostCX::ask_destroy() {
     error(true);
     return true;

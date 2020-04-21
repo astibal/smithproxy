@@ -55,9 +55,6 @@
 #include <ctime>
 
 
-DEFINE_LOGGING(MitmProxy);
-
-
 MitmProxy::MitmProxy(baseCom* c): baseProxy(c), sobject() {
 
     // FIXME: testing filter - get back to it later!

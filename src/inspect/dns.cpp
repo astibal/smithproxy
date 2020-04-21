@@ -44,10 +44,6 @@
 #include <inspect/dns.hpp>
 #include <log/logger.hpp>
 
-DEFINE_LOGGING(DNS_Packet);
-DEFINE_LOGGING(DNS_Request);
-DEFINE_LOGGING(DNS_Response);
-
 
 //std::unordered_map<std::string, ptr_cache<std::string,DNS_Response>*> inspect_per_ip_dns_cache;
 

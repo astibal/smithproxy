@@ -188,7 +188,7 @@ public:
     
     buffer content_replace_apply(buffer);
     
-    void __debug_zero_connections(baseHostCX* cx);
+    void _debug_zero_connections(baseHostCX* cx);
     
     MitmHostCX* first_left();
     MitmHostCX* first_right();
