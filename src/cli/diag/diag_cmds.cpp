@@ -1202,6 +1202,14 @@ int cli_diag_proxy_session_list(struct cli_def *cli, const char *command, char *
     return cli_diag_proxy_session_list_extra(cli, command, argv, argc, SL_NONE);
 }
 
+int cli_diag_proxy_tls_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    debug_cli_params(cli, command, argv, argc);
+
+    return cli_diag_proxy_session_list_extra(cli, command, argv, argc, SL_TLS_DETAILS);
+}
+
+
 int cli_diag_proxy_session_io_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
     debug_cli_params(cli, command, argv, argc);
@@ -1238,6 +1246,7 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
 
             socle::sobject *ptr = it.first;
             std::string prefix;
+            std::string suffix;
 
 
             if (!ptr) continue;
@@ -1340,6 +1349,51 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
                         prefix += loc_pr;
                 }
 
+                if (flag_check<int>(sl_flags, SL_TLS_DETAILS)) {
+                    std::stringstream tls_ss;
+
+                    std::vector<std::pair<std::string, SSLCom*>> tup;
+                    if(lf)
+                        tup.emplace_back(std::make_pair("Left ",dynamic_cast<SSLCom*>(lf->com())));
+                    if(rg)
+                        tup.emplace_back(std::make_pair("Right",dynamic_cast<SSLCom*>(rg->com())));
+
+                    for(auto const& side: tup) {
+                        auto com = side.second;
+
+                        if(com) {
+                            auto ssl = com->get_SSL();
+                            if (ssl) {
+                                auto *session = SSL_get_session(ssl);
+
+                                auto *cipher_str = SSL_CIPHER_get_name(SSL_SESSION_get0_cipher(session));
+                                int has_ticket = SSL_SESSION_has_ticket(session);
+                                unsigned long lifetime_hint = -1;
+                                if (has_ticket > 0) {
+                                    lifetime_hint = SSL_SESSION_get_ticket_lifetime_hint(session);
+                                }
+
+                                auto tls_ver = SSL_get_version(ssl);
+                                bool tls_rsm = (side.second->target_cert() == nullptr);
+
+                                tls_ss << "\n" << side.first << ": version: " << tls_ver << ", cipher: "
+                                       << cipher_str << ", resumed/ticket: "
+                                       << tls_rsm << "/" << has_ticket;
+                                if (has_ticket) {
+                                    tls_ss << " , ticket_hint: " << lifetime_hint << "s";
+                                }
+                            } else {
+                                tls_ss << "\n" << side.first << ": tls, but no info";
+                            }
+                        } else {
+                            tls_ss << "\n" << side.first << ": not a TLS session";
+                        }
+                    }
+                    tls_ss << "\n";
+                    do_print = true;
+                    suffix += tls_ss.str();
+                }
+
                 if (sl_flags == SL_NONE) {
                     do_print = true;
                 }
@@ -1361,7 +1415,7 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
                     prefix += "\r\n";
                 }
 
-                cur_obj_ss << prefix << ptr->to_string(verbosity);
+                cur_obj_ss << prefix << ptr->to_string(verbosity) << suffix;
 
                 if (verbosity >= DEB && si) {
                     cur_obj_ss << si->to_string(verbosity);
@@ -1621,8 +1675,10 @@ bool register_diags(cli_def* cli, cli_command* diag) {
     cli_register_command(cli, diag_proxy_policy,"list",cli_diag_proxy_policy_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy policy list");
 
     auto diag_proxy_session = cli_register_command(cli,diag_proxy,"session",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session commands");
-    cli_register_command(cli, diag_proxy_session,"list",cli_diag_proxy_session_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session list");
-    cli_register_command(cli, diag_proxy_session,"clear",cli_diag_proxy_session_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session clear");
+    cli_register_command(cli, diag_proxy_session,"list", cli_diag_proxy_session_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session list");
+    cli_register_command(cli, diag_proxy_session,"clear", cli_diag_proxy_session_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session clear");
+
+    cli_register_command(cli, diag_proxy_session,"tls-info", cli_diag_proxy_tls_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"connection TLS details");
 
     auto diag_proxy_io = cli_register_command(cli,diag_proxy,"io",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy I/O related commands");
     cli_register_command(cli, diag_proxy_io ,"list",cli_diag_proxy_session_io_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"active proxy sessions");
