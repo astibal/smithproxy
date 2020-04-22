@@ -140,7 +140,7 @@ public:
         }
         this->state(task_state_t::INIT);
     }
-    virtual typename IAsyncTask<R>::state update() = 0;
+    virtual task_state_t update() = 0;
     R& yield() override = 0;
 
     void handle_event (baseCom *com) override {
