@@ -37,6 +37,9 @@
     which carries forward this exception.
 */    
 
+#ifndef SMITHPROXY_MAIN_HPP
+#define SMITHPROXY_MAIN_HPP
+
 #define SMITH_VERSION "0.9.1"
 #define SMITH_DEVEL    1
 
@@ -44,3 +47,5 @@
 
 
 bool load_config(std::string& config_f, bool reload = false);
+
+#endif //SMITHPROXY_MAIN_HPP
