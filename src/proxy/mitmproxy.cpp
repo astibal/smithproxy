@@ -1237,31 +1237,49 @@ std::string verify_flag_string(int code) {
         case SSLCom::VRF_ALLFAILED:
             return "It was not possible to obtain certificate status";
         default:
-            return "";
+            return string_format("code 0x04%x", code);
+    }
+}
+
+std::string verify_flag_string_extended(int code) {
+    switch(code) {
+        case SSLCom::VRF_OTHER_SHA1_SIGNATURE:
+            return "Issuer certificate is signed using SHA1 (considered insecure).";
+        default:
+            return string_format("extended code 0x04%x", code);;
     }
 }
 
 void MitmProxy::set_replacement_msg_ssl(SSLCom* scom) {
     if(scom && scom->verify_get() != SSLCom::VRF_OK) {
 
+        std::stringstream  ss;
+
         if(scom->verify_bitcheck(SSLCom::VRF_SELF_SIGNED)) {
-            replacement_msg += "(ssl:" + verify_flag_string(SSLCom::VRF_SELF_SIGNED) + ")";
+            ss << "(ssl:" << verify_flag_string(SSLCom::VRF_SELF_SIGNED) << ")";
         }
         if(scom->verify_bitcheck(SSLCom::VRF_SELF_SIGNED_CHAIN)) {
-            replacement_msg += "(ssl:" + verify_flag_string(SSLCom::VRF_SELF_SIGNED_CHAIN) + ")";
+            ss << "(ssl:" << verify_flag_string(SSLCom::VRF_SELF_SIGNED_CHAIN) << ")";
         }
         if(scom->verify_bitcheck(SSLCom::VRF_UNKNOWN_ISSUER)) {
-            replacement_msg += "(ssl:" + verify_flag_string(SSLCom::VRF_UNKNOWN_ISSUER) + ")";
+            ss << "(ssl:" << verify_flag_string(SSLCom::VRF_UNKNOWN_ISSUER) << ")";
         }
         if(scom->verify_bitcheck(SSLCom::VRF_CLIENT_CERT_RQ)) {
-            replacement_msg += "(ssl:" + verify_flag_string(SSLCom::VRF_CLIENT_CERT_RQ) + ")";
+            ss << "(ssl:" << verify_flag_string(SSLCom::VRF_CLIENT_CERT_RQ) << ")";
         }
         if(scom->verify_bitcheck(SSLCom::VRF_REVOKED)) {
-            replacement_msg += "(ssl:" + verify_flag_string(SSLCom::VRF_REVOKED) + ")";
+            ss << "(ssl:" << verify_flag_string(SSLCom::VRF_REVOKED) << ")";
         }
         if(scom->verify_bitcheck(SSLCom::VRF_HOSTNAME_FAILED)) {
-            replacement_msg += "(ssl:" + verify_flag_string(SSLCom::VRF_HOSTNAME_FAILED) + ")";
+            ss << "(ssl:" << verify_flag_string(SSLCom::VRF_HOSTNAME_FAILED) << ")";
         }
+        if(scom->verify_bitcheck(SSLCom::VRF_EXTENDED_INFO)) {
+
+            for(auto const& ei: scom->verify_extended_info()) {
+                ss << "(ssl: " << verify_flag_string(ei) << ")";
+            }
+        }
+        replacement_msg += ss.str();
     }
 }
 
@@ -1271,44 +1289,50 @@ std::string MitmProxy::replacement_ssl_verify_detail(SSLCom* scom) {
     if(scom) {
         if (scom->verify_get() != SSLCom::VRF_OK) {
             bool is_set = false;
+            int reason_count = 0;
 
             if (scom->verify_bitcheck(SSLCom::VRF_SELF_SIGNED)) {
-                ss << "<p><h3 class=\"fg-red\">Reason:</h3> " << verify_flag_string(SSLCom::VRF_SELF_SIGNED) << ".</p>";
+                ss << "<p><h3 class=\"fg-red\">Reason " << ++reason_count << ":</h3> " << verify_flag_string(SSLCom::VRF_SELF_SIGNED) << ".</p>";
                 is_set = true;
             }
             if (scom->verify_bitcheck(SSLCom::VRF_SELF_SIGNED_CHAIN)) {
-                ss << "<p><h3 class=\"fg-red\">Reason:</h3> " << verify_flag_string(SSLCom::VRF_SELF_SIGNED_CHAIN)
+                ss << "<p><h3 class=\"fg-red\">Reason " << ++reason_count << ":</h3> " << verify_flag_string(SSLCom::VRF_SELF_SIGNED_CHAIN)
                    << ".</p>";
                 is_set = true;
             }
             if (scom->verify_bitcheck(SSLCom::VRF_UNKNOWN_ISSUER)) {
-                ss << "<p><h class=\"fg-red\"3>Reason:</h3>" << verify_flag_string(SSLCom::VRF_UNKNOWN_ISSUER) << ".</p>";
+                ss << "<p><h class=\"fg-red\">Reason " << ++reason_count << ":</h3>" << verify_flag_string(SSLCom::VRF_UNKNOWN_ISSUER) << ".</p>";
                 is_set = true;
             }
             if (scom->verify_bitcheck(SSLCom::VRF_CLIENT_CERT_RQ)) {
-                ss << "<p><h3 class=\"fg-red\">Reason:</h3>" << verify_flag_string(SSLCom::VRF_CLIENT_CERT_RQ) << ".<p>";
+                ss << "<p><h3 class=\"fg-red\">Reason " << ++reason_count << ":</h3>" << verify_flag_string(SSLCom::VRF_CLIENT_CERT_RQ) << ".<p>";
                 is_set = true;
             }
             if (scom->verify_bitcheck(SSLCom::VRF_REVOKED)) {
-                ss << "<p><h3 class=\"fg-red\">Reason:</h3>" << verify_flag_string(SSLCom::VRF_REVOKED) <<
+                ss << "<p><h3 class=\"fg-red\">Reason " << ++reason_count << ":</h3>" << verify_flag_string(SSLCom::VRF_REVOKED) <<
                        ". "
                        "This is a serious issue, it's highly recommended to not continue "
                        "to this page.</p>";
                 is_set = true;
             }
             if (scom->verify_bitcheck(SSLCom::VRF_INVALID)) {
-                ss << "<p><h3 class=\"fg-red\">Reason:</h3>" << verify_flag_string(SSLCom::VRF_INVALID) << ".</p>";
+                ss << "<p><h3 class=\"fg-red\">Reason " << ++reason_count << ":</h3>" << verify_flag_string(SSLCom::VRF_INVALID) << ".</p>";
                 is_set = true;
             }
             if (scom->verify_bitcheck(SSLCom::VRF_HOSTNAME_FAILED)) {
-                ss << "<p><h3 class=\"fg-red\">Reason:</h3>" << verify_flag_string(SSLCom::VRF_HOSTNAME_FAILED) << ".</p>";
+                ss << "<p><h3 class=\"fg-red\">Reason " << ++reason_count << ":</h3>" << verify_flag_string(SSLCom::VRF_HOSTNAME_FAILED) << ".</p>";
                 is_set = true;
             }
             if (scom->verify_bitcheck(SSLCom::VRF_ALLFAILED)) {
-                ss << "<p><h3 class=\"fg-red\">Reason:</h3>" << verify_flag_string(SSLCom::VRF_ALLFAILED) << ".</p>";
+                ss << "<p><h3 class=\"fg-red\">Reason " << ++reason_count << ":</h3>" << verify_flag_string(SSLCom::VRF_ALLFAILED) << ".</p>";
                 is_set = true;
             }
-
+            if(scom->verify_bitcheck(SSLCom::VRF_EXTENDED_INFO)) {
+                for (auto const &ei: scom->verify_extended_info()) {
+                    ss << "<p><h3 class=\"fg-red\">Reason " << ++reason_count << ":</h3>" << verify_flag_string_extended(ei) << ".</p>";
+                    is_set = true;
+                }
+            }
 
             if (!is_set) {
                 ss << string_format(
