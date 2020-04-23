@@ -409,7 +409,7 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
     }
 
 
-    _dum("identity check[%s]: return %d",str_af.c_str(), valid_ip_auth);
+    _dum("identity check[%s]: return %d", str_af.c_str(), valid_ip_auth);
     return valid_ip_auth;
 }
 
@@ -425,7 +425,7 @@ bool MitmProxy::update_auth_ipX_map(baseHostCX* cx) {
     std::string str_af = inet_family_str(af);    
     
 
-    _dum("update_auth_ip_map: start for %s %s",str_af.c_str(), cx->host().c_str());
+    _dum("update_auth_ip_map: start for %s %s", str_af.c_str(), cx->host().c_str());
     
     IdentityInfoBase* id_ptr = nullptr;
     
