@@ -1516,7 +1516,7 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
     if( sl_flags == SL_NONE ) {
         unsigned long l = MitmProxy::total_mtr_up().get();
         unsigned long r = MitmProxy::total_mtr_down().get();
-        cli_print(cli, "\nProxy performance: upload %sbps, download %sbps in last second",
+        cli_print(cli, "\nProxy performance: upload %sbps, download %sbps in last 60 seconds",
                   number_suffixed(l * 8).c_str(), number_suffixed(r * 8).c_str());
     }
     return CLI_OK;

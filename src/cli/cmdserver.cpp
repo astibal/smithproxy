@@ -163,7 +163,7 @@ void cmd_show_status(struct cli_def* cli) {
     cli_print(cli,"Objects: %lu", static_cast<unsigned long>(socle::sobjectDB::db().cache().size()));
     unsigned long l = MitmProxy::total_mtr_up().get();
     unsigned long r = MitmProxy::total_mtr_down().get();
-    cli_print(cli,"Performance: upload %sbps, download %sbps in last second",number_suffixed(l*8).c_str(),number_suffixed(r*8).c_str());
+    cli_print(cli,"Performance: upload %sbps, download %sbps in last 60 seconds",number_suffixed(l*8).c_str(),number_suffixed(r*8).c_str());
 
     unsigned long t = MitmProxy::total_mtr_up().total() + MitmProxy::total_mtr_down().total();
     cli_print(cli,"Transferred: %s bytes", number_suffixed(t).c_str());
