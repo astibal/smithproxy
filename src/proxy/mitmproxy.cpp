@@ -581,11 +581,14 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
     auto* scom = dynamic_cast<SSLCom*>(mh->peercom());
     if(scom && scom->opt_failed_certcheck_replacement) {
 
-        // adhoc async ocsp call
-//        if(scom->verify_check(SSLCom::VRF_DEFERRED) || true) {
+//        EXAMPLE od adhoc async ocsp call (this should not be here)
+//
+//        if(scom->verify_bitcheck(SSLCom::VRF_DEFERRED) || true) {
 //
 //
 //            if(scom->target_cert() && scom->target_issuer()) {
+//
+//
 //                using std::placeholders::_1;
 //                ocsp = std::make_unique<inet::ocsp::AsyncOCSP>(
 //                        scom->target_cert(),
@@ -595,6 +598,8 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
 //                ocsp->update();
 //                ocsp->tap();
 //                tap();
+//
+//                _not("deferred OCSP check ID 0x%lx", ocsp->oid());
 //            } else {
 //                auto& log = inet::ocsp::OcspFactory::log();
 //                _err("peer certificates still null");
