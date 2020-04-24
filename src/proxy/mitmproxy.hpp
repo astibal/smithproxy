@@ -199,8 +199,8 @@ public:
     socle::meter mtr_up;    
 
     static std::atomic_uint64_t& total_sessions() { static std::atomic_uint64_t total; return total; };
-    static socle::meter& total_mtr_up()  { static socle::meter t_up; return t_up; };
-    static socle::meter& total_mtr_down() {static socle::meter t_down; return t_down; };
+    static socle::meter& total_mtr_up()  { static socle::meter t_up(12); return t_up; };
+    static socle::meter& total_mtr_down() {static socle::meter t_down(12); return t_down; };
 
     
     DECLARE_C_NAME("MitmProxy");

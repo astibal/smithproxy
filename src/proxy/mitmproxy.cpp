@@ -55,7 +55,9 @@
 #include <ctime>
 
 
-MitmProxy::MitmProxy(baseCom* c): baseProxy(c), sobject() {
+MitmProxy::MitmProxy(baseCom* c): baseProxy(c), sobject(),
+    mtr_down(2), mtr_up(2)
+{
 
     // FIXME: testing filter - get back to it later!
     //add_filter("test",new TestFilter(this,5));
