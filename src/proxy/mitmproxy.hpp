@@ -166,8 +166,12 @@ public:
     // only once: check sslcom response and return true if redirected, set ssl_handled
     virtual bool handle_com_response_ssl(MitmHostCX* cx);
     virtual void handle_replacement_ssl(MitmHostCX* cx);
+
+    static std::string verify_flag_string(int code);
+    static std::string verify_flag_string_extended(int code);
+    static std::string replacement_ssl_verify_detail(SSLCom* scom);
+
     std::string replacement_ssl_page(SSLCom* scom, app_HttpRequest* app_request, std::string const& more_info);
-    std::string replacement_ssl_verify_detail(SSLCom* scom);
     void set_replacement_msg_ssl(SSLCom* scom); // evaluates SSL verify info and sets replacement_msg string
     
     // check if content has been pulled from cache and return true if so

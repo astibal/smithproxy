@@ -1223,7 +1223,7 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
     } 
 }
 
-std::string verify_flag_string(int code) {
+std::string MitmProxy::verify_flag_string(int code) {
     switch(code) {
         case SSLCom::VRF_OK:
             return "Certificate verification successful";
@@ -1248,7 +1248,7 @@ std::string verify_flag_string(int code) {
     }
 }
 
-std::string verify_flag_string_extended(int code) {
+std::string MitmProxy::verify_flag_string_extended(int code) {
     switch(code) {
         case SSLCom::VRF_OTHER_SHA1_SIGNATURE:
             return "Issuer certificate is signed using SHA1 (considered insecure).";

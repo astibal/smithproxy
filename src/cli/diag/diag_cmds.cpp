@@ -1376,17 +1376,73 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
                                 auto tls_ver = SSL_get_version(ssl);
                                 bool tls_rsm = (side.second->target_cert() == nullptr);
 
-                                tls_ss << "\n" << side.first << ": version: " << tls_ver << ", cipher: "
-                                       << cipher_str << ", resumed/ticket: "
+                                tls_ss << "\n  " << side.first << ": version: " << tls_ver << ", cipher: ";
+                                tls_ss << cipher_str << ", resumed/ticket: "
                                        << tls_rsm << "/" << has_ticket;
                                 if (has_ticket) {
                                     tls_ss << " , ticket_hint: " << lifetime_hint << "s";
                                 }
+
+                                if(! com->is_server()) {
+                                   tls_ss << "\n    verify(" << SSLCom::verify_origin_str(com->verify_origin()) << "): "
+                                          << MitmProxy::verify_flag_string(com->verify_get());
+
+                                   if(! com->verify_extended_info().empty()) {
+                                       for (auto const &ei: com->verify_extended_info()) {
+                                           tls_ss << "\n    verify: " <<  MitmProxy::verify_flag_string_extended(ei);
+                                       }
+                                   }
+                                }
+
+                                const char* sni = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
+                                if(sni) {
+                                    tls_ss << "\n    sni: " << sni;
+
+                                    if(lf) {
+                                        auto* app = lf->application_data;
+                                        auto http_app = dynamic_cast<app_HttpRequest*>(app);
+                                        if(http_app) {
+
+                                            if(! http_app->host.empty()) {
+                                                if (sni == http_app->host) {
+                                                    tls_ss << " -> http host ok";
+                                                }
+                                                else {
+                                                    tls_ss << " -> http host DOESN'T MATCH";
+                                                }
+                                            }
+
+                                            if(verbosity > iINF) {
+                                                tls_ss << "\n  http host: " << http_app->host;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                auto scts = SSL_get0_peer_scts(ssl);
+                                int scts_len = sk_SCT_num(scts);
+                                if(scts_len > 0) {
+
+                                    tls_ss << "\n    sct: " << scts_len << " entries";
+
+                                    if(verbosity > iDIA) {
+                                        for (int i = 0; i < scts_len; i++) {
+                                            auto sct = sk_SCT_value(scts, i);
+
+                                            unsigned char* sct_logid {};
+                                            size_t sct_logid_len = 0;
+                                            sct_logid_len = SCT_get0_log_id(sct, &sct_logid);
+                                            if(sct_logid_len > 0)
+                                                tls_ss << "\n        sct log." << i << ": " << hex_print(sct_logid, sct_logid_len);
+                                        }
+                                    }
+                                }
+
                             } else {
-                                tls_ss << "\n" << side.first << ": tls, but no info";
+                                tls_ss << "\n  " << side.first << ": tls, but no info";
                             }
                         } else {
-                            tls_ss << "\n" << side.first << ": not a TLS session";
+                            tls_ss << "\n  " << side.first << ": not a TLS session";
                         }
                     }
                     tls_ss << "\n";
