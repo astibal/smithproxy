@@ -359,7 +359,9 @@ void MitmHostCX::on_starttls() {
 //         delete ();
 //         delete peercom();
 
-    com_ = new MySSLMitmCom();
+    auto master = com()->master();
+
+    com(new MySSLMitmCom());
     baseCom* pcom = new MySSLMitmCom();
 
     //com()->init(this);
@@ -367,6 +369,9 @@ void MitmHostCX::on_starttls() {
     peer()->com(pcom);
     peer(peer()); // this will re-init
     peer()->peer(this);
+
+    com()->master(master);
+    pcom->master(master);
 
     _dia("peers set");
 
