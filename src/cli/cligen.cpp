@@ -76,6 +76,8 @@ std::pair<int, std::string> generate_dynamic_groups(struct cli_def *cli, const c
         _debug(cli, "creating dynamic groups for section %s, mode %d", static_section_path.c_str(), static_mode);
 
         try {
+
+            [[maybe_unused]]
             auto &parent_settings = CfgFactory::cfg_root().lookup(static_section_path);
             std::string this_setting_path = static_section_path + "." + words[1];
 

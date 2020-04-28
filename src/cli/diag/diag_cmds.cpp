@@ -1746,7 +1746,7 @@ bool register_diags(cli_def* cli, cli_command* diag) {
 
 
     auto diag_writer = cli_register_command(cli,diag,"writer",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"file writer diags");
-    auto diag_writer_stats = cli_register_command(cli,diag_writer,"stats",cli_diag_writer_stats,PRIVILEGE_PRIVILEGED, MODE_EXEC,"file writer statistics");
+    cli_register_command(cli,diag_writer,"stats",cli_diag_writer_stats,PRIVILEGE_PRIVILEGED, MODE_EXEC,"file writer statistics");
 
     return true;
 }

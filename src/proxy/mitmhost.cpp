@@ -124,7 +124,6 @@ void MitmHostCX::load_signatures() {
 void MitmHostCX::on_detect_www_get(const std::shared_ptr<duplexFlowMatch> &x_sig, flowMatchState& s, vector_range& r) {
     if(! r.empty()) {
         std::pair<char,buffer*>& get = flow().flow()[0];
-        std::pair<char,buffer*>& status = flow().flow()[0];
 
         buffer* buffer_get = get.second;
 

@@ -1801,7 +1801,6 @@ int CfgFactory::policy_apply (baseHostCX *originator, baseProxy *proxy) {
 
         
         auto* mitm_proxy = dynamic_cast<MitmProxy*>(proxy);
-        auto* mitm_originator = dynamic_cast<AppHostCX*>(originator);
         
         /* Processing Auth profile */
         if(pa && mitm_proxy) {
@@ -2184,6 +2183,7 @@ int CfgFactory::save_tls_ca(Config& ex) {
 
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
+    [[maybe_unused]]
     Setting& objects = ex.getRoot().add("tls_ca", Setting::TypeGroup);
 
     int n_saved = 0;

@@ -197,7 +197,7 @@ int socksServerCX::process_socks_request() {
     _dum("Request dump:\n%s",hex_dump(readbuf()->data(),readbuf()->size()).c_str());
     
               version = readbuf()->get_at<unsigned char>(0);
-    unsigned char cmd = readbuf()->get_at<unsigned char>(1);
+    [[maybe_unused]] auto cmd = readbuf()->get_at<unsigned char>(1);
     //@2 is reserved
     
     if(version < 4 or version > 5) {
@@ -213,7 +213,7 @@ int socksServerCX::process_socks_request() {
                 goto error;
             }
             
-            socks5_atype atype   = static_cast<socks5_atype>(readbuf()->get_at<unsigned char>(3));
+            auto atype   = static_cast<socks5_atype>(readbuf()->get_at<unsigned char>(3));
             
             if(atype != socks5_atype::IPV4 && atype != socks5_atype::FQDN) {
                 e = socks5_request_error::UNSUPPORTED_ATYPE;
@@ -224,7 +224,7 @@ int socksServerCX::process_socks_request() {
                 req_atype = socks5_atype::FQDN;
                 state_ = socks5_state::REQ_RECEIVED;
                 
-                unsigned char fqdn_sz = readbuf()->get_at<unsigned char>(4);
+                auto fqdn_sz = readbuf()->get_at<unsigned char>(4);
                 if((unsigned int)fqdn_sz + 4 + 2 >= readbuf()->size()) {
                     _err("protocol error: request header out of boundary.");
                     goto error;

@@ -243,20 +243,27 @@ public:
 
         auto& log = get_log();
 
-        if (!cfg_daemonize)
+        if (!cfg_daemonize) {
+            _fat("Terminating ...");
             printf("Terminating ...\n");
+        }
+
         if (backend_proxy != nullptr) {
             backend_proxy->state().dead(true);
         }
 
         cnt_terminate++;
         if(cnt_terminate == 3) {
-            if (!cfg_daemonize)
+            if (!cfg_daemonize) {
+                _err("Failed to terminate gracefully. Next attempt will be enforced.");
                 printf("Failed to terminate gracefully. Next attempt will be enforced.\n");
+            }
         }
         if(cnt_terminate > 3) {
-            if (!cfg_daemonize)
+            if (!cfg_daemonize) {
+                _err("Enforced exit.\n");
                 printf("Enforced exit.\n");
+            }
             abort();
         }
     }

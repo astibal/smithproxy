@@ -1492,7 +1492,7 @@ void cli_register_static(struct cli_def* cli) {
             cli_register_command(cli, save, "config", cli_save_config, PRIVILEGE_PRIVILEGED, MODE_ANY, "save config file");
 
     auto exec = cli_register_command(cli, nullptr, "execute", nullptr, PRIVILEGE_PRIVILEGED, MODE_ANY, "execute various tasks");
-            auto exec_reload = cli_register_command(cli, exec, "reload", cli_exec_reload, PRIVILEGE_PRIVILEGED, MODE_ANY, "reload config file");
+            [[maybe_unused]] auto exec_reload = cli_register_command(cli, exec, "reload", cli_exec_reload, PRIVILEGE_PRIVILEGED, MODE_ANY, "reload config file");
 
     auto show  = cli_register_command(cli, nullptr, "show", cli_show, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show basic information");
             cli_register_command(cli, show, "status", cli_show_status, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show smithproxy status");
@@ -1728,9 +1728,9 @@ void cli_loop(short unsigned int port) {
     socklen_t addr_len {0};
     while ((client_socket = accept(s, (struct sockaddr*)&addr, &addr_len)))
     {
-        auto* n = new std::thread(client_thread, client_socket);
+        new std::thread(client_thread, client_socket);
     }
-};
+}
 
 
 int cli_show(struct cli_def *cli, const char *command, char **argv, int argc) {
