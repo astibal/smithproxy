@@ -328,8 +328,8 @@ int CfgFactory::load_debug() {
         CfgFactory::cfg_root()["debug"].lookupValue("log_data_crc", baseCom::debug_log_data_crc);
         CfgFactory::cfg_root()["debug"].lookupValue("log_sockets", baseHostCX::socket_in_name);
         CfgFactory::cfg_root()["debug"].lookupValue("log_online_cx_name", baseHostCX::online_name);
-        CfgFactory::cfg_root()["debug"].lookupValue("log_srclines", get_logger()->print_srcline());
-        CfgFactory::cfg_root()["debug"].lookupValue("log_srclines_always", get_logger()->print_srcline_always());
+        CfgFactory::cfg_root()["debug"].lookupValue("log_srclines", LogOutput::get()->print_srcline());
+        CfgFactory::cfg_root()["debug"].lookupValue("log_srclines_always", LogOutput::get()->print_srcline_always());
 
         if (cfgapi.getRoot()["debug"].exists("log")) {
 
@@ -2103,8 +2103,8 @@ int CfgFactory::save_debug(Config& ex) {
     deb_objects.add("log_data_crc", Setting::TypeBoolean) =  baseCom::debug_log_data_crc;
     deb_objects.add("log_sockets", Setting::TypeBoolean) = baseHostCX::socket_in_name;
     deb_objects.add("log_online_cx_name", Setting::TypeBoolean) = baseHostCX::online_name;
-    deb_objects.add("log_srclines", Setting::TypeBoolean) = get_logger()->print_srcline();
-    deb_objects.add("log_srclines_always", Setting::TypeBoolean) = get_logger()->print_srcline_always();
+    deb_objects.add("log_srclines", Setting::TypeBoolean) = LogOutput::get()->print_srcline();
+    deb_objects.add("log_srclines_always", Setting::TypeBoolean) = LogOutput::get()->print_srcline_always();
 
 
     Setting& deb_log_objects = deb_objects.add("log", Setting::TypeGroup);

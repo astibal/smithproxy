@@ -60,7 +60,7 @@ public:
     int write_log(loglevel l, std::string& sss) override;
     virtual int write_disk(loglevel l, std::string& sss);
     
-    static void run_queue(QueueLogger* logger_src);
+    static void run_queue(std::shared_ptr<QueueLogger> log_src);
     
     unsigned int max_len = 1000;
     bool debug_queue = false;
@@ -75,6 +75,6 @@ private:
 };
 
 
-std::thread* create_log_writer(logger* log_ptr);
+std::thread *create_log_writer ();
 
 #endif

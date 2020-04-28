@@ -79,16 +79,16 @@
 void prepare_queue_logger(loglevel const& lev) {
 
     // set final logger now
-    set_logger(new QueueLogger());
+    LogOutput::set(std::make_shared<QueueLogger>());
 
     // create logging thread
-    std::thread* log_thread  = create_log_writer(get_logger());
+    std::thread* log_thread  = create_log_writer();
     if(log_thread != nullptr) {
         pthread_setname_np(log_thread->native_handle(),string_format("sxy_lwr_%d",
                                                                      CfgFactory::get().tenant_index).c_str());
     }
 
-    get_logger()->level(lev);
+    LogOutput::get()->level(lev);
     CfgFactory::get().log_version(false);  // don't delay, but display warning
 }
 
@@ -245,7 +245,7 @@ int main(int argc, char *argv[]) {
                 
             case 'o':
                 CfgFactory::get().config_file_check_only = true;
-                get_logger()->dup2_cout(true);
+                LogOutput::get()->dup2_cout(true);
                 break;
                 
             case 'D':
@@ -273,8 +273,8 @@ int main(int argc, char *argv[]) {
     }
 
     // set synchronous logger for the beginning
-    set_logger(new logger());
-    get_logger()->level(WAR);
+    LogOutput::set(LogOutput::default_logger());
+    LogOutput::get()->level(WAR);
 
 
     // be ready for tenants, or for standalone execution
@@ -283,7 +283,7 @@ int main(int argc, char *argv[]) {
 
     // be more verbose if check only requested
     if(CfgFactory::get().config_file_check_only) {
-        get_logger()->level(DIA);
+        LogOutput::get()->level(DIA);
     }
     bool CONFIG_LOADED = SmithProxy::instance().load_config(CfgFactory::get().config_file);
 
@@ -307,7 +307,7 @@ int main(int argc, char *argv[]) {
 
     // if logging set in cmd line, use it 
     if(CfgFactory::get().args_debug_flag > NON) {
-        get_logger()->level(CfgFactory::get().args_debug_flag);
+        LogOutput::get()->level(CfgFactory::get().args_debug_flag);
     }
     
     // set level to what's in the config
@@ -332,8 +332,8 @@ int main(int argc, char *argv[]) {
 
     
     // if there is loglevel specified in config file and is bigger than we currently have set, use it
-    if(CfgFactory::get().internal_init_level > get_logger()->level()) {
-        get_logger()->level(CfgFactory::get().internal_init_level);
+    if(CfgFactory::get().internal_init_level > LogOutput::get()->level()) {
+        LogOutput::get()->level(CfgFactory::get().internal_init_level);
     }
     
     if(this_daemon.exists_pidfile()) {
@@ -357,13 +357,13 @@ int main(int argc, char *argv[]) {
     }
     
     if(SmithProxy::instance().cfg_daemonize) {
-        if (get_logger()->targets().size() <= 0) {
+        if (LogOutput::get()->targets().size() <= 0) {
             _fat("Cannot daemonize without logging to file.");
             std::cerr << "Cannot daemonize without logging to file.";
             exit(-5);
         }
 
-        get_logger()->dup2_cout(false);
+        LogOutput::get()->dup2_cout(false);
         _inf("Entering daemon mode.");
         std::cout << "Entering daemon mode.";
 

@@ -104,7 +104,7 @@ std::thread* SmithProxy::create_identity_refresh_thread() {
 
 void SmithProxy::create_log_writer_thread() {
     // we have to create logger after daemonize is called
-    log_thread  = create_log_writer(get_logger());
+    log_thread  = create_log_writer();
     if(log_thread != nullptr) {
         pthread_setname_np( log_thread->native_handle(), string_format("sxy_lwr_%d", tenant_index()).c_str());
     }
@@ -373,7 +373,7 @@ void SmithProxy::run() {
     if(socks_thread) {
         socks_thread->join();
     }
-    auto* ql = dynamic_cast<QueueLogger*>(get_logger());
+    auto ql = std::dynamic_pointer_cast<QueueLogger>(LogOutput::get());
     if(ql) {
         ql->sig_terminate = true;
         log_thread->join();
@@ -521,8 +521,8 @@ bool SmithProxy::init_syslog() {
         ::close(syslog_socket);
     } else {
 
-        get_logger()->remote_targets(string_format("syslog-udp%d-%d", CfgFactory::get().syslog_family, syslog_socket),
-                                     syslog_socket);
+        LogOutput::get()->remote_targets(string_format("syslog-udp%d-%d", CfgFactory::get().syslog_family, syslog_socket),
+                                         syslog_socket);
 
         auto *lp = new logger_profile();
 
@@ -530,16 +530,16 @@ bool SmithProxy::init_syslog() {
         lp->level_ = CfgFactory::get().syslog_level;
 
         // raising internal logging level
-        if (lp->level_ > get_logger()->level()) {
-            _not("Internal logging raised from %d to %d due to syslog server loglevel.", get_logger()->level().level(),
+        if (lp->level_ > LogOutput::get()->level()) {
+            _not("Internal logging raised from %d to %d due to syslog server loglevel.", LogOutput::get()->level().level(),
                  lp->level_.level());
-            get_logger()->level(lp->level_);
+            LogOutput::get()->level(lp->level_);
         }
 
         lp->syslog_settings.severity = static_cast<int>(lp->level_.level());
         lp->syslog_settings.facility = CfgFactory::get().syslog_facility;
 
-        get_logger()->target_profiles()[(uint64_t) syslog_socket] = lp;
+        LogOutput::get()->target_profiles()[(uint64_t) syslog_socket] = lp;
     }
 
     return true;
@@ -609,15 +609,15 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
                     this_daemon.set_crashlog(crlog.c_str());
 
                     auto* o = new std::ofstream(CfgFactory::get().log_file.c_str(),std::ios::app);
-                    get_logger()->targets(CfgFactory::get().log_file, o);
-                    get_logger()->dup2_cout(false);
-                    get_logger()->level(CfgFactory::get().internal_init_level);
+                    LogOutput::get()->targets(CfgFactory::get().log_file, o);
+                    LogOutput::get()->dup2_cout(false);
+                    LogOutput::get()->level(CfgFactory::get().internal_init_level);
 
                     auto* lp = new logger_profile();
-                    lp->print_srcline_ = get_logger()->print_srcline();
-                    lp->print_srcline_always_ = get_logger()->print_srcline_always();
+                    lp->print_srcline_ = LogOutput::get()->print_srcline();
+                    lp->print_srcline_always_ = LogOutput::get()->print_srcline_always();
                     lp->level_ = CfgFactory::get().internal_init_level;
-                    get_logger()->target_profiles()[(uint64_t)o] = lp;
+                    LogOutput::get()->target_profiles()[(uint64_t)o] = lp;
 
                 }
             }
@@ -632,15 +632,15 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
                                                                      CfgFactory::get().tenant_name.c_str());
 
                     auto* o = new std::ofstream(CfgFactory::get().sslkeylog_file.c_str(),std::ios::app);
-                    get_logger()->targets(CfgFactory::get().sslkeylog_file,o);
-                    get_logger()->dup2_cout(false);
-                    get_logger()->level(CfgFactory::get().internal_init_level);
+                    LogOutput::get()->targets(CfgFactory::get().sslkeylog_file, o);
+                    LogOutput::get()->dup2_cout(false);
+                    LogOutput::get()->level(CfgFactory::get().internal_init_level);
 
                     auto* lp = new logger_profile();
-                    lp->print_srcline_ = get_logger()->print_srcline();
-                    lp->print_srcline_always_ = get_logger()->print_srcline_always();
+                    lp->print_srcline_ = LogOutput::get()->print_srcline();
+                    lp->print_srcline_always_ = LogOutput::get()->print_srcline_always();
                     lp->level_ = loglevel(iINF,flag_add(iNOT,CRT|KEYS));
-                    get_logger()->target_profiles()[(uint64_t)o] = lp;
+                    LogOutput::get()->target_profiles()[(uint64_t)o] = lp;
 
                 }
             }
@@ -654,7 +654,7 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
             }
 
             if(load_if_exists(CfgFactory::cfg_root()["settings"],"log_console", CfgFactory::get().log_console)) {
-                get_logger()->dup2_cout(CfgFactory::get().log_console);
+                LogOutput::get()->dup2_cout(CfgFactory::get().log_console);
             }
         }
     }

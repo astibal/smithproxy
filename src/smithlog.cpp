@@ -94,7 +94,7 @@ int QueueLogger::write_disk(loglevel l, std::string& sss) {
 }
 
 
-void QueueLogger::run_queue(QueueLogger* log_src) {
+void QueueLogger::run_queue(std::shared_ptr<QueueLogger> log_src) {
 
     if(log_src == nullptr) {
         return;
@@ -113,7 +113,7 @@ void QueueLogger::run_queue(QueueLogger* log_src) {
             log_src->unlock();
 
             if(log_src->debug_queue) {
-                auto ss = string_format("logsrc=0x%x [%d]| ", log_src, log_src->logs_.size());
+                auto ss = string_format("logsrc=0x%x [%d]| ", log_src.get(), log_src->logs_.size());
                 msg = ss + msg;
             }
             log_src->write_disk(l, msg);
@@ -125,12 +125,12 @@ void QueueLogger::run_queue(QueueLogger* log_src) {
     }
 }
 
-std::thread* create_log_writer(logger* log_ptr) {
+std::thread *create_log_writer () {
     std::thread * writer_thread = new std::thread([]() { 
-        logger* log_ptr = get_logger();
-        auto* q_logger = dynamic_cast<QueueLogger*>(log_ptr);
+        auto log_ptr = LogOutput::get();
+        auto q_logger = std::dynamic_pointer_cast<QueueLogger>(log_ptr);
         
-        if(q_logger != nullptr) {
+        if(q_logger) {
             QueueLogger::run_queue(q_logger);
         }
     } );
