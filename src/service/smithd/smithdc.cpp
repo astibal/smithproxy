@@ -49,7 +49,7 @@
 #include <uxcom.hpp>
 #include <service/smithd/smithdcx.hpp>
 
-std::string cfg_ux_socket() {
+const std::string& cfg_ux_socket() {
     static std::string sock = "/var/run/smithd.sock";
 
     return sock;
@@ -204,6 +204,7 @@ void test_url2(const char* url = nullptr) {
     }
 }
 
+[[maybe_unused]]
 void test_url(const char* url = nullptr) {
     
     // Setup location of smithd socket 
@@ -250,39 +251,40 @@ void test_url(const char* url = nullptr) {
 int main(int argc, char *argv[]) {
     
     int loop_count = 1;
-    
-    // measure RTT for getting response
-    struct timeb t_start, t_current;                           
     int t_diff;
-    
+
+    auto t_start = std::chrono::high_resolution_clock::now();
+
+    //std::chrono::microseconds d = std::chrono::duration_cast<std::chrono::microseconds>(now - start_);
+
     int t_min = 0;
     int t_max = 0;
     int t_sum = 0;
     int t_cnt = 0;
-    
-    
-    for(int i = 0; i < loop_count; i++) {
-    
-      ftime(&t_start);
-
-      try {
-          test_url2();
-      } catch(socle::com_error const& e) {
-          std::cerr << "com error: " << e.what();
-          return 1;
-      }
 
 
-      ftime(&t_current);
-      
-      t_diff = (int) (1000.0 * (t_current.time - t_start.time) + (t_current.millitm - t_start.millitm));
-      t_cnt++;
-      t_sum += t_diff;
-      
-      if(t_diff < t_min || t_min == 0) t_min = t_diff;
-      if(t_diff > t_max || t_max == 0) t_max = t_diff;
-      
-      std::cout << string_format(">> Server RTT: %dms  (avg=%.2fms min=%dms max=%dms)",t_diff,
-              ((float)t_sum)/t_cnt, t_min, t_max);
+    for (int i = 0; i < loop_count; i++) {
+
+        t_start = std::chrono::high_resolution_clock::now();
+
+        try {
+            test_url2();
+        } catch (socle::com_error const &e) {
+            std::cerr << "com error: " << e.what();
+            return 1;
+        }
+
+
+        auto t_current = std::chrono::high_resolution_clock::now();
+
+        t_diff = std::chrono::duration_cast<std::chrono::microseconds>(t_current - t_start).count();
+        t_cnt++;
+        t_sum += t_diff;
+
+        if (t_diff < t_min || t_min == 0) t_min = t_diff;
+        if (t_diff > t_max || t_max == 0) t_max = t_diff;
+
+        std::cout << string_format(">> Server RTT: %dus  (avg=%.2fus min=%dus max=%dus)", t_diff,
+                                   ((float) t_sum) / t_cnt, t_min, t_max);
     }
 }
