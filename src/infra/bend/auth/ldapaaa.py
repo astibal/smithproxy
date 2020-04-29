@@ -72,7 +72,7 @@ if __name__ == "__main__":
     confed = load_config(config_file)
     confed = cfg_2_dict(confed)
 
-    l = ldapcon.LdapSearch()
+    l = auth.ldapcon.LdapSearch()
     l.updateProfile(confed["sources"]["ldap"]["example_ldap"])
     pprint.pprint(l.profile)
     print("-------")
