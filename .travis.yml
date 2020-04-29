@@ -1,17 +1,44 @@
 
 language: cpp
-sudo: required
-dist: bionic
-compiler:
-  - gcc
-os:
-  - linux
 
-before_install:
-  - echo $LANG
-  - echo $LC_ALL
-  - if [ $TRAVIS_OS_NAME == linux ]; then echo "dependencies"; fi
-script:
-  - if [ $TRAVIS_OS_NAME == linux ]; then echo "build"; fi
-after_success:
-  - if [ $TRAVIS_OS_NAME == linux ]; then echo "after success"; fi
+jobs:
+  include:
+    - os linux
+      sudo: required
+      dist: precise
+      compiler:
+        - gcc
+        - clang
+      os:
+        - linux
+      arch:
+        - amd64
+        - arm64
+
+      before_install:
+        - echo $LANG
+        - echo $LC_ALL
+        - if [ $TRAVIS_OS_NAME == linux ]; then echo "dependencies"; fi
+      script:
+        - if [ $TRAVIS_OS_NAME == linux ]; then echo "build"; fi
+      after_success:
+        - if [ $TRAVIS_OS_NAME == linux ]; then echo "after success"; fi
+
+    - os linux
+      sudo: required
+      dist: xenial
+      compiler:
+        - gcc
+        - clang
+      arch:
+        - arm64
+        - amd64
+
+      before_install:
+        - echo $LANG
+        - echo $LC_ALL
+        - if [ $TRAVIS_OS_NAME == linux ]; then echo "dependencies"; fi
+      script:
+        - if [ $TRAVIS_OS_NAME == linux ]; then echo "build"; fi
+      after_success:
+        - if [ $TRAVIS_OS_NAME == linux ]; then echo "after success"; fi
