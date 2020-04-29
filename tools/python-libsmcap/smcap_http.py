@@ -58,9 +58,9 @@ def detect_http(gen):
                 if gen['lines'][j][0].startswith('HTTP'):
                     return True
             
-    except KeyError, e:
+    except KeyError as e:
         return False
-    except IndexError, e:
+    except IndexError as e:
         return False
     
     return False
@@ -77,18 +77,18 @@ def process_http(gen):
 
             # traverse all clients
             for client_request in gen['origins']['client']:
-                print "process_http: client " + str(client_request)
+                print("process_http: client " + str(client_request))
                 c += process_http_request(gen, client_request)
             
             for client_request in gen['origins']['server']:
-                print "process_http: server" + str(client_request)
+                print("process_http: server" + str(client_request))
                 c += process_http_response(gen, client_request)
 
             
             
-    except KeyError, e:
+    except KeyError as e:
         return " "*8 + "# Exception caught: " + str(e) + "\n" +" "*8 + "# Partial output:\n" + c
-    except IndexError, e:
+    except IndexError as e:
         return " "*8 + "# Exception caught: " + str(e) + "\n" +" "*8 + "# Partial output:\n" + c
     
     return c
@@ -99,9 +99,9 @@ def process_http_request(gen, request_origin_index):
     c = ''
     concat_data = http_concat_by_origin(gen,'client',request_origin_index)
     
-    print "# --- request:"
+    print("# --- request:")
     for l in concat_data[:5]:
-        print l
+        print (l)
         pass
 
     request_str = ''
@@ -136,9 +136,9 @@ def process_http_response(gen, request_origin_index):
     c = ''
     concat_data = http_concat_by_origin(gen,'server',request_origin_index)
     
-    print "# --- response:"
+    print("# --- response:")
     for l in concat_data[:5]:
-        print l
+        print(l)
         pass
 
 
@@ -150,9 +150,9 @@ def process_http_response(gen, request_origin_index):
         body_mass = concat_data[body_index+1:-1]
 
        
-        print "# --- response body:"
-        print str(body_mass)
-    except ValueError, e:
+        print("# --- response body:")
+        print(str(body_mass))
+    except ValueError as e:
         pass
         
 
@@ -200,7 +200,7 @@ def http_concat_by_origin(gen, role, index):
         peer_role = 'server'
     
     while True:
-        print "processing origin index " + str(cur_index)
+        print("processing origin index " + str(cur_index))
         
         cur_lines = gen['lines'][cur_index]
         data_to_concat += cur_lines
@@ -208,14 +208,14 @@ def http_concat_by_origin(gen, role, index):
         #print "merged lines so far:\n" + str(data_to_concat) + "\n"
         
         if cur_index + 2 >= len(gen['lines']):
-            print "next index is already out of bounds"
+            print("next index is already out of bounds")
             break
         else:
             if (cur_index + 1) not in gen['origins'][peer_role]:
-                print "next index is ours. continue."
+                print("next index is ours. continue.")
                 cur_index = cur_index + 1
             else:
-                print "next index is NOT ours. done."  
+                print("next index is NOT ours. done.")
                 break
         
     return data_to_concat

@@ -39,16 +39,13 @@
     """
     
 
-import sys
 import re
-import zlib
 import fileinput
-import pprint
 import binascii
 
 from smcap_http import *
 
-def list(fnm):
+def enlist(fnm):
     for line in fileinput.input(files=[fnm,]):
         re_packet_start = re.compile(r'^\+\d+: +\d+::([^:]+):([^:]+)-\d+::([^:]+):([^:(]+)')
 
@@ -174,13 +171,8 @@ def pythonize(packets,origins,global_comment="",init_comment="",nice_crlf=True):
     i = 0
     
     # DUPLICATE GENERATED OBJECT HERE
-    gen = {}
-    gen['comments']= []
-    gen['packets'] = []
-    gen['lines']   = []
-    gen['packets'] = []
-    gen['origins'] = []
-    
+    gen = {'comments': [], 'lines': [], 'packets': [], 'origins': []}
+
     for p in packets:
         side = "SERVER"
         index = -1
@@ -273,7 +265,7 @@ def export(fnm,efile):
         return 0
     
     if not efile or efile == "-":
-        print c
+        print(c)
         return len(c)
     else:
         f = open(efile,'w')
