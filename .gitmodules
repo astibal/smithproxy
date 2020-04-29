@@ -1,8 +1,9 @@
 [submodule "socle"]
 	path = socle
-	url = ssh://git@github.com/astibal/socle
+	url = ../socle.git
 	branch = master
 	update = merge
 [submodule "ext/argparse"]
 	path = ext/argparse
-	url = ssh://git@github.com/astibal/argparse.git
+	url = ../argparse.git
+
