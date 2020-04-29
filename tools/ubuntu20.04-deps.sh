@@ -16,5 +16,6 @@ ln -sf /usr/bin/gcc-9 /usr/bin/gcc && \
 ln -sf /usr/bin/gcc-9 /usr/bin/cc && \
 ln -sf /usr/bin/gcc-ar-9 /usr/bin/gcc-ar
 
-pip3 install pyroute2 pylibconfig2 m2crypto spyne zeep cryptography
+pip3 install pyroute2 pylibconfig2 m2crypto spyne==2.13.2a0 zeep cryptography
+
 
