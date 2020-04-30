@@ -116,7 +116,7 @@ elif [[ "${DIST}" == "Debian" ]]; then
 
     echo "... installing python libraries"
 
-    if [[ "${MACH}" == "aarch" ]]; then
+    if [[ "${MACH}" == "aarch64" ]]; then
         apt install -y python3-lxml
     fi
 
