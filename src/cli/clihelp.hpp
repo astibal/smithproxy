@@ -42,6 +42,7 @@
 #define SMITHPROXY_CLIHELP_HPP
 
 #include <unordered_map>
+#include <string>
 
 struct CliHelp {
 
