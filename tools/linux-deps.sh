@@ -44,6 +44,11 @@ elif [ "${OS}" = "Linux" ] ; then
 	elif [ -f /etc/debian_version ] ; then
 		DIST="Debian"
 		REV="`cat /etc/debian_version | awk -F"/" '{ print $1 }' | awk -F"." '{ print $1 }'`"
+
+		if [[ "{$REV}" == "bullseye" ]]; then
+		    REV="11.0"
+		fi
+
 	fi
 
 
@@ -57,6 +62,7 @@ fi
 
 ###
 
+echo "... OS detected: $REV version $REV"
 
 if [[ "${DIST}" == "Ubuntu" ]]; then
 
@@ -82,6 +88,14 @@ if [[ "${DIST}" == "Ubuntu" ]]; then
     debootstrap devscripts build-essential lintian debhelper vim nano
 
 elif [[ "${DIST}" == "Debian" ]]; then
+
+    DEB_MAJ=`echo $REV | awk -F'.' '{ print $1 }'`
+
+    if [[ "${DEB_MAJ}" == "20.04" ]]; then
+        SX_LIBCLI_VER="1.10"
+        SX_LIBCONFIG_VER="9v5"
+        SX_GCC_VER="10"
+    fi
 
     DEBIAN_FRONTEND=noninteractive apt-get install -y tzdata
 
