@@ -87,6 +87,9 @@ if [[ "${DIST}" == "Ubuntu" ]]; then
     apt install -y python3-ldap python3-pyparsing python3-posix-ipc swig  \
     debootstrap devscripts build-essential lintian debhelper vim nano
 
+    echo "... installing python libraries"
+    pip3 install pyroute2 pylibconfig2 m2crypto spyne${SX_SPYNE_VER} zeep cryptography
+
 elif [[ "${DIST}" == "Debian" ]]; then
 
     DEB_MAJ=`echo $REV | awk -F'.' '{ print $1 }'`
@@ -108,8 +111,19 @@ elif [[ "${DIST}" == "Debian" ]]; then
 
     echo "... installing OS toolchains"
     apt install -y iptables telnet iproute2 && \
-    apt install -y python3-ldap python3-pyparsing python3-posix-ipc swig  \
+    apt install -y python3-ldap python3-pyparsing swig  \
     debootstrap devscripts build-essential lintian debhelper vim nano
+
+    echo "... installing python libraries"
+
+    if [[ "${DEB_MAJ}" == "11" ]]; then
+        apt install -y python3-m2crypto
+        pip3 install posix-ipc
+        pip3 install pyroute2 pylibconfig2 spyne${SX_SPYNE_VER} zeep cryptography
+    else
+        apt install -y python3-posix-ipc
+        pip3 install pyroute2 pylibconfig2 m2crypto spyne${SX_SPYNE_VER} zeep cryptography
+    fi
 
 else
     echo "We can't detect your distro."
@@ -137,7 +151,6 @@ ln -sf /usr/bin/gcc-${SX_GCC_VER} /usr/bin/gcc && \
 ln -sf /usr/bin/gcc-${SX_GCC_VER} /usr/bin/cc && \
 ln -sf /usr/bin/gcc-ar-${SX_GCC_VER} /usr/bin/gcc-ar
 
-echo "... installing python libraries"
-pip3 install pyroute2 pylibconfig2 m2crypto spyne${SX_SPYNE_VER} zeep cryptography
+
 
 
