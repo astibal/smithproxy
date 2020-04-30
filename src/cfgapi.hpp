@@ -76,7 +76,7 @@ public:
     loglevel cli_init_level = NON;
 
     virtual bool apply_tenant_config() = 0;
-    int  apply_tenant_index(std::string& what, int& idx);
+    int  apply_tenant_index(std::string& what, int& idx) const;
 };
 
 
@@ -207,20 +207,22 @@ public:
     int  load_db_prof_tls ();
     int  load_db_prof_auth ();
     int  load_db_prof_alg_dns ();
+
+    [[maybe_unused]]
     int  load_db_prof_script ();
 
-    int save_address_objects(Config& ex);
-    int save_port_objects(Config& ex);
-    int save_proto_objects(Config& ex);
-    int save_debug(Config& ex);
-    int save_detection_profiles(Config& ex);
-    int save_content_profiles(Config& ex);
-    int save_tls_ca(Config& ex);
-    int save_tls_profiles(Config& ex);
-    int save_alg_dns_profiles(Config& ex);
-    int save_auth_profiles(Config& ex);
-    int save_policy(Config& ex);
-    int save_config();
+    int save_address_objects(Config& ex) const;
+    int save_port_objects(Config& ex) const;
+    int save_proto_objects(Config& ex) const;
+    int save_debug(Config& ex) const;
+    int save_detection_profiles(Config& ex) const;
+    int save_content_profiles(Config& ex) const;
+    int save_tls_ca(Config& ex) const;
+    int save_tls_profiles(Config& ex) const;
+    int save_alg_dns_profiles(Config& ex) const;
+    int save_auth_profiles(Config& ex) const;
+    int save_policy(Config& ex) const;
+    [[nodiscard]] int save_config() const;
 
 
     int  cleanup_db_address ();
@@ -246,9 +248,10 @@ public:
     bool prof_detect_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileDetection> &pd);
     bool prof_tls_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileTls> &ps);
     bool prof_alg_dns_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileAlgDns>& p_alg_dns);
+    [[maybe_unused]]
     bool prof_script_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileScript>& p_script);
 
-    bool should_redirect (std::shared_ptr<ProfileTls> pt, SSLCom *com);
+    bool should_redirect (const std::shared_ptr<ProfileTls> &pt, SSLCom *com);
 
     void log_version (bool warn_delay = true);
 
@@ -257,6 +260,7 @@ public:
     std::shared_ptr<ProfileTls> policy_prof_tls (int index);
     std::shared_ptr<ProfileAuth> policy_prof_auth (int index);
     std::shared_ptr<ProfileAlgDns> policy_prof_alg_dns (int index);
+    [[maybe_unused]]
     std::shared_ptr<ProfileScript> policy_prof_script (int index);
 
     #ifndef MEM_DEBUG

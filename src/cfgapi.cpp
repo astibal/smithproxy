@@ -834,7 +834,7 @@ int CfgFactory::policy_match (baseProxy *proxy) {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
     int x = 0;
-    for( auto rule: db_policy) {
+    for( auto const& rule: db_policy) {
 
         bool r = rule->match(proxy);
         
@@ -854,7 +854,7 @@ int CfgFactory::policy_match (std::vector<baseHostCX *> &left, std::vector<baseH
     std::lock_guard<std::recursive_mutex> l(lock_);
     
     int x = 0;
-    for( auto rule: db_policy) {
+    for( auto const& rule: db_policy) {
 
         bool r = rule->match(left, right);
         
@@ -946,6 +946,7 @@ std::shared_ptr<ProfileAlgDns> CfgFactory::policy_prof_alg_dns (int index) {
     }
 }
 
+[[maybe_unused]]
 std::shared_ptr<ProfileScript> CfgFactory::policy_prof_script(int index) {
     std::lock_guard<std::recursive_mutex> l(lock_);
 
@@ -1239,6 +1240,7 @@ int CfgFactory::load_db_prof_alg_dns () {
     return num;
 }
 
+[[maybe_unused]]
 int CfgFactory::load_db_prof_script () {
     std::lock_guard<std::recursive_mutex> l(lock_);
 
@@ -1825,7 +1827,7 @@ bool CfgFactory::policy_apply_tls (int policy_num, baseCom *xcom) {
     return policy_apply_tls(pt, xcom);
 }
 
-bool CfgFactory::should_redirect (std::shared_ptr<ProfileTls> pt, SSLCom *com) {
+bool CfgFactory::should_redirect (const std::shared_ptr<ProfileTls> &pt, SSLCom *com) {
 
     auto log = logan_lite("policy.rule");
     
@@ -1966,7 +1968,7 @@ void CfgFactory::log_version (bool warn_delay)
     }
 }
 
-int CfgFactoryBase::apply_tenant_index(std::string& what, int& idx) {
+int CfgFactoryBase::apply_tenant_index(std::string& what, int& idx) const {
     _deb("apply_index: what=%s idx=%d", what.c_str(), idx);
     int port = std::stoi(what);
     what = std::to_string(port + idx);
@@ -1994,7 +1996,7 @@ bool CfgFactory::apply_tenant_config () {
 }
 
 
-int CfgFactory::save_address_objects(Config& ex) {
+int CfgFactory::save_address_objects(Config& ex) const {
 
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
@@ -2002,7 +2004,7 @@ int CfgFactory::save_address_objects(Config& ex) {
 
     int n_saved = 0;
 
-    for (auto it: CfgFactory::get().db_address) {
+    for (auto const& it: CfgFactory::get().db_address) {
         auto name = it.first;
         auto obj = it.second;
 
@@ -2043,7 +2045,7 @@ int CfgFactory::save_address_objects(Config& ex) {
 }
 
 
-int CfgFactory::save_port_objects(Config& ex) {
+int CfgFactory::save_port_objects(Config& ex) const {
 
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
@@ -2051,7 +2053,7 @@ int CfgFactory::save_port_objects(Config& ex) {
 
     int n_saved = 0;
 
-    for (auto it: CfgFactory::get().db_port) {
+    for (auto const& it: CfgFactory::get().db_port) {
         auto name = it.first;
         auto obj = it.second;
 
@@ -2066,15 +2068,15 @@ int CfgFactory::save_port_objects(Config& ex) {
 }
 
 
-int CfgFactory::save_proto_objects(Config& ex) {
+int CfgFactory::save_proto_objects(Config& ex) const {
 
-    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());;
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
     Setting& objects = ex.getRoot().add("proto_objects", Setting::TypeGroup);
 
     int n_saved = 0;
 
-    for (auto it: CfgFactory::get().db_proto) {
+    for (auto const& it: CfgFactory::get().db_proto) {
         auto name = it.first;
         auto obj = it.second;
 
@@ -2088,7 +2090,7 @@ int CfgFactory::save_proto_objects(Config& ex) {
 }
 
 
-int CfgFactory::save_debug(Config& ex) {
+int CfgFactory::save_debug(Config& ex) const {
 
     if(!ex.exists("debug"))
         ex.getRoot().add("debug", Setting::TypeGroup);
@@ -2120,7 +2122,7 @@ int CfgFactory::save_debug(Config& ex) {
 }
 
 
-int CfgFactory::save_detection_profiles(Config& ex) {
+int CfgFactory::save_detection_profiles(Config& ex) const {
 
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
@@ -2128,7 +2130,7 @@ int CfgFactory::save_detection_profiles(Config& ex) {
 
     int n_saved = 0;
 
-    for (auto it: CfgFactory::get().db_prof_detection) {
+    for (auto const& it: CfgFactory::get().db_prof_detection) {
         auto name = it.first;
         auto obj = it.second;
 
@@ -2141,7 +2143,7 @@ int CfgFactory::save_detection_profiles(Config& ex) {
     return n_saved;
 }
 
-int CfgFactory::save_content_profiles(Config& ex) {
+int CfgFactory::save_content_profiles(Config& ex) const {
 
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
@@ -2149,7 +2151,7 @@ int CfgFactory::save_content_profiles(Config& ex) {
 
     int n_saved = 0;
 
-    for (auto it: CfgFactory::get().db_prof_content) {
+    for (auto const& it: CfgFactory::get().db_prof_content) {
         auto name = it.first;
         auto obj = it.second;
 
@@ -2160,7 +2162,7 @@ int CfgFactory::save_content_profiles(Config& ex) {
 
             Setting& cr_rules = item.add("content_rules", Setting::TypeList);
 
-            for(auto cr: obj->content_rules) {
+            for(auto const& cr: obj->content_rules) {
                 Setting& cr_rule = cr_rules.add(Setting::TypeGroup);
                 cr_rule.add("match", Setting::TypeString) = cr.match;
                 cr_rule.add("replace", Setting::TypeString) = cr.replace;
@@ -2175,7 +2177,7 @@ int CfgFactory::save_content_profiles(Config& ex) {
 }
 
 
-int CfgFactory::save_tls_ca(Config& ex) {
+int CfgFactory::save_tls_ca(Config& ex) const {
 
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
@@ -2197,7 +2199,7 @@ int CfgFactory::save_tls_ca(Config& ex) {
     return n_saved;
 }
 
-int CfgFactory::save_tls_profiles(Config& ex) {
+int CfgFactory::save_tls_profiles(Config& ex) const {
 
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
@@ -2205,7 +2207,7 @@ int CfgFactory::save_tls_profiles(Config& ex) {
 
     int n_saved = 0;
 
-    for (auto it: CfgFactory::get().db_prof_tls) {
+    for (auto const& it: CfgFactory::get().db_prof_tls) {
         auto name = it.first;
         auto obj = it.second;
 
@@ -2226,16 +2228,16 @@ int CfgFactory::save_tls_profiles(Config& ex) {
         item.add("ocsp_stapling_mode", Setting::TypeInt) = obj->ocsp_stapling_mode;
 
         // add sni bypass list
-        if(obj->sni_filter_bypass.ptr() && obj->sni_filter_bypass.ptr()->size() > 0 ) {
+        if(obj->sni_filter_bypass.ptr() && ! obj->sni_filter_bypass.ptr()->empty() ) {
             Setting& sni_flist = item.add("sni_filter_bypass", Setting::TypeArray);
 
-            for( auto snif: *obj->sni_filter_bypass.ptr()) {
+            for( auto const& snif: *obj->sni_filter_bypass.ptr()) {
                 sni_flist.add(Setting::TypeString) = snif;
             }
         }
 
         // add redirected ports (for replacements)
-        if( obj->redirect_warning_ports.ptr() && obj->redirect_warning_ports.ptr()->size() > 0 ) {
+        if( obj->redirect_warning_ports.ptr() && ! obj->redirect_warning_ports.ptr()->empty() ) {
 
             Setting& rport_list = item.add("redirect_warning_ports", Setting::TypeArray);
 
@@ -2262,7 +2264,7 @@ int CfgFactory::save_tls_profiles(Config& ex) {
 }
 
 
-int CfgFactory::save_alg_dns_profiles(Config& ex) {
+int CfgFactory::save_alg_dns_profiles(Config& ex) const {
 
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
@@ -2270,7 +2272,7 @@ int CfgFactory::save_alg_dns_profiles(Config& ex) {
 
     int n_saved = 0;
 
-    for (auto it: CfgFactory::get().db_prof_alg_dns) {
+    for (auto const& it: CfgFactory::get().db_prof_alg_dns) {
         auto name = it.first;
         auto obj = it.second;
 
@@ -2286,7 +2288,7 @@ int CfgFactory::save_alg_dns_profiles(Config& ex) {
 }
 
 
-int CfgFactory::save_auth_profiles(Config& ex) {
+int CfgFactory::save_auth_profiles(Config& ex) const {
 
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
@@ -2294,7 +2296,7 @@ int CfgFactory::save_auth_profiles(Config& ex) {
 
     int n_saved = 0;
 
-    for (auto it: CfgFactory::get().db_prof_auth) {
+    for (auto const& it: CfgFactory::get().db_prof_auth) {
         auto name = it.first;
         auto obj = it.second;
 
@@ -2302,11 +2304,11 @@ int CfgFactory::save_auth_profiles(Config& ex) {
         item.add("authenticate", Setting::TypeBoolean) = obj->authenticate;
         item.add("resolve", Setting::TypeBoolean) = obj->resolve;
 
-        if(obj->sub_policies.size() > 0) {
+        if(! obj->sub_policies.empty()) {
 
             Setting& ident = item.add("identities", Setting::TypeGroup);
 
-            for( auto identity: obj->sub_policies) {
+            for( auto const& identity: obj->sub_policies) {
                 Setting& subid = ident.add(identity->name, Setting::TypeGroup);
 
                 if(identity->profile_detection)
@@ -2331,7 +2333,7 @@ int CfgFactory::save_auth_profiles(Config& ex) {
 }
 
 
-int CfgFactory::save_policy(Config& ex) {
+int CfgFactory::save_policy(Config& ex) const {
 
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
@@ -2339,7 +2341,7 @@ int CfgFactory::save_policy(Config& ex) {
 
     int n_saved = 0;
 
-    for (auto pol: CfgFactory::get().db_policy) {
+    for (auto const& pol: CfgFactory::get().db_policy) {
 
         if(! pol)
             continue;
@@ -2350,22 +2352,22 @@ int CfgFactory::save_policy(Config& ex) {
 
         // SRC
         Setting& src_list = item.add("src", Setting::TypeArray);
-        for(auto s: pol->src) {
+        for(auto const& s: pol->src) {
             src_list.add(Setting::TypeString) = s->prof_name;
         }
         Setting& srcport_list = item.add("sport", Setting::TypeArray);
-        for(auto sp: pol->src_ports_names) {
+        for(auto const& sp: pol->src_ports_names) {
             srcport_list.add(Setting::TypeString) = sp;
         }
 
 
         // DST
         Setting& dst_list = item.add("dst", Setting::TypeArray);
-        for(auto d: pol->dst) {
+        for(auto const& d: pol->dst) {
             dst_list.add(Setting::TypeString) = d->prof_name;
         }
         Setting& dstport_list = item.add("dport", Setting::TypeArray);
-        for(auto sp: pol->dst_ports_names) {
+        for(auto const& sp: pol->dst_ports_names) {
             dstport_list.add(Setting::TypeString) = sp;
         }
 
@@ -2400,7 +2402,7 @@ int save_signatures(Config& ex, const std::string& sigset) {
     std::vector<std::shared_ptr<duplexFlowMatch>>& target_ref = sigset == "starttls_signatures" ?
                 SigFactory::get().tls() : SigFactory::get().detection();
 
-    for (auto sig: target_ref) {
+    for (auto const& sig: target_ref) {
 
         Setting& item = objects.add(Setting::TypeGroup);
 
@@ -2484,7 +2486,7 @@ int save_settings(Config& ex) {
 
     // nameservers
     Setting& it_ns  = objects.add("nameservers", Setting::TypeArray);
-    for(auto ns: CfgFactory::get().db_nameservers) {
+    for(auto const& ns: CfgFactory::get().db_nameservers) {
         it_ns.add(Setting::TypeString) = ns;
     }
 
@@ -2562,7 +2564,7 @@ int save_settings(Config& ex) {
 }
 
 
-int CfgFactory::save_config() {
+int CfgFactory::save_config() const {
 
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
