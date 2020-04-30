@@ -152,6 +152,11 @@ endif (LIBCLI_FOUND)
 find_package(PythonLibs 3 REQUIRED)
 include_directories(${PYTHON_INCLUDE_DIRS})
 
+if((CMAKE_SYSTEM_PROCESSOR MATCHES "arm") OR (CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64"))
+    target_link_libraries (smithproxy atomic)
+    target_link_libraries (smithd atomic)
+    target_link_libraries (smithdc atomic)
+endif()
 
 target_link_libraries(smithproxy socle_lib pthread ssl crypto rt unwind ${PYTHON_LIBRARIES})
 target_link_libraries(smithd socle_lib pthread ssl crypto rt unwind)
