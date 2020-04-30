@@ -224,14 +224,14 @@ bool CfgFactory::load_settings () {
     if(! cfgapi.getRoot().exists("settings"))
         return false;
 
-    cfgapi.getRoot()["settings"].lookupValue("plaintext_port",listen_tcp_port_base); listen_tcp_port = listen_tcp_port_base;
-    cfgapi.getRoot()["settings"].lookupValue("plaintext_workers",num_workers_tcp);
-    cfgapi.getRoot()["settings"].lookupValue("ssl_port",listen_tls_port_base); listen_tls_port = listen_tls_port_base;
-    cfgapi.getRoot()["settings"].lookupValue("ssl_workers",num_workers_tls);
-    cfgapi.getRoot()["settings"].lookupValue("udp_port",listen_udp_port_base); listen_udp_port = listen_udp_port_base;
-    cfgapi.getRoot()["settings"].lookupValue("udp_workers",num_workers_udp);
-    cfgapi.getRoot()["settings"].lookupValue("dtls_port",listen_dtls_port_base);  listen_dtls_port = listen_dtls_port_base;
-    cfgapi.getRoot()["settings"].lookupValue("dtls_workers",num_workers_dtls);
+    load_if_exists(cfgapi.getRoot()["settings"], "plaintext_port",listen_tcp_port_base); listen_tcp_port = listen_tcp_port_base;
+    load_if_exists(cfgapi.getRoot()["settings"], "plaintext_workers",num_workers_tcp);
+    load_if_exists(cfgapi.getRoot()["settings"], "ssl_port",listen_tls_port_base); listen_tls_port = listen_tls_port_base;
+    load_if_exists(cfgapi.getRoot()["settings"], "ssl_workers",num_workers_tls);
+    load_if_exists(cfgapi.getRoot()["settings"], "udp_port",listen_udp_port_base); listen_udp_port = listen_udp_port_base;
+    load_if_exists(cfgapi.getRoot()["settings"], "udp_workers",num_workers_udp);
+    load_if_exists(cfgapi.getRoot()["settings"], "dtls_port",listen_dtls_port_base);  listen_dtls_port = listen_dtls_port_base;
+    load_if_exists(cfgapi.getRoot()["settings"], "dtls_workers",num_workers_dtls);
 
 
     if(cfgapi.getRoot()["settings"].exists("nameservers")) {
@@ -253,14 +253,14 @@ bool CfgFactory::load_settings () {
         }
     }
 
-    cfgapi.getRoot()["settings"].lookupValue("certs_path",SSLFactory::default_cert_path());
-    cfgapi.getRoot()["settings"].lookupValue("certs_ca_key_password",SSLFactory::default_cert_password());
-    cfgapi.getRoot()["settings"].lookupValue("certs_ca_path",SSLFactory::default_client_ca_path());
+    load_if_exists(cfgapi.getRoot()["settings"], "certs_path",SSLFactory::default_cert_path());
+    load_if_exists(cfgapi.getRoot()["settings"], "certs_ca_key_password",SSLFactory::default_cert_password());
+    load_if_exists(cfgapi.getRoot()["settings"], "certs_ca_path",SSLFactory::default_client_ca_path());
 
-    cfgapi.getRoot()["settings"].lookupValue("ssl_autodetect",MitmMasterProxy::ssl_autodetect);
-    cfgapi.getRoot()["settings"].lookupValue("ssl_autodetect_harder",MitmMasterProxy::ssl_autodetect_harder);
-    cfgapi.getRoot()["settings"].lookupValue("ssl_ocsp_status_ttl",SSLFactory::ssl_ocsp_status_ttl);
-    cfgapi.getRoot()["settings"].lookupValue("ssl_crl_status_ttl",SSLFactory::ssl_crl_status_ttl);
+    load_if_exists(cfgapi.getRoot()["settings"], "ssl_autodetect",MitmMasterProxy::ssl_autodetect);
+    load_if_exists(cfgapi.getRoot()["settings"], "ssl_autodetect_harder",MitmMasterProxy::ssl_autodetect_harder);
+    load_if_exists(cfgapi.getRoot()["settings"], "ssl_ocsp_status_ttl",SSLFactory::ssl_ocsp_status_ttl);
+    load_if_exists(cfgapi.getRoot()["settings"], "ssl_crl_status_ttl",SSLFactory::ssl_crl_status_ttl);
 
     if(cfgapi.getRoot()["settings"].exists("udp_quick_ports")) {
 
@@ -276,24 +276,24 @@ bool CfgFactory::load_settings () {
         }
     }
 
-    cfgapi.getRoot()["settings"].lookupValue("socks_port",listen_socks_port_base); listen_socks_port = listen_socks_port_base;
-    cfgapi.getRoot()["settings"].lookupValue("socks_workers",num_workers_socks);
+    load_if_exists(cfgapi.getRoot()["settings"], "socks_port",listen_socks_port_base); listen_socks_port = listen_socks_port_base;
+    load_if_exists(cfgapi.getRoot()["settings"], "socks_workers",num_workers_socks);
 
     if(cfgapi.getRoot().exists("settings")) {
         if(cfgapi.getRoot()["settings"].exists("socks")) {
-            cfgapi.getRoot()["settings"]["socks"].lookupValue("async_dns", socksServerCX::global_async_dns);
+            load_if_exists(cfgapi.getRoot()["settings"]["socks"], "async_dns", socksServerCX::global_async_dns);
         }
     }
 
-    cfgapi.getRoot()["settings"].lookupValue("log_level",CfgFactory::get().internal_init_level.level_ref());
+    load_if_exists(cfgapi.getRoot()["settings"], "log_level",CfgFactory::get().internal_init_level.level_ref());
 
-    cfgapi.getRoot()["settings"].lookupValue("syslog_server",syslog_server);
-    cfgapi.getRoot()["settings"].lookupValue("syslog_port",syslog_port);
-    cfgapi.getRoot()["settings"].lookupValue("syslog_facility",syslog_facility);
-    cfgapi.getRoot()["settings"].lookupValue("syslog_level",syslog_level.level_ref());
-    cfgapi.getRoot()["settings"].lookupValue("syslog_family",syslog_family);
+    load_if_exists(cfgapi.getRoot()["settings"], "syslog_server",syslog_server);
+    load_if_exists(cfgapi.getRoot()["settings"], "syslog_port",syslog_port);
+    load_if_exists(cfgapi.getRoot()["settings"], "syslog_facility",syslog_facility);
+    load_if_exists(cfgapi.getRoot()["settings"], "syslog_level",syslog_level.level_ref());
+    load_if_exists(cfgapi.getRoot()["settings"], "syslog_family",syslog_family);
 
-    cfgapi.getRoot()["settings"].lookupValue("messages_dir",dir_msg_templates);
+    load_if_exists(cfgapi.getRoot()["settings"], "messages_dir",dir_msg_templates);
 
     if(cfgapi.getRoot()["settings"].exists("cli")) {
         load_if_exists(cfgapi.getRoot()["settings"]["cli"],"port", CliState::get().cli_port_base);
@@ -303,17 +303,17 @@ bool CfgFactory::load_settings () {
     }
 
     if(cfgapi.getRoot()["settings"].exists("auth_portal")) {
-        cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("address", auth_address);
-        cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("http_port", auth_http);
-        cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("https_port", auth_https);
-        cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("ssl_key", auth_sslkey);
-        cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("ssl_cert", auth_sslcert);
-        cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("magic_ip", tenant_magic_ip);
+        load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "address", auth_address);
+        load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "http_port", auth_http);
+        load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "https_port", auth_https);
+        load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "ssl_key", auth_sslkey);
+        load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "ssl_cert", auth_sslcert);
+        load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "magic_ip", tenant_magic_ip);
     }
 
-    CfgFactory::cfg_root()["settings"].lookupValue("write_payload_dir",CfgFactory::get().traflog_dir);
-    CfgFactory::cfg_root()["settings"].lookupValue("write_payload_file_prefix",CfgFactory::get().traflog_file_prefix);
-    CfgFactory::cfg_root()["settings"].lookupValue("write_payload_file_suffix",CfgFactory::get().traflog_file_suffix);
+    load_if_exists(CfgFactory::cfg_root()["settings"], "write_payload_dir",CfgFactory::get().traflog_dir);
+    load_if_exists(CfgFactory::cfg_root()["settings"], "write_payload_file_prefix",CfgFactory::get().traflog_file_prefix);
+    load_if_exists(CfgFactory::cfg_root()["settings"], "write_payload_file_suffix",CfgFactory::get().traflog_file_suffix);
 
     return true;
 }
@@ -325,29 +325,29 @@ int CfgFactory::load_debug() {
 
     if(! cfgapi.getRoot().exists("debug")) {
 
-        CfgFactory::cfg_root()["debug"].lookupValue("log_data_crc", baseCom::debug_log_data_crc);
-        CfgFactory::cfg_root()["debug"].lookupValue("log_sockets", baseHostCX::socket_in_name);
-        CfgFactory::cfg_root()["debug"].lookupValue("log_online_cx_name", baseHostCX::online_name);
-        CfgFactory::cfg_root()["debug"].lookupValue("log_srclines", LogOutput::get()->print_srcline());
-        CfgFactory::cfg_root()["debug"].lookupValue("log_srclines_always", LogOutput::get()->print_srcline_always());
+        load_if_exists(CfgFactory::cfg_root()["debug"], "log_data_crc", baseCom::debug_log_data_crc);
+        load_if_exists(CfgFactory::cfg_root()["debug"], "log_sockets", baseHostCX::socket_in_name);
+        load_if_exists(CfgFactory::cfg_root()["debug"], "log_online_cx_name", baseHostCX::online_name);
+        load_if_exists(CfgFactory::cfg_root()["debug"], "log_srclines", LogOutput::get()->print_srcline());
+        load_if_exists(CfgFactory::cfg_root()["debug"], "log_srclines_always", LogOutput::get()->print_srcline_always());
 
         if (cfgapi.getRoot()["debug"].exists("log")) {
 
-            CfgFactory::cfg_root()["debug"]["log"].lookupValue("sslcom", SSLCom::log_level_ref().level_ref());
-            CfgFactory::cfg_root()["debug"]["log"].lookupValue("sslmitmcom",
+            load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "sslcom", SSLCom::log_level_ref().level_ref());
+            load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "sslmitmcom",
                                                                baseSSLMitmCom<SSLCom>::log_level_ref().level_ref());
-            CfgFactory::cfg_root()["debug"]["log"].lookupValue("sslmitmcom",
+            load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "sslmitmcom",
                                                                baseSSLMitmCom<DTLSCom>::log_level_ref().level_ref());
-            CfgFactory::cfg_root()["debug"]["log"].lookupValue("sslcertstore",
+            load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "sslcertstore",
                                                                SSLFactory::get_log().level()->level_ref());
-            CfgFactory::cfg_root()["debug"]["log"].lookupValue("proxy", baseProxy::log_level_ref().level_ref());
-            CfgFactory::cfg_root()["debug"]["log"].lookupValue("proxy", epoll::log_level.level_ref());
-            CfgFactory::cfg_root()["debug"]["log"].lookupValue("mtrace", cfg_mtrace_enable);
-            CfgFactory::cfg_root()["debug"]["log"].lookupValue("openssl_mem_dbg", cfg_openssl_mem_dbg);
+            load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "proxy", baseProxy::log_level_ref().level_ref());
+            load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "proxy", epoll::log_level.level_ref());
+            load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "mtrace", cfg_mtrace_enable);
+            load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "openssl_mem_dbg", cfg_openssl_mem_dbg);
 
             /*DNS ALG EXPLICIT LOG*/
-            CfgFactory::cfg_root()["debug"]["log"].lookupValue("alg_dns", DNS_Inspector::log_level_ref().level_ref());
-            CfgFactory::cfg_root()["debug"]["log"].lookupValue("alg_dns", DNS_Packet::log_level_ref().level_ref());
+            load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "alg_dns", DNS_Inspector::log_level_ref().level_ref());
+            load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "alg_dns", DNS_Packet::log_level_ref().level_ref());
         }
         return 1;
     }
@@ -385,10 +385,10 @@ int CfgFactory::load_db_address () {
 
             _deb("cfgapi_load_addresses: processing '%s'",name.c_str());
             
-            if( cur_object.lookupValue("type",type)) {
+            if( load_if_exists(cur_object, "type",type)) {
                 switch(type) {
                     case 0: // CIDR notation
-                        if (cur_object.lookupValue("cidr",address)) {
+                        if (load_if_exists(cur_object, "cidr", address)) {
                             CIDR* c = cidr_from_str(address.c_str());
 
                             db_address[name] = std::make_shared<CidrAddress>(c);
@@ -397,7 +397,7 @@ int CfgFactory::load_db_address () {
                         }
                     break;
                     case 1: // FQDN notation
-                        if (cur_object.lookupValue("fqdn",address))  {
+                        if (load_if_exists(cur_object, "fqdn",address))  {
 
                             db_address[name] = std::make_shared<FqdnAddress>(address);
                             db_address[name]->prof_name = name;
@@ -447,8 +447,8 @@ int CfgFactory::load_db_port () {
 
             _deb("cfgapi_load_ports: processing '%s'",name.c_str());
             
-            if( cur_object.lookupValue("start",a) &&
-                cur_object.lookupValue("end",b)   ) {
+            if( load_if_exists(cur_object, "start",a) &&
+                    load_if_exists(cur_object, "end",b)   ) {
                 
                 if(a <= b) {
                     db_port[name] = range(a,b);
@@ -496,7 +496,7 @@ int CfgFactory::load_db_proto () {
 
             _deb("cfgapi_load_proto: processing '%s'", name.c_str());
             
-            if( cur_object.lookupValue("id",a) ) {
+            if( load_if_exists(cur_object, "id",a) ) {
                 
                 db_proto[name] = a;
 
@@ -545,7 +545,7 @@ int CfgFactory::load_db_policy () {
             
             auto rule = std::make_shared<PolicyRule>();
 
-            if(cur_object.lookupValue("proto",proto)) {
+            if(load_if_exists(cur_object, "proto",proto)) {
                 int r = lookup_proto(proto.c_str());
                 if(r != 0) {
                     rule->proto_name = proto;
@@ -561,7 +561,7 @@ int CfgFactory::load_db_policy () {
             const Setting& sett_src = cur_object["src"];
             if(sett_src.isScalar()) {
                 _dia("cfgapi_load_policy[#%d]: scalar src address object", i);
-                if(cur_object.lookupValue("src",src)) {
+                if(load_if_exists(cur_object, "src",src)) {
                     
                     auto r = lookup_address(src.c_str());
                     if(r) {
@@ -594,7 +594,7 @@ int CfgFactory::load_db_policy () {
             
             const Setting& sett_sport = cur_object["sport"];
             if(sett_sport.isScalar()) {
-                if(cur_object.lookupValue("sport",sport)) {
+                if(load_if_exists(cur_object, "sport",sport)) {
                     range r = lookup_port(sport.c_str());
                     if(r != NULLRANGE) {
                         rule->src_ports.push_back(r);
@@ -627,7 +627,7 @@ int CfgFactory::load_db_policy () {
 
             const Setting& sett_dst = cur_object["dst"];
             if(sett_dst.isScalar()) {
-                if(cur_object.lookupValue("dst",dst)) {
+                if(load_if_exists(cur_object, "dst",dst)) {
                     auto r = lookup_address(dst.c_str());
                     if(r) {
                         rule->dst.push_back(r);
@@ -659,7 +659,7 @@ int CfgFactory::load_db_policy () {
             
             const Setting& sett_dport = cur_object["dport"];
             if(sett_dport.isScalar()) { 
-                if(cur_object.lookupValue("dport",dport)) {
+                if(load_if_exists(cur_object, "dport",dport)) {
                     range r = lookup_port(dport.c_str());
                     if(r != NULLRANGE) {
                         rule->dst_ports.push_back(r);
@@ -690,7 +690,7 @@ int CfgFactory::load_db_policy () {
                 }
             }
             
-            if(cur_object.lookupValue("action",action)) {
+            if(load_if_exists(cur_object, "action",action)) {
                 int r_a = POLICY_ACTION_PASS;
                 if(action == "deny") {
                     _dia("cfgapi_load_policy[#%d]: action: deny", i);
@@ -713,7 +713,7 @@ int CfgFactory::load_db_policy () {
                 rule->action_name = "deny";
             }
 
-            if(cur_object.lookupValue("nat",nat)) {
+            if(load_if_exists(cur_object, "nat",nat)) {
                 int nat_a = POLICY_NAT_NONE;
                 
                 if(nat == "none") {
@@ -1009,7 +1009,7 @@ int CfgFactory::load_db_prof_detection () {
 
             _dia("cfgapi_load_obj_profile_detect: processing '%s'", name.c_str());
             
-            if( cur_object.lookupValue("mode",a->mode) ) {
+            if( load_if_exists(cur_object, "mode",a->mode) ) {
                 
                 a->prof_name = name;
                 db_prof_detection[name] = std::shared_ptr<ProfileDetection>(a);
@@ -1054,7 +1054,7 @@ int CfgFactory::load_db_prof_content () {
 
             _dia("load_db_prof_content: processing '%s'",name.c_str());
             
-            if( cur_object.lookupValue("write_payload",a->write_payload) ) {
+            if( load_if_exists(cur_object, "write_payload",a->write_payload) ) {
                 
                 a->prof_name = name;
                 db_prof_content[name] = std::shared_ptr<ProfileContent>(a);
@@ -1071,19 +1071,15 @@ int CfgFactory::load_db_prof_content () {
                         
                         bool fill_length = false;
                         int replace_each_nth = 0;
+
+                        load_if_exists(cur_replace_rule, "match",m);
                         
-                        cur_replace_rule.lookupValue("match",m);
-                        
-                        if(cur_replace_rule.lookupValue("replace",r)) {
+                        if(load_if_exists(cur_replace_rule, "replace",r)) {
                             action_defined = true;
                         }
                         
-                        //optional
-                        // arm version library throws exception here if option is not present
-                        if(cur_replace_rule.exists("fill_length"))
-                            cur_replace_rule.lookupValue("fill_length",fill_length);
-
-                        cur_replace_rule.lookupValue("replace_each_nth",replace_each_nth);
+                        load_if_exists(cur_replace_rule, "fill_length",fill_length);
+                        load_if_exists(cur_replace_rule, "replace_each_nth",replace_each_nth);
                         
                         if( (! m.empty() ) && action_defined) {
                             _dia("    [%d] match '%s' and replace with '%s'", j, m.c_str(), r.c_str());
@@ -1141,25 +1137,25 @@ int CfgFactory::load_db_prof_tls () {
 
             _dia("load_db_prof_tls: processing '%s'",name.c_str());
             
-            if( cur_object.lookupValue("inspect",a->inspect) ) {
+            if( load_if_exists(cur_object, "inspect",a->inspect) ) {
                 
                 a->prof_name = name;
-                cur_object.lookupValue("allow_untrusted_issuers",a->allow_untrusted_issuers);
-                cur_object.lookupValue("allow_invalid_certs",a->allow_invalid_certs);
-                cur_object.lookupValue("allow_self_signed",a->allow_self_signed);
-                cur_object.lookupValue("use_pfs",a->use_pfs);
-                cur_object.lookupValue("left_use_pfs",a->left_use_pfs);
-                cur_object.lookupValue("right_use_pfs",a->right_use_pfs);
-                cur_object.lookupValue("left_disable_reuse",a->left_disable_reuse);
-                cur_object.lookupValue("right_disable_reuse",a->right_disable_reuse);
-                
-                cur_object.lookupValue("ocsp_mode",a->ocsp_mode);
-                cur_object.lookupValue("ocsp_stapling",a->ocsp_stapling);
-                cur_object.lookupValue("ocsp_stapling_mode",a->ocsp_stapling_mode);
-                cur_object.lookupValue("failed_certcheck_replacement",a->failed_certcheck_replacement);
-                cur_object.lookupValue("failed_certcheck_override",a->failed_certcheck_override);
-                cur_object.lookupValue("failed_certcheck_override_timeout",a->failed_certcheck_override_timeout);
-                cur_object.lookupValue("failed_certcheck_override_timeout_type",a->failed_certcheck_override_timeout_type);
+                load_if_exists(cur_object, "allow_untrusted_issuers",a->allow_untrusted_issuers);
+                load_if_exists(cur_object, "allow_invalid_certs",a->allow_invalid_certs);
+                load_if_exists(cur_object, "allow_self_signed",a->allow_self_signed);
+                load_if_exists(cur_object, "use_pfs",a->use_pfs);
+                load_if_exists(cur_object, "left_use_pfs",a->left_use_pfs);
+                load_if_exists(cur_object, "right_use_pfs",a->right_use_pfs);
+                load_if_exists(cur_object, "left_disable_reuse",a->left_disable_reuse);
+                load_if_exists(cur_object, "right_disable_reuse",a->right_disable_reuse);
+
+                load_if_exists(cur_object, "ocsp_mode",a->ocsp_mode);
+                load_if_exists(cur_object, "ocsp_stapling",a->ocsp_stapling);
+                load_if_exists(cur_object, "ocsp_stapling_mode",a->ocsp_stapling_mode);
+                load_if_exists(cur_object, "failed_certcheck_replacement",a->failed_certcheck_replacement);
+                load_if_exists(cur_object, "failed_certcheck_override",a->failed_certcheck_override);
+                load_if_exists(cur_object, "failed_certcheck_override_timeout",a->failed_certcheck_override_timeout);
+                load_if_exists(cur_object, "failed_certcheck_override_timeout_type",a->failed_certcheck_override_timeout_type);
                 
                 if(cur_object.exists("sni_filter_bypass")) {
                         Setting& sni_filter = cur_object["sni_filter_bypass"];
@@ -1189,7 +1185,7 @@ int CfgFactory::load_db_prof_tls () {
                                 }
                         }
                 }
-                cur_object.lookupValue("sslkeylog",a->sslkeylog);
+                load_if_exists(cur_object, "sslkeylog",a->sslkeylog);
                 
                 db_prof_tls[name] = std::shared_ptr<ProfileTls>(a);
 
@@ -1232,9 +1228,9 @@ int CfgFactory::load_db_prof_alg_dns () {
             _dia("cfgapi_load_obj_alg_dns_profile: processing '%s'", name.c_str());
             
             a->prof_name = name;
-            cur_object.lookupValue("match_request_id",a->match_request_id);
-            cur_object.lookupValue("randomize_id",a->randomize_id);
-            cur_object.lookupValue("cached_responses",a->cached_responses);
+            load_if_exists(cur_object, "match_request_id",a->match_request_id);
+            load_if_exists(cur_object, "randomize_id",a->randomize_id);
+            load_if_exists(cur_object, "cached_responses",a->cached_responses);
             
             db_prof_alg_dns[name] = std::shared_ptr<ProfileAlgDns>(a);
         }
@@ -1272,8 +1268,8 @@ int CfgFactory::load_db_prof_script () {
             _dia("load_db_prof_script: processing '%s'", name.c_str());
 
             a->prof_name = name;
-            cur_object.lookupValue("type", a->script_type);
-            cur_object.lookupValue("script-file",a->module_path);
+            load_if_exists(cur_object, "type", a->script_type);
+            load_if_exists(cur_object, "script-file",a->module_path);
 
             db_prof_script[name] = std::shared_ptr<ProfileScript>(a);
         }
@@ -1291,11 +1287,11 @@ int CfgFactory::load_db_prof_auth () {
     _dia("load_db_prof_auth: start");
 
     _dia("load_db_prof_auth: portal settings");
-    cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("address", AuthFactory::get().portal_address);
+    load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "address", AuthFactory::get().portal_address);
 
     load_if_exists<std::string>(cfgapi.getRoot()["settings"]["auth_portal"], "address6", AuthFactory::get().portal_address6);
-    cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("http_port", AuthFactory::get().portal_port_http);
-    cfgapi.getRoot()["settings"]["auth_portal"].lookupValue("https_port", AuthFactory::get().portal_port_https);
+    load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "http_port", AuthFactory::get().portal_port_http);
+    load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "https_port", AuthFactory::get().portal_port_https);
 
     _dia("load_db_prof_auth: profiles");
     if(cfgapi.getRoot().exists("auth_profiles")) {
@@ -1322,8 +1318,8 @@ int CfgFactory::load_db_prof_auth () {
             _deb("load_db_prof_auth: processing '%s'",name.c_str());
             
             a->prof_name = name;
-            cur_object.lookupValue("authenticate",a->authenticate);
-            cur_object.lookupValue("resolve",a->resolve);
+            load_if_exists(cur_object, "authenticate",a->authenticate);
+            load_if_exists(cur_object, "resolve",a->resolve);
             
             if(cur_object.exists("identities")) {
                 _dia("load_db_prof_auth: profiles: subpolicies exists");
@@ -1520,7 +1516,7 @@ bool CfgFactory::prof_content_apply (baseHostCX *originator, baseProxy *new_prox
                 mitm_proxy->content_replace(pc->content_rules);
             }
         }
-        else if(cfgapi.getRoot()["settings"].lookupValue("default_write_payload",cfg_wrt)) {
+        else if(load_if_exists(cfgapi.getRoot()["settings"], "default_write_payload",cfg_wrt)) {
             _dia("policy_apply: global content profile: %d", cfg_wrt);
             mitm_proxy->write_payload(cfg_wrt);
         }

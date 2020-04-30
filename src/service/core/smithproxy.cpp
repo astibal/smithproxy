@@ -41,6 +41,7 @@
 #include <cli/cmdserver.hpp>
 #include <policy/authfactory.hpp>
 #include <inspect/sigfactory.hpp>
+#include <cfgapi.hpp>
 
 SmithProxy::~SmithProxy () {
 
@@ -426,10 +427,10 @@ int SmithProxy::load_signatures(libconfig::Config& cfg, const char* name, std::v
 
 
         const Setting& signature = cfg_signatures[i];
-        signature.lookupValue("name", newsig->name());
-        signature.lookupValue("side", newsig->sig_side);
-        signature.lookupValue("cat", newsig->category);
-        signature.lookupValue("severity", newsig->severity);
+        load_if_exists(signature, "name", newsig->name());
+        load_if_exists(signature, "side", newsig->sig_side);
+        load_if_exists(signature, "cat", newsig->category);
+        load_if_exists(signature, "severity", newsig->severity);
 
         const Setting& signature_flow = cfg_signatures[i]["flow"];
         int flow_count = signature_flow.getLength();
@@ -445,11 +446,11 @@ int SmithProxy::load_signatures(libconfig::Config& cfg, const char* name, std::v
             int bytes_start;
             int bytes_max;
 
-            if(!(signature_flow[j].lookupValue("side", side)
-                 && signature_flow[j].lookupValue("type", type)
-                 && signature_flow[j].lookupValue("signature", sigtext)
-                 && signature_flow[j].lookupValue("bytes_start", bytes_start)
-                 && signature_flow[j].lookupValue("bytes_max", bytes_max))) {
+            if(!( load_if_exists(signature_flow[j], "side", side)
+                 && load_if_exists(signature_flow[j], "type", type)
+                 && load_if_exists(signature_flow[j], "signature", sigtext)
+                 && load_if_exists(signature_flow[j], "bytes_start", bytes_start)
+                 && load_if_exists(signature_flow[j], "bytes_max", bytes_max))) {
 
                 _war("Starttls signature %s properties failed to load: index %d",newsig->name().c_str(), i);
                 continue;
@@ -596,7 +597,7 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
             //init crashlog file with dafe default
             this_daemon.set_crashlog("/tmp/smithproxy_crash.log");
 
-            if(CfgFactory::cfg_root()["settings"].lookupValue("log_file",CfgFactory::get().log_file_base)) {
+            if(load_if_exists(CfgFactory::cfg_root()["settings"], "log_file",CfgFactory::get().log_file_base)) {
 
                 CfgFactory::get().log_file = CfgFactory::get().log_file_base;
 
@@ -622,7 +623,7 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
                 }
             }
             //
-            if(CfgFactory::cfg_root()["settings"].lookupValue("sslkeylog_file", CfgFactory::get().sslkeylog_file_base)) {
+            if(load_if_exists(CfgFactory::cfg_root()["settings"], "sslkeylog_file", CfgFactory::get().sslkeylog_file_base)) {
 
                 CfgFactory::get().sslkeylog_file = CfgFactory::get().sslkeylog_file_base;
 

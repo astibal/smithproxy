@@ -275,7 +275,7 @@ public:
 // of libconfig++ on armhf which don't keep the promise and lookupValue throws an exception
 
 template <class T>
-bool load_if_exists(libconfig::Setting& s, const char* key, T& valref) {
+bool load_if_exists(libconfig::Setting const& s, const char* key, T& valref) {
     if(s.exists(key)) {
         s.lookupValue(key, valref);
 
