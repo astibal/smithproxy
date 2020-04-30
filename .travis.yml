@@ -26,7 +26,7 @@ jobs:
 
     - os linux
       sudo: required
-      dist: xenial
+      dist:
       compiler:
         - gcc
         - clang

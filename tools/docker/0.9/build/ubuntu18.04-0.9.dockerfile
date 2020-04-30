@@ -12,4 +12,4 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get install -y tzdata && apt -y install g
 RUN \
     git clone https://github.com/astibal/smithproxy.git smithproxy && cd smithproxy
 
-CMD cd /app/smithproxy/tools/build-scripts/deb && cat README.txt && echo && /bin/bash
+CMD cd /app/smithproxy/tools/pkg-scripts/deb && cat README.txt && echo && /bin/bash

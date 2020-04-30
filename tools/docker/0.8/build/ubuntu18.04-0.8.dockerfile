@@ -17,4 +17,4 @@ git g++ cmake make && pip install pylibconfig2
 RUN \
     git clone https://github.com/astibal/smithproxy.git smithproxy
 
-CMD cd /app/smithproxy/tools/build-scripts/deb && cat README.txt && echo && /bin/bash
+CMD cd /app/smithproxy/tools/pkg-scripts/deb && cat README.txt && echo && /bin/bash
