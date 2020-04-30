@@ -116,6 +116,10 @@ elif [[ "${DIST}" == "Debian" ]]; then
 
     echo "... installing python libraries"
 
+    if [[ "${MACH}" == "aarch" ]]; then
+        apt install -y python3-lxml
+    fi
+
     if [[ "${DEB_MAJ}" == "11" ]]; then
         apt install -y python3-m2crypto
         pip3 install posix-ipc
