@@ -12,7 +12,7 @@ RUN git clone --recursive https://github.com/astibal/smithproxy.git -b master sm
 
 RUN cd smithproxy && ./tools/ubuntu20.04-0.9-deps.sh
 
-RUN cd smithproxy && mkdir build && cd build && cmake .. -DCMAKE_BUILD_TYPE=Release && make install
+RUN cd smithproxy && ./tools/linux-build.sh
 
 # Define environment variable
 
