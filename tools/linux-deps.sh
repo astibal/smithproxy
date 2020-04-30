@@ -91,7 +91,7 @@ elif [[ "${DIST}" == "Debian" ]]; then
 
     DEB_MAJ=`echo $REV | awk -F'.' '{ print $1 }'`
 
-    if [[ "${DEB_MAJ}" == "20.04" ]]; then
+    if [[ "${DEB_MAJ}" == "11" ]]; then
         SX_LIBCLI_VER="1.10"
         SX_LIBCONFIG_VER="9v5"
         SX_GCC_VER="10"
