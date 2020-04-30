@@ -45,7 +45,7 @@ elif [ "${OS}" = "Linux" ] ; then
 		DIST="Debian"
 		REV="`cat /etc/debian_version | awk -F"/" '{ print $1 }' | awk -F"." '{ print $1 }'`"
 
-		if [[ "{$REV}" == "bullseye" ]]; then
+		if [[ "${REV}" == "bullseye" ]]; then
 		    REV="11.0"
 		fi
 
