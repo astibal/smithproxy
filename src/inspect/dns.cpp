@@ -37,6 +37,7 @@
     which carries forward this exception.
 */
 
+#include <sys/select.h>
 #include <arpa/inet.h>
 #include <openssl/rand.h>
 #include <unistd.h>
