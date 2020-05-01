@@ -2569,7 +2569,18 @@ int CfgFactory::save_config() const {
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
     Config ex;
+
+
+    #if ( LIBCONFIGXX_VER_MAJOR >= 1 && LIBCONFIGXX_VER_MINOR < 7 )
+
     ex.setOptions(Setting::OptionOpenBraceOnSeparateLine);
+
+    #else
+
+    ex.setOptions(Config::OptionOpenBraceOnSeparateLine);
+
+    #endif
+
     ex.setTabWidth(4);
 
     int n = 0;

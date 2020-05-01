@@ -1365,7 +1365,16 @@ void cli_print_section(cli_def* cli, const std::string& name, int index , unsign
 
         auto section_nodes = string_split(name, '.');
 
+
+        #if ( LIBCONFIGXX_VER_MAJOR >= 1 && LIBCONFIGXX_VER_MINOR < 7 )
+
         nc.setOptions(Setting::OptionOpenBraceOnSeparateLine);
+
+        #else
+
+        nc.setOptions(Config::OptionOpenBraceOnSeparateLine);
+
+        #endif
 
         Setting* target = &nc.getRoot();
         target = &target->add(s.getName(), s.getType());
