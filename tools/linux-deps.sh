@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env sh
 
 SX_LIBCLI_VER="1.9"
 SX_LIBCONFIG_VER="9v5"
