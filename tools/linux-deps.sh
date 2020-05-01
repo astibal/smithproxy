@@ -65,7 +65,7 @@ fi
 
 ###
 
-echo "... OS detected: $REV version $REV"
+echo "... OS detected: $DIST version $REV"
 
 if [[ "${DIST}" == "Ubuntu" ]]; then
 
