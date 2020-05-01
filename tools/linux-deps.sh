@@ -48,11 +48,13 @@ elif [ "${OS}" = "Linux" ] ; then
 		if [[ "${REV}" == "bullseye" ]]; then
 		    REV="11.0"
 		fi
+    elif [ -f /etc/alpine-release ] ; then
+        DIST="Alpine"
+        MAJ=`cat /etc/alpine-release | tr '_' ' ' | tr '.' ' ' | awk '{ print $1 }' `
+        MIN=`cat /etc/alpine-release | tr '_' ' ' | tr '.' ' ' | awk '{ print $2 }' `
+        REV="${MAJ}.${MIN}"
 
-	fi
-
-
-	if [ -f /etc/UnitedLinux-release ] ; then
+	elif [ -f /etc/UnitedLinux-release ] ; then
 		DIST="${DIST}[`cat /etc/UnitedLinux-release | tr "\n" ' ' | sed s/VERSION.*//`]"
 	fi
 
@@ -129,6 +131,30 @@ elif [[ "${DIST}" == "Debian" ]]; then
         pip3 install pyroute2 pylibconfig2 m2crypto spyne${SX_SPYNE_VER} zeep cryptography
     fi
 
+elif [[ "${DIST}" == "Alpine" ]]; then
+
+    OPW=`pwd`
+
+    cd /tmp
+
+    apk update
+    apk add git bash
+    apk add make gcc musl-dev
+
+    git clone --recursive https://github.com/dparrish/libcli
+    cd libcli/ && make install && cp libcli.h /usr/include/ && cd ..
+
+    apk add libconfig libconfig-dev
+    apk add cmake g++ python3-dev libexecinfo-dev openssl-dev linux-headers libunwind-dev
+    apk add busybox-extras iptables iproute2
+    apk add py-pip
+    apk add libldap openldap-dev libffi-dev libxml2-dev xmlsec-dev swig
+    pip3 install python-ldap pyparsing posix-ipc
+    pip3 install pyroute2 pylibconfig2 m2crypto spyne==2.13.2a0 zeep cryptography
+
+
+    cd ${OPW}
+
 else
     echo "We can't detect your distro."
     echo "please make sure following development packages are installed to compile smithproxy:"
@@ -154,7 +180,4 @@ ln -sf /usr/bin/g++-${SX_GCC_VER} /usr/bin/c++ && \
 ln -sf /usr/bin/gcc-${SX_GCC_VER} /usr/bin/gcc && \
 ln -sf /usr/bin/gcc-${SX_GCC_VER} /usr/bin/cc && \
 ln -sf /usr/bin/gcc-ar-${SX_GCC_VER} /usr/bin/gcc-ar
-
-
-
 
