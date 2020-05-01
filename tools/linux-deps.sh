@@ -12,6 +12,7 @@ MACH=`uname -m`
 DIST="UnknownDist"
 REV="UnknownRev"
 
+LINK_TOOLCHAIN="Y"
 
 # taken from distro.sh in pkg-scripts/deb/
 
@@ -152,6 +153,7 @@ elif [[ "${DIST}" == "Alpine" ]]; then
     pip3 install python-ldap pyparsing posix-ipc
     pip3 install pyroute2 pylibconfig2 m2crypto spyne==2.13.2a0 zeep cryptography
 
+    LINK_TOOLCHAIN="N"
 
     cd ${OPW}
 
@@ -173,11 +175,11 @@ fi
 
 
 
-
-echo "... using GCC ${SX_GCC_VER}"
-ln -sf /usr/bin/g++-${SX_GCC_VER} /usr/bin/g++ && \
-ln -sf /usr/bin/g++-${SX_GCC_VER} /usr/bin/c++ && \
-ln -sf /usr/bin/gcc-${SX_GCC_VER} /usr/bin/gcc && \
-ln -sf /usr/bin/gcc-${SX_GCC_VER} /usr/bin/cc && \
-ln -sf /usr/bin/gcc-ar-${SX_GCC_VER} /usr/bin/gcc-ar
-
+if [[ "${LINK_TOOLCHAIN}" == "Y" ]]; then
+    echo "... using GCC ${SX_GCC_VER}"
+    ln -sf /usr/bin/g++-${SX_GCC_VER} /usr/bin/g++ && \
+    ln -sf /usr/bin/g++-${SX_GCC_VER} /usr/bin/c++ && \
+    ln -sf /usr/bin/gcc-${SX_GCC_VER} /usr/bin/gcc && \
+    ln -sf /usr/bin/gcc-${SX_GCC_VER} /usr/bin/cc && \
+    ln -sf /usr/bin/gcc-ar-${SX_GCC_VER} /usr/bin/gcc-ar
+fi
