@@ -46,7 +46,7 @@ elif [ "${OS}" = "Linux" ] ; then
 		DIST="Debian"
 		REV="`cat /etc/debian_version | awk -F"/" '{ print $1 }' | awk -F"." '{ print $1 }'`"
 
-		if [ "${REV}" == "bullseye" ]; then
+		if [ "${REV}" = "bullseye" ]; then
 		    REV="11.0"
 		fi
     elif [ -f /etc/alpine-release ] ; then
@@ -67,10 +67,10 @@ fi
 
 echo "... OS detected: $DIST version $REV"
 
-if [ "${DIST}" == "Ubuntu" ]; then
+if [ "${DIST}" = "Ubuntu" ]; then
 
    # specifics
-   if [ "${REV}" == "20.04" ]; then
+   if [ "${REV}" = "20.04" ]; then
         SX_LIBCLI_VER="1.10"
         SX_LIBCONFIG_VER="9v5"
         SX_GCC_VER="9"
@@ -94,11 +94,11 @@ if [ "${DIST}" == "Ubuntu" ]; then
     pip3 install --upgrade pip
     pip3 install pyroute2 pylibconfig2 m2crypto spyne${SX_SPYNE_VER} zeep cryptography
 
-elif [ "${DIST}" == "Debian" ]; then
+elif [ "${DIST}" = "Debian" ]; then
 
     DEB_MAJ=`echo $REV | awk -F'.' '{ print $1 }'`
 
-    if [ "${DEB_MAJ}" == "11" ]; then
+    if [ "${DEB_MAJ}" = "11" ]; then
         SX_LIBCLI_VER="1.10"
         SX_LIBCONFIG_VER="9v5"
         SX_GCC_VER="10"
@@ -121,11 +121,11 @@ elif [ "${DIST}" == "Debian" ]; then
     echo "... installing python libraries"
     pip3 install --upgrade pip
 
-    if [ "${MACH}" == "aarch64" ]; then
+    if [ "${MACH}" = "aarch64" ]; then
         apt install -y python3-lxml
     fi
 
-    if [ "${DEB_MAJ}" == "11" ]; then
+    if [ "${DEB_MAJ}" = "11" ]; then
         apt install -y python3-m2crypto
         pip3 install posix-ipc
         pip3 install pyroute2 pylibconfig2 spyne${SX_SPYNE_VER} zeep cryptography
@@ -134,7 +134,7 @@ elif [ "${DIST}" == "Debian" ]; then
         pip3 install pyroute2 pylibconfig2 m2crypto spyne${SX_SPYNE_VER} zeep cryptography
     fi
 
-elif [ "${DIST}" == "Alpine" ]; then
+elif [ "${DIST}" = "Alpine" ]; then
 
     OPW=`pwd`
 
@@ -179,7 +179,7 @@ fi
 
 
 
-if [ "${LINK_TOOLCHAIN}" == "Y" ]; then
+if [ "${LINK_TOOLCHAIN}" = "Y" ]; then
     echo "... using GCC ${SX_GCC_VER}"
     ln -sf /usr/bin/g++-${SX_GCC_VER} /usr/bin/g++ && \
     ln -sf /usr/bin/g++-${SX_GCC_VER} /usr/bin/c++ && \
