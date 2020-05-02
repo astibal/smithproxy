@@ -3,7 +3,7 @@
 SX_LIBCLI_VER="1.9"
 SX_LIBCONFIG_VER="9v5"
 SX_GCC_VER="8"
-SX_SPYNE_VER="==2.13.2a0"
+SX_SPYNE_VER=">=2.13.2a0"
 
 
 OS=`uname -s`
@@ -26,22 +26,33 @@ elif [ "${OS}" = "AIX" ] ; then
 	OSSTR="${OS} `oslevel` (`oslevel -r`)"
 elif [ "${OS}" = "Linux" ] ; then
 	KERNEL=`uname -r`
-	if [ -f /etc/redhat-release ] ; then
+
+
+	if [ -f /etc/fedora-release ] ; then
+		DIST='Fedora'
+		PSEUDONAME=`cat /etc/fedora-release | sed s/.*\(// | sed s/\)//`
+
+		REV=`cat /etc/fedora-release | sed s/.*release\ // | sed s/\ .*//`
+	elif [ -f /etc/redhat-release ] ; then
 		DIST='RedHat'
 		PSEUDONAME=`cat /etc/redhat-release | sed s/.*\(// | sed s/\)//`
 		REV=`cat /etc/redhat-release | sed s/.*release\ // | sed s/\ .*//`
+
 	elif [ -f /etc/SUSE-release ] ; then
 		DIST=`cat /etc/SUSE-release | tr "\n" ' '| sed s/VERSION.*//`
 		REV=`cat /etc/SUSE-release | tr "\n" ' ' | sed s/.*=\ //`
+
 	elif [ -f /etc/mandrake-release ] ; then
 		DIST='Mandrake'
 		PSEUDONAME=`cat /etc/mandrake-release | sed s/.*\(// | sed s/\)//`
 		REV=`cat /etc/mandrake-release | sed s/.*release\ // | sed s/\ .*//`
+
 	elif [ -f /etc/lsb-release ] ; then
 		eval `cat /etc/lsb-release`
 		DIST=$DISTRIB_ID
 		PSEUDONAME=$DISTRIB_CODENAME
 		REV=$DISTRIB_RELEASE
+
 	elif [ -f /etc/debian_version ] ; then
 		DIST="Debian"
 		REV="`cat /etc/debian_version | awk -F"/" '{ print $1 }' | awk -F"." '{ print $1 }'`"
@@ -49,6 +60,7 @@ elif [ "${OS}" = "Linux" ] ; then
 		if [ "${REV}" = "bullseye" ]; then
 		    REV="11.0"
 		fi
+
     elif [ -f /etc/alpine-release ] ; then
         DIST="Alpine"
         MAJ=`cat /etc/alpine-release | tr '_' ' ' | tr '.' ' ' | awk '{ print $1 }' `
@@ -155,12 +167,29 @@ elif [ "${DIST}" = "Alpine" ]; then
 
     pip3 install --upgrade pip
     pip3 install python-ldap pyparsing posix-ipc
-    pip3 install pyroute2 pylibconfig2 m2crypto spyne==2.13.2a0 zeep cryptography
+    pip3 install pyroute2 pylibconfig2 m2crypto spyne${SX_SPYNE_VER} zeep cryptography
 
     LINK_TOOLCHAIN="N"
 
     cd ${OPW}
 
+elif [ "${DIST}" = "Fedora" ]; then
+
+    OPW=`pwd`
+    yum update -y
+    yum install -y git openssl-libs openssl-devel libcli-devel libconfig-devel python3-devel libunwind-devel kernel-headers glibc-headers
+
+    yum install -y gcc-c++ cmake make
+    yum install -y telnet iptables iproute
+    yum install -y openldap-devel libffi-devel libxml2-devel swig
+    yum install -y python3-pip
+    pip install --upgrade pip
+    pip install wheel
+    pip install python-ldap pyparsing posix-ipc
+    pip install pyroute2 pylibconfig2 m2crypto spyne${SX_SPYNE_VER} zeep cryptography
+    LINK_TOOLCHAIN="N"
+
+    cd ${OPW}
 else
     echo "We can't detect your distro."
     echo "please make sure following development packages are installed to compile smithproxy:"
