@@ -108,13 +108,32 @@ if [ "${DIST}" = "Ubuntu" ]; then
 
 elif [ "${DIST}" = "Debian" ]; then
 
-    DEB_MAJ=`echo $REV | awk -F'.' '{ print $1 }'`
+    # detect debian derivatives
 
-    if [ "${DEB_MAJ}" = "11" ]; then
+    if   [ "${REV}" = "kali" ]; then
+        DEB_MAJ="11"
         SX_LIBCLI_VER="1.10"
         SX_LIBCONFIG_VER="9v5"
-        SX_GCC_VER="10"
+        SX_GCC_VER="9"
+
+    elif [ "${REV}" = "kali-rolling" ]; then
+        DEB_MAJ="11"
+        SX_LIBCLI_VER="1.10"
+        SX_LIBCONFIG_VER="9v5"
+        SX_GCC_VER="9"
+    else
+        # for vanilla Debians
+
+        DEB_MAJ=`echo $REV | awk -F'.' '{ print $1 }'`
+
+        if [ "${DEB_MAJ}" = "11" ]; then
+            SX_LIBCLI_VER="1.10"
+            SX_LIBCONFIG_VER="9v5"
+            SX_GCC_VER="10"
+        fi
+
     fi
+
 
     DEBIAN_FRONTEND=noninteractive apt-get install -y tzdata
 
