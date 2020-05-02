@@ -91,6 +91,7 @@ if [[ "${DIST}" == "Ubuntu" ]]; then
     debootstrap devscripts build-essential lintian debhelper vim nano
 
     echo "... installing python libraries"
+    pip3 install --upgrade pip
     pip3 install pyroute2 pylibconfig2 m2crypto spyne${SX_SPYNE_VER} zeep cryptography
 
 elif [[ "${DIST}" == "Debian" ]]; then
@@ -118,6 +119,7 @@ elif [[ "${DIST}" == "Debian" ]]; then
     debootstrap devscripts build-essential lintian debhelper vim nano
 
     echo "... installing python libraries"
+    pip3 install --upgrade pip
 
     if [[ "${MACH}" == "aarch64" ]]; then
         apt install -y python3-lxml
@@ -150,6 +152,8 @@ elif [[ "${DIST}" == "Alpine" ]]; then
     apk add busybox-extras iptables iproute2
     apk add py-pip
     apk add libldap openldap-dev libffi-dev libxml2-dev xmlsec-dev swig
+
+    pip3 install --upgrade pip
     pip3 install python-ldap pyparsing posix-ipc
     pip3 install pyroute2 pylibconfig2 m2crypto spyne==2.13.2a0 zeep cryptography
 
