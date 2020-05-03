@@ -6,11 +6,7 @@ LABEL org.smithproxy.docker.image="astibal/smithproxy:debian10-0.9-run"
 # Set the working directory to /app
 WORKDIR /app
 
-
-RUN git clone https://github.com/astibal/smithproxy.git -b master smithproxy && \
-cd smithproxy && \
-git clone https://github.com/astibal/socle.git -b master socle && \
-mkdir build && cd build && cmake .. -DCMAKE_BUILD_TYPE=Release && make install
+RUN cd smithproxy && ./tools/linux-build.sh
 
 # Define environment variable
 

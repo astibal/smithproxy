@@ -1,7 +1,7 @@
 #
-FROM debian:10
+FROM ubuntu:20.04
 
-LABEL org.smithproxy.docker.image="astibal/smithproxy:debian10-0.9-base"
+LABEL org.smithproxy.docker.image="astibal/smithproxy:ubuntu20.04-0.9-base"
 
 WORKDIR /app
 

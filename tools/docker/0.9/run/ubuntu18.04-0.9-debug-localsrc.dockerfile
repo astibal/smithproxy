@@ -6,12 +6,17 @@ LABEL org.smithproxy.docker.image="astibal/smithproxy:ubuntu18.04-0.9-run-debug-
 # Set the working directory to /app
 WORKDIR /app
 
+RUN apt -y install gdb valgrind
+
+
+RUN rm -rf /smithproxy
+
 COPY smithproxy/ /smithproxy/
 COPY *.sh /app
 
-RUN apt -y install gdb valgrind && \
-cd /smithproxy && \
-mkdir build ; cd build && cmake .. -DCMAKE_BUILD_TYPE=Debug && make -j `cat /proc/cpuinfo  | grep processor | wc -l` install
+
+RUN cd /smithproxy && \
+mkdir build ; cd build && cmake .. -DCMAKE_BUILD_TYPE=Debug && make -j `nproc` install
 
 # Define environment variable
 
