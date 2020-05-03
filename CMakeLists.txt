@@ -291,6 +291,7 @@ if(UNIX)
             WORLD_READ WORLD_EXECUTE
             )
 
+    InstallSymlink(/usr/bin/smithproxy_cli /usr/bin/sx_cli)
     InstallSymlink(/usr/share/smithproxy/infra/sslca/makecerts.py /usr/bin/sx_regencerts)
     InstallSymlink(/usr/share/smithproxy/infra/sslca/makeportalcert.py /usr/bin/sx_autoportalcert)
     InstallSymlink(/usr/share/smithproxy/infra/authtools/sx_passwd.py /usr/bin/sx_passwd)
