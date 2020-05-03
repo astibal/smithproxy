@@ -10,7 +10,7 @@ RUN apt update && apt -y install git && DEBIAN_FRONTEND=noninteractive apt-get i
 
 RUN git clone --recursive https://github.com/astibal/smithproxy.git -b master smithproxy
 
-RUN cd smithproxy && ./tools/ubuntu20.04-0.9-deps.sh
+RUN cd smithproxy && ./tools/linux-deps.sh
 
 RUN cd smithproxy && ./tools/linux-build.sh
 
