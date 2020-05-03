@@ -181,7 +181,7 @@ elif [ "${DIST}" = "Alpine" ]; then
     apk add libconfig libconfig-dev
     apk add cmake g++ python3-dev libexecinfo-dev openssl-dev linux-headers libunwind-dev
     apk add busybox-extras iptables iproute2
-    apk add py-pip
+    apk add py3-pip
     apk add libldap openldap-dev libffi-dev libxml2-dev xmlsec-dev swig
 
     pip3 install --upgrade pip
