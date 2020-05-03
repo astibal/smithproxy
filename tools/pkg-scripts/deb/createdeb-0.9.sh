@@ -46,13 +46,7 @@ function sync() {
 
     cleanup
 
-    git clone http://github.com/astibal/smithproxy.git smithproxy
-    cd smithproxy; git fetch; git checkout $SMITHPROXY_BRANCH;
-
-    # stay in smithproxy dir, socle is submodule
-
-    git clone http://github.com/astibal/socle.git socle
-    cd socle; git fetch; git checkout $SOCLE_BRANCH; cd ..
+    git clone --recursive http://github.com/astibal/smithproxy.git smithproxy
 
     cd $O
 }
