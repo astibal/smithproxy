@@ -309,6 +309,21 @@ public:
             delete cached_packet;
         }
     };
+
+    [[maybe_unused]] std::optional<long> get_ttl() {
+        if(! answers().empty())
+            return answers().at(0).ttl_;
+
+        return std::nullopt;
+    }
+
+    std::optional<long> current_ttl() {
+
+        if( auto ttl = get_ttl(); ttl.has_value() )
+            return loaded_at + ttl.value() - time(nullptr);
+
+        return std::nullopt;
+    };
     
     DECLARE_C_NAME("DNS_Response");
     DECLARE_LOGGING(to_string);

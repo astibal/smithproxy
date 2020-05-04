@@ -49,6 +49,35 @@
 
 #include <service/core/smithproxy.hpp>
 
+// returns sleep time for the next cleanup
+unsigned int dns_cache_cleanup() {
+
+    auto& cache = DNS::get_dns_cache();
+    std::scoped_lock l_(cache.getlock());
+
+    int min_ttl = 0;
+
+    for(auto const& it: cache.cache()) {
+        auto ttl = it.second->current_ttl().value_or(-1);
+        if(ttl < 0) {
+            cache.erase(it.first);
+        } else {
+
+            // find time to sleep for a next call
+            if( ttl < min_ttl) {
+                min_ttl = ttl;
+            }
+        }
+    }
+
+    // cap max waiting time to ~5 minutes
+    if(min_ttl > 300) {
+        min_ttl = 300;
+    }
+
+    // wait at least 10 seconds to next laundry
+    return 10 + min_ttl;
+}
 
 std::thread* create_dns_updater() {
     auto* dns_thread = new std::thread([]() {
@@ -58,6 +87,9 @@ std::thread* create_dns_updater() {
     unsigned int sleep_time = 3;
     int requery_ttl = 60;
     std::set<std::string> record_blacklist;
+
+    unsigned int dns_cache_laundry_delta = 0;
+    unsigned int dns_cache_laundry_ttl = 0;
 
     for(unsigned int i = 1; ; i++) {
 
@@ -141,6 +173,16 @@ std::thread* create_dns_updater() {
                 }
             }
         }
+
+        dns_cache_laundry_delta += sleep_time;
+        if(dns_cache_laundry_delta > dns_cache_laundry_ttl) {
+            dns_cache_laundry_delta = 0;
+
+            _dia("dns cache laundry executed");
+            dns_cache_laundry_ttl = dns_cache_cleanup();
+            _dia("next dns cache laundry in %ds", dns_cache_laundry_ttl);
+        }
+
 
         // do some rescans of blacklisted entries
         if(i % (20*sleep_time) == 0) {
