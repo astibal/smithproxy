@@ -13,6 +13,6 @@ before_install:
   - echo $LC_ALL
   - if [ $TRAVIS_OS_NAME == linux ]; then echo "dependencies"; cd /tmp; git clone --recursive https://github.com/astibal/smithproxy; cd smithproxy && sudo ./tools/linux-deps.sh; fi
 script:
-  - if [ $TRAVIS_OS_NAME == linux ]; then echo "build"; cd /tmp/smithproxy; mkdir build && sudo ./tools/linux-build.sh; fi
+  - if [ $TRAVIS_OS_NAME == linux ]; then echo "build"; cd /tmp/smithproxy; sudo ./tools/linux-build.sh; fi
 after_success:
   - if [ $TRAVIS_OS_NAME == linux ]; then echo "after success"; fi
