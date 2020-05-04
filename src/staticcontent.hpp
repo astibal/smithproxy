@@ -53,7 +53,7 @@ class StaticContent {
         templates_ = new ptr_cache<std::string,Template> ("replacement message cache");
 
     };
-    ~StaticContent() { templates_->invalidate(); delete templates_; };
+    ~StaticContent() = default;
 
     logan_lite& log;
 public:
@@ -64,7 +64,7 @@ public:
 
     std::string render_server_response(std::string& message, unsigned int code=200);
     std::string render_msg_html_page(std::string& caption, std::string& meta, std::string& content,const char* window_width="450px");
-    Template* get(std::string const& s);
+    std::shared_ptr<Template> get(std::string const& s);
 
     static StaticContent* get() {
         static StaticContent s;

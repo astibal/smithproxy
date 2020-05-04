@@ -259,7 +259,7 @@ int socksServerCX::process_socks_request() {
 
                     std::scoped_lock<std::recursive_mutex> l_(DNS::get_dns_lock());
 
-                    DNS_Response* dns_resp = DNS::get_dns_cache().get("A:"+fqdn);
+                    auto dns_resp = DNS::get_dns_cache().get("A:"+fqdn);
                     if(dns_resp) {
                         if ( ! dns_resp->answers().empty() ) {
                             long ttl = (dns_resp->loaded_at + dns_resp->answers().at(0).ttl_) - time(nullptr);

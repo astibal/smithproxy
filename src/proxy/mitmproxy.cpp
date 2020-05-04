@@ -622,14 +622,14 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
             if( ( !key.empty() ) && key != "?") {
                 std::lock_guard<std::recursive_mutex> l_(whitelist_verify().getlock());
 
-                whitelist_verify_entry_t* wh = whitelist_verify().get(key);
-                _dia("whitelist_verify[%s]: %s", key.c_str(), wh ? "found" : "not found" );
+                auto wh_entry = whitelist_verify().get(key);
+                _dia("whitelist_verify[%s]: %s", key.c_str(), wh_entry ? "found" : "not found" );
 
                 // !!! wh might be already invalid here, unlocked !!!
-                if(wh != nullptr) {
+                if(wh_entry != nullptr) {
                     whitelist_found = true;
                     if (scom->opt_failed_certcheck_override_timeout_type == 1) {
-                        wh->expired_at() = ::time(nullptr) + scom->opt_failed_certcheck_override_timeout;
+                        wh_entry->expired_at() = ::time(nullptr) + scom->opt_failed_certcheck_override_timeout;
                         _dia("whitelist_verify[%s]: timeout reset to %d", key.c_str(), scom->opt_failed_certcheck_override_timeout );
                     }
                 }

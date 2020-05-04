@@ -80,13 +80,13 @@ public:
         return p;
     }
 
-    PyObject* module_get(std::string const& py_name) {
+    std::shared_ptr<PyObject> module_get(std::string const& py_name) {
         PythonLock l(this);
         return py_modules.get(py_name);
     };
 
     int module_add(std::string const& path) {
-        auto* _ = module_get(path);
+        auto _ = module_get(path);
         if(! _) {
 
             PythonLock l(this);

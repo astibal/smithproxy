@@ -160,7 +160,11 @@ void cmd_show_status(struct cli_def* cli) {
     cli_print(cli," ");
     time_t uptime = time(nullptr) - SmithProxy::instance().ts_sys_started;
     cli_print(cli,"Uptime: %s",uptime_string(uptime).c_str());
-    cli_print(cli,"Objects: %lu", static_cast<unsigned long>(socle::sobjectDB::db().cache().size()));
+
+    {
+        std::scoped_lock<std::recursive_mutex> l_(sobjectDB::getlock());
+        cli_print(cli, "Objects: %lu", static_cast<unsigned long>(socle::sobjectDB::db().size()));
+    }
     unsigned long l = MitmProxy::total_mtr_up().get();
     unsigned long r = MitmProxy::total_mtr_down().get();
     cli_print(cli,"Performance: upload %sbps, download %sbps in last 60 seconds",number_suffixed(l*8).c_str(),number_suffixed(r*8).c_str());

@@ -62,8 +62,8 @@ bool StaticContent::load_files(std::string& dir) {
     return ret;
 }
 
-Template* StaticContent::get(std::string const& name) {
-    Template* t = templates_->get(name);
+std::shared_ptr<Template> StaticContent::get(std::string const& name) {
+    auto t = templates_->get(name);
     if(!t) {
         _err("StaticContent::get: cannot load template '%s'", name.c_str());
     }
@@ -74,7 +74,7 @@ Template* StaticContent::get(std::string const& name) {
 
 std::string StaticContent::render_noargs(std::string const& name) {
 
-    Template* t = get(name);
+    auto t = get(name);
     if(t) {
         return t->render();
     } 
@@ -96,7 +96,7 @@ std::string StaticContent::render_server_response(std::string& message, unsigned
 }
 
 std::string StaticContent::render_msg_html_page(std::string& caption, std::string& meta, std::string& content, const char* window_width) {
-    Template* t = get("html_page");
+    auto t = get("html_page");
     t->set("title",caption);
     t->set("meta",meta);
     t->set("message",content);

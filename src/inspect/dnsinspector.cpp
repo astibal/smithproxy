@@ -72,9 +72,6 @@ void DNS_Inspector::update(AppHostCX* cx) {
     buffer *xbuf = cur_pos.second;
     buffer shallow_xbuf = xbuf->view(0, xbuf->size());
 
-    // check if response is already available
-    DNS_Response* cached_entry = nullptr;
-
     int mem_pos = 0;
     unsigned int red = 0;
 
@@ -141,7 +138,7 @@ void DNS_Inspector::update(AppHostCX* cx) {
             if(opt_cached_responses && ( ((DNS_Request*)ptr)->question_type_0() == A || ((DNS_Request*)ptr)->question_type_0() == AAAA ) ) {
                 std::scoped_lock<std::recursive_mutex> l_(DNS::get_dns_lock());
 
-                cached_entry = DNS::get_dns_cache().get(ptr->question_str_0());
+                auto cached_entry = DNS::get_dns_cache().get(ptr->question_str_0());
                 if(cached_entry != nullptr) {
                     _dia("DNS answer for %s is already in the cache",cached_entry->question_str_0().c_str());
 
@@ -309,11 +306,8 @@ bool DNS_Inspector::store(DNS_Response* ptr) {
 
 
                 if(LEV_(DEB)) {
-                    for( auto const& subdomain: subdom_cache->cache()) {
-                        std::string  s =  subdomain.first;
-                        expiring_int* i = subdomain.second;
-
-                        _deb("Sub domain cache list: entry %s, expiring in %d",s.c_str(), i->expired_at() - ::time(nullptr));
+                    for( auto const& [subdom_str, subdom_exp ]: subdom_cache->cache()) {
+                        _deb("Sub domain cache list: entry %s, expiring in %d", subdom_str.c_str(), subdom_exp->expired_at() - ::time(nullptr));
                     }
                 }
 
@@ -322,10 +316,10 @@ bool DNS_Inspector::store(DNS_Response* ptr) {
 
             else {
                 _dia("Top domain cache entry NOT found for domain %s",dom_pair.first.c_str());
-                subdom_cache = DNS::make_domain_entry(dom_pair.first);
-                subdom_cache -> set(dom_pair.second, new expiring_int(1, DNS::sub_ttl));
+                auto new_subdom_cache = DNS::make_domain_entry(dom_pair.first);
+                new_subdom_cache -> set(dom_pair.second, new expiring_int(1, DNS::sub_ttl));
 
-                DNS::get_domain_cache().set(dom_pair.first, subdom_cache);
+                DNS::get_domain_cache().set(dom_pair.first, new_subdom_cache);
             }
         }
     }

@@ -87,7 +87,7 @@ std::string FqdnAddress::to_string(int verbosity) const {
 bool FqdnAddress::match(CIDR* c) {
     bool ret = false;
     
-    DNS_Response* r = nullptr;
+    std::shared_ptr<DNS_Response> r = nullptr;
 
 
     {

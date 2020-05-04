@@ -80,9 +80,9 @@ std::thread* create_dns_updater() {
 
                     std::scoped_lock<std::recursive_mutex> ll_(DNS::get_dns_lock());
                     for (auto const& rec: recs) {
-                        DNS_Response *r = DNS::get_dns_cache().get(rec);
-                        if (r) {
-                            long ttl = (r->loaded_at + r->answers().at(0).ttl_) - ::time(nullptr);
+                        auto dns_response = DNS::get_dns_cache().get(rec);
+                        if (dns_response) {
+                            long ttl = (dns_response->loaded_at + dns_response->answers().at(0).ttl_) - ::time(nullptr);
 
                             _dia("fqdn %s ttl %d", rec.c_str(), ttl);
 

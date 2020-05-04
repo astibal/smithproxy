@@ -290,13 +290,11 @@ int cli_diag_ssl_wl_stats(struct cli_def *cli, const char *command, char *argv[]
     {
         int n_sz_cache = MitmProxy::whitelist_verify().cache().size();
         int n_max_cache = MitmProxy::whitelist_verify().max_size();
-        bool n_autorem = MitmProxy::whitelist_verify().auto_delete();
         std::string n_name = MitmProxy::whitelist_verify().name();
 
         ss << string_format("'%s' cache stats: \n",n_name.c_str());
         ss << string_format("    current size: %d\n",n_sz_cache);
         ss << string_format("    maximum size: %d\n",n_max_cache);
-        ss << string_format("      autodelete: %d\n ",n_autorem);
     }
 
 
@@ -351,14 +349,12 @@ int cli_diag_ssl_crl_stats(struct cli_def *cli, const char *command, char *argv[
 
         int n_sz_cache = SSLFactory::crl_cache.cache().size();
         int n_max_cache = SSLFactory::crl_cache.max_size();
-        bool n_autorem = SSLFactory::crl_cache.auto_delete();
         std::string n_name = SSLFactory::crl_cache.name();
 
 
         ss << string_format("'%s' cache stats: ", n_name.c_str());
         ss << string_format("    current size: %d \n", n_sz_cache);
         ss << string_format("    maximum size: %d \n", n_max_cache);
-        ss << string_format("      autodelete: %d \n", n_autorem);
     }
 
     cli_print(cli,"\n%s",ss.str().c_str());
@@ -423,7 +419,7 @@ int cli_diag_ssl_verify_list(struct cli_def *cli, const char *command, char *arg
         std::lock_guard<std::recursive_mutex> l_(SSLFactory::factory().verify_cache.getlock());
         for (auto const& x: SSLFactory::factory().verify_cache.cache()) {
             std::string cn = x.first;
-            SSLFactory::expiring_verify_result *cached_result = x.second;
+            auto cached_result = x.second;
             long ttl = 0;
             if (cached_result) {
                 ttl = cached_result->expired_at() - ::time(nullptr);
@@ -456,14 +452,12 @@ int cli_diag_ssl_verify_stats(struct cli_def *cli, const char *command, char *ar
 
         int n_sz_cache  = verify_cache.cache().size();
         int n_max_cache = verify_cache.max_size();
-        bool n_autorem  = verify_cache.auto_delete();
         std::string n_name = verify_cache.name();
 
 
         ss << string_format("'%s' cache stats: \n", n_name.c_str());
         ss << string_format("    current size: %d \n", n_sz_cache);
         ss << string_format("    maximum size: %d \n", n_max_cache);
-        ss << string_format("      autodelete: %d \n", n_autorem);
     }
 
     cli_print(cli,"\n%s",ss.str().c_str());
@@ -483,9 +477,7 @@ int cli_diag_ssl_ticket_list(struct cli_def *cli, const char *command, char *arg
 
         out << "SSL ticket/sessionid list:\n\n";
 
-        for (auto const& x: SSLFactory::session_cache.cache()) {
-            std::string key = x.first;
-            session_holder *session_keys = x.second;
+        for (auto const& [ key, session_keys ]: SSLFactory::session_cache.cache()) {
 
             bool showall = false;
 
@@ -560,13 +552,11 @@ int cli_diag_ssl_ticket_stats(struct cli_def *cli, const char *command, char *ar
 
         int n_sz_cache = SSLFactory::session_cache.cache().size();
         int n_max_cache = SSLFactory::session_cache.max_size();
-        bool n_autorem = SSLFactory::session_cache.auto_delete();
         std::string n_name = SSLFactory::session_cache.name();
 
         out << string_format("'%s' cache stats: \n", n_name.c_str());
         out << string_format("    current size: %d \n", n_sz_cache);
         out << string_format("    maximum size: %d \n", n_max_cache);
-        out << string_format("      autodelete: %d \n", n_autorem);
     }
 
     cli_print(cli, "%s", out.str().c_str());
@@ -624,13 +614,11 @@ int cli_diag_dns_cache_list(struct cli_def *cli, const char *command, char *argv
 
         out << "\nDNS cache populated from traffic: \n";
 
-        for (auto const& it: DNS::get_dns_cache().cache()) {
-            std::string s = it.first;
-            DNS_Response *r = it.second;
+        for (auto const& [ key, resp ]: DNS::get_dns_cache().cache()) {
 
-            if (r != nullptr && (! r->answers().empty()) ) {
-                long ttl = (r->loaded_at + r->answers().at(0).ttl_) - time(nullptr);
-                out << string_format("    %s  -> [ttl:%d]%s\n", s.c_str(), ttl, r->answer_str().c_str());
+            if (resp != nullptr && (! resp->answers().empty()) ) {
+                long ttl = (resp->loaded_at + resp->answers().at(0).ttl_) - time(nullptr);
+                out << string_format("    %s  -> [ttl:%d]%s\n", key.c_str(), ttl, resp->answer_str().c_str());
             }
         }
     }
@@ -651,12 +639,10 @@ int cli_diag_dns_cache_stats(struct cli_def *cli, const char *command, char *arg
         out << "\nDNS cache statistics: \n";
         int cache_size = DNS::get_dns_cache().cache().size();
         int max_size = DNS::get_dns_cache().max_size();
-        bool del = DNS::get_dns_cache().auto_delete();
 
 
         out << string_format("  Current size: %5d\n", cache_size);
         out << string_format("  Maximum size: %5d\n", max_size);
-        out << string_format("\n    Autodelete: %5d\n", del);
     }
 
     cli_print(cli, "%s", out.str().c_str());
@@ -1177,7 +1163,6 @@ int cli_diag_mem_objects_clear(struct cli_def *cli, const char *command, char *a
 
             int ret = -1;
             {
-                std::scoped_lock<std::recursive_mutex> l_(socle::sobjectDB::db().getlock());
                 ret = socle::sobjectDB::ask_destroy((void *) key);
             }
 
@@ -1248,9 +1233,9 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
 
 
     {
-        std::scoped_lock<std::recursive_mutex> l_(socle::sobjectDB::db().getlock());
+        std::scoped_lock<std::recursive_mutex> l_(socle::sobjectDB::getlock());
 
-        for (auto it: socle::sobjectDB::db().cache()) {
+        for (auto it: socle::sobjectDB::db()) {
 
             socle::sobject *ptr = it.first;
             std::string prefix;
@@ -1468,7 +1453,7 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
 
                 std::stringstream cur_obj_ss;
 
-                socle::sobject_info *si = it.second;
+                auto si = it.second;
 
                 if (!prefix.empty()) {
 
