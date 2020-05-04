@@ -253,9 +253,9 @@ bool CfgFactory::load_settings () {
         }
     }
 
-    load_if_exists(cfgapi.getRoot()["settings"], "certs_path",SSLFactory::default_cert_path());
-    load_if_exists(cfgapi.getRoot()["settings"], "certs_ca_key_password",SSLFactory::default_cert_password());
-    load_if_exists(cfgapi.getRoot()["settings"], "certs_ca_path",SSLFactory::default_client_ca_path());
+    load_if_exists(cfgapi.getRoot()["settings"], "certs_path",SSLFactory::certs_path());
+    load_if_exists(cfgapi.getRoot()["settings"], "certs_ca_key_password",SSLFactory::certs_password());
+    load_if_exists(cfgapi.getRoot()["settings"], "certs_ca_path",SSLFactory::ca_path());
 
     load_if_exists(cfgapi.getRoot()["settings"], "ssl_autodetect",MitmMasterProxy::ssl_autodetect);
     load_if_exists(cfgapi.getRoot()["settings"], "ssl_autodetect_harder",MitmMasterProxy::ssl_autodetect_harder);
@@ -2490,9 +2490,9 @@ int save_settings(Config& ex) {
         it_ns.add(Setting::TypeString) = ns;
     }
 
-    objects.add("certs_path", Setting::TypeString) = SSLFactory::default_cert_path();
-    objects.add("certs_ca_key_password", Setting::TypeString) = SSLFactory::default_cert_password();
-    objects.add("certs_ca_path", Setting::TypeString) = SSLFactory::default_client_ca_path();
+    objects.add("certs_path", Setting::TypeString) = SSLFactory::certs_path();
+    objects.add("certs_ca_key_password", Setting::TypeString) = SSLFactory::certs_password();
+    objects.add("certs_ca_path", Setting::TypeString) = SSLFactory::ca_path();
 
     objects.add("plaintext_port", Setting::TypeString) = CfgFactory::get().listen_tcp_port_base;
     objects.add("plaintext_workers", Setting::TypeInt) = CfgFactory::get().num_workers_tcp;
