@@ -237,11 +237,9 @@ bool MitmProxy::apply_id_policies(baseHostCX* cx) {
 
         
         if(auth_policy) {
-            for(auto sub: auth_policy->sub_policies) {
-                auto sub_prof = sub;
-                std::string sub_name = sub->name;
+            for(auto const& sub_prof: auth_policy->sub_policies) {
                 
-                _dia("apply_id_policies: checking identity policy for: %s", sub_name.c_str());
+                _dia("apply_id_policies: checking identity policy for: %s", sub_prof->name.c_str());
                 
                 for(auto const& my_id: group_vec) {
                     _dia("apply_id_policies: identity in policy: %s, match-test real user group '%s'",sub_prof->name.c_str(), my_id.c_str());
@@ -1099,7 +1097,7 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
     std::string block_pre("<h2 class=\"fg-red\">Page has been blocked</h2><p>Access has been blocked by smithproxy.</p>"
                           "<p>To check your user privileges go to status page<p><p> <form action=\"");
 
-    std::string block_post("\"><input type=\"submit\" value=\"User Info\" class=\"btn-red\"></form>");
+    std::string block_post(R"("><input type="submit" value="User Info" class="btn-red"></form>)");
     
     if (cx->replacement_flag() == MitmHostCX::REPLACE_REDIRECT) {
 
@@ -1155,7 +1153,7 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
             
             std::string token_text = cx->application_data->original_request();
           
-            for(auto i: CfgFactory::get().policy_prof_auth(cx->matched_policy())->sub_policies) {
+            for(auto const& i: CfgFactory::get().policy_prof_auth(cx->matched_policy())->sub_policies) {
                 _dia("MitmProxy::handle_replacement_auth: token: requesting identity %s", i->name.c_str());
                 token_text  += " |" + i->name;
             }
@@ -1253,7 +1251,7 @@ std::string MitmProxy::verify_flag_string_extended(int code) {
         case SSLCom::VRF_OTHER_SHA1_SIGNATURE:
             return "Issuer certificate is signed using SHA1 (considered insecure).";
         default:
-            return string_format("extended code 0x04%x", code);;
+            return string_format("extended code 0x04%x", code);
     }
 }
 
@@ -1376,8 +1374,6 @@ std::string MitmProxy::replacement_ssl_page(SSLCom* scom, app_HttpRequest* app_r
 
 void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
     
-    std::string repl;
-    
     auto* scom = dynamic_cast<SSLCom*>(cx->peercom());
     if(!scom) {
         std::string error("<html><head></head><body><p>Internal error</p><p>com object is not ssl-type</p></body></html>");
@@ -1436,7 +1432,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
                 
                 
                 std::string override_applied = string_format(
-                        "<html><head><meta http-equiv=\"Refresh\" content=\"0; url=%s\"></head><body><!-- applied, redirecting back to %s --></body></html>",
+                        R"(<html><head><meta http-equiv="Refresh" content="0; url=%s"></head><body><!-- applied, redirecting back to %s --></body></html>)",
                                                             orig_url.c_str(),orig_url.c_str());
 
                 whitelist_verify_entry v;
@@ -1478,7 +1474,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
         
             _dia("ssl_override: ph3 - warning replacement for %s", whitelist_make_key(cx).c_str());
             
-            repl = replacement_ssl_page(scom, app_request, block_override);
+            std::string repl = replacement_ssl_page(scom, app_request, block_override);
 
             cx->to_write((unsigned char*)repl.c_str(),repl.size());
             set_replacement_msg_ssl(scom);
@@ -1490,7 +1486,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             
             _dia("ssl_override: ph2 - redir to warning replacement for  %s", whitelist_make_key(cx).c_str());
             
-            std::string repl = "<html><head><meta http-equiv=\"Refresh\" content=\"0; url=/SM/IT/HP/RO/XY/warning?q=1\"></head><body></body></html>";
+            std::string repl = R"(<html><head><meta http-equiv="Refresh" content="0; url=/SM/IT/HP/RO/XY/warning?q=1"></head><body></body></html>)";
             repl = html()->render_server_response(repl);
             cx->to_write(repl);
             cx->close_after_write(true);
@@ -1968,7 +1964,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                             //std::string groups = id_ptr->last_logon_info.groups();
                             
                             if(CfgFactory::get().policy_prof_auth(policy_num) != nullptr) {
-                                for ( auto i: CfgFactory::get().policy_prof_auth(policy_num)->sub_policies) {
+                                for ( auto const& i: CfgFactory::get().policy_prof_auth(policy_num)->sub_policies) {
                                     for(auto const& x: group_vec) {
                                         _deb("Connection identities: ip identity '%s' against policy '%s'", x.c_str(), i->name.c_str());
                                         if(x == i->name) {
