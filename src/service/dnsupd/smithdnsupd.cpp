@@ -52,22 +52,38 @@
 // returns sleep time for the next cleanup
 unsigned int dns_cache_cleanup() {
 
+    logan_lite log = logan_lite("com.dns.cleaner");
+
     auto& cache = DNS::get_dns_cache();
-    std::scoped_lock l_(cache.getlock());
+    std::scoped_lock l_(DNS::get_dns_lock());
 
-    int min_ttl = 0;
+    int min_ttl = 300;
+    int processed = 0;
+    int removed = 0;
 
-    for(auto const& it: cache.cache()) {
-        auto ttl = it.second->current_ttl().value_or(-1);
+    for(auto it = cache.cache().begin(); it != cache.cache().end(); ) {
+        processed++;
+
+        _deb("dns_cache_cleanup: %s", it->first.c_str());
+
+        auto ttl = it->second->current_ttl().value_or(-1);
         if(ttl < 0) {
-            cache.erase(it.first);
+            _deb("dns_cache_cleanup:     ttl %d -- removing", ttl);
+            it = cache.erase(it);
+            removed++;
         } else {
+            _deb("dns_cache_cleanup:     ttl %d -- keeping", ttl);
 
             // find time to sleep for a next call
             if( ttl < min_ttl) {
                 min_ttl = ttl;
+                _deb("dns_cache_cleanup:     ttl %d -- setting up new minttl", ttl);
             }
+
+            ++it;
         }
+
+
     }
 
     // cap max waiting time to ~5 minutes
@@ -75,8 +91,13 @@ unsigned int dns_cache_cleanup() {
         min_ttl = 300;
     }
 
+    auto ret = 10 + min_ttl;
+
+
+    _dia("dns_cache_cleanup: processed %d entries, removed %d, next scan in %ds", processed, removed, ret);
+
     // wait at least 10 seconds to next laundry
-    return 10 + min_ttl;
+    return ret;
 }
 
 std::thread* create_dns_updater() {
