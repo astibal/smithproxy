@@ -115,7 +115,7 @@ namespace inet::ocsp {
             return result_;
         }
 
-        static const char* yield_str(int y) { return inet::ocsp::OcspQuery::state_str(y); }
+        static const char* yield_str(int y) { return inet::ocsp::OcspQuery::yield_str(y); }
 
         virtual void tap () {
             log_tracer_("tap");
