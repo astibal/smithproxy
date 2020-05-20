@@ -961,7 +961,15 @@ std::string get_connection_details_str(MitmProxy* px, baseHostCX* cx, char side)
 void MitmProxy::on_error(baseHostCX* cx, char side, const char* side_label) {
     if(cx == nullptr) {
         std::stringstream msg;
-        msg << "Connection closed (null cx) on " << (state().error_on_read ? "read" : "write") << ": "
+
+        msg << "Connection closed (null cx) on ";
+
+        if(state().error_on_left_read) msg << "Lr";
+        if(state().error_on_left_write) msg << "Lw";
+        if(state().error_on_right_read) msg << "Rr";
+        if(state().error_on_right_write) msg << "Rw";
+
+        msg << ": "
             << get_connection_details_str(this, cx, side);
         _err("%s", msg.str().c_str());
 
@@ -987,14 +995,28 @@ void MitmProxy::on_error(baseHostCX* cx, char side, const char* side_label) {
                 if (state().dead()) {
                     // status dead is new, since we check dead status at the begining
                     std::stringstream msg;
-                    msg << "Connection " << side_label << " half-closed on " << (state().error_on_read ? "read" : "write") << ": "
+                    msg << "Connection " << side_label << " half-closed on ";
+
+                    if(state().error_on_left_read) msg << "Lr";
+                    if(state().error_on_left_write) msg << "Lw";
+                    if(state().error_on_right_read) msg << "Rr";
+                    if(state().error_on_right_write) msg << "Rw";
+
+                    msg << ": "
                         << get_connection_details_str(this, cx, side);
                     _inf("%s", msg.str().c_str());
 
                 } else {
                     // on_half_close did not marked it dead, yet
                     std::stringstream msg;
-                    msg << "Connection " << side_label << " half-closing on " << (state().error_on_read ? "read" : "write") << ": "
+
+                    msg << "Connection " << side_label << " half-closing on ";
+                    if(state().error_on_left_read) msg << "Lr";
+                    if(state().error_on_left_write) msg << "Lw";
+                    if(state().error_on_right_read) msg << "Rr";
+                    if(state().error_on_right_write) msg << "Rw";
+
+                    msg << ": "
                         << get_connection_details_str(this, cx, side);
                     _dia("%s", msg.str().c_str());
 
@@ -1017,7 +1039,14 @@ void MitmProxy::on_error(baseHostCX* cx, char side, const char* side_label) {
             }
         } else {
             std::stringstream msg;
-            msg << "Connection from " << side_label << " half-closing (peer dead) on " << (state().error_on_read ? "read" : "write") << ": "
+            msg << "Connection from " << side_label << " half-closing (peer dead) on ";
+
+            if(state().error_on_left_read) msg << "Lr";
+            if(state().error_on_left_write) msg << "Lw";
+            if(state().error_on_right_read) msg << "Rr";
+            if(state().error_on_right_write) msg << "Rw";
+
+            msg << ": "
                 << get_connection_details_str(this, cx, side);
             _dia("%s", msg.str().c_str());
 
@@ -1033,8 +1062,7 @@ void MitmProxy::on_error(baseHostCX* cx, char side, const char* side_label) {
             std::stringstream msg;
             msg << "Connection from " << cx->full_name(side) << " closed: " << get_connection_details_str(this, cx, side);
             if(! replacement_msg.empty() ) {
-                msg << ", dropped: " << replacement_msg;
-                _inf("%s", msg.str().c_str()); // log to generic logger
+                msg << ", replaced: " << replacement_msg;
             }
             _inf("%s", msg.str().c_str());
             if(*log.level() > DEB) _debug_zero_connections(cx);
