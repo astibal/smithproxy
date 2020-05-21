@@ -244,7 +244,14 @@ if(UNIX)
                     GROUP_READ GROUP_EXECUTE 
                     WORLD_READ WORLD_EXECUTE 
     )
-    
+
+    install(FILES tools/sx_certinfo DESTINATION bin
+            PERMISSIONS
+            OWNER_READ OWNER_WRITE OWNER_EXECUTE
+            GROUP_READ GROUP_EXECUTE
+            WORLD_READ WORLD_EXECUTE
+            )
+
     file(GLOB def_certs "etc/certs/default/*.pem")
     install(FILES ${def_certs} DESTINATION /etc/smithproxy/certs/default)
 
@@ -336,7 +343,7 @@ if(UNIX)
     SET(CPACK_PACKAGE_VERSION_PATCH "${PATCH_VERSION}")
     
     SET(CPACK_PACKAGE_DESCRIPTION "transparent proxy with ssl inspection features")
-    SET(CPACK_PACKAGE_DESCRIPTION_SUMMARY "tranparent proxy based on TPROXY with SSL inspection, authentication and other features")
+    SET(CPACK_PACKAGE_DESCRIPTION_SUMMARY "transparent proxy based on TPROXY with SSL inspection, authentication and other features")
     SET(CPACK_DEBIAN_PACKAGE_MAINTAINER "Ales Stibal <astib@mag0.net>")
     SET(CPACK_DEBIAN_PACKAGE_DEPENDS "libstdc++6 (>= 4.9.0), libssl1.0.0 (>=1.0.0), libconfig++9v5, libcli1.9 (>=1.9.6), iptables ,python-ldap, python-pylibconfig2, python-pyparsing, python-posix-ipc, python-soappy, python-m2crypto")
     INCLUDE(CPack)

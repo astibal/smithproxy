@@ -1,0 +1,16 @@
+#!/usr/bin/env sh
+
+CERT_PATH="/etc/smithproxy/certs/default/ca-cert.pem"
+
+echo "[+] Smithproxy certificate info: "
+echo
+echo "  Path: ${CERT_PATH}"
+echo
+openssl x509 -in ${CERT_PATH} -noout -text | grep 'Issuer' -B 1 -A 6 | sed -e 's/^      //'
+
+
+echo
+echo "[+] CA certificate (load to systems as trusted CA certificate): "
+echo
+cat ${CERT_PATH}
+echo ""
