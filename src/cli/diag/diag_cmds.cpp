@@ -887,7 +887,8 @@ int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *a
             cli_print(cli, " 5kB pool size: %lu/%lu", memPool::pool().mem_5k_av(), memPool::pool().mem_5k_sz());
             cli_print(cli, "10kB pool size: %lu/%lu", memPool::pool().mem_10k_av(), memPool::pool().mem_10k_sz());
             cli_print(cli, "20kB pool size: %lu/%lu", memPool::pool().mem_20k_av(), memPool::pool().mem_20k_sz());
-            cli_print(cli, " big pool size: %lu", memPool::pool().mem_big_av());
+            cli_print(cli, "35kB pool size: %lu/%lu", memPool::pool().mem_35k_av(), memPool::pool().mem_35k_sz());
+            cli_print(cli, "50kB pool size: %lu/%lu", memPool::pool().mem_50k_av(), memPool::pool().mem_50k_sz());
 
             // (10 for 32 byte pool, and 3 for 64, 128 and 256 pool)
             unsigned long long total_pools = (10 + 3) * memPool::pool().mem_256_sz() + memPool::pool().mem_1k_sz() +
