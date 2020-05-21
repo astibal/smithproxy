@@ -57,8 +57,13 @@ SETTINGS = {
     "srv": {},
     "clt": {},
     "prt": {},
-    "path": "/tmp/"
+    "path": "/tmp/",
+    "ttl": 60
 }
+
+class Options:
+    indent = 0
+    debug = False
 
 
 def pref_choice(*args):
@@ -83,11 +88,11 @@ def init_directories(etc_dir):
             try:
                 os.mkdir(X)
             except FileNotFoundError:
-                print("fatal: path {} doesn't exit".format(X))
+                print(Options.indent*" " + "fatal: path {} doesn't exit".format(X))
                 return
 
             except PermissionError:
-                print("fatal: Permission denied: {}".format(X))
+                print(Options.indent*" " + "fatal: Permission denied: {}".format(X))
                 return
 
     SETTINGS["path"] = os.path.join(SETTINGS["path"], "certs/", "default/")
@@ -128,7 +133,7 @@ def init_settings(cn, c, ou=None, o=None, l=None, s=None, def_subj_ca=None, def_
             json.dump(r, f, indent=4)
 
     except Exception as e:
-        print("write_default_settings: exception caught: " + str(e))
+        print(Options.indent*" " + "write_default_settings: exception caught: " + str(e))
 
 
 def load_settings():
@@ -136,12 +141,12 @@ def load_settings():
     try:
         with open(os.path.join(SETTINGS["path"], "sslca.json"), "r") as f:
             r = json.load(f)
-            # print("load_settings: loaded settings: {}", str(r))
+            if(Options.debug): print(Options.indent*" " + "load_settings: loaded settings: {}", str(r))
 
             SETTINGS = r
 
     except Exception as e:
-        print("load_default_settings: exception caught: " + str(e))
+        print(Options.indent*" " + "load_default_settings: exception caught: " + str(e))
 
 
 def generate_rsa_key(size):
@@ -173,7 +178,7 @@ def save_key(key, keyfile, passphrase=None):
             ))
 
     except Exception as e:
-        print("save_key: exception caught: " + str(e))
+        print(Options.indent*" " + "save_key: exception caught: " + str(e))
 
 
 NameOIDMap = {
@@ -258,8 +263,19 @@ def generate_csr(key, profile, sans_dns=None, sans_ip=None, isca=False, custom_s
     return csr
 
 
-def sign_csr(key, csr, caprofile, valid=30, isca=False, cacert=None, aia_issuers=None, ocsp_responders=None):
+def sign_csr(key, csr, caprofile, arg_valid=0, isca=False, cacert=None, aia_issuers=None, ocsp_responders=None):
     global SETTINGS
+
+    valid = 30
+    if arg_valid > 0:
+        valid = arg_valid
+    else:
+        try:
+            valid = SETTINGS["ttl"]
+        except KeyError:
+            pass
+
+
 
     one_day = datetime.timedelta(1, 0, 0)
 
@@ -285,7 +301,7 @@ def sign_csr(key, csr, caprofile, valid=30, isca=False, cacert=None, aia_issuers
     try:
         if cacert:
             ski = cacert.extensions.get_extension_for_class(x509.SubjectKeyIdentifier)
-            builder = builder.add_extension(x509.AuthorityKeyIdentifier.from_issuer_subject_key_identifier(ski),
+            builder = builder.add_extension(x509.AuthorityKeyIdentifier.from_issuer_subject_key_identifier(ski.value),
                                             critical=False)
             has_ski = True
     except AttributeError:
@@ -315,21 +331,22 @@ def sign_csr(key, csr, caprofile, valid=30, isca=False, cacert=None, aia_issuers
         alist = x509.AuthorityInformationAccess(all_aias)
         builder = builder.add_extension(alist, critical=False)
 
-    print("sign CSR: == extensions ==")
+    if(Options.debug): print(Options.indent*" " + "sign CSR: == extensions ==")
+
     for e in csr.extensions:
         if isinstance(e.value, x509.BasicConstraints):
-            print("sign CSR: %s" % (e.oid,))
+            if(Options.debug): print(Options.indent*" " + "sign CSR: %s" % (e.oid,))
 
             if e.value.ca:
-                print("           CA=TRUE requested")
+                if(Options.debug): print((Options.indent+2)*" " + "           CA=TRUE requested")
 
                 if isca and not SETTINGS["ca"]["settings"]["grant_ca"]:
-                    print("           not allowed but overridden")
+                    if(Options.debug): print((Options.indent+2)*" " + "           CA not allowed but overridden")
                 elif not SETTINGS["ca"]["settings"]["grant_ca"]:
-                    print("           not allowed by rule")
+                    if(Options.debug): print((Options.indent+2)*" " + "           CA not allowed by rule")
                     continue
                 else:
-                    print("           allowed by rule")
+                    if(Options.debug): print((Options.indent+2)*" " + "           CA allowed by rule")
 
         builder = builder.add_extension(e.value, e.critical)
 
@@ -344,7 +361,7 @@ def save_certificate(cert, certfile):
                 encoding=serialization.Encoding.PEM))
 
     except Exception as e:
-        print("save_certificate: exception caught: " + str(e))
+        print(Options.indent*" " + "save_certificate: exception caught: " + str(e))
 
 
 def load_certificate(fnm):
