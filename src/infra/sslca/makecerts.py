@@ -170,7 +170,7 @@ def generate_server_cert(ca_key, ca_cert):
 
 def ttl_filter(val):
     if ask_bot_filter_int(val):
-        return 0 < int(val) <= 365
+        return 0 < int(val) <= 3650
 
 
 def check_certificates(etc_dir, assume_yes=True, dry_run=False, enforced=False):
@@ -225,6 +225,8 @@ def check_certificates(etc_dir, assume_yes=True, dry_run=False, enforced=False):
             print("   - w: ttl not set in config")
 
         ttl = ask_bot([ttl], "   ==> Lifetime in days", other_choices=True, other_value_filter=ttl_filter)
+
+        sxyca.SETTINGS['ttl'] = int(ttl)
         print("   - i: using ttl %s" % ttl)
 
     print("== checking default server cert ==")
