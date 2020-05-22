@@ -564,35 +564,6 @@ int cli_diag_ssl_ticket_stats(struct cli_def *cli, const char *command, char *ar
 }
 
 
-#ifndef USE_OPENSSL11
-int cli_diag_ssl_memcheck_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
-
-    std::string out;
-    BIO* b_out = BIO_new_string(&out);
-
-    CRYPTO_mem_leaks(b_out);
-    cli_print(cli,"OpenSSL memory leaks:\n%s",out.c_str());
-    BIO_free(b_out);
-
-    return CLI_OK;
-}
-
-
-int cli_diag_ssl_memcheck_enable(struct cli_def *cli, const char *command, char *argv[], int argc) {
-
-    CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ENABLE);
-
-    return CLI_OK;
-}
-
-int cli_diag_ssl_memcheck_disable(struct cli_def *cli, const char *command, char *argv[], int argc) {
-
-    CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_DISABLE);
-
-    return CLI_OK;
-}
-#endif
-
 int cli_diag_ssl_ca_reload(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
     debug_cli_params(cli, command, argv, argc);
