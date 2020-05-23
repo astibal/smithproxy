@@ -3,14 +3,31 @@ name: smithproxy
 version: '0.9.2'
 summary: Fast and featured transparent TCP/UDP/TLS proxy
 description: |
-Smithproxy is fast transparent TCP/UDP/TLS (SSL) proxy. It's highly configurable
-and featured.
+ Smithproxy is fast transparent TCP/UDP/TLS (SSL) proxy. It's highly configurable
+ and featured.
 
 grade: devel # must be 'stable' to release into candidate/stable channels
 confinement: devmode # use 'strict' once you have the right plugs and slots
 
-base: core20
+base: core18
 parts:
   smithproxy-core:
     # See 'snapcraft plugins'
-    plugin: nil
+    plugin: cmake
+    source-type: git
+    source: https://github.com/astibal/smithproxy
+    source-branch: master
+    build-packages:
+      - g++-8
+      - make
+      - cmake
+      - libcli-dev
+      - libconfig++-dev
+      - libunwind-dev
+      - python3-dev
+      - libssl-dev
+
+    stage-packages:
+      - libcli1.9
+      - libconfig++9v5
+      - libunwind8
