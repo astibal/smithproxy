@@ -1,0 +1,16 @@
+
+name: smithproxy
+version: '0.9.2'
+summary: Fast and featured transparent TCP/UDP/TLS proxy
+description: |
+Smithproxy is fast transparent TCP/UDP/TLS (SSL) proxy. It's highly configurable
+and featured.
+
+grade: devel # must be 'stable' to release into candidate/stable channels
+confinement: devmode # use 'strict' once you have the right plugs and slots
+
+base: core20
+parts:
+  smithproxy-core:
+    # See 'snapcraft plugins'
+    plugin: nil
