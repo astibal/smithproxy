@@ -4,6 +4,10 @@
 
 import os
 import sys
+
+sys.path.append('/usr/share/smithproxy/infra/sslca')
+sys.path.append('/usr/share/smithproxy/infra/bend')
+
 import sxyca
 import makecerts as utils
 
@@ -27,7 +31,6 @@ def portal_autogen():
 if __name__ == "__main__":
 
 
-    sys.path.append('/usr/share/smithproxy/infra/sslca')
-    sys.path.append('/usr/share/smithproxy/infra/bend')
+
 
     portal_autogen()

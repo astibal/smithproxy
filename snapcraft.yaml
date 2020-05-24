@@ -31,3 +31,27 @@ parts:
       - libcli1.9
       - libconfig++9v5
       - libunwind8
+
+apps:
+  smithproxy:
+    daemon: simple
+    command: bin/smithproxy
+    plugs:
+      - network
+      - network-bind
+
+  cli:
+    command: usr/bin/sx_cli
+
+  regencert:
+    command: usr/bin/sx_regencerts
+
+  passwd:
+    command: usr/bin/sx_passwd
+
+  autoportalcert:
+    command: usr/bin/sx_autoportalcert
+
+  certinfo-ca:
+    command: usr/bin/sx_certinfo_ca
+

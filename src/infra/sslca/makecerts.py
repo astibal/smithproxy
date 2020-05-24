@@ -6,6 +6,13 @@ import datetime
 import socket
 import ipaddress
 
+import sys
+sys.path.append('/usr/share/smithproxy/infra/sslca')
+sys.path.append('/usr/share/smithproxy/infra/bend')
+
+from bendutil import ask_bot
+from bendutil import ask_bot_filter_int
+
 import sxyca
 
 
@@ -338,12 +345,6 @@ def check_certificates(etc_dir, assume_yes=True, dry_run=False, enforced=False):
 
 
 if __name__ == "__main__":
-    import sys
-    sys.path.append('/usr/share/smithproxy/infra/sslca')
-    sys.path.append('/usr/share/smithproxy/infra/bend')
-
-    from bendutil import ask_bot
-    from bendutil import ask_bot_filter_int
 
     sxyca.Options.indent = 6
 

@@ -242,10 +242,11 @@ if(UNIX)
             PERMISSIONS 
                     OWNER_READ OWNER_WRITE OWNER_EXECUTE 
                     GROUP_READ GROUP_EXECUTE 
-                    WORLD_READ WORLD_EXECUTE 
+                    WORLD_READ WORLD_EXECUTE
+                    RENAME sx_cli
     )
 
-    install(FILES tools/sx_certinfo DESTINATION bin
+    install(FILES tools/sx_certinfo_ca DESTINATION bin
             PERMISSIONS
             OWNER_READ OWNER_WRITE OWNER_EXECUTE
             GROUP_READ GROUP_EXECUTE
@@ -298,10 +299,29 @@ if(UNIX)
             WORLD_READ WORLD_EXECUTE
             )
 
-    InstallSymlink(/usr/bin/smithproxy_cli /usr/bin/sx_cli)
-    InstallSymlink(/usr/share/smithproxy/infra/sslca/makecerts.py /usr/bin/sx_regencerts)
-    InstallSymlink(/usr/share/smithproxy/infra/sslca/makeportalcert.py /usr/bin/sx_autoportalcert)
-    InstallSymlink(/usr/share/smithproxy/infra/authtools/sx_passwd.py /usr/bin/sx_passwd)
+    install(FILES /usr/share/smithproxy/infra/sslca/makecerts.py DESTINATION bin
+            PERMISSIONS
+            OWNER_READ OWNER_WRITE OWNER_EXECUTE
+            GROUP_READ GROUP_EXECUTE
+            WORLD_READ WORLD_EXECUTE
+            RENAME sx_regencerts
+            )
+
+    install(FILES /usr/share/smithproxy/infra/sslca/makeportalcert.py DESTINATION bin
+            PERMISSIONS
+            OWNER_READ OWNER_WRITE OWNER_EXECUTE
+            GROUP_READ GROUP_EXECUTE
+            WORLD_READ WORLD_EXECUTE
+            RENAME sx_autoportalcert
+            )
+
+    install(FILES /usr/share/smithproxy/infra/authtools/sx_passwd.py  DESTINATION bin
+            PERMISSIONS
+            OWNER_READ OWNER_WRITE OWNER_EXECUTE
+            GROUP_READ GROUP_EXECUTE
+            WORLD_READ WORLD_EXECUTE
+            RENAME sx_passwd
+            )
 
     # portal installation
     file(GLOB sx_www_cgi "src/infra/portal/cgi-bin/auth*.py")
