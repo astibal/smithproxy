@@ -299,7 +299,7 @@ if(UNIX)
             WORLD_READ WORLD_EXECUTE
             )
 
-    install(FILES /usr/share/smithproxy/infra/sslca/makecerts.py DESTINATION bin
+    install(FILES src/infra/sslca/makecerts.py DESTINATION bin
             PERMISSIONS
             OWNER_READ OWNER_WRITE OWNER_EXECUTE
             GROUP_READ GROUP_EXECUTE
@@ -307,7 +307,7 @@ if(UNIX)
             RENAME sx_regencerts
             )
 
-    install(FILES /usr/share/smithproxy/infra/sslca/makeportalcert.py DESTINATION bin
+    install(FILES src/infra/sslca/makeportalcert.py DESTINATION bin
             PERMISSIONS
             OWNER_READ OWNER_WRITE OWNER_EXECUTE
             GROUP_READ GROUP_EXECUTE
@@ -315,7 +315,7 @@ if(UNIX)
             RENAME sx_autoportalcert
             )
 
-    install(FILES /usr/share/smithproxy/infra/authtools/sx_passwd.py  DESTINATION bin
+    install(FILES src/infra/authtools/sx_passwd.py  DESTINATION bin
             PERMISSIONS
             OWNER_READ OWNER_WRITE OWNER_EXECUTE
             GROUP_READ GROUP_EXECUTE
