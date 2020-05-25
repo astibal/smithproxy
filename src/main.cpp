@@ -173,7 +173,7 @@ void prepare_tenanting(bool is_custom_file) {
 
         std::string tenant_cfg = string_format(config_file_tenant.c_str(), CfgFactory::get().tenant_name.c_str());
 
-        struct stat s;
+        struct stat s{};
         if (stat(tenant_cfg.c_str(),&s) == 0) {
             _war("Tenant config: %s",tenant_cfg.c_str());
             CfgFactory::get().config_file = tenant_cfg;
@@ -181,12 +181,12 @@ void prepare_tenanting(bool is_custom_file) {
             _war("Tenant config %s not found. Using default.",tenant_cfg.c_str());
         }
 
-        this_daemon.set_tenant("smithproxy", std::to_string(CfgFactory::get().tenant_index));
+        this_daemon.set_tenant("smithproxy", CfgFactory::get().tenant_name);
     }
     else {
-        _war("Startinng non-tenant configuration");
+        _war("Starting non-tenant configuration");
         CfgFactory::get().tenant_index = 0;
-        this_daemon.set_tenant("smithproxy", "0");
+        this_daemon.set_tenant("smithproxy", "default");
     }
 
     SmithProxy::instance().tenant_index(CfgFactory::get().tenant_index);
@@ -226,7 +226,7 @@ int main(int argc, char *argv[]) {
     CfgFactory::get().config_file = "/etc/smithproxy/smithproxy.cfg";
     bool is_custom_config_file = false;
 
-    while(1) {
+    while(true) {
     /* getopt_long stores the option index here. */
         int option_index = 0;
     
@@ -357,7 +357,7 @@ int main(int argc, char *argv[]) {
     }
     
     if(SmithProxy::instance().cfg_daemonize) {
-        if (LogOutput::get()->targets().size() <= 0) {
+        if (LogOutput::get()->targets().empty()) {
             _fat("Cannot daemonize without logging to file.");
             std::cerr << "Cannot daemonize without logging to file.";
             exit(-5);
@@ -380,7 +380,7 @@ int main(int argc, char *argv[]) {
 
     // create utility threads
     SmithProxy::instance().create_log_writer_thread();
-    SmithProxy::instance().init_syslog();
+    SmithProxy::init_syslog();
 
     SmithProxy::instance().create_dns_thread();
     SmithProxy::instance().create_identity_thread();

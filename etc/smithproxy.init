@@ -36,8 +36,8 @@ function do_cmd {
         TENID="0"
         
         echo "${CMD}ing smithproxy"
-        /etc/smithproxy/smithproxy.startup.sh ${CMD}
-        python3 /usr/share/smithproxy/infra/smithdog.py ${CMD} "0" "0"   # <cmd> <tenant_name> <tenant_index>
+        /usr/bin/sx_network ${CMD}
+        /usr/bin/sx_ctl ${CMD} "default" "0"   # <cmd> <tenant_name> <tenant_index>
 
     else
         if [[ "$TENID"  != "" ]]; then
@@ -46,8 +46,8 @@ function do_cmd {
             echo "${CMD}ing smithproxy - tenant $TENID, index ${TENIDX}"
             
             # startup.sh will calculate tenant index on its own
-            /etc/smithproxy/smithproxy.startup.sh ${CMD} $TENID
-            python3 /usr/share/smithproxy/infra/smithdog.py ${CMD} ${TENID} ${TENIDX}
+            /usr/bin/sx_network ${CMD} $TENID
+            /usr/bin/sx_ctl ${CMD} ${TENID} ${TENIDX}
         
         else
 
@@ -96,7 +96,7 @@ case "$1" in
     ;;
   status)
     echo "Smithproxy status $tenant_id"
-    python3 /usr/share/smithproxy/infra/smithdog.py status
+    /usr/bin/sx_ctl status
     ;;
   reload|reapply)
     if [ -z $tenant_id ]; then
@@ -115,7 +115,7 @@ case "$1" in
     
   fin)
     # leave TPROXY targets. Only for troubleshooting.
-    python3 /usr/share/smithproxy/infra/smithdog.py stop ${tenant_id}
+    /usr/bin/sx_ctl stop ${tenant_id}
     ;;
 
   val)

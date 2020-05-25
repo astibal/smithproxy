@@ -226,11 +226,12 @@ if(UNIX)
     install_if_not_exists(etc/users.key /etc/smithproxy)
     install_if_not_exists(etc/smithproxy.startup.cfg /etc/smithproxy)
     install_if_not_exists(etc/smithd.cfg /etc/smithproxy)
-    install(FILES etc/smithproxy.startup.sh DESTINATION /etc/smithproxy 
+    install(FILES etc/smithproxy.startup.sh DESTINATION bin
                 PERMISSIONS 
                     OWNER_READ OWNER_WRITE OWNER_EXECUTE 
                     GROUP_READ GROUP_EXECUTE 
-                    WORLD_READ WORLD_EXECUTE 
+                    WORLD_READ WORLD_EXECUTE
+                RENAME sx_network
     )
     install(FILES etc/smithproxy.init DESTINATION /etc/init.d RENAME smithproxy 
             PERMISSIONS 
@@ -272,11 +273,12 @@ if(UNIX)
     install(FILES ${infra_py} DESTINATION share/smithproxy/infra)
     
     file(GLOB infra_exe_py "src/infra/smithdog.py")
-    install(FILES ${infra_exe_py} DESTINATION share/smithproxy/infra 
+    install(FILES ${infra_exe_py} DESTINATION bin
             PERMISSIONS 
                     OWNER_READ OWNER_WRITE OWNER_EXECUTE 
                     GROUP_READ GROUP_EXECUTE 
-                    WORLD_READ WORLD_EXECUTE 
+                    WORLD_READ WORLD_EXECUTE
+            RENAME sx_ctl
     )
 
     install(DIRECTORY src/infra/sslca DESTINATION share/smithproxy/infra)

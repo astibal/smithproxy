@@ -56,13 +56,11 @@ import subprocess
 import sys
 import time
 
-from daemon import Daemon, create_logger
 
 """
    WARNING: this is not intended to be edited by end users !! 
 """
 
-TENANCY = False
 TENANT_NAME = "default"
 TENANT_IDX = "0"
 
@@ -91,6 +89,8 @@ LOG_OK_INTERVAL = 60
 
 sys.path.append(WWW_PATH)
 sys.path.append(INFRA_PATH)
+
+from daemon import Daemon, create_logger
 
 from portal import webfr
 from bend import bend
@@ -348,11 +348,11 @@ if __name__ == "__main__":
     daemon.keeppid = True
 
     smithproxy_options = []
-    if TENANCY:
-        smithproxy_options.append("--tenant-name")
-        smithproxy_options.append(TENANT_NAME)
-        smithproxy_options.append("--tenant-index")
-        smithproxy_options.append(TENANT_IDX)
+
+    smithproxy_options.append("--tenant-name")
+    smithproxy_options.append(TENANT_NAME)
+    smithproxy_options.append("--tenant-index")
+    smithproxy_options.append(TENANT_IDX)
 
     daemon.exec_info.append(
         ('smithproxy core', SMITHPROXY_PATH, SMITHPROXY_PIDFILE % (TENANT_NAME,), smithproxy_options))

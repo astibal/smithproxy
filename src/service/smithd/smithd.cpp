@@ -489,7 +489,7 @@ int main(int argc, char *argv[]) {
     }
     else {
         _war("Starting tenant: 0 (default)");
-        this_daemon.set_tenant("smithd", "0");
+        this_daemon.set_tenant("smithd", "default");
     }
     
     
