@@ -253,7 +253,7 @@ int cli_diag_ssl_wl_list(struct cli_def *cli, const char *command, char *argv[],
     std::string out;
 
     std::lock_guard<std::recursive_mutex> l_(MitmProxy::whitelist_verify().getlock());
-    for(auto we: MitmProxy::whitelist_verify().cache()) {
+    for(auto const& we: MitmProxy::whitelist_verify().cache()) {
         out += "\n\t" + we.first;
 
         long ttl = we.second->expired_at() - ::time(nullptr);

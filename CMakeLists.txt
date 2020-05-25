@@ -238,7 +238,7 @@ if(UNIX)
                     GROUP_READ GROUP_EXECUTE 
                     WORLD_READ WORLD_EXECUTE 
     )
-    install(FILES etc/smithproxy_cli DESTINATION bin 
+    install(FILES etc/smithproxy_cli.sh DESTINATION bin
             PERMISSIONS 
                     OWNER_READ OWNER_WRITE OWNER_EXECUTE 
                     GROUP_READ GROUP_EXECUTE 
