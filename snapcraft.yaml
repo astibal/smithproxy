@@ -10,9 +10,19 @@ grade: devel # must be 'stable' to release into candidate/stable channels
 confinement: devmode # use 'strict' once you have the right plugs and slots
 
 base: core18
+
+layout:
+  /etc:
+    bind: $SNAP_DATA/etc
+
+  /usr/share/smithproxy:
+    bind: $SNAP_DATA/usr/share/smithproxy
+
+  /var/local/smithproxy:
+    type: tmpfs
+
 parts:
   smithproxy-core:
-    # See 'snapcraft plugins'
     plugin: cmake
     source-type: git
     source: https://github.com/astibal/smithproxy
@@ -31,6 +41,8 @@ parts:
       - libcli1.9
       - libconfig++9v5
       - libunwind8
+      - inetutils-telnet
+
 
 apps:
   smithproxy:
@@ -39,19 +51,42 @@ apps:
     plugs:
       - network
       - network-bind
+      - network-control
+
+  smithd:
+    daemon: simple
+    command: bin/smithd
+    plugs:
+      - network
+      - network-bind
 
   cli:
-    command: usr/bin/sx_cli
+    command: bin/sx_cli
 
   regencert:
-    command: usr/bin/sx_regencerts
+    command: bin/sx_regencerts
 
   passwd:
-    command: usr/bin/sx_passwd
+    command: bin/sx_passwd
 
   autoportalcert:
-    command: usr/bin/sx_autoportalcert
+    command: bin/sx_autoportalcert
 
   certinfo-ca:
-    command: usr/bin/sx_certinfo_ca
+    command: bin/sx_certinfo_ca
 
+  sx-ctl:
+    command: bin/sx_ctl
+    daemon: simple
+    plugs:
+      - network
+      - network-bind
+      - network-control
+
+
+  sx-network:
+    command: bin/sx_network
+    plugs:
+      - network
+      - network-bind
+      - network-control
