@@ -127,6 +127,10 @@ def generate_portal_cert(ca_key, ca_cert):
     except ImportError as e:
         print("     - w: cannot load pyroute2 - no IP addresses could be added to server cert")
 
+    except PermissionError as e:
+        print("     - w: cannot use pyroute2 - permission problem (contained environment?)")
+
+
     prt_key = sxyca.generate_rsa_key(2048)
     prt_csr = sxyca.generate_csr(prt_key, "prt", sans_dns=sans, sans_ip=ips, custom_subj={"cn": portal_cn})
     prt_cert = sxyca.sign_csr(ca_key, prt_csr, "prt", cacert=ca_cert)

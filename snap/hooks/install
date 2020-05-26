@@ -1,0 +1,5 @@
+#!/bin/sh
+
+# copy read-only default configs into writable area
+
+cp -r $SNAP/etc/smithproxy $SNAP_DATA/etc/

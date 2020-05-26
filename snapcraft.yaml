@@ -28,7 +28,6 @@ apps:
   smithproxy:
     command: bin/smithproxy
     plugs:
-      - home
       - network
       - network-bind
       - network-control
@@ -36,39 +35,31 @@ apps:
   smithd:
     command: bin/smithd
     plugs:
-      - home
       - network
       - network-bind
 
   cli:
-    plugs:
-      - home
     command: bin/sx_cli
 
   regencert:
-    plugs:
-      - home
     command: bin/sx_regencerts
+    plugs:
+      - network   # to guess hostname and IP
 
   passwd:
-    plugs:
-      - home
     command: bin/sx_passwd
 
   autoportalcert:
-    plugs:
-      - home
     command: bin/sx_autoportalcert
+    plugs:
+      - network  # to guess hostname and IP
 
   certinfo-ca:
-    plugs:
-      - home
     command: bin/sx_certinfo_ca
 
   ctl:
     command: bin/sx_ctl
     plugs:
-      - home
       - network
       - network-bind
       - network-control
@@ -76,7 +67,6 @@ apps:
   network:
     command: bin/sx_network
     plugs:
-      - home
       - network
       - network-bind
       - network-control
