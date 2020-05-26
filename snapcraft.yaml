@@ -7,7 +7,7 @@ description: |
  and featured.
 
 grade: devel # must be 'stable' to release into candidate/stable channels
-confinement: devmode # use 'strict' once you have the right plugs and slots
+confinement: strict # use 'strict' once you have the right plugs and slots
 
 base: core18
 
@@ -16,13 +16,74 @@ layout:
     bind: $SNAP_DATA/etc
 
   /usr/share/smithproxy:
-    bind: $SNAP_DATA/usr/share/smithproxy
+    bind: $SNAP/usr/share/smithproxy
+
+  /var/log:
+    bind: $SNAP_DATA/log
 
   /var/local/smithproxy:
-    type: tmpfs
+    bind: $SNAP_DATA/captures
+
+apps:
+  smithproxy:
+    command: bin/smithproxy
+    plugs:
+      - home
+      - network
+      - network-bind
+      - network-control
+
+  smithd:
+    command: bin/smithd
+    plugs:
+      - home
+      - network
+      - network-bind
+
+  cli:
+    plugs:
+      - home
+    command: bin/sx_cli
+
+  regencert:
+    plugs:
+      - home
+    command: bin/sx_regencerts
+
+  passwd:
+    plugs:
+      - home
+    command: bin/sx_passwd
+
+  autoportalcert:
+    plugs:
+      - home
+    command: bin/sx_autoportalcert
+
+  certinfo-ca:
+    plugs:
+      - home
+    command: bin/sx_certinfo_ca
+
+  ctl:
+    command: bin/sx_ctl
+    plugs:
+      - home
+      - network
+      - network-bind
+      - network-control
+
+  network:
+    command: bin/sx_network
+    plugs:
+      - home
+      - network
+      - network-bind
+      - network-control
+
 
 parts:
-  smithproxy-core:
+  smithproxy:
     plugin: cmake
     source-type: git
     source: https://github.com/astibal/smithproxy
@@ -36,57 +97,36 @@ parts:
       - libunwind-dev
       - python3-dev
       - libssl-dev
+      - python3-distutils
+      - telnet
 
     stage-packages:
       - libcli1.9
       - libconfig++9v5
       - libunwind8
-      - inetutils-telnet
+      - telnet
+      - python
+      - python3-ldap
+      - python3-pyparsing
+      - python3-posix-ipc
+      - python3-distutils
+      - swig
 
+  pydeps:
+    after: [ smithproxy ]
+    plugin: python
+    python-version: python3
 
-apps:
-  smithproxy:
-    daemon: simple
-    command: bin/smithproxy
-    plugs:
-      - network
-      - network-bind
-      - network-control
+    build-packages:
+      - libssl-dev
+      - python3-dev
+      - python3-distutils
+      - swig
 
-  smithd:
-    daemon: simple
-    command: bin/smithd
-    plugs:
-      - network
-      - network-bind
-
-  cli:
-    command: bin/sx_cli
-
-  regencert:
-    command: bin/sx_regencerts
-
-  passwd:
-    command: bin/sx_passwd
-
-  autoportalcert:
-    command: bin/sx_autoportalcert
-
-  certinfo-ca:
-    command: bin/sx_certinfo_ca
-
-  sx-ctl:
-    command: bin/sx_ctl
-    daemon: simple
-    plugs:
-      - network
-      - network-bind
-      - network-control
-
-
-  sx-network:
-    command: bin/sx_network
-    plugs:
-      - network
-      - network-bind
-      - network-control
+    python-packages:
+      - pyroute2
+      - pylibconfig2
+      - m2crypto
+      - spyne>=2.13.2a0
+      - zeep
+      - cryptography
