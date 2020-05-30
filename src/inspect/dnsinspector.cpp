@@ -89,7 +89,13 @@ void DNS_Inspector::update(AppHostCX* cx) {
         case 'r':
             stage = 0;
             for(unsigned int it = 0; red < shallow_xbuf.size() && it < 10; it++) {
+
+                if(ptr) {
+                    _err("DNS_Inspector::update[%s]: deleting request ptr from previous loop:%d", cx->c_name(), it-1);
+                    delete ptr;
+                }
                 ptr = new DNS_Request();
+
                 buffer cur_buf = shallow_xbuf.view(red, shallow_xbuf.size() - red);
                 int cur_red = ptr->load(&cur_buf);
 
@@ -190,6 +196,10 @@ void DNS_Inspector::update(AppHostCX* cx) {
         case 'w':
             stage = 1;
             for(unsigned int it = 0; red < shallow_xbuf.size() && it < 10; it++) {
+                if(ptr) {
+                    _err("DNS_Inspector::update[%s]: deleting response ptr from previous loop:%d", cx->c_name(), it-1);
+                    delete ptr;
+                }
                 ptr = new DNS_Response();
 
                 buffer cur_buf = shallow_xbuf.view(red, shallow_xbuf.size() - red);
