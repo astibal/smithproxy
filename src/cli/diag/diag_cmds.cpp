@@ -100,7 +100,7 @@ int cli_diag_ssl_cache_stats(struct cli_def *cli, const char *command, char *arg
 
     debug_cli_params(cli, command, argv, argc);
 
-    SSLFactory* store = SSLCom::certstore();
+    SSLFactory* store = SSLCom::factory();
 
 
     int n_cache = 0;
@@ -121,7 +121,7 @@ int cli_diag_ssl_cache_list(struct cli_def *cli, const char *command, char *argv
 
     debug_cli_params(cli, command, argv, argc);
 
-    SSLFactory* store = SSLCom::certstore();
+    SSLFactory* store = SSLCom::factory();
     bool print_refs = false;
 
     if(argc > 0) {
@@ -165,7 +165,7 @@ int cli_diag_ssl_cache_print(struct cli_def *cli, const char *command, char *arg
 
     debug_cli_params(cli, command, argv, argc);
 
-    SSLFactory *store = SSLCom::certstore();
+    SSLFactory *store = SSLCom::factory();
     bool print_refs = false;
 
     if (argc > 0) {
@@ -211,7 +211,7 @@ int cli_diag_ssl_cache_clear(struct cli_def *cli, const char *command, char *arg
 
     debug_cli_params(cli, command, argv, argc);
 
-    SSLFactory* store = SSLCom::certstore();
+    SSLFactory* store = SSLCom::factory();
     std::stringstream ss;
 
 

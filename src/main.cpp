@@ -132,12 +132,9 @@ void print_stats() {
 }
 
 void do_cleanup() {
-    CfgFactory::get().cfgapi_cleanup();
-    SSLCom::certstore()->destroy();
 
-    if(SmithProxy::instance().cfg_daemonize) {
-        DaemonFactory::instance().unlink_pidfile();
-    }
+    // this proven to be better idea than cleanup after exit() call
+    CfgFactory::get().cleanup();
 
     CRYPTO_cleanup_all_ex_data();
     ERR_free_strings();
