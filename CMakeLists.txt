@@ -24,10 +24,15 @@ if(UNIX)
         SET(CMAKE_BUILD_TYPE Debug)
     ENDIF(NOT CMAKE_BUILD_TYPE)
 
-    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wno-psabi -std=c++17 -g -O3 ")
-    SET(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -O3")
-    SET(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -flto -s -DBUILD_RELEASE")
-    SET(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -flto")
+    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wno-psabi -std=c++17")
+    SET(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g3 -fno-stack-protector")
+
+    IF (CMAKE_BUILD_TYPE STREQUAL "Release")
+        message(">>> release: enabling optimizations (smithpoxy)")
+        SET(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -flto -s -DBUILD_RELEASE")
+        SET(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -flto")
+    ENDIF()
+
     SET(CMAKE_AR  "gcc-ar")
     SET(CMAKE_CXX_ARCHIVE_CREATE "<CMAKE_AR> qcs <TARGET> <LINK_FLAGS> <OBJECTS>")
     SET(CMAKE_CXX_ARCHIVE_FINISH   true)
@@ -226,6 +231,18 @@ if(UNIX)
     install_if_not_exists(etc/users.key /etc/smithproxy)
     install_if_not_exists(etc/smithproxy.startup.cfg /etc/smithproxy)
     install_if_not_exists(etc/smithd.cfg /etc/smithproxy)
+
+    install(DIRECTORY DESTINATION /etc/smithproxy/certs/)
+    install(DIRECTORY DESTINATION /etc/smithproxy/certs/default)
+    install_if_not_exists(etc/certs/default/ca-cert.pem /etc/smithproxy/certs/default)
+    install_if_not_exists(etc/certs/default/ca-key.pem /etc/smithproxy/certs/default)
+    install_if_not_exists(etc/certs/default/srv-cert.pem /etc/smithproxy/certs/default)
+    install_if_not_exists(etc/certs/default/srv-key.pem /etc/smithproxy/certs/default)
+    install_if_not_exists(etc/certs/default/cl-cert.pem /etc/smithproxy/certs/default)
+    install_if_not_exists(etc/certs/default/cl-key.pem /etc/smithproxy/certs/default)
+    install_if_not_exists(etc/certs/default/portal-gen.info /etc/smithproxy/certs/default)
+
+
     install(FILES etc/smithproxy.startup.sh DESTINATION bin
                 PERMISSIONS 
                     OWNER_READ OWNER_WRITE OWNER_EXECUTE 
@@ -252,13 +269,9 @@ if(UNIX)
             OWNER_READ OWNER_WRITE OWNER_EXECUTE
             GROUP_READ GROUP_EXECUTE
             WORLD_READ WORLD_EXECUTE
-            )
+    )
 
-    file(GLOB def_certs "etc/certs/default/*.pem")
-    install(FILES ${def_certs} DESTINATION /etc/smithproxy/certs/default)
 
-    file(GLOB def_certs_flags "etc/certs/default/*.info")
-    install(FILES ${def_certs_flags} DESTINATION /etc/smithproxy/certs/default)
     
     # create CA dir
     install(DIRECTORY DESTINATION /etc/smithproxy/certs/ca)
