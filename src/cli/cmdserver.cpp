@@ -1551,8 +1551,6 @@ void cli_register_static(struct cli_def* cli) {
 }
 
 
-
-
 void client_thread(int client_socket) {
 
     auto log = logan::create("service");
@@ -1568,6 +1566,9 @@ void client_thread(int client_socket) {
     cli_allow_enable(cli, CliState::get().cli_enable_password.c_str());
 
     cli_register_static(cli);
+
+    cli_regular(cli, [](cli_def* c) -> int { if(SmithProxy::instance().terminate_flag) return CLI_ERROR; return CLI_OK; } );
+    cli_regular_interval(cli, 1);
 
 
     // generate dynamically content of config
@@ -1737,12 +1738,33 @@ void cli_loop(short unsigned int port) {
     listen(s, 50);
 
     int client_socket = 0;
-    sockaddr_storage addr {0};
-    socklen_t addr_len {0};
-    while ((client_socket = accept(s, (struct sockaddr*)&addr, &addr_len)))
-    {
-        new std::thread(client_thread, client_socket);
+
+
+    epoll epoller;
+    if ( epoller.init() <= 0) {
+        _err("cli main thread: Can't initialize epoll");
+        return;
     }
+
+    epoller.add(s, EPOLLIN);
+
+
+    while(true) {
+        int nfds = epoller.wait(1*1000);
+
+        if(nfds > 0) {
+            sockaddr_storage addr {0};
+            socklen_t addr_len {0};
+
+            client_socket = accept(s, (struct sockaddr*)&addr, &addr_len);
+            new std::thread(client_thread, client_socket);
+        }
+
+        if(SmithProxy::instance().terminate_flag) {
+            break;
+        }
+    }
+
 }
 
 
