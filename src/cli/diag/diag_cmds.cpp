@@ -939,10 +939,10 @@ int cli_diag_mem_trace_mark (struct cli_def *cli, const char *command, char **ar
 
 #ifdef MEMPOOL_DEBUG
 
-    std::scoped_lock<std::mutex> l(mempool_ptr_map_lock);
+    std::scoped_lock<std::mutex> l(mpdata::lock());
 
-    for ( auto it = mempool_ptr_map.begin() ; it != mempool_ptr_map.end() ; ++it) {
-        it->second.mark = 1;
+    for (auto& it: mpdata::map()) {
+        it.second.mark = 1;
     }
 
 
@@ -977,11 +977,21 @@ int cli_diag_mem_trace_list (struct cli_def *cli, const char *command, char **ar
 
     if(mem_chunk::trace_enabled)
     {
-        std::unordered_map<std::string, long long int> occ;
-        {
-            std::scoped_lock<std::mutex> l(mempool_ptr_map_lock);
+        struct bt_stat {
+            unsigned long long counter;
+            unsigned long long size;
 
-            for (auto mem: mempool_ptr_map) {
+            bool operator<(bt_stat const& b) const {
+                return counter < b.counter;
+            }
+        };
+
+
+        std::unordered_map<std::string, bt_stat> occ;
+        {
+            std::scoped_lock<std::mutex> l(mpdata::lock());
+
+            for (auto mem: mpdata::map()) {
                 auto mch = mem.second;
                 if ( (!mch.in_pool) && mch.mark == filter) {
                     std::string k;
@@ -994,20 +1004,21 @@ int cli_diag_mem_trace_list (struct cli_def *cli, const char *command, char **ar
                     auto i = occ.find(k);
                     if (i != occ.end()) {
 
-                        occ[k]++;
+                        occ[k].counter++;
+                        occ[k].size += mch.capacity;
                     } else {
-                        occ[k] = 1;
+                        occ[k] =  { .counter = 1, .size = mch.capacity } ;
                     }
                 }
             }
 
-            cli_print(cli, "Allocation traces: processed %ld used mempool entries", mempool_ptr_map.size());
+            cli_print(cli, "Allocation traces: processed %ld used mempool entries", mpdata::map().size());
         }
         cli_print(cli, "Allocation traces: parsed %ld unique entries.", occ.size());
 
-        std::map<long long int, std::string> ordered;
-        for(auto i: occ) {
-            ordered[i.second] = i.first;
+        std::map<bt_stat, std::string> ordered;
+        for(auto [ bt, bt_stat ]: occ) {
+            ordered[bt_stat] = bt;
         }
 
         cli_print(cli, "\nAllocation traces (top-%d):", n);
@@ -1017,9 +1028,9 @@ int cli_diag_mem_trace_list (struct cli_def *cli, const char *command, char **ar
             mem_chunk_t m;
 
             memcpy(&m.trace, i->second.data(), i->second.size());
-            m.trace_size = (int) i->second.size()/sizeof(void*);
+            m.trace_size = static_cast<int>(i->second.size()/sizeof(void*));
 
-            cli_print(cli, "\nNumber of traces: %lld\n%s", i->first, m.str_trace().c_str());
+            cli_print(cli, "\nNumber of traces: %lld [%lldB]\n%s", i->first.counter, i->first.size , m.str_trace().c_str());
             ++i;
             --n;
         }
