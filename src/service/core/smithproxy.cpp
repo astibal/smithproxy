@@ -45,17 +45,20 @@
 
 SmithProxy::~SmithProxy () {
 
-    delete plain_thread;
-    delete ssl_thread;
-    delete dtls_thread;
-    delete udp_thread;
-    delete socks_thread;
+//    delete plain_thread;
+//    delete ssl_thread;
+//    delete dtls_thread;
+//    delete udp_thread;
+//    delete socks_thread;
+//
+//
+//    delete dns_thread;
+//    delete id_thread;
+//    delete log_thread;
 
-
-    delete dns_thread;
-    delete id_thread;
-
-    delete log_thread;
+    if(cfg_daemonize) {
+        DaemonFactory::instance().unlink_pidfile();
+    }
 }
 
 void SmithProxy::reload() {
@@ -193,6 +196,9 @@ void SmithProxy::create_listeners() {
 
 void SmithProxy::run() {
 
+
+    CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
+
     std::string friendly_thread_name_tcp = string_format("sxy_tcp_%d",CfgFactory::get().tenant_index);
     std::string friendly_thread_name_udp = string_format("sxy_udp_%d",CfgFactory::get().tenant_index);
     std::string friendly_thread_name_tls = string_format("sxy_tls_%d",CfgFactory::get().tenant_index);
@@ -208,6 +214,8 @@ void SmithProxy::run() {
     if(plain_proxy) {
         _inf("Starting TCP listener");
         plain_thread = new std::thread([]() {
+            CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
+
             auto this_daemon = DaemonFactory::instance();
             auto& log = this_daemon.log;
 
@@ -224,6 +232,8 @@ void SmithProxy::run() {
     if(ssl_proxy) {
         _inf("Starting TLS listener");
         ssl_thread = new std::thread([] () {
+            CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
+
             auto this_daemon = DaemonFactory::instance();
             auto& log = this_daemon.log;
 
@@ -241,6 +251,8 @@ void SmithProxy::run() {
     if(dtls_proxy) {
         _inf("Starting DTLS listener");
         dtls_thread = new std::thread([] () {
+            CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
+
             auto this_daemon = DaemonFactory::instance();
             auto& log = this_daemon.log;
 
@@ -261,6 +273,8 @@ void SmithProxy::run() {
 
         _inf("Starting UDP listener");
         udp_thread = new std::thread([] () {
+            CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
+
             auto this_daemon = DaemonFactory::instance();
             auto& log = this_daemon.log;
 
@@ -278,6 +292,8 @@ void SmithProxy::run() {
     if(socks_proxy) {
         _inf("Starting SOCKS5 listener");
         socks_thread = new std::thread([] () {
+            CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
+
             auto this_daemon = DaemonFactory::instance();
             auto& log = this_daemon.log;
 
@@ -295,6 +311,8 @@ void SmithProxy::run() {
     if(redir_plain_proxy) {
         _inf("Starting REDIR-TCP listener");
         redir_plain_thread = new std::thread([] () {
+            CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
+
             auto this_daemon = DaemonFactory::instance();
             auto& log = this_daemon.log;
 
@@ -312,6 +330,8 @@ void SmithProxy::run() {
     if(redir_ssl_proxy) {
         _inf("Starting REDIR-SSL listener");
         redir_ssl_thread = new std::thread([] () {
+            CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
+
             auto this_daemon = DaemonFactory::instance();
             auto& log = this_daemon.log;
 
@@ -329,6 +349,8 @@ void SmithProxy::run() {
     if(redir_udp_proxy) {
         _inf("Starting REDIR-UDP listener");
         redir_udp_thread = new std::thread([] () {
+            CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
+
             auto this_daemon = DaemonFactory::instance();
             auto& log = this_daemon.log;
 
@@ -344,6 +366,8 @@ void SmithProxy::run() {
     }
 
     cli_thread = new std::thread([] () {
+        CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
+
         auto this_daemon = DaemonFactory::instance();
         auto& log = this_daemon.log;
 
@@ -359,26 +383,89 @@ void SmithProxy::run() {
 
     pthread_setname_np(pthread_self(),friendly_thread_name_own.c_str());
 
+    // adapt daemon factory signal handlers for this thread, too
+    DaemonFactory::set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
+
+    //signal(SIGINT, [](int c) { SmithProxy::instance().terminate_flag = true; } );
+
+    while(true) {
+        if(instance().terminate_flag) {
+            if(!cfg_daemonize)
+                std::cerr << "shutdown requested" << std::endl;
+            break;
+        }
+
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+
     if(plain_thread) {
+        if(!cfg_daemonize)
+            std::cerr << "terminating tcp thread" << std::endl;
         plain_thread->join();
     }
     if(ssl_thread) {
+        if(!cfg_daemonize)
+            std::cerr << "terminating tls thread" << std::endl;
         ssl_thread->join();
     }
     if(dtls_thread) {
+        if(!cfg_daemonize)
+            std::cerr << "terminating dtls thread" << std::endl;
         dtls_thread->join();
     }
     if(udp_thread) {
+        if(!cfg_daemonize)
+            std::cerr << "terminating udp thread" << std::endl;
         udp_thread->join();
     }
     if(socks_thread) {
+        if(!cfg_daemonize)
+            std::cerr << "terminating socks thread" << std::endl;
         socks_thread->join();
     }
+    if(redir_plain_thread) {
+
+        if(!cfg_daemonize)
+            std::cerr << "terminating redir tcp thread" << std::endl;
+        redir_plain_thread->join();
+    }
+    if(redir_ssl_thread) {
+        if(!cfg_daemonize)
+            std::cerr << "terminating redir tls thread" << std::endl;
+        redir_ssl_thread->join();
+    }
+    if(redir_udp_thread) {
+        if(!cfg_daemonize)
+            std::cerr << "terminating redir dns thread" << std::endl;
+        redir_udp_thread->join();
+    }
+    if(cli_thread) {
+        if(!cfg_daemonize)
+            std::cerr << "terminating cli server thread" << std::endl;
+        cli_thread->join();
+    }
+    if(dns_thread) {
+        if(!cfg_daemonize)
+            std::cerr << "terminating dns updater thread" << std::endl;
+        dns_thread->join();
+    }
+    if(id_thread) {
+        if(!cfg_daemonize)
+            std::cerr << "terminating identity updater thread" << std::endl;
+        id_thread->join();
+    }
+
     auto ql = std::dynamic_pointer_cast<QueueLogger>(LogOutput::get());
     if(ql) {
+        if(!cfg_daemonize)
+            std::cerr << "terminating logwriter thread" << std::endl;
         ql->sig_terminate = true;
         log_thread->join();
     }
+
+
+    if(!cfg_daemonize)
+        std::cerr << "all master threads terminated" << std::endl;
 }
 
 void SmithProxy::stop() {
@@ -402,6 +489,17 @@ void SmithProxy::stop() {
     if(socks_proxy != nullptr) {
         socks_proxy->state().dead(true);
     }
+    if(redir_plain_proxy) {
+        redir_plain_proxy->state().dead(true);
+    }
+    if(redir_ssl_proxy) {
+        redir_ssl_proxy->state().dead(true);
+    }
+    if(redir_udp_proxy) {
+        redir_udp_proxy->state().dead(true);
+    }
+
+
 }
 
 
@@ -565,7 +663,7 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
     try {
 
         if(reload) {
-            CfgFactory::get().cfgapi_cleanup();
+            CfgFactory::get().cleanup();
         }
 
         CfgFactory::get().load_db_address();
