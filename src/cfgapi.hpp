@@ -90,6 +90,7 @@ class CfgFactory : public CfgFactoryBase {
 public:
     CfgFactory(CfgFactory const &) = delete;
     void operator=(const CfgFactory&) = delete;
+    virtual ~CfgFactory() { cleanup(); }
 
     static CfgFactory& get() {
         static CfgFactory fac;
@@ -182,7 +183,7 @@ public:
 
 public:
     bool  cfgapi_init(const char* fnm);
-    void  cfgapi_cleanup();
+    void  cleanup();
 
     std::shared_ptr<AddressObject> lookup_address (const char *name);
     range             lookup_port (const char *name);

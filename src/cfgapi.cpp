@@ -296,7 +296,7 @@ bool CfgFactory::load_settings () {
     load_if_exists(cfgapi.getRoot()["settings"], "messages_dir", dir_msg_templates);
 
     if(cfgapi.getRoot()["settings"].exists("cli")) {
-        load_if_exists(cfgapi.getRoot()["settings"]["cli"], "port", CliState::get().cli_port_base);
+        load_if_exists<int>(cfgapi.getRoot()["settings"]["cli"], "port", CliState::get().cli_port_base);
         CliState::get().cli_port = CliState::get().cli_port_base;
 
         load_if_exists(cfgapi.getRoot()["settings"]["cli"], "enable_password", CliState::get().cli_enable_password);
@@ -1929,7 +1929,7 @@ bool CfgFactory::policy_apply_tls (const std::shared_ptr<ProfileTls> &pt, baseCo
 }
 
 
-void CfgFactory::cfgapi_cleanup()
+void CfgFactory::cleanup()
 {
     cleanup_db_policy();
     cleanup_db_address();
