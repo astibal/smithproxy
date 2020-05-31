@@ -52,8 +52,8 @@
 #include <shm/shmauth.hpp>
 
 #include <sslcertval.hpp>
-#include <async/asyncsocket.hpp>
-#include <async/asyncocsp.hpp>
+#include <proxy/ocspinvoker.hpp>
+
 #include <atomic>
 
 struct whitelist_verify_entry {
@@ -155,11 +155,8 @@ public:
     virtual bool handle_authentication(MitmHostCX* cx);
     virtual void handle_replacement_auth(MitmHostCX* cx);
 
-    // TLS related methods
-
-    // asynchronous OCSP
-    std::unique_ptr<inet::ocsp::AsyncOCSP> ocsp;
-    void ssl_ocsp_callback(int response);
+    std::atomic_bool ocsp_caller_tried {false};
+    std::unique_ptr<AsyncOcspInvoker> ocsp_caller;
 
     //
     bool ssl_handled = false;

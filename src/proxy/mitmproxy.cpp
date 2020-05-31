@@ -559,13 +559,7 @@ bool MitmProxy::handle_authentication(MitmHostCX* mh)
     return redirected;
 }
 
-void MitmProxy::ssl_ocsp_callback(int response) {
 
-    auto& log = inet::ocsp::OcspFactory::log();
-    _inf("async callback response %s", inet::ocsp::AsyncOCSP::yield_str(response));
-    untap();
-    handle_sockets_once(com());
-}
 
 
 bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
@@ -579,32 +573,11 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
     auto* scom = dynamic_cast<SSLCom*>(mh->peercom());
     if(scom && scom->opt_failed_certcheck_replacement) {
 
-//        EXAMPLE od adhoc async ocsp call (this should not be here)
+//        if(! ocsp_caller_tried) {
+//            ocsp_caller_tried = true;
+//            ocsp_caller = AsyncOcspInvoker::invoke(*this);
 //
-//        if(scom->verify_bitcheck(SSLCom::VRF_DEFERRED) || true) {
-//
-//
-//            if(scom->target_cert() && scom->target_issuer()) {
-//
-//
-//                using std::placeholders::_1;
-//                ocsp = std::make_unique<inet::ocsp::AsyncOCSP>(
-//                        scom->target_cert(),
-//                        scom->target_issuer(),
-//                        mh,
-//                        std::bind(&MitmProxy::ssl_ocsp_callback, this, _1));
-//                ocsp->update();
-//                ocsp->tap();
-//                tap();
-//
-//                _not("deferred OCSP check ID 0x%lx", ocsp->oid());
-//            } else {
-//                auto& log = inet::ocsp::OcspFactory::log();
-//                _err("peer certificates still null");
-//            }
-//
-//            ssl_handled = true;
-//            return false;
+//            _err("left: ocsp check invoked");
 //        }
 
         if(!(
@@ -801,8 +774,24 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
         
         if(tlog()) tlog()->right_write(cx->to_read());
     }
-    
-    
+
+
+//    // enters only if left bytes are not received a therefore not SSL additional tasks
+//    // performed
+//    if(! ssl_handled) {
+//        if(auto* scom = dynamic_cast<SSLCom*>(cx->com()) ; scom) {
+//            if (!ocsp_caller_tried) {
+//                ocsp_caller_tried = true;
+//                ocsp_caller = AsyncOcspInvoker::invoke(*this);
+//                _err("right: ocsp check invoked");
+//            }
+//        } else {
+//
+//            // if com is not SSL, no further ssl attempts are neded (spare dynamic casts)
+//            ssl_handled = true;
+//        }
+//    }
+
     for(auto j: left_sockets) {
         
         if(content_rule() != nullptr) {
