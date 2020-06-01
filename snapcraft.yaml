@@ -95,6 +95,8 @@ parts:
       - python3-dev
       - libssl-dev
       - libffi-dev
+      - libxml2-dev
+      - xmlsec-dev
       - python3-distutils
       - telnet
 
