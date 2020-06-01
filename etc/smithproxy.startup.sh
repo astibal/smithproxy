@@ -83,7 +83,7 @@ REDIRECT_TLS_PORT='51443'
 REDIRECT_TCP_PORT='51080'
 REDIRECT_DNS_PORT='51053'
 REDIRECT_EXEMPT_LAN=0
-REDIRECT_EXEMPT_USERS="root"   # could contain multiple users separated by spaces
+REDIRECT_EXEMPT_USERS=""   # could contain multiple users separated by spaces
 
 
 tenant_table="/etc/smithproxy/smithproxy.tenants.cfg"
@@ -392,27 +392,39 @@ function setup_redirect {
         iptables -t nat -A OUTPUT -p tcp -d 127.0.0.0/8 -j ACCEPT
         iptables -t nat -A OUTPUT -p tcp -s 127.0.0.0/8 -j ACCEPT
 
-        for U in ${REDIRECT_EXEMPT_USERS}; do
-            iptables -t nat -A OUTPUT -m owner --uid-owner `id -u ${U}` -j ACCEPT
-        done
+        if [ "${REDIRECT_EXEMPT_USERS}" != "" ]; then
+            for U in ${REDIRECT_EXEMPT_USERS}; do
+                iptables -t nat -A OUTPUT -m owner --uid-owner `id -u ${U}` -j ACCEPT
+            done
+        fi
+
+
+        # this piece of ... code is here because some really tight environments don't return ID or arbitrary user (and root)
+        ROOT_ID=0
+        ROOT_MAPPED=`( id -u root ) > /dev/null > 2>&1`
+        if [ "$?" != "0" ]; then
+            echo " ... assuming root id is 0";
+        else
+            ROOT_ID=$ROOT_MAPPED
+        fi
 
         for P in ${SMITH_TLS_PORTS}; do
             logit "  redirect port ${P}->${SMITH_TLS_TPROXY}"
-            iptables -t nat -A OUTPUT -p tcp --dport ${P} -j REDIRECT --to-port ${REDIRECT_TLS_PORT}  -m owner ! --uid-owner `id -u root`
+            iptables -t nat -A OUTPUT -p tcp --dport ${P} -j REDIRECT --to-port ${REDIRECT_TLS_PORT}  -m owner ! --uid-owner ${ROOT_ID}
         done;
 
         for P in ${SMITH_TCP_PORTS}; do
             logit "  redirect port ${P}->${SMITH_TCP_TPROXY}"
-            iptables -t nat -A OUTPUT -p tcp --dport ${P} -j REDIRECT --to-port ${REDIRECT_TCP_PORT}  -m owner ! --uid-owner `id -u root`
+            iptables -t nat -A OUTPUT -p tcp --dport ${P} -j REDIRECT --to-port ${REDIRECT_TCP_PORT}  -m owner ! --uid-owner ${ROOT_ID}
         done;
 
         if [[ ${SMITH_TCP_PORTS_ALL} -gt 0 ]]; then
             logit "  redirect ALL tcp->${SMITH_TCP_TPROXY}"
-            iptables -t nat -A OUTPUT -p tcp -j REDIRECT --to-port ${REDIRECT_TCP_PORT} -m owner ! --uid-owner `id -u root`
+            iptables -t nat -A OUTPUT -p tcp -j REDIRECT --to-port ${REDIRECT_TCP_PORT} -m owner ! --uid-owner ${ROOT_ID}
         fi
 
 
-        iptables -t nat -A OUTPUT -p udp --dport 53 -j REDIRECT --to-port ${REDIRECT_DNS_PORT}  -m owner ! --uid-owner `id -u root`
+        iptables -t nat -A OUTPUT -p udp --dport 53 -j REDIRECT --to-port ${REDIRECT_DNS_PORT}  -m owner ! --uid-owner ${ROOT_ID}
 
         ;;
 

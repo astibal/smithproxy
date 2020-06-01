@@ -63,12 +63,14 @@ apps:
   certinfo-ca:
     command: bin/sx_certinfo_ca
 
-  ctl:
-    command: bin/sx_ctl
-    plugs:
-      - network
-      - network-bind
-      - network-control
+#  start:
+#    command: bin/sx_ctl start
+#    plugs:
+#      - network
+#      - network-bind
+#      - network-control
+#    daemon: oneshot
+#    restart-condition: never
 
   net:
     command: bin/sx_network
@@ -95,8 +97,10 @@ parts:
       - python3-dev
       - libssl-dev
       - libffi-dev
-      - libxml2-dev
-      - xmlsec-dev
+      - try:
+        - libxml2-dev
+        - xmlsec-dev
+
       - python3-distutils
       - telnet
 
