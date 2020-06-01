@@ -393,26 +393,26 @@ function setup_redirect {
         iptables -t nat -A OUTPUT -p tcp -s 127.0.0.0/8 -j ACCEPT
 
         for U in ${REDIRECT_EXEMPT_USERS}; do
-            iptables -t nat -A OUTPUT -m owner --uid-owner ${U} -j ACCEPT
+            iptables -t nat -A OUTPUT -m owner --uid-owner `id -u ${U}` -j ACCEPT
         done
 
         for P in ${SMITH_TLS_PORTS}; do
             logit "  redirect port ${P}->${SMITH_TLS_TPROXY}"
-            iptables -t nat -A OUTPUT -p tcp --dport ${P} -j REDIRECT --to-port ${REDIRECT_TLS_PORT}  -m owner ! --uid-owner root
+            iptables -t nat -A OUTPUT -p tcp --dport ${P} -j REDIRECT --to-port ${REDIRECT_TLS_PORT}  -m owner ! --uid-owner `id -u root`
         done;
 
         for P in ${SMITH_TCP_PORTS}; do
             logit "  redirect port ${P}->${SMITH_TCP_TPROXY}"
-            iptables -t nat -A OUTPUT -p tcp --dport ${P} -j REDIRECT --to-port ${REDIRECT_TCP_PORT}  -m owner ! --uid-owner root
+            iptables -t nat -A OUTPUT -p tcp --dport ${P} -j REDIRECT --to-port ${REDIRECT_TCP_PORT}  -m owner ! --uid-owner `id -u root`
         done;
 
         if [[ ${SMITH_TCP_PORTS_ALL} -gt 0 ]]; then
             logit "  redirect ALL tcp->${SMITH_TCP_TPROXY}"
-            iptables -t nat -A OUTPUT -p tcp -j REDIRECT --to-port ${REDIRECT_TCP_PORT} -m owner ! --uid-owner root
+            iptables -t nat -A OUTPUT -p tcp -j REDIRECT --to-port ${REDIRECT_TCP_PORT} -m owner ! --uid-owner `id -u root`
         fi
 
 
-        iptables -t nat -A OUTPUT -p udp --dport 53 -j REDIRECT --to-port ${REDIRECT_DNS_PORT}  -m owner ! --uid-owner root
+        iptables -t nat -A OUTPUT -p udp --dport 53 -j REDIRECT --to-port ${REDIRECT_DNS_PORT}  -m owner ! --uid-owner `id -u root`
 
         ;;
 
