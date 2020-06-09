@@ -45,21 +45,20 @@
 void Service::my_terminate (int param) {
 
     Service* service = self();
-    auto& log = service->log;
 
     if (! service->cfg_daemonize )
-        _err("Terminating ...");
+        _cons("Terminating ...");
 
     service->stop();
 
     service->cnt_terminate++;
     if(service->cnt_terminate == 3) {
         if (!service->cfg_daemonize )
-            _fat("Failed to terminate gracefully. Next attempt will be enforced.");
+            _cons("Failed to terminate gracefully. Next attempt will be enforced.");
     }
     if(service->cnt_terminate > 3) {
         if (! service->cfg_daemonize )
-            _fat("Enforced exit.");
+            _cons("Enforced exit.");
         abort();
     }
 }

@@ -86,7 +86,7 @@ public:
             goto fail;
         }
         
-        shared_memory = (unsigned char*)mmap((void *)0, memory_size, PROT_READ | PROT_WRITE, MAP_SHARED, memory_fd, 0);
+        shared_memory = (unsigned char*)mmap(nullptr, memory_size, PROT_READ | PROT_WRITE, MAP_SHARED, memory_fd, 0);
         if (shared_memory == MAP_FAILED) {
             printf("MMapping the shared memory failed; errno is %d\n", errno);
             goto fail;

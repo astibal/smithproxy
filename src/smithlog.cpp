@@ -101,16 +101,17 @@ void QueueLogger::run_queue(std::shared_ptr<QueueLogger> log_src) {
     }
     
     while (!log_src->sig_terminate) {
-        log_src->lock();
-        
+
         if(! log_src->logs_.empty()) {
+
+            auto lock = locked_guard(log_src.get());
+
             log_entry e = log_src->logs_.front(); log_src->logs_.pop();
 
             //copy elements and unlock before write_log.
             loglevel l = e.first;
             std::string msg = e.second;
 
-            log_src->unlock();
 
             if(log_src->debug_queue) {
                 auto ss = string_format("logsrc=0x%x [%d]| ", log_src.get(), log_src->logs_.size());
@@ -119,7 +120,6 @@ void QueueLogger::run_queue(std::shared_ptr<QueueLogger> log_src) {
             log_src->write_disk(l, msg);
             
         } else {
-            log_src->unlock();
             usleep(1000); // wait 10ms if there is nothing to read
         }
     }

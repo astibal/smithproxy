@@ -65,7 +65,7 @@
 
 #include <cli/diag/diag_cmds.hpp>
 
-extern bool cfg_openssl_mem_dbg;
+//extern bool cfg_openssl_mem_dbg;
 
 #ifndef USE_OPENSSL11
 int cli_diag_ssl_memcheck_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
@@ -1671,7 +1671,7 @@ bool register_diags(cli_def* cli, cli_command* diag) {
     cli_register_command(cli, diag_sig, "list", cli_diag_sig_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list engine signatures");
 
 
-    if(cfg_openssl_mem_dbg) {
+    if(true) {
 #ifndef USE_OPENSSL11
         auto diag_ssl_memcheck = cli_register_command(cli, diag_ssl, "memcheck", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose openssl memcheck");
             cli_register_command(cli, diag_ssl_memcheck, "list", cli_diag_ssl_memcheck_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "print out OpenSSL memcheck status");

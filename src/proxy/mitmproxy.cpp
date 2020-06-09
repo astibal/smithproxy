@@ -2041,7 +2041,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
         
         end:
         
-        new_proxy->name(new_proxy->to_string(iINF));
+        //new_proxy->name(new_proxy->to_string(iINF));
         
         
         if(delete_proxy) {
@@ -2115,7 +2115,7 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
         com()->set_poll_handler(real_socket,new_proxy);
     }
     
-    new_proxy->name(new_proxy->to_string());
+    //new_proxy->name(new_proxy->to_string());
     _deb("MitmUDPProxy::on_left_new: finished");    
 }
 

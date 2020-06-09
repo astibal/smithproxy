@@ -399,12 +399,12 @@ void cli_print_log_levels(struct cli_def *cli) {
     cli_print(cli,"THIS cli logging level set to: %d",lp->level_.level());
     cli_print(cli,"Internal logging level set to: %d", LogOutput::get()->level().level());
     cli_print(cli,"\n");
-    for(int const& target: LogOutput::get()->remote_targets()) {
+    for(auto [ target, mut ]: LogOutput::get()->remote_targets()) {
         cli_print(cli, "Logging level for remote: %s: %d",
                   LogOutput::get()->target_name((uint64_t)target),
                   LogOutput::get()->target_profiles()[(uint64_t)target]->level_.level());
     }
-    for(auto const* o_ptr: LogOutput::get()->targets()) {
+    for(auto [ o_ptr, mut]: LogOutput::get()->targets()) {
         cli_print(cli, "Logging level for target: %s: %d",
                   LogOutput::get()->target_name((uint64_t)(o_ptr)),
                   LogOutput::get()->target_profiles()[(uint64_t)(o_ptr)]->level_.level());
@@ -505,7 +505,7 @@ int cli_debug_logfile(struct cli_def *cli, const char *command, char *argv[], in
             }
 
             if(newlev >= 0) {
-                for(auto const* o_ptr: LogOutput::get()->targets()) {
+                for(auto [ o_ptr, mut ]: LogOutput::get()->targets()) {
 
                     std::string fnm = LogOutput::get()->target_name((uint64_t)(o_ptr));
 
@@ -1705,7 +1705,8 @@ void client_thread(int client_socket) {
     load_defaults();
     cli_loop(cli, client_socket);
 
-    LogOutput::get()->remote_targets().remove(client_socket);
+
+    LogOutput::get()->remote_targets().remove_if([client_socket](auto e) { return e.first == client_socket; });
     LogOutput::get()->target_profiles().erase(client_socket);
     close(client_socket);
 

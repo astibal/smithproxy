@@ -471,6 +471,7 @@ void SmithProxy::run() {
 void SmithProxy::stop() {
 
     terminate_flag = true;
+    memPool::pool().bailing = true;
 
     if (plain_proxy != nullptr) {
         plain_proxy->state().dead(true);

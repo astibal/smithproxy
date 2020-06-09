@@ -127,8 +127,8 @@ void print_stats() {
     auto& log = DaemonFactory::instance().log;
 
     _dia("Debug SSL statistics: ");
-    _dia("SSL_accept: %d",SSLCom::counter_ssl_accept);
-    _dia("SSL_connect: %d",SSLCom::counter_ssl_connect);
+    _dia("SSL_accept: %d", SSLCom::counter_ssl_accept.load());
+    _dia("SSL_connect: %d", SSLCom::counter_ssl_connect.load());
 }
 
 void do_cleanup() {
