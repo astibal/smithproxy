@@ -106,7 +106,8 @@ parts:
       - libffi-dev
       - try:
         - libxml2-dev
-        - xmlsec-dev
+        - libxslt1-dev
+        - xmlsec1-dev
 
       - python3-distutils
       - telnet
@@ -135,6 +136,10 @@ parts:
       - python3-dev
       - python3-distutils
       - swig
+      - try:
+        - libxml2-dev
+        - libxslt1-dev
+        - xmlsec1-dev
 
     python-packages:
       - pyroute2
