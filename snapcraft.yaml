@@ -6,18 +6,38 @@ description: |
  Smithproxy is fast transparent TCP/UDP/TLS (SSL) proxy. It's highly configurable
  and got many features.
 
- TLS MITM:
-  * TLS security checks (ocsp, ocsp stapling, automatic crl download)
-  * Html replacement warnings
-  * STARTTLS support
-  * Seamless redirection to login portal
+ Core features:
+    * intercept routed traffic, locally-originated traffic and SOCKS requests
+    * Policy based traffic matching
+    * Per-policy applicable profiles
+    * Insightful CLI with configuration control
+
+ Policy profiles:
+    * content - replacing data online, writing to disk
+    * dns - dns inspection settigns
+    * tls - per-policy specific settigns
+    * auth - match users and enforce authentication
+    * detection - match specific patterns in the traffic
+
+ TLS protocol:
+    * dumping plaintext to files, exporting sslkeylog
+    * TLS security checks (ocsp, ocsp stapling, automatic crl download)
+    * Html replacement warnings
+    * STARTTLS support
+    * Seamless redirection to login portal
+
  Other:
-  * Insightful CLI
-  * Simple authentication portal with local and ldap user support
-  * SOCKS4/SOCKS5 support with DNS
-  * DNS ALG
-  * policies based on FQDN or 2nd level domain
-  * both IPv4 and IPv6 is supported.
+    * Simple authentication portal with local and ldap user support
+    * SOCKS4/SOCKS5 support with DNS
+    * DNS ALG
+    * policies based on FQDN or 2nd level domain
+    * both IPv4 and IPv6 is supported
+
+ Complementary tools:
+    * built-in tools to help with network redirections and certificates
+    * check pplay tool (https://pypi.org/project/pplay/): replays captures
+      over the network
+
 
   ... and many more!
 
