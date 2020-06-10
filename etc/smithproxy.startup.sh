@@ -400,12 +400,16 @@ function setup_redirect {
 
 
         # this piece of ... code is here because some really tight environments don't return ID or arbitrary user (and root)
-        ROOT_ID=0
+        ROOT_ID="0"
         ROOT_MAPPED=`( id -u root ) > /dev/null 2>&1`
         if [ "$?" != "0" ]; then
             echo " ... assuming root id is 0";
         else
-            ROOT_ID=$ROOT_MAPPED
+            ROOT_ID=`id -u root`
+            if [ "$?" != "0" ]; then
+                # if even that doesn't work assume 0
+                ROOT_ID="0"
+            fi
         fi
 
         for P in ${SMITH_TLS_PORTS}; do
