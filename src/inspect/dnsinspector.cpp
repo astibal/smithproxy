@@ -125,7 +125,8 @@ void DNS_Inspector::update(AppHostCX* cx) {
                     red = 0;
                     delete ptr;
                     ptr = (DNS_Packet*)0xCABA1A;
-                    _err("BUG CAUGHT: buffer:\n%s",hex_dump(cur_buf).c_str());
+                    _err("DNS BUG CAUGHT: buffer:\n%s",hex_dump(cur_buf).c_str());
+                    _cons(string_format("DNS BUG CAUGHT: buffer:\n%s", hex_dump(cur_buf).c_str()).c_str());
                 }
 
                 // on failure or last data exit loop
@@ -231,6 +232,7 @@ void DNS_Inspector::update(AppHostCX* cx) {
                         cx->error(true);
                         _war("DNS inspection: cannot find corresponding DNS request id 0x%x: dropping connection.",ptr->id());
                         delete ptr;
+                        ptr = nullptr;
                     }
                     else {
                         // DNS response is valid
@@ -258,6 +260,7 @@ void DNS_Inspector::update(AppHostCX* cx) {
                 } else {
                     red = 0;
                     delete ptr;
+                    ptr = nullptr;
                 }
 
                 // on failure or last data exit loop
