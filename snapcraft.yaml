@@ -11,9 +11,25 @@ confinement: strict # use 'strict' once you have the right plugs and slots
 
 base: core18
 
+hooks:
+  install:
+    plugs: [ network, network-control ]
+
 layout:
-  /etc:
-    bind: $SNAP_DATA/etc
+  /etc/smithproxy:
+    bind: $SNAP_DATA/etc/smithproxy
+
+  /etc/ca-certificates.conf:
+    bind-file: $SNAP_DATA/etc/ca-certificates.conf
+
+  /usr/share/ca-certificates:
+    bind: $SNAP_DATA/ca-bundle
+
+  /etc/ssl/certs:
+    bind: $SNAP_DATA/certs
+
+  /etc/ca-certificates:
+    bind: $SNAP_DATA/ca-certificates
 
   /usr/share/smithproxy:
     bind: $SNAP/usr/share/smithproxy
@@ -63,15 +79,6 @@ apps:
   certinfo-ca:
     command: bin/sx_certinfo_ca
 
-#  start:
-#    command: bin/sx_ctl start
-#    plugs:
-#      - network
-#      - network-bind
-#      - network-control
-#    daemon: oneshot
-#    restart-condition: never
-
   net:
     command: bin/sx_network
     plugs:
@@ -88,7 +95,7 @@ parts:
     source: https://github.com/astibal/smithproxy
     source-branch: master
     build-packages:
-      - g++-8
+      - g++
       - make
       - cmake
       - libcli-dev
@@ -105,6 +112,7 @@ parts:
       - telnet
 
     stage-packages:
+      - ca-certificates
       - iptables
       - libcli1.9
       - libconfig++9v5
