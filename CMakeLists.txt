@@ -373,19 +373,20 @@ if(UNIX)
     install(CODE "MESSAGE(\" |       -  add /usr/bin/smithproxy_cli to /etc/shells, make special user for it, use ssh |\")")
     install(CODE "MESSAGE(\" +----------------------------------------------------------------------------------------+\")")
     
-    SET(CPACK_GENERATOR "DEB")
-    SET(MAJOR_VERSION 0)
-    SET(MINOR_VERSION 8)
-    SET(PATCH_VERSION 3)
-    SET(CPACK_PACKAGE_VERSION_MAJOR "${MAJOR_VERSION}")
-    SET(CPACK_PACKAGE_VERSION_MINOR "${MINOR_VERSION}")
-    SET(CPACK_PACKAGE_VERSION_PATCH "${PATCH_VERSION}")
-    
-    SET(CPACK_PACKAGE_DESCRIPTION "transparent proxy with ssl inspection features")
-    SET(CPACK_PACKAGE_DESCRIPTION_SUMMARY "transparent proxy based on TPROXY with SSL inspection, authentication and other features")
-    SET(CPACK_DEBIAN_PACKAGE_MAINTAINER "Ales Stibal <astib@mag0.net>")
-    SET(CPACK_DEBIAN_PACKAGE_DEPENDS "libstdc++6 (>= 4.9.0), libssl1.0.0 (>=1.0.0), libconfig++9v5, libcli1.9 (>=1.9.6), iptables ,python-ldap, python-pylibconfig2, python-pyparsing, python-posix-ipc, python-soappy, python-m2crypto")
-    INCLUDE(CPack)
+#    # Let's get back to this later
+#    SET(CPACK_GENERATOR "DEB")
+#    SET(MAJOR_VERSION 0)
+#    SET(MINOR_VERSION 8)
+#    SET(PATCH_VERSION 3)
+#    SET(CPACK_PACKAGE_VERSION_MAJOR "${MAJOR_VERSION}")
+#    SET(CPACK_PACKAGE_VERSION_MINOR "${MINOR_VERSION}")
+#    SET(CPACK_PACKAGE_VERSION_PATCH "${PATCH_VERSION}")
+#
+#    SET(CPACK_PACKAGE_DESCRIPTION "transparent proxy with ssl inspection features")
+#    SET(CPACK_PACKAGE_DESCRIPTION_SUMMARY "transparent proxy based on TPROXY with SSL inspection, authentication and other features")
+#    SET(CPACK_DEBIAN_PACKAGE_MAINTAINER "Ales Stibal <astib@mag0.net>")
+#    SET(CPACK_DEBIAN_PACKAGE_DEPENDS "libstdc++6 (>= 4.9.0), libssl1.0.0 (>=1.0.0), libconfig++9v5, libcli1.9 (>=1.9.6), iptables ,python-ldap, python-pylibconfig2, python-pyparsing, python-posix-ipc, python-soappy, python-m2crypto")
+#    INCLUDE(CPack)
 
 endif()
 

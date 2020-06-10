@@ -1,10 +1,25 @@
 
 name: smithproxy
-version: '0.9.2'
+version: '0.9.3'
 summary: Fast and featured transparent TCP/UDP/TLS proxy
 description: |
  Smithproxy is fast transparent TCP/UDP/TLS (SSL) proxy. It's highly configurable
- and featured.
+ and got many features.
+
+ TLS MITM:
+  * TLS security checks (ocsp, ocsp stapling, automatic crl download)
+  * Html replacement warnings
+  * STARTTLS support
+  * Seamless redirection to login portal
+ Other:
+  * Insightful CLI
+  * Simple authentication portal with local and ldap user support
+  * SOCKS4/SOCKS5 support with DNS
+  * DNS ALG
+  * policies based on FQDN or 2nd level domain
+  * both IPv4 and IPv6 is supported.
+
+  ... and many more!
 
 grade: devel # must be 'stable' to release into candidate/stable channels
 confinement: strict # use 'strict' once you have the right plugs and slots
