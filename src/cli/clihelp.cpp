@@ -49,7 +49,7 @@ void CliHelp::init() {
     help_add("default","");
     help_add("settings.certs_path", "directory for TLS-resigning CA certificate and key");
     help_add("settings.certs_ca_key_password","TLS-resigning CA private key protection password");
-    help_add("settings.certs_ca_path", "trusted CA store path (to verify server-side connections)");
+    help_add("settings.ca_bundle_path", "trusted CA store path (to verify server-side connections)");
     help_add("settings.plaintext_port", "base divert port for non-SSL TCP traffic");
     help_add("settings.plaintext_workers", "non-SSL TCP traffic worker thread count");
     help_add("settings.ssl_port", "base divert port for SSL TCP traffic");
@@ -85,7 +85,7 @@ void CliHelp::init() {
     qmark_add("default", "enter <value>");
     qmark_add("settings.certs_path", "<string> with path to a directory");
     qmark_add("settings.certs_ca_key_password","");
-    qmark_add("settings.certs_ca_path", "");
+    qmark_add("settings.ca_bundle_path", "");
     qmark_add("settings.plaintext_port", "");
     qmark_add("settings.plaintext_workers", "");
     qmark_add("settings.ssl_port", "");

@@ -276,11 +276,6 @@ if(UNIX)
     )
 
 
-    
-    # create CA dir
-    install(DIRECTORY DESTINATION /etc/smithproxy/certs/ca)
-    InstallSymlink(/etc/ssl/certs /etc/smithproxy/certs/ca/default)
-    
     install(FILES man/TESTING_README.txt DESTINATION share/smithproxy/docs)
     
     # backend install in /usr/share/smithproxy/infra/bend/
