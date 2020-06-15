@@ -185,9 +185,21 @@ void DaemonFactory::set_crashlog(const char* file) {
 
 void writecrash(int fd, const char* msg, int len)  {
    int w = 0; int rep = 0;
+
+   auto pos = msg;
+   auto rest = len;
    do {
-       int curw = ::write(fd, msg, len);
-       if(curw > 0) w+= w;
+       int curw = ::write(fd, pos, rest);
+
+       if(curw == rest) {
+           break;
+       }
+       else if(curw > 0) {
+           w += curw;
+           pos = &pos[curw];
+           rest -= curw;
+       }
+
        rep++;
    } while(w < len && rep < 10);
 }
@@ -214,11 +226,12 @@ void DaemonFactory::uw_btrace_handler(int sig) {
 
     while (unw_step(&cursor) > 0) {
         memset(buf_line,0,256);
+
         char buf_fun[256];
         memset(buf_fun,0,256);
 
         unw_word_t  offset;
-        unw_get_proc_name(&cursor, buf_fun, sizeof(buf_fun), &offset);
+        unw_get_proc_name(&cursor, buf_fun, sizeof(buf_fun) - 1, &offset);
         unw_get_reg(&cursor, UNW_REG_IP, &ip);
         unw_get_reg(&cursor, UNW_REG_SP, &sp);
         

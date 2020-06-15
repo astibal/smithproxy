@@ -499,8 +499,6 @@ void SmithProxy::stop() {
     if(redir_udp_proxy) {
         redir_udp_proxy->state().dead(true);
     }
-
-
 }
 
 
