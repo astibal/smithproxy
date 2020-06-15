@@ -127,7 +127,7 @@ void MitmHostCX::on_detect_www_get(const std::shared_ptr<duplexFlowMatch> &x_sig
 
         buffer* buffer_get = get.second;
 
-        std::string buffer_data_string((const char*)buffer_get->data(),0,buffer_get->size());
+        std::string buffer_data_string((const char*)buffer_get->data(), buffer_get->size());
 
         //_inf(std::string((const char*)buffer_get->data(),0,buffer_get->size()));
         std::regex re_get("(GET|POST) *([^ \r\n\?]+)([^ \r\n]*)");
