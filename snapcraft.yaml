@@ -89,11 +89,11 @@ apps:
       - network-bind
       - network-control
 
-  smithd:
-    command: bin/smithd
-    plugs:
-      - network
-      - network-bind
+#  smithd:
+#    command: bin/smithd
+#    plugs:
+#      - network
+#      - network-bind
 
   cli:
     command: bin/sx_cli
@@ -103,13 +103,13 @@ apps:
     plugs:
       - network   # to guess hostname and IP
 
-  passwd:
-    command: bin/sx_passwd
+#  passwd:
+#    command: bin/sx_passwd
 
-  autoportalcert:
-    command: bin/sx_autoportalcert
-    plugs:
-      - network  # to guess hostname and IP
+#  autoportalcert:
+#    command: bin/sx_autoportalcert
+#    plugs:
+#      - network  # to guess hostname and IP
 
   certinfo-ca:
     command: bin/sx_certinfo_ca
