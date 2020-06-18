@@ -256,10 +256,6 @@ void MitmHostCX::on_detect_www_get(const std::shared_ptr<duplexFlowMatch> &x_sig
 
 void MitmHostCX::inspect(char side) {
 
-
-    if(inspect_verdict == Inspector::CACHED)
-        return;
-
     AppHostCX::inspect(side);
     
     if(flow().flow().size() > inspect_cur_flow_size) {
@@ -278,7 +274,9 @@ void MitmHostCX::inspect(char side) {
 
         _deb("MitmHostCX::inspect: inspector loop:");
         for(Inspector* inspector: inspectors_) {
-            if(inspector->interested(this) && (! inspector->completed() )) {
+            bool for_me = inspector->interested(this);
+            bool is_completed = inspector->completed();
+            if( for_me && (! is_completed )) {
                 inspector->update(this);
                 
                 inspect_verdict = inspector->verdict();
@@ -291,11 +289,17 @@ void MitmHostCX::inspect(char side) {
                     
                     baseHostCX* p = nullptr;
                     side == 'l' || side == 'L' ? p = peer() : p = this;
-                    p->error(true);
-                    
+
+                    // NOTE: this doesn't have to be really best idea, though it is working well
+                    //       in most cases
+                    //                    p->error(true);
+
                     auto* verdict_target = dynamic_cast<AppHostCX*>(p);
                     if(verdict_target != nullptr) {
                         inspector->apply_verdict(verdict_target);
+
+                        // reset it back to ok for further queries
+                        // inspector->verdict(Inspector::OK);
                         break;
                     } else {
                         _err("cannot apply verdict on generic cx");

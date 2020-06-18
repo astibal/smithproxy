@@ -42,7 +42,8 @@
 std::regex DNS_Inspector::wildcard = std::regex("[^.]+\\.(.*)$");
 
 bool DNS_Inspector::interested(AppHostCX* cx) const {
-    return cx->com()->nonlocal_dst_port() == 53;
+     auto port = cx->com()->nonlocal_dst_port();
+     return port == 53;
 }
 
 void DNS_Inspector::update(AppHostCX* cx) {
@@ -90,10 +91,6 @@ void DNS_Inspector::update(AppHostCX* cx) {
             stage = 0;
             for(unsigned int it = 0; red < shallow_xbuf.size() && it < 10; it++) {
 
-                if(ptr) {
-                    _err("DNS_Inspector::update[%s]: deleting request ptr from previous loop:%d", cx->c_name(), it-1);
-                    delete ptr;
-                }
                 ptr = new DNS_Request();
 
                 buffer cur_buf = shallow_xbuf.view(red, shallow_xbuf.size() - red);
@@ -121,26 +118,23 @@ void DNS_Inspector::update(AppHostCX* cx) {
                     _deb("DNS_Inspector::update[%s]: this 0x%x, requests size %d",cx->c_name(),this, requests_.size());
 
                     cx->idle_delay(30);
+
                 } else {
                     red = 0;
                     delete ptr;
-                    ptr = (DNS_Packet*)0xCABA1A;
-                    _err("DNS BUG CAUGHT: buffer:\n%s",hex_dump(cur_buf).c_str());
-                    _cons(string_format("DNS BUG CAUGHT: buffer:\n%s", hex_dump(cur_buf).c_str()).c_str());
+                    ptr = nullptr;
+                    _err("DNS BUG CAUGHT: iteration: %d, buffer:\n%s",it, hex_dump(cur_buf).c_str());
+
+                    // keep for troubleshooting if needed
+                    // _cons(string_format("DNS BUG: read buffer 0x%x size: %d, red = %d", shallow_xbuf.data(), shallow_xbuf.size(), red).c_str());
+                    // _cons(string_format("DNS BUG: iteration: %d, buffer:\n%s",it, hex_dump(cur_buf).c_str()).c_str());
+
+                    goto fail;
                 }
 
-                // on failure or last data exit loop
-                if(cur_red <= 0) {
-                    _dia("DNS_Inspector::update[%s]: finishing reading from buffers: red=%d, buffer_size=%d",cx->c_name(),red,cur_buf.size());
-                    break;
-                }
             }
+            _dia("DNS_Inspector::update[%s]: finishing reading from buffers: red=%d, buffer_size=%d",cx->c_name(),red, shallow_xbuf.size());
 
-            if(ptr == (DNS_Packet*)0xCABA1A) {
-                _err("BUG CAUGHT.");
-
-                goto fail;
-            }
 
             if(opt_cached_responses && ( ((DNS_Request*)ptr)->question_type_0() == A || ((DNS_Request*)ptr)->question_type_0() == AAAA ) ) {
                 std::scoped_lock<std::recursive_mutex> l_(DNS::get_dns_lock());
@@ -255,7 +249,7 @@ void DNS_Inspector::update(AppHostCX* cx) {
                         if(is_tcp)
                             cx->idle_delay(30);
                         else
-                            cx->idle_delay(1);
+                            cx->idle_delay(10);
                     }
                 } else {
                     red = 0;
@@ -389,9 +383,9 @@ void DNS_Inspector::apply_verdict(AppHostCX* cx) {
 
         if(! is_tcp) {
             _deb("udp encapsulation");
-            cx->to_write(cached_response->data(), cached_response->size());
-            int w = cx->write();
-            _dia("DNS_Inspector::apply_verdict: %d bytes written of cached response size %d",w,cached_response->size());
+            int w = cx->io_write(cached_response->data(), cached_response->size(), MSG_NOSIGNAL);
+
+            _dia("DNS_Inspector::apply_verdict: %d bytes written of cached response size %d", w, cached_response->size());
         } else {
             _deb("tcp encapsulation");
             // uint16_t* ptr = (uint16_t*)cached_response->data();
@@ -399,8 +393,7 @@ void DNS_Inspector::apply_verdict(AppHostCX* cx) {
             buffer b;
             b.append(&len,sizeof(uint16_t));
             b.append(cached_response->data(),cached_response->size());
-            cx->to_write(b);
-            int w = cx->write();
+            int w = cx->io_write(b.data(), b.size(), MSG_NOSIGNAL);
 
             _dia("DNS_Inspector::apply_verdict: %d bytes written of cached response size %d",w,b.size());
         }
