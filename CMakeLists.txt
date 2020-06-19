@@ -27,9 +27,10 @@ if(UNIX)
     SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wno-psabi -std=c++17")
     SET(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g3 -fno-stack-protector")
 
-#    IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
-#    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=thread -fPIE -pie")
-#    ENDIF()
+    IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
+        # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=thread -fPIE -pie")
+        # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fsanitize=leak -fPIE -pie")
+    ENDIF()
 
     IF (CMAKE_BUILD_TYPE STREQUAL "Release")
         message(">>> release: enabling optimizations (smithproxy)")
