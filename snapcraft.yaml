@@ -1,6 +1,6 @@
 
 name: smithproxy
-version: '0.9.5'
+version: '0.9.6'
 summary: Fast and featured transparent TCP/UDP/TLS proxy
 description: |
  Smithproxy is fast transparent TCP/UDP/TLS (SSL) proxy. It's highly configurable
@@ -127,8 +127,12 @@ parts:
   smithproxy:
     plugin: cmake
     source-type: git
-    source: https://github.com/astibal/smithproxy
+    ource: https://github.com/astibal/smithproxy
     source-branch: master
+
+    # source: .
+    # source-type: local
+
     build-packages:
       - g++
       - make
