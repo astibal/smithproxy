@@ -126,12 +126,13 @@ apps:
 parts:
   smithproxy:
     plugin: cmake
-    # source-type: git
-    # source: https://github.com/astibal/smithproxy
-    # source-branch: master
 
-    source: .
-    source-type: local
+    source: https://github.com/astibal/smithproxy
+    source-type: git
+    source-branch: master
+
+#    source: .
+#    source-type: local
 
     build-packages:
       - g++
