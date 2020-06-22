@@ -381,20 +381,27 @@ function setup_redirect {
 
     start|unbypass)
         iptables -t nat -F OUTPUT
+        ip6tables -t nat -F OUTPUT
 
         if [[ ${REDIRECT_EXEMPT_LAN} -gt 0 ]]; then
             iptables -t nat -A OUTPUT -p tcp -d 10.0.0.0/8 -j ACCEPT
             iptables -t nat -A OUTPUT -p tcp -d 172.16.0.0/12 -j ACCEPT
             iptables -t nat -A OUTPUT -p tcp -d 192.168.0.0/16 -j ACCEPT
+
+            ip6tables -t nat -A OUTPUT -p tcp -d fe80::/10 -j ACCEPT
         fi
 
         # don't loop yourself
         iptables -t nat -A OUTPUT -p tcp -d 127.0.0.0/8 -j ACCEPT
         iptables -t nat -A OUTPUT -p tcp -s 127.0.0.0/8 -j ACCEPT
 
+        ip6tables -t nat -A OUTPUT -p tcp -d ::1 -j ACCEPT
+        ip6tables -t nat -A OUTPUT -p tcp -s ::1 -j ACCEPT
+
         if [ "${REDIRECT_EXEMPT_USERS}" != "" ]; then
             for U in ${REDIRECT_EXEMPT_USERS}; do
                 iptables -t nat -A OUTPUT -m owner --uid-owner `id -u ${U}` -j ACCEPT
+                ip6tables -t nat -A OUTPUT -m owner --uid-owner `id -u ${U}` -j ACCEPT
             done
         fi
 
@@ -415,25 +422,30 @@ function setup_redirect {
         for P in ${SMITH_TLS_PORTS}; do
             logit "  redirect port ${P}->${SMITH_TLS_TPROXY}"
             iptables -t nat -A OUTPUT -p tcp --dport ${P} -j REDIRECT --to-port ${REDIRECT_TLS_PORT}  -m owner ! --uid-owner ${ROOT_ID}
+            ip6tables -t nat -A OUTPUT -p tcp --dport ${P} -j REDIRECT --to-port ${REDIRECT_TLS_PORT}  -m owner ! --uid-owner ${ROOT_ID}
         done;
 
         for P in ${SMITH_TCP_PORTS}; do
             logit "  redirect port ${P}->${SMITH_TCP_TPROXY}"
             iptables -t nat -A OUTPUT -p tcp --dport ${P} -j REDIRECT --to-port ${REDIRECT_TCP_PORT}  -m owner ! --uid-owner ${ROOT_ID}
+            ip6tables -t nat -A OUTPUT -p tcp --dport ${P} -j REDIRECT --to-port ${REDIRECT_TCP_PORT}  -m owner ! --uid-owner ${ROOT_ID}
         done;
 
         if [[ ${SMITH_TCP_PORTS_ALL} -gt 0 ]]; then
             logit "  redirect ALL tcp->${SMITH_TCP_TPROXY}"
             iptables -t nat -A OUTPUT -p tcp -j REDIRECT --to-port ${REDIRECT_TCP_PORT} -m owner ! --uid-owner ${ROOT_ID}
+            ip6tables -t nat -A OUTPUT -p tcp -j REDIRECT --to-port ${REDIRECT_TCP_PORT} -m owner ! --uid-owner ${ROOT_ID}
         fi
 
 
         iptables -t nat -A OUTPUT -p udp --dport 53 -j REDIRECT --to-port ${REDIRECT_DNS_PORT}  -m owner ! --uid-owner ${ROOT_ID}
+        ip6tables -t nat -A OUTPUT -p udp --dport 53 -j REDIRECT --to-port ${REDIRECT_DNS_PORT}  -m owner ! --uid-owner ${ROOT_ID}
 
         ;;
 
     stop|bypass)
          iptables -t nat -F OUTPUT
+         ip6tables -t nat -F OUTPUT
         ;;
 
     esac
