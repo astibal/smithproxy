@@ -127,7 +127,7 @@ parts:
   smithproxy:
     plugin: cmake
     source-type: git
-    ource: https://github.com/astibal/smithproxy
+    source: https://github.com/astibal/smithproxy
     source-branch: master
 
     # source: .
