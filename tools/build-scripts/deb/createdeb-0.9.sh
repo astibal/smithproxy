@@ -2,8 +2,7 @@
 ORIG_DIR=`pwd`
 
 PW_UPLOAD=$1
-SO_BRANCH="master"
-SX_BRANCH="master"
+SX_TAG="0.9.2"
 DEBIAN_DIR="debian-0.9"
 
 
@@ -34,25 +33,17 @@ function cleanup () {
 
 }
 
-# download source from git
-# @param1 - socle branch
-# @param2 - smithproxy branch
+# download source from git /release/
 function sync() {
-    SOCLE_BRANCH=$1
-    SMITHPROXY_BRANCH=$2
+    SX_TAG=$1
 
     O=`pwd`
     cd $CUR_DIR
 
     cleanup
 
-    git clone http://github.com/astibal/smithproxy.git smithproxy
-    cd smithproxy; git fetch; git checkout $SMITHPROXY_BRANCH;
-
-    # stay in smithproxy dir, socle is submodule
-
-    git clone http://github.com/astibal/socle.git socle
-    cd socle; git fetch; git checkout $SOCLE_BRANCH; cd ..
+    git clone --recursive --branch $SX_TAG --depth 20 --single-branch http://github.com/astibal/smithproxy.git smithproxy
+    cd smithproxy
 
     cd $O
 }
@@ -82,7 +73,7 @@ safe_upload() {
 ## get source !!
 ##
 
-sync $SO_BRANCH $SX_BRANCH
+sync $SX_TAG
 
 ##
 ## get proper versions from GIT. We set debian patch-level to distance from
