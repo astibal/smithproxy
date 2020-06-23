@@ -141,10 +141,9 @@ bool socksServerCX::choose_server_ip(std::vector<std::string>& target_ips) {
     return true;
 }
 
-bool socksServerCX::process_dns_response(DNS_Response* resp) {
+bool socksServerCX::process_dns_response(std::shared_ptr<DNS_Response> resp) {
 
     std::vector<std::string> target_ips;
-    bool del_resp = true;
     bool ret = true;
 
     if (resp) {
@@ -159,11 +158,7 @@ bool socksServerCX::process_dns_response(DNS_Response* resp) {
         if (! target_ips.empty()) {
 
             DNS_Inspector di;
-            del_resp = !di.store(resp);
-        }
-
-        if (del_resp) {
-            delete resp;
+            di.store(resp);
         }
     }
 
@@ -288,7 +283,7 @@ int socksServerCX::process_socks_request() {
 
                     if(!async_dns) {
 
-                        DNS_Response *resp = DNSFactory::get().resolve_dns_s(fqdn, A, nameserver);
+                        std::shared_ptr<DNS_Response> resp(DNSFactory::get().resolve_dns_s(fqdn, A, nameserver));
 
                         process_dns_response(resp);
                         setup_target();
@@ -544,14 +539,13 @@ void socksServerCX::pre_write() {
 
 void socksServerCX::dns_response_callback(std::pair<DNS_Response *, int>& rresp) {
 
-    DNS_Response* resp = rresp.first;
+    auto resp = std::shared_ptr<DNS_Response>(rresp.first);
     int red = rresp.second;
     state_ = socks5_state::DNS_RESP_RECV;
 
     if(red <= 0) {
         _deb("handle_event: socket read returned %d",red);
         error(true);
-        delete resp;
     } else {
         _deb("handle_event: OK - socket read returned %d",red);
         if(process_dns_response(resp)) {

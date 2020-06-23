@@ -183,14 +183,14 @@ std::thread* create_dns_updater() {
 
 
 
-            DNS_Response* resp = DNSFactory::get().resolve_dns_s(a, t, nameserver);
+            std::shared_ptr<DNS_Response> resp(DNSFactory::get().resolve_dns_s(a, t, nameserver));
+
             if(resp) {
                 if(di.store(resp)) {
                     _dia("Entry successfully stored in cache.");
                 } else {
                     _war("entry for %s was not stored, blacklisted!",t_a.c_str());
                     record_blacklist.insert(t_a);
-                    delete resp;
                 }
             }
         }

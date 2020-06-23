@@ -319,13 +319,11 @@ int cli_test_dns_sendrequest(struct cli_def *cli, const char *command, char *arg
             nameserver = CfgFactory::get().db_nameservers.at(0);
         }
 
-        DNS_Response* resp = send_dns_request(cli,argv0,A,nameserver);
+        auto resp = std::shared_ptr<DNS_Response>(send_dns_request(cli,argv0,A,nameserver));
         if(resp) {
             DNS_Inspector di;
             if(di.store(resp)) {
                 cli_print(cli, "Entry successfully stored in cache.");
-            } else {
-                delete resp;
             }
         }
 
@@ -368,21 +366,20 @@ int cli_test_dns_refreshallfqdns(struct cli_def *cli, const char *command, char 
 
     DNS_Inspector di;
     for(auto const& a: fqdns) {
-        DNS_Response* resp =  send_dns_request(cli,a,A,nameserver);
-        if(resp) {
-            if(di.store(resp)) {
-                cli_print(cli, "Entry successfully stored in cache.");
-            } else {
-                delete resp;
+
+        {
+            auto resp = std::shared_ptr<DNS_Response>(send_dns_request(cli, a, A, nameserver));
+            if (resp) {
+                if (di.store(resp)) {
+                    cli_print(cli, "Entry successfully stored in cache.");
+                }
             }
         }
 
-        resp = send_dns_request(cli,a,AAAA,nameserver);
+        auto resp = std::shared_ptr<DNS_Response>(send_dns_request(cli, a, AAAA ,nameserver));
         if(resp) {
             if(di.store(resp)) {
                 cli_print(cli, "Entry successfully stored in cache.");
-            } else {
-                delete resp;
             }
         }
     }

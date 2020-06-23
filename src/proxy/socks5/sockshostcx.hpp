@@ -114,7 +114,7 @@ private:
     std::string req_str_addr;
 
     unsigned short req_port;
-    bool process_dns_response(DNS_Response* resp);
+    bool process_dns_response(std::shared_ptr<DNS_Response> resp);
 
     bool choose_server_ip(std::vector<std::string>& target_ips);
     bool async_dns = true;

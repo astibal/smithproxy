@@ -47,11 +47,8 @@ public:
     explicit DNS_Inspector() {
         log = logan::attach(this, "dns");
     }
-    virtual ~DNS_Inspector() {
-        // clear local request cache
-        for(auto x: requests_) { if(x.second) {delete x.second; } };
-        if(cached_response != nullptr) delete cached_response;
-    };
+    virtual ~DNS_Inspector() {};
+
     void update(AppHostCX* cx) override;
 
     bool l4_prefilter(AppHostCX* cx) override { return interested(cx); };
@@ -61,24 +58,23 @@ public:
     bool opt_randomize_id = false;
     bool opt_cached_responses = false;
 
-    DNS_Request* find_request(uint16_t r) { auto it = requests_.find(r); if(it == requests_.end()) { return nullptr; } else { return it->second; }  }
-    bool validate_response(DNS_Response* ptr);
-    bool store(DNS_Response* ptr);
+    std::shared_ptr<DNS_Request> find_request(uint16_t r) { auto it = requests_.find(r); if(it == requests_.end()) { return nullptr; } else { return it->second; }  }
+    bool validate_response(std::shared_ptr<DNS_Response> ptr);
+    bool store(std::shared_ptr<DNS_Response> ptr);
     void apply_verdict(AppHostCX* cx) override;
 
     std::string to_string(int verbosity=iINF) const override;
 
-    static std::regex wildcard;
 private:
     logan_attached<DNS_Inspector> log;
     bool is_tcp = false;
 
-    buffer* cached_response = nullptr;
+    std::shared_ptr<buffer> cached_response = nullptr;
     uint16_t cached_response_id = 0;
     std::vector<int> cached_response_ttl_idx;
     uint32_t cached_response_decrement = 0;
 
-    std::unordered_map<uint16_t,DNS_Request*>  requests_;
+    std::unordered_map<uint16_t,std::shared_ptr<DNS_Request>>  requests_;
     int responses_ = 0;
     bool stored_ = false;
 
