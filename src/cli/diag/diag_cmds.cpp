@@ -1337,7 +1337,7 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
                     for(auto const& side: tup) {
                         auto com = side.second;
 
-                        if(com) {
+                        if(com && !com->opt_bypass) {
                             auto ssl = com->get_SSL();
                             if (ssl) {
                                 auto *session = SSL_get_session(ssl);
@@ -1419,6 +1419,8 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
                             }
                         } else {
                             tls_ss << "\n  " << side.first << ": not a TLS session";
+                            if(com && com->opt_bypass)
+                                tls_ss << " (bypassed)";
                         }
                     }
                     tls_ss << "\n";

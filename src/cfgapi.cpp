@@ -1883,6 +1883,10 @@ bool CfgFactory::policy_apply_tls (const std::shared_ptr<ProfileTls> &pt, baseCo
         auto* sslcom = dynamic_cast<SSLCom*>(xcom);
         if(sslcom != nullptr) {
             sslcom->opt_bypass = !pt->inspect;
+            if(sslcom->opt_bypass) {
+                sslcom->verify_reset(SSLCom::VRF_OK);
+            }
+
             sslcom->opt_allow_unknown_issuer = pt->allow_untrusted_issuers;
             sslcom->opt_allow_self_signed_chain = pt->allow_untrusted_issuers;
             sslcom->opt_allow_not_valid_cert = pt->allow_invalid_certs;

@@ -1889,11 +1889,13 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
             auto* scom = dynamic_cast<SSLCom*>(just_accepted_cx->com());
             if(scom != nullptr) {
                 scom->opt_bypass = true;
+                scom->verify_reset(SSLCom::VRF_OK);
             }
             
             scom = dynamic_cast<SSLCom*>(target_cx->com());
             if(scom != nullptr) {
                 scom->opt_bypass = true;
+                scom->verify_reset(SSLCom::VRF_OK);
             }
             
         }
