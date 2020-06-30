@@ -714,8 +714,9 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
         // check com responses
         redirected = handle_com_response_ssl(mh);
         
-        
-        if(handle_cached_response(mh)) {
+
+        // don't copy data if we have cached response, or we are are dropped and marked dead()
+        if(handle_cached_response(mh) || state().dead()) {
             return;
         }
     }
