@@ -40,9 +40,13 @@
 #include <inspect/dnsinspector.hpp>
 
 
+bool DNS_Inspector::dns_prefilter(AppHostCX *cx) {
+    auto port = cx->com()->nonlocal_dst_port();
+    return port == 53;
+}
+
 bool DNS_Inspector::interested(AppHostCX* cx) const {
-     auto port = cx->com()->nonlocal_dst_port();
-     return port == 53;
+    return DNS_Inspector::dns_prefilter(cx);
 }
 
 void DNS_Inspector::update(AppHostCX* cx) {

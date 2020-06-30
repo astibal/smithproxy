@@ -1586,9 +1586,11 @@ bool CfgFactory::prof_tls_apply (baseHostCX *originator, baseProxy *new_proxy, c
     if(ps != nullptr) {
         // we should also apply tls profile to originating side! Verification is not in effect, but BYPASS is!
         if (policy_apply_tls(ps, mitm_originator->com())) {
+            _dia("policy_apply: policy tls profile[%s] for %s", ps->prof_name.c_str(), mitm_originator->full_name('L').c_str());
             
             for( auto* cx: mitm_proxy->rs()) {
                 baseCom* xcom = cx->com();
+                _dia("policy_apply: policy tls profile[%s] for %s", ps->prof_name.c_str(), cx->full_name('R').c_str());
                 
                 tls_applied = policy_apply_tls(ps, xcom);
                 if(!tls_applied) {
@@ -1682,16 +1684,15 @@ bool CfgFactory::prof_alg_dns_apply (baseHostCX *originator, baseProxy *new_prox
     if(mh != nullptr) {
 
         if(p_alg_dns != nullptr) {
-            auto* n = new DNS_Inspector();
-            if(n->l4_prefilter(mh)) {
+            if(DNS_Inspector::dns_prefilter(mh)) {
+                auto* n = new DNS_Inspector();
+
+                _dia("policy_apply: policy dns profile[%s] for %s", p_alg_dns->prof_name.c_str(), mitm_originator->full_name('L').c_str());
                 n->opt_match_id = p_alg_dns->match_request_id;
                 n->opt_randomize_id = p_alg_dns->randomize_id;
                 n->opt_cached_responses = p_alg_dns->cached_responses;
                 mh->inspectors_.push_back(n);
                 ret = true;
-            }
-            else {
-                delete n;
             }
         }
         
@@ -1715,6 +1716,8 @@ bool CfgFactory::prof_script_apply (baseHostCX *originator, baseProxy *new_proxy
     if(mh != nullptr) {
 
         if(p_script) {
+
+            _dia("policy_apply: policy script profile[%s] for %s", p_script->prof_name.c_str(), mitm_originator->full_name('L').c_str());
 
             if(p_script->script_type == ProfileScript::ST_PYTHON) {
                 #ifdef USE_PYHON

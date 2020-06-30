@@ -54,6 +54,8 @@ public:
     bool l4_prefilter(AppHostCX* cx) override { return interested(cx); };
     bool interested(AppHostCX*cx) const override ;
 
+    static bool dns_prefilter(AppHostCX* cx);
+
     bool opt_match_id = false;
     bool opt_randomize_id = false;
     bool opt_cached_responses = false;
