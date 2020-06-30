@@ -208,7 +208,7 @@ public:
     int  ocsp_stapling_mode = 0; // 0 = loose, 1 = strict, 2 = require
     std::string prof_name;
     
-    socle::spointer_vector_string sni_filter_bypass;
+    std::shared_ptr<std::vector<std::string>> sni_filter_bypass;
     socle::spointer_set_int redirect_warning_ports;
     
     bool sni_filter_use_dns_cache = true;       // if sni_filter_bypass is set, check during policy match if target IP isn't in DNS cache matching SNI filter entries.
@@ -245,8 +245,8 @@ public:
             ret += string_format("\n        failed cert check user override timeout type: %d",failed_certcheck_override_timeout_type);
             
             bool sni_out = false;
-            if(sni_filter_bypass.ptr())
-            for(auto it: *sni_filter_bypass.ptr()) {
+            if(sni_filter_bypass)
+            for(auto const& it: *sni_filter_bypass) {
                 sni_out = true;
                 ret += string_format("\n        sni exclude: '%s'",ESC_(it).c_str());
             }

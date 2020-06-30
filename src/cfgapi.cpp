@@ -1168,10 +1168,10 @@ int CfgFactory::load_db_prof_tls () {
                         //init only when there is something
                         int sni_filter_len = sni_filter.getLength();
                         if(sni_filter_len > 0) {
-                                a->sni_filter_bypass.ptr(new std::vector<std::string>);
+                                a->sni_filter_bypass = std::make_shared<std::vector<std::string>>();
                                 for(int j = 0; j < sni_filter_len; ++j) {
                                     const char* elem = sni_filter[j];
-                                    a->sni_filter_bypass.ptr()->push_back(elem);
+                                    a->sni_filter_bypass->push_back(elem);
                                 }
                         }
                 }
@@ -1600,8 +1600,8 @@ bool CfgFactory::prof_tls_apply (baseHostCX *originator, baseProxy *new_proxy, c
                     //applying bypass based on DNS cache
                     
                     auto* sslcom = dynamic_cast<SSLCom*>(xcom);
-                    if(sslcom && ps->sni_filter_bypass.valid()) {
-                        if( ( ! ps->sni_filter_bypass.ptr()->empty() ) && ps->sni_filter_use_dns_cache) {
+                    if(sslcom && ps->sni_filter_bypass) {
+                        if( ( ! ps->sni_filter_bypass->empty() ) && ps->sni_filter_use_dns_cache) {
                         
                             bool interrupt = false;
                             for(std::string& filter_element: *ps->sni_filter_bypass) {
@@ -1920,9 +1920,9 @@ bool CfgFactory::policy_apply_tls (const std::shared_ptr<ProfileTls> &pt, baseCo
             sslcom->opt_ocsp_stapling_enabled = pt->ocsp_stapling;
             sslcom->opt_ocsp_stapling_mode = pt->ocsp_stapling_mode;
        
-            if(pt->sni_filter_bypass.valid()) {
-                if( ! pt->sni_filter_bypass.ptr()->empty() ) {
-                    sslcom->sni_filter_to_bypass().ref(pt->sni_filter_bypass);
+            if(pt->sni_filter_bypass) {
+                if( ! pt->sni_filter_bypass->empty() ) {
+                    sslcom->sni_filter_to_bypass() = pt->sni_filter_bypass;
                 }
             }
             
@@ -2235,10 +2235,10 @@ int CfgFactory::save_tls_profiles(Config& ex) const {
         item.add("ocsp_stapling_mode", Setting::TypeInt) = obj->ocsp_stapling_mode;
 
         // add sni bypass list
-        if(obj->sni_filter_bypass.ptr() && ! obj->sni_filter_bypass.ptr()->empty() ) {
+        if(obj->sni_filter_bypass && ! obj->sni_filter_bypass->empty() ) {
             Setting& sni_flist = item.add("sni_filter_bypass", Setting::TypeArray);
 
-            for( auto const& snif: *obj->sni_filter_bypass.ptr()) {
+            for( auto const& snif: *obj->sni_filter_bypass) {
                 sni_flist.add(Setting::TypeString) = snif;
             }
         }
