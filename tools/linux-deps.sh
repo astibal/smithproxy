@@ -178,7 +178,7 @@ elif [ "${DIST}" = "Alpine" ]; then
     git clone --recursive https://github.com/dparrish/libcli
     cd libcli/ && make install && cp libcli.h /usr/include/ && cd ..
 
-    apk add libconfig libconfig-dev
+    apk add openssl libconfig libconfig-dev
     apk add cmake g++ python3-dev libexecinfo-dev openssl-dev linux-headers libunwind-dev
     apk add busybox-extras iptables iproute2
     apk add py3-pip
