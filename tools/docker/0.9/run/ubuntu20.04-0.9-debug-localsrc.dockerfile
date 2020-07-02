@@ -12,6 +12,8 @@ FROM ubuntu:20.04
 
 LABEL org.smithproxy.docker.image="astibal/smithproxy:ubuntu20.04-0.9-run-debug-localsrc"
 
+RUN mkdir app/
+
 WORKDIR /app
 
 RUN apt update && apt -y install git && DEBIAN_FRONTEND=noninteractive apt-get install -y tzdata && apt -y install gdb valgrind
@@ -23,7 +25,7 @@ RUN rm -rf /smithproxy
 COPY smithproxy/ /smithproxy/
 
 # copy docker root extras
-COPY smithproxy/tools/docker/guest-scripts/* /app
+COPY smithproxy/tools/docker/guest-scripts/* /app/
 
 RUN cd /smithproxy && ./tools/linux-deps.sh && \
 mkdir build ; cd build && cmake .. -DCMAKE_BUILD_TYPE=Debug && make -j `nproc` install

@@ -1,7 +1,7 @@
 #
-FROM ubuntu:18.04
+FROM ubuntu:20.04
 
-LABEL org.smithproxy.docker.image="astibal/smithproxy:ubuntu18.04-0.9-debug"
+LABEL org.smithproxy.docker.image="astibal/smithproxy:ubuntu120.04-0.9-debug"
 
 WORKDIR /app
 

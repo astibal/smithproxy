@@ -11,8 +11,7 @@ rm -rf smithproxy/cmake-build* ; rm -rf smithproxy/build ; rm -rf smithproxy/ven
 sudo docker build . -f smithproxy/tools/docker/0.9/run/ubuntu20.04-0.9-debug-localsrc.dockerfile --tag astibal/smithproxy:ubuntu20.04-0.9-run-dbg-localsrc
 cd ${P}
 
-sudo ./runsx-debug.sh ubuntu20.04-0.9-run-dbg-localsrc
-sudo ./redir-output-chain.sh start
+sudo ./runsx-debug-isolated.sh ubuntu20.04-0.9-run-dbg-localsrc
 
 
 
