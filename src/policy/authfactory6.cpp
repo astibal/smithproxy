@@ -122,7 +122,7 @@ IdentityInfo6* AuthFactory::ip6_get(std::string& host) {
 }
 
 
-bool  AuthFactory::ip6_inc_counters(std::string& host, unsigned int rx, unsigned int tx) {
+bool  AuthFactory::ip6_inc_counters(const std::string &host, unsigned int rx, unsigned int tx) {
     bool ret = false;
 
     std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
@@ -139,15 +139,15 @@ bool  AuthFactory::ip6_inc_counters(std::string& host, unsigned int rx, unsigned
 }
 
 // remove IP from AUTH IP MAP and synchronize with SHM AUTH IP TABLE (table which is used to communicate with bend daemon)
-void AuthFactory::ip6_remove(std::string& host) {
+void AuthFactory::ip6_remove (const std::string &ip6_address) {
 
     std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
-    auto ip = ip6_map_.find(host);
+    auto ip = ip6_map_.find(ip6_address);
 
     if (ip != ip6_map_.end()) {
         // erase internal ip map entry
 
-        _dia("cfgapi_ip_map_remove: auth ip map - removing: %s",host.c_str());
+        _dia("cfgapi_ip_map_remove: auth ip map - removing: %s", ip6_address.c_str());
         ip6_map_.erase(ip);
 
         // for debug only: print all shm table entries
@@ -161,10 +161,10 @@ void AuthFactory::ip6_remove(std::string& host) {
         shm_ip6_map.acquire();
 
         // erase shared ip map entry
-        auto sh_it = shm_ip6_map.map_entries().find(host);
+        auto sh_it = shm_ip6_map.map_entries().find(ip6_address);
 
         if(sh_it != shm_ip6_map.map_entries().end()) {
-            _dia("cfgapi_ip_map_remove: shm auth ip table  - removing: %s",host.c_str());
+            _dia("cfgapi_ip_map_remove: shm auth ip table  - removing: %s", ip6_address.c_str());
             shm_ip6_map.map_entries().erase(sh_it);
             
             if(*log.level() >= DEB) {
