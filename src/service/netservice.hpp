@@ -76,6 +76,11 @@ Listener * NetworkServiceFactory::prepare_listener (unsigned int port, std::stri
 
     // bind with master proxy (.. and create child proxies for new connections)
     int sock = listener->bind(port, 'L');
+
+    locks::fd().insert(sock);
+
+    auto l_ = std::scoped_lock(*locks::fd().lock(sock));
+
     if (sock < 0) {
         _fat("Error binding %s on port %d, exiting", friendly_name.c_str(), sock);
         delete listener;
