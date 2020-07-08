@@ -46,17 +46,6 @@
 
 SmithProxy::~SmithProxy () {
 
-//    delete plain_thread;
-//    delete ssl_thread;
-//    delete dtls_thread;
-//    delete udp_thread;
-//    delete socks_thread;
-//
-//
-//    delete dns_thread;
-//    delete id_thread;
-//    delete log_thread;
-
     if(cfg_daemonize) {
         DaemonFactory::instance().unlink_pidfile();
     }
@@ -230,7 +219,8 @@ void SmithProxy::run() {
         for(auto proxy: proxies) {
             _inf("Starting: %s", log_friendly);
 
-            auto a_thread = new std::thread([&proxy]() {
+            // taking proxy as a value!
+            auto a_thread = new std::thread([proxy]() {
                 CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
 
                 auto this_daemon = DaemonFactory::instance();

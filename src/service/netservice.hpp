@@ -69,7 +69,7 @@ public:
     }
 
     template <class Listener, class Com,
-            typename port_type = unsigned int>
+            typename port_type = unsigned short>
     static std::vector<Listener*> prepare_listener (port_type port, std::string const &friendly_name, int sub_workers,
                                                                     proxy_type type);
 };
@@ -87,7 +87,11 @@ std::vector<Listener*> NetworkServiceFactory::prepare_listener (port_type port, 
         return vec_toret;
     }
 
-    _not("Entering %s mode on port %d", friendly_name.c_str(), port);
+    std::stringstream ss;
+    ss << "Entering " << friendly_name << " mode on port/path " << port;
+    auto sss = ss.str();
+
+    _not(sss.c_str());
     auto listener = new Listener(new Com(), type);
     listener->com()->nonlocal_dst(true);
     listener->worker_count_preference(sub_workers);
