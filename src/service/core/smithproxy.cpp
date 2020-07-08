@@ -37,6 +37,7 @@
     which carries forward this exception.
 */
 
+#include <memory>
 #include <service/core/smithproxy.hpp>
 #include <cli/cmdserver.hpp>
 #include <policy/authfactory.hpp>
@@ -108,23 +109,24 @@ std::thread* SmithProxy::create_identity_refresh_thread() {
 
 void SmithProxy::create_log_writer_thread() {
     // we have to create logger after daemonize is called
-    log_thread  = create_log_writer();
-    if(log_thread != nullptr) {
+    log_thread  = std::shared_ptr<std::thread>(create_log_writer());
+
+    if(log_thread) {
         pthread_setname_np( log_thread->native_handle(), string_format("sxy_lwr_%d", tenant_index()).c_str());
     }
 }
 
 
 void SmithProxy::create_dns_thread() {
-    dns_thread = create_dns_updater();
-    if(dns_thread != nullptr) {
+    dns_thread = std::shared_ptr<std::thread>(create_dns_updater());
+    if(dns_thread) {
         pthread_setname_np( dns_thread->native_handle(),
                             string_format("sxy_dns_%d",tenant_index()).c_str());
     }
 }
 
 void SmithProxy::create_identity_thread() {
-    id_thread = create_identity_refresh_thread();
+    id_thread = std::shared_ptr<std::thread>(create_identity_refresh_thread());
     if(id_thread != nullptr) {
         pthread_setname_np(id_thread->native_handle(),string_format("sxy_idu_%d",
                                                                     CfgFactory::get().tenant_index).c_str());
@@ -133,63 +135,76 @@ void SmithProxy::create_identity_thread() {
 
 
 void SmithProxy::create_listeners() {
-    plain_proxy = NetworkServiceFactory::prepare_listener<theAcceptor, TCPCom>(std::stoi(CfgFactory::get().listen_tcp_port),
-                                                                               "plain-tcp",
-                                                                               CfgFactory::get().num_workers_tcp,
-                                                                               NetworkServiceFactory::proxy_type::TRANSPARENT);
 
-    ssl_proxy = NetworkServiceFactory::prepare_listener<theAcceptor, MySSLMitmCom>(
-            std::stoi(CfgFactory::get().listen_tls_port),
-            "tls",
-            CfgFactory::get().num_workers_tls,
-            NetworkServiceFactory::proxy_type::TRANSPARENT);
+    try {
+        plain_proxies = NetworkServiceFactory::prepare_listener<theAcceptor, TCPCom>(
+                std::stoi(CfgFactory::get().listen_tcp_port),
+                "plain-tcp",
+                CfgFactory::get().num_workers_tcp,
+                NetworkServiceFactory::proxy_type::TRANSPARENT);
 
-    dtls_proxy = NetworkServiceFactory::prepare_listener<theReceiver, MyDTLSMitmCom>(
-            std::stoi(CfgFactory::get().listen_dtls_port),
-            "dtls",
-            CfgFactory::get().num_workers_dtls,
-            NetworkServiceFactory::proxy_type::TRANSPARENT);
+        ssl_proxies = NetworkServiceFactory::prepare_listener<theAcceptor, MySSLMitmCom>(
+                std::stoi(CfgFactory::get().listen_tls_port),
+                "tls",
+                CfgFactory::get().num_workers_tls,
+                NetworkServiceFactory::proxy_type::TRANSPARENT);
 
-    udp_proxy = NetworkServiceFactory::prepare_listener<theReceiver, UDPCom>(std::stoi(CfgFactory::get().listen_udp_port),
-                                                                             "udp",
-                                                                             CfgFactory::get().num_workers_udp,
-                                                                             NetworkServiceFactory::proxy_type::TRANSPARENT);
+        dtls_proxies = NetworkServiceFactory::prepare_listener<theReceiver, MyDTLSMitmCom>(
+                std::stoi(CfgFactory::get().listen_dtls_port),
+                "dtls",
+                CfgFactory::get().num_workers_dtls,
+                NetworkServiceFactory::proxy_type::TRANSPARENT);
 
-    socks_proxy = NetworkServiceFactory::prepare_listener<socksAcceptor, socksTCPCom>(
-            std::stoi(CfgFactory::get().listen_socks_port),
-            "socks",
-            CfgFactory::get().num_workers_socks,
-            NetworkServiceFactory::proxy_type::PROXY);
+        udp_proxies = NetworkServiceFactory::prepare_listener<theReceiver, UDPCom>(
+                std::stoi(CfgFactory::get().listen_udp_port),
+                "udp",
+                CfgFactory::get().num_workers_udp,
+                NetworkServiceFactory::proxy_type::TRANSPARENT);
 
-    redir_plain_proxy = NetworkServiceFactory::prepare_listener<theAcceptor, TCPCom>(
-            std::stoi(CfgFactory::get().listen_tcp_port) + 1000,
-            "plain-rdr",
-            CfgFactory::get().num_workers_tcp,
-            NetworkServiceFactory::proxy_type::REDIRECT);
-    redir_ssl_proxy = NetworkServiceFactory::prepare_listener<theAcceptor, MySSLMitmCom>(
-            std::stoi(CfgFactory::get().listen_tls_port) + 1000,
-            "ssl-rdr",
-            CfgFactory::get().num_workers_tcp,
-            NetworkServiceFactory::proxy_type::REDIRECT);
+        socks_proxies = NetworkServiceFactory::prepare_listener<socksAcceptor, socksTCPCom>(
+                std::stoi(CfgFactory::get().listen_socks_port),
+                "socks",
+                CfgFactory::get().num_workers_socks,
+                NetworkServiceFactory::proxy_type::PROXY);
 
-    redir_udp_proxy = NetworkServiceFactory::prepare_listener<theReceiver, UDPCom>(
-            std::stoi(CfgFactory::get().listen_udp_port) + 973,  // 973 + default 50080 = 51053: should suggest DNS only
-            "udp-rdr",
-            CfgFactory::get().num_workers_udp,
-            NetworkServiceFactory::proxy_type::REDIRECT);
+        redir_plain_proxies = NetworkServiceFactory::prepare_listener<theAcceptor, TCPCom>(
+                std::stoi(CfgFactory::get().listen_tcp_port) + 1000,
+                "plain-rdr",
+                CfgFactory::get().num_workers_tcp,
+                NetworkServiceFactory::proxy_type::REDIRECT);
+        redir_ssl_proxies = NetworkServiceFactory::prepare_listener<theAcceptor, MySSLMitmCom>(
+                std::stoi(CfgFactory::get().listen_tls_port) + 1000,
+                "ssl-rdr",
+                CfgFactory::get().num_workers_tcp,
+                NetworkServiceFactory::proxy_type::REDIRECT);
+
+        redir_udp_proxies = NetworkServiceFactory::prepare_listener<theReceiver, UDPCom>(
+                std::stoi(CfgFactory::get().listen_udp_port) +
+                973,  // 973 + default 50080 = 51053: should suggest DNS only
+                "udp-rdr",
+                CfgFactory::get().num_workers_udp,
+                NetworkServiceFactory::proxy_type::REDIRECT);
 
 
-    if ((plain_proxy == nullptr && CfgFactory::get().num_workers_tcp >= 0) ||
-        (ssl_proxy == nullptr && CfgFactory::get().num_workers_tls >= 0) ||
-        (dtls_proxy == nullptr && CfgFactory::get().num_workers_dtls >= 0) ||
-        (udp_proxy == nullptr && CfgFactory::get().num_workers_udp >= 0) ||
-        (socks_proxy == nullptr && CfgFactory::get().num_workers_socks >= 0) ||
-        (redir_plain_proxy == nullptr && CfgFactory::get().num_workers_tcp >= 0) ||
-        (redir_ssl_proxy == nullptr && CfgFactory::get().num_workers_tls >= 0) ||
-        (redir_udp_proxy == nullptr && CfgFactory::get().num_workers_udp >= 0)
-       ) {
+        if ((plain_proxies.empty() && CfgFactory::get().num_workers_tcp >= 0) ||
+            (ssl_proxies.empty() && CfgFactory::get().num_workers_tls >= 0) ||
+            (dtls_proxies.empty() && CfgFactory::get().num_workers_dtls >= 0) ||
+            (udp_proxies.empty() && CfgFactory::get().num_workers_udp >= 0) ||
+            (socks_proxies.empty() && CfgFactory::get().num_workers_socks >= 0) ||
+            (redir_plain_proxies.empty() && CfgFactory::get().num_workers_tcp >= 0) ||
+            (redir_ssl_proxies.empty() && CfgFactory::get().num_workers_tls >= 0) ||
+            (redir_udp_proxies.empty() && CfgFactory::get().num_workers_udp >= 0)
+                ) {
 
-        _fat("Failed to setup proxies. Bailing!");
+            _fat("Failed to setup proxies. Bailing!");
+            exit(-1);
+        }
+    }
+    catch (sx::netservice_error const& e) {
+
+        _fat("Failed to setup proxies: %s", e.what());
+        _fat("Bailing!");
+
         exit(-1);
     }
 }
@@ -211,168 +226,48 @@ void SmithProxy::run() {
     std::string friendly_thread_name_redir_ssl = string_format("sxy_rds_%d",CfgFactory::get().tenant_index);
     std::string friendly_thread_name_redir_udp = string_format("sxy_rdu_%d",CfgFactory::get().tenant_index);
 
-    if(plain_proxy) {
-        _inf("Starting TCP listener");
-        plain_thread = new std::thread([]() {
-            CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
+    auto launch_proxy_threads = [&](auto &proxies, const char* log_friendly, const char* thread_friendly) {
+        for(auto proxy: proxies) {
+            _inf("Starting: %s", log_friendly);
 
-            auto this_daemon = DaemonFactory::instance();
-            auto& log = this_daemon.log;
+            auto a_thread = new std::thread([&proxy]() {
+                CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
 
-            this_daemon.set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
-            _dia("smithproxy_tcp: max file descriptors: %d", this_daemon.get_limit_fd());
+                auto this_daemon = DaemonFactory::instance();
+                auto& log = this_daemon.log;
 
-            SmithProxy::instance().plain_proxy->run();
-            _dia("plaintext workers torn down.");
-            SmithProxy::instance().plain_proxy->shutdown();
-        } );
-        pthread_setname_np(plain_thread->native_handle(),friendly_thread_name_tcp.c_str());
-    }
+                DaemonFactory::set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
+                _dia("TCP listener: max file descriptors: %d", this_daemon.get_limit_fd());
 
-    if(ssl_proxy) {
-        _inf("Starting TLS listener");
-        ssl_thread = new std::thread([] () {
-            CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
+                proxy->run();
+                _dia("TCP listener: workers torn down.");
+                proxy->shutdown();
+            } );
+            pthread_setname_np(a_thread->native_handle(),thread_friendly);
+        }
+    };
 
-            auto this_daemon = DaemonFactory::instance();
-            auto& log = this_daemon.log;
+    // TCP listener
+    launch_proxy_threads(plain_proxies, "TCP listener", friendly_thread_name_tcp.c_str());
+    launch_proxy_threads(ssl_proxies, "TLS listener", friendly_thread_name_tls.c_str());
+    launch_proxy_threads(dtls_proxies, "DTLS listener", friendly_thread_name_dls.c_str());
+    launch_proxy_threads(udp_proxies, "UDP listener", friendly_thread_name_udp.c_str());
 
-            this_daemon.set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
-            this_daemon.set_limit_fd(0);
-            _dia("smithproxy_tls: max file descriptors: %d", this_daemon.get_limit_fd());
+    launch_proxy_threads(socks_proxies, "SOCKS listener", friendly_thread_name_skx.c_str());
 
-            SmithProxy::instance().ssl_proxy->run();
-            _dia("ssl workers torn down.");
-            SmithProxy::instance().ssl_proxy->shutdown();
-        } );
-        pthread_setname_np(ssl_thread->native_handle(),friendly_thread_name_tls.c_str());
-    }
+    launch_proxy_threads(redir_plain_proxies, "redirected TCP listener", friendly_thread_name_redir_tcp.c_str());
+    launch_proxy_threads(redir_ssl_proxies, "redirected TLS listener", friendly_thread_name_redir_ssl.c_str());
+    launch_proxy_threads(redir_udp_proxies, "redirected UDP listener", friendly_thread_name_redir_udp.c_str());
 
-    if(dtls_proxy) {
-        _inf("Starting DTLS listener");
-        dtls_thread = new std::thread([] () {
-            CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
 
-            auto this_daemon = DaemonFactory::instance();
-            auto& log = this_daemon.log;
-
-            this_daemon.set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
-            this_daemon.set_limit_fd(0);
-            _dia("smithproxy_tls: max file descriptors: %d", this_daemon.get_limit_fd());
-
-            SmithProxy::instance().dtls_proxy->run();
-            _dia("dtls workers torn down.");
-            SmithProxy::instance().dtls_proxy->shutdown();
-        } );
-        pthread_setname_np(dtls_thread->native_handle(),friendly_thread_name_dls.c_str());
-    }
-
-    if(udp_proxy) {
-
-        udp_proxy->set_quick_list(&CfgFactory::get().db_udp_quick_ports);
-
-        _inf("Starting UDP listener");
-        udp_thread = new std::thread([] () {
-            CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
-
-            auto this_daemon = DaemonFactory::instance();
-            auto& log = this_daemon.log;
-
-            this_daemon.set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
-            this_daemon.set_limit_fd(0);
-            _dia("smithproxy_udp: max file descriptors: %d", this_daemon.get_limit_fd());
-
-            SmithProxy::instance().udp_proxy->run();
-            _dia("udp workers torn down.");
-            SmithProxy::instance().udp_proxy->shutdown();
-        } );
-        pthread_setname_np(udp_thread->native_handle(),friendly_thread_name_udp.c_str());
-    }
-
-    if(socks_proxy) {
-        _inf("Starting SOCKS5 listener");
-        socks_thread = new std::thread([] () {
-            CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
-
-            auto this_daemon = DaemonFactory::instance();
-            auto& log = this_daemon.log;
-
-            this_daemon.set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
-            this_daemon.set_limit_fd(0);
-            _dia("smithproxy_skx: max file descriptors: %d", this_daemon.get_limit_fd());
-
-            SmithProxy::instance().socks_proxy->run();
-            _dia("socks workers torn down.");
-            SmithProxy::instance().socks_proxy->shutdown();
-        } );
-        pthread_setname_np(socks_thread->native_handle(),friendly_thread_name_skx.c_str());
-    }
-
-    if(redir_plain_proxy) {
-        _inf("Starting REDIR-TCP listener");
-        redir_plain_thread = new std::thread([] () {
-            CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
-
-            auto this_daemon = DaemonFactory::instance();
-            auto& log = this_daemon.log;
-
-            this_daemon.set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
-            this_daemon.set_limit_fd(0);
-            _dia("smithproxy_redir_plain: max file descriptors: %d", this_daemon.get_limit_fd());
-
-            SmithProxy::instance().redir_plain_proxy->run();
-            _dia("redir-plain workers torn down.");
-            SmithProxy::instance().redir_plain_proxy->shutdown();
-        } );
-        pthread_setname_np(redir_plain_thread->native_handle(),friendly_thread_name_redir_tcp.c_str());
-    }
-
-    if(redir_ssl_proxy) {
-        _inf("Starting REDIR-SSL listener");
-        redir_ssl_thread = new std::thread([] () {
-            CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
-
-            auto this_daemon = DaemonFactory::instance();
-            auto& log = this_daemon.log;
-
-            this_daemon.set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
-            this_daemon.set_limit_fd(0);
-            _dia("smithproxy_redir_ssl: max file descriptors: %d", this_daemon.get_limit_fd());
-
-            SmithProxy::instance().redir_ssl_proxy->run();
-            _dia("redir-ssl workers torn down.");
-            SmithProxy::instance().redir_ssl_proxy->shutdown();
-        } );
-        pthread_setname_np(redir_ssl_thread->native_handle(),friendly_thread_name_redir_ssl.c_str());
-    }
-
-    if(redir_udp_proxy) {
-        _inf("Starting REDIR-UDP listener");
-        redir_udp_thread = new std::thread([] () {
-            CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
-
-            auto this_daemon = DaemonFactory::instance();
-            auto& log = this_daemon.log;
-
-            this_daemon.set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
-            this_daemon.set_limit_fd(0);
-            _dia("smithproxy_redir_udp: max file descriptors: %d", this_daemon.get_limit_fd());
-
-            SmithProxy::instance().redir_udp_proxy->run();
-            _dia("redir-udp workers torn down.");
-            SmithProxy::instance().redir_udp_proxy->shutdown();
-        } );
-        pthread_setname_np(redir_udp_thread->native_handle(),friendly_thread_name_redir_udp.c_str());
-    }
-
-    cli_thread = new std::thread([] () {
+    cli_thread = std::make_shared<std::thread>([] () {
         CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
 
         auto this_daemon = DaemonFactory::instance();
         auto& log = this_daemon.log;
 
         _inf("Starting CLI");
-        this_daemon.set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
+        DaemonFactory::set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
         _dia("smithproxy_cli: max file descriptors: %d", this_daemon.get_limit_fd());
 
         cli_loop(CliState::get().cli_port);
@@ -398,46 +293,57 @@ void SmithProxy::run() {
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 
-    if(plain_thread) {
+
+    auto join_thread_list = [](auto thread_list) {
+        for(auto t: thread_list) {
+            t->join();
+        }
+    };
+
+    if(! plain_threads.empty()) {
         if(!cfg_daemonize)
             std::cerr << "terminating tcp thread" << std::endl;
-        plain_thread->join();
+        join_thread_list(plain_threads);
     }
-    if(ssl_thread) {
+
+    if(! ssl_threads.empty()) {
         if(!cfg_daemonize)
             std::cerr << "terminating tls thread" << std::endl;
-        ssl_thread->join();
+        join_thread_list(ssl_threads);
     }
-    if(dtls_thread) {
+
+    if(! dtls_threads.empty()) {
         if(!cfg_daemonize)
             std::cerr << "terminating dtls thread" << std::endl;
-        dtls_thread->join();
+        join_thread_list(dtls_threads);
     }
-    if(udp_thread) {
+
+    if(! udp_threads.empty()) {
         if(!cfg_daemonize)
             std::cerr << "terminating udp thread" << std::endl;
-        udp_thread->join();
+        join_thread_list(udp_threads);
     }
-    if(socks_thread) {
+
+    if(! socks_threads.empty()) {
         if(!cfg_daemonize)
             std::cerr << "terminating socks thread" << std::endl;
-        socks_thread->join();
+        join_thread_list(socks_threads);
     }
-    if(redir_plain_thread) {
+    if(! redir_plain_threads.empty()) {
 
         if(!cfg_daemonize)
             std::cerr << "terminating redir tcp thread" << std::endl;
-        redir_plain_thread->join();
+        join_thread_list(redir_plain_threads);
     }
-    if(redir_ssl_thread) {
+    if(! redir_ssl_threads.empty()) {
         if(!cfg_daemonize)
             std::cerr << "terminating redir tls thread" << std::endl;
-        redir_ssl_thread->join();
+        join_thread_list(redir_ssl_threads);
     }
-    if(redir_udp_thread) {
+    if(! redir_udp_threads.empty()) {
         if(!cfg_daemonize)
             std::cerr << "terminating redir dns thread" << std::endl;
-        redir_udp_thread->join();
+        join_thread_list(redir_udp_threads);
     }
     if(cli_thread) {
         if(!cfg_daemonize)
@@ -473,32 +379,23 @@ void SmithProxy::stop() {
     terminate_flag = true;
     memPool::pool().bailing = true;
 
-    if (plain_proxy != nullptr) {
-        plain_proxy->state().dead(true);
-    }
-    if(ssl_proxy != nullptr) {
-        ssl_proxy->state().dead(true);
+    auto kill_proxies = [](auto proxies) {
+        for(auto p: proxies) {
+            p->state().dead(true);
+        }
+    };
 
-    }
-    if(dtls_proxy != nullptr) {
-        dtls_proxy->state().dead(true);
-    }
-    if(udp_proxy != nullptr) {
-        udp_proxy->state().dead(true);
+    kill_proxies(plain_proxies);
+    kill_proxies(ssl_proxies);
+    kill_proxies(dtls_proxies);
+    kill_proxies(udp_proxies);
 
-    }
-    if(socks_proxy != nullptr) {
-        socks_proxy->state().dead(true);
-    }
-    if(redir_plain_proxy) {
-        redir_plain_proxy->state().dead(true);
-    }
-    if(redir_ssl_proxy) {
-        redir_ssl_proxy->state().dead(true);
-    }
-    if(redir_udp_proxy) {
-        redir_udp_proxy->state().dead(true);
-    }
+    kill_proxies(socks_proxies);
+
+
+    kill_proxies(redir_plain_proxies);
+    kill_proxies(redir_ssl_proxies);
+    kill_proxies(redir_udp_proxies);
 }
 
 

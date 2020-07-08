@@ -37,47 +37,10 @@
     which carries forward this exception.
 */    
 
-#include <vector>
 
-#include <csignal>
-#include <ctime>
-#include <cstdlib>
-#include <sys/stat.h>
-#include <sys/types.h>
+#include <stdexcept>
 
-#include <ostream>
-#include <ios>
-
-#include <getopt.h>
-#include <execinfo.h>
-
-#include <socle.hpp>
-
-#include <log/logger.hpp>
-#include <hostcx.hpp>
-#include <apphostcx.hpp>
-#include <baseproxy.hpp>
-#include <masterproxy.hpp>
-#include <threadedacceptor.hpp>
-#include <threadedreceiver.hpp>
-#include <sslcom.hpp>
-#include <sslmitmcom.hpp>
-#include <udpcom.hpp>
-#include <display.hpp>
-
-#include <main.hpp>
-#include <traflog.hpp>
-#include <display.hpp>
-
-#include <libconfig.h++>
-
-#include <proxy/mitmhost.hpp>
-#include <proxy/mitmproxy.hpp>
-#include <proxy/socks5/socksproxy.hpp>
-
-#include <cfgapi.hpp>
-#include <service/daemon.hpp>
-#include <cli/cmdserver.hpp>
+#include <service/netservice.hpp>
 
 //#define MEM_DEBUG 1
 #ifdef MEM_DEBUG
@@ -85,3 +48,7 @@
 #endif
 
 
+namespace sx {
+    netservice_error::netservice_error (const char *string) : runtime_error(string) {}
+    netservice_cannot_bind::netservice_cannot_bind (const char *string) : netservice_error(string) {}
+}

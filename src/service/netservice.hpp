@@ -40,7 +40,23 @@
 #ifndef SRVUTILS_HPP_
 #define SRVUTILS_HPP_
 
+#include <threadedacceptor.hpp>
+#include <threadedreceiver.hpp>
 #include <policy/authfactory.hpp>
+
+
+namespace sx {
+    class netservice_error : public std::runtime_error {
+    public:
+        netservice_error (const char *string);
+    };
+
+
+    class netservice_cannot_bind : public netservice_error {
+    public:
+        netservice_cannot_bind (const char *string);
+    };
+}
 
 class NetworkServiceFactory {
 public:
@@ -52,21 +68,23 @@ public:
         return l;
     }
 
-    template <class Listener, class Com>
-    static Listener *
-    prepare_listener (unsigned int port, std::string const &friendly_name, int sub_workers, proxy_type type);
-    template <class Listener, class Com>
-    static Listener* prepare_listener(std::string const& str_path, std::string const& friendly_name, std::string const& def_path, int sub_workers, proxy_type type);
+    template <class Listener, class Com,
+            typename port_type = unsigned int>
+    static std::vector<Listener*> prepare_listener (port_type port, std::string const &friendly_name, int sub_workers,
+                                                                    proxy_type type);
 };
 
-template <class Listener, class Com>
-Listener * NetworkServiceFactory::prepare_listener (unsigned int port, std::string const &friendly_name, int sub_workers,
+template <class Listener, class Com, typename port_type>
+std::vector<Listener*> NetworkServiceFactory::prepare_listener (port_type port, std::string const &friendly_name, int sub_workers,
                                                     proxy_type type) {
 
     auto log = NetworkServiceFactory::log();
 
+    std::vector<Listener*> vec_toret;
+
     if(sub_workers < 0) {
-        return nullptr;
+        // negative count means we won't spawn listeners for the service
+        return vec_toret;
     }
 
     _not("Entering %s mode on port %d", friendly_name.c_str(), port);
@@ -82,47 +100,24 @@ Listener * NetworkServiceFactory::prepare_listener (unsigned int port, std::stri
     auto l_ = std::scoped_lock(*locks::fd().lock(sock));
 
     if (sock < 0) {
-        _fat("Error binding %s on port %d, exiting", friendly_name.c_str(), sock);
+        std::stringstream ss;
+        ss << "error binding " << friendly_name << " on port/path: " << port;
+        auto err = ss.str();
+
+        _fat(err.c_str());
         delete listener;
-        return nullptr;
-    };
-    listener->com()->unblock(sock);
-    
-    listener->com()->set_monitor(sock);
-    listener->com()->set_poll_handler(sock, listener);
 
-    return listener;
-}
+        throw sx::netservice_cannot_bind(err.c_str());
+    } else {
 
-template <class Listener, class Com>
-Listener* NetworkServiceFactory::prepare_listener(std::string const& str_path, std::string const& friendly_name, std::string const& def_path, int sub_workers, proxy_type type) {
+        listener->com()->unblock(sock);
+        listener->com()->set_monitor(sock);
+        listener->com()->set_poll_handler(sock, listener);
 
-    auto log = NetworkServiceFactory::log();
-
-    if(sub_workers < 0) {
-        return nullptr;
+        vec_toret.push_back(listener);
     }
-    
-    std::string path = str_path;
-    if( path.empty() ) {
-        path = def_path;
-    }
-    
-    _not("Entering %s mode on path %s", friendly_name.c_str(), path.c_str());
-    auto listener = new Listener(new Com(), type);
 
-    listener->com()->nonlocal_dst(true);
-    listener->worker_count_preference(sub_workers);
-
-    // bind with master proxy (.. and create child proxies for new connections)
-    int sock = listener->bind(path.c_str(), 'L');
-    if (sock < 0) {
-        _fat("Error binding %s on path %s, exiting", friendly_name.c_str(), path.c_str());
-        delete listener;
-        return nullptr;
-    };
-    
-    return listener;
+    return vec_toret;
 }
 
 

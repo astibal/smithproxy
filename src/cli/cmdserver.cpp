@@ -136,24 +136,44 @@ void cmd_show_status(struct cli_def* cli) {
     cli_print(cli,"Built: %s", __TIMESTAMP__);
 #endif
 
-    int sq_plain = SmithProxy::instance().plain_proxy->sq_type();
-    int sq_ssl = SmithProxy::instance().ssl_proxy->sq_type();
-    int sq_udp = SmithProxy::instance().udp_proxy->sq_type();
-    int sq_dtls = SmithProxy::instance().dtls_proxy->sq_type();
+
+    auto get_proxy_type = [](auto& proxies) -> int {
+        if(proxies.empty()) return -1;
+
+        return proxies[0]->sq_type();
+    };
+
+    auto get_multiplier = [](auto& proxies) -> int {
+        if(proxies.empty()) return -1;
+
+        return proxies[0]->core_multiplier();
+    };
+
+    auto get_task_count = [](auto& proxies) -> int {
+        if(proxies.empty()) return -1;
+
+        return proxies[0]->task_count();
+    };
+
+    int sq_plain = get_proxy_type(SmithProxy::instance().plain_proxies);
+    int sq_ssl = get_proxy_type(SmithProxy::instance().ssl_proxies);
+    int sq_udp = get_proxy_type(SmithProxy::instance().udp_proxies);
+    int sq_dtls = get_proxy_type(SmithProxy::instance().dtls_proxies);
 
     cli_print(cli," ");
 
     cli_print(cli, "cores detected: %d, acc multi: %d recv multi: %d", std::thread::hardware_concurrency(),
-              SmithProxy::instance().plain_proxy->core_multiplier(),
-              SmithProxy::instance().udp_proxy->core_multiplier());
+              get_multiplier(SmithProxy::instance().plain_proxies),
+              get_multiplier(SmithProxy::instance().udp_proxies));
 
     cli_print(cli," ");
 
-    cli_print(cli, "TCP   threads: %d", SmithProxy::instance().plain_proxy->task_count());
-    cli_print(cli, "Socks threads: %d", SmithProxy::instance().socks_proxy->task_count());
-    cli_print(cli, "UDP   threads: %d", SmithProxy::instance().udp_proxy->task_count());
-    cli_print(cli, "TLS   threads: %d", SmithProxy::instance().ssl_proxy->task_count());
-    cli_print(cli, "DTLS  threads: %d", SmithProxy::instance().dtls_proxy->task_count());
+    cli_print(cli, "TCP   threads: %d", get_task_count(SmithProxy::instance().plain_proxies));
+    cli_print(cli, "Socks threads: %d", get_task_count(SmithProxy::instance().socks_proxies));
+    cli_print(cli, "UDP   threads: %d", get_task_count(SmithProxy::instance().udp_proxies));
+    cli_print(cli, "TLS   threads: %d", get_task_count(SmithProxy::instance().ssl_proxies));
+    cli_print(cli, "DTLS  threads: %d", get_task_count(SmithProxy::instance().dtls_proxies));
+
     cli_print(cli, "Acceptor hint: tcp:%d, tls:%d, udp:%d, dtls:%d", sq_plain, sq_ssl, sq_udp, sq_dtls);
 
 

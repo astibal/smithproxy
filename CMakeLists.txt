@@ -134,6 +134,7 @@ add_executable(smithd
         ${SMITHD_DIR}/smithdcx.cpp
 
         src/service/daemon.cpp
+        src/service/netservice.cpp
         src/smithlog.cpp
         src/inspect/dns.cpp src/ext/libcidr/cidr.cpp
         src/policy/addrobj.cpp src/async/asyncocsp.hpp)

@@ -70,29 +70,30 @@ class SmithProxy : public Service {
 
 public:
 
-    theAcceptor* plain_proxy = nullptr;
-    theAcceptor* ssl_proxy = nullptr;
-    theReceiver* udp_proxy = nullptr;
-    theReceiver* dtls_proxy = nullptr;
-    socksAcceptor* socks_proxy = nullptr;
+    std::vector<theAcceptor*> plain_proxies;
+    std::vector<theAcceptor*> ssl_proxies;
+    std::vector<theReceiver*> udp_proxies;
+    std::vector<theReceiver*> dtls_proxies;
+    std::vector<socksAcceptor*> socks_proxies;
 
-    theAcceptor* redir_plain_proxy = nullptr;
-    theAcceptor* redir_ssl_proxy = nullptr;
-    theReceiver* redir_udp_proxy = nullptr;
+    std::vector<theAcceptor*> redir_plain_proxies;
+    std::vector<theAcceptor*> redir_ssl_proxies;
+    std::vector<theReceiver*> redir_udp_proxies;
 
 
-    std::thread* plain_thread = nullptr;
-    std::thread* ssl_thread = nullptr;
-    std::thread* dtls_thread = nullptr;
-    std::thread* udp_thread = nullptr;
-    std::thread* socks_thread = nullptr;
-    std::thread* cli_thread = nullptr;
-    std::thread* log_thread = nullptr;
-    std::thread* dns_thread = nullptr;
-    std::thread* id_thread = nullptr;
-    std::thread* redir_plain_thread = nullptr;
-    std::thread* redir_ssl_thread = nullptr;
-    std::thread* redir_udp_thread = nullptr;
+    std::vector<std::shared_ptr<std::thread>> plain_threads;
+    std::vector<std::shared_ptr<std::thread>> ssl_threads;
+    std::vector<std::shared_ptr<std::thread>> dtls_threads;
+    std::vector<std::shared_ptr<std::thread>> udp_threads;
+    std::vector<std::shared_ptr<std::thread>> socks_threads;
+    std::vector<std::shared_ptr<std::thread>> redir_plain_threads;
+    std::vector<std::shared_ptr<std::thread>> redir_ssl_threads;
+    std::vector<std::shared_ptr<std::thread>> redir_udp_threads;
+
+    std::shared_ptr<std::thread> cli_thread;
+    std::shared_ptr<std::thread> log_thread;
+    std::shared_ptr<std::thread> dns_thread;
+    std::shared_ptr<std::thread> id_thread;
 
 
     SmithProxy (SmithProxy const&) = delete;
