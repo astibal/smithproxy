@@ -125,6 +125,8 @@ void SmithProxy::create_identity_thread() {
 
 void SmithProxy::create_listeners() {
 
+    bool success = false;
+
     try {
         plain_proxies = NetworkServiceFactory::prepare_listener<theAcceptor, TCPCom>(
                 std::stoi(CfgFactory::get().listen_tcp_port),
@@ -188,11 +190,23 @@ void SmithProxy::create_listeners() {
             _fat("Failed to setup proxies. Bailing!");
             exit(-1);
         }
+
+        success = true;
     }
-    catch (sx::netservice_error const& e) {
+    catch (sx::netservice_cannot_bind const& e) {
 
         _fat("Failed to setup proxies: %s", e.what());
-        _fat("Bailing!");
+        _cons("Failed to setup proxies");
+    }
+    catch (std::logic_error const& e) {
+
+        _fat("Failed to setup proxies: %s", e.what());
+        _cons("Failed to setup proxies");
+    }
+
+    if(! success) {
+        _fat("terminating!");
+        _cons("terminating!");
 
         exit(-1);
     }

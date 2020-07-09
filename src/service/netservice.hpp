@@ -48,13 +48,13 @@
 namespace sx {
     class netservice_error : public std::runtime_error {
     public:
-        netservice_error (const char *string);
+        explicit netservice_error (const char *string);
     };
 
 
     class netservice_cannot_bind : public netservice_error {
     public:
-        netservice_cannot_bind (const char *string);
+        explicit netservice_cannot_bind (const char *string);
     };
 }
 
@@ -92,9 +92,25 @@ std::vector<Listener*> NetworkServiceFactory::prepare_listener (port_type port, 
     auto sss = ss.str();
 
     _not(sss.c_str());
-    auto listener = new Listener(new Com(), type);
-    listener->com()->nonlocal_dst(true);
-    listener->worker_count_preference(sub_workers);
+
+    auto create_listener = [&]() -> Listener* {
+        auto r = new Listener(new Com(), type);
+        r->com()->nonlocal_dst(true);
+        r->worker_count_preference(sub_workers);
+
+        return r;
+    };
+
+
+
+    auto attach_listener = [](Listener* r, int sock) {
+        r->com()->unblock(sock);
+        r->com()->set_monitor(sock);
+        r->com()->set_poll_handler(sock, r);
+
+    };
+
+    auto listener = create_listener();
 
     // bind with master proxy (.. and create child proxies for new connections)
     int sock = listener->bind(port, 'L');
@@ -114,11 +130,39 @@ std::vector<Listener*> NetworkServiceFactory::prepare_listener (port_type port, 
         throw sx::netservice_cannot_bind(err.c_str());
     } else {
 
-        listener->com()->unblock(sock);
-        listener->com()->set_monitor(sock);
-        listener->com()->set_poll_handler(sock, listener);
+        // attach and push first listener
+        attach_listener(listener, sock);
 
         vec_toret.push_back(listener);
+
+        // create additional acceptor listeners (which will concurrently accept new connections)
+
+        // how many?
+        auto nthreads = std::thread::hardware_concurrency();
+        nthreads *= listener->core_multiplier();
+
+        if(sub_workers > 0)
+            nthreads = sub_workers;
+
+
+        nthreads = 2; // debug - create one addtional concurrent acceptor
+
+        for(unsigned int i = 0; i < nthreads - 1 ; i++) {
+            auto additional_listener = create_listener();
+
+            if(additional_listener) {
+                auto cx = additional_listener->listen(sock, 'L');
+                if(! cx) {
+                    throw sx::netservice_error("cannot create additional acceptor context");
+                }
+
+                vec_toret.push_back(additional_listener);
+            }
+            else {
+                throw sx::netservice_error("cannot create additional acceptor");
+            }
+
+        }
     }
 
     return vec_toret;
