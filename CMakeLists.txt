@@ -127,7 +127,17 @@ add_executable(smithproxy
         src/inspect/dnsinspector.hpp
         src/inspect/dnsinspector.cpp
         src/cli/clihelp.hpp
-        src/cli/clihelp.cpp src/cli/cligen.hpp src/cli/cligen.cpp src/service/core/service.cpp src/service/core/service.hpp src/cli/diag/diag_cmds.hpp src/cli/diag/diag_cmds.cpp src/proxy/ocspinvoker.cpp src/proxy/ocspinvoker.hpp)
+        src/cli/clihelp.cpp
+        src/cli/cligen.hpp
+        src/cli/cligen.cpp
+        src/service/core/service.cpp
+        src/service/core/service.hpp
+        src/cli/diag/diag_cmds.hpp
+        src/cli/diag/diag_cmds.cpp
+        src/proxy/ocspinvoker.cpp
+        src/proxy/ocspinvoker.hpp
+        src/proxy/fdq.cpp
+        src/proxy/fdq.hpp)
 
 add_executable(smithd
         ${SMITHD_DIR}/smithd.cpp
@@ -136,8 +146,11 @@ add_executable(smithd
         src/service/daemon.cpp
         src/service/netservice.cpp
         src/smithlog.cpp
-        src/inspect/dns.cpp src/ext/libcidr/cidr.cpp
-        src/policy/addrobj.cpp src/async/asyncocsp.hpp)
+        src/inspect/dns.cpp
+        src/ext/libcidr/cidr.cpp
+        src/policy/addrobj.cpp
+        src/async/asyncocsp.hpp
+        src/proxy/fdq.cpp)
 
 add_executable(smithdc
         ${SMITHD_DIR}/smithdc.cpp

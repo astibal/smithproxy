@@ -137,10 +137,10 @@ void cmd_show_status(struct cli_def* cli) {
 #endif
 
 
-    auto get_proxy_type = [](auto& proxies) -> int {
-        if(proxies.empty()) return -1;
+    auto get_proxy_type = [](auto& proxies) -> const char* {
+        if(proxies.empty()) return "none";
 
-        return proxies[0]->sq_type();
+        return proxies[0]->sq_type_str();
     };
 
     auto get_multiplier = [](auto& proxies) -> int {
@@ -155,10 +155,10 @@ void cmd_show_status(struct cli_def* cli) {
         return proxies[0]->task_count();
     };
 
-    int sq_plain = get_proxy_type(SmithProxy::instance().plain_proxies);
-    int sq_ssl = get_proxy_type(SmithProxy::instance().ssl_proxies);
-    int sq_udp = get_proxy_type(SmithProxy::instance().udp_proxies);
-    int sq_dtls = get_proxy_type(SmithProxy::instance().dtls_proxies);
+    auto sq_plain = get_proxy_type(SmithProxy::instance().plain_proxies);
+    auto sq_ssl = get_proxy_type(SmithProxy::instance().ssl_proxies);
+    auto sq_udp = get_proxy_type(SmithProxy::instance().udp_proxies);
+    auto sq_dtls = get_proxy_type(SmithProxy::instance().dtls_proxies);
 
     cli_print(cli," ");
 
@@ -174,7 +174,7 @@ void cmd_show_status(struct cli_def* cli) {
     cli_print(cli, "TLS   threads: %d", get_task_count(SmithProxy::instance().ssl_proxies));
     cli_print(cli, "DTLS  threads: %d", get_task_count(SmithProxy::instance().dtls_proxies));
 
-    cli_print(cli, "Acceptor hint: tcp:%d, tls:%d, udp:%d, dtls:%d", sq_plain, sq_ssl, sq_udp, sq_dtls);
+    cli_print(cli, "Acceptor hint: tcp:%s, tls:%s, udp:%s, dtls:%s", sq_plain, sq_ssl, sq_udp, sq_dtls);
 
 
     cli_print(cli," ");

@@ -93,8 +93,11 @@ std::vector<Listener*> NetworkServiceFactory::prepare_listener (port_type port, 
 
     _not(sss.c_str());
 
+
+    auto fdhints = std::make_shared<FdQueue>();
+
     auto create_listener = [&]() -> Listener* {
-        auto r = new Listener(new Com(), type);
+        auto r = new Listener(fdhints, new Com(), type);
         r->com()->nonlocal_dst(true);
         r->worker_count_preference(sub_workers);
 
