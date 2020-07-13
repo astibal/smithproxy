@@ -35,17 +35,41 @@ public:
     // pipe created to be monitored by Workers with poll. If pipe is filled with *some* data
     // there is something in the queue to pick-up.
 
-    int push(int);
+    int push(int s);
     int pop();
+    template <typename UnaryPredicate>
+    std::optional<int> pop_if(UnaryPredicate);
 
     inline std::pair<int,int> hint_pair() const { return std::make_pair(hint_pair_[0], hint_pair_[1]); }
-private:
+    std::mutex& get_lock() const { return sq_lock_; }
+protected:
     mutable std::mutex sq_lock_;
     mp::deque<int> sq_;
     int hint_pair_[2] = {-1, -1};
 
     logan_lite log;
+
+    friend struct FdQueueHandler;
 };
+
+
+template <typename UnaryPredicate>
+std::optional<int> FdQueue::pop_if(UnaryPredicate check_true) {
+
+    auto l_ = std::scoped_lock(sq_lock_);
+
+    if(sq_.empty())
+        return {};
+
+    uint32_t val = sq_.back();
+    if(check_true(val)) {
+        sq_.pop_back();
+        return val;
+    }
+
+    return {};
+}
+
 
 // proxy and wrapper class for FdQueue
 class FdQueueError : public std::runtime_error {
@@ -56,10 +80,16 @@ public:
 struct FdQueueHandler {
     explicit FdQueueHandler(std::shared_ptr<FdQueue> fdq) : fdqueue(std::move(fdq)) {}
 
-    std::shared_ptr<FdQueue> fdqueue;
     [[nodiscard]] int pop() const {
         if(fdqueue)
             return fdqueue->pop();
+
+        throw FdQueueError("handler: no fdqueue");
+    }
+
+    int push(int s) const {
+        if(fdqueue)
+            return fdqueue->push(s);
 
         throw FdQueueError("handler: no fdqueue");
     }
@@ -78,4 +108,21 @@ struct FdQueueHandler {
         throw FdQueueError("handler: no fdqueue");
     }
 
+    template <typename UnaryPredicate>
+    [[nodiscard]] std::optional<int> pop_if(UnaryPredicate check_true) {
+        if(fdqueue)
+            return fdqueue->pop_if(check_true);
+
+        throw FdQueueError("handler: no fdqueue");
+    }
+
+    [[nodiscard]] std::pair<int,int> hint_pair() const {
+        if(fdqueue)
+            return fdqueue->hint_pair();
+
+        throw FdQueueError("handler: no fdqueue");
+    }
+
+private:
+    std::shared_ptr<FdQueue> fdqueue;
 };
