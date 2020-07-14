@@ -135,9 +135,7 @@ add_executable(smithproxy
         src/cli/diag/diag_cmds.hpp
         src/cli/diag/diag_cmds.cpp
         src/proxy/ocspinvoker.cpp
-        src/proxy/ocspinvoker.hpp
-        src/proxy/fdq.cpp
-        src/proxy/fdq.hpp)
+        src/proxy/ocspinvoker.hpp)
 
 add_executable(smithd
         ${SMITHD_DIR}/smithd.cpp
@@ -149,8 +147,7 @@ add_executable(smithd
         src/inspect/dns.cpp
         src/ext/libcidr/cidr.cpp
         src/policy/addrobj.cpp
-        src/async/asyncocsp.hpp
-        src/proxy/fdq.cpp)
+        src/async/asyncocsp.hpp)
 
 add_executable(smithdc
         ${SMITHD_DIR}/smithdc.cpp
