@@ -148,7 +148,7 @@ std::vector<Listener*> NetworkServiceFactory::prepare_listener (port_type port, 
             nthreads = sub_workers;
 
 
-        nthreads = 2; // debug - create one addtional concurrent acceptor
+        nthreads = 5; // debug - create one addtional concurrent acceptor
 
         for(unsigned int i = 0; i < nthreads - 1 ; i++) {
             auto additional_listener = create_listener();
