@@ -38,7 +38,7 @@
 */
 #include <algorithm>
 
-#include <libcli.h>
+#include <ext/libcli/libcli.h>
 
 #include <cli/clihelp.hpp>
 #include <cli/cligen.hpp>

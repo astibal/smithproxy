@@ -53,6 +53,7 @@
 #include <openssl/rand.h>
 #include <log/logger.hpp>
 
+#include <ext/libcli/libcli.h>
 #include <cli/cmdserver.hpp>
 #include <cli/cligen.hpp>
 #include <cli/diag/diag_cmds.hpp>
@@ -76,7 +77,6 @@
 #include <inspect/sigfactory.hpp>
 #include <inspect/dnsinspector.hpp>
 
-#include <libcli.h>
 #include <cli/clihelp.hpp>
 
 
