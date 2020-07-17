@@ -117,7 +117,7 @@ add_executable(smithproxy
         src/ext/libcidr/cidr.cpp
         src/ext/cxxopts/cxxopts.hpp
         src/ext/nltemplate/nltemplate.cpp
-        src/ext/libcli/libcli.c
+        src/ext/libcli/libcli.cpp
 
         src/policy/authfactory.hpp
         src/policy/authfactory4.cpp
@@ -165,12 +165,9 @@ if (LIBCONFIGPP_FOUND)
   target_link_libraries (smithd ${LIBCONFIGPP_LIBRARIES})
 endif (LIBCONFIGPP_FOUND)
 
-#find_package (LibCli REQUIRED)
-#if (LIBCLI_FOUND)
-#  include_directories(${LIBCLI_INCLUDE_DIR})
-#  target_link_libraries (smithproxy ${LIBCLI_LIBRARY})
-#  target_link_libraries (smithd ${LIBCLI_LIBRARY})
-#endif (LIBCLI_FOUND)
+
+# libcli dep
+target_link_libraries (smithproxy crypt)
 
 find_package(PythonLibs 3 REQUIRED)
 include_directories(${PYTHON_INCLUDE_DIRS})
