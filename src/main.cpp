@@ -45,10 +45,9 @@
 #endif
 
 
-#include <vector>
-
 #include <cstdlib>
 #include <sys/stat.h>
+#include <sys/resource.h>
 
 #include <ostream>
 
@@ -189,8 +188,39 @@ void prepare_tenanting(bool is_custom_file) {
     SmithProxy::instance().tenant_index(CfgFactory::get().tenant_index);
 }
 
+bool raise_limits() {
+
+    bool ret = false;
+
+    rlimit r{0};
+    std::stringstream ss;
+
+    getrlimit(RLIMIT_NOFILE, &r);
+
+    // ss << " files: cur:" << r.rlim_cur << " max: " << r.rlim_max;
+    //_cons(ss); ss.clear();
+
+
+    rlimit fno {
+            .rlim_cur = r.rlim_max,
+            .rlim_max = r.rlim_max
+    };
+
+    if (0 == setrlimit(RLIMIT_NOFILE, &fno)) {
+        ret = true;
+    }
+    return ret;
+};
+
 
 int main(int argc, char *argv[]) {
+
+
+    if(! raise_limits()) {
+        std::cerr << "cannot max file descriptors";
+        exit(-1);
+    }
+
 
     static struct option long_options[] =
             {
