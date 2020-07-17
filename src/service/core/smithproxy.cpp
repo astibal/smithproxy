@@ -229,6 +229,24 @@ void SmithProxy::run() {
     std::string friendly_thread_name_redir_ssl = string_format("sxy_rds_%d",CfgFactory::get().tenant_index);
     std::string friendly_thread_name_redir_udp = string_format("sxy_rdu_%d",CfgFactory::get().tenant_index);
 
+
+    // cli_loop uses select :(
+    cli_thread = std::make_shared<std::thread>([] () {
+        CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
+
+        auto this_daemon = DaemonFactory::instance();
+        auto& log = this_daemon.log;
+
+        _inf("Starting CLI");
+        DaemonFactory::set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
+        _dia("smithproxy_cli: max file descriptors: %d", this_daemon.get_limit_fd());
+
+        cli_loop(CliState::get().cli_port);
+        _dia("cli workers torn down.");
+    } );
+    pthread_setname_np(cli_thread->native_handle(),friendly_thread_name_cli.c_str());
+
+
     auto launch_proxy_threads = [&](auto &proxies, const char* log_friendly, const char* thread_friendly) {
         for(auto proxy: proxies) {
             _inf("Starting: %s", log_friendly);
@@ -264,20 +282,6 @@ void SmithProxy::run() {
     launch_proxy_threads(redir_udp_proxies, "redirected UDP listener", friendly_thread_name_redir_udp.c_str());
 
 
-    cli_thread = std::make_shared<std::thread>([] () {
-        CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
-
-        auto this_daemon = DaemonFactory::instance();
-        auto& log = this_daemon.log;
-
-        _inf("Starting CLI");
-        DaemonFactory::set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
-        _dia("smithproxy_cli: max file descriptors: %d", this_daemon.get_limit_fd());
-
-        cli_loop(CliState::get().cli_port);
-        _dia("cli workers torn down.");
-    } );
-    pthread_setname_np(cli_thread->native_handle(),friendly_thread_name_cli.c_str());
 
 
     pthread_setname_np(pthread_self(),friendly_thread_name_own.c_str());
