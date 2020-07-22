@@ -57,9 +57,9 @@
 
 #include <atomic>
 
-typedef ThreadedAcceptor<MitmMasterProxy,MitmProxy> theAcceptor;
-typedef ThreadedReceiver<MitmUdpProxy,MitmProxy> theReceiver;
-typedef ThreadedAcceptor<MitmSocksProxy,SocksProxy> socksAcceptor;
+typedef ThreadedAcceptor<MitmMasterProxy> theAcceptor;
+typedef ThreadedReceiver<MitmUdpProxy> theReceiver;
+typedef ThreadedAcceptor<MitmSocksProxy> socksAcceptor;
 
 
 

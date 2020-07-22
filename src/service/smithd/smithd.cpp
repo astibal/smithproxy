@@ -194,7 +194,7 @@ public:
     }
 };
 
-typedef ThreadedAcceptor<UxAcceptor,SmithdProxy> UxProxy;
+typedef ThreadedAcceptor<UxAcceptor> UxProxy;
 
 // running threads and their proxies
 
