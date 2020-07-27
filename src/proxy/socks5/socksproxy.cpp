@@ -268,7 +268,7 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
                     if (n_cx->com()) {
                         af = n_cx->com()->l3_proto();
                     }
-                    std::string str_af = inet_family_str(af);
+                    std::string str_af = SocketInfo::inet_family_str(af);
 
 
                     std::vector<std::string> groups_vec;
