@@ -36,8 +36,7 @@ start)
         ip6tables -t nat -A OUTPUT -p tcp --dport ${P} -j REDIRECT --to-port 51443  -m owner ! --uid-owner `id -u root`
     done;
 
-    #iptables -t nat -A OUTPUT -p udp --dport 53 -j REDIRECT --to-port 51053  -m owner ! --uid-owner `id -u root`
-    iptables -t nat -A OUTPUT -p udp --dport 53 -d 208.67.222.222 -j REDIRECT --to-port 51053  -m owner ! --uid-owner `id -u root`
+    iptables -t nat -A OUTPUT -p udp --dport 53 -j REDIRECT --to-port 51053  -m owner ! --uid-owner `id -u root`
     iptables -t nat -A OUTPUT -p tcp -j REDIRECT --to-port 51080  -m owner ! --uid-owner `id -u root`
 
     #ip6tables -t nat -A OUTPUT -p udp --dport 53 -j REDIRECT --to-port 51053  -m owner ! --uid-owner `id -u root`
