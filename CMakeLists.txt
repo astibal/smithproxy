@@ -165,8 +165,6 @@ if (LIBCONFIGPP_FOUND)
   target_link_libraries (smithd ${LIBCONFIGPP_LIBRARIES})
 endif (LIBCONFIGPP_FOUND)
 
-
-# libcli dep
 target_link_libraries (smithproxy crypt)
 
 find_package(PythonLibs 3 REQUIRED)
@@ -391,7 +389,7 @@ if(UNIX)
     SET(CPACK_PACKAGE_DESCRIPTION "Smithproxy is fast and transparent TCP/UDP/TLS proxy with SOCKS support.")
     SET(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Smithproxy is fast and transparent TCP/UDP/TLS proxy with SOCKS support.")
     SET(CPACK_DEBIAN_PACKAGE_MAINTAINER "Ales Stibal <astib@mag0.net>")
-    SET(CPACK_DEBIAN_PACKAGE_DEPENDS "libstdc++6, libssl1.1 (>=1.1.1), libconfig++9v5, libcli1, libunwind8,
+    SET(CPACK_DEBIAN_PACKAGE_DEPENDS "libstdc++6, libssl1.1 (>=1.1.1), libconfig++9v5, libunwind8,
                                       swig, iptables, telnet, iproute2, python3-pyparsing,python3-posix-ipc, python3-ldap,
                                       python3-pip, libssl-dev")
 
