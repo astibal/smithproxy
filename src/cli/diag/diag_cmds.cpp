@@ -933,6 +933,22 @@ int cli_diag_mem_objects_stats(struct cli_def *cli, const char *command, char *a
 
 }
 
+int cli_diag_mem_udp_stats(struct cli_def *cli, const char *command, char **argv, int argc) {
+
+    debug_cli_params(cli, command, argv, argc);
+
+    cli_print(cli,"UDP Statistics:\n");
+    {
+        auto l_ = std::scoped_lock(DatagramCom::lock);
+        cli_print(cli, "Embryonic entries:    %lu", DatagramCom::datagrams_received.size());
+        cli_print(cli, "Embryonic inset sz:   %lu", DatagramCom::in_virt_set.size());
+    }
+
+    return CLI_OK;
+
+
+}
+
 int cli_diag_mem_trace_mark (struct cli_def *cli, const char *command, char **argv, int argc) {
 
     debug_cli_params(cli, command, argv, argc);
@@ -1683,8 +1699,11 @@ bool register_diags(cli_def* cli, cli_command* diag) {
     }
 
     auto diag_mem = cli_register_command(cli, diag, "mem", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory related troubleshooting commands");
-    auto diag_mem_buffers = cli_register_command(cli, diag_mem, "buffers", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory buffers troubleshooting commands");
-    cli_register_command(cli, diag_mem_buffers, "stats", cli_diag_mem_buffers_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory buffers statistics");
+        auto diag_mem_buffers = cli_register_command(cli, diag_mem, "buffers", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory buffers troubleshooting commands");
+            cli_register_command(cli, diag_mem_buffers, "stats", cli_diag_mem_buffers_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory buffers statistics");
+        auto diag_mem_udp = cli_register_command(cli, diag_mem, "udp", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "udp related structures troubleshooting commands");
+            cli_register_command(cli, diag_mem_udp, "stats", cli_diag_mem_udp_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "udp structures statistics");
+
     auto diag_mem_objects = cli_register_command(cli, diag_mem, "objects", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory object troubleshooting commands");
     cli_register_command(cli, diag_mem_objects, "stats", cli_diag_mem_objects_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory objects statistics");
     cli_register_command(cli, diag_mem_objects, "list", cli_diag_mem_objects_list, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory objects list");
