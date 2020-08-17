@@ -845,9 +845,11 @@ int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *a
         cli_print(cli, "API allocations above limits:");
         {
             std::scoped_lock<std::mutex> g(memPool::pool().lock);
-            cli_print(cli, "allocations: %lld/%lldB", memPool::pool().stat_alloc.load(), memPool::pool().stat_alloc_size.load());
-            cli_print(cli, "   releases: %lld/%lldB", memPool::pool().stat_out_free.load(),
+            cli_print(cli, "      allocations: %lld/%lldB", memPool::pool().stat_alloc.load(), memPool::pool().stat_alloc_size.load());
+            cli_print(cli, "         releases: %lld/%lldB", memPool::pool().stat_out_free.load(),
                       memPool::pool().stat_out_free_size.load());
+            cli_print(cli, "release pool miss: %lld/%lldB", memPool::pool().stat_out_pool_miss.load(),
+                      memPool::pool().stat_out_pool_miss_size.load());
 
             cli_print(cli, "\nPool capacities (available/limits):");
             cli_print(cli, " 32B pool size: %lu/%lu", memPool::pool().mem_32_av(), memPool::pool().mem_32_sz());
@@ -955,9 +957,9 @@ int cli_diag_mem_trace_mark (struct cli_def *cli, const char *command, char **ar
 
 #ifdef MEMPOOL_DEBUG
 
-    std::scoped_lock<std::mutex> l(mpdata::lock());
+    std::scoped_lock<std::mutex> l(mpdata::trace_lock());
 
-    for (auto& it: mpdata::map()) {
+    for (auto& it: mpdata::trace_map()) {
         it.second.mark = 1;
     }
 
@@ -1005,9 +1007,9 @@ int cli_diag_mem_trace_list (struct cli_def *cli, const char *command, char **ar
 
         std::unordered_map<std::string, bt_stat> occ;
         {
-            std::scoped_lock<std::mutex> l(mpdata::lock());
+            std::scoped_lock<std::mutex> l(mpdata::trace_lock());
 
-            for (auto mem: mpdata::map()) {
+            for (auto mem: mpdata::trace_map()) {
                 auto mch = mem.second;
                 if ( (!mch.in_pool) && mch.mark == filter) {
                     std::string k;
@@ -1028,7 +1030,7 @@ int cli_diag_mem_trace_list (struct cli_def *cli, const char *command, char **ar
                 }
             }
 
-            cli_print(cli, "Allocation traces: processed %ld used mempool entries", mpdata::map().size());
+            cli_print(cli, "Allocation traces: processed %ld used mempool entries", mpdata::trace_map().size());
         }
         cli_print(cli, "Allocation traces: parsed %ld unique entries.", occ.size());
 
