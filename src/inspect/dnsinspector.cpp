@@ -62,7 +62,7 @@ void DNS_Inspector::update(AppHostCX* cx) {
 
     if(!in_progress()) {
         baseCom* com = cx->com();
-        TCPCom* tcp_com = dynamic_cast<TCPCom*>(com);
+        auto* tcp_com = dynamic_cast<TCPCom*>(com);
         if(tcp_com)
             is_tcp = true;
 
