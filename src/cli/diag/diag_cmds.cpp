@@ -848,7 +848,7 @@ int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *a
             cli_print(cli, "      allocations: %lld/%lldB", memPool::pool().stat_alloc.load(), memPool::pool().stat_alloc_size.load());
             cli_print(cli, "         releases: %lld/%lldB", memPool::pool().stat_out_free.load(),
                       memPool::pool().stat_out_free_size.load());
-            cli_print(cli, "release pool miss: %lld/%lldB", memPool::pool().stat_out_pool_miss.load(),
+            cli_print(cli, "\nrelease pool miss: %lld/%lldB", memPool::pool().stat_out_pool_miss.load(),
                       memPool::pool().stat_out_pool_miss_size.load());
 
             cli_print(cli, "\nPool capacities (available/limits):");
