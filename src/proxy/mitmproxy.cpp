@@ -1833,7 +1833,10 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
             _deb("MitmMasterProxy::on_left_new: ladd the new cx (unpaused)");
             new_proxy->ladd(just_accepted_cx);
         }
-        
+
+        // new proxy must monitor accepted socket(s)
+        com()->set_poll_handler(just_accepted_cx->socket(), new_proxy);
+
         bool matched_vip = false; //did it match virtual IP?
         
         std::string target_host = just_accepted_cx->com()->nonlocal_dst_host();
