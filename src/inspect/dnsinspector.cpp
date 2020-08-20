@@ -182,7 +182,13 @@ void DNS_Inspector::update(AppHostCX* cx) {
 
                     }
                 } else {
-                    _dia("DNS answer for %s is not in cache",ptr->question_str_0().c_str());
+                    _dia("DNS answer for %s is not in cache - reverting to non-cached result",ptr->question_str_0().c_str());
+                    verdict(OK);
+                    if(cached_response) {
+                        _dia("DNS answer for %s is not in cache - resetting previous response",ptr->question_str_0().c_str());
+                        cached_response.reset();
+                    }
+
                 }
             }
 
