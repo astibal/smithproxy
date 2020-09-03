@@ -61,8 +61,6 @@ namespace sx {
 class NetworkServiceFactory {
 public:
 
-    using proxy_type = threadedProxyWorker::proxy_type_t;
-
     static logan_lite& log() {
         static logan_lite l("service");
         return l;
@@ -71,12 +69,12 @@ public:
     template <class Listener, class Com,
             typename port_type = unsigned short>
     static std::vector<Listener*> prepare_listener (port_type port, std::string const &friendly_name, int sub_workers,
-                                                                    proxy_type type);
+                                                                    proxyType type);
 };
 
 template <class Listener, class Com, typename port_type>
 std::vector<Listener*> NetworkServiceFactory::prepare_listener (port_type port, std::string const &friendly_name, int sub_workers,
-                                                    proxy_type type) {
+                                                    proxyType type) {
 
     auto log = NetworkServiceFactory::log();
 

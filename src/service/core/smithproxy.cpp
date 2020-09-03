@@ -132,49 +132,49 @@ void SmithProxy::create_listeners() {
                 std::stoi(CfgFactory::get().listen_tcp_port),
                 "plain-tcp",
                 CfgFactory::get().num_workers_tcp,
-                NetworkServiceFactory::proxy_type::TRANSPARENT);
+                proxyType::transparent());
 
         ssl_proxies = NetworkServiceFactory::prepare_listener<theAcceptor, MySSLMitmCom>(
                 std::stoi(CfgFactory::get().listen_tls_port),
                 "tls",
                 CfgFactory::get().num_workers_tls,
-                NetworkServiceFactory::proxy_type::TRANSPARENT);
+                proxyType::transparent());
 
         dtls_proxies = NetworkServiceFactory::prepare_listener<theReceiver, MyDTLSMitmCom>(
                 std::stoi(CfgFactory::get().listen_dtls_port),
                 "dtls",
                 CfgFactory::get().num_workers_dtls,
-                NetworkServiceFactory::proxy_type::TRANSPARENT);
+                proxyType::transparent());
 
         udp_proxies = NetworkServiceFactory::prepare_listener<theReceiver, UDPCom>(
                 std::stoi(CfgFactory::get().listen_udp_port),
                 "udp",
                 CfgFactory::get().num_workers_udp,
-                NetworkServiceFactory::proxy_type::TRANSPARENT);
+                proxyType::transparent());
 
         socks_proxies = NetworkServiceFactory::prepare_listener<socksAcceptor, socksTCPCom>(
                 std::stoi(CfgFactory::get().listen_socks_port),
                 "socks",
                 CfgFactory::get().num_workers_socks,
-                NetworkServiceFactory::proxy_type::PROXY);
+                proxyType::proxy());
 
         redir_plain_proxies = NetworkServiceFactory::prepare_listener<theAcceptor, TCPCom>(
                 std::stoi(CfgFactory::get().listen_tcp_port) + 1000,
                 "plain-rdr",
                 CfgFactory::get().num_workers_tcp,
-                NetworkServiceFactory::proxy_type::REDIRECT);
+                proxyType::redirect());
         redir_ssl_proxies = NetworkServiceFactory::prepare_listener<theAcceptor, MySSLMitmCom>(
                 std::stoi(CfgFactory::get().listen_tls_port) + 1000,
                 "ssl-rdr",
                 CfgFactory::get().num_workers_tcp,
-                NetworkServiceFactory::proxy_type::REDIRECT);
+                proxyType::redirect());
 
         redir_udp_proxies = NetworkServiceFactory::prepare_listener<theReceiver, UDPCom>(
                 std::stoi(CfgFactory::get().listen_udp_port) +
                 973,  // 973 + default 50080 = 51053: should suggest DNS only
                 "udp-rdr",
                 CfgFactory::get().num_workers_udp,
-                NetworkServiceFactory::proxy_type::REDIRECT);
+                proxyType::redirect());
 
 
         if ((plain_proxies.empty() && CfgFactory::get().num_workers_tcp >= 0) ||

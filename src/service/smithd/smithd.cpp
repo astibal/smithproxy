@@ -182,7 +182,7 @@ public:
 
 class UxAcceptor : public ThreadedAcceptorProxy<SmithdProxy> {
 public:
-    UxAcceptor(baseCom* c, int worker_id, proxy_type_t t = proxy_type_t::NONE ) :
+    UxAcceptor(baseCom* c, int worker_id, proxyType t = proxyType::none() ) :
         ThreadedAcceptorProxy<SmithdProxy>(c,worker_id, t) {};
     
     baseHostCX* new_cx(const char* h, const char* p) override { return new SmithServerCX(com()->slave(),h,p); };
@@ -584,7 +584,7 @@ int main(int argc, char *argv[]) {
                 path.c_str(),
                 "ux-plain",
                 cfg_smithd_workers,
-                NetworkServiceFactory::proxy_type::NONE);
+                proxyType::none());
     } catch(socle::com_error const& e) {
         _fat("Exception caught when creating listener: %s", e.what());
     }
