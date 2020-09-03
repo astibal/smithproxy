@@ -247,12 +247,12 @@ void SmithProxy::run() {
     pthread_setname_np(cli_thread->native_handle(),friendly_thread_name_cli.c_str());
 
 
-    auto launch_proxy_threads = [&](auto &proxies, const char* log_friendly, const char* thread_friendly) {
+    auto launch_proxy_threads = [&](auto &proxies, auto& thread_list, const char* log_friendly, const char* thread_friendly) {
         for(auto proxy: proxies) {
             _inf("Starting: %s", log_friendly);
 
             // taking proxy as a value!
-            auto a_thread = new std::thread([proxy]() {
+            auto a_thread = std::make_shared<std::thread>([proxy]() {
                 CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
 
                 auto this_daemon = DaemonFactory::instance();
@@ -266,20 +266,21 @@ void SmithProxy::run() {
                 proxy->shutdown();
             } );
             pthread_setname_np(a_thread->native_handle(),thread_friendly);
+            thread_list.push_back(a_thread);
         }
     };
 
     // TCP listener
-    launch_proxy_threads(plain_proxies, "TCP listener", friendly_thread_name_tcp.c_str());
-    launch_proxy_threads(ssl_proxies, "TLS listener", friendly_thread_name_tls.c_str());
-    launch_proxy_threads(dtls_proxies, "DTLS listener", friendly_thread_name_dls.c_str());
-    launch_proxy_threads(udp_proxies, "UDP listener", friendly_thread_name_udp.c_str());
+    launch_proxy_threads(plain_proxies, plain_threads, "TCP listener", friendly_thread_name_tcp.c_str());
+    launch_proxy_threads(ssl_proxies, ssl_threads, "TLS listener", friendly_thread_name_tls.c_str());
+    launch_proxy_threads(dtls_proxies, dtls_threads, "DTLS listener", friendly_thread_name_dls.c_str());
+    launch_proxy_threads(udp_proxies, udp_threads, "UDP listener", friendly_thread_name_udp.c_str());
 
-    launch_proxy_threads(socks_proxies, "SOCKS listener", friendly_thread_name_skx.c_str());
+    launch_proxy_threads(socks_proxies, socks_threads, "SOCKS listener", friendly_thread_name_skx.c_str());
 
-    launch_proxy_threads(redir_plain_proxies, "redirected TCP listener", friendly_thread_name_redir_tcp.c_str());
-    launch_proxy_threads(redir_ssl_proxies, "redirected TLS listener", friendly_thread_name_redir_ssl.c_str());
-    launch_proxy_threads(redir_udp_proxies, "redirected UDP listener", friendly_thread_name_redir_udp.c_str());
+    launch_proxy_threads(redir_plain_proxies, redir_plain_threads, "redirected TCP listener", friendly_thread_name_redir_tcp.c_str());
+    launch_proxy_threads(redir_ssl_proxies, redir_ssl_threads, "redirected TLS listener", friendly_thread_name_redir_ssl.c_str());
+    launch_proxy_threads(redir_udp_proxies, redir_udp_threads, "redirected UDP listener", friendly_thread_name_redir_udp.c_str());
 
 
 

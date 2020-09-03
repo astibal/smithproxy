@@ -83,9 +83,10 @@ public:
 
     std::vector<std::shared_ptr<std::thread>> plain_threads;
     std::vector<std::shared_ptr<std::thread>> ssl_threads;
-    std::vector<std::shared_ptr<std::thread>> dtls_threads;
     std::vector<std::shared_ptr<std::thread>> udp_threads;
+    std::vector<std::shared_ptr<std::thread>> dtls_threads;
     std::vector<std::shared_ptr<std::thread>> socks_threads;
+
     std::vector<std::shared_ptr<std::thread>> redir_plain_threads;
     std::vector<std::shared_ptr<std::thread>> redir_ssl_threads;
     std::vector<std::shared_ptr<std::thread>> redir_udp_threads;
