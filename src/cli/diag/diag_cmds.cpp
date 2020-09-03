@@ -420,10 +420,11 @@ int cli_diag_ssl_verify_list(struct cli_def *cli, const char *command, char *arg
         for (auto const& x: SSLFactory::factory().verify_cache.cache()) {
             std::string cn = x.first;
             auto cached_result = x.second;
-            long ttl = 0;
+
             if (cached_result) {
-                ttl = cached_result->expired_at() - ::time(nullptr);
-                out << string_format("    %s, ttl=%d, status=%d", cn.c_str(), ttl, cached_result->value());
+                auto ttl = cached_result->expired_at() - ::time(nullptr);
+                auto revoked_str = string_format("%s(%d)", cached_result->value().revoked > 0 ? "revoked" : "ok", cached_result->value().revoked );
+                out << string_format("    %s, ttl=%d, status=%s", cn.c_str(), ttl, revoked_str.c_str());
 
                 if (ttl <= 0) {
                     out << "  *expired*";
