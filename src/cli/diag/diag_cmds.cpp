@@ -1693,12 +1693,17 @@ int cli_diag_worker_list(struct cli_def *cli, const char *command, char *argv[],
 
                 int p_i = 0;
 
-                auto l_ = std::scoped_lock(wrk.second->proxy_lock());
+                std::stringstream ss;
+                {
+                    auto l_ = std::scoped_lock(wrk.second->proxy_lock());
 
-                for(auto p: wrk.second->proxies()) {
-                    cli_print(cli, "          `- proxy[%d]: %s", p_i, p->to_string().c_str());
-                    p_i++;
+                    for(auto p: wrk.second->proxies()) {
+                        ss << string_format("          `- proxy[%d]: %s\n", p_i, p->to_string().c_str());
+                        p_i++;
+                    }
                 }
+                auto sss = ss.str();
+                cli_print(cli, "%s", sss.c_str());
 
                 w_i++;
             }
