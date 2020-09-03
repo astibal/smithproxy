@@ -1653,6 +1653,83 @@ int cli_diag_sig_list(struct cli_def *cli, const char *command, char *argv[], in
     return CLI_OK;
 }
 
+#include <service/core/smithproxy.hpp>
+
+int cli_diag_worker_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    auto& sx = SmithProxy::instance();
+
+
+    auto list_worker = [&cli](const char* title, auto& listener) {
+        cli_print(cli, title);
+        for (auto acc: listener) {
+            cli_print(cli, "    %s, type %s",
+                      acc->hr().c_str(),
+                      acc->proxy_type().to_string().c_str());
+
+            int w_i = 0;
+            std::string em;
+            bool at_least_one_worker_active = false;
+            for(auto wrk: acc->tasks()) {
+
+                if(wrk.second->proxies().empty()) {
+                    em += string_format("<%d>", w_i);
+                    w_i++;
+                    continue;
+                } else {
+
+                    at_least_one_worker_active = true;
+
+                    if(! em.empty()) {
+                        cli_print(cli, "        `- workers idle: %s", em.c_str());
+                        em.clear();
+                    }
+                }
+
+                cli_print(cli, "        `- worker[%d]: %s, thread %p",
+                          w_i,
+                          wrk.second->to_string().c_str(),
+                          wrk.first);
+
+                int p_i = 0;
+
+                auto l_ = std::scoped_lock(wrk.second->proxy_lock());
+
+                for(auto p: wrk.second->proxies()) {
+                    cli_print(cli, "          `- proxy[%d]: %s", p_i, p->to_string().c_str());
+                    p_i++;
+                }
+
+                w_i++;
+            }
+
+            if(! at_least_one_worker_active) {
+                cli_print(cli, "        `- all %d workers idle", w_i); // don't add 1, it's added by last iteration
+
+            } else {
+                if (!em.empty()) {
+                    cli_print(cli, "        `- workers idle: %s", em.c_str());
+                }
+            }
+
+        }
+    };
+
+    list_worker("== plain acceptor", sx.plain_proxies);
+    list_worker("== tls acceptor", sx.ssl_proxies);
+
+    list_worker("== udp receiver", sx.udp_proxies);
+    list_worker("== dtls receiver", sx.dtls_proxies);
+
+    list_worker("== socks acceptor", sx.socks_proxies);
+
+    list_worker("== plain redirect acceptor", sx.redir_plain_proxies);
+    list_worker("== dns redirect receiver", sx.redir_udp_proxies);
+    list_worker("== tls redirect acceptor", sx.redir_ssl_proxies);
+
+    return CLI_OK;
+}
+
 bool register_diags(cli_def* cli, cli_command* diag) {
     auto diag_ssl = cli_register_command(cli, diag, "ssl", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "ssl related troubleshooting commands");
     auto diag_ssl_cache = cli_register_command(cli, diag_ssl, "cache", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl certificate cache");
@@ -1684,6 +1761,9 @@ bool register_diags(cli_def* cli, cli_command* diag) {
 
     auto diag_sig = cli_register_command(cli, diag, "sig", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "signature engine diagnostics");
     cli_register_command(cli, diag_sig, "list", cli_diag_sig_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list engine signatures");
+
+    auto diag_workers = cli_register_command(cli, diag, "workers", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "worker and threads diagnostics");
+    cli_register_command(cli, diag_workers, "list", cli_diag_worker_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list worker threads");
 
 
     if(true) {
