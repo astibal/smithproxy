@@ -240,7 +240,7 @@ public:
     int policy_match (baseProxy *proxy);
     int policy_match (std::vector<baseHostCX *> &left, std::vector<baseHostCX *> &right);
     int policy_action (int index);
-    int policy_apply (baseHostCX *originator, baseProxy *proxy);
+    int policy_apply (baseHostCX *originator, baseProxy *proxy, int matched_policy=-1);
 
     bool policy_apply_tls (int policy_num, baseCom *xcom);
     bool policy_apply_tls (const std::shared_ptr<ProfileTls> &pt, baseCom *xcom);

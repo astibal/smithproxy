@@ -180,26 +180,24 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
 
     n_cx->matched_policy(matched_policy());
     target_cx->matched_policy(matched_policy());
-        
-    int real_socket = target_cx->connect();
-    com()->set_monitor(real_socket);
-    com()->set_poll_handler(real_socket,this);
-    
+
     if(ssl) {
-//         ((SSLCom*)n_cx->com())->upgrade_server_socket(n_cx->socket());
-        _deb("SocksProxy::socks5_handoff: mark1");
-        
-//         ((SSLCom*)target_cx->com())->upgrade_client_socket(target_cx->socket());
+        _deb("SocksProxy::socks5_handoff: this connection is SSL port");
     }
     
     radd(target_cx);
-    
-    if (CfgFactory::get().policy_apply(n_cx, this) < 0) {
+
+    if (CfgFactory::get().policy_apply(n_cx, this, matched_policy()) < 0) {
         // strange, but it can happen if the sockets is closed between policy match and this profile application
         // mark dead.
         _inf("SocksProxy::socks5_handoff: session failed policy application");
         state().dead(true);
     } else {
+
+        // connect with applied properties
+        int real_socket = target_cx->connect();
+        com()->set_monitor(real_socket);
+        com()->set_poll_handler(real_socket,this);
 
         baseHostCX* src_cx = n_cx;
         bool delete_proxy = false;
