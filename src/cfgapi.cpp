@@ -1750,12 +1750,16 @@ bool CfgFactory::prof_script_apply (baseHostCX *originator, baseProxy *new_proxy
 }
 
 
-int CfgFactory::policy_apply (baseHostCX *originator, baseProxy *proxy) {
+int CfgFactory::policy_apply (baseHostCX *originator, baseProxy *proxy, int matched_policy) {
 
     auto log = logan_lite("policy.rule");
     std::lock_guard<std::recursive_mutex> l(lock_);
     
-    int policy_num = policy_match(proxy);
+    int policy_num = matched_policy;
+    if(policy_num < 1) {
+        policy_num = policy_match(proxy);
+    }
+
     int verdict = policy_action(policy_num);
     if(verdict == POLICY_ACTION_PASS) {
 
@@ -1843,7 +1847,12 @@ bool CfgFactory::should_redirect (const std::shared_ptr<ProfileTls> &pt, SSLCom 
     _deb("should_redirect[%s]", com->hr().c_str());
     
     if(com && com->owner_cx()) {
-        
+
+        if(com->owner_cx()->port().empty()) {
+            _deb("should_redirect[%s]: unknown cx port", com->hr().c_str());
+            return false;
+        }
+
         try {
             int num_port = std::stoi(com->owner_cx()->port());
             _deb("should_redirect[%s]: owner port %d", com->hr().c_str(), num_port);
@@ -1868,8 +1877,12 @@ bool CfgFactory::should_redirect (const std::shared_ptr<ProfileTls> &pt, SSLCom 
                 }
             }
         }
-        catch(std::invalid_argument& ) {}
-        catch(std::out_of_range& ) {}
+        catch(std::invalid_argument const& e) {
+            _err("should_redirect[%s]: %s", com->hr().c_str(), e.what());
+        }
+        catch(std::out_of_range const& e) {
+            _err("should_redirect[%s]: %s", com->hr().c_str(), e.what());
+        }
     }
     
     return ret;
