@@ -40,6 +40,8 @@
 #ifndef SRVUTILS_HPP_
 #define SRVUTILS_HPP_
 
+#include <algorithm>
+
 #include <threadedacceptor.hpp>
 #include <threadedreceiver.hpp>
 #include <policy/authfactory.hpp>
@@ -97,7 +99,7 @@ std::vector<Listener*> NetworkServiceFactory::prepare_listener (port_type port, 
     auto create_listener = [&]() -> Listener* {
         auto r = new Listener(fdhints, new Com(), type);
         r->com()->nonlocal_dst(true);
-        r->worker_count_preference(sub_workers);
+        r->worker_count_preference(std::max(sub_workers, 2));
 
         return r;
     };
@@ -142,11 +144,11 @@ std::vector<Listener*> NetworkServiceFactory::prepare_listener (port_type port, 
         auto nthreads = std::thread::hardware_concurrency();
         nthreads *= listener->core_multiplier();
 
-        if(sub_workers > 0)
+
+        // if option explicitly set, override listener count with it
+        if(sub_workers > 0) {
             nthreads = sub_workers;
-
-
-        nthreads = 5; // debug - create one additional concurrent acceptor
+        }
 
         for(unsigned int i = 0; i < nthreads - 1 ; i++) {
             auto additional_listener = create_listener();
