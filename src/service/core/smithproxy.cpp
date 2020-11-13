@@ -166,7 +166,7 @@ void SmithProxy::create_listeners() {
         redir_ssl_proxies = NetworkServiceFactory::prepare_listener<theAcceptor, MySSLMitmCom>(
                 std::stoi(CfgFactory::get().listen_tls_port) + 1000,
                 "ssl-rdr",
-                CfgFactory::get().num_workers_tcp,
+                CfgFactory::get().num_workers_tls,
                 proxyType::redirect());
 
         redir_udp_proxies = NetworkServiceFactory::prepare_listener<theReceiver, UDPCom>(
