@@ -128,87 +128,112 @@ void SmithProxy::create_listeners() {
     bool success = false;
 
     try {
-        plain_proxies = NetworkServiceFactory::prepare_listener<theAcceptor, TCPCom>(
-                std::stoi(CfgFactory::get().listen_tcp_port),
-                "plain-tcp",
-                CfgFactory::get().num_workers_tcp,
-                proxyType::transparent());
 
-        ssl_proxies = NetworkServiceFactory::prepare_listener<theAcceptor, MySSLMitmCom>(
-                std::stoi(CfgFactory::get().listen_tls_port),
-                "tls",
-                CfgFactory::get().num_workers_tls,
-                proxyType::transparent());
+        if(CfgFactory::get().accept_tproxy) {
+            plain_proxies = NetworkServiceFactory::prepare_listener<theAcceptor, TCPCom>(
+                    std::stoi(CfgFactory::get().listen_tcp_port),
+                    "plain-tcp",
+                    CfgFactory::get().num_workers_tcp,
+                    proxyType::transparent());
 
-        dtls_proxies = NetworkServiceFactory::prepare_listener<theReceiver, MyDTLSMitmCom>(
-                std::stoi(CfgFactory::get().listen_dtls_port),
-                "dtls",
-                CfgFactory::get().num_workers_dtls,
-                proxyType::transparent());
+            ssl_proxies = NetworkServiceFactory::prepare_listener<theAcceptor, MySSLMitmCom>(
+                    std::stoi(CfgFactory::get().listen_tls_port),
+                    "tls",
+                    CfgFactory::get().num_workers_tls,
+                    proxyType::transparent());
 
-        udp_proxies = NetworkServiceFactory::prepare_listener<theReceiver, UDPCom>(
-                std::stoi(CfgFactory::get().listen_udp_port),
-                "udp",
-                CfgFactory::get().num_workers_udp,
-                proxyType::transparent());
+            dtls_proxies = NetworkServiceFactory::prepare_listener<theReceiver, MyDTLSMitmCom>(
+                    std::stoi(CfgFactory::get().listen_dtls_port),
+                    "dtls",
+                    CfgFactory::get().num_workers_dtls,
+                    proxyType::transparent());
 
-        socks_proxies = NetworkServiceFactory::prepare_listener<socksAcceptor, socksTCPCom>(
-                std::stoi(CfgFactory::get().listen_socks_port),
-                "socks",
-                CfgFactory::get().num_workers_socks,
-                proxyType::proxy());
+            udp_proxies = NetworkServiceFactory::prepare_listener<theReceiver, UDPCom>(
+                    std::stoi(CfgFactory::get().listen_udp_port),
+                    "udp",
+                    CfgFactory::get().num_workers_udp,
+                    proxyType::transparent());
 
-        redir_plain_proxies = NetworkServiceFactory::prepare_listener<theAcceptor, TCPCom>(
-                std::stoi(CfgFactory::get().listen_tcp_port) + 1000,
-                "plain-rdr",
-                CfgFactory::get().num_workers_tcp,
-                proxyType::redirect());
-        redir_ssl_proxies = NetworkServiceFactory::prepare_listener<theAcceptor, MySSLMitmCom>(
-                std::stoi(CfgFactory::get().listen_tls_port) + 1000,
-                "ssl-rdr",
-                CfgFactory::get().num_workers_tls,
-                proxyType::redirect());
+            if ((plain_proxies.empty() && CfgFactory::get().num_workers_tcp >= 0) ||
+                (ssl_proxies.empty() && CfgFactory::get().num_workers_tls >= 0) ||
+                (dtls_proxies.empty() && CfgFactory::get().num_workers_dtls >= 0) ||
+                (udp_proxies.empty() && CfgFactory::get().num_workers_udp >= 0)) {
 
-        redir_udp_proxies = NetworkServiceFactory::prepare_listener<theReceiver, UDPCom>(
-                std::stoi(CfgFactory::get().listen_udp_port) +
-                973,  // 973 + default 50080 = 51053: should suggest DNS only
-                "udp-rdr",
-                CfgFactory::get().num_workers_udp,
-                proxyType::redirect());
+                _fat("Failed to setup tproxy proxies. Bailing!");
+                exit(-10);
+            }
 
-
-        if ((plain_proxies.empty() && CfgFactory::get().num_workers_tcp >= 0) ||
-            (ssl_proxies.empty() && CfgFactory::get().num_workers_tls >= 0) ||
-            (dtls_proxies.empty() && CfgFactory::get().num_workers_dtls >= 0) ||
-            (udp_proxies.empty() && CfgFactory::get().num_workers_udp >= 0) ||
-            (socks_proxies.empty() && CfgFactory::get().num_workers_socks >= 0) ||
-            (redir_plain_proxies.empty() && CfgFactory::get().num_workers_tcp >= 0) ||
-            (redir_ssl_proxies.empty() && CfgFactory::get().num_workers_tls >= 0) ||
-            (redir_udp_proxies.empty() && CfgFactory::get().num_workers_udp >= 0)
-                ) {
-
-            _fat("Failed to setup proxies. Bailing!");
-            exit(-1);
         }
+
+        if(CfgFactory::get().accept_socks) {
+            socks_proxies = NetworkServiceFactory::prepare_listener<socksAcceptor, socksTCPCom>(
+                    std::stoi(CfgFactory::get().listen_socks_port),
+                    "socks",
+                    CfgFactory::get().num_workers_socks,
+                    proxyType::proxy());
+
+            if((socks_proxies.empty() && CfgFactory::get().num_workers_socks >= 0)) {
+                _fat("Failed to setup socks proxies. Bailing!");
+                exit(-11);
+            }
+        }
+
+        if(CfgFactory::get().accept_redirect) {
+            redir_plain_proxies = NetworkServiceFactory::prepare_listener<theAcceptor, TCPCom>(
+                    std::stoi(CfgFactory::get().listen_tcp_port) + 1000,
+                    "plain-rdr",
+                    CfgFactory::get().num_workers_tcp,
+                    proxyType::redirect());
+            redir_ssl_proxies = NetworkServiceFactory::prepare_listener<theAcceptor, MySSLMitmCom>(
+                    std::stoi(CfgFactory::get().listen_tls_port) + 1000,
+                    "ssl-rdr",
+                    CfgFactory::get().num_workers_tls,
+                    proxyType::redirect());
+
+            redir_udp_proxies = NetworkServiceFactory::prepare_listener<theReceiver, UDPCom>(
+                    std::stoi(CfgFactory::get().listen_udp_port) +
+                    973,  // 973 + default 50080 = 51053: should suggest DNS only
+                    "udp-rdr",
+                    CfgFactory::get().num_workers_udp,
+                    proxyType::redirect());
+
+            if((redir_plain_proxies.empty() && CfgFactory::get().num_workers_tcp >= 0) ||
+               (redir_ssl_proxies.empty() && CfgFactory::get().num_workers_tls >= 0) ||
+               (redir_udp_proxies.empty() && CfgFactory::get().num_workers_udp >= 0)) {
+
+                if((socks_proxies.empty() && CfgFactory::get().num_workers_socks >= 0)) {
+                    _fat("Failed to setup redirect proxies. Bailing!");
+                    exit(-12);
+                }
+            }
+        }
+
+
 
         success = true;
     }
     catch (sx::netservice_cannot_bind const& e) {
 
-        _fat("Failed to setup proxies: %s", e.what());
-        _cons("Failed to setup proxies");
+        std::string msg = "Failed to bind proxies: ";
+        msg += e.what();
+
+        _fat(msg.c_str());
+        _cons(msg.c_str());
     }
     catch (std::logic_error const& e) {
 
-        _fat("Failed to setup proxies: %s", e.what());
-        _cons("Failed to setup proxies");
+        std::string msg = "Logic error in setup proxies: ";
+        msg += e.what();
+
+        _fat(msg.c_str());
+        _cons(msg.c_str());
     }
 
     if(! success) {
         _fat("terminating!");
         _cons("terminating!");
 
-        exit(-1);
+        exit(-9);
     }
 }
 
@@ -270,18 +295,26 @@ void SmithProxy::run() {
         }
     };
 
-    // TCP listener
-    launch_proxy_threads(plain_proxies, plain_threads, "TCP listener", friendly_thread_name_tcp.c_str());
-    launch_proxy_threads(ssl_proxies, ssl_threads, "TLS listener", friendly_thread_name_tls.c_str());
-    launch_proxy_threads(dtls_proxies, dtls_threads, "DTLS listener", friendly_thread_name_dls.c_str());
-    launch_proxy_threads(udp_proxies, udp_threads, "UDP listener", friendly_thread_name_udp.c_str());
 
-    launch_proxy_threads(socks_proxies, socks_threads, "SOCKS listener", friendly_thread_name_skx.c_str());
+    if(CfgFactory::get().accept_tproxy) {
+        launch_proxy_threads(plain_proxies, plain_threads, "TCP listener", friendly_thread_name_tcp.c_str());
+        launch_proxy_threads(ssl_proxies, ssl_threads, "TLS listener", friendly_thread_name_tls.c_str());
+        launch_proxy_threads(dtls_proxies, dtls_threads, "DTLS listener", friendly_thread_name_dls.c_str());
+        launch_proxy_threads(udp_proxies, udp_threads, "UDP listener", friendly_thread_name_udp.c_str());
+    }
 
-    launch_proxy_threads(redir_plain_proxies, redir_plain_threads, "redirected TCP listener", friendly_thread_name_redir_tcp.c_str());
-    launch_proxy_threads(redir_ssl_proxies, redir_ssl_threads, "redirected TLS listener", friendly_thread_name_redir_ssl.c_str());
-    launch_proxy_threads(redir_udp_proxies, redir_udp_threads, "redirected UDP listener", friendly_thread_name_redir_udp.c_str());
+    if(CfgFactory::get().accept_socks) {
+        launch_proxy_threads(socks_proxies, socks_threads, "SOCKS listener", friendly_thread_name_skx.c_str());
+    }
 
+    if(CfgFactory::get().accept_redirect) {
+        launch_proxy_threads(redir_plain_proxies, redir_plain_threads, "redirected TCP listener",
+                             friendly_thread_name_redir_tcp.c_str());
+        launch_proxy_threads(redir_ssl_proxies, redir_ssl_threads, "redirected TLS listener",
+                             friendly_thread_name_redir_ssl.c_str());
+        launch_proxy_threads(redir_udp_proxies, redir_udp_threads, "redirected UDP listener",
+                             friendly_thread_name_redir_udp.c_str());
+    }
 
 
 

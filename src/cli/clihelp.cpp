@@ -47,6 +47,10 @@
 
 void CliHelp::init() {
     help_add("default","");
+    help_add("settings.accept_tproxy", "whether to accept incoming connections via TPROXY target (default true)");
+    help_add("settings.accept_redirect", "whether to accept incoming connections via REDIRECT target (default true)");
+    help_add("settings.accept_socks", "whether to accept incoming connections via SOCKS target (default true)");
+
     help_add("settings.certs_path", "directory for TLS-resigning CA certificate and key");
     help_add("settings.certs_ca_key_password","TLS-resigning CA private key protection password");
     help_add("settings.ca_bundle_path", "trusted CA store path (to verify server-side connections)");
@@ -58,12 +62,16 @@ void CliHelp::init() {
     help_add("settings.ssl_autodetect_harder", "Detect TSL ClientHello - wait a bit longer");
     help_add("settings.ssl_ocsp_status_ttl", "hardcoded TTL for OCSP response validity");
     help_add("settings.ssl_crl_status_ttl", "hardcoded TTL for downloaded CRL files");
+
     help_add("settings.udp_port", "base divert port for non-DTLS UDP traffic");
     help_add("settings.udp_workers", "non-DTLS traffic worker thread count");
+
     help_add("settings.dtls_port", "base divert port for DTLS UDP traffic");
     help_add("settings.dtls_workers", "DTLS traffic worker thread count");
+
     help_add("settings.socks_port", "base SOCKS proxy listening port");
     help_add("settings.socks_workers", "SOCKS proxy traffic thread count");
+
     help_add("settings.log_level", "file logging verbosity level");
     help_add("settings.log_file", "log file");
     help_add("settings.log_console", "toggle logging to standard output");
@@ -77,6 +85,7 @@ void CliHelp::init() {
     help_add("settings.write_payload_dir", "root directory for packet dumps");
     help_add("settings.write_payload_file_prefix", "packet dumps file prefix");
     help_add("settings.write_payload_file_suffix", "packet dumps file suffix");
+
     help_add("settings.auth_portal", "** configure authentication portal settings");
     help_add("settings.cli", "** configure CLI specific settings");
     help_add("settings.socks", "** configure SOCKS specific settings");
