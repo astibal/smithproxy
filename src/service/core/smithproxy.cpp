@@ -337,7 +337,7 @@ void SmithProxy::run() {
 
 
     auto join_thread_list = [](auto thread_list) {
-        for(auto t: thread_list) {
+        for(auto const& t: thread_list) {
             t->join();
         }
     };

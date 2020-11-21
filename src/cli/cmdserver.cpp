@@ -162,20 +162,57 @@ void cmd_show_status(struct cli_def* cli) {
 
     cli_print(cli," ");
 
-    cli_print(cli, "cores detected: %d, acc multi: %d recv multi: %d", std::thread::hardware_concurrency(),
+    cli_print(cli, "CPU cores detected: %d, acc multi: %d recv multi: %d", std::thread::hardware_concurrency(),
               get_multiplier(SmithProxy::instance().plain_proxies),
               get_multiplier(SmithProxy::instance().udp_proxies));
+    cli_print(cli, "Acceptor hinting: tcp:%s, tls:%s, udp:%s, dtls:%s", sq_plain, sq_ssl, sq_udp, sq_dtls);
 
-    cli_print(cli," ");
 
-    cli_print(cli, "TCP   threads: %d", get_task_count(SmithProxy::instance().plain_proxies));
-    cli_print(cli, "Socks threads: %d", get_task_count(SmithProxy::instance().socks_proxies));
-    cli_print(cli, "UDP   threads: %d", get_task_count(SmithProxy::instance().udp_proxies));
-    cli_print(cli, "TLS   threads: %d", get_task_count(SmithProxy::instance().ssl_proxies));
-    cli_print(cli, "DTLS  threads: %d", get_task_count(SmithProxy::instance().dtls_proxies));
 
-    cli_print(cli, "Acceptor hint: tcp:%s, tls:%s, udp:%s, dtls:%s", sq_plain, sq_ssl, sq_udp, sq_dtls);
+    if(CfgFactory::get().accept_tproxy) {
+        cli_print(cli," ");
+        cli_print(cli, "Tproxy acceptors:");
+        cli_print(cli, "  TCP: %2zu workers: %2zu",
+                  SmithProxy::instance().plain_proxies.size(),
+                  SmithProxy::instance().plain_proxies.size() * get_task_count(SmithProxy::instance().plain_proxies));
 
+        cli_print(cli, "  UDP: %2zu workers: %2zu",
+                  SmithProxy::instance().udp_proxies.size(),
+                  SmithProxy::instance().udp_proxies.size() * get_task_count(SmithProxy::instance().udp_proxies));
+
+        cli_print(cli, "  TLS: %2zu workers: %2zu",
+                  SmithProxy::instance().ssl_proxies.size(),
+                  SmithProxy::instance().ssl_proxies.size() * get_task_count(SmithProxy::instance().ssl_proxies));
+
+        cli_print(cli, "  DTLS: %2zu workers: %2zu",
+                  SmithProxy::instance().dtls_proxies.size(),
+                  SmithProxy::instance().dtls_proxies.size() * get_task_count(SmithProxy::instance().dtls_proxies));
+    }
+
+    if(CfgFactory::get().accept_redirect) {
+        cli_print(cli," ");
+        cli_print(cli, "Redirect acceptors:");
+        cli_print(cli, "  TCP: %2zu workers: %2zu",
+                  SmithProxy::instance().redir_plain_proxies.size(),
+                  SmithProxy::instance().redir_plain_proxies.size() * get_task_count(SmithProxy::instance().redir_plain_proxies));
+
+        cli_print(cli, "  UDP: %2zu workers: %2zu",
+                  SmithProxy::instance().redir_udp_proxies.size(),
+                  SmithProxy::instance().redir_udp_proxies.size() * get_task_count(SmithProxy::instance().redir_udp_proxies));
+
+        cli_print(cli, "  TLS: %2zu workers: %2zu",
+                  SmithProxy::instance().redir_ssl_proxies.size(),
+                  SmithProxy::instance().redir_ssl_proxies.size() * get_task_count(SmithProxy::instance().redir_ssl_proxies));
+
+    }
+
+    if(CfgFactory::get().accept_socks) {
+        cli_print(cli," ");
+        cli_print(cli, "Socks acceptors:");
+        cli_print(cli, "  TCP: %2zu workers: %2zu",
+                  SmithProxy::instance().socks_proxies.size(),
+                  SmithProxy::instance().socks_proxies.size() * get_task_count(SmithProxy::instance().socks_proxies));
+    }
 
     cli_print(cli," ");
     time_t uptime = time(nullptr) - SmithProxy::instance().ts_sys_started;
