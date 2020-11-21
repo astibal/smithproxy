@@ -46,7 +46,7 @@ function do_cmd {
             echo "${CMD}ing smithproxy - tenant $TENID, index ${TENIDX}"
             
             # startup.sh will calculate tenant index on its own
-            /usr/bin/sx_network ${CMD} $TENID
+            /usr/bin/sx_network ${CMD} ${TENID} ${TENIDX}
             /usr/bin/sx_ctl ${CMD} ${TENID} ${TENIDX}
         
         else

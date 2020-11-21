@@ -90,6 +90,7 @@ tenant_table="/etc/smithproxy/smithproxy.tenants.cfg"
 tenant_id="0"
 tenant_index="0"
 tenant_range="0.0.0.0/0"
+tenant_range6="::/0"
 
 function logit {
     echo "`date -R`: $1" >> /var/log/smithproxy.startup.log
@@ -104,8 +105,10 @@ function tenant_apply {
         tenant_id="$2"
     fi
 
+
+    # set tenant source IP ranges
     if [[ "$tenant_id" != "0" ]]; then
-        if [[ ! -f "$tenant_table" ]]; then
+        if [[ ! -f "${tenant_table}" ]]; then
             logit "ERROR: Tenant table file not found."
             exit 1
         else
@@ -126,6 +129,32 @@ function tenant_apply {
             fi
         fi
     fi
+
+    SX_CFG="/etc/smithproxy/smithproxy.cfg"
+
+    if [ -f "/etc/smithproxy/smithproxy.${tenant_id}.cfg" ]; then
+        SX_CFG="/etc/smithproxy/smithproxy.${tenant_id}.cfg"
+    fi
+
+    if [ `cat ${SX_CFG}  | grep -i accept_tproxy | grep -i false > /dev/null ; echo $?` -eq 0 ]; then
+       # we are looking for false, because option can be omitted and default is true
+       SMITH_RUN_TRANSPARENT=0
+       logit "tproxy disabled in config file"
+    fi
+
+    if [ `cat ${SX_CFG}  | grep -i accept_redirect | grep -i false > /dev/null ; echo $?` -eq 0 ]; then
+       # we are looking for false, because option can be omitted and default is true
+       SMITH_RUN_REDIRECT=0
+       logit "redirect disabled in config file"
+    fi
+
+    if [ `cat ${SX_CFG}  | grep -i accept_socks | grep -i false > /dev/null ; echo $?` -eq 0 ]; then
+       # we are looking for false, because option can be omitted and default is true
+       # currently this does nothing
+       SMITH_RUN_SOCKS=0
+       logit "socks disabled in config file"
+    fi
+
 }
 
 function smith_interfaces4 {
@@ -333,13 +362,28 @@ function setup_tproxy {
         ;;
 
     stop)
+
         logit "Smithproxy iptables chains setup script - stop:"
         logit
+
+        logit "Removing ${SMITH_CHAIN_NAME} and ${DIVERT_CHAIN_NAME} references from mangle prerouting"
+        iptables -t mangle -L PREROUTING -n -v --line-numbers | egrep "${SMITH_CHAIN_NAME}" | egrep -o '^[0-9]+' | sort -nr | xargs -n1 iptables -t mangle -D PREROUTING
+        iptables -t mangle -L PREROUTING -n -v --line-numbers | egrep "${DIVERT_CHAIN_NAME}" | egrep -o '^[0-9]+' | sort -nr | xargs -n1 iptables -t mangle -D PREROUTING
+        ip6tables -t mangle -L PREROUTING -n -v --line-numbers | egrep "${SMITH_CHAIN_NAME}" | egrep -o '^[0-9]+' | sort -nr | xargs -n1 ip6tables -t mangle -D PREROUTING
+        ip6tables -t mangle -L PREROUTING -n -v --line-numbers | egrep "${DIVERT_CHAIN_NAME}" | egrep -o '^[0-9]+' | sort -nr | xargs -n1 ip6tables -t mangle -D PREROUTING
+        logit " done"
+        logit
+
+
         iptables -t mangle -F ${DIVERT_CHAIN_NAME}
         iptables -t mangle -F ${SMITH_CHAIN_NAME}
+        iptables -t mangle -X ${DIVERT_CHAIN_NAME}
+        iptables -t mangle -X ${SMITH_CHAIN_NAME}
 
         ip6tables -t mangle -F ${DIVERT_CHAIN_NAME}
         ip6tables -t mangle -F ${SMITH_CHAIN_NAME}
+        ip6tables -t mangle -X ${DIVERT_CHAIN_NAME}
+        ip6tables -t mangle -X ${SMITH_CHAIN_NAME}
 
         logit "Smithproxy iptables chains setup script - stop: finished"
 
@@ -367,6 +411,8 @@ function setup_tproxy {
 
 function setup_redirect {
 
+    SMITH_CHAIN_NAME="SX.rdr.${tenant_id}"
+
     IPT_CHECK=`iptables -nvL 2>&1`
     IPT_RET=$?
     if [[ $IPT_RET -gt 0 ]]; then
@@ -380,28 +426,33 @@ function setup_redirect {
     case "$1" in
 
     start|unbypass)
-        iptables -t nat -F OUTPUT
-        ip6tables -t nat -F OUTPUT
+
+        iptables -t nat -F ${SMITH_CHAIN_NAME}
+        iptables -t nat -N ${SMITH_CHAIN_NAME}
+
+        ip6tables -t nat -F ${SMITH_CHAIN_NAME}
+        ip6tables -t nat -N ${SMITH_CHAIN_NAME}
+
 
         if [[ ${REDIRECT_EXEMPT_LAN} -gt 0 ]]; then
-            iptables -t nat -A OUTPUT -p tcp -d 10.0.0.0/8 -j ACCEPT
-            iptables -t nat -A OUTPUT -p tcp -d 172.16.0.0/12 -j ACCEPT
-            iptables -t nat -A OUTPUT -p tcp -d 192.168.0.0/16 -j ACCEPT
+            iptables -t nat -A ${SMITH_CHAIN_NAME} -p tcp -d 10.0.0.0/8 -j ACCEPT
+            iptables -t nat -A ${SMITH_CHAIN_NAME} -p tcp -d 172.16.0.0/12 -j ACCEPT
+            iptables -t nat -A ${SMITH_CHAIN_NAME} -p tcp -d 192.168.0.0/16 -j ACCEPT
 
-            ip6tables -t nat -A OUTPUT -p tcp -d fe80::/10 -j ACCEPT
+            ip6tables -t nat -A ${SMITH_CHAIN_NAME} -p tcp -d fe80::/10 -j ACCEPT
         fi
 
         # don't loop yourself
-        iptables -t nat -A OUTPUT -p tcp -d 127.0.0.0/8 -j ACCEPT
-        iptables -t nat -A OUTPUT -p tcp -s 127.0.0.0/8 -j ACCEPT
+        iptables -t nat -A ${SMITH_CHAIN_NAME} -p tcp -d 127.0.0.0/8 -j ACCEPT
+        iptables -t nat -A ${SMITH_CHAIN_NAME} -p tcp -s 127.0.0.0/8 -j ACCEPT
 
-        ip6tables -t nat -A OUTPUT -p tcp -d ::1 -j ACCEPT
-        ip6tables -t nat -A OUTPUT -p tcp -s ::1 -j ACCEPT
+        ip6tables -t nat -A ${SMITH_CHAIN_NAME} -p tcp -d ::1 -j ACCEPT
+        ip6tables -t nat -A ${SMITH_CHAIN_NAME} -p tcp -s ::1 -j ACCEPT
 
         if [ "${REDIRECT_EXEMPT_USERS}" != "" ]; then
             for U in ${REDIRECT_EXEMPT_USERS}; do
-                iptables -t nat -A OUTPUT -m owner --uid-owner `id -u ${U}` -j ACCEPT
-                ip6tables -t nat -A OUTPUT -m owner --uid-owner `id -u ${U}` -j ACCEPT
+                iptables -t nat -A ${SMITH_CHAIN_NAME} -m owner --uid-owner `id -u ${U}` -j ACCEPT
+                ip6tables -t nat -A ${SMITH_CHAIN_NAME} -m owner --uid-owner `id -u ${U}` -j ACCEPT
             done
         fi
 
@@ -421,31 +472,49 @@ function setup_redirect {
 
         for P in ${SMITH_TLS_PORTS}; do
             logit "  redirect port ${P}->${SMITH_TLS_TPROXY}"
-            iptables -t nat -A OUTPUT -p tcp --dport ${P} -j REDIRECT --to-port ${REDIRECT_TLS_PORT}  -m owner ! --uid-owner ${ROOT_ID}
-            ip6tables -t nat -A OUTPUT -p tcp --dport ${P} -j REDIRECT --to-port ${REDIRECT_TLS_PORT}  -m owner ! --uid-owner ${ROOT_ID}
+            iptables -t nat -A ${SMITH_CHAIN_NAME} -p tcp --dport ${P} -j REDIRECT --to-port ${REDIRECT_TLS_PORT}  -m owner ! --uid-owner ${ROOT_ID}
+            ip6tables -t nat -A ${SMITH_CHAIN_NAME} -p tcp --dport ${P} -j REDIRECT --to-port ${REDIRECT_TLS_PORT}  -m owner ! --uid-owner ${ROOT_ID}
         done;
 
         for P in ${SMITH_TCP_PORTS}; do
             logit "  redirect port ${P}->${SMITH_TCP_TPROXY}"
-            iptables -t nat -A OUTPUT -p tcp --dport ${P} -j REDIRECT --to-port ${REDIRECT_TCP_PORT}  -m owner ! --uid-owner ${ROOT_ID}
-            ip6tables -t nat -A OUTPUT -p tcp --dport ${P} -j REDIRECT --to-port ${REDIRECT_TCP_PORT}  -m owner ! --uid-owner ${ROOT_ID}
+            iptables -t nat -A ${SMITH_CHAIN_NAME} -p tcp --dport ${P} -j REDIRECT --to-port ${REDIRECT_TCP_PORT}  -m owner ! --uid-owner ${ROOT_ID}
+            ip6tables -t nat -A ${SMITH_CHAIN_NAME} -p tcp --dport ${P} -j REDIRECT --to-port ${REDIRECT_TCP_PORT}  -m owner ! --uid-owner ${ROOT_ID}
         done;
 
         if [[ ${SMITH_TCP_PORTS_ALL} -gt 0 ]]; then
             logit "  redirect ALL tcp->${SMITH_TCP_TPROXY}"
-            iptables -t nat -A OUTPUT -p tcp -j REDIRECT --to-port ${REDIRECT_TCP_PORT} -m owner ! --uid-owner ${ROOT_ID}
-            ip6tables -t nat -A OUTPUT -p tcp -j REDIRECT --to-port ${REDIRECT_TCP_PORT} -m owner ! --uid-owner ${ROOT_ID}
+            iptables -t nat -A ${SMITH_CHAIN_NAME} -p tcp -j REDIRECT --to-port ${REDIRECT_TCP_PORT} -m owner ! --uid-owner ${ROOT_ID}
+            ip6tables -t nat -A ${SMITH_CHAIN_NAME} -p tcp -j REDIRECT --to-port ${REDIRECT_TCP_PORT} -m owner ! --uid-owner ${ROOT_ID}
         fi
 
 
-        iptables -t nat -A OUTPUT -p udp --dport 53 -j REDIRECT --to-port ${REDIRECT_DNS_PORT}  -m owner ! --uid-owner ${ROOT_ID}
-        ip6tables -t nat -A OUTPUT -p udp --dport 53 -j REDIRECT --to-port ${REDIRECT_DNS_PORT}  -m owner ! --uid-owner ${ROOT_ID}
+        iptables -t nat -A ${SMITH_CHAIN_NAME} -p udp --dport 53 -j REDIRECT --to-port ${REDIRECT_DNS_PORT}  -m owner ! --uid-owner ${ROOT_ID}
+        ip6tables -t nat -A ${SMITH_CHAIN_NAME} -p udp --dport 53 -j REDIRECT --to-port ${REDIRECT_DNS_PORT}  -m owner ! --uid-owner ${ROOT_ID}
+
+
+        iptables -t nat -A ${SMITH_CHAIN_NAME} -j RETURN
+
+        logit "Removing ${SMITH_CHAIN_NAME} references from nat output"
+        iptables -t nat -L OUTPUT -n -v --line-numbers | egrep "${SMITH_CHAIN_NAME}" | egrep -o '^[0-9]+' | sort -nr | xargs -n1 iptables -t nat -D OUTPUT
+        ip6tables -t nat -L OUTPUT -n -v --line-numbers | egrep "${SMITH_CHAIN_NAME}" | egrep -o '^[0-9]+' | sort -nr | xargs -n1 ip6tables -t nat -D OUTPUT
+
+
+        iptables -t nat -A OUTPUT -j ${SMITH_CHAIN_NAME}
+        ip6tables -t nat -A OUTPUT -j ${SMITH_CHAIN_NAME}
 
         ;;
 
     stop|bypass)
-         iptables -t nat -F OUTPUT
-         ip6tables -t nat -F OUTPUT
+        logit "Removing ${SMITH_CHAIN_NAME} references from nat output"
+        iptables -t nat -L OUTPUT -n -v --line-numbers | egrep "${SMITH_CHAIN_NAME}" | egrep -o '^[0-9]+' | sort -nr | xargs -n1 iptables -t nat -D OUTPUT
+        ip6tables -t nat -L OUTPUT -n -v --line-numbers | egrep "${SMITH_CHAIN_NAME}" | egrep -o '^[0-9]+' | sort -nr | xargs -n1 ip6tables -t nat -D OUTPUT
+
+        iptables -t nat -F ${SMITH_CHAIN_NAME}
+        ip6tables -t nat -F ${SMITH_CHAIN_NAME}
+
+        iptables -t nat -X ${SMITH_CHAIN_NAME}
+        ip6tables -t nat -X ${SMITH_CHAIN_NAME}
         ;;
 
     esac
@@ -468,7 +537,14 @@ fi
 
 
 case "$1" in
-  start|stop|bypass|unbypass)
+
+    stop|bypass)
+      setup_tproxy $1
+      setup_redirect $1
+
+      ;;
+
+    start|unbypass)
     if [[ ${SMITH_RUN_TRANSPARENT} -gt 0 ]]; then
         setup_tproxy $1
     fi
