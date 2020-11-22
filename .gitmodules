@@ -7,3 +7,6 @@
 	path = ext/argparse
 	url = ../argparse.git
 
+[submodule "src/ext/libcli"]
+	path = src/ext/libcli
+	url = ../libcli

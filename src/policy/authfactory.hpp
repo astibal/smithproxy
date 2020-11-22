@@ -134,12 +134,12 @@ public:
     IdentityInfo *ip4_get (std::string &);
     IdentityInfo6 *ip6_get (std::string &);
 
-    bool ip4_inc_counters (std::string &host, unsigned int rx, unsigned int tx);
-    bool ip6_inc_counters (std::string &host, unsigned int rx, unsigned int tx);
+    bool ip4_inc_counters (const std::string &host, unsigned int rx, unsigned int tx);
+    bool ip6_inc_counters (const std::string &host, unsigned int rx, unsigned int tx);
 
     // lookup by ip -> returns pointer IN the auth_ip_map
-    void ip4_remove (std::string &);
-    void ip6_remove (std::string &);
+    void ip4_remove (const std::string &host);
+    void ip6_remove (const std::string &ip6_address);
 
     bool ipX_inc_counters (baseHostCX *cx, unsigned int rx, unsigned int tx);
     bool ipX_inc_counters (baseHostCX *cx);

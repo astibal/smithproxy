@@ -90,6 +90,7 @@ configure_file(
 )
 
 add_executable(smithproxy
+
         src/main.cpp
         src/proxy/mitmhost.cpp
         src/proxy/mitmproxy.cpp
@@ -116,6 +117,7 @@ add_executable(smithproxy
         src/ext/libcidr/cidr.cpp
         src/ext/cxxopts/cxxopts.hpp
         src/ext/nltemplate/nltemplate.cpp
+        src/ext/libcli/libcli.cpp
 
         src/policy/authfactory.hpp
         src/policy/authfactory4.cpp
@@ -127,16 +129,27 @@ add_executable(smithproxy
         src/inspect/dnsinspector.hpp
         src/inspect/dnsinspector.cpp
         src/cli/clihelp.hpp
-        src/cli/clihelp.cpp src/cli/cligen.hpp src/cli/cligen.cpp src/service/core/service.cpp src/service/core/service.hpp src/cli/diag/diag_cmds.hpp src/cli/diag/diag_cmds.cpp src/proxy/ocspinvoker.cpp src/proxy/ocspinvoker.hpp)
+        src/cli/clihelp.cpp
+        src/cli/cligen.hpp
+        src/cli/cligen.cpp
+        src/service/core/service.cpp
+        src/service/core/service.hpp
+        src/cli/diag/diag_cmds.hpp
+        src/cli/diag/diag_cmds.cpp
+        src/proxy/ocspinvoker.cpp
+        src/proxy/ocspinvoker.hpp)
 
 add_executable(smithd
         ${SMITHD_DIR}/smithd.cpp
         ${SMITHD_DIR}/smithdcx.cpp
 
         src/service/daemon.cpp
+        src/service/netservice.cpp
         src/smithlog.cpp
-        src/inspect/dns.cpp src/ext/libcidr/cidr.cpp
-        src/policy/addrobj.cpp src/async/asyncocsp.hpp)
+        src/inspect/dns.cpp
+        src/ext/libcidr/cidr.cpp
+        src/policy/addrobj.cpp
+        src/async/asyncocsp.hpp)
 
 add_executable(smithdc
         ${SMITHD_DIR}/smithdc.cpp
@@ -152,12 +165,7 @@ if (LIBCONFIGPP_FOUND)
   target_link_libraries (smithd ${LIBCONFIGPP_LIBRARIES})
 endif (LIBCONFIGPP_FOUND)
 
-find_package (LibCli REQUIRED)
-if (LIBCLI_FOUND)
-  include_directories(${LIBCLI_INCLUDE_DIR})
-  target_link_libraries (smithproxy ${LIBCLI_LIBRARY})
-  target_link_libraries (smithd ${LIBCLI_LIBRARY})
-endif (LIBCLI_FOUND)
+target_link_libraries (smithproxy crypt)
 
 find_package(PythonLibs 3 REQUIRED)
 include_directories(${PYTHON_INCLUDE_DIRS})
@@ -381,7 +389,7 @@ if(UNIX)
     SET(CPACK_PACKAGE_DESCRIPTION "Smithproxy is fast and transparent TCP/UDP/TLS proxy with SOCKS support.")
     SET(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Smithproxy is fast and transparent TCP/UDP/TLS proxy with SOCKS support.")
     SET(CPACK_DEBIAN_PACKAGE_MAINTAINER "Ales Stibal <astib@mag0.net>")
-    SET(CPACK_DEBIAN_PACKAGE_DEPENDS "libstdc++6, libssl1.1 (>=1.1.1), libconfig++9v5, libcli1, libunwind8,
+    SET(CPACK_DEBIAN_PACKAGE_DEPENDS "libstdc++6, libssl1.1 (>=1.1.1), libconfig++9v5, libunwind8,
                                       swig, iptables, telnet, iproute2, python3-pyparsing,python3-posix-ipc, python3-ldap,
                                       python3-pip, libssl-dev")
 

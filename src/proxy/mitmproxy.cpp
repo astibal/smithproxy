@@ -186,7 +186,7 @@ bool MitmProxy::apply_id_policies(baseHostCX* cx) {
     if(cx->com()) {
         af = cx->com()->l3_proto();
     }
-    std::string str_af = inet_family_str(af);
+    std::string str_af = SocketInfo::inet_family_str(af);
     IdentityInfoBase* id_ptr = nullptr;
 
     bool found = false;
@@ -307,7 +307,7 @@ bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
     if(cx->com()) {
         af = cx->com()->l3_proto();
     }
-    std::string str_af = inet_family_str(af);
+    std::string str_af = SocketInfo::inet_family_str(af);
 
     bool new_identity = false;
 
@@ -422,7 +422,7 @@ bool MitmProxy::update_auth_ipX_map(baseHostCX* cx) {
     if(cx->com()) {
         af = cx->com()->l3_proto();
     }
-    std::string str_af = inet_family_str(af);    
+    std::string str_af = SocketInfo::inet_family_str(af);
     
 
     _dum("update_auth_ip_map: start for %s %s", str_af.c_str(), cx->host().c_str());
@@ -1833,7 +1833,10 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
             _deb("MitmMasterProxy::on_left_new: ladd the new cx (unpaused)");
             new_proxy->ladd(just_accepted_cx);
         }
-        
+
+        // new proxy must monitor accepted socket(s)
+        com()->set_poll_handler(just_accepted_cx->socket(), new_proxy);
+
         bool matched_vip = false; //did it match virtual IP?
         
         std::string target_host = just_accepted_cx->com()->nonlocal_dst_host();
@@ -1946,7 +1949,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                         if(just_accepted_cx->com()) {
                             af = just_accepted_cx->com()->l3_proto();
                         }
-                        std::string str_af = inet_family_str(af);
+                        std::string str_af = SocketInfo::inet_family_str(af);
                         
                         
                         // use common base pointer, so we can use all IdentityInfo types

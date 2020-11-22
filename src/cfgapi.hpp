@@ -120,6 +120,10 @@ public:
 
     bool config_file_check_only;
 
+    bool accept_tproxy = true;
+    bool accept_redirect = true;
+    bool accept_socks = true;
+
     int num_workers_tcp;
     int num_workers_tls;
     int num_workers_dtls;

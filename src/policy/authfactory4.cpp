@@ -165,7 +165,7 @@ IdentityInfo* AuthFactory::ip4_get(std::string& host) {
 }
 
 
-bool  AuthFactory::ip4_inc_counters(std::string& host, unsigned int rx, unsigned int tx) {
+bool  AuthFactory::ip4_inc_counters(const std::string &host, unsigned int rx, unsigned int tx) {
     bool ret = false;
 
     std::scoped_lock<std::recursive_mutex> l(AuthFactory::get_ip4_lock());
@@ -184,7 +184,7 @@ bool  AuthFactory::ip4_inc_counters(std::string& host, unsigned int rx, unsigned
 
 
 // remove IP from AUTH IP MAP and synchronize with SHM AUTH IP TABLE (table which is used to communicate with bend daemon)
-void AuthFactory::ip4_remove(std::string& host) {
+void AuthFactory::ip4_remove(const std::string &host) {
 
     std::scoped_lock<std::recursive_mutex> l(AuthFactory::get_ip4_lock());
     auto ip = ip4_map_.find(host);

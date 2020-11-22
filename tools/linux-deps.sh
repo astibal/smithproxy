@@ -1,6 +1,5 @@
 #!/usr/bin/env sh
 
-SX_LIBCLI_VER="1.9"
 SX_LIBCONFIG_VER="9v5"
 SX_GCC_VER="8"
 SX_SPYNE_VER=">=2.13.2a0"
@@ -83,7 +82,6 @@ if [ "${DIST}" = "Ubuntu" ]; then
 
    # specifics
    if [ "${REV}" = "20.04" ]; then
-        SX_LIBCLI_VER="1.10"
         SX_LIBCONFIG_VER="9v5"
         SX_GCC_VER="9"
    fi
@@ -94,8 +92,8 @@ if [ "${DIST}" = "Ubuntu" ]; then
     apt update && apt install -y \
     wget curl \
     python3 python3-pip python3-dev \
-    libcli${SX_LIBCLI_VER} libconfig++${SX_LIBCONFIG_VER} libssl1.1 libunwind8 \
-    libcli-dev libconfig-dev libconfig++-dev  libssl-dev libunwind-dev git g++-${SX_GCC_VER} cmake make
+    libconfig++${SX_LIBCONFIG_VER} libssl1.1 libunwind8 \
+    libconfig-dev libconfig++-dev  libssl-dev libunwind-dev git g++-${SX_GCC_VER} cmake make
 
     echo "... installing OS toolchains"
     apt install -y iptables telnet iproute2 && \
@@ -112,13 +110,11 @@ elif [ "${DIST}" = "Debian" ]; then
 
     if   [ "${REV}" = "kali" ]; then
         DEB_MAJ="11"
-        SX_LIBCLI_VER="1.10"
         SX_LIBCONFIG_VER="9v5"
         SX_GCC_VER="9"
 
     elif [ "${REV}" = "kali-rolling" ]; then
         DEB_MAJ="11"
-        SX_LIBCLI_VER="1.10"
         SX_LIBCONFIG_VER="9v5"
         SX_GCC_VER="9"
     else
@@ -127,7 +123,6 @@ elif [ "${DIST}" = "Debian" ]; then
         DEB_MAJ=`echo $REV | awk -F'.' '{ print $1 }'`
 
         if [ "${DEB_MAJ}" = "11" ]; then
-            SX_LIBCLI_VER="1.10"
             SX_LIBCONFIG_VER="9v5"
             SX_GCC_VER="10"
         fi
@@ -141,8 +136,8 @@ elif [ "${DIST}" = "Debian" ]; then
     apt update && apt install -y \
     wget curl \
     python3 python3-pip python3-dev \
-    libcli${SX_LIBCLI_VER} libconfig++${SX_LIBCONFIG_VER} libssl1.1 libunwind8 \
-    libcli-dev libconfig-dev libconfig++-dev  libssl-dev libunwind-dev git g++-${SX_GCC_VER} cmake make
+    libconfig++${SX_LIBCONFIG_VER} libssl1.1 libunwind8 \
+    libconfig-dev libconfig++-dev  libssl-dev libunwind-dev git g++-${SX_GCC_VER} cmake make
 
     echo "... installing OS toolchains"
     apt install -y iptables telnet iproute2 && \
@@ -175,9 +170,6 @@ elif [ "${DIST}" = "Alpine" ]; then
     apk add git bash
     apk add make gcc musl-dev
 
-    git clone --recursive https://github.com/dparrish/libcli
-    cd libcli/ && make install && cp libcli.h /usr/include/ && cd ..
-
     apk add openssl libconfig libconfig-dev
     apk add cmake g++ python3-dev libexecinfo-dev openssl-dev linux-headers libunwind-dev
     apk add busybox-extras iptables iproute2
@@ -196,7 +188,7 @@ elif [ "${DIST}" = "Fedora" ]; then
 
     OPW=`pwd`
     yum update -y
-    yum install -y git openssl-libs openssl-devel libcli-devel libconfig-devel python3-devel libunwind-devel kernel-headers glibc-headers
+    yum install -y git openssl-libs openssl-devel libconfig-devel python3-devel libunwind-devel kernel-headers glibc-headers
 
     yum install -y gcc-c++ cmake make
     yum install -y telnet iptables iproute
@@ -212,7 +204,6 @@ elif [ "${DIST}" = "Fedora" ]; then
 else
     echo "We can't detect your distro."
     echo "please make sure following development packages are installed to compile smithproxy:"
-    echo "   libcli-dev"
     echo "   libconfig++-dev"
     echo "   libssl-dev"
     echo "   python-dev"

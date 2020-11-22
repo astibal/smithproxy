@@ -40,7 +40,7 @@
 #ifndef _CMDSERVER_HPP_
    #define _CMDSERVER_HPP_
 
-#include <libcli.h>
+#include <ext/libcli/libcli.h>
 
 #include <cli/clihelp.hpp>
 

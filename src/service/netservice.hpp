@@ -40,84 +40,135 @@
 #ifndef SRVUTILS_HPP_
 #define SRVUTILS_HPP_
 
+#include <algorithm>
+
+#include <threadedacceptor.hpp>
+#include <threadedreceiver.hpp>
 #include <policy/authfactory.hpp>
+
+
+namespace sx {
+    class netservice_error : public std::runtime_error {
+    public:
+        explicit netservice_error (const char *string);
+    };
+
+
+    class netservice_cannot_bind : public netservice_error {
+    public:
+        explicit netservice_cannot_bind (const char *string);
+    };
+}
 
 class NetworkServiceFactory {
 public:
-
-    using proxy_type = threadedProxyWorker::proxy_type_t;
 
     static logan_lite& log() {
         static logan_lite l("service");
         return l;
     }
 
-    template <class Listener, class Com>
-    static Listener *
-    prepare_listener (unsigned int port, std::string const &friendly_name, int sub_workers, proxy_type type);
-    template <class Listener, class Com>
-    static Listener* prepare_listener(std::string const& str_path, std::string const& friendly_name, std::string const& def_path, int sub_workers, proxy_type type);
+    template <class Listener, class Com,
+            typename port_type = unsigned short>
+    static std::vector<Listener*> prepare_listener (port_type port, std::string const &friendly_name, int sub_workers,
+                                                                    proxyType type);
 };
 
-template <class Listener, class Com>
-Listener * NetworkServiceFactory::prepare_listener (unsigned int port, std::string const &friendly_name, int sub_workers,
-                                                    proxy_type type) {
+template <class Listener, class Com, typename port_type>
+std::vector<Listener*> NetworkServiceFactory::prepare_listener (port_type port, std::string const &friendly_name, int sub_workers,
+                                                    proxyType type) {
 
     auto log = NetworkServiceFactory::log();
 
+    std::vector<Listener*> vec_toret;
+
     if(sub_workers < 0) {
-        return nullptr;
+        // negative count means we won't spawn listeners for the service
+        return vec_toret;
     }
 
-    _not("Entering %s mode on port %d", friendly_name.c_str(), port);
-    auto listener = new Listener(new Com(), type);
-    listener->com()->nonlocal_dst(true);
-    listener->worker_count_preference(sub_workers);
+    std::stringstream ss;
+    ss << "Entering " << friendly_name << " mode on port/path " << port;
+    auto sss = ss.str();
+
+    _not(sss.c_str());
+
+
+    auto fdhints = std::make_shared<FdQueue>();
+
+    auto create_listener = [&]() -> Listener* {
+        auto r = new Listener(fdhints, new Com(), type);
+        r->com()->nonlocal_dst(true);
+        r->worker_count_preference(std::max(sub_workers, 2));
+
+        return r;
+    };
+
+
+
+    auto attach_listener = [](Listener* r, int sock) {
+        r->com()->unblock(sock);
+        r->com()->set_monitor(sock);
+        r->com()->set_poll_handler(sock, r);
+
+    };
+
+    auto listener = create_listener();
 
     // bind with master proxy (.. and create child proxies for new connections)
     int sock = listener->bind(port, 'L');
+
+    locks::fd().insert(sock);
+
+    auto l_ = std::scoped_lock(*locks::fd().lock(sock));
+
     if (sock < 0) {
-        _fat("Error binding %s on port %d, exiting", friendly_name.c_str(), sock);
+        std::stringstream ss;
+        ss << "error binding " << friendly_name << " on port/path: " << port;
+        auto err = ss.str();
+
+        _fat(err.c_str());
         delete listener;
-        return nullptr;
-    };
-    listener->com()->unblock(sock);
-    
-    listener->com()->set_monitor(sock);
-    listener->com()->set_poll_handler(sock, listener);
 
-    return listener;
-}
+        throw sx::netservice_cannot_bind(err.c_str());
+    } else {
 
-template <class Listener, class Com>
-Listener* NetworkServiceFactory::prepare_listener(std::string const& str_path, std::string const& friendly_name, std::string const& def_path, int sub_workers, proxy_type type) {
+        // attach and push first listener
+        attach_listener(listener, sock);
 
-    auto log = NetworkServiceFactory::log();
+        vec_toret.push_back(listener);
 
-    if(sub_workers < 0) {
-        return nullptr;
+        // create additional acceptor listeners (which will concurrently accept new connections)
+
+        // how many?
+        auto nthreads = std::thread::hardware_concurrency();
+        nthreads *= listener->core_multiplier();
+
+
+        // if option explicitly set, override listener count with it
+        if(sub_workers > 0) {
+            nthreads = sub_workers;
+        }
+
+        for(unsigned int i = 0; i < nthreads - 1 ; i++) {
+            auto additional_listener = create_listener();
+
+            if(additional_listener) {
+                auto cx = additional_listener->listen(sock, 'L');
+                if(! cx) {
+                    throw sx::netservice_error("cannot create additional acceptor context");
+                }
+
+                vec_toret.push_back(additional_listener);
+            }
+            else {
+                throw sx::netservice_error("cannot create additional acceptor");
+            }
+
+        }
     }
-    
-    std::string path = str_path;
-    if( path.empty() ) {
-        path = def_path;
-    }
-    
-    _not("Entering %s mode on path %s", friendly_name.c_str(), path.c_str());
-    auto listener = new Listener(new Com(), type);
 
-    listener->com()->nonlocal_dst(true);
-    listener->worker_count_preference(sub_workers);
-
-    // bind with master proxy (.. and create child proxies for new connections)
-    int sock = listener->bind(path.c_str(), 'L');
-    if (sock < 0) {
-        _fat("Error binding %s on path %s, exiting", friendly_name.c_str(), path.c_str());
-        delete listener;
-        return nullptr;
-    };
-    
-    return listener;
+    return vec_toret;
 }
 
 

@@ -182,7 +182,7 @@ public:
 
 class UxAcceptor : public ThreadedAcceptorProxy<SmithdProxy> {
 public:
-    UxAcceptor(baseCom* c, int worker_id, proxy_type_t t = proxy_type_t::NONE ) :
+    UxAcceptor(baseCom* c, int worker_id, proxyType t = proxyType::none() ) :
         ThreadedAcceptorProxy<SmithdProxy>(c,worker_id, t) {};
     
     baseHostCX* new_cx(const char* h, const char* p) override { return new SmithServerCX(com()->slave(),h,p); };
@@ -194,12 +194,12 @@ public:
     }
 };
 
-typedef ThreadedAcceptor<UxAcceptor,SmithdProxy> UxProxy;
+typedef ThreadedAcceptor<UxAcceptor> UxProxy;
 
 // running threads and their proxies
 
-static UxProxy* backend_proxy = nullptr;
-std::thread* backend_thread = nullptr;
+static std::vector<UxProxy*> backend_proxies;
+std::vector<std::shared_ptr<std::thread>> backend_threads;
 
 
 // Configuration variables
@@ -248,7 +248,7 @@ public:
             printf("Terminating ...\n");
         }
 
-        if (backend_proxy != nullptr) {
+        for(auto backend_proxy: backend_proxies) {
             backend_proxy->state().dead(true);
         }
 
@@ -573,43 +573,47 @@ int main(int argc, char *argv[]) {
 
     // no mercy here.
     unlink(cfg_smithd_listen_port.c_str());
-    backend_proxy = nullptr;
 
     try {
-        backend_proxy = NetworkServiceFactory::prepare_listener<UxProxy,UxCom>(
-                cfg_smithd_listen_port,
+        std::string path = cfg_smithd_listen_port;
+        if( path.empty() ) {
+            path = "/var/run/smithd.sock";
+        }
+
+        backend_proxies = NetworkServiceFactory::prepare_listener<UxProxy,UxCom,const char*>(
+                path.c_str(),
                 "ux-plain",
-                "/var/run/smithd.sock",
                 cfg_smithd_workers,
-                NetworkServiceFactory::proxy_type::NONE);
+                proxyType::none());
     } catch(socle::com_error const& e) {
         _fat("Exception caught when creating listener: %s", e.what());
-        backend_proxy = nullptr;
     }
 
-    if(backend_proxy == nullptr && cfg_smithd_workers >= 0) {
+    if(backend_proxies.empty() && cfg_smithd_workers >= 0) {
         
         _fat("Failed to setup proxies. Bailing!");
         exit(-1);
     }
 
-    this_daemon.set_daemon_signals(SmithD::my_terminate, SmithD::my_usr1);
+    DaemonFactory::set_daemon_signals(SmithD::my_terminate, SmithD::my_usr1);
     
-    if(backend_proxy) {
+    for(auto* backend_proxy: backend_proxies) {
         _inf("Starting smithd listener");
-        backend_thread = new std::thread([]() {
+        auto backend_thread = std::make_shared<std::thread>(std::thread([=]() {
 
             auto this_daemon = DaemonFactory::instance();
             auto& log = this_daemon.log;
 
-            this_daemon.set_daemon_signals(SmithD::my_terminate, SmithD::my_usr1);
+            DaemonFactory::set_daemon_signals(SmithD::my_terminate, SmithD::my_usr1);
             _dia("smithd: max file descriptors: %d", this_daemon.get_limit_fd());
             
             backend_proxy->run(); 
             _dia("smithd workers torn down.");
             backend_proxy->shutdown(); 
-        } );
+        } ));
+
         pthread_setname_np(backend_thread->native_handle(),string_format("smithd_%s",cfg_tenant_index.c_str()).c_str());
+        backend_threads.push_back(backend_thread);
     }
     
     
@@ -617,12 +621,13 @@ int main(int argc, char *argv[]) {
     
     pthread_setname_np(pthread_self(),"smithd");
     
-    if(backend_thread) {
-        backend_thread->join();
+    if(!backend_threads.empty()) {
+
+        for(auto th: backend_threads) {
+            th->join();
+        }
     }
 
-    delete backend_thread;
-    
     // cleanup
     this_daemon.unlink_pidfile();
     unlink(cfg_smithd_listen_port.c_str());

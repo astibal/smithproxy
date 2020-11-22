@@ -40,7 +40,7 @@
 #define SMITHPROXY_CLIGEN_HPP
 
 #include <cfgapi.hpp>
-#include <libcli.h>
+#include <ext/libcli/libcli.h>
 
 #include <vector>
 #include <string>

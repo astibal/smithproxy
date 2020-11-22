@@ -40,7 +40,7 @@
 #ifndef SMITHPROXY_DIAG_CMDS_HPP
 #define SMITHPROXY_DIAG_CMDS_HPP
 
-#include <libcli.h>
+#include <ext/libcli/libcli.h>
 
 int cli_diag_ssl_cache_stats(struct cli_def *cli, const char *command, char *argv[], int argc);
 int cli_diag_ssl_cache_list(struct cli_def *cli, const char *command, char *argv[], int argc);
@@ -87,6 +87,7 @@ int cli_diag_writer_stats(struct cli_def *cli, const char *command, char *argv[]
 int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *argv[], int argc);
 int cli_diag_mem_objects_stats(struct cli_def *cli, const char *command, char *argv[], int argc);
 int cli_diag_mem_trace_mark (struct cli_def *cli, const char *command, char **argv, int argc);
+int cli_diag_mem_udp_stats(struct cli_def *cli, const char *command, char **argv, int argc);
 
 int cli_diag_mem_trace_list (struct cli_def *cli, const char *command, char **argv, int argc);
 int cli_diag_mem_objects_list(struct cli_def *cli, const char *command, char *argv[], int argc);

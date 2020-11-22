@@ -10,10 +10,6 @@ yum update -y
 yum install -y git
 yum install -y libconfig libconfig-devel openssl11 openssl11-devel gcc gcc-c++
 
-# libcli not present as a package
-git clone --recursive https://github.com/dparrish/libcli
-cd libcli/ && make install && cp libcli.h /usr/include/ && cd ..
-
 yum install -y python3-devel
 yum install -y libunwind libunwind-devel 
 yum install -y cmake3 python3-devel

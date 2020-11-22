@@ -420,10 +420,11 @@ int cli_diag_ssl_verify_list(struct cli_def *cli, const char *command, char *arg
         for (auto const& x: SSLFactory::factory().verify_cache.cache()) {
             std::string cn = x.first;
             auto cached_result = x.second;
-            long ttl = 0;
+
             if (cached_result) {
-                ttl = cached_result->expired_at() - ::time(nullptr);
-                out << string_format("    %s, ttl=%d, status=%d", cn.c_str(), ttl, cached_result->value());
+                auto ttl = cached_result->expired_at() - ::time(nullptr);
+                auto revoked_str = string_format("%s(%d)", cached_result->value().revoked > 0 ? "revoked" : "ok", cached_result->value().revoked );
+                out << string_format("    %s, ttl=%d, status=%s", cn.c_str(), ttl, revoked_str.c_str());
 
                 if (ttl <= 0) {
                     out << "  *expired*";
@@ -834,20 +835,16 @@ int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *a
             cli_print(cli, "mp_realloc fitting returns: %lld", mp_stats::get().stat_mempool_realloc_fitting.load());
             cli_print(cli, "mp_free cache miss: %lld", mp_stats::get().stat_mempool_free_miss.load());
         }
-        size_t mp_size = 0L;
-        {
-            std::scoped_lock<std::mutex> l(mpdata::lock());
-            mp_size = mpdata::map().size();
-        }
-        cli_print(cli, "mp ptr cache size: %lu", static_cast<unsigned long>(mp_size));
 
         cli_print(cli," ");
         cli_print(cli, "API allocations above limits:");
         {
             std::scoped_lock<std::mutex> g(memPool::pool().lock);
-            cli_print(cli, "allocations: %lld/%lldB", memPool::pool().stat_alloc.load(), memPool::pool().stat_alloc_size.load());
-            cli_print(cli, "   releases: %lld/%lldB", memPool::pool().stat_out_free.load(),
+            cli_print(cli, "      allocations: %lld/%lldB", memPool::pool().stat_alloc.load(), memPool::pool().stat_alloc_size.load());
+            cli_print(cli, "         releases: %lld/%lldB", memPool::pool().stat_out_free.load(),
                       memPool::pool().stat_out_free_size.load());
+            cli_print(cli, "\nrelease pool miss: %lld/%lldB", memPool::pool().stat_out_pool_miss.load(),
+                      memPool::pool().stat_out_pool_miss_size.load());
 
             cli_print(cli, "\nPool capacities (available/limits):");
             cli_print(cli, " 32B pool size: %lu/%lu", memPool::pool().mem_32_av(), memPool::pool().mem_32_sz());
@@ -933,15 +930,31 @@ int cli_diag_mem_objects_stats(struct cli_def *cli, const char *command, char *a
 
 }
 
+int cli_diag_mem_udp_stats(struct cli_def *cli, const char *command, char **argv, int argc) {
+
+    debug_cli_params(cli, command, argv, argc);
+
+    cli_print(cli,"UDP Statistics:\n");
+    {
+        auto l_ = std::scoped_lock(DatagramCom::lock);
+        cli_print(cli, "Embryonic entries:    %lu", DatagramCom::datagrams_received.size());
+        cli_print(cli, "Embryonic inset sz:   %lu", DatagramCom::in_virt_set.size());
+    }
+
+    return CLI_OK;
+
+
+}
+
 int cli_diag_mem_trace_mark (struct cli_def *cli, const char *command, char **argv, int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
 #ifdef MEMPOOL_DEBUG
 
-    std::scoped_lock<std::mutex> l(mpdata::lock());
+    std::scoped_lock<std::mutex> l(mpdata::trace_lock());
 
-    for (auto& it: mpdata::map()) {
+    for (auto& it: mpdata::trace_map()) {
         it.second.mark = 1;
     }
 
@@ -989,9 +1002,9 @@ int cli_diag_mem_trace_list (struct cli_def *cli, const char *command, char **ar
 
         std::unordered_map<std::string, bt_stat> occ;
         {
-            std::scoped_lock<std::mutex> l(mpdata::lock());
+            std::scoped_lock<std::mutex> l(mpdata::trace_lock());
 
-            for (auto mem: mpdata::map()) {
+            for (auto mem: mpdata::trace_map()) {
                 auto mch = mem.second;
                 if ( (!mch.in_pool) && mch.mark == filter) {
                     std::string k;
@@ -1012,7 +1025,7 @@ int cli_diag_mem_trace_list (struct cli_def *cli, const char *command, char **ar
                 }
             }
 
-            cli_print(cli, "Allocation traces: processed %ld used mempool entries", mpdata::map().size());
+            cli_print(cli, "Allocation traces: processed %ld used mempool entries", mpdata::trace_map().size());
         }
         cli_print(cli, "Allocation traces: parsed %ld unique entries.", occ.size());
 
@@ -1640,6 +1653,88 @@ int cli_diag_sig_list(struct cli_def *cli, const char *command, char *argv[], in
     return CLI_OK;
 }
 
+#include <service/core/smithproxy.hpp>
+
+int cli_diag_worker_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    auto& sx = SmithProxy::instance();
+
+
+    auto list_worker = [&cli](const char* title, auto& listener) {
+        cli_print(cli, title);
+        for (auto acc: listener) {
+            cli_print(cli, "    %s, type %s",
+                      acc->hr().c_str(),
+                      acc->proxy_type().to_string().c_str());
+
+            int w_i = 0;
+            std::string em;
+            bool at_least_one_worker_active = false;
+            for(auto wrk: acc->tasks()) {
+
+                if(wrk.second->proxies().empty()) {
+                    em += string_format("<%d>", w_i);
+                    w_i++;
+                    continue;
+                } else {
+
+                    at_least_one_worker_active = true;
+
+                    if(! em.empty()) {
+                        cli_print(cli, "        `- workers idle: %s", em.c_str());
+                        em.clear();
+                    }
+                }
+
+                cli_print(cli, "        `- worker[%d]: %s, thread %p",
+                          w_i,
+                          wrk.second->to_string().c_str(),
+                          wrk.first);
+
+                int p_i = 0;
+
+                std::stringstream ss;
+                {
+                    auto l_ = std::scoped_lock(wrk.second->proxy_lock());
+
+                    for(auto p: wrk.second->proxies()) {
+                        ss << string_format("          `- proxy[%d]: %s\n", p_i, p->to_string().c_str());
+                        p_i++;
+                    }
+                }
+                auto sss = ss.str();
+                cli_print(cli, "%s", sss.c_str());
+
+                w_i++;
+            }
+
+            if(! at_least_one_worker_active) {
+                cli_print(cli, "        `- all %d workers idle", w_i); // don't add 1, it's added by last iteration
+
+            } else {
+                if (!em.empty()) {
+                    cli_print(cli, "        `- workers idle: %s", em.c_str());
+                }
+            }
+
+        }
+    };
+
+    list_worker("== plain acceptor", sx.plain_proxies);
+    list_worker("== tls acceptor", sx.ssl_proxies);
+
+    list_worker("== udp receiver", sx.udp_proxies);
+    list_worker("== dtls receiver", sx.dtls_proxies);
+
+    list_worker("== socks acceptor", sx.socks_proxies);
+
+    list_worker("== plain redirect acceptor", sx.redir_plain_proxies);
+    list_worker("== dns redirect receiver", sx.redir_udp_proxies);
+    list_worker("== tls redirect acceptor", sx.redir_ssl_proxies);
+
+    return CLI_OK;
+}
+
 bool register_diags(cli_def* cli, cli_command* diag) {
     auto diag_ssl = cli_register_command(cli, diag, "ssl", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "ssl related troubleshooting commands");
     auto diag_ssl_cache = cli_register_command(cli, diag_ssl, "cache", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl certificate cache");
@@ -1672,6 +1767,9 @@ bool register_diags(cli_def* cli, cli_command* diag) {
     auto diag_sig = cli_register_command(cli, diag, "sig", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "signature engine diagnostics");
     cli_register_command(cli, diag_sig, "list", cli_diag_sig_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list engine signatures");
 
+    auto diag_workers = cli_register_command(cli, diag, "workers", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "worker and threads diagnostics");
+    cli_register_command(cli, diag_workers, "list", cli_diag_worker_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list worker threads");
+
 
     if(true) {
 #ifndef USE_OPENSSL11
@@ -1683,8 +1781,11 @@ bool register_diags(cli_def* cli, cli_command* diag) {
     }
 
     auto diag_mem = cli_register_command(cli, diag, "mem", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory related troubleshooting commands");
-    auto diag_mem_buffers = cli_register_command(cli, diag_mem, "buffers", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory buffers troubleshooting commands");
-    cli_register_command(cli, diag_mem_buffers, "stats", cli_diag_mem_buffers_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory buffers statistics");
+        auto diag_mem_buffers = cli_register_command(cli, diag_mem, "buffers", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory buffers troubleshooting commands");
+            cli_register_command(cli, diag_mem_buffers, "stats", cli_diag_mem_buffers_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory buffers statistics");
+        auto diag_mem_udp = cli_register_command(cli, diag_mem, "udp", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "udp related structures troubleshooting commands");
+            cli_register_command(cli, diag_mem_udp, "stats", cli_diag_mem_udp_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "udp structures statistics");
+
     auto diag_mem_objects = cli_register_command(cli, diag_mem, "objects", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory object troubleshooting commands");
     cli_register_command(cli, diag_mem_objects, "stats", cli_diag_mem_objects_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory objects statistics");
     cli_register_command(cli, diag_mem_objects, "list", cli_diag_mem_objects_list, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory objects list");

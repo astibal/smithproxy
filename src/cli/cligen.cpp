@@ -37,7 +37,7 @@
     which carries forward this exception.
 */
 
-
+#include <ext/libcli/libcli.h>
 #include <cli/cligen.hpp>
 #include <cli/clihelp.hpp>
 #include <cfgapi.hpp>
