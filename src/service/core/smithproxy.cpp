@@ -410,6 +410,11 @@ void SmithProxy::run() {
         ql->sig_terminate = true;
         log_thread->join();
     }
+    else if(log_thread) {
+        if(!cfg_daemonize)
+            std::cerr << "terminating logwriter thread (without the cast)" << std::endl;
+        log_thread->join();
+    }
 
 
     if(!cfg_daemonize)
