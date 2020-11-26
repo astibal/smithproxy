@@ -127,15 +127,16 @@ void MitmHostCX::on_detect_www_get(const std::shared_ptr<duplexFlowMatch> &x_sig
 
         buffer* buffer_get = get.second;
 
-        std::string buffer_data_string((const char*)buffer_get->data(), buffer_get->size());
+        // limit this rather info/convenience regexing to 128 bytes
 
-        std::regex re_get("(GET|POST) *([^ \r\n\?]+)([^ \r\n]*)");
+        // Actually for unknown reason, sample size 512 (and more) was crashing deep in std::regex on alpine platform.
+        // Suspicion is it has to do something with MUSL or alpine platform specific. 256 is good enough to set for general use,
+        // as there is nothing dependant on full URI and more can slow box down for not real benefit.
+
+        std::string buffer_data_string((const char*)buffer_get->data(), std::min(static_cast<int>(buffer_get->size()), 128));
+
         std::smatch m_get;
-
-        std::regex re_ref("Referer: *([^ \r\n]+)");
         std::smatch m_ref;
-
-        std::regex re_host("Host: *([^ \r\n]+)");
         std::smatch m_host;
 
 
@@ -143,7 +144,7 @@ void MitmHostCX::on_detect_www_get(const std::shared_ptr<duplexFlowMatch> &x_sig
         std::string print_request;
 
 
-        if(std::regex_search (buffer_data_string, m_ref, re_ref)) {
+        if(std::regex_search (buffer_data_string, m_ref, http_req_ref() )) {
 
             str_temp = m_ref[1].str();
 
@@ -163,7 +164,7 @@ void MitmHostCX::on_detect_www_get(const std::shared_ptr<duplexFlowMatch> &x_sig
 
         }
 
-        if(std::regex_search (buffer_data_string, m_host, re_host))  {
+        if(std::regex_search (buffer_data_string, m_host, http_req_host() ))  {
             if(! m_host.empty()) {
                 str_temp = m_host[1].str();
                 print_request += str_temp;
@@ -200,7 +201,7 @@ void MitmHostCX::on_detect_www_get(const std::shared_ptr<duplexFlowMatch> &x_sig
             }
         }
 
-        if(std::regex_search (buffer_data_string, m_get, re_get)) {
+        if(std::regex_search (buffer_data_string, m_get, http_req_get() )) {
             if(m_get.size() > 1) {
                 str_temp = m_get[2].str();
                 print_request += str_temp;
