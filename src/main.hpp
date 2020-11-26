@@ -40,7 +40,7 @@
 #ifndef SMITHPROXY_MAIN_HPP
 #define SMITHPROXY_MAIN_HPP
 
-#define SMITH_VERSION "0.9.10"
+#define SMITH_VERSION "0.9.11"
 #define SMITH_DEVEL    1
 
 #define USE_PYTHON
