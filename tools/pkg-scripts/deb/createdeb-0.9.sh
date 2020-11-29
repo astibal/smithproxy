@@ -1,9 +1,29 @@
 #!/usr/bin/env bash
 ORIG_DIR=`pwd`
 
-PW_UPLOAD=$1
-SO_BRANCH="master"
-SX_BRANCH="master"
+# === LOAD DEFAULTS ====
+
+
+if [ "${FTP_UPLOAD_USER}" == "" ]; then
+    FTP_UPLOAD_USER="mag0net_uploader"
+fi
+
+if [ "${FTP_UPLOAD_PATH}" == "" ]; then
+    FTP_UPLOAD_PATH="ftp.mag0.net/web/out/smithproxy"
+fi
+
+if [ "${HTTP_CHECK_PATH}" == "" ]; then
+    HTTP_CHECK_PATH="www.mag0.net/out/smithproxy"
+fi
+
+if [ "${SO_BRANCH}" == "" ]; then
+    SO_BRANCH="master"
+fi
+
+if [ "${SX_BRANCH}" == "" ]; then
+    SX_BRANCH="master"
+fi
+
 DEBIAN_DIR="debian-0.9"
 
 
@@ -55,7 +75,12 @@ upload() {
     FILE=$1
     URL=$2
 
-    curl -tlsv1.2 --ftp-ssl-control --ftp-create-dirs -T $FILE -k $URL
+    if [[ -f $FILE ]]; then
+        echo "$FILE exists"
+        curl -tlsv1.2 --cipher 'DEFAULT:!DH' --ftp-ssl-control --ftp-create-dirs -T $FILE -k $URL
+    else
+        echo "$FILE doesn't exist!"
+    fi
 }
 
 # upload file if it URL doesn't exist
@@ -121,17 +146,19 @@ DISTRO=`./distro.sh`
 echo "Major version: $VER_MAJ, debian directory set to $DEB_DIR"
 
 
-
-
-UPLOAD_PWD=$1
-if [ "${UPLOAD_PWD}" == "" ]; then
-    read -s -p "Enter upload password: " UPLOAD_PWD
+# try to get passwords from an argument for case script is run interative
+if [ "${FTP_UPLOAD_PWD}" == "" ]; then
+    FTP_UPLOAD_PWD=$1
+fi
+# if password is still unknown, ask for it
+if [ "${FTP_UPLOAD_PWD}" == "" ]; then
+    read -s -p "Enter ftp upload password: " FTP_UPLOAD_PWD
 fi
 
-#echo "DEBUG: using password $UPLOAD_PWD"
+#echo "DEBUG: using password $FTP_UPLOAD_PWD"
 
-UPLOAD_URL="ftp://mag0net_uploader:${UPLOAD_PWD}@ftp.mag0.net/web/out/smithproxy"
-DOWNLOAD_URL="http://www.mag0.net/out/smithproxy"
+UPLOAD_URL="ftp://${FTP_UPLOAD_USER}:${FTP_UPLOAD_PWD}@${FTP_UPLOAD_PATH}"
+DOWNLOAD_URL="http://${HTTP_CHECK_PATH}"
 
 UPLOAD_STREAMLINE_CHANGELOG="N"
 
@@ -151,7 +178,7 @@ cd $DEB_DIR
 
 
 echo "Creating debian packages..."
-debuild -us -uc
+debuild -us -uc -j`nproc`
 
 echo "cd to $CUR_DIR"
 cd $CUR_DIR
@@ -168,7 +195,7 @@ if [ "$UPLOAD_STREAMLINE_CHANGELOG" == "Y" ]; then
     URL="${UPLOAD_URL}/${VER_MAJ}/changelog"
     FILE=smithproxy-${VER}/debian/changelog
 
-    if [ "$UPLOAD_PWD" == "" ]; then
+    if [ "$FTP_UPLOAD_PWD" == "" ]; then
         echo "password was not provided - no uploads"
     else
         echo "..uploading also streamline changelog, because this is its first build"
@@ -181,19 +208,26 @@ fi
 ## Final upload of produced files - only new files will be uploaded, and only if password has been provided
 ##
 
-if [ "$UPLOAD_PWD" == "" ]; then
+if [ "$FTP_UPLOAD_PWD" == "" ]; then
     echo "password was not provided - no uploads"
 else
 
     echo "File(s) being uploaded now."
     DEB_FILE=smithproxy_${VER}-${DEB_CUR}_${ARCH}.deb
-    DEB_URL=${UPLOAD_URL}/${VER_MAJ}/${DISTRO}/$DEB_FILE
+
+    if [ "${GIT_PATCH_DIST}" != "0" ]; then
+        DEB_PATH="${UPLOAD_URL}/${VER_MAJ}/${DISTRO}/snapshots"
+    else
+        DEB_PATH="${UPLOAD_URL}/${VER_MAJ}/${DISTRO}/release"
+    fi
+
+    DEB_URL="${DEB_PATH}/$DEB_FILE"
 
     safe_upload $DEB_FILE $DEB_URL
 
     # overwrite files if thy exist
-    upload smithproxy-${VER}/debian/changelog ${UPLOAD_URL}/${VER_MAJ}/${DISTRO}/changelog
-    upload README ${UPLOAD_URL}/${VER_MAJ}/${DISTRO}/README
+    upload smithproxy-${VER}/debian/changelog ${DEB_PATH}/smithproxy_${VER}-${DEB_CUR}.changelog
+    #upload README ${DEB_PATH}/README
 
     echo "Finished."
 fi
