@@ -226,7 +226,7 @@ else
     safe_upload $DEB_FILE $DEB_URL
 
     # overwrite files if thy exist
-    upload smithproxy-${VER}/debian/changelog ${DEB_PATH}/smithproxy_${VER}-${DEB_CUR}.changelog
+    safe_upload smithproxy-${VER}/debian/changelog ${DEB_PATH}/smithproxy_${VER}-${DEB_CUR}.changelog
     #upload README ${DEB_PATH}/README
 
     echo "Finished."
