@@ -1,0 +1,1 @@
+docker build -t $IMAGE_NAME --build-arg FTP_UPLOAD_PWD=$FTP_UPLOAD_PWD .
