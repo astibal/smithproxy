@@ -1,6 +1,6 @@
 #!/bin/bash
 
-TAG="testing"
+TAG="latest"
 
 TMPFS="no"
 LOG_VOLUME="--mount type=tmpfs,destination=/var/log,tmpfs-size=1000000000"
