@@ -110,11 +110,13 @@ public:
     void create_log_writer_thread();
     void create_dns_thread();
     void create_identity_thread();
-    void create_listeners();
+    bool create_listeners();
 
     void run() override;
     void stop() override;
     void reload() override;
+
+    void join_all();
 
     static int load_signatures(libconfig::Config& cfg, const char* name, std::vector<std::shared_ptr<duplexFlowMatch>>& target);
     static bool init_syslog();

@@ -123,7 +123,7 @@ void SmithProxy::create_identity_thread() {
 }
 
 
-void SmithProxy::create_listeners() {
+bool SmithProxy::create_listeners() {
 
     bool success = false;
 
@@ -214,7 +214,7 @@ void SmithProxy::create_listeners() {
     }
     catch (sx::netservice_cannot_bind const& e) {
 
-        std::string msg = "Failed to bind proxies: ";
+        std::string msg = "Failed to create listeners (cannot bind): ";
         msg += e.what();
 
         _fat(msg.c_str());
@@ -222,19 +222,20 @@ void SmithProxy::create_listeners() {
     }
     catch (std::logic_error const& e) {
 
-        std::string msg = "Logic error in setup proxies: ";
+        std::string msg = "Failed to create listeners (logic error): ";
         msg += e.what();
 
         _fat(msg.c_str());
         _cons(msg.c_str());
     }
+    catch(socle::com_error const& e) {
+        std::string msg = "Failed to create listeners (logic error): ";
 
-    if(! success) {
-        _fat("terminating!");
-        _cons("terminating!");
-
-        exit(-9);
+        _fat(msg.c_str());
+        _cons(msg.c_str());
     }
+
+    return success;
 }
 
 void SmithProxy::run() {
@@ -335,10 +336,19 @@ void SmithProxy::run() {
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 
+    instance().join_all();
+
+    if(!cfg_daemonize)
+        std::cerr << "all master threads terminated" << std::endl;
+}
+
+void SmithProxy::join_all() {
 
     auto join_thread_list = [](auto thread_list) {
         for(auto const& t: thread_list) {
-            t->join();
+            if(t) {
+                t->join();
+            }
         }
     };
 
@@ -416,9 +426,6 @@ void SmithProxy::run() {
         log_thread->join();
     }
 
-
-    if(!cfg_daemonize)
-        std::cerr << "all master threads terminated" << std::endl;
 }
 
 void SmithProxy::stop() {

@@ -414,20 +414,18 @@ int main(int argc, char *argv[]) {
 
     // launch listeners
 
-    try {
-        SmithProxy::instance().create_listeners();
-    } catch(socle::com_error const& e) {
-        _cri("failed to prepare listeners!");
-        return 1;
+    if(SmithProxy::instance().create_listeners()) {
+
+        _cri("Smithproxy %s (socle %s) starting...", SMITH_VERSION, SOCLE_VERSION);
+        SmithProxy::instance().run();
+        print_stats();
+    } else {
+        // something went wrong, terminate - but join all threads before doing so to prevent ABORT
+        SmithProxy::instance().terminate_flag = true;
+        SmithProxy::instance().join_all();
     }
 
-    _cri("Smithproxy %s (socle %s) starting...", SMITH_VERSION, SOCLE_VERSION);
-    SmithProxy::instance().run();
-
-
-    print_stats();
     do_cleanup();
-
     return 0;
 }
 
