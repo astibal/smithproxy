@@ -141,22 +141,6 @@ add_executable(smithproxy
         src/proxy/ocspinvoker.cpp
         src/proxy/ocspinvoker.hpp)
 
-add_executable(smithd
-        ${SMITHD_DIR}/smithd.cpp
-        ${SMITHD_DIR}/smithdcx.cpp
-
-        src/service/daemon.cpp
-        src/service/netservice.cpp
-        src/smithlog.cpp
-        src/inspect/dns.cpp
-        src/ext/libcidr/cidr.cpp
-        src/policy/addrobj.cpp
-        src/async/asyncocsp.hpp)
-
-add_executable(smithdc
-        ${SMITHD_DIR}/smithdc.cpp
-        ${SMITHD_DIR}/smithdcx.cpp
-        src/smithlog.cpp)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}")
 
@@ -164,7 +148,6 @@ find_package (LibConfig REQUIRED)
 if (LIBCONFIGPP_FOUND)
     include_directories(${LIBCONFIGPP_INCLUDE_DIRS})
     target_link_libraries (smithproxy ${LIBCONFIGPP_LIBRARIES})
-    target_link_libraries (smithd ${LIBCONFIGPP_LIBRARIES})
 endif (LIBCONFIGPP_FOUND)
 
 target_link_libraries (smithproxy crypt)
@@ -174,13 +157,8 @@ include_directories(${PYTHON_INCLUDE_DIRS})
 
 if((CMAKE_SYSTEM_PROCESSOR MATCHES "arm") OR (CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64"))
     target_link_libraries (smithproxy atomic)
-    target_link_libraries (smithd atomic)
-    target_link_libraries (smithdc atomic)
 endif()
 
 target_link_libraries(smithproxy socle_lib pthread ssl crypto rt unwind ${PYTHON_LIBRARIES})
-target_link_libraries(smithd socle_lib pthread ssl crypto rt unwind)
-target_link_libraries(smithdc socle_lib pthread ssl crypto rt unwind)
 
-
-include(${CMAKE_CURRENT_SOURCE_DIR}/install.cmake)
+#include(${CMAKE_CURRENT_SOURCE_DIR}/install.cmake)
