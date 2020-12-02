@@ -223,11 +223,20 @@ else
 
     DEB_URL="${DEB_PATH}/$DEB_FILE"
 
+
+    # upload the actual package
     safe_upload $DEB_FILE $DEB_URL
+
+    # upload package sha256 sum
+    sha256sum $DEB_FILE > $DEB_FILE.sha256
+    safe_upload $DEB_FILE.sha256 $DEB_URL.sha256
 
     # overwrite files if thy exist
     safe_upload smithproxy-${VER}/debian/changelog ${DEB_PATH}/smithproxy_${VER}-${DEB_CUR}.changelog
     #upload README ${DEB_PATH}/README
+
+    # upload Release_Notes from src root
+    safe_upload /tmp/smithproxy_build/smithproxy_src/Release_Notes.md "${UPLOAD_URL}/${VER_MAJ}/Release_Notes.md"
 
     echo "Finished."
 fi
