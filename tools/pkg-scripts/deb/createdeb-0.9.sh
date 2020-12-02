@@ -236,7 +236,7 @@ else
     #upload README ${DEB_PATH}/README
 
     # upload Release_Notes from src root
-    safe_upload /tmp/smithproxy_build/smithproxy_src/Release_Notes.md "${UPLOAD_URL}/${VER_MAJ}/Release_Notes.md"
+    upload /tmp/smithproxy_build/smithproxy_src/Release_Notes.md "${UPLOAD_URL}/${VER_MAJ}/Release_Notes.md"
 
     echo "Finished."
 fi
