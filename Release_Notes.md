@@ -1,33 +1,31 @@
 # Smithproxy 0.9 Release Notes
 
-Smithproxy is fast TLS/TCP/UDP/SOCKS mitm proxy written in C++. 
+[Smithproxy](https://www.smithproxy.org) is fast TLS/TCP/UDP/SOCKS mitm proxy written in C++. 
 
 Smithproxy is being developed by:    
 Ales Stibal `<astib@mag0.net>`
-    
 
-    
-For more information see https://www.smithproxy.org
 
 ## Download and contacts
 
 ### Binary packages
 
-* package: https://mag0.net/out/smithproxy (+changelogs)
-* snap:    https://snapcraft.io/smithproxy
-* docker:  https://hub.docker.com/r/astibal/smithproxy
+* package: [https://www.mag0.net/out/smithproxy](https://www.mag0.net/out/smithproxy) (+changelogs)
+* snap:    [https://snapcraft.io/smithproxy](https://snapcraft.io/smithproxy)
+* docker:  [https://hub.docker.com/r/astibal/smithproxy](https://hub.docker.com/r/astibal/smithproxy)
 
 ### Source
 
-* git: https://github.com/astibal/smithproxy
+* git: [https://github.com/astibal/smithproxy](https://github.com/astibal/smithproxy)
 
 To build smithproxy from source, please download source tarball and read instructions in `tools/README.md`.  
 It should compile on any recent Linux system with C++17 compiler (GCC is used and tested).
 
 ### Getting support
 
-* Discord server: https://discord.gg/vf4Qwwt
-* email support: `<support@smithproxy.net>`
+* Discord server: [https://discord.gg/vf4Qwwt](https://discord.gg/vf4Qwwt)
+* email support: `<support@smithproxy.org>`
+* Documentation: [https://smithproxy.readthedocs.org](https://smithproxy.readthedocs.org)
 
 ## What's new in 0.9.12 (in progress)
 
@@ -35,6 +33,7 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 
 * new build system, .deb package releases should appear more frequently on the server (amd64+armhf (v8): Ubuntu 20.04, 18.04 and Debian 10).
 * added Release Notes 
+* added sha256 sums to build uploads
 
 ### Bug fixes
 * fixed crash on exit in case proxy startup fails  
