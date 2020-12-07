@@ -31,7 +31,10 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 
 ### New features
 
-* added Certificate Transparency support (tls_profile/ct_enable option) - enabled by default
+* added Certificate Transparency support (tls_profile/ct_enable option) - enabled by default  
+    1) use new shell command `sx_download_ctlog` to download CT logs and make CT checks available
+    2) restart service to activate CT checks
+    3) config must be saved and reloaded to make it visible in CLI and config file (`save config`, `exec reload`)
 * new build system, .deb package releases should appear more frequently on the server (amd64+armhf (v8): Ubuntu 20.04, 18.04 and Debian 10).
 * added Release Notes 
 * added sha256 sums to build uploads
