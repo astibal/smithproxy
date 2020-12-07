@@ -31,6 +31,7 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 
 ### New features
 
+* added Certificate Transparency support (tls_profile/ct_enable option) - enabled by default
 * new build system, .deb package releases should appear more frequently on the server (amd64+armhf (v8): Ubuntu 20.04, 18.04 and Debian 10).
 * added Release Notes 
 * added sha256 sums to build uploads
