@@ -48,6 +48,13 @@ if(UNIX)
             WORLD_READ WORLD_EXECUTE
             )
 
+    install(FILES tools/sx_download_ctlog DESTINATION bin
+            PERMISSIONS
+            OWNER_READ OWNER_WRITE OWNER_EXECUTE
+            GROUP_READ GROUP_EXECUTE
+            WORLD_READ WORLD_EXECUTE
+            )
+
 
     install(FILES man/TESTING_README.txt DESTINATION share/smithproxy/docs)
 

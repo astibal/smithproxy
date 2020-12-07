@@ -1259,6 +1259,8 @@ std::string MitmProxy::verify_flag_string(int code) {
             return "Certificate is not valid";
         case SSLCom::VRF_ALLFAILED:
             return "It was not possible to obtain certificate status";
+        case SSLCom::VRF_CT_MISSING:
+            return "Certificate Transparency info is missing";
         default:
             return string_format("code 0x04%x", code);
     }
@@ -1336,6 +1338,13 @@ std::string MitmProxy::replacement_ssl_verify_detail(SSLCom* scom) {
                        ". "
                        "This is a serious issue, it's highly recommended to not continue "
                        "to this page.</p>";
+                is_set = true;
+            }
+            if (scom->verify_bitcheck(SSLCom::VRF_CT_MISSING)) {
+                ss << "<p><h3 class=\"fg-red\">Reason " << ++reason_count << ":</h3>" << verify_flag_string(SSLCom::VRF_CT_MISSING) <<
+                   ". "
+                   "This is a serious issue if your target is a public internet service. In such a case it's highly recommended to not continue "
+                   "to this page.</p>";
                 is_set = true;
             }
             if (scom->verify_bitcheck(SSLCom::VRF_INVALID)) {

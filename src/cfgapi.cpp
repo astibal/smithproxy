@@ -259,6 +259,10 @@ bool CfgFactory::load_settings () {
     load_if_exists(cfgapi.getRoot()["settings"], "certs_path",SSLFactory::certs_path());
     load_if_exists(cfgapi.getRoot()["settings"], "certs_ca_key_password",SSLFactory::certs_password());
 
+    if(! load_if_exists(cfgapi.getRoot()["settings"], "certs_ctlog",SSLFactory::ctlogfile())) {
+        SSLFactory::ctlogfile() = "/etc/smithproxy/ct_log_list.cnf";
+    }
+
 
     if(! load_if_exists(cfgapi.getRoot()["settings"], "ca_bundle_path",SSLFactory::ca_path())) {
         load_if_exists(cfgapi.getRoot()["settings"], "certs_ca_path", SSLFactory::ca_path());
@@ -2524,6 +2528,7 @@ int save_settings(Config& ex) {
 
     objects.add("certs_path", Setting::TypeString) = SSLFactory::certs_path();
     objects.add("certs_ca_key_password", Setting::TypeString) = SSLFactory::certs_password();
+    objects.add("certs_ctlog", Setting::TypeString) = SSLFactory::ctlogfile();
     objects.add("ca_bundle_path", Setting::TypeString) = SSLFactory::ca_path();
 
     objects.add("plaintext_port", Setting::TypeString) = CfgFactory::get().listen_tcp_port_base;

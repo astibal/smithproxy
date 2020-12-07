@@ -50,8 +50,8 @@ void CliHelp::init() {
     help_add("settings.accept_tproxy", "whether to accept incoming connections via TPROXY target (default true)");
     help_add("settings.accept_redirect", "whether to accept incoming connections via REDIRECT target (default true)");
     help_add("settings.accept_socks", "whether to accept incoming connections via SOCKS target (default true)");
-
     help_add("settings.certs_path", "directory for TLS-resigning CA certificate and key");
+    help_add("settings.certs_ctlog", "file containing certificate transparency log list");
     help_add("settings.certs_ca_key_password","TLS-resigning CA private key protection password");
     help_add("settings.ca_bundle_path", "trusted CA store path (to verify server-side connections)");
     help_add("settings.plaintext_port", "base divert port for non-SSL TCP traffic");

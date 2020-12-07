@@ -1,0 +1,15 @@
+#!/usr/bin/env sh
+
+FILE_PATH="/etc/smithproxy/ct_log_list.cnf"
+FILE_URL="https://www.mag0.net/out/smithproxy/add/openssl/ct_log_list.cnf"
+
+wget ${FILE_URL} -O ${FILE_PATH}
+
+if [ $? -ne 0 ]; then
+    echo "   !!! Sorry, something went wrong..."
+else
+    echo
+    echo "   !!! Smithproxy must be restarted to reload CT logs."
+    echo
+fi
+
