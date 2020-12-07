@@ -1164,6 +1164,7 @@ int CfgFactory::load_db_prof_tls () {
                 load_if_exists(cur_object, "ocsp_mode", a->ocsp_mode);
                 load_if_exists(cur_object, "ocsp_stapling", a->ocsp_stapling);
                 load_if_exists(cur_object, "ocsp_stapling_mode", a->ocsp_stapling_mode);
+                load_if_exists(cur_object, "ct_enable", a->opt_ct_enable);
                 load_if_exists(cur_object, "failed_certcheck_replacement", a->failed_certcheck_replacement);
                 load_if_exists(cur_object, "failed_certcheck_override", a->failed_certcheck_override);
                 load_if_exists(cur_object, "failed_certcheck_override_timeout", a->failed_certcheck_override_timeout);
@@ -1943,6 +1944,9 @@ bool CfgFactory::policy_apply_tls (const std::shared_ptr<ProfileTls> &pt, baseCo
             sslcom->opt_ocsp_mode = pt->ocsp_mode;
             sslcom->opt_ocsp_stapling_enabled = pt->ocsp_stapling;
             sslcom->opt_ocsp_stapling_mode = pt->ocsp_stapling_mode;
+
+            // certificate transparency
+            sslcom->opt_ct_enable = pt->opt_ct_enable;
        
             if(pt->sni_filter_bypass) {
                 if( ! pt->sni_filter_bypass->empty() ) {
@@ -2257,6 +2261,8 @@ int CfgFactory::save_tls_profiles(Config& ex) const {
         item.add("ocsp_mode", Setting::TypeInt) = obj->ocsp_mode;
         item.add("ocsp_stapling", Setting::TypeBoolean) = obj->ocsp_stapling;
         item.add("ocsp_stapling_mode", Setting::TypeInt) = obj->ocsp_stapling_mode;
+
+        item.add("ct_enable", Setting::TypeBoolean) = obj->opt_ct_enable;
 
         // add sni bypass list
         if(obj->sni_filter_bypass && ! obj->sni_filter_bypass->empty() ) {
