@@ -1415,6 +1415,8 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
                                     tls_ss << "\n    sct: " << scts_len << " entries";
 
                                     if(verbosity > iDIA) {
+                                        const CTLOG_STORE *log_store = SSL_CTX_get0_ctlog_store(SSLFactory::factory().default_tls_client_cx());
+
                                         for (int i = 0; i < scts_len; i++) {
                                             auto sct = sk_SCT_value(scts, i);
 
@@ -1423,6 +1425,15 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
                                             sct_logid_len = SCT_get0_log_id(sct, &sct_logid);
                                             if(sct_logid_len > 0)
                                                 tls_ss << "\n        sct log." << i << ": " << hex_print(sct_logid, sct_logid_len);
+                                            auto val_stat = SCT_get_validation_status(sct);
+                                                tls_ss << "\n        sct log." << i << ": " << SCT_validation_status_str(val_stat);
+
+                                            BioMemory bm;
+                                            SCT_print(sct, bm, 4, log_store);
+                                            auto v_of_s = string_split(bm.str(), '\n');
+                                            for(auto const& s: v_of_s) {
+                                                tls_ss << "\n        sct log." << i << ": " << s;
+                                            }
                                         }
                                     }
                                 }
