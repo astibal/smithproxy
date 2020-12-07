@@ -1270,6 +1270,10 @@ std::string MitmProxy::verify_flag_string_extended(int code) {
     switch(code) {
         case SSLCom::VRF_OTHER_SHA1_SIGNATURE:
             return "Issuer certificate is signed using SHA1 (considered insecure).";
+        case SSLCom::VRF_OTHER_CT_INVALID:
+            return "Certificate Transparency tag is INVALID.";
+        case SSLCom::VRF_OTHER_CT_FAILED:
+            return "Unable to verify Certificate Transparency tag.";
         default:
             return string_format("extended code 0x04%x", code);
     }
@@ -1343,10 +1347,18 @@ std::string MitmProxy::replacement_ssl_verify_detail(SSLCom* scom) {
             if (scom->verify_bitcheck(SSLCom::VRF_CT_MISSING)) {
                 ss << "<p><h3 class=\"fg-red\">Reason " << ++reason_count << ":</h3>" << verify_flag_string(SSLCom::VRF_CT_MISSING) <<
                    ". "
-                   "This is a serious issue if your target is a public internet service. In such a case it's highly recommended to not continue "
-                   "to this page.</p>";
+                   "This is a serious issue if your target is a public internet service. In such a case it's highly recommended to not continue."
+                   "</p>";
                 is_set = true;
             }
+            if (scom->verify_bitcheck(SSLCom::VRF_CT_FAILED)) {
+                ss << "<p><h3 class=\"fg-red\">Reason " << ++reason_count << ":</h3>" << verify_flag_string(SSLCom::VRF_CT_MISSING) <<
+                   ". "
+                   "This is a serious issue if your target is a public internet service. Don't continue unless you really know what you are doing. "
+                   "</p>";
+                is_set = true;
+            }
+
             if (scom->verify_bitcheck(SSLCom::VRF_INVALID)) {
                 ss << "<p><h3 class=\"fg-red\">Reason " << ++reason_count << ":</h3>" << verify_flag_string(SSLCom::VRF_INVALID) << ".</p>";
                 is_set = true;
