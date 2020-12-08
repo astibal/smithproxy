@@ -1,117 +1,51 @@
 
-**>>>** For general information go here: [www.smithproxy.org](http://www.smithproxy.org) **<<<**  
+[**Smithproxy**](https://www.smithproxy.org) is highly configurable, fast and transparent TCP/UDP/TLS (SSL) proxy
+ written in C++17.  
+It uses our C++17 socket proxying library called [*socle*](https://github.com/astibal/socle). 
+
+> Read fresh [**Release Notes**](https://www.mag0.net/out/smithproxy/0.9/Release_Notes.md) to stay tuned!  
+> Documentation: [https://smithproxy.readthedocs.org](https://smithproxy.readthedocs.org)  
+> To replay captured traffic, check out the sister project [pplay](https://pypi.org/project/pplay/).
 
 
-You can reach us also here:  
-[Discord server](https://discord.gg/vf4Qwwt)
+### Availability:
+  * **Linux** - can be installed as a service (distro packages, or easily compiled from sources)  
+    * Download Linux .deb (*armv8*, *amd64*) packages from [download site](https://www.mag0.net/out/smithproxy/)     
+    * Download and compile directly from source (known to work: Debian, Ubuntu, Alpine, Fedora, Kali)  
+  * **Docker** - available as an image on docker hub  
+    See our docker hub page: [https://hub.docker.com/r/astibal/smithproxy](https://hub.docker.com/r/astibal/smithproxy)
+  * **Snap** - you can also install it as a confined snap!  
+    Visit snap store here: [https://snapcraft.io/smithproxy](https://snapcraft.io/smithproxy)  
 
-Mailing lists:  
-[smithproxy-users](mailto:smithproxy-users@googlegroups.com)  
-[smithproxy-announce](mailto:smithproxy-announce@googlegroups.com)
+### Core features:
+  * intercept **routed** traffic, **locally-originated** traffic and **SOCKS** proxy requests
+  * configure policy based traffic matching similar to modern firewalls
+  * utilize per-policy applicable *content*, *dns*, *tls*, *detection* and *authentication* profiles
+  * enjoy insightful CLI with configuration control
 
+### TLS features:
+  * dumping plaintext version of traffic to files, exporting sslkeylog
+  * TLS security checks (OCSP, OCSP stapling, automatic CRL download)
+  * Certificate Transparency checks for outbound connections
+  * HTML replacement browser warnings
+  * STARTTLS support for most used protocols
+  * Seamless HTTPS redirection to authentication portal
 
+### Other:
+  * Local and LDAP user authentication using builtin web portal
+  * SOCKS4/SOCKS5 explicit proxy with DNS hostname support
+  * DNS inspection allows FQDN policy objects
+  * Policies based on FQDN and 2nd level DNS domain
+  * both IPv4 and IPv6 are supported
 
-## Something for docker users 
-**currently easiest way to test smithproxy is docker!**
+### Tools:
+  * built-in tools to help with CA and certificate enrollment needed to run smithproxy
+  * auto-enrolling portal certificate based on system IP and hostname
+  * auto-detect inspection interface(s) based on system routing information
+  * check [pplay tool](https://pypi.org/project/pplay/): replays captures
+    over the network with many cool features  
 
-To run smithproxy, issue something like this:
-
-```
-# -- create settings volume
-sudo docker volume create sxy
-
-# -- create logging volume
-sudo docker volume create sxyvar
-
-# -- create packet dump volume
-sudo docker volume create sxydumps
-
-
-# -- run actual smithproxy container
-sudo docker run -v sxy:/etc/smithproxy -v sxyvar:/var/log -v sxydumps:/var/local/smithproxy -it \
-                        --rm --network host astibal/smithproxy:latest
-```
-
-
-##### Before you start with testing
-
-
-You will see certificate on smithproxy startup. Copy this certificate,
-and add it in your browser trusted root CA list.
-This certificate will be used to sign spoofed target server certificates.
-Unless set,  your browser experience will be really painful.
-
----
-**Important**: 
-This is serious. Cryptographically you are allowing smithproxy 
-to actually terminate TLS on itself, and opening a new TLS connection to your 
-originally intended server.   
-As the user, you are now only controlling security of the connection between you 
-and smithproxy. The rest is not in your hand (it's in hands of smithproxy). 
----
-
- 
-Then, you can then point your browser to port 1080, and test. You should not 
-see much issues. Browsing is ok, and smithproxy is in its default config,
-which is intended for demonstration purposes (no OCSP, hacking features disabled).
-
-##### After you are done with testing
-
-I strongly recommend to remove previously added CA certificate from trusted 
-root certificate authorities! Of course it applies to all places you did this, 
-not only your browser.
-
-
-#### Where to look further
-
-All your files should be accessible from docker host, if you used volumes, as suggested above. I am 
-mentioning here full paths how they look inside of container. 
-
-###### sxy volume
-`/etc/smithproxy/` - all config rules 
-  * `smithproxy.cfg` - policies and profiles. There is a ton and half of things to play with.  
-  * `users.cfg` - user databases and realms (disabled by default)
- 
-
-###### sxyvar volume
-`/var/log/smithproxy*` - various logging files. 
-  * `smithproxy.cfg` - general logging of smithproxy daemon
-
-###### sxydumps volume
-`/var/local/smithproxy/data` - content writer target directory (disabled by default)
-  
-
-#### smithproxy CLI
-
-`smithproxy_cli` is your friend. Once you got CLI, type `enable` to elevate your privileges.
-CLI looks like this:
-```
-    root@pixie:/app# smithproxy_cli 
-    Trying 127.0.0.1...
-    Connected to localhost.
-    Escape character is '^]'.
-    --==[ Smithproxy command line utility ]==--
-    
-    smithproxy(pixie) > en
-    Password: 
-    smithproxy(pixie) # 
-    
-    smithproxy(pixie) # diag proxy session list
-    MitmProxy: l:tcp_192.168.122.1:54942 <+> r:tcp_109.233.72.84:80  policy: 1 up/down: 0/35.35M
-    MitmProxy: l:ssli_192.168.122.1:47030 <+> r:ssli_181.160.161.165:443  policy: 1 up/down: 0/0
-    MitmProxy: l:ssli_192.168.122.1:47040 <+> r:ssli_172.240.130.251:443  policy: 1 up/down: 0/12k
-```
-... yes, it's telnet to localhost. If you don't like it, submit patches. And yes, you can see 
-actual connection speed in the rightmost column.
-
-#### Restarting smithproxy
-
-You might need it one day. 
-```
-/etc/init.d/smithproxy restart
-```
-You will see many privilege-related errors. You can ignore them in this testing image. 
-Image is intended to be used in non-privileged mode, therefore only SOCKS4 or SOCKS5 could be used.
-Transparent proxying might not work properly, as you need to route traffic directly to container.
-
-
+### Support and contacts
+  * Discord server: [https://discord.gg/vf4Qwwt](https://discord.gg/vf4Qwwt)  
+  * email support: `<support@smithproxy.org>`  
+  * Documentation: [https://smithproxy.readthedocs.org](https://smithproxy.readthedocs.org)  
