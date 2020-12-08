@@ -559,7 +559,15 @@ int main(int argc, char *argv[]) {
 
         LogOutput::get()->dup2_cout(false);
         _inf("entering service mode");
-        this_daemon.daemonize();
+        int dem = this_daemon.daemonize();
+        if(dem == 0) {
+            // master - to exit
+            exit(0);
+        }
+        else if(dem < 0) {
+            // slave, but failed
+            exit(-1);
+        }
     }
     // write out PID file
     this_daemon.write_pidfile();

@@ -62,63 +62,71 @@ void DaemonFactory::set_tenant(const std::string& name, const std::string& tenan
     pid_file = string_format("/var/run/%s.%s.pid", name.c_str(), tenant_id.c_str());
 }
 
-void DaemonFactory::daemonize() {
-        
+// return 0 if returning as master, 1 if slave and ok, otherwise negative
+int DaemonFactory::daemonize () {
+
     /* Our process ID and Session ID */
     pid_t pid, sid;
-    
+
     _dia("daemonize start");
-    
+
     struct stat st{0};
     if(stat(pid_file.c_str(), &st) == 0) {
         _err("There seems to be smithproxy already running in the system. Aborting.");
-        exit(EXIT_FAILURE);
+
+        return -1;
     }
-    
+
     /* Fork off the parent process */
     pid = fork();
     if (pid < 0) {
             _fat("daemonize: failed to fork!");
-            exit(EXIT_FAILURE);
+
+            return -1;
     }
     /* If we got a good PID, then
         we can exit the parent process. */
     if (pid > 0) {
             _dia("daemonize: exiting from master");
-            exit(EXIT_SUCCESS);
+
+            return 0;
     }
 
     /* Change the file mode mask */
     umask(022);
-            
-    /* Open any logs here */        
-            
+
+    /* Open any logs here */
+
     /* Create a new SID for the child process */
     sid = setsid();
     if (sid < 0) {
             /* Log the failure */
             _fat("daemonize: failed to setsid!");
-            exit(EXIT_FAILURE);
-    }
-    
 
-    
+            return -1;
+    }
+
+
+
     /* Change the current working directory */
     if ((chdir("/")) < 0) {
             /* Log the failure */
             _fat("daemonize: failed to chdir to '/'!");
-            exit(EXIT_FAILURE);
+
+            return -1;
     }
-    
+
     /* Close out the standard file descriptors */
-    
+
     // don't ask me why we have to have opened stdin
     // close(STDIN_FILENO);
-    
+
     close(STDOUT_FILENO);
     close(STDERR_FILENO);
-        
+
     _dia("daemonize: finished");
+
+    return 1;
 }
 
 void DaemonFactory::write_pidfile() const {

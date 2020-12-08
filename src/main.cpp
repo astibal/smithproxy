@@ -437,9 +437,19 @@ int main(int argc, char *argv[]) {
         _inf("Entering daemon mode.");
         std::cout << "Entering daemon mode.";
 
-        this_daemon.daemonize();
-        this_daemon.write_pidfile();
+        int dem = this_daemon.daemonize();
+        if(dem == 0) {
+            // master - to exit
+            CfgFactory::get().cleanup();
+            exit(0);
+        }
+        else if(dem < 0) {
+            // slave, but failed
+            CfgFactory::get().cleanup();
+            exit(-1);
+        }
 
+        this_daemon.write_pidfile();
     }
 
     // openssl mem debugs

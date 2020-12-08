@@ -64,7 +64,7 @@ struct DaemonFactory : public LoganMate {
     }
     void set_tenant(const std::string& name, const std::string& tenant_id);
 
-    void daemonize();
+    int daemonize ();
     void write_pidfile() const;
     bool exists_pidfile() const;
     void unlink_pidfile() const;
