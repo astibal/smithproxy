@@ -1,6 +1,6 @@
 
 name: smithproxy
-version: '0.9.11-27'
+version: '0.9.11-28'
 summary: Fast and featured transparent TCP/UDP/TLS proxy
 description: |
  Smithproxy is fast transparent TCP/UDP/TLS (SSL) proxy. It's highly configurable
@@ -115,8 +115,10 @@ apps:
   certinfo-ca:
     command: bin/sx_certinfo_ca
 
-  download_ctlog:
+  download-ctlog:
     command: bin/sx_download_ctlog
+    plugs:
+      - network
 
   net:
     command: bin/sx_network
