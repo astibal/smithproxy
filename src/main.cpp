@@ -213,11 +213,41 @@ bool raise_limits() {
 };
 
 
+void print_help() {
+
+    std::cerr << std::endl;
+    std::cerr << "Smithproxy " << SMITH_VERSION << " - copyleft astib@mag0.net" << std::endl;
+    std::cerr << std::endl;
+    std::cerr << "  Tenant settings (optional):" << std::endl;
+    std::cerr << std::endl;
+    std::cerr << "    --tenant-name :  name of the tenant" << std::endl;
+    std::cerr << "    --tenant-idx  :  tenant index" << std::endl;
+    std::cerr << std::endl;
+    std::cerr << "  Startup debugs (optional):" << std::endl;
+    std::cerr << std::endl;
+    std::cerr << "    --daemonize :  start and fork to background" << std::endl;
+    std::cerr << "    --debug     :  debug level startup logs" << std::endl;
+    std::cerr << "    --diagnose  :  diag level startup logs" << std::endl;
+    std::cerr << std::endl;
+    std::cerr << "  Utility options (optional):" << std::endl;
+    std::cerr << std::endl;
+    std::cerr << "    --version, -c                :  print version and exit with 0" << std::endl;
+    std::cerr << "    --config-file, -c <filename> :  specify/override configuration file" << std::endl;
+    std::cerr << "    --config-check-only, -o      :  perform configuration file check" << std::endl;
+    std::cerr << std::endl;
+    std::cerr << "  Notes:" << std::endl;
+    std::cerr << std::endl;
+    std::cerr << "    Without arguments, smithproxy starts with defaults in the foreground." << std::endl;
+    std::cerr << "    Tenants are completely optional and are not needed at all." << std::endl;
+    std::cerr << std::endl;
+    std::cerr << std::endl;
+}
+
 int main(int argc, char *argv[]) {
 
 
     if(! raise_limits()) {
-        std::cerr << "cannot max file descriptors";
+        std::cerr << "cannot max file descriptors"  << std::endl;
         exit(-1);
     }
 
@@ -231,7 +261,7 @@ int main(int argc, char *argv[]) {
                     {"extreme",   no_argument,      (int*) &CfgFactory::get().args_debug_flag.level_ref(), iEXT},
 
                     {"config-file", required_argument, nullptr, 'c'},
-                    {"config-check-only",no_argument,nullptr,'o'},
+                    {"config-check-only", no_argument, nullptr, 'o'},
                     {"daemonize", no_argument, nullptr, 'D'},
                     {"version", no_argument, nullptr, 'v'},
 
@@ -239,6 +269,7 @@ int main(int argc, char *argv[]) {
                     // both, or none of them have to be set
                     {"tenant-index", required_argument, nullptr, 'i'},
                     {"tenant-name", required_argument, nullptr, 't'},
+                    {"help", no_argument,nullptr, 'h'},
                     {nullptr, 0, nullptr, 0}
             };
 
@@ -257,7 +288,7 @@ int main(int argc, char *argv[]) {
     /* getopt_long stores the option index here. */
         int option_index = 0;
     
-        int c = getopt_long (argc, argv, "p:vo",
+        int c = getopt_long (argc, argv, "hvocitD",
                         long_options, &option_index);
         if (c < 0) break;
 
@@ -287,6 +318,9 @@ int main(int argc, char *argv[]) {
                 CfgFactory::get().tenant_name = std::string(optarg);
                 break;
 
+            case 'h':
+                print_help();
+                exit(1);
                 
             case 'v':
                 std::cout << SMITH_VERSION << "+" << SOCLE_VERSION << std::endl;
@@ -294,7 +328,7 @@ int main(int argc, char *argv[]) {
                 
                 
             default:
-                std::cerr << "unknown option: " << c;
+                std::cerr << "unknown option: " << c  << std::endl;
                 exit(1);                 
         }
     }
@@ -323,6 +357,8 @@ int main(int argc, char *argv[]) {
             std::cerr <<  "Config file check OK" << std::endl;
         }
 
+        CfgFactory::get().cleanup();
+
         if(! CONFIG_LOADED) {
             exit(-1);
         }
@@ -340,13 +376,17 @@ int main(int argc, char *argv[]) {
     // set level to what's in the config
     if (! CONFIG_LOADED ) {
         _fat("Config check: error loading config file.");
-        std::cerr << "Config check: error loading config file.";
+        std::cerr << "Config check: error loading config file."  << std::endl;
+
+        CfgFactory::get().cleanup();
         exit(1);
     }
     
     if(!CfgFactory::get().apply_tenant_config()) {
         _fat("Failed to apply tenant specific configuration!");
-        std::cerr << "Failed to apply tenant specific configuration!";
+        std::cerr << "Failed to apply tenant specific configuration!"  << std::endl;
+
+        CfgFactory::get().cleanup();
         exit(2);
     }
 
@@ -367,9 +407,10 @@ int main(int argc, char *argv[]) {
         _fat("There is PID file already in the system.");
         _fat("Please make sure smithproxy is not running, remove %s and try again.", this_daemon.pid_file.c_str());
 
-        std::cerr << "There is PID file already in the system.";
-        std::cerr << "Please make sure smithproxy is not running, remove " << this_daemon.pid_file << " and try again.";
+        std::cerr << "There is PID file already in the system." << std::endl;
+        std::cerr << "Please make sure smithproxy is not running, remove " << this_daemon.pid_file << " and try again."  << std::endl;
 
+        CfgFactory::get().cleanup();
         exit(-5);
     }
     
@@ -379,14 +420,16 @@ int main(int argc, char *argv[]) {
         _war("IPv6/UDP smithproxy forwarding will not work.");
         _war("Set SMITH_IPV6_UDP_BYPASS=1 variable in smithproxy.startup.cfg");
 
-        std::cerr << "your kernel is outdated. More info in log.";
+        std::cerr << "your kernel is outdated. More info in log."  << std::endl;
         UDPCom::default_sock_family = AF_INET;
     }
     
     if(SmithProxy::instance().cfg_daemonize) {
         if (LogOutput::get()->targets().empty()) {
             _fat("Cannot daemonize without logging to file.");
-            std::cerr << "Cannot daemonize without logging to file.";
+            std::cerr << "Cannot daemonize without logging to file."  << std::endl;
+
+            CfgFactory::get().cleanup();
             exit(-5);
         }
 
