@@ -60,7 +60,7 @@ def create_logger(nickname, location):
     formatter = logging.Formatter('%(asctime)s [%(process)d] [%(levelname)s] %(message)s')
     hdlr.setFormatter(formatter)
     flog.addHandler(hdlr) 
-    flog.setLevel(logging.DEBUG)
+    flog.setLevel(logging.INFO)
     
     return flog
 
@@ -163,21 +163,22 @@ class Daemon:
     @staticmethod
     def readpid(fnm):
         # Check for a pidfile and the content
-        pid = None
+        pid = -1
         try:
             pf = io.FileIO(fnm,'r')
             pid = int(pf.read().strip())
+            Daemon.log.debug("Daemon.readpid: pid: " + fnm + ": " + str(pid))
             pf.close()
 
         except FileNotFoundError as e:
-            Daemon.log.debug("Daemon.readpid" + ": " +"cannot read pidfile: " + fnm + ": " + str(e))
-            pid = None
+            Daemon.log.debug("Daemon.readpid: cannot read pidfile: " + fnm + ": " + str(e))
+            pid = -1
         except IOError as e:
-            Daemon.log.debug("Daemon.readpid" + ": " +"cannot read pidfile: " + fnm + ": " + str(e))
-            pid = None
+            Daemon.log.debug("Daemon.readpid: cannot read pidfile: " + fnm + ": " + str(e))
+            pid = -2
         except ValueError as e:
-            Daemon.log.debug("Daemon.readpid" + ": " +"cannot read pidfile: " + fnm + ": " + str(e))
-            pid = None   
+            Daemon.log.debug("Daemon.readpid: unknown value in pidfile: " + fnm + ": " + str(e))
+            pid = 0
             
         return pid
 
@@ -190,7 +191,7 @@ class Daemon:
         """
         pid = self.getpid()
     
-        if pid:
+        if pid > 0:
             message = "pidfile %s already exist. Daemon already running?"
             Daemon.log.error(self.nicename + ": " + message % self.pidfile)
             return False
@@ -264,7 +265,7 @@ class Daemon:
     def is_running(self):
         try:
             pid = self.getpid()
-            if pid:
+            if pid > 0:
                 os.kill(pid, 0)
                 return True
                 

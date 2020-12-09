@@ -318,14 +318,26 @@ class SmithProxyDog(Daemon):
     @staticmethod
     def check_running_pidfile(pidfile):
 
+        flog.debug("Checking pidfile " + pidfile)
+
         running = False
         try:
             pid = Daemon.readpid(pidfile)
-            if pid:
+            if pid > 0:
+                flog.debug("Checking pidfile " + pidfile + " found pid " + str(pid))
                 os.kill(pid, 0)
                 running = True
+                flog.debug("Checking pidfile " + pidfile + " found pid " + str(pid) + " running")
+
+            elif pid == 0:
+                flog.debug("Checking pidfile " + pidfile + ": unknown value, but running")
+                running = True
+            else:
+                flog.debug("Checking pidfile " + pidfile + " no pid found")
+
 
         except OSError as e:
+            flog.debug("Checking pidfile " + pidfile + " found pid :" + str(e))
             err = str(e)
             if err.find("No such process") > 0:
                 if os.path.exists(pidfile):
@@ -418,7 +430,6 @@ if __name__ == "__main__":
                 else:
                     os.waitpid(ppp, 1)  # wait for 'p'
 
-            time.sleep(2)
 
             flog.info("Starting " + daemon.nicename)
             daemon.start()
@@ -427,15 +438,13 @@ if __name__ == "__main__":
             daemon.status(True, auto_restart=False)
 
         elif 'stop' == sys.argv[1]:
-            wait_time = 3
+
             flog.info("STOPPING ALL DEAMONS!")
             print("STOPPING ALL DEAMONS!")
 
-            flog.info("Stopping " + daemon.nicename + " (wait " + str(wait_time) + "s)")
+            flog.info("Stopping " + daemon.nicename)
             daemon.keeppid = False
             daemon.stop()
-            time.sleep(wait_time)
-            # flog.info("  finished")
 
             for d in daemon.sub_daemons:
                 flog.info("Stopping " + d.nicename)
