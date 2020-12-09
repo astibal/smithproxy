@@ -117,7 +117,6 @@ add_executable(smithproxy
         src/service/core/smithproxy.cpp
 
         src/ext/libcidr/cidr.cpp
-        src/ext/cxxopts/cxxopts.hpp
         src/ext/nltemplate/nltemplate.cpp
         src/ext/libcli/libcli.cpp
 
