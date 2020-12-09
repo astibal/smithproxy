@@ -449,7 +449,17 @@ int main(int argc, char *argv[]) {
             exit(-1);
         }
 
-        this_daemon.write_pidfile();
+    }
+    // write PID file (regardless if daemon or not)
+    if(! this_daemon.write_pidfile()) {
+
+        _fat("cannot write PID file!");
+        if(!SmithProxy::instance().cfg_daemonize) {
+            std::cerr << "cannot write PID file!" << std::endl;
+        }
+
+        CfgFactory::get().cleanup();
+        exit(-1);
     }
 
     // openssl mem debugs

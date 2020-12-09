@@ -46,9 +46,7 @@
 
 SmithProxy::~SmithProxy () {
 
-    if(cfg_daemonize) {
-        DaemonFactory::instance().unlink_pidfile();
-    }
+    DaemonFactory::instance().unlink_pidfile();
 }
 
 void SmithProxy::reload() {

@@ -129,14 +129,33 @@ int DaemonFactory::daemonize () {
     return 1;
 }
 
-void DaemonFactory::write_pidfile() const {
+bool DaemonFactory::write_pidfile() {
     FILE* pf = fopen(pid_file.c_str(), "w");
-    fprintf(pf,"%d",getpid());
-    fclose(pf);
+
+    if(pf) {
+        fprintf(pf, "%d", getpid());
+        fclose(pf);
+
+        pid_file_owned = true;
+
+        return true;
+    } else {
+        _err("cannot open pid file");
+    }
+
+    return false;
 }
 
-void DaemonFactory::unlink_pidfile() const {
-    unlink(pid_file.c_str());
+void DaemonFactory::unlink_pidfile(bool force) {
+
+    if(pid_file_owned || force) {
+        if(unlink(pid_file.c_str()) != 0) {
+            _err("cannot unlink pidfile: %s", string_error().c_str());
+        } else {
+            // success
+            pid_file_owned = false;
+        }
+    }
 }
 
 bool DaemonFactory::exists_pidfile() const {

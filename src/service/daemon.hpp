@@ -43,13 +43,14 @@
 #include <string>
 #include <log/logan.hpp>
 
-#define PID_FILE_DEFAULT "/var/run/smithproxy.0.pid"
+#define PID_FILE_DEFAULT "/var/run/smithproxy.default.pid"
 #define LOG_FILENAME_SZ 512
 
 
 struct DaemonFactory : public LoganMate {
     std::string pid_file = PID_FILE_DEFAULT;
     volatile char crashlog_file[LOG_FILENAME_SZ];
+    bool pid_file_owned = false;
 
     [[nodiscard]] std::string &class_name() const override;
     [[nodiscard]] std::string hr() const override;
@@ -65,9 +66,9 @@ struct DaemonFactory : public LoganMate {
     void set_tenant(const std::string& name, const std::string& tenant_id);
 
     int daemonize ();
-    void write_pidfile() const;
+    bool write_pidfile();
     bool exists_pidfile() const;
-    void unlink_pidfile() const;
+    void unlink_pidfile(bool force = false);
     int get_limit_fd();
     void set_limit_fd(int max);
     static void set_signal(int SIG, void (*sig_handler)(int));
