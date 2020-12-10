@@ -2294,7 +2294,7 @@ bool CfgFactory::new_tls_profile(Setting& ex, std::string const& name) const {
     item.add("allow_invalid_certs", Setting::TypeBoolean) = false;
     item.add("allow_self_signed", Setting::TypeBoolean) = false;
 
-    item.add("ocsp_mode", Setting::TypeInt) = 2;
+    item.add("ocsp_mode", Setting::TypeInt) = 1;
     item.add("ocsp_stapling", Setting::TypeBoolean) = true;
     item.add("ocsp_stapling_mode", Setting::TypeInt) = 1;
 
