@@ -1374,10 +1374,10 @@ int cli_uni_set_cb(std::string const& confpath, struct cli_def *cli, const char 
                 // cli_print(cli, "change written to current config");
 
                 if ( apply_setting( conf.getPath(), varname , cli )) {
-                    cli_print(cli, "change applied to current config");
+                    cli_print(cli, "running config changed");
                 } else {
                     // FIXME
-                    cli_print(cli, "change NOT applied to current config - reverting NYI, sorry");
+                    cli_print(cli, "running config NOT changed !!!");
                     cli_print(cli, "change will be visible in show config, but not written to mapped variables");
                     cli_print(cli, "therefore 'save config' won't write them to file.");
                 }
@@ -1414,12 +1414,7 @@ int cli_generic_set_cb(struct cli_def *cli, const char *command, char *argv[], i
 int cli_generic_add_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
 
-    cli_print(cli, "add something handler");
-    cli_print(cli, CliState::get().sections(cli->mode).c_str());
-
-
     std::vector<std::string> args;
-
     bool args_qmark = false;
     if (argc > 0) {
         for (int i = 0; i < argc; i++) {
@@ -1449,56 +1444,83 @@ int cli_generic_add_cb(struct cli_def *cli, const char *command, char *argv[], i
             apply_hostname(cli);
         };
 
+        bool created_internal = false;
+
         Setting &s = CfgFactory::cfg_root().lookup(section.c_str());
         if(section == "proto_objects") {
             if (CfgFactory::get().new_proto_object(s, args[0])) {
+                CfgFactory::get().load_db_proto();
                 register_cli();
+                created_internal = true;
             }
         }
         else if(section == "port_objects") {
             if (CfgFactory::get().new_port_object(s, args[0])) {
+                CfgFactory::get().load_db_port();
                 register_cli();
+                created_internal = true;
             }
         }
         else if(section == "address_objects") {
             if (CfgFactory::get().new_address_object(s, args[0])) {
+                CfgFactory::get().load_db_address();
                 register_cli();
+                created_internal = true;
             }
         }
         else if(section == "detection_profiles") {
             if (CfgFactory::get().new_detection_profile(s, args[0])) {
+                CfgFactory::get().load_db_prof_detection();
                 register_cli();
+                created_internal = true;
             }
         }
         else if(section == "content_profiles") {
             if (CfgFactory::get().new_content_profile(s, args[0])) {
+                CfgFactory::get().load_db_prof_content();
                 register_cli();
+                created_internal = true;
             }
         }
         else if(section == "tls_ca") {
             if (CfgFactory::get().new_tls_ca(s, args[0])) {
+                // missing load_db_tls_ca
                 register_cli();
+                created_internal = true;
             }
         }
         else if(section == "tls_profiles") {
             if (CfgFactory::get().new_tls_profile(s, args[0])) {
+                CfgFactory::get().load_db_prof_tls();
                 register_cli();
+                created_internal = true;
             }
         }
         else if(section == "alg_dns_profiles") {
             if (CfgFactory::get().new_alg_dns_profile(s, args[0])) {
+                CfgFactory::get().load_db_prof_alg_dns();
                 register_cli();
+                created_internal = true;
             }
         }
         else if(section == "auth_profiles") {
             if (CfgFactory::get().new_auth_profile(s, args[0])) {
+                CfgFactory::get().load_db_prof_auth();
                 register_cli();
+                created_internal = true;
             }
         }
         else if(section == "policy") {
             if (CfgFactory::get().new_policy(s, args[0])) {
+                CfgFactory::get().load_db_policy();
                 register_cli();
+                created_internal = true;
             }
+        }
+
+        if(created_internal) {
+            cli_print(cli, " ");
+            cli_print(cli, "New %s '%s' has been created.", section.c_str(), args[0].c_str());
         }
     }
     return CLI_OK;
