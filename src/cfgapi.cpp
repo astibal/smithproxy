@@ -2031,6 +2031,15 @@ bool CfgFactory::apply_tenant_config () {
 }
 
 
+bool CfgFactory::new_address_object(Setting& ex, std::string const& name) const {
+    Setting &item = ex.add(name, Setting::TypeGroup);
+
+    item.add("type", Setting::TypeInt) = 0;  // cidr
+    item.add("cidr", Setting::TypeString) = "127.0.0.1/32";
+
+    return true;
+}
+
 int CfgFactory::save_address_objects(Config& ex) const {
 
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
@@ -2079,6 +2088,13 @@ int CfgFactory::save_address_objects(Config& ex) const {
     return n_saved;
 }
 
+bool CfgFactory::new_port_object(Setting& ex, std::string const& name) const {
+    Setting& item = ex.add(name, Setting::TypeGroup);
+    item.add("start", Setting::TypeInt) = 0;
+    item.add("end", Setting::TypeInt) = 65535;
+
+    return true;
+}
 
 int CfgFactory::save_port_objects(Config& ex) const {
 
@@ -2102,6 +2118,13 @@ int CfgFactory::save_port_objects(Config& ex) const {
     return n_saved;
 }
 
+
+bool CfgFactory::new_proto_object(Setting& section, std::string const& name) const {
+    Setting& item = section.add(name, Setting::TypeGroup);
+    item.add("id", Setting::TypeInt) = 0;
+
+    return true;
+}
 
 int CfgFactory::save_proto_objects(Config& ex) const {
 
@@ -2157,6 +2180,13 @@ int CfgFactory::save_debug(Config& ex) const {
 }
 
 
+bool CfgFactory::new_detection_profile(Setting& ex, std::string const& name) const {
+    Setting& item = ex.add(name, Setting::TypeGroup);
+    item.add("mode", Setting::TypeInt) = 1; // MODE_PRE
+
+    return true;
+}
+
 int CfgFactory::save_detection_profiles(Config& ex) const {
 
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
@@ -2176,6 +2206,16 @@ int CfgFactory::save_detection_profiles(Config& ex) const {
     }
 
     return n_saved;
+}
+
+
+bool CfgFactory::new_content_profile(Setting& ex, std::string const& name) const {
+    Setting & item = ex.add(name, Setting::TypeGroup);
+
+    item.add("write_payload", Setting::TypeBoolean) = false;
+    item.add("content_rules", Setting::TypeList);
+
+    return true;
 }
 
 int CfgFactory::save_content_profiles(Config& ex) const {
@@ -2212,6 +2252,12 @@ int CfgFactory::save_content_profiles(Config& ex) const {
 }
 
 
+bool CfgFactory::new_tls_ca(Setting& ex, std::string const& name) const {
+    ex.add(name, Setting::TypeGroup);
+
+    return true;
+}
+
 int CfgFactory::save_tls_ca(Config& ex) const {
 
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
@@ -2232,6 +2278,43 @@ int CfgFactory::save_tls_ca(Config& ex) const {
 //    }
 
     return n_saved;
+}
+
+
+bool CfgFactory::new_tls_profile(Setting& ex, std::string const& name) const {
+    Setting &item = ex.add(name, Setting::TypeGroup);
+
+    item.add("inspect", Setting::TypeBoolean) = false;
+
+    item.add("use_pfs", Setting::TypeBoolean) = true;
+    item.add("left_use_pfs", Setting::TypeBoolean) = true;
+    item.add("right_use_pfs", Setting::TypeBoolean) = true;
+
+    item.add("allow_untrusted_issuers", Setting::TypeBoolean) = false;
+    item.add("allow_invalid_certs", Setting::TypeBoolean) = false;
+    item.add("allow_self_signed", Setting::TypeBoolean) = false;
+
+    item.add("ocsp_mode", Setting::TypeInt) = 2;
+    item.add("ocsp_stapling", Setting::TypeBoolean) = true;
+    item.add("ocsp_stapling_mode", Setting::TypeInt) = 1;
+
+    item.add("ct_enable", Setting::TypeBoolean) = true;
+
+    // add sni bypass list
+    item.add("sni_filter_bypass", Setting::TypeArray);
+    item.add("redirect_warning_ports", Setting::TypeArray);
+
+    item.add("failed_certcheck_replacement", Setting::TypeBoolean) = true;
+    item.add("failed_certcheck_override", Setting::TypeBoolean) = true;
+    item.add("failed_certcheck_override_timeout", Setting::TypeInt) = 600;
+    item.add("failed_certcheck_override_timeout_type", Setting::TypeInt) = 0;
+
+
+    item.add("left_disable_reuse", Setting::TypeBoolean) = false;
+    item.add("right_disable_reuse", Setting::TypeBoolean) = false;
+    item.add("sslkeylog", Setting::TypeBoolean) = false;
+
+    return true;
 }
 
 int CfgFactory::save_tls_profiles(Config& ex) const {
@@ -2301,6 +2384,16 @@ int CfgFactory::save_tls_profiles(Config& ex) const {
 }
 
 
+bool CfgFactory::new_alg_dns_profile(Setting &ex, const std::string &name) const {
+    Setting &item = ex.add(name, Setting::TypeGroup);
+
+    item.add("match_request_id", Setting::TypeBoolean) = false;
+    item.add("randomize_id", Setting::TypeBoolean) = false;
+    item.add("cached_responses", Setting::TypeBoolean) = false;
+
+    return true;
+}
+
 int CfgFactory::save_alg_dns_profiles(Config& ex) const {
 
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
@@ -2324,6 +2417,17 @@ int CfgFactory::save_alg_dns_profiles(Config& ex) const {
     return n_saved;
 }
 
+bool CfgFactory::new_auth_profile (Setting &ex, const std::string &name) const {
+
+    Setting &item = ex.add(name, Setting::TypeGroup);
+
+    item.add("authenticate", Setting::TypeBoolean) = false;
+    item.add("resolve", Setting::TypeBoolean) = true;
+
+    item.add("identities", Setting::TypeGroup);
+
+    return true;
+}
 
 int CfgFactory::save_auth_profiles(Config& ex) const {
 
@@ -2369,6 +2473,12 @@ int CfgFactory::save_auth_profiles(Config& ex) const {
     return n_saved;
 }
 
+
+bool CfgFactory::new_policy (Setting &ex, const std::string &name) const {
+    ex.add(name, Setting::TypeGroup);
+
+    return true;
+}
 
 int CfgFactory::save_policy(Config& ex) const {
 

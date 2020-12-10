@@ -216,17 +216,39 @@ public:
     [[maybe_unused]]
     int  load_db_prof_script ();
 
+
+    bool new_address_object(Setting& ex, std::string const& name) const;
     int save_address_objects(Config& ex) const;
+
+    bool new_port_object(Setting& ex, std::string const& name) const;
     int save_port_objects(Config& ex) const;
+
+    bool new_proto_object(Setting& section, std::string const& name) const;
     int save_proto_objects(Config& ex) const;
+
     int save_debug(Config& ex) const;
+
+    bool new_detection_profile(Setting& ex, std::string const& name) const;
     int save_detection_profiles(Config& ex) const;
+
+    bool new_content_profile(Setting& ex, std::string const& name) const;
     int save_content_profiles(Config& ex) const;
+
+    bool new_tls_ca(Setting& ex, std::string const& name) const;
     int save_tls_ca(Config& ex) const;
+
+    bool new_tls_profile(Setting& ex, std::string const& name) const;
     int save_tls_profiles(Config& ex) const;
+
+    bool new_alg_dns_profile(Setting& ex, std::string const& name) const;
     int save_alg_dns_profiles(Config& ex) const;
+
+    bool new_auth_profile(Setting& ex, std::string const& name) const;
     int save_auth_profiles(Config& ex) const;
+
+    bool new_policy(Setting& ex, std::string const& name) const;
     int save_policy(Config& ex) const;
+
     [[nodiscard]] int save_config() const;
 
 
