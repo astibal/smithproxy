@@ -135,6 +135,52 @@ void cfg_generate_cli_hints(Setting& setting, std::vector<std::string>* this_lev
     }
 }
 
+std::vector<std::string> load_valid_options(std::string const& section, std::string const& varname) {
+
+    std::vector<std::string> ret;
+
+    auto fill_attributes = [&](std::vector<std::string> keys) {
+        for(auto const& k: keys) {
+            ret.push_back(k);
+        }
+    };
+
+    if(section.find("policy.[") == 0) {
+
+        if(varname == "dst" || varname == "src") {
+            fill_attributes(CfgFactory::get().keys_of_db_address());
+        }
+        else if(varname == "proto" ) {
+            fill_attributes(CfgFactory::get().keys_of_db_proto());
+        }
+        else if(varname == "sport" || varname == "dport") {
+            fill_attributes(CfgFactory::get().keys_of_db_port());
+        }
+        else if(varname == "tls_profile") {
+            fill_attributes(CfgFactory::get().keys_of_db_prof_tls());
+        }
+        else if(varname == "detection_profile") {
+            fill_attributes(CfgFactory::get().keys_of_db_prof_detection());
+        }
+        else if(varname == "content_profile") {
+            fill_attributes(CfgFactory::get().keys_of_db_prof_content());
+        }
+        else if(varname == "auth_profile") {
+            fill_attributes(CfgFactory::get().keys_of_db_prof_auth());
+        }
+        else if(varname == "alg_dns_profile") {
+            fill_attributes(CfgFactory::get().keys_of_db_prof_alg_dns());
+        }
+        else if(varname == "nat") {
+            fill_attributes( { "none", "auto" } );
+        }
+        else if(varname == "action") {
+            fill_attributes( { "accept", "reject" });
+        }
+    }
+
+    return ret;
+}
 
 std::vector<cli_command*> cli_generate_set_command_args(struct cli_def *cli, cli_command* parent, std::string const &section, std::string const& varname) {
 
@@ -144,18 +190,13 @@ std::vector<cli_command*> cli_generate_set_command_args(struct cli_def *cli, cli
     auto set_cb = std::get<1>(cb_entry).cmd_set();
     int mode = std::get<0>(cb_entry);
 
-    if(section.find("policy.[") == 0) {
-        if(varname == "dst" || varname == "src") {
+    auto opts = load_valid_options(section, varname);
 
-            for(auto const& k: CfgFactory::get().keys_of_db_address()) {
-                auto *ret_single = cli_register_command(cli, parent, k.c_str(), set_cb, PRIVILEGE_PRIVILEGED, mode,
-                                                        "value from address object list");
+    for(auto const& k: opts) {
+        auto *ret_single = cli_register_command(cli, parent, k.c_str(), set_cb, PRIVILEGE_PRIVILEGED, mode,
+                                                " - valid options");
 
-                ret.push_back(ret_single);
-
-
-            }
-        }
+        ret.push_back(ret_single);
     }
 
     return ret;
@@ -231,12 +272,14 @@ void cli_generate_commands (cli_def *cli, std::string const &section, cli_comman
     // generate set commands for this section first
     cli_generate_set_commands(cli, section);
 
-    std::string help = string_format("edit %s sub-items", section.c_str());
+    std::string help_edit = string_format("edit %s sub-items", section.c_str());
+    std::string help_add = "add";
 
     cli_command* edit = nullptr;
+    cli_command* add = nullptr;
 
     auto &this_section = CfgFactory::cfg_root().lookup(section.c_str());
-    auto this_callback_entry = CliState::get().callbacks(section);
+    auto &this_callback_entry = CliState::get().callbacks(section);
     int this_mode = std::get<0>(this_callback_entry);
 
 
@@ -270,17 +313,26 @@ void cli_generate_commands (cli_def *cli, std::string const &section, cli_comman
                 mode = static_cast<int> (std::get<0>(callback_entry)) + i;
             }
             auto cb_config = std::get<1>(callback_entry).cmd_config();
+            auto cb_add = std::get<1>(callback_entry).cmd_add();
 
             cli_generate_commands(cli, section_path, nullptr);
 
 
             // register 'edit' and 'edit <subsection>' in terms of this "mode ID"
             if(! edit) {
-                edit = cli_register_command(cli, cli_parent, "edit", nullptr, PRIVILEGE_PRIVILEGED, this_mode, help.c_str());
+                edit = cli_register_command(cli, cli_parent, "edit", nullptr, PRIVILEGE_PRIVILEGED, this_mode, help_edit.c_str());
+                std::get<1>(this_callback_entry).cli_edit(edit);
+
             }
             cli_register_command(cli, edit, sub_section_name.c_str(),
                                  cb_config, PRIVILEGE_PRIVILEGED, this_mode,
                                  string_format("edit %s settings", sub_section_name.c_str()).c_str());
+
+
+            if(! add) {
+                add = cli_register_command(cli, cli_parent, "add", cb_add, PRIVILEGE_PRIVILEGED, this_mode, help_add.c_str());
+                std::get<1>(this_callback_entry).cli_add(add);
+            }
         }
     }
 }

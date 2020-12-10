@@ -1411,6 +1411,100 @@ int cli_generic_set_cb(struct cli_def *cli, const char *command, char *argv[], i
     return cli_uni_set_cb(CliState::get().sections(cli->mode), cli, command, argv, argc);
 }
 
+int cli_generic_add_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+
+    cli_print(cli, "add something handler");
+    cli_print(cli, CliState::get().sections(cli->mode).c_str());
+
+
+    std::vector<std::string> args;
+
+    bool args_qmark = false;
+    if (argc > 0) {
+        for (int i = 0; i < argc; i++) {
+            args.emplace_back(std::string(argv[i]));
+        }
+        args_qmark = (args[0] == "?");
+
+    } else {
+        return CLI_OK;
+    }
+
+    if(args_qmark) {
+        cli_print(cli, " ... hint: add <object_name>");
+        return CLI_OK;
+    }
+
+    auto section = CliState::get().sections(cli->mode);
+
+
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
+    if(CfgFactory::cfg_root().exists(section.c_str())) {
+
+        auto register_cli = [&]() {
+            auto& callback_entry = CliState::get().callbacks(section);
+            cli_register_command(cli, std::get<1>(callback_entry).cli_edit(), args[0].c_str(), std::get<1>(callback_entry).cmd_config(), PRIVILEGE_PRIVILEGED, cli->mode, " edit new entry");
+            CliState::get().config_changed_flag = true;
+            apply_hostname(cli);
+        };
+
+        Setting &s = CfgFactory::cfg_root().lookup(section.c_str());
+        if(section == "proto_objects") {
+            if (CfgFactory::get().new_proto_object(s, args[0])) {
+                register_cli();
+            }
+        }
+        else if(section == "port_objects") {
+            if (CfgFactory::get().new_port_object(s, args[0])) {
+                register_cli();
+            }
+        }
+        else if(section == "address_objects") {
+            if (CfgFactory::get().new_address_object(s, args[0])) {
+                register_cli();
+            }
+        }
+        else if(section == "detection_profiles") {
+            if (CfgFactory::get().new_detection_profile(s, args[0])) {
+                register_cli();
+            }
+        }
+        else if(section == "content_profiles") {
+            if (CfgFactory::get().new_content_profile(s, args[0])) {
+                register_cli();
+            }
+        }
+        else if(section == "tls_ca") {
+            if (CfgFactory::get().new_tls_ca(s, args[0])) {
+                register_cli();
+            }
+        }
+        else if(section == "tls_profiles") {
+            if (CfgFactory::get().new_tls_profile(s, args[0])) {
+                register_cli();
+            }
+        }
+        else if(section == "alg_dns_profiles") {
+            if (CfgFactory::get().new_alg_dns_profile(s, args[0])) {
+                register_cli();
+            }
+        }
+        else if(section == "auth_profiles") {
+            if (CfgFactory::get().new_auth_profile(s, args[0])) {
+                register_cli();
+            }
+        }
+        else if(section == "policy") {
+            if (CfgFactory::get().new_policy(s, args[0])) {
+                register_cli();
+            }
+        }
+    }
+    return CLI_OK;
+}
+
+
 // index < 0 means all
 void cli_print_section(cli_def* cli, const std::string& name, int index , unsigned long pipe_sz ) {
 
@@ -1667,19 +1761,22 @@ void client_thread(int client_socket) {
             "proto_objects",
             CliState::callback_entry(MODE_EDIT_PROTO_OBJECTS, CliCallbacks()
                 .cmd_set(cli_generic_set_cb)
-                .cmd_config(cli_conf_edit_proto_objects)));
+                .cmd_config(cli_conf_edit_proto_objects)
+                .cmd_add(cli_generic_add_cb)));
 
     CliState::get().callbacks(
             "address_objects",
             CliState::callback_entry(MODE_EDIT_ADDRESS_OBJECTS, CliCallbacks()
                     .cmd_set(cli_generic_set_cb)
-                    .cmd_config(cli_conf_edit_address_objects)));
+                    .cmd_config(cli_conf_edit_address_objects)
+                    .cmd_add(cli_generic_add_cb)));
 
     CliState::get().callbacks(
             "port_objects",
             CliState::callback_entry(MODE_EDIT_PORT_OBJECTS, CliCallbacks()
                 .cmd_set(cli_generic_set_cb)
-                .cmd_config(cli_conf_edit_port_objects)));
+                .cmd_config(cli_conf_edit_port_objects)
+                .cmd_add(cli_generic_add_cb)));
 
 
     cli_add_static_section("policy", MODE_EDIT_POLICY, cli_conf_edit_policy);
@@ -1688,31 +1785,36 @@ void client_thread(int client_socket) {
             "detection_profiles",
             CliState::callback_entry(MODE_EDIT_DETECTION_PROFILES, CliCallbacks()
                     .cmd_set(cli_generic_set_cb)
-                    .cmd_config(cli_conf_edit_detection_profiles)));
+                    .cmd_config(cli_conf_edit_detection_profiles)
+                    .cmd_add(cli_generic_add_cb)));
 
     CliState::get().callbacks(
             "content_profiles",
             CliState::callback_entry(MODE_EDIT_CONTENT_PROFILES, CliCallbacks()
                     .cmd_set(cli_generic_set_cb)
-                    .cmd_config(cli_conf_edit_content_profiles)));
+                    .cmd_config(cli_conf_edit_content_profiles)
+                    .cmd_add(cli_generic_add_cb)));
 
     CliState::get().callbacks(
             "tls_profiles",
             CliState::callback_entry(MODE_EDIT_TLS_PROFILES, CliCallbacks()
                     .cmd_set(cli_generic_set_cb)
-                    .cmd_config(cli_conf_edit_tls_profiles)));
+                    .cmd_config(cli_conf_edit_tls_profiles)
+                    .cmd_add(cli_generic_add_cb)));
 
     CliState::get().callbacks(
             "auth_profiles",
             CliState::callback_entry(MODE_EDIT_AUTH_PROFILES, CliCallbacks()
                     .cmd_set(cli_generic_set_cb)
-                    .cmd_config(cli_conf_edit_auth_profiles)));
+                    .cmd_config(cli_conf_edit_auth_profiles)
+                    .cmd_add(cli_generic_add_cb)));
 
     CliState::get().callbacks(
             "alg_dns_profiles",
             CliState::callback_entry(MODE_EDIT_ALG_DNS_PROFILES, CliCallbacks()
                     .cmd_set(cli_generic_set_cb)
-                    .cmd_config(cli_conf_edit_alg_dns_profiles)));
+                    .cmd_config(cli_conf_edit_alg_dns_profiles)
+                    .cmd_add(cli_generic_add_cb)));
 
 
 
@@ -1722,31 +1824,32 @@ void client_thread(int client_socket) {
     auto conft_edit = cli_register_command(cli, nullptr, "edit", nullptr, PRIVILEGE_PRIVILEGED, MODE_CONFIG, "configure smithproxy settings");
 
 
-    std::vector<std::string> sections = { "settings", "debug",
-                                          "proto_objects", "address_objects", "port_objects" ,
-                                          "detection_profiles", "content_profiles", "tls_profiles", "auth_profiles",
-                                          "alg_dns_profiles",
-                                          "policy",
-                                          "starttls_signatures",
-                                          "detection_signatures" };
-    for( auto const& section : sections) {
+    std::vector<std::string> edit_sections = {"settings", "debug",
+                                              "proto_objects", "address_objects", "port_objects" ,
+                                              "detection_profiles", "content_profiles", "tls_profiles", "auth_profiles",
+                                              "alg_dns_profiles",
+                                              "policy",
+                                              "starttls_signatures",
+                                              "detection_signatures" };
 
-        if (CfgFactory::cfg_root().exists(section.c_str())) {
+    auto gen_edit_sections = [&]() {
+        for (auto const &section : edit_sections) {
 
-            std::string edit_help = string_format(" \t - edit %s", section.c_str());
-            auto const& callback_entry = CliState::get().callbacks(section);
+            if (CfgFactory::cfg_root().exists(section.c_str())) {
 
-            cli_register_command(cli, conft_edit, section.c_str(), std::get<1>(callback_entry).cmd_config(),
-                                                            PRIVILEGE_PRIVILEGED, MODE_CONFIG, edit_help.c_str());
+                std::string edit_help = string_format(" \t - edit %s", section.c_str());
+                auto const &callback_entry = CliState::get().callbacks(section);
 
+                cli_register_command(cli, conft_edit, section.c_str(), std::get<1>(callback_entry).cmd_config(),
+                                     PRIVILEGE_PRIVILEGED, MODE_CONFIG, edit_help.c_str());
 
-            std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
-
-
-            //std::vector<cli_command *> set_cmds = cli_generate_set_commands(cli, section);
-            cli_generate_commands(cli, section, nullptr);
+                std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
+                cli_generate_commands(cli, section, nullptr);
+            }
         }
-    }
+    };
+
+    gen_edit_sections();
 
     // Pass the connection off to libcli
     LogOutput::get()->remote_targets(string_format("cli-%d", client_socket), client_socket);

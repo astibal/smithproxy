@@ -61,9 +61,32 @@ struct CliCallbacks {
         return *this;
     }
 
+    callback cmd_add() const { return cmd_add_; };
+    CliCallbacks& cmd_add(callback c) {
+        cmd_add_ = c;
+        return *this;
+    }
+
+    cli_command* cli_edit() const { return cli_edit_; };
+    CliCallbacks& cli_edit(cli_command* c) {
+        cli_edit_ = c;
+        return *this;
+    }
+
+    cli_command* cli_add() const { return cli_add_; };
+    CliCallbacks& cli_add(cli_command* c) {
+        cli_add_ = c;
+        return *this;
+    }
+
+
 private:
     callback cmd_set_;
     callback cmd_config_;
+    callback cmd_add_;
+
+    cli_command* cli_edit_;
+    cli_command* cli_add_;
 };
 
 struct CliState {
