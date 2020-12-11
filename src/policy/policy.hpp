@@ -58,9 +58,9 @@
 #define POLICY_NAT_AUTO     1
 #define POLICY_NAT_POOL     2
 
-struct ProfileDetection;
-struct ProfileContent;
-struct ProfileTls;
+class ProfileDetection;
+class ProfileContent;
+class ProfileTls;
 struct ProfileAuth;
 struct ProfileAlgDns;
 struct ProfileScript;
@@ -135,7 +135,7 @@ public:
     
     bool ask_destroy() override { return false; };
     std::string to_string(int verbosity = 6) const override {
-        return string_format("ProfileDetection: name=%s mode=%d",prof_name.c_str(), mode);
+        return string_format("ProfileDetection: name=%s mode=%d", prof_name.c_str(), mode);
     };
     
     DECLARE_C_NAME("ProfileDetection");
@@ -160,10 +160,7 @@ public:
 
 class ProfileContent  : public socle::sobject {
 public:
-    /*
-     *  Quite obvious: if true, content of proxy transmission will be written to the 
-     *                 mitm/ file.
-     */
+    // if true, content of proxy transmission will dumped to file
     bool write_payload = false;
     std::string prof_name;
     
@@ -172,10 +169,10 @@ public:
 
     bool ask_destroy() override { return false; };
     std::string to_string(int verbosity = 6) const override {
-        std::string ret = string_format("ProfileContent: name=%s capture=%d",prof_name.c_str(),write_payload); 
+        std::string ret = string_format("ProfileContent: name=%s capture=%d", prof_name.c_str(), write_payload);
         if(verbosity > INF) {
             for(auto const& it: content_rules)
-                ret += string_format("\n        match: '%s'",ESC_(it.match).c_str());
+                ret += string_format("\n        match: '%s'", ESC_(it.match).c_str());
         }
         
         return ret;
@@ -191,11 +188,11 @@ public:
     bool allow_untrusted_issuers = false;
     bool allow_invalid_certs = false;
     bool allow_self_signed = false;
-    bool failed_certcheck_replacement = true; //instead of resetting connection, spoof and display human-readable explanation why connection failed
-    bool failed_certcheck_override = false;   //failed ssl replacement will contain option to temporarily allow the connection for the source IP.
-    int  failed_certcheck_override_timeout = 600; // if failed ssl override is active, this is the timeout.
-    int  failed_certcheck_override_timeout_type = 0; // 0 - just expire after the timeout
-                                                     // 1 - reset timeout on traffic (aka idle timer)
+    bool failed_certcheck_replacement = true;           //instead of resetting connection, spoof and display human-readable explanation why connection failed
+    bool failed_certcheck_override = false;             //failed ssl replacement will contain option to temporarily allow the connection for the source IP.
+    int  failed_certcheck_override_timeout = 600;       // if failed ssl override is active, this is the timeout.
+    int  failed_certcheck_override_timeout_type = 0;    // 0 - just expire after the timeout
+                                                        // 1 - reset timeout on traffic (aka idle timer)
     
     bool use_pfs = true;         // general switch, more concrete take precedence
     bool left_use_pfs = true;
@@ -203,7 +200,7 @@ public:
     bool left_disable_reuse = false;
     bool right_disable_reuse = false;
     
-    int ocsp_mode = 0;           //  0 = disable OCSP checks ; 1 = check only end certificate ; 2 = check all certificates
+    int ocsp_mode = 0;           // 0 = disable OCSP checks ; 1 = check only end certificate ; 2 = check all certificates
     bool ocsp_stapling = false;
     int  ocsp_stapling_mode = 0; // 0 = loose, 1 = strict, 2 = require
 
@@ -236,23 +233,28 @@ public:
 
     bool ask_destroy() override { return false; };
     std::string to_string(int verbosity = 6) const override {
-        std::string ret = string_format("ProfileTls: name=%s inspect=%d ocsp=%d ocsp_stap=%d pfs=%d,%d abr=%d,%d",prof_name.c_str(),inspect,ocsp_mode,ocsp_stapling_mode,left_use_pfs,right_use_pfs,!left_disable_reuse,!right_disable_reuse); 
+        std::string ret = string_format("ProfileTls: name=%s inspect=%d ocsp=%d ocsp_stap=%d pfs=%d,%d abr=%d,%d",prof_name.c_str(),
+                                                inspect,
+                                                ocsp_mode, ocsp_stapling_mode,
+                                                left_use_pfs,right_use_pfs,
+                                                !left_disable_reuse,!right_disable_reuse);
         if(verbosity > INF) {
             
-            ret += string_format("\n        allow untrusted issuers: %d",allow_untrusted_issuers);
-            ret += string_format("\n        allow ivalid certs: %d",allow_invalid_certs);
-            ret += string_format("\n        allow self-signed certs: %d",allow_self_signed);
-            ret += string_format("\n        failed cert check html warnings: %d",failed_certcheck_replacement);
-            ret += string_format("\n        failed cert check allow user override: %d",failed_certcheck_override);
-            ret += string_format("\n        failed cert check user override timeout: %d",failed_certcheck_override_timeout);
-            ret += string_format("\n        failed cert check user override timeout type: %d",failed_certcheck_override_timeout_type);
+            ret += string_format("\n        allow untrusted issuers: %d", allow_untrusted_issuers);
+            ret += string_format("\n        allow invalid certs: %d", allow_invalid_certs);
+            ret += string_format("\n        allow self-signed certs: %d", allow_self_signed);
+            ret += string_format("\n        failed cert check html warnings: %d", failed_certcheck_replacement);
+            ret += string_format("\n        failed cert check allow user override: %d", failed_certcheck_override);
+            ret += string_format("\n        failed cert check user override timeout: %d", failed_certcheck_override_timeout);
+            ret += string_format("\n        failed cert check user override timeout type: %d", failed_certcheck_override_timeout_type);
             
             bool sni_out = false;
             if(sni_filter_bypass)
-            for(auto const& it: *sni_filter_bypass) {
-                sni_out = true;
-                ret += string_format("\n        sni exclude: '%s'",ESC_(it).c_str());
-            }
+                for(auto const& it: *sni_filter_bypass) {
+                    sni_out = true;
+                    ret += string_format("\n        sni exclude: '%s'",ESC_(it).c_str());
+                }
+
             if(sni_out) {
                 ret += string_format("\n        sni exclude - use dns cache: %d",sni_filter_use_dns_cache);
                 ret += string_format("\n        sni exclude - use dns domain tree: %d",sni_filter_use_dns_domain_tree);
@@ -267,6 +269,7 @@ public:
         
         return ret;
     }
+
     DECLARE_C_NAME("ProfileTls");
 };
 
