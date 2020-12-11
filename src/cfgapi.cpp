@@ -851,7 +851,18 @@ int CfgFactory::policy_match (baseProxy *proxy) {
         
         if(r) {
             _deb("policy_match: matched #%d", x);
+
+            {
+                // shadowing own log desired - wanting to log in policy rule context
+                auto &log = rule->get_log();
+                _dia(" => policy #%d matched!", x);
+            }
+
             return x;
+        } else {
+            // shadowing own log desired - wanting to log in policy rule context
+            auto &log = rule->get_log();
+            _dia(" => policy #%d NOT matched!", x);
         }
         
         x++;
@@ -871,8 +882,20 @@ int CfgFactory::policy_match (std::vector<baseHostCX *> &left, std::vector<baseH
         
         if(r) {
             _dia("cfgapi_obj_policy_match_lr: matched #%d", x);
+
+            {
+                // shadowing own log desired - wanting to log in policy rule context
+                auto &log = rule->get_log();
+                _dia(" => policy #%d matched!", x);
+            }
+
             return x;
+        } else {
+            // shadowing own log desired - wanting to log in policy rule context
+            auto &log = rule->get_log();
+            _dia(" => policy #%d NOT matched!", x);
         }
+
         
         x++;
     }
