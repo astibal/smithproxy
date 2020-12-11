@@ -189,7 +189,9 @@ bool PolicyRule::match_rangegrp_cx(std::vector< range >& ranges, baseHostCX* cx)
 
 bool PolicyRule::match_rangegrp_vecx(std::vector< range >& ranges, std::vector< baseHostCX* >& vecx) {
     bool match = false;
-    
+
+    if(vecx.empty()) return true;
+
     int idx = -1;
     for(auto cx: vecx) {
         ++idx;
@@ -209,7 +211,9 @@ bool PolicyRule::match_rangegrp_vecx(std::vector< range >& ranges, std::vector< 
 
 bool PolicyRule::match_addrgrp_vecx(std::vector<std::shared_ptr<AddressObject>> &sources, std::vector< baseHostCX* >& vecx) {
     bool match = false;
-    
+
+    if(vecx.empty()) return true;
+
     int idx = -1;
     for(auto cx: vecx) {
         ++idx;
@@ -226,6 +230,57 @@ bool PolicyRule::match_addrgrp_vecx(std::vector<std::shared_ptr<AddressObject>> 
     return match;
 }
 
+int PolicyRule::sock_2_net(int sock_type) {
+    switch (sock_type) {
+        case SOCK_STREAM:
+            return 6;
+        case SOCK_DGRAM:
+            return 17;
+        default:
+            return 0;
+    }
+};
+
+bool PolicyRule::match_proto_cx(int acl_proto, baseHostCX* cx) {
+
+    bool ret = false;
+
+    if( cx && cx->com()) {
+        auto cx_proto = sock_2_net(cx->com()->l4_proto());
+        if( cx_proto != 0) {
+            if(acl_proto == cx_proto) {
+                ret = true;
+            }
+        } else {
+            throw std::logic_error("traffic cx cannot be matched due to unknown L4 protocol");
+        }
+    }
+    return ret;
+};
+
+
+
+bool PolicyRule::match_proto_vecx(int acl_proto, std::vector<baseHostCX*> const& vec_cx) {
+
+    if(vec_cx.empty()) return true;
+
+    bool ret = false;
+    for(auto cx: vec_cx) {
+        if(match_proto_cx(acl_proto, cx)) {
+            ret = true;
+            continue;
+
+        } else {
+            ret = false;
+            break;
+        }
+    }
+
+    return ret;
+};
+
+
+
 
 bool PolicyRule::match(baseProxy* p) {
     
@@ -233,31 +288,45 @@ bool PolicyRule::match(baseProxy* p) {
     bool lpmatch = false;
     bool rmatch = false;
     bool rpmatch = false;
-    
+
     if(p != nullptr) {
 
-        lmatch = match_addrgrp_vecx(src,p->ls()) || match_addrgrp_vecx(src,p->lda());
+        // compare if policy has proto match
+        bool proto_match = false;
+
+        if(proto != 0) {
+            proto_match = match_proto_vecx(proto, p->ls()) && match_proto_vecx(proto, p->lda());
+
+        } else {
+            // proto 0 means we don't care
+            proto_match = true;
+
+        }
+
+        if(!proto_match) goto end;
+
+        lmatch = match_addrgrp_vecx(src,p->ls()) && match_addrgrp_vecx(src,p->lda());
         if(!lmatch) goto end;
 
-        lpmatch = match_rangegrp_vecx(src_ports,p->ls()) || match_rangegrp_vecx(src_ports,p->lda());
+        lpmatch = match_rangegrp_vecx(src_ports,p->ls()) && match_rangegrp_vecx(src_ports,p->lda());
         if(!lpmatch) goto end;
 
-        rmatch = match_addrgrp_vecx(dst,p->rs()) || match_addrgrp_vecx(dst,p->rda());
+        rmatch = match_addrgrp_vecx(dst,p->rs()) && match_addrgrp_vecx(dst,p->rda());
         if(!rmatch) goto end;
 
-        rpmatch = match_rangegrp_vecx(dst_ports,p->rs()) || match_rangegrp_vecx(dst_ports,p->rda());
+        rpmatch = match_rangegrp_vecx(dst_ports,p->rs()) && match_rangegrp_vecx(dst_ports,p->rda());
         if(!rpmatch) goto end;
 
         end:
 
-        if (lmatch && lpmatch && rmatch && rpmatch) {
+        if (proto_match && lmatch && lpmatch && rmatch && rpmatch) {
             _inf("PolicyRule::match %s OK", p->to_string(iINF).c_str());
             cnt_matches++;
 
             return true;
 
         } else {
-            _dia("PolicyRule::match %s FAILED: %d:%d->%d:%d", p->to_string(iINF).c_str(), lmatch, lpmatch, rmatch, rpmatch);
+            _dia("PolicyRule::match %s FAILED: %d-%d:%d->%d:%d", p->to_string(iINF).c_str(), proto, lmatch, lpmatch, rmatch, rpmatch);
         }
 
     } else {
@@ -284,6 +353,19 @@ bool PolicyRule::match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r)
         rs = r[0]->to_string();
     }
 
+    // compare if policy has proto match
+    bool proto_match = false;
+
+    if(proto != 0) {
+        proto_match = match_proto_vecx(proto, l);
+
+    } else {
+        // proto 0 means we don't care
+        proto_match = true;
+
+    }
+
+    if(!proto_match) goto end;
 
     lmatch = match_addrgrp_vecx(src,l);
     if(!lmatch) goto end;
@@ -301,19 +383,18 @@ bool PolicyRule::match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r)
     if(*log.level() >= DEB ) {
         for(auto i: l) _dum("PolicyRule::match_lr L: %s", i->to_string().c_str());
         for(auto i: r) _dum("PolicyRule::match_lr R: %s", i->to_string().c_str());
-        _deb("PolicyRule::match_lr Success: %d:%d->%d:%d", lmatch, lpmatch, rmatch, rpmatch);
+        _deb("PolicyRule::match_lr Success: %d-%d:%d->%d:%d", proto, lmatch, lpmatch, rmatch, rpmatch);
     }
 
     end:
-    
-    
-    if (lmatch && lpmatch && rmatch && rpmatch) {
+
+    if (proto_match && lmatch && lpmatch && rmatch && rpmatch) {
         _inf("PolicyRule::match_lr %s <+> %s OK", ls.c_str(), rs.c_str());
         cnt_matches++;
         
         return true;
     } else {
-        _dia("PolicyRule::match_lr %s <+> %s FAILED: %d:%d->%d:%d", ls.c_str(), rs.c_str(), lmatch, lpmatch, rmatch, rpmatch);
+        _dia("PolicyRule::match_lr %s <+> %s FAILED: %d-%d:%d->%d:%d", ls.c_str(), rs.c_str(), proto, lmatch, lpmatch, rmatch, rpmatch);
     }
 
     return false;

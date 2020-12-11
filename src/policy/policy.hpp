@@ -78,47 +78,55 @@ struct ProfileList {
 class PolicyRule : public ProfileList , public socle::sobject {
 
 public:
-       unsigned int cnt_matches = 0;
-    
-       int proto = 6;
-       std::string proto_name;
-       bool proto_default = true;
-    
-       std::vector<std::shared_ptr<AddressObject>> src;
-       bool src_default = true;
-       std::vector<range> src_ports;
-       std::vector<std::string> src_ports_names;
-       bool src_ports_default = true;
-       
-       std::vector<std::shared_ptr<AddressObject>> dst;
-       bool dst_default = true;
-       std::vector<range> dst_ports;
-       std::vector<std::string> dst_ports_names;
-       bool dst_ports_default = true;
+    unsigned int cnt_matches = 0;
 
-       int action = POLICY_ACTION_PASS;
-       std::string action_name;
-       int nat    = POLICY_NAT_NONE;
-       std::string nat_name;
-      
-       PolicyRule() : ProfileList(), socle::sobject(), log(this, "policy.rule") {};
-       virtual ~PolicyRule() = default;
-       
-       bool match(baseProxy*);
-       bool match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r);
-       
-       bool match_addrgrp_cx(std::vector<std::shared_ptr<AddressObject>> &sources, baseHostCX* cx);
-       bool match_addrgrp_vecx(std::vector<std::shared_ptr<AddressObject>> &sources, std::vector<baseHostCX*>& vecx);
-       bool match_rangegrp_cx(std::vector<range>& ranges,baseHostCX* cx);
-       bool match_rangegrp_vecx(std::vector<range>& ranges,std::vector<baseHostCX*>& vecx);
-       
-       bool ask_destroy() override { return false; }
-       std::string to_string(int verbosity = 6) const override;
-       
-       DECLARE_C_NAME("PolicyRule");
-       DECLARE_LOGGING(to_string);
+    int proto = 6;
+    std::string proto_name;
+    bool proto_default = true;
 
-       logan_attached<PolicyRule> log;
+    std::vector<std::shared_ptr<AddressObject>> src;
+    bool src_default = true;
+    std::vector<range> src_ports;
+    std::vector<std::string> src_ports_names;
+    bool src_ports_default = true;
+
+    std::vector<std::shared_ptr<AddressObject>> dst;
+    bool dst_default = true;
+    std::vector<range> dst_ports;
+    std::vector<std::string> dst_ports_names;
+    bool dst_ports_default = true;
+
+    int action = POLICY_ACTION_PASS;
+    std::string action_name;
+    int nat    = POLICY_NAT_NONE;
+    std::string nat_name;
+
+    PolicyRule() : ProfileList(), socle::sobject(), log(this, "policy.rule") {};
+    virtual ~PolicyRule() = default;
+
+    bool match(baseProxy*);
+    bool match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r);
+
+
+    int sock_2_net(int sock_type);
+    bool match_proto_cx(int acl_proto, baseHostCX* cx);
+    bool match_proto_vecx(int acl_proto, std::vector<baseHostCX*> const& vec_cx);
+
+    bool match_addrgrp_cx(std::vector<std::shared_ptr<AddressObject>> &sources, baseHostCX* cx);
+    bool match_addrgrp_vecx(std::vector<std::shared_ptr<AddressObject>> &sources, std::vector<baseHostCX*>& vecx);
+    bool match_rangegrp_cx(std::vector<range>& ranges,baseHostCX* cx);
+    bool match_rangegrp_vecx(std::vector<range>& ranges,std::vector<baseHostCX*>& vecx);
+
+    bool ask_destroy() override { return false; }
+    std::string to_string(int verbosity = 6) const override;
+
+    DECLARE_C_NAME("PolicyRule");
+    DECLARE_LOGGING(to_string);
+
+    logan_attached<PolicyRule> log;
+
+public:
+    logan_attached<PolicyRule> const& get_log() const { return log; }
 };
 
 class ProfileDetection : public socle::sobject {
