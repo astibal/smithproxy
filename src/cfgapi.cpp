@@ -45,6 +45,7 @@
 
 #include <cfgapi.hpp>
 #include <cli/cmdserver.hpp>
+#include <cli/clistate.hpp>
 #include <log/logger.hpp>
 
 #include <policy/policy.hpp>

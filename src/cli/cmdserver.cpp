@@ -78,7 +78,7 @@
 #include <inspect/dnsinspector.hpp>
 
 #include <cli/clihelp.hpp>
-
+#include <cli/clistate.hpp>
 
 
 #include "socle_version.h"
