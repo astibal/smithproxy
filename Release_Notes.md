@@ -31,6 +31,8 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 
 ### New features
 
+* added CLI command `add` which ... adds new configuration elements into *running config* (not all elements are covered
+ yet) 
 * added Certificate Transparency support (tls_profile/ct_enable option) - enabled by default  
     1) use new shell command `sx_download_ctlog` to download CT logs and make CT checks available
     2) restart service to activate CT checks
