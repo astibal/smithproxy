@@ -1414,6 +1414,165 @@ int cli_generic_set_cb(struct cli_def *cli, const char *command, char *argv[], i
 int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
 
+    cli_print(cli, "remove callback");
+
+
+    std::vector<std::string> args;
+    bool args_qmark = false;
+    if (argc > 0) {
+        for (int i = 0; i < argc; i++) {
+            args.emplace_back(std::string(argv[i]));
+        }
+        args_qmark = (args[0] == "?");
+
+    }
+
+    if(args_qmark) {
+        cli_print(cli, " ... hint: remove <object_name>");
+        return CLI_OK;
+    }
+
+    auto section = CliState::get().sections(cli->mode);
+    auto vec_full_args = string_split(command, ' ');
+
+    // concat with additional args
+    vec_full_args.insert(vec_full_args.end(), args.begin(), args.end());
+
+    // erase "remove" from the list
+    vec_full_args.erase(vec_full_args.begin());
+
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
+    if(CfgFactory::cfg_root().exists(section.c_str())) {
+        cli_print(cli, "existing section %s", section.c_str());
+
+        auto reconstruct_cli = [&cli, &section]() {
+            auto& callback_entry = CliState::get().callbacks(section);
+
+            // remove edit hooks and re-register for new list
+            cli_unregister_all(cli, std::get<1>(callback_entry).cli_edit());
+
+            // generate new CLI sub-tree
+            cli_generate_commands(cli, section, nullptr);
+
+            CliState::get().config_changed_flag = true;
+            apply_hostname(cli);
+        };
+
+        auto remove = [&cli] (std::string const& section, std::vector<std::string> const& what ) -> int {
+
+            int removed = 0;
+
+            for(auto const& arg: what) {
+                // construct full path
+
+                auto fp = section + "." + arg;
+
+                cli_print(cli, "removing %s", fp.c_str());
+                // remove setting - FIXME: code will move to cfgpi for dependency solving (to not delete used elements)
+                CfgFactory::cfg_root().lookup(section).remove(arg);
+
+                removed++;
+            }
+
+            return removed;
+        };
+
+        bool removed_internal = false;
+
+        if(section == "proto_objects") {
+            reconstruct_cli();
+            removed_internal = ( remove(section, vec_full_args) > 0 );
+            if(removed_internal) {
+                CfgFactory::get().cleanup_db_proto();
+                CfgFactory::get().load_db_proto();
+            }
+        }
+        else if(section == "port_objects") {
+            reconstruct_cli();
+            removed_internal = ( remove(section, vec_full_args) > 0 );
+            if(removed_internal) {
+                CfgFactory::get().cleanup_db_port();
+                CfgFactory::get().load_db_port();
+            }
+
+        }
+        else if(section == "address_objects") {
+            reconstruct_cli();
+            removed_internal = ( remove(section, vec_full_args) > 0 );
+            if(removed_internal) {
+                CfgFactory::get().cleanup_db_address();
+                CfgFactory::get().load_db_address();
+            }
+        }
+        else if(section == "detection_profiles") {
+            reconstruct_cli();
+            removed_internal = ( remove(section, vec_full_args) > 0 );
+            if(removed_internal) {
+                CfgFactory::get().cleanup_db_prof_detection();
+                CfgFactory::get().load_db_prof_detection();
+            }
+        }
+        else if(section == "content_profiles") {
+            reconstruct_cli();
+            removed_internal = ( remove(section, vec_full_args) > 0 );
+            if(removed_internal) {
+                CfgFactory::get().cleanup_db_prof_content();
+                CfgFactory::get().load_db_prof_content();
+            }
+        }
+        else if(section == "tls_ca") {
+            reconstruct_cli();
+            removed_internal = ( remove(section, vec_full_args) > 0 );
+            if(removed_internal) {
+                CfgFactory::get().cleanup_db_tls_ca();
+                CfgFactory::get().load_db_tls_ca();
+            }
+        }
+        else if(section == "tls_profiles") {
+            reconstruct_cli();
+            removed_internal = ( remove(section, vec_full_args) > 0 );
+            if(removed_internal) {
+                CfgFactory::get().cleanup_db_prof_tls();
+                CfgFactory::get().load_db_prof_tls();
+            }
+        }
+        else if(section == "alg_dns_profiles") {
+            reconstruct_cli();
+            removed_internal = ( remove(section, vec_full_args) > 0 );
+            if(removed_internal) {
+                CfgFactory::get().cleanup_db_prof_alg_dns();
+                CfgFactory::get().load_db_prof_alg_dns();
+            }
+        }
+        else if(section == "auth_profiles") {
+            reconstruct_cli();
+            removed_internal = ( remove(section, vec_full_args) > 0 );
+            if(removed_internal) {
+                CfgFactory::get().cleanup_db_prof_auth();
+                CfgFactory::get().load_db_prof_auth();
+            }
+        }
+        else if(section == "policy") {
+            reconstruct_cli();
+            removed_internal = ( remove(section, vec_full_args) > 0 );
+            if(removed_internal) {
+                ; // policy will be reloaded either way
+            }
+        }
+
+
+        if(removed_internal) {
+            CfgFactory::get().cleanup_db_policy();
+            CfgFactory::get().load_db_policy();
+
+            cli_print(cli, " ");
+            cli_print(cli, "%s element has been removed.", section.c_str());
+        }
+    }
+    else {
+        cli_print(cli, "unknown section %s", section.c_str());
+    }
+
     return CLI_OK;
 }
 
