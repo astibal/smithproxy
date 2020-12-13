@@ -1593,7 +1593,14 @@ int cli_generic_add_cb(struct cli_def *cli, const char *command, char *argv[], i
     }
 
     if(args_qmark) {
-        cli_print(cli, " ... hint: add <object_name>");
+        cli_print(cli, " ... hint: add <object_name> (name must not start with reserved __)");
+        return CLI_OK;
+    }
+
+    if(args[0].find("__") == 0) {
+
+        cli_print(cli, " ");
+        cli_print(cli, "Error: name must not start with reserved \'__\'");
         return CLI_OK;
     }
 
