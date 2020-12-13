@@ -11,8 +11,8 @@ class CfgElement {
     std::vector<std::weak_ptr<CfgElement>> use_references;
 
 public:
-    std::string prof_name() const { return name_; }
-    std::string& prof_name() { return name_; }
+    std::string element_name() const { return name_; }
+    std::string& element_name() { return name_; }
 };
 
 class ProfileDetection : public socle::sobject, public CfgElement {
@@ -28,7 +28,7 @@ public:
 
     bool ask_destroy() override { return false; };
     std::string to_string(int verbosity = 6) const override {
-        return string_format("ProfileDetection: name=%s mode=%d", prof_name().c_str(), mode);
+        return string_format("ProfileDetection: name=%s mode=%d", element_name().c_str(), mode);
     };
 
 DECLARE_C_NAME("ProfileDetection");
@@ -61,7 +61,7 @@ public:
 
     bool ask_destroy() override { return false; };
     std::string to_string(int verbosity = 6) const override {
-        std::string ret = string_format("ProfileContent: name=%s capture=%d", prof_name().c_str(), write_payload);
+        std::string ret = string_format("ProfileContent: name=%s capture=%d", element_name().c_str(), write_payload);
         if(verbosity > INF) {
             for(auto const& it: content_rules)
                 ret += string_format("\n        match: '%s'", ESC_(it.match).c_str());
@@ -123,11 +123,12 @@ public:
 
     bool ask_destroy() override { return false; };
     std::string to_string(int verbosity = 6) const override {
-        std::string ret = string_format("ProfileTls: name=%s inspect=%d ocsp=%d ocsp_stap=%d pfs=%d,%d abr=%d,%d",prof_name().c_str(),
+        std::string ret = string_format("ProfileTls: name=%s inspect=%d ocsp=%d ocsp_stap=%d pfs=%d,%d abr=%d,%d",
+                                        element_name().c_str(),
                                         inspect,
                                         ocsp_mode, ocsp_stapling_mode,
-                                        left_use_pfs,right_use_pfs,
-                                        !left_disable_reuse,!right_disable_reuse);
+                                        left_use_pfs, right_use_pfs,
+                                        !left_disable_reuse, !right_disable_reuse);
         if(verbosity > INF) {
 
             ret += string_format("\n        allow untrusted issuers: %d", allow_untrusted_issuers);

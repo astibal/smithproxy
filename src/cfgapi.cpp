@@ -409,7 +409,7 @@ int CfgFactory::load_db_address () {
                             CIDR* c = cidr_from_str(address.c_str());
 
                             db_address[name] = std::make_shared<CidrAddress>(c);
-                            db_address[name]->prof_name() = name;
+                            db_address[name]->element_name() = name;
                             _dia("cfgapi_load_addresses: cidr '%s': ok", name.c_str());
                         }
                     break;
@@ -417,7 +417,7 @@ int CfgFactory::load_db_address () {
                         if (load_if_exists(cur_object, "fqdn", address))  {
 
                             db_address[name] = std::make_shared<FqdnAddress>(address);
-                            db_address[name]->prof_name() = name;
+                            db_address[name]->element_name() = name;
                             _dia("cfgapi_load_addresses: fqdn '%s': ok", name.c_str());
                         }
                     break;
@@ -575,7 +575,7 @@ int CfgFactory::load_db_policy () {
             if(load_if_exists(cur_object, "proto", proto)) {
                 int r = lookup_proto(proto.c_str());
                 if(r != 0) {
-                    rule->proto_name = proto;
+                    rule->proto.element_name() = proto;
                     rule->proto = r;
                     rule->proto_default = false;
                     _dia("cfgapi_load_policy[#%d]: proto object: %s", i, proto.c_str());
@@ -624,8 +624,7 @@ int CfgFactory::load_db_policy () {
                 if(load_if_exists(cur_object, "sport", sport)) {
                     range r = lookup_port(sport.c_str());
                     if(r != NULLRANGE) {
-                        rule->src_ports.push_back(r);
-                        rule->src_ports_names.push_back(sport);
+                        rule->src_ports.emplace_back(std::make_shared<CfgRange>(sport, r));
                         rule->src_ports_default = false;
                         _dia("cfgapi_load_policy[#%d]: src_port object: %s", i, sport.c_str());
                     } else {
@@ -641,8 +640,7 @@ int CfgFactory::load_db_policy () {
                     
                     range r = lookup_port(obj_name);
                     if(r != NULLRANGE) {
-                        rule->src_ports.push_back(r);
-                        rule->src_ports_names.emplace_back(obj_name);
+                        rule->src_ports.emplace_back(std::make_shared<CfgRange>(obj_name, r));
                         rule->src_ports_default = false;
                         _dia("cfgapi_load_policy[#%d]: src_port object: %s", i, obj_name);
                     } else {
@@ -689,8 +687,7 @@ int CfgFactory::load_db_policy () {
                 if(load_if_exists(cur_object, "dport", dport)) {
                     range r = lookup_port(dport.c_str());
                     if(r != NULLRANGE) {
-                        rule->dst_ports.push_back(r);
-                        rule->dst_ports_names.push_back(dport);
+                        rule->dst_ports.emplace_back(std::make_shared<CfgRange>(dport, r));
                         rule->dst_ports_default = false;
                         _dia("cfgapi_load_policy[#%d]: dst_port object: %s", i, dport.c_str());
                     } else {
@@ -706,8 +703,7 @@ int CfgFactory::load_db_policy () {
                     
                     range r = lookup_port(obj_name);
                     if(r != NULLRANGE) {
-                        rule->dst_ports.push_back(r);
-                        rule->dst_ports_names.emplace_back(obj_name);
+                        rule->dst_ports.emplace_back(std::make_shared<CfgRange>(obj_name, r));
                         rule->dst_ports_default = false;
                         _dia("cfgapi_load_policy[#%d]: dst_port object: %s", i, obj_name);
                     } else {
@@ -1066,8 +1062,8 @@ int CfgFactory::load_db_prof_detection () {
             _dia("cfgapi_load_obj_profile_detect: processing '%s'", name.c_str());
             
             if( load_if_exists(cur_object, "mode", a->mode) ) {
-                
-                a->prof_name() = name;
+
+                a->element_name() = name;
                 db_prof_detection[name] = std::shared_ptr<ProfileDetection>(a);
 
                 _dia("cfgapi_load_obj_profile_detect: '%s': ok", name.c_str());
@@ -1116,8 +1112,8 @@ int CfgFactory::load_db_prof_content () {
             _dia("load_db_prof_content: processing '%s'", name.c_str());
             
             if( load_if_exists(cur_object, "write_payload", a->write_payload) ) {
-                
-                a->prof_name() = name;
+
+                a->element_name() = name;
                 db_prof_content[name] = std::shared_ptr<ProfileContent>(a);
                 
                 if(cur_object.exists("content_rules")) {
@@ -1208,8 +1204,8 @@ int CfgFactory::load_db_prof_tls () {
             _dia("load_db_prof_tls: processing '%s'", name.c_str());
             
             if( load_if_exists(cur_object, "inspect", a->inspect) ) {
-                
-                a->prof_name() = name;
+
+                a->element_name() = name;
                 load_if_exists(cur_object, "allow_untrusted_issuers", a->allow_untrusted_issuers);
                 load_if_exists(cur_object, "allow_invalid_certs", a->allow_invalid_certs);
                 load_if_exists(cur_object, "allow_self_signed", a->allow_self_signed);
@@ -1302,8 +1298,8 @@ int CfgFactory::load_db_prof_alg_dns () {
 
 
             _dia("cfgapi_load_obj_alg_dns_profile: processing '%s'", name.c_str());
-            
-            a->prof_name() = name;
+
+            a->element_name() = name;
             load_if_exists(cur_object, "match_request_id", a->match_request_id);
             load_if_exists(cur_object, "randomize_id", a->randomize_id);
             load_if_exists(cur_object, "cached_responses", a->cached_responses);
@@ -1349,7 +1345,7 @@ int CfgFactory::load_db_prof_script () {
 
             _dia("load_db_prof_script: processing '%s'", name.c_str());
 
-            a->prof_name() = name;
+            a->element_name() = name;
             load_if_exists(cur_object, "type", a->script_type);
             load_if_exists(cur_object, "script-file", a->module_path);
 
@@ -1403,8 +1399,8 @@ int CfgFactory::load_db_prof_auth () {
 
 
             _deb("load_db_prof_auth: processing '%s'", name.c_str());
-            
-            a->prof_name() = name;
+
+            a->element_name() = name;
             load_if_exists(cur_object, "authenticate", a->authenticate);
             load_if_exists(cur_object, "resolve", a->resolve);
             
@@ -1428,7 +1424,7 @@ int CfgFactory::load_db_prof_auth () {
                         continue;
                     }
 
-                    n_subpol->prof_name() = sub_name;
+                    n_subpol->element_name() = sub_name;
 
                     std::string name_content;
                     std::string name_detection;
@@ -1439,29 +1435,32 @@ int CfgFactory::load_db_prof_auth () {
                     if(load_if_exists(cur_subpol, "detection_profile", name_detection)) {
                         auto prf  = lookup_prof_detection(name_detection.c_str());
                         if(prf) {
-                            _dia("load_db_prof_auth[sub-profile:%s]: detect profile %s", n_subpol->prof_name().c_str(), name_detection.c_str());
+                            _dia("load_db_prof_auth[sub-profile:%s]: detect profile %s", n_subpol->element_name().c_str(), name_detection.c_str());
                             n_subpol->profile_detection = prf;
                         } else {
-                            _err("load_db_prof_auth[sub-profile:%s]: detect profile %s cannot be loaded", n_subpol->prof_name().c_str(), name_detection.c_str());
+                            _err("load_db_prof_auth[sub-profile:%s]: detect profile %s cannot be loaded",
+                                 n_subpol->element_name().c_str(), name_detection.c_str());
                         }
                     }
                     
                     if(load_if_exists(cur_subpol, "content_profile", name_content)) {
                         auto prf  = lookup_prof_content(name_content.c_str());
                         if(prf) {
-                            _dia("load_db_prof_auth[sub-profile:%s]: content profile %s", n_subpol->prof_name().c_str(), name_content.c_str());
+                            _dia("load_db_prof_auth[sub-profile:%s]: content profile %s", n_subpol->element_name().c_str(), name_content.c_str());
                             n_subpol->profile_content = prf;
                         } else {
-                            _err("load_db_prof_auth[sub-profile:%s]: content profile %s cannot be loaded", n_subpol->prof_name().c_str(), name_content.c_str());
+                            _err("load_db_prof_auth[sub-profile:%s]: content profile %s cannot be loaded",
+                                 n_subpol->element_name().c_str(), name_content.c_str());
                         }
                     }                
                     if(load_if_exists(cur_subpol, "tls_profile", name_tls)) {
                         auto tls  = lookup_prof_tls(name_tls.c_str());
                         if(tls) {
-                            _dia("load_db_prof_auth[sub-profile:%s]: tls profile %s", n_subpol->prof_name().c_str(), name_tls.c_str());
+                            _dia("load_db_prof_auth[sub-profile:%s]: tls profile %s", n_subpol->element_name().c_str(), name_tls.c_str());
                             n_subpol->profile_tls = std::shared_ptr<ProfileTls>(tls);
                         } else {
-                            _err("load_db_prof_auth[sub-profile:%s]: tls profile %s cannot be loaded", n_subpol->prof_name().c_str(), name_tls.c_str());
+                            _err("load_db_prof_auth[sub-profile:%s]: tls profile %s cannot be loaded",
+                                 n_subpol->element_name().c_str(), name_tls.c_str());
                         }
                     }         
 
@@ -1470,16 +1469,17 @@ int CfgFactory::load_db_prof_auth () {
                     if(load_if_exists(cur_subpol, "alg_dns_profile", name_alg_dns)) {
                         auto dns  = lookup_prof_alg_dns(name_alg_dns.c_str());
                         if(dns) {
-                            _dia("load_db_prof_auth[sub-profile:%s]: DNS alg profile %s", n_subpol->prof_name().c_str(), name_alg_dns.c_str());
+                            _dia("load_db_prof_auth[sub-profile:%s]: DNS alg profile %s", n_subpol->element_name().c_str(), name_alg_dns.c_str());
                             n_subpol->profile_alg_dns = dns;
                         } else {
-                            _err("load_db_prof_auth[sub-profile:%s]: DNS alg %s cannot be loaded", n_subpol->prof_name().c_str(), name_alg_dns.c_str());
+                            _err("load_db_prof_auth[sub-profile:%s]: DNS alg %s cannot be loaded",
+                                 n_subpol->element_name().c_str(), name_alg_dns.c_str());
                         }
                     }                    
 
                     
                     a->sub_policies.push_back(n_subpol);
-                    _dia("load_db_prof_auth: profiles: %d:%s", j, n_subpol->prof_name().c_str());
+                    _dia("load_db_prof_auth: profiles: %d:%s", j, n_subpol->element_name().c_str());
                 }
             }
             db_prof_auth[name] = std::shared_ptr<ProfileAuth>(a);
@@ -1605,7 +1605,7 @@ bool CfgFactory::prof_content_apply (baseHostCX *originator, baseProxy *new_prox
 
     if(mitm_proxy != nullptr) {
         if(pc != nullptr) {
-            const char* pc_name = pc->prof_name().c_str();
+            const char* pc_name = pc->element_name().c_str();
             _dia("policy_apply: policy content profile[%s]: write payload: %d", pc_name, pc->write_payload);
             mitm_proxy->write_payload(pc->write_payload);
     
@@ -1645,7 +1645,7 @@ bool CfgFactory::prof_detect_apply (baseHostCX *originator, baseProxy *new_proxy
     if(mitm_originator != nullptr) {
         mitm_originator->mode(AppHostCX::MODE_NONE);
         if(pd != nullptr)  {
-            pd_name = pd->prof_name().c_str();
+            pd_name = pd->element_name().c_str();
             _dia("policy_apply[%s]: policy detection profile: mode: %d", pd_name, pd->mode);
             mitm_originator->mode(static_cast<AppHostCX::mode_t>(pd->mode));
         }
@@ -1679,11 +1679,11 @@ bool CfgFactory::prof_tls_apply (baseHostCX *originator, baseProxy *new_proxy, c
     if(ps != nullptr) {
         // we should also apply tls profile to originating side! Verification is not in effect, but BYPASS is!
         if (policy_apply_tls(ps, mitm_originator->com())) {
-            _dia("policy_apply: policy tls profile[%s] for %s", ps->prof_name().c_str(), mitm_originator->full_name('L').c_str());
+            _dia("policy_apply: policy tls profile[%s] for %s", ps->element_name().c_str(), mitm_originator->full_name('L').c_str());
             
             for( auto* cx: mitm_proxy->rs()) {
                 baseCom* xcom = cx->com();
-                _dia("policy_apply: policy tls profile[%s] for %s", ps->prof_name().c_str(), cx->full_name('R').c_str());
+                _dia("policy_apply: policy tls profile[%s] for %s", ps->element_name().c_str(), cx->full_name('R').c_str());
                 
                 tls_applied = policy_apply_tls(ps, xcom);
                 if(!tls_applied) {
@@ -1780,7 +1780,7 @@ bool CfgFactory::prof_alg_dns_apply (baseHostCX *originator, baseProxy *new_prox
             if(DNS_Inspector::dns_prefilter(mh)) {
                 auto* n = new DNS_Inspector();
 
-                _dia("policy_apply: policy dns profile[%s] for %s", p_alg_dns->prof_name().c_str(), mitm_originator->full_name('L').c_str());
+                _dia("policy_apply: policy dns profile[%s] for %s", p_alg_dns->element_name().c_str(), mitm_originator->full_name('L').c_str());
                 n->opt_match_id = p_alg_dns->match_request_id;
                 n->opt_randomize_id = p_alg_dns->randomize_id;
                 n->opt_cached_responses = p_alg_dns->cached_responses;
@@ -1810,7 +1810,7 @@ bool CfgFactory::prof_script_apply (baseHostCX *originator, baseProxy *new_proxy
 
         if(p_script) {
 
-            _dia("policy_apply: policy script profile[%s] for %s", p_script->prof_name().c_str(), mitm_originator->full_name('L').c_str());
+            _dia("policy_apply: policy script profile[%s] for %s", p_script->element_name().c_str(), mitm_originator->full_name('L').c_str());
 
             if(p_script->script_type == ProfileScript::ST_PYTHON) {
                 #ifdef USE_PYHON
@@ -1875,7 +1875,7 @@ int CfgFactory::policy_apply (baseHostCX *originator, baseProxy *proxy, int matc
         /* Processing content profile */
         if (pc) {
             if (prof_content_apply(originator, proxy, pc)) {
-                pc_name = pc->prof_name().c_str();
+                pc_name = pc->element_name().c_str();
             }
         }
         
@@ -1883,21 +1883,21 @@ int CfgFactory::policy_apply (baseHostCX *originator, baseProxy *proxy, int matc
         /* Processing detection profile */
         if (pd) {
             if(prof_detect_apply(originator, proxy, pd)) {
-                pd_name = pd->prof_name().c_str();
+                pd_name = pd->element_name().c_str();
             }
         }
         
         /* Processing TLS profile*/
         if (pt) {
             if(prof_tls_apply(originator, proxy, pt)) {
-                pt_name = pt->prof_name().c_str();
+                pt_name = pt->element_name().c_str();
             }
         }
         
         /* Processing ALG : DNS*/
         if (p_alg_dns) {
             if (prof_alg_dns_apply(originator, proxy, p_alg_dns)) {
-                algs_name += p_alg_dns->prof_name();
+                algs_name += p_alg_dns->element_name();
             }
         }
 
@@ -1910,7 +1910,7 @@ int CfgFactory::policy_apply (baseHostCX *originator, baseProxy *proxy, int matc
             mitm_proxy->opt_auth_authenticate = pa->authenticate;
             mitm_proxy->opt_auth_resolve = pa->resolve;
             
-            pa_name = pa->prof_name().c_str();
+            pa_name = pa->element_name().c_str();
         } 
         
         // ALGS can operate only on MitmHostCX classes
@@ -2535,19 +2535,19 @@ int CfgFactory::save_auth_profiles(Config& ex) const {
             Setting& ident = item.add("identities", Setting::TypeGroup);
 
             for( auto const& identity: obj->sub_policies) {
-                Setting& subid = ident.add(identity->prof_name(), Setting::TypeGroup);
+                Setting& subid = ident.add(identity->element_name(), Setting::TypeGroup);
 
                 if(identity->profile_detection)
-                    subid.add("detection_profile", Setting::TypeString) = identity->profile_detection->prof_name();
+                    subid.add("detection_profile", Setting::TypeString) = identity->profile_detection->element_name();
 
                 if(identity->profile_tls)
-                    subid.add("tls_profile", Setting::TypeString) = identity->profile_tls->prof_name();
+                    subid.add("tls_profile", Setting::TypeString) = identity->profile_tls->element_name();
 
                 if(identity->profile_content)
-                    subid.add("content_profile", Setting::TypeString) = identity->profile_content->prof_name();
+                    subid.add("content_profile", Setting::TypeString) = identity->profile_content->element_name();
 
                 if(identity->profile_alg_dns)
-                    subid.add("alg_dns_profile", Setting::TypeString) = identity->profile_alg_dns->prof_name();
+                    subid.add("alg_dns_profile", Setting::TypeString) = identity->profile_alg_dns->element_name();
 
             }
         }
@@ -2580,42 +2580,42 @@ int CfgFactory::save_policy(Config& ex) const {
 
         Setting& item = objects.add(Setting::TypeGroup);
 
-        item.add("proto", Setting::TypeString) = pol->proto_name;
+        item.add("proto", Setting::TypeString) = pol->proto.element_name();
 
         // SRC
         Setting& src_list = item.add("src", Setting::TypeArray);
         for(auto const& s: pol->src) {
-            src_list.add(Setting::TypeString) = s->prof_name();
+            src_list.add(Setting::TypeString) = s->element_name();
         }
         Setting& srcport_list = item.add("sport", Setting::TypeArray);
-        for(auto const& sp: pol->src_ports_names) {
-            srcport_list.add(Setting::TypeString) = sp;
+        for(auto const& sp: pol->src_ports) {
+            srcport_list.add(Setting::TypeString) = sp->element_name();
         }
 
 
         // DST
         Setting& dst_list = item.add("dst", Setting::TypeArray);
         for(auto const& d: pol->dst) {
-            dst_list.add(Setting::TypeString) = d->prof_name();
+            dst_list.add(Setting::TypeString) = d->element_name();
         }
         Setting& dstport_list = item.add("dport", Setting::TypeArray);
-        for(auto const& sp: pol->dst_ports_names) {
-            dstport_list.add(Setting::TypeString) = sp;
+        for(auto const& sp: pol->dst_ports) {
+            dstport_list.add(Setting::TypeString) = sp->element_name();
         }
 
         item.add("action", Setting::TypeString) = pol->action_name;
         item.add("nat", Setting::TypeString) = pol->nat_name;
 
         if(pol->profile_tls)
-            item.add("tls_profile", Setting::TypeString) = pol->profile_tls->prof_name();
+            item.add("tls_profile", Setting::TypeString) = pol->profile_tls->element_name();
         if(pol->profile_detection)
-            item.add("detection_profile", Setting::TypeString) = pol->profile_detection->prof_name();
+            item.add("detection_profile", Setting::TypeString) = pol->profile_detection->element_name();
         if(pol->profile_content)
-            item.add("content_profile", Setting::TypeString) = pol->profile_content->prof_name();
+            item.add("content_profile", Setting::TypeString) = pol->profile_content->element_name();
         if(pol->profile_auth)
-            item.add("auth_profile", Setting::TypeString) = pol->profile_auth->prof_name();
+            item.add("auth_profile", Setting::TypeString) = pol->profile_auth->element_name();
         if(pol->profile_alg_dns)
-            item.add("alg_dns_profile", Setting::TypeString) = pol->profile_alg_dns->prof_name();
+            item.add("alg_dns_profile", Setting::TypeString) = pol->profile_alg_dns->element_name();
 
         n_saved++;
     }

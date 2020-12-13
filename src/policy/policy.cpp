@@ -44,7 +44,7 @@ std::string PolicyRule::to_string(int verbosity) const {
     std::stringstream from;
     from << "PolicyRule:";
     
-    switch(proto) {
+    switch(proto.value()) {
         case 6:
             from << " [tcp] ";
             break;
@@ -52,7 +52,7 @@ std::string PolicyRule::to_string(int verbosity) const {
             from << " [udp] ";
             break;
         default:
-            from << string_format(" [proto-%d] ", proto);
+            from << string_format(" [proto-%d] ", proto.value());
     }
     
     if(src_default) from << "*";
@@ -65,10 +65,10 @@ std::string PolicyRule::to_string(int verbosity) const {
     from << ":";
     if(src_ports_default) from << "*";
     for(auto it: src_ports) {
-        if(it.first == 0 && it.second == 65535)
+        if(it->value().first == 0 && it->value().second == 65535)
             from << "(*) ";
         else
-            from << string_format("(%d,%d) ", it.first, it.second);
+            from << string_format("(%d,%d) ", it->value().first, it->value().second);
     }
     
     std::stringstream to;
@@ -80,10 +80,10 @@ std::string PolicyRule::to_string(int verbosity) const {
     to << ":";
     if(dst_ports_default) to << "*";
     for(auto it: dst_ports) {
-        if(it.first == 0 && it.second == 65535)
+        if(it->value().first == 0 && it->value().second == 65535)
             to << "(*) ";
         else
-            to << string_format("(%d,%d) ", it.first, it.second);
+            to << string_format("(%d,%d) ", it->value().first, it->value().second);
     }
     
     std::stringstream out;
@@ -121,18 +121,18 @@ std::string PolicyRule::to_string(int verbosity) const {
     
     if(verbosity > INF) {
         out << ": ";
-        if(profile_auth) out << string_format("\n    auth=%s  (0x%x) ", profile_auth->prof_name().c_str(), profile_auth.get());
-        if(profile_tls) out << string_format("\n    tls=%s  (0x%x) ", profile_tls->prof_name().c_str(), profile_tls.get());
-        if(profile_detection) out << string_format("\n    det=%s  (0x%x) ", profile_detection->prof_name().c_str(), profile_detection.get());
-        if(profile_content) out << string_format("\n    cont=%s  (0x%x) ", profile_content->prof_name().c_str(), profile_content.get());
-        if(profile_alg_dns) out << string_format("\n    alg_dns=%s  (0x%x) ", profile_alg_dns->prof_name().c_str(), profile_alg_dns.get());
+        if(profile_auth) out << string_format("\n    auth=%s  (0x%x) ", profile_auth->element_name().c_str(), profile_auth.get());
+        if(profile_tls) out << string_format("\n    tls=%s  (0x%x) ", profile_tls->element_name().c_str(), profile_tls.get());
+        if(profile_detection) out << string_format("\n    det=%s  (0x%x) ", profile_detection->element_name().c_str(), profile_detection.get());
+        if(profile_content) out << string_format("\n    cont=%s  (0x%x) ", profile_content->element_name().c_str(), profile_content.get());
+        if(profile_alg_dns) out << string_format("\n    alg_dns=%s  (0x%x) ", profile_alg_dns->element_name().c_str(), profile_alg_dns.get());
     }
     
     return out.str();
 }
 
 
-bool PolicyRule::match_addrgrp_cx(std::vector<std::shared_ptr<AddressObject>> &sources, baseHostCX* cx) {
+bool PolicyRule::match_addrgrp_cx(group_of_addresses &sources, baseHostCX* cx) {
     bool match = false;
     
     if(sources.empty()) {
@@ -164,7 +164,7 @@ bool PolicyRule::match_addrgrp_cx(std::vector<std::shared_ptr<AddressObject>> &s
     return match;
 }
 
-bool PolicyRule::match_rangegrp_cx(std::vector< range >& ranges, baseHostCX* cx) {
+bool PolicyRule::match_rangegrp_cx(group_of_ports& ranges, baseHostCX* cx) {
     bool match = false;
     
     if(ranges.empty()) {
@@ -174,12 +174,12 @@ bool PolicyRule::match_rangegrp_cx(std::vector< range >& ranges, baseHostCX* cx)
         int p = std::stoi(cx->port());
         for(auto const& comp: ranges) {
 
-            if((p >= comp.first) && (p <= comp.second)) {
-                _deb("PolicyRule::match_rangergrp_cx: comparing %d with %s: matched", p, rangetos(comp).c_str());
+            if((p >= comp->value().first) && (p <= comp->value().second)) {
+                _deb("PolicyRule::match_rangergrp_cx: comparing %d with %s: matched", p, rangetos(comp->value()).c_str());
                 match = true;
                 break;
             } else {
-                _deb("PolicyRule::match_rangergrp_cx: comparing %d with %s: not matched", p, rangetos(comp).c_str());
+                _deb("PolicyRule::match_rangergrp_cx: comparing %d with %s: not matched", p, rangetos(comp->value()).c_str());
             }
         }
     }
@@ -187,7 +187,7 @@ bool PolicyRule::match_rangegrp_cx(std::vector< range >& ranges, baseHostCX* cx)
     return match;
 }
 
-bool PolicyRule::match_rangegrp_vecx(std::vector< range >& ranges, std::vector< baseHostCX* >& vecx) {
+bool PolicyRule::match_rangegrp_vecx(group_of_ports& ranges, std::vector< baseHostCX* >& vecx) {
     bool match = false;
 
     if(vecx.empty()) return true;
@@ -209,7 +209,7 @@ bool PolicyRule::match_rangegrp_vecx(std::vector< range >& ranges, std::vector< 
 }
 
 
-bool PolicyRule::match_addrgrp_vecx(std::vector<std::shared_ptr<AddressObject>> &sources, std::vector< baseHostCX* >& vecx) {
+bool PolicyRule::match_addrgrp_vecx(group_of_addresses &sources, std::vector< baseHostCX* >& vecx) {
     bool match = false;
 
     if(vecx.empty()) return true;
@@ -294,8 +294,8 @@ bool PolicyRule::match(baseProxy* p) {
         // compare if policy has proto match
         bool proto_match = false;
 
-        if(proto != 0) {
-            proto_match = match_proto_vecx(proto, p->ls()) && match_proto_vecx(proto, p->lda());
+        if(proto.value() != 0) {
+            proto_match = match_proto_vecx(proto.value(), p->ls()) && match_proto_vecx(proto.value(), p->lda());
 
         } else {
             // proto 0 means we don't care
@@ -356,8 +356,8 @@ bool PolicyRule::match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r)
     // compare if policy has proto match
     bool proto_match = false;
 
-    if(proto != 0) {
-        proto_match = match_proto_vecx(proto, l);
+    if(proto.value() != 0) {
+        proto_match = match_proto_vecx(proto.value(), l);
 
     } else {
         // proto 0 means we don't care

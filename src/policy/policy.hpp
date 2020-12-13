@@ -64,22 +64,24 @@
 class PolicyRule : public ProfileList , public socle::sobject {
 
 public:
+    using group_of_ports = std::vector<std::shared_ptr<CfgRange>>;
+    using group_of_addresses = std::vector<std::shared_ptr<AddressObject>>;
+
     unsigned int cnt_matches = 0;
 
-    int proto = 6;
-    std::string proto_name;
+    CfgUint8 proto;
     bool proto_default = true;
 
-    std::vector<std::shared_ptr<AddressObject>> src;
+    group_of_addresses src;
     bool src_default = true;
-    std::vector<range> src_ports;
-    std::vector<std::string> src_ports_names;
+
+    group_of_ports  src_ports;
     bool src_ports_default = true;
 
-    std::vector<std::shared_ptr<AddressObject>> dst;
+    group_of_addresses  dst;
     bool dst_default = true;
-    std::vector<range> dst_ports;
-    std::vector<std::string> dst_ports_names;
+
+    group_of_ports dst_ports;
     bool dst_ports_default = true;
 
     int action = POLICY_ACTION_PASS;
@@ -87,7 +89,11 @@ public:
     int nat    = POLICY_NAT_NONE;
     std::string nat_name;
 
-    PolicyRule() : ProfileList(), socle::sobject(), log(this, "policy.rule") {};
+    PolicyRule() : ProfileList(), socle::sobject(),
+                   proto(0),
+                   log(this, "policy.rule")
+                   {};
+
     virtual ~PolicyRule() = default;
 
     bool match(baseProxy*);
@@ -98,10 +104,11 @@ public:
     bool match_proto_cx(int acl_proto, baseHostCX* cx);
     bool match_proto_vecx(int acl_proto, std::vector<baseHostCX*> const& vec_cx);
 
-    bool match_addrgrp_cx(std::vector<std::shared_ptr<AddressObject>> &sources, baseHostCX* cx);
-    bool match_addrgrp_vecx(std::vector<std::shared_ptr<AddressObject>> &sources, std::vector<baseHostCX*>& vecx);
-    bool match_rangegrp_cx(std::vector<range>& ranges,baseHostCX* cx);
-    bool match_rangegrp_vecx(std::vector<range>& ranges,std::vector<baseHostCX*>& vecx);
+    bool match_addrgrp_cx(group_of_addresses &sources, baseHostCX* cx);
+    bool match_addrgrp_vecx(group_of_addresses &sources, std::vector<baseHostCX*>& vecx);
+
+    bool match_rangegrp_cx(group_of_ports& ranges,baseHostCX* cx);
+    bool match_rangegrp_vecx(group_of_ports& ranges,std::vector<baseHostCX*>& vecx);
 
     bool ask_destroy() override { return false; }
     std::string to_string(int verbosity = 6) const override;

@@ -76,8 +76,8 @@ std::string FqdnAddress::to_string(int verbosity) const {
         }
     }
 
-    if(! prof_name().empty() && verbosity > iINF) {
-        ret << string_format(" (name=%s)", prof_name().c_str());
+    if(!element_name().empty() && verbosity > iINF) {
+        ret << string_format(" (name=%s)", element_name().c_str());
     }
 
     return ret.str();

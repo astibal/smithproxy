@@ -48,6 +48,25 @@
 
 #include <sobject.hpp>
 #include <policy/profiles.hpp>
+#include <ranges.hpp>
+
+
+template <typename val_type>
+struct CfgSingle : public CfgElement {
+    CfgSingle(val_type const& v) { value_ = v; }
+    CfgSingle(std::string const& name, val_type const& v) { element_name() = name; value_ = v; }
+    val_type value_;
+
+    explicit operator val_type() const { return value_; }
+    val_type& value() { return value_; }
+    val_type value() const { return value_; }
+};
+
+typedef CfgSingle<uint8_t> CfgUint8;
+typedef CfgSingle<uint16_t> CfgUint16;
+typedef CfgSingle<uint32_t> CfgUint32;
+typedef CfgSingle<range> CfgRange;
+typedef CfgSingle<std::string> CfgString;
 
 class AddressObject : public socle::sobject, public CfgElement {
 public:
@@ -80,8 +99,8 @@ public:
 
         std::string ret = string_format("Cidr: %s",temp);
 
-        if(! prof_name().empty() && verbosity > iINF) {
-            ret += string_format(" (name=%s)", prof_name().c_str());
+        if(!element_name().empty() && verbosity > iINF) {
+            ret += string_format(" (name=%s)", element_name().c_str());
         }
 
         free(temp);
