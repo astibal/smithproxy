@@ -69,6 +69,12 @@ struct CliCallbacks {
         return *this;
     }
 
+    callback cmd_remove() const { return cmd_remove_; };
+    CliCallbacks& cmd_remove(callback c) {
+        cmd_remove_ = c;
+        return *this;
+    }
+
     cli_command* cli_edit() const { return cli_edit_; };
     CliCallbacks& cli_edit(cli_command* c) {
         cli_edit_ = c;
@@ -91,6 +97,7 @@ private:
     callback cmd_set_;
     callback cmd_config_;
     callback cmd_add_;
+    callback cmd_remove_;
 
     cli_command* cli_edit_;
     cli_command* cli_add_;

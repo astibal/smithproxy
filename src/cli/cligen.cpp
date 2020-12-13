@@ -273,10 +273,12 @@ void cli_generate_commands (cli_def *cli, std::string const &section, cli_comman
     cli_generate_set_commands(cli, section);
 
     std::string help_edit = string_format("edit %s sub-items", section.c_str());
-    std::string help_add = "add";
+    std::string help_add = "add elements";
+    std::string help_remove = "remove elements";
 
     cli_command* edit = nullptr;
     cli_command* add = nullptr;
+    cli_command* remove = nullptr;
 
     auto &this_section = CfgFactory::cfg_root().lookup(section.c_str());
     auto &this_callback_entry = CliState::get().callbacks(section);
@@ -314,6 +316,7 @@ void cli_generate_commands (cli_def *cli, std::string const &section, cli_comman
             }
             auto cb_config = std::get<1>(callback_entry).cmd_config();
             auto cb_add = std::get<1>(callback_entry).cmd_add();
+            auto cb_remove = std::get<1>(callback_entry).cmd_remove();
 
             cli_generate_commands(cli, section_path, nullptr);
 
@@ -324,15 +327,24 @@ void cli_generate_commands (cli_def *cli, std::string const &section, cli_comman
                 std::get<1>(this_callback_entry).cli_edit(edit);
 
             }
-            cli_register_command(cli, edit, sub_section_name.c_str(),
-                                 cb_config, PRIVILEGE_PRIVILEGED, this_mode,
-                                 string_format("edit %s settings", sub_section_name.c_str()).c_str());
-
 
             if(! add) {
                 add = cli_register_command(cli, cli_parent, "add", cb_add, PRIVILEGE_PRIVILEGED, this_mode, help_add.c_str());
                 std::get<1>(this_callback_entry).cli_add(add);
             }
+            if(! remove) {
+                remove = cli_register_command(cli, cli_parent, "remove", cb_remove, PRIVILEGE_PRIVILEGED, this_mode, help_remove.c_str());
+                std::get<1>(this_callback_entry).cli_remove(remove);
+            }
+
+            cli_register_command(cli, edit, sub_section_name.c_str(),
+                                 cb_config, PRIVILEGE_PRIVILEGED, this_mode,
+                                 string_format("edit %s settings", sub_section_name.c_str()).c_str());
+
+            cli_register_command(cli, remove, sub_section_name.c_str(),
+                                 cb_remove, PRIVILEGE_PRIVILEGED, this_mode,
+                                 string_format("remove %s element", sub_section_name.c_str()).c_str());
+
         }
     }
 }
