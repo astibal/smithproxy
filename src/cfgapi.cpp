@@ -1498,6 +1498,12 @@ int CfgFactory::cleanup_db_prof_detection () {
     
     return r;
 }
+
+int CfgFactory::cleanup_db_tls_ca () {
+    std::lock_guard<std::recursive_mutex> l(lock_);
+    return 0;
+}
+
 int CfgFactory::cleanup_db_prof_tls () {
     std::lock_guard<std::recursive_mutex> l(lock_);
     

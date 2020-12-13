@@ -259,6 +259,7 @@ public:
     int  cleanup_db_policy ();
     int  cleanup_db_prof_content ();
     int  cleanup_db_prof_detection ();
+    int  cleanup_db_tls_ca ();
     int  cleanup_db_prof_tls ();
     int  cleanup_db_prof_auth ();
     int  cleanup_db_prof_alg_dns ();
