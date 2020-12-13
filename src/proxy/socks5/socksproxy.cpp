@@ -303,10 +303,10 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
                             for (auto i: CfgFactory::get().policy_prof_auth(matched_policy())->sub_policies) {
                                 for (auto const& x: groups_vec) {
                                     _deb("Connection identities: ip identity '%s' against policy '%s'", x.c_str(),
-                                           i->name.c_str());
-                                    if (x == i->name) {
+                                           i->prof_name().c_str());
+                                    if (x == i->prof_name()) {
                                         _dia("Connection identities: ip identity '%s' matches policy '%s'", x.c_str(),
-                                               i->name.c_str());
+                                               i->prof_name().c_str());
                                         bad_auth = false;
                                     }
                                 }

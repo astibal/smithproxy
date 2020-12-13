@@ -239,11 +239,11 @@ bool MitmProxy::apply_id_policies(baseHostCX* cx) {
         if(auth_policy) {
             for(auto const& sub_prof: auth_policy->sub_policies) {
                 
-                _dia("apply_id_policies: checking identity policy for: %s", sub_prof->name.c_str());
+                _dia("apply_id_policies: checking identity policy for: %s", sub_prof->prof_name().c_str());
                 
                 for(auto const& my_id: group_vec) {
-                    _dia("apply_id_policies: identity in policy: %s, match-test real user group '%s'",sub_prof->name.c_str(), my_id.c_str());
-                    if(sub_prof->name == my_id) {
+                    _dia("apply_id_policies: identity in policy: %s, match-test real user group '%s'",sub_prof->prof_name().c_str(), my_id.c_str());
+                    if(sub_prof->prof_name() == my_id) {
                         _dia("apply_id_policies: .. matched.");
                         final_profile = sub_prof;
                         break;
@@ -263,34 +263,34 @@ bool MitmProxy::apply_id_policies(baseHostCX* cx) {
             const char* pt_name = "none";
             std::string algs;
             
-            _dia("apply_id_policies: assigning sub-profile %s",final_profile->name.c_str());
+            _dia("apply_id_policies: assigning sub-profile %s",final_profile->prof_name().c_str());
             if(final_profile->profile_content != nullptr) {
                 if (CfgFactory::get().prof_content_apply(cx, this, final_profile->profile_content)) {
-                    pc_name = final_profile->profile_content->prof_name.c_str();
-                    _dia("apply_id_policies: assigning content sub-profile %s",final_profile->profile_content->prof_name.c_str());
+                    pc_name = final_profile->profile_content->prof_name().c_str();
+                    _dia("apply_id_policies: assigning content sub-profile %s",final_profile->profile_content->prof_name().c_str());
                 }
             }
             if(final_profile->profile_detection != nullptr) {
                 if (CfgFactory::get().prof_detect_apply(cx, this, final_profile->profile_detection)) {
-                    pd_name = final_profile->profile_detection->prof_name.c_str();
-                    _dia("apply_id_policies: assigning detection sub-profile %s",final_profile->profile_detection->prof_name.c_str());
+                    pd_name = final_profile->profile_detection->prof_name().c_str();
+                    _dia("apply_id_policies: assigning detection sub-profile %s",final_profile->profile_detection->prof_name().c_str());
                 }
             }
             if(final_profile->profile_tls != nullptr) {
                 if(CfgFactory::get().prof_tls_apply(cx, this, final_profile->profile_tls)) {
-                    pt_name = final_profile->profile_tls->prof_name.c_str();
-                    _dia("apply_id_policies: assigning tls sub-profile %s",final_profile->profile_tls->prof_name.c_str());
+                    pt_name = final_profile->profile_tls->prof_name().c_str();
+                    _dia("apply_id_policies: assigning tls sub-profile %s",final_profile->profile_tls->prof_name().c_str());
                 }
             }
             if(final_profile->profile_alg_dns != nullptr) {
                 if(CfgFactory::get().prof_alg_dns_apply(cx, this, final_profile->profile_alg_dns)) {
-                    algs += final_profile->profile_alg_dns->prof_name + " ";
-                    _dia("apply_id_policies: assigning tls sub-profile %s",final_profile->profile_tls->prof_name.c_str());
+                    algs += final_profile->profile_alg_dns->prof_name() + " ";
+                    _dia("apply_id_policies: assigning tls sub-profile %s",final_profile->profile_tls->prof_name().c_str());
                 }
             }
             
             // end of custom sub-profiles
-            _inf("Connection %s: identity-based sub-profile: name=%s cont=%s det=%s tls=%s algs=%s",cx->full_name('L').c_str(),final_profile->name.c_str(),
+            _inf("Connection %s: identity-based sub-profile: name=%s cont=%s det=%s tls=%s algs=%s",cx->full_name('L').c_str(),final_profile->prof_name().c_str(),
                             pc_name, pd_name, pt_name, algs.c_str()
                             );
         }
@@ -1172,8 +1172,8 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
             std::string token_text = cx->application_data->original_request();
           
             for(auto const& i: CfgFactory::get().policy_prof_auth(cx->matched_policy())->sub_policies) {
-                _dia("MitmProxy::handle_replacement_auth: token: requesting identity %s", i->name.c_str());
-                token_text  += " |" + i->name;
+                _dia("MitmProxy::handle_replacement_auth: token: requesting identity %s", i->prof_name().c_str());
+                token_text  += " |" + i->prof_name();
             }
             shm_logon_token tok = shm_logon_token(token_text.c_str());
             
@@ -2010,9 +2010,9 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                             if(CfgFactory::get().policy_prof_auth(policy_num) != nullptr) {
                                 for ( auto const& i: CfgFactory::get().policy_prof_auth(policy_num)->sub_policies) {
                                     for(auto const& x: group_vec) {
-                                        _deb("Connection identities: ip identity '%s' against policy '%s'", x.c_str(), i->name.c_str());
-                                        if(x == i->name) {
-                                            _dia("Connection identities: ip identity '%s' matches policy '%s'", x.c_str(), i->name.c_str());
+                                        _deb("Connection identities: ip identity '%s' against policy '%s'", x.c_str(), i->prof_name().c_str());
+                                        if(x == i->prof_name()) {
+                                            _dia("Connection identities: ip identity '%s' matches policy '%s'", x.c_str(), i->prof_name().c_str());
                                             bad_auth = false;
                                         }
                                     }

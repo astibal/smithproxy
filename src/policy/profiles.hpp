@@ -5,7 +5,17 @@
 #ifndef SMITHPROXY_PROFILES_HPP
 #define SMITHPROXY_PROFILES_HPP
 
-class ProfileDetection : public socle::sobject {
+
+class CfgElement {
+    std::string name_;
+    std::vector<std::weak_ptr<CfgElement>> use_references;
+
+public:
+    std::string prof_name() const { return name_; }
+    std::string& prof_name() { return name_; }
+};
+
+class ProfileDetection : public socle::sobject, public CfgElement {
 
 public:
     /*
@@ -15,17 +25,16 @@ public:
      *  2   MODE_PRE  -- should be default, but not safe when cannot peek()
      */
     int mode = 0;
-    std::string prof_name;
 
     bool ask_destroy() override { return false; };
     std::string to_string(int verbosity = 6) const override {
-        return string_format("ProfileDetection: name=%s mode=%d", prof_name.c_str(), mode);
+        return string_format("ProfileDetection: name=%s mode=%d", prof_name().c_str(), mode);
     };
 
 DECLARE_C_NAME("ProfileDetection");
 };
 
-class ProfileContentRule : public socle::sobject {
+class ProfileContentRule : public socle::sobject, public CfgElement {
 
 public:
     std::string match;
@@ -42,18 +51,17 @@ public:
 DECLARE_C_NAME("ProfileContentRule");
 };
 
-class ProfileContent  : public socle::sobject {
+class ProfileContent  : public socle::sobject, public CfgElement {
 public:
     // if true, content of proxy transmission will dumped to file
     bool write_payload = false;
-    std::string prof_name;
 
     std::vector<ProfileContentRule> content_rules;
 
 
     bool ask_destroy() override { return false; };
     std::string to_string(int verbosity = 6) const override {
-        std::string ret = string_format("ProfileContent: name=%s capture=%d", prof_name.c_str(), write_payload);
+        std::string ret = string_format("ProfileContent: name=%s capture=%d", prof_name().c_str(), write_payload);
         if(verbosity > INF) {
             for(auto const& it: content_rules)
                 ret += string_format("\n        match: '%s'", ESC_(it.match).c_str());
@@ -66,7 +74,7 @@ DECLARE_C_NAME("ProfileContent");
 };
 
 
-class ProfileTls : public socle::sobject  {
+class ProfileTls : public socle::sobject, public CfgElement  {
 public:
     bool inspect = false;
     bool allow_untrusted_issuers = false;
@@ -89,8 +97,6 @@ public:
     int  ocsp_stapling_mode = 0; // 0 = loose, 1 = strict, 2 = require
 
     bool opt_ct_enable = true;
-
-    std::string prof_name;
 
     std::shared_ptr<std::vector<std::string>> sni_filter_bypass;
     socle::spointer_set_int redirect_warning_ports;
@@ -117,7 +123,7 @@ public:
 
     bool ask_destroy() override { return false; };
     std::string to_string(int verbosity = 6) const override {
-        std::string ret = string_format("ProfileTls: name=%s inspect=%d ocsp=%d ocsp_stap=%d pfs=%d,%d abr=%d,%d",prof_name.c_str(),
+        std::string ret = string_format("ProfileTls: name=%s inspect=%d ocsp=%d ocsp_stap=%d pfs=%d,%d abr=%d,%d",prof_name().c_str(),
                                         inspect,
                                         ocsp_mode, ocsp_stapling_mode,
                                         left_use_pfs,right_use_pfs,
@@ -170,26 +176,22 @@ struct ProfileList {
     std::shared_ptr<ProfileAlgDns> profile_alg_dns = nullptr;
     std::shared_ptr<ProfileScript> profile_script = nullptr;
 };
-struct ProfileSubAuth : public ProfileList {
-    std::string name;
+struct ProfileSubAuth : public ProfileList, public CfgElement {
 };
 
-struct ProfileAuth {
+struct ProfileAuth : public CfgElement {
     bool authenticate = false;
     bool resolve = false;  // resolve traffic by ip in auth table
-    std::string prof_name;
     std::vector<std::shared_ptr<ProfileSubAuth>> sub_policies;
 };
 
-struct ProfileAlgDns {
+struct ProfileAlgDns : public CfgElement {
     bool match_request_id = false;
     bool randomize_id = false;
     bool cached_responses = false;
-    std::string prof_name;
 };
 
-struct ProfileScript {
-    std::string prof_name;
+struct ProfileScript : public CfgElement {
     std::string module_path;
 
     using script_t = enum { ST_PYTHON = 0, ST_GOLANG = 1};
