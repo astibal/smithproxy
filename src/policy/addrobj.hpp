@@ -45,17 +45,17 @@
 #include <ext/libcidr/cidr.hpp>
 #include <display.hpp>
 #include <log/logger.hpp>
-#include <sobject.hpp>
 
-class AddressObject : public socle::sobject {
+#include <sobject.hpp>
+#include <policy/profiles.hpp>
+
+class AddressObject : public socle::sobject, public CfgElement {
 public:
     virtual bool match(CIDR* c) = 0;
     std::string to_string(int=iINF) const override = 0;
     AddressObject() : log(get_log()) {};
 
     ~AddressObject() override = default;
-
-    std::string prof_name;
 
     static logan_lite& get_log() {
         static logan_lite l("policy.addr");
@@ -80,8 +80,8 @@ public:
 
         std::string ret = string_format("Cidr: %s",temp);
 
-        if(! prof_name.empty() && verbosity > iINF) {
-            ret += string_format(" (name=%s)", prof_name.c_str());
+        if(! prof_name().empty() && verbosity > iINF) {
+            ret += string_format(" (name=%s)", prof_name().c_str());
         }
 
         free(temp);

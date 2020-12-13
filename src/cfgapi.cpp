@@ -409,7 +409,7 @@ int CfgFactory::load_db_address () {
                             CIDR* c = cidr_from_str(address.c_str());
 
                             db_address[name] = std::make_shared<CidrAddress>(c);
-                            db_address[name]->prof_name = name;
+                            db_address[name]->prof_name() = name;
                             _dia("cfgapi_load_addresses: cidr '%s': ok", name.c_str());
                         }
                     break;
@@ -417,7 +417,7 @@ int CfgFactory::load_db_address () {
                         if (load_if_exists(cur_object, "fqdn", address))  {
 
                             db_address[name] = std::make_shared<FqdnAddress>(address);
-                            db_address[name]->prof_name = name;
+                            db_address[name]->prof_name() = name;
                             _dia("cfgapi_load_addresses: fqdn '%s': ok", name.c_str());
                         }
                     break;
@@ -2585,7 +2585,7 @@ int CfgFactory::save_policy(Config& ex) const {
         // SRC
         Setting& src_list = item.add("src", Setting::TypeArray);
         for(auto const& s: pol->src) {
-            src_list.add(Setting::TypeString) = s->prof_name;
+            src_list.add(Setting::TypeString) = s->prof_name();
         }
         Setting& srcport_list = item.add("sport", Setting::TypeArray);
         for(auto const& sp: pol->src_ports_names) {
@@ -2596,7 +2596,7 @@ int CfgFactory::save_policy(Config& ex) const {
         // DST
         Setting& dst_list = item.add("dst", Setting::TypeArray);
         for(auto const& d: pol->dst) {
-            dst_list.add(Setting::TypeString) = d->prof_name;
+            dst_list.add(Setting::TypeString) = d->prof_name();
         }
         Setting& dstport_list = item.add("dport", Setting::TypeArray);
         for(auto const& sp: pol->dst_ports_names) {
