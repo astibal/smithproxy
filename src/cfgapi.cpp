@@ -394,6 +394,11 @@ int CfgFactory::load_db_address () {
             }
             
             name = cur_object.getName();
+            if(name.find("__") == 0) {
+                // don't process reserved names
+                continue;
+            }
+
 
             _deb("cfgapi_load_addresses: processing '%s'", name.c_str());
             
@@ -457,6 +462,11 @@ int CfgFactory::load_db_port () {
 
             name = cur_object.getName();
 
+            if(name.find("__") == 0) {
+                // don't process reserved names
+                continue;
+            }
+
             _deb("cfgapi_load_ports: processing '%s'", name.c_str());
             
             if( load_if_exists(cur_object, "start", a) &&
@@ -505,6 +515,11 @@ int CfgFactory::load_db_proto () {
             }
             
             name = cur_object.getName();
+
+            if(name.find("__") == 0) {
+                // don't process reserved names
+                continue;
+            }
 
             _deb("cfgapi_load_proto: processing '%s'", name.c_str());
             
@@ -1042,6 +1057,11 @@ int CfgFactory::load_db_prof_detection () {
             }
 
             name = cur_object.getName();
+            if(name.find("__") == 0) {
+                // don't process reserved names
+                continue;
+            }
+
 
             _dia("cfgapi_load_obj_profile_detect: processing '%s'", name.c_str());
             
@@ -1087,6 +1107,11 @@ int CfgFactory::load_db_prof_content () {
             }
 
             name = cur_object.getName();
+            if(name.find("__") == 0) {
+                // don't process reserved names
+                continue;
+            }
+
 
             _dia("load_db_prof_content: processing '%s'", name.c_str());
             
@@ -1174,6 +1199,11 @@ int CfgFactory::load_db_prof_tls () {
             }
 
             name = cur_object.getName();
+            if(name.find("__") == 0) {
+                // don't process reserved names
+                continue;
+            }
+
 
             _dia("load_db_prof_tls: processing '%s'", name.c_str());
             
@@ -1265,6 +1295,11 @@ int CfgFactory::load_db_prof_alg_dns () {
             }
             
             name = cur_object.getName();
+            if(name.find("__") == 0) {
+                // don't process reserved names
+                continue;
+            }
+
 
             _dia("cfgapi_load_obj_alg_dns_profile: processing '%s'", name.c_str());
             
@@ -1306,6 +1341,11 @@ int CfgFactory::load_db_prof_script () {
             }
 
             name = cur_object.getName();
+            if(name.find("__") == 0) {
+                // don't process reserved names
+                continue;
+            }
+
 
             _dia("load_db_prof_script: processing '%s'", name.c_str());
 
@@ -1356,6 +1396,11 @@ int CfgFactory::load_db_prof_auth () {
             }
             
             name = cur_object.getName();
+            if(name.find("__") == 0) {
+                // don't process reserved names
+                continue;
+            }
+
 
             _deb("load_db_prof_auth: processing '%s'", name.c_str());
             
@@ -1377,8 +1422,14 @@ int CfgFactory::load_db_prof_auth () {
                         continue;
                     }
 
-                    n_subpol->prof_name() = cur_subpol.getName();
-                    
+                    std::string sub_name = cur_subpol.getName();
+                    if(sub_name.find("__") == 0) {
+                        // don't process reserved names
+                        continue;
+                    }
+
+                    n_subpol->prof_name() = sub_name;
+
                     std::string name_content;
                     std::string name_detection;
                     std::string name_tls;
