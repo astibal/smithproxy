@@ -1144,6 +1144,10 @@ int CfgFactory::load_db_prof_content () {
     return num;
 }
 
+int CfgFactory::load_db_tls_ca() {
+    return 0;
+}
+
 int CfgFactory::load_db_prof_tls () {
     std::lock_guard<std::recursive_mutex> l(lock_);
     

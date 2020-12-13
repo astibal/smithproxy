@@ -209,6 +209,7 @@ public:
     int  load_db_policy ();
     int  load_db_prof_content ();
     int  load_db_prof_detection ();
+    int  load_db_tls_ca();
     int  load_db_prof_tls ();
     int  load_db_prof_auth ();
     int  load_db_prof_alg_dns ();
