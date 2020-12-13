@@ -315,7 +315,6 @@ void cli_generate_commands (cli_def *cli, std::string const &section, cli_comman
                 mode = static_cast<int> (std::get<0>(callback_entry)) + i;
             }
             auto cb_config = std::get<1>(callback_entry).cmd_config();
-            auto cb_add = std::get<1>(callback_entry).cmd_add();
             auto cb_remove = std::get<1>(callback_entry).cmd_remove();
 
             cli_generate_commands(cli, section_path, nullptr);
@@ -328,10 +327,6 @@ void cli_generate_commands (cli_def *cli, std::string const &section, cli_comman
 
             }
 
-            if(! add) {
-                add = cli_register_command(cli, cli_parent, "add", cb_add, PRIVILEGE_PRIVILEGED, this_mode, help_add.c_str());
-                std::get<1>(this_callback_entry).cli_add(add);
-            }
             if(! remove) {
                 remove = cli_register_command(cli, cli_parent, "remove", cb_remove, PRIVILEGE_PRIVILEGED, this_mode, help_remove.c_str());
                 std::get<1>(this_callback_entry).cli_remove(remove);
@@ -347,6 +342,11 @@ void cli_generate_commands (cli_def *cli, std::string const &section, cli_comman
 
         }
     }
+
+    auto cb_add = std::get<1>(this_callback_entry).cmd_add();
+
+    add = cli_register_command(cli, cli_parent, "add", cb_add, PRIVILEGE_PRIVILEGED, this_mode, help_add.c_str());
+    std::get<1>(this_callback_entry).cli_add(add);
 }
 
 
