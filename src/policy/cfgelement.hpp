@@ -17,25 +17,25 @@ class CfgElement {
     std::string name_;
 
     using dependency_vec_t = std::vector<std::weak_ptr<CfgElement>>;
-    dependency_vec_t dep_references_;
+    dependency_vec_t usage_references_;
 
 public:
     std::string element_name() const { return name_; }
     std::string& element_name() { return name_; }
 
-    dependency_vec_t& dependency_vec() noexcept { return dep_references_; };
-    dependency_vec_t const& dependency_vec() const noexcept  { return dep_references_; };
-    bool has_dependencies() const { return ! dep_references_.empty(); }
-    void dependency_add(std::weak_ptr<CfgElement>);
+    dependency_vec_t& usage_vec() noexcept { return usage_references_; };
+    dependency_vec_t const& usage_vec() const noexcept  { return usage_references_; };
+    bool has_usage() const { return ! usage_references_.empty(); }
+    void usage_add(std::weak_ptr<CfgElement> a);
 
-    inline std::vector<std::string> dependency_strvec() const;
+    inline std::vector<std::string> usage_strvec() const;
 };
 
 
-inline std::vector<std::string> CfgElement::dependency_strvec() const {
+inline std::vector<std::string> CfgElement::usage_strvec() const {
     std::vector<std::string> depnames;
 
-    for(auto const& dep: dependency_vec()) {
+    for(auto const& dep: usage_vec()) {
         auto dep_ptr = dep.lock();
 
         // if the dependency is still valid
@@ -43,10 +43,10 @@ inline std::vector<std::string> CfgElement::dependency_strvec() const {
 
             auto depstr = dep_ptr->element_name();
 
-            if(dep_ptr->has_dependencies()) {
+            if(dep_ptr->has_usage()) {
                 depstr += ":";
 
-                auto vec_of_deps = dep_ptr->dependency_strvec();
+                auto vec_of_deps = dep_ptr->usage_strvec();
                 std::for_each(vec_of_deps.begin(), vec_of_deps.end(), [&](auto e) { depstr+= e; } );
             }
 
@@ -57,7 +57,7 @@ inline std::vector<std::string> CfgElement::dependency_strvec() const {
     return depnames;
 }
 
-inline void CfgElement::dependency_add (std::weak_ptr<CfgElement> a) { dependency_vec().emplace_back(a); }
+inline void CfgElement::usage_add (std::weak_ptr<CfgElement> a) { usage_vec().emplace_back(a); }
 
 
 template <typename val_type>
