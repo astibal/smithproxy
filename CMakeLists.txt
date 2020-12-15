@@ -138,7 +138,7 @@ add_executable(smithproxy
         src/cli/diag/diag_cmds.hpp
         src/cli/diag/diag_cmds.cpp
         src/proxy/ocspinvoker.cpp
-        src/proxy/ocspinvoker.hpp src/policy/profiles.hpp)
+        src/proxy/ocspinvoker.hpp src/policy/profiles.hpp src/policy/cfgelement.hpp)
 
 add_executable(smithd
         ${SMITHD_DIR}/smithd.cpp

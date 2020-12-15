@@ -5,15 +5,7 @@
 #ifndef SMITHPROXY_PROFILES_HPP
 #define SMITHPROXY_PROFILES_HPP
 
-
-class CfgElement {
-    std::string name_;
-    std::vector<std::weak_ptr<CfgElement>> use_references;
-
-public:
-    std::string element_name() const { return name_; }
-    std::string& element_name() { return name_; }
-};
+#include <policy/cfgelement.hpp>
 
 class ProfileDetection : public socle::sobject, public CfgElement {
 
