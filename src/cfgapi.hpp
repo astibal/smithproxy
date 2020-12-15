@@ -156,8 +156,8 @@ public:
     }
 
     DB_MAP(std::shared_ptr<AddressObject>, db_address);
-    DB_MAP(range, db_port);
-    DB_MAP(int, db_proto);
+    DB_MAP(std::shared_ptr<CfgRange>, db_port);
+    DB_MAP(std::shared_ptr<CfgUint8> , db_proto);
     std::vector<std::shared_ptr<PolicyRule>> db_policy;
     DB_MAP(std::shared_ptr<ProfileDetection>, db_prof_detection);
     DB_MAP(std::shared_ptr<ProfileContent>, db_prof_content);
@@ -190,8 +190,8 @@ public:
     void  cleanup();
 
     std::shared_ptr<AddressObject> lookup_address (const char *name);
-    range             lookup_port (const char *name);
-    int               lookup_proto (const char *name);
+    std::shared_ptr<CfgRange> lookup_port (const char *name);
+    std::shared_ptr<CfgUint8> lookup_proto (const char *name);
     std::shared_ptr<ProfileDetection> lookup_prof_detection (const char *name);
     std::shared_ptr<ProfileContent> lookup_prof_content (const char *name);
     std::shared_ptr<ProfileTls> lookup_prof_tls (const char *name);

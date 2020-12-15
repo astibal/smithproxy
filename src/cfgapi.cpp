@@ -136,24 +136,24 @@ std::shared_ptr<AddressObject> CfgFactory::lookup_address (const char *name) {
     return nullptr;
 }
 
-range CfgFactory::lookup_port (const char *name) {
+std::shared_ptr<CfgRange> CfgFactory::lookup_port (const char *name) {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
     if(db_port.find(name) != db_port.end()) {
         return db_port[name];
     }    
     
-    return NULLRANGE;
+    return std::make_shared<CfgRange>(NULLRANGE);
 }
 
-int CfgFactory::lookup_proto (const char *name) {
+std::shared_ptr<CfgUint8> CfgFactory::lookup_proto (const char *name) {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
     if(db_proto.find(name) != db_proto.end()) {
         return db_proto[name];
     }    
     
-    return 0;
+    return std::make_shared<CfgUint8>(0);
 }
 
 std::shared_ptr<ProfileContent> CfgFactory::lookup_prof_content (const char *name) {
@@ -473,9 +473,13 @@ int CfgFactory::load_db_port () {
                     load_if_exists(cur_object, "end", b)   ) {
                 
                 if(a <= b) {
-                    db_port[name] = range(a, b);
+                    auto cf = std::make_shared<CfgRange>(std::pair(a, b));
+                    cf->element_name() = name;
+                    db_port[name] = cf;
                 } else {
-                    db_port[name] = range(b, a);
+                    auto cf = std::make_shared<CfgRange>(std::pair(b, a));
+                    cf->element_name() = name;
+                    db_port[name] = cf;
                 }
 
                 _dia("cfgapi_load_ports: '%s': ok", name.c_str());
@@ -505,7 +509,6 @@ int CfgFactory::load_db_proto () {
 
         for( int i = 0; i < num; i++) {
             std::string name;
-            int a;
             
             Setting& cur_object = curr_set[i];
 
@@ -522,9 +525,13 @@ int CfgFactory::load_db_proto () {
             }
 
             _deb("cfgapi_load_proto: processing '%s'", name.c_str());
-            
-            if( load_if_exists(cur_object, "id", a) ) {
-                
+
+            int ia;
+            if( load_if_exists(cur_object, "id", ia) ) {
+
+                auto a = std::make_shared<CfgUint8>(static_cast<uint8_t>(ia));
+                a->element_name() = name;
+
                 db_proto[name] = a;
 
                 _dia("cfgapi_load_proto: '%s': ok", name.c_str());
@@ -573,9 +580,9 @@ int CfgFactory::load_db_policy () {
             auto rule = std::make_shared<PolicyRule>();
 
             if(load_if_exists(cur_object, "proto", proto)) {
-                int r = lookup_proto(proto.c_str());
-                if(r != 0) {
-                    rule->proto.element_name() = proto;
+                auto r = lookup_proto(proto.c_str());
+                if(r) {
+                    r->usage_add(std::weak_ptr(rule));
                     rule->proto = r;
                     rule->proto_default = false;
                     _dia("cfgapi_load_policy[#%d]: proto object: %s", i, proto.c_str());
@@ -592,6 +599,7 @@ int CfgFactory::load_db_policy () {
                     
                     auto r = lookup_address(src.c_str());
                     if(r) {
+                        r->usage_add(std::weak_ptr(rule));
                         rule->src.push_back(r);
                         rule->src_default = false;
                         _dia("cfgapi_load_policy[#%d]: src address object: %s", i, src.c_str());
@@ -608,6 +616,7 @@ int CfgFactory::load_db_policy () {
                     
                     auto r = lookup_address(obj_name);
                     if(r) {
+                        r->usage_add(std::weak_ptr(rule));
                         rule->src.push_back(r);
                         rule->src_default = false;
                         _dia("cfgapi_load_policy[#%d]: src address object: %s", i, obj_name);
@@ -622,9 +631,10 @@ int CfgFactory::load_db_policy () {
             const Setting& sett_sport = cur_object["sport"];
             if(sett_sport.isScalar()) {
                 if(load_if_exists(cur_object, "sport", sport)) {
-                    range r = lookup_port(sport.c_str());
-                    if(r != NULLRANGE) {
-                        rule->src_ports.emplace_back(std::make_shared<CfgRange>(sport, r));
+                    auto r = lookup_port(sport.c_str());
+                    if(r) {
+                        r->usage_add(std::weak_ptr(rule));
+                        rule->src_ports.emplace_back(r);
                         rule->src_ports_default = false;
                         _dia("cfgapi_load_policy[#%d]: src_port object: %s", i, sport.c_str());
                     } else {
@@ -638,9 +648,10 @@ int CfgFactory::load_db_policy () {
                 for(int y = 0; y < sett_sport_count; y++) {
                     const char* obj_name = sett_sport[y];
                     
-                    range r = lookup_port(obj_name);
-                    if(r != NULLRANGE) {
-                        rule->src_ports.emplace_back(std::make_shared<CfgRange>(obj_name, r));
+                    auto r = lookup_port(obj_name);
+                    if(r) {
+                        r->usage_add(std::weak_ptr(rule));
+                        rule->src_ports.emplace_back(r);
                         rule->src_ports_default = false;
                         _dia("cfgapi_load_policy[#%d]: src_port object: %s", i, obj_name);
                     } else {
@@ -655,6 +666,7 @@ int CfgFactory::load_db_policy () {
                 if(load_if_exists(cur_object, "dst", dst)) {
                     auto r = lookup_address(dst.c_str());
                     if(r) {
+                        r->usage_add(std::weak_ptr(rule));
                         rule->dst.push_back(r);
                         rule->dst_default = false;
                         _dia("cfgapi_load_policy[#%d]: dst address object: %s", i, dst.c_str());
@@ -671,6 +683,7 @@ int CfgFactory::load_db_policy () {
 
                     auto r = lookup_address(obj_name);
                     if(r) {
+                        r->usage_add(std::weak_ptr(rule));
                         rule->dst.push_back(r);
                         rule->dst_default = false;
                         _dia("cfgapi_load_policy[#%d]: dst address object: %s", i, obj_name);
@@ -685,9 +698,10 @@ int CfgFactory::load_db_policy () {
             const Setting& sett_dport = cur_object["dport"];
             if(sett_dport.isScalar()) { 
                 if(load_if_exists(cur_object, "dport", dport)) {
-                    range r = lookup_port(dport.c_str());
-                    if(r != NULLRANGE) {
-                        rule->dst_ports.emplace_back(std::make_shared<CfgRange>(dport, r));
+                    auto r = lookup_port(dport.c_str());
+                    if(r) {
+                        r->usage_add(std::weak_ptr(rule));
+                        rule->dst_ports.emplace_back(r);
                         rule->dst_ports_default = false;
                         _dia("cfgapi_load_policy[#%d]: dst_port object: %s", i, dport.c_str());
                     } else {
@@ -701,9 +715,10 @@ int CfgFactory::load_db_policy () {
                 for(int y = 0; y < sett_dport_count; y++) {
                     const char* obj_name = sett_dport[y];
                     
-                    range r = lookup_port(obj_name);
-                    if(r != NULLRANGE) {
-                        rule->dst_ports.emplace_back(std::make_shared<CfgRange>(obj_name, r));
+                    auto r = lookup_port(obj_name);
+                    if(r) {
+                        r->usage_add(std::weak_ptr(rule));
+                        rule->dst_ports.emplace_back(r);
                         rule->dst_ports_default = false;
                         _dia("cfgapi_load_policy[#%d]: dst_port object: %s", i, obj_name);
                     } else {
@@ -775,6 +790,7 @@ int CfgFactory::load_db_policy () {
                 if(load_if_exists(cur_object, "detection_profile", name_detection)) {
                     auto prf  = lookup_prof_detection(name_detection.c_str());
                     if(prf) {
+                        prf->usage_add(std::weak_ptr(rule));
                         _dia("cfgapi_load_policy[#%d]: detect profile %s", i, name_detection.c_str());
                         rule->profile_detection = std::shared_ptr<ProfileDetection>(prf);
                     } else {
@@ -786,6 +802,7 @@ int CfgFactory::load_db_policy () {
                 if(load_if_exists(cur_object, "content_profile", name_content)) {
                     auto prf  = lookup_prof_content(name_content.c_str());
                     if(prf) {
+                        prf->usage_add(std::weak_ptr(rule));
                         _dia("cfgapi_load_policy[#%d]: content profile %s", i, name_content.c_str());
                         rule->profile_content = prf;
                     } else {
@@ -796,6 +813,7 @@ int CfgFactory::load_db_policy () {
                 if(load_if_exists(cur_object, "tls_profile", name_tls)) {
                     auto tls  = lookup_prof_tls(name_tls.c_str());
                     if(tls) {
+                        tls->usage_add(std::weak_ptr(rule));
                         _dia("cfgapi_load_policy[#%d]: tls profile %s", i, name_tls.c_str());
                         rule->profile_tls= std::shared_ptr<ProfileTls>(tls);
                     } else {
@@ -806,6 +824,7 @@ int CfgFactory::load_db_policy () {
                 if(load_if_exists(cur_object, "auth_profile", name_auth)) {
                     auto auth  = lookup_prof_auth(name_auth.c_str());
                     if(auth) {
+                        auth->usage_add(std::weak_ptr(rule));
                         _dia("cfgapi_load_policy[#%d]: auth profile %s", i, name_auth.c_str());
                         rule->profile_auth= auth;
                     } else {
@@ -816,6 +835,7 @@ int CfgFactory::load_db_policy () {
                 if(load_if_exists(cur_object, "alg_dns_profile", name_alg_dns)) {
                     auto dns  = lookup_prof_alg_dns(name_alg_dns.c_str());
                     if(dns) {
+                        dns->usage_add(std::weak_ptr(rule));
                         _dia("cfgapi_load_policy[#%d]: DNS alg profile %s", i, name_alg_dns.c_str());
                         rule->profile_alg_dns = dns;
                     } else {
@@ -827,6 +847,7 @@ int CfgFactory::load_db_policy () {
                 if(load_if_exists(cur_object, "script_profile", name_script)) {
                     auto scr  = lookup_prof_script(name_script.c_str());
                     if(scr) {
+                        scr->usage_add(std::weak_ptr(rule));
                         _dia("cfgapi_load_policy[#%d]: script profile %s", i, name_script.c_str());
                         rule->profile_script = scr;
                     } else {
@@ -2194,8 +2215,8 @@ int CfgFactory::save_port_objects(Config& ex) const {
         auto obj = it.second;
 
         Setting& item = objects.add(name, Setting::TypeGroup);
-        item.add("start", Setting::TypeInt) = obj.first;
-        item.add("end", Setting::TypeInt) = obj.second;
+        item.add("start", Setting::TypeInt) = obj->value().first;
+        item.add("end", Setting::TypeInt) = obj->value().second;
 
         n_saved++;
     }
@@ -2224,7 +2245,7 @@ int CfgFactory::save_proto_objects(Config& ex) const {
         auto obj = it.second;
 
         Setting& item = objects.add(name, Setting::TypeGroup);
-        item.add("id", Setting::TypeInt) = obj;
+        item.add("id", Setting::TypeInt) = obj->value();
 
         n_saved++;
     }
@@ -2580,7 +2601,7 @@ int CfgFactory::save_policy(Config& ex) const {
 
         Setting& item = objects.add(Setting::TypeGroup);
 
-        item.add("proto", Setting::TypeString) = pol->proto.element_name();
+        item.add("proto", Setting::TypeString) = pol->proto->element_name();
 
         // SRC
         Setting& src_list = item.add("src", Setting::TypeArray);

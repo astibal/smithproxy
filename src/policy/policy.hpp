@@ -61,7 +61,7 @@
 #define POLICY_NAT_POOL     2
 
 
-class PolicyRule : public ProfileList , public socle::sobject {
+class PolicyRule : public ProfileList , public CfgElement, public socle::sobject {
 
 public:
     using group_of_ports = std::vector<std::shared_ptr<CfgRange>>;
@@ -69,7 +69,7 @@ public:
 
     unsigned int cnt_matches = 0;
 
-    CfgUint8 proto;
+    std::shared_ptr<CfgUint8> proto;
     bool proto_default = true;
 
     group_of_addresses src;
@@ -89,10 +89,14 @@ public:
     int nat    = POLICY_NAT_NONE;
     std::string nat_name;
 
-    PolicyRule() : ProfileList(), socle::sobject(),
-                   proto(0),
+    PolicyRule() : ProfileList(),
+                   CfgElement(),
+                   socle::sobject(),
                    log(this, "policy.rule")
-                   {};
+                   {
+                    proto = std::make_shared<CfgUint8>((uint8_t)0);
+                    element_name() = string_format("policy-%d", oid());
+                   };
 
     virtual ~PolicyRule() = default;
 

@@ -44,7 +44,7 @@ std::string PolicyRule::to_string(int verbosity) const {
     std::stringstream from;
     from << "PolicyRule:";
     
-    switch(proto.value()) {
+    switch(proto->value()) {
         case 6:
             from << " [tcp] ";
             break;
@@ -52,7 +52,7 @@ std::string PolicyRule::to_string(int verbosity) const {
             from << " [udp] ";
             break;
         default:
-            from << string_format(" [proto-%d] ", proto.value());
+            from << string_format(" [proto-%d] ", proto->value());
     }
     
     if(src_default) from << "*";
@@ -294,8 +294,8 @@ bool PolicyRule::match(baseProxy* p) {
         // compare if policy has proto match
         bool proto_match = false;
 
-        if(proto.value() != 0) {
-            proto_match = match_proto_vecx(proto.value(), p->ls()) && match_proto_vecx(proto.value(), p->lda());
+        if(proto->value() != 0) {
+            proto_match = match_proto_vecx(proto->value(), p->ls()) && match_proto_vecx(proto->value(), p->lda());
 
         } else {
             // proto 0 means we don't care
@@ -356,8 +356,8 @@ bool PolicyRule::match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r)
     // compare if policy has proto match
     bool proto_match = false;
 
-    if(proto.value() != 0) {
-        proto_match = match_proto_vecx(proto.value(), l);
+    if(proto->value() != 0) {
+        proto_match = match_proto_vecx(proto->value(), l);
 
     } else {
         // proto 0 means we don't care
