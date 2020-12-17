@@ -31,7 +31,8 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 
 ### New features
 
-* added CLI command `remove` - use with caution, removes also used items, which leads to policy load failure
+* CLI `remove` dependency checks -> safe remove
+* added CLI command `remove` - use with caution  ~~, removes also used items, which leads to policy load failure~~
 * added CLI command `add` which ... adds new configuration elements into *running config* (not all elements are covered
  yet) 
 * added Certificate Transparency support (tls_profile/ct_enable option) - enabled by default  
