@@ -82,4 +82,13 @@ typedef CfgSingle<range> CfgRange;
 typedef CfgSingle<std::string> CfgString;
 
 
+typedef std::shared_ptr<CfgElement> shared_CfgElement;
+typedef std::shared_ptr<CfgUint8> shared_CfgUint8;
+typedef std::shared_ptr<CfgUint16> shared_CfgUint16;
+typedef std::shared_ptr<CfgUint32> shared_CfgUint32;
+typedef std::shared_ptr<CfgRange> shared_CfgRange;
+typedef std::shared_ptr<CfgString> shared_CfgString;
+
+
+
 #endif //SMITHPROXY_CFGELEMENT_HPP

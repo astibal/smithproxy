@@ -113,5 +113,6 @@ DECLARE_C_NAME("FqdnAddress");
 };
 
 typedef CfgSingle<std::shared_ptr<AddressObject>> CfgAddress;
+typedef std::shared_ptr<CfgAddress> shared_CfgAddress;
 
 #endif //ADDROBJ_HPP_

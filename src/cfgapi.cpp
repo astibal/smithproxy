@@ -101,6 +101,40 @@ CfgFactory::CfgFactory(): CfgFactoryBase() , args_debug_flag(NON), syslog_level(
     log_console = false;
 }
 
+std::map<std::string, std::shared_ptr<CfgElement>>& CfgFactory::section_db(std::string const& section) {
+    if(section == "proto_objects") {
+        return db_proto;
+    }
+    else if(section == "port_objects") {
+        return db_port;
+    }
+    else if(section == "address_objects") {
+        return db_address;
+    }
+    else if(section == "detection_profiles") {
+        return db_prof_detection;
+    }
+    else if(section == "content_profiles") {
+        return db_prof_content;
+    }
+    else if(section == "tls_ca") {
+        return db_prof_tls_ca;
+    }
+    else if(section == "tls_profiles") {
+        return db_prof_tls;
+    }
+    else if(section == "alg_dns_profiles") {
+        return db_prof_alg_dns;
+    }
+    else if(section == "auth_profiles") {
+        return db_prof_auth;
+    }
+    else if(section == "policy") {
+    }
+
+    auto msg = string_format("no such db section %s", section.c_str());
+    throw std::logic_error(msg.c_str());
+}
 
 bool CfgFactory::cfgapi_init(const char* fnm) {
     

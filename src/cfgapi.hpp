@@ -190,6 +190,10 @@ public:
     bool  cfgapi_init(const char* fnm);
     void  cleanup();
 
+    template <class T>
+    std::shared_ptr<T> section_element(std::string const& section, std::string const& key);
+    std::map<std::string, std::shared_ptr<CfgElement>>& section_db(std::string const& section);
+
     std::shared_ptr<CfgAddress> lookup_address (const char *name);
     std::shared_ptr<CfgRange> lookup_port (const char *name);
     std::shared_ptr<CfgUint8> lookup_proto (const char *name);
@@ -302,6 +306,11 @@ public:
     #endif
 };
 
+
+template <class T>
+inline std::shared_ptr<T> CfgFactory::section_element(std::string const& section, std::string const& key) {
+    return std::dynamic_pointer_cast<T>(section_db(section)[key]);
+}
 
 // HELPERS
 

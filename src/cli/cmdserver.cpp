@@ -1414,9 +1414,6 @@ int cli_generic_set_cb(struct cli_def *cli, const char *command, char *argv[], i
 int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
 
-    cli_print(cli, "remove callback");
-
-
     std::vector<std::string> args;
     bool args_qmark = false;
     if (argc > 0) {
@@ -1443,7 +1440,6 @@ int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[]
 
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
     if(CfgFactory::cfg_root().exists(section.c_str())) {
-        cli_print(cli, "existing section %s", section.c_str());
 
         auto reconstruct_cli = [&cli, &section]() {
             auto& callback_entry = CliState::get().callbacks(section);
@@ -1467,7 +1463,8 @@ int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[]
 
                 auto fp = section + "." + arg;
 
-                cli_print(cli, "removing %s", fp.c_str());
+                // cli_print(cli, "removing %s", fp.c_str());
+
                 // remove setting - FIXME: code will move to cfgpi for dependency solving (to not delete used elements)
                 CfgFactory::cfg_root().lookup(section).remove(arg);
 
@@ -1476,6 +1473,35 @@ int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[]
 
             return removed;
         };
+
+        auto check_deps = [&cli](std::string const& section, std::vector<std::string> const& what) -> bool {
+            bool ok_to_remove = true;
+
+            for(auto const& arg: what) {
+                auto elem = CfgFactory::get().section_element<CfgElement>(section, arg);
+                if(elem and elem->has_usage()) {
+
+                    auto brk = false;
+                    for(auto dep: elem->usage_strvec()) {
+                        cli_print(cli, "Cannot delete - used by: %s", dep.c_str());
+
+                        brk = true;
+                    }
+
+                    if(brk) {
+                        ok_to_remove = false;
+                        break;
+                    }
+                }
+            }
+
+            return ok_to_remove;
+        };
+
+        if(! check_deps(section, vec_full_args)) {
+            cli_print(cli, "Removal aborted.");
+            return CLI_OK;
+        }
 
         bool removed_internal = false;
 
