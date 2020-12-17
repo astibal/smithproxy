@@ -1454,35 +1454,35 @@ int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[]
             apply_hostname(cli);
         };
 
-        auto remove = [&cli] (std::string const& section, std::vector<std::string> const& what ) -> int {
+
+        // remove unconditionally @what element entries in the config @section
+        auto remove = [] (std::string const& section, std::vector<std::string> const& what ) -> int {
 
             int removed = 0;
 
             for(auto const& arg: what) {
-                // construct full path
-
-                auto fp = section + "." + arg;
-
-                // cli_print(cli, "removing %s", fp.c_str());
-
-                // remove setting - FIXME: code will move to cfgpi for dependency solving (to not delete used elements)
                 CfgFactory::cfg_root().lookup(section).remove(arg);
 
                 removed++;
             }
 
+            // return number of removed elements
             return removed;
         };
 
+
+        // check if any @what element entries from @section has some dependencies
         auto check_deps = [&cli](std::string const& section, std::vector<std::string> const& what) -> bool {
             bool ok_to_remove = true;
 
             for(auto const& arg: what) {
+
+                // attempt to get and cast section element to CfgElement shared pointer
                 auto elem = CfgFactory::get().section_element<CfgElement>(section, arg);
                 if(elem and elem->has_usage()) {
 
                     auto brk = false;
-                    for(auto dep: elem->usage_strvec()) {
+                    for(auto const& dep: elem->usage_strvec()) {
                         cli_print(cli, "Cannot delete - used by: %s", dep.c_str());
 
                         brk = true;
