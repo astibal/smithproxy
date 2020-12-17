@@ -57,7 +57,7 @@ public:
     std::string to_string(int=iINF) const override = 0;
     AddressObject() : log(get_log()) {};
 
-    ~AddressObject() override = default;
+    virtual ~AddressObject() override = default;
 
     static logan_lite& get_log() {
         static logan_lite l("policy.addr");
@@ -111,5 +111,7 @@ protected:
 
 DECLARE_C_NAME("FqdnAddress");
 };
+
+typedef CfgSingle<std::shared_ptr<AddressObject>> CfgAddress;
 
 #endif //ADDROBJ_HPP_

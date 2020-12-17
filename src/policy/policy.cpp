@@ -60,7 +60,7 @@ std::string PolicyRule::to_string(int verbosity) const {
         if(verbosity > iINF) {
             from << string_format("(0x%x)", this);
         }
-        from << it->to_string() << " ";
+        from << it->value()->to_string() << " ";
     }
     from << ":";
     if(src_ports_default) from << "*";
@@ -75,7 +75,7 @@ std::string PolicyRule::to_string(int verbosity) const {
 
     if(dst_default) to << "*";
     for(auto const& it: dst) {
-        to << it->to_string() << " ";
+        to << it->value()->to_string() << " ";
     }
     to << ":";
     if(dst_ports_default) to << "*";
@@ -142,10 +142,10 @@ bool PolicyRule::match_addrgrp_cx(group_of_addresses &sources, baseHostCX* cx) {
         CIDR* l = cidr_from_str(cx->host().c_str());
         for(auto const& comp: sources) {
             
-            if(comp->match(l)) {
+            if(comp->value()->match(l)) {
                 if(*log.level() >= DIA) {
                     char* a = cidr_to_str(l);
-                    _deb("PolicyRule::match_addrgrp_cx: comparing %s with rule %s: matched", a, comp->to_string().c_str());
+                    _deb("PolicyRule::match_addrgrp_cx: comparing %s with rule %s: matched", a, comp->value()->to_string().c_str());
                     free(a);
                 }
                 match = true;
@@ -153,7 +153,7 @@ bool PolicyRule::match_addrgrp_cx(group_of_addresses &sources, baseHostCX* cx) {
             } else {
                 if(*log.level() >= DIA) {
                     char* a = cidr_to_str(l);
-                    _deb("PolicyRule::match_addrgrp_cx: comparing %s with rule %s: not matched", a, comp->to_string().c_str());
+                    _deb("PolicyRule::match_addrgrp_cx: comparing %s with rule %s: not matched", a, comp->value()->to_string().c_str());
                     free(a);
                 }
             }

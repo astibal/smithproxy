@@ -125,11 +125,16 @@ std::thread* create_dns_updater() {
         {
             std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
             for (auto const& a: CfgFactory::get().db_address) {
-                auto fa = std::dynamic_pointer_cast<FqdnAddress>(a.second);
+                auto fa = std::dynamic_pointer_cast<CfgAddress>(a.second);
                 if (fa) {
+
+                    auto fa_obj = std::dynamic_pointer_cast<FqdnAddress>(fa->value());
+                    if(! fa_obj)
+                        continue;
+
                     std::vector<std::string> recs;
-                    recs.push_back("A:" + fa->fqdn());
-                    recs.push_back("AAAA:" + fa->fqdn());
+                    recs.push_back("A:" + fa_obj->fqdn());
+                    recs.push_back("AAAA:" + fa_obj->fqdn());
 
                     std::scoped_lock<std::recursive_mutex> ll_(DNS::get_dns_lock());
                     for (auto const& rec: recs) {

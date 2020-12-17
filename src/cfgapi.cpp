@@ -126,11 +126,11 @@ bool CfgFactory::cfgapi_init(const char* fnm) {
     return true;
 }
 
-std::shared_ptr<AddressObject> CfgFactory::lookup_address (const char *name) {
+std::shared_ptr<CfgAddress> CfgFactory::lookup_address (const char *name) {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
     if(db_address.find(name) != db_address.end()) {
-        return db_address[name];
+        return std::dynamic_pointer_cast<CfgAddress>(db_address[name]);
     }
     
     return nullptr;
@@ -140,7 +140,7 @@ std::shared_ptr<CfgRange> CfgFactory::lookup_port (const char *name) {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
     if(db_port.find(name) != db_port.end()) {
-        return db_port[name];
+        return std::dynamic_pointer_cast<CfgRange>(db_port[name]);
     }    
     
     return std::make_shared<CfgRange>(NULLRANGE);
@@ -150,7 +150,7 @@ std::shared_ptr<CfgUint8> CfgFactory::lookup_proto (const char *name) {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
     if(db_proto.find(name) != db_proto.end()) {
-        return db_proto[name];
+        return std::dynamic_pointer_cast<CfgUint8>(db_proto[name]);
     }    
     
     return std::make_shared<CfgUint8>(0);
@@ -160,7 +160,7 @@ std::shared_ptr<ProfileContent> CfgFactory::lookup_prof_content (const char *nam
     std::lock_guard<std::recursive_mutex> l(lock_);
     
     if(db_prof_content.find(name) != db_prof_content.end()) {
-        return db_prof_content[name];
+        return std::dynamic_pointer_cast<ProfileContent>(db_prof_content[name]);
     }    
     
     return nullptr;
@@ -170,7 +170,7 @@ std::shared_ptr<ProfileDetection> CfgFactory::lookup_prof_detection (const char 
     std::lock_guard<std::recursive_mutex> l(lock_);
     
     if(db_prof_detection.find(name) != db_prof_detection.end()) {
-        return db_prof_detection[name];
+        return std::dynamic_pointer_cast<ProfileDetection>(db_prof_detection[name]);
     }    
     
     return nullptr;
@@ -180,7 +180,7 @@ std::shared_ptr<ProfileTls> CfgFactory::lookup_prof_tls (const char *name) {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
     if(db_prof_tls.find(name) != db_prof_tls.end()) {
-        return db_prof_tls[name];
+        return std::dynamic_pointer_cast<ProfileTls>(db_prof_tls[name]);
     }    
     
     return nullptr;
@@ -190,7 +190,7 @@ std::shared_ptr<ProfileAlgDns> CfgFactory::lookup_prof_alg_dns (const char *name
     std::lock_guard<std::recursive_mutex> l(lock_);
     
     if(db_prof_alg_dns.find(name) != db_prof_alg_dns.end()) {
-        return db_prof_alg_dns[name];
+        return std::dynamic_pointer_cast<ProfileAlgDns>(db_prof_alg_dns[name]);
     }    
     
     return nullptr;
@@ -201,7 +201,7 @@ std::shared_ptr<ProfileScript> CfgFactory::lookup_prof_script(const char * name)
     std::lock_guard<std::recursive_mutex> l(lock_);
 
     if(db_prof_script.find(name) != db_prof_script.end()) {
-        return db_prof_script[name];
+        return std::dynamic_pointer_cast<ProfileScript>(db_prof_script[name]);
     }
 
     return nullptr;
@@ -212,7 +212,7 @@ std::shared_ptr<ProfileAuth> CfgFactory::lookup_prof_auth (const char *name) {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
     if(db_prof_auth.find(name) != db_prof_auth.end()) {
-        return db_prof_auth[name];
+        return std::dynamic_pointer_cast<ProfileAuth>(db_prof_auth[name]);
     }    
     
     return nullptr;
@@ -408,7 +408,7 @@ int CfgFactory::load_db_address () {
                         if (load_if_exists(cur_object, "cidr", address)) {
                             CIDR* c = cidr_from_str(address.c_str());
 
-                            db_address[name] = std::make_shared<CidrAddress>(c);
+                            db_address[name] = std::make_shared<CfgAddress>(std::shared_ptr<AddressObject>(new CidrAddress(c)));
                             db_address[name]->element_name() = name;
                             _dia("cfgapi_load_addresses: cidr '%s': ok", name.c_str());
                         }
@@ -416,7 +416,7 @@ int CfgFactory::load_db_address () {
                     case 1: // FQDN notation
                         if (load_if_exists(cur_object, "fqdn", address))  {
 
-                            db_address[name] = std::make_shared<FqdnAddress>(address);
+                            db_address[name] = std::make_shared<CfgAddress>(std::shared_ptr<AddressObject>(new FqdnAddress(address)));
                             db_address[name]->element_name() = name;
                             _dia("cfgapi_load_addresses: fqdn '%s': ok", name.c_str());
                         }
@@ -2156,16 +2156,17 @@ int CfgFactory::save_address_objects(Config& ex) const {
 
     for (auto const& it: CfgFactory::get().db_address) {
         auto name = it.first;
-        auto obj = it.second;
+        auto obj = std::dynamic_pointer_cast<CfgAddress>(it.second);
+        if(! obj) continue;
 
         Setting& item = address_objects.add(name, Setting::TypeGroup);
 
-        if(obj->c_name() == std::string("FqdnAddress")) {
+        if(obj->value()->c_name() == std::string("FqdnAddress")) {
             Setting &s_type = item.add("type", Setting::TypeInt);
             Setting &s_fqdn = item.add("fqdn", Setting::TypeString);
 
             s_type = 1;
-            auto fqdn_ptr = std::dynamic_pointer_cast<FqdnAddress>(obj);
+            auto fqdn_ptr = std::dynamic_pointer_cast<FqdnAddress>(obj->value());
             if(fqdn_ptr) {
                 s_fqdn = fqdn_ptr->fqdn();
             }
@@ -2173,13 +2174,13 @@ int CfgFactory::save_address_objects(Config& ex) const {
             n_saved++;
         }
         else
-        if(obj->c_name() == std::string("CidrAddress")) {
+        if(obj->value()->c_name() == std::string("CidrAddress")) {
             Setting &s_type = item.add("type", Setting::TypeInt);
             Setting &s_cidr = item.add("cidr", Setting::TypeString);
 
             s_type = 0;
 
-            auto cidr_ptr = std::dynamic_pointer_cast<CidrAddress>(obj);
+            auto cidr_ptr = std::dynamic_pointer_cast<CidrAddress>(obj->value());
             if(cidr_ptr) {
                 const char* addr = cidr_to_str(cidr_ptr->cidr());
                 s_cidr =  addr;
@@ -2212,7 +2213,8 @@ int CfgFactory::save_port_objects(Config& ex) const {
 
     for (auto const& it: CfgFactory::get().db_port) {
         auto name = it.first;
-        auto obj = it.second;
+        auto obj = std::dynamic_pointer_cast<CfgRange>(it.second);
+        if(! obj) continue;
 
         Setting& item = objects.add(name, Setting::TypeGroup);
         item.add("start", Setting::TypeInt) = obj->value().first;
@@ -2242,7 +2244,9 @@ int CfgFactory::save_proto_objects(Config& ex) const {
 
     for (auto const& it: CfgFactory::get().db_proto) {
         auto name = it.first;
-        auto obj = it.second;
+        auto obj = std::dynamic_pointer_cast<CfgUint8>(it.second);
+        if(!obj) continue;
+
 
         Setting& item = objects.add(name, Setting::TypeGroup);
         item.add("id", Setting::TypeInt) = obj->value();
@@ -2303,7 +2307,8 @@ int CfgFactory::save_detection_profiles(Config& ex) const {
 
     for (auto const& it: CfgFactory::get().db_prof_detection) {
         auto name = it.first;
-        auto obj = it.second;
+        auto obj = std::dynamic_pointer_cast<ProfileDetection>(it.second);
+        if(! obj) continue;
 
         Setting& item = objects.add(name, Setting::TypeGroup);
         item.add("mode", Setting::TypeInt) = obj->mode;
@@ -2334,7 +2339,8 @@ int CfgFactory::save_content_profiles(Config& ex) const {
 
     for (auto const& it: CfgFactory::get().db_prof_content) {
         auto name = it.first;
-        auto obj = it.second;
+        auto obj = std::dynamic_pointer_cast<ProfileContent>(it.second);
+        if(! obj) continue;
 
         Setting& item = objects.add(name, Setting::TypeGroup);
         item.add("write_payload", Setting::TypeBoolean) = obj->write_payload;
@@ -2433,7 +2439,8 @@ int CfgFactory::save_tls_profiles(Config& ex) const {
 
     for (auto const& it: CfgFactory::get().db_prof_tls) {
         auto name = it.first;
-        auto obj = it.second;
+        auto obj = std::dynamic_pointer_cast<ProfileTls>(it.second);
+        if(! obj) continue;
 
         Setting& item = objects.add(name, Setting::TypeGroup);
 
@@ -2510,7 +2517,8 @@ int CfgFactory::save_alg_dns_profiles(Config& ex) const {
 
     for (auto const& it: CfgFactory::get().db_prof_alg_dns) {
         auto name = it.first;
-        auto obj = it.second;
+        auto obj = std::dynamic_pointer_cast<ProfileAlgDns>(it.second);
+        if(! obj) continue;
 
         Setting& item = objects.add(name, Setting::TypeGroup);
         item.add("match_request_id", Setting::TypeBoolean) = obj->match_request_id;
@@ -2545,7 +2553,9 @@ int CfgFactory::save_auth_profiles(Config& ex) const {
 
     for (auto const& it: CfgFactory::get().db_prof_auth) {
         auto name = it.first;
-        auto obj = it.second;
+        auto obj = std::dynamic_pointer_cast<ProfileAuth>(it.second);
+        if(! obj) continue;
+
 
         Setting& item = objects.add(name, Setting::TypeGroup);
         item.add("authenticate", Setting::TypeBoolean) = obj->authenticate;

@@ -155,16 +155,17 @@ public:
         return rr; \
     }
 
-    DB_MAP(std::shared_ptr<AddressObject>, db_address);
-    DB_MAP(std::shared_ptr<CfgRange>, db_port);
-    DB_MAP(std::shared_ptr<CfgUint8> , db_proto);
+    DB_MAP(std::shared_ptr<CfgElement>, db_address);
+    DB_MAP(std::shared_ptr<CfgElement>, db_port);
+    DB_MAP(std::shared_ptr<CfgElement> , db_proto);
     std::vector<std::shared_ptr<PolicyRule>> db_policy;
-    DB_MAP(std::shared_ptr<ProfileDetection>, db_prof_detection);
-    DB_MAP(std::shared_ptr<ProfileContent>, db_prof_content);
-    DB_MAP(std::shared_ptr<ProfileTls>, db_prof_tls);
-    DB_MAP(std::shared_ptr<ProfileAuth>, db_prof_auth);
-    DB_MAP(std::shared_ptr<ProfileAlgDns>, db_prof_alg_dns);
-    DB_MAP(std::shared_ptr<ProfileScript>, db_prof_script);
+    DB_MAP(std::shared_ptr<CfgElement>, db_prof_detection);
+    DB_MAP(std::shared_ptr<CfgElement>, db_prof_content);
+    DB_MAP(std::shared_ptr<CfgElement>, db_prof_tls);
+    DB_MAP(std::shared_ptr<CfgElement>, db_prof_tls_ca);
+    DB_MAP(std::shared_ptr<CfgElement>, db_prof_auth);
+    DB_MAP(std::shared_ptr<CfgElement>, db_prof_alg_dns);
+    DB_MAP(std::shared_ptr<CfgElement>, db_prof_script);
 
     mp::vector<int> db_udp_quick_ports;
 
@@ -189,7 +190,7 @@ public:
     bool  cfgapi_init(const char* fnm);
     void  cleanup();
 
-    std::shared_ptr<AddressObject> lookup_address (const char *name);
+    std::shared_ptr<CfgAddress> lookup_address (const char *name);
     std::shared_ptr<CfgRange> lookup_port (const char *name);
     std::shared_ptr<CfgUint8> lookup_proto (const char *name);
     std::shared_ptr<ProfileDetection> lookup_prof_detection (const char *name);

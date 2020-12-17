@@ -65,7 +65,7 @@ class PolicyRule : public ProfileList , public CfgElement, public socle::sobject
 
 public:
     using group_of_ports = std::vector<std::shared_ptr<CfgRange>>;
-    using group_of_addresses = std::vector<std::shared_ptr<AddressObject>>;
+    using group_of_addresses = std::vector<std::shared_ptr<CfgAddress>>;
 
     unsigned int cnt_matches = 0;
 

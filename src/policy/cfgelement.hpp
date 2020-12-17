@@ -20,6 +20,8 @@ class CfgElement {
     dependency_vec_t usage_references_;
 
 public:
+    virtual ~CfgElement() = default;
+
     std::string element_name() const { return name_; }
     std::string& element_name() { return name_; }
 
@@ -66,7 +68,7 @@ struct CfgSingle : public CfgElement {
     CfgSingle(std::string const& name, val_type const& v) { element_name() = name; value_ = v; }
     val_type value_;
 
-    explicit operator val_type() const { return value_; }
+//    explicit operator val_type() const { return value_; }
     val_type& value() { return value_; }
     val_type value() const { return value_; }
 };
