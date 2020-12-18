@@ -1456,7 +1456,8 @@ int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[]
 
 
         // remove unconditionally @what element entries in the config @section
-        auto remove = [] (std::string const& section, std::vector<std::string> const& what ) -> int {
+        //      @what is 'auto' to detect type, we can have name via string, or index via unsigned int
+        auto remove = [] (std::string const& section, auto const& what ) -> int {
 
             int removed = 0;
 
@@ -1506,7 +1507,7 @@ int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[]
         bool removed_internal = false;
 
         if(section == "proto_objects") {
-            reconstruct_cli();
+
             removed_internal = ( remove(section, vec_full_args) > 0 );
             if(removed_internal) {
                 CfgFactory::get().cleanup_db_proto();
@@ -1514,7 +1515,7 @@ int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[]
             }
         }
         else if(section == "port_objects") {
-            reconstruct_cli();
+
             removed_internal = ( remove(section, vec_full_args) > 0 );
             if(removed_internal) {
                 CfgFactory::get().cleanup_db_port();
@@ -1523,7 +1524,7 @@ int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[]
 
         }
         else if(section == "address_objects") {
-            reconstruct_cli();
+
             removed_internal = ( remove(section, vec_full_args) > 0 );
             if(removed_internal) {
                 CfgFactory::get().cleanup_db_address();
@@ -1531,7 +1532,7 @@ int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[]
             }
         }
         else if(section == "detection_profiles") {
-            reconstruct_cli();
+
             removed_internal = ( remove(section, vec_full_args) > 0 );
             if(removed_internal) {
                 CfgFactory::get().cleanup_db_prof_detection();
@@ -1539,7 +1540,7 @@ int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[]
             }
         }
         else if(section == "content_profiles") {
-            reconstruct_cli();
+
             removed_internal = ( remove(section, vec_full_args) > 0 );
             if(removed_internal) {
                 CfgFactory::get().cleanup_db_prof_content();
@@ -1547,7 +1548,7 @@ int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[]
             }
         }
         else if(section == "tls_ca") {
-            reconstruct_cli();
+
             removed_internal = ( remove(section, vec_full_args) > 0 );
             if(removed_internal) {
                 CfgFactory::get().cleanup_db_tls_ca();
@@ -1555,7 +1556,7 @@ int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[]
             }
         }
         else if(section == "tls_profiles") {
-            reconstruct_cli();
+
             removed_internal = ( remove(section, vec_full_args) > 0 );
             if(removed_internal) {
                 CfgFactory::get().cleanup_db_prof_tls();
@@ -1563,7 +1564,7 @@ int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[]
             }
         }
         else if(section == "alg_dns_profiles") {
-            reconstruct_cli();
+
             removed_internal = ( remove(section, vec_full_args) > 0 );
             if(removed_internal) {
                 CfgFactory::get().cleanup_db_prof_alg_dns();
@@ -1571,23 +1572,45 @@ int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[]
             }
         }
         else if(section == "auth_profiles") {
-            reconstruct_cli();
+
             removed_internal = ( remove(section, vec_full_args) > 0 );
             if(removed_internal) {
                 CfgFactory::get().cleanup_db_prof_auth();
                 CfgFactory::get().load_db_prof_auth();
             }
         }
-        else if(section == "policy") {
-            reconstruct_cli();
-            removed_internal = ( remove(section, vec_full_args) > 0 );
+        else if(section == "policy.[x]") {
+
+            std::string unmask = section;
+            string_replace_all(unmask, ".[x]", "");
+
+            std::vector<unsigned int> vec_full_args_int;
+            std::for_each(vec_full_args.begin(), vec_full_args.end(), [&vec_full_args_int](auto const& arg) {
+
+                auto xarg = arg;
+                string_replace_all(xarg, "[", "");
+                string_replace_all(xarg, "]", "");
+                string_replace_all(xarg, " ", "");
+
+                auto v = safe_val(xarg);
+                if( v >= 0)
+                    vec_full_args_int.push_back(v);
+            });
+
+            removed_internal = ( remove(unmask, vec_full_args_int) > 0 );
             if(removed_internal) {
-                ; // policy will be reloaded either way
+
+                section = unmask;
+
+                CfgFactory::get().cleanup_db_policy();
+                CfgFactory::get().load_db_policy();
             }
         }
 
 
         if(removed_internal) {
+            reconstruct_cli();
+
             CfgFactory::get().cleanup_db_policy();
             CfgFactory::get().load_db_policy();
 
@@ -1727,7 +1750,10 @@ int cli_generic_add_cb(struct cli_def *cli, const char *command, char *argv[], i
 
 
 // index < 0 means all
-void cli_print_section(cli_def* cli, const std::string& name, int index , unsigned long pipe_sz ) {
+void cli_print_section(cli_def* cli, const std::string& xname, int index , unsigned long pipe_sz ) {
+
+    std::string name = xname;
+    string_replace_all(name, ".[x]", "");
 
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
@@ -2006,10 +2032,18 @@ void client_thread(int client_socket) {
     cli_add_static_section("policy", MODE_EDIT_POLICY, cli_conf_edit_policy);
 
     CliState::get().callbacks(
+            "policy.[x]",
+            CliState::callback_entry(MODE_EDIT_POLICY, CliCallbacks()
+            .cmd_set(cli_generic_set_cb)
+            .cmd_config(cli_conf_edit_port_objects)
+            .cmd_add(cli_generic_add_cb)
+            .cmd_remove(cli_generic_remove_cb)));
+
+    CliState::get().callbacks(
             "detection_profiles",
             CliState::callback_entry(MODE_EDIT_DETECTION_PROFILES, CliCallbacks()
                     .cmd_set(cli_generic_set_cb)
-                    .cmd_config(cli_conf_edit_detection_profiles)
+                    .cmd_config(cli_conf_edit_policy)
                     .cmd_add(cli_generic_add_cb)
                     .cmd_remove(cli_generic_remove_cb)));
 

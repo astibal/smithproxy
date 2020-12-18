@@ -293,19 +293,25 @@ void cli_generate_commands (cli_def *cli, std::string const &section, cli_comman
 
             std::string sub_section_name;
 
-            const char* ssn = sub_section.getName();
-            std::stringstream ss;
+            const char* cfg_section_name = sub_section.getName();
 
-            if(ssn) {
-                sub_section_name = ssn;
+            std::stringstream section_ss;
+            std::stringstream section_template_ss;
+
+            if(cfg_section_name) {
+                sub_section_name = cfg_section_name;
+
+                section_ss << section << "." << sub_section_name;
+                section_template_ss << section << "." << sub_section_name;
             } else {
                 sub_section_name = string_format("[%d]", i);
+                section_ss << section << "." << sub_section_name;
+                section_template_ss << section << ".[x]";
             }
-            ss << section << "." << sub_section_name;
 
-            std::string section_path = ss.str();
+            std::string section_path = section_ss.str();
 
-            auto& callback_entry = CliState::get().callbacks(section_path);
+            auto& callback_entry = CliState::get().callbacks(section_template_ss.str());
             int mode = std::get<0>(callback_entry);
 
             // specific treatment of dynamic (unknown groups)
@@ -385,4 +391,17 @@ Setting* cfg_canonize(std::string const& section) {
     }
 
     return nullptr;
+}
+
+void string_replace_all(std::string& target, std::string const& what, std::string const& replacement) {
+
+    auto pos = target.find(what);
+
+    while( pos != std::string::npos ) {
+
+        // Replace this occurrence of Sub String
+        target.replace(pos, what.size(), replacement);
+        // Get the next occurrence from the current position
+        pos = target.find(what,pos + replacement.size());
+    }
 }

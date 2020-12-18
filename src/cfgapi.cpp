@@ -129,7 +129,8 @@ std::map<std::string, std::shared_ptr<CfgElement>>& CfgFactory::section_db(std::
     else if(section == "auth_profiles") {
         return db_prof_auth;
     }
-    else if(section == "policy") {
+    else if(section == "policy.[x]") {
+        return db_policy;
     }
 
     auto msg = string_format("no such db section %s", section.c_str());
