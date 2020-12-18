@@ -99,6 +99,7 @@ if [ "${DIST}" = "Ubuntu" ]; then
     apt install -y iptables telnet iproute2 && \
     apt install -y python3-ldap python3-pyparsing python3-posix-ipc swig  \
     debootstrap devscripts build-essential lintian debhelper vim nano
+    apt install -y libffi-dev
 
     echo "... installing python libraries"
     pip3 install --upgrade pip
@@ -143,6 +144,7 @@ elif [ "${DIST}" = "Debian" ]; then
     apt install -y iptables telnet iproute2 && \
     apt install -y python3-ldap python3-pyparsing swig  \
     debootstrap devscripts build-essential lintian debhelper vim nano
+    apt install -y libffi-dev
 
     echo "... installing python libraries"
     pip3 install --upgrade pip

@@ -31,6 +31,7 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 
 ### New features
 
+* fixed arm64 ubuntu20.04 build
 * CLI `remove` dependency checks -> safe remove
 * added CLI command `remove` - use with caution  ~~, removes also used items, which leads to policy load failure~~
 * added CLI command `add` which ... adds new configuration elements into *running config* (not all elements are covered
