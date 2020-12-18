@@ -155,7 +155,7 @@ std::string MitmProxy::to_string(int verbosity) const {
 
 
             if(matched_policy() >= 0) {
-                auto p = CfgFactory::get().db_policy.at(matched_policy());
+                auto p = CfgFactory::get().db_policy_list.at(matched_policy());
                 r << string_format("\n    PolicyRule oid: 0x%x", p->oid());
             }
 
@@ -231,7 +231,7 @@ bool MitmProxy::apply_id_policies(baseHostCX* cx) {
     
     if( found ) {
         _dia("apply_id_policies: matched policy: %d",matched_policy());        
-        auto policy = CfgFactory::get().db_policy.at(matched_policy());
+        auto policy = CfgFactory::get().db_policy_list.at(matched_policy());
         
         auto auth_policy = policy->profile_auth;
 
@@ -2047,7 +2047,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                 }
                 
                 // setup NAT
-                if(CfgFactory::get().db_policy.at(policy_num)->nat == POLICY_NAT_NONE && ! matched_vip) {
+                if(CfgFactory::get().db_policy_list.at(policy_num)->nat == POLICY_NAT_NONE && ! matched_vip) {
                     target_cx->com()->nonlocal_src(true);
                     target_cx->com()->nonlocal_src_host() = h;
                     target_cx->com()->nonlocal_src_port() = std::stoi(p);               
@@ -2136,7 +2136,7 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
         target_cx->matched_policy(policy_num);
         new_proxy->matched_policy(policy_num);
         
-        if(CfgFactory::get().db_policy.at(policy_num)->nat == POLICY_NAT_NONE) {
+        if(CfgFactory::get().db_policy_list.at(policy_num)->nat == POLICY_NAT_NONE) {
             target_cx->com()->nonlocal_src(true);
             target_cx->com()->nonlocal_src_host() = h;
             target_cx->com()->nonlocal_src_port() = std::stoi(p);               

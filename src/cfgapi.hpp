@@ -158,7 +158,10 @@ public:
     DB_MAP(std::shared_ptr<CfgElement>, db_address);
     DB_MAP(std::shared_ptr<CfgElement>, db_port);
     DB_MAP(std::shared_ptr<CfgElement> , db_proto);
-    std::vector<std::shared_ptr<PolicyRule>> db_policy;
+
+    DB_MAP(std::shared_ptr<CfgElement> , db_policy);
+    std::vector<std::shared_ptr<PolicyRule>> db_policy_list;
+
     DB_MAP(std::shared_ptr<CfgElement>, db_prof_detection);
     DB_MAP(std::shared_ptr<CfgElement>, db_prof_content);
     DB_MAP(std::shared_ptr<CfgElement>, db_prof_tls);

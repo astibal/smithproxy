@@ -895,7 +895,9 @@ int CfgFactory::load_db_policy () {
             
             if(!error){
                 _dia("cfgapi_load_policy[#%d]: ok", i);
-                db_policy.push_back(rule);
+
+                db_policy_list.push_back(rule);
+                db_policy[string_format("[%d]", i)] = rule;
             } else {
                 _err("cfgapi_load_policy[#%d]: not ok (will not process traffic)", i);
             }
@@ -912,7 +914,7 @@ int CfgFactory::policy_match (baseProxy *proxy) {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
     int x = 0;
-    for( auto const& rule: db_policy) {
+    for( auto const& rule: db_policy_list) {
 
         bool r = rule->match(proxy);
         
@@ -943,7 +945,7 @@ int CfgFactory::policy_match (std::vector<baseHostCX *> &left, std::vector<baseH
     std::lock_guard<std::recursive_mutex> l(lock_);
     
     int x = 0;
-    for( auto const& rule: db_policy) {
+    for( auto const& rule: db_policy_list) {
 
         bool r = rule->match(left, right);
         
@@ -978,8 +980,8 @@ int CfgFactory::policy_action (int index) {
         return -1;
     }
     
-    if(index < (signed int)db_policy.size()) {
-        return db_policy.at(index)->action;
+    if(index < (signed int)db_policy_list.size()) {
+        return db_policy_list.at(index)->action;
     } else {
         _dia("cfg_obj_policy_action[#%d]: out of bounds, deny", index);
         return POLICY_ACTION_DENY;
@@ -993,8 +995,8 @@ std::shared_ptr<ProfileContent> CfgFactory::policy_prof_content (int index) {
         return nullptr;
     }
     
-    if(index < (signed int)db_policy.size()) {
-        return db_policy.at(index)->profile_content;
+    if(index < (signed int)db_policy_list.size()) {
+        return db_policy_list.at(index)->profile_content;
     } else {
         _dia("policy_prof_content[#%d]: out of bounds, nullptr", index);
         return nullptr;
@@ -1008,8 +1010,8 @@ std::shared_ptr<ProfileDetection> CfgFactory::policy_prof_detection (int index) 
         return nullptr;
     }
     
-    if(index < (signed int)db_policy.size()) {
-        return db_policy.at(index)->profile_detection;
+    if(index < (signed int)db_policy_list.size()) {
+        return db_policy_list.at(index)->profile_detection;
     } else {
         _dia("policy_prof_detection[#%d]: out of bounds, nullptr", index);
         return nullptr;
@@ -1023,8 +1025,8 @@ std::shared_ptr<ProfileTls> CfgFactory::policy_prof_tls (int index) {
         return nullptr;
     }
     
-    if(index < (signed int)db_policy.size()) {
-        return db_policy.at(index)->profile_tls;
+    if(index < (signed int)db_policy_list.size()) {
+        return db_policy_list.at(index)->profile_tls;
     } else {
         _dia("policy_prof_tls[#%d]: out of bounds, nullptr", index);
         return nullptr;
@@ -1039,8 +1041,8 @@ std::shared_ptr<ProfileAlgDns> CfgFactory::policy_prof_alg_dns (int index) {
         return nullptr;
     }
     
-    if(index < (signed int)db_policy.size()) {
-        return db_policy.at(index)->profile_alg_dns;
+    if(index < (signed int)db_policy_list.size()) {
+        return db_policy_list.at(index)->profile_alg_dns;
     } else {
         _dia("policy_prof_alg_dns[#%d]: out of bounds, nullptr", index);
         return nullptr;
@@ -1055,8 +1057,8 @@ std::shared_ptr<ProfileScript> CfgFactory::policy_prof_script(int index) {
         return nullptr;
     }
 
-    if(index < (signed int)db_policy.size()) {
-        return db_policy.at(index)->profile_script;
+    if(index < (signed int)db_policy_list.size()) {
+        return db_policy_list.at(index)->profile_script;
     } else {
         _dia("policy_prof_alg_dns[#%d]: out of bounds, nullptr", index);
         return nullptr;
@@ -1072,8 +1074,8 @@ std::shared_ptr<ProfileAuth> CfgFactory::policy_prof_auth (int index) {
         return nullptr;
     }
     
-    if(index < (signed int)db_policy.size()) {
-        return db_policy.at(index)->profile_auth;
+    if(index < (signed int)db_policy_list.size()) {
+        return db_policy_list.at(index)->profile_auth;
     } else {
         _dia("policy_prof_auth[#%d]: out of bounds, nullptr", index);
         return nullptr;
@@ -1562,7 +1564,8 @@ int CfgFactory::cleanup_db_address () {
 int CfgFactory::cleanup_db_policy () {
     std::lock_guard<std::recursive_mutex> l(lock_);
     
-    int r = db_policy.size();
+    int r = db_policy_list.size();
+    db_policy_list.clear();
     db_policy.clear();
     
     _deb("cleanup_db_policy: %d objects freed", r);
@@ -2638,7 +2641,7 @@ int CfgFactory::save_policy(Config& ex) const {
 
     int n_saved = 0;
 
-    for (auto const& pol: CfgFactory::get().db_policy) {
+    for (auto const& pol: CfgFactory::get().db_policy_list) {
 
         if(! pol)
             continue;
