@@ -102,34 +102,34 @@ CfgFactory::CfgFactory(): CfgFactoryBase() , args_debug_flag(NON), syslog_level(
 }
 
 std::map<std::string, std::shared_ptr<CfgElement>>& CfgFactory::section_db(std::string const& section) {
-    if(section == "proto_objects") {
+    if(section == "proto_objects" or section == "proto_objects.[x]") {
         return db_proto;
     }
-    else if(section == "port_objects") {
+    else if(section == "port_objects" or section == "port_objects.[x]") {
         return db_port;
     }
-    else if(section == "address_objects") {
+    else if(section == "address_objects" or section == "address_objects.[x]") {
         return db_address;
     }
-    else if(section == "detection_profiles") {
+    else if(section == "detection_profiles" or section == "detection_profiles.[x]") {
         return db_prof_detection;
     }
-    else if(section == "content_profiles") {
+    else if(section == "content_profiles"  or section == "content_profiles.[x]") {
         return db_prof_content;
     }
-    else if(section == "tls_ca") {
+    else if(section == "tls_ca" or section == "tls_ca.[x]") {
         return db_prof_tls_ca;
     }
-    else if(section == "tls_profiles") {
+    else if(section == "tls_profiles" or section == "tls_profiles.[x]") {
         return db_prof_tls;
     }
-    else if(section == "alg_dns_profiles") {
+    else if(section == "alg_dns_profiles" or section == "alg_dns_profiles.[x]") {
         return db_prof_alg_dns;
     }
-    else if(section == "auth_profiles") {
+    else if(section == "auth_profiles" or section == "auth_profiles.[x]") {
         return db_prof_auth;
     }
-    else if(section == "policy.[x]") {
+    else if(section == "policy" or section == "address_objects.[x]") {
         return db_policy;
     }
 
@@ -2176,10 +2176,16 @@ bool CfgFactory::apply_tenant_config () {
 
 
 bool CfgFactory::new_address_object(Setting& ex, std::string const& name) const {
-    Setting &item = ex.add(name, Setting::TypeGroup);
 
-    item.add("type", Setting::TypeInt) = 0;  // cidr
-    item.add("cidr", Setting::TypeString) = "127.0.0.1/32";
+    try {
+        Setting &item = ex.add(name, Setting::TypeGroup);
+        item.add("type", Setting::TypeInt) = 0;  // cidr
+        item.add("cidr", Setting::TypeString) = "0.0.0.0/32";
+    }
+    catch(libconfig::SettingNameException const& e) {
+        _war("cannot add new section %s.%s: %s", ex.c_str(), name.c_str(), e.what());
+        return false;
+    }
 
     return true;
 }
@@ -2234,9 +2240,16 @@ int CfgFactory::save_address_objects(Config& ex) const {
 }
 
 bool CfgFactory::new_port_object(Setting& ex, std::string const& name) const {
-    Setting& item = ex.add(name, Setting::TypeGroup);
-    item.add("start", Setting::TypeInt) = 0;
-    item.add("end", Setting::TypeInt) = 65535;
+
+    try {
+        Setting &item = ex.add(name, Setting::TypeGroup);
+        item.add("start", Setting::TypeInt) = 0;
+        item.add("end", Setting::TypeInt) = 65535;
+    }
+    catch(libconfig::SettingNameException const& e) {
+        _war("cannot add new section %s.%s: %s", ex.c_str(), name.c_str(), e.what());
+        return false;
+    }
 
     return true;
 }
@@ -2265,9 +2278,16 @@ int CfgFactory::save_port_objects(Config& ex) const {
 }
 
 
-bool CfgFactory::new_proto_object(Setting& section, std::string const& name) const {
-    Setting& item = section.add(name, Setting::TypeGroup);
-    item.add("id", Setting::TypeInt) = 0;
+bool CfgFactory::new_proto_object(Setting& ex, std::string const& name) const {
+
+    try {
+        Setting &item = ex.add(name, Setting::TypeGroup);
+        item.add("id", Setting::TypeInt) = 0;
+    }
+    catch(libconfig::SettingNameException const& e) {
+        _war("cannot add new section %s: %s", name.c_str(), e.what());
+        return false;
+    }
 
     return true;
 }
@@ -2329,8 +2349,15 @@ int CfgFactory::save_debug(Config& ex) const {
 
 
 bool CfgFactory::new_detection_profile(Setting& ex, std::string const& name) const {
-    Setting& item = ex.add(name, Setting::TypeGroup);
-    item.add("mode", Setting::TypeInt) = 1; // MODE_PRE
+
+    try {
+        Setting& item = ex.add(name, Setting::TypeGroup);
+        item.add("mode", Setting::TypeInt) = 1; // MODE_PRE
+    }
+    catch(libconfig::SettingNameException const& e) {
+        _war("cannot add new section %s: %s", name.c_str(), e.what());
+        return false;
+    }
 
     return true;
 }
@@ -2359,10 +2386,17 @@ int CfgFactory::save_detection_profiles(Config& ex) const {
 
 
 bool CfgFactory::new_content_profile(Setting& ex, std::string const& name) const {
-    Setting & item = ex.add(name, Setting::TypeGroup);
 
-    item.add("write_payload", Setting::TypeBoolean) = false;
-    item.add("content_rules", Setting::TypeList);
+    try {
+        Setting & item = ex.add(name, Setting::TypeGroup);
+        item.add("write_payload", Setting::TypeBoolean) = false;
+        item.add("content_rules", Setting::TypeList);
+    }
+    catch(libconfig::SettingNameException const& e) {
+        _war("cannot add new section %s: %s", name.c_str(), e.what());
+        return false;
+    }
+
 
     return true;
 }
@@ -2403,7 +2437,14 @@ int CfgFactory::save_content_profiles(Config& ex) const {
 
 
 bool CfgFactory::new_tls_ca(Setting& ex, std::string const& name) const {
-    ex.add(name, Setting::TypeGroup);
+
+    try {
+        ex.add(name, Setting::TypeGroup);
+    }
+    catch(libconfig::SettingNameException const& e) {
+        _war("cannot add new section %s: %s", name.c_str(), e.what());
+        return false;
+    }
 
     return true;
 }
@@ -2432,37 +2473,44 @@ int CfgFactory::save_tls_ca(Config& ex) const {
 
 
 bool CfgFactory::new_tls_profile(Setting& ex, std::string const& name) const {
-    Setting &item = ex.add(name, Setting::TypeGroup);
 
-    item.add("inspect", Setting::TypeBoolean) = false;
+    try {
+        Setting &item = ex.add(name, Setting::TypeGroup);
 
-    item.add("use_pfs", Setting::TypeBoolean) = true;
-    item.add("left_use_pfs", Setting::TypeBoolean) = true;
-    item.add("right_use_pfs", Setting::TypeBoolean) = true;
+        item.add("inspect", Setting::TypeBoolean) = false;
 
-    item.add("allow_untrusted_issuers", Setting::TypeBoolean) = false;
-    item.add("allow_invalid_certs", Setting::TypeBoolean) = false;
-    item.add("allow_self_signed", Setting::TypeBoolean) = false;
+        item.add("use_pfs", Setting::TypeBoolean) = true;
+        item.add("left_use_pfs", Setting::TypeBoolean) = true;
+        item.add("right_use_pfs", Setting::TypeBoolean) = true;
 
-    item.add("ocsp_mode", Setting::TypeInt) = 1;
-    item.add("ocsp_stapling", Setting::TypeBoolean) = true;
-    item.add("ocsp_stapling_mode", Setting::TypeInt) = 1;
+        item.add("allow_untrusted_issuers", Setting::TypeBoolean) = false;
+        item.add("allow_invalid_certs", Setting::TypeBoolean) = false;
+        item.add("allow_self_signed", Setting::TypeBoolean) = false;
 
-    item.add("ct_enable", Setting::TypeBoolean) = true;
+        item.add("ocsp_mode", Setting::TypeInt) = 1;
+        item.add("ocsp_stapling", Setting::TypeBoolean) = true;
+        item.add("ocsp_stapling_mode", Setting::TypeInt) = 1;
 
-    // add sni bypass list
-    item.add("sni_filter_bypass", Setting::TypeArray);
-    item.add("redirect_warning_ports", Setting::TypeArray);
+        item.add("ct_enable", Setting::TypeBoolean) = true;
 
-    item.add("failed_certcheck_replacement", Setting::TypeBoolean) = true;
-    item.add("failed_certcheck_override", Setting::TypeBoolean) = true;
-    item.add("failed_certcheck_override_timeout", Setting::TypeInt) = 600;
-    item.add("failed_certcheck_override_timeout_type", Setting::TypeInt) = 0;
+        // add sni bypass list
+        item.add("sni_filter_bypass", Setting::TypeArray);
+        item.add("redirect_warning_ports", Setting::TypeArray);
+
+        item.add("failed_certcheck_replacement", Setting::TypeBoolean) = true;
+        item.add("failed_certcheck_override", Setting::TypeBoolean) = true;
+        item.add("failed_certcheck_override_timeout", Setting::TypeInt) = 600;
+        item.add("failed_certcheck_override_timeout_type", Setting::TypeInt) = 0;
 
 
-    item.add("left_disable_reuse", Setting::TypeBoolean) = false;
-    item.add("right_disable_reuse", Setting::TypeBoolean) = false;
-    item.add("sslkeylog", Setting::TypeBoolean) = false;
+        item.add("left_disable_reuse", Setting::TypeBoolean) = false;
+        item.add("right_disable_reuse", Setting::TypeBoolean) = false;
+        item.add("sslkeylog", Setting::TypeBoolean) = false;
+    }
+    catch(libconfig::SettingNameException const& e) {
+        _war("cannot add new section %s: %s", name.c_str(), e.what());
+        return false;
+    }
 
     return true;
 }
@@ -2536,12 +2584,18 @@ int CfgFactory::save_tls_profiles(Config& ex) const {
 
 
 bool CfgFactory::new_alg_dns_profile(Setting &ex, const std::string &name) const {
-    Setting &item = ex.add(name, Setting::TypeGroup);
 
-    item.add("match_request_id", Setting::TypeBoolean) = false;
-    item.add("randomize_id", Setting::TypeBoolean) = false;
-    item.add("cached_responses", Setting::TypeBoolean) = false;
+    try {
+        Setting &item = ex.add(name, Setting::TypeGroup);
 
+        item.add("match_request_id", Setting::TypeBoolean) = false;
+        item.add("randomize_id", Setting::TypeBoolean) = false;
+        item.add("cached_responses", Setting::TypeBoolean) = false;
+    }
+    catch(libconfig::SettingNameException const& e) {
+        _war("cannot add new section %s: %s", name.c_str(), e.what());
+        return false;
+    }
     return true;
 }
 
@@ -2571,13 +2625,18 @@ int CfgFactory::save_alg_dns_profiles(Config& ex) const {
 
 bool CfgFactory::new_auth_profile (Setting &ex, const std::string &name) const {
 
-    Setting &item = ex.add(name, Setting::TypeGroup);
+    try {
+        Setting &item = ex.add(name, Setting::TypeGroup);
 
-    item.add("authenticate", Setting::TypeBoolean) = false;
-    item.add("resolve", Setting::TypeBoolean) = true;
+        item.add("authenticate", Setting::TypeBoolean) = false;
+        item.add("resolve", Setting::TypeBoolean) = true;
 
-    item.add("identities", Setting::TypeGroup);
-
+        item.add("identities", Setting::TypeGroup);
+    }
+    catch(libconfig::SettingNameException const& e) {
+        _war("cannot add new section %s: %s", name.c_str(), e.what());
+        return false;
+    }
     return true;
 }
 
@@ -2629,8 +2688,14 @@ int CfgFactory::save_auth_profiles(Config& ex) const {
 
 
 bool CfgFactory::new_policy (Setting &ex, const std::string &name) const {
-    ex.add(name, Setting::TypeGroup);
 
+    try {
+        ex.add(name, Setting::TypeGroup);
+    }
+    catch(libconfig::SettingNameException const& e) {
+        _war("cannot add new section %s: %s", name.c_str(), e.what());
+        return false;
+    }
     return true;
 }
 

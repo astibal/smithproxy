@@ -49,6 +49,9 @@
 
 struct CliCallbacks {
 
+    CliCallbacks() : caption_("<unknown>") {};
+    explicit CliCallbacks(std::string c) : caption_(std::move(c)) {};
+
     using callback = int (*)(struct cli_def *,const char *,char * *,int);
 
     callback cmd_set() const { return cmd_set_; }
@@ -57,9 +60,9 @@ struct CliCallbacks {
         return *this;
     }
 
-    callback cmd_config() const { return cmd_config_; };
-    CliCallbacks& cmd_config(callback c) {
-        cmd_config_ = c;
+    callback cmd_edit() const { return cmd_edit_; };
+    CliCallbacks& cmd_edit(callback c) {
+        cmd_edit_ = c;
         return *this;
     }
 
@@ -93,15 +96,41 @@ struct CliCallbacks {
         return *this;
     }
 
-private:
-    callback cmd_set_;
-    callback cmd_config_;
-    callback cmd_add_;
-    callback cmd_remove_;
+    bool cap_edit() const { return cmd_edit_enabled_; };
+    CliCallbacks& cap_edit(bool v) {
+        cmd_edit_enabled_ = v;
+        return *this;
+    }
 
-    cli_command* cli_edit_;
-    cli_command* cli_add_;
-    cli_command* cli_remove_;
+    bool cap_add() const { return cmd_add_enabled_; };
+    CliCallbacks& cap_add(bool v) {
+        cmd_add_enabled_ = v;
+        return *this;
+    }
+
+    bool cap_remove() const { return cmd_remove_enabled_; };
+    CliCallbacks& cap_remove(bool v) {
+        cmd_remove_enabled_ = v;
+        return *this;
+    }
+
+private:
+    std::string caption_;
+
+    callback cmd_set_;
+
+    callback cmd_edit_ = nullptr;
+    bool     cmd_edit_enabled_ = false;
+
+    callback cmd_add_ = nullptr;
+    bool     cmd_add_enabled_ = false;
+
+    callback cmd_remove_ = nullptr;
+    bool     cmd_remove_enabled_ = false;
+
+    cli_command* cli_edit_ = nullptr;
+    cli_command* cli_add_ = nullptr;
+    cli_command* cli_remove_ = nullptr;
 };
 
 struct CliState {
@@ -154,13 +183,23 @@ struct CliState {
         return callback_map_[s];
     }
 
+    bool erase_callback(std::string const& s) {
+        return callback_map_.erase(s) > 0;
+    }
+
+    bool has_callback(std::string const& s) {
+        return callback_map_.find(s) != callback_map_.end();
+    }
+
     std::string sections(int mode) {
         return mode_map[mode];
     }
 
-    void callbacks(std::string const& s, callback_entry v) {
+    void callbacks(std::string const& s, callback_entry v, bool set_mode_map = true) {
         callback_map_[s] = v;            //map SETTING => CALLBACKS
-        mode_map[std::get<0>(v)] = s; //map MODE => SETTING
+
+        if(set_mode_map)
+            mode_map[std::get<0>(v)] = s; //map MODE => SETTING
     }
 
 private:

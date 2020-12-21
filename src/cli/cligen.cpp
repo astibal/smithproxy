@@ -72,6 +72,10 @@ std::pair<int, std::string> generate_dynamic_groups(struct cli_def *cli, const c
         int static_mode = cli->mode;
         std::string static_section_path = CliState::get().sections(static_mode);
 
+        if(static_section_path.find(".[x]") != std::string::npos) {
+            string_replace_all(static_section_path, ".[x]", "");
+        }
+
         // check for existing entry
         _debug(cli, "creating dynamic groups for section %s, mode %d", static_section_path.c_str(), static_mode);
 
@@ -87,7 +91,8 @@ std::pair<int, std::string> generate_dynamic_groups(struct cli_def *cli, const c
 
             CliState::get().callbacks(
                     this_setting_path,
-                    CliState::callback_entry(new_mode, CliCallbacks().cmd_set(cli_generic_set_cb)));
+                    CliState::callback_entry(new_mode, CliCallbacks(this_setting_path).cmd_set(cli_generic_set_cb)),
+                    true); // set mode map, as the map value increases
 
             cli_generate_set_commands(cli, this_setting_path);
 
@@ -218,10 +223,6 @@ std::vector<cli_command *> cli_generate_set_commands (struct cli_def *cli, std::
     std::string set_help = string_format(" \t - modify variables in %s", section.c_str());
     int mode = std::get<0>(cb_entry);
 
-    // register anonymous 'set' command bound to CLI 'mode' ID
-    auto cli_parent = cli_register_command(cli, nullptr, "set", nullptr, PRIVILEGE_PRIVILEGED, mode,
-                                           set_help.c_str());
-
     std::vector<std::string> attributes, groups;
     std::vector<unsigned int> unnamed_attributes, unnamed_groups;
 
@@ -239,6 +240,10 @@ std::vector<cli_command *> cli_generate_set_commands (struct cli_def *cli, std::
 
 
             std::vector<cli_command*> ret;
+
+            // register anonymous 'set' command bound to CLI 'mode' ID
+            auto cli_parent = cli_register_command(cli, nullptr, "set", nullptr, PRIVILEGE_PRIVILEGED, mode,
+                                               set_help.c_str());
 
             for( const auto& here_n: attributes) {
 
@@ -266,93 +271,154 @@ std::vector<cli_command *> cli_generate_set_commands (struct cli_def *cli, std::
 }
 
 
-void cli_generate_commands (cli_def *cli, std::string const &section, cli_command *cli_parent) {
+void cli_generate_commands (cli_def *cli, std::string const &this_section, cli_command *cli_parent) {
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
-    // generate set commands for this section first
-    cli_generate_set_commands(cli, section);
-
-    std::string help_edit = string_format("edit %s sub-items", section.c_str());
+    std::string help_edit = string_format("edit %s sub-items", this_section.c_str());
     std::string help_add = "add elements";
     std::string help_remove = "remove elements";
 
-    cli_command* edit = nullptr;
-    cli_command* add = nullptr;
-    cli_command* remove = nullptr;
 
-    auto &this_section = CfgFactory::cfg_root().lookup(section.c_str());
-    auto &this_callback_entry = CliState::get().callbacks(section);
+    auto &cfg_this_section = CfgFactory::cfg_root().lookup(this_section.c_str());
+    auto &this_callback_entry = CliState::get().callbacks(this_section);
     int this_mode = std::get<0>(this_callback_entry);
 
+    if(this_mode == 0) {
+        cli_print(cli, "%s has no mode setting", this_section.c_str());
+        return;
+    }
 
-    for( int i = 0 ; i < this_section.getLength() ; i++ ) {
+    // common root edit for all editable sub-items
+    cli_command* edit = nullptr;
+    // common remove for all removable sub-items
+    cli_command* remove = nullptr;
+    // common remove for all removable sub-items
+    cli_command* add = nullptr;
 
-        Setting& sub_section = this_section[i];
 
-        if(sub_section.getType() == Setting::TypeGroup) {
+    for( int i = 0 ; i < cfg_this_section.getLength() ; i++ ) {
 
-            std::string sub_section_name;
+        Setting& sub_section = cfg_this_section[i];
+        std::string sub_section_name;
 
-            const char* cfg_section_name = sub_section.getName();
+        const char* cfg_section_name = sub_section.getName();
 
-            std::stringstream section_ss;
-            std::stringstream section_template_ss;
+        std::stringstream section_ss;
+        std::stringstream section_template_ss;
 
-            if(cfg_section_name) {
-                sub_section_name = cfg_section_name;
+        if(cfg_section_name) {
+            sub_section_name = cfg_section_name;
 
-                section_ss << section << "." << sub_section_name;
-                section_template_ss << section << "." << sub_section_name;
-            } else {
-                sub_section_name = string_format("[%d]", i);
-                section_ss << section << "." << sub_section_name;
-                section_template_ss << section << ".[x]";
+            section_ss << this_section << "." << sub_section_name;
+            section_template_ss << this_section << "." << sub_section_name;
+        } else {
+            sub_section_name = string_format("[%d]", i);
+            section_ss << this_section << "." << sub_section_name;
+            section_template_ss << this_section << ".[x]";
+        }
+
+        std::string section_path = section_ss.str();
+        std::string section_template = section_template_ss.str();
+        bool templated = false;
+
+
+        std::string template_key = section_template;
+        if(CliState::get().has_callback(template_key)) {
+            templated = true;
+        }
+        else if (CliState::get().has_callback(this_section + ".[x]")) {
+            template_key = this_section + ".[x]";
+            templated = true;
+        }
+        else {
+            // otherwise there is no template and template_cb will be the same as section_cb
+            template_key = section_path;
+        }
+
+        // load template first, section will be created automatically and template selection wouldn't work
+        auto& template_cb = CliState::get().callbacks(template_key);
+
+
+
+
+        if(templated and (sub_section.getType() == Setting::TypeGroup or sub_section.getType() == Setting::TypeArray)) {
+
+            // init a new section callback
+            if(! CliState::get().has_callback(section_path)) {
+                CliState::get().callbacks(section_path) = { this_mode , CliCallbacks(section_path) };
             }
-
-            std::string section_path = section_ss.str();
-
-            auto& callback_entry = CliState::get().callbacks(section_template_ss.str());
-            int mode = std::get<0>(callback_entry);
-
-            // specific treatment of dynamic (unknown groups)
-            if( mode == 0 ) {
-                // defaulted to parent section callbacks
-                callback_entry = CliState::get().callbacks(section);
-                mode = static_cast<int> (std::get<0>(callback_entry)) + i;
-            }
-            auto cb_config = std::get<1>(callback_entry).cmd_config();
-            auto cb_remove = std::get<1>(callback_entry).cmd_remove();
-
-            cli_generate_commands(cli, section_path, nullptr);
+            auto& section_cb = CliState::get().callbacks(section_path);
 
 
             // register 'edit' and 'edit <subsection>' in terms of this "mode ID"
-            if(! edit) {
-                edit = cli_register_command(cli, cli_parent, "edit", nullptr, PRIVILEGE_PRIVILEGED, this_mode, help_edit.c_str());
-                std::get<1>(this_callback_entry).cli_edit(edit);
 
+            auto edit_enabled  = templated ? std::get<1>(template_cb).cap_edit() : std::get<1>(section_cb).cap_edit();
+            auto remove_enabled = templated ? std::get<1>(template_cb).cap_remove() : std::get<1>(section_cb).cap_remove();
+            auto add_enabled = templated ? std::get<1>(template_cb).cap_add() : std::get<1>(section_cb).cap_add();
+
+            if(edit_enabled) {
+
+                auto cb_edit = templated ? std::get<1>(template_cb).cmd_edit()  : std::get<1>(section_cb).cmd_edit();
+
+                if(! edit) {
+                    // initialize parent "edit command only once"
+                    edit = cli_register_command(cli, cli_parent, "edit", nullptr, PRIVILEGE_PRIVILEGED, this_mode,
+                                                help_edit.c_str());
+                    if(templated) {
+                        std::get<1>(template_cb).cli_edit(edit);
+                    }
+                }
+
+
+                auto edit_sub = cli_register_command(cli, edit, sub_section_name.c_str(),
+                                     cb_edit, PRIVILEGE_PRIVILEGED, this_mode,
+                                     string_format("edit %s settings", sub_section_name.c_str()).c_str());
+
+
+                std::get<1>(section_cb).cli_edit(edit_sub);
             }
 
-            if(! remove) {
-                remove = cli_register_command(cli, cli_parent, "remove", cb_remove, PRIVILEGE_PRIVILEGED, this_mode, help_remove.c_str());
-                std::get<1>(this_callback_entry).cli_remove(remove);
+            if(remove_enabled) {
+
+                auto cb_remove = templated ?  std::get<1>(template_cb).cmd_remove() : std::get<1>(section_cb).cmd_remove();
+
+                if(!remove) {
+                    remove = cli_register_command(cli, cli_parent, "remove", cb_remove, PRIVILEGE_PRIVILEGED, this_mode, help_remove.c_str());
+
+                    if(templated) {
+                        std::get<1>(template_cb).cli_remove(remove);
+                    }
+                }
+
+                auto remove_sub = cli_register_command(cli, remove, sub_section_name.c_str(),
+                                     cb_remove, PRIVILEGE_PRIVILEGED, this_mode,
+                                     string_format("remove %s element", sub_section_name.c_str()).c_str());
+
+                std::get<1>(section_cb).cli_remove(remove_sub);
             }
 
-            cli_register_command(cli, edit, sub_section_name.c_str(),
-                                 cb_config, PRIVILEGE_PRIVILEGED, this_mode,
-                                 string_format("edit %s settings", sub_section_name.c_str()).c_str());
+            if(add_enabled) {
 
-            cli_register_command(cli, remove, sub_section_name.c_str(),
-                                 cb_remove, PRIVILEGE_PRIVILEGED, this_mode,
-                                 string_format("remove %s element", sub_section_name.c_str()).c_str());
+                if(! add) {
+                    auto cb_add = templated ? std::get<1>(template_cb).cmd_add() : std::get<1>(section_cb).cmd_add();
+
+                    add = cli_register_command(cli, cli_parent, "add",
+                                               cb_add, PRIVILEGE_PRIVILEGED, this_mode, help_add.c_str());
+                    std::get<1>(section_cb).cli_add(add);
+                }
+            }
 
         }
+        else {
+            // generate commands for the section exact path
+            // cli_generate_commands(cli, section_path, nullptr);
+        }
+        // cli_generate_set_commands(cli, section_path);
+
     }
 
-    auto cb_add = std::get<1>(this_callback_entry).cmd_add();
-
-    add = cli_register_command(cli, cli_parent, "add", cb_add, PRIVILEGE_PRIVILEGED, this_mode, help_add.c_str());
-    std::get<1>(this_callback_entry).cli_add(add);
+    // generate set commands for this section first
+    cli_generate_set_commands(cli, this_section);
 }
 
 

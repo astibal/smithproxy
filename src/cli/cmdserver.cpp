@@ -1022,7 +1022,7 @@ void cfg_clone_setting(Setting& dst, Setting& orig, int index/*, struct cli_def 
 
 bool cfg_write_value(Setting& parent, bool create, std::string& varname, const std::vector<std::string> &values, cli_def* cli) {
 
-    auto log = logan::create("service");
+    auto log = logan::create("config");
 
     bool verdict = true;
 
@@ -1438,17 +1438,51 @@ int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[]
     // erase "remove" from the list
     vec_full_args.erase(vec_full_args.begin());
 
+    bool templated = false;
+
+    if(section.find(".[x]") != std::string::npos) {
+        string_replace_all(section, ".[x]", "");
+        templated = true;
+    }
+
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
     if(CfgFactory::cfg_root().exists(section.c_str())) {
 
-        auto reconstruct_cli = [&cli, &section]() {
-            auto& callback_entry = CliState::get().callbacks(section);
+        auto reconstruct_cli = [&]() {
+            if(templated) {
 
-            // remove edit hooks and re-register for new list
-            cli_unregister_all(cli, std::get<1>(callback_entry).cli_edit());
+                if(CliState::get().has_callback(section + "." + vec_full_args[0])) {
+                    auto &callback_entry = CliState::get().callbacks(section + "." + vec_full_args[0]);
+                    // remove edit hooks and re-register for new list
 
-            // generate new CLI sub-tree
-            cli_generate_commands(cli, section, nullptr);
+                    // unregister all "edit <this> and siblings"
+                    cli_unregister_single(cli, std::get<1>(callback_entry).cli_edit());
+
+                    CliState::get().erase_callback(section + "." + vec_full_args[0]);
+
+                    //cli_generate_commands(cli, section, nullptr);
+                    //cli_generate_commands(cli, section + ".[x]", nullptr);
+
+                }
+                else {
+                    cli_print(cli, "templated, but no callbacks for: %s", section.c_str());
+                }
+
+            } else {
+                if(CliState::get().has_callback(section)) {
+                   // auto &callback_entry = CliState::get().callbacks(section);
+//
+//                // remove edit hooks and re-register for new list
+//                cli_unregister_all(cli, std::get<1>(callback_entry).cli_edit());
+//
+//                // generate new CLI sub-tree
+//                cli_generate_commands(cli, section, nullptr);
+                }
+                else {
+                    cli_print(cli, "no callbacks for: %s", section.c_str());
+                }
+                cli_print(cli, "cannot remove: %s - only templated entries can be removed", section.c_str());
+            }
 
             CliState::get().config_changed_flag = true;
             apply_hostname(cli);
@@ -1655,13 +1689,23 @@ int cli_generic_add_cb(struct cli_def *cli, const char *command, char *argv[], i
 
     auto section = CliState::get().sections(cli->mode);
 
+    // remove template suffix
+    bool templated = false;
+    if(section.find(".[x]") != std::string::npos) {
+        templated = true;
+        string_replace_all(section, ".[x]", "");
+    }
 
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
     if(CfgFactory::cfg_root().exists(section.c_str())) {
 
         auto register_cli = [&]() {
-            auto& callback_entry = CliState::get().callbacks(section);
-            cli_register_command(cli, std::get<1>(callback_entry).cli_edit(), args[0].c_str(), std::get<1>(callback_entry).cmd_config(), PRIVILEGE_PRIVILEGED, cli->mode, " edit new entry");
+
+            // load callbacks, must prefer templated
+            auto& callback_entry = templated ? CliState::get().callbacks(section + ".[x]") : CliState::get().callbacks(section);
+
+            cli_register_command(cli, std::get<1>(callback_entry).cli_edit(), args[0].c_str(),
+                                 std::get<1>(callback_entry).cmd_edit(), PRIVILEGE_PRIVILEGED, cli->mode, " edit new entry");
             CliState::get().config_changed_flag = true;
             apply_hostname(cli);
         };
@@ -1967,122 +2011,167 @@ void client_thread(int client_socket) {
 
 
     // generate dynamically content of config
+//    .cmd_set(cli_generic_set_cb)
+//            .cmd_config(edit_cb);
 
-    auto cli_add_static_section = [](std::string const& section, int mode, CliCallbacks::callback edit_cb) {
+
+
+    auto register_callback = [](std::string const& section, int mode) -> CliCallbacks& {
         CliState::get().callbacks(
                 section,
-                CliState::callback_entry(mode, CliCallbacks()
-                        .cmd_set(cli_generic_set_cb)
-                        .cmd_config(edit_cb)));
+                CliState::callback_entry(mode, CliCallbacks(section)));
+
+        return std::get<1>(CliState::get().callbacks(section));
 
     };
 
-    CliState::get().callbacks(
-            "settings",
-            CliState::callback_entry(MODE_EDIT_SETTINGS, CliCallbacks()
+    register_callback("settings",MODE_EDIT_SETTINGS)
                 .cmd_set(cli_generic_set_cb)
-                .cmd_config(cli_conf_edit_settings)));
+                .cmd_edit(cli_conf_edit_settings);
 
-    CliState::get().callbacks(
-            "settings.auth_portal",
-            CliState::callback_entry(MODE_EDIT_SETTINGS_AUTH, CliCallbacks()
+    register_callback( "settings.auth_portal",MODE_EDIT_SETTINGS_AUTH)
                 .cmd_set(cli_generic_set_cb)
-                .cmd_config(cli_conf_edit_settings_auth)));
+                .cmd_edit(cli_conf_edit_settings_auth)
+                .cap_edit(true);
 
-    CliState::get().callbacks(
-            "settings.socks",
-            CliState::callback_entry(MODE_EDIT_SETTINGS_SOCKS, CliCallbacks()
+    register_callback(
+            "settings.nameservers",MODE_EDIT_SETTINGS + 1);
+
+    register_callback(
+            "settings.socks", MODE_EDIT_SETTINGS_SOCKS)
                 .cmd_set(cli_generic_set_cb)
-                .cmd_config(cli_conf_edit_settings_socks)));
+                .cmd_edit(cli_conf_edit_settings_socks)
+                .cap_edit(true);
 
-    CliState::get().callbacks(
-            "settings.cli",
-            CliState::callback_entry(MODE_EDIT_SETTINGS_CLI, CliCallbacks()
+    register_callback("settings.cli", MODE_EDIT_SETTINGS_CLI)
                 .cmd_set(cli_generic_set_cb)
-                .cmd_config(cli_conf_edit_settings_cli)));
+                .cmd_edit(cli_conf_edit_settings_cli)
+                .cap_edit(true);
 
-    cli_add_static_section("debug", MODE_EDIT_DEBUG, cli_conf_edit_debug);
-    cli_add_static_section("debug.log", MODE_EDIT_DEBUG_LOG, cli_conf_edit_debug_log);
-
-    CliState::get().callbacks(
-            "proto_objects",
-            CliState::callback_entry(MODE_EDIT_PROTO_OBJECTS, CliCallbacks()
-                .cmd_set(cli_generic_set_cb)
-                .cmd_config(cli_conf_edit_proto_objects)
-                .cmd_add(cli_generic_add_cb)
-                .cmd_remove(cli_generic_remove_cb)));
-
-    CliState::get().callbacks(
-            "address_objects",
-            CliState::callback_entry(MODE_EDIT_ADDRESS_OBJECTS, CliCallbacks()
-                    .cmd_set(cli_generic_set_cb)
-                    .cmd_config(cli_conf_edit_address_objects)
-                    .cmd_add(cli_generic_add_cb)
-                    .cmd_remove(cli_generic_remove_cb)));
-
-    CliState::get().callbacks(
-            "port_objects",
-            CliState::callback_entry(MODE_EDIT_PORT_OBJECTS, CliCallbacks()
-                .cmd_set(cli_generic_set_cb)
-                .cmd_config(cli_conf_edit_port_objects)
-                .cmd_add(cli_generic_add_cb)
-                .cmd_remove(cli_generic_remove_cb)));
-
-
-    cli_add_static_section("policy", MODE_EDIT_POLICY, cli_conf_edit_policy);
-
-    CliState::get().callbacks(
-            "policy.[x]",
-            CliState::callback_entry(MODE_EDIT_POLICY, CliCallbacks()
+    register_callback("debug", MODE_EDIT_DEBUG)
             .cmd_set(cli_generic_set_cb)
-            .cmd_config(cli_conf_edit_port_objects)
+            .cmd_edit(cli_conf_edit_debug)
+            .cap_edit(true);
+
+    register_callback("debug.log", MODE_EDIT_DEBUG_LOG)
+            .cmd_set(cli_generic_set_cb)
+            .cmd_edit(cli_conf_edit_debug_log)
+            .cap_edit(true);
+
+
+    register_callback( "proto_objects", MODE_EDIT_PROTO_OBJECTS)
+                .cap_edit(true).cmd_edit(cli_conf_edit_proto_objects);
+
+    register_callback( "proto_objects.[x]", MODE_EDIT_PROTO_OBJECTS)
+            .cmd_set(cli_generic_set_cb)
+            .cap_edit(true).cmd_edit(cli_conf_edit_proto_objects)
+            .cap_add(true).cmd_add(cli_generic_add_cb)
+            .cap_remove(true).cmd_remove(cli_generic_remove_cb);
+
+
+    register_callback("address_objects", MODE_EDIT_ADDRESS_OBJECTS)
+            .cap_edit(true).cmd_edit(cli_conf_edit_address_objects);
+
+    register_callback("address_objects.[x]", MODE_EDIT_ADDRESS_OBJECTS)
+            .cmd_set(cli_generic_set_cb)
+            .cap_edit(true).cmd_edit(cli_conf_edit_address_objects)
+            .cap_add(true).cmd_add(cli_generic_add_cb)
+            .cap_remove(true).cmd_remove(cli_generic_remove_cb);
+
+
+    register_callback("port_objects", MODE_EDIT_PORT_OBJECTS)
+            .cap_edit(true).cmd_edit(cli_conf_edit_port_objects);
+
+    register_callback("port_objects.[x]", MODE_EDIT_PORT_OBJECTS)
+            .cmd_set(cli_generic_set_cb)
+            .cap_edit(true)
+            .cmd_edit(cli_conf_edit_port_objects)
+            .cap_add(true)
             .cmd_add(cli_generic_add_cb)
-            .cmd_remove(cli_generic_remove_cb)));
+            .cap_remove(true)
+            .cmd_remove(cli_generic_remove_cb);
 
-    CliState::get().callbacks(
-            "detection_profiles",
-            CliState::callback_entry(MODE_EDIT_DETECTION_PROFILES, CliCallbacks()
+
+    register_callback("policy", MODE_EDIT_POLICY)
+                .cmd_edit(cli_conf_edit_policy);
+
+    // template for policy list entries
+    register_callback( "policy.[x]", MODE_EDIT_POLICY)
+            .cmd_set(cli_generic_set_cb)
+            .cmd_add(cli_generic_add_cb)
+            .cmd_remove(cli_generic_remove_cb)
+            .cap_edit(true)
+            .cmd_edit(cli_conf_edit_policy);
+
+    register_callback("detection_profiles", MODE_EDIT_DETECTION_PROFILES)
+                    .cmd_edit(cli_conf_edit_detection_profiles);
+
+    register_callback("detection_profiles.[x]", MODE_EDIT_DETECTION_PROFILES)
+            .cmd_set(cli_generic_set_cb)
+            .cap_edit(true).cmd_edit(cli_conf_edit_detection_profiles)
+            .cmd_add(cli_generic_add_cb)
+            .cmd_remove(cli_generic_remove_cb);
+
+
+    register_callback("content_profiles", MODE_EDIT_CONTENT_PROFILES)
+            .cmd_edit(cli_conf_edit_content_profiles);
+
+    register_callback("content_profiles.[x]", MODE_EDIT_CONTENT_PROFILES)
                     .cmd_set(cli_generic_set_cb)
-                    .cmd_config(cli_conf_edit_policy)
+                    .cap_edit(true).cmd_edit(cli_conf_edit_content_profiles)
                     .cmd_add(cli_generic_add_cb)
-                    .cmd_remove(cli_generic_remove_cb)));
+                    .cmd_remove(cli_generic_remove_cb);
 
-    CliState::get().callbacks(
-            "content_profiles",
-            CliState::callback_entry(MODE_EDIT_CONTENT_PROFILES, CliCallbacks()
+
+    register_callback("tls_profiles", MODE_EDIT_TLS_PROFILES)
+            .cmd_edit(cli_conf_edit_tls_profiles);
+
+    register_callback("tls_profiles.[x]", MODE_EDIT_TLS_PROFILES)
                     .cmd_set(cli_generic_set_cb)
-                    .cmd_config(cli_conf_edit_content_profiles)
+                    .cap_edit(true).cmd_edit(cli_conf_edit_tls_profiles)
                     .cmd_add(cli_generic_add_cb)
-                    .cmd_remove(cli_generic_remove_cb)));
+                    .cmd_remove(cli_generic_remove_cb);
 
-    CliState::get().callbacks(
-            "tls_profiles",
-            CliState::callback_entry(MODE_EDIT_TLS_PROFILES, CliCallbacks()
+
+    register_callback("auth_profiles", MODE_EDIT_AUTH_PROFILES)
+            .cmd_edit(cli_conf_edit_auth_profiles);
+
+    register_callback("auth_profiles.[x]", MODE_EDIT_AUTH_PROFILES)
                     .cmd_set(cli_generic_set_cb)
-                    .cmd_config(cli_conf_edit_tls_profiles)
+                    .cap_edit(true).cmd_edit(cli_conf_edit_auth_profiles)
                     .cmd_add(cli_generic_add_cb)
-                    .cmd_remove(cli_generic_remove_cb)));
+                    .cmd_remove(cli_generic_remove_cb);
 
-    CliState::get().callbacks(
-            "auth_profiles",
-            CliState::callback_entry(MODE_EDIT_AUTH_PROFILES, CliCallbacks()
+    register_callback("alg_dns_profiles", MODE_EDIT_ALG_DNS_PROFILES)
+                    .cmd_edit(cli_conf_edit_alg_dns_profiles);
+
+    register_callback("alg_dns_profiles.[x]", MODE_EDIT_ALG_DNS_PROFILES)
+            .cmd_set(cli_generic_set_cb)
+            .cap_edit(true).cmd_edit(cli_conf_edit_alg_dns_profiles)
+            .cmd_add(cli_generic_add_cb)
+            .cmd_remove(cli_generic_remove_cb);
+
+
+
+
+    register_callback("starttls_signatures", MODE_EDIT_STARTTLS_SIGNATURES)
+    .cmd_edit(cli_conf_edit_starttls_signatures);
+
+    register_callback("starttls_signatures.[x]", MODE_EDIT_STARTTLS_SIGNATURES)
                     .cmd_set(cli_generic_set_cb)
-                    .cmd_config(cli_conf_edit_auth_profiles)
                     .cmd_add(cli_generic_add_cb)
-                    .cmd_remove(cli_generic_remove_cb)));
+                    .cmd_remove(cli_generic_remove_cb);
 
-    CliState::get().callbacks(
-            "alg_dns_profiles",
-            CliState::callback_entry(MODE_EDIT_ALG_DNS_PROFILES, CliCallbacks()
+    register_callback("detection_signatures", MODE_EDIT_DETECTION_SIGNATURES)
+        .cmd_edit(cli_conf_edit_detection_signatures);
+
+
+    register_callback("detection_signatures.[x]", MODE_EDIT_DETECTION_SIGNATURES)
                     .cmd_set(cli_generic_set_cb)
-                    .cmd_config(cli_conf_edit_alg_dns_profiles)
                     .cmd_add(cli_generic_add_cb)
-                    .cmd_remove(cli_generic_remove_cb)));
+                    .cmd_remove(cli_generic_remove_cb);
 
 
-
-    cli_add_static_section("starttls_signatures", MODE_EDIT_STARTTLS_SIGNATURES, cli_conf_edit_starttls_signatures);
-    cli_add_static_section("detection_signatures", MODE_EDIT_DETECTION_SIGNATURES, cli_conf_edit_detection_signatures);
 
     auto conft_edit = cli_register_command(cli, nullptr, "edit", nullptr, PRIVILEGE_PRIVILEGED, MODE_CONFIG, "configure smithproxy settings");
 
@@ -2103,7 +2192,7 @@ void client_thread(int client_socket) {
                 std::string edit_help = string_format(" \t - edit %s", section.c_str());
                 auto const &callback_entry = CliState::get().callbacks(section);
 
-                cli_register_command(cli, conft_edit, section.c_str(), std::get<1>(callback_entry).cmd_config(),
+                cli_register_command(cli, conft_edit, section.c_str(), std::get<1>(callback_entry).cmd_edit(),
                                      PRIVILEGE_PRIVILEGED, MODE_CONFIG, edit_help.c_str());
 
                 std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());

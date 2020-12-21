@@ -59,7 +59,7 @@ void cfg_generate_cli_hints(Setting& setting, std::vector<std::string>* this_lev
 
 std::vector<cli_command *>
         cli_generate_set_commands (struct cli_def *cli, std::string const& section);
-void cli_generate_commands (cli_def *cli, std::string const &section, cli_command *cli_parent);
+void cli_generate_commands (cli_def *cli, std::string const &this_section, cli_command *cli_parent);
 
 
 #define CONFIG_MODE_DEC(fn) \
@@ -99,7 +99,7 @@ void string_replace_all(std::string& target, std::string const& what, std::strin
 
 Setting* cfg_canonize(std::string const& section);
 
-enum edit_settings { MODE_EDIT_SETTINGS=0x10000000, MODE_EDIT_SETTINGS_AUTH, MODE_EDIT_SETTINGS_CLI, MODE_EDIT_SETTINGS_SOCKS };
+enum edit_settings { MODE_EDIT_SETTINGS=0x10000000, MODE_EDIT_SETTINGS_AUTH=0x10001000, MODE_EDIT_SETTINGS_CLI=0x10002000, MODE_EDIT_SETTINGS_SOCKS=0x10003000 };
 
 CONFIG_MODE_DEC(cli_conf_edit_settings);
 CONFIG_MODE_DEC(cli_conf_edit_settings_auth);
