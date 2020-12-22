@@ -48,4 +48,5 @@ sudo docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined\
 	${LOG_VOLUME} \
 	-v sxydumps:/var/local/smithproxy \
 	-it \
+	--shm-size 512M \
 	--rm --network host --name "sx-${TAG}" astibal/smithproxy:${TAG} "$@"

@@ -47,4 +47,5 @@ sudo docker run -v sxy:/etc/smithproxy \
 	${LOG_VOLUME} \
 	-v sxydumps:/var/local/smithproxy \
 	-it \
+	--shm-size 512M \
 	--rm --network host --name "sx-${TAG}" astibal/smithproxy:${TAG} "$@"
