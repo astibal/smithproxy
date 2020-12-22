@@ -175,12 +175,16 @@ elif [ "${DIST}" = "Alpine" ]; then
     apk add openssl libconfig libconfig-dev
     apk add cmake g++ python3-dev libexecinfo-dev openssl-dev linux-headers libunwind-dev
     apk add busybox-extras iptables iproute2
-    apk add py3-pip
-    apk add libldap openldap-dev libffi-dev libxml2-dev xmlsec-dev swig
+    apk add libldap openldap-dev libffi-dev libxml2-dev libxslt-dev xmlsec-dev swig
 
+    apk add py3-pip
+    apk add py3-ldap py3-cryptography py3-parsing py3-lxml
+
+    # add packages unknown to apk from pip3
     pip3 install --upgrade pip
-    pip3 install python-ldap pyparsing posix-ipc
-    pip3 install pyroute2 pylibconfig2 m2crypto spyne${SX_SPYNE_VER} zeep cryptography
+    pip3 install wheel
+    pip3 install posix-ipc
+    pip3 install pyroute2 pylibconfig2 m2crypto spyne${SX_SPYNE_VER} zeep
 
     LINK_TOOLCHAIN="N"
 
