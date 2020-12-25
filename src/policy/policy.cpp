@@ -43,7 +43,11 @@ std::string PolicyRule::to_string(int verbosity) const {
 
     std::stringstream from;
     from << "PolicyRule:";
-    
+
+    if(is_disabled) {
+        from << " -- DISABLED -- ";
+    }
+
     switch(proto->value()) {
         case 6:
             from << " [tcp] ";
@@ -55,7 +59,6 @@ std::string PolicyRule::to_string(int verbosity) const {
             from << string_format(" [proto-%d] ", proto->value());
     }
     
-    if(src_default) from << "*";
     for(auto const& it: src) {
         if(verbosity > iINF) {
             from << string_format("(0x%x)", this);
@@ -63,7 +66,6 @@ std::string PolicyRule::to_string(int verbosity) const {
         from << it->value()->to_string() << " ";
     }
     from << ":";
-    if(src_ports_default) from << "*";
     for(auto it: src_ports) {
         if(it->value().first == 0 && it->value().second == 65535)
             from << "(*) ";
@@ -73,12 +75,10 @@ std::string PolicyRule::to_string(int verbosity) const {
     
     std::stringstream to;
 
-    if(dst_default) to << "*";
     for(auto const& it: dst) {
         to << it->value()->to_string() << " ";
     }
     to << ":";
-    if(dst_ports_default) to << "*";
     for(auto it: dst_ports) {
         if(it->value().first == 0 && it->value().second == 65535)
             to << "(*) ";
@@ -289,6 +289,11 @@ bool PolicyRule::match(baseProxy* p) {
     bool rmatch = false;
     bool rpmatch = false;
 
+    if(is_disabled) {
+        _dia("PolicyRule::match %s this policy is disabled", p->to_string(iINF).c_str());
+        return false;
+    }
+
     if(p != nullptr) {
 
         // compare if policy has proto match
@@ -351,6 +356,11 @@ bool PolicyRule::match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r)
     }
     if(!r.empty()) {
         rs = r[0]->to_string();
+    }
+
+    if(is_disabled) {
+        _dia("PolicyRule::match_lr %s <+> %s - this policy is disabled", ls.c_str(), rs.c_str());
+        return false;
     }
 
     // compare if policy has proto match

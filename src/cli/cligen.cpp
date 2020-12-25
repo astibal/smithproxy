@@ -182,6 +182,10 @@ std::vector<std::string> load_valid_options(std::string const& section, std::str
         else if(varname == "action") {
             fill_attributes( { "accept", "reject" });
         }
+        else if(varname == "disabled") {
+            fill_attributes( { "false", "true" });
+        }
+
     }
 
     return ret;

@@ -31,7 +31,11 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 
 ### New features
 
-* **NOTE: CLI config changes are still experimental** 
+* **NOTE: CLI config changes are still experimental**
+
+* add new attributes in the `policy`: `disabled` and `name`  
+    * `disabled` - will make policy inactive - policy won't match any traffic
+    * `name` - convenience attribute for describing the policy
 * significantly improved CLI edit/add/remove commands - partial rewrite - getting to know libcli
 * added `remove` support for policy section
 * fixed arm64 ubuntu20.04 build

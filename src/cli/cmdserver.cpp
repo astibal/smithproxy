@@ -1368,6 +1368,19 @@ int cli_uni_set_cb(std::string const& confpath, struct cli_def *cli, const char 
 
         if (! args_qmark) {
 
+            // special treatment for "name" varname, which is always a string with spaces allowed
+            if(varname == "name") {
+                std::stringstream  ss_name;
+                for(auto it = args.begin(); it != args.end(); ++it) {
+                    ss_name << *it;
+                    if( it + 1 != args.end()) {
+                        ss_name << " ";
+                    }
+                }
+                args.clear();
+                args.emplace_back(ss_name.str());
+            }
+
             std::scoped_lock<std::recursive_mutex> ll_(CfgFactory::lock());
 
             if (cfg_write_value(conf, false, varname, args, cli)) {
@@ -2159,8 +2172,9 @@ void client_thread(int client_socket) {
 
     register_callback("starttls_signatures.[x]", MODE_EDIT_STARTTLS_SIGNATURES)
                     .cmd_set(cli_generic_set_cb)
-                    .cmd_add(cli_generic_add_cb)
-                    .cmd_remove(cli_generic_remove_cb);
+                    .cap_add(true).cmd_add(cli_generic_add_cb)
+                    .cap_remove(true).cmd_remove(cli_generic_remove_cb)
+                    .cap_edit(true).cmd_edit(cli_conf_edit_starttls_signatures);
 
     register_callback("detection_signatures", MODE_EDIT_DETECTION_SIGNATURES)
         .cmd_edit(cli_conf_edit_detection_signatures);
@@ -2168,8 +2182,9 @@ void client_thread(int client_socket) {
 
     register_callback("detection_signatures.[x]", MODE_EDIT_DETECTION_SIGNATURES)
                     .cmd_set(cli_generic_set_cb)
-                    .cmd_add(cli_generic_add_cb)
-                    .cmd_remove(cli_generic_remove_cb);
+                    .cap_add(true).cmd_add(cli_generic_add_cb)
+                    .cap_remove(true).cmd_remove(cli_generic_remove_cb)
+                    .cap_edit(true).cmd_edit(cli_conf_edit_detection_signatures);
 
 
 

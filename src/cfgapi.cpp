@@ -597,7 +597,8 @@ int CfgFactory::load_db_policy () {
 
         for( int i = 0; i < num; i++) {
             Setting& cur_object = curr_set[i];
-            
+
+            bool this_disabled = false;
             std::string proto;
             std::string dst;
             std::string dport;
@@ -614,16 +615,22 @@ int CfgFactory::load_db_policy () {
             
             auto rule = std::make_shared<PolicyRule>();
 
+            if(load_if_exists(cur_object, "disabled", this_disabled)) {
+                rule->is_disabled = this_disabled;
+            }
+
+            load_if_exists(cur_object, "name", rule->policy_name);
+
             if(load_if_exists(cur_object, "proto", proto)) {
                 auto r = lookup_proto(proto.c_str());
                 if(r) {
                     r->usage_add(std::weak_ptr(rule));
                     rule->proto = r;
-                    rule->proto_default = false;
                     _dia("cfgapi_load_policy[#%d]: proto object: %s", i, proto.c_str());
                 } else {
                     _dia("cfgapi_load_policy[#%d]: proto object not found: %s", i, proto.c_str());
                     error = true;
+                    rule->is_disabled = true;
                 }
             }
             
@@ -636,11 +643,11 @@ int CfgFactory::load_db_policy () {
                     if(r) {
                         r->usage_add(std::weak_ptr(rule));
                         rule->src.push_back(r);
-                        rule->src_default = false;
                         _dia("cfgapi_load_policy[#%d]: src address object: %s", i, src.c_str());
                     } else {
                         _dia("cfgapi_load_policy[#%d]: src address object not found: %s", i, src.c_str());
                         error = true;
+                        rule->is_disabled = true;
                     }
                 }
             } else {
@@ -653,11 +660,11 @@ int CfgFactory::load_db_policy () {
                     if(r) {
                         r->usage_add(std::weak_ptr(rule));
                         rule->src.push_back(r);
-                        rule->src_default = false;
                         _dia("cfgapi_load_policy[#%d]: src address object: %s", i, obj_name);
                     } else {
                         _dia("cfgapi_load_policy[#%d]: src address object not found: %s", i, obj_name);
                         error = true;
+                        rule->is_disabled = true;
                     }
 
                 }
@@ -670,11 +677,11 @@ int CfgFactory::load_db_policy () {
                     if(r) {
                         r->usage_add(std::weak_ptr(rule));
                         rule->src_ports.emplace_back(r);
-                        rule->src_ports_default = false;
                         _dia("cfgapi_load_policy[#%d]: src_port object: %s", i, sport.c_str());
                     } else {
                         _dia("cfgapi_load_policy[#%d]: src_port object not found: %s", i, sport.c_str());
                         error = true;
+                        rule->is_disabled = true;
                     }
                 }
             } else {
@@ -687,11 +694,11 @@ int CfgFactory::load_db_policy () {
                     if(r) {
                         r->usage_add(std::weak_ptr(rule));
                         rule->src_ports.emplace_back(r);
-                        rule->src_ports_default = false;
                         _dia("cfgapi_load_policy[#%d]: src_port object: %s", i, obj_name);
                     } else {
                         _dia("cfgapi_load_policy[#%d]: src_port object not found: %s", i, obj_name);
                         error = true;
+                        rule->is_disabled = true;
                     }
                 }
             }
@@ -703,11 +710,11 @@ int CfgFactory::load_db_policy () {
                     if(r) {
                         r->usage_add(std::weak_ptr(rule));
                         rule->dst.push_back(r);
-                        rule->dst_default = false;
                         _dia("cfgapi_load_policy[#%d]: dst address object: %s", i, dst.c_str());
                     } else {
                         _dia("cfgapi_load_policy[#%d]: dst address object not found: %s", i, dst.c_str());
                         error = true;
+                        rule->is_disabled = true;
                     }                
                 }
             } else {
@@ -720,11 +727,11 @@ int CfgFactory::load_db_policy () {
                     if(r) {
                         r->usage_add(std::weak_ptr(rule));
                         rule->dst.push_back(r);
-                        rule->dst_default = false;
                         _dia("cfgapi_load_policy[#%d]: dst address object: %s", i, obj_name);
                     } else {
                         _dia("cfgapi_load_policy[#%d]: dst address object not found: %s", i, obj_name);
                         error = true;
+                        rule->is_disabled = true;
                     }                
                 }
             }
@@ -737,11 +744,11 @@ int CfgFactory::load_db_policy () {
                     if(r) {
                         r->usage_add(std::weak_ptr(rule));
                         rule->dst_ports.emplace_back(r);
-                        rule->dst_ports_default = false;
                         _dia("cfgapi_load_policy[#%d]: dst_port object: %s", i, dport.c_str());
                     } else {
                         _dia("cfgapi_load_policy[#%d]: dst_port object not found: %s", i, dport.c_str());
                         error = true;
+                        rule->is_disabled = true;
                     }
                 }
             } else {
@@ -754,11 +761,11 @@ int CfgFactory::load_db_policy () {
                     if(r) {
                         r->usage_add(std::weak_ptr(rule));
                         rule->dst_ports.emplace_back(r);
-                        rule->dst_ports_default = false;
                         _dia("cfgapi_load_policy[#%d]: dst_port object: %s", i, obj_name);
                     } else {
                         _dia("cfgapi_load_policy[#%d]: dst_port object not found: %s", i, obj_name);
                         error = true;
+                        rule->is_disabled = true;
                     }                    
                 }
             }
@@ -2713,6 +2720,9 @@ int CfgFactory::save_policy(Config& ex) const {
             continue;
 
         Setting& item = objects.add(Setting::TypeGroup);
+
+        item.add("disabled", Setting::TypeBoolean) = pol->is_disabled;
+        item.add("name", Setting::TypeString) = pol->policy_name;
 
         item.add("proto", Setting::TypeString) = pol->proto->element_name();
 

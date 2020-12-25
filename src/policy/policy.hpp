@@ -69,20 +69,16 @@ public:
 
     unsigned int cnt_matches = 0;
 
+    bool is_disabled = false;
+    std::string policy_name;
+
     std::shared_ptr<CfgUint8> proto;
-    bool proto_default = true;
 
     group_of_addresses src;
-    bool src_default = true;
-
     group_of_ports  src_ports;
-    bool src_ports_default = true;
 
     group_of_addresses  dst;
-    bool dst_default = true;
-
     group_of_ports dst_ports;
-    bool dst_ports_default = true;
 
     int action = POLICY_ACTION_PASS;
     std::string action_name;
