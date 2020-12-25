@@ -326,7 +326,7 @@ bool PolicyRule::match(baseProxy* p) {
             return true;
 
         } else {
-            _dia("PolicyRule::match %s FAILED: %d-%d:%d->%d:%d", p->to_string(iINF).c_str(), proto, lmatch, lpmatch, rmatch, rpmatch);
+            _dia("PolicyRule::match %s FAILED: %d-%d:%d->%d:%d", p->to_string(iINF).c_str(), proto->value(), lmatch, lpmatch, rmatch, rpmatch);
         }
 
     } else {
@@ -383,7 +383,7 @@ bool PolicyRule::match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r)
     if(*log.level() >= DEB ) {
         for(auto i: l) _dum("PolicyRule::match_lr L: %s", i->to_string().c_str());
         for(auto i: r) _dum("PolicyRule::match_lr R: %s", i->to_string().c_str());
-        _deb("PolicyRule::match_lr Success: %d-%d:%d->%d:%d", proto, lmatch, lpmatch, rmatch, rpmatch);
+        _deb("PolicyRule::match_lr Success: %d-%d:%d->%d:%d", proto->value(), lmatch, lpmatch, rmatch, rpmatch);
     }
 
     end:
@@ -394,7 +394,7 @@ bool PolicyRule::match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r)
         
         return true;
     } else {
-        _dia("PolicyRule::match_lr %s <+> %s FAILED: %d-%d:%d->%d:%d", ls.c_str(), rs.c_str(), proto, lmatch, lpmatch, rmatch, rpmatch);
+        _dia("PolicyRule::match_lr %s <+> %s FAILED: %d-%d:%d->%d:%d", ls.c_str(), rs.c_str(), proto->value(), lmatch, lpmatch, rmatch, rpmatch);
     }
 
     return false;
