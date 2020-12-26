@@ -2697,12 +2697,27 @@ int CfgFactory::save_auth_profiles(Config& ex) const {
 bool CfgFactory::new_policy (Setting &ex, const std::string &name) const {
 
     try {
-        ex.add(name, Setting::TypeGroup);
+        auto& newpol = ex.add(Setting::TypeGroup);
+        newpol.add("disabled", Setting::TypeBoolean) = true;
+
+        newpol.add("proto", Setting::TypeString) = "tcp";
+
+        newpol.add("src", Setting::TypeArray);
+        newpol.add("sport", Setting::TypeArray);
+        newpol.add("dst", Setting::TypeArray);
+        newpol.add("dport", Setting::TypeArray);
+        newpol.add("action", Setting::TypeString) = "accept";
+        newpol.add("nat", Setting::TypeString) = "auto";
     }
     catch(libconfig::SettingNameException const& e) {
         _war("cannot add new section %s: %s", name.c_str(), e.what());
         return false;
     }
+    catch(libconfig::SettingTypeException const& e) {
+        _war("cannot add new section %s: %s", name.c_str(), e.what());
+        return false;
+    }
+
     return true;
 }
 

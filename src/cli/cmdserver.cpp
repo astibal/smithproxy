@@ -1686,20 +1686,40 @@ int cli_generic_add_cb(struct cli_def *cli, const char *command, char *argv[], i
 
     std::vector<std::string> args;
     bool args_qmark = false;
+    auto section = CliState::get().sections(cli->mode);
+
     if (argc > 0) {
         for (int i = 0; i < argc; i++) {
             args.emplace_back(std::string(argv[i]));
         }
         args_qmark = (args[0] == "?");
 
-    } else {
-        return CLI_OK;
     }
 
     if(args_qmark) {
         cli_print(cli, " ... hint: add <object_name> (name must not start with reserved __)");
         return CLI_OK;
     }
+
+    // remove template suffix
+    bool templated = false;
+    if(section.find(".[x]") != std::string::npos) {
+        templated = true;
+        string_replace_all(section, ".[x]", "");
+    }
+
+    if(section == "policy") {
+        args.clear();
+        args.push_back(string_format("[%d]", CfgFactory::get().db_policy_list.size()));
+    }
+
+    // if nothing to add, print out something smart and exit
+    if(args.empty())  {
+        cli_print(cli, " ");
+        cli_print(cli, "New entry in this section must have an unique name.");
+        return CLI_OK;
+    }
+
 
     if(args[0].find("__") == 0) {
 
@@ -1708,14 +1728,6 @@ int cli_generic_add_cb(struct cli_def *cli, const char *command, char *argv[], i
         return CLI_OK;
     }
 
-    auto section = CliState::get().sections(cli->mode);
-
-    // remove template suffix
-    bool templated = false;
-    if(section.find(".[x]") != std::string::npos) {
-        templated = true;
-        string_replace_all(section, ".[x]", "");
-    }
 
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
     if(CfgFactory::cfg_root().exists(section.c_str())) {
@@ -1799,6 +1811,9 @@ int cli_generic_add_cb(struct cli_def *cli, const char *command, char *argv[], i
         }
         else if(section == "policy") {
             if (CfgFactory::get().new_policy(s, args[0])) {
+
+                // policy is a list - it must be cleared before loaded again
+                CfgFactory::get().cleanup_db_policy();
                 CfgFactory::get().load_db_policy();
                 register_cli();
                 created_internal = true;
@@ -2119,7 +2134,7 @@ void client_thread(int client_socket) {
     // template for policy list entries
     register_callback( "policy.[x]", MODE_EDIT_POLICY)
             .cmd_set(cli_generic_set_cb)
-            .cmd_add(cli_generic_add_cb)
+            .cap_add(true).cmd_add(cli_generic_add_cb)
             .cmd_remove(cli_generic_remove_cb)
             .cap_edit(true)
             .cmd_edit(cli_conf_edit_policy);
