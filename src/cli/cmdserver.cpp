@@ -1504,14 +1504,22 @@ int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[]
 
         // remove unconditionally @what element entries in the config @section
         //      @what is 'auto' to detect type, we can have name via string, or index via unsigned int
-        auto remove = [] (std::string const& section, auto const& what ) -> int {
+        auto remove = [&cli] (std::string const& section, auto const& what ) -> int {
 
             int removed = 0;
 
             for(auto const& arg: what) {
-                CfgFactory::cfg_root().lookup(section).remove(arg);
 
-                removed++;
+                try {
+                    CfgFactory::cfg_root().lookup(section).remove(arg);
+                    removed++;
+                }
+                catch(std::exception const& e) {
+                    cli_print(cli, " ");
+                    cli_print(cli, "Error removing: %s", e.what());
+                }
+
+
             }
 
             // return number of removed elements
