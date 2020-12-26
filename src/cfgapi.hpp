@@ -193,7 +193,7 @@ public:
     bool  cfgapi_init(const char* fnm);
     void  cleanup();
 
-    static void cfg_clone_setting(Setting& dst, Setting& orig, int index );
+    static void cfg_clone_setting(Setting& dst, Setting& orig, int index = -1 );
     static int cfg_write(Config& cfg, FILE* where, unsigned long iobufsz = 0);
 
     template <class T>
@@ -260,6 +260,10 @@ public:
 
     bool new_policy(Setting& ex, std::string const& name) const;
     int save_policy(Config& ex) const;
+
+
+    enum class op_move { OP_MOVE_AFTER, OP_MOVE_BEFORE};
+    bool move_policy(int what, int where, op_move op);
 
     [[nodiscard]] int save_config() const;
 

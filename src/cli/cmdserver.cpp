@@ -1583,13 +1583,65 @@ int cli_policy_move_cb(struct cli_def *cli, const char *command, char *argv[], i
         return CLI_OK;
     }
 
-    // remove template suffix
-    bool templated = false;
     if (section.find(".[x]") != std::string::npos) {
-        templated = true;
         string_replace_all(section, ".[x]", "");
     }
 
+    auto cmd_split = string_split(command, ' ');
+
+    if(cmd_split.size() != 4) {
+        cli_print(cli, "cannot parse request: '%s'", command);
+        return CLI_OK;
+    }
+
+    auto x1 = cmd_split[1];
+    auto x2 = cmd_split[3];
+    string_replace_all(x1, "[", "");
+    string_replace_all(x2, "[", "");
+    string_replace_all(x1, "]", "");
+    string_replace_all(x2, "]", "");
+    string_replace_all(x1, " ", "");
+    string_replace_all(x2, " ", "");
+
+    auto index_1 = safe_val(x1);
+    auto index_2 = safe_val(x2);
+
+    if(index_1 < 0 or index_2 < 0) {
+        cli_print(cli, "invalid arguments in request: '%s'", command);
+        return CLI_OK;
+    }
+    _debug(cli, "moving %d %s %d", index_1, cmd_split[2].c_str(), index_2);
+
+    if(cmd_split[2] == "after") {
+        if(CfgFactory::get().move_policy(index_1, index_2, CfgFactory::op_move::OP_MOVE_AFTER)) {
+            CfgFactory::get().cleanup_db_policy();
+            CfgFactory::get().load_db_policy();
+
+            cli_print(cli, " ");
+            cli_print(cli, "Policy moved.");
+
+        } else {
+            cli_print(cli, " ");
+            cli_print(cli, "Error moving policies");
+        }
+    }
+    else
+    if(cmd_split[2] == "before") {
+        if(CfgFactory::get().move_policy(index_1, index_2, CfgFactory::op_move::OP_MOVE_BEFORE)) {
+            CfgFactory::get().cleanup_db_policy();
+            CfgFactory::get().load_db_policy();
+
+            cli_print(cli, " ");
+            cli_print(cli, "Policy moved.");
+        } else {
+            cli_print(cli, " ");
+            cli_print(cli, "Error moving policies");
+        }
+    }
+    else {
+        cli_print(cli, "invalid command in request: '%s'", command);
+        return CLI_OK;
+    }
 
     return CLI_OK;
 }

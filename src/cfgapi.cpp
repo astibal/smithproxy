@@ -2843,6 +2843,62 @@ int CfgFactory::cfg_write(Config& cfg, FILE* where, unsigned long iobufsz) {
 }
 
 
+bool CfgFactory::move_policy (int what, int where, op_move op) {
+
+    bool ret = false;
+
+    auto cfg_remove_all = [](Setting& objects) {
+        for(int i = objects.getLength() - 1; i >= 0; i--) {
+            objects.remove(i);
+        }
+    };
+
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
+
+    Config backup;
+    backup.setOptions(Setting::OptionOpenBraceOnSeparateLine);
+    backup.setTabWidth(4);
+
+    try {
+        auto &policy_list = backup.getRoot().add("policy", Setting::TypeList);
+
+        if(cfg_root().exists("policy")) {
+            Setting &orig_policy_list = cfg_root()["policy"];
+
+            cfg_clone_setting(policy_list, orig_policy_list, -1);
+            cfg_remove_all(orig_policy_list);
+
+            for(int i = 0; i < policy_list.getLength(); i++) {
+                if(i == what) {
+                    continue;
+                }
+                else {
+                    if (op == op_move::OP_MOVE_BEFORE and i == where) {
+                        auto &cur2 = orig_policy_list.add(Setting::TypeGroup);
+                        cfg_clone_setting(cur2, policy_list[what], -1);
+                    }
+
+                    auto &cur = orig_policy_list.add(Setting::TypeGroup);
+                    cfg_clone_setting(cur, policy_list[i], -1);
+
+                    if (op == op_move::OP_MOVE_AFTER and i == where) {
+                        auto &cur2 = orig_policy_list.add(Setting::TypeGroup);
+                        cfg_clone_setting(cur2, policy_list[what], -1);
+                    }
+                }
+            }
+
+            ret = true;
+        }
+    }
+    catch(std::exception const& e) {
+        std::cout << e.what() << std::endl;
+    }
+
+    return ret;
+}
+
+
 int CfgFactory::save_policy(Config& ex) const {
 
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
