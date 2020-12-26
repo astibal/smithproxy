@@ -37,6 +37,11 @@
     which carries forward this exception.
 */
 
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/ioctl.h>
+
 #include <vector>
 
 #include <socle.hpp>
@@ -2720,6 +2725,123 @@ bool CfgFactory::new_policy (Setting &ex, const std::string &name) const {
 
     return true;
 }
+
+
+// libconfig API is lacking cloning facility despite it's really trivial to implement:
+void CfgFactory::cfg_clone_setting(Setting& dst, Setting& orig, int index ) {
+
+
+    std::string orig_name;
+    if(orig.getName()) {
+        orig_name = orig.getName();
+    }
+
+    //cli_print(debug_cli, "clone start: name: %s, len: %d", orig_name.c_str(), orig.getLength());
+
+    for (unsigned int i = 0; i < (unsigned int) orig.getLength(); i++) {
+
+        if( index >= 0 && index != (int)i) {
+            continue;
+        }
+
+        Setting &cur_object = orig[(int)i];
+
+
+        Setting::Type type = cur_object.getType();
+
+        std::string name;
+        if(cur_object.getName()) {
+            name = cur_object.getName();
+        }
+
+
+        Setting& new_setting =  name.empty() ? dst.add(type) : dst.add(name.c_str(), type);
+
+        if(cur_object.isScalar()) {
+            switch(type) {
+                case Setting::TypeInt:
+                    new_setting = (int)cur_object;
+                    break;
+
+                case Setting::TypeInt64:
+                    new_setting = (long long int)cur_object;
+
+                    break;
+
+                case Setting::TypeString:
+                    new_setting = (const char*)cur_object;
+                    break;
+
+                case Setting::TypeFloat:
+                    new_setting = (float)cur_object;
+                    break;
+
+                case Setting::TypeBoolean:
+                    new_setting = (bool)cur_object;
+                    break;
+
+                default:
+                    // well, that sucks. Unknown type and no way to convert or report
+                    break;
+            }
+        }
+        else {
+            // index is always here -1, we don't filter sub-items
+            cfg_clone_setting(new_setting, cur_object, -1 /*, debug_cli */ );
+        }
+    }
+}
+
+int CfgFactory::cfg_write(Config& cfg, FILE* where, unsigned long iobufsz) {
+
+    int fds[2];
+    int fret = pipe(fds);
+    if(0 != fret) {
+        return -1;
+    }
+
+    FILE* fw = fdopen(fds[1], "w");
+    FILE* fr = fdopen(fds[0], "r");
+
+
+    // set pipe buffer size to 10MB - we need to fit whole config into it.
+    unsigned long nbytes = 10*1024*1024;
+    if(iobufsz > 0) {
+        nbytes = iobufsz;
+    }
+
+    ioctl(fds[0], FIONREAD, &nbytes);
+    ioctl(fds[1], FIONREAD, &nbytes);
+
+    cfg.write(fw);
+    fclose(fw);
+
+
+    int c = EOF;
+    do {
+        c = fgetc(fr);
+        //cli_print(cli, ">>> 0x%x", c);
+
+        switch(c) {
+            case EOF:
+                break;
+
+            case '\n':
+                fputc('\r', where);
+                // omit break - so we write also '\n'
+
+            default:
+                fputc(c, where);
+        }
+
+    } while(c != EOF);
+
+
+    fclose(fr);
+
+    return 0;
+}
+
 
 int CfgFactory::save_policy(Config& ex) const {
 

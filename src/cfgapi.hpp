@@ -193,6 +193,9 @@ public:
     bool  cfgapi_init(const char* fnm);
     void  cleanup();
 
+    static void cfg_clone_setting(Setting& dst, Setting& orig, int index );
+    static int cfg_write(Config& cfg, FILE* where, unsigned long iobufsz = 0);
+
     template <class T>
     std::shared_ptr<T> section_element(std::string const& section, std::string const& key);
     std::map<std::string, std::shared_ptr<CfgElement>>& section_db(std::string const& section);

@@ -885,138 +885,20 @@ int cli_exec_reload(struct cli_def *cli, const char *command, char *argv[], int 
 }
 
 
-int cfg_write(Config& cfg, FILE* where, unsigned long iobufsz = 0) {
 
-    int fds[2];
-    int fret = pipe(fds);
-    if(0 != fret) {
-        return -1;
-    }
-
-    FILE* fw = fdopen(fds[1], "w");
-    FILE* fr = fdopen(fds[0], "r");
-
-
-    // set pipe buffer size to 10MB - we need to fit whole config into it.
-    unsigned long nbytes = 10*1024*1024;
-    if(iobufsz > 0) {
-        nbytes = iobufsz;
-    }
-
-    ioctl(fds[0], FIONREAD, &nbytes);
-    ioctl(fds[1], FIONREAD, &nbytes);
-
-    cfg.write(fw);
-    fclose(fw);
-
-
-    int c = EOF;
-    do {
-        c = fgetc(fr);
-        //cli_print(cli, ">>> 0x%x", c);
-
-        switch(c) {
-            case EOF:
-                break;
-
-            case '\n':
-                fputc('\r', where);
-                // omit break - so we write also '\n'
-
-            default:
-                fputc(c, where);
-        }
-
-    } while(c != EOF);
-
-
-    fclose(fr);
-
-    return 0;
-}
 
 int cli_show_config_full (struct cli_def *cli, const char *command, char **argv, int argc) {
     debug_cli_params(cli, command, argv, argc);
 
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
-    if(cfg_write(CfgFactory::cfg_obj(), cli->client) != 0) {
+    if(CfgFactory::cfg_write(CfgFactory::cfg_obj(), cli->client) != 0) {
         cli_print(cli, "error: config print failed");
     }
 
     return CLI_OK;
 }
 
-// libconfig API is lacking cloning facility despite it's really trivial to implement:
-
-void cfg_clone_setting(Setting& dst, Setting& orig, int index/*, struct cli_def *debug_cli*/ ) {
-
-
-    std::string orig_name;
-    if(orig.getName()) {
-        orig_name = orig.getName();
-    }
-
-    //cli_print(debug_cli, "clone start: name: %s, len: %d", orig_name.c_str(), orig.getLength());
-
-    for (unsigned int i = 0; i < (unsigned int) orig.getLength(); i++) {
-
-        if( index >= 0 && index != (int)i) {
-            continue;
-        }
-
-        Setting &cur_object = orig[(int)i];
-
-
-        Setting::Type type = cur_object.getType();
-        //cli_print(debug_cli, "clone      : type: %d", type);
-
-        std::string name;
-        if(cur_object.getName()) {
-            name = cur_object.getName();
-            //cli_print(debug_cli, "clone      : type: %d, name: %s", type, name.c_str());
-        }
-
-
-        Setting& new_setting =  name.empty() ? dst.add(type) : dst.add(name.c_str(), type);
-
-        if(cur_object.isScalar()) {
-            switch(type) {
-                case Setting::TypeInt:
-                    new_setting = (int)cur_object;
-                    break;
-
-                case Setting::TypeInt64:
-                    new_setting = (long long int)cur_object;
-
-                    break;
-
-                case Setting::TypeString:
-                    new_setting = (const char*)cur_object;
-                    break;
-
-                case Setting::TypeFloat:
-                    new_setting = (float)cur_object;
-                    break;
-
-                case Setting::TypeBoolean:
-                    new_setting = (bool)cur_object;
-                    break;
-
-                default:
-                    // well, that sucks. Unknown type and no way to convert or report
-                    break;
-            }
-        }
-        else {
-
-            //cli_print(debug_cli, "clone      : --- entering non-scalar");
-
-            // index is always here -1, we don't filter sub-items
-            cfg_clone_setting(new_setting, cur_object, -1 /*, debug_cli */ );
-        }
-    }
-}
 
 
 
@@ -1890,9 +1772,8 @@ void cli_print_section(cli_def* cli, const std::string& xname, int index , unsig
         Setting* target = &nc.getRoot();
         target = &target->add(s.getName(), s.getType());
 
-        cfg_clone_setting( *target, s , index /*, cli */ );
-
-        cfg_write(nc, cli->client, pipe_sz);
+        CfgFactory::cfg_clone_setting( *target, s , index /*, cli */ );
+        CfgFactory::cfg_write(nc, cli->client, pipe_sz);
 
     } else {
         cli_print(cli, "'%s' config section doesn't exist", name.c_str());
