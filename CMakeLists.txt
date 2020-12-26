@@ -87,7 +87,7 @@ message(STATUS "Git commit smithrproxy version: ${SX_GIT_VERSION}")
 message(STATUS "Generating smithproxy_version.h")
 
 configure_file(
-        ${CMAKE_SOURCE_DIR}/smithproxy_version.h.in
+        ${PROJECT_SOURCE_DIR}/src/smithproxy_version.h.in
         ${PROJECT_SOURCE_DIR}/src/smithproxy_version.h
 )
 
