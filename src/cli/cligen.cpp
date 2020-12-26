@@ -298,6 +298,9 @@ void cli_generate_commands (cli_def *cli, std::string const &this_section, cli_c
     cli_command* remove = nullptr;
     // common remove for all removable sub-items
     cli_command* add = nullptr;
+    // common remove for all removable sub-items
+    cli_command* move = nullptr;
+
 
 
     for( int i = 0 ; i < cfg_this_section.getLength() ; i++ ) {
@@ -359,6 +362,7 @@ void cli_generate_commands (cli_def *cli, std::string const &this_section, cli_c
             auto edit_enabled  = templated ? std::get<1>(template_cb).cap_edit() : std::get<1>(section_cb).cap_edit();
             auto remove_enabled = templated ? std::get<1>(template_cb).cap_remove() : std::get<1>(section_cb).cap_remove();
             auto add_enabled = templated ? std::get<1>(template_cb).cap_add() : std::get<1>(section_cb).cap_add();
+            auto move_enabled = templated ? std::get<1>(template_cb).cap_move() : std::get<1>(section_cb).cap_move();
 
             if(edit_enabled) {
 
@@ -409,6 +413,39 @@ void cli_generate_commands (cli_def *cli, std::string const &this_section, cli_c
                     add = cli_register_command(cli, cli_parent, "add",
                                                cb_add, PRIVILEGE_PRIVILEGED, this_mode, help_add.c_str());
                     std::get<1>(section_cb).cli_add(add);
+                }
+            }
+
+            if(move_enabled and not std::get<1>(this_callback_entry).cli_move()) {
+
+                int len = cfg_this_section.getLength();
+                if(len > 1) {
+
+                    auto cb_move = templated ? std::get<1>(template_cb).cmd_move() : std::get<1>(section_cb).cmd_move();
+                    if(! move) {
+                        move = cli_register_command(cli, cli_parent, "move",
+                                                    nullptr, PRIVILEGE_PRIVILEGED, this_mode, help_add.c_str());
+                        std::get<1>(this_callback_entry).cli_move(move);
+                    }
+
+                    for (int i = 0; i < len; i++) {
+                        auto move_x = cli_register_command(cli, move, string_format("[%d]", i).c_str(),
+                                                           nullptr, PRIVILEGE_PRIVILEGED, this_mode, help_add.c_str());
+
+                        auto move_x_before = cli_register_command(cli, move_x, "before",
+                                                                  nullptr, PRIVILEGE_PRIVILEGED, this_mode, help_add.c_str());
+                        auto move_x_after = cli_register_command(cli, move_x, "after",
+                                                                  nullptr, PRIVILEGE_PRIVILEGED, this_mode, help_add.c_str());
+
+                        for (int j = 0; j < len; j++) {
+                            if( i == j) {
+                                continue;
+                            }
+
+                            cli_register_command(cli, move_x_before, string_format("[%d]", j).c_str(), cb_move, PRIVILEGE_PRIVILEGED, this_mode, help_add.c_str());
+                            cli_register_command(cli, move_x_after, string_format("[%d]", j).c_str(), cb_move, PRIVILEGE_PRIVILEGED, this_mode, help_add.c_str());
+                        }
+                    }
                 }
             }
 

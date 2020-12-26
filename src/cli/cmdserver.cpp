@@ -1681,6 +1681,38 @@ int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[]
 }
 
 
+int cli_policy_move_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+
+    std::vector<std::string> args;
+    bool args_qmark = false;
+    auto section = CliState::get().sections(cli->mode);
+
+    if (argc > 0) {
+        for (int i = 0; i < argc; i++) {
+            args.emplace_back(std::string(argv[i]));
+        }
+        args_qmark = (args[0] == "?");
+
+    }
+
+    if (args_qmark) {
+        cli_print(cli, " ... hint: move <policy_id> [before|after] <policy_id>");
+        return CLI_OK;
+    }
+
+    // remove template suffix
+    bool templated = false;
+    if (section.find(".[x]") != std::string::npos) {
+        templated = true;
+        string_replace_all(section, ".[x]", "");
+    }
+
+
+    return CLI_OK;
+}
+
+
 int cli_generic_add_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
 
@@ -2137,7 +2169,8 @@ void client_thread(int client_socket) {
             .cap_add(true).cmd_add(cli_generic_add_cb)
             .cmd_remove(cli_generic_remove_cb)
             .cap_edit(true)
-            .cmd_edit(cli_conf_edit_policy);
+            .cmd_edit(cli_conf_edit_policy)
+            .cap_move(true).cmd_move(cli_policy_move_cb);
 
     register_callback("detection_profiles", MODE_EDIT_DETECTION_PROFILES)
                     .cmd_edit(cli_conf_edit_detection_profiles);

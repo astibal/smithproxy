@@ -78,6 +78,13 @@ struct CliCallbacks {
         return *this;
     }
 
+    callback cmd_move() const { return cmd_move_; };
+    CliCallbacks& cmd_move(callback c) {
+        cmd_move_ = c;
+        return *this;
+    }
+
+
     cli_command* cli_edit() const { return cli_edit_; };
     CliCallbacks& cli_edit(cli_command* c) {
         cli_edit_ = c;
@@ -95,6 +102,13 @@ struct CliCallbacks {
         cli_remove_ = c;
         return *this;
     }
+
+    cli_command* cli_move() const { return cli_move_; };
+    CliCallbacks& cli_move(cli_command* c) {
+        cli_move_ = c;
+        return *this;
+    }
+
 
     bool cap_edit() const { return cmd_edit_enabled_; };
     CliCallbacks& cap_edit(bool v) {
@@ -114,6 +128,12 @@ struct CliCallbacks {
         return *this;
     }
 
+    bool cap_move() const { return cmd_move_enabled_; };
+    CliCallbacks& cap_move(bool v) {
+        cmd_move_enabled_ = v;
+        return *this;
+    }
+
 private:
     std::string caption_;
 
@@ -128,9 +148,14 @@ private:
     callback cmd_remove_ = nullptr;
     bool     cmd_remove_enabled_ = false;
 
+    callback cmd_move_ = nullptr;
+    bool     cmd_move_enabled_ = false;
+
+
     cli_command* cli_edit_ = nullptr;
     cli_command* cli_add_ = nullptr;
     cli_command* cli_remove_ = nullptr;
+    cli_command* cli_move_ = nullptr;
 };
 
 struct CliState {
