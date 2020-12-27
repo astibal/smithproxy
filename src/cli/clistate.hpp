@@ -232,7 +232,7 @@ private:
     std::unordered_map<std::string, callback_entry> callback_map_;
     std::unordered_map<int, std::string> mode_map;
 
-    CliState() : help_(CliHelp::instance()) {};
+    CliState() : help_(CliHelp::get()) {};
     CliHelp& help_;
 };
 

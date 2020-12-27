@@ -33,6 +33,8 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 
 * **NOTE: CLI config changes are still experimental**
 
+* cli help and hint mechanics improvements 
+* cli: allow attribute empty values, better value change checks
 * add new cli command `move` into policy section
 * add new cli command `add` into policy section (creates a new disabled policy)
 * add new attributes in the `policy`: `disabled` and `name`  

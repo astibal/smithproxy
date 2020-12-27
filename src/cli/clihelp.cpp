@@ -46,96 +46,110 @@
 #include <cfgapi.hpp>
 
 void CliHelp::init() {
-    help_add("default","");
-    help_add("settings.accept_tproxy", "whether to accept incoming connections via TPROXY target (default true)");
-    help_add("settings.accept_redirect", "whether to accept incoming connections via REDIRECT target (default true)");
-    help_add("settings.accept_socks", "whether to accept incoming connections via SOCKS target (default true)");
-    help_add("settings.certs_path", "directory for TLS-resigning CA certificate and key");
-    help_add("settings.certs_ctlog", "file containing certificate transparency log list");
-    help_add("settings.certs_ca_key_password","TLS-resigning CA private key protection password");
-    help_add("settings.ca_bundle_path", "trusted CA store path (to verify server-side connections)");
-    help_add("settings.plaintext_port", "base divert port for non-SSL TCP traffic");
-    help_add("settings.plaintext_workers", "non-SSL TCP traffic worker thread count");
-    help_add("settings.ssl_port", "base divert port for SSL TCP traffic");
-    help_add("settings.ssl_workers", "SSL TCP traffic worker thread count");
-    help_add("settings.ssl_autodetect", "Detect TLS ClientHello on unusual ports");
-    help_add("settings.ssl_autodetect_harder", "Detect TSL ClientHello - wait a bit longer");
-    help_add("settings.ssl_ocsp_status_ttl", "hardcoded TTL for OCSP response validity");
-    help_add("settings.ssl_crl_status_ttl", "hardcoded TTL for downloaded CRL files");
+    add("default", "")
+    .help_quick("enter <value>");
 
-    help_add("settings.udp_port", "base divert port for non-DTLS UDP traffic");
-    help_add("settings.udp_workers", "non-DTLS traffic worker thread count");
+    add("settings.accept_tproxy", "whether to accept incoming connections via TPROXY")
+            .help_quick("<bool>: set to 'true' to disable tproxy acceptor (default: false)");
 
-    help_add("settings.dtls_port", "base divert port for DTLS UDP traffic");
-    help_add("settings.dtls_workers", "DTLS traffic worker thread count");
+    add("settings.accept_redirect", "whether to accept incoming connections via REDIRECT")
+            .help_quick("<bool>: set to 'true' to disable redirect acceptor (default: false)");
 
-    help_add("settings.socks_port", "base SOCKS proxy listening port");
-    help_add("settings.socks_workers", "SOCKS proxy traffic thread count");
+    add("settings.accept_socks", "whether to accept incoming connections via SOCKS")
+            .help_quick("<bool>: set to 'true' to disable socks acceptor (default: false)");
 
-    help_add("settings.log_level", "file logging verbosity level");
-    help_add("settings.log_file", "log file");
-    help_add("settings.log_console", "toggle logging to standard output");
-    help_add("settings.syslog_server", "IP address of syslog server");
-    help_add("settings.syslog_port", "syslog server port");
-    help_add("settings.syslog_facility", "syslog facility");
-    help_add("settings.syslog_level", "syslog logging verbosity level");
-    help_add("settings.syslog_family", "IPv4 or IPv6?");
-    help_add("settings.sslkeylog_file", "where to dump TLS keying material");
-    help_add("settings.messages_dir", "replacement text directory");
-    help_add("settings.write_payload_dir", "root directory for packet dumps");
-    help_add("settings.write_payload_file_prefix", "packet dumps file prefix");
-    help_add("settings.write_payload_file_suffix", "packet dumps file suffix");
+    add("settings.certs_path", "directory for TLS-resigning CA certificate and key")
+            .help_quick("<string>: (default: /etc/smithproxy/certs/default)");
 
-    help_add("settings.auth_portal", "** configure authentication portal settings");
-    help_add("settings.cli", "** configure CLI specific settings");
-    help_add("settings.socks", "** configure SOCKS specific settings");
+    add("settings.certs_ctlog", "file containing certificate transparency log list")
+            .help_quick("<string>: file with certificate transparency keys (default: ct_log_list.cnf)");
+
+    add("settings.certs_ca_key_password", "TLS-resigning CA private key protection password");
+    add("settings.ca_bundle_path", "trusted CA store path (to verify server-side connections)");
+    add("settings.plaintext_port", "base divert port for non-SSL TCP traffic");
+    add("settings.plaintext_workers", "non-SSL TCP traffic worker thread count");
+    add("settings.ssl_port", "base divert port for SSL TCP traffic");
+    add("settings.ssl_workers", "SSL TCP traffic worker thread count");
+    add("settings.ssl_autodetect", "Detect TLS ClientHello on unusual ports");
+    add("settings.ssl_autodetect_harder", "Detect TSL ClientHello - wait a bit longer");
+    add("settings.ssl_ocsp_status_ttl", "hardcoded TTL for OCSP response validity");
+    add("settings.ssl_crl_status_ttl", "hardcoded TTL for downloaded CRL files");
+
+    add("settings.udp_port", "base divert port for non-DTLS UDP traffic");
+    add("settings.udp_workers", "non-DTLS traffic worker thread count");
+
+    add("settings.dtls_port", "base divert port for DTLS UDP traffic");
+    add("settings.dtls_workers", "DTLS traffic worker thread count");
+
+    add("settings.socks_port", "base SOCKS proxy listening port");
+    add("settings.socks_workers", "SOCKS proxy traffic thread count");
+
+    add("settings.log_level", "file logging verbosity level");
+    add("settings.log_file", "log file");
+    add("settings.log_console", "toggle logging to standard output");
+    add("settings.syslog_server", "IP address of syslog server");
+    add("settings.syslog_port", "syslog server port");
+    add("settings.syslog_facility", "syslog facility");
+    add("settings.syslog_level", "syslog logging verbosity level");
+    add("settings.syslog_family", "IPv4 or IPv6?");
+    add("settings.sslkeylog_file", "where to dump TLS keying material");
+    add("settings.messages_dir", "replacement text directory");
+    add("settings.write_payload_dir", "root directory for packet dumps");
+    add("settings.write_payload_file_prefix", "packet dumps file prefix");
+    add("settings.write_payload_file_suffix", "packet dumps file suffix");
+
+    add("settings.auth_portal", "** configure authentication portal settings");
+    add("settings.cli", "** configure CLI specific settings");
+    add("settings.socks", "** configure SOCKS specific settings");
 
 
-    qmark_add("default", "enter <value>");
-    qmark_add("settings.certs_path", "<string> with path to a directory");
-    qmark_add("settings.certs_ca_key_password","");
-    qmark_add("settings.ca_bundle_path", "");
-    qmark_add("settings.plaintext_port", "");
-    qmark_add("settings.plaintext_workers", "");
-    qmark_add("settings.ssl_port", "");
-    qmark_add("settings.ssl_workers", "");
-    qmark_add("settings.ssl_autodetect", "");
-    qmark_add("settings.ssl_autodetect_harder", "");
-    qmark_add("settings.ssl_ocsp_status_ttl", "");
-    qmark_add("settings.ssl_crl_status_ttl", "");
-    qmark_add("settings.udp_port", "");
-    qmark_add("settings.udp_workers", "");
-    qmark_add("settings.dtls_port", "");
-    qmark_add("settings.dtls_workers", "");
-    qmark_add("settings.socks_port", "");
-    qmark_add("settings.socks_workers", "");
-    qmark_add("settings.log_level", "");
-    qmark_add("settings.log_file", "");
-    qmark_add("settings.log_console", "");
-    qmark_add("settings.syslog_server", "");
-    qmark_add("settings.syslog_port", "");
-    qmark_add("settings.syslog_facility", "");
-    qmark_add("settings.syslog_level", "");
-    qmark_add("settings.syslog_family", "");
-    qmark_add("settings.sslkeylog_file", "");
-    qmark_add("settings.messages_dir", "");
-    qmark_add("settings.write_payload_dir", "");
-    qmark_add("settings.write_payload_file_prefix", "");
-    qmark_add("settings.write_payload_file_suffix", "");
-    qmark_add("settings.auth_portal", "");
-    qmark_add("settings.cli", "");
-    qmark_add("settings.socks", "");
 
-    qmark_add("debug.log_data_crc","calculate received CRC data (helps to identify proxy bugs)");
 
-    qmark_add("proto_objects", "IP protocols");
-    qmark_add("proto_objects.[0].id", "IP protocol number (tcp=6, udp=17)");
-    qmark_add("port_objects", "TCP/UDP ports");
+    help_quick("settings.certs_ca_key_password", "<string>");
+    help_quick("settings.ca_bundle_path", "path to ca bundle for outgoing connections");
+    help_quick("settings.plaintext_port", "tproxy non-tls acceptor port number");
+    help_quick("settings.plaintext_workers", "tproxy non-tls acceptor subordinate threads count");
+    help_quick("settings.ssl_port", "tproxy tls acceptor port number");
+    help_quick("settings.ssl_workers", "tproxy acceptor subordinate threads count");
+    help_quick("settings.ssl_autodetect", "try to detect tls in non-tls connection (tiny delay)");
+    help_quick("settings.ssl_autodetect_harder", "try to detect tls in non-tls connection harder");
+    help_quick("settings.ssl_ocsp_status_ttl", "obsoleted");
+    help_quick("settings.ssl_crl_status_ttl", "obsoleted");
+    help_quick("settings.udp_port", "tproxy udp acceptor port number");
+    help_quick("settings.udp_workers", "tproxy udp acceptor subordinate threads count");
+    help_quick("settings.dtls_port", "nyi - tproxy dtls acceptor port number");
+    help_quick("settings.dtls_workers", "nyi - tproxy dtls acceptor subordinate threads count");
+    help_quick("settings.socks_port", "socks acceptor port number");
+    help_quick("settings.socks_workers", "socks acceptor subordinate threads count");
+    help_quick("settings.log_level", "obsoleted");
+    help_quick("settings.log_file", "logfile path, must contain %%s for tenant name expansion");
+    help_quick("settings.log_console", "obsoleted");
+    help_quick("settings.syslog_server", "syslog server IP");
+    help_quick("settings.syslog_port", "syslog server port");
+    help_quick("settings.syslog_facility", "syslog facility (default 23 = local7)");
+    help_quick("settings.syslog_level", "syslog level (default 6 = informational)");
+    help_quick("settings.syslog_family", "set to 4 or 6 for ip version");
+    help_quick("settings.sslkeylog_file", "file path where to dump tls keys (if set)");
+    help_quick("settings.messages_dir", "directory path to message files");
+    help_quick("settings.write_payload_dir", "directory path for payload dump files");
+    help_quick("settings.write_payload_file_prefix", "dump filename prefix");
+    help_quick("settings.write_payload_file_suffix", "dump filename suffix");
+    help_quick("settings.auth_portal", "");
+    help_quick("settings.cli", "");
+    help_quick("settings.socks", "");
 
-    qmark_add("port_objects[0].start", "port range start");
-    qmark_add("port_objects[0].end", "port range end");
+    add("debug.log_data_crc", "calculate received CRC data (helps to identify proxy bugs)");
 
-    qmark_add("policy.[0].proto", "protocol to match (see proto_objects)");
+    add("proto_objects", "IP protocols");
+    add("proto_objects.[x].id", "IP protocol number (tcp=6, udp=17)");
+
+    add("port_objects", "TCP/UDP ports");
+    add("port_objects[x].start", "port range start");
+    add("port_objects[x].end", "port range end");
+
+    add("policy.[x].proto", "protocol to match (see proto_objects)")
+        .may_be_empty(false);
+
 }
 
 
@@ -157,11 +171,26 @@ bool CliHelp::value_check(std::string const& varname, float v, cli_def* cli) {
 
 bool CliHelp::value_check(std::string const& varname, std::string const& v, cli_def* cli) {
 
-    _debug(cli, "value_check: varname = %s, value = %s", varname.c_str(), v.c_str());
+    std::regex match ("\\[[0-9]+\\]");
+    std::string masked_varname  = std::regex_replace (varname, match, "[x]");
 
-    auto path_elems = string_split(varname, '.');
+    _debug(cli, "value_check: varname = %s, value = %s", varname.c_str(), v.c_str());
+    _debug(cli, "value_check:  masked = %s, value = %s", masked_varname.c_str(), v.c_str());
+
+    auto cli_e = find(masked_varname);
+    bool may_be_empty = true;
+    if(cli_e.has_value()) may_be_empty = cli_e->get().may_be_empty();
+
+    if(v.empty() and not may_be_empty) {
+        _debug(cli, " ");
+        _debug(cli, "this attribute cannot be empty");
+
+        return false;
+    }
+
+    auto path_elems = string_split(masked_varname, '.');
     try {
-        if (varname.find("policy.[") == 0) {
+        if (masked_varname.find("policy.[x]") == 0) {
 
             _debug(cli, "policy values check");
 
@@ -188,4 +217,31 @@ bool CliHelp::value_check(std::string const& varname, std::string const& v, cli_
 
     _debug(cli, "value_check: returning OK");
     return true;
+}
+
+
+std::string CliHelp::help(help_type_t htype, const std::string& section, const std::string& key) {
+
+    std::regex match ("\\[[0-9]+\\]");
+    std::string masked_section  = std::regex_replace (section, match, "[x]");
+
+    auto what = masked_section + "." + key;
+    auto cli_e = find(what);
+
+    if(not cli_e.has_value()) {
+        std::regex remove_last_part("\\.[^.]+$");
+        masked_section = std::regex_replace(section, remove_last_part, ".[x]");
+        cli_e = find(masked_section + "." + key);
+    }
+
+
+    if(cli_e.has_value()) {
+        if (htype == CliHelp::help_type_t::HELP_QMARK) {
+            return cli_e->get().help_quick();
+        } else {
+            return cli_e->get().help();
+        }
+    }
+
+    return std::string();
 }

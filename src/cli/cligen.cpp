@@ -253,7 +253,7 @@ std::vector<cli_command *> cli_generate_set_commands (struct cli_def *cli, std::
 
                 // create type information, and (possibly) some help text
 
-                std::string help = CliHelp::instance().help(CliHelp::help_type_t::HELP_CONTEXT, section, here_n);
+                std::string help = CliHelp::get().help(CliHelp::help_type_t::HELP_CONTEXT, section, here_n);
                 if(help.empty()) {
                     help = string_format("modify '%s'", here_n.c_str());
                 }
@@ -281,6 +281,7 @@ void cli_generate_commands (cli_def *cli, std::string const &this_section, cli_c
     std::string help_edit = string_format("edit %s sub-items", this_section.c_str());
     std::string help_add = "add elements";
     std::string help_remove = "remove elements";
+    std::string help_move = "move elements in the list";
 
 
     auto &cfg_this_section = CfgFactory::cfg_root().lookup(this_section.c_str());
@@ -424,26 +425,26 @@ void cli_generate_commands (cli_def *cli, std::string const &this_section, cli_c
                     auto cb_move = templated ? std::get<1>(template_cb).cmd_move() : std::get<1>(section_cb).cmd_move();
                     if(! move) {
                         move = cli_register_command(cli, cli_parent, "move",
-                                                    nullptr, PRIVILEGE_PRIVILEGED, this_mode, help_add.c_str());
+                                                    nullptr, PRIVILEGE_PRIVILEGED, this_mode, help_move.c_str());
                         std::get<1>(this_callback_entry).cli_move(move);
                     }
 
                     for (int i = 0; i < len; i++) {
                         auto move_x = cli_register_command(cli, move, string_format("[%d]", i).c_str(),
-                                                           nullptr, PRIVILEGE_PRIVILEGED, this_mode, help_add.c_str());
+                                                           nullptr, PRIVILEGE_PRIVILEGED, this_mode, help_move.c_str());
 
                         auto move_x_before = cli_register_command(cli, move_x, "before",
-                                                                  nullptr, PRIVILEGE_PRIVILEGED, this_mode, help_add.c_str());
+                                                                  nullptr, PRIVILEGE_PRIVILEGED, this_mode, help_move.c_str());
                         auto move_x_after = cli_register_command(cli, move_x, "after",
-                                                                  nullptr, PRIVILEGE_PRIVILEGED, this_mode, help_add.c_str());
+                                                                  nullptr, PRIVILEGE_PRIVILEGED, this_mode, help_move.c_str());
 
                         for (int j = 0; j < len; j++) {
                             if( i == j) {
                                 continue;
                             }
 
-                            cli_register_command(cli, move_x_before, string_format("[%d]", j).c_str(), cb_move, PRIVILEGE_PRIVILEGED, this_mode, help_add.c_str());
-                            cli_register_command(cli, move_x_after, string_format("[%d]", j).c_str(), cb_move, PRIVILEGE_PRIVILEGED, this_mode, help_add.c_str());
+                            cli_register_command(cli, move_x_before, string_format("[%d]", j).c_str(), cb_move, PRIVILEGE_PRIVILEGED, this_mode, help_move.c_str());
+                            cli_register_command(cli, move_x_after, string_format("[%d]", j).c_str(), cb_move, PRIVILEGE_PRIVILEGED, this_mode, help_move.c_str());
                         }
                     }
                 }

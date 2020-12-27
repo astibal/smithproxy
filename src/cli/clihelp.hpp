@@ -43,25 +43,59 @@
 
 #include <unordered_map>
 #include <string>
+#include <functional>
+
+struct CliElement {
+
+    CliElement() : name_("<unknown>") {};
+    explicit CliElement(std::string const& name) : name_(name) {}
+    std::string name_;
+    std::string const& name() const { return name_; }
+
+    std::string help_;
+    std::string help_quick_ = "";
+
+    CliElement& help(std::string const& s) { help_ = s; return *this; }
+    std::string const& help() const { return help_; }
+
+    CliElement& help_quick(std::string const& s) { help_quick_ = s; return *this; }
+    std::string const& help_quick() const { return help_quick_; }
+
+    bool may_be_empty_ = true;
+    CliElement& may_be_empty(bool s) { may_be_empty_ = s; return *this; }
+    bool may_be_empty() const { return may_be_empty_; }
+
+};
 
 struct CliHelp {
 
     CliHelp(CliHelp const&) = delete;
     CliHelp& operator=(CliHelp const&) = delete;
 
-    using help_db = std::unordered_map<std::string, std::string>;
+    using help_db = std::unordered_map<std::string, CliElement>;
 
-    help_db& qmark_help() { return qmark_help_; }
-    help_db& context_help() { return context_help_; }
+    help_db element_help_;
 
     void init();
 
-    void help_add( std::string k, std::string v ) {
-        context_help_[std::move(k)] = std::move(v);
+    std::optional<std::reference_wrapper<CliElement>> find(std::string const& k) {
+
+        if(element_help_.find(k) != element_help_.end()) {
+            return std::ref(element_help_[k]);
+        }
+
+        return std::nullopt;
     }
 
-    void qmark_add( std::string k, std::string v ) {
-        qmark_help_[std::move(k)] = std::move(v);
+    CliElement& add(std::string const& k, std::string v ) {
+
+        element_help_[k] = CliElement(k);
+        element_help_[k].help_ = v;
+        return element_help_[k];
+    }
+
+    CliElement& help_quick(std::string const& k, std::string v ) {
+        return element_help_[k].help_quick(v);
     }
 
     bool value_check(std::string const& varname, int v, cli_def* cli);
@@ -70,37 +104,14 @@ struct CliHelp {
     bool value_check(std::string const& varname, float v, cli_def* cli);
     bool value_check(std::string const& varname, std::string const& v, cli_def* cli);
 
-    help_db context_help_;
-    help_db qmark_help_;
 
     enum class help_type_t { HELP_CONTEXT=0, HELP_QMARK };
     using help_type_t = help_type_t;
 
-    std::string help(help_type_t htype, const std::string& section, const std::string& key) {
-
-        std::unordered_map<std::string, std::string>& ref = context_help();
-
-        if(htype == CliHelp::help_type_t::HELP_QMARK) {
-            ref = qmark_help();
-        }
-
-        auto i = ref.find(section + "." + key);
-        if(i != ref.end()) {
-            return i->second;
-        } else {
-
-            i = ref.find("default");
-            if(i != ref.end()) {
-                return i->second;
-            } else {
-                ref["default"] = "";
-                return ref["default"];
-            }
-        }
-    }
+    std::string help(help_type_t htype, const std::string& section, const std::string& key);
 
 
-    static CliHelp& instance() {
+    static CliHelp& get() {
         static CliHelp h;
         return h;
     }
