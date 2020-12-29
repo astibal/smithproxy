@@ -333,12 +333,24 @@ void cli_generate_commands (cli_def *cli, std::string const &this_section, cli_c
         std::string template_key = section_template;
         if(CliState::get().has_callback(template_key)) {
             templated = true;
+
+            // it is possible object is already in callback db (set up by previous cmd generation),
+            // but we still need to look for .[x] template!
+            _debug(cli, "object %s has callbacks set ", template_key.c_str());
+
+            if (CliState::get().has_callback(this_section + ".[x]")) {
+                _debug(cli, "object %s has callbacks set, but prefer .[x] template", template_key.c_str());
+                template_key = this_section + ".[x]";
+            }
         }
         else if (CliState::get().has_callback(this_section + ".[x]")) {
+
+            _debug(cli, "object %s has no callbacks set, but .[x] found", template_key.c_str());
             template_key = this_section + ".[x]";
             templated = true;
         }
         else {
+            _debug(cli, "object %s has callbacks set, no template set", template_key.c_str());
             // otherwise there is no template and template_cb will be the same as section_cb
             template_key = section_path;
         }
@@ -364,6 +376,9 @@ void cli_generate_commands (cli_def *cli, std::string const &this_section, cli_c
             auto remove_enabled = templated ? std::get<1>(template_cb).cap_remove() : std::get<1>(section_cb).cap_remove();
             auto add_enabled = templated ? std::get<1>(template_cb).cap_add() : std::get<1>(section_cb).cap_add();
             auto move_enabled = templated ? std::get<1>(template_cb).cap_move() : std::get<1>(section_cb).cap_move();
+
+            _debug(cli, "%s/%s:t=%d: edit: %d, remove: %d, add: %d, move: %d", section_template.c_str(), template_key.c_str(), templated,
+                   edit_enabled, remove_enabled, add_enabled, move_enabled);
 
             if(edit_enabled) {
 

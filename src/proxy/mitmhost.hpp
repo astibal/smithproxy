@@ -152,7 +152,7 @@ public:
     
     void on_starttls() override;
 
-    int matched_policy() { return matched_policy_; }
+    int matched_policy() const { return matched_policy_; }
     void matched_policy(int p) { matched_policy_ = p; }
 
     typedef enum { REPLACETYPE_NONE=0, REPLACETYPE_HTTP=1 } replacetype_t;
