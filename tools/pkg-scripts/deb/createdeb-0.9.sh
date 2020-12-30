@@ -250,7 +250,7 @@ else
 
         # upload latest checksum
         sha256sum $DEB_FILE > $DEB_FILE_LATEST.sha256
-        upload $DEB_FILE.sha256 $DEB_URL_LATEST.sha256
+        upload $DEB_FILE_LATEST.sha256 $DEB_URL_LATEST.sha256
         upload smithproxy-${VER}/debian/changelog ${DEB_PATH}/smithproxy_0.9-latest.changelog
 
     fi
