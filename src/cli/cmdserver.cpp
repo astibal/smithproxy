@@ -1639,22 +1639,64 @@ int cli_policy_move_cb(struct cli_def *cli, const char *command, char *argv[], i
 
     auto cmd_split = string_split(command, ' ');
 
-    if(cmd_split.size() != 4) {
+
+    int index_1 = -1;
+    int index_2 = -1;
+
+    if(cmd_split.size() == 4) {
+
+        auto x1 = cmd_split[1];
+        auto x2 = cmd_split[3];
+        string_replace_all(x1, "[", "");
+        string_replace_all(x2, "[", "");
+        string_replace_all(x1, "]", "");
+        string_replace_all(x2, "]", "");
+        string_replace_all(x1, " ", "");
+        string_replace_all(x2, " ", "");
+
+        index_1 = safe_val(x1);
+        index_2 = safe_val(x2);
+
+    } else if(cmd_split.size() == 3) {
+
+        auto x1 = cmd_split[1];
+        string_replace_all(x1, "[", "");
+        string_replace_all(x1, "]", "");
+        string_replace_all(x1, " ", "");
+        index_1 = safe_val(x1);
+
+        if (index_1 >= 0) {
+            bool unknown_command = false;
+            // process only ok-parsed items
+
+            if (cmd_split[2] == "up") {
+                index_2 = index_1 - 1;
+            } else if (cmd_split[2] == "top") {
+                index_2 = 0;
+            } else if (cmd_split[2] == "down") {
+                auto elem = CfgFactory::get().db_policy_list.size();
+                if (index_1 + 1 < static_cast<int>(elem))
+                    index_2 = index_1 + 1;
+            } else if (cmd_split[2] == "bottom") {
+
+                auto elem = CfgFactory::get().db_policy_list.size();
+                if (elem > 0)
+                    index_2 = static_cast<int>(elem - 1);
+            } else {
+                unknown_command = true;
+            }
+
+            if (unknown_command) {
+                cli_print(cli, "cannot move policy: '%s' to specified direction", command);
+                return CLI_OK;
+            }
+        }
+    }
+    else {
         cli_print(cli, "cannot parse request: '%s'", command);
         return CLI_OK;
     }
 
-    auto x1 = cmd_split[1];
-    auto x2 = cmd_split[3];
-    string_replace_all(x1, "[", "");
-    string_replace_all(x2, "[", "");
-    string_replace_all(x1, "]", "");
-    string_replace_all(x2, "]", "");
-    string_replace_all(x1, " ", "");
-    string_replace_all(x2, " ", "");
-
-    auto index_1 = safe_val(x1);
-    auto index_2 = safe_val(x2);
 
     if(index_1 < 0 or index_2 < 0) {
         cli_print(cli, "invalid arguments in request: '%s'", command);
@@ -1662,7 +1704,7 @@ int cli_policy_move_cb(struct cli_def *cli, const char *command, char *argv[], i
     }
     _debug(cli, "moving %d %s %d", index_1, cmd_split[2].c_str(), index_2);
 
-    if(cmd_split[2] == "after") {
+    if(cmd_split[2] == "after" or cmd_split[2] == "down" or cmd_split[2] == "bottom") {
         if(CfgFactory::get().move_policy(index_1, index_2, CfgFactory::op_move::OP_MOVE_AFTER)) {
             CfgFactory::get().cleanup_db_policy();
             CfgFactory::get().load_db_policy();
@@ -1675,7 +1717,7 @@ int cli_policy_move_cb(struct cli_def *cli, const char *command, char *argv[], i
             cli_print(cli, "Error moving policies");
         }
     }
-    else if(cmd_split[2] == "before") {
+    else if(cmd_split[2] == "before" or cmd_split[2] == "up" or cmd_split[2] == "top") {
         if(CfgFactory::get().move_policy(index_1, index_2, CfgFactory::op_move::OP_MOVE_BEFORE)) {
             CfgFactory::get().cleanup_db_policy();
             CfgFactory::get().load_db_policy();

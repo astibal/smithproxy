@@ -453,6 +453,16 @@ void cli_generate_commands (cli_def *cli, std::string const &this_section, cli_c
                         auto move_x_after = cli_register_command(cli, move_x, "after",
                                                                   nullptr, PRIVILEGE_PRIVILEGED, this_mode, help_move.c_str());
 
+                        if(i > 0) {
+                            cli_register_command(cli, move_x, "up", cb_move, PRIVILEGE_PRIVILEGED, this_mode, help_move.c_str());
+                            cli_register_command(cli, move_x, "top", cb_move, PRIVILEGE_PRIVILEGED, this_mode, help_move.c_str());
+                        }
+                        if(i < len - 1) {
+                            cli_register_command(cli, move_x, "down", cb_move, PRIVILEGE_PRIVILEGED, this_mode, help_move.c_str());
+                            cli_register_command(cli, move_x, "bottom", cb_move, PRIVILEGE_PRIVILEGED, this_mode, help_move.c_str());
+                        }
+
+
                         for (int j = 0; j < len; j++) {
                             if( i == j) {
                                 continue;
