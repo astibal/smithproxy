@@ -238,6 +238,23 @@ else
     # upload Release_Notes from src root
     upload /tmp/smithproxy_build/smithproxy_src/Release_Notes.md "${UPLOAD_URL}/${VER_MAJ}/Release_Notes.md"
 
+
+    #### LATEST build overwrite - only for snapshots
+    if [ "${GIT_PATCH_DIST}" != "0" ]; then
+
+        DEB_FILE_LATEST=smithproxy_0.9-latest_${ARCH}.deb
+        DEB_URL_LATEST="${DEB_PATH}/$DEB_FILE_LATEST"
+
+        # upload latest (always overwrite, rename it)
+        upload $DEB_FILE $DEB_URL_LATEST
+
+        # upload latest checksum
+        sha256sum $DEB_FILE > $DEB_FILE_LATEST.sha256
+        upload $DEB_FILE.sha256 $DEB_URL_LATEST.sha256
+        upload smithproxy-${VER}/debian/changelog ${DEB_PATH}/smithproxy_0.9-latest.changelog
+
+    fi
+
     echo "Finished."
 fi
 
