@@ -44,7 +44,7 @@
 
 #include <ext/libcli/libcli.h>
 #include <cli/clihelp.hpp>
-
+#include <log/logan.hpp>
 
 
 struct CliCallbacks {
@@ -219,6 +219,8 @@ struct CliState {
     std::string sections(int mode) {
         return mode_map[mode];
     }
+
+    std::string template_callback_key(std::string const& section, cli_def* cli = nullptr);
 
     void callbacks(std::string const& s, callback_entry v, bool set_mode_map = true) {
         callback_map_[s] = v;            //map SETTING => CALLBACKS

@@ -133,6 +133,8 @@ add_executable(smithproxy
         src/cli/clihelp.cpp
         src/cli/cligen.hpp
         src/cli/cligen.cpp
+        src/cli/clistate.hpp
+        src/cli/clistate.cpp
         src/service/core/service.cpp
         src/service/core/service.hpp
         src/cli/diag/diag_cmds.hpp
