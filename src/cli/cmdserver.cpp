@@ -2287,8 +2287,8 @@ void client_thread(int client_socket) {
 
     register_callback("starttls_signatures.[x]", MODE_EDIT_STARTTLS_SIGNATURES)
                     .cmd_set(cli_generic_set_cb)
-                    .cap_add(true).cmd_add(cli_generic_add_cb)
-                    .cap_remove(true).cmd_remove(cli_generic_remove_cb)
+                    // .cap_add(true).cmd_add(cli_generic_add_cb)
+                    // .cap_remove(true).cmd_remove(cli_generic_remove_cb)
                     .cap_edit(true).cmd_edit(cli_conf_edit_starttls_signatures);
 
     register_callback("detection_signatures", MODE_EDIT_DETECTION_SIGNATURES)
@@ -2297,8 +2297,8 @@ void client_thread(int client_socket) {
 
     register_callback("detection_signatures.[x]", MODE_EDIT_DETECTION_SIGNATURES)
                     .cmd_set(cli_generic_set_cb)
-                    .cap_add(true).cmd_add(cli_generic_add_cb)
-                    .cap_remove(true).cmd_remove(cli_generic_remove_cb)
+                    // .cap_add(true).cmd_add(cli_generic_add_cb)
+                    // .cap_remove(true).cmd_remove(cli_generic_remove_cb)
                     .cap_edit(true).cmd_edit(cli_conf_edit_detection_signatures);
 
 
