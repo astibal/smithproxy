@@ -59,14 +59,45 @@ void CliHelp::init() {
             .help_quick("<bool>: set to 'true' to disable socks acceptor (default: false)");
 
     add("settings.certs_path", "directory for TLS-resigning CA certificate and key")
-            .help_quick("<string>: (default: /etc/smithproxy/certs/default)");
+            .help_quick("<string>: (default: /etc/smithproxy/certs/default)")
+            .may_be_empty(false)
+            .value_filter(CliElement::VALUE_DIR);
 
     add("settings.certs_ctlog", "file containing certificate transparency log list")
-            .help_quick("<string>: file with certificate transparency keys (default: ct_log_list.cnf)");
+            .help_quick("<string>: file with certificate transparency keys (default: ct_log_list.cnf)")
+            .value_filter(CliElement::VALUE_FILE);
 
-    add("settings.certs_ca_key_password", "TLS-resigning CA private key protection password");
-    add("settings.ca_bundle_path", "trusted CA store path (to verify server-side connections)");
-    add("settings.plaintext_port", "base divert port for non-SSL TCP traffic");
+    add("settings.certs_ca_key_password", "TLS-resigning CA private key protection password")
+            .help_quick("<string>: enter string value");
+
+    add("settings.ca_bundle_path", "trusted CA store path (to verify server-side connections)")
+            .help_quick("<string>: enter valid path")
+            .may_be_empty(false)
+            .value_filter(CliElement::VALUE_DIR);
+
+
+
+    auto port_check = [](std::string const& v) -> CliElement::value_filter_retval {
+
+        auto [ may_val, descr ] = CliElement::VALUE_UINT_NZ(v);
+        auto err = "port value must be a number in range <1024,65535>";
+
+        if(may_val.has_value()) {
+            int port_value = std::any_cast<int>(may_val);
+
+            if(port_value < 1024 or port_value > 65535)
+                return std::make_pair(std::any(), err);
+            else
+                return { may_val, "" };
+        }
+
+        return { may_val, err };
+    };
+    add("settings.plaintext_port", "base divert port for non-SSL TCP traffic")
+            .help_quick("<string>: string value of port number")
+            .may_be_empty(false)
+            .value_filter(port_check);
+
     add("settings.plaintext_workers", "non-SSL TCP traffic worker thread count");
     add("settings.ssl_port", "base divert port for SSL TCP traffic");
     add("settings.ssl_workers", "SSL TCP traffic worker thread count");
@@ -105,9 +136,9 @@ void CliHelp::init() {
 
 
 
-    help_quick("settings.certs_ca_key_password", "<string>");
-    help_quick("settings.ca_bundle_path", "path to ca bundle for outgoing connections");
-    help_quick("settings.plaintext_port", "tproxy non-tls acceptor port number");
+
+
+
     help_quick("settings.plaintext_workers", "tproxy non-tls acceptor subordinate threads count");
     help_quick("settings.ssl_port", "tproxy tls acceptor port number");
     help_quick("settings.ssl_workers", "tproxy acceptor subordinate threads count");
@@ -179,12 +210,35 @@ bool CliHelp::value_check(std::string const& varname, std::string const& v, cli_
 
     auto cli_e = find(masked_varname);
     bool may_be_empty = true;
-    if(cli_e.has_value()) may_be_empty = cli_e->get().may_be_empty();
 
+    bool value_filter_check = true;
+    std::string value_filter_check_response;
+
+    if(cli_e.has_value()) {
+        may_be_empty = cli_e->get().may_be_empty();
+
+        if(not v.empty()) {
+            auto[ret, msg] = std::invoke(cli_e->get().value_filter(), v);
+            value_filter_check = ret.has_value();
+            value_filter_check_response = msg;
+
+            _debug(cli, " CliElement value filter check : %d : '%s'", ret.has_value(), msg.c_str());
+        }
+    }
+
+
+    // empty value check
     if(v.empty() and not may_be_empty) {
         _debug(cli, " ");
         _debug(cli, "this attribute cannot be empty");
 
+        return false;
+    }
+
+
+    if(not value_filter_check) {
+
+        cli_print(cli, "Value check failed: %s", value_filter_check_response.c_str());
         return false;
     }
 
