@@ -329,8 +329,18 @@ inline std::shared_ptr<T> CfgFactory::section_element(std::string const& section
 
 template <class T>
 bool load_if_exists(libconfig::Setting const& s, const char* key, T& valref) {
-    if(s.exists(key)) {
-        s.lookupValue(key, valref);
+
+    std::string str_key(key);
+
+    if(not str_key.empty() and s.exists(str_key)) {
+
+        T tmp = s[str_key.c_str()];
+
+        // Changed from this:
+        // s.lookupValue(key, valref);
+        // lookup value doesn't seem to work with empty strings ... :/
+
+        valref = tmp;
 
         return true;
     }
