@@ -1794,8 +1794,21 @@ int cli_generic_add_cb(struct cli_def *cli, const char *command, char *argv[], i
             // load callbacks, must prefer templated
             auto& callback_entry = templated ? CliState::get().callbacks(section + ".[x]") : CliState::get().callbacks(section);
 
-            cli_register_command(cli, std::get<1>(callback_entry).cli_edit(), args[0].c_str(),
-                                 std::get<1>(callback_entry).cmd_edit(), PRIVILEGE_PRIVILEGED, cli->mode, " edit new entry");
+            if(std::get<1>(callback_entry).cap_edit()) {
+
+                cli_register_command(cli, std::get<1>(callback_entry).cli_edit(), args[0].c_str(),
+                                     std::get<1>(callback_entry).cmd_edit(), PRIVILEGE_PRIVILEGED, cli->mode,
+                                     " edit new entry");
+            }
+
+            if(std::get<1>(callback_entry).cap_move()) {
+                auto cli_move = std::get<1>(callback_entry).cli_move();
+                if(cli_move) {
+                    if(section == "policy")
+                        cli_generate_move_commands(cli, cli->mode, cli_move, std::get<1>(callback_entry).cmd_move(), CfgFactory::get().db_policy_list.size()-1, CfgFactory::get().db_policy_list.size());
+                }
+            }
+
             CliState::get().config_changed_flag = true;
             apply_hostname(cli);
         };
