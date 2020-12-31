@@ -840,7 +840,8 @@ int CfgFactory::load_db_policy () {
                         prf->usage_add(std::weak_ptr(rule));
                         _dia("cfgapi_load_policy[#%d]: detect profile %s", i, name_detection.c_str());
                         rule->profile_detection = std::shared_ptr<ProfileDetection>(prf);
-                    } else {
+                    }
+                    else if(not name_detection.empty()) {
                         _err("cfgapi_load_policy[#%d]: detect profile %s cannot be loaded", i, name_detection.c_str());
                         error = true;
                     }
@@ -852,7 +853,8 @@ int CfgFactory::load_db_policy () {
                         prf->usage_add(std::weak_ptr(rule));
                         _dia("cfgapi_load_policy[#%d]: content profile %s", i, name_content.c_str());
                         rule->profile_content = prf;
-                    } else {
+                    }
+                    else if(not name_content.empty()) {
                         _err("cfgapi_load_policy[#%d]: content profile %s cannot be loaded", i, name_content.c_str());
                         error = true;
                     }
@@ -863,7 +865,8 @@ int CfgFactory::load_db_policy () {
                         tls->usage_add(std::weak_ptr(rule));
                         _dia("cfgapi_load_policy[#%d]: tls profile %s", i, name_tls.c_str());
                         rule->profile_tls= std::shared_ptr<ProfileTls>(tls);
-                    } else {
+                    }
+                    else if(not name_tls.empty()){
                         _err("cfgapi_load_policy[#%d]: tls profile %s cannot be loaded", i, name_tls.c_str());
                         error = true;
                     }
@@ -874,7 +877,8 @@ int CfgFactory::load_db_policy () {
                         auth->usage_add(std::weak_ptr(rule));
                         _dia("cfgapi_load_policy[#%d]: auth profile %s", i, name_auth.c_str());
                         rule->profile_auth= auth;
-                    } else {
+                    }
+                    else if(not name_auth.empty()) {
                         _err("cfgapi_load_policy[#%d]: auth profile %s cannot be loaded", i, name_auth.c_str());
                         error = true;
                     }
@@ -885,7 +889,8 @@ int CfgFactory::load_db_policy () {
                         dns->usage_add(std::weak_ptr(rule));
                         _dia("cfgapi_load_policy[#%d]: DNS alg profile %s", i, name_alg_dns.c_str());
                         rule->profile_alg_dns = dns;
-                    } else {
+                    }
+                    else if(not name_alg_dns.empty()) {
                         _err("cfgapi_load_policy[#%d]: DNS alg %s cannot be loaded", i, name_alg_dns.c_str());
                         error = true;
                     }
@@ -897,7 +902,8 @@ int CfgFactory::load_db_policy () {
                         scr->usage_add(std::weak_ptr(rule));
                         _dia("cfgapi_load_policy[#%d]: script profile %s", i, name_script.c_str());
                         rule->profile_script = scr;
-                    } else {
+                    }
+                    else if(not name_script.empty()){
                         _err("cfgapi_load_policy[#%d]: script profile %s cannot be loaded", i, name_script.c_str());
                         error = true;
                     }
@@ -2713,6 +2719,12 @@ bool CfgFactory::new_policy (Setting &ex, const std::string &name) const {
         newpol.add("dport", Setting::TypeArray);
         newpol.add("action", Setting::TypeString) = "accept";
         newpol.add("nat", Setting::TypeString) = "auto";
+
+        newpol.add("tls_profile", Setting::TypeString);
+        newpol.add("detection_profile", Setting::TypeString);
+        newpol.add("content_profile", Setting::TypeString);
+        newpol.add("auth_profile", Setting::TypeString);
+        newpol.add("alg_dns_profile", Setting::TypeString);
     }
     catch(libconfig::SettingNameException const& e) {
         _war("cannot add new section %s: %s", name.c_str(), e.what());
