@@ -275,13 +275,56 @@ std::vector<cli_command *> cli_generate_set_commands (struct cli_def *cli, std::
 }
 
 
+
+void cli_generate_move_commands(cli_def* cli, int this_mode, cli_command *move, CliCallbacks::callback callback, int i, int len ) {
+
+    std::string help_move = "move elements in the list";
+
+    auto move_x = cli_register_command(cli, move, string_format("[%d]", i).c_str(),
+                                       nullptr, PRIVILEGE_PRIVILEGED, this_mode,
+                                       help_move.c_str());
+
+    auto move_x_before = cli_register_command(cli, move_x, "before",
+                                              nullptr, PRIVILEGE_PRIVILEGED, this_mode,
+                                              help_move.c_str());
+    auto move_x_after = cli_register_command(cli, move_x, "after",
+                                             nullptr, PRIVILEGE_PRIVILEGED, this_mode,
+                                             help_move.c_str());
+
+    if (i > 0) {
+        cli_register_command(cli, move_x, "up", callback, PRIVILEGE_PRIVILEGED, this_mode,
+                             help_move.c_str());
+        cli_register_command(cli, move_x, "top", callback, PRIVILEGE_PRIVILEGED, this_mode,
+                             help_move.c_str());
+    }
+    if (i < len - 1) {
+        cli_register_command(cli, move_x, "down", callback, PRIVILEGE_PRIVILEGED, this_mode,
+                             help_move.c_str());
+        cli_register_command(cli, move_x, "bottom", callback, PRIVILEGE_PRIVILEGED, this_mode,
+                             help_move.c_str());
+    }
+
+
+    for (int j = 0; j < len; j++) {
+        if (i == j) {
+            continue;
+        }
+
+        cli_register_command(cli, move_x_before, string_format("[%d]", j).c_str(), callback,
+                             PRIVILEGE_PRIVILEGED, this_mode, help_move.c_str());
+        cli_register_command(cli, move_x_after, string_format("[%d]", j).c_str(), callback,
+                             PRIVILEGE_PRIVILEGED, this_mode, help_move.c_str());
+    }
+
+};
+
+
 void cli_generate_commands (cli_def *cli, std::string const &this_section, cli_command *cli_parent) {
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
     std::string help_edit = string_format("edit %s sub-items", this_section.c_str());
     std::string help_add = "add elements";
     std::string help_remove = "remove elements";
-    std::string help_move = "move elements in the list";
 
 
     auto &cfg_this_section = CfgFactory::cfg_root().lookup(this_section.c_str());
@@ -300,7 +343,7 @@ void cli_generate_commands (cli_def *cli, std::string const &this_section, cli_c
     // common remove for all removable sub-items
     cli_command* add = nullptr;
     // common remove for all removable sub-items
-    cli_command* move = nullptr;
+    cli_command* cli_move = nullptr;
 
 
 
@@ -428,49 +471,26 @@ void cli_generate_commands (cli_def *cli, std::string const &this_section, cli_c
 
                     add = cli_register_command(cli, cli_parent, "add",
                                                cb_add, PRIVILEGE_PRIVILEGED, this_mode, help_add.c_str());
-                    std::get<1>(section_cb).cli_add(add);
+                    std::get<1>(template_cb).cli_add(add);
                 }
             }
 
-            if(move_enabled and not std::get<1>(this_callback_entry).cli_move()) {
+            if(move_enabled and not std::get<1>(template_cb).cli_move()) {
 
                 int len = cfg_this_section.getLength();
+                std::string help_move = "move elements in the list";
+
                 if(len > 1) {
 
                     auto cb_move = templated ? std::get<1>(template_cb).cmd_move() : std::get<1>(section_cb).cmd_move();
-                    if(! move) {
-                        move = cli_register_command(cli, cli_parent, "move",
-                                                    nullptr, PRIVILEGE_PRIVILEGED, this_mode, help_move.c_str());
-                        std::get<1>(this_callback_entry).cli_move(move);
+                    if(! cli_move) {
+                        cli_move = cli_register_command(cli, cli_parent, "move",
+                                                        nullptr, PRIVILEGE_PRIVILEGED, this_mode, help_move.c_str());
+                        std::get<1>(template_cb).cli_move(cli_move);
                     }
 
                     for (int i = 0; i < len; i++) {
-                        auto move_x = cli_register_command(cli, move, string_format("[%d]", i).c_str(),
-                                                           nullptr, PRIVILEGE_PRIVILEGED, this_mode, help_move.c_str());
-
-                        auto move_x_before = cli_register_command(cli, move_x, "before",
-                                                                  nullptr, PRIVILEGE_PRIVILEGED, this_mode, help_move.c_str());
-                        auto move_x_after = cli_register_command(cli, move_x, "after",
-                                                                  nullptr, PRIVILEGE_PRIVILEGED, this_mode, help_move.c_str());
-
-                        if(i > 0) {
-                            cli_register_command(cli, move_x, "up", cb_move, PRIVILEGE_PRIVILEGED, this_mode, help_move.c_str());
-                            cli_register_command(cli, move_x, "top", cb_move, PRIVILEGE_PRIVILEGED, this_mode, help_move.c_str());
-                        }
-                        if(i < len - 1) {
-                            cli_register_command(cli, move_x, "down", cb_move, PRIVILEGE_PRIVILEGED, this_mode, help_move.c_str());
-                            cli_register_command(cli, move_x, "bottom", cb_move, PRIVILEGE_PRIVILEGED, this_mode, help_move.c_str());
-                        }
-
-
-                        for (int j = 0; j < len; j++) {
-                            if( i == j) {
-                                continue;
-                            }
-
-                            cli_register_command(cli, move_x_before, string_format("[%d]", j).c_str(), cb_move, PRIVILEGE_PRIVILEGED, this_mode, help_move.c_str());
-                            cli_register_command(cli, move_x_after, string_format("[%d]", j).c_str(), cb_move, PRIVILEGE_PRIVILEGED, this_mode, help_move.c_str());
-                        }
+                        cli_generate_move_commands(cli, this_mode, cli_move, cb_move, i, len);
                     }
                 }
             }
