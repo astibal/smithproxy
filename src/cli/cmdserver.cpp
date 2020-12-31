@@ -1804,9 +1804,31 @@ int cli_generic_add_cb(struct cli_def *cli, const char *command, char *argv[], i
             if(std::get<1>(callback_entry).cap_move()) {
                 auto cli_move = std::get<1>(callback_entry).cli_move();
                 if(cli_move) {
+
+                    // 'add' has empty args when adding to an array, so let's be a bit nasty here
                     if(section == "policy")
-                        cli_generate_move_commands(cli, cli->mode, cli_move, std::get<1>(callback_entry).cmd_move(), CfgFactory::get().db_policy_list.size()-1, CfgFactory::get().db_policy_list.size());
+                        cli_generate_move_commands(cli, cli->mode, cli_move, std::get<1>(callback_entry).cmd_move(),
+                                                   static_cast<int>(CfgFactory::get().db_policy_list.size()-1),
+                                                   CfgFactory::get().db_policy_list.size());
                 }
+            }
+
+            if(std::get<1>(callback_entry).cap_remove()) {
+                auto cli_remove = std::get<1>(callback_entry).cli_remove();
+
+                if(cli_remove) {
+                    cli_register_command(cli, std::get<1>(callback_entry).cli_remove(), args[0].c_str(),
+                                         std::get<1>(callback_entry).cmd_remove(), PRIVILEGE_PRIVILEGED, cli->mode,
+                                         " delete this entry");
+                }
+            }
+
+            if(section == "policy") {
+                // 'add' has empty args when adding to an array, so let's be a bit nasty here
+                cli_generate_set_commands(cli, section + ".[" + string_format("%d]", static_cast<int>(CfgFactory::get().db_policy_list.size()-1)));
+            }
+            else {
+                cli_generate_set_commands(cli, section + "." + args[0]);
             }
 
             CliState::get().config_changed_flag = true;
