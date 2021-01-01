@@ -10,7 +10,7 @@ Ales Stibal `<astib@mag0.net>`
 
 ### Binary packages
 
-* package: [https://www.mag0.net/out/smithproxy](https://www.mag0.net/out/smithproxy) (+changelogs)
+* package: [https://download.smithproxy.org/](https://download.smithproxy.org/) (+changelogs)
 * snap:    [https://snapcraft.io/smithproxy](https://snapcraft.io/smithproxy)
 * docker:  [https://hub.docker.com/r/astibal/smithproxy](https://hub.docker.com/r/astibal/smithproxy)
 
@@ -44,7 +44,6 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
     * `name` - convenience attribute for describing the policy
 * significantly improved CLI edit/add/remove commands - partial rewrite - getting to know libcli
 * added `remove` support for policy section
-* fixed arm64 ubuntu20.04 build
 * CLI `remove` dependency checks -> safe remove
 * added CLI command `remove` - use with caution  ~~, removes also used items, which leads to policy load failure~~
 * added CLI command `add` which ... adds new configuration elements into *running config* (not all elements are covered
@@ -57,7 +56,9 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 * added Release Notes 
 * added sha256 sums to build uploads
 
-### Bug fixes
+### Bug fixes & various
+* new file download server
+* fixed arm64 ubuntu20.04 build
 * fixed crash on exit in case proxy startup fails  
 
 

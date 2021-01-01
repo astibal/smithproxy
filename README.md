@@ -3,14 +3,14 @@
  written in C++17.  
 It uses our C++17 socket proxying library called [*socle*](https://github.com/astibal/socle). 
 
-> Read fresh [**Release Notes**](https://www.mag0.net/out/smithproxy/0.9/Release_Notes.md) to stay tuned!  
+> Read fresh [**Release Notes**](https://download.smithproxy.org/0.9/Release_Notes.md) to stay tuned!  
 > Documentation: [https://smithproxy.readthedocs.org](https://smithproxy.readthedocs.org)  
 > To replay captured traffic, check out the sister project [pplay](https://pypi.org/project/pplay/).
 
 
 ### Availability:
   * **Linux** - can be installed as a service (distro packages, or easily compiled from sources)  
-    * Download Linux .deb (*armv8*, *amd64*) packages from: [https://smithproxy.org/out/0.9/](https://smithproxy.org/out/0.9/)  
+    * Download Linux .deb (*armv8*, *amd64*) packages from: [https://download.smithproxy.org/](https://download.smithproxy.org/)  
     * Download and compile directly from source (known to work: Debian, Ubuntu, Alpine, Fedora, Kali)  
   * **Docker** - available as an image on docker hub  
     * See our docker hub page: [https://hub.docker.com/r/astibal/smithproxy](https://hub.docker.com/r/astibal/smithproxy)  
