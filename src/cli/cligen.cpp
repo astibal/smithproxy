@@ -443,6 +443,7 @@ void cli_generate_commands (cli_def *cli, std::string const &this_section, cli_c
 
 
                 std::get<1>(section_cb).cli_edit(edit_sub);
+                std::get<1>(section_cb).cmd_edit(cb_edit);
             }
 
             if(remove_enabled) {
@@ -462,6 +463,8 @@ void cli_generate_commands (cli_def *cli, std::string const &this_section, cli_c
                                      string_format("remove %s element", sub_section_name.c_str()).c_str());
 
                 std::get<1>(section_cb).cli_remove(remove_sub);
+                std::get<1>(section_cb).cmd_remove(cb_remove);
+
             }
 
             if(add_enabled) {
@@ -472,6 +475,7 @@ void cli_generate_commands (cli_def *cli, std::string const &this_section, cli_c
                     add = cli_register_command(cli, cli_parent, "add",
                                                cb_add, PRIVILEGE_PRIVILEGED, this_mode, help_add.c_str());
                     std::get<1>(template_cb).cli_add(add);
+                    std::get<1>(template_cb).cmd_add(cb_add);
                 }
             }
 
