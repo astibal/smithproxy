@@ -1698,7 +1698,7 @@ int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[]
                 CfgFactory::get().load_db_prof_auth();
             }
         }
-        else if(section == "policy.[x]") {
+        else if(section == "policy") {
 
             std::string unmask = section;
             string_replace_all(unmask, ".[x]", "");
