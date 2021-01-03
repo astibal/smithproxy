@@ -1519,14 +1519,20 @@ int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[]
                     auto &callback_entry = CliState::get().callbacks(section + "." + vec_full_args[0]);
                     // remove edit hooks and re-register for new list
 
-                    // unregister all "edit <this> and siblings"
-                    cli_unregister_single(cli, std::get<1>(callback_entry).cli_edit());
+                    // unregister "edit <this>"
+                    auto cli_edit = std::get<1>(callback_entry).cli_edit();
+                    if(cli_edit)
+                        cli_unregister_single(cli, cli_edit);
+
+
+
+                    // unregister "remove <this>"
+                    auto cli_remove = std::get<1>(callback_entry).cli_remove();
+                    if(cli_remove)
+                        cli_unregister_single(cli, cli_remove);
+
 
                     CliState::get().erase_callback(section + "." + vec_full_args[0]);
-
-                    //cli_generate_commands(cli, section, nullptr);
-                    //cli_generate_commands(cli, section + ".[x]", nullptr);
-
                 }
                 else {
                     cli_print(cli, "templated, but no callbacks for: %s", section.c_str());
