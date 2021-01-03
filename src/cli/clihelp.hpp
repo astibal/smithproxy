@@ -93,12 +93,11 @@ struct CliElement {
     [[ nodiscard ]] bool may_be_empty() const { return may_be_empty_; }
 
     [[ nodiscard ]] std::function<value_filter_fn> const& value_filter() const { return value_filter_; };
-    //CliElement& value_filter(value_filter_fn v) { value_filter_ = std::function(v); return *this; };
     CliElement& value_filter(std::function<value_filter_fn> v) { value_filter_ = v; return *this; };
 
 
 
-    static inline std::function<value_filter_fn> VALUE_ANY = [](std::string const&) -> value_filter_retval { return std::make_pair(true, ""); };
+    static inline std::function<value_filter_fn> VALUE_ANY = [](std::string const& v) -> value_filter_retval { return std::make_pair(v, ""); };
 
     static inline std::function<value_filter_fn> VALUE_UINT = [](std::string const& v) -> value_filter_retval {
         auto nv = safe_val(v);
@@ -128,6 +127,20 @@ struct CliElement {
         if (  struct stat sb{0} ; ::stat(v.c_str(), &sb) >= 0)
             if((sb.st_mode & S_IFMT) == S_IFDIR) { return std::make_pair(v, ""); }
         return std::make_pair(std::any(), "value must be existing directory name");
+    };
+
+    static inline std::function<value_filter_fn> VALUE_BOOL = [](std::string const& v) -> value_filter_retval {
+
+        std::string val = v;
+        std::transform(v.begin(), v.end(), val.begin(), [](unsigned char c){ return std::toupper(c); });
+
+        if( v == "TRUE" or v == "1" or v == "YES" or v == "T")
+            return std::make_pair( true, "");
+        else if ( v == "FALSE" or v == "0" or v == "NO" or v == "F")
+            return std::make_pair( false, "");
+        else
+            return std::make_pair(std::any(), "must be boolean: case insensitive value: [true|yes|1] | [false|no|0]");
+
     };
 
 };
@@ -163,10 +176,10 @@ struct CliHelp {
         return element_help_[k].help_quick(v);
     }
 
-    bool value_check(std::string const& varname, int v, cli_def* cli);
-    bool value_check(std::string const& varname, long long int v, cli_def* cli);
-    bool value_check(std::string const& varname, bool v, cli_def* cli);
-    bool value_check(std::string const& varname, float v, cli_def* cli);
+//    bool value_check(std::string const& varname, int v, cli_def* cli);
+//    bool value_check(std::string const& varname, long long int v, cli_def* cli);
+//    bool value_check(std::string const& varname, bool v, cli_def* cli);
+//    bool value_check(std::string const& varname, float v, cli_def* cli);
     bool value_check(std::string const& varname, std::string const& v, cli_def* cli);
 
 

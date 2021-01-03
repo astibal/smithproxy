@@ -45,18 +45,68 @@
 #include <common/log/logan.hpp>
 #include <cfgapi.hpp>
 
+
+// templated lambdas are supported since C++20 (smithproxy is C++17 project)
+template<int A, int B>
+CliElement::value_filter_retval VALUE_UINT_RANGE(std::string const& v) {
+
+    auto [ may_val, descr ] = CliElement::VALUE_UINT(v);
+    auto err = string_format("value must be a non-negative number in range <%d,%d>", A, B);
+
+    if(may_val.has_value()) {
+        int port_value = std::any_cast<int>(may_val);
+
+        if(port_value < A or port_value > B)
+            return std::make_pair(std::any(), err);
+        else
+            return { may_val, "" };
+    }
+
+    return { may_val, err };
+
+}
+
 void CliHelp::init() {
+
+    auto high_port_check = [](std::string const& v) -> CliElement::value_filter_retval {
+
+        auto [ may_val, descr ] = CliElement::VALUE_UINT_NZ(v);
+        auto err = "port value must be a number in range <1024,65535>";
+
+        if(may_val.has_value()) {
+            int port_value = std::any_cast<int>(may_val);
+
+            if(port_value < 1024 or port_value > 65535)
+                return std::make_pair(std::any(), err);
+            else
+                return { may_val, "" };
+        }
+
+        return { may_val, err };
+    };
+
+
+    auto workercount_check = [](std::string const& v) -> CliElement::value_filter_retval {
+
+        auto [ may_val, descr ] = CliElement::VALUE_UINT(v);
+        auto err = "worker count should be greater then zero and max 4x cpu count";
+
+        if(may_val.has_value()) {
+            int port_value = std::any_cast<int>(may_val);
+
+            if(port_value >=0 and port_value < static_cast<int>(4*std::thread::hardware_concurrency())) {
+                return { may_val, "" };
+            }
+            else
+                return std::make_pair(std::any(), err);
+            }
+
+        return { may_val, err };
+    };
+
     add("default", "")
     .help_quick("enter <value>");
 
-    add("settings.accept_tproxy", "whether to accept incoming connections via TPROXY")
-            .help_quick("<bool>: set to 'true' to disable tproxy acceptor (default: false)");
-
-    add("settings.accept_redirect", "whether to accept incoming connections via REDIRECT")
-            .help_quick("<bool>: set to 'true' to disable redirect acceptor (default: false)");
-
-    add("settings.accept_socks", "whether to accept incoming connections via SOCKS")
-            .help_quick("<bool>: set to 'true' to disable socks acceptor (default: false)");
 
     add("settings.certs_path", "directory for TLS-resigning CA certificate and key")
             .help_quick("<string>: (default: /etc/smithproxy/certs/default)")
@@ -76,46 +126,105 @@ void CliHelp::init() {
             .value_filter(CliElement::VALUE_DIR);
 
 
+    // listening ports
 
-    auto port_check = [](std::string const& v) -> CliElement::value_filter_retval {
-
-        auto [ may_val, descr ] = CliElement::VALUE_UINT_NZ(v);
-        auto err = "port value must be a number in range <1024,65535>";
-
-        if(may_val.has_value()) {
-            int port_value = std::any_cast<int>(may_val);
-
-            if(port_value < 1024 or port_value > 65535)
-                return std::make_pair(std::any(), err);
-            else
-                return { may_val, "" };
-        }
-
-        return { may_val, err };
-    };
     add("settings.plaintext_port", "base divert port for non-SSL TCP traffic")
-            .help_quick("<string>: string value of port number")
+            .help_quick("<number>: a high port number")
             .may_be_empty(false)
-            .value_filter(port_check);
+            .value_filter(high_port_check);
 
-    add("settings.plaintext_workers", "non-SSL TCP traffic worker thread count");
-    add("settings.ssl_port", "base divert port for SSL TCP traffic");
-    add("settings.ssl_workers", "SSL TCP traffic worker thread count");
-    add("settings.ssl_autodetect", "Detect TLS ClientHello on unusual ports");
-    add("settings.ssl_autodetect_harder", "Detect TSL ClientHello - wait a bit longer");
-    add("settings.ssl_ocsp_status_ttl", "hardcoded TTL for OCSP response validity");
-    add("settings.ssl_crl_status_ttl", "hardcoded TTL for downloaded CRL files");
+    add("settings.ssl_port", "base divert port for SSL TCP traffic")
+            .help_quick("<number>: a high port number")
+            .may_be_empty(false)
+            .value_filter(high_port_check);
 
-    add("settings.udp_port", "base divert port for non-DTLS UDP traffic");
-    add("settings.udp_workers", "non-DTLS traffic worker thread count");
+    add("settings.udp_port", "base divert port for non-DTLS UDP traffic")
+            .help_quick("<number>: a high port number")
+            .may_be_empty(false)
+            .value_filter(high_port_check);
 
-    add("settings.dtls_port", "base divert port for DTLS UDP traffic");
-    add("settings.dtls_workers", "DTLS traffic worker thread count");
+    add("settings.dtls_port", "base divert port for DTLS UDP traffic")
+            .help_quick("<number>: a high port number")
+            .may_be_empty(false)
+            .value_filter(high_port_check);
 
-    add("settings.socks_port", "base SOCKS proxy listening port");
-    add("settings.socks_workers", "SOCKS proxy traffic thread count");
+    add("settings.socks_port", "base SOCKS proxy listening port")
+            .help_quick("<number>: a high port number")
+            .may_be_empty(false)
+            .value_filter(high_port_check);
 
-    add("settings.log_level", "file logging verbosity level");
+
+    // worker setup
+
+    add("settings.accept_tproxy", "whether to accept incoming connections via TPROXY")
+            .help_quick("<bool>: set to 'true' to disable tproxy acceptor (default: false)")
+            .may_be_empty(false)
+            .value_filter(CliElement::VALUE_BOOL);
+
+    add("settings.accept_redirect", "whether to accept incoming connections via REDIRECT")
+            .help_quick("<bool>: set to 'true' to disable redirect acceptor (default: false)")
+            .may_be_empty(false)
+            .value_filter(CliElement::VALUE_BOOL);
+
+    add("settings.accept_socks", "whether to accept incoming connections via SOCKS")
+            .help_quick("<bool>: set to 'true' to disable socks acceptor (default: false)")
+            .may_be_empty(false)
+            .value_filter(CliElement::VALUE_BOOL);
+
+    //
+
+
+    add("settings.plaintext_workers", "non-SSL TCP traffic worker thread count")
+            .help_quick("<number> acceptor subordinate worker threads count")
+            .may_be_empty(false)
+            .value_filter(workercount_check);
+
+
+    add("settings.ssl_workers", "SSL TCP traffic worker thread count")
+            .help_quick("<number> acceptor subordinate worker threads count")
+            .may_be_empty(false)
+            .value_filter(workercount_check);
+
+    add("settings.udp_workers", "non-DTLS traffic worker thread count")
+            .help_quick("<number> acceptor subordinate worker threads count")
+            .may_be_empty(false)
+            .value_filter(workercount_check);
+
+
+    add("settings.dtls_workers", "DTLS traffic worker thread count")
+            .help_quick("<number> acceptor subordinate worker threads count")
+            .may_be_empty(false)
+            .value_filter(workercount_check);
+
+    add("settings.socks_workers", "SOCKS proxy traffic thread count")
+            .help_quick("<number> acceptor subordinate worker threads count")
+            .may_be_empty(false)
+            .value_filter(workercount_check);
+
+
+
+
+    add("settings.ssl_autodetect", "Detect TLS ClientHello on unusual ports")
+            .help_quick("<bool> set true to wait a short moment for TLS ClientHello on plaintext ports")
+            .may_be_empty(false)
+            .value_filter(CliElement::VALUE_BOOL);
+
+    add("settings.ssl_autodetect_harder", "Detect TSL ClientHello on unusual ports - wait a bit longer")
+            .help_quick("<bool> set true to wait a bit longer for TLS ClientHello on plaintext ports")
+            .may_be_empty(false)
+            .value_filter(CliElement::VALUE_BOOL);
+
+
+    add("settings.ssl_ocsp_status_ttl", "obsoleted - hardcoded TTL for OCSP response validity");
+
+    add("settings.ssl_crl_status_ttl", "obsoleted - hardcoded TTL for downloaded CRL files");
+
+
+    add("settings.log_level", "default file logging verbosity level")
+            .help_quick("<number> between 0 and 8 to highest verbosity. Debug level is set by topics in CLI")
+            .may_be_empty(false)
+            .value_filter(VALUE_UINT_RANGE<0,8>);
+
     add("settings.log_file", "log file");
     add("settings.log_console", "toggle logging to standard output");
     add("settings.syslog_server", "IP address of syslog server");
@@ -139,15 +248,7 @@ void CliHelp::init() {
 
 
 
-    help_quick("settings.plaintext_workers", "tproxy non-tls acceptor subordinate threads count");
-    help_quick("settings.ssl_port", "tproxy tls acceptor port number");
-    help_quick("settings.ssl_workers", "tproxy acceptor subordinate threads count");
-    help_quick("settings.ssl_autodetect", "try to detect tls in non-tls connection (tiny delay)");
-    help_quick("settings.ssl_autodetect_harder", "try to detect tls in non-tls connection harder");
-    help_quick("settings.ssl_ocsp_status_ttl", "obsoleted");
-    help_quick("settings.ssl_crl_status_ttl", "obsoleted");
-    help_quick("settings.udp_port", "tproxy udp acceptor port number");
-    help_quick("settings.udp_workers", "tproxy udp acceptor subordinate threads count");
+
     help_quick("settings.dtls_port", "nyi - tproxy dtls acceptor port number");
     help_quick("settings.dtls_workers", "nyi - tproxy dtls acceptor subordinate threads count");
     help_quick("settings.socks_port", "socks acceptor port number");
@@ -184,21 +285,6 @@ void CliHelp::init() {
 }
 
 
-bool CliHelp::value_check(std::string const& varname, int v, cli_def* cli) {
-    return true;
-}
-
-bool CliHelp::value_check(std::string const& varname, long long int v, cli_def* cli) {
-    return true;
-}
-
-bool CliHelp::value_check(std::string const& varname, bool v, cli_def* cli) {
-    return true;
-}
-
-bool CliHelp::value_check(std::string const& varname, float v, cli_def* cli) {
-    return true;
-}
 
 bool CliHelp::value_check(std::string const& varname, std::string const& v, cli_def* cli) {
 
@@ -229,8 +315,11 @@ bool CliHelp::value_check(std::string const& varname, std::string const& v, cli_
 
     // empty value check
     if(v.empty() and not may_be_empty) {
-        _debug(cli, " ");
+
         _debug(cli, "this attribute cannot be empty");
+
+        cli_print(cli," ");
+        cli_print(cli, "Value check failed: cannot be set with empty value");
 
         return false;
     }
@@ -238,6 +327,7 @@ bool CliHelp::value_check(std::string const& varname, std::string const& v, cli_
 
     if(not value_filter_check) {
 
+        cli_print(cli," ");
         cli_print(cli, "Value check failed: %s", value_filter_check_response.c_str());
         return false;
     }

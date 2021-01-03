@@ -558,3 +558,19 @@ void string_replace_all(std::string& target, std::string const& what, std::strin
         pos = target.find(what,pos + replacement.size());
     }
 }
+
+void string_cfg_escape(std::string& target) {
+    string_replace_all(target, "'", "_");
+    string_replace_all(target, "\\", "_");
+    string_replace_all(target, "%", "_");
+    string_replace_all(target, ";", "_");
+    string_replace_all(target, ":", "_");
+    string_replace_all(target, ",", "_");
+    string_replace_all(target, "\"", "_");
+    string_replace_all(target, "{", "_");
+    string_replace_all(target, "}", "_");
+    string_replace_all(target, "[", "_");
+    string_replace_all(target, "]", "_");
+    string_replace_all(target, "(", "_");
+    string_replace_all(target, ")", "_");
+}

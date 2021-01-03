@@ -899,109 +899,233 @@ int cli_show_config_full (struct cli_def *cli, const char *command, char **argv,
 
 
 
+std::optional<int> make_int(std::string const& v)  {
+    if(v.empty())
+        return 0;
+
+    return std::stoi(v);
+};
+
+std::optional<long long int> make_lli(std::string const& v) {
+
+    if(v.empty())
+        return 0L;
+
+    return std::stoll(v);
+};
+
+
+std::optional<bool> make_bool(std::string const& v) {
+
+    if(v.empty())
+        return true;
+
+    auto uv = string_tolower(v);
+    if (uv == "true" or uv == "1" or uv == "yes" or uv == "y" or uv == "t") {
+            return true;
+    } else if (uv == "false" or uv == "0" or uv == "no" or uv == "n" or uv == "f") {
+            return false;
+    } else {
+        return std::nullopt;
+    }
+}
+
+std::optional<float> make_float(std::string const& v) {
+
+    if(v.empty())
+        return 0.0f;
+
+    return std::stof(v);
+}
+
+bool write_value(Setting& setting, std::optional<std::string> string_value, cli_def* cli, Setting::Type add_as_type = Setting::TypeNone) {
+
+    bool ret_verdict = false;
+    std::string original_value;
+
+    if(string_value.has_value()) {
+        original_value = string_value.value();
+    }
+
+
+    auto setting_type = setting.getType();
+    if(add_as_type != Setting::TypeNone)
+        setting_type = add_as_type;
+
+    std::any converted_value;
+    switch(setting_type) {
+        case Setting::TypeInt: {
+            auto a = make_int(original_value);
+            if (a.has_value()) converted_value = a.value();
+        }
+        break;
+
+        case Setting::TypeInt64: {
+            auto a = make_lli(original_value);
+            if(a.has_value()) converted_value = a.value();
+        }
+        break;
+
+        case Setting::TypeBoolean: {
+            auto a = make_bool(original_value);
+            if (a.has_value()) converted_value = a.value();
+        }
+        break;
+
+        case Setting::TypeFloat: {
+            auto a = make_float(original_value);
+            if(a.has_value()) converted_value = a.value();
+        }
+        break;
+        case Setting::TypeString:
+            converted_value = original_value;
+            break;
+
+        case Setting::TypeNone:
+            throw std::logic_error("write value cannot be used for TypeNone");
+            break;
+        case Setting::TypeGroup:
+            throw std::logic_error("write value cannot be used for TypeGroup");
+            break;
+        case Setting::TypeArray:
+            throw std::logic_error("write value cannot be used for TypeArray");
+            break;
+        case Setting::TypeList:
+            throw std::logic_error("write value cannot be used for TypeList");
+            break;
+    }
+
+    if (converted_value.has_value()) {
+        //_debug(cli, "DEBUG: attempting to write %s: (TypeInt)%d ", varname.c_str(), i.value());
+
+        auto verdict = CliHelp::get().value_check(setting.getPath(), original_value, cli);
+        if (verdict) {
+            _debug(cli, "filter ok");
+
+            switch(setting_type) {
+                case Setting::TypeInt: {
+                    auto value = std::any_cast<int>(converted_value);
+                    if(add_as_type != Setting::TypeNone) {
+                        setting.add(Setting::TypeInt) = value;
+                    } else {
+                        setting = value;
+                    }
+
+                    ret_verdict = true;
+                }
+                break;
+
+                case Setting::TypeInt64: {
+                    auto value = std::any_cast<long long int>(converted_value);
+                    if(add_as_type != Setting::TypeNone) {
+                        setting.add(Setting::TypeInt64) = value;
+                    } else {
+                        setting = value;
+                    }
+
+                    ret_verdict = true;
+                }
+                break;
+
+                case Setting::TypeBoolean: {
+                    auto value = std::any_cast<bool>(converted_value);
+                    if(add_as_type != Setting::TypeNone) {
+                        setting.add(Setting::TypeBoolean) = value;
+                    } else {
+                        setting = value;
+                    }
+
+                    ret_verdict = true;
+                }
+                break;
+
+                case Setting::TypeFloat: {
+                    auto value = std::any_cast<float>(converted_value);
+                    if(add_as_type != Setting::TypeNone) {
+                        setting.add(Setting::TypeFloat) = value;
+                    } else {
+                        setting = value;
+                    }
+
+                    ret_verdict = true;
+                }
+                break;
+
+                case Setting::TypeString: {
+                    auto value = std::any_cast<std::string>(converted_value);
+                    if(add_as_type != Setting::TypeNone) {
+                        setting.add(Setting::TypeString) = value;
+                    } else {
+                        setting = value;
+                    }
+
+                    ret_verdict = true;
+                }
+                break;
+
+                case Setting::TypeNone:
+                    throw std::logic_error("write value cannot be used for TypeNone");
+                    break;
+                case Setting::TypeGroup:
+                    throw std::logic_error("write value cannot be used for TypeGroup");
+                    break;
+                case Setting::TypeArray:
+                    throw std::logic_error("write value cannot be used for TypeArray");
+                    break;
+                case Setting::TypeList:
+                    throw std::logic_error("write value cannot be used for TypeList");
+                    break;
+            }
+
+
+        } else {
+            _debug(cli, "filter rejected the value");
+            ret_verdict = false;
+        }
+    } else {
+        _debug(cli, "unexpected value");
+    }
+
+    return ret_verdict;
+}
+
 
 bool cfg_write_value(Setting& parent, bool create, std::string& varname, const std::vector<std::string> &values, cli_def* cli) {
 
     auto log = logan::create("config");
 
-    bool verdict = true;
+    bool ret_verdict = true;
     bool no_args_erases_array = true;
+
+
+
 
     if( parent.exists(varname.c_str()) ) {
 
         _not("config item exists %s", varname.c_str());
 
-        Setting& s = parent[varname.c_str()];
-        auto t = s.getType();
+        Setting& setting = parent[varname.c_str()];
+        auto setting_type = setting.getType();
 
         std::string lvalue;
 
+        _debug(cli, "DEBUG: attempting to write %s", varname.c_str());
+
         try {
-            switch (t) {
+            switch (setting_type) {
             case Setting::TypeInt:
-
-                if(not values.empty()){
-                    int i = std::stoi(values[0]);
-                    _debug(cli, "DEBUG: attempting to write %s: (TypeInt)%d ", varname.c_str(), i);
-
-                    verdict = CliHelp::get().value_check(s.getPath(), i, cli);
-                    if(verdict)
-                        s = i;
-                }
-                else {
-                    verdict = false;
-                }
-
-                break;
-
             case Setting::TypeInt64:
-
-                if(not values.empty()){
-                    long long int lli = std::stoll(values[0]);
-                    _debug(cli, "DEBUG: attempting to write %s: (TypeInt64)%lld ", varname.c_str(), lli);
-
-                    verdict = CliHelp::get().value_check(s.getPath(), lli, cli);
-                    if(verdict)
-                        s = lli;
-                } else {
-                    verdict = false;
-                }
-
-                break;
-
             case Setting::TypeBoolean:
-
-                if(not values.empty()) {
-                    lvalue = string_tolower(values[0]);
-                    _debug(cli, "DEBUG: attempting to write %s: (TypeBool)%s ", varname.c_str(), lvalue.c_str());
-
-                    if (lvalue == "true" || lvalue == "1") {
-
-                        verdict = CliHelp::get().value_check(s.getPath(), true, cli);
-                        if (verdict)
-                            s = true;
-                    } else if (lvalue == "false" || lvalue == "0") {
-                        verdict = CliHelp::get().value_check(s.getPath(), false, cli);
-                        if (verdict)
-                            s = false;
-                    }
-                }
-                else {
-                    verdict = false;
-                }
-
-                break;
-
             case Setting::TypeFloat:
-
-                if(not values.empty() ){
-                    float f = std::stof(values[0]);
-                    _debug(cli, "DEBUG: attempting to write %s: (TypeFloat)%f ", varname.c_str(), f);
-
-                    verdict = CliHelp::get().value_check(s.getPath(), f, cli);
-                    if(verdict)
-                        s = f;
-                }
-                else {
-                    verdict = false;
-                }
-
-                break;
-
             case Setting::TypeString:
 
-                {
-                    std::string str_to_write;
+                if(not values.empty()) {
 
-                    if (not values.empty())
-                        str_to_write = values[0];
-
-                    _debug(cli, "DEBUG: attempting to write %s: (TypeString)%s ", varname.c_str(),
-                           str_to_write.c_str());
-
-                    verdict = CliHelp::get().value_check(s.getPath(), str_to_write, cli);
-                    if (verdict)
-                        s = str_to_write;
+                    // write only first value into scalar
+                    ret_verdict = write_value(setting, values[0], cli);
+                }
+                else {
+                    ret_verdict = write_value(setting, std::nullopt, cli);
                 }
                 break;
 
@@ -1009,8 +1133,8 @@ bool cfg_write_value(Setting& parent, bool create, std::string& varname, const s
             case Setting::TypeArray:
                 {
                     auto first_elem_type = Setting::TypeString;
-                    if ( s.getLength() > 0 ) {
-                        first_elem_type = s[0].getType();
+                    if ( setting.getLength() > 0 ) {
+                        first_elem_type = setting[0].getType();
                     }
 
                     std::vector<std::string> consolidated_values;
@@ -1022,65 +1146,39 @@ bool cfg_write_value(Setting& parent, bool create, std::string& varname, const s
                     }
 
                     for(auto const& i: consolidated_values) {
-                        _debug(cli, "%s values: %s", s.getPath().c_str(), i.c_str());
+                        _debug(cli, "%s values: %s", setting.getPath().c_str(), i.c_str());
                     }
 
 
                     // check values
                     for(auto const& i: consolidated_values) {
 
-                        if(first_elem_type == Setting::TypeString) {
-                            verdict = CliHelp::get().value_check(s.getPath(), i, cli);
-                            _debug(cli, "checking string value: %s => %d", i.c_str(), verdict);
+                        auto verdict = CliHelp::get().value_check(setting.getPath(), i, cli);
 
-                        }
-                        else if(first_elem_type == Setting::TypeInt) {
-                            verdict = CliHelp::get().value_check(s.getPath(), std::stoi(i), cli);
-                            _debug(cli, "checking int value: %s => %d", i.c_str(), verdict);
-
-                        }
-                        else if(first_elem_type == Setting::TypeFloat) {
-                            verdict = CliHelp::get().value_check(s.getPath(), std::stof(i), cli);
-                            _debug(cli, "checking float value: %s => %d", i.c_str(), verdict);
+                        if(verdict) {
+                            _debug(cli, "checking value OK: %s => %s", i.c_str(), i.c_str());
                         }
                         else {
-                            throw(std::invalid_argument("unknown array type"));
-                        }
+                            _debug(cli, "checking value failed: %s => %s", i.c_str(), i.c_str());
 
-                        if(! verdict)
+                            ret_verdict = false;
                             break;
+                        }
                     }
 
-                    if(verdict) {
+                    if(ret_verdict) {
                         if (not consolidated_values.empty() or no_args_erases_array) {
 
                             // ugly (but only) way to remove
-                            for (int x = s.getLength() - 1; x >= 0; x--) {
+                            for (int x = setting.getLength() - 1; x >= 0; x--) {
                                 _debug(cli, "removing index %d", x);
-                                s.remove(x);
+                                setting.remove(x);
                             }
 
-                            for (auto const &i: consolidated_values) {
-
-                                if (first_elem_type == Setting::TypeString) {
-
-                                    _debug(cli, "adding string value: %s", i.c_str());
-                                    s.add(Setting::TypeString) = i.c_str();
-                                }
-                                else if (first_elem_type == Setting::TypeInt) {
-
-                                    _debug(cli, "adding int value: %s", i.c_str());
-                                    s.add(Setting::TypeInt) = std::stoi(i);
-                                }
-                                else if (first_elem_type == Setting::TypeFloat) {
-
-                                    _debug(cli, "adding float value: %s", i.c_str());
-                                    s.add(Setting::TypeFloat) = std::stof(i);
-                                }
-                                else {
-                                    throw (std::invalid_argument("unknown array type"));
-                                }
+                            for(auto const& cons_val: consolidated_values) {
+                                ret_verdict = write_value(setting, cons_val, cli, first_elem_type);
                             }
+
                         } else {
                             throw (std::invalid_argument("no valid arguments"));
                         }
@@ -1093,27 +1191,31 @@ bool cfg_write_value(Setting& parent, bool create, std::string& varname, const s
                     ;
             }
         }
+        catch(std::bad_any_cast const& e) {
+            cli_print(cli, "invalid value conversion!");
+            ret_verdict = false;
+        }
         catch(std::invalid_argument const& e) {
             cli_print(cli, "invalid argument!");
-            verdict = false;
+            ret_verdict = false;
         }
         catch(std::exception const& e) {
             cli_print(cli , "error writing config variable: %s", e.what());
             _err("error writing config variable: %s", e.what());
-            verdict = false;
+            ret_verdict = false;
         }
     }
     else if(create) {
         _err("nyi: error writing creating a new config variable: %s", varname.c_str());
-        verdict = false;
+        ret_verdict = false;
     } else {
         _err("cli error: no such attribute name: %s", varname.c_str());
 
         _debug(cli, "error: no such attribute name: %s", varname.c_str());
-        verdict = false;
+        ret_verdict = false;
     }
 
-    return verdict;
+    return ret_verdict;
 }
 
 bool apply_setting(std::string const& section, std::string const& varname, struct cli_def *cli) {
@@ -1271,14 +1373,21 @@ int cli_uni_set_cb(std::string const& confpath, struct cli_def *cli, const char 
         bool args_qmark = false;
         if (argc > 0) {
             for (int i = 0; i < argc; i++) {
-                args.emplace_back(std::string(argv[i]));
+                auto escaped = std::string(argv[i]);
+                string_cfg_escape(escaped);
+
+                args.emplace_back(escaped);
             }
             args_qmark = (args[0] == "?");
 
         } else {
             if(cmd.size() > 2) {
                 for (unsigned int i = 2; i < cmd.size(); i++) {
-                    args.emplace_back(std::string(cmd[i]));
+
+                    auto escaped = std::string(cmd[i]);
+                    string_cfg_escape(escaped);
+
+                    args.emplace_back(escaped);
                 }
 
                 args_qmark = (args[0] == "?");
@@ -1297,7 +1406,10 @@ int cli_uni_set_cb(std::string const& confpath, struct cli_def *cli, const char 
                     }
                 }
                 args.clear();
-                args.emplace_back(ss_name.str());
+
+                auto name_str = ss_name.str();
+                string_cfg_escape(name_str);
+                args.emplace_back(name_str);
             }
 
             std::scoped_lock<std::recursive_mutex> ll_(CfgFactory::lock());
@@ -1307,7 +1419,7 @@ int cli_uni_set_cb(std::string const& confpath, struct cli_def *cli, const char 
 
                 if ( apply_setting( conf.getPath(), varname , cli )) {
                     cli_print(cli, " ");
-                    cli_print(cli, "Running configuraion changed");
+                    cli_print(cli, "Running configuration changed");
                 } else {
                     // FIXME
                     cli_print(cli, " ");
@@ -1326,7 +1438,7 @@ int cli_uni_set_cb(std::string const& confpath, struct cli_def *cli, const char 
                     cli_print(cli, "Error setting value");
                 } else {
                     cli_print(cli, " ");
-                    cli_print(cli, "Cannot set empty value");
+                    cli_print(cli, "Error setting empty value");
                 }
             }
 

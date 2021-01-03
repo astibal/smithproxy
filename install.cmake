@@ -138,7 +138,7 @@ if(UNIX)
 
     # message: edit defaults and add to init.d to start at boot!
     install(CODE "MESSAGE(\" +----------------------------------------------------------------------------------------+\")")
-    install(CODE "MESSAGE(\" | Core installation complete!                                                                 |\")")
+    install(CODE "MESSAGE(\" | Core installation complete!                                                            |\")")
     install(CODE "MESSAGE(\" +----------------------------------------------------------------------------------------|\")")
     install(CODE "MESSAGE(\" |   Hints for minimal setup:                                                             |\")")
     install(CODE "MESSAGE(\" |     1:Edit /etc/smithproxy/smithproxy.startup.cfg                                      |\")")
