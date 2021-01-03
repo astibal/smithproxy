@@ -1335,9 +1335,16 @@ bool apply_setting(std::string const& section, std::string const& varname, struc
         cli_print(cli, "!!! Config was not applied");
         cli_print(cli, " -  saving and reload is necessary to apply your settings.");
     } else {
+
+        bool status_change = not CliState::get().config_changed_flag;
+
         CliState::get().config_changed_flag = true;
-        apply_hostname(cli);
-        cli_print(cli, "running config applied (not saved to file).");
+
+        if(status_change) {
+            apply_hostname(cli);
+            cli_print(cli, " ");
+            cli_print(cli, "Running config applied (not saved to file).");
+        }
     }
 
     return ret;
@@ -1419,7 +1426,7 @@ int cli_uni_set_cb(std::string const& confpath, struct cli_def *cli, const char 
 
                 if ( apply_setting( conf.getPath(), varname , cli )) {
                     cli_print(cli, " ");
-                    cli_print(cli, "Running configuration changed");
+                    // cli_print(cli, "Value changed");
                 } else {
                     // FIXME
                     cli_print(cli, " ");
@@ -1541,8 +1548,15 @@ int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[]
                 cli_print(cli, "cannot remove: %s - only templated entries can be removed", section.c_str());
             }
 
+            bool status_change = not CliState::get().config_changed_flag;
             CliState::get().config_changed_flag = true;
-            apply_hostname(cli);
+
+            if(status_change) {
+                apply_hostname(cli);
+                cli_print(cli, " ");
+                cli_print(cli, "Running config applied (not saved to file).");
+            }
+
         };
 
 
@@ -1822,7 +1836,7 @@ int cli_policy_move_cb(struct cli_def *cli, const char *command, char *argv[], i
             CfgFactory::get().load_db_policy();
 
             cli_print(cli, " ");
-            cli_print(cli, "Policy moved.");
+            // cli_print(cli, "Policy moved.");
 
         } else {
             cli_print(cli, " ");
@@ -1835,7 +1849,7 @@ int cli_policy_move_cb(struct cli_def *cli, const char *command, char *argv[], i
             CfgFactory::get().load_db_policy();
 
             cli_print(cli, " ");
-            cli_print(cli, "Policy moved.");
+            // cli_print(cli, "Policy moved.");
         } else {
             cli_print(cli, " ");
             cli_print(cli, "Error moving policies");
@@ -1942,9 +1956,6 @@ int cli_generic_add_cb(struct cli_def *cli, const char *command, char *argv[], i
             else {
                 cli_generate_set_commands(cli, section + "." + args[0]);
             }
-
-            CliState::get().config_changed_flag = true;
-            apply_hostname(cli);
         };
 
         bool created_internal = false;
@@ -2027,6 +2038,16 @@ int cli_generic_add_cb(struct cli_def *cli, const char *command, char *argv[], i
         if(created_internal) {
             cli_print(cli, " ");
             cli_print(cli, "New %s '%s' has been created.", section.c_str(), args[0].c_str());
+
+            bool status_change = not CliState::get().config_changed_flag;
+
+            CliState::get().config_changed_flag = true;
+
+            if(status_change) {
+                apply_hostname(cli);
+                cli_print(cli, " ");
+                cli_print(cli, "Running config applied (not saved to file).");
+            }
         }
     }
     return CLI_OK;
