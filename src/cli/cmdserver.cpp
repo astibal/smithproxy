@@ -90,7 +90,7 @@ void apply_hostname(cli_def* cli) {
     char hostname[64]; memset(hostname,0,64);
     gethostname(hostname,63);
 
-    cli_set_hostname(cli, string_format("smithproxy(%s)%s ", hostname, CliState::get().config_changed_flag ? "<*>" : "").c_str());
+    cli_set_hostname(cli, string_format("smithproxy(%s)%s ", hostname, CliGlobalState::config_changed_flag ? "<*>" : "").c_str());
 }
 
 void debug_cli_params(struct cli_def *cli, const char *command, char *argv[], int argc) {
@@ -228,7 +228,7 @@ void cmd_show_status(struct cli_def* cli) {
     cli_print(cli,"Transferred: %s bytes", number_suffixed(t).c_str());
     cli_print(cli,"Total sessions: %lu", static_cast<unsigned long>(MitmProxy::total_sessions().load()));
 
-    if(CliState::get().config_changed_flag) {
+    if(CliGlobalState::config_changed_flag) {
         cli_print(cli, "\n*** Configuration changes NOT saved ***");
     }
 
@@ -856,7 +856,7 @@ int cli_save_config(struct cli_def *cli, const char *command, char *argv[], int 
     }
     else {
         cli_print(cli, "config saved successfully.");
-        CliState::get().config_changed_flag = false;
+        CliGlobalState::config_changed_flag = false;
 
         apply_hostname(cli);
     }
@@ -867,12 +867,12 @@ int cli_save_config(struct cli_def *cli, const char *command, char *argv[], int 
 int cli_exec_reload(struct cli_def *cli, const char *command, char *argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
 
-    CliState::get().config_changed_flag = false;
+    CliGlobalState::config_changed_flag = false;
     bool CONFIG_LOADED = SmithProxy::instance().load_config(CfgFactory::get().config_file, true);
 
     if(CONFIG_LOADED) {
         cli_print(cli, "Configuration file reloaded successfully");
-        CliState::get().config_changed_flag = false;
+        CliGlobalState::config_changed_flag = false;
         apply_hostname(cli);
 
     } else {
@@ -1336,9 +1336,9 @@ bool apply_setting(std::string const& section, std::string const& varname, struc
         cli_print(cli, " -  saving and reload is necessary to apply your settings.");
     } else {
 
-        bool status_change = not CliState::get().config_changed_flag;
+        bool status_change = not CliGlobalState::config_changed_flag;
 
-        CliState::get().config_changed_flag = true;
+        CliGlobalState::config_changed_flag = true;
 
         if(status_change) {
             apply_hostname(cli);
@@ -1548,8 +1548,8 @@ int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[]
                 cli_print(cli, "cannot remove: %s - only templated entries can be removed", section.c_str());
             }
 
-            bool status_change = not CliState::get().config_changed_flag;
-            CliState::get().config_changed_flag = true;
+            bool status_change = not CliGlobalState::config_changed_flag;
+            CliGlobalState::config_changed_flag = true;
 
             if(status_change) {
                 apply_hostname(cli);
@@ -2039,9 +2039,9 @@ int cli_generic_add_cb(struct cli_def *cli, const char *command, char *argv[], i
             cli_print(cli, " ");
             cli_print(cli, "New %s '%s' has been created.", section.c_str(), args[0].c_str());
 
-            bool status_change = not CliState::get().config_changed_flag;
+            bool status_change = not CliGlobalState::config_changed_flag;
 
-            CliState::get().config_changed_flag = true;
+            CliGlobalState::config_changed_flag = true;
 
             if(status_change) {
                 apply_hostname(cli);
@@ -2359,9 +2359,8 @@ void client_thread(int client_socket) {
     register_callback( "policy.[x]", MODE_EDIT_POLICY)
             .cmd_set(cli_generic_set_cb)
             .cap_add(true).cmd_add(cli_generic_add_cb)
-            .cmd_remove(cli_generic_remove_cb)
-            .cap_edit(true)
-            .cmd_edit(cli_conf_edit_policy)
+            .cap_remove(true).cmd_remove(cli_generic_remove_cb)
+            .cap_edit(true).cmd_edit(cli_conf_edit_policy)
             .cap_move(true).cmd_move(cli_policy_move_cb);
 
     register_callback("detection_profiles", MODE_EDIT_DETECTION_PROFILES)

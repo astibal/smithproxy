@@ -158,8 +158,16 @@ private:
     cli_command* cli_move_ = nullptr;
 };
 
+
+struct CliGlobalState {
+    CliGlobalState() = delete;
+    CliGlobalState(CliGlobalState const&) = delete;
+    CliGlobalState&operator=(CliGlobalState&) = delete;
+
+    static inline bool config_changed_flag = false;
+};
+
 struct CliState {
-    bool config_changed_flag = false;
     bool cli_debug_flag = false;
 
     int cli_port = 50000;
@@ -187,7 +195,7 @@ struct CliState {
     loglevel orig_auth_loglevel = NON;
 
     static CliState& get() {
-        static CliState c;
+        static thread_local CliState c;
         return c;
     }
 
