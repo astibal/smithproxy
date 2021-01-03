@@ -1922,9 +1922,12 @@ int cli_generic_add_cb(struct cli_def *cli, const char *command, char *argv[], i
 
             if(std::get<1>(callback_entry).cap_edit()) {
 
-                cli_register_command(cli, std::get<1>(callback_entry).cli_edit(), args[0].c_str(),
+                auto cli_edit_x = cli_register_command(cli, std::get<1>(callback_entry).cli_edit(), args[0].c_str(),
                                      std::get<1>(callback_entry).cmd_edit(), PRIVILEGE_PRIVILEGED, cli->mode,
                                      " edit new entry");
+
+                // set also leaf node
+                std::get<1>(CliState::get().callbacks(section + "." + args[0])).cli_edit(cli_edit_x);
             }
 
             if(std::get<1>(callback_entry).cap_move()) {
@@ -1943,9 +1946,12 @@ int cli_generic_add_cb(struct cli_def *cli, const char *command, char *argv[], i
                 auto cli_remove = std::get<1>(callback_entry).cli_remove();
 
                 if(cli_remove) {
-                    cli_register_command(cli, std::get<1>(callback_entry).cli_remove(), args[0].c_str(),
+                    auto cli_remove_x = cli_register_command(cli, std::get<1>(callback_entry).cli_remove(), args[0].c_str(),
                                          std::get<1>(callback_entry).cmd_remove(), PRIVILEGE_PRIVILEGED, cli->mode,
                                          " delete this entry");
+
+                    // set also leaf node
+                    std::get<1>(CliState::get().callbacks(section + "." + args[0])).cli_remove(cli_remove_x);
                 }
             }
 
