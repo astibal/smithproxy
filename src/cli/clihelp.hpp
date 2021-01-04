@@ -41,15 +41,14 @@
 
 #define SMITHPROXY_CLIHELP_HPP
 
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 #include <unordered_map>
 #include <string>
+#include <list>
 #include <functional>
 #include <any>
 
+#include <utils/fs.hpp>
 #include <display.hpp>
 
 
@@ -77,7 +76,7 @@ struct CliElement {
     bool may_be_empty_ = true;
 
     // don't use std::function as reference
-    std::function<value_filter_fn> value_filter_= CliElement::VALUE_ANY;
+    std::list<std::function<value_filter_fn>> value_filter_= { CliElement::VALUE_ANY };
 
 
     [[ nodiscard ]] std::string const& name() const { return name_; }
@@ -92,10 +91,11 @@ struct CliElement {
     CliElement& may_be_empty(bool s) { may_be_empty_ = s; return *this; }
     [[ nodiscard ]] bool may_be_empty() const { return may_be_empty_; }
 
-    [[ nodiscard ]] std::function<value_filter_fn> const& value_filter() const { return value_filter_; };
-    CliElement& value_filter(std::function<value_filter_fn> v) { value_filter_ = v; return *this; };
+    [[ nodiscard ]] std::list<std::function<value_filter_fn>> const& value_filter() const { return value_filter_; };
+    CliElement& value_filter(std::function<value_filter_fn> v) { value_filter_.push_back(v); return *this; };
 
 
+    static inline std::function<value_filter_fn> VALUE_NONE = [](std::string const& v) -> value_filter_retval { return std::make_pair(std::any(), "cannot be changed"); };
 
     static inline std::function<value_filter_fn> VALUE_ANY = [](std::string const& v) -> value_filter_retval { return std::make_pair(v, ""); };
 
@@ -117,16 +117,28 @@ struct CliElement {
     };
 
     static inline std::function<value_filter_fn> VALUE_FILE = [](std::string const& v) -> value_filter_retval {
-        if (  struct stat sb{0} ; ::stat(v.c_str(), &sb) >= 0)
-            if((sb.st_mode & S_IFMT) == S_IFREG) { return std::make_pair(v, ""); }
+        if(sx::fs::is_file(v)) {
+            return std::make_pair( v, "" );
+        }
+
         return std::make_pair(std::any(), "value must be existing filename");
     };
 
 
     static inline std::function<value_filter_fn> VALUE_DIR = [](std::string const& v) -> value_filter_retval {
-        if (  struct stat sb{0} ; ::stat(v.c_str(), &sb) >= 0)
-            if((sb.st_mode & S_IFMT) == S_IFDIR) { return std::make_pair(v, ""); }
+        if(sx::fs::is_dir(v)) {
+            return std::make_pair(v, "");
+        }
+
         return std::make_pair(std::any(), "value must be existing directory name");
+    };
+
+    static inline std::function<value_filter_fn> VALUE_BASEDIR = [](std::string const& v) -> value_filter_retval {
+        if(sx::fs::is_basedir(v)) {
+            return std::make_pair(v, "");
+        }
+
+        return std::make_pair(std::any(), "directory for the file must exist and must not be /");
     };
 
     static inline std::function<value_filter_fn> VALUE_BOOL = [](std::string const& v) -> value_filter_retval {
@@ -176,10 +188,6 @@ struct CliHelp {
         return element_help_[k].help_quick(v);
     }
 
-//    bool value_check(std::string const& varname, int v, cli_def* cli);
-//    bool value_check(std::string const& varname, long long int v, cli_def* cli);
-//    bool value_check(std::string const& varname, bool v, cli_def* cli);
-//    bool value_check(std::string const& varname, float v, cli_def* cli);
     bool value_check(std::string const& varname, std::string const& v, cli_def* cli);
 
 

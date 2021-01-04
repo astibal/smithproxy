@@ -78,6 +78,7 @@
 #include <cli/clihelp.hpp>
 #include <cli/clistate.hpp>
 
+#include <utils/str.hpp>
 
 #include "socle_version.h"
 #include "smithproxy_version.h"
@@ -1381,7 +1382,7 @@ int cli_uni_set_cb(std::string const& confpath, struct cli_def *cli, const char 
         if (argc > 0) {
             for (int i = 0; i < argc; i++) {
                 auto escaped = std::string(argv[i]);
-                string_cfg_escape(escaped);
+                sx::str::string_cfg_escape(escaped);
 
                 args.emplace_back(escaped);
             }
@@ -1392,7 +1393,7 @@ int cli_uni_set_cb(std::string const& confpath, struct cli_def *cli, const char 
                 for (unsigned int i = 2; i < cmd.size(); i++) {
 
                     auto escaped = std::string(cmd[i]);
-                    string_cfg_escape(escaped);
+                    sx::str::string_cfg_escape(escaped);
 
                     args.emplace_back(escaped);
                 }
@@ -1415,7 +1416,7 @@ int cli_uni_set_cb(std::string const& confpath, struct cli_def *cli, const char 
                 args.clear();
 
                 auto name_str = ss_name.str();
-                string_cfg_escape(name_str);
+                sx::str::string_cfg_escape(name_str);
                 args.emplace_back(name_str);
             }
 
@@ -1505,7 +1506,7 @@ int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[]
     bool templated = false;
 
     if(section.find(".[x]") != std::string::npos) {
-        string_replace_all(section, ".[x]", "");
+        sx::str::string_replace_all(section, ".[x]", "");
         templated = true;
     }
 
@@ -1701,15 +1702,15 @@ int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[]
         else if(section == "policy") {
 
             std::string unmask = section;
-            string_replace_all(unmask, ".[x]", "");
+            sx::str::string_replace_all(unmask, ".[x]", "");
 
             std::vector<unsigned int> vec_full_args_int;
             std::for_each(vec_full_args.begin(), vec_full_args.end(), [&vec_full_args_int](auto const& arg) {
 
                 auto xarg = arg;
-                string_replace_all(xarg, "[", "");
-                string_replace_all(xarg, "]", "");
-                string_replace_all(xarg, " ", "");
+                sx::str::string_replace_all(xarg, "[", "");
+                sx::str::string_replace_all(xarg, "]", "");
+                sx::str::string_replace_all(xarg, " ", "");
 
                 auto v = safe_val(xarg);
                 if( v >= 0)
@@ -1766,7 +1767,7 @@ int cli_policy_move_cb(struct cli_def *cli, const char *command, char *argv[], i
     }
 
     if (section.find(".[x]") != std::string::npos) {
-        string_replace_all(section, ".[x]", "");
+        sx::str::string_replace_all(section, ".[x]", "");
     }
 
     auto cmd_split = string_split(command, ' ');
@@ -1779,12 +1780,12 @@ int cli_policy_move_cb(struct cli_def *cli, const char *command, char *argv[], i
 
         auto x1 = cmd_split[1];
         auto x2 = cmd_split[3];
-        string_replace_all(x1, "[", "");
-        string_replace_all(x2, "[", "");
-        string_replace_all(x1, "]", "");
-        string_replace_all(x2, "]", "");
-        string_replace_all(x1, " ", "");
-        string_replace_all(x2, " ", "");
+        sx::str::string_replace_all(x1, "[", "");
+        sx::str::string_replace_all(x2, "[", "");
+        sx::str::string_replace_all(x1, "]", "");
+        sx::str::string_replace_all(x2, "]", "");
+        sx::str::string_replace_all(x1, " ", "");
+        sx::str::string_replace_all(x2, " ", "");
 
         index_1 = safe_val(x1);
         index_2 = safe_val(x2);
@@ -1792,9 +1793,9 @@ int cli_policy_move_cb(struct cli_def *cli, const char *command, char *argv[], i
     } else if(cmd_split.size() == 3) {
 
         auto x1 = cmd_split[1];
-        string_replace_all(x1, "[", "");
-        string_replace_all(x1, "]", "");
-        string_replace_all(x1, " ", "");
+        sx::str::string_replace_all(x1, "[", "");
+        sx::str::string_replace_all(x1, "]", "");
+        sx::str::string_replace_all(x1, " ", "");
         index_1 = safe_val(x1);
 
         if (index_1 >= 0) {
@@ -1894,7 +1895,7 @@ int cli_generic_add_cb(struct cli_def *cli, const char *command, char *argv[], i
     bool templated = false;
     if(section.find(".[x]") != std::string::npos) {
         templated = true;
-        string_replace_all(section, ".[x]", "");
+        sx::str::string_replace_all(section, ".[x]", "");
     }
 
     if(section == "policy") {
@@ -2070,7 +2071,7 @@ int cli_generic_add_cb(struct cli_def *cli, const char *command, char *argv[], i
 void cli_print_section(cli_def* cli, const std::string& xname, int index , unsigned long pipe_sz ) {
 
     std::string name = xname;
-    string_replace_all(name, ".[x]", "");
+    sx::str::string_replace_all(name, ".[x]", "");
 
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 

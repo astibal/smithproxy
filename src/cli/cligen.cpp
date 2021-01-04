@@ -42,6 +42,8 @@
 #include <cli/clihelp.hpp>
 #include <cfgapi.hpp>
 
+#include <utils/str.hpp>
+
 CONFIG_MODE_DEF(cli_conf_edit_settings, MODE_EDIT_SETTINGS,"settings");
 CONFIG_MODE_DEF(cli_conf_edit_settings_auth, MODE_EDIT_SETTINGS_AUTH,"auth_portal");
 CONFIG_MODE_DEF(cli_conf_edit_settings_cli, MODE_EDIT_SETTINGS_CLI,"cli");
@@ -73,7 +75,7 @@ std::pair<int, std::string> generate_dynamic_groups(struct cli_def *cli, const c
         std::string static_section_path = CliState::get().sections(static_mode);
 
         if(static_section_path.find(".[x]") != std::string::npos) {
-            string_replace_all(static_section_path, ".[x]", "");
+            sx::str::string_replace_all(static_section_path, ".[x]", "");
         }
 
         // check for existing entry
@@ -191,25 +193,50 @@ std::vector<std::string> load_valid_options(std::string const& section, std::str
     return ret;
 }
 
-std::vector<cli_command*> cli_generate_set_command_args(struct cli_def *cli, cli_command* parent, std::string const &section, std::string const& varname) {
 
-    std::vector<cli_command*> ret;
+void generate_options_combination(cli_def* cli, cli_command* parent, std::vector<std::string> const& options, int mode, CliCallbacks::callback set_cb, int& max_depth) {
+
+    if(max_depth <= 0) {
+        return; // max_depth reached
+    }
+
+    for(auto const& opt: options) {
+
+        auto *ret = cli_register_command(cli, parent, opt.c_str(), set_cb, PRIVILEGE_PRIVILEGED, mode,
+                                         " - valid options");
+
+        std::vector<std::string> my_options;
+        std::copy_if(options.begin(), options.end(), std::back_inserter(my_options), [&](auto const& elem) { return elem != opt; });
+
+        if(my_options.empty())
+            break;
+
+        generate_options_combination(cli, ret, my_options, mode, set_cb, --max_depth);
+    }
+
+}
+
+void cli_generate_set_command_args(struct cli_def *cli, cli_command* parent, std::string const &section, std::string const& varname) {
 
     auto const& cb_entry = CliState::get().callbacks(section);
     auto set_cb = std::get<1>(cb_entry).cmd_set();
     int mode = std::get<0>(cb_entry);
 
-    auto opts = load_valid_options(section, varname);
+    auto const& opts = load_valid_options(section, varname);
 
-    for(auto const& k: opts) {
-        auto *ret_single = cli_register_command(cli, parent, k.c_str(), set_cb, PRIVILEGE_PRIVILEGED, mode,
-                                                " - valid options");
+    auto& this_setting = CfgFactory::cfg_root().lookup((section + "." + varname).c_str());
+    auto this_type = this_setting.getType();
 
-        ret.push_back(ret_single);
+    if(this_type != Setting::TypeArray) {
+        for(auto const& k: opts) {
+
+            cli_register_command(cli, parent, k.c_str(), set_cb, PRIVILEGE_PRIVILEGED, mode,
+                                                    " - valid options");
+        }
+    } else {
+        int max_depth = 10;
+        generate_options_combination(cli, parent, opts, mode, set_cb, max_depth);
     }
-
-    return ret;
-
 }
 
 
@@ -550,31 +577,3 @@ Setting* cfg_canonize(std::string const& section) {
     return nullptr;
 }
 
-void string_replace_all(std::string& target, std::string const& what, std::string const& replacement) {
-
-    auto pos = target.find(what);
-
-    while( pos != std::string::npos ) {
-
-        // Replace this occurrence of Sub String
-        target.replace(pos, what.size(), replacement);
-        // Get the next occurrence from the current position
-        pos = target.find(what,pos + replacement.size());
-    }
-}
-
-void string_cfg_escape(std::string& target) {
-    string_replace_all(target, "'", "_");
-    string_replace_all(target, "\\", "_");
-    string_replace_all(target, "%", "_");
-    string_replace_all(target, ";", "_");
-    string_replace_all(target, ":", "_");
-    string_replace_all(target, ",", "_");
-    string_replace_all(target, "\"", "_");
-    string_replace_all(target, "{", "_");
-    string_replace_all(target, "}", "_");
-    string_replace_all(target, "[", "_");
-    string_replace_all(target, "]", "_");
-    string_replace_all(target, "(", "_");
-    string_replace_all(target, ")", "_");
-}
