@@ -87,9 +87,6 @@ int fn(struct cli_def *cli, const char *command, char *argv[], int argc) { \
     return CLI_OK;                                                         \
 }    \
 
-void string_replace_all(std::string& target, std::string const& what, std::string const& replacement);
-void string_cfg_escape(std::string& target);
-
 
 //
 //  Functions to execute when issuing 'edit <something>' in config term mode
