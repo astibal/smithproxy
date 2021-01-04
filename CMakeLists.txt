@@ -140,7 +140,16 @@ add_executable(smithproxy
         src/cli/diag/diag_cmds.hpp
         src/cli/diag/diag_cmds.cpp
         src/proxy/ocspinvoker.cpp
-        src/proxy/ocspinvoker.hpp src/policy/profiles.hpp src/policy/cfgelement.hpp)
+        src/proxy/ocspinvoker.hpp
+        src/policy/profiles.hpp
+        src/policy/cfgelement.hpp
+        src/utils/fs.hpp
+        src/utils/fs.cpp
+        src/utils/str.hpp
+        src/utils/str.cpp
+        src/utils/mem.hpp
+        src/utils/mem.cpp)
+
 
 add_executable(smithd
         ${SMITHD_DIR}/smithd.cpp
@@ -152,12 +161,22 @@ add_executable(smithd
         src/inspect/dns.cpp
         src/ext/libcidr/cidr.cpp
         src/policy/addrobj.cpp
-        src/async/asyncocsp.hpp)
+        src/async/asyncocsp.hpp
+        src/utils/fs.hpp
+        src/utils/fs.cpp
+        src/utils/str.hpp
+        src/utils/str.cpp
+        src/utils/mem.hpp
+        src/utils/mem.cpp)
 
 add_executable(smithdc
         ${SMITHD_DIR}/smithdc.cpp
         ${SMITHD_DIR}/smithdcx.cpp
-        src/smithlog.cpp)
+        src/smithlog.cpp
+        src/utils/fs.hpp
+        src/utils/fs.cpp
+        src/utils/mem.hpp
+        src/utils/mem.cpp)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}")
 
