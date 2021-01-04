@@ -1,6 +1,6 @@
 
 name: smithproxy
-version: 0.9.11-112-g677e2c8
+version: 0.9.11-117-g8af81d6
 summary: Fast and featured transparent TCP/UDP/TLS proxy
 description: |
  Smithproxy is fast transparent TCP/UDP/TLS (SSL) proxy. It's highly configurable

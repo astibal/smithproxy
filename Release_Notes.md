@@ -33,6 +33,7 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 
 * **NOTE: CLI config changes are still experimental**
 
+* cli `set` commands will expand full chain of argument values if attribute is array
 * cli policy `move` command improved by `up|down|top|bottom` directives (ie. command `move [3] top`)
 * docs improved with inline docker scenario overview
 * cli help and hint mechanics improvements 
