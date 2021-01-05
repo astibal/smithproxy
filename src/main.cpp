@@ -492,3 +492,28 @@ int main(int argc, char *argv[]) {
     return 0;
 }
 
+
+#ifdef MEMPOOL_ALL
+
+#include <exception>
+#include <new>
+
+void * operator new(std::size_t n)
+{
+    if (memPool::is_ready()) {
+        return mempool_alloc(n);
+    } else {
+        return ::malloc(n);
+    }
+
+}
+void operator delete(void * p) noexcept
+{
+    if (memPool::is_ready()) {
+        return mempool_free(p);
+    } else {
+        return ::free(p);
+    }
+}
+
+#endif
