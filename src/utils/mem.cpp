@@ -46,8 +46,8 @@ namespace sx::mem {
         return std::shared_ptr<uint8_t>((uint8_t *) mempool_alloc(size), [] (uint8_t *ptr) { mempool_free(ptr); });
     }
 
-    std::unique_ptr<uint8_t, _private::unique_ptr_deleter> unique_mpool_alloc (size_t size) {
-        return std::unique_ptr<uint8_t, _private::unique_ptr_deleter>( (uint8_t*) mempool_alloc(size), _private::unique_ptr_deleter());
+    std::unique_ptr<uint8_t, deleters::unique_ptr_deleter> unique_mpool_alloc (size_t size) {
+        return std::unique_ptr<uint8_t, deleters::unique_ptr_deleter>( (uint8_t*) mempool_alloc(size), deleters::unique_ptr_deleter());
     }
 
 

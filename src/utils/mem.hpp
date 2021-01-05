@@ -46,7 +46,7 @@
 namespace sx::mem {
     std::shared_ptr<uint8_t> shared_mpool_alloc(size_t size);
 
-    namespace _private {
+    namespace deleters {
         class unique_ptr_deleter {
         public:
             void operator()(uint8_t* ptr) {
@@ -54,9 +54,18 @@ namespace sx::mem {
                     mempool_free(ptr);
             }
         };
+
+        template <typename T>
+        class unique_ptr_deleter_free {
+        public:
+            void operator()(T* ptr) {
+                if(ptr)
+                    ::free((void*)ptr);
+            }
+        };
     }
 
-    std::unique_ptr<uint8_t, _private::unique_ptr_deleter> unique_mpool_alloc (size_t size);
+    std::unique_ptr<uint8_t, deleters::unique_ptr_deleter> unique_mpool_alloc (size_t size);
 }
 
 
