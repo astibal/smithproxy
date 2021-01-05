@@ -2093,7 +2093,7 @@ bool CfgFactory::policy_apply_tls (const std::shared_ptr<ProfileTls> &pt, baseCo
                 peer_sslcom->opt_failed_certcheck_override_timeout_type = pt->failed_certcheck_override_timeout_type;
             }
             
-            // set accordingly if general "use_pfs" is specified, more conrete settings come later
+            // set accordingly if general "use_pfs" is specified, more concrete settings come later
             sslcom->opt_left_kex_dh = pt->use_pfs;
             sslcom->opt_right_kex_dh = pt->use_pfs;
             

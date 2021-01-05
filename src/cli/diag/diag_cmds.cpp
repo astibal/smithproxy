@@ -1231,7 +1231,7 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
     {
         std::scoped_lock<std::recursive_mutex> l_(socle::sobjectDB::getlock());
 
-        for (auto it: socle::sobjectDB::db()) {
+        for (auto const& it: socle::sobjectDB::db()) {
 
             socle::sobject *ptr = it.first;
             std::string prefix;
@@ -1462,7 +1462,7 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
 
                 std::stringstream cur_obj_ss;
 
-                auto si = it.second;
+                auto const& si = it.second;
 
                 if (!prefix.empty()) {
 
