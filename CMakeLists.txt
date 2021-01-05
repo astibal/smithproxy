@@ -148,7 +148,7 @@ add_executable(smithproxy
         src/utils/str.hpp
         src/utils/str.cpp
         src/utils/mem.hpp
-        src/utils/mem.cpp)
+        src/utils/mem.cpp socle/common/mempool/malloc_allocator.hpp)
 
 
 add_executable(smithd
@@ -167,7 +167,7 @@ add_executable(smithd
         src/utils/str.hpp
         src/utils/str.cpp
         src/utils/mem.hpp
-        src/utils/mem.cpp)
+        src/utils/mem.cpp socle/common/mempool/malloc_allocator.hpp)
 
 add_executable(smithdc
         ${SMITHD_DIR}/smithdc.cpp
@@ -176,7 +176,7 @@ add_executable(smithdc
         src/utils/fs.hpp
         src/utils/fs.cpp
         src/utils/mem.hpp
-        src/utils/mem.cpp)
+        src/utils/mem.cpp socle/common/mempool/malloc_allocator.hpp)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}")
 
