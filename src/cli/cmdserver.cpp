@@ -132,9 +132,18 @@ void cmd_show_status(struct cli_def* cli) {
 
     cli_print(cli, " Socle lib source info: %s", SOCLE_GIT_VERSION);
     cli_print(cli, "                branch: %s commit: %s", SOCLE_GIT_BRANCH, SOCLE_GIT_COMMIT_HASH);
-    cli_print(cli,"Built: %s", __TIMESTAMP__);
+    cli_print(cli, "Built: %s", __TIMESTAMP__);  // breaks reproducible builds
 #endif
 
+#ifndef BUILD_RELEASE
+    cli_print(cli, "  + DEBUG BUILD");  // slower
+#endif
+#ifdef MEMPOOL_ALL
+    cli_print(cli, "  + MEMPOOL_ALL");  // using everything from pool
+#endif
+#ifdef MEMPOOL_DEBUG
+    cli_print(cli, "  + MEMPOOL_DEBUG");  // much slower
+#endif
 
     auto get_proxy_type = [](auto& proxies) -> const char* {
         if(proxies.empty()) return "none";
