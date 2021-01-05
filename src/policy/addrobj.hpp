@@ -103,7 +103,7 @@ public:
     explicit FqdnAddress(std::string s) : AddressObject(), fqdn_(std::move(s)) { }
     std::string fqdn() const { return fqdn_; }
     
-    bool match(CIDR* c) override;
+    bool match(CIDR* to_match) override;
     bool ask_destroy() override { return false; };
     std::string to_string(int verbosity=iINF) const override;
 protected:

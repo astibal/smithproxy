@@ -84,7 +84,7 @@ std::string FqdnAddress::to_string(int verbosity) const {
 }
 
 
-bool FqdnAddress::match(CIDR* c) {
+bool FqdnAddress::match(CIDR* to_match) {
     bool ret = false;
     
     std::shared_ptr<DNS_Response> r = nullptr;
@@ -93,9 +93,9 @@ bool FqdnAddress::match(CIDR* c) {
     {
         std::scoped_lock<std::recursive_mutex> l_(DNS::get_dns_lock());
 
-        if (c->proto == CIDR_IPV4) {
+        if (to_match->proto == CIDR_IPV4) {
             r = DNS::get_dns_cache().get("A:" + fqdn_);
-        } else if (c->proto == CIDR_IPV6) {
+        } else if (to_match->proto == CIDR_IPV6) {
             r = DNS::get_dns_cache().get("AAAA:" + fqdn_);
         }
     }
@@ -107,7 +107,7 @@ bool FqdnAddress::match(CIDR* c) {
         
         int i = 0;
         for(CidrAddress* ip: ips) {
-            if(ip->match(c)) {
+            if(ip->match(to_match)) {
                 _deb("FqdnAddress::match: cached %s matches answer[%d] with %s",
                                                 fqdn_.c_str(),i,ip->to_string().c_str());
                 ret = true;
@@ -116,7 +116,7 @@ bool FqdnAddress::match(CIDR* c) {
                                                 fqdn_.c_str(),i,ip->to_string().c_str());
             }
             ++i;
-            // delete it straigt away.
+            // delete it straight away.
             delete ip;
         }
         
