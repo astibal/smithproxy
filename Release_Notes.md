@@ -33,6 +33,7 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 
 * **NOTE: CLI config changes are still experimental**
 
+* experimental memory mode  - leak troubleshooting feature (must be compiled in)
 * cli `set` commands will expand full chain of argument values if attribute is array
 * cli policy `move` command improved by `up|down|top|bottom` directives (ie. command `move [3] top`)
 * docs improved with inline docker scenario overview
@@ -58,6 +59,7 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 * added sha256 sums to build uploads
 
 ### Bug fixes & various
+* fixed memory leak in sobjectdb
 * new file download server
 * fixed arm64 ubuntu20.04 build
 * fixed crash on exit in case proxy startup fails  
