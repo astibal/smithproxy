@@ -140,7 +140,7 @@ int cli_diag_ssl_cache_list(struct cli_def *cli, const char *command, char *argv
 
         for (auto const& x: store->cache()) {
             std::string fqdn = x.first;
-            SSLFactory::X509_PAIR* ptr = x.second;
+            SSLFactory::X509_PAIR const* ptr = x.second.keypair();
 
             ss << string_format("    %s\n", fqdn.c_str());
 
@@ -184,7 +184,7 @@ int cli_diag_ssl_cache_print(struct cli_def *cli, const char *command, char *arg
 
         for (auto const& x: store->cache()) {
             std::string fqdn = x.first;
-            SSLFactory::X509_PAIR *ptr = x.second;
+            SSLFactory::X509_PAIR const* ptr = x.second.keypair();
 
             std::regex r("\\+san:");
             std::string nice_fqdn = std::regex_replace(fqdn, r, "\n    san: ");
@@ -221,7 +221,6 @@ int cli_diag_ssl_cache_clear(struct cli_def *cli, const char *command, char *arg
         for (auto const& x: store->cache()) {
             std::string fqdn = x.first;
             ss << string_format("removing    %s\n",fqdn.c_str());
-            SSLFactory::X509_PAIR* ptr = x.second;
 
             if(argc > 0) {
                 std::string a1 = argv[0];
@@ -233,9 +232,6 @@ int cli_diag_ssl_cache_clear(struct cli_def *cli, const char *command, char *arg
 #endif
                 }
             }
-
-            EVP_PKEY_free(ptr->first);
-            X509_free(ptr->second);
         }
         store->cache().clear();
     }
