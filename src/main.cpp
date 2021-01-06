@@ -107,6 +107,8 @@ void prepare_html_renderer() {
 void prepare_mem_debugs() {
     if(CfgFactory::get().cfg_openssl_mem_dbg) {
 
+
+#ifndef BUILD_RELEASE
         auto& log = DaemonFactory::instance().log;
 
         _war("openssl memory debug enabled");
@@ -118,6 +120,7 @@ void prepare_mem_debugs() {
 
         CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON);
         CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_DISABLE);
+#endif
     }
 
 }
