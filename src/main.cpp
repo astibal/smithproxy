@@ -248,6 +248,11 @@ void print_help() {
 
 int main(int argc, char *argv[]) {
 
+#ifdef MEMPOOL_ALL
+    if( CRYPTO_set_mem_functions(mempool_alloc, mempool_realloc, mempool_free) == 0) {
+        std::cerr << "WARNING: openssl allocators not registered, defaulting" << std::endl;
+    }
+#endif
 
     if(! raise_limits()) {
         std::cerr << "cannot max file descriptors"  << std::endl;
@@ -279,10 +284,6 @@ int main(int argc, char *argv[]) {
 
     DaemonFactory& this_daemon = DaemonFactory::instance();
     auto& log = this_daemon.log;
-
-    if(buffer::use_pool)
-        CRYPTO_set_mem_functions(mempool_alloc, mempool_realloc, mempool_free);
-
 
     CfgFactory::get().config_file = "/etc/smithproxy/smithproxy.cfg";
     bool is_custom_config_file = false;
