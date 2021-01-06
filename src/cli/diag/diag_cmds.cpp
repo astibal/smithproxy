@@ -968,6 +968,22 @@ int cli_diag_mem_trace_mark (struct cli_def *cli, const char *command, char **ar
 }
 
 
+#ifdef MEMPOOL_ALL
+
+// template specializations for MEMPOOL_ALL + MEMPOOL_DEBUG debugs - it's tricky - we MUST use ::malloc and ::free,
+// because strings and maps will alloc and trigger deadlock
+
+template <typename K, typename V>
+using unordered_map_malloc = std::unordered_map<K, V, std::hash<K>, std::equal_to<>, mp::malloc::allocator<std::pair<const K, V>>>;
+
+template <typename K, typename V, class H>
+using  unordered_map_malloc_h = std::unordered_map<K, V, H, std::equal_to<>, mp::malloc::allocator<std::pair<const K, V>>>;
+
+template <typename K, typename V>
+using  map_malloc_h = std::map<K, V, std::less<>, mp::malloc::allocator<std::pair<const K, V>>>;
+
+#endif
+
 
 int cli_diag_mem_trace_list (struct cli_def *cli, const char *command, char **argv, int argc) {
 
@@ -991,6 +1007,10 @@ int cli_diag_mem_trace_list (struct cli_def *cli, const char *command, char **ar
     if(mem_chunk::trace_enabled)
     {
         struct bt_stat {
+            bt_stat() = default;
+            bt_stat(bt_stat const&) = default;
+            bt_stat& operator=(bt_stat const&) = default;
+
             unsigned long long counter;
             unsigned long long size;
 
@@ -999,15 +1019,29 @@ int cli_diag_mem_trace_list (struct cli_def *cli, const char *command, char **ar
             }
         };
 
+        struct bt_stat_hash {
+            std::size_t operator()(const bt_stat &v) {
+                return std::hash<unsigned long long>()(v.counter) ^ std::hash<unsigned long long>()(v.size);
+            }
+        };
 
-        std::unordered_map<std::string, bt_stat> occ;
+#ifdef MEMPOOL_ALL
+        using used_string_type = mp::malloc::string;
+        using used_hashmap1 = unordered_map_malloc_h<mp::malloc::string, bt_stat, mp::malloc::hash>;
+        using used_hashmap2 = map_malloc_h<bt_stat, used_string_type>;
+#else
+        using used_string_type = std::string;
+        using used_hashmap1 = std::unordered_map<std::string, bt_stat>;
+        using used_hashmap2 = std::map<bt_stat, used_string_type>;
+#endif
+        used_hashmap1 occ;
         {
             std::scoped_lock<std::mutex> l(mpdata::trace_lock());
 
-            for (auto mem: mpdata::trace_map()) {
+            for (auto const& mem: mpdata::trace_map()) {
                 auto mch = mem.second;
                 if ( (!mch.in_pool) && mch.mark == filter) {
-                    std::string k;
+                    used_string_type k;
 
                     //k = mch.str_trace();
                     k.resize((size_t)(sizeof(void*))*mch.trace_size);
@@ -1029,7 +1063,7 @@ int cli_diag_mem_trace_list (struct cli_def *cli, const char *command, char **ar
         }
         cli_print(cli, "Allocation traces: parsed %ld unique entries.", occ.size());
 
-        std::map<bt_stat, std::string> ordered;
+        used_hashmap2 ordered;
         for(auto [ bt, bt_stat ]: occ) {
             ordered[bt_stat] = bt;
         }
