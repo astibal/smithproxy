@@ -43,7 +43,7 @@
 
 
 #include <ext/libcli/libcli.h>
-#include <cli/clihelp.hpp>
+#include <cmd/clihelp.hpp>
 #include <log/logan.hpp>
 
 

@@ -39,8 +39,8 @@
 
 #include <memory>
 #include <service/core/smithproxy.hpp>
-#include <cli/cmdserver.hpp>
-#include <cli/clistate.hpp>
+#include <cmd/cmdserver.hpp>
+#include <cmd/clistate.hpp>
 #include <policy/authfactory.hpp>
 #include <inspect/sigfactory.hpp>
 #include <cfgapi.hpp>

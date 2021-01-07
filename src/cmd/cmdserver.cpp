@@ -52,9 +52,9 @@
 #include <log/logger.hpp>
 
 #include <ext/libcli/libcli.h>
-#include <cli/cmdserver.hpp>
-#include <cli/cligen.hpp>
-#include <cli/diag/diag_cmds.hpp>
+#include <cmd/cmdserver.hpp>
+#include <cmd/cligen.hpp>
+#include <cmd/diag/diag_cmds.hpp>
 
 #include <cfgapi.hpp>
 #include <timeops.hpp>
@@ -75,8 +75,8 @@
 #include <inspect/sigfactory.hpp>
 #include <inspect/dnsinspector.hpp>
 
-#include <cli/clihelp.hpp>
-#include <cli/clistate.hpp>
+#include <cmd/clihelp.hpp>
+#include <cmd/clistate.hpp>
 
 #include <utils/str.hpp>
 

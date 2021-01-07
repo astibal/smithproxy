@@ -37,8 +37,8 @@
     which carries forward this exception.
 */
 
-#include <cli/clistate.hpp>
-#include <cli/cligen.hpp>
+#include <cmd/clistate.hpp>
+#include <cmd/cligen.hpp>
 
 std::string CliState::template_callback_key (std::string const& section, cli_def* cli) {
 

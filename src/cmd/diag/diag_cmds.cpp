@@ -50,7 +50,7 @@
 #include <log/logger.hpp>
 #include <traflog.hpp>
 
-#include <cli/cmdserver.hpp>
+#include <cmd/cmdserver.hpp>
 
 #include <cfgapi.hpp>
 #include <sslcom.hpp>
@@ -63,7 +63,7 @@
 
 #include <inspect/sigfactory.hpp>
 
-#include <cli/diag/diag_cmds.hpp>
+#include <cmd/diag/diag_cmds.hpp>
 
 //extern bool cfg_openssl_mem_dbg;
 
