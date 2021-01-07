@@ -48,6 +48,9 @@
 
 
 struct DaemonFactory : public LoganMate {
+
+    using signal_handler_t = void(*)(int);
+
     std::string pid_file = PID_FILE_DEFAULT;
     volatile char crashlog_file[LOG_FILENAME_SZ];
     bool pid_file_owned = false;
@@ -71,6 +74,7 @@ struct DaemonFactory : public LoganMate {
     static void set_daemon_signals(void (*terminate_handler)(int),void (*reload_handler)(int));
     void set_crashlog(const char* file);
     static void uw_btrace_handler(int sig);
+    static void release_crash_handler(int sig);
 
     logan_attached<DaemonFactory> log;
 

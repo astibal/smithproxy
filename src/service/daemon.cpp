@@ -191,7 +191,7 @@ void DaemonFactory::set_limit_fd(int max) {
     }
 }
 
-void DaemonFactory::set_signal(int SIG, void (*sig_handler)(int)) {
+void DaemonFactory::set_signal(int SIG, signal_handler_t sig_handler) {
 
     struct sigaction act_segv;
     memset(&act_segv, 0, sizeof(struct sigaction));
@@ -274,7 +274,32 @@ void DaemonFactory::uw_btrace_handler(int sig) {
 
     df.unlink_pidfile();
     
-    exit(-1);
+    _exit(-1);
+}
+
+
+void DaemonFactory::release_crash_handler(int sig) {
+
+    DaemonFactory& df = DaemonFactory::instance();
+
+    char buf_line[256];
+    int chars = snprintf(buf_line,255," Error handler: signal %d received, aborting\n", sig);
+
+    int CRLOG = open((const char*)df.crashlog_file, O_CREAT | O_WRONLY | O_TRUNC,S_IRUSR|S_IWUSR);
+    writecrash(STDERR_FILENO,buf_line,chars);
+    writecrash(CRLOG,buf_line,chars);
+
+    if(sig == 11 or sig == 6) {
+        chars = snprintf(buf_line,255,"  consider installing debug smithproxy version \n");
+        writecrash(STDERR_FILENO,buf_line,chars);
+        writecrash(CRLOG,buf_line,chars);
+    }
+    close(CRLOG);
+
+    df.unlink_pidfile();
+
+    memPool::bailing = true;
+    _exit(-1);
 }
 
 void DaemonFactory::set_daemon_signals(void (*terminate_handler)(int),void (*reload_handler)(int)) {
@@ -285,9 +310,14 @@ void DaemonFactory::set_daemon_signals(void (*terminate_handler)(int),void (*rel
     set_signal(SIGINT,terminate_handler);
     
     set_signal(SIGUSR1,reload_handler);
-    
+
+#ifndef BUILD_RELEASE
     set_signal(SIGABRT,uw_btrace_handler);
     set_signal(SIGSEGV,uw_btrace_handler);
+#else
+    set_signal(SIGABRT,release_crash_handler);
+    set_signal(SIGSEGV,release_crash_handler);
+#endif
 }
 
 std::string& DaemonFactory::class_name() const {
