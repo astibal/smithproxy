@@ -308,7 +308,7 @@ bool load_config(std::string& config_f, bool reload) {
     bool ret = true;
     std::lock_guard<std::recursive_mutex> l(merged_cfg_write_lock);
 
-    auto this_daemon = DaemonFactory::instance();
+    auto& this_daemon = DaemonFactory::instance();
     auto& log = this_daemon.log;
 
     using namespace libconfig;
@@ -385,7 +385,7 @@ bool load_config(std::string& config_f, bool reload) {
 
 int smithd_apply_index(std::string& what , const std::string& idx) {
 
-    auto this_daemon = DaemonFactory::instance();
+    auto& this_daemon = DaemonFactory::instance();
     auto& log = this_daemon.log;
 
     _deb("apply_index: what=%s idx=%s",what.c_str(),idx.c_str());
@@ -609,7 +609,7 @@ int main(int argc, char *argv[]) {
         _inf("Starting smithd listener");
         auto backend_thread = std::make_shared<std::thread>(std::thread([=]() {
 
-            auto this_daemon = DaemonFactory::instance();
+            auto& this_daemon = DaemonFactory::instance();
             auto& log = this_daemon.log;
 
             DaemonFactory::set_daemon_signals(SmithD::my_terminate, SmithD::my_usr1);

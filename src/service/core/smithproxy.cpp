@@ -259,7 +259,7 @@ void SmithProxy::run() {
     cli_thread = std::make_shared<std::thread>([] () {
         CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
 
-        auto this_daemon = DaemonFactory::instance();
+        auto& this_daemon = DaemonFactory::instance();
         auto& log = this_daemon.log;
 
         _inf("Starting CLI");
@@ -280,7 +280,7 @@ void SmithProxy::run() {
             auto a_thread = std::make_shared<std::thread>([proxy]() {
                 CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
 
-                auto this_daemon = DaemonFactory::instance();
+                auto& this_daemon = DaemonFactory::instance();
                 auto& log = this_daemon.log;
 
                 DaemonFactory::set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
@@ -595,7 +595,7 @@ bool SmithProxy::init_syslog() {
 
 bool SmithProxy::load_config(std::string& config_f, bool reload) {
     bool ret = true;
-    auto this_daemon = DaemonFactory::instance();
+    auto& this_daemon = DaemonFactory::instance();
     auto& log = instance().log;
 
     using namespace libconfig;

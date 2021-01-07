@@ -55,10 +55,6 @@ struct DaemonFactory : public LoganMate {
     [[nodiscard]] std::string &class_name() const override;
     [[nodiscard]] std::string hr() const override;
 
-    DaemonFactory() : log(logan_attached<DaemonFactory>(this, "service")) {
-        ::memset((void*)crashlog_file, 0, LOG_FILENAME_SZ);
-    }
-
     static DaemonFactory& instance() {
         static DaemonFactory d;
         return d;
@@ -77,6 +73,13 @@ struct DaemonFactory : public LoganMate {
     static void uw_btrace_handler(int sig);
 
     logan_attached<DaemonFactory> log;
+
+    DaemonFactory(DaemonFactory const&) = delete;
+    DaemonFactory& operator=(DaemonFactory const&) = delete;
+private:
+    DaemonFactory() : log(logan_attached<DaemonFactory>(this, "service")) {
+        ::memset((void*)crashlog_file, 0, LOG_FILENAME_SZ);
+    }
 };
 
 
