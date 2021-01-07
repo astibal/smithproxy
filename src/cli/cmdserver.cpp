@@ -893,6 +893,18 @@ int cli_exec_reload(struct cli_def *cli, const char *command, char *argv[], int 
 }
 
 
+int cli_exec_shutdown(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+
+    cli_print(cli, " ");
+    cli_print(cli, " !!!   terminating smithproxy   !!!");
+    cli_print(cli, " ");
+
+    SmithProxy::instance().stop();
+
+    return CLI_OK;
+}
+
 
 
 int cli_show_config_full (struct cli_def *cli, const char *command, char **argv, int argc) {
@@ -2227,6 +2239,7 @@ void cli_register_static(struct cli_def* cli) {
 
     auto exec = cli_register_command(cli, nullptr, "execute", nullptr, PRIVILEGE_PRIVILEGED, MODE_ANY, "execute various tasks");
             [[maybe_unused]] auto exec_reload = cli_register_command(cli, exec, "reload", cli_exec_reload, PRIVILEGE_PRIVILEGED, MODE_ANY, "reload config file");
+            [[maybe_unused]] auto exec_shutdown = cli_register_command(cli, exec, "shutdown", cli_exec_shutdown, PRIVILEGE_PRIVILEGED, MODE_ANY, "terminate this smithproxy process");
 
     auto show  = cli_register_command(cli, nullptr, "show", cli_show, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show basic information");
             cli_register_command(cli, show, "status", cli_show_status, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show smithproxy status");

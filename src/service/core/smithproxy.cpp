@@ -353,7 +353,7 @@ void SmithProxy::join_all() {
 
     if(! plain_threads.empty()) {
         if(!cfg_daemonize)
-            std::cerr << "terminating tcp thread" << std::endl;
+            std::cerr << "terminating tcp thread\r\n" << std::endl;
         join_thread_list(plain_threads);
     }
 
