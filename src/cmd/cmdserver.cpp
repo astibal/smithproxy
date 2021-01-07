@@ -969,6 +969,14 @@ bool write_value(Setting& setting, std::optional<std::string> string_value, cli_
         original_value = string_value.value();
     }
 
+    auto value_check_verdict = CliHelp::get().value_check(setting.getPath(), original_value, cli);
+    if(value_check_verdict.has_value()) {
+        original_value = value_check_verdict.value();
+    } else {
+        _debug(cli, "filter rejected the value");
+        return false;
+    }
+
 
     auto setting_type = setting.getType();
     if(add_as_type != Setting::TypeNone)
@@ -1020,90 +1028,83 @@ bool write_value(Setting& setting, std::optional<std::string> string_value, cli_
     if (converted_value.has_value()) {
         //_debug(cli, "DEBUG: attempting to write %s: (TypeInt)%d ", varname.c_str(), i.value());
 
-        auto verdict = CliHelp::get().value_check(setting.getPath(), original_value, cli);
-        if (verdict) {
-            _debug(cli, "filter ok");
+        _debug(cli, "filter ok");
 
-            switch(setting_type) {
-                case Setting::TypeInt: {
-                    auto value = std::any_cast<int>(converted_value);
-                    if(add_as_type != Setting::TypeNone) {
-                        setting.add(Setting::TypeInt) = value;
-                    } else {
-                        setting = value;
-                    }
-
-                    ret_verdict = true;
+        switch(setting_type) {
+            case Setting::TypeInt: {
+                auto value = std::any_cast<int>(converted_value);
+                if(add_as_type != Setting::TypeNone) {
+                    setting.add(Setting::TypeInt) = value;
+                } else {
+                    setting = value;
                 }
-                break;
 
-                case Setting::TypeInt64: {
-                    auto value = std::any_cast<long long int>(converted_value);
-                    if(add_as_type != Setting::TypeNone) {
-                        setting.add(Setting::TypeInt64) = value;
-                    } else {
-                        setting = value;
-                    }
-
-                    ret_verdict = true;
-                }
-                break;
-
-                case Setting::TypeBoolean: {
-                    auto value = std::any_cast<bool>(converted_value);
-                    if(add_as_type != Setting::TypeNone) {
-                        setting.add(Setting::TypeBoolean) = value;
-                    } else {
-                        setting = value;
-                    }
-
-                    ret_verdict = true;
-                }
-                break;
-
-                case Setting::TypeFloat: {
-                    auto value = std::any_cast<float>(converted_value);
-                    if(add_as_type != Setting::TypeNone) {
-                        setting.add(Setting::TypeFloat) = value;
-                    } else {
-                        setting = value;
-                    }
-
-                    ret_verdict = true;
-                }
-                break;
-
-                case Setting::TypeString: {
-                    auto value = std::any_cast<std::string>(converted_value);
-                    if(add_as_type != Setting::TypeNone) {
-                        setting.add(Setting::TypeString) = value;
-                    } else {
-                        setting = value;
-                    }
-
-                    ret_verdict = true;
-                }
-                break;
-
-                case Setting::TypeNone:
-                    throw std::logic_error("write value cannot be used for TypeNone");
-                    break;
-                case Setting::TypeGroup:
-                    throw std::logic_error("write value cannot be used for TypeGroup");
-                    break;
-                case Setting::TypeArray:
-                    throw std::logic_error("write value cannot be used for TypeArray");
-                    break;
-                case Setting::TypeList:
-                    throw std::logic_error("write value cannot be used for TypeList");
-                    break;
+                ret_verdict = true;
             }
+            break;
 
+            case Setting::TypeInt64: {
+                auto value = std::any_cast<long long int>(converted_value);
+                if(add_as_type != Setting::TypeNone) {
+                    setting.add(Setting::TypeInt64) = value;
+                } else {
+                    setting = value;
+                }
 
-        } else {
-            _debug(cli, "filter rejected the value");
-            ret_verdict = false;
+                ret_verdict = true;
+            }
+            break;
+
+            case Setting::TypeBoolean: {
+                auto value = std::any_cast<bool>(converted_value);
+                if(add_as_type != Setting::TypeNone) {
+                    setting.add(Setting::TypeBoolean) = value;
+                } else {
+                    setting = value;
+                }
+
+                ret_verdict = true;
+            }
+            break;
+
+            case Setting::TypeFloat: {
+                auto value = std::any_cast<float>(converted_value);
+                if(add_as_type != Setting::TypeNone) {
+                    setting.add(Setting::TypeFloat) = value;
+                } else {
+                    setting = value;
+                }
+
+                ret_verdict = true;
+            }
+            break;
+
+            case Setting::TypeString: {
+                auto value = std::any_cast<std::string>(converted_value);
+                if(add_as_type != Setting::TypeNone) {
+                    setting.add(Setting::TypeString) = value;
+                } else {
+                    setting = value;
+                }
+
+                ret_verdict = true;
+            }
+            break;
+
+            case Setting::TypeNone:
+                throw std::logic_error("write value cannot be used for TypeNone");
+                break;
+            case Setting::TypeGroup:
+                throw std::logic_error("write value cannot be used for TypeGroup");
+                break;
+            case Setting::TypeArray:
+                throw std::logic_error("write value cannot be used for TypeArray");
+                break;
+            case Setting::TypeList:
+                throw std::logic_error("write value cannot be used for TypeList");
+                break;
         }
+
     } else {
         _debug(cli, "unexpected value");
     }
@@ -1403,9 +1404,11 @@ int cli_uni_set_cb(std::string const& confpath, struct cli_def *cli, const char 
         if (argc > 0) {
             for (int i = 0; i < argc; i++) {
                 auto escaped = std::string(argv[i]);
-                sx::str::string_cfg_escape(escaped);
+                for(auto sub_escaped: string_split(escaped, ',')) {
 
-                args.emplace_back(escaped);
+                    sx::str::string_cfg_escape(sub_escaped);
+                    args.emplace_back(sub_escaped);
+                }
             }
             args_qmark = (args[0] == "?");
 
@@ -1414,9 +1417,11 @@ int cli_uni_set_cb(std::string const& confpath, struct cli_def *cli, const char 
                 for (unsigned int i = 2; i < cmd.size(); i++) {
 
                     auto escaped = std::string(cmd[i]);
-                    sx::str::string_cfg_escape(escaped);
+                    for(auto sub_escaped: string_split(escaped, ',')) {
 
-                    args.emplace_back(escaped);
+                        sx::str::string_cfg_escape(sub_escaped);
+                        args.emplace_back(sub_escaped);
+                    }
                 }
 
                 args_qmark = (args[0] == "?");
@@ -1441,9 +1446,17 @@ int cli_uni_set_cb(std::string const& confpath, struct cli_def *cli, const char 
                 args.emplace_back(name_str);
             }
 
+            decltype(args) consolidated_args;
+            for(auto const& a: args) {
+                if (std::find(consolidated_args.begin(), consolidated_args.end(), a) == consolidated_args.end()) {
+                    consolidated_args.emplace_back(a);
+                }
+            }
+
+
             std::scoped_lock<std::recursive_mutex> ll_(CfgFactory::lock());
 
-            if (cfg_write_value(conf, false, varname, args, cli)) {
+            if (cfg_write_value(conf, false, varname, consolidated_args, cli)) {
                 // cli_print(cli, "change written to current config");
 
                 if ( apply_setting( conf.getPath(), varname , cli )) {

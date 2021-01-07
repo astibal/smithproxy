@@ -54,8 +54,34 @@
 
 struct CliElement {
 
-    using value_filter_retval = std::pair<std::any, std::string>;
-    using value_filter_fn = value_filter_retval(std::string const&);
+    struct filter_retval {
+
+        filter_retval(std::string v, std::string c) :
+            value(std::move(v)),
+            comment(std::move(c)){};
+
+        std::optional<std::string> value;
+        std::string comment;
+
+        static inline filter_retval accept(std::string const& v) { return filter_retval( v, std::string()); }
+        static inline filter_retval accept(std::string const& v, std::string const& c) { return filter_retval( v,c); }
+        static inline filter_retval reject(std::string c) {
+            filter_retval v;
+            v.comment = std::move(c);
+            return v;
+        }
+
+        [[nodiscard]] bool accepted() const noexcept { return value.has_value(); };
+        std::string get_value() const { return value.value(); }
+        std::string get_comment() const { return comment; }
+
+    private:
+        explicit filter_retval(): value(std::nullopt), comment() {}
+    };
+
+
+
+    using value_filter_fn = filter_retval(std::string const&);
 
     CliElement() : name_("<unknown>") {};
     explicit CliElement(std::string name) : name_(std::move(name)) {}
@@ -95,63 +121,63 @@ struct CliElement {
     CliElement& value_filter(std::function<value_filter_fn> v) { value_filter_.push_back(v); return *this; };
 
 
-    static inline std::function<value_filter_fn> VALUE_NONE = [](std::string const& v) -> value_filter_retval { return std::make_pair(std::any(), "cannot be changed"); };
+    static inline std::function<value_filter_fn> VALUE_NONE = [](std::string const& v) -> filter_retval { return  filter_retval::reject("cannot be changed"); };
 
-    static inline std::function<value_filter_fn> VALUE_ANY = [](std::string const& v) -> value_filter_retval { return std::make_pair(v, ""); };
+    static inline std::function<value_filter_fn> VALUE_ANY = [](std::string const& v) -> filter_retval { return filter_retval::accept(v); };
 
-    static inline std::function<value_filter_fn> VALUE_UINT = [](std::string const& v) -> value_filter_retval {
+    static inline std::function<value_filter_fn> VALUE_UINT = [](std::string const& v) -> filter_retval {
         auto nv = safe_val(v);
         if(nv >= 0)
-            return std::make_pair( nv, "");
+            return filter_retval::accept(v);
         else
-            return std::make_pair(std::any(), "value must be non-negative integer");
+            return filter_retval::reject("value must be non-negative integer");
     };
 
-    static inline std::function<value_filter_fn> VALUE_UINT_NZ = [](std::string const& v) -> value_filter_retval {
+    static inline std::function<value_filter_fn> VALUE_UINT_NZ = [](std::string const& v) -> filter_retval {
         auto nv = safe_val(v);
         if(nv > 0)
-            return std::make_pair( nv, "");
+            return filter_retval::accept(v);
         else
-            return std::make_pair(std::any(), "value must be greater than zero");
+            return filter_retval::reject("value must be greater than zero");
 
     };
 
-    static inline std::function<value_filter_fn> VALUE_FILE = [](std::string const& v) -> value_filter_retval {
+    static inline std::function<value_filter_fn> VALUE_FILE = [](std::string const& v) -> filter_retval {
         if(sx::fs::is_file(v)) {
-            return std::make_pair( v, "" );
+            return filter_retval::accept(v);
         }
 
-        return std::make_pair(std::any(), "value must be existing filename");
+        return filter_retval::reject("value must be existing filename");
     };
 
 
-    static inline std::function<value_filter_fn> VALUE_DIR = [](std::string const& v) -> value_filter_retval {
+    static inline std::function<value_filter_fn> VALUE_DIR = [](std::string const& v) -> filter_retval {
         if(sx::fs::is_dir(v)) {
-            return std::make_pair(v, "");
+            return filter_retval::accept(v);
         }
 
-        return std::make_pair(std::any(), "value must be existing directory name");
+        return filter_retval::reject("value must be existing directory name");
     };
 
-    static inline std::function<value_filter_fn> VALUE_BASEDIR = [](std::string const& v) -> value_filter_retval {
+    static inline std::function<value_filter_fn> VALUE_BASEDIR = [](std::string const& v) -> filter_retval {
         if(sx::fs::is_basedir(v)) {
-            return std::make_pair(v, "");
+            return filter_retval::accept(v);
         }
 
-        return std::make_pair(std::any(), "directory for the file must exist and must not be /");
+        return filter_retval::reject("directory for the file must exist and must not be /");
     };
 
-    static inline std::function<value_filter_fn> VALUE_BOOL = [](std::string const& v) -> value_filter_retval {
+    static inline std::function<value_filter_fn> VALUE_BOOL = [](std::string const& v) -> filter_retval {
 
         std::string val = v;
         std::transform(v.begin(), v.end(), val.begin(), [](unsigned char c){ return std::toupper(c); });
 
-        if( v == "TRUE" or v == "1" or v == "YES" or v == "T")
-            return std::make_pair( true, "");
-        else if ( v == "FALSE" or v == "0" or v == "NO" or v == "F")
-            return std::make_pair( false, "");
+        if( val == "TRUE" or val == "1" or val == "YES" or val == "T")
+            return filter_retval::accept("true");
+        else if ( val == "FALSE" or val == "0" or val == "NO" or val == "F")
+            return filter_retval::accept( "false");
         else
-            return std::make_pair(std::any(), "must be boolean: case insensitive value: [true|yes|1] | [false|no|0]");
+            return filter_retval::reject("must be boolean: case insensitive value: [true|yes|1] | [false|no|0]");
 
     };
 
@@ -188,7 +214,7 @@ struct CliHelp {
         return element_help_[k].help_quick(v);
     }
 
-    bool value_check(std::string const& varname, std::string const& v, cli_def* cli);
+    std::optional<std::string> value_check(std::string const& varname, std::string const& value_argument, cli_def* cli);
 
 
     enum class help_type_t { HELP_CONTEXT=0, HELP_QMARK };

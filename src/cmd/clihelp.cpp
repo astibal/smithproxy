@@ -44,6 +44,7 @@
 #include <cmd/cligen.hpp>
 #include <common/log/logan.hpp>
 #include <cfgapi.hpp>
+#include <utils/str.hpp>
 
 
 // @brief  - return true for numbers in the closed range
@@ -53,7 +54,7 @@
 // @note  template lambdas supported since C++20
 
 
-CliElement::value_filter_retval VALUE_UINT_RANGE_GEN(std::function<int()> callableA, std::function<int()> callableB, std::string const& v) {
+CliElement::filter_retval VALUE_UINT_RANGE_GEN(std::function<int()> callableA, std::function<int()> callableB, std::string const& v) {
 
     auto [ may_val, descr ] = CliElement::VALUE_UINT(v);
 
@@ -62,21 +63,22 @@ CliElement::value_filter_retval VALUE_UINT_RANGE_GEN(std::function<int()> callab
 
     auto err = string_format("value must be a non-negative number in range <%d,%d>", intA, intB);
 
-    if(may_val.has_value()) {
-        int port_value = std::any_cast<int>(may_val);
+    int port_value = safe_val(v);;
 
+    if(may_val.has_value() and port_value >= 0) {
         if(port_value < intA or port_value > intB)
-            return std::make_pair(std::any(), err);
+            return CliElement::filter_retval::reject(err);
         else
-            return { may_val, "" };
+            return CliElement::filter_retval::accept(may_val.value());
     }
-
-    return { may_val, err };
+    else {
+        return CliElement::filter_retval::reject(err);
+    }
 
 }
 
 template <int A, int B>
-CliElement::value_filter_retval VALUE_UINT_RANGE(std::string const& v) {
+CliElement::filter_retval VALUE_UINT_RANGE(std::string const& v) {
 
     auto a = []() { return A; };
     auto b = []() { return B; };
@@ -219,9 +221,24 @@ void CliHelp::init() {
             .value_filter(VALUE_UINT_RANGE<0,8>);
 
     add("settings.log_file", "log file")
-            .help_quick("<filename template> file for logging. Must include '%%s' for tenant name expansion.")
+            .help_quick("<filename template> file for logging. Must include '^s' for tenant name expansion.")
             .may_be_empty(false)
-            .value_filter(CliElement::VALUE_BASEDIR);
+            .value_filter(CliElement::VALUE_BASEDIR)
+            .value_filter([](std::string const& v) -> CliElement::filter_retval {
+
+                std::string orig = v;
+                std::string base = v;
+                base = ::basename(v.c_str());
+
+                auto where = base.find("^s");
+                if(where == v.npos) {
+
+                    return CliElement::filter_retval::reject("filename must contain '^s' for tenant name expansion.");
+                }
+
+                sx::str::string_replace_all(orig, "^s", "%s");
+                return CliElement::filter_retval::accept(orig);
+            });
 
     add("settings.log_console", "toggle logging to standard output");
     add("settings.syslog_server", "IP address of syslog server");
@@ -285,13 +302,13 @@ void CliHelp::init() {
 
 
 
-bool CliHelp::value_check(std::string const& varname, std::string const& v, cli_def* cli) {
+std::optional<std::string> CliHelp::value_check(std::string const& varname, std::string const& value_argument, cli_def* cli) {
 
     std::regex match ("\\[[0-9]+\\]");
     std::string masked_varname  = std::regex_replace (varname, match, "[x]");
 
-    _debug(cli, "value_check: varname = %s, value = %s", varname.c_str(), v.c_str());
-    _debug(cli, "value_check:  masked = %s, value = %s", masked_varname.c_str(), v.c_str());
+    _debug(cli, "value_check: varname = %s, value = %s", varname.c_str(), value_argument.c_str());
+    _debug(cli, "value_check:  masked = %s, value = %s", masked_varname.c_str(), value_argument.c_str());
 
     auto cli_e = find(masked_varname);
     bool may_be_empty = true;
@@ -302,35 +319,46 @@ bool CliHelp::value_check(std::string const& varname, std::string const& v, cli_
         std::string value_filter_check_response;
     };
     std::list<filter_result_e> filter_result;
+    auto value_modified = value_argument;
 
     if(cli_e.has_value()) {
         may_be_empty = cli_e->get().may_be_empty();
 
-        if(not v.empty()) {
+        if(not value_modified.empty()) {
 
             unsigned int i = 0;
             for(auto this_filter: cli_e->get().value_filter()) {
-                auto[ret, msg] = std::invoke(this_filter, v);
+                auto retval = std::invoke(this_filter, value_modified);
 
-                filter_result.emplace_back(ret.has_value(), msg);
-                _debug(cli, " CliElement value filter check[%u] : %d : '%s'", i, ret.has_value(), msg.c_str());
+                _debug(cli, " CliElement value filter check[%u] : %d : '%s'", i, retval.accepted(),
+                       retval.comment.c_str());
 
-                i++;
+                // value is not applicable according to this filter
+                if(not retval.accepted()) {
+
+                    filter_result.emplace_back(false, retval.get_comment());
+
+                    break;
+                } else {
+                    value_modified = retval.get_value();
+                    filter_result.emplace_back(true, retval.get_comment());
+
+                    i++;
+                }
             }
-
         }
     }
 
 
     // empty value check
-    if(v.empty() and not may_be_empty) {
+    if(value_argument.empty() and not may_be_empty) {
 
         _debug(cli, "this attribute cannot be empty");
 
         cli_print(cli," ");
         cli_print(cli, "Value check failed: cannot be set with empty value");
 
-        return false;
+        return std::nullopt;
     }
 
 
@@ -339,7 +367,7 @@ bool CliHelp::value_check(std::string const& varname, std::string const& v, cli_
 
             cli_print(cli," ");
             cli_print(cli, "Value check failed: %s", fr.value_filter_check_response.c_str());
-            return false;
+            return std::nullopt;
         }
     }
 
@@ -357,9 +385,9 @@ bool CliHelp::value_check(std::string const& varname, std::string const& v, cli_
                 _debug(cli, "policy values for %s", path_elems[2].c_str());
 
                 auto addrlist = CfgFactory::get().keys_of_db_address();
-                if(std::find(addrlist.begin(), addrlist.end(), v) == addrlist.end()) {
-                    _debug(cli, "policy values for %s: %s not found address db", path_elems[2].c_str(), v.c_str());
-                    return false;
+                if(std::find(addrlist.begin(), addrlist.end(), value_modified) == addrlist.end()) {
+                    _debug(cli, "policy values for %s: %s not found address db", path_elems[2].c_str(), value_modified.c_str());
+                    return std::nullopt;
                 }
             }
         }
@@ -369,11 +397,11 @@ bool CliHelp::value_check(std::string const& varname, std::string const& v, cli_
     }
     catch(std::out_of_range const& e) {
         _debug(cli, "value_check: returning FAILED: out of range");
-        return false;
+        return std::nullopt;
     }
 
     _debug(cli, "value_check: returning OK");
-    return true;
+    return value_modified;
 }
 
 
