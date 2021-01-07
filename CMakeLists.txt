@@ -5,6 +5,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/helpers.cmake)
 SET(SOCLE_DIR "socle")
 SET(SOCLE_COMMON_DIR "socle/common")
 SET(SMITHD_DIR "src/service/smithd")
+SET(UNWIND_LIB "")
 
 project(smithproxy CXX)
 
@@ -30,6 +31,7 @@ if(UNIX)
     SET(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g3 -fno-stack-protector")
 
     IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
+        SET(UNWIND_LIB "unwind")
         # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=thread -fPIE -pie")
         # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fsanitize=leak -fPIE -pie")
     ENDIF()
@@ -198,9 +200,9 @@ if((CMAKE_SYSTEM_PROCESSOR MATCHES "arm") OR (CMAKE_SYSTEM_PROCESSOR STREQUAL "a
     target_link_libraries (smithdc atomic)
 endif()
 
-target_link_libraries(smithproxy socle_lib pthread ssl crypto rt unwind ${PYTHON_LIBRARIES})
-target_link_libraries(smithd socle_lib pthread ssl crypto rt unwind)
-target_link_libraries(smithdc socle_lib pthread ssl crypto rt unwind)
+target_link_libraries(smithproxy socle_lib pthread ssl crypto rt ${UNWIND_LIB} ${PYTHON_LIBRARIES})
+target_link_libraries(smithd socle_lib pthread ssl crypto rt ${UNWIND_LIB})
+target_link_libraries(smithdc socle_lib pthread ssl crypto rt ${UNWIND_LIB})
 
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/install.cmake)

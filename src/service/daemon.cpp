@@ -54,9 +54,14 @@
 #include <service/daemon.hpp>
 #include <display.hpp>
 
+#ifndef BUILD_RELEASE
+
+// use libunwind only in debug builds
+
 #define UNW_LOCAL_ONLY
 #include <libunwind.h>
 
+#endif
 
 void DaemonFactory::set_tenant(const std::string& name, const std::string& tenant_id) {
     pid_file = string_format("/var/run/%s.%s.pid", name.c_str(), tenant_id.c_str());
@@ -231,6 +236,9 @@ void writecrash(int fd, const char* msg, int len)  {
    } while(w < len && rep < 10);
 }
 
+
+#ifndef BUILD_RELEASE
+
 void DaemonFactory::uw_btrace_handler(int sig) {
     thread_local unw_cursor_t cursor; 
     thread_local unw_context_t uc;
@@ -277,6 +285,7 @@ void DaemonFactory::uw_btrace_handler(int sig) {
     _exit(-1);
 }
 
+#endif
 
 void DaemonFactory::release_crash_handler(int sig) {
 

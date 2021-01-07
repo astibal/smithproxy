@@ -73,7 +73,11 @@ struct DaemonFactory : public LoganMate {
     static void set_signal(int SIG, void (*sig_handler)(int));
     static void set_daemon_signals(void (*terminate_handler)(int),void (*reload_handler)(int));
     void set_crashlog(const char* file);
+
+#ifndef BUILD_RELEASE
     static void uw_btrace_handler(int sig);
+#endif
+
     static void release_crash_handler(int sig);
 
     logan_attached<DaemonFactory> log;
