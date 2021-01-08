@@ -1,0 +1,26 @@
+Source: smithproxy
+Maintainer: Ales Stibal <astib@mag0.net>
+Section: misc
+Priority: optional
+Standards-Version: 3.9.6
+Build-Depends: cmake, debhelper (>= 9)
+
+Package: smithproxy-dbg
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends},
+                            libstdc++6 (>= 8.3.0),
+                            libssl1.1 (>=1.1.1),
+                            libconfig++9v5,
+                            iptables,
+                            python3,
+                            python3-pyparsing,
+                            python3-posix-ipc,
+                            iproute2,
+                            telnet,
+                            python3-pyroute2
+Description:
+ Feature-rich, fast transparent TCP/UDP/TLS proxy.
+ Forwarded traffic is diverted to smithproxy where it's processed based
+ on policies with feature profiles.
+ It can also process local traffic and accepts SOCKS5 requests.
+

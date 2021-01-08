@@ -1,9 +1,17 @@
 #!/usr/bin/make -f
+
+CFLAGS += -O0
+INSTALL_PROGRAM += -s
+
 %:
 	dh $@ --parallel
 
 override_dh_auto_configure:
-	dh_auto_configure -- -DCMAKE_BUILD_TYPE=Release
+	dh_auto_configure --  -DCMAKE_BUILD_TYPE=Debug
+
+
+override_dh_strip:
+	echo "no stripping"
 
 #override_dh_auto_install:
 #	$(MAKE) DESTDIR=$$(pwd)/debian/smithproxy prefix=/usr install
