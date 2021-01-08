@@ -15,6 +15,6 @@ RUN git clone --depth 1 --recursive https://github.com/astibal/smithproxy.git -b
 
 RUN cd smithproxy && ./tools/linux-deps.sh
 
-RUN cd /app/smithproxy/tools/pkg-scripts/deb && ./createdeb-0.9-dbg.sh
+RUN cd /app/smithproxy/tools/pkg-scripts/deb && ./createdeb-0.9-debug.sh
 
 CMD echo "there is nothing to see - it's a build-only image"
