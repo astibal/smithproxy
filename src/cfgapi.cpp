@@ -2904,7 +2904,7 @@ bool CfgFactory::move_policy (int what, int where, op_move op) {
         }
     }
     catch(std::exception const& e) {
-        std::cout << e.what() << std::endl;
+        _err("move_policy: error - %s", e.what());
     }
 
     return ret;
