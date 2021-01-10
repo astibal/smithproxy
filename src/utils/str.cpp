@@ -42,9 +42,9 @@
 namespace  sx::str {
     void string_replace_all (std::string &target, std::string const &what, std::string const &replacement) {
 
-        auto pos = target.find(what);
+        if(what.empty() or target.empty() or replacement.empty()) return;
 
-        while (pos != std::string::npos) {
+        for(auto pos = target.find(what); pos != std::string::npos; ) {
 
             // Replace this occurrence of Sub String
             target.replace(pos, what.size(), replacement);
