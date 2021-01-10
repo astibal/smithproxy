@@ -71,6 +71,8 @@ public:
 class CidrAddress : public AddressObject {
 public:
     explicit CidrAddress(CIDR* c) : AddressObject(), c_(c) { }
+    explicit CidrAddress(std::string const& v) : AddressObject(), c_(cidr_from_str(v.c_str())) {}
+
     CIDR* cidr() { return c_; }
 
     int contains(CIDR *other);
