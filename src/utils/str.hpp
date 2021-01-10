@@ -43,4 +43,8 @@
 namespace sx::str {
     void string_replace_all(std::string& target, std::string const& what, std::string const& replacement);
     void string_cfg_escape(std::string& target);
+    namespace cli {
+        std::string mask_array_index(std::string const& varname);
+        std::string mask_parent(std::string const& varname);
+    }
 }

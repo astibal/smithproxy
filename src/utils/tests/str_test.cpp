@@ -16,3 +16,14 @@ TEST(sx_str_replace, multiple_items) {
     sx::str::string_replace_all(sample, "i", "X");
     ASSERT_TRUE(sample == "thXs Xs a sXmple Xtch");
 }
+
+
+TEST(sx_str_cli, mask_array) {
+    std::string sample = "policy.[0]";
+    ASSERT_TRUE(sx::str::cli::mask_array_index(sample) == "policy.[x]");
+}
+
+TEST(sx_str_cli, mask_parent) {
+    std::string sample = "proto_objects.abc.id";
+    ASSERT_TRUE(sx::str::cli::mask_parent(sample) == "proto_objects.[x].id");
+}

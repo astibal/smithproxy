@@ -24,3 +24,8 @@ TEST(CidrAddressTest, NonsenseInput3) {
     auto garbage = CidrAddress(cidr_from_str("this.is.a.4/23423"));
     ASSERT_TRUE(garbage.cidr() == nullptr);
 }
+
+TEST(CidrAddressTest, Host_HostTest) {
+    auto a = cidr_from_str("1.1.1.1");
+    ASSERT_TRUE(std::string(cidr_numhost(a)) == "1");
+}

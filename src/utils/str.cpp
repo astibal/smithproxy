@@ -37,6 +37,9 @@
     which carries forward this exception.
 */
 
+#include <regex>
+
+#include <display.hpp>
 #include <utils/str.hpp>
 
 namespace  sx::str {
@@ -67,6 +70,50 @@ namespace  sx::str {
         string_replace_all(target, "]", "_");
         string_replace_all(target, "(", "_");
         string_replace_all(target, ")", "_");
+    }
+
+    namespace cli {
+
+        static std::regex re_index() {
+            static auto r = std::regex("\\[[0-9]+\\]");
+            return r;
+        }
+        // helpers for cli processing
+
+        std::string mask_array_index(std::string const& varname) {
+            return std::regex_replace (varname, re_index(), "[x]");
+        }
+
+        std::string mask_parent(std::string const& varname) {
+            // another attempt - find parent setting mask
+            auto path_split = string_split(varname, '.');
+
+
+            // make test only if depth is 3 or more:   category1[.categoryX., ..].<to_mask>.varname
+            if(path_split.size() >= 3) {
+
+                std::string masked_parent = path_split[0];
+
+                unsigned int i = 1;
+                for (auto const &elem: path_split) {
+
+                    if(i == 1) {
+                        i++;
+                        continue;
+                    }
+                    else if (i == path_split.size() - 1) {
+                        masked_parent += ".[x]";
+                    } else {
+                        masked_parent += "." + elem;
+                    }
+                    i++;
+                }
+
+                return masked_parent;
+            }
+
+            return varname;
+        }
     }
 
 }

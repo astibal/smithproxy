@@ -49,6 +49,7 @@
 #include <any>
 
 #include <utils/fs.hpp>
+#include <policy/addrobj.hpp>
 #include <display.hpp>
 
 
@@ -178,6 +179,32 @@ struct CliElement {
             return filter_retval::accept( "false");
         else
             return filter_retval::reject("must be boolean: case insensitive value: [true|yes|1] | [false|no|0]");
+
+    };
+
+    static inline std::function<value_filter_fn> VALUE_IPHOST = [](std::string const& v) -> filter_retval {
+
+        auto a = CidrAddress(v);
+        if(a.cidr()) {
+            if(std::string(cidr_numhost(a.cidr())) == "1") {
+                return filter_retval::accept(v);
+            } else {
+                return filter_retval::reject("must be single IP address");
+            }
+        }
+        else
+            return filter_retval::reject("must be an IP address");
+
+    };
+
+    static inline std::function<value_filter_fn> VALUE_IPADDRESS = [](std::string const& v) -> filter_retval {
+
+        auto a = CidrAddress(v);
+        if(a.cidr()) {
+            return filter_retval::accept(v);
+        }
+        else
+            return filter_retval::reject("must be an IP address");
 
     };
 

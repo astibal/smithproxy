@@ -240,42 +240,63 @@ void CliHelp::init() {
                 return CliElement::filter_retval::accept(orig);
             });
 
-    add("settings.log_console", "toggle logging to standard output");
-    add("settings.syslog_server", "IP address of syslog server");
-    add("settings.syslog_port", "syslog server port");
+    add("settings.log_console", "toggle logging to standard output")
+        .may_be_empty(false)
+        .value_filter(CliElement::VALUE_BOOL);
 
-    add("settings.syslog_facility", "syslog facility");
-    help_quick("settings.syslog_facility", "syslog facility (default 23 = local7)");
 
-    add("settings.syslog_level", "syslog logging verbosity level");
-    help_quick("settings.syslog_level", "syslog level (default 6 = informational)");
+    add("settings.syslog_server", "IP address of syslog server")
+        .value_filter(CliElement::VALUE_IPHOST);
 
-    add("settings.syslog_family", "IPv4 or IPv6?");
-    help_quick("settings.syslog_family", "set to 4 or 6 for ip version");
+    add("settings.syslog_port", "syslog server port")
+        .value_filter(VALUE_UINT_RANGE<0,65535>);
 
-    add("settings.sslkeylog_file", "where to dump TLS keying material");
-    help_quick("settings.sslkeylog_file", "file path where to dump tls keys (if set)");
+    add("settings.syslog_facility", "syslog facility")
+        .help_quick("syslog facility (default 23 = local7)")
+        .value_filter(VALUE_UINT_RANGE<0,32>);
 
-    add("settings.messages_dir", "replacement text directory");
-    help_quick("settings.messages_dir", "directory path to message files");
 
-    add("settings.write_payload_dir", "root directory for packet dumps");
-    help_quick("settings.write_payload_dir", "directory path for payload dump files");
 
-    add("settings.write_payload_file_prefix", "packet dumps file prefix");
-    help_quick("settings.write_payload_file_prefix", "dump filename prefix");
 
-    add("settings.write_payload_file_suffix", "packet dumps file suffix");
-    help_quick("settings.write_payload_file_suffix", "dump filename suffix");
+    add("settings.syslog_level", "syslog logging verbosity level")
+        .help_quick("syslog level (default 6 = informational)")
+        .value_filter(VALUE_UINT_RANGE<0,8>);
 
+
+
+    add("settings.syslog_family", "IPv4 or IPv6?")
+        .help_quick("set to 4 or 6 for ip version")
+        .value_filter([](std::string const& v) -> CliElement::filter_retval {
+            if(v == "4" or v == "6") {
+                return CliElement::filter_retval::accept(v);
+            }
+            return CliElement::filter_retval::reject("must be empty to set default, 4, or 6.");
+        });
+
+    add("settings.sslkeylog_file", "where to dump TLS keying material")
+        .help_quick("file path where to dump tls keys (if set)")
+        .value_filter(CliElement::VALUE_BASEDIR);
+
+    add("settings.messages_dir", "replacement text directory")
+        .help_quick("directory path to message files")
+        .may_be_empty(false)
+        .value_filter(CliElement::VALUE_DIR);
+
+    add("settings.write_payload_dir", "root directory for packet dumps")
+        .help_quick("directory path for payload dump files")
+        .may_be_empty(false)
+        .value_filter(CliElement::VALUE_DIR);
+
+    add("settings.write_payload_file_prefix", "packet dumps file prefix")
+        .help_quick("dump filename prefix");
+
+    add("settings.write_payload_file_suffix", "packet dumps file suffix")
+        .help_quick("dump filename suffix");
+
+    // sections
     add("settings.auth_portal", "** configure authentication portal settings");
-    help_quick("settings.auth_portal", "");
-
     add("settings.cli", "** configure CLI specific settings");
-    help_quick("settings.cli", "");
-
     add("settings.socks", "** configure SOCKS specific settings");
-    help_quick("settings.socks", "");
 
 
 
@@ -292,11 +313,23 @@ void CliHelp::init() {
 
 
     add("port_objects", "TCP/UDP ports");
-    add("port_objects[x].start", "port range start");
-    add("port_objects[x].end", "port range end");
+    add("port_objects.[x].start", "port range start")
+        .may_be_empty(false)
+        .value_filter(VALUE_UINT_RANGE<0,65535>);
+    add("port_objects.[x].end", "port range end")
+        .may_be_empty(false)
+        .value_filter(VALUE_UINT_RANGE<0,65535>);
 
     add("policy.[x].proto", "protocol to match (see proto_objects)")
-        .may_be_empty(false);
+        .may_be_empty(false)
+        .value_filter([](std::string const& v) -> auto {
+            for(auto const& proto: CfgFactory::get().keys_of_db_proto()) {
+                if(v == proto) {
+                    return CliElement::filter_retval::accept(v);
+                }
+            }
+            return CliElement::filter_retval::reject("must be a configured protocol");
+        });
 
 }
 
@@ -304,8 +337,7 @@ void CliHelp::init() {
 
 std::optional<std::string> CliHelp::value_check(std::string const& varname, std::string const& value_argument, cli_def* cli) {
 
-    std::regex match ("\\[[0-9]+\\]");
-    std::string masked_varname  = std::regex_replace (varname, match, "[x]");
+    auto masked_varname = sx::str::cli::mask_array_index(varname);
 
     _debug(cli, "value_check: varname = %s, value = %s", varname.c_str(), value_argument.c_str());
     _debug(cli, "value_check:  masked = %s, value = %s", masked_varname.c_str(), value_argument.c_str());
@@ -320,6 +352,14 @@ std::optional<std::string> CliHelp::value_check(std::string const& varname, std:
     };
     std::list<filter_result_e> filter_result;
     auto value_modified = value_argument;
+
+
+    if(not cli_e.has_value()) {
+        // try also mask the parent
+        auto masked_parent = sx::str::cli::mask_parent(varname);
+        cli_e = find(masked_parent);
+    }
+
 
     if(cli_e.has_value()) {
         may_be_empty = cli_e->get().may_be_empty();
