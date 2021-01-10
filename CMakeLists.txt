@@ -183,8 +183,12 @@ add_executable(smithdc
 find_package(GTest)
 if(GTEST_FOUND)
     add_executable(sx_gtests
-            src/utils/tests/str_test.cpp)
-    target_link_libraries(sx_gtests gtest gtest_main pthread)
+            src/utils/tests/str_test.cpp
+
+            src/inspect/dns.cpp
+            src/ext/libcidr/cidr.cpp
+            src/policy/tests/addrobj_test.cpp)
+    target_link_libraries(sx_gtests gtest gtest_main socle_lib pthread crypto)
 endif()
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}")
