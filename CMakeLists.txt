@@ -180,11 +180,12 @@ add_executable(smithdc
         src/utils/mem.hpp
         src/utils/mem.cpp socle/common/mempool/malloc_allocator.hpp)
 
-
-add_executable(sx_gtests
-        src/utils/tests/str_test.cpp)
-target_link_libraries(sx_gtests gtest gtest_main pthread)
-
+find_package(GTest)
+if(GTEST_FOUND)
+    add_executable(sx_gtests
+            src/utils/tests/str_test.cpp)
+    target_link_libraries(sx_gtests gtest gtest_main pthread)
+endif()
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}")
 
