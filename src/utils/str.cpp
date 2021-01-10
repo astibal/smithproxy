@@ -42,7 +42,7 @@
 namespace  sx::str {
     void string_replace_all (std::string &target, std::string const &what, std::string const &replacement) {
 
-        if(what.empty() or target.empty() or replacement.empty()) return;
+        if(what.empty() or target.empty()) return;
 
         for(auto pos = target.find(what); pos != std::string::npos; ) {
 
