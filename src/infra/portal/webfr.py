@@ -121,7 +121,6 @@ def run_portal_all_background():
         else:
             logging.debug("Starting %s process..." % (ps_name,))
             callable(c)
-            time.sleep(1)
 
 
 def run_portal_plain(tenant_name,tenant_idx, drop_privs_routine=None):

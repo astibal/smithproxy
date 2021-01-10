@@ -165,7 +165,7 @@ void prepare_tenanting(bool is_custom_file) {
             CfgFactory::get().tenant_index = 0;
         }
 
-        _war("Starting tenant: '%s', index %d",
+        _war("Tenant: '%s', index %d",
              CfgFactory::get().tenant_name.c_str(),
              CfgFactory::get().tenant_index);
 
@@ -177,7 +177,7 @@ void prepare_tenanting(bool is_custom_file) {
             _war("Tenant config: %s",tenant_cfg.c_str());
             CfgFactory::get().config_file = tenant_cfg;
         } else {
-            _war("Tenant config %s not found. Using default.",tenant_cfg.c_str());
+            _war("Tenant config: using default",tenant_cfg.c_str());
         }
 
         this_daemon.set_tenant("smithproxy", CfgFactory::get().tenant_name);
@@ -439,7 +439,6 @@ int main(int argc, char *argv[]) {
 
         LogOutput::get()->dup2_cout(false);
         _inf("Entering daemon mode.");
-        std::cout << "Entering daemon mode.";
 
         int dem = this_daemon.daemonize();
         if(dem == 0) {
@@ -454,18 +453,6 @@ int main(int argc, char *argv[]) {
         }
 
     }
-    // write PID file (regardless if daemon or not)
-    if(! this_daemon.write_pidfile()) {
-
-        _fat("cannot write PID file!");
-        if(!SmithProxy::instance().cfg_daemonize) {
-            std::cerr << "cannot write PID file!" << std::endl;
-        }
-
-        CfgFactory::get().cleanup();
-        exit(-1);
-    }
-
     // openssl mem debugs
     prepare_mem_debugs();
 

@@ -205,14 +205,14 @@ std::vector<std::shared_ptr<std::thread>> backend_threads;
 // Configuration variables
 
 static std::string config_file;
-std::recursive_mutex merged_cfg_write_lock;
+std::recursive_mutex smithd_cfg_write_lock;
 static bool cfg_daemonize = false;
 bool cfg_mtrace_enable = false;
 static loglevel cfg_log_level = INF;
 static int cfg_log_console = false;
 static int cfg_smithd_workers = 0;
 
-static std::string cfg_log_file = "/var/log/smithmerged.%s.log";
+static std::string cfg_log_file = "/var/log/smithd.%s.log";
 static std::string cfg_smithd_listen_port = "/var/run/smithd.%s.sock";
 
 // Tenant configuration
@@ -306,7 +306,7 @@ static struct option long_options[] =
 bool load_config(std::string& config_f, bool reload) {
 
     bool ret = true;
-    std::lock_guard<std::recursive_mutex> l(merged_cfg_write_lock);
+    std::lock_guard<std::recursive_mutex> l(smithd_cfg_write_lock);
 
     auto& this_daemon = DaemonFactory::instance();
     auto& log = this_daemon.log;
@@ -326,7 +326,7 @@ bool load_config(std::string& config_f, bool reload) {
                 std::string log_target = cfg_log_file;
                 log_target = string_format(log_target.c_str(), cfg_tenant_name.c_str());
 
-                std::cout << "log target: " << log_target << std::endl;
+                //std::cout << "log target: " << log_target << std::endl;
 
                 // prepare custom crashlog file
                 std::string crlog = log_target + ".crashlog.log";
@@ -418,9 +418,7 @@ int main(int argc, char *argv[]) {
     std::string config_file_tenant = "/etc/smithproxy/smithd.%s.cfg";
     bool custom_config_file = false;
     
-    std::cout << "START" << std::endl;
-    
-    while(1) {
+    while(true) {
     /* getopt_long stores the option index here. */
         int option_index = 0;
     
@@ -474,11 +472,8 @@ int main(int argc, char *argv[]) {
 
     LogOutput::get()->level(DEB);
     
-    std::cout << "tenant" << std::endl;
-
     if(cfg_tenant_index.size() > 0 && cfg_tenant_name.size() > 0) {
         _war("Starting tenant: '%s', index %s",cfg_tenant_name.c_str(),cfg_tenant_index.c_str());
-        std::cout << "tenant " << cfg_tenant_name.c_str() << "/" << cfg_tenant_index.c_str() << std::endl;
 
         this_daemon.set_tenant("smithd", cfg_tenant_name);
     } 
@@ -503,7 +498,7 @@ int main(int argc, char *argv[]) {
         
         std::string tenant_cfg = string_format(config_file_tenant.c_str(),cfg_tenant_name.c_str());
         
-        std::cout << "tenant config " << tenant_cfg << std::endl;
+        _dia("tenant config: %s", tenant_cfg.c_str());
         
         struct stat s;
         if (stat(tenant_cfg.c_str(),&s) == 0) {
@@ -519,7 +514,7 @@ int main(int argc, char *argv[]) {
         exit(2);
     }
 
-    std::cout << "loading config from " << config_file << std::endl;
+    _dia("loading config from %s", config_file.c_str());
     
     if (!load_config(config_file)) {
         if(config_file_check_only) {
@@ -528,7 +523,7 @@ int main(int argc, char *argv[]) {
         }
         else {
             _err("Error loading config file on startup.");
-            std::cout << "error loading config" << std::endl;
+            std::cerr << "error loading config" << std::endl;
             exit(1);
         }
     }
@@ -544,13 +539,7 @@ int main(int argc, char *argv[]) {
         mtrace();
     }
 #endif
-  
-    if(this_daemon.exists_pidfile()) {
-        _fat("There is PID file already in the system.");
-        _fat("Please make sure smithd is not running, remove %s and try again.", this_daemon.pid_file.c_str());
-        exit(-5);
-    }
-    
+
     if(cfg_daemonize) {
         if(LogOutput::get()->targets().size() <= 0) {
             _fat("Cannot daemonize without logging to file.");
@@ -560,21 +549,18 @@ int main(int argc, char *argv[]) {
         LogOutput::get()->dup2_cout(false);
         _inf("entering service mode");
         int dem = this_daemon.daemonize();
+
         if(dem == 0) {
             // master - to exit
             exit(0);
-        }
-        else if(dem < 0) {
-            // slave, but failed
+        } else if (dem < 0) {
             exit(-1);
         }
+    } else {
+        // also when non-daemon, write out PID file
+        this_daemon.write_pidfile();
     }
-    // write out PID file
-    this_daemon.write_pidfile();
 
-    //     atexit(__libc_freeres);    
-    //     CRYPTO_malloc_debug_init();
-    //     CRYPTO_dbg_set_options(V_CRYPTO_MDEBUG_ALL);
     CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON);
 
     std::string friendly_thread_name_smithd = "sxy_smithd";
@@ -637,7 +623,6 @@ int main(int argc, char *argv[]) {
     }
 
     // cleanup
-    this_daemon.unlink_pidfile();
     unlink(cfg_smithd_listen_port.c_str());
 }
 

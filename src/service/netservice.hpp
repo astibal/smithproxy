@@ -128,6 +128,7 @@ std::vector<Listener*> NetworkServiceFactory::prepare_listener (port_type port, 
         auto err = ss.str();
 
         _fat(err.c_str());
+        std::cerr << err.c_str() << std::endl;
         delete listener;
 
         throw sx::netservice_cannot_bind(err.c_str());

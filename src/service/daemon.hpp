@@ -84,6 +84,7 @@ struct DaemonFactory : public LoganMate {
 
     DaemonFactory(DaemonFactory const&) = delete;
     DaemonFactory& operator=(DaemonFactory const&) = delete;
+    virtual ~DaemonFactory() { unlink_pidfile(); }
 private:
     DaemonFactory() : log(logan_attached<DaemonFactory>(this, "service")) {
         ::memset((void*)crashlog_file, 0, LOG_FILENAME_SZ);

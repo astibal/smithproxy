@@ -141,15 +141,15 @@ class Daemon:
         os.dup2(so.fileno(), sys.stdout.fileno())
         os.dup2(se.fileno(), sys.stderr.fileno())
     
-        # write pidfile
-        atexit.register(self.delpid)
         pid = str(os.getpid())
-
         Daemon.log.debug("pid = %s", pid)
 
         with open(self.pidfile, "w+") as f:
             f.write("%s" % pid)
-            
+
+        # write pidfile
+        atexit.register(self.delpid)
+
         # reset if this will be called again! 
 
         Daemon.log.debug(self.nicename + ": daemonize returning " + str(True))
@@ -192,9 +192,10 @@ class Daemon:
         pid = self.getpid()
     
         if pid > 0:
-            message = "pidfile %s already exist. Daemon already running?"
-            Daemon.log.error(self.nicename + ": " + message % self.pidfile)
-            return False
+            if self.is_running():
+                message = "pidfile %s already exist. Daemon already running?"
+                Daemon.log.error(self.nicename + ": " + message % self.pidfile)
+                return False
         
         # Start the daemon
         if not self.daemonize():

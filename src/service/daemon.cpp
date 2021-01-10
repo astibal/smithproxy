@@ -75,13 +75,6 @@ int DaemonFactory::daemonize () {
 
     _dia("daemonize start");
 
-    struct stat st{0};
-    if(stat(pid_file.c_str(), &st) == 0) {
-        _err("There seems to be smithproxy already running in the system. Aborting.");
-
-        return -1;
-    }
-
     /* Fork off the parent process */
     pid = fork();
     if (pid < 0) {
@@ -95,6 +88,20 @@ int DaemonFactory::daemonize () {
             _dia("daemonize: exiting from master");
 
             return 0;
+    } else {
+
+        // if daemonizing, write pid file only from slave (master will be shut down)
+
+        struct stat st{0};
+        if(stat(pid_file.c_str(), &st) == 0) {
+            _err("There seems to be smithproxy already running in the system");
+
+            return -10;
+        } else {
+            if(not write_pidfile()) {
+                return -2;
+            }
+        }
     }
 
     /* Change the file mode mask */
@@ -138,13 +145,19 @@ bool DaemonFactory::write_pidfile() {
     FILE* pf = fopen(pid_file.c_str(), "w");
 
     if(pf) {
-        fprintf(pf, "%d", getpid());
+        int written = fprintf(pf, "%d", getpid());
         fclose(pf);
 
-        pid_file_owned = true;
+        if(written > 0) {
+            pid_file_owned = true;
+            return true;
+        } else {
+            std::cerr << "cannot write into pid file" << std::endl;
+            _err("cannot write into pid file");
+        }
 
-        return true;
     } else {
+        std::cerr << "cannot open pid file" << std::endl;
         _err("cannot open pid file");
     }
 

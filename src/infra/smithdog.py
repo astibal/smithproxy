@@ -148,7 +148,7 @@ class BendDaemon(Daemon):
         try:
             bend.run_bend(tenant_name=TENANT_NAME, tenant_index=TENANT_IDX)
         except Exception as e:
-            flog.info("Failure during execution: %s" % (str(e)))
+            flog.info("bend: failure during execution: %s" % (str(e)))
             print("Failure during execution: %s" % (str(e)))
 
             return False
@@ -171,7 +171,7 @@ class BendBrodDaemon(Daemon):
             b = bendbrod.BendBroker(TENANT_IDX, TENANT_NAME)
             b.run()
         except Exception as e:
-            flog.info("Failure during execution: %s" % (str(e)))
+            flog.info("bendbrod: failure during execution: %s" % (str(e)))
             return  False
 
         return True
@@ -205,6 +205,7 @@ class SmithProxyDog(Daemon):
         Daemon.__init__(self, 'smithdog', SMITHDOG_PIDFILE % (TENANT_NAME,), stdin, stdout, stderr)
         self.exec_info = []  # tuples of nicename,executable,pidfile_of_executable
         self.sub_daemons = []  # daemons which we are starting via Daemon class interface
+        self.startup = True
         self.poll_interval = poll_interval
         self.last_ok_log = 0
 
@@ -215,16 +216,16 @@ class SmithProxyDog(Daemon):
             return True
         return False
 
-    # this will be needed to reset if the status was not OK => we should print out OK then immediatelly
+    # this will be needed to reset if the status was not OK => we should print out OK then immediately
     def reset_log_ok(self):
         self.last_ok_log = 0
 
-    def status(self, print_stdout=False, auto_restart=True):
+    def status(self, print_stdout=False, auto_restart=True, print_nice=False):
 
         ret = True
         r = SmithProxyDog.check_running_pidfile(self.pidfile)
         if not r:
-            SmithProxyDog.print_process_status(r, self.nicename, print_stdout)
+            SmithProxyDog.print_process_status(r, self.nicename, print_stdout, print_nice=print_nice)
             ret = r
             if auto_restart:
                 msg = "Cannot automatically fix myself: please run the 'start' parameter"
@@ -235,7 +236,7 @@ class SmithProxyDog(Daemon):
         for (nicename, exe, pidfile, add) in self.exec_info:
             r = SmithProxyDog.check_running_pidfile(pidfile)
             if not r:
-                SmithProxyDog.print_process_status(r, nicename, print_stdout)
+                SmithProxyDog.print_process_status(r, nicename, print_stdout=print_stdout, print_nice=print_nice)
                 ret = r
                 if auto_restart:
                     msg = "fixing: " + nicename
@@ -255,7 +256,7 @@ class SmithProxyDog(Daemon):
         for d in self.sub_daemons:
             r = SmithProxyDog.check_running_pidfile(d.pidfile)
             if not r:
-                SmithProxyDog.print_process_status(r, d.nicename, print_stdout)
+                SmithProxyDog.print_process_status(r, d.nicename, print_stdout=print_stdout, print_nice=print_nice)
                 ret = r
                 if auto_restart:
                     msg = "fixing: " + d.nicename
@@ -290,8 +291,16 @@ class SmithProxyDog(Daemon):
         return ret
 
     def run(self) -> bool:
+
+        self.startup = True
+
         while True:
             try:
+
+                if self.startup:
+                    time.sleep(5*self.poll_interval)
+                    self.startup = False
+
                 self.status(False)
                 time.sleep(self.poll_interval)
             except Exception as e:
@@ -301,19 +310,30 @@ class SmithProxyDog(Daemon):
         return True
 
     @staticmethod
-    def print_process_status(r, nicename, print_stdout=False):
-        statmsg = "NOT running"
-        prep = "WARNING: "
+    def print_process_status(r, nicename, print_stdout=False, print_nice=False):
+
+        if print_nice:
+
+            statmsg_ok = "started"
+            statmsg_nok = "stopped"
+            prep = "  "
+        else:
+            statmsg_ok = "running"
+            statmsg_nok = "NOT running"
+            prep = ""
+
         if r:
-            statmsg = "running"
-            prep = ''
+            msg = ("%-17s : " % (nicename,)) + statmsg_ok
+        else:
+            msg = ("%-17s : " % (nicename,)) + statmsg_nok
+
         if not print_stdout:
             if not r:
-                flog.warning("Status of '" + nicename + "': " + statmsg)
+                flog.warning(msg)
             else:
-                flog.info("Status of '" + nicename + "': " + statmsg)
+                flog.info(msg)
         else:
-            print(prep + "Status of '" + nicename + "': " + statmsg)
+            print(msg)
 
     @staticmethod
     def check_running_pidfile(pidfile):
@@ -377,7 +397,7 @@ if __name__ == "__main__":
     bend_.log = flog
     daemon.sub_daemons.append(bend_)
 
-    # Backend broker daemon -- unprivilegged connections from clients
+    # Backend broker daemon -- unprivileged connections from clients
     bendbrod_ = BendBrodDaemon('bendbrod', BENDBROD_PIDFILE % (TENANT_NAME,))
     bendbrod_.pwd = INFRA_PATH
     bendbrod_.log = flog
@@ -403,8 +423,8 @@ if __name__ == "__main__":
     if len(sys.argv) >= 2:
 
         if 'start' == sys.argv[1]:
-            flog.info("STARTING ALL DAEMONS!")
-            print("STARTING ALL DAEMONS!")
+            flog.info("starting all daemons")
+            print("Starting all daemons")
 
             for d in daemon.sub_daemons:
                 flog.info("Starting " + d.nicename)
@@ -439,24 +459,24 @@ if __name__ == "__main__":
 
         elif 'stop' == sys.argv[1]:
 
-            flog.info("STOPPING ALL DEAMONS!")
-            print("STOPPING ALL DEAMONS!")
+            flog.info("stopping all daemons")
+            print("stopping all daemons\n")
 
-            flog.info("Stopping " + daemon.nicename)
+            flog.info("  stopping " + daemon.nicename)
             daemon.keeppid = False
             daemon.stop()
 
             for d in daemon.sub_daemons:
-                flog.info("Stopping " + d.nicename)
+                flog.info("  stopping " + d.nicename)
                 d.stop()
                 # flog.info("  finished")
 
             for (n, e, p, a) in daemon.exec_info:
-                flog.info("Stopping " + n)
+                flog.info("  stopping " + n)
                 stop_exec(n, p)
                 # flog.info("  finished")
 
-            daemon.status(True, auto_restart=False)
+            daemon.status(print_stdout=True, auto_restart=False, print_nice=True)
 
         elif 'status' == sys.argv[1]:
             daemon.status(True, auto_restart=False)

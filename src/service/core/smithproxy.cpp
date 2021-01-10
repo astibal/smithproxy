@@ -48,7 +48,6 @@
 SmithProxy::~SmithProxy () {
 
     memPool::bailing = true;
-    DaemonFactory::instance().unlink_pidfile();
 }
 
 void SmithProxy::reload() {

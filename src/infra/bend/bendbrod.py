@@ -58,8 +58,8 @@ class BendBroker(ServiceBase):
         if tenant_name:
             self.tenant_name = tenant_name
 
-        self.cert_file = '/etc/smithproxy/certs/default/srv-cert.pem'
-        self.key_file = '/etc/smithproxy/certs/default/srv-key.pem'
+        self.cert_file = '/etc/smithproxy/certs/default/portal-cert.pem'
+        self.key_file = '/etc/smithproxy/certs/default/portal-key.pem'
 
         self.context = SSL.Context()
         self.context.load_cert(self.cert_file, keyfile=self.key_file)
@@ -75,16 +75,6 @@ class BendBroker(ServiceBase):
 
         self.l_server = make_server('127.0.0.1', self.service_port, application)
         self.r_server = SoapClient("http://localhost:%d/?wsdl" % (self.bend_port,))
-
-        # self.l_server.registerFunction(SOAPpy.MethodSig(self.ping, keywords=0, context=1))
-        # self.l_server.registerFunction(SOAPpy.MethodSig(self.whoami, keywords=0, context=1))
-        # self.l_server.registerFunction(SOAPpy.MethodSig(self.authenticate, keywords=0, context=1))
-        #
-        # self.l_server.registerFunction(SOAPpy.MethodSig(self.admin_login, keywords=0, context=1))
-        # self.l_server.registerFunction(SOAPpy.MethodSig(self.admin_token_list, keywords=0, context=1))
-        #
-        # self.l_server.registerFunction(SOAPpy.MethodSig(self.admin_keepalive, keywords=0, context=1))
-        # self.l_server.registerFunction(SOAPpy.MethodSig(self.admin_logout, keywords=0, context=1))
 
         self.create_logger()
         self.load_config()
