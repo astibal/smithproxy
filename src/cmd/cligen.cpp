@@ -142,58 +142,6 @@ void cfg_generate_cli_hints(Setting& setting, std::vector<std::string>* this_lev
     }
 }
 
-std::vector<std::string> load_valid_options(std::string const& section, std::string const& varname) {
-
-    std::vector<std::string> ret;
-
-    auto fill_attributes = [&](std::vector<std::string> keys) {
-        for(auto const& k: keys) {
-            ret.push_back(k);
-        }
-    };
-
-    if(section.find("policy.[") == 0) {
-
-        if(varname == "dst" || varname == "src") {
-            fill_attributes(CfgFactory::get().keys_of_db_address());
-        }
-        else if(varname == "proto" ) {
-            fill_attributes(CfgFactory::get().keys_of_db_proto());
-        }
-        else if(varname == "sport" || varname == "dport") {
-            fill_attributes(CfgFactory::get().keys_of_db_port());
-        }
-        else if(varname == "tls_profile") {
-            fill_attributes(CfgFactory::get().keys_of_db_prof_tls());
-        }
-        else if(varname == "detection_profile") {
-            fill_attributes(CfgFactory::get().keys_of_db_prof_detection());
-        }
-        else if(varname == "content_profile") {
-            fill_attributes(CfgFactory::get().keys_of_db_prof_content());
-        }
-        else if(varname == "auth_profile") {
-            fill_attributes(CfgFactory::get().keys_of_db_prof_auth());
-        }
-        else if(varname == "alg_dns_profile") {
-            fill_attributes(CfgFactory::get().keys_of_db_prof_alg_dns());
-        }
-        else if(varname == "nat") {
-            fill_attributes( { "none", "auto" } );
-        }
-        else if(varname == "action") {
-            fill_attributes( { "accept", "reject" });
-        }
-        else if(varname == "disabled") {
-            fill_attributes( { "false", "true" });
-        }
-
-    }
-
-    return ret;
-}
-
-
 void generate_options_combination(cli_def* cli, cli_command* parent, std::vector<std::string> const& options, int mode, CliCallbacks::callback set_cb, int& max_depth) {
 
     if(max_depth <= 0) {
@@ -222,7 +170,13 @@ void cli_generate_set_command_args(struct cli_def *cli, cli_command* parent, std
     auto set_cb = std::get<1>(cb_entry).cmd_set();
     int mode = std::get<0>(cb_entry);
 
-    auto const& opts = load_valid_options(section, varname);
+    std::string masked = sx::str::cli::mask_all(section + "." + varname);
+    std::vector<std::string> opts;
+
+    auto cli_e = CliHelp::get().find(masked);
+    if(cli_e) {
+        opts = cli_e->get().suggestion_generate(section, varname);
+    }
 
     auto& this_setting = CfgFactory::cfg_root().lookup((section + "." + varname).c_str());
     auto this_type = this_setting.getType();

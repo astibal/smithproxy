@@ -87,6 +87,35 @@ CliElement::filter_retval VALUE_UINT_RANGE(std::string const& v) {
 };
 
 
+
+class is_in_vector {
+public:
+    using container_fetcher = std::vector<std::string>();
+
+    is_in_vector(container_fetcher v, std::string n): get_the_container(std::function(v)), name(std::move(n)) {}
+    is_in_vector(is_in_vector const& ref) {
+        get_the_container = ref.get_the_container;
+        name = ref.name;
+    }
+    is_in_vector& operator=(is_in_vector const& ref) = default;
+
+
+    CliElement::filter_retval operator()(std::string const& v) {
+
+        auto what = std::invoke(get_the_container);
+
+        if(std::any_of(what.begin(), what.end(), [&v](auto const& k){ return k == v; }))
+            return  CliElement::filter_retval::accept(v);
+
+        return CliElement::filter_retval::reject(name);
+    }
+private:
+    std::function<container_fetcher> get_the_container;
+    std::string name;
+};
+
+
+
 void CliHelp::init() {
 
     add("default", "")
@@ -295,8 +324,46 @@ void CliHelp::init() {
 
     // sections
     add("settings.auth_portal", "** configure authentication portal settings");
+    add("settings.auth_portal.address", "IP of FQDN where user is redirected for authentication")
+    .may_be_empty(false);
+    add("settings.auth_portal.http_port", "port where user is redirected for HTTP authentication")
+            .may_be_empty(false)
+            .value_filter(VALUE_UINT_RANGE<1024,65535>);
+    add("settings.auth_portal.https_port", "port where user is redirected for HTTPS authentication")
+            .may_be_empty(false)
+            .value_filter(VALUE_UINT_RANGE<1024,65535>);
+    add("settings.auth_portal.ssl_key", "key for HTTPS authentication certificate")
+            .may_be_empty(false)
+            .value_filter(CliElement::VALUE_FILE);
+    add("settings.auth_portal.ssl_cert", "HTTPS authentication certificate file")
+            .may_be_empty(false)
+            .value_filter(CliElement::VALUE_FILE);
+    add("settings.auth_portal.magic_ip", "Rendezvous IP for client traffic")
+            .may_be_empty(false)
+            .value_filter([](auto const&v){
+                auto ip = CidrAddress(v);
+                if(ip.cidr()) {
+                    if(std::string(cidr_numhost(ip.cidr())) == "1") {
+                        return CliElement::filter_retval::accept(v);
+                    }
+                }
+                return CliElement::filter_retval::reject("must me a valid host IP address");
+            });
+
+
+
     add("settings.cli", "** configure CLI specific settings");
+    add("settings.cli.port", "base port where CLI is listening for telnet connections")
+        .may_be_empty(false)
+        .value_filter(VALUE_UINT_RANGE<1024, 65535>);
+
+    add("settings.cli.enable_password", "enable password");
+
+
     add("settings.socks", "** configure SOCKS specific settings");
+    add("settings.socks.async_dns", "run DNS requests asynchronously")
+        .may_be_empty(false)
+        .value_filter(CliElement::VALUE_BOOL);
 
 
 
@@ -322,14 +389,87 @@ void CliHelp::init() {
 
     add("policy.[x].proto", "protocol to match (see proto_objects)")
         .may_be_empty(false)
-        .value_filter([](std::string const& v) -> auto {
-            for(auto const& proto: CfgFactory::get().keys_of_db_proto()) {
-                if(v == proto) {
-                    return CliElement::filter_retval::accept(v);
-                }
-            }
-            return CliElement::filter_retval::reject("must be a configured protocol");
+        .value_filter(is_in_vector([]() { return CfgFactory::get().keys_of_db_proto(); },"must be in proto_objects"))
+        .suggestion_generator([](std::string const& section, std::string const& variable) {
+            return CfgFactory::get().keys_of_db_proto();
         });
+
+    add("policy.[x].src", "source address to match")
+        .may_be_empty(true)
+        .value_filter(is_in_vector([]() { return CfgFactory::get().keys_of_db_address(); },"must be in address_objects"))
+        .suggestion_generator([](std::string const& section, std::string const& variable) {
+            return CfgFactory::get().keys_of_db_address();
+        });
+    add("policy.[x].dst", "destination address to match")
+            .may_be_empty(true)
+            .value_filter(is_in_vector([]() { return CfgFactory::get().keys_of_db_address(); },"must be in address_objects"))
+            .suggestion_generator([](std::string const& section, std::string const& variable) {
+                return CfgFactory::get().keys_of_db_address();
+            });
+
+    add("policy.[x].dport", "destination port to match")
+            .may_be_empty(true)
+            .value_filter(is_in_vector([]() { return CfgFactory::get().keys_of_db_port(); },"must be in port_objects"))
+            .suggestion_generator([](std::string const& section, std::string const& variable) {
+                return CfgFactory::get().keys_of_db_port();
+            });
+
+    add("policy.[x].sport", "source port to match")
+            .may_be_empty(true)
+            .value_filter(is_in_vector([]() { return CfgFactory::get().keys_of_db_port(); },"must be in port_objects"))
+            .suggestion_generator([](std::string const& section, std::string const& variable) {
+                return CfgFactory::get().keys_of_db_port();
+            });
+
+    add("policy.[x].action", "action to take with matching traffic")
+            .may_be_empty(false)
+            .value_filter(is_in_vector([]() -> std::vector<std::string> { return {"accept", "reject"}; },"accept, or reject"))
+            .suggestion_generator([](std::string const& section, std::string const& variable) -> std::vector<std::string> {
+                return {"accept", "reject"}; ;
+            });
+
+    add("policy.[x].nat", "nat options")
+            .may_be_empty(false)
+            .value_filter(is_in_vector([]() -> std::vector<std::string> { return {"auto", "none"}; },"auto, or none"))
+            .suggestion_generator([](std::string const& section, std::string const& variable) -> std::vector<std::string> {
+                return {"auto", "none"};;
+            });
+
+    add("policy.[x].tls_profile", "tls options")
+            .may_be_empty(true)
+            .value_filter(is_in_vector([]() -> std::vector<std::string> { return CfgFactory::get().keys_of_db_prof_tls(); },"must be in tls_profiles"))
+            .suggestion_generator([](std::string const& section, std::string const& variable) -> std::vector<std::string> {
+                return CfgFactory::get().keys_of_db_prof_tls();
+            });
+
+    add("policy.[x].detection_profile", "detection options")
+            .may_be_empty(true)
+            .value_filter(is_in_vector([]() -> std::vector<std::string> { return CfgFactory::get().keys_of_db_prof_detection(); },"must be in detection_profiles"))
+            .suggestion_generator([](std::string const& section, std::string const& variable) -> std::vector<std::string> {
+                return CfgFactory::get().keys_of_db_prof_detection();
+            });
+
+    add("policy.[x].content_profile", "content options")
+            .may_be_empty(true)
+            .value_filter(is_in_vector([]() -> std::vector<std::string> { return CfgFactory::get().keys_of_db_prof_content(); },"must be in content_profiles"))
+            .suggestion_generator([](std::string const& section, std::string const& variable) -> std::vector<std::string> {
+                return CfgFactory::get().keys_of_db_prof_content();
+            });
+
+    add("policy.[x].auth_profile", "auth options")
+            .may_be_empty(true)
+            .value_filter(is_in_vector([]() -> std::vector<std::string> { return CfgFactory::get().keys_of_db_prof_auth(); },"must be in auth_profiles"))
+            .suggestion_generator([](std::string const& section, std::string const& variable) -> std::vector<std::string> {
+                return CfgFactory::get().keys_of_db_prof_auth();
+            });
+
+    add("policy.[x].auth_profile", "auth options")
+            .may_be_empty(true)
+            .value_filter(is_in_vector([]() -> std::vector<std::string> { return CfgFactory::get().keys_of_db_prof_auth(); },"must be in auth_profiles"))
+            .suggestion_generator([](std::string const& section, std::string const& variable) -> std::vector<std::string> {
+                return CfgFactory::get().keys_of_db_prof_auth();
+            });
+
 
 }
 

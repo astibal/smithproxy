@@ -83,6 +83,7 @@ struct CliElement {
 
 
     using value_filter_fn = filter_retval(std::string const&);
+    using suggestion_generator_fn = std::vector<std::string>(std::string const&, std::string const&);
 
     CliElement() : name_("<unknown>") {};
     explicit CliElement(std::string name) : name_(std::move(name)) {}
@@ -105,6 +106,8 @@ struct CliElement {
     // don't use std::function as reference
     std::list<std::function<value_filter_fn>> value_filter_= { CliElement::VALUE_ANY };
 
+    std::function<suggestion_generator_fn> gen_suggestions_ = SUGGESTION_GENERATOR_EMPTY;
+
 
     [[ nodiscard ]] std::string const& name() const { return name_; }
 
@@ -121,6 +124,12 @@ struct CliElement {
     [[ nodiscard ]] std::list<std::function<value_filter_fn>> const& value_filter() const { return value_filter_; };
     CliElement& value_filter(std::function<value_filter_fn> v) { value_filter_.push_back(v); return *this; };
 
+    [[ nodiscard ]] std::function<suggestion_generator_fn> suggestion_generator() const { return gen_suggestions_; }
+    CliElement& suggestion_generator(std::function<suggestion_generator_fn> v) { gen_suggestions_ = v;  return *this; }
+    std::vector<std::string> suggestion_generate(std::string const& section, std::string const& variable) { return std::invoke(gen_suggestions_, section, variable); };
+
+
+    static inline std::function<suggestion_generator_fn> SUGGESTION_GENERATOR_EMPTY = [](std::string const& section, std::string const& variable) { return std::vector<std::string>(); };
 
     static inline std::function<value_filter_fn> VALUE_NONE = [](std::string const& v) -> filter_retval { return  filter_retval::reject("cannot be changed"); };
 
