@@ -463,11 +463,11 @@ void CliHelp::init() {
                 return CfgFactory::get().keys_of_db_prof_auth();
             });
 
-    add("policy.[x].auth_profile", "auth options")
+    add("policy.[x].alg_dns_profile", "alg_dns_profile options")
             .may_be_empty(true)
-            .value_filter(is_in_vector([]() -> std::vector<std::string> { return CfgFactory::get().keys_of_db_prof_auth(); },"must be in auth_profiles"))
+            .value_filter(is_in_vector([]() -> std::vector<std::string> { return CfgFactory::get().keys_of_db_prof_alg_dns(); },"must be in alg_dns_profile"))
             .suggestion_generator([](std::string const& section, std::string const& variable) -> std::vector<std::string> {
-                return CfgFactory::get().keys_of_db_prof_auth();
+                return CfgFactory::get().keys_of_db_prof_alg_dns();
             });
 
 
