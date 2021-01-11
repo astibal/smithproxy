@@ -471,6 +471,9 @@ void cli_generate_commands (cli_def *cli, std::string const &this_section, cli_c
 
                 std::get<1>(section_cb).cli_edit(edit_sub);
                 std::get<1>(section_cb).cmd_edit(cb_edit);
+
+
+                cli_generate_commands(cli, section_path, nullptr);
             }
 
             if(remove_enabled) {
