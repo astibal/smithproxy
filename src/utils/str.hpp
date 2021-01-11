@@ -46,5 +46,6 @@ namespace sx::str {
     namespace cli {
         std::string mask_array_index(std::string const& varname);
         std::string mask_parent(std::string const& varname);
+        std::string mask_all(std::string const& varname);
     }
 }

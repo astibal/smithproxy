@@ -114,6 +114,15 @@ namespace  sx::str {
 
             return varname;
         }
+
+        std::string mask_all(std::string const& varname) {
+            auto masked = mask_array_index(varname);
+            if(masked == varname) {
+                masked = mask_parent(varname);
+            }
+
+            return  masked;
+        }
     }
 
 }
