@@ -1,6 +1,6 @@
 
 name: smithproxy
-version: 0.9.11-160-g43c4ad9
+version: 0.9.12-rc1-g43c4ad9
 summary: Fast and featured transparent TCP/UDP/TLS proxy
 description: |
  Smithproxy is fast transparent TCP/UDP/TLS (SSL) proxy. It's highly configurable
@@ -42,7 +42,7 @@ description: |
 
   ... and many more!
 
-grade: devel # must be 'stable' to release into candidate/stable channels
+grade: stable # must be 'stable' to release into candidate/stable channels
 confinement: strict # use 'strict' once you have the right plugs and slots
 
 base: core18

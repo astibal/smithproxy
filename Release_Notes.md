@@ -33,6 +33,8 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 
 * **NOTE: CLI config changes are still experimental**
 
+* release candidate 1
+* smithproxy has now extensive CLI configuration support 
 * release builds don't require libunwind (which is good news on some platforms)
 * experimental memory mode  'mempool_all' - leak troubleshooting feature (must be compiled in)
 * cli `set` commands will expand full chain of argument values if attribute is array
@@ -60,6 +62,7 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 * added sha256 sums to build uploads
 
 ### Bug fixes & various
+* fix (stability) occasional CPU spikes during TLS handshake caused by sockets input race
 * fix daemon factory handling of pid files (fixes 'randomly not stopping via server or sx_ctl')
 * fix various mempool_all crashes on exit (mempool is experimental - common releases are not affected) 
 * fix abort call from signal handler - use _exit
