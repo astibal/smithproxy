@@ -1431,20 +1431,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
         return;
     }
     
-    std::string block_additinal_info;
-    std::string block_override;
 
-    if(scom->opt_failed_certcheck_override)   {
-        std::string block_override_pre = "<form action=\"/SM/IT/HP/RO/XY";
-
-        std::string key = whitelist_make_key(cx);
-        if(cx->peer()) {
-            block_override_pre += "/override/target=" + key;//cx->peer()->host() + "#" + cx->peer()->port() + "&";
-        }
-        std::string block_target_info;
-        block_override = block_override_pre + R"(orig_url=/"><input type="submit" value="Override" class="btn-red"></form>)";
-    }
-    
     auto* app_request = dynamic_cast<app_HttpRequest*>(cx->application_data);
     if(app_request != nullptr) {
         
@@ -1452,8 +1439,40 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
 //         _inf(" ---     uri: %s",app_request->uri.c_str());
 //         _inf(" --- origuri: %s",app_request->original_request().c_str());
 //         _inf(" --- referer: %s",app_request->referer.c_str());
-        
-        
+
+        auto find_orig_uri = [&]() -> std::optional<std::string> {
+            auto request = app_request->request();
+            auto a = request.find("orig_url");
+            if(a != std::string::npos) {
+                //len of "orig_url=" is 9
+                return request.substr(a+9, std::string::npos);
+            }
+
+            return std::nullopt;
+        };
+
+
+        auto generate_block_override = [&]() -> std::string {
+            std::string block_override;
+
+            if (scom->opt_failed_certcheck_override) {
+                std::string block_override_pre = R"(<form action="/SM/IT/HP/RO/XY)";
+
+                std::string key = whitelist_make_key(cx);
+                if (cx->peer()) {
+                    block_override_pre += "/override/target=" + key;
+                    if (not app_request->uri.empty()) {
+                        block_override_pre += "&orig_url=" + find_orig_uri().value_or("/");
+                    }
+                }
+                std::string block_target_info;
+                block_override =
+                        block_override_pre + R"("><input type="submit" value="Override" class="btn-red"></form>)";
+            }
+
+            return block_override;
+        };
+
         if(app_request->request().find("/SM/IT/HP/RO/XY/override") != std::string::npos) {
             
             // PHASE IV.
@@ -1464,16 +1483,8 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             
                 _dia("ssl_override: ph4 - asked for verify override for %s", whitelist_make_key(cx).c_str());
                 
-                std::string orig_url = "about:blank";
-                
-                //we require orig_url is the last argument!!!
-                auto a = app_request->request().find("orig_url");
-                if(a != std::string::npos) {
-                    //len of "orig_url=" is 9
-                    orig_url = app_request->request().substr(a+9);
-                }
-                
-                
+                std::string orig_url = find_orig_uri().value_or("/");
+
                 std::string override_applied = string_format(
                         R"(<html><head><meta http-equiv="Refresh" content="0; url=%s"></head><body><!-- applied, redirecting back to %s --></body></html>)",
                                                             orig_url.c_str(),orig_url.c_str());
@@ -1517,7 +1528,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
         
             _dia("ssl_override: ph3 - warning replacement for %s", whitelist_make_key(cx).c_str());
             
-            std::string repl = replacement_ssl_page(scom, app_request, block_override);
+            std::string repl = replacement_ssl_page(scom, app_request, generate_block_override());
 
             cx->to_write((unsigned char*)repl.c_str(),repl.size());
             set_replacement_msg_ssl(scom);
@@ -1541,11 +1552,10 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             
             _dia("ssl_override: ph1 - redir to / for %s", whitelist_make_key(cx).c_str());
             
-            std::string redir_pre("<html><head><script>top.location.href=\"");
-            std::string redir_suf("\";</script></head><body></body></html>");  
-            
-            //std::string repl = "<html><head><meta http-equiv=\"Refresh\" content=\"0; url=/\"></head><body></body></html>";            
-            std::string repl = redir_pre + "/" + redir_suf;   
+            std::string redir_pre(R"(<html><head><script>top.location.href=")");
+            std::string redir_suf(R"(";</script></head><body></body></html>)");
+
+            std::string repl = redir_pre + "/SM/IT/HP/RO/XY/warning?q=1&orig_url=" +app_request->uri + redir_suf;
             repl = html()->render_server_response(repl);
             
             cx->to_write((unsigned char*)repl.c_str(),repl.size());

@@ -127,9 +127,9 @@ struct app_DNS : public ApplicationData {
 };
 
 struct ProtoRex {
-    static std::regex const& http_req_get() { static std::regex r{"(GET|POST) *([^ \r\n\?]+)([^ \r\n]*)"}; return r; };
-    static std::regex const& http_req_ref() { static std::regex r{"Referer: *([^ \r\n]+)"}; return r; };
-    static std::regex const& http_req_host(){ static std::regex r{"Host: *([^ \r\n]+)"}; return r; };
+    static std::regex const& http_req_get() { static std::regex r{R"((GET|POST) *([^ \r\n\?]+)\??([^ \r\n]*))"}; return r; };
+    static std::regex const& http_req_ref() { static std::regex r{R"(Referer: *([^ \r\n]+))"}; return r; };
+    static std::regex const& http_req_host(){ static std::regex r{R"(Host: *([^ \r\n]+))"}; return r; };
 };
 
 class MitmHostCX : public AppHostCX, public socle::sobject, public ProtoRex {

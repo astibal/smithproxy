@@ -133,7 +133,7 @@ void MitmHostCX::on_detect_www_get(const std::shared_ptr<duplexFlowMatch> &x_sig
         // Suspicion is it has to do something with MUSL or alpine platform specific. 256 is good enough to set for general use,
         // as there is nothing dependant on full URI and more can slow box down for not real benefit.
 
-        std::string buffer_data_string((const char*)buffer_get->data(), std::min(static_cast<int>(buffer_get->size()), 128));
+        std::string buffer_data_string((const char*)buffer_get->data(),  buffer_get->size());
 
         std::smatch m_get;
         std::smatch m_ref;
@@ -144,64 +144,74 @@ void MitmHostCX::on_detect_www_get(const std::shared_ptr<duplexFlowMatch> &x_sig
         std::string print_request;
 
 
-        if(std::regex_search (buffer_data_string, m_ref, http_req_ref() )) {
+        auto ix_ref = buffer_data_string.find("Referer: ");
+        if(ix_ref != std::string::npos) {
+            auto ref_start = buffer_data_string.substr(ix_ref, std::min(std::size_t (128), buffer_data_string.size() - ix_ref));
+            if (std::regex_search(ref_start, m_ref, http_req_ref())) {
 
-            str_temp = m_ref[1].str();
+                str_temp = m_ref[1].str();
 
-            //don't add referer to log.
-            //print_request += str_temp;
+                //don't add referer to log.
+                //print_request += str_temp;
 
-            if(application_data == nullptr) {
-                application_data = new app_HttpRequest;
-            }
-
-            auto* app_request = dynamic_cast<app_HttpRequest*>(application_data);
-            if(app_request != nullptr) {
-                app_request->referer = str_temp;
-                _deb("Referer: %s", ESC(app_request->referer));
-            }
-
-
-        }
-
-        if(std::regex_search (buffer_data_string, m_host, http_req_host() ))  {
-            if(! m_host.empty()) {
-                str_temp = m_host[1].str();
-                print_request += str_temp;
-
-                if(application_data == nullptr) {
+                if (application_data == nullptr) {
                     application_data = new app_HttpRequest;
                 }
 
-                auto* app_request = dynamic_cast<app_HttpRequest*>(application_data);
-                if(app_request != nullptr) {
-                    app_request->host = str_temp;
-                    _dia("Host: %s", app_request->host.c_str());
+                auto *app_request = dynamic_cast<app_HttpRequest *>(application_data);
+                if (app_request != nullptr) {
+                    app_request->referer = str_temp;
+                    _deb("Referer: %s", ESC(app_request->referer));
+                }
+            }
+        }
+
+        auto ix_host = buffer_data_string.find("Host: ");
+
+        if(ix_host != std::string::npos) {
+            auto host_start = buffer_data_string.substr(ix_host, std::min(std::size_t (128), buffer_data_string.size() - ix_host));
+
+            if (std::regex_search(host_start, m_host, http_req_host())) {
+                if (!m_host.empty()) {
+                    str_temp = m_host[1].str();
+                    print_request += str_temp;
+
+                    if (application_data == nullptr) {
+                        application_data = new app_HttpRequest;
+                    }
+
+                    auto *app_request = dynamic_cast<app_HttpRequest *>(application_data);
+                    if (app_request != nullptr) {
+                        app_request->host = str_temp;
+                        _dia("Host: %s", app_request->host.c_str());
 
 
-                    // FIXME: should be some config variable
-                    bool check_inspect_dns_cache = true;
-                    if(check_inspect_dns_cache) {
+                        // FIXME: should be some config variable
+                        bool check_inspect_dns_cache = true;
+                        if (check_inspect_dns_cache) {
 
-                        std::scoped_lock<std::recursive_mutex> d_(DNS::get().dns_lock());
+                            std::scoped_lock<std::recursive_mutex> d_(DNS::get().dns_lock());
 
-                        auto dns_resp_a = DNS::get().dns_cache().get("A:" + app_request->host);
-                        auto dns_resp_aaaa = DNS::get().dns_cache().get("AAAA:" + app_request->host);
+                            auto dns_resp_a = DNS::get().dns_cache().get("A:" + app_request->host);
+                            auto dns_resp_aaaa = DNS::get().dns_cache().get("AAAA:" + app_request->host);
 
-                        if(dns_resp_a && com()->l3_proto() == AF_INET) {
-                            _deb("HTTP inspection: Host header matches DNS: %s", ESC(dns_resp_a->question_str_0()));
-                        } else if(dns_resp_aaaa && com()->l3_proto() == AF_INET6) {
-                            _deb("HTTP inspection: Host header matches IPv6 DNS: %s", ESC(dns_resp_aaaa->question_str_0()));
-                        }
-                        else {
-                            _war("HTTP inspection: 'Host' header value '%s' DOESN'T match DNS!", app_request->host.c_str());
+                            if (dns_resp_a && com()->l3_proto() == AF_INET) {
+                                _deb("HTTP inspection: Host header matches DNS: %s", ESC(dns_resp_a->question_str_0()));
+                            } else if (dns_resp_aaaa && com()->l3_proto() == AF_INET6) {
+                                _deb("HTTP inspection: Host header matches IPv6 DNS: %s",
+                                     ESC(dns_resp_aaaa->question_str_0()));
+                            } else {
+                                _war("HTTP inspection: 'Host' header value '%s' DOESN'T match DNS!",
+                                     app_request->host.c_str());
+                            }
                         }
                     }
                 }
             }
         }
 
-        if(std::regex_search (buffer_data_string, m_get, http_req_get() )) {
+        auto method_start = buffer_data_string.substr(0, std::min(std::size_t(128), buffer_data_string.size()));
+        if(std::regex_search (method_start, m_get, http_req_get() )) {
             if(m_get.size() > 1) {
                 str_temp = m_get[2].str();
                 print_request += str_temp;
