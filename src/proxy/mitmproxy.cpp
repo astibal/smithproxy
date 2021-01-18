@@ -589,7 +589,56 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
              ||
             scom->verify_get() == ( SSLCom::VRF_OK | SSLCom::VRF_CLIENT_CERT_RQ )
             )) {
-            
+
+
+            bool this_is_allowed_by_option = true;
+            auto problem_mask = scom->verify_get();
+
+            // do test run for cases the TLS problem is explicitly allowed by policy
+            // and therefore are NOT eligible for replacement
+
+            if(this_is_allowed_by_option and scom->verify_bitcheck(SSLCom::VRF_SELF_SIGNED)) {
+                this_is_allowed_by_option = scom->opt_allow_self_signed_cert;
+
+                problem_mask = flag_reset<decltype(problem_mask)>(problem_mask, SSLCom::VRF_SELF_SIGNED);
+            }
+            if(this_is_allowed_by_option and scom->verify_bitcheck(SSLCom::VRF_SELF_SIGNED_CHAIN)) {
+                this_is_allowed_by_option = scom->opt_allow_self_signed_chain;
+
+                problem_mask = flag_reset<decltype(problem_mask)>(problem_mask, SSLCom::VRF_SELF_SIGNED_CHAIN);
+            }
+            if(this_is_allowed_by_option and scom->verify_bitcheck(SSLCom::VRF_INVALID)) {
+                this_is_allowed_by_option = scom->opt_allow_not_valid_cert;
+
+                problem_mask = flag_reset<decltype(problem_mask)>(problem_mask, SSLCom::VRF_INVALID);
+            }
+            if(this_is_allowed_by_option and scom->verify_bitcheck(SSLCom::VRF_UNKNOWN_ISSUER)) {
+                this_is_allowed_by_option = scom->opt_allow_unknown_issuer;
+
+                problem_mask = flag_reset<decltype(problem_mask)>(problem_mask, SSLCom::VRF_UNKNOWN_ISSUER);
+            }
+
+            if(this_is_allowed_by_option) {
+                // we hit allow options while not failing other
+                // remove VRF_DEFERRED flag (which made connection reach this code)
+                // remove VRF_ALLFAILED because any of certificates are not possible to validate
+                //  (even OCSP/CRL works, it doesn't make sense to use such information, they are officially not usable)
+
+                problem_mask = flag_reset<decltype(problem_mask)>(problem_mask, SSLCom::VRF_DEFERRED);
+                problem_mask = flag_reset<decltype(problem_mask)>(problem_mask, SSLCom::VRF_ALLFAILED);
+
+                if ((problem_mask == 0) or
+                    (problem_mask == SSLCom::VRF_CLIENT_CERT_RQ)) {
+                    ssl_handled = true;
+
+                    // return false to let proxy continue
+                    return false;
+                }
+            }
+
+
+
+
             bool whitelist_found = false;
             
             //look for whitelisted entry
