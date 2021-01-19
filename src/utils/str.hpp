@@ -45,7 +45,9 @@ namespace sx::str {
     void string_cfg_escape(std::string& target);
     namespace cli {
         std::string mask_array_index(std::string const& varname);
+        std::string mask_tail_index(std::string const& varname, unsigned int);
         std::string mask_parent(std::string const& varname);
+        std::string mask_this(std::string const& varname);
         std::string mask_all(std::string const& varname);
     }
 }

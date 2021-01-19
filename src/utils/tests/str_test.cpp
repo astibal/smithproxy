@@ -27,3 +27,8 @@ TEST(sx_str_cli, mask_parent) {
     std::string sample = "proto_objects.abc.id";
     ASSERT_TRUE(sx::str::cli::mask_parent(sample) == "proto_objects.[x].id");
 }
+
+TEST(sx_str_cli, mask_this) {
+    std::string sample = "proto_objects.abc";
+    ASSERT_TRUE(sx::str::cli::mask_this(sample) == "proto_objects.[x]");
+}

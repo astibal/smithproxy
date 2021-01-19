@@ -84,41 +84,48 @@ namespace  sx::str {
             return std::regex_replace (varname, re_index(), "[x]");
         }
 
-        std::string mask_parent(std::string const& varname) {
+        std::string mask_tail_index(std::string const& varname, unsigned int back_pos) {
             // another attempt - find parent setting mask
             auto path_split = string_split(varname, '.');
 
 
-            // make test only if depth is 3 or more:   category1[.categoryX., ..].<to_mask>.varname
-            if(path_split.size() >= 3) {
+            std::string masked_element = path_split[0];
 
-                std::string masked_parent = path_split[0];
+            unsigned int i = 1;
+            for (auto const &elem: path_split) {
 
-                unsigned int i = 1;
-                for (auto const &elem: path_split) {
-
-                    if(i == 1) {
-                        i++;
-                        continue;
-                    }
-                    else if (i == path_split.size() - 1) {
-                        masked_parent += ".[x]";
-                    } else {
-                        masked_parent += "." + elem;
-                    }
+                if(i == 1) {
                     i++;
+                    continue;
                 }
-
-                return masked_parent;
+                else if (i == path_split.size() - back_pos) {
+                    masked_element += ".[x]";
+                } else {
+                    masked_element += "." + elem;
+                }
+                i++;
             }
 
-            return varname;
+            return masked_element;
         }
+
+        std::string mask_parent(std::string const& varname) {
+            return mask_tail_index(varname, 1);
+        }
+
+
+        std::string mask_this(std::string const& varname) {
+            return mask_tail_index(varname, 0);
+        }
+
 
         std::string mask_all(std::string const& varname) {
             auto masked = mask_array_index(varname);
             if(masked == varname) {
                 masked = mask_parent(varname);
+            }
+            if(masked == varname) {
+                masked = mask_this(varname);
             }
 
             return  masked;
