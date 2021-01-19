@@ -2075,6 +2075,11 @@ bool CfgFactory::policy_apply_tls (const std::shared_ptr<ProfileTls> &pt, baseCo
             sslcom->opt_allow_not_valid_cert = pt->allow_invalid_certs;
             sslcom->opt_allow_self_signed_cert = pt->allow_self_signed;
 
+            sslcom->opt_failed_certcheck_replacement = pt->failed_certcheck_replacement;
+            sslcom->opt_failed_certcheck_override = pt->failed_certcheck_override;
+            sslcom->opt_failed_certcheck_override_timeout = pt->failed_certcheck_override_timeout;
+            sslcom->opt_failed_certcheck_override_timeout_type = pt->failed_certcheck_override_timeout_type;
+
             auto* peer_sslcom = dynamic_cast<SSLCom*>(sslcom->peer());
 
             if( peer_sslcom &&
