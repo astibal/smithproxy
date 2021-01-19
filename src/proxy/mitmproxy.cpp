@@ -808,26 +808,55 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
 //        }
 //    }
 
+
+    bool redirected = false;
+
+    auto* mh = dynamic_cast<MitmHostCX*>(cx->peer());
+
+    if(mh != nullptr) {
+
+        // check authentication
+        redirected = handle_authentication(mh);
+
+        // check com responses
+        redirected = handle_com_response_ssl(mh);
+
+    }
+
+
+
     for(auto j: left_sockets) {
-        
-        if(content_rule() != nullptr) {
-            buffer b = content_replace_apply(cx->to_read());
-            j->to_write(b);
-            _dia("mitmproxy::on_right_bytes: original %d bytes replaced with %d bytes", cx->to_read().size(), b.size());
-        } else {      
-            j->to_write(cx->to_read());
-            _dia("mitmproxy::on_right_bytes: %d copied", cx->to_read().size());
+
+        if(! redirected ) {
+            if (content_rule() != nullptr) {
+                buffer b = content_replace_apply(cx->to_read());
+                j->to_write(b);
+                _dia("mitmproxy::on_right_bytes: original %d bytes replaced with %d bytes", cx->to_read().size(),
+                     b.size());
+            } else {
+                j->to_write(cx->to_read());
+                _dia("mitmproxy::on_right_bytes: %d copied", cx->to_read().size());
+            }
+        }
+        else {
+            cx->shutdown();
         }
     }
     for(auto j: left_delayed_accepts) {
-        
-        if(content_rule() != nullptr) {
-            buffer b = content_replace_apply(cx->to_read());
-            j->to_write(b);
-            _dia("mitmproxy::on_right_bytes: original %d bytes replaced with %d bytes into delayed", cx->to_read().size(), b.size());
-        } else {      
-            j->to_write(cx->to_read()); 
-            _dia("mitmproxy::on_right_bytes: %d copied to delayed", cx->to_read().size());
+
+        if(! redirected ) {
+            if (content_rule() != nullptr) {
+                buffer b = content_replace_apply(cx->to_read());
+                j->to_write(b);
+                _dia("mitmproxy::on_right_bytes: original %d bytes replaced with %d bytes into delayed",
+                     cx->to_read().size(), b.size());
+            } else {
+                j->to_write(cx->to_read());
+                _dia("mitmproxy::on_right_bytes: %d copied to delayed", cx->to_read().size());
+            }
+        }
+        else {
+            cx->shutdown();
         }
     }
 
