@@ -426,8 +426,12 @@ void cli_generate_commands (cli_def *cli, std::string const &this_section, cli_c
                 std::get<1>(section_cb).cli_edit(edit_sub);
                 std::get<1>(section_cb).cmd_edit(cb_edit);
 
-
-                cli_generate_commands(cli, section_path, nullptr);
+                if(section_path == template_key) {
+                    _debug(cli, "templated, but not dynamic group: %s - generating subcommands", section_path.c_str());
+                    cli_generate_commands(cli, section_path, nullptr);
+                } else {
+                    _debug(cli, "dynamic group: %s - NOT generating subcommands", section_path.c_str());
+                }
             }
 
             if(remove_enabled) {
