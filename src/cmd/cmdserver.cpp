@@ -2417,38 +2417,38 @@ void client_thread(int client_socket) {
     register_callback("detection_profiles.[x]", MODE_EDIT_DETECTION_PROFILES)
             .cmd_set(cli_generic_set_cb)
             .cap_edit(true).cmd_edit(cli_conf_edit_detection_profiles)
-            .cmd_add(cli_generic_add_cb)
-            .cmd_remove(cli_generic_remove_cb);
+            .cap_add(true).cmd_add(cli_generic_add_cb)
+            .cap_remove(true).cmd_remove(cli_generic_remove_cb);
 
 
     register_callback("content_profiles", MODE_EDIT_CONTENT_PROFILES)
             .cmd_edit(cli_conf_edit_content_profiles);
 
     register_callback("content_profiles.[x]", MODE_EDIT_CONTENT_PROFILES)
-                    .cmd_set(cli_generic_set_cb)
-                    .cap_edit(true).cmd_edit(cli_conf_edit_content_profiles)
-                    .cmd_add(cli_generic_add_cb)
-                    .cmd_remove(cli_generic_remove_cb);
+            .cmd_set(cli_generic_set_cb)
+            .cap_edit(true).cmd_edit(cli_conf_edit_content_profiles)
+            .cap_add(true).cmd_add(cli_generic_add_cb)
+            .cap_remove(true).cmd_remove(cli_generic_remove_cb);
 
 
     register_callback("tls_profiles", MODE_EDIT_TLS_PROFILES)
             .cmd_edit(cli_conf_edit_tls_profiles);
 
     register_callback("tls_profiles.[x]", MODE_EDIT_TLS_PROFILES)
-                    .cmd_set(cli_generic_set_cb)
-                    .cap_edit(true).cmd_edit(cli_conf_edit_tls_profiles)
-                    .cmd_add(cli_generic_add_cb)
-                    .cmd_remove(cli_generic_remove_cb);
+            .cmd_set(cli_generic_set_cb)
+            .cap_edit(true).cmd_edit(cli_conf_edit_tls_profiles)
+            .cap_add(true).cmd_add(cli_generic_add_cb)
+            .cap_remove(true).cmd_remove(cli_generic_remove_cb);
 
 
     register_callback("auth_profiles", MODE_EDIT_AUTH_PROFILES)
             .cmd_edit(cli_conf_edit_auth_profiles);
 
     register_callback("auth_profiles.[x]", MODE_EDIT_AUTH_PROFILES)
-                    .cmd_set(cli_generic_set_cb)
-                    .cap_edit(true).cmd_edit(cli_conf_edit_auth_profiles)
-                    .cmd_add(cli_generic_add_cb)
-                    .cmd_remove(cli_generic_remove_cb);
+            .cmd_set(cli_generic_set_cb)
+            .cap_edit(true).cmd_edit(cli_conf_edit_auth_profiles)
+            .cap_add(true).cmd_add(cli_generic_add_cb)
+            .cap_remove(true).cmd_remove(cli_generic_remove_cb);
 
     register_callback("alg_dns_profiles", MODE_EDIT_ALG_DNS_PROFILES)
                     .cmd_edit(cli_conf_edit_alg_dns_profiles);
@@ -2456,8 +2456,8 @@ void client_thread(int client_socket) {
     register_callback("alg_dns_profiles.[x]", MODE_EDIT_ALG_DNS_PROFILES)
             .cmd_set(cli_generic_set_cb)
             .cap_edit(true).cmd_edit(cli_conf_edit_alg_dns_profiles)
-            .cmd_add(cli_generic_add_cb)
-            .cmd_remove(cli_generic_remove_cb);
+            .cap_add(true).cmd_add(cli_generic_add_cb)
+            .cap_remove(true).cmd_remove(cli_generic_remove_cb);
 
 
 
