@@ -27,13 +27,26 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 * email support: `<support@smithproxy.org>`
 * Documentation: [https://smithproxy.readthedocs.org](https://smithproxy.readthedocs.org)
 
+
+## Roadmap for 0.9.13 (tba)
+
+Milestones:
+* [ ] better certificate cache - certificates from cache expire on LRU-similar basis
+* [ ] memory profiles - more flexible mempool with, or optionally without fallback to heap for constrained systems
+* [ ] **new installations affecting change** split portal services and core   
+* [ ] json/api interface  
+ 
+
+... TBA ... 
+
 ## What's new in 0.9.12 (in progress)
 
 ### New features
 
 * **NOTE: CLI config changes are still experimental**
 
-* release candidate 1
+* **0.9.12 RC2**
+* **0.9.12 RC1**
 * smithproxy has now extensive CLI configuration support 
 * release builds don't require libunwind (which is good news on some platforms)
 * experimental memory mode  'mempool_all' - leak troubleshooting feature (must be compiled in)
@@ -50,7 +63,7 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 * significantly improved CLI edit/add/remove commands - partial rewrite - getting to know libcli
 * added `remove` support for policy section
 * CLI `remove` dependency checks -> safe remove
-* added CLI command `remove` - use with caution  ~~, removes also used items, which leads to policy load failure~~
+* added CLI command `remove` ~~- use with caution, removes also used items, which leads to policy load failure~~
 * added CLI command `add` which ... adds new configuration elements into *running config* (not all elements are covered
  yet) 
 * added Certificate Transparency support (tls_profile/ct_enable option) - enabled by default  
@@ -62,6 +75,12 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 * added sha256 sums to build uploads
 
 ### Bug fixes & various
+
+* **0.9.12 RC2**
+* fix CLI 'set' commands appearing where it shouldn't
+* fix TLS profiles - some options were not working 
+* fix clunky override replacement mechanics
+* **0.9.12 RC1**
 * fix (stability) occasional CPU spikes during TLS handshake caused by sockets input race
 * fix daemon factory handling of pid files (fixes 'randomly not stopping via server or sx_ctl')
 * fix various mempool_all crashes on exit (mempool is experimental - common releases are not affected) 
@@ -100,6 +119,7 @@ While there are still no guarantees, smithproxy is regularly tested with user in
 Note the list is not exhaustive and my differ based on release type and new features added. 
 
 ### AMD64/x86
+* docker ubuntu, mode TPROXY -- routed traffic, also from/to docker0 
 * docker ubuntu, mode REDIRECT   -- heavy testing on main development system
 * docker ubuntu, mode SOCKS5 with DNS 
 * kvm ubuntu guest, mode TPROXY  
