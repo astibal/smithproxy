@@ -115,9 +115,14 @@ GIT_TAG=`echo ${GIT_DESCR} | awk -F'-' '{ print $1 }'`
 GIT_PATCH_DIST=`echo ${GIT_DESCR} | awk -F'-' '{ print $2 }'`
 GIT_PATCH=`echo ${GIT_DESCR} | awk -F'-' '{ print $3 }'`
 
+
 if [ "${GIT_PATCH_DIST}" == "" ]; then
-    GIT_PATCH_DIST="0"
+   GIT_PATCH_DIST="0"
 fi
+
+# start minor counting with from 1
+GIT_PATCH_DIST=` expr ${GIT_PATCH_DIST} + 1`
+
 cd ..
 
 mv smithproxy smithproxy-${GIT_TAG}
@@ -215,7 +220,7 @@ else
     echo "File(s) being uploaded now."
     DEB_FILE=smithproxy_${VER}-${DEB_CUR}_${ARCH}.deb
 
-    if [ "${GIT_PATCH_DIST}" != "0" ]; then
+    if [ "${GIT_PATCH_DIST}" != "1" ]; then
         DEB_PATH="${UPLOAD_URL}/${VER_MAJ}/${DISTRO}/snapshots"
     else
         DEB_PATH="${UPLOAD_URL}/${VER_MAJ}/${DISTRO}/release"
@@ -240,7 +245,7 @@ else
 
 
     #### LATEST build overwrite - only for snapshots
-    if [ "${GIT_PATCH_DIST}" != "0" ]; then
+    if [ "${GIT_PATCH_DIST}" != "1" ]; then
 
         DEB_FILE_LATEST=smithproxy_0.9-latest_${ARCH}.deb
         DEB_URL_LATEST="${DEB_PATH}/$DEB_FILE_LATEST"
