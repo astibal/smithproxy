@@ -43,9 +43,9 @@ Milestones:
 
 ### New features
 
-* **NOTE: CLI config changes are still experimental**
-
-* **0.9.12 RC2**
+* **0.9.12**
+* **0.9.12 RC2**  
+  see fixes
 * **0.9.12 RC1**
 * smithproxy has now extensive CLI configuration support 
 * release builds don't require libunwind (which is good news on some platforms)
@@ -77,7 +77,7 @@ Milestones:
 ### Bug fixes & various
 
 * **0.9.12 RC2**
-* fix CLI 'set' commands appearing where it shouldn't
+* fix CLI 'set' commands appearing where they shouldn't
 * fix TLS profiles - some options were not working 
 * fix clunky override replacement mechanics
 * **0.9.12 RC1**
