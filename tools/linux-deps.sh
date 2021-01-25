@@ -97,7 +97,7 @@ if [ "${DIST}" = "Ubuntu" ]; then
 
     echo "... installing OS toolchains"
     apt install -y iptables telnet iproute2 && \
-    apt install -y python3-ldap python3-posix-ipc swig  \
+    apt install -y python3-posix-ipc swig  \
     debootstrap devscripts build-essential lintian debhelper vim nano
     apt install -y libffi-dev
     apt install -y python3-lxml
@@ -143,7 +143,7 @@ elif [ "${DIST}" = "Debian" ]; then
 
     echo "... installing OS toolchains"
     apt install -y iptables telnet iproute2 && \
-    apt install -y python3-ldap swig  \
+    apt install -y swig  \
     debootstrap devscripts build-essential lintian debhelper vim nano
     apt install -y libffi-dev
 
@@ -176,10 +176,10 @@ elif [ "${DIST}" = "Alpine" ]; then
     apk add openssl libconfig libconfig-dev
     apk add cmake g++ python3-dev libexecinfo-dev openssl-dev linux-headers libunwind-dev
     apk add busybox-extras iptables iproute2
-    apk add libldap openldap-dev libffi-dev libxml2-dev libxslt-dev xmlsec-dev swig
+    apk add libffi-dev libxml2-dev libxslt-dev xmlsec-dev swig
 
     apk add py3-pip
-    apk add py3-ldap py3-cryptography py3-parsing py3-lxml
+    apk add py3-cryptography py3-parsing py3-lxml
 
     # add packages unknown to apk from pip3
     pip3 install --upgrade pip
@@ -199,11 +199,11 @@ elif [ "${DIST}" = "Fedora" ]; then
 
     yum install -y gcc-c++ cmake make
     yum install -y telnet iptables iproute
-    yum install -y openldap-devel libffi-devel libxml2-devel swig
+    yum install -y libffi-devel libxml2-devel swig
     yum install -y python3-pip
     pip install --upgrade pip
     pip install wheel
-    pip install python-ldap posix-ipc
+    pip install posix-ipc
     pip install pyroute2 pylibconfig2 m2crypto spyne${SX_SPYNE_VER} zeep cryptography
     LINK_TOOLCHAIN="N"
 
@@ -214,11 +214,11 @@ else
     echo "   libconfig++-dev"
     echo "   libssl-dev"
     echo "   python-dev"
-    echo "   libunwind-dev (version8)"
+    echo "   libunwind-dev (version8) iff compiled with -DCMAKE_BUILD_TYPE=Debug"
     echo "   "
     echo "and following packages to make smithproxy infrastructure work:"
     echo "   iptables telnet iproute2 python3 swig"
-    echo "   ... python3 packages: ldap posix-ipc pyroute2 pylibconfig2 m2crypto spyne==2.13.2a0 zeep cryptography"
+    echo "   ... python3 packages: posix-ipc pyroute2 pylibconfig2 m2crypto spyne==2.13.2a0 zeep cryptography"
 
     exit 1;
 fi
