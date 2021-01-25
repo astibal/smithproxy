@@ -189,5 +189,4 @@ parts:
       - pylibconfig2
       - lxml
       - m2crypto
-      - spyne>=2.13.2a0
       - cryptography
