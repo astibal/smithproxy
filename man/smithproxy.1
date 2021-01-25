@@ -12,7 +12,7 @@
 .br
 Smithproxy is designed to run as a system service. Please see system service named
 .B smithproxy
-for more infomation.
+for more information.
 .br
 Config files needed to run service:
 .nf
@@ -145,7 +145,7 @@ several notes in there; for example if the traffic was SSL, smithproxy logs also
 
 .B Pplay
 is the tool I wrote to replay it, or use it as data source for your python program (ie. for further analysis).
-.Bpplay
+.B pplay
 can be also used to replay it into pcap (with various limitations).
 
 You can simply install it with:
@@ -155,7 +155,7 @@ pip install pplay
 
 .SH PERFORMANCE on decent machine
 Smithproxy is considerably fast. Using it in transparent mode, you barely recognize it's there.
-It handles gigabits of plaintext traffic, and hundreds of TLS traffic.
+It handles gigabits of plaintext traffic, and hundreds megabits of TLS traffic on normal PC.
 
 Bottleneck is typically disk IO as it is dumping packets to files. This is however asynchronous,
 so you won't see disk IO as biggest issue. It's CPU which needs to format dumped .smcap files.
@@ -206,13 +206,4 @@ licensed with LGPL version 2 or later.
 .B "Ales Stibal" 
 <astibal@mag0.net>, (c) 2014
 .br
-
-.br
-I would like to hear from you about how are you using smithproxy. If it's not too secret,
-of course :). Drop me a line, thanks!
-.br
-
-.br
-Big thanks to my family and my wife Katka for their endless patience with me while hacking this
-tool for you!
 
