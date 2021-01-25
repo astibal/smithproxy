@@ -90,13 +90,22 @@ LOG_OK_INTERVAL = 60
 sys.path.append(WWW_PATH)
 sys.path.append(INFRA_PATH)
 
-from daemon import Daemon, create_logger
+HAVE_AUTH = False
 
-from portal import webfr
-from bend import bend
-from bend import bendbrod
-from bend.wot import wotresponder
+from daemon import Daemon, create_logger
 from uxserv import ThreadedUxServerDaemon
+
+try:
+    from portal import webfr
+    from bend import bend
+    from bend import bendbrod
+    from bend.wot import wotresponder
+
+    HAVE_AUTH = True
+
+except ImportError as e:
+    pass
+
 
 global flog
 
@@ -391,34 +400,45 @@ if __name__ == "__main__":
 
     daemon.exec_info.append(('smithproxy smithd', SMITHD_PATH, SMITHD_PIDFILE % (TENANT_NAME,), smithproxy_options))
 
-    # Backend INIT
-    bend_ = BendDaemon('bend', BEND_PIDFILE % (TENANT_NAME,))
-    bend_.pwd = INFRA_PATH
-    bend_.log = flog
-    daemon.sub_daemons.append(bend_)
 
-    # Backend broker daemon -- unprivileged connections from clients
-    bendbrod_ = BendBrodDaemon('bendbrod', BENDBROD_PIDFILE % (TENANT_NAME,))
-    bendbrod_.pwd = INFRA_PATH
-    bendbrod_.log = flog
-    daemon.sub_daemons.append(bendbrod_)
+    bend_ = None
+    bendbrod_ = None
 
-    # Portal INIT
+    portal_ = None
+    portal_ssl_ = None
 
-    portal_ = PortalDaemon('portal', PORTAL_PIDFILE % (TENANT_NAME,))
-    portal_.pwd = PORTAL_PATH
-    portal_.log = flog
-    daemon.sub_daemons.append(portal_)
+    wotd_ = None
 
-    portal_ssl_ = PortalDaemon('portal_ssl', PORTALSSL_PIDFILE % (TENANT_NAME,))
-    portal_ssl_.pwd = PORTAL_PATH
-    portal_ssl_.log = flog
-    daemon.sub_daemons.append(portal_ssl_)
+    if HAVE_AUTH:
 
-    wotd_ = ThreadedUxServerDaemon("wotd", WOTD_PIDFILE, WOTD_SOCKFILE, wotresponder.WotResponder)
-    wotd_.pwd = "/var/run/"
-    wotd_.log = flog
-    daemon.sub_daemons.append(wotd_)
+        # Backend INIT
+        bend_ = BendDaemon('bend', BEND_PIDFILE % (TENANT_NAME,))
+        bend_.pwd = INFRA_PATH
+        bend_.log = flog
+        daemon.sub_daemons.append(bend_)
+
+        # Backend broker daemon -- unprivileged connections from clients
+        bendbrod_ = BendBrodDaemon('bendbrod', BENDBROD_PIDFILE % (TENANT_NAME,))
+        bendbrod_.pwd = INFRA_PATH
+        bendbrod_.log = flog
+        daemon.sub_daemons.append(bendbrod_)
+
+        # Portal INIT
+
+        portal_ = PortalDaemon('portal', PORTAL_PIDFILE % (TENANT_NAME,))
+        portal_.pwd = PORTAL_PATH
+        portal_.log = flog
+        daemon.sub_daemons.append(portal_)
+
+        portal_ssl_ = PortalDaemon('portal_ssl', PORTALSSL_PIDFILE % (TENANT_NAME,))
+        portal_ssl_.pwd = PORTAL_PATH
+        portal_ssl_.log = flog
+        daemon.sub_daemons.append(portal_ssl_)
+
+        wotd_ = ThreadedUxServerDaemon("wotd", WOTD_PIDFILE, WOTD_SOCKFILE, wotresponder.WotResponder)
+        wotd_.pwd = "/var/run/"
+        wotd_.log = flog
+        daemon.sub_daemons.append(wotd_)
 
     if len(sys.argv) >= 2:
 
@@ -486,22 +506,32 @@ if __name__ == "__main__":
 
         elif 'test' == sys.argv[1]:
             if len(sys.argv) >= 3:
-                if 'bend' == sys.argv[2]:
+                if 'bend' == sys.argv[2] and bend_:
                     bend_.start()
-                if 'portal_plain' == sys.argv[2]:
+                if 'portal_plain' == sys.argv[2] and portal_:
                     portal_.start()
-                if 'portal_ssl' == sys.argv[2]:
+                if 'portal_ssl' == sys.argv[2] and portal_ssl_:
                     portal_ssl_.start()
+                elif HAVE_AUTH:
+                    flog.error("cannot perform this operation on: " + sys.argv[2])
+                elif not HAVE_AUTH:
+                    flog.error("components not present")
+
+
 
         # run them in the foreground (avoid Daemon.start() invocation)
         elif 'run' == sys.argv[1]:
             if len(sys.argv) >= 3:
-                if 'bend' == sys.argv[2]:
+                if 'bend' == sys.argv[2] and bend_:
                     bend_.run()
-                if 'portal_plain' == sys.argv[2]:
+                if 'portal_plain' == sys.argv[2] and portal_:
                     portal_.run()
-                if 'portal_ssl' == sys.argv[2]:
+                if 'portal_ssl' == sys.argv[2] and portal_ssl_:
                     portal_ssl_.run()
+                elif HAVE_AUTH:
+                    flog.error("cannot perform this operation on: " + sys.argv[2])
+                elif not HAVE_AUTH:
+                    flog.error("components not present")
 
         else:
             print("Unknown command")
