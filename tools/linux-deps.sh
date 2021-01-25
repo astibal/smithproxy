@@ -97,7 +97,7 @@ if [ "${DIST}" = "Ubuntu" ]; then
 
     echo "... installing OS toolchains"
     apt install -y iptables telnet iproute2 && \
-    apt install -y python3-ldap python3-pyparsing python3-posix-ipc swig  \
+    apt install -y python3-ldap python3-posix-ipc swig  \
     debootstrap devscripts build-essential lintian debhelper vim nano
     apt install -y libffi-dev
     apt install -y python3-lxml
@@ -143,7 +143,7 @@ elif [ "${DIST}" = "Debian" ]; then
 
     echo "... installing OS toolchains"
     apt install -y iptables telnet iproute2 && \
-    apt install -y python3-ldap python3-pyparsing swig  \
+    apt install -y python3-ldap swig  \
     debootstrap devscripts build-essential lintian debhelper vim nano
     apt install -y libffi-dev
 
@@ -203,7 +203,7 @@ elif [ "${DIST}" = "Fedora" ]; then
     yum install -y python3-pip
     pip install --upgrade pip
     pip install wheel
-    pip install python-ldap pyparsing posix-ipc
+    pip install python-ldap posix-ipc
     pip install pyroute2 pylibconfig2 m2crypto spyne${SX_SPYNE_VER} zeep cryptography
     LINK_TOOLCHAIN="N"
 
@@ -218,7 +218,7 @@ else
     echo "   "
     echo "and following packages to make smithproxy infrastructure work:"
     echo "   iptables telnet iproute2 python3 swig"
-    echo "   ... python3 packages: ldap pyparsing posix-ipc pyroute2 pylibconfig2 m2crypto spyne==2.13.2a0 zeep cryptography"
+    echo "   ... python3 packages: ldap posix-ipc pyroute2 pylibconfig2 m2crypto spyne==2.13.2a0 zeep cryptography"
 
     exit 1;
 fi

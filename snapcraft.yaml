@@ -165,7 +165,6 @@ parts:
       - telnet
       - python
       - python3-ldap
-      - python3-pyparsing
       - python3-posix-ipc
       - python3-distutils
       - swig
