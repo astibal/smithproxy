@@ -104,7 +104,7 @@ if [ "${DIST}" = "Ubuntu" ]; then
 
     echo "... installing python libraries"
     pip3 install --upgrade pip
-    pip3 install pyroute2 pylibconfig2 m2crypto spyne${SX_SPYNE_VER} zeep cryptography
+    pip3 install pyroute2 pylibconfig2 m2crypto spyne${SX_SPYNE_VER} cryptography
 
 elif [ "${DIST}" = "Debian" ]; then
 
@@ -157,10 +157,10 @@ elif [ "${DIST}" = "Debian" ]; then
     if [ "${DEB_MAJ}" = "11" ]; then
         apt install -y python3-m2crypto
         pip3 install posix-ipc
-        pip3 install pyroute2 pylibconfig2 spyne${SX_SPYNE_VER} zeep cryptography
+        pip3 install pyroute2 pylibconfig2 spyne${SX_SPYNE_VER} cryptography
     else
         apt install -y python3-posix-ipc
-        pip3 install pyroute2 pylibconfig2 m2crypto spyne${SX_SPYNE_VER} zeep cryptography
+        pip3 install pyroute2 pylibconfig2 m2crypto spyne${SX_SPYNE_VER}  cryptography
     fi
 
 elif [ "${DIST}" = "Alpine" ]; then
@@ -185,7 +185,7 @@ elif [ "${DIST}" = "Alpine" ]; then
     pip3 install --upgrade pip
     pip3 install wheel
     pip3 install posix-ipc
-    pip3 install pyroute2 pylibconfig2 m2crypto spyne${SX_SPYNE_VER} zeep
+    pip3 install pyroute2 pylibconfig2 m2crypto spyne${SX_SPYNE_VER}
 
     LINK_TOOLCHAIN="N"
 
@@ -204,7 +204,7 @@ elif [ "${DIST}" = "Fedora" ]; then
     pip install --upgrade pip
     pip install wheel
     pip install posix-ipc
-    pip install pyroute2 pylibconfig2 m2crypto spyne${SX_SPYNE_VER} zeep cryptography
+    pip install pyroute2 pylibconfig2 m2crypto spyne${SX_SPYNE_VER} cryptography
     LINK_TOOLCHAIN="N"
 
     cd ${OPW}
@@ -218,7 +218,7 @@ else
     echo "   "
     echo "and following packages to make smithproxy infrastructure work:"
     echo "   iptables telnet iproute2 python3 swig"
-    echo "   ... python3 packages: posix-ipc pyroute2 pylibconfig2 m2crypto spyne==2.13.2a0 zeep cryptography"
+    echo "   ... python3 packages: posix-ipc pyroute2 pylibconfig2 m2crypto spyne==2.13.2a0 cryptography"
 
     exit 1;
 fi

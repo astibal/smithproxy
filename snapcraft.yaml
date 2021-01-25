@@ -190,5 +190,4 @@ parts:
       - lxml
       - m2crypto
       - spyne>=2.13.2a0
-      - zeep
       - cryptography
