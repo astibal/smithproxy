@@ -169,7 +169,7 @@ elif [ "${DIST}" = "Alpine" ]; then
     apk add openssl libconfig libconfig-dev
     apk add cmake g++ python3-dev libexecinfo-dev openssl-dev linux-headers libunwind-dev
     apk add busybox-extras iptables iproute2
-    apk add libffi-dev libxml2-dev libxslt-dev xmlsec-dev swig
+    apk add libffi-dev libxml2-dev libxslt-dev xmlsec-dev
 
     apk add py3-pip
     apk add py3-cryptography
@@ -177,7 +177,7 @@ elif [ "${DIST}" = "Alpine" ]; then
     # add packages unknown to apk from pip3
     pip3 install --upgrade pip
     pip3 install wheel
-    pip3 install pyroute2 pylibconfig2 m2crypto
+    pip3 install pyroute2 pylibconfig2
 
     LINK_TOOLCHAIN="N"
 
