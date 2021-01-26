@@ -95,14 +95,12 @@ if [ "${DIST}" = "Ubuntu" ]; then
     libconfig-dev libconfig++-dev  libssl-dev libunwind-dev git g++-${SX_GCC_VER} cmake make
 
     echo "... installing OS toolchains"
-    apt install -y iptables telnet iproute2 && \
-    apt install -y swig  \
+    apt install -y iptables telnet iproute2 python3-cryptography python3-pyroute2 \
     debootstrap devscripts build-essential lintian debhelper vim nano
-    apt install -y libffi-dev
 
     echo "... installing python libraries"
     pip3 install --upgrade pip
-    pip3 install pyroute2 pylibconfig2 m2crypto cryptography
+    pip3 install pylibconfig2
 
 elif [ "${DIST}" = "Debian" ]; then
 
@@ -149,14 +147,13 @@ elif [ "${DIST}" = "Debian" ]; then
     pip3 install --upgrade pip
 
     if [ "${MACH}" = "aarch64" ]; then
-        ;
+      echo
     fi
 
     if [ "${DEB_MAJ}" = "11" ]; then
-        apt install -y python3-m2crypto
-        pip3 install pyroute2 pylibconfig2 cryptography
+        pip3 pylibconfig2
     else
-        pip3 install pyroute2 pylibconfig2 m2crypto cryptography
+        pip3 pylibconfig2
     fi
 
 elif [ "${DIST}" = "Alpine" ]; then
