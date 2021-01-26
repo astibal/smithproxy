@@ -1,3 +1,3 @@
 #!/bin/sh
 
-python3 -m pip install pyroute2 pylibconfig2 m2crypto cryptography
+python3 -m pip install pylibconfig2

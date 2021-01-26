@@ -3,7 +3,7 @@ Maintainer: Ales Stibal <astib@mag0.net>
 Section: misc
 Priority: optional
 Standards-Version: 3.9.6
-Build-Depends: debhelper (>= 9)
+Build-Depends: cmake, debhelper (>= 9)
 
 Package: smithproxy
 Architecture: any
