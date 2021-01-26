@@ -151,9 +151,9 @@ elif [ "${DIST}" = "Debian" ]; then
     fi
 
     if [ "${DEB_MAJ}" = "11" ]; then
-        pip3 pylibconfig2
+        pip3 install pylibconfig2
     else
-        pip3 pylibconfig2
+        pip3 install pylibconfig2
     fi
 
 elif [ "${DIST}" = "Alpine" ]; then
