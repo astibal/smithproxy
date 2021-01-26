@@ -99,7 +99,6 @@ if [ "${DIST}" = "Ubuntu" ]; then
     apt install -y python3-posix-ipc swig  \
     debootstrap devscripts build-essential lintian debhelper vim nano
     apt install -y libffi-dev
-    apt install -y python3-lxml
 
     echo "... installing python libraries"
     pip3 install --upgrade pip
@@ -150,7 +149,7 @@ elif [ "${DIST}" = "Debian" ]; then
     pip3 install --upgrade pip
 
     if [ "${MACH}" = "aarch64" ]; then
-        apt install -y python3-lxml
+        ;
     fi
 
     if [ "${DEB_MAJ}" = "11" ]; then
@@ -178,7 +177,7 @@ elif [ "${DIST}" = "Alpine" ]; then
     apk add libffi-dev libxml2-dev libxslt-dev xmlsec-dev swig
 
     apk add py3-pip
-    apk add py3-cryptography py3-parsing py3-lxml
+    apk add py3-cryptography
 
     # add packages unknown to apk from pip3
     pip3 install --upgrade pip

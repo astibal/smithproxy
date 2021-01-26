@@ -187,6 +187,5 @@ parts:
     python-packages:
       - pyroute2
       - pylibconfig2
-      - lxml
       - m2crypto
       - cryptography
