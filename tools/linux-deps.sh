@@ -96,7 +96,7 @@ if [ "${DIST}" = "Ubuntu" ]; then
 
     echo "... installing OS toolchains"
     apt install -y iptables telnet iproute2 && \
-    apt install -y python3-posix-ipc swig  \
+    apt install -y swig  \
     debootstrap devscripts build-essential lintian debhelper vim nano
     apt install -y libffi-dev
 
@@ -154,10 +154,8 @@ elif [ "${DIST}" = "Debian" ]; then
 
     if [ "${DEB_MAJ}" = "11" ]; then
         apt install -y python3-m2crypto
-        pip3 install posix-ipc
         pip3 install pyroute2 pylibconfig2 cryptography
     else
-        apt install -y python3-posix-ipc
         pip3 install pyroute2 pylibconfig2 m2crypto cryptography
     fi
 
@@ -182,7 +180,6 @@ elif [ "${DIST}" = "Alpine" ]; then
     # add packages unknown to apk from pip3
     pip3 install --upgrade pip
     pip3 install wheel
-    pip3 install posix-ipc
     pip3 install pyroute2 pylibconfig2 m2crypto
 
     LINK_TOOLCHAIN="N"
@@ -201,7 +198,6 @@ elif [ "${DIST}" = "Fedora" ]; then
     yum install -y python3-pip
     pip install --upgrade pip
     pip install wheel
-    pip install posix-ipc
     pip install pyroute2 pylibconfig2 m2crypto cryptography
     LINK_TOOLCHAIN="N"
 
@@ -216,7 +212,7 @@ else
     echo "   "
     echo "and following packages to make smithproxy infrastructure work:"
     echo "   iptables telnet iproute2 python3 swig"
-    echo "   ... python3 packages: posix-ipc pyroute2 pylibconfig2 m2crypto cryptography"
+    echo "   ... python3 packages: pyroute2 pylibconfig2 m2crypto cryptography"
 
     exit 1;
 fi
