@@ -16,8 +16,7 @@ Depends: ${shlibs:Depends}, ${misc:Depends},
                             python3-pip,
                             iproute2,
                             telnet,
-                            python3-pyroute2,
-
+                            python3-pyroute2
 Description:
  Feature-rich, fast transparent TCP/UDP/TLS proxy.
  Forwarded traffic is diverted to smithproxy where it's processed based
