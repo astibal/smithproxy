@@ -2873,7 +2873,12 @@ bool CfgFactory::move_policy (int what, int where, op_move op) {
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
     Config backup;
+
+#if ( LIBCONFIGXX_VER_MAJOR >= 1 && LIBCONFIGXX_VER_MINOR < 7 )
     backup.setOptions(Setting::OptionOpenBraceOnSeparateLine);
+#else
+    backup.setOptions(Config::OptionOpenBraceOnSeparateLine);
+#endif
     backup.setTabWidth(4);
 
     try {

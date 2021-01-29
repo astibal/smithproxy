@@ -1,4 +1,3 @@
 #!/bin/sh
-SX_SPYNE_VER=">=2.13.2a0"
 
-python3 -m pip install pyroute2 pylibconfig2 m2crypto spyne${SX_SPYNE_VER} zeep cryptography
+python3 -m pip install pyparsing pylibconfig2

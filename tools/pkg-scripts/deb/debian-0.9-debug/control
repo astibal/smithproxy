@@ -11,13 +11,16 @@ Depends: ${shlibs:Depends}, ${misc:Depends},
                             libstdc++6 (>= 8.3.0),
                             libssl1.1 (>=1.1.1),
                             libconfig++9v5,
+                            libunwind8,
                             iptables,
                             python3,
-                            python3-pyparsing,
-                            python3-posix-ipc,
+                            python3-pip,
+                            python3-setuptools,
+                            python3-wheel,
+                            python3-cryptography,
+                            python3-pyroute2,
                             iproute2,
-                            telnet,
-                            python3-pyroute2
+                            telnet
 Description:
  Feature-rich, fast transparent TCP/UDP/TLS proxy.
  Forwarded traffic is diverted to smithproxy where it's processed based

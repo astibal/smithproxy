@@ -66,7 +66,7 @@ function sync() {
 
     cleanup
 
-    git clone --recursive http://github.com/astibal/smithproxy.git smithproxy
+    git clone --recursive http://github.com/astibal/smithproxy.git smithproxy -b ${SMITHPROXY_BRANCH}
 
     cd $O
 }

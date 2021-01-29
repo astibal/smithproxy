@@ -164,8 +164,6 @@ parts:
       - libunwind8
       - telnet
       - python
-      - python3-ldap
-      - python3-pyparsing
       - python3-posix-ipc
       - python3-distutils
       - swig
@@ -189,8 +187,5 @@ parts:
     python-packages:
       - pyroute2
       - pylibconfig2
-      - lxml
       - m2crypto
-      - spyne>=2.13.2a0
-      - zeep
       - cryptography

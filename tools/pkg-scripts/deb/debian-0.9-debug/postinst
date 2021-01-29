@@ -1,4 +1,3 @@
 #!/bin/sh
-SX_SPYNE_VER=">=2.13.2a0"
 
-python3 -m pip install pyroute2 pylibconfig2
+python3 -m pip install pylibconfig2

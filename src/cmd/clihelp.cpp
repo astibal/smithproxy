@@ -37,6 +37,7 @@
     which carries forward this exception.
 */
 #include <algorithm>
+#include <libgen.h>
 
 #include <ext/libcli/libcli.h>
 
@@ -257,7 +258,7 @@ void CliHelp::init() {
 
                 std::string orig = v;
                 std::string base = v;
-                base = ::basename(v.c_str());
+                base = ::basename((char*)v.c_str());
 
                 auto where = base.find("^s");
                 if(where == v.npos) {

@@ -10,8 +10,8 @@ import sys
 sys.path.append('/usr/share/smithproxy/infra/sslca')
 sys.path.append('/usr/share/smithproxy/infra/bend')
 
-from bendutil import ask_bot
-from bendutil import ask_bot_filter_int
+from askbot import ask_bot
+from askbot import ask_bot_filter_int
 
 import sxyca
 

@@ -2,7 +2,6 @@
 
 SX_LIBCONFIG_VER="9v5"
 SX_GCC_VER="8"
-SX_SPYNE_VER=">=2.13.2a0"
 
 
 OS=`uname -s`
@@ -96,15 +95,12 @@ if [ "${DIST}" = "Ubuntu" ]; then
     libconfig-dev libconfig++-dev  libssl-dev libunwind-dev git g++-${SX_GCC_VER} cmake make
 
     echo "... installing OS toolchains"
-    apt install -y iptables telnet iproute2 && \
-    apt install -y python3-ldap python3-pyparsing python3-posix-ipc swig  \
+    apt install -y iptables telnet iproute2 python3-cryptography python3-pyroute2 \
     debootstrap devscripts build-essential lintian debhelper vim nano
-    apt install -y libffi-dev
-    apt install -y python3-lxml
 
     echo "... installing python libraries"
     pip3 install --upgrade pip
-    pip3 install pyroute2 pylibconfig2 m2crypto spyne${SX_SPYNE_VER} zeep cryptography
+    pip3 install pyparsing  pylibconfig2
 
 elif [ "${DIST}" = "Debian" ]; then
 
@@ -143,7 +139,7 @@ elif [ "${DIST}" = "Debian" ]; then
 
     echo "... installing OS toolchains"
     apt install -y iptables telnet iproute2 && \
-    apt install -y python3-ldap python3-pyparsing swig  \
+    apt install -y swig  \
     debootstrap devscripts build-essential lintian debhelper vim nano
     apt install -y libffi-dev
 
@@ -151,16 +147,13 @@ elif [ "${DIST}" = "Debian" ]; then
     pip3 install --upgrade pip
 
     if [ "${MACH}" = "aarch64" ]; then
-        apt install -y python3-lxml
+      echo
     fi
 
     if [ "${DEB_MAJ}" = "11" ]; then
-        apt install -y python3-m2crypto
-        pip3 install posix-ipc
-        pip3 install pyroute2 pylibconfig2 spyne${SX_SPYNE_VER} zeep cryptography
+        pip3 install pyparsing pylibconfig2
     else
-        apt install -y python3-posix-ipc
-        pip3 install pyroute2 pylibconfig2 m2crypto spyne${SX_SPYNE_VER} zeep cryptography
+        pip3 install pyparsing pylibconfig2
     fi
 
 elif [ "${DIST}" = "Alpine" ]; then
@@ -176,16 +169,15 @@ elif [ "${DIST}" = "Alpine" ]; then
     apk add openssl libconfig libconfig-dev
     apk add cmake g++ python3-dev libexecinfo-dev openssl-dev linux-headers libunwind-dev
     apk add busybox-extras iptables iproute2
-    apk add libldap openldap-dev libffi-dev libxml2-dev libxslt-dev xmlsec-dev swig
+    apk add libffi-dev libxml2-dev libxslt-dev xmlsec-dev
 
     apk add py3-pip
-    apk add py3-ldap py3-cryptography py3-parsing py3-lxml
+    apk add py3-cryptography
 
     # add packages unknown to apk from pip3
     pip3 install --upgrade pip
     pip3 install wheel
-    pip3 install posix-ipc
-    pip3 install pyroute2 pylibconfig2 m2crypto spyne${SX_SPYNE_VER} zeep
+    pip3 install pyroute2 pyparsing pylibconfig2
 
     LINK_TOOLCHAIN="N"
 
@@ -199,12 +191,11 @@ elif [ "${DIST}" = "Fedora" ]; then
 
     yum install -y gcc-c++ cmake make
     yum install -y telnet iptables iproute
-    yum install -y openldap-devel libffi-devel libxml2-devel swig
+    yum install -y libffi-devel libxml2-devel swig
     yum install -y python3-pip
     pip install --upgrade pip
     pip install wheel
-    pip install python-ldap pyparsing posix-ipc
-    pip install pyroute2 pylibconfig2 m2crypto spyne${SX_SPYNE_VER} zeep cryptography
+    pip install pyroute2 pyparsing pylibconfig2 m2crypto cryptography
     LINK_TOOLCHAIN="N"
 
     cd ${OPW}
@@ -214,11 +205,11 @@ else
     echo "   libconfig++-dev"
     echo "   libssl-dev"
     echo "   python-dev"
-    echo "   libunwind-dev (version8)"
+    echo "   libunwind-dev (version8) iff compiled with -DCMAKE_BUILD_TYPE=Debug"
     echo "   "
     echo "and following packages to make smithproxy infrastructure work:"
     echo "   iptables telnet iproute2 python3 swig"
-    echo "   ... python3 packages: ldap pyparsing posix-ipc pyroute2 pylibconfig2 m2crypto spyne==2.13.2a0 zeep cryptography"
+    echo "   ... python3 packages: pyroute2 pylibconfig2 m2crypto cryptography"
 
     exit 1;
 fi

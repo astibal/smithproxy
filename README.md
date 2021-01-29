@@ -32,7 +32,7 @@ It uses our C++17 socket proxying library called [*socle*](https://github.com/as
   * Seamless HTTPS redirection to authentication portal
 
 ### Other:
-  * Local and LDAP user authentication using builtin web portal
+  * Local and LDAP user authentication using builtin web portal (since version `>0.9.12` as optional package)
   * SOCKS4/SOCKS5 explicit proxy with DNS hostname support
   * DNS inspection allows FQDN policy objects
   * Policies based on FQDN and 2nd level DNS domain
