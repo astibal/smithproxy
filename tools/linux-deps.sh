@@ -100,7 +100,7 @@ if [ "${DIST}" = "Ubuntu" ]; then
 
     echo "... installing python libraries"
     pip3 install --upgrade pip
-    pip3 install pylibconfig2
+    pip3 install pyparsing  pylibconfig2
 
 elif [ "${DIST}" = "Debian" ]; then
 
@@ -151,9 +151,9 @@ elif [ "${DIST}" = "Debian" ]; then
     fi
 
     if [ "${DEB_MAJ}" = "11" ]; then
-        pip3 install pylibconfig2
+        pip3 install pyparsing pylibconfig2
     else
-        pip3 install pylibconfig2
+        pip3 install pyparsing pylibconfig2
     fi
 
 elif [ "${DIST}" = "Alpine" ]; then
@@ -177,7 +177,7 @@ elif [ "${DIST}" = "Alpine" ]; then
     # add packages unknown to apk from pip3
     pip3 install --upgrade pip
     pip3 install wheel
-    pip3 install pyroute2 pylibconfig2
+    pip3 install pyroute2 pyparsing pylibconfig2
 
     LINK_TOOLCHAIN="N"
 
@@ -195,7 +195,7 @@ elif [ "${DIST}" = "Fedora" ]; then
     yum install -y python3-pip
     pip install --upgrade pip
     pip install wheel
-    pip install pyroute2 pylibconfig2 m2crypto cryptography
+    pip install pyroute2 pyparsing pylibconfig2 m2crypto cryptography
     LINK_TOOLCHAIN="N"
 
     cd ${OPW}
