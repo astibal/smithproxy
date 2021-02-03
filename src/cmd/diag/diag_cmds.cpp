@@ -252,7 +252,7 @@ int cli_diag_ssl_wl_list(struct cli_def *cli, const char *command, char *argv[],
     for(auto const& we: MitmProxy::whitelist_verify().cache()) {
         out += "\n\t" + we.first;
 
-        long ttl = we.second->expired_at() - ::time(nullptr);
+        long ttl = we.second.ptr()->expired_at() - ::time(nullptr);
 
         out += string_format(" ttl: %d", ttl);
         if(ttl <= 0) {
@@ -311,7 +311,7 @@ int cli_diag_ssl_crl_list(struct cli_def *cli, const char *command, char *argv[]
         std::lock_guard<std::recursive_mutex> l_(SSLFactory::crl_cache.getlock());
         for (auto const& x: SSLFactory::crl_cache.cache()) {
             std::string uri = x.first;
-            auto cached_result = x.second;
+            auto cached_result = x.second.ptr();
 
             out << "    " + uri;
             if (cached_result) {
@@ -415,7 +415,7 @@ int cli_diag_ssl_verify_list(struct cli_def *cli, const char *command, char *arg
         std::lock_guard<std::recursive_mutex> l_(SSLFactory::factory().verify_cache.getlock());
         for (auto const& x: SSLFactory::factory().verify_cache.cache()) {
             std::string cn = x.first;
-            auto cached_result = x.second;
+            auto cached_result = x.second.ptr();
 
             if (cached_result) {
                 auto ttl = cached_result->expired_at() - ::time(nullptr);
@@ -488,13 +488,13 @@ int cli_diag_ssl_ticket_list(struct cli_def *cli, const char *command, char *arg
 
 #ifdef USE_OPENSSL11
 
-            if (session_keys->ptr) {
+            if (session_keys.ptr()) {
 
-                if (SSL_SESSION_has_ticket(session_keys->ptr)) {
+                if (SSL_SESSION_has_ticket(session_keys.ptr()->ptr)) {
                     size_t ticket_len = 0;
                     const unsigned char *ticket_ptr = nullptr;
 
-                    SSL_SESSION_get0_ticket(session_keys->ptr, &ticket_ptr, &ticket_len);
+                    SSL_SESSION_get0_ticket(session_keys.ptr()->ptr, &ticket_ptr, &ticket_len);
                     if (ticket_ptr && ticket_len) {
                         ticket = true;
                         std::string tick = hex_print((unsigned char *) ticket_ptr, ticket_len);
@@ -504,13 +504,13 @@ int cli_diag_ssl_ticket_list(struct cli_def *cli, const char *command, char *arg
                 }
 
                 unsigned int session_id_len = 0;
-                const unsigned char *session_id = SSL_SESSION_get_id(session_keys->ptr, &session_id_len);
+                const unsigned char *session_id = SSL_SESSION_get_id(session_keys.ptr()->ptr, &session_id_len);
                 if (!ticket || showall) {
                     if (session_id_len > 0) {
                         std::string sessionid = hex_print((unsigned char *) session_id, session_id_len);
                         out << string_format("    %s, sessionid: %s\n", key.c_str(), sessionid.c_str());
                     }
-                    out << string_format("    usage cnt: %d\n", session_keys->cnt_loaded);
+                    out << string_format("    usage cnt: %d\n", session_keys.ptr()->cnt_loaded);
                 }
             }
 
@@ -584,9 +584,11 @@ int cli_diag_dns_cache_list(struct cli_def *cli, const char *command, char *argv
 
         for (auto const& [ key, resp ]: DNS::get_dns_cache().cache()) {
 
-            if (resp != nullptr && (! resp->answers().empty()) ) {
-                long ttl = (resp->loaded_at + resp->answers().at(0).ttl_) - time(nullptr);
-                out << string_format("    %s  -> [ttl:%d]%s\n", key.c_str(), ttl, resp->answer_str().c_str());
+            auto response = resp.ptr();
+            if (response != nullptr && (! response->answers().empty()) ) {
+
+                long ttl = (response->loaded_at + response->answers().at(0).ttl_) - time(nullptr);
+                out << string_format("    %s  -> [ttl:%d]%s\n", key.c_str(), ttl, response->answer_str().c_str());
             }
         }
     }
@@ -641,12 +643,11 @@ int cli_diag_dns_domain_cache_list(struct cli_def *cli, const char *command, cha
     {
         std::scoped_lock<std::recursive_mutex> l_(DNS::get_domain_lock());
 
-        for (auto const& sub_domain_cache: DNS::get_domain_cache().cache()) {
+        for (auto const& [ domain, cache ]: DNS::get_domain_cache().cache()) {
 
-            std::string domain = sub_domain_cache.first;
             std::string str;
 
-            for (auto const& sub_e: sub_domain_cache.second->cache()) {
+            for (auto const& sub_e: cache.ptr()->cache()) {
                 str += " " + sub_e.first;
             }
             out << string_format("\n\t%s: \t%s", domain.c_str(), str.c_str());
