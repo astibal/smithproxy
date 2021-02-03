@@ -106,7 +106,7 @@ int cli_diag_ssl_cache_stats(struct cli_def *cli, const char *command, char *arg
     int n_cache = 0;
     {
         std::lock_guard<std::recursive_mutex> l(store->lock());
-        n_cache = store->cache().size();
+        n_cache = store->cache().cache().size();
     }
 
 
@@ -138,9 +138,9 @@ int cli_diag_ssl_cache_list(struct cli_def *cli, const char *command, char *argv
     {
         std::lock_guard<std::recursive_mutex> l_(store->lock());
 
-        for (auto const& x: store->cache()) {
+        for (auto const& x: store->cache().cache()) {
             std::string fqdn = x.first;
-            SSLFactory::X509_PAIR const* ptr = x.second.keypair();
+            SSLFactory::X509_PAIR const* ptr = x.second.ptr()->keypair();
 
             ss << string_format("    %s\n", fqdn.c_str());
 
@@ -182,9 +182,9 @@ int cli_diag_ssl_cache_print(struct cli_def *cli, const char *command, char *arg
     {
         std::lock_guard<std::recursive_mutex> l_(store->lock());
 
-        for (auto const& x: store->cache()) {
+        for (auto const& x: store->cache().cache()) {
             std::string fqdn = x.first;
-            SSLFactory::X509_PAIR const* ptr = x.second.keypair();
+            SSLFactory::X509_PAIR const* ptr = x.second.ptr()->keypair();
 
             std::regex r("\\+san:");
             std::string nice_fqdn = std::regex_replace(fqdn, r, "\n    san: ");
@@ -218,7 +218,7 @@ int cli_diag_ssl_cache_clear(struct cli_def *cli, const char *command, char *arg
     {
         std::lock_guard<std::recursive_mutex> l_(store->lock());
 
-        for (auto const& x: store->cache()) {
+        for (auto const& x: store->cache().cache()) {
             std::string fqdn = x.first;
             ss << string_format("removing    %s\n",fqdn.c_str());
 
