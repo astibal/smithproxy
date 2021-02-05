@@ -66,7 +66,7 @@ unsigned int dns_cache_cleanup() {
 
         _deb("dns_cache_cleanup: %s", it->first.c_str());
 
-        auto ttl = it->second.ptr()->current_ttl().value_or(-1);
+        auto ttl = it->second->ptr()->current_ttl().value_or(-1);
         if(ttl < 0) {
             _deb("dns_cache_cleanup:     ttl %d -- removing", ttl);
             it = cache.erase(it);
