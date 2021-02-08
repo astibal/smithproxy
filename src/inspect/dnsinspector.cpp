@@ -316,7 +316,7 @@ bool DNS_Inspector::store(std::shared_ptr<DNS_Response> ptr) {
 
                 if(LEV_(DEB)) {
                     for( auto const& [subdom_str, subdom_exp ]: subdom_cache->cache()) {
-                        _deb("Sub domain cache list: entry %s, expiring in %d", subdom_str.c_str(), subdom_exp->expired_at() - ::time(nullptr));
+                        _deb("Sub domain cache list: entry %s, expiring in %d", subdom_str.c_str(), subdom_exp->ptr()->expired_at() - ::time(nullptr));
                     }
                 }
 

@@ -53,6 +53,8 @@
 #include <display.hpp>
 
 
+using namespace libcli;
+
 struct CliElement {
 
     struct filter_retval {

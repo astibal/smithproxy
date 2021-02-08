@@ -40,6 +40,9 @@
 #include <cmd/clistate.hpp>
 #include <cmd/cligen.hpp>
 
+
+using namespace libcli;
+
 std::string CliState::template_callback_key (std::string const& section, cli_def* cli) {
 
     std::string template_key = section;

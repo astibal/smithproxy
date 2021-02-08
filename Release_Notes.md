@@ -33,7 +33,7 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 Milestones:
 * [ ] better certificate cache - certificates from cache expire on LRU-similar basis
 * [ ] memory profiles - more flexible mempool with, or optionally without fallback to heap for constrained systems
-* [ ] **new installations affecting change** split portal services and core   
+* [x] **new installations affecting change** split portal services and core   
 * [ ] json/api interface  
  
 
@@ -42,6 +42,7 @@ Milestones:
 ## What's new in 0.9.12 (in progress)
 
 ### New features
+* portal spit - portals moved to smithproxy_auth project (core package detects portals on restart)
 
 * **0.9.12**
 * **0.9.12 RC2**  

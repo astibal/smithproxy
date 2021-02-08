@@ -248,6 +248,8 @@ void print_help() {
 
 int main(int argc, char *argv[]) {
 
+    memPool::pool();
+
 #ifdef MEMPOOL_ALL
     if( CRYPTO_set_mem_functions(mempool_alloc, mempool_realloc, mempool_free) == 0) {
         std::cerr << "WARNING: openssl allocators not registered, defaulting" << std::endl;

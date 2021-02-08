@@ -7,3 +7,5 @@
 [submodule "src/ext/libcli"]
 	path = src/ext/libcli
 	url = ../libcli
+	branch = main
+

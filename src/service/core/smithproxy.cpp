@@ -469,11 +469,12 @@ void SmithProxy::join_all() {
 void SmithProxy::stop() {
 
     terminate_flag = true;
-    memPool::pool().bailing = true;
+    memPool::bailing = true;
 
     auto kill_proxies = [](auto proxies) {
         for(auto p: proxies) {
-            p->state().dead(true);
+            if(p)
+                p->state().dead(true);
         }
     };
 
