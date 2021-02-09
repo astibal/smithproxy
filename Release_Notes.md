@@ -31,15 +31,16 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 ## Roadmap for 0.9.13 (tba)
 
 Milestones:
-* [ ] better certificate cache - certificates from cache expire on LRU-similar basis
+* [x] better certificate cache - certificates from cache expire on LRU-similar basis
 * [ ] memory profiles - more flexible mempool with, or optionally without fallback to heap for constrained systems
 * [x] **new installations affecting change** split portal services and core   
 * [ ] json/api interface  
  
+* libcli changes - code base switched to new 'main' branch with few changes
+* certificate cache changes - cache is now based on custom lru scheme 
+* portal split - there are now 2 packages: smithproxy and smithproxy-auth 
 
-... TBA ... 
-
-## What's new in 0.9.12 (in progress)
+## What's new in 0.9.12
 
 ### New features
 * portal spit - portals moved to smithproxy_auth project (core package detects portals on restart)
