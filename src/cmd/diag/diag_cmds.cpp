@@ -494,6 +494,8 @@ int cli_diag_ssl_ticket_list(struct cli_def *cli, const char *command, char *arg
 
             if (session_keys->ptr()) {
 
+                bool printed = false;
+
                 if (SSL_SESSION_has_ticket(session_keys->ptr()->ptr)) {
                     size_t ticket_len = 0;
                     const unsigned char *ticket_ptr = nullptr;
@@ -504,6 +506,7 @@ int cli_diag_ssl_ticket_list(struct cli_def *cli, const char *command, char *arg
                         std::string tick = hex_print((unsigned char *) ticket_ptr, ticket_len);
                         out << string_format("    %s,    ticket: %s\n", key.c_str(), tick.c_str());
 
+                        printed = true;
                     }
                 }
 
@@ -513,9 +516,13 @@ int cli_diag_ssl_ticket_list(struct cli_def *cli, const char *command, char *arg
                     if (session_id_len > 0) {
                         std::string sessionid = hex_print((unsigned char *) session_id, session_id_len);
                         out << string_format("    %s, sessionid: %s\n", key.c_str(), sessionid.c_str());
+
+                        printed = true;
                     }
-                    out << string_format("    usage cnt: %d\n", session_keys->ptr()->cnt_loaded);
                 }
+
+                if(printed)
+                    out << string_format("    usage cnt: %d\n", session_keys->ptr()->cnt_loaded);
             }
 
 #else
