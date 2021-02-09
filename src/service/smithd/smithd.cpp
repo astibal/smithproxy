@@ -579,7 +579,14 @@ int main(int argc, char *argv[]) {
                 "ux-plain",
                 cfg_smithd_workers,
                 proxyType::none());
-    } catch(socle::com_error const& e) {
+    }
+    catch(socle::com_error const& e) {
+        _fat("Exception caught when creating listener: %s", e.what());
+    }
+    catch(sx::netservice_cannot_bind const& e) {
+        _fat("Exception caught when creating listener: %s", e.what());
+    }
+    catch(sx::netservice_error const& e) {
         _fat("Exception caught when creating listener: %s", e.what());
     }
 

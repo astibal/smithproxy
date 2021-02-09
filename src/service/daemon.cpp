@@ -229,6 +229,11 @@ void DaemonFactory::set_crashlog(const char* file) {
 }
 
 void writecrash(int fd, const char* msg, int len)  {
+
+    if(len < 0 or fd <= 0) {
+        return;
+    }
+
    int w = 0; int rep = 0;
 
    auto pos = msg;

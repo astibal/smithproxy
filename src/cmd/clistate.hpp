@@ -54,81 +54,81 @@ struct CliCallbacks {
 
     using callback = int (*)(struct cli_def *,const char *,char * *,int);
 
-    callback cmd_set() const { return cmd_set_; }
+    [[nodiscard]] callback cmd_set() const { return cmd_set_; }
     CliCallbacks& cmd_set(callback c) {
         cmd_set_ = c;
         return *this;
     }
 
-    callback cmd_edit() const { return cmd_edit_; };
+    [[nodiscard]] callback cmd_edit() const { return cmd_edit_; };
     CliCallbacks& cmd_edit(callback c) {
         cmd_edit_ = c;
         return *this;
     }
 
-    callback cmd_add() const { return cmd_add_; };
+    [[nodiscard]] callback cmd_add() const { return cmd_add_; };
     CliCallbacks& cmd_add(callback c) {
         cmd_add_ = c;
         return *this;
     }
 
-    callback cmd_remove() const { return cmd_remove_; };
+    [[nodiscard]] callback cmd_remove() const { return cmd_remove_; };
     CliCallbacks& cmd_remove(callback c) {
         cmd_remove_ = c;
         return *this;
     }
 
-    callback cmd_move() const { return cmd_move_; };
+    [[nodiscard]] callback cmd_move() const { return cmd_move_; };
     CliCallbacks& cmd_move(callback c) {
         cmd_move_ = c;
         return *this;
     }
 
 
-    cli_command* cli_edit() const { return cli_edit_; };
+    [[nodiscard]] cli_command* cli_edit() const { return cli_edit_; };
     CliCallbacks& cli_edit(cli_command* c) {
         cli_edit_ = c;
         return *this;
     }
 
-    cli_command* cli_add() const { return cli_add_; };
+    [[nodiscard]] cli_command* cli_add() const { return cli_add_; };
     CliCallbacks& cli_add(cli_command* c) {
         cli_add_ = c;
         return *this;
     }
 
-    cli_command* cli_remove() const { return cli_remove_; };
+    [[nodiscard]] cli_command* cli_remove() const { return cli_remove_; };
     CliCallbacks& cli_remove(cli_command* c) {
         cli_remove_ = c;
         return *this;
     }
 
-    cli_command* cli_move() const { return cli_move_; };
+    [[nodiscard]] cli_command* cli_move() const { return cli_move_; };
     CliCallbacks& cli_move(cli_command* c) {
         cli_move_ = c;
         return *this;
     }
 
 
-    bool cap_edit() const { return cmd_edit_enabled_; };
+    [[nodiscard]] bool cap_edit() const { return cmd_edit_enabled_; };
     CliCallbacks& cap_edit(bool v) {
         cmd_edit_enabled_ = v;
         return *this;
     }
 
-    bool cap_add() const { return cmd_add_enabled_; };
+    [[nodiscard]] bool cap_add() const { return cmd_add_enabled_; };
     CliCallbacks& cap_add(bool v) {
         cmd_add_enabled_ = v;
         return *this;
     }
 
-    bool cap_remove() const { return cmd_remove_enabled_; };
+    [[nodiscard]] bool cap_remove() const { return cmd_remove_enabled_; };
     CliCallbacks& cap_remove(bool v) {
         cmd_remove_enabled_ = v;
         return *this;
     }
 
-    bool cap_move() const { return cmd_move_enabled_; };
+    [[nodiscard]] bool cap_move() const { return cmd_move_enabled_; };
     CliCallbacks& cap_move(bool v) {
         cmd_move_enabled_ = v;
         return *this;
@@ -137,7 +137,7 @@ struct CliCallbacks {
 private:
     std::string caption_;
 
-    callback cmd_set_;
+    callback cmd_set_ = nullptr;
 
     callback cmd_edit_ = nullptr;
     bool     cmd_edit_enabled_ = false;
