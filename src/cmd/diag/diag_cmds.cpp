@@ -104,14 +104,17 @@ int cli_diag_ssl_cache_stats(struct cli_def *cli, const char *command, char *arg
 
 
     int n_cache = 0;
+    int n_maxsize = 0;
     {
         std::lock_guard<std::recursive_mutex> l(store->lock());
         n_cache = store->cache().cache().size();
+        n_maxsize = store->cache().max_size();
     }
 
 
     cli_print(cli,"certificate store stats: ");
-    cli_print(cli,"    CN cert cache size: %d ",n_cache);
+    cli_print(cli,"    cache size: %d ",n_cache);
+    cli_print(cli,"      max size: %d ",n_maxsize);
 
     return CLI_OK;
 }
@@ -472,23 +475,35 @@ int cli_diag_ssl_ticket_list(struct cli_def *cli, const char *command, char *arg
     debug_cli_params(cli, command, argv, argc);
 
     std::stringstream out;
+    int lev = 6;
+    bool showall = false;
+
+
+    auto shorten = [](std::string const& s) -> std::string {
+        if(s.length() > 9) {
+            auto shortened = s.substr(0, 3);
+            auto shortened2 = s.substr(s.length()-3, s.length());
+            return shortened + "..." + shortened2;
+        }
+        return s;
+    };
 
     {
+
+
+        if (argc > 0) {
+            lev = safe_val(argv[0]);
+            if (lev >= 7) {
+                showall = true;
+            }
+        }
+        bool ticket = false;
+
         std::lock_guard<std::recursive_mutex> l_(SSLFactory::session_cache().getlock());
 
         out << "SSL ticket/sessionid list:\n\n";
 
         for (auto const& [ key, session_keys ]: SSLFactory::session_cache().cache()) {
-
-            bool showall = false;
-
-            if (argc > 0) {
-                int lev = safe_val(argv[0]);
-                if (lev >= 7) {
-                    showall = true;
-                }
-            }
-            bool ticket = false;
 
 #ifdef USE_OPENSSL11
 
@@ -504,8 +519,14 @@ int cli_diag_ssl_ticket_list(struct cli_def *cli, const char *command, char *arg
                     if (ticket_ptr && ticket_len) {
                         ticket = true;
                         std::string tick = hex_print((unsigned char *) ticket_ptr, ticket_len);
-                        out << string_format("    %s,    ticket: %s\n", key.c_str(), tick.c_str());
+                        out << string_format("    %s,    ticket", key.c_str());
 
+                        if(lev > 6) {
+                            out << string_format(": %s", tick.c_str());
+                        }
+                        else {
+                            out << string_format(": %s", shorten(tick).c_str());
+                        }
                         printed = true;
                     }
                 }
@@ -515,14 +536,23 @@ int cli_diag_ssl_ticket_list(struct cli_def *cli, const char *command, char *arg
                 if (!ticket || showall) {
                     if (session_id_len > 0) {
                         std::string sessionid = hex_print((unsigned char *) session_id, session_id_len);
-                        out << string_format("    %s, sessionid: %s\n", key.c_str(), sessionid.c_str());
+                        out << string_format("    %s, sessionid", key.c_str());
+
+                        if(lev > 6) {
+                            out << string_format(": %s", sessionid.c_str());
+                        } else {
+                            out << string_format(": %s", shorten(sessionid).c_str());
+                        }
 
                         printed = true;
                     }
                 }
 
-                if(printed)
-                    out << string_format("    usage cnt: %d\n", session_keys->ptr()->cnt_loaded);
+                if(printed) {
+                    out << string_format(", usage cnt: %d", session_keys->ptr()->cnt_loaded);
+                    out << "\n";
+                }
+
             }
 
 #else
@@ -554,18 +584,23 @@ int cli_diag_ssl_ticket_stats(struct cli_def *cli, const char *command, char *ar
     debug_cli_params(cli, command, argv, argc);
 
     std::stringstream out;
+    int n_sz_cache = 0;
+    int n_max_cache = 0;
+    std::string n_name;
+
 
     {
         std::lock_guard<std::recursive_mutex> l_(SSLFactory::session_cache().getlock());
 
-        int n_sz_cache = SSLFactory::session_cache().cache().size();
-        int n_max_cache = SSLFactory::session_cache().max_size();
-        std::string n_name = SSLFactory::session_cache().name();
-
-        out << string_format("'%s' cache stats: \n", n_name.c_str());
-        out << string_format("    current size: %d \n", n_sz_cache);
-        out << string_format("    maximum size: %d \n", n_max_cache);
+        n_sz_cache = SSLFactory::session_cache().cache().size();
+        n_max_cache = SSLFactory::session_cache().max_size();
+        n_name = SSLFactory::session_cache().name();
     }
+
+    out << string_format("'%s' cache stats: \n", n_name.c_str());
+    out << string_format("    current size: %d \n", n_sz_cache);
+    out << string_format("    maximum size: %d \n", n_max_cache);
+
 
     cli_print(cli, "%s", out.str().c_str());
     return CLI_OK;
@@ -614,17 +649,19 @@ int cli_diag_dns_cache_stats(struct cli_def *cli, const char *command, char *arg
     debug_cli_params(cli, command, argv, argc);
 
     std::stringstream out;
+    int cache_size = 0;
+    int max_size = 0;
+
     {
         std::scoped_lock<std::recursive_mutex> l_(DNS::get_dns_lock());
 
         out << "\nDNS cache statistics: \n";
-        int cache_size = DNS::get_dns_cache().cache().size();
-        int max_size = DNS::get_dns_cache().max_size();
-
-
-        out << string_format("  Current size: %5d\n", cache_size);
-        out << string_format("  Maximum size: %5d\n", max_size);
+        cache_size = DNS::get_dns_cache().cache().size();
+        max_size = DNS::get_dns_cache().max_size();
     }
+
+    out << string_format("  Current size: %5d\n", cache_size);
+    out << string_format("  Maximum size: %5d\n", max_size);
 
     cli_print(cli, "%s", out.str().c_str());
     return CLI_OK;
