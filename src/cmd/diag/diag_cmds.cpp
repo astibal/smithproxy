@@ -606,6 +606,29 @@ int cli_diag_ssl_ticket_stats(struct cli_def *cli, const char *command, char *ar
     return CLI_OK;
 }
 
+int cli_diag_ssl_ticket_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    debug_cli_params(cli, command, argv, argc);
+
+    std::stringstream out;
+    int n_sz_cache = 0;
+
+    {
+        std::lock_guard<std::recursive_mutex> l_(SSLFactory::session_cache().getlock());
+
+        n_sz_cache = SSLFactory::session_cache().cache().size();
+
+        SSLFactory::session_cache().clear();
+    }
+
+
+    out << string_format("\n    %d session data cleared\n", n_sz_cache);
+
+
+    cli_print(cli, "%s", out.str().c_str());
+    return CLI_OK;
+}
+
 
 int cli_diag_ssl_ca_reload(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
@@ -1850,6 +1873,7 @@ bool register_diags(cli_def* cli, cli_command* diag) {
     auto diag_ssl_ticket = cli_register_command(cli, diag_ssl, "ticket", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose abbreviated handshake session/ticket cache");
     cli_register_command(cli, diag_ssl_ticket, "list", cli_diag_ssl_ticket_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list abbreviated handshake session/ticket cache");
     cli_register_command(cli, diag_ssl_ticket, "stats", cli_diag_ssl_ticket_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "abbreviated handshake session/ticket cache stats");
+    cli_register_command(cli, diag_ssl_ticket, "clear", cli_diag_ssl_ticket_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clear abbreviated handshake session/ticket cache");
 
     auto diag_ssl_ca     = cli_register_command(cli, diag_ssl, "ca", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose SSL signing CA");
     cli_register_command(cli, diag_ssl_ca, "reload", cli_diag_ssl_ca_reload, PRIVILEGE_PRIVILEGED, MODE_EXEC, "reload signing CA key and certificate");
