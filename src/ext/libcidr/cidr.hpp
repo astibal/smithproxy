@@ -10,11 +10,13 @@ extern "C"{
 #endif 
 
 /* We need the fixed-size int types.  See discussion below. */
-#include <inttypes.h>
+#include <cinttypes>
+
 /* We need the struct in[6]_addr defs */
 #include <netinet/in.h>
 
 
+namespace cidr {
 /* CONSTANTS */
 /* String forms (cidr_to_str()) */
 #define CIDR_NOFLAGS      (0)
@@ -36,9 +38,9 @@ extern "C"{
 #define CIDR_IPV6           2
 
 /* Versioning info */
-#define CIDR_VERSION "1.2.3"
+#define CIDR_VERSION "1.2.4"
 #define CIDR_RELEASE "release"
-#define CIDR_REVISION " (fullermd@over-yonder.net-20140201113312-pbfu6stkedc79fe9)"
+#define CIDR_REVISION " (custom smithproxy fork)"
 #define CIDR_VERSION_STR (CIDR_VERSION "-" CIDR_RELEASE CIDR_REVISION)
 
 
@@ -55,44 +57,70 @@ extern "C"{
  * structure directly from external programs.  Use the cidr_get_*()
  * functions to get a copy to work with.
  */
-struct cidr_addr
-{
-    int     version;
-    uint8_t addr[16];
-    uint8_t mask[16];
-    int     proto;
-};
-typedef struct cidr_addr CIDR;
+    struct cidr_addr {
+        int version;
+        uint8_t addr[16];
+        uint8_t mask[16];
+        int proto;
+    };
+    typedef struct cidr_addr CIDR;
 
 
-/* PROTOTYPES */
-CIDR *cidr_addr_broadcast(const CIDR *);
-CIDR *cidr_addr_hostmax(const CIDR *);
-CIDR *cidr_addr_hostmin(const CIDR *);
-CIDR *cidr_addr_network(const CIDR *);
-CIDR *cidr_alloc(void);
-int cidr_contains(const CIDR *, const CIDR *);
-CIDR *cidr_dup(const CIDR *);
-int cidr_equals(const CIDR *, const CIDR *);
-void cidr_free(CIDR *);
-CIDR *cidr_from_inaddr(const struct in_addr *);
-CIDR *cidr_from_in6addr(const struct in6_addr *);
-CIDR *cidr_from_str(const char *);
-uint8_t *cidr_get_addr(const CIDR *);
-uint8_t *cidr_get_mask(const CIDR *);
-int cidr_get_pflen(const CIDR *);
-int cidr_get_proto(const CIDR *);
-int cidr_is_v4mapped(const CIDR *);
-CIDR **cidr_net_subnets(const CIDR *);
-CIDR *cidr_net_supernet(const CIDR *);
-const char *cidr_numaddr(const CIDR *);
-const char *cidr_numaddr_pflen(int);
-const char *cidr_numhost(const CIDR *);
-const char *cidr_numhost_pflen(int);
-struct in_addr *cidr_to_inaddr(const CIDR *, struct in_addr *);
-struct in6_addr *cidr_to_in6addr(const CIDR *, struct in6_addr *);
-char *cidr_to_str(const CIDR * c, int flags=CIDR_NOFLAGS);
-const char *cidr_version(void);
+
+    [[nodiscard]] CIDR *cidr_addr_broadcast (const CIDR *);
+
+    [[nodiscard]] CIDR *cidr_addr_hostmax (const CIDR *);
+
+    [[nodiscard]] CIDR *cidr_addr_hostmin (const CIDR *);
+
+    [[nodiscard]] CIDR *cidr_addr_network (const CIDR *);
+
+    [[nodiscard]] CIDR *cidr_alloc ();
+
+    int cidr_contains (const CIDR *, const CIDR *);
+
+    [[nodiscard]] CIDR *cidr_dup (const CIDR *);
+
+    int cidr_equals (const CIDR *, const CIDR *);
+
+    void cidr_free (CIDR *);
+
+    [[nodiscard]] CIDR *cidr_from_inaddr (const struct in_addr *);
+
+    [[nodiscard]] CIDR *cidr_from_in6addr (const struct in6_addr *);
+
+    [[nodiscard]] CIDR *cidr_from_str (const char *);
+
+    [[nodiscard]] uint8_t *cidr_get_addr (const CIDR *);
+
+    [[nodiscard]] uint8_t *cidr_get_mask (const CIDR *);
+
+    int cidr_get_pflen (const CIDR *);
+
+    int cidr_get_proto (const CIDR *);
+
+    int cidr_is_v4mapped (const CIDR *);
+
+    [[nodiscard]] CIDR **cidr_net_subnets (const CIDR *);
+
+    [[nodiscard]] CIDR *cidr_net_supernet (const CIDR *);
+
+    const char *cidr_numaddr (const CIDR *);
+
+    const char *cidr_numaddr_pflen (int);
+
+    const char *cidr_numhost (const CIDR *);
+
+    const char *cidr_numhost_pflen (int);
+
+    [[nodiscard]] struct in_addr *cidr_to_inaddr (const CIDR *, struct in_addr *);
+
+    [[nodiscard]] struct in6_addr *cidr_to_in6addr (const CIDR *, struct in6_addr *);
+
+    [[nodiscard]] char *cidr_to_str (const CIDR *c, int flags = CIDR_NOFLAGS);
+
+    const char *cidr_version (void);
+}
 
 #ifdef __cplusplus
 }

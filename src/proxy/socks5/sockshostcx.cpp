@@ -243,7 +243,7 @@ int socksServerCX::process_socks_request() {
                 std::vector<std::string> target_ips;
                 
                 // Some implementations use atype FQDN eventhough the target is already IP
-                CIDR* adr_as_fqdn = cidr_from_str(fqdn.c_str());
+                auto* adr_as_fqdn = cidr::cidr_from_str(fqdn.c_str());
                 if(adr_as_fqdn != nullptr) {
                     // hmm, it's an address
                     cidr_free(adr_as_fqdn);

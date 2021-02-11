@@ -53,7 +53,7 @@
 
 class AddressObject : public socle::sobject, public CfgElement {
 public:
-    virtual bool match(CIDR* c) = 0;
+    virtual bool match(cidr::CIDR* c) = 0;
     std::string to_string(int=iINF) const override = 0;
     AddressObject() : log(get_log()) {};
 
@@ -70,13 +70,13 @@ public:
 
 class CidrAddress : public AddressObject {
 public:
-    explicit CidrAddress(CIDR* c) : AddressObject(), c_(c) { }
-    explicit CidrAddress(std::string const& v) : AddressObject(), c_(cidr_from_str(v.c_str())) {}
+    explicit CidrAddress(cidr::CIDR* c) : AddressObject(), c_(c) { }
+    explicit CidrAddress(std::string const& v) : AddressObject(), c_(cidr::cidr_from_str(v.c_str())) {}
 
-    CIDR* cidr() { return c_; }
+    cidr::CIDR* cidr() { return c_; }
 
-    int contains(CIDR *other);
-    bool match(CIDR* c) override { return (contains(c) >= 0); };
+    int contains(cidr::CIDR *other);
+    bool match(cidr::CIDR* c) override { return (contains(c) >= 0); };
     bool ask_destroy() override { return false; };
     
     std::string to_string(int verbosity=iINF) const override {
@@ -95,7 +95,7 @@ public:
     
     ~CidrAddress() override { cidr_free(c_); };
 protected:
-    CIDR* c_;
+    cidr::CIDR* c_;
 
 DECLARE_C_NAME("CidrAddress");
 };
@@ -105,7 +105,7 @@ public:
     explicit FqdnAddress(std::string s) : AddressObject(), fqdn_(std::move(s)) { }
     std::string fqdn() const { return fqdn_; }
     
-    bool match(CIDR* to_match) override;
+    bool match(cidr::CIDR* to_match) override;
     bool ask_destroy() override { return false; };
     std::string to_string(int verbosity=iINF) const override;
 protected:

@@ -3,6 +3,8 @@
 
 #include <gtest/gtest.h>
 
+using namespace cidr;
+
 TEST(CidrAddressTest, ZeroZeroMatchesAll) {
     auto all = CidrAddress(cidr_from_str("0.0.0.0/0"));
     auto ip4_min = cidr_from_str("1.0.0.1");

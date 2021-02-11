@@ -139,7 +139,7 @@ bool PolicyRule::match_addrgrp_cx(group_of_addresses &sources, baseHostCX* cx) {
         match = true;
 //                 _dia("PolicyRule: matched ");
     } else {
-        CIDR* l = cidr_from_str(cx->host().c_str());
+        auto* l = cidr::cidr_from_str(cx->host().c_str());
         for(auto const& comp: sources) {
             
             if(comp->value()->match(l)) {

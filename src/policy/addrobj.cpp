@@ -42,7 +42,7 @@
 #include <inspect/dns.hpp>
 #include <sstream>
 
-int CidrAddress::contains(CIDR* other) {
+int CidrAddress::contains(cidr::CIDR* other) {
     return cidr_contains(c_,other);
 }
 
@@ -84,7 +84,7 @@ std::string FqdnAddress::to_string(int verbosity) const {
 }
 
 
-bool FqdnAddress::match(CIDR* to_match) {
+bool FqdnAddress::match(cidr::CIDR* to_match) {
     bool ret = false;
     
     std::shared_ptr<DNS_Response> r = nullptr;

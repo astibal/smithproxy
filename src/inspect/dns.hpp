@@ -167,18 +167,18 @@ struct DNS_Answer {
         return ret;
     }
     
-    CIDR* cidr() const {
+    cidr::CIDR* cidr() const {
         if(type_ == A && data_.size() == 4) {
             uint32_t ip = data_.get_at<uint32_t>(0);
             in_addr a{0};
             a.s_addr = ip;
             
-            return cidr_from_inaddr(&a);
+            return cidr::cidr_from_inaddr(&a);
         } 
         else if (type_ == AAAA && data_.size() == 16) {
             in6_addr a{0};
             memcpy(&a.s6_addr,data_.data(),16);
-            return cidr_from_in6addr(&a);
+            return cidr::cidr_from_in6addr(&a);
         }
         
         return nullptr;

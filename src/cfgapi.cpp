@@ -446,7 +446,7 @@ int CfgFactory::load_db_address () {
                 switch(type) {
                     case 0: // CIDR notation
                         if (load_if_exists(cur_object, "cidr", address)) {
-                            CIDR* c = cidr_from_str(address.c_str());
+                            auto* c = cidr::cidr_from_str(address.c_str());
 
                             db_address[name] = std::make_shared<CfgAddress>(std::shared_ptr<AddressObject>(new CidrAddress(c)));
                             db_address[name]->element_name() = name;
@@ -1776,9 +1776,9 @@ bool CfgFactory::prof_tls_apply (baseHostCX *originator, baseProxy *new_proxy, c
                             bool interrupt = false;
                             for(std::string& filter_element: *ps->sni_filter_bypass) {
                                 FqdnAddress f(filter_element);
-                                auto host_cidr = std::unique_ptr<CIDR, decltype(&cidr_free)>(
-                                                        cidr_from_str(xcom->owner_cx()->host().c_str()),
-                                                        &cidr_free);
+                                auto host_cidr = std::unique_ptr<cidr::CIDR, decltype(&cidr::cidr_free)>(
+                                                        cidr::cidr_from_str(xcom->owner_cx()->host().c_str()),
+                                                        &cidr::cidr_free);
                                 
                                 if(f.match(host_cidr.get())) {
                                     if(sslcom->bypass_me_and_peer()) {
