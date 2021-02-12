@@ -27,18 +27,27 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 * email support: `<support@smithproxy.org>`
 * Documentation: [https://smithproxy.readthedocs.org](https://smithproxy.readthedocs.org)
 
-
-## Roadmap for 0.9.13 (tba)
-
-Milestones:
-* [x] better certificate cache - certificates from cache expire on LRU-similar basis
+## Roadmap to 0.9.14 (tba)
 * [ ] memory profiles - more flexible mempool with, or optionally without fallback to heap for constrained systems
-* [x] **new installations affecting change** split portal services and core   
 * [ ] json/api interface  
+
+## Roadmap to 0.9.13 (in progress)
  
+### New features
+* new `diag ssl ticket clear` to clear tls session data 
+* [x] better certificate cache - certificates from cache expire on LRU-similar basis
+* [x] **new installations affecting change** split portal services and core   
+
+### Imrovements
+* libcidr changes - refactored into namespace
+* tls session cache is now set to lru mode  
 * libcli changes - code base switched to new 'main' branch with few changes
 * certificate cache changes - cache is now based on custom lru scheme 
 * portal split - there are now 2 packages: smithproxy and smithproxy-auth 
+
+### Fixes
+* 2 smaller memory leaks fixed
+
 
 ## What's new in 0.9.12
 

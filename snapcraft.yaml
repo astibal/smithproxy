@@ -1,6 +1,6 @@
 
 name: smithproxy
-version: 0.9.12-40-g09bfca0
+version: 0.9.12-43-g3f212f1
 summary: Fast and featured transparent TCP/UDP/TLS proxy
 description: |
  Smithproxy is fast transparent TCP/UDP/TLS (SSL) proxy. It's highly configurable
@@ -145,7 +145,6 @@ parts:
       - make
       - cmake
       - libconfig++-dev
-      - libunwind-dev
       - python3-dev
       - libssl-dev
       - libffi-dev
@@ -161,7 +160,6 @@ parts:
       - ca-certificates
       - iptables
       - libconfig++9v5
-      - libunwind8
       - telnet
       - python
       - python3-posix-ipc
@@ -187,5 +185,4 @@ parts:
     python-packages:
       - pyroute2
       - pylibconfig2
-      - m2crypto
       - cryptography
