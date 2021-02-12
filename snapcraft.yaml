@@ -132,6 +132,8 @@ apps:
 parts:
   smithproxy:
     plugin: cmake
+    configflags:
+      - -DCMAKE_BUILD_TYPE=Release
 
     source: https://github.com/astibal/smithproxy
     source-type: git
