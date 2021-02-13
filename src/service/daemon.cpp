@@ -321,7 +321,7 @@ void DaemonFactory::release_crash_handler(int sig) {
         writecrash(STDERR_FILENO,buf_line,chars);
         writecrash(CRLOG,buf_line,chars);
     }
-    close(CRLOG);
+    if(CRLOG >=0) close(CRLOG);
 
     df.unlink_pidfile();
 

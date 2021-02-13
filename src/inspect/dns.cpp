@@ -179,7 +179,7 @@ int DNSFactory::send_dns_request(std::string const& hostname, DNS_Record_Type t,
     // create UDP socket
     int send_socket = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 
-    if(send_socket > 0) {
+    if(send_socket >= 0) {
         struct sockaddr_storage addr{};
 
         memset(&addr, 0, sizeof(struct sockaddr_storage));
