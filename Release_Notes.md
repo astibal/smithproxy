@@ -39,6 +39,7 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 * [x] **new installations affecting change** split portal services and core   
 
 ### Imrovements
+* introduce SX_MEMSIZE env variable to control how many buffers are allocated
 * libcidr changes - refactored into namespace
 * tls session cache is now set to lru mode  
 * libcli changes - code base switched to new 'main' branch with few changes
@@ -47,6 +48,7 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 
 ### Fixes
 * 2 smaller memory leaks fixed
+* fix dns inspector - allow NS type in authority responses and allow records into cache 
 
 
 ## What's new in 0.9.12
