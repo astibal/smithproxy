@@ -51,6 +51,7 @@
 const char* DNSFactory::dns_record_type_str(int a) {
     switch(a) {
         case A: return str_a;
+        case NS: return str_ns;
         case AAAA: return str_aaaa;
         case CNAME: return str_cname;
         case TXT: return str_txt;
@@ -453,7 +454,7 @@ int DNS_Packet::load(buffer* src) {
 
                     _dum("xi: %d, pre-type: %d", xi, pre_type);
 
-                    if (pre_type == SOA) {
+                    if (pre_type == SOA or pre_type == NS) {
                         //answer_temp.name_ = ntohs(src->get_at<unsigned short>(i));
                         answer_temp.type_ = pre_type;//ntohs(src->get_at<unsigned short>(i+1));
                         answer_temp.class_ = ntohs(src->get_at<unsigned short>(i));

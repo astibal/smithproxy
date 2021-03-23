@@ -65,6 +65,7 @@
 typedef enum DNS_Record_Type_ { 
     UNKNOWN=0,
     A=1,
+    NS=2,
     CNAME=5,
     SOA=6,
     TXT=16,
@@ -78,6 +79,7 @@ struct DNS_Response;
 class DNSFactory {
     const char* _unknown = "unknown";
     const char* str_a = "A";
+    const char* str_ns = "NS";
     const char* str_aaaa = "AAAA";
     const char* str_cname = "CNAME";
     const char* str_txt= "TXT";
