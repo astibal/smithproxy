@@ -33,7 +33,7 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 
 ## Roadmap to 0.9.14 (tba - in progress)
 
-* [ ] json/api interface  
+* [ ] json/api interface
 
 ## What's new in 0.9.13
  
