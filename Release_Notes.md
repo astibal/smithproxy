@@ -27,18 +27,23 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 * email support: `<support@smithproxy.org>`
 * Documentation: [https://smithproxy.readthedocs.org](https://smithproxy.readthedocs.org)
 
-## Roadmap to 0.9.14 (tba)
-* [ ] memory profiles - more flexible mempool with, or optionally without fallback to heap for constrained systems
+## Roadmap for future versions
+
+* [ ] memory pool ONLY execution
+
+## Roadmap to 0.9.14 (tba - in progress)
+
 * [ ] json/api interface  
 
-## Roadmap to 0.9.13 (in progress)
+## What's new in 0.9.13
  
 ### New features
-* new `diag ssl ticket clear` to clear tls session data 
+* new `diag ssl ticket clear` to clear tls session data
+* [x] memory profiles - more flexible mempool controlled by percentile env. variable SX_MEMSIZE 
 * [x] better certificate cache - certificates from cache expire on LRU-similar basis
 * [x] **new installations affecting change** split portal services and core   
 
-### Imrovements
+### Improvements
 * introduce SX_MEMSIZE env variable to control how many buffers are allocated
 * libcidr changes - refactored into namespace
 * tls session cache is now set to lru mode  
