@@ -194,7 +194,7 @@ void cli_generate_set_command_args(struct cli_def *cli, cli_command* parent, std
 }
 
 
-std::vector<cli_command *> cli_generate_set_commands (struct cli_def *cli, std::string const &section) {
+void cli_generate_set_commands (struct cli_def *cli, std::string const &section) {
 
 
     auto& this_setting = CfgFactory::cfg_root().lookup(section.c_str());

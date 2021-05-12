@@ -57,7 +57,7 @@ void cfg_generate_cli_hints(Setting& setting, std::vector<std::string>* this_lev
 
 
 
-std::vector<cli_command *> cli_generate_set_commands (struct cli_def *cli, std::string const& section);
+void cli_generate_set_commands (struct cli_def *cli, std::string const& section);
 
 void cli_generate_move_commands(cli_def* cli, int this_mode, cli_command *move, CliCallbacks::callback callback, int i, int len);
 void cli_generate_commands (cli_def *cli, std::string const &this_section, cli_command *cli_parent);
