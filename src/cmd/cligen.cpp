@@ -93,7 +93,7 @@ std::pair<int, std::string> generate_dynamic_groups(struct cli_def *cli, const c
 
             CliState::get().callbacks(
                     this_setting_path,
-                    CliState::callback_entry(new_mode, CliCallbacks(this_setting_path).cmd_set(cli_generic_set_cb)),
+                    CliState::callback_entry(new_mode, CliCallbacks(this_setting_path).cmd("set", cli_generic_set_cb)),
                     true); // set mode map, as the map value increases
 
             cli_generate_set_commands(cli, this_setting_path);
@@ -166,8 +166,8 @@ void generate_options_combination(cli_def* cli, cli_command* parent, std::vector
 
 void cli_generate_set_command_args(struct cli_def *cli, cli_command* parent, std::string const &section, std::string const& varname) {
 
-    auto const& cb_entry = CliState::get().callbacks(section);
-    auto set_cb = std::get<1>(cb_entry).cmd_set();
+    auto& cb_entry = CliState::get().callbacks(section);
+    auto set_cb = std::get<1>(cb_entry).cmd("set");
     int mode = std::get<0>(cb_entry);
 
     std::string masked = sx::str::cli::mask_all(section + "." + varname);
@@ -202,8 +202,8 @@ void cli_generate_set_commands (struct cli_def *cli, std::string const &section)
     std::string this_setting_path = this_setting.getPath();
     _debug(cli, "cli_generate_set_commands: path = %s", this_setting.getPath().c_str());
 
-    auto const& cb_entry = CliState::get().callbacks(section);
-    auto set_cb = std::get<1>(cb_entry).cmd_set();
+    auto & cb_entry = CliState::get().callbacks(section);
+    auto set_cb = std::get<1>(cb_entry).cmd("set");
 
     std::string set_help = string_format(" \t - modify variables in %s", section.c_str());
     int mode = std::get<0>(cb_entry);
@@ -224,35 +224,28 @@ void cli_generate_set_commands (struct cli_def *cli, std::string const &section)
         std::string name;
 
 
-            std::vector<cli_command*> ret;
+        // register anonymous 'set' command bound to CLI 'mode' ID
+        auto cli_parent_set = cli_register_command(cli, nullptr, "set", nullptr, PRIVILEGE_PRIVILEGED, mode,
+                                                   set_help.c_str());
 
-            // register anonymous 'set' command bound to CLI 'mode' ID
-            auto cli_parent = cli_register_command(cli, nullptr, "set", nullptr, PRIVILEGE_PRIVILEGED, mode,
-                                               set_help.c_str());
+        for( const auto& here_n: attributes) {
 
-            for( const auto& here_n: attributes) {
+            // create type information, and (possibly) some help text
 
-                // create type information, and (possibly) some help text
-
-                std::string help = CliHelp::get().help(CliHelp::help_type_t::HELP_CONTEXT, section, here_n);
-                if(help.empty()) {
-                    help = string_format("modify '%s'", here_n.c_str());
-                }
-
-                auto help2 = "\t - " + help;
-
-                auto* ret_single = cli_register_command(cli, cli_parent, here_n.c_str(), set_cb, PRIVILEGE_PRIVILEGED, mode,
-                                                        help2.c_str() );
-
-                cli_generate_set_command_args(cli, ret_single, section, here_n);
-
-                ret.push_back(ret_single);
+            std::string help = CliHelp::get().help(CliHelp::help_type_t::HELP_CONTEXT, section, here_n);
+            if(help.empty()) {
+                help = string_format("modify '%s'", here_n.c_str());
             }
 
-            return ret;
-    }
+            auto help2 = "\t - " + help;
 
-    return {};
+            auto* ret_single = cli_register_command(cli, cli_parent_set, here_n.c_str(), set_cb, PRIVILEGE_PRIVILEGED, mode,
+                                                    help2.c_str() );
+
+            cli_generate_set_command_args(cli, ret_single, section, here_n);
+
+        }
+    }
 }
 
 
@@ -396,24 +389,24 @@ void cli_generate_commands (cli_def *cli, std::string const &this_section, cli_c
 
             // register 'edit' and 'edit <subsection>' in terms of this "mode ID"
 
-            auto edit_enabled  = templated ? std::get<1>(template_cb).cap_edit() : std::get<1>(section_cb).cap_edit();
-            auto remove_enabled = templated ? std::get<1>(template_cb).cap_remove() : std::get<1>(section_cb).cap_remove();
-            auto add_enabled = templated ? std::get<1>(template_cb).cap_add() : std::get<1>(section_cb).cap_add();
-            auto move_enabled = templated ? std::get<1>(template_cb).cap_move() : std::get<1>(section_cb).cap_move();
+            auto edit_enabled  = templated ? std::get<1>(template_cb).cap("edit") : std::get<1>(section_cb).cap("edit");
+            auto remove_enabled = templated ? std::get<1>(template_cb).cap("remove") : std::get<1>(section_cb).cap("remove");
+            auto add_enabled = templated ? std::get<1>(template_cb).cap("add") : std::get<1>(section_cb).cap("add");
+            auto move_enabled = templated ? std::get<1>(template_cb).cap("move") : std::get<1>(section_cb).cap("move");
 
             _debug(cli, "%s/%s:t=%d: edit: %d, remove: %d, add: %d, move: %d", section_template.c_str(), template_key.c_str(), templated,
                    edit_enabled, remove_enabled, add_enabled, move_enabled);
 
             if(edit_enabled) {
 
-                auto cb_edit = templated ? std::get<1>(template_cb).cmd_edit()  : std::get<1>(section_cb).cmd_edit();
+                auto cb_edit = templated ? std::get<1>(template_cb).cmd("edit")  : std::get<1>(section_cb).cmd("edit");
 
                 if(! edit) {
                     // initialize parent "edit command only once"
                     edit = cli_register_command(cli, cli_parent, "edit", nullptr, PRIVILEGE_PRIVILEGED, this_mode,
                                                 help_edit.c_str());
                     if(templated) {
-                        std::get<1>(template_cb).cli_edit(edit);
+                        std::get<1>(template_cb).cli("edit", edit);
                     }
                 }
 
@@ -423,8 +416,8 @@ void cli_generate_commands (cli_def *cli, std::string const &this_section, cli_c
                                      string_format("edit %s settings", sub_section_name.c_str()).c_str());
 
 
-                std::get<1>(section_cb).cli_edit(edit_sub);
-                std::get<1>(section_cb).cmd_edit(cb_edit);
+                std::get<1>(section_cb).cli("edit", edit_sub);
+                std::get<1>(section_cb).cmd("edit", cb_edit);
 
                 if(section_path == template_key) {
                     _debug(cli, "templated, but not dynamic group: %s - generating subcommands", section_path.c_str());
@@ -436,13 +429,13 @@ void cli_generate_commands (cli_def *cli, std::string const &this_section, cli_c
 
             if(remove_enabled) {
 
-                auto cb_remove = templated ?  std::get<1>(template_cb).cmd_remove() : std::get<1>(section_cb).cmd_remove();
+                auto cb_remove = templated ?  std::get<1>(template_cb).cmd("remove") : std::get<1>(section_cb).cmd("remove");
 
                 if(!remove) {
                     remove = cli_register_command(cli, cli_parent, "remove", cb_remove, PRIVILEGE_PRIVILEGED, this_mode, help_remove.c_str());
 
                     if(templated) {
-                        std::get<1>(template_cb).cli_remove(remove);
+                        std::get<1>(template_cb).cli("remove", remove);
                     }
                 }
 
@@ -450,35 +443,35 @@ void cli_generate_commands (cli_def *cli, std::string const &this_section, cli_c
                                      cb_remove, PRIVILEGE_PRIVILEGED, this_mode,
                                      string_format("remove %s element", sub_section_name.c_str()).c_str());
 
-                std::get<1>(section_cb).cli_remove(remove_sub);
-                std::get<1>(section_cb).cmd_remove(cb_remove);
+                std::get<1>(section_cb).cli("remove", remove_sub);
+                std::get<1>(section_cb).cmd("remove", cb_remove);
 
             }
 
             if(add_enabled) {
 
                 if(! add) {
-                    auto cb_add = templated ? std::get<1>(template_cb).cmd_add() : std::get<1>(section_cb).cmd_add();
+                    auto cb_add = templated ? std::get<1>(template_cb).cmd("add") : std::get<1>(section_cb).cmd("add");
 
                     add = cli_register_command(cli, cli_parent, "add",
                                                cb_add, PRIVILEGE_PRIVILEGED, this_mode, help_add.c_str());
-                    std::get<1>(template_cb).cli_add(add);
-                    std::get<1>(template_cb).cmd_add(cb_add);
+                    std::get<1>(template_cb).cli("add", add);
+                    std::get<1>(template_cb).cmd("add", cb_add);
                 }
             }
 
-            if(move_enabled and not std::get<1>(template_cb).cli_move()) {
+            if(move_enabled and not std::get<1>(template_cb).cli("move")) {
 
                 int len = cfg_this_section.getLength();
                 std::string help_move = "move elements in the list";
 
                 if(len > 1) {
 
-                    auto cb_move = templated ? std::get<1>(template_cb).cmd_move() : std::get<1>(section_cb).cmd_move();
+                    auto cb_move = templated ? std::get<1>(template_cb).cmd("move") : std::get<1>(section_cb).cmd("move");
                     if(! cli_move) {
                         cli_move = cli_register_command(cli, cli_parent, "move",
                                                         nullptr, PRIVILEGE_PRIVILEGED, this_mode, help_move.c_str());
-                        std::get<1>(template_cb).cli_move(cli_move);
+                        std::get<1>(template_cb).cli("move", cli_move);
                     }
 
                     for (int i = 0; i < len; i++) {

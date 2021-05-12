@@ -1555,14 +1555,14 @@ int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[]
                     // remove edit hooks and re-register for new list
 
                     // unregister "edit <this>"
-                    auto cli_edit = std::get<1>(callback_entry).cli_edit();
+                    auto cli_edit = std::get<1>(callback_entry).cli("edit");
                     if(cli_edit)
                         cli_unregister_single(cli, cli_edit);
 
 
 
                     // unregister "remove <this>"
-                    auto cli_remove = std::get<1>(callback_entry).cli_remove();
+                    auto cli_remove = std::get<1>(callback_entry).cli("remove");
                     if(cli_remove)
                         cli_unregister_single(cli, cli_remove);
 
@@ -1578,7 +1578,7 @@ int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[]
                    // auto &callback_entry = CliState::get().callbacks(section);
 //
 //                // remove edit hooks and re-register for new list
-//                cli_unregister_all(cli, std::get<1>(callback_entry).cli_edit());
+//                cli_unregister_all(cli, std::get<1>(callback_entry).cli("edit"));
 //
 //                // generate new CLI sub-tree
 //                cli_generate_commands(cli, section, nullptr);
@@ -1961,38 +1961,38 @@ int cli_generic_add_cb(struct cli_def *cli, const char *command, char *argv[], i
             // load callbacks, must prefer templated
             auto& callback_entry = templated ? CliState::get().callbacks(section + ".[x]") : CliState::get().callbacks(section);
 
-            if(std::get<1>(callback_entry).cap_edit()) {
+            if(std::get<1>(callback_entry).cap("edit")) {
 
-                auto cli_edit_x = cli_register_command(cli, std::get<1>(callback_entry).cli_edit(), args[0].c_str(),
-                                     std::get<1>(callback_entry).cmd_edit(), PRIVILEGE_PRIVILEGED, cli->mode,
+                auto cli_edit_x = cli_register_command(cli, std::get<1>(callback_entry).cli("edit"), args[0].c_str(),
+                                     std::get<1>(callback_entry).cmd("edit"), PRIVILEGE_PRIVILEGED, cli->mode,
                                      " edit new entry");
 
                 // set also leaf node
-                std::get<1>(CliState::get().callbacks(section + "." + args[0])).cli_edit(cli_edit_x);
+                std::get<1>(CliState::get().callbacks(section + "." + args[0])).cli("edit", cli_edit_x);
             }
 
-            if(std::get<1>(callback_entry).cap_move()) {
-                auto cli_move = std::get<1>(callback_entry).cli_move();
+            if(std::get<1>(callback_entry).cap("move")) {
+                auto cli_move = std::get<1>(callback_entry).cli("move");
                 if(cli_move) {
 
                     // 'add' has empty args when adding to an array, so let's be a bit nasty here
                     if(section == "policy")
-                        cli_generate_move_commands(cli, cli->mode, cli_move, std::get<1>(callback_entry).cmd_move(),
+                        cli_generate_move_commands(cli, cli->mode, cli_move, std::get<1>(callback_entry).cmd("move"),
                                                    static_cast<int>(CfgFactory::get().db_policy_list.size()-1),
                                                    CfgFactory::get().db_policy_list.size());
                 }
             }
 
-            if(std::get<1>(callback_entry).cap_remove()) {
-                auto cli_remove = std::get<1>(callback_entry).cli_remove();
+            if(std::get<1>(callback_entry).cap("remove")) {
+                auto cli_remove = std::get<1>(callback_entry).cli("remove");
 
                 if(cli_remove) {
-                    auto cli_remove_x = cli_register_command(cli, std::get<1>(callback_entry).cli_remove(), args[0].c_str(),
-                                         std::get<1>(callback_entry).cmd_remove(), PRIVILEGE_PRIVILEGED, cli->mode,
+                    auto cli_remove_x = cli_register_command(cli, std::get<1>(callback_entry).cli("remove"), args[0].c_str(),
+                                         std::get<1>(callback_entry).cmd("remove"), PRIVILEGE_PRIVILEGED, cli->mode,
                                          " delete this entry");
 
                     // set also leaf node
-                    std::get<1>(CliState::get().callbacks(section + "." + args[0])).cli_remove(cli_remove_x);
+                    std::get<1>(CliState::get().callbacks(section + "." + args[0])).cli("remove", cli_remove_x);
                 }
             }
 
@@ -2334,152 +2334,209 @@ void client_thread(int client_socket) {
     };
 
     register_callback("settings",MODE_EDIT_SETTINGS)
-                .cmd_set(cli_generic_set_cb)
-                .cmd_edit(cli_conf_edit_settings);
+                .cap("set", true)
+                .cmd("set", cli_generic_set_cb)
+                .cap("edit", true)
+                .cmd("edit", cli_conf_edit_settings);
 
     register_callback( "settings.auth_portal",MODE_EDIT_SETTINGS_AUTH)
-                .cmd_set(cli_generic_set_cb)
-                .cmd_edit(cli_conf_edit_settings_auth)
-                .cap_edit(true);
+                .cap("set", true)
+                .cmd("set", cli_generic_set_cb)
+                .cap("edit", true)
+                .cmd("edit", cli_conf_edit_settings_auth);
 
     register_callback(
             "settings.nameservers",MODE_EDIT_SETTINGS + 1);
 
     register_callback(
             "settings.socks", MODE_EDIT_SETTINGS_SOCKS)
-                .cmd_set(cli_generic_set_cb)
-                .cmd_edit(cli_conf_edit_settings_socks)
-                .cap_edit(true);
+            .cap("set", true)
+            .cmd("set", cli_generic_set_cb)
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_settings_socks);
+
 
     register_callback("settings.cli", MODE_EDIT_SETTINGS_CLI)
-                .cmd_set(cli_generic_set_cb)
-                .cmd_edit(cli_conf_edit_settings_cli)
-                .cap_edit(true);
+            .cap("set", true)
+            .cmd("set", cli_generic_set_cb)
+            .cmd("edit", cli_conf_edit_settings_cli)
+            .cap("edit", true);
 
     register_callback("debug", MODE_EDIT_DEBUG)
-            .cmd_set(cli_generic_set_cb)
-            .cmd_edit(cli_conf_edit_debug)
-            .cap_edit(true);
+            .cap("set", true)
+            .cmd("set", cli_generic_set_cb)
+            .cmd("edit", cli_conf_edit_debug)
+            .cap("edit", true);
 
     register_callback("debug.log", MODE_EDIT_DEBUG_LOG)
-            .cmd_set(cli_generic_set_cb)
-            .cmd_edit(cli_conf_edit_debug_log)
-            .cap_edit(true);
+            .cap("set", true)
+            .cmd("set", cli_generic_set_cb)
+            .cmd("edit", cli_conf_edit_debug_log)
+            .cap("edit", true);
 
 
     register_callback( "proto_objects", MODE_EDIT_PROTO_OBJECTS)
-                .cap_edit(true).cmd_edit(cli_conf_edit_proto_objects);
+                .cap("edit", true)
+                .cmd("edit", cli_conf_edit_proto_objects);
 
     register_callback( "proto_objects.[x]", MODE_EDIT_PROTO_OBJECTS)
-            .cmd_set(cli_generic_set_cb)
-            .cap_edit(true).cmd_edit(cli_conf_edit_proto_objects)
-            .cap_add(true).cmd_add(cli_generic_add_cb)
-            .cap_remove(true).cmd_remove(cli_generic_remove_cb);
+            .cap("set", true)
+            .cmd("set", cli_generic_set_cb)
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_proto_objects)
+            .cap("add", true)
+            .cmd("add", cli_generic_add_cb)
+            .cap("remove", true)
+            .cmd("remove", cli_generic_remove_cb);
 
 
     register_callback("address_objects", MODE_EDIT_ADDRESS_OBJECTS)
-            .cap_edit(true).cmd_edit(cli_conf_edit_address_objects);
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_address_objects);
 
     register_callback("address_objects.[x]", MODE_EDIT_ADDRESS_OBJECTS)
-            .cmd_set(cli_generic_set_cb)
-            .cap_edit(true).cmd_edit(cli_conf_edit_address_objects)
-            .cap_add(true).cmd_add(cli_generic_add_cb)
-            .cap_remove(true).cmd_remove(cli_generic_remove_cb);
+            .cap("set", true)
+            .cmd("set", cli_generic_set_cb)
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_address_objects)
+            .cap("add", true)
+            .cmd("add", cli_generic_add_cb)
+            .cap("remove", true)
+            .cmd("remove", cli_generic_remove_cb);
 
 
     register_callback("port_objects", MODE_EDIT_PORT_OBJECTS)
-            .cap_edit(true).cmd_edit(cli_conf_edit_port_objects);
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_port_objects);
 
     register_callback("port_objects.[x]", MODE_EDIT_PORT_OBJECTS)
-            .cmd_set(cli_generic_set_cb)
-            .cap_edit(true)
-            .cmd_edit(cli_conf_edit_port_objects)
-            .cap_add(true)
-            .cmd_add(cli_generic_add_cb)
-            .cap_remove(true)
-            .cmd_remove(cli_generic_remove_cb);
+            .cap("set", true)
+            .cmd("set", cli_generic_set_cb)
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_port_objects)
+            .cap("add", true)
+            .cmd("add", cli_generic_add_cb)
+            .cap("remove", true)
+            .cmd("remove", cli_generic_remove_cb);
 
 
     register_callback("policy", MODE_EDIT_POLICY)
-                .cmd_edit(cli_conf_edit_policy);
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_policy);
 
     // template for policy list entries
     register_callback( "policy.[x]", MODE_EDIT_POLICY)
-            .cmd_set(cli_generic_set_cb)
-            .cap_add(true).cmd_add(cli_generic_add_cb)
-            .cap_remove(true).cmd_remove(cli_generic_remove_cb)
-            .cap_edit(true).cmd_edit(cli_conf_edit_policy)
-            .cap_move(true).cmd_move(cli_policy_move_cb);
+            .cap("set", true)
+            .cmd("set", cli_generic_set_cb)
+            .cap("add", true)
+            .cmd("add", cli_generic_add_cb)
+            .cap("remove", true)
+            .cmd("remove", cli_generic_remove_cb)
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_policy)
+            .cap("move", true)
+            .cmd("move", cli_policy_move_cb);
 
     register_callback("detection_profiles", MODE_EDIT_DETECTION_PROFILES)
-                    .cmd_edit(cli_conf_edit_detection_profiles);
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_detection_profiles);
 
     register_callback("detection_profiles.[x]", MODE_EDIT_DETECTION_PROFILES)
-            .cmd_set(cli_generic_set_cb)
-            .cap_edit(true).cmd_edit(cli_conf_edit_detection_profiles)
-            .cap_add(true).cmd_add(cli_generic_add_cb)
-            .cap_remove(true).cmd_remove(cli_generic_remove_cb);
+            .cap("set", true)
+            .cmd("set", cli_generic_set_cb)
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_detection_profiles)
+            .cap("add", true)
+            .cmd("add", cli_generic_add_cb)
+            .cap("remove", true)
+            .cmd("remove", cli_generic_remove_cb);
 
 
     register_callback("content_profiles", MODE_EDIT_CONTENT_PROFILES)
-            .cmd_edit(cli_conf_edit_content_profiles);
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_content_profiles);
 
     register_callback("content_profiles.[x]", MODE_EDIT_CONTENT_PROFILES)
-            .cmd_set(cli_generic_set_cb)
-            .cap_edit(true).cmd_edit(cli_conf_edit_content_profiles)
-            .cap_add(true).cmd_add(cli_generic_add_cb)
-            .cap_remove(true).cmd_remove(cli_generic_remove_cb);
+            .cap("set", true)
+            .cmd("set", cli_generic_set_cb)
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_content_profiles)
+            .cap("add", true)
+            .cmd("add", cli_generic_add_cb)
+            .cap("remove", true)
+            .cmd("remove", cli_generic_remove_cb);
 
 
     register_callback("tls_profiles", MODE_EDIT_TLS_PROFILES)
-            .cmd_edit(cli_conf_edit_tls_profiles);
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_tls_profiles);
 
     register_callback("tls_profiles.[x]", MODE_EDIT_TLS_PROFILES)
-            .cmd_set(cli_generic_set_cb)
-            .cap_edit(true).cmd_edit(cli_conf_edit_tls_profiles)
-            .cap_add(true).cmd_add(cli_generic_add_cb)
-            .cap_remove(true).cmd_remove(cli_generic_remove_cb);
+            .cap("set", true)
+            .cmd("set", cli_generic_set_cb)
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_tls_profiles)
+            .cap("add", true)
+            .cmd("add", cli_generic_add_cb)
+            .cap("remove", true)
+            .cmd("remove", cli_generic_remove_cb);
 
 
     register_callback("auth_profiles", MODE_EDIT_AUTH_PROFILES)
-            .cmd_edit(cli_conf_edit_auth_profiles);
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_auth_profiles);
 
     register_callback("auth_profiles.[x]", MODE_EDIT_AUTH_PROFILES)
-            .cmd_set(cli_generic_set_cb)
-            .cap_edit(true).cmd_edit(cli_conf_edit_auth_profiles)
-            .cap_add(true).cmd_add(cli_generic_add_cb)
-            .cap_remove(true).cmd_remove(cli_generic_remove_cb);
+            .cap("set", true)
+            .cmd("set", cli_generic_set_cb)
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_auth_profiles)
+            .cap("add", true)
+            .cmd("add", cli_generic_add_cb)
+            .cap("remove", true)
+            .cmd("remove", cli_generic_remove_cb);
 
     register_callback("alg_dns_profiles", MODE_EDIT_ALG_DNS_PROFILES)
-                    .cmd_edit(cli_conf_edit_alg_dns_profiles);
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_alg_dns_profiles);
 
     register_callback("alg_dns_profiles.[x]", MODE_EDIT_ALG_DNS_PROFILES)
-            .cmd_set(cli_generic_set_cb)
-            .cap_edit(true).cmd_edit(cli_conf_edit_alg_dns_profiles)
-            .cap_add(true).cmd_add(cli_generic_add_cb)
-            .cap_remove(true).cmd_remove(cli_generic_remove_cb);
+            .cap("set", true)
+            .cmd("set", cli_generic_set_cb)
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_alg_dns_profiles)
+            .cap("add", true)
+            .cmd("add", cli_generic_add_cb)
+            .cap("remove", true)
+            .cmd("remove", cli_generic_remove_cb);
 
 
 
 
     register_callback("starttls_signatures", MODE_EDIT_STARTTLS_SIGNATURES)
-    .cmd_edit(cli_conf_edit_starttls_signatures);
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_starttls_signatures);
 
     register_callback("starttls_signatures.[x]", MODE_EDIT_STARTTLS_SIGNATURES)
-                    .cmd_set(cli_generic_set_cb)
-                    // .cap_add(true).cmd_add(cli_generic_add_cb)
-                    // .cap_remove(true).cmd_remove(cli_generic_remove_cb)
-                    .cap_edit(true).cmd_edit(cli_conf_edit_starttls_signatures);
+            .cap("set", true)
+            .cmd("set", cli_generic_set_cb)
+            // .cap("add", true).cmd("add", cli_generic_add_cb)
+            // .cap("remove", true).cmd("remove", cli_generic_remove_cb)
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_starttls_signatures);
 
     register_callback("detection_signatures", MODE_EDIT_DETECTION_SIGNATURES)
-        .cmd_edit(cli_conf_edit_detection_signatures);
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_detection_signatures);
 
 
     register_callback("detection_signatures.[x]", MODE_EDIT_DETECTION_SIGNATURES)
-                    .cmd_set(cli_generic_set_cb)
-                    // .cap_add(true).cmd_add(cli_generic_add_cb)
-                    // .cap_remove(true).cmd_remove(cli_generic_remove_cb)
-                    .cap_edit(true).cmd_edit(cli_conf_edit_detection_signatures);
+            .cap("set", true)
+            .cmd("set", cli_generic_set_cb)
+            // .cap("add", true).cmd("add", cli_generic_add_cb)
+            // .cap("remove", true).cmd("remove", cli_generic_remove_cb)
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_detection_signatures);
 
 
 
@@ -2500,9 +2557,9 @@ void client_thread(int client_socket) {
             if (CfgFactory::cfg_root().exists(section.c_str())) {
 
                 std::string edit_help = string_format(" \t - edit %s", section.c_str());
-                auto const &callback_entry = CliState::get().callbacks(section);
+                auto &callback_entry = CliState::get().callbacks(section);
 
-                cli_register_command(cli, conft_edit, section.c_str(), std::get<1>(callback_entry).cmd_edit(),
+                cli_register_command(cli, conft_edit, section.c_str(), std::get<1>(callback_entry).cmd("edit"),
                                      PRIVILEGE_PRIVILEGED, MODE_CONFIG, edit_help.c_str());
 
                 std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
