@@ -49,6 +49,7 @@
 #include <any>
 
 #include <utils/fs.hpp>
+#include <utils/str.hpp>
 #include <policy/addrobj.hpp>
 #include <display.hpp>
 
@@ -272,5 +273,134 @@ private:
     }
 };
 
+
+struct CliStrings {
+    static std::vector<std::string> const& config_not_applied() {
+
+        static std::vector<std::string> r =
+                {
+                 " ",
+                 "  Something didn't go well: running config NOT changed !!!",
+                 "    Change will be visible in show config, but not written to mapped variables",
+                 "    therefore 'save config' won't write them to file.",
+                 "    ",
+                 "    Consider running 'execute reload'  ... sorry for inconvenience."
+                };
+
+        return r;
+    }
+
+    static void cli_print(cli_def* cli, std::vector<std::string> const& vec) {
+        for( auto const& r: vec) {
+            ::cli_print(cli, r.c_str());
+        }
+    }
+};
+
+
+struct CmdCleaner {
+
+    struct arg_opts_t {
+        bool is_question = false;
+        bool is_plain = false;
+        std::string varname;
+        std::vector<std::string> args;
+    };
+
+    static std::vector<std::string> dedup(std::vector<std::string>& vec_of_str)  {
+
+        std::vector<std::string> consolidated_args;
+        for(auto const& a: vec_of_str) {
+            if (std::find(consolidated_args.begin(), consolidated_args.end(), a) == consolidated_args.end()) {
+                consolidated_args.emplace_back(a);
+            }
+        }
+
+        return consolidated_args;
+    };
+
+    static std::vector<std::string> toggle(std::vector<std::string>& original, std::vector<std::string>& toggles)  {
+
+        std::vector<std::string> consolidated_args;
+
+        for(auto const& a: original) {
+            if (std::find(toggles.begin(),toggles.end(), a) == toggles.end()) {
+                consolidated_args.emplace_back(a);
+            }
+        }
+
+        for(auto const& a: toggles) {
+            if (std::find(original.begin(),original.end(), a) == original.end()) {
+                consolidated_args.emplace_back(a);
+            }
+        }
+
+        return consolidated_args;
+    };
+
+
+
+    static arg_opts_t normalize(const char *command, char *argv[], int argc) {
+
+        arg_opts_t to_ret;
+
+        auto cmd = string_split(command, ' ');
+
+        if(argc > 0) {
+            to_ret.varname = cmd[cmd.size() - 1];
+        } else {
+            if(cmd.size() >= 2) {
+                to_ret.varname = cmd[1];
+            }
+        }
+
+
+        if(to_ret.varname == "name") {
+            to_ret.is_plain = true;
+
+            if (argc > 0) {
+                for (int i = 0; i < argc; i++) {
+                    auto escaped = std::string(argv[i]);
+                    to_ret.args.emplace_back(escaped);
+                }
+            }
+
+        } else {
+
+            if (argc > 0) {
+                for (int i = 0; i < argc; i++) {
+                    auto escaped = std::string(argv[i]);
+                    for (auto sub_escaped: string_split(escaped, ',')) {
+
+                        sx::str::string_cfg_escape(sub_escaped);
+                        to_ret.args.emplace_back(sub_escaped);
+                    }
+                }
+                to_ret.is_question = (to_ret.args[0] == "?");
+
+            } else {
+                if (cmd.size() > 2) {
+                    for (unsigned int i = 2; i < cmd.size(); i++) {
+
+                        auto escaped = std::string(cmd[i]);
+                        for (auto sub_escaped: string_split(escaped, ',')) {
+
+                            sx::str::string_cfg_escape(sub_escaped);
+                            to_ret.args.emplace_back(sub_escaped);
+                        }
+                    }
+
+                    to_ret.is_question = (to_ret.args[0] == "?");
+                }
+            }
+        }
+
+        to_ret.args = to_ret.is_plain ? to_ret.args : dedup(to_ret.args);
+
+        return to_ret;
+    };
+
+
+};
 
 #endif //SMITHPROXY_CLIHELP_HPP

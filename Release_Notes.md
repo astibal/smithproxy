@@ -34,6 +34,7 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 ## Roadmap to 0.9.14 (tba - in progress)
 
 * [ ] json/api interface
+* new 'toggle' command - modify list variables - toggle specific element instead of setting all at once  
 
 ## What's new in 0.9.13
  

@@ -98,6 +98,8 @@ std::pair<int, std::string> generate_dynamic_groups(struct cli_def *cli, const c
 
             cli_generate_set_commands(cli, this_setting_path);
 
+            cli_generate_toggle_commands(cli, this_setting_path);
+
             return { new_mode, words[1]};
 
         } catch (ConfigException const& e) {
@@ -142,7 +144,7 @@ void cfg_generate_cli_hints(Setting& setting, std::vector<std::string>* this_lev
     }
 }
 
-void generate_options_combination(cli_def* cli, cli_command* parent, std::vector<std::string> const& options, int mode, CliCallbacks::callback set_cb, int& max_depth) {
+void generate_options_combination(cli_def* cli, cli_command* parent, std::vector<std::string> const& options, int mode, CliCallbacks::callback callback, int& max_depth) {
 
     if(max_depth <= 0) {
         return; // max_depth reached
@@ -150,7 +152,7 @@ void generate_options_combination(cli_def* cli, cli_command* parent, std::vector
 
     for(auto const& opt: options) {
 
-        auto *ret = cli_register_command(cli, parent, opt.c_str(), set_cb, PRIVILEGE_PRIVILEGED, mode,
+        auto *ret = cli_register_command(cli, parent, opt.c_str(), callback, PRIVILEGE_PRIVILEGED, mode,
                                          " - valid options");
 
         std::vector<std::string> my_options;
@@ -159,7 +161,7 @@ void generate_options_combination(cli_def* cli, cli_command* parent, std::vector
         if(my_options.empty())
             break;
 
-        generate_options_combination(cli, ret, my_options, mode, set_cb, --max_depth);
+        generate_options_combination(cli, ret, my_options, mode, callback, --max_depth);
     }
 
 }
@@ -248,6 +250,147 @@ void cli_generate_set_commands (struct cli_def *cli, std::string const &section)
     }
 }
 
+void cli_generate_toggle_command_args(struct cli_def *cli, cli_command* parent, std::string const &section, std::string const& varname) {
+
+    auto & cb_entry = CliState::get().callbacks(section);
+    auto toggle_cb = std::get<1>(cb_entry).cmd("toggle");
+    int mode = std::get<0>(cb_entry);
+
+    std::string masked = sx::str::cli::mask_all(section);
+    if(not toggle_cb) {
+        // if no specific callback is found, look for masked
+
+        auto& cb_entry_n = CliState::get().callbacks(masked);
+        toggle_cb = std::get<1>(cb_entry_n).cmd("toggle");
+    }
+
+    std::vector<std::string> opts;
+    auto cli_e = CliHelp::get().find(masked + '.' + varname);
+    if(cli_e) {
+        opts = cli_e->get().suggestion_generate(section, varname);
+    }
+
+    for(auto const& o: opts) {
+        _debug(cli, "cli_generate_toggle_commands_args:    suggestion = %s", o.c_str());
+    }
+
+    auto& this_setting = CfgFactory::cfg_root().lookup((section + "." + varname).c_str());
+    auto this_type = this_setting.getType();
+
+    if(this_type == Setting::TypeArray or this_type == Setting::TypeList) {
+
+        _debug(cli, "cli_generate_toggle_commands_args: is list/array");
+
+        std::vector<std::string> cfg_values;
+
+
+        // add existing values into suggestions (don't forget to dedup it later)
+
+        for(int i = 0; i < this_setting.getLength(); i++) {
+            if(not this_setting.isAggregate()) {
+                std::string sub = this_setting[i].c_str();
+                cfg_values.emplace_back(sub);
+            }
+        }
+        for(auto const& v: cfg_values) {
+            opts.emplace_back(v);
+            _debug(cli, "cli_generate_toggle_commands_args:    config values = %s", v.c_str());
+        }
+
+        opts = CmdCleaner::dedup(opts);
+        for(auto const& o: opts) {
+            _debug(cli, "cli_generate_toggle_commands_args:    final opts = %s", o.c_str());
+        }
+
+
+//        for(auto const& k: opts) {
+//
+//            cli_register_command(cli, parent, k.c_str(), toggle_cb, PRIVILEGE_PRIVILEGED, mode,
+//                                 " - valid options");
+//        }
+
+        if(not opts.empty()) {
+            int max_depth = 10;
+            generate_options_combination(cli, parent, opts, mode, toggle_cb, max_depth);
+        }
+    }
+}
+
+void cli_generate_toggle_commands (struct cli_def *cli, std::string const &section) {
+
+
+    auto& this_setting = CfgFactory::cfg_root().lookup(section.c_str());
+
+    std::string this_setting_path = this_setting.getPath();
+    _debug(cli, "cli_generate_toggle_commands: path = %s", this_setting.getPath().c_str());
+
+    auto& cb_entry = CliState::get().callbacks(section);
+    int mode = std::get<0>(cb_entry);
+
+    auto toggle_cb = std::get<1>(cb_entry).cmd("toggle");
+    if(not toggle_cb) {
+        auto& cb_entry_n = CliState::get().callbacks(sx::str::cli::mask_all(section));
+        toggle_cb = std::get<1>(cb_entry_n).cmd("toggle");
+    }
+
+    std::string set_help = string_format(" \t - toggle variables in %s", section.c_str());
+
+
+    std::vector<std::string> attributes, groups;
+    std::vector<unsigned int> unnamed_attributes, unnamed_groups;
+
+    _debug(cli, "calling cfg_generate_cli_hints");
+
+    cfg_generate_cli_hints(this_setting, &attributes, &unnamed_attributes, &groups, &unnamed_groups);
+
+    _debug(cli, "%s hint results: named: %d, indexed %d, next-level named: %d, next-level indexed: %d", this_setting_path.c_str(),
+           (int)attributes.size(), (int)unnamed_attributes.size(),
+           (int)groups.size(), (int)unnamed_groups.size());
+
+    if((! unnamed_attributes.empty() ) || (! attributes.empty()) ) {
+
+        std::string name;
+
+
+        // register anonymous 'set' command bound to CLI 'mode' ID
+        cli_command* cli_parent_toggle = nullptr;
+
+        for( const auto& here_n: attributes) {
+
+            _debug(cli, "cli_generate_toggle_commands:    attribute = %s", here_n.c_str());
+
+            // process only list or array types (avoid 'toggle' command if there are not attributes to toggle)
+            if (this_setting.exists(here_n.c_str()) and (
+                    this_setting[here_n.c_str()].isList() or this_setting[here_n.c_str()].isArray())) {
+
+                _debug(cli, "cli_generate_toggle_commands:    is list/array");
+
+                if (not cli_parent_toggle) {
+                    cli_parent_toggle = cli_register_command(cli, nullptr, "toggle", nullptr, PRIVILEGE_PRIVILEGED, mode,
+                                         set_help.c_str());
+
+                    _debug(cli, "cli_generate_toggle_commands:    creating parent command node 0x%p", cli_parent_toggle);
+                }
+
+                std::string help = CliHelp::get().help(CliHelp::help_type_t::HELP_CONTEXT, section, here_n);
+                if (help.empty()) {
+                    help = string_format("toggle '%s'", here_n.c_str());
+                }
+
+                auto help2 = "\t - " + help;
+
+                auto *ret_single = cli_register_command(cli, cli_parent_toggle, here_n.c_str(), toggle_cb,
+                                                        PRIVILEGE_PRIVILEGED, mode,
+                                                        help2.c_str());
+
+                _debug(cli, "cli_generate_toggle_commands:    creating command node 0x%p for '%s', cb = 0x%p", ret_single, here_n.c_str(), toggle_cb);
+
+                cli_generate_toggle_command_args(cli, ret_single, section, here_n);
+
+            }
+        }
+    }
+}
 
 
 void cli_generate_move_commands(cli_def* cli, int this_mode, cli_command *move, CliCallbacks::callback callback, int i, int len ) {
@@ -479,18 +622,13 @@ void cli_generate_commands (cli_def *cli, std::string const &this_section, cli_c
                     }
                 }
             }
-
         }
-        else {
-            // generate commands for the section exact path
-            // cli_generate_commands(cli, section_path, nullptr);
-        }
-        // cli_generate_set_commands(cli, section_path);
-
     }
 
     // generate set commands for this section first
     cli_generate_set_commands(cli, this_section);
+
+    cli_generate_toggle_commands(cli, this_section);
 }
 
 

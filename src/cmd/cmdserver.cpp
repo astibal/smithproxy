@@ -1380,102 +1380,32 @@ int cli_uni_set_cb(std::string const& confpath, struct cli_def *cli, const char 
 
     if (CfgFactory::cfg_obj().exists(confpath)) {
 
+        auto normalized = CmdCleaner::normalize(command, argv, argc);
+
+        _debug(cli, "var: %s", normalized.varname.c_str());
+
+        std::scoped_lock<std::recursive_mutex> ll_(CfgFactory::lock());
         Setting& conf = CfgFactory::cfg_obj().lookup(confpath);
 
-        auto cmd = string_split(command, ' ');
-        std::string varname;
-
-        if(argc > 0) {
-            varname = cmd[cmd.size() - 1];
-        } else {
-            if(cmd.size() >= 2) {
-                varname = cmd[1];
-            }
+        if(! conf.exists(normalized.varname)) {
+            cli_print(cli, "set: cannot find varname %s", normalized.varname.c_str() );
+            return CLI_OK;
         }
 
-        _debug(cli, "var: %s", varname.c_str());
+        if (! normalized.is_question) {
 
 
-        std::vector<std::string> args;
+            if (cfg_write_value(conf, false, normalized.varname, normalized.args, cli)) {
+                _debug(cli, "change written to current config");
+                cli_print(cli, " ");
 
-        // counting from 1, since 0 is varname
-
-        bool args_qmark = false;
-        if (argc > 0) {
-            for (int i = 0; i < argc; i++) {
-                auto escaped = std::string(argv[i]);
-                for(auto sub_escaped: string_split(escaped, ',')) {
-
-                    sx::str::string_cfg_escape(sub_escaped);
-                    args.emplace_back(sub_escaped);
-                }
-            }
-            args_qmark = (args[0] == "?");
-
-        } else {
-            if(cmd.size() > 2) {
-                for (unsigned int i = 2; i < cmd.size(); i++) {
-
-                    auto escaped = std::string(cmd[i]);
-                    for(auto sub_escaped: string_split(escaped, ',')) {
-
-                        sx::str::string_cfg_escape(sub_escaped);
-                        args.emplace_back(sub_escaped);
-                    }
-                }
-
-                args_qmark = (args[0] == "?");
-            }
-        }
-
-        if (! args_qmark) {
-
-            // special treatment for "name" varname, which is always a string with spaces allowed
-            if(varname == "name") {
-                std::stringstream  ss_name;
-                for(auto it = args.begin(); it != args.end(); ++it) {
-                    ss_name << *it;
-                    if( it + 1 != args.end()) {
-                        ss_name << " ";
-                    }
-                }
-                args.clear();
-
-                auto name_str = ss_name.str();
-                sx::str::string_cfg_escape(name_str);
-                args.emplace_back(name_str);
-            }
-
-            decltype(args) consolidated_args;
-            for(auto const& a: args) {
-                if (std::find(consolidated_args.begin(), consolidated_args.end(), a) == consolidated_args.end()) {
-                    consolidated_args.emplace_back(a);
-                }
-            }
-
-
-            std::scoped_lock<std::recursive_mutex> ll_(CfgFactory::lock());
-
-            if (cfg_write_value(conf, false, varname, consolidated_args, cli)) {
-                // cli_print(cli, "change written to current config");
-
-                if ( apply_setting( conf.getPath(), varname , cli )) {
-                    cli_print(cli, " ");
-                    // cli_print(cli, "Value changed");
-                } else {
-                    // FIXME
-                    cli_print(cli, " ");
-                    cli_print(cli, " ");
-                    cli_print(cli, "  Something didn't go well: running config NOT changed !!!");
-                    cli_print(cli, "    Change will be visible in show config, but not written to mapped variables");
-                    cli_print(cli, "    therefore 'save config' won't write them to file.");
-                    cli_print(cli, "    ");
-                    cli_print(cli, "    Consider running 'execute reload'  ... sorry for inconvenience.");
+                if (not apply_setting( conf.getPath(), normalized.varname , cli )) {
+                    CliStrings::cli_print(cli, CliStrings::config_not_applied());
                 }
             } else {
 
                 //  display error only if arguments were present
-                if(not args.empty()) {
+                if(not normalized.args.empty()) {
                     cli_print(cli, " ");
                     cli_print(cli, "Error setting value");
                 } else {
@@ -1487,7 +1417,7 @@ int cli_uni_set_cb(std::string const& confpath, struct cli_def *cli, const char 
         } else {
             if (!conf.isRoot() && conf.getName()) {
 
-                auto h = CliHelp::get().help(CliHelp::help_type_t::HELP_QMARK, conf.getPath(), varname);
+                auto h = CliHelp::get().help(CliHelp::help_type_t::HELP_QMARK, conf.getPath(), normalized.varname);
 
                 cli_print(cli, "hint:  %s (%s)", h.c_str(), conf.getPath().c_str());
             }
@@ -1497,6 +1427,71 @@ int cli_uni_set_cb(std::string const& confpath, struct cli_def *cli, const char 
     return CLI_OK;
 }
 
+
+int cli_uni_toggle_cb(std::string const& confpath, struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
+
+    if (CfgFactory::cfg_obj().exists(confpath)) {
+
+        auto normalized = CmdCleaner::normalize(command, argv, argc);
+
+        _debug(cli, "var: %s", normalized.varname.c_str());
+
+        std::scoped_lock<std::recursive_mutex> ll_(CfgFactory::lock());
+        Setting& conf = CfgFactory::cfg_obj().lookup(confpath);
+
+        if(! conf.exists(normalized.varname)) {
+            cli_print(cli, "toggle: cannot find varname %s", normalized.varname.c_str() );
+            return CLI_OK;
+        }
+
+        if (! normalized.is_question) {
+
+            auto& this_conf = conf[normalized.varname.c_str()];
+
+            if(this_conf.isArray() or this_conf.isList()) {
+                std::vector<std::string> cfg_values;
+
+                for(int i = 0; i < this_conf.getLength(); i++) {
+                    std::string sub = this_conf[i];
+                    cfg_values.emplace_back(sub);
+                }
+                normalized.args = CmdCleaner::toggle(cfg_values, normalized.args);
+            }
+
+            if (cfg_write_value(conf, false, normalized.varname, normalized.args, cli)) {
+                _debug(cli, "change written to current config");
+                cli_print(cli, " ");
+
+                if (not apply_setting( conf.getPath(), normalized.varname , cli )) {
+                    CliStrings::cli_print(cli, CliStrings::config_not_applied());
+                }
+            } else {
+
+                //  display error only if arguments were present
+                if(not normalized.args.empty()) {
+                    cli_print(cli, " ");
+                    cli_print(cli, "Error setting value");
+                } else {
+                    cli_print(cli, " ");
+                    cli_print(cli, "Error setting empty value");
+                }
+            }
+
+        } else {
+            if (!conf.isRoot() && conf.getName()) {
+
+                auto h = CliHelp::get().help(CliHelp::help_type_t::HELP_QMARK, conf.getPath(), normalized.varname);
+
+                cli_print(cli, "hint:  %s (%s)", h.c_str(), conf.getPath().c_str());
+            }
+        }
+    }
+
+    return CLI_OK;
+}
 
 #define CLI_PRINT_ARGS( cli, command , argv, argc ) \
     cli_print(cli, "called: '%s' with '%s' args: %d", __FUNCTION__, command, argc); \
@@ -1509,6 +1504,13 @@ int cli_generic_set_cb(struct cli_def *cli, const char *command, char *argv[], i
     debug_cli_params(cli, command, argv, argc);
     return cli_uni_set_cb(CliState::get().sections(cli->mode), cli, command, argv, argc);
 }
+
+int cli_generic_toggle_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+    return cli_uni_toggle_cb(CliState::get().sections(cli->mode), cli, command, argv, argc);
+}
+
+
 
 int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
@@ -2337,7 +2339,10 @@ void client_thread(int client_socket) {
                 .cap("set", true)
                 .cmd("set", cli_generic_set_cb)
                 .cap("edit", true)
-                .cmd("edit", cli_conf_edit_settings);
+                .cmd("edit", cli_conf_edit_settings)
+                .cap("toggle", true)
+                .cmd("toggle", cli_generic_toggle_cb);
+
 
     register_callback( "settings.auth_portal",MODE_EDIT_SETTINGS_AUTH)
                 .cap("set", true)
@@ -2346,7 +2351,9 @@ void client_thread(int client_socket) {
                 .cmd("edit", cli_conf_edit_settings_auth);
 
     register_callback(
-            "settings.nameservers",MODE_EDIT_SETTINGS + 1);
+            "settings.nameservers",MODE_EDIT_SETTINGS + 1)
+            .cap("set", true)
+            .cmd("set", cli_generic_set_cb);
 
     register_callback(
             "settings.socks", MODE_EDIT_SETTINGS_SOCKS)
@@ -2435,7 +2442,9 @@ void client_thread(int client_socket) {
             .cap("edit", true)
             .cmd("edit", cli_conf_edit_policy)
             .cap("move", true)
-            .cmd("move", cli_policy_move_cb);
+            .cmd("move", cli_policy_move_cb)
+            .cap("toggle", true)
+            .cmd("toggle", cli_generic_toggle_cb);
 
     register_callback("detection_profiles", MODE_EDIT_DETECTION_PROFILES)
             .cap("edit", true)
@@ -2479,7 +2488,9 @@ void client_thread(int client_socket) {
             .cap("add", true)
             .cmd("add", cli_generic_add_cb)
             .cap("remove", true)
-            .cmd("remove", cli_generic_remove_cb);
+            .cmd("remove", cli_generic_remove_cb)
+            .cap("toggle", true)
+            .cmd("toggle", cli_generic_toggle_cb);
 
 
     register_callback("auth_profiles", MODE_EDIT_AUTH_PROFILES)
