@@ -55,12 +55,10 @@
 #include <ctime>
 
 
-MitmProxy::MitmProxy(baseCom* c): baseProxy(c), sobject(),
-    mtr_down(2), mtr_up(2)
-{
+MitmProxy::MitmProxy(baseCom* c): baseProxy(c), sobject() {
 
-    // FIXME: testing filter - get back to it later!
-    //add_filter("test",new TestFilter(this,5));
+    // NOTE: testing filter - get back to it later!
+    // add_filter("test",new TestFilter(this,5));
 
     log = logan::attach(this, "proxy");
 
@@ -148,7 +146,7 @@ std::string MitmProxy::to_string(int verbosity) const {
         
         if(verbosity > INF) r << "\n    ";
         
-        r << string_format("up/down: %s/%s",number_suffixed(mtr_up.get()*8).c_str(),number_suffixed(mtr_down.get()*8).c_str());
+        r << string_format("up/down: %s/%s",number_suffixed(stats_.mtr_up.get()*8).c_str(),number_suffixed(stats_.mtr_down.get()*8).c_str());
         
         if(verbosity > INF) { 
             r << string_format("\n    Policy  index: %d", matched_policy());
@@ -775,7 +773,6 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
 
     //update meters
     total_mtr_up().update(cx->to_read().size());
-    mtr_up.update(cx->to_read().size());
 }
 
 void MitmProxy::on_right_bytes(baseHostCX* cx) {
@@ -860,9 +857,8 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
         }
     }
 
-    // update meters
+    // update total meters
     total_mtr_down().update(cx->to_read().size());
-    mtr_down.update(cx->to_read().size());
 }
 
 
