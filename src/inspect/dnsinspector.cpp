@@ -314,7 +314,7 @@ bool DNS_Inspector::store(std::shared_ptr<DNS_Response> ptr) {
                 }
 
 
-                if(LEV_(DEB)) {
+                if(*log.level() >= DEB) {
                     for( auto const& [subdom_str, subdom_exp ]: subdom_cache->cache()) {
                         _deb("Sub domain cache list: entry %s, expiring in %d", subdom_str.c_str(), subdom_exp->ptr()->expired_at() - ::time(nullptr));
                     }
@@ -347,10 +347,8 @@ bool DNS_Inspector::validate_response(std::shared_ptr<DNS_Response> ptr) {
     } else {
         _dia("DNS_Inspector::validate_response: request 0x%x not found",id);
         _err("validating DNS response for %s failed.",ptr->to_string().c_str());
-        return false; // FIXME: for debug
+        return false;
     }
-
-    return false;
 }
 
 std::string DNS_Inspector::to_string(int verbosity) const {
@@ -378,7 +376,7 @@ void DNS_Inspector::apply_verdict(AppHostCX* cx) {
             _deb("DNS_Inspector::apply_verdict: mangling original ttl %d to %d at index %d",orig_ttl,new_ttl,i);
 
             uint8_t* ptr = cached_response->data();
-            uint32_t* ptr_ttl  = (uint32_t*)&ptr[i];
+            auto* ptr_ttl  = reinterpret_cast<uint32_t*>(&ptr[i]);
             *ptr_ttl = htonl(new_ttl);
 
         }
