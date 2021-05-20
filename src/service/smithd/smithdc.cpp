@@ -41,8 +41,7 @@
     This is standalone client utility for smithd backend server.
 */
 
-#define SIGSLOT_USE_POSIX_THREADS
-#include <sigslot.h>
+#include <functional>
 
 
 #include <baseproxy.hpp>
@@ -70,8 +69,8 @@ public:
     std::string hr() const override { return class_name(); }
 
     //only used in test_url2
-    sigslot::signal0<> sig_on_package;
-    sigslot::signal2<SmithClientCX*,LTVEntry*> sig_package_detail;
+    std::function<void()> sig_on_package;
+    std::function<void(SmithClientCX* cx, LTVEntry* pkg)> sig_package_detail;
     
    
     void process_package(LTVEntry* e) override {
@@ -86,13 +85,13 @@ public:
         }
         
         //only used in test_url2
-        sig_on_package.emit();
-        sig_package_detail.emit(this,e);
+        std::invoke(sig_on_package);
+        std::invoke(sig_package_detail, this, e);
         
         error(true);
     };
     
-    LTVEntry* pkg_create_envelope(uint32_t req_id, int32_t req_t) {
+    static LTVEntry* pkg_create_envelope(uint32_t req_id, int32_t req_t) {
 
         auto* packet = new LTVEntry();
         packet->container(100);
@@ -139,43 +138,44 @@ class SmithdProxy : public baseProxy {
 };
 
 template <class COM, class CX, class PX>
-class SimpleClient : public sigslot::has_slots<sigslot::multi_threaded_local> {
+class SimpleClient {
     public:
         SimpleClient<COM,CX,PX>() = default;
-        SimpleClient<COM,CX,PX>(const char* h, const char* p)  {
+        SimpleClient<COM,CX,PX>(const char* h, const char* p):
+            host_(h), port_(p) {
         
-            px_ = new PX(new COM());
+            px_ = std::make_unique<PX>(new COM());
             px_->pollroot(true);
-
-            cx_ = new CX(px_->com()->slave(),h,p);
         };
-        
-        ~SimpleClient() override {
-            delete px_;
+
+        inline std::unique_ptr<PX> const& px() { return px_; }
+        inline CX* cx() {
+            if(px() and not px()->ls().empty()) {
+                return dynamic_cast<CX*>(px()->ls().at(0));
+            }
+            return nullptr;
         }
-        
-        inline CX* cx() { return cx_; }
-        inline PX* px() { return px_; }
-        
+
         virtual int connect() {
             int r = cx()->connect();
-            if(r > 0) px()->ladd(cx()); 
+            if(r > 0) px()->ladd(new CX(px_->com()->slave(), host_, port_));
             return r; 
         }
         virtual int run() { return px()->run(); }
     protected:
-	PX* px_ = nullptr;
-	CX* cx_ = nullptr;
+	    std::unique_ptr<PX> px_;
+        const char* host_{};
+        const char* port_{};
 };
 
 
 //only used in test_url2
-class PackageHandler :  public sigslot::has_slots<sigslot::multi_threaded_local> {
+class PackageHandler {
     public:
         logan_lite log = logan_lite("com.smithd");
 
-        void on_package() { _inf("MGR: package received (notify signal)"); };
-        void on_package(SmithClientCX* cx, LTVEntry* pkg) { 
+        void on_package() const { _inf("MGR: package received (notify signal)"); };
+        void on_package_detail(SmithClientCX* cx, LTVEntry* pkg) const {
             _inf("MGR: package received (detail signal)");
             _deb("cx %s: data: \n%s",cx->c_name(), pkg->hr().c_str());
         };
@@ -197,8 +197,9 @@ void test_url2(const char* url = nullptr) {
         
         // signal management
         PackageHandler mgr;
-        client.cx()->sig_on_package.connect(&mgr,&PackageHandler::on_package);
-        client.cx()->sig_package_detail.connect(&mgr,&PackageHandler::on_package);
+
+        client.cx()->sig_on_package = [&mgr]() { mgr.on_package(); };
+        client.cx()->sig_package_detail = [&mgr](SmithClientCX* cx, LTVEntry* pkg) { mgr.on_package_detail(cx, pkg); };
         
         client.run();
     }
@@ -285,6 +286,6 @@ int main(int argc, char *argv[]) {
         if (t_diff > t_max || t_max == 0) t_max = t_diff;
 
         std::cout << string_format(">> Server RTT: %dus  (avg=%.2fus min=%dus max=%dus)", t_diff,
-                                   ((float) t_sum) / t_cnt, t_min, t_max);
+                                   ((double) t_sum) / t_cnt, t_min, t_max);
     }
 }

@@ -46,7 +46,6 @@
 #include <basecom.hpp>
 #include <ltventry.hpp>
 
-#include <sigslot.h>
 
 class SmithProtoCX : public baseHostCX {
 
