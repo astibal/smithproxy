@@ -165,7 +165,7 @@ public:
     explicit SmithdProxy(baseCom* c) : baseProxy(c) {};
     ~SmithdProxy() override = default;
 
-    std::string to_string(int verbosity=iINF) const override {
+    std::string to_string(int verbosity) const override {
         return "SmithdProxy|" + baseProxy::to_string(verbosity);
     }
 

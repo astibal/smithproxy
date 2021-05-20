@@ -145,7 +145,7 @@ public:
     bool ipX_inc_counters (baseHostCX *cx);
 
 
-    std::string to_string() const { return "AuthFactory"; };
+    std::string to_string(int verbosity) const { return "AuthFactory"; };
 
     DECLARE_C_NAME("AuthFactory");
     DECLARE_LOGGING(to_string);

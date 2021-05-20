@@ -960,7 +960,7 @@ std::string get_connection_details_str(MitmProxy* px, baseHostCX* cx, char side)
             detail << "app=" << http->proto << http->host << " ";
         }
         else {
-            detail << "app=" << mh->application_data->hr() << " ";
+            detail << "app=" << mh->application_data->str() << " ";
         }
     }
 
@@ -1172,7 +1172,7 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
             
             if(now - token_ts < AuthFactory::get().token_timeout) {
                 _inf("MitmProxy::handle_replacement_auth: cached token %s for request: %s",
-                                token_tk.c_str(), cx->application_data->hr().c_str());
+                                token_tk.c_str(), cx->application_data->str().c_str());
                 
                 if(cx->com()) {
                     if(cx->com()->l3_proto() == AF_INET) {
@@ -1202,7 +1202,7 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
                 replacement_msg += "(auth: known token)";
             } else {
                 _inf("MitmProxy::handle_replacement_auth: expired token %s for request: %s",
-                                token_tk.c_str(), cx->application_data->hr().c_str());
+                                token_tk.c_str(), cx->application_data->str().c_str());
                 goto new_token;
             }
         } else {
@@ -1218,7 +1218,7 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
             shm_logon_token tok = shm_logon_token(token_text.c_str());
             
             _inf("MitmProxy::handle_replacement_auth: new auth token %s for request: %s",
-                                tok.token().c_str(), cx->application_data->hr().c_str());
+                                tok.token().c_str(), cx->application_data->str().c_str());
             
             if(cx->com()) {
                 if(cx->com()->l3_proto() == AF_INET) {
@@ -1629,7 +1629,7 @@ void MitmProxy::init_content_replace() {
 }
 
 buffer MitmProxy::content_replace_apply(buffer b) {
-    std::string data = b.to_string();
+    std::string data = b.str();
     std::string result = data;
     
     int stage = 0;

@@ -111,7 +111,7 @@ public:
     bool match_rangegrp_vecx(group_of_ports& ranges,std::vector<baseHostCX*>& vecx);
 
     bool ask_destroy() override { return false; }
-    std::string to_string(int verbosity = 6) const override;
+    std::string to_string(int verbosity) const override;
 
     DECLARE_C_NAME("PolicyRule");
     DECLARE_LOGGING(to_string);

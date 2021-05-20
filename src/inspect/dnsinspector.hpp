@@ -65,7 +65,7 @@ public:
     bool store(std::shared_ptr<DNS_Response> ptr);
     void apply_verdict(AppHostCX* cx) override;
 
-    std::string to_string(int verbosity=iINF) const override;
+    std::string to_string(int verbosity) const override;
 
 private:
     logan_attached<DNS_Inspector> log;
@@ -81,7 +81,7 @@ private:
     bool stored_ = false;
 
     DECLARE_C_NAME("DNS_Inspector");
-    DECLARE_LOGGING(name);
+    DECLARE_LOGGING(to_string);
 };
 
 

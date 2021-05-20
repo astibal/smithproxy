@@ -343,7 +343,7 @@ DNS_Response* send_dns_request(struct cli_def *cli, std::string const& hostname,
             auto* resp = new DNS_Response();
             parsed = resp->load(&r);
             cli_print(cli, "parsed %d bytes (0 means all)",parsed);
-            cli_print(cli, "DNS response: \n %s",resp->to_string().c_str());
+            cli_print(cli, "DNS response: \n %s",resp->str().c_str());
 
             // save only fully parsed messages
             if(parsed == 0) {

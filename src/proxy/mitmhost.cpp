@@ -249,7 +249,7 @@ void MitmHostCX::on_detect_www_get(const std::shared_ptr<duplexFlowMatch> &x_sig
             }
 
 
-            _inf("http request: %s",ESC(app_request->hr()));
+            _inf("http request: %s",ESC(app_request->str()));
         } else {
             _inf("http request: %s (app_request cast failed)", ESC(print_request));
         }

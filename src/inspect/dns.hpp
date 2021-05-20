@@ -188,7 +188,7 @@ struct DNS_Answer {
     
     std::string hr() const { 
         
-        std::string ret = string_format("type: %s, class: %d, ttl: %d",
+        std::string ret = string_format("type: %s, class: %d, ttl: %d, ",
                                         DNSFactory::get().dns_record_type_str(type_), class_, ttl_);
         ret += ip();
         return ret;
@@ -234,7 +234,7 @@ public:
     std::vector<int> answer_ttl_idx; // should be protected;
     time_t      loaded_at = 0;
     
-    std::string to_string(int verbosity=iINF) const override;
+    std::string to_string(int verbosity) const override;
     bool ask_destroy() override { return false; };
 
     ~DNS_Packet() override = default;
@@ -287,6 +287,8 @@ public:
     ~DNS_Request() override {
         _dum("DNS_Request::d-tor");
     };
+    std::string to_string(int verbosity) const override {  return DNS_Packet::to_string(verbosity); }
+
     DECLARE_C_NAME("DNS_Request");
     DECLARE_LOGGING(to_string);
 };
@@ -326,7 +328,9 @@ public:
 
         return std::nullopt;
     };
-    
+
+    std::string to_string(int verbosity) const override {  return DNS_Packet::to_string(verbosity); }
+
     DECLARE_C_NAME("DNS_Response");
     DECLARE_LOGGING(to_string);
 };

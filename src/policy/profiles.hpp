@@ -19,7 +19,7 @@ public:
     int mode = 0;
 
     bool ask_destroy() override { return false; };
-    std::string to_string(int verbosity = 6) const override {
+    std::string to_string(int verbosity) const override {
         return string_format("ProfileDetection: name=%s mode=%d", element_name().c_str(), mode);
     };
 
@@ -36,7 +36,7 @@ public:
     int replace_each_counter_ = 0;
 
     bool ask_destroy() override { return false; };
-    std::string to_string(int verbosity = 6) const override {
+    std::string to_string(int verbosity) const override {
         return string_format("ProfileContentRule: matching %s", ESC_(match).c_str());
     }
 
@@ -52,7 +52,7 @@ public:
 
 
     bool ask_destroy() override { return false; };
-    std::string to_string(int verbosity = 6) const override {
+    std::string to_string(int verbosity) const override {
         std::string ret = string_format("ProfileContent: name=%s capture=%d", element_name().c_str(), write_payload);
         if(verbosity > INF) {
             for(auto const& it: content_rules)
@@ -114,7 +114,7 @@ public:
 
 
     bool ask_destroy() override { return false; };
-    std::string to_string(int verbosity = 6) const override {
+    std::string to_string(int verbosity) const override {
         std::string ret = string_format("ProfileTls: name=%s inspect=%d ocsp=%d ocsp_stap=%d pfs=%d,%d abr=%d,%d",
                                         element_name().c_str(),
                                         inspect,

@@ -1586,7 +1586,7 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
                     if (lf) {
                         if (verbosity > INF) ss << "\n    ";
                         if (lf->application_data) {
-                            std::string desc = lf->application_data->hr();
+                            std::string desc = lf->application_data->str();
                             if (verbosity < DEB && desc.size() > 120) {
                                 desc = desc.substr(0, 117);
                                 desc += "...";
@@ -1597,7 +1597,7 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
                         }
 
                         if (verbosity > INF) {
-                            cur_obj_ss << "    obj_debug: " << curr_proxy->get_this_log_level().to_string() << "\n";
+                            cur_obj_ss << "    obj_debug: " << curr_proxy->get_this_log_level().str() << "\n";
                             long expiry = -1;
                             if (curr_proxy->half_holdtimer > 0) {
                                 expiry = curr_proxy->half_holdtimer + MitmProxy::half_timeout() - curtime;
@@ -1643,9 +1643,9 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
                         }
 
                         if (verbosity > DIA) {
-                            cur_obj_ss << "     lf_debug: " << lf->get_this_log_level().to_string() << "\n";
+                            cur_obj_ss << "     lf_debug: " << lf->get_this_log_level().str() << "\n";
                             if (lf->com()) {
-                                cur_obj_ss << "       lf_com: " << lf->com()->get_this_log_level().to_string() << "\n";
+                                cur_obj_ss << "       lf_com: " << lf->com()->get_this_log_level().str() << "\n";
                             }
                         }
                     }
@@ -1656,9 +1656,9 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
                             }
                         }
                         if (verbosity > DIA) {
-                            cur_obj_ss << "     rg_debug: " << rg->get_this_log_level().to_string() << "\n";
+                            cur_obj_ss << "     rg_debug: " << rg->get_this_log_level().str() << "\n";
                             if (rg->com()) {
-                                cur_obj_ss << "       rg_com: " << rg->com()->get_this_log_level().to_string() << "\n";
+                                cur_obj_ss << "       rg_com: " << rg->com()->get_this_log_level().str() << "\n";
                             }
                         }
                     }
@@ -1778,7 +1778,7 @@ int cli_diag_worker_list(struct cli_def *cli, const char *command, char *argv[],
         for (auto acc: listener) {
             cli_print(cli, "    %s, type %s",
                       acc->hr().c_str(),
-                      acc->proxy_type().to_string().c_str());
+                      acc->proxy_type().str().c_str());
 
             int w_i = 0;
             std::string em;
@@ -1801,7 +1801,7 @@ int cli_diag_worker_list(struct cli_def *cli, const char *command, char *argv[],
 
                 cli_print(cli, "        `- worker[%d]: %s, thread %p",
                           w_i,
-                          wrk.second->to_string().c_str(),
+                          wrk.second->str().c_str(),
                           wrk.first);
 
                 int p_i = 0;
@@ -1811,7 +1811,7 @@ int cli_diag_worker_list(struct cli_def *cli, const char *command, char *argv[],
                     auto l_ = std::scoped_lock(wrk.second->proxy_lock());
 
                     for(auto p: wrk.second->proxies()) {
-                        ss << string_format("          `- proxy[%d]: %s\n", p_i, p->to_string().c_str());
+                        ss << string_format("          `- proxy[%d]: %s\n", p_i, p->str().c_str());
                         p_i++;
                     }
                 }

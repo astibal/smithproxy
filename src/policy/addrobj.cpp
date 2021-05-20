@@ -109,11 +109,11 @@ bool FqdnAddress::match(cidr::CIDR* to_match) {
         for(CidrAddress* ip: ips) {
             if(ip->match(to_match)) {
                 _deb("FqdnAddress::match: cached %s matches answer[%d] with %s",
-                                                fqdn_.c_str(),i,ip->to_string().c_str());
+                                                fqdn_.c_str(),i,ip->str().c_str());
                 ret = true;
             } else {
                 _deb("FqdnAddress::match: cached %s DOESN'T match answer[%d] with %s",
-                                                fqdn_.c_str(),i,ip->to_string().c_str());
+                                                fqdn_.c_str(),i,ip->str().c_str());
             }
             ++i;
             // delete it straight away.

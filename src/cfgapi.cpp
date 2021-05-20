@@ -1812,7 +1812,7 @@ bool CfgFactory::prof_tls_apply (baseHostCX *originator, baseProxy *new_proxy, c
 
                                         for(auto const& to_match_entry: to_match) {
                                             FqdnAddress ff(to_match_entry);
-                                            _deb("Connection %s: subdomain check: test if %s matches %s", originator->full_name('L').c_str(), ff.to_string().c_str(), xcom->owner_cx()->host().c_str());
+                                            _deb("Connection %s: subdomain check: test if %s matches %s", originator->full_name('L').c_str(), ff.str().c_str(), xcom->owner_cx()->host().c_str());
 
                                             // ff.match locks DNS cache
                                             if(ff.match(host_cidr.get())) {

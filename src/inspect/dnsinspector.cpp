@@ -284,7 +284,7 @@ bool DNS_Inspector::store(std::shared_ptr<DNS_Response> ptr) {
         _dia("DNS inspection: non-A response for %s",ptr->question_str_0().c_str());
         is_a_record = false;
     }
-    _dia("DNS response: %s",ptr->to_string().c_str());
+    _dia("DNS response: %s",ptr->str().c_str());
 
 
     if(is_a_record) {
@@ -346,13 +346,13 @@ bool DNS_Inspector::validate_response(std::shared_ptr<DNS_Response> ptr) {
 
     } else {
         _dia("DNS_Inspector::validate_response: request 0x%x not found",id);
-        _err("validating DNS response for %s failed.",ptr->to_string().c_str());
+        _err("validating DNS response for %s failed.",ptr->str().c_str());
         return false;
     }
 }
 
 std::string DNS_Inspector::to_string(int verbosity) const {
-    std::string r = Inspector::to_string()+"\n  ";
+    std::string r = Inspector::to_string(verbosity)+"\n  ";
 
     r += string_format("tcp: %d requests: %d valid responses: %d stored: %d",is_tcp,requests_.size(),responses_,stored_);
 

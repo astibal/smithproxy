@@ -69,7 +69,7 @@ struct ApplicationData: public socle::sobject {
     virtual std::string request() { return std::string(""); };
     
     bool ask_destroy() override { return false; };
-    std::string to_string(int verbosity = iINF) const override { return name() + ": " + hr(verbosity); };
+    std::string to_string(int verbosity) const override { return name() + ": " + hr(verbosity); };
     
     DECLARE_C_NAME("ApplicationData");
 
@@ -104,7 +104,7 @@ struct app_HttpRequest : public ApplicationData {
         return proto+host+uri+params;
     };
 
-    std::string hr(int verbosity=iINF) const override {
+    std::string hr(int verbosity) const override {
         std::stringstream ret;
 
         ret << proto << host << uri << params;
@@ -184,7 +184,7 @@ public:
     bool is_dns_port = false;
 
     bool ask_destroy() override;
-    std::string to_string(int verbosity = iINF) const override;
+    std::string to_string(int verbosity) const override;
     
 private:
 

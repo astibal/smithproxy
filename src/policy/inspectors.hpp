@@ -105,7 +105,7 @@ protected:
     
     
     bool ask_destroy() override { return false; };
-    std::string to_string(int verbosity=iINF) const override {
+    std::string to_string(int verbosity) const override {
         return string_format("%s: in-progress: %d stage: %d completed: %d result: %d",
                              c_name(),in_progress(), stage, completed(),result());
     };

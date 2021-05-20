@@ -175,7 +175,7 @@ public:
     virtual bool handle_cached_response(MitmHostCX* cx);
     
     bool ask_destroy() override { state().dead(true); return true; };
-    std::string to_string(int verbosity=iINF) const override;
+    std::string to_string(int verbosity) const override;
     
     virtual int handle_sockets_once(baseCom*);
     

@@ -63,7 +63,7 @@ std::string PolicyRule::to_string(int verbosity) const {
         if(verbosity > iINF) {
             from << string_format("(0x%x)", this);
         }
-        from << it->value()->to_string() << " ";
+        from << it->value()->str() << " ";
     }
     from << ":";
     for(auto it: src_ports) {
@@ -76,7 +76,7 @@ std::string PolicyRule::to_string(int verbosity) const {
     std::stringstream to;
 
     for(auto const& it: dst) {
-        to << it->value()->to_string() << " ";
+        to << it->value()->str() << " ";
     }
     to << ":";
     for(auto it: dst_ports) {
@@ -145,7 +145,7 @@ bool PolicyRule::match_addrgrp_cx(group_of_addresses &sources, baseHostCX* cx) {
             if(comp->value()->match(l)) {
                 if(*log.level() >= DIA) {
                     char* a = cidr_to_str(l);
-                    _deb("PolicyRule::match_addrgrp_cx: comparing %s with rule %s: matched", a, comp->value()->to_string().c_str());
+                    _deb("PolicyRule::match_addrgrp_cx: comparing %s with rule %s: matched", a, comp->value()->str().c_str());
                     free(a);
                 }
                 match = true;
@@ -153,7 +153,7 @@ bool PolicyRule::match_addrgrp_cx(group_of_addresses &sources, baseHostCX* cx) {
             } else {
                 if(*log.level() >= DIA) {
                     char* a = cidr_to_str(l);
-                    _deb("PolicyRule::match_addrgrp_cx: comparing %s with rule %s: not matched", a, comp->value()->to_string().c_str());
+                    _deb("PolicyRule::match_addrgrp_cx: comparing %s with rule %s: not matched", a, comp->value()->str().c_str());
                     free(a);
                 }
             }
@@ -352,10 +352,10 @@ bool PolicyRule::match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r)
     std::string rs("???");
 
     if(!l.empty()) {
-        ls = l[0]->to_string();
+        ls = l[0]->str();
     }
     if(!r.empty()) {
-        rs = r[0]->to_string();
+        rs = r[0]->str();
     }
 
     if(is_disabled) {
@@ -391,8 +391,8 @@ bool PolicyRule::match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r)
     
     
     if(*log.level() >= DEB ) {
-        for(auto i: l) _dum("PolicyRule::match_lr L: %s", i->to_string().c_str());
-        for(auto i: r) _dum("PolicyRule::match_lr R: %s", i->to_string().c_str());
+        for(auto i: l) _dum("PolicyRule::match_lr L: %s", i->str().c_str());
+        for(auto i: r) _dum("PolicyRule::match_lr R: %s", i->str().c_str());
         _deb("PolicyRule::match_lr Success: %d-%d:%d->%d:%d", proto->value(), lmatch, lpmatch, rmatch, rpmatch);
     }
 

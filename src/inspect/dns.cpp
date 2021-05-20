@@ -252,7 +252,7 @@ std::pair<DNS_Response*,int> DNSFactory::recv_dns_response(int send_socket, unsi
             auto* resp = new DNS_Response();
             int parsed = resp->load(&r);
             _dia("parsed %d bytes (0 means all)",parsed);
-            _dia("DNS response: \n %s",resp->to_string().c_str());
+            _dia("DNS response: \n %s",resp->str().c_str());
 
             // save only fully parsed messages
             if(parsed == 0) {
