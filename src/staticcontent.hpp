@@ -48,9 +48,9 @@ using namespace ext::nltemplate;
 
 class StaticContent {
 
-    ptr_cache<std::string,Template>* templates_;
+    std::unique_ptr<ptr_cache<std::string,Template>> templates_;
     StaticContent() : log(get_log()) {
-        templates_ = new ptr_cache<std::string,Template> ("replacement message cache");
+        templates_ = std::make_unique<ptr_cache<std::string,Template>>("replacement message cache");
 
     };
     ~StaticContent() = default;
