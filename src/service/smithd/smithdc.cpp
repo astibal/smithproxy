@@ -49,7 +49,7 @@
 #include <service/smithd/smithdcx.hpp>
 
 const std::string& cfg_ux_socket() {
-    static std::string sock = "/var/run/smithd.sock";
+    static std::string sock = "/var/run/smithd.default.sock";
 
     return sock;
 }
@@ -130,8 +130,8 @@ public:
 class SmithdProxy : public baseProxy {
     public:
         explicit SmithdProxy(baseCom* c) : baseProxy(c) {};
-        baseHostCX* new_cx(const char* h, const char* p) override { return new SmithClientCX(com(),h,p); };
-        baseHostCX* new_cx(int s) override { return new SmithClientCX(com(), s); };
+        baseHostCX* new_cx(const char* h, const char* p) override { return new SmithClientCX(com()->slave(),h,p); };
+        baseHostCX* new_cx(int s) override { return new SmithClientCX(com()->slave(), s); };
         
         void on_left_error(baseHostCX*) override { state().dead(true); };
         void on_right_error(baseHostCX*) override { state().dead(true); };
@@ -157,9 +157,8 @@ class SimpleClient {
         }
 
         virtual int connect() {
-            int r = cx()->connect();
-            if(r > 0) px()->ladd(new CX(px_->com()->slave(), host_, port_));
-            return r; 
+            px()->ladd(new CX(px_->com()->slave(), host_, port_));
+            return cx()->connect();
         }
         virtual int run() { return px()->run(); }
     protected:
@@ -187,21 +186,40 @@ void test_url2(const char* url = nullptr) {
     if(url != nullptr) u = url;
 
     SimpleClient<UxCom,SmithClientCX,SmithdProxy> client(u,"");
-    if( client.connect() > 0) {
-        // create application payload
-        LTVEntry* m = client.cx()->pkg_create_rateurl_request(1,"www.smithproxy.org");
-        // pack. Make buffer data from the object
-        m->pack();
-        client.cx()->send(m);
-        delete m; // coverity: 1408013
-        
+
+
+    client.connect();
+    if(int sock = client.connect() > 0) {
+
+        std::cout << "socket created: " << sock << std::endl;
+
+
         // signal management
         PackageHandler mgr;
 
         client.cx()->sig_on_package = [&mgr]() { mgr.on_package(); };
         client.cx()->sig_package_detail = [&mgr](SmithClientCX* cx, LTVEntry* pkg) { mgr.on_package_detail(cx, pkg); };
-        
+
+
+        // create application payload
+        std::unique_ptr<LTVEntry> m(client.cx()->pkg_create_rateurl_request(1,"www.smithproxy.org"));
+
+        // pack. Make buffer data from the object
+        int sz = m->pack();
+        std::cout << "prepared packet size: " << sz << "B" << std::endl;
+        std::cout << string_format("%s\n", hex_dump(m->data(), m->buflen()).c_str());
+
+        client.cx()->send(m.get());
+
+        client.px()->com()->master()->poller.handler_db.clear();
+
+        client.cx()->shutdown();
+        client.px()->shutdown();
+        std::cout << "sent" << std::endl;
+
         client.run();
+    } else {
+        std::cout << "cannot connect" << std::endl;
     }
 }
 
@@ -250,7 +268,14 @@ void test_url(const char* url = nullptr) {
 
 
 int main(int argc, char *argv[]) {
-    
+
+    logger().dup2_cout(true);
+    logger().level(DEB);
+    logan::get()["internal.ltv"]->level(iDEB);
+    logan::get()["com.smithd"]->level(iDEB);
+
+
+
     int loop_count = 1;
     int t_diff;
 
@@ -285,7 +310,7 @@ int main(int argc, char *argv[]) {
         if (t_diff < t_min || t_min == 0) t_min = t_diff;
         if (t_diff > t_max || t_max == 0) t_max = t_diff;
 
-        std::cout << string_format(">> Server RTT: %dus  (avg=%.2fus min=%dus max=%dus)", t_diff,
+        std::cout << string_format(">> Server RTT: %dus  (avg=%.2fus min=%dus max=%dus)\n", t_diff,
                                    ((double) t_sum) / t_cnt, t_min, t_max);
     }
 }
