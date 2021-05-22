@@ -3,7 +3,7 @@
 # taken shamelessly from smithproxy.startup.cfg
 SMITH_TLS_PORTS='443 465 636 993 995 10443'
 
-EXEMPT_USERS="root fahclient boinc"
+EXEMPT_USERS="root fahclient boinc loki"
 
 case "$1" in
 
