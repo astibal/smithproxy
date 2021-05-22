@@ -63,13 +63,12 @@ class MyDTLSMitmCom : public baseSSLMitmCom<DTLSCom> {
 struct ApplicationData: public socle::sobject {
     ~ApplicationData() override = default;
     bool is_ssl = false;
-    
-    virtual std::string hr(int verbosity=iINF) const { return std::string(""); };
+
     virtual std::string original_request() { return request(); }; // parent request
     virtual std::string request() { return std::string(""); };
     
     bool ask_destroy() override { return false; };
-    std::string to_string(int verbosity) const override { return name() + ": " + hr(verbosity); };
+    std::string to_string(int verbosity) const override { return name() + "AppData: generic"; };
     
     DECLARE_C_NAME("ApplicationData");
 
@@ -104,12 +103,12 @@ struct app_HttpRequest : public ApplicationData {
         return proto+host+uri+params;
     };
 
-    std::string hr(int verbosity) const override {
+    std::string to_string(int verbosity) const override {
         std::stringstream ret;
 
-        ret << proto << host << uri << params;
+        ret << "AppData: " << proto << host << uri << params;
 
-        if(verbosity> INF && referer.size()>0) {
+        if(verbosity > INF && not referer.empty()) {
             ret << " via " << referer;
         }
 
