@@ -169,7 +169,7 @@ public:
         return "SmithdProxy|" + baseProxy::to_string(verbosity);
     }
 
-    DECLARE_LOGGING(to_string);
+    DECLARE_LOGGING(to_string)
 
     void on_left_error(baseHostCX*)  override {  state().dead(true); };
     void on_right_error(baseHostCX*) override { state().dead(true); };

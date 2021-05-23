@@ -27,7 +27,9 @@ if(UNIX)
         SET(CMAKE_BUILD_TYPE Debug)
     ENDIF(NOT CMAKE_BUILD_TYPE)
 
-    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wno-psabi -std=c++17")
+    # Pedantic complains about designated initializers (C++20)
+    # SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wpedantic -Wno-unused-parameter -Wno-psabi -std=c++17")
+    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wno-unused-parameter -Wno-psabi -std=c++17")
     SET(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g3 -fno-stack-protector")
 
     IF (CMAKE_BUILD_TYPE STREQUAL "Debug")

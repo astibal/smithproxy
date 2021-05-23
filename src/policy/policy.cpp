@@ -239,7 +239,7 @@ int PolicyRule::sock_2_net(int sock_type) {
         default:
             return 0;
     }
-};
+}
 
 bool PolicyRule::match_proto_cx(int acl_proto, baseHostCX* cx) {
 
@@ -256,7 +256,7 @@ bool PolicyRule::match_proto_cx(int acl_proto, baseHostCX* cx) {
         }
     }
     return ret;
-};
+}
 
 
 
@@ -277,7 +277,7 @@ bool PolicyRule::match_proto_vecx(int acl_proto, std::vector<baseHostCX*> const&
     }
 
     return ret;
-};
+}
 
 
 

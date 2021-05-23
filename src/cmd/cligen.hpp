@@ -100,51 +100,51 @@ Setting* cfg_canonize(std::string const& section);
 
 enum edit_settings { MODE_EDIT_SETTINGS=0x10000000, MODE_EDIT_SETTINGS_AUTH=0x10001000, MODE_EDIT_SETTINGS_CLI=0x10002000, MODE_EDIT_SETTINGS_SOCKS=0x10003000 };
 
-CONFIG_MODE_DEC(cli_conf_edit_settings);
-CONFIG_MODE_DEC(cli_conf_edit_settings_auth);
-CONFIG_MODE_DEC(cli_conf_edit_settings_cli);
-CONFIG_MODE_DEC(cli_conf_edit_settings_socks);
+CONFIG_MODE_DEC(cli_conf_edit_settings)
+CONFIG_MODE_DEC(cli_conf_edit_settings_auth)
+CONFIG_MODE_DEC(cli_conf_edit_settings_cli)
+CONFIG_MODE_DEC(cli_conf_edit_settings_socks)
 
 
 enum edit_debug { MODE_EDIT_DEBUG=0x11000000, MODE_EDIT_DEBUG_LOG };
-CONFIG_MODE_DEC(cli_conf_edit_debug);
-CONFIG_MODE_DEC(cli_conf_edit_debug_log);
+CONFIG_MODE_DEC(cli_conf_edit_debug)
+CONFIG_MODE_DEC(cli_conf_edit_debug_log)
 
 enum edit_proto_objects { MODE_EDIT_PROTO_OBJECTS=0x12000000, };
-CONFIG_MODE_DEC(cli_conf_edit_proto_objects);
+CONFIG_MODE_DEC(cli_conf_edit_proto_objects)
 
 
 enum edit_address_objects { MODE_EDIT_ADDRESS_OBJECTS=0x13000000, };
-CONFIG_MODE_DEC(cli_conf_edit_address_objects);
+CONFIG_MODE_DEC(cli_conf_edit_address_objects)
 
 
 enum edit_port_objects { MODE_EDIT_PORT_OBJECTS=0x14000000, };
-CONFIG_MODE_DEC(cli_conf_edit_port_objects);
+CONFIG_MODE_DEC(cli_conf_edit_port_objects)
 
 enum edit_policy { MODE_EDIT_POLICY=0x15000000, };
-CONFIG_MODE_DEC(cli_conf_edit_policy);
+CONFIG_MODE_DEC(cli_conf_edit_policy)
 
 enum edit_detection_profile { MODE_EDIT_DETECTION_PROFILES=0x16000000, };
-CONFIG_MODE_DEC(cli_conf_edit_detection_profiles);
+CONFIG_MODE_DEC(cli_conf_edit_detection_profiles)
 
 enum edit_content_profile { MODE_EDIT_CONTENT_PROFILES=0x17000000, };
-CONFIG_MODE_DEC(cli_conf_edit_content_profiles);
+CONFIG_MODE_DEC(cli_conf_edit_content_profiles)
 
 enum edit_tls_profile { MODE_EDIT_TLS_PROFILES=0x18000000, };
-CONFIG_MODE_DEC(cli_conf_edit_tls_profiles);
+CONFIG_MODE_DEC(cli_conf_edit_tls_profiles)
 
 enum edit_alg_dns_profile { MODE_EDIT_ALG_DNS_PROFILES=0x19000000, };
-CONFIG_MODE_DEC(cli_conf_edit_alg_dns_profiles);
+CONFIG_MODE_DEC(cli_conf_edit_alg_dns_profiles)
 
 enum edit_auth_profile { MODE_EDIT_AUTH_PROFILES=0x1a000000, };
-CONFIG_MODE_DEC(cli_conf_edit_auth_profiles);
+CONFIG_MODE_DEC(cli_conf_edit_auth_profiles)
 
 enum edit_starttls_signatures { MODE_EDIT_STARTTLS_SIGNATURES=0x26000000, };
-CONFIG_MODE_DEC(cli_conf_edit_starttls_signatures);
+CONFIG_MODE_DEC(cli_conf_edit_starttls_signatures)
 
 
 enum edit_detection_signatures { MODE_EDIT_DETECTION_SIGNATURES=0x27000000, };
-CONFIG_MODE_DEC(cli_conf_edit_detection_signatures);
+CONFIG_MODE_DEC(cli_conf_edit_detection_signatures)
 
 
 #endif //SMITHPROXY_CLIGEN_HPP

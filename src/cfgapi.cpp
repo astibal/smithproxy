@@ -2847,6 +2847,8 @@ int CfgFactory::cfg_write(Config& cfg, FILE* where, unsigned long iobufsz) {
                 fputc('\r', where);
                 // omit break - so we write also '\n'
 
+                [[fallthrough]];
+
             default:
                 fputc(c, where);
         }

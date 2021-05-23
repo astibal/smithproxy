@@ -23,7 +23,7 @@ public:
         return string_format("ProfileDetection: name=%s mode=%d", element_name().c_str(), mode);
     };
 
-DECLARE_C_NAME("ProfileDetection");
+DECLARE_C_NAME("ProfileDetection")
 };
 
 class ProfileContentRule : public socle::sobject, public CfgElement {
@@ -40,7 +40,7 @@ public:
         return string_format("ProfileContentRule: matching %s", ESC_(match).c_str());
     }
 
-DECLARE_C_NAME("ProfileContentRule");
+DECLARE_C_NAME("ProfileContentRule")
 };
 
 class ProfileContent  : public socle::sobject, public CfgElement {
@@ -62,7 +62,7 @@ public:
         return ret;
     };
 
-DECLARE_C_NAME("ProfileContent");
+DECLARE_C_NAME("ProfileContent")
 };
 
 
@@ -153,7 +153,7 @@ public:
         return ret;
     }
 
-DECLARE_C_NAME("ProfileTls");
+DECLARE_C_NAME("ProfileTls")
 };
 
 struct ProfileAuth;

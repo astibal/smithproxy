@@ -92,7 +92,7 @@ int DaemonFactory::daemonize () {
 
         // if daemonizing, write pid file only from slave (master will be shut down)
 
-        struct stat st{0};
+        struct stat st{};
         if(stat(pid_file.c_str(), &st) == 0) {
             _err("There seems to be smithproxy already running in the system");
 
@@ -177,13 +177,13 @@ void DaemonFactory::unlink_pidfile(bool force) {
 }
 
 bool DaemonFactory::exists_pidfile() const {
-    struct stat st{0};
+    struct stat st{};
     int result = stat(pid_file.c_str(), &st);
     return result == 0;
 }
 
 int DaemonFactory::get_limit_fd() {
-    struct rlimit r{0};
+    struct rlimit r{};
     int ret = getrlimit(RLIMIT_NOFILE,&r);
     if(ret < 0) {
         _err("get_limit_fd: cannot obtain fd limits: %s", string_error().c_str());
@@ -198,7 +198,7 @@ void DaemonFactory::set_limit_fd(int max) {
     if(max == 0) 
         n = 100000;
 
-    struct rlimit r{0};
+    struct rlimit r{};
     r.rlim_cur = n;
     r.rlim_max = 100000;
     

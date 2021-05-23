@@ -44,28 +44,28 @@
 
 #include <utils/str.hpp>
 
-CONFIG_MODE_DEF(cli_conf_edit_settings, MODE_EDIT_SETTINGS,"settings");
-CONFIG_MODE_DEF(cli_conf_edit_settings_auth, MODE_EDIT_SETTINGS_AUTH,"auth_portal");
-CONFIG_MODE_DEF(cli_conf_edit_settings_cli, MODE_EDIT_SETTINGS_CLI,"cli");
-CONFIG_MODE_DEF(cli_conf_edit_settings_socks, MODE_EDIT_SETTINGS_SOCKS,"socks");
+CONFIG_MODE_DEF(cli_conf_edit_settings, MODE_EDIT_SETTINGS,"settings")
+CONFIG_MODE_DEF(cli_conf_edit_settings_auth, MODE_EDIT_SETTINGS_AUTH,"auth_portal")
+CONFIG_MODE_DEF(cli_conf_edit_settings_cli, MODE_EDIT_SETTINGS_CLI,"cli")
+CONFIG_MODE_DEF(cli_conf_edit_settings_socks, MODE_EDIT_SETTINGS_SOCKS,"socks")
 
-CONFIG_MODE_DEF(cli_conf_edit_debug, MODE_EDIT_DEBUG, "debug");
-CONFIG_MODE_DEF(cli_conf_edit_debug_log, MODE_EDIT_DEBUG_LOG, "log");
+CONFIG_MODE_DEF(cli_conf_edit_debug, MODE_EDIT_DEBUG, "debug")
+CONFIG_MODE_DEF(cli_conf_edit_debug_log, MODE_EDIT_DEBUG_LOG, "log")
 
-CONFIG_MODE_DEF(cli_conf_edit_proto_objects, MODE_EDIT_PROTO_OBJECTS, "proto_objects");
-CONFIG_MODE_DEF(cli_conf_edit_address_objects, MODE_EDIT_ADDRESS_OBJECTS, "address_objects");
-CONFIG_MODE_DEF(cli_conf_edit_port_objects, MODE_EDIT_PORT_OBJECTS, "port_objects");
+CONFIG_MODE_DEF(cli_conf_edit_proto_objects, MODE_EDIT_PROTO_OBJECTS, "proto_objects")
+CONFIG_MODE_DEF(cli_conf_edit_address_objects, MODE_EDIT_ADDRESS_OBJECTS, "address_objects")
+CONFIG_MODE_DEF(cli_conf_edit_port_objects, MODE_EDIT_PORT_OBJECTS, "port_objects")
 
-CONFIG_MODE_DEF(cli_conf_edit_policy, MODE_EDIT_POLICY, "policy");
+CONFIG_MODE_DEF(cli_conf_edit_policy, MODE_EDIT_POLICY, "policy")
 
-CONFIG_MODE_DEF(cli_conf_edit_detection_profiles, MODE_EDIT_DETECTION_PROFILES, "detection_profiles");
-CONFIG_MODE_DEF(cli_conf_edit_content_profiles, MODE_EDIT_CONTENT_PROFILES, "content_profiles");
-CONFIG_MODE_DEF(cli_conf_edit_tls_profiles, MODE_EDIT_TLS_PROFILES, "tls_profiles");
-CONFIG_MODE_DEF(cli_conf_edit_alg_dns_profiles, MODE_EDIT_ALG_DNS_PROFILES, "alg_dns_profiles");
-CONFIG_MODE_DEF(cli_conf_edit_auth_profiles, MODE_EDIT_AUTH_PROFILES, "auth_profiles");
+CONFIG_MODE_DEF(cli_conf_edit_detection_profiles, MODE_EDIT_DETECTION_PROFILES, "detection_profiles")
+CONFIG_MODE_DEF(cli_conf_edit_content_profiles, MODE_EDIT_CONTENT_PROFILES, "content_profiles")
+CONFIG_MODE_DEF(cli_conf_edit_tls_profiles, MODE_EDIT_TLS_PROFILES, "tls_profiles")
+CONFIG_MODE_DEF(cli_conf_edit_alg_dns_profiles, MODE_EDIT_ALG_DNS_PROFILES, "alg_dns_profiles")
+CONFIG_MODE_DEF(cli_conf_edit_auth_profiles, MODE_EDIT_AUTH_PROFILES, "auth_profiles")
 
-CONFIG_MODE_DEF(cli_conf_edit_starttls_signatures, MODE_EDIT_STARTTLS_SIGNATURES, "starttls_signatures");
-CONFIG_MODE_DEF(cli_conf_edit_detection_signatures, MODE_EDIT_DETECTION_SIGNATURES, "detection_signatures");
+CONFIG_MODE_DEF(cli_conf_edit_starttls_signatures, MODE_EDIT_STARTTLS_SIGNATURES, "starttls_signatures")
+CONFIG_MODE_DEF(cli_conf_edit_detection_signatures, MODE_EDIT_DETECTION_SIGNATURES, "detection_signatures")
 
 
 std::pair<int, std::string> generate_dynamic_groups(struct cli_def *cli, const char *command, char **argv, int argc) {
@@ -369,7 +369,7 @@ void cli_generate_toggle_commands (struct cli_def *cli, std::string const &secti
                     cli_parent_toggle = cli_register_command(cli, nullptr, "toggle", nullptr, PRIVILEGE_PRIVILEGED, mode,
                                          set_help.c_str());
 
-                    _debug(cli, "cli_generate_toggle_commands:    creating parent command node 0x%p", cli_parent_toggle);
+                    _debug(cli, "cli_generate_toggle_commands:    creating parent command node 0x%p", static_cast<void*>(cli_parent_toggle));
                 }
 
                 std::string help = CliHelp::get().help(CliHelp::help_type_t::HELP_CONTEXT, section, here_n);
@@ -383,7 +383,8 @@ void cli_generate_toggle_commands (struct cli_def *cli, std::string const &secti
                                                         PRIVILEGE_PRIVILEGED, mode,
                                                         help2.c_str());
 
-                _debug(cli, "cli_generate_toggle_commands:    creating command node 0x%p for '%s', cb = 0x%p", ret_single, here_n.c_str(), toggle_cb);
+                _debug(cli, "cli_generate_toggle_commands:    creating command node 0x%p for '%s', cb = 0x%p",
+                       static_cast<void*>(ret_single), here_n.c_str(), reinterpret_cast<void*>(toggle_cb));
 
                 cli_generate_toggle_command_args(cli, ret_single, section, here_n);
 
@@ -433,7 +434,7 @@ void cli_generate_move_commands(cli_def* cli, int this_mode, cli_command *move, 
                              PRIVILEGE_PRIVILEGED, this_mode, help_move.c_str());
     }
 
-};
+}
 
 
 void cli_generate_commands (cli_def *cli, std::string const &this_section, cli_command *cli_parent) {

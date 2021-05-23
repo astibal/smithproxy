@@ -576,7 +576,7 @@ bool SmithProxy::init_syslog() {
     // create UDP socket
     int syslog_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 
-    struct sockaddr_storage syslog_in {0};
+    struct sockaddr_storage syslog_in {};
     memset(&syslog_in, 0, sizeof(struct sockaddr_storage));
 
     if(CfgFactory::get().syslog_family != 6) {

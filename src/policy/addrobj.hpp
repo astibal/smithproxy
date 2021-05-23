@@ -96,7 +96,7 @@ public:
 protected:
     cidr::CIDR* c_;
 
-DECLARE_C_NAME("CidrAddress");
+DECLARE_C_NAME("CidrAddress")
 };
 
 class FqdnAddress : public AddressObject {
@@ -111,7 +111,7 @@ public:
 protected:
     std::string fqdn_;
 
-DECLARE_C_NAME("FqdnAddress");
+DECLARE_C_NAME("FqdnAddress")
 };
 
 typedef CfgSingle<std::shared_ptr<AddressObject>> CfgAddress;

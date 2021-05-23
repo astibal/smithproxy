@@ -85,7 +85,7 @@ CliElement::filter_retval VALUE_UINT_RANGE(std::string const& v) {
     auto b = []() { return B; };
 
     return VALUE_UINT_RANGE_GEN(a, b, v);
-};
+}
 
 
 

@@ -608,7 +608,7 @@ int DNS_Packet::load(buffer* src) {
         _err("error loading packet: %s", e.what());
     }
     return -1;
-};
+}
 
 
 std::string DNS_Packet::to_string(int verbosity) const {

@@ -77,5 +77,5 @@ public:
     }
 };
 
-inline StaticContent* html() { return StaticContent::get(); };
+inline StaticContent* html() { return StaticContent::get(); }
 #endif

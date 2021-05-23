@@ -103,7 +103,7 @@ private:
 };
 
     
-}; // namespace Private
+} // namespace Private
 
     
     

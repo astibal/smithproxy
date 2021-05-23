@@ -55,7 +55,7 @@ namespace sx::fs {
     bool is_dir(std::string const& v) {
         auto log = sx::fs::get_log();
 
-        if (  struct stat sb{0} ; ::stat(v.c_str(), &sb) >= 0) {
+        if (  struct stat sb{} ; ::stat(v.c_str(), &sb) >= 0) {
             _deb("is_dir: '%s' exists", v.c_str());
             if ((sb.st_mode & S_IFMT) == S_IFDIR) {
                 _deb("is_dir: '%s' is directory", v.c_str());
@@ -73,7 +73,7 @@ namespace sx::fs {
     bool is_file(std::string const& v) {
         auto log = sx::fs::get_log();
 
-        if (struct stat sb{0}; ::stat(v.c_str(), &sb) >= 0) {
+        if (struct stat sb{}; ::stat(v.c_str(), &sb) >= 0) {
             _deb("is_file: '%s' exists", v.c_str());
             if ((sb.st_mode & S_IFMT) == S_IFREG) {
                 _deb("is_file: '%s' is file", v.c_str());

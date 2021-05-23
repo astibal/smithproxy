@@ -364,13 +364,13 @@ Loader::Result LoaderFile::load( const string & name ) {
     input.open( name );
     
     if ( ! input.is_open() ) {
-        return { false, nullptr, "Could not open file " + name };
+        return { false, "", "Could not open file " + name };
     }
     
     std::string content( (std::istreambuf_iterator<char>( input ) ),
                          (std::istreambuf_iterator<char>() ) );
 
-    return { true, content };
+    return { true, content, "" };
 }
 
 
@@ -382,11 +382,11 @@ void LoaderMemory::add( const std::string & name, const std::string & body ) {
 Loader::Result LoaderMemory::load( const std::string & name ) {
     for ( auto & pair : files ) {
         if ( pair.first == name ) {
-            return { true, pair.second };
+            return { true, pair.second, "" };
         }
     }
     
-    return { false, nullptr, name + " not found." };
+    return { false, "", name + " not found." };
 }
 
 

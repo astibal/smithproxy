@@ -302,7 +302,7 @@ DNS_Response* send_dns_request(struct cli_def *cli, std::string const& hostname,
 
     // create UDP socket
     int send_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    struct sockaddr_storage addr {0};
+    struct sockaddr_storage addr {};
     memset(&addr, 0, sizeof(struct sockaddr_storage));
     addr.ss_family                = AF_INET;
     ((sockaddr_in*)&addr)->sin_addr.s_addr = inet_addr(nameserver.c_str());
@@ -324,7 +324,7 @@ DNS_Response* send_dns_request(struct cli_def *cli, std::string const& hostname,
 
     int rv;
     fd_set confds;
-    struct timeval tv {0};
+    struct timeval tv {};
     tv.tv_usec = 0;
     tv.tv_sec = 2;
     FD_ZERO(&confds);
@@ -926,7 +926,7 @@ std::optional<int> make_int(std::string const& v)  {
         return 0;
 
     return std::stoi(v);
-};
+}
 
 std::optional<long long int> make_lli(std::string const& v) {
 
@@ -934,7 +934,7 @@ std::optional<long long int> make_lli(std::string const& v) {
         return 0L;
 
     return std::stoll(v);
-};
+}
 
 
 std::optional<bool> make_bool(std::string const& v) {
@@ -2316,7 +2316,7 @@ void client_thread(int client_socket) {
 
     cli_register_static(cli);
 
-    cli_regular(cli, [](cli_def* c) -> int { if(SmithProxy::instance().terminate_flag) return CLI_ERROR; return CLI_OK; } );
+    cli_regular(cli, []([[maybe_unused]]  cli_def* c) -> int { if(SmithProxy::instance().terminate_flag) return CLI_ERROR; return CLI_OK; } );
     cli_regular_interval(cli, 1);
 
 
@@ -2604,7 +2604,7 @@ void client_thread(int client_socket) {
 void cli_loop(short unsigned int port) {
 
     auto log = logan::create("service");
-    sockaddr_in servaddr{0};
+    sockaddr_in servaddr{};
     int on = 1;
 
     // Create a socket
@@ -2641,7 +2641,7 @@ void cli_loop(short unsigned int port) {
         int nfds = epoller.wait(1*1000);
 
         if(nfds > 0) {
-            sockaddr_storage addr {0};
+            sockaddr_storage addr {};
             socklen_t addr_len {0};
 
             client_socket = accept(s, (struct sockaddr*)&addr, &addr_len);

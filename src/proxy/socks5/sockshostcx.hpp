@@ -125,8 +125,8 @@ private:
     std::string to_string(int verbosity) const override { return baseHostCX::to_string(verbosity); };
 private:
     // implement advanced logging
-    DECLARE_C_NAME("sockHostCX");
-    DECLARE_LOGGING(to_string);
+    DECLARE_C_NAME("sockHostCX")
+    DECLARE_LOGGING(to_string)
 
     logan_attached<socksServerCX> log;
 };

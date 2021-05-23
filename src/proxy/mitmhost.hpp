@@ -70,7 +70,7 @@ struct ApplicationData: public socle::sobject {
     bool ask_destroy() override { return false; };
     std::string to_string(int verbosity) const override { return name() + "AppData: generic"; };
     
-    DECLARE_C_NAME("ApplicationData");
+    DECLARE_C_NAME("ApplicationData")
 
     logan_attached<ApplicationData> log = logan_attached<ApplicationData>(this, "inspect");
 };
@@ -115,14 +115,14 @@ struct app_HttpRequest : public ApplicationData {
         return ret.str();
     }
     
-    DECLARE_C_NAME("app_HttpRequest");
+    DECLARE_C_NAME("app_HttpRequest")
 };
 
 struct app_DNS : public ApplicationData {
     DNS_Request*  request = nullptr;
     DNS_Response* response = nullptr;
     
-    DECLARE_C_NAME("app_DNS");
+    DECLARE_C_NAME("app_DNS")
 };
 
 struct ProtoRex {
@@ -162,8 +162,6 @@ public:
     void replacement_flag(replaceflags_t i) { replacement_flags_ = i; }
     replaceflags_t replacement_flag()   { return replacement_flags_; }
     
-    typedef enum {} replacepurpose_t;
-    
     int inspection_verdict() const { return inspect_verdict; };
 protected:    
     int matched_policy_ = -1;
@@ -193,8 +191,8 @@ private:
     unsigned int inspect_flow_same_bytes = 0;
     int inspect_verdict = Inspector::OK;
     
-    DECLARE_C_NAME("MitmHostCX");
-    DECLARE_LOGGING(to_string);
+    DECLARE_C_NAME("MitmHostCX")
+    DECLARE_LOGGING(to_string)
 };
 
 #endif

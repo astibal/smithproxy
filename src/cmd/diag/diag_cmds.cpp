@@ -1802,7 +1802,7 @@ int cli_diag_worker_list(struct cli_def *cli, const char *command, char *argv[],
                 cli_print(cli, "        `- worker[%d]: %s, thread %p",
                           w_i,
                           wrk.second->str().c_str(),
-                          wrk.first);
+                          static_cast<void*>(wrk.first));
 
                 int p_i = 0;
 

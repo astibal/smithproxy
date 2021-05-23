@@ -267,8 +267,8 @@ public:
     inline std::vector<DNS_Answer>& additionals() { return additionals_list_; };
     
 
-    DECLARE_C_NAME("DNS_Packet");
-    DECLARE_LOGGING(to_string);
+    DECLARE_C_NAME("DNS_Packet")
+    DECLARE_LOGGING(to_string)
 };
 
 #define DNS_REQUEST_OVERHEAD 17
@@ -289,8 +289,8 @@ public:
     };
     std::string to_string(int verbosity) const override {  return DNS_Packet::to_string(verbosity); }
 
-    DECLARE_C_NAME("DNS_Request");
-    DECLARE_LOGGING(to_string);
+    DECLARE_C_NAME("DNS_Request")
+    DECLARE_LOGGING(to_string)
 };
 
 
@@ -331,8 +331,8 @@ public:
 
     std::string to_string(int verbosity) const override {  return DNS_Packet::to_string(verbosity); }
 
-    DECLARE_C_NAME("DNS_Response");
-    DECLARE_LOGGING(to_string);
+    DECLARE_C_NAME("DNS_Response")
+    DECLARE_LOGGING(to_string)
 };
 
 

@@ -79,15 +79,15 @@ class FilterProxy : public baseProxy, public socle::sobject {
 public:
     
     FilterProxy(MitmProxy* parent);
-    virtual ~FilterProxy() { if(result_) delete result_; };
+    virtual ~FilterProxy() { delete result_; };
     
     std::string to_string(int verbosity) const override { static std::string r("FilterProxy"); return r; };
     bool ask_destroy() override { return false; };
     
     FilterResult* result() { return result_; }
     
-    DECLARE_C_NAME("FilterProxy");
-    DECLARE_LOGGING(to_string);
+    DECLARE_C_NAME("FilterProxy")
+    DECLARE_LOGGING(to_string)
     
 protected:
     MitmProxy* parent_{};

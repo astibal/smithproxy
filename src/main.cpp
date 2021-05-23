@@ -195,7 +195,7 @@ bool raise_limits() {
 
     bool ret = false;
 
-    rlimit r{0};
+    rlimit r{};
     std::stringstream ss;
 
     getrlimit(RLIMIT_NOFILE, &r);
@@ -213,7 +213,7 @@ bool raise_limits() {
         ret = true;
     }
     return ret;
-};
+}
 
 
 void print_help() {

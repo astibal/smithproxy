@@ -130,7 +130,7 @@ namespace inet::ocsp {
         int result_state_ = -100;
 
 
-    DECLARE_C_NAME("AsyncOCSP");
+    DECLARE_C_NAME("AsyncOCSP")
     };
 }
 #endif //ASYNCOCSP_HPP

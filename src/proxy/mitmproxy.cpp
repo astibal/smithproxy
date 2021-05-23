@@ -82,7 +82,7 @@ void MitmProxy::toggle_tlog() {
 
         data_dir += "/disabled";
         
-        struct stat st{0};
+        struct stat st{};
         int result = stat(data_dir.c_str(), &st);
         bool present = (result == 0);
         
@@ -1820,7 +1820,7 @@ bool MitmMasterProxy::detect_ssl_on_plain_socket(int sock) {
             }
         } else {
             if(ssl_autodetect_harder && time_taken < time_max) {
-                struct timespec t{0};
+                struct timespec t{};
                 t.tv_sec = 0;
                 t.tv_nsec = time_increment;
                 

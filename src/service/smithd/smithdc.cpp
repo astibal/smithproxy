@@ -267,7 +267,7 @@ void test_url(const char* url = nullptr) {
 }
 
 
-int main(int argc, char *argv[]) {
+int main() {
 
     logger().dup2_cout(true);
     logger().level(DEB);
