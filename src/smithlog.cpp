@@ -41,6 +41,8 @@
 #include <smithlog.hpp>
 #include <unistd.h>
 
+using namespace socle;
+
 QueueLogger::QueueLogger(): logger(), lockable() {
 }
 
@@ -59,7 +61,7 @@ int QueueLogger::write_log(loglevel l, std::string& sss) {
     // set warning condition
     if(warned  == 0 && logs_.size() >= max_len - max_len/10 ) {
         auto msg = string_format("logger queue filling up: %d/%d", logs_.size(), max_len);
-        logger::write_log(ERR, msg);
+        logger::write_log(log::level::ERR, msg);
         warned++;
     }
 
