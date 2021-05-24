@@ -1508,11 +1508,6 @@ namespace cidr {
             errno = ENOENT; /* Bad choice of errno */
             return (nullptr);
         }
-
-
-        /* NOTREACHED */
-        errno = ENOENT;
-        return (nullptr);
     }
 
 
