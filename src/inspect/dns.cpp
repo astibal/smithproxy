@@ -66,7 +66,7 @@ const char* DNSFactory::dns_record_type_str(int a) {
 int DNSFactory::load_qname(unsigned char* ptr, unsigned int maxlen, std::string* str_storage = nullptr) {
     unsigned int xi = 0;
 
-    _deb("load_qname:\n%s",hex_dump(ptr,maxlen).c_str());
+    _deb("load_qname:\n%s",hex_dump(ptr, static_cast<int>(maxlen)).c_str());
 
 
     if(ptr[xi] == 0) {
@@ -250,7 +250,7 @@ std::pair<DNS_Response*,int> DNSFactory::recv_dns_response(int send_socket, unsi
 
 
             auto* resp = new DNS_Response();
-            int parsed = resp->load(&r);
+            unsigned int parsed = resp->load(&r);
             _dia("parsed %d bytes (0 means all)",parsed);
             _dia("DNS response: \n %s",resp->str().c_str());
 
@@ -288,7 +288,7 @@ DNS_Response* DNSFactory::resolve_dns_s (std::string const& hostname, DNS_Record
 /*
  * returns 0 on OK, >0 if  there are still some bytes to read and -1 on error.
  */
-int DNS_Packet::load(buffer* src) {
+unsigned int DNS_Packet::load(buffer* src) {
 
     loaded_at = ::time(nullptr);
 
@@ -318,10 +318,10 @@ int DNS_Packet::load(buffer* src) {
             bool failure = false;
 
             /* QUESTION */
-            if (!failure && questions_togo > 0) {
+            if (questions_togo > 0) {
                 _dia("DNS Inspect: Questions: start (count %d)", questions_togo);
 
-                for (; mem_counter < src->size() && questions_togo > 0 && questions_togo > 0;) {
+                for (; mem_counter < src->size() && questions_togo > 0; ) {
                     _deb("DNS_Packet::load: question loop start: current memory pos: %d", mem_counter);
                     DNS_Question question_temp;
                     unsigned int field_len = 0;
@@ -366,12 +366,10 @@ int DNS_Packet::load(buffer* src) {
                             mem_counter += (1 + (2 * 2));
                             _deb("DNS_Packet::load: s==0, mem counter changed to: %d (0x%x)", mem_counter, mem_counter);
 
-                            if (questions_togo > 0) {
-                                questions_list_.push_back(question_temp);
-                                questions_togo--;
-                            }
-                            // we don't currently process authorities and additional records
-                            break;
+                            questions_list_.push_back(question_temp);
+                            questions_togo--;
+
+
                         } else {
                             if (field_len > src->size()) {
                                 _dia("DNS_Packet::load: incomplete question data in the preamble, "
@@ -438,7 +436,7 @@ int DNS_Packet::load(buffer* src) {
                 }
             }
 
-            /* AUTHORITIES sectin */
+            /* AUTHORITIES section */
             if (!failure && authorities_togo > 0) {
 
                 _dia("DNS Inspect: Authorities: start (count %d)", authorities_togo);

@@ -59,7 +59,6 @@
 #include <policy/addrobj.hpp>
 #include <inspect/dns.hpp>
 
-#define DNS_HEADER_SZ 12
 
 
 typedef enum DNS_Record_Type_ { 
@@ -77,14 +76,14 @@ typedef enum DNS_Record_Type_ {
 struct DNS_Response;
 
 class DNSFactory {
-    const char* _unknown = "unknown";
-    const char* str_a = "A";
-    const char* str_ns = "NS";
-    const char* str_aaaa = "AAAA";
-    const char* str_cname = "CNAME";
-    const char* str_txt= "TXT";
-    const char* str_opt = "OPT";
-    const char* str_soa = "SOA";
+    constexpr static const char* _unknown = "unknown";
+    constexpr static const char* str_a = "A";
+    constexpr static const char* str_ns = "NS";
+    constexpr static const char* str_aaaa = "AAAA";
+    constexpr static const char* str_cname = "CNAME";
+    constexpr static const char* str_txt= "TXT";
+    constexpr static const char* str_opt = "OPT";
+    constexpr static const char* str_soa = "SOA";
 
 
     DNSFactory() : log(get_log()) {};
@@ -94,7 +93,7 @@ public:
     DNSFactory(DNSFactory const&) = delete;
     void operator=(DNSFactory const&) = delete;
 
-    const char *dns_record_type_str(int a);
+    static const char *dns_record_type_str(int a);
     int load_qname(unsigned char* ptr, unsigned int maxlen, std::string* str_storage);
     int generate_dns_request(unsigned short id, buffer& b, std::string const& hostname, DNS_Record_Type t);
 
@@ -208,6 +207,9 @@ struct DNS_DnssecAdditionalInfo {
 };
 
 class DNS_Packet : public socle::sobject {
+
+public:
+    static constexpr unsigned int DNS_HEADER_SZ = 12;
 protected:
     uint16_t    id_ = 0;
     uint16_t    flags_ = 0;
@@ -239,7 +241,7 @@ public:
 
     ~DNS_Packet() override = default;
 
-    int load(buffer* src); // initialize from memory. if non-zero is returned, there is yet another data and new DNS_packet should be read.
+    unsigned int load(buffer* src); // initialize from memory. if non-zero is returned, there is yet another data and new DNS_packet should be read.
 
     inline uint16_t id() const { return id_; }
     inline uint16_t flags() const { return flags_; } // todo: split and inspect all bits of this field
@@ -247,9 +249,7 @@ public:
     // helper inline functions to operate on most common content
     std::string question_str_0() const { 
         if(! questions_list_.empty()) {
-            std::string ret;
-            if(question_type_0() == A) ret = "A:";
-            else if (question_type_0() == AAAA) ret = "AAAA:";
+            std::string ret = string_format("%s:", DNSFactory::dns_record_type_str(question_type_0()));
             ret += string_format("%s", questions_list_.at(0).rec_str.c_str());
             return ret;
         } 
@@ -339,14 +339,14 @@ public:
 class DNS {
 
 public:
-    static const unsigned int cache_size = 2000;
-    static const unsigned int sub_ttl = 3600;
-    static const unsigned int top_ttl = 28000;
+    constexpr static const unsigned int cache_size = 2000;
+    constexpr static const unsigned int sub_ttl = 3600;
+    constexpr static const unsigned int top_ttl = 28000;
 
 private:
-    typedef ptr_cache<std::string,DNS_Response> dns_cache_t;
-    typedef ptr_cache<std::string,expiring_int> domain_cache_entry_t;
-    typedef ptr_cache<std::string,domain_cache_entry_t> domain_cache_t;
+    using dns_cache_t = ptr_cache<std::string,DNS_Response> ;
+    using  domain_cache_entry_t = ptr_cache<std::string,expiring_int>;
+    using  domain_cache_t = ptr_cache<std::string,domain_cache_entry_t>;
 
     dns_cache_t dns_cache_;
     domain_cache_t domain_cache_;
