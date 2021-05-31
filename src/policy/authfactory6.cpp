@@ -150,8 +150,8 @@ void AuthFactory::ip6_remove (const std::string &ip6_address) {
         _dia("cfgapi_ip_map_remove: auth ip map - removing: %s", ip6_address.c_str());
         ip6_map_.erase(ip);
 
-        // for debug only: print all shm table entries
-        if(*log.level() >= DEB) {
+        // for debug only: print all shm table entries (optimized-out in Release)
+        _if_deb {
             _deb(":: - SHM AUTH IP map - before removal::");
             for(auto& x_it: shm_ip6_map.map_entries()) {
                 _deb("::  %s::",x_it.first.c_str());
@@ -166,8 +166,9 @@ void AuthFactory::ip6_remove (const std::string &ip6_address) {
         if(sh_it != shm_ip6_map.map_entries().end()) {
             _dia("cfgapi_ip_map_remove: shm auth ip table  - removing: %s", ip6_address.c_str());
             shm_ip6_map.map_entries().erase(sh_it);
-            
-            if(*log.level() >= DEB) {
+
+            // optimized-out in Release
+            _if_deb {
                 _deb(":: - SHM AUTH IP map - after removal::");
                 for(auto& x_it: shm_ip6_map.map_entries()) {
                         _deb("::   %s::",x_it.first.c_str());
