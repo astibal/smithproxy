@@ -267,8 +267,6 @@ void MitmHostCX::on_detect_www_get(const std::shared_ptr<duplexFlowMatch> &x_sig
 
 void MitmHostCX::inspect(char side) {
 
-    AppHostCX::inspect(side);
-    
     if(flow().flow().size() > inspect_cur_flow_size) {
         _deb("MitmHostCX::inspect: flow size change: %d", flow().flow().size());
         inspect_flow_same_bytes = 0;
