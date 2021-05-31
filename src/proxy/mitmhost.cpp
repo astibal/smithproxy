@@ -147,7 +147,7 @@ void MitmHostCX::on_detect_www_get(const std::shared_ptr<duplexFlowMatch> &x_sig
         auto ix_ref = buffer_data_string.find("Referer: ");
         if(ix_ref != std::string::npos) {
             auto ref_start = buffer_data_string.substr(ix_ref, std::min(std::size_t (128), buffer_data_string.size() - ix_ref));
-            if (std::regex_search(ref_start, m_ref, http_req_ref())) {
+            if (std::regex_search(ref_start, m_ref, ProtoRex::http_req_ref())) {
 
                 str_temp = m_ref[1].str();
 
@@ -171,7 +171,7 @@ void MitmHostCX::on_detect_www_get(const std::shared_ptr<duplexFlowMatch> &x_sig
         if(ix_host != std::string::npos) {
             auto host_start = buffer_data_string.substr(ix_host, std::min(std::size_t (128), buffer_data_string.size() - ix_host));
 
-            if (std::regex_search(host_start, m_host, http_req_host())) {
+            if (std::regex_search(host_start, m_host, ProtoRex::http_req_host())) {
                 if (!m_host.empty()) {
                     str_temp = m_host[1].str();
                     print_request += str_temp;
@@ -211,7 +211,7 @@ void MitmHostCX::on_detect_www_get(const std::shared_ptr<duplexFlowMatch> &x_sig
         }
 
         auto method_start = buffer_data_string.substr(0, std::min(std::size_t(128), buffer_data_string.size()));
-        if(std::regex_search (method_start, m_get, http_req_get() )) {
+        if(std::regex_search (method_start, m_get, ProtoRex::http_req_get() )) {
             if(m_get.size() > 1) {
                 str_temp = m_get[2].str();
                 print_request += str_temp;

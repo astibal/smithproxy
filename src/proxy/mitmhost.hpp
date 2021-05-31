@@ -131,7 +131,7 @@ struct ProtoRex {
     static std::regex const& http_req_host(){ static std::regex r{R"(Host: *([^ \r\n]+))"}; return r; };
 };
 
-class MitmHostCX : public AppHostCX, public socle::sobject, public ProtoRex {
+class MitmHostCX : public AppHostCX, public socle::sobject {
 public:
     std::unique_ptr<ApplicationData> application_data;
     
