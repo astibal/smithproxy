@@ -80,7 +80,7 @@ private:
     int responses_ = 0;
     bool stored_ = false;
 
-    DECLARE_C_NAME("DNS_Inspector")
+    TYPENAME_OVERRIDE("DNS_Inspector")
     DECLARE_LOGGING(to_string)
 };
 

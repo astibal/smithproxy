@@ -201,7 +201,7 @@ public:
     static socle::meter& total_mtr_down() {static socle::meter t_down(12); return t_down; };
 
     
-    DECLARE_C_NAME("MitmProxy")
+    TYPENAME_OVERRIDE("MitmProxy")
     DECLARE_LOGGING(to_string)
 
 private:

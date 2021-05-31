@@ -610,7 +610,7 @@ unsigned int DNS_Packet::load(buffer* src) {
 
 
 std::string DNS_Packet::to_string(int verbosity) const {
-    std::string r = string_format("%s: id: %d, type 0x%x [ ",c_name(),id_,flags_);
+    std::string r = string_format("%s: id: %d, type 0x%x [ ",c_type(),id_,flags_);
     for(auto x = questions_list_.begin(); x != questions_list_.end(); ++x) {
         r += x->hr();
         if(x+1 != questions_list_.end()) {

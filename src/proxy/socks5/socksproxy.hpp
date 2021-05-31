@@ -56,7 +56,7 @@ public:
 
     std::string to_string(int lev) const override { std::string r(string_format("SocksProxy[%s]", MitmProxy::to_string(lev).c_str())); return r; };
 
-    DECLARE_C_NAME("SocksProxy")
+    TYPENAME_OVERRIDE("SocksProxy")
     DECLARE_LOGGING(to_string)
 
 private:
@@ -77,7 +77,7 @@ public:
 
     std::string to_string(int lev) const override { static std::string r(string_format("MitmSocksProxy[%s]", baseProxy::to_string(lev).c_str())); return r; };
 
-    DECLARE_C_NAME("MitmSocksProxy")
+    TYPENAME_OVERRIDE("MitmSocksProxy")
     DECLARE_LOGGING(to_string)
 
 private:

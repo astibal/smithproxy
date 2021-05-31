@@ -103,7 +103,7 @@ int MitmHostCX::process() {
     unsigned int len = baseHostCX::readbuf()->size();
 
     // our only processing: hex dup the payload to the log
-    _dum("Incoming data(%s):\n %s", this->name().c_str(), hex_dump(ptr, static_cast<int>(len)).c_str());
+    _dum("Incoming data(%s):\n %s", this->c_type(), hex_dump(ptr, static_cast<int>(len)).c_str());
 
 
 
@@ -291,7 +291,7 @@ void MitmHostCX::inspect(char side) {
                 
                 inspect_verdict = inspector->verdict();
 
-                _dia("MitmHostCX::inspect[%s]: verdict %d", inspector->c_name(), inspect_verdict);
+                _dia("MitmHostCX::inspect[%s]: verdict %d", inspector->c_type(), inspect_verdict);
                 if(inspect_verdict == Inspector::OK) {
                     //
                 } else if (inspect_verdict == Inspector::CACHED) {

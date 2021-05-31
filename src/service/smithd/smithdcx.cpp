@@ -67,13 +67,13 @@ void SmithProtoCX::destroy() {
 
 void SmithProtoCX::destroy_packages() {
 
-    _deb("SmithProtoCX::destroy_packages[%s]: ",c_name());
+    _deb("SmithProtoCX::destroy_packages[%s]: ",c_type());
     for (auto const& i: packages()) {
-        _deb("SmithProtoCX::destroy_packages[%s]: deleting LTVEntry with id %d",c_name(),i->id());
+        _deb("SmithProtoCX::destroy_packages[%s]: deleting LTVEntry with id %d",c_type(),i->id());
         delete i;
     }
 
-    _deb("SmithProtoCX::destroy_packages[%s]: clearing, size %d",c_name(),packages().size());
+    _deb("SmithProtoCX::destroy_packages[%s]: clearing, size %d",c_type(),packages().size());
     packages().clear();
 }
 
@@ -99,7 +99,7 @@ unsigned int SmithProtoCX::unpack(buffer* b) {
 
         r += c_r;
 
-        _dum("SmithProtoCX::unpack[%s]: extracted message: ",c_name());
+        _dum("SmithProtoCX::unpack[%s]: extracted message: ",c_type());
         _dum(l->hr().c_str());
         packages().push_back(l);
     }
@@ -112,13 +112,13 @@ int SmithProtoCX::process() {
         
     //retrieve packages from received buffer
     auto r = unpack();
-    _deb("SmithProtoCX::process[%s]: %d bytes unpacked",c_name(),r);
+    _deb("SmithProtoCX::process[%s]: %d bytes unpacked",c_type(),r);
 
     for (auto const& i: packages()) {
 
         auto id = i->id();
         auto ty = i->type();
-        _deb("SmithProtoCX::process[%s]: received message id=%d of type %d",c_name(),id,ty);
+        _deb("SmithProtoCX::process[%s]: received message id=%d of type %d",c_type(),id,ty);
 
         if(id == id_keepalive) {
             process_keepalive(i);
@@ -150,7 +150,7 @@ void SmithProtoCX::on_timer() {
 
 ssize_t SmithProtoCX::finish() {
 
-    _deb("SmithProtoCX::finish[%s] packages=%d, to_read_buffer size=%d capacity=%d",c_name(), packages().size(), to_read_buffer.size(),to_read_buffer.capacity());
+    _deb("SmithProtoCX::finish[%s] packages=%d, to_read_buffer size=%d capacity=%d",c_type(), packages().size(), to_read_buffer.size(),to_read_buffer.capacity());
 
     destroy_packages();
     to_read_buffer.clear();
@@ -178,10 +178,10 @@ buffer SmithProtoCX::to_read() {
 unsigned int SmithProtoCX::check_timeouts() {
 
     if (!valid()) {
-        _deb("SmithProtoCX::check_timeouts[%s] -- socket not UP yet",c_name());
+        _deb("SmithProtoCX::check_timeouts[%s] -- socket not UP yet",c_type());
         return 0;
     }
-    _deb("SmithProtoCX::check_timeouts[%s]",c_name());
+    _deb("SmithProtoCX::check_timeouts[%s]",c_type());
 
         
     unsigned int r = 0;
@@ -190,8 +190,8 @@ unsigned int SmithProtoCX::check_timeouts() {
     time(&now);
     
     if (now - hb_peer_received  > hb_peer_timeout + (hb_peer_timeout/10) ) {                
-        _deb("SmithProtoCX::check_timeouts[%s]: Peer not in time with heartbeat!",c_name());
-        _dia("SMITH peer %s heartbeat timeout",c_name());
+        _deb("SmithProtoCX::check_timeouts[%s]: Peer not in time with heartbeat!",c_type());
+        _dia("SMITH peer %s heartbeat timeout",c_type());
         flag_set<unsigned int>(&r, 1);
         
         hb_peer_timeout_counter++;
@@ -199,16 +199,16 @@ unsigned int SmithProtoCX::check_timeouts() {
 
     } else {
         if (opening()) {
-            _deb("SmithProtoCX::check_timeouts[%s]: peer is opening",c_name());
+            _deb("SmithProtoCX::check_timeouts[%s]: peer is opening",c_type());
         } else {
             hb_peer_timeout_counter = 0;
-            _deb("SmithProtoCX::check_timeouts[%s]: peer is alive",c_name());
+            _deb("SmithProtoCX::check_timeouts[%s]: peer is alive",c_type());
         }
     }
 
     
     if(now - hb_me_sent >  hb_me_timeout - (hb_me_timeout/10) ) {
-        _deb("SmithProtoCX::check_timeouts[%s]: we should send keepalive now",c_name());
+        _deb("SmithProtoCX::check_timeouts[%s]: we should send keepalive now",c_type());
         flag_set<unsigned int>(&r, 2);
         
         on_hb_timeout_me();
@@ -226,7 +226,7 @@ void SmithProtoCX::process_keepalive(LTVEntry* e) {
     hb_peer = k;
     time(&hb_peer_received);
     
-    _deb("SmithProtoCX::process_keepalive[%s]: heartbeat received: %d",c_name(),k);
+    _deb("SmithProtoCX::process_keepalive[%s]: heartbeat received: %d",c_type(),k);
 }
 
 void SmithProtoCX::process_package(LTVEntry* e) {

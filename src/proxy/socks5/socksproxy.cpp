@@ -131,8 +131,8 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     
     auto* n_cx = new MitmHostCX(new_com, s);
     n_cx->waiting_for_peercom(true);
-    n_cx->com()->name();
-    n_cx->name();
+    n_cx->com()->c_type();
+    n_cx->c_type();
     n_cx->com()->nonlocal_dst(true);
     n_cx->com()->nonlocal_dst_host() = cx->com()->nonlocal_dst_host();
     n_cx->com()->nonlocal_dst_port() = cx->com()->nonlocal_dst_port();
@@ -158,7 +158,7 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
                                         );
     std::string h;
     std::string p;
-    n_cx->name();
+    n_cx->c_type();
     n_cx->com()->resolve_socket_src(n_cx->socket(),&h,&p);
     n_cx->host() = h;
     n_cx->port() = p;
@@ -249,11 +249,11 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
                         if (target_port != 80 && target_port != 443) {
                             delete_proxy = true;
                             _inf("Connection %s closed: authorization failed (unknown identity)",
-                                   n_cx->c_name());
+                                   n_cx->c_type());
                         }
                     }
                     else {
-                        _dia("Connection %s: authentication info optional, continuing.",n_cx->c_name());
+                        _dia("Connection %s: authentication info optional, continuing.",n_cx->c_type());
                     }
 
                 } else if(opt_auth_authenticate) {
@@ -314,10 +314,10 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
                         if (bad_auth) {
                             if (target_port != 80 && target_port != 443) {
                                 _inf("Connection %s closed: authorization failed (non-matching identity criteria)",
-                                       n_cx->c_name());
+                                       n_cx->c_type());
                             } else {
                                 _inf("Connection %s closed: authorization failed (non-matching identity criteria)(with replacement)",
-                                       n_cx->c_name());
+                                       n_cx->c_type());
                                 // set bad_auth true, because despite authentication failed, it could be replaced (we can let user know
                                 // he is not allowed to proceed
                                 bad_auth = false;
@@ -331,13 +331,13 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
                     }
                 }
             } else {
-                _dia("Connection %s: authentication info optional, continuing.",n_cx->c_name());
+                _dia("Connection %s: authentication info optional, continuing.",n_cx->c_type());
             }
         }
 
 
         if(delete_proxy) {
-            _deb("deleting proxy %s", c_name());
+            _deb("deleting proxy %s", c_type());
             state().dead(true);
         }
     }

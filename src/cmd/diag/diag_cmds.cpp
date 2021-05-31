@@ -293,7 +293,7 @@ int cli_diag_ssl_wl_stats(struct cli_def *cli, const char *command, char *argv[]
     {
         int n_sz_cache = MitmProxy::whitelist_verify().cache().size();
         int n_max_cache = MitmProxy::whitelist_verify().max_size();
-        std::string n_name = MitmProxy::whitelist_verify().name();
+        std::string n_name = MitmProxy::whitelist_verify().c_type();
 
         ss << string_format("'%s' cache stats: \n",n_name.c_str());
         ss << string_format("    current size: %d\n",n_sz_cache);
@@ -352,7 +352,7 @@ int cli_diag_ssl_crl_stats(struct cli_def *cli, const char *command, char *argv[
 
         int n_sz_cache = SSLFactory::crl_cache().cache().size();
         int n_max_cache = SSLFactory::crl_cache().max_size();
-        std::string n_name = SSLFactory::crl_cache().name();
+        std::string n_name = SSLFactory::crl_cache().c_type();
 
 
         ss << string_format("'%s' cache stats: ", n_name.c_str());
@@ -456,7 +456,7 @@ int cli_diag_ssl_verify_stats(struct cli_def *cli, const char *command, char *ar
 
         int n_sz_cache  = verify_cache.cache().size();
         int n_max_cache = verify_cache.max_size();
-        std::string n_name = verify_cache.name();
+        std::string n_name = verify_cache.c_type();
 
 
         ss << string_format("'%s' cache stats: \n", n_name.c_str());
@@ -594,7 +594,7 @@ int cli_diag_ssl_ticket_stats(struct cli_def *cli, const char *command, char *ar
 
         n_sz_cache = SSLFactory::session_cache().cache().size();
         n_max_cache = SSLFactory::session_cache().max_size();
-        n_name = SSLFactory::session_cache().name();
+        n_name = SSLFactory::session_cache().c_type();
     }
 
     out << string_format("'%s' cache stats: \n", n_name.c_str());
@@ -1342,7 +1342,8 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
 
             if (!ptr) continue;
 
-            if (ptr->class_name() == "MitmProxy" || ptr->class_name() == "SocksProxy") {
+            std::string what = ptr->c_type();
+            if ( what == "MitmProxy" || what == "SocksProxy") {
 
                 auto *curr_proxy = dynamic_cast<MitmProxy *>(ptr);
                 MitmHostCX *lf = nullptr;

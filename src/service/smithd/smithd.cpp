@@ -155,6 +155,8 @@ public:
         
         return e;
     }
+
+    TYPENAME_BASE("SmithServerCX")
 };
 
 

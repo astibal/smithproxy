@@ -1867,7 +1867,7 @@ baseHostCX* MitmMasterProxy::new_cx(int s) {
     
     auto r = new MitmHostCX(c,s);
     if (is_ssl) {
-        _inf("Connection %s: SSL detected on unusual port.", r->c_name());
+        _inf("Connection %s: SSL detected on unusual port.", r->c_type());
         r->is_ssl = true;
         r->is_ssl_port = is_ssl_port;
     }
@@ -1875,7 +1875,7 @@ baseHostCX* MitmMasterProxy::new_cx(int s) {
         r->is_ssl = true;
     }
     
-    _deb("Pausing new connection %s", r->c_name());
+    _deb("Pausing new connection %s", r->c_type());
     r->waiting_for_peercom(true);
     return r; 
 }
@@ -1933,7 +1933,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
             }
             target_host = "127.0.0.1";
             
-            _dia("Connection from %s to %s:%d: traffic redirected from magic IP to %s:%d", just_accepted_cx->c_name(),
+            _dia("Connection from %s to %s:%d: traffic redirected from magic IP to %s:%d", just_accepted_cx->c_type(),
                  orig_target_host.c_str(), orig_target_port,
                  target_host.c_str(), target_port);
             matched_vip = true;
@@ -2009,7 +2009,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                     if(!res) {
                         if(target_port != 80 && target_port != 443){
                             delete_proxy = true;
-                            _inf("Dropping non-replaceable connection %s due to unknown source IP", just_accepted_cx->c_name());
+                            _inf("Dropping non-replaceable connection %s due to unknown source IP", just_accepted_cx->c_type());
                             goto end;
                         }
                     } else {
@@ -2073,10 +2073,10 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
 
                             if(bad_auth) {
                                 if(target_port != 80 && target_port != 443) {
-                                    _inf("Dropping non-replaceable connection %s due to non-matching identity", just_accepted_cx->c_name());
+                                    _inf("Dropping non-replaceable connection %s due to non-matching identity", just_accepted_cx->c_type());
                                 }
                                 else {
-                                    _inf("Connection %s with non-matching identity (to be replaced)", just_accepted_cx->c_name());
+                                    _inf("Connection %s with non-matching identity (to be replaced)", just_accepted_cx->c_type());
                                     // set bad_auth true, because despite authentication failed, it could be replaced (we can let user know 
                                     // he is not allowed to proceed
                                     bad_auth = false;
@@ -2109,7 +2109,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                 
             } else {
                 delete_proxy = true;
-                _not("MitmMasterProxy::on_left_new: %s cannot be converted to MitmHostCx", just_accepted_cx->c_name());
+                _not("MitmMasterProxy::on_left_new: %s cannot be converted to MitmHostCx", just_accepted_cx->c_type());
             }
   
         } else {
@@ -2124,7 +2124,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
         
         
         if(delete_proxy) {
-            _inf("Dropping proxy %s", new_proxy->c_name());
+            _inf("Dropping proxy %s", new_proxy->c_type());
             delete new_proxy;
         }        
     }

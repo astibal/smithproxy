@@ -1764,7 +1764,7 @@ bool CfgFactory::prof_tls_apply (baseHostCX *originator, baseProxy *new_proxy, c
                 
                 tls_applied = policy_apply_tls(ps, xcom);
                 if(!tls_applied) {
-                    _err("%s: cannot apply TLS profile to target connection %s", new_proxy->c_name(), cx->c_name());
+                    _err("%s: cannot apply TLS profile to target connection %s", new_proxy->c_type(), cx->c_type());
                 } else {
                     
                     //applying bypass based on DNS cache
@@ -2228,7 +2228,7 @@ int CfgFactory::save_address_objects(Config& ex) const {
 
         Setting& item = address_objects.add(name, Setting::TypeGroup);
 
-        if(obj->value()->c_name() == std::string("FqdnAddress")) {
+        if(obj->value()->c_type() == std::string("FqdnAddress")) {
             Setting &s_type = item.add("type", Setting::TypeInt);
             Setting &s_fqdn = item.add("fqdn", Setting::TypeString);
 
@@ -2241,7 +2241,7 @@ int CfgFactory::save_address_objects(Config& ex) const {
             n_saved++;
         }
         else
-        if(obj->value()->c_name() == std::string("CidrAddress")) {
+        if(obj->value()->c_type() == std::string("CidrAddress")) {
             Setting &s_type = item.add("type", Setting::TypeInt);
             Setting &s_cidr = item.add("cidr", Setting::TypeString);
 

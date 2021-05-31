@@ -107,7 +107,7 @@ protected:
     bool ask_destroy() override { return false; };
     std::string to_string(int verbosity) const override {
         return string_format("%s: in-progress: %d stage: %d completed: %d result: %d",
-                             c_name(),in_progress(), stage, completed(),result());
+                             c_type(),in_progress(), stage, completed(),result());
     };
     
                                                 
@@ -115,7 +115,7 @@ protected:
     static std::vector<std::string> split(std::string, unsigned char delimiter);
     static std::pair<std::string,std::string> split_fqdn_subdomain(std::string& fqdn);
                                                 
-    DECLARE_C_NAME("Inspector")
+    TYPENAME_OVERRIDE("Inspector")
 };
 
 #endif //INSPECTORS_HPP_

@@ -198,10 +198,10 @@ bool PolicyRule::match_rangegrp_vecx(group_of_ports& ranges, std::vector< baseHo
 
         match = match_rangegrp_cx(ranges, cx);
         if(match) {
-            _deb("PolicyRule::match_rangegrp_vecx: %s matched", cx->c_name());
+            _deb("PolicyRule::match_rangegrp_vecx: %s matched", cx->c_type());
             break;
         } else {
-            _deb("PolicyRule::match_rangegrp_vecx: %s not matched", cx->c_name());
+            _deb("PolicyRule::match_rangegrp_vecx: %s not matched", cx->c_type());
         }
     }
     
@@ -220,10 +220,10 @@ bool PolicyRule::match_addrgrp_vecx(group_of_addresses &sources, std::vector< ba
 
         match = match_addrgrp_cx(sources, cx);
         if(match) {
-            _deb("PolicyRule::match_addrgrp_vecx: %s matched", cx->c_name());
+            _deb("PolicyRule::match_addrgrp_vecx: %s matched", cx->c_type());
             break;
         } else {
-            _deb("PolicyRule::match_addrgrp_vecx: %s not matched", cx->c_name());
+            _deb("PolicyRule::match_addrgrp_vecx: %s not matched", cx->c_type());
         }
     }
     

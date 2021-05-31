@@ -89,6 +89,8 @@ private:
     DaemonFactory() : log(logan_attached<DaemonFactory>(this, "service")) {
         ::memset((void*)crashlog_file, 0, LOG_FILENAME_SZ);
     }
+
+    TYPENAME_BASE("DaemonFactory")
 };
 
 

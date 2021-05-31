@@ -68,9 +68,9 @@ struct ApplicationData: public socle::sobject {
     virtual std::string request() { return std::string(""); };
     
     bool ask_destroy() override { return false; };
-    std::string to_string(int verbosity) const override { return name() + "AppData: generic"; };
+    std::string to_string(int verbosity) const override { return string_format("%s AppData: generic", c_type()); };
     
-    DECLARE_C_NAME("ApplicationData")
+    TYPENAME_OVERRIDE("ApplicationData")
 
     logan_attached<ApplicationData> log = logan_attached<ApplicationData>(this, "inspect");
 };
@@ -115,14 +115,14 @@ struct app_HttpRequest : public ApplicationData {
         return ret.str();
     }
     
-    DECLARE_C_NAME("app_HttpRequest")
+    TYPENAME_OVERRIDE("app_HttpRequest")
 };
 
 struct app_DNS : public ApplicationData {
     DNS_Request*  request = nullptr;
     DNS_Response* response = nullptr;
     
-    DECLARE_C_NAME("app_DNS")
+    TYPENAME_OVERRIDE("app_DNS")
 };
 
 struct ProtoRex {
@@ -191,7 +191,7 @@ private:
     unsigned int inspect_flow_same_bytes = 0;
     int inspect_verdict = Inspector::OK;
     
-    DECLARE_C_NAME("MitmHostCX")
+    TYPENAME_OVERRIDE("MitmHostCX")
     DECLARE_LOGGING(to_string)
 };
 

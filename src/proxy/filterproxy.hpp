@@ -86,7 +86,7 @@ public:
     
     FilterResult* result() { return result_; }
     
-    DECLARE_C_NAME("FilterProxy")
+    TYPENAME_OVERRIDE("FilterProxy")
     DECLARE_LOGGING(to_string)
     
 protected:

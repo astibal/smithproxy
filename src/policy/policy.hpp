@@ -113,7 +113,7 @@ public:
     bool ask_destroy() override { return false; }
     std::string to_string(int verbosity) const override;
 
-    DECLARE_C_NAME("PolicyRule")
+    TYPENAME_OVERRIDE("PolicyRule")
     DECLARE_LOGGING(to_string)
 
     logan_attached<PolicyRule> log;

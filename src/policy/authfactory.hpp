@@ -147,7 +147,7 @@ public:
 
     std::string to_string(int verbosity) const { return "AuthFactory"; };
 
-    DECLARE_C_NAME("AuthFactory")
+    TYPENAME_BASE("AuthFactory")
     DECLARE_LOGGING(to_string)
 
     static logan_lite& get_log() {

@@ -125,6 +125,8 @@ public:
         
         return envelope;
     }
+
+    TYPENAME_BASE("SmithClientCX")
 };
 
 class SmithdProxy : public baseProxy {
@@ -176,7 +178,7 @@ class PackageHandler {
         void on_package() const { _inf("MGR: package received (notify signal)"); };
         void on_package_detail(SmithClientCX* cx, LTVEntry* pkg) const {
             _inf("MGR: package received (detail signal)");
-            _deb("cx %s: data: \n%s",cx->c_name(), pkg->hr().c_str());
+            _deb("cx %s: data: \n%s",cx->c_type(), pkg->hr().c_str());
         };
 };
 

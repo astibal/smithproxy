@@ -235,7 +235,7 @@ int socksServerCX::process_socks_request() {
 
                 com()->nonlocal_dst_port() = req_port;
                 com()->nonlocal_src(true);
-                _dia("socksServerCX::process_socks_request: request (FQDN) for %s -> %s:%d",c_name(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
+                _dia("socksServerCX::process_socks_request: request (FQDN) for %s -> %s:%d",c_type(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
 
 
 
@@ -322,7 +322,7 @@ int socksServerCX::process_socks_request() {
                 req_port = ntohs(readbuf()->get_at<uint16_t>(8));
                 com()->nonlocal_dst_port() = req_port;
                 com()->nonlocal_src(true);
-                _dia("socksServerCX::process_socks_request: request for %s -> %s:%d",c_name(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
+                _dia("socksServerCX::process_socks_request: request for %s -> %s:%d",c_type(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
 
                 
                 req_addr.s_addr=dst;
@@ -330,7 +330,7 @@ int socksServerCX::process_socks_request() {
                 com()->nonlocal_dst_host() = string_format("%s",inet_ntoa(req_addr));
                 com()->nonlocal_dst_port() = req_port;
                 com()->nonlocal_src(true);
-                _dia("socksServerCX::process_socks_request: request (IPv4) for %s -> %s:%d",c_name(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
+                _dia("socksServerCX::process_socks_request: request (IPv4) for %s -> %s:%d",c_type(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
                 setup_target();
             } else {
                 _err("unknown address type %d", atype);
@@ -356,7 +356,7 @@ int socksServerCX::process_socks_request() {
             com()->nonlocal_dst_host() = string_format("%s",inet_ntoa(req_addr));
             com()->nonlocal_dst_port() = req_port;
             com()->nonlocal_src(true);
-            _dia("socksServerCX::process_socks_request: request (SOCKSv4) for %s -> %s:%d",c_name(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
+            _dia("socksServerCX::process_socks_request: request (SOCKSv4) for %s -> %s:%d",c_type(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
 
             setup_target();
         }
@@ -396,8 +396,8 @@ bool socksServerCX::setup_target() {
         
         auto* n_cx = new MitmHostCX(new_com, s);
         n_cx->waiting_for_peercom(true);
-        n_cx->com()->name();
-        n_cx->name();
+        n_cx->com()->c_type();
+        n_cx->c_type();
         n_cx->com()->nonlocal_dst(true);
         n_cx->com()->nonlocal_dst_host() = com()->nonlocal_dst_host();
         n_cx->com()->nonlocal_dst_port() = com()->nonlocal_dst_port();
@@ -414,7 +414,7 @@ bool socksServerCX::setup_target() {
         
         std::string h;
         std::string p;
-        n_cx->name();
+        n_cx->c_type();
         n_cx->com()->resolve_socket_src(n_cx->socket(),&h,&p);
         
         
@@ -425,9 +425,9 @@ bool socksServerCX::setup_target() {
         
         
         left = n_cx;
-        _dia("socksServerCX::setup_target: prepared left: %s",left->c_name());
+        _dia("socksServerCX::setup_target: prepared left: %s",left->c_type());
         right = target_cx;
-        _dia("socksServerCX::setup_target: prepared right: %s",right->c_name());
+        _dia("socksServerCX::setup_target: prepared right: %s",right->c_type());
         
         // peers are now prepared for handover. Owning proxy will wipe this CX (it will be empty)
         // and if policy allows, left and right will be set (also in proxy owning this cx).
@@ -526,10 +526,10 @@ int socksServerCX::process_socks_reply() {
 }
 
 void socksServerCX::pre_write() {
-    _deb("socksServerCX::pre_write[%s]: writebuf=%d, readbuf=%d",c_name(),writebuf()->size(),readbuf()->size());
+    _deb("socksServerCX::pre_write[%s]: writebuf=%d, readbuf=%d",c_type(),writebuf()->size(),readbuf()->size());
     if(state_ == socks5_state::REQRES_SENT ) {
         if(writebuf()->empty()) {
-            _dia("socksServerCX::pre_write[%s]: all flushed, state change to HANDOFF: writebuf=%d, readbuf=%d",c_name(),writebuf()->size(),readbuf()->size());
+            _dia("socksServerCX::pre_write[%s]: all flushed, state change to HANDOFF: writebuf=%d, readbuf=%d",c_type(),writebuf()->size(),readbuf()->size());
             waiting_for_peercom(true);
             state(socks5_state::HANDOFF);
         }
