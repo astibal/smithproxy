@@ -955,7 +955,7 @@ std::string get_connection_details_str(MitmProxy* px, baseHostCX* cx, char side)
     }
     if(mh && mh->application_data) {
 
-        auto* http = dynamic_cast<app_HttpRequest*>(mh->application_data);
+        auto* http = dynamic_cast<app_HttpRequest*>(mh->application_data.get());
         if(http) {
             detail << "app=" << http->proto << http->host << " ";
         }
@@ -1468,7 +1468,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
     }
     
 
-    auto* app_request = dynamic_cast<app_HttpRequest*>(cx->application_data);
+    auto* app_request = dynamic_cast<app_HttpRequest*>(cx->application_data.get());
     if(app_request != nullptr) {
         
 //         _inf(" --- request: %s",app_request->request().c_str());

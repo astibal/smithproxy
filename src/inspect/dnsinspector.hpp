@@ -47,7 +47,7 @@ public:
     explicit DNS_Inspector() {
         log = logan::attach(this, "dns");
     }
-    ~DNS_Inspector() override {};
+    ~DNS_Inspector() override = default;
 
     void update(AppHostCX* cx) override;
 

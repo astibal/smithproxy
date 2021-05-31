@@ -1861,7 +1861,7 @@ bool CfgFactory::prof_alg_dns_apply (baseHostCX *originator, baseProxy *new_prox
                 n->opt_match_id = p_alg_dns->match_request_id;
                 n->opt_randomize_id = p_alg_dns->randomize_id;
                 n->opt_cached_responses = p_alg_dns->cached_responses;
-                mh->inspectors_.push_back(n);
+                mh->inspectors_.emplace_back(n);
                 ret = true;
             }
         }

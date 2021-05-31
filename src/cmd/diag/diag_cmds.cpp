@@ -1490,7 +1490,7 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
                                     tls_ss << "\n    sni: " << sni;
 
                                     if(lf) {
-                                        auto* app = lf->application_data;
+                                        auto* app = lf->application_data.get();
                                         auto http_app = dynamic_cast<app_HttpRequest*>(app);
                                         if(http_app) {
 

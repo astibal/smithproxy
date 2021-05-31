@@ -154,11 +154,11 @@ void MitmHostCX::on_detect_www_get(const std::shared_ptr<duplexFlowMatch> &x_sig
                 //don't add referer to log.
                 //print_request += str_temp;
 
-                if (application_data == nullptr) {
-                    application_data = new app_HttpRequest;
+                if(not application_data) {
+                    application_data = std::make_unique<app_HttpRequest>();
                 }
 
-                auto *app_request = dynamic_cast<app_HttpRequest *>(application_data);
+                auto *app_request = dynamic_cast<app_HttpRequest *>(application_data.get());
                 if (app_request != nullptr) {
                     app_request->referer = str_temp;
                     _deb("Referer: %s", ESC(app_request->referer));
@@ -176,11 +176,11 @@ void MitmHostCX::on_detect_www_get(const std::shared_ptr<duplexFlowMatch> &x_sig
                     str_temp = m_host[1].str();
                     print_request += str_temp;
 
-                    if (application_data == nullptr) {
-                        application_data = new app_HttpRequest;
+                    if (not application_data) {
+                        application_data = std::make_unique<app_HttpRequest>();
                     }
 
-                    auto *app_request = dynamic_cast<app_HttpRequest *>(application_data);
+                    auto *app_request = dynamic_cast<app_HttpRequest *>(application_data.get());
                     if (app_request != nullptr) {
                         app_request->host = str_temp;
                         _dia("Host: %s", app_request->host.c_str());
@@ -216,11 +216,11 @@ void MitmHostCX::on_detect_www_get(const std::shared_ptr<duplexFlowMatch> &x_sig
                 str_temp = m_get[2].str();
                 print_request += str_temp;
 
-                if(application_data == nullptr) {
-                    application_data = new app_HttpRequest;
+                if(not application_data) {
+                    application_data = std::make_unique<app_HttpRequest>();
                 }
 
-                auto* app_request = dynamic_cast<app_HttpRequest*>(application_data);
+                auto* app_request = dynamic_cast<app_HttpRequest*>(application_data.get());
                 if(app_request != nullptr) {
                     app_request->uri = str_temp;
                     _dia("URI: %s", ESC(app_request->uri));
@@ -237,7 +237,7 @@ void MitmHostCX::on_detect_www_get(const std::shared_ptr<duplexFlowMatch> &x_sig
         }
 
 
-        auto* app_request = dynamic_cast<app_HttpRequest*>(application_data);
+        auto* app_request = dynamic_cast<app_HttpRequest*>(application_data.get());
         if(app_request != nullptr) {
             // detect protocol (plain vs ssl)
             auto* proto_com = dynamic_cast<SSLCom*>(com());
@@ -282,7 +282,8 @@ void MitmHostCX::inspect(char side) {
         }
 
         _deb("MitmHostCX::inspect: inspector loop:");
-        for(Inspector* inspector: inspectors_) {
+        for(auto const& inspector: inspectors_) {
+
             bool for_me = inspector->interested(this);
             bool is_completed = inspector->completed();
             if( for_me && (! is_completed )) {

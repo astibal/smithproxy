@@ -133,9 +133,9 @@ struct ProtoRex {
 
 class MitmHostCX : public AppHostCX, public socle::sobject, public ProtoRex {
 public:
-    ApplicationData* application_data = nullptr;
+    std::unique_ptr<ApplicationData> application_data;
     
-    ~MitmHostCX() override { delete application_data; for(auto i: inspectors_) { delete i; } };
+    ~MitmHostCX() override = default;
     
     MitmHostCX(baseCom* c, const char* h, const char* p );
     MitmHostCX( baseCom* c, int s );
@@ -144,7 +144,7 @@ public:
     void load_signatures();
 
     
-    std::vector<Inspector*> inspectors_;
+    std::vector<std::unique_ptr<Inspector>> inspectors_;
     void inspect(char side) override;
     void on_detect(std::shared_ptr<duplexFlowMatch> x_sig, flowMatchState& s, vector_range& r) override;
     virtual void on_detect_www_get(const std::shared_ptr<duplexFlowMatch> &x_sig, flowMatchState& s, vector_range& r);
