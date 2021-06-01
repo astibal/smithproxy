@@ -10,13 +10,13 @@
 
 FROM ubuntu:20.04
 
-LABEL org.smithproxy.docker.image="astibal/smithproxy:ubuntu20.04-0.9-run-debug-localsrc"
+LABEL org.smithproxy.docker.image="astibal/smithproxy:ubuntu20.04-0.9-run-release-localsrc"
 
 RUN mkdir app/
 
 WORKDIR /app
 
-RUN apt update && apt -y install git && DEBIAN_FRONTEND=noninteractive apt-get install -y tzdata && apt -y install gdb valgrind
+RUN apt update && apt -y install git && DEBIAN_FRONTEND=noninteractive apt-get install -y tzdata && apt -y install gdb 
 
 
 RUN rm -rf /smithproxy
@@ -28,10 +28,10 @@ COPY smithproxy/ /smithproxy/
 COPY smithproxy/tools/docker/guest-scripts/* /app/
 
 RUN cd /smithproxy && ./tools/linux-deps.sh && \
-mkdir build ; cd build && cmake .. -DCMAKE_BUILD_TYPE=Debug && make -j `nproc` install
+mkdir build ; cd build && cmake .. -DCMAKE_BUILD_TYPE=Release && make -j `nproc` install
 
 # Define environment variable
 
 # Run smithproxy when the container launches
-CMD echo "Starting smithproxy (Debug) .... " && ( /etc/init.d/smithproxy start ) > /dev/null 2>&1 && sleep 2 && \
+CMD echo "Starting smithproxy (Release) .... " && ( /etc/init.d/smithproxy start ) > /dev/null 2>&1 && sleep 2 && \
     echo "SSL MITM CA cert:" && cat /etc/smithproxy/certs/default/ca-cert.pem && echo ; echo "run sx_cli" && bash
