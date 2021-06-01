@@ -40,7 +40,7 @@ if(UNIX)
 
     IF (CMAKE_BUILD_TYPE STREQUAL "Release")
         message(">>> release: enabling optimizations (smithproxy)")
-        SET(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -flto -s -DBUILD_RELEASE")
+        SET(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -fstack-protector-strong -O3 -flto -s -DBUILD_RELEASE")
         SET(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -flto")
     ENDIF()
 
