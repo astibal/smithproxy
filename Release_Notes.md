@@ -31,12 +31,12 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 
 * [ ] memory pool ONLY execution
 
-## Roadmap to 0.9.15 (tba - in progress)
+## Roadmap to 0.9.16 (tba - in progress)
 
 ### Improvements
 
 * [ ] json/api interface
-* version 0.9.14 skipped due to larger API changes in socle
+* version 0.9.14-15 skipped due to larger API changes in socle
 * new 'toggle' command - modify list variables - toggle specific element instead of setting all at once
 * code cleanups in logging - removal of old macros
 
