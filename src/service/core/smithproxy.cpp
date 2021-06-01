@@ -667,7 +667,7 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
         CfgFactory::get().load_db_policy();
 
 
-        load_signatures(CfgFactory::cfg_obj(),"detection_signatures", SigFactory::get().detection());
+        load_signatures(CfgFactory::cfg_obj(),"detection_signatures", SigFactory::get().base());
         load_signatures(CfgFactory::cfg_obj(),"starttls_signatures", SigFactory::get().tls());
 
         CfgFactory::get().load_settings();

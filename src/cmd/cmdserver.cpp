@@ -1345,7 +1345,7 @@ bool apply_setting(std::string const& section, std::string const& varname, struc
         ret = CfgFactory::get().load_db_policy();
     } else
     if( 0 == section.find("detection_signatures") ) {
-        SmithProxy::load_signatures(CfgFactory::cfg_obj(),"detection_signatures", SigFactory::get().detection());
+        SmithProxy::load_signatures(CfgFactory::cfg_obj(),"detection_signatures", SigFactory::get().base());
 
         CfgFactory::get().cleanup_db_policy();
         ret = CfgFactory::get().load_db_policy();

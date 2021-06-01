@@ -1742,7 +1742,7 @@ int cli_diag_sig_list(struct cli_def *cli, const char *command, char *argv[], in
 
     std::vector< std::vector<std::shared_ptr<duplexFlowMatch>>*> lists;
     lists.push_back(& SigFactory::get().tls());
-    lists.push_back(& SigFactory::get().detection());
+    lists.push_back(&SigFactory::get().base());
 
     for(auto* list: lists)
         for(std::shared_ptr<duplexFlowMatch> const& sig: *list) {

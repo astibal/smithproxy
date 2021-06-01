@@ -116,7 +116,7 @@ void MitmHostCX::load_signatures() {
     _deb("MitmHostCX::load_signatures: start");
 
     make_sig_states(starttls_sensor(), SigFactory::get().tls() );
-    make_sig_states(sensor(), SigFactory::get().detection());
+    make_sig_states(base_sensor(), SigFactory::get().base());
 
     _deb("MitmHostCX::load_signatures: stop");
 }

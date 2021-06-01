@@ -2993,7 +2993,7 @@ int save_signatures(Config& ex, const std::string& sigset) {
     int n_saved = 0;
 
     std::vector<std::shared_ptr<duplexFlowMatch>>& target_ref = sigset == "starttls_signatures" ?
-                SigFactory::get().tls() : SigFactory::get().detection();
+                SigFactory::get().tls() : SigFactory::get().base();
 
     for (auto const& sig: target_ref) {
 

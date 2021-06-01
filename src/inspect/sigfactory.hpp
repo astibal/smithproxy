@@ -49,8 +49,8 @@ public:
         return sigs_starttls;
     }
 
-    std::vector<std::shared_ptr<duplexFlowMatch>>& detection() {
-        return sigs_detection;
+    std::vector<std::shared_ptr<duplexFlowMatch>>& base() {
+        return sigs_base;
     }
 
     SigFactory& operator=(SigFactory const&) = delete;
@@ -66,7 +66,7 @@ private:
     SigFactory() = default;
 
     std::vector<std::shared_ptr<duplexFlowMatch>> sigs_starttls;
-    std::vector<std::shared_ptr<duplexFlowMatch>> sigs_detection;
+    std::vector<std::shared_ptr<duplexFlowMatch>> sigs_base;
 
 };
 
