@@ -492,7 +492,7 @@ void SmithProxy::stop() {
 }
 
 
-int SmithProxy::load_signatures(libconfig::Config& cfg, const char* name, std::vector<std::shared_ptr<duplexFlowMatch>>& target) {
+int SmithProxy::load_signatures(libconfig::Config& cfg, const char* name, std::shared_ptr<SignatureTree::sensorType> target) {
 
     auto& log = instance().log;
 
@@ -503,9 +503,9 @@ int SmithProxy::load_signatures(libconfig::Config& cfg, const char* name, std::v
     int sigs_len = cfg_signatures.getLength();
 
 
-    if(! target.empty()) {
-        _dia("Clearing %s, size %d", name, target.size());
-        target.clear();
+    if(! target->empty()) {
+        _dia("Clearing %s, size %d", name, target->size());
+        target->clear();
     }
 
     _dia("Loading %s: %d", name, sigs_len);
@@ -516,8 +516,10 @@ int SmithProxy::load_signatures(libconfig::Config& cfg, const char* name, std::v
         const Setting& signature = cfg_signatures[i];
         load_if_exists(signature, "name", newsig->name());
         load_if_exists(signature, "side", newsig->sig_side);
-        load_if_exists(signature, "cat", newsig->category);
-        load_if_exists(signature, "severity", newsig->severity);
+        load_if_exists(signature, "cat", newsig->sig_category);
+        load_if_exists(signature, "severity", newsig->sig_severity);
+        load_if_exists(signature, "group", newsig->sig_group);
+        load_if_exists(signature, "enables", newsig->sig_enables);
 
         const Setting& signature_flow = cfg_signatures[i]["flow"];
         int flow_count = signature_flow.getLength();
@@ -562,8 +564,10 @@ int SmithProxy::load_signatures(libconfig::Config& cfg, const char* name, std::v
         }
 
         // load if not set to null due to loading error
-        if(newsig)
-            target.push_back(newsig);
+        if(newsig) {
+            // emplace also dummy flowMatchState which won't be used. Little overhead for good abstraction.
+            target->emplace_back(flowMatchState(), newsig);
+        }
     }
 
     return sigs_len;

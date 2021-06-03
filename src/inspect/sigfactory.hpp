@@ -45,13 +45,15 @@
 class SigFactory  {
 
 public:
-    std::vector<std::shared_ptr<duplexFlowMatch>>& tls() {
-        return sigs_starttls;
+    auto& tls() {
+        return signatures_.sensors_[0];
     }
 
-    std::vector<std::shared_ptr<duplexFlowMatch>>& base() {
-        return sigs_base;
+    auto& base() {
+        return signatures_.sensors_[1];
     }
+
+    auto& signature_tree() { return signatures_; }
 
     SigFactory& operator=(SigFactory const&) = delete;
     SigFactory(SigFactory const&) = delete;
@@ -63,11 +65,10 @@ public:
 
 private:
 
-    SigFactory() = default;
+    SigFactory() : signatures_(2) {};
 
-    std::vector<std::shared_ptr<duplexFlowMatch>> sigs_starttls;
-    std::vector<std::shared_ptr<duplexFlowMatch>> sigs_base;
-
+    // signature tree contains also match states, which are unused by factory
+    SignatureTree signatures_;
 };
 
 #endif //SIGFACTORY_HPP

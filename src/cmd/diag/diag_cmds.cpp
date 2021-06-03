@@ -1740,12 +1740,12 @@ int cli_diag_sig_list(struct cli_def *cli, const char *command, char *argv[], in
 
     // explicitly make shared_ptr from the list
 
-    std::vector< std::vector<std::shared_ptr<duplexFlowMatch>>*> lists;
-    lists.push_back(& SigFactory::get().tls());
-    lists.push_back(&SigFactory::get().base());
+    std::vector< std::shared_ptr<SignatureTree::sensorType> > lists;
+    lists.push_back(SigFactory::get().tls());
+    lists.push_back(SigFactory::get().base());
 
-    for(auto* list: lists)
-        for(std::shared_ptr<duplexFlowMatch> const& sig: *list) {
+    for(auto list: lists)
+        for(auto const& [ _, sig]: *list) {
 
             // print refcnt one less, due to this shared_ptr serving only priting purposes
             ss << "Name: '" << sig->name() << "' refcnt: " << sig.use_count() - 1 << "\n";
@@ -1753,9 +1753,11 @@ int cli_diag_sig_list(struct cli_def *cli, const char *command, char *argv[], in
 
             auto sx_ptr = std::dynamic_pointer_cast<MyDuplexFlowMatch>(sig);
             if(sx_ptr) {
-                ss << "  category: " << sx_ptr->category << "\n";
-                ss << "  severity: " << sx_ptr->severity << "\n";
+                ss << "  category: " << sx_ptr->sig_category << "\n";
+                ss << "  severity: " << sx_ptr->sig_severity << "\n";
                 ss << "  side: " << sx_ptr->sig_side << "\n";
+                ss << "  group: " << sx_ptr->sig_group << "\n";
+                ss << "  enables: " << sx_ptr->sig_enables << "\n";
             }
 
             ss << "\n";

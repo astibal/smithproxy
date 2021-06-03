@@ -118,7 +118,7 @@ public:
 
     void join_all();
 
-    static int load_signatures(libconfig::Config& cfg, const char* name, std::vector<std::shared_ptr<duplexFlowMatch>>& target);
+    static int load_signatures(libconfig::Config& cfg, const char* name, std::shared_ptr<SignatureTree::sensorType> target);
     static bool init_syslog();
     bool load_config(std::string& config_f, bool reload = false);
 };

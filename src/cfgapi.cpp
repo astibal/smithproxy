@@ -2986,85 +2986,110 @@ int CfgFactory::save_policy(Config& ex) const {
 
 int save_signatures(Config& ex, const std::string& sigset) {
 
-    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
+    auto save_target = [](Config& ex, auto& target, auto sigset_name) -> int {
+        std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
-    Setting& objects = ex.getRoot().add(sigset, Setting::TypeList);
+        Setting& objects = ex.getRoot().add(sigset_name, Setting::TypeList);
 
-    int n_saved = 0;
+        int n_saved = 0;
 
-    std::vector<std::shared_ptr<duplexFlowMatch>>& target_ref = sigset == "starttls_signatures" ?
-                SigFactory::get().tls() : SigFactory::get().base();
+        auto& target_ref = *target;
+        for (auto const&[_, sig]: target_ref) {
 
-    for (auto const& sig: target_ref) {
+            Setting &item = objects.add(Setting::TypeGroup);
 
-        Setting& item = objects.add(Setting::TypeGroup);
-
-        item.add("name", Setting::TypeString) = sig->name();
-
-
-        auto my_sig = dynamic_cast<MyDuplexFlowMatch*>(sig.get());
-
-        if(my_sig) {
-            item.add("cat", Setting::TypeString) = my_sig->category;
-            item.add("side", Setting::TypeString) = my_sig->sig_side;
-            item.add("severity", Setting::TypeInt) = my_sig->severity;
-        }
-
-        if( ! sig->sig_chain().empty() ) {
-
-            Setting& flow = item.add("flow", Setting::TypeList);
-
-            for (auto f: sig->sig_chain()) {
+            item.add("name", Setting::TypeString) = sig->name();
 
 
-                bool sig_correct = false;
+            auto my_sig = dynamic_cast<MyDuplexFlowMatch *>(sig.get());
 
-                char        sig_side = f.first;
-                baseMatch*        bm = f.second;
+            if (my_sig) {
+                item.add("cat", Setting::TypeString) = my_sig->sig_category;
+                item.add("side", Setting::TypeString) = my_sig->sig_side;
+                item.add("severity", Setting::TypeInt) = my_sig->sig_severity;
+                item.add("group", Setting::TypeString) = my_sig->sig_group;
+                item.add("enables", Setting::TypeString) = my_sig->sig_enables;
+            }
+
+            if (!sig->sig_chain().empty()) {
+
+                Setting &flow = item.add("flow", Setting::TypeList);
+
+                for (auto f: sig->sig_chain()) {
 
 
-                unsigned int sig_bytes_start = bm->match_limits_offset;
-                unsigned int sig_bytes_max   = bm->match_limits_bytes;
-                std::string sig_type;
-                std::string sig_expr;
+                    bool sig_correct = false;
+
+                    char sig_side = f.first;
+                    baseMatch *bm = f.second;
 
 
-                // follow the inheritance (regex can also be cast to simple)
-                auto rm = dynamic_cast<regexMatch*>(bm);
-                if(rm) {
-                    sig_type = "regex";
-                    sig_expr = rm->expr();
-                    sig_correct = true;
-                }
-                else {
-                    auto sm = dynamic_cast<simpleMatch*>(bm);
-                    if(sm) {
-                        sig_type = "simple";
-                        sig_expr = sm->expr();
+                    unsigned int sig_bytes_start = bm->match_limits_offset;
+                    unsigned int sig_bytes_max = bm->match_limits_bytes;
+                    std::string sig_type;
+                    std::string sig_expr;
+
+
+                    // follow the inheritance (regex can also be cast to simple)
+                    auto rm = dynamic_cast<regexMatch *>(bm);
+                    if (rm) {
+                        sig_type = "regex";
+                        sig_expr = rm->expr();
                         sig_correct = true;
+                    } else {
+                        auto sm = dynamic_cast<simpleMatch *>(bm);
+                        if (sm) {
+                            sig_type = "simple";
+                            sig_expr = sm->expr();
+                            sig_correct = true;
+                        }
+                    }
+
+
+                    if (sig_correct) {
+                        Setting &flow_match = flow.add(Setting::TypeGroup);
+                        flow_match.add("side", Setting::TypeString) = string_format("%c", sig_side);
+                        flow_match.add("type", Setting::TypeString) = sig_type;
+                        flow_match.add("bytes_start", Setting::TypeInt) = (int) sig_bytes_start;
+                        flow_match.add("bytes_max", Setting::TypeInt) = (int) sig_bytes_max;
+                        flow_match.add("signature", Setting::TypeString) = sig_expr;
+                    } else {
+                        Setting &flow_match = flow.add(Setting::TypeGroup);
+                        flow_match.add("comment", Setting::TypeString) = "???";
                     }
                 }
-
-
-                if(sig_correct) {
-                    Setting& flow_match = flow.add(Setting::TypeGroup);
-                    flow_match.add("side", Setting::TypeString) = string_format("%c", sig_side);
-                    flow_match.add("type", Setting::TypeString) = sig_type;
-                    flow_match.add("bytes_start", Setting::TypeInt) = (int)sig_bytes_start;
-                    flow_match.add("bytes_max", Setting::TypeInt) = (int)sig_bytes_max;
-                    flow_match.add("signature", Setting::TypeString) = sig_expr;
-                } else {
-                    Setting& flow_match = flow.add(Setting::TypeGroup);
-                    flow_match.add("comment", Setting::TypeString) = "???";
-                }
             }
+
+
+            n_saved++;
         }
 
+        return n_saved;
+    };
 
-        n_saved++;
+
+    int total = 0;
+
+    if(sigset == "starttls_signatures") {
+        auto target = SigFactory::get().tls();
+        if(target)
+            total += save_target(ex, target, sigset);
+    }
+    else if(sigset == "detection_signatures") {
+        auto target = SigFactory::get().base();
+        if(target)
+            total += save_target(ex, target, sigset);
+    }
+    else {
+        // iterate all SigFactory signatures and save under "detection_signatures"
+        for(auto const& [name, index]: SigFactory::get().signature_tree().name_index) {
+            auto target = SigFactory::get().signature_tree().group(name.c_str());
+            if(target)
+                total += save_target(ex, target, "detection_signatures");
+        }
     }
 
-    return n_saved;
+    return total;
 
 }
 

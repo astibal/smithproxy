@@ -118,6 +118,26 @@ void MitmHostCX::load_signatures() {
     make_sig_states(starttls_sensor(), SigFactory::get().tls() );
     make_sig_states(base_sensor(), SigFactory::get().base());
 
+    auto& factory_signatures = SigFactory::get().signature_tree();
+
+    for(auto const& [name, index]: factory_signatures.name_index) {
+
+        auto factory_group = factory_signatures.group(name.c_str(), true);
+        if(factory_group) {
+
+            // look if we have group too
+            auto my_group = signatures().group(name.c_str(), false);
+
+            // create group if it doesn't exist
+            if(not my_group) {
+                auto n_index = signatures().group_add(name.c_str(), false); // add disabled group
+                // assign my_group with a new index-ed group
+                my_group = signatures().sensors_[n_index];
+            }
+
+            make_sig_states(my_group, factory_group);
+        }
+    }
     _deb("MitmHostCX::load_signatures: stop");
 }
 
@@ -335,9 +355,9 @@ void MitmHostCX::on_detect(std::shared_ptr<duplexFlowMatch> x_sig, flowMatchStat
         bool reported = false;
 
         // log to wildcard logger
-        if( logan::get()["inspect"]->level() >= static_cast<unsigned int>(sig_sig->severity)) {
-            log.log(loglevel(sig_sig->severity),log.topic(), "matching signature: cat='%s', name='%s'",
-                    sig_sig->category.c_str(),
+        if( logan::get()["inspect"]->level() >= static_cast<unsigned int>(sig_sig->sig_severity)) {
+            log.log(loglevel(sig_sig->sig_severity), log.topic(), "matching signature: cat='%s', name='%s'",
+                    sig_sig->sig_category.c_str(),
                     sig_sig->name().c_str());
 
             reported = true;
@@ -346,16 +366,16 @@ void MitmHostCX::on_detect(std::shared_ptr<duplexFlowMatch> x_sig, flowMatchStat
         if(! reported) {
             // diagnose on "inspect" topic
             _dia("matching signature: cat='%s', name='%s' at %s",
-                 sig_sig->category.c_str(),
+                 sig_sig->sig_category.c_str(),
                  sig_sig->name().c_str(),
                  vrangetos(r).c_str());
         }
         this->comlog().append( string_format("\nDetected application: cat='%s', name='%s'\n",
-                sig_sig->category.c_str(),
+                sig_sig->sig_category.c_str(),
                 sig_sig->name().c_str()));
 
 
-        if(sig_sig->category ==  "www" && sig_sig->name() == "http/get|post") {
+        if(sig_sig->sig_category == "www" && sig_sig->name() == "http/get|post") {
             on_detect_www_get(x_sig,s,r);
         }
     } else {

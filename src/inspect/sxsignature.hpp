@@ -46,8 +46,10 @@ class MyDuplexFlowMatch : public duplexFlowMatch {
 
 public:
     std::string sig_side;
-    std::string category;
-    int severity {7};  // set severity to 7: log only if diagnosing
+    std::string sig_category;
+    int sig_severity {7};  // set severity to 7: log only if diagnosing
+    std::string sig_group;
+    std::string sig_enables;
 
     ~MyDuplexFlowMatch() override = default;
 };
