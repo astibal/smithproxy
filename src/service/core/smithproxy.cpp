@@ -491,8 +491,13 @@ void SmithProxy::stop() {
     kill_proxies(redir_udp_proxies);
 }
 
-
-int SmithProxy::load_signatures(libconfig::Config& cfg, const char* name, std::shared_ptr<SignatureTree::sensorType> target) {
+/// @brief loads signature definitions from config object and places then into a signature tree
+/// @param cfg 'cfg' Config object
+/// @param name 'name' config element name (full path)
+/// @param signature_tree 'signature_tree' where to place created signature
+/// @param if non-negative, overrides signature group index, otherwise gets group name via group index lookup
+int SmithProxy::load_signatures (libconfig::Config &cfg, const char *name, SignatureTree &signature_tree,
+                                 int preferred_index) {
 
     auto& log = instance().log;
 
@@ -501,12 +506,6 @@ int SmithProxy::load_signatures(libconfig::Config& cfg, const char* name, std::s
     const Setting& root = cfg.getRoot();
     const Setting& cfg_signatures = root[name];
     int sigs_len = cfg_signatures.getLength();
-
-
-    if(! target->empty()) {
-        _dia("Clearing %s, size %d", name, target->size());
-        target->clear();
-    }
 
     _dia("Loading %s: %d", name, sigs_len);
     for ( int i = 0 ; i < sigs_len; i++) {
@@ -566,7 +565,19 @@ int SmithProxy::load_signatures(libconfig::Config& cfg, const char* name, std::s
         // load if not set to null due to loading error
         if(newsig) {
             // emplace also dummy flowMatchState which won't be used. Little overhead for good abstraction.
-            target->emplace_back(flowMatchState(), newsig);
+            if(preferred_index >= 0) {
+                // starttls signatures
+                signature_tree.sensors_[preferred_index]->emplace_back(flowMatchState(), newsig);
+            }
+            else {
+                if(newsig->sig_group.empty() or newsig->sig_group == "base") {
+                    // element 1 is base signatures
+                    signature_tree.sensors_[1]->emplace_back(flowMatchState(), newsig);
+                }
+                else {
+                    signature_tree.signature_add(newsig, newsig->sig_group.c_str(), false);
+                }
+            }
         }
     }
 
@@ -671,8 +682,15 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
         CfgFactory::get().load_db_policy();
 
 
-        load_signatures(CfgFactory::cfg_obj(),"detection_signatures", SigFactory::get().base());
-        load_signatures(CfgFactory::cfg_obj(),"starttls_signatures", SigFactory::get().tls());
+        SigFactory::get().signature_tree().reset();
+        SigFactory::get().signature_tree().group_add(true);
+        SigFactory::get().signature_tree().group_add(true);
+
+        // load starttls signatures into 0 sensor (group)
+        load_signatures(CfgFactory::cfg_obj(), "starttls_signatures", SigFactory::get().signature_tree(), 0);
+
+        // load detection signatures into sensor (group) specified by signature. If none specified, it will be placed into 1 (base group)
+        load_signatures(CfgFactory::cfg_obj(), "detection_signatures", SigFactory::get().signature_tree());
 
         CfgFactory::get().load_settings();
         CfgFactory::get().load_debug();

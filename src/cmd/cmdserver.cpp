@@ -1338,14 +1338,11 @@ bool apply_setting(std::string const& section, std::string const& varname, struc
             ret = CfgFactory::get().load_db_policy();
         }
     } else
-    if( 0 == section.find("starttls_signatures") ) {
-        SmithProxy::load_signatures(CfgFactory::cfg_obj(),"starttls_signatures", SigFactory::get().tls());
+    if( 0 == section.find("starttls_signatures") or
+        0 == section.find("detection_signatures") ) {
 
-        CfgFactory::get().cleanup_db_policy();
-        ret = CfgFactory::get().load_db_policy();
-    } else
-    if( 0 == section.find("detection_signatures") ) {
-        SmithProxy::load_signatures(CfgFactory::cfg_obj(),"detection_signatures", SigFactory::get().base());
+        SmithProxy::load_signatures(CfgFactory::cfg_obj(), "starttls_signatures", SigFactory::get().signature_tree(),0);
+        SmithProxy::load_signatures(CfgFactory::cfg_obj(), "detection_signatures", SigFactory::get().signature_tree());
 
         CfgFactory::get().cleanup_db_policy();
         ret = CfgFactory::get().load_db_policy();
