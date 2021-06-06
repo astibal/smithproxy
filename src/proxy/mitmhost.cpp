@@ -349,37 +349,46 @@ void MitmHostCX::on_detect(std::shared_ptr<duplexFlowMatch> x_sig, flowMatchStat
 
     auto sig_sig = std::dynamic_pointer_cast<MyDuplexFlowMatch>(x_sig);
 
-
-    if(sig_sig) {
-
-        bool reported = false;
-
-        // log to wildcard logger
-        if( logan::get()["inspect"]->level() >= static_cast<unsigned int>(sig_sig->sig_severity)) {
-            log.log(loglevel(sig_sig->sig_severity), log.topic(), "matching signature: cat='%s', name='%s'",
-                    sig_sig->sig_category.c_str(),
-                    sig_sig->name().c_str());
-
-            reported = true;
-        }
-
-        if(! reported) {
-            // diagnose on "inspect" topic
-            _dia("matching signature: cat='%s', name='%s' at %s",
-                 sig_sig->sig_category.c_str(),
-                 sig_sig->name().c_str(),
-                 vrangetos(r).c_str());
-        }
-        this->comlog().append( string_format("\nDetected application: cat='%s', name='%s'\n",
-                sig_sig->sig_category.c_str(),
-                sig_sig->name().c_str()));
-
-
-        if(sig_sig->sig_category == "www" && sig_sig->name() == "http/get|post") {
-            on_detect_www_get(x_sig,s,r);
-        }
-    } else {
+    if(! sig_sig) {
         _war("signature of unknown attributes matched: %s", x_sig->name().c_str());
+    }
+
+    bool reported = false;
+
+    // log to wildcard logger
+    if( logan::get()["inspect"]->level() >= static_cast<unsigned int>(sig_sig->sig_severity)) {
+        log.log(loglevel(sig_sig->sig_severity), log.topic(), "matching signature: cat='%s', name='%s'",
+                sig_sig->sig_category.c_str(),
+                sig_sig->name().c_str());
+
+        reported = true;
+    }
+
+    if(! reported) {
+        // diagnose on "inspect" topic
+        _dia("matching signature: cat='%s', name='%s' at %s",
+             sig_sig->sig_category.c_str(),
+             sig_sig->name().c_str(),
+             vrangetos(r).c_str());
+    }
+    this->comlog().append( string_format("\nDetected application: cat='%s', name='%s'\n",
+            sig_sig->sig_category.c_str(),
+            sig_sig->name().c_str()));
+
+
+    if(sig_sig->sig_category == "www" && sig_sig->name() == "http/get|post") {
+        on_detect_www_get(x_sig,s,r);
+    }
+
+    // look if signature enables other groups
+    if(auto const& gn = sig_sig->sig_enables;  not gn.empty()) {
+
+        auto gi = signatures().group_index(gn.c_str());
+        if(gi.has_value()) {
+
+            _dia("signature enabled %s signature group", gn.c_str());
+            signatures().set(gi.value(), true);
+        }
     }
 }
 
