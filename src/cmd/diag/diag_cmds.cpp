@@ -1293,11 +1293,19 @@ int cli_diag_proxy_session_list(struct cli_def *cli, const char *command, char *
     return cli_diag_proxy_session_list_extra(cli, command, argv, argc, SL_NONE);
 }
 
+
 int cli_diag_proxy_tls_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
     return cli_diag_proxy_session_list_extra(cli, command, argv, argc, SL_TLS_DETAILS);
+}
+
+int cli_diag_proxy_list_active(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    debug_cli_params(cli, command, argv, argc);
+
+    return cli_diag_proxy_session_list_extra(cli, command, argv, argc, SL_ACTIVE);
 }
 
 
@@ -1553,6 +1561,13 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
                     tls_ss << "\n";
                     do_print = true;
                     suffix += tls_ss.str();
+                }
+
+                if (flag_check<int>(sl_flags, SL_ACTIVE)) {
+                    if(curr_proxy->stats().mtr_down.get() + curr_proxy->stats().mtr_up.get() == 0) {
+                        continue;
+                    }
+                    do_print = true;
                 }
 
                 if (sl_flags == SL_NONE) {
@@ -1931,6 +1946,8 @@ bool register_diags(cli_def* cli, cli_command* diag) {
     cli_register_command(cli, diag_proxy_session,"clear", cli_diag_proxy_session_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session clear");
 
     cli_register_command(cli, diag_proxy_session,"tls-info", cli_diag_proxy_tls_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"connection TLS details");
+    cli_register_command(cli, diag_proxy_session,"active", cli_diag_proxy_list_active, PRIVILEGE_PRIVILEGED, MODE_EXEC,"list only sessions active last 5s");
+
 
     auto diag_proxy_io = cli_register_command(cli,diag_proxy,"io",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy I/O related commands");
     cli_register_command(cli, diag_proxy_io ,"list",cli_diag_proxy_session_io_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"active proxy sessions");
