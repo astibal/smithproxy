@@ -40,7 +40,6 @@
 
 #include <cstdlib>
 #include <ctime>
-#include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <linux/sockios.h>
 #include <unistd.h>
@@ -1759,7 +1758,7 @@ int cli_diag_sig_list(struct cli_def *cli, const char *command, char *argv[], in
     lists.push_back(SigFactory::get().tls());
     lists.push_back(SigFactory::get().base());
 
-    for(auto list: lists)
+    for(auto const& list: lists)
         for(auto const& [ _, sig]: *list) {
 
             // print refcnt one less, due to this shared_ptr serving only priting purposes

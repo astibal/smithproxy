@@ -122,7 +122,7 @@ void MitmHostCX::load_signatures() {
 
     for(auto const& [name, index]: factory_signatures.name_index) {
 
-        auto factory_group = factory_signatures.group(name.c_str(), true);
+        auto factory_group = factory_signatures.group(name.c_str(), false);
         if(factory_group) {
 
             // look if we have group too
