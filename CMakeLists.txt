@@ -191,7 +191,8 @@ if(GTEST_FOUND)
             src/ext/libcidr/cidr.cpp
             src/policy/tests/addrobj_test.cpp
 
-            socle/common/tests/cache_tests.cpp)
+            socle/common/tests/cache_tests.cpp
+            socle/common/tests/inet_tests.cpp)
     target_link_libraries(sx_gtests gtest gtest_main socle_lib pthread crypto)
 endif()
 
