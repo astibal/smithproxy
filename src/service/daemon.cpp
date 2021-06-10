@@ -296,7 +296,7 @@ void DaemonFactory::uw_btrace_handler(int sig) {
 
     writecrash(STDERR_FILENO," ===============================================\n",50);
     writecrash(CRLOG," ===============================================\n",50);
-    close(CRLOG);
+    if(CRLOG >=0) close(CRLOG);
 
     df.unlink_pidfile();
     
