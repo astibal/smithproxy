@@ -339,11 +339,11 @@ bool load_config(std::string& config_f, bool reload) {
                 LogOutput::get()->dup2_cout(false);
                 LogOutput::get()->level(cfg_log_level);
 
-                auto *lp = new logger_profile();
+                auto lp = std::make_unique<logger_profile>();
                 lp->print_srcline_ = LogOutput::get()->print_srcline();
                 lp->print_srcline_always_ = LogOutput::get()->print_srcline_always();
                 lp->level_ = cfg_log_level;
-                LogOutput::get()->target_profiles()[(uint64_t) o] = lp;
+                LogOutput::get()->target_profiles()[(uint64_t) o] = std::move(lp);
 
                 if (load_if_exists(cfgapi.getRoot()["settings"], "log_console", cfg_log_console)) {
                     LogOutput::get()->dup2_cout(cfg_log_console);
@@ -463,6 +463,7 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    LogOutput::init();
     LogOutput::set(std::make_shared<QueueLogger>());
     
     if(!cfg_daemonize) {

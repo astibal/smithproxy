@@ -340,6 +340,7 @@ int main(int argc, char *argv[]) {
     }
 
     // set synchronous logger for the beginning
+    LogOutput::init();
     LogOutput::set(LogOutput::default_logger());
     LogOutput::get()->level(WAR);
 

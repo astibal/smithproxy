@@ -627,7 +627,7 @@ bool SmithProxy::init_syslog() {
         LogOutput::get()->remote_targets(string_format("syslog-udp%d-%d", CfgFactory::get().syslog_family, syslog_socket),
                                          syslog_socket);
 
-        auto *lp = new logger_profile();
+        auto lp = std::make_unique<logger_profile>();
 
         lp->logger_type = logger_profile::REMOTE_SYSLOG;
         lp->level_ = CfgFactory::get().syslog_level;
@@ -642,7 +642,7 @@ bool SmithProxy::init_syslog() {
         lp->syslog_settings.severity = static_cast<int>(lp->level_.level());
         lp->syslog_settings.facility = CfgFactory::get().syslog_facility;
 
-        LogOutput::get()->target_profiles()[(uint64_t) syslog_socket] = lp;
+        LogOutput::get()->target_profiles()[(uint64_t) syslog_socket] = std::move(lp);
     }
 
     return true;
@@ -723,11 +723,11 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
                     LogOutput::get()->dup2_cout(false);
                     LogOutput::get()->level(CfgFactory::get().internal_init_level);
 
-                    auto* lp = new logger_profile();
+                    auto lp = std::make_unique<logger_profile>();
                     lp->print_srcline_ = LogOutput::get()->print_srcline();
                     lp->print_srcline_always_ = LogOutput::get()->print_srcline_always();
                     lp->level_ = CfgFactory::get().internal_init_level;
-                    LogOutput::get()->target_profiles()[(uint64_t)o] = lp;
+                    LogOutput::get()->target_profiles()[(uint64_t)o] = std::move(lp);
 
                 }
             }
@@ -746,11 +746,11 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
                     LogOutput::get()->dup2_cout(false);
                     LogOutput::get()->level(CfgFactory::get().internal_init_level);
 
-                    auto* lp = new logger_profile();
+                    auto lp = std::make_unique<logger_profile>();
                     lp->print_srcline_ = LogOutput::get()->print_srcline();
                     lp->print_srcline_always_ = LogOutput::get()->print_srcline_always();
                     lp->level_ = loglevel(iINF,flag_add(iNOT,CRT|KEYS));
-                    LogOutput::get()->target_profiles()[(uint64_t)o] = lp;
+                    LogOutput::get()->target_profiles()[(uint64_t)o] = std::move(lp);
 
                 }
             }
