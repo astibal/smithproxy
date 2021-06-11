@@ -71,14 +71,14 @@ void MitmProxy::toggle_tlog() {
     if(tlog_ == nullptr) {
 
         tlog_ = new socle::trafLog( this,
-                                    CfgFactory::get().traflog_dir.c_str(),
-                                    CfgFactory::get().traflog_file_prefix.c_str(),
-                                    CfgFactory::get().traflog_file_suffix.c_str());
+                                    CfgFactory::get()->traflog_dir.c_str(),
+                                    CfgFactory::get()->traflog_file_prefix.c_str(),
+                                    CfgFactory::get()->traflog_file_suffix.c_str());
     }
     
     // check if we have there status file
     if(tlog_) {
-        std::string data_dir = CfgFactory::get().traflog_dir;
+        std::string data_dir = CfgFactory::get()->traflog_dir;
 
         data_dir += "/disabled";
         
@@ -153,7 +153,7 @@ std::string MitmProxy::to_string(int verbosity) const {
 
 
             if(matched_policy() >= 0) {
-                auto p = CfgFactory::get().db_policy_list.at(matched_policy());
+                auto p = CfgFactory::get()->db_policy_list.at(matched_policy());
                 r << string_format("\n    PolicyRule oid: 0x%x", p->oid());
             }
 
@@ -229,7 +229,7 @@ bool MitmProxy::apply_id_policies(baseHostCX* cx) {
     
     if( found ) {
         _dia("apply_id_policies: matched policy: %d",matched_policy());        
-        auto policy = CfgFactory::get().db_policy_list.at(matched_policy());
+        auto policy = CfgFactory::get()->db_policy_list.at(matched_policy());
         
         auto auth_policy = policy->profile_auth;
 
@@ -264,27 +264,27 @@ bool MitmProxy::apply_id_policies(baseHostCX* cx) {
             
             _dia("apply_id_policies: assigning sub-profile %s", final_profile->element_name().c_str());
             if(final_profile->profile_content != nullptr) {
-                if (CfgFactory::get().prof_content_apply(cx, this, final_profile->profile_content)) {
+                if (CfgFactory::get()->prof_content_apply(cx, this, final_profile->profile_content)) {
                     pc_name = final_profile->profile_content->element_name().c_str();
                     _dia("apply_id_policies: assigning content sub-profile %s",
                          final_profile->profile_content->element_name().c_str());
                 }
             }
             if(final_profile->profile_detection != nullptr) {
-                if (CfgFactory::get().prof_detect_apply(cx, this, final_profile->profile_detection)) {
+                if (CfgFactory::get()->prof_detect_apply(cx, this, final_profile->profile_detection)) {
                     pd_name = final_profile->profile_detection->element_name().c_str();
                     _dia("apply_id_policies: assigning detection sub-profile %s",
                          final_profile->profile_detection->element_name().c_str());
                 }
             }
             if(final_profile->profile_tls != nullptr) {
-                if(CfgFactory::get().prof_tls_apply(cx, this, final_profile->profile_tls)) {
+                if(CfgFactory::get()->prof_tls_apply(cx, this, final_profile->profile_tls)) {
                     pt_name = final_profile->profile_tls->element_name().c_str();
                     _dia("apply_id_policies: assigning tls sub-profile %s", final_profile->profile_tls->element_name().c_str());
                 }
             }
             if(final_profile->profile_alg_dns != nullptr) {
-                if(CfgFactory::get().prof_alg_dns_apply(cx, this, final_profile->profile_alg_dns)) {
+                if(CfgFactory::get()->prof_alg_dns_apply(cx, this, final_profile->profile_alg_dns)) {
                     algs += final_profile->profile_alg_dns->element_name() + " ";
                     _dia("apply_id_policies: assigning tls sub-profile %s", final_profile->profile_tls->element_name().c_str());
                 }
@@ -1211,7 +1211,7 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
             
             std::string token_text = cx->application_data->original_request();
           
-            for(auto const& i: CfgFactory::get().policy_prof_auth(cx->matched_policy())->sub_policies) {
+            for(auto const& i: CfgFactory::get()->policy_prof_auth(cx->matched_policy())->sub_policies) {
                 _dia("MitmProxy::handle_replacement_auth: token: requesting identity %s", i->element_name().c_str());
                 token_text  += " |" + i->element_name();
             }
@@ -1915,14 +1915,14 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
         short unsigned int target_port = just_accepted_cx->com()->nonlocal_dst_port();
         short unsigned int orig_target_port;
 
-        if( target_host == CfgFactory::get().tenant_magic_ip) {
+        if( target_host == CfgFactory::get()->tenant_magic_ip) {
             
             orig_target_host = target_host;
             orig_target_port = target_port;
             
             if(target_port == 65000 || target_port == 143) {
                 // bend broker magic IP
-                target_port = 65000 + CfgFactory::get().tenant_index;
+                target_port = 65000 + CfgFactory::get()->tenant_index;
             }
             else if(target_port != 443) {
                 // auth portal https magic IP
@@ -1956,7 +1956,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
         bool delete_proxy = false;
         
         // apply policy and get result
-        int policy_num = CfgFactory::get().policy_apply(just_accepted_cx, new_proxy);
+        int policy_num = CfgFactory::get()->policy_apply(just_accepted_cx, new_proxy);
 
         // bypass ssl com to VIP
         if(matched_vip) {
@@ -2057,8 +2057,8 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                         if( found ) {
                             //std::string groups = id_ptr->last_logon_info.groups();
                             
-                            if(CfgFactory::get().policy_prof_auth(policy_num) != nullptr) {
-                                for ( auto const& i: CfgFactory::get().policy_prof_auth(policy_num)->sub_policies) {
+                            if(CfgFactory::get()->policy_prof_auth(policy_num) != nullptr) {
+                                for ( auto const& i: CfgFactory::get()->policy_prof_auth(policy_num)->sub_policies) {
                                     for(auto const& x: group_vec) {
                                         _deb("Connection identities: ip identity '%s' against policy '%s'", x.c_str(),
                                              i->element_name().c_str());
@@ -2093,7 +2093,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                 }
                 
                 // setup NAT
-                if(CfgFactory::get().db_policy_list.at(policy_num)->nat == POLICY_NAT_NONE && ! matched_vip) {
+                if(CfgFactory::get()->db_policy_list.at(policy_num)->nat == POLICY_NAT_NONE && ! matched_vip) {
                     target_cx->com()->nonlocal_src(true);
                     target_cx->com()->nonlocal_src_host() = h;
                     target_cx->com()->nonlocal_src_port() = std::stoi(p);               
@@ -2174,7 +2174,7 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
     new_proxy->radd(target_cx);
 
     // apply policy and get result
-    int policy_num = CfgFactory::get().policy_apply(just_accepted_cx, new_proxy);
+    int policy_num = CfgFactory::get()->policy_apply(just_accepted_cx, new_proxy);
     if(policy_num >= 0) {
         this->proxies().push_back(new_proxy);
         
@@ -2182,7 +2182,7 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
         target_cx->matched_policy(policy_num);
         new_proxy->matched_policy(policy_num);
         
-        if(CfgFactory::get().db_policy_list.at(policy_num)->nat == POLICY_NAT_NONE) {
+        if(CfgFactory::get()->db_policy_list.at(policy_num)->nat == POLICY_NAT_NONE) {
             target_cx->com()->nonlocal_src(true);
             target_cx->com()->nonlocal_src_host() = h;
             target_cx->com()->nonlocal_src_port() = std::stoi(p);               

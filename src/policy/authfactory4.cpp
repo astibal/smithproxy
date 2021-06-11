@@ -47,9 +47,9 @@ int AuthFactory::shm_ip4_table_refresh()  {
         std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
         shm_ip4_map.attach( string_format(AUTH_IP_MEM_NAME,
-                                          CfgFactory::get().tenant_name.c_str()).c_str(),
+                                          CfgFactory::get()->tenant_name.c_str()).c_str(),
                                           AUTH_IP_MEM_SIZE,
-                            string_format(AUTH_IP_SEM_NAME, CfgFactory::get().tenant_name.c_str()).c_str() );
+                            string_format(AUTH_IP_SEM_NAME, CfgFactory::get()->tenant_name.c_str()).c_str() );
     }
 
     _deb("AuthFactory::shm_ip4_table_refresh: acquiring semaphore");
@@ -112,9 +112,9 @@ int AuthFactory::shm_token_table_refresh()  {
     {
         std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
-        shm_token_map_.attach(string_format(AUTH_TOKEN_MEM_NAME, CfgFactory::get().tenant_name.c_str()).c_str(),
+        shm_token_map_.attach(string_format(AUTH_TOKEN_MEM_NAME, CfgFactory::get()->tenant_name.c_str()).c_str(),
                               AUTH_TOKEN_MEM_SIZE,
-                              string_format(AUTH_TOKEN_SEM_NAME, CfgFactory::get().tenant_name.c_str()).c_str());
+                              string_format(AUTH_TOKEN_SEM_NAME, CfgFactory::get()->tenant_name.c_str()).c_str());
     }
 
     _deb("AuthFactory::shm_token_table_refresh: acquiring semaphore");

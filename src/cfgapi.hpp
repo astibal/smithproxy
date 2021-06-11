@@ -82,25 +82,30 @@ public:
 
 class CfgFactory : public CfgFactoryBase {
 
-    CfgFactory();
-
     Config cfgapi;
+
     std::recursive_mutex lock_;
+    static inline std::shared_ptr<CfgFactory> self;
 
 public:
+
+    CfgFactory();
     CfgFactory(CfgFactory const &) = delete;
     void operator=(const CfgFactory&) = delete;
     virtual ~CfgFactory() { cleanup(); }
 
-    static CfgFactory& get() {
-        static CfgFactory fac;
-        return fac;
+    static void init() {
+        self = std::make_shared<CfgFactory>();
+    }
+
+    static std::shared_ptr<CfgFactory> get() {
+        return CfgFactory::self;
     }
 
 
-    static std::recursive_mutex& lock() { return get().lock_; }
-    static Setting& cfg_root() { return get().cfgapi.getRoot(); }
-    static Config&  cfg_obj() { return get().cfgapi; }
+    static std::recursive_mutex& lock() { return get()->lock_; }
+    static Setting& cfg_root() { return get()->cfgapi.getRoot(); }
+    static Config&  cfg_obj() { return get()->cfgapi; }
 
     loglevel args_debug_flag;
 

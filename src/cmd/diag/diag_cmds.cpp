@@ -1732,7 +1732,7 @@ int cli_diag_proxy_policy_list(struct cli_def *cli, const char *command, char *a
     {
         std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
-        for (auto const& it: CfgFactory::get().db_policy_list) {
+        for (auto const& it: CfgFactory::get()->db_policy_list) {
             out << it->to_string(verbosity);
             out << "\n\n";
         }

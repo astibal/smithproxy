@@ -337,7 +337,7 @@ bool CfgFactory::load_settings () {
         }
     }
 
-    load_if_exists(cfgapi.getRoot()["settings"], "log_level", CfgFactory::get().internal_init_level.level_ref());
+    load_if_exists(cfgapi.getRoot()["settings"], "log_level", CfgFactory::get()->internal_init_level.level_ref());
 
     load_if_exists(cfgapi.getRoot()["settings"], "syslog_server", syslog_server);
     load_if_exists(cfgapi.getRoot()["settings"], "syslog_port", syslog_port);
@@ -363,9 +363,9 @@ bool CfgFactory::load_settings () {
         load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "magic_ip", tenant_magic_ip);
     }
 
-    load_if_exists(CfgFactory::cfg_root()["settings"], "write_payload_dir", CfgFactory::get().traflog_dir);
-    load_if_exists(CfgFactory::cfg_root()["settings"], "write_payload_file_prefix", CfgFactory::get().traflog_file_prefix);
-    load_if_exists(CfgFactory::cfg_root()["settings"], "write_payload_file_suffix", CfgFactory::get().traflog_file_suffix);
+    load_if_exists(CfgFactory::cfg_root()["settings"], "write_payload_dir", CfgFactory::get()->traflog_dir);
+    load_if_exists(CfgFactory::cfg_root()["settings"], "write_payload_file_prefix", CfgFactory::get()->traflog_file_prefix);
+    load_if_exists(CfgFactory::cfg_root()["settings"], "write_payload_file_suffix", CfgFactory::get()->traflog_file_suffix);
 
     return true;
 }
@@ -2221,7 +2221,7 @@ int CfgFactory::save_address_objects(Config& ex) const {
 
     int n_saved = 0;
 
-    for (auto const& it: CfgFactory::get().db_address) {
+    for (auto const& it: CfgFactory::get()->db_address) {
         auto name = it.first;
         auto obj = std::dynamic_pointer_cast<CfgAddress>(it.second);
         if(! obj) continue;
@@ -2285,7 +2285,7 @@ int CfgFactory::save_port_objects(Config& ex) const {
 
     int n_saved = 0;
 
-    for (auto const& it: CfgFactory::get().db_port) {
+    for (auto const& it: CfgFactory::get()->db_port) {
         auto name = it.first;
         auto obj = std::dynamic_pointer_cast<CfgRange>(it.second);
         if(! obj) continue;
@@ -2323,7 +2323,7 @@ int CfgFactory::save_proto_objects(Config& ex) const {
 
     int n_saved = 0;
 
-    for (auto const& it: CfgFactory::get().db_proto) {
+    for (auto const& it: CfgFactory::get()->db_proto) {
         auto name = it.first;
         auto obj = std::dynamic_pointer_cast<CfgUint8>(it.second);
         if(!obj) continue;
@@ -2393,7 +2393,7 @@ int CfgFactory::save_detection_profiles(Config& ex) const {
 
     int n_saved = 0;
 
-    for (auto const& it: CfgFactory::get().db_prof_detection) {
+    for (auto const& it: CfgFactory::get()->db_prof_detection) {
         auto name = it.first;
         auto obj = std::dynamic_pointer_cast<ProfileDetection>(it.second);
         if(! obj) continue;
@@ -2432,7 +2432,7 @@ int CfgFactory::save_content_profiles(Config& ex) const {
 
     int n_saved = 0;
 
-    for (auto const& it: CfgFactory::get().db_prof_content) {
+    for (auto const& it: CfgFactory::get()->db_prof_content) {
         auto name = it.first;
         auto obj = std::dynamic_pointer_cast<ProfileContent>(it.second);
         if(! obj) continue;
@@ -2546,7 +2546,7 @@ int CfgFactory::save_tls_profiles(Config& ex) const {
 
     int n_saved = 0;
 
-    for (auto const& it: CfgFactory::get().db_prof_tls) {
+    for (auto const& it: CfgFactory::get()->db_prof_tls) {
         auto name = it.first;
         auto obj = std::dynamic_pointer_cast<ProfileTls>(it.second);
         if(! obj) continue;
@@ -2630,7 +2630,7 @@ int CfgFactory::save_alg_dns_profiles(Config& ex) const {
 
     int n_saved = 0;
 
-    for (auto const& it: CfgFactory::get().db_prof_alg_dns) {
+    for (auto const& it: CfgFactory::get()->db_prof_alg_dns) {
         auto name = it.first;
         auto obj = std::dynamic_pointer_cast<ProfileAlgDns>(it.second);
         if(! obj) continue;
@@ -2671,7 +2671,7 @@ int CfgFactory::save_auth_profiles(Config& ex) const {
 
     int n_saved = 0;
 
-    for (auto const& it: CfgFactory::get().db_prof_auth) {
+    for (auto const& it: CfgFactory::get()->db_prof_auth) {
         auto name = it.first;
         auto obj = std::dynamic_pointer_cast<ProfileAuth>(it.second);
         if(! obj) continue;
@@ -2931,7 +2931,7 @@ int CfgFactory::save_policy(Config& ex) const {
 
     int n_saved = 0;
 
-    for (auto const& pol: CfgFactory::get().db_policy_list) {
+    for (auto const& pol: CfgFactory::get()->db_policy_list) {
 
         if(! pol)
             continue;
@@ -3103,13 +3103,13 @@ int save_settings(Config& ex) {
     Setting& objects = ex.getRoot()["settings"];
 
 
-    objects.add("accept_tproxy", Setting::TypeBoolean) = CfgFactory::get().accept_tproxy;
-    objects.add("accept_redirect", Setting::TypeBoolean) = CfgFactory::get().accept_redirect;
-    objects.add("accept_socks", Setting::TypeBoolean) = CfgFactory::get().accept_socks;
+    objects.add("accept_tproxy", Setting::TypeBoolean) = CfgFactory::get()->accept_tproxy;
+    objects.add("accept_redirect", Setting::TypeBoolean) = CfgFactory::get()->accept_redirect;
+    objects.add("accept_socks", Setting::TypeBoolean) = CfgFactory::get()->accept_socks;
 
     // nameservers
     Setting& it_ns  = objects.add("nameservers", Setting::TypeArray);
-    for(auto const& ns: CfgFactory::get().db_nameservers) {
+    for(auto const& ns: CfgFactory::get()->db_nameservers) {
         it_ns.add(Setting::TypeString) = ns;
     }
 
@@ -3118,52 +3118,52 @@ int save_settings(Config& ex) {
     objects.add("certs_ctlog", Setting::TypeString) = SSLFactory::ctlogfile();
     objects.add("ca_bundle_path", Setting::TypeString) = SSLFactory::ca_path();
 
-    objects.add("plaintext_port", Setting::TypeString) = CfgFactory::get().listen_tcp_port_base;
-    objects.add("plaintext_workers", Setting::TypeInt) = CfgFactory::get().num_workers_tcp;
+    objects.add("plaintext_port", Setting::TypeString) = CfgFactory::get()->listen_tcp_port_base;
+    objects.add("plaintext_workers", Setting::TypeInt) = CfgFactory::get()->num_workers_tcp;
 
-    objects.add("ssl_port", Setting::TypeString) = CfgFactory::get().listen_tls_port_base;
-    objects.add("ssl_workers", Setting::TypeInt) = CfgFactory::get().num_workers_tls;
+    objects.add("ssl_port", Setting::TypeString) = CfgFactory::get()->listen_tls_port_base;
+    objects.add("ssl_workers", Setting::TypeInt) = CfgFactory::get()->num_workers_tls;
     objects.add("ssl_autodetect", Setting::TypeBoolean) = MitmMasterProxy::ssl_autodetect;
     objects.add("ssl_autodetect_harder", Setting::TypeBoolean) = MitmMasterProxy::ssl_autodetect_harder;
     objects.add("ssl_ocsp_status_ttl", Setting::TypeInt) = SSLFactory::ssl_ocsp_status_ttl;
     objects.add("ssl_crl_status_ttl", Setting::TypeInt) = SSLFactory::ssl_crl_status_ttl;
 
-    objects.add("udp_port", Setting::TypeString) = CfgFactory::get().listen_udp_port_base;
-    objects.add("udp_workers", Setting::TypeInt) = CfgFactory::get().num_workers_udp;
+    objects.add("udp_port", Setting::TypeString) = CfgFactory::get()->listen_udp_port_base;
+    objects.add("udp_workers", Setting::TypeInt) = CfgFactory::get()->num_workers_udp;
 
-    objects.add("dtls_port", Setting::TypeString) = CfgFactory::get().listen_dtls_port_base;
-    objects.add("dtls_workers", Setting::TypeInt) = CfgFactory::get().num_workers_dtls;
+    objects.add("dtls_port", Setting::TypeString) = CfgFactory::get()->listen_dtls_port_base;
+    objects.add("dtls_workers", Setting::TypeInt) = CfgFactory::get()->num_workers_dtls;
 
     //udp quick ports
     Setting& it_quick  = objects.add("udp_quick_ports", Setting::TypeArray);
-    if(CfgFactory::get().db_udp_quick_ports.empty()) {
+    if(CfgFactory::get()->db_udp_quick_ports.empty()) {
         it_quick.add(Setting::TypeInt) = 0;
     }
     else {
-        for (auto p: CfgFactory::get().db_udp_quick_ports) {
+        for (auto p: CfgFactory::get()->db_udp_quick_ports) {
             it_quick.add(Setting::TypeInt) = p;
         }
     }
 
-    objects.add("socks_port", Setting::TypeString) = CfgFactory::get().listen_socks_port_base;
-    objects.add("socks_workers", Setting::TypeInt) = CfgFactory::get().num_workers_socks;
+    objects.add("socks_port", Setting::TypeString) = CfgFactory::get()->listen_socks_port_base;
+    objects.add("socks_workers", Setting::TypeInt) = CfgFactory::get()->num_workers_socks;
 
     Setting& socks_objects = objects.add("socks", Setting::TypeGroup);
     socks_objects.add("async_dns", Setting::TypeBoolean) = socksServerCX::global_async_dns;
 
 
-    objects.add("log_level", Setting::TypeInt) = static_cast<int>(CfgFactory::get().internal_init_level.level_ref());
-    objects.add("log_file", Setting::TypeString) = CfgFactory::get().log_file_base;
-    objects.add("log_console", Setting::TypeBoolean)  = CfgFactory::get().log_console;
+    objects.add("log_level", Setting::TypeInt) = static_cast<int>(CfgFactory::get()->internal_init_level.level_ref());
+    objects.add("log_file", Setting::TypeString) = CfgFactory::get()->log_file_base;
+    objects.add("log_console", Setting::TypeBoolean)  = CfgFactory::get()->log_console;
 
-    objects.add("syslog_server", Setting::TypeString) = CfgFactory::get().syslog_server;
-    objects.add("syslog_port", Setting::TypeInt) = CfgFactory::get().syslog_port;
-    objects.add("syslog_facility", Setting::TypeInt) = CfgFactory::get().syslog_facility;
-    objects.add("syslog_level", Setting::TypeInt) = (int)CfgFactory::get().syslog_level.level_ref();
-    objects.add("syslog_family", Setting::TypeInt) = CfgFactory::get().syslog_family;
+    objects.add("syslog_server", Setting::TypeString) = CfgFactory::get()->syslog_server;
+    objects.add("syslog_port", Setting::TypeInt) = CfgFactory::get()->syslog_port;
+    objects.add("syslog_facility", Setting::TypeInt) = CfgFactory::get()->syslog_facility;
+    objects.add("syslog_level", Setting::TypeInt) = (int)CfgFactory::get()->syslog_level.level_ref();
+    objects.add("syslog_family", Setting::TypeInt) = CfgFactory::get()->syslog_family;
 
-    objects.add("sslkeylog_file", Setting::TypeString) = CfgFactory::get().sslkeylog_file_base;
-    objects.add("messages_dir", Setting::TypeString) = CfgFactory::get().dir_msg_templates;
+    objects.add("sslkeylog_file", Setting::TypeString) = CfgFactory::get()->sslkeylog_file_base;
+    objects.add("messages_dir", Setting::TypeString) = CfgFactory::get()->dir_msg_templates;
 
     Setting& cli_objects = objects.add("cli", Setting::TypeGroup);
     cli_objects.add("port", Setting::TypeInt) = CliState::get().cli_port_base;
@@ -3171,17 +3171,17 @@ int save_settings(Config& ex) {
 
 
     Setting& auth_objects = objects.add("auth_portal", Setting::TypeGroup);
-    auth_objects.add("address", Setting::TypeString) = CfgFactory::get().auth_address;
-    auth_objects.add("http_port", Setting::TypeString) = CfgFactory::get().auth_http;
-    auth_objects.add("https_port", Setting::TypeString) = CfgFactory::get().auth_https;
-    auth_objects.add("ssl_key", Setting::TypeString) = CfgFactory::get().auth_sslkey;
-    auth_objects.add("ssl_cert", Setting::TypeString) = CfgFactory::get().auth_sslcert;
-    auth_objects.add("magic_ip", Setting::TypeString) = CfgFactory::get().tenant_magic_ip;
+    auth_objects.add("address", Setting::TypeString) = CfgFactory::get()->auth_address;
+    auth_objects.add("http_port", Setting::TypeString) = CfgFactory::get()->auth_http;
+    auth_objects.add("https_port", Setting::TypeString) = CfgFactory::get()->auth_https;
+    auth_objects.add("ssl_key", Setting::TypeString) = CfgFactory::get()->auth_sslkey;
+    auth_objects.add("ssl_cert", Setting::TypeString) = CfgFactory::get()->auth_sslcert;
+    auth_objects.add("magic_ip", Setting::TypeString) = CfgFactory::get()->tenant_magic_ip;
 
 
-    objects.add("write_payload_dir", Setting::TypeString) = CfgFactory::get().traflog_dir;
-    objects.add("write_payload_file_prefix", Setting::TypeString) = CfgFactory::get().traflog_file_prefix;
-    objects.add("write_payload_file_suffix", Setting::TypeString) = CfgFactory::get().traflog_file_suffix;
+    objects.add("write_payload_dir", Setting::TypeString) = CfgFactory::get()->traflog_dir;
+    objects.add("write_payload_file_prefix", Setting::TypeString) = CfgFactory::get()->traflog_file_prefix;
+    objects.add("write_payload_file_suffix", Setting::TypeString) = CfgFactory::get()->traflog_file_suffix;
 
 
     return 0;
@@ -3253,7 +3253,7 @@ int CfgFactory::save_config() const {
 
 
     try {
-        ex.writeFile(CfgFactory::get().config_file.c_str());
+        ex.writeFile(CfgFactory::get()->config_file.c_str());
     }
     catch(ConfigException const& e) {
         _err("error writing config file %s", e.what());

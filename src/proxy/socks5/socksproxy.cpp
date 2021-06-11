@@ -67,12 +67,12 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
 
             std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
 
-            matched_policy(CfgFactory::get().policy_match(l, r));
-            bool verdict = CfgFactory::get().policy_action(matched_policy());
+            matched_policy(CfgFactory::get()->policy_match(l, r));
+            bool verdict = CfgFactory::get()->policy_action(matched_policy());
 
             std::shared_ptr<PolicyRule> p;
             if(matched_policy() >= 0) {
-                p = CfgFactory::get().db_policy_list.at(matched_policy());
+                p = CfgFactory::get()->db_policy_list.at(matched_policy());
             }
 
             _dia("socksProxy::on_left_message: policy check result: policy# %d policyoid 0x%x verdict %s", matched_policy(), p->oid(), verdict ? "accept" : "reject" );
@@ -101,10 +101,10 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
         state().dead(true);
         return;
     } 
-    else if(matched_policy() >= (signed int)CfgFactory::get().db_policy_list.size()) {
+    else if(matched_policy() >= (signed int)CfgFactory::get()->db_policy_list.size()) {
         _dia("SocksProxy::sock5_handoff: matching policy out of policy index table: %d/%d: dropping.",
                                          matched_policy(),
-                                         CfgFactory::get().db_policy_list.size());
+                                         CfgFactory::get()->db_policy_list.size());
         state().dead(true);
         return;
     }
@@ -171,7 +171,7 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     {
         std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
 
-        if (CfgFactory::get().db_policy_list.at(matched_policy())->nat == POLICY_NAT_NONE) {
+        if (CfgFactory::get()->db_policy_list.at(matched_policy())->nat == POLICY_NAT_NONE) {
             target_cx->com()->nonlocal_src(true);
             target_cx->com()->nonlocal_src_host() = h;
             target_cx->com()->nonlocal_src_port() = std::stoi(p);
@@ -187,7 +187,7 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     
     radd(target_cx);
 
-    if (CfgFactory::get().policy_apply(n_cx, this, matched_policy()) < 0) {
+    if (CfgFactory::get()->policy_apply(n_cx, this, matched_policy()) < 0) {
         // strange, but it can happen if the sockets is closed between policy match and this profile application
         // mark dead.
         _inf("SocksProxy::socks5_handoff: session failed policy application");
@@ -299,8 +299,8 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
                     if ( found ) {
                         //std::string groups = id_ptr->last_logon_info.groups();
 
-                        if (CfgFactory::get().policy_prof_auth(matched_policy()) != nullptr)
-                            for (auto i: CfgFactory::get().policy_prof_auth(matched_policy())->sub_policies) {
+                        if (CfgFactory::get()->policy_prof_auth(matched_policy()) != nullptr)
+                            for (auto i: CfgFactory::get()->policy_prof_auth(matched_policy())->sub_policies) {
                                 for (auto const& x: groups_vec) {
                                     _deb("Connection identities: ip identity '%s' against policy '%s'", x.c_str(),
                                          i->element_name().c_str());

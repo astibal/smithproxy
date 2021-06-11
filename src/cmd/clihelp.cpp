@@ -390,36 +390,36 @@ void CliHelp::init() {
 
     add("policy.[x].proto", "protocol to match (see proto_objects)")
         .may_be_empty(false)
-        .value_filter(is_in_vector([]() { return CfgFactory::get().keys_of_db_proto(); },"must be in proto_objects"))
+        .value_filter(is_in_vector([]() { return CfgFactory::get()->keys_of_db_proto(); },"must be in proto_objects"))
         .suggestion_generator([](std::string const& section, std::string const& variable) {
-            return CfgFactory::get().keys_of_db_proto();
+            return CfgFactory::get()->keys_of_db_proto();
         });
 
     add("policy.[x].src", "source address to match")
         .may_be_empty(true)
-        .value_filter(is_in_vector([]() { return CfgFactory::get().keys_of_db_address(); },"must be in address_objects"))
+        .value_filter(is_in_vector([]() { return CfgFactory::get()->keys_of_db_address(); },"must be in address_objects"))
         .suggestion_generator([](std::string const& section, std::string const& variable) {
-            return CfgFactory::get().keys_of_db_address();
+            return CfgFactory::get()->keys_of_db_address();
         });
     add("policy.[x].dst", "destination address to match")
             .may_be_empty(true)
-            .value_filter(is_in_vector([]() { return CfgFactory::get().keys_of_db_address(); },"must be in address_objects"))
+            .value_filter(is_in_vector([]() { return CfgFactory::get()->keys_of_db_address(); },"must be in address_objects"))
             .suggestion_generator([](std::string const& section, std::string const& variable) {
-                return CfgFactory::get().keys_of_db_address();
+                return CfgFactory::get()->keys_of_db_address();
             });
 
     add("policy.[x].dport", "destination port to match")
             .may_be_empty(true)
-            .value_filter(is_in_vector([]() { return CfgFactory::get().keys_of_db_port(); },"must be in port_objects"))
+            .value_filter(is_in_vector([]() { return CfgFactory::get()->keys_of_db_port(); },"must be in port_objects"))
             .suggestion_generator([](std::string const& section, std::string const& variable) {
-                return CfgFactory::get().keys_of_db_port();
+                return CfgFactory::get()->keys_of_db_port();
             });
 
     add("policy.[x].sport", "source port to match")
             .may_be_empty(true)
-            .value_filter(is_in_vector([]() { return CfgFactory::get().keys_of_db_port(); },"must be in port_objects"))
+            .value_filter(is_in_vector([]() { return CfgFactory::get()->keys_of_db_port(); },"must be in port_objects"))
             .suggestion_generator([](std::string const& section, std::string const& variable) {
-                return CfgFactory::get().keys_of_db_port();
+                return CfgFactory::get()->keys_of_db_port();
             });
 
     add("policy.[x].action", "action to take with matching traffic")
@@ -438,37 +438,37 @@ void CliHelp::init() {
 
     add("policy.[x].tls_profile", "tls options")
             .may_be_empty(true)
-            .value_filter(is_in_vector([]() -> std::vector<std::string> { return CfgFactory::get().keys_of_db_prof_tls(); },"must be in tls_profiles"))
+            .value_filter(is_in_vector([]() -> std::vector<std::string> { return CfgFactory::get()->keys_of_db_prof_tls(); },"must be in tls_profiles"))
             .suggestion_generator([](std::string const& section, std::string const& variable) -> std::vector<std::string> {
-                return CfgFactory::get().keys_of_db_prof_tls();
+                return CfgFactory::get()->keys_of_db_prof_tls();
             });
 
     add("policy.[x].detection_profile", "detection options")
             .may_be_empty(true)
-            .value_filter(is_in_vector([]() -> std::vector<std::string> { return CfgFactory::get().keys_of_db_prof_detection(); },"must be in detection_profiles"))
+            .value_filter(is_in_vector([]() -> std::vector<std::string> { return CfgFactory::get()->keys_of_db_prof_detection(); },"must be in detection_profiles"))
             .suggestion_generator([](std::string const& section, std::string const& variable) -> std::vector<std::string> {
-                return CfgFactory::get().keys_of_db_prof_detection();
+                return CfgFactory::get()->keys_of_db_prof_detection();
             });
 
     add("policy.[x].content_profile", "content options")
             .may_be_empty(true)
-            .value_filter(is_in_vector([]() -> std::vector<std::string> { return CfgFactory::get().keys_of_db_prof_content(); },"must be in content_profiles"))
+            .value_filter(is_in_vector([]() -> std::vector<std::string> { return CfgFactory::get()->keys_of_db_prof_content(); },"must be in content_profiles"))
             .suggestion_generator([](std::string const& section, std::string const& variable) -> std::vector<std::string> {
-                return CfgFactory::get().keys_of_db_prof_content();
+                return CfgFactory::get()->keys_of_db_prof_content();
             });
 
     add("policy.[x].auth_profile", "auth options")
             .may_be_empty(true)
-            .value_filter(is_in_vector([]() -> std::vector<std::string> { return CfgFactory::get().keys_of_db_prof_auth(); },"must be in auth_profiles"))
+            .value_filter(is_in_vector([]() -> std::vector<std::string> { return CfgFactory::get()->keys_of_db_prof_auth(); },"must be in auth_profiles"))
             .suggestion_generator([](std::string const& section, std::string const& variable) -> std::vector<std::string> {
-                return CfgFactory::get().keys_of_db_prof_auth();
+                return CfgFactory::get()->keys_of_db_prof_auth();
             });
 
     add("policy.[x].alg_dns_profile", "alg_dns_profile options")
             .may_be_empty(true)
-            .value_filter(is_in_vector([]() -> std::vector<std::string> { return CfgFactory::get().keys_of_db_prof_alg_dns(); },"must be in alg_dns_profile"))
+            .value_filter(is_in_vector([]() -> std::vector<std::string> { return CfgFactory::get()->keys_of_db_prof_alg_dns(); },"must be in alg_dns_profile"))
             .suggestion_generator([](std::string const& section, std::string const& variable) -> std::vector<std::string> {
-                return CfgFactory::get().keys_of_db_prof_alg_dns();
+                return CfgFactory::get()->keys_of_db_prof_alg_dns();
             });
 
 
@@ -565,7 +565,7 @@ std::optional<std::string> CliHelp::value_check(std::string const& varname, std:
 
                 _debug(cli, "policy values for %s", path_elems[2].c_str());
 
-                auto addrlist = CfgFactory::get().keys_of_db_address();
+                auto addrlist = CfgFactory::get()->keys_of_db_address();
                 if(std::find(addrlist.begin(), addrlist.end(), value_modified) == addrlist.end()) {
                     _debug(cli, "policy values for %s: %s not found address db", path_elems[2].c_str(), value_modified.c_str());
                     return std::nullopt;

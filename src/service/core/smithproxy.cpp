@@ -52,7 +52,7 @@ SmithProxy::~SmithProxy () {
 
 void SmithProxy::reload() {
     _war("reloading configuration (excluding signatures)");
-    SmithProxy::instance().load_config(CfgFactory::get().config_file,true);
+    SmithProxy::instance().load_config(CfgFactory::get()->config_file,true);
     _dia("USR1 signal handler finished");
 }
 
@@ -117,7 +117,7 @@ void SmithProxy::create_identity_thread() {
     id_thread = std::shared_ptr<std::thread>(create_identity_refresh_thread());
     if(id_thread != nullptr) {
         pthread_setname_np(id_thread->native_handle(),string_format("sxy_idu_%d",
-                                                                    CfgFactory::get().tenant_index).c_str());
+                                                                    CfgFactory::get()->tenant_index).c_str());
     }
 }
 
@@ -146,47 +146,47 @@ bool SmithProxy::create_listeners() {
             }
         };
 
-        if(CfgFactory::get().accept_tproxy) {
+        if(CfgFactory::get()->accept_tproxy) {
 
             plain_proxies = NetworkServiceFactory::prepare_listener<theAcceptor, TCPCom>(
-                    std::stoi(CfgFactory::get().listen_tcp_port),
+                    std::stoi(CfgFactory::get()->listen_tcp_port),
                     tcp_frm,
-                    CfgFactory::get().num_workers_tcp,
+                    CfgFactory::get()->num_workers_tcp,
                     proxyType::transparent());
 
             log_listener(tcp_frm, plain_proxies);
 
             ssl_proxies = NetworkServiceFactory::prepare_listener<theAcceptor, MySSLMitmCom>(
-                    std::stoi(CfgFactory::get().listen_tls_port),
+                    std::stoi(CfgFactory::get()->listen_tls_port),
                     tls_frm,
-                    CfgFactory::get().num_workers_tls,
+                    CfgFactory::get()->num_workers_tls,
                     proxyType::transparent());
 
             log_listener(tls_frm, ssl_proxies);
 
 
             dtls_proxies = NetworkServiceFactory::prepare_listener<theReceiver, MyDTLSMitmCom>(
-                    std::stoi(CfgFactory::get().listen_dtls_port),
+                    std::stoi(CfgFactory::get()->listen_dtls_port),
                     dtls_frm,
-                    CfgFactory::get().num_workers_dtls,
+                    CfgFactory::get()->num_workers_dtls,
                     proxyType::transparent());
 
             log_listener(dtls_frm, dtls_proxies);
 
 
             udp_proxies = NetworkServiceFactory::prepare_listener<theReceiver, UDPCom>(
-                    std::stoi(CfgFactory::get().listen_udp_port),
+                    std::stoi(CfgFactory::get()->listen_udp_port),
                     udp_frm,
-                    CfgFactory::get().num_workers_udp,
+                    CfgFactory::get()->num_workers_udp,
                     proxyType::transparent());
 
             log_listener(udp_frm, udp_proxies);
 
 
-            if ((plain_proxies.empty() && CfgFactory::get().num_workers_tcp >= 0) ||
-                (ssl_proxies.empty() && CfgFactory::get().num_workers_tls >= 0) ||
-                (dtls_proxies.empty() && CfgFactory::get().num_workers_dtls >= 0) ||
-                (udp_proxies.empty() && CfgFactory::get().num_workers_udp >= 0)) {
+            if ((plain_proxies.empty() && CfgFactory::get()->num_workers_tcp >= 0) ||
+                (ssl_proxies.empty() && CfgFactory::get()->num_workers_tls >= 0) ||
+                (dtls_proxies.empty() && CfgFactory::get()->num_workers_dtls >= 0) ||
+                (udp_proxies.empty() && CfgFactory::get()->num_workers_udp >= 0)) {
 
                 _fat("Failed to setup tproxy proxies. Bailing!");
                 exit(-10);
@@ -194,52 +194,52 @@ bool SmithProxy::create_listeners() {
 
         }
 
-        if(CfgFactory::get().accept_socks) {
+        if(CfgFactory::get()->accept_socks) {
             socks_proxies = NetworkServiceFactory::prepare_listener<socksAcceptor, socksTCPCom>(
-                    std::stoi(CfgFactory::get().listen_socks_port),
+                    std::stoi(CfgFactory::get()->listen_socks_port),
                     socks_frm,
-                    CfgFactory::get().num_workers_socks,
+                    CfgFactory::get()->num_workers_socks,
                     proxyType::proxy());
 
             log_listener(socks_frm, socks_proxies);
 
-            if((socks_proxies.empty() && CfgFactory::get().num_workers_socks >= 0)) {
+            if((socks_proxies.empty() && CfgFactory::get()->num_workers_socks >= 0)) {
                 _fat("Failed to setup socks proxies. Bailing!");
                 exit(-11);
             }
         }
 
-        if(CfgFactory::get().accept_redirect) {
+        if(CfgFactory::get()->accept_redirect) {
             redir_plain_proxies = NetworkServiceFactory::prepare_listener<theAcceptor, TCPCom>(
-                    std::stoi(CfgFactory::get().listen_tcp_port) + 1000,
+                    std::stoi(CfgFactory::get()->listen_tcp_port) + 1000,
                     retcp_frm,
-                    CfgFactory::get().num_workers_tcp,
+                    CfgFactory::get()->num_workers_tcp,
                     proxyType::redirect());
 
             log_listener(retcp_frm, redir_plain_proxies);
 
             redir_ssl_proxies = NetworkServiceFactory::prepare_listener<theAcceptor, MySSLMitmCom>(
-                    std::stoi(CfgFactory::get().listen_tls_port) + 1000,
+                    std::stoi(CfgFactory::get()->listen_tls_port) + 1000,
                     "ssl-rdr",
-                    CfgFactory::get().num_workers_tls,
+                    CfgFactory::get()->num_workers_tls,
                     proxyType::redirect());
 
             log_listener(retls_frm, redir_ssl_proxies);
 
             redir_udp_proxies = NetworkServiceFactory::prepare_listener<theReceiver, UDPCom>(
-                    std::stoi(CfgFactory::get().listen_udp_port) +
+                    std::stoi(CfgFactory::get()->listen_udp_port) +
                     973,  // 973 + default 50080 = 51053: should suggest DNS only
                     "udp-rdr",
-                    CfgFactory::get().num_workers_udp,
+                    CfgFactory::get()->num_workers_udp,
                     proxyType::redirect());
 
             log_listener(redns_frm, redir_udp_proxies);
 
-            if((redir_plain_proxies.empty() && CfgFactory::get().num_workers_tcp >= 0) ||
-               (redir_ssl_proxies.empty() && CfgFactory::get().num_workers_tls >= 0) ||
-               (redir_udp_proxies.empty() && CfgFactory::get().num_workers_udp >= 0)) {
+            if((redir_plain_proxies.empty() && CfgFactory::get()->num_workers_tcp >= 0) ||
+               (redir_ssl_proxies.empty() && CfgFactory::get()->num_workers_tls >= 0) ||
+               (redir_udp_proxies.empty() && CfgFactory::get()->num_workers_udp >= 0)) {
 
-                if((socks_proxies.empty() && CfgFactory::get().num_workers_socks >= 0)) {
+                if((socks_proxies.empty() && CfgFactory::get()->num_workers_socks >= 0)) {
                     _fat("Failed to setup redirect proxies. Bailing!");
                     exit(-12);
                 }
@@ -281,17 +281,17 @@ void SmithProxy::run() {
 
     CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
 
-    std::string friendly_thread_name_tcp = string_format("sxy_tcp_%d",CfgFactory::get().tenant_index);
-    std::string friendly_thread_name_udp = string_format("sxy_udp_%d",CfgFactory::get().tenant_index);
-    std::string friendly_thread_name_tls = string_format("sxy_tls_%d",CfgFactory::get().tenant_index);
-    std::string friendly_thread_name_dls = string_format("sxy_dls_%d",CfgFactory::get().tenant_index);
-    std::string friendly_thread_name_skx = string_format("sxy_skx_%d",CfgFactory::get().tenant_index);
-    std::string friendly_thread_name_cli = string_format("sxy_cli_%d",CfgFactory::get().tenant_index);
-    std::string friendly_thread_name_own = string_format("sxy_own_%d",CfgFactory::get().tenant_index);
+    std::string friendly_thread_name_tcp = string_format("sxy_tcp_%d",CfgFactory::get()->tenant_index);
+    std::string friendly_thread_name_udp = string_format("sxy_udp_%d",CfgFactory::get()->tenant_index);
+    std::string friendly_thread_name_tls = string_format("sxy_tls_%d",CfgFactory::get()->tenant_index);
+    std::string friendly_thread_name_dls = string_format("sxy_dls_%d",CfgFactory::get()->tenant_index);
+    std::string friendly_thread_name_skx = string_format("sxy_skx_%d",CfgFactory::get()->tenant_index);
+    std::string friendly_thread_name_cli = string_format("sxy_cli_%d",CfgFactory::get()->tenant_index);
+    std::string friendly_thread_name_own = string_format("sxy_own_%d",CfgFactory::get()->tenant_index);
 
-    std::string friendly_thread_name_redir_tcp = string_format("sxy_rdt_%d",CfgFactory::get().tenant_index);
-    std::string friendly_thread_name_redir_ssl = string_format("sxy_rds_%d",CfgFactory::get().tenant_index);
-    std::string friendly_thread_name_redir_udp = string_format("sxy_rdu_%d",CfgFactory::get().tenant_index);
+    std::string friendly_thread_name_redir_tcp = string_format("sxy_rdt_%d",CfgFactory::get()->tenant_index);
+    std::string friendly_thread_name_redir_ssl = string_format("sxy_rds_%d",CfgFactory::get()->tenant_index);
+    std::string friendly_thread_name_redir_udp = string_format("sxy_rdu_%d",CfgFactory::get()->tenant_index);
 
 
     // cli_loop uses select :(
@@ -335,18 +335,18 @@ void SmithProxy::run() {
     };
 
 
-    if(CfgFactory::get().accept_tproxy) {
+    if(CfgFactory::get()->accept_tproxy) {
         launch_proxy_threads(plain_proxies, plain_threads, "TCP listener", friendly_thread_name_tcp.c_str());
         launch_proxy_threads(ssl_proxies, ssl_threads, "TLS listener", friendly_thread_name_tls.c_str());
         launch_proxy_threads(dtls_proxies, dtls_threads, "DTLS listener", friendly_thread_name_dls.c_str());
         launch_proxy_threads(udp_proxies, udp_threads, "UDP listener", friendly_thread_name_udp.c_str());
     }
 
-    if(CfgFactory::get().accept_socks) {
+    if(CfgFactory::get()->accept_socks) {
         launch_proxy_threads(socks_proxies, socks_threads, "SOCKS listener", friendly_thread_name_skx.c_str());
     }
 
-    if(CfgFactory::get().accept_redirect) {
+    if(CfgFactory::get()->accept_redirect) {
         launch_proxy_threads(redir_plain_proxies, redir_plain_threads, "redirected TCP listener",
                              friendly_thread_name_redir_tcp.c_str());
         launch_proxy_threads(redir_ssl_proxies, redir_ssl_threads, "redirected TLS listener",
@@ -594,28 +594,28 @@ bool SmithProxy::init_syslog() {
     struct sockaddr_storage syslog_in {};
     memset(&syslog_in, 0, sizeof(struct sockaddr_storage));
 
-    if(CfgFactory::get().syslog_family != 6) {
-        CfgFactory::get().syslog_family = 4;
+    if(CfgFactory::get()->syslog_family != 6) {
+        CfgFactory::get()->syslog_family = 4;
         syslog_in.ss_family                = AF_INET;
-        ((sockaddr_in*)&syslog_in)->sin_addr.s_addr = inet_addr(CfgFactory::get().syslog_server.c_str());
+        ((sockaddr_in*)&syslog_in)->sin_addr.s_addr = inet_addr(CfgFactory::get()->syslog_server.c_str());
         if(((sockaddr_in*)&syslog_in)->sin_addr.s_addr == INADDR_NONE) {
-            _err("Error initializing syslog server: %s", CfgFactory::get().syslog_server.c_str());
+            _err("Error initializing syslog server: %s", CfgFactory::get()->syslog_server.c_str());
             ::close(syslog_socket); // coverity: 1407945
             return false;
         }
 
-        ((sockaddr_in*)&syslog_in)->sin_port = htons(CfgFactory::get().syslog_port);
+        ((sockaddr_in*)&syslog_in)->sin_port = htons(CfgFactory::get()->syslog_port);
     } else {
-        CfgFactory::get().syslog_family = 6;
+        CfgFactory::get()->syslog_family = 6;
         syslog_in.ss_family                = AF_INET6;
-        int ret = inet_pton(AF_INET6, CfgFactory::get().syslog_server.c_str(),(unsigned char*)&((sockaddr_in6*)&syslog_in)->sin6_addr.s6_addr);
+        int ret = inet_pton(AF_INET6, CfgFactory::get()->syslog_server.c_str(),(unsigned char*)&((sockaddr_in6*)&syslog_in)->sin6_addr.s6_addr);
         if(ret <= 0) {
-            _err("Error initializing syslog server: %s", CfgFactory::get().syslog_server.c_str());
+            _err("Error initializing syslog server: %s", CfgFactory::get()->syslog_server.c_str());
 
             ::close(syslog_socket); // coverity: 1407945
             return false;
         }
-        ((sockaddr_in6*)&syslog_in)->sin6_port = htons(CfgFactory::get().syslog_port);
+        ((sockaddr_in6*)&syslog_in)->sin6_port = htons(CfgFactory::get()->syslog_port);
     }
 
 
@@ -624,13 +624,13 @@ bool SmithProxy::init_syslog() {
         ::close(syslog_socket);
     } else {
 
-        LogOutput::get()->remote_targets(string_format("syslog-udp%d-%d", CfgFactory::get().syslog_family, syslog_socket),
+        LogOutput::get()->remote_targets(string_format("syslog-udp%d-%d", CfgFactory::get()->syslog_family, syslog_socket),
                                          syslog_socket);
 
         auto lp = std::make_unique<logger_profile>();
 
         lp->logger_type = logger_profile::REMOTE_SYSLOG;
-        lp->level_ = CfgFactory::get().syslog_level;
+        lp->level_ = CfgFactory::get()->syslog_level;
 
         // raising internal logging level
         if (lp->level_ > LogOutput::get()->level()) {
@@ -640,7 +640,7 @@ bool SmithProxy::init_syslog() {
         }
 
         lp->syslog_settings.severity = static_cast<int>(lp->level_.level());
-        lp->syslog_settings.facility = CfgFactory::get().syslog_facility;
+        lp->syslog_settings.facility = CfgFactory::get()->syslog_facility;
 
         LogOutput::get()->target_profiles()[(uint64_t) syslog_socket] = std::move(lp);
     }
@@ -654,12 +654,12 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
     auto& log = instance().log;
 
     using namespace libconfig;
-    if(! CfgFactory::get().cfgapi_init(config_f.c_str()) ) {
+    if(! CfgFactory::get()->cfgapi_init(config_f.c_str()) ) {
         _fat("Unable to load config.");
         ret = false;
     }
 
-    CfgFactory::get().config_file = config_f;
+    CfgFactory::get()->config_file = config_f;
 
     // Add another level of lock. File is already loaded. We need to apply its content.
     // lock is needed here to not try to match against potentially empty/partial policy list
@@ -667,19 +667,19 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
     try {
 
         if(reload) {
-            CfgFactory::get().cleanup();
+            CfgFactory::get()->cleanup();
         }
 
-        CfgFactory::get().load_db_address();
-        CfgFactory::get().load_db_port();
-        CfgFactory::get().load_db_proto();
-        CfgFactory::get().load_db_prof_detection();
-        CfgFactory::get().load_db_prof_content();
-        CfgFactory::get().load_db_prof_tls();
-        CfgFactory::get().load_db_prof_alg_dns();
-        CfgFactory::get().load_db_prof_auth();
+        CfgFactory::get()->load_db_address();
+        CfgFactory::get()->load_db_port();
+        CfgFactory::get()->load_db_proto();
+        CfgFactory::get()->load_db_prof_detection();
+        CfgFactory::get()->load_db_prof_content();
+        CfgFactory::get()->load_db_prof_tls();
+        CfgFactory::get()->load_db_prof_alg_dns();
+        CfgFactory::get()->load_db_prof_auth();
 
-        CfgFactory::get().load_db_policy();
+        CfgFactory::get()->load_db_policy();
 
 
         SigFactory::get().signature_tree().reset();
@@ -692,8 +692,8 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
         // load detection signatures into sensor (group) specified by signature. If none specified, it will be placed into 1 (base group)
         load_signatures(CfgFactory::cfg_obj(), "detection_signatures", SigFactory::get().signature_tree());
 
-        CfgFactory::get().load_settings();
-        CfgFactory::get().load_debug();
+        CfgFactory::get()->load_settings();
+        CfgFactory::get()->load_debug();
 
         // initialize stubborn logans :)
         auto _ = inet::Factory::log();
@@ -706,45 +706,45 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
             //init crashlog file with dafe default
             this_daemon.set_crashlog("/tmp/smithproxy_crash.log");
 
-            if(load_if_exists(CfgFactory::cfg_root()["settings"], "log_file",CfgFactory::get().log_file_base)) {
+            if(load_if_exists(CfgFactory::cfg_root()["settings"], "log_file",CfgFactory::get()->log_file_base)) {
 
-                CfgFactory::get().log_file = CfgFactory::get().log_file_base;
+                CfgFactory::get()->log_file = CfgFactory::get()->log_file_base;
 
 
-                if(! CfgFactory::get().log_file.empty()) {
+                if(! CfgFactory::get()->log_file.empty()) {
 
-                    CfgFactory::get().log_file = string_format(CfgFactory::get().log_file.c_str(), CfgFactory::get().tenant_name.c_str());
+                    CfgFactory::get()->log_file = string_format(CfgFactory::get()->log_file.c_str(), CfgFactory::get()->tenant_name.c_str());
                     // prepare custom crashlog file
-                    std::string crlog = CfgFactory::get().log_file + ".crashlog.log";
-                    this_daemon.set_crashlog(crlog.c_str());
+                    std::string crlog = CfgFactory::get()->log_file + ".crashlog.log";
+                    this_daemon->set_crashlog(crlog.c_str());
 
-                    auto* o = new std::ofstream(CfgFactory::get().log_file.c_str(),std::ios::app);
-                    LogOutput::get()->targets(CfgFactory::get().log_file, o);
+                    auto* o = new std::ofstream(CfgFactory::get()->log_file.c_str(),std::ios::app);
+                    LogOutput::get()->targets(CfgFactory::get()->log_file, o);
                     LogOutput::get()->dup2_cout(false);
-                    LogOutput::get()->level(CfgFactory::get().internal_init_level);
+                    LogOutput::get()->level(CfgFactory::get()->internal_init_level);
 
                     auto lp = std::make_unique<logger_profile>();
                     lp->print_srcline_ = LogOutput::get()->print_srcline();
                     lp->print_srcline_always_ = LogOutput::get()->print_srcline_always();
-                    lp->level_ = CfgFactory::get().internal_init_level;
+                    lp->level_ = CfgFactory::get()->internal_init_level;
                     LogOutput::get()->target_profiles()[(uint64_t)o] = std::move(lp);
 
                 }
             }
             //
-            if(load_if_exists(CfgFactory::cfg_root()["settings"], "sslkeylog_file", CfgFactory::get().sslkeylog_file_base)) {
+            if(load_if_exists(CfgFactory::cfg_root()["settings"], "sslkeylog_file", CfgFactory::get()->sslkeylog_file_base)) {
 
-                CfgFactory::get().sslkeylog_file = CfgFactory::get().sslkeylog_file_base;
+                CfgFactory::get()->sslkeylog_file = CfgFactory::get()->sslkeylog_file_base;
 
-                if(! CfgFactory::get().sslkeylog_file.empty()) {
+                if(! CfgFactory::get()->sslkeylog_file.empty()) {
 
-                    CfgFactory::get().sslkeylog_file = string_format(CfgFactory::get().sslkeylog_file.c_str(),
-                                                                     CfgFactory::get().tenant_name.c_str());
+                    CfgFactory::get()->sslkeylog_file = string_format(CfgFactory::get()->sslkeylog_file.c_str(),
+                                                                     CfgFactory::get()->tenant_name.c_str());
 
-                    auto* o = new std::ofstream(CfgFactory::get().sslkeylog_file.c_str(),std::ios::app);
-                    LogOutput::get()->targets(CfgFactory::get().sslkeylog_file, o);
+                    auto* o = new std::ofstream(CfgFactory::get()->sslkeylog_file.c_str(),std::ios::app);
+                    LogOutput::get()->targets(CfgFactory::get()->sslkeylog_file, o);
                     LogOutput::get()->dup2_cout(false);
-                    LogOutput::get()->level(CfgFactory::get().internal_init_level);
+                    LogOutput::get()->level(CfgFactory::get()->internal_init_level);
 
                     auto lp = std::make_unique<logger_profile>();
                     lp->print_srcline_ = LogOutput::get()->print_srcline();
@@ -756,15 +756,15 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
             }
 
 
-            if( ! CfgFactory::get().syslog_server.empty() ) {
+            if( ! CfgFactory::get()->syslog_server.empty() ) {
                 bool have_syslog = init_syslog();
                 if(! have_syslog) {
                     _err("syslog logging not set.");
                 }
             }
 
-            if(load_if_exists(CfgFactory::cfg_root()["settings"],"log_console", CfgFactory::get().log_console)) {
-                LogOutput::get()->dup2_cout(CfgFactory::get().log_console);
+            if(load_if_exists(CfgFactory::cfg_root()["settings"],"log_console", CfgFactory::get()->log_console)) {
+                LogOutput::get()->dup2_cout(CfgFactory::get()->log_console);
             }
         }
     }

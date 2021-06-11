@@ -177,7 +177,7 @@ void cmd_show_status(struct cli_def* cli) {
 
 
 
-    if(CfgFactory::get().accept_tproxy) {
+    if(CfgFactory::get()->accept_tproxy) {
         cli_print(cli," ");
         cli_print(cli, "Tproxy acceptors:");
         cli_print(cli, "  TCP: %2zu workers: %2zu",
@@ -197,7 +197,7 @@ void cmd_show_status(struct cli_def* cli) {
                   SmithProxy::instance().dtls_proxies.size() * get_task_count(SmithProxy::instance().dtls_proxies));
     }
 
-    if(CfgFactory::get().accept_redirect) {
+    if(CfgFactory::get()->accept_redirect) {
         cli_print(cli," ");
         cli_print(cli, "Redirect acceptors:");
         cli_print(cli, "  TCP: %2zu workers: %2zu",
@@ -214,7 +214,7 @@ void cmd_show_status(struct cli_def* cli) {
 
     }
 
-    if(CfgFactory::get().accept_socks) {
+    if(CfgFactory::get()->accept_socks) {
         cli_print(cli," ");
         cli_print(cli, "Socks acceptors:");
         cli_print(cli, "  TCP: %2zu workers: %2zu",
@@ -380,8 +380,8 @@ int cli_test_dns_sendrequest(struct cli_def *cli, const char *command, char *arg
         }
 
         std::string nameserver = "8.8.8.8";
-        if(! CfgFactory::get().db_nameservers.empty()) {
-            nameserver = CfgFactory::get().db_nameservers.at(0);
+        if(! CfgFactory::get()->db_nameservers.empty()) {
+            nameserver = CfgFactory::get()->db_nameservers.at(0);
         }
 
         auto resp = std::shared_ptr<DNS_Response>(send_dns_request(cli,argv0,A,nameserver));
@@ -416,7 +416,7 @@ int cli_test_dns_refreshallfqdns(struct cli_def *cli, const char *command, char 
     {
         std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
 
-        for (auto const& a: CfgFactory::get().db_address) {
+        for (auto const& a: CfgFactory::get()->db_address) {
             auto fa = std::dynamic_pointer_cast<FqdnAddress>(a.second);
             if (fa) {
                 fqdns.push_back(fa->fqdn());
@@ -425,8 +425,8 @@ int cli_test_dns_refreshallfqdns(struct cli_def *cli, const char *command, char 
     }
 
     std::string nameserver = "8.8.8.8";
-    if(! CfgFactory::get().db_nameservers.empty()) {
-        nameserver = CfgFactory::get().db_nameservers.at(0);
+    if(! CfgFactory::get()->db_nameservers.empty()) {
+        nameserver = CfgFactory::get()->db_nameservers.at(0);
     }
 
     DNS_Inspector di;
@@ -456,7 +456,7 @@ int cli_test_dns_refreshallfqdns(struct cli_def *cli, const char *command, char 
 
 void cli_print_log_levels(struct cli_def *cli) {
 
-    logger_profile* lp = LogOutput::get()->target_profiles()[(uint64_t)fileno(cli->client)];
+    auto const& lp = LogOutput::get()->target_profiles()[(uint64_t)fileno(cli->client)];
 
     cli_print(cli,"THIS cli logging level set to: %d",lp->level_.level());
     cli_print(cli,"Internal logging level set to: %d", LogOutput::get()->level().level());
@@ -466,10 +466,10 @@ void cli_print_log_levels(struct cli_def *cli) {
                   LogOutput::get()->target_name((uint64_t)target),
                   LogOutput::get()->target_profiles()[(uint64_t)target]->level_.level());
     }
-    for(auto [ o_ptr, mut]: LogOutput::get()->targets()) {
+    for(auto const& [ o_ptr, mut]: LogOutput::get()->targets()) {
         cli_print(cli, "Logging level for target: %s: %d",
-                  LogOutput::get()->target_name((uint64_t)(o_ptr)),
-                  LogOutput::get()->target_profiles()[(uint64_t)(o_ptr)]->level_.level());
+                  LogOutput::get()->target_name((uint64_t)(o_ptr.get())),
+                  LogOutput::get()->target_profiles()[(uint64_t)(o_ptr.get())]->level_.level());
     }
 }
 
@@ -478,7 +478,7 @@ int cli_debug_level(struct cli_def *cli, const char *command, char *argv[], int 
 
     debug_cli_params(cli, command, argv, argc);
 
-    logger_profile* lp = LogOutput::get()->target_profiles()[(uint64_t)fileno(cli->client)];
+    auto const& lp = LogOutput::get()->target_profiles()[(uint64_t)fileno(cli->client)];
     if(argc > 0) {
 
         std::string a1 = argv[0];
@@ -489,7 +489,7 @@ int cli_debug_level(struct cli_def *cli, const char *command, char *argv[], int 
         else if(a1 == "reset") {
             lp->level_ = NON;
 
-            LogOutput::get()->level(CfgFactory::get().internal_init_level);
+            LogOutput::get()->level(CfgFactory::get()->internal_init_level);
             cli_print(cli, "internal logging level changed to %d", LogOutput::get()->level().level_ref());
         }
         else {
@@ -512,7 +512,7 @@ int cli_debug_level(struct cli_def *cli, const char *command, char *argv[], int 
 int cli_debug_terminal(struct cli_def *cli, const char *command, char *argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
 
-    logger_profile* lp = LogOutput::get()->target_profiles()[(uint64_t)fileno(cli->client)];
+    auto const& lp = LogOutput::get()->target_profiles()[(uint64_t)fileno(cli->client)];
     if(argc > 0) {
 
         std::string a1 = argv[0];
@@ -561,22 +561,22 @@ int cli_debug_logfile(struct cli_def *cli, const char *command, char *argv[], in
 
             int newlev = 0;
             if(a1 == "reset") {
-                newlev = static_cast<int>(CfgFactory::get().internal_init_level.level());
+                newlev = static_cast<int>(CfgFactory::get()->internal_init_level.level());
             } else {
                 newlev = safe_val(argv[0]);
             }
 
             if(newlev >= 0) {
-                for(auto [ o_ptr, mut ]: LogOutput::get()->targets()) {
+                for(auto const& [ o_ptr, mut ]: LogOutput::get()->targets()) {
 
-                    std::string fnm = LogOutput::get()->target_name((uint64_t)(o_ptr));
+                    std::string fnm = LogOutput::get()->target_name((uint64_t)(o_ptr.get()));
 
                     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
-                    if( fnm == CfgFactory::get().log_file ) {
+                    if( fnm == CfgFactory::get()->log_file ) {
 
                         cli_print(cli, "changing '%s' loglevel to %d", fnm.c_str(), newlev);
-                        LogOutput::get()->target_profiles()[(uint64_t) (o_ptr)]->level_.level(newlev);
+                        LogOutput::get()->target_profiles()[(uint64_t) (o_ptr.get())]->level_.level(newlev);
                     }
                 }
             }
@@ -860,7 +860,7 @@ int cli_debug_set(struct cli_def *cli, const char *command, char *argv[], int ar
 int cli_save_config(struct cli_def *cli, const char *command, char *argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
 
-    int n = CfgFactory::get().save_config();
+    int n = CfgFactory::get()->save_config();
     if(n < 0) {
         cli_print(cli, "error writing config file!");
     }
@@ -878,7 +878,7 @@ int cli_exec_reload(struct cli_def *cli, const char *command, char *argv[], int 
     debug_cli_params(cli, command, argv, argc);
 
     CliGlobalState::config_changed_flag = false;
-    bool CONFIG_LOADED = SmithProxy::instance().load_config(CfgFactory::get().config_file, true);
+    bool CONFIG_LOADED = SmithProxy::instance().load_config(CfgFactory::get()->config_file, true);
 
     if(CONFIG_LOADED) {
         cli_print(cli, "Configuration file reloaded successfully");
@@ -1248,94 +1248,94 @@ bool apply_setting(std::string const& section, std::string const& varname, struc
     bool ret = false;
 
     if( 0 == section.find("settings") ) {
-        ret = CfgFactory::get().load_settings();
+        ret = CfgFactory::get()->load_settings();
     } else
     if( 0 == section.find("debug") ) {
-        ret = CfgFactory::get().load_debug();
+        ret = CfgFactory::get()->load_debug();
     } else
     if( 0 == section.find("policy") ) {
 
-        CfgFactory::get().cleanup_db_policy();
-        ret = CfgFactory::get().load_db_policy();
+        CfgFactory::get()->cleanup_db_policy();
+        ret = CfgFactory::get()->load_db_policy();
     } else
     if( 0 == section.find("port_objects") ) {
 
-        CfgFactory::get().cleanup_db_port();
-        ret = CfgFactory::get().load_db_port();
+        CfgFactory::get()->cleanup_db_port();
+        ret = CfgFactory::get()->load_db_port();
 
         if(ret) {
-            CfgFactory::get().cleanup_db_policy();
-            ret = CfgFactory::get().load_db_policy();
+            CfgFactory::get()->cleanup_db_policy();
+            ret = CfgFactory::get()->load_db_policy();
         }
     } else
     if( 0 == section.find("proto_objects") ) {
 
-        CfgFactory::get().cleanup_db_proto();
-        ret = CfgFactory::get().load_db_proto();
+        CfgFactory::get()->cleanup_db_proto();
+        ret = CfgFactory::get()->load_db_proto();
 
         if(ret) {
-            CfgFactory::get().cleanup_db_policy();
-            ret = CfgFactory::get().load_db_policy();
+            CfgFactory::get()->cleanup_db_policy();
+            ret = CfgFactory::get()->load_db_policy();
         }
     } else
     if( 0 == section.find("address_objects") ) {
 
-        CfgFactory::get().cleanup_db_address();
-        ret = CfgFactory::get().load_db_address();
+        CfgFactory::get()->cleanup_db_address();
+        ret = CfgFactory::get()->load_db_address();
 
         if(ret) {
-            CfgFactory::get().cleanup_db_policy();
-            ret = CfgFactory::get().load_db_policy();
+            CfgFactory::get()->cleanup_db_policy();
+            ret = CfgFactory::get()->load_db_policy();
         }
     } else
     if( 0 == section.find("detection_profiles") ) {
 
-        CfgFactory::get().cleanup_db_prof_detection();
-        ret = CfgFactory::get().load_db_prof_detection();
+        CfgFactory::get()->cleanup_db_prof_detection();
+        ret = CfgFactory::get()->load_db_prof_detection();
 
         if(ret) {
-            CfgFactory::get().cleanup_db_policy();
-            ret = CfgFactory::get().load_db_policy();
+            CfgFactory::get()->cleanup_db_policy();
+            ret = CfgFactory::get()->load_db_policy();
         }
     } else
     if( 0 == section.find("content_profiles") ) {
 
-        CfgFactory::get().cleanup_db_prof_content();
-        ret = CfgFactory::get().load_db_prof_content();
+        CfgFactory::get()->cleanup_db_prof_content();
+        ret = CfgFactory::get()->load_db_prof_content();
 
         if(ret) {
-            CfgFactory::get().cleanup_db_policy();
-            ret = CfgFactory::get().load_db_policy();
+            CfgFactory::get()->cleanup_db_policy();
+            ret = CfgFactory::get()->load_db_policy();
         }
     } else
     if( 0 == section.find("tls_profiles") ) {
 
-        CfgFactory::get().cleanup_db_prof_tls();
-        ret = CfgFactory::get().load_db_prof_tls();
+        CfgFactory::get()->cleanup_db_prof_tls();
+        ret = CfgFactory::get()->load_db_prof_tls();
 
         if(ret) {
-            CfgFactory::get().cleanup_db_policy();
-            ret = CfgFactory::get().load_db_policy();
+            CfgFactory::get()->cleanup_db_policy();
+            ret = CfgFactory::get()->load_db_policy();
         }
     } else
     if( 0 == section.find("alg_dns_profiles") ) {
 
-        CfgFactory::get().cleanup_db_prof_alg_dns();
-        ret = CfgFactory::get().load_db_prof_alg_dns();
+        CfgFactory::get()->cleanup_db_prof_alg_dns();
+        ret = CfgFactory::get()->load_db_prof_alg_dns();
 
         if(ret) {
-            CfgFactory::get().cleanup_db_policy();
-            ret = CfgFactory::get().load_db_policy();
+            CfgFactory::get()->cleanup_db_policy();
+            ret = CfgFactory::get()->load_db_policy();
         }
     } else
     if( 0 == section.find("auth_profiles") ) {
 
-        CfgFactory::get().cleanup_db_prof_auth();
-        ret = CfgFactory::get().load_db_prof_auth();
+        CfgFactory::get()->cleanup_db_prof_auth();
+        ret = CfgFactory::get()->load_db_prof_auth();
 
         if(ret) {
-            CfgFactory::get().cleanup_db_policy();
-            ret = CfgFactory::get().load_db_policy();
+            CfgFactory::get()->cleanup_db_policy();
+            ret = CfgFactory::get()->load_db_policy();
         }
     } else
     if( 0 == section.find("starttls_signatures") or
@@ -1344,8 +1344,8 @@ bool apply_setting(std::string const& section, std::string const& varname, struc
         SmithProxy::load_signatures(CfgFactory::cfg_obj(), "starttls_signatures", SigFactory::get().signature_tree(),0);
         SmithProxy::load_signatures(CfgFactory::cfg_obj(), "detection_signatures", SigFactory::get().signature_tree());
 
-        CfgFactory::get().cleanup_db_policy();
-        ret = CfgFactory::get().load_db_policy();
+        CfgFactory::get()->cleanup_db_policy();
+        ret = CfgFactory::get()->load_db_policy();
     } else {
         cli_print(cli, "config apply - unknown config section!");
     }
@@ -1632,7 +1632,7 @@ int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[]
             for(auto const& arg: what) {
 
                 // attempt to get and cast section element to CfgElement shared pointer
-                auto elem = CfgFactory::get().section_element<CfgElement>(section, arg);
+                auto elem = CfgFactory::get()->section_element<CfgElement>(section, arg);
                 if(elem and elem->has_usage()) {
 
                     auto brk = false;
@@ -1663,16 +1663,16 @@ int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[]
 
             removed_internal = ( remove(section, vec_full_args) > 0 );
             if(removed_internal) {
-                CfgFactory::get().cleanup_db_proto();
-                CfgFactory::get().load_db_proto();
+                CfgFactory::get()->cleanup_db_proto();
+                CfgFactory::get()->load_db_proto();
             }
         }
         else if(section == "port_objects") {
 
             removed_internal = ( remove(section, vec_full_args) > 0 );
             if(removed_internal) {
-                CfgFactory::get().cleanup_db_port();
-                CfgFactory::get().load_db_port();
+                CfgFactory::get()->cleanup_db_port();
+                CfgFactory::get()->load_db_port();
             }
 
         }
@@ -1680,56 +1680,56 @@ int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[]
 
             removed_internal = ( remove(section, vec_full_args) > 0 );
             if(removed_internal) {
-                CfgFactory::get().cleanup_db_address();
-                CfgFactory::get().load_db_address();
+                CfgFactory::get()->cleanup_db_address();
+                CfgFactory::get()->load_db_address();
             }
         }
         else if(section == "detection_profiles") {
 
             removed_internal = ( remove(section, vec_full_args) > 0 );
             if(removed_internal) {
-                CfgFactory::get().cleanup_db_prof_detection();
-                CfgFactory::get().load_db_prof_detection();
+                CfgFactory::get()->cleanup_db_prof_detection();
+                CfgFactory::get()->load_db_prof_detection();
             }
         }
         else if(section == "content_profiles") {
 
             removed_internal = ( remove(section, vec_full_args) > 0 );
             if(removed_internal) {
-                CfgFactory::get().cleanup_db_prof_content();
-                CfgFactory::get().load_db_prof_content();
+                CfgFactory::get()->cleanup_db_prof_content();
+                CfgFactory::get()->load_db_prof_content();
             }
         }
         else if(section == "tls_ca") {
 
             removed_internal = ( remove(section, vec_full_args) > 0 );
             if(removed_internal) {
-                CfgFactory::get().cleanup_db_tls_ca();
-                CfgFactory::get().load_db_tls_ca();
+                CfgFactory::get()->cleanup_db_tls_ca();
+                CfgFactory::get()->load_db_tls_ca();
             }
         }
         else if(section == "tls_profiles") {
 
             removed_internal = ( remove(section, vec_full_args) > 0 );
             if(removed_internal) {
-                CfgFactory::get().cleanup_db_prof_tls();
-                CfgFactory::get().load_db_prof_tls();
+                CfgFactory::get()->cleanup_db_prof_tls();
+                CfgFactory::get()->load_db_prof_tls();
             }
         }
         else if(section == "alg_dns_profiles") {
 
             removed_internal = ( remove(section, vec_full_args) > 0 );
             if(removed_internal) {
-                CfgFactory::get().cleanup_db_prof_alg_dns();
-                CfgFactory::get().load_db_prof_alg_dns();
+                CfgFactory::get()->cleanup_db_prof_alg_dns();
+                CfgFactory::get()->load_db_prof_alg_dns();
             }
         }
         else if(section == "auth_profiles") {
 
             removed_internal = ( remove(section, vec_full_args) > 0 );
             if(removed_internal) {
-                CfgFactory::get().cleanup_db_prof_auth();
-                CfgFactory::get().load_db_prof_auth();
+                CfgFactory::get()->cleanup_db_prof_auth();
+                CfgFactory::get()->load_db_prof_auth();
             }
         }
         else if(section == "policy") {
@@ -1755,8 +1755,8 @@ int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[]
 
                 section = unmask;
 
-                CfgFactory::get().cleanup_db_policy();
-                CfgFactory::get().load_db_policy();
+                CfgFactory::get()->cleanup_db_policy();
+                CfgFactory::get()->load_db_policy();
             }
         }
 
@@ -1764,8 +1764,8 @@ int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[]
         if(removed_internal) {
             reconstruct_cli();
 
-            CfgFactory::get().cleanup_db_policy();
-            CfgFactory::get().load_db_policy();
+            CfgFactory::get()->cleanup_db_policy();
+            CfgFactory::get()->load_db_policy();
 
             cli_print(cli, " ");
             cli_print(cli, "%s element has been removed.", section.c_str());
@@ -1840,12 +1840,12 @@ int cli_policy_move_cb(struct cli_def *cli, const char *command, char *argv[], i
             } else if (cmd_split[2] == "top") {
                 index_2 = 0;
             } else if (cmd_split[2] == "down") {
-                auto elem = CfgFactory::get().db_policy_list.size();
+                auto elem = CfgFactory::get()->db_policy_list.size();
                 if (index_1 + 1 < static_cast<int>(elem))
                     index_2 = index_1 + 1;
             } else if (cmd_split[2] == "bottom") {
 
-                auto elem = CfgFactory::get().db_policy_list.size();
+                auto elem = CfgFactory::get()->db_policy_list.size();
                 if (elem > 0)
                     index_2 = static_cast<int>(elem - 1);
             } else {
@@ -1871,9 +1871,9 @@ int cli_policy_move_cb(struct cli_def *cli, const char *command, char *argv[], i
     _debug(cli, "moving %d %s %d", index_1, cmd_split[2].c_str(), index_2);
 
     if(cmd_split[2] == "after" or cmd_split[2] == "down" or cmd_split[2] == "bottom") {
-        if(CfgFactory::get().move_policy(index_1, index_2, CfgFactory::op_move::OP_MOVE_AFTER)) {
-            CfgFactory::get().cleanup_db_policy();
-            CfgFactory::get().load_db_policy();
+        if(CfgFactory::get()->move_policy(index_1, index_2, CfgFactory::op_move::OP_MOVE_AFTER)) {
+            CfgFactory::get()->cleanup_db_policy();
+            CfgFactory::get()->load_db_policy();
 
             cli_print(cli, " ");
             // cli_print(cli, "Policy moved.");
@@ -1884,9 +1884,9 @@ int cli_policy_move_cb(struct cli_def *cli, const char *command, char *argv[], i
         }
     }
     else if(cmd_split[2] == "before" or cmd_split[2] == "up" or cmd_split[2] == "top") {
-        if(CfgFactory::get().move_policy(index_1, index_2, CfgFactory::op_move::OP_MOVE_BEFORE)) {
-            CfgFactory::get().cleanup_db_policy();
-            CfgFactory::get().load_db_policy();
+        if(CfgFactory::get()->move_policy(index_1, index_2, CfgFactory::op_move::OP_MOVE_BEFORE)) {
+            CfgFactory::get()->cleanup_db_policy();
+            CfgFactory::get()->load_db_policy();
 
             cli_print(cli, " ");
             // cli_print(cli, "Policy moved.");
@@ -1933,7 +1933,7 @@ int cli_generic_add_cb(struct cli_def *cli, const char *command, char *argv[], i
 
     if(section == "policy") {
         args.clear();
-        args.push_back(string_format("[%d]", CfgFactory::get().db_policy_list.size()));
+        args.push_back(string_format("[%d]", CfgFactory::get()->db_policy_list.size()));
     }
 
     // if nothing to add, print out something smart and exit
@@ -1977,8 +1977,8 @@ int cli_generic_add_cb(struct cli_def *cli, const char *command, char *argv[], i
                     // 'add' has empty args when adding to an array, so let's be a bit nasty here
                     if(section == "policy")
                         cli_generate_move_commands(cli, cli->mode, cli_move, std::get<1>(callback_entry).cmd("move"),
-                                                   static_cast<int>(CfgFactory::get().db_policy_list.size()-1),
-                                                   CfgFactory::get().db_policy_list.size());
+                                                   static_cast<int>(CfgFactory::get()->db_policy_list.size()-1),
+                                                   CfgFactory::get()->db_policy_list.size());
                 }
             }
 
@@ -1997,7 +1997,7 @@ int cli_generic_add_cb(struct cli_def *cli, const char *command, char *argv[], i
 
             if(section == "policy") {
                 // 'add' has empty args when adding to an array, so let's be a bit nasty here
-                cli_generate_set_commands(cli, section + ".[" + string_format("%d]", static_cast<int>(CfgFactory::get().db_policy_list.size()-1)));
+                cli_generate_set_commands(cli, section + ".[" + string_format("%d]", static_cast<int>(CfgFactory::get()->db_policy_list.size()-1)));
             }
             else {
                 cli_generate_set_commands(cli, section + "." + args[0]);
@@ -2008,74 +2008,74 @@ int cli_generic_add_cb(struct cli_def *cli, const char *command, char *argv[], i
 
         Setting &s = CfgFactory::cfg_root().lookup(section.c_str());
         if(section == "proto_objects") {
-            if (CfgFactory::get().new_proto_object(s, args[0])) {
-                CfgFactory::get().load_db_proto();
+            if (CfgFactory::get()->new_proto_object(s, args[0])) {
+                CfgFactory::get()->load_db_proto();
                 register_cli();
                 created_internal = true;
             }
         }
         else if(section == "port_objects") {
-            if (CfgFactory::get().new_port_object(s, args[0])) {
-                CfgFactory::get().load_db_port();
+            if (CfgFactory::get()->new_port_object(s, args[0])) {
+                CfgFactory::get()->load_db_port();
                 register_cli();
                 created_internal = true;
             }
         }
         else if(section == "address_objects") {
-            if (CfgFactory::get().new_address_object(s, args[0])) {
-                CfgFactory::get().load_db_address();
+            if (CfgFactory::get()->new_address_object(s, args[0])) {
+                CfgFactory::get()->load_db_address();
                 register_cli();
                 created_internal = true;
             }
         }
         else if(section == "detection_profiles") {
-            if (CfgFactory::get().new_detection_profile(s, args[0])) {
-                CfgFactory::get().load_db_prof_detection();
+            if (CfgFactory::get()->new_detection_profile(s, args[0])) {
+                CfgFactory::get()->load_db_prof_detection();
                 register_cli();
                 created_internal = true;
             }
         }
         else if(section == "content_profiles") {
-            if (CfgFactory::get().new_content_profile(s, args[0])) {
-                CfgFactory::get().load_db_prof_content();
+            if (CfgFactory::get()->new_content_profile(s, args[0])) {
+                CfgFactory::get()->load_db_prof_content();
                 register_cli();
                 created_internal = true;
             }
         }
         else if(section == "tls_ca") {
-            if (CfgFactory::get().new_tls_ca(s, args[0])) {
+            if (CfgFactory::get()->new_tls_ca(s, args[0])) {
                 // missing load_db_tls_ca
                 register_cli();
                 created_internal = true;
             }
         }
         else if(section == "tls_profiles") {
-            if (CfgFactory::get().new_tls_profile(s, args[0])) {
-                CfgFactory::get().load_db_prof_tls();
+            if (CfgFactory::get()->new_tls_profile(s, args[0])) {
+                CfgFactory::get()->load_db_prof_tls();
                 register_cli();
                 created_internal = true;
             }
         }
         else if(section == "alg_dns_profiles") {
-            if (CfgFactory::get().new_alg_dns_profile(s, args[0])) {
-                CfgFactory::get().load_db_prof_alg_dns();
+            if (CfgFactory::get()->new_alg_dns_profile(s, args[0])) {
+                CfgFactory::get()->load_db_prof_alg_dns();
                 register_cli();
                 created_internal = true;
             }
         }
         else if(section == "auth_profiles") {
-            if (CfgFactory::get().new_auth_profile(s, args[0])) {
-                CfgFactory::get().load_db_prof_auth();
+            if (CfgFactory::get()->new_auth_profile(s, args[0])) {
+                CfgFactory::get()->load_db_prof_auth();
                 register_cli();
                 created_internal = true;
             }
         }
         else if(section == "policy") {
-            if (CfgFactory::get().new_policy(s, args[0])) {
+            if (CfgFactory::get()->new_policy(s, args[0])) {
 
                 // policy is a list - it must be cleared before loaded again
-                CfgFactory::get().cleanup_db_policy();
-                CfgFactory::get().load_db_policy();
+                CfgFactory::get()->cleanup_db_policy();
+                CfgFactory::get()->load_db_policy();
                 register_cli();
                 created_internal = true;
             }
@@ -2581,9 +2581,9 @@ void client_thread(int client_socket) {
     // Pass the connection off to libcli
     LogOutput::get()->remote_targets(string_format("cli-%d", client_socket), client_socket);
 
-    logger_profile lp;
-    lp.level_ = CfgFactory::get().cli_init_level;
-    LogOutput::get()->target_profiles()[(uint64_t)client_socket] = &lp;
+    auto lp = std::make_unique<logger_profile>();
+    lp->level_ = CfgFactory::get()->cli_init_level;
+    LogOutput::get()->target_profiles()[(uint64_t)client_socket] = std::move(lp);
 
 
     load_defaults();

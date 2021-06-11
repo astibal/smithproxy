@@ -47,9 +47,9 @@ int AuthFactory::shm_ip6_table_refresh()  {
         std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
         shm_ip6_map.attach(string_format(AUTH_IP6_MEM_NAME,
-                                         CfgFactory::get().tenant_name.c_str()).c_str(),
+                                         CfgFactory::get()->tenant_name.c_str()).c_str(),
                                          AUTH_IP6_MEM_SIZE,
-                           string_format(AUTH_IP6_SEM_NAME, CfgFactory::get().tenant_name.c_str()).c_str());
+                           string_format(AUTH_IP6_SEM_NAME, CfgFactory::get()->tenant_name.c_str()).c_str());
 
     }
 
