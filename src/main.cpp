@@ -84,11 +84,11 @@ void prepare_queue_logger(loglevel const& lev) {
     std::thread* log_thread  = create_log_writer();
     if(log_thread != nullptr) {
         pthread_setname_np(log_thread->native_handle(),string_format("sxy_lwr_%d",
-                                                                     CfgFactory::get().tenant_index).c_str());
+                                                                     CfgFactory::get()->tenant_index).c_str());
     }
 
     LogOutput::get()->level(lev);
-    CfgFactory::get().log_version(false);  // don't delay, but display warning
+    CfgFactory::get()->log_version(false);  // don't delay, but display warning
 }
 
 
@@ -96,8 +96,8 @@ void prepare_html_renderer() {
 
     auto& log = DaemonFactory::instance()->log;
 
-    if(!html()->load_files(CfgFactory::get().dir_msg_templates)) {
-        _err("Cannot load messages from '%s', replacements will not work correctly !!!", CfgFactory::get().dir_msg_templates.c_str());
+    if(!html()->load_files(CfgFactory::get()->dir_msg_templates)) {
+        _err("Cannot load messages from '%s', replacements will not work correctly !!!", CfgFactory::get()->dir_msg_templates.c_str());
     } else {
         std::string test = "test";
         _dia("Message testing string: %s", html()->render_noargs(test).c_str());
@@ -105,7 +105,7 @@ void prepare_html_renderer() {
 }
 
 void prepare_mem_debugs() {
-    if(CfgFactory::get().cfg_openssl_mem_dbg) {
+    if(CfgFactory::get()->cfg_openssl_mem_dbg) {
 
 
 #ifndef BUILD_RELEASE
@@ -136,7 +136,7 @@ void print_stats() {
 void do_cleanup() {
 
     // this proven to be better idea than cleanup after exit() call
-    CfgFactory::get().cleanup();
+    CfgFactory::get()->cleanup();
 
     CRYPTO_cleanup_all_ex_data();
     ERR_free_strings();
@@ -153,42 +153,42 @@ void prepare_tenanting(bool is_custom_file) {
     std::string config_file_tenant = "/etc/smithproxy/smithproxy.%s.cfg";
     if(is_custom_file) {
         // if user supplied config file, we will obey instructions (it's already set in factory)
-        config_file_tenant = CfgFactory::get().config_file;
+        config_file_tenant = CfgFactory::get()->config_file;
     }
 
-    auto& this_daemon = DaemonFactory::instance();
+    auto this_daemon = DaemonFactory::instance();
 
-    if( (! CfgFactory::get().tenant_name.empty())) {
+    if( (! CfgFactory::get()->tenant_name.empty())) {
 
-        if(CfgFactory::get().tenant_index < 0) {
+        if(CfgFactory::get()->tenant_index < 0) {
             _war("... tenant name set, but no index given (assuming idx=0)");
-            CfgFactory::get().tenant_index = 0;
+            CfgFactory::get()->tenant_index = 0;
         }
 
         _war("Tenant: '%s', index %d",
-             CfgFactory::get().tenant_name.c_str(),
-             CfgFactory::get().tenant_index);
+             CfgFactory::get()->tenant_name.c_str(),
+             CfgFactory::get()->tenant_index);
 
 
-        std::string tenant_cfg = string_format(config_file_tenant.c_str(), CfgFactory::get().tenant_name.c_str());
+        std::string tenant_cfg = string_format(config_file_tenant.c_str(), CfgFactory::get()->tenant_name.c_str());
 
         struct stat s{};
         if (stat(tenant_cfg.c_str(),&s) == 0) {
             _war("Tenant config: %s",tenant_cfg.c_str());
-            CfgFactory::get().config_file = tenant_cfg;
+            CfgFactory::get()->config_file = tenant_cfg;
         } else {
             _war("Tenant config: using default",tenant_cfg.c_str());
         }
 
-        this_daemon.set_tenant("smithproxy", CfgFactory::get().tenant_name);
+        this_daemon->set_tenant("smithproxy", CfgFactory::get()->tenant_name);
     }
     else {
         _war("Starting non-tenant configuration");
-        CfgFactory::get().tenant_index = 0;
-        this_daemon.set_tenant("smithproxy", "default");
+        CfgFactory::get()->tenant_index = 0;
+        this_daemon->set_tenant("smithproxy", "default");
     }
 
-    SmithProxy::instance().tenant_index(CfgFactory::get().tenant_index);
+    SmithProxy::instance().tenant_index(CfgFactory::get()->tenant_index);
 }
 
 bool raise_limits() {
@@ -249,6 +249,7 @@ void print_help() {
 int main(int argc, char *argv[]) {
 
     memPool::pool();
+    CfgFactory::init();
 
 #ifdef MEMPOOL_ALL
     if( CRYPTO_set_mem_functions(mempool_alloc, mempool_realloc, mempool_free) == 0) {
@@ -265,10 +266,10 @@ int main(int argc, char *argv[]) {
     static struct option long_options[] =
             {
                     /* These options set a flag. */
-                    {"debug",   no_argument,        (int*) &CfgFactory::get().args_debug_flag.level_ref(), iDEB},
-                    {"diagnose",   no_argument,     (int*) &CfgFactory::get().args_debug_flag.level_ref(), iDIA},
-                    {"dump",   no_argument,         (int*) &CfgFactory::get().args_debug_flag.level_ref(), iDUM},
-                    {"extreme",   no_argument,      (int*) &CfgFactory::get().args_debug_flag.level_ref(), iEXT},
+                    {"debug",   no_argument,        (int*) &CfgFactory::get()->args_debug_flag.level_ref(), iDEB},
+                    {"diagnose",   no_argument,     (int*) &CfgFactory::get()->args_debug_flag.level_ref(), iDIA},
+                    {"dump",   no_argument,         (int*) &CfgFactory::get()->args_debug_flag.level_ref(), iDUM},
+                    {"extreme",   no_argument,      (int*) &CfgFactory::get()->args_debug_flag.level_ref(), iEXT},
 
                     {"config-file", required_argument, nullptr, 'c'},
                     {"config-check-only", no_argument, nullptr, 'o'},
@@ -287,7 +288,7 @@ int main(int argc, char *argv[]) {
     auto this_daemon = DaemonFactory::instance();
     auto& log = this_daemon->log;
 
-    CfgFactory::get().config_file = "/etc/smithproxy/smithproxy.cfg";
+    CfgFactory::get()->config_file = "/etc/smithproxy/smithproxy.cfg";
     bool is_custom_config_file = false;
 
     while(true) {
@@ -303,12 +304,12 @@ int main(int argc, char *argv[]) {
                 break;
                 
             case 'c':
-                CfgFactory::get().config_file = std::string(optarg);
+                CfgFactory::get()->config_file = std::string(optarg);
                 is_custom_config_file = true;
                 break;      
                 
             case 'o':
-                CfgFactory::get().config_file_check_only = true;
+                CfgFactory::get()->config_file_check_only = true;
                 LogOutput::get()->dup2_cout(true);
                 break;
                 
@@ -317,11 +318,11 @@ int main(int argc, char *argv[]) {
                 break;
                 
             case 'i':
-                CfgFactory::get().tenant_index = std::stoi(std::string(optarg));
+                CfgFactory::get()->tenant_index = std::stoi(std::string(optarg));
                 break;
                 
             case 't':
-                CfgFactory::get().tenant_name = std::string(optarg);
+                CfgFactory::get()->tenant_name = std::string(optarg);
                 break;
 
             case 'h':
@@ -350,13 +351,13 @@ int main(int argc, char *argv[]) {
 
 
     // be more verbose if check only requested
-    if(CfgFactory::get().config_file_check_only) {
+    if(CfgFactory::get()->config_file_check_only) {
         LogOutput::get()->level(DIA);
     }
-    bool CONFIG_LOADED = SmithProxy::instance().load_config(CfgFactory::get().config_file);
+    bool CONFIG_LOADED = SmithProxy::instance().load_config(CfgFactory::get()->config_file);
 
     // exit if that's only about config check - we should not proceed
-    if(CfgFactory::get().config_file_check_only) {
+    if(CfgFactory::get()->config_file_check_only) {
 
         if (! CONFIG_LOADED) {
             std::cerr <<  "Failed to load config file!" << std::endl;
@@ -364,7 +365,7 @@ int main(int argc, char *argv[]) {
             std::cerr <<  "Config file check OK" << std::endl;
         }
 
-        CfgFactory::get().cleanup();
+        CfgFactory::get()->cleanup();
 
         if(! CONFIG_LOADED) {
             exit(-1);
@@ -376,8 +377,8 @@ int main(int argc, char *argv[]) {
 
 
     // if logging set in cmd line, use it 
-    if(CfgFactory::get().args_debug_flag > NON) {
-        LogOutput::get()->level(CfgFactory::get().args_debug_flag);
+    if(CfgFactory::get()->args_debug_flag > NON) {
+        LogOutput::get()->level(CfgFactory::get()->args_debug_flag);
     }
     
     // set level to what's in the config
@@ -385,19 +386,19 @@ int main(int argc, char *argv[]) {
         _fat("Config check: error loading config file.");
         std::cerr << "Config check: error loading config file."  << std::endl;
 
-        CfgFactory::get().cleanup();
+        CfgFactory::get()->cleanup();
         exit(1);
     }
     
-    if(!CfgFactory::get().apply_tenant_config()) {
+    if(!CfgFactory::get()->apply_tenant_config()) {
         _fat("Failed to apply tenant specific configuration!");
         std::cerr << "Failed to apply tenant specific configuration!"  << std::endl;
 
-        CfgFactory::get().cleanup();
+        CfgFactory::get()->cleanup();
         exit(2);
     }
 
-    if(CfgFactory::get().cfg_mtrace_enable) {
+    if(CfgFactory::get()->cfg_mtrace_enable) {
 #ifdef MEM_DEBUG
         putenv("MALLOC_TRACE=/var/log/smithproxy_mtrace.log");
         mtrace();
@@ -406,18 +407,18 @@ int main(int argc, char *argv[]) {
 
     
     // if there is loglevel specified in config file and is bigger than we currently have set, use it
-    if(CfgFactory::get().internal_init_level > LogOutput::get()->level()) {
-        LogOutput::get()->level(CfgFactory::get().internal_init_level);
+    if(CfgFactory::get()->internal_init_level > LogOutput::get()->level()) {
+        LogOutput::get()->level(CfgFactory::get()->internal_init_level);
     }
     
-    if(this_daemon.exists_pidfile()) {
+    if(this_daemon->exists_pidfile()) {
         _fat("There is PID file already in the system.");
-        _fat("Please make sure smithproxy is not running, remove %s and try again.", this_daemon.pid_file.c_str());
+        _fat("Please make sure smithproxy is not running, remove %s and try again.", this_daemon->pid_file.c_str());
 
         std::cerr << "There is PID file already in the system." << std::endl;
-        std::cerr << "Please make sure smithproxy is not running, remove " << this_daemon.pid_file << " and try again."  << std::endl;
+        std::cerr << "Please make sure smithproxy is not running, remove " << this_daemon->pid_file << " and try again."  << std::endl;
 
-        CfgFactory::get().cleanup();
+        CfgFactory::get()->cleanup();
         exit(-5);
     }
     
@@ -436,22 +437,22 @@ int main(int argc, char *argv[]) {
             _fat("Cannot daemonize without logging to file.");
             std::cerr << "Cannot daemonize without logging to file."  << std::endl;
 
-            CfgFactory::get().cleanup();
+            CfgFactory::get()->cleanup();
             exit(-5);
         }
 
         LogOutput::get()->dup2_cout(false);
         _inf("Entering daemon mode.");
 
-        int dem = this_daemon.daemonize();
+        int dem = this_daemon->daemonize();
         if(dem == 0) {
             // master - to exit
-            CfgFactory::get().cleanup();
+            CfgFactory::get()->cleanup();
             exit(0);
         }
         else if(dem < 0) {
             // slave, but failed
-            CfgFactory::get().cleanup();
+            CfgFactory::get()->cleanup();
             exit(-1);
         }
 
