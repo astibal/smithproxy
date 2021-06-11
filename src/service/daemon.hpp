@@ -58,8 +58,8 @@ struct DaemonFactory : public LoganMate {
     [[nodiscard]] std::string &class_name() const override;
     [[nodiscard]] std::string hr() const override;
 
-    static DaemonFactory& instance() {
-        static DaemonFactory d;
+    static std::shared_ptr<DaemonFactory> instance() {
+        static std::shared_ptr<DaemonFactory> d = std::make_shared<DaemonFactory>();
         return d;
     }
     void set_tenant(const std::string& name, const std::string& tenant_id);
@@ -85,10 +85,11 @@ struct DaemonFactory : public LoganMate {
     DaemonFactory(DaemonFactory const&) = delete;
     DaemonFactory& operator=(DaemonFactory const&) = delete;
     virtual ~DaemonFactory() { unlink_pidfile(); }
-private:
+
     DaemonFactory() : log(logan_attached<DaemonFactory>(this, "service")) {
         ::memset((void*)crashlog_file, 0, LOG_FILENAME_SZ);
     }
+private:
 
     TYPENAME_BASE("DaemonFactory")
 };

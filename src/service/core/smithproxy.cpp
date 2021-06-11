@@ -298,12 +298,12 @@ void SmithProxy::run() {
     cli_thread = std::make_shared<std::thread>([] () {
         CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
 
-        auto& this_daemon = DaemonFactory::instance();
-        auto& log = this_daemon.log;
+        auto this_daemon = DaemonFactory::instance();
+        auto& log = this_daemon->log;
 
         _inf("Starting CLI");
         DaemonFactory::set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
-        _dia("smithproxy_cli: max file descriptors: %d", this_daemon.get_limit_fd());
+        _dia("smithproxy_cli: max file descriptors: %d", this_daemon->get_limit_fd());
 
         cli_loop(CliState::get().cli_port);
         _dia("cli workers torn down.");
@@ -319,11 +319,11 @@ void SmithProxy::run() {
             auto a_thread = std::make_shared<std::thread>([proxy]() {
                 CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
 
-                auto& this_daemon = DaemonFactory::instance();
-                auto& log = this_daemon.log;
+                auto this_daemon = DaemonFactory::instance();
+                auto& log = this_daemon->log;
 
                 DaemonFactory::set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
-                _dia("TCP listener: max file descriptors: %d", this_daemon.get_limit_fd());
+                _dia("TCP listener: max file descriptors: %d", this_daemon->get_limit_fd());
 
                 proxy->run();
                 _dia("TCP listener: workers torn down.");
@@ -650,7 +650,7 @@ bool SmithProxy::init_syslog() {
 
 bool SmithProxy::load_config(std::string& config_f, bool reload) {
     bool ret = true;
-    auto& this_daemon = DaemonFactory::instance();
+    auto this_daemon = DaemonFactory::instance();
     auto& log = instance().log;
 
     using namespace libconfig;
@@ -704,7 +704,7 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
 
 
             //init crashlog file with dafe default
-            this_daemon.set_crashlog("/tmp/smithproxy_crash.log");
+            this_daemon->set_crashlog("/tmp/smithproxy_crash.log");
 
             if(load_if_exists(CfgFactory::cfg_root()["settings"], "log_file",CfgFactory::get()->log_file_base)) {
 

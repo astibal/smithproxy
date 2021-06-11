@@ -310,8 +310,8 @@ bool load_config(std::string& config_f, bool reload) {
     bool ret = true;
     std::lock_guard<std::recursive_mutex> l(smithd_cfg_write_lock);
 
-    auto& this_daemon = DaemonFactory::instance();
-    auto& log = this_daemon.log;
+    auto this_daemon = DaemonFactory::instance();
+    auto& log = this_daemon->log;
 
     using namespace libconfig;
     Config cfgapi;
@@ -332,7 +332,7 @@ bool load_config(std::string& config_f, bool reload) {
 
                 // prepare custom crashlog file
                 std::string crlog = log_target + ".crashlog.log";
-                this_daemon.set_crashlog(crlog.c_str());
+                this_daemon->set_crashlog(crlog.c_str());
 
                 auto *o = new std::ofstream(log_target.c_str(), std::ios::app);
                 LogOutput::get()->targets(log_target, o);
@@ -387,8 +387,8 @@ bool load_config(std::string& config_f, bool reload) {
 
 int smithd_apply_index(std::string& what , const std::string& idx) {
 
-    auto& this_daemon = DaemonFactory::instance();
-    auto& log = this_daemon.log;
+    auto this_daemon = DaemonFactory::instance();
+    auto& log = this_daemon->log;
 
     _deb("apply_index: what=%s idx=%s",what.c_str(),idx.c_str());
     int port = std::stoi(what);
@@ -411,10 +411,10 @@ bool smithd_apply_tenant_config() {
 
 int main(int argc, char *argv[]) {
     
-    DaemonFactory& this_daemon = DaemonFactory::instance();
-    auto& log = this_daemon.log;
+    auto this_daemon = DaemonFactory::instance();
+    auto& log = this_daemon->log;
 
-    this_daemon.pid_file="/var/run/smithd.%s.pid";
+    this_daemon->pid_file="/var/run/smithd.%s.pid";
 
     config_file = "/etc/smithproxy/smithd.cfg";
     std::string config_file_tenant = "/etc/smithproxy/smithd.%s.cfg";
@@ -478,7 +478,7 @@ int main(int argc, char *argv[]) {
     if(cfg_tenant_index.size() > 0 && cfg_tenant_name.size() > 0) {
         _war("Starting tenant: '%s', index %s",cfg_tenant_name.c_str(),cfg_tenant_index.c_str());
 
-        this_daemon.set_tenant("smithd", cfg_tenant_name);
+        this_daemon->set_tenant("smithd", cfg_tenant_name);
     } 
     else if (cfg_tenant_index.size() > 0 || cfg_tenant_name.size() > 0){
         
@@ -487,7 +487,7 @@ int main(int argc, char *argv[]) {
     }
     else {
         _war("Starting tenant: 0 (default)");
-        this_daemon.set_tenant("smithd", "default");
+        this_daemon->set_tenant("smithd", "default");
     }
     
     
@@ -551,7 +551,7 @@ int main(int argc, char *argv[]) {
 
         LogOutput::get()->dup2_cout(false);
         _inf("entering service mode");
-        int dem = this_daemon.daemonize();
+        int dem = this_daemon->daemonize();
 
         if(dem == 0) {
             // master - to exit
@@ -561,7 +561,7 @@ int main(int argc, char *argv[]) {
         }
     } else {
         // also when non-daemon, write out PID file
-        this_daemon.write_pidfile();
+        this_daemon->write_pidfile();
     }
 
     CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON);
@@ -605,11 +605,11 @@ int main(int argc, char *argv[]) {
         _inf("Starting smithd listener");
         auto backend_thread = std::make_shared<std::thread>(std::thread([=]() {
 
-            auto& this_daemon = DaemonFactory::instance();
-            auto& log = this_daemon.log;
+            auto this_daemon = DaemonFactory::instance();
+            auto& log = this_daemon->log;
 
             DaemonFactory::set_daemon_signals(SmithD::my_terminate, SmithD::my_usr1);
-            _dia("smithd: max file descriptors: %d", this_daemon.get_limit_fd());
+            _dia("smithd: max file descriptors: %d", this_daemon->get_limit_fd());
             
             backend_proxy->run(); 
             _dia("smithd workers torn down.");

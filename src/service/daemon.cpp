@@ -266,12 +266,12 @@ void DaemonFactory::uw_btrace_handler(int sig) {
     unw_getcontext(&uc);
     unw_init_local(&cursor, &uc);
 
-    DaemonFactory& df = DaemonFactory::instance();
+    auto df = DaemonFactory::instance();
 
     char buf_line[256];
     int chars = snprintf(buf_line,255," ======== Smithproxy exception handler (sig %d) =========\n",sig);
 
-    int CRLOG = open((const char*)df.crashlog_file, O_CREAT | O_WRONLY | O_TRUNC,S_IRUSR|S_IWUSR);
+    int CRLOG = open((const char*)df->crashlog_file, O_CREAT | O_WRONLY | O_TRUNC,S_IRUSR|S_IWUSR);
     writecrash(STDERR_FILENO,buf_line,chars);
     writecrash(CRLOG,buf_line,chars);
     writecrash(STDERR_FILENO,"Traceback:\n",11);
@@ -298,7 +298,7 @@ void DaemonFactory::uw_btrace_handler(int sig) {
     writecrash(CRLOG," ===============================================\n",50);
     if(CRLOG >=0) close(CRLOG);
 
-    df.unlink_pidfile();
+    df->unlink_pidfile();
     
     _exit(-1);
 }
@@ -307,12 +307,12 @@ void DaemonFactory::uw_btrace_handler(int sig) {
 
 void DaemonFactory::release_crash_handler(int sig) {
 
-    DaemonFactory& df = DaemonFactory::instance();
+    auto df = DaemonFactory::instance();
 
     char buf_line[256];
     int chars = snprintf(buf_line,255," Error handler: signal %d received, aborting\n", sig);
 
-    int CRLOG = open((const char*)df.crashlog_file, O_CREAT | O_WRONLY | O_TRUNC,S_IRUSR|S_IWUSR);
+    int CRLOG = open((const char*)df->crashlog_file, O_CREAT | O_WRONLY | O_TRUNC,S_IRUSR|S_IWUSR);
     writecrash(STDERR_FILENO,buf_line,chars);
     writecrash(CRLOG,buf_line,chars);
 
@@ -323,7 +323,7 @@ void DaemonFactory::release_crash_handler(int sig) {
     }
     if(CRLOG >=0) close(CRLOG);
 
-    df.unlink_pidfile();
+    df->unlink_pidfile();
 
     memPool::bailing = true;
     _exit(-1);
