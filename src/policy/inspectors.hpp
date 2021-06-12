@@ -88,7 +88,7 @@ public:
     inspect_verdict verdict_ = OK;
     inspect_verdict verdict() const { return verdict_; };
     void verdict(inspect_verdict v) { verdict_ = v; }
-    virtual void apply_verdict(AppHostCX* cx);
+    virtual void apply_verdict(AppHostCX* cx) {};
 private:
     logan_attached<Inspector> log;
 

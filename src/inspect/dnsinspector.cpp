@@ -360,9 +360,6 @@ std::string DNS_Inspector::to_string(int verbosity) const {
     return r;
 }
 
-void Inspector::apply_verdict(AppHostCX* cx) {
-}
-
 void DNS_Inspector::apply_verdict(AppHostCX* cx) {
     _deb("DNS_Inspector::apply_verdict called");
 

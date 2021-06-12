@@ -211,7 +211,7 @@ int DNSFactory::send_dns_request(std::string const& hostname, DNS_Record_Type t,
 }
 
 
-std::pair<DNS_Response*,int> DNSFactory::recv_dns_response(int send_socket, unsigned int timeout_sec){
+std::pair<DNS_Response *, ssize_t> DNSFactory::recv_dns_response(int send_socket, unsigned int timeout_sec){
     DNS_Response *ret = nullptr;
     int l = 0;
 
@@ -288,7 +288,7 @@ DNS_Response* DNSFactory::resolve_dns_s (std::string const& hostname, DNS_Record
 /*
  * returns 0 on OK, >0 if  there are still some bytes to read and -1 on error.
  */
-unsigned int DNS_Packet::load(buffer* src) {
+ssize_t DNS_Packet::load(buffer* src) {
 
     loaded_at = ::time(nullptr);
 
