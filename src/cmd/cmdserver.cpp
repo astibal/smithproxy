@@ -286,7 +286,6 @@ int cli_test_dns_genrequest(struct cli_def *cli, const char *command, char *argv
 DNS_Response* send_dns_request(struct cli_def *cli, std::string const& hostname, DNS_Record_Type t, std::string const& nameserver) {
 
     buffer b(1024);
-    int parsed = -1;
     DNS_Response* ret = nullptr;
 
     unsigned char rand_pool[2];
@@ -322,28 +321,26 @@ DNS_Response* send_dns_request(struct cli_def *cli, std::string const& hostname,
         return CLI_OK;
     }
 
-    int rv;
-    fd_set confds;
-    struct timeval tv {};
-    tv.tv_usec = 0;
-    tv.tv_sec = 2;
-    FD_ZERO(&confds);
-    FD_SET(send_socket, &confds);
-    rv = select(send_socket + 1, &confds, nullptr, nullptr, &tv);
-    if(rv == 1) {
-        buffer r(1500);
-         int l = ::recv(send_socket,r.data(),r.capacity(),0);
-        if(l > 0) {
-            r.size(l);
+    epoll e;
+    e.init();
+    e.add(send_socket);
 
-            cli_print(cli, "received %d bytes",l);
-            cli_print(cli, "\n%s\n",hex_dump(r).c_str());
+    int rv = e.wait(4000);
+    if(rv >= 1) {
+        buffer recv_buf(1500);
+        auto l = ::recv(send_socket, recv_buf.data(), recv_buf.capacity(), 0);
+
+        if(l > 0) {
+            recv_buf.size(l);
+
+            cli_print(cli, "received %ld bytes", l);
+            cli_print(cli, "\n%s\n", hex_dump(recv_buf).c_str());
 
 
             auto* resp = new DNS_Response();
-            parsed = resp->load(&r);
-            cli_print(cli, "parsed %d bytes (0 means all)",parsed);
-            cli_print(cli, "DNS response: \n %s",resp->str().c_str());
+            auto parsed = resp->load(&recv_buf);
+            cli_print(cli, "parsed %ld bytes (0 means all)", parsed);
+            cli_print(cli, "DNS response: \n %s", resp->str().c_str());
 
             // save only fully parsed messages
             if(parsed == 0) {
@@ -354,7 +351,7 @@ DNS_Response* send_dns_request(struct cli_def *cli, std::string const& hostname,
             }
 
         } else {
-            cli_print(cli, "recv() returned %d",l);
+            cli_print(cli, "recv() returned %ld", l);
         }
 
     } else {
