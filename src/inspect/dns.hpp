@@ -139,8 +139,8 @@ struct DNS_Answer {
     uint32_t ttl_ = 0;
     uint16_t datalen_ = 0;
     buffer data_;
-    
-    std::string ip(bool nice=true) const { 
+
+    std::string ip(bool nice=true) const {
         std::string ret;
         if(type_ == A && data_.size() == 4) {
             uint32_t ip = data_.get_at<uint32_t>(0);
@@ -241,7 +241,7 @@ public:
 
     ~DNS_Packet() override = default;
 
-    unsigned int load(buffer* src); // initialize from memory. if non-zero is returned, there is yet another data and new DNS_packet should be read.
+    ssize_t load(buffer* src); // initialize from memory. if non-zero is returned, there is yet another data and new DNS_packet should be read.
 
     inline uint16_t id() const { return id_; }
     inline uint16_t flags() const { return flags_; } // todo: split and inspect all bits of this field

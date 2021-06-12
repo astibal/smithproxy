@@ -37,11 +37,11 @@
     which carries forward this exception.
 */
 
-#include <sys/select.h>
 #include <arpa/inet.h>
 #include <openssl/rand.h>
 #include <unistd.h>
 
+#include <epoll.hpp>
 #include <inspect/dns.hpp>
 #include <log/logger.hpp>
 
@@ -213,7 +213,7 @@ int DNSFactory::send_dns_request(std::string const& hostname, DNS_Record_Type t,
 
 std::pair<DNS_Response *, ssize_t> DNSFactory::recv_dns_response(int send_socket, unsigned int timeout_sec){
     DNS_Response *ret = nullptr;
-    int l = 0;
+    ssize_t l = 0;
 
     if(send_socket <= 0) {
 
@@ -221,41 +221,35 @@ std::pair<DNS_Response *, ssize_t> DNSFactory::recv_dns_response(int send_socket
         return { nullptr, -1 };
     }
 
-    int rv = 1;
 
-    if(timeout_sec > 0) {
-        struct timeval tv{};
-        tv.tv_usec = 0;
-        tv.tv_sec = timeout_sec;
+    // utilize epoll and wait for the socket to be ready (or timeout)
+    epoll e;
+    e.init();
+    e.add(send_socket);
+    auto rv = e.wait(static_cast<int>(timeout_sec)*1000);
 
-        fd_set confds;
-        FD_ZERO(&confds);
-        FD_SET(send_socket, &confds);
-        rv = select(send_socket + 1, &confds, nullptr, nullptr, &tv);
-    } else {
-
-    }
-    if(rv == 1) {
-        buffer r(1500);
-        l = ::recv(send_socket,r.data(),r.capacity(), timeout_sec > 0 ? 0 : MSG_DONTWAIT);
+    // e.wait returns number of sucessfull elements from which we added
+    if(rv >= 1) {
+        buffer recv_buffer(1500);
+        l = ::recv(send_socket, recv_buffer.data(), recv_buffer.capacity(), timeout_sec > 0 ? 0 : MSG_DONTWAIT);
         _deb("recv_dns_response(%d,%d): recv() returned %d",send_socket, timeout_sec, l);
 
-        _deb("buffer: ptr=0x%x, size=%d, capacity=%d",r.data(),r.size(),r.capacity());
+        _deb("buffer: ptr=0x%x, size=%d, capacity=%d", recv_buffer.data(), recv_buffer.size(), recv_buffer.capacity());
 
         if(l > 0) {
-            r.size(l);
+            recv_buffer.size(l);
 
             _deb("received %d bytes",l);
-            _dum("\n%s\n",hex_dump(r).c_str());
+            _dum("\n%s\n",hex_dump(recv_buffer).c_str());
 
 
             auto* resp = new DNS_Response();
-            unsigned int parsed = resp->load(&r);
+            auto parsed = resp->load(&recv_buffer);
             _dia("parsed %d bytes (0 means all)",parsed);
             _dia("DNS response: \n %s",resp->str().c_str());
 
             // save only fully parsed messages
-            if(parsed == 0) {
+            if(parsed >= 0) {
                 ret = resp;
 
             } else {
