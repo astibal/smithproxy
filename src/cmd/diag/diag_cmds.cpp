@@ -656,7 +656,7 @@ int cli_diag_dns_cache_list(struct cli_def *cli, const char *command, char *argv
             if (response != nullptr && (! response->answers().empty()) ) {
 
                 long ttl = (response->loaded_at + response->answers().at(0).ttl_) - time(nullptr);
-                out << string_format("    %s  -> [ttl:%d]%s\n", key.c_str(), ttl, response->answer_str().c_str());
+                out << string_format("    %s  -> [ttl:%d]%s\n", key.c_str(), ttl, response->answer_str_A().c_str());
             }
         }
     }

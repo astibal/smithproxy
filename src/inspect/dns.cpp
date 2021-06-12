@@ -635,7 +635,7 @@ std::string DNS_Packet::to_string(int verbosity) const {
 }
 
 
-std::string DNS_Packet::answer_str() const {
+std::string DNS_Packet::answer_str_A() const {
     std::string ret;
 
     for(auto const& x: answers_list_) {
@@ -646,6 +646,38 @@ std::string DNS_Packet::answer_str() const {
 
     return ret;
 }
+
+
+
+std::string DNS_Packet::answer_str_list() const {
+    std::stringstream ret;
+
+    for(auto const& x: answers_list_) {
+        if(x.type_ == A || x.type_ == AAAA) {
+            ret << "[ " << DNSFactory::dns_record_type_str(x.type_) << ":" << x.ip() << " ] ";
+        }
+        else {
+            ret << "[ " << DNSFactory::dns_record_type_str(x.type_) << " "
+                << hex_print(const_cast<unsigned char*>(x.data_.data()), x.data_.size()) << " " << x.data_.size() << "B ] " ;
+        }
+    }
+
+    return ret.str();
+}
+
+
+std::string DNS_Packet::answer_hex_dump() const {
+    std::stringstream ret;
+
+    for(auto const& x: answers_list_) {
+        ret << "[\n" << DNSFactory::dns_record_type_str(x.type_) << ": \n"
+            << hex_dump(const_cast<unsigned char*>(x.data_.data()), x.data_.size()) << "\n# Size: " << x.data_.size() << "B\n] " ;
+    }
+
+    return ret.str();
+}
+
+
 
 std::vector< CidrAddress*> DNS_Packet::get_a_anwsers() const {
     std::vector<CidrAddress*> ret;

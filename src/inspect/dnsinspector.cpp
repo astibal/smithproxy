@@ -276,7 +276,7 @@ void DNS_Inspector::update(AppHostCX* cx) {
 bool DNS_Inspector::store(std::shared_ptr<DNS_Response> ptr) {
     bool is_a_record = true;
 
-    std::string ip = ptr->answer_str();
+    std::string ip = ptr->answer_str_A();
     if(! ip.empty()) {
         _not("DNS inspection: %s is at%s",ptr->question_str_0().c_str(),ip.c_str()); //ip is already prepended with " "
     }

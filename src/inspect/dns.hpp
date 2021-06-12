@@ -258,7 +258,9 @@ public:
     uint16_t question_type_0() const { if( ! questions_list_.empty() ) { return questions_list_.at(0).rec_type; } return 0; };
     uint16_t question_class_0() const { if( ! questions_list_.empty() ) { return questions_list_.at(0).rec_class; } return 0; };
     
-    std::string answer_str() const;
+    std::string answer_str_A() const;
+    std::string answer_str_list() const;
+    std::string answer_hex_dump() const;
     std::vector<CidrAddress*> get_a_anwsers() const;
 
     inline std::vector<DNS_Question>& questions() { return questions_list_; };
