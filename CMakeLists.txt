@@ -185,9 +185,11 @@ add_executable(smithdc
 find_package(GTest)
 if(GTEST_FOUND)
     add_executable(sx_gtests
-            src/utils/tests/str_test.cpp
-
             src/inspect/dns.cpp
+            src/utils/str.cpp
+
+            src/utils/tests/str_test.cpp
+            src/inspect/tests/dns_tests.cpp
             src/ext/libcidr/cidr.cpp
             src/policy/tests/addrobj_test.cpp
 

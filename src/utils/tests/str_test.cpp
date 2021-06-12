@@ -1,4 +1,4 @@
-#include <utils/str.cpp>
+#include <utils/str.hpp>
 
 #include <gtest/gtest.h>
 
