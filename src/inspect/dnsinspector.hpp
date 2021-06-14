@@ -73,7 +73,7 @@ private:
 
     std::shared_ptr<buffer> cached_response = nullptr;
     uint16_t cached_response_id = 0;
-    std::vector<int> cached_response_ttl_idx;
+    std::vector<unsigned int> cached_response_ttl_idx;
     uint32_t cached_response_decrement = 0;
 
     std::unordered_map<uint16_t,std::shared_ptr<DNS_Request>>  requests_;

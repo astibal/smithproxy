@@ -63,10 +63,10 @@ const char* DNSFactory::dns_record_type_str(int a) {
 }
 
 
-int DNSFactory::load_qname(unsigned char* ptr, unsigned int maxlen, std::string* str_storage = nullptr) {
+unsigned int DNSFactory::skip_qname(unsigned char* ptr, unsigned int maxlen, std::string* str_storage) const {
     unsigned int xi = 0;
 
-    _deb("load_qname:\n%s",hex_dump(ptr, static_cast<int>(maxlen)).c_str());
+    _deb("skip_qname:\n%s",hex_dump(ptr, static_cast<int>(maxlen)).c_str());
 
 
     if(ptr[xi] == 0) {
@@ -82,7 +82,7 @@ int DNSFactory::load_qname(unsigned char* ptr, unsigned int maxlen, std::string*
         }
         ++xi;
 
-        if(str_storage) str_storage->assign(lab);
+        if(str_storage) str_storage->append(lab);
 
         _deb("plain label: %s",ESC(lab));
     } else {
@@ -92,6 +92,45 @@ int DNSFactory::load_qname(unsigned char* ptr, unsigned int maxlen, std::string*
     }
 
     return xi;
+}
+
+
+std::string DNSFactory::construct_qname(unsigned char* qname_start, unsigned char* packet_start, size_t packet_size) {
+    std::string to_ret;
+    unsigned int part_size = 0;
+
+    if(qname_start > packet_start + packet_size or qname_start < packet_start or qname_start[0] == 0) {
+        return to_ret;
+    }
+    else if(qname_start[0] < 0xC0) {
+        part_size = qname_start[0];
+
+        // sanitize part size - make it to stay in packet_size boundary
+        auto remaining_data =  packet_start + packet_size - (qname_start + 1 + part_size);
+        if(remaining_data < 0) {
+            part_size = packet_start + packet_size - (qname_start + 1);
+            remaining_data = 0;
+        }
+
+        to_ret.assign(reinterpret_cast<const char*>(&qname_start[1]), part_size);
+        if(remaining_data > 0) {
+            auto ret = construct_qname(qname_start + 1 + part_size, packet_start, packet_size);
+            if(not ret.empty()) {
+                to_ret += "." + ret;
+            }
+        }
+
+    } else {
+        // compressed entry
+        auto step_index = qname_start[0] - 0xC0;  // remove pointer bits
+        auto data_index = qname_start[1] + step_index;
+        auto ret =construct_qname(packet_start + data_index, packet_start, packet_size);
+        if(not ret.empty()) {
+            to_ret += ret;
+        }
+    }
+
+    return to_ret;
 }
 
 int DNSFactory::generate_dns_request(unsigned short id, buffer& b, std::string const& h, DNS_Record_Type t) {
@@ -408,15 +447,19 @@ ssize_t DNS_Packet::load(buffer* src) {
 
                 for (unsigned int i = mem_counter; i < src->size() && answers_togo > 0;) {
                     DNS_Answer answer_temp;
-                    answer_temp.name_ = ntohs(src->get_at<unsigned short>(i));
+                    //answer_temp.name_ = ntohs(src->get_at<unsigned short>(i));
+                    answer_temp.qname_ = DNSFactory::get().construct_qname(src->data() + mem_counter, src->data(), src->size());
                     answer_temp.type_ = ntohs(src->get_at<unsigned short>(i + 2));
                     answer_temp.class_ = ntohs(src->get_at<unsigned short>(i + 4));
                     answer_ttl_idx.push_back(i + 6);
                     answer_temp.ttl_ = ntohl(src->get_at<uint32_t>(i + 6));
                     answer_temp.datalen_ = ntohs(src->get_at<uint32_t>(i + 10));
-                    if (answer_temp.datalen_ > 0)
-                        answer_temp.data_.append(src->view(i + 12, answer_temp.datalen_));
-                    int inc = 12 + answer_temp.datalen_;
+                    if (answer_temp.datalen_ > 0 and i + DNS_HEADER_SZ + answer_temp.datalen_ <= src->size()) {
+                        answer_temp.data_.append(src->view(i + DNS_HEADER_SZ, answer_temp.datalen_));
+                    } else {
+                        _err("DNS_Packet::load: answer[%d]: malformed packet: data boundary check failed", answers_togo);
+                    }
+                    int inc = DNS_HEADER_SZ + answer_temp.datalen_;
 
                     mem_counter += inc;
                     i += inc;
@@ -438,7 +481,7 @@ ssize_t DNS_Packet::load(buffer* src) {
                 for (unsigned int i = mem_counter; i < src->size() && authorities_togo > 0;) {
                     DNS_Answer answer_temp;
 
-                    int xi = DNSFactory::get().load_qname(src->data() + i, src->size() - i);
+                    auto xi = DNSFactory::get().skip_qname(src->data() + i, src->size() - i);
 
                     //unsigned short pre_type = ntohs(src->get_at<unsigned short>(i+1));
                     unsigned short pre_type = ntohs(src->get_at<unsigned short>(i + xi));
@@ -448,6 +491,7 @@ ssize_t DNS_Packet::load(buffer* src) {
 
                     if (pre_type == SOA or pre_type == NS) {
                         //answer_temp.name_ = ntohs(src->get_at<unsigned short>(i));
+                        answer_temp.qname_ = DNSFactory::get().construct_qname(src->data() + mem_counter, src->data(), src->size());
                         answer_temp.type_ = pre_type;//ntohs(src->get_at<unsigned short>(i+1));
                         answer_temp.class_ = ntohs(src->get_at<unsigned short>(i));
                         answer_temp.ttl_ = ntohl(src->get_at<uint32_t>(i + 2));
@@ -459,12 +503,12 @@ ssize_t DNS_Packet::load(buffer* src) {
                              answer_temp.name_, answer_temp.type_, answer_temp.class_, answer_temp.ttl_,
                              answer_temp.datalen_);
 
-                        if (answer_temp.datalen_ > 0)
+                        // i is incremented already by size of QNAME, 8 is size of prev fields
+                        if (answer_temp.datalen_ > 0 and i + 8 + answer_temp.datalen_ <= src->size())
                             answer_temp.data_.append(src->view(i + 8, answer_temp.datalen_));
-                        int inc = 8 + answer_temp.datalen_;
 
-                        mem_counter += inc;
-                        i += inc;
+                        i += ( 8 + answer_temp.datalen_);
+                        mem_counter = i;
 
                         _dia("DNS_Packet::load: authorities[%d]: name: %d, type: %d, class: %d, ttl: %d, len: %d, buflen: %d",
                              authorities_togo,
@@ -490,7 +534,8 @@ ssize_t DNS_Packet::load(buffer* src) {
                 for (unsigned int i = mem_counter; i < src->size() && additionals_togo > 0;) {
 
 
-                    int xi = DNSFactory::get().load_qname(src->data() + i, src->size() - i);
+                    auto xi = DNSFactory::get().skip_qname(src->data() + i, src->size() - i);
+
 
                     //unsigned short pre_type = ntohs(src->get_at<unsigned short>(i+1));
                     unsigned short pre_type = ntohs(src->get_at<unsigned short>(i + xi));
@@ -520,7 +565,7 @@ ssize_t DNS_Packet::load(buffer* src) {
 
                         if (i + answer_temp.datalen_ <= src->size()) {
 
-                            if (answer_temp.datalen_ > 0) {
+                            if (answer_temp.datalen_ > 0 and i + answer_temp.datalen_ <= src->size()) {
                                 answer_temp.data_.append(src->view(i, answer_temp.datalen_));
                                 i += answer_temp.datalen_;
                             }
@@ -543,7 +588,8 @@ ssize_t DNS_Packet::load(buffer* src) {
                         DNS_Answer answer_temp;
                         //answer_temp.name_ = ntohs(src->get_at<unsigned short>(i));
 
-
+                        // i is shifted already, use memcounter
+                        answer_temp.qname_ = DNSFactory::get().construct_qname(src->data() + mem_counter, src->data(), src->size());
 
                         answer_temp.type_ = pre_type;
                         answer_temp.class_ = ntohs(src->get_at<unsigned short>(i));
@@ -554,7 +600,8 @@ ssize_t DNS_Packet::load(buffer* src) {
                         answer_temp.datalen_ = ntohs(src->get_at<uint16_t>(i));
                         i += 2;
 
-                        if (answer_temp.datalen_ > 0) {
+                        // i is incremented already by size of QNAME and all fields
+                        if (answer_temp.datalen_ > 0 and i + answer_temp.datalen_ <= src->size()) {
                             answer_temp.data_.append(src->view(i, answer_temp.datalen_));
                             i += answer_temp.datalen_;
                         }

@@ -94,7 +94,12 @@ public:
     void operator=(DNSFactory const&) = delete;
 
     static const char *dns_record_type_str(int a);
-    int load_qname(unsigned char* ptr, unsigned int maxlen, std::string* str_storage);
+
+    /// @brief check bytes in the range starting at 'ptr' to 'maxlen', and parse the text as DNS QNAME.
+    /// @returns next index behind QNAME data.
+    /// Used to quickly pass the QNAME when parsing DNS packet and follow on to pase next elements.
+    unsigned int skip_qname(unsigned char* ptr, unsigned int maxlen, std::string* str_storage = nullptr) const;
+    std::string construct_qname(unsigned char* qname_start, unsigned char* packet_start, size_t packet_size);
     int generate_dns_request(unsigned short id, buffer& b, std::string const& hostname, DNS_Record_Type t);
 
     // send DNS request out to network. Return socket FD, or non-positive on error.
@@ -133,6 +138,7 @@ struct DNS_Question {
 };
 
 struct DNS_Answer {
+    std::string qname_;
     uint16_t name_ = 0;
     uint16_t type_ = 0;
     uint16_t class_ = 0;
@@ -187,8 +193,8 @@ struct DNS_Answer {
     
     std::string hr() const { 
         
-        std::string ret = string_format("type: %s, class: %d, ttl: %d, ",
-                                        DNSFactory::get().dns_record_type_str(type_), class_, ttl_);
+        std::string ret = string_format("type: %s, class: %d, ttl: %d, name: %s ",
+                                        DNSFactory::get().dns_record_type_str(type_), class_, ttl_, qname_.c_str());
         ret += ip();
         return ret;
     };
@@ -233,7 +239,7 @@ public:
         log = logan::attach<DNS_Packet>(this, "com.dns");
     };
 
-    std::vector<int> answer_ttl_idx; // should be protected;
+    std::vector<unsigned int> answer_ttl_idx; // should be protected;
     time_t      loaded_at = 0;
     
     std::string to_string(int verbosity) const override;
