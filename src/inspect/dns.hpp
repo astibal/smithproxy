@@ -99,7 +99,7 @@ public:
     /// @returns next index behind QNAME data.
     /// Used to quickly pass the QNAME when parsing DNS packet and follow on to pase next elements.
     unsigned int skip_qname(unsigned char* ptr, unsigned int maxlen, std::string* str_storage = nullptr) const;
-    std::string construct_qname(unsigned char* qname_start, unsigned char* packet_start, size_t packet_size);
+    std::string construct_qname(unsigned char* qname_start, unsigned char* packet_start, size_t packet_size, unsigned int loop_max=16);
     int generate_dns_request(unsigned short id, buffer& b, std::string const& hostname, DNS_Record_Type t);
 
     // send DNS request out to network. Return socket FD, or non-positive on error.
@@ -132,7 +132,7 @@ struct DNS_Question {
     uint16_t rec_type = 0;
     uint16_t rec_class = 0;
     size_t mem_size() const { return rec_str.size()+1 + 2*sizeof(uint16_t); };
-    std::string hr() const { return string_format("type: %s class: %d record: %s", 
+    std::string hr() const { return string_format("type: %s class: %d record: %s",
                                                DNSFactory::get().dns_record_type_str(rec_type),
                                                rec_class, rec_str.c_str()); }
 };

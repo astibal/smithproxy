@@ -95,11 +95,11 @@ unsigned int DNSFactory::skip_qname(unsigned char* ptr, unsigned int maxlen, std
 }
 
 
-std::string DNSFactory::construct_qname(unsigned char* qname_start, unsigned char* packet_start, size_t packet_size) {
+std::string DNSFactory::construct_qname(unsigned char* qname_start, unsigned char* packet_start, size_t packet_size, unsigned int loopmax) {
     std::string to_ret;
     unsigned int part_size = 0;
 
-    if(qname_start > packet_start + packet_size or qname_start < packet_start or qname_start[0] == 0) {
+    if(loopmax == 0 or qname_start >= packet_start + packet_size or qname_start < packet_start or qname_start[0] == 0) {
         return to_ret;
     }
     else if(qname_start[0] < 0xC0) {
@@ -114,7 +114,7 @@ std::string DNSFactory::construct_qname(unsigned char* qname_start, unsigned cha
 
         to_ret.assign(reinterpret_cast<const char*>(&qname_start[1]), part_size);
         if(remaining_data > 0) {
-            auto ret = construct_qname(qname_start + 1 + part_size, packet_start, packet_size);
+            auto ret = construct_qname(qname_start + 1 + part_size, packet_start, packet_size, loopmax - 1 );
             if(not ret.empty()) {
                 to_ret += "." + ret;
             }
@@ -124,7 +124,7 @@ std::string DNSFactory::construct_qname(unsigned char* qname_start, unsigned cha
         // compressed entry
         auto step_index = qname_start[0] - 0xC0;  // remove pointer bits
         auto data_index = qname_start[1] + step_index;
-        auto ret =construct_qname(packet_start + data_index, packet_start, packet_size);
+        auto ret =construct_qname(packet_start + data_index, packet_start, packet_size, loopmax - 1);
         if(not ret.empty()) {
             to_ret += ret;
         }
