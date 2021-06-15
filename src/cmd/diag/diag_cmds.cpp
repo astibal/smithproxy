@@ -1518,6 +1518,10 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
                                     }
                                 }
 
+                                if(not com->alpn().empty()) {
+                                    tls_ss << "\n    alpn: " << com->alpn();
+                                }
+
                                 auto scts = SSL_get0_peer_scts(ssl);
                                 int scts_len = sk_SCT_num(scts);
                                 if(scts_len > 0) {
