@@ -89,6 +89,7 @@ public:
     int  ocsp_stapling_mode = 0; // 0 = loose, 1 = strict, 2 = require
 
     bool opt_ct_enable = true;
+    bool opt_alpn_block = false;
 
     std::shared_ptr<std::vector<std::string>> sni_filter_bypass;
     socle::spointer_set_int redirect_warning_ports;

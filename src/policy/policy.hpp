@@ -94,7 +94,7 @@ public:
                     element_name() = string_format("policy-%d", oid());
                    };
 
-    virtual ~PolicyRule() = default;
+    ~PolicyRule() override = default;
 
     bool match(baseProxy*);
     bool match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r);
