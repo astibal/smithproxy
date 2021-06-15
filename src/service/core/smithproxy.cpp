@@ -519,6 +519,7 @@ int SmithProxy::load_signatures (libconfig::Config &cfg, const char *name, Signa
         load_if_exists(signature, "severity", newsig->sig_severity);
         load_if_exists(signature, "group", newsig->sig_group);
         load_if_exists(signature, "enables", newsig->sig_enables);
+        load_if_exists(signature, "engine", newsig->sig_engine);
 
         const Setting& signature_flow = cfg_signatures[i]["flow"];
         int flow_count = signature_flow.getLength();

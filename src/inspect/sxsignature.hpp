@@ -50,6 +50,7 @@ public:
     int sig_severity {7};  // set severity to 7: log only if diagnosing
     std::string sig_group;
     std::string sig_enables;
+    std::string sig_engine; // start specific engine (ie. http1)
 
     ~MyDuplexFlowMatch() override = default;
 };

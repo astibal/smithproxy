@@ -3015,6 +3015,7 @@ int save_signatures(Config& ex, const std::string& sigset) {
                 item.add("severity", Setting::TypeInt) = my_sig->sig_severity;
                 item.add("group", Setting::TypeString) = my_sig->sig_group;
                 item.add("enables", Setting::TypeString) = my_sig->sig_enables;
+                item.add("engine", Setting::TypeString) = my_sig->sig_engine;
             }
 
             if (!sig->sig_chain().empty()) {
