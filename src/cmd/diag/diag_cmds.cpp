@@ -1776,6 +1776,7 @@ int cli_diag_sig_list(struct cli_def *cli, const char *command, char *argv[], in
                 ss << "  side: " << sx_ptr->sig_side << "\n";
                 ss << "  group: " << sx_ptr->sig_group << "\n";
                 ss << "  enables: " << sx_ptr->sig_enables << "\n";
+                ss << "  engine: " << sx_ptr->sig_engine << "\n";
             }
 
             ss << "\n";

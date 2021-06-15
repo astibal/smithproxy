@@ -141,147 +141,154 @@ void MitmHostCX::load_signatures() {
     _deb("MitmHostCX::load_signatures: stop");
 }
 
-void MitmHostCX::on_detect_www_get(const std::shared_ptr<duplexFlowMatch> &x_sig, flowMatchState& s, vector_range& r) {
-    if(! r.empty()) {
-        std::pair<char,buffer*>& get = flow().flow()[0];
 
-        buffer* buffer_get = get.second;
+void MitmHostCX::engine(std::string const& name, EngineCtx e) {
+    // mux to other engines from hash name->engine, now just pass to http1
+    if(name == "http1") {
+        engine_http1_start(e.signature, e.match_state, e.match_range);
+    } else {
+        _err("unknown engine: %s", name.c_str());
+    }
+}
 
-        // limit this rather info/convenience regexing to 128 bytes
+void MitmHostCX::engine_http1_start(const std::shared_ptr<duplexFlowMatch> &x_sig, flowMatchState& s, vector_range& r) {
 
-        // Actually for unknown reason, sample size 512 (and more) was crashing deep in std::regex on alpine platform.
-        // Suspicion is it has to do something with MUSL or alpine platform specific. 256 is good enough to set for general use,
-        // as there is nothing dependant on full URI and more can slow box down for not real benefit.
+    if(r.empty()) return;
 
-        std::string buffer_data_string((const char*)buffer_get->data(),  buffer_get->size());
+    std::pair<char,buffer*>& http_request1 = flow().flow()[0];
 
-        std::smatch m_get;
-        std::smatch m_ref;
-        std::smatch m_host;
+    buffer* http_request1_buffer = http_request1.second;
 
+    // limit this rather info/convenience regexing to 128 bytes
 
-        std::string str_temp;
-        std::string print_request;
+    // Actually for unknown reason, sample size 512 (and more) was crashing deep in std::regex on alpine platform.
+    // Suspicion is it has to do something with MUSL or alpine platform specific. 256 is good enough to set for general use,
+    // as there is nothing dependant on full URI and more can slow box down for not real benefit.
 
 
-        auto ix_ref = buffer_data_string.find("Referer: ");
-        if(ix_ref != std::string::npos) {
-            auto ref_start = buffer_data_string.substr(ix_ref, std::min(std::size_t (128), buffer_data_string.size() - ix_ref));
-            if (std::regex_search(ref_start, m_ref, ProtoRex::http_req_ref())) {
+    std::string buffer_data_string((const char*)http_request1_buffer->data(), http_request1_buffer->size());
 
-                str_temp = m_ref[1].str();
+    std::smatch m_get;
+    std::smatch m_ref;
+    std::smatch m_host;
 
-                //don't add referer to log.
-                //print_request += str_temp;
 
-                if(not application_data) {
+    std::string str_temp;
+    std::string print_request;
+
+
+    auto ix_ref = buffer_data_string.find("Referer: ");
+    if(ix_ref != std::string::npos) {
+        auto ref_start = buffer_data_string.substr(ix_ref, std::min(std::size_t (128), buffer_data_string.size() - ix_ref));
+        if (std::regex_search(ref_start, m_ref, ProtoRex::http_req_ref())) {
+
+            str_temp = m_ref[1].str();
+
+            //don't add referer to log.
+            //print_request += str_temp;
+
+            if(not application_data) {
+                application_data = std::make_unique<app_HttpRequest>();
+            }
+
+            auto *app_request = dynamic_cast<app_HttpRequest *>(application_data.get());
+            if (app_request != nullptr) {
+                app_request->referer = str_temp;
+                _deb("Referer: %s", ESC(app_request->referer));
+            }
+        }
+    }
+
+    auto ix_host = buffer_data_string.find("Host: ");
+
+    if(ix_host != std::string::npos) {
+        auto host_start = buffer_data_string.substr(ix_host, std::min(std::size_t (128), buffer_data_string.size() - ix_host));
+
+        if (std::regex_search(host_start, m_host, ProtoRex::http_req_host())) {
+            if (!m_host.empty()) {
+                str_temp = m_host[1].str();
+                print_request += str_temp;
+
+                if (not application_data) {
                     application_data = std::make_unique<app_HttpRequest>();
                 }
 
                 auto *app_request = dynamic_cast<app_HttpRequest *>(application_data.get());
                 if (app_request != nullptr) {
-                    app_request->referer = str_temp;
-                    _deb("Referer: %s", ESC(app_request->referer));
-                }
-            }
-        }
-
-        auto ix_host = buffer_data_string.find("Host: ");
-
-        if(ix_host != std::string::npos) {
-            auto host_start = buffer_data_string.substr(ix_host, std::min(std::size_t (128), buffer_data_string.size() - ix_host));
-
-            if (std::regex_search(host_start, m_host, ProtoRex::http_req_host())) {
-                if (!m_host.empty()) {
-                    str_temp = m_host[1].str();
-                    print_request += str_temp;
-
-                    if (not application_data) {
-                        application_data = std::make_unique<app_HttpRequest>();
-                    }
-
-                    auto *app_request = dynamic_cast<app_HttpRequest *>(application_data.get());
-                    if (app_request != nullptr) {
-                        app_request->host = str_temp;
-                        _dia("Host: %s", app_request->host.c_str());
+                    app_request->host = str_temp;
+                    _dia("Host: %s", app_request->host.c_str());
 
 
-                        // FIXME: should be some config variable
-                        bool check_inspect_dns_cache = true;
-                        if (check_inspect_dns_cache) {
+                    // FIXME: should be some config variable
+                    bool check_inspect_dns_cache = true;
+                    if (check_inspect_dns_cache) {
 
-                            std::scoped_lock<std::recursive_mutex> d_(DNS::get().dns_lock());
+                        std::scoped_lock<std::recursive_mutex> d_(DNS::get().dns_lock());
 
-                            auto dns_resp_a = DNS::get().dns_cache().get("A:" + app_request->host);
-                            auto dns_resp_aaaa = DNS::get().dns_cache().get("AAAA:" + app_request->host);
+                        auto dns_resp_a = DNS::get().dns_cache().get("A:" + app_request->host);
+                        auto dns_resp_aaaa = DNS::get().dns_cache().get("AAAA:" + app_request->host);
 
-                            if (dns_resp_a && com()->l3_proto() == AF_INET) {
-                                _deb("HTTP inspection: Host header matches DNS: %s", ESC(dns_resp_a->question_str_0()));
-                            } else if (dns_resp_aaaa && com()->l3_proto() == AF_INET6) {
-                                _deb("HTTP inspection: Host header matches IPv6 DNS: %s",
-                                     ESC(dns_resp_aaaa->question_str_0()));
-                            } else {
-                                _war("HTTP inspection: 'Host' header value '%s' DOESN'T match DNS!",
-                                     app_request->host.c_str());
-                            }
+                        if (dns_resp_a && com()->l3_proto() == AF_INET) {
+                            _deb("HTTP inspection: Host header matches DNS: %s", ESC(dns_resp_a->question_str_0()));
+                        } else if (dns_resp_aaaa && com()->l3_proto() == AF_INET6) {
+                            _deb("HTTP inspection: Host header matches IPv6 DNS: %s",
+                                 ESC(dns_resp_aaaa->question_str_0()));
+                        } else {
+                            _war("HTTP inspection: 'Host' header value '%s' DOESN'T match DNS!",
+                                 app_request->host.c_str());
                         }
                     }
                 }
             }
         }
-
-        auto method_start = buffer_data_string.substr(0, std::min(std::size_t(128), buffer_data_string.size()));
-        if(std::regex_search (method_start, m_get, ProtoRex::http_req_get() )) {
-            if(m_get.size() > 1) {
-                str_temp = m_get[2].str();
-                print_request += str_temp;
-
-                if(not application_data) {
-                    application_data = std::make_unique<app_HttpRequest>();
-                }
-
-                auto* app_request = dynamic_cast<app_HttpRequest*>(application_data.get());
-                if(app_request != nullptr) {
-                    app_request->uri = str_temp;
-                    _dia("URI: %s", ESC(app_request->uri));
-                }
-
-                if(app_request && m_get.size() > 2) {
-                    str_temp = m_get[3].str();
-                    app_request->params = str_temp;
-                    _dia("params: %s", ESC(app_request->params));
-
-                    //print_request += str_temp;
-                }
-            }
-        }
-
-
-        auto* app_request = dynamic_cast<app_HttpRequest*>(application_data.get());
-        if(app_request != nullptr) {
-            // detect protocol (plain vs ssl)
-            auto* proto_com = dynamic_cast<SSLCom*>(com());
-            if(proto_com != nullptr) {
-                app_request->proto="https://";
-                app_request->is_ssl = true;
-            } else {
-                app_request->proto="http://" ;
-            }
-
-
-            _inf("http request: %s",ESC(app_request->str()));
-        } else {
-            _inf("http request: %s (app_request cast failed)", ESC(print_request));
-        }
-
-
-        // this is the right way, but not here
-        // replacement(REPLACE_REDIRECT);
-        // replacement(REPLACE_BLOCK);
-
-        // we have to specify that we are replaceable!
-        replacement_type_ = REPLACETYPE_HTTP;
     }
+
+    auto method_start = buffer_data_string.substr(0, std::min(std::size_t(128), buffer_data_string.size()));
+    if(std::regex_search (method_start, m_get, ProtoRex::http_req_get() )) {
+        if(m_get.size() > 1) {
+            str_temp = m_get[2].str();
+            print_request += str_temp;
+
+            if(not application_data) {
+                application_data = std::make_unique<app_HttpRequest>();
+            }
+
+            auto* app_request = dynamic_cast<app_HttpRequest*>(application_data.get());
+            if(app_request != nullptr) {
+                app_request->uri = str_temp;
+                _dia("URI: %s", ESC(app_request->uri));
+            }
+
+            if(app_request && m_get.size() > 2) {
+                str_temp = m_get[3].str();
+                app_request->params = str_temp;
+                _dia("params: %s", ESC(app_request->params));
+
+                //print_request += str_temp;
+            }
+        }
+    }
+
+
+    auto* app_request = dynamic_cast<app_HttpRequest*>(application_data.get());
+    if(app_request != nullptr) {
+        // detect protocol (plain vs ssl)
+        auto* proto_com = dynamic_cast<SSLCom*>(com());
+        if(proto_com != nullptr) {
+            app_request->proto="https://";
+            app_request->is_ssl = true;
+        } else {
+            app_request->proto="http://" ;
+        }
+
+
+        _inf("http request: %s",ESC(app_request->str()));
+    } else {
+        _inf("http request: %s (app_request cast failed)", ESC(print_request));
+    }
+
+
+    replacement_type_ = REPLACETYPE_HTTP;
 }
 
 
@@ -376,8 +383,16 @@ void MitmHostCX::on_detect(std::shared_ptr<duplexFlowMatch> x_sig, flowMatchStat
             sig_sig->name().c_str()));
 
 
+    // make this code deprecated and call it only if engine is not present in the configuration
     if(sig_sig->sig_category == "www" && sig_sig->name() == "http/get|post") {
-        on_detect_www_get(x_sig,s,r);
+        if(sig_sig->sig_engine.empty()) {
+            engine_http1_start(x_sig, s, r);
+        }
+    }
+
+    if(not sig_sig->sig_engine.empty()) {
+        auto cx = EngineCtx::create(this, x_sig, s, r);
+        engine(sig_sig->sig_engine, cx);
     }
 
     // look if signature enables other groups

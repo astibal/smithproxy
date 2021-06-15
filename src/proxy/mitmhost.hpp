@@ -131,6 +131,19 @@ struct ProtoRex {
     static std::regex const& http_req_host(){ static std::regex r{R"(Host: *([^ \r\n]+))"}; return r; };
 };
 
+class MitmHostCX;
+
+struct EngineCtx {
+    MitmHostCX* origin;
+    const std::shared_ptr<duplexFlowMatch> signature;
+    flowMatchState& match_state;
+    vector_range& match_range;
+
+    static EngineCtx create(MitmHostCX* orig, const std::shared_ptr<duplexFlowMatch> &x_sig, flowMatchState& s, vector_range& r) {
+        return { .origin = orig, .signature = x_sig,  .match_state = s, .match_range = r};
+    }
+};
+
 class MitmHostCX : public AppHostCX, public socle::sobject {
 public:
     std::unique_ptr<ApplicationData> application_data;
@@ -147,7 +160,9 @@ public:
     std::vector<std::unique_ptr<Inspector>> inspectors_;
     void inspect(char side) override;
     void on_detect(std::shared_ptr<duplexFlowMatch> x_sig, flowMatchState& s, vector_range& r) override;
-    virtual void on_detect_www_get(const std::shared_ptr<duplexFlowMatch> &x_sig, flowMatchState& s, vector_range& r);
+
+    void engine(std::string const& name, EngineCtx e);
+    void engine_http1_start(const std::shared_ptr<duplexFlowMatch> &x_sig, flowMatchState& s, vector_range& r);
     
     void on_starttls() override;
 
