@@ -3088,12 +3088,8 @@ int save_signatures(Config& ex, const std::string& sigset) {
             total += save_target(ex, target, sigset);
     }
     else {
-        // iterate all SigFactory signatures and save under "detection_signatures"
-        for(auto const& [name, index]: SigFactory::get().signature_tree().name_index) {
-            auto target = SigFactory::get().signature_tree().group(name.c_str());
-            if(target)
-                total += save_target(ex, target, "detection_signatures");
-        }
+        auto target = SigFactory::get().signature_tree().group(sigset.c_str(), false);
+        total += save_target(ex, target, sigset);
     }
 
     return total;
@@ -3256,8 +3252,15 @@ int CfgFactory::save_config() const {
     _inf("%d %s signatures", n, "starttls");
 
     n = save_signatures(ex, "detection_signatures");
-    _inf("%d %s signatures", n, "detection");
+    _inf("%d %s signatures", n, "detection/base");
 
+    for(auto const& ni: SigFactory::get().signature_tree().name_index) {
+        // avoid to copy again starttls and base
+        if(ni.second < 2) continue;
+
+        n = save_signatures(ex, ni.first);
+        _inf("%d %s signatures", n, string_format("detection/%s[%d]", ni.first.c_str(), ni.second).c_str());
+    }
 
     try {
         ex.writeFile(CfgFactory::get()->config_file.c_str());
