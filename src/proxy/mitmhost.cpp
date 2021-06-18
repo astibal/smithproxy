@@ -151,41 +151,17 @@ void MitmHostCX::engine(std::string const& name, EngineCtx e) {
     }
 }
 
-void MitmHostCX::engine_http1_start(const std::shared_ptr<duplexFlowMatch> &x_sig, flowMatchState& s, vector_range& r) {
+void MitmHostCX::engine_http1_start_find_referrer(std::string const& data) {
 
-    if(r.empty()) return;
-
-    std::pair<char,buffer*>& http_request1 = flow().flow()[0];
-
-    buffer* http_request1_buffer = http_request1.second;
-
-    // limit this rather info/convenience regexing to 128 bytes
-
-    // Actually for unknown reason, sample size 512 (and more) was crashing deep in std::regex on alpine platform.
-    // Suspicion is it has to do something with MUSL or alpine platform specific. 256 is good enough to set for general use,
-    // as there is nothing dependant on full URI and more can slow box down for not real benefit.
-
-
-    std::string buffer_data_string((const char*)http_request1_buffer->data(), http_request1_buffer->size());
-
-    std::smatch m_get;
     std::smatch m_ref;
-    std::smatch m_host;
 
-
-    std::string str_temp;
-    std::string print_request;
-
-
-    auto ix_ref = buffer_data_string.find("Referer: ");
+    auto ix_ref = data.find("Referer: ");
     if(ix_ref != std::string::npos) {
-        auto ref_start = buffer_data_string.substr(ix_ref, std::min(std::size_t (128), buffer_data_string.size() - ix_ref));
+        auto ref_start = data.substr(ix_ref, std::min(std::size_t (128), data.size() - ix_ref));
         if (std::regex_search(ref_start, m_ref, ProtoRex::http_req_ref())) {
+            std::string str_temp;
 
             str_temp = m_ref[1].str();
-
-            //don't add referer to log.
-            //print_request += str_temp;
 
             if(not application_data) {
                 application_data = std::make_unique<app_HttpRequest>();
@@ -198,16 +174,18 @@ void MitmHostCX::engine_http1_start(const std::shared_ptr<duplexFlowMatch> &x_si
             }
         }
     }
+}
 
-    auto ix_host = buffer_data_string.find("Host: ");
-
+void MitmHostCX::engine_http1_start_find_host(std::string const& data) {
+    auto ix_host = data.find("Host: ");
     if(ix_host != std::string::npos) {
-        auto host_start = buffer_data_string.substr(ix_host, std::min(std::size_t (128), buffer_data_string.size() - ix_host));
+
+        auto host_start = data.substr(ix_host, std::min(std::size_t (128), data.size() - ix_host));
+        std::smatch m_host;
 
         if (std::regex_search(host_start, m_host, ProtoRex::http_req_host())) {
             if (!m_host.empty()) {
-                str_temp = m_host[1].str();
-                print_request += str_temp;
+                auto str_temp = m_host[1].str();
 
                 if (not application_data) {
                     application_data = std::make_unique<app_HttpRequest>();
@@ -219,7 +197,7 @@ void MitmHostCX::engine_http1_start(const std::shared_ptr<duplexFlowMatch> &x_si
                     _dia("Host: %s", app_request->host.c_str());
 
 
-                    // FIXME: should be some config variable
+                    // NOTE: should be some config variable
                     bool check_inspect_dns_cache = true;
                     if (check_inspect_dns_cache) {
 
@@ -242,12 +220,16 @@ void MitmHostCX::engine_http1_start(const std::shared_ptr<duplexFlowMatch> &x_si
             }
         }
     }
+}
 
-    auto method_start = buffer_data_string.substr(0, std::min(std::size_t(128), buffer_data_string.size()));
+void MitmHostCX::engine_http1_start_find_method(std::string const& data) {
+    auto method_start = data.substr(0, std::min(std::size_t(128), data.size()));
+    std::smatch m_get;
+
     if(std::regex_search (method_start, m_get, ProtoRex::http_req_get() )) {
         if(m_get.size() > 1) {
-            str_temp = m_get[2].str();
-            print_request += str_temp;
+
+            auto str_temp = m_get[2].str();
 
             if(not application_data) {
                 application_data = std::make_unique<app_HttpRequest>();
@@ -264,29 +246,56 @@ void MitmHostCX::engine_http1_start(const std::shared_ptr<duplexFlowMatch> &x_si
                 app_request->params = str_temp;
                 _dia("params: %s", ESC(app_request->params));
 
-                //print_request += str_temp;
             }
         }
     }
+}
 
 
-    auto* app_request = dynamic_cast<app_HttpRequest*>(application_data.get());
-    if(app_request != nullptr) {
-        // detect protocol (plain vs ssl)
-        auto* proto_com = dynamic_cast<SSLCom*>(com());
-        if(proto_com != nullptr) {
-            app_request->proto="https://";
-            app_request->is_ssl = true;
+void MitmHostCX::engine_http1_start(const std::shared_ptr<duplexFlowMatch> &x_sig, flowMatchState& s, vector_range& r) {
+
+    if(r.empty()) return;
+
+    std::pair<char,buffer*>& http_request1 = flow().flow()[0];
+
+    buffer* http_request1_buffer = http_request1.second;
+
+    // limit this rather info/convenience regexing to 128 bytes
+
+    // Actually for unknown reason, sample size 512 (and more) was crashing deep in std::regex on alpine platform.
+    // Suspicion is it has to do something with MUSL or alpine platform specific. 256 is good enough to set for general use,
+    // as there is nothing dependant on full URI and more can slow box down for not real benefit.
+
+
+    std::string buffer_data_string((const char*)http_request1_buffer->data(), http_request1_buffer->size());
+
+
+    engine_http1_start_find_method(buffer_data_string);
+    engine_http1_start_find_host(buffer_data_string);
+    engine_http1_start_find_referrer(buffer_data_string);
+
+
+    auto engine_http1_set_proto = [this]() {
+        auto* app_request = dynamic_cast<app_HttpRequest*>(application_data.get());
+        if(app_request != nullptr) {
+            // detect protocol (plain vs ssl)
+            auto* proto_com = dynamic_cast<SSLCom*>(com());
+            if(proto_com != nullptr) {
+                app_request->proto="https://";
+                app_request->is_ssl = true;
+            } else {
+                app_request->proto="http://" ;
+            }
+
+
+            _inf("http request: %s",ESC(app_request->str()));
         } else {
-            app_request->proto="http://" ;
+            _err("http request: app_request failed");
         }
+    };
 
 
-        _inf("http request: %s",ESC(app_request->str()));
-    } else {
-        _inf("http request: %s (app_request cast failed)", ESC(print_request));
-    }
-
+    engine_http1_set_proto();
 
     replacement_type_ = REPLACETYPE_HTTP;
 }

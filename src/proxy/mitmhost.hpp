@@ -163,7 +163,10 @@ public:
 
     void engine(std::string const& name, EngineCtx e);
     void engine_http1_start(const std::shared_ptr<duplexFlowMatch> &x_sig, flowMatchState& s, vector_range& r);
-    
+    void engine_http1_start_find_referrer(std::string const& data);
+    void engine_http1_start_find_host(std::string const& data);
+    void engine_http1_start_find_method(std::string const& data);
+
     void on_starttls() override;
 
     int matched_policy() const { return matched_policy_; }
