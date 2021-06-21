@@ -1771,8 +1771,9 @@ int cli_diag_sig_list(struct cli_def *cli, const char *command, char *argv[], in
     // explicitly make shared_ptr from the list
 
     std::vector< std::shared_ptr<SignatureTree::sensorType> > lists;
-    lists.push_back(SigFactory::get().tls());
-    lists.push_back(SigFactory::get().base());
+    for(auto next: SigFactory::get().signature_tree().sensors_) {
+        if(next) lists.push_back(next);
+    }
 
     for(auto const& list: lists)
         for(auto const& [ _, sig]: *list) {
