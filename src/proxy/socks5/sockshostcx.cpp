@@ -64,7 +64,7 @@ socksServerCX::~socksServerCX() {
 }
 
 
-int socksServerCX::process() {
+std::size_t socksServerCX::process_in() {
     switch(state_) {
         case socks5_state::INIT:
             return process_socks_hello();

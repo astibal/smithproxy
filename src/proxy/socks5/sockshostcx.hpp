@@ -81,7 +81,7 @@ public:
     virtual ~socksServerCX();
 
 
-    virtual int process();
+    virtual std::size_t process_in();
     virtual int process_socks_hello();
     virtual int process_socks_request();
     virtual bool setup_target();

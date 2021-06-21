@@ -96,19 +96,24 @@ MitmHostCX::MitmHostCX( baseCom* c, int s ) : AppHostCX::AppHostCX(c,s) {
     load_signatures();
 }
 
-int MitmHostCX::process() {
+std::size_t MitmHostCX::process_in() {
 
-    // incoming data are in the readbuf
-    unsigned char *ptr = baseHostCX::readbuf()->data();
-    unsigned int len = baseHostCX::readbuf()->size();
+    // eliminate this completely
+    _if_deb {
+        // incoming data are in the readbuf
+        unsigned char *ptr = baseHostCX::readbuf()->data();
+        unsigned int len = baseHostCX::readbuf()->size();
 
-    // our only processing: hex dup the payload to the log
-    _dum("Incoming data(%s):\n %s", this->c_type(), hex_dump(ptr, static_cast<int>(len)).c_str());
+        // our only processing: hex dup the payload to the log
+        _dum("Incoming data(%s):\n %s", this->c_type(), hex_dump(ptr, static_cast<int>(len)).c_str());
 
 
 
-    //  read buffer will be truncated by 'len' bytes. Note: truncated bytes are LOST.
-    return static_cast<int>(len);
+        //  read buffer will be truncated by 'len' bytes. Note: truncated bytes are LOST.
+        return len;
+    }
+
+    return baseHostCX::process_in();
 }
 
 void MitmHostCX::load_signatures() {
@@ -120,7 +125,7 @@ void MitmHostCX::load_signatures() {
 
     auto& factory_signatures = SigFactory::get().signature_tree();
 
-    for(auto const& [name, index]: factory_signatures.name_index) {
+    for(auto const& [name, index ]: factory_signatures.name_index) {
 
         auto factory_group = factory_signatures.group(name.c_str(), false);
         if(factory_group) {

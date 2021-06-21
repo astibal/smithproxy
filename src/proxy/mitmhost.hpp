@@ -153,7 +153,7 @@ public:
     MitmHostCX(baseCom* c, const char* h, const char* p );
     MitmHostCX( baseCom* c, int s );
 
-    int process() override;
+    std::size_t process_in() override;
     void load_signatures();
 
     

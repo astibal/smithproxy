@@ -108,7 +108,7 @@ unsigned int SmithProtoCX::unpack(buffer* b) {
     return r;
 }
 
-int SmithProtoCX::process() {
+std::size_t SmithProtoCX::process_in() {
         
     //retrieve packages from received buffer
     auto r = unpack();

@@ -55,7 +55,7 @@ public:
     ~SmithProtoCX() override;
         
 
-    int process() override ;
+    std::size_t process_in() override ;
     virtual void process_keepalive(LTVEntry*);
     virtual void process_package(LTVEntry*);
         
