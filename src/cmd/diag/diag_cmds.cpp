@@ -1605,16 +1605,27 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
 
                     if (lf) {
                         if (verbosity > INF) ss << "\n    ";
+                        if(lf->engine_ctx.signature) {
+
+                            auto mysig = std::dynamic_pointer_cast<MyDuplexFlowMatch>(lf->engine_ctx.signature);
+
+                            cur_obj_ss << "\n    L7_engine: " << mysig->sig_engine;
+                            cur_obj_ss << "\n    L7_signature: " << mysig->name() << ", group: " << mysig->sig_group;
+                        } else {
+                            cur_obj_ss << "\n    L7_engine: none";
+                        }
+
                         if (lf->engine_ctx.application_data) {
                             std::string desc = lf->engine_ctx.application_data->str();
                             if (verbosity < DEB && desc.size() > 120) {
                                 desc = desc.substr(0, 117);
                                 desc += "...";
                             }
-                            cur_obj_ss << "\n    app_data: " << desc << "\n";
+                            cur_obj_ss << "\n    L7_params: " << desc << "\n";
                         } else {
-                            cur_obj_ss << "\n    app_data: none\n";
+                            cur_obj_ss << "\n    L7_params: none\n";
                         }
+
 
                         if (verbosity > INF) {
                             cur_obj_ss << "    obj_debug: " << curr_proxy->get_this_log_level().str() << "\n";
