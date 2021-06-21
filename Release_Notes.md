@@ -36,10 +36,11 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 ### Improvements
 
 * [ ] json/api interface
+* pass TLS ALPN extension by default; controllable by 'alpn_block' in TLS profile   
 * add cli command 'diag proxy session active' which prints only currently active sessions
 * match starttls only on certain traffic and exchange margins 
 * create infrastructure for signature cascades
-* version 0.9.14-15 skipped due to larger API changes in socle
+* version 0.9.14-18 skipped due to larger API changes in socle
 * new 'toggle' command - modify list variables - toggle specific element instead of setting all at once
 * code cleanups in logging - removal of old macros
 
