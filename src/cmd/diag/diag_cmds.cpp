@@ -61,6 +61,7 @@
 #include <policy/authfactory.hpp>
 
 #include <inspect/sigfactory.hpp>
+#include <inspect/sxsignature.hpp>
 
 #include <cmd/diag/diag_cmds.hpp>
 
@@ -1498,8 +1499,8 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
                                     tls_ss << "\n    sni: " << sni;
 
                                     if(lf) {
-                                        auto* app = lf->application_data.get();
-                                        auto http_app = dynamic_cast<app_HttpRequest*>(app);
+                                        auto* app = lf->engine_ctx.application_data.get();
+                                        auto http_app = dynamic_cast<sx::engine::http::app_HttpRequest*>(app);
                                         if(http_app) {
 
                                             if(! http_app->host.empty()) {
@@ -1604,15 +1605,15 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
 
                     if (lf) {
                         if (verbosity > INF) ss << "\n    ";
-                        if (lf->application_data) {
-                            std::string desc = lf->application_data->str();
+                        if (lf->engine_ctx.application_data) {
+                            std::string desc = lf->engine_ctx.application_data->str();
                             if (verbosity < DEB && desc.size() > 120) {
                                 desc = desc.substr(0, 117);
                                 desc += "...";
                             }
                             cur_obj_ss << "\n    app_data: " << desc << "\n";
                         } else {
-                            cur_obj_ss << "app_data: none\n";
+                            cur_obj_ss << "\n    app_data: none\n";
                         }
 
                         if (verbosity > INF) {

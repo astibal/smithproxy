@@ -38,10 +38,13 @@
 */
 
 #include <proxy/mitmhost.hpp>
+#include <proxy/mitmcom.hpp>
 #include <display.hpp>
 #include <log/logger.hpp>
 #include <cfgapi.hpp>
 #include <inspect/sigfactory.hpp>
+#include <inspect/sxsignature.hpp>
+#include <inspect/http1engine.hpp>
 
 bool MitmHostCX::ask_destroy() {
     error(true);
@@ -61,24 +64,6 @@ std::string MitmHostCX::to_string(int verbosity) const {
     ret << "<" << AppHostCX::to_string(verbosity) << ">";
 
     return ret.str();
-}
-
-
-
-baseCom* MySSLMitmCom::replicate() {
-    return new MySSLMitmCom();
-}
-
-bool MySSLMitmCom::spoof_cert(X509* x, SpoofOptions& spo) {
-    
-    //std::string cert = SSLFactory::print_cert(x);
-    //comlog().append("\n ==== Server certificate:\n" + cert  + "\n ====\n");
-
-    bool r = baseSSLMitmCom::spoof_cert(x,spo);
-
-    //_ext("MySSLMitmCom::spoof_cert: cert:\n%s",cert.c_str());
-
-    return r;
 }
 
 
@@ -106,14 +91,21 @@ std::size_t MitmHostCX::process_in() {
 
         // our only processing: hex dup the payload to the log
         _dum("Incoming data(%s):\n %s", this->c_type(), hex_dump(ptr, static_cast<int>(len)).c_str());
+    }
 
+    if(engine_ctx.signature) {
+        auto sig = std::dynamic_pointer_cast<MyDuplexFlowMatch>(engine_ctx.signature);
 
-
-        //  read buffer will be truncated by 'len' bytes. Note: truncated bytes are LOST.
-        return len;
+        if(sig and not sig->sig_engine.empty()) {
+            engine_run(sig->sig_engine, engine_ctx);
+        }
     }
 
     return baseHostCX::process_in();
+}
+
+std::size_t MitmHostCX::process_out() {
+    return baseHostCX::process_out();
 }
 
 void MitmHostCX::load_signatures() {
@@ -147,163 +139,15 @@ void MitmHostCX::load_signatures() {
 }
 
 
-void MitmHostCX::engine(std::string const& name, EngineCtx e) {
+void MitmHostCX::engine_run(std::string const& name, sx::engine::EngineCtx &e) {
     // mux to other engines from hash name->engine, now just pass to http1
     if(name == "http1") {
-        engine_http1_start(e.signature, e.match_state, e.match_range);
+        sx::engine::http::engine_http1_start(e);
     } else {
-        _err("unknown engine: %s", name.c_str());
+        _deb("unknown engine_run: %s", name.c_str());
     }
 }
 
-void MitmHostCX::engine_http1_start_find_referrer(std::string const& data) {
-
-    std::smatch m_ref;
-
-    auto ix_ref = data.find("Referer: ");
-    if(ix_ref != std::string::npos) {
-        auto ref_start = data.substr(ix_ref, std::min(std::size_t (128), data.size() - ix_ref));
-        if (std::regex_search(ref_start, m_ref, ProtoRex::http_req_ref())) {
-            std::string str_temp;
-
-            str_temp = m_ref[1].str();
-
-            if(not application_data) {
-                application_data = std::make_unique<app_HttpRequest>();
-            }
-
-            auto *app_request = dynamic_cast<app_HttpRequest *>(application_data.get());
-            if (app_request != nullptr) {
-                app_request->referer = str_temp;
-                _deb("Referer: %s", ESC(app_request->referer));
-            }
-        }
-    }
-}
-
-void MitmHostCX::engine_http1_start_find_host(std::string const& data) {
-    auto ix_host = data.find("Host: ");
-    if(ix_host != std::string::npos) {
-
-        auto host_start = data.substr(ix_host, std::min(std::size_t (128), data.size() - ix_host));
-        std::smatch m_host;
-
-        if (std::regex_search(host_start, m_host, ProtoRex::http_req_host())) {
-            if (!m_host.empty()) {
-                auto str_temp = m_host[1].str();
-
-                if (not application_data) {
-                    application_data = std::make_unique<app_HttpRequest>();
-                }
-
-                auto *app_request = dynamic_cast<app_HttpRequest *>(application_data.get());
-                if (app_request != nullptr) {
-                    app_request->host = str_temp;
-                    _dia("Host: %s", app_request->host.c_str());
-
-
-                    // NOTE: should be some config variable
-                    bool check_inspect_dns_cache = true;
-                    if (check_inspect_dns_cache) {
-
-                        std::scoped_lock<std::recursive_mutex> d_(DNS::get().dns_lock());
-
-                        auto dns_resp_a = DNS::get().dns_cache().get("A:" + app_request->host);
-                        auto dns_resp_aaaa = DNS::get().dns_cache().get("AAAA:" + app_request->host);
-
-                        if (dns_resp_a && com()->l3_proto() == AF_INET) {
-                            _deb("HTTP inspection: Host header matches DNS: %s", ESC(dns_resp_a->question_str_0()));
-                        } else if (dns_resp_aaaa && com()->l3_proto() == AF_INET6) {
-                            _deb("HTTP inspection: Host header matches IPv6 DNS: %s",
-                                 ESC(dns_resp_aaaa->question_str_0()));
-                        } else {
-                            _war("HTTP inspection: 'Host' header value '%s' DOESN'T match DNS!",
-                                 app_request->host.c_str());
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-void MitmHostCX::engine_http1_start_find_method(std::string const& data) {
-    auto method_start = data.substr(0, std::min(std::size_t(128), data.size()));
-    std::smatch m_get;
-
-    if(std::regex_search (method_start, m_get, ProtoRex::http_req_get() )) {
-        if(m_get.size() > 1) {
-
-            auto str_temp = m_get[2].str();
-
-            if(not application_data) {
-                application_data = std::make_unique<app_HttpRequest>();
-            }
-
-            auto* app_request = dynamic_cast<app_HttpRequest*>(application_data.get());
-            if(app_request != nullptr) {
-                app_request->uri = str_temp;
-                _dia("URI: %s", ESC(app_request->uri));
-            }
-
-            if(app_request && m_get.size() > 2) {
-                str_temp = m_get[3].str();
-                app_request->params = str_temp;
-                _dia("params: %s", ESC(app_request->params));
-
-            }
-        }
-    }
-}
-
-
-void MitmHostCX::engine_http1_start(const std::shared_ptr<duplexFlowMatch> &x_sig, flowMatchState& s, vector_range& r) {
-
-    if(r.empty()) return;
-
-    std::pair<char,buffer*>& http_request1 = flow().flow()[0];
-
-    buffer* http_request1_buffer = http_request1.second;
-
-    // limit this rather info/convenience regexing to 128 bytes
-
-    // Actually for unknown reason, sample size 512 (and more) was crashing deep in std::regex on alpine platform.
-    // Suspicion is it has to do something with MUSL or alpine platform specific. 256 is good enough to set for general use,
-    // as there is nothing dependant on full URI and more can slow box down for not real benefit.
-
-
-    std::string buffer_data_string((const char*)http_request1_buffer->data(), http_request1_buffer->size());
-
-
-    engine_http1_start_find_method(buffer_data_string);
-    engine_http1_start_find_host(buffer_data_string);
-    engine_http1_start_find_referrer(buffer_data_string);
-
-
-    auto engine_http1_set_proto = [this]() {
-        auto* app_request = dynamic_cast<app_HttpRequest*>(application_data.get());
-        if(app_request != nullptr) {
-            // detect protocol (plain vs ssl)
-            auto* proto_com = dynamic_cast<SSLCom*>(com());
-            if(proto_com != nullptr) {
-                app_request->proto="https://";
-                app_request->is_ssl = true;
-            } else {
-                app_request->proto="http://" ;
-            }
-
-
-            _inf("http request: %s",ESC(app_request->str()));
-        } else {
-            _err("http request: app_request failed");
-        }
-    };
-
-
-    engine_http1_set_proto();
-
-    replacement_type_ = REPLACETYPE_HTTP;
-}
 
 
 void MitmHostCX::inspect(char side) {
@@ -397,16 +241,24 @@ void MitmHostCX::on_detect(std::shared_ptr<duplexFlowMatch> x_sig, flowMatchStat
             sig_sig->name().c_str()));
 
 
+    auto prep_ctx = [&]() {
+        engine_ctx.origin = this;
+        engine_ctx.flow_pos = flow().flow().size() - 1;
+        engine_ctx.signature = x_sig;
+    };
+
     // make this code deprecated and call it only if engine is not present in the configuration
-    if(sig_sig->sig_category == "www" && sig_sig->name() == "http/get|post") {
-        if(sig_sig->sig_engine.empty()) {
-            engine_http1_start(x_sig, s, r);
-        }
-    }
+//    if(sig_sig->sig_category == "www" && sig_sig->name() == "http/get|post") {
+//        if(sig_sig->sig_engine.empty()) {
+//            prep_ctx();
+//            engine_http1_start(engine_ctx);
+//        }
+//    }
 
     if(not sig_sig->sig_engine.empty()) {
-        auto cx = EngineCtx::create(this, x_sig, s, r);
-        engine(sig_sig->sig_engine, cx);
+        prep_ctx();
+        // Engine will run in process_in() and process_out()
+        // engine(sig_sig->sig_engine, engine_ctx);
     }
 
     // look if signature enables other groups

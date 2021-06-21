@@ -41,6 +41,8 @@
 #ifndef MITMPROXY_HPP
  #define MITMPROXY_HPP
 
+#include <atomic>
+
 #include <basecom.hpp>
 #include <hostcx.hpp>
 #include <proxy/socks5/sockshostcx.hpp>
@@ -53,8 +55,8 @@
 
 #include <sslcertval.hpp>
 #include <proxy/ocspinvoker.hpp>
+#include <inspect/http1engine.hpp>
 
-#include <atomic>
 
 struct whitelist_verify_entry {
 };
@@ -168,7 +170,7 @@ public:
     static std::string verify_flag_string_extended(int code);
     static std::string replacement_ssl_verify_detail(SSLCom* scom);
 
-    static std::string replacement_ssl_page(SSLCom* scom, app_HttpRequest* app_request, std::string const& more_info);
+    static std::string replacement_ssl_page(SSLCom* scom, sx::engine::http::app_HttpRequest* app_request, std::string const& more_info);
     void set_replacement_msg_ssl(SSLCom* scom); // evaluates SSL verify info and sets replacement_msg string
     
     // check if content has been pulled from cache and return true if so

@@ -100,6 +100,8 @@ add_executable(smithproxy
         src/main.cpp
         src/proxy/mitmhost.cpp
         src/proxy/mitmproxy.cpp
+        src/proxy/mitmcom.hpp
+        src/proxy/mitmcom.cpp
         src/cfgapi.cpp
         src/policy/policy.cpp
         src/service/daemon.cpp
@@ -129,6 +131,10 @@ add_executable(smithproxy
         src/inspect/sxsignature.hpp
         src/inspect/pyinspector.hpp
         src/inspect/sigfactory.hpp
+        src/inspect/engine.hpp
+        src/inspect/http1engine.hpp
+        src/inspect/http1engine.cpp
+        src/inspect/dohinspector.hpp
         src/async/asyncsocket.hpp
         src/async/asyncdns.hpp
         src/inspect/dnsinspector.hpp

@@ -38,11 +38,16 @@
 */
 
 #include <memory>
+
 #include <service/core/smithproxy.hpp>
+
 #include <cmd/cmdserver.hpp>
 #include <cmd/clistate.hpp>
+
 #include <policy/authfactory.hpp>
 #include <inspect/sigfactory.hpp>
+#include <inspect/sxsignature.hpp>
+
 #include <cfgapi.hpp>
 
 SmithProxy::~SmithProxy () {

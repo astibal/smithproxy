@@ -56,6 +56,7 @@
 #include <policy/policy.hpp>
 #include <policy/authfactory.hpp>
 #include <inspect/sigfactory.hpp>
+#include <inspect/sxsignature.hpp>
 
 #include <proxy/mitmproxy.hpp>
 #include <proxy/mitmhost.hpp>

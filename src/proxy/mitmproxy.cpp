@@ -953,14 +953,14 @@ std::string get_connection_details_str(MitmProxy* px, baseHostCX* cx, char side)
             detail << string_format("sni=%s ",sc->get_peer_sni().c_str());
         }
     }
-    if(mh && mh->application_data) {
+    if(mh && mh->engine_ctx.application_data) {
 
-        auto* http = dynamic_cast<app_HttpRequest*>(mh->application_data.get());
+        auto* http = dynamic_cast<sx::engine::http::app_HttpRequest*>(mh->engine_ctx.application_data.get());
         if(http) {
             detail << "app=" << http->proto << http->host << " ";
         }
         else {
-            detail << "app=" << mh->application_data->str() << " ";
+            detail << "app=" << mh->engine_ctx.application_data->str() << " ";
         }
     }
 
@@ -1147,7 +1147,7 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
     std::string repl_port = AuthFactory::get().portal_port_http;
     std::string repl_proto = "http";
 
-    if(cx->application_data->is_ssl) {
+    if(cx->engine_ctx.application_data->is_ssl) {
         repl_proto = "https";
         repl_port =AuthFactory::get().portal_port_https;
     }    
@@ -1172,7 +1172,7 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
             
             if(now - token_ts < AuthFactory::get().token_timeout) {
                 _inf("MitmProxy::handle_replacement_auth: cached token %s for request: %s",
-                                token_tk.c_str(), cx->application_data->str().c_str());
+                                token_tk.c_str(), cx->engine_ctx.application_data->str().c_str());
                 
                 if(cx->com()) {
                     if(cx->com()->l3_proto() == AF_INET) {
@@ -1202,14 +1202,14 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
                 replacement_msg += "(auth: known token)";
             } else {
                 _inf("MitmProxy::handle_replacement_auth: expired token %s for request: %s",
-                                token_tk.c_str(), cx->application_data->str().c_str());
+                                token_tk.c_str(), cx->engine_ctx.application_data->str().c_str());
                 goto new_token;
             }
         } else {
         
             new_token:
             
-            std::string token_text = cx->application_data->original_request();
+            std::string token_text = cx->engine_ctx.application_data->original_request();
           
             for(auto const& i: CfgFactory::get()->policy_prof_auth(cx->matched_policy())->sub_policies) {
                 _dia("MitmProxy::handle_replacement_auth: token: requesting identity %s", i->element_name().c_str());
@@ -1218,7 +1218,7 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
             shm_logon_token tok = shm_logon_token(token_text.c_str());
             
             _inf("MitmProxy::handle_replacement_auth: new auth token %s for request: %s",
-                                tok.token().c_str(), cx->application_data->str().c_str());
+                                tok.token().c_str(), cx->engine_ctx.application_data->str().c_str());
             
             if(cx->com()) {
                 if(cx->com()->l3_proto() == AF_INET) {
@@ -1434,7 +1434,7 @@ std::string MitmProxy::replacement_ssl_verify_detail(SSLCom* scom) {
 }
 
 
-std::string MitmProxy::replacement_ssl_page(SSLCom* scom, app_HttpRequest* app_request, std::string const& more_info) {
+std::string MitmProxy::replacement_ssl_page(SSLCom* scom, sx::engine::http::app_HttpRequest* app_request, std::string const& more_info) {
     std::string repl;
 
     std::string block_target_info = "<p><h3 class=\"fg-red\">Requested site:</h3>" + app_request->proto + app_request->host + "</p>";
@@ -1468,7 +1468,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
     }
     
 
-    auto* app_request = dynamic_cast<app_HttpRequest*>(cx->application_data.get());
+    auto* app_request = dynamic_cast<sx::engine::http::app_HttpRequest*>(cx->engine_ctx.application_data.get());
     if(app_request != nullptr) {
         
 //         _inf(" --- request: %s",app_request->request().c_str());

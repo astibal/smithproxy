@@ -41,6 +41,7 @@
   #define _SOCKS5HOST_HPP_
 
 #include <threadedacceptor.hpp>
+#include <proxy/mitmcom.hpp>
 #include <proxy/mitmhost.hpp>
 #include <proxy/mitmproxy.hpp>
 #include <hostcx.hpp>
