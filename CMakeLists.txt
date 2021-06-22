@@ -199,6 +199,7 @@ if(GTEST_FOUND)
             src/policy/tests/addrobj_test.cpp
 
             socle/tests/test_tls.cpp
+            socle/tests/tests_peering.cpp
             socle/common/tests/cache_tests.cpp
             socle/common/tests/inet_tests.cpp)
     target_link_libraries(sx_gtests gtest gtest_main socle_lib pthread crypto ssl)
