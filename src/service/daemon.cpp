@@ -43,12 +43,10 @@
 #include <csignal>
 
 #include <cstdio>
-#include <cstdlib>
 #include <fcntl.h>
 #include <unistd.h>
 
 #include <cstring>
-#include <sys/resource.h>
 
 #include <log/logger.hpp>
 #include <service/daemon.hpp>
@@ -182,12 +180,12 @@ bool DaemonFactory::exists_pidfile() const {
     return result == 0;
 }
 
-int DaemonFactory::get_limit_fd() {
+rlim_t DaemonFactory::get_limit_fd() {
     struct rlimit r{};
-    int ret = getrlimit(RLIMIT_NOFILE,&r);
+    int ret = getrlimit(RLIMIT_NOFILE, &r);
     if(ret < 0) {
         _err("get_limit_fd: cannot obtain fd limits: %s", string_error().c_str());
-        return -1;
+        return 0;
     }
 
     return r.rlim_cur;
@@ -228,30 +226,32 @@ void DaemonFactory::set_crashlog(const char* file) {
     strncpy((char*)crashlog_file,file,LOG_FILENAME_SZ-1);
 }
 
-void writecrash(int fd, const char* msg, int len)  {
+void writecrash(int fd, const char* msg, size_t len)  {
 
     if(len < 0 or fd <= 0) {
         return;
     }
 
-   int w = 0; int rep = 0;
+   unsigned int written = 0;
+   int rep = 0;
 
    auto pos = msg;
    auto rest = len;
-   do {
-       int curw = ::write(fd, pos, rest);
 
-       if(curw == rest) {
+   do {
+       auto curw = ::write(fd, pos, rest);
+
+       if(curw == static_cast<ssize_t>(rest)) {
            break;
        }
        else if(curw > 0) {
-           w += curw;
+           written += curw;
            pos = &pos[curw];
-           rest -= curw;
+           rest -= static_cast<size_t>(curw);
        }
 
        rep++;
-   } while(w < len && rep < 10);
+   } while(written < len && rep < 10);
 }
 
 

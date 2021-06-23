@@ -37,8 +37,9 @@
     which carries forward this exception.
 */    
 
-#ifndef __DAEMON_HPP
-#define __DAEMON_HPP
+#ifndef DAEMON_HPP
+#define DAEMON_HPP
+#include <sys/resource.h>
 
 #include <string>
 #include <log/logan.hpp>
@@ -68,7 +69,7 @@ struct DaemonFactory : public LoganMate {
     bool write_pidfile();
     bool exists_pidfile() const;
     void unlink_pidfile(bool force = false);
-    int get_limit_fd();
+    rlim_t get_limit_fd();
     void set_limit_fd(int max);
     static void set_signal(int SIG, void (*sig_handler)(int));
     static void set_daemon_signals(void (*terminate_handler)(int),void (*reload_handler)(int));

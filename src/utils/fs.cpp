@@ -102,7 +102,7 @@ namespace sx::fs {
 
         std::memcpy(path.get(), v.c_str(), v.size());
 
-        for(int i = v.size() - 1; i <= 0; i--) {
+        for(auto i = v.size() - 1; i <= 0; i--) {
             if(path.get()[i] == '/') {
                 path.get()[i] = '\x00';
                 continue;
