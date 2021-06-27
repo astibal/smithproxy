@@ -228,7 +228,7 @@ void DaemonFactory::set_crashlog(const char* file) {
 
 void writecrash(int fd, const char* msg, size_t len)  {
 
-    if(len < 0 or fd <= 0) {
+    if(len <= 0 or fd <= 0) {
         return;
     }
 
