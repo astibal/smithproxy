@@ -46,7 +46,7 @@ using namespace socle;
 QueueLogger::QueueLogger(): LogMux(), lockable() {
 }
 
-int QueueLogger::write_log(loglevel l, std::string& sss) {
+size_t QueueLogger::write_log(loglevel l, std::string& sss) {
 
     locked_guard<QueueLogger> ll(this);
 
@@ -88,7 +88,7 @@ int QueueLogger::write_log(loglevel l, std::string& sss) {
     return 0;
 }
 
-int QueueLogger::write_disk(loglevel l, std::string& sss) {
+size_t QueueLogger::write_disk(loglevel l, std::string& sss) {
     locked_guard<QueueLogger> ll(this);
 
     return LogMux::write_log(l,sss);

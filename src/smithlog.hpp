@@ -57,8 +57,8 @@ class QueueLogger : public LogMux, public lockable {
 public:
     QueueLogger();
     ~QueueLogger() override = default;
-    int write_log(loglevel l, std::string& sss) override;
-    virtual int write_disk(loglevel l, std::string& sss);
+    size_t write_log(loglevel l, std::string& sss) override;
+    virtual size_t write_disk(loglevel l, std::string& sss);
     
     static void run_queue(std::shared_ptr<QueueLogger> log_src);
     
