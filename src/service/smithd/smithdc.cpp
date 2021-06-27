@@ -271,10 +271,11 @@ void test_url(const char* url = nullptr) {
 
 int main() {
 
-    logger().dup2_cout(true);
-    logger().level(DEB);
-    logan::get()["internal.ltv"]->level(iDEB);
-    logan::get()["com.smithd"]->level(iDEB);
+    Log::init();
+    Log::get()->dup2_cout(true);
+    Log::get()->level(INF);
+    logan::get()["internal.ltv"]->level(iINF);
+    logan::get()["com.smithd"]->level(iINF);
 
 
 

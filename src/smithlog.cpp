@@ -43,7 +43,7 @@
 
 using namespace socle;
 
-QueueLogger::QueueLogger(): logger(), lockable() {
+QueueLogger::QueueLogger(): LogMux(), lockable() {
 }
 
 int QueueLogger::write_log(loglevel l, std::string& sss) {
@@ -61,7 +61,7 @@ int QueueLogger::write_log(loglevel l, std::string& sss) {
     // set warning condition
     if(warned  == 0 && logs_.size() >= max_len - max_len/10 ) {
         auto msg = string_format("logger queue filling up: %d/%d", logs_.size(), max_len);
-        logger::write_log(log::level::ERR, msg);
+        LogMux::write_log(log::level::ERR, msg);
         warned++;
     }
 
@@ -91,7 +91,7 @@ int QueueLogger::write_log(loglevel l, std::string& sss) {
 int QueueLogger::write_disk(loglevel l, std::string& sss) {
     locked_guard<QueueLogger> ll(this);
 
-    return logger::write_log(l,sss);
+    return LogMux::write_log(l,sss);
 }
 
 
@@ -128,7 +128,7 @@ void QueueLogger::run_queue(std::shared_ptr<QueueLogger> log_src) {
 
 std::thread *create_log_writer () {
     std::thread * writer_thread = new std::thread([]() { 
-        auto log_ptr = LogOutput::get();
+        auto log_ptr = Log::get();
         auto q_logger = std::dynamic_pointer_cast<QueueLogger>(log_ptr);
         
         if(q_logger) {

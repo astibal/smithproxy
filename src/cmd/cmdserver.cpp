@@ -453,20 +453,20 @@ int cli_test_dns_refreshallfqdns(struct cli_def *cli, const char *command, char 
 
 void cli_print_log_levels(struct cli_def *cli) {
 
-    auto const& lp = LogOutput::get()->target_profiles()[(uint64_t)fileno(cli->client)];
+    auto const& lp = Log::get()->target_profiles()[(uint64_t)fileno(cli->client)];
 
     cli_print(cli,"THIS cli logging level set to: %d",lp->level_.level());
-    cli_print(cli,"Internal logging level set to: %d", LogOutput::get()->level().level());
+    cli_print(cli, "Internal logging level set to: %d", Log::get()->level().level());
     cli_print(cli,"\n");
-    for(auto [ target, mut ]: LogOutput::get()->remote_targets()) {
+    for(auto [ target, mut ]: Log::get()->remote_targets()) {
         cli_print(cli, "Logging level for remote: %s: %d",
-                  LogOutput::get()->target_name((uint64_t)target),
-                  LogOutput::get()->target_profiles()[(uint64_t)target]->level_.level());
+                  Log::get()->target_name((uint64_t)target),
+                  Log::get()->target_profiles()[(uint64_t)target]->level_.level());
     }
-    for(auto const& [ o_ptr, mut]: LogOutput::get()->targets()) {
+    for(auto const& [ o_ptr, mut]: Log::get()->targets()) {
         cli_print(cli, "Logging level for target: %s: %d",
-                  LogOutput::get()->target_name((uint64_t)(o_ptr.get())),
-                  LogOutput::get()->target_profiles()[(uint64_t)(o_ptr.get())]->level_.level());
+                  Log::get()->target_name((uint64_t)(o_ptr.get())),
+                  Log::get()->target_profiles()[(uint64_t)(o_ptr.get())]->level_.level());
     }
 }
 
@@ -475,7 +475,7 @@ int cli_debug_level(struct cli_def *cli, const char *command, char *argv[], int 
 
     debug_cli_params(cli, command, argv, argc);
 
-    auto const& lp = LogOutput::get()->target_profiles()[(uint64_t)fileno(cli->client)];
+    auto const& lp = Log::get()->target_profiles()[(uint64_t)fileno(cli->client)];
     if(argc > 0) {
 
         std::string a1 = argv[0];
@@ -486,14 +486,14 @@ int cli_debug_level(struct cli_def *cli, const char *command, char *argv[], int 
         else if(a1 == "reset") {
             lp->level_ = NON;
 
-            LogOutput::get()->level(CfgFactory::get()->internal_init_level);
-            cli_print(cli, "internal logging level changed to %d", LogOutput::get()->level().level_ref());
+            Log::get()->level(CfgFactory::get()->internal_init_level);
+            cli_print(cli, "internal logging level changed to %d", Log::get()->level().level_ref());
         }
         else {
             //cli_print(cli, "called %s with %s, argc %d\r\n", __FUNCTION__, command, argc);
             int newlev = safe_val(argv[0]);
             if(newlev >= 0) {
-                LogOutput::get()->level(loglevel(newlev, 0));
+                Log::get()->level(loglevel(newlev, 0));
             } else {
                 cli_print(cli,"Incorrect value for logging level: %d",newlev);
             }
@@ -509,7 +509,7 @@ int cli_debug_level(struct cli_def *cli, const char *command, char *argv[], int 
 int cli_debug_terminal(struct cli_def *cli, const char *command, char *argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
 
-    auto const& lp = LogOutput::get()->target_profiles()[(uint64_t)fileno(cli->client)];
+    auto const& lp = Log::get()->target_profiles()[(uint64_t)fileno(cli->client)];
     if(argc > 0) {
 
         std::string a1 = argv[0];
@@ -564,16 +564,16 @@ int cli_debug_logfile(struct cli_def *cli, const char *command, char *argv[], in
             }
 
             if(newlev >= 0) {
-                for(auto const& [ o_ptr, mut ]: LogOutput::get()->targets()) {
+                for(auto const& [ o_ptr, mut ]: Log::get()->targets()) {
 
-                    std::string fnm = LogOutput::get()->target_name((uint64_t)(o_ptr.get()));
+                    std::string fnm = Log::get()->target_name((uint64_t)(o_ptr.get()));
 
                     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
                     if( fnm == CfgFactory::get()->log_file ) {
 
                         cli_print(cli, "changing '%s' loglevel to %d", fnm.c_str(), newlev);
-                        LogOutput::get()->target_profiles()[(uint64_t) (o_ptr.get())]->level_.level(newlev);
+                        Log::get()->target_profiles()[(uint64_t) (o_ptr.get())]->level_.level(newlev);
                     }
                 }
             }
@@ -2576,19 +2576,19 @@ void client_thread(int client_socket) {
     gen_edit_sections();
 
     // Pass the connection off to libcli
-    LogOutput::get()->remote_targets(string_format("cli-%d", client_socket), client_socket);
+    Log::get()->remote_targets(string_format("cli-%d", client_socket), client_socket);
 
     auto lp = std::make_unique<logger_profile>();
     lp->level_ = CfgFactory::get()->cli_init_level;
-    LogOutput::get()->target_profiles()[(uint64_t)client_socket] = std::move(lp);
+    Log::get()->target_profiles()[(uint64_t)client_socket] = std::move(lp);
 
 
     load_defaults();
     cli_loop(cli, client_socket);
 
 
-    LogOutput::get()->remote_targets().remove_if([client_socket](auto e) { return e.first == client_socket; });
-    LogOutput::get()->target_profiles().erase(client_socket);
+    Log::get()->remote_targets().remove_if([client_socket](auto e) { return e.first == client_socket; });
+    Log::get()->target_profiles().erase(client_socket);
     close(client_socket);
 
     // Free data structures

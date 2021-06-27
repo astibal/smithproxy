@@ -53,7 +53,7 @@
 
 typedef std::pair<loglevel,std::string> log_entry;
 
-class QueueLogger : public logger, public lockable {
+class QueueLogger : public LogMux, public lockable {
 public:
     QueueLogger();
     ~QueueLogger() override = default;

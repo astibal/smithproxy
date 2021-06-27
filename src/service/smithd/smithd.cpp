@@ -335,18 +335,18 @@ bool load_config(std::string& config_f, bool reload) {
                 this_daemon->set_crashlog(crlog.c_str());
 
                 auto *o = new std::ofstream(log_target.c_str(), std::ios::app);
-                LogOutput::get()->targets(log_target, o);
-                LogOutput::get()->dup2_cout(false);
-                LogOutput::get()->level(cfg_log_level);
+                Log::get()->targets(log_target, o);
+                Log::get()->dup2_cout(false);
+                Log::get()->level(cfg_log_level);
 
                 auto lp = std::make_unique<logger_profile>();
-                lp->print_srcline_ = LogOutput::get()->print_srcline();
-                lp->print_srcline_always_ = LogOutput::get()->print_srcline_always();
+                lp->print_srcline_ = Log::get()->print_srcline();
+                lp->print_srcline_always_ = Log::get()->print_srcline_always();
                 lp->level_ = cfg_log_level;
-                LogOutput::get()->target_profiles()[(uint64_t) o] = std::move(lp);
+                Log::get()->target_profiles()[(uint64_t) o] = std::move(lp);
 
                 if (load_if_exists(cfgapi.getRoot()["settings"], "log_console", cfg_log_console)) {
-                    LogOutput::get()->dup2_cout(cfg_log_console);
+                    Log::get()->dup2_cout(cfg_log_console);
                 }
             }
 
@@ -463,8 +463,8 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    LogOutput::init();
-    LogOutput::set(std::make_shared<QueueLogger>());
+    Log::init();
+    Log::set(std::make_shared<QueueLogger>());
     
     if(!cfg_daemonize) {
         std::thread* log_thread  = create_log_writer();
@@ -473,7 +473,7 @@ int main(int argc, char *argv[]) {
         }    
     }
 
-    LogOutput::get()->level(DEB);
+    Log::get()->level(DEB);
     
     if(cfg_tenant_index.size() > 0 && cfg_tenant_name.size() > 0) {
         _war("Starting tenant: '%s', index %s",cfg_tenant_name.c_str(),cfg_tenant_index.c_str());
@@ -493,7 +493,7 @@ int main(int argc, char *argv[]) {
     
     // if logging set in cmd line, use it 
     if(args_debug_flag > NON) {
-        LogOutput::get()->level(args_debug_flag);
+        Log::get()->level(args_debug_flag);
     }
     
     if(! custom_config_file) {
@@ -544,12 +544,12 @@ int main(int argc, char *argv[]) {
 #endif
 
     if(cfg_daemonize) {
-        if(LogOutput::get()->targets().size() <= 0) {
+        if(Log::get()->targets().size() <= 0) {
             _fat("Cannot daemonize without logging to file.");
             exit(-5);
         }
 
-        LogOutput::get()->dup2_cout(false);
+        Log::get()->dup2_cout(false);
         _inf("entering service mode");
         int dem = this_daemon->daemonize();
 
