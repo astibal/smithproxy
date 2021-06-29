@@ -215,7 +215,11 @@ void DaemonFactory::set_signal(int SIG, signal_handler_t sig_handler) {
     sigemptyset(&act_segv.sa_mask);
     act_segv.sa_flags = 0;
     
-    if(sig_handler != nullptr)  act_segv.sa_handler = sig_handler;
+    if(sig_handler != nullptr)  {
+        act_segv.sa_handler = sig_handler;
+    } else {
+        act_segv.sa_handler = SIG_IGN;
+    }
     
     sigaction( SIG, &act_segv, nullptr);
 }
@@ -337,6 +341,7 @@ void DaemonFactory::set_daemon_signals(void (*terminate_handler)(int),void (*rel
     set_signal(SIGINT,terminate_handler);
     
     set_signal(SIGUSR1,reload_handler);
+    set_signal(SIGPIPE, nullptr); // don't wake up threads on PIPE
 
 #ifndef BUILD_RELEASE
     set_signal(SIGABRT,uw_btrace_handler);
