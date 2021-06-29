@@ -323,7 +323,7 @@ DNS_Response* send_dns_request(struct cli_def *cli, std::string const& hostname,
 
     epoll e;
     e.init();
-    e.add(send_socket);
+    e.add(send_socket, EPOLLIN);
 
     int rv = e.wait(4000);
     if(rv >= 1) {
@@ -355,7 +355,7 @@ DNS_Response* send_dns_request(struct cli_def *cli, std::string const& hostname,
         }
 
     } else {
-        cli_print(cli, "timeout, or an error occured.");
+        cli_print(cli, "timeout, or an error occurred.");
     }
 
 

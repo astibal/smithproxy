@@ -264,7 +264,7 @@ std::pair<DNS_Response *, ssize_t> DNSFactory::recv_dns_response(int send_socket
     // utilize epoll and wait for the socket to be ready (or timeout)
     epoll e;
     e.init();
-    e.add(send_socket);
+    e.add(send_socket, EPOLLIN);
     auto rv = e.wait(static_cast<int>(timeout_sec)*1000);
 
     // e.wait returns number of sucessfull elements from which we added
