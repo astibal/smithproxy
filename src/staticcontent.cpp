@@ -46,7 +46,7 @@ bool StaticContent::load_files(std::string& dir) {
         LoaderFile loader_file;
         std::vector<std::string> names;
 
-        for(const std::string& name: { "test", "html_page", "html_img_warning"} ) {
+        for(const std::string name: { "test", "html_page", "html_img_warning"} ) {
             _dia("StaticContent::load_files: loading template %s", name.c_str());
 
             auto* t_temp = new Template(loader_file);

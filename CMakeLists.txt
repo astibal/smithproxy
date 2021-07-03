@@ -1,11 +1,10 @@
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.0)
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/helpers.cmake)
 
 SET(SOCLE_DIR "socle")
 SET(SOCLE_COMMON_DIR "socle/common")
 SET(SMITHD_DIR "src/service/smithd")
-SET(UNWIND_LIB "")
 
 project(smithproxy CXX)
 
@@ -21,6 +20,21 @@ include_directories ("${SMITHD_DIR}")
 
 add_subdirectory(${SOCLE_DIR} socle_lib)
 add_subdirectory(${SOCLE_COMMON_DIR} socle_common_lib)
+
+
+find_package (LibConfig REQUIRED)
+if (LIBCONFIGPP_FOUND)
+    include_directories(${LIBCONFIGPP_INCLUDE_DIRS})
+endif (LIBCONFIGPP_FOUND)
+
+find_package(PythonLibs 3 REQUIRED)
+
+
+if(PYTHONLIBS_FOUND)
+    include_directories(${PYTHON_INCLUDE_DIRS})
+    message(">> python includes: " ${PYTHON_INCLUDE_DIRS})
+    add_compile_definitions(USE_PYTHON)
+endif()
 
 if(UNIX)
     IF(NOT CMAKE_BUILD_TYPE)
@@ -207,17 +221,12 @@ endif()
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}")
 
-find_package (LibConfig REQUIRED)
 if (LIBCONFIGPP_FOUND)
-    include_directories(${LIBCONFIGPP_INCLUDE_DIRS})
     target_link_libraries (smithproxy ${LIBCONFIGPP_LIBRARIES})
     target_link_libraries (smithd ${LIBCONFIGPP_LIBRARIES})
 endif (LIBCONFIGPP_FOUND)
 
 target_link_libraries (smithproxy crypt)
-
-find_package(PythonLibs 3 REQUIRED)
-include_directories(${PYTHON_INCLUDE_DIRS})
 
 if((CMAKE_SYSTEM_PROCESSOR MATCHES "arm") OR (CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64"))
     target_link_libraries (smithproxy atomic)

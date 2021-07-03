@@ -43,7 +43,6 @@
 #define SMITH_VERSION "0.9.18"
 #define SMITH_DEVEL    1
 
-#define USE_PYTHON
 
 
 bool load_config(std::string& config_f, bool reload = false);

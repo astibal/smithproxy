@@ -44,6 +44,7 @@
 #include <vector>
 #include <mutex>
 #include <unordered_map>
+#include <optional>
 #include <ctime>
 
 #include <sys/socket.h>

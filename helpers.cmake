@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.0)
 
 # taken from http://public.kitware.com/Bug/view.php?id=12646
 function(install_if_not_exists src dest)

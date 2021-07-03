@@ -47,6 +47,8 @@
 #include <list>
 #include <functional>
 #include <any>
+#include <optional>
+#include <memory>
 
 #include <utils/fs.hpp>
 #include <utils/str.hpp>
