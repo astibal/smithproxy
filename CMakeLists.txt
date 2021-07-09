@@ -33,7 +33,7 @@ find_package(PythonLibs 3 REQUIRED)
 if(PYTHONLIBS_FOUND)
     include_directories(${PYTHON_INCLUDE_DIRS})
     message(">> python includes: " ${PYTHON_INCLUDE_DIRS})
-    add_compile_definitions(USE_PYTHON)
+    add_definitions(-DUSE_PYTHON)
 endif()
 
 if(UNIX)
