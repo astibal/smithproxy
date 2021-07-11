@@ -47,7 +47,7 @@
 #include <biostring.hpp>
 
 #include <log/logger.hpp>
-#include <traflog.hpp>
+#include <traflog/traflog.hpp>
 
 #include <cmd/cmdserver.hpp>
 
