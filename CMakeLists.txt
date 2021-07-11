@@ -212,6 +212,7 @@ if(GTEST_FOUND)
             src/ext/libcidr/cidr.cpp
             src/policy/tests/addrobj_test.cpp
 
+            socle/traflog/tests/test_pcapapi.cpp
             socle/tests/test_tls.cpp
             socle/tests/tests_peering.cpp
             socle/common/tests/cache_tests.cpp
