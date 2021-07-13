@@ -70,7 +70,7 @@ class IOController {
 public:
     virtual void tap() = 0;
     virtual void untap() = 0;
-    IOController const* master() const noexcept { return (! master_) ?  this : master_; }
+    [[nodiscard]] IOController const* master() const noexcept { return (! master_) ?  this : master_; }
     void master(IOController* n) { master_ = n; }
 
 private:
@@ -125,7 +125,7 @@ public:
     inline bool identity_resolved() const;
     inline void identity_resolved(bool b);
     shm_logon_info_base* identity() { return identity_; }
-    inline void identity(shm_logon_info_base* i) { if(identity_ != nullptr) { delete identity_; }  if(i != nullptr) { identity_ = i->clone(); } }
+    inline void identity(shm_logon_info_base* i) { delete identity_; if(i != nullptr) { identity_ = i->clone(); } }
     bool resolve_identity(baseHostCX*,bool);
     bool update_auth_ipX_map(baseHostCX*);
     bool apply_id_policies(baseHostCX* cx);
@@ -138,19 +138,19 @@ public:
     void toggle_tlog();
     
     explicit MitmProxy(baseCom* c);
-    virtual ~MitmProxy();
+    ~MitmProxy() override;
     
     // this virtual method is called whenever there are new bytes in any LEFT host context!
-    virtual void on_left_bytes(baseHostCX* cx);    
-    virtual void on_right_bytes(baseHostCX* cx);
+    void on_left_bytes(baseHostCX* cx) override;
+    void on_right_bytes(baseHostCX* cx) override;
     
     // ... and also when there is error on L/R side, claim the proxy DEAD. When marked dead, it will be safely 
     // closed by it's master proxy next cycle.
 
     // universal error handler
     void on_error(baseHostCX* cx, char side, const char* side_label);
-    virtual void on_left_error(baseHostCX* cx);
-    virtual void on_right_error(baseHostCX* cx);
+    void on_left_error(baseHostCX* cx) override;
+    void on_right_error(baseHostCX* cx) override;
     
     // check authentication status and return true if redirected
     virtual void on_half_close(baseHostCX* cx);
@@ -179,12 +179,12 @@ public:
     bool ask_destroy() override { state().dead(true); return true; };
     std::string to_string(int verbosity) const override;
     
-    virtual int handle_sockets_once(baseCom*);
+    int handle_sockets_once(baseCom*) override;
     
     void init_content_replace();
     std::vector<ProfileContentRule>* content_rule() { return content_rule_; }    
     void content_replace(std::vector<ProfileContentRule>& x) { 
-	for(auto i: x) {
+	for(auto const& i: x) {
 	    content_rule_->push_back(i);
 	}
     }
@@ -219,9 +219,9 @@ public:
         log.area("acceptor.tcp");
     };
     
-    virtual baseHostCX* new_cx(int s);
-    virtual void on_left_new(baseHostCX* just_accepted_cx);
-    virtual int handle_sockets_once(baseCom* c);
+    baseHostCX* new_cx(int s) override;
+    void on_left_new(baseHostCX* just_accepted_cx) override;
+    int handle_sockets_once(baseCom* c) override;
     
     static bool ssl_autodetect;
     static bool ssl_autodetect_harder;
@@ -239,8 +239,8 @@ public:
 
         log.area("acceptor.udp");
     };
-    virtual void on_left_new(baseHostCX* just_accepted_cx);
-    baseHostCX* new_cx(int s);
+    void on_left_new(baseHostCX* just_accepted_cx) override;
+    baseHostCX* new_cx(int s) override;
 };
 
 

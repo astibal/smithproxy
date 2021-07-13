@@ -38,21 +38,18 @@
 */    
 
 #include <regex>
-#include <cstdlib>
 #include <ctime>
 
 #include <proxy/mitmproxy.hpp>
 #include <proxy/mitmhost.hpp>
 #include <log/logger.hpp>
 #include <cfgapi.hpp>
-#include <proxy/socks5/sockshostcx.hpp>
 #include <uxcom.hpp>
 #include <staticcontent.hpp>
 #include <proxy/filterproxy.hpp>
 #include <policy/authfactory.hpp>
 
 #include <algorithm>
-#include <ctime>
 
 
 MitmProxy::MitmProxy(baseCom* c): baseProxy(c), sobject() {
@@ -868,12 +865,12 @@ void MitmProxy::_debug_zero_connections(baseHostCX* cx) {
         auto* xcom = dynamic_cast<SSLCom*>(cx->com());
         if(xcom) {
             xcom->log_profiling_stats(iINF);
-            int p = 0; 
+
             int s = cx->socket();
             if(s == 0) s = cx->closed_socket();
             if(s != 0) {
                 buffer b(1024);
-                p = cx->com()->peek(s,b.data(),b.capacity(),0);
+                auto p = cx->com()->peek(s,b.data(),b.capacity(),0);
                 _inf("        cx peek size %d", p);
             }
             
@@ -885,12 +882,11 @@ void MitmProxy::_debug_zero_connections(baseHostCX* cx) {
                 xcom_peer->log_profiling_stats(iINF);
                 _inf("        peer transferred bytes: up=%d/%dB dw=%d/%dB", cx->peer()->meter_read_count, cx->peer()->meter_read_bytes,
                                                                 cx->peer()->meter_write_count, cx->peer()->meter_write_bytes);
-                int p = 0; 
                 int s = cx->peer()->socket();
                 if(s == 0) s = cx->peer()->closed_socket();
                 if(s != 0) {
                     buffer b(1024);
-                    p = cx->peer()->com()->peek(s,b.data(),b.capacity(),0);
+                    auto p = cx->peer()->com()->peek(s,b.data(),b.capacity(),0);
                     _inf("        peer peek size %d", p);
                 }                
             }
@@ -1023,7 +1019,7 @@ void MitmProxy::on_error(baseHostCX* cx, char side, const char* side_label) {
                 on_half_close(cx);
 
                 if (state().dead()) {
-                    // status dead is new, since we check dead status at the begining
+                    // status dead is new, since we check dead status at the beginning
                     std::stringstream msg;
                     msg << "Connection " << side_label << " half-closed on ";
 
@@ -1811,7 +1807,7 @@ bool MitmMasterProxy::detect_ssl_on_plain_socket(int sock) {
         again:
         char peek_buffer[NEW_CX_PEEK_BUFFER_SZ];
 
-        int b = ::recv(sock, peek_buffer, NEW_CX_PEEK_BUFFER_SZ, MSG_PEEK | MSG_DONTWAIT);
+        auto b = ::recv(sock, peek_buffer, NEW_CX_PEEK_BUFFER_SZ, MSG_PEEK | MSG_DONTWAIT);
         
         if(b > 6) {
             if (peek_buffer[0] == 0x16 && peek_buffer[1] == 0x03 && ( peek_buffer[5] == 0x00 || peek_buffer[5] == 0x01 || peek_buffer[5] == 0x02 )) {
