@@ -213,6 +213,7 @@ if(GTEST_FOUND)
             src/policy/tests/addrobj_test.cpp
 
             socle/traflog/tests/test_pcapapi.cpp
+            socle/traflog/tests/test_pcapng.cpp
             socle/tests/test_tls.cpp
             socle/tests/tests_peering.cpp
             socle/common/tests/cache_tests.cpp
