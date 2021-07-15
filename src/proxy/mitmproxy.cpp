@@ -51,6 +51,7 @@
 
 #include <algorithm>
 
+using namespace socle;
 
 MitmProxy::MitmProxy(baseCom* c): baseProxy(c), sobject() {
 
@@ -105,19 +106,19 @@ MitmProxy::~MitmProxy() {
 
         for(auto* cx: ls()) {
             if(! cx->comlog().empty()) {
-                if(tlog()) tlog()->write('L', cx->comlog());
+                if(tlog()) tlog()->write(side_t::LEFT, cx->comlog());
                 cx->comlog().clear();
             }
         }               
         
         for(auto* cx: rs()) {
             if(! cx->comlog().empty()) {
-                if(tlog()) tlog()->write('R', cx->comlog());
+                if(tlog()) tlog()->write_right(cx->comlog());
                 cx->comlog().clear();
             }
         }         
         
-        if(tlog()) tlog()->left_write("Connection stop\n");
+        if(tlog()) tlog()->write_left("Connection stop\n");
     }
     
     delete content_rule_;
@@ -704,11 +705,11 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
         toggle_tlog();
         
         if(! cx->comlog().empty()) {
-            if(tlog()) tlog()->write('L', cx->comlog());
+            if(tlog()) tlog()->write_left(cx->comlog());
             cx->comlog().clear();
         }
         
-        if(tlog()) tlog()->left_write(cx->to_read());
+        if(tlog()) tlog()->write_left(cx->to_read());
     }
     
 
@@ -778,11 +779,11 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
         toggle_tlog();
         
         if(! cx->comlog().empty()) {
-            if(tlog()) tlog()->write('R',cx->comlog());
+            if(tlog()) tlog()->write_right(cx->comlog());
             cx->comlog().clear();
         }
         
-        if(tlog()) tlog()->right_write(cx->to_read());
+        if(tlog()) tlog()->write_right(cx->to_read());
     }
 
 
@@ -1104,9 +1105,13 @@ void MitmProxy::on_error(baseHostCX* cx, char side, const char* side_label) {
             toggle_tlog();
             if (tlog()) {
 
-                tlog()->write(side, std::string(side_label) + "side connection closed: " + cx->name() + "\n");
+                std::stringstream ss;
+                ss << std::string(side_label) << "side connection closed: " << cx->name() << "\n";
+                auto msg = ss.str();
+
+                tlog()->write(to_side(side), msg);
                 if (!replacement_msg.empty()) {
-                    tlog()->write(side, cx->name() + "   dropped by proxy:" + replacement_msg + "\n");
+                    tlog()->write(to_side(side), cx->name() + "   dropped by proxy:" + replacement_msg + "\n");
                 }
             }
         }
