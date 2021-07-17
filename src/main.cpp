@@ -356,6 +356,26 @@ int main(int argc, char *argv[]) {
     }
     bool CONFIG_LOADED = SmithProxy::instance().load_config(CfgFactory::get()->config_file);
 
+    if(CONFIG_LOADED) {
+        bool upgraded_status = false;
+
+        if(not CfgFactory::get()->config_file_check_only) {
+            upgraded_status = CfgFactory::get()->upgrade_and_save();
+            if(upgraded_status)
+                _not("config file has been upgraded");
+        }
+
+        if(upgraded_status) {
+            CONFIG_LOADED = SmithProxy::instance().load_config(CfgFactory::get()->config_file);
+            if(CONFIG_LOADED) {
+                _not("upgraded config file has been reloaded");
+            }
+            else {
+                _cri("upgraded config file FAILED to load");
+            }
+        }
+    }
+
     // exit if that's only about config check - we should not proceed
     if(CfgFactory::get()->config_file_check_only) {
 

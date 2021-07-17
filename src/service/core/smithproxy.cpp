@@ -676,6 +676,8 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
             CfgFactory::get()->cleanup();
         }
 
+        CfgFactory::get()->load_internal();
+
         CfgFactory::get()->load_db_address();
         CfgFactory::get()->load_db_port();
         CfgFactory::get()->load_db_proto();

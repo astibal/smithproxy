@@ -109,6 +109,8 @@ public:
 
     loglevel args_debug_flag;
 
+    std::string internal_version;
+
     std::string listen_tcp_port_base;
     std::string listen_tls_port_base;
     std::string listen_dtls_port_base;
@@ -217,6 +219,9 @@ public:
 
     bool apply_tenant_config() override;
 
+    bool upgrade_and_save();
+
+    bool load_internal();
     bool load_settings ();
     int  load_debug();
     int  load_db_address ();

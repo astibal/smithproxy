@@ -259,6 +259,94 @@ std::shared_ptr<ProfileAuth> CfgFactory::lookup_prof_auth (const char *name) {
     return nullptr;
 }
 
+bool CfgFactory::upgrade_and_save() {
+
+
+    auto backup = [this](std::string const& prev_ver) {
+        try {
+            std::stringstream ss;
+            ss << CfgFactory::get()->config_file;
+            ss << "." << prev_ver << ".bak.cfg";
+
+            #if ( LIBCONFIGXX_VER_MAJOR >= 1 && LIBCONFIGXX_VER_MINOR < 7 )
+            cfgapi.setOptions(Setting::OptionOpenBraceOnSeparateLine);
+            #else
+            cfgapi.setOptions(Config::OptionOpenBraceOnSeparateLine);
+            #endif
+
+            cfgapi.setTabWidth(4);
+            cfgapi.writeFile(ss.str().c_str());
+        }
+        catch(ConfigException const& e) {
+            _err("error writing config file backup %s", e.what());
+            return false;
+        }
+
+        return true;
+    };
+
+    auto save_status = [this]() -> bool {
+        if(not save_config()) {
+            _err("cannot upgrade config file");
+            return false;
+        }
+        return true;
+    };
+
+    if(not cfgapi.getRoot().exists("*_internal_*")) {
+
+        // versioning first initialization
+
+        cfgapi.getRoot().add("*_internal_*", Setting::TypeGroup);
+
+        auto& internal = cfgapi.getRoot()["*_internal_*"];
+        auto& v = internal.add("version", Setting::TypeString);
+        v = SMITH_VERSION;
+
+        return save_status();
+
+    }
+
+    auto& internal = cfgapi.getRoot()["*_internal_*"];
+
+
+    bool do_save = false;
+    std::string v1;
+    if(load_if_exists(internal, "version", v1)) {
+
+        if (v1 != SMITH_VERSION) {
+            backup(v1);
+
+            internal["version"] = SMITH_VERSION;
+            do_save = true;
+        }
+    } else {
+
+        // interal section is there, but version is not... hmm.
+
+        auto& v = internal.add("version", Setting::TypeString);
+        v = SMITH_VERSION;
+    }
+
+    if(do_save) {
+        return save_status();
+    }
+
+    return false;
+}
+
+
+bool CfgFactory::load_internal() {
+
+    std::lock_guard<std::recursive_mutex> l(lock_);
+
+    if (!cfgapi.getRoot().exists("*_internal_*"))
+        return false;
+
+    return load_if_exists(cfgapi.getRoot()["*_internal_*"], "version", internal_version);
+}
+
+
 bool CfgFactory::load_settings () {
 
     std::lock_guard<std::recursive_mutex> l(lock_);
@@ -3130,6 +3218,18 @@ int save_signatures(Config& ex, const std::string& sigset) {
 
 }
 
+int save_internal(Config& ex) {
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
+
+    if(!ex.exists("*_internal_*"))
+        ex.getRoot().add("*_internal_*", Setting::TypeGroup);
+
+    Setting& objects = ex.getRoot()["*_internal_*"];
+    objects.add("version", Setting::TypeString) = SMITH_VERSION;
+
+    return 1;
+}
+
 int save_settings(Config& ex) {
 
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
@@ -3243,6 +3343,8 @@ int CfgFactory::save_config() const {
     #endif
 
     ex.setTabWidth(4);
+
+    save_internal(ex);
 
     int n = 0;
 
