@@ -68,17 +68,17 @@ void MitmProxy::toggle_tlog () {
     // create traffic logger if it doesn't exist
     if(not tlog_) {
 
-        switch (opt_write_payload_format) {
-            case write_format_type_t::SMCAP:
+        switch (opt_write_payload_format.value) {
+            case ContentCaptureFormat::type_t::SMCAP:
                 tlog_ = std::make_unique<socle::trafLog>( this,
                                   CfgFactory::get()->traflog_dir.c_str(),
                                   CfgFactory::get()->traflog_file_prefix.c_str(),
                                   CfgFactory::get()->traflog_file_suffix.c_str());
 
                 break;
-            case write_format_type_t::PCAP:
+            case ContentCaptureFormat::type_t::PCAP:
                 break;
-            case write_format_type_t::PCAP_SINGLE:
+            case ContentCaptureFormat::type_t::PCAP_SINGLE:
                 break;
         }
     }

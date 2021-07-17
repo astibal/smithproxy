@@ -43,17 +43,55 @@ public:
 TYPENAME_OVERRIDE("ProfileContentRule")
 };
 
+struct ContentCaptureFormat {
+    enum class write_format_type_t { SMCAP, PCAP_SINGLE, PCAP };
+    using type_t = write_format_type_t;
+
+    type_t value;
+
+    using map_t = std::initializer_list<std::pair<type_t, const char*>>;
+    static const inline map_t map_ = { { type_t::SMCAP, "smcap" },
+                                       { type_t::PCAP, "pcap" },
+                                       { type_t::PCAP_SINGLE, "smcap_single" }
+                               };
+
+    ContentCaptureFormat() : value(type_t::SMCAP) {}
+    ContentCaptureFormat(std::string const& v) : value(from_str(v)) {};
+    ContentCaptureFormat(type_t v) : value(v) {};
+
+    static std::string to_str(write_format_type_t t)  {
+        std::string to_ret;
+        for(auto const& r: map_) {
+            if(r.first == t) {
+                to_ret  = r.second;
+                break;
+            }
+        }
+        return to_ret;
+    }
+    static write_format_type_t from_str(std::string const& write_format) {
+        type_t to_ret = write_format_type_t::SMCAP;
+
+        for(auto const& r: map_) {
+            if(r.second == write_format) {
+                to_ret  = r.first;
+                break;
+            }
+        }
+        return to_ret;
+
+    }
+
+    std::string to_str() const { return to_str(value); }
+};
+
 class ProfileContent  : public socle::sobject, public CfgElement {
 public:
     // if true, content of proxy transmission will dumped to file
     bool write_payload = false;
 
-    enum class write_format_type_t { SMCAP, PCAP_SINGLE, PCAP };
-    write_format_type_t write_format { write_format_type_t::SMCAP };
-
-
+    ContentCaptureFormat write_format;
     std::vector<ProfileContentRule> content_rules;
-
 
     bool ask_destroy() override { return false; };
     std::string to_string(int verbosity) const override {

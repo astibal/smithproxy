@@ -100,8 +100,7 @@ public:
     }
 
     bool opt_write_payload = false;
-    using write_format_type_t = ProfileContent::write_format_type_t;
-    write_format_type_t opt_write_payload_format { write_format_type_t::SMCAP };
+    ContentCaptureFormat opt_write_payload_format;
 
     bool opt_auth_authenticate = false;
     bool opt_auth_resolve = false;

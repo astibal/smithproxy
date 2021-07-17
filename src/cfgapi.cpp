@@ -1287,21 +1287,7 @@ bool CfgFactory::load_db_prof_content_write_format(Setting& cur_object, ProfileC
     load_if_exists(cur_object, "write_format", write_format);
     write_format = string_tolower(write_format);
 
-    using wtf = ProfileContent::write_format_type_t;
-
-    if(write_format == "smcap") {
-        new_profile->write_format = wtf::SMCAP;
-    }
-    else if(write_format == "pcap") {
-        new_profile->write_format = wtf::PCAP;
-    }
-    else if(write_format == "pcap_single") {
-        new_profile->write_format = wtf::PCAP_SINGLE;
-    }
-    else {
-        _err("unknown payload write format: %s, assuming smcap", write_format.c_str());
-        new_profile->write_format = wtf::SMCAP;
-    }
+    new_profile->write_format = ContentCaptureFormat(write_format);
 
     return true;
 
@@ -1340,6 +1326,9 @@ int CfgFactory::load_db_prof_content () {
         _dia("load_db_prof_content: processing '%s'", name.c_str());
 
         if( load_if_exists(cur_object, "write_payload", new_profile->write_payload) ) {
+            std::string wf;
+            load_if_exists(cur_object, "write_format", wf);
+            new_profile->write_format = ContentCaptureFormat(wf);
 
             new_profile->element_name() = name;
             db_prof_content[name] = new_profile;
@@ -2565,6 +2554,7 @@ int CfgFactory::save_content_profiles(Config& ex) const {
 
         Setting& item = objects.add(name, Setting::TypeGroup);
         item.add("write_payload", Setting::TypeBoolean) = obj->write_payload;
+        item.add("write_format", Setting::TypeString) = obj->write_format.to_str();
 
         if(! obj->content_rules.empty() ) {
 
