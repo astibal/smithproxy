@@ -1153,92 +1153,121 @@ int CfgFactory::load_db_prof_detection () {
     return num;
 }
 
+int CfgFactory::load_db_prof_content_subrules(Setting& cur_object, ProfileContent* new_profile) {
+    int jnum = cur_object["content_rules"].getLength();
+    _dia("replace rules in profile '%s', size %d", new_profile->element_name().c_str(), jnum);
+    for (int j = 0; j < jnum; j++) {
+        Setting &cur_replace_rule = cur_object["content_rules"][j];
+
+        std::string m;
+        std::string r;
+        bool action_defined = false;
+
+        bool fill_length = false;
+        int replace_each_nth = 0;
+
+        load_if_exists(cur_replace_rule, "match", m);
+
+        if (load_if_exists(cur_replace_rule, "replace", r)) {
+            action_defined = true;
+        }
+
+        load_if_exists(cur_replace_rule, "fill_length", fill_length);
+        load_if_exists(cur_replace_rule, "replace_each_nth", replace_each_nth);
+
+        if ((!m.empty()) && action_defined) {
+            _dia("    [%d] match '%s' and replace with '%s'", j, m.c_str(), r.c_str());
+            ProfileContentRule p;
+            p.match = m;
+            p.replace = r;
+            p.fill_length = fill_length;
+            p.replace_each_nth = replace_each_nth;
+
+            new_profile->content_rules.push_back(p);
+
+        } else {
+            _dia("    [%d] unfinished replace policy", j);
+        }
+    }
+
+    return jnum;
+};
+
+
+bool CfgFactory::load_db_prof_content_write_format(Setting& cur_object, ProfileContent* new_profile) {
+    std::string write_format = "smcap";
+    load_if_exists(cur_object, "write_format", write_format);
+    write_format = string_tolower(write_format);
+
+    using wtf = ProfileContent::write_format_type_t;
+
+    if(write_format == "smcap") {
+        new_profile->write_format = wtf::SMCAP;
+    }
+    else if(write_format == "pcap") {
+        new_profile->write_format = wtf::PCAP;
+    }
+    else if(write_format == "pcap_single") {
+        new_profile->write_format = wtf::PCAP_SINGLE;
+    }
+    else {
+        _err("unknown payload write format: %s, assuming smcap", write_format.c_str());
+        new_profile->write_format = wtf::SMCAP;
+    }
+
+    return true;
+
+}
 
 int CfgFactory::load_db_prof_content () {
     std::lock_guard<std::recursive_mutex> l(lock_);
-    
-    int num = 0;
+
 
     _dia("load_db_prof_content: start");
-    
-    if(cfgapi.getRoot().exists("content_profiles")) {
+    if(not cfgapi.getRoot().exists("content_profiles")) return 0;
 
-        num = cfgapi.getRoot()["content_profiles"].getLength();
-        _dia("load_db_prof_content: found %d objects", num);
-        
-        Setting& curr_set = cfgapi.getRoot()["content_profiles"];
 
-        for( int i = 0; i < num; i++) {
-            std::string name;
-            auto* a = new ProfileContent;
-            
-            Setting& cur_object = curr_set[i];
+    int num = cfgapi.getRoot()["content_profiles"].getLength();
+    _dia("load_db_prof_content: found %d objects", num);
 
-            if (  ! cur_object.getName() ) {
-                _dia("load_db_prof_content: unnamed object index %d: not ok", i);
-                continue;
+    Setting& curr_set = cfgapi.getRoot()["content_profiles"];
+
+    for( int i = 0; i < num; i++) {
+        std::string name;
+        auto new_profile = std::make_shared<ProfileContent>();
+
+        Setting& cur_object = curr_set[i];
+
+        if ( not cur_object.getName() ) {
+            _dia("load_db_prof_content: unnamed object index %d: not ok", i);
+            continue;
+        }
+
+        name = cur_object.getName();
+        if(name.find("__") == 0) {
+            // don't process reserved names
+            continue;
+        }
+
+        _dia("load_db_prof_content: processing '%s'", name.c_str());
+
+        if( load_if_exists(cur_object, "write_payload", new_profile->write_payload) ) {
+
+            new_profile->element_name() = name;
+            db_prof_content[name] = new_profile;
+
+            if(cur_object.exists("content_rules")) {
+                load_db_prof_content_subrules(cur_object, new_profile.get());
             }
 
-            name = cur_object.getName();
-            if(name.find("__") == 0) {
-                // don't process reserved names
-                continue;
-            }
+            load_db_prof_content_write_format(cur_object, new_profile.get());
 
-
-            _dia("load_db_prof_content: processing '%s'", name.c_str());
-            
-            if( load_if_exists(cur_object, "write_payload", a->write_payload) ) {
-
-                a->element_name() = name;
-                db_prof_content[name] = std::shared_ptr<ProfileContent>(a);
-                
-                if(cur_object.exists("content_rules")) {
-                    int jnum = cur_object["content_rules"].getLength();
-                    _dia("replace rules in profile '%s', size %d", name.c_str(), jnum);
-                    for (int j = 0; j < jnum; j++) {
-                        Setting& cur_replace_rule = cur_object["content_rules"][j];
-
-                        std::string m;
-                        std::string r;
-                        bool action_defined = false;
-                        
-                        bool fill_length = false;
-                        int replace_each_nth = 0;
-
-                        load_if_exists(cur_replace_rule, "match", m);
-                        
-                        if(load_if_exists(cur_replace_rule, "replace", r)) {
-                            action_defined = true;
-                        }
-                        
-                        load_if_exists(cur_replace_rule, "fill_length", fill_length);
-                        load_if_exists(cur_replace_rule, "replace_each_nth", replace_each_nth);
-                        
-                        if( (! m.empty() ) && action_defined) {
-                            _dia("    [%d] match '%s' and replace with '%s'", j, m.c_str(), r.c_str());
-                            ProfileContentRule p;
-                            p.match = m;
-                            p.replace = r;
-                            p.fill_length = fill_length;
-                            p.replace_each_nth = replace_each_nth;
-
-                            a->content_rules.push_back(p);
-                            
-                        } else {
-                            _dia("    [%d] unfinished replace policy", j);
-                        }
-                    }
-                }
-
-
-                _dia("load_db_prof_content: '%s': ok", name.c_str());
-            } else {
-                _dia("load_db_prof_content: '%s': not ok", name.c_str());
-            }
+            _dia("load_db_prof_content: '%s': ok", name.c_str());
+        } else {
+            _dia("load_db_prof_content: '%s': not ok", name.c_str());
         }
     }
-    
+
     return num;
 }
 
@@ -1686,8 +1715,10 @@ bool CfgFactory::prof_content_apply (baseHostCX *originator, baseProxy *new_prox
         if(pc != nullptr) {
             const char* pc_name = pc->element_name().c_str();
             _dia("policy_apply: policy content profile[%s]: write payload: %d", pc_name, pc->write_payload);
-            mitm_proxy->write_payload(pc->write_payload);
-    
+
+            mitm_proxy->opt_write_payload = pc->write_payload;
+            mitm_proxy->opt_write_payload_format = pc->write_format;
+
             if( ! pc->content_rules.empty() ) {
                 _dia("policy_apply: policy content profile[%s]: applying content rules, size %d", pc_name, pc->content_rules.size());
                 mitm_proxy->init_content_replace();
@@ -1696,10 +1727,10 @@ bool CfgFactory::prof_content_apply (baseHostCX *originator, baseProxy *new_prox
         }
         else if(load_if_exists(cfgapi.getRoot()["settings"], "default_write_payload", cfg_wrt)) {
             _dia("policy_apply: global content profile: %d", cfg_wrt);
-            mitm_proxy->write_payload(cfg_wrt);
+            mitm_proxy->opt_write_payload = cfg_wrt;
         }
         
-        if(mitm_proxy->write_payload()) {
+        if(mitm_proxy->opt_write_payload) {
             std::string msg("Connection start\n");
 
             mitm_proxy->toggle_tlog();

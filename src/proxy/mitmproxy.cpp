@@ -63,15 +63,24 @@ MitmProxy::MitmProxy(baseCom* c): baseProxy(c), sobject() {
     total_sessions()++;
 }
 
-void MitmProxy::toggle_tlog() {
+void MitmProxy::toggle_tlog () {
     
     // create traffic logger if it doesn't exist
     if(not tlog_) {
 
-        tlog_ = std::make_unique<socle::trafLog>( this,
-                                    CfgFactory::get()->traflog_dir.c_str(),
-                                    CfgFactory::get()->traflog_file_prefix.c_str(),
-                                    CfgFactory::get()->traflog_file_suffix.c_str());
+        switch (opt_write_payload_format) {
+            case write_format_type_t::SMCAP:
+                tlog_ = std::make_unique<socle::trafLog>( this,
+                                  CfgFactory::get()->traflog_dir.c_str(),
+                                  CfgFactory::get()->traflog_file_prefix.c_str(),
+                                  CfgFactory::get()->traflog_file_suffix.c_str());
+
+                break;
+            case write_format_type_t::PCAP:
+                break;
+            case write_format_type_t::PCAP_SINGLE:
+                break;
+        }
     }
     
     // check if we have there status file
@@ -101,7 +110,7 @@ void MitmProxy::toggle_tlog() {
 
 MitmProxy::~MitmProxy() {
     
-    if(write_payload()) {
+    if(opt_write_payload) {
         _deb("MitmProxy::destructor: syncing writer");
 
         for(auto* cx: ls()) {
@@ -699,8 +708,8 @@ bool MitmProxy::handle_cached_response(MitmHostCX* mh) {
 
 void MitmProxy::on_left_bytes(baseHostCX* cx) {
 
-    if(write_payload()) {
-        
+    if(opt_write_payload) {
+
         toggle_tlog();
         
         if(! cx->comlog().empty()) {
@@ -773,7 +782,7 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
 }
 
 void MitmProxy::on_right_bytes(baseHostCX* cx) {
-    if(write_payload()) {
+    if(opt_write_payload) {
 
         toggle_tlog();
         
@@ -1100,7 +1109,7 @@ void MitmProxy::on_error(baseHostCX* cx, char side, const char* side_label) {
 
     // state could change. Log if we are dead now
     if(state().dead()){
-        if (write_payload()) {
+        if (opt_write_payload) {
             toggle_tlog();
             if (tlog()) {
 

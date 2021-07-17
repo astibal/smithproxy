@@ -48,6 +48,10 @@ public:
     // if true, content of proxy transmission will dumped to file
     bool write_payload = false;
 
+    enum class write_format_type_t { SMCAP, PCAP_SINGLE, PCAP };
+    write_format_type_t write_format { write_format_type_t::SMCAP };
+
+
     std::vector<ProfileContentRule> content_rules;
 
 

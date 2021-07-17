@@ -224,6 +224,8 @@ public:
     int  load_db_proto ();
     int  load_db_policy ();
     int  load_db_prof_content ();
+        int load_db_prof_content_subrules(Setting& cur_object, ProfileContent* new_profile);
+        bool load_db_prof_content_write_format(Setting& cur_object, ProfileContent* new_profile);
     int  load_db_prof_detection ();
     int  load_db_tls_ca();
     int  load_db_prof_tls ();

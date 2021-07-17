@@ -78,10 +78,9 @@ private:
 };
 
 class MitmProxy : public baseProxy, public socle::sobject, public IOController {
-    
+
 protected:
     std::unique_ptr<socle::baseTrafficLogger> tlog_;
-    bool write_payload_ = false;
     
     bool identity_resolved_ = false;    // meant if attempt has been done, regardless of its result.
     shm_logon_info_base* identity_ = nullptr;
@@ -99,7 +98,11 @@ public:
         static whitelist_map m("whitelist - verify", 500, true, whitelist_verify_entry_t::is_expired);
         return m;
     }
-    
+
+    bool opt_write_payload = false;
+    using write_format_type_t = ProfileContent::write_format_type_t;
+    write_format_type_t opt_write_payload_format { write_format_type_t::SMCAP };
+
     bool opt_auth_authenticate = false;
     bool opt_auth_resolve = false;
     bool auth_block_identity = false;
@@ -130,12 +133,10 @@ public:
     bool update_auth_ipX_map(baseHostCX*);
     bool apply_id_policies(baseHostCX* cx);
    
-    
-    bool write_payload() const { return write_payload_; }
-    void write_payload(bool b) { write_payload_ = b; }
+
     
     std::unique_ptr<socle::baseTrafficLogger>& tlog() { return tlog_; }
-    void toggle_tlog();
+    void toggle_tlog ();
     
     explicit MitmProxy(baseCom* c);
     ~MitmProxy() override;
