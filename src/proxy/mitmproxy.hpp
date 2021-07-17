@@ -80,7 +80,7 @@ private:
 class MitmProxy : public baseProxy, public socle::sobject, public IOController {
     
 protected:
-    socle::trafLog *tlog_ = nullptr;
+    std::unique_ptr<socle::baseTrafficLogger> tlog_;
     bool write_payload_ = false;
     
     bool identity_resolved_ = false;    // meant if attempt has been done, regardless of its result.
@@ -134,7 +134,7 @@ public:
     bool write_payload() const { return write_payload_; }
     void write_payload(bool b) { write_payload_ = b; }
     
-    socle::trafLog* tlog() const { return tlog_; }
+    std::unique_ptr<socle::baseTrafficLogger>& tlog() { return tlog_; }
     void toggle_tlog();
     
     explicit MitmProxy(baseCom* c);

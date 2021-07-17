@@ -66,9 +66,9 @@ MitmProxy::MitmProxy(baseCom* c): baseProxy(c), sobject() {
 void MitmProxy::toggle_tlog() {
     
     // create traffic logger if it doesn't exist
-    if(tlog_ == nullptr) {
+    if(not tlog_) {
 
-        tlog_ = new socle::trafLog( this,
+        tlog_ = std::make_unique<socle::trafLog>( this,
                                     CfgFactory::get()->traflog_dir.c_str(),
                                     CfgFactory::get()->traflog_file_prefix.c_str(),
                                     CfgFactory::get()->traflog_file_suffix.c_str());
@@ -122,7 +122,6 @@ MitmProxy::~MitmProxy() {
     }
     
     delete content_rule_;
-    delete tlog_;
     delete identity_;
     
     // delete all filters
