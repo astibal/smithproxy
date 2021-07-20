@@ -842,15 +842,7 @@ int cli_diag_writer_stats(struct cli_def *cli, const char *command, char *argv[]
     {
         std::scoped_lock<std::mutex> l_(wr->queue_lock());
 
-        ss << "Not started files: " << wr->task_files().size() << "\n";
-        ss << "Queue being processed:\n";
-
-        for (auto const& elem: wr->queue()) {
-            auto const& k = elem.first;
-            auto const& q = elem.second;
-
-            ss << "    '" << k << "' : " << q.size() << " chunks\n";
-        }
+        ss << "Pending ops: " << wr->queue().size() << "\n";
     }
     {
         std::scoped_lock<std::recursive_mutex> l_(wr->ofstream_lock());
