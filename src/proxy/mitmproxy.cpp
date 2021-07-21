@@ -42,11 +42,12 @@
 
 #include <proxy/mitmproxy.hpp>
 #include <proxy/mitmhost.hpp>
+#include <proxy/filterproxy.hpp>
 #include <log/logger.hpp>
 #include <cfgapi.hpp>
+
 #include <uxcom.hpp>
 #include <staticcontent.hpp>
-#include <proxy/filterproxy.hpp>
 #include <policy/authfactory.hpp>
 
 #include <algorithm>
@@ -77,8 +78,25 @@ void MitmProxy::toggle_tlog () {
 
                 break;
             case ContentCaptureFormat::type_t::PCAP:
+                tlog_ = std::make_unique<socle::traflog::PcapLog>(this,
+                                                                  CfgFactory::get()->traflog_dir.c_str(),
+                                                                  CfgFactory::get()->traflog_file_prefix.c_str(),
+                                                                  CfgFactory::get()->traflog_file_suffix.c_str());
+
                 break;
             case ContentCaptureFormat::type_t::PCAP_SINGLE:
+
+                static std::once_flag once;
+                std::call_once(once, [] {
+                    auto& single = socle::traflog::PcapLog::single_instance();
+                    single.FS.generate_filename_single("smithproxy");
+                });
+
+                auto* n = new socle::traflog::PcapLog(this, CfgFactory::get()->traflog_dir.c_str(),
+                                                        CfgFactory::get()->traflog_file_prefix.c_str(),
+                                                        CfgFactory::get()->traflog_file_suffix.c_str());
+                n->single_only = true;
+                tlog_ = std::unique_ptr<baseTrafficLogger>(n);
                 break;
         }
     }

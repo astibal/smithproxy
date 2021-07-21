@@ -51,6 +51,7 @@
 #include <threadedreceiver.hpp>
 
 #include <traflog/smcaplog.hpp>
+#include <traflog/pcaplog.hpp>
 
 #include <policy/policy.hpp>
 #include <shm/shmauth.hpp>
