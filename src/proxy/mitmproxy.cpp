@@ -70,10 +70,10 @@ void MitmProxy::toggle_tlog () {
 
         switch (opt_write_payload_format.value) {
             case ContentCaptureFormat::type_t::SMCAP:
-                tlog_ = std::make_unique<socle::trafLog>( this,
-                                  CfgFactory::get()->traflog_dir.c_str(),
-                                  CfgFactory::get()->traflog_file_prefix.c_str(),
-                                  CfgFactory::get()->traflog_file_suffix.c_str());
+                tlog_ = std::make_unique<socle::traflog::SmcapLog>(this,
+                                                          CfgFactory::get()->traflog_dir.c_str(),
+                                                          CfgFactory::get()->traflog_file_prefix.c_str(),
+                                                          CfgFactory::get()->traflog_file_suffix.c_str());
 
                 break;
             case ContentCaptureFormat::type_t::PCAP:

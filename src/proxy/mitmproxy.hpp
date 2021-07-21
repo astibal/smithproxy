@@ -49,7 +49,9 @@
 #include <baseproxy.hpp>
 #include <threadedacceptor.hpp>
 #include <threadedreceiver.hpp>
-#include <traflog/traflog.hpp>
+
+#include <traflog/smcaplog.hpp>
+
 #include <policy/policy.hpp>
 #include <shm/shmauth.hpp>
 
