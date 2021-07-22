@@ -52,7 +52,7 @@ struct ContentCaptureFormat {
     using map_t = std::initializer_list<std::pair<type_t, const char*>>;
     static const inline map_t map_ = { { type_t::SMCAP, "smcap" },
                                        { type_t::PCAP, "pcap" },
-                                       { type_t::PCAP_SINGLE, "smcap_single" }
+                                       { type_t::PCAP_SINGLE, "pcap_single" }
                                };
 
     ContentCaptureFormat() : value(type_t::SMCAP) {}
