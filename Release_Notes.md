@@ -30,17 +30,19 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 ## Roadmap for future versions
 
 * [ ] memory pool ONLY execution
-
-## Roadmap to 0.9.16 (tba - in progress)
-
-### Improvements
-
 * [ ] json/api interface
-* pass TLS ALPN extension by default; controllable by 'alpn_block' in TLS profile   
+
+## Roadmap to 0.9.20 (tba - in progress)
+
+### New features in 0.9.14-19
+* add support for PCAP file capture (multiple, or single capture file)
+* pass TLS ALPN extension - controllable by 'alpn_block' in TLS profile
+* signature cascades
+
+### Improvements in 0.9.14-19
+* introduction of engines - similar to inspectors, but working more closely with data     
 * add cli command 'diag proxy session active' which prints only currently active sessions
-* match starttls only on certain traffic and exchange margins 
-* create infrastructure for signature cascades
-* version 0.9.14-18 skipped due to larger API changes in socle
+* match starttls only on certain traffic and exchange margins
 * new 'toggle' command - modify list variables - toggle specific element instead of setting all at once
 * code cleanups in logging - removal of old macros
 
