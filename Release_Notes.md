@@ -38,6 +38,7 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 * add support for PCAP file capture (multiple, or single capture file)
 * pass TLS ALPN extension - controllable by 'alpn_block' in TLS profile
 * signature cascades
+* new version config file migration support
 
 ### Improvements in 0.9.14-19
 * introduction of engines - similar to inspectors, but working more closely with data     
