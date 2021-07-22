@@ -472,6 +472,12 @@ void CliHelp::init() {
             });
 
 
+    add("content_profiles.[x].write_format", "smcap, pcap, pcap_single")
+            .help_quick("<string>: smcap, pcap, pcap_single")
+            .may_be_empty(false)
+            .value_filter(is_in_vector([]() -> std::vector<std::string> { return {"smcap", "pcap", "pcap_single"}; },"smcap, pcap or pcap_single"))
+            .suggestion_generator([](std::string const& section, std::string const& variable) -> std::vector<std::string> {  return {"smcap", "pcap", "pcap_single"};   });
+
 }
 
 
