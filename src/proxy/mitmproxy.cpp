@@ -50,6 +50,8 @@
 #include <staticcontent.hpp>
 #include <policy/authfactory.hpp>
 
+#include <traflog/fsoutput.hpp>
+
 #include <algorithm>
 
 using namespace socle;
@@ -81,7 +83,8 @@ void MitmProxy::toggle_tlog () {
                 tlog_ = std::make_unique<socle::traflog::PcapLog>(this,
                                                                   CfgFactory::get()->traflog_dir.c_str(),
                                                                   CfgFactory::get()->traflog_file_prefix.c_str(),
-                                                                  CfgFactory::get()->traflog_file_suffix.c_str());
+                                                                  CfgFactory::get()->traflog_file_suffix.c_str(),
+                                                                  true);
 
                 break;
             case ContentCaptureFormat::type_t::PCAP_SINGLE:
@@ -89,12 +92,18 @@ void MitmProxy::toggle_tlog () {
                 static std::once_flag once;
                 std::call_once(once, [] {
                     auto& single = socle::traflog::PcapLog::single_instance();
-                    single.FS.generate_filename_single("smithproxy");
+
+                    single.FS = socle::traflog::FsOutput(nullptr, CfgFactory::get()->traflog_dir.c_str(),
+                                        CfgFactory::get()->traflog_file_prefix.c_str(),
+                                        CfgFactory::get()->traflog_file_suffix.c_str(), false);
+
+                    single.FS.generate_filename_single("smithproxy", true);
                 });
 
                 auto* n = new socle::traflog::PcapLog(this, CfgFactory::get()->traflog_dir.c_str(),
                                                         CfgFactory::get()->traflog_file_prefix.c_str(),
-                                                        CfgFactory::get()->traflog_file_suffix.c_str());
+                                                        CfgFactory::get()->traflog_file_suffix.c_str(),
+                                                        false);
                 n->single_only = true;
                 tlog_ = std::unique_ptr<baseTrafficLogger>(n);
                 break;
