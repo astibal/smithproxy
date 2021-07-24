@@ -3104,10 +3104,10 @@ int CfgFactory::save_policy(Config& ex) const {
 
 int save_signatures(Config& ex, const std::string& sigset) {
 
-    auto save_target = [](Config& ex, auto& target, auto sigset_name) -> int {
+    auto save_target = [](Config& ex, auto& target, std::string const& sigset_name) -> int {
         std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
-        Setting& objects = ex.getRoot().add(sigset_name, Setting::TypeList);
+        Setting& objects = ex.getRoot().exists(sigset_name) ? ex.getRoot()[sigset_name.c_str()] : ex.getRoot().add(sigset_name, Setting::TypeList);
 
         int n_saved = 0;
 
@@ -3201,7 +3201,7 @@ int save_signatures(Config& ex, const std::string& sigset) {
     }
     else {
         auto target = SigFactory::get().signature_tree().group(sigset.c_str(), false);
-        total += save_target(ex, target, sigset);
+        total += save_target(ex, target, "detection_signatures");
     }
 
     return total;
