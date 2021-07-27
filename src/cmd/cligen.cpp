@@ -533,25 +533,24 @@ void cli_generate_commands (cli_def *cli, std::string const &this_section, cli_c
 
             // register 'edit' and 'edit <subsection>' in terms of this "mode ID"
 
-            auto edit_enabled  = templated ? std::get<1>(template_cb).cap("edit") : std::get<1>(section_cb).cap("edit");
-            auto remove_enabled = templated ? std::get<1>(template_cb).cap("remove") : std::get<1>(section_cb).cap("remove");
-            auto add_enabled = templated ? std::get<1>(template_cb).cap("add") : std::get<1>(section_cb).cap("add");
-            auto move_enabled = templated ? std::get<1>(template_cb).cap("move") : std::get<1>(section_cb).cap("move");
+            auto edit_enabled  = std::get<1>(template_cb).cap("edit");
+            auto remove_enabled = std::get<1>(template_cb).cap("remove");
+            auto add_enabled = std::get<1>(template_cb).cap("add");
+            auto move_enabled = std::get<1>(template_cb).cap("move");
 
             _debug(cli, "%s/%s:t=%d: edit: %d, remove: %d, add: %d, move: %d", section_template.c_str(), template_key.c_str(), templated,
                    edit_enabled, remove_enabled, add_enabled, move_enabled);
 
             if(edit_enabled) {
 
-                auto cb_edit = templated ? std::get<1>(template_cb).cmd("edit")  : std::get<1>(section_cb).cmd("edit");
+                auto cb_edit = std::get<1>(template_cb).cmd("edit");
 
                 if(! edit) {
                     // initialize parent "edit command only once"
                     edit = cli_register_command(cli, cli_parent, "edit", nullptr, PRIVILEGE_PRIVILEGED, this_mode,
                                                 help_edit.c_str());
-                    if(templated) {
-                        std::get<1>(template_cb).cli("edit", edit);
-                    }
+
+                    std::get<1>(template_cb).cli("edit", edit);
                 }
 
 
@@ -573,14 +572,12 @@ void cli_generate_commands (cli_def *cli, std::string const &this_section, cli_c
 
             if(remove_enabled) {
 
-                auto cb_remove = templated ?  std::get<1>(template_cb).cmd("remove") : std::get<1>(section_cb).cmd("remove");
+                auto cb_remove = std::get<1>(template_cb).cmd("remove");
 
                 if(!remove) {
                     remove = cli_register_command(cli, cli_parent, "remove", cb_remove, PRIVILEGE_PRIVILEGED, this_mode, help_remove.c_str());
 
-                    if(templated) {
-                        std::get<1>(template_cb).cli("remove", remove);
-                    }
+                    std::get<1>(template_cb).cli("remove", remove);
                 }
 
                 auto remove_sub = cli_register_command(cli, remove, sub_section_name.c_str(),
@@ -595,7 +592,7 @@ void cli_generate_commands (cli_def *cli, std::string const &this_section, cli_c
             if(add_enabled) {
 
                 if(! add) {
-                    auto cb_add = templated ? std::get<1>(template_cb).cmd("add") : std::get<1>(section_cb).cmd("add");
+                    auto cb_add = std::get<1>(template_cb).cmd("add");
 
                     add = cli_register_command(cli, cli_parent, "add",
                                                cb_add, PRIVILEGE_PRIVILEGED, this_mode, help_add.c_str());
@@ -611,7 +608,7 @@ void cli_generate_commands (cli_def *cli, std::string const &this_section, cli_c
 
                 if(len > 1) {
 
-                    auto cb_move = templated ? std::get<1>(template_cb).cmd("move") : std::get<1>(section_cb).cmd("move");
+                    auto cb_move = std::get<1>(template_cb).cmd("move");
                     if(! cli_move) {
                         cli_move = cli_register_command(cli, cli_parent, "move",
                                                         nullptr, PRIVILEGE_PRIVILEGED, this_mode, help_move.c_str());
