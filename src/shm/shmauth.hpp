@@ -98,7 +98,7 @@ struct shm_logon_info_ : public shm_logon_info_base {
     
     ~shm_logon_info_() override = default;
 
-    static unsigned int record_size () {
+    static constexpr unsigned int record_size () {
         return AddressSize+LOGON_INFO_USERNAME_SZ+LOGON_INFO_GROUPS_SZ;
     }
 
@@ -132,10 +132,10 @@ struct shm_logon_info_ : public shm_logon_info_base {
         if(AddressSize == 16) {
             inet_ntop(AF_INET6,buffer_.data(),b,64);
             return std::string(b);
+        } else {
+            inet_ntop(AF_INET, buffer_.data(), b, 64);
+            return std::string(b);
         }
-        
-        inet_ntop(AF_INET,buffer_.data(),b,64);
-        return std::string(b);
     }
     
     std::string username() override {
