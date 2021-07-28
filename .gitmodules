@@ -9,3 +9,6 @@
 	url = ../libcli
 	branch = main
 
+[submodule "src/ext/lmhpp"]
+	path = src/ext/lmhpp
+	url = ../lmhpp
