@@ -1,0 +1,62 @@
+# Find the CUnit includes and library
+#
+# This module defines
+# LIBMICROHTTPD_INCLUDE_DIR, where to find cppunit include files, etc.
+# LIBMICROHTTPD_LIBRARIES, the libraries to link against to use CppUnit.
+# LIBMICROHTTPD_STATIC_LIBRARIY_PATH
+# LIBMICROHTTPD_FOUND, If false, do not try to use CppUnit.
+
+# also defined, but not for general use are
+# LIBMICROHTTPD_LIBRARY, where to find the CUnit library.
+
+#MESSAGE("Searching for libconfig library")
+
+FIND_PATH(LIBMICROHTTPD_INCLUDE_DIR microhttpd.h
+        /usr/local/include
+        /usr/include
+        ~/libs/include
+        ~/include
+        )
+
+FIND_LIBRARY(LIBMICROHTTPD_LIBRARY microhttpd
+        /usr/local/lib
+        /usr/lib
+        ~/libs/lib
+        )
+
+FIND_LIBRARY(LIBMICROHTTPD_STATIC_LIBRARY "libmicrohttpd${CMAKE_STATIC_LIBRARY_SUFFIX}"
+        /usr/local/lib
+        /usr/lib
+        ~/libs/lib
+        )
+
+
+IF(LIBMICROHTTPD_INCLUDE_DIR)
+    IF(LIBMICROHTTPD_LIBRARY)
+        SET(LIBMICROHTTPD_FOUND TRUE)
+        SET(LIBMICROHTTPD_LIBRARIES ${LIBMICROHTTPD_LIBRARY})
+        SET(LIBMICROHTTPD_STATIC_LIBRARY_PATH ${LIBMICROHTTPD_STATIC_LIBRARY})
+    ENDIF(LIBMICROHTTPD_LIBRARY)
+ENDIF(LIBMICROHTTPD_INCLUDE_DIR)
+
+IF(LIBMICROHTTPDPP_INCLUDE_DIR)
+    IF(LIBMICROHTTPDPP_LIBRARY)
+        SET(LIBMICROHTTPDPP_FOUND TRUE)
+        SET(LIBMICROHTTPDPP_LIBRARIES ${LIBMICROHTTPDPP_LIBRARY})
+        SET(LIBMICROHTTPDPP_STATIC_LIBRARY_PATH ${LIBMICROHTTPDPP_STATIC_LIBRARY})
+    ENDIF(LIBMICROHTTPDPP_LIBRARY)
+ENDIF(LIBMICROHTTPDPP_INCLUDE_DIR)
+
+IF (LIBMICROHTTPD_FOUND)
+    IF (NOT LibConfig_FIND_QUIETLY)
+        MESSAGE(STATUS "Found LibConfig++: ${LIBMICROHTTPDPP_LIBRARIES}" )
+        MESSAGE(STATUS "Found LibConfig: ${LIBMICROHTTPD_LIBRARIES}")
+        MESSAGE(STATUS "static LibConfig path: ${LIBMICROHTTPD_STATIC_LIBRARY_PATH}")
+    ENDIF (NOT LibConfig_FIND_QUIETLY)
+ELSE (LIBMICROHTTPD_FOUND)
+    IF (LibConfig_FIND_REQUIRED)
+        MESSAGE(SEND_ERROR "Could NOT find LibConfig")
+    ENDIF (LibConfig_FIND_REQUIRED)
+ENDIF (LIBMICROHTTPD_FOUND)
+
+MARK_AS_ADVANCED(LIBMICROHTTPD_INCLUDE_DIR LIBMICROHTTPD_LIBRARIES)

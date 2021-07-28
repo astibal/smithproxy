@@ -27,6 +27,16 @@ if (LIBCONFIGPP_FOUND)
     include_directories(${LIBCONFIGPP_INCLUDE_DIRS})
 endif (LIBCONFIGPP_FOUND)
 
+find_package (LibMicroHttpd)
+if (LIBMICROHTTPD_FOUND)
+    include_directories(${LIBMICROHTTPD_INCLUDE_DIR})
+    message(">> microhttpd includes: " ${LIBMICROHTTPD_INCLUDE_DIR})
+    # libmicrohttpd/lmhpp use - now disabled
+    # add_definitions(-DUSE_LMHPP)
+    # set(USE_LMHPP "Y")
+endif (LIBMICROHTTPD_FOUND)
+
+
 find_package(PythonLibs 3 REQUIRED)
 
 
@@ -171,7 +181,11 @@ add_executable(smithproxy
         src/utils/str.hpp
         src/utils/str.cpp
         src/utils/mem.hpp
-        src/utils/mem.cpp socle/common/mempool/malloc_allocator.hpp)
+        src/utils/mem.cpp
+        socle/common/mempool/malloc_allocator.hpp
+
+        src/ext/lmhpp/include/lmhttpd.hpp
+        src/service/httpd/httpd.cpp)
 
 
 add_executable(smithd
@@ -237,6 +251,12 @@ if((CMAKE_SYSTEM_PROCESSOR MATCHES "arm") OR (CMAKE_SYSTEM_PROCESSOR STREQUAL "a
 endif()
 
 target_link_libraries(smithproxy socle_lib pthread ssl crypto rt ${UNWIND_LIB} ${PYTHON_LIBRARIES})
+
+if("${USE_LMHPP}" STREQUAL "Y")
+    target_link_libraries(smithproxy microhttpd)
+else()
+    message(">> libmicrohttpd not used")
+endif()
 target_link_libraries(smithd socle_lib pthread ssl crypto rt ${UNWIND_LIB})
 target_link_libraries(smithdc socle_lib pthread ssl crypto rt ${UNWIND_LIB})
 

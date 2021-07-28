@@ -135,15 +135,26 @@ void cmd_show_status(struct cli_def* cli) {
     cli_print(cli, "Built: %s", __TIMESTAMP__);  // breaks reproducible builds
 #endif
 
+std::stringstream features;
+    features << "[ ";
 #ifndef BUILD_RELEASE
-    cli_print(cli, "  + DEBUG BUILD");  // slower
+    features << "+DEBUG BUILD";  // slower
 #endif
 #ifdef MEMPOOL_ALL
-    cli_print(cli, "  + MEMPOOL_ALL");  // using everything from pool
+    features << "+MEMPOOL_ALL";  // using everything from pool
 #endif
 #ifdef MEMPOOL_DEBUG
-    cli_print(cli, "  + MEMPOOL_DEBUG");  // much slower
+    features << "+MEMPOOL_DEBUG";  // much slower
 #endif
+#ifdef USE_PYTHON
+    features << "+PYTHON";
+#endif
+#ifdef USE_LMHPP
+    features << "+LMHPP";
+#endif
+    features << " ]";
+
+    cli_print(cli, "  %s", features.str().c_str());
 
     auto get_proxy_type = [](auto& proxies) -> const char* {
         if(proxies.empty()) return "none";
