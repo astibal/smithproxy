@@ -71,6 +71,7 @@
 #include <proxy/socks5/socksproxy.hpp>
 #include <policy/inspectors.hpp>
 #include <policy/authfactory.hpp>
+#include <traflog/pcaplog.hpp>
 
 #include <inspect/sigfactory.hpp>
 #include <inspect/dnsinspector.hpp>
@@ -899,6 +900,16 @@ int cli_exec_reload(struct cli_def *cli, const char *command, char *argv[], int 
 
     return CLI_OK;
 }
+
+int cli_exec_pcap_rollover(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+
+    auto& single = socle::traflog::PcapLog::single_instance();
+    single.rotate_now = true;
+
+    return CLI_OK;
+}
+
 
 
 int cli_exec_shutdown(struct cli_def *cli, const char *command, char *argv[], int argc) {
@@ -2260,6 +2271,8 @@ void cli_register_static(struct cli_def* cli) {
     auto exec = cli_register_command(cli, nullptr, "execute", nullptr, PRIVILEGE_PRIVILEGED, MODE_ANY, "execute various tasks");
             [[maybe_unused]] auto exec_reload = cli_register_command(cli, exec, "reload", cli_exec_reload, PRIVILEGE_PRIVILEGED, MODE_ANY, "reload config file");
             [[maybe_unused]] auto exec_shutdown = cli_register_command(cli, exec, "shutdown", cli_exec_shutdown, PRIVILEGE_PRIVILEGED, MODE_ANY, "terminate this smithproxy process");
+                             auto exec_pcap = cli_register_command(cli, exec, "pcap", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "manage PCAP writer");
+                            [[maybe_unused]] auto exec_pcap_rollover = cli_register_command(cli, exec_pcap, "rollover", cli_exec_pcap_rollover, PRIVILEGE_PRIVILEGED, MODE_ANY, "rollover pcap file now");
 
     auto show  = cli_register_command(cli, nullptr, "show", cli_show, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show basic information");
             cli_register_command(cli, show, "status", cli_show_status, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show smithproxy status");
