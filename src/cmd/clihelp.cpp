@@ -320,6 +320,11 @@ void CliHelp::init() {
     add("settings.write_payload_file_suffix", "packet dumps file suffix")
         .help_quick("dump filename suffix");
 
+    add("settings.write_pcap_single_quota", "on how many bytes roll over pcap_single file (0 means never)")
+            .help_quick("<number>")
+            .may_be_empty(false)
+            .value_filter(VALUE_UINT_RANGE<0LL, LLONG_MAX>); //10M
+
     // sections
     add("settings.auth_portal", "** configure authentication portal settings");
     add("settings.auth_portal.address", "IP of FQDN where user is redirected for authentication")

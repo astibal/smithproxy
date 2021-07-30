@@ -853,6 +853,10 @@ int cli_diag_writer_stats(struct cli_def *cli, const char *command, char *argv[]
         }
     }
 
+    ss << "PCAP stats: \n";
+    ss << "current file: written " << traflog::PcapLog::single_instance().stat_bytes_written
+                                << " quota " << traflog::PcapLog::single_instance().stat_bytes_quota  << "\n";
+
     cli_print(cli, "%s", ss.str().c_str());
 
     return CLI_OK;

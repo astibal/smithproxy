@@ -455,6 +455,7 @@ bool CfgFactory::load_settings () {
     load_if_exists(CfgFactory::cfg_root()["settings"], "write_payload_dir", CfgFactory::get()->traflog_dir);
     load_if_exists(CfgFactory::cfg_root()["settings"], "write_payload_file_prefix", CfgFactory::get()->traflog_file_prefix);
     load_if_exists(CfgFactory::cfg_root()["settings"], "write_payload_file_suffix", CfgFactory::get()->traflog_file_suffix);
+    load_if_exists(CfgFactory::cfg_root()["settings"], "write_pcap_single_quota", traflog::PcapLog::single_instance().stat_bytes_quota);
 
     return true;
 }
@@ -3309,6 +3310,7 @@ int save_settings(Config& ex) {
     objects.add("write_payload_dir", Setting::TypeString) = CfgFactory::get()->traflog_dir;
     objects.add("write_payload_file_prefix", Setting::TypeString) = CfgFactory::get()->traflog_file_prefix;
     objects.add("write_payload_file_suffix", Setting::TypeString) = CfgFactory::get()->traflog_file_suffix;
+    objects.add("write_pcap_single_quota", Setting::TypeInt64) = traflog::PcapLog::single_instance().stat_bytes_quota;
 
 
     return 0;
