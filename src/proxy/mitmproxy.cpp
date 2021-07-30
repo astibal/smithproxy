@@ -71,7 +71,7 @@ void MitmProxy::toggle_tlog () {
     // create traffic logger if it doesn't exist
     if(not tlog_) {
 
-        switch (opt_write_payload_format.value) {
+        switch (writer_opts()->format.value) {
             case ContentCaptureFormat::type_t::SMCAP:
                 tlog_ = std::make_unique<socle::traflog::SmcapLog>(this,
                                                           CfgFactory::get()->traflog_dir.c_str(),
@@ -137,7 +137,7 @@ void MitmProxy::toggle_tlog () {
 
 MitmProxy::~MitmProxy() {
     
-    if(opt_write_payload) {
+    if(writer_opts()->write_payload) {
         _deb("MitmProxy::destructor: syncing writer");
 
         for(auto* cx: ls()) {
@@ -735,7 +735,7 @@ bool MitmProxy::handle_cached_response(MitmHostCX* mh) {
 
 void MitmProxy::on_left_bytes(baseHostCX* cx) {
 
-    if(opt_write_payload) {
+    if(writer_opts()->write_payload) {
 
         toggle_tlog();
         
@@ -809,7 +809,7 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
 }
 
 void MitmProxy::on_right_bytes(baseHostCX* cx) {
-    if(opt_write_payload) {
+    if(writer_opts()->write_payload) {
 
         toggle_tlog();
         
@@ -1136,7 +1136,7 @@ void MitmProxy::on_error(baseHostCX* cx, char side, const char* side_label) {
 
     // state could change. Log if we are dead now
     if(state().dead()){
-        if (opt_write_payload) {
+        if (writer_opts()->write_payload) {
             toggle_tlog();
             if (tlog()) {
 

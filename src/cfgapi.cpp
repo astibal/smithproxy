@@ -1793,8 +1793,8 @@ bool CfgFactory::prof_content_apply (baseHostCX *originator, baseProxy *new_prox
             const char* pc_name = pc->element_name().c_str();
             _dia("policy_apply: policy content profile[%s]: write payload: %d", pc_name, pc->write_payload);
 
-            mitm_proxy->opt_write_payload = pc->write_payload;
-            mitm_proxy->opt_write_payload_format = pc->write_format;
+            mitm_proxy->writer_opts()->write_payload = pc->write_payload;
+            mitm_proxy->writer_opts()->format = pc->write_format;
 
             if( ! pc->content_rules.empty() ) {
                 _dia("policy_apply: policy content profile[%s]: applying content rules, size %d", pc_name, pc->content_rules.size());
@@ -1804,10 +1804,10 @@ bool CfgFactory::prof_content_apply (baseHostCX *originator, baseProxy *new_prox
         }
         else if(load_if_exists(cfgapi.getRoot()["settings"], "default_write_payload", cfg_wrt)) {
             _dia("policy_apply: global content profile: %d", cfg_wrt);
-            mitm_proxy->opt_write_payload = cfg_wrt;
+            mitm_proxy->writer_opts()->write_payload = cfg_wrt;
         }
         
-        if(mitm_proxy->opt_write_payload) {
+        if(mitm_proxy->writer_opts()->write_payload) {
             std::string msg("Connection start\n");
 
             mitm_proxy->toggle_tlog();

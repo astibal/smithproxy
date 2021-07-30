@@ -102,8 +102,17 @@ public:
         return m;
     }
 
-    bool opt_write_payload = false;
-    ContentCaptureFormat opt_write_payload_format;
+    struct Opts_ContentWriter {
+        bool write_payload = false;
+        ContentCaptureFormat format;
+        long long pcap_single_quota;
+    };
+    std::unique_ptr<Opts_ContentWriter> writer_opts_;
+    Opts_ContentWriter* writer_opts() {
+        if(not writer_opts_) writer_opts_ = std::make_unique<Opts_ContentWriter>();
+        return writer_opts_.get();
+    }
+
 
     bool opt_auth_authenticate = false;
     bool opt_auth_resolve = false;
