@@ -55,18 +55,18 @@
 // @note  template lambdas supported since C++20
 
 
-CliElement::filter_retval VALUE_UINT_RANGE_GEN(std::function<int()> callableA, std::function<int()> callableB, std::string const& v) {
+CliElement::filter_retval VALUE_UINT_RANGE_GEN(std::function<long long()> callableA, std::function<long long()> callableB, std::string const& v) {
 
     auto [ may_val, descr ] = CliElement::VALUE_UINT(v);
 
-    int intA = callableA();
-    int intB = callableB();
+    long long intA = callableA();
+    long long intB = callableB();
 
-    auto err = string_format("value must be a non-negative number in range <%d,%d>", intA, intB);
+    auto err = string_format("value must be a non-negative number in range <%ld,%ld>", intA, intB);
 
-    int port_value = safe_val(v);;
+    long long port_value = safe_val(v);
 
-    if(may_val.has_value() and port_value >= 0) {
+    if(may_val.has_value() and port_value >= 0LL) {
         if(port_value < intA or port_value > intB)
             return CliElement::filter_retval::reject(err);
         else
@@ -78,7 +78,7 @@ CliElement::filter_retval VALUE_UINT_RANGE_GEN(std::function<int()> callableA, s
 
 }
 
-template <int A, int B>
+template <long long A, long long B>
 CliElement::filter_retval VALUE_UINT_RANGE(std::string const& v) {
 
     auto a = []() { return A; };
@@ -94,10 +94,7 @@ public:
     using container_fetcher = std::vector<std::string>();
 
     is_in_vector(container_fetcher v, std::string n): get_the_container(std::function(v)), name(std::move(n)) {}
-    is_in_vector(is_in_vector const& ref) {
-        get_the_container = ref.get_the_container;
-        name = ref.name;
-    }
+    is_in_vector(is_in_vector const& ref) : get_the_container(ref.get_the_container), name(ref.name) {}
     is_in_vector& operator=(is_in_vector const& ref) = default;
 
 
