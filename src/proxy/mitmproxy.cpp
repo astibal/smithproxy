@@ -562,7 +562,7 @@ bool MitmProxy::handle_authentication(MitmHostCX* mh)
         resolve_identity(mh);
         
         if(!identity_resolved()) {        
-            _deb("identity check: unknown");
+            _deb("handle_authentication: identity check: unknown");
             
             if(opt_auth_authenticate) {
                 if(mh->replacement_type() == MitmHostCX::REPLACETYPE_HTTP) {
@@ -583,7 +583,7 @@ bool MitmProxy::handle_authentication(MitmHostCX* mh)
         } else {
             if(auth_block_identity) {
                 if(mh->replacement_type() == MitmHostCX::REPLACETYPE_HTTP) {
-                    _dia("MitmProxy::on_left_bytes: we should block it");
+                    _dia("MitmProxy::handle_authentication: we should block it");
                     mh->replacement_flag(MitmHostCX::REPLACE_BLOCK);
                     redirected = true;
                     handle_replacement_auth(mh);
@@ -631,6 +631,7 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
             scom->verify_get() == ( SSLCom::VRF_OK | SSLCom::VRF_CLIENT_CERT_RQ )
             )) {
 
+            if(tlog()) tlog()->write_left("original TLS peer verification failed");
 
             bool whitelist_found = false;
             
@@ -1494,7 +1495,9 @@ std::string MitmProxy::replacement_ssl_page(SSLCom* scom, sx::engine::http::app_
 }
 
 void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
-    
+
+    if(tlog()) tlog()->write_left("TLS content replacement\n");
+
     auto* scom = dynamic_cast<SSLCom*>(cx->peercom());
     if(!scom) {
         std::string error("<html><head></head><body><p>Internal error</p><p>com object is not ssl-type</p></body></html>");
