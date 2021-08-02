@@ -61,7 +61,7 @@ MitmProxy::MitmProxy(baseCom* c): baseProxy(c), sobject() {
     // NOTE: testing filter - get back to it later!
     // add_filter("test",new TestFilter(this,5));
 
-    log = logan::attach(this, "proxy");
+    log = logan::attach(this, "com.proxy");
 
     total_sessions()++;
 }
@@ -740,6 +740,26 @@ bool MitmProxy::handle_cached_response(MitmHostCX* mh) {
     return false;
 }
 
+
+void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redirected) {
+
+    if (!redirected) {
+        if (content_rule() != nullptr) {
+            buffer b = content_replace_apply(from->to_read());
+            to->to_write(b);
+            _dia("mitmproxy::proxy-%c: original %d bytes replaced with %d bytes", from_side(side), from->to_read().size(),
+                 b.size());
+        } else {
+            to->to_write(from->to_read());
+            _dia("mitmproxy::proxy-%c: %d copied", from_side(side), from->to_read().size());
+        }
+    } else {
+
+        // rest of connections should be closed when sending replacement to a client
+        to->shutdown();
+    }
+};
+
 void MitmProxy::on_left_bytes(baseHostCX* cx) {
 
     if(writer_opts()->write_payload) {
@@ -773,43 +793,19 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
             return;
         }
     }
-    
-    
+
     // because we have left bytes, let's copy them into all right side sockets!
-    for(auto j: right_sockets) {
-        
-        if(!redirected) {
-            if(content_rule() != nullptr) {
-                buffer b = content_replace_apply(cx->to_read());
-                j->to_write(b);
-                _dia("mitmproxy::on_left_bytes: original %d bytes replaced with %d bytes", cx->to_read().size(), b.size());
-            } else {
-                j->to_write(cx->to_read());
-                _dia("mitmproxy::on_left_bytes: %d copied",cx->to_read().size());
-            }
-        } else {
-        
-            // rest of connections should be closed when sending replacement to a client
-            j->shutdown();
-        }
-    }    
-    for(auto j: right_delayed_accepts) {
-        
-        if(!redirected) {
-            if(content_rule() != nullptr) {
-                buffer b = content_replace_apply(cx->to_read());
-                j->to_write(b);
-                _dia("mitmproxy::on_left_bytes: original %d bytes replaced with %d bytes into delayed", cx->to_read().size(), b.size());
-            } else {	  
-                j->to_write(cx->to_read());
-                _dia("mitmproxy::on_left_bytes: %d copied to delayed", cx->to_read().size());
-            }
-        } else {
-        
-            // rest of connections should be closed when sending replacement to a client
-            j->shutdown();
-        }
-    }    
+    std::for_each(
+            right_sockets.begin(),
+            right_sockets.end(),
+            [&](auto* to) {proxy(cx, to, side_t::LEFT, redirected); });
+
+    // because we have left bytes, let's copy them into all right side sockets!
+    std::for_each(
+            right_delayed_accepts.begin(),
+            right_delayed_accepts.end(),
+            [&](auto* to) {proxy(cx, to, side_t::LEFT, redirected); });
+
 
     //update meters
     total_mtr_up().update(cx->to_read().size());
@@ -860,42 +856,17 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
 
     }
 
+    std::for_each(
+            left_sockets.begin(),
+            left_sockets.end(),
+            [&](auto* to) {proxy(cx, to, side_t::RIGHT, redirected); });
 
+    // because we have left bytes, let's copy them into all right side sockets!
+    std::for_each(
+            left_delayed_accepts.begin(),
+            left_delayed_accepts.end(),
+            [&](auto* to) {proxy(cx, to, side_t::RIGHT, redirected); });
 
-    for(auto j: left_sockets) {
-
-        if(! redirected ) {
-            if (content_rule() != nullptr) {
-                buffer b = content_replace_apply(cx->to_read());
-                j->to_write(b);
-                _dia("mitmproxy::on_right_bytes: original %d bytes replaced with %d bytes", cx->to_read().size(),
-                     b.size());
-            } else {
-                j->to_write(cx->to_read());
-                _dia("mitmproxy::on_right_bytes: %d copied", cx->to_read().size());
-            }
-        }
-        else {
-            cx->shutdown();
-        }
-    }
-    for(auto j: left_delayed_accepts) {
-
-        if(! redirected ) {
-            if (content_rule() != nullptr) {
-                buffer b = content_replace_apply(cx->to_read());
-                j->to_write(b);
-                _dia("mitmproxy::on_right_bytes: original %d bytes replaced with %d bytes into delayed",
-                     cx->to_read().size(), b.size());
-            } else {
-                j->to_write(cx->to_read());
-                _dia("mitmproxy::on_right_bytes: %d copied to delayed", cx->to_read().size());
-            }
-        }
-        else {
-            cx->shutdown();
-        }
-    }
 
     // update total meters
     total_mtr_down().update(cx->to_read().size());
