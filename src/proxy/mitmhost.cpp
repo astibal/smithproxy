@@ -55,12 +55,13 @@ std::string MitmHostCX::to_string(int verbosity) const {
 
     std::stringstream ret;
 
-    ret << "MitmHostCX:";
+    if(verbosity > iINF) {
+        ret << "MitmHostCX:";
 
-    if(parent_proxy()) {
-        ret << "[" << parent_flag() << "]:";
+        if (parent_proxy()) {
+            ret << "[" << parent_flag() << "]:";
+        }
     }
-
     ret << "<" << AppHostCX::to_string(verbosity) << ">";
 
     return ret.str();
