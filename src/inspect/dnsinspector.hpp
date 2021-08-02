@@ -67,6 +67,7 @@ public:
 
     std::string to_string(int verbosity) const override;
 
+    std::shared_ptr<buffer> verdict_response() override { return cached_response; };
 private:
     logan_attached<DNS_Inspector> log;
     bool is_tcp = false;

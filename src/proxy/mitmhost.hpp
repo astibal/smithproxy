@@ -77,6 +77,7 @@ public:
     replaceflags_t replacement_flag()   { return replacement_flags_; }
     
     int inspection_verdict() const { return inspect_verdict; };
+    std::shared_ptr<buffer> inspection_verdict_response() const { return  inspect_verdict_response; }
 protected:    
     int matched_policy_ = -1;
     
@@ -105,6 +106,7 @@ private:
     unsigned int inspect_cur_flow_size = 0;
     unsigned int inspect_flow_same_bytes = 0;
     int inspect_verdict = Inspector::OK;
+    std::shared_ptr<buffer> inspect_verdict_response;
     
     TYPENAME_OVERRIDE("MitmHostCX")
     DECLARE_LOGGING(to_string)

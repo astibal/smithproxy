@@ -175,6 +175,7 @@ void MitmHostCX::inspect(char side) {
                 inspector->update(this);
                 
                 inspect_verdict = inspector->verdict();
+                inspect_verdict_response = inspector->verdict_response();
 
                 _dia("MitmHostCX::inspect[%s]: verdict %d", inspector->c_type(), inspect_verdict);
                 if(inspect_verdict == Inspector::OK) {

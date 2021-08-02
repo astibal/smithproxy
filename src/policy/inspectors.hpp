@@ -89,6 +89,7 @@ public:
     inspect_verdict verdict() const { return verdict_; };
     void verdict(inspect_verdict v) { verdict_ = v; }
     virtual void apply_verdict(AppHostCX* cx) {};
+    virtual std::shared_ptr<buffer> verdict_response() = 0;
 private:
     logan_attached<Inspector> log;
 
