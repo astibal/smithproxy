@@ -726,6 +726,12 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
 bool MitmProxy::handle_cached_response(MitmHostCX* mh) {
     
     if(mh->inspection_verdict() == Inspector::CACHED) {
+
+        if(tlog()) {
+            tlog()->write_right("content has been served from cache\n");
+            if(mh->inspection_verdict_response()) tlog()->write(side_t::RIGHT, *mh->inspection_verdict_response());
+        }
+
         _dia("cached content: not proxying");
         return true;
     }
