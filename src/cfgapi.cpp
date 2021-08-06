@@ -102,7 +102,7 @@ CfgFactory::CfgFactory(): CfgFactoryBase() , args_debug_flag(NON), syslog_level(
 
     traflog_dir = "/var/local/smithproxy/data";
     //traflog_file_prefix = "";
-    traflog_file_suffix = "smcap";
+    traflog_file_suffix = "pcapng";
 
     log_console = false;
 }
@@ -1284,7 +1284,7 @@ int CfgFactory::load_db_prof_content_subrules(Setting& cur_object, ProfileConten
 
 
 bool CfgFactory::load_db_prof_content_write_format(Setting& cur_object, ProfileContent* new_profile) {
-    std::string write_format = "smcap";
+    std::string write_format = "pcap_single";
     load_if_exists(cur_object, "write_format", write_format);
     write_format = string_tolower(write_format);
 
