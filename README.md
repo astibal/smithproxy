@@ -24,7 +24,7 @@ It uses our C++17 socket proxying library called [*socle*](https://github.com/as
   * enjoy insightful CLI with configuration control
 
 ### TLS features:
-  * dumping plaintext version of traffic to files, exporting sslkeylog
+  * dumping traffic plaintext into pcapng or text files, exporting sslkeylog 
   * TLS security checks (OCSP, OCSP stapling, automatic CRL download)
   * Certificate Transparency checks for outbound connections
   * HTML replacement browser warnings
