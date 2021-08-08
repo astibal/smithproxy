@@ -20,7 +20,7 @@ description: |
     * detection - match specific patterns in the traffic
 
  TLS protocol:
-    * dumping plaintext to files, exporting sslkeylog
+    * dumping traffic plaintext into pcapng or text files, exporting sslkeylog
     * TLS security checks (ocsp, ocsp stapling, automatic crl download)
     * Certificate Transparency checks for outbound connections
     * Html replacement warnings

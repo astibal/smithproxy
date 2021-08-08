@@ -32,15 +32,16 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 * [ ] memory pool ONLY execution
 * [ ] json/api interface
 
-## Roadmap to 0.9.20 (tba - in progress)
+## Roadmap to 0.9.21
+*tba - in progress*
 
-### New features in 0.9.14-19
-* add support for PCAP file capture (multiple, or single capture file)
+### New features in 0.9.20
+* add support for PCAP file capture (multiple, or single capture file) with rollover capability
 * pass TLS ALPN extension - controllable by 'alpn_block' in TLS profile
 * signature cascades
 * new version config file migration support
 
-### Improvements in 0.9.14-19
+### Improvements in 0.9.20
 * introduction of engines - similar to inspectors, but working more closely with data     
 * add cli command 'diag proxy session active' which prints only currently active sessions
 * match starttls only on certain traffic and exchange margins
