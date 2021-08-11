@@ -2072,7 +2072,8 @@ namespace cidr {
         short pflen;
         short lzer; /* Last zero */
         char *toret;
-        char tmpbuf[128]; /* We shouldn't need more than ~5 anywhere */
+        constexpr unsigned int tmpbuf_sz = 128;
+        char tmpbuf[tmpbuf_sz]; /* We shouldn't need more than ~5 anywhere */
         CIDR *nmtmp;
         char *nmstr;
         int nmflags;
@@ -2164,7 +2165,7 @@ namespace cidr {
                 /* Now, slap on the v4 address */
                 for (i = 12; i <= 15; i++) {
                     sprintf(tmpbuf, "%u", (block->addr)[i]);
-                    strcat(toret, tmpbuf);
+                    strncat(toret, tmpbuf, tmpbuf_sz - 1);
                     if (i < 15)
                         strcat(toret, ".");
                 }
@@ -2190,7 +2191,7 @@ namespace cidr {
                         if (flags & CIDR_WILDCARD)
                             moct = ~(moct);
                         sprintf(tmpbuf, "%u", moct);
-                        strcat(toret, tmpbuf);
+                        strncat(toret, tmpbuf, tmpbuf_sz - 1);
                         if (i < 15)
                             strcat(toret, ".");
                     }
@@ -2211,7 +2212,7 @@ namespace cidr {
                     sprintf(tmpbuf, "%u",
                             (flags & CIDR_USEV6) ? pflen + 96 : pflen);
 
-                    strcat(toret, tmpbuf);
+                    strncat(toret, tmpbuf, tmpbuf_sz - 1);
                 }
             } /* ! ONLYADDR */
 
@@ -2339,7 +2340,7 @@ namespace cidr {
                         sprintf(tmpbuf, "%.4x", v6sect);
                     else
                         sprintf(tmpbuf, "%x", v6sect);
-                    strcat(toret, tmpbuf);
+                    strncat(toret, tmpbuf, tmpbuf_sz - 1);
 
                     /* And loop back around to the next 2-octet set */
                 } /* for(each 16-bit set) */
@@ -2389,7 +2390,7 @@ namespace cidr {
                     /* No need to strip the prefix, it doesn't have it */
 
                     /* Just add it on */
-                    strcat(toret, nmstr);
+                    strncat(toret, nmstr, tmpbuf_sz - 1);
                     free(nmstr);
                 } else {
                     /* Just figure the and show prefix length */
@@ -2403,7 +2404,7 @@ namespace cidr {
                         pflen += 96;
 
                     sprintf(tmpbuf, "%u", pflen);
-                    strcat(toret, tmpbuf);
+                    strncat(toret, tmpbuf,  tmpbuf_sz - 1);
                 }
             } /* ! ONLYADDR */
         } else {
