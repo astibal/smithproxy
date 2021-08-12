@@ -2108,7 +2108,8 @@ namespace cidr {
      * consumers of the library can count on this behavior...  well, I
      * haven't decided yet.  Lemme alone.
      */
-        toret = (char *) malloc(128);
+        constexpr unsigned int toret_sz = 128;
+        toret = (char *) malloc(toret_sz);
         if (toret == nullptr) {
             errno = ENOMEM;
             return (nullptr);
@@ -2164,7 +2165,7 @@ namespace cidr {
 
                 /* Now, slap on the v4 address */
                 for (i = 12; i <= 15; i++) {
-                    sprintf(tmpbuf, "%u", (block->addr)[i]);
+                    snprintf(tmpbuf,  tmpbuf_sz - 1,"%u", (block->addr)[i]);
                     strncat(toret, tmpbuf, tmpbuf_sz - 1);
                     if (i < 15)
                         strcat(toret, ".");
@@ -2190,7 +2191,7 @@ namespace cidr {
                         moct = (block->mask)[i];
                         if (flags & CIDR_WILDCARD)
                             moct = ~(moct);
-                        sprintf(tmpbuf, "%u", moct);
+                        snprintf(tmpbuf,  tmpbuf_sz - 1,"%u", moct);
                         strncat(toret, tmpbuf, tmpbuf_sz - 1);
                         if (i < 15)
                             strcat(toret, ".");
@@ -2209,7 +2210,7 @@ namespace cidr {
                     if (block->proto == CIDR_IPV6 && (flags & CIDR_FORCEV4))
                         pflen -= 96;
 
-                    sprintf(tmpbuf, "%u",
+                    snprintf(tmpbuf,  tmpbuf_sz - 1,"%u",
                             (flags & CIDR_USEV6) ? pflen + 96 : pflen);
 
                     strncat(toret, tmpbuf, tmpbuf_sz - 1);
@@ -2337,9 +2338,9 @@ namespace cidr {
                  * only use as many digits as we need.
                  */
                     if (flags & CIDR_VERBOSE)
-                        sprintf(tmpbuf, "%.4x", v6sect);
+                        snprintf(tmpbuf, tmpbuf_sz - 1, "%.4x", v6sect);
                     else
-                        sprintf(tmpbuf, "%x", v6sect);
+                        snprintf(tmpbuf,  tmpbuf_sz - 1, "%x", v6sect);
                     strncat(toret, tmpbuf, tmpbuf_sz - 1);
 
                     /* And loop back around to the next 2-octet set */
@@ -2403,7 +2404,7 @@ namespace cidr {
                     if (block->proto == CIDR_IPV4 && (flags & CIDR_FORCEV6))
                         pflen += 96;
 
-                    sprintf(tmpbuf, "%u", pflen);
+                    snprintf(tmpbuf, tmpbuf_sz - 1, "%u", pflen);
                     strncat(toret, tmpbuf,  tmpbuf_sz - 1);
                 }
             } /* ! ONLYADDR */
