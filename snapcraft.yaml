@@ -150,6 +150,7 @@ parts:
       - python3-dev
       - libssl-dev
       - libffi-dev
+      - libmicrohttpd-dev
       - try:
         - libxml2-dev
         - libxslt1-dev
@@ -162,6 +163,7 @@ parts:
       - ca-certificates
       - iptables
       - libconfig++9v5
+      - libmicrohttpd12
       - telnet
       - wget
       - python

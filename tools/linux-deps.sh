@@ -83,6 +83,9 @@ if [ "${DIST}" = "Ubuntu" ]; then
    if [ "${REV}" = "20.04" ]; then
         SX_LIBCONFIG_VER="9v5"
         SX_GCC_VER="9"
+   elif [ "${REV}" = "21.04" ]; then
+        SX_LIBCONFIG_VER="9v5"
+        SX_GCC_VER="11"
    fi
 
     DEBIAN_FRONTEND=noninteractive apt-get install -y tzdata
@@ -91,8 +94,8 @@ if [ "${DIST}" = "Ubuntu" ]; then
     apt update && apt install -y \
     wget curl \
     python3 python3-pip python3-dev \
-    libconfig++${SX_LIBCONFIG_VER} libssl1.1 libunwind8 \
-    libconfig-dev libconfig++-dev  libssl-dev libunwind-dev git g++-${SX_GCC_VER} cmake make
+    libconfig++${SX_LIBCONFIG_VER} libssl1.1 libunwind8 libmicrohttpd12 \
+    libconfig-dev libconfig++-dev  libssl-dev libunwind-dev libmicrohttpd-dev git g++-${SX_GCC_VER} cmake make
 
     echo "... installing OS toolchains"
     apt install -y iptables telnet iproute2 python3-cryptography python3-pyroute2 \
@@ -134,8 +137,8 @@ elif [ "${DIST}" = "Debian" ]; then
     apt update && apt install -y \
     wget curl \
     python3 python3-pip python3-dev \
-    libconfig++${SX_LIBCONFIG_VER} libssl1.1 libunwind8 \
-    libconfig-dev libconfig++-dev  libssl-dev libunwind-dev git g++-${SX_GCC_VER} cmake make
+    libconfig++${SX_LIBCONFIG_VER} libssl1.1 libunwind8 libmicrohttpd12 \
+    libconfig-dev libconfig++-dev  libssl-dev libunwind-dev libmicrohttpd-dev git g++-${SX_GCC_VER} cmake make
 
     echo "... installing OS toolchains"
     apt install -y iptables telnet iproute2 && \
@@ -166,7 +169,7 @@ elif [ "${DIST}" = "Alpine" ]; then
     apk add git bash
     apk add make gcc musl-dev
 
-    apk add openssl libconfig libconfig-dev
+    apk add openssl libconfig libconfig-dev libmicrohttpd libmicrohttpd-dev
     apk add cmake g++ python3-dev libexecinfo-dev openssl-dev linux-headers libunwind-dev
     apk add busybox-extras iptables iproute2
     apk add libffi-dev libxml2-dev libxslt-dev xmlsec-dev
@@ -188,6 +191,7 @@ elif [ "${DIST}" = "Fedora" ]; then
     OPW=`pwd`
     yum update -y
     yum install -y git openssl-libs openssl-devel libconfig-devel python3-devel libunwind-devel kernel-headers glibc-headers
+    yum install -y libmicrohttpd libmicrohttpd-devel
 
     yum install -y gcc-c++ cmake make
     yum install -y telnet iptables iproute
@@ -205,6 +209,7 @@ else
     echo "   libconfig++-dev"
     echo "   libssl-dev"
     echo "   python-dev"
+    echo "   libmicrohttpd-dev"
     echo "   libunwind-dev (version8) iff compiled with -DCMAKE_BUILD_TYPE=Debug"
     echo "   "
     echo "and following packages to make smithproxy infrastructure work:"

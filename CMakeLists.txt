@@ -31,9 +31,9 @@ find_package (LibMicroHttpd)
 if (LIBMICROHTTPD_FOUND)
     include_directories(${LIBMICROHTTPD_INCLUDE_DIR})
     message(">> microhttpd includes: " ${LIBMICROHTTPD_INCLUDE_DIR})
-    # libmicrohttpd/lmhpp use - now disabled
-    # add_definitions(-DUSE_LMHPP)
-    # set(USE_LMHPP "Y")
+    # libmicrohttpd/lmhpp use
+    add_definitions(-DUSE_LMHPP)
+    set(USE_LMHPP "Y")
 endif (LIBMICROHTTPD_FOUND)
 
 
