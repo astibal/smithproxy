@@ -1,6 +1,6 @@
 
 name: smithproxy
-version: 0.9.20
+version: 0.9.21
 summary: Fast and featured transparent TCP/UDP/TLS proxy
 description: |
  Smithproxy is fast transparent TCP/UDP/TLS (SSL) proxy. It's highly configurable
@@ -137,7 +137,7 @@ parts:
 
     source: https://github.com/astibal/smithproxy
     source-type: git
-    source-branch: master
+    source-branch: release-0.9.21
 
 #    source: .
 #    source-type: local
@@ -163,7 +163,7 @@ parts:
       - ca-certificates
       - iptables
       - libconfig++9v5
-      - libmicrohttpd12
+#      - libmicrohttpd12
       - telnet
       - wget
       - python
