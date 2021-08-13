@@ -150,7 +150,7 @@ parts:
       - python3-dev
       - libssl-dev
       - libffi-dev
-      - libmicrohttpd-dev
+#      - libmicrohttpd-dev
       - try:
         - libxml2-dev
         - libxslt1-dev
