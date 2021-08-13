@@ -32,8 +32,15 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 * [ ] memory pool ONLY execution
 * [ ] json/api interface
 
-## Roadmap to 0.9.21
+## Roadmap to 0.9.22
 *tba - in progress*
+
+##  What's new in 0.9.21
+This is a hotfix release:
+
+* fix pcap file rollover race condition
+
+## What's new in 0.9.20
 
 ### New features in 0.9.20
 * add support for PCAP file capture (multiple, or single capture file) with rollover capability
