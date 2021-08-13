@@ -1,6 +1,6 @@
 # Smithproxy 0.9 Release Notes
 
-[Smithproxy](https://www.smithproxy.org) is fast TLS/TCP/UDP/SOCKS mitm proxy written in C++. 
+[Smithproxy](https://www.smithproxy.org) is fast TLS/TCP/UDP/SOCKS mitm proxy written in C++.
 
 Smithproxy is being developed by:    
 Ales Stibal `<astib@mag0.net>`
@@ -32,15 +32,17 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 * [ ] memory pool ONLY execution
 * [ ] json/api interface
 
-## Roadmap to 0.9.20 (tba - in progress)
+## Roadmap to 0.9.22
+*tba - in progress*
 
-### New features in 0.9.14-19
-* add support for PCAP file capture (multiple, or single capture file)
-* pass TLS ALPN extension - controllable by 'alpn_block' in TLS profile
-* signature cascades
-* new version config file migration support
+##  What's new in 0.9.21
+This is a hotfix release:
 
-### Improvements in 0.9.14-19
+* fix pcap file rollover race condition 
+
+## What's new in 0.9.20
+
+### Improvements in 0.9.20
 * introduction of engines - similar to inspectors, but working more closely with data     
 * add cli command 'diag proxy session active' which prints only currently active sessions
 * match starttls only on certain traffic and exchange margins
@@ -68,7 +70,7 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 
 ### Fixes
 * 2 smaller memory leaks fixed
-* fix dns inspector - allow NS type in authority responses and allow records into cache 
+* fix dns inspector - allow NS type in authority responses and allow records into cache
 
 
 ## What's new in 0.9.12
