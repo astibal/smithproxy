@@ -4,6 +4,7 @@ ARG FTP_UPLOAD_PWD=""
 ARG FTP_UPLOAD_USER=""
 ARG FTP_UPLOAD_PATH=""
 ARG HTTP_CHECK_PATH=""
+ARG SX_BRANCH="master"
 
 WORKDIR /app
 
@@ -11,7 +12,7 @@ RUN if [ "$http_proxy" != "" ]; then echo "Acquire::http { Proxy \"${http_proxy}
 
 RUN apt update && apt -y install git && DEBIAN_FRONTEND=noninteractive apt install -y tzdata
 
-RUN git clone --depth 1 --recursive https://github.com/astibal/smithproxy.git -b master smithproxy
+RUN echo "Getting git branch: ${SX_BRANCH}"; git clone --depth 1 --recursive https://github.com/astibal/smithproxy.git -b ${SX_BRANCH} smithproxy
 
 RUN cd smithproxy && ./tools/linux-deps.sh
 
