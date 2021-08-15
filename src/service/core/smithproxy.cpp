@@ -47,6 +47,7 @@
 #include <policy/authfactory.hpp>
 #include <inspect/sigfactory.hpp>
 #include <inspect/sxsignature.hpp>
+#include <service/httpd/httpd.hpp>
 
 #include <cfgapi.hpp>
 
@@ -123,6 +124,14 @@ void SmithProxy::create_identity_thread() {
     if(id_thread != nullptr) {
         pthread_setname_np(id_thread->native_handle(),string_format("sxy_idu_%d",
                                                                     CfgFactory::get()->tenant_index).c_str());
+    }
+}
+
+void SmithProxy::create_api_thread() {
+    api_thread = std::shared_ptr<std::thread>(create_httpd_thread(55555 + tenant_index()));
+    if(api_thread) {
+        pthread_setname_np( api_thread->native_handle(),
+                            string_format("sxy_api_%d",tenant_index()).c_str());
     }
 }
 
@@ -454,6 +463,11 @@ void SmithProxy::join_all() {
         if(!cfg_daemonize)
             std::cerr << "terminating identity updater thread" << std::endl;
         id_thread->join();
+    }
+    if(api_thread) {
+        if(!cfg_daemonize)
+            std::cerr << "terminating identity updater thread" << std::endl;
+        api_thread->join();
     }
 
     auto ql = std::dynamic_pointer_cast<QueueLogger>(Log::get());

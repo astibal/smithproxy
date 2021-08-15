@@ -96,6 +96,7 @@ public:
     std::shared_ptr<std::thread> dns_thread;
     std::shared_ptr<std::thread> id_thread;
 
+    std::shared_ptr<std::thread> api_thread;
 
     SmithProxy (SmithProxy const&) = delete;
     SmithProxy& operator= (SmithProxy const& r) = delete;
@@ -110,6 +111,8 @@ public:
     void create_log_writer_thread();
     void create_dns_thread();
     void create_identity_thread();
+    void create_api_thread();
+
     bool create_listeners();
 
     void run() override;

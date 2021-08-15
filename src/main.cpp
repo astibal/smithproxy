@@ -489,6 +489,7 @@ int main(int argc, char *argv[]) {
 
     SmithProxy::instance().create_dns_thread();
     SmithProxy::instance().create_identity_thread();
+    SmithProxy::instance().create_api_thread();
 
     // launch listeners
 
