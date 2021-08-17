@@ -41,6 +41,7 @@
 #define HTTPD_HPP_
 
 #include <ext/lmhpp/include/lmhttpd.hpp>
+#include <ext/json/json.hpp>
 #include <main.hpp>
 
 std::thread* create_httpd_thread(unsigned short port);
@@ -60,7 +61,9 @@ public:
 
         lmh::ResponseParams ret;
         ret.headers.emplace_back("X-Vendor", string_format("Smithproxy-%s", SMITH_VERSION));
-        response << "<html><head><title>smithproxy http service</title></head><body>OK</body></html>";
+        ret.headers.emplace_back("Content-Type", "application/json");
+        nlohmann::json js = { { "version", SMITH_VERSION }, { "status", "ok" } };
+        response << to_string(js);
 
         return ret;
     }
