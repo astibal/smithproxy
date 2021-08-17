@@ -40,8 +40,8 @@
 #ifndef HTTPD_HPP_
 #define HTTPD_HPP_
 
-
 #include <ext/lmhpp/include/lmhttpd.hpp>
+#include <main.hpp>
 
 std::thread* create_httpd_thread(unsigned short port);
 
@@ -54,11 +54,15 @@ public:
         return (this_path == path and this_meth == method);
     }
 
-    void createResponse(struct MHD_Connection * connection,
+     lmh::ResponseParams createResponse(struct MHD_Connection * connection,
             const char * url, const char * method, const char * upload_data,
             size_t * upload_data_size, std::stringstream& response) override {
 
+        lmh::ResponseParams ret;
+        ret.headers.emplace_back("X-Vendor", string_format("Smithproxy-%s", SMITH_VERSION));
         response << "<html><head><title>smithproxy http service</title></head><body>OK</body></html>";
+
+        return ret;
     }
 
 };
