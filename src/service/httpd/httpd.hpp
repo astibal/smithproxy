@@ -46,6 +46,48 @@
 
 std::thread* create_httpd_thread(unsigned short port);
 
+struct HttpService_JsonResponseParams : public lmh::ResponseParams {
+    nlohmann::json response;
+};
+
+class HttpService_JsonResponder : public lmh::DynamicController {
+    std::string meth;
+    std::string path;
+    std::function<HttpService_JsonResponseParams(struct MHD_Connection*)> responder;
+
+public:
+    HttpService_JsonResponder(std::string m, std::string p, std::function<HttpService_JsonResponseParams(struct MHD_Connection*)> r)
+            : meth(std::move(m)), path(std::move(p)), responder(std::move(r)) {};
+
+    bool validPath(const char* arg_path, const char* arg_method) override {
+        if(arg_path == path and arg_method == meth) return true;
+
+        if(arg_method == meth) {
+            std::string argp = arg_path;
+            if(argp.find(path + "?") == 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    lmh::ResponseParams createResponse(struct MHD_Connection * connection,
+            const char * url, const char * method, const char * upload_data,
+            size_t * upload_data_size, std::stringstream& response) override {
+
+        auto to_add = responder(connection);
+        lmh::ResponseParams ret = static_cast<lmh::ResponseParams>(to_add);
+
+        ret.headers.emplace_back("X-Vendor", string_format("Smithproxy-%s", SMITH_VERSION));
+        ret.headers.emplace_back("Content-Type", "application/json");
+
+        response << to_string(to_add.response);
+        return ret;
+    }
+
+};
+
+
 class HttpService_Status_Ping : public lmh::DynamicController {
 public:
     bool validPath(const char* path, const char* method) override {
