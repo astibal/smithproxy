@@ -23,8 +23,20 @@ std::thread* create_httpd_thread(unsigned short port) {
                     }
                 );
 
+        HttpService_JsonResponder diag_ssl_cache_print(
+                "GET",
+                "/api/diag/ssl/cache/print",
+                [](MHD_Connection* conn) -> HttpService_JsonResponseParams {
+                    HttpService_JsonResponseParams ret;
+                    ret.response = json_ssl_cache_print(conn);
+                    return ret;
+                }
+                );
+
+
         server.addController(&status_ping);
         server.addController(&diag_ssl_cache_stats);
+        server.addController(&diag_ssl_cache_print);
 
         server.handler_should_terminate = []() -> bool {
                 return SmithProxy::instance().terminate_flag;
