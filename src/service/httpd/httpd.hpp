@@ -105,9 +105,13 @@ public:
         lmh::ResponseParams ret;
         ret.headers.emplace_back("X-Vendor", string_format("Smithproxy-%s", SMITH_VERSION));
         ret.headers.emplace_back("Content-Type", "application/json");
-         ret.headers.emplace_back("Access-Control-Allow-Origin", "*");
+        ret.headers.emplace_back("Access-Control-Allow-Origin", "*");
 
-        nlohmann::json js = { { "version", SMITH_VERSION }, { "status", "ok" } };
+        time_t uptime = time(nullptr) - SmithProxy::instance().ts_sys_started;
+
+        nlohmann::json js = { { "version", SMITH_VERSION }, { "status", "ok" },
+                              { "uptime", uptime },
+                              { "uptime_str", uptime_string(uptime) } };
         response << to_string(js);
 
         return ret;
