@@ -80,6 +80,7 @@ public:
 
         ret.headers.emplace_back("X-Vendor", string_format("Smithproxy-%s", SMITH_VERSION));
         ret.headers.emplace_back("Content-Type", "application/json");
+        ret.headers.emplace_back("Access-Control-Allow-Origin", "*");
 
         response << to_string(to_add.response);
         return ret;
@@ -104,6 +105,8 @@ public:
         lmh::ResponseParams ret;
         ret.headers.emplace_back("X-Vendor", string_format("Smithproxy-%s", SMITH_VERSION));
         ret.headers.emplace_back("Content-Type", "application/json");
+         ret.headers.emplace_back("Access-Control-Allow-Origin", "*");
+
         nlohmann::json js = { { "version", SMITH_VERSION }, { "status", "ok" } };
         response << to_string(js);
 
