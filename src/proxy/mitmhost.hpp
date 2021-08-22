@@ -101,8 +101,6 @@ public:
     
 private:
 
-    //baseProxy* parent_proxy_ = nullptr;
-
     unsigned int inspect_cur_flow_size = 0;
     unsigned int inspect_flow_same_bytes = 0;
     int inspect_verdict = Inspector::OK;

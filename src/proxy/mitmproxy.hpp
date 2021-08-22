@@ -136,7 +136,7 @@ public:
     int matched_policy() const { return matched_policy_; }
     void matched_policy(int p)  { matched_policy_ = p; }
     
-    inline bool identity_resolved() const;
+    inline bool identity_resolved() const { return identity_resolved_; };
     inline void identity_resolved(bool b);
     shm_logon_info_base* identity() { return identity_; }
     inline void identity(shm_logon_info_base* i) { delete identity_; if(i != nullptr) { identity_ = i->clone(); } }
@@ -215,7 +215,7 @@ public:
     static socle::meter& total_mtr_up()  { static socle::meter t_up(12); return t_up; };
     static socle::meter& total_mtr_down() {static socle::meter t_down(12); return t_down; };
 
-    
+
     TYPENAME_OVERRIDE("MitmProxy")
     DECLARE_LOGGING(to_string)
 

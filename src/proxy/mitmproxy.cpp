@@ -205,10 +205,6 @@ std::string MitmProxy::to_string(int verbosity) const {
 void MitmProxy::identity_resolved(bool b) {
     identity_resolved_ = b;
 }
-bool MitmProxy::identity_resolved() const {
-    return identity_resolved_;
-}
-
 
 bool MitmProxy::apply_id_policies(baseHostCX* cx) {
 
