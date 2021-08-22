@@ -44,60 +44,57 @@
 #include <service/httpd/jsonize.hpp>
 
 
-static nlohmann::json json_ssl_cache_stats(struct MHD_Connection * connection) {
-    SSLFactory* store = SSLCom::factory();
+static nlohmann::json json_proxy_session_list(struct MHD_Connection * connection) {
 
-    int n_cache = 0;
-    int n_maxsize = 0;
-    {
-        std::lock_guard<std::recursive_mutex> l(store->lock());
-        n_cache = store->cache().cache().size();
-        n_maxsize = store->cache().max_size();
-    }
+    std::scoped_lock<std::recursive_mutex> l_(socle::sobjectDB::getlock());
 
-    nlohmann::json ret = { { "cache_size", n_cache }, { "max_size",  n_maxsize } };
-    return ret;
-}
+    nlohmann::json ret;
 
-static nlohmann::json json_ssl_cache_print(struct MHD_Connection * connection) {
+    bool flag_active_only = connection_param_int(connection, "active", 0) > 0;
+    bool flag_tlsinfo = connection_param_int(connection, "tlsinfo", 0) > 0;
+    int verbosity = connection_param_int(connection, "verbosity", iINF);
 
 
-    SSLFactory *store = SSLCom::factory();
-    bool print_refs = false;
+    for (auto const &it: socle::sobjectDB::db()) {
 
-    int verbosity = connection_param_int(connection, "verbosity", 6);
-    nlohmann::json toret;
+        socle::sobject *ptr = it.first;
+        std::string prefix;
+        std::string suffix;
 
-    {
-        std::lock_guard<std::recursive_mutex> l_(store->lock());
 
-        for (auto const& x: store->cache().cache()) {
-            std::string fqdn = x.first;
-            SSLFactory::X509_PAIR const* ptr = x.second->ptr()->keypair();
+        if (!ptr) continue;
 
-            nlohmann::json detail;
+        std::string what = ptr->c_type();
+        if (what == "MitmProxy" || what == "SocksProxy") {
+            auto* proxy = dynamic_cast<MitmProxy*>(ptr);
+            if(proxy) {
+                if(flag_active_only) {
+                    if(proxy->stats().mtr_up.get() == 0L and proxy->stats().mtr_down.get() == 0L)
+                        continue;
+                }
+                auto proxy_detail = jsonize::from(proxy, verbosity);
 
-            auto name_vec = string_split(fqdn, '+');
-            detail["subject"] = name_vec[0];
-            detail["names"] = name_vec;
+                if(flag_tlsinfo) {
+                    nlohmann::json left;
+                    nlohmann::json right;
 
-            if(print_refs) {
-                int counter = x.second->count();
-                int age = x.second->age();
+                    if(proxy->first_left()) {
+                        left = jsonize::from(proxy->first_left()->com(), verbosity);
+                    }
+                    if(proxy->first_right()) {
+                        right = jsonize::from(proxy->first_right()->com(), verbosity);
+                    }
 
-                detail["usage"] = {
-                        "accessed",  counter,
-                        "age", age
-                    };
+                    proxy_detail["tlsinfo"] = { { "left", left },
+                                                { "right", right }
+                                              };
+                }
+                ret.push_back(proxy_detail);
             }
-
-            detail[fqdn] =  jsonize::from(ptr->second, verbosity);
-            toret.push_back(detail);
         }
     }
 
-    if(toret.empty()) return nlohmann::json::array();
-    return toret;
+    if(ret.empty()) return nlohmann::json::array();
+
+    return ret;
 }
-
-

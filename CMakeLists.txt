@@ -122,45 +122,52 @@ configure_file(
 add_executable(smithproxy
 
         src/main.cpp
+        src/smithlog.cpp
+        src/cfgapi.cpp
+        src/staticcontent.cpp
+
         src/proxy/mitmhost.cpp
         src/proxy/mitmproxy.cpp
         src/proxy/mitmcom.hpp
         src/proxy/mitmcom.cpp
-        src/cfgapi.cpp
-        src/policy/policy.cpp
-        src/service/daemon.cpp
+        src/proxy/filterproxy.cpp
+        src/proxy/ocspinvoker.cpp
+        src/proxy/ocspinvoker.hpp
+
         src/proxy/socks5/sockshostcx.cpp
         src/proxy/socks5/socksproxy.cpp
-        src/shm/shmauth.cpp
-        src/inspect/dns.cpp
-        src/policy/inspectors.cpp
-        src/policy/addrobj.cpp
-        src/service/netservice.cpp
-        src/staticcontent.cpp
-        src/policy/authfactory6.cpp
-        src/smithlog.cpp
-        src/proxy/filterproxy.cpp
-        src/service/dnsupd/smithdnsupd.cpp
-        src/policy/loadb.cpp
-        src/service/core/smithproxy.hpp
-        src/service/core/smithproxy.cpp
 
-        src/ext/libcidr/cidr.cpp
-        src/ext/nltemplate/nltemplate.cpp
-        src/ext/libcli/libcli.cpp
-
+        src/policy/policy.cpp
         src/policy/authfactory.hpp
         src/policy/authfactory4.cpp
+        src/policy/inspectors.cpp
+        src/policy/addrobj.cpp
+        src/policy/authfactory6.cpp
+        src/policy/loadb.cpp
+        src/policy/profiles.hpp
+        src/policy/cfgelement.hpp
+
         src/inspect/sxsignature.hpp
         src/inspect/pyinspector.hpp
         src/inspect/sigfactory.hpp
         src/inspect/engine.hpp
         src/inspect/http1engine.hpp
         src/inspect/http1engine.cpp
-        src/async/asyncsocket.hpp
-        src/async/asyncdns.hpp
         src/inspect/dnsinspector.hpp
         src/inspect/dnsinspector.cpp
+        src/inspect/dns.cpp
+
+        src/shm/shmauth.cpp
+
+
+        src/async/asyncsocket.hpp
+        src/async/asyncdns.hpp
+
+        src/service/daemon.cpp
+        src/service/netservice.cpp
+        src/service/dnsupd/smithdnsupd.cpp
+        src/service/core/smithproxy.hpp
+        src/service/core/smithproxy.cpp
         src/service/cmd/cmdserver.cpp
         src/service/cmd/clihelp.hpp
         src/service/cmd/clihelp.cpp
@@ -172,20 +179,23 @@ add_executable(smithproxy
         src/service/cmd/diag/diag_cmds.cpp
         src/service/core/service.cpp
         src/service/core/service.hpp
-        src/proxy/ocspinvoker.cpp
-        src/proxy/ocspinvoker.hpp
-        src/policy/profiles.hpp
-        src/policy/cfgelement.hpp
+        src/service/httpd/httpd.cpp
+        src/service/httpd/jsonize.cpp
+
         src/utils/fs.hpp
         src/utils/fs.cpp
         src/utils/str.hpp
         src/utils/str.cpp
         src/utils/mem.hpp
         src/utils/mem.cpp
+
         socle/common/mempool/malloc_allocator.hpp
 
+        src/ext/libcidr/cidr.cpp
+        src/ext/nltemplate/nltemplate.cpp
+        src/ext/libcli/libcli.cpp
         src/ext/lmhpp/include/lmhttpd.hpp
-        src/service/httpd/httpd.cpp)
+        )
 
 
 add_executable(smithd

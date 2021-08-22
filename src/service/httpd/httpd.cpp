@@ -5,6 +5,7 @@
 #include <service/httpd/httpd.hpp>
 
 #include <service/httpd/diag/diag_ssl.hpp>
+#include <service/httpd/diag/daig_proxy.hpp>
 
 std::thread* create_httpd_thread(unsigned short port) {
     return new std::thread([port]() {
@@ -12,6 +13,8 @@ std::thread* create_httpd_thread(unsigned short port) {
 
         lmh::WebServer server(port);
         server.opt_bind_loopback = true;
+
+        server.addController(&status_ping);
 
         HttpService_JsonResponder diag_ssl_cache_stats(
                 "GET",
@@ -22,6 +25,8 @@ std::thread* create_httpd_thread(unsigned short port) {
                     return ret;
                     }
                 );
+        server.addController(&diag_ssl_cache_stats);
+
 
         HttpService_JsonResponder diag_ssl_cache_print(
                 "GET",
@@ -32,11 +37,19 @@ std::thread* create_httpd_thread(unsigned short port) {
                     return ret;
                 }
                 );
-
-
-        server.addController(&status_ping);
-        server.addController(&diag_ssl_cache_stats);
         server.addController(&diag_ssl_cache_print);
+
+        HttpService_JsonResponder diag_proxy_session_list(
+                "GET",
+                "/api/diag/proxy/session/list",
+                [](MHD_Connection* conn) -> HttpService_JsonResponseParams {
+                    HttpService_JsonResponseParams ret;
+                    ret.response = json_proxy_session_list(conn);
+                    return ret;
+                }
+        );
+        server.addController(&diag_proxy_session_list);
+
 
         server.handler_should_terminate = []() -> bool {
                 return SmithProxy::instance().terminate_flag;

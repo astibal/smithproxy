@@ -37,67 +37,21 @@
     which carries forward this exception.
 */
 
+
+#ifndef JSONIZE_HPP_
+#define JSONIZE_HPP_
+
+#include <openssl/x509.h>
 #include <ext/json/json.hpp>
 
-#include <ext/lmhpp/include/lmhttpd.hpp>
-#include <service/httpd/util.hpp>
-#include <service/httpd/jsonize.hpp>
+#include <proxy/mitmproxy.hpp>
 
+namespace jsonize {
 
-static nlohmann::json json_ssl_cache_stats(struct MHD_Connection * connection) {
-    SSLFactory* store = SSLCom::factory();
-
-    int n_cache = 0;
-    int n_maxsize = 0;
-    {
-        std::lock_guard<std::recursive_mutex> l(store->lock());
-        n_cache = store->cache().cache().size();
-        n_maxsize = store->cache().max_size();
-    }
-
-    nlohmann::json ret = { { "cache_size", n_cache }, { "max_size",  n_maxsize } };
-    return ret;
+    nlohmann::json from(X509 *x, int verbosity);
+    nlohmann::json from(baseCom *xcom, int verbosity);
+    nlohmann::json from(MitmProxy* what, int verbosity);
+    nlohmann::json from(MitmHostCX* what, int verbosity);
 }
 
-static nlohmann::json json_ssl_cache_print(struct MHD_Connection * connection) {
-
-
-    SSLFactory *store = SSLCom::factory();
-    bool print_refs = false;
-
-    int verbosity = connection_param_int(connection, "verbosity", 6);
-    nlohmann::json toret;
-
-    {
-        std::lock_guard<std::recursive_mutex> l_(store->lock());
-
-        for (auto const& x: store->cache().cache()) {
-            std::string fqdn = x.first;
-            SSLFactory::X509_PAIR const* ptr = x.second->ptr()->keypair();
-
-            nlohmann::json detail;
-
-            auto name_vec = string_split(fqdn, '+');
-            detail["subject"] = name_vec[0];
-            detail["names"] = name_vec;
-
-            if(print_refs) {
-                int counter = x.second->count();
-                int age = x.second->age();
-
-                detail["usage"] = {
-                        "accessed",  counter,
-                        "age", age
-                    };
-            }
-
-            detail[fqdn] =  jsonize::from(ptr->second, verbosity);
-            toret.push_back(detail);
-        }
-    }
-
-    if(toret.empty()) return nlohmann::json::array();
-    return toret;
-}
-
-
+#endif
