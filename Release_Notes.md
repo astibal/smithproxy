@@ -30,10 +30,15 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 ## Roadmap for future versions
 
 * [ ] memory pool ONLY execution
-* [ ] json/api interface
 
-## Roadmap to 0.9.22
-*tba - in progress*
+
+## What's new in upcoming 0.9.22
+* [x] json/api interface
+
+* JSON API: proxy connections detail
+* JSON API: certificate cache list/stats
+* JSON API: smithproxy status
+
 
 ##  What's new in 0.9.21
 This is a hotfix release:
