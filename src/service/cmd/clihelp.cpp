@@ -41,8 +41,8 @@
 
 #include <ext/libcli/libcli.h>
 
-#include <cmd/clihelp.hpp>
-#include <cmd/cligen.hpp>
+#include <service/cmd/clihelp.hpp>
+#include <service/cmd/cligen.hpp>
 #include <common/log/logan.hpp>
 #include <cfgapi.hpp>
 #include <utils/str.hpp>

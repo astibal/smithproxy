@@ -45,8 +45,8 @@
 #include <vector>
 #include <string>
 
-#include <cmd/cmdserver.hpp>
-#include <cmd/clistate.hpp>
+#include <service/cmd/cmdserver.hpp>
+#include <service/cmd/clistate.hpp>
 
 #define _debug   if(CliState::get().cli_debug_flag) cli_print
 

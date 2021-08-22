@@ -42,7 +42,7 @@
 
 #include <ext/libcli/libcli.h>
 
-#include <cmd/clihelp.hpp>
+#include <service/cmd/clihelp.hpp>
 
 
 void debug_cli_params(struct cli_def *cli, const char *command, char *argv[], int argc);

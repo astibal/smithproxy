@@ -131,7 +131,6 @@ add_executable(smithproxy
         src/service/daemon.cpp
         src/proxy/socks5/sockshostcx.cpp
         src/proxy/socks5/socksproxy.cpp
-        src/cmd/cmdserver.cpp
         src/shm/shmauth.cpp
         src/inspect/dns.cpp
         src/policy/inspectors.cpp
@@ -162,16 +161,17 @@ add_executable(smithproxy
         src/async/asyncdns.hpp
         src/inspect/dnsinspector.hpp
         src/inspect/dnsinspector.cpp
-        src/cmd/clihelp.hpp
-        src/cmd/clihelp.cpp
-        src/cmd/cligen.hpp
-        src/cmd/cligen.cpp
-        src/cmd/clistate.hpp
-        src/cmd/clistate.cpp
+        src/service/cmd/cmdserver.cpp
+        src/service/cmd/clihelp.hpp
+        src/service/cmd/clihelp.cpp
+        src/service/cmd/cligen.hpp
+        src/service/cmd/cligen.cpp
+        src/service/cmd/clistate.hpp
+        src/service/cmd/clistate.cpp
+        src/service/cmd/diag/diag_cmds.hpp
+        src/service/cmd/diag/diag_cmds.cpp
         src/service/core/service.cpp
         src/service/core/service.hpp
-        src/cmd/diag/diag_cmds.hpp
-        src/cmd/diag/diag_cmds.cpp
         src/proxy/ocspinvoker.cpp
         src/proxy/ocspinvoker.hpp
         src/policy/profiles.hpp

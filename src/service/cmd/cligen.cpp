@@ -38,8 +38,8 @@
 */
 
 #include <ext/libcli/libcli.h>
-#include <cmd/cligen.hpp>
-#include <cmd/clihelp.hpp>
+#include <service/cmd/cligen.hpp>
+#include <service/cmd/clihelp.hpp>
 #include <cfgapi.hpp>
 
 #include <utils/str.hpp>

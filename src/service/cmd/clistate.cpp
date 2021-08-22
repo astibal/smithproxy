@@ -37,8 +37,8 @@
     which carries forward this exception.
 */
 
-#include <cmd/clistate.hpp>
-#include <cmd/cligen.hpp>
+#include <service/cmd/clistate.hpp>
+#include <service/cmd/cligen.hpp>
 
 
 using namespace libcli;
