@@ -65,7 +65,7 @@ static nlohmann::json json_ssl_cache_print(struct MHD_Connection * connection) {
     SSLFactory *store = SSLCom::factory();
     bool print_refs = false;
 
-    int verbosity = connection_param_int(connection, "verbosity", 6);
+    int verbosity = connection_ll_param(connection, "verbosity", 6);
     nlohmann::json toret;
 
     {

@@ -188,6 +188,8 @@ namespace jsonize {
 
         }
 
+        ret["oid"] = what->oid();
+
         ret["left"] = left;
         ret["right"] = right;
 

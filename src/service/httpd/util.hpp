@@ -42,14 +42,22 @@
 #define HTTPD_UTIL_HPP_
 
 
-static int connection_param_int(MHD_Connection* connection, const char* param, int defval) {
+unsigned long long connection_ull_param(MHD_Connection* connection, const char* param, unsigned long long defval) {
     const char* param_val_str = MHD_lookup_connection_value(connection, MHD_GET_ARGUMENT_KIND, param);
-    int param_val = defval;
-    if (param_val_str) {
-        param_val = safe_val(param_val_str);
+    if(not param_val_str) {
+        return defval;
     }
 
-    return param_val;
+    return safe_ull_value(param_val_str).value_or(defval);
+}
+
+long long connection_ll_param(MHD_Connection* connection, const char* param, long long defval) {
+    const char* param_val_str = MHD_lookup_connection_value(connection, MHD_GET_ARGUMENT_KIND, param);
+    if(not param_val_str) {
+        return defval;
+    }
+
+    return safe_ll_value(param_val_str).value_or(defval);
 }
 
 

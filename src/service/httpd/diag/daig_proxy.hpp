@@ -50,51 +50,78 @@ static nlohmann::json json_proxy_session_list(struct MHD_Connection * connection
 
     nlohmann::json ret;
 
-    bool flag_active_only = connection_param_int(connection, "active", 0) > 0;
-    bool flag_tlsinfo = connection_param_int(connection, "tlsinfo", 0) > 0;
-    int verbosity = connection_param_int(connection, "verbosity", iINF);
+    bool flag_active_only = connection_ll_param(connection, "active", 0) > 0;
+    bool flag_tlsinfo = connection_ll_param(connection, "tlsinfo", 0) > 0;
+    int verbosity = connection_ll_param(connection, "verbosity", iINF);
 
 
-    for (auto const &it: socle::sobjectDB::db()) {
+    auto json_single_proxy = [&](MitmProxy* proxy) -> std::optional<nlohmann::json> {
+        if(flag_active_only) {
+            if(proxy->stats().mtr_up.get() == 0L and proxy->stats().mtr_down.get() == 0L)
+                return std::nullopt;
+        }
+        auto proxy_detail = jsonize::from(proxy, verbosity);
 
-        socle::sobject *ptr = it.first;
-        std::string prefix;
-        std::string suffix;
+        if(flag_tlsinfo) {
+            nlohmann::json left;
+            nlohmann::json right;
+
+            if(proxy->first_left()) {
+                left = jsonize::from(proxy->first_left()->com(), verbosity);
+            }
+            if(proxy->first_right()) {
+                right = jsonize::from(proxy->first_right()->com(), verbosity);
+            }
+
+            proxy_detail["tlsinfo"] = { { "left", left },
+                                        { "right", right }
+            };
+        }
+        return proxy_detail;
+    };
 
 
-        if (!ptr) continue;
+    auto oid = connection_ull_param(connection, "oid", 0ULL);
+    if(oid != 0ULL) {
+        auto it = socle::sobjectDB::oid_db().find(oid);
+        if(it != socle::sobjectDB::oid_db().end()) {
 
-        std::string what = ptr->c_type();
-        if (what == "MitmProxy" || what == "SocksProxy") {
-            auto* proxy = dynamic_cast<MitmProxy*>(ptr);
-            if(proxy) {
-                if(flag_active_only) {
-                    if(proxy->stats().mtr_up.get() == 0L and proxy->stats().mtr_down.get() == 0L)
-                        continue;
+            std::string what = it->second->c_type();
+            if (what == "MitmProxy" || what == "SocksProxy") {
+                auto *proxy = dynamic_cast<MitmProxy *>(it->second.get());
+                if (proxy) {
+                    auto single_ret = json_single_proxy(proxy);
+                    if (single_ret.has_value()) ret.push_back(single_ret.value());
+                    return ret;
                 }
-                auto proxy_detail = jsonize::from(proxy, verbosity);
-
-                if(flag_tlsinfo) {
-                    nlohmann::json left;
-                    nlohmann::json right;
-
-                    if(proxy->first_left()) {
-                        left = jsonize::from(proxy->first_left()->com(), verbosity);
-                    }
-                    if(proxy->first_right()) {
-                        right = jsonize::from(proxy->first_right()->com(), verbosity);
-                    }
-
-                    proxy_detail["tlsinfo"] = { { "left", left },
-                                                { "right", right }
-                                              };
-                }
-                ret.push_back(proxy_detail);
             }
         }
+        return nlohmann::json::array();
+    } else {
+
+        for (auto const &it: socle::sobjectDB::db()) {
+
+            socle::sobject *ptr = it.first;
+            std::string prefix;
+            std::string suffix;
+
+
+            if (!ptr) continue;
+
+            std::string what = ptr->c_type();
+            if (what == "MitmProxy" || what == "SocksProxy") {
+                auto *proxy = dynamic_cast<MitmProxy *>(ptr);
+                if (proxy) {
+                    auto single_ret = json_single_proxy(proxy);
+                    if (single_ret.has_value()) {
+                        ret.push_back(single_ret.value());
+                    }
+                }
+            }
+        }
+
+        if (ret.empty()) return nlohmann::json::array();
+
+        return ret;
     }
-
-    if(ret.empty()) return nlohmann::json::array();
-
-    return ret;
 }
