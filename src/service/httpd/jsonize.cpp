@@ -74,11 +74,11 @@ namespace jsonize {
         nlohmann::json ret;
 
         auto *com = dynamic_cast<SSLCom *>(xcom);
-        if (com) {
+        if (com and !com->opt_bypass) {
             auto ssl = com->get_SSL();
-            if (ssl) {
-                auto *session = SSL_get_session(ssl);
+            SSL_SESSION* session = ssl != nullptr ? SSL_get_session(ssl) : nullptr;
 
+            if (ssl and session) {
                 auto *cipher_str = SSL_CIPHER_get_name(SSL_SESSION_get0_cipher(session));
                 int has_ticket = SSL_SESSION_has_ticket(session);
                 unsigned long lifetime_hint = -1;
@@ -188,6 +188,14 @@ namespace jsonize {
 
         }
 
+        if(left.empty()) {
+            left.emplace_back(jsonize::from((MitmHostCX*)nullptr, verbosity));
+        }
+        if(right.empty()) {
+            right.emplace_back(jsonize::from((MitmHostCX*)nullptr, verbosity));
+        }
+
+
         ret["oid"] = what->oid();
 
         ret["left"] = left;
@@ -234,9 +242,21 @@ namespace jsonize {
     nlohmann::json from(MitmHostCX* what, int verbosity) {
         nlohmann::json ret;
 
-        ret["host"] = what->host();
-        ret["port"] = what->port();
-        ret["com"] = what->com() ? what->com()->shortname() : "";
+        if(what) {
+            auto h = what->host().empty() ? "0.0.0.0" : what->host();
+            auto p = what->port().empty() ? "0" : what->port();
+            auto c = what->com() ? what->com()->shortname() : "none";
+            if(c.empty()) c = "unknown";
+
+            ret["host"] = h;
+            ret["port"] = p;
+            ret["com"] = c;
+        }
+        else {
+            ret["host"] = "0.0.0.0";
+            ret["port"] = "0";
+            ret["com"] = "none";
+        }
 
         return ret;
     }

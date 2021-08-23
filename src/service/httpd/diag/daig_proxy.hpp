@@ -60,6 +60,11 @@ static nlohmann::json json_proxy_session_list(struct MHD_Connection * connection
             if(proxy->stats().mtr_up.get() == 0L and proxy->stats().mtr_down.get() == 0L)
                 return std::nullopt;
         }
+
+        if(proxy->lsize() == 0 or proxy->rsize() == 0) {
+            return std::nullopt;
+        }
+
         auto proxy_detail = jsonize::from(proxy, verbosity);
 
         if(flag_tlsinfo) {
@@ -99,26 +104,40 @@ static nlohmann::json json_proxy_session_list(struct MHD_Connection * connection
         return nlohmann::json::array();
     } else {
 
-        for (auto const &it: socle::sobjectDB::db()) {
+        auto& sx = SmithProxy::instance();
 
-            socle::sobject *ptr = it.first;
-            std::string prefix;
-            std::string suffix;
+        auto list_worker = [&json_single_proxy, &ret](const char* title, auto& listener) {
+            for (auto acc: listener) {
+                for(auto wrk: acc->tasks()) {
 
+                    {
+                        auto l_ = std::scoped_lock(wrk.second->proxy_lock());
 
-            if (!ptr) continue;
-
-            std::string what = ptr->c_type();
-            if (what == "MitmProxy" || what == "SocksProxy") {
-                auto *proxy = dynamic_cast<MitmProxy *>(ptr);
-                if (proxy) {
-                    auto single_ret = json_single_proxy(proxy);
-                    if (single_ret.has_value()) {
-                        ret.push_back(single_ret.value());
+                        for(auto* p: wrk.second->proxies()) {
+                            if(auto* proxy = dynamic_cast<MitmProxy*>(p); p != nullptr) {
+                                auto single_ret = json_single_proxy(proxy);
+                                if (single_ret.has_value()) {
+                                    single_ret.value()["origin"] = title;
+                                    ret.push_back(single_ret.value());
+                                }
+                            }
+                        }
                     }
                 }
             }
-        }
+        };
+
+        list_worker("plain acceptor", sx.plain_proxies);
+        list_worker("tls acceptor", sx.ssl_proxies);
+
+        list_worker("udp receiver", sx.udp_proxies);
+        list_worker("dtls receiver", sx.dtls_proxies);
+
+        list_worker("socks acceptor", sx.socks_proxies);
+
+        list_worker("plain redirect acceptor", sx.redir_plain_proxies);
+        list_worker("dns redirect receiver", sx.redir_udp_proxies);
+        list_worker("tls redirect acceptor", sx.redir_ssl_proxies);
 
         if (ret.empty()) return nlohmann::json::array();
 
