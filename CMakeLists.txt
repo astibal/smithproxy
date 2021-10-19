@@ -133,6 +133,8 @@ add_executable(smithproxy
         src/proxy/filterproxy.cpp
         src/proxy/ocspinvoker.cpp
         src/proxy/ocspinvoker.hpp
+        src/proxy/proxymaker.hpp
+        src/proxy/proxymaker.cpp
 
         src/proxy/socks5/sockshostcx.cpp
         src/proxy/socks5/socksproxy.cpp

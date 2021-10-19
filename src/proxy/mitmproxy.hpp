@@ -140,7 +140,9 @@ public:
     inline void identity_resolved(bool b);
     shm_logon_info_base* identity() { return identity_; }
     inline void identity(shm_logon_info_base* i) { delete identity_; if(i != nullptr) { identity_ = i->clone(); } }
-    bool resolve_identity(baseHostCX*,bool);
+
+    bool resolve_identity(bool insert_guest = false) { return resolve_identity(first_left(), insert_guest); }
+    bool resolve_identity(baseHostCX* custom_cx, bool insert_guest);
     bool update_auth_ipX_map(baseHostCX*);
     bool apply_id_policies(baseHostCX* cx);
    

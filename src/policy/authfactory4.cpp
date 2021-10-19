@@ -107,6 +107,35 @@ int AuthFactory::shm_ip4_table_refresh()  {
     return 0;
 }
 
+
+std::optional<std::vector<std::string>> AuthFactory::ip4_get_groups(std::string const& host) {
+    std::scoped_lock<std::recursive_mutex> l_(get_ip4_lock());
+
+    auto ip = get_ip4_map().find(host);
+    if (ip != get_ip4_map().end()) {
+        auto* id_ptr = &(*ip).second;
+        if(id_ptr)
+            return id_ptr->groups_vec;
+    }
+
+    return std::nullopt;
+}
+
+std::optional<std::vector<std::string>> AuthFactory::ip6_get_groups(std::string const& host) {
+    std::scoped_lock<std::recursive_mutex> l_(get_ip6_lock());
+
+    auto ip = get_ip6_map().find(host);
+    if (ip != get_ip6_map().end()) {
+        auto* id_ptr = &(*ip).second;
+        if(id_ptr)
+            return id_ptr->groups_vec;
+    }
+
+    return std::nullopt;
+}
+
+
+
 int AuthFactory::shm_token_table_refresh()  {
 
     {

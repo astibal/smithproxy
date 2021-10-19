@@ -56,17 +56,7 @@ class AuthFactory {
     mutable std::recursive_mutex ip6_lock_;
 
 
-    AuthFactory () : log(get_log()) {
-        global_idle_timeout = 600;
-        portal_address = "192.168.0.1";
-        // cfgapi_identity_portal_address6;
-        portal_port_http = "8008";
-        portal_port_https = "8043";
-
-        token_timeout = 20; // token expires _from_cache_ after this timeout (in seconds).
-    };
-
-
+    AuthFactory () : log(get_log()) {};
 
 public:
 
@@ -79,12 +69,12 @@ public:
     };
 
     // publicly accessible config values
-    unsigned int token_timeout; // token expires _from_cache_ after this timeout (in seconds).
-    int global_idle_timeout;
-    std::string portal_address;
-    std::string portal_address6;
-    std::string portal_port_http;
-    std::string portal_port_https;
+    unsigned int token_timeout = 20; // token expires _from_cache_ after this timeout (in seconds).
+    int global_idle_timeout = 600;
+    std::string portal_address = "0.0.0.0";
+    std::string portal_address6 = "[::]";
+    std::string portal_port_http = "8008";
+    std::string portal_port_https = "8043";
 
 
     typedef shared_table<shm_logon_token> shared_token_table_t;
@@ -120,7 +110,8 @@ public:
     static token_map_t& get_token_map() { return get().token_map_; };
 
 
-
+    std::optional<std::vector<std::string>> ip4_get_groups(std::string const& host);
+    std::optional<std::vector<std::string>> ip6_get_groups(std::string const& host);
 
     // refresh from shared memory
     int shm_token_table_refresh ();

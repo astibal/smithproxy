@@ -60,6 +60,7 @@
 #define POLICY_NAT_AUTO     1
 #define POLICY_NAT_POOL     2
 
+#define POLICY_IMPLICIT_PASS 65500;
 
 class PolicyRule : public ProfileList , public CfgElement, public socle::sobject {
 

@@ -43,6 +43,8 @@
 #include <proxy/mitmproxy.hpp>
 #include <proxy/mitmhost.hpp>
 #include <proxy/filterproxy.hpp>
+#include <proxy/proxymaker.hpp>
+
 #include <log/logger.hpp>
 #include <cfgapi.hpp>
 
@@ -332,7 +334,9 @@ bool MitmProxy::apply_id_policies(baseHostCX* cx) {
     return false;
 }
 
-bool MitmProxy::resolve_identity(baseHostCX* cx,bool insert_guest=false) {
+bool MitmProxy::resolve_identity(baseHostCX* cx, bool insert_guest = false) {
+
+    if(not cx) return false;
     
     int af = AF_INET;
     if(cx->com()) {
@@ -1891,256 +1895,75 @@ baseHostCX* MitmMasterProxy::new_cx(int s) {
     r->waiting_for_peercom(true);
     return r; 
 }
+
 void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
     // ok, we just accepted socket, created context for it (using new_cx) and we probably need ... 
     // to create child proxy and attach this cx to it.
 
     if(! just_accepted_cx->com()->nonlocal_dst_resolved()) {
-        _err("Was not possible to resolve original destination!");
+        _err("on_left_new: cannot resolve socket destination");
         just_accepted_cx->shutdown();
         delete just_accepted_cx;
-    } 
-    else {
-        std::string h;
-        std::string p;
-        just_accepted_cx->name();
-        just_accepted_cx->com()->resolve_socket_src(just_accepted_cx->socket(),&h,&p);
-
-        auto* new_proxy = new MitmProxy(just_accepted_cx->com()->slave());
-        
-        // let's add this just_accepted_cx into new_proxy
-        if(just_accepted_cx->read_waiting_for_peercom()) {
-            _deb("MitmMasterProxy::on_left_new: ldaadd the new waiting_for_peercom cx");
-            new_proxy->ldaadd(just_accepted_cx);
-        } else{
-            _deb("MitmMasterProxy::on_left_new: ladd the new cx (unpaused)");
-            new_proxy->ladd(just_accepted_cx);
-        }
-
-        // new proxy must monitor accepted socket(s)
-        com()->set_poll_handler(just_accepted_cx->socket(), new_proxy);
-
-        bool matched_vip = false; //did it match virtual IP?
-        
-        std::string target_host = just_accepted_cx->com()->nonlocal_dst_host();
-        std::string orig_target_host;
-        short unsigned int target_port = just_accepted_cx->com()->nonlocal_dst_port();
-        short unsigned int orig_target_port;
-
-        if( target_host == CfgFactory::get()->tenant_magic_ip) {
-            
-            orig_target_host = target_host;
-            orig_target_port = target_port;
-            
-            if(target_port == 65000 || target_port == 143) {
-                // bend broker magic IP
-                target_port = 65000 + CfgFactory::get()->tenant_index;
-            }
-            else if(target_port != 443) {
-                // auth portal https magic IP
-                target_port = std::stoi(AuthFactory::get().portal_port_http);
-            } else {
-                // auth portal plaintext magic IP
-                target_port = std::stoi(AuthFactory::get().portal_port_https);
-            }
-            target_host = "127.0.0.1";
-            
-            _dia("Connection from %s to %s:%d: traffic redirected from magic IP to %s:%d", just_accepted_cx->c_type(),
-                 orig_target_host.c_str(), orig_target_port,
-                 target_host.c_str(), target_port);
-            matched_vip = true;
-        }
-        
-        auto *target_cx = new MitmHostCX(just_accepted_cx->com()->slave(), target_host.c_str(),
-                                            string_format("%d",target_port).c_str()
-                                            );
-        
-        
-        // connect it! - btw ... we don't want to block of course...
-        
-        target_cx->com()->l3_proto(just_accepted_cx->com()->l3_proto());
-        just_accepted_cx->peer(target_cx);
-        target_cx->peer(just_accepted_cx);          
-
-
-        // almost done, just add this target_cx to right side of new proxy
-        new_proxy->radd(target_cx);
-        bool delete_proxy = false;
-        
-        // apply policy and get result
-        int policy_num = CfgFactory::get()->policy_apply(just_accepted_cx, new_proxy);
-
-        // bypass ssl com to VIP
-        if(matched_vip) {
-            auto* scom = dynamic_cast<SSLCom*>(just_accepted_cx->com());
-            if(scom != nullptr) {
-                scom->opt_bypass = true;
-                scom->verify_reset(SSLCom::VRF_OK);
-            }
-            
-            scom = dynamic_cast<SSLCom*>(target_cx->com());
-            if(scom != nullptr) {
-                scom->opt_bypass = true;
-                scom->verify_reset(SSLCom::VRF_OK);
-            }
-            
-        }
-        
-        if(policy_num >= 0) {
-
-            //traffic is allowed
-            
-            MitmHostCX* src_cx;
-            src_cx = dynamic_cast<MitmHostCX*>(just_accepted_cx);
-            if (src_cx != nullptr) {
-                
-                // we know proxy can be properly configured now, both peers are MitmHostCX types
-                
-                // let know CX what policy it matched (it is handly CX will know under some circumstances like upgrade to SSL)
-                src_cx->matched_policy(policy_num);
-                target_cx->matched_policy(policy_num);
-                new_proxy->matched_policy(policy_num);
-
-                // resolve source information - is there an identity info for that IP?
-                if(new_proxy->opt_auth_authenticate && new_proxy->opt_auth_resolve) {
-                    bool res = new_proxy->resolve_identity(src_cx);
-
-                    // reload table and check timeouts each 5 seconds 
-                    time_t now = time(nullptr);
-                    if(now > auth_table_refreshed + 5) {
-                        AuthFactory::get().shm_ip4_table_refresh();
-                        AuthFactory::get().shm_ip6_table_refresh();
-                        auth_table_refreshed = now;
-                        
-                        //one day this can run in separate thread to not slow down session setup rate
-                        AuthFactory::get().ip4_timeout_check();
-                        AuthFactory::get().ip6_timeout_check();
-                    }
-                    
-                    
-                    if(!res) {
-                        if(target_port != 80 && target_port != 443){
-                            delete_proxy = true;
-                            _inf("Dropping non-replaceable connection %s due to unknown source IP", just_accepted_cx->c_type());
-                            goto end;
-                        }
-                    } else {
-                        bool bad_auth = true;
-
-                        // investigate L3 protocol
-                        int af = AF_INET;
-                        if(just_accepted_cx->com()) {
-                            af = just_accepted_cx->com()->l3_proto();
-                        }
-                        std::string str_af = SocketInfo::inet_family_str(af);
-                        
-                        
-                        // use common base pointer, so we can use all IdentityInfo types
-
-                        IdentityInfoBase* id_ptr = nullptr;
-                        bool found = false;
-                        std::vector<std::string> group_vec;
-                        
-                        if(af == AF_INET || af == 0) {
-
-                            std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip4_lock());
-
-                            auto ip = AuthFactory::get_ip4_map().find(just_accepted_cx->host());
-                            if (ip != AuthFactory::get_ip4_map().end()) {
-                                id_ptr = &(*ip).second;
-                                found = true;
-                                if(id_ptr)
-                                    group_vec = id_ptr->groups_vec;
-                            }
-                        }
-                        else if(af == AF_INET6) {
-
-                            std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
-
-                            auto ip = AuthFactory::get_ip6_map().find(just_accepted_cx->host());
-                            if (ip != AuthFactory::get_ip6_map().end()) {
-                                id_ptr = &(*ip).second;
-                                found = true;
-                                if(id_ptr)
-                                    group_vec = id_ptr->groups_vec;
-                            }
-                        }
-                        
-                        if( found ) {
-                            //std::string groups = id_ptr->last_logon_info.groups();
-                            
-                            if(CfgFactory::get()->policy_prof_auth(policy_num) != nullptr) {
-                                for ( auto const& i: CfgFactory::get()->policy_prof_auth(policy_num)->sub_policies) {
-                                    for(auto const& x: group_vec) {
-                                        _deb("Connection identities: ip identity '%s' against policy '%s'", x.c_str(),
-                                             i->element_name().c_str());
-                                        if(x == i->element_name()) {
-                                            _dia("Connection identities: ip identity '%s' matches policy '%s'", x.c_str(),
-                                                 i->element_name().c_str());
-                                            bad_auth = false;
-                                        }
-                                    }
-                                }
-                            }
-
-                            if(bad_auth) {
-                                if(target_port != 80 && target_port != 443) {
-                                    _inf("Dropping non-replaceable connection %s due to non-matching identity", just_accepted_cx->c_type());
-                                }
-                                else {
-                                    _inf("Connection %s with non-matching identity (to be replaced)", just_accepted_cx->c_type());
-                                    // set bad_auth true, because despite authentication failed, it could be replaced (we can let user know 
-                                    // he is not allowed to proceed
-                                    bad_auth = false;
-                                    new_proxy->auth_block_identity = true;
-                                }
-                            }
-                        }
-                        
-                        if(bad_auth) {
-                            delete_proxy = true;
-                            goto end;
-                        }
-                    }
-                }
-                
-                // setup NAT
-                if(CfgFactory::get()->db_policy_list.at(policy_num)->nat == POLICY_NAT_NONE && ! matched_vip) {
-                    target_cx->com()->nonlocal_src(true);
-                    target_cx->com()->nonlocal_src_host() = h;
-                    target_cx->com()->nonlocal_src_port() = std::stoi(p);               
-                }
-                
-                // finalize connection acceptance by adding new proxy to proxies and connect
-                this->proxies().push_back(new_proxy);
-                
-                //FIXME: this is really ugly!! :) It's here since radd has been called before socket for target_cx was created.
-                int real_socket = target_cx->connect();
-                com()->set_monitor(real_socket);
-                com()->set_poll_handler(real_socket,new_proxy);
-                
-            } else {
-                delete_proxy = true;
-                _not("MitmMasterProxy::on_left_new: %s cannot be converted to MitmHostCx", just_accepted_cx->c_type());
-            }
-  
-        } else {
-            
-            // hmm. traffic is denied.
-            delete_proxy = true;
-        }
-        
-        end:
-        
-        //new_proxy->name(new_proxy->to_string(iINF));
-        
-        
-        if(delete_proxy) {
-            _inf("Dropping proxy %s", new_proxy->c_type());
-            delete new_proxy;
-        }        
+        return;
     }
-    
+
+    std::string source_host;
+    std::string source_port;
+
+    if(not just_accepted_cx->com()->resolve_socket_src(just_accepted_cx->socket(), &source_host, &source_port)) {
+        _err("on_left_new: cannot resolve socket source");
+
+        just_accepted_cx->shutdown();
+        delete just_accepted_cx;
+        return;
+    }
+
+
+    std::string target_host = just_accepted_cx->com()->nonlocal_dst_host();
+    unsigned short target_port = just_accepted_cx->com()->nonlocal_dst_port();
+
+
+    bool redirected_magic = false;
+    if(target_host == CfgFactory::get()->tenant_magic_ip) {
+        redirected_magic = true;
+        auto redir = sx::proxymaker::to_magic(target_host, target_port);
+        target_host = redir.first;
+        target_port = redir.second;
+
+        _dia("Connection from %s redirected from magic IP to %s:%d",
+             just_accepted_cx->name().c_str(),
+             target_host.c_str(), target_port);
+    };
+
+
+    auto *target_cx = new MitmHostCX(just_accepted_cx->com()->slave(),
+                             target_host.c_str(),
+                             string_format("%d",target_port).c_str());
+
+    auto* new_proxy = sx::proxymaker::make(just_accepted_cx, target_cx);
+
+    if(not sx::proxymaker::policy(this, new_proxy, redirected_magic)) {
+        delete new_proxy;
+        return;
+    }
+
+    if(not sx::proxymaker::authorize(new_proxy)) {
+        if(not sx::proxymaker::is_replaceable(target_port)) {
+            delete new_proxy;
+            return;
+        }
+    }
+
+    if(not sx::proxymaker::setup_snat(new_proxy, source_host, source_port)) {
+        delete new_proxy;
+        return;
+    }
+
+    if(not sx::proxymaker::connect(this, new_proxy)) {
+        delete new_proxy;
+        return;
+    }
+
     _deb("MitmMasterProxy::on_left_new: finished");
 }
 
