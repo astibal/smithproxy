@@ -37,6 +37,7 @@ It uses our C++17 socket proxying library called [*socle*](https://github.com/as
   * DNS inspection allows FQDN policy objects
   * Policies based on FQDN and 2nd level DNS domain
   * both IPv4 and IPv6 are supported
+  * pcap files can be rotated based on size in MB
 
 ### Tools:
   * built-in tools to help with CA and certificate enrollment needed to run smithproxy
