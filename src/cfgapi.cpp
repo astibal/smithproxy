@@ -259,6 +259,55 @@ std::shared_ptr<ProfileAuth> CfgFactory::lookup_prof_auth (const char *name) {
     return nullptr;
 }
 
+
+std::optional<int> version_compare(std::string const& v1, std::string const& v2) {
+    auto vers1 = string_split(v1, '.');
+    auto vers2 = string_split(v2, '.');
+
+    if(vers1.size() != vers2.size()) return std::nullopt;
+
+    int result;
+
+    int index = 0;
+    for(auto const& cur1: vers1) {
+
+        auto i1 = safe_val(cur1);
+        auto i2 = safe_val(vers2[index]);
+
+        if(i1 < 0 or i2 < 0) return std::nullopt;
+
+        result = i2 - i1;
+        if(result != 0)
+            break;
+
+        index++;
+    }
+
+    return result;
+}
+
+bool CfgFactory::upgrade(std::string const& from) {
+
+    std::cout << "upgrade check: " << from << " -> " << SMITH_VERSION  << std::endl;
+
+    if(version_compare("0.9.23", SMITH_VERSION).value_or(-1) > 0) {
+        return upgrade_to_0_9_23();
+    }
+
+    return false;
+}
+
+bool CfgFactory::upgrade_to_0_9_23 () {
+
+    std::cout << "upgrade script to 0.9.23" << std::endl;
+
+    long long tmp;
+    if(load_if_exists(CfgFactory::cfg_root()["settings"], "write_pcap_single_quota", tmp)) {
+        traflog::PcapLog::single_instance().stat_bytes_quota = tmp / (1024 * 1024);
+    }
+    return true;
+}
+
 bool CfgFactory::upgrade_and_save() {
 
 
@@ -316,13 +365,14 @@ bool CfgFactory::upgrade_and_save() {
 
         if (v1 != SMITH_VERSION) {
             backup(v1);
+            upgrade(v1);
 
             internal["version"] = SMITH_VERSION;
             do_save = true;
         }
     } else {
 
-        // interal section is there, but version is not... hmm.
+        // internal section is there, but version is not... hmm.
 
         auto& v = internal.add("version", Setting::TypeString);
         v = SMITH_VERSION;
@@ -455,7 +505,10 @@ bool CfgFactory::load_settings () {
     load_if_exists(CfgFactory::cfg_root()["settings"], "write_payload_dir", CfgFactory::get()->traflog_dir);
     load_if_exists(CfgFactory::cfg_root()["settings"], "write_payload_file_prefix", CfgFactory::get()->traflog_file_prefix);
     load_if_exists(CfgFactory::cfg_root()["settings"], "write_payload_file_suffix", CfgFactory::get()->traflog_file_suffix);
-    load_if_exists(CfgFactory::cfg_root()["settings"], "write_pcap_single_quota", traflog::PcapLog::single_instance().stat_bytes_quota);
+
+    int quota_megabytes;
+    load_if_exists(CfgFactory::cfg_root()["settings"], "write_pcap_single_quota", quota_megabytes);
+    traflog::PcapLog::single_instance().stat_bytes_quota = quota_megabytes*1024*1024;
 
     return true;
 }
@@ -3310,7 +3363,7 @@ int save_settings(Config& ex) {
     objects.add("write_payload_dir", Setting::TypeString) = CfgFactory::get()->traflog_dir;
     objects.add("write_payload_file_prefix", Setting::TypeString) = CfgFactory::get()->traflog_file_prefix;
     objects.add("write_payload_file_suffix", Setting::TypeString) = CfgFactory::get()->traflog_file_suffix;
-    objects.add("write_pcap_single_quota", Setting::TypeInt64) = traflog::PcapLog::single_instance().stat_bytes_quota;
+    objects.add("write_pcap_single_quota", Setting::TypeInt) = static_cast<int>(traflog::PcapLog::single_instance().stat_bytes_quota/(1024*1024));
 
 
     return 0;

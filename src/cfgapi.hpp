@@ -220,6 +220,8 @@ public:
     bool apply_tenant_config() override;
 
     bool upgrade_and_save();
+    bool upgrade(std::string const& from);
+    bool upgrade_to_0_9_23();
 
     bool load_internal();
     bool load_settings ();
