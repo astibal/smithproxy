@@ -1,0 +1,10 @@
+# log rotating for smithproxy
+
+/var/log/smithproxy* {
+  copytruncate
+  rotate 7
+  daily
+  compress
+  missingok
+  notifempty
+}

@@ -19,6 +19,7 @@ if(UNIX)
     install_if_not_exists(etc/certs/default/cl-key.pem /etc/smithproxy/certs/default)
     install_if_not_exists(etc/certs/default/portal-gen.info /etc/smithproxy/certs/default)
 
+    install_if_not_exists(etc/logrotate.d/smithproxy /etc/logrotate.d)
 
     install(FILES etc/smithproxy.startup.sh DESTINATION bin
             PERMISSIONS
