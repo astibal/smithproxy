@@ -30,15 +30,20 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 ## Roadmap for future versions
 
 * [ ] memory pool ONLY execution
+* [ ] routing - DNAT fixed, SNI-based, load-balanced
 
 
-## What's new in upcoming 0.9.22
-* [x] json/api interface
+## What's new in 0.9.23
+* **CHANGE:** pcap quota now in megabytes (values will be converted automatically on upgrade)
+* **CHANGE:** new dependency: libmicrohttpd
+* added a limited json/api interface
+ 
+  * JSON API: proxy connections detail
+  * JSON API: certificate cache list/stats
+  * JSON API: smithproxy status
 
-* JSON API: proxy connections detail
-* JSON API: certificate cache list/stats
-* JSON API: smithproxy status
-
+* fix crash on transparent source IP detection
+* fix crash in sx_regencerts tool
 
 ##  What's new in 0.9.21
 This is a hotfix release:
