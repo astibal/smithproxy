@@ -335,6 +335,8 @@ bool load_config(std::string& config_f, bool reload) {
                 this_daemon->set_crashlog(crlog.c_str());
 
                 auto *o = new std::ofstream(log_target.c_str(), std::ios::app);
+                chmod(log_target.c_str(), 0600);
+
                 Log::get()->targets(log_target, o);
                 Log::get()->dup2_cout(false);
                 Log::get()->level(cfg_log_level);

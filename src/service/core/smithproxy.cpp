@@ -741,6 +741,8 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
                     this_daemon->set_crashlog(crlog.c_str());
 
                     auto* o = new std::ofstream(CfgFactory::get()->log_file.c_str(),std::ios::app);
+                    chmod(CfgFactory::get()->log_file.c_str(), 0600);
+
                     Log::get()->targets(CfgFactory::get()->log_file, o);
                     Log::get()->dup2_cout(false);
                     Log::get()->level(CfgFactory::get()->internal_init_level);
@@ -764,6 +766,8 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
                                                                      CfgFactory::get()->tenant_name.c_str());
 
                     auto* o = new std::ofstream(CfgFactory::get()->sslkeylog_file.c_str(),std::ios::app);
+                    chmod(CfgFactory::get()->sslkeylog_file.c_str(), 0600);
+
                     Log::get()->targets(CfgFactory::get()->sslkeylog_file, o);
                     Log::get()->dup2_cout(false);
                     Log::get()->level(CfgFactory::get()->internal_init_level);

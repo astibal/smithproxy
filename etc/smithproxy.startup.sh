@@ -92,8 +92,17 @@ tenant_index="0"
 tenant_range="0.0.0.0/0"
 tenant_range6="::/0"
 
+
+LOGFILE='/var/log/smithproxy.startup.log'
+
+
+function prepare_log {
+  touch ${LOGFILE}
+  chmod 600 ${LOGFILE}
+}
+
 function logit {
-    echo "`date -R`: $1" >> /var/log/smithproxy.startup.log
+    echo "`date -R`: $1" >> ${LOGFILE}
     echo $1
 }
 
@@ -522,6 +531,7 @@ function setup_redirect {
 }
 
 
+prepare_log
 
 tenant_apply $1 $2
 
@@ -533,8 +543,6 @@ tenant_apply $1 $2
 if [[ -f /etc/smithproxy/smithproxy.startup.cfg ]]; then
  . /etc/smithproxy/smithproxy.startup.cfg $1 "before"
 fi
-
-
 
 case "$1" in
 

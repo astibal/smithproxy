@@ -61,7 +61,9 @@ def create_logger(nickname, location):
     hdlr.setFormatter(formatter)
     flog.addHandler(hdlr) 
     flog.setLevel(logging.INFO)
-    
+
+    os.chmod(location, 0o600)
+
     return flog
 
 class Daemon:
