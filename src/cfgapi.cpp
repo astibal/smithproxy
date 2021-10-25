@@ -135,6 +135,9 @@ std::map<std::string, std::shared_ptr<CfgElement>>& CfgFactory::section_db(std::
     else if(section == "auth_profiles" or section == "auth_profiles.[x]") {
         return db_prof_auth;
     }
+    else if(section == "routing" or section == "routing.[x]") {
+        return db_routing;
+    }
     else if(section == "policy" or section == "address_objects.[x]") {
         return db_policy;
     }
@@ -257,6 +260,17 @@ std::shared_ptr<ProfileAuth> CfgFactory::lookup_prof_auth (const char *name) {
     }    
     
     return nullptr;
+}
+
+std::shared_ptr<ProfileRouting> CfgFactory::lookup_prof_routing(const char * name)  {
+    std::lock_guard<std::recursive_mutex> l(lock_);
+
+    if(db_routing.find(name) != db_routing.end()) {
+        return std::dynamic_pointer_cast<ProfileRouting>(db_routing[name]);
+    }
+
+    return nullptr;
+
 }
 
 
@@ -976,7 +990,8 @@ int CfgFactory::load_db_policy () {
                 std::string name_auth;
                 std::string name_alg_dns;
                 std::string name_script;
-                
+                std::string name_routing;
+
                 if(load_if_exists(cur_object, "detection_profile", name_detection)) {
                     auto prf  = lookup_prof_detection(name_detection.c_str());
                     if(prf) {
@@ -1049,6 +1064,24 @@ int CfgFactory::load_db_policy () {
                     else if(not name_script.empty()){
                         _err("cfgapi_load_policy[#%d]: script profile %s cannot be loaded", i, name_script.c_str());
                         error = true;
+                    }
+                }
+
+                if(load_if_exists(cur_object, "routing", name_routing)) {
+
+                    if(name_routing.empty()) name_routing = "none";
+
+                    if(name_routing != "none") {
+                        auto scr = lookup_prof_routing(name_routing.c_str());
+                        if (scr) {
+                            scr->usage_add(std::weak_ptr(rule));
+                            _dia("cfgapi_load_policy[#%d]: routing profile %s", i, name_routing.c_str());
+                            rule->profile_routing = scr;
+                        } else if (not name_routing.empty()) {
+                            _err("cfgapi_load_policy[#%d]: routing profile %s cannot be loaded", i,
+                                 name_routing.c_str());
+                            error = true;
+                        }
                     }
                 }
 
@@ -2431,6 +2464,160 @@ int CfgFactory::save_address_objects(Config& ex) const {
     return n_saved;
 }
 
+
+int CfgFactory::cleanup_db_routing () {
+    std::lock_guard<std::recursive_mutex> l(lock_);
+
+    int r = db_routing.size();
+    db_routing.clear();
+
+    return r;
+}
+
+int CfgFactory::load_db_routing () {
+
+    std::lock_guard<std::recursive_mutex> l(lock_);
+
+    int loaded = 0;
+
+    _dia("load_db_routing: start");
+
+    if (cfgapi.getRoot().exists("routing")) {
+
+        int num = cfgapi.getRoot()["routing"].getLength();
+        _dia("load_db_routing: found %d objects", num);
+
+        Setting &curr_set = cfgapi.getRoot()["routing"];
+
+        for (int i = 0; i < num; i++) {
+            std::string name;
+
+            Setting& cur_object = curr_set[i];
+
+            if (  ! cur_object.getName() ) {
+                _dia("load_db_routing: unnamed object index %d: not ok", i);
+                continue;
+            }
+
+            name = cur_object.getName();
+            if(name.find("__") == 0) {
+                // don't process reserved names
+                continue;
+            }
+
+            auto new_profile = std::make_shared<ProfileRouting>();
+            new_profile->element_name() = name;
+
+            if(cur_object.exists("dnat_address")) {
+                auto& da = cur_object["dnat_address"];
+                auto da_l = da.getLength();
+                for (int j = 0; j < da_l; ++j) {
+                    const char* address = da[j];
+                    if(db_address.find(address) == db_address.end()) {
+                        _dia("load_db_routing[%d]: unknown dnat address: '%s'", i, address);
+                        continue;
+                    }
+                    new_profile->dnat_addresses.emplace_back(address);
+                }
+            }
+
+
+            if(cur_object.exists("dnat_port")) {
+                auto& dp = cur_object["dnat_port"];
+                auto dp_l = dp.getLength();
+                for (int j = 0; j < dp_l; ++j) {
+                    const char* port = dp[j];
+                    if(db_port.find(port) == db_port.end()) {
+                        _dia("load_db_routing[%d]: unknown dnat port: '%s'", i, port);
+                        continue;
+                    }
+                    new_profile->dnat_ports.emplace_back(port);
+                }
+            }
+
+            std::string lb_meth;
+            if(load_if_exists(cur_object, "dnat_lb_method", lb_meth)) {
+                if(lb_meth == "sticky-l3") {
+                    new_profile->dnat_lb_method = ProfileRouting::lb_method::LB_L3;
+                }
+                else if(lb_meth == "sticky-l4") {
+                    new_profile->dnat_lb_method = ProfileRouting::lb_method::LB_L4;
+                }
+                else {
+                    new_profile->dnat_lb_method = ProfileRouting::lb_method::LB_RR;
+                }
+            }
+
+            db_routing[name] = new_profile;
+            loaded++;
+        }
+
+    }
+
+    return loaded;
+}
+
+int CfgFactory::save_routing(Config& ex) const {
+
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
+
+    Setting& objects = ex.getRoot().add("routing", Setting::TypeGroup);
+
+    int n_saved = 0;
+
+    for (auto const& it: CfgFactory::get()->db_routing) {
+        auto name = it.first;
+        auto obj = std::dynamic_pointer_cast<ProfileRouting>(it.second);
+        if(!obj) continue;
+
+        Setting& routing_item = objects.add(name, Setting::TypeGroup);
+
+        auto& dnat_address = routing_item.add("dnat_address", Setting::TypeArray);
+        for(auto const& dnat_it: obj->dnat_addresses)
+            dnat_address.add(Setting::TypeString) = dnat_it;
+
+        auto& dnat_port = routing_item.add("dnat_port", Setting::TypeArray);
+        for(auto const& dnat_it: obj->dnat_ports)
+            dnat_port.add(Setting::TypeString) = dnat_it;
+
+        auto& lbm = routing_item.add("dnat_lb_method", Setting::TypeString);
+        if(obj->dnat_lb_method == ProfileRouting::lb_method::LB_L3)
+            lbm = "sticky-l3";
+        else if(obj->dnat_lb_method == ProfileRouting::lb_method::LB_L4)
+            lbm = "sticky-l4";
+        else
+            lbm = "round-robin";
+
+        n_saved++;
+    }
+
+    return n_saved;
+}
+
+
+bool CfgFactory::new_routing(Setting& ex, std::string const& name) const {
+
+    try {
+        Setting &item = ex.add(name, Setting::TypeGroup);
+
+        // to be added later
+        // item.add("snat_address", Setting::TypeArray);
+        // item.add("snat_port", Setting::TypeArray) ;
+
+        item.add("dnat_address", Setting::TypeArray);
+        item.add("dnat_port", Setting::TypeArray);
+
+        item.add("dnat_lb_method", Setting::TypeString) = "round-robin";
+    }
+    catch(libconfig::SettingNameException const& e) {
+        _war("cannot add new section %s.%s: %s", ex.c_str(), name.c_str(), e.what());
+        return false;
+    }
+
+    return true;
+
+}
+
 bool CfgFactory::new_port_object(Setting& ex, std::string const& name) const {
 
     try {
@@ -3139,6 +3326,11 @@ int CfgFactory::save_policy(Config& ex) const {
         item.add("action", Setting::TypeString) = pol->action_name;
         item.add("nat", Setting::TypeString) = pol->nat_name;
 
+        if(pol->profile_routing)
+            item.add("routing", Setting::TypeString) = pol->profile_routing->element_name();
+        else
+            item.add("routing", Setting::TypeString) = "none";
+
         if(pol->profile_tls)
             item.add("tls_profile", Setting::TypeString) = pol->profile_tls->element_name();
         if(pol->profile_detection)
@@ -3425,6 +3617,9 @@ int CfgFactory::save_config() const {
 
     n = save_auth_profiles(ex);
     _inf("%d auth_profiles", n);
+
+    n = save_routing(ex);
+    _inf("%d routing", n);
 
     n = save_policy(ex);
     _inf("%d policy", n);

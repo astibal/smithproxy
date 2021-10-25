@@ -140,7 +140,7 @@ void cmd_show_status(struct cli_def* cli) {
 std::stringstream features;
     features << "[ ";
 #ifndef BUILD_RELEASE
-    features << "+DEBUG BUILD";  // slower
+    features << "+DEBUG";  // slower
 #endif
 #ifdef MEMPOOL_ALL
     features << "+MEMPOOL_ALL";  // using everything from pool
@@ -1357,7 +1357,19 @@ bool apply_setting(std::string const& section, std::string const& varname, struc
             CfgFactory::get()->cleanup_db_policy();
             ret = CfgFactory::get()->load_db_policy();
         }
-    } else
+    }
+    else
+    if( 0 == section.find("routing") ) {
+
+        CfgFactory::get()->cleanup_db_routing();
+        ret = CfgFactory::get()->load_db_routing();
+
+        if(ret) {
+            CfgFactory::get()->cleanup_db_policy();
+            ret = CfgFactory::get()->load_db_policy();
+        }
+    }
+    else
     if( 0 == section.find("starttls_signatures") or
         0 == section.find("detection_signatures") ) {
 
@@ -1752,6 +1764,14 @@ int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[]
                 CfgFactory::get()->load_db_prof_auth();
             }
         }
+        else if(section == "routing") {
+
+            removed_internal = ( remove(section, vec_full_args) > 0 );
+            if(removed_internal) {
+                CfgFactory::get()->cleanup_db_routing();
+                CfgFactory::get()->load_db_routing();
+            }
+        }
         else if(section == "policy") {
 
             std::string unmask = section;
@@ -1982,12 +2002,15 @@ int cli_generic_add_cb(struct cli_def *cli, const char *command, char *argv[], i
 
             if(std::get<1>(callback_entry).cap("edit")) {
 
-                auto cli_edit_x = cli_register_command(cli, std::get<1>(callback_entry).cli("edit"), args[0].c_str(),
+                auto cb_edit = std::get<1>(callback_entry).cli("edit");
+                if(cb_edit) {
+                    auto cli_edit_x = cli_register_command(cli, cb_edit, args[0].c_str(),
                                      std::get<1>(callback_entry).cmd("edit"), PRIVILEGE_PRIVILEGED, cli->mode,
                                      " edit new entry");
 
-                // set also leaf node
-                std::get<1>(CliState::get().callbacks(section + "." + args[0])).cli("edit", cli_edit_x);
+                    // set also leaf node
+                    std::get<1>(CliState::get().callbacks(section + "." + args[0])).cli("edit", cli_edit_x);
+                }
             }
 
             if(std::get<1>(callback_entry).cap("move")) {
@@ -2100,6 +2123,16 @@ int cli_generic_add_cb(struct cli_def *cli, const char *command, char *argv[], i
                 created_internal = true;
             }
         }
+        else if(section == "routing") {
+            if (CfgFactory::get()->new_routing(s, args[0])) {
+
+                // policy is a list - it must be cleared before loaded again
+                CfgFactory::get()->load_db_routing();
+                register_cli();
+                created_internal = true;
+            }
+        }
+
 
         if(created_internal) {
             cli_print(cli, " ");
@@ -2264,6 +2297,14 @@ int cli_show_config_detection_sig(struct cli_def *cli, const char *command, char
     return CLI_OK;
 }
 
+int cli_show_config_routing(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+
+    cli_print_section(cli, "routing", -1, 1 * 1024 * 1024);
+    return CLI_OK;
+}
+
+
 void cli_register_static(struct cli_def* cli) {
 
     auto save  = cli_register_command(cli, nullptr, "save", nullptr, PRIVILEGE_PRIVILEGED, MODE_ANY, "save configs");
@@ -2295,6 +2336,7 @@ void cli_register_static(struct cli_def* cli) {
 
                     cli_register_command(cli, show_config, "starttls_signatures", cli_show_config_starttls_sig, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy config section: starttls_signatures");
                     cli_register_command(cli, show_config, "detection_signatures", cli_show_config_detection_sig, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy config section: detection_signatures");
+                    cli_register_command(cli, show_config, "routing", cli_show_config_routing, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy config section: routing");
 
     auto test  = cli_register_command(cli, nullptr, "test", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "various testing commands");
             auto test_dns = cli_register_command(cli, test, "dns", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "dns related testing commands");
@@ -2569,6 +2611,21 @@ void client_thread(int client_socket) {
             .cmd("edit", cli_conf_edit_detection_signatures);
 
 
+    register_callback("routing", MODE_EDIT_ROUTING)
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_routing);
+
+    register_callback("routing.[x]", MODE_EDIT_ROUTING)
+            .cap("set", true)
+            .cmd("set", cli_generic_set_cb)
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_routing)
+            .cap("add", true)
+            .cmd("add", cli_generic_add_cb)
+            .cap("remove", true)
+            .cmd("remove", cli_generic_remove_cb)
+            .cap("toggle", true)
+            .cmd("toggle", cli_generic_toggle_cb);
 
     auto conft_edit = cli_register_command(cli, nullptr, "edit", nullptr, PRIVILEGE_PRIVILEGED, MODE_CONFIG, "configure smithproxy settings");
 
@@ -2577,6 +2634,7 @@ void client_thread(int client_socket) {
                                               "proto_objects", "address_objects", "port_objects" ,
                                               "detection_profiles", "content_profiles", "tls_profiles", "auth_profiles",
                                               "alg_dns_profiles",
+                                              "routing",
                                               "policy",
                                               "starttls_signatures",
                                               "detection_signatures" };

@@ -473,6 +473,13 @@ void CliHelp::init() {
                 return CfgFactory::get()->keys_of_db_prof_alg_dns();
             });
 
+    add("policy.[x].routing", "routing")
+            .may_be_empty(true)
+            .value_filter(is_in_vector([]() -> std::vector<std::string> { return CfgFactory::get()->keys_of_db_routing_or_none(); },"must be in routing, or 'none'"))
+            .suggestion_generator([](std::string const& section, std::string const& variable) -> std::vector<std::string> {
+                return CfgFactory::get()->keys_of_db_routing_or_none();
+            });
+
 
     add("content_profiles.[x].write_format", "smcap, pcap, pcap_single")
             .help_quick("<string>: smcap, pcap, pcap_single")
@@ -480,6 +487,25 @@ void CliHelp::init() {
             .value_filter(is_in_vector([]() -> std::vector<std::string> { return {"smcap", "pcap", "pcap_single"}; },"smcap, pcap or pcap_single"))
             .suggestion_generator([](std::string const& section, std::string const& variable) -> std::vector<std::string> {  return {"smcap", "pcap", "pcap_single"};   });
 
+    add("routing.[x].dnat_address", "change destination address")
+            .may_be_empty(true)
+            .value_filter(is_in_vector([]() { return CfgFactory::get()->keys_of_db_address(); },"must be in address_objects"))
+            .suggestion_generator([](std::string const& section, std::string const& variable) {
+                return CfgFactory::get()->keys_of_db_address();
+            });
+
+    add("routing.[x].dnat_port", "change destination port ")
+            .may_be_empty(true)
+            .value_filter(is_in_vector([]() { return CfgFactory::get()->keys_of_db_port(); },"must be in port_objects"))
+            .suggestion_generator([](std::string const& section, std::string const& variable) {
+                return CfgFactory::get()->keys_of_db_port();
+            });
+    add("routing.[x].dnat_lb_method", "how to distribute connections if more targets")
+            .may_be_empty(true)
+            .value_filter(is_in_vector([]() { std::vector<std::string> r {"round-robin", "sticky-l3", "sticky-l4" }; return r; }, "must be in port_objects"))
+            .suggestion_generator([](std::string const& section, std::string const& variable) {
+                std::vector<std::string> r {"round-robin", "sticky-l3", "sticky-l4" }; return r;
+            });
 }
 
 

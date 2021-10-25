@@ -146,5 +146,9 @@ CONFIG_MODE_DEC(cli_conf_edit_starttls_signatures)
 enum edit_detection_signatures { MODE_EDIT_DETECTION_SIGNATURES=0x27000000, };
 CONFIG_MODE_DEC(cli_conf_edit_detection_signatures)
 
+enum edit_routing { MODE_EDIT_ROUTING=0x28000000, };
+CONFIG_MODE_DEC(cli_conf_edit_routing)
+
+
 
 #endif //SMITHPROXY_CLIGEN_HPP

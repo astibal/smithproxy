@@ -202,6 +202,7 @@ TYPENAME_OVERRIDE("ProfileTls")
 struct ProfileAuth;
 struct ProfileAlgDns;
 struct ProfileScript;
+struct ProfileRouting;
 
 
 struct ProfileList {
@@ -211,6 +212,7 @@ struct ProfileList {
     std::shared_ptr<ProfileAuth> profile_auth = nullptr;
     std::shared_ptr<ProfileAlgDns> profile_alg_dns = nullptr;
     std::shared_ptr<ProfileScript> profile_script = nullptr;
+    std::shared_ptr<ProfileRouting> profile_routing = nullptr;
 };
 struct ProfileSubAuth : public ProfileList, public CfgElement {
 };
@@ -232,6 +234,14 @@ struct ProfileScript : public CfgElement {
 
     using script_t = enum { ST_PYTHON = 0, ST_GOLANG = 1};
     int script_type = -1;
+};
+
+struct ProfileRouting: public CfgElement {
+    std::vector<std::string> dnat_addresses;
+    std::vector<std::string> dnat_ports;
+
+    using dnat_lb_method_t = enum class lb_method { LB_RR, LB_L3, LB_L4 };
+    dnat_lb_method_t dnat_lb_method;
 };
 
 

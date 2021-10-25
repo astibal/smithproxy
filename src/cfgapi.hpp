@@ -160,6 +160,12 @@ public:
         std::vector<std::string> rr; \
         for(auto const& it:  name )  rr.push_back(it.first); \
         return rr; \
+    }                          \
+    std::vector<std::string> keys_of_##name##_or_none() const  {\
+        std::vector<std::string> rr; \
+        for(auto const& it:  name )  rr.push_back(it.first); \
+        rr.push_back("none"); \
+        return rr; \
     }
 
     DB_MAP(std::shared_ptr<CfgElement>, db_address);
@@ -168,6 +174,8 @@ public:
 
     DB_MAP(std::shared_ptr<CfgElement> , db_policy);
     std::vector<std::shared_ptr<PolicyRule>> db_policy_list;
+
+    DB_MAP(std::shared_ptr<CfgElement> , db_routing);
 
     DB_MAP(std::shared_ptr<CfgElement>, db_prof_detection);
     DB_MAP(std::shared_ptr<CfgElement>, db_prof_content);
@@ -216,6 +224,7 @@ public:
     std::shared_ptr<ProfileAuth> lookup_prof_auth (const char *name);
     std::shared_ptr<ProfileAlgDns> lookup_prof_alg_dns (const char *name);
     std::shared_ptr<ProfileScript> lookup_prof_script (const char *name);
+    std::shared_ptr<ProfileRouting> lookup_prof_routing (const char *name);
 
     bool apply_tenant_config() override;
 
@@ -238,6 +247,7 @@ public:
     int  load_db_prof_tls ();
     int  load_db_prof_auth ();
     int  load_db_prof_alg_dns ();
+    int  load_db_routing ();
 
     [[maybe_unused]]
     int  load_db_prof_script ();
@@ -276,6 +286,9 @@ public:
     int save_policy(Config& ex) const;
 
 
+    bool new_routing(Setting& ex, std::string const& name) const;
+    int save_routing(Config& ex) const;
+
     enum class op_move { OP_MOVE_AFTER, OP_MOVE_BEFORE};
     bool move_policy(int what, int where, op_move op);
 
@@ -286,6 +299,7 @@ public:
     int  cleanup_db_port ();
     int  cleanup_db_proto ();
     int  cleanup_db_policy ();
+    int  cleanup_db_routing ();
     int  cleanup_db_prof_content ();
     int  cleanup_db_prof_detection ();
     int  cleanup_db_tls_ca ();

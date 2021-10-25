@@ -67,6 +67,8 @@ CONFIG_MODE_DEF(cli_conf_edit_auth_profiles, MODE_EDIT_AUTH_PROFILES, "auth_prof
 CONFIG_MODE_DEF(cli_conf_edit_starttls_signatures, MODE_EDIT_STARTTLS_SIGNATURES, "starttls_signatures")
 CONFIG_MODE_DEF(cli_conf_edit_detection_signatures, MODE_EDIT_DETECTION_SIGNATURES, "detection_signatures")
 
+CONFIG_MODE_DEF(cli_conf_edit_routing, MODE_EDIT_ROUTING, "routing")
+
 
 std::pair<int, std::string> generate_dynamic_groups(struct cli_def *cli, const char *command, char **argv, int argc) {
     auto words = string_split(command, ' ');
@@ -462,8 +464,6 @@ void cli_generate_commands (cli_def *cli, std::string const &this_section, cli_c
     cli_command* add = nullptr;
     // common remove for all removable sub-items
     cli_command* cli_move = nullptr;
-
-
 
     for( int i = 0 ; i < cfg_this_section.getLength() ; i++ ) {
 
