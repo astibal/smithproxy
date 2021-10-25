@@ -1455,9 +1455,8 @@ int CfgFactory::load_db_prof_tls () {
 
         for( int i = 0; i < num; i++) {
             std::string name;
-            auto* a = new ProfileTls;
-            
             Setting& cur_object = curr_set[i];
+
 
             if (  ! cur_object.getName() ) {
                 _dia("load_db_prof_tls: unnamed object index %d: not ok", i);
@@ -1470,30 +1469,31 @@ int CfgFactory::load_db_prof_tls () {
                 continue;
             }
 
+            auto new_profile = std::make_shared<ProfileTls>();
 
             _dia("load_db_prof_tls: processing '%s'", name.c_str());
             
-            if( load_if_exists(cur_object, "inspect", a->inspect) ) {
+            if( load_if_exists(cur_object, "inspect", new_profile->inspect) ) {
 
-                a->element_name() = name;
-                load_if_exists(cur_object, "allow_untrusted_issuers", a->allow_untrusted_issuers);
-                load_if_exists(cur_object, "allow_invalid_certs", a->allow_invalid_certs);
-                load_if_exists(cur_object, "allow_self_signed", a->allow_self_signed);
-                load_if_exists(cur_object, "use_pfs", a->use_pfs);
-                load_if_exists(cur_object, "left_use_pfs", a->left_use_pfs);
-                load_if_exists(cur_object, "right_use_pfs", a->right_use_pfs);
-                load_if_exists(cur_object, "left_disable_reuse", a->left_disable_reuse);
-                load_if_exists(cur_object, "right_disable_reuse", a->right_disable_reuse);
+                new_profile->element_name() = name;
+                load_if_exists(cur_object, "allow_untrusted_issuers", new_profile->allow_untrusted_issuers);
+                load_if_exists(cur_object, "allow_invalid_certs", new_profile->allow_invalid_certs);
+                load_if_exists(cur_object, "allow_self_signed", new_profile->allow_self_signed);
+                load_if_exists(cur_object, "use_pfs", new_profile->use_pfs);
+                load_if_exists(cur_object, "left_use_pfs", new_profile->left_use_pfs);
+                load_if_exists(cur_object, "right_use_pfs", new_profile->right_use_pfs);
+                load_if_exists(cur_object, "left_disable_reuse", new_profile->left_disable_reuse);
+                load_if_exists(cur_object, "right_disable_reuse", new_profile->right_disable_reuse);
 
-                load_if_exists(cur_object, "ocsp_mode", a->ocsp_mode);
-                load_if_exists(cur_object, "ocsp_stapling", a->ocsp_stapling);
-                load_if_exists(cur_object, "ocsp_stapling_mode", a->ocsp_stapling_mode);
-                load_if_exists(cur_object, "ct_enable", a->opt_ct_enable);
-                load_if_exists(cur_object, "alpn_block", a->opt_alpn_block);
-                load_if_exists(cur_object, "failed_certcheck_replacement", a->failed_certcheck_replacement);
-                load_if_exists(cur_object, "failed_certcheck_override", a->failed_certcheck_override);
-                load_if_exists(cur_object, "failed_certcheck_override_timeout", a->failed_certcheck_override_timeout);
-                load_if_exists(cur_object, "failed_certcheck_override_timeout_type", a->failed_certcheck_override_timeout_type);
+                load_if_exists(cur_object, "ocsp_mode", new_profile->ocsp_mode);
+                load_if_exists(cur_object, "ocsp_stapling", new_profile->ocsp_stapling);
+                load_if_exists(cur_object, "ocsp_stapling_mode", new_profile->ocsp_stapling_mode);
+                load_if_exists(cur_object, "ct_enable", new_profile->opt_ct_enable);
+                load_if_exists(cur_object, "alpn_block", new_profile->opt_alpn_block);
+                load_if_exists(cur_object, "failed_certcheck_replacement", new_profile->failed_certcheck_replacement);
+                load_if_exists(cur_object, "failed_certcheck_override", new_profile->failed_certcheck_override);
+                load_if_exists(cur_object, "failed_certcheck_override_timeout", new_profile->failed_certcheck_override_timeout);
+                load_if_exists(cur_object, "failed_certcheck_override_timeout_type", new_profile->failed_certcheck_override_timeout_type);
                 
                 if(cur_object.exists("sni_filter_bypass")) {
                         Setting& sni_filter = cur_object["sni_filter_bypass"];
@@ -1501,10 +1501,10 @@ int CfgFactory::load_db_prof_tls () {
                         //init only when there is something
                         int sni_filter_len = sni_filter.getLength();
                         if(sni_filter_len > 0) {
-                                a->sni_filter_bypass = std::make_shared<std::vector<std::string>>();
+                                new_profile->sni_filter_bypass = std::make_shared<std::vector<std::string>>();
                                 for(int j = 0; j < sni_filter_len; ++j) {
                                     const char* elem = sni_filter[j];
-                                    a->sni_filter_bypass->push_back(elem);
+                                    new_profile->sni_filter_bypass->push_back(elem);
                                 }
                         }
                 }
@@ -1516,16 +1516,16 @@ int CfgFactory::load_db_prof_tls () {
                         //init only when there is something
                         int rwp_len = rwp.getLength();
                         if(rwp_len > 0) {
-                                a->redirect_warning_ports.ptr(new std::set<int>);
+                                new_profile->redirect_warning_ports.ptr(new std::set<int>);
                                 for(int j = 0; j < rwp_len; ++j) {
                                     int elem = rwp[j];
-                                    a->redirect_warning_ports.ptr()->insert(elem);
+                                    new_profile->redirect_warning_ports.ptr()->insert(elem);
                                 }
                         }
                 }
-                load_if_exists(cur_object, "sslkeylog", a->sslkeylog);
+                load_if_exists(cur_object, "sslkeylog", new_profile->sslkeylog);
                 
-                db_prof_tls[name] = std::shared_ptr<ProfileTls>(a);
+                db_prof_tls[name] = new_profile;
 
                 _dia("load_db_prof_tls: '%s': ok", name.c_str());
             } else {
