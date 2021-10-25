@@ -623,6 +623,60 @@ void cli_generate_commands (cli_def *cli, std::string const &this_section, cli_c
         }
     }
 
+    // if previous for loop didn't run, because section is empty
+    if(cfg_this_section.getLength() == 0) {
+
+        std::string template_key;
+
+        if (CliState::get().has_callback(this_section + ".[x]")) {
+
+            _debug(cli, "0 elements - new object %s : callback for .[x] found", template_key.c_str());
+            template_key = this_section + ".[x]";
+        }
+        else if(CliState::get().has_callback(this_section)) {
+            _debug(cli, "0 elements - new object %s : callback ", template_key.c_str());
+            template_key = this_section;
+        }
+
+        // template found?
+        if(not template_key.empty()) {
+            auto& cb = CliState::get().callbacks(template_key);
+            auto add_enabled = std::get<1>(cb).cap("add");
+            if(add_enabled) {
+                if(! add) {
+                    auto cb_add = std::get<1>(cb).cmd("add");
+                    auto cb_edit = std::get<1>(cb).cmd("edit");
+                    auto cb_remove = std::get<1>(cb).cmd("remove");
+
+                    if(cb_add) {
+                        add = cli_register_command(cli, cli_parent, "add",
+                                                   cb_add, PRIVILEGE_PRIVILEGED, this_mode, help_add.c_str());
+                        std::get<1>(cb).cli("add", add);
+                        std::get<1>(cb).cmd("add", cb_add);
+                    }
+                    if(add) {
+                        if(cb_edit) {
+                            // if added
+                            edit = cli_register_command(cli, cli_parent, "edit",
+                                                       cb_edit, PRIVILEGE_PRIVILEGED, this_mode, help_add.c_str());
+                            std::get<1>(cb).cli("edit", edit);
+                            std::get<1>(cb).cmd("edit", cb_edit);
+                        }
+                        if(cb_remove) {
+                            // if added
+                            remove = cli_register_command(cli, cli_parent, "remove",
+                                                        cb_remove, PRIVILEGE_PRIVILEGED, this_mode, help_add.c_str());
+                            std::get<1>(cb).cli("remove", remove);
+                            std::get<1>(cb).cmd("remove", cb_remove);
+                        }
+
+                    }
+                }
+            }
+        }
+
+    }
+
     // generate set commands for this section first
     cli_generate_set_commands(cli, this_section);
 
