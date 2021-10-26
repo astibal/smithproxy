@@ -1975,62 +1975,50 @@ int MitmMasterProxy::handle_sockets_once(baseCom* c) {
 
 void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
 {
-    auto* new_proxy = new MitmProxy(com()->slave());
-    // let's add this just_accepted_cx into new_proxy
-    if(just_accepted_cx->read_waiting_for_peercom()) {
-        _deb("MitmMasterProxy::on_left_new: ldaadd the new waiting_for_peercom cx");
-        new_proxy->ldaadd(just_accepted_cx);
-    } else{
-        _deb("MitmMasterProxy::on_left_new: ladd the new cx (unpaused)");
-        new_proxy->ladd(just_accepted_cx);
+    std::string target_host = just_accepted_cx->com()->nonlocal_dst_host();
+    unsigned short target_port = just_accepted_cx->com()->nonlocal_dst_port();
+
+    auto *target_cx = new MitmHostCX(just_accepted_cx->com()->slave(),
+                                     target_host.c_str(),
+                                     string_format("%d",target_port).c_str());
+
+    auto* new_proxy = sx::proxymaker::make(just_accepted_cx, target_cx);
+
+
+    if(not sx::proxymaker::policy(new_proxy, false)) {
+        delete new_proxy;
+        return;
     }
-    
-    auto *target_cx = new MitmHostCX(com()->slave(), just_accepted_cx->com()->nonlocal_dst_host().c_str(),
-                                    string_format("%d",just_accepted_cx->com()->nonlocal_dst_port()).c_str()
-                                    );
-    
 
-    std::string h;
-    std::string p;
-    just_accepted_cx->name();
-    just_accepted_cx->com()->resolve_socket_src(just_accepted_cx->socket(),&h,&p);
-    target_cx->com()->l3_proto(just_accepted_cx->com()->l3_proto());
-    
-    //_deb("UDP proxy: src l3 = %s dst l3 = %s",inet_family_str(just_accepted_cx->com()->l3_proto()).c_str(), inet_family_str(target_cx->com()->l3_proto()).c_str());
-    
-    just_accepted_cx->peer(target_cx);
-    target_cx->peer(just_accepted_cx);
-
-
-    
-    ((MitmHostCX*)just_accepted_cx)->mode(AppHostCX::MODE_NONE);
-    target_cx->mode(AppHostCX::MODE_NONE);
-    
-    new_proxy->radd(target_cx);
-
-    // apply policy and get result
-    int policy_num = CfgFactory::get()->policy_apply(just_accepted_cx, new_proxy);
-    if(policy_num >= 0) {
-        this->proxies().push_back(new_proxy);
-        
-        ((MitmHostCX*)just_accepted_cx)->matched_policy(policy_num);
-        target_cx->matched_policy(policy_num);
-        new_proxy->matched_policy(policy_num);
-        
-        if(CfgFactory::get()->db_policy_list.at(policy_num)->nat == POLICY_NAT_NONE) {
-            target_cx->com()->nonlocal_src(true);
-            target_cx->com()->nonlocal_src_host() = h;
-            target_cx->com()->nonlocal_src_port() = std::stoi(p);               
+    if(not sx::proxymaker::authorize(new_proxy)) {
+        if(not sx::proxymaker::is_replaceable(target_port)) {
+            delete new_proxy;
+            return;
         }
-
-        int real_socket = target_cx->connect();
-        target_cx->rename();
-        com()->set_monitor(real_socket);
-        com()->set_poll_handler(real_socket,new_proxy);
     }
-    
-    //new_proxy->name(new_proxy->to_string());
-    _deb("MitmUDPProxy::on_left_new: finished");    
+
+    std::string source_host;
+    std::string source_port;
+
+    if(not just_accepted_cx->com()->resolve_socket_src(just_accepted_cx->socket(), &source_host, &source_port)) {
+        _err("on_left_new: cannot resolve socket source");
+
+        just_accepted_cx->shutdown();
+        delete just_accepted_cx;
+        return;
+    }
+
+    if(not sx::proxymaker::setup_snat(new_proxy, source_host, source_port)) {
+        delete new_proxy;
+        return;
+    }
+
+    if(not sx::proxymaker::connect(this, new_proxy)) {
+        delete new_proxy;
+        return;
+    }
+
+    _deb("MitmUDPProxy::on_left_new: finished");
 }
 
 baseHostCX* MitmUdpProxy::MitmUdpProxy::new_cx(int s) {
