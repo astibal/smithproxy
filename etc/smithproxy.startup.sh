@@ -66,6 +66,7 @@ SMITH_RUN_SOCKS=1           # enable socks
 SMITH_INTERFACE='-'
 SMITH_TCP_PORTS='80 25 587 21 143 110 5222 65000'
 SMITH_TCP_PORTS_ALL=1
+SMITH_UDP_PORTS_ALL=0
 SMITH_IPV6_UDP_BYPASS=0
 SMITH_TCP_TPROXY='50080'
 SMITH_UDP_PORTS='53'
@@ -287,6 +288,14 @@ function setup_tproxy {
                 ip6tables -t mangle -A ${SMITH_CHAIN_NAME} -p tcp -i ${IF} -j TPROXY \
                 --tproxy-mark 0x1/0x1 --on-port ${SMITH_TCP_TPROXY}
             fi
+            if [[ ${SMITH_UDP_PORTS_ALL} -gt 0 ]]; then
+                logit " tproxy for all TCP traffic"
+                iptables -t mangle -A ${SMITH_CHAIN_NAME} -p udp -i ${IF} -j TPROXY \
+                --tproxy-mark 0x1/0x1 --on-port ${SMITH_UDP_TPROXY}
+                ip6tables -t mangle -A ${SMITH_CHAIN_NAME} -p udp -i ${IF} -j TPROXY \
+                --tproxy-mark 0x1/0x1 --on-port ${SMITH_UDP_TPROXY}
+            fi
+
 
             logit " --"
         done
@@ -497,6 +506,9 @@ function setup_redirect {
             ip6tables -t nat -A ${SMITH_CHAIN_NAME} -p tcp -j REDIRECT --to-port ${REDIRECT_TCP_PORT} -m owner ! --uid-owner ${ROOT_ID}
         fi
 
+        if [[ ${SMITH_UDP_PORTS_ALL} -gt 0 ]]; then
+            logit "  redirecting ALL udp-> *ignored for redirect*"
+        fi
 
         iptables -t nat -A ${SMITH_CHAIN_NAME} -p udp --dport 53 -j REDIRECT --to-port ${REDIRECT_DNS_PORT}  -m owner ! --uid-owner ${ROOT_ID}
         ip6tables -t nat -A ${SMITH_CHAIN_NAME} -p udp --dport 53 -j REDIRECT --to-port ${REDIRECT_DNS_PORT}  -m owner ! --uid-owner ${ROOT_ID}
