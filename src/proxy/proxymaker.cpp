@@ -78,7 +78,7 @@ namespace sx::proxymaker {
         return new_proxy;
     }
 
-    bool policy(MitmMasterProxy *owner, MitmProxy *proxy, bool implicit_allow) {
+    bool policy (MitmProxy *proxy, bool implicit_allow) {
 
         auto log = logan_lite("proxy");
 
@@ -267,7 +267,7 @@ namespace sx::proxymaker {
     }
 
 
-    bool connect (MitmMasterProxy *owner, MitmProxy *new_proxy) {
+    bool connect (MasterProxy *owner, MitmProxy *new_proxy) {
 
         if (owner and new_proxy) {
 

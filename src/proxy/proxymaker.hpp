@@ -43,14 +43,14 @@
 namespace sx::proxymaker {
 
     MitmProxy *make (baseHostCX *left, baseHostCX *right);
-    bool policy(MitmMasterProxy *owner, MitmProxy *proxy, bool implicit_allow);
+    bool policy (MitmProxy *proxy, bool implicit_allow);
     std::pair<std::string, unsigned short> to_magic(std::string const &target_host, unsigned short target_port);
     bool authorize_is_bad (MitmProxy *proxy);
     bool is_replaceable (unsigned short port);
     bool authorize (MitmProxy *proxy);
 
     bool setup_snat (MitmProxy *proxy, std::string const &source_host, std::string const &source_port);
-    bool connect (MitmMasterProxy *owner, MitmProxy *new_proxy);
+    bool connect (MasterProxy *owner, MitmProxy *new_proxy);
 }
 
 #endif //PROXYMAKER_HPP

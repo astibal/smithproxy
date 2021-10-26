@@ -1942,7 +1942,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
 
     auto* new_proxy = sx::proxymaker::make(just_accepted_cx, target_cx);
 
-    if(not sx::proxymaker::policy(this, new_proxy, redirected_magic)) {
+    if(not sx::proxymaker::policy(new_proxy, redirected_magic)) {
         delete new_proxy;
         return;
     }
