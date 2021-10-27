@@ -2202,7 +2202,7 @@ int cli_show_config_policy(struct cli_def *cli, const char *command, char *argv[
 
     int index = -1;
     if(argc > 0) {
-        index = std::stoi(argv[0]);
+        index = safe_val(argv[0]);
     }
     cli_print_section(cli, "policy", index, 10 * 1024 * 1024);
     return CLI_OK;
