@@ -39,17 +39,54 @@
 
 #include <cfgapi.hpp>
 #include <policy/authfactory.hpp>
-
 #include <proxy/mitmproxy.hpp>
 
+#include <proxy/proxymaker.hpp>
+
 namespace sx::proxymaker {
+
+    namespace log {
+        logan_lite& proxy() {
+            static auto l_ = logan_lite("proxy");
+            return l_;
+        }
+
+        logan_lite& routing() {
+            static auto l_ = logan_lite("proxy.routing");
+            return l_;
+        }
+
+        logan_lite& make() {
+            static auto l_ = logan_lite("proxy.make");
+            return l_;
+        }
+
+        logan_lite& policy() {
+            static auto l_ = logan_lite("proxy.policy");
+            return l_;
+        }
+
+        logan_lite& authorize() {
+            static auto l_ = logan_lite("proxy.authorize");
+            return l_;
+        }
+        logan_lite& snat() {
+            static auto l_ = logan_lite("proxy.snat");
+            return l_;
+        }
+
+        logan_lite& connect() {
+            static auto l_ = logan_lite("proxy.connect");
+            return l_;
+        }
+    }
 
     MitmProxy *make (baseHostCX *left, baseHostCX *right) {
 
         auto *new_proxy = new MitmProxy(left->com()->slave());
         if (not new_proxy or not left or not right) return nullptr;
 
-        auto log = logan_lite("proxy");
+        auto& log = log::make();
 
         // resolve internal name
         left->name();
@@ -80,7 +117,7 @@ namespace sx::proxymaker {
 
     bool policy (MitmProxy *proxy, bool implicit_allow) {
 
-        auto log = logan_lite("proxy");
+        auto& log = log::policy();
 
         auto bypass_cx = [] (baseHostCX *cx) {
             auto *scom = dynamic_cast<SSLCom *>(cx->com());
@@ -117,11 +154,105 @@ namespace sx::proxymaker {
             return false;
         }
 
-
         // let know CX what policy it matched (it is handy when ie upgrade to TLS)
         src_cx->matched_policy(policy_num);
         dst_cx->matched_policy(policy_num);
         proxy->matched_policy(policy_num);
+
+        if(policy_num >= 0) {
+            auto policy = CfgFactory::get()->lookup_policy(policy_num);
+            if(policy) {
+                if(auto rt = policy->profile_routing; rt) {
+                    if(not route(proxy, rt)) {
+
+                    }
+                }
+            }
+        }
+
+        return true;
+    }
+
+
+    using optional_string = std::optional<std::string>;
+
+    std::pair<optional_string, optional_string> get_dnat_target(std::shared_ptr<ProfileRouting> rt) {
+        auto& log = log::routing();
+
+        std::string ip;
+        std::string port;
+
+        if(not rt->dnat_addresses.empty()) {
+            // find address object referred in "routing"
+            auto addr = CfgFactory::get()->lookup_address(rt->dnat_addresses[0].c_str());
+            if(addr) {
+                if( auto addr_obj = std::dynamic_pointer_cast<CidrAddress>(addr->value()); addr_obj) {
+                    // for now, use just ddress part - no load-balancing
+                    ip = addr_obj->ip(CIDR_ONLYADDR);
+
+                    auto pflen = cidr::cidr_get_pflen(addr_obj->cidr());
+                    if(addr_obj->cidr()->proto == CIDR_IPV4) {
+                        if(pflen != 32) {
+                            _not("ignoring address4 mask");
+                        }
+                    }
+                    else if(addr_obj->cidr()->proto == CIDR_IPV6) {
+                        if(pflen != 128) {
+                            _not("ignoring address6 mask");
+                        }
+                    }
+                }
+            }
+        }
+
+        if(not rt->dnat_ports.empty()) {
+            // find address object referred in "routing"
+            auto prt = CfgFactory::get()->lookup_port(rt->dnat_ports[0].c_str());
+            if(prt) {
+                if( auto port_obj = std::dynamic_pointer_cast<CfgRange>(prt); port_obj) {
+                    // no balancing on ports
+                    port = string_format("%d", port_obj->value().first);
+
+                    if(port_obj->value().first != port_obj->value().second) {
+                        _not("range set, but only first port number is used");
+                    }
+                }
+            }
+        }
+
+        return { ip.empty() ? std::nullopt : std::make_optional(ip),
+                 port.empty() ? std::nullopt : std::make_optional(port) };
+    }
+
+    bool route(baseProxy* proxy, std::shared_ptr<ProfileRouting> rt) {
+        auto& log = log::routing();
+
+        if(not rt or not proxy) return false;
+
+        auto [ op_ip, op_port ] = get_dnat_target(rt);
+        if(op_ip or op_port) {
+
+            auto orig_px_name = proxy->to_string(iINF);
+
+            for (auto *cx: proxy->rs()) {
+                if (op_ip) {
+                    cx->host(op_ip.value());
+                    _dia("%s: routing to IP: %s", orig_px_name.c_str(), op_ip->c_str());
+                }
+
+                // safeval covers cases when port is set to zero - which means no changes (ie "all" default port range)
+
+                if (op_port) {
+
+                    auto port = safe_val(op_port.value());
+                    _dia("%s: routing to port: %s", orig_px_name.c_str(), port > 0  ? op_port->c_str() : "<unchanged>");
+
+                    if(port > 0) {
+                        cx->port(op_port.value());
+                    }
+                }
+            }
+        }
 
         return true;
     }
@@ -156,7 +287,7 @@ namespace sx::proxymaker {
 
         if (not left or not right) return false;
 
-        auto log = logan_lite("proxy");
+        auto& log = log::authorize();
 
         bool bad_auth = true;
 
@@ -177,24 +308,23 @@ namespace sx::proxymaker {
         }
 
 
-        if (maybe_groups) {
-            if (CfgFactory::get()->policy_prof_auth(left->matched_policy()) != nullptr) {
-                for (auto const &i: CfgFactory::get()->policy_prof_auth(left->matched_policy())->sub_policies) {
-                    for (auto const &x: maybe_groups.value()) {
-                        _deb("Connection identities: ip identity '%s' against policy '%s'", x.c_str(),
-                             i->element_name().c_str());
-                        if (x == i->element_name()) {
-                            _dia("Connection identities: ip identity '%s' matches policy '%s'", x.c_str(),
-                                 i->element_name().c_str());
-                            bad_auth = false;
-                            break;
-                        }
-                    }
+        if (maybe_groups and CfgFactory::get()->policy_prof_auth(left->matched_policy())) {
 
-                    // don't iterate if we know we are ok
-                    if (not bad_auth)
+            for (auto const &i: CfgFactory::get()->policy_prof_auth(left->matched_policy())->sub_policies) {
+                for (auto const &x: maybe_groups.value()) {
+                    _deb("Connection identities: ip identity '%s' against policy '%s'", x.c_str(),
+                         i->element_name().c_str());
+                    if (x == i->element_name()) {
+                        _dia("Connection identities: ip identity '%s' matches policy '%s'", x.c_str(),
+                             i->element_name().c_str());
+                        bad_auth = false;
                         break;
+                    }
                 }
+
+                // don't iterate if we know we are ok
+                if (not bad_auth)
+                    break;
             }
         }
 
@@ -204,21 +334,39 @@ namespace sx::proxymaker {
 
     bool authorize (MitmProxy *proxy) {
 
+        auto& log = log::authorize();
+
         // resolve source information - is there an identity info for that IP?
         if (proxy->opt_auth_authenticate) {
+
+            _deb("proxymaker::authorize[%s]: must be authorized", proxy->to_string(iINF).c_str());
+
             bool res = proxy->resolve_identity();
 
-            if (not res) {
-                return false;
-            } else if (authorize_is_bad(proxy)) {
-                proxy->auth_block_identity = true;
-                return false;
+            if(res) {
+                _dia("proxymaker::authorize[%s]: identity resolved: %s/%s", proxy->to_string(iINF).c_str(),
+                     proxy->identity()->username().c_str(),
+                     proxy->identity()->groups().c_str());
 
+                if (authorize_is_bad(proxy)) {
+                    _dia("proxymaker::authorize[%s]: this identity is not authorized", proxy->to_string(iINF).c_str());
+
+                    proxy->auth_block_identity = true;
+                    return false;
+                }
             }
+            else {
+                _dia("proxymaker::authorize[%s]: identity not resolved", proxy->to_string(iINF).c_str());
+
+                return false;
+            }
+
         } else if (proxy->opt_auth_resolve) {
+            _deb("proxymaker::authorize[%s]: optional identity check", proxy->to_string(iINF).c_str());
             proxy->resolve_identity();
         }
 
+        _deb("proxymaker::authorize[%s]: no identity needed", proxy->to_string(iINF).c_str());
         return true;
     }
 
@@ -238,7 +386,7 @@ namespace sx::proxymaker {
 
         bool enforce_nat = proxy->matched_policy() == POLICY_IMPLICIT_PASS;
 
-        auto log = logan_lite("proxy");
+        auto log = logan_lite("proxy.snat");
 
         // setup NAT
         if (not enforce_nat) {
@@ -251,12 +399,12 @@ namespace sx::proxymaker {
                 }
             }
             catch (std::invalid_argument const &e) {
-                _err("proxy_setup_snat (nonat): %s, policy #%d: %s", proxy->to_string(iINF).c_str(),
+                _err("proxy_setup_snat (nonat)[%s]: policy #%d: error %s", proxy->to_string(iINF).c_str(),
                      proxy->matched_policy(), e.what());
                 return false;
             }
             catch (std::out_of_range const &e) {
-                _err("proxy_setup_snat (nonat): %s, policy #%d: %s", proxy->to_string(iINF).c_str(),
+                _err("proxy_setup_snat (nonat)[%s]: policy #%d: error %s", proxy->to_string(iINF).c_str(),
                      proxy->matched_policy(), e.what());
                 return false;
             }
@@ -269,6 +417,8 @@ namespace sx::proxymaker {
 
     bool connect (MasterProxy *owner, MitmProxy *new_proxy) {
 
+        auto& log = log::connect();
+
         if (owner and new_proxy) {
 
             auto *left = new_proxy->first_left();
@@ -276,6 +426,9 @@ namespace sx::proxymaker {
             auto *oc = owner->com();
 
             if (left and right and oc) {
+
+                _deb("proxymaker::connect[%s]: connecting", new_proxy->to_string(iINF).c_str());
+
                 // owner com sets new_proxy as the epoll handler for left socket
                 // finalize connection acceptance by adding new proxy to proxies and connect
 
@@ -286,10 +439,14 @@ namespace sx::proxymaker {
                 oc->set_poll_handler(right_socket, new_proxy);
 
                 owner->proxies().emplace_back(new_proxy);
+                _deb("proxymaker::connect[%s]: added to owner proxy", new_proxy->to_string(iINF).c_str());
 
                 return true;
             }
         }
+
+
+        _deb("proxymaker::connect[%s]: cannot connect, not ready", new_proxy->to_string(iINF).c_str());
 
         return false;
     }

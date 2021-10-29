@@ -73,6 +73,13 @@ public:
     explicit CidrAddress(std::string const& v) : AddressObject(), c_(cidr::cidr_from_str(v.c_str())) {}
 
     cidr::CIDR* cidr() { return c_; }
+    std::string ip(int flags) const {
+        char* temp = cidr_to_str(c_, flags);
+        std::string ret = string_format("%s", temp);
+        free(temp);
+
+        return ret;
+    }
 
     int contains(cidr::CIDR *other);
     bool match(cidr::CIDR* c) override { return (contains(c) >= 0); };
