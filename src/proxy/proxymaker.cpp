@@ -160,11 +160,11 @@ namespace sx::proxymaker {
         proxy->matched_policy(policy_num);
 
         if(policy_num >= 0) {
-            auto policy = CfgFactory::get()->lookup_policy(policy_num);
-            if(policy) {
+            if( auto policy = CfgFactory::get()->lookup_policy(policy_num); policy) {
+
                 if(auto rt = policy->profile_routing; rt) {
                     if(not route(proxy, rt)) {
-
+                        _err("routing failed");
                     }
                 }
             }
