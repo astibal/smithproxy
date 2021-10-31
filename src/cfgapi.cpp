@@ -1871,7 +1871,7 @@ int CfgFactory::cleanup_db_prof_auth () {
 
 bool CfgFactory::prof_content_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileContent> &pc) {
 
-    auto log = logan_lite("policy.rule");
+    auto& log = log::policy();
 
     auto* mitm_proxy = dynamic_cast<MitmProxy*>(new_proxy);
 
@@ -1915,7 +1915,7 @@ bool CfgFactory::prof_content_apply (baseHostCX *originator, baseProxy *new_prox
 bool CfgFactory::prof_detect_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileDetection> &pd) {
 
     auto* mitm_originator = dynamic_cast<AppHostCX*>(originator);
-    auto log = logan_lite("policy.rule");
+    auto& log = log::policy();
 
     const char* pd_name = "none";
     bool ret = true;
@@ -1938,7 +1938,7 @@ bool CfgFactory::prof_detect_apply (baseHostCX *originator, baseProxy *new_proxy
 
 bool CfgFactory::prof_tls_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileTls> &ps) {
 
-    auto log = logan_lite("policy.rule");
+    auto& log = log::policy();
 
     auto* mitm_proxy = dynamic_cast<MitmProxy*>(new_proxy);
     auto* mitm_originator = dynamic_cast<AppHostCX*>(originator);
@@ -2046,7 +2046,7 @@ bool CfgFactory::prof_tls_apply (baseHostCX *originator, baseProxy *new_proxy, c
 
 bool CfgFactory::prof_alg_dns_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileAlgDns> &p_alg_dns) {
 
-    auto log = logan_lite("policy.rule");
+    auto& log = log::policy();
 
     auto* mitm_originator = dynamic_cast<AppHostCX*>(originator);
     auto* mh = dynamic_cast<MitmHostCX*>(mitm_originator);
@@ -2078,7 +2078,7 @@ bool CfgFactory::prof_alg_dns_apply (baseHostCX *originator, baseProxy *new_prox
 
 bool CfgFactory::prof_script_apply (baseHostCX *originator, baseProxy *new_proxy, std::shared_ptr<ProfileScript> const& p_script) {
 
-    auto log = logan_lite("policy.rule");
+    auto& log = log::policy();
 
     auto* mitm_originator = dynamic_cast<AppHostCX*>(originator);
     auto* mh = dynamic_cast<MitmHostCX*>(mitm_originator);
@@ -2124,7 +2124,8 @@ bool CfgFactory::prof_script_apply (baseHostCX *originator, baseProxy *new_proxy
 
 int CfgFactory::policy_apply (baseHostCX *originator, baseProxy *proxy, int matched_policy) {
 
-    auto log = logan_lite("policy.rule");
+    auto& log = log::policy();
+
     std::lock_guard<std::recursive_mutex> l(lock_);
     
     int policy_num = matched_policy;
@@ -2212,7 +2213,7 @@ bool CfgFactory::policy_apply_tls (int policy_num, baseCom *xcom) {
 
 bool CfgFactory::should_redirect (const std::shared_ptr<ProfileTls> &pt, SSLCom *com) {
 
-    auto log = logan_lite("policy.rule");
+    auto& log = log::policy();
     
     bool ret = false;
     
@@ -2261,6 +2262,8 @@ bool CfgFactory::should_redirect (const std::shared_ptr<ProfileTls> &pt, SSLCom 
 }
 
 bool CfgFactory::policy_apply_tls (const std::shared_ptr<ProfileTls> &pt, baseCom *xcom) {
+
+    auto& log = log::policy();
 
     bool tls_applied = false;     
     

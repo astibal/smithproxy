@@ -58,15 +58,22 @@ using namespace libconfig;
 
 class CfgFactoryBase {
 public:
-    CfgFactoryBase(): log(get_log()) {}
+    CfgFactoryBase(): log(log::config()) {}
     CfgFactoryBase(CfgFactoryBase const &) = delete;
     void operator=(const CfgFactoryBase&) = delete;
 
     logan_lite& log;
-    static logan_lite& get_log() {
-        static logan_lite l("config");
-        return l;
-    }
+
+    struct log { ;
+        static logan_lite &config() {
+            static logan_lite l("config");
+            return l;
+        }
+        static logan_lite &policy() {
+            static logan_lite l("policy");
+            return l;
+        }
+    };
 
     std::string config_file;
     int tenant_index = -1;
