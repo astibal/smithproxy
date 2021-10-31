@@ -42,6 +42,8 @@
 #ifndef ADDROBJ_HPP_
 #define ADDROBJ_HPP_
 
+#include <utility>
+
 #include <ext/libcidr/cidr.hpp>
 #include <display.hpp>
 #include <log/logger.hpp>

@@ -1502,9 +1502,12 @@ int CfgFactory::load_db_prof_tls () {
                         int sni_filter_len = sni_filter.getLength();
                         if(sni_filter_len > 0) {
                                 new_profile->sni_filter_bypass = std::make_shared<std::vector<std::string>>();
+                                new_profile->sni_filter_bypass_addrobj = std::make_shared<std::vector<FqdnAddress>>();
+
                                 for(int j = 0; j < sni_filter_len; ++j) {
                                     const char* elem = sni_filter[j];
                                     new_profile->sni_filter_bypass->push_back(elem);
+                                    new_profile->sni_filter_bypass_addrobj->emplace_back(elem);
                                 }
                         }
                 }

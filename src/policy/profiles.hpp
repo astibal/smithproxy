@@ -6,6 +6,7 @@
 #define SMITHPROXY_PROFILES_HPP
 
 #include <policy/cfgelement.hpp>
+#include <policy/addrobj.hpp>
 
 class ProfileDetection : public socle::sobject, public CfgElement {
 
@@ -108,6 +109,8 @@ TYPENAME_OVERRIDE("ProfileContent")
 };
 
 
+class FqdnAddress;
+
 class ProfileTls : public socle::sobject, public CfgElement  {
 public:
     bool inspect = false;
@@ -134,6 +137,7 @@ public:
     bool opt_alpn_block = false;
 
     std::shared_ptr<std::vector<std::string>> sni_filter_bypass;
+    std::shared_ptr<std::vector<FqdnAddress>> sni_filter_bypass_addrobj;
     socle::spointer_set_int redirect_warning_ports;
 
     bool sni_filter_use_dns_cache = true;       // if sni_filter_bypass is set, check during policy match if target IP isn't in DNS cache matching SNI filter entries.
