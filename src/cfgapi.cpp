@@ -1936,110 +1936,128 @@ bool CfgFactory::prof_detect_apply (baseHostCX *originator, baseProxy *new_proxy
     return ret;
 }
 
+
+std::optional<std::vector<std::string>> CfgFactory::find_bypass_domain_hosts(std::string const& filter_element, bool wildcards_only)  {
+    std::vector<std::string> to_match;
+    {
+        std::scoped_lock<std::recursive_mutex> dd_(DNS::get_domain_lock());
+
+        auto wildcard_element = filter_element;
+        bool wildcard_planted = false;
+        if(auto wlc_i = filter_element.find("*."); wlc_i == 0) {
+            _dia("found wildcard SNI bypass element");
+            wildcard_element.replace(0, 2, "");
+            wildcard_planted = true;
+        }
+
+        // do not try to find subdomains based on filter-element string
+        if(not wildcard_planted and wildcards_only) return std::nullopt;
+
+        auto subdomain_cache = DNS::get_domain_cache().get(wildcard_element);
+        if (subdomain_cache != nullptr) {
+            for (auto const &subdomain: subdomain_cache->cache()) {
+
+                std::vector<std::string> prefix_n_domainname = string_split(subdomain.first,
+                                                                            ':');
+                if (prefix_n_domainname.size() < 2)
+                    continue; // continue if we can't strip A: or AAAA:
+
+                to_match.emplace_back(prefix_n_domainname.at(1) + "." + wildcard_element);
+            }
+        }
+    }
+
+    return to_match.empty() ? std::nullopt : std::make_optional(to_match);
+};
+
 bool CfgFactory::prof_tls_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileTls> &ps) {
 
     auto& log = log::policy();
 
-    auto* mitm_proxy = dynamic_cast<MitmProxy*>(new_proxy);
-    auto* mitm_originator = dynamic_cast<AppHostCX*>(originator);
-    
+    if(not ps) {
+        _err("CfgFactory::prof_tls_apply[%s]: profile is null", new_proxy->to_string(iINF).c_str());
+        return false;
+    }
+
     bool tls_applied = false;
 
-    if(! mitm_proxy) {
-        _err("prof_tls_apply: proxy is null");
+    if(not new_proxy or not originator) {
+        _err("CfgFactory::prof_tls_apply[%s]: proxy or originator is null", new_proxy->to_string(iINF).c_str());
         return false;
     }
 
-    if(! mitm_originator) {
-        _err("prof_tls_apply: originator cx is null");
+    if( not policy_apply_tls(ps, originator->com())) {
+        _err("CfgFactory::prof_tls_apply[%s]: cannot apply on originator cx", new_proxy->to_string(iINF).c_str());
         return false;
     }
 
-    if(ps != nullptr) {
-        // we should also apply tls profile to originating side! Verification is not in effect, but BYPASS is!
-        if (policy_apply_tls(ps, mitm_originator->com())) {
-            _dia("policy_apply: policy tls profile[%s] for %s", ps->element_name().c_str(), mitm_originator->full_name('L').c_str());
-            
-            for( auto* cx: mitm_proxy->rs()) {
-                baseCom* xcom = cx->com();
-                _dia("policy_apply: policy tls profile[%s] for %s", ps->element_name().c_str(), cx->full_name('R').c_str());
-                
-                tls_applied = policy_apply_tls(ps, xcom);
-                if(!tls_applied) {
-                    _err("%s: cannot apply TLS profile to target connection %s", new_proxy->c_type(), cx->c_type());
-                } else {
-                    
-                    //applying bypass based on DNS cache
-                    
-                    auto* sslcom = dynamic_cast<SSLCom*>(xcom);
-                    if(sslcom && ps->sni_filter_bypass) {
-                        if( ( ! ps->sni_filter_bypass->empty() ) && ps->sni_filter_use_dns_cache) {
-                        
-                            bool interrupt = false;
-                            for(std::string& filter_element: *ps->sni_filter_bypass) {
-                                FqdnAddress f(filter_element);
-                                auto host_cidr = std::unique_ptr<cidr::CIDR, decltype(&cidr::cidr_free)>(
-                                                        cidr::cidr_from_str(xcom->owner_cx()->host().c_str()),
-                                                        &cidr::cidr_free);
-                                
-                                if(f.match(host_cidr.get())) {
-                                    if(sslcom->bypass_me_and_peer()) {
-                                        _inf("Connection %s bypassed: IP in DNS cache matching TLS bypass list (%s).", originator->full_name('L').c_str(), filter_element.c_str());
-                                        interrupt = true;
-                                        break;
-                                    } else {
-                                        _war("Connection %s: cannot be bypassed.", originator->full_name('L').c_str());
-                                    }
-                                } else if (ps->sni_filter_use_dns_domain_tree) {
 
-                                    std::vector<std::string> to_match;
-                                    {
-                                        std::scoped_lock<std::recursive_mutex> dd_(DNS::get_domain_lock());
 
-                                        auto subdomain_cache = DNS::get_domain_cache().get(filter_element);
-                                        if(subdomain_cache != nullptr) {
-                                            for (auto const &subdomain: subdomain_cache->cache()) {
+    _dia("CfgFactory::prof_tls_apply[%s]: profile %s, originator %s", new_proxy->to_string(iINF).c_str(), ps->element_name().c_str(), originator->full_name('L').c_str());
 
-                                                std::vector<std::string> prefix_n_domainname = string_split(subdomain.first,
-                                                                                                            ':');
-                                                if (prefix_n_domainname.size() < 2)
-                                                    continue; // don't continue if we can't strip A: or AAAA:
+    for( auto* cx: new_proxy->rs()) {
+        baseCom* xcom = cx->com();
+        _dia("CfgFactory::prof_tls_apply[%s]: profile %s, target %s", new_proxy->to_string(iINF).c_str(), ps->element_name().c_str(), cx->full_name('R').c_str());
 
-                                                to_match.push_back(prefix_n_domainname.at(1) + "." + filter_element);
-                                            }
-                                        }
-                                    }
+        tls_applied = policy_apply_tls(ps, xcom);
+        if(!tls_applied) {
+            _err("%s: cannot apply TLS profile to target connection %s", new_proxy->c_type(), cx->c_type());
+            tls_applied = false;
+            break;
+        }
 
-                                    if(! to_match.empty()) {
+        //applying bypass based on DNS cache
 
-                                        for(auto const& to_match_entry: to_match) {
-                                            FqdnAddress ff(to_match_entry);
-                                            _deb("Connection %s: subdomain check: test if %s matches %s", originator->full_name('L').c_str(), ff.str().c_str(), xcom->owner_cx()->host().c_str());
+        auto* sslcom = dynamic_cast<SSLCom*>(xcom);
+        if(sslcom && ps->sni_filter_bypass) {
+            if( ( ! ps->sni_filter_bypass->empty() ) && ps->sni_filter_use_dns_cache) {
 
-                                            // ff.match locks DNS cache
-                                            if(ff.match(host_cidr.get())) {
-                                                if(sslcom->bypass_me_and_peer()) {
-                                                    _inf("Connection %s bypassed: IP in DNS sub-domain cache matching TLS bypass list (%s).", originator->full_name('L').c_str(), filter_element.c_str());
-                                                } else {
-                                                    _war("Connection %s: cannot be bypassed.", originator->full_name('L').c_str());
-                                                }
-                                                interrupt = true; //exit also from main loop
-                                                break;
-                                            }
-                                        }
-                                    }
+                bool interrupt = false;
+                for(FqdnAddress& sni_fqdn: *ps->sni_filter_bypass_addrobj) {
+
+                    auto target = CidrAddress(xcom->owner_cx()->host());
+
+                    if(sni_fqdn.match(target.cidr())) {
+                        if(sslcom->bypass_me_and_peer()) {
+                            _inf("Connection %s bypassed: IP in DNS cache matching TLS bypass list (%s).", originator->full_name('L').c_str(), sni_fqdn.fqdn().c_str());
+                            interrupt = true;
+                            break;
+                        } else {
+                            _war("Connection %s: cannot be bypassed.", originator->full_name('L').c_str());
+                        }
+                    }
+                    else if (ps->sni_filter_use_dns_domain_tree) {
+
+                        // don't look for subdomains of current fqdn
+                        auto to_match = find_bypass_domain_hosts(sni_fqdn.fqdn(), true);
+                        if(not to_match) continue;
+
+                        for(auto const& to_match_entry: to_match.value()) {
+                            FqdnAddress ff(to_match_entry);
+                            _deb("Connection %s: subdomain check: test if %s matches %s", originator->full_name('L').c_str(), ff.str().c_str(), xcom->owner_cx()->host().c_str());
+
+                            // ff.match locks DNS cache
+                            if(ff.match(target.cidr())) {
+                                if(sslcom->bypass_me_and_peer()) {
+                                    _inf("Connection %s bypassed: IP in DNS sub-domain cache matching TLS bypass list (%s).", originator->full_name('L').c_str(), sni_fqdn.fqdn().c_str());
+                                } else {
+                                    _war("Connection %s: cannot be bypassed.", originator->full_name('L').c_str());
                                 }
-                            }
-
-                            if(interrupt)
+                                interrupt = true; //exit also from main loop
                                 break;
-
+                            }
                         }
                     }
                 }
+
+                if(interrupt)
+                    break;
+
             }
         }
-    } 
+
+    }
+
     
     return tls_applied;
 }
@@ -2263,78 +2281,83 @@ bool CfgFactory::should_redirect (const std::shared_ptr<ProfileTls> &pt, SSLCom 
 
 bool CfgFactory::policy_apply_tls (const std::shared_ptr<ProfileTls> &pt, baseCom *xcom) {
 
+    if(not pt or not xcom) {
+        _err("CfgFactory::policy_apply_tls: null argument: profile %x, com %x", pt.get(), xcom);
+        return false;
+    }
+
     auto& log = log::policy();
 
     bool tls_applied = false;     
     
-    if(pt != nullptr) {
-        auto* sslcom = dynamic_cast<SSLCom*>(xcom);
-        if(sslcom != nullptr) {
-            sslcom->opt_bypass = !pt->inspect;
-            if(sslcom->opt_bypass) {
-                sslcom->verify_reset(SSLCom::VRF_OK);
+    auto* sslcom = dynamic_cast<SSLCom*>(xcom);
+    if(sslcom != nullptr) {
+        sslcom->opt_bypass = !pt->inspect;
+        if(sslcom->opt_bypass) {
+            sslcom->verify_reset(SSLCom::VRF_OK);
+        }
+
+        sslcom->opt_allow_unknown_issuer = pt->allow_untrusted_issuers;
+        sslcom->opt_allow_self_signed_chain = pt->allow_untrusted_issuers;
+        sslcom->opt_allow_not_valid_cert = pt->allow_invalid_certs;
+        sslcom->opt_allow_self_signed_cert = pt->allow_self_signed;
+
+        sslcom->opt_failed_certcheck_replacement = pt->failed_certcheck_replacement;
+        sslcom->opt_failed_certcheck_override = pt->failed_certcheck_override;
+        sslcom->opt_failed_certcheck_override_timeout = pt->failed_certcheck_override_timeout;
+        sslcom->opt_failed_certcheck_override_timeout_type = pt->failed_certcheck_override_timeout_type;
+
+        auto* peer_sslcom = dynamic_cast<SSLCom*>(sslcom->peer());
+
+        if( peer_sslcom &&
+                pt->failed_certcheck_replacement &&
+                should_redirect(pt, peer_sslcom)) {
+
+            _deb("policy_apply_tls: applying profile, repl=%d, repl_ovrd=%d, repl_ovrd_tmo=%d, repl_ovrd_tmo_type=%d",
+                 pt->failed_certcheck_replacement,
+                 pt->failed_certcheck_override,
+                 pt->failed_certcheck_override_timeout,
+                 pt->failed_certcheck_override_timeout_type );
+
+            peer_sslcom->opt_failed_certcheck_replacement = pt->failed_certcheck_replacement;
+            peer_sslcom->opt_failed_certcheck_override = pt->failed_certcheck_override;
+            peer_sslcom->opt_failed_certcheck_override_timeout = pt->failed_certcheck_override_timeout;
+            peer_sslcom->opt_failed_certcheck_override_timeout_type = pt->failed_certcheck_override_timeout_type;
+        }
+
+        // set accordingly if general "use_pfs" is specified, more concrete settings come later
+        sslcom->opt_left_kex_dh = pt->use_pfs;
+        sslcom->opt_right_kex_dh = pt->use_pfs;
+
+        sslcom->opt_left_kex_dh = pt->left_use_pfs;
+        sslcom->opt_right_kex_dh = pt->right_use_pfs;
+
+        sslcom->opt_left_no_tickets = pt->left_disable_reuse;
+        sslcom->opt_right_no_tickets = pt->right_disable_reuse;
+
+        sslcom->opt_ocsp_mode = pt->ocsp_mode;
+        sslcom->opt_ocsp_stapling_enabled = pt->ocsp_stapling;
+        sslcom->opt_ocsp_stapling_mode = pt->ocsp_stapling_mode;
+
+        // certificate transparency
+        sslcom->opt_ct_enable = pt->opt_ct_enable;
+
+        // alpn alpn
+        sslcom->opt_alpn_block = pt->opt_alpn_block;
+
+        if(pt->sni_filter_bypass) {
+            if( ! pt->sni_filter_bypass->empty() ) {
+                sslcom->sni_filter_to_bypass() = pt->sni_filter_bypass;
             }
+        }
 
-            sslcom->opt_allow_unknown_issuer = pt->allow_untrusted_issuers;
-            sslcom->opt_allow_self_signed_chain = pt->allow_untrusted_issuers;
-            sslcom->opt_allow_not_valid_cert = pt->allow_invalid_certs;
-            sslcom->opt_allow_self_signed_cert = pt->allow_self_signed;
+        sslcom->sslkeylog = pt->sslkeylog;
 
-            sslcom->opt_failed_certcheck_replacement = pt->failed_certcheck_replacement;
-            sslcom->opt_failed_certcheck_override = pt->failed_certcheck_override;
-            sslcom->opt_failed_certcheck_override_timeout = pt->failed_certcheck_override_timeout;
-            sslcom->opt_failed_certcheck_override_timeout_type = pt->failed_certcheck_override_timeout_type;
-
-            auto* peer_sslcom = dynamic_cast<SSLCom*>(sslcom->peer());
-
-            if( peer_sslcom &&
-                    pt->failed_certcheck_replacement &&
-                    should_redirect(pt, peer_sslcom)) {
-
-                _deb("policy_apply_tls: applying profile, repl=%d, repl_ovrd=%d, repl_ovrd_tmo=%d, repl_ovrd_tmo_type=%d",
-                     pt->failed_certcheck_replacement,
-                     pt->failed_certcheck_override,
-                     pt->failed_certcheck_override_timeout,
-                     pt->failed_certcheck_override_timeout_type );
-
-                peer_sslcom->opt_failed_certcheck_replacement = pt->failed_certcheck_replacement;
-                peer_sslcom->opt_failed_certcheck_override = pt->failed_certcheck_override;
-                peer_sslcom->opt_failed_certcheck_override_timeout = pt->failed_certcheck_override_timeout;
-                peer_sslcom->opt_failed_certcheck_override_timeout_type = pt->failed_certcheck_override_timeout_type;
-            }
-            
-            // set accordingly if general "use_pfs" is specified, more concrete settings come later
-            sslcom->opt_left_kex_dh = pt->use_pfs;
-            sslcom->opt_right_kex_dh = pt->use_pfs;
-            
-            sslcom->opt_left_kex_dh = pt->left_use_pfs;
-            sslcom->opt_right_kex_dh = pt->right_use_pfs;
-            
-            sslcom->opt_left_no_tickets = pt->left_disable_reuse;
-            sslcom->opt_right_no_tickets = pt->right_disable_reuse;
-            
-            sslcom->opt_ocsp_mode = pt->ocsp_mode;
-            sslcom->opt_ocsp_stapling_enabled = pt->ocsp_stapling;
-            sslcom->opt_ocsp_stapling_mode = pt->ocsp_stapling_mode;
-
-            // certificate transparency
-            sslcom->opt_ct_enable = pt->opt_ct_enable;
-
-            // alpn alpn
-            sslcom->opt_alpn_block = pt->opt_alpn_block;
-       
-            if(pt->sni_filter_bypass) {
-                if( ! pt->sni_filter_bypass->empty() ) {
-                    sslcom->sni_filter_to_bypass() = pt->sni_filter_bypass;
-                }
-            }
-            
-            sslcom->sslkeylog = pt->sslkeylog;
-            
-            tls_applied = true;
-        }        
+        tls_applied = true;
+    } else {
+        _err("CfgFactory::policy_apply_tls[%s]: is not SSL", xcom->shortname().c_str());
     }
-    
+
     return tls_applied;
 }
 
