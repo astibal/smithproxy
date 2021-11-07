@@ -40,8 +40,8 @@
 #ifndef SMITHPROXY_MAIN_HPP
 #define SMITHPROXY_MAIN_HPP
 
-#define SMITH_VERSION "0.9.23"
-#define SMITH_DEVEL    1
+#define SMITH_VERSION "0.9.24"
+#define SMITH_DEVEL    0
 
 
 
