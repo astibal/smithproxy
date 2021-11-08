@@ -32,6 +32,12 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 * [ ] memory pool ONLY execution
 * [ ] routing - DNAT fixed, SNI-based, load-balanced
 
+## What's new in 0.9.25
+
+hotfix release
+
+* fixed problem in smithproxy start when upgrading config file
+
 ## What's new in 0.9.24
 * added 'routing' configuration element, currently, DNAT can be configured (more to come)
 * improve a bit SNI bypass, which now supports '*.example.com' notation
