@@ -304,7 +304,7 @@ bool CfgFactory::upgrade(std::string const& from) {
 
     std::cout << "upgrade check: " << from << " -> " << SMITH_VERSION  << std::endl;
 
-    if(version_compare("0.9.23", SMITH_VERSION).value_or(-1) > 0) {
+    if(version_compare(SMITH_VERSION, "0.9.23").value_or(-1) > 0) {
         return upgrade_to_0_9_23();
     }
 
