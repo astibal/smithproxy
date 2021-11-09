@@ -127,7 +127,7 @@ void QueueLogger::run_queue(std::shared_ptr<QueueLogger> log_src) {
 }
 
 std::thread *create_log_writer () {
-    std::thread * writer_thread = new std::thread([]() { 
+    auto* writer_thread = new std::thread([]() {
         auto log_ptr = Log::get();
         auto q_logger = std::dynamic_pointer_cast<QueueLogger>(log_ptr);
         

@@ -53,7 +53,7 @@ namespace sx::fs {
 
 
     bool is_dir(std::string const& v) {
-        auto log = sx::fs::get_log();
+        auto& log = sx::fs::get_log();
 
         if (  struct stat sb{} ; ::stat(v.c_str(), &sb) >= 0) {
             _deb("is_dir: '%s' exists", v.c_str());
@@ -71,7 +71,7 @@ namespace sx::fs {
     }
 
     bool is_file(std::string const& v) {
-        auto log = sx::fs::get_log();
+        auto& log = sx::fs::get_log();
 
         if (struct stat sb{}; ::stat(v.c_str(), &sb) >= 0) {
             _deb("is_file: '%s' exists", v.c_str());
@@ -90,7 +90,7 @@ namespace sx::fs {
     }
 
     bool is_basedir(std::string const& v) {
-        auto log = sx::fs::get_log();
+        auto& log = sx::fs::get_log();
 
         auto path = sx::mem::unique_mpool_alloc(v.size());
 

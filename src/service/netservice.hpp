@@ -78,7 +78,7 @@ template <class Listener, class Com, typename port_type>
 std::vector<Listener*> NetworkServiceFactory::prepare_listener (port_type port, std::string const &friendly_name, int sub_workers,
                                                     proxyType type) {
 
-    auto log = NetworkServiceFactory::log();
+    auto& log = NetworkServiceFactory::log();
 
     std::vector<Listener*> vec_toret;
 

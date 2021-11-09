@@ -1135,7 +1135,7 @@ bool write_value(Setting& setting, std::optional<std::string> string_value, cli_
 
 bool cfg_write_value(Setting& parent, bool create, std::string& varname, const std::vector<std::string> &values, cli_def* cli) {
 
-    auto log = logan::create("config");
+    static auto log = logan::create("config");
 
     bool ret_verdict = true;
     bool no_args_erases_array = true;
@@ -2363,7 +2363,7 @@ void cli_register_static(struct cli_def* cli) {
 
 void client_thread(int client_socket) {
 
-    auto log = logan::create("service");
+    static auto log = logan::create("service");
 
     struct cli_def *cli = cli_init();
 
@@ -2680,7 +2680,7 @@ void client_thread(int client_socket) {
 
 void cli_loop(short unsigned int port) {
 
-    auto log = logan::create("service");
+    static auto log = logan::create("service");
     sockaddr_in servaddr{};
     int on = 1;
 

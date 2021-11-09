@@ -1104,7 +1104,7 @@ int CfgFactory::load_db_policy () {
 
 int CfgFactory::policy_match (baseProxy *proxy) {
 
-    auto log = logan_lite("policy.rule");
+    auto& log = log::policy();
 
     std::lock_guard<std::recursive_mutex> l(lock_);
     

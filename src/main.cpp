@@ -109,7 +109,7 @@ void prepare_mem_debugs() {
 
 
 #ifndef BUILD_RELEASE
-        auto log = DaemonFactory::instance()->log;
+        auto& log = DaemonFactory::instance()->log;
 
         _war("openssl memory debug enabled");
 
@@ -148,7 +148,7 @@ void do_cleanup() {
 
 void prepare_tenanting(bool is_custom_file) {
 
-    auto log = DaemonFactory::instance()->log;
+    auto& log = DaemonFactory::instance()->log;
 
     std::string config_file_tenant = "/etc/smithproxy/smithproxy.%s.cfg";
     if(is_custom_file) {

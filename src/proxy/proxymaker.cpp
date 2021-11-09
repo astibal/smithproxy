@@ -386,7 +386,7 @@ namespace sx::proxymaker {
 
         bool enforce_nat = proxy->matched_policy() == POLICY_IMPLICIT_PASS;
 
-        auto log = logan_lite("proxy.snat");
+        auto& log = log::snat();
 
         // setup NAT
         if (not enforce_nat) {
