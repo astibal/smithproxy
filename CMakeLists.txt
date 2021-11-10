@@ -236,7 +236,10 @@ if(GTEST_FOUND)
             src/utils/tests/str_test.cpp
             src/inspect/tests/dns_tests.cpp
             src/ext/libcidr/cidr.cpp
+
+            src/policy/policy.cpp
             src/policy/tests/addrobj_test.cpp
+            src/policy/tests/policy_test.cpp
 
             socle/traflog/tests/test_pcapapi.cpp
             socle/traflog/tests/test_pcapng.cpp
@@ -244,6 +247,7 @@ if(GTEST_FOUND)
             socle/tests/tests_peering.cpp
             socle/common/tests/cache_tests.cpp
             socle/common/tests/inet_tests.cpp)
+
     target_link_libraries(sx_gtests gtest gtest_main socle_lib pthread crypto ssl)
 endif()
 
