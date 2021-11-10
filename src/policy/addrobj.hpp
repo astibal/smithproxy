@@ -41,6 +41,7 @@
 #define ADDROBJ_HPP_
 
 #include <utility>
+#include <vars.hpp>
 
 #include <ext/libcidr/cidr.hpp>
 #include <display.hpp>
@@ -50,6 +51,8 @@
 #include <policy/profiles.hpp>
 #include <policy/cfgelement.hpp>
 #include <ranges.hpp>
+
+using namespace socle;
 
 class AddressObject : public socle::sobject, public CfgElement {
 public:
@@ -73,10 +76,9 @@ public:
     explicit CidrAddress(std::string const& v) : AddressObject(), c_(cidr::cidr_from_str(v.c_str())) {}
 
     cidr::CIDR* cidr() { return c_; }
-    std::string ip(int flags) const {
-        char* temp = cidr_to_str(c_, flags);
-        std::string ret = string_format("%s", temp);
-        free(temp);
+    std::string ip(int flags = CIDR_ONLYADDR) const {
+        auto temp = raw::allocated(cidr_to_str(c_, flags));
+        std::string ret = string_format("%s", temp.value);
 
         return ret;
     }
@@ -86,15 +88,14 @@ public:
     bool ask_destroy() override { return false; };
 
     std::string to_string(int verbosity) const override {
-        char* temp = cidr_to_str(c_);
+        auto temp = raw::allocated(cidr_to_str(c_));
 
-        std::string ret = string_format("Cidr: %s",temp);
+        std::string ret = string_format("Cidr: %s",temp.value);
 
         if(!element_name().empty() && verbosity > iINF) {
             ret += string_format(" (name=%s)", element_name().c_str());
         }
 
-        free(temp);
         return ret;
     }
     
