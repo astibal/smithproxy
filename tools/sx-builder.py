@@ -45,6 +45,7 @@ build_group.add_argument('--proxy', type=str, nargs='?', help='hosts - localhost
 
 misc_group = top_group.add_argument_group()
 misc_group.add_argument('--list', action='store_true')
+misc_group.add_argument('--cleanup', action='store_true')
 misc_group.add_argument('--config', type=str, nargs=1, help="custom config file (default %s)" % (CFG_DEFAULT))
 
 
@@ -87,14 +88,21 @@ def list_dockers(arg_filter=None, out_filter=None):
     return to_ret
 
 
-def run_build(host, files, arg_http_proxy=None):
+def run_build(host, files, arg_http_proxy=None, arg_cleanup=False):
+
+    cmd_pre = ""
+    if arg_cleanup:
+        cmd_pre = "docker system prune -a -f\; "
 
     for dockerfile in files:       
-        cmd_base = "docker build --rm --no-cache --build-arg FTP_UPLOAD_PWD=%s \
+        cmd_base = cmd_pre + "docker build --rm --no-cache --build-arg FTP_UPLOAD_PWD=%s \
                             --build-arg FTP_UPLOAD_USER=%s \
                             --build-arg FTP_UPLOAD_PATH=%s \
                             --build-arg SX_BRANCH=%s" % (FTP_PASS, FTP_UPLOAD_USER, FTP_UPLOAD_PATH, SRC_BRANCH,)
-                            
+
+        # reset - cmd_pre is run only once
+        cmd_pre = ""
+
         tag = "echo \"===\"; date -R; echo \"%s: %s\"; echo \"===\"" % (host, dockerfile)
                             
         if arg_http_proxy:
@@ -162,6 +170,7 @@ if __name__ == '__main__':
         exclude = []
         dockerfiles = []
         http_proxy = None
+        cleanup = False
 
         if args.config:
             load_config(args.config[0])
@@ -190,12 +199,16 @@ if __name__ == '__main__':
             http_proxy = args.proxy
 
         if args.hosts:
+
+            if args.cleanup:
+                cleanup = True
+
             for h in args.hosts:
                 
                 pid = os.fork()
                 if pid == 0:
                     print("%s host child process: %s" % (h, str(dockerfiles)))
-                    run_build(h, dockerfiles, http_proxy)
+                    run_build(h, dockerfiles, arg_http_proxy=http_proxy, arg_cleanup=cleanup)
                     print("%s host child finished: %s" % (h, str(dockerfiles)))
                     sys.exit(0)
                 else:
