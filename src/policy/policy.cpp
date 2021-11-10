@@ -142,26 +142,23 @@ bool PolicyRule::match_addrgrp_cx(group_of_addresses &sources, baseHostCX* cx) {
         match = true;
 //                 _dia("PolicyRule: matched ");
     } else {
-        auto* l = cidr::cidr_from_str(cx->host().c_str());
+        auto l = CidrAddress(cx->host());
         for(auto const& comp: sources) {
             
-            if(comp->value()->match(l)) {
+            if(comp->value()->match(l.cidr())) {
                 if(*log.level() >= DIA) {
-                    char* a = cidr_to_str(l);
-                    _deb("PolicyRule::match_addrgrp_cx: comparing %s with rule %s: matched", a, comp->value()->str().c_str());
-                    free(a);
+                    auto a = raw::allocated(cidr_to_str(l.cidr()));
+                    _deb("PolicyRule::match_addrgrp_cx: comparing %s with rule %s: matched", a.value, comp->value()->str().c_str());
                 }
                 match = true;
                 break;
             } else {
                 if(*log.level() >= DIA) {
-                    char* a = cidr_to_str(l);
-                    _deb("PolicyRule::match_addrgrp_cx: comparing %s with rule %s: not matched", a, comp->value()->str().c_str());
-                    free(a);
+                    auto a = raw::allocated(cidr_to_str(l.cidr()));
+                    _deb("PolicyRule::match_addrgrp_cx: comparing %s with rule %s: not matched", a.value, comp->value()->str().c_str());
                 }
             }
         }
-        cidr_free(l);
     }
 
     return match;
