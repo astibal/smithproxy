@@ -171,7 +171,7 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     {
         std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
 
-        if (CfgFactory::get()->db_policy_list.at(matched_policy())->nat == POLICY_NAT_NONE) {
+        if (CfgFactory::get()->db_policy_list.at(matched_policy())->nat == PolicyRule::POLICY_NAT_NONE) {
             target_cx->com()->nonlocal_src(true);
             target_cx->com()->nonlocal_src_host() = h;
             target_cx->com()->nonlocal_src_port() = std::stoi(p);

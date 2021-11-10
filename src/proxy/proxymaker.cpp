@@ -134,7 +134,7 @@ namespace sx::proxymaker {
             // bypass ssl com to VIP
             bypass_cx(proxy->first_left());
             bypass_cx(proxy->first_right());
-            policy_num = POLICY_IMPLICIT_PASS;
+            policy_num = PolicyRule::POLICY_IMPLICIT_PASS;
         } else {
             policy_num = CfgFactory::get()->policy_apply(proxy->first_left(), proxy);
         }
@@ -384,14 +384,14 @@ namespace sx::proxymaker {
         auto *target_cx = proxy->first_right();
         if (not target_cx or not source_cx) return false;
 
-        bool enforce_nat = proxy->matched_policy() == POLICY_IMPLICIT_PASS;
+        bool enforce_nat = proxy->matched_policy() == PolicyRule::POLICY_IMPLICIT_PASS;
 
         auto const& log = log::snat();
 
         // setup NAT
         if (not enforce_nat) {
             try {
-                if (CfgFactory::get()->db_policy_list.at(proxy->matched_policy())->nat == POLICY_NAT_NONE) {
+                if (CfgFactory::get()->db_policy_list.at(proxy->matched_policy())->nat == PolicyRule::POLICY_NAT_NONE) {
 
                     target_cx->com()->nonlocal_src_port() = std::stoi(source_port);
                     target_cx->com()->nonlocal_src_host() = source_host;

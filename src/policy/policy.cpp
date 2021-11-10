@@ -135,59 +135,55 @@ std::string PolicyRule::to_string(int verbosity) const {
 }
 
 
-bool PolicyRule::match_addrgrp_cx(group_of_addresses &sources, baseHostCX* cx) {
+bool PolicyRule::match_addrgrp_cx(group_of_addresses const& sources, baseHostCX* cx) const {
     bool match = false;
     
-    if(sources.empty()) {
-        match = true;
-//                 _dia("PolicyRule: matched ");
-    } else {
-        auto l = CidrAddress(cx->host());
-        for(auto const& comp: sources) {
-            
-            if(comp->value()->match(l.cidr())) {
-                if(*log.level() >= DIA) {
-                    auto a = raw::allocated(cidr_to_str(l.cidr()));
-                    _deb("PolicyRule::match_addrgrp_cx: comparing %s with rule %s: matched", a.value, comp->value()->str().c_str());
-                }
-                match = true;
-                break;
-            } else {
-                if(*log.level() >= DIA) {
-                    auto a = raw::allocated(cidr_to_str(l.cidr()));
-                    _deb("PolicyRule::match_addrgrp_cx: comparing %s with rule %s: not matched", a.value, comp->value()->str().c_str());
-                }
-            }
+     if(sources.empty()) {
+         return true;
+    }
+
+    auto l = CidrAddress(cx->host());
+
+    for(auto const& comp: sources) {
+
+        if(comp->value()->match(l.cidr())) {
+            _deb("PolicyRule::match_addrgrp_cx: comparing %s with rule %s: matched", l.ip().c_str(), comp->value()->str().c_str());
+            match = true;
+            break;
+        } else {
+            _deb("PolicyRule::match_addrgrp_cx: comparing %s with rule %s: not matched", l.ip().c_str(), comp->value()->str().c_str());
         }
     }
 
     return match;
 }
 
-bool PolicyRule::match_rangegrp_cx(group_of_ports& ranges, baseHostCX* cx) {
+bool PolicyRule::match_rangegrp_cx(group_of_ports const& ranges, baseHostCX* cx) const {
     bool match = false;
     
     if(ranges.empty()) {
-        match = true;
-//                 _dia("PolicyRule: matched ");
-    } else {
-        int p = std::stoi(cx->port());
-        for(auto const& comp: ranges) {
+        return  true;
+    }
 
-            if((p >= comp->value().first) && (p <= comp->value().second)) {
-                _deb("PolicyRule::match_rangergrp_cx: comparing %d with %s: matched", p, rangetos(comp->value()).c_str());
-                match = true;
-                break;
-            } else {
-                _deb("PolicyRule::match_rangergrp_cx: comparing %d with %s: not matched", p, rangetos(comp->value()).c_str());
-            }
+    int p = safe_val(cx->port());
+
+    if(p < 0) return false;
+
+    for(auto const& comp: ranges) {
+
+        if((p >= comp->value().first) && (p <= comp->value().second)) {
+            _deb("PolicyRule::match_rangergrp_cx: comparing %d with %s: matched", p, rangetos(comp->value()).c_str());
+            match = true;
+            break;
+        } else {
+            _deb("PolicyRule::match_rangergrp_cx: comparing %d with %s: not matched", p, rangetos(comp->value()).c_str());
         }
     }
 
     return match;
 }
 
-bool PolicyRule::match_rangegrp_vecx(group_of_ports& ranges, std::vector< baseHostCX* >& vecx) {
+bool PolicyRule::match_rangegrp_vecx(group_of_ports const& ranges, std::vector<baseHostCX*> const& vecx) const {
     bool match = false;
 
     if(vecx.empty()) return true;
@@ -209,7 +205,7 @@ bool PolicyRule::match_rangegrp_vecx(group_of_ports& ranges, std::vector< baseHo
 }
 
 
-bool PolicyRule::match_addrgrp_vecx(group_of_addresses &sources, std::vector< baseHostCX* >& vecx) {
+bool PolicyRule::match_addrgrp_vecx(group_of_addresses const& sources, std::vector<baseHostCX*> const& vecx)  const{
     bool match = false;
 
     if(vecx.empty()) return true;
@@ -230,7 +226,7 @@ bool PolicyRule::match_addrgrp_vecx(group_of_addresses &sources, std::vector< ba
     return match;
 }
 
-int PolicyRule::sock_2_net(int sock_type) {
+int PolicyRule::sock_2_net(int sock_type) const {
     switch (sock_type) {
         case SOCK_STREAM:
             return 6;
@@ -241,7 +237,7 @@ int PolicyRule::sock_2_net(int sock_type) {
     }
 }
 
-bool PolicyRule::match_proto_cx(int acl_proto, baseHostCX* cx) {
+bool PolicyRule::match_proto_cx(int acl_proto, const baseHostCX *cx) {
 
     bool ret = false;
 

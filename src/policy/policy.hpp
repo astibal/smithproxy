@@ -53,18 +53,19 @@
 
 #include <sobject.hpp>
 
-#define POLICY_ACTION_DENY  0
-#define POLICY_ACTION_PASS  1
-
-#define POLICY_NAT_NONE     0
-#define POLICY_NAT_AUTO     1
-#define POLICY_NAT_POOL     2
-
-#define POLICY_IMPLICIT_PASS 65500;
-
 class PolicyRule : public ProfileList , public CfgElement, public socle::sobject {
 
 public:
+
+    constexpr static int POLICY_ACTION_DENY = 0;
+    constexpr static int POLICY_ACTION_PASS = 1;
+
+    constexpr static int POLICY_NAT_NONE = 0;
+    constexpr static int POLICY_NAT_AUTO = 1;
+    constexpr static int POLICY_NAT_POOL = 2;
+    constexpr static int POLICY_IMPLICIT_PASS = 65500;
+
+
     using group_of_ports = std::vector<std::shared_ptr<CfgRange>>;
     using group_of_addresses = std::vector<std::shared_ptr<CfgAddress>>;
 
@@ -101,15 +102,15 @@ public:
     bool match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r);
 
 
-    int sock_2_net(int sock_type);
-    bool match_proto_cx(int acl_proto, baseHostCX* cx);
+    int sock_2_net(int sock_type) const;
+    bool match_proto_cx(int acl_proto, const baseHostCX *cx);
     bool match_proto_vecx(int acl_proto, std::vector<baseHostCX*> const& vec_cx);
 
-    bool match_addrgrp_cx(group_of_addresses &sources, baseHostCX* cx);
-    bool match_addrgrp_vecx(group_of_addresses &sources, std::vector<baseHostCX*>& vecx);
+    bool match_addrgrp_cx(group_of_addresses const& sources, baseHostCX* cx) const;
+    bool match_addrgrp_vecx(group_of_addresses const& sources, std::vector<baseHostCX*> const& vecx)const;
 
-    bool match_rangegrp_cx(group_of_ports& ranges,baseHostCX* cx);
-    bool match_rangegrp_vecx(group_of_ports& ranges,std::vector<baseHostCX*>& vecx);
+    bool match_rangegrp_cx(group_of_ports const& ranges,baseHostCX* cx) const;
+    bool match_rangegrp_vecx(group_of_ports const& ranges,std::vector<baseHostCX*> const& vecx) const;
 
     bool ask_destroy() override { return false; }
     std::string to_string(int verbosity) const override;

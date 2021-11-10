@@ -933,50 +933,50 @@ int CfgFactory::load_db_policy () {
             }
             
             if(load_if_exists(cur_object, "action", action)) {
-                int r_a = POLICY_ACTION_PASS;
+                int r_a = PolicyRule::POLICY_ACTION_PASS;
                 if(action == "deny") {
                     _dia("cfgapi_load_policy[#%d]: action: deny", i);
-                    r_a = POLICY_ACTION_DENY;
+                    r_a = PolicyRule::POLICY_ACTION_DENY;
                     rule->action_name = action;
 
                 } else if (action == "accept"){
                     _dia("cfgapi_load_policy[#%d]: action: accept", i);
-                    r_a = POLICY_ACTION_PASS;
+                    r_a = PolicyRule::POLICY_ACTION_PASS;
                     rule->action_name = action;
                 } else {
                     _dia("cfgapi_load_policy[#%d]: action: unknown action '%s'", i, action.c_str());
-                    r_a  = POLICY_ACTION_DENY;
+                    r_a  = PolicyRule::POLICY_ACTION_DENY;
                     error = true;
                 }
                 
                 rule->action = r_a;
             } else {
-                rule->action = POLICY_ACTION_DENY;
+                rule->action = PolicyRule::POLICY_ACTION_DENY;
                 rule->action_name = "deny";
             }
 
             if(load_if_exists(cur_object, "nat", nat)) {
-                int nat_a = POLICY_NAT_NONE;
+                int nat_a = PolicyRule::POLICY_NAT_NONE;
                 
                 if(nat == "none") {
                     _dia("cfgapi_load_policy[#%d]: nat: none", i);
-                    nat_a = POLICY_NAT_NONE;
+                    nat_a = PolicyRule::POLICY_NAT_NONE;
                     rule->nat_name = nat;
 
                 } else if (nat == "auto"){
                     _dia("cfgapi_load_policy[#%d]: nat: auto", i);
-                    nat_a = POLICY_NAT_AUTO;
+                    nat_a = PolicyRule::POLICY_NAT_AUTO;
                     rule->nat_name = nat;
                 } else {
                     _dia("cfgapi_load_policy[#%d]: nat: unknown nat method '%s'", i, nat.c_str());
-                    nat_a  = POLICY_NAT_NONE;
+                    nat_a  = PolicyRule::POLICY_NAT_NONE;
                     rule->nat_name = "none";
                     error = true;
                 }
                 
                 rule->nat = nat_a;
             } else {
-                rule->nat = POLICY_NAT_NONE;
+                rule->nat = PolicyRule::POLICY_NAT_NONE;
             }            
             
             
