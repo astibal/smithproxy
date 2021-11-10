@@ -64,49 +64,6 @@
 #include <inspect/dnsinspector.hpp>
 #include <inspect/pyinspector.hpp>
 
-CfgFactory::CfgFactory(): CfgFactoryBase() , args_debug_flag(NON), syslog_level(INF) {
-
-    listen_tcp_port = "50080";
-    listen_tls_port = "50443";
-    listen_dtls_port = "50443";
-    listen_udp_port = "50080";
-    listen_socks_port = "1080";
-
-    listen_tcp_port_base = "50080";
-    listen_tls_port_base = "50443";
-    listen_dtls_port_base = "50443";
-    listen_udp_port_base = "50080";
-    listen_socks_port_base = "1080";
-
-    config_file_check_only = false;
-
-    dir_msg_templates = "/etc/smithproxy/msg/en/";
-
-
-    num_workers_tcp = 0;
-    num_workers_tls = 0;
-    num_workers_dtls = 0;
-    num_workers_udp = 0;
-    num_workers_socks = 0;
-
-    syslog_server = "";
-    syslog_port = 514;
-    syslog_facility = 23; //local7
-    syslog_family = 4;
-
-
-    // multi-tenancy support
-    tenant_name = "default";
-    tenant_index = 0;
-
-
-    traflog_dir = "/var/local/smithproxy/data";
-    //traflog_file_prefix = "";
-    traflog_file_suffix = "pcapng";
-
-    log_console = false;
-}
-
 std::map<std::string, std::shared_ptr<CfgElement>>& CfgFactory::section_db(std::string const& section) {
     if(section == "proto_objects" or section == "proto_objects.[x]") {
         return db_proto;
@@ -148,7 +105,7 @@ std::map<std::string, std::shared_ptr<CfgElement>>& CfgFactory::section_db(std::
 
 bool CfgFactory::cfgapi_init(const char* fnm) {
     
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
     
     _dia("Reading config file");
     
@@ -171,7 +128,7 @@ bool CfgFactory::cfgapi_init(const char* fnm) {
 }
 
 std::shared_ptr<CfgAddress> CfgFactory::lookup_address (const char *name) {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
     
     if(db_address.find(name) != db_address.end()) {
         return std::dynamic_pointer_cast<CfgAddress>(db_address[name]);
@@ -181,7 +138,7 @@ std::shared_ptr<CfgAddress> CfgFactory::lookup_address (const char *name) {
 }
 
 std::shared_ptr<CfgRange> CfgFactory::lookup_port (const char *name) {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
     
     if(db_port.find(name) != db_port.end()) {
         return std::dynamic_pointer_cast<CfgRange>(db_port[name]);
@@ -191,7 +148,7 @@ std::shared_ptr<CfgRange> CfgFactory::lookup_port (const char *name) {
 }
 
 std::shared_ptr<CfgUint8> CfgFactory::lookup_proto (const char *name) {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
     
     if(db_proto.find(name) != db_proto.end()) {
         return std::dynamic_pointer_cast<CfgUint8>(db_proto[name]);
@@ -201,7 +158,7 @@ std::shared_ptr<CfgUint8> CfgFactory::lookup_proto (const char *name) {
 }
 
 std::shared_ptr<ProfileContent> CfgFactory::lookup_prof_content (const char *name) {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
     
     if(db_prof_content.find(name) != db_prof_content.end()) {
         return std::dynamic_pointer_cast<ProfileContent>(db_prof_content[name]);
@@ -211,7 +168,7 @@ std::shared_ptr<ProfileContent> CfgFactory::lookup_prof_content (const char *nam
 }
 
 std::shared_ptr<ProfileDetection> CfgFactory::lookup_prof_detection (const char *name) {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
     
     if(db_prof_detection.find(name) != db_prof_detection.end()) {
         return std::dynamic_pointer_cast<ProfileDetection>(db_prof_detection[name]);
@@ -221,7 +178,7 @@ std::shared_ptr<ProfileDetection> CfgFactory::lookup_prof_detection (const char 
 }
 
 std::shared_ptr<ProfileTls> CfgFactory::lookup_prof_tls (const char *name) {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
     
     if(db_prof_tls.find(name) != db_prof_tls.end()) {
         return std::dynamic_pointer_cast<ProfileTls>(db_prof_tls[name]);
@@ -231,7 +188,7 @@ std::shared_ptr<ProfileTls> CfgFactory::lookup_prof_tls (const char *name) {
 }
 
 std::shared_ptr<ProfileAlgDns> CfgFactory::lookup_prof_alg_dns (const char *name) {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
     
     if(db_prof_alg_dns.find(name) != db_prof_alg_dns.end()) {
         return std::dynamic_pointer_cast<ProfileAlgDns>(db_prof_alg_dns[name]);
@@ -242,7 +199,7 @@ std::shared_ptr<ProfileAlgDns> CfgFactory::lookup_prof_alg_dns (const char *name
 }
 
 std::shared_ptr<ProfileScript> CfgFactory::lookup_prof_script(const char * name)  {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
 
     if(db_prof_script.find(name) != db_prof_script.end()) {
         return std::dynamic_pointer_cast<ProfileScript>(db_prof_script[name]);
@@ -253,7 +210,7 @@ std::shared_ptr<ProfileScript> CfgFactory::lookup_prof_script(const char * name)
 }
 
 std::shared_ptr<ProfileAuth> CfgFactory::lookup_prof_auth (const char *name) {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
     
     if(db_prof_auth.find(name) != db_prof_auth.end()) {
         return std::dynamic_pointer_cast<ProfileAuth>(db_prof_auth[name]);
@@ -263,7 +220,7 @@ std::shared_ptr<ProfileAuth> CfgFactory::lookup_prof_auth (const char *name) {
 }
 
 std::shared_ptr<ProfileRouting> CfgFactory::lookup_prof_routing(const char * name)  {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
 
     if(db_routing.find(name) != db_routing.end()) {
         return std::dynamic_pointer_cast<ProfileRouting>(db_routing[name]);
@@ -402,7 +359,7 @@ bool CfgFactory::upgrade_and_save() {
 
 bool CfgFactory::load_internal() {
 
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
 
     if (!cfgapi.getRoot().exists("*_internal_*"))
         return false;
@@ -413,7 +370,7 @@ bool CfgFactory::load_internal() {
 
 bool CfgFactory::load_settings () {
 
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
 
     if(! cfgapi.getRoot().exists("settings"))
         return false;
@@ -530,7 +487,7 @@ bool CfgFactory::load_settings () {
 
 int CfgFactory::load_debug() {
 
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
 
     if(! cfgapi.getRoot().exists("debug")) {
 
@@ -565,7 +522,7 @@ int CfgFactory::load_debug() {
 }
 
 int CfgFactory::load_db_address () {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
     
     int num = 0;
     
@@ -632,7 +589,7 @@ int CfgFactory::load_db_address () {
 
 int CfgFactory::load_db_port () {
     
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
     
     int num = 0;
 
@@ -691,7 +648,7 @@ int CfgFactory::load_db_port () {
 
 int CfgFactory::load_db_proto () {
     
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
     
     int num = 0;
 
@@ -744,7 +701,7 @@ int CfgFactory::load_db_proto () {
 
 int CfgFactory::load_db_policy () {
     
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
     
     int num = 0;
 
@@ -1106,7 +1063,7 @@ int CfgFactory::policy_match (baseProxy *proxy) {
 
     auto const& log = log::policy();
 
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
     
     int x = 0;
     for( auto const& rule: db_policy_list) {
@@ -1118,14 +1075,14 @@ int CfgFactory::policy_match (baseProxy *proxy) {
 
             {
                 // shadowing own log desired - wanting to log in policy rule context
-                auto &log = rule->get_log();
+                auto const& log = rule->get_log();
                 _dia(" => policy #%d matched!", x);
             }
 
             return x;
         } else {
             // shadowing own log desired - wanting to log in policy rule context
-            auto &log = rule->get_log();
+            auto const& log = rule->get_log();
             _dia(" => policy #%d NOT matched!", x);
         }
         
@@ -1137,7 +1094,7 @@ int CfgFactory::policy_match (baseProxy *proxy) {
 }
 
 int CfgFactory::policy_match (std::vector<baseHostCX *> &left, std::vector<baseHostCX *> &right) {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
     
     int x = 0;
     for( auto const& rule: db_policy_list) {
@@ -1169,7 +1126,7 @@ int CfgFactory::policy_match (std::vector<baseHostCX *> &left, std::vector<baseH
 }    
 
 int CfgFactory::policy_action (int index) {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
     
     if(index < 0) {
         return -1;
@@ -1184,7 +1141,7 @@ int CfgFactory::policy_action (int index) {
 }
 
 std::shared_ptr<ProfileContent> CfgFactory::policy_prof_content (int index) {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
     
     if(index < 0) {
         return nullptr;
@@ -1199,7 +1156,7 @@ std::shared_ptr<ProfileContent> CfgFactory::policy_prof_content (int index) {
 }
 
 std::shared_ptr<ProfileDetection> CfgFactory::policy_prof_detection (int index) {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
     
     if(index < 0) {
         return nullptr;
@@ -1214,7 +1171,7 @@ std::shared_ptr<ProfileDetection> CfgFactory::policy_prof_detection (int index) 
 }
 
 std::shared_ptr<ProfileTls> CfgFactory::policy_prof_tls (int index) {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
     
     if(index < 0) {
         return nullptr;
@@ -1230,7 +1187,7 @@ std::shared_ptr<ProfileTls> CfgFactory::policy_prof_tls (int index) {
 
 
 std::shared_ptr<ProfileAlgDns> CfgFactory::policy_prof_alg_dns (int index) {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
     
     if(index < 0) {
         return nullptr;
@@ -1246,7 +1203,7 @@ std::shared_ptr<ProfileAlgDns> CfgFactory::policy_prof_alg_dns (int index) {
 
 [[maybe_unused]]
 std::shared_ptr<ProfileScript> CfgFactory::policy_prof_script(int index) {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
 
     if(index < 0) {
         return nullptr;
@@ -1263,7 +1220,7 @@ std::shared_ptr<ProfileScript> CfgFactory::policy_prof_script(int index) {
 
 
 std::shared_ptr<ProfileAuth> CfgFactory::policy_prof_auth (int index) {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
     
     if(index < 0) {
         return nullptr;
@@ -1280,7 +1237,7 @@ std::shared_ptr<ProfileAuth> CfgFactory::policy_prof_auth (int index) {
 
 
 int CfgFactory::load_db_prof_detection () {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
     
     int num = 0;
 
@@ -1381,7 +1338,7 @@ bool CfgFactory::load_db_prof_content_write_format(Setting& cur_object, ProfileC
 }
 
 int CfgFactory::load_db_prof_content () {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
 
 
     _dia("load_db_prof_content: start");
@@ -1391,7 +1348,7 @@ int CfgFactory::load_db_prof_content () {
     int num = cfgapi.getRoot()["content_profiles"].getLength();
     _dia("load_db_prof_content: found %d objects", num);
 
-    Setting& curr_set = cfgapi.getRoot()["content_profiles"];
+    Setting const& curr_set = cfgapi.getRoot()["content_profiles"];
 
     for( int i = 0; i < num; i++) {
         std::string name;
@@ -1440,7 +1397,7 @@ int CfgFactory::load_db_tls_ca() {
 }
 
 int CfgFactory::load_db_prof_tls () {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
     
     int num = 0;
 
@@ -1541,7 +1498,7 @@ int CfgFactory::load_db_prof_tls () {
 }
 
 int CfgFactory::load_db_prof_alg_dns () {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
 
     int num = 0;
     _dia("cfgapi_load_obj_alg_dns_profile: start");
@@ -1587,7 +1544,7 @@ int CfgFactory::load_db_prof_alg_dns () {
 
 [[maybe_unused]]
 int CfgFactory::load_db_prof_script () {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
 
     int num = 0;
     _dia("load_db_prof_script: start");
@@ -1632,7 +1589,7 @@ int CfgFactory::load_db_prof_script () {
 
 
 int CfgFactory::load_db_prof_auth () {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
     
     int num = 0;
 
@@ -1769,7 +1726,7 @@ int CfgFactory::load_db_prof_auth () {
 
 
 int CfgFactory::cleanup_db_address () {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
     
     int r = db_address.size();
     db_address.clear();
@@ -1779,7 +1736,7 @@ int CfgFactory::cleanup_db_address () {
 }
 
 int CfgFactory::cleanup_db_policy () {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
     
     int r = db_policy_list.size();
     db_policy_list.clear();
@@ -1790,7 +1747,7 @@ int CfgFactory::cleanup_db_policy () {
 }
 
 int CfgFactory::cleanup_db_port () {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
     
     int r = db_port.size();
     db_port.clear();
@@ -1799,7 +1756,7 @@ int CfgFactory::cleanup_db_port () {
 }
 
 int CfgFactory::cleanup_db_proto () {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
     
     int r = db_proto.size();
     db_proto.clear();
@@ -1809,7 +1766,7 @@ int CfgFactory::cleanup_db_proto () {
 
 
 int CfgFactory::cleanup_db_prof_content () {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
     
     int r = db_prof_content.size();
     db_prof_content.clear();
@@ -1817,7 +1774,7 @@ int CfgFactory::cleanup_db_prof_content () {
     return r;
 }
 int CfgFactory::cleanup_db_prof_detection () {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
     
     int r = db_prof_detection.size();
     db_prof_detection.clear();
@@ -1826,12 +1783,12 @@ int CfgFactory::cleanup_db_prof_detection () {
 }
 
 int CfgFactory::cleanup_db_tls_ca () {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
     return 0;
 }
 
 int CfgFactory::cleanup_db_prof_tls () {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
     
     int r = db_prof_tls.size();
     db_prof_tls.clear();
@@ -1840,7 +1797,7 @@ int CfgFactory::cleanup_db_prof_tls () {
 }
 
 int CfgFactory::cleanup_db_prof_alg_dns () {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
     
     int r = db_prof_alg_dns.size();
     db_prof_alg_dns.clear();
@@ -1849,7 +1806,7 @@ int CfgFactory::cleanup_db_prof_alg_dns () {
 }
 
 int CfgFactory::cleanup_db_prof_script () {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
 
     int r = db_prof_script.size();
     if(r > 0)
@@ -1860,7 +1817,7 @@ int CfgFactory::cleanup_db_prof_script () {
 
 
 int CfgFactory::cleanup_db_prof_auth () {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
     
     int r = db_prof_auth.size();
     db_prof_auth.clear();
@@ -2144,15 +2101,14 @@ int CfgFactory::policy_apply (baseHostCX *originator, baseProxy *proxy, int matc
 
     auto const& log = log::policy();
 
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
     
     int policy_num = matched_policy;
     if(policy_num < 1) {
         policy_num = policy_match(proxy);
     }
 
-    int verdict = policy_action(policy_num);
-    if(verdict == POLICY_ACTION_PASS) {
+    if(auto verdict = policy_action(policy_num); verdict == PolicyRule::POLICY_ACTION_PASS) {
 
         auto pc = policy_prof_content(policy_num);
         auto pd = policy_prof_detection(policy_num);
@@ -2179,31 +2135,23 @@ int CfgFactory::policy_apply (baseHostCX *originator, baseProxy *proxy, int matc
         
         
         /* Processing detection profile */
-        if (pd) {
-            if(prof_detect_apply(originator, proxy, pd)) {
-                pd_name = pd->element_name().c_str();
-            }
+        if (pd and prof_detect_apply(originator, proxy, pd)) {
+            pd_name = pd->element_name().c_str();
         }
         
         /* Processing TLS profile*/
-        if (pt) {
-            if(prof_tls_apply(originator, proxy, pt)) {
-                pt_name = pt->element_name().c_str();
-            }
+        if (pt and prof_tls_apply(originator, proxy, pt)) {
+            pt_name = pt->element_name().c_str();
         }
         
         /* Processing ALG : DNS*/
-        if (p_alg_dns) {
-            if (prof_alg_dns_apply(originator, proxy, p_alg_dns)) {
-                algs_name += p_alg_dns->element_name();
-            }
+        if (p_alg_dns and prof_alg_dns_apply(originator, proxy, p_alg_dns)) {
+            algs_name += p_alg_dns->element_name();
         }
 
-        
-        auto* mitm_proxy = dynamic_cast<MitmProxy*>(proxy);
-        
+
         /* Processing Auth profile */
-        if(pa && mitm_proxy) {
+        if(auto* mitm_proxy = dynamic_cast<MitmProxy*>(proxy); mitm_proxy and pa) {
             // auth is applied on proxy
             mitm_proxy->opt_auth_authenticate = pa->authenticate;
             mitm_proxy->opt_auth_resolve = pa->resolve;
@@ -2495,7 +2443,7 @@ int CfgFactory::save_address_objects(Config& ex) const {
 
 
 int CfgFactory::cleanup_db_routing () {
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
 
     int r = db_routing.size();
     db_routing.clear();
@@ -2505,7 +2453,7 @@ int CfgFactory::cleanup_db_routing () {
 
 int CfgFactory::load_db_routing () {
 
-    std::lock_guard<std::recursive_mutex> l(lock_);
+    std::scoped_lock<std::recursive_mutex> l(lock_);
 
     int loaded = 0;
 

@@ -60,6 +60,7 @@ class CfgFactoryBase {
 public:
     CfgFactoryBase(): log(log::config()) {}
     CfgFactoryBase(CfgFactoryBase const &) = delete;
+    virtual ~CfgFactoryBase() = default;
     void operator=(const CfgFactoryBase&) = delete;
 
     logan_lite& log;
@@ -76,8 +77,8 @@ public:
     };
 
     std::string config_file;
-    int tenant_index = -1;
-    std::string tenant_name;
+    int tenant_index = 0;
+    std::string tenant_name = "default";
 
     loglevel internal_init_level = INF;
     loglevel cli_init_level = NON;
@@ -96,10 +97,10 @@ class CfgFactory : public CfgFactoryBase {
 
 public:
 
-    CfgFactory();
+    CfgFactory() = default;
     CfgFactory(CfgFactory const &) = delete;
     void operator=(const CfgFactory&) = delete;
-    virtual ~CfgFactory() { cleanup(); }
+    ~CfgFactory() override { cleanup(); }
 
     static void init() {
         self = std::make_shared<CfgFactory>();
@@ -114,42 +115,42 @@ public:
     static Setting& cfg_root() { return get()->cfgapi.getRoot(); }
     static Config&  cfg_obj() { return get()->cfgapi; }
 
-    loglevel args_debug_flag;
+    loglevel args_debug_flag = NON;
 
     std::string internal_version;
 
-    std::string listen_tcp_port_base;
-    std::string listen_tls_port_base;
-    std::string listen_dtls_port_base;
-    std::string listen_udp_port_base;
-    std::string listen_socks_port_base;
+    std::string listen_tcp_port_base = "50080";
+    std::string listen_tls_port_base = "50443";
+    std::string listen_dtls_port_base = "50443";
+    std::string listen_udp_port_base = "50080";
+    std::string listen_socks_port_base = "1080";
 
-    std::string listen_tcp_port;
-    std::string listen_tls_port;
-    std::string listen_dtls_port;
-    std::string listen_udp_port;
-    std::string listen_socks_port;
+    std::string listen_tcp_port = "50080";
+    std::string listen_tls_port = "50443";
+    std::string listen_dtls_port = "50443";
+    std::string listen_udp_port = "50080";
+    std::string listen_socks_port = "1080";
 
-    std::string dir_msg_templates;
+    std::string dir_msg_templates = "/etc/smithproxy/msg/en/";
 
-    bool config_file_check_only;
+    bool config_file_check_only = false;
 
     bool accept_tproxy = true;
     bool accept_redirect = true;
     bool accept_socks = true;
 
-    int num_workers_tcp;
-    int num_workers_tls;
-    int num_workers_dtls;
-    int num_workers_udp;
-    int num_workers_socks;
+    int num_workers_tcp = 0;
+    int num_workers_tls = 0;
+    int num_workers_dtls = 0;
+    int num_workers_udp  = 0;
+    int num_workers_socks = 0;
 
 
     std::string syslog_server;
-    int syslog_port;
-    int syslog_facility;
-    loglevel syslog_level;
-    int syslog_family;
+    int syslog_port     = 514;
+    int syslog_facility = 23; //local7
+    int syslog_family   = 4;
+    loglevel syslog_level = INF;
 
 
     std::string log_file_base;
@@ -157,7 +158,7 @@ public:
 
     std::string log_file;
     std::string sslkeylog_file;
-    bool log_console{};
+    bool log_console = false;
 
 
     // macro to define maps attribute, plus accessor functions
@@ -203,9 +204,9 @@ public:
     std::string tenant_magic_ip;
 
 
-    std::string traflog_dir;
+    std::string traflog_dir = "/var/local/smithproxy/data";
     std::string traflog_file_prefix;
-    std::string traflog_file_suffix;
+    std::string traflog_file_suffix = "pcapng";
 
 
     std::vector<std::string> db_nameservers;
