@@ -1136,7 +1136,7 @@ int CfgFactory::policy_action (int index) {
         return db_policy_list.at(index)->action;
     } else {
         _dia("cfg_obj_policy_action[#%d]: out of bounds, deny", index);
-        return POLICY_ACTION_DENY;
+        return PolicyRule::POLICY_ACTION_DENY;
     }
 }
 
