@@ -67,7 +67,7 @@ std::thread* SmithProxy::create_identity_refresh_thread() {
 
 
     auto* id_thread = new std::thread([]() {
-        auto& log = instance().log;
+        auto const& log = instance().log;
 
         // give some time to init shm - don't run immediately
         // this is workaround for rare(?) race condition when shm is not
@@ -313,7 +313,7 @@ void SmithProxy::run() {
         CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
 
         auto this_daemon = DaemonFactory::instance();
-        auto& log = this_daemon->log;
+        auto const& log = this_daemon->log;
 
         _inf("Starting CLI");
         DaemonFactory::set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
@@ -334,7 +334,7 @@ void SmithProxy::run() {
                 CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
 
                 auto this_daemon = DaemonFactory::instance();
-                auto& log = this_daemon->log;
+                auto const& log = this_daemon->log;
 
                 DaemonFactory::set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
                 _dia("TCP listener: max file descriptors: %d", this_daemon->get_limit_fd());
@@ -518,7 +518,7 @@ void SmithProxy::stop() {
 int SmithProxy::load_signatures (libconfig::Config &cfg, const char *name, SignatureTree &signature_tree,
                                  int preferred_index) {
 
-    auto& log = instance().log;
+    auto const& log = instance().log;
 
     using namespace libconfig;
 
@@ -606,7 +606,7 @@ int SmithProxy::load_signatures (libconfig::Config &cfg, const char *name, Signa
 
 bool SmithProxy::init_syslog() {
 
-    auto& log = instance().log;
+    auto const& log = instance().log;
 
     // create UDP socket
     int syslog_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -671,7 +671,7 @@ bool SmithProxy::init_syslog() {
 bool SmithProxy::load_config(std::string& config_f, bool reload) {
     bool ret = true;
     auto this_daemon = DaemonFactory::instance();
-    auto& log = instance().log;
+    auto const& log = instance().log;
 
     using namespace libconfig;
     if(! CfgFactory::get()->cfgapi_init(config_f.c_str()) ) {

@@ -86,7 +86,7 @@ namespace sx::proxymaker {
         auto *new_proxy = new MitmProxy(left->com()->slave());
         if (not new_proxy or not left or not right) return nullptr;
 
-        auto& log = log::make();
+        auto const& log = log::make();
 
         // resolve internal name
         left->name();
@@ -117,7 +117,7 @@ namespace sx::proxymaker {
 
     bool policy (MitmProxy *proxy, bool implicit_allow) {
 
-        auto& log = log::policy();
+        auto const& log = log::policy();
 
         auto bypass_cx = [] (baseHostCX *cx) {
             auto *scom = dynamic_cast<SSLCom *>(cx->com());
@@ -177,7 +177,7 @@ namespace sx::proxymaker {
     using optional_string = std::optional<std::string>;
 
     std::pair<optional_string, optional_string> get_dnat_target(std::shared_ptr<ProfileRouting> rt) {
-        auto& log = log::routing();
+        auto const& log = log::routing();
 
         std::string ip;
         std::string port;
@@ -225,7 +225,7 @@ namespace sx::proxymaker {
     }
 
     bool route(baseProxy* proxy, std::shared_ptr<ProfileRouting> rt) {
-        auto& log = log::routing();
+        auto const& log = log::routing();
 
         if(not rt or not proxy) return false;
 
@@ -287,7 +287,7 @@ namespace sx::proxymaker {
 
         if (not left or not right) return false;
 
-        auto& log = log::authorize();
+        auto const& log = log::authorize();
 
         bool bad_auth = true;
 
@@ -334,7 +334,7 @@ namespace sx::proxymaker {
 
     bool authorize (MitmProxy *proxy) {
 
-        auto& log = log::authorize();
+        auto const& log = log::authorize();
 
         // resolve source information - is there an identity info for that IP?
         if (proxy->opt_auth_authenticate) {
@@ -386,7 +386,7 @@ namespace sx::proxymaker {
 
         bool enforce_nat = proxy->matched_policy() == POLICY_IMPLICIT_PASS;
 
-        auto& log = log::snat();
+        auto const& log = log::snat();
 
         // setup NAT
         if (not enforce_nat) {
@@ -417,7 +417,7 @@ namespace sx::proxymaker {
 
     bool connect (MasterProxy *owner, MitmProxy *new_proxy) {
 
-        auto& log = log::connect();
+        auto const& log = log::connect();
 
         if (owner and new_proxy) {
 

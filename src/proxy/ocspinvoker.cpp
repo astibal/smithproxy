@@ -64,12 +64,12 @@ std::unique_ptr<AsyncOcspInvoker> AsyncOcspInvoker::invoke(MitmProxy& proxy) {
                 new_caller->ocsp_->tap();
                 new_caller->parent_.tap();
 
-                auto& log = inet::ocsp::OcspFactory::log();
+                auto const& log = inet::ocsp::OcspFactory::log();
                 _not("deferred OCSP check ID 0x%lx", new_caller->ocsp_->oid());
 
                 return new_caller;
             } else {
-                auto& log = inet::ocsp::OcspFactory::log();
+                auto const& log = inet::ocsp::OcspFactory::log();
                 _err("peer certificates still null");
             }
         }
@@ -79,7 +79,7 @@ std::unique_ptr<AsyncOcspInvoker> AsyncOcspInvoker::invoke(MitmProxy& proxy) {
 
 void AsyncOcspInvoker::ssl_ocsp_callback(int response) {
 
-    auto& log = inet::ocsp::OcspFactory::log();
+    auto const& log = inet::ocsp::OcspFactory::log();
     _inf("async callback response %d:%s", response, inet::ocsp::AsyncOCSP::yield_str(response));
     parent_.untap();
     parent_.handle_sockets_once(parent_.com());

@@ -37,7 +37,10 @@
     which carries forward this exception.
 */  
 
+#include <vars.hpp>
 #include <policy/policy.hpp>
+
+using namespace socle;
 
 std::string PolicyRule::to_string(int verbosity) const {
 
@@ -66,7 +69,7 @@ std::string PolicyRule::to_string(int verbosity) const {
         from << it->value()->str() << " ";
     }
     from << ":";
-    for(auto it: src_ports) {
+    for(auto const& it: src_ports) {
         if(it->value().first == 0 && it->value().second == 65535)
             from << "(*) ";
         else
@@ -79,7 +82,7 @@ std::string PolicyRule::to_string(int verbosity) const {
         to << it->value()->str() << " ";
     }
     to << ":";
-    for(auto it: dst_ports) {
+    for(auto const& it: dst_ports) {
         if(it->value().first == 0 && it->value().second == 65535)
             to << "(*) ";
         else

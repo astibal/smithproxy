@@ -243,7 +243,7 @@ public:
 
     static void my_terminate (int param) {
 
-        auto& log = get_log();
+        auto const& log = get_log();
 
         if (!cfg_daemonize) {
             _fat("Terminating ...");
@@ -272,7 +272,7 @@ public:
 
     static void my_usr1 (int param) {
 
-        auto& log = get_log();
+        auto const& log = get_log();
 
         _dia("USR1 signal handler started");
         _not("reloading policies and its objects !!");
@@ -311,7 +311,7 @@ bool load_config(std::string& config_f, bool reload) {
     std::lock_guard<std::recursive_mutex> l(smithd_cfg_write_lock);
 
     auto this_daemon = DaemonFactory::instance();
-    auto& log = this_daemon->log;
+    auto const& log = this_daemon->log;
 
     using namespace libconfig;
     Config cfgapi;
@@ -390,7 +390,7 @@ bool load_config(std::string& config_f, bool reload) {
 int smithd_apply_index(std::string& what , const std::string& idx) {
 
     auto this_daemon = DaemonFactory::instance();
-    auto& log = this_daemon->log;
+    auto const& log = this_daemon->log;
 
     _deb("apply_index: what=%s idx=%s",what.c_str(),idx.c_str());
     int port = std::stoi(what);
@@ -414,7 +414,7 @@ bool smithd_apply_tenant_config() {
 int main(int argc, char *argv[]) {
     
     auto this_daemon = DaemonFactory::instance();
-    auto& log = this_daemon->log;
+    auto const& log = this_daemon->log;
 
     this_daemon->pid_file="/var/run/smithd.%s.pid";
 
@@ -608,7 +608,7 @@ int main(int argc, char *argv[]) {
         auto backend_thread = std::make_shared<std::thread>(std::thread([=]() {
 
             auto this_daemon = DaemonFactory::instance();
-            auto& log = this_daemon->log;
+            auto const& log = this_daemon->log;
 
             DaemonFactory::set_daemon_signals(SmithD::my_terminate, SmithD::my_usr1);
             _dia("smithd: max file descriptors: %d", this_daemon->get_limit_fd());

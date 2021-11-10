@@ -1104,7 +1104,7 @@ int CfgFactory::load_db_policy () {
 
 int CfgFactory::policy_match (baseProxy *proxy) {
 
-    auto& log = log::policy();
+    auto const& log = log::policy();
 
     std::lock_guard<std::recursive_mutex> l(lock_);
     
@@ -1871,7 +1871,7 @@ int CfgFactory::cleanup_db_prof_auth () {
 
 bool CfgFactory::prof_content_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileContent> &pc) {
 
-    auto& log = log::policy();
+    auto const& log = log::policy();
 
     auto* mitm_proxy = dynamic_cast<MitmProxy*>(new_proxy);
 
@@ -1915,7 +1915,7 @@ bool CfgFactory::prof_content_apply (baseHostCX *originator, baseProxy *new_prox
 bool CfgFactory::prof_detect_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileDetection> &pd) {
 
     auto* mitm_originator = dynamic_cast<AppHostCX*>(originator);
-    auto& log = log::policy();
+    auto const& log = log::policy();
 
     const char* pd_name = "none";
     bool ret = true;
@@ -1972,7 +1972,7 @@ std::optional<std::vector<std::string>> CfgFactory::find_bypass_domain_hosts(std
 
 bool CfgFactory::prof_tls_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileTls> &ps) {
 
-    auto& log = log::policy();
+    auto const& log = log::policy();
 
     if(not ps) {
         _err("CfgFactory::prof_tls_apply[%s]: profile is null", new_proxy->to_string(iINF).c_str());
@@ -2064,7 +2064,7 @@ bool CfgFactory::prof_tls_apply (baseHostCX *originator, baseProxy *new_proxy, c
 
 bool CfgFactory::prof_alg_dns_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileAlgDns> &p_alg_dns) {
 
-    auto& log = log::policy();
+    auto const& log = log::policy();
 
     auto* mitm_originator = dynamic_cast<AppHostCX*>(originator);
     auto* mh = dynamic_cast<MitmHostCX*>(mitm_originator);
@@ -2096,7 +2096,7 @@ bool CfgFactory::prof_alg_dns_apply (baseHostCX *originator, baseProxy *new_prox
 
 bool CfgFactory::prof_script_apply (baseHostCX *originator, baseProxy *new_proxy, std::shared_ptr<ProfileScript> const& p_script) {
 
-    auto& log = log::policy();
+    auto const& log = log::policy();
 
     auto* mitm_originator = dynamic_cast<AppHostCX*>(originator);
     auto* mh = dynamic_cast<MitmHostCX*>(mitm_originator);
@@ -2142,7 +2142,7 @@ bool CfgFactory::prof_script_apply (baseHostCX *originator, baseProxy *new_proxy
 
 int CfgFactory::policy_apply (baseHostCX *originator, baseProxy *proxy, int matched_policy) {
 
-    auto& log = log::policy();
+    auto const& log = log::policy();
 
     std::lock_guard<std::recursive_mutex> l(lock_);
     
@@ -2231,7 +2231,7 @@ bool CfgFactory::policy_apply_tls (int policy_num, baseCom *xcom) {
 
 bool CfgFactory::should_redirect (const std::shared_ptr<ProfileTls> &pt, SSLCom *com) {
 
-    auto& log = log::policy();
+    auto const& log = log::policy();
     
     bool ret = false;
     
@@ -2286,7 +2286,7 @@ bool CfgFactory::policy_apply_tls (const std::shared_ptr<ProfileTls> &pt, baseCo
         return false;
     }
 
-    auto& log = log::policy();
+    auto const& log = log::policy();
 
     bool tls_applied = false;     
     

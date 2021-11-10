@@ -65,7 +65,7 @@ void Service::my_terminate (int param) {
 
 
 void Service::my_usr1 (int param) {
-    auto& log = service_log();
+    auto const& log = service_log();
 
     _dia("USR1 signal handler started (param %d)", param);
     self()->reload();

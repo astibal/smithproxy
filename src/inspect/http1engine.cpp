@@ -6,7 +6,7 @@
 namespace sx::engine::http {
 
     void engine_http1_start_find_referrer (EngineCtx &ctx, std::string const &data) {
-        auto& log = ctx.origin->get_log();
+        auto const& log = ctx.origin->get_log();
 
         std::smatch m_ref;
 
@@ -32,7 +32,7 @@ namespace sx::engine::http {
     }
 
     void engine_http1_start_find_host (EngineCtx &ctx, std::string const &data) {
-        auto& log = ctx.origin->get_log();
+        auto const& log = ctx.origin->get_log();
 
         auto ix_host = data.find("Host: ");
         if (ix_host != std::string::npos) {
@@ -80,7 +80,7 @@ namespace sx::engine::http {
     }
 
     void engine_http1_start_find_method (EngineCtx &ctx, std::string const &data) {
-        auto& log = ctx.origin->get_log();
+        auto const& log = ctx.origin->get_log();
 
         auto method_start = data.substr(0, std::min(std::size_t(128), data.size()));
         std::smatch m_get;
@@ -118,7 +118,7 @@ namespace sx::engine::http {
     }
 
     void engine_http1_parse_request(EngineCtx &ctx, std::string const &buffer_data_string) {
-        auto& log = ctx.origin->get_log();
+        auto const& log = ctx.origin->get_log();
 
         engine_http1_start_find_method(ctx, buffer_data_string);
         engine_http1_start_find_host(ctx, buffer_data_string);
@@ -158,7 +158,7 @@ namespace sx::engine::http {
             return;
         }
 
-        auto& log = ctx.origin->get_log();
+        auto const& log = ctx.origin->get_log();
         _deb("engine_http1_start");
 
         std::pair<char, buffer *> &http_request1 = ctx.origin->flow().flow()[ctx.flow_pos];
