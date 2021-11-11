@@ -186,6 +186,13 @@ void DNS_Inspector::update(AppHostCX* cx) {
                     }
 
                 }
+            } else {
+                if(cached_response) {
+                    _dia("DNS answer for non-A request %s - clearing cached response",
+                         ptr->question_str_0().c_str());
+                    cached_response.reset();
+                    verdict(OK);
+                }
             }
         }
     }
