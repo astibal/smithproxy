@@ -42,8 +42,8 @@
 #include <inspect/dns.hpp>
 #include <sstream>
 
-int CidrAddress::contains(cidr::CIDR* other) {
-    return cidr_contains(c_,other);
+int CidrAddress::contains(cidr::CIDR const* other) const{
+    return cidr_contains(c_.value,other);
 }
 
 
@@ -83,41 +83,40 @@ std::string FqdnAddress::to_string(int verbosity) const {
     return ret.str();
 }
 
+std::shared_ptr<DNS_Response> FqdnAddress::find_dns_response(int cidr_type) const {
+
+    std::scoped_lock<std::recursive_mutex> l_(DNS::get_dns_lock());
+
+    if (cidr_type == CIDR_IPV4) {
+        return DNS::get_dns_cache().get("A:" + fqdn_);
+    } else if (cidr_type == CIDR_IPV6) {
+        return DNS::get_dns_cache().get("AAAA:" + fqdn_);
+    }
+
+    return nullptr;
+}
 
 bool FqdnAddress::match(cidr::CIDR* to_match) {
     bool ret = false;
-    
-    std::shared_ptr<DNS_Response> r = nullptr;
 
+    if(auto r = find_dns_response(to_match->proto); r != nullptr) {
 
-    {
-        std::scoped_lock<std::recursive_mutex> l_(DNS::get_dns_lock());
-
-        if (to_match->proto == CIDR_IPV4) {
-            r = DNS::get_dns_cache().get("A:" + fqdn_);
-        } else if (to_match->proto == CIDR_IPV6) {
-            r = DNS::get_dns_cache().get("AAAA:" + fqdn_);
-        }
-    }
-
-    if(r != nullptr) {
         _deb("FqdnAddress::match: found in cache: %s",fqdn_.c_str());
         
-        std::vector<CidrAddress*> ips = r->get_a_anwsers();
+        auto ips = r->get_a_anwsers();
         
         int i = 0;
-        for(CidrAddress* ip: ips) {
+        for(auto const& ip: ips) {
             if(ip->match(to_match)) {
                 _deb("FqdnAddress::match: cached %s matches answer[%d] with %s",
                                                 fqdn_.c_str(),i,ip->str().c_str());
                 ret = true;
+                break;
             } else {
                 _deb("FqdnAddress::match: cached %s DOESN'T match answer[%d] with %s",
                                                 fqdn_.c_str(),i,ip->str().c_str());
             }
             ++i;
-            // delete it straight away.
-            delete ip;
         }
         
     } else {

@@ -52,43 +52,44 @@
 #include <policy/cfgelement.hpp>
 #include <ranges.hpp>
 
-using namespace socle;
 
 class AddressObject : public socle::sobject, public CfgElement {
 public:
     virtual bool match(cidr::CIDR* c) = 0;
 
-    AddressObject() : log(get_log()) {};
+    AddressObject() = default;
     ~AddressObject() override = default;
 
-    static logan_lite& get_log() {
-        static logan_lite l("policy.addr");
-        return l;
-    }
 
-    logan_lite& log;
+    struct log {
+        static logan_lite const& policy() {
+            static logan_lite l("policy.addr");
+            return l;
+        }
+    };
+    static inline logan_lite const& log = log::policy();
 };
 
 
 class CidrAddress : public AddressObject {
 public:
-    explicit CidrAddress(cidr::CIDR* c) : AddressObject(), c_(c) { }
-    explicit CidrAddress(std::string const& v) : AddressObject(), c_(cidr::cidr_from_str(v.c_str())) {}
+    explicit CidrAddress(cidr::CIDR* c) : AddressObject(), c_(raw::allocated(c)) { }
+    explicit CidrAddress(std::string const& v) : AddressObject(), c_(raw::allocated(cidr::cidr_from_str(v.c_str()))) {}
 
-    cidr::CIDR* cidr() { return c_; }
+    cidr::CIDR* cidr() { return c_.value; }
     std::string ip(int flags = CIDR_ONLYADDR) const {
-        auto temp = raw::allocated(cidr_to_str(c_, flags));
+        auto temp = raw::allocated(cidr_to_str(c_.value, flags));
         std::string ret = string_format("%s", temp.value);
 
         return ret;
     }
 
-    int contains(cidr::CIDR *other);
+    int contains(cidr::CIDR const* other) const;
     bool match(cidr::CIDR* c) override { return (contains(c) >= 0); };
     bool ask_destroy() override { return false; };
 
     std::string to_string(int verbosity) const override {
-        auto temp = raw::allocated(cidr_to_str(c_));
+        auto temp = raw::allocated(cidr_to_str(c_.value));
 
         std::string ret = string_format("Cidr: %s",temp.value);
 
@@ -99,30 +100,32 @@ public:
         return ret;
     }
     
-    
-    ~CidrAddress() override { cidr_free(c_); };
-protected:
-    cidr::CIDR* c_;
+private:
+    raw::var<cidr::CIDR*> c_;
 
 TYPENAME_OVERRIDE("CidrAddress")
 };
+
+class DNS_Response;
 
 class FqdnAddress : public AddressObject {
 public:
     explicit FqdnAddress(std::string s) : AddressObject(), fqdn_(std::move(s)) { }
     std::string fqdn() const { return fqdn_; }
+    std::shared_ptr<DNS_Response> find_dns_response(int cidr_type) const;
     
     bool match(cidr::CIDR* to_match) override;
     bool ask_destroy() override { return false; };
 
     std::string to_string(int verbosity) const override;
-protected:
+
+private:
     std::string fqdn_;
 
 TYPENAME_OVERRIDE("FqdnAddress")
 };
 
-typedef CfgSingle<std::shared_ptr<AddressObject>> CfgAddress;
-typedef std::shared_ptr<CfgAddress> shared_CfgAddress;
+using CfgAddress = CfgSingle<std::shared_ptr<AddressObject>>;
+using shared_CfgAddress =  std::shared_ptr<CfgAddress>;
 
 #endif //ADDROBJ_HPP_

@@ -466,7 +466,7 @@ void SmithProxy::join_all() {
     }
     if(api_thread) {
         if(!cfg_daemonize)
-            std::cerr << "terminating identity updater thread" << std::endl;
+            std::cerr << "terminating API updater thread" << std::endl;
         api_thread->join();
     }
 

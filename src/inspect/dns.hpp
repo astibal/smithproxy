@@ -268,7 +268,7 @@ public:
     std::string answer_str_A() const;
     std::string answer_str_list() const;
     std::string answer_hex_dump() const;
-    std::vector<CidrAddress*> get_a_anwsers() const;
+    std::vector<std::unique_ptr<CidrAddress>> get_a_anwsers() const;
 
     inline std::vector<DNS_Question>& questions() { return questions_list_; };
     inline std::vector<DNS_Answer>& answers() { return answers_list_; };

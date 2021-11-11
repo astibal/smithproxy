@@ -720,12 +720,12 @@ std::string DNS_Packet::answer_hex_dump() const {
 
 
 
-std::vector< CidrAddress*> DNS_Packet::get_a_anwsers() const {
-    std::vector<CidrAddress*> ret;
+std::vector<std::unique_ptr<CidrAddress>> DNS_Packet::get_a_anwsers() const {
+    std::vector<std::unique_ptr<CidrAddress>> ret;
 
     for(auto const& x: answers_list_) {
         if(x.type_ == A || x.type_ == AAAA) {
-            ret.push_back(new CidrAddress(x.cidr()));
+            ret.emplace_back(std::make_unique<CidrAddress>(x.cidr()));
         }
     }
 
