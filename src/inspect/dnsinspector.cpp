@@ -55,8 +55,8 @@ void DNS_Inspector::update(AppHostCX* cx) {
     //std::lock_guard<std::recursive_mutex> l(DatagramCom::lock);
 
 
-    duplexFlow& f = cx->flow();
-    _dia("DNS_Inspector::update[%s]: stage %d start (flow size %d, last flow entry data length %d)",cx->c_type(),stage, f.flow().size(),f.flow().back().second->size());
+    duplexFlow& flow = cx->flow();
+    _dia("DNS_Inspector::update[%s]: stage %d start (flow size %d, last flow entry data length %d)", cx->c_type(), stage, flow.flow().size(), flow.flow().back().second->size());
 
     /* INIT */
 
@@ -70,11 +70,12 @@ void DNS_Inspector::update(AppHostCX* cx) {
     }
 
 
-    std::pair<char,buffer*> cur_pos = cx->flow().flow().back();
+//    std::pair<char,buffer*> cur_pos = flow.flow().back();
+    auto const& [ cur_side, cur_buffer ] = flow.flow().back();
 
     std::shared_ptr<DNS_Packet> ptr;
-    buffer *xbuf = cur_pos.second;
-    buffer shallow_xbuf = xbuf->view(0, xbuf->size());
+
+    auto shallow_xbuf = cur_buffer->view();
 
     unsigned int mem_pos = 0;
     unsigned int red = 0;
@@ -89,7 +90,7 @@ void DNS_Inspector::update(AppHostCX* cx) {
     }
 
     auto mem_len = shallow_xbuf.size();
-    if(cur_pos.first == 'r') {
+    if(cur_side == 'r') {
 
         stage = 0;
         for (unsigned int it = 0; red < shallow_xbuf.size() && it < 10; it++) {
@@ -97,7 +98,13 @@ void DNS_Inspector::update(AppHostCX* cx) {
             ptr = std::make_shared<DNS_Request>();
 
             buffer cur_buf = shallow_xbuf.view(red, shallow_xbuf.size() - red);
-            auto cur_red = ptr->load(&cur_buf);
+            auto load_status = ptr->load(&cur_buf);
+
+            if(not load_status) {
+                break;
+            }
+
+            auto cur_red = load_status.value();
 
             // because of non-standard return value from above load(), we need to adjust red bytes manually
             if (cur_red == 0) { cur_red = cur_buf.size(); }
@@ -106,23 +113,23 @@ void DNS_Inspector::update(AppHostCX* cx) {
             _deb("DNS_Inspector::update[%s]: flow: %s", cx->c_type(), cx->flow().hr().c_str());
 
             // on success write to requests_
-            if (cur_red >= 0) {
-                red += cur_red;
 
-                if (requests_[ptr->id()] != nullptr) {
-                    _not("DNS_Inspector::update[%s]: detected re-sent request", cx->c_type());
-                    requests_.erase(ptr->id());
-                }
+            red += cur_red;
 
-                _dia("DNS_Inspector::update[%s]: adding key 0x%x red=%d, buffer_size=%d, ptr=0x%x", cx->c_type(),
-                     ptr->id(), red, cur_buf.size(), ptr.get());
-                requests_[ptr->id()] = std::dynamic_pointer_cast<DNS_Request>(ptr);
-
-                _deb("DNS_Inspector::update[%s]: this 0x%x, requests size %d", cx->c_type(), this,
-                     requests_.size());
-
-                cx->idle_delay(30);
+            if (requests_[ptr->id()] != nullptr) {
+                _not("DNS_Inspector::update[%s]: detected re-sent request", cx->c_type());
+                requests_.erase(ptr->id());
             }
+
+            _dia("DNS_Inspector::update[%s]: adding key 0x%x red=%d, buffer_size=%d, ptr=0x%x", cx->c_type(),
+                 ptr->id(), red, cur_buf.size(), ptr.get());
+            requests_[ptr->id()] = std::dynamic_pointer_cast<DNS_Request>(ptr);
+
+            _deb("DNS_Inspector::update[%s]: this 0x%x, requests size %d", cx->c_type(), this,
+                 requests_.size());
+
+            cx->idle_delay(30);
+
             _dia("DNS_Inspector::update[%s]: finishing reading from buffers: red=%d, buffer_size=%d", cx->c_type(),
                  red, shallow_xbuf.size());
 
@@ -196,7 +203,7 @@ void DNS_Inspector::update(AppHostCX* cx) {
             }
         }
     }
-    else if (cur_pos.first == 'w') {
+    else if (cur_side == 'w') {
 
         stage = 1;
         for (unsigned int it = 0; red < shallow_xbuf.size() && it < 10; it++) {
@@ -207,69 +214,65 @@ void DNS_Inspector::update(AppHostCX* cx) {
             auto ptr_response = std::dynamic_pointer_cast<DNS_Response>(ptr);
 
             buffer cur_buf = shallow_xbuf.view(red, shallow_xbuf.size() - red);
-            ssize_t cur_red = ptr->load(&cur_buf);
 
+            auto load_status = ptr->load(&cur_buf);
 
-            if (cur_red >= 0) {
-                if (opt_cached_responses) {
+            if(not load_status) {
+                break;
+            }
 
+            auto cur_red = load_status.value();
 
-                    if (ptr_response) {
-                        delete ptr_response->cached_packet;
+            if (opt_cached_responses and ptr_response) {
 
-                        ptr_response->cached_packet = new buffer();
-                        if (cur_red == 0) {
-                            ptr_response->cached_packet->append(cur_buf.data(), cur_buf.size());
-                        } else {
-                            ptr_response->cached_packet->append(cur_buf.data(), cur_red);
-                        }
-
-                        _deb("caching response packet: size=%d", ptr_response->cached_packet->size());
-                    }
+                if(not ptr_response->cached_packet) {
+                    ptr_response->cached_packet = std::make_unique<buffer>(cur_buf.size());
                 }
 
-                mem_pos += cur_red;
-                red = cur_red;
+                ptr_response->cached_packet->size(0);
+                ptr_response->cached_packet->append(cur_buf.data(), cur_buf.size());
 
-                _dia("DNS_Inspector::update[%s]: loaded new response (at %d size %d out of %d)", cx->c_type(), red,
-                     mem_pos, mem_len);
-                if (!validate_response(ptr_response)) {
-                    // invalid, delete
+                _deb("caching response packet: size=%d", ptr_response->cached_packet->size());
 
-                    cx->writebuf()->clear();
-                    cx->error(true);
-                    _war("DNS inspection: cannot find corresponding DNS request id 0x%x: dropping connection.",
-                         ptr->id());
+            }
+
+            mem_pos += cur_red;
+            red = cur_red;
+
+            _dia("DNS_Inspector::update[%s]: loaded new response (at %d size %d out of %d)", cx->c_type(), red,
+                 mem_pos, mem_len);
+            if (!validate_response(ptr_response)) {
+                // invalid, delete
+
+                cx->writebuf()->clear();
+                cx->error(true);
+                _war("DNS inspection: cannot find corresponding DNS request id 0x%x: dropping connection.",
+                     ptr->id());
+            } else {
+                // DNS response is valid
+                responses_++;
+
+                _dia("DNS_Inspector::update[%s]: valid response", cx->c_type());
+
+                if (store(ptr_response)) {
+                    stored_ = true;
+                    // DNS response is interesting (A record present) - we stored it , ptr is VALID
+                    _dia("DNS_Inspector::update[%s]: contains interesting info, stored", cx->c_type());
+
                 } else {
-                    // DNS response is valid
-                    responses_++;
-
-                    _dia("DNS_Inspector::update[%s]: valid response", cx->c_type());
-
-                    if (store(ptr_response)) {
-                        stored_ = true;
-                        // DNS response is interesting (A record present) - we stored it , ptr is VALID
-                        _dia("DNS_Inspector::update[%s]: contains interesting info, stored", cx->c_type());
-
-                    } else {
-                        _dia("DNS_Inspector::update[%s]: no interesting info there, deleted", cx->c_type());
-                    }
+                    _dia("DNS_Inspector::update[%s]: no interesting info there, deleted", cx->c_type());
+                }
 
                     if (is_tcp)
                         cx->idle_delay(30);
                     else
                         cx->idle_delay(10);
-                }
-            } else {
-                red = 0;
-            }
 
-            // on failure or last data exit loop
-            if (red <= 0) break;
+            }
         }
     }
 
-    _dia("DNS_Inspector::update[%s]: stage %d end (flow size %d)", cx->c_type(), stage, f.flow().size());
+    _dia("DNS_Inspector::update[%s]: stage %d end (flow size %d)", cx->c_type(), stage, flow.flow().size());
 }
 
 
@@ -357,7 +360,7 @@ bool DNS_Inspector::validate_response(std::shared_ptr<DNS_Response> ptr) {
 std::string DNS_Inspector::to_string(int verbosity) const {
     std::string r = Inspector::to_string(verbosity)+"\n  ";
 
-    r += string_format("tcp: %d requests: %d valid responses: %d stored: %d",is_tcp,requests_.size(),responses_,stored_);
+    r += string_format("tcp: %d requests: %d valid responses: %d stored: %d",is_tcp, requests_.size(), responses_,stored_);
 
     return r;
 }
@@ -366,7 +369,7 @@ void DNS_Inspector::apply_verdict(AppHostCX* cx) {
     _deb("DNS_Inspector::apply_verdict called");
 
     //TODO: dirty, make more generic
-    if(cached_response != nullptr) {
+    if(cached_response  != nullptr) {
         _deb("DNS_Inspector::apply_verdict: mangling response id=%d",cached_response_id);
         *((uint16_t*)cached_response->data()) = htons(cached_response_id);
 

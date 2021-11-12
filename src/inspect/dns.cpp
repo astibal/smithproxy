@@ -63,7 +63,7 @@ const char* DNSFactory::dns_record_type_str(int a) {
 }
 
 
-unsigned int DNSFactory::skip_qname(unsigned char* ptr, unsigned int maxlen, std::string* str_storage) const {
+unsigned int DNSFactory::skip_qname(unsigned char* ptr, unsigned long maxlen, std::string* str_storage) const {
     unsigned int xi = 0;
 
     _deb("skip_qname:\n%s",hex_dump(ptr, static_cast<int>(maxlen)).c_str());
@@ -321,7 +321,7 @@ DNS_Response* DNSFactory::resolve_dns_s (std::string const& hostname, DNS_Record
 /*
  * returns 0 on OK, >0 if  there are still some bytes to read and -1 on error.
  */
-ssize_t DNS_Packet::load(buffer* src) {
+std::optional<size_t> DNS_Packet::load(buffer* src) {
 
     loaded_at = ::time(nullptr);
 
@@ -646,7 +646,7 @@ ssize_t DNS_Packet::load(buffer* src) {
     } catch (std::out_of_range const& e) {
         _err("error loading packet: %s", e.what());
     }
-    return -1;
+    return std::nullopt;
 }
 
 

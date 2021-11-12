@@ -96,7 +96,7 @@ TEST(DNS_Packet, load_request1) {
     std::cout << dr->question_str_0() << "'\n";
     ASSERT_TRUE(dr->question_str_0() == "A:pcdn.brave.com");
 
-    std::cout << "returned: " << ret << ":\n" << dr->to_string(iDEB) << "\n";
+    std::cout << "returned: " << ret.value_or(-1) << ":\n" << dr->to_string(iDEB) << "\n";
 }
 
 TEST(DNS_Packet, load_response1) {
@@ -112,7 +112,7 @@ TEST(DNS_Packet, load_response1) {
     auto ret = dr->load(&b);
     ASSERT_TRUE(ret == 0);
 
-    std::cout << "returned: " << ret << ":\n" << dr->to_string(iDEB) << "\n";
+    std::cout << "returned: " << ret.value_or(-1) << ":\n" << dr->to_string(iDEB) << "\n";
     std::cout << "dump:\n" << dr->answer_hex_dump() << "\n";
 
     for(auto const& ref: dr->questions()) {

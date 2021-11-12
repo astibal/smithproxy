@@ -99,7 +99,7 @@ public:
     /// @brief check bytes in the range starting at 'ptr' to 'maxlen', and parse the text as DNS QNAME.
     /// @returns next index behind QNAME data.
     /// Used to quickly pass the QNAME when parsing DNS packet and follow on to pase next elements.
-    unsigned int skip_qname(unsigned char* ptr, unsigned int maxlen, std::string* str_storage = nullptr) const;
+    unsigned int skip_qname(unsigned char* ptr, unsigned long maxlen, std::string* str_storage = nullptr) const;
     std::string construct_qname(unsigned char* qname_start, unsigned char* packet_start, size_t packet_size, unsigned int loop_max=16);
     int generate_dns_request(unsigned short id, buffer& b, std::string const& hostname, DNS_Record_Type t);
 
@@ -248,7 +248,7 @@ public:
 
     ~DNS_Packet() override = default;
 
-    ssize_t load(buffer* src); // initialize from memory. if non-zero is returned, there is yet another data and new DNS_packet should be read.
+    std::optional<size_t> load(buffer* src); // initialize from memory. if non-zero is returned, there is yet another data and new DNS_packet should be read.
 
     inline uint16_t id() const { return id_; }
     inline uint16_t flags() const { return flags_; } // todo: split and inspect all bits of this field
@@ -308,19 +308,11 @@ private:
     logan_attached<DNS_Response> log;
 
 public:
-    buffer* cached_packet = nullptr;
+    std::unique_ptr<buffer> cached_packet = nullptr;
     unsigned int cached_id_idx = 0;
     
     DNS_Response(): DNS_Packet() {
         log = logan::attach<DNS_Response>(this, "dns");
-        _dum("DNS_Response::c-tor");
-    };
-    ~DNS_Response() override {
-        _dum("DNS_Request::d-tor");
-        if(cached_packet != nullptr) {
-            _dum("DNS_Request::d-tor deleting cached packet");
-            delete cached_packet;
-        }
     };
 
     [[maybe_unused]] std::optional<long> get_ttl() {
