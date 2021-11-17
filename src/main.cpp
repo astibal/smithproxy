@@ -534,6 +534,10 @@ int main(int argc, char *argv[]) {
             return EXIT_FAILURE;
         }
 
+    } else {
+        // this is necessary for systemd which doesn't favor forked daemons
+        // also - there is no harm to write PIDfile even for foreground programs
+        this_daemon->write_pidfile();
     }
     // openssl mem debugs
     prepare_mem_debugs();
