@@ -68,6 +68,7 @@
 #include <libconfig.h++>
 
 #include <cfgapi.hpp>
+#include <utils/tenants.hpp>
 #include <service/daemon.hpp>
 #include <staticcontent.hpp>
 #include <smithlog.hpp>
@@ -146,7 +147,29 @@ void do_cleanup() {
     EVP_cleanup();
 }
 
-void prepare_tenanting(bool is_custom_file) {
+std::optional<sx::cfg::vec_tenants> load_tenant_config() {
+    std::string line;
+    std::ifstream cfg;
+
+    auto const& log = DaemonFactory::instance()->log;
+
+    cfg.open("/etc/smithproxy/smithproxy.tenants.cfg");
+
+    if(not cfg.is_open()) {
+        _war("cannot load tenant config");
+        return std::nullopt;
+    }
+
+    std::vector<sx::cfg::TenantConfig> to_ret;
+
+    while(getline(cfg, line)) {
+        sx::cfg::process_tenant_config_line(line, to_ret);
+    }
+
+    return to_ret;
+}
+
+bool prepare_tenanting(bool is_custom_file) {
 
     auto const& log = DaemonFactory::instance()->log;
 
@@ -156,12 +179,40 @@ void prepare_tenanting(bool is_custom_file) {
         config_file_tenant = CfgFactory::get()->config_file;
     }
 
+    auto revert = [] {
+        CfgFactory::get()->tenant_name = "default";
+        CfgFactory::get()->tenant_index = 0;
+    };
+
     auto this_daemon = DaemonFactory::instance();
 
-    if( (! CfgFactory::get()->tenant_name.empty())) {
+    if(not CfgFactory::get()->tenant_name.empty()) {
 
-        if(CfgFactory::get()->tenant_index < 0) {
-            _war("... tenant name set, but no index given (assuming idx=0)");
+        // let's resolve non-defaults
+
+        if(CfgFactory::get()->tenant_name != "default") {
+            auto ten_cfg = load_tenant_config();
+            if(not ten_cfg) {
+                _war("... tenant name not default, but cannot load tenant config - bailing");
+                std::cerr << "... tenant name not default, but cannot load tenant config - bailing" << std::endl;
+                revert();
+                return false;
+            }
+            else {
+                auto index = sx::cfg::find_tenant(ten_cfg.value(), CfgFactory::get()->tenant_name);
+                if(not index) {
+                    _war("... tenant name not default, but cannot find index tenant config - bailing");
+                    std::cerr << "... tenant name not default, but cannot find index tenant config - bailing" << std::endl;
+                    revert();
+                    return false;
+                }
+                else {
+                    CfgFactory::get()->tenant_index = index.value();
+                }
+            }
+        }
+        else {
+            _war("... default tenant name, index forced to 0");
             CfgFactory::get()->tenant_index = 0;
         }
 
@@ -189,6 +240,8 @@ void prepare_tenanting(bool is_custom_file) {
     }
 
     SmithProxy::instance().tenant_index(CfgFactory::get()->tenant_index);
+
+    return true;
 }
 
 bool raise_limits() {
@@ -318,7 +371,9 @@ int main(int argc, char *argv[]) {
                 break;
                 
             case 'i':
-                CfgFactory::get()->tenant_index = std::stoi(std::string(optarg));
+                // removed in 0.9.27
+                // CfgFactory::get()->tenant_index = std::stoi(std::string(optarg));
+                std::cerr << "using --tenant-index is since 0.9.27 deprecated and no-op, index is loaded from smithproxy.tenants.cfg" << std::endl;
                 break;
                 
             case 't':
@@ -347,7 +402,9 @@ int main(int argc, char *argv[]) {
 
 
     // be ready for tenants, or for standalone execution
-    prepare_tenanting(is_custom_config_file);
+    if (not prepare_tenanting(is_custom_config_file)) {
+        return EXIT_FAILURE;
+    }
 
 
     // be more verbose if check only requested
