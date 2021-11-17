@@ -77,14 +77,14 @@ public:
     };
 
     std::string config_file;
-    int tenant_index = 0;
+    unsigned int tenant_index = 0;
     std::string tenant_name = "default";
 
     loglevel internal_init_level = INF;
     loglevel cli_init_level = NON;
 
     virtual bool apply_tenant_config() = 0;
-    int  apply_tenant_index(std::string& what, int& idx) const;
+    int  apply_tenant_index(std::string& what, unsigned int const& idx) const;
 };
 
 

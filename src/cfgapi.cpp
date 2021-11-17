@@ -2349,7 +2349,7 @@ void CfgFactory::log_version (bool warn_delay)
     }
 }
 
-int CfgFactoryBase::apply_tenant_index(std::string& what, int& idx) const {
+int CfgFactoryBase::apply_tenant_index(std::string& what, unsigned int const& idx) const {
     _deb("apply_index: what=%s idx=%d", what.c_str(), idx);
     int port = std::stoi(what);
     what = std::to_string(port + idx);
