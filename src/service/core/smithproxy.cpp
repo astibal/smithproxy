@@ -319,7 +319,7 @@ void SmithProxy::run() {
         DaemonFactory::set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
         _dia("smithproxy_cli: max file descriptors: %d", this_daemon->get_limit_fd());
 
-        cli_loop(CliState::get().cli_port);
+        cli_loop(CliState::get().cli_port + CfgFactory::get()->tenant_index);
         _dia("cli workers torn down.");
     } );
     pthread_setname_np(cli_thread->native_handle(),friendly_thread_name_cli.c_str());
