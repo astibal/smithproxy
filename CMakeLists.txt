@@ -190,6 +190,8 @@ add_executable(smithproxy
         src/utils/str.cpp
         src/utils/mem.hpp
         src/utils/mem.cpp
+        src/utils/tenants.hpp
+        src/utils/tenants.cpp
 
         socle/common/mempool/malloc_allocator.hpp
 
@@ -240,6 +242,9 @@ if(GTEST_FOUND)
             src/policy/policy.cpp
             src/policy/tests/addrobj_test.cpp
             src/policy/tests/policy_test.cpp
+
+            src/utils/tenants.cpp
+            src/tests/test_misc.cpp
 
             socle/traflog/tests/test_pcapapi.cpp
             socle/traflog/tests/test_pcapng.cpp
