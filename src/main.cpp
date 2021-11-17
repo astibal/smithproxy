@@ -312,7 +312,7 @@ int main(int argc, char *argv[]) {
 
     if(! raise_limits()) {
         std::cerr << "cannot max file descriptors"  << std::endl;
-        exit(-1);
+        return EXIT_FAILURE;
     }
 
 
@@ -382,16 +382,16 @@ int main(int argc, char *argv[]) {
 
             case 'h':
                 print_help();
-                exit(1);
+                return EXIT_SUCCESS;
                 
             case 'v':
                 std::cout << SMITH_VERSION << "+" << SOCLE_VERSION << std::endl;
-                exit(0);
+                return EXIT_SUCCESS;
                 
                 
             default:
                 std::cerr << "unknown option: " << c  << std::endl;
-                exit(1);                 
+                return EXIT_FAILURE;
         }
     }
 
@@ -445,9 +445,10 @@ int main(int argc, char *argv[]) {
         CfgFactory::get()->cleanup();
 
         if(! CONFIG_LOADED) {
-            exit(-1);
+            return EXIT_FAILURE;
         }
-        exit(0);
+
+        return EXIT_SUCCESS;
     }
 
 
@@ -464,7 +465,7 @@ int main(int argc, char *argv[]) {
         std::cerr << "Config check: error loading config file."  << std::endl;
 
         CfgFactory::get()->cleanup();
-        exit(1);
+        return EXIT_FAILURE;
     }
     
     if(!CfgFactory::get()->apply_tenant_config()) {
@@ -472,7 +473,7 @@ int main(int argc, char *argv[]) {
         std::cerr << "Failed to apply tenant specific configuration!"  << std::endl;
 
         CfgFactory::get()->cleanup();
-        exit(2);
+        return EXIT_FAILURE;
     }
 
     if(CfgFactory::get()->cfg_mtrace_enable) {
@@ -496,7 +497,7 @@ int main(int argc, char *argv[]) {
         std::cerr << "Please make sure smithproxy is not running, remove " << this_daemon->pid_file << " and try again."  << std::endl;
 
         CfgFactory::get()->cleanup();
-        exit(-5);
+        return EXIT_FAILURE;
     }
     
     // detect kernel version, and adapt UDP socket family
@@ -515,7 +516,7 @@ int main(int argc, char *argv[]) {
             std::cerr << "Cannot daemonize without logging to file."  << std::endl;
 
             CfgFactory::get()->cleanup();
-            exit(-5);
+            return EXIT_FAILURE;
         }
 
         Log::get()->dup2_cout(false);
@@ -525,12 +526,12 @@ int main(int argc, char *argv[]) {
         if(dem == 0) {
             // master - to exit
             CfgFactory::get()->cleanup();
-            exit(0);
+            return EXIT_SUCCESS;
         }
         else if(dem < 0) {
             // slave, but failed
             CfgFactory::get()->cleanup();
-            exit(-1);
+            return EXIT_FAILURE;
         }
 
     }
@@ -562,7 +563,7 @@ int main(int argc, char *argv[]) {
     }
 
     do_cleanup();
-    return 0;
+    return EXIT_SUCCESS;
 }
 
 

@@ -203,7 +203,7 @@ bool SmithProxy::create_listeners() {
                 (udp_proxies.empty() && CfgFactory::get()->num_workers_udp >= 0)) {
 
                 _fat("Failed to setup tproxy proxies. Bailing!");
-                exit(-10);
+                return false;
             }
 
         }
@@ -219,7 +219,7 @@ bool SmithProxy::create_listeners() {
 
             if((socks_proxies.empty() && CfgFactory::get()->num_workers_socks >= 0)) {
                 _fat("Failed to setup socks proxies. Bailing!");
-                exit(-11);
+                return false;
             }
         }
 
@@ -255,7 +255,7 @@ bool SmithProxy::create_listeners() {
 
                 if((socks_proxies.empty() && CfgFactory::get()->num_workers_socks >= 0)) {
                     _fat("Failed to setup redirect proxies. Bailing!");
-                    exit(-12);
+                    return false;
                 }
             }
         }
