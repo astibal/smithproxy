@@ -110,6 +110,7 @@ TYPENAME_OVERRIDE("ProfileContent")
 
 
 class FqdnAddress;
+class CidrAddress;
 
 class ProfileTls : public socle::sobject, public CfgElement  {
 public:
@@ -246,6 +247,33 @@ struct ProfileRouting: public CfgElement {
 
     using dnat_lb_method_t = enum class lb_method { LB_RR, LB_L3, LB_L4 };
     dnat_lb_method_t dnat_lb_method;
+
+    // update internal state - run once per one request
+    inline void update() { lb_state.expand_candidates(dnat_addresses); lb_state.rr_counter++; }
+
+    // get (cached) address lookup candidates
+    inline auto lb_candidates(int family) const { return family == CIDR_IPV6 ? lb_state.candidates_v6 : lb_state.candidates_v4; }
+
+    // helper to get index based on RR scheme
+    [[nodiscard]] inline size_t lb_index_rr(size_t sz) const { return sz == 0 ? 0 : lb_state.rr_counter % sz; }
+
+    struct LbState {
+        constexpr static unsigned int refresh_interval = 5;
+
+        std::mutex lock_;
+
+        std::atomic_long rr_counter = 0;
+
+        time_t last_refresh = 0;
+        std::vector<std::shared_ptr<CidrAddress>> candidates_v4;
+        std::vector<std::shared_ptr<CidrAddress>> candidates_v6;
+        bool expand_candidates(std::vector<std::string> const& addresses);
+
+        // update internal counters, should be run once per request to have consistent results
+
+    };
+
+    LbState lb_state;
 };
 
 

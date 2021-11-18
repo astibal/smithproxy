@@ -175,36 +175,21 @@ namespace sx::proxymaker {
     }
 
 
-    using optional_string = std::optional<std::string>;
 
-    std::pair<optional_string, optional_string> get_dnat_target(std::shared_ptr<ProfileRouting> rt) {
+    using optional_string = std::optional<std::string>;
+    std::pair<optional_string, optional_string> get_dnat_target (std::shared_ptr<ProfileRouting> rt, int family) {
+
+        if(not rt) return { std::nullopt, std::nullopt };
+
         auto const& log = log::routing();
 
         std::string ip;
         std::string port;
 
-        if(not rt->dnat_addresses.empty()) {
-            // find address object referred in "routing"
-            auto addr = CfgFactory::get()->lookup_address(rt->dnat_addresses[0].c_str());
-            if(addr) {
-                if( auto addr_obj = std::dynamic_pointer_cast<CidrAddress>(addr->value()); addr_obj) {
-                    // for now, use just ddress part - no load-balancing
-                    ip = addr_obj->ip(CIDR_ONLYADDR);
+        auto candidates = rt->lb_candidates(family);
+        auto index = rt->lb_index_rr(candidates.size());
 
-                    auto pflen = cidr::cidr_get_pflen(addr_obj->cidr());
-                    if(addr_obj->cidr()->proto == CIDR_IPV4) {
-                        if(pflen != 32) {
-                            _not("ignoring address4 mask");
-                        }
-                    }
-                    else if(addr_obj->cidr()->proto == CIDR_IPV6) {
-                        if(pflen != 128) {
-                            _not("ignoring address6 mask");
-                        }
-                    }
-                }
-            }
-        }
+        ip = candidates[index]->ip();
 
         if(not rt->dnat_ports.empty()) {
             // find address object referred in "routing"
@@ -230,7 +215,10 @@ namespace sx::proxymaker {
 
         if(not rt or not proxy) return false;
 
-        auto [ op_ip, op_port ] = get_dnat_target(rt);
+        // update rt profile internals
+        rt->update();
+
+        auto [ op_ip, op_port ] = get_dnat_target(rt, proxy->com()->l3_proto());
         if(op_ip or op_port) {
 
             auto orig_px_name = proxy->to_string(iINF);
@@ -253,6 +241,8 @@ namespace sx::proxymaker {
                     }
                 }
             }
+        } else {
+            return false;
         }
 
         return true;

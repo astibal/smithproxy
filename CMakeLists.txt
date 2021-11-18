@@ -147,6 +147,7 @@ add_executable(smithproxy
         src/policy/authfactory6.cpp
         src/policy/loadb.cpp
         src/policy/profiles.hpp
+        src/policy/profiles.cpp
         src/policy/cfgelement.hpp
 
         src/inspect/sxsignature.hpp
