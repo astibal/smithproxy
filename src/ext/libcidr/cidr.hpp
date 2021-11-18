@@ -33,9 +33,9 @@ namespace cidr {
 #define CIDR_REVERSE      (1<<10) /* Return a DNS PTR name */
 
 /* Protocols */
-#define CIDR_NOPROTO        0
-#define CIDR_IPV4           1
-#define CIDR_IPV6           2
+#define CIDR_NOPROTO        AF_UNSPEC
+#define CIDR_IPV4           AF_INET
+#define CIDR_IPV6           AF_INET6
 
 /* Versioning info */
 #define CIDR_VERSION "1.2.4"
