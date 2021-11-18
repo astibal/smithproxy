@@ -92,8 +92,11 @@ using namespace socle;
 void apply_hostname(cli_def* cli) {
     char hostname[64]; memset(hostname,0,64);
     gethostname(hostname,63);
+    auto tenant = "." + CfgFactory::get()->tenant_name;
 
-    cli_set_hostname(cli, string_format("smithproxy(%s)%s ", hostname, CliGlobalState::config_changed_flag ? "<*>" : "").c_str());
+    std::string hostname_full = hostname + (tenant == ".default" ? "" : tenant );
+
+    cli_set_hostname(cli, string_format("smithproxy(%s)%s", hostname_full.c_str(), CliGlobalState::config_changed_flag ? "<*>" : "").c_str());
 }
 
 void debug_cli_params(struct cli_def *cli, const char *command, char *argv[], int argc) {
