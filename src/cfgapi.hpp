@@ -224,6 +224,10 @@ public:
     std::map<std::string, std::shared_ptr<CfgElement>>& section_db(std::string const& section);
 
     std::shared_ptr<CfgAddress> lookup_address (const char *name);
+    std::vector<std::shared_ptr<CidrAddress>>
+    expand_to_cidr (std::vector<std::string> const &address_names, int cidr_flags);
+
+
     std::shared_ptr<CfgRange> lookup_port (const char *name);
     std::shared_ptr<CfgUint8> lookup_proto (const char *name);
     std::shared_ptr<ProfileDetection> lookup_prof_detection (const char *name);

@@ -137,6 +137,54 @@ std::shared_ptr<CfgAddress> CfgFactory::lookup_address (const char *name) {
     return nullptr;
 }
 
+std::vector<std::shared_ptr<CidrAddress>>
+CfgFactory::expand_to_cidr (std::vector<std::string> const& address_names, int cidr_flags) {
+    // lock cfg, don't lock anything else
+
+    std::vector<std::shared_ptr<CidrAddress>> to_ret;
+
+    auto cfglock = std::scoped_lock(lock_);
+
+    // for each dnat address find CidrAddress
+    for(auto const& n: address_names) {
+        auto obj = lookup_address(n.c_str());
+
+        if(not obj) continue;
+
+        // dig out AddressObject
+
+        if(auto cidr = std::dynamic_pointer_cast<CidrAddress>(obj->value()); cidr) {
+
+            if(cidr_flags == CIDR_IPV4 and cidr->cidr()->proto != CIDR_IPV4) continue;
+            if(cidr_flags == CIDR_IPV6 and cidr->cidr()->proto != CIDR_IPV6) continue;
+
+            to_ret.push_back(cidr);
+        }
+        else if(auto fq = std::dynamic_pointer_cast<FqdnAddress>(obj->value()); fq) {
+
+            auto find_dns_entries = [&](auto IPV) {
+                std::shared_ptr<DNS_Response> dns = fq->find_dns_response(IPV);
+                if(not dns) return;
+
+                auto ips = dns->get_a_anwsers();
+
+                for (auto const &ip: ips) {
+                    auto ip_val = ip->ip(CIDR_ONLYADDR);
+
+                    // make new CidrAddress
+                    to_ret.emplace_back(std::make_shared<CidrAddress>(ip_val));
+                }
+            };
+
+            if(cidr_flags != CIDR_IPV6) find_dns_entries(CIDR_IPV4);
+            if(cidr_flags != CIDR_IPV4) find_dns_entries(CIDR_IPV6);
+        }
+    }
+
+    return to_ret;
+}
+
+
 std::shared_ptr<CfgRange> CfgFactory::lookup_port (const char *name) {
     std::scoped_lock<std::recursive_mutex> l(lock_);
     
@@ -2361,7 +2409,7 @@ int CfgFactoryBase::apply_tenant_index(std::string& what, unsigned int const& id
 bool CfgFactory::apply_tenant_config () {
     int ret = 0;
 
-    if( (  tenant_index >= 0 ) && ( ! tenant_name.empty() ) ) {
+    if(not tenant_name.empty()) {
         ret += apply_tenant_index(listen_tcp_port, tenant_index);
         ret += apply_tenant_index(listen_tls_port, tenant_index);
         ret += apply_tenant_index(listen_dtls_port, tenant_index);
