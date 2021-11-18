@@ -83,8 +83,9 @@ namespace sx::proxymaker {
 
     MitmProxy *make (baseHostCX *left, baseHostCX *right) {
 
+        if(not left or not right) return nullptr;
+
         auto *new_proxy = new MitmProxy(left->com()->slave());
-        if (not new_proxy or not left or not right) return nullptr;
 
         auto const& log = log::make();
 
@@ -119,7 +120,7 @@ namespace sx::proxymaker {
 
         auto const& log = log::policy();
 
-        auto bypass_cx = [] (baseHostCX *cx) {
+        auto bypass_cx = [] (baseHostCX const* cx) {
             auto *scom = dynamic_cast<SSLCom *>(cx->com());
             if (scom != nullptr) {
                 scom->opt_bypass = true;
