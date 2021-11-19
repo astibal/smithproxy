@@ -177,7 +177,7 @@ namespace sx::proxymaker {
 
 
     using optional_string = std::optional<std::string>;
-    std::pair<optional_string, optional_string> get_dnat_target (std::shared_ptr<ProfileRouting> rt, int family) {
+    std::pair<optional_string, optional_string> get_dnat_target (std::shared_ptr<ProfileRouting> rt, MitmProxy* proxy) {
 
         if(not rt) return { std::nullopt, std::nullopt };
 
@@ -186,10 +186,28 @@ namespace sx::proxymaker {
         std::string ip;
         std::string port;
 
-        auto candidates = rt->lb_candidates(family);
-        auto index = rt->lb_index_rr(candidates.size());
 
-        ip = candidates[index]->ip();
+        {
+            auto l_ = std::scoped_lock(rt->lb_state.lock_);
+            auto candidates = rt->lb_candidates(proxy->com()->l3_proto());
+
+            size_t index = 0;
+
+            switch(rt->dnat_lb_method) {
+
+                case ProfileRouting::lb_method::LB_RR:
+                    index = rt->lb_index_rr(candidates.size());
+                    break;
+                case ProfileRouting::lb_method::LB_L3:
+                    index = rt->lb_index_l3(proxy, candidates.size());
+                    break;
+                case ProfileRouting::lb_method::LB_L4:
+                    index = rt->lb_index_l4(proxy, candidates.size());
+                    break;
+            }
+
+            ip = candidates[index]->ip();
+        }
 
         if(not rt->dnat_ports.empty()) {
             // find address object referred in "routing"
@@ -210,7 +228,7 @@ namespace sx::proxymaker {
                  port.empty() ? std::nullopt : std::make_optional(port) };
     }
 
-    bool route(baseProxy* proxy, std::shared_ptr<ProfileRouting> rt) {
+    bool route(MitmProxy* proxy, std::shared_ptr<ProfileRouting> rt) {
         auto const& log = log::routing();
 
         if(not rt or not proxy) return false;
@@ -218,7 +236,7 @@ namespace sx::proxymaker {
         // update rt profile internals
         rt->update();
 
-        auto [ op_ip, op_port ] = get_dnat_target(rt, proxy->com()->l3_proto());
+        auto [ op_ip, op_port ] = get_dnat_target(rt, proxy);
         if(op_ip or op_port) {
 
             auto orig_px_name = proxy->to_string(iINF);

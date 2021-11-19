@@ -44,7 +44,7 @@ namespace sx::proxymaker {
 
     MitmProxy *make (baseHostCX *left, baseHostCX *right);
     bool policy (MitmProxy *proxy, bool implicit_allow);
-    bool route(baseProxy* proxy, std::shared_ptr<ProfileRouting> rt);
+    bool route(MitmProxy *proxy, std::shared_ptr<ProfileRouting> rt);
     std::pair<std::string, unsigned short> to_magic(std::string const &target_host, unsigned short target_port);
     bool authorize_is_bad (MitmProxy *proxy);
     bool is_replaceable (unsigned short port);
