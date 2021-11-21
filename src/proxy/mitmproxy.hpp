@@ -105,7 +105,6 @@ public:
     struct Opts_ContentWriter {
         bool write_payload = false;
         ContentCaptureFormat format;
-        long long pcap_single_quota;
     };
     std::unique_ptr<Opts_ContentWriter> writer_opts_;
     Opts_ContentWriter* writer_opts() {
