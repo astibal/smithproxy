@@ -58,12 +58,10 @@
 
 class CfgFactoryBase {
 public:
-    CfgFactoryBase(): log(log::config()) {}
+    CfgFactoryBase() = default;
     CfgFactoryBase(CfgFactoryBase const &) = delete;
     virtual ~CfgFactoryBase() = default;
     void operator=(const CfgFactoryBase&) = delete;
-
-    logan_lite& log;
 
     struct log { ;
         static logan_lite &config() {
@@ -75,6 +73,8 @@ public:
             return l;
         }
     };
+
+    logan_lite& log = log::config();
 
     std::string config_file;
     unsigned int tenant_index = 0;
@@ -172,7 +172,7 @@ public:
     std::vector<std::string> keys_of_##name##_or_none() const  {\
         std::vector<std::string> rr; \
         for(auto const& it:  name )  rr.push_back(it.first); \
-        rr.push_back("none"); \
+        rr.emplace_back("none"); \
         return rr; \
     }
 
@@ -211,8 +211,6 @@ public:
 
     std::vector<std::string> db_nameservers;
 
-
-public:
     bool  cfgapi_init(const char* fnm);
     void  cleanup();
 
@@ -306,24 +304,24 @@ public:
     [[nodiscard]] int save_config() const;
 
 
-    int  cleanup_db_address ();
-    int  cleanup_db_port ();
-    int  cleanup_db_proto ();
-    int  cleanup_db_policy ();
-    int  cleanup_db_routing ();
-    int  cleanup_db_prof_content ();
-    int  cleanup_db_prof_detection ();
-    int  cleanup_db_tls_ca ();
-    int  cleanup_db_prof_tls ();
-    int  cleanup_db_prof_auth ();
-    int  cleanup_db_prof_alg_dns ();
-    int  cleanup_db_prof_script ();
+    size_t cleanup_db_address ();
+    size_t cleanup_db_port ();
+    size_t cleanup_db_proto ();
+    size_t cleanup_db_policy ();
+    size_t cleanup_db_routing ();
+    size_t cleanup_db_prof_content ();
+    size_t cleanup_db_prof_detection ();
+    size_t cleanup_db_tls_ca ();
+    size_t cleanup_db_prof_tls ();
+    size_t cleanup_db_prof_auth ();
+    size_t cleanup_db_prof_alg_dns ();
+    size_t cleanup_db_prof_script ();
 
     int policy_match (baseProxy *proxy);
     int policy_match (std::vector<baseHostCX *> &left, std::vector<baseHostCX *> &right);
     int policy_action (int index);
     int policy_apply (baseHostCX *originator, baseProxy *proxy, int matched_policy=-1);
-    std::shared_ptr<PolicyRule> lookup_policy(std::size_t i) { if(i < db_policy_list.size()) return db_policy_list.at(i); return nullptr; }
+    std::shared_ptr<PolicyRule> lookup_policy(std::size_t i) { if(i < db_policy_list.size()) return db_policy_list.at(i); else return nullptr; }
 
     bool policy_apply_tls (int policy_num, baseCom *xcom);
     bool policy_apply_tls (const std::shared_ptr<ProfileTls> &pt, baseCom *xcom);
@@ -392,7 +390,7 @@ bool load_if_exists(libconfig::Setting const& s, const char* key, T& valref) {
     catch(libconfig::SettingTypeException const& e) {
         static auto log = logan_lite("config");
 
-        _war("cannot load: %s", key);
+        _war("cannot load: %s: %s", key, e.what());
     }
 
     return false;

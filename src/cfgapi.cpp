@@ -103,7 +103,7 @@ std::map<std::string, std::shared_ptr<CfgElement>>& CfgFactory::section_db(std::
     }
 
     auto msg = string_format("no such db section %s", section.c_str());
-    throw std::logic_error(msg.c_str());
+    throw std::invalid_argument(msg.c_str());
 }
 
 bool CfgFactory::cfgapi_init(const char* fnm) {
@@ -118,7 +118,7 @@ bool CfgFactory::cfgapi_init(const char* fnm) {
     }
     catch(const FileIOException &fioex)
     {
-        _err("I/O error while reading config file: %s", fnm);
+        _err("I/O error while reading config file: %s: %s", fnm, fioex.what());
         return false;   
     }
     catch(const ParseException &pex)
@@ -1776,20 +1776,20 @@ int CfgFactory::load_db_prof_auth () {
 
 
 
-int CfgFactory::cleanup_db_address () {
+size_t CfgFactory::cleanup_db_address () {
     std::scoped_lock<std::recursive_mutex> l(lock_);
     
-    int r = db_address.size();
+    auto r = db_address.size();
     db_address.clear();
     
     _deb("cleanup_db_address: %d objects freed", r);
     return r;
 }
 
-int CfgFactory::cleanup_db_policy () {
+size_t CfgFactory::cleanup_db_policy () {
     std::scoped_lock<std::recursive_mutex> l(lock_);
     
-    int r = db_policy_list.size();
+    auto r = db_policy_list.size();
     db_policy_list.clear();
     db_policy.clear();
     
@@ -1797,69 +1797,69 @@ int CfgFactory::cleanup_db_policy () {
     return r;
 }
 
-int CfgFactory::cleanup_db_port () {
+size_t CfgFactory::cleanup_db_port () {
     std::scoped_lock<std::recursive_mutex> l(lock_);
-    
-    int r = db_port.size();
+
+    auto r = db_port.size();
     db_port.clear();
     
     return r;
 }
 
-int CfgFactory::cleanup_db_proto () {
+size_t CfgFactory::cleanup_db_proto () {
     std::scoped_lock<std::recursive_mutex> l(lock_);
-    
-    int r = db_proto.size();
+
+    auto r = db_proto.size();
     db_proto.clear();
     
     return r;
 }
 
 
-int CfgFactory::cleanup_db_prof_content () {
+size_t CfgFactory::cleanup_db_prof_content () {
     std::scoped_lock<std::recursive_mutex> l(lock_);
-    
-    int r = db_prof_content.size();
+
+    auto r = db_prof_content.size();
     db_prof_content.clear();
     
     return r;
 }
-int CfgFactory::cleanup_db_prof_detection () {
+size_t CfgFactory::cleanup_db_prof_detection () {
     std::scoped_lock<std::recursive_mutex> l(lock_);
-    
-    int r = db_prof_detection.size();
+
+    auto r = db_prof_detection.size();
     db_prof_detection.clear();
     
     return r;
 }
 
-int CfgFactory::cleanup_db_tls_ca () {
+size_t CfgFactory::cleanup_db_tls_ca () {
     std::scoped_lock<std::recursive_mutex> l(lock_);
     return 0;
 }
 
-int CfgFactory::cleanup_db_prof_tls () {
+size_t CfgFactory::cleanup_db_prof_tls () {
     std::scoped_lock<std::recursive_mutex> l(lock_);
-    
-    int r = db_prof_tls.size();
+
+    auto r = db_prof_tls.size();
     db_prof_tls.clear();
     
     return r;
 }
 
-int CfgFactory::cleanup_db_prof_alg_dns () {
+size_t CfgFactory::cleanup_db_prof_alg_dns () {
     std::scoped_lock<std::recursive_mutex> l(lock_);
-    
-    int r = db_prof_alg_dns.size();
+
+    auto r = db_prof_alg_dns.size();
     db_prof_alg_dns.clear();
     
     return r;
 }
 
-int CfgFactory::cleanup_db_prof_script () {
+size_t CfgFactory::cleanup_db_prof_script () {
     std::scoped_lock<std::recursive_mutex> l(lock_);
 
-    int r = db_prof_script.size();
+    auto r = db_prof_script.size();
     if(r > 0)
         db_prof_script.clear();
 
@@ -1867,10 +1867,10 @@ int CfgFactory::cleanup_db_prof_script () {
 }
 
 
-int CfgFactory::cleanup_db_prof_auth () {
+size_t CfgFactory::cleanup_db_prof_auth () {
     std::scoped_lock<std::recursive_mutex> l(lock_);
-    
-    int r = db_prof_auth.size();
+
+    auto r = db_prof_auth.size();
     db_prof_auth.clear();
     
     return r;
@@ -2493,10 +2493,10 @@ int CfgFactory::save_address_objects(Config& ex) const {
 }
 
 
-int CfgFactory::cleanup_db_routing () {
+size_t CfgFactory::cleanup_db_routing () {
     std::scoped_lock<std::recursive_mutex> l(lock_);
 
-    int r = db_routing.size();
+    auto r = db_routing.size();
     db_routing.clear();
 
     return r;
