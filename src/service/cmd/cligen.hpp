@@ -50,7 +50,7 @@
 
 #define _debug   if(CliState::get().cli_debug_flag) cli_print
 
-void cfg_generate_cli_hints(Setting& setting, std::vector<std::string>* this_level_names,
+void cfg_generate_cli_hints(libconfig::Setting& setting, std::vector<std::string>* this_level_names,
                             std::vector<unsigned int>* this_level_indexes,
                             std::vector<std::string>* next_level_names,
                             std::vector<unsigned int>* next_level_indexes);
@@ -96,7 +96,7 @@ int fn(struct cli_def *cli, const char *command, char *argv[], int argc) { \
 //
 
 
-Setting* cfg_canonize(std::string const& section);
+libconfig::Setting* cfg_canonize(std::string const& section);
 
 enum edit_settings { MODE_EDIT_SETTINGS=0x10000000, MODE_EDIT_SETTINGS_AUTH=0x10001000, MODE_EDIT_SETTINGS_CLI=0x10002000, MODE_EDIT_SETTINGS_SOCKS=0x10003000 };
 

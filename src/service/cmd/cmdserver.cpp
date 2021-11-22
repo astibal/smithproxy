@@ -87,7 +87,7 @@
 
 
 using namespace socle;
-
+using namespace libconfig;
 
 void apply_hostname(cli_def* cli) {
     char hostname[64]; memset(hostname,0,64);

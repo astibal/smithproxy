@@ -64,6 +64,9 @@
 #include <inspect/dnsinspector.hpp>
 #include <inspect/pyinspector.hpp>
 
+
+using namespace libconfig;
+
 std::map<std::string, std::shared_ptr<CfgElement>>& CfgFactory::section_db(std::string const& section) {
     if(section == "proto_objects" or section == "proto_objects.[x]") {
         return db_proto;

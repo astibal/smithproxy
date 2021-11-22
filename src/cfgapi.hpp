@@ -54,7 +54,7 @@
 #include <shm/shmauth.hpp>
 
 
-using namespace libconfig;
+
 
 class CfgFactoryBase {
 public:
@@ -90,7 +90,7 @@ public:
 
 class CfgFactory : public CfgFactoryBase {
 
-    Config cfgapi;
+    libconfig::Config cfgapi;
 
     std::recursive_mutex lock_;
     static inline std::shared_ptr<CfgFactory> self;
@@ -112,8 +112,8 @@ public:
 
 
     static std::recursive_mutex& lock() { return get()->lock_; }
-    static Setting& cfg_root() { return get()->cfgapi.getRoot(); }
-    static Config&  cfg_obj() { return get()->cfgapi; }
+    static libconfig::Setting& cfg_root() { return get()->cfgapi.getRoot(); }
+    static libconfig::Config&  cfg_obj() { return get()->cfgapi; }
 
     loglevel args_debug_flag = NON;
 
@@ -216,8 +216,8 @@ public:
     bool  cfgapi_init(const char* fnm);
     void  cleanup();
 
-    static void cfg_clone_setting(Setting& dst, Setting& orig, int index = -1 );
-    static int cfg_write(Config& cfg, FILE* where, unsigned long iobufsz = 0);
+    static void cfg_clone_setting(libconfig::Setting& dst, libconfig::Setting& orig, int index = -1 );
+    static int cfg_write(libconfig::Config& cfg, FILE* where, unsigned long iobufsz = 0);
 
     template <class T>
     std::shared_ptr<T> section_element(std::string const& section, std::string const& key);
@@ -226,7 +226,6 @@ public:
     std::shared_ptr<CfgAddress> lookup_address (const char *name);
     std::vector<std::shared_ptr<CidrAddress>>
     expand_to_cidr (std::vector<std::string> const &address_names, int cidr_flags);
-
 
     std::shared_ptr<CfgRange> lookup_port (const char *name);
     std::shared_ptr<CfgUint8> lookup_proto (const char *name);
@@ -252,8 +251,8 @@ public:
     int  load_db_proto ();
     int  load_db_policy ();
     int  load_db_prof_content ();
-        int load_db_prof_content_subrules(Setting& cur_object, ProfileContent* new_profile);
-        bool load_db_prof_content_write_format(Setting& cur_object, ProfileContent* new_profile);
+        int load_db_prof_content_subrules(libconfig::Setting& cur_object, ProfileContent* new_profile);
+        bool load_db_prof_content_write_format(libconfig::Setting& cur_object, ProfileContent* new_profile);
     int  load_db_prof_detection ();
     int  load_db_tls_ca();
     int  load_db_prof_tls ();
@@ -265,41 +264,41 @@ public:
     int  load_db_prof_script ();
 
 
-    bool new_address_object(Setting& ex, std::string const& name) const;
-    int save_address_objects(Config& ex) const;
+    bool new_address_object(libconfig::Setting& ex, std::string const& name) const;
+    int save_address_objects(libconfig::Config& ex) const;
 
-    bool new_port_object(Setting& ex, std::string const& name) const;
-    int save_port_objects(Config& ex) const;
+    bool new_port_object(libconfig::Setting& ex, std::string const& name) const;
+    int save_port_objects(libconfig::Config& ex) const;
 
-    bool new_proto_object(Setting& section, std::string const& name) const;
-    int save_proto_objects(Config& ex) const;
+    bool new_proto_object(libconfig::Setting& section, std::string const& name) const;
+    int save_proto_objects(libconfig::Config& ex) const;
 
-    int save_debug(Config& ex) const;
+    int save_debug(libconfig::Config& ex) const;
 
-    bool new_detection_profile(Setting& ex, std::string const& name) const;
-    int save_detection_profiles(Config& ex) const;
+    bool new_detection_profile(libconfig::Setting& ex, std::string const& name) const;
+    int save_detection_profiles(libconfig::Config& ex) const;
 
-    bool new_content_profile(Setting& ex, std::string const& name) const;
-    int save_content_profiles(Config& ex) const;
+    bool new_content_profile(libconfig::Setting& ex, std::string const& name) const;
+    int save_content_profiles(libconfig::Config& ex) const;
 
-    bool new_tls_ca(Setting& ex, std::string const& name) const;
-    int save_tls_ca(Config& ex) const;
+    bool new_tls_ca(libconfig::Setting& ex, std::string const& name) const;
+    int save_tls_ca(libconfig::Config& ex) const;
 
-    bool new_tls_profile(Setting& ex, std::string const& name) const;
-    int save_tls_profiles(Config& ex) const;
+    bool new_tls_profile(libconfig::Setting& ex, std::string const& name) const;
+    int save_tls_profiles(libconfig::Config& ex) const;
 
-    bool new_alg_dns_profile(Setting& ex, std::string const& name) const;
-    int save_alg_dns_profiles(Config& ex) const;
+    bool new_alg_dns_profile(libconfig::Setting& ex, std::string const& name) const;
+    int save_alg_dns_profiles(libconfig::Config& ex) const;
 
-    bool new_auth_profile(Setting& ex, std::string const& name) const;
-    int save_auth_profiles(Config& ex) const;
+    bool new_auth_profile(libconfig::Setting& ex, std::string const& name) const;
+    int save_auth_profiles(libconfig::Config& ex) const;
 
-    bool new_policy(Setting& ex, std::string const& name) const;
-    int save_policy(Config& ex) const;
+    bool new_policy(libconfig::Setting& ex, std::string const& name) const;
+    int save_policy(libconfig::Config& ex) const;
 
 
-    bool new_routing(Setting& ex, std::string const& name) const;
-    int save_routing(Config& ex) const;
+    bool new_routing(libconfig::Setting& ex, std::string const& name) const;
+    int save_routing(libconfig::Config& ex) const;
 
     enum class op_move { OP_MOVE_AFTER, OP_MOVE_BEFORE};
     bool move_policy(int what, int where, op_move op);
