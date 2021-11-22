@@ -21,6 +21,7 @@ It uses our C++17 socket proxying library called [*socle*](https://github.com/as
   * intercept **routed** traffic, **locally-originated** traffic and **SOCKS** proxy requests
   * configure policy based traffic matching similar to modern firewalls
   * utilize per-policy applicable *content*, *dns*, *tls*, *detection* and *authentication* profiles
+  * re-route traffic (DNAT) and load-balance it, stickiness based on source-IP, L3 or L4 data  
   * enjoy insightful CLI with configuration control
 
 ### TLS features:

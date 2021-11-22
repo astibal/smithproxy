@@ -30,7 +30,20 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 ## Roadmap for future versions
 
 * [ ] memory pool ONLY execution
-* [ ] routing - DNAT fixed, SNI-based, load-balanced
+* [ ] routing - SNI-based, ... more options
+
+## What's new in 0.9.26
+
+* [x] routing - DNAT fixed, load-balanced
+
+* add 'routing' load-balance criteria: source-IP, L3 (srcIP+dstIP), L4 (srcIP+dstIP+dstPORT)
+* add 'routing' to more targets - aka load-balance
+* CHANGE: --tenant-index is now no-op (smithproxy reads index from tenants config)
+
+* major fix - resolve memory corruption under heavy load caused by socle mempool data race condition
+* fix - write PID if run in foreground (to help with systemd integration)
+* fix minor multi-tenancy support problems and improvements 
+* logging optimizations - less memory copying in several places 
 
 ## What's new in 0.9.25
 
