@@ -66,7 +66,7 @@ function sync() {
 
     cleanup
 
-    git clone --recursive http://github.com/astibal/smithproxy.git smithproxy -b ${SMITHPROXY_BRANCH}
+    git clone --recursive https://github.com/astibal/smithproxy.git smithproxy -b ${SMITHPROXY_BRANCH}
 
     cd $O
 }
@@ -76,10 +76,10 @@ upload() {
     URL=$2
 
     if [[ -f $FILE ]]; then
-        echo "$FILE exists"
-        curl -tlsv1.2 --cipher 'DEFAULT:!DH' --ftp-ssl-control --ftp-create-dirs -T $FILE -k $URL
+        echo "source $FILE exists"
+        curl --ftp-ssl-control --ftp-create-dirs -T $FILE $URL
     else
-        echo "$FILE doesn't exist!"
+        echo "source $FILE doesn't exist!"
     fi
 }
 
@@ -89,9 +89,9 @@ safe_upload() {
     URL=$2
 
     if curl --output /dev/null --silent --head --fail "$URL"; then
-      echo "URL exists: $URL, aborting"
+      echo "target URL exists: $URL, aborting"
     else
-      echo "URL does not exist: $URL, uploading"
+      echo "target URL does not exist: $URL, uploading"
       upload $FILE $URL
     fi
 }
@@ -161,7 +161,6 @@ fi
 #echo "DEBUG: using password $FTP_UPLOAD_PWD"
 
 UPLOAD_URL="ftp://${FTP_UPLOAD_USER}:${FTP_UPLOAD_PWD}@${FTP_UPLOAD_PATH}"
-DOWNLOAD_URL="http://${HTTP_CHECK_PATH}"
 
 UPLOAD_STREAMLINE_CHANGELOG="N"
 
@@ -258,7 +257,7 @@ else
 
     fi
 
-    $SRC_BALL="${UPLOAD_URL}/src/smithproxy_src-${GIT_TAG}-${GIT_PATCH_DIST}.tar.gz"
+    SRC_BALL="${UPLOAD_URL}src/smithproxy_src-${GIT_TAG}-${GIT_PATCH_DIST}.tar.gz"
     safe_upload /tmp/smithproxy-src.tar.gz $SRC_BALL
 
     sha256sum /tmp/smithproxy-src.tar.gz > /tmp/smithproxy-src.tar.gz.sha256
