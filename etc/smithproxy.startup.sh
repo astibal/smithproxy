@@ -88,7 +88,7 @@ REDIRECT_EXEMPT_USERS=""   # could contain multiple users separated by spaces
 
 
 tenant_table="/etc/smithproxy/smithproxy.tenants.cfg"
-tenant_id="0"
+tenant_id="default"
 tenant_index="0"
 tenant_range="0.0.0.0/0"
 tenant_range6="::/0"
@@ -117,7 +117,7 @@ function tenant_apply {
 
 
     # set tenant source IP ranges
-    if [[ "$tenant_id" != "0" ]]; then
+    if [[ "$tenant_id" != "0" && "$tenant_id" != "default" ]]; then
         if [[ ! -f "${tenant_table}" ]]; then
             logit "ERROR: Tenant table file not found."
             exit 1
