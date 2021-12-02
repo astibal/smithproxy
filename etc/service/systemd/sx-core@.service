@@ -1,0 +1,13 @@
+[Unit]
+Description=Smithproxy Core - tenant %i
+After=network.target remote-fs.target nss-lookup.target
+
+[Service]
+Type=simple
+PIDFile=/var/run/smithproxy.%i.pid
+ExecStart=/usr/bin/smithproxy --tenant-name %i
+Restart=always
+LimitNOFILE=infinity
+
+[Install]
+WantedBy=multi-user.target

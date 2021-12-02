@@ -1,0 +1,12 @@
+[Unit]
+Description=Smithproxy Networking - tenant %i
+After=network.target remote-fs.target nss-lookup.target
+
+[Service]
+Type=OneShot
+ExecStart=/usr/bin/sx_network start %i
+ExecStop=/usr/bin/sx_network stop %i
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
