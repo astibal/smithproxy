@@ -2,5 +2,12 @@
 
 python3 -m pip install pyparsing pylibconfig2
 
-systemctl enable sx-network@default.service
-systemctl enable sx-core@default.service
+if  [[ -f $(which systemctl) ]]; then
+  echo "... systemd detected, enabling services"
+
+  systemctl enable sx-network@default.service
+  systemctl enable sx-core@default.service
+else
+  echo "... systemd not detected, services not enabled"
+  echo "    legacy rc script can be found in /usr/share/smithproxy"
+fi
