@@ -34,6 +34,16 @@ if(UNIX)
             GROUP_READ GROUP_EXECUTE
             WORLD_READ WORLD_EXECUTE
             )
+
+    install(FILES etc/service/systemd/sx-core@.service DESTINATION /usr/lib/systemd/system
+            PERMISSIONS
+            OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
+
+    install(FILES etc/service/systemd/sx-network@.service DESTINATION /usr/lib/systemd/system
+            PERMISSIONS
+            OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
+
+
     install(FILES etc/smithproxy_cli.sh DESTINATION bin
             PERMISSIONS
             OWNER_READ OWNER_WRITE OWNER_EXECUTE
