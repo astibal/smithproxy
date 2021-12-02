@@ -126,6 +126,9 @@ ln -s smithproxy-${GIT_TAG} smithproxy_src
 # create tarball for build
 tar cfz smithproxy_${GIT_TAG}.orig.tar.gz --exclude-vcs smithproxy-${GIT_TAG}
 
+# make source tarball
+rm /tmp/smithproxy-src.tar.gz ; cp smithproxy_${GIT_TAG}.orig.tar.gz /tmp/smithproxy-src.tar.gz
+
 cd smithproxy_src
 
 
@@ -254,6 +257,15 @@ else
         upload smithproxy-${VER}/debian/changelog ${DEB_PATH}/smithproxy_0.9-latest.changelog
 
     fi
+
+    $SRC_BALL="${UPLOAD_URL}/src/smithproxy_src-${$GIT_TAG}-${$GIT_PATCH_DIST}.tar.gz"
+    safe_upload /tmp/smithproxy-src.tar.gz $SRC_BALL
+
+    sha256sum /tmp/smithproxy-src.tar.gz > /tmp/smithproxy-src.tar.gz.sha256
+    safe_upload /tmp/smithproxy-src.tar.gz.sha256 $SRC_BALL.sha256
+
+    rm /tmp/smithproxy-src.tar.gz
+    rm /tmp/smithproxy-src.tar.gz.sha256
 
     echo "Finished."
 fi
