@@ -28,7 +28,7 @@ if(UNIX)
             WORLD_READ WORLD_EXECUTE
             RENAME sx_network
             )
-    install(FILES etc/smithproxy.init DESTINATION /etc/init.d RENAME smithproxy
+    install(FILES etc/service/initd/smithproxy.init DESTINATION share/smithproxy/service
             PERMISSIONS
             OWNER_READ OWNER_WRITE OWNER_EXECUTE
             GROUP_READ GROUP_EXECUTE
