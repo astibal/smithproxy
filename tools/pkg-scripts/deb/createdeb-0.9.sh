@@ -258,7 +258,7 @@ else
 
     fi
 
-    $SRC_BALL="${UPLOAD_URL}/src/smithproxy_src-${$GIT_TAG}-${$GIT_PATCH_DIST}.tar.gz"
+    $SRC_BALL="${UPLOAD_URL}/src/smithproxy_src-${$GIT_TAG}-${GIT_PATCH_DIST}.tar.gz"
     safe_upload /tmp/smithproxy-src.tar.gz $SRC_BALL
 
     sha256sum /tmp/smithproxy-src.tar.gz > /tmp/smithproxy-src.tar.gz.sha256
