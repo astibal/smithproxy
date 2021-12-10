@@ -308,13 +308,28 @@ std::optional<int> version_compare(std::string const& v1, std::string const& v2)
     return result;
 }
 
-bool CfgFactory::upgrade(std::string const& from) {
+// upgrade from previous schema number
+// Any action here is applied to active configuration - which is later saved
+// if returned true.
+
+bool CfgFactory::upgrade_schema(int upgrade_to_num) {
+
+    return false;
+}
+
+bool CfgFactory::upgrade_by_version(std::string const& from) {
 
     std::cout << "upgrade check: " << from << " -> " << SMITH_VERSION  << std::endl;
 
     if(version_compare(SMITH_VERSION, "0.9.23").value_or(-1) > 0) {
         return upgrade_to_0_9_23();
     }
+
+    // Don't use version-based upgrade, unless it's unrelated to configuration file
+    // and needs specific care.
+
+    // Version-based upgrade is deprecated - use schema numbering
+    // which is decoupled from versions.
 
     return false;
 }
@@ -323,8 +338,7 @@ bool CfgFactory::upgrade_to_0_9_23 () {
 
     std::cout << "upgrade script to 0.9.23" << std::endl;
 
-    long long tmp;
-    if(load_if_exists(CfgFactory::cfg_root()["settings"], "write_pcap_single_quota", tmp)) {
+    if(long long tmp; load_if_exists(CfgFactory::cfg_root()["settings"], "write_pcap_single_quota", tmp)) {
         traflog::PcapLog::single_instance().stat_bytes_quota = tmp / (1024 * 1024);
     }
     return true;
@@ -358,7 +372,7 @@ bool CfgFactory::upgrade_and_save() {
 
     auto save_status = [this]() -> bool {
         if(not save_config()) {
-            _err("cannot upgrade config file");
+            _err("cannot upgrade_version config file");
             return false;
         }
         return true;
@@ -382,12 +396,31 @@ bool CfgFactory::upgrade_and_save() {
 
 
     bool do_save = false;
-    std::string v1;
-    if(load_if_exists(internal, "version", v1)) {
+
+    int our_schema = SCHEMA_VERSION;
+    int cfg_schema = 1000;
+
+    if(load_if_exists(internal, "schema", cfg_schema)) {
+        int num_touches = 0;
+
+        if(our_schema > cfg_schema) {
+            for (int cur_schema = cfg_schema + 1; cur_schema <= our_schema ; ++cur_schema) {
+                if (upgrade_schema(cur_schema)) num_touches++;
+            }
+
+            internal["schema"] = SCHEMA_VERSION;
+
+            if(num_touches)
+                do_save = true;
+        }
+    }
+
+
+    if(std::string v1; load_if_exists(internal, "version", v1)) {
 
         if (v1 != SMITH_VERSION) {
             backup(v1);
-            upgrade(v1);
+            upgrade_by_version(v1);
 
             internal["version"] = SMITH_VERSION;
             do_save = true;
@@ -416,6 +449,7 @@ bool CfgFactory::load_internal() {
         return false;
 
     return load_if_exists(cfgapi.getRoot()["*_internal_*"], "version", internal_version);
+    return load_if_exists(cfgapi.getRoot()["*_internal_*"], "schema", schema_version);
 }
 
 
@@ -3490,6 +3524,7 @@ int save_internal(Config& ex) {
 
     Setting& objects = ex.getRoot()["*_internal_*"];
     objects.add("version", Setting::TypeString) = SMITH_VERSION;
+    objects.add("schema", Setting::TypeInt) = CfgFactory::get()->schema_version;
 
     return 1;
 }

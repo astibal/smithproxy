@@ -97,6 +97,9 @@ class CfgFactory : public CfgFactoryBase {
 
 public:
 
+    // Each version bump implies a config upgrade - we start on 1000
+    constexpr static inline const int SCHEMA_VERSION  = 1000;
+
     CfgFactory() = default;
     CfgFactory(CfgFactory const &) = delete;
     void operator=(const CfgFactory&) = delete;
@@ -118,6 +121,7 @@ public:
     loglevel args_debug_flag = NON;
 
     std::string internal_version;
+    int         schema_version = SCHEMA_VERSION;
 
     std::string listen_tcp_port_base = "50080";
     std::string listen_tls_port_base = "50443";
@@ -238,7 +242,9 @@ public:
     bool apply_tenant_config() override;
 
     bool upgrade_and_save();
-    bool upgrade(std::string const& from);
+    bool upgrade_schema(int upgrade_to_num);
+
+    bool upgrade_by_version(std::string const& from);
     bool upgrade_to_0_9_23();
 
     bool load_internal();
