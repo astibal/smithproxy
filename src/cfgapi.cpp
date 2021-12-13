@@ -314,6 +314,9 @@ std::optional<int> version_compare(std::string const& v1, std::string const& v2)
 
 bool CfgFactory::upgrade_schema(int upgrade_to_num) {
 
+    // save 'captures' new section and removes settings
+    if(upgrade_to_num == 1001) return true;
+
     return false;
 }
 
