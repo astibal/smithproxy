@@ -72,6 +72,10 @@ CONFIG_MODE_DEF(cli_conf_edit_detection_signatures, MODE_EDIT_DETECTION_SIGNATUR
 
 CONFIG_MODE_DEF(cli_conf_edit_routing, MODE_EDIT_ROUTING, "routing")
 
+CONFIG_MODE_DEF(cli_conf_edit_captures, MODE_EDIT_CAPTURES, "captures")
+CONFIG_MODE_DEF(cli_conf_edit_captures_local, MODE_EDIT_CAPTURES_LOCAL, "local")
+CONFIG_MODE_DEF(cli_conf_edit_captures_remote, MODE_EDIT_CAPTURES_REMOTE, "remote")
+
 
 std::pair<int, std::string> generate_dynamic_groups(struct cli_def *cli, const char *command, char **argv, int argc) {
     auto words = string_split(command, ' ');

@@ -2310,6 +2310,13 @@ int cli_show_config_routing(struct cli_def *cli, const char *command, char *argv
     return CLI_OK;
 }
 
+int cli_show_config_captures(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+
+    cli_print_section(cli, "captures", -1, 1 * 1024 * 1024);
+    return CLI_OK;
+}
+
 
 void cli_register_static(struct cli_def* cli) {
 
@@ -2343,6 +2350,7 @@ void cli_register_static(struct cli_def* cli) {
                     cli_register_command(cli, show_config, "starttls_signatures", cli_show_config_starttls_sig, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy config section: starttls_signatures");
                     cli_register_command(cli, show_config, "detection_signatures", cli_show_config_detection_sig, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy config section: detection_signatures");
                     cli_register_command(cli, show_config, "routing", cli_show_config_routing, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy config section: routing");
+                    cli_register_command(cli, show_config, "captures", cli_show_config_captures, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy config section: captures");
 
     auto test  = cli_register_command(cli, nullptr, "test", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "various testing commands");
             auto test_dns = cli_register_command(cli, test, "dns", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "dns related testing commands");
@@ -2633,6 +2641,22 @@ void client_thread(int client_socket) {
             .cap("toggle", true)
             .cmd("toggle", cli_generic_toggle_cb);
 
+    register_callback("captures", MODE_EDIT_CAPTURES)
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_captures);
+    register_callback( "captures.local",MODE_EDIT_CAPTURES_LOCAL)
+            .cap("set", true)
+            .cmd("set", cli_generic_set_cb)
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_captures_local);
+    register_callback( "captures.remote",MODE_EDIT_CAPTURES_REMOTE)
+            .cap("set", true)
+            .cmd("set", cli_generic_set_cb)
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_captures_remote);
+
+
+
     auto conft_edit = cli_register_command(cli, nullptr, "edit", nullptr, PRIVILEGE_PRIVILEGED, MODE_CONFIG, "configure smithproxy settings");
 
 
@@ -2641,6 +2665,7 @@ void client_thread(int client_socket) {
                                               "detection_profiles", "content_profiles", "tls_profiles", "auth_profiles",
                                               "alg_dns_profiles",
                                               "routing",
+                                              "captures",
                                               "policy",
                                               "starttls_signatures",
                                               "detection_signatures" };

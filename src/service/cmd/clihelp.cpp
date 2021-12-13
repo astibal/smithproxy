@@ -506,6 +506,15 @@ void CliHelp::init() {
             .suggestion_generator([](std::string const& section, std::string const& variable) {
                 std::vector<std::string> r {"round-robin", "sticky-l3", "sticky-l4" }; return r;
             });
+
+    add("captures.local.enabled", "globally enable/disable file captures")
+            .may_be_empty(false)
+            .value_filter(CliElement::VALUE_BOOL);
+
+    add("captures.remote.enabled", "globally enable/disable tunnelled capture emission")
+            .may_be_empty(false)
+            .value_filter(CliElement::VALUE_BOOL);
+
 }
 
 
