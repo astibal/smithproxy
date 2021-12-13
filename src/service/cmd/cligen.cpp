@@ -181,10 +181,14 @@ void cli_generate_set_command_args(struct cli_def *cli, cli_command* parent, std
     auto set_cb = std::get<1>(cb_entry).cmd("set");
     int mode = std::get<0>(cb_entry);
 
-    std::string masked = sx::str::cli::mask_all(section + "." + varname);
     std::vector<std::string> opts;
 
-    auto cli_e = CliHelp::get().find(masked);
+    auto cli_e = CliHelp::get().find(section + "." + varname);
+    if(not cli_e) {
+        std::string masked = sx::str::cli::mask_all(section + "." + varname);
+        cli_e = CliHelp::get().find(masked);
+    }
+
     if(cli_e) {
         opts = cli_e->get().suggestion_generate(section, varname);
     }
@@ -505,11 +509,6 @@ void cli_generate_commands (cli_def *cli, std::string const &this_section, cli_c
             // it is possible object is already in callback db (set up by previous cmd generation),
             // but we still need to look for .[x] template!
             _debug(cli, "object %s has callbacks set ", template_key.c_str());
-
-            if (CliState::get().has_callback(this_section + ".[x]")) {
-                _debug(cli, "object %s has callbacks set, but prefer .[x] template", template_key.c_str());
-                template_key = this_section + ".[x]";
-            }
         }
         else if (CliState::get().has_callback(this_section + ".[x]")) {
 
