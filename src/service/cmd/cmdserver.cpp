@@ -2441,20 +2441,20 @@ void client_thread(int client_socket) {
     register_callback("settings.cli", MODE_EDIT_SETTINGS_CLI)
             .cap("set", true)
             .cmd("set", cli_generic_set_cb)
-            .cmd("edit", cli_conf_edit_settings_cli)
-            .cap("edit", true);
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_settings_cli);
 
     register_callback("debug", MODE_EDIT_DEBUG)
             .cap("set", true)
             .cmd("set", cli_generic_set_cb)
-            .cmd("edit", cli_conf_edit_debug)
-            .cap("edit", true);
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_debug);
 
     register_callback("debug.log", MODE_EDIT_DEBUG_LOG)
             .cap("set", true)
             .cmd("set", cli_generic_set_cb)
-            .cmd("edit", cli_conf_edit_debug_log)
-            .cap("edit", true);
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_debug_log);
 
 
     register_callback( "proto_objects", MODE_EDIT_PROTO_OBJECTS)

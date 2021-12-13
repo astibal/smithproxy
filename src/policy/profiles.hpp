@@ -95,6 +95,7 @@ struct ContentCaptureFormat {
     ContentCaptureFormat() : value(type_t::SMCAP) {}
     ContentCaptureFormat(std::string const& v) : value(from_str(v)) {};
     ContentCaptureFormat(type_t v) : value(v) {};
+    void operator=(std::string const& r) { value = from_str(r); }
 
     static std::string to_str(write_format_type_t t)  {
         std::string to_ret;

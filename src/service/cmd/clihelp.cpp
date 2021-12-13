@@ -507,16 +507,37 @@ void CliHelp::init() {
                 std::vector<std::string> r {"round-robin", "sticky-l3", "sticky-l4" }; return r;
             });
 
+    init_captures();
+}
+
+
+void CliHelp::init_captures () {
     add("captures.local.enabled", "globally enable/disable file captures")
             .may_be_empty(false)
-            .value_filter(CliElement::VALUE_BOOL);
+            .value_filter(CliElement::VALUE_BOOL)
+            .suggestion_generator(CliElement::SUGGESTION_BOOL);
+
+    add("captures.local.pcap_quota", "Max size of pcap_single file (in MB). Zero means no limits.")
+            .may_be_empty(false)
+            .value_filter(CliElement::VALUE_UINT);
+
+    add("captures.local.dir", "directory where to write capture files")
+            .may_be_empty(false)
+            .value_filter(CliElement::VALUE_DIR);
+
+    add("captures.local.format", "capture file format")
+            .may_be_empty(false)
+            .value_filter(is_in_vector([]() { std::vector<std::string> r {"pcap_single", "pcap", "smcap" }; return r; },
+                                       "write into single pcap, per-connection pcap, or per connection smcap"))
+            .suggestion_generator([](std::string const& section, std::string const& variable) {
+                std::vector<std::string> r {"pcap_single", "pcap", "smcap" }; return r;
+            });
 
     add("captures.remote.enabled", "globally enable/disable tunnelled capture emission")
             .may_be_empty(false)
             .value_filter(CliElement::VALUE_BOOL);
 
 }
-
 
 
 std::optional<std::string> CliHelp::value_check(std::string const& varname, std::string const& value_argument, cli_def* cli) {

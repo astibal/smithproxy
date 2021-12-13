@@ -69,11 +69,18 @@ MitmProxy::MitmProxy(baseCom* c): baseProxy(c), sobject() {
 }
 
 void MitmProxy::toggle_tlog () {
-    
+
+    if(not writer_opts()->write_payload) return;
+
+    auto const& cfg = CfgFactory::get();
+    if(not cfg->capture_local.enabled and not cfg->capture_remote.enabled) return;
+
     // create traffic logger if it doesn't exist
     if(not tlog_) {
 
-        switch (writer_opts()->format.value) {
+        auto fmt = cfg->capture_local.format;
+
+        switch (fmt.value) {
             case ContentCaptureFormat::type_t::SMCAP: {
                 tlog_ = std::make_unique<socle::traflog::SmcapLog>(this,
                                                                    CfgFactory::get()->capture_local.dir.c_str(),

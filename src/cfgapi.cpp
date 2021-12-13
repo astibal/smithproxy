@@ -581,8 +581,11 @@ bool CfgFactory::load_captures() {
             load_if_exists(local, "file_prefix", factory->capture_local.file_prefix);
             load_if_exists(local, "file_suffix", factory->capture_local.file_suffix);
 
+            if(std::string fmt_str; load_if_exists(local, "format", fmt_str))
+                factory->capture_local.format = fmt_str;
+
             int quota_megabytes;
-            load_if_exists(local, "pcap_single_quota", quota_megabytes);
+            load_if_exists(local, "pcap_quota", quota_megabytes);
             traflog::PcapLog::single_instance().stat_bytes_quota = quota_megabytes*1024*1024;
         }
         if(captures.exists("remote")) {
@@ -1963,7 +1966,6 @@ bool CfgFactory::prof_content_apply (baseHostCX *originator, baseProxy *new_prox
             _dia("policy_apply: policy content profile[%s]: write payload: %d", pc_name, pc->write_payload);
 
             mitm_proxy->writer_opts()->write_payload = pc->write_payload;
-            mitm_proxy->writer_opts()->format = pc->write_format;
 
             if( ! pc->content_rules.empty() ) {
                 _dia("policy_apply: policy content profile[%s]: applying content rules, size %d", pc_name, pc->content_rules.size());
@@ -3670,10 +3672,20 @@ int CfgFactory::save_captures(Config& ex) const {
 
 
     auto& local = ex.getRoot()["captures"]["local"];
+    local.add("enable", Setting::TypeBoolean) = CfgFactory::get()->capture_local.enabled;
     local.add("dir", Setting::TypeString) = CfgFactory::get()->capture_local.dir;
     local.add("file_prefix", Setting::TypeString) = CfgFactory::get()->capture_local.file_prefix;
     local.add("file_suffix", Setting::TypeString) = CfgFactory::get()->capture_local.file_suffix;
-    local.add("pcap_single_quota", Setting::TypeInt) = static_cast<int>(traflog::PcapLog::single_instance().stat_bytes_quota/(1024*1024));
+    local.add("pcap_quota", Setting::TypeInt) = static_cast<int>(traflog::PcapLog::single_instance().stat_bytes_quota/(1024*1024));
+    local.add("format", Setting::TypeString) = CfgFactory::get()->capture_local.format.to_str();
+
+
+    if(not objects.exists("remote"))
+        objects.add("remote", Setting::TypeGroup);
+
+
+    auto& remote = ex.getRoot()["captures"]["remote"];
+    remote.add("enable", Setting::TypeBoolean) = CfgFactory::get()->capture_local.enabled;
 
     return 1;
 }

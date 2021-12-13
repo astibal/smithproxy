@@ -136,6 +136,9 @@ struct CliElement {
 
     static inline std::function<suggestion_generator_fn> SUGGESTION_GENERATOR_EMPTY = [](std::string const& section, std::string const& variable) { return std::vector<std::string>(); };
 
+    static inline std::function<suggestion_generator_fn> SUGGESTION_BOOL = [](std::string const& section, std::string const& variable) {
+        std::vector<std::string> r {"true", "false" }; return r; };
+
     static inline std::function<value_filter_fn> VALUE_NONE = [](std::string const& v) -> filter_retval { return  filter_retval::reject("cannot be changed"); };
 
     static inline std::function<value_filter_fn> VALUE_ANY = [](std::string const& v) -> filter_retval { return filter_retval::accept(v); };
@@ -234,6 +237,7 @@ struct CliHelp {
     help_db element_help_;
 
     void init();
+    void init_captures();
 
     std::optional<std::reference_wrapper<CliElement>> find(std::string const& k) {
 

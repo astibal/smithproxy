@@ -104,7 +104,6 @@ public:
 
     struct Opts_ContentWriter {
         bool write_payload = false;
-        ContentCaptureFormat format;
     };
     std::unique_ptr<Opts_ContentWriter> writer_opts_;
     Opts_ContentWriter* writer_opts() {

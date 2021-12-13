@@ -213,6 +213,7 @@ public:
         std::string dir = "/var/local/smithproxy/data";
         std::string file_prefix;
         std::string file_suffix = "pcapng";
+        ContentCaptureFormat format { ContentCaptureFormat::type_t::PCAP_SINGLE };
 
     } capture_local;
 
