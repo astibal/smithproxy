@@ -611,7 +611,7 @@ int CfgFactory::load_debug() {
 
     std::scoped_lock<std::recursive_mutex> l(lock_);
 
-    if(! cfgapi.getRoot().exists("debug")) {
+    if(cfgapi.getRoot().exists("debug")) {
 
         load_if_exists(CfgFactory::cfg_root()["debug"], "log_data_crc", baseCom::debug_log_data_crc);
         load_if_exists(CfgFactory::cfg_root()["debug"], "log_sockets", baseHostCX::socket_in_name);
