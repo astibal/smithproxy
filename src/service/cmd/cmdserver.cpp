@@ -1273,6 +1273,9 @@ bool apply_setting(std::string const& section, std::string const& varname, struc
     if( 0 == section.find("settings") ) {
         ret = CfgFactory::get()->load_settings();
     } else
+    if( 0 == section.find("captures") ) {
+        ret = CfgFactory::get()->load_captures();
+    } else
     if( 0 == section.find("debug") ) {
         ret = CfgFactory::get()->load_debug();
     } else

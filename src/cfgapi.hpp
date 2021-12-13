@@ -208,9 +208,17 @@ public:
     std::string tenant_magic_ip;
 
 
-    std::string traflog_dir = "/var/local/smithproxy/data";
-    std::string traflog_file_prefix;
-    std::string traflog_file_suffix = "pcapng";
+    struct {
+        bool enabled = true;
+        std::string dir = "/var/local/smithproxy/data";
+        std::string file_prefix;
+        std::string file_suffix = "pcapng";
+
+    } capture_local;
+
+    struct {
+        bool enabled = false;
+    } capture_remote;
 
 
     std::vector<std::string> db_nameservers;
@@ -248,7 +256,8 @@ public:
     bool upgrade_to_0_9_23();
 
     bool load_internal();
-    bool load_settings ();
+    bool load_settings();
+    bool load_captures();
     int  load_debug();
     int  load_db_address ();
     int  load_db_port ();
@@ -267,6 +276,8 @@ public:
     [[maybe_unused]]
     int  load_db_prof_script ();
 
+
+    int save_captures(libconfig::Config& ex) const;
 
     bool new_address_object(libconfig::Setting& ex, std::string const& name) const;
     int save_address_objects(libconfig::Config& ex) const;

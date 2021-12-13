@@ -716,6 +716,7 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
         load_signatures(CfgFactory::cfg_obj(), "detection_signatures", SigFactory::get().signature_tree());
 
         CfgFactory::get()->load_settings();
+        CfgFactory::get()->load_captures();
         CfgFactory::get()->load_debug();
 
         // initialize stubborn logans :)

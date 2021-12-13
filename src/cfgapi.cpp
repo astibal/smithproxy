@@ -558,17 +558,54 @@ bool CfgFactory::load_settings () {
         load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "magic_ip", tenant_magic_ip);
     }
 
-    load_if_exists(CfgFactory::cfg_root()["settings"], "write_payload_dir", CfgFactory::get()->traflog_dir);
-    load_if_exists(CfgFactory::cfg_root()["settings"], "write_payload_file_prefix", CfgFactory::get()->traflog_file_prefix);
-    load_if_exists(CfgFactory::cfg_root()["settings"], "write_payload_file_suffix", CfgFactory::get()->traflog_file_suffix);
 
-    int quota_megabytes;
-    load_if_exists(CfgFactory::cfg_root()["settings"], "write_pcap_single_quota", quota_megabytes);
-    traflog::PcapLog::single_instance().stat_bytes_quota = quota_megabytes*1024*1024;
 
     return true;
 }
 
+
+bool CfgFactory::load_captures() {
+
+    std::scoped_lock<std::recursive_mutex> l(lock_);
+
+    auto factory = CfgFactory::get();
+
+    if(cfgapi.getRoot().exists("captures")) {
+        Setting const& captures = cfgapi.getRoot()["captures"];
+
+        if(captures.exists("local")) {
+            Setting const& local = captures["local"];
+
+            load_if_exists(local, "enabled", factory->capture_local.enabled);
+            load_if_exists(local, "dir", factory->capture_local.dir);
+            load_if_exists(local, "file_prefix", factory->capture_local.file_prefix);
+            load_if_exists(local, "file_suffix", factory->capture_local.file_suffix);
+
+            int quota_megabytes;
+            load_if_exists(local, "pcap_single_quota", quota_megabytes);
+            traflog::PcapLog::single_instance().stat_bytes_quota = quota_megabytes*1024*1024;
+        }
+        if(captures.exists("remote")) {
+            Setting const& remote = captures["remote"];
+
+            load_if_exists(remote, "enabled", CfgFactory::get()->capture_remote.enabled);
+        }
+    }
+    else {
+        // try to load old variables
+
+        load_if_exists(CfgFactory::cfg_root()["settings"], "write_payload_dir", CfgFactory::get()->capture_local.dir);
+        load_if_exists(CfgFactory::cfg_root()["settings"], "write_payload_file_prefix", CfgFactory::get()->capture_local.file_prefix);
+        load_if_exists(CfgFactory::cfg_root()["settings"], "write_payload_file_suffix", CfgFactory::get()->capture_local.file_suffix);
+
+        int quota_megabytes;
+        load_if_exists(CfgFactory::cfg_root()["settings"], "write_pcap_single_quota", quota_megabytes);
+        traflog::PcapLog::single_instance().stat_bytes_quota = quota_megabytes*1024*1024;
+
+    }
+
+    return true;
+}
 
 int CfgFactory::load_debug() {
 
@@ -3615,15 +3652,31 @@ int save_settings(Config& ex) {
     auth_objects.add("magic_ip", Setting::TypeString) = CfgFactory::get()->tenant_magic_ip;
 
 
-    objects.add("write_payload_dir", Setting::TypeString) = CfgFactory::get()->traflog_dir;
-    objects.add("write_payload_file_prefix", Setting::TypeString) = CfgFactory::get()->traflog_file_prefix;
-    objects.add("write_payload_file_suffix", Setting::TypeString) = CfgFactory::get()->traflog_file_suffix;
-    objects.add("write_pcap_single_quota", Setting::TypeInt) = static_cast<int>(traflog::PcapLog::single_instance().stat_bytes_quota/(1024*1024));
-
-
     return 0;
 }
 
+
+int CfgFactory::save_captures(Config& ex) const {
+
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
+
+    if(not ex.exists("captures"))
+        ex.getRoot().add("captures", Setting::TypeGroup);
+
+    Setting& objects = ex.getRoot()["captures"];
+
+    if(not objects.exists("local"))
+        objects.add("local", Setting::TypeGroup);
+
+
+    auto& local = ex.getRoot()["captures"]["local"];
+    local.add("dir", Setting::TypeString) = CfgFactory::get()->capture_local.dir;
+    local.add("file_prefix", Setting::TypeString) = CfgFactory::get()->capture_local.file_prefix;
+    local.add("file_suffix", Setting::TypeString) = CfgFactory::get()->capture_local.file_suffix;
+    local.add("pcap_single_quota", Setting::TypeInt) = static_cast<int>(traflog::PcapLog::single_instance().stat_bytes_quota/(1024*1024));
+
+    return 1;
+}
 
 int CfgFactory::save_config() const {
 
@@ -3650,6 +3703,9 @@ int CfgFactory::save_config() const {
 
     n = save_settings(ex);
     _inf("... common settings");
+
+    n = save_captures(ex);
+    _inf("... capture settings");
 
     n = save_debug(ex);
     _inf("... debug settings");

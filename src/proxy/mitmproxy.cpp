@@ -74,47 +74,58 @@ void MitmProxy::toggle_tlog () {
     if(not tlog_) {
 
         switch (writer_opts()->format.value) {
-            case ContentCaptureFormat::type_t::SMCAP:
+            case ContentCaptureFormat::type_t::SMCAP: {
                 tlog_ = std::make_unique<socle::traflog::SmcapLog>(this,
-                                                          CfgFactory::get()->traflog_dir.c_str(),
-                                                          CfgFactory::get()->traflog_file_prefix.c_str(),
-                                                          CfgFactory::get()->traflog_file_suffix.c_str());
+                                                                   CfgFactory::get()->capture_local.dir.c_str(),
+                                                                   CfgFactory::get()->capture_local.file_prefix.c_str(),
+                                                                   CfgFactory::get()->capture_local.file_suffix.c_str());
 
+                }
                 break;
-            case ContentCaptureFormat::type_t::PCAP:
-                tlog_ = std::make_unique<socle::traflog::PcapLog>(this,
-                                                                  CfgFactory::get()->traflog_dir.c_str(),
-                                                                  CfgFactory::get()->traflog_file_prefix.c_str(),
-                                                                  CfgFactory::get()->traflog_file_suffix.c_str(),
-                                                                  true);
 
+            case ContentCaptureFormat::type_t::PCAP: {
+                auto pcaplog = std::make_unique<socle::traflog::PcapLog>(this,
+                                                             CfgFactory::get()->capture_local.dir.c_str(),
+                                                             CfgFactory::get()->capture_local.file_prefix.c_str(),
+                                                             CfgFactory::get()->capture_local.file_suffix.c_str(),
+
+                                                             true);
+                pcaplog->details.ttl = 32;
+                tlog_ = std::move(pcaplog);
+
+                }
                 break;
-            case ContentCaptureFormat::type_t::PCAP_SINGLE:
+
+            case ContentCaptureFormat::type_t::PCAP_SINGLE: {
 
                 static std::once_flag once;
                 std::call_once(once, [] {
-                    auto& single = socle::traflog::PcapLog::single_instance();
+                    auto &single = socle::traflog::PcapLog::single_instance();
 
-                    single.FS = socle::traflog::FsOutput(nullptr, CfgFactory::get()->traflog_dir.c_str(),
-                                        CfgFactory::get()->traflog_file_prefix.c_str(),
-                                        CfgFactory::get()->traflog_file_suffix.c_str(), false);
+                    single.FS = socle::traflog::FsOutput(nullptr, CfgFactory::get()->capture_local.dir.c_str(),
+                                                         CfgFactory::get()->capture_local.file_prefix.c_str(),
+                                                         CfgFactory::get()->capture_local.file_suffix.c_str(), false);
 
                     single.FS.generate_filename_single("smithproxy", true);
                 });
 
-                auto* n = new socle::traflog::PcapLog(this, CfgFactory::get()->traflog_dir.c_str(),
-                                                        CfgFactory::get()->traflog_file_prefix.c_str(),
-                                                        CfgFactory::get()->traflog_file_suffix.c_str(),
-                                                        false);
+                auto n = std::make_unique<socle::traflog::PcapLog>(this, CfgFactory::get()->capture_local.dir.c_str(),
+                                                                   CfgFactory::get()->capture_local.file_prefix.c_str(),
+                                                                   CfgFactory::get()->capture_local.file_suffix.c_str(),
+                                                                   false);
                 n->single_only = true;
-                tlog_ = std::unique_ptr<baseTrafficLogger>(n);
+                n->details.ttl = 32;
+
+                tlog_ = std::move(n);
+
+                }
                 break;
         }
     }
     
     // check if we have there status file
     if(tlog_) {
-        std::string data_dir = CfgFactory::get()->traflog_dir;
+        std::string data_dir = CfgFactory::get()->capture_local.dir;
 
         data_dir += "/disabled";
         
