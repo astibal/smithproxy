@@ -487,6 +487,13 @@ void CliHelp::init() {
             .value_filter(is_in_vector([]() -> std::vector<std::string> { return {"smcap", "pcap", "pcap_single"}; },"smcap, pcap or pcap_single"))
             .suggestion_generator([](std::string const& section, std::string const& variable) -> std::vector<std::string> {  return {"smcap", "pcap", "pcap_single"};   });
 
+
+    init_routing();
+    init_captures();
+}
+
+
+void CliHelp::init_routing() {
     add("routing.[x].dnat_address", "change destination address")
             .may_be_empty(true)
             .value_filter(is_in_vector([]() { return CfgFactory::get()->keys_of_db_address(); },"must be in address_objects"))
@@ -506,10 +513,7 @@ void CliHelp::init() {
             .suggestion_generator([](std::string const& section, std::string const& variable) {
                 std::vector<std::string> r {"round-robin", "sticky-l3", "sticky-l4" }; return r;
             });
-
-    init_captures();
 }
-
 
 void CliHelp::init_captures () {
     add("captures.local.enabled", "globally enable/disable file captures")

@@ -237,6 +237,7 @@ struct CliHelp {
     help_db element_help_;
 
     void init();
+    void init_routing();
     void init_captures();
 
     std::optional<std::reference_wrapper<CliElement>> find(std::string const& k) {
