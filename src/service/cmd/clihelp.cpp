@@ -537,6 +537,27 @@ void CliHelp::init_captures () {
             .may_be_empty(false)
             .value_filter(CliElement::VALUE_BOOL);
 
+    add("captures.remote.tun_type", "select tunnelling protocol")
+            .may_be_empty(false)
+            .value_filter(is_in_vector([]() { std::vector<std::string> r {"gre", }; return r; },
+                                       "tunnel type"))
+            .suggestion_generator([](std::string const& section, std::string const& variable) {
+                std::vector<std::string> r{"gre",};
+                return r;
+            });
+
+    add("captures.remote.tun_src", "set tunnel source IP address")
+            .may_be_empty(false)
+            .value_filter(CliElement::VALUE_IPHOST);
+    add("captures.remote.tun_dst", "set tunnel destination IP address")
+            .may_be_empty(false)
+            .value_filter(CliElement::VALUE_IPHOST);
+    add("captures.remote.tun_ttl", "set tunnel TTL (ie. to not accidentally leave your premises)")
+            .may_be_empty(false)
+            .value_filter(VALUE_UINT_RANGE<0,255>);
+
+
+
 }
 
 

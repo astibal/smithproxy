@@ -317,6 +317,12 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
     // save 'captures' new section and removes settings
     if(upgrade_to_num == 1001) return true;
 
+    // added elements in captures.remote
+    if(upgrade_to_num == 1002) {
+        CfgFactory::get()->capture_remote.enabled = false;
+        return true;
+    }
+
     return false;
 }
 
@@ -595,6 +601,10 @@ bool CfgFactory::load_captures() {
             Setting const& remote = captures["remote"];
 
             load_if_exists(remote, "enabled", CfgFactory::get()->capture_remote.enabled);
+            load_if_exists(remote, "tun_type", CfgFactory::get()->capture_remote.tun_type);
+            load_if_exists(remote, "tun_src", CfgFactory::get()->capture_remote.tun_src);
+            load_if_exists(remote, "tun_dst", CfgFactory::get()->capture_remote.tun_dst);
+            load_if_exists(remote, "tun_ttl", CfgFactory::get()->capture_remote.tun_ttl);
         }
     }
     else {
@@ -3688,7 +3698,11 @@ int CfgFactory::save_captures(Config& ex) const {
 
 
     auto& remote = ex.getRoot()["captures"]["remote"];
-    remote.add("enable", Setting::TypeBoolean) = CfgFactory::get()->capture_local.enabled;
+    remote.add("enable", Setting::TypeBoolean) = CfgFactory::get()->capture_remote.enabled;
+    remote.add("tun_type", Setting::TypeString) = CfgFactory::get()->capture_remote.tun_type;
+    remote.add("tun_src", Setting::TypeString) = CfgFactory::get()->capture_remote.tun_src;
+    remote.add("tun_dst", Setting::TypeString) = CfgFactory::get()->capture_remote.tun_dst;
+    remote.add("tun_ttl", Setting::TypeInt) = CfgFactory::get()->capture_remote.tun_ttl;
 
     return 1;
 }
