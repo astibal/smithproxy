@@ -61,7 +61,7 @@ namespace  sx::str {
         string_replace_all(target, "\\", "_");
         string_replace_all(target, "%", "_");
         string_replace_all(target, ";", "_");
-        string_replace_all(target, ":", "_");
+
         string_replace_all(target, ",", "_");
         string_replace_all(target, "\"", "_");
         string_replace_all(target, "{", "_");
