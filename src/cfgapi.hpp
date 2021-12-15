@@ -98,7 +98,7 @@ class CfgFactory : public CfgFactoryBase {
 public:
 
     // Each version bump implies a config upgrade - we start on 1000
-    constexpr static inline const int SCHEMA_VERSION  = 1002;
+    constexpr static inline const int SCHEMA_VERSION  = 1003;
 
     CfgFactory() = default;
     CfgFactory(CfgFactory const &) = delete;

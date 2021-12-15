@@ -318,10 +318,19 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
     if(upgrade_to_num == 1001) return true;
 
     // added elements in captures.remote
-    if(upgrade_to_num == 1002) {
+    else if(upgrade_to_num == 1002) {
         CfgFactory::get()->capture_remote.enabled = false;
         return true;
     }
+    // file suffix is added automatically, reset if not set to something custom
+    else if(upgrade_to_num == 1003) {
+        auto s = CfgFactory::get()->capture_local.file_suffix;
+        if(s == "pcapng" or s == "pcap" or s == "smcap") {
+            CfgFactory::get()->capture_local.file_suffix = "";
+            return true;
+        }
+    }
+
 
     return false;
 }
@@ -590,12 +599,34 @@ bool CfgFactory::load_captures() {
             load_if_exists(local, "file_prefix", factory->capture_local.file_prefix);
             load_if_exists(local, "file_suffix", factory->capture_local.file_suffix);
 
-            if(std::string fmt_str; load_if_exists(local, "format", fmt_str))
+            std::string fmt_str;
+            if(load_if_exists(local, "format", fmt_str)) {
                 factory->capture_local.format = fmt_str;
+
+                if (fmt_str == "pcap_single") {
+                    auto fs = factory->capture_local.format.to_ext(factory->capture_local.file_suffix);
+                    auto fp = factory->capture_local.file_prefix;
+                    auto fd = factory->capture_local.dir;
+
+                    auto& tgt = traflog::PcapLog::single_instance();
+                    bool updated = false;
+
+                    if(tgt.FS.file_suffix != fs) { tgt.FS.file_suffix = fs; updated = true; }
+                    if(tgt.FS.file_prefix != fp) { tgt.FS.file_prefix = fp; updated = true; }
+                    if(tgt.FS.data_dir != fd) { tgt.FS.data_dir = fd; updated = true; }
+
+                    if(updated) {
+                        traflog::PcapLog::single_instance().FS.generate_filename_single("smithproxy", true);
+                        traflog::PcapLog::single_instance().pcap_header_written = false;
+                    }
+                }
+            }
 
             int quota_megabytes;
             load_if_exists(local, "pcap_quota", quota_megabytes);
-            traflog::PcapLog::single_instance().stat_bytes_quota = quota_megabytes*1024*1024;
+
+            if(fmt_str == "pcap_single")
+                traflog::PcapLog::single_instance().stat_bytes_quota = quota_megabytes*1024*1024;
         }
         if(captures.exists("remote")) {
             Setting const& remote = captures["remote"];
