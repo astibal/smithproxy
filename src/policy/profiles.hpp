@@ -92,6 +92,11 @@ struct ContentCaptureFormat {
                                        { type_t::PCAP_SINGLE, "pcap_single" }
                                };
 
+    static const inline map_t extension_map_ = { { type_t::SMCAP, "smcap" },
+                                       { type_t::PCAP, "pcapng" },
+                                       { type_t::PCAP_SINGLE, "pcapng" }
+    };
+
     ContentCaptureFormat() : value(type_t::SMCAP) {}
     ContentCaptureFormat(std::string const& v) : value(from_str(v)) {};
     ContentCaptureFormat(type_t v) : value(v) {};
@@ -107,6 +112,19 @@ struct ContentCaptureFormat {
         }
         return to_ret;
     }
+
+    static std::string to_ext(write_format_type_t t)  {
+        std::string to_ret;
+        for(auto const& r: extension_map_) {
+            if(r.first == t) {
+                to_ret  = r.second;
+                break;
+            }
+        }
+        return to_ret;
+    }
+    std::string to_ext() const { return to_ext(value); }
+
     static write_format_type_t from_str(std::string const& write_format) {
         type_t to_ret = write_format_type_t::SMCAP;
 
@@ -118,6 +136,12 @@ struct ContentCaptureFormat {
         }
         return to_ret;
 
+    }
+
+    std::string to_ext(std::string const& more_suf) {
+        auto suf = more_suf;
+        suf.empty() ? suf += to_ext() : suf += "." + to_ext();
+        return suf;
     }
 
     std::string to_str() const { return to_str(value); }

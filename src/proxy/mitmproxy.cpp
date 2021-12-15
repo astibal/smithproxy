@@ -82,20 +82,24 @@ void MitmProxy::toggle_tlog () {
 
         switch (fmt.value) {
             case ContentCaptureFormat::type_t::SMCAP: {
+
+                auto suf = fmt.to_ext(CfgFactory::get()->capture_local.file_suffix);
+
                 tlog_ = std::make_unique<socle::traflog::SmcapLog>(this,
                                                                    CfgFactory::get()->capture_local.dir.c_str(),
                                                                    CfgFactory::get()->capture_local.file_prefix.c_str(),
-                                                                   CfgFactory::get()->capture_local.file_suffix.c_str());
+                                                                   suf.c_str());
 
                 }
                 break;
 
             case ContentCaptureFormat::type_t::PCAP: {
+                auto suf = fmt.to_ext(CfgFactory::get()->capture_local.file_suffix);
+
                 auto pcaplog = std::make_unique<socle::traflog::PcapLog>(this,
                                                              CfgFactory::get()->capture_local.dir.c_str(),
                                                              CfgFactory::get()->capture_local.file_prefix.c_str(),
-                                                             CfgFactory::get()->capture_local.file_suffix.c_str(),
-
+                                                             suf.c_str(),
                                                              true);
                 pcaplog->details.ttl = 32;
                 tlog_ = std::move(pcaplog);
@@ -106,19 +110,21 @@ void MitmProxy::toggle_tlog () {
             case ContentCaptureFormat::type_t::PCAP_SINGLE: {
 
                 static std::once_flag once;
-                std::call_once(once, [] {
+                std::call_once(once, [&fmt] {
                     auto &single = socle::traflog::PcapLog::single_instance();
+                    auto suf = fmt.to_ext(CfgFactory::get()->capture_local.file_suffix);
 
                     single.FS = socle::traflog::FsOutput(nullptr, CfgFactory::get()->capture_local.dir.c_str(),
                                                          CfgFactory::get()->capture_local.file_prefix.c_str(),
-                                                         CfgFactory::get()->capture_local.file_suffix.c_str(), false);
+                                                         suf.c_str(), false);
 
                     single.FS.generate_filename_single("smithproxy", true);
                 });
 
+                auto suf = fmt.to_ext(CfgFactory::get()->capture_local.file_suffix);
                 auto n = std::make_unique<socle::traflog::PcapLog>(this, CfgFactory::get()->capture_local.dir.c_str(),
                                                                    CfgFactory::get()->capture_local.file_prefix.c_str(),
-                                                                   CfgFactory::get()->capture_local.file_suffix.c_str(),
+                                                                   suf.c_str(),
                                                                    false);
                 n->single_only = true;
                 n->details.ttl = 32;
