@@ -3716,7 +3716,7 @@ int CfgFactory::save_captures(Config& ex) const {
 
 
     auto& local = ex.getRoot()["captures"]["local"];
-    local.add("enable", Setting::TypeBoolean) = CfgFactory::get()->capture_local.enabled;
+    local.add("enabled", Setting::TypeBoolean) = CfgFactory::get()->capture_local.enabled;
     local.add("dir", Setting::TypeString) = CfgFactory::get()->capture_local.dir;
     local.add("file_prefix", Setting::TypeString) = CfgFactory::get()->capture_local.file_prefix;
     local.add("file_suffix", Setting::TypeString) = CfgFactory::get()->capture_local.file_suffix;
@@ -3729,7 +3729,7 @@ int CfgFactory::save_captures(Config& ex) const {
 
 
     auto& remote = ex.getRoot()["captures"]["remote"];
-    remote.add("enable", Setting::TypeBoolean) = CfgFactory::get()->capture_remote.enabled;
+    remote.add("enabled", Setting::TypeBoolean) = CfgFactory::get()->capture_remote.enabled;
     remote.add("tun_type", Setting::TypeString) = CfgFactory::get()->capture_remote.tun_type;
     remote.add("tun_src", Setting::TypeString) = CfgFactory::get()->capture_remote.tun_src;
     remote.add("tun_dst", Setting::TypeString) = CfgFactory::get()->capture_remote.tun_dst;
