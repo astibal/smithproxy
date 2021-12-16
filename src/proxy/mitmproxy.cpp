@@ -75,6 +75,28 @@ void MitmProxy::toggle_tlog () {
     auto const& cfg = CfgFactory::get();
     if(not cfg->capture_local.enabled and not cfg->capture_remote.enabled) return;
 
+
+    auto install_gre_export = [](std::unique_ptr<traflog::PcapLog>& pcaplog){
+
+        auto const& cfg = CfgFactory::get();
+
+        if(cfg->capture_remote.enabled) {
+            if(not cfg->capture_remote.tun_dst.empty()) {
+                auto c = CidrAddress(cfg->capture_remote.tun_dst);
+
+                auto ip = c.ip();
+                auto fam = c.cidr()->proto;
+                auto exp = traflog::GreExporter(fam, ip);
+
+                if(cfg->capture_remote.tun_ttl > 0)
+                    exp.ttl(cfg->capture_remote.tun_ttl);
+
+                pcaplog->ip_packet_hook = exp;
+            }
+        }
+    };
+
+
     // create traffic logger if it doesn't exist
     if(not tlog_) {
 
@@ -102,6 +124,7 @@ void MitmProxy::toggle_tlog () {
                                                              suf.c_str(),
                                                              true);
                 pcaplog->details.ttl = 32;
+                install_gre_export(pcaplog);
                 tlog_ = std::move(pcaplog);
 
                 }
@@ -128,6 +151,8 @@ void MitmProxy::toggle_tlog () {
                                                                    false);
                 n->single_only = true;
                 n->details.ttl = 32;
+
+                install_gre_export(n);
 
                 tlog_ = std::move(n);
 
