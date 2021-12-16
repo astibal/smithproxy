@@ -220,7 +220,6 @@ public:
     struct {
         bool enabled = false;
         std::string tun_type = "gre";
-        std::string tun_src = "127.0.0.1";
         std::string tun_dst = "127.0.0.1";
         int tun_ttl {1};
     } capture_remote;

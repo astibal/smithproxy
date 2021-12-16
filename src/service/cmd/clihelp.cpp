@@ -550,9 +550,6 @@ void CliHelp::init_captures () {
                 return r;
             });
 
-    add("captures.remote.tun_src", "set tunnel source IP address")
-            .may_be_empty(false)
-            .value_filter(CliElement::VALUE_IPHOST);
     add("captures.remote.tun_dst", "set tunnel destination IP address")
             .may_be_empty(false)
             .value_filter(CliElement::VALUE_IPHOST);

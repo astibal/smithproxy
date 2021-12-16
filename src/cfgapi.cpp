@@ -633,7 +633,6 @@ bool CfgFactory::load_captures() {
 
             load_if_exists(remote, "enabled", CfgFactory::get()->capture_remote.enabled);
             load_if_exists(remote, "tun_type", CfgFactory::get()->capture_remote.tun_type);
-            load_if_exists(remote, "tun_src", CfgFactory::get()->capture_remote.tun_src);
             load_if_exists(remote, "tun_dst", CfgFactory::get()->capture_remote.tun_dst);
             load_if_exists(remote, "tun_ttl", CfgFactory::get()->capture_remote.tun_ttl);
         }
@@ -3731,7 +3730,6 @@ int CfgFactory::save_captures(Config& ex) const {
     auto& remote = ex.getRoot()["captures"]["remote"];
     remote.add("enabled", Setting::TypeBoolean) = CfgFactory::get()->capture_remote.enabled;
     remote.add("tun_type", Setting::TypeString) = CfgFactory::get()->capture_remote.tun_type;
-    remote.add("tun_src", Setting::TypeString) = CfgFactory::get()->capture_remote.tun_src;
     remote.add("tun_dst", Setting::TypeString) = CfgFactory::get()->capture_remote.tun_dst;
     remote.add("tun_ttl", Setting::TypeInt) = CfgFactory::get()->capture_remote.tun_ttl;
 
