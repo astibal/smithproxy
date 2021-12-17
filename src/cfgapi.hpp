@@ -212,7 +212,7 @@ public:
         bool enabled = true;
         std::string dir = "/var/local/smithproxy/data";
         std::string file_prefix;
-        std::string file_suffix = "pcapng";
+        std::string file_suffix;
         ContentCaptureFormat format { ContentCaptureFormat::type_t::PCAP_SINGLE };
 
     } capture_local;
