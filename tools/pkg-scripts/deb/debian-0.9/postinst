@@ -7,7 +7,7 @@ if [ ! -d /var/local/smithproxy/data ]; then
   mkdir -p /var/local/smithproxy/data
 fi
 
-if  [ -f $(which systemctl) ]; then
+if  [ -f "$(which systemctl)" ]; then
   echo "... systemd detected, enabling services"
 
   systemctl enable sx-network@default.service
