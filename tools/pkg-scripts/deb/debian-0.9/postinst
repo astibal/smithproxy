@@ -2,6 +2,11 @@
 
 python3 -m pip install pyparsing pylibconfig2
 
+if [[ ! -d /var/local/smithproxy/data ]]; then
+  echo "... creating default capture directory"
+  mkdir -p /var/local/smithproxy/data
+fi
+
 if  [[ -f $(which systemctl) ]]; then
   echo "... systemd detected, enabling services"
 
