@@ -88,12 +88,11 @@ void MitmProxy::toggle_tlog () {
 
                 auto ip = c.ip();
                 auto fam = c.cidr()->proto;
-                auto exp = traflog::GreExporter(fam, ip);
 
-                if(cfg->capture_remote.tun_ttl > 0)
-                    exp.ttl(cfg->capture_remote.tun_ttl);
-
+                auto exp = std::make_shared<traflog::GreExporter>(fam, ip);
                 pcaplog->ip_packet_hook = exp;
+                if(cfg->capture_remote.tun_ttl > 0)
+                    exp->ttl(cfg->capture_remote.tun_ttl);
             }
         }
     };
