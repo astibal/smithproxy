@@ -607,6 +607,7 @@ bool CfgFactory::load_captures() {
                     auto fs = factory->capture_local.format.to_ext(factory->capture_local.file_suffix);
                     auto fp = factory->capture_local.file_prefix;
                     auto fd = factory->capture_local.dir;
+                    auto only_remote = not factory->capture_local.enabled;
 
                     auto& tgt = traflog::PcapLog::single_instance();
                     bool updated = false;
@@ -614,6 +615,7 @@ bool CfgFactory::load_captures() {
                     if(tgt.FS.file_suffix != fs) { tgt.FS.file_suffix = fs; updated = true; }
                     if(tgt.FS.file_prefix != fp) { tgt.FS.file_prefix = fp; updated = true; }
                     if(tgt.FS.data_dir != fd) { tgt.FS.data_dir = fd; updated = true; }
+                    if(traflog::PcapLog::ip_packet_hook_only != only_remote ) { traflog::PcapLog::ip_packet_hook_only = only_remote; }
 
                     if(updated) {
                         traflog::PcapLog::single_instance().FS.generate_filename_single("smithproxy", true);

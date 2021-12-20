@@ -73,6 +73,8 @@ void MitmProxy::toggle_tlog () {
     if(not writer_opts()->write_payload) return;
 
     auto const& cfg = CfgFactory::get();
+
+    // let pass further local.disabled and remote.enabled => writes only GRE packets using PCAP features
     if(not cfg->capture_local.enabled and not cfg->capture_remote.enabled) return;
 
 
@@ -136,9 +138,10 @@ void MitmProxy::toggle_tlog () {
                 std::call_once(once, [&fmt] {
                     auto &single = socle::traflog::PcapLog::single_instance();
                     auto suf = fmt.to_ext(CfgFactory::get()->capture_local.file_suffix);
+                    auto const& cfg = CfgFactory::get();
 
-                    single.FS = socle::traflog::FsOutput(nullptr, CfgFactory::get()->capture_local.dir.c_str(),
-                                                         CfgFactory::get()->capture_local.file_prefix.c_str(),
+                    single.FS = socle::traflog::FsOutput(nullptr, cfg->capture_local.dir.c_str(),
+                                                         cfg->capture_local.file_prefix.c_str(),
                                                          suf.c_str(), false);
 
                     single.FS.generate_filename_single("smithproxy", true);
