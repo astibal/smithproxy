@@ -420,6 +420,7 @@ bool CfgFactory::upgrade_and_save() {
 
     if(not load_if_exists(internal, "schema", cfg_schema)) {
         std::cerr << "schema versioning info not found, assuming 1000\n";
+        internal.add("schema", libconfig::Setting::TypeInt) = 1000;
     }
 
     [&]{
