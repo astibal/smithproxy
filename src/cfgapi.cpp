@@ -327,8 +327,8 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         auto s = CfgFactory::get()->capture_local.file_suffix;
         if(s == "pcapng" or s == "pcap" or s == "smcap") {
             CfgFactory::get()->capture_local.file_suffix = "";
-            return true;
         }
+        return true;
     }
 
 
@@ -418,7 +418,11 @@ bool CfgFactory::upgrade_and_save() {
     int our_schema = SCHEMA_VERSION;
     int cfg_schema = 1000;
 
-    if(load_if_exists(internal, "schema", cfg_schema)) {
+    if(not load_if_exists(internal, "schema", cfg_schema)) {
+        std::cerr << "schema versioning info not found, assuming 1000\n";
+    }
+
+    [&]{
         int num_touches = 0;
 
         if(our_schema > cfg_schema) {
@@ -431,7 +435,7 @@ bool CfgFactory::upgrade_and_save() {
             if(num_touches)
                 do_save = true;
         }
-    }
+    }();
 
 
     if(std::string v1; load_if_exists(internal, "version", v1)) {
