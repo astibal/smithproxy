@@ -1,5 +1,9 @@
 #!/bin/sh
 
+# set basic hosts file
+echo "127.0.0.1   localhost" > $SNAP_DATA/etc/hosts
+echo "::1     ip6-localhost ip6-loopback" >> $SNAP_DATA/etc/hosts
+
 # copy read-only default configs into writable area
 
 cp -r $SNAP/etc/smithproxy $SNAP_DATA/etc/

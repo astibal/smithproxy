@@ -82,9 +82,31 @@ layout:
   /var/local/smithproxy:
     bind: $SNAP_DATA/captures
 
+  /usr/bin/telnet:
+    bind-file: $SNAP/usr/bin/telnet.netkit
+
 apps:
+  svc-core:
+    command: bin/smithproxy --tenant-name default
+    daemon: simple
+    restart-condition: always
+    plugs:
+      - network
+      - network-bind
+      - network-control
+    
+  svc-net:
+    command: bin/sx_network start    
+    stop-command: bin/sx_network stop
+    daemon: oneshot
+    plugs:
+      - network
+      - network-bind
+      - network-control
+      - firewall-control
+        
   exe:
-    command: bin/smithproxy --tenant-index 0 --tenant-name default
+    command: bin/smithproxy --tenant-name default
     plugs:
       - network
       - network-bind
@@ -98,6 +120,8 @@ apps:
 
   cli:
     command: bin/sx_cli
+    plugs:
+      - network
 
   regencert:
     command: bin/sx_regencerts
