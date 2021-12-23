@@ -637,6 +637,8 @@ bool CfgFactory::load_captures() {
             load_if_exists(remote, "tun_type", CfgFactory::get()->capture_remote.tun_type);
             load_if_exists(remote, "tun_dst", CfgFactory::get()->capture_remote.tun_dst);
             load_if_exists(remote, "tun_ttl", CfgFactory::get()->capture_remote.tun_ttl);
+
+            CfgFactory::gre_export_apply(&traflog::PcapLog::single_instance());
         }
     }
     else {
@@ -2339,6 +2341,31 @@ int CfgFactory::policy_apply (baseHostCX *originator, baseProxy *proxy, int matc
     
     return policy_num;
 }
+
+
+void CfgFactory::gre_export_apply(traflog::PcapLog* pcaplog) {
+
+    auto const& cfg = CfgFactory::get();
+
+    if(cfg->capture_remote.enabled) {
+        if(not cfg->capture_remote.tun_dst.empty()) {
+            auto c = CidrAddress(cfg->capture_remote.tun_dst);
+
+            auto ip = c.ip();
+            auto fam = c.cidr()->proto;
+
+            auto exp = std::make_shared<traflog::GreExporter>(fam, ip);
+            pcaplog->ip_packet_hook = exp;
+            if(cfg->capture_remote.tun_ttl > 0)
+                exp->ttl(cfg->capture_remote.tun_ttl);
+
+        } else {
+            pcaplog->ip_packet_hook.reset();
+        }
+    } else {
+        pcaplog->ip_packet_hook.reset();
+    }
+};
 
 
 bool CfgFactory::policy_apply_tls (int policy_num, baseCom *xcom) {

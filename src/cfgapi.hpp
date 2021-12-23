@@ -50,6 +50,7 @@
 #include <ranges.hpp>
 #include <policy/policy.hpp>
 #include <sslcom.hpp>
+#include <traflog/pcaplog.hpp>
 
 #include <shm/shmauth.hpp>
 
@@ -355,6 +356,8 @@ public:
     bool prof_alg_dns_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileAlgDns>& p_alg_dns);
     [[maybe_unused]]
     bool prof_script_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileScript>& p_script);
+
+    static void gre_export_apply(traflog::PcapLog* pcaplog);
 
     bool should_redirect (const std::shared_ptr<ProfileTls> &pt, SSLCom *com);
 
