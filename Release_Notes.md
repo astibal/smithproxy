@@ -32,6 +32,23 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 * [ ] memory pool ONLY execution
 * [ ] routing - SNI-based, ... more options
 
+
+## What's new in 0.9.27
+
+- systemd units made ready (most of you will use instance name 'default')
+- introduced new config schema mechanics which improves upgrade experience
+- rewritten internal connection-proxy flow
+- added a new config section 'captures', and its sub-entries 'local' and 'remote'
+- introduce GRE capture export sent to remote host, configurable in 'captures/remote' config section
+- snap smithproxy flavor introduces snap services and fixes CLI support
+
+### Fixes
+
+- fix IPv6 address ':' will be replaced with underscore 
+- fix IPv6 transparency - ipv6 traffic is no longer natted regardless of configuration
+- fix CLI sub-section handling preventing to enter certain configuration entries
+
+
 ## What's new in 0.9.26
 
 * [x] routing - DNAT fixed, load-balanced
