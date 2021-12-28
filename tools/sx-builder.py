@@ -16,6 +16,7 @@ Config file (default ~/.config/sx-builder.json):
     "FTP_PASS": "password",
     "FTP_UPLOAD_USER": "ftpuser",
     "FTP_UPLOAD_PATH": "ftp.site.org/download/",
+    "CURL_UPLOAD_OPTS": ""
 }
 """
 
@@ -27,7 +28,7 @@ SRC_BRANCH = ""
 FTP_PASS = ""
 FTP_UPLOAD_USER = ""
 FTP_UPLOAD_PATH = ""
-
+CURL_UPLOAD_OPTS = ""
 
 parser = argparse.ArgumentParser(description='Smithproxy builder')
 
@@ -98,7 +99,8 @@ def run_build(host, files, arg_http_proxy=None, arg_cleanup=False):
         cmd_base = cmd_pre + "docker build --rm --no-cache --build-arg FTP_UPLOAD_PWD=%s \
                             --build-arg FTP_UPLOAD_USER=%s \
                             --build-arg FTP_UPLOAD_PATH=%s \
-                            --build-arg SX_BRANCH=%s" % (FTP_PASS, FTP_UPLOAD_USER, FTP_UPLOAD_PATH, SRC_BRANCH,)
+                            --build-arg SX_BRANCH=%s \
+                            --build-arg CURL_UPLOAD_OPTS=%s " % (FTP_PASS, FTP_UPLOAD_USER, FTP_UPLOAD_PATH, SRC_BRANCH, CURL_UPLOAD_OPTS)
 
         # reset - cmd_pre is run only once
         cmd_pre = ""
@@ -139,7 +141,7 @@ def run_build(host, files, arg_http_proxy=None, arg_cleanup=False):
 def load_config(fnm):
     
     global SRC_ROOT
-    global SRC_REST, SRC_BRANCH, FTP_PASS, FTP_UPLOAD_USER, FTP_UPLOAD_PATH
+    global SRC_REST, SRC_BRANCH, FTP_PASS, FTP_UPLOAD_USER, FTP_UPLOAD_PATH, CURL_UPLOAD_OPTS
     
     try:
         cfg = json.load(open(os.path.expanduser(fnm)))
@@ -150,6 +152,7 @@ def load_config(fnm):
         FTP_PASS = cfg["FTP_PASS"]
         FTP_UPLOAD_USER = cfg["FTP_UPLOAD_USER"]
         FTP_UPLOAD_PATH = cfg["FTP_UPLOAD_PATH"]
+        CURL_UPLOAD_OPTS = cfg["CURL_UPLOAD_OPTS"]
         
     except Exception as e:
         print("cannot load secrets: " + str(e))

@@ -24,6 +24,10 @@ if [ "${SX_BRANCH}" == "" ]; then
     SX_BRANCH="master"
 fi
 
+if [ "${CURL_UPLOAD_OPTS}" == "" ]; then
+  CURL_UPLOAD_OPTS="--ftp-ssl-control"
+fi
+
 DEBIAN_DIR="debian-0.9"
 
 
@@ -77,7 +81,7 @@ upload() {
 
     if [[ -f $FILE ]]; then
         echo "source $FILE exists"
-        curl --ftp-ssl-control --ftp-create-dirs -T $FILE $URL
+        curl ${CURL_UPLOAD_OPTS} --ftp-create-dirs -T $FILE $URL
     else
         echo "source $FILE doesn't exist!"
     fi
