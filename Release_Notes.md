@@ -33,6 +33,10 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 * [ ] routing - SNI-based, ... more options
 
 
+## What's new in 0.9.28
+
+- hotfix release fixing IPv6 UDP traffic connection problem 
+
 ## What's new in 0.9.27
 
 - systemd units made ready (most of you will use instance name 'default')
