@@ -58,7 +58,7 @@ int cli_diag_ssl_verify_clear(struct cli_def *cli, const char *command, char *ar
 int cli_diag_ssl_verify_list(struct cli_def *cli, const char *command, char *argv[], int argc);
 int cli_diag_ssl_verify_stats(struct cli_def *cli, const char *command, char *argv[], int argc);
 
-int cli_diag_ssl_ticket_list(struct cli_def *cli, const char *command, char *argv[], int argc);
+int cli_diag_ssl_ticket_list(struct cli_def *orig, const char *command, char *argv[], int argc);
 int cli_diag_ssl_ticket_stats(struct cli_def *cli, const char *command, char *argv[], int argc);
 
 
@@ -94,7 +94,7 @@ int cli_diag_mem_objects_list(struct cli_def *cli, const char *command, char *ar
 int cli_diag_mem_objects_search(struct cli_def *cli, const char *command, char *argv[], int argc);
 int cli_diag_mem_objects_clear(struct cli_def *cli, const char *command, char *argv[], int argc);
 
-typedef enum session_list_filter_flags { SL_NONE=0x0000 , SL_IO_OSBUF_NZ=0x0001 , SL_IO_EMPTY=0x0002, SL_TLS_DETAILS=0x0004, SL_ACTIVE=0x0010 } session_list_filter_flags_t;
+typedef enum session_list_filter_flags { SL_NONE=0x0000 , SL_IO_OSBUF_NZ=0x0001 , SL_IO_EMPTY=0x0002, SL_TLS_DETAILS=0x0004, SL_ACTIVE=0x0010, SL_NAMES=0x0020 } session_list_filter_flags_t;
 int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, char *argv[], int argc, int sl_flags);
 int cli_diag_proxy_session_list(struct cli_def *cli, const char *command, char *argv[], int argc);
 int cli_diag_proxy_session_io_list(struct cli_def *cli, const char *command, char *argv[], int argc);

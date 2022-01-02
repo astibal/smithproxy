@@ -699,7 +699,7 @@ std::string DNS_Packet::answer_str_list() const {
         }
         else {
             ret << "[ " << DNSFactory::dns_record_type_str(x.type_) << " "
-                << hex_print(const_cast<unsigned char*>(x.data_.data()), x.data_.size()) << " " << x.data_.size() << "B ] " ;
+                << hex_print(x.data_.data(), x.data_.size()) << " " << x.data_.size() << "B ] " ;
         }
     }
 

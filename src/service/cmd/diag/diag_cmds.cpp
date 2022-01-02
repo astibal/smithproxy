@@ -49,6 +49,7 @@
 #include <log/logger.hpp>
 #include <traflog/traflog.hpp>
 
+#include <service/core/smithproxy.hpp>
 #include <service/cmd/cmdserver.hpp>
 #include <service/cmd/diag/diag_cmds.hpp>
 
@@ -64,8 +65,7 @@
 #include <inspect/sigfactory.hpp>
 #include <inspect/sxsignature.hpp>
 
-
-//extern bool cfg_openssl_mem_dbg;
+#include <varmem.hpp>
 
 #ifndef USE_OPENSSL11
 int cli_diag_ssl_memcheck_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
@@ -103,18 +103,18 @@ int cli_diag_ssl_cache_stats(struct cli_def *cli, const char *command, char *arg
     SSLFactory* store = SSLCom::factory();
 
 
-    int n_cache = 0;
+    size_t n_cache = 0;
     int n_maxsize = 0;
     {
-        std::lock_guard<std::recursive_mutex> l(store->lock());
+        auto lc_ = std::scoped_lock(store->lock());
         n_cache = store->cache().cache().size();
         n_maxsize = store->cache().max_size();
     }
 
 
     cli_print(cli,"certificate store stats: ");
-    cli_print(cli,"    cache size: %d ",n_cache);
-    cli_print(cli,"      max size: %d ",n_maxsize);
+    cli_print(cli,"    cache size: %zu ", n_cache);
+    cli_print(cli,"      max size: %d ", n_maxsize);
 
     return CLI_OK;
 }
@@ -124,7 +124,7 @@ int cli_diag_ssl_cache_list(struct cli_def *cli, const char *command, char *argv
 
     debug_cli_params(cli, command, argv, argc);
 
-    SSLFactory* store = SSLCom::factory();
+    auto* store = SSLCom::factory();
     bool print_refs = false;
 
     if(argc > 0) {
@@ -134,21 +134,20 @@ int cli_diag_ssl_cache_list(struct cli_def *cli, const char *command, char *argv
         }
     }
 
-    std::stringstream ss;
+    std::stringstream out;
 
     cli_print(cli,"certificate store entries: ");
 
     {
-        std::lock_guard<std::recursive_mutex> l_(store->lock());
+        auto lc_ = std::scoped_lock(store->lock());
 
-        for (auto const& x: store->cache().cache()) {
-            std::string fqdn = x.first;
-            SSLFactory::X509_PAIR const* ptr = x.second->ptr()->keypair();
+        for (auto const& [ fqdn, cache ]: store->cache().cache()) {
+            SSLFactory::X509_PAIR const* ptr = cache->ptr()->keypair();
 
-            ss << string_format("    %s\n", fqdn.c_str());
+            out << string_format("    %s\n", fqdn.c_str());
 
             if(print_refs) {
-                ss << string_format("        : keyptr=0x%x certptr=0x%x\n", ptr->first, ptr->second);
+                out << string_format("        : keyptr=0x%x certptr=0x%x\n", ptr->first, ptr->second);
             }
 
 #ifndef USE_OPENSSL11
@@ -159,7 +158,7 @@ int cli_diag_ssl_cache_list(struct cli_def *cli, const char *command, char *argv
     }
 
 
-    cli_print(cli, "%s", ss.str().c_str());
+    cli_print(cli, "%s", out.str().c_str());
 
     return CLI_OK;
 }
@@ -178,37 +177,36 @@ int cli_diag_ssl_cache_print(struct cli_def *cli, const char *command, char *arg
         }
     }
 
-    std::stringstream ss;
+    std::stringstream out;
 
     cli_print(cli, "certificate store entries: \n");
 
     {
-        std::lock_guard<std::recursive_mutex> l_(store->lock());
+        auto lc_ = std::scoped_lock(store->lock());
 
-        for (auto const& x: store->cache().cache()) {
-            std::string fqdn = x.first;
-            SSLFactory::X509_PAIR const* ptr = x.second->ptr()->keypair();
+        for (auto const& [ fqdn, cache]: store->cache().cache()) {
+            SSLFactory::X509_PAIR const* ptr = cache->ptr()->keypair();
 
-            std::regex r("\\+san:");
-            std::string nice_fqdn = std::regex_replace(fqdn, r, "\n     san: ");
+            std::regex reg("\\+san:");
+            std::string nice_fqdn = std::regex_replace(fqdn, reg, "\n     san: ");
 
-            ss << "\n--------: " << nice_fqdn << "\n";
+            out << "\n--------: " << nice_fqdn << "\n";
 
             if(print_refs) {
-                ss << string_format("        : keyptr=0x%x certptr=0x%x\n", ptr->first, ptr->second);
-                int counter = x.second->count();
-                int age = x.second->age();
-                ss << string_format("        : access_counter=%d, age=%d\n", counter, age);
+                out << string_format("        : keyptr=0x%x certptr=0x%x\n", ptr->first, ptr->second);
+                auto counter = cache->count();
+                auto age = cache->age();
+                out << string_format("        : access_counter=%d, age=%d\n", counter, age);
             }
 
-            ss << SSLFactory::print_cert(ptr->second);
-            ss << "\n--------";
+            out << SSLFactory::print_cert(ptr->second);
+            out << "\n--------";
 
-            ss << "\n\n";
+            out << "\n\n";
         }
     }
 
-    cli_print(cli, "%s", ss.str().c_str());
+    cli_print(cli, "%s", out.str().c_str());
 
     return CLI_OK;
 }
@@ -218,20 +216,20 @@ int cli_diag_ssl_cache_clear(struct cli_def *cli, const char *command, char *arg
 
     debug_cli_params(cli, command, argv, argc);
 
-    SSLFactory* store = SSLCom::factory();
-    std::stringstream ss;
+    auto* store = SSLCom::factory();
+    std::stringstream out;
 
 
     {
-        std::lock_guard<std::recursive_mutex> l_(store->lock());
+        auto lc_ = std::scoped_lock(store->lock());
 
-        for (auto const& x: store->cache().cache()) {
-            std::string fqdn = x.first;
-            ss << string_format("removing    %s\n",fqdn.c_str());
+        for (auto const& [ fqdn, cache ]: store->cache().cache()) {
+
+            out << string_format("removing    %s\n", fqdn.c_str());
 
             if(argc > 0) {
-                std::string a1 = argv[0];
-                if(a1 == "7") {
+                std::string arg1 = argv[0];
+                if(arg1 == "7") {
 #ifndef USE_OPENSSL11
                     ss << string_format("            refcounts: key=%d cert=%d\n",
                                         ptr->first->references,
@@ -243,7 +241,7 @@ int cli_diag_ssl_cache_clear(struct cli_def *cli, const char *command, char *arg
         store->cache().clear();
     }
 
-    cli_print(cli, "%s", ss.str().c_str());
+    cli_print(cli, "%s", out.str().c_str());
 
     return CLI_OK;
 }
@@ -255,11 +253,12 @@ int cli_diag_ssl_wl_list(struct cli_def *cli, const char *command, char *argv[],
     cli_print(cli,"\nSSL whitelist:");
     std::string out;
 
-    std::lock_guard<std::recursive_mutex> l_(MitmProxy::whitelist_verify().getlock());
-    for(auto const& we: MitmProxy::whitelist_verify().cache()) {
-        out += "\n\t" + we.first;
+    auto lc_ = std::scoped_lock(MitmProxy::whitelist_verify().getlock());
 
-        long ttl = we.second->ptr()->expired_at() - ::time(nullptr);
+    for(auto const& [label, entry]: MitmProxy::whitelist_verify().cache()) {
+        out += "\n\t" + label;
+
+        long ttl = entry->ptr()->expired_at() - ::time(nullptr);
 
         out += string_format(" ttl: %d", ttl);
         if(ttl <= 0) {
@@ -275,7 +274,7 @@ int cli_diag_ssl_wl_clear(struct cli_def *cli, const char *command, char *argv[]
 
     debug_cli_params(cli, command, argv, argc);
 
-    std::lock_guard<std::recursive_mutex> l_(MitmProxy::whitelist_verify().getlock());
+    auto lc_ = std::scoped_lock(MitmProxy::whitelist_verify().getlock());
 
     MitmProxy::whitelist_verify().clear();
 
@@ -287,21 +286,21 @@ int cli_diag_ssl_wl_stats(struct cli_def *cli, const char *command, char *argv[]
 
     debug_cli_params(cli, command, argv, argc);
 
-    std::stringstream ss;
+    std::stringstream out;
 
-    std::lock_guard<std::recursive_mutex> l_(MitmProxy::whitelist_verify().getlock());
+    auto lc_ = std::scoped_lock(MitmProxy::whitelist_verify().getlock());
     {
-        int n_sz_cache = MitmProxy::whitelist_verify().cache().size();
-        int n_max_cache = MitmProxy::whitelist_verify().max_size();
+        auto n_sz_cache = MitmProxy::whitelist_verify().cache().size();
+        auto n_max_cache = MitmProxy::whitelist_verify().max_size();
         std::string n_name = MitmProxy::whitelist_verify().c_type();
 
-        ss << string_format("'%s' cache stats: \n",n_name.c_str());
-        ss << string_format("    current size: %d\n",n_sz_cache);
-        ss << string_format("    maximum size: %d\n",n_max_cache);
+        out << string_format("'%s' cache stats: \n", n_name.c_str());
+        out << string_format("    current size: %d\n", n_sz_cache);
+        out << string_format("    maximum size: %d\n", n_max_cache);
     }
 
 
-    cli_print(cli, "%s", ss.str().c_str());
+    cli_print(cli, "%s", out.str().c_str());
 
     return CLI_OK;
 }
@@ -315,10 +314,10 @@ int cli_diag_ssl_crl_list(struct cli_def *cli, const char *command, char *argv[]
     out << "Downloaded CRLs:\n\n";
 
     {
-        std::lock_guard<std::recursive_mutex> l_(SSLFactory::crl_cache().getlock());
-        for (auto const& x: SSLFactory::crl_cache().cache()) {
-            std::string uri = x.first;
-            auto cached_result = x.second->ptr();
+        auto lc_ = std::scoped_lock(SSLFactory::crl_cache().getlock());
+
+        for (auto const& [uri, cache] : SSLFactory::crl_cache().cache()) {
+            auto cached_result = cache->ptr();
 
             out << "    " + uri;
             if (cached_result) {
@@ -336,7 +335,7 @@ int cli_diag_ssl_crl_list(struct cli_def *cli, const char *command, char *argv[]
         }
     }
 
-    cli_print(cli,"\n%s",out.str().c_str());
+    cli_print(cli, "\n%s", out.str().c_str());
 
     return CLI_OK;
 }
@@ -345,22 +344,22 @@ int cli_diag_ssl_crl_stats(struct cli_def *cli, const char *command, char *argv[
 
     debug_cli_params(cli, command, argv, argc);
 
-    std::stringstream ss;
+    std::stringstream out;
 
     {
-        std::lock_guard<std::recursive_mutex> l_(SSLFactory::crl_cache().getlock());
+        auto lc_ = std::scoped_lock(SSLFactory::crl_cache().getlock());
 
-        int n_sz_cache = SSLFactory::crl_cache().cache().size();
-        int n_max_cache = SSLFactory::crl_cache().max_size();
+        auto n_sz_cache = SSLFactory::crl_cache().cache().size();
+        auto n_max_cache = SSLFactory::crl_cache().max_size();
         std::string n_name = SSLFactory::crl_cache().c_type();
 
 
-        ss << string_format("'%s' cache stats: ", n_name.c_str());
-        ss << string_format("    current size: %d \n", n_sz_cache);
-        ss << string_format("    maximum size: %d \n", n_max_cache);
+        out << string_format("'%s' cache stats: ", n_name.c_str());
+        out << string_format("    current size: %d \n", n_sz_cache);
+        out << string_format("    maximum size: %d \n", n_max_cache);
     }
 
-    cli_print(cli,"\n%s",ss.str().c_str());
+    cli_print(cli, "\n%s", out.str().c_str());
 
     return CLI_OK;
 }
@@ -383,25 +382,30 @@ int cli_diag_ssl_verify_clear(struct cli_def *cli, const char *command, char *ar
     cli_print(cli, "request to clear ocsp cache from: %s", what.str().c_str());
     std::stringstream out;
 
-    std::lock_guard<std::recursive_mutex> l_(SSLFactory::factory().verify_cache.getlock());
+    auto lc_ = std::scoped_lock(SSLFactory::factory().verify_cache.getlock());
+
     if(to_delete.empty()) {
+
+        auto n_size = SSLFactory::factory().verify_cache.cache().size();
         SSLFactory::factory().verify_cache.clear();
+
+        cli_print(cli, "erased %zu entries", n_size);
+
+        return CLI_OK;
     }
-    else {
 
-        mp::vector<std::string> to_delete_keys;
+    mp::vector<std::string> to_delete_keys;
 
-        for(auto& i: SSLFactory::factory().verify_cache.cache()) {
-            for(auto const& k: to_delete)
-                if(i.first.find(k,0) == 0) {
-                    to_delete_keys.push_back(i.first);
-                }
-        }
+    for(auto const& [ key, cache]: SSLFactory::factory().verify_cache.cache()) {
+        for(auto const& del_entry: to_delete)
+            if(key.find(del_entry, 0) == 0) {
+                to_delete_keys.push_back(key);
+            }
+    }
 
-        for(auto const& k: to_delete_keys) {
-            out << "erasing key: " << k << "\n";
-            SSLFactory::factory().verify_cache.erase(k);
-        }
+    for(auto const& del_entry: to_delete_keys) {
+        out << "erasing key: " << del_entry << "\n";
+        SSLFactory::factory().verify_cache.erase(del_entry);
     }
 
     cli_print(cli, "%s", out.str().c_str());
@@ -419,10 +423,11 @@ int cli_diag_ssl_verify_list(struct cli_def *cli, const char *command, char *arg
     out << "Verify status list:\n\n";
 
     {
-        std::lock_guard<std::recursive_mutex> l_(SSLFactory::factory().verify_cache.getlock());
-        for (auto const& x: SSLFactory::factory().verify_cache.cache()) {
-            std::string cn = x.first;
-            auto cached_result = x.second->ptr();
+        auto lc_ = std::scoped_lock(SSLFactory::factory().verify_cache.getlock());
+
+        for (auto const& [cn, cache]: SSLFactory::factory().verify_cache.cache()) {
+
+            auto cached_result = cache->ptr();
 
             if (cached_result) {
                 auto ttl = cached_result->expired_at() - ::time(nullptr);
@@ -449,130 +454,138 @@ int cli_diag_ssl_verify_stats(struct cli_def *cli, const char *command, char *ar
 
     debug_cli_params(cli, command, argv, argc);
 
-    std::stringstream ss;
+    std::stringstream out;
     {
-        auto& verify_cache = SSLFactory::factory().verify_cache;
-        std::lock_guard<std::recursive_mutex> l_(verify_cache.getlock());
+        auto const& verify_cache = SSLFactory::factory().verify_cache;
 
-        int n_sz_cache  = verify_cache.cache().size();
-        int n_max_cache = verify_cache.max_size();
+        auto lc_ = std::scoped_lock(verify_cache.getlock());
+
+        auto n_sz_cache  = verify_cache.cache().size();
+        auto n_max_cache = verify_cache.max_size();
         std::string n_name = verify_cache.c_type();
 
 
-        ss << string_format("'%s' cache stats: \n", n_name.c_str());
-        ss << string_format("    current size: %d \n", n_sz_cache);
-        ss << string_format("    maximum size: %d \n", n_max_cache);
+        out << string_format("'%s' cache stats: \n", n_name.c_str());
+        out << string_format("    current size: %d \n", n_sz_cache);
+        out << string_format("    maximum size: %d \n", n_max_cache);
     }
 
-    cli_print(cli,"\n%s",ss.str().c_str());
+    cli_print(cli, "\n%s", out.str().c_str());
 
     return CLI_OK;
 }
 
 
+
 int cli_diag_ssl_ticket_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+
+    auto print_session_ticket = [](SSL_SESSION const* ses, std::string_view label, std::stringstream& out, int lev) {
+        if (SSL_SESSION_has_ticket(ses)) {
+            size_t ticket_len = 0;
+            const unsigned char *ticket_ptr = nullptr;
+
+            SSL_SESSION_get0_ticket(ses, &ticket_ptr, &ticket_len);
+            auto ticket_copy = raw::temp_clone(ticket_ptr, ticket_len);
+
+            if (ticket_ptr && ticket_len) {
+
+                std::string tick = hex_print(ticket_copy.value, (unsigned int)ticket_len);
+                out << string_format("    %s,    ticket", label.data());
+
+                if (lev > 6) {
+                    out << string_format(": %s", tick.c_str());
+                } else {
+                    out << string_format(": %s", string_shorten(tick, 9).c_str());
+                }
+                return true;
+            }
+        }
+        return false;
+    };
+
+    auto print_session_id = [](SSL_SESSION const* ses, std::string_view label, std::stringstream& out, int lev) {
+
+        unsigned int session_id_len = 0;
+        const unsigned char *session_id = SSL_SESSION_get_id(ses, &session_id_len);
+        auto session_id_copy = raw::temp_clone(session_id, session_id_len);
+
+        if (session_id_len > 0) {
+            std::string sessionid = hex_print(session_id_copy.value, session_id_len);
+            out << string_format("    %s, sessionid", label.data());
+
+            if(lev > 6) {
+                out << string_format(": %s", sessionid.c_str());
+            } else {
+                out << string_format(": %s", string_shorten(sessionid, 9).c_str());
+            }
+
+            return true;
+        }
+
+        return false;
+    };
 
     debug_cli_params(cli, command, argv, argc);
 
     std::stringstream out;
     int lev = 6;
-    bool showall = false;
+    bool show_all = false;
 
 
-    auto shorten = [](std::string const& s) -> std::string {
-        if(s.length() > 9) {
-            auto shortened = s.substr(0, 3);
-            auto shortened2 = s.substr(s.length()-3, s.length());
-            return shortened + "..." + shortened2;
-        }
-        return s;
-    };
-
-    {
-
-
-        if (argc > 0) {
-            lev = safe_val(argv[0]);
-            if (lev >= 7) {
-                showall = true;
-            }
-        }
-        bool ticket = false;
-
-        std::lock_guard<std::recursive_mutex> l_(SSLFactory::session_cache().getlock());
-
-        out << "SSL ticket/sessionid list:\n\n";
-
-        for (auto const& [ key, session_keys ]: SSLFactory::session_cache().cache()) {
-
-#ifdef USE_OPENSSL11
-
-            if (session_keys->ptr()) {
-
-                bool printed = false;
-
-                if (SSL_SESSION_has_ticket(session_keys->ptr()->ptr)) {
-                    size_t ticket_len = 0;
-                    const unsigned char *ticket_ptr = nullptr;
-
-                    SSL_SESSION_get0_ticket(session_keys->ptr()->ptr, &ticket_ptr, &ticket_len);
-                    if (ticket_ptr && ticket_len) {
-                        ticket = true;
-                        std::string tick = hex_print((unsigned char *) ticket_ptr, ticket_len);
-                        out << string_format("    %s,    ticket", key.c_str());
-
-                        if(lev > 6) {
-                            out << string_format(": %s", tick.c_str());
-                        }
-                        else {
-                            out << string_format(": %s", shorten(tick).c_str());
-                        }
-                        printed = true;
-                    }
-                }
-
-                unsigned int session_id_len = 0;
-                const unsigned char *session_id = SSL_SESSION_get_id(session_keys->ptr()->ptr, &session_id_len);
-                if (!ticket || showall) {
-                    if (session_id_len > 0) {
-                        std::string sessionid = hex_print((unsigned char *) session_id, session_id_len);
-                        out << string_format("    %s, sessionid", key.c_str());
-
-                        if(lev > 6) {
-                            out << string_format(": %s", sessionid.c_str());
-                        } else {
-                            out << string_format(": %s", shorten(sessionid).c_str());
-                        }
-
-                        printed = true;
-                    }
-                }
-
-                if(printed) {
-                    out << string_format(", usage cnt: %d", session_keys->ptr()->cnt_loaded);
-                    out << "\n";
-                }
-
-            }
-
-#else
-            if (session_keys->ptr->tlsext_ticklen > 0) {
-                ticket = true;
-                std::string tick = hex_print(session_keys->ptr->tlsext_tick, session_keys->ptr->tlsext_ticklen);
-                out += string_format("    %s,    ticket: %s\n",key.c_str(),tick.c_str());
-            }
-
-            if(! ticket || showall) {
-                if(session_keys->ptr->session_id_length > 0) {
-                    std::string sessionid = hex_print(session_keys->ptr->session_id, session_keys->ptr->session_id_length);
-                    out += string_format("    %s, sessionid: %s\n",key.c_str(),sessionid.c_str());
-                }
-                out += string_format("    usage cnt: %d\n",session_keys->cnt_loaded);
-            }
-#endif
-
+    if (argc > 0) {
+        lev = safe_val(argv[0]);
+        if (lev >= 7) {
+            show_all = true;
         }
     }
+    bool ticket = false;
+
+    auto lc_ = std::scoped_lock(SSLFactory::session_cache().getlock());
+
+    out << "SSL ticket/sessionid list:\n\n";
+
+    for (auto const& [ key, session_keys ]: SSLFactory::session_cache().cache()) {
+
+        #ifdef USE_OPENSSL11
+
+        if (session_keys->ptr()) {
+
+            bool printed = false;
+
+
+            ticket = printed = print_session_ticket(session_keys->ptr()->ptr, key, out, lev);
+
+
+            if (!ticket || show_all) {
+                printed = print_session_id(session_keys->ptr()->ptr, key, out, lev);
+            }
+
+            if(printed) {
+                out << string_format(", usage cnt: %d", session_keys->ptr()->cnt_loaded);
+                out << "\n";
+            }
+
+        }
+
+        #else
+        if (session_keys->ptr->tlsext_ticklen > 0) {
+            ticket = true;
+            std::string tick = hex_print(session_keys->ptr->tlsext_tick, session_keys->ptr->tlsext_ticklen);
+            out += string_format("    %s,    ticket: %s\n",key.c_str(),tick.c_str());
+        }
+
+        if(! ticket || showall) {
+            if(session_keys->ptr->session_id_length > 0) {
+                std::string sessionid = hex_print(session_keys->ptr->session_id, session_keys->ptr->session_id_length);
+                out += string_format("    %s, sessionid: %s\n",key.c_str(),sessionid.c_str());
+            }
+            out += string_format("    usage cnt: %d\n",session_keys->cnt_loaded);
+        }
+        #endif
+
+    }
+
 
     cli_print(cli,"\n%s",out.str().c_str());
 
@@ -584,13 +597,13 @@ int cli_diag_ssl_ticket_stats(struct cli_def *cli, const char *command, char *ar
     debug_cli_params(cli, command, argv, argc);
 
     std::stringstream out;
-    int n_sz_cache = 0;
+    std::size_t n_sz_cache = 0;
     int n_max_cache = 0;
     std::string n_name;
 
 
     {
-        std::lock_guard<std::recursive_mutex> l_(SSLFactory::session_cache().getlock());
+        auto lc_ = std::scoped_lock(SSLFactory::session_cache().getlock());
 
         n_sz_cache = SSLFactory::session_cache().cache().size();
         n_max_cache = SSLFactory::session_cache().max_size();
@@ -598,7 +611,7 @@ int cli_diag_ssl_ticket_stats(struct cli_def *cli, const char *command, char *ar
     }
 
     out << string_format("'%s' cache stats: \n", n_name.c_str());
-    out << string_format("    current size: %d \n", n_sz_cache);
+    out << string_format("    current size: %zu \n", n_sz_cache);
     out << string_format("    maximum size: %d \n", n_max_cache);
 
 
@@ -611,10 +624,10 @@ int cli_diag_ssl_ticket_clear(struct cli_def *cli, const char *command, char *ar
     debug_cli_params(cli, command, argv, argc);
 
     std::stringstream out;
-    int n_sz_cache = 0;
+    std::size_t n_sz_cache = 0;
 
     {
-        std::lock_guard<std::recursive_mutex> l_(SSLFactory::session_cache().getlock());
+        auto lc_ = std::scoped_lock(SSLFactory::session_cache().getlock());
 
         n_sz_cache = SSLFactory::session_cache().cache().size();
 
@@ -622,7 +635,7 @@ int cli_diag_ssl_ticket_clear(struct cli_def *cli, const char *command, char *ar
     }
 
 
-    out << string_format("\n    %d session data cleared\n", n_sz_cache);
+    out << string_format("\n    %zu session data cleared\n", n_sz_cache);
 
 
     cli_print(cli, "%s", out.str().c_str());
@@ -676,7 +689,7 @@ int cli_diag_dns_cache_stats(struct cli_def *cli, const char *command, char *arg
     int max_size = 0;
 
     {
-        std::scoped_lock<std::recursive_mutex> l_(DNS::get_dns_lock());
+        auto lc_ = std::scoped_lock(DNS::get_dns_lock());
 
         out << "\nDNS cache statistics: \n";
         cache_size = DNS::get_dns_cache().cache().size();
@@ -695,7 +708,7 @@ int cli_diag_dns_cache_clear(struct cli_def *cli, const char *command, char *arg
     debug_cli_params(cli, command, argv, argc);
 
     {
-        std::scoped_lock<std::recursive_mutex> l_(DNS::get_dns_lock());
+        auto lc_ = std::scoped_lock(DNS::get_dns_lock());
         DNS::get_dns_cache().clear();
     }
 
@@ -712,14 +725,14 @@ int cli_diag_dns_domain_cache_list(struct cli_def *cli, const char *command, cha
     std::stringstream out;
 
     {
-        std::scoped_lock<std::recursive_mutex> l_(DNS::get_domain_lock());
+        auto lc_ = std::scoped_lock(DNS::get_domain_lock());
 
         for (auto const& [ domain, cache ]: DNS::get_domain_cache().cache()) {
 
             std::string str;
 
-            for (auto const& sub_e: cache->ptr()->cache()) {
-                str += " " + sub_e.first;
+            for (auto const& [ domain, cache]: cache->ptr()->cache()) {
+                str += " " + domain;
             }
             out << string_format("\n\t%s: \t%s", domain.c_str(), str.c_str());
 
@@ -737,7 +750,7 @@ int cli_diag_dns_domain_cache_clear(struct cli_def *cli, const char *command, ch
     cli_print(cli, "\n Clearing domain cache:");
 
     {
-        std::scoped_lock<std::recursive_mutex> l_(DNS::get_domain_lock());
+        auto lc_ = std::scoped_lock(DNS::get_domain_lock());
         DNS::get_domain_cache().clear();
     }
 
@@ -755,18 +768,17 @@ int cli_diag_identity_ip_list(struct cli_def *cli, const char *command, char *ar
     std::stringstream ss4;
 
     {
-        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip4_lock());
-        for (auto const& ip: AuthFactory::get_ip4_map()) {
+        auto lc_ = std::scoped_lock(AuthFactory::get_ip4_lock());
 
-            IdentityInfo const& id = ip.second;
+        for (auto const& [ ip_address, identity]: AuthFactory::get_ip4_map()) {
 
             ss4 << "\n";
-            ss4 << "    ipv4: " << ip.first << ", user: " << id.username << ", groups: " << id.groups << ", rx/tx: ";
-            ss4 <<   number_suffixed(id.tx_bytes) << "/" << number_suffixed(id.rx_bytes);
+            ss4 << "    ipv4: " << ip_address << ", user: " << identity.username << ", groups: " << identity.groups << ", rx/tx: ";
+            ss4 << number_suffixed(identity.tx_bytes) << "/" << number_suffixed(identity.rx_bytes);
 
-            ss4 << "\n          uptime: " << std::to_string(id.uptime()) << ", idle: " << std::to_string(id.i_time());
-            ss4 << "\n          status: " << std::to_string(!id.i_timeout()) << ", last policy: ";
-            ss4 <<   std::to_string(id.last_seen_policy);
+            ss4 << "\n          uptime: " << std::to_string(identity.uptime()) << ", idle: " << std::to_string(identity.i_time());
+            ss4 << "\n          status: " << std::to_string(!identity.i_timeout()) << ", last policy: ";
+            ss4 <<   std::to_string(identity.last_seen_policy);
             ss4 << "\n";
         }
 
@@ -777,17 +789,16 @@ int cli_diag_identity_ip_list(struct cli_def *cli, const char *command, char *ar
     cli_print(cli, "\nIPv6 identities:");
     std::stringstream ss6;
     {
-        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
-        for (auto const& ip: AuthFactory::get_ip6_map()) {
+        auto lc_ = std::scoped_lock(AuthFactory::get_ip6_lock());
 
-            IdentityInfo6 const& id = ip.second;
+        for (auto const& [ ip_address, identity]: AuthFactory::get_ip6_map()) {
 
             ss6 << "\n";
-            ss6 << "    ipv6: " << ip.first << ", user: " << id.username << ", groups: " << id.groups << ", rx/tx: ";
-            ss6 <<   number_suffixed(id.tx_bytes) << "/" << number_suffixed(id.rx_bytes);
-            ss6 << "\n          uptime: " << std::to_string(id.uptime()) << ", idle: " << std::to_string(id.i_time());
-            ss6 << "\n          status: " << std::to_string(!id.i_timeout()) << ", last policy: ";
-            ss6 <<   std::to_string(id.last_seen_policy);
+            ss6 << "    ipv6: " << ip_address << ", user: " << identity.username << ", groups: " << identity.groups << ", rx/tx: ";
+            ss6 << number_suffixed(identity.tx_bytes) << "/" << number_suffixed(identity.rx_bytes);
+            ss6 << "\n          uptime: " << std::to_string(identity.uptime()) << ", idle: " << std::to_string(identity.i_time());
+            ss6 << "\n          status: " << std::to_string(!identity.i_timeout()) << ", last policy: ";
+            ss6 <<   std::to_string(identity.last_seen_policy);
             ss6 << "\n";
 
         }
@@ -804,7 +815,8 @@ int cli_diag_identity_ip_clear(struct cli_def *cli, const char *command, char *a
     std::string out;
 
     {
-        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip4_lock());
+        auto lc_ = std::scoped_lock(AuthFactory::get_ip4_lock());
+
         AuthFactory::get_ip4_map().clear();
         AuthFactory::get().shm_ip4_map.acquire();
         AuthFactory::get().shm_ip4_map.map_entries().clear();
@@ -817,7 +829,8 @@ int cli_diag_identity_ip_clear(struct cli_def *cli, const char *command, char *a
     }
 
     {
-        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
+        auto lc_ = std::scoped_lock(AuthFactory::get_ip6_lock());
+
         AuthFactory::get_ip6_map().clear();
         AuthFactory::get().shm_ip6_map.acquire();
         AuthFactory::get().shm_ip6_map.map_entries().clear();
@@ -840,16 +853,16 @@ int cli_diag_writer_stats(struct cli_def *cli, const char *command, char *argv[]
     std::stringstream ss;
 
     {
-        std::scoped_lock<std::mutex> l_(wr->queue_lock());
+        auto lc_ = std::scoped_lock(wr->queue_lock());
 
         ss << "Pending ops: " << wr->queue().size() << "\n";
     }
     {
-        std::scoped_lock<std::recursive_mutex> l_(wr->ofstream_lock());
+        auto lc_ = std::scoped_lock(wr->ofstream_lock());
 
         ss << "Recent (opened files):\n";
-        for (auto const& elem: wr->ofstream_cache().cache()) {
-            ss << "    " << elem.first << "\n";
+        for (auto const& [ fnm, x] : wr->ofstream_cache().cache()) {
+            ss << "    " << fnm << "\n";
         }
     }
 
@@ -878,7 +891,7 @@ int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *a
 
         {
             {
-                std::scoped_lock<std::mutex> g(memPool::pool().lock);
+                auto gl_ = std::scoped_lock(memPool::pool().lock);
 
                 auto stat_acq = memPool::pool().stat_acq.load();
                 auto stat_acq_size = memPool::pool().stat_acq_size.load();
@@ -903,7 +916,8 @@ int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *a
         cli_print(cli," ");
         cli_print(cli, "API allocations above limits:");
         {
-            std::scoped_lock<std::mutex> g(memPool::pool().lock);
+            auto gl_ = std::scoped_lock(memPool::pool().lock);
+
             cli_print(cli, "      allocations: %lld/%lldB", memPool::pool().stat_alloc.load(), memPool::pool().stat_alloc_size.load());
             cli_print(cli, "         releases: %lld/%lldB", memPool::pool().stat_out_free.load(),
                       memPool::pool().stat_out_free_size.load());
@@ -1317,39 +1331,71 @@ int cli_diag_proxy_session_io_list(struct cli_def *cli, const char *command, cha
 }
 
 
+void print_queue_stats(std::stringstream &ss, int verbosity, MitmHostCX *cx, const char *sm,
+                             const char *bg) {
+    int in_pending;
+    int out_pending;
+
+    buffer::size_type in_buf;
+    buffer::size_type out_buf;
+
+    buffer::size_type in_cap;
+    buffer::size_type out_cap;
+
+    ::ioctl(cx->socket(), SIOCINQ, &in_pending);
+    ::ioctl(cx->socket(), SIOCOUTQ, &out_pending);
+
+    in_buf = cx->readbuf()->size();
+    in_cap  = cx->readbuf()->capacity();
+
+    out_buf = cx->writebuf()->size();
+    out_cap  = cx->writebuf()->capacity();
+
+    ss << "     " << sm << "_os_recv-q: " << in_pending << " " << sm << "_os_send-q: "
+       << out_pending << "\n";
+    ss << "     " << sm << "_sx_recv-q[" << in_cap << "]: " << in_buf << " " << sm << "_sx_send-q[" << out_cap << "]: " << out_buf
+       << "\n";
+
+    // fun stuff
+    if(verbosity >= EXT and in_buf) {
+        ss << "     " << bg << " last-seen read data: \n" << hex_dump(cx->readbuf(), 6) << "\n";
+    }
+};
+
+
 int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, char *argv[], int argc, int sl_flags) {
 
     debug_cli_params(cli, command, argv, argc);
 
-    std::string a1,a2;
+    std::string arg1;
+    std::string arg2;
     int verbosity = iINF;
     if(argc > 0) {
-        a1 = argv[0];
-        verbosity = safe_val(a1,iINF);
+        arg1 = argv[0];
+        verbosity = safe_val(arg1, iINF);
     }
-    if(argc > 1) a2 = argv[1];
+    if(argc > 1) arg2 = argv[1];
 
-    std::stringstream ss;
+    std::stringstream out;
 
     time_t  curtime = time(nullptr);
 
 
     {
-        std::scoped_lock<std::recursive_mutex> l_(socle::sobjectDB::getlock());
+        auto lc_ = std::scoped_lock(socle::sobjectDB::getlock());
 
-        for (auto const& it: socle::sobjectDB::db()) {
+        for (auto const& [ so_ptr, so_info]: socle::sobjectDB::db()) {
 
-            socle::sobject *ptr = it.first;
             std::string prefix;
             std::string suffix;
 
 
-            if (!ptr) continue;
+            if (!so_ptr) continue;
 
-            std::string what = ptr->c_type();
+            std::string what = so_ptr->c_type();
             if ( what == "MitmProxy" || what == "SocksProxy") {
 
-                auto *curr_proxy = dynamic_cast<MitmProxy *>(ptr);
+                auto *curr_proxy = dynamic_cast<MitmProxy *>(so_ptr);
                 MitmHostCX *lf = nullptr;
                 MitmHostCX *rg = nullptr;
 
@@ -1375,7 +1421,7 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
                         ::ioctl(lf->socket(), SIOCINQ, &l_in_pending);
                         ::ioctl(lf->socket(), SIOCOUTQ, &l_out_pending);
                     }
-                    if (rg && rg->real_socket() > 0) {
+                    if (rg && rg->real_socket() > 0 && lf) {
                         ::ioctl(lf->socket(), SIOCINQ, &r_in_pending);
                         ::ioctl(lf->socket(), SIOCOUTQ, &r_out_pending);
                     }
@@ -1416,7 +1462,6 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
                         do_print = true;
 
                     }
-
                 }
 
                 if (flag_check<int>(sl_flags, SL_IO_EMPTY)) {
@@ -1450,17 +1495,16 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
 
                     std::vector<std::pair<std::string, SSLCom*>> tup;
                     if(lf)
-                        tup.emplace_back(std::make_pair("Left ",dynamic_cast<SSLCom*>(lf->com())));
+                        tup.emplace_back("Left ", dynamic_cast<SSLCom*>(lf->com()));
                     if(rg)
-                        tup.emplace_back(std::make_pair("Right",dynamic_cast<SSLCom*>(rg->com())));
+                        tup.emplace_back("Right", dynamic_cast<SSLCom*>(rg->com()));
 
-                    for(auto const& side: tup) {
-                        auto com = side.second;
+                    for(auto const& [label, com ] : tup) {
 
                         if(com && !com->opt_bypass) {
                             auto ssl = com->get_SSL();
                             if (ssl) {
-                                auto *session = SSL_get_session(ssl);
+                                auto const* session = SSL_get_session(ssl);
 
                                 auto *cipher_str = SSL_CIPHER_get_name(SSL_SESSION_get0_cipher(session));
                                 int has_ticket = SSL_SESSION_has_ticket(session);
@@ -1470,9 +1514,9 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
                                 }
 
                                 auto tls_ver = SSL_get_version(ssl);
-                                bool tls_rsm = (side.second->target_cert() == nullptr);
+                                bool tls_rsm = (com->target_cert() == nullptr);
 
-                                tls_ss << "\n  " << side.first << ": version: " << tls_ver << ", cipher: ";
+                                tls_ss << "\n  " << label << ": version: " << tls_ver << ", cipher: ";
                                 tls_ss << cipher_str << ", resumed/ticket: "
                                        << tls_rsm << "/" << has_ticket;
                                 if (has_ticket) {
@@ -1532,7 +1576,8 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
                                             auto sct = sk_SCT_value(scts, i);
 
                                             unsigned char* sct_logid {};
-                                            size_t sct_logid_len = 0;
+                                            std::size_t sct_logid_len = 0;
+
                                             sct_logid_len = SCT_get0_log_id(sct, &sct_logid);
                                             if(sct_logid_len > 0)
                                                 tls_ss << "\n        sct log." << i << ": " << hex_print(sct_logid, sct_logid_len);
@@ -1550,10 +1595,10 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
                                 }
 
                             } else {
-                                tls_ss << "\n  " << side.first << ": tls, but no info";
+                                tls_ss << "\n  " << label << ": tls, but no info";
                             }
                         } else {
-                            tls_ss << "\n  " << side.first << ": not a TLS session";
+                            tls_ss << "\n  " << label << ": not a TLS session";
                             if(com && com->opt_bypass)
                                 tls_ss << " (bypassed)";
                         }
@@ -1580,8 +1625,6 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
 
                 std::stringstream cur_obj_ss;
 
-                auto const& si = it.second;
-
                 if (!prefix.empty()) {
 
                     if (prefix[prefix.size() - 1] != ' ')
@@ -1591,16 +1634,16 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
                     prefix += "\r\n";
                 }
 
-                cur_obj_ss << prefix << ptr->to_string(verbosity) << suffix;
+                cur_obj_ss << prefix << so_ptr->to_string(verbosity) << suffix;
 
-                if (verbosity >= DEB && si) {
-                    cur_obj_ss << si->to_string(verbosity);
+                if (verbosity >= DEB && so_info) {
+                    cur_obj_ss << so_info->to_string(verbosity);
                 }
 
                 if (verbosity > INF) {
 
                     if (lf) {
-                        if (verbosity > INF) ss << "\n    ";
+                        if (verbosity > INF) out << "\n    ";
                         if(lf->engine_ctx.signature) {
 
                             auto mysig = std::dynamic_pointer_cast<MyDuplexFlowMatch>(lf->engine_ctx.signature);
@@ -1633,40 +1676,9 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
                         }
                     }
 
-
-                    auto print_queue_stats = [] (std::stringstream &ss, int verbosity, MitmHostCX *cx, const char *sm,
-                                                 const char *bg) {
-                        int in_pending, out_pending;
-                        buffer::size_type in_buf, out_buf, in_cap, out_cap;
-
-                        ::ioctl(cx->socket(), SIOCINQ, &in_pending);
-                        ::ioctl(cx->socket(), SIOCOUTQ, &out_pending);
-
-                        in_buf = cx->readbuf()->size();
-                        in_cap  = cx->readbuf()->capacity();
-
-                        out_buf = cx->writebuf()->size();
-                        out_cap  = cx->writebuf()->capacity();
-
-                        ss << "     " << sm << "_os_recv-q: " << in_pending << " " << sm << "_os_send-q: "
-                           << out_pending << "\n";
-                        ss << "     " << sm << "_sx_recv-q[" << in_cap << "]: " << in_buf << " " << sm << "_sx_send-q[" << out_cap << "]: " << out_buf
-                           << "\n";
-
-                        // fun stuff
-                        if (verbosity >= EXT) {
-                            if (in_buf) {
-                                ss << "     " << bg << " last-seen read data: \n" << hex_dump(cx->readbuf(), 6) << "\n";
-                            }
-                        }
-                    };
-
-
                     if (lf) {
-                        if (verbosity > INF) {
-                            if (lf->socket() > 0) {
-                                print_queue_stats(cur_obj_ss, verbosity, lf, "lf", "Left");
-                            }
+                        if (verbosity > INF and lf->socket() > 0) {
+                            print_queue_stats(cur_obj_ss, verbosity, lf, "lf", "Left");
                         }
 
                         if (verbosity > DIA) {
@@ -1677,10 +1689,8 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
                         }
                     }
                     if (rg) {
-                        if (verbosity > INF) {
-                            if (rg->socket() > 0) {
-                                print_queue_stats(cur_obj_ss, verbosity, rg, "rg", "Right");
-                            }
+                        if (verbosity > INF and rg->socket() > 0) {
+                            print_queue_stats(cur_obj_ss, verbosity, rg, "rg", "Right");
                         }
                         if (verbosity > DIA) {
                             cur_obj_ss << "     rg_debug: " << rg->get_this_log_level().str() << "\n";
@@ -1692,13 +1702,13 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
 
 
                 }
-                ss << cur_obj_ss.str() << "\n";
+                out << cur_obj_ss.str() << "\n";
             }
         }
     }
 
 
-    cli_print(cli,"%s",ss.str().c_str());
+    cli_print(cli, "%s", out.str().c_str());
 
     if( sl_flags == SL_NONE ) {
         unsigned long l = MitmProxy::total_mtr_up().get();
@@ -1797,7 +1807,6 @@ int cli_diag_sig_list(struct cli_def *cli, const char *command, char *argv[], in
     return CLI_OK;
 }
 
-#include <service/core/smithproxy.hpp>
 
 int cli_diag_worker_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
@@ -1820,15 +1829,15 @@ int cli_diag_worker_list(struct cli_def *cli, const char *command, char *argv[],
                     em += string_format("<%d>", w_i);
                     w_i++;
                     continue;
-                } else {
-
-                    at_least_one_worker_active = true;
-
-                    if(! em.empty()) {
-                        cli_print(cli, "        `- workers idle: %s", em.c_str());
-                        em.clear();
-                    }
                 }
+
+                at_least_one_worker_active = true;
+
+                if(! em.empty()) {
+                    cli_print(cli, "        `- workers idle: %s", em.c_str());
+                    em.clear();
+                }
+
 
                 cli_print(cli, "        `- worker[%d]: %s, thread %p",
                           w_i,
