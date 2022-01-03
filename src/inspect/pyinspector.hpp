@@ -154,6 +154,8 @@ public:
     bool interested (AppHostCX *cx) const override {
         return true;
     }
+
+    std::shared_ptr<buffer> verdict_response() override { return nullptr; };
 };
 
 #endif // USE_PYTHON

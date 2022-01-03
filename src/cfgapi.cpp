@@ -2243,14 +2243,11 @@ bool CfgFactory::prof_script_apply (baseHostCX *originator, baseProxy *new_proxy
             _dia("policy_apply: policy script profile[%s] for %s", p_script->element_name().c_str(), mitm_originator->full_name('L').c_str());
 
             if(p_script->script_type == ProfileScript::ST_PYTHON) {
-                #ifdef USE_PYHON
-                auto* n = new PythonInspector();
-                if(n->l4_prefilter(mh)) {
-                    mh->inspectors_.push_back(n);
+                #ifdef USE_PYTHON
+                auto new_prof = std::make_unique<PythonInspector>();
+                if(new_prof->l4_prefilter(mh)) {
+                    mh->inspectors_.push_back(std::move(new_prof));
                     ret = true;
-                }
-                else {
-                    delete n;
                 }
                 #else
                 _err("CfgFactory::prof_script_apply: python scripting not supported by this build");
