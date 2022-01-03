@@ -137,29 +137,30 @@ void cmd_show_status(struct cli_def* cli) {
 
     cli_print(cli, " Socle lib source info: %s", SOCLE_GIT_VERSION);
     cli_print(cli, "                branch: %s commit: %s", SOCLE_GIT_BRANCH, SOCLE_GIT_COMMIT_HASH);
-    cli_print(cli, "Built: %s", __TIMESTAMP__);  // breaks reproducible builds
+
 #endif
 
 std::stringstream features;
-    features << "[ ";
 #ifndef BUILD_RELEASE
-    features << "+DEBUG";  // slower
+    features << "DEBUG ";  // slower
+#endif
+#ifdef USE_UNWIND
+    features << "UNWIND ";
 #endif
 #ifdef MEMPOOL_ALL
-    features << "+MEMPOOL_ALL";  // using everything from pool
+    features << "MEMPOOL_ALL ";  // using everything from pool
 #endif
 #ifdef MEMPOOL_DEBUG
-    features << "+MEMPOOL_DEBUG";  // much slower
+    features << "MEMPOOL_DEBUG ";  // much slower
 #endif
 #ifdef USE_PYTHON
-    features << "+PYTHON";
+    features << "PYTHON ";
 #endif
 #ifdef USE_LMHPP
-    features << "+LMHPP";
+    features << "LMHPP ";
 #endif
-    features << " ]";
+    cli_print(cli, "Built: %s, with: %s", __TIMESTAMP__, features.str().c_str());  // breaks reproducible builds
 
-    cli_print(cli, "  %s", features.str().c_str());
 
     auto get_proxy_type = [](auto& proxies) -> const char* {
         if(proxies.empty()) return "none";
@@ -228,6 +229,9 @@ std::stringstream features;
                   SmithProxy::instance().redir_ssl_proxies.size(),
                   SmithProxy::instance().redir_ssl_proxies.size() * get_task_count(SmithProxy::instance().redir_ssl_proxies));
 
+    } else {
+        cli_print(cli," ");
+        cli_print(cli, "Redirect acceptors: disabled");
     }
 
     if(CfgFactory::get()->accept_socks) {
@@ -236,6 +240,9 @@ std::stringstream features;
         cli_print(cli, "  TCP: %2zu workers: %2zu",
                   SmithProxy::instance().socks_proxies.size(),
                   SmithProxy::instance().socks_proxies.size() * get_task_count(SmithProxy::instance().socks_proxies));
+    } else {
+        cli_print(cli," ");
+        cli_print(cli, "SOCKS acceptors: disabled");
     }
 
     cli_print(cli," ");
