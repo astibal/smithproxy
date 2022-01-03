@@ -11,7 +11,7 @@ project(smithproxy CXX)
 SET(CMAKE_SOURCE_DIR "src/")
 SET(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}")
 
-set(USE_PYTHON "Y")
+set(USE_PYTHON "N")
 set(USE_LMHPP "Y")
 set(USE_UNWIND "Y")
 
