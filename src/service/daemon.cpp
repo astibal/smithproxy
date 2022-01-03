@@ -261,6 +261,7 @@ void writecrash(int fd, const char* msg, size_t len)  {
 
 #ifndef BUILD_RELEASE
 
+#ifdef USE_UNWIND
 void DaemonFactory::uw_btrace_handler(int sig) {
     thread_local unw_cursor_t cursor; 
     thread_local unw_context_t uc;
@@ -308,8 +309,9 @@ void DaemonFactory::uw_btrace_handler(int sig) {
     
     _exit(-1);
 }
+#endif // USE_UNWIND
 
-#endif
+#endif //BUILD_RELEASE
 
 void DaemonFactory::release_crash_handler(int sig) {
 
@@ -348,8 +350,15 @@ void DaemonFactory::set_daemon_signals(void (*terminate_handler)(int),void (*rel
     set_signal(SIGPIPE, nullptr); // don't wake up threads on PIPE
 
 #ifndef BUILD_RELEASE
+
+    // even debug builds can disable unwind (release builds don't support unwind at all)
+    #ifdef USE_UNWIND
     set_signal(SIGABRT,uw_btrace_handler);
     set_signal(SIGSEGV,uw_btrace_handler);
+    #else
+    set_signal(SIGABRT,release_crash_handler);
+    set_signal(SIGSEGV,release_crash_handler);
+    #endif
 #else
     set_signal(SIGABRT,release_crash_handler);
     set_signal(SIGSEGV,release_crash_handler);
