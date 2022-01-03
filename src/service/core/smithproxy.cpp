@@ -128,11 +128,14 @@ void SmithProxy::create_identity_thread() {
 }
 
 void SmithProxy::create_api_thread() {
+#ifdef USE_LMHPP
+
     api_thread = std::shared_ptr<std::thread>(create_httpd_thread(55555 + tenant_index()));
     if(api_thread) {
         pthread_setname_np( api_thread->native_handle(),
                             string_format("sxy_api_%d",tenant_index()).c_str());
     }
+#endif
 }
 
 
