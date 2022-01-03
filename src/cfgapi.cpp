@@ -1429,7 +1429,7 @@ int CfgFactory::load_db_prof_detection () {
         
         for( int i = 0; i < num; i++) {
             std::string name;
-            auto* a = new ProfileDetection;
+            auto new_prof = std::make_unique<ProfileDetection>();
             
             Setting& cur_object = curr_set[i];
 
@@ -1447,10 +1447,10 @@ int CfgFactory::load_db_prof_detection () {
 
             _dia("cfgapi_load_obj_profile_detect: processing '%s'", name.c_str());
             
-            if( load_if_exists(cur_object, "mode", a->mode) ) {
+            if( load_if_exists(cur_object, "mode", new_prof->mode) ) {
 
-                a->element_name() = name;
-                db_prof_detection[name] = std::shared_ptr<ProfileDetection>(a);
+                new_prof->element_name() = name;
+                db_prof_detection[name] = std::shared_ptr<ProfileDetection>(std::move(new_prof));
 
                 _dia("cfgapi_load_obj_profile_detect: '%s': ok", name.c_str());
             } else {
@@ -1687,14 +1687,12 @@ int CfgFactory::load_db_prof_alg_dns () {
 
         for( int i = 0; i < num; i++) {
             std::string name;
-            auto* a = new ProfileAlgDns;
+            auto new_prof = std::make_unique<ProfileAlgDns>();
             
             Setting& cur_object = curr_set[i];
 
             if (  ! cur_object.getName() ) {
                 _dia("cfgapi_load_obj_alg_dns_profile: unnamed object index %d: not ok", i);
-
-                delete a; // coverity: 1407948
                 continue;
             }
             
@@ -1707,12 +1705,12 @@ int CfgFactory::load_db_prof_alg_dns () {
 
             _dia("cfgapi_load_obj_alg_dns_profile: processing '%s'", name.c_str());
 
-            a->element_name() = name;
-            load_if_exists(cur_object, "match_request_id", a->match_request_id);
-            load_if_exists(cur_object, "randomize_id", a->randomize_id);
-            load_if_exists(cur_object, "cached_responses", a->cached_responses);
+            new_prof->element_name() = name;
+            load_if_exists(cur_object, "match_request_id", new_prof->match_request_id);
+            load_if_exists(cur_object, "randomize_id", new_prof->randomize_id);
+            load_if_exists(cur_object, "cached_responses", new_prof->cached_responses);
             
-            db_prof_alg_dns[name] = std::shared_ptr<ProfileAlgDns>(a);
+            db_prof_alg_dns[name] = std::shared_ptr<ProfileAlgDns>(std::move(new_prof));
         }
     }
     
@@ -1733,14 +1731,13 @@ int CfgFactory::load_db_prof_script () {
 
         for( int i = 0; i < num; i++) {
             std::string name;
-            auto* a = new ProfileScript;
+            auto new_prof = std::make_unique<ProfileScript>();
 
             Setting& cur_object = curr_set[i];
 
             if (  ! cur_object.getName() ) {
                 _dia("load_db_prof_script: unnamed object index %d: not ok", i);
 
-                delete a;
                 continue;
             }
 
@@ -1753,11 +1750,11 @@ int CfgFactory::load_db_prof_script () {
 
             _dia("load_db_prof_script: processing '%s'", name.c_str());
 
-            a->element_name() = name;
-            load_if_exists(cur_object, "type", a->script_type);
-            load_if_exists(cur_object, "script-file", a->module_path);
+            new_prof->element_name() = name;
+            load_if_exists(cur_object, "type", new_prof->script_type);
+            load_if_exists(cur_object, "script-file", new_prof->module_path);
 
-            db_prof_script[name] = std::shared_ptr<ProfileScript>(a);
+            db_prof_script[name] = std::shared_ptr<ProfileScript>(std::move(new_prof));
         }
     }
 
