@@ -2028,10 +2028,10 @@ bool CfgFactory::prof_content_apply (baseHostCX *originator, baseProxy *new_prox
         }
         
         if(mitm_proxy->writer_opts()->write_payload) {
-            std::string msg("Connection start\n");
-
             mitm_proxy->toggle_tlog();
-            mitm_proxy->tlog()->write_left(msg);
+
+            if(mitm_proxy->tlog())
+                mitm_proxy->tlog()->write_left("Connection start\n");
         }
     } else {
         _war("policy_apply: cannot apply content profile: cast to MitmProxy failed.");
