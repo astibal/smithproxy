@@ -35,7 +35,7 @@ if [ "$TMPFS" != "yes" ]; then
 fi
     
 if [ "$SXYDUMPS_" != "0" ]; then
-    echo "... creating /var/local/smithproxy volume"
+    echo "... creating /var/smithproxy volume"
     sudo docker volume create sxydumps
 fi
 
@@ -47,7 +47,7 @@ sudo docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined \
     -p 1112:1112 -p 50001:50000 \
 	-v sxy:/etc/smithproxy \
 	${LOG_VOLUME} \
-	-v sxydumps:/var/local/smithproxy \
+	-v sxydumps:/var/smithproxy \
 	-it \
 	--shm-size 512M \
 	--rm --name "sx-${TAG}-`date +"%s"`" astibal/smithproxy:${TAG} "$@"

@@ -79,7 +79,7 @@ layout:
   /var/log:
     bind: $SNAP_DATA/log
 
-  /var/local/smithproxy:
+  /var/smithproxy:
     bind: $SNAP_DATA/captures
 
   /usr/bin/telnet:

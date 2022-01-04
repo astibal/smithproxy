@@ -2,9 +2,9 @@
 
 python3 -m pip install pyparsing pylibconfig2
 
-if [ ! -d /var/local/smithproxy/data ]; then
+if [ ! -d /var/smithproxy/data ]; then
   echo "... creating default capture directory"
-  mkdir -p /var/local/smithproxy/data
+  mkdir -p /var/smithproxy/data
 fi
 
 if  [ -f "$(which setcap)" ]; then
