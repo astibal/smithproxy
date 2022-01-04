@@ -1,3 +1,47 @@
 #!/bin/sh
 
-python3 -m pip install pylibconfig2
+python3 -m pip install pyparsing pylibconfig2
+
+if [ ! -d /var/local/smithproxy/data ]; then
+  echo "... creating default capture directory"
+  mkdir -p /var/local/smithproxy/data
+fi
+
+if  [ -f "$(which setcap)" ]; then
+   echo "... setting capability, capability-only mode can be optionally configured"
+  setcap cap_net_raw,cap_net_admin,cap_net_bind_service+eip /usr/bin/smithproxy
+
+  U="_sxy"
+  if  [ -f "$(which adduser)" ]; then
+    echo "... adding user ${U}"
+    adduser ${U} --system --group --home /nonexistent --no-create-home --disabled-login --disabled-password --quiet --force-badname
+
+    echo "... setting group permission to /etc/smithproxy"
+    chgrp ${U} /etc/smithproxy -R
+    chmod g+rw /etc/smithproxy -R
+
+    echo "... setting group permission to /var/smithproxy"
+    if [ ! -d "/var/smithproxy/data" ]; then mkdir -p /var/smithproxy/data; fi;
+    chgrp ${U}  /var/smithproxy -R
+    chmod g+rw  /var/smithproxy -R
+
+    echo "... setting group permission to /var/log/smithproxy"
+    if [ ! -d "/var/log/smithproxy" ]; then mkdir -p /var/log/smithproxy; fi;
+    chgrp ${U}  /var/log/smithproxy -R
+    chmod g+rw  /var/log/smithproxy -R
+
+  fi
+
+else
+  echo "... setcap not found, capability-only run NOT supported"
+fi
+
+if  [ -f "$(which systemctl)" ]; then
+  echo "... systemd detected, enabling services"
+
+  systemctl enable sx-network@default.service
+  systemctl enable sx-core@default.service
+else
+  echo "... systemd not detected, services not enabled"
+  echo "    legacy rc script can be found in /usr/share/smithproxy"
+fi
