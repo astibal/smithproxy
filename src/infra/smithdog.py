@@ -71,7 +71,7 @@ SMITHD_PATH = '/usr/bin/smithd'
 SMITHD_PIDFILE = '/var/run/smithd.%s.pid'
 
 SMITHDOG_PIDFILE = '/var/run/smithproxy_dog.%s.pid'
-SMITHDOG_LOGFILE = '/var/log/smithproxy_dog.%s.log'
+SMITHDOG_LOGFILE = '/var/log/smithproxy/dog.%s.log'
 
 WWW_PATH = '/usr/share/smithproxy/www/'
 PORTAL_PATH = WWW_PATH + "portal/"

@@ -94,7 +94,7 @@ tenant_range="0.0.0.0/0"
 tenant_range6="::/0"
 
 
-LOGFILE='/var/log/smithproxy.startup.log'
+LOGFILE='/var/log/smithproxy/startup.log'
 
 
 function prepare_log {

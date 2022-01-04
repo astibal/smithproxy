@@ -478,7 +478,7 @@ int main(int argc, char *argv[]) {
 
     if(CfgFactory::get()->cfg_mtrace_enable) {
 #ifdef MEM_DEBUG
-        putenv("MALLOC_TRACE=/var/log/smithproxy_mtrace.log");
+        putenv("MALLOC_TRACE=/var/log/smithproxy/mtrace.log");
         mtrace();
 #endif
     }

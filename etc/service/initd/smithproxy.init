@@ -120,14 +120,14 @@ case "$1" in
 
   val)
     valgrind --max-threads=1000 --leak-check=full --trace-children=yes \
-      --log-file=/var/log/smithproxy_val.log /usr/bin/smithproxy --daemonize --tenant-index 0 --tenant-name default
+      --log-file=/var/log/smithproxy/valgrind.log /usr/bin/smithproxy --daemonize --tenant-index 0 --tenant-name default
     ;;
 
   *)
     echo "Usage: /etc/init.d/smithproxy {start|stop|status|reload|restart|force-reload|bypass|unbypass} [tenant UUID]"
     echo "Debugs: /etc/init.d/smithproxy {fin|val}"
     echo "        fin - just terminate daemons, keep TPROXY rules up! This will disrupt traffic severely."
-    echo "        val - run valgrind on smithproxy. Run it once, if it crashes, it stops Log goes to /var/log/smithproxy_val.log."
+    echo "        val - run valgrind on smithproxy. Run it once, if it crashes, it stops Log goes to /var/log/smithproxy/valgrind.log."
     echo "            - doesn't support tenants)"
     exit 1
     ;;

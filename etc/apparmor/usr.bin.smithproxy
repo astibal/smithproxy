@@ -43,6 +43,7 @@
 
   # write logs
   /var/log/smithproxy* rw,
+  /var/log/smithproxy/* rw,
 
   # write dumpfiles
   #

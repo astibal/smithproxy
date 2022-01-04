@@ -72,7 +72,7 @@ class Daemon:
     
     Usage: subclass the Daemon class and override the run() method
     """
-    log = create_logger("daemon", '/var/log/smithproxy_daemons.log')
+    log = create_logger("daemon", '/var/log/smithproxy/daemons.log')
 
     def __init__(self, nicename, pidfile, stdin='/dev/null', stdout='/dev/null', stderr='/dev/null'):
         self.stdin = stdin

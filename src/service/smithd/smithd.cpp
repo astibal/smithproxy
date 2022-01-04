@@ -214,7 +214,7 @@ static loglevel cfg_log_level = INF;
 static int cfg_log_console = false;
 static int cfg_smithd_workers = 0;
 
-static std::string cfg_log_file = "/var/log/smithd.%s.log";
+static std::string cfg_log_file = "/var/log/smithproxy/smithd.%s.log";
 static std::string cfg_smithd_listen_port = "/var/run/smithd.%s.sock";
 
 // Tenant configuration
