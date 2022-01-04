@@ -2,6 +2,7 @@
 
 @{SX_BIN}=/usr/bin/smithproxy
 @{SX_DATA}=/var/local/smithproxy/
+@{SX_DATA2}=/var/smithproxy/
 @{CERTSTORE}=/usr/share/ca-certificates/
 
 
@@ -48,4 +49,5 @@
   # write dumpfiles
   #
   @{SX_DATA}/** rw,
+  @{SX_DATA2}/** rw,
 }
