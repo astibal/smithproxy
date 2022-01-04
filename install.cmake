@@ -117,17 +117,11 @@ if(UNIX)
 
     install(DIRECTORY etc/msg DESTINATION /etc/smithproxy)
 
+    create_dir("/var/log/smithproxy/")
+
     # message: edit defaults and add to init.d to start at boot!
     install(CODE "MESSAGE(\" +----------------------------------------------------------------------------------------+\")")
-    install(CODE "MESSAGE(\" | Core installation complete!                                                            |\")")
-    install(CODE "MESSAGE(\" +----------------------------------------------------------------------------------------|\")")
-    install(CODE "MESSAGE(\" |   Hints for minimal setup:                                                             |\")")
-    install(CODE "MESSAGE(\" |     1:Edit /etc/smithproxy/smithproxy.startup.cfg                                      |\")")
-    install(CODE "MESSAGE(\" |       -  change interface heading to the LAN/internal network you want to inspect.     |\")")
-    install(CODE "MESSAGE(\" |     2:Make smithproxy start on boot                                                    |\")")
-    install(CODE "MESSAGE(\" |       -  Debian:  update-rc.d smithproxy defaults                                      |\")")
-    install(CODE "MESSAGE(\" |     3:Enable smithproxy CLI                                                            |\")")
-    install(CODE "MESSAGE(\" |       -  add /usr/bin/smithproxy_cli to /etc/shells, make special user for it, use ssh |\")")
+    install(CODE "MESSAGE(\" | Installation complete!                                                                 |\")")
     install(CODE "MESSAGE(\" +----------------------------------------------------------------------------------------+\")")
 
 endif()

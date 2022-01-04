@@ -26,6 +26,12 @@ function(install_if_not_exists src dest)
   ")
 endfunction(install_if_not_exists)
 
+function (create_dir _dirpath)
+    install(CODE "
+        message(STATUS \"Directory : ${_dirpath}\")
+        execute_process(COMMAND \"${CMAKE_COMMAND}\" -E make_directory ${_dirpath})
+    ")
+endfunction (create_dir)
 
 macro(InstallSymlink _filepath _sympath)
     get_filename_component(_symname ${_sympath} NAME)
