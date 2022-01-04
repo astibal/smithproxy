@@ -1,0 +1,12 @@
+#!/bin/sh
+
+# create symlink to your hook directory with (from project dir)
+# ln -s ../../.git_pre-commit .git/hooks/pre-commit
+
+
+. git-sh-setup  # for die 
+if git-diff-index -p -M --cached HEAD -- \
+| grep '^+' \
+| grep 'USE_EXPERIMENT= *Y'; then
+    die Blocking commit because of banned string
+fi

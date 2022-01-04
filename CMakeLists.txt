@@ -15,6 +15,12 @@ set(USE_PYTHON "N")
 set(USE_LMHPP "Y")
 set(USE_UNWIND "Y")
 
+
+set(USE_EXPERIMENT=N)
+if("${USE_EXPERIMENT}" STREQUAL "Y")
+    add_definitions(-DUSE_EXPERIMENT)
+endif()
+
 include_directories ("${SOCLE_DIR}")
 include_directories ("${SOCLE_COMMON_DIR}")
 include_directories ("${PROJECT_SOURCE_DIR}")
