@@ -118,6 +118,7 @@ if(UNIX)
     install(DIRECTORY etc/msg DESTINATION /etc/smithproxy)
 
     create_dir("/var/log/smithproxy/")
+    create_dir("/var/smithproxy/data/")
 
     # message: edit defaults and add to init.d to start at boot!
     install(CODE "MESSAGE(\" +----------------------------------------------------------------------------------------+\")")
