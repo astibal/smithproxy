@@ -16,7 +16,7 @@ set(USE_LMHPP "Y")
 set(USE_UNWIND "Y")
 
 
-set(USE_EXPERIMENT=N)
+set(USE_EXPERIMENT="N")
 if("${USE_EXPERIMENT}" STREQUAL "Y")
     add_definitions(-DUSE_EXPERIMENT)
 endif()

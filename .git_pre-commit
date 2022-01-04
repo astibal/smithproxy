@@ -7,6 +7,6 @@
 . git-sh-setup  # for die 
 if git-diff-index -p -M --cached HEAD -- \
 | grep '^+' \
-| grep 'USE_EXPERIMENT= *Y'; then
+| grep 'USE_EXPERIMENT= *"Y"'; then
     die Blocking commit because of banned string
 fi
