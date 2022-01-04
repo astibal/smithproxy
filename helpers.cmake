@@ -33,6 +33,26 @@ function (create_dir _dirpath)
     ")
 endfunction (create_dir)
 
+
+function(create_symlink _src _dst)
+    execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink  ${_src} ${_dst}
+            RESULT_VARIABLE res
+            ERROR_VARIABLE err)
+    if(res)
+        message(">> installing git hooks failed: ${err}")
+    endif()
+endfunction()
+
+
+function(create_git_hooks)
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git/hooks/pre-commit")
+        message(">> Installing git hooks")
+        create_symlink(../../.git_pre-commit ${CMAKE_CURRENT_SOURCE_DIR}/.git/hooks/pre-commit)
+    else()
+        message(">> Git hooks present")
+    endif()
+endfunction()
+
 macro(InstallSymlink _filepath _sympath)
     get_filename_component(_symname ${_sympath} NAME)
     get_filename_component(_installdir ${_sympath} PATH)

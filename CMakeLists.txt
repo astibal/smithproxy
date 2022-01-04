@@ -21,6 +21,8 @@ if("${USE_EXPERIMENT}" STREQUAL "Y")
     add_definitions(-DUSE_EXPERIMENT)
 endif()
 
+create_git_hooks()
+
 include_directories ("${SOCLE_DIR}")
 include_directories ("${SOCLE_COMMON_DIR}")
 include_directories ("${PROJECT_SOURCE_DIR}")
