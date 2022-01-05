@@ -16,8 +16,9 @@ set(USE_LMHPP "Y")
 set(USE_UNWIND "Y")
 
 
-set(USE_EXPERIMENT="N")
+set(USE_EXPERIMENT "N")
 if("${USE_EXPERIMENT}" STREQUAL "Y")
+    message(" >> !!! EXPERIMENTS ENABLED !!!" )
     add_definitions(-DUSE_EXPERIMENT)
 endif()
 
@@ -325,3 +326,9 @@ target_link_libraries(smithdc socle_lib pthread ssl crypto rt ${UNWIND_LIB})
 
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/install.cmake)
+
+if("${USE_EXPERIMENT}" STREQUAL "Y")
+    message(" >> !!! EXPERIMENTS ENABLED !!!" )
+    message(" >> - software you built and install contain code which is probably not for general use" )
+endif()
+

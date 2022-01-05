@@ -281,6 +281,14 @@ public:
     [[maybe_unused]]
     int  load_db_prof_script ();
 
+    #ifdef USE_EXPERIMENT
+    struct {
+        bool enabled;
+        std::string param;
+    } experiment_1;
+    int save_experiment(libconfig::Config& ex) const;
+    bool load_experiment();
+    #endif
 
     int save_captures(libconfig::Config& ex) const;
 

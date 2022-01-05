@@ -490,6 +490,10 @@ void CliHelp::init() {
 
     init_routing();
     init_captures();
+
+    #ifdef USE_EXPERIMENT
+    init_experiment();
+    #endif
 }
 
 
@@ -561,6 +565,18 @@ void CliHelp::init_captures () {
 
 }
 
+#ifdef USE_EXPERIMENT
+void CliHelp::init_experiment() {
+    add("experiment.enabled_1", "enable/disable experiment #1")
+            .may_be_empty(false)
+            .value_filter(CliElement::VALUE_BOOL)
+            .suggestion_generator(CliElement::SUGGESTION_BOOL);
+
+    add("experiment.param_1", "set parameter for experiment #1")
+            .may_be_empty(true)
+            .value_filter(CliElement::VALUE_ANY);
+}
+#endif
 
 std::optional<std::string> CliHelp::value_check(std::string const& varname, std::string const& value_argument, cli_def* cli) {
 

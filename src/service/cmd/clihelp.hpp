@@ -240,6 +240,10 @@ struct CliHelp {
     void init_routing();
     void init_captures();
 
+    #ifdef USE_EXPERIMENT
+    void init_experiment();
+    #endif
+
     std::optional<std::reference_wrapper<CliElement>> find(std::string const& k) {
 
         if(element_help_.find(k) != element_help_.end()) {

@@ -154,5 +154,9 @@ CONFIG_MODE_DEC(cli_conf_edit_captures)
 CONFIG_MODE_DEC(cli_conf_edit_captures_local)
 CONFIG_MODE_DEC(cli_conf_edit_captures_remote)
 
+#ifdef USE_EXPERIMENT
+enum edit_experiment { MODE_EDIT_EXPERIMENT=0x30000000 };
+CONFIG_MODE_DEC(cli_conf_edit_experiment)
+#endif
 
 #endif //SMITHPROXY_CLIGEN_HPP

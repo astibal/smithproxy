@@ -396,6 +396,29 @@ bool CfgFactory::upgrade_and_save() {
         return true;
     };
 
+    bool do_save = false;
+
+
+#if ( not defined USE_EXPERIMENT and defined BUILD_RELEASE )
+
+    //remove experiment (and save config) when running non-experimental release build
+
+    if(cfgapi.getRoot().exists("experiment")) {
+        cfgapi.getRoot().remove("experiment");
+        do_save = true;
+    }
+#elif defined USE_EXPERIMENT
+
+    if(not cfgapi.getRoot().exists("experiment")) {
+        auto& ex = cfgapi.getRoot().add("experiment", Setting::TypeGroup);
+        ex.add("enabled_1", libconfig::Setting::TypeBoolean) = false;
+        ex.add("param_1", libconfig::Setting::TypeString) = "";
+        do_save = true;
+    }
+
+#endif
+
+
     if(not cfgapi.getRoot().exists("*_internal_*")) {
 
         // versioning first initialization
@@ -412,8 +435,6 @@ bool CfgFactory::upgrade_and_save() {
 
     auto& internal = cfgapi.getRoot()["*_internal_*"];
 
-
-    bool do_save = false;
 
     int our_schema = SCHEMA_VERSION;
     int cfg_schema = 1000;
@@ -585,6 +606,18 @@ bool CfgFactory::load_settings () {
 
     return true;
 }
+
+#ifdef USE_EXPERIMENT
+bool CfgFactory::load_experiment() {
+
+    if(cfgapi.getRoot().exists("experiment")) {
+        load_if_exists(cfgapi.getRoot()["experiment"], "enabled_1", experiment_1.enabled);
+        load_if_exists(cfgapi.getRoot()["experiment"], "param_1", experiment_1.param);
+    }
+
+    return true;
+}
+#endif
 
 
 bool CfgFactory::load_captures() {
@@ -3728,6 +3761,23 @@ int save_settings(Config& ex) {
     return 0;
 }
 
+#ifdef USE_EXPERIMENT
+int CfgFactory::save_experiment(Config& ex) const {
+
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
+
+    if(not ex.exists("experiment"))
+        ex.getRoot().add("experiment", Setting::TypeGroup);
+
+    Setting& exper = ex.getRoot()["experiment"];
+
+    exper.add("enabled_1", Setting::TypeBoolean) = CfgFactory::get()->experiment_1.enabled;
+    exper.add("param_1", Setting::TypeString) = CfgFactory::get()->experiment_1.param;
+
+    return 1;
+}
+#endif
+
 
 int CfgFactory::save_captures(Config& ex) const {
 
@@ -3791,6 +3841,12 @@ int CfgFactory::save_config() const {
     _inf("... common settings");
 
     n = save_captures(ex);
+
+#ifdef USE_EXPERIMENT
+    n = save_experiment(ex);
+    _inf("... experiments (will be removed by no-experimental version)");
+#endif //USE_EXPERIMENT
+
     _inf("... capture settings");
 
     n = save_debug(ex);

@@ -159,6 +159,10 @@ std::stringstream features;
 #ifdef USE_LMHPP
     features << "LMHPP ";
 #endif
+
+#ifdef USE_EXPERIMENT
+    features << "EXPERIMENTAL ";
+#endif
     cli_print(cli, "Built: %s, with: %s", __TIMESTAMP__, features.str().c_str());  // breaks reproducible builds
 
 
@@ -1283,6 +1287,11 @@ bool apply_setting(std::string const& section, std::string const& varname, struc
     if( 0 == section.find("captures") ) {
         ret = CfgFactory::get()->load_captures();
     } else
+#ifdef USE_EXPERIMENT
+    if( 0 == section.find("experiment") ) {
+        ret = CfgFactory::get()->load_experiment();
+    } else
+#endif
     if( 0 == section.find("debug") ) {
         ret = CfgFactory::get()->load_debug();
     } else
@@ -2324,6 +2333,14 @@ int cli_show_config_captures(struct cli_def *cli, const char *command, char *arg
     return CLI_OK;
 }
 
+#ifdef USE_EXPERIMENT
+int cli_show_config_experiment(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+
+    cli_print_section(cli, "experiment", -1, 1 * 1024 * 1024);
+    return CLI_OK;
+}
+#endif
 
 void cli_register_static(struct cli_def* cli) {
 
@@ -2358,6 +2375,9 @@ void cli_register_static(struct cli_def* cli) {
                     cli_register_command(cli, show_config, "detection_signatures", cli_show_config_detection_sig, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy config section: detection_signatures");
                     cli_register_command(cli, show_config, "routing", cli_show_config_routing, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy config section: routing");
                     cli_register_command(cli, show_config, "captures", cli_show_config_captures, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy config section: captures");
+                    #ifdef USE_EXPERIMENT
+                    cli_register_command(cli, show_config, "experiment", cli_show_config_experiment, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy config section: experiment");
+                    #endif
 
     auto test  = cli_register_command(cli, nullptr, "test", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "various testing commands");
             auto test_dns = cli_register_command(cli, test, "dns", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "dns related testing commands");
@@ -2662,7 +2682,13 @@ void client_thread(int client_socket) {
             .cap("edit", true)
             .cmd("edit", cli_conf_edit_captures_remote);
 
-
+#ifdef USE_EXPERIMENT
+    register_callback("experiment", MODE_EDIT_EXPERIMENT)
+            .cap("set", true)
+            .cmd("set", cli_generic_set_cb)
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_experiment);
+#endif
 
     auto conft_edit = cli_register_command(cli, nullptr, "edit", nullptr, PRIVILEGE_PRIVILEGED, MODE_CONFIG, "configure smithproxy settings");
 
@@ -2672,6 +2698,9 @@ void client_thread(int client_socket) {
                                               "detection_profiles", "content_profiles", "tls_profiles", "auth_profiles",
                                               "alg_dns_profiles",
                                               "routing",
+                                              #ifdef USE_EXPERIMENT
+                                              "experiment",
+                                              #endif
                                               "captures",
                                               "policy",
                                               "starttls_signatures",

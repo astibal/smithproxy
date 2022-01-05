@@ -76,6 +76,9 @@ CONFIG_MODE_DEF(cli_conf_edit_captures, MODE_EDIT_CAPTURES, "captures")
 CONFIG_MODE_DEF(cli_conf_edit_captures_local, MODE_EDIT_CAPTURES_LOCAL, "local")
 CONFIG_MODE_DEF(cli_conf_edit_captures_remote, MODE_EDIT_CAPTURES_REMOTE, "remote")
 
+#ifdef USE_EXPERIMENT
+CONFIG_MODE_DEF(cli_conf_edit_experiment, MODE_EDIT_EXPERIMENT, "experiment")
+#endif
 
 std::pair<int, std::string> generate_dynamic_groups(struct cli_def *cli, const char *command, char **argv, int argc) {
     auto words = string_split(command, ' ');
