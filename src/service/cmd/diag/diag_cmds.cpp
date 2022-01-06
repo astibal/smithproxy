@@ -1014,9 +1014,10 @@ int cli_diag_mem_udp_stats(struct cli_def *cli, const char *command, char **argv
 
     cli_print(cli,"UDP Statistics:\n");
     {
-        auto l_ = std::scoped_lock(DatagramCom::lock);
-        cli_print(cli, "Embryonic entries:    %zd", DatagramCom::datagrams_received.size());
-        cli_print(cli, "Embryonic inset sz:   %zd", DatagramCom::in_virt_set.size());
+        auto udpc = UDPCom::datagram_com_static();
+        auto lc_ = std::scoped_lock(udpc->lock);
+        cli_print(cli, "Embryonic entries:    %zd", udpc->datagrams_received.size());
+        cli_print(cli, "Embryonic inset sz:   %zd", udpc->in_virt_set.size());
     }
 
     return CLI_OK;
