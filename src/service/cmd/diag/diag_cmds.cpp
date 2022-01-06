@@ -1296,12 +1296,36 @@ int cli_diag_mem_objects_clear(struct cli_def *cli, const char *command, char *a
 }
 
 
+auto args_to_vec(char* argv[], int argc) {
+    std::vector<std::string> arg;
+    for (int i = 0; i < argc; ++i) {
+        arg.emplace_back(argv[i]);
+    }
+
+    return arg;
+}
+
 
 int cli_diag_proxy_session_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
-    return cli_diag_proxy_session_list_extra(cli, command, argv, argc, SL_NONE);
+    int flags = SL_NONE;
+    std::vector<std::string> args;
+
+    for (int i = 0; i < argc; ++i) {
+        std::string arg = argv[i];
+
+        if(arg == "active") flags = flag_set<int>(flags, SL_ACTIVE);
+        else if(arg == "tls") flags = flag_set<int>(flags, SL_TLS_DETAILS);
+        else if(arg == "io")  { flags = flag_set<int>(flags, SL_IO_EMPTY); flags = flag_set<int>(flags, SL_IO_OSBUF_NZ); }
+        else if(arg == "nonames")  flags = flag_set<int>(flags, SL_NO_NAMES);
+        else {
+            args.emplace_back(arg);
+        }
+    }
+
+    return cli_diag_proxy_session_list_extra(cli, command, args, flags);
 }
 
 
@@ -1309,14 +1333,14 @@ int cli_diag_proxy_tls_list(struct cli_def *cli, const char *command, char *argv
 
     debug_cli_params(cli, command, argv, argc);
 
-    return cli_diag_proxy_session_list_extra(cli, command, argv, argc, SL_TLS_DETAILS);
+    return cli_diag_proxy_session_list_extra(cli, command, args_to_vec(argv, argc), SL_TLS_DETAILS);
 }
 
 int cli_diag_proxy_list_active(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
-    return cli_diag_proxy_session_list_extra(cli, command, argv, argc, SL_ACTIVE);
+    return cli_diag_proxy_session_list_extra(cli, command, args_to_vec(argv, argc), SL_ACTIVE);
 }
 
 
@@ -1328,7 +1352,14 @@ int cli_diag_proxy_session_io_list(struct cli_def *cli, const char *command, cha
     flag_set<int>(&f, SL_IO_OSBUF_NZ);
     flag_set<int>(&f, SL_IO_EMPTY);
 
-    return cli_diag_proxy_session_list_extra(cli, command, argv, argc, f);
+    return cli_diag_proxy_session_list_extra(cli, command, args_to_vec(argv, argc), f);
+}
+
+int cli_diag_proxy_list_nonames(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    debug_cli_params(cli, command, argv, argc);
+
+    return cli_diag_proxy_session_list_extra(cli, command, args_to_vec(argv, argc), SL_NO_NAMES);
 }
 
 
@@ -1364,18 +1395,20 @@ void print_queue_stats(std::stringstream &ss, int verbosity, MitmHostCX *cx, con
 };
 
 
-int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, char *argv[], int argc, int sl_flags) {
+int cli_diag_proxy_session_list_extra (struct cli_def *cli, const char *command, std::vector<std::string> const &args,
+                                       int sl_flags) {
 
-    debug_cli_params(cli, command, argv, argc);
+    debug_cli_params(cli, command, args);
 
     std::string arg1;
     std::string arg2;
     int verbosity = iINF;
-    if(argc > 0) {
-        arg1 = argv[0];
+    if(not args.empty()) {
+        arg1 = args.at(0);
         verbosity = safe_val(arg1, iINF);
+
+        if(args.size() > 1) arg2 = args.at(1);
     }
-    if(argc > 1) arg2 = argv[1];
 
     std::stringstream out;
 
@@ -1616,9 +1649,8 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
                     do_print = true;
                 }
 
-                if (sl_flags == SL_NONE) {
-                    do_print = true;
-                }
+                if (sl_flags == SL_NONE) { do_print = true;  }
+                if (sl_flags == SL_NO_NAMES) { do_print = true;  }
 
                 if (!do_print) {
                     continue;
@@ -1635,7 +1667,35 @@ int cli_diag_proxy_session_list_extra(struct cli_def *cli, const char *command, 
                     prefix += "\r\n";
                 }
 
-                cur_obj_ss << prefix << so_ptr->to_string(verbosity) << suffix;
+                if(flag_check<int>(sl_flags, SL_NO_NAMES)) {
+                    cur_obj_ss << prefix << so_ptr->to_string(verbosity) << suffix;
+                }
+                else {
+
+                    auto replace_proxy_title_with_sni = [](auto const& title, auto* right_cx, auto verbosity) {
+
+                        auto scom = dynamic_cast<SSLCom *>(right_cx->com());
+                        if (scom) {
+                            std::stringstream replacement;
+
+                            std::string tgt = (scom->get_peer_sni().empty() ? scom->shortname() + "_" + right_cx->host() : scom->get_peer_sni());
+                            replacement << "$1"<< (verbosity > iINF ? "[sni]" : "" ) << tgt << ":" << right_cx->port();
+
+                            auto rmatch = std::regex("(r:[^_]+)ssli_[0-9a-fA-F:.]+");
+
+                            return std::regex_replace(title, rmatch, replacement.str());
+
+                        } else {
+                            return title;
+                        }
+                    };
+
+                    if(rg) {
+                        cur_obj_ss << prefix << replace_proxy_title_with_sni(so_ptr->to_string(verbosity), rg, verbosity) << suffix;
+                    } else {
+                        cur_obj_ss << prefix << so_ptr->to_string(verbosity) << suffix;
+                    }
+                }
 
                 if (verbosity >= DEB && so_info) {
                     cur_obj_ss << so_info->to_string(verbosity);
@@ -1966,6 +2026,7 @@ bool register_diags(cli_def* cli, cli_command* diag) {
 
     auto diag_proxy_session = cli_register_command(cli,diag_proxy,"session",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session commands");
     cli_register_command(cli, diag_proxy_session,"list", cli_diag_proxy_session_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session list");
+    cli_register_command(cli, diag_proxy_session,"list-nonames", cli_diag_proxy_list_nonames, PRIVILEGE_PRIVILEGED, MODE_EXEC,"list sessions without resolved destination names");
     cli_register_command(cli, diag_proxy_session,"clear", cli_diag_proxy_session_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session clear");
 
     cli_register_command(cli, diag_proxy_session,"tls-info", cli_diag_proxy_tls_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"connection TLS details");

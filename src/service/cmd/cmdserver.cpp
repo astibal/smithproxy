@@ -109,6 +109,17 @@ void debug_cli_params(struct cli_def *cli, const char *command, char *argv[], in
 
 }
 
+void debug_cli_params(struct cli_def *cli, const char *command, std::vector<std::string> const& args) {
+
+    _debug(cli, "Cli mode: %d", cli->mode);
+    _debug(cli, "command: %s", command);
+    for(auto const& arg: args) {
+        _debug(cli, "      arg: %s", arg.c_str());
+    }
+
+}
+
+
 void load_defaults() {
     CliState::get().orig_ssl_loglevel = SSLCom::log_level_ref();
     CliState::get().orig_sslmitm_loglevel = SSLMitmCom::log_level_ref();

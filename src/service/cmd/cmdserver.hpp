@@ -46,6 +46,7 @@
 
 
 void debug_cli_params(struct cli_def *cli, const char *command, char *argv[], int argc);
+void debug_cli_params(struct cli_def *cli, const char *command, std::vector<std::string> const& args);
 void cli_loop(unsigned short port=50000);
 
 // SL_NONE - no filtering
