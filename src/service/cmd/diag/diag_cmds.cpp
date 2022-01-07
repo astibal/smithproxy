@@ -659,7 +659,7 @@ int cli_diag_dns_cache_list(struct cli_def *cli, const char *command, char *argv
 
     std::stringstream out;
     {
-        std::scoped_lock<std::recursive_mutex> l_(DNS::get_dns_lock());
+        std::scoped_lock<std::recursive_mutex> lc_(DNS::get_dns_lock());
 
 
         out << "\nDNS cache populated from traffic: \n";
@@ -685,7 +685,7 @@ int cli_diag_dns_cache_stats(struct cli_def *cli, const char *command, char *arg
     debug_cli_params(cli, command, argv, argc);
 
     std::stringstream out;
-    int cache_size = 0;
+    std::size_t cache_size = 0;
     int max_size = 0;
 
     {
@@ -727,14 +727,14 @@ int cli_diag_dns_domain_cache_list(struct cli_def *cli, const char *command, cha
     {
         auto lc_ = std::scoped_lock(DNS::get_domain_lock());
 
-        for (auto const& [ domain, cache ]: DNS::get_domain_cache().cache()) {
+        for (auto const& [ domain_main, cache_main ]: DNS::get_domain_cache().cache()) {
 
             std::string str;
 
-            for (auto const& [ domain, cache]: cache->ptr()->cache()) {
+            for (auto const& [ domain, cache]: cache_main->ptr()->cache()) {
                 str += " " + domain;
             }
-            out << string_format("\n\t%s: \t%s", domain.c_str(), str.c_str());
+            out << string_format("\n\t%s: \t%s", domain_main.c_str(), str.c_str());
 
         }
     }
@@ -848,29 +848,29 @@ int cli_diag_identity_ip_clear(struct cli_def *cli, const char *command, char *a
 int cli_diag_writer_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
 
-    auto wr = socle::threadedPoolFileWriter::instance();
+    auto wrt = socle::threadedPoolFileWriter::instance();
 
-    std::stringstream ss;
+    std::stringstream out;
 
     {
-        auto lc_ = std::scoped_lock(wr->queue_lock());
+        auto lc_ = std::scoped_lock(wrt->queue_lock());
 
-        ss << "Pending ops: " << wr->queue().size() << "\n";
+        out << "Pending ops: " << wrt->queue().size() << "\n";
     }
     {
-        auto lc_ = std::scoped_lock(wr->ofstream_lock());
+        auto lc_ = std::scoped_lock(wrt->ofstream_lock());
 
-        ss << "Recent (opened files):\n";
-        for (auto const& [ fnm, x] : wr->ofstream_cache().cache()) {
-            ss << "    " << fnm << "\n";
+        out << "Recent (opened files):\n";
+        for (auto const& [ fnm, x] : wrt->ofstream_cache().cache()) {
+            out << "    " << fnm << "\n";
         }
     }
 
-    ss << "PCAP stats: \n";
-    ss << "current file: written " << traflog::PcapLog::single_instance().stat_bytes_written
-                                << " quota " << traflog::PcapLog::single_instance().stat_bytes_quota  << "\n";
+    out << "PCAP stats: \n";
+    out << "current file: written " << traflog::PcapLog::single_instance().stat_bytes_written
+        << " quota " << traflog::PcapLog::single_instance().stat_bytes_quota << "\n";
 
-    cli_print(cli, "%s", ss.str().c_str());
+    cli_print(cli, "%s", out.str().c_str());
 
     return CLI_OK;
 }
@@ -1180,8 +1180,8 @@ int cli_diag_mem_objects_list(struct cli_def *cli, const char *command, char *ar
     int verbosity = iINF;
 
     if(argc > 0) {
-        std::string a1 = argv[0];
-        if(a1 == "?") {
+        std::string arg1 = argv[0];
+        if(arg1 == "?") {
             cli_print(cli,"valid parameters:");
             cli_print(cli,"         <empty> - all entries will be printed out");
             cli_print(cli,"         0x prefixed string - only object with matching Id will be printed out");
@@ -1190,25 +1190,25 @@ int cli_diag_mem_objects_list(struct cli_def *cli, const char *command, char *ar
             return CLI_OK;
         } else {
             // a1 is param for the lookup
-            if("*" == a1 || "ALL" == a1) {
+            if("*" == arg1 || "ALL" == arg1) {
                 object_filter = "";
             } else {
-                object_filter = a1;
+                object_filter = arg1;
             }
         }
 
         if(argc > 1) {
-            std::string a2 = argv[1];
-            verbosity = safe_val(a2,iINF);
+            std::string arg2 = argv[1];
+            verbosity = safe_val(arg2,iINF);
         }
     }
 
 
-    std::string r = socle::sobjectDB::str_list((object_filter.empty()) ? nullptr : object_filter.c_str(), nullptr, verbosity);
-    r += "\n" + socle::sobjectDB::str_stats((object_filter.empty()) ? nullptr : object_filter.c_str());
+    std::string ret = socle::sobjectDB::str_list((object_filter.empty()) ? nullptr : object_filter.c_str(), nullptr, verbosity);
+    ret += "\n" + socle::sobjectDB::str_stats((object_filter.empty()) ? nullptr : object_filter.c_str());
 
 
-    cli_print(cli,"Smithproxy objects (filter: %s):\n%s\nFinished.",(object_filter.empty()) ? "ALL" : object_filter.c_str() ,r.c_str());
+    cli_print(cli, "Smithproxy objects (filter: %s):\n%s\nFinished.",(object_filter.empty()) ? "ALL" : object_filter.c_str() , ret.c_str());
     return CLI_OK;
 }
 
@@ -1221,8 +1221,8 @@ int cli_diag_mem_objects_search(struct cli_def *cli, const char *command, char *
     int verbosity = iINF;
 
     if(argc > 0) {
-        std::string a1 = argv[0];
-        if(a1 == "?") {
+        std::string arg1 = argv[0];
+        if(arg1 == "?") {
             cli_print(cli,"valid parameters:");
             cli_print(cli,"         <empty>     - all entries will be printed out");
             cli_print(cli,"         any string  - objects with descriptions containing this string will be printed out");
@@ -1230,16 +1230,16 @@ int cli_diag_mem_objects_search(struct cli_def *cli, const char *command, char *
             return CLI_OK;
         } else {
             // a1 is param for the lookup
-            if("*" == a1 || "ALL" == a1) {
+            if("*" == arg1 || "ALL" == arg1) {
                 object_filter = "";
             } else {
-                object_filter = a1;
+                object_filter = arg1;
             }
         }
 
         if(argc > 1) {
-            std::string a2 = argv[1];
-            verbosity = safe_val(a2,iINF);
+            std::string arg2 = argv[1];
+            verbosity = safe_val(arg2,iINF);
         }
     }
 
@@ -1297,7 +1297,7 @@ int cli_diag_mem_objects_clear(struct cli_def *cli, const char *command, char *a
 
 
 auto args_to_vec(char* argv[], int argc) {
-    std::vector<std::string> arg;
+    std::vector<std::string> arg(argc);
     for (int i = 0; i < argc; ++i) {
         arg.emplace_back(argv[i]);
     }
@@ -1319,6 +1319,11 @@ int cli_diag_proxy_session_list(struct cli_def *cli, const char *command, char *
         if(arg == "active") flags = flag_set<int>(flags, SL_ACTIVE);
         else if(arg == "tls") flags = flag_set<int>(flags, SL_TLS_DETAILS);
         else if(arg == "io")  { flags = flag_set<int>(flags, SL_IO_EMPTY); flags = flag_set<int>(flags, SL_IO_OSBUF_NZ); }
+        else if(arg == "io-all")  {
+            flags = flag_set<int>(flags, SL_IO_EMPTY);
+            flags = flag_set<int>(flags, SL_IO_OSBUF_NZ);
+            flags = flag_set<int>(flags, SL_IO_ALL);
+        }
         else if(arg == "nonames")  flags = flag_set<int>(flags, SL_NO_NAMES);
         else {
             args.emplace_back(arg);
@@ -1395,6 +1400,352 @@ void print_queue_stats(std::stringstream &ss, int verbosity, MitmHostCX *cx, con
 };
 
 
+auto get_io_info(MitmHostCX* lf, MitmHostCX* rg, int sl_flags) {
+
+    bool do_print = false;
+    std::string prefix;
+    std::string suffix;
+
+    bool do_all = flag_check<int>(sl_flags, SL_IO_ALL);
+
+    if (flag_check<int>(sl_flags, SL_IO_OSBUF_NZ) or do_all) {
+
+        unsigned int l_in_pending = 0;
+        unsigned int l_out_pending = 0;
+        unsigned int r_out_pending = 0;
+        unsigned int r_in_pending = 0;
+
+        if (lf && lf->real_socket() > 0) {
+            ::ioctl(lf->socket(), SIOCINQ, &l_in_pending);
+            ::ioctl(lf->socket(), SIOCOUTQ, &l_out_pending);
+        }
+        if (rg && rg->real_socket() > 0 && lf) {
+            ::ioctl(lf->socket(), SIOCINQ, &r_in_pending);
+            ::ioctl(lf->socket(), SIOCOUTQ, &r_out_pending);
+        }
+
+        suffix += " i/o: ";
+
+        if (l_in_pending + l_out_pending + r_in_pending + r_out_pending != 0) {
+
+            suffix += "sio-";
+
+            if (l_in_pending) { suffix += string_format("-Li(%d)", l_in_pending); }
+            if (l_out_pending) { suffix += string_format("-Lo(%d)", l_out_pending); }
+            if (r_in_pending) { suffix += string_format("-Ri(%d)", r_in_pending); }
+            if (r_out_pending) { suffix += string_format("-Ro(%d)", r_out_pending); }
+
+
+            suffix += " ";
+
+            do_print = true;
+        } else {
+            suffix += "sio-ok ";
+        }
+
+        if (lf && rg) {
+            if (lf->meter_read_bytes != rg->meter_write_bytes) {
+                suffix += string_format("L(%d)->R ", lf->meter_read_bytes - rg->meter_write_bytes);
+                do_print = true;
+            }
+
+            if (lf->meter_write_bytes != rg->meter_read_bytes) {
+                suffix += string_format("R(%d)->L ", rg->meter_read_bytes - lf->meter_write_bytes);
+                do_print = true;
+            }
+        }
+
+        if (lf && lf->writebuf() && (!lf->writebuf()->empty())) {
+            suffix += string_format("LWrBuf(%d) ", lf->writebuf()->size());
+            do_print = true;
+        }
+
+        if (rg && rg->writebuf() && (!rg->writebuf()->empty())) {
+            suffix += string_format("RWrBuf(%d) ", rg->writebuf()->size());
+            do_print = true;
+
+        }
+    }
+
+    if (flag_check<int>(sl_flags, SL_IO_EMPTY) or do_all) {
+
+        int both = 0;
+        std::string loc_pr;
+
+        if (lf && (lf->meter_read_bytes == 0 || lf->meter_write_bytes == 0)) {
+            loc_pr += "L-no-transfer ";
+
+            both++;
+            do_print = true;
+        }
+
+        if (rg && (rg->meter_read_bytes == 0 || rg->meter_write_bytes == 0)) {
+            loc_pr += "R-no-transfer ";
+
+            both++;
+            do_print = true;
+        }
+
+        if (both > 1)
+            loc_pr = "no-transfer ";
+
+        if (both > 0)
+            suffix += loc_pr;
+    }
+
+    if(flag_check<int>(sl_flags, SL_IO_ALL)) {
+        if(not do_print)
+            suffix += "proxy-ok";
+        do_print = true;
+    }
+
+    return std::make_tuple(do_print, prefix, suffix);
+};
+
+
+
+auto get_tls_info(MitmHostCX const* lf, MitmHostCX const* rg, int sl_flags, int verbosity) {
+
+    bool do_print = false;
+    std::string prefix;
+    std::string suffix;
+
+    if (flag_check<int>(sl_flags, SL_TLS_DETAILS)) {
+        std::stringstream tls_ss;
+
+        std::vector<std::pair<std::string, SSLCom *>> tup;
+        if (lf)
+            tup.emplace_back("Left ", dynamic_cast<SSLCom *>(lf->com()));
+        if (rg)
+            tup.emplace_back("Right", dynamic_cast<SSLCom *>(rg->com()));
+
+        for (auto const&[label, com]: tup) {
+
+            if (com && !com->opt_bypass) {
+                auto ssl = com->get_SSL();
+                if (ssl) {
+                    auto const *session = SSL_get_session(ssl);
+
+                    auto *cipher_str = SSL_CIPHER_get_name(SSL_SESSION_get0_cipher(session));
+                    int has_ticket = SSL_SESSION_has_ticket(session);
+                    unsigned long lifetime_hint = -1;
+                    if (has_ticket > 0) {
+                        lifetime_hint = SSL_SESSION_get_ticket_lifetime_hint(session);
+                    }
+
+                    auto tls_ver = SSL_get_version(ssl);
+                    bool tls_rsm = (com->target_cert() == nullptr);
+
+                    tls_ss << "\n  " << label << ": version: " << tls_ver << ", cipher: ";
+                    tls_ss << cipher_str << ", resumed/ticket: "
+                           << tls_rsm << "/" << has_ticket;
+                    if (has_ticket) {
+                        tls_ss << " , ticket_hint: " << lifetime_hint << "s";
+                    }
+
+                    if (!com->is_server()) {
+                        tls_ss << "\n    verify(" << SSLCom::verify_origin_str(com->verify_origin())
+                               << "): "
+                               << MitmProxy::verify_flag_string(com->verify_get());
+
+                        if (!com->verify_extended_info().empty()) {
+                            for (auto const &ei: com->verify_extended_info()) {
+                                tls_ss << "\n    verify: "
+                                       << MitmProxy::verify_flag_string_extended(ei);
+                            }
+                        }
+                    }
+
+                    const char *sni = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
+                    if (sni) {
+                        tls_ss << "\n    sni: " << sni;
+
+                        if (lf) {
+                            auto *app = lf->engine_ctx.application_data.get();
+                            auto http_app = dynamic_cast<sx::engine::http::app_HttpRequest *>(app);
+                            if (http_app) {
+
+                                if (!http_app->host.empty()) {
+                                    if (sni == http_app->host) {
+                                        tls_ss << " -> http host ok";
+                                    } else {
+                                        tls_ss << " -> http host DOESN'T MATCH";
+                                    }
+                                }
+
+                                if (verbosity > iINF) {
+                                    tls_ss << "\n  http host: " << http_app->host;
+                                }
+                            }
+                        }
+                    }
+
+                    if (not com->alpn().empty()) {
+                        tls_ss << "\n    alpn: " << com->alpn();
+                    }
+
+                    auto scts = SSL_get0_peer_scts(ssl);
+                    int scts_len = sk_SCT_num(scts);
+                    if (scts_len > 0) {
+
+                        tls_ss << "\n    sct: " << scts_len << " entries";
+
+                        if (verbosity > iDIA) {
+                            const CTLOG_STORE *log_store = SSL_CTX_get0_ctlog_store(
+                                    SSLFactory::factory().default_tls_client_cx());
+
+                            for (int i = 0; i < scts_len; i++) {
+                                auto sct = sk_SCT_value(scts, i);
+
+                                unsigned char *sct_logid{};
+                                std::size_t sct_logid_len = 0;
+
+                                sct_logid_len = SCT_get0_log_id(sct, &sct_logid);
+                                if (sct_logid_len > 0)
+                                    tls_ss << "\n        sct log." << i << ": "
+                                           << hex_print(sct_logid, sct_logid_len);
+                                auto val_stat = SCT_get_validation_status(sct);
+                                tls_ss << "\n        sct log." << i << ": "
+                                       << SCT_validation_status_str(val_stat);
+
+                                BioMemory bm;
+                                SCT_print(sct, bm, 4, log_store);
+                                auto v_of_s = string_split(bm.str(), '\n');
+                                for (auto const &s: v_of_s) {
+                                    tls_ss << "\n        sct log." << i << ": " << s;
+                                }
+                            }
+                        }
+                    }
+
+                } else {
+                    tls_ss << "\n  " << label << ": tls, but no info";
+                }
+            } else {
+                tls_ss << "\n  " << label << ": not a TLS session";
+                if (com && com->opt_bypass)
+                    tls_ss << " (bypassed)";
+            }
+        }
+        tls_ss << "\n";
+        do_print = true;
+        suffix += tls_ss.str();
+
+    }
+    return std::make_tuple(do_print, prefix, suffix);
+};
+
+
+
+auto replace_proxy_title_with_sni(std::string const &title, MitmHostCX *right_cx, int verbosity) {
+
+    auto scom = dynamic_cast<SSLCom *>(right_cx->com());
+    if (scom) {
+        std::stringstream replacement;
+
+        std::string tgt = (scom->get_peer_sni().empty() ? scom->shortname() + "_" +
+                                                          right_cx->host()
+                                                        : scom->get_peer_sni());
+        replacement << "$1" << (verbosity > iINF ? "[sni]" : "") << tgt << ":"
+                    << right_cx->port();
+
+        auto rmatch = std::regex("(r:[^_]+)ssli_[0-9a-fA-F:.]+");
+
+        return std::regex_replace(title, rmatch, replacement.str());
+
+    } else {
+        return title;
+    }
+};
+
+auto get_proxy_title(MitmProxy* proxy, int sl_flags, int verbosity) {
+
+    if (flag_check<int>(sl_flags, SL_NO_NAMES)) {
+        return proxy->to_string(verbosity);
+    } else {
+        if (auto* rg = proxy->first_right(); rg) {
+            return replace_proxy_title_with_sni(proxy->to_string(verbosity), rg, verbosity);
+        } else {
+            return proxy->to_string(verbosity);
+        }
+    }
+};
+
+
+auto get_more_info(sobject_info const* so_info, MitmProxy const* curr_proxy, MitmHostCX* lf, MitmHostCX* rg, int verbosity) {
+
+    std::stringstream info_ss;
+
+    if (verbosity >= DEB && so_info) {
+        info_ss << so_info->to_string(verbosity);
+    }
+
+    if (verbosity > INF) {
+
+        if (lf) {
+            if (verbosity > INF) info_ss << "\n    ";
+            if (lf->engine_ctx.signature) {
+
+                auto mysig = std::dynamic_pointer_cast<MyDuplexFlowMatch>(lf->engine_ctx.signature);
+
+                info_ss << "\n    L7_engine: " << mysig->sig_engine;
+                info_ss << "\n    L7_signature: " << mysig->name() << ", group: "
+                        << mysig->sig_group;
+            } else {
+                info_ss << "\n    L7_engine: none";
+            }
+
+            if (lf->engine_ctx.application_data) {
+                std::string desc = lf->engine_ctx.application_data->str();
+                if (verbosity < DEB && desc.size() > 120) {
+                    desc = desc.substr(0, 117);
+                    desc += "...";
+                }
+                info_ss << "\n    L7_params: " << desc << "\n";
+            } else {
+                info_ss << "\n    L7_params: none\n";
+            }
+
+
+            if (verbosity > INF) {
+                info_ss << "    obj_debug: " << curr_proxy->get_this_log_level().str() << "\n";
+                long expiry = -1;
+                if (curr_proxy->half_holdtimer > 0) {
+                    expiry = curr_proxy->half_holdtimer + MitmProxy::half_timeout() - time(nullptr);
+                }
+                info_ss << "    half_hold: " << expiry << "\n";
+            }
+        }
+
+        if (lf) {
+            if (verbosity > INF and lf->socket() > 0) {
+                print_queue_stats(info_ss, verbosity, lf, "lf", "Left");
+            }
+
+            if (verbosity > DIA) {
+                info_ss << "     lf_debug: " << lf->get_this_log_level().str() << "\n";
+                if (lf->com()) {
+                    info_ss << "       lf_com: " << lf->com()->get_this_log_level().str() << "\n";
+                }
+            }
+        }
+        if (rg) {
+            if (verbosity > INF and rg->socket() > 0) {
+                print_queue_stats(info_ss, verbosity, rg, "rg", "Right");
+            }
+            if (verbosity > DIA) {
+                info_ss << "     rg_debug: " << rg->get_this_log_level().str() << "\n";
+                if (rg->com()) {
+                    info_ss << "       rg_com: " << rg->com()->get_this_log_level().str() << "\n";
+                }
+            }
+        }
+    }
+
+    return info_ss.str();
+};
+
+
 int cli_diag_proxy_session_list_extra (struct cli_def *cli, const char *command, std::vector<std::string> const &args,
                                        int sl_flags) {
 
@@ -1411,9 +1762,6 @@ int cli_diag_proxy_session_list_extra (struct cli_def *cli, const char *command,
     }
 
     std::stringstream out;
-
-    time_t  curtime = time(nullptr);
-
 
     {
         auto lc_ = std::scoped_lock(socle::sobjectDB::getlock());
@@ -1444,210 +1792,26 @@ int cli_diag_proxy_session_list_extra (struct cli_def *cli, const char *command,
 
                 bool do_print = false;
 
-                if (flag_check<int>(sl_flags, SL_IO_OSBUF_NZ)) {
-
-                    unsigned int l_in_pending = 0;
-                    unsigned int l_out_pending = 0;
-                    unsigned int r_out_pending = 0;
-                    unsigned int r_in_pending = 0;
-
-                    if (lf && lf->real_socket() > 0) {
-                        ::ioctl(lf->socket(), SIOCINQ, &l_in_pending);
-                        ::ioctl(lf->socket(), SIOCOUTQ, &l_out_pending);
-                    }
-                    if (rg && rg->real_socket() > 0 && lf) {
-                        ::ioctl(lf->socket(), SIOCINQ, &r_in_pending);
-                        ::ioctl(lf->socket(), SIOCOUTQ, &r_out_pending);
-                    }
-
-                    if (l_in_pending + l_out_pending + r_in_pending + r_out_pending != 0) {
-
-                        prefix = "OS";
-
-                        if (l_in_pending) { prefix += "-Li"; }
-                        if (r_in_pending) { prefix += "-Ri"; }
-                        if (l_out_pending) { prefix += "-Lo"; }
-                        if (r_out_pending) { prefix += "-Ro"; }
-
-                        prefix += " ";
-
-                        do_print = true;
-                    }
-
-                    if (lf && rg) {
-                        if (lf->meter_read_bytes != rg->meter_write_bytes) {
-                            prefix += "LRdeSync ";
-                            do_print = true;
-                        }
-
-                        if (lf->meter_write_bytes != rg->meter_read_bytes) {
-                            prefix += "RLdeSync ";
-                            do_print = true;
-                        }
-                    }
-
-                    if (lf && lf->writebuf() && (! lf->writebuf()->empty())) {
-                        prefix += "LWrBuf ";
-                        do_print = true;
-                    }
-
-                    if (rg && rg->writebuf() && (! rg->writebuf()->empty())) {
-                        prefix += "RWrBuf ";
-                        do_print = true;
-
-                    }
-                }
-
-                if (flag_check<int>(sl_flags, SL_IO_EMPTY)) {
-
-                    int both = 0;
-                    std::string loc_pr;
-
-                    if (lf && (lf->meter_read_bytes == 0 || lf->meter_write_bytes == 0)) {
-                        loc_pr += "LEmp ";
-
-                        both++;
-                        do_print = true;
-                    }
-
-                    if (rg && (rg->meter_read_bytes == 0 || rg->meter_write_bytes == 0)) {
-                        loc_pr += "REmp ";
-
-                        both++;
-                        do_print = true;
-                    }
-
-                    if (both > 1)
-                        loc_pr = "Emp";
-
-                    if (both > 0)
-                        prefix += loc_pr;
-                }
-
-                if (flag_check<int>(sl_flags, SL_TLS_DETAILS)) {
-                    std::stringstream tls_ss;
-
-                    std::vector<std::pair<std::string, SSLCom*>> tup;
-                    if(lf)
-                        tup.emplace_back("Left ", dynamic_cast<SSLCom*>(lf->com()));
-                    if(rg)
-                        tup.emplace_back("Right", dynamic_cast<SSLCom*>(rg->com()));
-
-                    for(auto const& [label, com ] : tup) {
-
-                        if(com && !com->opt_bypass) {
-                            auto ssl = com->get_SSL();
-                            if (ssl) {
-                                auto const* session = SSL_get_session(ssl);
-
-                                auto *cipher_str = SSL_CIPHER_get_name(SSL_SESSION_get0_cipher(session));
-                                int has_ticket = SSL_SESSION_has_ticket(session);
-                                unsigned long lifetime_hint = -1;
-                                if (has_ticket > 0) {
-                                    lifetime_hint = SSL_SESSION_get_ticket_lifetime_hint(session);
-                                }
-
-                                auto tls_ver = SSL_get_version(ssl);
-                                bool tls_rsm = (com->target_cert() == nullptr);
-
-                                tls_ss << "\n  " << label << ": version: " << tls_ver << ", cipher: ";
-                                tls_ss << cipher_str << ", resumed/ticket: "
-                                       << tls_rsm << "/" << has_ticket;
-                                if (has_ticket) {
-                                    tls_ss << " , ticket_hint: " << lifetime_hint << "s";
-                                }
-
-                                if(! com->is_server()) {
-                                   tls_ss << "\n    verify(" << SSLCom::verify_origin_str(com->verify_origin()) << "): "
-                                          << MitmProxy::verify_flag_string(com->verify_get());
-
-                                   if(! com->verify_extended_info().empty()) {
-                                       for (auto const &ei: com->verify_extended_info()) {
-                                           tls_ss << "\n    verify: " <<  MitmProxy::verify_flag_string_extended(ei);
-                                       }
-                                   }
-                                }
-
-                                const char* sni = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
-                                if(sni) {
-                                    tls_ss << "\n    sni: " << sni;
-
-                                    if(lf) {
-                                        auto* app = lf->engine_ctx.application_data.get();
-                                        auto http_app = dynamic_cast<sx::engine::http::app_HttpRequest*>(app);
-                                        if(http_app) {
-
-                                            if(! http_app->host.empty()) {
-                                                if (sni == http_app->host) {
-                                                    tls_ss << " -> http host ok";
-                                                }
-                                                else {
-                                                    tls_ss << " -> http host DOESN'T MATCH";
-                                                }
-                                            }
-
-                                            if(verbosity > iINF) {
-                                                tls_ss << "\n  http host: " << http_app->host;
-                                            }
-                                        }
-                                    }
-                                }
-
-                                if(not com->alpn().empty()) {
-                                    tls_ss << "\n    alpn: " << com->alpn();
-                                }
-
-                                auto scts = SSL_get0_peer_scts(ssl);
-                                int scts_len = sk_SCT_num(scts);
-                                if(scts_len > 0) {
-
-                                    tls_ss << "\n    sct: " << scts_len << " entries";
-
-                                    if(verbosity > iDIA) {
-                                        const CTLOG_STORE *log_store = SSL_CTX_get0_ctlog_store(SSLFactory::factory().default_tls_client_cx());
-
-                                        for (int i = 0; i < scts_len; i++) {
-                                            auto sct = sk_SCT_value(scts, i);
-
-                                            unsigned char* sct_logid {};
-                                            std::size_t sct_logid_len = 0;
-
-                                            sct_logid_len = SCT_get0_log_id(sct, &sct_logid);
-                                            if(sct_logid_len > 0)
-                                                tls_ss << "\n        sct log." << i << ": " << hex_print(sct_logid, sct_logid_len);
-                                            auto val_stat = SCT_get_validation_status(sct);
-                                                tls_ss << "\n        sct log." << i << ": " << SCT_validation_status_str(val_stat);
-
-                                            BioMemory bm;
-                                            SCT_print(sct, bm, 4, log_store);
-                                            auto v_of_s = string_split(bm.str(), '\n');
-                                            for(auto const& s: v_of_s) {
-                                                tls_ss << "\n        sct log." << i << ": " << s;
-                                            }
-                                        }
-                                    }
-                                }
-
-                            } else {
-                                tls_ss << "\n  " << label << ": tls, but no info";
-                            }
-                        } else {
-                            tls_ss << "\n  " << label << ": not a TLS session";
-                            if(com && com->opt_bypass)
-                                tls_ss << " (bypassed)";
-                        }
-                    }
-                    tls_ss << "\n";
-                    do_print = true;
-                    suffix += tls_ss.str();
-                }
-
                 if (flag_check<int>(sl_flags, SL_ACTIVE)) {
                     if(curr_proxy->stats().mtr_down.get() + curr_proxy->stats().mtr_up.get() == 0) {
                         continue;
                     }
                     do_print = true;
                 }
+
+                auto const& io_info = get_io_info(lf, rg, sl_flags);
+
+                do_print |= std::get<0>(io_info);
+                prefix += std::get<1>(io_info);
+                suffix += std::get<2>(io_info);
+
+
+                auto tls_info = get_tls_info(lf, rg, sl_flags, verbosity);
+
+                do_print |= std::get<0>(tls_info);
+                prefix += std::get<1>(tls_info);
+                suffix += std::get<2>(tls_info);
+
 
                 if (sl_flags == SL_NONE) { do_print = true;  }
                 if (sl_flags == SL_NO_NAMES) { do_print = true;  }
@@ -1656,8 +1820,7 @@ int cli_diag_proxy_session_list_extra (struct cli_def *cli, const char *command,
                     continue;
                 }
 
-                std::stringstream cur_obj_ss;
-
+                // adjust prefix spacing
                 if (!prefix.empty()) {
 
                     if (prefix[prefix.size() - 1] != ' ')
@@ -1667,102 +1830,11 @@ int cli_diag_proxy_session_list_extra (struct cli_def *cli, const char *command,
                     prefix += "\r\n";
                 }
 
-                if(flag_check<int>(sl_flags, SL_NO_NAMES)) {
-                    cur_obj_ss << prefix << so_ptr->to_string(verbosity) << suffix;
-                }
-                else {
+                std::stringstream cur_obj_ss;
+                cur_obj_ss << prefix << get_proxy_title(curr_proxy, sl_flags, verbosity) << suffix;
 
-                    auto replace_proxy_title_with_sni = [](auto const& title, auto* right_cx, auto verbosity) {
+                cur_obj_ss << get_more_info(so_info.get(), curr_proxy, lf, rg, verbosity);
 
-                        auto scom = dynamic_cast<SSLCom *>(right_cx->com());
-                        if (scom) {
-                            std::stringstream replacement;
-
-                            std::string tgt = (scom->get_peer_sni().empty() ? scom->shortname() + "_" + right_cx->host() : scom->get_peer_sni());
-                            replacement << "$1"<< (verbosity > iINF ? "[sni]" : "" ) << tgt << ":" << right_cx->port();
-
-                            auto rmatch = std::regex("(r:[^_]+)ssli_[0-9a-fA-F:.]+");
-
-                            return std::regex_replace(title, rmatch, replacement.str());
-
-                        } else {
-                            return title;
-                        }
-                    };
-
-                    if(rg) {
-                        cur_obj_ss << prefix << replace_proxy_title_with_sni(so_ptr->to_string(verbosity), rg, verbosity) << suffix;
-                    } else {
-                        cur_obj_ss << prefix << so_ptr->to_string(verbosity) << suffix;
-                    }
-                }
-
-                if (verbosity >= DEB && so_info) {
-                    cur_obj_ss << so_info->to_string(verbosity);
-                }
-
-                if (verbosity > INF) {
-
-                    if (lf) {
-                        if (verbosity > INF) out << "\n    ";
-                        if(lf->engine_ctx.signature) {
-
-                            auto mysig = std::dynamic_pointer_cast<MyDuplexFlowMatch>(lf->engine_ctx.signature);
-
-                            cur_obj_ss << "\n    L7_engine: " << mysig->sig_engine;
-                            cur_obj_ss << "\n    L7_signature: " << mysig->name() << ", group: " << mysig->sig_group;
-                        } else {
-                            cur_obj_ss << "\n    L7_engine: none";
-                        }
-
-                        if (lf->engine_ctx.application_data) {
-                            std::string desc = lf->engine_ctx.application_data->str();
-                            if (verbosity < DEB && desc.size() > 120) {
-                                desc = desc.substr(0, 117);
-                                desc += "...";
-                            }
-                            cur_obj_ss << "\n    L7_params: " << desc << "\n";
-                        } else {
-                            cur_obj_ss << "\n    L7_params: none\n";
-                        }
-
-
-                        if (verbosity > INF) {
-                            cur_obj_ss << "    obj_debug: " << curr_proxy->get_this_log_level().str() << "\n";
-                            long expiry = -1;
-                            if (curr_proxy->half_holdtimer > 0) {
-                                expiry = curr_proxy->half_holdtimer + MitmProxy::half_timeout() - curtime;
-                            }
-                            cur_obj_ss << "    half_hold: " << expiry << "\n";
-                        }
-                    }
-
-                    if (lf) {
-                        if (verbosity > INF and lf->socket() > 0) {
-                            print_queue_stats(cur_obj_ss, verbosity, lf, "lf", "Left");
-                        }
-
-                        if (verbosity > DIA) {
-                            cur_obj_ss << "     lf_debug: " << lf->get_this_log_level().str() << "\n";
-                            if (lf->com()) {
-                                cur_obj_ss << "       lf_com: " << lf->com()->get_this_log_level().str() << "\n";
-                            }
-                        }
-                    }
-                    if (rg) {
-                        if (verbosity > INF and rg->socket() > 0) {
-                            print_queue_stats(cur_obj_ss, verbosity, rg, "rg", "Right");
-                        }
-                        if (verbosity > DIA) {
-                            cur_obj_ss << "     rg_debug: " << rg->get_this_log_level().str() << "\n";
-                            if (rg->com()) {
-                                cur_obj_ss << "       rg_com: " << rg->com()->get_this_log_level().str() << "\n";
-                            }
-                        }
-                    }
-
-
-                }
                 out << cur_obj_ss.str() << "\n";
             }
         }
@@ -1869,82 +1941,144 @@ int cli_diag_sig_list(struct cli_def *cli, const char *command, char *argv[], in
 }
 
 
-int cli_diag_worker_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_worker_list(struct cli_def *cli, [[maybe_unused]] const char *command, [[maybe_unused]] char *argv[], [[maybe_unused]] int argc) {
+
+    int verbosity = iINF;
+    if(argc > 0) {
+        std::string arg1 = argv[0];
+        verbosity = safe_val(arg1, iINF);
+    }
 
     auto& sx = SmithProxy::instance();
 
+    auto list_worker = [&cli] (auto const& wrk, std::size_t index, int verbosity) {
 
-    auto list_worker = [&cli](const char* title, auto& listener) {
+        std::stringstream out;
+
+        if(verbosity > iINF) {
+            out << string_format("        `- worker[%zu]: %s", index, wrk.second->str().c_str());
+            out << ", thread " << std::hex << wrk.first->get_id();
+        }
+        else {
+            out << string_format( "        `- worker[%zu]: ", index);
+        }
+
+        auto const& proxies = wrk.second->proxies();
+
+        if (proxies.empty()) {
+            if(verbosity > iINF)
+                out << "\n          `- idle";
+            else
+                out << " [> idle";
+
+            auto sss = out.str();
+            cli_print(cli, "%s", sss.c_str());
+            return false;
+        }
+
+        unsigned long up = 0;
+        unsigned long down = 0;
+
+        {
+            // skim proxies for speed stats
+            auto lc_ = std::scoped_lock(wrk.second->proxy_lock());
+            for (auto const *proxy: proxies) {
+                up += proxy->stats().mtr_up.get()*8;
+                down += proxy->stats().mtr_down.get()*8;
+            }
+        }
+
+        auto speed_str = (up + down == 0L) ? "up/down: --" : string_format("up/down: %s/%s", number_suffixed(up).c_str(), number_suffixed(down).c_str());
+
+        if(verbosity > iINF) {
+            {
+                auto lc_ = std::scoped_lock(wrk.second->proxy_lock());
+
+
+                for (std::size_t p_i = 0; p_i < proxies.size(); ++p_i) {
+                    auto const *proxy = proxies.at(p_i);
+                    out << string_format("\n          `- proxy[%d]: %s", p_i, proxy->str().c_str());
+                }
+                out << "\n          `- " << speed_str;
+            }
+        } else {
+            auto num_proxies = proxies.size();
+            out << " [";
+            for (std::size_t prin = 0; prin < num_proxies; ++prin) out << "=";
+            out << ">";
+
+            out << string_format(" : %d proxies, %s", num_proxies, speed_str.c_str());
+        }
+
+        auto sss = out.str();
+        cli_print(cli, "%s", sss.c_str());
+
+        return true;
+    };
+
+
+    auto get_thread_id_str = [](auto const& thread_ptr) {
+        if (thread_ptr) {
+            std::stringstream threadss;
+            threadss << std::hex << thread_ptr->get_id();
+
+            return threadss.str();
+        }
+        return std::string();
+    };
+
+
+    struct {
+        int workers_busy = 0;
+        int workers_idle = 0;
+    } stats;
+
+    auto list_acceptor = [&cli, &list_worker, &get_thread_id_str, &stats](const char* title, auto& listener, auto const& threads, int verbosity) {
+
+        if(listener.empty() and verbosity <= iINF) return;
+
         cli_print(cli, title);
-        for (auto acc: listener) {
-            cli_print(cli, "    %s, type %s",
-                      acc->hr().c_str(),
-                      acc->proxy_type().str().c_str());
+        bool thread_len_ok = (listener.size() == threads.size());
 
-            int w_i = 0;
-            std::string em;
-            bool at_least_one_worker_active = false;
-            for(auto wrk: acc->tasks()) {
+        for (std::size_t idx = 0; idx < listener.size(); ++idx) {
 
-                if(wrk.second->proxies().empty()) {
-                    em += string_format("<%d>", w_i);
-                    w_i++;
-                    continue;
-                }
+            auto const& acceptor = listener.at(idx);
+            std::string thread_id;
 
-                at_least_one_worker_active = true;
-
-                if(! em.empty()) {
-                    cli_print(cli, "        `- workers idle: %s", em.c_str());
-                    em.clear();
-                }
-
-
-                cli_print(cli, "        `- worker[%d]: %s, thread %p",
-                          w_i,
-                          wrk.second->str().c_str(),
-                          static_cast<void*>(wrk.first));
-
-                int p_i = 0;
-
-                std::stringstream ss;
-                {
-                    auto l_ = std::scoped_lock(wrk.second->proxy_lock());
-
-                    for(auto p: wrk.second->proxies()) {
-                        ss << string_format("          `- proxy[%d]: %s\n", p_i, p->str().c_str());
-                        p_i++;
-                    }
-                }
-                auto sss = ss.str();
-                cli_print(cli, "%s", sss.c_str());
-
-                w_i++;
+            if(thread_len_ok) {
+                thread_id = get_thread_id_str(threads.at(idx));
             }
 
-            if(! at_least_one_worker_active) {
-                cli_print(cli, "        `- all %d workers idle", w_i); // don't add 1, it's added by last iteration
+            cli_print(cli, "    %s%s%s", acceptor->hr().c_str(),
+                                (verbosity > iINF ? string_format(", type %s", acceptor->proxy_type().str().c_str()).c_str() : ""),
+                                ( (verbosity > iINF and not thread_id.empty() ) ? string_format(", thread %s", thread_id.c_str()).c_str() : ""));
 
-            } else {
-                if (!em.empty()) {
-                    cli_print(cli, "        `- workers idle: %s", em.c_str());
+
+
+            for(std::size_t i = 0; i < acceptor->tasks().size(); ++i) {
+                if(not list_worker(acceptor->tasks().at(i), i, verbosity)) {
+                    stats.workers_idle++;
+                }
+                else {
+                    stats.workers_busy++;
                 }
             }
-
         }
     };
 
-    list_worker("== plain acceptor", sx.plain_proxies);
-    list_worker("== tls acceptor", sx.ssl_proxies);
+    list_acceptor("== plain acceptor", sx.plain_proxies, sx.plain_threads, verbosity);
+    list_acceptor("== tls acceptor", sx.ssl_proxies, sx.ssl_threads, verbosity);
 
-    list_worker("== udp receiver", sx.udp_proxies);
-    list_worker("== dtls receiver", sx.dtls_proxies);
+    list_acceptor("== udp receiver", sx.udp_proxies, sx.udp_threads, verbosity);
+    list_acceptor("== dtls receiver", sx.dtls_proxies, sx.dtls_threads, verbosity);
 
-    list_worker("== socks acceptor", sx.socks_proxies);
+    list_acceptor("== socks acceptor", sx.socks_proxies, sx.socks_threads, verbosity);
 
-    list_worker("== plain redirect acceptor", sx.redir_plain_proxies);
-    list_worker("== dns redirect receiver", sx.redir_udp_proxies);
-    list_worker("== tls redirect acceptor", sx.redir_ssl_proxies);
+    list_acceptor("== plain redirect acceptor", sx.redir_plain_proxies, sx.redir_plain_threads, verbosity);
+    list_acceptor("== dns redirect receiver", sx.redir_udp_proxies, sx.redir_udp_threads, verbosity);
+    list_acceptor("== tls redirect acceptor", sx.redir_ssl_proxies, sx.redir_ssl_threads, verbosity);
+
+    cli_print(cli, "\nThreading load: %d total busy workers, %.2f per CPU", stats.workers_busy, stats.workers_busy/(float)std::thread::hardware_concurrency());
 
     return CLI_OK;
 }
