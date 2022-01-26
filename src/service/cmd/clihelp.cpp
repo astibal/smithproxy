@@ -354,6 +354,21 @@ void CliHelp::init() {
             });
 
 
+    add("settings.tuning", "** tune selected internals");
+    add("settings.tuning.proxy_thread_spray_min", "minimum worker sub-proxies for activating thread spraying")
+            .may_be_empty(false)
+            .value_filter(VALUE_UINT_RANGE<0,65535>);
+    add("settings.tuning.host_bufsz_min", "initial io buffer size")
+            .may_be_empty(false)
+            .value_filter(VALUE_UINT_RANGE<1500,10000000>);
+    add("settings.tuning.host_bufsz_max_multiplier", "multiplier of min to get maximal buffer size")
+            .may_be_empty(false)
+            .value_filter(VALUE_UINT_RANGE<1,1024000000>);
+    add("settings.tuning.host_write_full", "unwritten remote bytes threshold to slower reads")
+            .may_be_empty(false)
+            .value_filter(VALUE_UINT_RANGE<1024,1024000000>);
+
+
 
     add("settings.cli", "** configure CLI specific settings");
     add("settings.cli.port", "base port where CLI is listening for telnet connections")

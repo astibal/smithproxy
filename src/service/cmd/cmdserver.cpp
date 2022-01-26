@@ -2463,6 +2463,12 @@ void client_thread(int client_socket) {
                 .cap("edit", true)
                 .cmd("edit", cli_conf_edit_settings_auth);
 
+    register_callback( "settings.tuning",MODE_EDIT_SETTINGS_TUNING)
+            .cap("set", true)
+            .cmd("set", cli_generic_set_cb)
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_settings_tuning);
+
     register_callback(
             "settings.nameservers",MODE_EDIT_SETTINGS + 1)
             .cap("set", true)

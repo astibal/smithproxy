@@ -330,7 +330,10 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         }
         return true;
     }
-
+    else if(upgrade_to_num == 1004) {
+        // save setting.tuning group
+        return true;
+    }
 
     return false;
 }
@@ -602,7 +605,22 @@ bool CfgFactory::load_settings () {
         load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "magic_ip", tenant_magic_ip);
     }
 
+    if(cfgapi.getRoot()["settings"].exists("tuning")) {
+        load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "proxy_thread_spray_min", MasterProxy::subproxy_thread_spray_min);
 
+        int hostcx_min = 0;
+        load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "host_bufsz_min", hostcx_min);
+        if(hostcx_min >= 1500 and hostcx_min < 10000000) { baseHostCX::HOSTCX_BUFFSIZE = hostcx_min; } // maximum initial bufsize is guarded at 10MB
+
+        int hostcx_maxmul = 0;
+        load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "host_bufsz_max_multiplier", hostcx_maxmul);
+        if(hostcx_maxmul > 0) { baseHostCX::HOSTCX_BUFFSIZE_MAXMUL = hostcx_maxmul; }
+
+        int hostcx_write_full = 0;
+        load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "host_write_full", hostcx_write_full);
+        if(hostcx_write_full >= 1024) { baseHostCX::HOSTCX_WRITEFULL = hostcx_write_full; }
+
+    }
 
     return true;
 }
@@ -3755,8 +3773,13 @@ int save_settings(Config& ex) {
     auth_objects.add("https_port", Setting::TypeString) = CfgFactory::get()->auth_https;
     auth_objects.add("ssl_key", Setting::TypeString) = CfgFactory::get()->auth_sslkey;
     auth_objects.add("ssl_cert", Setting::TypeString) = CfgFactory::get()->auth_sslcert;
-    auth_objects.add("magic_ip", Setting::TypeString) = CfgFactory::get()->tenant_magic_ip;
 
+
+    Setting& tuning_objects = objects.add("tuning", Setting::TypeGroup);
+    tuning_objects.add("proxy_thread_spray_min", Setting::TypeInt) = (int)MasterProxy::subproxy_thread_spray_min;
+    tuning_objects.add("host_bufsz_min", Setting::TypeInt) = (int) baseHostCX::HOSTCX_BUFFSIZE;
+    tuning_objects.add("host_bufsz_max_multiplier", Setting::TypeInt) = (int) baseHostCX::HOSTCX_BUFFSIZE_MAXMUL;
+    tuning_objects.add("host_write_full", Setting::TypeInt) = (int) baseHostCX::HOSTCX_WRITEFULL;
 
     return 0;
 }
