@@ -1982,7 +1982,7 @@ int cli_diag_worker_list(struct cli_def *cli, [[maybe_unused]] const char *comma
         {
             // skim proxies for speed stats
             auto lc_ = std::scoped_lock(wrk.second->proxy_lock());
-            for (auto const *proxy: proxies) {
+            for (auto& [ proxy, thr ]: proxies) {
                 up += proxy->stats().mtr_up.get()*8;
                 down += proxy->stats().mtr_down.get()*8;
             }
@@ -1996,7 +1996,7 @@ int cli_diag_worker_list(struct cli_def *cli, [[maybe_unused]] const char *comma
 
 
                 for (std::size_t p_i = 0; p_i < proxies.size(); ++p_i) {
-                    auto const *proxy = proxies.at(p_i);
+                    auto const *proxy = proxies.at(p_i).first;
                     out << string_format("\n          `- proxy[%d]: %s", p_i, proxy->str().c_str());
                 }
                 out << "\n          `- " << speed_str;

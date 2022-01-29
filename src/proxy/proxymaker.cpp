@@ -447,7 +447,7 @@ namespace sx::proxymaker {
                 oc->set_poll_handler(left->socket(), new_proxy);
                 oc->set_poll_handler(right_socket, new_proxy);
 
-                owner->proxies().emplace_back(new_proxy);
+                owner->add_proxy(new_proxy);
                 _deb("proxymaker::connect[%s]: added to owner proxy", new_proxy->to_string(iINF).c_str());
 
                 return true;
