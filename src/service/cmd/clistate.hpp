@@ -180,11 +180,13 @@ struct CliState {
 
     std::string template_callback_key(std::string const& section, cli_def* cli = nullptr);
 
-    void callbacks(std::string const& s, callback_entry v, bool set_mode_map = true) {
+    callback_entry& callbacks(std::string const& s, callback_entry v, bool set_mode_map = true) {
         callback_map_[s] = v;            //map SETTING => CALLBACKS
 
         if(set_mode_map)
             mode_map[std::get<0>(v)] = s; //map MODE => SETTING
+
+        return callback_map_[s];
     }
 
 private:
