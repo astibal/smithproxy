@@ -114,7 +114,7 @@ static nlohmann::json json_proxy_session_list(struct MHD_Connection * connection
                         auto l_ = std::scoped_lock(wrk.second->proxy_lock());
 
                         for(auto& [ p, thr ] : wrk.second->proxies()) {
-                            if(auto* proxy = dynamic_cast<MitmProxy*>(p); p != nullptr) {
+                            if(auto* proxy = dynamic_cast<MitmProxy*>(p.get()); p != nullptr) {
                                 auto single_ret = json_single_proxy(proxy);
                                 if (single_ret.has_value()) {
                                     single_ret.value()["origin"] = title;
