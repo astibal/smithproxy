@@ -2751,6 +2751,17 @@ void client_thread(int client_socket) {
 
 
     load_defaults();
+
+    auto reg_cb = [](cli_def* cli) {
+        if(SmithProxy::instance().terminate_flag) {
+
+            cli_print(cli, "\n\n !!!   Shutdown   !!!\n");
+            return CLI_QUIT;
+        }
+
+        return CLI_OK;
+    };
+    cli->regular_callback = reg_cb;
     cli_loop(cli, client_socket);
 
 
@@ -2798,21 +2809,31 @@ void cli_loop(short unsigned int port) {
     epoller.add(s, EPOLLIN);
 
 
+    std::vector<std::thread> cli_threads;
+
     while(true) {
-        int nfds = epoller.wait(1*1000);
+        int nfds = epoller.wait(1*200);
 
         if(nfds > 0) {
             sockaddr_storage addr {};
             socklen_t addr_len {0};
 
             client_socket = accept(s, (struct sockaddr*)&addr, &addr_len);
-            new std::thread(client_thread, client_socket);
+
+            auto cli_thr = std::thread(client_thread, client_socket);
+            cli_threads.emplace_back(std::move(cli_thr));
         }
 
         if(SmithProxy::instance().terminate_flag) {
             break;
         }
     }
+
+    std::for_each(cli_threads.begin(), cli_threads.end(), [](auto& x){
+        if(x.joinable()) {
+            x.join();
+        }
+    });
 
 }
 
