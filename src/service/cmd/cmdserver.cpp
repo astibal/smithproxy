@@ -823,7 +823,7 @@ int cli_debug_show(struct cli_def *cli, const char *command, char *argv[], int a
     std::stringstream ss;
     for(auto const& i: logan::get().topic_db_) {
         std::string t = i.first;
-        loglevel* lev = i.second;
+        auto* lev = &i.second;
 
         ss << "    [" << t << "] => level " << lev->level() << " flag: " << lev->topic() << "\n";
     }
@@ -867,7 +867,7 @@ int cli_debug_set(struct cli_def *cli, const char *command, char *argv[], int ar
         }
         else {
             if(logan::get().topic_db_.find(var) != logan::get().topic_db_.end()) {
-                loglevel* l = logan::get()[var];
+                auto const* l = logan::get()[var];
 
                 unsigned int old_lev = l->level();
                 logan::get()[var]->level(newlev);
