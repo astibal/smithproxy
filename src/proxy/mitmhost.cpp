@@ -223,7 +223,8 @@ void MitmHostCX::on_detect(std::shared_ptr<duplexFlowMatch> x_sig, flowMatchStat
     bool reported = false;
 
     // log to wildcard logger
-    if( logan::get()["inspect"]->level() >= static_cast<unsigned int>(sig_sig->sig_severity)) {
+    auto xlog = logan::get();
+    if( xlog->level("inspect") >= static_cast<unsigned int>(sig_sig->sig_severity)) {
         log.log(loglevel(sig_sig->sig_severity), log.topic(), "matching signature: cat='%s', name='%s'",
                 sig_sig->sig_category.c_str(),
                 sig_sig->name().c_str());

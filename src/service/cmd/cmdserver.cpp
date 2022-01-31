@@ -821,7 +821,10 @@ int cli_debug_show(struct cli_def *cli, const char *command, char *argv[], int a
     cli_print(cli, "\n\nlogan light loggers");
 
     std::stringstream ss;
-    for(auto const& i: logan::get().topic_db_) {
+
+    auto log = logan::get();
+
+    for(auto const& i: log->topic_db_) {
         std::string t = i.first;
         auto* lev = &i.second;
 
@@ -842,7 +845,9 @@ int cli_debug_set(struct cli_def *cli, const char *command, char *argv[], int ar
     std::set<std::string> topics;
     std::stringstream topiclist;
 
-    for(auto const& i: logan::get().topic_db_) {
+    auto log = logan::get();
+
+    for(auto const& i: log->topic_db_) {
         std::string t = i.first;
         // loglevel l = i.second;
 
@@ -855,10 +860,10 @@ int cli_debug_set(struct cli_def *cli, const char *command, char *argv[], int ar
 
 
         if(var == "all" || var == "*") {
-            for(auto const& lv: logan::get().topic_db_) {
+            for(auto const& lv: log->topic_db_) {
 
-                auto orig_l = logan::get()[lv.first]->level();
-                logan::get()[lv.first]->level(newlev);
+                auto orig_l = log->level(lv.first);
+                log->entry(lv.first)->level(newlev);
                 cli_print(cli, "debug level changed: %s: %d => %d", lv.first.c_str(), orig_l, newlev);
             }
         }
@@ -866,11 +871,10 @@ int cli_debug_set(struct cli_def *cli, const char *command, char *argv[], int ar
             CliState::get().cli_debug_flag = (newlev > 0);
         }
         else {
-            if(logan::get().topic_db_.find(var) != logan::get().topic_db_.end()) {
-                auto const* l = logan::get()[var];
+            if(log->topic_db_.find(var) != log->topic_db_.end()) {
 
-                unsigned int old_lev = l->level();
-                logan::get()[var]->level(newlev);
+                unsigned int old_lev = log->entry(var)->level();
+                log->entry(var)->level(newlev);
 
                 cli_print(cli, "debug level changed: %s: %d => %d", var.c_str(), old_lev, newlev);
             } else {
@@ -2789,6 +2793,9 @@ void cli_loop(short unsigned int port) {
     servaddr.sin_port = htons(port);
 
     while(0 != bind(s, (struct sockaddr *)&servaddr, sizeof(servaddr))) {
+
+        if(SmithProxy::instance().terminate_flag) return;
+
         _err("cli main thread - cannot bind %d port: %s", port, string_error().c_str());
         ::sleep(1);
         _err("...retrying");

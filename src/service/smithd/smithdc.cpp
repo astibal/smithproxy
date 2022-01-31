@@ -274,8 +274,11 @@ int main() {
     Log::init();
     Log::get()->dup2_cout(true);
     Log::get()->level(INF);
-    logan::get()["internal.ltv"]->level(iINF);
-    logan::get()["com.smithd"]->level(iINF);
+
+    auto log = logan::get();
+
+    log->entry("internal.ltv")->level(iINF);
+    log->entry("com.smithd")->level(iINF);
 
 
 
