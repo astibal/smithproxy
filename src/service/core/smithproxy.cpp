@@ -495,8 +495,10 @@ void SmithProxy::stop() {
 
     auto kill_proxies = [](auto proxies) {
         for(auto p: proxies) {
-            if(p)
+            if(p) {
                 p->state().dead(true);
+                p->join_workers();
+            }
         }
     };
 
