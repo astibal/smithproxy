@@ -335,7 +335,8 @@ bool load_config(std::string& config_f, bool reload) {
                 this_daemon->set_crashlog(crlog.c_str());
 
                 auto *o = new std::ofstream(log_target.c_str(), std::ios::app);
-                chmod(log_target.c_str(), 0600);
+
+                if(chmod(log_target.c_str(), 0600) != 0) { _err("load_config: cannot chmod logfile: %s", string_error().c_str()); }
 
                 Log::get()->targets(log_target, o);
                 Log::get()->dup2_cout(false);
@@ -594,6 +595,10 @@ int main(int argc, char *argv[]) {
     catch(sx::netservice_error const& e) {
         _fat("Exception caught when creating listener: %s", e.what());
     }
+    catch(mempool_bad_alloc const& e) {
+        _fat("Exception caught when creating listener: %s", e.what());
+    }
+
 
     if(backend_proxies.empty() && cfg_smithd_workers >= 0) {
         

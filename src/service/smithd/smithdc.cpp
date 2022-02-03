@@ -316,7 +316,7 @@ int main() {
         if (t_diff < t_min || t_min == 0) t_min = t_diff;
         if (t_diff > t_max || t_max == 0) t_max = t_diff;
 
-        std::cout << string_format(">> Server RTT: %dus  (avg=%.2fus min=%dus max=%dus)\n", t_diff,
+        std::cout << string_format_heap(">> Server RTT: %dus  (avg=%.2fus min=%dus max=%dus)\n", t_diff,
                                    ((double) t_sum) / t_cnt, t_min, t_max);
     }
 }

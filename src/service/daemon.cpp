@@ -277,7 +277,7 @@ void DaemonFactory::uw_btrace_handler(int sig) {
     int chars = snprintf(buf_line,255," ======== Smithproxy exception handler (sig %d) =========\n",sig);
 
     int CRLOG = open((const char*)df->crashlog_file, O_CREAT | O_WRONLY | O_TRUNC,S_IRUSR|S_IWUSR);
-    chmod((const char*)df->crashlog_file, 0600);
+    if(chmod((const char*)df->crashlog_file, 0600) != 0) return;
 
     writecrash(STDERR_FILENO,buf_line,chars);
     writecrash(CRLOG,buf_line,chars);
@@ -321,7 +321,8 @@ void DaemonFactory::release_crash_handler(int sig) {
     int chars = snprintf(buf_line,255," Error handler: signal %d received, aborting\n", sig);
 
     int CRLOG = open((const char*)df->crashlog_file, O_CREAT | O_WRONLY | O_TRUNC,S_IRUSR|S_IWUSR);
-    chmod((const char*)df->crashlog_file, 0600);
+
+    if(chmod((const char*)df->crashlog_file, 0600) != 0) { if(CRLOG >= 0) ::close(CRLOG); return; }
 
     writecrash(STDERR_FILENO,buf_line,chars);
     writecrash(CRLOG,buf_line,chars);
