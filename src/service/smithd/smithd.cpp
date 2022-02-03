@@ -595,7 +595,7 @@ int main(int argc, char *argv[]) {
     catch(sx::netservice_error const& e) {
         _fat("Exception caught when creating listener: %s", e.what());
     }
-    catch(mempool_bad_alloc const& e) {
+    catch(mempool_error const& e) {
         _fat("Exception caught when creating listener: %s", e.what());
     }
 
