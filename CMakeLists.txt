@@ -15,12 +15,20 @@ set(USE_PYTHON "N")
 set(USE_LMHPP "Y")
 set(USE_UNWIND "Y")
 
+set(OPT_MEMPOOL_NOEXCEPT "Y")
 
 set(USE_EXPERIMENT "N")
 if("${USE_EXPERIMENT}" STREQUAL "Y")
     message(" >> !!! EXPERIMENTS ENABLED !!!" )
     add_definitions(-DUSE_EXPERIMENT)
 endif()
+
+
+if("${OPT_MEMPOOL_NOEXCEPT}" STREQUAL "Y")
+    message(" >> mempool cannot throw" )
+    add_definitions(-DMEMPOOL_NOEXCEPT)
+endif()
+
 
 create_git_hooks()
 
