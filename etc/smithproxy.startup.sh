@@ -229,6 +229,8 @@ function setup_tproxy {
                 ip6tables -t mangle -A ${SMITH_CHAIN_NAME} -d ${I6} -j ACCEPT
         done
 
+        iptables -t mangle -A ${SMITH_CHAIN_NAME} -d "255.255.255.255" -j ACCEPT
+        ip6tables -t mangle -A ${SMITH_CHAIN_NAME} -d "FF00::/8" -j ACCEPT
 
         smith_interfaces4
 
