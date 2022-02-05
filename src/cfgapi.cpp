@@ -610,15 +610,15 @@ bool CfgFactory::load_settings () {
 
         int hostcx_min = 0;
         load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "host_bufsz_min", hostcx_min);
-        if(hostcx_min >= 1500 and hostcx_min < 10000000) { baseHostCX::HOSTCX_BUFFSIZE = hostcx_min; } // maximum initial bufsize is guarded at 10MB
+        if(hostcx_min >= 1500 and hostcx_min < 10000000) { baseHostCX::params.buffsize = hostcx_min; } // maximum initial bufsize is guarded at 10MB
 
         int hostcx_maxmul = 0;
         load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "host_bufsz_max_multiplier", hostcx_maxmul);
-        if(hostcx_maxmul > 0) { baseHostCX::HOSTCX_BUFFSIZE_MAXMUL = hostcx_maxmul; }
+        if(hostcx_maxmul > 0) { baseHostCX::params.buffsize_maxmul = hostcx_maxmul; }
 
         int hostcx_write_full = 0;
         load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "host_write_full", hostcx_write_full);
-        if(hostcx_write_full >= 1024) { baseHostCX::HOSTCX_WRITEFULL = hostcx_write_full; }
+        if(hostcx_write_full >= 1024) { baseHostCX::params.write_full = hostcx_write_full; }
 
     }
 
@@ -3777,9 +3777,9 @@ int save_settings(Config& ex) {
 
     Setting& tuning_objects = objects.add("tuning", Setting::TypeGroup);
     tuning_objects.add("proxy_thread_spray_min", Setting::TypeInt) = (int)MasterProxy::subproxy_thread_spray_min;
-    tuning_objects.add("host_bufsz_min", Setting::TypeInt) = (int) baseHostCX::HOSTCX_BUFFSIZE;
-    tuning_objects.add("host_bufsz_max_multiplier", Setting::TypeInt) = (int) baseHostCX::HOSTCX_BUFFSIZE_MAXMUL;
-    tuning_objects.add("host_write_full", Setting::TypeInt) = (int) baseHostCX::HOSTCX_WRITEFULL;
+    tuning_objects.add("host_bufsz_min", Setting::TypeInt) = (int) baseHostCX::params.buffsize;
+    tuning_objects.add("host_bufsz_max_multiplier", Setting::TypeInt) = (int) baseHostCX::params.buffsize_maxmul;
+    tuning_objects.add("host_write_full", Setting::TypeInt) = (int) baseHostCX::params.write_full;
 
     return 0;
 }

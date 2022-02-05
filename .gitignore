@@ -7,6 +7,6 @@ smithproxy.kdev4
 **/*.pyc
 **/*.deb
 tools/build-scripts/deb/debian/changelog
-src/smithproxy_version.h
+/src/smithproxy_version.h
 /venv/
 /smithproxy.srctrl*
