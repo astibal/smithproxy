@@ -86,7 +86,7 @@ protected:
     std::unique_ptr<socle::baseTrafficLogger> tlog_;
     
     bool identity_resolved_ = false;    // meant if attempt has been done, regardless of its result.
-    shm_logon_info_base* identity_ = nullptr;
+    std::unique_ptr<shm_logon_info_base> identity_;
     
     std::vector<ProfileContentRule>* content_rule_ = nullptr; //save some space and store it as a pointer. Init it only when needed and delete in dtor.
     int matched_policy_ = -1;
@@ -136,8 +136,8 @@ public:
     
     inline bool identity_resolved() const { return identity_resolved_; };
     inline void identity_resolved(bool b);
-    shm_logon_info_base* identity() { return identity_; }
-    inline void identity(shm_logon_info_base* i) { delete identity_; if(i != nullptr) { identity_ = i->clone(); } }
+    shm_logon_info_base* identity() { return identity_.get(); }
+    inline void identity(shm_logon_info_base const* new_id) { if(new_id) { identity_.reset(new_id->clone()); } }
 
     bool resolve_identity(bool insert_guest = false) { return resolve_identity(first_left(), insert_guest); }
     bool resolve_identity(baseHostCX* custom_cx, bool insert_guest);

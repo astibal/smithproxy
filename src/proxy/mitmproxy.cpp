@@ -196,8 +196,7 @@ MitmProxy::~MitmProxy() {
     }
     
     delete content_rule_;
-    delete identity_;
-    
+
     // delete all filters
     for (auto const& p: filters_) {
         delete p.second;
@@ -403,8 +402,8 @@ bool MitmProxy::resolve_identity(baseHostCX* cx, bool insert_guest = false) {
 
 
     bool valid_ip_auth = false;
-    shm_logon_info_base* id_ptr = nullptr;
-    
+    std::unique_ptr<shm_logon_info_base> id_ptr;
+
     if(af == AF_INET || af == 0) {
 
         std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip4_lock());
@@ -413,11 +412,11 @@ bool MitmProxy::resolve_identity(baseHostCX* cx, bool insert_guest = false) {
         _deb("identity check[%s]: table size: %d", str_af.c_str(), AuthFactory::get_ip4_map().size());
         auto ip = AuthFactory::get_ip4_map().find(cx->host());
         if (ip != AuthFactory::get_ip4_map().end()) {
-            shm_logon_info& li = (*ip).second.last_logon_info;
-            id_ptr = li.clone();
+            shm_logon_info& li = ip->second.last_logon_info;
+            id_ptr.reset(std::move(li.clone()));
         } else {
             if (insert_guest) {
-                id_ptr = new shm_logon_info(cx->host().c_str(),"guest","guest+guests+guests_ipv4");
+                id_ptr = std::make_unique<shm_logon_info>(cx->host().c_str(),"guest","guest+guests+guests_ipv4");
             }
         }
     }
@@ -431,15 +430,15 @@ bool MitmProxy::resolve_identity(baseHostCX* cx, bool insert_guest = false) {
         auto ip = AuthFactory::get_ip6_map().find(cx->host());
         if (ip != AuthFactory::get_ip6_map().end()) {
             shm_logon_info6& li = (*ip).second.last_logon_info;
-            id_ptr = li.clone();
+            id_ptr.reset(std::move(li.clone()));
         } else {
             if (insert_guest) {
-                id_ptr = new shm_logon_info6(cx->host().c_str(),"guest","guest+guests+guests_ipv6");
+                id_ptr = std::make_unique<shm_logon_info6>(cx->host().c_str(),"guest","guest+guests+guests_ipv6");
             }
         }    
     }
 
-    if(id_ptr != nullptr) {
+    if(id_ptr) {
 
         if(new_identity) {
             _inf("unresolved identity found for %s %s: user: %s groups: %s", str_af.c_str(), cx->host().c_str(),
@@ -458,7 +457,7 @@ bool MitmProxy::resolve_identity(baseHostCX* cx, bool insert_guest = false) {
         
         identity_resolved(valid_ip_auth);
         if(valid_ip_auth) { 
-            identity(id_ptr);
+            identity(id_ptr.get());
         }
         
         // apply specific identity-based profile. 'li' is still valid, since we still hold the lock
@@ -473,10 +472,6 @@ bool MitmProxy::resolve_identity(baseHostCX* cx, bool insert_guest = false) {
         }
 
         apply_id_policies(cx);
-
-
-        // id_ptr is either a clone, or new guest id
-        delete id_ptr;
     }
 
 
