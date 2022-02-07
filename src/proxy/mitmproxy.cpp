@@ -194,13 +194,6 @@ MitmProxy::~MitmProxy() {
         
         if(tlog()) tlog()->write_left("Connection stop\n");
     }
-    
-    delete content_rule_;
-
-    // delete all filters
-    for (auto const& p: filters_) {
-        delete p.second;
-    }
 }
 
 std::string MitmProxy::to_string(int verbosity) const {
@@ -558,10 +551,8 @@ void MitmProxy::add_filter(std::string const& name, FilterProxy* fp) {
 
 int MitmProxy::handle_sockets_once(baseCom* xcom) {
     
-    for(auto const& filter_pair: filters_) {
-        std::string const& filter_name = filter_pair.first;
-        baseProxy* filter_proxy = filter_pair.second;
-        
+    for(auto const& [ filter_name, filter_proxy ]: filters_) {
+
         _deb("MitmProxy::handle_sockets_once: running filter %s", filter_name.c_str());
         filter_proxy->handle_sockets_once(xcom);
     }
@@ -1666,13 +1657,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
 }
 
 void MitmProxy::init_content_replace() {
-    
-    if(content_rule_ != nullptr) {
-        _dia("MitmProxy::init_content_replace: deleting old replace rules");
-        delete content_rule_;
-    }
-    
-    content_rule_ = new std::vector<ProfileContentRule>;
+    content_rule_.reset(new std::vector<ProfileContentRule>);
 }
 
 buffer MitmProxy::content_replace_apply(buffer b) {
@@ -1840,9 +1825,6 @@ MitmHostCX* MitmProxy::first_right() {
 }
 
 
-
-bool MitmMasterProxy::ssl_autodetect = false;
-bool MitmMasterProxy::ssl_autodetect_harder = true;
 
 bool MitmMasterProxy::detect_ssl_on_plain_socket(int sock) {
     

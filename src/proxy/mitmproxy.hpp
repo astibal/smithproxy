@@ -88,7 +88,7 @@ protected:
     bool identity_resolved_ = false;    // meant if attempt has been done, regardless of its result.
     std::unique_ptr<shm_logon_info_base> identity_;
     
-    std::vector<ProfileContentRule>* content_rule_ = nullptr; //save some space and store it as a pointer. Init it only when needed and delete in dtor.
+    std::unique_ptr<std::vector<ProfileContentRule>> content_rule_; //save some space and store it as a pointer. Init it only when needed and delete in dtor.
     int matched_policy_ = -1;
 
     std::string replacement_msg;
@@ -119,7 +119,7 @@ public:
     
     // Remote filters - use other proxy to filter content of this proxy.
     // Elements are pair of "name" and pointer to the filter proxy 
-    std::vector<std::pair<std::string,FilterProxy*>> filters_;
+    std::vector<std::pair<std::string, std::unique_ptr<FilterProxy>>> filters_;
     void add_filter(std::string const& name, FilterProxy* fp);
     
     // tap proxy - unmonitor all left and right sockets, pause contexts
@@ -170,8 +170,10 @@ public:
     virtual bool handle_authentication(MitmHostCX* cx);
     virtual void handle_replacement_auth(MitmHostCX* cx);
 
+#ifdef USE_EXPERIMENT
     std::atomic_bool ocsp_caller_tried {false};
     std::unique_ptr<AsyncOcspInvoker> ocsp_caller;
+#endif
 
     //
     bool ssl_handled = false;
@@ -195,11 +197,11 @@ public:
     int handle_sockets_once(baseCom*) override;
     
     void init_content_replace();
-    std::vector<ProfileContentRule>* content_rule() { return content_rule_; }    
-    void content_replace(std::vector<ProfileContentRule>& x) { 
-	for(auto const& i: x) {
-	    content_rule_->push_back(i);
-	}
+    std::vector<ProfileContentRule>* content_rule() { return content_rule_.get(); }
+    void content_replace(std::vector<ProfileContentRule> const& x) {
+        for(auto const& i: x) {
+            content_rule_->push_back(i);
+        }
     }
     
     buffer content_replace_apply(buffer);
@@ -209,8 +211,6 @@ public:
     MitmHostCX* first_left();
     MitmHostCX* first_right();
     
-public:
-
     static std::atomic_uint64_t& total_sessions() { static std::atomic_uint64_t total; return total; };
     static socle::meter& total_mtr_up()  { static socle::meter t_up(12); return t_up; };
     static socle::meter& total_mtr_down() {static socle::meter t_down(12); return t_down; };
@@ -236,12 +236,10 @@ public:
     void on_left_new(baseHostCX* just_accepted_cx) override;
     int handle_sockets_once(baseCom* c) override;
     
-    static bool ssl_autodetect;
-    static bool ssl_autodetect_harder;
-    bool detect_ssl_on_plain_socket(int sock);
-    
-    time_t auth_table_refreshed = 0;
+    static inline bool ssl_autodetect = false;
+    static inline bool ssl_autodetect_harder = true;
 
+    bool detect_ssl_on_plain_socket(int sock);
 };
 
 
