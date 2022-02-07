@@ -55,27 +55,27 @@
 #include <shmtable.hpp>
 
 
-#define AUTH_IP_MEM_NAME "/smithproxy_auth_ok_%s"
-#define AUTH_IP_MEM_SIZE 64*1024*1024
-#define AUTH_IP_SEM_NAME "/smithproxy_auth_ok_%s.sem"
+constexpr const char* AUTH_IP_MEM_NAME = "/smithproxy_auth_ok_%s";
+constexpr const std::size_t AUTH_IP_MEM_SIZE = 64*1024*1024;
+constexpr const char* AUTH_IP_SEM_NAME  = "/smithproxy_auth_ok_%s.sem";
 
-#define AUTH_IP6_MEM_NAME "/smithproxy_auth6_ok_%s"
-#define AUTH_IP6_MEM_SIZE 64*1024*1024
-#define AUTH_IP6_SEM_NAME "/smithproxy_auth6_ok_%s.sem"
+constexpr const char* AUTH_IP6_MEM_NAME = "/smithproxy_auth6_ok_%s";
+constexpr const std::size_t AUTH_IP6_MEM_SIZE = 64*1024*1024;
+constexpr const char* AUTH_IP6_SEM_NAME = "/smithproxy_auth6_ok_%s.sem";
 
 
-#define AUTH_TOKEN_MEM_NAME "/smithproxy_auth_token_%s"
-#define AUTH_TOKEN_MEM_SIZE AUTH_IP_MEM_SIZE 
-#define AUTH_TOKEN_SEM_NAME "/smithproxy_auth_token_%s.sem"    
- 
-#define LOGON_INFO_IP_SZ           4
-#define LOGON_INFO_USERNAME_SZ    64
-#define LOGON_INFO_GROUPS_SZ     128 
+constexpr const char* AUTH_TOKEN_MEM_NAME = "/smithproxy_auth_token_%s";
+constexpr const std::size_t AUTH_TOKEN_MEM_SIZE = AUTH_IP_MEM_SIZE;
+constexpr const char* AUTH_TOKEN_SEM_NAME = "/smithproxy_auth_token_%s.sem";
 
-#define LOGON_TOKEN_TOKEN_SZ      64
-#define LOGON_TOKEN_URL_SZ       512
+constexpr const std::size_t LOGON_INFO_IP_SZ = 4;
+constexpr const std::size_t LOGON_INFO_USERNAME_SZ = 64;
+constexpr const std::size_t LOGON_INFO_GROUPS_SZ = 128;
 
-#define INFO_HR_OUT_SZ           256
+constexpr const std::size_t LOGON_TOKEN_TOKEN_SZ = 64;
+constexpr const std::size_t LOGON_TOKEN_URL_SZ = 512;
+
+constexpr const std::size_t INFO_HR_OUT_SZ = 256;
 
 
 struct shm_logon_info_base {
@@ -84,7 +84,7 @@ struct shm_logon_info_base {
     virtual std::string username() = 0;
     virtual std::string groups() = 0;
     
-    virtual shm_logon_info_base* clone() = 0;
+    virtual shm_logon_info_base* clone() const = 0;
     
     virtual ~shm_logon_info_base() = default;
 };
@@ -94,8 +94,9 @@ template <int AddressSize>
 struct shm_logon_info_ : public shm_logon_info_base {
 
     buffer buffer_;
-    virtual buffer* data() { return &buffer_; }
-    
+    buffer& buf() { return buffer_; }
+    buffer const& buf() const { return buffer_; }
+
     ~shm_logon_info_() override = default;
 
     static constexpr unsigned int record_size () {
@@ -146,9 +147,9 @@ struct shm_logon_info_ : public shm_logon_info_base {
         return std::string((const char*)&buffer_.data()[AddressSize+LOGON_INFO_USERNAME_SZ]);
     }
     
-    shm_logon_info_base* clone() override {
+    shm_logon_info_base* clone() const override {
         auto* n =  new shm_logon_info_<AddressSize>(); //return a clone of this object
-        *n->data() = *data();
+        n->buf() = buf();
         
         return n;
     }
@@ -159,15 +160,16 @@ struct shm_logon_info_ : public shm_logon_info_base {
 //     }
 };
 
-typedef shm_logon_info_<4> shm_logon_info;
-typedef shm_logon_info_<16> shm_logon_info6;
+using shm_logon_info = shm_logon_info_<4>;
+using shm_logon_info6 = shm_logon_info_<16>;
 
 // structure exchanged with backend daemon
 struct shm_logon_token {
     
     buffer buffer_;
-    virtual buffer* data() { return &buffer_; }
-    
+    buffer& buf() { return buffer_; }
+    buffer const& buf() const { return buffer_; }
+
     [[nodiscard]] std::string token() const { return std::string((const char*)buffer_.data()); };
     [[nodiscard]] std::string url() const { return std::string((const char*)&buffer_.data()[LOGON_TOKEN_TOKEN_SZ]);};
 
@@ -236,6 +238,7 @@ struct IdentityInfoBase {
     unsigned int last_seen_policy = 0;
     
     IdentityInfoBase();
+    virtual ~IdentityInfoBase() = default;
     
     inline void touch() { last_seen_at = time(nullptr); }
     inline bool i_timeout() const { return ( (time(nullptr) - last_seen_at) > idle_timeout ); }

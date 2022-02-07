@@ -161,10 +161,7 @@ namespace sx::engine::http {
         auto const& log = ctx.origin->get_log();
         _deb("engine_http1_start");
 
-        std::pair<char, buffer *> &http_request1 = ctx.origin->flow().flow()[ctx.flow_pos];
-
-        auto http_request1_side = http_request1.first;
-        buffer *http_request1_buffer = http_request1.second;
+        auto const& [ http_request1_side, http_request1_buffer ] = ctx.origin->flow().flow()[ctx.flow_pos];
 
         // limit this rather info/convenience regexing to 128 bytes
 
