@@ -506,6 +506,8 @@ void SmithProxy::stop() {
                 p->join_workers();
             }
         }
+
+        proxies.clear();
     };
 
     kill_proxies(plain_proxies);
