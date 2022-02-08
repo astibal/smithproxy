@@ -110,7 +110,7 @@ public:
     // @returns: response and return from receive - well. I don't like it this way either,
     // but we can't actually return nullptr, since it could be legit return value on non-blocking socket
     // you want to call this for async receive - ideally if socket is in readset.
-    std::pair<DNS_Response *, ssize_t> recv_dns_response(int send_socket, unsigned int timeout_sec=2);
+    std::pair<DNS_Response*, ssize_t> recv_dns_response(int send_socket, unsigned int timeout_sec=2);
 
 
     // this is easiest way to resolve. Just do the thing, with blocking ... and waiting.

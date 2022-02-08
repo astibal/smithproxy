@@ -284,15 +284,12 @@ std::pair<DNS_Response *, ssize_t> DNSFactory::recv_dns_response(int send_socket
 
             auto* resp = new DNS_Response();
             auto parsed = resp->load(&recv_buffer);
-            _dia("parsed %d bytes (0 means all)",parsed);
+            _dia("parsed %d bytes",parsed);
             _dia("DNS response: \n %s",resp->str().c_str());
 
-            // save only fully parsed messages
-            if(parsed >= 0) {
-                ret = resp;
+            ret = resp;
 
-            } else {
-                ret = resp;
+            if(not parsed) {
                 _err("Something went wrong with parsing DNS response (keeping response)");
             }
 
@@ -302,7 +299,7 @@ std::pair<DNS_Response *, ssize_t> DNSFactory::recv_dns_response(int send_socket
         _dia("synchronous mode: timeout, or an error occurred.");
     }
 
-    return {ret,l};
+    return { ret, l };
 }
 
 DNS_Response* DNSFactory::resolve_dns_s (std::string const& hostname, DNS_Record_Type t, std::string const& nameserver, unsigned int timeout_s) {
