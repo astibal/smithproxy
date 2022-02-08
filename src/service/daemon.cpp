@@ -336,7 +336,9 @@ void DaemonFactory::release_crash_handler(int sig) {
 
     df->unlink_pidfile();
 
+#ifndef MEMPOOL_DISABLE
     memPool::bailing = true;
+#endif
     _exit(-1);
 }
 

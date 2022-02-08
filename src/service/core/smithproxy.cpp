@@ -53,7 +53,10 @@
 
 SmithProxy::~SmithProxy () {
 
+#ifndef MEMPOOL_DISABLE
     memPool::bailing = true;
+#endif
+
 }
 
 void SmithProxy::reload() {

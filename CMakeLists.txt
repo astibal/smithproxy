@@ -16,6 +16,7 @@ set(USE_LMHPP "Y")
 set(USE_UNWIND "Y")
 
 set(OPT_MEMPOOL_NOEXCEPT "Y")
+set(OPT_MEMPOOL_DISABLE "N")
 
 set(USE_EXPERIMENT "N")
 if("${USE_EXPERIMENT}" STREQUAL "Y")
@@ -33,6 +34,12 @@ endif()
 if("${OPT_MEMPOOL_NOEXCEPT}" STREQUAL "Y")
     message(" >> mempool cannot throw" )
     add_definitions(-DMEMPOOL_NOEXCEPT)
+endif()
+
+
+if("${OPT_MEMPOOL_DISABLE}" STREQUAL "Y")
+    message(" >> mempool not used" )
+    add_definitions(-DMEMPOOL_DISABLE)
 endif()
 
 
