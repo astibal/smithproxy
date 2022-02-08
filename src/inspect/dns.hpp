@@ -354,8 +354,8 @@ private:
 
 
     DNS() :
-        dns_cache_("DNS cache - global", cache_size, true),
-        domain_cache_("DNS 3l domain cache", cache_size, true)
+        dns_cache_("dns.cache", cache_size, true),
+        domain_cache_("dns.domains", cache_size, true)
     {}
 
 public:

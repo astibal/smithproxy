@@ -50,7 +50,7 @@ class StaticContent {
 
     std::unique_ptr<ptr_cache<std::string,Template>> templates_;
     StaticContent() : log(get_log()) {
-        templates_ = std::make_unique<ptr_cache<std::string,Template>>("replacement message cache");
+        templates_ = std::make_unique<ptr_cache<std::string,Template>>("content.replacements");
 
     };
     ~StaticContent() = default;
