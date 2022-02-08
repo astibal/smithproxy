@@ -24,6 +24,12 @@ if("${USE_EXPERIMENT}" STREQUAL "Y")
 endif()
 
 
+set(USE_EXTRA_DEBUG "N")
+if("${USE_EXTRA_DEBUG}" STREQUAL "Y")
+    message(" >> !!! EXTRA_DEBUG ENABLED !!!" )
+    add_definitions(-DEXTRA_DEBUG)
+endif()
+
 if("${OPT_MEMPOOL_NOEXCEPT}" STREQUAL "Y")
     message(" >> mempool cannot throw" )
     add_definitions(-DMEMPOOL_NOEXCEPT)

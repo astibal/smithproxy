@@ -374,7 +374,11 @@ public:
     static std::recursive_mutex& get_domain_lock() { return get().domain_lock(); };
 
     static domain_cache_entry_t* make_domain_entry(std::string const& s) {
-        return new domain_cache_entry_t(string_format("DNS cache for %s", s.c_str()).c_str(), DNS::sub_ttl, true);
+        #ifdef EXTRA_DEBUG
+            return new domain_cache_entry_t(string_format("dns.domains.sub.%s", s.c_str()).c_str(), DNS::sub_ttl, true);
+        #else
+            return new domain_cache_entry_t("dns.domains.sub", DNS::sub_ttl, true);
+        #endif
     }
 
     static DNS& get() {
