@@ -70,17 +70,17 @@ public:
 
     template <class Listener, class Com,
             typename port_type = unsigned short>
-    static std::vector<Listener*> prepare_listener (port_type port, std::string const &friendly_name, int sub_workers,
+    static std::vector<std::unique_ptr<Listener>> prepare_listener (port_type port, std::string const &friendly_name, int sub_workers,
                                                                     proxyType type);
 };
 
 template <class Listener, class Com, typename port_type>
-std::vector<Listener*> NetworkServiceFactory::prepare_listener (port_type port, std::string const &friendly_name, int sub_workers,
+std::vector<std::unique_ptr<Listener>> NetworkServiceFactory::prepare_listener (port_type port, std::string const &friendly_name, int sub_workers,
                                                     proxyType type) {
 
     auto const& log = NetworkServiceFactory::log();
 
-    std::vector<Listener*> vec_toret;
+    std::vector<std::unique_ptr<Listener>> vec_toret;
 
     if(sub_workers < 0) {
         // negative count means we won't spawn listeners for the service
@@ -131,7 +131,6 @@ std::vector<Listener*> NetworkServiceFactory::prepare_listener (port_type port, 
 
         _fat(err.c_str());
         std::cerr << err.c_str() << std::endl;
-        delete listener;
 
         throw sx::netservice_cannot_bind(err.c_str());
     } else {
