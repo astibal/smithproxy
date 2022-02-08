@@ -494,7 +494,10 @@ void SmithProxy::join_all() {
 void SmithProxy::stop() {
 
     terminate_flag = true;
+
+#ifndef MEMPOOL_DISABLE
     memPool::bailing = true;
+#endif
 
     auto kill_proxies = [](auto proxies) {
         for(auto p: proxies) {
