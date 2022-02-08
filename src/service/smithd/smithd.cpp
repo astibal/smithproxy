@@ -200,7 +200,7 @@ typedef ThreadedAcceptor<UxAcceptor> UxProxy;
 
 // running threads and their proxies
 
-static std::vector<UxProxy*> backend_proxies;
+static std::vector<std::unique_ptr<UxProxy>> backend_proxies;
 std::vector<std::shared_ptr<std::thread>> backend_threads;
 
 
@@ -250,7 +250,7 @@ public:
             printf("Terminating ...\n");
         }
 
-        for(auto backend_proxy: backend_proxies) {
+        for(auto& backend_proxy: backend_proxies) {
             backend_proxy->state().dead(true);
         }
 
@@ -608,9 +608,9 @@ int main(int argc, char *argv[]) {
 
     DaemonFactory::set_daemon_signals(SmithD::my_terminate, SmithD::my_usr1);
     
-    for(auto* backend_proxy: backend_proxies) {
+    for(auto& backend_proxy: backend_proxies) {
         _inf("Starting smithd listener");
-        auto backend_thread = std::make_shared<std::thread>(std::thread([=]() {
+        auto backend_thread = std::make_shared<std::thread>(std::thread([&backend_proxy]() {
 
             auto this_daemon = DaemonFactory::instance();
             auto const& log = this_daemon->log;

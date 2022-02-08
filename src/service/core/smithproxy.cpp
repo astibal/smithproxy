@@ -332,11 +332,11 @@ void SmithProxy::run() {
 
 
     auto launch_proxy_threads = [&](auto &proxies, auto& thread_list, const char* log_friendly, const char* thread_friendly) {
-        for(auto proxy: proxies) {
+        for(auto& proxy: proxies) {
             _inf("Starting: %s", log_friendly);
 
             // taking proxy as a value!
-            auto a_thread = std::make_shared<std::thread>([proxy]() {
+            auto a_thread = std::make_shared<std::thread>([&proxy]() {
                 CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
 
                 auto this_daemon = DaemonFactory::instance();
@@ -499,8 +499,8 @@ void SmithProxy::stop() {
     memPool::bailing = true;
 #endif
 
-    auto kill_proxies = [](auto proxies) {
-        for(auto p: proxies) {
+    auto kill_proxies = [](auto& proxies) {
+        for(auto& p: proxies) {
             if(p) {
                 p->state().dead(true);
                 p->join_workers();

@@ -97,7 +97,9 @@ std::vector<Listener*> NetworkServiceFactory::prepare_listener (port_type port, 
     auto fdhints = std::make_shared<FdQueue>();
 
     auto create_listener = [&]() -> Listener* {
-        auto r = new Listener(fdhints, new Com(), type);
+        auto* nc =  new Com();
+        auto* r = new Listener(fdhints, nc, type);
+
         r->com()->nonlocal_dst(true);
         r->worker_count_preference(std::max(sub_workers, 2));
 
@@ -113,7 +115,7 @@ std::vector<Listener*> NetworkServiceFactory::prepare_listener (port_type port, 
 
     };
 
-    auto listener = create_listener();
+    std::unique_ptr<Listener> listener(create_listener());
 
     // bind with master proxy (.. and create child proxies for new connections)
     int sock = listener->bind(port, 'L');
@@ -135,9 +137,9 @@ std::vector<Listener*> NetworkServiceFactory::prepare_listener (port_type port, 
     } else {
 
         // attach and push first listener
-        attach_listener(listener, sock);
+        attach_listener(listener.get(), sock);
 
-        vec_toret.push_back(listener);
+        vec_toret.emplace_back(std::move(listener));
 
         // create additional acceptor listeners (which will concurrently accept new connections)
 
@@ -152,7 +154,7 @@ std::vector<Listener*> NetworkServiceFactory::prepare_listener (port_type port, 
         }
 
         for(unsigned int i = 0; i < nthreads - 1 ; i++) {
-            auto additional_listener = create_listener();
+            std::unique_ptr<Listener> additional_listener(create_listener());
 
             if(additional_listener) {
                 auto cx = additional_listener->listen(sock, 'L');
@@ -160,7 +162,7 @@ std::vector<Listener*> NetworkServiceFactory::prepare_listener (port_type port, 
                     throw sx::netservice_error("cannot create additional acceptor context");
                 }
 
-                vec_toret.push_back(additional_listener);
+                vec_toret.emplace_back(std::move(additional_listener));
             }
             else {
                 throw sx::netservice_error("cannot create additional acceptor");

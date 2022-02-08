@@ -70,15 +70,19 @@ class SmithProxy : public Service {
 
 public:
 
-    std::vector<theAcceptor*> plain_proxies;
-    std::vector<theAcceptor*> ssl_proxies;
-    std::vector<theReceiver*> udp_proxies;
-    std::vector<theReceiver*> dtls_proxies;
-    std::vector<socksAcceptor*> socks_proxies;
+    using vec_of_acceptors = std::vector<std::unique_ptr<theAcceptor>>;
+    using vec_of_sock5tors = std::vector<std::unique_ptr<socksAcceptor>>;
+    using vec_of_receivers = std::vector<std::unique_ptr<theReceiver>>;
 
-    std::vector<theAcceptor*> redir_plain_proxies;
-    std::vector<theAcceptor*> redir_ssl_proxies;
-    std::vector<theReceiver*> redir_udp_proxies;
+    vec_of_acceptors plain_proxies;
+    vec_of_acceptors ssl_proxies;
+    vec_of_receivers udp_proxies;
+    vec_of_receivers dtls_proxies;
+    vec_of_sock5tors socks_proxies;
+
+    vec_of_acceptors redir_plain_proxies;
+    vec_of_acceptors redir_ssl_proxies;
+    vec_of_receivers redir_udp_proxies;
 
 
     std::vector<std::shared_ptr<std::thread>> plain_threads;
