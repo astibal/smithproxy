@@ -103,9 +103,10 @@ public:
 
 
     void handle_event (baseCom *com) override;
-    void dns_response_callback(std::pair<DNS_Response *, int>&);
 
-public:
+    using dns_response_t = std::pair<std::shared_ptr<DNS_Response>, ssize_t>;
+    void dns_response_callback(dns_response_t const& resp);
+
     static bool global_async_dns;
 
 private:

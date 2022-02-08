@@ -537,7 +537,7 @@ void socksServerCX::pre_write() {
 }
 
 
-void socksServerCX::dns_response_callback(std::pair<DNS_Response *, int>& rresp) {
+void socksServerCX::dns_response_callback(dns_response_t const& rresp) {
 
     auto resp = std::shared_ptr<DNS_Response>(rresp.first);
     int red = rresp.second;

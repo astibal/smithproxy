@@ -43,16 +43,21 @@
 #include <inspect/dns.hpp>
 
 
-class AsyncDnsQuery : public AsyncSocket<std::pair<DNS_Response *, int>>, WithID {
+using dns_response_t = std::pair<std::shared_ptr<DNS_Response>, ssize_t>;
+
+class AsyncDnsQuery : public AsyncSocket<dns_response_t>, WithID {
 public:
     explicit AsyncDnsQuery(baseHostCX* owner, callback_t callback = nullptr):
             AsyncSocket(owner, std::move(callback)),
             log(get_log())
             {}
-    using dns_response_t = std::pair<DNS_Response *, int>;
+
 
     task_state_t update() override {
-        response = DNSFactory::get().recv_dns_response(socket(),0);
+        auto raw_response = DNSFactory::get().recv_dns_response(socket(),0);
+        response.first.reset(raw_response.first);
+        response.second = raw_response.second;
+
         if(response.first) {
             _dia("AsyncDnsQuery::update[%u] finished request for %s", id, response.first->question_str_0().c_str());
             return task_state_t::FINISHED;
@@ -62,7 +67,7 @@ public:
         return task_state_t::RUNNING;
     }
 
-    dns_response_t& yield () override {
+    dns_response_t const& yield () const override {
         return response;
     }
 

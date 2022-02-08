@@ -47,7 +47,7 @@ namespace inet::ocsp {
         }
 
         #ifdef ASYNC_OCSP_DEBUG
-        Tracer tracer;
+        mutable Tracer tracer;
         #endif
 
         std::string to_string (int verbosity = iINF) const override {
@@ -80,7 +80,7 @@ namespace inet::ocsp {
             return ss.str();
         }
 
-        void log_tracer_(const char* location) {
+        void log_tracer_(const char* location) const {
             std::stringstream ss;
             ss << location << ": state:" << query_.state_str() << " yield: " << query_.yield_str();
             tracer.log(ss.str());
@@ -110,7 +110,7 @@ namespace inet::ocsp {
             return task_state_t::FINISHED;
         }
 
-        int &yield () override {
+        int const& yield () const override {
             log_tracer_("yield");
             return result_;
         }

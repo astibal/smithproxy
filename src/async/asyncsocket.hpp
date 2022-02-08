@@ -63,7 +63,7 @@ public:
     inline task_state_t state() const { return state_; };
     [[nodiscard]] const char* state_str() const { return task_state_str(state()); }
 
-    virtual R& yield() = 0;
+    virtual R const& yield() const = 0;
     virtual task_state_t update() = 0;
     bool finished() {
         return update() >= task_state_t::FINISHED;
@@ -92,7 +92,7 @@ template <class R>
 class AsyncSocket : public IAsyncTask<R>, public epoll_handler {
 public:
     using task_state_t = typename IAsyncTask<R>::task_state_t;
-    using callback_t = std::function<void(R&)>;
+    using callback_t = std::function<void(R const&)>;
 
     explicit AsyncSocket(baseHostCX* owner, callback_t callback = nullptr) : owner_(owner), callback_(callback) {}
     ~AsyncSocket () override {
@@ -112,7 +112,7 @@ public:
         this->state(task_state_t::INIT);
     }
     virtual task_state_t update() = 0;
-    R& yield() override = 0;
+    R const& yield() const override = 0;
 
     void handle_event (baseCom *com) override {
 
