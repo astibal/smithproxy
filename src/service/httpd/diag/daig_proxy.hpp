@@ -107,19 +107,17 @@ static nlohmann::json json_proxy_session_list(struct MHD_Connection * connection
         auto& sx = SmithProxy::instance();
 
         auto list_worker = [&json_single_proxy, &ret](const char* title, auto& listener) {
-            for (auto acc: listener) {
-                for(auto wrk: acc->tasks()) {
+            for (auto const& acc: listener) {
+                for(auto const& wrk: acc->tasks()) {
 
-                    {
-                        auto l_ = std::scoped_lock(wrk.second->proxy_lock());
+                    auto lc_ = std::scoped_lock(wrk.second->proxy_lock());
 
-                        for(auto& [ p, thr ] : wrk.second->proxies()) {
-                            if(auto* proxy = dynamic_cast<MitmProxy*>(p.get()); p != nullptr) {
-                                auto single_ret = json_single_proxy(proxy);
-                                if (single_ret.has_value()) {
-                                    single_ret.value()["origin"] = title;
-                                    ret.push_back(single_ret.value());
-                                }
+                    for(auto& [ p, thr ] : wrk.second->proxies()) {
+                        if(auto* proxy = dynamic_cast<MitmProxy*>(p.get()); p != nullptr) {
+                            auto single_ret = json_single_proxy(proxy);
+                            if (single_ret.has_value()) {
+                                single_ret.value()["origin"] = title;
+                                ret.push_back(single_ret.value());
                             }
                         }
                     }
