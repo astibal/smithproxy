@@ -163,8 +163,9 @@ namespace sx::proxymaker {
         // we are done
         if(policy_num < 0) return true;
 
-        if( auto policy = CfgFactory::get()->lookup_policy(policy_num);
-            policy and not route(proxy, policy->profile_routing)) {
+        if( auto policy = CfgFactory::get()->lookup_policy(policy_num); policy) {
+
+            if(policy->profile_routing and not route(proxy, policy->profile_routing))
                 _err("routing failed");
         }
 

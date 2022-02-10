@@ -2549,7 +2549,8 @@ bool CfgFactory::policy_apply_tls (const std::shared_ptr<ProfileTls> &pt, baseCo
 
         tls_applied = true;
     } else {
-        _err("CfgFactory::policy_apply_tls[%s]: is not SSL", xcom->shortname().c_str());
+        _deb("CfgFactory::policy_apply_tls[%s]: is not SSL", xcom->shortname().c_str());
+        tls_applied = true; // report ok, we won't apply TLS profile but it's not an error
     }
 
     return tls_applied;
