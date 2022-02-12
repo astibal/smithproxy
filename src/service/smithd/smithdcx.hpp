@@ -62,7 +62,7 @@ public:
     void on_timer() override;
     virtual unsigned int check_timeouts();
     
-    buffer to_read() override;
+    buffer & to_read() override;
     ssize_t finish() override;
 
     inline unsigned int unpack();

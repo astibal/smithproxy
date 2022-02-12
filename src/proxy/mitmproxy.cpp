@@ -1660,8 +1660,8 @@ void MitmProxy::init_content_replace() {
     content_rule_.reset(new std::vector<ProfileContentRule>);
 }
 
-buffer MitmProxy::content_replace_apply(buffer b) {
-    std::string data = b.str();
+buffer MitmProxy::content_replace_apply(const buffer &ref) {
+    std::string data = ref.str();
     std::string result = data;
     
     int stage = 0;
@@ -1717,8 +1717,8 @@ buffer MitmProxy::content_replace_apply(buffer b) {
     buffer ret_b;
     ret_b.append(result.c_str(),result.size());
     
-    _dia("content rewritten: original %d bytes with new %d bytes.",b.size(), ret_b.size());
-    _dum("Replacing bytes (%d):\n%s\n# with bytes(%d):\n%s", data.size(), hex_dump(b).c_str(),
+    _dia("content rewritten: original %d bytes with new %d bytes.", ref.size(), ret_b.size());
+    _dum("Replacing bytes (%d):\n%s\n# with bytes(%d):\n%s", data.size(), hex_dump(ref).c_str(),
                                                             ret_b.size(),hex_dump(ret_b).c_str());
     return ret_b;
 }

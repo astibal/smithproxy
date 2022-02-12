@@ -158,7 +158,7 @@ ssize_t SmithProtoCX::finish() {
     return baseHostCX::finish();
 }
 
-buffer SmithProtoCX::to_read() {
+buffer & SmithProtoCX::to_read() {
     auto size = 0;
     for (auto const& i: packages()) {
         size += i->len();
@@ -172,7 +172,7 @@ buffer SmithProtoCX::to_read() {
         to_read_buffer.append(i->buffer(), i->len());
     }
 
-    return to_read_buffer.view();
+    return to_read_buffer;
 }
 
 unsigned int SmithProtoCX::check_timeouts() {

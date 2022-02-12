@@ -204,7 +204,7 @@ public:
         }
     }
     
-    buffer content_replace_apply(buffer);
+    buffer content_replace_apply(const buffer &ref);
     
     void _debug_zero_connections(baseHostCX* cx);
     
