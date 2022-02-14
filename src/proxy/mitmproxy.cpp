@@ -816,21 +816,21 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
         }
     }
 
+    //update meters
+    total_mtr_up().update(cx->to_read().size());
+
     // because we have left bytes, let's copy them into all right side sockets!
     std::for_each(
             right_sockets.begin(),
             right_sockets.end(),
-            [&](auto* to) {proxy(cx, to, side_t::LEFT, redirected); });
+            [&](auto* to) { proxy(cx, to, side_t::LEFT, redirected); });
 
     // because we have left bytes, let's copy them into all right side sockets!
     std::for_each(
             right_delayed_accepts.begin(),
             right_delayed_accepts.end(),
-            [&](auto* to) {proxy(cx, to, side_t::LEFT, redirected); });
+            [&](auto* to) { proxy(cx, to, side_t::LEFT, redirected); });
 
-
-    //update meters
-    total_mtr_up().update(cx->to_read().size());
 }
 
 void MitmProxy::on_right_bytes(baseHostCX* cx) {
@@ -878,20 +878,20 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
 
     }
 
+    // update total meters
+    total_mtr_down().update(cx->to_read().size());
+
     std::for_each(
             left_sockets.begin(),
             left_sockets.end(),
-            [&](auto* to) {proxy(cx, to, side_t::RIGHT, redirected); });
+            [&](auto* to) { proxy(cx, to, side_t::RIGHT, redirected); });
 
     // because we have left bytes, let's copy them into all right side sockets!
     std::for_each(
             left_delayed_accepts.begin(),
             left_delayed_accepts.end(),
-            [&](auto* to) {proxy(cx, to, side_t::RIGHT, redirected); });
+            [&](auto* to) { proxy(cx, to, side_t::RIGHT, redirected); });
 
-
-    // update total meters
-    total_mtr_down().update(cx->to_read().size());
 }
 
 
