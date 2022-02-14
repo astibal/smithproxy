@@ -847,6 +847,8 @@ int cli_debug_set(struct cli_def *cli, const char *command, char *argv[], int ar
 
     auto log = logan::get();
 
+    auto args = args_to_vec(argv, argc);
+
     for(auto const& i: log->topic_db_) {
         std::string t = i.first;
         // loglevel l = i.second;
@@ -854,29 +856,70 @@ int cli_debug_set(struct cli_def *cli, const char *command, char *argv[], int ar
         topics.insert(t);
         topiclist << t << "\n";
     }
-    if(argc > 1) {
-        auto var = std::string(argv[0]);
-        int  newlev = safe_val(argv[1]);
+    if(not args.empty()) {
 
+        auto var = args[0];
 
         if(var == "all" || var == "*") {
+
+            int newlev = -1;
+            if(args.size() > 1) {
+                newlev = safe_val(args[1]);
+            }
+
             for(auto const& lv: log->topic_db_) {
 
                 auto orig_l = log->level(lv.first);
-                log->entry(lv.first)->level(newlev);
-                cli_print(cli, "debug level changed: %s: %d => %d", lv.first.c_str(), orig_l, newlev);
+                if(newlev >= 0) {
+                    log->entry(lv.first)->level(newlev);
+                    cli_print(cli, "debug level changed: %s: %d => %d", lv.first.c_str(), orig_l, newlev);
+                } else {
+                    cli_print(cli, "debug level: %s: %d", lv.first.c_str(), orig_l);
+                }
             }
         }
         else if(var == "cli") {
-            CliState::get().cli_debug_flag = (newlev > 0);
+            int  newlev = -1;
+            if(args.size() > 1) {
+                newlev = safe_val(args[1]);
+                CliState::get().cli_debug_flag = (newlev > 0);
+            }
+            cli_print(cli, "cli debug now %s", CliState::get().cli_debug_flag ? "ON" : "OFF");
+        }
+        else if(var == "filter") {
+            std::string filter_val;
+            if(args.size() > 1) filter_val = args[1];
+
+            if(not filter_val.empty()) {
+                logan_lite::context_filter.active(false);
+                logan_lite::context_filter.set(filter_val);
+                logan_lite::context_filter.active(true);
+
+                cli_print(cli, "\nLogging context filter set to: '%s'", filter_val.c_str());
+            } else {
+                logan_lite::context_filter.active(false);
+                logan_lite::context_filter.set("");
+
+                cli_print(cli, "\nLogging context filter '%s' deactivated", logan_lite::context_filter.value().c_str());
+            }
         }
         else {
+            int  newlev = -1;
+            if(args.size() > 1)
+                newlev = safe_val(args[1]);
+
             if(log->topic_db_.find(var) != log->topic_db_.end()) {
 
                 unsigned int old_lev = log->entry(var)->level();
-                log->entry(var)->level(newlev);
 
-                cli_print(cli, "debug level changed: %s: %d => %d", var.c_str(), old_lev, newlev);
+                if(newlev >= 0) {
+                    log->entry(var)->level(newlev);
+
+                    cli_print(cli, "debug level changed: %s: %d => %d", var.c_str(), old_lev, newlev);
+                } else {
+                    cli_print(cli, "debug level: %s: %d", var.c_str(), old_lev);
+                }
+
             } else {
                 cli_print(cli, "variable not recognized");
             }
@@ -888,6 +931,14 @@ int cli_debug_set(struct cli_def *cli, const char *command, char *argv[], int ar
         cli_print(cli, "         \n");
         cli_print(cli, "Variable list:\n");
         cli_print(cli, "%s", topiclist.str().c_str());
+        cli_print(cli, "         \n");
+
+        if(not logan_lite::context_filter.active()) {
+            cli_print(cli, "Context filter inactive\n");
+        } else {
+            cli_print(cli, "Context filter ON:\n");
+            cli_print(cli, "   '%s'\n", logan_lite::context_filter.value().c_str());
+        }
 
     }
     return CLI_OK;
