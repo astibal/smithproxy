@@ -764,13 +764,29 @@ bool MitmProxy::handle_cached_response(MitmHostCX* mh) {
 
 void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redirected) {
 
+
+    auto dump_packet = [this](auto sid, auto const& buf) {
+        auto const& log = log_dump;
+
+        _dia("mitmproxy::proxy-%c: \r\n%s\n", from_side(sid), hex_dump(buf, 4, arrow_from_side(sid), true).c_str());
+    };
+
+
     if (!redirected) {
         if (content_rule() != nullptr) {
             buffer b = content_replace_apply(from->to_read());
+
+            if(*log_dump.level() >= iDIA)
+                dump_packet(side, b);
+
             to->to_write(b);
             _dia("mitmproxy::proxy-%c: original %d bytes replaced with %d bytes", from_side(side), from->to_read().size(),
                  b.size());
         } else {
+
+            if(*log_dump.level() >= iDIA)
+                dump_packet(side, from->to_read());
+
             auto sz = from->to_read().size();
             to->to_write(from->to_read());
             auto fastlane = sz > 0 and from->to_read().empty();

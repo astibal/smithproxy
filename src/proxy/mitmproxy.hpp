@@ -223,6 +223,7 @@ public:
 
 private:
     logan_lite log {"com.proxy"};
+    logan_lite log_dump {"com.proxy.payload"};
 };
 
 class MitmMasterProxy : public ThreadedAcceptorProxy<MitmProxy> {

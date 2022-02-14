@@ -1303,15 +1303,6 @@ int cli_diag_mem_objects_clear(struct cli_def *cli, const char *command, char *a
 }
 
 
-auto args_to_vec(char* argv[], int argc) {
-    std::vector<std::string> arg(argc);
-    for (int i = 0; i < argc; ++i) {
-        arg.emplace_back(argv[i]);
-    }
-
-    return arg;
-}
-
 
 int cli_diag_proxy_session_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
