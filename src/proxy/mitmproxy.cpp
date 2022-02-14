@@ -762,14 +762,48 @@ bool MitmProxy::handle_cached_response(MitmHostCX* mh) {
 }
 
 
+void MitmProxy::proxy_dump_packet(side_t sid, buffer& buf) {
+    auto const& log = log_dump;
+
+    constexpr size_t chunk_sz = 1024;
+    size_t printed = 0;
+    bool printed_all = false;
+    unsigned int counter =  0;
+
+    do {
+
+        if(printed + chunk_sz >= buf.size()) {
+            auto cur_buf = buf.view(printed, buf.size() - printed);
+
+            _dia("mitmproxy::proxy-%c%s: \r\n%s", from_side(sid),
+                 counter == 0 ? "" : string_format("/%d", counter).c_str(),
+                 hex_dump(cur_buf, 4, arrow_from_side(sid), true, printed).c_str());
+
+            printed_all = true;
+            break;
+        }  else {
+            auto cur_buf = buf.view(printed, chunk_sz);
+
+            _dia("mitmproxy::proxy-%c%s: \r\n%s", from_side(sid),
+                 string_format("/%d", counter).c_str(),
+                 hex_dump(cur_buf, 4, arrow_from_side(sid), true, printed).c_str());
+
+            printed += chunk_sz;
+        }
+        counter++;
+
+    } while(printed < 20480);
+
+    if(not printed_all) {
+        _dia("mitmproxy::proxy-%c: <truncated>", from_side(sid));
+    }
+};
+
+
+
 void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redirected) {
 
 
-    auto dump_packet = [this](auto sid, auto const& buf) {
-        auto const& log = log_dump;
-
-        _dia("mitmproxy::proxy-%c: \r\n%s\n", from_side(sid), hex_dump(buf, 4, arrow_from_side(sid), true).c_str());
-    };
 
 
     if (!redirected) {
@@ -777,7 +811,7 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
             buffer b = content_replace_apply(from->to_read());
 
             if(*log_dump.level() >= iDIA)
-                dump_packet(side, b);
+                proxy_dump_packet(side, b);
 
             to->to_write(b);
             _dia("mitmproxy::proxy-%c: original %d bytes replaced with %d bytes", from_side(side), from->to_read().size(),
@@ -785,7 +819,7 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
         } else {
 
             if(*log_dump.level() >= iDIA)
-                dump_packet(side, from->to_read());
+                proxy_dump_packet(side, from->to_read());
 
             auto sz = from->to_read().size();
             to->to_write(from->to_read());

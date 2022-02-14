@@ -152,6 +152,7 @@ public:
     explicit MitmProxy(baseCom* c);
     ~MitmProxy() override;
 
+    void proxy_dump_packet(side_t sid, buffer& buf);
     void proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redirected);
     // this virtual method is called whenever there are new bytes in any LEFT host context!
     void on_left_bytes(baseHostCX* cx) override;
