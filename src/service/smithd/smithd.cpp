@@ -73,9 +73,6 @@ public:
     SmithServerCX(baseCom* c, const char* h, const char* p) : SmithProtoCX(c,h,p) {};
     ~SmithServerCX() override = default;
 
-    logan_attached<SmithServerCX> log = logan_attached<SmithServerCX>(this, "com.smithd");
-    friend class logan_attached<SmithServerCX>;
-
     std::string& class_name() const override {  static std::string s = "SmithServerCX"; return s; };
     std::string hr() const override { return class_name(); }
 
@@ -157,12 +154,14 @@ public:
     }
 
     TYPENAME_BASE("SmithServerCX")
+private:
+    logan_lite log {"com.smithd"};
+
 };
 
 
 class SmithdProxy : public baseProxy {
 
-    logan_attached<SmithdProxy> log = logan_attached<SmithdProxy>(this, "com.smithd");
 public:
     explicit SmithdProxy(baseCom* c) : baseProxy(c) {};
     ~SmithdProxy() override = default;
@@ -179,6 +178,9 @@ public:
     void on_left_bytes(baseHostCX* cx) override {
         _inf("Left %d bytes arrived to 0x%x",cx->readbuf()->size(), cx);
     }
+
+private:
+    logan_lite log {"com.smithd"};
 };
 
 
@@ -311,7 +313,7 @@ bool load_config(std::string& config_f, bool reload) {
     std::lock_guard<std::recursive_mutex> l(smithd_cfg_write_lock);
 
     auto this_daemon = DaemonFactory::instance();
-    auto const& log = this_daemon->log;
+    auto const& log  = this_daemon->get_log();
 
     using namespace libconfig;
     Config cfgapi;
@@ -391,7 +393,7 @@ bool load_config(std::string& config_f, bool reload) {
 int smithd_apply_index(std::string& what , const std::string& idx) {
 
     auto this_daemon = DaemonFactory::instance();
-    auto const& log = this_daemon->log;
+    auto const& log = this_daemon->get_log();
 
     _deb("apply_index: what=%s idx=%s",what.c_str(),idx.c_str());
     int port = std::stoi(what);
@@ -415,7 +417,7 @@ bool smithd_apply_tenant_config() {
 int main(int argc, char *argv[]) {
     
     auto this_daemon = DaemonFactory::instance();
-    auto const& log = this_daemon->log;
+    auto const& log = this_daemon->get_log();
 
     this_daemon->pid_file="/var/run/smithd.%s.pid";
 
@@ -613,7 +615,7 @@ int main(int argc, char *argv[]) {
         auto backend_thread = std::make_shared<std::thread>(std::thread([&backend_proxy]() {
 
             auto this_daemon = DaemonFactory::instance();
-            auto const& log = this_daemon->log;
+            auto const& log = this_daemon->get_log();
 
             DaemonFactory::set_daemon_signals(SmithD::my_terminate, SmithD::my_usr1);
             _dia("smithd: max file descriptors: %d", this_daemon->get_limit_fd());

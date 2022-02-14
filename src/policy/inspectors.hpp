@@ -64,9 +64,7 @@
 //
 class Inspector : public socle::sobject, public lockable {
 public:
-    Inspector() {
-        log = logan::attach(this, "alg");
-    }
+    explicit Inspector() = default;
     virtual ~Inspector() = default;
     //! called always when there are new data in the flow. \see class Flow.
     virtual void update(AppHostCX* cx) = 0;
@@ -91,7 +89,7 @@ public:
     virtual void apply_verdict(AppHostCX* cx) {};
     virtual std::shared_ptr<buffer> verdict_response() = 0;
 private:
-    logan_attached<Inspector> log;
+    logan_lite log {"com.app"};
 
 protected:
     bool completed_ = false;

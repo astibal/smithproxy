@@ -1303,14 +1303,12 @@ int CfgFactory::policy_match (baseProxy *proxy) {
 
             {
                 // shadowing own log desired - wanting to log in policy rule context
-                auto const& log = rule->get_log();
                 _dia(" => policy #%d matched!", x);
             }
 
             return x;
         } else {
             // shadowing own log desired - wanting to log in policy rule context
-            auto const& log = rule->get_log();
             _dia(" => policy #%d NOT matched!", x);
         }
         

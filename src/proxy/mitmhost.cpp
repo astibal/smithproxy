@@ -69,15 +69,11 @@ std::string MitmHostCX::to_string(int verbosity) const {
 
 
 MitmHostCX::MitmHostCX(baseCom* c, const char* h, const char* p ) : AppHostCX::AppHostCX(c,h,p) {
-    log = logan::attach<MitmHostCX>(this, "inspect");
-
     _deb("MitmHostCX: constructor %s:%s", h, p);
     load_signatures();
 }
 
 MitmHostCX::MitmHostCX( baseCom* c, int s ) : AppHostCX::AppHostCX(c,s) {
-    log = logan::attach<MitmHostCX>(this, "inspect");
-
     _deb("MitmHostCX: constructor %d", s);
     load_signatures();
 }

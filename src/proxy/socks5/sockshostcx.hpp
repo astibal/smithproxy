@@ -79,7 +79,7 @@ public:
 class socksServerCX : public baseHostCX, public epoll_handler {
 public:
     socksServerCX(baseCom* c, unsigned int s);
-    virtual ~socksServerCX();
+    ~socksServerCX() override;
 
 
     virtual std::size_t process_in();
@@ -130,7 +130,9 @@ private:
     TYPENAME_BASE("sockHostCX")
     DECLARE_LOGGING(to_string)
 
-    logan_attached<socksServerCX> log;
+private:
+    logan_lite log {"com.proxy"};
+
 };
 
 #endif //_SOCKS5HOST_HPP_

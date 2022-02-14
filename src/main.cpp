@@ -95,7 +95,7 @@ void prepare_queue_logger(loglevel const& lev) {
 
 void prepare_html_renderer() {
 
-    auto const& log = DaemonFactory::instance()->log;
+    auto const& log = DaemonFactory::instance()->get_log();
 
     if(!html()->load_files(CfgFactory::get()->dir_msg_templates)) {
         _err("Cannot load messages from '%s', replacements will not work correctly !!!", CfgFactory::get()->dir_msg_templates.c_str());
@@ -110,7 +110,7 @@ void prepare_mem_debugs() {
 
 
 #ifndef BUILD_RELEASE
-        auto const& log = DaemonFactory::instance()->log;
+        auto const& log = DaemonFactory::instance()->get_log();
 
         _war("openssl memory debug enabled");
 
@@ -127,7 +127,7 @@ void prepare_mem_debugs() {
 }
 
 void print_stats() {
-    auto const& log = DaemonFactory::instance()->log;
+    auto const& log = DaemonFactory::instance()->get_log();
 
     _dia("Debug SSL statistics: ");
     _dia("SSL_accept: %d", SSLCom::counter_ssl_accept.load());
@@ -151,7 +151,7 @@ std::optional<sx::cfg::vec_tenants> load_tenant_config() {
     std::string line;
     std::ifstream cfg;
 
-    auto const& log = DaemonFactory::instance()->log;
+    auto const& log = DaemonFactory::instance()->get_log();
 
     cfg.open("/etc/smithproxy/smithproxy.tenants.cfg");
 
@@ -171,7 +171,7 @@ std::optional<sx::cfg::vec_tenants> load_tenant_config() {
 
 bool prepare_tenanting(bool is_custom_file) {
 
-    auto const& log = DaemonFactory::instance()->log;
+    auto const& log = DaemonFactory::instance()->get_log();
 
     std::string config_file_tenant = "/etc/smithproxy/smithproxy.%s.cfg";
     if(is_custom_file) {
@@ -302,6 +302,12 @@ void print_help() {
 int main(int argc, char *argv[]) {
 
     memPool::pool();
+
+    {
+        auto log = logan::get();
+        log->inf("service", "");
+    }
+
     CfgFactory::init();
 
 #ifdef MEMPOOL_ALL
@@ -339,7 +345,7 @@ int main(int argc, char *argv[]) {
 
 
     auto this_daemon = DaemonFactory::instance();
-    auto const& log = this_daemon->log;
+    auto const& log = this_daemon->get_log();
 
     CfgFactory::get()->config_file = "/etc/smithproxy/smithproxy.cfg";
     bool is_custom_config_file = false;

@@ -314,8 +314,8 @@ void CliHelp::init() {
         .may_be_empty(false)
         .value_filter(CliElement::VALUE_DIR);
 
-    add("settings.write_payload_file_prefix", "packet dumps file prefix")
-        .help_quick("dump filename prefix");
+    add("settings.write_payload_file_prefix", "packet dumps file context")
+        .help_quick("dump filename context");
 
     add("settings.write_payload_file_suffix", "packet dumps file suffix")
         .help_quick("dump filename suffix");

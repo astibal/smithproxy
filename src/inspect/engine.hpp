@@ -62,7 +62,8 @@ namespace sx::engine {
 
         TYPENAME_OVERRIDE("ApplicationData")
 
-        logan_attached<ApplicationData> log = logan_attached<ApplicationData>(this, "inspect");
+    private:
+        logan_lite log {"com.app"};
     };
 
     struct EngineCtx {

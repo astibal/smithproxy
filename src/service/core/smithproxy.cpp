@@ -319,7 +319,7 @@ void SmithProxy::run() {
         CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
 
         auto this_daemon = DaemonFactory::instance();
-        auto const& log = this_daemon->log;
+        auto const& log = this_daemon->get_log();
 
         _inf("Starting CLI");
         DaemonFactory::set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
@@ -340,7 +340,7 @@ void SmithProxy::run() {
                 CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
 
                 auto this_daemon = DaemonFactory::instance();
-                auto const& log = this_daemon->log;
+                auto const& log = this_daemon->get_log();
 
                 DaemonFactory::set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
                 _dia("TCP listener: max file descriptors: %d", this_daemon->get_limit_fd());
@@ -731,10 +731,6 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
         CfgFactory::get()->load_settings();
         CfgFactory::get()->load_captures();
         CfgFactory::get()->load_debug();
-
-        // initialize stubborn logans :)
-        auto _ = inet::Factory::log();
-
 
         // don't mess with logging if just reloading
         if(! reload) {

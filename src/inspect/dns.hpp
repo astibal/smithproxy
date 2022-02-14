@@ -233,12 +233,10 @@ protected:
     std::vector<DNS_Answer> additionals_list_;
 
 private:
-    logan_attached<DNS_Packet> log;
+    logan_lite log {"com.dns"};
 
 public:
-    explicit DNS_Packet() {
-        log = logan::attach<DNS_Packet>(this, "com.dns");
-    };
+    explicit DNS_Packet() = default;
 
     std::vector<unsigned int> answer_ttl_idx; // should be protected;
     time_t      loaded_at = 0;
@@ -283,37 +281,23 @@ public:
 #define DNS_REQUEST_OVERHEAD 17
 
 class DNS_Request : public DNS_Packet {
-private:
-    logan_attached<DNS_Request> log;
 
 public:
-    DNS_Request(): DNS_Packet() {
-        log = logan::attach<DNS_Request>(this, "dns");
-        _dum("DNS_Request::c-tor");
-    };
-
-
-    ~DNS_Request() override {
-        _dum("DNS_Request::d-tor");
-    };
     std::string to_string(int verbosity) const override {  return DNS_Packet::to_string(verbosity); }
 
     TYPENAME_OVERRIDE("DNS_Request")
     DECLARE_LOGGING(to_string)
+
+private:
+    logan_lite log {"com.dns"};
 };
 
 
 class DNS_Response : public DNS_Packet {
-private:
-    logan_attached<DNS_Response> log;
 
 public:
     std::unique_ptr<buffer> cached_packet = nullptr;
     unsigned int cached_id_idx = 0;
-    
-    DNS_Response(): DNS_Packet() {
-        log = logan::attach<DNS_Response>(this, "dns");
-    };
 
     [[maybe_unused]] std::optional<long> get_ttl() {
         if(! answers().empty())
@@ -334,6 +318,9 @@ public:
 
     TYPENAME_OVERRIDE("DNS_Response")
     DECLARE_LOGGING(to_string)
+
+private:
+    logan_lite log {"com.dns"};
 };
 
 

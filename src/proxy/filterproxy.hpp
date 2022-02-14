@@ -106,7 +106,7 @@ public:
     time_t trigger_at;
     int counter = 0;
 private:
-    logan_attached<TestFilter> log = logan_attached<TestFilter>(this, "proxy");
+    logan_lite log {"com.proxy"};
 };
 
 #endif //__FILTER_PROXY

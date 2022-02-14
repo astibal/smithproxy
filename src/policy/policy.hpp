@@ -89,8 +89,7 @@ public:
 
     PolicyRule() : ProfileList(),
                    CfgElement(),
-                   socle::sobject(),
-                   log(this, "policy.rule")
+                   socle::sobject()
                    {
                     proto = std::make_shared<CfgUint8>((uint8_t)0);
                     element_name() = string_format("policy-%d", oid());
@@ -115,13 +114,13 @@ public:
     bool ask_destroy() override { return false; }
     std::string to_string(int verbosity) const override;
 
+    logan_lite& get_log() { return log; }
+
     TYPENAME_OVERRIDE("PolicyRule")
     DECLARE_LOGGING(to_string)
 
-    logan_attached<PolicyRule> log;
-
-public:
-    logan_attached<PolicyRule> const& get_log() const { return log; }
+    private:
+        logan_lite log {"com.proxy.policy"};
 };
 
 

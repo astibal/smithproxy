@@ -44,9 +44,7 @@
 
 class DNS_Inspector : public Inspector {
 public:
-    explicit DNS_Inspector() {
-        log = logan::attach(this, "dns");
-    }
+    explicit DNS_Inspector() = default;
     ~DNS_Inspector() override = default;
 
     void update(AppHostCX* cx) override;
@@ -69,7 +67,8 @@ public:
 
     std::shared_ptr<buffer> verdict_response() override { return cached_response; };
 private:
-    logan_attached<DNS_Inspector> log;
+    logan_lite log {"com.dns"};
+
     bool is_tcp = false;
 
     std::shared_ptr<buffer> cached_response = nullptr;

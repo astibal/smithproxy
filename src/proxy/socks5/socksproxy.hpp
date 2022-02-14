@@ -48,13 +48,13 @@
 
 class SocksProxy : public MitmProxy {
 public:
-    explicit SocksProxy(baseCom*);
+    explicit SocksProxy(baseCom* com) : MitmProxy(com) {};
     ~SocksProxy() override = default;
     void on_left_message(baseHostCX* cx) override;
     
     virtual void socks5_handoff(socksServerCX* cx);
 
-    std::string to_string(int lev) const override { std::string r(string_format("SocksProxy[%s]", MitmProxy::to_string(lev).c_str())); return r; };
+    std::string to_string(int lev) const override;
 
     TYPENAME_OVERRIDE("SocksProxy")
     DECLARE_LOGGING(to_string)
@@ -62,16 +62,14 @@ public:
 private:
     time_t auth_table_refreshed = 0;
 
-    logan_attached<SocksProxy> log;
+    logan_lite log {"com.socksproxy"};
 };
 
 
 class MitmSocksProxy : public ThreadedAcceptorProxy<SocksProxy> {
 public:
 
-    MitmSocksProxy(baseCom* c, int worker_id, proxyType t = proxyType::proxy()) : ThreadedAcceptorProxy<SocksProxy>(c,worker_id, t) {
-        log = logan::attach(this, "masterproxy.socks");
-    };
+    MitmSocksProxy(baseCom* c, int worker_id, proxyType t = proxyType::proxy()) : ThreadedAcceptorProxy<SocksProxy>(c,worker_id, t) {};
     baseHostCX* new_cx(int s) override;
     void on_left_new(baseHostCX* just_accepted_cx) override;
 
@@ -81,7 +79,7 @@ public:
     DECLARE_LOGGING(to_string)
 
 private:
-    logan_attached<MitmSocksProxy> log;
+    logan_lite log {"com.socksproxy.acceptor"};
 };
 
 

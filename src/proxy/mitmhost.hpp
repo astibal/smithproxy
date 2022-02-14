@@ -84,7 +84,6 @@ protected:
     replacetype_t replacement_type_ = REPLACETYPE_NONE; 
     replaceflags_t replacement_flags_ = REPLACE_NONE;
 
-    logan_attached<MitmHostCX> log;
 public:
     bool is_ssl = false;
     bool is_ssl_port = false;
@@ -108,6 +107,10 @@ private:
     
     TYPENAME_OVERRIDE("MitmHostCX")
     DECLARE_LOGGING(to_string)
+
+private:
+    logan_lite log {"com.proxy"};
+
 };
 
 #endif

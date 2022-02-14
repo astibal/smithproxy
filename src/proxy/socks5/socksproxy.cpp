@@ -49,10 +49,6 @@
 #include <vector>
 
 
-SocksProxy::SocksProxy(baseCom* c): MitmProxy(c) {
-    log = logan::attach(this, "proxy");
-}
-
 void SocksProxy::on_left_message(baseHostCX* basecx) {
 
     auto* cx = dynamic_cast<socksServerCX*>(basecx);
@@ -91,6 +87,16 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
         }
     }
 }
+
+std::string SocksProxy::to_string(int lev) const  {
+    std::stringstream  r;
+    if(lev >= iINF) {
+        r << "Socks|";
+    }
+    r << MitmProxy::to_string(lev);
+
+    return r.str();
+};
 
 void SocksProxy::socks5_handoff(socksServerCX* cx) {
 

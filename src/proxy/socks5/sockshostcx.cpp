@@ -54,7 +54,6 @@ socksServerCX::socksServerCX(baseCom* c, unsigned int s) : baseHostCX(c,s) {
     // copy setting from global/static variable - don't allow to change async
     // flag on the background during the object life
     async_dns = global_async_dns;
-    log = logan_attached<socksServerCX>(this, "com.socks");
 }
 
 socksServerCX::~socksServerCX() {

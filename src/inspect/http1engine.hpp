@@ -133,6 +133,9 @@ namespace sx::engine::http {
         }
 
     TYPENAME_OVERRIDE("app_HttpRequest")
+
+    private:
+        logan_lite log {"com.app"};
     };
 
 

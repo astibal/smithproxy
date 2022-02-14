@@ -62,9 +62,6 @@ public:
     SmithClientCX(baseCom* c, const char* h, const char* p) : SmithProtoCX(c, h, p) {};
     ~SmithClientCX() override = default;
 
-    logan_attached<SmithClientCX> log = logan_attached<SmithClientCX>(this, "com.smithd");
-    friend class logan_attached<SmithClientCX>;
-
     std::string& class_name() const override {  static std::string s = "SmithServerCX"; return s; };
     std::string hr() const override { return class_name(); }
 
@@ -127,6 +124,10 @@ public:
     }
 
     TYPENAME_BASE("SmithClientCX")
+
+private:
+    logan_lite log {"com.smithc"};
+
 };
 
 class SmithdProxy : public baseProxy {

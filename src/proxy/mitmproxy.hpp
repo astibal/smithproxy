@@ -222,17 +222,14 @@ public:
     DECLARE_LOGGING(to_string)
 
 private:
-    logan_attached<MitmProxy> log;
+    logan_lite log {"com.proxy"};
 };
 
 class MitmMasterProxy : public ThreadedAcceptorProxy<MitmProxy> {
 public:
     
     MitmMasterProxy(baseCom* c, int worker_id, proxyType t = proxyType::transparent() ) :
-        ThreadedAcceptorProxy< MitmProxy >(c,worker_id, t) {
-
-        log.area("acceptor.tcp");
-    };
+        ThreadedAcceptorProxy< MitmProxy >(c,worker_id, t) {};
     
     baseHostCX* new_cx(int s) override;
     void on_left_new(baseHostCX* just_accepted_cx) override;
@@ -242,18 +239,21 @@ public:
     static inline bool ssl_autodetect_harder = true;
 
     bool detect_ssl_on_plain_socket(int sock);
+
+private:
+    logan_lite log {"com.tcp.acceptor"};
 };
 
 
 class MitmUdpProxy : public ThreadedReceiverProxy<MitmProxy> {
 public:
     MitmUdpProxy(baseCom* c, int worker_id, proxyType t = proxyType::transparent() ):
-        ThreadedReceiverProxy< MitmProxy >(c,worker_id, t) {
-
-        log.area("acceptor.udp");
-    };
+        ThreadedReceiverProxy< MitmProxy >(c,worker_id, t) {};
     void on_left_new(baseHostCX* just_accepted_cx) override;
     baseHostCX* new_cx(int s) override;
+
+private:
+    logan_lite log {"com.udp.acceptor"};
 };
 
 

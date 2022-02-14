@@ -63,8 +63,6 @@ MitmProxy::MitmProxy(baseCom* c): baseProxy(c), sobject() {
     // NOTE: testing filter - get back to it later!
     // add_filter("test",new TestFilter(this,5));
 
-    log = logan::attach(this, "com.proxy");
-
     total_sessions()++;
 }
 
@@ -117,10 +115,9 @@ void MitmProxy::toggle_tlog () {
             case ContentCaptureFormat::type_t::PCAP_SINGLE: {
 
                 static std::once_flag once;
-                std::call_once(once, [&fmt] {
+                std::call_once(once, [&fmt, &cfg] {
                     auto &single = socle::traflog::PcapLog::single_instance();
                     auto suf = fmt.to_ext(CfgFactory::get()->capture_local.file_suffix);
-                    auto const& cfg = CfgFactory::get();
 
                     single.FS = socle::traflog::FsOutput(nullptr, cfg->capture_local.dir.c_str(),
                                                          cfg->capture_local.file_prefix.c_str(),
@@ -198,7 +195,9 @@ MitmProxy::~MitmProxy() {
 
 std::string MitmProxy::to_string(int verbosity) const {
     std::stringstream r;
-    r <<  "MitmProxy:" + baseProxy::to_string(verbosity);
+    if(verbosity >= INF) r <<  "MitM|";
+
+    r << baseProxy::to_string(verbosity);
     
     if(verbosity >= INF) {
         r << string_format(" policy: %d ", matched_policy());
@@ -1957,6 +1956,7 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                              string_format("%d",target_port).c_str());
 
     auto* new_proxy = sx::proxymaker::make(just_accepted_cx, target_cx);
+    auto lcx = logan_context(new_proxy->to_string(iNOT));
 
     if(not sx::proxymaker::policy(new_proxy, redirected_magic)) {
         delete new_proxy;
@@ -2000,6 +2000,7 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
 
     auto* new_proxy = sx::proxymaker::make(just_accepted_cx, target_cx);
 
+    auto lcx = logan_context(new_proxy->to_string(iNOT));
 
     if(not sx::proxymaker::policy(new_proxy, false)) {
         delete new_proxy;

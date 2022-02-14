@@ -81,16 +81,17 @@ struct DaemonFactory : public LoganMate {
 
     static void release_crash_handler(int sig);
 
-    logan_attached<DaemonFactory> log;
-
     DaemonFactory(DaemonFactory const&) = delete;
     DaemonFactory& operator=(DaemonFactory const&) = delete;
     virtual ~DaemonFactory() { unlink_pidfile(); }
 
-    DaemonFactory() : log(logan_attached<DaemonFactory>(this, "service")) {
+    DaemonFactory() {
         ::memset((void*)crashlog_file, 0, LOG_FILENAME_SZ);
     }
+
+    logan_lite& get_log() { return log; };
 private:
+    logan_lite log {"service"};
 
     TYPENAME_BASE("DaemonFactory")
 };
