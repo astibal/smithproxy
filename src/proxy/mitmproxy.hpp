@@ -167,6 +167,8 @@ public:
     
     // check authentication status and return true if redirected
     virtual void on_half_close(baseHostCX* cx);
+
+    bool handle_requirements(baseHostCX* cx);
     virtual bool handle_authentication(MitmHostCX* cx);
     virtual void handle_replacement_auth(MitmHostCX* cx);
 

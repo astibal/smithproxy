@@ -772,8 +772,11 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
             _dia("mitmproxy::proxy-%c: original %d bytes replaced with %d bytes", from_side(side), from->to_read().size(),
                  b.size());
         } else {
+            auto sz = from->to_read().size();
             to->to_write(from->to_read());
-            _dia("mitmproxy::proxy-%c: %d copied", from_side(side), from->to_read().size());
+            auto fastlane = sz > 0 and from->to_read().empty();
+
+            _dia("mitmproxy::proxy-%c: %d copied %s", from_side(side), sz, fastlane ? "(fastlane)": "");
         }
     } else {
 
@@ -783,6 +786,8 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
 };
 
 void MitmProxy::on_left_bytes(baseHostCX* cx) {
+
+    if(not cx) return;
 
     if(writer_opts()->write_payload) {
 
@@ -797,24 +802,7 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
     }
     
 
-    bool redirected = false;
-    
-    auto* mh = dynamic_cast<MitmHostCX*>(cx);
-
-    if(mh != nullptr) {
-
-        // check authentication
-        redirected = handle_authentication(mh);
-     
-        // check com responses
-        redirected = handle_com_response_ssl(mh);
-        
-
-        // don't copy data if we have cached response, or we are are dropped and marked dead()
-        if(handle_cached_response(mh) || state().dead()) {
-            return;
-        }
-    }
+    bool redirected = handle_requirements(cx);
 
     //update meters
     total_mtr_up().update(cx->to_read().size());
@@ -833,7 +821,34 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
 
 }
 
+
+bool MitmProxy::handle_requirements(baseHostCX* cx) {
+
+    bool redirected = false;
+
+    auto* mh = dynamic_cast<MitmHostCX*>(cx);
+
+    if(mh != nullptr) {
+
+        if((cx->meter_read_bytes < 1024 and cx->meter_write_bytes < 1024)
+           or
+           ((cx->meter_read_count + cx->meter_write_count) % 100 == 0)) {
+            // check authentication
+            redirected = handle_authentication(mh);
+        }
+
+        // check com responses
+        redirected = handle_com_response_ssl(mh);
+
+    }
+
+    return redirected;
+}
+
 void MitmProxy::on_right_bytes(baseHostCX* cx) {
+
+    if(not cx) return;
+
     if(writer_opts()->write_payload) {
 
         toggle_tlog();
@@ -864,19 +879,7 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
 //    }
 
 
-    bool redirected = false;
-
-    auto* mh = dynamic_cast<MitmHostCX*>(cx->peer());
-
-    if(mh != nullptr) {
-
-        // check authentication
-        redirected = handle_authentication(mh);
-
-        // check com responses
-        redirected = handle_com_response_ssl(mh);
-
-    }
+    bool redirected = handle_requirements(cx->peer());
 
     // update total meters
     total_mtr_down().update(cx->to_read().size());
