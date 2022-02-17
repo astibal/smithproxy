@@ -49,7 +49,7 @@
 #include <sslmitmcom.hpp>
 #include <async/asyncdns.hpp>
 
-typedef enum class socks5_state_ { INIT=1, HELLO_SENT, WAIT_REQUEST, REQ_RECEIVED, WAIT_POLICY, POLICY_RECEIVED, REQRES_SENT, DNS_QUERY_SENT=15, DNS_RESP_RECV, HANDOFF=31 , ZOMBIE=255 } socks5_state;
+typedef enum class socks5_state_ { INIT=1, HELLO_SENT, WAIT_REQUEST, REQ_RECEIVED, WAIT_POLICY, POLICY_RECEIVED, REQRES_SENT, DNS_QUERY_SENT=15, DNS_RESP_RECV, DNS_RESP_FAILED, HANDOFF=31 , ZOMBIE=255 } socks5_state;
 typedef enum class socks5_request_error_ { NONE=0, UNSUPPORTED_VERSION, UNSUPPORTED_ATYPE } socks5_request_error;
 typedef enum class socks5_atype_ { IPV4=1, FQDN=3, IPV6=4 } socks5_atype;
 typedef enum class socks5_policy_ { PENDING, ACCEPT, REJECT } socks5_policy;
@@ -79,15 +79,19 @@ public:
 class socksServerCX : public baseHostCX, public epoll_handler {
 public:
     socksServerCX(baseCom* c, unsigned int s);
-    ~socksServerCX() override;
+    ~socksServerCX() override {};
 
+    bool tested_dns_a = false;
+    bool tested_dns_aaaa  = false;
+    static inline bool mixed_ip_versions = true; // allow cross-version connections
+    static inline bool prefer_ipv6 = false;       // if set, try IPv6 DNS first (AAAA), then IPv4 (A)
 
-    virtual std::size_t process_in();
+    std::size_t process_in() override;
     virtual int process_socks_hello();
     virtual int process_socks_request();
     virtual bool setup_target();
     virtual int process_socks_reply();
-    virtual void pre_write();
+    void pre_write() override;
     
     bool new_message() const override;
     void verdict(socks5_policy);
@@ -97,13 +101,15 @@ public:
     socks5_state state_;
     
     //before handoff, prepare already new CX. 
-    MitmHostCX* left = nullptr;
-    MitmHostCX* right = nullptr;
+    std::unique_ptr<MitmHostCX> left;
+    std::unique_ptr<MitmHostCX> right;
     bool handoff_as_ssl = false;
 
 
     void handle_event (baseCom *com) override;
 
+    std::string choose_dns_server() const;
+    void setup_dns_async(std::string const& fqdn, DNS_Record_Type type, std::string const& nameserver);
     using dns_response_t = std::pair<std::shared_ptr<DNS_Response>, ssize_t>;
     void dns_response_callback(dns_response_t const& resp);
 
@@ -122,7 +128,7 @@ private:
     bool async_dns = true;
     //socket_state async_dns_socket;
 
-    AsyncDnsQuery* async_dns_query = nullptr;
+    std::unique_ptr<AsyncDnsQuery> async_dns_query;
 
     std::string to_string(int verbosity) const override { return baseHostCX::to_string(verbosity); };
 private:
@@ -131,7 +137,7 @@ private:
     DECLARE_LOGGING(to_string)
 
 private:
-    logan_lite log {"com.proxy"};
+    logan_lite log {"com.socks.proxy"};
 
 };
 

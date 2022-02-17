@@ -334,6 +334,11 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         // save setting.tuning group
         return true;
     }
+    else if(upgrade_to_num == 1005) {
+        // save setting.socks group, new ipv6-related options
+        return true;
+    }
+
 
     return false;
 }
@@ -576,6 +581,8 @@ bool CfgFactory::load_settings () {
     if(cfgapi.getRoot().exists("settings")) {
         if(cfgapi.getRoot()["settings"].exists("socks")) {
             load_if_exists(cfgapi.getRoot()["settings"]["socks"], "async_dns", socksServerCX::global_async_dns);
+            load_if_exists(cfgapi.getRoot()["settings"]["socks"], "ipver_mixing", socksServerCX::mixed_ip_versions);
+            load_if_exists(cfgapi.getRoot()["settings"]["socks"], "prefer_ipv6", socksServerCX::prefer_ipv6);
         }
     }
 
@@ -3746,6 +3753,8 @@ int save_settings(Config& ex) {
 
     Setting& socks_objects = objects.add("socks", Setting::TypeGroup);
     socks_objects.add("async_dns", Setting::TypeBoolean) = socksServerCX::global_async_dns;
+    socks_objects.add("ipver_mixing", Setting::TypeBoolean) =  socksServerCX::mixed_ip_versions;
+    socks_objects.add("prefer_ipv6", Setting::TypeBoolean) = socksServerCX::prefer_ipv6;
 
 
     objects.add("log_level", Setting::TypeInt) = static_cast<int>(CfgFactory::get()->internal_init_level.level_ref());

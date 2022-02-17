@@ -62,7 +62,7 @@ public:
 private:
     time_t auth_table_refreshed = 0;
 
-    logan_lite log {"com.socksproxy"};
+    logan_lite log {"com.socks.proxy"};
 };
 
 
@@ -79,7 +79,7 @@ public:
     DECLARE_LOGGING(to_string)
 
 private:
-    logan_lite log {"com.socksproxy.acceptor"};
+    logan_lite log {"com.socks.acceptor"};
 };
 
 

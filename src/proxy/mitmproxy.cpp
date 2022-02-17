@@ -803,9 +803,6 @@ void MitmProxy::proxy_dump_packet(side_t sid, buffer& buf) {
 
 void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redirected) {
 
-
-
-
     if (!redirected) {
         if (content_rule() != nullptr) {
             buffer b = content_replace_apply(from->to_read());

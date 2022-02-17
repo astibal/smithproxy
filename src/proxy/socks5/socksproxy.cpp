@@ -57,8 +57,8 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
             _dia("SocksProxy::on_left_message: policy check: accepted");
             std::vector<baseHostCX*> l;
             std::vector<baseHostCX*> r;
-            l.push_back(cx);
-            r.push_back(cx->right);
+            l.emplace_back(cx);
+            r.emplace_back(cx->right.get());
 
 
             std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
@@ -71,7 +71,9 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
                 p = CfgFactory::get()->db_policy_list.at(matched_policy());
             }
 
-            _dia("socksProxy::on_left_message: policy check result: policy# %d policyoid 0x%x verdict %s", matched_policy(), p->oid(), verdict ? "accept" : "reject" );
+            const char* resp = verdict ? "accept" : "reject";
+            //_dia("socksProxy::on_left_message: policy check result: policy# %d policyoid 0x%x verdict %s", matched_policy(), p->oid(), resp);
+            _dia("socksProxy::on_left_message: policy check result: policy# %d, verdict %s", matched_policy(), resp);
 
             socks5_policy s5_verdict = verdict ? socks5_policy::ACCEPT : socks5_policy::REJECT;
             cx->verdict(s5_verdict);
