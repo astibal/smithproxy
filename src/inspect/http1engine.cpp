@@ -6,7 +6,7 @@
 namespace sx::engine::http {
 
     void engine_http1_start_find_referrer (EngineCtx &ctx, std::string const &data) {
-        auto const& log = ctx.origin->get_log();
+        auto const& log = log::http1;
 
         std::smatch m_ref;
 
@@ -32,7 +32,7 @@ namespace sx::engine::http {
     }
 
     void engine_http1_start_find_host (EngineCtx &ctx, std::string const &data) {
-        auto const& log = ctx.origin->get_log();
+        auto const& log = log::http1;
 
         auto ix_host = data.find("Host: ");
         if (ix_host != std::string::npos) {
@@ -80,7 +80,7 @@ namespace sx::engine::http {
     }
 
     void engine_http1_start_find_method (EngineCtx &ctx, std::string const &data) {
-        auto const& log = ctx.origin->get_log();
+        auto const& log = log::http1;
 
         auto method_start = data.substr(0, std::min(std::size_t(128), data.size()));
         std::smatch m_get;
@@ -118,18 +118,18 @@ namespace sx::engine::http {
     }
 
     void engine_http1_parse_request(EngineCtx &ctx, std::string const &buffer_data_string) {
-        auto const& log = ctx.origin->get_log();
+        auto const& log = log::http1;
 
         engine_http1_start_find_method(ctx, buffer_data_string);
         engine_http1_start_find_host(ctx, buffer_data_string);
         engine_http1_start_find_referrer(ctx, buffer_data_string);
 
 
-        auto engine_http1_set_proto = [&ctx, &log] () {
+        auto engine_http1_set_proto = [&ctx] () {
             auto *app_request = dynamic_cast<app_HttpRequest *>(ctx.application_data.get());
             if (app_request != nullptr) {
                 // detect protocol (plain vs ssl)
-                auto *proto_com = dynamic_cast<SSLCom *>(ctx.origin->com());
+                auto const* proto_com = dynamic_cast<SSLCom *>(ctx.origin->com());
                 if (proto_com != nullptr) {
                     app_request->proto = "https://";
                     app_request->is_ssl = true;
@@ -158,7 +158,7 @@ namespace sx::engine::http {
             return;
         }
 
-        auto const& log = ctx.origin->get_log();
+        auto const& log = log::http1;
         _deb("engine_http1_start");
 
         auto const& [ http_request1_side, http_request1_buffer ] = ctx.origin->flow().flow()[ctx.flow_pos];
@@ -171,7 +171,7 @@ namespace sx::engine::http {
 
 
         if(http_request1_side == 'r') {
-            _dia("engine_http1_start: request");
+            _dia("engine_http1_start: flow block index %d, size %dB", ctx.flow_pos, http_request1_buffer->size());
             std::string buffer_data_string((const char *) http_request1_buffer->data(), http_request1_buffer->size());
             engine_http1_parse_request(ctx, buffer_data_string);
         }

@@ -148,6 +148,9 @@ namespace sx::engine::http {
     // execute engine
     void engine_http1_start (EngineCtx &ctx);
 
+    struct log {
+        static inline logan_lite http1 {"com.app.engine.http1" };
+    };
 }
 
 #endif
