@@ -44,7 +44,7 @@
 #include <cfgapi.hpp>
 #include <inspect/sigfactory.hpp>
 #include <inspect/sxsignature.hpp>
-#include <inspect/http1engine.hpp>
+#include <inspect/engine/http.hpp>
 
 bool MitmHostCX::ask_destroy() {
     error(true);
@@ -139,7 +139,7 @@ void MitmHostCX::load_signatures() {
 void MitmHostCX::engine_run(std::string const& name, sx::engine::EngineCtx &e) {
     // mux to other engines from hash name->engine, now just pass to http1
     if(name == "http1") {
-        sx::engine::http::engine_http1_start(e);
+        sx::engine::http::v1::engine_http1_start(e);
     } else {
         _deb("unknown engine_run: %s", name.c_str());
     }

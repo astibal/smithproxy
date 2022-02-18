@@ -223,11 +223,12 @@ add_executable(smithproxy
         src/inspect/pyinspector.hpp
         src/inspect/sigfactory.hpp
         src/inspect/engine.hpp
-        src/inspect/http1engine.hpp
-        src/inspect/http1engine.cpp
         src/inspect/dnsinspector.hpp
         src/inspect/dnsinspector.cpp
         src/inspect/dns.cpp
+
+        src/inspect/engine/http.hpp
+        src/inspect/engine/http.cpp
 
         src/shm/shmauth.cpp
 
@@ -269,7 +270,7 @@ add_executable(smithproxy
         src/ext/nltemplate/nltemplate.cpp
         src/ext/libcli/libcli.cpp
         src/ext/lmhpp/include/lmhttpd.hpp
-        )
+        src/ext/hpack/hpack.hpp)
 
 
 add_executable(smithd

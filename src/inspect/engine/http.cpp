@@ -1,9 +1,9 @@
 #include <sslcom.hpp>
 
-#include <inspect/http1engine.hpp>
+#include <inspect/engine/http.hpp>
 #include <proxy/mitmhost.hpp>
 
-namespace sx::engine::http {
+namespace sx::engine::http::v1 {
 
     void engine_http1_start_find_referrer (EngineCtx &ctx, std::string const &data) {
         auto const& log = log::http1;

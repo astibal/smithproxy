@@ -58,7 +58,7 @@
 
 #include <sslcertval.hpp>
 #include <proxy/ocspinvoker.hpp>
-#include <inspect/http1engine.hpp>
+#include <inspect/engine/http.hpp>
 
 
 struct whitelist_verify_entry {

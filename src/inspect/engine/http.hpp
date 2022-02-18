@@ -139,14 +139,16 @@ namespace sx::engine::http {
     };
 
 
-    // request parsing
-    void engine_http1_parse_request(EngineCtx &ctx, std::string const &data);
-    void engine_http1_start_find_referrer (EngineCtx &ctx, std::string const &data);
-    void engine_http1_start_find_host (EngineCtx &ctx, std::string const &data);
-    void engine_http1_start_find_method (EngineCtx &ctx, std::string const &data);
+    namespace v1 {
+        // request parsing
+        void engine_http1_parse_request (EngineCtx &ctx, std::string const &data);
+        void engine_http1_start_find_referrer (EngineCtx &ctx, std::string const &data);
+        void engine_http1_start_find_host (EngineCtx &ctx, std::string const &data);
+        void engine_http1_start_find_method (EngineCtx &ctx, std::string const &data);
 
-    // execute engine
-    void engine_http1_start (EngineCtx &ctx);
+        // execute engine
+        void engine_http1_start (EngineCtx &ctx);
+    }
 
     struct log {
         static inline logan_lite http1 {"com.app.engine.http1" };
