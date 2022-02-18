@@ -66,7 +66,7 @@ const char* DNSFactory::dns_record_type_str(int a) {
 unsigned int DNSFactory::skip_qname(unsigned char* ptr, unsigned long maxlen, std::string* str_storage) const {
     unsigned int xi = 0;
 
-    _deb("skip_qname:\n%s",hex_dump(ptr, static_cast<int>(maxlen)).c_str());
+    _deb("skip_qname:\r\n%s",hex_dump(ptr, static_cast<int>(maxlen), 4, 0, true).c_str());
 
 
     if(ptr[xi] == 0) {
@@ -341,7 +341,7 @@ std::optional<size_t> DNS_Packet::load(buffer* src) {
             _dia("DNS_Packet::load: processing [0x%x] Q: %d, A: %d, AU: %d, AD: %d  (buffer length=%d)", id_,
                  questions_,
                  answers_, authorities_, additionals_, src->size());
-            _deb("DNS Packet dump:\n%s", hex_dump(src->data(), src->size()).c_str());
+            _deb("DNS Packet dump:\r\n%s", hex_dump(src->data(), src->size(), 4, 0, true).c_str());
 
             unsigned int mem_counter = DNS_HEADER_SZ;
 

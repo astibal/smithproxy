@@ -87,7 +87,7 @@ std::size_t MitmHostCX::process_in() {
         unsigned int len = baseHostCX::readbuf()->size();
 
         // our only processing: hex dup the payload to the log
-        _dum("Incoming data(%s):\n %s", this->c_type(), hex_dump(ptr, static_cast<int>(len)).c_str());
+        _dum("Incoming data(%s):\r\n %s", this->c_type(), hex_dump(ptr, static_cast<int>(len), 4, 0, true).c_str());
     }
 
     if(engine_ctx.signature) {

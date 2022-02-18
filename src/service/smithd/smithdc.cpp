@@ -210,7 +210,7 @@ void test_url2(const char* url = nullptr) {
         // pack. Make buffer data from the object
         int sz = m->pack();
         std::cout << "prepared packet size: " << sz << "B" << std::endl;
-        std::cout << string_format("%s\n", hex_dump(m->data(), m->buflen()).c_str());
+        std::cout << string_format("%s\r\n", hex_dump(m->data(), m->buflen(), 4, 0, true).c_str());
 
         client.cx()->send(m.get());
 
