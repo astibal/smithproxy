@@ -275,9 +275,26 @@ namespace sx::engine::http {
 
                 auto flg = frame.get_at<uint8_t>(cur_off);   cur_off += sizeof(uint8_t);
                 auto sid = (long) ntohl(frame.get_at<uint32_t>(cur_off));   cur_off += sizeof(uint32_t);
-                _inf("Frame: type = %s, flags = %d, size = %d, stream = %d", frame_type_str(typ), flg, frame_sz, sid);
 
                 {
+
+                    if(typ == 0) {
+                        auto const& log = log::http2_frames;
+                        auto deb_view = frame.view(0, cur_off + frame_sz);
+
+
+                        _inf("Frame: type = %s, flags = %d, size = %d, stream = %d", frame_type_str(typ), flg, frame_sz, sid);
+                        _dia("Data frame: \r\n%s", hex_dump(deb_view, 4, 0, true).c_str());
+                    }
+                    if(typ != 0) {
+                        auto const& log = log::http2_frames;
+                        auto deb_view = frame.view(0, cur_off + frame_sz);
+
+                        _inf("Frame: type = %s, flags = %d, size = %d, stream = %d", frame_type_str(typ), flg, frame_sz, sid);
+                        _deb("Frame: \r\n%s", hex_dump(deb_view, 4, 0, true).c_str());
+                    }
+
+
                     if(typ == 1) {
                         auto const& log = log::http2_headers;
 
@@ -293,28 +310,15 @@ namespace sx::engine::http {
                             for (auto& hdr : dec.headers()) {
                                 auto h = hdr.first;
                                 auto v = hdr.second;
-                                _inf("header/%s : %s", h.c_str(), v.c_str());
+                                _inf("Frame: header/%s : %s", h.c_str(), v.c_str());
                             }
                         } else {
-                            _err("hpack decode error");
+                            _err("Frame: hpack decode error");
                         }
 #else
                         auto deb_view = frame.view(0, cur_off + frame_sz);
                         _dia("Headers frame: \r\n%s", hex_dump(deb_view, 4, 0, true).c_str());
 #endif
-                    }
-                    else if(typ == 0) {
-                        auto const& log = log::http2_frames;
-                        auto deb_view = frame.view(0, cur_off + frame_sz);
-
-
-                        _dia("Data frame: \r\n%s", hex_dump(deb_view, 4, 0, true).c_str());
-                    }
-                    if(typ != 0) {
-                        auto const& log = log::http2_frames;
-                        auto deb_view = frame.view(0, cur_off + frame_sz);
-
-                        _deb("Frame: \r\n%s", hex_dump(deb_view, 4, 0, true).c_str());
                     }
                 }
 

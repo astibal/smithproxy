@@ -25,7 +25,7 @@ set(USE_EXTRA_DEBUG "N")
 
 #### experimental, tempo variables
 
-set(USE_HTTP2_ENGINE "N")
+set(USE_HTTP2_ENGINE "Y")
 ###
 
 if("${USE_EXPERIMENT}" STREQUAL "Y")
@@ -328,6 +328,9 @@ if(GTEST_FOUND)
 
             src/utils/tenants.cpp
             src/tests/test_misc.cpp
+
+            src/ext/hpack/hpack.hpp
+            src/ext/hpack/hpack_tests.cpp
 
             socle/traflog/tests/test_pcapapi.cpp
             socle/traflog/tests/test_pcapng.cpp
