@@ -52,7 +52,6 @@ namespace sx::engine::http {
     constexpr const char* str_http1_1 = "http/1.1";
     constexpr const char* str_http2 = "http/2";
 
-
     struct ProtoRex {
         static std::regex const &http_req_get () {
             static std::regex r{R"((GET|POST|HEAD|PUT|DELETE|CONNECT|OPTIONS|TRACE|PATCH) *([^ \r\n\?]+)\??([^ \r\n]*))"};
@@ -141,17 +140,32 @@ namespace sx::engine::http {
 
     namespace v1 {
         // request parsing
-        void engine_http1_parse_request (EngineCtx &ctx, std::string const &data);
-        void engine_http1_start_find_referrer (EngineCtx &ctx, std::string const &data);
-        void engine_http1_start_find_host (EngineCtx &ctx, std::string const &data);
-        void engine_http1_start_find_method (EngineCtx &ctx, std::string const &data);
+        void parse_request (EngineCtx &ctx, std::string const &data);
+        void find_referrer (EngineCtx &ctx, std::string const &data);
+        void find_host (EngineCtx &ctx, std::string const &data);
+        void find_method (EngineCtx &ctx, std::string const &data);
 
         // execute engine
-        void engine_http1_start (EngineCtx &ctx);
+        void start(EngineCtx &ctx);
+    }
+
+    namespace v2 {
+        using state_data_t = std::pair<size_t, size_t>;
+
+        struct txt {
+            static constexpr const char* magic = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
+            static constexpr const size_t magic_sz = 24;
+        };
+
+        void start(EngineCtx &ctx);
     }
 
     struct log {
-        static inline logan_lite http1 {"com.app.engine.http1" };
+        static inline logan_lite http1 {"com.app.http1" };
+        static inline logan_lite http2 {"com.app.http2" };
+        static inline logan_lite http2_state {"com.app.http2.state" };
+        static inline logan_lite http2_headers {"com.app.http2.headers" };
+        static inline logan_lite http2_frames {"com.app.http2.frames" };
     };
 }
 

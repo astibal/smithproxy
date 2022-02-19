@@ -20,13 +20,19 @@ set(OPT_MEMPOOL_NOEXCEPT "Y")
 set(OPT_MEMPOOL_DISABLE "N")
 
 set(USE_EXPERIMENT "N")
+set(USE_EXTRA_DEBUG "N")
+
+
+#### experimental, tempo variables
+
+set(USE_HTTP2_ENGINE "N")
+###
+
 if("${USE_EXPERIMENT}" STREQUAL "Y")
     message(" >> !!! EXPERIMENTS ENABLED !!!" )
     add_definitions(-DUSE_EXPERIMENT)
 endif()
 
-
-set(USE_EXTRA_DEBUG "N")
 if("${USE_EXTRA_DEBUG}" STREQUAL "Y")
     message(" >> !!! EXTRA_DEBUG ENABLED !!!" )
     add_definitions(-DEXTRA_DEBUG)
@@ -41,6 +47,12 @@ endif()
 if("${OPT_MEMPOOL_DISABLE}" STREQUAL "Y")
     message(" >> mempool not used" )
     add_definitions(-DMEMPOOL_DISABLE)
+endif()
+
+if("${USE_HTTP2_ENGINE}" STREQUAL "Y")
+    message(" >> http2 enabled" )
+    add_definitions(-DUSE_HTTP2)
+    add_definitions(-DUSE_HPACK)
 endif()
 
 

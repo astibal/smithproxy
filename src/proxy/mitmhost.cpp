@@ -102,6 +102,15 @@ std::size_t MitmHostCX::process_in() {
 }
 
 std::size_t MitmHostCX::process_out() {
+
+    if(engine_ctx.signature) {
+        auto sig = std::dynamic_pointer_cast<MyDuplexFlowMatch>(engine_ctx.signature);
+
+        if(sig and not sig->sig_engine.empty()) {
+            engine_run(sig->sig_engine, engine_ctx);
+        }
+    }
+
     return baseHostCX::process_out();
 }
 
@@ -137,9 +146,13 @@ void MitmHostCX::load_signatures() {
 
 
 void MitmHostCX::engine_run(std::string const& name, sx::engine::EngineCtx &e) {
-    // mux to other engines from hash name->engine, now just pass to http1
+
     if(name == "http1") {
-        sx::engine::http::v1::engine_http1_start(e);
+        sx::engine::http::v1::start(e);
+    } else if(name == "http2") {
+#ifdef USE_HTTP2
+        sx::engine::http::v2::start(e);
+#endif
     } else {
         _deb("unknown engine_run: %s", name.c_str());
     }
