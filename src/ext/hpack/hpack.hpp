@@ -802,8 +802,13 @@ namespace HPACK
                 return false;
             auto itr = data.begin();
             auto end = data.end();
-            for ( ; itr != end; /* itr++ */ ) {
-                if ( 0x20 == ( *itr * 0xE0 ) ) { // 6.3 Dynamic Table update
+
+
+            while(end - itr > 0) {
+
+                auto byte_value = *itr;
+
+                if ( 0x20 == ( byte_value & 0xE0 ) ) { // 6.3 Dynamic Table update
                     uint32_t size(0);
 
                     decode_integer(itr, end, size, 5);
