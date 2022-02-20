@@ -15,8 +15,8 @@
 
 namespace HPACK
 {
-    typedef std::pair< const std::string, const std::string > header_t;
-    typedef std::vector< bool > bits_t;
+    using header_t = std::pair<const std::string, const std::string>;
+    using bits_t = std::vector<bool>;
 
     static const std::array< header_t, 62 > predefined_headers = {
             {
@@ -358,19 +358,20 @@ namespace HPACK
         int16_t		m_code;
     public:
         huffman_node_t(huffman_node_t* l = nullptr, huffman_node_t* r = nullptr, int16_t c = -1) : m_left(l), m_right(r), m_code(c) { }
-        virtual ~huffman_node_t(void) { m_left = nullptr; m_right = nullptr; m_code = 0; return; }
-        int16_t code(void) const { return m_code; }
-        void code(int16_t c) { m_code = c; return; }
-        huffman_node_t* left(void) { return m_left; }
-        void left(huffman_node_t* l) { m_left = l; return; }
-        huffman_node_t* right(void) { return m_right; }
-        void right(huffman_node_t* r) { m_right = r; return; }
+        ~huffman_node_t() { m_left = nullptr; m_right = nullptr; m_code = 0; }
+        int16_t code() const noexcept { return m_code; }
+
+        void code(int16_t c) { m_code = c; }
+
+        huffman_node_t* left() noexcept { return m_left; }
+        huffman_node_t* right() noexcept { return m_right; }
+
+        void left(huffman_node_t* l) { m_left = l; }
+        void right(huffman_node_t* r) { m_right = r; }
     };
 
     class huffman_tree_t
     {
-    private:
-    protected:
         huffman_node_t* m_root;
 
         void delete_node( huffman_node_t* n ) {
@@ -387,7 +388,7 @@ namespace HPACK
         }
 
     public:
-        huffman_tree_t(void) : m_root(new huffman_node_t)
+        huffman_tree_t() : m_root(new huffman_node_t)
         {
             for ( std::size_t idx = 0; idx < huffman_table.size(); idx++ ) {
                 const bits_t&		bits = huffman_table.at(idx);
@@ -411,11 +412,6 @@ namespace HPACK
             }
         }
 
-        virtual ~huffman_tree_t(void)
-        {
-            delete_node(m_root);
-            return;
-        }
 
         std::string
         decode(const std::string& src)
@@ -457,16 +453,14 @@ namespace HPACK
 
     class ringtable_t
     {
-    private:
-    protected:
         uint64_t				m_max;
         std::deque< header_t >	m_queue;
 
     public:
         // 4096 is the default table size per the HTTPv2 RFC
-        ringtable_t(void) : m_max(4096) { }
-        ringtable_t(uint64_t m) : m_max(m) { }
-        virtual ~ringtable_t(void) { }
+        ringtable_t() : m_max(4096) {}
+        explicit ringtable_t(uint64_t m) : m_max(m) {}
+        virtual ~ringtable_t() = default;
 
         void
         max(uint64_t m)
@@ -475,29 +469,24 @@ namespace HPACK
 
             // the RFC dictates that we do this here,
             // so we do.
-            while ( length() >= m_max ) {
-                m_queue.pop_back();
+
+            if(m == 0) {
+                m_queue.clear();
             }
-
-            return;
+            else {
+                while (length() >= m_max) {
+                    m_queue.pop_back();
+                }
+            }
         }
 
-        inline uint64_t
-        max(void) const
-        {
-            return m_max;
-        }
+        [[nodiscard]] inline uint64_t max() const noexcept { return m_max; }
 
-        inline uint64_t
-        entries_count(void) const
-        {
-            return m_queue.size();
-        }
+        [[nodiscard]] inline uint64_t entries_count() const { return m_queue.size(); }
 
-        inline uint64_t
-        length(void) const
-        {
-            uint64_t size(0);
+        [[nodiscard]] inline uint64_t length() const {
+
+            uint64_t size = 0L;
 
             for ( auto& h : m_queue ) {
                 uint64_t nl(h.first.length());
@@ -523,52 +512,50 @@ namespace HPACK
             return size;
         }
 
-        void
-        add(const header_t&  h)
-        {
-            uint64_t size(h.first.length() + h.second.length());
+        void add(const header_t&  h) {
 
-            // In practice it should be basically implausible to trip these exceptions because
+            // In practice, it should be basically implausible to trip these exceptions because
             // you would need 2^(sizeof(uint64_t)*8) bytes of memory to be in use, which in itself
             // will likely fail long before then. In other words its probably safe to remove
-            // these checks for the forseeable future, but I left them in because technically I
-            // should check even if its an absurd condition.
+            // these checks for the foreseeable future, but I left them in because technically I
+            // should check even if it's an absurd condition.
+
             if ( h.first.length() > std::numeric_limits< uint64_t >::max() - h.second.length() )
                 throw std::runtime_error("HPACK::ringtable_t::add(): Additive integer overflow encountered.");
 
             // Again the RFC dictates when we resize the queue.
-            while ( length() >= m_max ) {
-                m_queue.pop_back();
+
+            if(m_max == 0) {
+                m_queue.clear();
+            } else {
+                while (length() >= m_max) {
+                    m_queue.pop_back();
+                }
             }
 
             m_queue.push_front(h);
-            return;
         }
 
-        void
-        add(const std::string& n, const std::string& v)
-        {
+        void add(const std::string& n, const std::string& v) {
+
             header_t h(n, v);
 
             add(h);
-            return;
         }
 
-        void
-        add(const char* n, const char* v)
-        {
-            std::string name(n), value(v);
+        void add(const char* n, const char* v) {
+
+            std::string name(n);
+            std::string value(v);
 
             if ( nullptr == n || nullptr == v )
                 throw std::runtime_error("HPACK::ringtable_t::add(): Invalid nullptr parameter(s)");
 
             add(name, value);
-            return;
         }
 
-        const header_t&
-        at(uint64_t idx)
-        {
+        header_t const& at(uint64_t idx) {
+
             if ( idx > m_queue.size() ) {
                 // It's not clear these checks even entirely make sense
                 // the concern was that someone passes in an out-of-bounds
@@ -592,19 +579,20 @@ namespace HPACK
             return m_queue.at(static_cast< std::size_t >( idx ));
         }
 
-        bool
-        find(const header_t& h, int64_t& index) const
-        {
+        bool find(header_t const& h, int64_t& index) const {
+
+
+            if ( index > std::numeric_limits< std::size_t >::max() ) {
+                throw std::invalid_argument("HPACK::ringtable_t::find(): Invalid/overlarge index which results in truncation");
+            }
+
             index = -1;
 
-            if ( index > std::numeric_limits< std::size_t >::max() )
-                throw std::invalid_argument("HPACK::ringtable_t::find(): Invalid/overlarge index which results in truncation");
-
             for ( std::size_t idx = 0; idx < m_queue.size(); idx++ ) {
-                if ( !h.first.compare(m_queue.at(idx).first) && !h.second.compare(m_queue.at(idx).second) ) {
+                if ( h.first == m_queue.at(idx).first and h.second == m_queue.at(idx).second ) {
                     index = predefined_headers.size() + idx;
                     return true;
-                } else if ( !h.first.compare(m_queue.at(idx).first) ) {
+                } else if ( h.first == m_queue.at(idx).first ) {
                     index = predefined_headers.size() + idx;
                     return false;
                 }
@@ -613,9 +601,8 @@ namespace HPACK
             return false;
         }
 
-        const header_t&
-        get_header(const std::size_t index) const
-        {
+        header_t const& get_header(const std::size_t index) const {
+
             if ( index < predefined_headers.size() ) {
                 return predefined_headers.at(index);
             } else if ( index > predefined_headers.size() && index < predefined_headers.size() + m_queue.size() )
@@ -649,15 +636,14 @@ namespace HPACK
         }
 
     public:
-        huffman_encoder_t(void) : m_byte(0), m_count(8) { }
-        virtual ~huffman_encoder_t(void) { }
+        huffman_encoder_t() : m_byte(0), m_count(8) { }
 
         std::vector< uint8_t >
         encode(std::vector< uint8_t >& src)
         {
             std::vector< uint8_t > ret(0);
 
-            for ( auto& byte : src ) {
+            for ( auto const& byte : src ) {
                 bits_t bits = huffman_table.at(byte);
 
                 for ( auto const& bit : bits ) {
@@ -714,17 +700,17 @@ namespace HPACK
      */
     class decoder_t
     {
-    private:
-    protected:
-        std::map< std::string, std::string >	m_headers;
-        ringtable_t								m_dynamic;
-        huffman_tree_t							m_huffman;
+        using header_map_type = std::map< std::string, std::vector<std::string>, std::less<>>;
+        using dec_vec_itr_t = std::vector< uint8_t >::iterator;
 
-        typedef std::vector< uint8_t >::iterator dec_vec_itr_t;
+        header_map_type	m_headers;
+        ringtable_t		m_dynamic;
+        huffman_tree_t	m_huffman;
 
-        void
-        decode_integer(dec_vec_itr_t& beg, dec_vec_itr_t& end, uint32_t& dst, uint8_t N)
-        {
+
+
+        void decode_integer(dec_vec_itr_t& beg, dec_vec_itr_t& end, uint32_t& dst, uint8_t N) {
+
             const uint16_t two_N = static_cast< uint16_t >( std::pow(2, N) - 1 );
             dec_vec_itr_t&  current(beg);
 
@@ -749,21 +735,20 @@ namespace HPACK
             return;
         }
 
-        std::string
-        parse_string(dec_vec_itr_t& itr, dec_vec_itr_t& end)
-        {
-            std::string		dst("");
+        std::string parse_string(dec_vec_itr_t& itr, dec_vec_itr_t& end) {
+
+            std::string		dst;
             unsigned int	len(*itr & 0x7F);
             bool			huff(( *itr & 0x80 ) == 0x80 ? true : false);
             auto	        cur(itr);
 
-            if ( itr == end )
+            if ( itr >= end )
                 throw std::invalid_argument("HPACK::decoder_t::parse_string(): Attempted to parse string when already at end of input");
 
-            for ( ++cur; cur != end; cur++ ) {
+            for ( ++cur; cur < end; cur++ ) {
 
                 auto dist = end - cur;
-                if(dist == 0) break;
+                if(dist <= 0) break;
 
                 dst += *cur;
 
@@ -787,7 +772,7 @@ namespace HPACK
             \param max the maximum size of the dynamic table; unbounded and allowed to exceed RFC sizes
         */
         decoder_t(int64_t max = 4096) : m_dynamic(max) { }
-        virtual ~decoder_t(void) { }
+
 
         /*!
             \fn bool decode(const std::string&)
@@ -798,9 +783,8 @@ namespace HPACK
 
             \Warning Never indexed code paths were under tested.
         */
-        bool
-        decode(const std::string& str)
-        {
+        bool decode(const std::string& str) {
+
             auto vec = std::vector< uint8_t >(str.begin(), str.end());
             return decode(vec);
         }
@@ -814,9 +798,8 @@ namespace HPACK
 
             \Warning Never indexed code paths were under tested.
         */
-        bool
-        decode(const char* ptr)
-        {
+        bool decode(const char* ptr) {
+
             if ( nullptr == ptr )
                 throw std::invalid_argument("HPACK::decoder_t::decode(): Invalid nullptr parameter");
 
@@ -833,12 +816,12 @@ namespace HPACK
 
             \Warning Never indexed code paths were under tested.
         */
-        bool
-        decode(std::vector< uint8_t >& data)
-        {
+        bool decode(std::vector< uint8_t >& data) {
 
-            if ( !data.size() )
+
+            if ( data.empty() )
                 return false;
+
             auto itr = data.begin();
             auto end = data.end();
 
@@ -868,14 +851,13 @@ namespace HPACK
                         return false;
                     }
 
-                    m_headers[ m_dynamic.get_header(index).first ] = m_dynamic.get_header(index).second;
+                    m_headers[ m_dynamic.get_header(index).first ].emplace_back(m_dynamic.get_header(index).second);
                 } else if(end - itr > 0){
-                    auto dist = end - itr;
 
                     uint32_t index(0);
-                    std::string n("");
+                    std::string n;
 
-                    if ( 0x40 == ( *itr & 0xC0 ) ) // 6.2.1 Literal Header Field with Incremental Indexing
+                    if ( 0x40 == ( byte_value & 0xC0 ) ) // 6.2.1 Literal Header Field with Incremental Indexing
                         decode_integer(itr, end, index, 6);
                     else // 6.2.2 Literal Header Field without Indexing
                         decode_integer(itr, end, index, 4);
@@ -887,7 +869,7 @@ namespace HPACK
                         n = parse_string(itr, end);
                     }
 
-                    m_headers[ n ] = parse_string(itr, end);
+                    m_headers[ n ].emplace_back(parse_string(itr, end));
                 } else {
                     break;
                 }
@@ -903,20 +885,12 @@ namespace HPACK
 
             \Return The map of the decoded headers
          */
-        const std::map< std::string, std::string >&
-        headers(void) const
+        [[nodiscard]] header_map_type const& headers() const
         {
             return m_headers;
         }
     };
 
-
-
-#define INDEXED_BIT_PATTERN 0x80
-#define LITERAL_INDEXED_BIT_PATTERN 0x40
-#define LITERAL_WITHOUT_INDEXING_BIT_PATTERN 0x00
-#define LITERAL_NEVER_INDEXED_BIT_PATTERN 0x10
-#define HUFFMAN_ENCODED 0x80
 
     /*! \Class The HPACK encoder class.
      *  \Brief A wrapper class that ties together the ringtable_t dynamic table implementation
@@ -929,8 +903,15 @@ namespace HPACK
      */
     class encoder_t
     {
+    public:
+
+        constexpr static uint8_t HUFFMAN_ENCODED = 0x80;
+        constexpr static uint8_t LITERAL_WITHOUT_INDEXING_BIT_PATTERN = 0x00;
+        constexpr static uint8_t LITERAL_NEVER_INDEXED_BIT_PATTERN = 0x10;
+        constexpr static uint8_t  LITERAL_INDEXED_BIT_PATTERN = 0x40;
+        constexpr static uint8_t  INDEXED_BIT_PATTERN = 0x80;
+
     private:
-    protected:
         std::vector< uint8_t >	m_buf;
         ringtable_t				m_dynamic;
         huffman_encoder_t		m_huffman;
@@ -939,8 +920,6 @@ namespace HPACK
         huff_encode(const std::string& str)
         {
             std::vector< uint8_t >	huffbuff(0);
-            std::size_t				len(0);
-
 
             huffbuff = m_huffman.encode(str);
 
@@ -954,21 +933,19 @@ namespace HPACK
             }
 
             m_buf.insert(m_buf.end(), huffbuff.begin(), huffbuff.end());
-            return;
         }
 
-        bool
-        find(const header_t& h, int64_t& index)
-        {
+        bool find(const header_t& h, int64_t& index) {
+
             int64_t saved_index(-1);
             index = -1;
 
             for ( uint64_t idx = 1; idx < predefined_headers.size(); idx++ ) {
-                if ( !h.first.compare(predefined_headers.at(static_cast< std::size_t >( idx )).first) &&
-                     !h.second.compare(predefined_headers.at(static_cast< std::size_t >( idx )).second) ) {
+                if ( h.first == predefined_headers.at(static_cast< std::size_t >( idx )).first and
+                     h.second == predefined_headers.at(static_cast< std::size_t >( idx )).second ) {
                     index = idx;
                     return true;
-                } else if ( !h.first.compare(predefined_headers.at(static_cast< std::size_t >( idx )).first) ) {
+                } else if ( h.first == predefined_headers.at(static_cast< std::size_t >( idx )).first) {
                     index = idx;
                 }
             }
@@ -986,9 +963,8 @@ namespace HPACK
             return false;
         }
 
-        uint64_t
-        encode_integer(std::vector< uint8_t >& dst, uint32_t I, uint8_t N)
-        {
+        uint64_t encode_integer(std::vector< uint8_t >& dst, uint32_t I, uint8_t N) {
+
             const uint16_t two_N = static_cast< uint16_t >( std::pow(2, N) - 1 );
 
             if ( I < two_N ) {
@@ -1018,8 +994,7 @@ namespace HPACK
 
         \param max the maximum size of the dynamic table; unbounded and allowed to exceed RFC sizes
         */
-        encoder_t(uint64_t max = 4096) : m_dynamic(max) { }
-        virtual ~encoder_t(void) { }
+        explicit encoder_t(uint64_t max = 4096) : m_dynamic(max) {}
 
         /*!
         \fn void max_table_size(uint64_t max)
@@ -1027,12 +1002,7 @@ namespace HPACK
 
         \param max the maximum size of the dynamic table; unbounded and allowed to exceed RFC sizes
         */
-        void
-        max_table_size(uint64_t max)
-        {
-            m_dynamic.max(max);
-            return;
-        }
+        void max_table_size(uint64_t max) { m_dynamic.max(max); }
 
         /*!
         \fn inline uint64_t max_table_size(void) const
@@ -1040,11 +1010,8 @@ namespace HPACK
 
         \return max the maximum size of the dynamic table; unbounded and allowed to exceed RFC sizes
         */
-        inline uint64_t
-        max_table_size(void) const
-        {
-            return m_dynamic.max();
-        }
+
+        inline uint64_t  max_table_size() const noexcept { return m_dynamic.max(); }
 
         /*!
         \fn void add(const std::string& n, const std::string& v, bool huffman = true, bool never_indexed = false)
@@ -1055,9 +1022,8 @@ namespace HPACK
         \param huffman a boolean value that indicates whether to huffman encode any related string literals
         \param never_indexed whether to set the never indexed flag for the name-value pair
         */
-        void
-        add(const std::string& n, const std::string& v, bool huffman = true, bool never_indexed = false)
-        {
+
+        void add(std::string const& n, const std::string& v, bool huffman = true, bool never_indexed = false) {
             header_t h(n, v);
             add(h, huffman, never_indexed);
         }
@@ -1072,9 +1038,8 @@ namespace HPACK
         \param huffman a boolean value that indicates whether to huffman encode any related string literals
         \param never_indexed whether to set the never indexed flag for the name-value pair
         */
-        void
-        add(const char* n, const char* v, bool huffman = true, bool never_indexed = false)
-        {
+
+        void add(const char* n, const char* v, bool huffman = true, bool never_indexed = false) {
             header_t h(n, v);
 
             if ( nullptr == n || nullptr == v )
@@ -1091,9 +1056,8 @@ namespace HPACK
         \param huffman a boolean value that indicates whether to huffman encode any related string literals
         \param never_indexed whether to set the never indexed flag for the name-value pair
         */
-        void
-        add(const header_t& h, bool huffman = true, bool never_indexed = false)
-        {
+
+        void add(header_t const& h, bool huffman = true, bool never_indexed = false) {
             int64_t					index(0);
             std::vector< uint8_t >	buf(0), huffbuff(0);
 
@@ -1149,12 +1113,8 @@ namespace HPACK
                     m_buf.insert(m_buf.end(), h.second.begin(), h.second.end());
                 }
             }
-
-            return;
         }
 
-
-
-        std::vector< uint8_t >& data(void) { return m_buf; }
+        std::vector<uint8_t>& data() { return m_buf; }
     };
 }
