@@ -131,7 +131,7 @@ namespace sx::engine::http {
             find_referrer(ctx, buffer_data_string);
 
 
-            auto engine_http1_set_proto = [&ctx] () {
+            auto engine_http1_set_proto = [&ctx,&log] () {
                 auto *app_request = dynamic_cast<app_HttpRequest *>(ctx.application_data.get());
                 if (app_request != nullptr) {
                     // detect protocol (plain vs ssl)
@@ -277,20 +277,18 @@ namespace sx::engine::http {
                 auto sid = (long) ntohl(frame.get_at<uint32_t>(cur_off));   cur_off += sizeof(uint32_t);
 
                 {
+                    _inf("Frame: type = %s, flags = %d, size = %d, stream = %d", frame_type_str(typ), flg, frame_sz, sid);
 
                     if(typ == 0) {
                         auto const& log = log::http2_frames;
                         auto deb_view = frame.view(0, cur_off + frame_sz);
 
-
-                        _inf("Frame: type = %s, flags = %d, size = %d, stream = %d", frame_type_str(typ), flg, frame_sz, sid);
                         _dia("Data frame: \r\n%s", hex_dump(deb_view, 4, 0, true).c_str());
                     }
                     if(typ != 0) {
                         auto const& log = log::http2_frames;
                         auto deb_view = frame.view(0, cur_off + frame_sz);
 
-                        _inf("Frame: type = %s, flags = %d, size = %d, stream = %d", frame_type_str(typ), flg, frame_sz, sid);
                         _deb("Frame: \r\n%s", hex_dump(deb_view, 4, 0, true).c_str());
                     }
 
