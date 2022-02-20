@@ -373,20 +373,17 @@ namespace HPACK
     protected:
         huffman_node_t* m_root;
 
-        void
-        delete_node( huffman_node_t* n )
-        {
-            if ( nullptr != n->right() )
+        void delete_node( huffman_node_t* n ) {
+
+            if(not n) return;
+
+            if ( nullptr != n->right())
                 delete_node(n->right());
-            if ( nullptr != n->left() )
+
+            if ( nullptr != n->left())
                 delete_node(n->left());
 
-            if ( nullptr == n->left() && nullptr == n->right() ) {
-                delete n;
-                n = nullptr;
-            }
-
-            return;
+            delete n;
         }
 
     public:
