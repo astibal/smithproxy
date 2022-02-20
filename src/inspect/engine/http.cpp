@@ -305,10 +305,9 @@ namespace sx::engine::http {
                         auto vec = std::vector<uint8_t>(data_string.begin(), data_string.end());
 
                         if (dec.decode(vec)) {
-                            for (auto& hdr : dec.headers()) {
-                                auto h = hdr.first;
-                                auto v = hdr.second;
-                                _inf("Frame: header/%s : %s", h.c_str(), v.c_str());
+                            for (auto& [ hdr, vlist ] : dec.headers()) {
+                                for(auto const& hdr_elem: vlist)
+                                    _inf("Frame: header/%s : %s", hdr.c_str(), hdr_elem.c_str());
                             }
                         } else {
                             _err("Frame: hpack decode error");
