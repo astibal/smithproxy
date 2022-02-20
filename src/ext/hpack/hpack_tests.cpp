@@ -63,7 +63,7 @@ TEST(HPack, RootCurl_Request) {
             0x6e, 0x74, 0x01, 0x31
     };
 
-    std::size_t data_sz = 873;
+    std::size_t data_sz = 868;
 
 
     HPACK::decoder_t dec;
@@ -72,10 +72,10 @@ TEST(HPack, RootCurl_Request) {
     auto vec = std::vector<uint8_t>(data_string.begin(), data_string.end());
 
     if (dec.decode(vec)) {
-        for (auto& hdr : dec.headers()) {
-            auto h = hdr.first;
-            auto v = hdr.second;
-            std::cout << "Frame: header/" << h << ": " << v << "\n";
+        for (auto& [ hdr, vlist ] : dec.headers()) {
+
+            for(auto const& hdr_elem: vlist)
+                std::cout << "Frame: header/" << hdr << ": " << hdr_elem << "\n";
         }
     } else {
         std::cout << "Frame: hpack decode error";
@@ -129,10 +129,10 @@ TEST(HPack, RootCurl_Resp) {
     auto vec = std::vector<uint8_t>(data_string.begin(), data_string.end());
 
     if (dec.decode(vec)) {
-        for (auto& hdr : dec.headers()) {
-            auto h = hdr.first;
-            auto v = hdr.second;
-            std::cout << "Frame: header/" << h << ": " << v << "\n";
+        for (auto& [ hdr, vlist ] : dec.headers()) {
+
+            for(auto const& hdr_elem: vlist)
+                std::cout << "Frame: header/" << hdr << ": " << hdr_elem << "\n";
         }
     } else {
         std::cout << "Frame: hpack decode error";
