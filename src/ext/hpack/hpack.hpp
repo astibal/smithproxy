@@ -11,7 +11,11 @@
 #include <limits>
 #include <string>
 
-// https://github.com/jnferguson/hpack-rfc7541
+#include <display.hpp>
+
+// Originally developed here: https://github.com/jnferguson/hpack-rfc7541
+
+//#define DEBUG_VARS
 
 namespace HPACK
 {
@@ -351,13 +355,12 @@ namespace HPACK
 
     class huffman_node_t
     {
-    private:
-    protected:
+
         huffman_node_t*	m_left;
         huffman_node_t* m_right;
         int16_t		m_code;
     public:
-        huffman_node_t(huffman_node_t* l = nullptr, huffman_node_t* r = nullptr, int16_t c = -1) : m_left(l), m_right(r), m_code(c) { }
+        explicit huffman_node_t(huffman_node_t* l = nullptr, huffman_node_t* r = nullptr, int16_t c = -1) : m_left(l), m_right(r), m_code(c) { }
         ~huffman_node_t() { m_left = nullptr; m_right = nullptr; m_code = 0; }
         int16_t code() const noexcept { return m_code; }
 
@@ -413,16 +416,15 @@ namespace HPACK
         }
 
 
-        std::string
-        decode(const std::string& src)
+        std::string decode(std::string const& src)
         {
-            std::string			dst("");
+            std::stringstream	dst;
             huffman_node_t*		current(m_root);
 
             if ( src.length() > std::numeric_limits< unsigned int >::max() )
                 throw std::invalid_argument("HPACK::huffman_tree_t::decode(): Overly long input string");
 
-            for ( unsigned int idx = 0; idx < src.length(); idx++ ) {
+            for ( unsigned int idx = 0; idx < src.size(); idx++ ) {
                 for ( int8_t j = 7; j >= 0; j-- ) {
                     if ( ( src[ idx ] & ( 1 << j ) ) > 0 ) {
                         if ( nullptr == current->right() )
@@ -439,15 +441,15 @@ namespace HPACK
                         uint16_t code = current->code();
 
                         if ( 257 == code )
-                            dst += static_cast< uint8_t >( ( ( code & 0xFF00 ) >> 8 ) & 0xFF );
+                            dst << static_cast< uint8_t >( ( ( code & 0xFF00 ) >> 8 ) & 0xFF );
 
-                        dst += static_cast< uint8_t >( code & 0xFF );
+                        dst << static_cast< uint8_t >( code & 0xFF );
                         current = m_root;
                     }
                 }
             }
 
-            return dst;
+            return dst.str();
         }
     };
 
@@ -601,14 +603,14 @@ namespace HPACK
             return false;
         }
 
-        header_t const& get_header(const std::size_t index) const {
+        header_t const* get_header(const std::size_t index) const {
 
             if ( index < predefined_headers.size() ) {
-                return predefined_headers.at(index);
-            } else if ( index > predefined_headers.size() && index < predefined_headers.size() + m_queue.size() )
-                return m_queue.at(index - predefined_headers.size());
+                return &predefined_headers.at(index);
+            } else if ( index >= predefined_headers.size() && index < predefined_headers.size() + m_queue.size() )
+                return &m_queue.at(index - predefined_headers.size());
 
-            throw std::runtime_error("HPACK::ringtable_t::get_header(): Invalid index/header not found");
+            return nullptr;
         }
 
     };
@@ -659,7 +661,7 @@ namespace HPACK
             // Apparently the remainder unused bits
             // are to be set to 1, some sources refer
             // to this as the EOS bit, but the code
-            // for EOS is like 30-bits of 1's so its
+            // for EOS is like 30-bits of 1's, so It's
             // clearly not the EOS code.
             if ( 8 != m_count && 0 != m_count) {
                 m_byte = ( m_byte << ( m_count - 1 ) );
@@ -708,55 +710,51 @@ namespace HPACK
         huffman_tree_t	m_huffman;
 
 
+    public:
 
         void decode_integer(dec_vec_itr_t& beg, dec_vec_itr_t& end, uint32_t& dst, uint8_t N) {
-
-            const uint16_t two_N = static_cast< uint16_t >( std::pow(2, N) - 1 );
             dec_vec_itr_t&  current(beg);
 
-            if ( current == end )
-                throw std::invalid_argument("HPACK::decoder_t::decode_integer(): Attempted to decode integer when at end of input");
+            auto mask = (1 << N) - 1;
 
-            dst = ( *current & two_N );
+            auto I = *current & mask;
 
-            if ( dst == two_N ) {
-                uint64_t M = 0;
-
-                for ( ; current < end; current++ ) {
-                    dst += ( ( *current & 0x7F ) << M );
-                    M += 7;
-
-                    if ( !( *current & 0x80 ) )
-                        break;
-                }
+            if(I < std::pow(2,N)-1 ) {
+                dst=I;
+                beg++;
+                return;
             }
 
-            beg = current+1;
-            return;
+            uint8_t  M = 0;
+            uint8_t B = 0;
+            do {
+                B = *(++current);
+                I += ((B & 0x7F) * std::pow(2, M));
+                M += 7;
+
+            } while( ( B & 0x80 ) == 0x80);
+
+            dst = I;
+            beg = current + 1;
         }
 
         std::string parse_string(dec_vec_itr_t& itr, dec_vec_itr_t& end) {
 
-            std::string		dst;
-            unsigned int	len(*itr & 0x7F);
+            unsigned int	len = 0;
             bool			huff(( *itr & 0x80 ) == 0x80 ? true : false);
-            auto	        cur(itr);
 
+            decode_integer(itr, end, len, 7);
+
+#ifdef DEBUG_VARS
+            std::string deb1(itr, itr+len);
+            std::string deb2 = hex_print(deb1.data(), deb1.size());
+#endif
             if ( itr >= end )
                 throw std::invalid_argument("HPACK::decoder_t::parse_string(): Attempted to parse string when already at end of input");
 
-            for ( ++cur; cur < end; cur++ ) {
+            std::string dst(itr, itr+len);
+            itr += len;
 
-                auto dist = end - cur;
-                if(dist <= 0) break;
-
-                dst += *cur;
-
-                if ( cur - itr == len )
-                    break;
-            }
-
-            itr += len + 1;
 
             if ( true == huff )
                 dst = m_huffman.decode(dst);
@@ -764,7 +762,6 @@ namespace HPACK
             return dst;
         }
 
-    public:
         /*!
             \fn encoder_t(uint64_t max = 4096)
             \Brief Constructs the encoder
@@ -826,7 +823,8 @@ namespace HPACK
             auto end = data.end();
 
 
-            while(end - itr > 0) {
+
+            for(size_t loop = 0; end - itr > 0 and loop < 100; ++loop) {
 
                 auto byte_value = *itr;
 
@@ -837,21 +835,29 @@ namespace HPACK
 
                     if ( size > m_dynamic.max() ) {
                         // decoding error
-                        return false;
+
+                        // report error - dynamic update too big
                     }
 
                     m_dynamic.max(size);
-                } else if ( ( *itr & 0x80 ) ) { // 6.1 Indexed Header Field Representation
+                } else if ( ( byte_value & 0x80 ) ) { // 6.1 Indexed Header Field Representation
                     uint32_t index(0);
 
                     decode_integer(itr, end, index, 7);
 
                     if ( 0 == index ) {
                         // decoding error
+
+                        // report index zero error
                         return false;
                     }
 
-                    m_headers[ m_dynamic.get_header(index).first ].emplace_back(m_dynamic.get_header(index).second);
+                    auto const* hdr_ptr = m_dynamic.get_header(index);
+                    if(hdr_ptr) {
+                        m_headers[hdr_ptr->first].emplace_back(hdr_ptr->second);
+                    } else {
+                        // report error - index not found
+                    }
                 } else if(end - itr > 0){
 
                     uint32_t index(0);
@@ -863,13 +869,18 @@ namespace HPACK
                         decode_integer(itr, end, index, 4);
 
                     if ( 0 != index ) {
-                        header_t h = m_dynamic.get_header(index);
-                        n = h.first;
+                        auto const* h = m_dynamic.get_header(index);
+                        if(h) {
+                            n = h->first;
+                        } else {
+                            //report index error
+                        }
                     } else {
                         n = parse_string(itr, end);
                     }
 
-                    m_headers[ n ].emplace_back(parse_string(itr, end));
+                    auto val = parse_string(itr, end);
+                    m_headers[ n ].emplace_back(val);
                 } else {
                     break;
                 }
@@ -881,7 +892,7 @@ namespace HPACK
 
         /*!
             \fn const std::map< std::string, std::string >& headers(void) const
-            \Brief Retrieves the interally managed header map of decoded headers
+            \Brief Retrieves the internally managed header map of decoded headers
 
             \Return The map of the decoded headers
          */
