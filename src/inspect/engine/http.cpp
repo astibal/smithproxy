@@ -269,6 +269,9 @@ namespace sx::engine::http {
 
             auto frame_sz = find_frame_sz(frame);
             std::size_t cur_off = 3L;
+            size_t add_hdr = 0;
+
+            constexpr size_t preamble_sz = 9L;
 
             if (frame_sz <= frame.size()) {
                 auto typ = frame.get_at<uint8_t>(cur_off);   cur_off += sizeof(uint8_t);
@@ -276,18 +279,33 @@ namespace sx::engine::http {
                 auto flg = frame.get_at<uint8_t>(cur_off);   cur_off += sizeof(uint8_t);
                 auto sid = (long) ntohl(frame.get_at<uint32_t>(cur_off));   cur_off += sizeof(uint32_t);
 
+                // end of preamble
+
+                uint32_t stream_dep = 0L;
+                uint8_t wgh = 0;
+
+                if(flg & 0x20) {
+                    stream_dep = frame.get_at<uint32_t>(cur_off); cur_off += sizeof(uint32_t);
+                    wgh = frame.get_at<uint8_t>(cur_off);   cur_off += sizeof(uint8_t);
+
+                    add_hdr += 5;
+                }
+
                 {
                     _inf("Frame: type = %s, flags = %d, size = %d, stream = %d", frame_type_str(typ), flg, frame_sz, sid);
 
+                    if(flg & 0x20)
+                        _inf("Frame prio: stream dep = %X, weight: %d", stream_dep, wgh);
+
                     if(typ == 0) {
                         auto const& log = log::http2_frames;
-                        auto deb_view = frame.view(0, cur_off + frame_sz);
+                        auto deb_view = frame.view(0, preamble_sz + frame_sz);
 
                         _dia("Data frame: \r\n%s", hex_dump(deb_view, 4, 0, true).c_str());
                     }
                     if(typ != 0) {
                         auto const& log = log::http2_frames;
-                        auto deb_view = frame.view(0, cur_off + frame_sz);
+                        auto deb_view = frame.view(0, preamble_sz + frame_sz);
 
                         _deb("Frame: \r\n%s", hex_dump(deb_view, 4, 0, true).c_str());
                     }
@@ -298,7 +316,7 @@ namespace sx::engine::http {
 
 #ifdef USE_HPACK
                         // skip frame headers, start of data
-                        auto data = frame.view(9, frame_sz);
+                        auto data = frame.view(preamble_sz + add_hdr, frame_sz - add_hdr);
 
                         HPACK::decoder_t dec;
                         auto data_string = std::string((const char*)data.data(), data.size());
@@ -307,23 +325,21 @@ namespace sx::engine::http {
                         if (dec.decode(vec)) {
                             for (auto& [ hdr, vlist ] : dec.headers()) {
                                 for(auto const& hdr_elem: vlist)
-                                    _inf("Frame: header/%s : %s", hdr.c_str(), hdr_elem.c_str());
+                                    _inf("Frame: header/%s : %s", escape(hdr).c_str(), escape(hdr_elem).c_str());
                             }
                         } else {
                             _err("Frame: hpack decode error");
                         }
 #else
-                        auto deb_view = frame.view(0, cur_off + frame_sz);
+                        auto deb_view = frame.view(0, preamble_sz + frame_sz);
                         _dia("Headers frame: \r\n%s", hex_dump(deb_view, 4, 0, true).c_str());
 #endif
                     }
                 }
-
-                // if(typ == 3) frame_sz = 24;
             }
 
 
-            return cur_off + frame_sz;
+            return  preamble_sz + frame_sz;
         };
 
 
@@ -375,7 +391,13 @@ namespace sx::engine::http {
 
             std::size_t starting_index = load_prev_state(ctx);
             if(starting_index >= h2_buffer->size()) {
-                _deb("there is nothing more to read!");
+
+                if(starting_index == h2_buffer->size()) {
+                    _deb("there is nothing more to read!");
+                }
+                else {
+                    _err("starting index in the future");
+                }
                 return;
             }
 
@@ -383,15 +405,27 @@ namespace sx::engine::http {
             std::size_t if_magic = 0L;
             auto starting_buffer = h2_buffer->view(starting_index);
 
-            // eliminate finding magic later in the flow
-            if(ctx.flow_pos < 5 and side == 'r' and h2_buffer->size() >= txt::magic_sz) {
-                if_magic = find_magic(starting_buffer);
-                if (if_magic + 4 > h2_buffer->size()) {
-                    _err("not enough data to read");
-                    return;
+            if(side == 'r') {
+                if (ctx.status == EngineCtx::status_t::START) {
+                    // eliminate finding magic later in the flow
+                    if (ctx.flow_pos < 5 and h2_buffer->size() >= txt::magic_sz) {
+                        if_magic = find_magic(starting_buffer);
+
+                        // save starting position + size of magic
+                        if (if_magic > 0) {
+                            save_state(ctx, starting_index + if_magic);
+                            ctx.status = EngineCtx::status_t::MAGIC;
+                        }
+
+                        if (if_magic + 4 > h2_buffer->size()) {
+                            _err("not enough data to read");
+                            return;
+                        }
+                    } else {
+                        _deb("too late for magic lookup");
+                        ctx.status = EngineCtx::status_t::MAGIC;
+                    }
                 }
-            } else {
-                _deb("too late for magic lookup");
             }
 
             buffer frame = starting_buffer.view(if_magic);
@@ -402,8 +436,11 @@ namespace sx::engine::http {
 
                 try {
                     cur_off = process_frame(frame);
+                    total += cur_off;
                 }
                 catch(std::out_of_range const& e) {
+                    _err("incomplete frame: last read size = %d", cur_off);
+                    _err("incomplete frame: total read size = %d", total);
                     _err("incomplete frame: %s", e.what());
                     _war("data dump: \r\n%s", hex_dump(frame, 4, 'E', true).c_str());
                     break;
@@ -418,7 +455,6 @@ namespace sx::engine::http {
                     break;
                 }
 
-                total += cur_off;
             } while(total < starting_buffer.size() - if_magic);
 
 

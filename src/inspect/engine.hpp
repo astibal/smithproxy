@@ -74,6 +74,10 @@ namespace sx::engine {
 
         // state data to be placed here
         std::any data;
+
+        // status
+        enum class status_t { START, MAGIC, OK, ERROR };
+        status_t status {status_t::START};
     };
 
 }
