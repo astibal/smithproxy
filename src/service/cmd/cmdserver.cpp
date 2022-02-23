@@ -496,7 +496,7 @@ void cli_print_log_levels(struct cli_def *cli) {
     cli_print(cli,"THIS cli logging level set to: %d",lp->level_.level());
     cli_print(cli, "Internal logging level set to: %d", Log::get()->level().level());
     cli_print(cli,"\n");
-    for(auto [ target, mut ]: Log::get()->remote_targets()) {
+    for(auto const& [ target, mut ]: Log::get()->remote_targets()) {
         cli_print(cli, "Logging level for remote: %s: %d",
                   Log::get()->target_name((uint64_t)target),
                   Log::get()->target_profiles()[(uint64_t)target]->level_.level());
@@ -826,7 +826,7 @@ int cli_debug_show(struct cli_def *cli, const char *command, char *argv[], int a
 
     for(auto const& i: log->topic_db_) {
         std::string t = i.first;
-        auto* lev = &i.second;
+        auto lev = i.second;
 
         ss << "    [" << t << "] => level " << lev->level() << " flag: " << lev->topic() << "\n";
     }
@@ -2820,7 +2820,7 @@ void client_thread(int client_socket) {
     cli_loop(cli, client_socket);
 
 
-    Log::get()->remote_targets().remove_if([client_socket](auto e) { return e.first == client_socket; });
+    Log::get()->remote_targets().remove_if([client_socket](auto const& e) { return e.first == client_socket; });
     Log::get()->target_profiles().erase(client_socket);
     close(client_socket);
 
