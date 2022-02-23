@@ -17,7 +17,9 @@ set(USE_UNWIND "Y")
 set(USE_REDIS "Y")
 
 set(OPT_MEMPOOL_NOEXCEPT "Y")
-set(OPT_MEMPOOL_DISABLE "N")
+set(OPT_MEMPOOL_DISABLE "Y")
+set(OPT_DEBUG_ASAN_LEAKS "N")
+set(OPT_DEBUG_ASAN_THREADS "N")
 
 set(USE_EXPERIMENT "N")
 set(USE_EXTRA_DEBUG "N")
@@ -25,7 +27,7 @@ set(USE_EXTRA_DEBUG "N")
 
 #### experimental, tempo variables
 
-set(USE_HTTP2_ENGINE "N")
+set(USE_HTTP2_ENGINE "Y")
 ###
 
 if("${USE_EXPERIMENT}" STREQUAL "Y")
@@ -139,8 +141,11 @@ if(UNIX)
     SET(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g3 -fno-stack-protector")
 
     IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
-        # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=thread -fPIE -pie")
-        # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fsanitize=leak -fPIE -pie")
+        if("${OPT_DEBUG_ASAN_THREADS}" STREQUAL "Y")
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=thread -fPIE -pie")
+        elseif("${OPT_DEBUG_ASAN_LEAKS}" STREQUAL "Y")
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fsanitize=leak -fPIE -pie")
+        endif()
     ENDIF()
 
     IF (CMAKE_BUILD_TYPE STREQUAL "Release")
