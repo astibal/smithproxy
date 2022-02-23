@@ -414,6 +414,9 @@ namespace HPACK
                 current->code(static_cast< int16_t >( idx ));
             }
         }
+        ~huffman_tree_t()  {
+            delete_node(m_root);
+        }
 
 
         std::string decode(std::string const& src)
