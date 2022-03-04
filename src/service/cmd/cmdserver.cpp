@@ -89,6 +89,11 @@
 using namespace socle;
 using namespace libconfig;
 
+struct CliGlobals {
+    static thread_local inline bool ct_warning_flag = false;
+
+};
+
 void apply_hostname(cli_def* cli) {
     char hostname[64]; memset(hostname,0,64);
     gethostname(hostname,63);
@@ -2812,6 +2817,13 @@ void client_thread(int client_socket) {
 
             cli_print(cli, "\n\n !!!   Shutdown   !!!\n");
             return CLI_QUIT;
+        }
+
+        if(not SSLFactory::factory().is_ct_available() and not CliGlobals::ct_warning_flag) {
+            cli_print(cli, "\r\n Warning: Certificate Transparency checks not available");
+            cli_print(cli, "          - download it using `sx_download_ctlog` tool and restart service");
+
+            CliGlobals::ct_warning_flag = true;
         }
 
         return CLI_OK;
