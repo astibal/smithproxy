@@ -140,10 +140,10 @@ namespace sx::engine::http {
 
     namespace v1 {
         // request parsing
-        void parse_request (EngineCtx &ctx, std::string const &data);
-        void find_referrer (EngineCtx &ctx, std::string const &data);
-        void find_host (EngineCtx &ctx, std::string const &data);
-        void find_method (EngineCtx &ctx, std::string const &data);
+        void parse_request (EngineCtx &ctx, buffer const* buffer_data_string);
+        void find_referrer (EngineCtx &ctx, std::string_view data);
+        void find_host (EngineCtx &ctx, std::string_view data);
+        void find_method (EngineCtx &ctx, std::string_view data);
 
         // execute engine
         void start(EngineCtx &ctx);

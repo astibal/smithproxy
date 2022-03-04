@@ -11,14 +11,14 @@ namespace sx::engine::http {
 
     namespace v1 {
 
-        void find_referrer (EngineCtx &ctx, std::string const &data) {
+        void find_referrer (EngineCtx &ctx, std::string_view data) {
             auto const& log = log::http1;
 
             std::smatch m_ref;
 
             auto ix_ref = data.find("Referer: ");
             if (ix_ref != std::string::npos) {
-                auto ref_start = data.substr(ix_ref, std::min(std::size_t(128), data.size() - ix_ref));
+                std::string ref_start ( data.substr(ix_ref, std::min(std::size_t(128), data.size() - ix_ref)) );
                 if (std::regex_search(ref_start, m_ref, ProtoRex::http_req_ref())) {
                     std::string str_temp;
 
@@ -37,13 +37,13 @@ namespace sx::engine::http {
             }
         }
 
-        void find_host (EngineCtx &ctx, std::string const &data) {
+        void find_host (EngineCtx &ctx, std::string_view data) {
             auto const& log = log::http1;
 
             auto ix_host = data.find("Host: ");
             if (ix_host != std::string::npos) {
 
-                auto host_start = data.substr(ix_host, std::min(std::size_t(128), data.size() - ix_host));
+                std::string host_start( data.substr(ix_host, std::min(std::size_t(128), data.size() - ix_host)) );
                 std::smatch m_host;
 
                 if (std::regex_search(host_start, m_host, ProtoRex::http_req_host())) {
@@ -85,10 +85,10 @@ namespace sx::engine::http {
             }
         }
 
-        void find_method (EngineCtx &ctx, std::string const &data) {
+        void find_method (EngineCtx &ctx, std::string_view data) {
             auto const& log = log::http1;
 
-            auto method_start = data.substr(0, std::min(std::size_t(128), data.size()));
+            std::string method_start(data.substr(0, std::min(std::size_t(128), data.size())));
             std::smatch m_get;
 
             if (std::regex_search(method_start, m_get, ProtoRex::http_req_get())) {
@@ -123,12 +123,14 @@ namespace sx::engine::http {
             }
         }
 
-        void parse_request(EngineCtx &ctx, std::string const &buffer_data_string) {
+        void parse_request(EngineCtx &ctx, buffer const* buffer_data) {
             auto const& log = log::http1;
 
-            find_method(ctx, buffer_data_string);
-            find_host(ctx, buffer_data_string);
-            find_referrer(ctx, buffer_data_string);
+            auto data = buffer_data->string_view();
+
+            find_method(ctx, data);
+            find_host(ctx, data);
+            find_referrer(ctx, data);
 
 
             auto engine_http1_set_proto = [&ctx,&log] () {
@@ -167,7 +169,7 @@ namespace sx::engine::http {
             auto const& log = log::http1;
             _deb("start");
 
-            auto const& [ http_request1_side, http_request1_buffer ] = ctx.origin->flow().flow()[ctx.flow_pos];
+            auto const& [ http_request1_side, http_request1_buffer ] = ctx.origin->flow().flow().back();
 
             // limit this rather info/convenience regexing to 128 bytes
 
@@ -179,7 +181,7 @@ namespace sx::engine::http {
             if(http_request1_side == 'r') {
                 _dia("start: flow block index %d, size %dB", ctx.flow_pos, http_request1_buffer->size());
                 std::string buffer_data_string((const char *) http_request1_buffer->data(), http_request1_buffer->size());
-                parse_request(ctx, buffer_data_string);
+                parse_request(ctx, http_request1_buffer.get());
             }
 
             _deb("start finished");
@@ -353,7 +355,7 @@ namespace sx::engine::http {
             }
 
             try {
-                prev_state = std::any_cast<state_data_t>(ctx.data);
+                prev_state = std::any_cast<state_data_t>(ctx.state_info);
             } catch (std::bad_any_cast const& e) {
                 _deb("state: no previous state %s", e.what());
             }
@@ -372,7 +374,7 @@ namespace sx::engine::http {
         void save_state(EngineCtx& ctx, std::size_t processed) {
             auto const& log = log::http2_state;
 
-            ctx.data = std::make_any<state_data_t>(ctx.origin->flow().size(), processed);
+            ctx.state_info = std::make_any<state_data_t>(ctx.origin->flow().size(), processed);
             _deb("state: saving processed bytes in this flow: %d", processed);
         }
 

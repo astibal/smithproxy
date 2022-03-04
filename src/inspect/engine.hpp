@@ -73,7 +73,9 @@ namespace sx::engine {
         std::unique_ptr<ApplicationData> application_data;
 
         // state data to be placed here
-        std::any data;
+        std::any state_info;  // general positional information, etc
+        std::any state_data;  // more application specific data
+
 
         // status
         enum class status_t { START, MAGIC, OK, ERROR };
