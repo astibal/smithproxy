@@ -27,7 +27,7 @@ set(USE_EXTRA_DEBUG "N")
 
 #### experimental, tempo variables
 
-set(USE_HTTP2_ENGINE "Y")
+set(USE_HTTP2_ENGINE "N")
 ###
 
 if("${USE_EXPERIMENT}" STREQUAL "Y")
