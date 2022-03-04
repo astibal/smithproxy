@@ -378,8 +378,6 @@ bool load_config(std::string& config_f, bool reload) {
     
     try {
         load_if_exists(cfgapi.getRoot()["settings"], "log_level",cfg_log_level.level_ref());
-        if(reload) {
-        }
     }
     catch(const SettingNotFoundException &nfex) {
     

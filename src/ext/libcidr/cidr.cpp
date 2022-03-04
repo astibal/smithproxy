@@ -1016,7 +1016,7 @@ namespace cidr {
          */
             if (pflen > 0) {
                 /* 0 < pflen <= 32 */
-                if (pflen < 0 || pflen > 32) {
+                if (pflen > 32) {
                     /* Always bad */
                     cidr_free(toret);
                     errno = EINVAL;
@@ -1227,7 +1227,7 @@ namespace cidr {
          */
             if (pflen > 0) {
                 /* Better be 0...128 */
-                if (pflen < 0 || pflen > 128) {
+                if (pflen > 128) {
                     /* Always bad */
                     cidr_free(toret);
                     errno = EINVAL;

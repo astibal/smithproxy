@@ -373,6 +373,11 @@ namespace HPACK
         void right(huffman_node_t* r) { m_right = r; }
     };
 
+    class hpack_error : public std::runtime_error {
+    public:
+        explicit hpack_error(const char* e) : std::runtime_error(e) {};
+    };
+
     class huffman_tree_t
     {
         huffman_node_t* m_root;
@@ -429,13 +434,13 @@ namespace HPACK
 
             for ( unsigned int idx = 0; idx < src.size(); idx++ ) {
                 for ( int8_t j = 7; j >= 0; j-- ) {
-                    if ( ( src[ idx ] & ( 1 << j ) ) > 0 ) {
+                    if ( ( src[ idx ] & ( 1 << j ) ) != 0 ) {
                         if ( nullptr == current->right() )
-                            throw std::runtime_error("HPACK::huffman_tree_t::decode(): Internal state error (right == nullptr)");
+                            throw hpack_error("HPACK::huffman_tree_t::decode(): Internal state error (right == nullptr)");
                         current = current->right();
                     } else {
                         if ( nullptr == current->left() )
-                            throw std::runtime_error("HPACK::huffman_tree_t::decode(): Internal state error (left == nullptr)");
+                            throw hpack_error("HPACK::huffman_tree_t::decode(): Internal state error (left == nullptr)");
 
                         current = current->left();
                     }
@@ -444,9 +449,9 @@ namespace HPACK
                         uint16_t code = current->code();
 
                         if ( 257 == code )
-                            dst << static_cast< uint8_t >( ( ( code & 0xFF00 ) >> 8 ) & 0xFF );
+                            dst << static_cast< uint8_t >( ( ( code & 0xFF00u ) >> 8u ) & 0xFF );
 
-                        dst << static_cast< uint8_t >( code & 0xFF );
+                        dst << static_cast< uint8_t >( code & 0xFFu );
                         current = m_root;
                     }
                 }
@@ -587,7 +592,7 @@ namespace HPACK
         bool find(header_t const& h, int64_t& index) const {
 
 
-            if ( index > std::numeric_limits< std::size_t >::max() ) {
+            if ( static_cast<std::size_t>(index) > std::numeric_limits< std::size_t >::max() ) {
                 throw std::invalid_argument("HPACK::ringtable_t::find(): Invalid/overlarge index which results in truncation");
             }
 
@@ -610,7 +615,7 @@ namespace HPACK
 
             if ( index < predefined_headers.size() ) {
                 return &predefined_headers.at(index);
-            } else if ( index >= predefined_headers.size() && index < predefined_headers.size() + m_queue.size() )
+            } else if ( index < predefined_headers.size() + m_queue.size() )
                 return &m_queue.at(index - predefined_headers.size());
 
             return nullptr;
@@ -977,9 +982,9 @@ namespace HPACK
             return false;
         }
 
-        uint64_t encode_integer(std::vector< uint8_t >& dst, uint32_t I, uint8_t N) {
+        uint64_t encode_integer(std::vector< uint8_t >& dst, uint32_t I, uint8_t N) const {
 
-            const uint16_t two_N = static_cast< uint16_t >( std::pow(2, N) - 1 );
+            const auto two_N = static_cast< uint16_t >( std::pow(2, N) - 1 );
 
             if ( I < two_N ) {
                 dst.push_back(static_cast< uint8_t >( I ));
@@ -996,9 +1001,6 @@ namespace HPACK
                 dst.push_back(static_cast< uint8_t >( I ));
                 return dst.size();
             }
-
-            // unreached
-            throw std::runtime_error("HPACK::encoder_t::encode_integer(): Impossible code path");
         }
 
     public:
