@@ -347,7 +347,6 @@ void SmithProxy::run() {
 
                 proxy->run();
                 _dia("TCP listener: workers torn down.");
-                proxy->shutdown();
             } );
             pthread_setname_np(a_thread->native_handle(),thread_friendly);
             thread_list.push_back(a_thread);
