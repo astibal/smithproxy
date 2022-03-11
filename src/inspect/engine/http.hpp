@@ -158,6 +158,25 @@ namespace sx::engine::http {
         };
 
         void start(EngineCtx &ctx);
+
+
+        struct GunZip {
+            buffer in;
+        };
+
+
+        struct Http2Stream {
+            enum content_type_t { PLAIN, GZIP };
+
+            content_type_t content_encoding_;
+            std::optional<GunZip> gzip;
+        };
+
+
+        struct Http2Connection {
+            // map
+            mp::map<long,Http2Stream> streams;
+        };
     }
 
     struct log {

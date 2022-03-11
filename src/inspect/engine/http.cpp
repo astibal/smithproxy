@@ -7,6 +7,11 @@
 #include <ext/hpack/hpack.hpp>
 #endif
 
+#ifdef USE_ZLIB
+#include <zlib.h>
+#endif
+
+
 namespace sx::engine::http {
 
     namespace v1 {
@@ -266,8 +271,77 @@ namespace sx::engine::http {
             return siz;
         }
 
-        std::size_t process_frame(buffer& frame) {
-            auto const& log = log::http2;
+
+        void process_headers(EngineCtx& ctx, long stream_id, uint8_t flags, buffer const& data) {
+
+#ifdef USE_HPACK
+            auto const& log = log::http2_headers;
+
+            HPACK::decoder_t dec;
+            auto data_string = std::string((const char*)data.data(), data.size());
+            auto vec = std::vector<uint8_t>(data_string.begin(), data_string.end());
+
+            auto* state_data = std::any_cast<Http2Connection>(& ctx.state_data);
+
+            if (dec.decode(vec)) {
+                for (auto& [ hdr, vlist ] : dec.headers()) {
+                    for(auto const& hdr_elem: vlist) {
+                        _dia("Frame: header/%s : %s", escape(hdr).c_str(), escape(hdr_elem).c_str());
+                        if(state_data) {
+                            if(hdr == "content-encoding") {
+                                if(hdr_elem == "gzip") state_data->streams[stream_id].content_encoding_ = Http2Stream::GZIP;
+                            }
+                        }
+                    }
+                }
+            } else {
+                _err("Frame: hpack decode error");
+            }
+#endif
+        }
+
+        void process_data(EngineCtx& ctx, long stream_id, uint8_t flags, buffer const& data) {
+//            auto const &log = log::http2;
+
+            auto* state_data = std::any_cast<Http2Connection>(& ctx.state_data);
+            if(state_data) {
+                if(state_data->streams[stream_id].content_encoding_ == Http2Stream::GZIP) {
+//                    auto& gz_instance = state_data->streams[stream_id].gzip;
+//
+//                    if(gz_instance.has_value() and (flags & 0x01u) != 0) {
+//
+//                        // fixme: add configurable uncompress features
+//                        auto const& compressed_data = state_data->streams[stream_id].gzip.in;
+//
+//                        buffer out;
+//                        out.capacity(compressed_data.size() * 15);
+//                        unsigned long outlen = out.capacity();
+//                        int uc_result = uncompress(out.data(), &outlen, (unsigned char*)compressed_data.data(), compressed_data.size());
+//
+//                        if(uc_result == Z_OK) {
+//                            out.size(outlen);
+//                            _deb("Gunzip: \r\n%s", hex_dump(out, 4, 0, true).c_str());
+//                        } else {
+//                            _deb("Gunzip: failed");
+//                        }
+//
+//                    }
+//                    else {
+//                        _dia("process_data/gzip (cont)");
+//                        if(auto& gz_instance = state_data->streams[stream_id].gzip; gz_instance.has_value()) {
+//                            gz_instance->in.append(data);
+//                        }
+//                    }
+                }
+            }
+        }
+
+
+        void process_other(EngineCtx& ctx, long stream_id, uint8_t flags, buffer const& data) {
+        }
+
+        std::size_t process_frame(EngineCtx& ctx, buffer& frame) {
+            auto const& log = log::http2_frames;
 
             auto frame_sz = find_frame_sz(frame);
             std::size_t cur_off = 3L;
@@ -294,49 +368,28 @@ namespace sx::engine::http {
                 }
 
                 {
-                    _inf("Frame: type = %s, flags = %d, size = %d, stream = %d", frame_type_str(typ), flg, frame_sz, sid);
+                    _inf("Frame: type = %s, flags = %d, size = %d, stream = %d", frame_type_str(typ), flg, frame_sz,
+                         sid);
 
-                    if(flg & 0x20)
+                    if (flg & 0x20)
                         _inf("Frame prio: stream dep = %X, weight: %d", stream_dep, wgh);
 
+                    _deb("Frame: \r\n%s", hex_dump(frame, 4, 0, true).c_str());
+
                     if(typ == 0) {
-                        auto const& log = log::http2_frames;
-                        auto deb_view = frame.view(0, preamble_sz + frame_sz);
-
-                        _dia("Data frame: \r\n%s", hex_dump(deb_view, 4, 0, true).c_str());
-                    }
-                    if(typ != 0) {
-                        auto const& log = log::http2_frames;
-                        auto deb_view = frame.view(0, preamble_sz + frame_sz);
-
-                        _deb("Frame: \r\n%s", hex_dump(deb_view, 4, 0, true).c_str());
-                    }
-
-
-                    if(typ == 1) {
-                        auto const& log = log::http2_headers;
-
-#ifdef USE_HPACK
-                        // skip frame headers, start of data
                         auto data = frame.view(preamble_sz + add_hdr, frame_sz - add_hdr);
-
-                        HPACK::decoder_t dec;
-                        auto data_string = std::string((const char*)data.data(), data.size());
-                        auto vec = std::vector<uint8_t>(data_string.begin(), data_string.end());
-
-                        if (dec.decode(vec)) {
-                            for (auto& [ hdr, vlist ] : dec.headers()) {
-                                for(auto const& hdr_elem: vlist)
-                                    _inf("Frame: header/%s : %s", escape(hdr).c_str(), escape(hdr_elem).c_str());
-                            }
-                        } else {
-                            _err("Frame: hpack decode error");
-                        }
-#else
-                        auto deb_view = frame.view(0, preamble_sz + frame_sz);
-                        _dia("Headers frame: \r\n%s", hex_dump(deb_view, 4, 0, true).c_str());
-#endif
+                        process_data(ctx, sid, flg, data);
                     }
+                    else if(typ == 1) {
+                        auto data = frame.view(preamble_sz + add_hdr, frame_sz - add_hdr);
+                        process_headers(ctx, sid, flg, data);
+                    }
+                    else {
+                        auto data = frame.view(preamble_sz + add_hdr, frame_sz - add_hdr);
+                        process_other(ctx, sid, flg, data);
+                    }
+
+
                 }
             }
 
@@ -417,6 +470,10 @@ namespace sx::engine::http {
                         if (if_magic > 0) {
                             save_state(ctx, starting_index + if_magic);
                             ctx.status = EngineCtx::status_t::MAGIC;
+
+                            auto const* state_data = std::any_cast<Http2Connection>(& ctx.state_data);
+                            if(not state_data)
+                                ctx.state_data = std::make_any<Http2Connection>();
                         }
 
                         if (if_magic + 4 > h2_buffer->size()) {
@@ -437,7 +494,7 @@ namespace sx::engine::http {
                 frame = frame.view(cur_off);
 
                 try {
-                    cur_off = process_frame(frame);
+                    cur_off = process_frame(ctx, frame);
                     total += cur_off;
                 }
                 catch(std::out_of_range const& e) {

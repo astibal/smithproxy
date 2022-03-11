@@ -55,6 +55,7 @@ if("${USE_HTTP2_ENGINE}" STREQUAL "Y")
     message(" >> http2 enabled" )
     add_definitions(-DUSE_HTTP2)
     add_definitions(-DUSE_HPACK)
+    add_definitions(-DUSE_ZLIB)
 endif()
 
 
@@ -377,6 +378,10 @@ if("${USE_PYTHON}" STREQUAL "Y")
     target_link_libraries(smithproxy ${PYTHON_LIBRARIES})
 else()
     message(">> python not used")
+endif()
+
+if("${USE_HTTP2_ENGINE}" STREQUAL "Y")
+    target_link_libraries(smithproxy z)
 endif()
 
 if(HIREDIS_FOUND)
