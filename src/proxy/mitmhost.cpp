@@ -162,17 +162,18 @@ void MitmHostCX::engine_run(std::string const& name, sx::engine::EngineCtx &e) {
 
 void MitmHostCX::inspect(char side) {
 
-    if(flow().flow().size() > inspect_cur_flow_size) {
-        _deb("MitmHostCX::inspect: flow size change: %d", flow().flow().size());
+    if(flow().data().size() > inspect_cur_flow_size) {
+        _deb("MitmHostCX::inspect: flow size change: %d", flow().data().size());
         inspect_flow_same_bytes = 0;
     }
     
-    if(flow().flow().size() > inspect_cur_flow_size || 
-                (flow().flow().size() == inspect_cur_flow_size && flow().flow().back().second->size() > inspect_flow_same_bytes) ) {
+    if(flow().data().size() > inspect_cur_flow_size ||
+       (flow().data().size() == inspect_cur_flow_size &&
+                        flow().data().back().second->size() > inspect_flow_same_bytes) ) {
 
-        if(flow().flow().size() == inspect_cur_flow_size) {
+        if(flow().data().size() == inspect_cur_flow_size) {
 
-            _deb("MitmHostCX::inspect: new data in the  same flow size %d", flow().flow().size());
+            _deb("MitmHostCX::inspect: new data in the  same flow size %d", flow().data().size());
 
         }
 
@@ -215,8 +216,8 @@ void MitmHostCX::inspect(char side) {
         }
         _deb("MitmHostCX::inspect: inspector loop end.");
         
-        inspect_cur_flow_size = flow().flow().size();
-        inspect_flow_same_bytes  = flow().flow().back().second->size();
+        inspect_cur_flow_size = flow().data().size();
+        inspect_flow_same_bytes  = flow().data().back().second->size();
     }
 }
 
@@ -255,7 +256,7 @@ void MitmHostCX::on_detect(std::shared_ptr<duplexFlowMatch> x_sig, flowMatchStat
 
     auto prep_ctx = [&]() {
         engine_ctx.origin = this;
-        engine_ctx.flow_pos = flow().flow().size() - 1;
+        engine_ctx.flow_pos = flow().data().size() - 1;
         engine_ctx.signature = x_sig;
     };
 

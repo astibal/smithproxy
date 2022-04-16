@@ -174,7 +174,7 @@ namespace sx::engine::http {
             auto const& log = log::http1;
             _deb("start");
 
-            auto const& [ http_request1_side, http_request1_buffer ] = ctx.origin->flow().flow().back();
+            auto const& [ http_request1_side, http_request1_buffer ] = ctx.origin->flow().data().back();
 
             // limit this rather info/convenience regexing to 128 bytes
 
@@ -439,7 +439,7 @@ namespace sx::engine::http {
             }
 
             auto const& log = log::http2;
-            auto const& [ side, h2_buffer ] = ctx.origin->flow().flow().back();
+            auto const& [ side, h2_buffer ] = ctx.origin->flow().data().back();
 
             _dia("start at flow #%d", ctx.origin->flow().size());
             _dia("flow path: %s", ctx.origin->flow().hr().c_str());

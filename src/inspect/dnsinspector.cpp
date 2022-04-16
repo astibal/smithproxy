@@ -56,7 +56,9 @@ void DNS_Inspector::update(AppHostCX* cx) {
 
 
     duplexFlow& flow = cx->flow();
-    _dia("DNS_Inspector::update[%s]: stage %d start (flow size %d, last flow entry data length %d)", cx->c_type(), stage, flow.flow().size(), flow.flow().back().second->size());
+    _dia("DNS_Inspector::update[%s]: stage %d start (flow size %d, last flow entry data length %d)", cx->c_type(), stage,
+         flow.data().size(),
+         flow.data().back().second->size());
 
     /* INIT */
 
@@ -71,7 +73,7 @@ void DNS_Inspector::update(AppHostCX* cx) {
 
 
 //    std::pair<char,buffer*> cur_pos = flow.flow().back();
-    auto const& [ cur_side, cur_buffer ] = flow.flow().back();
+    auto const& [ cur_side, cur_buffer ] = flow.data().back();
 
     std::shared_ptr<DNS_Packet> ptr;
 
@@ -272,7 +274,7 @@ void DNS_Inspector::update(AppHostCX* cx) {
         }
     }
 
-    _dia("DNS_Inspector::update[%s]: stage %d end (flow size %d)", cx->c_type(), stage, flow.flow().size());
+    _dia("DNS_Inspector::update[%s]: stage %d end (flow size %d)", cx->c_type(), stage, flow.data().size());
 }
 
 
