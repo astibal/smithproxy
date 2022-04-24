@@ -380,7 +380,7 @@ else()
 endif()
 
 if("${USE_HTTP2_ENGINE}" STREQUAL "Y")
-    target_link_libraries(smithproxy z)
+    # target_link_libraries(smithproxy z)
 endif()
 
 if(HIREDIS_FOUND)
