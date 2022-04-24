@@ -166,9 +166,12 @@ namespace sx::engine::http {
 
 
         struct Http2Stream {
+            using value_list_t = std::map<std::string, std::vector<std::string>, std::less<>>;
+
             enum content_type_t { PLAIN, GZIP };
 
             content_type_t content_encoding_;
+            value_list_t headers_;
             std::optional<GunZip> gzip;
         };
 

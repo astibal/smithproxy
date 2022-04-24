@@ -7,11 +7,6 @@
 #include <ext/hpack/hpack.hpp>
 #endif
 
-#ifdef USE_ZLIB
-#include <zlib.h>
-#endif
-
-
 namespace sx::engine::http {
 
     namespace v1 {
@@ -272,7 +267,60 @@ namespace sx::engine::http {
         }
 
 
-        void process_headers(EngineCtx& ctx, long stream_id, uint8_t flags, buffer const& data) {
+        void process_header_entry(EngineCtx& ctx, side_t side, std::shared_ptr<app_HttpRequest>& app_data,
+                                  long stream_id, uint8_t flags, buffer const& data, std::string const& hdr, std::string const& hdr_elem) {
+            auto const& log = log::http2_headers;
+
+            auto* state_data = std::any_cast<Http2Connection>(& ctx.state_data);
+
+            auto arrow = arrow_from_side(side);
+            _dia("Frame<%ld>: %c%c header/%s : %s", stream_id,
+                        arrow, arrow,
+                        escape(hdr).c_str(), escape(hdr_elem).c_str());
+            if(state_data) {
+
+                auto touch_header = [&](const char* hdr_name, bool clear = false) {
+                    if(clear)
+                        state_data->streams[stream_id].headers_[hdr_name].clear();
+                    state_data->streams[stream_id].headers_[hdr_name].emplace_back(hdr_elem);
+                };
+
+
+                if(side == side_t::LEFT) {
+
+                    if (hdr == ":authority") {
+                        touch_header(":authority", true);
+                        if (app_data) {
+                            app_data->host.clear();
+                            app_data->method.clear();
+                            app_data->uri.clear();
+                            app_data->params.clear();
+                            app_data->referer.clear();
+                            app_data->proto.clear();
+
+                            app_data->host = hdr_elem;
+                        }
+                    } else if (hdr == ":scheme") {
+                        touch_header(":scheme");
+                        if (app_data) app_data->proto = hdr_elem + "://";
+                    } else if (hdr == ":path") {
+                        touch_header(":path");
+                        if (app_data) app_data->uri = hdr_elem;
+                    } else if (hdr == ":method") {
+                        touch_header(":method");
+                        if (app_data) app_data->method = hdr_elem;
+                    }
+
+                }
+                else {
+                    if(hdr == "content-encoding") {
+                        if(hdr_elem == "gzip") state_data->streams[stream_id].content_encoding_ = Http2Stream::GZIP;
+                    }
+                }
+            }
+        }
+
+        void process_headers(EngineCtx& ctx, side_t side, long stream_id, uint8_t flags, buffer const& data) {
 
 #ifdef USE_HPACK
             auto const& log = log::http2_headers;
@@ -281,17 +329,17 @@ namespace sx::engine::http {
             auto data_string = std::string((const char*)data.data(), data.size());
             auto vec = std::vector<uint8_t>(data_string.begin(), data_string.end());
 
-            auto* state_data = std::any_cast<Http2Connection>(& ctx.state_data);
+            if(not ctx.application_data) {
+                ctx.application_data = std::make_unique<app_HttpRequest>();
+            }
+            auto my_app_data = std::dynamic_pointer_cast<app_HttpRequest>(ctx.application_data);
+            if(my_app_data) my_app_data->version = app_HttpRequest::HTTP_VER::HTTP2;
 
             if (dec.decode(vec)) {
                 for (auto& [ hdr, vlist ] : dec.headers()) {
                     for(auto const& hdr_elem: vlist) {
-                        _dia("Frame: header/%s : %s", escape(hdr).c_str(), escape(hdr_elem).c_str());
-                        if(state_data) {
-                            if(hdr == "content-encoding") {
-                                if(hdr_elem == "gzip") state_data->streams[stream_id].content_encoding_ = Http2Stream::GZIP;
-                            }
-                        }
+                        process_header_entry(ctx, side, my_app_data,
+                                             stream_id, flags, data, hdr, hdr_elem);
                     }
                 }
             } else {
@@ -300,7 +348,7 @@ namespace sx::engine::http {
 #endif
         }
 
-        void process_data(EngineCtx& ctx, long stream_id, uint8_t flags, buffer const& data) {
+        void process_data(EngineCtx& ctx, side_t side, long stream_id, uint8_t flags, buffer const& data) {
 //            auto const &log = log::http2;
 
             auto* state_data = std::any_cast<Http2Connection>(& ctx.state_data);
@@ -337,10 +385,10 @@ namespace sx::engine::http {
         }
 
 
-        void process_other(EngineCtx& ctx, long stream_id, uint8_t flags, buffer const& data) {
+        void process_other(EngineCtx& ctx, side_t side, long stream_id, uint8_t flags, buffer const& data) {
         }
 
-        std::size_t process_frame(EngineCtx& ctx, buffer& frame) {
+        std::size_t process_frame(EngineCtx& ctx, side_t side, buffer& frame) {
             auto const& log = log::http2_frames;
 
             auto frame_sz = find_frame_sz(frame);
@@ -353,7 +401,7 @@ namespace sx::engine::http {
                 auto typ = frame.get_at<uint8_t>(cur_off);   cur_off += sizeof(uint8_t);
 
                 auto flg = frame.get_at<uint8_t>(cur_off);   cur_off += sizeof(uint8_t);
-                auto sid = (long) ntohl(frame.get_at<uint32_t>(cur_off));   cur_off += sizeof(uint32_t);
+                auto stream_id = (long) ntohl(frame.get_at<uint32_t>(cur_off)); cur_off += sizeof(uint32_t);
 
                 // end of preamble
 
@@ -369,7 +417,7 @@ namespace sx::engine::http {
 
                 {
                     _inf("Frame: type = %s, flags = %d, size = %d, stream = %d", frame_type_str(typ), flg, frame_sz,
-                         sid);
+                         stream_id);
 
                     if (flg & 0x20)
                         _inf("Frame prio: stream dep = %X, weight: %d", stream_dep, wgh);
@@ -378,15 +426,15 @@ namespace sx::engine::http {
 
                     if(typ == 0) {
                         auto data = frame.view(preamble_sz + add_hdr, frame_sz - add_hdr);
-                        process_data(ctx, sid, flg, data);
+                        process_data(ctx, side, stream_id, flg, data);
                     }
                     else if(typ == 1) {
                         auto data = frame.view(preamble_sz + add_hdr, frame_sz - add_hdr);
-                        process_headers(ctx, sid, flg, data);
+                        process_headers(ctx, side, stream_id, flg, data);
                     }
                     else {
                         auto data = frame.view(preamble_sz + add_hdr, frame_sz - add_hdr);
-                        process_other(ctx, sid, flg, data);
+                        process_other(ctx, side, stream_id, flg, data);
                     }
 
 
@@ -494,7 +542,8 @@ namespace sx::engine::http {
                 frame = frame.view(cur_off);
 
                 try {
-                    cur_off = process_frame(ctx, frame);
+                    // convert side from signature read/write r/w meaning to left/right l/r
+                    cur_off = process_frame(ctx, side == 'r' ? side_t::LEFT : side_t::RIGHT , frame);
                     total += cur_off;
                 }
                 catch(std::out_of_range const& e) {

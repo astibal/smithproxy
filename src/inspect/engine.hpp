@@ -70,7 +70,7 @@ namespace sx::engine {
         MitmHostCX* origin = nullptr;
         std::shared_ptr<duplexFlowMatch> signature;
         std::size_t flow_pos = 0;
-        std::unique_ptr<ApplicationData> application_data;
+        std::shared_ptr<ApplicationData> application_data;
 
         // state data to be placed here
         std::any state_info;  // general positional information, etc

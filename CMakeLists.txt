@@ -27,7 +27,7 @@ set(USE_EXTRA_DEBUG "N")
 
 #### experimental, tempo variables
 
-set(USE_HTTP2_ENGINE "N")
+set(USE_HTTP2_ENGINE "Y")
 ###
 
 if("${USE_EXPERIMENT}" STREQUAL "Y")
@@ -55,7 +55,6 @@ if("${USE_HTTP2_ENGINE}" STREQUAL "Y")
     message(" >> http2 enabled" )
     add_definitions(-DUSE_HTTP2)
     add_definitions(-DUSE_HPACK)
-    add_definitions(-DUSE_ZLIB)
 endif()
 
 
