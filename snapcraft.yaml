@@ -1,6 +1,6 @@
 
 name: smithproxy
-version: 0.9.28-dev
+version: 0.9.29
 summary: Fast and featured transparent TCP/UDP/TLS proxy
 description: |
  Smithproxy is fast transparent TCP/UDP/TLS (SSL) proxy. It's highly configurable
@@ -14,13 +14,13 @@ description: |
 
  Policy profiles:
     * content - replacing data online, writing to disk
-    * dns - dns inspection settigns
-    * tls - per-policy specific settigns
+    * dns - dns inspection settings
+    * tls - per-policy specific settings
     * auth - match users and enforce authentication
     * detection - match specific patterns in the traffic
 
  TLS protocol:
-    * dumping traffic plaintext into pcapng or text files, exporting sslkeylog
+    * dumping traffic plaintext into pcapng, text or remote GRE, exporting sslkeylog
     * TLS security checks (ocsp, ocsp stapling, automatic crl download)
     * Certificate Transparency checks for outbound connections
     * Html replacement warnings

@@ -32,6 +32,13 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 * [ ] memory pool ONLY execution
 * [ ] routing - SNI-based, ... more options
 
+## What's new in 0.9.29
+
+- introduce HTTP/2 engine
+- logging is now moved to /var/log/smithproxy/
+- improve CLI `diag` commands
+- fix IPv6 SOCKS5 features
+- coverity and more fixes
 
 ## What's new in 0.9.28
 
