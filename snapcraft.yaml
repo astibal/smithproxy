@@ -58,6 +58,9 @@ layout:
   /etc/ca-certificates.conf:
     bind-file: $SNAP_DATA/etc/ca-certificates.conf
 
+  /etc/wgetrc:
+    bind-file: $SNAP_DATA/etc/wgetrc
+
   /usr/share/ca-certificates:
     bind: $SNAP_DATA/ca-bundle
 
@@ -76,7 +79,7 @@ layout:
   /usr/bin/smithd:
     bind-file: $SNAP/usr/bin/smithd
 
-  /var/log:
+  /var/log/smithproxy:
     bind: $SNAP_DATA/log
 
   /var/smithproxy:

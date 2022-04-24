@@ -714,6 +714,8 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
         CfgFactory::get()->load_db_prof_auth();
         CfgFactory::get()->load_db_routing();
 
+        // clean policy list: list behavior, elements are not overwritten, but added
+        CfgFactory::get()->cleanup_db_policy();
         CfgFactory::get()->load_db_policy();
 
 
