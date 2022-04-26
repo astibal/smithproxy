@@ -53,12 +53,29 @@ namespace sx::engine {
     struct ApplicationData: public socle::sobject {
         ~ApplicationData() override = default;
         bool is_ssl = false;
+        std::map<std::string,std::string, std::less<>> properties;
 
         virtual std::string original_request() { return request(); }; // parent request
         virtual std::string request() { return std::string(""); };
 
         bool ask_destroy() override { return false; };
-        std::string to_string(int verbosity) const override { return string_format("%s AppData: generic", c_type()); };
+        std::string to_string(int verbosity) const override {
+
+            if(verbosity >= iDEB) {
+                std::stringstream ss;
+
+                if (is_ssl) ss << "[ssl=true]";
+                if (not properties.empty()) {
+                    ss << "+";
+                    for (auto const &[k, v]: properties) {
+                        ss << "[" << k << "=" << v << "]";
+                    }
+                }
+                return ss.str();
+            }
+
+            return {};
+        };
 
         TYPENAME_OVERRIDE("ApplicationData")
 

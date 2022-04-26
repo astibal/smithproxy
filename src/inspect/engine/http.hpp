@@ -119,7 +119,11 @@ namespace sx::engine::http {
         std::string to_string (int verbosity) const override {
             std::stringstream ret;
 
-            ret << "AppData: " << proto << host << uri << params;
+            ret << "AppData: ";
+            if(auto up_str = ApplicationData::to_string(verbosity); not up_str.empty()) {
+                ret << up_str << ": ";
+            }
+            ret << proto << host << uri << params;
 
             if (verbosity > INF) {
 
