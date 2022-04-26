@@ -172,10 +172,13 @@ namespace sx::engine::http {
         struct Http2Stream {
             using value_list_t = std::map<std::string, std::vector<std::string>, std::less<>>;
 
-            enum content_type_t { PLAIN, GZIP };
+            enum class content_type_t { PLAIN, GZIP };
+            enum class sub_app_t { UNKNOWN, DNS };
 
-            content_type_t content_encoding_;
-            value_list_t headers_;
+            content_type_t content_encoding_ { content_type_t::PLAIN };
+            sub_app_t sub_app_ { sub_app_t::UNKNOWN };
+            value_list_t request_headers_;
+            value_list_t response_headers_;
             std::optional<GunZip> gzip;
         };
 
@@ -192,6 +195,7 @@ namespace sx::engine::http {
         static inline logan_lite http2_state {"com.app.http2.state" };
         static inline logan_lite http2_headers {"com.app.http2.headers" };
         static inline logan_lite http2_frames {"com.app.http2.frames" };
+        static inline logan_lite http2_subapp {"com.app.http2.subapp" };
     };
 }
 

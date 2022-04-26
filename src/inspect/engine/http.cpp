@@ -267,7 +267,41 @@ namespace sx::engine::http {
         }
 
 
-        void process_header_entry(EngineCtx& ctx, side_t side, std::shared_ptr<app_HttpRequest>& app_data,
+        void detect_app(EngineCtx& ctx, side_t side, std::shared_ptr<app_HttpRequest> const& app_data,
+                        long stream_id, uint8_t flags, buffer const& data) {
+
+            auto* state_data = std::any_cast<Http2Connection>(& ctx.state_data);
+            if(state_data) {
+                auto &stream_state = state_data->streams[stream_id];
+
+                auto find_header_last_val = [&](std::string_view hdr) -> std::optional<std::string> {
+                    if(auto const& it = stream_state.request_headers_.find(hdr); it != stream_state.request_headers_.end()) {
+                        if(not it->second.empty()) {
+                            auto const& hdr_val = it->second.back();
+                            return std::make_optional<std::string>(hdr_val);
+                        }
+                    }
+                    return std::nullopt;
+                };
+
+                if(side == side_t::LEFT) {
+                    if(auto path = find_header_last_val(":path"); path and path.value() == "/dns-query") {
+                        stream_state.sub_app_ = Http2Stream::sub_app_t::DNS;
+                    }
+                    // now look in properties!
+//                    else if(auto const& val = app_data->properties["content-type"] ; not val.empty()) {
+//                        if(val == "application/dns-message")
+//                            stream_state.sub_app_ = Http2Stream::sub_app_t::DNS;
+//                    }
+                    else if(auto const& val = app_data->properties["accept"] ; not val.empty()) {
+                        if(val == "application/dns-message")
+                            stream_state.sub_app_ = Http2Stream::sub_app_t::DNS;
+                    }
+                }
+            }
+        }
+
+        void process_header_entry(EngineCtx& ctx, side_t side, std::shared_ptr<app_HttpRequest> const& app_data,
                                   long stream_id, uint8_t flags, buffer const& data, std::string const& hdr, std::string const& hdr_elem) {
             auto const& log = log::http2_headers;
 
@@ -279,10 +313,14 @@ namespace sx::engine::http {
                         escape(hdr).c_str(), escape(hdr_elem).c_str());
             if(state_data) {
 
+                auto& stream_state = state_data->streams[stream_id];
+
                 auto touch_header = [&](const char* hdr_name, bool clear = false) {
+                    auto& headers = side == side_t::LEFT ? stream_state.request_headers_ : stream_state.response_headers_;
+
                     if(clear)
-                        state_data->streams[stream_id].headers_[hdr_name].clear();
-                    state_data->streams[stream_id].headers_[hdr_name].emplace_back(hdr_elem);
+                        headers[hdr_name].clear();
+                    headers[hdr_name].emplace_back(hdr_elem);
                 };
 
 
@@ -301,22 +339,23 @@ namespace sx::engine::http {
                             app_data->host = hdr_elem;
                         }
                     } else if (hdr == ":scheme") {
-                        touch_header(":scheme");
                         if (app_data) app_data->proto = hdr_elem + "://";
                     } else if (hdr == ":path") {
-                        touch_header(":path");
                         if (app_data) app_data->uri = hdr_elem;
                     } else if (hdr == ":method") {
-                        touch_header(":method");
                         if (app_data) app_data->method = hdr_elem;
                     }
+
+                    // save all left (request) values
+                    app_data->properties[hdr] = hdr_elem;
 
                 }
                 else {
                     if(hdr == "content-encoding") {
-                        if(hdr_elem == "gzip") state_data->streams[stream_id].content_encoding_ = Http2Stream::GZIP;
+                        if(hdr_elem == "gzip") stream_state.content_encoding_ = Http2Stream::content_type_t::GZIP;
                     }
                 }
+                touch_header(hdr.c_str());
             }
         }
 
@@ -342,6 +381,8 @@ namespace sx::engine::http {
                                              stream_id, flags, data, hdr, hdr_elem);
                     }
                 }
+                detect_app(ctx, side, my_app_data, stream_id, flags, data);
+
             } else {
                 _err("Frame: hpack decode error");
             }
@@ -353,7 +394,9 @@ namespace sx::engine::http {
 
             auto* state_data = std::any_cast<Http2Connection>(& ctx.state_data);
             if(state_data) {
-                if(state_data->streams[stream_id].content_encoding_ == Http2Stream::GZIP) {
+                auto& stream_state = state_data->streams[stream_id];
+
+                if(stream_state.content_encoding_ == Http2Stream::content_type_t::GZIP) {
 //                    auto& gz_instance = state_data->streams[stream_id].gzip;
 //
 //                    if(gz_instance.has_value() and (flags & 0x01u) != 0) {
@@ -380,6 +423,43 @@ namespace sx::engine::http {
 //                            gz_instance->in.append(data);
 //                        }
 //                    }
+                }
+
+                switch (stream_state.sub_app_) {
+
+                    case Http2Stream::sub_app_t::DNS:
+                        if(side == side_t::RIGHT) {
+                            auto const &log = log::http2_subapp;
+
+                            std::string content_type;
+                            // get content-type from stream response headers and fallback to 'accept' value
+                            if(stream_state.response_headers_.find("content-type") != stream_state.response_headers_.end()) {
+                                content_type = stream_state.response_headers_["content-type"].back();
+                            }
+                            if(content_type.empty())
+                                content_type = ctx.application_data->properties["accept"];
+
+                            _dia("subapp detected: DoH+%s", content_type.c_str());
+                            _deb("DNS response bytes: \r\n%s", hex_dump(data, 4, 0, true).c_str());
+
+
+                            if(content_type == "application/dns-message") {
+                                auto resp = std::make_shared<DNS_Response>();
+
+                                if (auto parsed_bytes = resp->load(&data); parsed_bytes) {
+                                    _dia("DNS response: %s", resp->to_string(iINF).c_str());
+                                }
+                            }
+                            else {
+                                _err("DNS response: unknown content type");
+                            }
+                        }
+                        break;
+
+
+                    case Http2Stream::sub_app_t::UNKNOWN:
+                    default:
+                        ;
                 }
             }
         }
