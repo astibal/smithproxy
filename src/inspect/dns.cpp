@@ -63,7 +63,7 @@ const char* DNSFactory::dns_record_type_str(int a) {
 }
 
 
-unsigned int DNSFactory::skip_qname(unsigned char* ptr, unsigned long maxlen, std::string* str_storage) const {
+unsigned int DNSFactory::skip_qname(const unsigned char* ptr, unsigned long maxlen, std::string* str_storage) const {
     unsigned int xi = 0;
 
     _deb("skip_qname:\r\n%s",hex_dump(ptr, static_cast<int>(maxlen), 4, 0, true).c_str());
@@ -95,7 +95,7 @@ unsigned int DNSFactory::skip_qname(unsigned char* ptr, unsigned long maxlen, st
 }
 
 
-std::string DNSFactory::construct_qname(unsigned char* qname_start, unsigned char* packet_start, size_t packet_size, unsigned int loopmax) {
+std::string DNSFactory::construct_qname(const unsigned char* qname_start, const unsigned char* packet_start, size_t packet_size, unsigned int loopmax) {
     std::string to_ret;
     unsigned int part_size = 0;
 
@@ -316,9 +316,9 @@ DNS_Response* DNSFactory::resolve_dns_s (std::string const& hostname, DNS_Record
 
 
 /*
- * returns 0 on OK, >0 if  there are still some bytes to read and -1 on error.
+ * returns value of 0 on OK completely, >0 if  there are still some bytes; nullopt on failure
  */
-std::optional<size_t> DNS_Packet::load(buffer* src) {
+std::optional<size_t> DNS_Packet::load(const buffer *src) {
 
     loaded_at = ::time(nullptr);
 

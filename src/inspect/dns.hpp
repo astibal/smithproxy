@@ -99,8 +99,8 @@ public:
     /// @brief check bytes in the range starting at 'ptr' to 'maxlen', and parse the text as DNS QNAME.
     /// @returns next index behind QNAME data.
     /// Used to quickly pass the QNAME when parsing DNS packet and follow on to pase next elements.
-    unsigned int skip_qname(unsigned char* ptr, unsigned long maxlen, std::string* str_storage = nullptr) const;
-    std::string construct_qname(unsigned char* qname_start, unsigned char* packet_start, size_t packet_size, unsigned int loop_max=16);
+    unsigned int skip_qname(const unsigned char* ptr, unsigned long maxlen, std::string* str_storage = nullptr) const;
+    std::string construct_qname(const unsigned char* qname_start, const unsigned char* packet_start, size_t packet_size, unsigned int loop_max=16);
     int generate_dns_request(unsigned short id, buffer& b, std::string const& hostname, DNS_Record_Type t);
 
     // send DNS request out to network. Return socket FD, or non-positive on error.
@@ -246,7 +246,7 @@ public:
 
     ~DNS_Packet() override = default;
 
-    std::optional<size_t> load(buffer* src); // initialize from memory. if non-zero is returned, there is yet another data and new DNS_packet should be read.
+    std::optional<size_t> load(const buffer *src); // initialize from memory. if non-zero is returned, there is yet another data and new DNS_packet should be read.
 
     inline uint16_t id() const { return id_; }
     inline uint16_t flags() const { return flags_; } // todo: split and inspect all bits of this field
