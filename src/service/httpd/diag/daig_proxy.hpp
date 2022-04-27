@@ -112,7 +112,7 @@ static nlohmann::json json_proxy_session_list(struct MHD_Connection * connection
 
                     auto lc_ = std::scoped_lock(wrk.second->proxy_lock());
 
-                    for(auto& [ p, thr ] : wrk.second->proxies()) {
+                    for(auto const& [ p, _ ] : wrk.second->proxies()) {
                         if(auto* proxy = dynamic_cast<MitmProxy*>(p.get()); p != nullptr) {
                             auto single_ret = json_single_proxy(proxy);
                             if (single_ret.has_value()) {

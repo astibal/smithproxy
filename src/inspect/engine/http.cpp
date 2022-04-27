@@ -7,6 +7,8 @@
 #include <ext/hpack/hpack.hpp>
 #endif
 
+#include <inspect/dnsinspector.hpp>
+
 namespace sx::engine::http {
 
     namespace v1 {
@@ -167,7 +169,7 @@ namespace sx::engine::http {
             }
 
             auto const& log = log::http1;
-            _deb("start");
+            _deb("start: cx.meter_read %ldB, cx.meter_write %ldB", ctx.origin->meter_read_bytes, ctx.origin->meter_write_bytes);
 
             auto const& [ http_request1_side, http_request1_buffer ] = ctx.origin->flow().data().back();
 
@@ -444,10 +446,16 @@ namespace sx::engine::http {
 
 
                             if(content_type == "application/dns-message") {
+
+                                // acknowledge next 5kB as expected continuous flow data
+                                ctx.origin->acknowledge_continuous_mode(5000);
+
                                 auto resp = std::make_shared<DNS_Response>();
 
                                 if (auto parsed_bytes = resp->load(&data); parsed_bytes) {
                                     _dia("DNS response: %s", resp->to_string(iINF).c_str());
+
+                                    DNS_Inspector::store(resp);
                                 }
                             }
                             else {

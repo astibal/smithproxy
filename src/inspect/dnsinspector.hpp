@@ -60,14 +60,14 @@ public:
 
     std::shared_ptr<DNS_Request> find_request(uint16_t r) { auto it = requests_.find(r); if(it == requests_.end()) { return nullptr; } else { return it->second; }  }
     bool validate_response(std::shared_ptr<DNS_Response> ptr);
-    bool store(std::shared_ptr<DNS_Response> ptr);
+    static bool store(std::shared_ptr<DNS_Response> ptr);
     void apply_verdict(AppHostCX* cx) override;
 
     std::string to_string(int verbosity) const override;
 
     std::shared_ptr<buffer> verdict_response() override { return cached_response; };
 private:
-    logan_lite log {"com.dns"};
+    static inline logan_lite log {"com.dns" };
 
     bool is_tcp = false;
 

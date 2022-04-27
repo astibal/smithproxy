@@ -265,11 +265,10 @@ void DNS_Inspector::update(AppHostCX* cx) {
                     _dia("DNS_Inspector::update[%s]: no interesting info there, deleted", cx->c_type());
                 }
 
-                    if (is_tcp)
-                        cx->idle_delay(30);
-                    else
-                        cx->idle_delay(10);
-
+                if (is_tcp)
+                    cx->idle_delay(30);
+                else
+                    cx->idle_delay(10);
             }
         }
     }
@@ -281,6 +280,7 @@ void DNS_Inspector::update(AppHostCX* cx) {
 
 
 bool DNS_Inspector::store(std::shared_ptr<DNS_Response> ptr) {
+
     bool is_a_record = true;
 
     std::string ip = ptr->answer_str_A();

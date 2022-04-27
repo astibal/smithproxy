@@ -53,7 +53,7 @@ namespace sx::engine {
     struct ApplicationData: public socle::sobject {
         ~ApplicationData() override = default;
         bool is_ssl = false;
-        std::map<std::string,std::string, std::less<>> properties;
+        std::unordered_map<std::string,std::string> properties;
 
         virtual std::string original_request() { return request(); }; // parent request
         virtual std::string request() { return std::string(""); };
