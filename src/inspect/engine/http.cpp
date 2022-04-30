@@ -364,6 +364,8 @@ namespace sx::engine::http {
         void process_headers(EngineCtx& ctx, side_t side, long stream_id, uint8_t flags, buffer const& data) {
 
 #ifdef USE_HPACK
+            if(data.empty()) return;
+
             auto const& log = log::http2_headers;
 
             HPACK::decoder_t dec;
@@ -393,6 +395,8 @@ namespace sx::engine::http {
 
         void process_data(EngineCtx& ctx, side_t side, long stream_id, uint8_t flags, buffer const& data) {
 //            auto const &log = log::http2;
+
+            if(data.empty()) return;
 
             auto* state_data = std::any_cast<Http2Connection>(& ctx.state_data);
             if(state_data) {
@@ -474,9 +478,13 @@ namespace sx::engine::http {
 
 
         void process_other(EngineCtx& ctx, side_t side, long stream_id, uint8_t flags, buffer const& data) {
+            if(data.empty()) return;
         }
 
         std::size_t process_frame(EngineCtx& ctx, side_t side, buffer& frame) {
+
+            if(frame.empty()) return 0L;
+
             auto const& log = log::http2_frames;
 
             auto frame_sz = find_frame_sz(frame);
