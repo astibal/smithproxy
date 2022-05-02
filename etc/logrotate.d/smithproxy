@@ -1,15 +1,12 @@
 # log rotating for smithproxy
 
-/var/log/smithproxy* {
-  copytruncate
-  rotate 7
-  daily
-  compress
-  missingok
-  notifempty
-}
-
-/var/log/smithproxy/* {
+/var/log/smithproxy/*[!.]gz
+/var/log/smithproxy/*.[!g]z
+/var/log/smithproxy/*.g[!z]
+/var/log/smithproxy/*[!.][!g]z
+/var/log/smithproxy/*[!.]g[!z]
+/var/log/smithproxy/*.[!g][!z]
+/var/log/smithproxy/*[!.][!g][!z] {
   copytruncate
   rotate 7
   daily
