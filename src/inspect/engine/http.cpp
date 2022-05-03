@@ -523,20 +523,21 @@ namespace sx::engine::http {
 
                     _deb("Frame: \r\n%s", hex_dump(frame, 4, 0, true).c_str());
 
-                    if(typ == 0) {
-                        auto data = frame.view(preamble_sz + add_hdr, frame_sz - add_hdr);
-                        process_data(ctx, side, stream_id, flg, data);
-                    }
-                    else if(typ == 1) {
-                        auto data = frame.view(preamble_sz + add_hdr, frame_sz - add_hdr);
-                        process_headers(ctx, side, stream_id, flg, data);
+                    if(frame_sz > 0) {
+                        if (typ == 0) {
+                            auto data = frame.view(preamble_sz + add_hdr, frame_sz - add_hdr);
+                            process_data(ctx, side, stream_id, flg, data);
+                        } else if (typ == 1) {
+                            auto data = frame.view(preamble_sz + add_hdr, frame_sz - add_hdr);
+                            process_headers(ctx, side, stream_id, flg, data);
+                        } else {
+                            auto data = frame.view(preamble_sz + add_hdr, frame_sz - add_hdr);
+                            process_other(ctx, side, stream_id, flg, data);
+                        }
                     }
                     else {
-                        auto data = frame.view(preamble_sz + add_hdr, frame_sz - add_hdr);
-                        process_other(ctx, side, stream_id, flg, data);
+                        _inf("Frame: zero size");
                     }
-
-
                 }
             }
 
