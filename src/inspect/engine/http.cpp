@@ -378,18 +378,21 @@ namespace sx::engine::http {
             auto my_app_data = std::dynamic_pointer_cast<app_HttpRequest>(ctx.application_data);
             if(my_app_data) my_app_data->version = app_HttpRequest::HTTP_VER::HTTP2;
 
-            if (dec.decode(vec)) {
-                for (auto& [ hdr, vlist ] : dec.headers()) {
-                    for(auto const& hdr_elem: vlist) {
-                        process_header_entry(ctx, side, my_app_data,
-                                             stream_id, flags, data, hdr, hdr_elem);
-                    }
+            try {
+                if (not dec.decode(vec)) {
+                    _err("Frame: hpack decode error");
                 }
-                detect_app(ctx, side, my_app_data, stream_id, flags, data);
-
-            } else {
-                _err("Frame: hpack decode error");
+            } catch (std::invalid_argument const& e) {
+                _err("Frame: hpack decode exception: %s", e.what());
             }
+
+            for (auto& [ hdr, vlist ] : dec.headers()) {
+                for(auto const& hdr_elem: vlist) {
+                    process_header_entry(ctx, side, my_app_data,
+                                         stream_id, flags, data, hdr, hdr_elem);
+                }
+            }
+            detect_app(ctx, side, my_app_data, stream_id, flags, data);
 #endif
         }
 
