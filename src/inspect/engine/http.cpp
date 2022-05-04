@@ -43,44 +43,44 @@ namespace sx::engine::http {
             auto const& log = log::http1;
 
             auto ix_host = data.find("Host: ");
-            if (ix_host != std::string::npos) {
 
-                std::string host_start( data.substr(ix_host, std::min(std::size_t(128), data.size() - ix_host)) );
-                std::smatch m_host;
+            // no point to continue
+            if(ix_host == std::string::npos) return;
 
-                if (std::regex_search(host_start, m_host, ProtoRex::http_req_host())) {
-                    if (!m_host.empty()) {
-                        auto str_temp = m_host[1].str();
+            std::string host_start( data.substr(ix_host, std::min(std::size_t(128), data.size() - ix_host)) );
+            std::smatch m_host;
 
-                        if (not ctx.application_data) {
-                            ctx.application_data = std::make_unique<app_HttpRequest>();
-                        }
+            if (std::regex_search(host_start, m_host, ProtoRex::http_req_host()) and not m_host.empty()) {
 
-                        auto *app_request = dynamic_cast<app_HttpRequest *>(ctx.application_data.get());
-                        if (app_request != nullptr) {
-                            app_request->host = str_temp;
-                            _dia("Host: %s", app_request->host.c_str());
+                auto str_temp = m_host[1].str();
+
+                if (not ctx.application_data) {
+                    ctx.application_data = std::make_unique<app_HttpRequest>();
+                }
+
+                auto *app_request = dynamic_cast<app_HttpRequest *>(ctx.application_data.get());
+                if (app_request != nullptr) {
+                    app_request->host = str_temp;
+                    _dia("Host: %s", app_request->host.c_str());
 
 
-                            // NOTE: should be some config variable
-                            bool check_inspect_dns_cache = true;
-                            if (check_inspect_dns_cache) {
+                    // NOTE: should be some config variable
+                    bool check_inspect_dns_cache = true;
+                    if (check_inspect_dns_cache) {
 
-                                std::scoped_lock<std::recursive_mutex> d_(DNS::get().dns_lock());
+                        std::scoped_lock<std::recursive_mutex> d_(DNS::get().dns_lock());
 
-                                auto dns_resp_a = DNS::get().dns_cache().get("A:" + app_request->host);
-                                auto dns_resp_aaaa = DNS::get().dns_cache().get("AAAA:" + app_request->host);
+                        auto dns_resp_a = DNS::get().dns_cache().get("A:" + app_request->host);
+                        auto dns_resp_aaaa = DNS::get().dns_cache().get("AAAA:" + app_request->host);
 
-                                if (dns_resp_a && ctx.origin->com()->l3_proto() == AF_INET) {
-                                    _deb("HTTP inspection: Host header matches DNS: %s", ESC(dns_resp_a->question_str_0()));
-                                } else if (dns_resp_aaaa && ctx.origin->com()->l3_proto() == AF_INET6) {
-                                    _deb("HTTP inspection: Host header matches IPv6 DNS: %s",
-                                         ESC(dns_resp_aaaa->question_str_0()));
-                                } else {
-                                    _war("HTTP inspection: 'Host' header value '%s' DOESN'T match DNS!",
-                                         app_request->host.c_str());
-                                }
-                            }
+                        if (dns_resp_a && ctx.origin->com()->l3_proto() == AF_INET) {
+                            _deb("HTTP inspection: Host header matches DNS: %s", ESC(dns_resp_a->question_str_0()));
+                        } else if (dns_resp_aaaa && ctx.origin->com()->l3_proto() == AF_INET6) {
+                            _deb("HTTP inspection: Host header matches IPv6 DNS: %s",
+                                 ESC(dns_resp_aaaa->question_str_0()));
+                        } else {
+                            _war("HTTP inspection: 'Host' header value '%s' DOESN'T match DNS!",
+                                 app_request->host.c_str());
                         }
                     }
                 }
@@ -250,7 +250,7 @@ namespace sx::engine::http {
         uint32_t find_frame_sz(buffer const& frame) {
             auto const& log = log::http2;
 
-            std::size_t cur_off = 0;
+            unsigned int cur_off = 0;
 
             buffer a(4);
 
