@@ -42,7 +42,8 @@ It uses our C++17 socket proxying library called [*socle*](https://github.com/as
 ## Other:
 * Local and LDAP user authentication using builtin web portal (using complementary package)
 * SOCKS4/SOCKS5 explicit proxy with DNS hostname support
-* DNS inspection allows FQDN policy objects
+* Engines: limited HTTP1 and HTTP2 support
+* DNS inspection allows FQDN policy objects, including DoH
 * Policies based on FQDN and 2nd level DNS domain
 * both IPv4 and IPv6 are supported
 * detailed debugging messages in CLI if needed
