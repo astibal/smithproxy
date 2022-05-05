@@ -567,7 +567,9 @@ int main(int argc, char *argv[]) {
         this_daemon->write_pidfile();
     }
 
+    #ifndef USE_OPENSSL300
     CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON);
+    #endif
 
     std::string friendly_thread_name_smithd = "sxy_smithd";
 
