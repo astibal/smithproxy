@@ -79,6 +79,7 @@ echo "... OS detected: $DIST version $REV"
 
 if [ "${DIST}" = "Ubuntu" ]; then
 
+   LIBSSL="libssl1.1"
    # specifics
    if [ "${REV}" = "20.04" ]; then
         SX_LIBCONFIG_VER="9v5"
@@ -86,6 +87,10 @@ if [ "${DIST}" = "Ubuntu" ]; then
    elif [ "${REV}" = "21.04" ]; then
         SX_LIBCONFIG_VER="9v5"
         SX_GCC_VER="11"
+   elif [ "${REV}" = "22.04" ]; then
+        SX_LIBCONFIG_VER="9"
+        SX_GCC_VER="12"
+        LIBSSL="libssl3"
    fi
 
     DEBIAN_FRONTEND=noninteractive apt-get install -y tzdata
@@ -94,7 +99,7 @@ if [ "${DIST}" = "Ubuntu" ]; then
     apt update && apt install -y \
     wget curl \
     python3 python3-pip python3-dev \
-    libconfig++${SX_LIBCONFIG_VER} libssl1.1 libunwind8 libmicrohttpd12 \
+    libconfig++${SX_LIBCONFIG_VER} ${LIBSSL} libunwind8 libmicrohttpd12 \
     libconfig-dev libconfig++-dev  libssl-dev libunwind-dev libmicrohttpd-dev git g++-${SX_GCC_VER} cmake make
 
     echo "... installing OS toolchains"
