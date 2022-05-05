@@ -119,8 +119,10 @@ void prepare_mem_debugs() {
             CRYPTO_dbg_set_options(V_CRYPTO_MDEBUG_ALL);
         #endif
 
+        #ifndef USE_OPENSSL300
         CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON);
         CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_DISABLE);
+        #endif
 #endif
     }
 
