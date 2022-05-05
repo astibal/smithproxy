@@ -32,6 +32,10 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 * [ ] memory pool ONLY execution
 * [ ] routing - SNI-based, ... more options
 
+## What's new in 0.9.30
+- HTTP/2 parser - retrieve connection details from the headers
+- DoH support - parse out and use DNS responses from DoH traffic
+
 ## What's new in 0.9.29
 
 - introduce HTTP/2 engine
