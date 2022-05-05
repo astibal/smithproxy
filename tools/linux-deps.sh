@@ -79,6 +79,8 @@ echo "... OS detected: $DIST version $REV"
 
 if [ "${DIST}" = "Ubuntu" ]; then
 
+  PIP="pip3"
+
    LIBSSL="libssl1.1"
    # specifics
    if [ "${REV}" = "20.04" ]; then
@@ -88,9 +90,10 @@ if [ "${DIST}" = "Ubuntu" ]; then
         SX_LIBCONFIG_VER="9v5"
         SX_GCC_VER="11"
    elif [ "${REV}" = "22.04" ]; then
-        SX_LIBCONFIG_VER="9"
+        SX_LIBCONFIG_VER="9v5"
         SX_GCC_VER="12"
         LIBSSL="libssl3"
+        PIP="pip"
    fi
 
     DEBIAN_FRONTEND=noninteractive apt-get install -y tzdata
@@ -107,8 +110,8 @@ if [ "${DIST}" = "Ubuntu" ]; then
     debootstrap devscripts build-essential lintian debhelper vim nano
 
     echo "... installing python libraries"
-    pip3 install --upgrade pip
-    pip3 install pyparsing  pylibconfig2
+    ${PIP} install --upgrade pip
+    ${PIP} install pyparsing  pylibconfig2
 
 elif [ "${DIST}" = "Debian" ]; then
 
@@ -152,16 +155,16 @@ elif [ "${DIST}" = "Debian" ]; then
     apt install -y libffi-dev
 
     echo "... installing python libraries"
-    pip3 install --upgrade pip
+    ${PIP} install --upgrade pip
 
     if [ "${MACH}" = "aarch64" ]; then
       echo
     fi
 
     if [ "${DEB_MAJ}" = "11" ]; then
-        pip3 install pyparsing pylibconfig2
+        ${PIP} install pyparsing pylibconfig2
     else
-        pip3 install pyparsing pylibconfig2
+        ${PIP} install pyparsing pylibconfig2
     fi
 
 elif [ "${DIST}" = "Alpine" ]; then
