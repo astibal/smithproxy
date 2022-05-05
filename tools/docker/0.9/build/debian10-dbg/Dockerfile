@@ -6,6 +6,7 @@ ARG FTP_UPLOAD_PATH=""
 ARG HTTP_CHECK_PATH=""
 ARG SX_BRANCH="master"
 ARG CURL_UPLOAD_OPTS=""
+ARG MAKE_DEBUG="Y"
 
 WORKDIR /app
 
@@ -17,6 +18,6 @@ RUN echo "Getting git branch: ${SX_BRANCH}"; git clone --depth 1 --recursive htt
 
 RUN cd smithproxy && ./tools/linux-deps.sh
 
-RUN cd /app/smithproxy/tools/pkg-scripts/deb && ./createdeb-0.9-debug.sh
+RUN cd /app/smithproxy/tools/pkg-scripts/deb && ./createdeb-0.9.sh
 
 CMD echo "there is nothing to see - it's a build-only image"

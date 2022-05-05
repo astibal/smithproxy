@@ -2,6 +2,8 @@
 ORIG_DIR=`pwd`
 
 # === LOAD DEFAULTS ====
+SUFFIX_LONG=""
+SUFFIX_SHORT=""
 
 
 if [ "${FTP_UPLOAD_USER}" == "" ]; then
@@ -29,6 +31,12 @@ if [ "${CURL_UPLOAD_OPTS}" == "" ]; then
 fi
 
 DEBIAN_DIR="debian-0.9"
+
+if [ "${MAKE_DEBUG}" == "Y" ]; then
+  SUFFIX_LONG="-debug"
+  SUFFIX_SHORT="-dbg"
+  DEBIAN_DIR="debian-0.9${SUFFIX_LONG}"
+fi
 
 
 CUR_DIR=/tmp/smithproxy_build
@@ -219,7 +227,7 @@ if [ "$FTP_UPLOAD_PWD" == "" ]; then
 else
 
     echo "File(s) being uploaded now."
-    DEB_FILE=smithproxy_${VER}-${DEB_CUR}_${ARCH}.deb
+    DEB_FILE=smithproxy${SUFFIX_SHORT}_${VER}-${DEB_CUR}_${ARCH}.deb
 
     if [ "${GIT_PATCH_DIST}" != "0" ]; then
         DEB_PATH="${UPLOAD_URL}/${VER_MAJ}/${DISTRO}/snapshots"
@@ -237,18 +245,21 @@ else
     sha256sum $DEB_FILE > $DEB_FILE.sha256
     safe_upload $DEB_FILE.sha256 $DEB_URL.sha256
 
-    # overwrite files if thy exist
-    safe_upload smithproxy-${VER}/debian/changelog ${DEB_PATH}/smithproxy_${VER}-${DEB_CUR}.changelog
-    #upload README ${DEB_PATH}/README
+    if [ "${MAKE_DEBUG}" == "Y" ]; then
+        echo "debug release, skipping complementary files"
+    else
+        # overwrite files if thy exist
+        safe_upload smithproxy-${VER}/debian/changelog ${DEB_PATH}/smithproxy_${VER}-${DEB_CUR}.changelog
+        #upload README ${DEB_PATH}/README
 
-    # upload Release_Notes from src root
-    upload /tmp/smithproxy_build/smithproxy_src/Release_Notes.md "${UPLOAD_URL}/${VER_MAJ}/Release_Notes.md"
-
+        # upload Release_Notes from src root
+        upload /tmp/smithproxy_build/smithproxy_src/Release_Notes.md "${UPLOAD_URL}/${VER_MAJ}/Release_Notes.md"
+    fi
 
     #### LATEST build overwrite - only for snapshots
     if [ "${GIT_PATCH_DIST}" != "0" ]; then
 
-        DEB_FILE_LATEST=smithproxy_0.9-latest_${ARCH}.deb
+        DEB_FILE_LATEST=smithproxy${SUFFIX_SHORT}_${VER_MAJ}-latest_${ARCH}.deb
         DEB_URL_LATEST="${DEB_PATH}/$DEB_FILE_LATEST"
 
         # upload latest (always overwrite, rename it)
@@ -257,19 +268,23 @@ else
         # upload latest checksum
         sha256sum $DEB_FILE > $DEB_FILE_LATEST.sha256
         upload $DEB_FILE_LATEST.sha256 $DEB_URL_LATEST.sha256
-        upload smithproxy-${VER}/debian/changelog ${DEB_PATH}/smithproxy_0.9-latest.changelog
 
+
+        if [ "${MAKE_DEBUG}" == "Y" ]; then
+            echo "debug release, skipping complementary files"
+        else
+            upload smithproxy-${VER}/debian/changelog ${DEB_PATH}/smithproxy_${VER_MAJ}-latest.changelog
+
+            SRC_BALL="${UPLOAD_URL}src/smithproxy_src-${GIT_TAG}-${GIT_PATCH_DIST}.tar.gz"
+            safe_upload /tmp/smithproxy-src.tar.gz $SRC_BALL
+
+            sha256sum /tmp/smithproxy-src.tar.gz > /tmp/smithproxy-src.tar.gz.sha256
+            safe_upload /tmp/smithproxy-src.tar.gz.sha256 $SRC_BALL.sha256
+
+            rm /tmp/smithproxy-src.tar.gz
+            rm /tmp/smithproxy-src.tar.gz.sha256
+        fi
     fi
-
-    SRC_BALL="${UPLOAD_URL}src/smithproxy_src-${GIT_TAG}-${GIT_PATCH_DIST}.tar.gz"
-    safe_upload /tmp/smithproxy-src.tar.gz $SRC_BALL
-
-    sha256sum /tmp/smithproxy-src.tar.gz > /tmp/smithproxy-src.tar.gz.sha256
-    safe_upload /tmp/smithproxy-src.tar.gz.sha256 $SRC_BALL.sha256
-
-    rm /tmp/smithproxy-src.tar.gz
-    rm /tmp/smithproxy-src.tar.gz.sha256
-
     echo "Finished."
 fi
 

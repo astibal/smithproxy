@@ -1,4 +1,4 @@
-FROM debian:10
+FROM ubuntu:22.04
 
 ARG FTP_UPLOAD_PWD=""
 ARG FTP_UPLOAD_USER=""
