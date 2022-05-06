@@ -287,6 +287,27 @@ std::stringstream features;
 
 }
 
+void cmd_show_events(struct cli_def* cli) {
+
+    std::stringstream  ss;
+
+    auto const& events = Log::get()->events();
+    {
+        auto lc_ = std::scoped_lock(Log::get()->events_lock());
+        for (auto const &ev: events) {
+            ss << ev << "\r\n";
+        }
+    }
+    cli_print(cli, ss.str().c_str());
+}
+
+void cmd_exec_events_clear(struct cli_def* cli) {
+
+    Log::get()->events_clear();
+    Log::get()->event(CRI, "events cleared by admin");
+    cli_print(cli, "Events cleared");
+}
+
 int cli_show_status(struct cli_def *cli, const char *command, char *argv[], int argc)
 {
     debug_cli_params(cli, command, argv, argc);
@@ -295,6 +316,22 @@ int cli_show_status(struct cli_def *cli, const char *command, char *argv[], int 
     return CLI_OK;
 }
 
+
+int cli_show_events(struct cli_def *cli, const char *command, char *argv[], int argc)
+{
+    debug_cli_params(cli, command, argv, argc);
+
+    cmd_show_events(cli);
+    return CLI_OK;
+}
+
+int cli_exec_events_clear(struct cli_def *cli, const char *command, char *argv[], int argc)
+{
+    debug_cli_params(cli, command, argv, argc);
+
+    cmd_exec_events_clear(cli);
+    return CLI_OK;
+}
 
 int cli_test_dns_genrequest(struct cli_def *cli, const char *command, char *argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
@@ -2423,9 +2460,12 @@ void cli_register_static(struct cli_def* cli) {
             [[maybe_unused]] auto exec_shutdown = cli_register_command(cli, exec, "shutdown", cli_exec_shutdown, PRIVILEGE_PRIVILEGED, MODE_ANY, "terminate this smithproxy process");
                              auto exec_pcap = cli_register_command(cli, exec, "pcap", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "manage PCAP writer");
                             [[maybe_unused]] auto exec_pcap_rollover = cli_register_command(cli, exec_pcap, "rollover", cli_exec_pcap_rollover, PRIVILEGE_PRIVILEGED, MODE_ANY, "rollover pcap file now");
+                             auto exec_events = cli_register_command(cli, exec, "events", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "mange event messages");
+                            [[maybe_unused]] auto exec_events_clear = cli_register_command(cli, exec_events, "clear", cli_exec_events_clear, PRIVILEGE_PRIVILEGED, MODE_ANY, "clear event ring buffer");
 
     auto show  = cli_register_command(cli, nullptr, "show", cli_show, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show basic information");
             cli_register_command(cli, show, "status", cli_show_status, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show smithproxy status");
+            cli_register_command(cli, show, "events", cli_show_events, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show events");
             auto show_config = cli_register_command(cli, show, "config", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy configuration related commands");
                     cli_register_command(cli, show_config, "full", cli_show_config_full, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy full configuration");
 
@@ -2481,6 +2521,8 @@ void client_thread(int client_socket) {
 
     // Set the hostname (shown in the the prompt)
     apply_hostname(cli);
+
+    Log::get()->event(NOT, "admin CLI access");
 
     // Set the greeting
     cli_set_banner(cli, "--==[ Smithproxy command line utility ]==--");
