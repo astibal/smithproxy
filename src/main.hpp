@@ -41,7 +41,7 @@
 #define SMITHPROXY_MAIN_HPP
 
 #define SMITH_VERSION "0.9.30"
-#define SMITH_DEVEL    0
+#define SMITH_DEVEL    1
 
 
 
