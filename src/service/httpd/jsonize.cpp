@@ -140,7 +140,7 @@ namespace jsonize {
                             sct_detail["sctlog_id"] = hex_print(sct_logid, sct_logid_len);
 
                         auto val_stat = SCT_get_validation_status(sct);
-                        sct_detail["sctlog_status"] = SCT_validation_status_str(val_stat);
+                        sct_detail["sctlog_status"] = socle::com::ssl::SCT_validation_status_str(val_stat);
 
                         if (verbosity >= iDEB) {
                             BioMemory bm;

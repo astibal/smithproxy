@@ -1604,7 +1604,7 @@ auto get_tls_info(MitmHostCX const* lf, MitmHostCX const* rg, int sl_flags, int 
                                            << hex_print(sct_logid, sct_logid_len);
                                 auto val_stat = SCT_get_validation_status(sct);
                                 tls_ss << "\n        sct log." << i << ": "
-                                       << SCT_validation_status_str(val_stat);
+                                       << socle::com::ssl::SCT_validation_status_str(val_stat);
 
                                 BioMemory bm;
                                 SCT_print(sct, bm, 4, log_store);
