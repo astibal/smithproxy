@@ -1553,11 +1553,12 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
         
         return;
     }
-    
+
 
     auto* app_request = dynamic_cast<sx::engine::http::app_HttpRequest*>(cx->engine_ctx.application_data.get());
     if(app_request != nullptr) {
-        
+        log.event(INF, "[%s]: HTTP replacement active", socle::com::ssl::connection_name(scom, true).c_str());
+
 //         _inf(" --- request: %s",app_request->request().c_str());
 //         _inf(" ---     uri: %s",app_request->uri.c_str());
 //         _inf(" --- origuri: %s",app_request->original_request().c_str());
@@ -1690,6 +1691,8 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
     else {
         _dia("ssl_override: enforced ph1 - redir to / for %s", whitelist_make_key(cx).c_str());
         _inf("readbuf: \n%s", hex_dump(cx->readbuf(), 4).c_str());
+
+        log.event(INF, "[%s]: enforced HTTP replacement active", socle::com::ssl::connection_name(scom, true).c_str());
 
         std::string redir_pre("<html><head><script>top.location.href=\"");
         std::string redir_suf("\";</script></head><body></body></html>");
