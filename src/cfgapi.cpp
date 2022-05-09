@@ -463,7 +463,7 @@ bool CfgFactory::upgrade_and_save() {
             internal["schema"] = SCHEMA_VERSION;
 
             if(num_touches) {
-                log.event(NOT, "New configuration schema %s", our_schema);
+                log.event(NOT, "New configuration schema %d", our_schema);
                 do_save = true;
             }
         }
