@@ -426,8 +426,10 @@ int main(int argc, char *argv[]) {
 
         if(not CfgFactory::get()->config_file_check_only) {
             upgraded_status = CfgFactory::get()->upgrade_and_save();
-            if(upgraded_status)
+            if(upgraded_status) {
                 _not("config file has been upgraded");
+                log.event(NOT, "Configuration updated and saved");
+            }
         }
 
         if(upgraded_status) {
@@ -556,6 +558,8 @@ int main(int argc, char *argv[]) {
     // create utility threads
     SmithProxy::instance().create_log_writer_thread();
     SmithProxy::init_syslog();
+
+    Log::get()->event(INF, "Smithproxy %s%s starting", SMITH_VERSION, SMITH_DEVEL > 0 ? "-dev" : "");
 
     SmithProxy::instance().create_dns_thread();
     SmithProxy::instance().create_identity_thread();

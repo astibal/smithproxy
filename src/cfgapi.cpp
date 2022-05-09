@@ -462,8 +462,10 @@ bool CfgFactory::upgrade_and_save() {
 
             internal["schema"] = SCHEMA_VERSION;
 
-            if(num_touches)
+            if(num_touches) {
+                log.event(NOT, "New configuration schema %s", our_schema);
                 do_save = true;
+            }
         }
     }();
 
@@ -3937,6 +3939,8 @@ int CfgFactory::save_config() const {
         _err("error writing config file %s", e.what());
         return -1;
     }
+
+    log.event(NOT, "Configuration file saved");
 
     return n;
 }

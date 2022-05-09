@@ -383,6 +383,8 @@ void SmithProxy::run() {
 
     //signal(SIGINT, [](int c) { SmithProxy::instance().terminate_flag = true; } );
 
+    Log::get()->event(INF, "... started");
+
     while(true) {
         if(instance().terminate_flag) {
             if(!cfg_daemonize)
