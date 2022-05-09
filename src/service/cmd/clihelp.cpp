@@ -503,6 +503,25 @@ void CliHelp::init() {
             .suggestion_generator([](std::string const& section, std::string const& variable) -> std::vector<std::string> {  return {"smcap", "pcap", "pcap_single"};   });
 
 
+    add("detection_profiles.[x].mode", "0 = disabled, 1 = enabled")
+            .help_quick("<integer>: 0-1")
+            .may_be_empty(false)
+            .value_filter(VALUE_UINT_RANGE<0,1>);
+
+
+    add("detection_profiles.[x].engines_enabled", "enable/disable L7 engines")
+            .help_quick(CliElement::HELP_BOOL)
+            .may_be_empty(false)
+            .value_filter(CliElement::VALUE_BOOL)
+            .suggestion_generator(CliElement::SUGGESTION_BOOL);
+
+    add("detection_profiles.[x].kb_enabled", "enable/disable knowledge base information collection")
+            .help_quick(CliElement::HELP_BOOL)
+            .may_be_empty(false)
+            .value_filter(CliElement::VALUE_BOOL)
+            .suggestion_generator(CliElement::SUGGESTION_BOOL);
+
+
     init_routing();
     init_captures();
 

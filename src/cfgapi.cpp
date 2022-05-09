@@ -338,6 +338,12 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         // save setting.socks group, new ipv6-related options
         return true;
     }
+    else if(upgrade_to_num == 1006) {
+        log.event(INF, "added detection_profile.[x].engine_enabled");
+        log.event(INF, "added detection_profile.[x].kb_enabled");
+        return true;
+    }
+
 
 
     return false;
@@ -1508,6 +1514,9 @@ int CfgFactory::load_db_prof_detection () {
             if( load_if_exists(cur_object, "mode", new_prof->mode) ) {
 
                 new_prof->element_name() = name;
+                load_if_exists(cur_object, "engines_enabled", new_prof->engines_enabled);
+                load_if_exists(cur_object, "kb_enabled", new_prof->kb_enabled);
+
                 db_prof_detection[name] = std::shared_ptr<ProfileDetection>(std::move(new_prof));
 
                 _dia("cfgapi_load_obj_profile_detect: '%s': ok", name.c_str());
@@ -2102,7 +2111,7 @@ bool CfgFactory::prof_content_apply (baseHostCX *originator, baseProxy *new_prox
 
 bool CfgFactory::prof_detect_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileDetection> &pd) {
 
-    auto* mitm_originator = dynamic_cast<AppHostCX*>(originator);
+    auto* mitm_originator = dynamic_cast<MitmHostCX*>(originator);
     auto const& log = log::policy();
 
     const char* pd_name = "none";
@@ -2115,6 +2124,8 @@ bool CfgFactory::prof_detect_apply (baseHostCX *originator, baseProxy *new_proxy
             pd_name = pd->element_name().c_str();
             _dia("policy_apply[%s]: policy detection profile: mode: %d", pd_name, pd->mode);
             mitm_originator->mode(static_cast<AppHostCX::mode_t>(pd->mode));
+            mitm_originator->opt_engines_enabled = pd->engines_enabled;
+            mitm_originator->opt_kb_enabled = pd->kb_enabled;
         }
     } else {
         _war("policy_apply: cannot apply detection profile: cast to AppHostCX failed.");
@@ -2987,6 +2998,8 @@ int CfgFactory::save_detection_profiles(Config& ex) const {
 
         Setting& item = objects.add(name, Setting::TypeGroup);
         item.add("mode", Setting::TypeInt) = obj->mode;
+        item.add("engines_enabled", Setting::TypeBoolean) = obj->engines_enabled;
+        item.add("kb_enabled", Setting::TypeBoolean) = obj->kb_enabled;
 
         n_saved++;
     }

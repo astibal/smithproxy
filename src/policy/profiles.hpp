@@ -54,6 +54,8 @@ public:
      *  2   MODE_PRE  -- should be default, but not safe when cannot peek()
      */
     int mode = 0;
+    bool engines_enabled = true;
+    bool kb_enabled = true;
 
     bool ask_destroy() override { return false; };
     std::string to_string(int verbosity) const override {

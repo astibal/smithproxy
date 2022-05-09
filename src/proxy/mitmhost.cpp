@@ -90,7 +90,7 @@ std::size_t MitmHostCX::process_in() {
         _dum("Incoming data(%s):\r\n %s", this->c_type(), hex_dump(ptr, static_cast<int>(len), 4, 0, true).c_str());
     }
 
-    if(engine_ctx.signature) {
+    if(opt_engines_enabled and engine_ctx.signature) {
         auto sig = std::dynamic_pointer_cast<MyDuplexFlowMatch>(engine_ctx.signature);
 
         if(sig and not sig->sig_engine.empty()) {
@@ -103,7 +103,7 @@ std::size_t MitmHostCX::process_in() {
 
 std::size_t MitmHostCX::process_out() {
 
-    if(engine_ctx.signature) {
+    if(opt_engines_enabled and engine_ctx.signature) {
         auto sig = std::dynamic_pointer_cast<MyDuplexFlowMatch>(engine_ctx.signature);
 
         if(sig and not sig->sig_engine.empty()) {

@@ -198,6 +198,7 @@ struct CliElement {
             return filter_retval::reject("must be boolean: case insensitive value: [true|yes|1] | [false|no|0]");
 
     };
+    static inline const char* HELP_BOOL = "<bool>: true|false";
 
     static inline std::function<value_filter_fn> VALUE_IPHOST = [](std::string const& v) -> filter_retval {
 

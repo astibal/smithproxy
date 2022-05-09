@@ -85,6 +85,9 @@ protected:
     replaceflags_t replacement_flags_ = REPLACE_NONE;
 
 public:
+    bool opt_engines_enabled = true;
+    bool opt_kb_enabled = true;
+
     bool is_ssl = false;
     bool is_ssl_port = false;
     
