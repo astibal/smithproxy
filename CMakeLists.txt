@@ -325,6 +325,7 @@ if(GTEST_FOUND)
 
             src/utils/tests/str_test.cpp
             src/inspect/tests/dns_tests.cpp
+            src/inspect/tests/kb_tests.cpp
             src/ext/libcidr/cidr.cpp
 
             src/policy/policy.cpp
