@@ -1,96 +1,83 @@
-#ifndef KB_HPP
-#define KB_HPP
+/*
+    Smithproxy- transparent proxy with SSL inspection capabilities.
+    Copyright (c) 2014, Ales Stibal <astib@mag0.net>, All rights reserved.
 
-#include <unordered_map>
+    Smithproxy is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
 
-#include <string>
-#include <memory>
-#include <mutex>
+    Smithproxy is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
 
-#include <ext/json/json.hpp>
+    You should have received a copy of the GNU General Public License
+    along with Smithproxy.  If not, see <http://www.gnu.org/licenses/>.
+
+    Linking Smithproxy statically or dynamically with other modules is
+    making a combined work based on Smithproxy. Thus, the terms and
+    conditions of the GNU General Public License cover the whole combination.
+
+    In addition, as a special exception, the copyright holders of Smithproxy
+    give you permission to combine Smithproxy with free software programs
+    or libraries that are released under the GNU LGPL and with code
+    included in the standard release of OpenSSL under the OpenSSL's license
+    (or modified versions of such code, with unchanged license).
+    You may copy and distribute such a system following the terms
+    of the GNU GPL for Smithproxy and the licenses of the other code
+    concerned, provided that you include the source code of that other code
+    when and as the GNU GPL requires distribution of source code.
+
+    Note that people who make modified versions of Smithproxy are not
+    obligated to grant this special exception for their modified versions;
+    it is their choice whether to do so. The GNU General Public License
+    gives permission to release a modified version without this exception;
+    this exception also makes it possible to release a modified version
+    which carries forward this exception.
+*/
+
+
+#ifndef SMITHPROXY_KB_HPP
+#define SMITHPROXY_KB_HPP
+
+#include <inspect/kb/node.hpp>
 
 namespace sx {
 
-    struct Node_Data {
-        virtual std::string to_string() const = 0;
-        virtual nlohmann::json to_json() const = 0;
-        virtual ~Node_Data() = default;
+    struct KB_String : public Node_Data {
+        KB_String() = default;
+
+        KB_String(std::string const &s) : value(s) {};
+        std::string value;
+
+        bool empty() const override { return value.empty(); }
+
+        nlohmann::json to_json() const override { return value; };
+
+        std::string to_string() const override { return "value=" + value + "\""; };
     };
 
-    template<typename K>
-    struct Node {
-        std::string label = ".";
-        std::shared_ptr<Node_Data> data;
-        std::unordered_map<K,std::shared_ptr<Node>> elements;
+    struct KB_Int : public Node_Data {
+        KB_Int() = default;
 
-        explicit Node() = default;
-        explicit Node(std::shared_ptr<Node_Data> const& d) : data(d) {};
+        KB_Int(int i) : value(i) {};
+        int value;
 
-        Node(Node const&) = delete;
-        Node& operator=(Node&) = delete;
-        virtual ~Node() = default;
+        nlohmann::json to_json() const override { return value; };
 
-        auto& operator[](const char* k) {
-            return elements[k];
+        std::string to_string() const override { return "value=" + std::to_string(value) + "\""; };
+    };
+
+    struct KB {
+        static inline std::mutex lck_;
+        static auto get() {
+            auto static r = std::make_shared<Node<std::string>>();
+            return r;
         }
 
-        template < typename Y, typename ... Args >
-        std::shared_ptr<Node<K>> insert(std::string const& key, Args ... args) {
-            auto y = std::make_shared<Y>(args...);
-            return insert(key, y);
-        }
-
-        template<typename Y>
-        std::shared_ptr<Node<K>> insert(std::string const& key, std::shared_ptr<Y> n) {
-            auto x = std::dynamic_pointer_cast<Node_Data>(n);
-            if(x) {
-                auto nel = std::make_shared<Node<K>>(x);
-                elements[key] = nel;
-
-                return nel;
-            }
-
-            return nullptr;
-        }
-
-        std::shared_ptr<Node<K>> operator[](std::string_view str) {
-            return elements[str];
-        }
-
-        virtual nlohmann::json to_json() const  {
-            nlohmann::json ret;
-
-            if(elements.empty()) return data->to_json();
-
-            if(data) {
-                ret[label] = data->to_json();
-            }
-            for(auto const& [ key,elem] : elements) {
-
-                ret[key] = elem->to_json();
-            }
-            return ret;
-        }
-
-        virtual std::string to_string() const {
-            std::stringstream ret;
-            ret << "{ ";
-
-            if(data) {
-                ret << "{ " << data->to_string() << " } ";
-            }
-
-            ret << ": [";
-            for(auto const& [ key,elem] : elements) {
-
-                ret << "\"" << key << "\": {" << elem->to_string() << "} ";
-            }
-            ret << "]";
-
-            return ret.str();
-        }
+        static std::mutex& lock() { return lck_; };
     };
 
 }
-
-#endif // KB_HPP
+#endif //SMITHPROXY_KB_HPP

@@ -1,0 +1,141 @@
+/*
+    Smithproxy- transparent proxy with SSL inspection capabilities.
+    Copyright (c) 2014, Ales Stibal <astib@mag0.net>, All rights reserved.
+
+    Smithproxy is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    Smithproxy is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with Smithproxy.  If not, see <http://www.gnu.org/licenses/>.
+
+    Linking Smithproxy statically or dynamically with other modules is
+    making a combined work based on Smithproxy. Thus, the terms and
+    conditions of the GNU General Public License cover the whole combination.
+
+    In addition, as a special exception, the copyright holders of Smithproxy
+    give you permission to combine Smithproxy with free software programs
+    or libraries that are released under the GNU LGPL and with code
+    included in the standard release of OpenSSL under the OpenSSL's license
+    (or modified versions of such code, with unchanged license).
+    You may copy and distribute such a system following the terms
+    of the GNU GPL for Smithproxy and the licenses of the other code
+    concerned, provided that you include the source code of that other code
+    when and as the GNU GPL requires distribution of source code.
+
+    Note that people who make modified versions of Smithproxy are not
+    obligated to grant this special exception for their modified versions;
+    it is their choice whether to do so. The GNU General Public License
+    gives permission to release a modified version without this exception;
+    this exception also makes it possible to release a modified version
+    which carries forward this exception.
+*/
+
+
+#ifndef NODE_HPP
+#define NODE_HPP
+
+#include <unordered_map>
+
+#include <string>
+#include <memory>
+#include <mutex>
+
+#include <ext/json/json.hpp>
+
+namespace sx {
+
+    struct Node_Data {
+        virtual std::string to_string() const = 0;
+        virtual nlohmann::json to_json() const = 0;
+        virtual bool empty() const { return false; };
+        virtual ~Node_Data() = default;
+    };
+
+    template<typename K>
+    struct Node {
+        std::string label = ".";
+        std::shared_ptr<Node_Data> data;
+        std::unordered_map<K,std::shared_ptr<Node>> elements;
+
+        explicit Node() = default;
+        explicit Node(std::shared_ptr<Node_Data> const& d) : data(d) {};
+
+        Node(Node const&) = delete;
+        Node& operator=(Node&) = delete;
+        virtual ~Node() = default;
+
+        auto& operator[](const char* k) {
+            return elements[k];
+        }
+
+        template < typename Y, typename ... Args >
+        std::shared_ptr<Node<K>> insert(std::string const& key, Args ... args) {
+            if(auto it = elements.find(key); it != elements.end()) {
+                return it->second;
+            } else {
+                auto y = std::make_shared<Y>(args...);
+                return replace(key, y);
+            }
+        }
+
+        template<typename Y>
+        std::shared_ptr<Node<K>> replace(std::string const& key, std::shared_ptr<Y> n) {
+            auto x = std::dynamic_pointer_cast<Node_Data>(n);
+            if(x) {
+                auto nel = std::make_shared<Node<K>>(x);
+                elements[key] = nel;
+
+                return nel;
+            }
+
+            return nullptr;
+        }
+
+        std::shared_ptr<Node<K>> operator[](std::string_view str) {
+            return elements[str];
+        }
+
+        virtual nlohmann::json to_json() const  {
+            nlohmann::json ret;
+
+            if(elements.empty()) return data->to_json();
+
+            if(data and not data->empty()) {
+                    ret[label] = data->to_json();
+            }
+            for(auto const& [ key,elem] : elements) {
+
+                ret[key] = elem->to_json();
+            }
+            return ret;
+        }
+
+        virtual std::string to_string() const {
+            std::stringstream ret;
+            ret << "{ ";
+
+            if(data) {
+                ret << "{ " << data->to_string() << " } ";
+            }
+
+            ret << ": [";
+            for(auto const& [ key,elem] : elements) {
+
+                ret << "\"" << key << "\": {" << elem->to_string() << "} ";
+            }
+            ret << "]";
+
+            return ret.str();
+        }
+    };
+
+}
+
+#endif // NODE_HPP
