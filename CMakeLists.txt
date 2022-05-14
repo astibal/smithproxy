@@ -243,6 +243,7 @@ add_executable(smithproxy
         src/inspect/dnsinspector.hpp
         src/inspect/dnsinspector.cpp
         src/inspect/dns.cpp
+        src/inspect/kb/kb.hpp
 
         src/inspect/engine/http.hpp
         src/inspect/engine/http.cpp
@@ -325,7 +326,7 @@ if(GTEST_FOUND)
 
             src/utils/tests/str_test.cpp
             src/inspect/tests/dns_tests.cpp
-            src/inspect/tests/kb_tests.cpp
+            src/inspect/tests/node_tests.cpp
             src/ext/libcidr/cidr.cpp
 
             src/policy/policy.cpp

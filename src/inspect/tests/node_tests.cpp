@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <inspect/kb/kb.hpp>
+#include "src/inspect/kb/node.hpp"
 
 using namespace sx;
 
@@ -44,24 +44,24 @@ TEST(KB_test, test_string) {
 
     auto new_kb = std::make_shared<KB_String>();
     new_kb->value = "some";
-    auto one = root.insert("1", new_kb);
+    auto one = root.replace("1", new_kb);
 
     auto new_kb2 = std::make_shared<KB_String>();
     new_kb2->value = "some2";
-    auto two = one->insert("2", new_kb2);
+    auto two = one->replace("2", new_kb2);
 
     two->insert<KB_String>("3", "some")->insert<KB_String>("another", "some_value");
 
 
     auto sub_kb = std::make_shared<KB_String>();
     sub_kb->value = "sub";
-    one->insert("10", sub_kb);
+    one->replace("10", sub_kb);
 
 
     auto x = root.to_json();
-    std::cout << to_string(x) << "\n";
+    std::cout << x.dump(4) << "\n";
 
-    std::cout << to_string(one->to_json()) << "\n";
+    std::cout << one->to_json().dump(4) << "\n";
     std::cout << "\n";
     std::cout << "\n";
     std::cout << "\n";
@@ -81,7 +81,7 @@ TEST(KB_test, test_mixed) {
     coo->insert<KB_Int>("Z", 0);
 
     auto x = root.to_json();
-    std::cout << to_string(x) << "\n";
+    std::cout << x.dump(4) << "\n";
 
 //    std::cout << to_string(one->to_json()) << "\n";
     std::cout << "\n";
