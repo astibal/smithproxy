@@ -105,7 +105,7 @@ namespace sx {
         virtual nlohmann::json to_json() const  {
             nlohmann::json ret;
 
-            if(elements.empty()) return data->to_json();
+            if(elements.empty() and data and not data->empty()) return data->to_json();
 
             if(data and not data->empty()) {
                     ret[label] = data->to_json();
