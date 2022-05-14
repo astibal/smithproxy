@@ -79,6 +79,7 @@
 
 #include <inspect/sigfactory.hpp>
 #include <inspect/dnsinspector.hpp>
+#include <inspect/kb/kb.hpp>
 
 #include <utils/str.hpp>
 
@@ -324,6 +325,47 @@ int cli_show_events(struct cli_def *cli, const char *command, char *argv[], int 
     cmd_show_events(cli);
     return CLI_OK;
 }
+
+int cli_exec_kb_print(struct cli_def *cli, const char *command, char *argv[], int argc)
+{
+    debug_cli_params(cli, command, argv, argc);
+
+    std::string dump;
+    {
+        auto kb = sx::KB::get();
+        auto lc_ = std::scoped_lock(sx::KB::lock());
+        dump = kb->to_json().dump(4);
+    }
+
+    cli_print(cli, "Knowledgebase dump: \n");
+    cli_print(cli, "\r\n");
+    cli_print(cli, "%s", dump.c_str());
+
+    return CLI_OK;
+}
+
+
+int cli_exec_kb_clear(struct cli_def *cli, const char *command, char *argv[], int argc)
+{
+    debug_cli_params(cli, command, argv, argc);
+
+    int sz = 0;
+
+    std::string dump;
+    {
+        auto kb = sx::KB::get();
+        sz = kb->elements.size();
+
+        auto lc_ = std::scoped_lock(sx::KB::lock());
+        kb->elements.clear();
+    }
+
+    cli_print(cli, "Knowledgebase cleared %d entries", sz);
+
+    return CLI_OK;
+}
+
+
 
 int cli_exec_events_clear(struct cli_def *cli, const char *command, char *argv[], int argc)
 {
@@ -2462,6 +2504,9 @@ void cli_register_static(struct cli_def* cli) {
                             [[maybe_unused]] auto exec_pcap_rollover = cli_register_command(cli, exec_pcap, "rollover", cli_exec_pcap_rollover, PRIVILEGE_PRIVILEGED, MODE_ANY, "rollover pcap file now");
                              auto exec_events = cli_register_command(cli, exec, "events", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "mange event messages");
                             [[maybe_unused]] auto exec_events_clear = cli_register_command(cli, exec_events, "clear", cli_exec_events_clear, PRIVILEGE_PRIVILEGED, MODE_ANY, "clear event ring buffer");
+                             auto exec_kb = cli_register_command(cli, exec, "kb", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "mange KB");
+                            [[maybe_unused]] auto exec_kb_print = cli_register_command(cli, exec_kb, "print", cli_exec_kb_print, PRIVILEGE_PRIVILEGED, MODE_ANY, "print all KB entries");
+                            [[maybe_unused]] auto exec_kb_clear = cli_register_command(cli, exec_kb, "clear", cli_exec_kb_clear, PRIVILEGE_PRIVILEGED, MODE_ANY, "clear all KB entries");
 
     auto show  = cli_register_command(cli, nullptr, "show", cli_show, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show basic information");
             cli_register_command(cli, show, "status", cli_show_status, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show smithproxy status");
