@@ -63,6 +63,7 @@ namespace sx {
         std::string label = ".";
         std::shared_ptr<Node_Data> data;
         std::unordered_map<K,std::weak_ptr<Node>> elements;
+        std::deque<std::pair<K,std::weak_ptr<Node>>> elements_queue;
 
         static inline size_t max_elements = 0;
         static inline size_t cleanup_divisor = 10;  // max_elements/cleanup_divisor = amount of elements triggering cleanup
@@ -102,14 +103,14 @@ namespace sx {
                 // clean-up own elements if there is too many entries
                 // Too many means relative to maximum entries.
                 // 10
-                if(elements.size() > max_elements/cleanup_divisor)
-                    for(auto it = elements.begin(); it != elements.end();) {
-                        if (it->second.use_count() == 0) {
-                            it = elements.erase(it);
+                if(elements_queue.size() > max_elements/cleanup_divisor)
+                    while(true) {
+                        if(auto const& [ key, last ] = elements_queue.front(); last.use_count() == 0) {
+                            elements.erase(key);
+                            elements_queue.pop_front();
+                            continue;
                         }
-                        else {
-                            ++it;
-                        }
+                        break;
                     }
             }
         }
@@ -124,6 +125,7 @@ namespace sx {
                 auto nel = std::make_shared<Node<K>>(x);
                 queue.push_back(nel);
                 elements[key] = nel;
+                elements_queue.emplace_back(key, nel);
 
                 return nel;
             }
