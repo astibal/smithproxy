@@ -73,6 +73,7 @@ namespace sx {
         static inline std::mutex lck_;
         static auto get() {
             auto static r = std::make_shared<Node<std::string>>();
+            r->max_elements = 1000;
             return r;
         }
 

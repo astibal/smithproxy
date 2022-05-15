@@ -8,6 +8,7 @@
 #endif
 
 #include <inspect/dnsinspector.hpp>
+#include <inspect/kb/kb.hpp>
 
 namespace sx::engine::http {
 
@@ -269,6 +270,53 @@ namespace sx::engine::http {
         }
 
 
+        void fill_kb(EngineCtx& ctx, side_t side, std::shared_ptr<app_HttpRequest> const& app_data,
+                        long stream_id, uint8_t flags, buffer const& data) {
+
+            auto *state_data = std::any_cast<Http2Connection>(&ctx.state_data);
+            if (state_data) {
+                auto &stream_state = state_data->streams[stream_id];
+
+                auto kb = sx::KB::get();
+                auto lc_ = std::scoped_lock(sx::KB::lock());
+
+                auto domain = stream_state.domain();
+                auto hostname = stream_state.hostname();
+
+                if(not domain or not hostname) return;
+
+                auto domain_entry = kb->at<KB_String>(stream_state.domain().value_or("."));
+                auto host_entry = domain_entry->at<KB_String>(stream_state.hostname().value_or("<?>"));
+
+
+                if (auto path = stream_state.request_header(":path"); hostname.has_value()) {
+                    auto path_entry = host_entry->at<KB_String>(path.value());
+
+                    if(side == side_t::LEFT) {
+
+                        if (auto ck = stream_state.request_header("cookie"); ck.has_value()) {
+                            auto cookies = host_entry->at<KB_String>("cookie");
+                            auto ck_entry = cookies->at<KB_String>("@" + std::to_string(time(nullptr)),
+                                                                   ck.value());
+                        }
+
+                    } else {
+
+                        if(auto code = stream_state.response_header(":status"); code.has_value())  {
+                            auto status = path_entry->at<KB_Int>(":status", safe_val(code.value()));
+                            auto cnt = status->at<KB_Int>("counter", 0);
+                            auto* kb_int = (KB_Int*) cnt->data.get();
+                            kb_int->value++;
+                        }
+                        if(auto set_cookie = stream_state.response_header("set-cookie"); set_cookie) {
+                            auto sc = path_entry->at<KB_String>("set-cookie");
+                            sc->at<KB_String>("@"+std::to_string(time(nullptr)), set_cookie.value());
+                        }
+                    }
+                }
+            }
+        }
+
         void detect_app(EngineCtx& ctx, side_t side, std::shared_ptr<app_HttpRequest> const& app_data,
                         long stream_id, uint8_t flags, buffer const& data) {
 
@@ -276,25 +324,11 @@ namespace sx::engine::http {
             if(state_data) {
                 auto &stream_state = state_data->streams[stream_id];
 
-                auto find_header_last_val = [&](std::string_view hdr) -> std::optional<std::string> {
-                    if(auto const& it = stream_state.request_headers_.find(hdr); it != stream_state.request_headers_.end()) {
-                        if(not it->second.empty()) {
-                            auto const& hdr_val = it->second.back();
-                            return std::make_optional<std::string>(hdr_val);
-                        }
-                    }
-                    return std::nullopt;
-                };
-
                 if(side == side_t::LEFT) {
-                    if(auto path = find_header_last_val(":path"); path and path.value() == "/dns-query") {
+
+                    if(auto path = stream_state.request_header(":path"); path and path.value() == "/dns-query") {
                         stream_state.sub_app_ = Http2Stream::sub_app_t::DNS;
                     }
-                    // now look in properties!
-//                    else if(auto const& val = app_data->properties["content-type"] ; not val.empty()) {
-//                        if(val == "application/dns-message")
-//                            stream_state.sub_app_ = Http2Stream::sub_app_t::DNS;
-//                    }
                     else if(auto const& val = app_data->properties["accept"] ; not val.empty()) {
                         if(val == "application/dns-message")
                             stream_state.sub_app_ = Http2Stream::sub_app_t::DNS;
@@ -393,6 +427,9 @@ namespace sx::engine::http {
                 }
             }
             detect_app(ctx, side, my_app_data, stream_id, flags, data);
+            if(ctx.origin->opt_kb_enabled) {
+                fill_kb(ctx, side, my_app_data, stream_id, flags, data);
+            }
 #endif
         }
 

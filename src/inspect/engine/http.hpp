@@ -172,16 +172,75 @@ namespace sx::engine::http {
         struct Http2Stream {
             using value_list_t = std::map<std::string, std::vector<std::string>, std::less<>>;
 
-            enum class content_type_t { PLAIN, GZIP };
-            enum class sub_app_t { UNKNOWN, DNS };
+            enum class content_type_t {
+                PLAIN, GZIP
+            };
+            enum class sub_app_t {
+                UNKNOWN, DNS
+            };
 
-            content_type_t content_encoding_ { content_type_t::PLAIN };
-            sub_app_t sub_app_ { sub_app_t::UNKNOWN };
+            content_type_t content_encoding_{content_type_t::PLAIN};
+            sub_app_t sub_app_{sub_app_t::UNKNOWN};
             value_list_t request_headers_;
             value_list_t response_headers_;
             std::optional<GunZip> gzip;
-        };
 
+            std::string domain_;
+            std::string hostname_;
+
+            std::optional<std::string> request_header(std::string_view hdr) {
+                return find_header(request_headers_, hdr);
+            }
+
+            std::optional<std::string> response_header(std::string_view hdr) {
+                return find_header(response_headers_, hdr);
+            }
+
+            static std::optional<std::string> find_header(value_list_t const &where, std::string_view hdr) {
+                if (auto const &it = where.find(hdr); it != where.end()) {
+                    if (not it->second.empty()) {
+                        auto const &hdr_val = it->second.back();
+                        return std::make_optional<std::string>(hdr_val);
+                    }
+                }
+                return std::nullopt;
+            };
+
+            std::optional<std::string> domain() {
+
+                if (not domain_.empty()) return domain_;
+
+                if (auto host = request_header(":authority"); host.has_value()) {
+
+                    auto dns_split = string_split(host.value(), '.');
+                    std::stringstream domain_ss;
+                    int tld_counter = 0;
+                    for (auto it = dns_split.rbegin(); it != dns_split.rend();) {
+
+                        if (++tld_counter > 2) break;
+                        domain_ss << *it;
+
+                        ++it;
+                        if (tld_counter > 0 and it != dns_split.rend())
+                            domain_ss << ".";
+                    }
+
+                    domain_ = domain_ss.str();
+                    hostname_ = host.value();
+
+                    return domain_;
+                }
+
+                return std::nullopt;
+            }
+
+            std::optional<std::string> hostname() {
+                if(domain()) {
+                    return hostname_;
+                }
+                return  std::nullopt;
+            }
+        };
 
         struct Http2Connection {
             // map

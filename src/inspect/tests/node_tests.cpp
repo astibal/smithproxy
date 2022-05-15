@@ -50,7 +50,7 @@ TEST(KB_test, test_string) {
     new_kb2->value = "some2";
     auto two = one->replace("2", new_kb2);
 
-    two->insert<KB_String>("3", "some")->insert<KB_String>("another", "some_value");
+    two->at<KB_String>("3", "some")->at<KB_String>("another", "some_value");
 
 
     auto sub_kb = std::make_shared<KB_String>();
@@ -72,18 +72,37 @@ TEST(KB_test, test_mixed) {
 
     auto root_kb = std::make_shared<KB_Int>();
     Node<std::string> root;
-    root.insert<KB_String>("header1", "abc");
-    root.insert<KB_String>("header2", "123");
-    root.insert<KB_Int>("Content-Length", 12356);
-    auto coo = root.insert<KB_XY>("Coords", -3453, 345);
+    root.at<KB_String>("header1", "abc");
+    root.at<KB_String>("header2", "123");
+    root.at<KB_Int>("Content-Length", 12356);
+    auto coo = root.at<KB_XY>("Coords", -3453, 345);
     coo->label = "xy";
-    root["Coords"]->label = "XY";
-    coo->insert<KB_Int>("Z", 0);
+    root["Coords"].lock()->label = "XY";
+    coo->at<KB_Int>("Z", 0);
 
     auto x = root.to_json();
     std::cout << x.dump(4) << "\n";
 
 //    std::cout << to_string(one->to_json()) << "\n";
+    std::cout << "\n";
+    std::cout << "\n";
+    std::cout << "\n";
+
+}
+
+TEST(KB_test, test_quota) {
+
+    auto root_kb = std::make_shared<KB_Int>();
+    Node<std::string> root;
+    root.max_elements = 10;
+
+    for (int i = 0; i < 1000; ++i) {
+        root.at<KB_String>("header"+std::to_string(i), "abc" + std::to_string(i));
+    }
+
+    auto x = root.to_json();
+    std::cout << x.dump(4) << "\n";
+
     std::cout << "\n";
     std::cout << "\n";
     std::cout << "\n";

@@ -337,8 +337,7 @@ int cli_exec_kb_print(struct cli_def *cli, const char *command, char *argv[], in
         dump = kb->to_json().dump(4);
     }
 
-    cli_print(cli, "Knowledgebase dump: \n");
-    cli_print(cli, "\r\n");
+    cli_print(cli, "Knowledgebase dump:");
     cli_print(cli, "%s", dump.c_str());
 
     return CLI_OK;

@@ -42,10 +42,10 @@
 #define NODE_HPP
 
 #include <unordered_map>
-
 #include <string>
 #include <memory>
-#include <mutex>
+
+#include <deque>
 
 #include <ext/json/json.hpp>
 
@@ -62,7 +62,12 @@ namespace sx {
     struct Node {
         std::string label = ".";
         std::shared_ptr<Node_Data> data;
-        std::unordered_map<K,std::shared_ptr<Node>> elements;
+        std::unordered_map<K,std::weak_ptr<Node>> elements;
+
+        static inline size_t max_elements = 0;
+        static inline size_t cleanup_divisor = 10;  // max_elements/cleanup_divisor = amount of elements triggering cleanup
+                                                    // 10 is arbitrary number made up by wild guess - maybe other is better
+        static inline std::deque<std::shared_ptr<Node>> queue {};
 
         explicit Node() = default;
         explicit Node(std::shared_ptr<Node_Data> const& d) : data(d) {};
@@ -76,12 +81,36 @@ namespace sx {
         }
 
         template < typename Y, typename ... Args >
-        std::shared_ptr<Node<K>> insert(std::string const& key, Args ... args) {
+        std::shared_ptr<Node<K>> at(std::string const& key, Args ... args) {
             if(auto it = elements.find(key); it != elements.end()) {
-                return it->second;
-            } else {
-                auto y = std::make_shared<Y>(args...);
-                return replace(key, y);
+                if(auto to_ret = it->second.lock(); to_ret)
+                    return to_ret;
+
+                elements.erase(it);
+            }
+
+            auto y = std::make_shared<Y>(args...);
+            return replace(key, y);
+        }
+
+        void apply_quota() {
+            if(max_elements > 0) {
+                if(queue.size() > max_elements) {
+                    queue.pop_front();
+                }
+
+                // clean-up own elements if there is too many entries
+                // Too many means relative to maximum entries.
+                // 10
+                if(elements.size() > max_elements/cleanup_divisor)
+                    for(auto it = elements.begin(); it != elements.end();) {
+                        if (it->second.use_count() == 0) {
+                            it = elements.erase(it);
+                        }
+                        else {
+                            ++it;
+                        }
+                    }
             }
         }
 
@@ -89,7 +118,11 @@ namespace sx {
         std::shared_ptr<Node<K>> replace(std::string const& key, std::shared_ptr<Y> n) {
             auto x = std::dynamic_pointer_cast<Node_Data>(n);
             if(x) {
+
+                apply_quota();
+
                 auto nel = std::make_shared<Node<K>>(x);
+                queue.push_back(nel);
                 elements[key] = nel;
 
                 return nel;
@@ -110,9 +143,11 @@ namespace sx {
             if(data and not data->empty()) {
                     ret[label] = data->to_json();
             }
-            for(auto const& [ key,elem] : elements) {
+            for(auto const& [ key, elem ] : elements) {
 
-                ret[key] = elem->to_json();
+                auto entry = elem.lock();
+                if(entry)
+                    ret[key] = entry->to_json();
             }
             return ret;
         }
@@ -126,9 +161,11 @@ namespace sx {
             }
 
             ret << ": [";
-            for(auto const& [ key,elem] : elements) {
+            for(auto const& [ key,elem ] : elements) {
 
-                ret << "\"" << key << "\": {" << elem->to_string() << "} ";
+                auto entry = elem.lock();
+                if(entry)
+                    ret << "\"" << key << "\": {" << entry->to_string() << "} ";
             }
             ret << "]";
 
