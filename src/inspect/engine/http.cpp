@@ -248,7 +248,10 @@ namespace sx::engine::http {
             return to_ret_index;
         }
 
-        uint32_t find_frame_sz(buffer const& frame) {
+        std::optional<uint32_t> find_frame_sz(buffer const& frame) {
+
+            if(frame.size() < 4) return 0;
+
             auto const& log = log::http2;
 
             unsigned int cur_off = 0;
@@ -522,18 +525,21 @@ namespace sx::engine::http {
         }
 
         std::size_t process_frame(EngineCtx& ctx, side_t side, buffer& frame) {
-
-            if(frame.empty()) return 0L;
+            constexpr size_t preamble_sz = 9L;
+            if(frame.size() < preamble_sz) return 0L;
 
             auto const& log = log::http2_frames;
 
-            auto frame_sz = find_frame_sz(frame);
+            auto frame_sz_opt = find_frame_sz(frame);
+
+            // not possible to parse frame header
+            if(not frame_sz_opt) return 0L;
+            auto frame_sz = frame_sz_opt.value();
+
             std::size_t cur_off = 3L;
             size_t add_hdr = 0;
 
-            constexpr size_t preamble_sz = 9L;
-
-            if (frame_sz <= frame.size()) {
+            if (frame_sz + preamble_sz <= frame.size()) {
                 auto typ = frame.get_at<uint8_t>(cur_off);   cur_off += sizeof(uint8_t);
 
                 auto flg = frame.get_at<uint8_t>(cur_off);   cur_off += sizeof(uint8_t);
@@ -576,10 +582,13 @@ namespace sx::engine::http {
                         _inf("Frame: zero size");
                     }
                 }
+                return  preamble_sz + frame_sz;
+            }
+            else {
+                _deb("frame is incomplete (frame size: %d, data in buffer: %d", frame_sz, frame.size());
             }
 
-
-            return  preamble_sz + frame_sz;
+            return 0;
         };
 
 
@@ -591,6 +600,8 @@ namespace sx::engine::http {
                 _err("no ctx origin");
                 return 0;
             }
+
+            if(not ctx.state_data.has_value()) return 0;
 
             try {
                 prev_state = std::any_cast<state_data_t>(ctx.state_info);
@@ -681,6 +692,10 @@ namespace sx::engine::http {
                 try {
                     // convert side from signature read/write r/w meaning to left/right l/r
                     cur_off = process_frame(ctx, side == 'r' ? side_t::LEFT : side_t::RIGHT , frame);
+                    if(cur_off == 0) {
+                        // frame not complete
+                        break;
+                    }
                     total += cur_off;
                 }
                 catch(std::out_of_range const& e) {
@@ -691,10 +706,6 @@ namespace sx::engine::http {
                     break;
                 }
 
-                if(cur_off == 0) {
-                    _err("frame size zero");
-                    break;
-                }
                 if(cur_off > frame.size()) {
                     _err("incomplete frame %d / %d", cur_off, frame.size());
                     break;
