@@ -37,8 +37,8 @@
     which carries forward this exception.
 */ 
 
-#ifndef __SOCKSPROXY_HPP__
-  #define __SOCKSPROXY_HPP__
+#ifndef SOCKSPROXY_HPP
+  #define SOCKSPROXY_HPP
 
 #include <threadedacceptor.hpp>
 
@@ -48,10 +48,11 @@
 
 class SocksProxy : public MitmProxy {
 public:
-    explicit SocksProxy(baseCom* com) : MitmProxy(com) {};
+    using MitmProxy::MitmProxy;
     ~SocksProxy() override = default;
     void on_left_message(baseHostCX* cx) override;
-    
+
+    //consumes cx and deletes it
     virtual void socks5_handoff(socksServerCX* cx);
 
     std::string to_string(int lev) const override;
@@ -60,8 +61,6 @@ public:
     DECLARE_LOGGING(to_string)
 
 private:
-    time_t auth_table_refreshed = 0;
-
     logan_lite log {"com.socks.proxy"};
 };
 

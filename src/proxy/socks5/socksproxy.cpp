@@ -37,7 +37,6 @@
     which carries forward this exception.
 */
 
-#include <sslcom.hpp>
 #include <tcpcom.hpp>
 
 #include <proxy/socks5/sockshostcx.hpp>
@@ -61,7 +60,7 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
             r.emplace_back(cx->right.get());
 
 
-            std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
+            auto lc_ = std::scoped_lock(CfgFactory::lock());
 
             matched_policy(CfgFactory::get()->policy_match(l, r));
             bool verdict = CfgFactory::get()->policy_action(matched_policy());
@@ -72,7 +71,6 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
             }
 
             const char* resp = verdict ? "accept" : "reject";
-            //_dia("socksProxy::on_left_message: policy check result: policy# %d policyoid 0x%x verdict %s", matched_policy(), p->oid(), resp);
             _dia("socksProxy::on_left_message: policy check result: policy# %d, verdict %s", matched_policy(), resp);
 
             socks5_policy s5_verdict = verdict ? socks5_policy::ACCEPT : socks5_policy::REJECT;
@@ -139,16 +137,12 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     
     auto* n_cx = new MitmHostCX(new_com, s);
     n_cx->waiting_for_peercom(true);
-    n_cx->com()->c_type();
-    n_cx->c_type();
     n_cx->com()->nonlocal_dst(true);
     n_cx->com()->nonlocal_dst_host() = cx->com()->nonlocal_dst_host();
     n_cx->com()->nonlocal_dst_port() = cx->com()->nonlocal_dst_port();
     n_cx->com()->nonlocal_dst_resolved(true);
-//     n_cx->writebuf()->append(cx->writebuf()->data(),cx->writebuf()->size());
-    
+
     // get rid of it
-    //cx->socket(0);
     cx->remove_socket();
     if(cx->left) { 
         // we are using the socket, so we don't want it to be cleared in cx->left destructor.
@@ -166,7 +160,6 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
                                         );
     std::string h;
     std::string p;
-    n_cx->c_type();
     n_cx->com()->resolve_socket_src(n_cx->socket(),&h,&p);
     n_cx->host() = h;
     n_cx->port() = p;
@@ -177,8 +170,7 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
 
 
     {
-        std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
-
+        auto lc_ = std::scoped_lock(CfgFactory::lock());
         if (CfgFactory::get()->db_policy_list.at(matched_policy())->nat == PolicyRule::POLICY_NAT_NONE) {
             target_cx->com()->nonlocal_src(true);
             target_cx->com()->nonlocal_src_host() = h;
@@ -221,32 +213,6 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
 
                 _dia("authentication required or optionally resolved");
 
-                // reload table and check timeouts each 5 seconds
-                time_t now = time(nullptr);
-                if (now > auth_table_refreshed + 5) {
-
-                    // refresh and timeout IPv4 entries
-
-                    {
-                        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip4_lock());
-                        _dum("authentication: refreshing ip4 shm logons");
-                        AuthFactory::get().shm_ip4_table_refresh();
-
-                        _dum("authentication: checking ip4 timeouts");
-                        AuthFactory::get().ip4_timeout_check();
-                    }
-
-                    // refresh and timeout IPv6 entries
-                    {
-                        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
-                        _dum("authentication: refreshing ip6 shm logons");
-                        AuthFactory::get().shm_ip6_table_refresh();
-
-                        _dum("authentication: checking ip6 timeouts");
-                        AuthFactory::get().ip6_timeout_check();
-                    }
-                }
-
                 bool identity_resolved = resolve_identity(src_cx, false);
 
 
@@ -277,39 +243,19 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
                     std::string str_af = SocketInfo::inet_family_str(af);
 
 
-                    std::vector<std::string> groups_vec;
-                    bool found = false;
+                    std::optional<std::vector<std::string>> groups_vec;
 
                     if (af == AF_INET || af == 0) {
-                        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip4_lock());
-                        auto ip = AuthFactory::get_ip4_map().find(n_cx->host());
-                        if (ip != AuthFactory::get_ip4_map().end()) {
-                            IdentityInfoBase *id_ptr = &(*ip).second;
-
-                            if(id_ptr) {
-                                found = true;
-                                for (auto const& g: id_ptr->groups_vec) groups_vec.push_back(g);
-                            }
-                        }
+                        groups_vec = AuthFactory::get().ip4_get_groups(n_cx->host());
                     } else if (af == AF_INET6) {
-                        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
-                        auto ip = AuthFactory::get_ip6_map().find(n_cx->host());
-                        if (ip != AuthFactory::get_ip6_map().end()) {
-                            IdentityInfoBase *id_ptr = &(*ip).second;
-
-                            if(id_ptr) {
-                                found = true;
-                                for (auto const& g: id_ptr->groups_vec) groups_vec.push_back(g);
-                            }
-                        }
+                        groups_vec = AuthFactory::get().ip6_get_groups(n_cx->host());
                     }
 
-                    if ( found ) {
-                        //std::string groups = id_ptr->last_logon_info.groups();
+                    if ( groups_vec ) {
 
                         if (CfgFactory::get()->policy_prof_auth(matched_policy()) != nullptr)
                             for (auto i: CfgFactory::get()->policy_prof_auth(matched_policy())->sub_policies) {
-                                for (auto const& x: groups_vec) {
+                                for (auto const& x: groups_vec.value()) {
                                     _deb("Connection identities: ip identity '%s' against policy '%s'", x.c_str(),
                                          i->element_name().c_str());
                                     if (x == i->element_name()) {
