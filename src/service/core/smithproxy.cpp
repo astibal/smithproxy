@@ -92,6 +92,8 @@ std::thread* SmithProxy::create_identity_refresh_thread() {
             AuthFactory::get().shm_ip4_table_refresh();
             AuthFactory::get().shm_ip6_table_refresh();
             AuthFactory::get().shm_token_table_refresh();
+            AuthFactory::get().ip4_timeout_check();
+            AuthFactory::get().ip6_timeout_check();
 
             _dum("id_thread: finished");
 
