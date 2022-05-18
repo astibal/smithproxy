@@ -83,8 +83,8 @@ std::size_t MitmHostCX::process_in() {
     // eliminate this completely
     _if_deb {
         // incoming data are in the readbuf
-        unsigned char *ptr = baseHostCX::readbuf()->data();
-        unsigned int len = baseHostCX::readbuf()->size();
+        auto const *ptr = baseHostCX::readbuf()->data();
+        auto len = baseHostCX::readbuf()->size();
 
         // our only processing: hex dup the payload to the log
         _dum("Incoming data(%s):\r\n %s", this->c_type(), hex_dump(ptr, static_cast<int>(len), 4, 0, true).c_str());
@@ -145,7 +145,7 @@ void MitmHostCX::load_signatures() {
 }
 
 
-void MitmHostCX::engine_run(std::string const& name, sx::engine::EngineCtx &e) {
+void MitmHostCX::engine_run(std::string const& name, sx::engine::EngineCtx &e) const {
 
     if(name == "http1") {
         sx::engine::http::v1::start(e);
@@ -197,16 +197,13 @@ void MitmHostCX::inspect(char side) {
                     baseHostCX* p = nullptr;
                     side == 'l' || side == 'L' ? p = peer() : p = this;
 
-                    // NOTE: this doesn't have to be really best idea, though it is working well
+                    // NOTE: this doesn't have to be really the best idea, though it is working well
                     //       in most cases
-                    //                    p->error(true);
 
                     auto* verdict_target = dynamic_cast<AppHostCX*>(p);
                     if(verdict_target != nullptr) {
                         inspector->apply_verdict(verdict_target);
 
-                        // reset it back to ok for further queries
-                        // inspector->verdict(Inspector::OK);
                         break;
                     } else {
                         _err("cannot apply verdict on generic cx");
@@ -260,18 +257,8 @@ void MitmHostCX::on_detect(std::shared_ptr<duplexFlowMatch> x_sig, flowMatchStat
         engine_ctx.signature = x_sig;
     };
 
-    // make this code deprecated and call it only if engine is not present in the configuration
-//    if(sig_sig->sig_category == "www" && sig_sig->name() == "http/get|post") {
-//        if(sig_sig->sig_engine.empty()) {
-//            prep_ctx();
-//            engine_http1_start(engine_ctx);
-//        }
-//    }
-
     if(not sig_sig->sig_engine.empty()) {
         prep_ctx();
-        // Engine will run in process_in() and process_out()
-        // engine(sig_sig->sig_engine, engine_ctx);
     }
 
     // look if signature enables other groups

@@ -44,7 +44,7 @@
 #include <apphostcx.hpp>
 #include <policy/inspectors.hpp>
 
-class MitmHostCX : public AppHostCX, public socle::sobject {
+class MitmHostCX final : public AppHostCX, public socle::sobject {
 public:
     ~MitmHostCX() override = default;
     
@@ -61,30 +61,24 @@ public:
     void on_detect(std::shared_ptr<duplexFlowMatch> x_sig, flowMatchState& s, vector_range& r) override;
 
     sx::engine::EngineCtx engine_ctx;
-    void engine_run(std::string const& name, sx::engine::EngineCtx &e);
+    void engine_run(std::string const& name, sx::engine::EngineCtx &e) const;
 
     void on_starttls() override;
 
     int matched_policy() const { return matched_policy_; }
     void matched_policy(int p) { matched_policy_ = p; }
 
-    typedef enum { REPLACETYPE_NONE=0, REPLACETYPE_HTTP=1 } replacetype_t;
+    using replacetype_t = enum { REPLACETYPE_NONE=0, REPLACETYPE_HTTP=1 };
     replacetype_t replacement_type() const { return replacement_type_; }
     void replacement_type(replacetype_t r) { replacement_type_ = r; }
     
-    typedef enum { REPLACE_NONE=0, REPLACE_REDIRECT=1, REPLACE_BLOCK=2 } replaceflags_t;    
+    using replaceflags_t = enum { REPLACE_NONE=0, REPLACE_REDIRECT=1, REPLACE_BLOCK=2 };
     void replacement_flag(replaceflags_t i) { replacement_flags_ = i; }
     replaceflags_t replacement_flag()   { return replacement_flags_; }
     
     int inspection_verdict() const { return inspect_verdict; };
     std::shared_ptr<buffer> inspection_verdict_response() const { return  inspect_verdict_response; }
-protected:    
-    int matched_policy_ = -1;
-    
-    replacetype_t replacement_type_ = REPLACETYPE_NONE; 
-    replaceflags_t replacement_flags_ = REPLACE_NONE;
 
-public:
     bool opt_engines_enabled = true;
     bool opt_kb_enabled = true;
 
@@ -102,6 +96,10 @@ public:
     auto const& get_log() const { return log; }
     
 private:
+    int matched_policy_ = -1;
+
+    replacetype_t replacement_type_ = REPLACETYPE_NONE;
+    replaceflags_t replacement_flags_ = REPLACE_NONE;
 
     unsigned int inspect_cur_flow_size = 0;
     unsigned int inspect_flow_same_bytes = 0;
