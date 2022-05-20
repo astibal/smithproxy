@@ -2119,7 +2119,7 @@ bool CfgFactory::prof_detect_apply (baseHostCX *originator, baseProxy *new_proxy
     
     // we scan connection on client's side
     if(mitm_originator != nullptr) {
-        mitm_originator->mode(AppHostCX::MODE_NONE);
+        mitm_originator->mode(AppHostCX::mode_t::NONE);
         if(pd != nullptr)  {
             pd_name = pd->element_name().c_str();
             _dia("policy_apply[%s]: policy detection profile: mode: %d", pd_name, pd->mode);
@@ -2973,7 +2973,7 @@ bool CfgFactory::new_detection_profile(Setting& ex, std::string const& name) con
 
     try {
         Setting& item = ex.add(name, Setting::TypeGroup);
-        item.add("mode", Setting::TypeInt) = 1; // MODE_PRE
+        item.add("mode", Setting::TypeInt) = 1; // PRE
     }
     catch(libconfig::SettingNameException const& e) {
         _war("cannot add new section %s: %s", name.c_str(), e.what());
@@ -3624,14 +3624,9 @@ int save_signatures(Config& ex, const std::string& sigset) {
 
                 Setting &flow = item.add("flow", Setting::TypeList);
 
-                for (auto f: sig->sig_chain()) {
-
+                for (auto& [ sig_side, bm ]: sig->sig_chain()) {
 
                     bool sig_correct = false;
-
-                    char sig_side = f.first;
-                    baseMatch *bm = f.second;
-
 
                     unsigned int sig_bytes_start = bm->match_limits_offset;
                     unsigned int sig_bytes_max = bm->match_limits_bytes;
@@ -3640,13 +3635,13 @@ int save_signatures(Config& ex, const std::string& sigset) {
 
 
                     // follow the inheritance (regex can also be cast to simple)
-                    auto rm = dynamic_cast<regexMatch *>(bm);
+                    auto rm = dynamic_cast<regexMatch *>(bm.get());
                     if (rm) {
                         sig_type = "regex";
                         sig_expr = rm->expr();
                         sig_correct = true;
                     } else {
-                        auto sm = dynamic_cast<simpleMatch *>(bm);
+                        auto sm = dynamic_cast<simpleMatch *>(bm.get());
                         if (sm) {
                             sig_type = "simple";
                             sig_expr = sm->expr();

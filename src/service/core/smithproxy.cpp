@@ -544,7 +544,7 @@ int SmithProxy::load_signatures (libconfig::Config &cfg, const char *name, Signa
 
     _dia("Loading %s: %d", name, sigs_len);
     for ( int i = 0 ; i < sigs_len; i++) {
-        auto newsig = std::make_shared<MyDuplexFlowMatch>(MyDuplexFlowMatch());
+        auto newsig = std::make_shared<MyDuplexFlowMatch>();
 
 
         const Setting& signature = cfg_signatures[i];

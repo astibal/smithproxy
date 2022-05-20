@@ -172,7 +172,9 @@ namespace sx::engine::http {
             auto const& log = log::http1;
             _deb("start: cx.meter_read %ldB, cx.meter_write %ldB", ctx.origin->meter_read_bytes, ctx.origin->meter_write_bytes);
 
-            auto const& [ http_request1_side, http_request1_buffer ] = ctx.origin->flow().data().back();
+            auto const& last_flow_entry = ctx.origin->flow().flow_queue().back();
+            auto const& http_request1_side = last_flow_entry.source();
+            auto const& http_request1_buffer = last_flow_entry.data();
 
             // limit this rather info/convenience regexing to 128 bytes
 
@@ -184,7 +186,7 @@ namespace sx::engine::http {
             if(http_request1_side == 'r') {
                 _dia("start: flow block index %d, size %dB", ctx.flow_pos, http_request1_buffer->size());
                 std::string buffer_data_string((const char *) http_request1_buffer->data(), http_request1_buffer->size());
-                parse_request(ctx, http_request1_buffer.get());
+                parse_request(ctx, http_request1_buffer);
             }
 
             _deb("start finished");
@@ -635,7 +637,9 @@ namespace sx::engine::http {
             }
 
             auto const& log = log::http2;
-            auto const& [ side, h2_buffer ] = ctx.origin->flow().data().back();
+            auto const& last_flow_entry = ctx.origin->flow().flow_queue().back();
+            auto const& side = last_flow_entry.source();
+            auto const& h2_buffer= last_flow_entry.data();
 
             _dia("start at flow #%d", ctx.origin->flow().size());
             _dia("flow path: %s", ctx.origin->flow().hr().c_str());

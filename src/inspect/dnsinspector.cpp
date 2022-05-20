@@ -57,8 +57,8 @@ void DNS_Inspector::update(AppHostCX* cx) {
 
     duplexFlow& flow = cx->flow();
     _dia("DNS_Inspector::update[%s]: stage %d start (flow size %d, last flow entry data length %d)", cx->c_type(), stage,
-         flow.data().size(),
-         flow.data().back().second->size());
+         flow.flow_queue().size(),
+         flow.flow_queue().back().size());
 
     /* INIT */
 
@@ -73,11 +73,12 @@ void DNS_Inspector::update(AppHostCX* cx) {
 
 
 //    std::pair<char,buffer*> cur_pos = flow.flow().back();
-    auto const& [ cur_side, cur_buffer ] = flow.data().back();
+    auto const& last_flow_entry = flow.flow_queue().back();
+
 
     std::shared_ptr<DNS_Packet> ptr;
 
-    auto shallow_xbuf = cur_buffer->view();
+    auto shallow_xbuf = last_flow_entry.data()->view();
 
     unsigned int mem_pos = 0;
     unsigned int red = 0;
@@ -92,7 +93,7 @@ void DNS_Inspector::update(AppHostCX* cx) {
     }
 
     auto mem_len = shallow_xbuf.size();
-    if(cur_side == 'r') {
+    if(last_flow_entry.source() == 'r') {
 
         stage = 0;
         for (unsigned int it = 0; red < shallow_xbuf.size() && it < 10; it++) {
@@ -205,7 +206,7 @@ void DNS_Inspector::update(AppHostCX* cx) {
             }
         }
     }
-    else if (cur_side == 'w') {
+    else if (last_flow_entry.source() == 'w') {
 
         stage = 1;
         for (unsigned int it = 0; red < shallow_xbuf.size() && it < 10; it++) {
@@ -273,7 +274,7 @@ void DNS_Inspector::update(AppHostCX* cx) {
         }
     }
 
-    _dia("DNS_Inspector::update[%s]: stage %d end (flow size %d)", cx->c_type(), stage, flow.data().size());
+    _dia("DNS_Inspector::update[%s]: stage %d end (flow size %d)", cx->c_type(), stage, flow.flow_queue().size());
 }
 
 

@@ -48,10 +48,10 @@ class ProfileDetection : public socle::sobject, public CfgElement {
 
 public:
     /*
-     *  0   MODE_NONE
-     *  1   MODE_POST -- works in all scenarios, but sometimes we can read data, which should
-     *                   have been processed by upgraded com. Use MODE_PRE if possible.
-     *  2   MODE_PRE  -- should be default, but not safe when cannot peek()
+     *  0   NONE
+     *  1   POST -- works in all scenarios, but sometimes we can read data, which should
+     *                   have been processed by upgraded com. Use PRE if possible.
+     *  2   PRE  -- should be default, but not safe when cannot peek()
      */
     int mode = 0;
     bool engines_enabled = true;

@@ -229,7 +229,7 @@ namespace jsonize {
             };
 
             ret["stats"]["flow"] = {
-                    { "size", what->first_left() ? what->first_left()->flow().data().size() : 0 }
+                    { "size", what->first_left() ? what->first_left()->flow().flow_queue().size() : 0 }
             };
         }
 
