@@ -138,7 +138,7 @@ if(UNIX)
     # Pedantic complains about designated initializers (C++20)
     # SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wconversion -Wpedantic -Wno-unused-parameter -Wno-psabi -std=c++17")
     SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Wno-unused-parameter -Wno-psabi -std=c++17")
-    SET(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g3 -fno-stack-protector")
+    SET(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_DEBUG} -g3 -fno-stack-protector")
 
     IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
         if("${OPT_DEBUG_ASAN_THREADS}" STREQUAL "Y")
@@ -204,6 +204,8 @@ configure_file(
         ${PROJECT_SOURCE_DIR}/src/smithproxy_version.h.in
         ${PROJECT_SOURCE_DIR}/src/smithproxy_version.h
 )
+message(STATUS "compiler flags: ${CMAKE_CXX_FLAGS}")
+message(STATUS "compiler debug flags: ${CMAKE_CXX_FLAGS_DEBUG}")
 
 add_executable(smithproxy
 
