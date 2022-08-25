@@ -463,7 +463,7 @@ bool socksServerCX::setup_target() {
         n_cx->com()->resolve_socket_src(n_cx->socket(),&h,&p);
         
         
-        target_cx->com()->nonlocal_src(false); //FIXME
+        target_cx->com()->nonlocal_src(false);
         target_cx->com()->nonlocal_src_host() = h;
         target_cx->com()->nonlocal_src_port() = std::stoi(p); 
         
