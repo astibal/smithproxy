@@ -83,7 +83,6 @@ private:
 
 class MitmProxy : public baseProxy, public socle::sobject, public IOController {
 
-protected:
     std::unique_ptr<socle::baseTrafficLogger> tlog_;
     
     bool identity_resolved_ = false;    // meant if attempt has been done, regardless of its result.
@@ -148,7 +147,8 @@ public:
     bool resolve_identity(baseHostCX* custom_cx, bool insert_guest);
     bool update_auth_ipX_map(baseHostCX*);
     bool apply_id_policies(baseHostCX* cx);
-   
+    std::optional<std::vector<std::string>> find_id_groups(baseHostCX const* cx);
+    std::shared_ptr<ProfileSubAuth> find_auth_subprofile(std::vector<std::string> const& groups);
 
 
     std::unique_ptr<socle::baseTrafficLogger>& tlog() { return tlog_; }

@@ -230,135 +230,141 @@ std::string MitmProxy::to_string(int verbosity) const {
     return r.str();
 }
 
-
-void MitmProxy::identity_resolved(bool b) {
-    identity_resolved_ = b;
-}
-
-bool MitmProxy::apply_id_policies(baseHostCX* cx) {
-
+std::optional<std::vector<std::string>> MitmProxy::find_id_groups(baseHostCX const* cx) {
 
     int af = AF_INET;
     if(cx->com()) {
         af = cx->com()->l3_proto();
     }
     std::string str_af = SocketInfo::inet_family_str(af);
-    IdentityInfoBase* id_ptr = nullptr;
 
     bool found = false;
     std::vector<std::string> group_vec;
 
-    if(af == AF_INET || af == 0) {
-        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip4_lock());
+    auto from_map = [&group_vec](auto const& map, auto const& host) -> bool {
 
-        // use common base pointer, so we can use all IdentityInfo types
-
-        auto ip = AuthFactory::get_ip4_map().find(cx->host());
-        if (ip != AuthFactory::get_ip4_map().end()) {
-            id_ptr = &(*ip).second;
+        auto ip = map.find(host);
+        if (ip != map.end()) {
+            auto* id_ptr = &(*ip).second;
 
             if(id_ptr) {
-                found = true;
                 for (auto const &my_id: id_ptr->groups_vec) {
-                    group_vec.push_back(my_id);
+                    group_vec.emplace_back(my_id);
                 }
+
+                return true;
             }
         }
+        return false;
+    };
+
+    if(af == AF_INET or af == 0) {
+        auto lc_ = std::scoped_lock(AuthFactory::get_ip4_lock());
+        found = from_map(AuthFactory::get_ip4_map(), cx->host());
     }
     else if(af == AF_INET6) {
-        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
-        // use common base pointer, so we can use all IdentityInfo types
-
-        auto ip = AuthFactory::get_ip6_map().find(cx->host());
-        if (ip != AuthFactory::get_ip6_map().end()) {
-            id_ptr = &(*ip).second;
-
-            if(id_ptr) {
-                found = true;
-                for(auto const& my_id: id_ptr->groups_vec) {
-                    group_vec.push_back(my_id);
-                }
-            }
-        }
+        auto lc_ = std::scoped_lock(AuthFactory::get_ip6_lock());
+        found = from_map(AuthFactory::get_ip6_map(), cx->host());
     }
 
+    if(found) return group_vec;
 
-    std::shared_ptr<ProfileSubAuth> final_profile;
-    
-    if( found ) {
-        _dia("apply_id_policies: matched policy: %d",matched_policy());        
-        auto policy = CfgFactory::get()->db_policy_list.at(matched_policy());
-        
-        auto auth_policy = policy->profile_auth;
+    return std::nullopt;
+}
 
-        
-        if(auth_policy) {
-            for(auto const& sub_prof: auth_policy->sub_policies) {
-                
-                _dia("apply_id_policies: checking identity policy for: %s", sub_prof->element_name().c_str());
-                
-                for(auto const& my_id: group_vec) {
-                    _dia("apply_id_policies: identity in policy: %s, match-test real user group '%s'",
-                         sub_prof->element_name().c_str(), my_id.c_str());
-                    if(sub_prof->element_name() == my_id) {
-                        _dia("apply_id_policies: .. matched.");
-                        final_profile = sub_prof;
-                        break;
-                    }
-                }
-                
-                if(final_profile != nullptr) {
+std::shared_ptr<ProfileSubAuth> MitmProxy::find_auth_subprofile(std::vector<std::string> const& groups) {
+
+    auto policy = CfgFactory::get()->db_policy_list.at(matched_policy());
+    auto auth_policy = policy->profile_auth;
+    std::shared_ptr<ProfileSubAuth> to_ret;
+
+    if (auth_policy) {
+        for (auto const &sub_prof: auth_policy->sub_policies) {
+
+            _dia("apply_id_policies: checking identity policy for: %s", sub_prof->element_name().c_str());
+
+            for (auto const &my_id: groups) {
+                _dia("apply_id_policies: identity in policy: %s, match-test real user group '%s'",
+                     sub_prof->element_name().c_str(), my_id.c_str());
+                if (sub_prof->element_name() == my_id) {
+                    _dia("apply_id_policies: .. matched.");
+                    to_ret = sub_prof;
                     break;
                 }
             }
-        }
-        
-        if(final_profile != nullptr) {
-            
-            const char* pc_name = "none";
-            const char* pd_name = "none";
-            const char* pt_name = "none";
-            std::string algs;
-            
-            _dia("apply_id_policies: assigning sub-profile %s", final_profile->element_name().c_str());
-            if(final_profile->profile_content != nullptr) {
-                if (CfgFactory::get()->prof_content_apply(cx, this, final_profile->profile_content)) {
-                    pc_name = final_profile->profile_content->element_name().c_str();
-                    _dia("apply_id_policies: assigning content sub-profile %s",
-                         final_profile->profile_content->element_name().c_str());
-                }
-            }
-            if(final_profile->profile_detection != nullptr) {
-                if (CfgFactory::get()->prof_detect_apply(cx, this, final_profile->profile_detection)) {
-                    pd_name = final_profile->profile_detection->element_name().c_str();
-                    _dia("apply_id_policies: assigning detection sub-profile %s",
-                         final_profile->profile_detection->element_name().c_str());
-                }
-            }
-            if(final_profile->profile_tls != nullptr) {
-                if(CfgFactory::get()->prof_tls_apply(cx, this, final_profile->profile_tls)) {
-                    pt_name = final_profile->profile_tls->element_name().c_str();
-                    _dia("apply_id_policies: assigning tls sub-profile %s", final_profile->profile_tls->element_name().c_str());
-                }
-            }
-            if(final_profile->profile_alg_dns != nullptr) {
-                if(CfgFactory::get()->prof_alg_dns_apply(cx, this, final_profile->profile_alg_dns)) {
-                    algs += final_profile->profile_alg_dns->element_name() + " ";
-                    _dia("apply_id_policies: assigning tls sub-profile %s", final_profile->profile_tls->element_name().c_str());
-                }
-            }
-            
-            // end of custom sub-profiles
-            _inf("Connection %s: identity-based sub-profile: name=%s cont=%s det=%s tls=%s algs=%s",cx->full_name('L').c_str(),
-                 final_profile->element_name().c_str(),
-                            pc_name, pd_name, pt_name, algs.c_str()
-                            );
-        }
 
-        return (final_profile != nullptr);
-    } 
+            if (to_ret != nullptr) {
+                break;
+            }
+        }
+    }
 
-    return false;
+    return to_ret;
+};
+
+bool MitmProxy::apply_id_policies(baseHostCX* cx) {
+
+    _dia("apply_id_policies: matched policy: %d", matched_policy());
+
+    auto opt_group_vec = find_id_groups(cx);
+
+
+    if( not opt_group_vec.has_value() ) {
+        _deb("apply_id_policies: %d groups not found");
+        return false;
+    }
+
+    _deb("apply_id_policies: %d groups found", opt_group_vec.value().size());
+    auto final_profile = find_auth_subprofile(opt_group_vec.value());
+
+    if (not final_profile) {
+        _deb("apply_id_policies: %d no subprofile found");
+        return false;
+    }
+
+    const char *pc_name = "none";
+    const char *pd_name = "none";
+    const char *pt_name = "none";
+    std::string algs;
+
+    _dia("apply_id_policies: assigning sub-profile %s", final_profile->element_name().c_str());
+    if (final_profile->profile_content != nullptr) {
+        if (CfgFactory::get()->prof_content_apply(cx, this, final_profile->profile_content)) {
+            pc_name = final_profile->profile_content->element_name().c_str();
+            _dia("apply_id_policies: assigning content sub-profile %s",
+                 final_profile->profile_content->element_name().c_str());
+        }
+    }
+    if (final_profile->profile_detection != nullptr) {
+        if (CfgFactory::get()->prof_detect_apply(cx, this, final_profile->profile_detection)) {
+            pd_name = final_profile->profile_detection->element_name().c_str();
+            _dia("apply_id_policies: assigning detection sub-profile %s",
+                 final_profile->profile_detection->element_name().c_str());
+        }
+    }
+    if (final_profile->profile_tls != nullptr) {
+        if (CfgFactory::get()->prof_tls_apply(cx, this, final_profile->profile_tls)) {
+            pt_name = final_profile->profile_tls->element_name().c_str();
+            _dia("apply_id_policies: assigning tls sub-profile %s",
+                 final_profile->profile_tls->element_name().c_str());
+        }
+    }
+    if (final_profile->profile_alg_dns != nullptr) {
+        if (CfgFactory::get()->prof_alg_dns_apply(cx, this, final_profile->profile_alg_dns)) {
+            algs += final_profile->profile_alg_dns->element_name() + " ";
+            _dia("apply_id_policies: assigning tls sub-profile %s",
+                 final_profile->profile_tls->element_name().c_str());
+        }
+    }
+
+    // end of custom sub-profiles
+    _inf("Connection %s: identity-based sub-profile: name=%s cont=%s det=%s tls=%s algs=%s",
+         cx->full_name('L').c_str(),
+         final_profile->element_name().c_str(),
+         pc_name, pd_name, pt_name, algs.c_str()
+        );
+
+    return true;
 }
 
 bool MitmProxy::resolve_identity(baseHostCX* cx, bool insert_guest = false) {
