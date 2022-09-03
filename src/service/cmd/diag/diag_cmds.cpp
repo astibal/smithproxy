@@ -314,9 +314,10 @@ int cli_diag_ssl_crl_list(struct cli_def *cli, const char *command, char *argv[]
     out << "Downloaded CRLs:\n\n";
 
     {
-        auto lc_ = std::scoped_lock(SSLFactory::crl_cache().getlock());
+        auto& fac = SSLFactory::factory();
+        auto lc_ = std::scoped_lock(fac.crl_cache().getlock());
 
-        for (auto const& [uri, cache] : SSLFactory::crl_cache().cache()) {
+        for (auto const& [uri, cache] : fac.crl_cache().cache()) {
             auto cached_result = cache->ptr();
 
             out << "    " + uri;
@@ -347,11 +348,12 @@ int cli_diag_ssl_crl_stats(struct cli_def *cli, const char *command, char *argv[
     std::stringstream out;
 
     {
-        auto lc_ = std::scoped_lock(SSLFactory::crl_cache().getlock());
+        auto& fac = SSLFactory::factory();
+        auto lc_ = std::scoped_lock(fac.crl_cache().getlock());
 
-        auto n_sz_cache = SSLFactory::crl_cache().cache().size();
-        auto n_max_cache = SSLFactory::crl_cache().max_size();
-        std::string n_name = SSLFactory::crl_cache().c_type();
+        auto n_sz_cache = fac.crl_cache().cache().size();
+        auto n_max_cache = fac.crl_cache().max_size();
+        std::string n_name = fac.crl_cache().c_type();
 
 
         out << string_format("'%s' cache stats: ", n_name.c_str());
@@ -382,12 +384,13 @@ int cli_diag_ssl_verify_clear(struct cli_def *cli, const char *command, char *ar
     cli_print(cli, "request to clear ocsp cache from: %s", what.str().c_str());
     std::stringstream out;
 
-    auto lc_ = std::scoped_lock(SSLFactory::factory().verify_cache.getlock());
+    auto& fac = SSLFactory::factory();
+    auto lc_ = std::scoped_lock(fac.verify_cache().getlock());
 
     if(to_delete.empty()) {
 
-        auto n_size = SSLFactory::factory().verify_cache.cache().size();
-        SSLFactory::factory().verify_cache.clear();
+        auto n_size = fac.verify_cache().cache().size();
+        fac.verify_cache().clear();
 
         cli_print(cli, "erased %zu entries", n_size);
 
@@ -396,7 +399,7 @@ int cli_diag_ssl_verify_clear(struct cli_def *cli, const char *command, char *ar
 
     mp::vector<std::string> to_delete_keys;
 
-    for(auto const& [ key, cache]: SSLFactory::factory().verify_cache.cache()) {
+    for(auto const& [ key, cache]: SSLFactory::factory().verify_cache().cache()) {
         for(auto const& del_entry: to_delete)
             if(key.find(del_entry, 0) == 0) {
                 to_delete_keys.push_back(key);
@@ -405,7 +408,7 @@ int cli_diag_ssl_verify_clear(struct cli_def *cli, const char *command, char *ar
 
     for(auto const& del_entry: to_delete_keys) {
         out << "erasing key: " << del_entry << "\n";
-        SSLFactory::factory().verify_cache.erase(del_entry);
+        SSLFactory::factory().verify_cache().erase(del_entry);
     }
 
     cli_print(cli, "%s", out.str().c_str());
@@ -423,9 +426,9 @@ int cli_diag_ssl_verify_list(struct cli_def *cli, const char *command, char *arg
     out << "Verify status list:\n\n";
 
     {
-        auto lc_ = std::scoped_lock(SSLFactory::factory().verify_cache.getlock());
+        auto lc_ = std::scoped_lock(SSLFactory::factory().verify_cache().getlock());
 
-        for (auto const& [cn, cache]: SSLFactory::factory().verify_cache.cache()) {
+        for (auto const& [cn, cache]: SSLFactory::factory().verify_cache().cache()) {
 
             auto cached_result = cache->ptr();
 
@@ -456,7 +459,7 @@ int cli_diag_ssl_verify_stats(struct cli_def *cli, const char *command, char *ar
 
     std::stringstream out;
     {
-        auto const& verify_cache = SSLFactory::factory().verify_cache;
+        auto const& verify_cache = SSLFactory::factory().verify_cache();
 
         auto lc_ = std::scoped_lock(verify_cache.getlock());
 
@@ -541,11 +544,12 @@ int cli_diag_ssl_ticket_list(struct cli_def *cli, const char *command, char *arg
     }
     bool ticket = false;
 
-    auto lc_ = std::scoped_lock(SSLFactory::session_cache().getlock());
+    auto& fac = SSLFactory::factory();
+    auto lc_ = std::scoped_lock(fac.session_cache().getlock());
 
     out << "SSL ticket/sessionid list:\n\n";
 
-    for (auto const& [ key, session_keys ]: SSLFactory::session_cache().cache()) {
+    for (auto const& [ key, session_keys ]: fac.session_cache().cache()) {
 
         #ifdef USE_OPENSSL11
 
@@ -603,11 +607,12 @@ int cli_diag_ssl_ticket_stats(struct cli_def *cli, const char *command, char *ar
 
 
     {
-        auto lc_ = std::scoped_lock(SSLFactory::session_cache().getlock());
+        auto& fac = SSLFactory::factory();
+        auto lc_ = std::scoped_lock(fac.session_cache().getlock());
 
-        n_sz_cache = SSLFactory::session_cache().cache().size();
-        n_max_cache = SSLFactory::session_cache().max_size();
-        n_name = SSLFactory::session_cache().c_type();
+        n_sz_cache = fac.session_cache().cache().size();
+        n_max_cache = fac.session_cache().max_size();
+        n_name = fac.session_cache().c_type();
     }
 
     out << string_format("'%s' cache stats: \n", n_name.c_str());
@@ -627,11 +632,12 @@ int cli_diag_ssl_ticket_clear(struct cli_def *cli, const char *command, char *ar
     std::size_t n_sz_cache = 0;
 
     {
-        auto lc_ = std::scoped_lock(SSLFactory::session_cache().getlock());
+        auto& fac = SSLFactory::factory();
+        auto lc_ = std::scoped_lock(fac.session_cache().getlock());
 
-        n_sz_cache = SSLFactory::session_cache().cache().size();
+        n_sz_cache = fac.session_cache().cache().size();
 
-        SSLFactory::session_cache().clear();
+        fac.session_cache().clear();
     }
 
 

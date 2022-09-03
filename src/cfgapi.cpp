@@ -552,16 +552,16 @@ bool CfgFactory::load_settings () {
         }
     }
 
-    load_if_exists(cfgapi.getRoot()["settings"], "certs_path",SSLFactory::certs_path());
-    load_if_exists(cfgapi.getRoot()["settings"], "certs_ca_key_password",SSLFactory::certs_password());
+    load_if_exists(cfgapi.getRoot()["settings"], "certs_path",SSLFactory::factory().certs_path());
+    load_if_exists(cfgapi.getRoot()["settings"], "certs_ca_key_password",SSLFactory::factory().certs_password());
 
-    if(! load_if_exists(cfgapi.getRoot()["settings"], "certs_ctlog",SSLFactory::ctlogfile())) {
-        SSLFactory::ctlogfile() = "/etc/smithproxy/ct_log_list.cnf";
+    if(! load_if_exists(cfgapi.getRoot()["settings"], "certs_ctlog",SSLFactory::factory().ctlogfile())) {
+        SSLFactory::factory().ctlogfile() = "/etc/smithproxy/ct_log_list.cnf";
     }
 
 
-    if(! load_if_exists(cfgapi.getRoot()["settings"], "ca_bundle_path",SSLFactory::ca_path())) {
-        load_if_exists(cfgapi.getRoot()["settings"], "certs_ca_path", SSLFactory::ca_path());
+    if(! load_if_exists(cfgapi.getRoot()["settings"], "ca_bundle_path",SSLFactory::factory().ca_path())) {
+        load_if_exists(cfgapi.getRoot()["settings"], "certs_ca_path", SSLFactory::factory().ca_path());
     }
 
     load_if_exists(cfgapi.getRoot()["settings"], "ssl_autodetect",MitmMasterProxy::ssl_autodetect);
@@ -3726,10 +3726,10 @@ int save_settings(Config& ex) {
         it_ns.add(Setting::TypeString) = ns;
     }
 
-    objects.add("certs_path", Setting::TypeString) = SSLFactory::certs_path();
-    objects.add("certs_ca_key_password", Setting::TypeString) = SSLFactory::certs_password();
-    objects.add("certs_ctlog", Setting::TypeString) = SSLFactory::ctlogfile();
-    objects.add("ca_bundle_path", Setting::TypeString) = SSLFactory::ca_path();
+    objects.add("certs_path", Setting::TypeString) = SSLFactory::factory().certs_path();
+    objects.add("certs_ca_key_password", Setting::TypeString) = SSLFactory::factory().certs_password();
+    objects.add("certs_ctlog", Setting::TypeString) = SSLFactory::factory().ctlogfile();
+    objects.add("ca_bundle_path", Setting::TypeString) = SSLFactory::factory().ca_path();
 
     objects.add("plaintext_port", Setting::TypeString) = CfgFactory::get()->listen_tcp_port_base;
     objects.add("plaintext_workers", Setting::TypeInt) = CfgFactory::get()->num_workers_tcp;
