@@ -441,8 +441,7 @@ bool socksServerCX::setup_target() {
         
         auto* n_cx = new MitmHostCX(new_com, s);
         n_cx->waiting_for_peercom(true);
-        n_cx->com()->c_type();
-        n_cx->c_type();
+
         n_cx->com()->nonlocal_dst(true);
         n_cx->com()->nonlocal_dst_host() = com()->nonlocal_dst_host();
         n_cx->com()->nonlocal_dst_port() = com()->nonlocal_dst_port();
@@ -459,7 +458,6 @@ bool socksServerCX::setup_target() {
         
         std::string h;
         std::string p;
-        n_cx->c_type();
         n_cx->com()->resolve_socket_src(n_cx->socket(),&h,&p);
         
         

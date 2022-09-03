@@ -48,8 +48,8 @@
 
 namespace jsonize {
 
-    nlohmann::json from(X509 *x, int verbosity);
-    nlohmann::json from(baseCom *xcom, int verbosity);
+    nlohmann::json from(X509 const* x, int verbosity);
+    nlohmann::json from(baseCom* xcom, int verbosity);
     nlohmann::json from(MitmProxy* what, int verbosity);
     nlohmann::json from(MitmHostCX* what, int verbosity);
 }

@@ -2,23 +2,25 @@
 
 namespace jsonize {
 
-    nlohmann::json from(X509 *x, int verbosity) {
-        char tmp[SSLCERTSTORE_BUFSIZE];
+    constexpr static size_t BUFSIZE = 512;
+
+    nlohmann::json from(X509 const* x, int verbosity) {
+        char tmp[BUFSIZE];
         nlohmann::json toret;
 
         // get info from the peer certificate
-        X509_NAME_get_text_by_NID(X509_get_subject_name(x), NID_commonName, tmp, SSLCERTSTORE_BUFSIZE - 1);
+        X509_NAME_get_text_by_NID(X509_get_subject_name(x), NID_commonName, tmp, BUFSIZE - 1);
         toret["cn"] = std::string(tmp);
 
-        X509_NAME_oneline(X509_get_subject_name(x), tmp, SSLCERTSTORE_BUFSIZE - 1);
+        X509_NAME_oneline(X509_get_subject_name(x), tmp, BUFSIZE - 1);
         toret["subject"] = std::string(tmp);
 
 
-        X509_NAME *issuer = X509_get_issuer_name(x);
+        X509_NAME const* issuer = X509_get_issuer_name(x);
         if (!issuer) {
             toret["issuer"] = "";
         } else {
-            X509_NAME_oneline(issuer, tmp, SSLCERTSTORE_BUFSIZE - 1);
+            X509_NAME_oneline(issuer, tmp, BUFSIZE - 1);
             toret["issuer"] = std::string(tmp);
         }
 
@@ -36,10 +38,10 @@ namespace jsonize {
         ASN1_TIME *not_before = X509_get_notBefore(x);
         ASN1_TIME *not_after = X509_get_notAfter(x);
 
-        SSLFactory::convert_ASN1TIME(not_before, tmp, SSLCERTSTORE_BUFSIZE - 1);
+        SSLFactory::convert_ASN1TIME(not_before, tmp, BUFSIZE - 1);
         toret["valid_from"] = std::string(tmp);
 
-        SSLFactory::convert_ASN1TIME(not_after, tmp, SSLCERTSTORE_BUFSIZE - 1);
+        SSLFactory::convert_ASN1TIME(not_after, tmp, BUFSIZE - 1);
         toret["valid_to"] = std::string(tmp);
 
 
@@ -69,14 +71,15 @@ namespace jsonize {
     }
 
 
-    nlohmann::json from(baseCom *xcom, int verbosity) {
+    nlohmann::json from(baseCom* xcom, int verbosity) {
 
         nlohmann::json ret;
 
         auto *com = dynamic_cast<SSLCom *>(xcom);
         if (com and !com->opt_bypass) {
+
             auto ssl = com->get_SSL();
-            SSL_SESSION* session = ssl != nullptr ? SSL_get_session(ssl) : nullptr;
+            SSL_SESSION const* session = ssl != nullptr ? SSL_get_session(ssl) : nullptr;
 
             if (ssl and session) {
                 auto *cipher_str = SSL_CIPHER_get_name(SSL_SESSION_get0_cipher(session));
@@ -168,11 +171,11 @@ namespace jsonize {
 
 
         auto host_to_json = [verbosity](baseHostCX* cx) -> nlohmann::json {
-            nlohmann::json ret;
+            nlohmann::json cret;
             if(auto* mh = dynamic_cast<MitmHostCX*>(cx); mh != nullptr) {
-                ret = jsonize::from(mh, verbosity);
+                cret = jsonize::from(mh, verbosity);
             }
-            return ret;
+            return cret;
         };
 
         {
