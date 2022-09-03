@@ -177,7 +177,7 @@ std::string socksServerCX::choose_dns_server() const {
     }
 
     return nameserver;
-};
+}
 
 void socksServerCX::setup_dns_async(std::string const& fqdn, DNS_Record_Type type, std::string const& nameserver) {
     int dns_sock = DNSFactory::get().send_dns_request(fqdn, type, nameserver);
@@ -205,7 +205,7 @@ void socksServerCX::setup_dns_async(std::string const& fqdn, DNS_Record_Type typ
         _err("failed to send dns request: %s", fqdn.c_str());
         error(true);
     }
-};
+}
 
 
 int socksServerCX::process_socks_request() {
