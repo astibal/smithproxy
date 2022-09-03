@@ -105,7 +105,8 @@ private:
     unsigned int inspect_flow_same_bytes = 0;
     int inspect_verdict = Inspector::OK;
     std::shared_ptr<buffer> inspect_verdict_response;
-    
+
+public:
     TYPENAME_OVERRIDE("MitmHostCX")
     DECLARE_LOGGING(to_string)
 
