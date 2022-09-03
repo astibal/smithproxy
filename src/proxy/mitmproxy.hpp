@@ -64,13 +64,14 @@
 struct whitelist_verify_entry {
 };
 
-typedef expiring<whitelist_verify_entry> whitelist_verify_entry_t;
+
 
 class FilterProxy;
 
 
 class IOController {
 public:
+    virtual ~IOController() = default;
     virtual void tap() = 0;
     virtual void untap() = 0;
     [[nodiscard]] IOController const* master() const noexcept { return (! master_) ?  this : master_; }
@@ -92,13 +93,16 @@ protected:
     int matched_policy_ = -1;
 
     std::string replacement_msg;
-public: 
-    time_t half_holdtimer = 0;
-    static long& half_timeout() { static long s_half_timetout = 5; return s_half_timetout; };
+    static inline long half_timeout_ = 5;
+public:
+    using whitelist_verify_entry_t = expiring<whitelist_verify_entry> ;
+    using whitelist_map_t = ptr_cache<std::string,whitelist_verify_entry_t>;
 
-    using whitelist_map = ptr_cache<std::string,whitelist_verify_entry_t>;
-    static whitelist_map& whitelist_verify() {
-        static whitelist_map m("whitelist - verify", 500, true, whitelist_verify_entry_t::is_expired);
+    time_t half_holdtimer = 0;
+    static long& half_timeout() { ; return half_timeout_; };
+
+    static whitelist_map_t& whitelist_verify() {
+        static whitelist_map_t m("whitelist_verify", 500, true, whitelist_verify_entry_t::is_expired);
         return m;
     }
 
@@ -134,8 +138,9 @@ public:
     int matched_policy() const { return matched_policy_; }
     void matched_policy(int p)  { matched_policy_ = p; }
     
-    inline bool identity_resolved() const { return identity_resolved_; };
-    inline void identity_resolved(bool b);
+    inline bool identity_resolved() const { return identity_resolved_; }
+    inline void identity_resolved(bool b) { identity_resolved_ = b; }
+
     shm_logon_info_base* identity() { return identity_.get(); }
     inline void identity(shm_logon_info_base const* new_id) { if(new_id) { identity_.reset(new_id->clone()); } }
 
@@ -145,7 +150,7 @@ public:
     bool apply_id_policies(baseHostCX* cx);
    
 
-    
+
     std::unique_ptr<socle::baseTrafficLogger>& tlog() { return tlog_; }
     void toggle_tlog ();
     

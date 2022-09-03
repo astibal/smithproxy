@@ -723,7 +723,7 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
                         //we should not block
                         _dia(" -> client-cert request: auto-whitelist");
 
-                        std::lock_guard<std::recursive_mutex> l_(whitelist_verify().getlock());
+                        auto lc_ = std::scoped_lock(whitelist_verify().getlock());
                         
                         whitelist_verify_entry v;
                         whitelist_verify().set(key,new whitelist_verify_entry_t(v,scom->opt_failed_certcheck_override_timeout));
