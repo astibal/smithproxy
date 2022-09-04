@@ -43,7 +43,7 @@
 
 #include <cstring>
 #include <ctime>
-#include <sys/types.h>
+
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
@@ -82,6 +82,7 @@
 #include <inspect/kb/kb.hpp>
 
 #include <utils/str.hpp>
+#include <display.hpp>
 
 #include "socle_version.h"
 #include "smithproxy_version.h"
@@ -288,15 +289,44 @@ std::stringstream features;
 
 }
 
-void cmd_show_events(struct cli_def* cli) {
+void cmd_show_events_list(struct cli_def* cli) {
 
     std::stringstream  ss;
 
-    auto const& events = Log::get()->events();
+    auto& events = Log::get()->events();
     {
-        auto lc_ = std::scoped_lock(Log::get()->events_lock());
-        for (auto const &ev: events) {
-            ss << ev << "\r\n";
+        auto lc_ = std::scoped_lock(events.events_lock());
+        for (auto const& [ id, ev ]: events.entries()) {
+            auto found = ( events.event_details().find(id) != events.event_details().end() );
+            ss << (found ? "* " : "  ") << id << ": " << ev << "\r\n";
+        }
+    }
+    cli_print(cli, ss.str().c_str());
+}
+
+void cmd_show_events_detail(struct cli_def* cli, std::vector<std::string> const& args) {
+
+    if(args.empty()) {
+        cli_print(cli, "enter event ID please");
+        return;
+    }
+    auto val = safe_ull_value(args[0]).value_or(0);
+    if(val <= 0) {
+        cli_print(cli, "enter valid event ID please");
+        return;
+    }
+
+    std::stringstream  ss;
+
+
+    auto& events = Log::get()->events();
+    {
+        auto lc_ = std::scoped_lock(events.events_lock());
+        auto it = events.event_details().find(val);
+        if(it != events.event_details().end()) {
+            cli_print(cli, "%s", it->second.c_str());
+        } else {
+            cli_print(cli, "no details for this event id %lld", val);
         }
     }
     cli_print(cli, ss.str().c_str());
@@ -304,8 +334,8 @@ void cmd_show_events(struct cli_def* cli) {
 
 void cmd_exec_events_clear(struct cli_def* cli) {
 
-    Log::get()->events_clear();
-    Log::get()->event(CRI, "events cleared by admin");
+    Log::get()->events().clear();
+    Log::get()->events().insert(CRI, "events cleared by admin");
     cli_print(cli, "Events cleared");
 }
 
@@ -318,13 +348,22 @@ int cli_show_status(struct cli_def *cli, const char *command, char *argv[], int 
 }
 
 
-int cli_show_events(struct cli_def *cli, const char *command, char *argv[], int argc)
+int cli_show_events_list(struct cli_def *cli, const char *command, char *argv[], int argc)
 {
     debug_cli_params(cli, command, argv, argc);
 
-    cmd_show_events(cli);
+    cmd_show_events_list(cli);
     return CLI_OK;
 }
+
+int cli_show_events_detail(struct cli_def *cli, const char *command, char *argv[], int argc)
+{
+    debug_cli_params(cli, command, argv, argc);
+
+    cmd_show_events_detail(cli, args_to_vec(argv, argc));
+    return CLI_OK;
+}
+
 
 int cli_exec_kb_print(struct cli_def *cli, const char *command, char *argv[], int argc)
 {
@@ -2509,7 +2548,10 @@ void cli_register_static(struct cli_def* cli) {
 
     auto show  = cli_register_command(cli, nullptr, "show", cli_show, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show basic information");
             cli_register_command(cli, show, "status", cli_show_status, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show smithproxy status");
-            cli_register_command(cli, show, "events", cli_show_events, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show events");
+            auto show_events = cli_register_command(cli, show, "event", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show event commands");
+                            cli_register_command(cli, show_events, "list", cli_show_events_list, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "show event list");
+                            cli_register_command(cli, show_events, "detail", cli_show_events_detail, PRIVILEGE_PRIVILEGED, MODE_EXEC, "show event detail");
+
             auto show_config = cli_register_command(cli, show, "config", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy configuration related commands");
                     cli_register_command(cli, show_config, "full", cli_show_config_full, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "show smithproxy full configuration");
 
@@ -2563,10 +2605,10 @@ void client_thread(int client_socket) {
 
     struct cli_def *cli = cli_init();
 
-    // Set the hostname (shown in the the prompt)
+    // Set the hostname (shown in the prompt)
     apply_hostname(cli);
 
-    Log::get()->event(NOT, "admin CLI access");
+    Log::get()->events().insert(NOT, "admin CLI access");
 
     // Set the greeting
     cli_set_banner(cli, "--==[ Smithproxy command line utility ]==--");

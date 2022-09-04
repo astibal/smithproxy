@@ -559,7 +559,7 @@ int main(int argc, char *argv[]) {
     SmithProxy::instance().create_log_writer_thread();
     SmithProxy::init_syslog();
 
-    Log::get()->event(INF, "Smithproxy %s%s starting", SMITH_VERSION, SMITH_DEVEL > 0 ? "-dev" : "");
+    Log::get()->events().insert(INF, "Smithproxy %s%s starting", SMITH_VERSION, SMITH_DEVEL > 0 ? "-dev" : "");
 
     SmithProxy::instance().create_dns_thread();
     SmithProxy::instance().create_identity_thread();

@@ -385,7 +385,7 @@ void SmithProxy::run() {
 
     //signal(SIGINT, [](int c) { SmithProxy::instance().terminate_flag = true; } );
 
-    Log::get()->event(INF, "... started");
+    Log::get()->events().insert(INF, "... started");
 
     while(true) {
         if(instance().terminate_flag) {
