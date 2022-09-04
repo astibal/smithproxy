@@ -281,6 +281,44 @@ int cli_diag_ssl_wl_clear(struct cli_def *cli, const char *command, char *argv[]
     return CLI_OK;
 }
 
+void whitelist_add_entry(std::string const& key, unsigned int timeout) {
+    auto lc_ = std::scoped_lock(MitmProxy::whitelist_verify().getlock());
+    whitelist_verify_entry v;
+    MitmProxy::whitelist_verify().set(key, new MitmProxy::whitelist_verify_entry_t(v, timeout));
+}
+
+int cli_diag_ssl_wl_insert_fingerprint(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    debug_cli_params(cli, command, argv, argc);
+
+    std::string fingerprint;
+    unsigned int timeout = 600;
+
+    auto args = args_to_vec(argv,argc);
+    if(not args.empty()) { fingerprint = args[0]; }
+    if(args.size() > 1) { timeout = safe_val(args[1], 600); }
+
+    whitelist_add_entry(fingerprint, timeout);
+
+    return CLI_OK;
+}
+
+int cli_diag_ssl_wl_insert_l4(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    debug_cli_params(cli, command, argv, argc);
+
+    std::string l4key;
+    unsigned int timeout = 600;
+
+    auto args = args_to_vec(argv,argc);
+    if(not args.empty()) { l4key = args[0]; }
+    if(args.size() > 1) { timeout = safe_val(args[1], 600); }
+
+    whitelist_add_entry(l4key, timeout);
+
+    return CLI_OK;
+}
+
 
 int cli_diag_ssl_wl_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
@@ -2097,6 +2135,8 @@ bool register_diags(cli_def* cli, cli_command* diag) {
 
     auto diag_ssl_wl = cli_register_command(cli, diag_ssl, "whitelist", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl temporary verification whitelist");
     cli_register_command(cli, diag_ssl_wl, "list", cli_diag_ssl_wl_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all verification whitelist entries");
+    cli_register_command(cli, diag_ssl_wl, "insert_fingerprint", cli_diag_ssl_wl_insert_fingerprint, PRIVILEGE_PRIVILEGED, MODE_EXEC, "insert end certificate fingerprint to whitelist (lowcase)");
+    cli_register_command(cli, diag_ssl_wl, "insert_l4", cli_diag_ssl_wl_insert_l4, PRIVILEGE_PRIVILEGED, MODE_EXEC, "insert L4 key to whitelist (sip:dip:dport)");
     cli_register_command(cli, diag_ssl_wl, "clear", cli_diag_ssl_wl_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clear all verification whitelist entries");
     cli_register_command(cli, diag_ssl_wl, "stats", cli_diag_ssl_wl_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "verification whitelist cache stats");
 

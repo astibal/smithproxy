@@ -48,6 +48,7 @@ public:
 
     baseCom* replicate() override;
     bool spoof_cert(X509* x, SpoofOptions& spo) override;
+    std::string ssl_error_details() override;
 };
 
 class MyDTLSMitmCom : public baseSSLMitmCom<DTLSCom> {

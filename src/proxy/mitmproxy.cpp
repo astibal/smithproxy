@@ -566,7 +566,7 @@ int MitmProxy::handle_sockets_once(baseCom* xcom) {
 }
 
 
-std::string whitelist_make_key(MitmHostCX* cx)  {
+std::string whitelist_make_key_l4(baseHostCX const* cx)  {
     
     std::string key;
     
@@ -577,6 +577,16 @@ std::string whitelist_make_key(MitmHostCX* cx)  {
     }
     
     return key;
+}
+
+std::string whitelist_make_key_cert(baseHostCX const* cx) {
+    if (not cx) return {};
+
+    auto const* scom  = dynamic_cast<SSLCom*>(cx->peercom());
+    if(not scom) return {};
+
+    auto fg = SSLFactory::fingerprint(scom->target_cert());
+    return fg;
 }
 
 
@@ -621,7 +631,38 @@ bool MitmProxy::handle_authentication(MitmHostCX* mh)
     return redirected;
 }
 
+bool MitmProxy::is_white_listed(MitmHostCX const* mh, SSLCom* peercom) {
 
+    auto const* scom = peercom ? peercom : dynamic_cast<SSLCom*>(mh->peercom());
+    auto find_it = [&](auto key) -> bool {
+
+        auto lc_ = std::scoped_lock(whitelist_verify().getlock());
+
+        auto wh_entry = whitelist_verify().get(key);
+        _dia("whitelist_verify[%s]: %s", key.c_str(), wh_entry ? "found" : "not found");
+
+        // !!! wh might be already invalid here, unlocked !!!
+        if (wh_entry != nullptr) {
+            if (scom->opt_failed_certcheck_override_timeout_type == 1) {
+                wh_entry->expired_at() = ::time(nullptr) + scom->opt_failed_certcheck_override_timeout;
+                _dia("whitelist_verify[%s]: timeout reset to %d", key.c_str(),
+                     scom->opt_failed_certcheck_override_timeout);
+            }
+            return true;
+        }
+
+        return false;
+    };
+
+    //look for whitelisted entry
+    std::string key_l4 = whitelist_make_key_l4(mh);
+    if ((not key_l4.empty()) and key_l4 != "?" and find_it(key_l4)) return true;
+
+    std::string key_cert = whitelist_make_key_cert(mh);
+    if ((not key_cert.empty()) and key_cert != "?" and find_it(key_cert)) return true;
+
+    return false;
+};
 
 
 bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
@@ -660,28 +701,9 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
 
             if(tlog()) tlog()->write_left("original TLS peer verification failed");
 
-            bool whitelist_found = false;
-            
-            //look for whitelisted entry
-            std::string key = whitelist_make_key(mh);
-            if( ( !key.empty() ) && key != "?") {
-                std::lock_guard<std::recursive_mutex> l_(whitelist_verify().getlock());
+            bool whitelist_found = is_white_listed(mh, scom);
 
-                auto wh_entry = whitelist_verify().get(key);
-                _dia("whitelist_verify[%s]: %s", key.c_str(), wh_entry ? "found" : "not found" );
-
-                // !!! wh might be already invalid here, unlocked !!!
-                if(wh_entry != nullptr) {
-                    whitelist_found = true;
-                    if (scom->opt_failed_certcheck_override_timeout_type == 1) {
-                        wh_entry->expired_at() = ::time(nullptr) + scom->opt_failed_certcheck_override_timeout;
-                        _dia("whitelist_verify[%s]: timeout reset to %d", key.c_str(), scom->opt_failed_certcheck_override_timeout );
-                    }
-                }
-            }
-            
-            
-            if(!whitelist_found) {
+            if(not whitelist_found) {
                 _dia("relaxed cert-check: peer sslcom verify not OK, not in whitelist");
 
                 if(mh->replacement_type() == MitmHostCX::REPLACETYPE_NONE) {
@@ -732,7 +754,7 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
                         auto lc_ = std::scoped_lock(whitelist_verify().getlock());
                         
                         whitelist_verify_entry v;
-                        whitelist_verify().set(key,new whitelist_verify_entry_t(v,scom->opt_failed_certcheck_override_timeout));
+                        whitelist_verify().set(whitelist_make_key_l4(mh), new whitelist_verify_entry_t(v, scom->opt_failed_certcheck_override_timeout));
                     } else {
                         _dia(" -> client-cert request: none");
                     }
@@ -1565,11 +1587,6 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
     if(app_request != nullptr) {
         log.event(INF, "[%s]: HTTP replacement active", socle::com::ssl::connection_name(scom, true).c_str());
 
-//         _inf(" --- request: %s",app_request->request().c_str());
-//         _inf(" ---     uri: %s",app_request->uri.c_str());
-//         _inf(" --- origuri: %s",app_request->original_request().c_str());
-//         _inf(" --- referer: %s",app_request->referer.c_str());
-
         auto find_orig_uri = [&]() -> std::optional<std::string> {
             auto request = app_request->request();
             auto a = request.find("orig_url");
@@ -1588,7 +1605,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             if (scom->opt_failed_certcheck_override) {
                 std::string block_override_pre = R"(<form action="/SM/IT/HP/RO/XY)";
 
-                std::string key = whitelist_make_key(cx);
+                std::string key = whitelist_make_key_l4(cx);
                 if (cx->peer()) {
                     block_override_pre += "/override/target=" + key;
                     if (not app_request->uri.empty()) {
@@ -1611,7 +1628,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
                         
             if(scom->opt_failed_certcheck_override) {
             
-                _dia("ssl_override: ph4 - asked for verify override for %s", whitelist_make_key(cx).c_str());
+                _dia("ssl_override: ph4 - asked for verify override for %s", whitelist_make_key_l4(cx).c_str());
                 
                 std::string orig_url = find_orig_uri().value_or("/");
 
@@ -1622,9 +1639,9 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
                 whitelist_verify_entry v;
 
                 {
-                    std::lock_guard<std::recursive_mutex> l_(whitelist_verify().getlock());
-                    whitelist_verify().set(whitelist_make_key(cx),
-                                         new whitelist_verify_entry_t(v, scom->opt_failed_certcheck_override_timeout));
+                    auto lc_ = std::scoped_lock(whitelist_verify().getlock());
+                    whitelist_verify().set(whitelist_make_key_l4(cx),
+                                           new whitelist_verify_entry_t(v, scom->opt_failed_certcheck_override_timeout));
                 }
                 
                 override_applied = html()->render_server_response(override_applied);
@@ -1656,7 +1673,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             // PHASE III.
             // display warning and button which will trigger override
         
-            _dia("ssl_override: ph3 - warning replacement for %s", whitelist_make_key(cx).c_str());
+            _dia("ssl_override: ph3 - warning replacement for %s", whitelist_make_key_l4(cx).c_str());
             
             std::string repl = replacement_ssl_page(scom, app_request, generate_block_override());
 
@@ -1668,7 +1685,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             // PHASE II
             // redir to warning message
             
-            _dia("ssl_override: ph2 - redir to warning replacement for  %s", whitelist_make_key(cx).c_str());
+            _dia("ssl_override: ph2 - redir to warning replacement for  %s", whitelist_make_key_l4(cx).c_str());
             
             std::string repl = R"(<html><head><meta http-equiv="Refresh" content="0; url=/SM/IT/HP/RO/XY/warning?q=1"></head><body></body></html>)";
             repl = html()->render_server_response(repl);
@@ -1680,7 +1697,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             // PHASE I
             // redirecting to / -- for example some subpages would be displayed incorrectly
             
-            _dia("ssl_override: ph1 - redir to / for %s", whitelist_make_key(cx).c_str());
+            _dia("ssl_override: ph1 - redir to / for %s", whitelist_make_key_l4(cx).c_str());
             
             std::string redir_pre(R"(<html><head><script>top.location.href=")");
             std::string redir_suf(R"(";</script></head><body></body></html>)");
@@ -1695,7 +1712,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
     }
 
     else {
-        _dia("ssl_override: enforced ph1 - redir to / for %s", whitelist_make_key(cx).c_str());
+        _dia("ssl_override: enforced ph1 - redir to / for %s", whitelist_make_key_l4(cx).c_str());
         _inf("readbuf: \n%s", hex_dump(cx->readbuf(), 4).c_str());
 
         log.event(INF, "[%s]: enforced HTTP replacement active", socle::com::ssl::connection_name(scom, true).c_str());

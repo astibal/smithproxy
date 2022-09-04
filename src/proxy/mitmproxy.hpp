@@ -186,6 +186,8 @@ public:
     //
     bool ssl_handled = false;
     // only once: check sslcom response and return true if redirected, set ssl_handled
+
+    bool is_white_listed(MitmHostCX const* mh, SSLCom* peercom = nullptr);
     virtual bool handle_com_response_ssl(MitmHostCX* cx);
     virtual void handle_replacement_ssl(MitmHostCX* cx);
 
@@ -264,6 +266,7 @@ private:
 };
 
 
-std::string whitelist_make_key(MitmHostCX*);
+std::string whitelist_make_key_l4(baseHostCX const* cx);
+std::string whitelist_make_key_cert(baseHostCX const* cx);
 
 #endif //MITMPROXY_HPP
