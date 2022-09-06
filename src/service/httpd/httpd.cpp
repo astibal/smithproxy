@@ -12,7 +12,7 @@ std::thread* create_httpd_thread(unsigned short port) {
         HttpService_Status_Ping status_ping;
 
         lmh::WebServer server(port);
-        server.opt_bind_loopback = true;
+        server.options().bind_loopback = true;
 
         server.addController(&status_ping);
 
@@ -51,7 +51,7 @@ std::thread* create_httpd_thread(unsigned short port) {
         server.addController(&diag_proxy_session_list);
 
 
-        server.handler_should_terminate = []() -> bool {
+        server.options().handler_should_terminate = []() -> bool {
                 return SmithProxy::instance().terminate_flag;
             };
         server.start();
