@@ -94,12 +94,12 @@ struct HttpSessions {
 
 std::thread* create_httpd_thread(unsigned short port);
 
-struct HttpService_JsonResponseParams : public lmh::ResponseParams {
+struct Http_JsonResponseParams : public lmh::ResponseParams {
     nlohmann::json response;
 };
 
 template <typename Callable>
-class HttpService_JsonResponder : public lmh::DynamicController {
+class Http_JsonResponder : public lmh::DynamicController {
     std::string meth;
     std::string path;
 
@@ -112,7 +112,7 @@ class HttpService_JsonResponder : public lmh::DynamicController {
             };
 
 public:
-    HttpService_JsonResponder(std::string m, std::string p, Callable r)
+    Http_JsonResponder(std::string m, std::string p, Callable r)
             : meth(std::move(m)), path(std::move(p)), responder(r) {};
 
     bool validPath(const char* arg_path, const char* arg_method) override {

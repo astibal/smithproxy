@@ -17,9 +17,9 @@ namespace sx::webserver {
             json_call Func;
 
             explicit token_protected(json_call c) : Func(c) {};
-            HttpService_JsonResponseParams operator()(MHD_Connection *conn, std::string const &req) const {
+            Http_JsonResponseParams operator()(MHD_Connection *conn, std::string const &req) const {
 
-                HttpService_JsonResponseParams ret;
+                Http_JsonResponseParams ret;
 
                 if (not req.empty()) {
                     ret.response_code = MHD_HTTP_OK;
@@ -49,9 +49,9 @@ namespace sx::webserver {
             json_call Func;
 
             explicit unprotected(json_call c) : Func(c) {};
-            HttpService_JsonResponseParams operator()(MHD_Connection *conn, std::string const &req) const {
+            Http_JsonResponseParams operator()(MHD_Connection *conn, std::string const &req) const {
 
-                HttpService_JsonResponseParams ret;
+                Http_JsonResponseParams ret;
 
                 if (not req.empty()) {
                     ret.response_code = MHD_HTTP_OK;
@@ -81,7 +81,7 @@ std::thread* create_httpd_thread(unsigned short port) {
         server.options().bind_loopback = true;
 
 #ifndef BUILD_RELEASE
-        HttpService_JsonResponder status_ping(
+        Http_JsonResponder status_ping(
                 "POST",
                 "/api/status/ping",
                 authorized::unprotected([]([[maybe_unused]] MHD_Connection* c) -> json {
@@ -94,12 +94,12 @@ std::thread* create_httpd_thread(unsigned short port) {
         server.addController(&status_ping);
 #endif
 
-        HttpService_JsonResponder authorize(
+        Http_JsonResponder authorize(
                     "POST",
                     "/api/authorize",
-                    [](MHD_Connection* conn, std::string const& req) -> HttpService_JsonResponseParams {
+                    [](MHD_Connection* conn, std::string const& req) -> Http_JsonResponseParams {
 
-                        HttpService_JsonResponseParams ret;
+                        Http_JsonResponseParams ret;
                         ret.response_code = MHD_YES;
 
                         if(not req.empty()) {
@@ -139,7 +139,7 @@ std::thread* create_httpd_thread(unsigned short port) {
 
         server.addController(&authorize);
 
-        HttpService_JsonResponder diag_ssl_cache_stats(
+        Http_JsonResponder diag_ssl_cache_stats(
                 "POST",
                 "/api/diag/ssl/cache/stats",
                 authorized::token_protected(json_ssl_cache_stats)
@@ -147,14 +147,14 @@ std::thread* create_httpd_thread(unsigned short port) {
         server.addController(&diag_ssl_cache_stats);
 
 
-        HttpService_JsonResponder diag_ssl_cache_print(
+        Http_JsonResponder diag_ssl_cache_print(
                 "POST",
                 "/api/diag/ssl/cache/print",
                 authorized::token_protected(json_ssl_cache_print)
                 );
         server.addController(&diag_ssl_cache_print);
 
-        HttpService_JsonResponder diag_proxy_session_list(
+        Http_JsonResponder diag_proxy_session_list(
                 "POST",
                 "/api/diag/proxy/session/list",
                 authorized::token_protected(json_proxy_session_list)
