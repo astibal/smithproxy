@@ -8,20 +8,91 @@
 #include <service/httpd/diag/daig_proxy.hpp>
 
 namespace sx::webserver {
+    using json = nlohmann::json;
 
-using json = nlohmann::json;
+    namespace authorized {
+
+        struct token_protected {
+            using json_call = std::function<json(MHD_Connection*)>;
+            json_call Func;
+
+            explicit token_protected(json_call c) : Func(c) {};
+            HttpService_JsonResponseParams operator()(MHD_Connection *conn, std::string const &req) const {
+
+                HttpService_JsonResponseParams ret;
+
+                if (not req.empty()) {
+                    ret.response_code = MHD_HTTP_OK;
+
+                    try {
+                        json jreq = json::parse(req);
+                        if (HttpSessions::validate_tokens(
+                                jreq[HttpSessions::ATT_AUTH_TOKEN].get<std::string>(),
+                                jreq[HttpSessions::ATT_CSRF_TOKEN].get<std::string>())) {
+                            ret.response = Func(conn);
+                            ret.response_code = MHD_HTTP_OK;
+                        } else {
+                            ret.response = {{"error", "access denied"},};
+                        }
+                    }
+                    catch (json::exception const &) {
+                        ret.response = {{"error", "access denied"},};
+                    }
+
+                }
+                return ret;
+            }
+        };
+
+        struct unprotected {
+            using json_call = std::function<json(MHD_Connection*)>;
+            json_call Func;
+
+            explicit unprotected(json_call c) : Func(c) {};
+            HttpService_JsonResponseParams operator()(MHD_Connection *conn, std::string const &req) const {
+
+                HttpService_JsonResponseParams ret;
+
+                if (not req.empty()) {
+                    ret.response_code = MHD_HTTP_OK;
+
+                    try {
+                        json jreq = json::parse(req);
+                        ret.response = Func(conn);
+                        ret.response_code = MHD_HTTP_OK;
+                    }
+                    catch (json::exception const &) {
+                        ret.response = {{"error", "unknown parameters"},};
+                    }
+
+                }
+                return ret;
+            }
+        };
+    }
+
 
 std::thread* create_httpd_thread(unsigned short port) {
     return new std::thread([port]() {
 
         HttpSessions::api_keys.insert("key");
 
-        HttpService_Status_Ping status_ping;
-
         lmh::WebServer server(port);
         server.options().bind_loopback = true;
 
+#ifndef BUILD_RELEASE
+        HttpService_JsonResponder status_ping(
+                "POST",
+                "/api/status/ping",
+                authorized::unprotected([]([[maybe_unused]] MHD_Connection* c) -> json {
+                    time_t uptime = time(nullptr) - SmithProxy::instance().ts_sys_started;
+                    return { { "version", SMITH_VERSION }, { "status", "ok" },
+                             { "uptime", uptime },
+                             { "uptime_str", uptime_string(uptime) } };
+                }));
+
         server.addController(&status_ping);
+#endif
 
         HttpService_JsonResponder authorize(
                     "POST",
@@ -65,16 +136,13 @@ std::thread* create_httpd_thread(unsigned short port) {
                         return ret;
                     }
                 );
+
         server.addController(&authorize);
 
         HttpService_JsonResponder diag_ssl_cache_stats(
                 "POST",
                 "/api/diag/ssl/cache/stats",
-                [](MHD_Connection* conn, std::string const& req) -> HttpService_JsonResponseParams {
-                    HttpService_JsonResponseParams ret;
-                    ret.response = json_ssl_cache_stats(conn);
-                    return ret;
-                    }
+                authorized::token_protected(json_ssl_cache_stats)
                 );
         server.addController(&diag_ssl_cache_stats);
 
@@ -82,43 +150,14 @@ std::thread* create_httpd_thread(unsigned short port) {
         HttpService_JsonResponder diag_ssl_cache_print(
                 "POST",
                 "/api/diag/ssl/cache/print",
-                [](MHD_Connection* conn, std::string const& req) -> HttpService_JsonResponseParams {
-                    HttpService_JsonResponseParams ret;
-                    ret.response = json_ssl_cache_print(conn);
-                    return ret;
-                }
+                authorized::token_protected(json_ssl_cache_print)
                 );
         server.addController(&diag_ssl_cache_print);
 
         HttpService_JsonResponder diag_proxy_session_list(
                 "POST",
                 "/api/diag/proxy/session/list",
-                [](MHD_Connection* conn, std::string const& req) -> HttpService_JsonResponseParams {
-
-                    HttpService_JsonResponseParams ret;
-
-                    if(not req.empty()) {
-                        ret.response_code = MHD_HTTP_OK;
-
-                        try {
-                            json jreq = json::parse(req);
-                            if (HttpSessions::validate_tokens(
-                                    jreq[HttpSessions::ATT_AUTH_TOKEN].get<std::string>(),
-                                    jreq[HttpSessions::ATT_CSRF_TOKEN].get<std::string>()  )) {
-                                ret.response = json_proxy_session_list(conn);
-                                ret.response_code = MHD_HTTP_OK;
-                            }
-                            else {
-                                ret.response = {{"error", "access denied"},};
-                            }
-                        }
-                        catch(json::exception const&) {
-                            ret.response = {{"error", "access denied"},};
-                        }
-
-                    }
-                    return ret;
-                }
+                authorized::token_protected(json_proxy_session_list)
         );
         server.addController(&diag_proxy_session_list);
 
