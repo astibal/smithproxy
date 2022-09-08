@@ -44,6 +44,54 @@
 #include <ext/json/json.hpp>
 #include <main.hpp>
 
+namespace sx::webserver {
+
+using named_var_t = std::unordered_map<std::string, std::string>;
+using sessions_t = std::unordered_map<std::string, named_var_t>;
+
+struct HttpSessions {
+
+    static inline std::mutex lock;
+    static inline std::set<std::string> api_keys;
+    static inline sessions_t access_keys;
+
+    constexpr static const char* ATT_AUTH_TOKEN = "auth_token";
+    constexpr static const char* ATT_CSRF_TOKEN = "csrf_token";
+
+    static std::string table_value(std::string const& key, std::string const& varname, bool create=false) {
+        auto lc_ = std::scoped_lock(lock);
+
+        auto key_it = access_keys.find(key);
+        if(create and key_it == access_keys.end()) {
+            access_keys[key] = named_var_t(); key_it = access_keys.find(key);
+        }
+
+        if(key_it != access_keys.end()) {
+            if(auto var_it = key_it->second.find(varname); var_it != key_it->second.end()) {
+                return var_it->second;
+            }
+            else if(create) {
+                return key_it->second[varname];
+            }
+        }
+
+        return {};
+    }
+
+    static std::string generate_auth_token() {
+        return "__AUTH_TOKEN__";
+    }
+
+    static std::string generate_csrf_token() {
+        return "__CSRF_TOKEN__";
+    }
+
+    static bool validate_tokens(std::string const& auth_token, std::string const& csrf_token) {
+        auto db_csrf_token = table_value(auth_token, "csrf_token");
+        return csrf_token == db_csrf_token;
+    }
+};
+
 std::thread* create_httpd_thread(unsigned short port);
 
 struct HttpService_JsonResponseParams : public lmh::ResponseParams {
@@ -53,10 +101,12 @@ struct HttpService_JsonResponseParams : public lmh::ResponseParams {
 class HttpService_JsonResponder : public lmh::DynamicController {
     std::string meth;
     std::string path;
-    std::function<HttpService_JsonResponseParams(struct MHD_Connection*)> responder;
+    std::function<HttpService_JsonResponseParams(struct MHD_Connection*,std::string const& requ)> responder;
+
+
 
 public:
-    HttpService_JsonResponder(std::string m, std::string p, std::function<HttpService_JsonResponseParams(struct MHD_Connection*)> r)
+    HttpService_JsonResponder(std::string m, std::string p, std::function<HttpService_JsonResponseParams(struct MHD_Connection*, std::string const&)> r)
             : meth(std::move(m)), path(std::move(p)), responder(std::move(r)) {};
 
     bool validPath(const char* arg_path, const char* arg_method) override {
@@ -73,16 +123,40 @@ public:
 
     lmh::ResponseParams createResponse(struct MHD_Connection * connection,
             const char * url, const char * method, const char * upload_data,
-            size_t * upload_data_size, std::stringstream& response) override {
+            size_t * upload_data_size, void** ptr, std::stringstream& response) override {
 
-        auto to_add = responder(connection);
-        lmh::ResponseParams ret = static_cast<lmh::ResponseParams>(to_add);
+        auto meth_str = std::string(meth);
+        std::string request_data;
 
-        ret.headers.emplace_back("X-Vendor", string_format("Smithproxy-%s", SMITH_VERSION));
-        ret.headers.emplace_back("Content-Type", "application/json");
-        ret.headers.emplace_back("Access-Control-Allow-Origin", "*");
+        auto* body = static_cast<lmh::ConnectionState*>(*ptr);
 
-        response << to_string(to_add.response);
+        if (not body) {
+            if(meth_str == "POST") {
+                lmh::ResponseParams ret;
+                ret.response_code = MHD_YES;
+                if(not *ptr) *ptr = new lmh::ConnectionState(*this);
+
+                return ret;
+            }
+        }
+        else if(*upload_data_size > 0) {
+            std::string inc(upload_data, *upload_data_size);
+            body->request_data += inc.c_str();
+            *upload_data_size = 0;
+
+            request_data = body->request_data;
+        }
+
+
+        auto ret = responder(connection, request_data);
+
+        if(ret.response_code == MHD_HTTP_OK) {
+            ret.headers.emplace_back("X-Vendor", string_format("Smithproxy-%s", SMITH_VERSION));
+            ret.headers.emplace_back("Content-Type", "application/json");
+            ret.headers.emplace_back("Access-Control-Allow-Origin", "*");
+
+            response << to_string(ret.response);
+        }
         return ret;
     }
 
@@ -100,7 +174,7 @@ public:
 
      lmh::ResponseParams createResponse(struct MHD_Connection * connection,
             const char * url, const char * method, const char * upload_data,
-            size_t * upload_data_size, std::stringstream& response) override {
+            size_t * upload_data_size, void** ptr, std::stringstream& response) override {
 
         lmh::ResponseParams ret;
         ret.headers.emplace_back("X-Vendor", string_format("Smithproxy-%s", SMITH_VERSION));
@@ -119,4 +193,5 @@ public:
 
 };
 
+}
 #endif //HTTPD_HPP_
