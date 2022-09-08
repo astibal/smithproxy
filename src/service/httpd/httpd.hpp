@@ -101,12 +101,18 @@ struct HttpService_JsonResponseParams : public lmh::ResponseParams {
 class HttpService_JsonResponder : public lmh::DynamicController {
     std::string meth;
     std::string path;
-    std::function<HttpService_JsonResponseParams(struct MHD_Connection*,std::string const& requ)> responder;
+    using responder_t  = std::function<HttpService_JsonResponseParams(struct MHD_Connection*,std::string const& requ)>;
 
+    responder_t responder;
 
+    static inline const std::vector<std::pair<std::string, std::string>> json_response_headers  = {
+            { "X-Vendor", "smithproxy " SMITH_VERSION },
+            { "Content-Type", "application/json" },
+            { "Access-Control-Allow-Origin", "*" },
+            };
 
 public:
-    HttpService_JsonResponder(std::string m, std::string p, std::function<HttpService_JsonResponseParams(struct MHD_Connection*, std::string const&)> r)
+    HttpService_JsonResponder(std::string m, std::string p, responder_t r)
             : meth(std::move(m)), path(std::move(p)), responder(std::move(r)) {};
 
     bool validPath(const char* arg_path, const char* arg_method) override {
@@ -151,9 +157,8 @@ public:
         auto ret = responder(connection, request_data);
 
         if(ret.response_code == MHD_HTTP_OK) {
-            ret.headers.emplace_back("X-Vendor", string_format("Smithproxy-%s", SMITH_VERSION));
-            ret.headers.emplace_back("Content-Type", "application/json");
-            ret.headers.emplace_back("Access-Control-Allow-Origin", "*");
+
+            ret.headers = json_response_headers;
 
             response << to_string(ret.response);
         }
@@ -167,7 +172,7 @@ class HttpService_Status_Ping : public lmh::DynamicController {
 public:
     bool validPath(const char* path, const char* method) override {
         const std::string this_path = "/api/status/ping";
-        const std::string this_meth = "GET";
+        const std::string this_meth = "POST";
 
         return (this_path == path and this_meth == method);
     }
@@ -177,9 +182,6 @@ public:
             size_t * upload_data_size, void** ptr, std::stringstream& response) override {
 
         lmh::ResponseParams ret;
-        ret.headers.emplace_back("X-Vendor", string_format("Smithproxy-%s", SMITH_VERSION));
-        ret.headers.emplace_back("Content-Type", "application/json");
-        ret.headers.emplace_back("Access-Control-Allow-Origin", "*");
 
         time_t uptime = time(nullptr) - SmithProxy::instance().ts_sys_started;
 
