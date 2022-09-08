@@ -43,6 +43,7 @@
 #include <ext/lmhpp/include/lmhttpd.hpp>
 #include <ext/json/json.hpp>
 #include <main.hpp>
+#include <openssl/rand.h>
 
 namespace sx::webserver {
 
@@ -79,11 +80,15 @@ struct HttpSessions {
     }
 
     static std::string generate_auth_token() {
-        return "__AUTH_TOKEN__";
+        unsigned char rand_pool[16];
+        RAND_bytes(rand_pool, 16);
+        return hex_print(rand_pool, 16);
     }
 
     static std::string generate_csrf_token() {
-        return "__CSRF_TOKEN__";
+        unsigned char rand_pool[16];
+        RAND_bytes(rand_pool, 16);
+        return hex_print(rand_pool, 16);
     }
 
     static bool validate_tokens(std::string const& auth_token, std::string const& csrf_token) {
