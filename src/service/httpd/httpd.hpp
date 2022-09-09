@@ -92,6 +92,10 @@ struct HttpSessions {
     }
 
     static bool validate_tokens(std::string const& auth_token, std::string const& csrf_token) {
+
+        // don't report valid access if tokens are empty and there are none also in the database
+        if(auth_token.empty() or csrf_token.empty()) return false;
+
         auto db_csrf_token = table_value(auth_token, "csrf_token");
         return csrf_token == db_csrf_token;
     }
