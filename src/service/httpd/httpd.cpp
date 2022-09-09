@@ -12,6 +12,19 @@ namespace sx::webserver {
 
     namespace authorized {
 
+        std::string client_address(MHD_Connection* mc) {
+            if(mc) {
+                auto* ci = MHD_get_connection_info(mc,MHD_CONNECTION_INFO_CLIENT_ADDRESS);
+                if(ci) {
+                    if (ci->client_addr) {
+                        return SocketInfo::inet_ss_str((sockaddr_storage *) ci->client_addr).c_str();
+                    }
+                }
+            }
+
+            return "<unknown>";
+        }
+
         struct token_protected {
             using json_call = std::function<json(MHD_Connection*)>;
             json_call Func;
@@ -32,10 +45,15 @@ namespace sx::webserver {
                             ret.response = Func(conn);
                             ret.response_code = MHD_HTTP_OK;
                         } else {
+                            Log::get()->events().insert(ERR,"API unauthorized access attempt from %s", client_address(conn).c_str());
+
+
                             ret.response = {{"error", "access denied"},};
                         }
                     }
                     catch (json::exception const &) {
+                        Log::get()->events().insert(ERR,"malformed API request from %s", client_address(conn).c_str());
+
                         ret.response = {{"error", "access denied"},};
                     }
 
@@ -75,7 +93,7 @@ namespace sx::webserver {
 std::thread* create_httpd_thread(unsigned short port) {
     return new std::thread([port]() {
 
-        HttpSessions::api_keys.insert("key");
+        HttpSessions::api_keys.emplace("key");
 
         lmh::WebServer server(port);
         server.options().bind_loopback = true;
@@ -122,12 +140,14 @@ std::thread* create_httpd_thread(unsigned short port) {
                                     auto lc_ = std::scoped_lock(HttpSessions::lock);
                                     HttpSessions::access_keys[auth_token]["csrf_token"] = csrf_token;
                                 } else {
-                                    Log::get()->events().insert(ERR,"API unauthorized access attempt from %s",
-                                                                SocketInfo::inet_ss_str((sockaddr_storage*)MHD_get_connection_info(conn, MHD_CONNECTION_INFO_CLIENT_ADDRESS)->client_addr).c_str());
+                                    Log::get()->events().insert(ERR,"API unauthorized access attempt from %s", authorized::client_address(conn).c_str());
+
                                     ret.response = {{"error", "access denied"},};
                                 }
                             }
-                            catch(nlohmann::json::exception const& e) {
+                            catch(nlohmann::json::exception const&) {
+
+                                Log::get()->events().insert(ERR,"malformed API request from %s", authorized::client_address(conn).c_str());
                                 ret.response = {{"error", "access denied"},};
                             }
                             ret.response_code = MHD_HTTP_OK;
