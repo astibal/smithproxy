@@ -99,7 +99,7 @@ class CfgFactory : public CfgFactoryBase {
 public:
 
     // Each version bump implies a config upgrade - we start on 1000
-    constexpr static inline const int SCHEMA_VERSION  = 1006;
+    constexpr static inline const int SCHEMA_VERSION  = 1007;
 
     CfgFactory() = default;
     CfgFactory(CfgFactory const &) = delete;
@@ -143,6 +143,7 @@ public:
     bool accept_tproxy = true;
     bool accept_redirect = true;
     bool accept_socks = true;
+    bool accept_api = true;
 
     int num_workers_tcp = 0;
     int num_workers_tls = 0;

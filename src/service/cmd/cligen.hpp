@@ -98,13 +98,19 @@ int fn(struct cli_def *cli, const char *command, char *argv[], int argc) { \
 
 libconfig::Setting* cfg_canonize(std::string const& section);
 
-enum edit_settings { MODE_EDIT_SETTINGS=0x10000000, MODE_EDIT_SETTINGS_AUTH=0x10001000, MODE_EDIT_SETTINGS_CLI=0x10002000, MODE_EDIT_SETTINGS_SOCKS=0x10003000, MODE_EDIT_SETTINGS_TUNING=0x10004000 };
+enum edit_settings { MODE_EDIT_SETTINGS=       0x10000000,
+                     MODE_EDIT_SETTINGS_AUTH=  0x10001000,
+                     MODE_EDIT_SETTINGS_CLI=   0x10002000,
+                     MODE_EDIT_SETTINGS_SOCKS= 0x10003000,
+                     MODE_EDIT_SETTINGS_TUNING= 0x10004000,
+                     MODE_EDIT_SETTINGS_HTTP_API=0x10005000 };
 
 CONFIG_MODE_DEC(cli_conf_edit_settings)
 CONFIG_MODE_DEC(cli_conf_edit_settings_auth)
 CONFIG_MODE_DEC(cli_conf_edit_settings_cli)
 CONFIG_MODE_DEC(cli_conf_edit_settings_socks)
 CONFIG_MODE_DEC(cli_conf_edit_settings_tuning)
+CONFIG_MODE_DEC(cli_conf_edit_settings_http_api)
 
 
 enum edit_debug { MODE_EDIT_DEBUG=0x11000000, MODE_EDIT_DEBUG_LOG };

@@ -52,6 +52,7 @@ CONFIG_MODE_DEF(cli_conf_edit_settings_auth, MODE_EDIT_SETTINGS_AUTH,"auth_porta
 CONFIG_MODE_DEF(cli_conf_edit_settings_cli, MODE_EDIT_SETTINGS_CLI,"cli")
 CONFIG_MODE_DEF(cli_conf_edit_settings_socks, MODE_EDIT_SETTINGS_SOCKS,"socks")
 CONFIG_MODE_DEF(cli_conf_edit_settings_tuning, MODE_EDIT_SETTINGS_TUNING,"tuning")
+CONFIG_MODE_DEF(cli_conf_edit_settings_http_api, MODE_EDIT_SETTINGS_HTTP_API,"http_api")
 
 CONFIG_MODE_DEF(cli_conf_edit_debug, MODE_EDIT_DEBUG, "debug")
 CONFIG_MODE_DEF(cli_conf_edit_debug_log, MODE_EDIT_DEBUG_LOG, "log")

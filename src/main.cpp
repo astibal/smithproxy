@@ -58,7 +58,7 @@
 #include <socle.hpp>
 
 #include <log/logger.hpp>
-#include <hostcx.hpp>
+
 #include <sslcom.hpp>
 #include <udpcom.hpp>
 #include <display.hpp>
@@ -74,7 +74,7 @@
 #include <smithlog.hpp>
 
 #include <service/core/smithproxy.hpp>
-
+#include <service/httpd/httpd.hpp>
 
 void prepare_queue_logger(loglevel const& lev) {
 
@@ -563,7 +563,15 @@ int main(int argc, char *argv[]) {
 
     SmithProxy::instance().create_dns_thread();
     SmithProxy::instance().create_identity_thread();
-    SmithProxy::instance().create_api_thread();
+
+    if(CfgFactory::get()->accept_api) {
+
+        if(not sx::webserver::HttpSessions::api_keys.empty()) {
+            SmithProxy::instance().create_api_thread();
+        } else {
+            Log::get()->events().insert(ERR, "cannot start API server: key not set");
+        }
+    }
 
     // launch listeners
 

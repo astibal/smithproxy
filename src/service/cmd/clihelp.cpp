@@ -384,6 +384,14 @@ void CliHelp::init() {
         .value_filter(CliElement::VALUE_BOOL);
 
 
+    add("settings.accept_api", "whether to accept HTTP API request")
+            .help_quick("<bool>: set to 'true' to disable API server (default: true)")
+            .may_be_empty(false)
+            .value_filter(CliElement::VALUE_BOOL);
+
+    add("settings.http_api", "API access options");
+    add("settings.http_api.keys", "API access keys to retrieve API access tokens");
+
 
 
     add("debug.log_data_crc", "calculate received CRC data (helps to identify proxy bugs)");

@@ -2657,6 +2657,14 @@ void client_thread(int client_socket) {
             .cap("edit", true)
             .cmd("edit", cli_conf_edit_settings_tuning);
 
+    register_callback( "settings.http_api",MODE_EDIT_SETTINGS_HTTP_API)
+            .cap("set", true)
+            .cmd("set", cli_generic_set_cb)
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_settings_http_api)
+            .cap("toggle", true)
+            .cmd("toggle", cli_generic_toggle_cb);
+
     register_callback(
             "settings.nameservers",MODE_EDIT_SETTINGS + 1)
             .cap("set", true)

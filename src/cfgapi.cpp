@@ -39,7 +39,6 @@
 
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <sys/stat.h>
 #include <sys/ioctl.h>
 
 #include <vector>
@@ -49,7 +48,6 @@
 
 
 #include <cfgapi.hpp>
-#include <service/cmd/cmdserver.hpp>
 #include <service/cmd/clistate.hpp>
 #include <log/logger.hpp>
 
@@ -64,6 +62,7 @@
 #include <inspect/dnsinspector.hpp>
 #include <inspect/pyinspector.hpp>
 
+#include <service/httpd/httpd.hpp>
 
 using namespace libconfig;
 
@@ -343,6 +342,22 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "added detection_profile.[x].kb_enabled");
         return true;
     }
+    else if(upgrade_to_num == 1007) {
+        log.event(INF, "added settings.http_api section");
+        log.event(INF, "added settings.http_api section.keys array");
+
+        unsigned char rand_pool[16];
+        RAND_bytes(rand_pool, 16);
+
+        if(sx::webserver::HttpSessions::api_keys.empty()) {
+
+            auto lc_ = std::scoped_lock(sx::webserver::HttpSessions::lock);
+            sx::webserver::HttpSessions::api_keys.emplace(hex_print(rand_pool, 16));
+            log.event(INF, "new API key generated");
+        }
+
+        return true;
+    }
 
 
 
@@ -523,6 +538,7 @@ bool CfgFactory::load_settings () {
     load_if_exists(cfgapi.getRoot()["settings"], "accept_tproxy", accept_tproxy);
     load_if_exists(cfgapi.getRoot()["settings"], "accept_redirect", accept_redirect);
     load_if_exists(cfgapi.getRoot()["settings"], "accept_socks", accept_socks);
+    load_if_exists(cfgapi.getRoot()["settings"], "accept_api", accept_api);
     load_if_exists(cfgapi.getRoot()["settings"], "plaintext_port",listen_tcp_port_base); listen_tcp_port = listen_tcp_port_base;
     load_if_exists(cfgapi.getRoot()["settings"], "plaintext_workers",num_workers_tcp);
     load_if_exists(cfgapi.getRoot()["settings"], "ssl_port",listen_tls_port_base); listen_tls_port = listen_tls_port_base;
@@ -635,6 +651,23 @@ bool CfgFactory::load_settings () {
         load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "host_write_full", hostcx_write_full);
         if(hostcx_write_full >= 1024) { baseHostCX::params.write_full = hostcx_write_full; }
 
+    }
+
+    if(cfgapi.getRoot()["settings"].exists("http_api")) {
+        auto& key_storage = sx::webserver::HttpSessions::api_keys;
+
+        if(not key_storage.empty()) {
+            _deb("load_settings: clearing existing entries in: api keys");
+            key_storage.clear();
+        }
+
+        if(cfgapi.getRoot()["settings"]["http_api"].exists("keys")) {
+            const int num = cfgapi.getRoot()["settings"]["http_api"]["keys"].getLength();
+            for (int i = 0; i < num; i++) {
+                std::string key = cfgapi.getRoot()["settings"]["http_api"]["keys"][i];
+                key_storage.emplace(key);
+            }
+        }
     }
 
     return true;
@@ -3798,6 +3831,15 @@ int save_settings(Config& ex) {
     tuning_objects.add("host_bufsz_min", Setting::TypeInt) = (int) baseHostCX::params.buffsize;
     tuning_objects.add("host_bufsz_max_multiplier", Setting::TypeInt) = (int) baseHostCX::params.buffsize_maxmul;
     tuning_objects.add("host_write_full", Setting::TypeInt) = (int) baseHostCX::params.write_full;
+
+
+    objects.add("accept_api", Setting::TypeBoolean) = CfgFactory::get()->accept_api;
+    Setting& http_api_objects = objects.add("http_api", Setting::TypeGroup);
+    Setting& keys = http_api_objects.add("keys", Setting::TypeArray);
+
+    for(auto const& k: sx::webserver::HttpSessions::api_keys) {
+        keys.add(Setting::TypeString) = k;
+    }
 
     return 0;
 }

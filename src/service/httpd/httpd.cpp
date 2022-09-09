@@ -93,8 +93,6 @@ namespace sx::webserver {
 std::thread* create_httpd_thread(unsigned short port) {
     return new std::thread([port]() {
 
-        HttpSessions::api_keys.emplace("key");
-
         lmh::WebServer server(port);
         server.options().bind_loopback = true;
 
