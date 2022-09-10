@@ -40,6 +40,9 @@
 #ifndef HTTPD_HPP_
 #define HTTPD_HPP_
 
+#include <cstdlib>
+#include <memory>
+
 #include <ext/lmhpp/include/lmhttpd.hpp>
 #include <ext/json/json.hpp>
 #include <main.hpp>
@@ -47,14 +50,64 @@
 
 namespace sx::webserver {
 
-using named_var_t = std::unordered_map<std::string, std::string>;
-using sessions_t = std::unordered_map<std::string, named_var_t>;
+
+    template <typename T>
+    struct TimedOptional {
+        TimedOptional(T v, unsigned int in_seconds): value_(v), expired_at_(::time(nullptr) + in_seconds) {}
+        explicit TimedOptional() : TimedOptional(T(), 3600) {};
+        virtual ~TimedOptional() = default;
+
+        void extend(uint32_t add) { expired_at_ = ::time(nullptr) + add; }
+        bool expired() const { return (this->expired_at_ <= ::time(nullptr)); }
+        std::optional<T> optional() {
+            if(expired()) {
+                return std::nullopt;
+            }
+            return value_;
+        };
+        std::optional<T> stored_optional() const {
+            return value_;
+        };
+
+        time_t& expired_at() { return expired_at_; };
+
+        bool operator==(TimedOptional<T> const &ref) {
+            if(value_.has_value() and ref.has_value()) {
+                return value_.value() == ref.value().value();
+            }
+            else if(not value_.has_value() and not ref.has_value()) {
+                return true;
+            }
+
+            return false;
+        }
+        static T default_value() { return {}; }
+
+
+    private:
+        std::optional<T> value_ = std::nullopt;
+        time_t expired_at_{0};
+    };
+
+    template<typename T>
+    struct hash {
+        std::size_t operator()(TimedOptional<T>& v) const {
+            return std::hash<const char*>()(v.stored_optional().value_or(TimedOptional<T>::default_value() ).c_str());
+        }
+    };
+
+
+    using named_var_t = std::unordered_map<std::string, TimedOptional<std::string>>;
+    using sessions_t = std::unordered_map<std::string, named_var_t>;
+
 
 struct HttpSessions {
 
     static inline std::mutex lock;
     static inline std::set<std::string> api_keys;
     static inline sessions_t access_keys;
+    static inline uint32_t session_ttl = 60;
+    static inline bool extend_on_access = true;
 
     constexpr static const char* ATT_AUTH_TOKEN = "auth_token";
     constexpr static const char* ATT_CSRF_TOKEN = "csrf_token";
@@ -69,10 +122,26 @@ struct HttpSessions {
 
         if(key_it != access_keys.end()) {
             if(auto var_it = key_it->second.find(varname); var_it != key_it->second.end()) {
-                return var_it->second;
+
+                auto& val = var_it->second;
+
+                if(val.optional().has_value()) {
+
+                    if (extend_on_access) {
+                        // access element by reference
+                        val.extend(session_ttl);
+                    }
+
+                    return val.optional().value();
+                }
+                else {
+                    // erase empty var (invalidates iterator!)
+                    key_it->second.erase(varname);
+                    return {};
+                }
             }
             else if(create) {
-                return key_it->second[varname];
+                return key_it->second[varname].optional().value_or("");
             }
         }
 
@@ -97,7 +166,15 @@ struct HttpSessions {
         if(auth_token.empty() or csrf_token.empty()) return false;
 
         auto db_csrf_token = table_value(auth_token, "csrf_token");
-        return csrf_token == db_csrf_token;
+        bool ret = ( csrf_token == db_csrf_token );
+
+        if(not ret) {
+            auto lc_ = std::scoped_lock(lock);
+            //eventually erase this auth_token
+            access_keys.erase(auth_token);
+        }
+
+        return ret;
     }
 };
 

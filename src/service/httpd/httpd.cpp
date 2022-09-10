@@ -136,7 +136,7 @@ std::thread* create_httpd_thread(unsigned short port) {
                                                     {"csrf_token", csrf_token }};
 
                                     auto lc_ = std::scoped_lock(HttpSessions::lock);
-                                    HttpSessions::access_keys[auth_token]["csrf_token"] = csrf_token;
+                                    HttpSessions::access_keys[auth_token]["csrf_token"] = TimedOptional(csrf_token, HttpSessions::session_ttl);
                                 } else {
                                     Log::get()->events().insert(ERR,"unauthorized API access attempt from %s", authorized::client_address(conn).c_str());
 

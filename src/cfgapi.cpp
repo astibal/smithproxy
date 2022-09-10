@@ -358,6 +358,13 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
 
         return true;
     }
+    else if(upgrade_to_num == 1008) {
+        log.event(INF, "added settings.http_api.key_timeout");
+        log.event(INF, "added settings.http_api.key_extend_on_access");
+
+        return true;
+    }
+
 
 
 
@@ -668,6 +675,8 @@ bool CfgFactory::load_settings () {
                 key_storage.emplace(key);
             }
         }
+        load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "key_timeout", sx::webserver::HttpSessions::session_ttl);
+        load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "key_extend_on_access", sx::webserver::HttpSessions::extend_on_access);
     }
 
     return true;
@@ -3835,11 +3844,14 @@ int save_settings(Config& ex) {
 
     objects.add("accept_api", Setting::TypeBoolean) = CfgFactory::get()->accept_api;
     Setting& http_api_objects = objects.add("http_api", Setting::TypeGroup);
-    Setting& keys = http_api_objects.add("keys", Setting::TypeArray);
 
+    Setting& keys = http_api_objects.add("keys", Setting::TypeArray);
     for(auto const& k: sx::webserver::HttpSessions::api_keys) {
         keys.add(Setting::TypeString) = k;
     }
+    http_api_objects.add("key_timeout", Setting::TypeInt) = (int)sx::webserver::HttpSessions::session_ttl;
+    http_api_objects.add("key_extend_on_access", Setting::TypeBoolean) = (bool)sx::webserver::HttpSessions::extend_on_access;
+
 
     return 0;
 }

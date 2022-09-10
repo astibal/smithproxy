@@ -391,6 +391,15 @@ void CliHelp::init() {
 
     add("settings.http_api", "API access options");
     add("settings.http_api.keys", "API access keys to retrieve API access tokens");
+    add("settings.http_api.key_timeout", "Expiration timeout for session tokens")
+            .help_quick("<positive integer>: ttl in seconds")
+            .may_be_empty(false)
+            .value_filter(CliElement::VALUE_UINT_NZ);
+
+    add("settings.http_api.key_extend_on_access", "If set, tokens are refreshed when used")
+            .help_quick("<bool>: set true to refresh tokens when used (default: true)")
+            .may_be_empty(false)
+            .value_filter(CliElement::VALUE_BOOL);
 
 
 
