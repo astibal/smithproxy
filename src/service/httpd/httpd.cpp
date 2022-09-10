@@ -45,7 +45,7 @@ namespace sx::webserver {
                             ret.response = Func(conn);
                             ret.response_code = MHD_HTTP_OK;
                         } else {
-                            Log::get()->events().insert(ERR,"API unauthorized access attempt from %s", client_address(conn).c_str());
+                            Log::get()->events().insert(ERR,"unauthorized API access attempt from %s", client_address(conn).c_str());
 
 
                             ret.response = {{"error", "access denied"},};
@@ -138,7 +138,7 @@ std::thread* create_httpd_thread(unsigned short port) {
                                     auto lc_ = std::scoped_lock(HttpSessions::lock);
                                     HttpSessions::access_keys[auth_token]["csrf_token"] = csrf_token;
                                 } else {
-                                    Log::get()->events().insert(ERR,"API unauthorized access attempt from %s", authorized::client_address(conn).c_str());
+                                    Log::get()->events().insert(ERR,"unauthorized API access attempt from %s", authorized::client_address(conn).c_str());
 
                                     ret.response = {{"error", "access denied"},};
                                 }
