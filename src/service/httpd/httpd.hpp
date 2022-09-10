@@ -106,7 +106,7 @@ struct HttpSessions {
     static inline std::mutex lock;
     static inline std::set<std::string> api_keys;
     static inline sessions_t access_keys;
-    static inline uint32_t session_ttl = 60;
+    static inline uint32_t session_ttl = 3600;
     static inline bool extend_on_access = true;
 
     constexpr static const char* ATT_AUTH_TOKEN = "auth_token";
