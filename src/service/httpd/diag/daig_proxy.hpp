@@ -44,16 +44,28 @@
 #include <service/httpd/jsonize.hpp>
 
 
-static nlohmann::json json_proxy_session_list(struct MHD_Connection * connection) {
+template <typename T>
+std::optional<T> load_json_params(std::string const& args, const char* varname) {
+    try {
+        auto js = nlohmann::json::parse(args);
+        return js["params"][varname].get<T>();
+    } catch (nlohmann::json::exception const& e) {
+        return std::nullopt;
+    }
+}
+
+
+static nlohmann::json json_proxy_session_list(struct MHD_Connection * connection, std::string const& req) {
+
+    using nlohmann::json;
 
     std::scoped_lock<std::recursive_mutex> l_(socle::sobjectDB::getlock());
+    json ret;
 
-    nlohmann::json ret;
-
-    bool flag_active_only = connection_ll_param(connection, "active", 0) > 0;
-    bool flag_tlsinfo = connection_ll_param(connection, "tlsinfo", 0) > 0;
-    int verbosity = connection_ll_param(connection, "verbosity", iINF);
-
+    bool flag_active_only = load_json_params<bool>(req, "active").value_or(false);
+    bool flag_tlsinfo = load_json_params<bool>(req, "tlsinfo").value_or(false);
+    bool flag_verbose = load_json_params<bool>(req, "verbose").value_or(false);
+    auto verbosity = flag_verbose ? iDIA : iINF;
 
     auto json_single_proxy = [&](MitmProxy* proxy) -> std::optional<nlohmann::json> {
         if(flag_active_only) {

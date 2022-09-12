@@ -26,7 +26,7 @@ namespace sx::webserver {
         }
 
         struct token_protected {
-            using json_call = std::function<json(MHD_Connection*)>;
+            using json_call = std::function<json(MHD_Connection*, std::string const&)>;
             json_call Func;
 
             explicit token_protected(json_call c) : Func(c) {};
@@ -42,7 +42,7 @@ namespace sx::webserver {
                         if (HttpSessions::validate_tokens(
                                 jreq[HttpSessions::ATT_AUTH_TOKEN].get<std::string>(),
                                 jreq[HttpSessions::ATT_CSRF_TOKEN].get<std::string>())) {
-                            ret.response = Func(conn);
+                            ret.response = Func(conn, req);
                             ret.response_code = MHD_HTTP_OK;
                         } else {
                             Log::get()->events().insert(ERR,"unauthorized API access attempt from %s", client_address(conn).c_str());
@@ -63,7 +63,7 @@ namespace sx::webserver {
         };
 
         struct unprotected {
-            using json_call = std::function<json(MHD_Connection*)>;
+            using json_call = std::function<json(MHD_Connection*, std::string const&)>;
             json_call Func;
 
             explicit unprotected(json_call c) : Func(c) {};
@@ -76,7 +76,7 @@ namespace sx::webserver {
 
                     try {
                         json jreq = json::parse(req);
-                        ret.response = Func(conn);
+                        ret.response = Func(conn, req);
                         ret.response_code = MHD_HTTP_OK;
                     }
                     catch (json::exception const &) {
@@ -100,7 +100,7 @@ std::thread* create_httpd_thread(unsigned short port) {
         Http_JsonResponder status_ping(
                 "POST",
                 "/api/status/ping",
-                authorized::unprotected([]([[maybe_unused]] MHD_Connection* c) -> json {
+                authorized::unprotected([]([[maybe_unused]] MHD_Connection* c, [[maybe_unused]] std::string const& req) -> json {
                     time_t uptime = time(nullptr) - SmithProxy::instance().ts_sys_started;
                     return { { "version", SMITH_VERSION }, { "status", "ok" },
                              { "uptime", uptime },
