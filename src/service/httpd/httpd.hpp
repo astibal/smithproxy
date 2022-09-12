@@ -69,7 +69,7 @@ namespace sx::webserver {
             return value_;
         };
 
-        time_t& expired_at() { return expired_at_; };
+        time_t expired_at() const { return expired_at_; };
 
         bool operator==(TimedOptional<T> const &ref) {
             if(value_.has_value() and ref.has_value()) {
