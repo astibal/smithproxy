@@ -3513,57 +3513,69 @@ size_t CfgFactory::section_list_size(std::string const& section) const {
     return 0;
 }
 
-bool CfgFactory::create_new_entry(std::string const& section, std::string const& entry_name) {
+bool CfgFactory::_apply_new_entry(std::string const& section, std::string const& entry_name) {
+
+    bool added = false;
 
     Setting &s = cfg_root().lookup(section.c_str());
     if(section == "proto_objects") {
         if (CfgFactory::get()->new_proto_object(s, entry_name)) {
+            added = true;
             CfgFactory::get()->load_db_proto();
         }
     }
     else if(section == "port_objects") {
         if (CfgFactory::get()->new_port_object(s, entry_name)) {
+            added = true;
             CfgFactory::get()->load_db_port();
         }
     }
     else if(section == "address_objects") {
         if (CfgFactory::get()->new_address_object(s, entry_name)) {
+            added = true;
             CfgFactory::get()->load_db_address();
         }
     }
     else if(section == "detection_profiles") {
         if (CfgFactory::get()->new_detection_profile(s, entry_name)) {
+            added = true;
             CfgFactory::get()->load_db_prof_detection();
         }
     }
     else if(section == "content_profiles") {
         if (CfgFactory::get()->new_content_profile(s, entry_name)) {
+            added = true;
             CfgFactory::get()->load_db_prof_content();
         }
     }
     else if(section == "tls_ca") {
         if (CfgFactory::get()->new_tls_ca(s, entry_name)) {
+            added = true;
             // missing load_db_tls_ca
         }
     }
     else if(section == "tls_profiles") {
         if (CfgFactory::get()->new_tls_profile(s, entry_name)) {
+            added = true;
             CfgFactory::get()->load_db_prof_tls();
         }
     }
     else if(section == "alg_dns_profiles") {
         if (CfgFactory::get()->new_alg_dns_profile(s, entry_name)) {
+            added = true;
             CfgFactory::get()->load_db_prof_alg_dns();
         }
     }
     else if(section == "auth_profiles") {
         if (CfgFactory::get()->new_auth_profile(s, entry_name)) {
+            added = true;
             CfgFactory::get()->load_db_prof_auth();
         }
     }
     else if(section == "policy") {
         // policy is unnamed list, ignore argument and add index
         if (CfgFactory::get()->new_policy(s, string_format("[%d]", CfgFactory::get()->db_policy_list.size()))) {
+            added = true;
 
             // policy is a list - it must be cleared before loaded again
             CfgFactory::get()->cleanup_db_policy();
@@ -3572,16 +3584,78 @@ bool CfgFactory::create_new_entry(std::string const& section, std::string const&
     }
     else if(section == "routing") {
         if (CfgFactory::get()->new_routing(s, entry_name)) {
-
+            added = true;
             // policy is a list - it must be cleared before loaded again
             CfgFactory::get()->load_db_routing();
         }
+    }
+
+    if(added) {
+        CfgFactory::config_changed_flag = true;
+        return true;
     } else {
         return false;
     }
-
-    return true;
 }
+
+std::pair<bool, std::string> CfgFactory::cfg_add_prepare_params(std::string const& section, std::vector<std::string>& args) {
+
+    bool section_is_list = CfgFactory::section_lists.find(section) != CfgFactory::section_lists.end();
+
+    std::for_each(args.begin(), args.end(), [](auto& e) {
+        // allow only ascii characters
+        e = escape(e, true, true);
+    });
+
+    if (not args.empty()) {
+        if(args[0] == "?") {
+            return { false, "Note: add <object_name> (name must not start with reserved __)" };
+        }
+        else if(args[0].find("__") == 0) {
+            return { false, "Error: name must not start with reserved \'__\'" };
+        }
+        else if(section_is_list) {
+
+            args.clear();
+            args.push_back(string_format("[%d]", CfgFactory::get()->section_list_size(section)));
+
+            return { true, "Note: suggested name is ignored in unnamed lists" };
+        }
+    }
+    else {
+        // allow empty args for policy
+        if (section_is_list) {
+            args.clear();
+            args.push_back(string_format("[%d]", CfgFactory::get()->section_list_size(section)));
+        }
+        else {
+            return { false, "Error: new entry in this section must have an unique name." };
+        }
+    }
+
+    return { true, "" };
+};
+
+std::pair<bool, std::string> CfgFactory::cfg_add_entry(std::string const& section_name, std::string const& entry_name) {
+
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
+
+    if (CfgFactory::cfg_root().exists(section_name.c_str())) {
+
+        if (CfgFactory::_apply_new_entry(section_name, entry_name)) {
+
+            CfgFactory::config_changed_flag = true;
+
+            return { true, string_format("Note: %s.%s has been created.", section_name.c_str(), entry_name.c_str()) };
+        }
+        else {
+            return { false, "Error: entry not created" };
+        }
+    }
+    else {
+        return { false, "Error: section does not exist" };
+    }
+};
 
 bool CfgFactory::move_policy (int what, int where, op_move op) {
 

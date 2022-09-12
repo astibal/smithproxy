@@ -2219,7 +2219,6 @@ auto register_cli_entry(struct cli_def *cli, std::string const& entry) {
     }
 };
 
-
 int cli_generic_add_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
 
@@ -2232,70 +2231,34 @@ int cli_generic_add_cb(struct cli_def *cli, const char *command, char *argv[], i
     }
 
     // returns true if ok to proceed
-    auto prepare_args = [&cli, &args](std::string const& section) {
 
-        bool section_is_list = CfgFactory::section_lists.find(section) != CfgFactory::section_lists.end();
 
-        if (not args.empty()) {
-            if(args[0] == "?") {
-                cli_print(cli, " ... hint: add <object_name> (name must not start with reserved __)");
-                return false;
-            }
-            else if(args[0].find("__") == 0) {
-
-                cli_print(cli, " ");
-                cli_print(cli, "Error: name must not start with reserved \'__\'");
-                return false;
-            }
-            else if(section_is_list) {
-                cli_print(cli, "Note: suggested name is ignored in unnamed lists");
-                cli_print(cli, "  ");
-
-                args.clear();
-                args.push_back(string_format("[%d]", CfgFactory::get()->section_list_size(section)));
-            }
-        }
-        else {
-            // allow empty args for policy
-            if (section_is_list) {
-                args.clear();
-                args.push_back(string_format("[%d]", CfgFactory::get()->section_list_size(section)));
-            }
-            else {
-                cli_print(cli, " ");
-                cli_print(cli, "New entry in this section must have an unique name.");
-                return false;
-            }
-        }
-
-        return true;
-    };
-
-    if(not prepare_args(section)) {
+    if(auto const& [status, msg] = CfgFactory::cfg_add_prepare_params(section, args);  not status) {
+        cli_print(cli, " %s", msg.c_str());
         return CLI_OK;
+    } else if( not msg.empty()){
+        cli_print(cli, " %s", msg.c_str());
     }
 
-    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
-    if(CfgFactory::cfg_root().exists(section.c_str())) {
+    bool status_change = not CfgFactory::config_changed_flag;
+    auto [ status, msg ]  = CfgFactory::get()->cfg_add_entry(section, args[0]);
 
-        if(CfgFactory::create_new_entry(section, args[0])) {
+    cli_print(cli, "  ");
+    cli_print(cli, " %s", msg.c_str());
 
-            register_cli_entry(cli, args[0]);
+    if (status) {
 
+        register_cli_entry(cli, args[0]);
+
+        if(status_change) {
+            apply_hostname(cli);
             cli_print(cli, " ");
-            cli_print(cli, "New %s '%s' has been created.", section.c_str(), args[0].c_str());
-
-            bool status_change = not CliGlobalState::config_changed_flag;
-
-            CliGlobalState::config_changed_flag = true;
-
-            if(status_change) {
-                apply_hostname(cli);
-                cli_print(cli, " ");
-                cli_print(cli, "Running config applied (not saved to file).");
-            }
+            cli_print(cli, "Running config applied (not saved to file).");
         }
     }
+
+
+
     return CLI_OK;
 }
 

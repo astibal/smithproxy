@@ -92,8 +92,8 @@ public:
 class CfgFactory : public CfgFactoryBase {
 
     libconfig::Config cfgapi;
-
     std::recursive_mutex lock_;
+
     static inline std::shared_ptr<CfgFactory> self;
 
 public:
@@ -235,7 +235,11 @@ public:
 
     static void cfg_clone_setting(libconfig::Setting& dst, libconfig::Setting& orig, int index = -1 );
     static int cfg_write(libconfig::Config& cfg, FILE* where, unsigned long iobufsz = 0);
-    static bool create_new_entry(std::string const& section, std::string const& entry_name);
+
+    static std::pair<bool, std::string> cfg_add_prepare_params(std::string const& section, std::vector<std::string>& args);
+    std::pair<bool, std::string> cfg_add_entry(std::string const& section_name, std::string const& entry_name);
+    static bool _apply_new_entry(std::string const& section, std::string const& entry_name);
+
 
     //sections containing unnamed lists (ie. traffic policy)
     static inline std::set<std::string, std::less<>> section_lists = { "policy", };
