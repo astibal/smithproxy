@@ -3506,6 +3506,82 @@ int CfgFactory::cfg_write(Config& cfg, FILE* where, unsigned long iobufsz) {
     return 0;
 }
 
+size_t CfgFactory::section_list_size(std::string const& section) const {
+    if(section == "policy") {
+        return db_policy_list.size();
+    }
+    return 0;
+}
+
+bool CfgFactory::create_new_entry(std::string const& section, std::string const& entry_name) {
+
+    Setting &s = cfg_root().lookup(section.c_str());
+    if(section == "proto_objects") {
+        if (CfgFactory::get()->new_proto_object(s, entry_name)) {
+            CfgFactory::get()->load_db_proto();
+        }
+    }
+    else if(section == "port_objects") {
+        if (CfgFactory::get()->new_port_object(s, entry_name)) {
+            CfgFactory::get()->load_db_port();
+        }
+    }
+    else if(section == "address_objects") {
+        if (CfgFactory::get()->new_address_object(s, entry_name)) {
+            CfgFactory::get()->load_db_address();
+        }
+    }
+    else if(section == "detection_profiles") {
+        if (CfgFactory::get()->new_detection_profile(s, entry_name)) {
+            CfgFactory::get()->load_db_prof_detection();
+        }
+    }
+    else if(section == "content_profiles") {
+        if (CfgFactory::get()->new_content_profile(s, entry_name)) {
+            CfgFactory::get()->load_db_prof_content();
+        }
+    }
+    else if(section == "tls_ca") {
+        if (CfgFactory::get()->new_tls_ca(s, entry_name)) {
+            // missing load_db_tls_ca
+        }
+    }
+    else if(section == "tls_profiles") {
+        if (CfgFactory::get()->new_tls_profile(s, entry_name)) {
+            CfgFactory::get()->load_db_prof_tls();
+        }
+    }
+    else if(section == "alg_dns_profiles") {
+        if (CfgFactory::get()->new_alg_dns_profile(s, entry_name)) {
+            CfgFactory::get()->load_db_prof_alg_dns();
+        }
+    }
+    else if(section == "auth_profiles") {
+        if (CfgFactory::get()->new_auth_profile(s, entry_name)) {
+            CfgFactory::get()->load_db_prof_auth();
+        }
+    }
+    else if(section == "policy") {
+        // policy is unnamed list, ignore argument and add index
+        if (CfgFactory::get()->new_policy(s, string_format("[%d]", CfgFactory::get()->db_policy_list.size()))) {
+
+            // policy is a list - it must be cleared before loaded again
+            CfgFactory::get()->cleanup_db_policy();
+            CfgFactory::get()->load_db_policy();
+        }
+    }
+    else if(section == "routing") {
+        if (CfgFactory::get()->new_routing(s, entry_name)) {
+
+            // policy is a list - it must be cleared before loaded again
+            CfgFactory::get()->load_db_routing();
+        }
+    } else {
+        return false;
+    }
+
+    return true;
+}
 
 bool CfgFactory::move_policy (int what, int where, op_move op) {
 

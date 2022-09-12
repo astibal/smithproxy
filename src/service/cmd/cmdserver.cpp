@@ -571,7 +571,7 @@ int cli_test_dns_refreshallfqdns(struct cli_def *cli, const char *command, char 
     std::vector<std::string> fqdns;
 
     {
-        std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
+        auto lc_ = std::scoped_lock(CfgFactory::lock());
 
         for (auto const& a: CfgFactory::get()->db_address) {
             auto fa = std::dynamic_pointer_cast<FqdnAddress>(a.second);
@@ -581,18 +581,21 @@ int cli_test_dns_refreshallfqdns(struct cli_def *cli, const char *command, char 
         }
     }
 
-    std::string nameserver = "8.8.8.8";
-    if(! CfgFactory::get()->db_nameservers.empty()) {
+    std::string nameserver;
+    if(not CfgFactory::get()->db_nameservers.empty()) {
         nameserver = CfgFactory::get()->db_nameservers.at(0);
     }
+    else {
+        cli_print(cli, "nameservers not configured in 'config.settings' section");
+        return CLI_OK;
+    }
 
-    DNS_Inspector di;
     for(auto const& a: fqdns) {
 
         {
             auto resp = std::shared_ptr<DNS_Response>(send_dns_request(cli, a, A, nameserver));
             if (resp) {
-                if (di.store(resp)) {
+                if (DNS_Inspector::store(resp)) {
                     cli_print(cli, "Entry successfully stored in cache.");
                 }
             }
@@ -600,7 +603,7 @@ int cli_test_dns_refreshallfqdns(struct cli_def *cli, const char *command, char 
 
         auto resp = std::shared_ptr<DNS_Response>(send_dns_request(cli, a, AAAA ,nameserver));
         if(resp) {
-            if(di.store(resp)) {
+            if(DNS_Inspector::store(resp)) {
                 cli_print(cli, "Entry successfully stored in cache.");
             }
         }
@@ -2154,25 +2157,10 @@ int cli_policy_move_cb(struct cli_def *cli, const char *command, char *argv[], i
 }
 
 
-int cli_generic_add_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
-    debug_cli_params(cli, command, argv, argc);
 
-    std::vector<std::string> args;
-    bool args_qmark = false;
+auto register_cli_entry(struct cli_def *cli, std::string const& entry) {
+
     auto section = CliState::get().sections(cli->mode);
-
-    if (argc > 0) {
-        for (int i = 0; i < argc; i++) {
-            args.emplace_back(std::string(argv[i]));
-        }
-        args_qmark = (args[0] == "?");
-
-    }
-
-    if(args_qmark) {
-        cli_print(cli, " ... hint: add <object_name> (name must not start with reserved __)");
-        return CLI_OK;
-    }
 
     // remove template suffix
     bool templated = false;
@@ -2181,170 +2169,119 @@ int cli_generic_add_cb(struct cli_def *cli, const char *command, char *argv[], i
         sx::str::string_replace_all(section, ".[x]", "");
     }
 
+    // load callbacks, must prefer templated
+    auto& callback_entry = templated ? CliState::get().callbacks(section + ".[x]") : CliState::get().callbacks(section);
+
+    if(std::get<1>(callback_entry).cap("edit")) {
+
+        auto cb_edit = std::get<1>(callback_entry).cli("edit");
+        if(cb_edit) {
+            auto cli_edit_x = cli_register_command(cli, cb_edit, entry.c_str(),
+                                                   std::get<1>(callback_entry).cmd("edit"), PRIVILEGE_PRIVILEGED, cli->mode,
+                                                   " edit new entry");
+
+            // set also leaf node
+            std::get<1>(CliState::get().callbacks(section + "." + entry)).cli("edit", cli_edit_x);
+        }
+    }
+
+    if(std::get<1>(callback_entry).cap("move")) {
+        auto cli_move = std::get<1>(callback_entry).cli("move");
+        if(cli_move) {
+
+            // 'add' has empty args when adding to an array, so let's be a bit nasty here
+            if(section == "policy")
+                cli_generate_move_commands(cli, cli->mode, cli_move, std::get<1>(callback_entry).cmd("move"),
+                                           static_cast<int>(CfgFactory::get()->db_policy_list.size()-1),
+                                           CfgFactory::get()->db_policy_list.size());
+        }
+    }
+
+    if(std::get<1>(callback_entry).cap("remove")) {
+        auto cli_remove = std::get<1>(callback_entry).cli("remove");
+
+        if(cli_remove) {
+            auto cli_remove_x = cli_register_command(cli, std::get<1>(callback_entry).cli("remove"), entry.c_str(),
+                                                     std::get<1>(callback_entry).cmd("remove"), PRIVILEGE_PRIVILEGED, cli->mode,
+                                                     " delete this entry");
+
+            // set also leaf node
+            std::get<1>(CliState::get().callbacks(section + "." + entry)).cli("remove", cli_remove_x);
+        }
+    }
+
     if(section == "policy") {
-        args.clear();
-        args.push_back(string_format("[%d]", CfgFactory::get()->db_policy_list.size()));
+        // 'add' has empty args when adding to an array, so let's be a bit nasty here
+        cli_generate_set_commands(cli, section + ".[" + string_format("%d]", static_cast<int>(CfgFactory::get()->db_policy_list.size()-1)));
+    }
+    else {
+        cli_generate_set_commands(cli, section + "." + entry);
+    }
+};
+
+
+int cli_generic_add_cb(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+
+    std::vector<std::string> args = args_to_vec(argv, argc);
+    auto section = CliState::get().sections(cli->mode);
+
+    // remove dynamic suffix
+    if(section.find(".[x]") != std::string::npos) {
+        sx::str::string_replace_all(section, ".[x]", "");
     }
 
-    // if nothing to add, print out something smart and exit
-    if(args.empty())  {
-        cli_print(cli, " ");
-        cli_print(cli, "New entry in this section must have an unique name.");
+    // returns true if ok to proceed
+    auto prepare_args = [&cli, &args](std::string const& section) {
+
+        bool section_is_list = CfgFactory::section_lists.find(section) != CfgFactory::section_lists.end();
+
+        if (not args.empty()) {
+            if(args[0] == "?") {
+                cli_print(cli, " ... hint: add <object_name> (name must not start with reserved __)");
+                return false;
+            }
+            else if(args[0].find("__") == 0) {
+
+                cli_print(cli, " ");
+                cli_print(cli, "Error: name must not start with reserved \'__\'");
+                return false;
+            }
+            else if(section_is_list) {
+                cli_print(cli, "Note: suggested name is ignored in unnamed lists");
+                cli_print(cli, "  ");
+
+                args.clear();
+                args.push_back(string_format("[%d]", CfgFactory::get()->section_list_size(section)));
+            }
+        }
+        else {
+            // allow empty args for policy
+            if (section_is_list) {
+                args.clear();
+                args.push_back(string_format("[%d]", CfgFactory::get()->section_list_size(section)));
+            }
+            else {
+                cli_print(cli, " ");
+                cli_print(cli, "New entry in this section must have an unique name.");
+                return false;
+            }
+        }
+
+        return true;
+    };
+
+    if(not prepare_args(section)) {
         return CLI_OK;
     }
-
-
-    if(args[0].find("__") == 0) {
-
-        cli_print(cli, " ");
-        cli_print(cli, "Error: name must not start with reserved \'__\'");
-        return CLI_OK;
-    }
-
 
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
     if(CfgFactory::cfg_root().exists(section.c_str())) {
 
-        auto register_cli = [&]() {
+        if(CfgFactory::create_new_entry(section, args[0])) {
 
-            // load callbacks, must prefer templated
-            auto& callback_entry = templated ? CliState::get().callbacks(section + ".[x]") : CliState::get().callbacks(section);
+            register_cli_entry(cli, args[0]);
 
-            if(std::get<1>(callback_entry).cap("edit")) {
-
-                auto cb_edit = std::get<1>(callback_entry).cli("edit");
-                if(cb_edit) {
-                    auto cli_edit_x = cli_register_command(cli, cb_edit, args[0].c_str(),
-                                     std::get<1>(callback_entry).cmd("edit"), PRIVILEGE_PRIVILEGED, cli->mode,
-                                     " edit new entry");
-
-                    // set also leaf node
-                    std::get<1>(CliState::get().callbacks(section + "." + args[0])).cli("edit", cli_edit_x);
-                }
-            }
-
-            if(std::get<1>(callback_entry).cap("move")) {
-                auto cli_move = std::get<1>(callback_entry).cli("move");
-                if(cli_move) {
-
-                    // 'add' has empty args when adding to an array, so let's be a bit nasty here
-                    if(section == "policy")
-                        cli_generate_move_commands(cli, cli->mode, cli_move, std::get<1>(callback_entry).cmd("move"),
-                                                   static_cast<int>(CfgFactory::get()->db_policy_list.size()-1),
-                                                   CfgFactory::get()->db_policy_list.size());
-                }
-            }
-
-            if(std::get<1>(callback_entry).cap("remove")) {
-                auto cli_remove = std::get<1>(callback_entry).cli("remove");
-
-                if(cli_remove) {
-                    auto cli_remove_x = cli_register_command(cli, std::get<1>(callback_entry).cli("remove"), args[0].c_str(),
-                                         std::get<1>(callback_entry).cmd("remove"), PRIVILEGE_PRIVILEGED, cli->mode,
-                                         " delete this entry");
-
-                    // set also leaf node
-                    std::get<1>(CliState::get().callbacks(section + "." + args[0])).cli("remove", cli_remove_x);
-                }
-            }
-
-            if(section == "policy") {
-                // 'add' has empty args when adding to an array, so let's be a bit nasty here
-                cli_generate_set_commands(cli, section + ".[" + string_format("%d]", static_cast<int>(CfgFactory::get()->db_policy_list.size()-1)));
-            }
-            else {
-                cli_generate_set_commands(cli, section + "." + args[0]);
-            }
-        };
-
-        bool created_internal = false;
-
-        Setting &s = CfgFactory::cfg_root().lookup(section.c_str());
-        if(section == "proto_objects") {
-            if (CfgFactory::get()->new_proto_object(s, args[0])) {
-                CfgFactory::get()->load_db_proto();
-                register_cli();
-                created_internal = true;
-            }
-        }
-        else if(section == "port_objects") {
-            if (CfgFactory::get()->new_port_object(s, args[0])) {
-                CfgFactory::get()->load_db_port();
-                register_cli();
-                created_internal = true;
-            }
-        }
-        else if(section == "address_objects") {
-            if (CfgFactory::get()->new_address_object(s, args[0])) {
-                CfgFactory::get()->load_db_address();
-                register_cli();
-                created_internal = true;
-            }
-        }
-        else if(section == "detection_profiles") {
-            if (CfgFactory::get()->new_detection_profile(s, args[0])) {
-                CfgFactory::get()->load_db_prof_detection();
-                register_cli();
-                created_internal = true;
-            }
-        }
-        else if(section == "content_profiles") {
-            if (CfgFactory::get()->new_content_profile(s, args[0])) {
-                CfgFactory::get()->load_db_prof_content();
-                register_cli();
-                created_internal = true;
-            }
-        }
-        else if(section == "tls_ca") {
-            if (CfgFactory::get()->new_tls_ca(s, args[0])) {
-                // missing load_db_tls_ca
-                register_cli();
-                created_internal = true;
-            }
-        }
-        else if(section == "tls_profiles") {
-            if (CfgFactory::get()->new_tls_profile(s, args[0])) {
-                CfgFactory::get()->load_db_prof_tls();
-                register_cli();
-                created_internal = true;
-            }
-        }
-        else if(section == "alg_dns_profiles") {
-            if (CfgFactory::get()->new_alg_dns_profile(s, args[0])) {
-                CfgFactory::get()->load_db_prof_alg_dns();
-                register_cli();
-                created_internal = true;
-            }
-        }
-        else if(section == "auth_profiles") {
-            if (CfgFactory::get()->new_auth_profile(s, args[0])) {
-                CfgFactory::get()->load_db_prof_auth();
-                register_cli();
-                created_internal = true;
-            }
-        }
-        else if(section == "policy") {
-            if (CfgFactory::get()->new_policy(s, args[0])) {
-
-                // policy is a list - it must be cleared before loaded again
-                CfgFactory::get()->cleanup_db_policy();
-                CfgFactory::get()->load_db_policy();
-                register_cli();
-                created_internal = true;
-            }
-        }
-        else if(section == "routing") {
-            if (CfgFactory::get()->new_routing(s, args[0])) {
-
-                // policy is a list - it must be cleared before loaded again
-                CfgFactory::get()->load_db_routing();
-                register_cli();
-                created_internal = true;
-            }
-        }
-
-
-        if(created_internal) {
             cli_print(cli, " ");
             cli_print(cli, "New %s '%s' has been created.", section.c_str(), args[0].c_str());
 

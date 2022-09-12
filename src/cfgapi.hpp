@@ -234,6 +234,11 @@ public:
 
     static void cfg_clone_setting(libconfig::Setting& dst, libconfig::Setting& orig, int index = -1 );
     static int cfg_write(libconfig::Config& cfg, FILE* where, unsigned long iobufsz = 0);
+    static bool create_new_entry(std::string const& section, std::string const& entry_name);
+
+    //sections containing unnamed lists (ie. traffic policy)
+    static inline std::set<std::string, std::less<>> section_lists = { "policy", };
+    size_t section_list_size(std::string const& section) const;
 
     template <class T>
     std::shared_ptr<T> section_element(std::string const& section, std::string const& key);
