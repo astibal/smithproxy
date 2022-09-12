@@ -52,6 +52,7 @@
 #include <service/core/smithproxy.hpp>
 #include <service/cmd/cmdserver.hpp>
 #include <service/cmd/diag/diag_cmds.hpp>
+#include <service/httpd/httpd.hpp>
 
 #include <cfgapi.hpp>
 #include <sslcom.hpp>
@@ -2124,6 +2125,32 @@ int cli_diag_worker_list(struct cli_def *cli, [[maybe_unused]] const char *comma
 
     return CLI_OK;
 }
+int cli_diag_api_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    std::stringstream ss;
+    {
+        using namespace sx::webserver;
+        auto lc_ = std::scoped_lock(HttpSessions::lock);
+
+        for (auto const& ak: HttpSessions::access_keys) {
+            for(auto const& to: ak.second) {
+                ss << "access_token: " << ak.first << " csrf_token: ";
+
+                auto const& csrf = to.second.stored_optional();
+                if(csrf.has_value()) {
+                    auto exp = to.second.expired_at() - time(nullptr);
+                    ss << csrf.value() << " expiring: " << exp << ( exp < 0 ? " *expired*" : "" );
+                }
+            }
+
+            ss << "\r\n";
+        }
+    }
+
+    cli_print(cli, "%s", ss.str().c_str());
+    return CLI_OK;
+}
+
 
 bool register_diags(cli_def* cli, cli_command* diag) {
     auto diag_ssl = cli_register_command(cli, diag, "ssl", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "ssl related troubleshooting commands");
@@ -2222,6 +2249,9 @@ bool register_diags(cli_def* cli, cli_command* diag) {
 
     auto diag_writer = cli_register_command(cli,diag,"writer",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"file writer diags");
     cli_register_command(cli,diag_writer,"stats",cli_diag_writer_stats,PRIVILEGE_PRIVILEGED, MODE_EXEC,"file writer statistics");
+
+    auto diag_api = cli_register_command(cli,diag,"api",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"http api info");
+        cli_register_command(cli,diag_api,"list-keys",cli_diag_api_list,PRIVILEGE_PRIVILEGED, MODE_EXEC,"list API active keys");
 
     return true;
 }
