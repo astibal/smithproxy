@@ -103,7 +103,7 @@ void apply_hostname(cli_def* cli) {
 
     std::string hostname_full = hostname + (tenant == ".default" ? "" : tenant );
 
-    cli_set_hostname(cli, string_format("smithproxy(%s)%s", hostname_full.c_str(), CliGlobalState::config_changed_flag ? "<*>" : "").c_str());
+    cli_set_hostname(cli, string_format("smithproxy(%s)%s", hostname_full.c_str(), CfgFactory::config_changed_flag ? "<*>" : "").c_str());
 }
 
 void debug_cli_params(struct cli_def *cli, const char *command, char *argv[], int argc) {
@@ -283,7 +283,7 @@ std::stringstream features;
     cli_print(cli,"Transferred: %s bytes", number_suffixed(t).c_str());
     cli_print(cli,"Total sessions: %lu", static_cast<unsigned long>(MitmProxy::total_sessions().load()));
 
-    if(CliGlobalState::config_changed_flag) {
+    if(CfgFactory::config_changed_flag) {
         cli_print(cli, "\n*** Configuration changes NOT saved ***");
     }
 
@@ -1081,7 +1081,7 @@ int cli_save_config(struct cli_def *cli, const char *command, char *argv[], int 
     }
     else {
         cli_print(cli, "config saved successfully.");
-        CliGlobalState::config_changed_flag = false;
+        CfgFactory::config_changed_flag = false;
 
         apply_hostname(cli);
     }
@@ -1092,12 +1092,12 @@ int cli_save_config(struct cli_def *cli, const char *command, char *argv[], int 
 int cli_exec_reload(struct cli_def *cli, const char *command, char *argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
 
-    CliGlobalState::config_changed_flag = false;
+    CfgFactory::config_changed_flag = false;
     bool CONFIG_LOADED = SmithProxy::instance().load_config(CfgFactory::get()->config_file, true);
 
     if(CONFIG_LOADED) {
         cli_print(cli, "Configuration file reloaded successfully");
-        CliGlobalState::config_changed_flag = false;
+        CfgFactory::config_changed_flag = false;
         apply_hostname(cli);
 
     } else {
@@ -1601,9 +1601,9 @@ bool apply_setting(std::string const& section, std::string const& varname, struc
         cli_print(cli, " -  saving and reload is necessary to apply your settings.");
     } else {
 
-        bool status_change = not CliGlobalState::config_changed_flag;
+        bool status_change = not CfgFactory::config_changed_flag;
 
-        CliGlobalState::config_changed_flag = true;
+        CfgFactory::config_changed_flag = true;
 
         if(status_change) {
             apply_hostname(cli);
@@ -1833,8 +1833,8 @@ int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[]
                 cli_print(cli, "cannot remove: %s - only templated entries can be removed", section.c_str());
             }
 
-            bool status_change = not CliGlobalState::config_changed_flag;
-            CliGlobalState::config_changed_flag = true;
+            bool status_change = not CfgFactory::config_changed_flag;
+            CfgFactory::config_changed_flag = true;
 
             if(status_change) {
                 apply_hostname(cli);

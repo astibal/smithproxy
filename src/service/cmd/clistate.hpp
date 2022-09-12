@@ -109,14 +109,6 @@ private:
 };
 
 
-struct CliGlobalState {
-    CliGlobalState() = delete;
-    CliGlobalState(CliGlobalState const&) = delete;
-    CliGlobalState&operator=(CliGlobalState&) = delete;
-
-    static inline bool config_changed_flag = false;
-};
-
 struct CliState {
     bool cli_debug_flag = false;
 
