@@ -92,18 +92,32 @@ using namespace socle;
 using namespace libconfig;
 
 struct CliGlobals {
+    static std::string create_hostname() {
+        char hostname[64]; memset(hostname,0,64);
+        gethostname(hostname,63);
+        auto tenant = "." + CfgFactory::get()->tenant_name;
+
+        std::string hostname_full = hostname + (tenant == ".default" ? "" : tenant );
+        return hostname_full;
+    }
+    static std::string hostname() {
+        static std::string h = create_hostname();
+        return h;
+    };
+
     static thread_local inline bool ct_warning_flag = false;
+    static thread_local inline bool cfg_warning_flag = false;
 
 };
 
 void apply_hostname(cli_def* cli) {
-    char hostname[64]; memset(hostname,0,64);
-    gethostname(hostname,63);
-    auto tenant = "." + CfgFactory::get()->tenant_name;
 
-    std::string hostname_full = hostname + (tenant == ".default" ? "" : tenant );
+    cli_set_hostname(cli, string_format("smithproxy(%s)%s", CliGlobals::hostname().c_str(), CfgFactory::config_changed_flag ? "<*>" : "").c_str());
 
-    cli_set_hostname(cli, string_format("smithproxy(%s)%s", hostname_full.c_str(), CfgFactory::config_changed_flag ? "<*>" : "").c_str());
+    if(CfgFactory::config_changed_flag and not CliGlobals::cfg_warning_flag) {
+        cli_print(cli, "*** config changed ***");
+        CliGlobals::cfg_warning_flag = true;
+    }
 }
 
 void debug_cli_params(struct cli_def *cli, const char *command, char *argv[], int argc) {
@@ -1084,6 +1098,7 @@ int cli_save_config(struct cli_def *cli, const char *command, char *argv[], int 
         CfgFactory::config_changed_flag = false;
 
         apply_hostname(cli);
+        CliGlobals::cfg_warning_flag = false;
     }
     return CLI_OK;
 }
@@ -1098,7 +1113,9 @@ int cli_exec_reload(struct cli_def *cli, const char *command, char *argv[], int 
     if(CONFIG_LOADED) {
         cli_print(cli, "Configuration file reloaded successfully");
         CfgFactory::config_changed_flag = false;
+
         apply_hostname(cli);
+        CliGlobals::cfg_warning_flag = false;
 
     } else {
         cli_print(cli, "Configuration file reload FAILED");
@@ -2516,16 +2533,7 @@ void client_thread(int client_socket) {
     cli_allow_enable(cli, CliState::get().cli_enable_password.c_str());
 
     cli_register_static(cli);
-
-    cli_regular(cli, []([[maybe_unused]]  cli_def* c) -> int { if(SmithProxy::instance().terminate_flag) return CLI_ERROR; return CLI_OK; } );
     cli_regular_interval(cli, 1);
-
-
-    // generate dynamically content of config
-//    .cmd_set(cli_generic_set_cb)
-//            .cmd_config(edit_cb);
-
-
 
     auto register_callback = [](std::string const& section, int mode) -> CliCallbacks& {
         CliState::get().callbacks(
@@ -2848,7 +2856,13 @@ void client_thread(int client_socket) {
 
     load_defaults();
 
-    auto reg_cb = [](cli_def* cli) {
+    auto regular_callback = [](cli_def* cli) {
+
+        if(CfgFactory::config_changed_flag and not CliGlobals::cfg_warning_flag) {
+            apply_hostname(cli);
+            cli_reprompt(cli);
+        }
+
         if(SmithProxy::instance().terminate_flag) {
 
             cli_print(cli, "\n\n !!!   Shutdown   !!!\n");
@@ -2864,7 +2878,7 @@ void client_thread(int client_socket) {
 
         return CLI_OK;
     };
-    cli->regular_callback = reg_cb;
+    cli_regular(cli, regular_callback);
     cli_loop(cli, client_socket);
 
 
