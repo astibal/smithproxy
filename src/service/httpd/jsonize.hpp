@@ -64,10 +64,10 @@ namespace jsonize {
     }
 
     inline nlohmann::json cfg_status_response(std::pair<bool,std::string> status) {
-        return {
+        return { {
                 (status.first ? "success" : "error"),
                 status.second
-        };
+        } };
     }
 }
 
