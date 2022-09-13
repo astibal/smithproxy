@@ -7,6 +7,8 @@
 #include <service/httpd/diag/diag_ssl.hpp>
 #include <service/httpd/diag/daig_proxy.hpp>
 
+#include <service/httpd/cfg/add.hpp>
+
 namespace sx::webserver {
     using json = nlohmann::json;
 
@@ -176,8 +178,15 @@ std::thread* create_httpd_thread(unsigned short port) {
                 "POST",
                 "/api/diag/proxy/session/list",
                 authorized::token_protected(json_proxy_session_list)
-        );
+                );
         server.addController(&diag_proxy_session_list);
+
+        Http_JsonResponder cfg_uni_add(
+                "POST",
+                "/api/config/uni/add",
+                authorized::token_protected(&json_add_section_entry)
+                );
+        server.addController(&cfg_uni_add);
 
 
         server.options().handler_should_terminate = []() -> bool {
