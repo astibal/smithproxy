@@ -44,20 +44,11 @@
 #include <service/httpd/jsonize.hpp>
 
 
-template <typename T>
-std::optional<T> load_json_params(std::string const& args, const char* varname) {
-    try {
-        auto js = nlohmann::json::parse(args);
-        return js["params"][varname].get<T>();
-    } catch (nlohmann::json::exception const& e) {
-        return std::nullopt;
-    }
-}
-
 
 static nlohmann::json json_proxy_session_list(struct MHD_Connection * connection, std::string const& req) {
 
     using nlohmann::json;
+    using namespace jsonize;
 
     std::scoped_lock<std::recursive_mutex> l_(socle::sobjectDB::getlock());
     json ret;

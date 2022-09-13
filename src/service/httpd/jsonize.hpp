@@ -52,6 +52,23 @@ namespace jsonize {
     nlohmann::json from(baseCom* xcom, int verbosity);
     nlohmann::json from(MitmProxy* what, int verbosity);
     nlohmann::json from(MitmHostCX* what, int verbosity);
+
+    template <typename T>
+    std::optional<T> load_json_params(std::string const& args, const char* varname) {
+        try {
+            auto js = nlohmann::json::parse(args);
+            return js["params"][varname].get<T>();
+        } catch (nlohmann::json::exception const& e) {
+            return std::nullopt;
+        }
+    }
+
+    inline nlohmann::json cfg_status_response(std::pair<bool,std::string> status) {
+        return {
+                (status.first ? "success" : "error"),
+                status.second
+        };
+    }
 }
 
 #endif
