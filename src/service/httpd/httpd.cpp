@@ -94,7 +94,7 @@ std::thread* create_httpd_thread(unsigned short port) {
     return new std::thread([port]() {
 
         lmh::WebServer server(port);
-        server.options().bind_loopback = true;
+        server.options().bind_loopback = HttpSessions::loopback_only;
 
 #ifndef BUILD_RELEASE
         Http_JsonResponder status_ping(

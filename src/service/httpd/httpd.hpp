@@ -108,6 +108,7 @@ struct HttpSessions {
     static inline sessions_t access_keys;
     static inline uint32_t session_ttl = 3600;
     static inline bool extend_on_access = true;
+    static inline bool loopback_only = true;
 
     constexpr static const char* ATT_AUTH_TOKEN = "auth_token";
     constexpr static const char* ATT_CSRF_TOKEN = "csrf_token";

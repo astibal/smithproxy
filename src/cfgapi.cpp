@@ -364,6 +364,12 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
 
         return true;
     }
+    else if(upgrade_to_num == 1009) {
+        log.event(INF, "added settings.http_api.loopback_only");
+
+        return true;
+    }
+
 
 
 
@@ -677,6 +683,7 @@ bool CfgFactory::load_settings () {
         }
         load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "key_timeout", sx::webserver::HttpSessions::session_ttl);
         load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "key_extend_on_access", sx::webserver::HttpSessions::extend_on_access);
+        load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "loopback_only", sx::webserver::HttpSessions::loopback_only);
     }
 
     return true;
@@ -4001,6 +4008,7 @@ int save_settings(Config& ex) {
     }
     http_api_objects.add("key_timeout", Setting::TypeInt) = (int)sx::webserver::HttpSessions::session_ttl;
     http_api_objects.add("key_extend_on_access", Setting::TypeBoolean) = (bool)sx::webserver::HttpSessions::extend_on_access;
+    http_api_objects.add("loopback_only", Setting::TypeBoolean) = (bool)sx::webserver::HttpSessions::loopback_only;
 
 
     return 0;

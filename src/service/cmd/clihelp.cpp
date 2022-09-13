@@ -401,6 +401,10 @@ void CliHelp::init() {
             .may_be_empty(false)
             .value_filter(CliElement::VALUE_BOOL);
 
+    add("settings.http_api.loopback_only", "Listen to loopback only (default)")
+            .help_quick("<bool>: set true to listen only on loopback address (default: true)")
+            .may_be_empty(false)
+            .value_filter(CliElement::VALUE_BOOL);
 
 
     add("debug.log_data_crc", "calculate received CRC data (helps to identify proxy bugs)");

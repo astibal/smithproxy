@@ -100,7 +100,7 @@ public:
     static inline bool config_changed_flag = false;
 
     // Each version bump implies a config upgrade - we start on 1000
-    constexpr static inline const int SCHEMA_VERSION  = 1008;
+    constexpr static inline const int SCHEMA_VERSION  = 1009;
 
     CfgFactory() = default;
     CfgFactory(CfgFactory const &) = delete;
