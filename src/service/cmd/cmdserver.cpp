@@ -2038,6 +2038,9 @@ int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[]
 
 
         if(removed_internal) {
+
+            CfgFactory::board()->upgrade();
+
             reconstruct_cli();
 
             CfgFactory::get()->cleanup_db_policy();
