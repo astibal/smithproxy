@@ -63,6 +63,7 @@ void cli_generate_toggle_commands (struct cli_def *cli, std::string const& secti
 void cli_generate_move_commands(cli_def* cli, int this_mode, cli_command *move, CliCallbacks::callback callback, int i, int len);
 void cli_generate_commands (cli_def *cli, std::string const &this_section, cli_command *cli_parent);
 
+CliCallbacks& register_callback(std::string const& section, int mode);
 
 #define CONFIG_MODE_DEC(fn) \
                             \

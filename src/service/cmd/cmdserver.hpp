@@ -59,4 +59,7 @@ int cli_show(struct cli_def *cli, const char *command, char **argv, int argc);
 int cli_uni_set_cb(std::string const& confpath, struct cli_def *cli, const char *command, char *argv[], int argc);
 int cli_generic_set_cb(struct cli_def *cli, const char *command, char *argv[], int argc);
 
+void register_regular_callback(cli_def* cli);
+void register_edit_command(cli_def* cli);
+
 #endif

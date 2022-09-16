@@ -3598,7 +3598,7 @@ bool CfgFactory::_apply_new_entry(std::string const& section, std::string const&
     }
 
     if(added) {
-        CfgFactory::config_changed_flag = true;
+        board()->upgrade();
         return true;
     } else {
         return false;
@@ -3651,7 +3651,7 @@ std::pair<bool, std::string> CfgFactory::cfg_add_entry(std::string const& sectio
 
         if (CfgFactory::_apply_new_entry(section_name, entry_name)) {
 
-            CfgFactory::config_changed_flag = true;
+            board()->upgrade();
 
             return { true, string_format("Note: %s.%s has been created.", section_name.c_str(), entry_name.c_str()) };
         }

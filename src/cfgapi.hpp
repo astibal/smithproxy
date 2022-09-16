@@ -88,6 +88,93 @@ public:
     int  apply_tenant_index(std::string& what, unsigned int const& idx) const;
 };
 
+struct UpdateBoard {
+    static constexpr inline uint64_t starting_num = 1000L;
+
+    struct UpdateInfo {
+        uint64_t seen_current { starting_num };
+        uint64_t seen_saved { starting_num };
+    };
+
+    // pair of seen current version, seen saved version - maintained by subscriber
+    using update_info_t = UpdateInfo;
+
+    // subscriber-id -> update info
+    using subscriber_map_t = std::unordered_map<std::string, update_info_t>;
+
+    void subscribe(std::string const& sub_id) { board_[sub_id] = { current_version_, saved_version_ }; };
+    void unsubscribe(std::string const& sub_id) { board_.erase(sub_id); };
+
+    update_info_t& at(std::string const& sub_id) {
+        return board_[sub_id];
+    };
+    update_info_t& operator[](std::string const& sub_id) { return at(sub_id); }
+
+    bool differs_current(std::string const& sub_id) {
+        return ( at(sub_id).seen_current != current_version_ );
+    }
+    bool differs_saved(std::string const& sub_id) {
+        return ( at(sub_id).seen_saved != saved_version_ );
+    }
+    bool differs(std::string const& sub_id) {
+        return ( differs_current(sub_id) or differs_saved(sub_id) );
+    }
+
+    // return current version difference
+    // negative - means rollback to older version
+    // zero - versions are the same
+    // positive - seen version is newer, config is updated
+    int64_t current_delta(std::string const& sub_id) {
+        return current_version_ - at(sub_id).seen_current;
+    }
+
+    // return saved version difference
+    // negative - older save has been applied
+    // zero - no new saves
+    // positive - new config version has been saved
+    int64_t saved_delta(std::string const& sub_id) {
+        return saved_version_ - at(sub_id).seen_saved;
+    }
+
+
+    void ack_current(std::string const& sub_id) {
+        at(sub_id).seen_current = current_version_;
+    }
+    void ack_saved(std::string const& sub_id) {
+        at(sub_id).seen_saved = saved_version_;
+    }
+
+
+    uint64_t upgrade() { return ++current_version_; }
+    uint64_t rollback() { return current_version_ = saved_version_; }
+    uint64_t save() { saved_version_ = current_version_; return saved_version_; }
+
+    uint64_t version_current() const noexcept { return current_version_; }
+    uint64_t version_saved() const noexcept { return saved_version_; }
+
+    uint64_t current_version_ = starting_num;
+    uint64_t saved_version_ = starting_num;
+    subscriber_map_t board_;
+};
+
+
+//RAII sub mechanics
+
+struct UpdateBoardSubscriber {
+    UpdateBoardSubscriber() = delete;
+    UpdateBoardSubscriber(std::string const& sub_id, std::shared_ptr<UpdateBoard> board) : my_id(sub_id), board_(board) {};
+    ~UpdateBoardSubscriber() {
+        auto shr = board_.lock();
+        if(shr) {
+            shr->unsubscribe(my_id);
+        }
+    }
+
+    auto board() { return board_.lock(); }
+
+    std::string my_id;
+    std::weak_ptr<UpdateBoard> board_;
+};
 
 class CfgFactory : public CfgFactoryBase {
 
@@ -95,9 +182,10 @@ class CfgFactory : public CfgFactoryBase {
     std::recursive_mutex lock_;
 
     static inline std::shared_ptr<CfgFactory> self;
+    static inline std::shared_ptr<UpdateBoard> update_board;
 
 public:
-    static inline bool config_changed_flag = false;
+//    static inline bool config_changed_flag = false;
 
     // Each version bump implies a config upgrade - we start on 1000
     constexpr static inline const int SCHEMA_VERSION  = 1009;
@@ -109,10 +197,15 @@ public:
 
     static void init() {
         self = std::make_shared<CfgFactory>();
+        update_board = std::make_shared<UpdateBoard>();
     }
 
     static std::shared_ptr<CfgFactory> get() {
         return CfgFactory::self;
+    }
+
+    static std::shared_ptr<UpdateBoard> board() {
+        return CfgFactory::update_board;
     }
 
 

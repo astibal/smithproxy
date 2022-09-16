@@ -106,18 +106,29 @@ struct CliGlobals {
     };
 
     static thread_local inline bool ct_warning_flag = false;
-    static thread_local inline bool cfg_warning_flag = false;
 
 };
 
+auto cli_id() {
+    std::stringstream ss;
+    ss << "cli-" << std::this_thread::get_id();
+
+    return ss.str();
+}
+
 void apply_hostname(cli_def* cli) {
 
-    cli_set_hostname(cli, string_format("smithproxy(%s)%s", CliGlobals::hostname().c_str(), CfgFactory::config_changed_flag ? "<*>" : "").c_str());
+    auto board = CfgFactory::board();
 
-    if(CfgFactory::config_changed_flag and not CliGlobals::cfg_warning_flag) {
-        cli_print(cli, "*** config changed ***");
-        CliGlobals::cfg_warning_flag = true;
-    }
+    board->ack_current(cli_id());
+
+    board->ack_saved(cli_id());
+
+    bool cfg_change_unsaved = (board->at(cli_id()).seen_current != board->at(cli_id()).seen_saved);
+
+
+    cli_set_hostname(cli, string_format("smithproxy(%s)%s", CliGlobals::hostname().c_str(), cfg_change_unsaved ? "<*>" : "").c_str());
+
 }
 
 void debug_cli_params(struct cli_def *cli, const char *command, char *argv[], int argc) {
@@ -297,7 +308,7 @@ std::stringstream features;
     cli_print(cli,"Transferred: %s bytes", number_suffixed(t).c_str());
     cli_print(cli,"Total sessions: %lu", static_cast<unsigned long>(MitmProxy::total_sessions().load()));
 
-    if(CfgFactory::config_changed_flag) {
+    if(CfgFactory::board()->version_saved() < CfgFactory::board()->version_current()) {
         cli_print(cli, "\n*** Configuration changes NOT saved ***");
     }
 
@@ -1095,10 +1106,11 @@ int cli_save_config(struct cli_def *cli, const char *command, char *argv[], int 
     }
     else {
         cli_print(cli, "config saved successfully.");
-        CfgFactory::config_changed_flag = false;
+
+        CfgFactory::board()->save();
+        CfgFactory::board()->ack_saved(cli_id());
 
         apply_hostname(cli);
-        CliGlobals::cfg_warning_flag = false;
     }
     return CLI_OK;
 }
@@ -1107,15 +1119,14 @@ int cli_save_config(struct cli_def *cli, const char *command, char *argv[], int 
 int cli_exec_reload(struct cli_def *cli, const char *command, char *argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
 
-    CfgFactory::config_changed_flag = false;
     bool CONFIG_LOADED = SmithProxy::instance().load_config(CfgFactory::get()->config_file, true);
+    CfgFactory::board()->rollback();
 
     if(CONFIG_LOADED) {
         cli_print(cli, "Configuration file reloaded successfully");
-        CfgFactory::config_changed_flag = false;
 
+        CfgFactory::board()->ack_current(cli_id());
         apply_hostname(cli);
-        CliGlobals::cfg_warning_flag = false;
 
     } else {
         cli_print(cli, "Configuration file reload FAILED");
@@ -1618,15 +1629,12 @@ bool apply_setting(std::string const& section, std::string const& varname, struc
         cli_print(cli, " -  saving and reload is necessary to apply your settings.");
     } else {
 
-        bool status_change = not CfgFactory::config_changed_flag;
 
-        CfgFactory::config_changed_flag = true;
+        CfgFactory::board()->upgrade();
 
-        if(status_change) {
-            apply_hostname(cli);
-            cli_print(cli, " ");
-            cli_print(cli, "Running config applied (not saved to file).");
-        }
+        apply_hostname(cli);
+        cli_print(cli, " ");
+        cli_print(cli, "Running config applied (not saved to file).");
     }
 
     return ret;
@@ -1635,15 +1643,13 @@ bool apply_setting(std::string const& section, std::string const& varname, struc
 int cli_uni_set_cb(std::string const& confpath, struct cli_def *cli, const char *command, char *argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
 
-    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
-
     if (CfgFactory::cfg_obj().exists(confpath)) {
 
         auto normalized = CmdCleaner::normalize(command, argv, argc);
 
         _debug(cli, "var: %s", normalized.varname.c_str());
 
-        std::scoped_lock<std::recursive_mutex> ll_(CfgFactory::lock());
+        auto lc_ = std::scoped_lock(CfgFactory::lock());
         Setting& conf = CfgFactory::cfg_obj().lookup(confpath);
 
         if(! conf.exists(normalized.varname)) {
@@ -1661,6 +1667,9 @@ int cli_uni_set_cb(std::string const& confpath, struct cli_def *cli, const char 
                 if (not apply_setting( conf.getPath(), normalized.varname , cli )) {
                     CliStrings::cli_print(cli, CliStrings::config_not_applied());
                 }
+
+                // write on board there is a new configuration
+                CfgFactory::board()->upgrade();
             } else {
 
                 //  display error only if arguments were present
@@ -1850,10 +1859,7 @@ int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[]
                 cli_print(cli, "cannot remove: %s - only templated entries can be removed", section.c_str());
             }
 
-            bool status_change = not CfgFactory::config_changed_flag;
-            CfgFactory::config_changed_flag = true;
-
-            if(status_change) {
+            if(CfgFactory::board()->differs_current(cli_id())) {
                 apply_hostname(cli);
                 cli_print(cli, " ");
                 cli_print(cli, "Running config applied (not saved to file).");
@@ -2257,21 +2263,18 @@ int cli_generic_add_cb(struct cli_def *cli, const char *command, char *argv[], i
         cli_print(cli, " %s", msg.c_str());
     }
 
-    bool status_change = not CfgFactory::config_changed_flag;
     auto [ status, msg ]  = CfgFactory::get()->cfg_add_entry(section, args[0]);
 
     cli_print(cli, "  ");
     cli_print(cli, " %s", msg.c_str());
 
-    if (status) {
+    if (CfgFactory::board()->differs_current(cli_id())) {
 
         register_cli_entry(cli, args[0]);
 
-        if(status_change) {
-            apply_hostname(cli);
-            cli_print(cli, " ");
-            cli_print(cli, "Running config applied (not saved to file).");
-        }
+        apply_hostname(cli);
+        cli_print(cli, " ");
+        cli_print(cli, "Running config applied (not saved to file).");
     }
 
 
@@ -2515,49 +2518,24 @@ void cli_register_static(struct cli_def* cli) {
     cli_register_command(cli, debuk, "set", cli_debug_set, PRIVILEGE_PRIVILEGED, MODE_EXEC, "change light logan loglevels");
 }
 
+void generate_callbacks() {
 
-void client_thread(int client_socket) {
-
-    static auto log = logan::create("service");
-
-    struct cli_def *cli = cli_init();
-
-    // Set the hostname (shown in the prompt)
-    apply_hostname(cli);
-
-    Log::get()->events().insert(NOT, "admin CLI access");
-
-    // Set the greeting
-    cli_set_banner(cli, "--==[ Smithproxy command line utility ]==--");
-
-    cli_allow_enable(cli, CliState::get().cli_enable_password.c_str());
-
-    cli_register_static(cli);
-    cli_regular_interval(cli, 1);
-
-    auto register_callback = [](std::string const& section, int mode) -> CliCallbacks& {
-        CliState::get().callbacks(
-                section,
-                CliState::callback_entry(mode, CliCallbacks(section)));
-
-        return std::get<1>(CliState::get().callbacks(section));
-
-    };
+    CliState::get().clear_all();
 
     register_callback("settings",MODE_EDIT_SETTINGS)
-                .cap("set", true)
-                .cmd("set", cli_generic_set_cb)
-                .cap("edit", true)
-                .cmd("edit", cli_conf_edit_settings)
-                .cap("toggle", true)
-                .cmd("toggle", cli_generic_toggle_cb);
+            .cap("set", true)
+            .cmd("set", cli_generic_set_cb)
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_settings)
+            .cap("toggle", true)
+            .cmd("toggle", cli_generic_toggle_cb);
 
 
     register_callback( "settings.auth_portal",MODE_EDIT_SETTINGS_AUTH)
-                .cap("set", true)
-                .cmd("set", cli_generic_set_cb)
-                .cap("edit", true)
-                .cmd("edit", cli_conf_edit_settings_auth);
+            .cap("set", true)
+            .cmd("set", cli_generic_set_cb)
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_settings_auth);
 
     register_callback( "settings.tuning",MODE_EDIT_SETTINGS_TUNING)
             .cap("set", true)
@@ -2606,8 +2584,8 @@ void client_thread(int client_socket) {
 
 
     register_callback( "proto_objects", MODE_EDIT_PROTO_OBJECTS)
-                .cap("edit", true)
-                .cmd("edit", cli_conf_edit_proto_objects);
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_proto_objects);
 
     register_callback( "proto_objects.[x]", MODE_EDIT_PROTO_OBJECTS)
             .cap("set", true)
@@ -2754,8 +2732,8 @@ void client_thread(int client_socket) {
     register_callback("starttls_signatures.[x]", MODE_EDIT_STARTTLS_SIGNATURES)
             .cap("set", true)
             .cmd("set", cli_generic_set_cb)
-            // .cap("add", true).cmd("add", cli_generic_add_cb)
-            // .cap("remove", true).cmd("remove", cli_generic_remove_cb)
+                    // .cap("add", true).cmd("add", cli_generic_add_cb)
+                    // .cap("remove", true).cmd("remove", cli_generic_remove_cb)
             .cap("edit", true)
             .cmd("edit", cli_conf_edit_starttls_signatures);
 
@@ -2767,8 +2745,8 @@ void client_thread(int client_socket) {
     register_callback("detection_signatures.[x]", MODE_EDIT_DETECTION_SIGNATURES)
             .cap("set", true)
             .cmd("set", cli_generic_set_cb)
-            // .cap("add", true).cmd("add", cli_generic_add_cb)
-            // .cap("remove", true).cmd("remove", cli_generic_remove_cb)
+                    // .cap("add", true).cmd("add", cli_generic_add_cb)
+                    // .cap("remove", true).cmd("remove", cli_generic_remove_cb)
             .cap("edit", true)
             .cmd("edit", cli_conf_edit_detection_signatures);
 
@@ -2811,55 +2789,21 @@ void client_thread(int client_socket) {
             .cmd("edit", cli_conf_edit_experiment);
 #endif
 
-    auto conft_edit = cli_register_command(cli, nullptr, "edit", nullptr, PRIVILEGE_PRIVILEGED, MODE_CONFIG, "configure smithproxy settings");
+}
 
 
-    std::vector<std::string> edit_sections = {"settings", "debug",
-                                              "proto_objects", "address_objects", "port_objects" ,
-                                              "detection_profiles", "content_profiles", "tls_profiles", "auth_profiles",
-                                              "alg_dns_profiles",
-                                              "routing",
-                                              #ifdef USE_EXPERIMENT
-                                              "experiment",
-                                              #endif
-                                              "captures",
-                                              "policy",
-                                              "starttls_signatures",
-                                              "detection_signatures" };
-
-    auto gen_edit_sections = [&]() {
-        for (auto const &section : edit_sections) {
-
-            if (CfgFactory::cfg_root().exists(section.c_str())) {
-
-                std::string edit_help = string_format(" \t - edit %s", section.c_str());
-                auto &callback_entry = CliState::get().callbacks(section);
-
-                cli_register_command(cli, conft_edit, section.c_str(), std::get<1>(callback_entry).cmd("edit"),
-                                     PRIVILEGE_PRIVILEGED, MODE_CONFIG, edit_help.c_str());
-
-                std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
-                cli_generate_commands(cli, section, nullptr);
-            }
-        }
-    };
-
-    gen_edit_sections();
-
-    // Pass the connection off to libcli
-    Log::get()->remote_targets(string_format("cli-%d", client_socket), client_socket);
-
-    auto lp = std::make_unique<logger_profile>();
-    lp->level_ = CfgFactory::get()->cli_init_level;
-    Log::get()->target_profiles()[(uint64_t)client_socket] = std::move(lp);
-
-
-    load_defaults();
+void register_regular_callback(cli_def* cli) {
 
     auto regular_callback = [](cli_def* cli) {
 
-        if(CfgFactory::config_changed_flag and not CliGlobals::cfg_warning_flag) {
+        if(CfgFactory::board()->differs(cli_id())) {
             apply_hostname(cli);
+
+            generate_callbacks();
+            register_edit_command(cli);
+
+            cli_set_configmode(cli, MODE_EXEC, nullptr);
+
             cli_reprompt(cli);
         }
 
@@ -2879,6 +2823,87 @@ void client_thread(int client_socket) {
         return CLI_OK;
     };
     cli_regular(cli, regular_callback);
+}
+
+void register_edit_command(cli_def* cli) {
+
+    if(CliState::get().cmd_edit_root) {
+        cli_unregister_command(cli, "edit");
+    }
+    CliState::get().cmd_edit_root = cli_register_command(cli, nullptr, "edit", nullptr, PRIVILEGE_PRIVILEGED, MODE_CONFIG, "configure smithproxy settings");
+
+
+    std::vector<std::string> edit_sections = {"settings", "debug",
+                                              "proto_objects", "address_objects", "port_objects" ,
+                                              "detection_profiles", "content_profiles", "tls_profiles", "auth_profiles",
+                                              "alg_dns_profiles",
+                                              "routing",
+#ifdef USE_EXPERIMENT
+            "experiment",
+#endif
+                                              "captures",
+                                              "policy",
+                                              "starttls_signatures",
+                                              "detection_signatures" };
+
+    auto gen_edit_sections = [&]() {
+        for (auto const &section : edit_sections) {
+
+            if (CfgFactory::cfg_root().exists(section.c_str())) {
+
+                std::string edit_help = string_format(" \t - edit %s", section.c_str());
+                auto &callback_entry = CliState::get().callbacks(section);
+
+                cli_register_command(cli, CliState::get().cmd_edit_root, section.c_str(), std::get<1>(callback_entry).cmd("edit"),
+                                     PRIVILEGE_PRIVILEGED, MODE_CONFIG, edit_help.c_str());
+
+                std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
+                cli_generate_commands(cli, section, nullptr);
+            }
+        }
+    };
+
+    gen_edit_sections();
+
+}
+
+void client_thread(int client_socket) {
+
+    static auto log = logan::create("service");
+
+    struct cli_def *cli = cli_init();
+
+    // RAII subscriber removing us from board after exit
+    UpdateBoardSubscriber ubs(cli_id(), CfgFactory::board());
+
+    // Set the hostname (shown in the prompt)
+    apply_hostname(cli);
+
+    Log::get()->events().insert(NOT, "admin CLI access");
+
+    // Set the greeting
+    cli_set_banner(cli, "--==[ Smithproxy command line utility ]==--");
+
+    cli_allow_enable(cli, CliState::get().cli_enable_password.c_str());
+
+    cli_register_static(cli);
+    cli_regular_interval(cli, 1);
+
+    generate_callbacks();
+    register_edit_command(cli);
+
+    // Pass the connection off to libcli
+    Log::get()->remote_targets(string_format("cli-%d", client_socket), client_socket);
+
+    auto lp = std::make_unique<logger_profile>();
+    lp->level_ = CfgFactory::get()->cli_init_level;
+    Log::get()->target_profiles()[(uint64_t)client_socket] = std::move(lp);
+
+
+    load_defaults();
+
+    register_regular_callback(cli);
+
     cli_loop(cli, client_socket);
 
 

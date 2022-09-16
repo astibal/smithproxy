@@ -732,3 +732,11 @@ Setting* cfg_canonize(std::string const& section) {
     return nullptr;
 }
 
+CliCallbacks& register_callback(std::string const& section, int mode) {
+    CliState::get().callbacks(
+            section,
+            CliState::callback_entry(mode, CliCallbacks(section)));
+
+    return std::get<1>(CliState::get().callbacks(section));
+
+};

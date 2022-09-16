@@ -43,8 +43,10 @@
 
 
 #include <ext/libcli/libcli.h>
+
 #include <service/cmd/clihelp.hpp>
 #include <log/logan.hpp>
+#include <cfgapi.hpp>
 
 
 struct CliCallbacks {
@@ -136,6 +138,8 @@ struct CliState {
 
     loglevel orig_auth_loglevel = NON;
 
+    static inline thread_local cli_command* cmd_edit_root = nullptr;
+
     static CliState& get() {
         static thread_local CliState c;
         return c;
@@ -167,7 +171,7 @@ struct CliState {
     }
 
     std::string sections(int mode) {
-        return mode_map[mode];
+        return mode_map_[mode];
     }
 
     std::string template_callback_key(std::string const& section, cli_def* cli = nullptr);
@@ -176,15 +180,20 @@ struct CliState {
         callback_map_[s] = v;            //map SETTING => CALLBACKS
 
         if(set_mode_map)
-            mode_map[std::get<0>(v)] = s; //map MODE => SETTING
+            mode_map_[std::get<0>(v)] = s; //map MODE => SETTING
 
         return callback_map_[s];
+    }
+
+    void clear_all() {
+        callback_map_.clear();
+        mode_map_.clear();
     }
 
 private:
 
     std::unordered_map<std::string, callback_entry> callback_map_;
-    std::unordered_map<int, std::string> mode_map;
+    std::unordered_map<int, std::string> mode_map_;
 
     CliState() : help_(CliHelp::get()) {};
     CliHelp& help_;
