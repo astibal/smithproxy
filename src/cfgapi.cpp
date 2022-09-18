@@ -4067,7 +4067,7 @@ int CfgFactory::save_captures(Config& ex) const {
     return 1;
 }
 
-int CfgFactory::save_config() const {
+bool CfgFactory::save_config() const {
 
     std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
@@ -4154,13 +4154,14 @@ int CfgFactory::save_config() const {
 
     try {
         ex.writeFile(CfgFactory::get()->config_file.c_str());
+        log.event(NOT, "Configuration saved");
+
+        return true;
     }
     catch(ConfigException const& e) {
         _err("error writing config file %s", e.what());
-        return -1;
+        log.event(ERR, "Configuration NOT saved: %s", e.what());
+
+        return false;
     }
-
-    log.event(NOT, "Configuration file saved");
-
-    return n;
 }

@@ -435,7 +435,7 @@ public:
     enum class op_move { OP_MOVE_AFTER, OP_MOVE_BEFORE};
     bool move_policy(int what, int where, op_move op);
 
-    [[nodiscard]] int save_config() const;
+    [[nodiscard]] bool save_config() const;
 
 
     size_t cleanup_db_address ();
