@@ -2831,7 +2831,7 @@ void register_regular_callback(cli_def* cli) {
 void register_edit_command(cli_def* cli) {
 
     if(CliState::get().cmd_edit_root) {
-        cli_unregister_command(cli, "edit");
+        cli_unregister_all(cli, CliState::get().cmd_edit_root);
     }
     CliState::get().cmd_edit_root = cli_register_command(cli, nullptr, "edit", nullptr, PRIVILEGE_PRIVILEGED, MODE_CONFIG, "configure smithproxy settings");
 
