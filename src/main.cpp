@@ -67,7 +67,7 @@
 
 #include <libconfig.h++>
 
-#include <cfgapi.hpp>
+#include <service/cfgapi/cfgapi.hpp>
 #include <utils/tenants.hpp>
 #include <service/daemon.hpp>
 #include <staticcontent.hpp>

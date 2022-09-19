@@ -53,7 +53,7 @@
 #include <main.hpp>
 
 #include <libconfig.h++>
-#include <cfgapi.hpp>
+#include <service/cfgapi/cfgapi.hpp>
 
 #include <service/daemon.hpp>
 #include <service/netservice.hpp>

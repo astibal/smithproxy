@@ -42,7 +42,7 @@
 
 #include <ext/libcli/libcli.h>
 
-#include <service/cmd/clihelp.hpp>
+#include <service/cfgapi/cfgvalue.hpp>
 
 
 void debug_cli_params(struct cli_def *cli, const char *command, char *argv[], int argc);
@@ -53,6 +53,30 @@ void cli_loop(unsigned short port=50000);
 // SL_IO_OSBUF_NZ - sessions with non-empty OS buffers, or non-empty smithproxy write buffers
 // SL_IO_EMPTY - sessions with no data received and/or sent
 
+
+struct CliStrings {
+
+    static std::vector<std::string> const& config_not_applied() {
+
+        static std::vector<std::string> r =
+                {
+                        " ",
+                        "  Something didn't go well: running config NOT changed !!!",
+                        "    Change will be visible in show config, but not written to mapped variables",
+                        "    therefore 'save config' won't write them to file.",
+                        "    ",
+                        "    Consider running 'execute reload'  ... sorry for inconvenience."
+                };
+
+        return r;
+    }
+
+    static void cli_print(libcli::cli_def* cli, std::vector<std::string> const& vec) {
+        for( auto const& r: vec) {
+            libcli::cli_print(cli, r.c_str());
+        }
+    }
+};
 
 int cli_show(struct cli_def *cli, const char *command, char **argv, int argc);
 

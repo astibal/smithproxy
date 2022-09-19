@@ -47,7 +47,7 @@
 #include <service/httpd/jsonize.hpp>
 
 #include <main.hpp>
-#include <cfgapi.hpp>
+#include <service/cfgapi/cfgapi.hpp>
 
 namespace sx::webserver {
 

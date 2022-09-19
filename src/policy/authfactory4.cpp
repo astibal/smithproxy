@@ -39,7 +39,7 @@
 
 #include <log/logger.hpp>
 #include <policy/authfactory.hpp>
-#include <cfgapi.hpp>
+#include <service/cfgapi/cfgapi.hpp>
 
 int AuthFactory::shm_ip4_table_refresh()  {
 

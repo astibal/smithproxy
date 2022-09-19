@@ -37,7 +37,7 @@
     which carries forward this exception.
 */    
 
-#include <cfgapi.hpp>
+#include <service/cfgapi/cfgapi.hpp>
 #include <log/logger.hpp>
 #include <proxy/socks5/sockshostcx.hpp>
 #include <inspect/dnsinspector.hpp>

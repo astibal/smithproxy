@@ -40,7 +40,7 @@
 
 #include <policy/authfactory.hpp>
 #include <log/logger.hpp>
-#include <cfgapi.hpp>
+#include <service/cfgapi/cfgapi.hpp>
 
 
 IdentityInfoBase::IdentityInfoBase() {

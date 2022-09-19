@@ -42,7 +42,7 @@
 #include <proxy/socks5/sockshostcx.hpp>
 #include <proxy/socks5/socksproxy.hpp>
 #include <proxy/mitmhost.hpp>
-#include <cfgapi.hpp>
+#include <service/cfgapi/cfgapi.hpp>
 #include <policy/authfactory.hpp>
 
 #include <vector>

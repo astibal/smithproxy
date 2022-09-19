@@ -96,7 +96,7 @@ add_executable(smithproxy
         src/main.cpp
         src/proxy/mitmhost.cpp
         src/proxy/mitmproxy.cpp
-        src/cfgapi.cpp
+        src/service/cfgapi/cfgapi.cpp
         src/policy/policy.cpp
         src/service/daemon.cpp
         src/proxy/socks5/sockshostcx.cpp

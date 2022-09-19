@@ -211,7 +211,7 @@ add_executable(smithproxy
 
         src/main.cpp
         src/smithlog.cpp
-        src/cfgapi.cpp
+        src/service/cfgapi/cfgapi.cpp
         src/staticcontent.cpp
 
         src/proxy/mitmhost.cpp
@@ -262,8 +262,8 @@ add_executable(smithproxy
         src/service/core/smithproxy.hpp
         src/service/core/smithproxy.cpp
         src/service/cmd/cmdserver.cpp
-        src/service/cmd/clihelp.hpp
-        src/service/cmd/clihelp.cpp
+        src/service/cfgapi/cfgvalue.hpp
+        src/service/cfgapi/cfgvalue.cpp
         src/service/cmd/cligen.hpp
         src/service/cmd/cligen.cpp
         src/service/cmd/clistate.hpp

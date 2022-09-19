@@ -53,8 +53,8 @@
 #include <service/cmd/cmdserver.hpp>
 #include <service/cmd/diag/diag_cmds.hpp>
 #include <service/httpd/httpd.hpp>
+#include <service/cfgapi/cfgapi.hpp>
 
-#include <cfgapi.hpp>
 #include <sslcom.hpp>
 #include <sslcertstore.hpp>
 

@@ -47,7 +47,7 @@
 #include <main.hpp>
 
 
-#include <cfgapi.hpp>
+#include <service/cfgapi/cfgapi.hpp>
 #include <service/cmd/clistate.hpp>
 #include <log/logger.hpp>
 

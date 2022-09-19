@@ -56,11 +56,11 @@
 #include <service/cmd/cmdserver.hpp>
 #include <service/cmd/cligen.hpp>
 #include <service/cmd/diag/diag_cmds.hpp>
-#include <service/cmd/clihelp.hpp>
+#include <service/cfgapi/cfgvalue.hpp>
 #include <service/cmd/clistate.hpp>
 
 
-#include <cfgapi.hpp>
+#include <service/cfgapi/cfgapi.hpp>
 #include <timeops.hpp>
 
 #include <socle.hpp>
@@ -1222,7 +1222,7 @@ bool write_value(Setting& setting, std::optional<std::string> string_value, cli_
         original_value = string_value.value();
     }
 
-    auto value_check_verdict = CliHelp::get().value_check(setting.getPath(), original_value, cli);
+    auto value_check_verdict = CfgValueHelp::get().value_check(setting.getPath(), original_value, cli);
     if(value_check_verdict.has_value()) {
         original_value = value_check_verdict.value();
     } else {
@@ -1429,7 +1429,7 @@ bool cfg_write_value(Setting& parent, bool create, std::string& varname, const s
                     // check values
                     for(auto const& i: consolidated_values) {
 
-                        auto verdict = CliHelp::get().value_check(setting.getPath(), i, cli);
+                        auto verdict = CfgValueHelp::get().value_check(setting.getPath(), i, cli);
 
                         if(verdict) {
                             _debug(cli, "checking value OK: %s => %s", i.c_str(), i.c_str());
@@ -1645,7 +1645,7 @@ int cli_uni_set_cb(std::string const& confpath, struct cli_def *cli, const char 
 
     if (CfgFactory::cfg_obj().exists(confpath)) {
 
-        auto normalized = CmdCleaner::normalize(command, argv, argc);
+        auto normalized = CfgValueCleaner::normalize(command, argv, argc);
 
         _debug(cli, "var: %s", normalized.varname.c_str());
 
@@ -1685,7 +1685,7 @@ int cli_uni_set_cb(std::string const& confpath, struct cli_def *cli, const char 
         } else {
             if (!conf.isRoot() && conf.getName()) {
 
-                auto h = CliHelp::get().help(CliHelp::help_type_t::HELP_QMARK, conf.getPath(), normalized.varname);
+                auto h = CfgValueHelp::get().help(CfgValueHelp::help_type_t::HELP_QMARK, conf.getPath(), normalized.varname);
 
                 cli_print(cli, "hint:  %s (%s)", h.c_str(), conf.getPath().c_str());
             }
@@ -1703,7 +1703,7 @@ int cli_uni_toggle_cb(std::string const& confpath, struct cli_def *cli, const ch
 
     if (CfgFactory::cfg_obj().exists(confpath)) {
 
-        auto normalized = CmdCleaner::normalize(command, argv, argc);
+        auto normalized = CfgValueCleaner::normalize(command, argv, argc);
 
         _debug(cli, "var: %s", normalized.varname.c_str());
 
@@ -1726,7 +1726,7 @@ int cli_uni_toggle_cb(std::string const& confpath, struct cli_def *cli, const ch
                     std::string sub = this_conf[i];
                     cfg_values.emplace_back(sub);
                 }
-                normalized.args = CmdCleaner::toggle(cfg_values, normalized.args);
+                normalized.args = CfgValueCleaner::toggle(cfg_values, normalized.args);
             }
 
             if (cfg_write_value(conf, false, normalized.varname, normalized.args, cli)) {
@@ -1751,7 +1751,7 @@ int cli_uni_toggle_cb(std::string const& confpath, struct cli_def *cli, const ch
         } else {
             if (!conf.isRoot() && conf.getName()) {
 
-                auto h = CliHelp::get().help(CliHelp::help_type_t::HELP_QMARK, conf.getPath(), normalized.varname);
+                auto h = CfgValueHelp::get().help(CfgValueHelp::help_type_t::HELP_QMARK, conf.getPath(), normalized.varname);
 
                 cli_print(cli, "hint:  %s (%s)", h.c_str(), conf.getPath().c_str());
             }

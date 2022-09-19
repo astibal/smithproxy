@@ -44,9 +44,9 @@
 
 #include <ext/libcli/libcli.h>
 
-#include <service/cmd/clihelp.hpp>
+#include <service/cfgapi/cfgvalue.hpp>
+#include <service/cfgapi/cfgapi.hpp>
 #include <log/logan.hpp>
-#include <cfgapi.hpp>
 
 
 struct CliCallbacks {
@@ -145,7 +145,7 @@ struct CliState {
         return c;
     }
 
-    static CliHelp& help() {
+    static CfgValueHelp& help() {
         return get().help_;
     }
 
@@ -195,8 +195,8 @@ private:
     std::unordered_map<std::string, callback_entry> callback_map_;
     std::unordered_map<int, std::string> mode_map_;
 
-    CliState() : help_(CliHelp::get()) {};
-    CliHelp& help_;
+    CliState() : help_(CfgValueHelp::get()) {};
+    CfgValueHelp& help_;
 };
 
 

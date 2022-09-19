@@ -49,7 +49,7 @@
 #include <inspect/sxsignature.hpp>
 #include <service/httpd/httpd.hpp>
 
-#include <cfgapi.hpp>
+#include <service/cfgapi/cfgapi.hpp>
 
 SmithProxy::~SmithProxy () {
 

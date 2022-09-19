@@ -37,9 +37,9 @@
     which carries forward this exception.
 */
 
-#ifndef SMITHPROXY_CLIHELP_HPP
+#ifndef SMITHPROXY_CFGVALUE_HPP
 
-#define SMITHPROXY_CLIHELP_HPP
+#define SMITHPROXY_CFGVALUE_HPP
 
 
 #include <unordered_map>
@@ -58,7 +58,7 @@
 
 using namespace libcli;
 
-struct CliElement {
+struct CfgValue {
 
     struct filter_retval {
 
@@ -82,7 +82,7 @@ struct CliElement {
         std::string get_comment() const { return comment; }
 
     private:
-        explicit filter_retval(): value(std::nullopt), comment() {}
+        explicit filter_retval(): value(std::nullopt) {}
     };
 
 
@@ -90,9 +90,9 @@ struct CliElement {
     using value_filter_fn = filter_retval(std::string const&);
     using suggestion_generator_fn = std::vector<std::string>(std::string const&, std::string const&);
 
-    CliElement() : name_("<unknown>") {};
-    explicit CliElement(std::string name) : name_(std::move(name)) {}
-    CliElement& operator=(CliElement const& ref) {
+    CfgValue() : name_("<unknown>") {};
+    explicit CfgValue(std::string name) : name_(std::move(name)) {}
+    CfgValue& operator=(CfgValue const& ref) {
 
         if( this != &ref) {
             name_ = ref.name_;
@@ -109,7 +109,7 @@ struct CliElement {
     bool may_be_empty_ = true;
 
     // don't use std::function as reference
-    std::list<std::function<value_filter_fn>> value_filter_= { CliElement::VALUE_ANY };
+    std::list<std::function<value_filter_fn>> value_filter_= {CfgValue::VALUE_ANY };
 
     std::function<suggestion_generator_fn> gen_suggestions_ = SUGGESTION_GENERATOR_EMPTY;
 
@@ -117,20 +117,20 @@ struct CliElement {
     [[ nodiscard ]] std::string const& name() const { return name_; }
 
 
-    CliElement& help(std::string const& s) { help_ = s; return *this; }
+    CfgValue& help(std::string const& s) { help_ = s; return *this; }
     [[ nodiscard ]] std::string const& help() const { return help_; }
 
-    CliElement& help_quick(std::string const& s) { help_quick_ = s; return *this; }
+    CfgValue& help_quick(std::string const& s) { help_quick_ = s; return *this; }
     [[ nodiscard ]] std::string const& help_quick() const { return help_quick_; }
 
-    CliElement& may_be_empty(bool s) { may_be_empty_ = s; return *this; }
+    CfgValue& may_be_empty(bool s) { may_be_empty_ = s; return *this; }
     [[ nodiscard ]] bool may_be_empty() const { return may_be_empty_; }
 
     [[ nodiscard ]] std::list<std::function<value_filter_fn>> const& value_filter() const { return value_filter_; };
-    CliElement& value_filter(std::function<value_filter_fn> v) { value_filter_.push_back(v); return *this; };
+    CfgValue& value_filter(std::function<value_filter_fn> v) { value_filter_.push_back(v); return *this; };
 
     [[ nodiscard ]] std::function<suggestion_generator_fn> suggestion_generator() const { return gen_suggestions_; }
-    CliElement& suggestion_generator(std::function<suggestion_generator_fn> v) { gen_suggestions_ = v;  return *this; }
+    CfgValue& suggestion_generator(std::function<suggestion_generator_fn> v) { gen_suggestions_ = v;  return *this; }
     std::vector<std::string> suggestion_generate(std::string const& section, std::string const& variable) { return std::invoke(gen_suggestions_, section, variable); };
 
 
@@ -228,12 +228,12 @@ struct CliElement {
 
 };
 
-struct CliHelp {
+struct CfgValueHelp {
 
-    CliHelp(CliHelp const&) = delete;
-    CliHelp& operator=(CliHelp const&) = delete;
+    CfgValueHelp(CfgValueHelp const&) = delete;
+    CfgValueHelp& operator=(CfgValueHelp const&) = delete;
 
-    using help_db = std::unordered_map<std::string, CliElement>;
+    using help_db = std::unordered_map<std::string, CfgValue>;
 
     help_db element_help_;
 
@@ -245,7 +245,7 @@ struct CliHelp {
     void init_experiment();
     #endif
 
-    std::optional<std::reference_wrapper<CliElement>> find(std::string const& k) {
+    std::optional<std::reference_wrapper<CfgValue>> find(std::string const& k) {
 
         if(element_help_.find(k) != element_help_.end()) {
             return std::ref(element_help_[k]);
@@ -254,14 +254,14 @@ struct CliHelp {
         return std::nullopt;
     }
 
-    CliElement& add(std::string const& k, std::string v ) {
+    CfgValue& add(std::string const& k, std::string v ) {
 
-        element_help_[k] = CliElement(k);
+        element_help_[k] = CfgValue(k);
         element_help_[k].help_ = v;
         return element_help_[k];
     }
 
-    CliElement& help_quick(std::string const& k, std::string v ) {
+    CfgValue& help_quick(std::string const& k, std::string v ) {
         return element_help_[k].help_quick(v);
     }
 
@@ -274,43 +274,18 @@ struct CliHelp {
     std::string help(help_type_t htype, const std::string& section, const std::string& key);
 
 
-    static CliHelp& get() {
-        static CliHelp h;
+    static CfgValueHelp& get() {
+        static CfgValueHelp h;
         return h;
     }
 
 private:
-    CliHelp() {
+    CfgValueHelp() {
         init();
     }
 };
 
-
-struct CliStrings {
-    static std::vector<std::string> const& config_not_applied() {
-
-        static std::vector<std::string> r =
-                {
-                 " ",
-                 "  Something didn't go well: running config NOT changed !!!",
-                 "    Change will be visible in show config, but not written to mapped variables",
-                 "    therefore 'save config' won't write them to file.",
-                 "    ",
-                 "    Consider running 'execute reload'  ... sorry for inconvenience."
-                };
-
-        return r;
-    }
-
-    static void cli_print(cli_def* cli, std::vector<std::string> const& vec) {
-        for( auto const& r: vec) {
-            ::cli_print(cli, r.c_str());
-        }
-    }
-};
-
-
-struct CmdCleaner {
+struct CfgValueCleaner {
 
     struct arg_opts_t {
         bool is_question = false;
@@ -415,4 +390,4 @@ struct CmdCleaner {
 
 };
 
-#endif //SMITHPROXY_CLIHELP_HPP
+#endif //SMITHPROXY_CFGVALUE_HPP

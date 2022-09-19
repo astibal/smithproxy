@@ -46,7 +46,7 @@
 #include <proxy/proxymaker.hpp>
 
 #include <log/logger.hpp>
-#include <cfgapi.hpp>
+#include <service/cfgapi/cfgapi.hpp>
 
 #include <uxcom.hpp>
 #include <staticcontent.hpp>

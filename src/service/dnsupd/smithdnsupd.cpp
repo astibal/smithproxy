@@ -45,7 +45,7 @@
 #include <policy/addrobj.hpp>
 #include <inspect/dns.hpp>
 #include <inspect/dnsinspector.hpp>
-#include <cfgapi.hpp>
+#include <service/cfgapi/cfgapi.hpp>
 
 #include <service/core/smithproxy.hpp>
 

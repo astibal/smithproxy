@@ -46,7 +46,7 @@
 #include <threadedacceptor.hpp>
 #include <threadedreceiver.hpp>
 
-#include <cfgapi.hpp>
+#include <service/cfgapi/cfgapi.hpp>
 
 #include <service/core/service.hpp>
 #include <service/daemon.hpp>

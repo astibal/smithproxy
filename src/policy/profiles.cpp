@@ -1,5 +1,5 @@
 #include <policy/profiles.hpp>
-#include <cfgapi.hpp>
+#include <service/cfgapi/cfgapi.hpp>
 
 #include <proxy/mitmproxy.hpp>
 #include <crc32.hpp>

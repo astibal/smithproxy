@@ -39,13 +39,15 @@
 
 #include <ext/libcli/libcli.h>
 #include <service/cmd/cligen.hpp>
-#include <service/cmd/clihelp.hpp>
-#include <cfgapi.hpp>
+
+#include <service/cfgapi/cfgvalue.hpp>
+#include <service/cfgapi/cfgapi.hpp>
 
 #include <utils/str.hpp>
 
 
 using namespace libconfig;
+using namespace libcli;
 
 CONFIG_MODE_DEF(cli_conf_edit_settings, MODE_EDIT_SETTINGS,"settings")
 CONFIG_MODE_DEF(cli_conf_edit_settings_auth, MODE_EDIT_SETTINGS_AUTH,"auth_portal")
@@ -188,10 +190,10 @@ void cli_generate_set_command_args(struct cli_def *cli, cli_command* parent, std
 
     std::vector<std::string> opts;
 
-    auto cli_e = CliHelp::get().find(section + "." + varname);
+    auto cli_e = CfgValueHelp::get().find(section + "." + varname);
     if(not cli_e) {
         std::string masked = sx::str::cli::mask_all(section + "." + varname);
-        cli_e = CliHelp::get().find(masked);
+        cli_e = CfgValueHelp::get().find(masked);
     }
 
     if(cli_e) {
@@ -252,7 +254,7 @@ void cli_generate_set_commands (struct cli_def *cli, std::string const &section)
 
             // create type information, and (possibly) some help text
 
-            std::string help = CliHelp::get().help(CliHelp::help_type_t::HELP_CONTEXT, section, here_n);
+            std::string help = CfgValueHelp::get().help(CfgValueHelp::help_type_t::HELP_CONTEXT, section, here_n);
             if(help.empty()) {
                 help = string_format("modify '%s'", here_n.c_str());
             }
@@ -283,7 +285,7 @@ void cli_generate_toggle_command_args(struct cli_def *cli, cli_command* parent, 
     }
 
     std::vector<std::string> opts;
-    auto cli_e = CliHelp::get().find(masked + '.' + varname);
+    auto cli_e = CfgValueHelp::get().find(masked + '.' + varname);
     if(cli_e) {
         opts = cli_e->get().suggestion_generate(section, varname);
     }
@@ -315,7 +317,7 @@ void cli_generate_toggle_command_args(struct cli_def *cli, cli_command* parent, 
             _debug(cli, "cli_generate_toggle_commands_args:    config values = %s", v.c_str());
         }
 
-        opts = CmdCleaner::dedup(opts);
+        opts = CfgValueCleaner::dedup(opts);
         for(auto const& o: opts) {
             _debug(cli, "cli_generate_toggle_commands_args:    final opts = %s", o.c_str());
         }
@@ -390,7 +392,7 @@ void cli_generate_toggle_commands (struct cli_def *cli, std::string const &secti
                     _debug(cli, "cli_generate_toggle_commands:    creating parent command node 0x%p", static_cast<void*>(cli_parent_toggle));
                 }
 
-                std::string help = CliHelp::get().help(CliHelp::help_type_t::HELP_CONTEXT, section, here_n);
+                std::string help = CfgValueHelp::get().help(CfgValueHelp::help_type_t::HELP_CONTEXT, section, here_n);
                 if (help.empty()) {
                     help = string_format("toggle '%s'", here_n.c_str());
                 }

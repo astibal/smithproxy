@@ -41,7 +41,7 @@
 #include <proxy/mitmcom.hpp>
 #include <display.hpp>
 #include <log/logger.hpp>
-#include <cfgapi.hpp>
+#include <service/cfgapi/cfgapi.hpp>
 #include <inspect/sigfactory.hpp>
 #include <inspect/sxsignature.hpp>
 #include <inspect/engine/http.hpp>

@@ -41,10 +41,10 @@
 
 #include <ext/libcli/libcli.h>
 
-#include <service/cmd/clihelp.hpp>
+#include <service/cfgapi/cfgvalue.hpp>
+#include <service/cfgapi/cfgapi.hpp>
 #include <service/cmd/cligen.hpp>
 #include <common/log/logan.hpp>
-#include <cfgapi.hpp>
 #include <utils/str.hpp>
 
 
@@ -54,10 +54,9 @@
 // @param v - string to check
 // @note  template lambdas supported since C++20
 
+CfgValue::filter_retval VALUE_UINT_RANGE_GEN(std::function<long long()> callableA, std::function<long long()> callableB, std::string const& v) {
 
-CliElement::filter_retval VALUE_UINT_RANGE_GEN(std::function<long long()> callableA, std::function<long long()> callableB, std::string const& v) {
-
-    auto [ may_val, descr ] = CliElement::VALUE_UINT(v);
+    auto [ may_val, descr ] = CfgValue::VALUE_UINT(v);
 
     long long intA = callableA();
     long long intB = callableB();
@@ -68,18 +67,18 @@ CliElement::filter_retval VALUE_UINT_RANGE_GEN(std::function<long long()> callab
 
     if(may_val.has_value() and port_value >= 0LL) {
         if(port_value < intA or port_value > intB)
-            return CliElement::filter_retval::reject(err);
+            return CfgValue::filter_retval::reject(err);
         else
-            return CliElement::filter_retval::accept(may_val.value());
+            return CfgValue::filter_retval::accept(may_val.value());
     }
     else {
-        return CliElement::filter_retval::reject(err);
+        return CfgValue::filter_retval::reject(err);
     }
 
 }
 
 template <long long A, long long B>
-CliElement::filter_retval VALUE_UINT_RANGE(std::string const& v) {
+CfgValue::filter_retval VALUE_UINT_RANGE(std::string const& v) {
 
     auto a = []() { return A; };
     auto b = []() { return B; };
@@ -98,14 +97,14 @@ public:
     is_in_vector& operator=(is_in_vector const& ref) = default;
 
 
-    CliElement::filter_retval operator()(std::string const& v) {
+    CfgValue::filter_retval operator()(std::string const& v) {
 
         auto what = std::invoke(get_the_container);
 
         if(std::any_of(what.begin(), what.end(), [&v](auto const& k){ return k == v; }))
-            return  CliElement::filter_retval::accept(v);
+            return  CfgValue::filter_retval::accept(v);
 
-        return CliElement::filter_retval::reject(name);
+        return CfgValue::filter_retval::reject(name);
     }
 private:
     std::function<container_fetcher> get_the_container;
@@ -114,7 +113,7 @@ private:
 
 
 
-void CliHelp::init() {
+void CfgValueHelp::init() {
 
     add("default", "")
     .help_quick("enter <value>");
@@ -123,11 +122,11 @@ void CliHelp::init() {
     add("settings.certs_path", "directory for TLS-resigning CA certificate and key")
             .help_quick("<string>: (default: /etc/smithproxy/certs/default)")
             .may_be_empty(false)
-            .value_filter(CliElement::VALUE_DIR);
+            .value_filter(CfgValue::VALUE_DIR);
 
     add("settings.certs_ctlog", "file containing certificate transparency log list")
             .help_quick("<string>: file with certificate transparency keys (default: ct_log_list.cnf)")
-            .value_filter(CliElement::VALUE_FILE);
+            .value_filter(CfgValue::VALUE_FILE);
 
     add("settings.certs_ca_key_password", "TLS-resigning CA private key protection password")
             .help_quick("<string>: enter string value");
@@ -135,7 +134,7 @@ void CliHelp::init() {
     add("settings.ca_bundle_path", "trusted CA store path (to verify server-side connections)")
             .help_quick("<string>: enter valid path")
             .may_be_empty(false)
-            .value_filter(CliElement::VALUE_DIR);
+            .value_filter(CfgValue::VALUE_DIR);
 
     // listening ports
 
@@ -170,17 +169,17 @@ void CliHelp::init() {
     add("settings.accept_tproxy", "whether to accept incoming connections via TPROXY")
             .help_quick("<bool>: set to 'true' to disable tproxy acceptor (default: false)")
             .may_be_empty(false)
-            .value_filter(CliElement::VALUE_BOOL);
+            .value_filter(CfgValue::VALUE_BOOL);
 
     add("settings.accept_redirect", "whether to accept incoming connections via REDIRECT")
             .help_quick("<bool>: set to 'true' to disable redirect acceptor (default: false)")
             .may_be_empty(false)
-            .value_filter(CliElement::VALUE_BOOL);
+            .value_filter(CfgValue::VALUE_BOOL);
 
     add("settings.accept_socks", "whether to accept incoming connections via SOCKS")
             .help_quick("<bool>: set to 'true' to disable socks acceptor (default: false)")
             .may_be_empty(false)
-            .value_filter(CliElement::VALUE_BOOL);
+            .value_filter(CfgValue::VALUE_BOOL);
 
     //
 
@@ -224,22 +223,22 @@ void CliHelp::init() {
     add("settings.ssl_autodetect", "Detect TLS ClientHello on unusual ports")
             .help_quick("<bool> set true to wait a short moment for TLS ClientHello on plaintext ports")
             .may_be_empty(false)
-            .value_filter(CliElement::VALUE_BOOL);
+            .value_filter(CfgValue::VALUE_BOOL);
 
     add("settings.ssl_autodetect_harder", "Detect TSL ClientHello on unusual ports - wait a bit longer")
             .help_quick("<bool> set true to wait a bit longer for TLS ClientHello on plaintext ports")
             .may_be_empty(false)
-            .value_filter(CliElement::VALUE_BOOL);
+            .value_filter(CfgValue::VALUE_BOOL);
 
 
     add("settings.ssl_ocsp_status_ttl", "obsoleted - hardcoded TTL for OCSP response validity")
             .may_be_empty(false)
-            .value_filter(CliElement::VALUE_NONE);
+            .value_filter(CfgValue::VALUE_NONE);
 
 
     add("settings.ssl_crl_status_ttl", "obsoleted - hardcoded TTL for downloaded CRL files")
             .may_be_empty(false)
-            .value_filter(CliElement::VALUE_NONE);
+            .value_filter(CfgValue::VALUE_NONE);
 
 
     add("settings.log_level", "default file logging verbosity level")
@@ -250,8 +249,8 @@ void CliHelp::init() {
     add("settings.log_file", "log file")
             .help_quick("<filename template> file for logging. Must include '^s' for tenant name expansion.")
             .may_be_empty(false)
-            .value_filter(CliElement::VALUE_BASEDIR)
-            .value_filter([](std::string const& v) -> CliElement::filter_retval {
+            .value_filter(CfgValue::VALUE_BASEDIR)
+            .value_filter([](std::string const& v) -> CfgValue::filter_retval {
 
                 std::string orig = v;
                 std::string base = v;
@@ -260,20 +259,20 @@ void CliHelp::init() {
                 auto where = base.find("^s");
                 if(where == v.npos) {
 
-                    return CliElement::filter_retval::reject("filename must contain '^s' for tenant name expansion.");
+                    return CfgValue::filter_retval::reject("filename must contain '^s' for tenant name expansion.");
                 }
 
                 sx::str::string_replace_all(orig, "^s", "%s");
-                return CliElement::filter_retval::accept(orig);
+                return CfgValue::filter_retval::accept(orig);
             });
 
     add("settings.log_console", "toggle logging to standard output")
         .may_be_empty(false)
-        .value_filter(CliElement::VALUE_BOOL);
+        .value_filter(CfgValue::VALUE_BOOL);
 
 
     add("settings.syslog_server", "IP address of syslog server")
-        .value_filter(CliElement::VALUE_IPHOST);
+        .value_filter(CfgValue::VALUE_IPHOST);
 
     add("settings.syslog_port", "syslog server port")
         .value_filter(VALUE_UINT_RANGE<0,65535>);
@@ -293,26 +292,26 @@ void CliHelp::init() {
 
     add("settings.syslog_family", "IPv4 or IPv6?")
         .help_quick("set to 4 or 6 for ip version")
-        .value_filter([](std::string const& v) -> CliElement::filter_retval {
+        .value_filter([](std::string const& v) -> CfgValue::filter_retval {
             if(v == "4" or v == "6") {
-                return CliElement::filter_retval::accept(v);
+                return CfgValue::filter_retval::accept(v);
             }
-            return CliElement::filter_retval::reject("must be empty to set default, 4, or 6.");
+            return CfgValue::filter_retval::reject("must be empty to set default, 4, or 6.");
         });
 
     add("settings.sslkeylog_file", "where to dump TLS keying material")
         .help_quick("file path where to dump tls keys (if set)")
-        .value_filter(CliElement::VALUE_BASEDIR);
+        .value_filter(CfgValue::VALUE_BASEDIR);
 
     add("settings.messages_dir", "replacement text directory")
         .help_quick("directory path to message files")
         .may_be_empty(false)
-        .value_filter(CliElement::VALUE_DIR);
+        .value_filter(CfgValue::VALUE_DIR);
 
     add("settings.write_payload_dir", "root directory for packet dumps")
         .help_quick("directory path for payload dump files")
         .may_be_empty(false)
-        .value_filter(CliElement::VALUE_DIR);
+        .value_filter(CfgValue::VALUE_DIR);
 
     add("settings.write_payload_file_prefix", "packet dumps file context")
         .help_quick("dump filename context");
@@ -337,20 +336,20 @@ void CliHelp::init() {
             .value_filter(VALUE_UINT_RANGE<1024,65535>);
     add("settings.auth_portal.ssl_key", "key for HTTPS authentication certificate")
             .may_be_empty(false)
-            .value_filter(CliElement::VALUE_FILE);
+            .value_filter(CfgValue::VALUE_FILE);
     add("settings.auth_portal.ssl_cert", "HTTPS authentication certificate file")
             .may_be_empty(false)
-            .value_filter(CliElement::VALUE_FILE);
+            .value_filter(CfgValue::VALUE_FILE);
     add("settings.auth_portal.magic_ip", "Rendezvous IP for client traffic")
             .may_be_empty(false)
             .value_filter([](auto const&v){
                 auto ip = CidrAddress(v);
                 if(ip.cidr()) {
                     if(std::string(cidr_numhost(ip.cidr())) == "1") {
-                        return CliElement::filter_retval::accept(v);
+                        return CfgValue::filter_retval::accept(v);
                     }
                 }
-                return CliElement::filter_retval::reject("must me a valid host IP address");
+                return CfgValue::filter_retval::reject("must me a valid host IP address");
             });
 
 
@@ -381,30 +380,30 @@ void CliHelp::init() {
     add("settings.socks", "** configure SOCKS specific settings");
     add("settings.socks.async_dns", "run DNS requests asynchronously")
         .may_be_empty(false)
-        .value_filter(CliElement::VALUE_BOOL);
+        .value_filter(CfgValue::VALUE_BOOL);
 
 
     add("settings.accept_api", "whether to accept HTTP API request")
             .help_quick("<bool>: set to 'true' to disable API server (default: true)")
             .may_be_empty(false)
-            .value_filter(CliElement::VALUE_BOOL);
+            .value_filter(CfgValue::VALUE_BOOL);
 
     add("settings.http_api", "API access options");
     add("settings.http_api.keys", "API access keys to retrieve API access tokens");
     add("settings.http_api.key_timeout", "Expiration timeout for session tokens")
             .help_quick("<positive integer>: ttl in seconds")
             .may_be_empty(false)
-            .value_filter(CliElement::VALUE_UINT_NZ);
+            .value_filter(CfgValue::VALUE_UINT_NZ);
 
     add("settings.http_api.key_extend_on_access", "If set, tokens are refreshed when used")
             .help_quick("<bool>: set true to refresh tokens when used (default: true)")
             .may_be_empty(false)
-            .value_filter(CliElement::VALUE_BOOL);
+            .value_filter(CfgValue::VALUE_BOOL);
 
     add("settings.http_api.loopback_only", "Listen to loopback only (default)")
             .help_quick("<bool>: set true to listen only on loopback address (default: true)")
             .may_be_empty(false)
-            .value_filter(CliElement::VALUE_BOOL);
+            .value_filter(CfgValue::VALUE_BOOL);
 
 
     add("debug.log_data_crc", "calculate received CRC data (helps to identify proxy bugs)");
@@ -531,16 +530,16 @@ void CliHelp::init() {
 
 
     add("detection_profiles.[x].engines_enabled", "enable/disable L7 engines")
-            .help_quick(CliElement::HELP_BOOL)
+            .help_quick(CfgValue::HELP_BOOL)
             .may_be_empty(false)
-            .value_filter(CliElement::VALUE_BOOL)
-            .suggestion_generator(CliElement::SUGGESTION_BOOL);
+            .value_filter(CfgValue::VALUE_BOOL)
+            .suggestion_generator(CfgValue::SUGGESTION_BOOL);
 
     add("detection_profiles.[x].kb_enabled", "enable/disable knowledge base information collection")
-            .help_quick(CliElement::HELP_BOOL)
+            .help_quick(CfgValue::HELP_BOOL)
             .may_be_empty(false)
-            .value_filter(CliElement::VALUE_BOOL)
-            .suggestion_generator(CliElement::SUGGESTION_BOOL);
+            .value_filter(CfgValue::VALUE_BOOL)
+            .suggestion_generator(CfgValue::SUGGESTION_BOOL);
 
 
     init_routing();
@@ -552,7 +551,7 @@ void CliHelp::init() {
 }
 
 
-void CliHelp::init_routing() {
+void CfgValueHelp::init_routing() {
     add("routing.[x].dnat_address", "change destination address")
             .may_be_empty(true)
             .value_filter(is_in_vector([]() { return CfgFactory::get()->keys_of_db_address(); },"must be in address_objects"))
@@ -574,19 +573,19 @@ void CliHelp::init_routing() {
             });
 }
 
-void CliHelp::init_captures () {
+void CfgValueHelp::init_captures () {
     add("captures.local.enabled", "globally enable/disable file captures")
             .may_be_empty(false)
-            .value_filter(CliElement::VALUE_BOOL)
-            .suggestion_generator(CliElement::SUGGESTION_BOOL);
+            .value_filter(CfgValue::VALUE_BOOL)
+            .suggestion_generator(CfgValue::SUGGESTION_BOOL);
 
     add("captures.local.pcap_quota", "Max size of pcap_single file (in MB). Zero means no limits.")
             .may_be_empty(false)
-            .value_filter(CliElement::VALUE_UINT);
+            .value_filter(CfgValue::VALUE_UINT);
 
     add("captures.local.dir", "directory where to write capture files")
             .may_be_empty(false)
-            .value_filter(CliElement::VALUE_DIR);
+            .value_filter(CfgValue::VALUE_DIR);
 
     add("captures.local.format", "capture file format")
             .may_be_empty(false)
@@ -598,7 +597,7 @@ void CliHelp::init_captures () {
 
     add("captures.remote.enabled", "globally enable/disable tunnelled capture emission")
             .may_be_empty(false)
-            .value_filter(CliElement::VALUE_BOOL);
+            .value_filter(CfgValue::VALUE_BOOL);
 
     add("captures.remote.tun_type", "select tunnelling protocol")
             .may_be_empty(false)
@@ -611,7 +610,7 @@ void CliHelp::init_captures () {
 
     add("captures.remote.tun_dst", "set tunnel destination IP address")
             .may_be_empty(false)
-            .value_filter(CliElement::VALUE_IPHOST);
+            .value_filter(CfgValue::VALUE_IPHOST);
     add("captures.remote.tun_ttl", "set tunnel TTL (ie. to not accidentally leave your premises)")
             .may_be_empty(false)
             .value_filter(VALUE_UINT_RANGE<0,255>);
@@ -621,19 +620,19 @@ void CliHelp::init_captures () {
 }
 
 #ifdef USE_EXPERIMENT
-void CliHelp::init_experiment() {
+void CfgValueHelp::init_experiment() {
     add("experiment.enabled_1", "enable/disable experiment #1")
             .may_be_empty(false)
-            .value_filter(CliElement::VALUE_BOOL)
-            .suggestion_generator(CliElement::SUGGESTION_BOOL);
+            .value_filter(CfgValue::VALUE_BOOL)
+            .suggestion_generator(CfgValue::SUGGESTION_BOOL);
 
     add("experiment.param_1", "set parameter for experiment #1")
             .may_be_empty(true)
-            .value_filter(CliElement::VALUE_ANY);
+            .value_filter(CfgValue::VALUE_ANY);
 }
 #endif
 
-std::optional<std::string> CliHelp::value_check(std::string const& varname, std::string const& value_argument, cli_def* cli) {
+std::optional<std::string> CfgValueHelp::value_check(std::string const& varname, std::string const& value_argument, cli_def* cli) {
 
     auto masked_varname = sx::str::cli::mask_array_index(varname);
 
@@ -668,7 +667,7 @@ std::optional<std::string> CliHelp::value_check(std::string const& varname, std:
             for(auto this_filter: cli_e->get().value_filter()) {
                 auto retval = std::invoke(this_filter, value_modified);
 
-                _debug(cli, " CliElement value filter check[%u] : %d : '%s'", i, retval.accepted(),
+                _debug(cli, " CfgValue value filter check[%u] : %d : '%s'", i, retval.accepted(),
                        retval.comment.c_str());
 
                 // value is not applicable according to this filter
@@ -743,7 +742,7 @@ std::optional<std::string> CliHelp::value_check(std::string const& varname, std:
 }
 
 
-std::string CliHelp::help(help_type_t htype, const std::string& section, const std::string& key) {
+std::string CfgValueHelp::help(help_type_t htype, const std::string& section, const std::string& key) {
 
     std::regex match ("\\[[0-9]+\\]");
     std::string masked_section  = std::regex_replace (section, match, "[x]");
@@ -759,7 +758,7 @@ std::string CliHelp::help(help_type_t htype, const std::string& section, const s
 
 
     if(cli_e.has_value()) {
-        if (htype == CliHelp::help_type_t::HELP_QMARK) {
+        if (htype == CfgValueHelp::help_type_t::HELP_QMARK) {
             return cli_e->get().help_quick();
         } else {
             return cli_e->get().help();
