@@ -8,6 +8,7 @@
 #include <service/httpd/diag/daig_proxy.hpp>
 
 #include <service/httpd/cfg/add.hpp>
+#include <service/httpd/cfg/set.hpp>
 
 namespace sx::webserver {
     using json = nlohmann::json;
@@ -187,6 +188,13 @@ std::thread* create_httpd_thread(unsigned short port) {
                 authorized::token_protected(&json_add_section_entry)
                 );
         server.addController(&cfg_uni_add);
+
+        Http_JsonResponder cfg_uni_set(
+                "POST",
+                "/api/config/uni/set",
+                authorized::token_protected(&json_set_section_entry)
+        );
+        server.addController(&cfg_uni_set);
 
 
         server.options().handler_should_terminate = []() -> bool {
