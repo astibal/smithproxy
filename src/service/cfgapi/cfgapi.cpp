@@ -3597,12 +3597,7 @@ bool CfgFactory::_apply_new_entry(std::string const& section, std::string const&
         }
     }
 
-    if(added) {
-        board()->upgrade();
-        return true;
-    } else {
-        return false;
-    }
+    return added;
 }
 
 std::pair<bool, std::string> CfgFactory::cfg_add_prepare_params(std::string const& section, std::vector<std::string>& args) {
@@ -3650,8 +3645,6 @@ std::pair<bool, std::string> CfgFactory::cfg_add_entry(std::string const& sectio
     if (CfgFactory::cfg_root().exists(section_name.c_str())) {
 
         if (CfgFactory::_apply_new_entry(section_name, entry_name)) {
-
-            board()->upgrade();
 
             return { true, string_format("Note: %s.%s has been created.", section_name.c_str(), entry_name.c_str()) };
         }

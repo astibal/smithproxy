@@ -73,7 +73,11 @@ namespace sx::webserver {
             else {
                 // parameters satisfy requirements
                 auto lc_ = std::scoped_lock(CfgFactory::lock());
-                return jsonize::cfg_status_response(CfgFactory::get()->cfg_add_entry(section_name, args[0]));
+                auto add_status = CfgFactory::get()->cfg_add_entry(section_name, args[0]);
+                if(add_status.first) {
+                    CfgFactory::board()->upgrade("API");
+                }
+                return jsonize::cfg_status_response(add_status);
             }
 
         } else {

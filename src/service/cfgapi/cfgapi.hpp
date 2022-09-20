@@ -145,16 +145,18 @@ struct UpdateBoard {
     }
 
 
-    uint64_t upgrade() { return ++current_version_; }
-    uint64_t rollback() { return current_version_ = saved_version_; }
-    uint64_t save() { saved_version_ = current_version_; return saved_version_; }
+    uint64_t upgrade(std::string const& sid) { updater_ = sid; return ++current_version_; }
+    uint64_t rollback(std::string const& sid) { updater_ = sid; return current_version_ = saved_version_; }
+    uint64_t save(std::string const& sid) { updater_ = sid; saved_version_ = current_version_; return saved_version_; }
 
+    std::string const& updater() const {return updater_; }
     uint64_t version_current() const noexcept { return current_version_; }
     uint64_t version_saved() const noexcept { return saved_version_; }
 
     uint64_t current_version_ = starting_num;
     uint64_t saved_version_ = starting_num;
     subscriber_map_t board_;
+    std::string updater_;
 };
 
 

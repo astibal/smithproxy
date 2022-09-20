@@ -1107,7 +1107,7 @@ int cli_save_config(struct cli_def *cli, const char *command, char *argv[], int 
     else {
         cli_print(cli, "config saved successfully.");
 
-        CfgFactory::board()->save();
+        CfgFactory::board()->save(cli_id());
         CfgFactory::board()->ack_saved(cli_id());
 
         apply_hostname(cli);
@@ -1120,7 +1120,7 @@ int cli_exec_reload(struct cli_def *cli, const char *command, char *argv[], int 
     debug_cli_params(cli, command, argv, argc);
 
     bool CONFIG_LOADED = SmithProxy::instance().load_config(CfgFactory::get()->config_file, true);
-    CfgFactory::board()->rollback();
+    CfgFactory::board()->rollback(cli_id());
 
     if(CONFIG_LOADED) {
         cli_print(cli, "Configuration file reloaded successfully");
@@ -1630,7 +1630,7 @@ bool apply_setting(std::string const& section, std::string const& varname, struc
     } else {
 
 
-        CfgFactory::board()->upgrade();
+        CfgFactory::board()->upgrade(cli_id());
 
         apply_hostname(cli);
         cli_print(cli, " ");
@@ -1669,7 +1669,7 @@ int cli_uni_set_cb(std::string const& confpath, struct cli_def *cli, const char 
                 }
 
                 // write on board there is a new configuration
-                CfgFactory::board()->upgrade();
+                CfgFactory::board()->upgrade(cli_id());
             } else {
 
                 //  display error only if arguments were present
@@ -2039,7 +2039,7 @@ int cli_generic_remove_cb(struct cli_def *cli, const char *command, char *argv[]
 
         if(removed_internal) {
 
-            CfgFactory::board()->upgrade();
+            CfgFactory::board()->upgrade(cli_id());
 
             reconstruct_cli();
 
@@ -2267,6 +2267,9 @@ int cli_generic_add_cb(struct cli_def *cli, const char *command, char *argv[], i
     }
 
     auto [ status, msg ]  = CfgFactory::get()->cfg_add_entry(section, args[0]);
+    if(status) {
+        CfgFactory::board()->upgrade(cli_id());
+    }
 
     cli_print(cli, "  ");
     cli_print(cli, " %s", msg.c_str());
@@ -2805,9 +2808,11 @@ void register_regular_callback(cli_def* cli) {
             generate_callbacks();
             register_edit_command(cli);
 
-            cli_set_configmode(cli, MODE_EXEC, nullptr);
-
-            cli_reprompt(cli);
+            // exit only if config was updated by different update subscriber
+            if(CfgFactory::board()->updater() != cli_id()) {
+                cli_set_configmode(cli, MODE_EXEC, nullptr);
+                cli_reprompt(cli);
+            }
         }
 
         if(SmithProxy::instance().terminate_flag) {
