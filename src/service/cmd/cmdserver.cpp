@@ -2805,11 +2805,11 @@ void register_regular_callback(cli_def* cli) {
         if(CfgFactory::board()->differs(cli_id())) {
             apply_hostname(cli);
 
-            generate_callbacks();
-            register_edit_command(cli);
-
             // exit only if config was updated by different update subscriber
             if(CfgFactory::board()->updater() != cli_id()) {
+                generate_callbacks();
+                register_edit_command(cli);
+
                 cli_set_configmode(cli, MODE_EXEC, nullptr);
                 cli_reprompt(cli);
             }
