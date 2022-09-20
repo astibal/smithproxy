@@ -2484,6 +2484,226 @@ void CfgFactory::gre_export_apply(traflog::PcapLog* pcaplog) {
     }
 };
 
+/// @brief loads signature definitions from config object and places then into a signature tree
+/// @param cfg 'cfg' Config object
+/// @param name 'name' config element name (full path)
+/// @param signature_tree 'signature_tree' where to place created signature
+/// @param if non-negative, overrides signature group index, otherwise gets group name via group index lookup
+int CfgFactory::load_signatures(libconfig::Config &cfg, const char *name, SignatureTree &signature_tree,
+                                 int preferred_index) {
+
+    using namespace libconfig;
+
+    const Setting& root = cfg.getRoot();
+    const Setting& cfg_signatures = root[name];
+    int sigs_len = cfg_signatures.getLength();
+
+    _dia("Loading %s: %d", name, sigs_len);
+    for ( int i = 0 ; i < sigs_len; i++) {
+        auto newsig = std::make_shared<MyDuplexFlowMatch>();
+
+
+        const Setting& signature = cfg_signatures[i];
+        load_if_exists(signature, "name", newsig->name());
+        load_if_exists(signature, "side", newsig->sig_side);
+        load_if_exists(signature, "cat", newsig->sig_category);
+        load_if_exists(signature, "severity", newsig->sig_severity);
+        load_if_exists(signature, "group", newsig->sig_group);
+        load_if_exists(signature, "enables", newsig->sig_enables);
+        load_if_exists(signature, "engine", newsig->sig_engine);
+
+        const Setting& signature_flow = cfg_signatures[i]["flow"];
+        int flow_count = signature_flow.getLength();
+
+        _dia("Loading signature '%s' with %d flow matches",newsig->name().c_str(),flow_count);
+
+
+        for ( int j = 0; j < flow_count; j++ ) {
+
+            std::string side;
+            std::string type;
+            std::string sigtext;
+            int bytes_start;
+            int bytes_max;
+
+            if(!( load_if_exists(signature_flow[j], "side", side)
+                  && load_if_exists(signature_flow[j], "type", type)
+                  && load_if_exists(signature_flow[j], "signature", sigtext)
+                  && load_if_exists(signature_flow[j], "bytes_start", bytes_start)
+                  && load_if_exists(signature_flow[j], "bytes_max", bytes_max))) {
+
+                _war("Starttls signature %s properties failed to load: index %d",newsig->name().c_str(), i);
+                continue;
+            }
+
+            if( type == "regex") {
+                _deb(" [%d]: new regex flow match",j);
+                try {
+                    newsig->add(side[0], new regexMatch(sigtext, bytes_start, bytes_max));
+                } catch(std::regex_error const& e) {
+
+                    _err("Starttls signature %s regex failed to load: index %d, load aborted", newsig->name().c_str() , i);
+
+                    newsig = nullptr;
+                    break;
+                }
+            } else
+            if ( type == "simple") {
+                _deb(" [%d]: new simple flow match", j);
+                newsig->add(side[0],new simpleMatch(sigtext,bytes_start,bytes_max));
+            }
+        }
+
+        // load if not set to null due to loading error
+        if(newsig) {
+            // emplace also dummy flowMatchState which won't be used. Little overhead for good abstraction.
+            if(preferred_index >= 0) {
+                // starttls signatures
+                signature_tree.sensors_[preferred_index]->emplace_back(flowMatchState(), newsig);
+            }
+            else {
+                if(newsig->sig_group.empty() or newsig->sig_group == "base") {
+                    // element 1 is base signatures
+                    signature_tree.sensors_[1]->emplace_back(flowMatchState(), newsig);
+                }
+                else {
+                    signature_tree.signature_add(newsig, newsig->sig_group.c_str(), false);
+                }
+            }
+        }
+    }
+
+    return sigs_len;
+}
+
+
+
+bool CfgFactory::apply_config_change(std::string_view section) {
+    bool ret = false;
+
+    if( 0 == section.find("settings") ) {
+        ret = CfgFactory::get()->load_settings();
+    } else
+    if( 0 == section.find("captures") ) {
+        ret = CfgFactory::get()->load_captures();
+    } else
+#ifdef USE_EXPERIMENT
+        if( 0 == section.find("experiment") ) {
+        ret = CfgFactory::get()->load_experiment();
+    } else
+#endif
+    if( 0 == section.find("debug") ) {
+        ret = CfgFactory::get()->load_debug();
+    } else
+    if( 0 == section.find("policy") ) {
+
+        CfgFactory::get()->cleanup_db_policy();
+        ret = CfgFactory::get()->load_db_policy();
+    } else
+    if( 0 == section.find("port_objects") ) {
+
+        CfgFactory::get()->cleanup_db_port();
+        ret = CfgFactory::get()->load_db_port();
+
+        if(ret) {
+            CfgFactory::get()->cleanup_db_policy();
+            ret = CfgFactory::get()->load_db_policy();
+        }
+    } else
+    if( 0 == section.find("proto_objects") ) {
+
+        CfgFactory::get()->cleanup_db_proto();
+        ret = CfgFactory::get()->load_db_proto();
+
+        if(ret) {
+            CfgFactory::get()->cleanup_db_policy();
+            ret = CfgFactory::get()->load_db_policy();
+        }
+    } else
+    if( 0 == section.find("address_objects") ) {
+
+        CfgFactory::get()->cleanup_db_address();
+        ret = CfgFactory::get()->load_db_address();
+
+        if(ret) {
+            CfgFactory::get()->cleanup_db_policy();
+            ret = CfgFactory::get()->load_db_policy();
+        }
+    } else
+    if( 0 == section.find("detection_profiles") ) {
+
+        CfgFactory::get()->cleanup_db_prof_detection();
+        ret = CfgFactory::get()->load_db_prof_detection();
+
+        if(ret) {
+            CfgFactory::get()->cleanup_db_policy();
+            ret = CfgFactory::get()->load_db_policy();
+        }
+    } else
+    if( 0 == section.find("content_profiles") ) {
+
+        CfgFactory::get()->cleanup_db_prof_content();
+        ret = CfgFactory::get()->load_db_prof_content();
+
+        if(ret) {
+            CfgFactory::get()->cleanup_db_policy();
+            ret = CfgFactory::get()->load_db_policy();
+        }
+    } else
+    if( 0 == section.find("tls_profiles") ) {
+
+        CfgFactory::get()->cleanup_db_prof_tls();
+        ret = CfgFactory::get()->load_db_prof_tls();
+
+        if(ret) {
+            CfgFactory::get()->cleanup_db_policy();
+            ret = CfgFactory::get()->load_db_policy();
+        }
+    } else
+    if( 0 == section.find("alg_dns_profiles") ) {
+
+        CfgFactory::get()->cleanup_db_prof_alg_dns();
+        ret = CfgFactory::get()->load_db_prof_alg_dns();
+
+        if(ret) {
+            CfgFactory::get()->cleanup_db_policy();
+            ret = CfgFactory::get()->load_db_policy();
+        }
+    } else
+    if( 0 == section.find("auth_profiles") ) {
+
+        CfgFactory::get()->cleanup_db_prof_auth();
+        ret = CfgFactory::get()->load_db_prof_auth();
+
+        if(ret) {
+            CfgFactory::get()->cleanup_db_policy();
+            ret = CfgFactory::get()->load_db_policy();
+        }
+    }
+    else
+    if( 0 == section.find("routing") ) {
+
+        CfgFactory::get()->cleanup_db_routing();
+        ret = CfgFactory::get()->load_db_routing();
+
+        if(ret) {
+            CfgFactory::get()->cleanup_db_policy();
+            ret = CfgFactory::get()->load_db_policy();
+        }
+    }
+    else
+    if( 0 == section.find("starttls_signatures") or
+        0 == section.find("detection_signatures") ) {
+
+        CfgFactory::get()->load_signatures(CfgFactory::cfg_obj(), "starttls_signatures", SigFactory::get().signature_tree(),0);
+        CfgFactory::get()->load_signatures(CfgFactory::cfg_obj(), "detection_signatures", SigFactory::get().signature_tree());
+
+        CfgFactory::get()->cleanup_db_policy();
+        ret = CfgFactory::get()->load_db_policy();
+    }
+
+    return ret;
+}
 
 bool CfgFactory::policy_apply_tls (int policy_num, baseCom *xcom) {
     auto pt = policy_prof_tls(policy_num);
@@ -3655,7 +3875,305 @@ std::pair<bool, std::string> CfgFactory::cfg_add_entry(std::string const& sectio
     else {
         return { false, "Error: section does not exist" };
     }
-};
+}
+
+std::optional<int> make_int(std::string const& v)  {
+    if(v.empty())
+        return 0;
+
+    return std::stoi(v);
+}
+
+std::optional<long long int> make_lli(std::string const& v) {
+
+    if(v.empty())
+        return 0L;
+
+    return std::stoll(v);
+}
+
+
+std::optional<bool> make_bool(std::string const& v) {
+
+    if(v.empty())
+        return true;
+
+    auto uv = string_tolower(v);
+    if (uv == "true" or uv == "1" or uv == "yes" or uv == "y" or uv == "t") {
+        return true;
+    } else if (uv == "false" or uv == "0" or uv == "no" or uv == "n" or uv == "f") {
+        return false;
+    } else {
+        return std::nullopt;
+    }
+}
+
+std::optional<float> make_float(std::string const& v) {
+
+    if(v.empty())
+        return 0.0f;
+
+    return std::stof(v);
+}
+
+bool CfgFactory::write_value(Setting& setting, std::optional<std::string> string_value, Setting::Type add_as_type) {
+
+    bool ret_verdict = false;
+    std::string original_value;
+
+    if(string_value.has_value()) {
+        original_value = string_value.value();
+    }
+
+    auto [ verdict, msg ] = CfgValueHelp::get().value_check(setting.getPath(), original_value);
+    if(verdict.has_value()) {
+        original_value = verdict.value();
+    } else {
+        return false;
+    }
+
+
+    auto setting_type = setting.getType();
+    if(add_as_type != Setting::TypeNone)
+        setting_type = add_as_type;
+
+    std::any converted_value;
+    switch(setting_type) {
+        case Setting::TypeInt: {
+            auto a = make_int(original_value);
+            if (a.has_value()) converted_value = a.value();
+        }
+            break;
+
+        case Setting::TypeInt64: {
+            auto a = make_lli(original_value);
+            if(a.has_value()) converted_value = a.value();
+        }
+            break;
+
+        case Setting::TypeBoolean: {
+            auto a = make_bool(original_value);
+            if (a.has_value()) converted_value = a.value();
+        }
+            break;
+
+        case Setting::TypeFloat: {
+            auto a = make_float(original_value);
+            if(a.has_value()) converted_value = a.value();
+        }
+            break;
+        case Setting::TypeString:
+            converted_value = original_value;
+            break;
+
+        case Setting::TypeNone:
+            throw std::logic_error("write value cannot be used for TypeNone");
+            break;
+        case Setting::TypeGroup:
+            throw std::logic_error("write value cannot be used for TypeGroup");
+            break;
+        case Setting::TypeArray:
+            throw std::logic_error("write value cannot be used for TypeArray");
+            break;
+        case Setting::TypeList:
+            throw std::logic_error("write value cannot be used for TypeList");
+            break;
+    }
+
+    if (converted_value.has_value()) {
+
+        switch(setting_type) {
+            case Setting::TypeInt: {
+                auto value = std::any_cast<int>(converted_value);
+                if(add_as_type != Setting::TypeNone) {
+                    setting.add(Setting::TypeInt) = value;
+                } else {
+                    setting = value;
+                }
+
+                ret_verdict = true;
+            }
+                break;
+
+            case Setting::TypeInt64: {
+                auto value = std::any_cast<long long int>(converted_value);
+                if(add_as_type != Setting::TypeNone) {
+                    setting.add(Setting::TypeInt64) = value;
+                } else {
+                    setting = value;
+                }
+
+                ret_verdict = true;
+            }
+                break;
+
+            case Setting::TypeBoolean: {
+                auto value = std::any_cast<bool>(converted_value);
+                if(add_as_type != Setting::TypeNone) {
+                    setting.add(Setting::TypeBoolean) = value;
+                } else {
+                    setting = value;
+                }
+
+                ret_verdict = true;
+            }
+                break;
+
+            case Setting::TypeFloat: {
+                auto value = std::any_cast<float>(converted_value);
+                if(add_as_type != Setting::TypeNone) {
+                    setting.add(Setting::TypeFloat) = value;
+                } else {
+                    setting = value;
+                }
+
+                ret_verdict = true;
+            }
+                break;
+
+            case Setting::TypeString: {
+                auto value = std::any_cast<std::string>(converted_value);
+                if(add_as_type != Setting::TypeNone) {
+                    setting.add(Setting::TypeString) = value;
+                } else {
+                    setting = value;
+                }
+
+                ret_verdict = true;
+            }
+                break;
+
+            case Setting::TypeNone:
+                throw std::logic_error("write value cannot be used for TypeNone");
+                break;
+            case Setting::TypeGroup:
+                throw std::logic_error("write value cannot be used for TypeGroup");
+                break;
+            case Setting::TypeArray:
+                throw std::logic_error("write value cannot be used for TypeArray");
+                break;
+            case Setting::TypeList:
+                throw std::logic_error("write value cannot be used for TypeList");
+                break;
+        }
+
+    }
+
+    return ret_verdict;
+}
+
+
+std::pair<bool, std::string> CfgFactory::cfg_write_value(Setting& parent, bool create, std::string& varname, const std::vector<std::string> &values) {
+
+    bool ret_verdict = true;
+    std::string ret_msg;
+
+    bool no_args_erases_array = true;
+
+
+    if( parent.exists(varname.c_str()) ) {
+
+        _not("config item exists %s", varname.c_str());
+
+        Setting& setting = parent[varname.c_str()];
+        auto setting_type = setting.getType();
+
+        std::string lvalue;
+
+        try {
+            switch (setting_type) {
+                case Setting::TypeInt:
+                case Setting::TypeInt64:
+                case Setting::TypeBoolean:
+                case Setting::TypeFloat:
+                case Setting::TypeString:
+
+                    if(not values.empty()) {
+
+                        // write only first value into scalar
+                        ret_verdict = write_value(setting, values[0]);
+                    }
+                    else {
+                        ret_verdict = write_value(setting, std::nullopt);
+                    }
+                    break;
+
+
+                case Setting::TypeArray:
+                {
+                    auto first_elem_type = Setting::TypeString;
+                    if ( setting.getLength() > 0 ) {
+                        first_elem_type = setting[0].getType();
+                    }
+
+                    std::vector<std::string> consolidated_values;
+                    for(auto const &v: values) {
+                        auto arg_values = string_split(v, ',');
+
+                        for (auto const &av: arg_values)
+                            consolidated_values.push_back(av);
+                    }
+
+                    // check values
+                    for(auto const& i: consolidated_values) {
+
+                        auto [ verdict, msg ]  = CfgValueHelp::get().value_check(setting.getPath(), i);
+
+                        if(not verdict) {
+                            ret_verdict = false;
+                            ret_msg = msg;
+                            break;
+                        }
+                    }
+
+                    if(ret_verdict) {
+                        if (not consolidated_values.empty() or no_args_erases_array) {
+
+                            // ugly (but only) way to remove
+                            for (int x = setting.getLength() - 1; x >= 0; x--) {
+                                setting.remove(x);
+                            }
+
+                            for(auto const& cons_val: consolidated_values) {
+                                ret_verdict = write_value(setting, cons_val, first_elem_type);
+                            }
+
+                        } else {
+                            throw (std::invalid_argument("no valid arguments"));
+                        }
+                    }
+                }
+
+                    break;
+
+                default:
+                    ;
+            }
+        }
+        catch(std::bad_any_cast const& e) {
+            ret_msg = "invalid value conversion";
+            ret_verdict = false;
+        }
+        catch(std::invalid_argument const& e) {
+            ret_msg ="invalid argument!";
+            ret_verdict = false;
+        }
+        catch(std::exception const& e) {
+            ret_msg = string_format( "error writing config variable: %s", e.what());
+            ret_verdict = false;
+        }
+    }
+    else if(create) {
+        _err("nyi: error writing creating a new config variable: %s", varname.c_str());
+        ret_verdict = false;
+    } else {
+        _err("cli error: no such attribute name: %s", varname.c_str());
+        ret_verdict = false;
+    }
+
+    return { ret_verdict, ret_msg };
+}
+
 
 bool CfgFactory::move_policy (int what, int where, op_move op) {
 

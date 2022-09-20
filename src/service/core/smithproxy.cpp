@@ -526,99 +526,6 @@ void SmithProxy::stop() {
     kill_proxies(redir_udp_proxies);
 }
 
-/// @brief loads signature definitions from config object and places then into a signature tree
-/// @param cfg 'cfg' Config object
-/// @param name 'name' config element name (full path)
-/// @param signature_tree 'signature_tree' where to place created signature
-/// @param if non-negative, overrides signature group index, otherwise gets group name via group index lookup
-int SmithProxy::load_signatures (libconfig::Config &cfg, const char *name, SignatureTree &signature_tree,
-                                 int preferred_index) {
-
-    auto const& log = instance().log;
-
-    using namespace libconfig;
-
-    const Setting& root = cfg.getRoot();
-    const Setting& cfg_signatures = root[name];
-    int sigs_len = cfg_signatures.getLength();
-
-    _dia("Loading %s: %d", name, sigs_len);
-    for ( int i = 0 ; i < sigs_len; i++) {
-        auto newsig = std::make_shared<MyDuplexFlowMatch>();
-
-
-        const Setting& signature = cfg_signatures[i];
-        load_if_exists(signature, "name", newsig->name());
-        load_if_exists(signature, "side", newsig->sig_side);
-        load_if_exists(signature, "cat", newsig->sig_category);
-        load_if_exists(signature, "severity", newsig->sig_severity);
-        load_if_exists(signature, "group", newsig->sig_group);
-        load_if_exists(signature, "enables", newsig->sig_enables);
-        load_if_exists(signature, "engine", newsig->sig_engine);
-
-        const Setting& signature_flow = cfg_signatures[i]["flow"];
-        int flow_count = signature_flow.getLength();
-
-        _dia("Loading signature '%s' with %d flow matches",newsig->name().c_str(),flow_count);
-
-
-        for ( int j = 0; j < flow_count; j++ ) {
-
-            std::string side;
-            std::string type;
-            std::string sigtext;
-            int bytes_start;
-            int bytes_max;
-
-            if(!( load_if_exists(signature_flow[j], "side", side)
-                 && load_if_exists(signature_flow[j], "type", type)
-                 && load_if_exists(signature_flow[j], "signature", sigtext)
-                 && load_if_exists(signature_flow[j], "bytes_start", bytes_start)
-                 && load_if_exists(signature_flow[j], "bytes_max", bytes_max))) {
-
-                _war("Starttls signature %s properties failed to load: index %d",newsig->name().c_str(), i);
-                continue;
-            }
-
-            if( type == "regex") {
-                _deb(" [%d]: new regex flow match",j);
-                try {
-                    newsig->add(side[0], new regexMatch(sigtext, bytes_start, bytes_max));
-                } catch(std::regex_error const& e) {
-
-                    _err("Starttls signature %s regex failed to load: index %d, load aborted", newsig->name().c_str() , i);
-
-                    newsig = nullptr;
-                    break;
-                }
-            } else
-            if ( type == "simple") {
-                _deb(" [%d]: new simple flow match", j);
-                newsig->add(side[0],new simpleMatch(sigtext,bytes_start,bytes_max));
-            }
-        }
-
-        // load if not set to null due to loading error
-        if(newsig) {
-            // emplace also dummy flowMatchState which won't be used. Little overhead for good abstraction.
-            if(preferred_index >= 0) {
-                // starttls signatures
-                signature_tree.sensors_[preferred_index]->emplace_back(flowMatchState(), newsig);
-            }
-            else {
-                if(newsig->sig_group.empty() or newsig->sig_group == "base") {
-                    // element 1 is base signatures
-                    signature_tree.sensors_[1]->emplace_back(flowMatchState(), newsig);
-                }
-                else {
-                    signature_tree.signature_add(newsig, newsig->sig_group.c_str(), false);
-                }
-            }
-        }
-    }
-
-    return sigs_len;
-}
 
 bool SmithProxy::init_syslog() {
 
@@ -728,10 +635,10 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
         SigFactory::get().signature_tree().group_add(true);
 
         // load starttls signatures into 0 sensor (group)
-        load_signatures(CfgFactory::cfg_obj(), "starttls_signatures", SigFactory::get().signature_tree(), 0);
+        CfgFactory::get()->load_signatures(CfgFactory::cfg_obj(), "starttls_signatures", SigFactory::get().signature_tree(), 0);
 
         // load detection signatures into sensor (group) specified by signature. If none specified, it will be placed into 1 (base group)
-        load_signatures(CfgFactory::cfg_obj(), "detection_signatures", SigFactory::get().signature_tree());
+        CfgFactory::get()->load_signatures(CfgFactory::cfg_obj(), "detection_signatures", SigFactory::get().signature_tree());
 
         CfgFactory::get()->load_settings();
         CfgFactory::get()->load_captures();

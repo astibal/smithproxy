@@ -125,8 +125,6 @@ public:
 
     void join_all();
 
-    static int load_signatures (libconfig::Config &cfg, const char *name, SignatureTree &signature_tree,
-                                int preferred_index=-1);
     static bool init_syslog();
     bool load_config(std::string& config_f, bool reload = false);
 };

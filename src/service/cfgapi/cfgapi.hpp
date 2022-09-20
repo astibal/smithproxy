@@ -178,6 +178,9 @@ struct UpdateBoardSubscriber {
     std::weak_ptr<UpdateBoard> board_;
 };
 
+
+struct SignatureTree;
+
 class CfgFactory : public CfgFactoryBase {
 
     libconfig::Config cfgapi;
@@ -335,6 +338,8 @@ public:
     std::pair<bool, std::string> cfg_add_entry(std::string const& section_name, std::string const& entry_name);
     static bool _apply_new_entry(std::string const& section, std::string const& entry_name);
 
+    bool write_value(libconfig::Setting& setting, std::optional<std::string> string_value, libconfig::Setting::Type add_as_type = libconfig::Setting::TypeNone);
+    std::pair<bool, std::string> cfg_write_value(libconfig::Setting& parent, bool create, std::string& varname, const std::vector<std::string> &values);
 
     //sections containing unnamed lists (ie. traffic policy)
     static inline std::set<std::string, std::less<>> section_lists = { "policy", };
@@ -383,6 +388,7 @@ public:
     int  load_db_prof_auth ();
     int  load_db_prof_alg_dns ();
     int  load_db_routing ();
+    int load_signatures(libconfig::Config &cfg, const char *name, SignatureTree &signature_tree, int preferred_index=-1);
 
     [[maybe_unused]]
     int  load_db_prof_script ();
@@ -456,6 +462,9 @@ public:
     int policy_match (baseProxy *proxy);
     int policy_match (std::vector<baseHostCX *> &left, std::vector<baseHostCX *> &right);
     int policy_action (int index);
+
+
+    bool apply_config_change(std::string_view section);
     int policy_apply (baseHostCX *originator, baseProxy *proxy, int matched_policy=-1);
     std::shared_ptr<PolicyRule> lookup_policy(std::size_t i) { if(i < db_policy_list.size()) return db_policy_list.at(i); else return nullptr; }
 

@@ -265,7 +265,7 @@ struct CfgValueHelp {
         return element_help_[k].help_quick(v);
     }
 
-    std::optional<std::string> value_check(std::string const& varname, std::string const& value_argument, cli_def* cli);
+    std::pair<std::optional<std::string>,std::string> value_check(std::string const& varname, std::string const& value_argument);
 
 
     enum class help_type_t { HELP_CONTEXT=0, HELP_QMARK };

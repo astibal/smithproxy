@@ -632,12 +632,9 @@ void CfgValueHelp::init_experiment() {
 }
 #endif
 
-std::optional<std::string> CfgValueHelp::value_check(std::string const& varname, std::string const& value_argument, cli_def* cli) {
+std::pair<std::optional<std::string>, std::string> CfgValueHelp::value_check(std::string const& varname, std::string const& value_argument) {
 
     auto masked_varname = sx::str::cli::mask_array_index(varname);
-
-    _debug(cli, "value_check: varname = %s, value = %s", varname.c_str(), value_argument.c_str());
-    _debug(cli, "value_check:  masked = %s, value = %s", masked_varname.c_str(), value_argument.c_str());
 
     auto cli_e = find(masked_varname);
     bool may_be_empty = true;
@@ -667,9 +664,6 @@ std::optional<std::string> CfgValueHelp::value_check(std::string const& varname,
             for(auto this_filter: cli_e->get().value_filter()) {
                 auto retval = std::invoke(this_filter, value_modified);
 
-                _debug(cli, " CfgValue value filter check[%u] : %d : '%s'", i, retval.accepted(),
-                       retval.comment.c_str());
-
                 // value is not applicable according to this filter
                 if(not retval.accepted()) {
 
@@ -690,21 +684,13 @@ std::optional<std::string> CfgValueHelp::value_check(std::string const& varname,
     // empty value check
     if(value_argument.empty() and not may_be_empty) {
 
-        _debug(cli, "this attribute cannot be empty");
-
-        cli_print(cli," ");
-        cli_print(cli, "Value check failed: cannot be set with empty value");
-
-        return std::nullopt;
+        return { std::nullopt, "this attribute cannot be empty" };
     }
 
 
     for(auto const& fr: filter_result) {
         if(not fr.value_filter_check) {
-
-            cli_print(cli," ");
-            cli_print(cli, "Value check failed: %s", fr.value_filter_check_response.c_str());
-            return std::nullopt;
+            return { std::nullopt, string_format("Value check failed: %s", fr.value_filter_check_response.c_str()) };
         }
     }
 
@@ -714,31 +700,21 @@ std::optional<std::string> CfgValueHelp::value_check(std::string const& varname,
     try {
         if (masked_varname.find("policy.[x]") == 0) {
 
-            _debug(cli, "policy values check");
-
             // check policy
-            if(path_elems[2] == "src" || path_elems[2] == "dst") {
-
-                _debug(cli, "policy values for %s", path_elems[2].c_str());
+            if(path_elems[2] == "src" or path_elems[2] == "dst") {
 
                 auto addrlist = CfgFactory::get()->keys_of_db_address();
                 if(std::find(addrlist.begin(), addrlist.end(), value_modified) == addrlist.end()) {
-                    _debug(cli, "policy values for %s: %s not found address db", path_elems[2].c_str(), value_modified.c_str());
-                    return std::nullopt;
+                    return { std::nullopt, string_format("policy values for %s: %s not found address db", path_elems[2].c_str(), value_modified.c_str()) };
                 }
             }
         }
-        else {
-        _debug(cli, "value_check: no specific check procedure programmed");
-        }
     }
     catch(std::out_of_range const& e) {
-        _debug(cli, "value_check: returning FAILED: out of range");
-        return std::nullopt;
+        return { std::nullopt, "value_check: returning FAILED: out of range" };
     }
 
-    _debug(cli, "value_check: returning OK");
-    return value_modified;
+    return { value_modified, "" };
 }
 
 
