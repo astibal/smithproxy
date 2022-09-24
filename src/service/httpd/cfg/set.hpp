@@ -87,10 +87,10 @@ namespace sx::webserver {
                     cur_write_msg << "ER(config not applied);";
                 }
 
-                return { true, cur_write_msg.str() };
+                return { { "success", cur_write_msg.str() } };
             }
             else {
-                return { false, cur_write_msg.str() };
+                return { { "error", cur_write_msg.str() } };
             }
         }
     }

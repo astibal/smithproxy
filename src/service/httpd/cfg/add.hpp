@@ -55,6 +55,16 @@ namespace sx::webserver {
 
     nlohmann::json json_add_section_entry(struct MHD_Connection * connection, std::string const& req) {
 
+        /*      request example (auth token is processed earlier)
+         *      {
+         *          "token": "<>",
+         *          "params" : {
+         *              "section": "port_objects",
+         *              "name": "to_change",
+         *          }
+         *      }
+         * */
+
         if(req.empty()) return { "error", "request empty" };
 
         auto section_name = jsonize::load_json_params<std::string>(req, "section").value_or("");
