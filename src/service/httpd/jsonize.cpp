@@ -1,10 +1,13 @@
 #include <service/httpd/jsonize.hpp>
+#include <libconfig.h++>
 
 namespace jsonize {
 
+    using namespace nlohmann;
+
     constexpr static size_t BUFSIZE = 512;
 
-    nlohmann::json from(X509 const* x, int verbosity) {
+    nlohmann::json from(X509 const *x, int verbosity) {
         char tmp[BUFSIZE];
         nlohmann::json toret;
 
@@ -16,7 +19,7 @@ namespace jsonize {
         toret["subject"] = std::string(tmp);
 
 
-        X509_NAME const* issuer = X509_get_issuer_name(x);
+        X509_NAME const *issuer = X509_get_issuer_name(x);
         if (!issuer) {
             toret["issuer"] = "";
         } else {
@@ -71,7 +74,7 @@ namespace jsonize {
     }
 
 
-    nlohmann::json from(baseCom* xcom, int verbosity) {
+    nlohmann::json from(baseCom *xcom, int verbosity) {
 
         nlohmann::json ret;
 
@@ -79,7 +82,7 @@ namespace jsonize {
         if (com and !com->opt_bypass) {
 
             auto ssl = com->get_SSL();
-            SSL_SESSION const* session = ssl != nullptr ? SSL_get_session(ssl) : nullptr;
+            SSL_SESSION const *session = ssl != nullptr ? SSL_get_session(ssl) : nullptr;
 
             if (ssl and session) {
                 auto *cipher_str = SSL_CIPHER_get_name(SSL_SESSION_get0_cipher(session));
@@ -163,39 +166,39 @@ namespace jsonize {
     }
 
 
-    nlohmann::json from(MitmProxy* what, int verbosity) {
+    nlohmann::json from(MitmProxy *what, int verbosity) {
         nlohmann::json ret;
 
         std::vector<nlohmann::json> left;
         std::vector<nlohmann::json> right;
 
 
-        auto host_to_json = [verbosity](baseHostCX* cx) -> nlohmann::json {
+        auto host_to_json = [verbosity](baseHostCX *cx) -> nlohmann::json {
             nlohmann::json cret;
-            if(auto* mh = dynamic_cast<MitmHostCX*>(cx); mh != nullptr) {
+            if (auto *mh = dynamic_cast<MitmHostCX *>(cx); mh != nullptr) {
                 cret = jsonize::from(mh, verbosity);
             }
             return cret;
         };
 
         {
-            for (auto ii: what->lbs()) left.emplace_back( host_to_json(ii));
-            for (auto ii: what->ls()) left.emplace_back( host_to_json(ii));
-            for (auto ii: what->lda()) left.emplace_back( host_to_json(ii));
-            for (auto ii: what->lpc()) left.emplace_back( host_to_json(ii));
+            for (auto ii: what->lbs()) left.emplace_back(host_to_json(ii));
+            for (auto ii: what->ls()) left.emplace_back(host_to_json(ii));
+            for (auto ii: what->lda()) left.emplace_back(host_to_json(ii));
+            for (auto ii: what->lpc()) left.emplace_back(host_to_json(ii));
 
-            for (auto ii: what->rbs()) right.emplace_back( host_to_json(ii));
-            for (auto ii: what->rs()) right.emplace_back( host_to_json(ii));
-            for (auto ii: what->rda()) right.emplace_back( host_to_json(ii));
-            for (auto ii: what->rpc()) right.emplace_back( host_to_json(ii));
+            for (auto ii: what->rbs()) right.emplace_back(host_to_json(ii));
+            for (auto ii: what->rs()) right.emplace_back(host_to_json(ii));
+            for (auto ii: what->rda()) right.emplace_back(host_to_json(ii));
+            for (auto ii: what->rpc()) right.emplace_back(host_to_json(ii));
 
         }
 
-        if(left.empty()) {
-            left.emplace_back(jsonize::from((MitmHostCX*)nullptr, verbosity));
+        if (left.empty()) {
+            left.emplace_back(jsonize::from((MitmHostCX *) nullptr, verbosity));
         }
-        if(right.empty()) {
-            right.emplace_back(jsonize::from((MitmHostCX*)nullptr, verbosity));
+        if (right.empty()) {
+            right.emplace_back(jsonize::from((MitmHostCX *) nullptr, verbosity));
         }
 
 
@@ -205,57 +208,55 @@ namespace jsonize {
         ret["right"] = right;
 
 
-        if(verbosity > DIA) {
-            ret["has_parent"] = { (what->parent() != nullptr) };
+        if (verbosity > DIA) {
+            ret["has_parent"] = {(what->parent() != nullptr)};
             ret["is_root"] = what->pollroot();
         }
 
-        if(verbosity >= INF) {
+        if (verbosity >= INF) {
             ret["policy"] = what->matched_policy();
 
-            if(what->identity_resolved()) {
-                ret["identity"] = { { "user",  what->identity()->username() },
-                                    { "groups", what->identity()->groups() }
+            if (what->identity_resolved()) {
+                ret["identity"] = {{"user",   what->identity()->username()},
+                                   {"groups", what->identity()->groups()}
                 };
             }
 
             ret["stats"]["speed"] = {
-                    { "up_str", number_suffixed(what->stats().mtr_up.get() * 8) + "bps"},
-                    { "down_str", number_suffixed(what->stats().mtr_down.get() * 8) + "bps"},
-                    { "up", what->stats().mtr_up.get()},
-                    { "down", what->stats().mtr_down.get()}
+                    {"up_str",   number_suffixed(what->stats().mtr_up.get() * 8) + "bps"},
+                    {"down_str", number_suffixed(what->stats().mtr_down.get() * 8) + "bps"},
+                    {"up",       what->stats().mtr_up.get()},
+                    {"down",     what->stats().mtr_down.get()}
             };
 
             ret["stats"]["counters"] = {
-                    { "bytes_up", what->stats().mtr_up.total() },
-                    { "bytes_down", what->stats().mtr_down.total() }
+                    {"bytes_up",   what->stats().mtr_up.total()},
+                    {"bytes_down", what->stats().mtr_down.total()}
             };
 
             ret["stats"]["flow"] = {
-                    { "size", what->first_left() ? what->first_left()->flow().flow_queue().size() : 0 }
+                    {"size", what->first_left() ? what->first_left()->flow().flow_queue().size() : 0}
             };
         }
-
 
 
         return ret;
     }
 
 
-    nlohmann::json from(MitmHostCX* what, int verbosity) {
+    nlohmann::json from(MitmHostCX *what, int verbosity) {
         nlohmann::json ret;
 
-        if(what) {
+        if (what) {
             auto h = what->host().empty() ? "0.0.0.0" : what->host();
             auto p = what->port().empty() ? "0" : what->port();
             auto c = what->com() ? what->com()->shortname() : "none";
-            if(c.empty()) c = "unknown";
+            if (c.empty()) c = "unknown";
 
             ret["host"] = h;
             ret["port"] = p;
             ret["com"] = c;
-        }
-        else {
+        } else {
             ret["host"] = "0.0.0.0";
             ret["port"] = "0";
             ret["com"] = "none";
@@ -263,4 +264,103 @@ namespace jsonize {
 
         return ret;
     }
+
+    using namespace libconfig;
+
+    nlohmann::json from(Setting const& s) {
+
+
+        auto scalar_str = [](Setting const& cur_object) -> std::string {
+            std::stringstream valss;
+            auto type = cur_object.getType();
+
+            switch (type) {
+                case Setting::TypeInt:
+                    valss << (int) cur_object;
+                    break;
+
+                case Setting::TypeInt64:
+                    valss << (long long int) cur_object;
+
+                    break;
+
+                case Setting::TypeString:
+                    valss << (const char *) cur_object;
+                    break;
+
+                case Setting::TypeFloat:
+                    valss << (float) cur_object;
+                    break;
+
+                case Setting::TypeBoolean:
+                    valss << (bool) cur_object;
+                    break;
+
+                default:
+                    // well, that sucks. Unknown type and no way to convert or report
+                    break;
+            }
+
+            return valss.str();
+        };
+
+        json ret;
+        std::string orig_name;
+
+        auto update_return = [&](std::string const& name, auto& val) {
+
+            if(name.empty()) {
+                ret.push_back(val);
+            } else {
+                ret[name] = val;
+            }
+        };
+
+
+        if (s.getName()) {
+            orig_name = s.getName();
+        }
+
+        for (int i = 0; i < s.getLength(); ++i) {
+
+            Setting const& cur_object = s[(int) i];
+
+            Setting::Type type = cur_object.getType();
+
+            std::string name;
+            if (cur_object.getName()) {
+                name = cur_object.getName();
+            }
+
+            if (cur_object.isScalar()) {
+                auto val = scalar_str(cur_object);
+                update_return(name, val);
+
+            } else if (type == Setting::TypeArray) {
+
+                std::vector<std::string> list_val;
+
+                for (int j = 0; j < cur_object.getLength(); ++j) {
+                    list_val.emplace_back(scalar_str(cur_object[j]));
+                }
+                update_return(name, list_val);
+            }
+            else if(type == Setting::TypeList) {
+                auto list = json::array();
+
+                for (int j = 0; j < cur_object.getLength(); ++j) {
+                    list.emplace_back(from(cur_object[j]));
+                }
+
+                update_return(name, list);
+            }
+            else {
+                auto val =from(cur_object);
+                update_return(name, val);
+            }
+        }
+
+        return ret;
+    }
+
 }

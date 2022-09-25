@@ -45,6 +45,7 @@
 #include <ext/json/json.hpp>
 
 #include <proxy/mitmproxy.hpp>
+#include <libconfig.h++>
 
 namespace jsonize {
 
@@ -69,6 +70,8 @@ namespace jsonize {
                 status.second
         } };
     }
+
+    nlohmann::json from(libconfig::Setting const& s);
 }
 
 #endif
