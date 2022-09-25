@@ -9,6 +9,7 @@
 
 #include <service/httpd/cfg/add.hpp>
 #include <service/httpd/cfg/set.hpp>
+#include <service/httpd/cfg/get.hpp>
 
 namespace sx::webserver {
     using json = nlohmann::json;
@@ -195,6 +196,14 @@ std::thread* create_httpd_thread(unsigned short port) {
                 authorized::token_protected(&json_set_section_entry)
         );
         server.addController(&cfg_uni_set);
+
+
+        Http_JsonResponder cfg_uni_get(
+                "POST",
+                "/api/config/uni/get",
+                authorized::token_protected(&json_get_section_entry)
+        );
+        server.addController(&cfg_uni_get);
 
 
         server.options().handler_should_terminate = []() -> bool {
