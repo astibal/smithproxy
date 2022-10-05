@@ -498,7 +498,7 @@ DNS_Response* send_dns_request(struct cli_def *cli, std::string const& hostname,
         return CLI_OK;
     }
 
-    if(::send(send_socket,b.data(),b.size(),0) < 0) {
+    if(::send(send_socket, b.data(), b.size(), 0) < 0) {
         std::string r = string_format("logger::write_log: cannot write remote socket: %d",send_socket);
         cli_print(cli,"%s",r.c_str());
 
@@ -561,12 +561,15 @@ int cli_test_dns_sendrequest(struct cli_def *cli, const char *command, char *arg
             return CLI_OK;
         }
 
-        std::string nameserver = "8.8.8.8";
-        if(! CfgFactory::get()->db_nameservers.empty()) {
+        std::string nameserver;
+        if(not CfgFactory::get()->db_nameservers.empty()) {
             nameserver = CfgFactory::get()->db_nameservers.at(0);
         }
+        else {
+            cli_print(cli, "Error: nameservers not configured");
+        }
 
-        auto resp = std::shared_ptr<DNS_Response>(send_dns_request(cli,argv0,A,nameserver));
+        auto resp = std::shared_ptr<DNS_Response>(send_dns_request(cli,argv0,A, nameserver));
         if(resp) {
             DNS_Inspector di;
             if(di.store(resp)) {
