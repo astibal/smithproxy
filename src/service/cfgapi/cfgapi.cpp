@@ -2773,20 +2773,20 @@ bool CfgFactory::policy_apply_tls (const std::shared_ptr<ProfileTls> &pt, baseCo
     
     auto* sslcom = dynamic_cast<SSLCom*>(xcom);
     if(sslcom != nullptr) {
-        sslcom->opt_bypass = !pt->inspect;
-        if(sslcom->opt_bypass) {
-            sslcom->verify_reset(SSLCom::VRF_OK);
+        sslcom->opt.bypass = !pt->inspect;
+        if(sslcom->opt.bypass) {
+            sslcom->verify_reset(SSLCom::verify_status_t::VRF_OK);
         }
 
-        sslcom->opt_allow_unknown_issuer = pt->allow_untrusted_issuers;
-        sslcom->opt_allow_self_signed_chain = pt->allow_untrusted_issuers;
-        sslcom->opt_allow_not_valid_cert = pt->allow_invalid_certs;
-        sslcom->opt_allow_self_signed_cert = pt->allow_self_signed;
+        sslcom->opt.cert.allow_unknown_issuer = pt->allow_untrusted_issuers;
+        sslcom->opt.cert.allow_self_signed_chain = pt->allow_untrusted_issuers;
+        sslcom->opt.cert.allow_not_valid = pt->allow_invalid_certs;
+        sslcom->opt.cert.allow_self_signed = pt->allow_self_signed;
 
-        sslcom->opt_failed_certcheck_replacement = pt->failed_certcheck_replacement;
-        sslcom->opt_failed_certcheck_override = pt->failed_certcheck_override;
-        sslcom->opt_failed_certcheck_override_timeout = pt->failed_certcheck_override_timeout;
-        sslcom->opt_failed_certcheck_override_timeout_type = pt->failed_certcheck_override_timeout_type;
+        sslcom->opt.cert.failed_check_replacement = pt->failed_certcheck_replacement;
+        sslcom->opt.cert.failed_check_override = pt->failed_certcheck_override;
+        sslcom->opt.cert.failed_check_override_timeout = pt->failed_certcheck_override_timeout;
+        sslcom->opt.cert.failed_check_override_timeout_type = pt->failed_certcheck_override_timeout_type;
 
         auto* peer_sslcom = dynamic_cast<SSLCom*>(sslcom->peer());
 
@@ -2800,36 +2800,34 @@ bool CfgFactory::policy_apply_tls (const std::shared_ptr<ProfileTls> &pt, baseCo
                  pt->failed_certcheck_override_timeout,
                  pt->failed_certcheck_override_timeout_type );
 
-            peer_sslcom->opt_failed_certcheck_replacement = pt->failed_certcheck_replacement;
-            peer_sslcom->opt_failed_certcheck_override = pt->failed_certcheck_override;
-            peer_sslcom->opt_failed_certcheck_override_timeout = pt->failed_certcheck_override_timeout;
-            peer_sslcom->opt_failed_certcheck_override_timeout_type = pt->failed_certcheck_override_timeout_type;
+            peer_sslcom->opt.cert.failed_check_replacement = pt->failed_certcheck_replacement;
+            peer_sslcom->opt.cert.failed_check_override = pt->failed_certcheck_override;
+            peer_sslcom->opt.cert.failed_check_override_timeout = pt->failed_certcheck_override_timeout;
+            peer_sslcom->opt.cert.failed_check_override_timeout_type = pt->failed_certcheck_override_timeout_type;
         }
 
         // set accordingly if general "use_pfs" is specified, more concrete settings come later
-        sslcom->opt_left_kex_dh = pt->use_pfs;
-        sslcom->opt_right_kex_dh = pt->use_pfs;
+        sslcom->opt.left.kex_dh = pt->use_pfs;
+        sslcom->opt.right.kex_dh = pt->use_pfs;
 
-        sslcom->opt_left_kex_dh = pt->left_use_pfs;
-        sslcom->opt_right_kex_dh = pt->right_use_pfs;
+        sslcom->opt.left.kex_dh = pt->left_use_pfs;
+        sslcom->opt.right.kex_dh = pt->right_use_pfs;
 
-        sslcom->opt_left_no_tickets = pt->left_disable_reuse;
-        sslcom->opt_right_no_tickets = pt->right_disable_reuse;
+        sslcom->opt.left.no_tickets = pt->left_disable_reuse;
+        sslcom->opt.right.no_tickets = pt->right_disable_reuse;
 
-        sslcom->opt_ocsp_mode = pt->ocsp_mode;
-        sslcom->opt_ocsp_stapling_enabled = pt->ocsp_stapling;
-        sslcom->opt_ocsp_stapling_mode = pt->ocsp_stapling_mode;
+        sslcom->opt.ocsp.mode = pt->ocsp_mode;
+        sslcom->opt.ocsp.stapling_enabled = pt->ocsp_stapling;
+        sslcom->opt.ocsp.stapling_mode = pt->ocsp_stapling_mode;
 
         // certificate transparency
-        sslcom->opt_ct_enable = pt->opt_ct_enable;
+        sslcom->opt.ct_enable = pt->opt_ct_enable;
 
         // alpn alpn
-        sslcom->opt_alpn_block = pt->opt_alpn_block;
+        sslcom->opt.alpn_block = pt->opt_alpn_block;
 
-        if(pt->sni_filter_bypass) {
-            if( ! pt->sni_filter_bypass->empty() ) {
-                sslcom->sni_filter_to_bypass() = pt->sni_filter_bypass;
-            }
+        if(pt->sni_filter_bypass and not pt->sni_filter_bypass->empty()) {
+            sslcom->sni_filter_to_bypass() = pt->sni_filter_bypass;
         }
 
         sslcom->sslkeylog = pt->sslkeylog;

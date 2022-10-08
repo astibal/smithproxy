@@ -1564,7 +1564,7 @@ auto get_tls_info(MitmHostCX const* lf, MitmHostCX const* rg, int sl_flags, int 
 
         for (auto const&[label, com]: tup) {
 
-            if (com && !com->opt_bypass) {
+            if (com && not com->opt.bypass) {
                 auto ssl = com->get_SSL();
                 if (ssl) {
                     auto const *session = SSL_get_session(ssl);
@@ -1666,7 +1666,7 @@ auto get_tls_info(MitmHostCX const* lf, MitmHostCX const* rg, int sl_flags, int 
                 }
             } else {
                 tls_ss << "\n  " << label << ": not a TLS session";
-                if (com && com->opt_bypass)
+                if (com && com->opt.bypass)
                     tls_ss << " (bypassed)";
             }
         }

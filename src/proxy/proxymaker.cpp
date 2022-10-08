@@ -123,8 +123,8 @@ namespace sx::proxymaker {
         auto bypass_cx = [] (baseHostCX const* cx) {
             auto *scom = dynamic_cast<SSLCom *>(cx->com());
             if (scom != nullptr) {
-                scom->opt_bypass = true;
-                scom->verify_reset(SSLCom::VRF_OK);
+                scom->opt.bypass = true;
+                scom->verify_reset(SSLCom::verify_status_t::VRF_OK);
             }
         };
 

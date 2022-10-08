@@ -79,7 +79,7 @@ namespace jsonize {
         nlohmann::json ret;
 
         auto *com = dynamic_cast<SSLCom *>(xcom);
-        if (com and !com->opt_bypass) {
+        if (com and not com->opt.bypass) {
 
             auto ssl = com->get_SSL();
             SSL_SESSION const *session = ssl != nullptr ? SSL_get_session(ssl) : nullptr;
