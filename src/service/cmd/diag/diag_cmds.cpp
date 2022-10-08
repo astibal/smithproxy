@@ -1751,7 +1751,6 @@ auto get_more_info(sobject_info const* so_info, MitmProxy const* curr_proxy, Mit
 
 
             if (verbosity > INF) {
-                info_ss << "    obj_debug: " << curr_proxy->get_this_log_level().str() << "\n";
                 long expiry = -1;
                 if (curr_proxy->half_holdtimer > 0) {
                     expiry = curr_proxy->half_holdtimer + MitmProxy::half_timeout() - time(nullptr);
@@ -1764,23 +1763,10 @@ auto get_more_info(sobject_info const* so_info, MitmProxy const* curr_proxy, Mit
             if (verbosity > INF and lf->socket() > 0) {
                 print_queue_stats(info_ss, verbosity, lf, "lf", "Left");
             }
-
-            if (verbosity > DIA) {
-                info_ss << "     lf_debug: " << lf->get_this_log_level().str() << "\n";
-                if (lf->com()) {
-                    info_ss << "       lf_com: " << lf->com()->get_this_log_level().str() << "\n";
-                }
-            }
         }
         if (rg) {
             if (verbosity > INF and rg->socket() > 0) {
                 print_queue_stats(info_ss, verbosity, rg, "rg", "Right");
-            }
-            if (verbosity > DIA) {
-                info_ss << "     rg_debug: " << rg->get_this_log_level().str() << "\n";
-                if (rg->com()) {
-                    info_ss << "       rg_com: " << rg->com()->get_this_log_level().str() << "\n";
-                }
             }
         }
     }

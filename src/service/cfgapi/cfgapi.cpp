@@ -791,21 +791,21 @@ int CfgFactory::load_debug() {
 
         if (cfgapi.getRoot()["debug"].exists("log")) {
 
-            load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "sslcom", SSLCom::log_level_ref().level_ref());
+            load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "sslcom", SSLCom::log_level().level_ref());
             load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "sslmitmcom",
-                                                               baseSSLMitmCom<SSLCom>::log_level_ref().level_ref());
+                                                               baseSSLMitmCom<SSLCom>::log_level().level_ref());
             load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "sslmitmcom",
-                                                               baseSSLMitmCom<DTLSCom>::log_level_ref().level_ref());
+                                                               baseSSLMitmCom<DTLSCom>::log_level().level_ref());
             load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "sslcertstore",
                                                                SSLFactory::get_log().level()->level_ref());
-            load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "proxy", baseProxy::log_level_ref().level_ref());
+            load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "proxy", baseProxy::log_level().level_ref());
             load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "proxy", epoll::log_level.level_ref());
             load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "mtrace", cfg_mtrace_enable);
             load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "openssl_mem_dbg", cfg_openssl_mem_dbg);
 
             /*DNS ALG EXPLICIT LOG*/
-            load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "alg_dns", DNS_Inspector::log_level_ref().level_ref());
-            load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "alg_dns", DNS_Packet::log_level_ref().level_ref());
+            load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "alg_dns", DNS_Inspector::log_level().level_ref());
+            load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "alg_dns", DNS_Packet::log_level().level_ref());
         }
         return 1;
     }
@@ -3221,17 +3221,17 @@ int CfgFactory::save_debug(Config& ex) const {
 
 
     Setting& deb_log_objects = deb_objects.add("log", Setting::TypeGroup);
-    deb_log_objects.add("sslcom", Setting::TypeInt) = (int)SSLCom::log_level_ref().level_ref();
-    deb_log_objects.add("sslmitmcom", Setting::TypeInt) = (int)baseSSLMitmCom<DTLSCom>::log_level_ref().level_ref();
+    deb_log_objects.add("sslcom", Setting::TypeInt) = (int)SSLCom::log_level().level_ref();
+    deb_log_objects.add("sslmitmcom", Setting::TypeInt) = (int)baseSSLMitmCom<DTLSCom>::log_level().level_ref();
     deb_log_objects.add("sslcertstore", Setting::TypeInt) = (int)SSLFactory::get_log().level()->level_ref();
-    deb_log_objects.add("proxy", Setting::TypeInt) = (int)baseProxy::log_level_ref().level_ref();
+    deb_log_objects.add("proxy", Setting::TypeInt) = (int)baseProxy::log_level().level_ref();
     deb_log_objects.add("epoll", Setting::TypeInt) = (int)epoll::log_level.level_ref();
 
     deb_log_objects.add("mtrace", Setting::TypeBoolean) = cfg_mtrace_enable;
     deb_log_objects.add("openssl_mem_dbg", Setting::TypeBoolean) = cfg_openssl_mem_dbg;
 
-    deb_log_objects.add("alg_dns", Setting::TypeInt) = (int)DNS_Inspector::log_level_ref().level_ref();
-    deb_log_objects.add("pkt_dns", Setting::TypeInt) = (int)DNS_Packet::log_level_ref().level_ref();
+    deb_log_objects.add("alg_dns", Setting::TypeInt) = (int)DNS_Inspector::log_level().level_ref();
+    deb_log_objects.add("pkt_dns", Setting::TypeInt) = (int)DNS_Packet::log_level().level_ref();
 
 
     return 0;

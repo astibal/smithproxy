@@ -153,25 +153,23 @@ void debug_cli_params(struct cli_def *cli, const char *command, std::vector<std:
 
 
 void load_defaults() {
-    CliState::get().orig_ssl_loglevel = SSLCom::log_level_ref();
-    CliState::get().orig_sslmitm_loglevel = SSLMitmCom::log_level_ref();
+    CliState::get().orig_ssl_loglevel = SSLCom::log_level();
+    CliState::get().orig_sslmitm_loglevel = SSLMitmCom::log_level();
     CliState::get().orig_sslca_loglevel = *SSLFactory::get_log().level();
 
-    CliState::get().orig_dns_insp_loglevel = DNS_Inspector::log_level_ref();
-    CliState::get().orig_dns_packet_loglevel = DNS_Packet::log_level_ref();
+    CliState::get().orig_dns_insp_loglevel = DNS_Inspector::log_level();
+    CliState::get().orig_dns_packet_loglevel = DNS_Packet::log_level();
 
-    CliState::get().orig_baseproxy_loglevel = baseProxy::log_level_ref();
+    CliState::get().orig_baseproxy_loglevel = baseProxy::log_level();
     CliState::get().orig_epoll_loglevel = epoll::log_level;
-    CliState::get().orig_mitmproxy_loglevel = MitmProxy::log_level_ref();
-    CliState::get().orig_mitmmasterproxy_loglevel = MitmMasterProxy::log_level_ref();
+    CliState::get().orig_mitmproxy_loglevel = MitmProxy::log_level();
+    CliState::get().orig_mitmmasterproxy_loglevel = MitmMasterProxy::log_level();
 }
 
 
 
 void cmd_show_status(struct cli_def* cli) {
-    
-    //cli_print(cli,":connected using socket %d",fileno(cli->client));
-  
+
     cli_print(cli,"Version: %s%s",SMITH_VERSION,SMITH_DEVEL ? " (dev)" : "");
     cli_print(cli,"Socle: %s%s",SOCLE_VERSION,SOCLE_DEVEL ? " (dev)" : "");
 #if ( (SMITH_DEVEL > 0) || (SOCLE_DEVEL > 0))
@@ -787,21 +785,21 @@ int cli_debug_ssl(struct cli_def *cli, const char *command, char *argv[], int ar
             cli_print(cli,"valid parameters: %s", CliState::get().debug_levels);
         }
         else if(a1 == "reset") {
-            SSLCom::log_level_ref() = CliState::get().orig_ssl_loglevel;
-            SSLMitmCom::log_level_ref() = CliState::get().orig_sslmitm_loglevel;
+            SSLCom::log_level() = CliState::get().orig_ssl_loglevel;
+            SSLMitmCom::log_level() = CliState::get().orig_sslmitm_loglevel;
             SSLFactory::get_log().level(CliState::get().orig_sslca_loglevel);
         }
         else {
             newlev = safe_val(argv[0]);
-            SSLCom::log_level_ref().level(newlev);
-            SSLMitmCom::log_level_ref().level(newlev);
+            SSLCom::log_level().level(newlev);
+            SSLMitmCom::log_level().level(newlev);
             SSLFactory::get_log().level(loglevel(newlev));
 
         }
     } else {
-        unsigned int l = SSLCom::log_level_ref().level();
+        unsigned int l = SSLCom::log_level().level();
         cli_print(cli,"SSL debug level: %d",l);
-        l = SSLMitmCom::log_level_ref().level();
+        l = SSLMitmCom::log_level().level();
         cli_print(cli,"SSL MitM debug level: %d",l);
         l = SSLFactory::get_log().level()->level();
         cli_print(cli,"SSL CA debug level: %d",l);
@@ -823,15 +821,15 @@ int cli_debug_auth(struct cli_def *cli, const char *command, char *argv[], int a
             cli_print(cli,"valid parameters: %s", CliState::get().debug_levels);
         }
         else if(a1 == "reset") {
-            AuthFactory::log_level_ref() = CliState::get().orig_auth_loglevel;
+            AuthFactory::log_level() = CliState::get().orig_auth_loglevel;
         }
         else {
             newlev = safe_val(a1);
-            AuthFactory::log_level_ref().level(newlev);
+            AuthFactory::log_level().level(newlev);
 
         }
     } else {
-        unsigned int l = AuthFactory::log_level_ref().level();
+        unsigned int l = AuthFactory::log_level().level();
         cli_print(cli,"Auth debug level: %d",l);
         cli_print(cli,"\n");
         cli_print(cli,"valid parameters: %s", CliState::get().debug_levels);
@@ -849,19 +847,19 @@ int cli_debug_dns(struct cli_def *cli, const char *command, char *argv[], int ar
             cli_print(cli,"valid parameters: %s", CliState::get().debug_levels);
         }
         else if(a1 == "reset") {
-            DNS_Inspector::log_level_ref() = CliState::get().orig_dns_insp_loglevel;
-            DNS_Packet::log_level_ref() = CliState::get().orig_dns_packet_loglevel;
+            DNS_Inspector::log_level() = CliState::get().orig_dns_insp_loglevel;
+            DNS_Packet::log_level() = CliState::get().orig_dns_packet_loglevel;
         }
         else {
             int lev = std::stoi(argv[0]);
-            DNS_Inspector::log_level_ref().level(lev);
-            DNS_Packet::log_level_ref().level(lev);
+            DNS_Inspector::log_level().level(lev);
+            DNS_Packet::log_level().level(lev);
 
         }
     } else {
-        unsigned int l = DNS_Inspector::log_level_ref().level();
+        unsigned int l = DNS_Inspector::log_level().level();
         cli_print(cli,"DNS Inspector debug level: %d",l);
-        l = DNS_Packet::log_level_ref().level();
+        l = DNS_Packet::log_level().level();
         cli_print(cli,"DNS Packet debug level: %d",l);
         cli_print(cli,"\n");
         cli_print(cli,"valid parameters: %s", CliState::get().debug_levels);
@@ -901,42 +899,42 @@ int cli_debug_proxy(struct cli_def *cli, const char *command, char *argv[], int 
             cli_print(cli,"valid parameters: %s", CliState::get().debug_levels);
         }
         else if(a1 == "reset") {
-            baseProxy::log_level_ref() = CliState::get().orig_baseproxy_loglevel;
+            baseProxy::log_level() = CliState::get().orig_baseproxy_loglevel;
             epoll::log_level = CliState::get().orig_epoll_loglevel;
 
-            MitmMasterProxy::log_level_ref() = CliState::get().orig_mitmproxy_loglevel;
-            MitmHostCX::log_level_ref() = CliState::get().orig_mitmhostcx_loglevel;
-            MitmProxy::log_level_ref() = CliState::get().orig_mitmproxy_loglevel;
-            SocksProxy::log_level_ref() = CliState::get().orig_socksproxy_loglevel;
+            MitmMasterProxy::log_level() = CliState::get().orig_mitmproxy_loglevel;
+            MitmHostCX::log_level() = CliState::get().orig_mitmhostcx_loglevel;
+            MitmProxy::log_level() = CliState::get().orig_mitmproxy_loglevel;
+            SocksProxy::log_level() = CliState::get().orig_socksproxy_loglevel;
         }
         else {
             int lev = std::stoi(argv[0]);
-            baseProxy::log_level_ref().level(lev);
+            baseProxy::log_level().level(lev);
             epoll::log_level.level(lev);
 
-            MitmMasterProxy::log_level_ref().level(lev);
-            MitmHostCX::log_level_ref().level(lev);
-            MitmProxy::log_level_ref().level(lev);
-            SocksProxy::log_level_ref().level(lev);
+            MitmMasterProxy::log_level().level(lev);
+            MitmHostCX::log_level().level(lev);
+            MitmProxy::log_level().level(lev);
+            SocksProxy::log_level().level(lev);
 
         }
     } else {
-        unsigned int l = baseProxy::log_level_ref().level();
+        unsigned int l = baseProxy::log_level().level();
         cli_print(cli,"baseProxy debug level: %d",l);
 
         l = epoll::log_level.level();
         cli_print(cli,"epoll debug level: %d",l);
 
-        l = MitmMasterProxy::log_level_ref().level();
+        l = MitmMasterProxy::log_level().level();
         cli_print(cli,"MitmMasterProxy debug level: %d",l);
 
-        l = MitmHostCX::log_level_ref().level();
+        l = MitmHostCX::log_level().level();
         cli_print(cli,"MitmHostCX debug level: %d",l);
 
-        l = MitmProxy::log_level_ref().level();
+        l = MitmProxy::log_level().level();
         cli_print(cli,"MitmProxy debug level: %d",l);
 
-        l = SocksProxy::log_level_ref().level();
+        l = SocksProxy::log_level().level();
         cli_print(cli,"SocksProxy debug level: %d",l);
 
 
@@ -952,22 +950,22 @@ int cli_debug_show(struct cli_def *cli, const char *command, char *argv[], int a
 
     debug_cli_params(cli, command, argv, argc);
 
-    unsigned int l = baseProxy::log_level_ref().level();
+    unsigned int l = baseProxy::log_level().level();
     cli_print(cli,"baseProxy debug level: %d",l);
 
     l = epoll::log_level.level();
     cli_print(cli,"epoll debug level: %d",l);
 
-    l = MitmMasterProxy::log_level_ref().level();
+    l = MitmMasterProxy::log_level().level();
     cli_print(cli,"MitmMasterProxy debug level: %d",l);
 
-    l = MitmHostCX::log_level_ref().level();
+    l = MitmHostCX::log_level().level();
     cli_print(cli,"MitmHostCX debug level: %d",l);
 
-    l = MitmProxy::log_level_ref().level();
+    l = MitmProxy::log_level().level();
     cli_print(cli,"MitmProxy debug level: %d",l);
 
-    l = SocksProxy::log_level_ref().level();
+    l = SocksProxy::log_level().level();
     cli_print(cli,"SocksProxy debug level: %d",l);
 
 
