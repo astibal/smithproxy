@@ -278,13 +278,13 @@ void MitmHostCX::on_starttls() {
     _dia("we should now handover myself to SSL worker");
 
     // we know this side is client
-//         delete ();
-//         delete peercom();
-
     auto master = com()->master();
 
-    com(new MySSLMitmCom());
-    peer()->com(new MySSLMitmCom());
+    auto* new_client_com = new MySSLMitmCom();
+    com(new_client_com);
+
+    auto* new_peer_com = new MySSLMitmCom();
+    peer()->com(new_peer_com);
 
     peer(peer()); // this will re-init
     peer()->peer(this);
@@ -298,13 +298,8 @@ void MitmHostCX::on_starttls() {
 
     waiting_for_peercom(true);
 
-
-
-    SSLCom* ptr;
-    ptr = dynamic_cast<SSLCom*>(peercom());
-    if (ptr != nullptr) ptr->upgrade_client_socket(peer()->socket());
-    ptr = dynamic_cast<SSLCom*>(com());
-    if (ptr != nullptr) ptr->upgrade_server_socket(socket());
+    new_peer_com->upgrade_client_socket(peer()->socket());
+    new_client_com->upgrade_server_socket(socket());
 
     CfgFactory::get()->policy_apply_tls(matched_policy(), com());
     CfgFactory::get()->policy_apply_tls(matched_policy(), peercom());
