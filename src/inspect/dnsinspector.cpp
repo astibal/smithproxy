@@ -63,16 +63,13 @@ void DNS_Inspector::update(AppHostCX* cx) {
     /* INIT */
 
     if(!in_progress()) {
-        baseCom* com = cx->com();
-        auto* tcp_com = dynamic_cast<TCPCom*>(com);
-        if(tcp_com)
+        if(cx->com()->l4_proto() == SOCK_STREAM)
             is_tcp = true;
 
         in_progress(true);
     }
 
 
-//    std::pair<char,buffer*> cur_pos = flow.flow().back();
     auto const& last_flow_entry = flow.flow_queue().back();
 
 
