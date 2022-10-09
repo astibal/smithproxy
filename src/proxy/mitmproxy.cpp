@@ -1052,7 +1052,7 @@ std::string get_connection_details_str(MitmProxy* px, baseHostCX* cx, char side)
     if(cx->peercom()) {
         auto* sc = dynamic_cast<SSLMitmCom*>(cx->peercom());
         if(sc) {
-            detail << string_format("sni=%s ",sc->get_peer_sni().c_str());
+            detail << string_format("sni=%s ", sc->get_sni().c_str());
         }
     }
     if(mh && mh->engine_ctx.application_data) {

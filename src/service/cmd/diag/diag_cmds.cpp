@@ -1686,9 +1686,9 @@ auto replace_proxy_title_with_sni(std::string const &title, MitmHostCX *right_cx
     if (scom) {
         std::stringstream replacement;
 
-        std::string tgt = (scom->get_peer_sni().empty() ? scom->shortname() + "_" +
-                                                          right_cx->host()
-                                                        : scom->get_peer_sni());
+        std::string tgt = (scom->get_sni().empty() ? scom->shortname() + "_" +
+                                                     right_cx->host()
+                                                   : scom->get_sni());
         replacement << "$1" << (verbosity > iINF ? "[sni]" : "") << tgt << ":"
                     << right_cx->port();
 
