@@ -17,7 +17,7 @@ bool MySSLMitmCom::spoof_cert(X509* x, SpoofOptions& spo) {
     return r;
 }
 
-std::string MySSLMitmCom::ssl_error_details() {
+std::string MySSLMitmCom::ssl_error_details() const {
     auto ret = SSLCom::ssl_error_details();
 
     std::stringstream info;
