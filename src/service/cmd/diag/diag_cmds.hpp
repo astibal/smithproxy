@@ -98,11 +98,13 @@ typedef enum session_list_filter_flags {
         SL_NONE=0x0000,
         SL_IO_OSBUF_NZ=0x0001,
         SL_IO_EMPTY=0x0002,
-        SL_TLS_DETAILS=0x0004,
+        SL_IO_ALL=0x0008,
 
         SL_ACTIVE=0x0010,
         SL_NO_NAMES=0x0020,
-        SL_IO_ALL=0x0040
+        SL_IPS=0x0040,
+
+        SL_TLS_DETAILS=0x0100,
 
     } session_list_filter_flags_t;
 int cli_diag_proxy_session_list_extra (struct cli_def *cli, const char *command, std::vector<std::string> const &args,

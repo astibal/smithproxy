@@ -1677,7 +1677,7 @@ auto get_tls_info(MitmHostCX const* lf, MitmHostCX const* rg, int sl_flags, int 
 
 
 
-auto replace_proxy_title_with_sni(std::string const &title, MitmHostCX *right_cx, int verbosity) {
+auto replace_proxy_title_target(std::string const &title, MitmHostCX const* right_cx, int verbosity, int sl_flags) {
 
     auto scom = dynamic_cast<SSLCom *>(right_cx->com());
     if (scom) {
@@ -1686,8 +1686,14 @@ auto replace_proxy_title_with_sni(std::string const &title, MitmHostCX *right_cx
         std::string tgt = (scom->get_sni().empty() ? scom->shortname() + "_" +
                                                      right_cx->host()
                                                    : scom->get_sni());
-        replacement << "$1" << (verbosity > iINF ? "[sni]" : "") << tgt << ":"
-                    << right_cx->port();
+        replacement << "$1" << (verbosity > iINF ? "[sni]" : "") << tgt;
+
+        // add IP only if sni was filled in
+        if(flag_check<int>(sl_flags, SL_IPS) and not scom->get_sni().empty()) {
+            replacement << '(' << right_cx->host() << ')';
+        }
+
+        replacement << ":" << right_cx->port();
 
         auto rmatch = std::regex("(r:[^_]+)ssli_[0-9a-fA-F:.]+");
 
@@ -1703,8 +1709,8 @@ auto get_proxy_title(MitmProxy* proxy, int sl_flags, int verbosity) {
     if (flag_check<int>(sl_flags, SL_NO_NAMES)) {
         return proxy->to_string(verbosity);
     } else {
-        if (auto* rg = proxy->first_right(); rg) {
-            return replace_proxy_title_with_sni(proxy->to_string(verbosity), rg, verbosity);
+        if (auto const* rg = proxy->first_right(); rg) {
+            return replace_proxy_title_target(proxy->to_string(verbosity), rg, verbosity, sl_flags);
         } else {
             return proxy->to_string(verbosity);
         }
@@ -1839,6 +1845,7 @@ int cli_diag_proxy_session_list_extra (struct cli_def *cli, const char *command,
 
                 if (sl_flags == SL_NONE) { do_print = true;  }
                 if (sl_flags == SL_NO_NAMES) { do_print = true;  }
+                if (sl_flags == SL_IPS) { do_print = true;  }
 
                 if (!do_print) {
                     continue;
