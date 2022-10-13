@@ -273,6 +273,7 @@ add_executable(smithproxy
         src/service/core/service.cpp
         src/service/core/service.hpp
         src/service/httpd/httpd.cpp
+        src/service/httpd/handlers/handlers.cpp
         src/service/httpd/jsonize.cpp
 
         src/utils/fs.hpp

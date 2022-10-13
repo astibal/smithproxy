@@ -42,10 +42,15 @@
 
 #include <cstdlib>
 #include <memory>
+#include <mutex>
+#include <set>
+#include <thread>
 
 #include <ext/lmhpp/include/lmhttpd.hpp>
 #include <ext/json/json.hpp>
 #include <main.hpp>
+#include <common/display.hpp>
+
 #include <openssl/rand.h>
 
 namespace sx::webserver {
