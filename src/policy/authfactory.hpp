@@ -48,15 +48,33 @@
 
 class baseHostCX;
 
+struct AuthFactoryOptions {
+    // publicly accessible config values
+    unsigned int token_timeout = 20; // token expires _from_cache_ after this timeout (in seconds).
+    int global_idle_timeout = 600;
+    std::string portal_address = "0.0.0.0";
+    std::string portal_address6 = "[::]";
+    std::string portal_port_http = "8008";
+    std::string portal_port_https = "8043";
+};
 
 class AuthFactory {
+
+    using shared_token_table_t = shared_table<shm_logon_token>;
+    using token_map_t = std::unordered_map<std::string,std::pair<unsigned int,std::string>>;
+
+    using shared_ip4_map_t = shared_logoninfotype_ntoa_map<shm_logon_info,4>;
+    using shared_ip6_map_t = shared_logoninfotype_ntoa_map<shm_logon_info6,16>;
+
+    using ip6_map_t = std::unordered_map<std::string,IdentityInfo6>;
+    using ip4_map_t = std::unordered_map<std::string,IdentityInfo> ;
 
     mutable std::recursive_mutex token_lock_;
     mutable std::recursive_mutex ip4_lock_;
     mutable std::recursive_mutex ip6_lock_;
 
-
-    AuthFactory () : log(get_log()) {};
+    AuthFactory() = default;
+    virtual ~AuthFactory() = default;
 
 public:
 
@@ -68,23 +86,7 @@ public:
         return a;
     };
 
-    // publicly accessible config values
-    unsigned int token_timeout = 20; // token expires _from_cache_ after this timeout (in seconds).
-    int global_idle_timeout = 600;
-    std::string portal_address = "0.0.0.0";
-    std::string portal_address6 = "[::]";
-    std::string portal_port_http = "8008";
-    std::string portal_port_https = "8043";
-
-
-    typedef shared_table<shm_logon_token> shared_token_table_t;
-    typedef std::unordered_map<std::string,std::pair<unsigned int,std::string>> token_map_t;
-
-    typedef shared_logoninfotype_ntoa_map<shm_logon_info,4> shared_ip4_map_t;
-    typedef shared_logoninfotype_ntoa_map<shm_logon_info6,16> shared_ip6_map_t;
-
-    typedef std::unordered_map<std::string,IdentityInfo6> ip6_map_t;
-    typedef std::unordered_map<std::string,IdentityInfo> ip4_map_t;
+    AuthFactoryOptions options;
 
     inline std::recursive_mutex& token_lock () const { return token_lock_; };
     inline std::recursive_mutex& ip4_lock () const { return ip4_lock_; };
@@ -136,7 +138,7 @@ public:
     bool ipX_inc_counters (baseHostCX *cx);
 
 
-    std::string to_string(int verbosity) const { return "AuthFactory"; };
+    std::string to_string([[maybe_unused]] int verbosity) const { return "AuthFactory"; };
 
     TYPENAME_BASE("AuthFactory")
     DECLARE_LOGGING(to_string)
@@ -146,7 +148,7 @@ public:
         return l;
     }
 
-    logan_lite& log;
+    logan_lite& log = get_log();
 };
 
 #endif //SMITHPROXY_AUTHFACTORY_HPP

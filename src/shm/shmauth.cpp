@@ -44,7 +44,7 @@
 
 
 IdentityInfoBase::IdentityInfoBase() {
-    idle_timeout = AuthFactory::get().global_idle_timeout;
+    idle_timeout = AuthFactory::get().options.global_idle_timeout;
     created = time(nullptr);
     last_seen_at = created;
 }

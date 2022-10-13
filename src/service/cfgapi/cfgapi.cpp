@@ -1886,11 +1886,11 @@ int CfgFactory::load_db_prof_auth () {
     _dia("load_db_prof_auth: start");
 
     _dia("load_db_prof_auth: portal settings");
-    load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "address", AuthFactory::get().portal_address);
+    load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "address", AuthFactory::get().options.portal_address);
 
-    load_if_exists<std::string>(cfgapi.getRoot()["settings"]["auth_portal"], "address6", AuthFactory::get().portal_address6);
-    load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "http_port", AuthFactory::get().portal_port_http);
-    load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "https_port", AuthFactory::get().portal_port_https);
+    load_if_exists<std::string>(cfgapi.getRoot()["settings"]["auth_portal"], "address6", AuthFactory::get().options.portal_address6);
+    load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "http_port", AuthFactory::get().options.portal_port_http);
+    load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "https_port", AuthFactory::get().options.portal_port_https);
 
     _dia("load_db_prof_auth: profiles");
     if(cfgapi.getRoot().exists("auth_profiles")) {
@@ -2899,8 +2899,8 @@ bool CfgFactory::apply_tenant_config () {
         ret += apply_tenant_index(listen_dtls_port, tenant_index);
         ret += apply_tenant_index(listen_udp_port, tenant_index);
         ret += apply_tenant_index(listen_socks_port, tenant_index);
-        ret += apply_tenant_index(AuthFactory::get().portal_port_http, tenant_index);
-        ret += apply_tenant_index(AuthFactory::get().portal_port_https, tenant_index);
+        ret += apply_tenant_index(AuthFactory::get().options.portal_port_http, tenant_index);
+        ret += apply_tenant_index(AuthFactory::get().options.portal_port_https, tenant_index);
 
         CliState::get().cli_port += tenant_index;
     }

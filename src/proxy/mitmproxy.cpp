@@ -1250,12 +1250,12 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
   
     
     std::string repl;
-    std::string repl_port = AuthFactory::get().portal_port_http;
+    std::string repl_port = AuthFactory::get().options.portal_port_http;
     std::string repl_proto = "http";
 
     if(cx->engine_ctx.application_data->is_ssl) {
         repl_proto = "https";
-        repl_port =AuthFactory::get().portal_port_https;
+        repl_port =AuthFactory::get().options.portal_port_https;
     }    
     
     std::string block_pre("<h2 class=\"fg-red\">Page has been blocked</h2><p>Access has been blocked by smithproxy.</p>"
@@ -1276,19 +1276,19 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
             unsigned int token_ts = cache_entry.first;
             std::string& token_tk = cache_entry.second;
             
-            if(now - token_ts < AuthFactory::get().token_timeout) {
+            if(now - token_ts < AuthFactory::get().options.token_timeout) {
                 _inf("MitmProxy::handle_replacement_auth: cached token %s for request: %s",
                                 token_tk.c_str(), cx->engine_ctx.application_data->str().c_str());
                 
                 if(cx->com()) {
                     if(cx->com()->l3_proto() == AF_INET) {
                         repl = redir_pre + repl_proto
-                                + "://"+AuthFactory::get().portal_address+":"+repl_port+"/cgi-bin/auth.py?token="
+                                + "://"+AuthFactory::get().options.portal_address+":"+repl_port+"/cgi-bin/auth.py?token="
                                 + token_tk + redir_suf;
 
                     } else if(cx->com()->l3_proto() == AF_INET6) {
                         repl = redir_pre + repl_proto
-                                + "://"+AuthFactory::get().portal_address6+":"+repl_port+"/cgi-bin/auth.py?token="
+                                + "://"+AuthFactory::get().options.portal_address6+":"+repl_port+"/cgi-bin/auth.py?token="
                                 + token_tk + redir_suf;
                     } 
                 } 
@@ -1296,7 +1296,7 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
                 if(repl.empty()) {
                     // default to IPv4 address
                     repl = redir_pre + repl_proto
-                            + "://"+AuthFactory::get().portal_address+":"+repl_port+"/cgi-bin/auth.py?token="
+                            + "://"+AuthFactory::get().options.portal_address+":"+repl_port+"/cgi-bin/auth.py?token="
                             + token_tk + redir_suf;
                 }
                 
@@ -1329,12 +1329,12 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
             if(cx->com()) {
                 if(cx->com()->l3_proto() == AF_INET) {
                     repl = redir_pre + repl_proto
-                            + "://"+AuthFactory::get().portal_address+":"+repl_port+"/cgi-bin/auth.py?token="
+                            + "://"+AuthFactory::get().options.portal_address+":"+repl_port+"/cgi-bin/auth.py?token="
                             + tok.token() + redir_suf;
 
                 } else if(cx->com()->l3_proto() == AF_INET6) {
                     repl = redir_pre + repl_proto
-                            + "://"+AuthFactory::get().portal_address6+":"+repl_port+"/cgi-bin/auth.py?token="
+                            + "://"+AuthFactory::get().options.portal_address6+":"+repl_port+"/cgi-bin/auth.py?token="
                             + tok.token() + redir_suf;
                 } 
             } 
@@ -1343,7 +1343,7 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
                 // default to IPv4 address
                 _dia("reply fallback to IPv4");
                 repl = redir_pre + repl_proto
-                        + "://"+AuthFactory::get().portal_address+":"+repl_port+"/cgi-bin/auth.py?token="
+                        + "://"+AuthFactory::get().options.portal_address+":"+repl_port+"/cgi-bin/auth.py?token="
                         + tok.token() + redir_suf;
             }
             
@@ -1367,7 +1367,7 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
     if (cx->replacement_flag() == MitmHostCX::REPLACE_BLOCK) {
 
         _dia("MitmProxy::handle_replacement_auth: instructed to replace block");
-        repl = block_pre + repl_proto + "://"+AuthFactory::get().portal_address+":"+repl_port + "/cgi-bin/auth.py?a=z" + block_post;
+        repl = block_pre + repl_proto + "://"+AuthFactory::get().options.portal_address+":"+repl_port + "/cgi-bin/auth.py?a=z" + block_post;
         
         std::string cap  = "Page Blocked";
         std::string meta;

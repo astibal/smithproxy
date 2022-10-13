@@ -278,10 +278,10 @@ namespace sx::proxymaker {
             redir_port = 65000 + CfgFactory::get()->tenant_index;
         } else if (target_port != 443) {
             // auth portal https magic IP
-            redir_port = std::stoi(AuthFactory::get().portal_port_http);
+            redir_port = std::stoi(AuthFactory::get().options.portal_port_http);
         } else {
             // auth portal plaintext magic IP
-            redir_port = std::stoi(AuthFactory::get().portal_port_https);
+            redir_port = std::stoi(AuthFactory::get().options.portal_port_https);
         }
         redir_host = "127.0.0.1";
 
