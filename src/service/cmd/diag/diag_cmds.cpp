@@ -1368,6 +1368,7 @@ int cli_diag_proxy_session_list(struct cli_def *cli, const char *command, char *
             flags = flag_set<int>(flags, SL_IO_ALL);
         }
         else if(arg == "nonames")  flags = flag_set<int>(flags, SL_NO_NAMES);
+        else if(arg == "ips")  flags = flag_set<int>(flags, SL_IPS);
         else {
             args.emplace_back(arg);
         }
@@ -1440,7 +1441,7 @@ void print_queue_stats(std::stringstream &ss, int verbosity, MitmHostCX *cx, con
     if(verbosity >= EXT and in_buf) {
         ss << "     " << bg << " last-seen read data: \n" << hex_dump(cx->readbuf(), 6) << "\n";
     }
-};
+}
 
 
 auto get_io_info(MitmHostCX* lf, MitmHostCX* rg, int sl_flags) {
@@ -1543,7 +1544,7 @@ auto get_io_info(MitmHostCX* lf, MitmHostCX* rg, int sl_flags) {
     }
 
     return std::make_tuple(do_print, prefix, suffix);
-};
+}
 
 
 
@@ -1629,39 +1630,35 @@ auto get_tls_info(MitmHostCX const* lf, MitmHostCX const* rg, int sl_flags, int 
 
                     auto scts = SSL_get0_peer_scts(ssl);
                     int scts_len = sk_SCT_num(scts);
-                    if (scts_len > 0) {
+                    tls_ss << "\n    sct: " << scts_len << " entries";
 
-                        tls_ss << "\n    sct: " << scts_len << " entries";
+                    if (scts_len > 0 and verbosity > iDIA) {
+                        const CTLOG_STORE *log_store = SSL_CTX_get0_ctlog_store(SSLFactory::factory().default_tls_client_cx());
 
-                        if (verbosity > iDIA) {
-                            const CTLOG_STORE *log_store = SSL_CTX_get0_ctlog_store(
-                                    SSLFactory::factory().default_tls_client_cx());
+                        for (int i = 0; i < scts_len; i++) {
+                            auto sct = sk_SCT_value(scts, i);
 
-                            for (int i = 0; i < scts_len; i++) {
-                                auto sct = sk_SCT_value(scts, i);
+                            unsigned char *sct_logid{};
+                            std::size_t sct_logid_len = 0;
 
-                                unsigned char *sct_logid{};
-                                std::size_t sct_logid_len = 0;
-
-                                sct_logid_len = SCT_get0_log_id(sct, &sct_logid);
-                                if (sct_logid_len > 0)
-                                    tls_ss << "\n        sct log." << i << ": "
-                                           << hex_print(sct_logid, sct_logid_len);
-                                auto val_stat = SCT_get_validation_status(sct);
+                            sct_logid_len = SCT_get0_log_id(sct, &sct_logid);
+                            if (sct_logid_len > 0)
                                 tls_ss << "\n        sct log." << i << ": "
-                                       << socle::com::ssl::SCT_validation_status_str(val_stat);
+                                       << hex_print(sct_logid, sct_logid_len);
+                            auto val_stat = SCT_get_validation_status(sct);
+                            tls_ss << "\n        sct log." << i << ": "
+                                   << socle::com::ssl::SCT_validation_status_str(val_stat);
 
-                                BioMemory bm;
-                                SCT_print(sct, bm, 4, log_store);
-                                auto v_of_s = string_split(bm.str(), '\n');
-                                for (auto const &s: v_of_s) {
-                                    tls_ss << "\n        sct log." << i << ": " << s;
-                                }
+                            BioMemory bm;
+                            SCT_print(sct, bm, 4, log_store);
+                            auto v_of_s = string_split(bm.str(), '\n');
+                            for (auto const &s: v_of_s) {
+                                tls_ss << "\n        sct log." << i << ": " << s;
                             }
                         }
                     }
-
-                } else {
+                }
+                else {
                     tls_ss << "\n  " << label << ": tls, but no info";
                 }
             } else {
@@ -1676,7 +1673,7 @@ auto get_tls_info(MitmHostCX const* lf, MitmHostCX const* rg, int sl_flags, int 
 
     }
     return std::make_tuple(do_print, prefix, suffix);
-};
+}
 
 
 
@@ -1699,7 +1696,7 @@ auto replace_proxy_title_with_sni(std::string const &title, MitmHostCX *right_cx
     } else {
         return title;
     }
-};
+}
 
 auto get_proxy_title(MitmProxy* proxy, int sl_flags, int verbosity) {
 
@@ -1712,7 +1709,7 @@ auto get_proxy_title(MitmProxy* proxy, int sl_flags, int verbosity) {
             return proxy->to_string(verbosity);
         }
     }
-};
+}
 
 
 auto get_more_info(sobject_info const* so_info, MitmProxy const* curr_proxy, MitmHostCX* lf, MitmHostCX* rg, int verbosity) {
@@ -1759,20 +1756,18 @@ auto get_more_info(sobject_info const* so_info, MitmProxy const* curr_proxy, Mit
             }
         }
 
-        if (lf) {
-            if (verbosity > INF and lf->socket() > 0) {
+        if (verbosity > INF) {
+            if(lf and lf->socket() > 0) {
                 print_queue_stats(info_ss, verbosity, lf, "lf", "Left");
             }
-        }
-        if (rg) {
-            if (verbosity > INF and rg->socket() > 0) {
+            if(rg and rg->socket() > 0) {
                 print_queue_stats(info_ss, verbosity, rg, "rg", "Right");
             }
         }
     }
 
     return info_ss.str();
-};
+}
 
 
 int cli_diag_proxy_session_list_extra (struct cli_def *cli, const char *command, std::vector<std::string> const &args,
@@ -2177,14 +2172,13 @@ bool register_diags(cli_def* cli, cli_command* diag) {
     cli_register_command(cli, diag_workers, "list", cli_diag_worker_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list worker threads");
 
 
-    if(true) {
+
 #ifndef USE_OPENSSL11
         auto diag_ssl_memcheck = cli_register_command(cli, diag_ssl, "memcheck", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose openssl memcheck");
             cli_register_command(cli, diag_ssl_memcheck, "list", cli_diag_ssl_memcheck_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "print out OpenSSL memcheck status");
             cli_register_command(cli, diag_ssl_memcheck, "enable", cli_diag_ssl_memcheck_enable, PRIVILEGE_PRIVILEGED, MODE_EXEC, "enable OpenSSL debug collection");
             cli_register_command(cli, diag_ssl_memcheck, "disable", cli_diag_ssl_memcheck_disable, PRIVILEGE_PRIVILEGED, MODE_EXEC, "disable OpenSSL debug collection");
 #endif
-    }
 
     auto diag_mem = cli_register_command(cli, diag, "mem", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory related troubleshooting commands");
         auto diag_mem_buffers = cli_register_command(cli, diag_mem, "buffers", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory buffers troubleshooting commands");
