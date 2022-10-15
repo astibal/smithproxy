@@ -564,18 +564,24 @@ int main(int argc, char *argv[]) {
     SmithProxy::instance().create_dns_thread();
     SmithProxy::instance().create_identity_thread();
 
-    if(CfgFactory::get()->accept_api) {
+    auto start_api = [&]() {
+        if (CfgFactory::get()->accept_api) {
 
-        if(not sx::webserver::HttpSessions::api_keys.empty()) {
-            SmithProxy::instance().create_api_thread();
-        } else {
-            Log::get()->events().insert(ERR, "cannot start API server: key not set");
+            if (not sx::webserver::HttpSessions::api_keys.empty()) {
+                SmithProxy::instance().create_api_thread();
+            } else {
+                Log::get()->events().insert(ERR, "cannot start API server: key not set");
+            }
         }
-    }
+    };
 
     // launch listeners
 
     if(SmithProxy::instance().create_listeners()) {
+
+        // init to get certificates and info
+        SSLFactory::factory().init();
+        start_api();
 
         _cri("Smithproxy %s (socle %s) starting...", SMITH_VERSION, SOCLE_VERSION);
         SmithProxy::instance().run();

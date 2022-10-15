@@ -14,6 +14,7 @@ std::thread* create_httpd_thread(unsigned short port) {
 
         lmh::WebServer server(port);
         server.options().bind_loopback = HttpSessions::loopback_only;
+        server.options().certificate = std::make_pair(SSLFactory::factory().config.def_sr_key_str, SSLFactory::factory().config.def_sr_cert_str);
 
         handlers::controller_add_debug_only(server);
 

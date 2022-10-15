@@ -115,6 +115,13 @@ struct HttpSessions {
     static inline bool extend_on_access = true;
     static inline bool loopback_only = true;
 
+    enum class cookie_samesite { None, Lax, Strict };
+
+    constexpr static const char* COOKIE_AUTH_TOKEN="__sx_api";
+    static inline cookie_samesite COOKIE_SAMESITE = cookie_samesite::Strict;
+
+    constexpr static const char* COOKIE_CSRF_TOKEN="csrf_token";
+
     constexpr static const char* ATT_AUTH_TOKEN = "auth_token";
     constexpr static const char* ATT_CSRF_TOKEN = "csrf_token";
 
@@ -250,7 +257,7 @@ public:
 
         if(ret.response_code == MHD_HTTP_OK) {
 
-            ret.headers = json_response_headers;
+            std::copy(json_response_headers.begin(), json_response_headers.end(), std::back_inserter(ret.headers));
 
             response << to_string(ret.response);
         }

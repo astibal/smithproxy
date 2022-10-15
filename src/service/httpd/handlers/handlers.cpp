@@ -60,7 +60,7 @@ namespace sx::webserver {
 
             }
             return ret;
-            }
+        }
 
 
         Http_JsonResponseParams unprotected::operator()(MHD_Connection *conn, std::string const &req) const {
@@ -109,6 +109,64 @@ namespace sx::webserver {
     }
 
     void controller_add_authorization(lmh::WebServer &server) {
+
+        static auto create_auth_cookie_val = [](std::string const& token){
+            using samesite_t = HttpSessions::cookie_samesite;
+
+            std::stringstream ss;
+            ss << string_format("%s=%s; Max-Age:%d",
+                                HttpSessions::COOKIE_AUTH_TOKEN,
+                                token.c_str(), HttpSessions::session_ttl);
+
+            if(HttpSessions::COOKIE_SAMESITE != samesite_t::None) {
+                ss << "; SameSite=";
+                ss << (HttpSessions::COOKIE_SAMESITE == samesite_t::Lax ? "Lax" : "Strict");
+            }
+
+            return ss.str();
+        };
+        static auto create_token_cookie_val = [](std::string const& token){
+            std::stringstream ss;
+            ss << string_format("__Host-%s=%s; Secure; Path=/",
+                                HttpSessions::COOKIE_CSRF_TOKEN,
+                                token.c_str(), HttpSessions::session_ttl);
+
+
+            return ss.str();
+        };
+
+        static Http_JsonResponder authorize_get(
+                "GET",
+                "/api/authorize",
+                [](MHD_Connection *conn, std::string const &req) -> Http_JsonResponseParams {
+                    Http_JsonResponseParams ret;
+                    ret.response_code = MHD_YES;
+
+                    auto key = MHD_lookup_connection_value(conn, MHD_GET_ARGUMENT_KIND, "key");
+                    bool found = false;
+                    if(key){
+                        auto lc_ = std::scoped_lock(HttpSessions::lock);
+                        found = (HttpSessions::api_keys.find(key) !=
+                                 HttpSessions::api_keys.end());
+                    }
+
+                    if(found) {
+                        auto auth_token = HttpSessions::generate_auth_token();
+                        auto csrf_token = HttpSessions::generate_csrf_token();
+
+                        ret.response = {{"auth_token", auth_token},
+                                        {"csrf_token", csrf_token}};
+
+                        ret.headers.emplace_back("Set-Cookie", create_auth_cookie_val(auth_token));
+                        ret.headers.emplace_back("Set-Cookie", create_token_cookie_val(csrf_token));
+
+                        return ret;
+                    }
+
+                    ret.response_code = MHD_HTTP_FORBIDDEN;
+                    return ret;
+                });
+
         static Http_JsonResponder authorize(
                 "POST",
                 "/api/authorize",
@@ -135,6 +193,9 @@ namespace sx::webserver {
                                 ret.response = {{"auth_token", auth_token},
                                                 {"csrf_token", csrf_token}};
 
+                                ret.headers.emplace_back("Set-Cookie", create_auth_cookie_val(auth_token));
+                                ret.headers.emplace_back("Set-Cookie", create_token_cookie_val(csrf_token));
+
                                 auto lc_ = std::scoped_lock(HttpSessions::lock);
                                 HttpSessions::access_keys[auth_token]["csrf_token"] = TimedOptional(csrf_token,
                                                                                                     HttpSessions::session_ttl);
@@ -159,6 +220,7 @@ namespace sx::webserver {
         );
 
         server.addController(&authorize);
+        server.addController(&authorize_get);
     }
 
     void controller_add_diag(lmh::WebServer &server) {
