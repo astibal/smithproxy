@@ -64,10 +64,10 @@ namespace sx::webserver {
                     if(meth == "POST" and token_header.empty()) {
                         return std::nullopt;
                     }
-                    else if(not token_cookie.empty() and not token_header.empty()) {
+                    else if(not token_header.empty()) {
 
                         // csrf token and header must match
-                        if(token_cookie != token_header) return std::nullopt;
+                        if(not token_cookie.empty() and token_cookie != token_header) return std::nullopt;
 
                         // prepare for return value
                         token_cookie = token_header;
