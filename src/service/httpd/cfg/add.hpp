@@ -53,7 +53,7 @@ namespace sx::webserver {
 
     using nlohmann::json;
 
-    nlohmann::json json_add_section_entry(struct MHD_Connection * connection, std::string const& req) {
+    nlohmann::json json_add_section_entry(struct MHD_Connection * connection, std::string const& meth, std::string const& req) {
 
         /*      request example (auth token is processed earlier)
          *      {

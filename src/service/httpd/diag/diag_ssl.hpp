@@ -44,7 +44,7 @@
 #include <service/httpd/jsonize.hpp>
 
 
-static nlohmann::json json_ssl_cache_stats(struct MHD_Connection * connection, std::string const& req) {
+static nlohmann::json json_ssl_cache_stats(struct MHD_Connection* conn, std::string const& meth, std::string const& req) {
     SSLFactory* store = SSLCom::factory();
 
     int n_cache = 0;
@@ -59,7 +59,7 @@ static nlohmann::json json_ssl_cache_stats(struct MHD_Connection * connection, s
     return ret;
 }
 
-static nlohmann::json json_ssl_cache_print(struct MHD_Connection * connection, std::string const& req) {
+static nlohmann::json json_ssl_cache_print(struct MHD_Connection* connection, std::string const& meth, std::string const& req) {
 
 
     SSLFactory *store = SSLCom::factory();

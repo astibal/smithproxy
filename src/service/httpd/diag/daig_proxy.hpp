@@ -45,7 +45,7 @@
 
 
 
-static nlohmann::json json_proxy_session_list(struct MHD_Connection * connection, std::string const& req) {
+static nlohmann::json json_proxy_session_list(struct MHD_Connection * connection, std::string const& meth, std::string const& req) {
 
     using nlohmann::json;
     using namespace jsonize;

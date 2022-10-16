@@ -120,7 +120,7 @@ struct HttpSessions {
     constexpr static const char* COOKIE_AUTH_TOKEN="__sx_api";
     static inline cookie_samesite COOKIE_SAMESITE = cookie_samesite::Strict;
 
-    constexpr static const char* COOKIE_CSRF_TOKEN="csrf_token";
+    constexpr static const char* HEADER_CSRF_TOKEN="csrf_token";
 
     constexpr static const char* ATT_AUTH_TOKEN = "auth_token";
     constexpr static const char* ATT_CSRF_TOKEN = "csrf_token";
@@ -253,7 +253,7 @@ public:
         }
 
 
-        auto ret = responder(connection, request_data);
+        auto ret = responder(connection, meth, request_data);
 
         if(ret.response_code == MHD_HTTP_OK) {
 

@@ -15,7 +15,7 @@ namespace sx::webserver {
     using nlohmann::json;
     using namespace libconfig;
 
-    nlohmann::json json_set_section_entry(struct MHD_Connection * connection, std::string const& req) {
+    nlohmann::json json_set_section_entry(struct MHD_Connection * connection, std::string const& meth, std::string const& req) {
 
 
         /*      request example (auth token is processed earlier)

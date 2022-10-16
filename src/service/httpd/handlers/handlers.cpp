@@ -4,13 +4,6 @@
 #include <service/httpd/httpd.hpp>
 #include <service/core/smithproxy.hpp>
 
-#include <service/httpd/diag/diag_ssl.hpp>
-#include <service/httpd/diag/daig_proxy.hpp>
-
-#include <service/httpd/cfg/add.hpp>
-#include <service/httpd/cfg/set.hpp>
-#include <service/httpd/cfg/get.hpp>
-
 #include <service/httpd/handlers/handlers.hpp>
 
 namespace sx::webserver {
@@ -31,39 +24,91 @@ namespace sx::webserver {
         }
 
 
-        Http_JsonResponseParams token_protected::operator()(MHD_Connection *conn, std::string const &req) const {
+        Http_JsonResponseParams token_protected::operator()(MHD_Connection *conn, std::string const& meth, std::string const &req) const {
 
             Http_JsonResponseParams ret;
 
-            if (not req.empty()) {
+            auto validate_and_call = [&](auto const& key, auto const& token) {
+                if (HttpSessions::validate_tokens(key, token)
+                        ) {
+                    ret.response = Func(conn, meth, req);
+                    ret.response_code = MHD_HTTP_OK;
+                } else {
+                    Log::get()->events().insert(ERR, "unauthorized API access attempt from %s",
+                                                client_address(conn).c_str());
+
+
+                    ret.response = {{"error", "access denied"},};
+                }
+            };
+
+            auto char_to_str = [](const char* cstr) -> std::string {
+                if(not cstr) return {};
+
+                return std::string(cstr);
+            };
+
+            auto extract_cookies_headers = [&]() -> std::optional<std::pair<std::string, std::string>> {
+                std::string auth_cookie = char_to_str(MHD_lookup_connection_value(conn, MHD_COOKIE_KIND, HttpSessions::COOKIE_AUTH_TOKEN));
+
+                std::string token_cookie_name("__Host-");
+                token_cookie_name += HttpSessions::HEADER_CSRF_TOKEN;
+
+                // token cookie is optional, however if set, it must be the same as header
+                std::string token_cookie = char_to_str(MHD_lookup_connection_value(conn, MHD_COOKIE_KIND, token_cookie_name.c_str()));
+
+                if(not auth_cookie.empty()) {
+                    std::string token_header = char_to_str(MHD_lookup_connection_value(conn, MHD_HEADER_KIND, HttpSessions::HEADER_CSRF_TOKEN));
+
+                    // POST is required to have CSRF header
+                    if(meth == "POST" and token_header.empty()) {
+                        return std::nullopt;
+                    }
+                    else if(not token_cookie.empty() and not token_header.empty()) {
+
+                        // csrf token and header must match
+                        if(token_cookie != token_header) return std::nullopt;
+
+                        // prepare for return value
+                        token_cookie = token_header;
+                    }
+                }
+
+                if(auth_cookie.empty() or token_cookie.empty())
+                    return std::nullopt;
+
+                return std::make_optional<std::pair<std::string, std::string>>(auth_cookie, token_cookie);
+            };
+
+            if (not req.empty() or meth != "POST") {
                 ret.response_code = MHD_HTTP_OK;
 
-                try {
-                    json jreq = json::parse(req);
-                    if (HttpSessions::validate_tokens(
-                            jreq[HttpSessions::ATT_AUTH_TOKEN].get<std::string>(),
-                            jreq[HttpSessions::ATT_CSRF_TOKEN].get<std::string>())) {
-                        ret.response = Func(conn, req);
-                        ret.response_code = MHD_HTTP_OK;
-                    } else {
-                        Log::get()->events().insert(ERR,"unauthorized API access attempt from %s", client_address(conn).c_str());
+                // authenticate using cookies & headers if both set
 
+                if(auto cookies_headers = extract_cookies_headers(); cookies_headers) {
+
+                    validate_and_call(cookies_headers.value().first, cookies_headers.value().second);
+                }
+                else {
+                    try {
+                        json jreq = json::parse(req);
+                        auto key = jreq[HttpSessions::ATT_AUTH_TOKEN].get<std::string>();
+                        auto token = jreq[HttpSessions::ATT_CSRF_TOKEN].get<std::string>();
+
+                        validate_and_call(key, token);
+                    }
+                    catch (json::exception const &) {
+                        Log::get()->events().insert(ERR, "malformed API request from %s", client_address(conn).c_str());
 
                         ret.response = {{"error", "access denied"},};
                     }
                 }
-                catch (json::exception const &) {
-                    Log::get()->events().insert(ERR,"malformed API request from %s", client_address(conn).c_str());
-
-                    ret.response = {{"error", "access denied"},};
-                }
-
             }
             return ret;
         }
 
 
-        Http_JsonResponseParams unprotected::operator()(MHD_Connection *conn, std::string const &req) const {
+        Http_JsonResponseParams unprotected::operator()(MHD_Connection *conn, std::string const& meth, std::string const &req) const {
 
             Http_JsonResponseParams ret;
 
@@ -72,7 +117,7 @@ namespace sx::webserver {
 
                 try {
                     json jreq = json::parse(req);
-                    ret.response = Func(conn, req);
+                    ret.response = Func(conn, meth, req);
                     ret.response_code = MHD_HTTP_OK;
                 }
                 catch (json::exception const &) {
@@ -86,27 +131,9 @@ namespace sx::webserver {
     }
 
 
-    namespace handlers {
+    namespace dispatchers {
 
     using json = nlohmann::json;
-
-    void controller_add_debug_only(lmh::WebServer &server) {
-        #ifndef BUILD_RELEASE
-        static Http_JsonResponder status_ping(
-                "POST",
-                "/api/status/ping",
-                authorized::unprotected(
-                        []([[maybe_unused]] MHD_Connection *c, [[maybe_unused]] std::string const &req) -> json {
-                            time_t uptime = time(nullptr) - SmithProxy::instance().ts_sys_started;
-                            return {{"version", SMITH_VERSION},
-                                    {"status",     "ok"},
-                                    {"uptime",     uptime},
-                                    {"uptime_str", uptime_string(uptime)}};
-                        }));
-
-        server.addController(&status_ping);
-        #endif
-    }
 
     void controller_add_authorization(lmh::WebServer &server) {
 
@@ -128,7 +155,7 @@ namespace sx::webserver {
         static auto create_token_cookie_val = [](std::string const& token){
             std::stringstream ss;
             ss << string_format("__Host-%s=%s; Secure; Path=/",
-                                HttpSessions::COOKIE_CSRF_TOKEN,
+                                HttpSessions::HEADER_CSRF_TOKEN,
                                 token.c_str(), HttpSessions::session_ttl);
 
 
@@ -138,7 +165,7 @@ namespace sx::webserver {
         static Http_JsonResponder authorize_get(
                 "GET",
                 "/api/authorize",
-                [](MHD_Connection *conn, std::string const &req) -> Http_JsonResponseParams {
+                [](MHD_Connection *conn, std::string const& meth, std::string const &req) -> Http_JsonResponseParams {
                     Http_JsonResponseParams ret;
                     ret.response_code = MHD_YES;
 
@@ -154,12 +181,17 @@ namespace sx::webserver {
                         auto auth_token = HttpSessions::generate_auth_token();
                         auto csrf_token = HttpSessions::generate_csrf_token();
 
+                        auto lc_ = std::scoped_lock(HttpSessions::lock);
+                        HttpSessions::access_keys[auth_token]["csrf_token"] = TimedOptional(csrf_token,
+                                                                                            HttpSessions::session_ttl);
+
                         ret.response = {{"auth_token", auth_token},
                                         {"csrf_token", csrf_token}};
 
                         ret.headers.emplace_back("Set-Cookie", create_auth_cookie_val(auth_token));
                         ret.headers.emplace_back("Set-Cookie", create_token_cookie_val(csrf_token));
 
+                        ret.response_code = MHD_HTTP_OK;
                         return ret;
                     }
 
@@ -170,7 +202,7 @@ namespace sx::webserver {
         static Http_JsonResponder authorize(
                 "POST",
                 "/api/authorize",
-                [](MHD_Connection *conn, std::string const &req) -> Http_JsonResponseParams {
+                [](MHD_Connection *conn, std::string const& meth, std::string const &req) -> Http_JsonResponseParams {
 
                     Http_JsonResponseParams ret;
                     ret.response_code = MHD_YES;
@@ -222,54 +254,5 @@ namespace sx::webserver {
         server.addController(&authorize);
         server.addController(&authorize_get);
     }
-
-    void controller_add_diag(lmh::WebServer &server) {
-        static Http_JsonResponder diag_ssl_cache_stats(
-                "POST",
-                "/api/diag/ssl/cache/stats",
-                authorized::token_protected(json_ssl_cache_stats)
-        );
-        server.addController(&diag_ssl_cache_stats);
-
-
-        static Http_JsonResponder diag_ssl_cache_print(
-                "POST",
-                "/api/diag/ssl/cache/print",
-                authorized::token_protected(json_ssl_cache_print)
-        );
-        server.addController(&diag_ssl_cache_print);
-
-        static Http_JsonResponder diag_proxy_session_list(
-                "POST",
-                "/api/diag/proxy/session/list",
-                authorized::token_protected(json_proxy_session_list)
-        );
-        server.addController(&diag_proxy_session_list);
-    }
-
-    void controller_add_uni(lmh::WebServer &server) {
-        static Http_JsonResponder cfg_uni_add(
-                "POST",
-                "/api/config/uni/add",
-                authorized::token_protected(&json_add_section_entry)
-        );
-        server.addController(&cfg_uni_add);
-
-        static Http_JsonResponder cfg_uni_set(
-                "POST",
-                "/api/config/uni/set",
-                authorized::token_protected(&json_set_section_entry)
-        );
-        server.addController(&cfg_uni_set);
-
-
-        static Http_JsonResponder cfg_uni_get(
-                "POST",
-                "/api/config/uni/get",
-                authorized::token_protected(&json_get_section_entry)
-        );
-        server.addController(&cfg_uni_get);
-    }
-
 }
 }
