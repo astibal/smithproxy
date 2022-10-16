@@ -137,30 +137,6 @@ namespace sx::webserver {
 
     void controller_add_authorization(lmh::WebServer &server) {
 
-        static auto create_auth_cookie_val = [](std::string const& token){
-            using samesite_t = HttpSessions::cookie_samesite;
-
-            std::stringstream ss;
-            ss << string_format("%s=%s; Max-Age:%d",
-                                HttpSessions::COOKIE_AUTH_TOKEN,
-                                token.c_str(), HttpSessions::session_ttl);
-
-            if(HttpSessions::COOKIE_SAMESITE != samesite_t::None) {
-                ss << "; SameSite=";
-                ss << (HttpSessions::COOKIE_SAMESITE == samesite_t::Lax ? "Lax" : "Strict");
-            }
-
-            return ss.str();
-        };
-        static auto create_token_cookie_val = [](std::string const& token){
-            std::stringstream ss;
-            ss << string_format("__Host-%s=%s; Secure; Path=/",
-                                HttpSessions::HEADER_CSRF_TOKEN,
-                                token.c_str(), HttpSessions::session_ttl);
-
-
-            return ss.str();
-        };
 
         static Http_JsonResponder authorize_get(
                 "GET",
@@ -177,19 +153,8 @@ namespace sx::webserver {
                                  HttpSessions::api_keys.end());
                     }
 
-                    if(found) {
-                        auto auth_token = HttpSessions::generate_auth_token();
-                        auto csrf_token = HttpSessions::generate_csrf_token();
-
-                        auto lc_ = std::scoped_lock(HttpSessions::lock);
-                        HttpSessions::access_keys[auth_token]["csrf_token"] = TimedOptional(csrf_token,
-                                                                                            HttpSessions::session_ttl);
-
-                        ret.response = {{"auth_token", auth_token},
-                                        {"csrf_token", csrf_token}};
-
-                        ret.headers.emplace_back("Set-Cookie", create_auth_cookie_val(auth_token));
-                        ret.headers.emplace_back("Set-Cookie", create_token_cookie_val(csrf_token));
+                    if (found) {
+                        authorize_response(ret);
 
                         ret.response_code = MHD_HTTP_OK;
                         return ret;
@@ -218,19 +183,7 @@ namespace sx::webserver {
                                          HttpSessions::api_keys.end());
                             }
                             if (found) {
-
-                                auto auth_token = HttpSessions::generate_auth_token();
-                                auto csrf_token = HttpSessions::generate_csrf_token();
-
-                                ret.response = {{"auth_token", auth_token},
-                                                {"csrf_token", csrf_token}};
-
-                                ret.headers.emplace_back("Set-Cookie", create_auth_cookie_val(auth_token));
-                                ret.headers.emplace_back("Set-Cookie", create_token_cookie_val(csrf_token));
-
-                                auto lc_ = std::scoped_lock(HttpSessions::lock);
-                                HttpSessions::access_keys[auth_token]["csrf_token"] = TimedOptional(csrf_token,
-                                                                                                    HttpSessions::session_ttl);
+                                authorize_response(ret);
                             } else {
                                 Log::get()->events().insert(ERR, "unauthorized API access attempt from %s",
                                                             authorized::client_address(conn).c_str());
