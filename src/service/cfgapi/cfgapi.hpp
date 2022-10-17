@@ -193,7 +193,7 @@ public:
 //    static inline bool config_changed_flag = false;
 
     // Each version bump implies a config upgrade - we start on 1000
-    constexpr static inline const int SCHEMA_VERSION  = 1009;
+    constexpr static inline const int SCHEMA_VERSION  = 1010;
 
     CfgFactory() = default;
     CfgFactory(CfgFactory const &) = delete;
@@ -243,6 +243,8 @@ public:
     bool accept_redirect = true;
     bool accept_socks = true;
     bool accept_api = true;
+
+    std::string admin_group;
 
     int num_workers_tcp = 0;
     int num_workers_tls = 0;

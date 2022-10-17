@@ -369,6 +369,12 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
 
         return true;
     }
+    else if(upgrade_to_num == 1010) {
+        log.event(INF, "added settings.admin section");
+        log.event(INF, "added settings.admin.group string variable");
+
+        return true;
+    }
 
 
 
@@ -638,6 +644,10 @@ bool CfgFactory::load_settings () {
         CliState::get().cli_port = CliState::get().cli_port_base;
 
         load_if_exists(cfgapi.getRoot()["settings"]["cli"], "enable_password", CliState::get().cli_enable_password);
+    }
+
+    if(cfgapi.getRoot()["settings"].exists("admin")) {
+        load_if_exists(cfgapi.getRoot()["settings"]["admin"], "group", admin_group);
     }
 
     if(cfgapi.getRoot()["settings"].exists("auth_portal")) {
@@ -4488,10 +4498,12 @@ int save_settings(Config& ex) {
     objects.add("sslkeylog_file", Setting::TypeString) = CfgFactory::get()->sslkeylog_file_base;
     objects.add("messages_dir", Setting::TypeString) = CfgFactory::get()->dir_msg_templates;
 
+    Setting& admin_objects = objects.add("admin", Setting::TypeGroup);
+    admin_objects.add("group", Setting::TypeString) = CfgFactory::get()->admin_group;
+
     Setting& cli_objects = objects.add("cli", Setting::TypeGroup);
     cli_objects.add("port", Setting::TypeInt) = CliState::get().cli_port_base;
     cli_objects.add("enable_password", Setting::TypeString) = CliState::get().cli_enable_password;
-
 
     Setting& auth_objects = objects.add("auth_portal", Setting::TypeGroup);
     auth_objects.add("address", Setting::TypeString) = CfgFactory::get()->auth_address;

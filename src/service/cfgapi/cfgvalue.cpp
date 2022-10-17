@@ -395,6 +395,11 @@ void CfgValueHelp::init() {
             .may_be_empty(false)
             .value_filter(CfgValue::VALUE_UINT_NZ);
 
+    add("settings.admin", "administration options");
+    add("settings.admin.group", "system group with granted access; empty means root.")
+            .help_quick("<string>: existing group name")
+            .may_be_empty(true);
+
     add("settings.http_api.key_extend_on_access", "If set, tokens are refreshed when used")
             .help_quick("<bool>: set true to refresh tokens when used (default: true)")
             .may_be_empty(false)

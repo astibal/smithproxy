@@ -289,7 +289,20 @@ namespace sx::webserver {
 #else
                             if(false) {
 #endif
-                                authorize_response(ret);
+                                auto admin_group = CfgFactory::get()->admin_group;
+                                if(admin_group.empty()) admin_group = "root";
+
+                                if(auth::unix_is_group_member(u.c_str(), admin_group.c_str())) {
+                                    authorize_response(ret);
+                                } else {
+                                    Log::get()->events().insert(ERR, "unauthorized access attempt from %s as user %s (not '%s' group member)",
+                                                                authorized::client_address(conn).c_str(),
+                                                                u.c_str(),
+                                                                admin_group.c_str());
+
+                                    ret.response_code = MHD_HTTP_UNAUTHORIZED;
+                                    ret.response = {{"error", "access denied"},};
+                                }
                             }
                             else {
                                 ret.response = {{"error", "access denied"},};
@@ -297,7 +310,7 @@ namespace sx::webserver {
                             }
                         }
                         catch(std::out_of_range const& e) {
-                            Log::get()->events().insert(ERR, "unauthorized API access attempt from %s",
+                            Log::get()->events().insert(ERR, "unauthorized access attempt from %s",
                                                         authorized::client_address(conn).c_str());
 
                             ret.response = {{"error", "access denied"},};

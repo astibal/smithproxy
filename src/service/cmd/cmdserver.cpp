@@ -2119,6 +2119,14 @@ void generate_callbacks() {
             .cap("toggle", true)
             .cmd("toggle", cli_generic_toggle_cb);
 
+    register_callback( "settings.admin",MODE_EDIT_SETTINGS_ADMIN)
+            .cap("set", true)
+            .cmd("set", cli_generic_set_cb)
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_settings_admin)
+            .cap("toggle", true)
+            .cmd("toggle", cli_generic_toggle_cb);
+
     register_callback(
             "settings.nameservers",MODE_EDIT_SETTINGS + 1)
             .cap("set", true)
