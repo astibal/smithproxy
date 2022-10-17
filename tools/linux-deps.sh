@@ -103,7 +103,7 @@ if [ "${DIST}" = "Ubuntu" ]; then
     wget curl \
     python3 python3-pip python3-dev \
     libconfig++${SX_LIBCONFIG_VER} ${LIBSSL} libunwind8 libmicrohttpd12 \
-    libconfig-dev libconfig++-dev  libssl-dev libunwind-dev libmicrohttpd-dev git g++-${SX_GCC_VER} cmake make
+    libconfig-dev libconfig++-dev  libssl-dev libunwind-dev libmicrohttpd-dev libpam-dev git g++-${SX_GCC_VER} cmake make
 
     echo "... installing OS toolchains"
     apt install -y iptables telnet iproute2 python3-cryptography python3-pyroute2 \
@@ -146,7 +146,7 @@ elif [ "${DIST}" = "Debian" ]; then
     wget curl \
     python3 python3-pip python3-dev \
     libconfig++${SX_LIBCONFIG_VER} libssl1.1 libunwind8 libmicrohttpd12 \
-    libconfig-dev libconfig++-dev  libssl-dev libunwind-dev libmicrohttpd-dev git g++-${SX_GCC_VER} cmake make
+    libconfig-dev libconfig++-dev  libssl-dev libunwind-dev libmicrohttpd-dev libpam-dev git g++-${SX_GCC_VER} cmake make
 
     echo "... installing OS toolchains"
     apt install -y iptables telnet iproute2 && \
@@ -177,7 +177,7 @@ elif [ "${DIST}" = "Alpine" ]; then
     apk add git bash
     apk add make gcc musl-dev
 
-    apk add openssl libconfig libconfig-dev libmicrohttpd libmicrohttpd-dev
+    apk add openssl libconfig libconfig-dev libmicrohttpd libmicrohttpd-dev linux-pam-dev
     apk add cmake g++ python3-dev libexecinfo-dev openssl-dev linux-headers libunwind-dev
     apk add busybox-extras iptables iproute2
     apk add libffi-dev libxml2-dev libxslt-dev xmlsec-dev
@@ -199,7 +199,7 @@ elif [ "${DIST}" = "Fedora" ]; then
     OPW=`pwd`
     yum update -y
     yum install -y git openssl-libs openssl-devel libconfig-devel python3-devel libunwind-devel kernel-headers glibc-headers
-    yum install -y libmicrohttpd libmicrohttpd-devel
+    yum install -y libmicrohttpd libmicrohttpd-devel pam-devel
 
     yum install -y gcc-c++ cmake make
     yum install -y telnet iptables iproute

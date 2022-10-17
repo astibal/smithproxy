@@ -178,6 +178,7 @@ parts:
       - libssl-dev
       - libffi-dev
       - libmicrohttpd-dev
+      - libpam-dev
       - try:
         - libxml2-dev
         - libxslt1-dev
