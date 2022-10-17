@@ -6,6 +6,8 @@
 
 #include <service/httpd/handlers/handlers.hpp>
 
+#include <service/core/authpam.hpp>
+
 namespace sx::webserver {
 
     namespace authorized {
@@ -130,6 +132,48 @@ namespace sx::webserver {
 
     }
 
+    std::string create_auth_cookie_val(std::string const& token){
+        using samesite_t = HttpSessions::cookie_samesite;
+
+        std::stringstream ss;
+        ss << string_format("%s=%s; Max-Age:%d",
+                            HttpSessions::COOKIE_AUTH_TOKEN,
+                            token.c_str(), HttpSessions::session_ttl);
+
+        if(HttpSessions::COOKIE_SAMESITE != samesite_t::None) {
+            ss << "; SameSite=";
+            ss << (HttpSessions::COOKIE_SAMESITE == samesite_t::Lax ? "Lax" : "Strict");
+        }
+
+        return ss.str();
+    }
+
+    std::string create_token_cookie_val(std::string const& token){
+        std::stringstream ss;
+        ss << string_format("__Host-%s=%s; Secure; Path=/",
+                            HttpSessions::HEADER_CSRF_TOKEN,
+                            token.c_str(), HttpSessions::session_ttl);
+
+
+        return ss.str();
+    };
+
+    static void authorize_response(Http_JsonResponseParams& response) {
+
+        auto auth_token = HttpSessions::generate_auth_token();
+        auto csrf_token = HttpSessions::generate_csrf_token();
+
+        response.response = {{"auth_token", auth_token},
+                        {"csrf_token", csrf_token}};
+
+        response.headers.emplace_back("Set-Cookie", create_auth_cookie_val(auth_token));
+        response.headers.emplace_back("Set-Cookie", create_token_cookie_val(csrf_token));
+
+        auto lc_ = std::scoped_lock(HttpSessions::lock);
+        HttpSessions::access_keys[auth_token]["csrf_token"] = TimedOptional(csrf_token,
+                                                                            HttpSessions::session_ttl);
+    }
+
 
     namespace dispatchers {
 
@@ -141,13 +185,13 @@ namespace sx::webserver {
         static Http_JsonResponder authorize_get(
                 "GET",
                 "/api/authorize",
-                [](MHD_Connection *conn, std::string const& meth, std::string const &req) -> Http_JsonResponseParams {
+                [](MHD_Connection *conn, std::string const &meth, std::string const &req) -> Http_JsonResponseParams {
                     Http_JsonResponseParams ret;
                     ret.response_code = MHD_YES;
 
                     auto key = MHD_lookup_connection_value(conn, MHD_GET_ARGUMENT_KIND, "key");
                     bool found = false;
-                    if(key){
+                    if (key) {
                         auto lc_ = std::scoped_lock(HttpSessions::lock);
                         found = (HttpSessions::api_keys.find(key) !=
                                  HttpSessions::api_keys.end());
@@ -167,7 +211,7 @@ namespace sx::webserver {
         static Http_JsonResponder authorize(
                 "POST",
                 "/api/authorize",
-                [](MHD_Connection *conn, std::string const& meth, std::string const &req) -> Http_JsonResponseParams {
+                [](MHD_Connection *conn, std::string const &meth, std::string const &req) -> Http_JsonResponseParams {
 
                     Http_JsonResponseParams ret;
                     ret.response_code = MHD_YES;
@@ -206,6 +250,71 @@ namespace sx::webserver {
 
         server.addController(&authorize);
         server.addController(&authorize_get);
+
+
+        auto split_form_data = [](std::string const& str, unsigned char sep1, unsigned char sep2) {
+            auto vec = string_split(str, sep1);
+            std::map<std::string,std::string> vals;
+
+            if(vec.size() > 1) {
+                for(auto const& nv: vec) {
+                    auto n_v = string_split(nv, sep2);
+                    if(n_v.size() > 1) {
+                        vals[n_v[0]] = n_v[1];
+                    }
+                }
+            }
+
+            return vals;
+        };
+
+        static Http_JsonResponder login(
+                "POST",
+                "/api/login",
+                [&split_form_data](MHD_Connection *conn, std::string const &meth, std::string const &req) -> Http_JsonResponseParams {
+
+                    Http_JsonResponseParams ret;
+                    ret.response_code = MHD_YES;
+
+                    if (not req.empty()) {
+
+                        //name=a&email=b%40v
+                        auto form_map = split_form_data(req,'&','=');
+                        try {
+                            auto u = form_map.at("username");
+                            auto p = form_map.at("password");
+
+#ifdef USE_PAM
+                            if(auth::pam_auth_user_pass(u.c_str(), p.c_str())) {
+#else
+                            if(false) {
+#endif
+                                authorize_response(ret);
+                            }
+                            else {
+                                ret.response = {{"error", "access denied"},};
+                                ret.response_code = MHD_HTTP_UNAUTHORIZED;
+                            }
+                        }
+                        catch(std::out_of_range const& e) {
+                            Log::get()->events().insert(ERR, "unauthorized API access attempt from %s",
+                                                        authorized::client_address(conn).c_str());
+
+                            ret.response = {{"error", "access denied"},};
+                        }
+
+#ifndef USE_PAM
+                        Log::get()->events().insert(ERR, "PAM not available: API handler /api/login not supported");
+#endif
+
+                        ret.response_code = MHD_HTTP_OK;
+                    }
+
+                    return ret;
+                }
+        );
+
+        server.addController(&login);
     }
 }
 }

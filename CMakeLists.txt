@@ -15,6 +15,7 @@ set(USE_PYTHON "N")
 set(USE_LMHPP "Y")
 set(USE_UNWIND "Y")
 set(USE_REDIS "N")
+set(USE_PAM "Y")
 
 set(OPT_MEMPOOL_NOEXCEPT "Y")
 set(OPT_MEMPOOL_DISABLE "N")
@@ -55,6 +56,11 @@ if("${USE_HTTP2_ENGINE}" STREQUAL "Y")
     message(" >> http2 enabled" )
     add_definitions(-DUSE_HTTP2)
     add_definitions(-DUSE_HPACK)
+endif()
+
+if("${USE_PAM}" STREQUAL "Y")
+    message(" >> Using PAM authentication" )
+    add_definitions(-DUSE_PAM)
 endif()
 
 
@@ -292,7 +298,7 @@ add_executable(smithproxy
         src/ext/nltemplate/nltemplate.cpp
         src/ext/libcli/libcli.cpp
         src/ext/lmhpp/include/lmhttpd.hpp
-        src/ext/hpack/hpack.hpp)
+        src/ext/hpack/hpack.hpp src/service/core/authpam.cpp)
 
 
 add_executable(smithd
@@ -378,6 +384,11 @@ else()
     message(">> libmicrohttpd not used")
 endif()
 
+if("${USE_PAM}" STREQUAL "Y")
+    target_link_libraries(smithproxy pam)
+else()
+    message(">> PAM not used")
+endif()
 
 if("${USE_PYTHON}" STREQUAL "Y")
     target_link_libraries(smithproxy ${PYTHON_LIBRARIES})
