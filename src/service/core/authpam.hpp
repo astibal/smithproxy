@@ -20,6 +20,7 @@ namespace sx::auth {
     }
 
     bool pam_auth_user_pass (const char* user, const char*  pass);
+    bool unix_is_group_member(const char* username, const char* groupname);
 }
 
 #endif
