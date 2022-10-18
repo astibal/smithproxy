@@ -252,6 +252,9 @@ public:
     int num_workers_udp  = 0;
     int num_workers_socks = 0;
 
+    int cli_port = 50000;
+    int cli_port_base = 50000;
+    std::string cli_enable_password;
 
     std::string syslog_server;
     int syslog_port     = 514;

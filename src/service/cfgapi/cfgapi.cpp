@@ -640,10 +640,10 @@ bool CfgFactory::load_settings () {
     load_if_exists(cfgapi.getRoot()["settings"], "messages_dir", dir_msg_templates);
 
     if(cfgapi.getRoot()["settings"].exists("cli")) {
-        load_if_exists<int>(cfgapi.getRoot()["settings"]["cli"], "port", CliState::get().cli_port_base);
-        CliState::get().cli_port = CliState::get().cli_port_base;
+        load_if_exists<int>(cfgapi.getRoot()["settings"]["cli"], "port", CfgFactory::get()->cli_port_base);
+        CfgFactory::get()->cli_port = CfgFactory::get()->cli_port_base;
 
-        load_if_exists(cfgapi.getRoot()["settings"]["cli"], "enable_password", CliState::get().cli_enable_password);
+        load_if_exists(cfgapi.getRoot()["settings"]["cli"], "enable_password", CfgFactory::get()->cli_enable_password);
     }
 
     if(cfgapi.getRoot()["settings"].exists("admin")) {
@@ -2912,7 +2912,7 @@ bool CfgFactory::apply_tenant_config () {
         ret += apply_tenant_index(AuthFactory::get().options.portal_port_http, tenant_index);
         ret += apply_tenant_index(AuthFactory::get().options.portal_port_https, tenant_index);
 
-        CliState::get().cli_port += tenant_index;
+        CfgFactory::get()->cli_port += tenant_index;
     }
 
     return (ret == 0);
@@ -4502,8 +4502,8 @@ int save_settings(Config& ex) {
     admin_objects.add("group", Setting::TypeString) = CfgFactory::get()->admin_group;
 
     Setting& cli_objects = objects.add("cli", Setting::TypeGroup);
-    cli_objects.add("port", Setting::TypeInt) = CliState::get().cli_port_base;
-    cli_objects.add("enable_password", Setting::TypeString) = CliState::get().cli_enable_password;
+    cli_objects.add("port", Setting::TypeInt) = CfgFactory::get()->cli_port_base;
+    cli_objects.add("enable_password", Setting::TypeString) = CfgFactory::get()->cli_enable_password;
 
     Setting& auth_objects = objects.add("auth_portal", Setting::TypeGroup);
     auth_objects.add("address", Setting::TypeString) = CfgFactory::get()->auth_address;
