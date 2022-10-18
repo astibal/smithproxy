@@ -58,7 +58,7 @@
 #include <service/cmd/diag/diag_cmds.hpp>
 #include <service/cfgapi/cfgvalue.hpp>
 #include <service/cmd/clistate.hpp>
-
+#include <service/core/authpam.hpp>
 
 #include <service/cfgapi/cfgapi.hpp>
 #include <timeops.hpp>
@@ -2445,15 +2445,44 @@ void register_edit_command(cli_def* cli) {
 
 }
 
+#ifdef USE_PAM
+int cli_auth_cb(cli_def* cli, const char* username, const char* password) {
+    if(sx::auth::pam_auth_user_pass(username, password)) {
+        if(sx::auth::unix_is_group_member(username, CfgFactory::get()->admin_group.c_str())) {
+
+            if(CfgFactory::get()->cli_enable_password.empty()) {
+
+                cli_set_privilege(cli, PRIVILEGE_PRIVILEGED);
+                cli_set_configmode(cli, MODE_EXEC, nullptr);
+            }
+
+            return 0;
+        }
+        return -1;
+    }
+    return -2;
+}
+#endif
+
 void client_thread(int client_socket) {
 
     static auto log = logan::create("service");
 
     struct cli_def *cli = cli_init();
 
-    // RAII subscriber removing us from board after exit
-    UpdateBoardSubscriber ubs(cli_id(), CfgFactory::board());
 
+    std::string admin_group;
+    std::string enable_pwd;
+
+    {
+        // load stuff from cfgfactory
+        auto lc_ = std::scoped_lock(CfgFactory::get()->lock());
+
+        // RAII subscriber removing us from board after exit
+        UpdateBoardSubscriber ubs(cli_id(), CfgFactory::board());
+        admin_group = CfgFactory::get()->admin_group;
+        enable_pwd = CfgFactory::get()->cli_enable_password;
+    }
     // Set the hostname (shown in the prompt)
     apply_hostname(cli);
 
@@ -2462,7 +2491,13 @@ void client_thread(int client_socket) {
     // Set the greeting
     cli_set_banner(cli, "--==[ Smithproxy command line utility ]==--");
 
-    cli_allow_enable(cli, CliState::get().cli_enable_password.c_str());
+    if (not admin_group.empty()) {
+        cli_set_auth_callback(cli, cli_auth_cb);
+    }
+
+    if (not enable_pwd.empty()) {
+        cli_allow_enable(cli, enable_pwd.c_str());
+    }
 
     cli_register_static(cli);
     cli_regular_interval(cli, 1);
