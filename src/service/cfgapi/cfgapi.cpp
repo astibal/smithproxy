@@ -375,6 +375,12 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
 
         return true;
     }
+    else if(upgrade_to_num == 1011) {
+        log.event(INF, "added settings.http_api.pam_login");
+        log.event(INF, "added settings.http_api.port");
+
+        return true;
+    }
 
 
 
@@ -694,6 +700,14 @@ bool CfgFactory::load_settings () {
         load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "key_timeout", sx::webserver::HttpSessions::session_ttl);
         load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "key_extend_on_access", sx::webserver::HttpSessions::extend_on_access);
         load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "loopback_only", sx::webserver::HttpSessions::loopback_only);
+
+        int api_port = 55555;
+        load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "port", api_port);
+        if(api_port < 1025 or api_port >= 65535)  {
+            log.event(ERR, "invalid API port number");
+            sx::webserver::HttpSessions::api_port = 55555;
+        }
+        load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "pam_login", sx::webserver::HttpSessions::pam_login);
     }
 
     return true;
@@ -4531,6 +4545,8 @@ int save_settings(Config& ex) {
     http_api_objects.add("key_extend_on_access", Setting::TypeBoolean) = (bool)sx::webserver::HttpSessions::extend_on_access;
     http_api_objects.add("loopback_only", Setting::TypeBoolean) = (bool)sx::webserver::HttpSessions::loopback_only;
 
+    http_api_objects.add("port", Setting::TypeInt) = sx::webserver::HttpSessions::api_port;
+    http_api_objects.add("pam_login", Setting::TypeBoolean) = (bool)sx::webserver::HttpSessions::pam_login;
 
     return 0;
 }

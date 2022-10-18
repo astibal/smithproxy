@@ -276,6 +276,13 @@ namespace sx::webserver {
                     Http_JsonResponseParams ret;
                     ret.response_code = MHD_YES;
 
+                    bool pam_enabled = HttpSessions::pam_login;
+                    std::string admin_group;
+                    {
+                        auto lc_ = std::scoped_lock(CfgFactory::lock());
+                        admin_group = CfgFactory::get()->admin_group;
+                    }
+
                     if (not req.empty()) {
 
                         //name=a&email=b%40v
@@ -285,11 +292,10 @@ namespace sx::webserver {
                             auto p = form_map.at("password");
 
 #ifdef USE_PAM
-                            if(auth::pam_auth_user_pass(u.c_str(), p.c_str())) {
+                            if(pam_enabled and auth::pam_auth_user_pass(u.c_str(), p.c_str())) {
 #else
                             if(false) {
 #endif
-                                auto admin_group = CfgFactory::get()->admin_group;
                                 if(admin_group.empty()) admin_group = "root";
 
                                 if(auth::unix_is_group_member(u.c_str(), admin_group.c_str())) {

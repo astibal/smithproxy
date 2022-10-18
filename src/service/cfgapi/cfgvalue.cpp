@@ -395,6 +395,22 @@ void CfgValueHelp::init() {
             .may_be_empty(false)
             .value_filter(CfgValue::VALUE_UINT_NZ);
 
+    add("settings.http_api.port", "TCP port for API HTTPS access")
+            .help_quick("<number>: port number (default: 55555)")
+            .value_filter(VALUE_UINT_RANGE<1024,65535>);
+
+#ifdef USE_PAM
+    add("settings.http_api.pam_login", "enable API login using system account")
+            .help_quick("<bool>: set to false to disable API login via PAM")
+#else
+    add("settings.http_api.pam_login", "(NOT USABLE) enable API login using system account")
+            .help_quick("<bool>: (NOT USABLE) set to false to disable API login via PAM")
+#endif
+            .may_be_empty(false)
+            .help_quick("<bool>: set to false to disable API login via PAM")
+            .value_filter(CfgValue::VALUE_BOOL);
+
+
     add("settings.admin", "administration options");
     add("settings.admin.group", "system group with granted access; empty means root.")
             .help_quick("<string>: existing group name")

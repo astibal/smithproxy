@@ -114,6 +114,10 @@ struct HttpSessions {
     static inline uint32_t session_ttl = 3600;
     static inline bool extend_on_access = true;
     static inline bool loopback_only = true;
+    static inline int api_port = 55555;
+#ifdef USE_PAM
+    static inline bool pam_login = true;
+#endif
 
     enum class cookie_samesite { None, Lax, Strict };
 
