@@ -45,7 +45,7 @@ using namespace socle;
 std::string PolicyRule::to_string(int verbosity) const {
 
     std::stringstream from;
-    from << "PolicyRule:";
+    from << "PolicyRule: ";
 
     if(is_disabled) {
         from << " -- DISABLED -- ";
@@ -53,40 +53,54 @@ std::string PolicyRule::to_string(int verbosity) const {
 
     switch(proto->value()) {
         case 6:
-            from << " [tcp] ";
+            from << "[tcp] ";
             break;
         case 17:
-            from << " [udp] ";
+            from << "[udp] ";
             break;
         default:
             from << string_format(" [proto-%d] ", proto->value());
     }
-    
+
     for(auto const& it: src) {
-        if(verbosity > iINF) {
+
+        from << "[";
+        if(verbosity > iDIA) {
             from << string_format("(0x%x)", this);
         }
-        from << it->value()->str() << " ";
+        from << it->value()->str() << "]";
     }
     from << ":";
-    for(auto const& it: src_ports) {
-        if(it->value().first == 0 && it->value().second == 65535)
-            from << "(*) ";
-        else
-            from << string_format("(%d,%d) ", it->value().first, it->value().second);
+
+    if(not src_ports.empty()) {
+        for (auto const &it: src_ports) {
+            if (it->value().first == 0 && it->value().second == 65535)
+                from << "(*) ";
+            else
+                from << string_format("(%d,%d) ", it->value().first, it->value().second);
+        }
+    }
+    else {
+        from << "(*) ";
     }
     
     std::stringstream to;
 
     for(auto const& it: dst) {
-        to << it->value()->str() << " ";
+        to << "[" << it->value()->str() << "]";
     }
     to << ":";
-    for(auto const& it: dst_ports) {
-        if(it->value().first == 0 && it->value().second == 65535)
-            to << "(*) ";
-        else
-            to << string_format("(%d,%d) ", it->value().first, it->value().second);
+
+    if(not dst_ports.empty()) {
+        for (auto const &it: dst_ports) {
+            if (it->value().first == 0 && it->value().second == 65535)
+                to << "(*) ";
+            else
+                to << string_format("(%d,%d) ", it->value().first, it->value().second);
+        }
+    }
+    else {
+        to << "(*) ";
     }
     
     std::stringstream out;
@@ -122,15 +136,25 @@ std::string PolicyRule::to_string(int verbosity) const {
     if(verbosity > iINF)
         out << " [" << std::to_string(cnt_matches) << "x]";
     
-    if(verbosity > INF) {
-        out << ": ";
-        if(profile_auth) out << string_format("\n    auth=%s  (0x%x) ", profile_auth->element_name().c_str(), profile_auth.get());
-        if(profile_tls) out << string_format("\n    tls=%s  (0x%x) ", profile_tls->element_name().c_str(), profile_tls.get());
-        if(profile_detection) out << string_format("\n    det=%s  (0x%x) ", profile_detection->element_name().c_str(), profile_detection.get());
-        if(profile_content) out << string_format("\n    cont=%s  (0x%x) ", profile_content->element_name().c_str(), profile_content.get());
-        if(profile_alg_dns) out << string_format("\n    alg_dns=%s  (0x%x) ", profile_alg_dns->element_name().c_str(), profile_alg_dns.get());
-    }
-    
+    out << ": ";
+
+    auto print_profile = [&](const char* pref, auto const& sptr) {
+        if(sptr) {
+            out << string_format("\n    %s=%s", pref, sptr->element_name().c_str());
+
+            // this would work only with debug builds where DEB is allowed
+            if(verbosity > iDIA)
+                out << string_format("  (0x%x) ",sptr.get());
+
+        }
+    };
+    print_profile("auth", profile_auth);
+    print_profile("tls", profile_tls);
+    print_profile("det", profile_detection);
+    print_profile("cont", profile_content);
+    print_profile("alg_dns", profile_alg_dns);
+    print_profile("routing", profile_routing);
+
     return out.str();
 }
 
