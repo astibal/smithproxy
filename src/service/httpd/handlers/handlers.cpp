@@ -276,7 +276,7 @@ namespace sx::webserver {
                     Http_JsonResponseParams ret;
                     ret.response_code = MHD_YES;
 
-                    bool pam_enabled = HttpSessions::pam_login;
+                    [[maybe_unused]] bool pam_enabled = HttpSessions::pam_login;
                     std::string admin_group;
                     {
                         auto lc_ = std::scoped_lock(CfgFactory::lock());
@@ -291,28 +291,24 @@ namespace sx::webserver {
                             auto u = form_map.at("username");
                             auto p = form_map.at("password");
 
+                            if(admin_group.empty()) admin_group = "root";
+
 #ifdef USE_PAM
-                            if(pam_enabled and auth::pam_auth_user_pass(u.c_str(), p.c_str())) {
+                            if(pam_enabled and auth::pam_auth_user_pass(u.c_str(), p.c_str()) and auth::unix_is_group_member(u.c_str(), admin_group.c_str())) {
 #else
                             if(false) {
 #endif
-                                if(admin_group.empty()) admin_group = "root";
 
-                                if(auth::unix_is_group_member(u.c_str(), admin_group.c_str())) {
-                                    authorize_response(ret);
-                                } else {
-                                    Log::get()->events().insert(ERR, "unauthorized access attempt from %s as user %s (not '%s' group member)",
-                                                                authorized::client_address(conn).c_str(),
-                                                                u.c_str(),
-                                                                admin_group.c_str());
-
-                                    ret.response_code = MHD_HTTP_UNAUTHORIZED;
-                                    ret.response = {{"error", "access denied"},};
-                                }
+                                authorize_response(ret);
                             }
                             else {
-                                ret.response = {{"error", "access denied"},};
                                 ret.response_code = MHD_HTTP_UNAUTHORIZED;
+                                ret.response = {{"error", "access denied"},};
+                                Log::get()->events().insert(ERR, "unauthorized access attempt from %s as user %s (not '%s' group member)",
+                                                            authorized::client_address(conn).c_str(),
+                                                            u.c_str(),
+                                                            admin_group.c_str());
+
                             }
                         }
                         catch(std::out_of_range const& e) {

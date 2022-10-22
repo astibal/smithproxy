@@ -2464,6 +2464,16 @@ int cli_auth_cb(cli_def* cli, const char* username, const char* password) {
 }
 #endif
 
+
+using fn_auth_cb = int(*)(cli_def*, const char*,const char*);
+fn_auth_cb get_auth_callback() {
+#ifdef USE_PAM
+    return &cli_auth_cb;
+#else
+    return nullptr;
+#endif
+}
+
 void client_thread(int client_socket) {
 
     static auto log = logan::create("service");
@@ -2491,8 +2501,8 @@ void client_thread(int client_socket) {
     // Set the greeting
     cli_set_banner(cli, "--==[ Smithproxy command line utility ]==--");
 
-    if (not admin_group.empty()) {
-        cli_set_auth_callback(cli, cli_auth_cb);
+    if (get_auth_callback() and not admin_group.empty()) {
+        cli_set_auth_callback(cli, get_auth_callback());
     }
 
     if (not enable_pwd.empty()) {

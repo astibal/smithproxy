@@ -117,6 +117,8 @@ struct HttpSessions {
     static inline int api_port = 55555;
 #ifdef USE_PAM
     static inline bool pam_login = true;
+#else
+        static inline bool pam_login = false;
 #endif
 
     enum class cookie_samesite { None, Lax, Strict };
