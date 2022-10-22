@@ -101,10 +101,10 @@ std::pair<int, std::string> generate_dynamic_groups(struct cli_def *cli, const c
         try {
 
             [[maybe_unused]]
-            auto &parent_settings = CfgFactory::cfg_root().lookup(static_section_path);
+            auto const& parent_settings = CfgFactory::cfg_root().lookup(static_section_path);
             std::string this_setting_path = static_section_path + "." + words[1];
 
-            auto &this_settings = CfgFactory::cfg_root().lookup(this_setting_path);
+            auto const& this_settings = CfgFactory::cfg_root().lookup(this_setting_path);
             int this_index = this_settings.getIndex();
             int new_mode = static_mode + 500 + this_index;
 

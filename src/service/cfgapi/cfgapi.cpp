@@ -381,7 +381,11 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
 
         return true;
     }
+    else if(upgrade_to_num == 1012) {
+        log.event(INF, "address_objects changes");
 
+        return true;
+    }
 
 
 
@@ -852,51 +856,112 @@ int CfgFactory::load_db_address () {
         Setting& curr_set = cfgapi.getRoot()["address_objects"];
 
         for( int i = 0; i < num; i++) {
-            std::string name;
-            std::string address;
-            int type;
-            
-            Setting& cur_object = curr_set[i];
 
-            if (  ! cur_object.getName() ) {
+            Setting &cur_object = curr_set[i];
+
+            if (!cur_object.getName()) {
                 _dia("cfgapi_load_address: unnamed object index %d: not ok", i);
                 continue;
             }
-            
+
+            std::string name;
             name = cur_object.getName();
-            if(name.find("__") == 0) {
+            if (name.find("__") == 0) {
                 // don't process reserved names
                 continue;
             }
 
+            auto load_addr_09_30 = [&]() {
 
-            _deb("cfgapi_load_addresses: processing '%s'", name.c_str());
-            
-            if( load_if_exists(cur_object, "type", type)) {
-                switch(type) {
-                    case 0: // CIDR notation
-                        if (load_if_exists(cur_object, "cidr", address)) {
-                            auto* c = cidr::cidr_from_str(address.c_str());
+                std::string address;
+                int type;
 
-                            db_address[name] = std::make_shared<CfgAddress>(std::shared_ptr<AddressObject>(new CidrAddress(c)));
+                _deb("cfgapi_load_addresses: processing '%s'", name.c_str());
+
+                if (load_if_exists(cur_object, "type", type)) {
+                    switch (type) {
+                        case 0: // CIDR notation
+                            if (load_if_exists(cur_object, "cidr", address)) {
+                                auto *c = cidr::cidr_from_str(address.c_str());
+
+                                db_address[name] = std::make_shared<CfgAddress>(
+                                        std::shared_ptr<AddressObject>(new CidrAddress(c)));
+                                db_address[name]->element_name() = name;
+                                _dia("cfgapi_load_addresses: cidr '%s': ok", name.c_str());
+                            }
+                            break;
+                        case 1: // FQDN notation
+                            if (load_if_exists(cur_object, "fqdn", address)) {
+
+                                db_address[name] = std::make_shared<CfgAddress>(
+                                        std::shared_ptr<AddressObject>(new FqdnAddress(address)));
+                                db_address[name]->element_name() = name;
+                                _dia("cfgapi_load_addresses: fqdn '%s': ok", name.c_str());
+                            }
+                            break;
+                        default:
+                            _dia("cfgapi_load_addresses: fqdn '%s': unknown type value(ignoring)", name.c_str());
+                    }
+                } else {
+                    _dia("cfgapi_load_addresses: '%s': not ok", name.c_str());
+                }
+            };
+
+            auto load_addr = [&]() {
+
+                std::string address;
+                std::string type;
+
+                _deb("cfgapi_load_addresses: processing '%s'", name.c_str());
+
+                if (load_if_exists(cur_object, "type", type)) {
+
+                    if(type == "cidr") {
+                        if (load_if_exists(cur_object, "value", address)) {
+                            auto *c = cidr::cidr_from_str(address.c_str());
+
+                            db_address[name] = std::make_shared<CfgAddress>(
+                                    std::shared_ptr<AddressObject>(new CidrAddress(c)));
                             db_address[name]->element_name() = name;
                             _dia("cfgapi_load_addresses: cidr '%s': ok", name.c_str());
                         }
-                    break;
-                    case 1: // FQDN notation
-                        if (load_if_exists(cur_object, "fqdn", address))  {
+                    }
+                    else if(type == "fqdn") {
+                        if (load_if_exists(cur_object, "value", address)) {
 
-                            db_address[name] = std::make_shared<CfgAddress>(std::shared_ptr<AddressObject>(new FqdnAddress(address)));
+                            db_address[name] = std::make_shared<CfgAddress>(
+                                    std::shared_ptr<AddressObject>(new FqdnAddress(address)));
                             db_address[name]->element_name() = name;
                             _dia("cfgapi_load_addresses: fqdn '%s': ok", name.c_str());
                         }
-                    break;
-                    default:
+                    }
+                    else {
                         _dia("cfgapi_load_addresses: fqdn '%s': unknown type value(ignoring)", name.c_str());
+                    }
+                } else {
+                    _dia("cfgapi_load_addresses: '%s': not ok", name.c_str());
                 }
-            } else {
-                _dia("cfgapi_load_addresses: '%s': not ok", name.c_str());
+            };
+
+            // since 0.9.31 cidr objects have differrent config syntax:
+            // OLD = {
+            //     type = <int>
+            //     cidr = "cidr_string" ; if type = 0
+            //     fqdn = "fqdn_string" ; if type = 1
+            // }
+            // NEW = {
+            //     type = <string>  ; "cidr" or "fqdn"
+            //     value = "value"
+            // }
+
+            // detect config style version, value is present in new scheme
+            if(cur_object.exists("value")) {
+                load_addr();
             }
+            else {
+                load_addr_09_30();
+            }
+
         }
     }
     
@@ -2937,8 +3002,8 @@ bool CfgFactory::new_address_object(Setting& ex, std::string const& name) const 
 
     try {
         Setting &item = ex.add(name, Setting::TypeGroup);
-        item.add("type", Setting::TypeInt) = 0;  // cidr
-        item.add("cidr", Setting::TypeString) = "0.0.0.0/32";
+        item.add("type", Setting::TypeString) = "cidr";  // cidr
+        item.add("value", Setting::TypeString) = "0.0.0.0/32";
     }
     catch(libconfig::SettingNameException const& e) {
         _war("cannot add new section %s.%s: %s", ex.c_str(), name.c_str(), e.what());
@@ -2964,10 +3029,10 @@ int CfgFactory::save_address_objects(Config& ex) const {
         Setting& item = address_objects.add(name, Setting::TypeGroup);
 
         if(obj->value()->c_type() == std::string("FqdnAddress")) {
-            Setting &s_type = item.add("type", Setting::TypeInt);
-            Setting &s_fqdn = item.add("fqdn", Setting::TypeString);
+            Setting &s_type = item.add("type", Setting::TypeString);
+            Setting &s_fqdn = item.add("value", Setting::TypeString);
 
-            s_type = 1;
+            s_type = "fqdn";
             auto fqdn_ptr = std::dynamic_pointer_cast<FqdnAddress>(obj->value());
             if(fqdn_ptr) {
                 s_fqdn = fqdn_ptr->fqdn();
@@ -2975,12 +3040,11 @@ int CfgFactory::save_address_objects(Config& ex) const {
 
             n_saved++;
         }
-        else
-        if(obj->value()->c_type() == std::string("CidrAddress")) {
-            Setting &s_type = item.add("type", Setting::TypeInt);
-            Setting &s_cidr = item.add("cidr", Setting::TypeString);
+        else if(obj->value()->c_type() == std::string("CidrAddress")) {
+            Setting &s_type = item.add("type", Setting::TypeString);
+            Setting &s_cidr = item.add("value", Setting::TypeString);
 
-            s_type = 0;
+            s_type = "cidr";
 
             auto cidr_ptr = std::dynamic_pointer_cast<CidrAddress>(obj->value());
             if(cidr_ptr) {

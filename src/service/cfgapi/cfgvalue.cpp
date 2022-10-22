@@ -446,6 +446,16 @@ void CfgValueHelp::init() {
         .may_be_empty(false)
         .value_filter(VALUE_UINT_RANGE<0,65535>);
 
+    add("address_objects", "adresses and fqdn names");
+    add("address_objects.[x].type", "'cidr' or 'fqdn'")
+        .may_be_empty(false)
+        .value_filter(is_in_vector([]() -> std::vector<std::string> { return { "cidr", "fqdn" }; },"only allowed options"))
+        .suggestion_generator([](std::string const& section, std::string const& variable) -> std::vector<std::string> { return { "cidr", "fqdn" }; });
+
+    add("address_objects.[x].value", "value depends on 'type'")
+        .may_be_empty(false);
+
+
     add("policy.[x].proto", "protocol to match (see proto_objects)")
         .may_be_empty(false)
         .value_filter(is_in_vector([]() { return CfgFactory::get()->keys_of_db_proto(); },"must be in proto_objects"))
