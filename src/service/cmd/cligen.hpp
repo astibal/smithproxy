@@ -55,7 +55,7 @@ void cfg_generate_cli_hints(libconfig::Setting& setting, std::vector<std::string
                             std::vector<std::string>* next_level_names,
                             std::vector<unsigned int>* next_level_indexes);
 
-
+int cli_end_command(struct cli_def *cli, const char *command, char *argv[], int argc);
 
 void cli_generate_set_commands (struct cli_def *cli, std::string const& section);
 void cli_generate_toggle_commands (struct cli_def *cli, std::string const& section);
@@ -72,21 +72,52 @@ int fn(struct cli_def *cli, const char *command, char *argv[], int argc); \
 
 std::pair<int, std::string> generate_dynamic_groups(struct cli_def *cli, const char *command, char **argv, int argc);
 
+void cli_generate_end_commands(cli_def* cli, int mode);
+
 #define CONFIG_MODE_DEF(fn, mode, name) \
                                         \
 int fn(struct cli_def *cli, const char *command, char *argv[], int argc) { \
-    _debug(cli, "entering " name ", mode = %d", mode);                     \
-    debug_cli_params(cli, command, argv, argc);                            \
-                                                                           \
-    int oldmode = cli_set_configmode(cli, mode, name );                    \
-    _debug(cli, "   oldmode = %d", oldmode);                               \
-                                                                           \
-    if(mode == oldmode) {                                                  \
-         auto dynres =                                                     \
-                        generate_dynamic_groups(cli, command, argv, argc); \
-          if (dynres.first > 0) cli_set_configmode(cli, dynres.first, dynres.second.c_str()); \
-    }                                                                      \
-    return CLI_OK;                                                         \
+    _debug(cli, "entering '" name "', mode = %d", mode);                    \
+    debug_cli_params(cli, command, argv, argc);                             \
+                                                                            \
+    std::string oldmodestring;                                              \
+    if(cli->modestring) oldmodestring = cli->modestring;                    \
+                                                                            \
+    int oldmode = cli_set_configmode(cli, mode, name );                     \
+    _debug(cli, "   oldmode = %d", oldmode);                                \
+                                                                            \
+                                                                            \
+    std::pair<int, std::string>  mode_pair = { mode, name };                \
+                                                                            \
+     auto& stk = CliState::get().mode_stack();                              \
+                                                                            \
+     /* conf term start, clear the stack */                                 \
+     if(oldmode == 1) {                                                     \
+        while(not stk.empty()) stk.pop();                                   \
+     }                                                                      \
+     if(stk.empty()) {                                                      \
+        _debug(cli, "    mode stack + %d:''", oldmode);                     \
+        stk.emplace(oldmode, "");                                           \
+     }                                                                      \
+                                                                            \
+    if(mode == oldmode) {                                                   \
+         mode_pair = generate_dynamic_groups(cli, command, argv, argc);     \
+                                                                            \
+         if(mode_pair.first > 0)                                            \
+         cli_set_configmode(cli, mode_pair.first, mode_pair.second.c_str());\
+    }                                                                       \
+                                                                            \
+     if(stk.top().first != mode_pair.first ) {      \
+         _debug(cli, "    mode stack + %d:'%s'", mode_pair.first, mode_pair.second.c_str());    \
+         stk.push(mode_pair);                                               \
+         cli_generate_end_commands(cli, mode_pair.first);                   \
+     }                                                                      \
+     else {                                                                 \
+        _debug(cli, "    mode stack top contains this mode");               \
+ }                                                                          \
+                                                                            \
+                                                                            \
+    return CLI_OK;                                                          \
 }    \
 
 

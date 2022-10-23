@@ -85,6 +85,23 @@ CONFIG_MODE_DEF(cli_conf_edit_captures_remote, MODE_EDIT_CAPTURES_REMOTE, "remot
 CONFIG_MODE_DEF(cli_conf_edit_experiment, MODE_EDIT_EXPERIMENT, "experiment")
 #endif
 
+void cli_generate_end_commands(cli_def* cli, int mode) {
+    auto& cs = CliState::get();
+    auto section = cs.sections(mode);
+
+    auto& cbe = cs.callbacks(section).second;
+
+    if(not cbe.cli("end")) {
+        _debug(cli, "registering 'end' for mode %d, full section %s", mode, section.c_str());
+
+        auto* cmd = cli_register_command(cli, nullptr, "end", cli_end_command, PRIVILEGE_PRIVILEGED, mode, "return from this section");
+        cbe.cli("end", cmd);
+    }
+    else {
+        _debug(cli, "'end' already registered for mode %d, full section %s", mode, section.c_str());
+    }
+}
+
 std::pair<int, std::string> generate_dynamic_groups(struct cli_def *cli, const char *command, char **argv, int argc) {
     auto words = string_split(command, ' ');
     if(words.size() >= 2) {
@@ -107,6 +124,7 @@ std::pair<int, std::string> generate_dynamic_groups(struct cli_def *cli, const c
             auto const& this_settings = CfgFactory::cfg_root().lookup(this_setting_path);
             int this_index = this_settings.getIndex();
             int new_mode = static_mode + 500 + this_index;
+            _debug(cli, "new dynmic mode %d", new_mode);
 
             CliState::get().callbacks(
                     this_setting_path,
@@ -117,7 +135,7 @@ std::pair<int, std::string> generate_dynamic_groups(struct cli_def *cli, const c
 
             cli_generate_toggle_commands(cli, this_setting_path);
 
-            return { new_mode, words[1]};
+            return { new_mode, words[1] };
 
         } catch (ConfigException const& e) {
             cli_print(cli, "error loading %s.%s: %s", static_section_path.c_str(), words[1].c_str(), e.what());
@@ -216,6 +234,21 @@ void cli_generate_set_command_args(struct cli_def *cli, cli_command* parent, std
     }
 }
 
+int cli_end_command(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    auto& mst  = CliState::get().mode_stack();
+
+    mst.pop(); // get rid of current mode, we want go back to previous one!
+
+    if(not mst.empty()) {
+        auto const& top = mst.top();
+
+        int cli_mode = cli->mode;
+        _debug(cli, "end - return from %d to %d:'%s' ", cli_mode, top.first, top.second.c_str());
+        cli_set_configmode(cli, top.first, top.second.c_str());
+    }
+
+    return CLI_OK;
+}
 
 void cli_generate_set_commands (struct cli_def *cli, std::string const &section) {
 

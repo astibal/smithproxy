@@ -112,6 +112,9 @@ private:
 
 
 struct CliState {
+
+    using mode_stack_entry = std::pair<int, std::string>;
+
     bool cli_debug_flag = false;
 
     const char *debug_levels = "\n\t0\tNONE\n\t1\tFATAL\n\t2\tCRITICAL\n\t3\tERROR\n\t4\tWARNING\n\t5\tNOTIFY\n\t6\tINFORMATIONAL\n\t7\tDIAGNOSE\t(may impact performance)\n\t8\tDEBUG\t(impacts performance)\n\t9\tEXTREME\t(severe performance drop)\n\t10\tDUMPALL\t(performance killer)\n\treset\treset back to level configured in config file";
@@ -150,7 +153,7 @@ struct CliState {
     // command callbacks
     using callback = CliCallbacks;
 
-    using callback_entry = std::tuple<unsigned int, callback>;
+    using callback_entry = std::pair<unsigned int, callback>;
 
 
     callback_entry& callbacks(std::string const& s) {
@@ -167,6 +170,10 @@ struct CliState {
 
     std::string sections(int mode) {
         return mode_map_[mode];
+    }
+
+    std::stack<mode_stack_entry>& mode_stack() {
+        return mode_stack_;
     }
 
     std::string template_callback_key(std::string const& section, cli_def* cli = nullptr);
@@ -189,6 +196,7 @@ private:
 
     std::unordered_map<std::string, callback_entry> callback_map_;
     std::unordered_map<int, std::string> mode_map_;
+    std::stack<mode_stack_entry> mode_stack_;
 
     CliState() : help_(CfgValueHelp::get()) {};
     CfgValueHelp& help_;
