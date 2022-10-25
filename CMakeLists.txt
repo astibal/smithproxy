@@ -328,38 +328,43 @@ add_executable(smithdc
         src/utils/mem.hpp
         src/utils/mem.cpp socle/common/mempool/malloc_allocator.hpp)
 
-find_package(GTest)
-if(GTEST_FOUND)
-    add_executable(sx_gtests
-            src/inspect/dns.cpp
-            src/utils/str.cpp
+IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    find_package(GTest)
+    if(GTEST_FOUND)
+        add_executable(sx_gtests
+                src/inspect/dns.cpp
+                src/utils/str.cpp
 
-            src/utils/tests/str_test.cpp
-            src/inspect/tests/dns_tests.cpp
-            src/inspect/tests/node_tests.cpp
-            src/ext/libcidr/cidr.cpp
+                src/utils/tests/str_test.cpp
+                src/inspect/tests/dns_tests.cpp
+                src/inspect/tests/node_tests.cpp
+                src/ext/libcidr/cidr.cpp
 
-            src/policy/policy.cpp
-            src/policy/tests/addrobj_test.cpp
-            src/policy/tests/policy_test.cpp
+                src/policy/policy.cpp
+                src/policy/tests/addrobj_test.cpp
+                src/policy/tests/policy_test.cpp
 
-            src/utils/tenants.cpp
-            src/tests/test_misc.cpp
+                src/utils/tenants.cpp
+                src/tests/test_misc.cpp
 
-            src/ext/hpack/hpack.hpp
-            src/ext/hpack/hpack_tests.cpp
+                src/ext/hpack/hpack.hpp
+                src/ext/hpack/hpack_tests.cpp
 
-            socle/traflog/tests/test_pcapapi.cpp
-            socle/traflog/tests/test_pcapng.cpp
-            socle/tests/test_tls.cpp
-            socle/tests/tests_peering.cpp
-            socle/common/tests/cache_tests.cpp
-            socle/common/tests/mempool_tests.cpp
-            socle/common/tests/string_tests.cpp
-            socle/common/tests/inet_tests.cpp)
+                socle/common/display.cpp
+                socle/traflog/tests/test_pcapapi.cpp
+                socle/traflog/tests/test_pcapng.cpp
+                socle/tests/test_tls.cpp
+                socle/tests/tests_peering.cpp
+                socle/common/tests/cache_tests.cpp
+                socle/common/tests/mempool_tests.cpp
+                socle/common/tests/string_tests.cpp
+                socle/common/tests/inet_tests.cpp
+                socle/common/tests/cast_tests.cpp
+                )
 
-    target_link_libraries(sx_gtests gtest gtest_main socle_lib pthread crypto ssl)
-endif()
+        target_link_libraries(sx_gtests gtest gtest_main socle_lib pthread crypto ssl)
+    endif()
+ENDIF()
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}")
 
