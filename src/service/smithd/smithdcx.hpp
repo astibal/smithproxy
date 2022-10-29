@@ -63,7 +63,7 @@ public:
     virtual unsigned int check_timeouts();
     
     buffer & to_read() override;
-    ssize_t finish() override;
+    std::size_t finish() override;
 
     inline unsigned int unpack();
     unsigned int unpack(buffer*);

@@ -148,7 +148,7 @@ void SmithProtoCX::on_timer() {
 }
 
 
-ssize_t SmithProtoCX::finish() {
+std::size_t SmithProtoCX::finish() {
 
     _deb("SmithProtoCX::finish[%s] packages=%d, to_read_buffer size=%d capacity=%d",c_type(), packages().size(), to_read_buffer.size(),to_read_buffer.capacity());
 

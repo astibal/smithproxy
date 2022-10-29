@@ -80,8 +80,6 @@ int fn(struct cli_def *cli, const char *command, char *argv[], int argc) { \
     _debug(cli, "entering '" name "', mode = %d", mode);                    \
     debug_cli_params(cli, command, argv, argc);                             \
                                                                             \
-    std::string oldmodestring;                                              \
-    if(cli->modestring) oldmodestring = cli->modestring;                    \
                                                                             \
     int oldmode = cli_set_configmode(cli, mode, name );                     \
     _debug(cli, "   oldmode = %d", oldmode);                                \
