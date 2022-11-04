@@ -57,21 +57,27 @@ namespace sx::engine {
 
         virtual std::string original_request() { return request(); }; // parent request
         virtual std::string request() { return std::string(""); };
+        virtual std::string protocol() const = 0;
 
         bool ask_destroy() override { return false; };
+
+        std::string properties_str() const {
+            std::stringstream ss;
+
+            if (is_ssl) ss << "[ssl=true]";
+            if (not properties.empty()) {
+                ss << "+";
+                for (auto const &[k, v]: properties) {
+                    ss << "[" << k << "=" << v << "]";
+                }
+            }
+            return ss.str();
+        }
+
         std::string to_string(int verbosity) const override {
 
             if(verbosity >= iDEB) {
-                std::stringstream ss;
-
-                if (is_ssl) ss << "[ssl=true]";
-                if (not properties.empty()) {
-                    ss << "+";
-                    for (auto const &[k, v]: properties) {
-                        ss << "[" << k << "=" << v << "]";
-                    }
-                }
-                return ss.str();
+                return properties_str();
             }
 
             return {};
@@ -81,6 +87,30 @@ namespace sx::engine {
 
     private:
         logan_lite log {"com.app"};
+    };
+
+    // Free-form application data
+
+    struct CustomApplicationData : public ApplicationData {
+        explicit CustomApplicationData(std::string_view n): proto_name(n) {};
+        CustomApplicationData(std::string_view  n, std::string_view  r): proto_name(n), request(r) {};
+
+        std::string protocol() const override { return proto_name; };
+
+        std::string to_string(int ver) const override {
+            std::stringstream r;
+            r << proto_name;
+            if(not request.empty()) r << ":" << request;
+
+            if(not properties.empty()) {
+                r << ":" << properties_str();
+            }
+
+            return r.str();
+        }
+
+        std::string proto_name;
+        std::string request;
     };
 
     struct EngineCtx {

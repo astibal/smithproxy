@@ -45,6 +45,7 @@
 #include <inspect/sigfactory.hpp>
 #include <inspect/sxsignature.hpp>
 #include <inspect/engine/http.hpp>
+#include <inspect/engine.hpp>
 
 bool MitmHostCX::ask_destroy() {
     error(true);
@@ -177,6 +178,12 @@ void MitmHostCX::inspect(char side) {
 
         }
 
+        auto set_app_name = [this](auto const& inspector) {
+            if( not engine_ctx.application_data ) {
+                engine_ctx.application_data = std::make_shared<sx::engine::CustomApplicationData>(inspector->proto_name());
+            }
+        };
+
         _deb("MitmHostCX::inspect: inspector loop:");
         for(auto const& inspector: inspectors_) {
 
@@ -190,8 +197,10 @@ void MitmHostCX::inspect(char side) {
 
                 _dia("MitmHostCX::inspect[%s]: verdict %d", inspector->c_type(), inspect_verdict);
                 if(inspect_verdict == Inspector::OK) {
-                    //
+                    set_app_name(inspector);
                 } else if (inspect_verdict == Inspector::CACHED) {
+                    set_app_name(inspector);
+
                     // if connection can be populated by cache, close right side.
                     
                     baseHostCX* p = nullptr;

@@ -44,7 +44,7 @@
 
 class DNS_Inspector : public Inspector {
 public:
-    explicit DNS_Inspector() = default;
+    explicit DNS_Inspector() : Inspector("dns") {};
     ~DNS_Inspector() override = default;
 
     void update(AppHostCX* cx) override;

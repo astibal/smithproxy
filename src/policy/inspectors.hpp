@@ -64,7 +64,8 @@
 //
 class Inspector : public socle::sobject, public lockable {
 public:
-    explicit Inspector() = default;
+    //explicit Inspector() = default;
+    explicit Inspector(std::string_view name) : proto_name_(name) {};
     virtual ~Inspector() = default;
     //! called always when there are new data in the flow. \see class Flow.
     virtual void update(AppHostCX* cx) = 0;
@@ -82,6 +83,8 @@ public:
     //! indicate if inspector was able to parse and process the payload.
     inline bool result() const { return result_; }
 
+    std::string_view proto_name() const { return proto_name_; }
+
     typedef enum { OK=0, BLOCK, CACHED } inspect_verdict;
     inspect_verdict verdict_ = OK;
     inspect_verdict verdict() const { return verdict_; };
@@ -90,6 +93,7 @@ public:
     virtual std::shared_ptr<buffer> verdict_response() = 0;
 private:
     logan_lite log {"com.app"};
+    std::string proto_name_;
 
 protected:
     bool completed_ = false;

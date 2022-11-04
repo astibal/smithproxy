@@ -1829,6 +1829,10 @@ int cli_diag_proxy_session_list_extra (struct cli_def *cli, const char *command,
                     do_print = true;
                 }
 
+                if(lf and lf->engine_ctx.application_data) {
+                    suffix += string_format(" (%s)", lf->engine_ctx.application_data->protocol().c_str());
+                }
+
                 auto const& io_info = get_io_info(lf, rg, sl_flags);
 
                 do_print |= std::get<0>(io_info);
@@ -2019,7 +2023,9 @@ int cli_diag_worker_list(struct cli_def *cli, [[maybe_unused]] const char *comma
             }
         }
 
-        auto speed_str = (up + down == 0L) ? "up/down: --" : string_format("up/down: %s/%s", number_suffixed(up).c_str(), number_suffixed(down).c_str());
+        std::string sp_str = number_suffixed(up) + "/" + number_suffixed(down);
+
+        auto speed_str = (sp_str == "0.0/0.0") ? "up/dw: --" : string_format("up/dw: %s", sp_str.c_str());
 
         if(verbosity > iINF) {
             {

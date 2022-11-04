@@ -505,6 +505,11 @@ namespace sx::engine::http {
                                     _dia("DNS response: %s", resp->to_string(iINF).c_str());
 
                                     DNS_Inspector::store(resp);
+
+                                    if(auto httpa = std::dynamic_pointer_cast<app_HttpRequest>(ctx.application_data); httpa) {
+                                        httpa->sub_proto = "dns";
+                                    }
+
                                 }
                             }
                             else {

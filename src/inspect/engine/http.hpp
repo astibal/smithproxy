@@ -47,10 +47,10 @@
 namespace sx::engine::http {
 
     constexpr const char* str_unknown = "???";
-    constexpr const char* str_http1 = "http/1.x";
-    constexpr const char* str_http1_0 = "http/1.0";
-    constexpr const char* str_http1_1 = "http/1.1";
-    constexpr const char* str_http2 = "http/2";
+    constexpr const char* str_http1 = "http1";
+    constexpr const char* str_http1_0 = "http1.0";
+    constexpr const char* str_http1_1 = "http1.1";
+    constexpr const char* str_http2 = "http2";
 
     struct ProtoRex {
         static std::regex const &http_req_get () {
@@ -78,6 +78,7 @@ namespace sx::engine::http {
         std::string params;
         std::string referer;
         std::string proto;
+        std::string sub_proto;
 
         enum class HTTP_VER { HTTP_1, HTTP1_0, HTTP1_1, HTTP2 } version;
 
@@ -94,6 +95,15 @@ namespace sx::engine::http {
                     return str_http2;
             }
             return str_unknown;
+        }
+        std::string protocol() const override {
+            std::stringstream ss;
+            ss << http_str(version);
+            if(not sub_proto.empty()) {
+                ss << "/" << sub_proto;
+            }
+
+            return ss.str();
         }
 
         // this function returns most usable link for visited site from the request.

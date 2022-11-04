@@ -496,6 +496,9 @@ void SmithProxy::join_all() {
 
 void SmithProxy::stop() {
 
+    baseCom::poll_msec = 50;
+    baseCom::rescan_msec = 50;
+
     terminate_flag = true;
 
 #ifndef MEMPOOL_DISABLE
