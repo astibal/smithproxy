@@ -78,7 +78,9 @@ public:
     vec_of_acceptors ssl_proxies;
     vec_of_receivers udp_proxies;
     vec_of_receivers dtls_proxies;
+
     vec_of_sock5tors socks_proxies;
+    vec_of_sock5tors socks_udp_proxies;
 
     vec_of_acceptors redir_plain_proxies;
     vec_of_acceptors redir_ssl_proxies;
@@ -90,6 +92,7 @@ public:
     std::vector<std::shared_ptr<std::thread>> udp_threads;
     std::vector<std::shared_ptr<std::thread>> dtls_threads;
     std::vector<std::shared_ptr<std::thread>> socks_threads;
+    std::vector<std::shared_ptr<std::thread>> socks_udp_threads;
 
     std::vector<std::shared_ptr<std::thread>> redir_plain_threads;
     std::vector<std::shared_ptr<std::thread>> redir_ssl_threads;

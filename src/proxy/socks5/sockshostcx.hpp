@@ -62,15 +62,24 @@ typedef enum socks5_message_ { POLICY, UPGRADE } socks5_message;
 
 class socksTCPCom: public TCPCom {
 public:
-    static std::string sockstcpcom_name_;
-    
+    static inline std::string sockstcpcom_name_ = "s5_tcp";;
+
     virtual std::string& name() { return sockstcpcom_name_; };
     virtual baseCom* replicate() { return new socksTCPCom(); };
 };
 
+class socksUDPCom: public UDPCom {
+public:
+    static inline std::string socksudpcom_name_ = "s5_udp";
+
+    virtual std::string& name() { return socksudpcom_name_; };
+    virtual baseCom* replicate() { return new socksUDPCom(); };
+};
+
+
 class socksSSLMitmCom: public MySSLMitmCom {
 public:
-    static std::string sockssslmitmcom_name_;
+    static inline std::string sockssslmitmcom_name_ = "s5_ssli";
     
     virtual std::string& name() { return sockssslmitmcom_name_; };
     virtual baseCom* replicate() { return new socksSSLMitmCom(); };

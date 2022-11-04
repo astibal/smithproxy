@@ -155,7 +155,8 @@ bool SmithProxy::create_listeners() {
         std::string dtls_frm = "dtls";
         std::string udp_frm = "udp";
 
-        std::string socks_frm = "socks";
+        std::string socks_frm = "socks-tcp";
+        std::string socks_udp_frm = "socks-udp";
 
         std::string retcp_frm = "redir-tcp";
         std::string retls_frm = "redir-tls";
@@ -225,7 +226,20 @@ bool SmithProxy::create_listeners() {
 
             log_listener(socks_frm, socks_proxies);
 
-            if((socks_proxies.empty() && CfgFactory::get()->num_workers_socks >= 0)) {
+
+            socks_udp_proxies = NetworkServiceFactory::prepare_listener<socksAcceptor, socksUDPCom>(
+                    std::stoi(CfgFactory::get()->listen_socks_port),
+                    socks_udp_frm,
+                    CfgFactory::get()->num_workers_socks,
+                    proxyType::proxy());
+
+            log_listener(socks_udp_frm, socks_udp_proxies);
+
+
+
+            if((socks_proxies.empty() && CfgFactory::get()->num_workers_socks >= 0) or
+               (socks_udp_proxies.empty() && CfgFactory::get()->num_workers_socks >= 0)
+            ) {
                 _fat("Failed to setup socks proxies. Bailing!");
                 return false;
             }
@@ -261,10 +275,8 @@ bool SmithProxy::create_listeners() {
                (redir_ssl_proxies.empty() && CfgFactory::get()->num_workers_tls >= 0) ||
                (redir_udp_proxies.empty() && CfgFactory::get()->num_workers_udp >= 0)) {
 
-                if((socks_proxies.empty() && CfgFactory::get()->num_workers_socks >= 0)) {
-                    _fat("Failed to setup redirect proxies. Bailing!");
-                    return false;
-                }
+                _fat("Failed to setup redirect proxies. Bailing!");
+                return false;
             }
         }
 
@@ -308,6 +320,7 @@ void SmithProxy::run() {
     std::string friendly_thread_name_tls = string_format("sxy_tls_%d",CfgFactory::get()->tenant_index);
     std::string friendly_thread_name_dls = string_format("sxy_dls_%d",CfgFactory::get()->tenant_index);
     std::string friendly_thread_name_skx = string_format("sxy_skx_%d",CfgFactory::get()->tenant_index);
+    std::string friendly_thread_name_sku = string_format("sxy_sku_%d",CfgFactory::get()->tenant_index);
     std::string friendly_thread_name_cli = string_format("sxy_cli_%d",CfgFactory::get()->tenant_index);
     std::string friendly_thread_name_own = string_format("sxy_own_%d",CfgFactory::get()->tenant_index);
 
@@ -364,7 +377,8 @@ void SmithProxy::run() {
     }
 
     if(CfgFactory::get()->accept_socks) {
-        launch_proxy_threads(socks_proxies, socks_threads, "SOCKS listener", friendly_thread_name_skx.c_str());
+        launch_proxy_threads(socks_proxies, socks_threads, "SOCKS TCP listener", friendly_thread_name_skx.c_str());
+        launch_proxy_threads(socks_udp_proxies, socks_udp_threads, "SOCKS UDP listener", friendly_thread_name_sku.c_str());
     }
 
     if(CfgFactory::get()->accept_redirect) {
@@ -439,9 +453,16 @@ void SmithProxy::join_all() {
 
     if(! socks_threads.empty()) {
         if(!cfg_daemonize)
-            std::cerr << "terminating socks thread" << std::endl;
+            std::cerr << "terminating tcp socks thread" << std::endl;
         join_thread_list(socks_threads);
     }
+    if(! socks_udp_threads.empty()) {
+        if(!cfg_daemonize)
+            std::cerr << "terminating udp socks thread" << std::endl;
+        join_thread_list(socks_udp_threads);
+    }
+
+
     if(! redir_plain_threads.empty()) {
 
         if(!cfg_daemonize)
@@ -522,6 +543,7 @@ void SmithProxy::stop() {
     kill_proxies(udp_proxies);
 
     kill_proxies(socks_proxies);
+    kill_proxies(socks_udp_proxies);
 
 
     kill_proxies(redir_plain_proxies);

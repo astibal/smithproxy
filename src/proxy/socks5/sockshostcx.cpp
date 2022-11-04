@@ -43,9 +43,6 @@
 #include <inspect/dnsinspector.hpp>
 
 
-std::string socksTCPCom::sockstcpcom_name_ = "sock5";
-std::string socksSSLMitmCom::sockssslmitmcom_name_ = "s5+ssl+insp";
-
 bool socksServerCX::global_async_dns = true;
 
 socksServerCX::socksServerCX(baseCom* c, unsigned int s) : baseHostCX(c,s) {
