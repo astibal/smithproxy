@@ -52,8 +52,8 @@
 using socks5_state = enum class socks5_state_ { INIT=1, HELLO_SENT, WAIT_REQUEST, REQ_RECEIVED, WAIT_POLICY, POLICY_RECEIVED, REQRES_SENT, DNS_QUERY_SENT=15, DNS_RESP_RECV, DNS_RESP_FAILED, HANDOFF=31 , ZOMBIE=255 };
 using socks5_request_error = enum class socks5_request_error_ { NONE=0, UNSUPPORTED_VERSION, UNSUPPORTED_ATYPE, UNSUPPORTED_METHOD, MALFORMED_DATA };
 
-using socks5_cmd = enum socks5_cmd_ { CONNECT=1, BIND=2, UDP_ASSOCIATE=3 };
-using socks5_atype = enum class socks5_atype_ { IPV4=1, FQDN=3, IPV6=4 };
+using socks5_cmd = enum socks5_cmd_ { CONNECT=1u, BIND=2u, UDP_ASSOCIATE=3u };
+using socks5_atype = enum class socks5_atype_ { IPV4=1u, FQDN=3u, IPV6=4u };
 using socks5_policy = enum class socks5_policy_ { PENDING, ACCEPT, REJECT };
 
 using socks5_message = enum socks5_message_ { POLICY, UPGRADE };
@@ -107,6 +107,17 @@ public:
 
     virtual bool setup_target();
     virtual int process_socks_reply();
+    virtual int process_socks_reply_v4();
+    virtual int process_socks_reply_v5();
+
+    void wait_policy() {
+        // peers are now prepared for handover. Owning proxy will wipe this CX (it will be empty)
+        // and if policy allows, left and right will be set (also in proxy owning this cx).
+
+        state_ = socks5_state::WAIT_POLICY;
+        read_waiting_for_peercom(true);
+    }
+
     void pre_write() override;
     
     bool new_message() const override;
@@ -132,8 +143,10 @@ public:
 
     static bool global_async_dns;
 
+    uint8_t request_command() const noexcept { return req_cmd; }
 private:
-    unsigned char version;
+    uint8_t version;
+    uint8_t req_cmd;
     socks5_atype req_atype;
     in_addr req_addr;
     std::string req_str_addr;

@@ -400,27 +400,31 @@ int socksServerCX::process_socks_request() {
     _dum("Request dump:\r\n%s",hex_dump(readbuf()->data(),readbuf()->size(), 4, 0, true).c_str());
     
     version = readbuf()->get_at<unsigned char>(0);
-    int cmd = readbuf()->get_at<unsigned char>(1);
+    req_cmd = readbuf()->get_at<unsigned char>(1);
     //@2 is reserved
 
-    if(version < 4 or version > 5) {
-        socks_error_ = socks5_request_error::UNSUPPORTED_VERSION;
-    }
-    else if(version == 5) {
+    if(version == 5) {
 
         if(readbuf()->size() < 10) {
             _dia("process_socks_request: socks5 request header too short");
         }
-        else if(cmd == socks5_cmd::CONNECT) {
+        else if(req_cmd == socks5_cmd::CONNECT) {
             socks_error_ = handle5_connect();
+        }
+        else if(req_cmd == socks5_cmd::UDP_ASSOCIATE) {
+            // let's just handle the response
+            socks_error_ = socks5_request_error::NONE;
+            wait_policy();
         }
         else {
             socks_error_ = socks5_request_error::UNSUPPORTED_METHOD;
         }
-
     }
     else if (version == 4) {
         socks_error_ = handle4_connect();
+    }
+    else {
+        socks_error_ = socks5_request_error::UNSUPPORTED_VERSION;
     }
 
     if(socks_error_ != socks5_request_error_::NONE) {
@@ -485,11 +489,7 @@ bool socksServerCX::setup_target() {
         right.reset(target_cx);
         _dia("socksServerCX::setup_target: prepared right: %s",right->c_type());
         
-        // peers are now prepared for handover. Owning proxy will wipe this CX (it will be empty)
-        // and if policy allows, left and right will be set (also in proxy owning this cx).
-        
-        state_ = socks5_state::WAIT_POLICY;
-        read_waiting_for_peercom(true);
+        wait_policy();
         
         return true;
 }
@@ -511,73 +511,101 @@ void socksServerCX::verdict(socks5_policy p) {
     }
 }
 
-int socksServerCX::process_socks_reply() {
-    if(version == 5) {
-        
-        unsigned char b[128];
-        
-        b[0] = 5;
-        b[1] = 2; // denied
-        if(verdict_ == socks5_policy::ACCEPT) b[1] = 0; //accept
-        b[2] = 0;
-        b[3] = static_cast<int>(req_atype);
-        
-        int cur = 4;
-        
-        if(req_atype == socks5_atype::IPV4) {
-            *((uint32_t*)&b[cur]) = req_addr.s_addr;
-            cur += sizeof(uint32_t);
-        }
-        else if(req_atype == socks5_atype::FQDN) {
-            
-            b[cur] = (unsigned char)req_str_addr.size();
-            cur++;
-            
+int socksServerCX::process_socks_reply_v5() {
+
+    std::array<uint8_t,128> response;
+
+    response[0] = 5;
+    response[1] = 2; // denied
+    if(verdict_ == socks5_policy::ACCEPT) response[1] = 0; //accept
+
+    response[2] = 0;
+    int cur_data_ptr = 3;
+
+    if(req_cmd == socks5_cmd::CONNECT) {
+        response[3] = static_cast<uint8_t>(req_atype);
+        ++cur_data_ptr;
+
+        if (req_atype == socks5_atype::IPV4) {
+            *((uint32_t *) &response[cur_data_ptr]) = req_addr.s_addr;
+            cur_data_ptr += sizeof(uint32_t);
+
+            *((uint16_t*)&response[cur_data_ptr]) = htons(req_port);
+            cur_data_ptr += sizeof(uint16_t);
+
+        } else if (req_atype == socks5_atype::FQDN) {
+
+            response[cur_data_ptr] = (unsigned char) req_str_addr.size();
+            cur_data_ptr++;
+
             for (char c: req_str_addr) {
-                b[cur] = c;
-                cur++;
+                response[cur_data_ptr] = c;
+                cur_data_ptr++;
             }
         }
-            
-        *((uint16_t*)&b[cur]) = htons(req_port);
-        cur += sizeof(uint16_t);
-        
-        writebuf()->append(b,cur);
-        state_ = socks5_state::REQRES_SENT;
-
-        _dum("socksServerCX::process_socks_reply: response dump:\r\n%s",hex_dump(b,cur, 4, 0, true).c_str());
-
-        // response is about to be sent. In most cases client sends data on left,
-        // but in case it's waiting ie. for banner, we must trigger proxy code to
-        // actually connect the right side.
-        // Because now are all data handled, there is no way how we get to proxy code,
-        // unless:
-        //      * new data appears on left
-        //      * some error occurs on left
-        //      * other way how socket appears in epoll result.
-        //
-        // we can acheive that to simply put left socket to write monitor.
-        // This will make left socket writable (dummy - we don't have anything to write),
-        // but also triggers proxy's on_message().
-
-        com()->set_write_monitor(socket());
-        return cur;
-    } 
-    else if(version == 4) {
-        unsigned char b[8];
-        
-        b[0] = 0;
-        b[1] = 91; // denied
-        if(verdict_ == socks5_policy::ACCEPT) b[1] = 90; //accept
-        
-        *((uint16_t*)&b[2]) = htons(req_port);
-        *((uint32_t*)&b[4]) = req_addr.s_addr;
-        
-        writebuf()->append(b,8);        
-        state_ = socks5_state::REQRES_SENT;
-        return 8;
     }
-    
+    else if(req_cmd == socks5_cmd::UDP_ASSOCIATE) {
+        response[3] = 1u;
+        ++cur_data_ptr;
+
+        *((uint32_t*)&response[cur_data_ptr]) = 0U;
+        cur_data_ptr += sizeof(uint32_t);
+
+        *((uint16_t*)&response[cur_data_ptr]) = htons(1080);
+        cur_data_ptr += sizeof(uint16_t);
+    }
+
+
+    writebuf()->append(response.data(), cur_data_ptr);
+    state_ = socks5_state::REQRES_SENT;
+
+    _dum("socksServerCX::process_socks_reply: response dump:\r\n%s",hex_dump(response.data(), cur_data_ptr, 4, 0, true).c_str());
+
+    // response is about to be sent. In most cases client sends data on left,
+    // but in case it's waiting ie. for banner, we must trigger proxy code to
+    // actually connect the right side.
+    // Because now are all data handled, there is no way how we get to proxy code,
+    // unless:
+    //      * new data appears on left
+    //      * some error occurs on left
+    //      * other way how socket appears in epoll result.
+    //
+    // we can achieve that to simply put left socket to write monitor.
+    // This will make left socket writable (dummy - we don't have anything to write),
+    // but also triggers proxy's on_message().
+
+    com()->set_write_monitor(socket());
+    return cur_data_ptr;
+
+}
+
+int socksServerCX::process_socks_reply_v4() {
+    unsigned char b[8];
+
+    b[0] = 0;
+    b[1] = 91; // denied
+    if(verdict_ == socks5_policy::ACCEPT) b[1] = 90; //accept
+
+    *((uint16_t*)&b[2]) = htons(req_port);
+    *((uint32_t*)&b[4]) = req_addr.s_addr;
+
+    writebuf()->append(b,8);
+    state_ = socks5_state::REQRES_SENT;
+    return 8;
+
+}
+
+int socksServerCX::process_socks_reply() {
+
+    switch(version) {
+        case 4:
+            return process_socks_reply_v4();
+        case 5:
+            return process_socks_reply_v5();
+        default:
+            ;
+    }
+
     return 0;
 }
 

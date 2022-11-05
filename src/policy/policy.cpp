@@ -371,10 +371,10 @@ bool PolicyRule::match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r)
     std::string ls("???");
     std::string rs("???");
 
-    if(!l.empty()) {
+    if(not l.empty() and l[0]) {
         ls = l[0]->str();
     }
-    if(!r.empty()) {
+    if(not r.empty() and r[0]) {
         rs = r[0]->str();
     }
 

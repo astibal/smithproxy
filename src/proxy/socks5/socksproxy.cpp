@@ -63,25 +63,35 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
         }
         else if(cx->state_ == socks5_state::WAIT_POLICY) {
 
-            _dia("SocksProxy::on_left_message: policy check: accepted");
-            std::vector<baseHostCX*> l;
-            std::vector<baseHostCX*> r;
-            l.emplace_back(cx);
-            r.emplace_back(cx->right.get());
+            bool verdict = false;
+
+            _dia("SocksProxy::on_left_message: policy check: start");
+
+            if(cx->request_command() == socks5_cmd::CONNECT) {
+                std::vector<baseHostCX *> l;
+                std::vector<baseHostCX *> r;
+                l.emplace_back(cx);
+                r.emplace_back(cx->right.get());
 
 
-            auto lc_ = std::scoped_lock(CfgFactory::lock());
+                auto lc_ = std::scoped_lock(CfgFactory::lock());
 
-            matched_policy(CfgFactory::get()->policy_match(l, r));
-            bool verdict = CfgFactory::get()->policy_action(matched_policy());
+                matched_policy(CfgFactory::get()->policy_match(l, r));
+                verdict = CfgFactory::get()->policy_action(matched_policy());
 
-            std::shared_ptr<PolicyRule> p;
-            if(matched_policy() >= 0) {
-                p = CfgFactory::get()->db_policy_list.at(matched_policy());
+                std::shared_ptr<PolicyRule> p;
+                if (matched_policy() >= 0) {
+                    p = CfgFactory::get()->db_policy_list.at(matched_policy());
+                }
+
+                const char *resp = verdict ? "accept" : "reject";
+                _dia("socksProxy::on_left_message: policy check result: policy# %d, verdict %s", matched_policy(),
+                     resp);
             }
-
-            const char* resp = verdict ? "accept" : "reject";
-            _dia("socksProxy::on_left_message: policy check result: policy# %d, verdict %s", matched_policy(), resp);
+            else if(cx->request_command() == socks5_cmd::UDP_ASSOCIATE) {
+                _dia("socksProxy::on_left_message: policy check: accept udp associate");
+                verdict = true;
+            }
 
             socks5_policy s5_verdict = verdict ? socks5_policy::ACCEPT : socks5_policy::REJECT;
             cx->verdict(s5_verdict);
