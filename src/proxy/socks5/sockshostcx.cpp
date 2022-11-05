@@ -42,6 +42,7 @@
 #include <proxy/socks5/sockshostcx.hpp>
 #include <inspect/dnsinspector.hpp>
 
+#include <common/numops.hpp>
 
 bool socksServerCX::global_async_dns = true;
 
@@ -204,10 +205,186 @@ void socksServerCX::setup_dns_async(std::string const& fqdn, DNS_Record_Type typ
     }
 }
 
+socks5_request_error socksServerCX::handle5_connect_fqdn(std::string const& fqdn) {
+
+    com()->nonlocal_dst_port() = req_port;
+    com()->nonlocal_src(true);
+    _dia("handle5_connect: request (FQDN) for %s -> %s:%d",c_type(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
+
+    std::vector<std::string> target_ips;
+
+    struct sockaddr_storage _ss{};
+    com()->resolve_socket_src(socket(), nullptr, nullptr, &_ss);
+    auto ipver = com()->l3_proto();
+
+    // Some implementations use atype FQDN, but target is an IP address
+    auto* adr_as_fqdn = cidr::cidr_from_str(fqdn.c_str());
+    if(adr_as_fqdn != nullptr) {
+        // hmm, it's an address
+        cidr_free(adr_as_fqdn);
+
+        target_ips.push_back(fqdn);
+    } else {
+        // really FQDN.
+
+        std::scoped_lock<std::recursive_mutex> l_(DNS::get_dns_lock());
+
+
+        auto dns_resp = DNS::get_dns_cache().get(( ipver == AF_INET6 ? "AAAA:" : "A:")+fqdn);
+        if(dns_resp) {
+            if ( ! dns_resp->answers().empty() ) {
+                long ttl = (dns_resp->loaded_at + dns_resp->answers().at(0).ttl_) - time(nullptr);
+                if(ttl > 0) {
+                    for( auto const& a: dns_resp->answers() ) {
+                        std::string a_ip = a.ip(false);
+                        if(! a_ip.empty() ) {
+                            _dia("handle5_connect: cache candidate: %s",a_ip.c_str());
+                            target_ips.push_back(a_ip);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+
+    // cache is not populated - send out query
+    if(target_ips.empty()) {
+        // no targets, send DNS query
+
+        std::string nameserver = choose_dns_server();
+
+        if(!async_dns) {
+
+            std::shared_ptr<DNS_Response> resp(DNSFactory::get().resolve_dns_s(fqdn, A, nameserver));
+
+            process_dns_response(resp);
+            setup_target();
+
+        } else {
+            _dia("handle5_connect:");
+
+            auto dns_req_type = DNS_Record_Type::A;
+
+
+
+            if(ipver == AF_INET6) {
+                _dia("handle5_connect: carrier ipv6");
+                dns_req_type = DNS_Record_Type::AAAA;
+            }
+            else {
+                _dia("handle5_connect: carrier default");
+
+                if(prefer_ipv6) {
+                    _dia("handle5_connect: DNS override to query AAAA");
+                    dns_req_type = DNS_Record_Type::AAAA;
+                }
+            }
+
+            setup_dns_async(fqdn, dns_req_type, nameserver);
+        }
+    }
+    else {
+        if(! target_ips.empty() && choose_server_ip(target_ips)) {
+            setup_target();
+        } else {
+            _err("handle5_connect: unable to find destination address for the request");
+            error(true);
+        }
+    }
+
+    return socks5_request_error::NONE;
+}
+
+socks5_request_error socksServerCX::handle4_connect() {
+    _dia("handle4_connect: socks4");
+
+    if(readbuf()->size() < 8) {
+        _dia("handle4_connect: socks4 request header too short");
+        return socks5_request_error::MALFORMED_DATA;
+    }
+
+    req_atype = socks5_atype::IPV4;
+    state_ = socks5_state::REQ_RECEIVED;
+    _dia("socksServerCX::process_socks_request: socks4 request received");
+
+    req_port = ntohs(readbuf()->get_at<uint16_t>(2));
+    auto dst = readbuf()->get_at<uint32_t>(4);
+
+
+    req_addr.s_addr=dst;
+
+    com()->nonlocal_dst_host() = string_format("%s",inet_ntoa(req_addr));
+    com()->nonlocal_dst_port() = req_port;
+    com()->nonlocal_src(true);
+    _dia("socksServerCX::process_socks_request: request (SOCKSv4) for %s -> %s:%d",c_type(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
+
+    setup_target();
+
+    return socks5_request_error::NONE;
+}
+
+socks5_request_error socksServerCX::handle5_connect() {
+    auto atype   = static_cast<socks5_atype>(readbuf()->get_at<unsigned char>(3));
+
+    if(atype != socks5_atype::IPV4 && atype != socks5_atype::FQDN) {
+        return socks5_request_error::UNSUPPORTED_ATYPE;
+    }
+
+    if(atype == socks5_atype::FQDN) {
+        req_atype = socks5_atype::FQDN;
+        state_ = socks5_state::REQ_RECEIVED;
+
+        auto fqdn_sz = readbuf()->get_at<unsigned char>(4);
+        if((unsigned int)fqdn_sz + 4 + 2 >= readbuf()->size()) {
+            _err("handle5_connect: protocol error: request header out of boundary.");
+            return socks5_request_error_::MALFORMED_DATA;
+        }
+
+        _dia("handle5_connect: fqdn size: %d",fqdn_sz);
+        std::string fqdn((const char*)&readbuf()->data()[5],fqdn_sz);
+        _dia("handle5_connect: fqdn requested: %s",fqdn.c_str());
+        req_str_addr = fqdn;
+
+        req_port = ntohs(readbuf()->get_at<uint16_t>(5+fqdn_sz));
+        _dia("handle5_connect: port requested: %d",req_port);
+
+        return handle5_connect_fqdn(fqdn);
+
+    }
+    else if(atype == socks5_atype::IPV4) {
+
+        req_atype = socks5_atype::IPV4;
+        state_ = socks5_state::REQ_RECEIVED;
+        _dia("handle5_connect: request received, type %d", atype);
+
+        auto dst = readbuf()->get_at<uint32_t>(4);
+        req_port = ntohs(readbuf()->get_at<uint16_t>(8));
+        com()->nonlocal_dst_port() = req_port;
+        com()->nonlocal_src(true);
+        _dia("handle5_connect: request for %s -> %s:%d",c_type(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
+
+
+        req_addr.s_addr=dst;
+
+        com()->nonlocal_dst_host() = string_format("%s",inet_ntoa(req_addr));
+        com()->nonlocal_dst_port() = req_port;
+        com()->nonlocal_src(true);
+        _dia("handle5_connect: request (IPv4) for %s -> %s:%d",c_type(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
+        setup_target();
+
+        return socks5_request_error::NONE;
+    } else {
+
+        _err("handle5_connect address type %d", atype);
+        return socks5_request_error::UNSUPPORTED_ATYPE;
+    }
+}
+
 
 int socksServerCX::process_socks_request() {
 
-    socks5_request_error e = socks5_request_error::NONE;
+    socks_error_ = socks5_request_error::NONE;
     
     if(readbuf()->size() < 5) {
         return 0; // wait for more complete request
@@ -222,198 +399,37 @@ int socksServerCX::process_socks_request() {
 
     _dum("Request dump:\r\n%s",hex_dump(readbuf()->data(),readbuf()->size(), 4, 0, true).c_str());
     
-              version = readbuf()->get_at<unsigned char>(0);
-    [[maybe_unused]] auto cmd = readbuf()->get_at<unsigned char>(1);
+    version = readbuf()->get_at<unsigned char>(0);
+    int cmd = readbuf()->get_at<unsigned char>(1);
     //@2 is reserved
-    
+
     if(version < 4 or version > 5) {
-        e = socks5_request_error::UNSUPPORTED_VERSION;
-        goto error;
+        socks_error_ = socks5_request_error::UNSUPPORTED_VERSION;
     }
-    
-       
-    if(version == 5) {
+    else if(version == 5) {
 
         if(readbuf()->size() < 10) {
             _dia("process_socks_request: socks5 request header too short");
-            goto error;
+        }
+        else if(cmd == socks5_cmd::CONNECT) {
+            socks_error_ = handle5_connect();
+        }
+        else {
+            socks_error_ = socks5_request_error::UNSUPPORTED_METHOD;
         }
 
-        auto atype   = static_cast<socks5_atype>(readbuf()->get_at<unsigned char>(3));
-
-        if(atype != socks5_atype::IPV4 && atype != socks5_atype::FQDN) {
-            e = socks5_request_error::UNSUPPORTED_ATYPE;
-            goto error;
-        }
-
-        if(atype == socks5_atype::FQDN) {
-            req_atype = socks5_atype::FQDN;
-            state_ = socks5_state::REQ_RECEIVED;
-
-            auto fqdn_sz = readbuf()->get_at<unsigned char>(4);
-            if((unsigned int)fqdn_sz + 4 + 2 >= readbuf()->size()) {
-                _err("process_socks_request: protocol error: request header out of boundary.");
-                goto error;
-            }
-
-            _dia("process_socks_request: fqdn size: %d",fqdn_sz);
-            std::string fqdn((const char*)&readbuf()->data()[5],fqdn_sz);
-            _dia("process_socks_request: fqdn requested: %s",fqdn.c_str());
-            req_str_addr = fqdn;
-
-            req_port = ntohs(readbuf()->get_at<uint16_t>(5+fqdn_sz));
-            _dia("process_socks_request: port requested: %d",req_port);
-
-            com()->nonlocal_dst_port() = req_port;
-            com()->nonlocal_src(true);
-            _dia("process_socks_request: request (FQDN) for %s -> %s:%d",c_type(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
-
-
-
-
-            std::vector<std::string> target_ips;
-
-            struct sockaddr_storage _ss{};
-            com()->resolve_socket_src(socket(), nullptr, nullptr, &_ss);
-            auto ipver = com()->l3_proto();
-
-            // Some implementations use atype FQDN, but target is an IP address
-            auto* adr_as_fqdn = cidr::cidr_from_str(fqdn.c_str());
-            if(adr_as_fqdn != nullptr) {
-                // hmm, it's an address
-                cidr_free(adr_as_fqdn);
-
-                target_ips.push_back(fqdn);
-            } else {
-                // really FQDN.
-
-                std::scoped_lock<std::recursive_mutex> l_(DNS::get_dns_lock());
-
-
-                auto dns_resp = DNS::get_dns_cache().get(( ipver == AF_INET6 ? "AAAA:" : "A:")+fqdn);
-                if(dns_resp) {
-                    if ( ! dns_resp->answers().empty() ) {
-                        long ttl = (dns_resp->loaded_at + dns_resp->answers().at(0).ttl_) - time(nullptr);
-                        if(ttl > 0) {
-                            for( auto const& a: dns_resp->answers() ) {
-                                std::string a_ip = a.ip(false);
-                                if(! a_ip.empty() ) {
-                                    _dia("process_socks_request: cache candidate: %s",a_ip.c_str());
-                                    target_ips.push_back(a_ip);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-
-            // cache is not populated - send out query
-            if(target_ips.empty()) {
-                // no targets, send DNS query
-
-                std::string nameserver = choose_dns_server();
-
-                if(!async_dns) {
-
-                    std::shared_ptr<DNS_Response> resp(DNSFactory::get().resolve_dns_s(fqdn, A, nameserver));
-
-                    process_dns_response(resp);
-                    setup_target();
-
-                } else {
-                    _dia("process_socks_request:");
-
-                    auto dns_req_type = DNS_Record_Type::A;
-
-
-
-                    if(ipver == AF_INET6) {
-                        _dia("process_socket_request: carrier ipv6");
-                        dns_req_type = DNS_Record_Type::AAAA;
-                    }
-                    else {
-                        _dia("process_socks_request: carrier default");
-
-                        if(prefer_ipv6) {
-                            _dia("process_socks_request: DNS override to query AAAA");
-                            dns_req_type = DNS_Record_Type::AAAA;
-                        }
-                    }
-
-                    setup_dns_async(fqdn, dns_req_type, nameserver);
-                }
-            } else {
-                if(! target_ips.empty() && choose_server_ip(target_ips)) {
-                    setup_target();
-                } else {
-                    _err("process_socks_request: unable to find destination address for the request");
-                    error(true);
-                }
-            }
-        }
-        else if(atype == socks5_atype::IPV4) {
-
-            req_atype = socks5_atype::IPV4;
-            state_ = socks5_state::REQ_RECEIVED;
-            _dia("process_socks_request: request received, type %d", atype);
-
-            auto dst = readbuf()->get_at<uint32_t>(4);
-            req_port = ntohs(readbuf()->get_at<uint16_t>(8));
-            com()->nonlocal_dst_port() = req_port;
-            com()->nonlocal_src(true);
-            _dia("process_socks_request: request for %s -> %s:%d",c_type(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
-
-
-            req_addr.s_addr=dst;
-
-            com()->nonlocal_dst_host() = string_format("%s",inet_ntoa(req_addr));
-            com()->nonlocal_dst_port() = req_port;
-            com()->nonlocal_src(true);
-            _dia("process_socks_request: request (IPv4) for %s -> %s:%d",c_type(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
-            setup_target();
-        } else {
-            _err("unknown address type %d", atype);
-        }
     }
-
     else if (version == 4) {
-        _dia("process_socks_request: socks4");
-
-        if(readbuf()->size() < 8) {
-            _dia("process_socks_request: socks4 request header too short");
-            goto error;
-        }
-
-        req_atype = socks5_atype::IPV4;
-        state_ = socks5_state::REQ_RECEIVED;
-        _dia("socksServerCX::process_socks_request: socks4 request received");
-
-        req_port = ntohs(readbuf()->get_at<uint16_t>(2));
-        auto dst = readbuf()->get_at<uint32_t>(4);
-
-
-        req_addr.s_addr=dst;
-
-        com()->nonlocal_dst_host() = string_format("%s",inet_ntoa(req_addr));
-        com()->nonlocal_dst_port() = req_port;
-        com()->nonlocal_src(true);
-        _dia("socksServerCX::process_socks_request: request (SOCKSv4) for %s -> %s:%d",c_type(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
-
-        setup_target();
+        socks_error_ = handle4_connect();
     }
-    else {
-        _dia("process_socks_request: unexpected socks version");
-        goto error;
+
+    if(socks_error_ != socks5_request_error_::NONE) {
+        _dia("socksServerCX::process_socks_request: error %d", socks_error_);
+        error(true);
     }
 
 
     return readbuf()->size();
-
-    error:
-        _dia("socksServerCX::process_socks_request: error %d",e);
-        error(true);
-        return readbuf()->size();
 }
 
 bool socksServerCX::setup_target() {
@@ -489,7 +505,7 @@ bool socksServerCX::new_message() const {
 void socksServerCX::verdict(socks5_policy p) {
     verdict_ = p;
     state_ = socks5_state::POLICY_RECEIVED;
-    
+
     if(verdict_ == socks5_policy::ACCEPT || verdict_ == socks5_policy::REJECT) {
         process_socks_reply();
     }

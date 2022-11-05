@@ -52,7 +52,17 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
 
     auto* cx = dynamic_cast<socksServerCX*>(basecx);
     if(cx != nullptr) {
-        if(cx->state_ == socks5_state::WAIT_POLICY) {
+        if(cx->socks_error_ != socks5_request_error_::NONE) {
+            if(cx->socks_error_ == socks5_request_error_::MALFORMED_DATA) {
+                cx->error(true);
+                return;
+            }
+            else {
+                cx->verdict(socks5_policy_::REJECT);
+            }
+        }
+        else if(cx->state_ == socks5_state::WAIT_POLICY) {
+
             _dia("SocksProxy::on_left_message: policy check: accepted");
             std::vector<baseHostCX*> l;
             std::vector<baseHostCX*> r;

@@ -49,12 +49,14 @@
 #include <sslmitmcom.hpp>
 #include <async/asyncdns.hpp>
 
-typedef enum class socks5_state_ { INIT=1, HELLO_SENT, WAIT_REQUEST, REQ_RECEIVED, WAIT_POLICY, POLICY_RECEIVED, REQRES_SENT, DNS_QUERY_SENT=15, DNS_RESP_RECV, DNS_RESP_FAILED, HANDOFF=31 , ZOMBIE=255 } socks5_state;
-typedef enum class socks5_request_error_ { NONE=0, UNSUPPORTED_VERSION, UNSUPPORTED_ATYPE } socks5_request_error;
-typedef enum class socks5_atype_ { IPV4=1, FQDN=3, IPV6=4 } socks5_atype;
-typedef enum class socks5_policy_ { PENDING, ACCEPT, REJECT } socks5_policy;
+using socks5_state = enum class socks5_state_ { INIT=1, HELLO_SENT, WAIT_REQUEST, REQ_RECEIVED, WAIT_POLICY, POLICY_RECEIVED, REQRES_SENT, DNS_QUERY_SENT=15, DNS_RESP_RECV, DNS_RESP_FAILED, HANDOFF=31 , ZOMBIE=255 };
+using socks5_request_error = enum class socks5_request_error_ { NONE=0, UNSUPPORTED_VERSION, UNSUPPORTED_ATYPE, UNSUPPORTED_METHOD, MALFORMED_DATA };
 
-typedef enum socks5_message_ { POLICY, UPGRADE } socks5_message;
+using socks5_cmd = enum socks5_cmd_ { CONNECT=1, BIND=2, UDP_ASSOCIATE=3 };
+using socks5_atype = enum class socks5_atype_ { IPV4=1, FQDN=3, IPV6=4 };
+using socks5_policy = enum class socks5_policy_ { PENDING, ACCEPT, REJECT };
+
+using socks5_message = enum socks5_message_ { POLICY, UPGRADE };
 
 
 
@@ -98,6 +100,11 @@ public:
     std::size_t process_in() override;
     virtual int process_socks_hello();
     virtual int process_socks_request();
+
+    socks5_request_error handle4_connect();
+    socks5_request_error handle5_connect();
+    socks5_request_error handle5_connect_fqdn(std::string const& fqdn);
+
     virtual bool setup_target();
     virtual int process_socks_reply();
     void pre_write() override;
@@ -105,7 +112,8 @@ public:
     bool new_message() const override;
     void verdict(socks5_policy);
     void state(socks5_state s) { state_ = s; };
-    
+
+    socks5_request_error socks_error_;
     socks5_policy verdict_ = socks5_policy::PENDING;
     socks5_state state_;
     
