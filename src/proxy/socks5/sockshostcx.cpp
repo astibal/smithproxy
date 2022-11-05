@@ -542,6 +542,9 @@ int socksServerCX::process_socks_reply_v5() {
                 response[cur_data_ptr] = c;
                 cur_data_ptr++;
             }
+
+            *((uint16_t*)&response[cur_data_ptr]) = htons(req_port);
+            cur_data_ptr += sizeof(uint16_t);
         }
     }
     else if(req_cmd == socks5_cmd::UDP_ASSOCIATE) {
