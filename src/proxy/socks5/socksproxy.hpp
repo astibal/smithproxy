@@ -82,4 +82,20 @@ private:
 };
 
 
+class MitmSocksUdpProxy : public ThreadedReceiverProxy<SocksProxy> {
+public:
+
+    MitmSocksUdpProxy(baseCom* c, int worker_id, proxyType t = proxyType::proxy()) : ThreadedReceiverProxy<SocksProxy>(c,worker_id, t) {};
+    baseHostCX* new_cx(int s) override;
+    void on_left_new(baseHostCX* just_accepted_cx) override;
+
+    std::string to_string(int lev) const override { static std::string r(string_format("MitmSocksUdpProxy[%s]", baseProxy::to_string(lev).c_str())); return r; };
+
+    TYPENAME_OVERRIDE("MitmSocksUdpProxy")
+DECLARE_LOGGING(to_string)
+
+private:
+    logan_lite log {"com.socks.receiver"};
+};
+
 #endif

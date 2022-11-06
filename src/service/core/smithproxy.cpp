@@ -227,7 +227,7 @@ bool SmithProxy::create_listeners() {
             log_listener(socks_frm, socks_proxies);
 
 
-            socks_udp_proxies = NetworkServiceFactory::prepare_listener<socksAcceptor, socksUDPCom>(
+            socks_udp_proxies = NetworkServiceFactory::prepare_listener<socksReceiver , socksUDPCom>(
                     std::stoi(CfgFactory::get()->listen_socks_port),
                     socks_udp_frm,
                     CfgFactory::get()->num_workers_socks,

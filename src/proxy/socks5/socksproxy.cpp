@@ -147,11 +147,12 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
         case 636:
         case 993:
         case 995:
-            new_com = new socksSSLMitmCom();
-            ssl = true;
-            break;
+            if(com()->l4_proto() != SOCK_DGRAM) {
+                new_com = new baseSSLMitmCom<SSLCom>();
+                break;
+            }
         default:
-            new_com = new socksTCPCom();
+            new_com = (com()->l4_proto() == SOCK_DGRAM) ? (baseCom*) new UDPCom() : (baseCom*) new TCPCom();
     }
     new_com->master(com()->master());
     
@@ -342,5 +343,24 @@ void MitmSocksProxy::on_left_new(baseHostCX* just_accepted_cx) {
 
     new_proxy->ladd(just_accepted_cx);
     this->add_proxy(new_proxy);
-    _deb("MitmMasterProxy::on_left_new: finished");
+    _deb("MitmSocksProxy::on_left_new: finished");
+}
+
+baseHostCX* MitmSocksUdpProxy::new_cx(int s) {
+    auto r = new socksServerCX(com()->slave(),s);
+    return r;
+}
+
+void MitmSocksUdpProxy::on_left_new(baseHostCX* just_accepted_cx) {
+
+    auto* new_proxy = new SocksProxy(com()->slave());
+    // let's add this just_accepted_cx into new_proxy
+    std::string h;
+    std::string p;
+    just_accepted_cx->name();
+    just_accepted_cx->com()->resolve_socket_src(just_accepted_cx->socket(),&h,&p);
+
+    new_proxy->ladd(just_accepted_cx);
+    this->add_proxy(new_proxy);
+    _deb("MitmSocksUdpProxy::on_left_new: finished");
 }

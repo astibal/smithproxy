@@ -57,9 +57,11 @@
 
 #include <atomic>
 
-typedef ThreadedAcceptor<MitmMasterProxy> theAcceptor;
-typedef ThreadedReceiver<MitmUdpProxy> theReceiver;
-typedef ThreadedAcceptor<MitmSocksProxy> socksAcceptor;
+using theAcceptor = ThreadedAcceptor<MitmMasterProxy>;
+using theReceiver = ThreadedReceiver<MitmUdpProxy>;
+
+using socksAcceptor = ThreadedAcceptor<MitmSocksProxy>;
+using socksReceiver = ThreadedReceiver<MitmSocksUdpProxy>;
 
 
 
@@ -71,8 +73,10 @@ class SmithProxy : public Service {
 public:
 
     using vec_of_acceptors = std::vector<std::unique_ptr<theAcceptor>>;
-    using vec_of_sock5tors = std::vector<std::unique_ptr<socksAcceptor>>;
     using vec_of_receivers = std::vector<std::unique_ptr<theReceiver>>;
+
+    using vec_of_sock5tors = std::vector<std::unique_ptr<socksAcceptor>>;
+    using vec_of_sock5vers = std::vector<std::unique_ptr<socksReceiver>>;
 
     vec_of_acceptors plain_proxies;
     vec_of_acceptors ssl_proxies;
@@ -80,7 +84,7 @@ public:
     vec_of_receivers dtls_proxies;
 
     vec_of_sock5tors socks_proxies;
-    vec_of_sock5tors socks_udp_proxies;
+    vec_of_sock5vers socks_udp_proxies;
 
     vec_of_acceptors redir_plain_proxies;
     vec_of_acceptors redir_ssl_proxies;
