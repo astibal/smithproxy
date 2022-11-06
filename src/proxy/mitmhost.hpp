@@ -44,7 +44,7 @@
 #include <apphostcx.hpp>
 #include <policy/inspectors.hpp>
 
-class MitmHostCX final : public AppHostCX, public socle::sobject {
+class MitmHostCX : public AppHostCX, public socle::sobject {
 public:
     ~MitmHostCX() override = default;
     
