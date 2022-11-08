@@ -2110,6 +2110,7 @@ int cli_diag_worker_list(struct cli_def *cli, [[maybe_unused]] const char *comma
     list_acceptor("== dtls receiver", sx.dtls_proxies, sx.dtls_threads, verbosity);
 
     list_acceptor("== socks acceptor", sx.socks_proxies, sx.socks_threads, verbosity);
+    list_acceptor("== socks receiver", sx.socks_udp_proxies, sx.socks_udp_threads, verbosity);
 
     list_acceptor("== plain redirect acceptor", sx.redir_plain_proxies, sx.redir_plain_threads, verbosity);
     list_acceptor("== dns redirect receiver", sx.redir_udp_proxies, sx.redir_udp_threads, verbosity);
