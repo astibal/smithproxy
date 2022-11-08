@@ -49,6 +49,8 @@
 #include <sslmitmcom.hpp>
 #include <async/asyncdns.hpp>
 
+#include <common/numops.hpp>
+
 using socks5_state = enum class socks5_state_ { INIT=1, HELLO_SENT, WAIT_REQUEST, REQ_RECEIVED, WAIT_POLICY, POLICY_RECEIVED, REQRES_SENT, DNS_QUERY_SENT=15, DNS_RESP_RECV, DNS_RESP_FAILED, HANDOFF=31 , ZOMBIE=255 };
 using socks5_request_error = enum class socks5_request_error_ { NONE=0, UNSUPPORTED_VERSION, UNSUPPORTED_ATYPE, UNSUPPORTED_METHOD, MALFORMED_DATA };
 
@@ -67,7 +69,7 @@ public:
     static inline std::string sockstcpcom_name_ = "s5_tcp";;
 
     virtual std::string& name() { return sockstcpcom_name_; };
-    virtual baseCom* replicate() { return new socksTCPCom(); };
+    baseCom* replicate() override { return new socksTCPCom(); };
 };
 
 class socksUDPCom: public UDPCom {
@@ -75,7 +77,7 @@ public:
     static inline std::string socksudpcom_name_ = "s5_udp";
 
     virtual std::string& name() { return socksudpcom_name_; };
-    virtual baseCom* replicate() { return new socksUDPCom(); };
+    baseCom* replicate() override { return new socksUDPCom(); };
 };
 
 
@@ -84,10 +86,10 @@ public:
     static inline std::string sockssslmitmcom_name_ = "s5_ssli";
     
     virtual std::string& name() { return sockssslmitmcom_name_; };
-    virtual baseCom* replicate() { return new socksSSLMitmCom(); };
+    baseCom* replicate() override { return new socksSSLMitmCom(); };
 };
 
-class socksServerCX : public baseHostCX, public epoll_handler {
+class socksServerCX : public MitmHostCX, public epoll_handler {
 public:
     socksServerCX(baseCom* c, unsigned int s);
     ~socksServerCX() override {};
@@ -98,17 +100,21 @@ public:
     static inline bool prefer_ipv6 = false;       // if set, try IPv6 DNS first (AAAA), then IPv4 (A)
 
     std::size_t process_in() override;
-    virtual int process_socks_hello();
-    virtual int process_socks_request();
+    virtual std::size_t process_socks_hello();
+    virtual std::size_t process_socks_hello_tcp();
+    virtual std::size_t process_socks_udp_request();
+
+    virtual std::size_t process_socks_request();
 
     socks5_request_error handle4_connect();
     socks5_request_error handle5_connect();
     socks5_request_error handle5_connect_fqdn(std::string const& fqdn);
 
     virtual bool setup_target();
-    virtual int process_socks_reply();
+    virtual std::size_t process_socks_reply();
     virtual int process_socks_reply_v4();
-    virtual int process_socks_reply_v5();
+    virtual std::size_t process_socks_reply_v5();
+
 
     void wait_policy() {
         // peers are now prepared for handover. Owning proxy will wipe this CX (it will be empty)
@@ -144,6 +150,10 @@ public:
     static bool global_async_dns;
 
     uint8_t request_command() const noexcept { return req_cmd; }
+
+    std::size_t process_socks_response();
+    std::size_t process_out() override;
+
 private:
     uint8_t version;
     uint8_t req_cmd;
@@ -152,20 +162,36 @@ private:
     std::string req_str_addr;
 
     unsigned short req_port;
+    std::size_t req_hdr_size = 0L;
+
     bool process_dns_response(std::shared_ptr<DNS_Response> resp);
 
     bool choose_server_ip(std::vector<std::string>& target_ips);
     bool async_dns = true;
-    //socket_state async_dns_socket;
 
     std::unique_ptr<AsyncDnsQuery> async_dns_query;
 
     std::string to_string(int verbosity) const override { return baseHostCX::to_string(verbosity); };
-private:
+
+public:
     // implement advanced logging
     TYPENAME_BASE("sockHostCX")
     DECLARE_LOGGING(to_string)
 
+private:
+    logan_lite log {"com.socks.proxy"};
+
+};
+
+
+class socksMitmHostCX : public MitmHostCX {
+public:
+    ~socksMitmHostCX() override = default;
+
+    socksMitmHostCX(baseCom* c, const char* h, const char* p ) : MitmHostCX(c, h, p) {};
+    socksMitmHostCX( baseCom* c, int s ) : MitmHostCX(c, s) {};
+
+    TYPENAME_BASE("socksMitmHostCX")
 private:
     logan_lite log {"com.socks.proxy"};
 

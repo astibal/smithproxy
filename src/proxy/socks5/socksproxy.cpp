@@ -95,11 +95,19 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
 
             socks5_policy s5_verdict = verdict ? socks5_policy::ACCEPT : socks5_policy::REJECT;
             cx->verdict(s5_verdict);
+
+            // Proceed with UDP directly to handoff phase
+            if(com()->l4_proto() == SOCK_DGRAM) {
+                _dia("SocksProxy::on_left_message: socksHostCX policy+handoff");
+                cx->state(socks5_state::ZOMBIE);
+
+                cx->com()->l4_proto() != SOCK_DGRAM ? socks5_handoff(cx) : socks5_handoff_udp(cx);
+            }
         }
         else if(cx->state_ == socks5_state::HANDOFF) {
             _dia("SocksProxy::on_left_message: socksHostCX handoff msg received");
             cx->state(socks5_state::ZOMBIE);
-            
+
             socks5_handoff(cx);
         } else {
 
@@ -139,7 +147,7 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     
     int s = cx->socket();
     bool ssl = false;
-    
+
     baseCom* new_com = nullptr;
     switch(cx->com()->nonlocal_dst_port()) {
         case 443:
@@ -151,11 +159,12 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
                 new_com = new baseSSLMitmCom<SSLCom>();
                 break;
             }
+            [[fallthrough]];
         default:
             new_com = (com()->l4_proto() == SOCK_DGRAM) ? (baseCom*) new UDPCom() : (baseCom*) new TCPCom();
     }
     new_com->master(com()->master());
-    
+
     auto* n_cx = new MitmHostCX(new_com, s);
     n_cx->waiting_for_peercom(true);
     n_cx->com()->nonlocal_dst(true);
@@ -165,17 +174,17 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
 
     // get rid of it
     cx->remove_socket();
-    if(cx->left) { 
+    if(cx->left) {
         // we are using the socket, so we don't want it to be cleared in cx->left destructor.
         cx->left->remove_socket();
     }
-    
+
     delete cx;
-    
+
     left_sockets.clear();
     ldaadd(n_cx);
     n_cx->on_delay_socket(s);
-    
+
     auto *target_cx = new MitmHostCX(n_cx->com()->slave(), n_cx->com()->nonlocal_dst_host().c_str(),
                                         string_format("%d",n_cx->com()->nonlocal_dst_port()).c_str()
                                         );
@@ -184,8 +193,8 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     n_cx->com()->resolve_socket_src(n_cx->socket(),&h,&p);
     n_cx->host() = h;
     n_cx->port() = p;
-    
-    
+
+
     n_cx->peer(target_cx);
     target_cx->peer(n_cx);
 
@@ -227,100 +236,182 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
         std::string target_host = n_cx->com()->nonlocal_dst_host();
         short unsigned int target_port = n_cx->com()->nonlocal_dst_port();
 
-        if (src_cx != nullptr) {
+        if(not socks5_handoff_resolve_identity(n_cx)) {
+            _deb("deleting proxy %s", c_type());
+            state().dead(true);
+        }
+    }
 
-            // resolve source information - is there an identity info for that IP?
-            if (opt_auth_authenticate || opt_auth_resolve) {
-
-                _dia("authentication required or optionally resolved");
-
-                bool identity_resolved = resolve_identity(src_cx, false);
-
-
-                if (!identity_resolved) {
-                    // identity is unknown!
-
-                    if(opt_auth_authenticate) {
-                        if (target_port != 80 && target_port != 443) {
-                            delete_proxy = true;
-                            _inf("Connection %s closed: authorization failed (unknown identity)",
-                                   n_cx->c_type());
-                        }
-                    }
-                    else {
-                        _dia("Connection %s: authentication info optional, continuing.",n_cx->c_type());
-                    }
-
-                } else if(opt_auth_authenticate) {
+    _dia("SocksProxy::socks5_handoff: finished");
+}
 
 
-                    bool bad_auth = true;
+bool SocksProxy::socks5_handoff_resolve_identity(MitmHostCX* cx) {
 
-                    // investigate L3 protocol
-                    int af = AF_INET;
-                    if (n_cx->com()) {
-                        af = n_cx->com()->l3_proto();
-                    }
-                    std::string str_af = SocketInfo::inet_family_str(af);
+    bool result = true;
+
+    // resolve source information - is there an identity info for that IP?
+    if (opt_auth_authenticate || opt_auth_resolve) {
+
+        _dia("socks5_handoff_udp: authentication required or optionally resolved");
+
+        bool identity_resolved = resolve_identity(cx, false);
+
+        if (!identity_resolved) {
+            // identity is unknown!
+
+            if(opt_auth_authenticate) {
+                short unsigned int target_port = cx->com()->nonlocal_dst_port();
 
 
-                    std::optional<std::vector<std::string>> groups_vec;
+                if (target_port != 80 && target_port != 443) {
+                    result = false;
+                    _inf("Connection %s closed: authorization failed (unknown identity)",
+                         cx->c_type());
+                }
+            }
+            else {
+                _dia("Connection %s: authentication info optional, continuing.",cx->c_type());
+            }
 
-                    if (af == AF_INET || af == 0) {
-                        groups_vec = AuthFactory::get().ip4_get_groups(n_cx->host());
-                    } else if (af == AF_INET6) {
-                        groups_vec = AuthFactory::get().ip6_get_groups(n_cx->host());
-                    }
+        } else if(opt_auth_authenticate) {
 
-                    if ( groups_vec ) {
+            result = socks5_handoff_authenticate(cx);
 
-                        if (CfgFactory::get()->policy_prof_auth(matched_policy()) != nullptr)
-                            for (auto i: CfgFactory::get()->policy_prof_auth(matched_policy())->sub_policies) {
-                                for (auto const& x: groups_vec.value()) {
-                                    _deb("Connection identities: ip identity '%s' against policy '%s'", x.c_str(),
-                                         i->element_name().c_str());
-                                    if (x == i->element_name()) {
-                                        _dia("Connection identities: ip identity '%s' matches policy '%s'", x.c_str(),
-                                             i->element_name().c_str());
-                                        bad_auth = false;
-                                    }
-                                }
-                            }
-                        if (bad_auth) {
-                            if (target_port != 80 && target_port != 443) {
-                                _inf("Connection %s closed: authorization failed (non-matching identity criteria)",
-                                       n_cx->c_type());
-                            } else {
-                                _inf("Connection %s closed: authorization failed (non-matching identity criteria)(with replacement)",
-                                       n_cx->c_type());
-                                // set bad_auth true, because despite authentication failed, it could be replaced (we can let user know
-                                // he is not allowed to proceed
-                                bad_auth = false;
-                                auth_block_identity = true;
-                            }
-                        }
-                    }
+        }
+    } else {
+        _dia("Connection %s: authentication info optional, continuing.", cx->c_type());
+    }
 
-                    if (bad_auth) {
-                        delete_proxy = true;
+    return result;
+}
+
+
+bool SocksProxy::socks5_handoff_authenticate(MitmHostCX *cx) {
+
+    bool bad_auth = true;
+
+    // investigate L3 protocol
+    int af = AF_INET;
+    if (cx->com()) {
+        af = cx->com()->l3_proto();
+    }
+    std::string str_af = SocketInfo::inet_family_str(af);
+
+
+    std::optional<std::vector<std::string>> groups_vec;
+
+    if (af == AF_INET || af == 0) {
+        groups_vec = AuthFactory::get().ip4_get_groups(cx->host());
+    } else if (af == AF_INET6) {
+        groups_vec = AuthFactory::get().ip6_get_groups(cx->host());
+    }
+
+    if ( groups_vec ) {
+
+        if (CfgFactory::get()->policy_prof_auth(matched_policy()) != nullptr)
+            for (auto i: CfgFactory::get()->policy_prof_auth(matched_policy())->sub_policies) {
+                for (auto const& x: groups_vec.value()) {
+                    _deb("Connection identities: ip identity '%s' against policy '%s'", x.c_str(),
+                         i->element_name().c_str());
+                    if (x == i->element_name()) {
+                        _dia("Connection identities: ip identity '%s' matches policy '%s'", x.c_str(),
+                             i->element_name().c_str());
+                        bad_auth = false;
                     }
                 }
+            }
+        if (bad_auth) {
+            short unsigned int target_port = cx->com()->nonlocal_dst_port();
+
+
+            if (target_port != 80 && target_port != 443) {
+                _inf("Connection %s closed: authorization failed (non-matching identity criteria)",
+                     cx->c_type());
             } else {
-                _dia("Connection %s: authentication info optional, continuing.",n_cx->c_type());
+                _inf("Connection %s closed: authorization failed (non-matching identity criteria)(with replacement)",
+                     cx->c_type());
+                // set bad_auth true, because despite authentication failed, it could be replaced (we can let user know
+                // he is not allowed to proceed
+                bad_auth = false;
+                auth_block_identity = true;
             }
         }
+    }
+
+    return not bad_auth;
+}
+
+void SocksProxy::socks5_handoff_udp(socksServerCX* cx) {
+
+    _deb("SocksProxy::socks5_handoff_udp: start");
+
+    if(matched_policy() < 0) {
+        _dia("SocksProxy::socks5_handoff_udp: matching policy: %d: dropping.",matched_policy());
+        state().dead(true);
+        return;
+    }
+    else if(matched_policy() >= (signed int)CfgFactory::get()->db_policy_list.size()) {
+        _dia("SocksProxy::socks5_handoff_udp: matching policy out of policy index table: %d/%d: dropping.",
+             matched_policy(),
+             CfgFactory::get()->db_policy_list.size());
+        state().dead(true);
+        return;
+    }
+
+    ////// we matched the policy
+
+    auto *target_cx = cx->right.release();
+
+    cx->peer(target_cx);
+    target_cx->peer(cx);
+    target_cx->writebuf()->append(cx->left->readbuf()->data(), cx->left->readbuf()->size());
 
 
-        if(delete_proxy) {
+    auto const& n_cx = cx->left;
+
+    if(not n_cx) {
+        _err("SocksProxy::socks5_handoff_udp: left shadow cx is null");
+        state().dead(true);
+        return;
+    }
+
+    {
+        auto lc_ = std::scoped_lock(CfgFactory::lock());
+        if (CfgFactory::get()->db_policy_list.at(matched_policy())->nat == PolicyRule::POLICY_NAT_NONE) {
+            target_cx->com()->nonlocal_src(true);
+        }
+    }
+
+    n_cx->matched_policy(matched_policy());
+    target_cx->matched_policy(matched_policy());
+
+    radd(target_cx);
+
+    if (CfgFactory::get()->policy_apply(n_cx.get(), this, matched_policy()) < 0) {
+        // strange, but it can happen if the sockets is closed between policy match and this profile application
+        // mark dead.
+        _inf("SocksProxy::socks5_handoff_udp: session failed policy application");
+        state().dead(true);
+    } else {
+
+        // connect with applied properties
+        int real_socket = target_cx->connect();
+        com()->set_monitor(real_socket);
+        com()->set_poll_handler(real_socket,this);
+
+        // apply policy and get result
+
+
+        if(not socks5_handoff_resolve_identity(n_cx.get())) {
             _deb("deleting proxy %s", c_type());
             state().dead(true);
         }
     }
 
 
-    _dia("SocksProxy::socks5_handoff: finished");
+    _dia("SocksProxy::socks5_handoff_udp: finished");
 }
-
 
 
 

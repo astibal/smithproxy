@@ -46,7 +46,7 @@
 
 bool socksServerCX::global_async_dns = true;
 
-socksServerCX::socksServerCX(baseCom* c, unsigned int s) : baseHostCX(c,s) {
+socksServerCX::socksServerCX(baseCom* c, unsigned int s) : MitmHostCX(c,s) {
     state_ = socks5_state::INIT;
 
     // copy setting from global/static variable - don't allow to change async
@@ -69,36 +69,66 @@ std::size_t socksServerCX::process_in() {
     return 0;
 }
 
-int socksServerCX::process_socks_hello() {
-        
-    buffer* b = readbuf();
-    if(b->size() < 3) {
+std::size_t socksServerCX::process_socks_udp_request() {
+    buffer const *b = readbuf();
+    if (b->size() < 4) {
         // minimal size of "client hello" is 3 bytes
         return 0;
     }
-                   version = b->get_at<unsigned char>(0);
-    unsigned char nmethods = b->get_at<unsigned char>(1);
-    
-    if(b->size() < (unsigned int)(2 + nmethods)) {
+
+    [[maybe_unused]]    uint16_t reserved = b->get_at<uint8_t>(0);
+    [[maybe_unused]]    uint8_t fragment = b->get_at<uint8_t>(2);
+
+    req_cmd = socks5_cmd::CONNECT;
+    req_atype = static_cast<socks5_atype>( b->get_at<uint8_t>(3));
+
+    try {
+        auto err = handle5_connect();
+
+        if(err != socks5_request_error::NONE) {
+            return 0;
+        }
+    }
+    catch(std::out_of_range const&) {
         return 0;
     }
-    
+
+    // there is actually no response sent in UDP proxy case
+
+    read_force_eagain();
+
+    return b->size();
+}
+
+std::size_t socksServerCX::process_socks_hello_tcp() {
+
+    buffer const* b = readbuf();
+    if (b->size() < 3) {
+        // minimal size of "client hello" is 3 bytes
+        return 0;
+    }
+    version = b->get_at<unsigned char>(0);
+    unsigned char nmethods = b->get_at<unsigned char>(1);
+
+    if (b->size() < (unsigned int) (2 + nmethods)) {
+        return 0;
+    }
+
     // at this stage we have full client hello received
-    if(version == 5) {
+    if (version == 5) {
         _dia("socksServerCX::process_socks_init: version %d", version);
-        
+
         unsigned char server_hello[2];
         server_hello[0] = 5; // version
         server_hello[1] = 0; // no authentication
-        
-        writebuf()->append(server_hello,2);
+
+        writebuf()->append(server_hello, 2);
         state_ = socks5_state::HELLO_SENT;
         state_ = socks5_state::WAIT_REQUEST;
-        
-        // flush all data, assuming 
+
+        // flush all data, assuming
         return b->size();
-    }
-    else if(version == 4) {
+    } else if (version == 4) {
         _dia("socksServerCX::process_socks_init: version %d", version);
         return process_socks_request();
     } else {
@@ -106,6 +136,17 @@ int socksServerCX::process_socks_hello() {
         error(true);
     }
 
+    return 0;
+}
+
+std::size_t socksServerCX::process_socks_hello() {
+
+    if(com()->l4_proto() != SOCK_DGRAM) {
+        return process_socks_hello_tcp();
+    }
+    else {
+        return process_socks_udp_request();
+    }
     return 0;
 }
 
@@ -349,6 +390,8 @@ socks5_request_error socksServerCX::handle5_connect() {
         req_port = ntohs(readbuf()->get_at<uint16_t>(5+fqdn_sz));
         _dia("handle5_connect: port requested: %d",req_port);
 
+        req_hdr_size = 5 + fqdn_sz + 2;
+
         return handle5_connect_fqdn(fqdn);
 
     }
@@ -371,6 +414,8 @@ socks5_request_error socksServerCX::handle5_connect() {
         com()->nonlocal_dst_port() = req_port;
         com()->nonlocal_src(true);
         _dia("handle5_connect: request (IPv4) for %s -> %s:%d",c_type(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
+
+        req_hdr_size = 10;
         setup_target();
 
         return socks5_request_error::NONE;
@@ -382,50 +427,48 @@ socks5_request_error socksServerCX::handle5_connect() {
 }
 
 
-int socksServerCX::process_socks_request() {
+std::size_t socksServerCX::process_socks_request() {
 
     socks_error_ = socks5_request_error::NONE;
     
-    if(readbuf()->size() < 5) {
-        return 0; // wait for more complete request
-    }
-
     _dia("socksServerCX::process_socks_request");
 
-    if(state_ == socks5_state::DNS_QUERY_SENT) {
-        _dia("process_socks_request: triggered when waiting for DNS response");
-        return 0;
+    try {
+        if (state_ == socks5_state::DNS_QUERY_SENT) {
+            _dia("process_socks_request: triggered when waiting for DNS response");
+            return 0;
+        }
+
+        _dum("Request dump:\r\n%s", hex_dump(readbuf()->data(), readbuf()->size(), 4, 0, true).c_str());
+
+        version = readbuf()->get_at<unsigned char>(0);
+        req_cmd = readbuf()->get_at<unsigned char>(1);
+        //@2 is reserved
+
+        if (version == 5) {
+
+            if (readbuf()->size() < 10) {
+                _dia("process_socks_request: socks5 request header too short");
+                return -1;
+            } else if (req_cmd == socks5_cmd::CONNECT) {
+                socks_error_ = handle5_connect();
+            } else if (req_cmd == socks5_cmd::UDP_ASSOCIATE) {
+                // let's just handle the response
+                socks_error_ = socks5_request_error::NONE;
+                wait_policy();
+            } else {
+                socks_error_ = socks5_request_error::UNSUPPORTED_METHOD;
+            }
+        } else if (version == 4) {
+            socks_error_ = handle4_connect();
+        } else {
+            socks_error_ = socks5_request_error::UNSUPPORTED_VERSION;
+        }
+    }
+    catch(std::out_of_range const&) {
+        socks_error_ = socks5_request_error::MALFORMED_DATA;
     }
 
-    _dum("Request dump:\r\n%s",hex_dump(readbuf()->data(),readbuf()->size(), 4, 0, true).c_str());
-    
-    version = readbuf()->get_at<unsigned char>(0);
-    req_cmd = readbuf()->get_at<unsigned char>(1);
-    //@2 is reserved
-
-    if(version == 5) {
-
-        if(readbuf()->size() < 10) {
-            _dia("process_socks_request: socks5 request header too short");
-        }
-        else if(req_cmd == socks5_cmd::CONNECT) {
-            socks_error_ = handle5_connect();
-        }
-        else if(req_cmd == socks5_cmd::UDP_ASSOCIATE) {
-            // let's just handle the response
-            socks_error_ = socks5_request_error::NONE;
-            wait_policy();
-        }
-        else {
-            socks_error_ = socks5_request_error::UNSUPPORTED_METHOD;
-        }
-    }
-    else if (version == 4) {
-        socks_error_ = handle4_connect();
-    }
-    else {
-        socks_error_ = socks5_request_error::UNSUPPORTED_VERSION;
-    }
 
     if(socks_error_ != socks5_request_error_::NONE) {
         _dia("socksServerCX::process_socks_request: error %d", socks_error_);
@@ -449,43 +492,64 @@ bool socksServerCX::setup_target() {
             case 636:
             case 993:
             case 995:
-                new_com = new baseSSLMitmCom<SSLCom>();
-                handoff_as_ssl = true;
-                break;
+
+                if(com()->l4_proto() != SOCK_DGRAM) {
+                    new_com = new baseSSLMitmCom<SSLCom>();
+                    handoff_as_ssl = true;
+                    break;
+                }
+                [[fallthrough]];
             default:
-                new_com = new TCPCom();
+                new_com = (com()->l4_proto() == SOCK_DGRAM) ? (baseCom*) new UDPCom() : (baseCom*) new TCPCom();
         }
-        
-        auto* n_cx = new MitmHostCX(new_com, s);
+
+        auto* n_cx = new socksMitmHostCX(new_com, s);
         n_cx->waiting_for_peercom(true);
 
         n_cx->com()->nonlocal_dst(true);
         n_cx->com()->nonlocal_dst_host() = com()->nonlocal_dst_host();
         n_cx->com()->nonlocal_dst_port() = com()->nonlocal_dst_port();
         n_cx->com()->nonlocal_dst_resolved(true);
-        
+
+        if(com()->l4_proto() == SOCK_DGRAM) {
+            // with UDP, we receive data with the request, n_cx must have it
+            readbuf()->flush(req_hdr_size);
+            n_cx->readbuf()->append(readbuf()->data(), readbuf()->size());
+        }
+
+        // Use of "left" differs between UDP and TCP.
+        // TCP - n_cx ("left") replaces current SocksServerCX on the left side of proxy.
+        //       This is desirable, at this point SOCKS protocol is not anymore involved.
+        //
+        // UDP - n_cx ("left") will NOT replace SocksServerCX on the left side,
+        //       because all traffic between client on the left and this proxy still talks SOCKS.
+        //       UDP payload is always prepended with SOCKS CONNECT request, and its response
+        //       is expected to be received back => it *cannot* be replaced with vanilla proxy.
+
+        // for now, move its ownership!
+        left.reset(std::move(n_cx));
+        _dia("socksServerCX::setup_target: prepared left: %s",left->c_type());
+
         
         // RIGHT
+        std::string h;
+        std::string p;
+        com()->resolve_socket_src(socket(),&h,&p);
 
-
-        auto *target_cx = new MitmHostCX(n_cx->com()->slave(), n_cx->com()->nonlocal_dst_host().c_str(),
-                                            string_format("%d",n_cx->com()->nonlocal_dst_port()).c_str()
+        auto *target_cx = new MitmHostCX(com()->slave(), com()->nonlocal_dst_host().c_str(),
+                                            string_format("%d",com()->nonlocal_dst_port()).c_str()
                                             );
         target_cx->waiting_for_peercom(true);
         
-        std::string h;
-        std::string p;
-        n_cx->com()->resolve_socket_src(n_cx->socket(),&h,&p);
-        
+
         
         target_cx->com()->nonlocal_src(false);
         target_cx->com()->nonlocal_src_host() = h;
-        target_cx->com()->nonlocal_src_port() = std::stoi(p); 
-        
-        
-        
-        left.reset(n_cx);
-        _dia("socksServerCX::setup_target: prepared left: %s",left->c_type());
+        target_cx->com()->nonlocal_src_port() = std::stoi(p);
+
+
+
+        // move pointer's ownership!
         right.reset(target_cx);
         _dia("socksServerCX::setup_target: prepared right: %s",right->c_type());
         
@@ -511,7 +575,7 @@ void socksServerCX::verdict(socks5_policy p) {
     }
 }
 
-int socksServerCX::process_socks_reply_v5() {
+std::size_t socksServerCX::process_socks_reply_v5() {
 
     std::array<uint8_t,128> response;
 
@@ -598,7 +662,7 @@ int socksServerCX::process_socks_reply_v4() {
 
 }
 
-int socksServerCX::process_socks_reply() {
+std::size_t socksServerCX::process_socks_reply() {
 
     switch(version) {
         case 4:
@@ -671,6 +735,48 @@ void socksServerCX::dns_response_callback(dns_response_t const& rresp) {
 
 
 void socksServerCX::handle_event (baseCom *xcom) {
+}
 
+std::size_t socksServerCX::process_socks_response() {
+    state_ = socks5_state::INIT;
+
+    buffer b(writebuf()->size() + 200);
+
+    (*(uint16_t*)&b.data()[0]) = 0;
+    b.data()[2] = 0;
+
+    b.data()[3] = static_cast<uint8_t>(req_atype);
+    b.size(4);
+
+    if(req_atype == socks5_atype::IPV4) {
+
+        (*(uint32_t *) &b.data()[4]) = req_addr.s_addr;
+        (*(uint16_t *) &b.data()[8]) = htons(req_port);
+        b.size(10);
+    }
+    else if(req_atype == socks5_atype::FQDN) {
+        b.append<>(raw::down_cast<uint8_t>(req_str_addr.size()).value_or(255));
+        b.append(req_str_addr.data(), req_str_addr.size());
+        b.append<>(htons(req_port));
+    }
+
+
+    b.append(writebuf()->data(), writebuf()->size());
+    writebuf()->swap(b);
+    return writebuf()->size();
+}
+
+
+std::size_t socksServerCX::process_out() {
+
+    if(com()->l4_proto() != SOCK_DGRAM) {
+        return writebuf()->size();
+    }
+    else if(state_ > socks5_state::REQ_RECEIVED) {
+        return process_socks_response();
+    }
+    else {
+        return writebuf()->size();
+    }
 }
 
