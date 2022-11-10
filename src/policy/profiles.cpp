@@ -21,10 +21,10 @@ size_t ProfileRouting::lb_index_rr(size_t sz) const {
 static uint32_t crc32_proxy_key(MitmProxy* proxy, bool add_port) {
     std::stringstream ss;
 
-    if(auto* l = proxy->first_left(); l) {
+    if(auto const* l = proxy->first_left(); l) {
         ss << l->host();
     }
-    if(auto* r = proxy->first_right(); r) {
+    if(auto const* r = proxy->first_right(); r) {
         ss << r->host();
         if(add_port) {
             ss << r->port();

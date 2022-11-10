@@ -140,7 +140,7 @@ struct ContentCaptureFormat {
 
     }
 
-    std::string to_ext(std::string const& more_suf) {
+    std::string to_ext(std::string const& more_suf) const {
         auto suf = more_suf;
         suf.empty() ? suf += to_ext() : suf += "." + to_ext();
         return suf;
@@ -323,7 +323,7 @@ struct ProfileRouting: public CfgElement {
     size_t lb_index_l4(MitmProxy *proxy, size_t sz) const;
 
     struct LbState {
-        constexpr static unsigned int refresh_interval = 5;
+        constexpr static time_t refresh_interval = 5;
 
         std::mutex lock_;
 
