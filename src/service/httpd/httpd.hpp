@@ -204,20 +204,21 @@ struct Http_JsonResponseParams : public lmh::ResponseParams {
 };
 
 template <typename Callable>
-class Http_JsonResponder : public lmh::DynamicController {
+class Http_Responder : public lmh::DynamicController {
     std::string meth;
     std::string path;
 
     Callable responder;
 
-    static inline const std::vector<std::pair<std::string, std::string>> json_response_headers  = {
+    static inline const std::vector<std::pair<std::string, std::string>> Http_Response_Headers  = {
             { "X-Vendor", "smithproxy " SMITH_VERSION },
-            { "Content-Type", "application/json" },
-            { "Access-Control-Allow-Origin", "*" },
+            { "Access-Control-Allow-Origin", "*" }
             };
 
 public:
-    Http_JsonResponder(std::string m, std::string p, Callable r)
+
+    std::string Content_Type = "application/text";
+    Http_Responder(std::string m, std::string p, Callable r)
             : meth(std::move(m)), path(std::move(p)), responder(r) {};
 
     bool validPath(const char* arg_path, const char* arg_method) override {
@@ -263,7 +264,9 @@ public:
 
         if(ret.response_code == MHD_HTTP_OK) {
 
-            std::copy(json_response_headers.begin(), json_response_headers.end(), std::back_inserter(ret.headers));
+            auto ct = std::make_pair("Content-Type", Content_Type);
+            ret.headers.emplace_back(std::move(ct));
+            std::copy(Http_Response_Headers.begin(), Http_Response_Headers.end(), std::back_inserter(ret.headers));
 
             response << to_string(ret.response);
         }

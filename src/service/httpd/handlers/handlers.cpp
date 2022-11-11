@@ -182,7 +182,7 @@ namespace sx::webserver {
     void controller_add_authorization(lmh::WebServer &server) {
 
 
-        static Http_JsonResponder authorize_get(
+        static Http_Responder authorize_get(
                 "GET",
                 "/api/authorize",
                 [](MHD_Connection *conn, std::string const &meth, std::string const &req) -> Http_JsonResponseParams {
@@ -208,7 +208,7 @@ namespace sx::webserver {
                     return ret;
                 });
 
-        static Http_JsonResponder authorize(
+        static Http_Responder authorize(
                 "POST",
                 "/api/authorize",
                 [](MHD_Connection *conn, std::string const &meth, std::string const &req) -> Http_JsonResponseParams {
@@ -248,6 +248,9 @@ namespace sx::webserver {
                 }
         );
 
+        authorize.Content_Type = "application/json";
+        authorize_get.Content_Type = "application/json";
+
         server.addController(&authorize);
         server.addController(&authorize_get);
 
@@ -268,7 +271,7 @@ namespace sx::webserver {
             return vals;
         };
 
-        static Http_JsonResponder login(
+        static Http_Responder login(
                 "POST",
                 "/api/login",
                 [&split_form_data](MHD_Connection *conn, std::string const &meth, std::string const &req) -> Http_JsonResponseParams {
@@ -329,6 +332,7 @@ namespace sx::webserver {
                 }
         );
 
+        login.Content_Type = "application/json";
         server.addController(&login);
     }
 }

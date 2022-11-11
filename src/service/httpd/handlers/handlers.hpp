@@ -18,23 +18,23 @@ namespace sx::webserver {
         std::string client_address(MHD_Connection* mc);
 
         struct token_protected {
-            using json_call = std::function<json(MHD_Connection*, std::string const&, std::string const&)>;
+            using the_call = std::function<json(MHD_Connection*, std::string const&, std::string const&)>;
 
-            explicit token_protected(json_call c) : Func(c) {};
+            explicit token_protected(the_call c) : Func(c) {};
             Http_JsonResponseParams operator()(MHD_Connection *conn, std::string const& meth, std::string const &req) const;
 
             private:
-                json_call Func;
+                the_call Func;
         };
 
         struct unprotected {
-            using json_call = std::function<json(MHD_Connection*, std::string const&, std::string const&)>;
+            using the_call = std::function<json(MHD_Connection*, std::string const&, std::string const&)>;
 
-            explicit unprotected(json_call c) : Func(c) {};
+            explicit unprotected(the_call c) : Func(c) {};
             Http_JsonResponseParams operator()(MHD_Connection *conn, std::string const& meth, std::string const &req) const;
 
             private:
-                json_call Func;
+                the_call Func;
         };
     }
 
