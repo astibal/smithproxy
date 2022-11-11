@@ -34,19 +34,19 @@ namespace sx::webserver::dispatchers {
         static Http_Responder cacert(
                 "GET",
                 "/cacert",
-                authorized::unprotected(
+                authorized::unprotected<std::string>(
                         []([[maybe_unused]] MHD_Connection *c, [[maybe_unused]] std::string const &meth,
-                           [[maybe_unused]] std::string const &req) -> json {
+                           [[maybe_unused]] std::string const &req) -> std::string {
                             auto const &fac = SSLFactory::factory();
                             std::string pem_ca_cert;
                             {
                                 auto fac_lock = std::scoped_lock(fac.lock());
                                 pem_ca_cert = fac.config.def_ca_cert_str;
                             }
-                            return { {"cacert", pem_ca_cert },};
+                            return pem_ca_cert;
                         }));
 
-        cacert.Content_Type = "application/json";
+        cacert.Content_Type = "application/x-pem-file";
         server.addController(&cacert);
     }
 
