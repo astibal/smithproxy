@@ -114,7 +114,7 @@ namespace sx::webserver {
 
             Http_JsonResponseParams ret;
 
-            if (not req.empty()) {
+            if (meth == "POST" and not req.empty()) {
                 ret.response_code = MHD_HTTP_OK;
 
                 try {
@@ -126,6 +126,11 @@ namespace sx::webserver {
                     ret.response = {{"error", "unknown parameters"},};
                 }
 
+            }
+            else if(meth != "POST") {
+                // we don't require json in other methods
+                ret.response = Func(conn, meth, req);
+                ret.response_code = MHD_HTTP_OK;
             }
             return ret;
         }
