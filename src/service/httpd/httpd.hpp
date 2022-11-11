@@ -268,7 +268,12 @@ public:
             ret.headers.emplace_back(std::move(ct));
             std::copy(Http_Response_Headers.begin(), Http_Response_Headers.end(), std::back_inserter(ret.headers));
 
-            response << to_string(ret.response);
+            if(ret.response.is_string()) {
+                response << ret.response.template get<std::string>();
+            }
+            else {
+                response << ret.response;
+            }
         }
         return ret;
     }

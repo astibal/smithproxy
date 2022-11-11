@@ -16,7 +16,7 @@ namespace sx::webserver::dispatchers {
         static Http_Responder status_ping(
                 "POST",
                 "/api/status/ping",
-                authorized::unprotected(
+                authorized::unprotected<json>(
                         []([[maybe_unused]] MHD_Connection *c, [[maybe_unused]] std::string const &meth, [[maybe_unused]] std::string const &req) -> json {
                             time_t uptime = time(nullptr) - SmithProxy::instance().ts_sys_started;
                             return {{"version", SMITH_VERSION},
@@ -55,7 +55,7 @@ namespace sx::webserver::dispatchers {
 
         for(auto const& meth: { "GET", "POST"}) {
             static Http_Responder handler(meth, "/api/diag/ssl/cache/stats",
-                                          authorized::token_protected(json_ssl_cache_stats));
+                                          authorized::token_protected<json>(json_ssl_cache_stats));
             handler.Content_Type = "application/json";
             server.addController(&handler);
         }
@@ -64,7 +64,7 @@ namespace sx::webserver::dispatchers {
             static Http_Responder handler(
                     meth,
                     "/api/diag/ssl/cache/print",
-                    authorized::token_protected(json_ssl_cache_print)
+                    authorized::token_protected<json>(json_ssl_cache_print)
             );
             handler.Content_Type = "application/json";
             server.addController(&handler);
@@ -75,7 +75,7 @@ namespace sx::webserver::dispatchers {
             static Http_Responder handler(
                     meth,
                     "/api/diag/proxy/session/list",
-                    authorized::token_protected(json_proxy_session_list)
+                    authorized::token_protected<json>(json_proxy_session_list)
             );
             handler.Content_Type = "application/json";
             server.addController(&handler);
@@ -86,7 +86,7 @@ namespace sx::webserver::dispatchers {
         static Http_Responder cfg_uni_add(
                 "POST",
                 "/api/config/uni/add",
-                authorized::token_protected(&json_add_section_entry)
+                authorized::token_protected<json>(&json_add_section_entry)
         );
         cfg_uni_add.Content_Type = "application/json";
         server.addController(&cfg_uni_add);
@@ -94,7 +94,7 @@ namespace sx::webserver::dispatchers {
         static Http_Responder cfg_uni_set(
                 "POST",
                 "/api/config/uni/set",
-                authorized::token_protected(&json_set_section_entry)
+                authorized::token_protected<json>(&json_set_section_entry)
         );
         cfg_uni_set.Content_Type = "application/json";
         server.addController(&cfg_uni_set);
@@ -103,7 +103,7 @@ namespace sx::webserver::dispatchers {
         static Http_Responder cfg_uni_get(
                 "POST",
                 "/api/config/uni/get",
-                authorized::token_protected(&json_get_section_entry)
+                authorized::token_protected<json>(&json_get_section_entry)
         );
         cfg_uni_get.Content_Type = "application/json";
         server.addController(&cfg_uni_get);
