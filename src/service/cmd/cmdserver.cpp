@@ -2580,7 +2580,7 @@ void cli_loop(short unsigned int port) {
     std::vector<std::thread> cli_threads;
 
     while(true) {
-        int nfds = epoller.wait(1*200);
+        int nfds = epoller.wait(1000);
 
         if(nfds > 0) {
             sockaddr_storage addr {};
