@@ -380,6 +380,34 @@ socks5_request_error socksServerCX::handle4_connect() {
 }
 
 socks5_request_error socksServerCX::socks5_parse_request() {
+
+    auto authorize_if_udp = [this](std::string const& server, unsigned short srv_port) -> bool {
+        // check specific UDP requirement - with the same clientIP:port should not
+        if(com()->l4_proto() == SOCK_DGRAM and not get_udp()->make_authorized(server, srv_port)) {
+            _err("authorize_if_udp: UDP violating original target restrictions");
+            error(true);
+
+            auto ass = UDP::db();
+
+            auto lc_ = std::scoped_lock(UDP::lock);
+            std::string key = string_format("%s:%s", host().c_str(), port().c_str());
+
+            auto it = ass->clients.find(key);
+            if(it != ass->clients.end()) {
+
+                auto* cx = it->second;
+                if(cx) {
+                    _dia("authorize_if_udp: shutting down UDP association connection");
+                    cx->error(true);
+                }
+            }
+
+            return false;
+        }
+        return true;
+    };
+
+
     auto atype   = static_cast<socks5_atype>(readbuf()->get_at<unsigned char>(3));
 
     if(atype != socks5_atype::IPV4 && atype != socks5_atype::FQDN) {
@@ -405,6 +433,9 @@ socks5_request_error socksServerCX::socks5_parse_request() {
         _dia("handle5_connect: port requested: %d",req_port);
 
         req_hdr_size = 5 + fqdn_sz + 2;
+
+        if(not authorize_if_udp(fqdn, req_port)) return socks5_request_error::UNAUTHORIZED;
+
     }
     else if(atype == socks5_atype::IPV4) {
 
@@ -414,8 +445,6 @@ socks5_request_error socksServerCX::socks5_parse_request() {
 
         auto dst = readbuf()->get_at<uint32_t>(4);
         req_port = ntohs(readbuf()->get_at<uint16_t>(8));
-        com()->nonlocal_dst_port() = req_port;
-        com()->nonlocal_src(true);
         _dia("handle5_connect: request for %s -> %s:%d",c_type(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
 
 
@@ -425,6 +454,8 @@ socks5_request_error socksServerCX::socks5_parse_request() {
         com()->nonlocal_dst_port() = req_port;
         com()->nonlocal_src(true);
         _dia("handle5_connect: request (IPv4) for %s -> %s:%d",c_type(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
+
+        if(not authorize_if_udp(com()->nonlocal_dst_host(), req_port)) return socks5_request_error::UNAUTHORIZED;
 
         req_hdr_size = 10;
 
@@ -440,6 +471,23 @@ socks5_request_error socksServerCX::socks5_parse_request() {
 socks5_request_error socksServerCX::handle5_connect() {
 
     auto parse_status = socks5_parse_request();
+
+    if(com()->l4_proto() == SOCK_DGRAM) {
+
+        // check if we are in associated clients
+        auto ass = UDP::db();
+        auto lc_ = std::scoped_lock(UDP::lock);
+
+        auto key = string_format("%s:%s", host().c_str(), port().c_str());
+        if(ass->clients.find(key) == ass->clients.end()) {
+            return socks5_request_error::UNAUTHORIZED;
+            error(true);
+            _not("handle5_connect: UDP client not properly associated");
+        }
+        else {
+            _dia("handle5_connect: UDP client association found");
+        }
+    }
 
     if(parse_status == socks5_request_error::NONE) {
 
@@ -627,10 +675,10 @@ void socksServerCX::verdict(socks5_policy p) {
             auto lc_ = std::scoped_lock(UDP::lock);
 
             auto key = string_format("%s:%d", host().c_str(), req_port);
-            ass->clients.insert(key);
+            ass->clients.emplace(key, this);
 
-            if(not udp) udp = std::make_unique<UDP>();
-            udp.value()->my_assoc = key;
+            auto& udp = get_udp();
+            udp->my_assoc = key;
         }
 
         process_socks_reply();
@@ -730,11 +778,20 @@ int socksServerCX::process_socks_reply_v4() {
 
 std::size_t socksServerCX::process_socks_reply() {
 
+    _dia("process_socks_reply: version %d", version);
+
     switch(version) {
         case 4:
             return process_socks_reply_v4();
         case 5:
             return process_socks_reply_v5();
+        case 0:
+            if(com()->l4_proto() == SOCK_DGRAM) {
+                _dia("process_socks_reply: version 0 - ok");
+                break;
+            }
+            [[fallthrough]];
+
         default:
             _err("process_socks_reply: unknown version");
     }
@@ -836,12 +893,15 @@ std::size_t socksServerCX::process_socks_response() {
 std::size_t socksServerCX::process_out() {
 
     if(com()->l4_proto() != SOCK_DGRAM) {
+        _dia("process_out: SOCKS5 response with %dB of proxied data", writebuf()->size());
         return writebuf()->size();
     }
     else if(state_ > socks5_state::REQ_RECEIVED) {
+        _dia("process_out: SOCKS5 UDP response header will prefix %dB of proxied data", writebuf()->size());
         return process_socks_response();
     }
     else {
+        _err("process_out: unknown state, defaulting to proxy %dB", writebuf()->size());
         return writebuf()->size();
     }
 }

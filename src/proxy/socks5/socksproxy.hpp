@@ -99,7 +99,7 @@ public:
 DECLARE_LOGGING(to_string)
 
 private:
-    logan_lite log {"com.socks.receiver"};
+    logan_lite log {"com.socks.worker"};
 };
 
 #endif

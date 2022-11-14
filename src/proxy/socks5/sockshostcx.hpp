@@ -52,7 +52,7 @@
 #include <common/numops.hpp>
 
 using socks5_state = enum class socks5_state_ { INIT=1u, HELLO_SENT, WAIT_REQUEST, REQ_RECEIVED, WAIT_POLICY, POLICY_RECEIVED, REQRES_SENT, DNS_QUERY_SENT, DNS_RESP_RECV, DNS_RESP_FAILED, HANDOFF , ZOMBIE };
-using socks5_request_error = enum class socks5_request_error_ { NONE=0, UNSUPPORTED_VERSION, UNSUPPORTED_ATYPE, UNSUPPORTED_METHOD, MALFORMED_DATA };
+using socks5_request_error = enum class socks5_request_error_ { NONE=0, UNSUPPORTED_VERSION, UNSUPPORTED_ATYPE, UNSUPPORTED_METHOD, MALFORMED_DATA, UNAUTHORIZED };
 
 using socks5_cmd = enum socks5_cmd_ { CONNECT=1u, BIND=2u, UDP_ASSOCIATE=3u };
 using socks5_atype = enum class socks5_atype_ { IPV4=1u, FQDN=3u, IPV6=4u };
@@ -97,11 +97,11 @@ public:
     socksServerCX(baseCom* c, unsigned int s);
     ~socksServerCX() override {
 
-        if(udp) {
+        if(udp_) {
             auto ass = UDP::db();
 
             auto lc_ = std::scoped_lock(UDP::lock);
-            ass->clients.erase(udp.value()->my_assoc);
+            ass->clients.erase(udp_->my_assoc);
         }
     }
 
@@ -118,10 +118,20 @@ public:
     struct UDP {
         struct associations {
             // this cannot be only port - must be also source IP
-            std::set<std::string> clients;
+            std::map<std::string, socksServerCX*> clients;
         };
 
         std::string my_assoc;
+        std::string my_allowed_target;
+
+        bool make_authorized(std::string const& server, unsigned short port) {
+            std::string const key = string_format("%s:%d", server.c_str(), port);
+            if(my_allowed_target.empty()) {
+                my_allowed_target = key;
+                return true;
+            }
+            return key == my_allowed_target;
+        }
 
         static std::shared_ptr<associations> db() {
 
@@ -140,7 +150,9 @@ public:
         static inline std::shared_ptr<associations> db_;
     };
 
-    std::optional<std::unique_ptr<UDP>> udp;
+    std::unique_ptr<UDP> udp_;
+    std::unique_ptr<UDP>& get_udp() noexcept { if(not udp_) udp_ = std::make_unique<UDP>(); return udp_; };
+
 
 
     virtual std::size_t process_socks_request();
