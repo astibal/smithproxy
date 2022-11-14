@@ -95,7 +95,15 @@ private:
 class socksServerCX : public MitmHostCX, public epoll_handler {
 public:
     socksServerCX(baseCom* c, unsigned int s);
-    ~socksServerCX() override {};
+    ~socksServerCX() override {
+
+        if(udp) {
+            auto ass = UDP::db();
+
+            auto lc_ = std::scoped_lock(UDP::lock);
+            ass->clients.erase(udp.value()->my_assoc);
+        }
+    }
 
     bool tested_dns_a = false;
     bool tested_dns_aaaa  = false;
@@ -106,6 +114,34 @@ public:
     virtual std::size_t process_socks_hello();
     virtual std::size_t process_socks_hello_tcp();
     virtual std::size_t process_socks_udp_request();
+
+    struct UDP {
+        struct associations {
+            // this cannot be only port - must be also source IP
+            std::set<std::string> clients;
+        };
+
+        std::string my_assoc;
+
+        static std::shared_ptr<associations> db() {
+
+            // double condition check to prevent locks
+            if(not db_) {
+                auto lc_ = std::scoped_lock(lock);
+                if(not db_) {
+                    db_ = std::make_shared<associations>();
+                }
+            }
+            return db_;
+        }
+
+        static inline std::mutex lock;
+    private:
+        static inline std::shared_ptr<associations> db_;
+    };
+
+    std::optional<std::unique_ptr<UDP>> udp;
+
 
     virtual std::size_t process_socks_request();
 

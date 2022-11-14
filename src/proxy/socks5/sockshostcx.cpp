@@ -616,6 +616,23 @@ void socksServerCX::verdict(socks5_policy p) {
     state_ = socks5_state::POLICY_RECEIVED;
 
     if(verdict_ == socks5_policy::ACCEPT || verdict_ == socks5_policy::REJECT) {
+
+        _dia("verdict: policy received: %d", verdict_);
+
+        if(verdict_ == socks5_policy::ACCEPT and req_cmd == socks5_cmd::UDP_ASSOCIATE) {
+            // create source port associate
+
+            auto ass = UDP::db();
+
+            auto lc_ = std::scoped_lock(UDP::lock);
+
+            auto key = string_format("%s:%d", host().c_str(), req_port);
+            ass->clients.insert(key);
+
+            if(not udp) udp = std::make_unique<UDP>();
+            udp.value()->my_assoc = key;
+        }
+
         process_socks_reply();
     }
 }
