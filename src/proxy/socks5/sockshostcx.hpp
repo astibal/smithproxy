@@ -37,8 +37,8 @@
     which carries forward this exception.
 */    
 
-#ifndef _SOCKS5HOST_HPP_
-  #define _SOCKS5HOST_HPP_
+#ifndef SOCKS5HOST_HPP
+  #define SOCKS5HOST_HPP
 
 #include <threadedacceptor.hpp>
 #include <proxy/mitmcom.hpp>
@@ -51,7 +51,7 @@
 
 #include <common/numops.hpp>
 
-using socks5_state = enum class socks5_state_ { INIT=1, HELLO_SENT, WAIT_REQUEST, REQ_RECEIVED, WAIT_POLICY, POLICY_RECEIVED, REQRES_SENT, DNS_QUERY_SENT=15, DNS_RESP_RECV, DNS_RESP_FAILED, HANDOFF=31 , ZOMBIE=255 };
+using socks5_state = enum class socks5_state_ { INIT=1u, HELLO_SENT, WAIT_REQUEST, REQ_RECEIVED, WAIT_POLICY, POLICY_RECEIVED, REQRES_SENT, DNS_QUERY_SENT, DNS_RESP_RECV, DNS_RESP_FAILED, HANDOFF , ZOMBIE };
 using socks5_request_error = enum class socks5_request_error_ { NONE=0, UNSUPPORTED_VERSION, UNSUPPORTED_ATYPE, UNSUPPORTED_METHOD, MALFORMED_DATA };
 
 using socks5_cmd = enum socks5_cmd_ { CONNECT=1u, BIND=2u, UDP_ASSOCIATE=3u };
@@ -61,32 +61,35 @@ using socks5_policy = enum class socks5_policy_ { PENDING, ACCEPT, REJECT };
 using socks5_message = enum socks5_message_ { POLICY, UPGRADE };
 
 
-
-
-
 class socksTCPCom: public TCPCom {
 public:
-    static inline std::string sockstcpcom_name_ = "s5_tcp";;
-
-    virtual std::string& name() { return sockstcpcom_name_; };
     baseCom* replicate() override { return new socksTCPCom(); };
+
+    TYPENAME_OVERRIDE("s5_tcp");
+private:
+    logan_lite log {"com.socks.tcp"};
 };
 
 class socksUDPCom: public UDPCom {
 public:
-    static inline std::string socksudpcom_name_ = "s5_udp";
 
-    virtual std::string& name() { return socksudpcom_name_; };
     baseCom* replicate() override { return new socksUDPCom(); };
+
+    TYPENAME_OVERRIDE("s5_udp");
+
+private:
+    logan_lite log {"com.socks.udp"};
 };
 
 
 class socksSSLMitmCom: public MySSLMitmCom {
 public:
-    static inline std::string sockssslmitmcom_name_ = "s5_ssli";
-    
-    virtual std::string& name() { return sockssslmitmcom_name_; };
     baseCom* replicate() override { return new socksSSLMitmCom(); };
+
+    TYPENAME_OVERRIDE("s5_tls");
+
+private:
+    logan_lite log {"com.socks.tls"};
 };
 
 class socksServerCX : public MitmHostCX, public epoll_handler {
@@ -107,8 +110,9 @@ public:
     virtual std::size_t process_socks_request();
 
     socks5_request_error handle4_connect();
+    socks5_request_error socks5_parse_request();
     socks5_request_error handle5_connect();
-    socks5_request_error handle5_connect_fqdn(std::string const& fqdn);
+    socks5_request_error handle5_connect_fqdn();
 
     virtual bool setup_target();
     virtual std::size_t process_socks_reply();
@@ -130,15 +134,13 @@ public:
     void verdict(socks5_policy);
     void state(socks5_state s) { state_ = s; };
 
-    socks5_request_error socks_error_;
+    socks5_request_error socks_error_ = socks5_request_error::NONE;
     socks5_policy verdict_ = socks5_policy::PENDING;
     socks5_state state_;
     
     //before handoff, prepare already new CX. 
     std::unique_ptr<MitmHostCX> left;
     std::unique_ptr<MitmHostCX> right;
-    bool handoff_as_ssl = false;
-
 
     void handle_event (baseCom *com) override;
 
@@ -155,13 +157,13 @@ public:
     std::size_t process_out() override;
 
 private:
-    uint8_t version;
-    uint8_t req_cmd;
-    socks5_atype req_atype;
-    in_addr req_addr;
+    uint8_t version {0};
+    uint8_t req_cmd {0};
+    socks5_atype req_atype {0};
+    in_addr req_addr {0};
     std::string req_str_addr;
 
-    unsigned short req_port;
+    unsigned short req_port {0};
     std::size_t req_hdr_size = 0L;
 
     bool process_dns_response(std::shared_ptr<DNS_Response> resp);
@@ -171,11 +173,11 @@ private:
 
     std::unique_ptr<AsyncDnsQuery> async_dns_query;
 
-    std::string to_string(int verbosity) const override { return baseHostCX::to_string(verbosity); };
+    std::string to_string(int verbosity) const override { return MitmHostCX::to_string(verbosity); };
 
 public:
     // implement advanced logging
-    TYPENAME_BASE("sockHostCX")
+    TYPENAME_OVERRIDE("sockHostCX")
     DECLARE_LOGGING(to_string)
 
 private:
@@ -187,15 +189,13 @@ private:
 class socksMitmHostCX : public MitmHostCX {
 public:
     ~socksMitmHostCX() override = default;
+    using MitmHostCX::MitmHostCX;
 
-    socksMitmHostCX(baseCom* c, const char* h, const char* p ) : MitmHostCX(c, h, p) {};
-    socksMitmHostCX( baseCom* c, int s ) : MitmHostCX(c, s) {};
-
-    TYPENAME_BASE("socksMitmHostCX")
+    TYPENAME_OVERRIDE("socksMitmHostCX")
 private:
     logan_lite log {"com.socks.proxy"};
 
 };
 
-#endif //_SOCKS5HOST_HPP_
+#endif //SOCKS5HOST_HPP
  
