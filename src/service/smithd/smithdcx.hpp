@@ -62,7 +62,7 @@ public:
     void on_timer() override;
     virtual unsigned int check_timeouts();
     
-    buffer & to_read() override;
+    lockbuffer& to_read() override;
     std::size_t finish() override;
 
     inline unsigned int unpack();
@@ -90,7 +90,7 @@ public:
     
 protected:
     std::vector<LTVEntry*> packages_;
-    buffer to_read_buffer; 
+    lockbuffer to_read_buffer;
 
     unsigned long hb_me = 0;
     time_t           hb_me_sent = 0;

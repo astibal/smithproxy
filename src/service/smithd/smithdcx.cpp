@@ -47,12 +47,10 @@
 
 
 SmithProtoCX::SmithProtoCX(baseCom *c, const char* h, const char* p): baseHostCX(c, h, p) {
-    to_read_buffer = buffer(0);
     reset_hb_me();
     peer_hb_reset();
 }
 SmithProtoCX::SmithProtoCX(baseCom *c, int s): baseHostCX(c, s) {
-    to_read_buffer = buffer(0);
     reset_hb_me();
     peer_hb_reset();
 }
@@ -158,7 +156,7 @@ std::size_t SmithProtoCX::finish() {
     return baseHostCX::finish();
 }
 
-buffer & SmithProtoCX::to_read() {
+lockbuffer& SmithProtoCX::to_read() {
     auto size = 0;
     for (auto const& i: packages()) {
         size += i->len();
