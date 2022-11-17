@@ -3,49 +3,49 @@ name: smithproxy
 version: 0.9.30
 summary: Fast and featured transparent TCP/UDP/TLS proxy
 description: |
- Smithproxy is fast transparent TCP/UDP/TLS (SSL) proxy. It's highly configurable
- and got many features.
-
- Core features:
-    * intercept routed traffic, locally-originated traffic and SOCKS requests
-    * Policy based traffic matching
-    * Per-policy applicable profiles
-    * Insightful CLI with configuration control
-
- Policy profiles:
-    * content - replacing data online, writing to disk
-    * dns - dns inspection settings
-    * tls - per-policy specific settings
-    * auth - match users and enforce authentication
-    * detection - match specific patterns in the traffic
-
- TLS protocol:
-    * dumping traffic plaintext into pcapng, text or remote GRE, exporting sslkeylog
-    * TLS security checks (ocsp, ocsp stapling, automatic crl download)
-    * Certificate Transparency checks for outbound connections
-    * Html replacement warnings
-    * STARTTLS support
-    * Seamless redirection to login portal
-
- Other:
-    * Simple authentication portal with local and ldap user support
-    * SOCKS4/SOCKS5 support with DNS
-    * DNS ALG
-    * policies based on FQDN or 2nd level domain
-    * both IPv4 and IPv6 is supported
-
- Complementary tools:
-    * built-in tools to help with network redirections and certificates
-    * check pplay tool (https://pypi.org/project/pplay/): replays captures
-      over the network
-
-
-  ... and many more!
+  Smithproxy is fast transparent TCP/UDP/TLS (SSL) proxy. It's highly configurable
+  and got many features.
+  
+  Core features:
+     * intercept routed traffic, locally-originated traffic and SOCKS requests
+     * Policy based traffic matching
+     * Per-policy applicable profiles
+     * Insightful CLI with configuration control
+  
+  Policy profiles:
+     * content - replacing data online, writing to disk
+     * dns - dns inspection settings
+     * tls - per-policy specific settings
+     * auth - match users and enforce authentication
+     * detection - match specific patterns in the traffic
+  
+  TLS protocol:
+     * dumping traffic plaintext into pcapng, text or remote GRE, exporting sslkeylog
+     * TLS security checks (ocsp, ocsp stapling, automatic crl download)
+     * Certificate Transparency checks for outbound connections
+     * Html replacement warnings
+     * STARTTLS support
+     * Seamless redirection to login portal
+  
+  Other:
+     * Simple authentication portal with local and ldap user support
+     * SOCKS4/SOCKS5 support with DNS
+     * DNS ALG
+     * policies based on FQDN or 2nd level domain
+     * both IPv4 and IPv6 is supported
+  
+  Complementary tools:
+     * built-in tools to help with network redirections and certificates
+     * check pplay tool (https://pypi.org/project/pplay/): replays captures
+       over the network
+  
+  
+   ... and many more!
 
 grade: stable # must be 'stable' to release into candidate/stable channels
 confinement: strict # use 'strict' once you have the right plugs and slots
 
-base: core18
+base: core22
 
 hooks:
   install:
@@ -90,65 +90,65 @@ layout:
 
 apps:
   svc-core:
-    command: bin/smithproxy --tenant-name default
+    command: usr/bin/smithproxy --tenant-name default
     daemon: simple
     restart-condition: always
     plugs:
       - network
       - network-bind
       - network-control
-    
+
   svc-net:
-    command: bin/sx_network start    
-    stop-command: bin/sx_network stop
+    command: usr/bin/sx_network start
+    stop-command: usr/bin/sx_network stop
     daemon: oneshot
     plugs:
       - network
       - network-bind
       - network-control
       - firewall-control
-        
+
   exe:
-    command: bin/smithproxy --tenant-name default
+    command: usr/bin/smithproxy --tenant-name default
     plugs:
       - network
       - network-bind
       - network-control
 
-#  smithd:
-#    command: bin/smithd
-#    plugs:
-#      - network
-#      - network-bind
+  #  smithd:
+  #    command: usr/bin/smithd
+  #    plugs:
+  #      - network
+  #      - network-bind
 
   cli:
-    command: bin/sx_cli
+    command: usr/bin/sx_cli
     plugs:
       - network
 
   regencert:
-    command: bin/sx_regencerts
+    command: usr/bin/sx_regencerts
     plugs:
       - network   # to guess hostname and IP
 
-#  passwd:
-#    command: bin/sx_passwd
+  #  passwd:
+  #    command: usr/bin/sx_passwd
 
-#  autoportalcert:
-#    command: bin/sx_autoportalcert
-#    plugs:
-#      - network  # to guess hostname and IP
+  #  autoportalcert:
+  #    command: usr/bin/sx_autoportalcert
+  #    plugs:
+  #      - network  # to guess hostname and IP
 
   certinfo-ca:
-    command: bin/sx_certinfo_ca
+    command: usr/bin/sx_certinfo_ca
 
   download-ctlog:
-    command: bin/sx_download_ctlog
+    command: usr/bin/sx_download_ctlog
     plugs:
       - network
 
   net:
-    command: bin/sx_network
+    command: usr/bin/sx_network
     plugs:
       - network
       - network-bind
@@ -159,15 +159,17 @@ apps:
 parts:
   smithproxy:
     plugin: cmake
-    configflags:
+    cmake-parameters:
       - -DCMAKE_BUILD_TYPE=Release
 
     source: https://github.com/astibal/smithproxy
     source-type: git
     source-branch: master
+    build-environment:
+      - PYTHONPATH: "$SNAPCRAFT_PART_INSTALL/usr/lib/python3/dist-packages"
 
-#    source: .
-#    source-type: local
+    #    source: .
+    #    source-type: local
 
     build-packages:
       - g++
@@ -179,10 +181,9 @@ parts:
       - libffi-dev
       - libmicrohttpd-dev
       - libpam-dev
-      - try:
-        - libxml2-dev
-        - libxslt1-dev
-        - xmlsec1-dev
+      - libxml2-dev
+      - libxslt1-dev
+      - libxmlsec1-dev
 
       - python3-distutils
       - telnet
@@ -194,7 +195,8 @@ parts:
       - libmicrohttpd12
       - telnet
       - wget
-      - python
+      - python3
+      - python3-wheel
       - python3-posix-ipc
       - python3-distutils
       - python3-setuptools
@@ -204,7 +206,15 @@ parts:
   pydeps:
     after: [ smithproxy ]
     plugin: python
-    python-version: python3
+    source: .
+    source-type: local
+    build-environment:
+      - PYTHONPATH: "$SNAPCRAFT_PART_INSTALL/usr/lib/python3/dist-packages"
+
+    override-build: |
+      craftctl default
+      pip3 install wheel
+      pip3 install pylibconfig2
 
     build-packages:
       - python3-wheel
@@ -212,4 +222,3 @@ parts:
     python-packages:
       - wheel
       - pyparsing
-      - pylibconfig2
