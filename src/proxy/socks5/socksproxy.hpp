@@ -59,6 +59,8 @@ public:
 
     virtual void socks5_handoff_udp(socksServerCX* cx);
 
+    void on_left_bytes(baseHostCX* cx) override;
+
     std::string to_string(int lev) const override;
 
     TYPENAME_OVERRIDE("SocksProxy")

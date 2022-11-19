@@ -416,6 +416,17 @@ void SocksProxy::socks5_handoff_udp(socksServerCX* cx) {
 
 
 
+void SocksProxy::on_left_bytes(baseHostCX* cx) {
+
+    if(left_sockets.empty() or right_sockets.empty()) {
+        _dia("waiting for proxy pair, L: %d, R: %d ", left_sockets.size(), right_sockets.size());
+        return;
+    }
+    else {
+        MitmProxy::on_left_bytes(cx);
+    }
+};
+
 
 
 
