@@ -367,9 +367,15 @@ socks5_request_error socksServerCX::handle4_connect() {
     auto dst = readbuf()->get_at<uint32_t>(4);
 
 
-    req_addr.s_addr=dst;
+    req_addr.dst_ss = sockaddr_storage{};
+    req_addr.dst_family = AF_INET;
+    req_addr.dst_as_v4()->sin_family = AF_INET;
+    req_addr.dst_as_v4()->sin_addr.s_addr= dst;
+    req_addr.dst_as_v4()->sin_port = req_port;
 
-    com()->nonlocal_dst_host() = string_format("%s",inet_ntoa(req_addr));
+    req_addr.unpack_dst_ss();
+
+    com()->nonlocal_dst_host() = req_addr.str_dst_host;
     com()->nonlocal_dst_port() = req_port;
     com()->nonlocal_src(true);
     _dia("process_socks_request: request (SOCKSv4) for %s -> %s:%d",c_type(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
@@ -410,7 +416,7 @@ socks5_request_error socksServerCX::socks5_parse_request() {
 
     auto atype   = static_cast<socks5_atype>(readbuf()->get_at<unsigned char>(3));
 
-    if(atype != socks5_atype::IPV4 && atype != socks5_atype::FQDN) {
+    if(atype != socks5_atype::IPV4 && atype != socks5_atype::IPV6 && atype != socks5_atype::FQDN) {
         return socks5_request_error::UNSUPPORTED_ATYPE;
     }
 
@@ -437,27 +443,49 @@ socks5_request_error socksServerCX::socks5_parse_request() {
         if(not authorize_if_udp(fqdn, req_port)) return socks5_request_error::UNAUTHORIZED;
 
     }
-    else if(atype == socks5_atype::IPV4) {
+    else if(atype == socks5_atype::IPV4 or atype == socks5_atype::IPV6) {
 
         req_atype = socks5_atype::IPV4;
         state_ = socks5_state::REQ_RECEIVED;
         _dia("handle5_connect: request received, type %d", atype);
 
-        auto dst = readbuf()->get_at<uint32_t>(4);
-        req_port = ntohs(readbuf()->get_at<uint16_t>(8));
-        _dia("handle5_connect: request for %s -> %s:%d",c_type(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
+        req_addr.dst_ss = sockaddr_storage {};
 
+        if(atype == socks5_atype::IPV4) {
+            auto dst = readbuf()->get_at<uint32_t>(4);
+            req_port = ntohs(readbuf()->get_at<uint16_t>(8));
+            _dia("handle5_connect: request IPv4 for %s -> %s:%d",c_type(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
+            req_hdr_size = 10;
 
-        req_addr.s_addr=dst;
+            req_addr.dst_family = AF_INET;
+            req_addr.dst_as_v4()->sin_family = AF_INET;
+            req_addr.dst_as_v4()->sin_addr.s_addr = dst;
+            req_addr.dst_as_v4()->sin_port = req_port;
+            req_addr.unpack_dst_ss();
 
-        com()->nonlocal_dst_host() = string_format("%s",inet_ntoa(req_addr));
+        }
+        else if(atype == socks5_atype::IPV6) {
+
+            auto arr6 = readbuf()->copy_from<16>(4);
+            req_port = ntohs(readbuf()->get_at<uint16_t>(20));
+            _dia("handle5_connect: request IPv6 for %s -> %s:%d",c_type(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
+            req_hdr_size = 22;
+
+            req_addr.dst_family = AF_INET6;
+            req_addr.dst_as_v6()->sin6_family = AF_INET6;
+            std::memcpy(&req_addr.dst_as_v6()->sin6_addr, arr6.data(), 16);
+            req_addr.dst_as_v6()->sin6_port = req_port;
+            req_addr.unpack_dst_ss();
+        }
+
+        com()->nonlocal_dst_host() = req_addr.str_dst_host;
         com()->nonlocal_dst_port() = req_port;
         com()->nonlocal_src(true);
-        _dia("handle5_connect: request (IPv4) for %s -> %s:%d",c_type(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
+        _dia("handle5_connect: request for %s -> %s:%d",c_type(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
 
         if(not authorize_if_udp(com()->nonlocal_dst_host(), req_port)) return socks5_request_error::UNAUTHORIZED;
 
-        req_hdr_size = 10;
+
 
     } else {
 
@@ -701,7 +729,7 @@ std::size_t socksServerCX::process_socks_reply_v5() {
         ++cur_data_ptr;
 
         if (req_atype == socks5_atype::IPV4) {
-            *((uint32_t *) &response[cur_data_ptr]) = req_addr.s_addr;
+            *((uint32_t *) &response[cur_data_ptr]) = req_addr.dst_as_v4()->sin_addr.s_addr;
             cur_data_ptr += sizeof(uint32_t);
 
             *((uint16_t*)&response[cur_data_ptr]) = htons(req_port);
@@ -766,7 +794,7 @@ int socksServerCX::process_socks_reply_v4() {
     if(verdict_ == socks5_policy::ACCEPT) b[1] = 90; //accept
 
     *((uint16_t*)&b[2]) = htons(req_port);
-    *((uint32_t*)&b[4]) = req_addr.s_addr;
+    *((uint32_t*)&b[4]) = req_addr.dst_as_v4()->sin_addr.s_addr;
 
     writebuf()->append(b,8);
     state_ = socks5_state::REQRES_SENT;
@@ -873,9 +901,15 @@ std::size_t socksServerCX::process_socks_response() {
 
     if(req_atype == socks5_atype::IPV4) {
 
-        (*(uint32_t *) &b.data()[4]) = req_addr.s_addr;
+        (*(uint32_t *) &b.data()[4]) = req_addr.dst_as_v4()->sin_addr.s_addr;
         (*(uint16_t *) &b.data()[8]) = htons(req_port);
         b.size(10);
+    }
+    if(req_atype == socks5_atype::IPV6) {
+
+        std::memcpy(&b.data()[4], &req_addr.dst_as_v6()->sin6_addr, 16);
+        (*(uint16_t *) &b.data()[20]) = htons(req_port);
+        b.size(22);
     }
     else if(req_atype == socks5_atype::FQDN) {
         b.append<>(raw::down_cast<uint8_t>(req_str_addr.size()).value_or(255));

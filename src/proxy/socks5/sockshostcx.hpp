@@ -46,6 +46,7 @@
 #include <proxy/mitmproxy.hpp>
 #include <hostcx.hpp>
 #include <tcpcom.hpp>
+#include <socketinfo.hpp>
 #include <sslmitmcom.hpp>
 #include <async/asyncdns.hpp>
 
@@ -208,7 +209,7 @@ private:
     uint8_t version {0};
     uint8_t req_cmd {0};
     socks5_atype req_atype {0};
-    in_addr req_addr {0};
+    SocketInfo req_addr {};
     std::string req_str_addr;
 
     unsigned short req_port {0};
