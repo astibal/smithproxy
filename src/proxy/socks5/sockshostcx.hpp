@@ -209,7 +209,7 @@ private:
     uint8_t version {0};
     uint8_t req_cmd {0};
     socks5_atype req_atype {0};
-    SocketInfo req_addr {};
+    AddressInfo req_addr {};
     std::string req_str_addr;
 
     unsigned short req_port {0};

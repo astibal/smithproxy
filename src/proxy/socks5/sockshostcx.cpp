@@ -367,15 +367,15 @@ socks5_request_error socksServerCX::handle4_connect() {
     auto dst = readbuf()->get_at<uint32_t>(4);
 
 
-    req_addr.dst.ss = sockaddr_storage{};
-    req_addr.dst.family = AF_INET;
-    req_addr.dst.as_v4()->sin_family = AF_INET;
-    req_addr.dst.as_v4()->sin_addr.s_addr= dst;
-    req_addr.dst.as_v4()->sin_port = req_port;
+    req_addr.ss = sockaddr_storage{};
+    req_addr.family = AF_INET;
+    req_addr.as_v4()->sin_family = AF_INET;
+    req_addr.as_v4()->sin_addr.s_addr= dst;
+    req_addr.as_v4()->sin_port = req_port;
 
-    req_addr.dst.unpack();
+    req_addr.unpack();
 
-    com()->nonlocal_dst_host() = req_addr.dst.str_host;
+    com()->nonlocal_dst_host() = req_addr.str_host;
     com()->nonlocal_dst_port() = req_port;
     com()->nonlocal_src(true);
     _dia("process_socks_request: request (SOCKSv4) for %s -> %s:%d",c_type(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
@@ -449,7 +449,7 @@ socks5_request_error socksServerCX::socks5_parse_request() {
         state_ = socks5_state::REQ_RECEIVED;
         _dia("handle5_connect: request received, type %d", atype);
 
-        req_addr.dst.ss = sockaddr_storage {};
+        req_addr.ss = sockaddr_storage {};
 
         if(atype == socks5_atype::IPV4) {
             auto dst = readbuf()->get_at<uint32_t>(4);
@@ -457,11 +457,11 @@ socks5_request_error socksServerCX::socks5_parse_request() {
             _dia("handle5_connect: request IPv4 for %s -> %s:%d",c_type(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
             req_hdr_size = 10;
 
-            req_addr.dst.family = AF_INET;
-            req_addr.dst.as_v4()->sin_family = AF_INET;
-            req_addr.dst.as_v4()->sin_addr.s_addr = dst;
-            req_addr.dst.as_v4()->sin_port = req_port;
-            req_addr.dst.unpack();
+            req_addr.family = AF_INET;
+            req_addr.as_v4()->sin_family = AF_INET;
+            req_addr.as_v4()->sin_addr.s_addr = dst;
+            req_addr.as_v4()->sin_port = req_port;
+            req_addr.unpack();
 
         }
         else if(atype == socks5_atype::IPV6) {
@@ -471,14 +471,14 @@ socks5_request_error socksServerCX::socks5_parse_request() {
             _dia("handle5_connect: request IPv6 for %s -> %s:%d",c_type(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
             req_hdr_size = 22;
 
-            req_addr.dst.family = AF_INET6;
-            req_addr.dst.as_v6()->sin6_family = AF_INET6;
-            std::memcpy(&req_addr.dst.as_v6()->sin6_addr, arr6.data(), 16);
-            req_addr.dst.as_v6()->sin6_port = req_port;
-            req_addr.dst.unpack();
+            req_addr.family = AF_INET6;
+            req_addr.as_v6()->sin6_family = AF_INET6;
+            std::memcpy(&req_addr.as_v6()->sin6_addr, arr6.data(), 16);
+            req_addr.as_v6()->sin6_port = req_port;
+            req_addr.unpack();
         }
 
-        com()->nonlocal_dst_host() = req_addr.dst.str_host;
+        com()->nonlocal_dst_host() = req_addr.str_host;
         com()->nonlocal_dst_port() = req_port;
         com()->nonlocal_src(true);
         _dia("handle5_connect: request for %s -> %s:%d",c_type(),com()->nonlocal_dst_host().c_str(),com()->nonlocal_dst_port());
@@ -729,7 +729,7 @@ std::size_t socksServerCX::process_socks_reply_v5() {
         ++cur_data_ptr;
 
         if (req_atype == socks5_atype::IPV4) {
-            *((uint32_t *) &response[cur_data_ptr]) = req_addr.dst.as_v4()->sin_addr.s_addr;
+            *((uint32_t *) &response[cur_data_ptr]) = req_addr.as_v4()->sin_addr.s_addr;
             cur_data_ptr += sizeof(uint32_t);
 
             *((uint16_t*)&response[cur_data_ptr]) = htons(req_port);
@@ -794,7 +794,7 @@ int socksServerCX::process_socks_reply_v4() {
     if(verdict_ == socks5_policy::ACCEPT) b[1] = 90; //accept
 
     *((uint16_t*)&b[2]) = htons(req_port);
-    *((uint32_t*)&b[4]) = req_addr.dst.as_v4()->sin_addr.s_addr;
+    *((uint32_t*)&b[4]) = req_addr.as_v4()->sin_addr.s_addr;
 
     writebuf()->append(b,8);
     state_ = socks5_state::REQRES_SENT;
@@ -901,13 +901,13 @@ std::size_t socksServerCX::process_socks_response() {
 
     if(req_atype == socks5_atype::IPV4) {
 
-        (*(uint32_t *) &b.data()[4]) = req_addr.dst.as_v4()->sin_addr.s_addr;
+        (*(uint32_t *) &b.data()[4]) = req_addr.as_v4()->sin_addr.s_addr;
         (*(uint16_t *) &b.data()[8]) = htons(req_port);
         b.size(10);
     }
     if(req_atype == socks5_atype::IPV6) {
 
-        std::memcpy(&b.data()[4], &req_addr.dst.as_v6()->sin6_addr, 16);
+        std::memcpy(&b.data()[4], &req_addr.as_v6()->sin6_addr, 16);
         (*(uint16_t *) &b.data()[20]) = htons(req_port);
         b.size(22);
     }
