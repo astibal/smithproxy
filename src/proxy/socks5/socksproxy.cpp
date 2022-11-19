@@ -296,7 +296,7 @@ bool SocksProxy::socks5_handoff_authenticate(MitmHostCX *cx) {
     if (cx->com()) {
         af = cx->com()->l3_proto();
     }
-    std::string str_af = SocketInfo::inet_family_str(af);
+    std::string str_af = SockOps::family_str(af);
 
 
     std::optional<std::vector<std::string>> groups_vec;

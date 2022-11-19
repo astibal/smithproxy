@@ -309,7 +309,7 @@ namespace sx::proxymaker {
         if (left->com()) {
             af = left->com()->l3_proto();
         }
-        std::string str_af = SocketInfo::inet_family_str(af);
+        std::string str_af = SockOps::family_str(af);
 
         // use common base pointer, so we can use all IdentityInfo types
 

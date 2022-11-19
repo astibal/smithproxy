@@ -243,7 +243,7 @@ std::optional<std::vector<std::string>> MitmProxy::find_id_groups(baseHostCX con
     if(cx->com()) {
         af = cx->com()->l3_proto();
     }
-    std::string str_af = SocketInfo::inet_family_str(af);
+    std::string str_af = SockOps::family_str(af);
 
     bool found = false;
     std::vector<std::string> group_vec;
@@ -382,7 +382,7 @@ bool MitmProxy::resolve_identity(baseHostCX* cx, bool insert_guest = false) {
     if(cx->com()) {
         af = cx->com()->l3_proto();
     }
-    std::string str_af = SocketInfo::inet_family_str(af);
+    std::string str_af = SockOps::family_str(af);
 
     bool new_identity = false;
 
@@ -493,7 +493,7 @@ bool MitmProxy::update_auth_ipX_map(baseHostCX* cx) {
     if(cx->com()) {
         af = cx->com()->l3_proto();
     }
-    std::string str_af = SocketInfo::inet_family_str(af);
+    std::string str_af = SockOps::family_str(af);
     
 
     _dum("update_auth_ip_map: start for %s %s", str_af.c_str(), cx->host().c_str());

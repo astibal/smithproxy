@@ -17,7 +17,7 @@ namespace sx::webserver {
                 auto* ci = MHD_get_connection_info(mc,MHD_CONNECTION_INFO_CLIENT_ADDRESS);
                 if(ci) {
                     if (ci->client_addr) {
-                        return SocketInfo::inet_ss_str((sockaddr_storage *) ci->client_addr).c_str();
+                        return SockOps::ss_str((sockaddr_storage *) ci->client_addr).c_str();
                     }
                 }
             }
