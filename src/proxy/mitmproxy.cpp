@@ -63,6 +63,7 @@ MitmProxy::MitmProxy(baseCom* c): baseProxy(c), sobject() {
     // NOTE: testing filter - get back to it later!
     // add_filter("test",new TestFilter(this,5));
 
+    current_sessions()++;
     total_sessions()++;
 }
 
@@ -191,6 +192,8 @@ MitmProxy::~MitmProxy() {
         
         if(tlog()) tlog()->write_left("Connection stop\n");
     }
+
+    current_sessions()--;
 }
 
 std::string MitmProxy::to_string(int verbosity) const {

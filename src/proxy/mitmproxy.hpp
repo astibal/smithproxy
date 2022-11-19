@@ -220,7 +220,8 @@ public:
     
     MitmHostCX* first_left();
     MitmHostCX* first_right();
-    
+
+    static std::atomic_uint64_t& current_sessions() { static std::atomic_uint64_t current; return current; };
     static std::atomic_uint64_t& total_sessions() { static std::atomic_uint64_t total; return total; };
     static socle::meter& total_mtr_up()  { static socle::meter t_up(12); return t_up; };
     static socle::meter& total_mtr_down() {static socle::meter t_down(12); return t_down; };

@@ -67,6 +67,8 @@ public:
 
     // flag for threads which don't have mechanics to terminate themselves
     std::atomic<bool> terminate_flag {false};
+    std::atomic<bool> terminated {false};
+
     [[nodiscard]] static bool abort_sleep(unsigned int steps, unsigned int step=1);
 
     unsigned int tenant_index () const { return tenant_index_; }

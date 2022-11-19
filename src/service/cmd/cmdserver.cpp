@@ -1154,7 +1154,20 @@ int cli_exec_shutdown(struct cli_def *cli, const char *command, char *argv[], in
     cli_print(cli, " !!!   terminating smithproxy   !!!");
     cli_print(cli, " ");
 
+    auto counter = std::thread([&cli]{
+        timespec t {};
+        t.tv_sec = 1;
+
+        while(not SmithProxy::instance().terminated) {
+            cli_print(cli, "  -    proxies remaining: %zu", MitmProxy::current_sessions().load());
+
+            nanosleep(&t, nullptr);
+            t.tv_sec = 3;
+        }
+    });
+
     SmithProxy::instance().stop();
+    counter.join();
 
     return CLI_OK;
 }

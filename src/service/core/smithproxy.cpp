@@ -549,6 +549,8 @@ void SmithProxy::stop() {
     kill_proxies(redir_plain_proxies);
     kill_proxies(redir_ssl_proxies);
     kill_proxies(redir_udp_proxies);
+
+    terminated = true;
 }
 
 
