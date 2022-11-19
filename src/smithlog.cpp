@@ -48,7 +48,7 @@ QueueLogger::QueueLogger(): LogMux(), lockable() {
 
 size_t QueueLogger::write_log(loglevel l, std::string& sss) {
 
-    locked_guard<QueueLogger> ll(this);
+    locked_ ll(this);
 
 
     if(debug_queue) {
@@ -89,7 +89,7 @@ size_t QueueLogger::write_log(loglevel l, std::string& sss) {
 }
 
 size_t QueueLogger::write_disk(loglevel l, std::string& sss) {
-    locked_guard<QueueLogger> ll(this);
+    locked_ ll(this);
 
     return LogMux::write_log(l,sss);
 }
@@ -105,7 +105,7 @@ void QueueLogger::run_queue(std::shared_ptr<QueueLogger> log_src) {
 
         if(! log_src->logs_.empty()) {
 
-            auto lock = locked_guard(log_src.get());
+            auto lock = locked_(log_src.get());
 
             log_entry e = log_src->logs_.front(); log_src->logs_.pop();
 

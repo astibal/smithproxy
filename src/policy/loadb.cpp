@@ -43,7 +43,7 @@
 template <class HostInfoType>
 HostPool<HostInfoType>::~HostPool() {
     
-    locked_guard l(this);
+    locked_ l(this);
     
     candidates.clear();
     
@@ -55,7 +55,7 @@ HostPool<HostInfoType>::~HostPool() {
 template <class HostInfoType>
 bool HostPool<HostInfoType>::insert_new(Host h)  {
 
-    locked_guard l(this);
+    locked_ l(this);
     
     auto i = host_data_.find(h);
     
@@ -71,7 +71,7 @@ bool HostPool<HostInfoType>::insert_new(Host h)  {
 
 template <class HostInfoType>
 const HostInfoType* HostPool<HostInfoType>::compute() {
-    locked_guard l(this);
+    locked_ l(this);
     
     int i = compute_index();
     HostInfoType* r = candidates.at(i);
@@ -79,7 +79,7 @@ const HostInfoType* HostPool<HostInfoType>::compute() {
 
 template <class HostInfoType>
 void HostPool<HostInfoType>::refresh() {
-    locked_guard l(this);
+    locked_ l(this);
     
     candidates.clear();
     for(auto i: host_data_) {
