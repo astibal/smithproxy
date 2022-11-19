@@ -40,6 +40,11 @@
 #ifndef PROXYMAKER_HPP
 #define PROXYMAKER_HPP
 
+#include <proxy/mitmproxy.hpp>
+#include <policy/profiles.hpp>
+
+#include <memory>
+
 namespace sx::proxymaker {
 
     MitmProxy *make (baseHostCX *left, baseHostCX *right);
