@@ -3673,6 +3673,7 @@ bool CfgFactory::new_policy (Setting &ex, const std::string &name) const {
     try {
         auto& newpol = ex.add(Setting::TypeGroup);
         newpol.add("disabled", Setting::TypeBoolean) = true;
+        newpol.add("name", Setting::TypeString);
 
         newpol.add("proto", Setting::TypeString) = "tcp";
 
@@ -3688,6 +3689,7 @@ bool CfgFactory::new_policy (Setting &ex, const std::string &name) const {
         newpol.add("content_profile", Setting::TypeString);
         newpol.add("auth_profile", Setting::TypeString);
         newpol.add("alg_dns_profile", Setting::TypeString);
+        newpol.add("routing", Setting::TypeString);
     }
     catch(libconfig::SettingNameException const& e) {
         _war("cannot add new section %s: %s", name.c_str(), e.what());
