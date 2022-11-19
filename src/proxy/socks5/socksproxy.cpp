@@ -39,6 +39,7 @@
 
 #include <tcpcom.hpp>
 
+#include <proxy/proxymaker.hpp>
 #include <proxy/socks5/sockshostcx.hpp>
 #include <proxy/socks5/socksproxy.hpp>
 #include <proxy/mitmhost.hpp>
@@ -199,6 +200,7 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     target_cx->peer(n_cx);
 
 
+
     {
         auto lc_ = std::scoped_lock(CfgFactory::lock());
         if (CfgFactory::get()->db_policy_list.at(matched_policy())->nat == PolicyRule::POLICY_NAT_NONE) {
@@ -217,10 +219,16 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     
     radd(target_cx);
 
-    if (CfgFactory::get()->policy_apply(n_cx, this, matched_policy()) < 0) {
-        // strange, but it can happen if the sockets is closed between policy match and this profile application
-        // mark dead.
-        _inf("SocksProxy::socks5_handoff: session failed policy application");
+    if( auto policy = CfgFactory::get()->lookup_policy(matched_policy()); policy) {
+
+        if(policy->profile_routing and not sx::proxymaker::route(this, policy->profile_routing))
+            _err("SocksProxy::socks5_handoff: routing failed");
+    }
+
+    if ((CfgFactory::get()->policy_apply(n_cx, this, matched_policy()) < 0) or
+        (CfgFactory::get()->policy_apply(target_cx, this, matched_policy()) < 0)) {
+
+        _inf("SocksProxy::socks5_handoff: session failed policy application on contexts");
         state().dead(true);
     } else {
 
@@ -228,13 +236,6 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
         int real_socket = target_cx->connect();
         com()->set_monitor(real_socket);
         com()->set_poll_handler(real_socket,this);
-
-        baseHostCX* src_cx = n_cx;
-        bool delete_proxy = false;
-        // apply policy and get result
-
-        std::string target_host = n_cx->com()->nonlocal_dst_host();
-        short unsigned int target_port = n_cx->com()->nonlocal_dst_port();
 
         if(not socks5_handoff_resolve_identity(n_cx)) {
             _deb("deleting proxy %s", c_type());
