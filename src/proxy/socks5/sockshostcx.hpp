@@ -106,6 +106,7 @@ public:
         }
     }
 
+    bool is_ssl = false;
     bool tested_dns_a = false;
     bool tested_dns_aaaa  = false;
     static inline bool mixed_ip_versions = true; // allow cross-version connections

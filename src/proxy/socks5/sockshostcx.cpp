@@ -609,6 +609,8 @@ bool socksServerCX::setup_target() {
             case 995:
 
                 if(com()->l4_proto() != SOCK_DGRAM) {
+                    is_ssl = true;
+
                     _dia("setup_target: TLS port");
                     new_com = new baseSSLMitmCom<SSLCom>();
                     break;
