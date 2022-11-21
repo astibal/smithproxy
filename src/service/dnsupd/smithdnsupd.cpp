@@ -55,7 +55,7 @@ unsigned int dns_cache_cleanup() {
     logan_lite log = logan_lite("com.dns.cleaner");
 
     auto& cache = DNS::get_dns_cache();
-    std::scoped_lock l_(DNS::get_dns_lock());
+    auto lc_ = std::scoped_lock(DNS::get_dns_lock());
 
     int min_ttl = 300;
     int processed = 0;
@@ -100,74 +100,67 @@ unsigned int dns_cache_cleanup() {
     return ret;
 }
 
-std::thread* create_dns_updater() {
-    auto* dns_thread = new std::thread([]() {
 
-    logan_lite log = logan_lite("com.dns.updater");
 
-    unsigned int sleep_time = 3;
-    int requery_ttl = 60;
-    std::set<std::string> record_blacklist;
+struct DNS_Resolver : DNS_Setup {
 
-    unsigned int dns_cache_laundry_delta = 0;
-    unsigned int dns_cache_laundry_ttl = 0;
+    static inline logan_lite log = logan_lite("com.dns.resolver");
+    static inline time_t requery_ttl = 60;
+    static inline std::set<std::string, std::less<>> record_blacklist;
 
-    for(unsigned int i = 1; ; i++) {
+    static std::vector<std::string> refresh_candidates() {
+        std::vector<std::string> ret;
 
-        if(Service::abort_sleep(sleep_time)) {
-            break;
-        }
+        auto lc_ = std::scoped_lock(CfgFactory::lock());
+        for (auto const &a: CfgFactory::get()->db_address) {
+            auto fa = std::dynamic_pointer_cast<CfgAddress>(a.second);
+            if (fa) {
 
-        _dia("dns_updater: refresh round %d", i);
-
-        std::vector<std::string> fqdns;
-
-        {
-            std::lock_guard<std::recursive_mutex> l_(CfgFactory::lock());
-            for (auto const& a: CfgFactory::get()->db_address) {
-                auto fa = std::dynamic_pointer_cast<CfgAddress>(a.second);
-                if (fa) {
-
-                    auto fa_obj = std::dynamic_pointer_cast<FqdnAddress>(fa->value());
-                    if(! fa_obj)
-                        continue;
-
-                    std::vector<std::string> recs;
-                    recs.push_back("A:" + fa_obj->fqdn());
-                    recs.push_back("AAAA:" + fa_obj->fqdn());
-
-                    std::scoped_lock<std::recursive_mutex> ll_(DNS::get_dns_lock());
-                    for (auto const& rec: recs) {
-                        auto dns_response = DNS::get_dns_cache().get(rec);
-                        if (dns_response) {
-                            long ttl = (dns_response->loaded_at + dns_response->answers().at(0).ttl_) - ::time(nullptr);
-
-                            _dia("fqdn %s ttl %d", rec.c_str(), ttl);
-
-                            //re-query only about-to-expire existing DNS entries for FQDN addresses
-                            if (ttl < requery_ttl) {
-                                fqdns.push_back(rec);
-                            }
-                        } else {
-                            // query FQDNs without DNS cache entry
-                            if (record_blacklist.find(rec) == record_blacklist.end()) {
-                                fqdns.push_back(rec);
-                            } else {
-                                _dia("fqdn %s is blacklisted", rec.c_str());
-                            }
-                        }
-                    }
+                auto fa_obj = std::dynamic_pointer_cast<FqdnAddress>(fa->value());
+                if (fa_obj) {
+                    ret.push_back("A:" + fa_obj->fqdn());
+                    ret.push_back("AAAA:" + fa_obj->fqdn());
                 }
             }
         }
 
-        std::string nameserver = "8.8.8.8";
-        if(! CfgFactory::get()->db_nameservers.empty() ) {
-            nameserver = CfgFactory::get()->db_nameservers.at(i % CfgFactory::get()->db_nameservers.size());
+        return ret;
+    }
+
+    static std::vector<std::string> check_cache_expiry(std::vector<std::string> const& request_candidates) {
+
+        std::vector<std::string> to_refresh;
+
+        auto ll_ = std::scoped_lock(DNS::get_dns_lock());
+
+        for (auto const& candidate: request_candidates) {
+            auto dns_response = DNS::get_dns_cache().get(candidate);
+            if (dns_response) {
+                const long ttl = (dns_response->loaded_at + dns_response->answers().at(0).ttl_) - ::time(nullptr);
+
+                _dia("fqdn %s ttl %d", candidate.c_str(), ttl);
+
+                //re-query only about-to-expire existing DNS entries for FQDN addresses
+                if (ttl < requery_ttl) {
+                    to_refresh.push_back(candidate);
+                }
+            } else {
+                // query FQDNs without DNS cache entry
+                if (record_blacklist.find(candidate) == record_blacklist.end()) {
+                    to_refresh.push_back(candidate);
+                } else {
+                    _dia("fqdn %s is blacklisted", candidate.c_str());
+                }
+            }
         }
 
-        DNS_Inspector di;
-        for(const auto& t_a: fqdns) {
+        return to_refresh;
+    }
+
+
+
+    static void requery_records(std::vector<std::string> const& records) {
+        for(const auto& t_a: records) {
             _dia("refreshing fqdn: %s",t_a.c_str());
 
             std::string a;
@@ -179,26 +172,51 @@ std::thread* create_dns_updater() {
                 t = A; a = t_a.substr(2,-1);
             }
             else if (t_a.find("AAAA:") == 0) {
-                    t = AAAA;
-                    a = t_a.substr(5, -1);
+                t = AAAA;
+                a = t_a.substr(5, -1);
             }
             else {
-                    continue;
+                continue;
             }
 
+            auto const& nameserver = DNS_Resolver::choose_dns_server(0);
 
-
-            std::shared_ptr<DNS_Response> resp(DNSFactory::get().resolve_dns_s(a, t, nameserver));
+            auto resp = std::shared_ptr<DNS_Response>(DNSFactory::get().resolve_dns_s(a, t, nameserver));
 
             if(resp) {
-                if(di.store(resp)) {
+                if(DNS_Inspector::store(resp)) {
                     _dia("Entry successfully stored in cache.");
                 } else {
                     _war("entry for %s was not stored, blacklisted!",t_a.c_str());
-                    record_blacklist.insert(t_a);
+                    DNS_Resolver::record_blacklist.insert(t_a);
                 }
             }
         }
+    }
+};
+
+void dns_updater_thread_fn() {
+
+    auto const& log = DNS_Resolver::log;
+
+    const unsigned int sleep_time = 10;
+    const unsigned int blacklist_timeout = 120;
+
+    unsigned int dns_cache_laundry_delta = 0;
+    unsigned int dns_cache_laundry_ttl = 0;
+
+
+    for(unsigned int i = 1; ; i++) {
+
+        if(Service::abort_sleep(sleep_time)) {
+            break;
+        }
+
+        _dia("dns_updater: refresh round %d", i);
+
+        const auto request_candidates = DNS_Resolver::refresh_candidates();
+        const auto to_refresh = DNS_Resolver::check_cache_expiry(request_candidates);
+        DNS_Resolver::requery_records(to_refresh);
 
         dns_cache_laundry_delta += sleep_time;
         if(dns_cache_laundry_delta > dns_cache_laundry_ttl) {
@@ -211,12 +229,13 @@ std::thread* create_dns_updater() {
 
 
         // do some rescans of blacklisted entries
-        if(i % (20*sleep_time) == 0) {
-            record_blacklist.clear();
+        if((i*sleep_time) % blacklist_timeout == 0) {
+            DNS_Resolver::record_blacklist.clear();
         }
 
-    } } );
-      
-    
-    return dns_thread;
+    }
+}
+
+std::thread* create_dns_updater() {
+    return new std::thread(dns_updater_thread_fn);
 }
