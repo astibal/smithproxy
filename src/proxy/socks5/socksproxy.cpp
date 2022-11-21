@@ -186,15 +186,21 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     ldaadd(n_cx);
     n_cx->on_delay_socket(s);
 
-    auto *target_cx = new MitmHostCX(n_cx->com()->slave(), n_cx->com()->nonlocal_dst_host().c_str(),
-                                        string_format("%d",n_cx->com()->nonlocal_dst_port()).c_str()
-                                        );
+
     std::string h;
     std::string p;
-    n_cx->com()->resolve_socket_src(n_cx->socket(),&h,&p);
-    n_cx->host() = h;
-    n_cx->port() = p;
+    if(n_cx->com()->resolve_socket_src(n_cx->socket(),&h,&p)) {
+        n_cx->host() = h;
+        n_cx->port() = p;
+    }
+    else {
+        state().dead(true);
+        return;
+    }
 
+    auto *target_cx = new MitmHostCX(n_cx->com()->slave(), n_cx->com()->nonlocal_dst_host().c_str(),
+                                     string_format("%d",n_cx->com()->nonlocal_dst_port()).c_str()
+    );
 
     n_cx->peer(target_cx);
     target_cx->peer(n_cx);
