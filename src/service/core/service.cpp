@@ -72,10 +72,13 @@ void Service::my_usr1 (int param) {
 }
 
 
-bool Service::abort_sleep(unsigned int steps, unsigned int step) {
+bool Service::abort_sleep(unsigned int steps, time_t step) {
+
+    timespec ts{};
+    ts.tv_sec = step;
 
     for(unsigned int i = 0; i < steps; i++) {
-        ::sleep(step);
+        nanosleep(&ts, nullptr);
         if (Service::self()->terminate_flag) {
             return true;
         }

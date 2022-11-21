@@ -69,7 +69,7 @@ public:
     std::atomic<bool> terminate_flag {false};
     std::atomic<bool> terminated {false};
 
-    [[nodiscard]] static bool abort_sleep(unsigned int steps, unsigned int step=1);
+    [[nodiscard]] static bool abort_sleep(unsigned int steps, time_t step=1);
 
     unsigned int tenant_index () const { return tenant_index_; }
     void tenant_index (unsigned int tenantIndex) { tenant_index_ = tenantIndex; }
