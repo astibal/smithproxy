@@ -4558,7 +4558,7 @@ int save_settings(Config& ex) {
     // nameservers
     Setting& it_ns  = objects.add("nameservers", Setting::TypeArray);
     for(auto const& ns: CfgFactory::get()->db_nameservers) {
-        it_ns.add(Setting::TypeString) = ns;
+        it_ns.add(Setting::TypeString) = ns.str_host;
     }
 
     objects.add("certs_path", Setting::TypeString) = SSLFactory::factory().certs_path();
@@ -4804,4 +4804,35 @@ bool CfgFactory::save_config() const {
 
         return false;
     }
+}
+
+
+AddressInfo const& DNS_Setup::default_ns() {
+    static const auto ai = create_default_ns(AF_INET, "1.1.1.1", 53);
+    return ai;
+};
+
+AddressInfo const& DNS_Setup::choose_dns_server(int pref_family) {
+
+    auto const& db = CfgFactory::get()->db_nameservers;
+    if (not db.empty()) {
+
+        if(pref_family != 0) for(auto const& can: db) {
+                if(can.family == pref_family)
+                    return can;
+            }
+        return db.at(0);
+    }
+    return default_ns();
+}
+
+
+AddressInfo DNS_Setup::create_default_ns(int fam, const char* ip, unsigned short port) {
+    AddressInfo ai;
+    ai.str_host = ip;
+    ai.port = port;
+    ai.family = fam;
+    ai.pack();
+
+    return ai;
 }
