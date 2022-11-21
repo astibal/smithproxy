@@ -100,8 +100,8 @@ struct CliGlobals {
         std::string hostname_full = hostname + (tenant == ".default" ? "" : tenant );
         return hostname_full;
     }
-    static std::string hostname() {
-        static std::string h = create_hostname();
+    static std::string const& hostname() {
+        static const std::string h = create_hostname();
         return h;
     };
 
@@ -124,7 +124,7 @@ void apply_hostname(cli_def* cli) {
 
     board->ack_saved(cli_id());
 
-    bool cfg_change_unsaved = (board->at(cli_id()).seen_current != board->at(cli_id()).seen_saved);
+    const bool cfg_change_unsaved = (board->at(cli_id()).seen_current != board->at(cli_id()).seen_saved);
 
 
     cli_set_hostname(cli, string_format("smithproxy(%s)%s", CliGlobals::hostname().c_str(), cfg_change_unsaved ? "<*>" : "").c_str());
@@ -291,18 +291,18 @@ std::stringstream features;
     }
 
     cli_print(cli," ");
-    time_t uptime = time(nullptr) - SmithProxy::instance().ts_sys_started;
+    const time_t uptime = time(nullptr) - SmithProxy::instance().ts_sys_started;
     cli_print(cli,"Uptime: %s",uptime_string(uptime).c_str());
 
     {
-        std::scoped_lock<std::recursive_mutex> l_(sobjectDB::getlock());
+        auto lc_ = std::scoped_lock(sobjectDB::getlock());
         cli_print(cli, "Objects: %lu", static_cast<unsigned long>(socle::sobjectDB::db().size()));
     }
-    unsigned long l = MitmProxy::total_mtr_up().get();
-    unsigned long r = MitmProxy::total_mtr_down().get();
+    const unsigned long l = MitmProxy::total_mtr_up().get();
+    const unsigned long r = MitmProxy::total_mtr_down().get();
     cli_print(cli,"Performance: upload %sbps, download %sbps in last 60 seconds",number_suffixed(l*8).c_str(),number_suffixed(r*8).c_str());
 
-    unsigned long t = MitmProxy::total_mtr_up().total() + MitmProxy::total_mtr_down().total();
+    const unsigned long t = MitmProxy::total_mtr_up().total() + MitmProxy::total_mtr_down().total();
     cli_print(cli,"Transferred: %s bytes", number_suffixed(t).c_str());
     cli_print(cli,"Total sessions: %lu", static_cast<unsigned long>(MitmProxy::total_sessions().load()));
 
@@ -410,14 +410,13 @@ int cli_exec_kb_clear(struct cli_def *cli, const char *command, char *argv[], in
 {
     debug_cli_params(cli, command, argv, argc);
 
-    int sz = 0;
+    std::size_t sz = 0;
 
-    std::string dump;
     {
         auto kb = sx::KB::get();
-        sz = kb->elements.size();
-
         auto lc_ = std::scoped_lock(sx::KB::lock());
+
+        sz = kb->elements.size();
         kb->elements.clear();
     }
 
@@ -442,7 +441,7 @@ int cli_test_dns_genrequest(struct cli_def *cli, const char *command, char *argv
     buffer b(1024);
 
     if(argc > 0) {
-        std::string argv0(argv[0]);
+        const std::string argv0(argv[0]);
         if( argv0 == "?" || argv0 == "\t") {
             cli_print(cli,"specify hostname.");
             return CLI_OK;
@@ -454,7 +453,7 @@ int cli_test_dns_genrequest(struct cli_def *cli, const char *command, char *argv
 #else
         RAND_pseudo_bytes(rand_pool,2);
 #endif
-        unsigned short id = *(unsigned short*)rand_pool;
+        const auto id = *(unsigned short*)rand_pool;
 
         int s = DNSFactory::get().generate_dns_request(id,b,argv[0],A);
         cli_print(cli,"DNS generated request: \n%s, %dB",hex_dump(b).c_str(), s);
@@ -492,7 +491,7 @@ DNS_Response* send_dns_request(struct cli_def *cli, std::string const& hostname,
     }
 
     if(::send(send_socket, b.data(), b.size(), 0) < 0) {
-        std::string r = string_format("logger::write_log: cannot write remote socket: %d",send_socket);
+        const std::string r = string_format("logger::write_log: cannot write remote socket: %d",send_socket);
         cli_print(cli,"%s",r.c_str());
 
         ::close(send_socket); // coverity: 1407944
@@ -1141,7 +1140,8 @@ int cli_exec_shutdown(struct cli_def *cli, const char *command, char *argv[], in
         t.tv_sec = 1;
 
         while(not SmithProxy::instance().terminated) {
-            cli_print(cli, "  -    proxies remaining: %zu", MitmProxy::current_sessions().load());
+            const unsigned long prsz = MitmProxy::current_sessions().load();
+            cli_print(cli, "  -    proxies remaining: %lu", prsz);
 
             nanosleep(&t, nullptr);
             t.tv_sec = 3;
