@@ -217,17 +217,9 @@ bool socksServerCX::process_dns_response(std::shared_ptr<DNS_Response> resp) {
 }
 
 
-std::string socksServerCX::choose_dns_server() const {
 
-    std::string nameserver = "1.1.1.1";
-    if (!CfgFactory::get()->db_nameservers.empty()) {
-        return CfgFactory::get()->db_nameservers.at(0);
-    }
 
-    return nameserver;
-}
-
-void socksServerCX::setup_dns_async(std::string const& fqdn, DNS_Record_Type type, std::string const& nameserver) {
+void socksServerCX::setup_dns_async(std::string const& fqdn, DNS_Record_Type type, AddressInfo const& nameserver) {
     int dns_sock = DNSFactory::get().send_dns_request(fqdn, type, nameserver);
     if (dns_sock) {
         _dia("setup_dns_async: request sent: %s", fqdn.c_str());
@@ -307,7 +299,7 @@ socks5_request_error socksServerCX::handle5_connect_fqdn() {
     if(target_ips.empty()) {
         // no targets, send DNS query
 
-        std::string nameserver = choose_dns_server();
+        auto const& nameserver = DNS_Setup::choose_dns_server(ipver);
 
         if(!async_dns) {
 
@@ -842,15 +834,19 @@ void socksServerCX::pre_write() {
 
         if(mixed_ip_versions)  {
             if (not tested_dns_aaaa) {
+                _dia("socksServerCX::pre_write[%s]: trying DNS AAAA query", c_type());
+
                 tested_dns_aaaa = true;
 
-                auto nameserver = choose_dns_server();
+                auto const& nameserver = DNS_Setup::choose_dns_server(AF_INET6);
                 setup_dns_async(req_str_addr, AAAA, nameserver);
             }
             else if(not tested_dns_a) {
+                _dia("socksServerCX::pre_write[%s]: trying DNS A query", c_type());
+
                 tested_dns_a = true;
 
-                auto nameserver = choose_dns_server();
+                auto const& nameserver = DNS_Setup::choose_dns_server(AF_INET);
                 setup_dns_async(req_str_addr, A, nameserver);
             }
 

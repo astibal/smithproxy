@@ -58,6 +58,7 @@
 #include <log/logger.hpp>
 #include <ext/libcidr/cidr.hpp>
 #include <policy/addrobj.hpp>
+#include <socketinfo.hpp>
 #include <inspect/dns.hpp>
 
 
@@ -105,7 +106,7 @@ public:
 
     // send DNS request out to network. Return socket FD, or non-positive on error.
     // you want to call this for async request
-    int send_dns_request (std::string const &hostname, DNS_Record_Type t, std::string const &nameserver);
+    int send_dns_request (std::string const &hostname, DNS_Record_Type t, AddressInfo const& nameserver);
 
     // @returns: response and return from receive - well. I don't like it this way either,
     // but we can't actually return nullptr, since it could be legit return value on non-blocking socket
@@ -114,7 +115,7 @@ public:
 
 
     // this is easiest way to resolve. Just do the thing, with blocking ... and waiting.
-    DNS_Response* resolve_dns_s (std::string const& hostname, DNS_Record_Type t, std::string const& nameserver, unsigned int timeout_s=2);
+    DNS_Response* resolve_dns_s (std::string const& hostname, DNS_Record_Type t, AddressInfo const& nameserver, unsigned int timeout_s=2);
 
 
     static DNSFactory& get() {

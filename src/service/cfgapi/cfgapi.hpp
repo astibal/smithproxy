@@ -181,6 +181,16 @@ struct UpdateBoardSubscriber {
 
 struct SignatureTree;
 
+struct DNS_Setup {
+
+    static AddressInfo const& default_ns();
+    static AddressInfo const& choose_dns_server(int pref_family);
+
+private:
+    static AddressInfo create_default_ns(int fam, const char* ip, unsigned short port);
+};
+
+
 class CfgFactory : public CfgFactoryBase {
 
     libconfig::Config cfgapi;
@@ -331,7 +341,7 @@ public:
     } capture_remote;
 
 
-    std::vector<std::string> db_nameservers;
+    std::vector<AddressInfo> db_nameservers;
 
     bool  cfgapi_init(const char* fnm);
     void  cleanup();

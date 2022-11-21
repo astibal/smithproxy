@@ -421,7 +421,7 @@ int cli_exec_kb_clear(struct cli_def *cli, const char *command, char *argv[], in
         kb->elements.clear();
     }
 
-    cli_print(cli, "Knowledgebase cleared %d entries", sz);
+    cli_print(cli, "Knowledgebase cleared %zu entries", sz);
 
     return CLI_OK;
 }
@@ -466,7 +466,7 @@ int cli_test_dns_genrequest(struct cli_def *cli, const char *command, char *argv
 }
 
 
-DNS_Response* send_dns_request(struct cli_def *cli, std::string const& hostname, DNS_Record_Type t, std::string const& nameserver) {
+DNS_Response* send_dns_request(struct cli_def *cli, std::string const& hostname, DNS_Record_Type t, const AddressInfo &nameserver) {
 
     buffer b(1024);
     DNS_Response* ret = nullptr;
@@ -483,14 +483,9 @@ DNS_Response* send_dns_request(struct cli_def *cli, std::string const& hostname,
     cli_print(cli,"DNS generated request: \n%s, %dB",hex_dump(b).c_str(),s);
 
     // create UDP socket
-    int send_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    struct sockaddr_storage addr {};
-    memset(&addr, 0, sizeof(struct sockaddr_storage));
-    addr.ss_family                = AF_INET;
-    ((sockaddr_in*)&addr)->sin_addr.s_addr = inet_addr(nameserver.c_str());
-    ((sockaddr_in*)&addr)->sin_port = htons(53);
+    int send_socket = socket(nameserver.family, SOCK_DGRAM, IPPROTO_UDP);
 
-    if(0 != ::connect(send_socket,(sockaddr*)&addr,sizeof(sockaddr_storage))) {
+    if(0 != ::connect(send_socket,(sockaddr const*) nameserver.as_ss(), sizeof(sockaddr_storage))) {
         cli_print(cli, "cannot connect socket");
         ::close(send_socket);
         return CLI_OK;
@@ -559,13 +554,7 @@ int cli_test_dns_sendrequest(struct cli_def *cli, const char *command, char *arg
             return CLI_OK;
         }
 
-        std::string nameserver;
-        if(not CfgFactory::get()->db_nameservers.empty()) {
-            nameserver = CfgFactory::get()->db_nameservers.at(0);
-        }
-        else {
-            cli_print(cli, "Error: nameservers not configured");
-        }
+        auto const& nameserver = DNS_Setup::choose_dns_server(0);
 
         auto resp = std::shared_ptr<DNS_Response>(send_dns_request(cli,argv0,A, nameserver));
         if(resp) {
@@ -607,14 +596,7 @@ int cli_test_dns_refreshallfqdns(struct cli_def *cli, const char *command, char 
         }
     }
 
-    std::string nameserver;
-    if(not CfgFactory::get()->db_nameservers.empty()) {
-        nameserver = CfgFactory::get()->db_nameservers.at(0);
-    }
-    else {
-        cli_print(cli, "nameservers not configured in 'config.settings' section");
-        return CLI_OK;
-    }
+    auto const& nameserver = DNS_Setup::choose_dns_server(0);
 
     for(auto const& a: fqdns) {
 

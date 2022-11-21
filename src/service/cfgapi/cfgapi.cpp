@@ -591,9 +591,46 @@ bool CfgFactory::load_settings () {
         const int num = cfgapi.getRoot()["settings"]["nameservers"].getLength();
         for(int i = 0; i < num; i++) {
             std::string ns = cfgapi.getRoot()["settings"]["nameservers"][i];
-            db_nameservers.push_back(ns);
+
+            CidrAddress test_ip(ns.c_str());
+            if(not test_ip.cidr()) {
+                _err("load_settings: nameserver %s - unknown address format", ns.c_str());
+                continue;
+            }
+
+            AddressInfo ai;
+            ai.str_host = ns;
+            ai.port = 53;
+
+            auto push_it = [&](const char* famstr) {
+                if(ai.pack()) {
+                    db_nameservers.push_back(ai);
+                    _deb("load_settings: %s nameserver %s - added", famstr, ns.c_str());
+                }
+                else { _err("load_settings: %s nameserver %s - cannot pack", famstr, ns.c_str()); }
+
+            };
+
+            if(test_ip.cidr()->proto == CIDR_IPV6) {
+                ai.family = AF_INET6;
+                push_it("IPv6");
+            }
+            else if (test_ip.cidr()->proto == CIDR_IPV4) {
+                ai.family = AF_INET;
+                push_it("IPv4");
+            }
 
             ReceiverRedirectMap::instance().map_add(std::stoi(listen_udp_port) + 973, ReceiverRedirectMap::redir_target_t(ns, 53));  // to make default port 51053 suggesting DNS
+        }
+        if(db_nameservers.empty()) {
+            _cri("NO NAMESERVERS set - using defaults (Cloudflare)");
+            AddressInfo ai;
+            ai.family = AF_INET;
+            ai.str_host = "1.1.1.1";
+            ai.port = 53;
+            if(ai.pack()) {
+                db_nameservers.push_back(ai);
+            }
         }
     }
 

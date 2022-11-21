@@ -1,10 +1,8 @@
 #include <inspect/dns.hpp>
-
 #include <gtest/gtest.h>
 
-constexpr const char* nameserver = "8.8.8.8";
 constexpr const char* host = "smithproxy.org";
-
+AddressInfo nameserver(AF_INET, "1.1.1.1", 53);
 
 const unsigned char  dns_response1[] = {
         0xf3, 0x1a, 0x81, 0x80, 0x00, 0x01, 0x00, 0x02, 0x00, 0x02, 0x00, 0x06, 0x04, 0x70, 0x63, 0x64,

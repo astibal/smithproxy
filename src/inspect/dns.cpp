@@ -42,11 +42,10 @@
 #include <unistd.h>
 
 #include <epoll.hpp>
+#include <socketinfo.hpp>
 #include <inspect/dns.hpp>
 #include <log/logger.hpp>
 
-
-//std::unordered_map<std::string, ptr_cache<std::string,DNS_Response>*> inspect_per_ip_dns_cache;
 
 const char* DNSFactory::dns_record_type_str(int a) {
     switch(a) {
@@ -195,48 +194,37 @@ std::size_t DNSFactory::generate_dns_request(unsigned short id, buffer& b, std::
 }
 
 
-int DNSFactory::send_dns_request(std::string const& hostname, DNS_Record_Type t, std::string const& nameserver) {
-    if (nameserver.empty()) {
-        _err("resolve_dns_s: query %s for type %s: missing nameserver", hostname.c_str(),
-             DNSFactory::get().dns_record_type_str(t));
-    }
+int DNSFactory::send_dns_request(std::string const& hostname, DNS_Record_Type t, AddressInfo const& nameserver) {
+    _dia("resolve_dns_s: query %s for type %s: nameserver: %s", hostname.c_str(),
+             DNSFactory::get().dns_record_type_str(t),
+             SockOps::ss_str(nameserver.as_ss()).c_str());
 
     buffer b(256);
 
     unsigned char rand_pool[2];
     RAND_bytes(rand_pool, 2);
-    unsigned short id = *(unsigned short *) rand_pool;
+    auto id = *(unsigned short *) rand_pool;
 
-    int s = DNSFactory::get().generate_dns_request(id, b, hostname, t);
-    _dum("DNS generated request: size %db\n%s", s, hex_dump(b).c_str());
+    auto req_sz = DNSFactory::get().generate_dns_request(id, b, hostname, t);
+    _dum("DNS generated request: size %zub\n%s", req_sz, hex_dump(b).c_str());
 
     // create UDP socket
-    int send_socket = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-
-    if(send_socket >= 0) {
-        struct sockaddr_storage addr{};
-
-        memset(&addr, 0, sizeof(struct sockaddr_storage));
-        addr.ss_family = AF_INET;
-        ((sockaddr_in *) &addr)->sin_addr.s_addr = inet_addr(nameserver.c_str());
-        ((sockaddr_in *) &addr)->sin_port = htons(53);
+    auto sock = raw::unique<int>(::socket(nameserver.family, SOCK_DGRAM, IPPROTO_UDP), raw::deleter::close);
 
 
-        if (0 != ::connect(send_socket, (sockaddr *) &addr, sizeof(sockaddr_storage))) {
+    if(sock.value >= 0) {
+
+        if (0 != ::connect(sock.value, (sockaddr *) nameserver.as_ss(), sizeof(sockaddr_storage))) {
             _err("resolve_dns_s: cannot connect: %s", string_error().c_str());
-            ::close(send_socket);
             return -2;
         }
 
-        if (::send(send_socket, b.data(), b.size(), 0) < 0) {
-            std::string r = string_format("resolve_dns_s: cannot write remote socket: %d", send_socket);
-            _dia("%s", r.c_str());
-
-            ::close(send_socket);  // coverity: 1407969
+        if (::send(sock.value, b.data(), b.size(), 0) < 0) {
+            _dia("%s", string_format("resolve_dns_s: cannot write remote socket: %d", sock.value).c_str());
             return -3;
         }
 
-        return send_socket;
+        return sock.release();
     } else {
         _err("resolve_dns_s: cannot create socket %s", string_error().c_str());
         return -1;
@@ -261,8 +249,8 @@ std::pair<DNS_Response *, ssize_t> DNSFactory::recv_dns_response(int send_socket
     e.add(send_socket, EPOLLIN);
     auto rv = e.wait(static_cast<int>(timeout_sec)*1000);
 
-    // e.wait returns number of sucessfull elements from which we added
-    if(rv >= 1) {
+    // e.wait returns number of successful elements from which we added
+    if(poll_result >= 1) {
         buffer recv_buffer(1500);
         l = ::recv(send_socket, recv_buffer.data(), recv_buffer.capacity(), timeout_sec > 0 ? 0 : MSG_DONTWAIT);
         _deb("recv_dns_response(%d,%d): recv() returned %d",send_socket, timeout_sec, l);
@@ -296,10 +284,10 @@ std::pair<DNS_Response *, ssize_t> DNSFactory::recv_dns_response(int send_socket
     return { ret, l };
 }
 
-DNS_Response* DNSFactory::resolve_dns_s (std::string const& hostname, DNS_Record_Type t, std::string const& nameserver, unsigned int timeout_s) {
+DNS_Response* DNSFactory::resolve_dns_s (std::string const& hostname, DNS_Record_Type t, AddressInfo const& nameserver, unsigned int timeout_s) {
 
-    int send_socket = send_dns_request(hostname, t, nameserver);
-    auto resp = recv_dns_response(send_socket,timeout_s);
+    const int send_socket = send_dns_request(hostname, t, nameserver);
+    auto resp = recv_dns_response(send_socket, timeout_s);
 
     if(send_socket > 0) {
         ::close(send_socket);

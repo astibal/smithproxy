@@ -194,8 +194,7 @@ public:
 
     void handle_event (baseCom *com) override;
 
-    std::string choose_dns_server() const;
-    void setup_dns_async(std::string const& fqdn, DNS_Record_Type type, std::string const& nameserver);
+    void setup_dns_async(std::string const& fqdn, DNS_Record_Type type, const AddressInfo &nameserver);
     using dns_response_t = std::pair<std::shared_ptr<DNS_Response>, ssize_t>;
     void dns_response_callback(dns_response_t const& resp);
 
