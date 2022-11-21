@@ -243,11 +243,16 @@ std::pair<DNS_Response *, ssize_t> DNSFactory::recv_dns_response(int send_socket
     }
 
 
-    // utilize epoll and wait for the socket to be ready (or timeout)
-    epoll e;
-    e.init();
-    e.add(send_socket, EPOLLIN);
-    auto rv = e.wait(static_cast<int>(timeout_sec)*1000);
+    auto poll_result = 1;
+
+    // wait on socket
+    if(timeout_sec > 0) {
+        // utilize epoll and wait for the socket to be ready (or timeout)
+        epoll e;
+        e.init();
+        e.add(send_socket, EPOLLIN);
+        poll_result = e.wait(static_cast<int>(timeout_sec) * 1000);
+    }
 
     // e.wait returns number of successful elements from which we added
     if(poll_result >= 1) {
@@ -275,6 +280,8 @@ std::pair<DNS_Response *, ssize_t> DNSFactory::recv_dns_response(int send_socket
                 _err("Something went wrong with parsing DNS response (keeping response)");
             }
 
+        } else {
+            _deb("nothing in socket: %d", l);
         }
 
     } else {
