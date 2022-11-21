@@ -133,39 +133,35 @@ std::string DNSFactory::construct_qname(const unsigned char* qname_start, const 
     return to_ret;
 }
 
-int DNSFactory::generate_dns_request(unsigned short id, buffer& b, std::string const& h, DNS_Record_Type t) {
+std::size_t DNSFactory::generate_dns_request(unsigned short id, buffer& b, std::string const& h, DNS_Record_Type t) {
 
     std::string hostname = "." + h;
     //need to add dot at the beginning
 
-    if(b.capacity() < (hostname.size()+DNS_REQUEST_OVERHEAD)) return -1;
-
-    unsigned char* ptr = b.data();
+    b.size(hostname.size()+DNS_REQUEST_OVERHEAD);
 
     // transaction ID
-    unsigned short* transaction_id = (unsigned short*)&ptr[0];
-    *transaction_id = htons(id);
+    b.set_at<uint16_t>(0, htons(id));
 
     //
-    unsigned short* flags = (unsigned short*)&ptr[2];
-    *flags = htons(0x0100);
+    b.set_at<uint16_t>(2, htons(0x0100));
 
-    unsigned short* nquestions = (unsigned short*)&ptr[4];
-    *nquestions = htons(1);
+    // number of questions
+    b.set_at<uint16_t>(4, htons(1));
 
-    unsigned short* nanswers = (unsigned short*)&ptr[6];
-    *nanswers= 0;
+    // number of answers
+    b.set_at<uint16_t>(6, 0);
 
-    unsigned short* nauthorities = (unsigned short*)&ptr[8];
-    *nauthorities = 0;
+    // n of authorities
+    b.set_at<uint16_t>(8, 0);
 
-    unsigned short* nadditionals = (unsigned short*)&ptr[10];
-    *nadditionals = 0;
+    // n of additionals
+    b.set_at<uint16_t>(10, 0);
 
-    unsigned char* queries = &ptr[12];
+    unsigned char* queries = &b.data()[12];
 
-    unsigned char* len_ptr = queries;
-    unsigned int piece_sz = 0;
+    uint8_t* len_ptr = queries;
+    uint8_t piece_sz = 0;
 
     for(unsigned int i = 0; i < hostname.size(); ++i) {
         char A = hostname[i];
@@ -189,14 +185,12 @@ int DNSFactory::generate_dns_request(unsigned short id, buffer& b, std::string c
     unsigned char* trailer = &queries[hostname.size()];
     trailer[0] = 0x00;
 
-    unsigned short* typ = (unsigned short*)&trailer[1];
+    auto* typ = (unsigned short*)&trailer[1];
     *typ = htons(t);
 
-    unsigned short* clas = (unsigned short*)&trailer[3];
+    auto* clas = (unsigned short*)&trailer[3];
     *clas = htons(0x0001);
 
-
-    b.size(hostname.size()+DNS_REQUEST_OVERHEAD);
     return b.size();
 }
 
