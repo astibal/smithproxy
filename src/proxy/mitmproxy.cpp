@@ -2047,28 +2047,24 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
                              target_host.c_str(),
                              string_format("%d",target_port).c_str());
 
-    auto* new_proxy = sx::proxymaker::make(just_accepted_cx, target_cx);
+    auto new_proxy = sx::proxymaker::make(just_accepted_cx, target_cx);
     auto lcx = logan_context(new_proxy->to_string(iNOT));
 
     if(not sx::proxymaker::policy(new_proxy, redirected_magic)) {
-        delete new_proxy;
         return;
     }
 
     if(not sx::proxymaker::authorize(new_proxy)) {
         if(not sx::proxymaker::is_replaceable(target_port)) {
-            delete new_proxy;
             return;
         }
     }
 
     if(not sx::proxymaker::setup_snat(new_proxy, source_host, source_port)) {
-        delete new_proxy;
         return;
     }
 
-    if(not sx::proxymaker::connect(this, new_proxy)) {
-        delete new_proxy;
+    if(not sx::proxymaker::connect(this, std::move(new_proxy))) {
         return;
     }
 
@@ -2090,18 +2086,16 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
                                      target_host.c_str(),
                                      string_format("%d",target_port).c_str());
 
-    auto* new_proxy = sx::proxymaker::make(just_accepted_cx, target_cx);
+    auto new_proxy = sx::proxymaker::make(just_accepted_cx, target_cx);
 
     auto lcx = logan_context(new_proxy->to_string(iNOT));
 
     if(not sx::proxymaker::policy(new_proxy, false)) {
-        delete new_proxy;
         return;
     }
 
     if(not sx::proxymaker::authorize(new_proxy)) {
         if(not sx::proxymaker::is_replaceable(target_port)) {
-            delete new_proxy;
             return;
         }
     }
@@ -2118,12 +2112,10 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
     }
 
     if(not sx::proxymaker::setup_snat(new_proxy, source_host, source_port)) {
-        delete new_proxy;
         return;
     }
 
-    if(not sx::proxymaker::connect(this, new_proxy)) {
-        delete new_proxy;
+    if(not sx::proxymaker::connect(this, std::move(new_proxy))) {
         return;
     }
 

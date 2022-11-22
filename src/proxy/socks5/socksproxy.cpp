@@ -227,7 +227,7 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
 
     if( auto policy = CfgFactory::get()->lookup_policy(matched_policy()); policy) {
 
-        if(policy->profile_routing and not sx::proxymaker::route(this, policy->profile_routing))
+        if(policy->profile_routing and not sx::proxymaker::route_existing(this, policy->profile_routing))
             _err("SocksProxy::socks5_handoff: routing failed");
     }
 
@@ -394,6 +394,12 @@ void SocksProxy::socks5_handoff_udp(socksServerCX* cx) {
     target_cx->matched_policy(matched_policy());
 
     radd(target_cx);
+
+    if( auto policy = CfgFactory::get()->lookup_policy(matched_policy()); policy) {
+
+        if(policy->profile_routing and not sx::proxymaker::route_existing(this, policy->profile_routing))
+            _err("SocksProxy::socks5_handoff_udp: routing failed");
+    }
 
     if (CfgFactory::get()->policy_apply(n_cx.get(), this, matched_policy()) < 0) {
         // strange, but it can happen if the sockets is closed between policy match and this profile application

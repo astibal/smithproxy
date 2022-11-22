@@ -308,7 +308,7 @@ bool DNS_Inspector::store(std::shared_ptr<DNS_Response> ptr) {
 
         if( (! dom_pair.first.empty()) && (! dom_pair.second.empty()) ) {
 
-            std::scoped_lock<std::recursive_mutex> ll_(DNS::get_domain_lock());
+            auto ll_ = std::scoped_lock(DNS::get_domain_lock());
 
             auto subdom_cache = DNS::get_domain_cache().get(dom_pair.first);
             if(subdom_cache) {

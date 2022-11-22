@@ -81,11 +81,11 @@ namespace sx::proxymaker {
         }
     }
 
-    MitmProxy *make (baseHostCX *left, baseHostCX *right) {
+    std::unique_ptr<MitmProxy> make (baseHostCX *left, baseHostCX *right) {
 
         if(not left or not right) return nullptr;
 
-        auto *new_proxy = new MitmProxy(left->com()->slave());
+        auto new_proxy = std::make_unique<MitmProxy>(left->com()->slave());
 
         auto const& log = log::make();
 
@@ -116,7 +116,7 @@ namespace sx::proxymaker {
         return new_proxy;
     }
 
-    bool policy (MitmProxy *proxy, bool implicit_allow) {
+    bool policy (std::unique_ptr<MitmProxy>& proxy, bool implicit_allow) {
 
         auto const& log = log::policy();
 
@@ -137,7 +137,7 @@ namespace sx::proxymaker {
             bypass_cx(proxy->first_right());
             policy_num = PolicyRule::POLICY_IMPLICIT_PASS;
         } else {
-            policy_num = CfgFactory::get()->policy_apply(proxy->first_left(), proxy);
+            policy_num = CfgFactory::get()->policy_apply(proxy->first_left(), proxy.get());
         }
 
         auto *src_cx = proxy->first_left();
@@ -175,7 +175,8 @@ namespace sx::proxymaker {
 
 
     using optional_string = std::optional<std::string>;
-    std::pair<optional_string, optional_string> get_dnat_target (std::shared_ptr<ProfileRouting> routing_profile, MitmProxy* proxy) {
+    std::pair<optional_string, optional_string>
+    get_dnat_target(std::unique_ptr<MitmProxy> const& proxy, std::shared_ptr<ProfileRouting> routing_profile) {
 
         if(not routing_profile) return {std::nullopt, std::nullopt };
 
@@ -198,10 +199,10 @@ namespace sx::proxymaker {
                     index = routing_profile->lb_index_rr(candidates.size());
                     break;
                 case ProfileRouting::lb_method::LB_L3:
-                    index = routing_profile->lb_index_l3(proxy, candidates.size());
+                    index = routing_profile->lb_index_l3(proxy.get(), candidates.size());
                     break;
                 case ProfileRouting::lb_method::LB_L4:
-                    index = routing_profile->lb_index_l4(proxy, candidates.size());
+                    index = routing_profile->lb_index_l4(proxy.get(), candidates.size());
                     break;
                 default:
                     // act as LB_RR
@@ -230,22 +231,30 @@ namespace sx::proxymaker {
                  port.empty() ? std::nullopt : std::make_optional(port) };
     }
 
-    bool route(MitmProxy* proxy, std::shared_ptr<ProfileRouting> routing_profile) {
+    bool route_existing(MitmProxy*proxy, std::shared_ptr<ProfileRouting> routing_profile) {
+        auto p = std::unique_ptr<MitmProxy>(proxy);
+        auto r = route(p, routing_profile);
 
-        if(not routing_profile or not proxy) return false;
+        p.release();
+        return r;
+    }
+
+    bool route(std::unique_ptr<MitmProxy> &proxy, std::shared_ptr<ProfileRouting> routing_profile) {
+
+        if(not routing_profile or not proxy) { return false; }
 
         auto const& log = log::routing();
 
         // update rt profile internals
         routing_profile->update();
 
-        auto [ op_ip, op_port ] = get_dnat_target(routing_profile, proxy);
-        if(not op_ip and not op_port) return false;
+        auto [ op_ip, op_port ] = get_dnat_target(proxy, routing_profile);
+        if(not op_ip and not op_port) { return false; }
 
 
         auto orig_px_name = proxy->to_string(iINF);
 
-        for (auto *cx: proxy->rs()) {
+        for (auto const *cx: proxy->rs()) {
             if (op_ip) {
                 cx->host(op_ip.value());
                 _dia("%s: routing to IP: %s", orig_px_name.c_str(), op_ip->c_str());
@@ -267,21 +276,22 @@ namespace sx::proxymaker {
         return true;
     }
 
-    std::pair<std::string, unsigned short>
-    to_magic(std::string const &target_host, unsigned short target_port) {
+    std::pair<std::string, unsigned short> to_magic(unsigned short target_port) {
 
         std::string redir_host;
         unsigned short redir_port;
 
-        if (target_port == 65000 or target_port == 143) {
+        const unsigned short base = 65000;
+
+        if (target_port == base) {
             // bend broker magic IP
-            redir_port = 65000 + CfgFactory::get()->tenant_index;
+            redir_port = base + raw::try_down_cast<unsigned short>(CfgFactory::get()->tenant_index);
         } else if (target_port != 443) {
             // auth portal https magic IP
-            redir_port = std::stoi(AuthFactory::get().options.portal_port_http);
+            redir_port = raw::try_down_cast<unsigned short>(std::stoi(AuthFactory::get().options.portal_port_http));
         } else {
             // auth portal plaintext magic IP
-            redir_port = std::stoi(AuthFactory::get().options.portal_port_https);
+            redir_port = raw::try_down_cast<unsigned short>(std::stoi(AuthFactory::get().options.portal_port_https));
         }
         redir_host = "127.0.0.1";
 
@@ -342,7 +352,7 @@ namespace sx::proxymaker {
     }
 
 
-    bool authorize (MitmProxy *proxy) {
+    bool authorize(std::unique_ptr<MitmProxy>& proxy) {
 
         auto const& log = log::authorize();
 
@@ -358,7 +368,7 @@ namespace sx::proxymaker {
                      proxy->identity()->username().c_str(),
                      proxy->identity()->groups().c_str());
 
-                if (authorize_is_bad(proxy)) {
+                if (authorize_is_bad(proxy.get())) {
                     _dia("proxymaker::authorize[%s]: this identity is not authorized", proxy->to_string(iINF).c_str());
 
                     proxy->auth_block_identity = true;
@@ -386,7 +396,7 @@ namespace sx::proxymaker {
         return std::find(ports.begin(), ports.end(), port) != ports.end();
     }
 
-    bool setup_snat (MitmProxy *proxy, std::string const &source_host, std::string const &source_port) {
+    bool setup_snat (std::unique_ptr<MitmProxy> &proxy, std::string const &source_host, std::string const &source_port) {
 
         if (not proxy) return false;
 
@@ -425,19 +435,21 @@ namespace sx::proxymaker {
     }
 
 
-    bool connect (MasterProxy *owner, MitmProxy *new_proxy) {
+    bool connect(MasterProxy* owner, std::unique_ptr<MitmProxy> &&new_proxy) {
+
+        auto proxy_of_mine = std::move(new_proxy);
 
         auto const& log = log::connect();
 
-        if (owner and new_proxy) {
+        if (owner and proxy_of_mine) {
 
-            auto const* left = new_proxy->first_left();
-            auto* right = new_proxy->first_right();
+            auto const* left = proxy_of_mine->first_left();
+            auto* right = proxy_of_mine->first_right();
             auto *oc = owner->com();
 
             if (left and right and oc) {
 
-                _deb("proxymaker::connect[%s]: connecting", new_proxy->to_string(iINF).c_str());
+                _deb("proxymaker::connect[%s]: connecting", proxy_of_mine->to_string(iINF).c_str());
 
                 // owner com sets new_proxy as the epoll handler for left socket
                 // finalize connection acceptance by adding new proxy to proxies and connect
@@ -445,11 +457,11 @@ namespace sx::proxymaker {
                 int right_socket = right->connect();
                 oc->set_monitor(right_socket);
 
-                oc->set_poll_handler(left->socket(), new_proxy);
-                oc->set_poll_handler(right_socket, new_proxy);
+                oc->set_poll_handler(left->socket(), proxy_of_mine.get());
+                oc->set_poll_handler(right_socket, proxy_of_mine.get());
 
-                owner->add_proxy(new_proxy);
-                _deb("proxymaker::connect[%s]: added to owner proxy", new_proxy->to_string(iINF).c_str());
+                _deb("proxymaker::connect[%s]: adding to owner proxy", proxy_of_mine->to_string(iINF).c_str());
+                owner->add_proxy(std::move(proxy_of_mine));
 
                 return true;
             }

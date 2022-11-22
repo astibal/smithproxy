@@ -47,16 +47,17 @@
 
 namespace sx::proxymaker {
 
-    MitmProxy *make (baseHostCX *left, baseHostCX *right);
-    bool policy (MitmProxy *proxy, bool implicit_allow);
-    bool route(MitmProxy *proxy, std::shared_ptr<ProfileRouting> routing_profile);
-    std::pair<std::string, unsigned short> to_magic(std::string const &target_host, unsigned short target_port);
+    std::unique_ptr<MitmProxy> make (baseHostCX *left, baseHostCX *right);
+    bool policy (std::unique_ptr<MitmProxy> &proxy, bool implicit_allow);
+    bool route_existing(MitmProxy* proxy, std::shared_ptr<ProfileRouting> routing_profile);
+    bool route(std::unique_ptr<MitmProxy> &proxy, std::shared_ptr<ProfileRouting> routing_profile);
+    std::pair<std::string, unsigned short> to_magic(unsigned short target_port);
     bool authorize_is_bad (MitmProxy *proxy);
     bool is_replaceable (unsigned short port);
-    bool authorize (MitmProxy *proxy);
+    bool authorize (std::unique_ptr<MitmProxy> &proxy);
 
-    bool setup_snat (MitmProxy *proxy, std::string const &source_host, std::string const &source_port);
-    bool connect (MasterProxy *owner, MitmProxy *new_proxy);
+    bool setup_snat (std::unique_ptr<MitmProxy> &proxy, std::string const &source_host, std::string const &source_port);
+    bool connect (MasterProxy *owner, std::unique_ptr<MitmProxy> &&new_proxy);
 }
 
 #endif //PROXYMAKER_HPP
