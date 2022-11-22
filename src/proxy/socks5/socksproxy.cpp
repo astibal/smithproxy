@@ -110,7 +110,7 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
             cx->state(socks5_state::ZOMBIE);
 
             // There is nothing to handoff on UDP association connection
-            if(cx->com()->l3_proto() != SOCK_DGRAM) {
+            if(cx->com()->l4_proto() != SOCK_DGRAM) {
                 socks5_handoff(cx);
             }
         } else {
