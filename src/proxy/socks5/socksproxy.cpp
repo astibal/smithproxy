@@ -109,7 +109,10 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
             _dia("SocksProxy::on_left_message: socksHostCX handoff msg received");
             cx->state(socks5_state::ZOMBIE);
 
-            socks5_handoff(cx);
+            // There is nothing to handoff on UDP association connection
+            if(cx->com()->l3_proto() != SOCK_DGRAM) {
+                socks5_handoff(cx);
+            }
         } else {
 
             _war("SocksProxy::on_left_message: unknown message");
