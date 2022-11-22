@@ -153,7 +153,13 @@ if(UNIX)
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -funroll-loops --param  max-unrolled-insns=4")
     endif()
 
+    IF (CMAKE_BUILD_TYPE STREQUAL "Coverity")
+        SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_DEBUG}")
+    ENDIF()
+
     IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
+        SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_DEBUG}")
+
         if("${OPT_DEBUG_ASAN_THREADS}" STREQUAL "Y")
             set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=thread -fPIE -pie")
         endif()
