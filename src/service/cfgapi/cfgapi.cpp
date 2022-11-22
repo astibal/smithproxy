@@ -2314,7 +2314,7 @@ bool CfgFactory::prof_detect_apply (baseHostCX *originator, baseProxy *new_proxy
 std::optional<std::vector<std::string>> CfgFactory::find_bypass_domain_hosts(std::string const& filter_element, bool wildcards_only)  {
     std::vector<std::string> to_match;
     {
-        std::scoped_lock<std::recursive_mutex> dd_(DNS::get_domain_lock());
+        auto dd_ = std::scoped_lock(DNS::get_domain_lock());
 
         auto wildcard_element = filter_element;
         bool wildcard_planted = false;
@@ -2515,7 +2515,7 @@ int CfgFactory::policy_apply (baseHostCX *originator, baseProxy *proxy, int matc
 
     auto const& log = log::policy();
 
-    std::scoped_lock<std::recursive_mutex> l(lock_);
+    auto lc_ = std::scoped_lock(lock_);
     
     int policy_num = matched_policy;
     if(policy_num < 1) {

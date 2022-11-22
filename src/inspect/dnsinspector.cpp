@@ -135,7 +135,7 @@ void DNS_Inspector::update(AppHostCX* cx) {
 
 
             if (opt_cached_responses && (ptr->question_type_0() == A || ptr->question_type_0() == AAAA)) {
-                std::scoped_lock<std::recursive_mutex> l_(DNS::get_dns_lock());
+                auto lc_ = std::scoped_lock(DNS::get_dns_lock());
 
                 auto cached_entry = DNS::get_dns_cache().get(ptr->question_str_0());
                 if (cached_entry != nullptr) {
@@ -296,7 +296,7 @@ bool DNS_Inspector::store(std::shared_ptr<DNS_Response> ptr) {
         std::string question = ptr->question_str_0();
 
         {
-            std::scoped_lock<std::recursive_mutex> l_(DNS::get_dns_lock());
+            auto lc_ = std::scoped_lock(DNS::get_dns_lock());
             DNS::get_dns_cache().set(question, ptr);
         }
         _dia("DNS_Inspector::update: %s added to cache (%d elements of max %d)", ptr->question_str_0().c_str(),

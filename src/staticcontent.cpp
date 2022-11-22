@@ -44,7 +44,6 @@ bool StaticContent::load_files(std::string& dir) {
     
     try {
         LoaderFile loader_file;
-        std::vector<std::string> names;
 
         for(const std::string name: { "test", "html_page", "html_img_warning"} ) {
             _dia("StaticContent::load_files: loading template %s", name.c_str());
@@ -79,7 +78,7 @@ std::string StaticContent::render_noargs(std::string const& name) {
         return t->render();
     } 
     
-    return std::string();
+    return {};
 }
 
 std::string StaticContent::render_server_response(std::string& message, unsigned int code) {
@@ -95,12 +94,12 @@ std::string StaticContent::render_server_response(std::string& message, unsigned
     return out.str();
 }
 
-std::string StaticContent::render_msg_html_page(std::string& caption, std::string& meta, std::string& content, const char* window_width) {
+std::string StaticContent::render_msg_html_page(std::string const& caption, std::string const& meta, std::string const& content, const char* window_width) {
     auto t = get("html_page");
-    t->set("title",caption);
-    t->set("meta",meta);
-    t->set("message",content);
-    t->set("window_width",window_width);
+    t->set("title", caption);
+    t->set("meta", meta);
+    t->set("message", content);
+    t->set("window_width", window_width);
     
     std::string r = t->render();
     return r;

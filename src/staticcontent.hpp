@@ -63,7 +63,7 @@ public:
     std::string render_noargs(std::string const& s);
 
     std::string render_server_response(std::string& message, unsigned int code=200);
-    std::string render_msg_html_page(std::string& caption, std::string& meta, std::string& content,const char* window_width="450px");
+    std::string render_msg_html_page(std::string const& caption, std::string const& meta, std::string const& content,const char* window_width="450px");
     std::shared_ptr<Template> get(std::string const& s);
 
     static StaticContent* get() {

@@ -36,12 +36,12 @@ static uint32_t crc32_proxy_key(MitmProxy* proxy, bool add_port) {
     return socle::tools::crc32::compute(0, key.data(), key.size());
 }
 
-size_t ProfileRouting::lb_index_l3 (MitmProxy *proxy, size_t sz) const {
+size_t ProfileRouting::lb_index_l3 (MitmProxy* proxy, size_t sz) const {
 
     return sz == 0 ? 0 : crc32_proxy_key(proxy, false) % sz;
 }
 
-size_t ProfileRouting::lb_index_l4(MitmProxy *proxy, size_t sz) const {
+size_t ProfileRouting::lb_index_l4(MitmProxy* proxy, size_t sz) const {
 
     return sz == 0 ? 0 : crc32_proxy_key(proxy, proxy) % sz;
 }
@@ -53,8 +53,8 @@ bool ProfileRouting::LbState::expand_candidates(std::vector<std::string> const& 
         last_refresh = now;
 
         // get a fresh, expanded list of all IP addresses
-        std::vector<std::shared_ptr<CidrAddress>> update4 = CfgFactory::get()->expand_to_cidr(addresses, AF_INET);
-        std::vector<std::shared_ptr<CidrAddress>> update6 = CfgFactory::get()->expand_to_cidr(addresses, AF_INET6);
+        const std::vector<std::shared_ptr<CidrAddress>> update4 = CfgFactory::get()->expand_to_cidr(addresses, AF_INET);
+        const std::vector<std::shared_ptr<CidrAddress>> update6 = CfgFactory::get()->expand_to_cidr(addresses, AF_INET6);
 
         auto l_ = std::scoped_lock(lock_);
         candidates_v4 = update4;

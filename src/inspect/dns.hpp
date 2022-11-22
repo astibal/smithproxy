@@ -75,7 +75,7 @@ typedef enum DNS_Record_Type_ {
 } DNS_Record_Type;
 
 
-struct DNS_Response;
+class DNS_Response;
 
 class DNSFactory {
     constexpr static const char* _unknown = "unknown";
@@ -351,15 +351,15 @@ public:
     inline dns_cache_t& dns_cache() { return dns_cache_; };
     inline domain_cache_t& domain_cache() { return domain_cache_; };
 
-    inline std::recursive_mutex& dns_lock() { return dns_cache().getlock(); };
-    inline std::recursive_mutex& domain_lock() { return domain_cache().getlock(); };
+    inline auto& dns_lock() { return dns_cache().getlock(); };
+    inline auto& domain_lock() { return domain_cache().getlock(); };
 
 
     static dns_cache_t& get_dns_cache() { return get().dns_cache(); };
     static domain_cache_t& get_domain_cache() { return get().domain_cache(); };
 
-    static std::recursive_mutex& get_dns_lock() { return get().dns_lock(); };
-    static std::recursive_mutex& get_domain_lock() { return get().domain_lock(); };
+    static auto& get_dns_lock() { return get().dns_lock(); };
+    static auto& get_domain_lock() { return get().domain_lock(); };
 
     static domain_cache_entry_t* make_domain_entry(std::string const& s) {
         #ifdef EXTRA_DEBUG

@@ -317,13 +317,13 @@ bool SocksProxy::socks5_handoff_authenticate(MitmHostCX *cx) {
     if ( groups_vec ) {
 
         if (CfgFactory::get()->policy_prof_auth(matched_policy()) != nullptr)
-            for (auto i: CfgFactory::get()->policy_prof_auth(matched_policy())->sub_policies) {
+            for (auto const& sub_pol: CfgFactory::get()->policy_prof_auth(matched_policy())->sub_policies) {
                 for (auto const& x: groups_vec.value()) {
                     _deb("Connection identities: ip identity '%s' against policy '%s'", x.c_str(),
-                         i->element_name().c_str());
-                    if (x == i->element_name()) {
+                         sub_pol->element_name().c_str());
+                    if (x == sub_pol->element_name()) {
                         _dia("Connection identities: ip identity '%s' matches policy '%s'", x.c_str(),
-                             i->element_name().c_str());
+                             sub_pol->element_name().c_str());
                         bad_auth = false;
                     }
                 }

@@ -60,9 +60,6 @@ using namespace socle;
 
 MitmProxy::MitmProxy(baseCom* c): baseProxy(c), sobject() {
 
-    // NOTE: testing filter - get back to it later!
-    // add_filter("test",new TestFilter(this,5));
-
     current_sessions()++;
     total_sessions()++;
 }
@@ -153,8 +150,8 @@ void MitmProxy::toggle_tlog () {
         data_dir += "/disabled";
         
         struct stat st{};
-        int result = stat(data_dir.c_str(), &st);
-        bool present = (result == 0);
+        const int result = stat(data_dir.c_str(), &st);
+        const bool present = (result == 0);
         
         if(present) {
             if(tlog()->status()) {
@@ -176,14 +173,14 @@ MitmProxy::~MitmProxy() {
     if(writer_opts()->write_payload) {
         _deb("MitmProxy::destructor: syncing writer");
 
-        for(auto* cx: ls()) {
+        for(auto const* cx: ls()) {
             if(! cx->comlog().empty()) {
                 if(tlog()) tlog()->write(side_t::LEFT, cx->comlog());
                 cx->comlog().clear();
             }
         }               
         
-        for(auto* cx: rs()) {
+        for(auto const* cx: rs()) {
             if(! cx->comlog().empty()) {
                 if(tlog()) tlog()->write_right(cx->comlog());
                 cx->comlog().clear();
@@ -211,7 +208,7 @@ std::string MitmProxy::to_string(int verbosity) const {
         
         if(verbosity > INF) r << "\n    ";
 
-        std::string sp_str = number_suffixed(stats_.mtr_up.get()*8) + "/" + number_suffixed(stats_.mtr_down.get()*8);
+        std::string const sp_str = number_suffixed(stats_.mtr_up.get()*8) + "/" + number_suffixed(stats_.mtr_down.get()*8);
         auto speed_str = (sp_str == "0.0/0.0") ? "up/dw: --" : string_format("up/dw: %s", sp_str.c_str());
 
 
@@ -243,7 +240,7 @@ std::optional<std::vector<std::string>> MitmProxy::find_id_groups(baseHostCX con
     if(cx->com()) {
         af = cx->com()->l3_proto();
     }
-    std::string str_af = SockOps::family_str(af);
+    const std::string str_af = SockOps::family_str(af);
 
     bool found = false;
     std::vector<std::string> group_vec;
@@ -1311,7 +1308,7 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
                 
                 repl = html()->render_server_response(repl);
                 
-                cx->to_write((unsigned char*)repl.c_str(),repl.size());
+                cx->to_write(repl);
                 cx->close_after_write(true);
 
                 replacement_msg += "(auth: known token)";
@@ -1358,7 +1355,7 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
             
             repl = html()->render_server_response(repl);
             
-            cx->to_write((unsigned char*)repl.c_str(),repl.size());
+            cx->to_write(repl);
             cx->close_after_write(true);
             replacement_msg += "(auth: new token)";
 
@@ -1383,7 +1380,7 @@ void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
         repl = html()->render_msg_html_page(cap,meta, repl,"700px");
         repl = html()->render_server_response(repl);
         
-        cx->to_write((unsigned char*)repl.c_str(),repl.size());
+        cx->to_write(repl);
         cx->close_after_write(true);
 
         replacement_msg += "(auth: blocked)";
@@ -1484,63 +1481,74 @@ std::string MitmProxy::replacement_ssl_verify_detail(SSLCom* scom) {
     if(scom) {
         if (scom->verify_get() != verify_status_t::VRF_OK) {
             bool is_set = false;
-            int reason_count = 0;
+            int reason_count = 1;
 
             if (scom->verify_bitcheck(verify_status_t::VRF_SELF_SIGNED)) {
-                ss << "<p><h3 class=\"fg-red\">Reason " << ++reason_count << ":</h3> " << verify_flag_string(verify_status_t::VRF_SELF_SIGNED) << ".</p>";
+                ss << "<p><h3 class=\"fg-red\">Reason " << reason_count << ":</h3> " << verify_flag_string(verify_status_t::VRF_SELF_SIGNED) << ".</p>";
                 is_set = true;
+                ++reason_count;
             }
             if (scom->verify_bitcheck(verify_status_t::VRF_SELF_SIGNED_CHAIN)) {
-                ss << "<p><h3 class=\"fg-red\">Reason " << ++reason_count << ":</h3> " << verify_flag_string(verify_status_t::VRF_SELF_SIGNED_CHAIN)
+                ss << "<p><h3 class=\"fg-red\">Reason " << reason_count << ":</h3> " << verify_flag_string(verify_status_t::VRF_SELF_SIGNED_CHAIN)
                    << ".</p>";
                 is_set = true;
+                ++reason_count;
             }
             if (scom->verify_bitcheck(verify_status_t::VRF_UNKNOWN_ISSUER)) {
-                ss << "<p><h class=\"fg-red\">Reason " << ++reason_count << ":</h3>" << verify_flag_string(verify_status_t::VRF_UNKNOWN_ISSUER) << ".</p>";
+                ss << "<p><h class=\"fg-red\">Reason " << reason_count << ":</h3>" << verify_flag_string(verify_status_t::VRF_UNKNOWN_ISSUER) << ".</p>";
                 is_set = true;
+                ++reason_count;
             }
             if (scom->verify_bitcheck(verify_status_t::VRF_CLIENT_CERT_RQ)) {
-                ss << "<p><h3 class=\"fg-red\">Reason " << ++reason_count << ":</h3>" << verify_flag_string(verify_status_t::VRF_CLIENT_CERT_RQ) << ".<p>";
+                ss << "<p><h3 class=\"fg-red\">Reason " << reason_count << ":</h3>" << verify_flag_string(verify_status_t::VRF_CLIENT_CERT_RQ) << ".<p>";
                 is_set = true;
+                ++reason_count;
             }
             if (scom->verify_bitcheck(verify_status_t::VRF_REVOKED)) {
-                ss << "<p><h3 class=\"fg-red\">Reason " << ++reason_count << ":</h3>" << verify_flag_string(verify_status_t::VRF_REVOKED) <<
+                ss << "<p><h3 class=\"fg-red\">Reason " << reason_count << ":</h3>" << verify_flag_string(verify_status_t::VRF_REVOKED) <<
                        ". "
                        "This is a serious issue, it's highly recommended to not continue "
                        "to this page.</p>";
                 is_set = true;
+                ++reason_count;
             }
             if (scom->verify_bitcheck(verify_status_t::VRF_CT_MISSING)) {
-                ss << "<p><h3 class=\"fg-red\">Reason " << ++reason_count << ":</h3>" << verify_flag_string(verify_status_t::VRF_CT_MISSING) <<
+                ss << "<p><h3 class=\"fg-red\">Reason " << reason_count << ":</h3>" << verify_flag_string(verify_status_t::VRF_CT_MISSING) <<
                    ". "
                    "This is a serious issue if your target is a public internet service. In such a case it's highly recommended to not continue."
                    "</p>";
                 is_set = true;
+                ++reason_count;
             }
             if (scom->verify_bitcheck(verify_status_t::VRF_CT_FAILED)) {
-                ss << "<p><h3 class=\"fg-red\">Reason " << ++reason_count << ":</h3>" << verify_flag_string(verify_status_t::VRF_CT_MISSING) <<
+                ss << "<p><h3 class=\"fg-red\">Reason " << reason_count << ":</h3>" << verify_flag_string(verify_status_t::VRF_CT_MISSING) <<
                    ". "
                    "This is a serious issue if your target is a public internet service. Don't continue unless you really know what you are doing. "
                    "</p>";
                 is_set = true;
+                ++reason_count;
             }
 
             if (scom->verify_bitcheck(verify_status_t::VRF_INVALID)) {
-                ss << "<p><h3 class=\"fg-red\">Reason " << ++reason_count << ":</h3>" << verify_flag_string(verify_status_t::VRF_INVALID) << ".</p>";
+                ss << "<p><h3 class=\"fg-red\">Reason " << reason_count << ":</h3>" << verify_flag_string(verify_status_t::VRF_INVALID) << ".</p>";
                 is_set = true;
+                ++reason_count;
             }
             if (scom->verify_bitcheck(verify_status_t::VRF_HOSTNAME_FAILED)) {
-                ss << "<p><h3 class=\"fg-red\">Reason " << ++reason_count << ":</h3>" << verify_flag_string(verify_status_t::VRF_HOSTNAME_FAILED) << ".</p>";
+                ss << "<p><h3 class=\"fg-red\">Reason " << reason_count << ":</h3>" << verify_flag_string(verify_status_t::VRF_HOSTNAME_FAILED) << ".</p>";
                 is_set = true;
+                ++reason_count;
             }
             if (scom->verify_bitcheck(verify_status_t::VRF_ALLFAILED)) {
-                ss << "<p><h3 class=\"fg-red\">Reason " << ++reason_count << ":</h3>" << verify_flag_string(verify_status_t::VRF_ALLFAILED) << ".</p>";
+                ss << "<p><h3 class=\"fg-red\">Reason " << reason_count << ":</h3>" << verify_flag_string(verify_status_t::VRF_ALLFAILED) << ".</p>";
                 is_set = true;
+                ++reason_count;
             }
             if(scom->verify_bitcheck(verify_status_t::VRF_EXTENDED_INFO)) {
                 for (auto const &ei: scom->verify_extended_info()) {
-                    ss << "<p><h3 class=\"fg-red\">Reason " << ++reason_count << ":</h3>" << verify_flag_string_extended(ei) << ".</p>";
+                    ss << "<p><h3 class=\"fg-red\">Reason " << reason_count << ":</h3>" << verify_flag_string_extended(ei) << ".</p>";
                     is_set = true;
+                    ++reason_count;
                 }
             }
 
@@ -1560,17 +1568,18 @@ std::string MitmProxy::replacement_ssl_verify_detail(SSLCom* scom) {
 }
 
 
-std::string MitmProxy::replacement_ssl_page(SSLCom* scom, sx::engine::http::app_HttpRequest* app_request, std::string const& more_info) {
+std::string MitmProxy::replacement_ssl_page(SSLCom* scom, sx::engine::http::app_HttpRequest const* app_request, std::string const& more_info) {
     std::string repl;
 
-    std::string block_target_info = "<p><h3 class=\"fg-red\">Requested site:</h3>" + app_request->proto + app_request->host + "</p>";
+    const std::string block_target_info = "<p><h3 class=\"fg-red\">Requested site:</h3>" + app_request->proto + app_request->host + "</p>";
 
-    std::string block_additinal_info = replacement_ssl_verify_detail(scom) + more_info;
+    const std::string block_additinal_info = replacement_ssl_verify_detail(scom) + more_info;
 
-    std::string cap = "TLS security warning";
-    std::string meta;
-    std::string war_img = html()->render_noargs("html_img_warning");
-    std::string msg = string_format("<h2 class=\"fg-red\">%s TLS security warning</h2>%s",war_img.c_str(),(block_target_info + block_additinal_info).c_str());
+    const std::string cap = "TLS security warning";
+    const std::string meta;
+    const std::string war_img = html()->render_noargs("html_img_warning");
+    const std::string msg = string_format("<h2 class=\"fg-red\">%s TLS security warning</h2>%s",war_img.c_str(),(block_target_info + block_additinal_info).c_str());
+
     repl = html()->render_msg_html_page(cap, meta, msg,"700px");
     repl = html()->render_server_response(repl);
 
@@ -1586,7 +1595,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
         std::string error("<html><head></head><body><p>Internal error</p><p>com object is not ssl-type</p></body></html>");
         error = html()->render_server_response(error);
         
-        cx->to_write((unsigned char*)error.c_str(),error.size());
+        cx->to_write(error);
         cx->close_after_write(true);
         set_replacement_msg_ssl(scom);
 
@@ -1613,24 +1622,22 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
 
 
         auto generate_block_override = [&]() -> std::string {
-            std::string block_override;
+            std::stringstream block_override;
 
             if (scom->opt.cert.failed_check_override) {
-                std::string block_override_pre = R"(<form action="/SM/IT/HP/RO/XY)";
+                block_override << R"(<form action="/SM/IT/HP/RO/XY)";
 
-                std::string key = whitelist_make_key_l4(cx);
+                const std::string key = whitelist_make_key_l4(cx);
                 if (cx->peer()) {
-                    block_override_pre += "/override/target=" + key;
+                    block_override << "/override/target=" + key;
                     if (not app_request->uri.empty()) {
-                        block_override_pre += "&orig_url=" + find_orig_uri().value_or("/");
+                        block_override << "&orig_url=" << find_orig_uri().value_or("/");
                     }
                 }
-                std::string block_target_info;
-                block_override =
-                        block_override_pre + R"("><input type="submit" value="Override" class="btn-red"></form>)";
+                block_override << R"("><input type="submit" value="Override" class="btn-red"></form>)";
             }
 
-            return block_override;
+            return block_override.str();
         };
 
         if(app_request->request().find("/SM/IT/HP/RO/XY/override") != std::string::npos) {
@@ -1643,23 +1650,21 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             
                 _dia("ssl_override: ph4 - asked for verify override for %s", whitelist_make_key_l4(cx).c_str());
                 
-                std::string orig_url = find_orig_uri().value_or("/");
+                const std::string orig_url = find_orig_uri().value_or("/");
 
                 std::string override_applied = string_format(
                         R"(<html><head><meta http-equiv="Refresh" content="0; url=%s"></head><body><!-- applied, redirecting back to %s --></body></html>)",
                                                             orig_url.c_str(),orig_url.c_str());
 
-                whitelist_verify_entry v;
-
                 {
                     auto lc_ = std::scoped_lock(whitelist_verify().getlock());
                     whitelist_verify().set(whitelist_make_key_l4(cx),
-                                           new whitelist_verify_entry_t(v, scom->opt.cert.failed_check_override_timeout));
+                                           new whitelist_verify_entry_t({}, scom->opt.cert.failed_check_override_timeout));
                 }
                 
                 override_applied = html()->render_server_response(override_applied);
                 
-                cx->to_write((unsigned char*)override_applied.c_str(),override_applied.size());
+                cx->to_write(override_applied);
                 cx->close_after_write(true);
                 set_replacement_msg_ssl(scom);
                 replacement_msg += "(ssl: override)";
@@ -1672,7 +1677,8 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
                 // override is not enabled, but client somehow reached this (attack?)
                 std::string error("<html><head></head><body><p>Failed to override</p><p>Action is denied.</p></body></html>");
                 error = html()->render_server_response(error);
-                cx->to_write((unsigned char*)error.c_str(),error.size());
+
+                cx->to_write(error);
                 cx->close_after_write(true);
                 set_replacement_msg_ssl(scom);
                 replacement_msg += "(ssl: override disabled)";
@@ -1688,9 +1694,9 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
         
             _dia("ssl_override: ph3 - warning replacement for %s", whitelist_make_key_l4(cx).c_str());
             
-            std::string repl = replacement_ssl_page(scom, app_request, generate_block_override());
+            const std::string repl = replacement_ssl_page(scom, app_request, generate_block_override());
 
-            cx->to_write((unsigned char*)repl.c_str(),repl.size());
+            cx->to_write(repl);
             set_replacement_msg_ssl(scom);
             cx->close_after_write(true);
         } else 
@@ -1712,13 +1718,13 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             
             _dia("ssl_override: ph1 - redir to / for %s", whitelist_make_key_l4(cx).c_str());
             
-            std::string redir_pre(R"(<html><head><script>top.location.href=")");
-            std::string redir_suf(R"(";</script></head><body></body></html>)");
+            const std::string redir_pre(R"(<html><head><script>top.location.href=")");
+            const std::string redir_suf(R"(";</script></head><body></body></html>)");
 
             std::string repl = redir_pre + "/SM/IT/HP/RO/XY/warning?q=1&orig_url=" +app_request->uri + redir_suf;
             repl = html()->render_server_response(repl);
             
-            cx->to_write((unsigned char*)repl.c_str(),repl.size());
+            cx->to_write(repl);
             cx->close_after_write(true);
             set_replacement_msg_ssl(scom);
         }
@@ -1730,14 +1736,14 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
 
         log.event(INF, "[%s]: enforced HTTP replacement active", socle::com::ssl::connection_name(scom, true).c_str());
 
-        std::string redir_pre("<html><head><script>top.location.href=\"");
-        std::string redir_suf("\";</script></head><body></body></html>");
+        const std::string redir_pre("<html><head><script>top.location.href=\"");
+        const std::string redir_suf("\";</script></head><body></body></html>");
 
-        //std::string repl = "<html><head><meta http-equiv=\"Refresh\" content=\"0; url=/\"></head><body></body></html>";
+
         std::string repl = redir_pre + "/" + redir_suf;
         repl = html()->render_server_response(repl);
 
-        cx->to_write((unsigned char*)repl.c_str(),repl.size());
+        cx->to_write(repl);
         cx->close_after_write(true);
         set_replacement_msg_ssl(scom);
         replacement_msg += "(ssl: enforced)";
@@ -1745,19 +1751,19 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
 }
 
 void MitmProxy::init_content_replace() {
-    content_rule_.reset(new std::vector<ProfileContentRule>);
+    content_rule_ = std::make_unique<std::vector<ProfileContentRule>>();
 }
 
 buffer MitmProxy::content_replace_apply(const buffer &ref) {
-    std::string data = ref.str();
+    const std::string data = ref.str();
     std::string result = data;
     
     int stage = 0;
     for(auto& profile: *content_rule()) {
         
         try {
-            std::regex re_match(profile.match.c_str());
-            std::string repl = profile.replace;
+            const std::regex re_match(profile.match.c_str());
+            const std::string repl = profile.replace;
             
             if(profile.replace_each_nth != 0) {
 
@@ -1765,7 +1771,7 @@ buffer MitmProxy::content_replace_apply(const buffer &ref) {
                 // ... which is no problem if we don't care. But in case we want to replace only 
                 // .... nth occurrence, we have to do extra search to check (requiring one extra regex match).
                 std::smatch sm;
-                bool is_there = std::regex_search(result,sm,re_match);
+                const bool is_there = std::regex_search(result,sm,re_match);
 
                 if(is_there) {
                     profile.replace_each_counter_++;
@@ -2027,14 +2033,14 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
     bool redirected_magic = false;
     if(target_host == CfgFactory::get()->tenant_magic_ip) {
         redirected_magic = true;
-        auto redir = sx::proxymaker::to_magic(target_host, target_port);
+        auto redir = sx::proxymaker::to_magic(target_port);
         target_host = redir.first;
         target_port = redir.second;
 
         _dia("Connection from %s redirected from magic IP to %s:%d",
              just_accepted_cx->name().c_str(),
              target_host.c_str(), target_port);
-    };
+    }
 
 
     auto *target_cx = new MitmHostCX(just_accepted_cx->com()->slave(),

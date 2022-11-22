@@ -704,7 +704,7 @@ int cli_diag_dns_cache_list(struct cli_def *cli, const char *command, char *argv
 
     std::stringstream out;
     {
-        std::scoped_lock<std::recursive_mutex> lc_(DNS::get_dns_lock());
+        auto lc_ = std::scoped_lock(DNS::get_dns_lock());
 
 
         out << "\nDNS cache populated from traffic: \n";

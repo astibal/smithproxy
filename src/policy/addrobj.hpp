@@ -73,8 +73,8 @@ public:
 
 class CidrAddress : public AddressObject {
 public:
-    explicit CidrAddress(cidr::CIDR* c) : AddressObject(), c_(raw::allocated(c)) { }
-    explicit CidrAddress(std::string const& v) : AddressObject(), c_(raw::allocated(cidr::cidr_from_str(v.c_str()))) {}
+    explicit CidrAddress(cidr::CIDR* c) : AddressObject(), c_(raw::allocated<cidr::CIDR*>(c)) { }
+    explicit CidrAddress(std::string const& v) : AddressObject(), c_(raw::allocated<cidr::CIDR*>(cidr::cidr_from_str(v.c_str()))) {}
 
     cidr::CIDR* cidr() { return c_.value; }
     std::string ip(int flags = CIDR_ONLYADDR) const {

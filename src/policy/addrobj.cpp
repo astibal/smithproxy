@@ -57,7 +57,7 @@ std::string FqdnAddress::to_string(int verbosity) const {
     bool cached_4a= false;
     if(verbosity > INF) {
 
-        std::scoped_lock<std::recursive_mutex> l_(DNS::get_dns_lock());
+        auto lc_ = std::scoped_lock(DNS::get_dns_lock());
 
         if(DNS::get_dns_cache().get("A:"+fqdn_) != nullptr) {
             cached_a = true;

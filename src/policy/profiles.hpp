@@ -319,8 +319,8 @@ struct ProfileRouting: public CfgElement {
 
     // helper to get index based on RR scheme
     size_t lb_index_rr(size_t sz) const;
-    size_t lb_index_l3 (MitmProxy *proxy, size_t sz) const;
-    size_t lb_index_l4(MitmProxy *proxy, size_t sz) const;
+    size_t lb_index_l3 (MitmProxy* proxy, size_t sz) const;
+    size_t lb_index_l4(MitmProxy* proxy, size_t sz) const;
 
     struct LbState {
         constexpr static time_t refresh_interval = 5;

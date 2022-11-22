@@ -69,7 +69,7 @@ namespace sx::engine::http {
                     bool check_inspect_dns_cache = true;
                     if (check_inspect_dns_cache) {
 
-                        std::scoped_lock<std::recursive_mutex> d_(DNS::get().dns_lock());
+                        auto dc_ = std::scoped_lock(DNS::get().dns_lock());
 
                         auto dns_resp_a = DNS::get().dns_cache().get("A:" + app_request->host);
                         auto dns_resp_aaaa = DNS::get().dns_cache().get("AAAA:" + app_request->host);
