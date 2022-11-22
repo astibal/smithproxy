@@ -85,8 +85,6 @@ std::string FqdnAddress::to_string(int verbosity) const {
 
 std::shared_ptr<DNS_Response> FqdnAddress::find_dns_response(int cidr_type) const {
 
-    std::scoped_lock<std::recursive_mutex> l_(DNS::get_dns_lock());
-
     if (cidr_type == CIDR_IPV4) {
         return DNS::get_dns_cache().get("A:" + fqdn_);
     } else if (cidr_type == CIDR_IPV6) {
