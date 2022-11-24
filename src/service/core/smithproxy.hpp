@@ -127,6 +127,8 @@ public:
     bool create_listeners();
 
     void run() override;
+
+    void kill_proxies();
     void stop() override;
     void reload() override;
 

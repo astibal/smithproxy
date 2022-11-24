@@ -95,7 +95,7 @@ public:
     void set_handler_term(void (*terminate_handler)(int)) { terminate_handler_ = terminate_handler;  }
     void set_handler_reload(void (*reload_handler)(int)) { reload_handler_ = reload_handler; }
 
-    volatile int cnt_terminate = 0;
+    std::atomic_int cnt_terminate = 0;
 
     virtual void run() = 0;
     virtual void stop() = 0;

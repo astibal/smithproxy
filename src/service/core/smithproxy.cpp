@@ -411,10 +411,35 @@ void SmithProxy::run() {
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 
-    instance().join_all();
+    auto bail_it = [this]{
+        kill_proxies();
+        instance().join_all();
+        terminated = true;
+    };
 
-    if(!cfg_daemonize)
-        std::cerr << "all master threads terminated" << std::endl;
+    if(not cfg_daemonize) {
+        auto counter = std::thread([] {
+            timespec t{};
+            t.tv_sec = 1;
+
+            while (not SmithProxy::instance().terminated) {
+                const unsigned long prsz = MitmProxy::current_sessions().load();
+                std::cerr << "  -    proxies remaining: " << prsz << "\n";
+
+                nanosleep(&t, nullptr);
+                t.tv_sec = 3;
+            }
+        });
+
+        bail_it();
+        counter.join();
+
+        if (!cfg_daemonize)
+            std::cerr << "all master threads terminated" << std::endl;
+    }
+    else {
+        bail_it();
+    }
 }
 
 void SmithProxy::join_all() {
@@ -515,16 +540,10 @@ void SmithProxy::join_all() {
 
 }
 
-void SmithProxy::stop() {
+void SmithProxy::kill_proxies() {
 
     baseCom::poll_msec = 50;
     baseCom::rescan_msec = 50;
-
-    terminate_flag = true;
-
-#ifndef MEMPOOL_DISABLE
-    memPool::bailing = true;
-#endif
 
     auto kill_proxies = [](auto& proxies) {
         for(auto& p: proxies) {
@@ -549,6 +568,17 @@ void SmithProxy::stop() {
     kill_proxies(redir_plain_proxies);
     kill_proxies(redir_ssl_proxies);
     kill_proxies(redir_udp_proxies);
+}
+
+void SmithProxy::stop() {
+
+    terminate_flag = true;
+
+#ifndef MEMPOOL_DISABLE
+    memPool::bailing = true;
+#endif
+
+    kill_proxies();
 
     terminated = true;
 }

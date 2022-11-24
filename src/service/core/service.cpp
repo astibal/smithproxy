@@ -41,23 +41,31 @@
 #include <unistd.h>
 
 #include <service/core/service.hpp>
+#include <basecom.hpp>
 
 void Service::my_terminate (int param) {
 
     Service* service = self();
-
-    if (! service->cfg_daemonize )
-        _cons("Terminating ...");
-
-    service->stop();
-
     service->cnt_terminate++;
+
+    if (not service->cfg_daemonize ) {
+        _cons("Terminating ...");
+    }
+
+    // don't run multiple times
+    if(service->cnt_terminate == 1) {
+        service->terminate_flag = true;
+    }
+    else if(not service->cfg_daemonize) {
+        _cons("... shutdown already requested");
+    }
+
     if(service->cnt_terminate == 3) {
-        if (!service->cfg_daemonize )
-            _cons("Failed to terminate gracefully. Next attempt will be enforced.");
+        if (not service->cfg_daemonize )
+            _cons("Failed to terminate gracefully. Next attempt will force the abort.");
     }
     if(service->cnt_terminate > 3) {
-        if (! service->cfg_daemonize )
+        if (not service->cfg_daemonize )
             _cons("Enforced exit.");
         abort();
     }
