@@ -936,16 +936,16 @@ int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *a
 
         {
             {
-                auto gl_ = std::scoped_lock(memPool::pool().lock);
-
-                auto stat_acq = memPool::pool().stat_acq.load();
-                auto stat_acq_size = memPool::pool().stat_acq_size.load();
-                auto stat_ret = memPool::pool().stat_ret.load();
-                auto stat_ret_size = memPool::pool().stat_ret_size.load();
+                auto stat_acq = memPool::pool().stats.acq.load();
+                auto stat_acq_size = memPool::pool().stats.acq_size.load();
+                auto stat_ret = memPool::pool().stats.ret.load();
+                auto stat_ret_size = memPool::pool().stats.ret_size.load();
 
                 cli_print(cli, "\nMemory pool API stats:");
                 cli_print(cli, "acquires: %lld/%lldB", stat_acq, stat_acq_size);
                 cli_print(cli, "releases: %lld/%lldB", stat_ret, stat_ret_size);
+                cli_print(cli, "active->: %lld/%s", stat_acq - stat_ret,
+                                                    number_suffixed(stat_acq_size - stat_ret_size).c_str());
             }
 
 
@@ -961,31 +961,16 @@ int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *a
         cli_print(cli," ");
         cli_print(cli, "API allocations above limits:");
         {
-            auto gl_ = std::scoped_lock(memPool::pool().lock);
-
-            cli_print(cli, "      allocations: %lld/%lldB", memPool::pool().stat_alloc.load(), memPool::pool().stat_alloc_size.load());
-            cli_print(cli, "         releases: %lld/%lldB", memPool::pool().stat_out_free.load(),
-                      memPool::pool().stat_out_free_size.load());
-            cli_print(cli, "\nrelease pool miss: %lld/%lldB", memPool::pool().stat_out_pool_miss.load(),
-                      memPool::pool().stat_out_pool_miss_size.load());
+            cli_print(cli, "      allocations: %lld/%lldB", memPool::pool().stats.heap_alloc.load(), memPool::pool().stats.heap_alloc_size.load());
+            cli_print(cli, "         releases: %lld/%lldB", memPool::pool().stats.out_free.load(), memPool::pool().stats.out_free_size.load());
+            cli_print(cli, "\nrelease pool miss: %lld/%lldB", memPool::pool().stats.out_pool_miss.load(),
+                      memPool::pool().stats.out_pool_miss_size.load());
 
             cli_print(cli, "\nPool capacities (available/limits):");
-            cli_print(cli, " 32B pool size: %lu/%lu", memPool::pool().mem_32_av(), memPool::pool().mem_32_sz());
-            cli_print(cli, " 64B pool size: %lu/%lu", memPool::pool().mem_64_av(), memPool::pool().mem_64_sz());
-            cli_print(cli, "128B pool size: %lu/%lu", memPool::pool().mem_128_av(), memPool::pool().mem_128_sz());
-            cli_print(cli, "256B pool size: %lu/%lu", memPool::pool().mem_256_av(), memPool::pool().mem_256_sz());
-            cli_print(cli, " 1kB pool size: %lu/%lu", memPool::pool().mem_1k_av(), memPool::pool().mem_1k_sz());
-            cli_print(cli, " 5kB pool size: %lu/%lu", memPool::pool().mem_5k_av(), memPool::pool().mem_5k_sz());
-            cli_print(cli, "10kB pool size: %lu/%lu", memPool::pool().mem_10k_av(), memPool::pool().mem_10k_sz());
-            cli_print(cli, "20kB pool size: %lu/%lu", memPool::pool().mem_20k_av(), memPool::pool().mem_20k_sz());
-            cli_print(cli, "35kB pool size: %lu/%lu", memPool::pool().mem_35k_av(), memPool::pool().mem_35k_sz());
-            cli_print(cli, "50kB pool size: %lu/%lu", memPool::pool().mem_50k_av(), memPool::pool().mem_50k_sz());
 
-            // (10 for 32 byte pool, and 3 for 64, 128 and 256 pool)
-            unsigned long long total_pools = (10 + 3) * memPool::pool().mem_256_sz() + memPool::pool().mem_1k_sz() +
-                                             memPool::pool().mem_5k_sz() + memPool::pool().mem_10k_sz() +
-                                             memPool::pool().mem_20k_sz();
-            cli_print(cli,"   total pools: %lld", total_pools);
+            for(auto const* buck: memPool::pool().get_buckets()) {
+                cli_print(cli, "%5luB pool size: %lu/%lu", buck->chunk_size(), buck->size(), buck->total_count());
+            }
         }
 
 
