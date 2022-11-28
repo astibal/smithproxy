@@ -143,8 +143,8 @@ class SmithdProxy : public baseProxy {
 template <class COM, class CX, class PX>
 class SimpleClient {
     public:
-        SimpleClient<COM,CX,PX>() = default;
-        SimpleClient<COM,CX,PX>(const char* h, const char* p):
+        SimpleClient() = default;
+        SimpleClient(const char* h, const char* p):
             host_(h), port_(p) {
         
             px_ = std::make_unique<PX>(new COM());

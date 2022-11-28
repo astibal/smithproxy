@@ -224,7 +224,7 @@ static std::string cfg_tenant_index = "0";
 static std::string cfg_tenant_name = "default";
 
 // Various
-volatile static int cnt_terminate = 0;
+static std::atomic_int cnt_terminate = 0;
 static loglevel  args_debug_flag = NON;
 bool config_file_check_only = false;
 
@@ -355,7 +355,7 @@ bool load_config(std::string& config_f, bool reload) {
                 }
             }
 
-            load_if_exists(cfgapi.getRoot()["settings"], "log_level",cfg_log_level.level_ref());
+            load_if_exists_atomic(cfgapi.getRoot()["settings"], "log_level",cfg_log_level.level_ref());
         }
 
     }
@@ -377,7 +377,7 @@ bool load_config(std::string& config_f, bool reload) {
     }
     
     try {
-        load_if_exists(cfgapi.getRoot()["settings"], "log_level",cfg_log_level.level_ref());
+        load_if_exists_atomic(cfgapi.getRoot()["settings"], "log_level",cfg_log_level.level_ref());
     }
     catch(const SettingNotFoundException &nfex) {
     
