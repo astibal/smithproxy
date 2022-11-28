@@ -586,40 +586,21 @@ void SmithProxy::stop() {
 
 bool SmithProxy::init_syslog() {
 
+    // no server is set, this is not an error
+    if(CfgFactory::get()->syslog_server.empty()) return true;
+
     auto const& log = instance().log;
 
+    AddressInfo ai;
+    ai.str_host = CfgFactory::get()->syslog_server;
+    ai.port = htons(raw::down_cast_signed<unsigned short>(CfgFactory::get()->syslog_port).value_or(514));
+    ai.family = CfgFactory::get()->syslog_family == 6 ? AF_INET6 : AF_INET;
+    ai.pack();
+
     // create UDP socket
-    int syslog_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    int syslog_socket = socket(ai.family, SOCK_DGRAM, IPPROTO_UDP);
 
-    struct sockaddr_storage syslog_in {};
-    memset(&syslog_in, 0, sizeof(struct sockaddr_storage));
-
-    if(CfgFactory::get()->syslog_family != 6) {
-        CfgFactory::get()->syslog_family = 4;
-        syslog_in.ss_family                = AF_INET;
-        ((sockaddr_in*)&syslog_in)->sin_addr.s_addr = inet_addr(CfgFactory::get()->syslog_server.c_str());
-        if(((sockaddr_in*)&syslog_in)->sin_addr.s_addr == INADDR_NONE) {
-            _err("Error initializing syslog server: %s", CfgFactory::get()->syslog_server.c_str());
-            ::close(syslog_socket); // coverity: 1407945
-            return false;
-        }
-
-        ((sockaddr_in*)&syslog_in)->sin_port = htons(CfgFactory::get()->syslog_port);
-    } else {
-        CfgFactory::get()->syslog_family = 6;
-        syslog_in.ss_family                = AF_INET6;
-        int ret = inet_pton(AF_INET6, CfgFactory::get()->syslog_server.c_str(),(unsigned char*)&((sockaddr_in6*)&syslog_in)->sin6_addr.s6_addr);
-        if(ret <= 0) {
-            _err("Error initializing syslog server: %s", CfgFactory::get()->syslog_server.c_str());
-
-            ::close(syslog_socket); // coverity: 1407945
-            return false;
-        }
-        ((sockaddr_in6*)&syslog_in)->sin6_port = htons(CfgFactory::get()->syslog_port);
-    }
-
-
-    if(0 != ::connect(syslog_socket,(sockaddr*)&syslog_in,sizeof(sockaddr_storage))) {
+    if(0 != ::connect(syslog_socket,(sockaddr*) ai.as_ss(),sizeof(sockaddr_storage))) {
         _err("cannot connect syslog socket %d: %s", syslog_socket, string_error().c_str());
         ::close(syslog_socket);
     } else {
@@ -762,7 +743,7 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
             }
 
 
-            if( ! CfgFactory::get()->syslog_server.empty() ) {
+            if(not CfgFactory::get()->syslog_server.empty() ) {
                 bool have_syslog = init_syslog();
                 if(! have_syslog) {
                     _err("syslog logging not set.");
