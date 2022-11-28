@@ -969,7 +969,9 @@ int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *a
             cli_print(cli, "\nPool capacities (available/limits):");
 
             for(auto const* buck: memPool::pool().get_buckets()) {
-                cli_print(cli, "%5luB pool size: %lu/%lu", buck->chunk_size(), buck->size(), buck->total_count());
+                cli_print(cli, "%5luB pool size: %lu/%lu", static_cast<unsigned long>(buck->chunk_size()),
+                                                            static_cast<unsigned long>(buck->size()),
+                                                            static_cast<unsigned long>(buck->total_count()));
             }
         }
 
