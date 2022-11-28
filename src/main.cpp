@@ -131,6 +131,21 @@ void prepare_mem_debugs() {
 void print_stats() {
     auto const& log = DaemonFactory::instance()->get_log();
 
+    const time_t uptime = time(nullptr) - SmithProxy::instance().ts_sys_started;
+    const unsigned long t = MitmProxy::total_mtr_up().total() + MitmProxy::total_mtr_down().total();
+
+    auto stat = string_format("Smithproxy was running: %s, served %lu sessions and transferred %sB of data.\n",
+            uptime_string(uptime).c_str(),
+            static_cast<unsigned long>(MitmProxy::total_sessions().load()),
+            number_suffixed(t).c_str());
+
+    if(SmithProxy::instance().cfg_daemonize) {
+        _inf("%s", stat.c_str());
+    }
+    else {
+        std::cerr << stat;
+    }
+
     _dia("Debug SSL statistics: ");
     _dia("SSL_accept: %d", SSLCom::counter_ssl_accept.load());
     _dia("SSL_connect: %d", SSLCom::counter_ssl_connect.load());
@@ -557,7 +572,6 @@ int main(int argc, char *argv[]) {
 
     // create utility threads
     SmithProxy::instance().create_log_writer_thread();
-    SmithProxy::init_syslog();
 
     Log::get()->events().insert(INF, "Smithproxy %s%s starting", SMITH_VERSION, SMITH_DEVEL > 0 ? "-dev" : "");
 
@@ -583,10 +597,11 @@ int main(int argc, char *argv[]) {
         SSLFactory::factory().init();
         start_api();
 
-        _cri("Smithproxy %s (socle %s) starting...", SMITH_VERSION, SOCLE_VERSION);
+        _dia("Smithproxy %s (socle %s) starting...", SMITH_VERSION, SOCLE_VERSION);
         SmithProxy::instance().run();
         print_stats();
     } else {
+        _cri("cannot create listeners, exiting...");
         // something went wrong, terminate - but join all threads before doing so to prevent ABORT
         SmithProxy::instance().terminate_flag = true;
         SmithProxy::instance().join_all();
