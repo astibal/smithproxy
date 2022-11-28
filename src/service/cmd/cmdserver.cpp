@@ -657,7 +657,7 @@ int cli_debug_level(struct cli_def *cli, const char *command, char *argv[], int 
             lp->level_ = NON;
 
             Log::get()->level(CfgFactory::get()->internal_init_level);
-            cli_print(cli, "internal logging level changed to %d", Log::get()->level().level_ref());
+            cli_print(cli, "internal logging level changed to %d", Log::get()->level().level());
         }
         else {
             //cli_print(cli, "called %s with %s, argc %d\r\n", __FUNCTION__, command, argc);

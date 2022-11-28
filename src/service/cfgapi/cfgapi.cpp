@@ -676,12 +676,12 @@ bool CfgFactory::load_settings () {
         }
     }
 
-    load_if_exists(cfgapi.getRoot()["settings"], "log_level", CfgFactory::get()->internal_init_level.level_ref());
+    load_if_exists_atomic(cfgapi.getRoot()["settings"], "log_level", CfgFactory::get()->internal_init_level.level_ref());
 
     load_if_exists(cfgapi.getRoot()["settings"], "syslog_server", syslog_server);
     load_if_exists(cfgapi.getRoot()["settings"], "syslog_port", syslog_port);
     load_if_exists(cfgapi.getRoot()["settings"], "syslog_facility", syslog_facility);
-    load_if_exists(cfgapi.getRoot()["settings"], "syslog_level", syslog_level.level_ref());
+    load_if_exists_atomic(cfgapi.getRoot()["settings"], "syslog_level", syslog_level.level_ref());
     load_if_exists(cfgapi.getRoot()["settings"], "syslog_family", syslog_family);
 
     load_if_exists(cfgapi.getRoot()["settings"], "messages_dir", dir_msg_templates);
@@ -856,21 +856,21 @@ int CfgFactory::load_debug() {
 
         if (cfgapi.getRoot()["debug"].exists("log")) {
 
-            load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "sslcom", SSLCom::log_level().level_ref());
-            load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "sslmitmcom",
+            load_if_exists_atomic(CfgFactory::cfg_root()["debug"]["log"], "sslcom", SSLCom::log_level().level_ref());
+            load_if_exists_atomic(CfgFactory::cfg_root()["debug"]["log"], "sslmitmcom",
                                                                baseSSLMitmCom<SSLCom>::log_level().level_ref());
-            load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "sslmitmcom",
+            load_if_exists_atomic(CfgFactory::cfg_root()["debug"]["log"], "sslmitmcom",
                                                                baseSSLMitmCom<DTLSCom>::log_level().level_ref());
-            load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "sslcertstore",
+            load_if_exists_atomic(CfgFactory::cfg_root()["debug"]["log"], "sslcertstore",
                                                                SSLFactory::get_log().level()->level_ref());
-            load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "proxy", baseProxy::log_level().level_ref());
-            load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "proxy", epoll::log_level.level_ref());
+            load_if_exists_atomic(CfgFactory::cfg_root()["debug"]["log"], "proxy", baseProxy::log_level().level_ref());
+            load_if_exists_atomic(CfgFactory::cfg_root()["debug"]["log"], "proxy", epoll::log_level.level_ref());
             load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "mtrace", cfg_mtrace_enable);
             load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "openssl_mem_dbg", cfg_openssl_mem_dbg);
 
             /*DNS ALG EXPLICIT LOG*/
-            load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "alg_dns", DNS_Inspector::log_level().level_ref());
-            load_if_exists(CfgFactory::cfg_root()["debug"]["log"], "alg_dns", DNS_Packet::log_level().level_ref());
+            load_if_exists_atomic(CfgFactory::cfg_root()["debug"]["log"], "alg_dns", DNS_Inspector::log_level().level_ref());
+            load_if_exists_atomic(CfgFactory::cfg_root()["debug"]["log"], "alg_dns", DNS_Packet::log_level().level_ref());
         }
         return 1;
     }

@@ -558,5 +558,26 @@ bool load_if_exists(libconfig::Setting const& s, const char* key, T& valref) {
     return false;
 }
 
+template <class T>
+bool load_if_exists_atomic(libconfig::Setting const& s, const char* key, T& valref) {
+
+    try {
+        std::string str_key(key);
+
+        if (not str_key.empty() and s.exists(str_key)) {
+            valref.store(s[str_key.c_str()]);
+
+            return true;
+        }
+
+    }
+    catch(libconfig::SettingTypeException const& e) {
+        static auto log = logan_lite("config");
+
+        _war("cannot load: %s: %s", key, e.what());
+    }
+
+    return false;
+}
 
 #endif
