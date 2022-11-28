@@ -204,7 +204,7 @@ std::stringstream features;
 #ifdef USE_EXPERIMENT
     features << "EXPERIMENTAL ";
 #endif
-    cli_print(cli, "Built: %s, with: %s", __TIMESTAMP__, features.str().c_str());  // breaks reproducible builds
+    cli_print(cli, "Built with: %s", features.str().c_str());
 
 
     auto get_proxy_type = [](auto& proxies) -> const char* {
