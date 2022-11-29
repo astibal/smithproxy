@@ -304,7 +304,7 @@ void print_help() {
     std::cerr << std::endl;
     std::cerr << "  Utility options (optional):" << std::endl;
     std::cerr << std::endl;
-    std::cerr << "    --version, -c                :  print version and exit with 0" << std::endl;
+    std::cerr << "    --version, -v                :  print version and exit with 0" << std::endl;
     std::cerr << "    --config-file, -c <filename> :  specify/override configuration file" << std::endl;
     std::cerr << "    --config-check-only, -o      :  perform configuration file check" << std::endl;
     std::cerr << std::endl;
@@ -371,9 +371,12 @@ int main(int argc, char *argv[]) {
     /* getopt_long stores the option index here. */
         int option_index = 0;
     
-        int c = getopt_long (argc, argv, "hvocitD",
+        int c = getopt_long (argc, argv, "hvoc:itD",
                         long_options, &option_index);
         if (c < 0) break;
+
+        // set synchronous logger for the beginning
+        Log::init();
 
         switch(c) {
             case 0:
@@ -413,13 +416,12 @@ int main(int argc, char *argv[]) {
                 
                 
             default:
-                std::cerr << "unknown option: " << c  << std::endl;
+                std::cerr << "unknown option: '" << (char)c << "'"<< std::endl;
                 return EXIT_FAILURE;
         }
     }
 
-    // set synchronous logger for the beginning
-    Log::init();
+
     Log::set(Log::default_logger());
     Log::get()->level(WAR);
 
