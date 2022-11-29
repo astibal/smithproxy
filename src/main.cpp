@@ -294,7 +294,6 @@ void print_help() {
     std::cerr << "  Tenant settings (optional):" << std::endl;
     std::cerr << std::endl;
     std::cerr << "    --tenant-name :  name of the tenant" << std::endl;
-    std::cerr << "    --tenant-idx  :  tenant index" << std::endl;
     std::cerr << std::endl;
     std::cerr << "  Startup debugs (optional):" << std::endl;
     std::cerr << std::endl;
@@ -366,17 +365,16 @@ int main(int argc, char *argv[]) {
 
     CfgFactory::get()->config_file = "/etc/smithproxy/smithproxy.cfg";
     bool is_custom_config_file = false;
+    bool is_dup2cout = false;
 
     while(true) {
     /* getopt_long stores the option index here. */
         int option_index = 0;
     
-        int c = getopt_long (argc, argv, "hvoc:itD",
+        int c = getopt_long (argc, argv, "hvoc:t:D",
                         long_options, &option_index);
         if (c < 0) break;
 
-        // set synchronous logger for the beginning
-        Log::init();
 
         switch(c) {
             case 0:
@@ -389,19 +387,13 @@ int main(int argc, char *argv[]) {
                 
             case 'o':
                 CfgFactory::get()->config_file_check_only = true;
-                Log::get()->dup2_cout(true);
+                is_dup2cout = true;
                 break;
                 
             case 'D':
                 SmithProxy::instance().cfg_daemonize = true;
                 break;
-                
-            case 'i':
-                // removed in 0.9.27
-                // CfgFactory::get()->tenant_index = std::stoi(std::string(optarg));
-                std::cerr << "using --tenant-index is since 0.9.27 deprecated and no-op, index is loaded from smithproxy.tenants.cfg" << std::endl;
-                break;
-                
+
             case 't':
                 CfgFactory::get()->tenant_name = std::string(optarg);
                 break;
@@ -421,10 +413,14 @@ int main(int argc, char *argv[]) {
         }
     }
 
-
+    // set synchronous logger for the beginning
+    Log::init();
     Log::set(Log::default_logger());
     Log::get()->level(WAR);
 
+    if(is_dup2cout) {
+        Log::get()->dup2_cout(true);
+    }
 
     // be ready for tenants, or for standalone execution
     if (not prepare_tenanting(is_custom_config_file)) {
