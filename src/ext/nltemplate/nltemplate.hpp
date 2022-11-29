@@ -129,14 +129,14 @@ protected:
 class Block : public Node {
 public:
     Block( const std::string & name );
-    Fragment *copy() const;
+    Fragment *copy() const override;
     ~Block();
-    bool isBlockNamed( const std::string & name ) const;
+    bool isBlockNamed( const std::string & name ) const override;
     void enable();
     void disable();
     void repeat( size_t n );
     Node & operator[]( size_t index );
-    void render( std::ostream & output, const Dictionary & dictionary ) const;
+    void render( std::ostream & output, const Dictionary & dictionary ) const override;
     
 protected:
     const std::string name;
@@ -180,6 +180,8 @@ public:
     Template( Loader & loader );
     void clear();
     void load( const std::string & name );
+
+    using Block::render;
     void render( std::ostream & output ) const;
     std::string render() const;
     

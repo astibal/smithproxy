@@ -461,7 +461,7 @@ int main(int argc, char *argv[]) {
                 break;                
                 
             default:
-                std::cerr << "unknown option: " << c;
+                std::cerr << "unknown option: '" << (char)c << "'";
                 exit(1);                 
         }
     }

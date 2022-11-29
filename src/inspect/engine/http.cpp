@@ -136,7 +136,7 @@ namespace sx::engine::http {
             find_referrer(ctx, data);
 
 
-            auto engine_http1_set_proto = [&ctx,&log] () {
+            auto engine_http1_set_proto = [&ctx] () {
                 auto *app_request = dynamic_cast<app_HttpRequest *>(ctx.application_data.get());
                 if (app_request != nullptr) {
                     // detect protocol (plain vs ssl)

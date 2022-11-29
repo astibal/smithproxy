@@ -185,7 +185,7 @@ struct DNS_Answer {
             return cidr::cidr_from_inaddr(&a);
         } 
         else if (type_ == AAAA && data_.size() == 16) {
-            in6_addr a{0};
+            in6_addr a{};
             memcpy(&a.s6_addr,data_.data(),16);
             return cidr::cidr_from_in6addr(&a);
         }

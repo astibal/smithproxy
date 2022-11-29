@@ -111,7 +111,7 @@ public:
 
         this->state(task_state_t::INIT);
     }
-    virtual task_state_t update() = 0;
+    task_state_t update() override = 0;
     R const& yield() const override = 0;
 
     void handle_event (baseCom *com) override {
