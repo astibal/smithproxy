@@ -51,6 +51,10 @@
 
 #include <service/cfgapi/cfgapi.hpp>
 
+#ifdef ASAN_LEAKS
+extern "C" int __lsan_do_recoverable_leak_check();
+#endif
+
 SmithProxy::~SmithProxy () {
 
 #ifndef MEMPOOL_DISABLE
@@ -409,6 +413,20 @@ void SmithProxy::run() {
         }
 
         std::this_thread::sleep_for(std::chrono::seconds(1));
+
+#ifdef ASAN_LEAKS
+        // See: https://stackoverflow.com/questions/67705427/how-to-use-asan-on-a-long-time-running-server-program
+        // More info in:
+        //    https://github.com/llvm-mirror/compiler-rt/blob/master/include/sanitizer/lsan_interface.h
+        // Interesting options:
+        // ASAN_OPTIONS=halt_on_error=false:alloc_dealloc_mismatch=0:detect_leaks=1:verbose=1 LSAN_OPTIONS=report_objects=1
+
+        if(time(nullptr) % 30 == 0) {
+            if(__lsan_do_recoverable_leak_check() == 0) {
+                std::cerr << "=== No leaks detected\n";
+            }
+        }
+#endif
     }
 
     auto bail_it = [this]{
