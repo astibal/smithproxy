@@ -43,6 +43,15 @@ CUR_DIR=/tmp/smithproxy_build
 mkdir ${CUR_DIR}
 cp *.sh ${CUR_DIR}
 cp -r ${DEBIAN_DIR} ${CUR_DIR}/debian
+
+
+CUSTOM_DEBIAN_DIR="${DEBIAN_DIR}_$(./distro.sh)"
+if [[ -d "${CUSTOM_DEBIAN_DIR}" ]]; then
+    echo "custom debian directory found, copying files"
+    cp -rv "${CUSTOM_DEBIAN_DIR}"/* ${CUR_DIR}/debian/
+fi
+
+
 cd ${CUR_DIR}
 ##
 ## trap Ctrl-C, don't continue with script if hit in longer task (ie. make)

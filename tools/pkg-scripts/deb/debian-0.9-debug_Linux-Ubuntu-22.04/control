@@ -9,7 +9,7 @@ Package: smithproxy-dbg
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends},
                             libstdc++6 (>= 8.3.0),
-                            libssl1.1 (>=1.1.1),
+                            libssl3 (>=3.0.0),
                             libconfig++9v5,
                             libmicrohttpd12,
                             libpam0g,
@@ -28,4 +28,3 @@ Description:
  Forwarded traffic is diverted to smithproxy where it's processed based
  on policies with feature profiles.
  It can also process local traffic and accepts SOCKS5 requests.
-
