@@ -21,6 +21,7 @@ set(OPT_MEMPOOL_NOEXCEPT "Y")
 set(OPT_MEMPOOL_DISABLE "N")
 set(OPT_DEBUG_ASAN_LEAKS "N")
 set(OPT_DEBUG_ASAN_THREADS "N")
+set(OPT_DEBUG_ASAN_UB "Y")
 
 set(OPT_GCC_UNROLL "Y")
 
@@ -172,6 +173,12 @@ if(UNIX)
             add_definitions(-DASAN_LEAKS)
             set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fsanitize=leak -fPIE -pie")
         endif()
+        if("${OPT_DEBUG_ASAN_UB}" STREQUAL "Y")
+            add_definitions(-DASAN_UB)
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=undefined  -fPIE -pie")
+        endif()
+
+
     ENDIF()
 
     IF (CMAKE_BUILD_TYPE STREQUAL "Release")
