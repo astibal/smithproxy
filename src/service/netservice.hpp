@@ -135,17 +135,15 @@ std::vector<std::unique_ptr<Listener>> NetworkServiceFactory::prepare_listener (
         throw sx::netservice_cannot_bind(err.c_str());
     } else {
 
-        // attach and push first listener
-        attach_listener(listener.get(), sock);
-
-        vec_toret.emplace_back(std::move(listener));
-
-        // create additional acceptor listeners (which will concurrently accept new connections)
-
-        // how many?
+        // how many additional listeners?
         auto nthreads = std::thread::hardware_concurrency();
         nthreads *= listener->core_multiplier();
 
+        // attach and push first listener
+        attach_listener(listener.get(), sock);
+
+        // move!
+        vec_toret.emplace_back(std::move(listener));
 
         // if option explicitly set, override listener count with it
         if(sub_workers > 0) {
