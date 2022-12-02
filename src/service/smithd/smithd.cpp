@@ -220,7 +220,6 @@ static std::string cfg_log_file = "/var/log/smithproxy/smithd.%s.log";
 static std::string cfg_smithd_listen_port = "/var/run/smithd.%s.sock";
 
 // Tenant configuration
-static std::string cfg_tenant_index = "0";
 static std::string cfg_tenant_name = "default";
 
 // Various
@@ -291,8 +290,7 @@ static struct option long_options[] =
     /* These options set a flag. */
     {"debug",   no_argument,       (int*)&args_debug_flag.level_ref(), iDEB},
     {"diagnose",   no_argument,       (int*)&args_debug_flag.level_ref(), iDIA},
-    {"dump",   no_argument,       (int*)&args_debug_flag.level_ref(), iDUM},
-    {"extreme",   no_argument,       (int*)&args_debug_flag.level_ref(), iEXT},
+
     
     {"config-file", required_argument,  nullptr, 'c'},
     {"config-check-only",no_argument,nullptr,'o'},
@@ -301,7 +299,6 @@ static struct option long_options[] =
     
     // multi-tenancy support: listening ports will be shifted by number 'i', while 't' controls logging, pidfile, etc.
     // both, or none of them have to be set
-    {"tenant-index", required_argument, nullptr, 'i'},
     {"tenant-name", required_argument, nullptr, 't'},
     {nullptr, 0, nullptr, 0}
 };  
@@ -404,7 +401,7 @@ int smithd_apply_index(std::string& what , const std::string& idx) {
 bool smithd_apply_tenant_config() {
     int ret = 0;
     
-    if(cfg_tenant_index.size() > 0 && cfg_tenant_name.size() > 0) {
+    if(cfg_tenant_name.size() > 0) {
         cfg_smithd_listen_port = string_format(cfg_smithd_listen_port.c_str(),cfg_tenant_name.c_str());
     }
     
@@ -427,7 +424,7 @@ int main(int argc, char *argv[]) {
     /* getopt_long stores the option index here. */
         int option_index = 0;
     
-        int c = getopt_long (argc, argv, "p:voDcit",
+        int c = getopt_long (argc, argv, "voDct",
                         long_options, &option_index);
         if (c < 0) break;
 
@@ -452,10 +449,6 @@ int main(int argc, char *argv[]) {
                 std::cout << SMITH_VERSION << "+" << SOCLE_VERSION << std::endl;
                 exit(0);
 
-            case 'i':
-                cfg_tenant_index = std::string(optarg);
-                break;
-                
             case 't':
                 cfg_tenant_name = std::string(optarg);
                 break;                
@@ -478,15 +471,9 @@ int main(int argc, char *argv[]) {
 
     Log::get()->level(DEB);
     
-    if(cfg_tenant_index.size() > 0 && cfg_tenant_name.size() > 0) {
-        _war("Starting tenant: '%s', index %s",cfg_tenant_name.c_str(),cfg_tenant_index.c_str());
-
+    if(not cfg_tenant_name.empty()) {
+        _war("Starting tenant: '%s'",cfg_tenant_name.c_str());
         this_daemon->set_tenant("smithd", cfg_tenant_name);
-    } 
-    else if (cfg_tenant_index.size() > 0 || cfg_tenant_name.size() > 0){
-        
-        _fat("You have to specify both options: --tenant-name AND --tenant-index");
-        exit(-20);
     }
     else {
         _war("Starting tenant: 0 (default)");
@@ -625,7 +612,7 @@ int main(int argc, char *argv[]) {
             backend_proxy->shutdown(); 
         } ));
 
-        pthread_setname_np(backend_thread->native_handle(),string_format("smithd_%s",cfg_tenant_index.c_str()).c_str());
+        pthread_setname_np(backend_thread->native_handle(),string_format("smithd_%s",cfg_tenant_name.c_str()).c_str());
         backend_threads.push_back(backend_thread);
     }
     

@@ -392,8 +392,6 @@ if __name__ == "__main__":
 
     smithproxy_options.append("--tenant-name")
     smithproxy_options.append(TENANT_NAME)
-    smithproxy_options.append("--tenant-index")
-    smithproxy_options.append(TENANT_IDX)
 
     daemon.exec_info.append(
         ('smithproxy core', SMITHPROXY_PATH, SMITHPROXY_PIDFILE % (TENANT_NAME,), smithproxy_options))
