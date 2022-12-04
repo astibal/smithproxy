@@ -41,13 +41,15 @@ build_group.add_argument('--exclude', type=str, nargs='*', help='builds to exclu
 
 build_group.add_argument('--hosts', type=str, nargs='*', help='hosts - localhost or remote hostname')
 
-build_group.add_argument('--proxy', type=str, nargs='?', help='hosts - localhost or remote hostname')
+build_group.add_argument('--proxy', type=str, nargs='?', help='proxy to be used by the build')
 
 
 misc_group = top_group.add_argument_group()
 misc_group.add_argument('--list', action='store_true')
 misc_group.add_argument('--cleanup', action='store_true')
 misc_group.add_argument('--config', type=str, nargs=1, help="custom config file (default %s)" % (CFG_DEFAULT))
+misc_group.add_argument('--user', type=str, help="ssh username", nargs='?')
+misc_group.add_argument('--key', type=str, help="ssh key file to use", nargs='?')
 
 
 def list_dockers(arg_filter=None, out_filter=None):
@@ -89,7 +91,7 @@ def list_dockers(arg_filter=None, out_filter=None):
     return to_ret
 
 
-def run_build(host, files, arg_http_proxy=None, arg_cleanup=False):
+def run_build(host, files, arg_http_proxy=None, arg_cleanup=False, arg_user=None, arg_key=None):
 
     cmd_pre = ""
     if arg_cleanup:
@@ -115,10 +117,23 @@ def run_build(host, files, arg_http_proxy=None, arg_cleanup=False):
             subprocess.run("(" + tag + cmd_local + ") >> /tmp/builder-%s.log 2>&1" % (host,), shell=True)
                 
         else:
-        
-            cp_cmd = "scp %s root@%s:/tmp/Dockerfile.current" % (dockerfile, host)
-            
-            ssh_cmd = "ssh root@%s -C " % (host) + cmd_base + " -f /tmp/Dockerfile.current \`mktemp -d\`"
+
+            u = 'root'
+            if arg_user:
+                u = arg_user
+
+            cp_cmd = "scp"
+            ssh_cmd = "ssh"
+
+            if arg_key:
+                print("using key: {}".format(arg_key))
+                cp_cmd += " -i %s " % (arg_key, )
+                ssh_cmd += " -i %s " % (arg_key, )
+
+            cp_cmd += " %s %s@%s:/tmp/Dockerfile.current " % (dockerfile, u, host)
+            ssh_cmd += " %s@%s " % (u, host, )
+
+            ssh_cmd += " -C " + cmd_base + " -f /tmp/Dockerfile.current \`mktemp -d\`"
             
             ssh_cmd = "(" + tag + ";" + cp_cmd + ";" + ssh_cmd + ") >> /tmp/builder-%s.log 2>&1" % (host,)
             
@@ -174,6 +189,8 @@ if __name__ == '__main__':
         dockerfiles = []
         http_proxy = None
         cleanup = False
+        sshkey = None
+        sshuser = None
 
         if args.config:
             load_config(args.config[0])
@@ -201,6 +218,12 @@ if __name__ == '__main__':
         if args.proxy:
             http_proxy = args.proxy
 
+        if args.key:
+            sshkey = args.key
+
+        if args.user:
+            sshuser = args.user
+
         if args.hosts:
 
             if args.cleanup:
@@ -211,7 +234,7 @@ if __name__ == '__main__':
                 pid = os.fork()
                 if pid == 0:
                     print("%s host child process: %s" % (h, str(dockerfiles)))
-                    run_build(h, dockerfiles, arg_http_proxy=http_proxy, arg_cleanup=cleanup)
+                    run_build(h, dockerfiles, arg_http_proxy=http_proxy, arg_cleanup=cleanup, arg_user=sshuser, arg_key=sshkey)
                     print("%s host child finished: %s" % (h, str(dockerfiles)))
                     sys.exit(0)
                 else:
