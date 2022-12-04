@@ -1,4 +1,12 @@
-cmake_minimum_required(VERSION 3.0)
+cmake_minimum_required(VERSION 3.14)
+
+## To be set in the (near!) future
+# set(CMAKE_CXX_STANDARD 20)
+
+# Avoid warning about DOWNLOAD_EXTRACT_TIMESTAMP in CMake 3.24:
+if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.24.0")
+    cmake_policy(SET CMP0135 OLD)
+endif()
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/helpers.cmake)
 
@@ -79,6 +87,13 @@ include_directories ("${SMITHD_DIR}")
 add_subdirectory(${SOCLE_DIR} socle_lib)
 add_subdirectory(${SOCLE_COMMON_DIR} socle_common_lib)
 
+include(FetchContent)
+FetchContent_Declare(
+        json
+        URL https://github.com/nlohmann/json/releases/download/v3.11.2/json.tar.xz
+        URL_HASH SHA256=8c4b26bf4b422252e13f332bc5e388ec0ab5c3443d24399acb675e68278d341f
+)
+FetchContent_MakeAvailable(json)
 
 find_package (LibConfig REQUIRED)
 if (LIBCONFIGPP_FOUND)
@@ -390,6 +405,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 )
 
         target_link_libraries(sx_gtests gtest gtest_main socle_lib pthread crypto ssl)
+        target_link_libraries (sx_gtests nlohmann_json::nlohmann_json)
     endif()
 ENDIF()
 
@@ -401,6 +417,7 @@ if (LIBCONFIGPP_FOUND)
 endif (LIBCONFIGPP_FOUND)
 
 target_link_libraries (smithproxy crypt)
+target_link_libraries (smithproxy nlohmann_json::nlohmann_json)
 
 if((CMAKE_SYSTEM_PROCESSOR MATCHES "arm") OR (CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64"))
     target_link_libraries (smithproxy atomic)

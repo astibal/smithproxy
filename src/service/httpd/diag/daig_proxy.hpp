@@ -37,7 +37,7 @@
     which carries forward this exception.
 */
 
-#include <ext/json/json.hpp>
+#include <nlohmann/json.hpp>
 
 #include <ext/lmhpp/include/lmhttpd.hpp>
 #include <service/httpd/util.hpp>

@@ -7,7 +7,7 @@
 #include <service/httpd/httpd.hpp>
 
 #include <ext/lmhpp/include/lmhttpd.hpp>
-#include <ext/json/json.hpp>
+#include <nlohmann/json.hpp>
 
 namespace sx::webserver {
     namespace dispatchers {

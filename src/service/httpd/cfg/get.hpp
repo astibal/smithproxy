@@ -1,7 +1,7 @@
 #ifndef HTTPD_GET_HPP_
 #define HTTPD_GET_HPP_
 
-#include <ext/json/json.hpp>
+#include <nlohmann/json.hpp>
 
 #include <ext/lmhpp/include/lmhttpd.hpp>
 #include <service/httpd/httpd.hpp>

@@ -42,7 +42,7 @@
 #define JSONIZE_HPP_
 
 #include <openssl/x509.h>
-#include <ext/json/json.hpp>
+#include <nlohmann/json.hpp>
 
 #include <proxy/mitmproxy.hpp>
 #include <libconfig.h++>

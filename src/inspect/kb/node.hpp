@@ -47,7 +47,7 @@
 
 #include <deque>
 
-#include <ext/json/json.hpp>
+#include <nlohmann/json.hpp>
 
 namespace sx {
 

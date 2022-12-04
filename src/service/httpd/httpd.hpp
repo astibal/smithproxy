@@ -47,7 +47,7 @@
 #include <thread>
 
 #include <ext/lmhpp/include/lmhttpd.hpp>
-#include <ext/json/json.hpp>
+#include <nlohmann/json.hpp>
 #include <main.hpp>
 #include <common/display.hpp>
 
