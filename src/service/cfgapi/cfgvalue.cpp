@@ -136,6 +136,11 @@ void CfgValueHelp::init() {
             .may_be_empty(false)
             .value_filter(CfgValue::VALUE_DIR);
 
+    add("settings.ca_bundle_file", "trusted CA bundle file (preferred over directory)")
+            .help_quick("<string>: enter valid path to file")
+            .may_be_empty(true)
+            .value_filter(CfgValue::VALUE_FILE);
+
     // listening ports
 
     add("settings.plaintext_port", "base divert port for non-SSL TCP traffic")

@@ -106,6 +106,9 @@ int cli_diag_ssl_cache_stats(struct cli_def *cli, const char *command, char *arg
 
     size_t n_cache = 0;
     int n_maxsize = 0;
+    bool ver_bundle = store->stats.ca_verify_use_file;
+    bool sto_bundle = store->stats.ca_store_use_file;
+
     {
         auto lc_ = std::scoped_lock(store->lock());
         n_cache = store->cache().cache().size();
@@ -116,6 +119,9 @@ int cli_diag_ssl_cache_stats(struct cli_def *cli, const char *command, char *arg
     cli_print(cli,"certificate store stats: ");
     cli_print(cli,"    cache size: %zu ", n_cache);
     cli_print(cli,"      max size: %d ", n_maxsize);
+    cli_print(cli,"    cert verify from bundle: %d", ver_bundle);
+    cli_print(cli,"    cert store from bundle: %d", sto_bundle);
+
 
     return CLI_OK;
 }

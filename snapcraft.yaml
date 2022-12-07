@@ -147,6 +147,12 @@ apps:
     plugs:
       - network
 
+  download-ca-bundle:
+    command: usr/bin/sx_download_ca_bundle
+    plugs:
+      - network
+
+
   net:
     command: usr/bin/sx_network
     plugs:

@@ -1,0 +1,18 @@
+#!/usr/bin/env sh
+
+FILE_PATH="/etc/smithproxy/certs/ca_curl_bundle.pem"
+FILE_URL="https://curl.se/ca/cacert.pem"
+
+wget ${FILE_URL} -O ${FILE_PATH}
+
+if [ $? -ne 0 ]; then
+    echo "   !!! Sorry, something went wrong..."
+else
+    echo
+    echo "       => file saved here: ${FILE_PATH}"
+    echo "   !!! Smithproxy must be reconfigured to use this CA bundle and then restarted."
+    echo
+fi
+
+
+
