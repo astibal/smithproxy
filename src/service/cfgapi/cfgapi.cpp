@@ -648,8 +648,9 @@ bool CfgFactory::load_settings () {
 
     load_if_exists(cfgapi.getRoot()["settings"], "ssl_autodetect",MitmMasterProxy::ssl_autodetect);
     load_if_exists(cfgapi.getRoot()["settings"], "ssl_autodetect_harder",MitmMasterProxy::ssl_autodetect_harder);
-    load_if_exists(cfgapi.getRoot()["settings"], "ssl_ocsp_status_ttl",SSLFactory::ssl_ocsp_status_ttl);
-    load_if_exists(cfgapi.getRoot()["settings"], "ssl_crl_status_ttl",SSLFactory::ssl_crl_status_ttl);
+    load_if_exists(cfgapi.getRoot()["settings"], "ssl_ocsp_status_ttl",SSLFactory::options::ocsp_status_ttl);
+    load_if_exists(cfgapi.getRoot()["settings"], "ssl_crl_status_ttl",SSLFactory::options::crl_status_ttl);
+    load_if_exists(cfgapi.getRoot()["settings"], "ssl_use_ktls",SSLFactory::options::ktls);
 
     if(cfgapi.getRoot()["settings"].exists("udp_quick_ports")) {
 
@@ -4574,8 +4575,9 @@ int save_settings(Config& ex) {
     objects.add("ssl_workers", Setting::TypeInt) = CfgFactory::get()->num_workers_tls;
     objects.add("ssl_autodetect", Setting::TypeBoolean) = MitmMasterProxy::ssl_autodetect;
     objects.add("ssl_autodetect_harder", Setting::TypeBoolean) = MitmMasterProxy::ssl_autodetect_harder;
-    objects.add("ssl_ocsp_status_ttl", Setting::TypeInt) = SSLFactory::ssl_ocsp_status_ttl;
-    objects.add("ssl_crl_status_ttl", Setting::TypeInt) = SSLFactory::ssl_crl_status_ttl;
+    objects.add("ssl_ocsp_status_ttl", Setting::TypeInt) = SSLFactory::options::ocsp_status_ttl;
+    objects.add("ssl_crl_status_ttl", Setting::TypeInt) = SSLFactory::options::crl_status_ttl;
+    objects.add("ssl_use_ktls", Setting::TypeBoolean) = SSLFactory::options::ktls;
 
     objects.add("udp_port", Setting::TypeString) = CfgFactory::get()->listen_udp_port_base;
     objects.add("udp_workers", Setting::TypeInt) = CfgFactory::get()->num_workers_udp;

@@ -1574,7 +1574,13 @@ auto get_tls_info(MitmHostCX const* lf, MitmHostCX const* rg, int sl_flags, int 
                     bool tls_rsm = (com->target_cert() == nullptr);
 
                     tls_ss << "\n  " << label << ": version: " << tls_ver << ", cipher: ";
-                    tls_ss << cipher_str << ", resumed/ticket: "
+                    tls_ss << cipher_str;
+#ifdef USE_OPENSSL300
+                    auto ktls_r = BIO_get_ktls_recv(SSL_get_rbio(ssl));
+                    auto ktls_w = BIO_get_ktls_send(SSL_get_wbio(ssl));
+                    tls_ss << " ktls: r:" << ktls_r << "w:" << ktls_w;
+#endif
+                    tls_ss << ", resumed/ticket: "
                            << tls_rsm << "/" << has_ticket;
                     if (has_ticket) {
                         tls_ss << " , ticket_hint: " << lifetime_hint << "s";
