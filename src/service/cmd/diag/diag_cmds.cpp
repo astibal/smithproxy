@@ -1578,7 +1578,7 @@ auto get_tls_info(MitmHostCX const* lf, MitmHostCX const* rg, int sl_flags, int 
 #ifdef USE_OPENSSL300
                     auto ktls_r = BIO_get_ktls_recv(SSL_get_rbio(ssl));
                     auto ktls_w = BIO_get_ktls_send(SSL_get_wbio(ssl));
-                    tls_ss << " ktls: r:" << ktls_r << "w:" << ktls_w;
+                    tls_ss << " ktls: r:" << ktls_r << "/w:" << ktls_w;
 #endif
                     tls_ss << ", resumed/ticket: "
                            << tls_rsm << "/" << has_ticket;
