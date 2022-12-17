@@ -263,50 +263,57 @@ void writecrash(int fd, const char* msg, size_t len)  {
 
 #ifdef USE_UNWIND
 void DaemonFactory::uw_btrace_handler(int sig) {
-    thread_local unw_cursor_t cursor; 
-    thread_local unw_context_t uc;
-    thread_local unw_word_t ip;
-    thread_local unw_word_t sp;
-
-    unw_getcontext(&uc);
-    unw_init_local(&cursor, &uc);
 
     auto df = DaemonFactory::instance();
 
-    char buf_line[256];
-    int chars = snprintf(buf_line,255," ======== Smithproxy exception handler (sig %d) =========\n",sig);
+    if(DaemonFactory::generate_crashlog) {
 
-    int CRLOG = open((const char*)df->crashlog_file, O_CREAT | O_WRONLY | O_APPEND,S_IRUSR|S_IWUSR);
-    if(chmod((const char*)df->crashlog_file, 0600) != 0) { if(CRLOG >= 0) { ::close(CRLOG); } return; }
+        thread_local unw_cursor_t cursor;
+        thread_local unw_context_t uc;
+        thread_local unw_word_t ip;
+        thread_local unw_word_t sp;
 
-    writecrash(STDERR_FILENO,buf_line,chars);
-    writecrash(CRLOG,buf_line,chars);
-    writecrash(STDERR_FILENO,"Traceback:\n",11);
-    writecrash(CRLOG,"Traceback:\n",11);
+        unw_getcontext(&uc);
+        unw_init_local(&cursor, &uc);
 
-    while (unw_step(&cursor) > 0) {
-        memset(buf_line,0,256);
+        char buf_line[256];
+        int chars = snprintf(buf_line, 255, " ======== Smithproxy exception handler (sig %d) =========\n", sig);
 
-        char buf_fun[256];
-        memset(buf_fun,0,256);
+        int CRLOG = open((const char *) df->crashlog_file, O_CREAT | O_WRONLY | O_APPEND, S_IRUSR | S_IWUSR);
+        if (chmod((const char *) df->crashlog_file, 0600) != 0) {
+            if (CRLOG >= 0) { ::close(CRLOG); }
+            return;
+        }
 
-        unw_word_t  offset;
-        unw_get_proc_name(&cursor, buf_fun, sizeof(buf_fun) - 1, &offset);
-        unw_get_reg(&cursor, UNW_REG_IP, &ip);
-        unw_get_reg(&cursor, UNW_REG_SP, &sp);
-        
-        chars = snprintf(buf_line, 255, "ip = %lx, sp = %lx: (%s+0x%x) [%p]\n", (long) ip, (unsigned long) sp, buf_fun, (unsigned int) offset, (void*)ip);
+        writecrash(STDERR_FILENO, buf_line, chars);
+        writecrash(CRLOG, buf_line, chars);
+        writecrash(STDERR_FILENO, "Traceback:\n", 11);
+        writecrash(CRLOG, "Traceback:\n", 11);
 
-        writecrash(CRLOG,buf_line,chars);
-        writecrash(STDERR_FILENO,buf_line,chars);
+        while (unw_step(&cursor) > 0) {
+            memset(buf_line, 0, 256);
+
+            char buf_fun[256];
+            memset(buf_fun, 0, 256);
+
+            unw_word_t offset;
+            unw_get_proc_name(&cursor, buf_fun, sizeof(buf_fun) - 1, &offset);
+            unw_get_reg(&cursor, UNW_REG_IP, &ip);
+            unw_get_reg(&cursor, UNW_REG_SP, &sp);
+
+            chars = snprintf(buf_line, 255, "ip = %lx, sp = %lx: (%s+0x%x) [%p]\n", (long) ip, (unsigned long) sp,
+                             buf_fun, (unsigned int) offset, (void *) ip);
+
+            writecrash(CRLOG, buf_line, chars);
+            writecrash(STDERR_FILENO, buf_line, chars);
+        }
+
+        writecrash(STDERR_FILENO, " ===============================================\n", 50);
+        writecrash(CRLOG, " ===============================================\n", 50);
+        if (CRLOG >= 0) close(CRLOG);
     }
 
-    writecrash(STDERR_FILENO," ===============================================\n",50);
-    writecrash(CRLOG," ===============================================\n",50);
-    if(CRLOG >=0) close(CRLOG);
-
     df->unlink_pidfile();
-    
     _exit(-1);
 }
 #endif // USE_UNWIND
@@ -317,22 +324,28 @@ void DaemonFactory::release_crash_handler(int sig) {
 
     auto df = DaemonFactory::instance();
 
-    char buf_line[256];
-    int chars = snprintf(buf_line,255," Error handler: signal %d received, aborting\n", sig);
+    if (DaemonFactory::generate_crashlog) {
 
-    int CRLOG = open((const char*)df->crashlog_file, O_CREAT | O_WRONLY | O_APPEND,S_IRUSR|S_IWUSR);
+        char buf_line[256];
+        int chars = snprintf(buf_line, 255, " Error handler: signal %d received, aborting\n", sig);
 
-    if(chmod((const char*)df->crashlog_file, 0600) != 0) { if(CRLOG >= 0) ::close(CRLOG); return; }
+        int CRLOG = open((const char *) df->crashlog_file, O_CREAT | O_WRONLY | O_APPEND, S_IRUSR | S_IWUSR);
 
-    writecrash(STDERR_FILENO,buf_line,chars);
-    writecrash(CRLOG,buf_line,chars);
+        if (chmod((const char *) df->crashlog_file, 0600) != 0) {
+            if (CRLOG >= 0) ::close(CRLOG);
+            return;
+        }
 
-    if(sig == 11 or sig == 6) {
-        chars = snprintf(buf_line,255,"  consider installing debug smithproxy version \n");
-        writecrash(STDERR_FILENO,buf_line,chars);
-        writecrash(CRLOG,buf_line,chars);
+        writecrash(STDERR_FILENO, buf_line, chars);
+        writecrash(CRLOG, buf_line, chars);
+
+        if (sig == 11 or sig == 6) {
+            chars = snprintf(buf_line, 255, "  consider installing debug smithproxy version \n");
+            writecrash(STDERR_FILENO, buf_line, chars);
+            writecrash(CRLOG, buf_line, chars);
+        }
+        if (CRLOG >= 0) close(CRLOG);
     }
-    if(CRLOG >=0) close(CRLOG);
 
     df->unlink_pidfile();
 
@@ -340,6 +353,26 @@ void DaemonFactory::release_crash_handler(int sig) {
     memPool::bailing = true;
 #endif
     _exit(-1);
+}
+
+
+void DaemonFactory::set_crash_signals() {
+
+    void (*han)(int) = nullptr;
+
+    #ifndef BUILD_RELEASE
+        // even debug builds can disable unwind (release builds don't support unwind at all)
+        #ifdef USE_UNWIND
+            han = uw_btrace_handler;
+        #else
+            han = release_crash_handler;
+        #endif
+    #else
+        han = release_crash_handler;
+    #endif
+
+    set_signal(SIGABRT, han);
+    set_signal(SIGSEGV, han);
 }
 
 void DaemonFactory::set_daemon_signals(void (*terminate_handler)(int),void (*reload_handler)(int)) {
@@ -352,20 +385,7 @@ void DaemonFactory::set_daemon_signals(void (*terminate_handler)(int),void (*rel
     set_signal(SIGUSR1,reload_handler);
     set_signal(SIGPIPE, nullptr); // don't wake up threads on PIPE
 
-#ifndef BUILD_RELEASE
-
-    // even debug builds can disable unwind (release builds don't support unwind at all)
-    #ifdef USE_UNWIND
-    set_signal(SIGABRT,uw_btrace_handler);
-    set_signal(SIGSEGV,uw_btrace_handler);
-    #else
-    set_signal(SIGABRT,release_crash_handler);
-    set_signal(SIGSEGV,release_crash_handler);
-    #endif
-#else
-    set_signal(SIGABRT,release_crash_handler);
-    set_signal(SIGSEGV,release_crash_handler);
-#endif
+    set_crash_signals();
 }
 
 std::string& DaemonFactory::class_name() const {

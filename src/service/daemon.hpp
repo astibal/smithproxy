@@ -72,6 +72,7 @@ struct DaemonFactory : public LoganMate {
     rlim_t get_limit_fd();
     void set_limit_fd(int max);
     static void set_signal(int SIG, void (*sig_handler)(int));
+    static void set_crash_signals();
     static void set_daemon_signals(void (*terminate_handler)(int),void (*reload_handler)(int));
     void set_crashlog(const char* file);
 
@@ -88,6 +89,8 @@ struct DaemonFactory : public LoganMate {
     DaemonFactory() {
         ::memset((void*)crashlog_file, 0, LOG_FILENAME_SZ);
     }
+
+    static inline bool generate_crashlog = true;
 
     logan_lite& get_log() { return log; };
 private:

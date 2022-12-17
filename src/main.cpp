@@ -606,6 +606,12 @@ int main(int argc, char *argv[]) {
     }
 
     do_cleanup();
+
+    // Don't do crashdumps on exit in Release builds
+    #ifdef BUILD_RELEASE
+    DaemonFactory::generate_crashlog = false;
+    #endif
+
     return EXIT_SUCCESS;
 }
 
