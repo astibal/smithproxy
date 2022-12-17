@@ -1148,7 +1148,7 @@ int cli_exec_shutdown(struct cli_def *cli, const char *command, char *argv[], in
         }
     });
 
-    SmithProxy::instance().stop();
+    SmithProxy::instance().terminate_flag = true;
     counter.join();
 
     return CLI_OK;
