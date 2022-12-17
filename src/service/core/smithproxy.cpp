@@ -431,8 +431,9 @@ void SmithProxy::run() {
 
     auto bail_it = [this]{
         kill_proxies();
-        instance().join_all();
         terminated = true;
+
+        instance().join_all();
     };
 
     if(not cfg_daemonize) {
@@ -570,8 +571,6 @@ void SmithProxy::kill_proxies() {
                 p->join_workers();
             }
         }
-
-        proxies.clear();
     };
 
     kill_proxies(plain_proxies);
