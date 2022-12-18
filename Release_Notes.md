@@ -19,7 +19,7 @@ Ales Stibal `<astib@mag0.net>`
 * git: [https://github.com/astibal/smithproxy](https://github.com/astibal/smithproxy)
 
 To build smithproxy from source, please download source tarball and read instructions in `tools/README.md`.  
-It should compile on any recent Linux system with C++17 compiler (GCC is used and tested).
+It should compile on any recent Linux system with C++17 compiler (GCC and Clang is used and tested).
 
 ### Getting support
 
@@ -29,8 +29,20 @@ It should compile on any recent Linux system with C++17 compiler (GCC is used an
 
 ## Roadmap for future versions
 
-* [ ] memory pool ONLY execution
-* [ ] routing - SNI-based, ... more options
+## What's new in 0.9.31
+
+- enable KTLS by default (`settings/ssl_use_ktls` config variable)
+- UDP SOCKS5 server support
+- added "events": important logging is kept in the ring buffer
+  - `show event list` shows event entries, asterisk indicates details present
+  - `show event detail <number>` prints event details (ie. certificate, ...)
+- configurable login dependency on unix group membership (using PAM)
+- added option `ips` to `dia proxy session list` to display IP with SNI
+- API improvements: 
+  - listens now on HTTPS, login with GET or json POST
+  - remove/set/add configuration options
+- snap packages moved from `core18` to `core22`   
+- many fixes and smaller improvements
 
 ## What's new in 0.9.30
 - HTTP/2 parser - retrieve connection details from the headers
