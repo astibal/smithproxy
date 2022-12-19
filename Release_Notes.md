@@ -32,6 +32,7 @@ It should compile on any recent Linux system with C++17 compiler (GCC and Clang 
 ## What's new in 0.9.31
 
 - enable KTLS by default (`settings/ssl_use_ktls` config variable)
+- use single file CA bundle (`settings/ca_bundle_file` config variable)
 - UDP SOCKS5 server support
 - added "events": important logging is kept in the ring buffer
   - `show event list` shows event entries, asterisk indicates details present
