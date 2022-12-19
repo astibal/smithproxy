@@ -1,6 +1,6 @@
 
 name: smithproxy
-version: 0.9.30
+version: 0.9.31
 summary: Fast and featured transparent TCP/UDP/TLS proxy
 description: |
   Smithproxy is fast transparent TCP/UDP/TLS (SSL) proxy. It's highly configurable
@@ -170,7 +170,7 @@ parts:
 
     source: https://github.com/astibal/smithproxy
     source-type: git
-    source-branch: master
+    source-branch: 0.9.31
     build-environment:
       - PYTHONPATH: "$SNAPCRAFT_PART_INSTALL/usr/lib/python3/dist-packages"
 
