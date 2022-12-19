@@ -170,7 +170,7 @@ parts:
 
     source: https://github.com/astibal/smithproxy
     source-type: git
-    source-branch: master
+    source-branch: release-0.9.31
     build-environment:
       - PYTHONPATH: "$SNAPCRAFT_PART_INSTALL/usr/lib/python3/dist-packages"
 
