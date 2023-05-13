@@ -578,6 +578,14 @@ void CfgValueHelp::init() {
             .suggestion_generator(CfgValue::SUGGESTION_BOOL);
 
 
+    add("tls_profiles.[x].sni_based_cert", "enable/disable loading custom, sni-based certificates (no mitm)")
+            .help_quick(CfgValue::HELP_BOOL)
+            .may_be_empty(false)
+            .value_filter(CfgValue::VALUE_BOOL)
+            .suggestion_generator(CfgValue::SUGGESTION_BOOL);
+
+
+
     init_routing();
     init_captures();
 

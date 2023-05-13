@@ -187,6 +187,8 @@ public:
     int  failed_certcheck_override_timeout_type = 0;    // 0 - just expire after the timeout
     // 1 - reset timeout on traffic (aka idle timer)
 
+    bool mitm_cert_sni_search = true;                   // look in cache for certificates stored with SNI key
+
     bool use_pfs = true;         // general switch, more concrete take precedence
     bool left_use_pfs = true;
     bool right_use_pfs = true;
@@ -241,6 +243,7 @@ public:
             ret += string_format("\n        failed cert check allow user override: %d", failed_certcheck_override);
             ret += string_format("\n        failed cert check user override timeout: %d", failed_certcheck_override_timeout);
             ret += string_format("\n        failed cert check user override timeout type: %d", failed_certcheck_override_timeout_type);
+            ret += string_format("\n        look for SNI custom certificates: %d", mitm_cert_sni_search);
 
             bool sni_out = false;
             if(sni_filter_bypass)
