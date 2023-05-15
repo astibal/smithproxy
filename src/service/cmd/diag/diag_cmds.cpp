@@ -246,6 +246,7 @@ int cli_diag_ssl_cache_clear(struct cli_def *cli, const char *command, char *arg
             }
         }
         store->cache().clear();
+        store->load_custom_certificates();
     }
 
     cli_print(cli, "%s", out.str().c_str());
@@ -2152,7 +2153,7 @@ bool register_diags(cli_def* cli, cli_command* diag) {
     cli_register_command(cli, diag_ssl_cache, "stats", cli_diag_ssl_cache_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "display ssl cert cache statistics");
     cli_register_command(cli, diag_ssl_cache, "list", cli_diag_ssl_cache_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all ssl cert cache entries");
     cli_register_command(cli, diag_ssl_cache, "print", cli_diag_ssl_cache_print, PRIVILEGE_PRIVILEGED, MODE_EXEC, "print all ssl cert cache entries");
-    cli_register_command(cli, diag_ssl_cache, "clear", cli_diag_ssl_cache_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "remove all ssl cert cache entries");
+    cli_register_command(cli, diag_ssl_cache, "clear", cli_diag_ssl_cache_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "remove all ssl cert cache entries and reload custom certificates");
 
     auto diag_ssl_wl = cli_register_command(cli, diag_ssl, "whitelist", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl temporary verification whitelist");
     cli_register_command(cli, diag_ssl_wl, "list", cli_diag_ssl_wl_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all verification whitelist entries");

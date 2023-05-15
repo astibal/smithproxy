@@ -394,6 +394,10 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "added tls_profiles.[x].sni_based_cert");
         return true;
     }
+    else if(upgrade_to_num == 1015) {
+        log.event(INF, "added tls_profiles.[x].ip_based_cert");
+        return true;
+    }
 
     return false;
 }
@@ -1876,6 +1880,7 @@ int CfgFactory::load_db_prof_tls () {
                 load_if_exists(cur_object, "failed_certcheck_override_timeout", new_profile->failed_certcheck_override_timeout);
                 load_if_exists(cur_object, "failed_certcheck_override_timeout_type", new_profile->failed_certcheck_override_timeout_type);
                 load_if_exists(cur_object, "sni_based_cert", new_profile->mitm_cert_sni_search);
+                load_if_exists(cur_object, "ip_based_cert", new_profile->mitm_cert_ip_search);
 
                 if(cur_object.exists("sni_filter_bypass")) {
                         Setting& sni_filter = cur_object["sni_filter_bypass"];
@@ -2920,6 +2925,7 @@ bool CfgFactory::policy_apply_tls (const std::shared_ptr<ProfileTls> &pt, baseCo
         sslcom->opt.cert.failed_check_override_timeout = pt->failed_certcheck_override_timeout;
         sslcom->opt.cert.failed_check_override_timeout_type = pt->failed_certcheck_override_timeout_type;
         sslcom->opt.cert.mitm_cert_sni_search = pt->mitm_cert_sni_search;
+        sslcom->opt.cert.mitm_cert_ip_search = pt->mitm_cert_ip_search;
 
         auto* peer_sslcom = dynamic_cast<SSLCom*>(sslcom->peer());
 
@@ -2927,18 +2933,20 @@ bool CfgFactory::policy_apply_tls (const std::shared_ptr<ProfileTls> &pt, baseCo
                 pt->failed_certcheck_replacement &&
                 should_redirect(pt, peer_sslcom)) {
 
-            _deb("policy_apply_tls: applying profile, repl=%d, repl_ovrd=%d, repl_ovrd_tmo=%d, repl_ovrd_tmo_type=%d, sni_search=%d",
+            _deb("policy_apply_tls: applying profile, repl=%d, repl_ovrd=%d, repl_ovrd_tmo=%d, repl_ovrd_tmo_type=%d, sni_search=%d, ip_search=%d",
                  pt->failed_certcheck_replacement,
                  pt->failed_certcheck_override,
                  pt->failed_certcheck_override_timeout,
                  pt->failed_certcheck_override_timeout_type,
-                 pt->mitm_cert_sni_search);
+                 pt->mitm_cert_sni_search,
+                 pt->mitm_cert_ip_search);
 
             peer_sslcom->opt.cert.failed_check_replacement = pt->failed_certcheck_replacement;
             peer_sslcom->opt.cert.failed_check_override = pt->failed_certcheck_override;
             peer_sslcom->opt.cert.failed_check_override_timeout = pt->failed_certcheck_override_timeout;
             peer_sslcom->opt.cert.failed_check_override_timeout_type = pt->failed_certcheck_override_timeout_type;
             peer_sslcom->opt.cert.mitm_cert_sni_search = pt->mitm_cert_sni_search;
+            peer_sslcom->opt.cert.mitm_cert_ip_search = pt->mitm_cert_ip_search;
         }
 
         // set accordingly if general "use_pfs" is specified, more concrete settings come later
@@ -3527,6 +3535,7 @@ bool CfgFactory::new_tls_profile(Setting& ex, std::string const& name) const {
         item.add("failed_certcheck_override_timeout", Setting::TypeInt) = 600;
         item.add("failed_certcheck_override_timeout_type", Setting::TypeInt) = 0;
         item.add("sni_based_cert", Setting::TypeBoolean) = true;
+        item.add("ip_based_cert", Setting::TypeBoolean) = true;
 
 
         item.add("left_disable_reuse", Setting::TypeBoolean) = false;
@@ -3597,6 +3606,7 @@ int CfgFactory::save_tls_profiles(Config& ex) const {
         item.add("failed_certcheck_override_timeout", Setting::TypeInt) = obj->failed_certcheck_override_timeout;
         item.add("failed_certcheck_override_timeout_type", Setting::TypeInt) = obj->failed_certcheck_override_timeout_type;
         item.add("sni_based_cert", Setting::TypeBoolean) = obj->mitm_cert_sni_search;
+        item.add("ip_based_cert", Setting::TypeBoolean) = obj->mitm_cert_ip_search;
 
 
         item.add("left_disable_reuse", Setting::TypeBoolean) = obj->left_disable_reuse;

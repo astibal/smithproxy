@@ -584,6 +584,11 @@ void CfgValueHelp::init() {
             .value_filter(CfgValue::VALUE_BOOL)
             .suggestion_generator(CfgValue::SUGGESTION_BOOL);
 
+    add("tls_profiles.[x].ip_based_cert", "enable/disable loading custom, address based certificates (no mitm)")
+            .help_quick(CfgValue::HELP_BOOL)
+            .may_be_empty(false)
+            .value_filter(CfgValue::VALUE_BOOL)
+            .suggestion_generator(CfgValue::SUGGESTION_BOOL);
 
 
     init_routing();
