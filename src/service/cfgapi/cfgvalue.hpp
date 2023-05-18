@@ -363,7 +363,8 @@ struct CfgValueCleaner {
                         to_ret.args.emplace_back(sub_escaped);
                     }
                 }
-                to_ret.is_question = (to_ret.args[0] == "?");
+                if(not to_ret.args.empty())
+                    to_ret.is_question = (to_ret.args[0] == "?");
 
             } else {
                 if (cmd.size() > 2) {
@@ -377,7 +378,8 @@ struct CfgValueCleaner {
                         }
                     }
 
-                    to_ret.is_question = (to_ret.args[0] == "?");
+                    if(not to_ret.args.empty())
+                        to_ret.is_question = (to_ret.args[0] == "?");
                 }
             }
         }
