@@ -60,6 +60,7 @@
 
 #include <sobject.hpp>
 #include <proxy/mitmproxy.hpp>
+#include <proxy/filters/filterproxy.hpp>
 #include <policy/inspectors.hpp>
 #include <policy/authfactory.hpp>
 
@@ -1730,6 +1731,13 @@ auto get_more_info(sobject_info const* so_info, MitmProxy const* curr_proxy, Mit
 
         if (lf) {
             if (verbosity > INF) info_ss << "\n    ";
+
+            if( curr_proxy and not curr_proxy->filters_.empty()) {
+                info_ss << "\n    Filters:";
+                for(auto const& fi: curr_proxy->filters_) {
+                    info_ss << "\n        " << fi.first << ": " << fi.second.get()->to_string(iINF);
+                }
+            }
             if (lf->engine_ctx.signature) {
 
                 auto mysig = std::dynamic_pointer_cast<MyDuplexFlowMatch>(lf->engine_ctx.signature);
@@ -1831,6 +1839,11 @@ int cli_diag_proxy_session_list_extra (struct cli_def *cli, const char *command,
 
                 if(lf and lf->engine_ctx.application_data) {
                     suffix += string_format(" (%s)", lf->engine_ctx.application_data->protocol().c_str());
+                }
+                if(curr_proxy and not curr_proxy->filters_.empty()) {
+                    for(auto const& fi: curr_proxy->filters_) {
+                        suffix += string_format(" !%s", fi.first.c_str());
+                    }
                 }
 
                 auto const& io_info = get_io_info(lf, rg, sl_flags);

@@ -45,7 +45,9 @@
 
 #include <basecom.hpp>
 #include <hostcx.hpp>
+
 #include <proxy/socks5/sockshostcx.hpp>
+
 #include <baseproxy.hpp>
 #include <threadedacceptor.hpp>
 #include <threadedreceiver.hpp>
@@ -63,8 +65,6 @@
 
 struct whitelist_verify_entry {
 };
-
-
 
 class FilterProxy;
 

@@ -42,7 +42,9 @@
 
 #include <proxy/mitmproxy.hpp>
 #include <proxy/mitmhost.hpp>
-#include <proxy/filterproxy.hpp>
+#include <proxy/filters/filterproxy.hpp>
+#include <proxy/filters/sinkhole.hpp>
+
 #include <proxy/proxymaker.hpp>
 
 #include <log/logger.hpp>
@@ -543,29 +545,13 @@ bool MitmProxy::update_auth_ipX_map(baseHostCX* cx) {
 
 
 void MitmProxy::add_filter(std::string const& name, FilterProxy* fp) {
-
-    filters_.emplace_back(std::pair<std::string,FilterProxy*>(name,fp));
-    
-    for(auto s: fp->ls()) {
-        com()->set_monitor(s->socket());
-        com()->set_poll_handler(s->socket(),this);
-    }
-    
-    for(auto s: fp->rs()) {
-        com()->set_monitor(s->socket());
-        com()->set_poll_handler(s->socket(),this);
-    }    
+    filters_.emplace_back(name, fp);
 }
 
 
 int MitmProxy::handle_sockets_once(baseCom* xcom) {
     
-    for(auto const& [ filter_name, filter_proxy ]: filters_) {
 
-        _deb("MitmProxy::handle_sockets_once: running filter %s", filter_name.c_str());
-        filter_proxy->handle_sockets_once(xcom);
-    }
-    
     return baseProxy::handle_sockets_once(xcom);
 }
 
@@ -844,6 +830,13 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
 
             if(*log_dump.level() >= iDIA)
                 proxy_dump_packet(side, from->to_read());
+
+
+            if(not filters_.empty()) for(auto const& [ filter_name, filter_proxy ]: filters_) {
+
+                    _deb("MitmProxy::proxy: running filter %s", filter_name.c_str());
+                    filter_proxy->proxy(from, to, side, redirected);
+            }
 
             auto sz = from->to_read().size();
             to->to_write(from->to_read());
