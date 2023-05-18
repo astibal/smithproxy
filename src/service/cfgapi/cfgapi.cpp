@@ -59,6 +59,8 @@
 #include <proxy/mitmproxy.hpp>
 #include <proxy/mitmhost.hpp>
 
+#include <proxy/filters/sinkhole.hpp>
+
 #include <inspect/dnsinspector.hpp>
 #include <inspect/pyinspector.hpp>
 
@@ -195,6 +197,16 @@ std::shared_ptr<CfgRange> CfgFactory::lookup_port (const char *name) {
     }    
     
     return std::make_shared<CfgRange>(NULLRANGE);
+}
+
+std::shared_ptr<CfgString> CfgFactory::lookup_features (const char *name) {
+    std::scoped_lock<std::recursive_mutex> l(lock_);
+
+    if(db_features.find(name) != db_features.end()) {
+        return std::dynamic_pointer_cast<CfgString>(db_features[name]);
+    }
+
+    return nullptr;
 }
 
 std::shared_ptr<CfgUint8> CfgFactory::lookup_proto (const char *name) {
@@ -398,6 +410,11 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "added tls_profiles.[x].ip_based_cert");
         return true;
     }
+    else if(upgrade_to_num == 1016) {
+        log.event(INF, "added policy.[x].features");
+        return true;
+    }
+
 
     return false;
 }
@@ -1125,6 +1142,21 @@ int CfgFactory::load_db_proto () {
     return num;
 }
 
+int CfgFactory::load_db_features() {
+    auto lc_ = std::scoped_lock(lock_);
+
+    _dia("cfgapi_load_db_filters: start");
+    auto sl = std::make_shared<CfgString>("sink-left");
+    db_features["sink-left"] = std::move(sl);
+
+    auto sr = std::make_shared<CfgString>("sink-right");
+    db_features["sink-right"] = std::move(sr);
+
+    auto sa = std::make_shared<CfgString>("sink-all");
+    db_features["sink-all"] = std::move(sa);
+
+    return static_cast<int>(db_features.size());
+}
 
 int CfgFactory::load_db_policy () {
     
@@ -1313,6 +1345,28 @@ int CfgFactory::load_db_policy () {
                         error = true;
                         rule->is_disabled = true;
                     }                    
+                }
+            }
+
+            if(cur_object.exists("features")) {
+                const Setting &sett_features = cur_object["features"];
+                if (not sett_features.isScalar()) {
+                    int sett_filters_count = sett_features.getLength();
+                    _dia("cfgapi_load_policy[#%d]: features object list", i);
+                    for (int y = 0; y < sett_filters_count; y++) {
+                        const char *obj_name = sett_features[y];
+
+                        auto r = lookup_features(obj_name);
+                        if (r) {
+                            r->usage_add(std::weak_ptr(rule));
+                            rule->features.emplace_back(r);
+                            _dia("cfgapi_load_policy[#%d]: features object: %s", i, obj_name);
+                        } else {
+                            _dia("cfgapi_load_policy[#%d]: features object not found: %s", i, obj_name);
+                            error = true;
+                            rule->is_disabled = true;
+                        }
+                    }
                 }
             }
             
@@ -1564,6 +1618,22 @@ int CfgFactory::policy_action (int index) {
         return PolicyRule::POLICY_ACTION_DENY;
     }
 }
+
+std::shared_ptr<PolicyRule> CfgFactory::policy_rule (int index) {
+    std::scoped_lock<std::recursive_mutex> l(lock_);
+
+    if(index < 0) {
+        return nullptr;
+    }
+
+    if(index < (signed int)db_policy_list.size()) {
+        return db_policy_list.at(index);
+    } else {
+        _dia("cfg_obj_policy_rule[#%d]: out of bounds, nullptr", index);
+        return nullptr;
+    }
+}
+
 
 std::shared_ptr<ProfileContent> CfgFactory::policy_prof_content (int index) {
     std::scoped_lock<std::recursive_mutex> l(lock_);
@@ -2521,6 +2591,22 @@ bool CfgFactory::prof_script_apply (baseHostCX *originator, baseProxy *new_proxy
     return ret;
 }
 
+void CfgFactory::policy_apply_features(std::shared_ptr<PolicyRule> const & policy_rule, MitmProxy *mitm_proxy) {
+
+    // apply feature tags
+    if(policy_rule and not policy_rule->features.empty()) {
+        FilterProxy* f = nullptr;
+        for(auto const& it: policy_rule->features) {
+            if(it->value() == "sink-left") { if(not f) f = new SinkholeFilter(mitm_proxy, true, false); }
+            if(it->value() == "sink-right") { if(not f) f = new SinkholeFilter(mitm_proxy, false, true); }
+            if(it->value() == "sink-all") { if(not f) f = new SinkholeFilter(mitm_proxy, true, true); }
+        }
+
+        if(f) {
+            mitm_proxy->add_filter(f->to_string(iINF), f);
+        }
+    }
+}
 
 int CfgFactory::policy_apply (baseHostCX *originator, baseProxy *proxy, int matched_policy) {
 
@@ -2532,8 +2618,8 @@ int CfgFactory::policy_apply (baseHostCX *originator, baseProxy *proxy, int matc
     if(policy_num < 1) {
         policy_num = policy_match(proxy);
     }
-
     if(auto verdict = policy_action(policy_num); verdict == PolicyRule::POLICY_ACTION_PASS) {
+        auto rule = policy_rule(policy_num);
 
         auto pc = policy_prof_content(policy_num);
         auto pd = policy_prof_detection(policy_num);
@@ -2582,13 +2668,16 @@ int CfgFactory::policy_apply (baseHostCX *originator, baseProxy *proxy, int matc
             mitm_proxy->opt_auth_resolve = pa->resolve;
             
             pa_name = pa->element_name().c_str();
+
+            // now load features, based on a feature tag
+            policy_apply_features(rule, mitm_proxy);
         } 
         
         // ALGS can operate only on MitmHostCX classes
 
         
         _inf("Connection %s accepted: policy=%d cont=%s det=%s tls=%s auth=%s algs=%s", originator->full_name('L').c_str(), policy_num, pc_name, pd_name, pt_name, pa_name, algs_name.c_str());
-        
+
     } else {
         _inf("Connection %s denied: policy=%d", originator->full_name('L').c_str(), policy_num);
     }
@@ -3739,6 +3828,9 @@ bool CfgFactory::new_policy (Setting &ex, const std::string &name) const {
         newpol.add("sport", Setting::TypeArray);
         newpol.add("dst", Setting::TypeArray);
         newpol.add("dport", Setting::TypeArray);
+
+        newpol.add("features", Setting::TypeArray);
+
         newpol.add("action", Setting::TypeString) = "accept";
         newpol.add("nat", Setting::TypeString) = "auto";
 
@@ -4421,6 +4513,11 @@ int CfgFactory::save_policy(Config& ex) const {
         Setting& dstport_list = item.add("dport", Setting::TypeArray);
         for(auto const& sp: pol->dst_ports) {
             dstport_list.add(Setting::TypeString) = sp->element_name();
+        }
+
+        Setting& features_list = item.add("features", Setting::TypeArray);
+        for(auto const& f: pol->features) {
+            features_list.add(Setting::TypeString) = f->element_name();
         }
 
         item.add("action", Setting::TypeString) = pol->action_name;

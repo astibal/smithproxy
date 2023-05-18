@@ -495,18 +495,26 @@ void CfgValueHelp::init() {
                 return CfgFactory::get()->keys_of_db_port();
             });
 
+    add("policy.[x].features", "connection optional features")
+            .may_be_empty(true)
+            .value_filter(is_in_vector([]() { return CfgFactory::get()->keys_of_db_features(); },"must a valid feature tag "))
+            .suggestion_generator([](std::string const& section, std::string const& variable) {
+                return CfgFactory::get()->keys_of_db_features();
+            });
+
+
     add("policy.[x].action", "action to take with matching traffic")
             .may_be_empty(false)
             .value_filter(is_in_vector([]() -> std::vector<std::string> { return {"accept", "reject"}; },"accept, or reject"))
             .suggestion_generator([](std::string const& section, std::string const& variable) -> std::vector<std::string> {
-                return {"accept", "reject"}; ;
+                return {"accept", "reject"};
             });
 
     add("policy.[x].nat", "nat options")
             .may_be_empty(false)
             .value_filter(is_in_vector([]() -> std::vector<std::string> { return {"auto", "none"}; },"auto, or none"))
             .suggestion_generator([](std::string const& section, std::string const& variable) -> std::vector<std::string> {
-                return {"auto", "none"};;
+                return {"auto", "none"};
             });
 
     add("policy.[x].tls_profile", "tls options")

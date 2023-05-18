@@ -155,6 +155,14 @@ std::string PolicyRule::to_string(int verbosity) const {
     print_profile("alg_dns", profile_alg_dns);
     print_profile("routing", profile_routing);
 
+    if(not features.empty()) {
+        out << "\n    features=[ ";
+        for(auto const& feat: features) {
+            out << feat->value() << " ";
+        }
+        out << "]";
+    }
+
     return out.str();
 }
 
