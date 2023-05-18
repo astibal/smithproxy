@@ -75,20 +75,19 @@ struct CfgSingle : public CfgElement {
 
 
 
-typedef CfgSingle<uint8_t> CfgUint8;
-typedef CfgSingle<uint16_t> CfgUint16;
-typedef CfgSingle<uint32_t> CfgUint32;
-typedef CfgSingle<range> CfgRange;
-typedef CfgSingle<std::string> CfgString;
+using CfgUint8 = CfgSingle<uint8_t>;
+using CfgUint16 = CfgSingle<uint16_t>;
+using CfgUint32 = CfgSingle<uint32_t>;
+using CfgRange = CfgSingle<range>;
+using CfgString = CfgSingle<std::string>;
 
 
-typedef std::shared_ptr<CfgElement> shared_CfgElement;
-typedef std::shared_ptr<CfgUint8> shared_CfgUint8;
-typedef std::shared_ptr<CfgUint16> shared_CfgUint16;
-typedef std::shared_ptr<CfgUint32> shared_CfgUint32;
-typedef std::shared_ptr<CfgRange> shared_CfgRange;
-typedef std::shared_ptr<CfgString> shared_CfgString;
-
+using shared_CfgElement = std::shared_ptr<CfgElement>;
+using shared_CfgUint8 = std::shared_ptr<CfgUint8>;
+using shared_CfgUint16 = std::shared_ptr<CfgUint16>;
+using shared_CfgUint32 = std::shared_ptr<CfgUint32>;
+using shared_CfgRange = std::shared_ptr<CfgRange>;
+using shared_CfgString = std::shared_ptr<CfgString>;
 
 
 #endif //SMITHPROXY_CFGELEMENT_HPP
