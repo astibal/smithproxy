@@ -68,6 +68,7 @@ struct FilterResult : public socle::sobject {
 class FilterProxy : public socle::sobject {
 public:
     
+    FilterProxy() = default;
     explicit FilterProxy(MitmProxy* parent) : parent_(parent) {};
     ~FilterProxy() override = default;
     
@@ -80,6 +81,7 @@ public:
 
     MitmProxy* parent() { return parent_; }
     MitmProxy const* parent() const { return parent_; }
+    void parent(MitmProxy* p) { parent_ = p; }
 
     std::unique_ptr<FilterResult>& result() { return result_; }
 

@@ -44,13 +44,12 @@
 
 class SinkholeFilter : public FilterProxy {
 
+public:
     bool sink_left = false;
     bool sink_right = false;
-
     std::string replacement;
 
-    static inline logan_lite log {"proxy.sinkhole"};
-public:
+    SinkholeFilter() = default;
     // which received data should be sunken? If left, data from left are not sent to the right side
     SinkholeFilter(MitmProxy* parent, bool sink_left, bool sink_right) : FilterProxy(parent), sink_left(sink_left), sink_right(sink_right) {}
 
@@ -59,6 +58,9 @@ public:
     }
 
     void proxy(baseHostCX *from, baseHostCX *to, socle::side_t side, bool redirected) override;
+
+private:
+    static inline logan_lite log {"proxy.sinkhole"};
 };
 
 #endif
