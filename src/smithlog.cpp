@@ -48,7 +48,7 @@ QueueLogger::QueueLogger(): LogMux(), lockable() {
 
 size_t QueueLogger::write_log(loglevel l, std::string& sss) {
 
-    locked_ ll(this);
+    auto lc_ = std::scoped_lock(*this);
 
 
     if(debug_queue) {
@@ -82,14 +82,14 @@ size_t QueueLogger::write_log(loglevel l, std::string& sss) {
     if(logs_.size() >= max_len) {
         logs_.pop();
     }
-    
+
     // process on my mark!
-    
+
     return 0;
 }
 
 size_t QueueLogger::write_disk(loglevel l, std::string& sss) {
-    locked_ ll(this);
+    auto lc_ = std::scoped_lock(*this);
 
     return LogMux::write_log(l,sss);
 }
@@ -100,12 +100,12 @@ void QueueLogger::run_queue(std::shared_ptr<QueueLogger> log_src) {
     if(log_src == nullptr) {
         return;
     }
-    
+
     while (!log_src->sig_terminate) {
 
         if(! log_src->logs_.empty()) {
 
-            auto lock = locked_(log_src.get());
+            auto lc_ = std::scoped_lock(*log_src.get());
 
             log_entry e = log_src->logs_.front(); log_src->logs_.pop();
 

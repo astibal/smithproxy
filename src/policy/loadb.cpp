@@ -42,11 +42,11 @@
 
 template <class HostInfoType>
 HostPool<HostInfoType>::~HostPool() {
-    
-    locked_ l(this);
-    
+
+    auto lc_ = std::scoped_lock(*this);
+
     candidates.clear();
-    
+
     for(auto i: host_data_) {
         delete i.second();
     }
@@ -55,31 +55,31 @@ HostPool<HostInfoType>::~HostPool() {
 template <class HostInfoType>
 bool HostPool<HostInfoType>::insert_new(Host h)  {
 
-    locked_ l(this);
-    
+    auto lc_ = std::scoped_lock(*this);
+
     auto i = host_data_.find(h);
-    
+
     if(i != host_data_.end()) {
         return false;
     }
-    
+
     host_data_[h] = new HostInfoType(h);
-    
+
     return true;
 }
 
 
 template <class HostInfoType>
 const HostInfoType* HostPool<HostInfoType>::compute() {
-    locked_ l(this);
-    
+    auto lc_ = std::scoped_lock(*this);
+
     int i = compute_index();
     HostInfoType* r = candidates.at(i);
 }
 
 template <class HostInfoType>
 void HostPool<HostInfoType>::refresh() {
-    locked_ l(this);
+    auto lc_ = std::scoped_lock(*this);
     
     candidates.clear();
     for(auto i: host_data_) {
