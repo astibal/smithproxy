@@ -120,7 +120,7 @@ public:
     DECLARE_LOGGING(to_string)
 
     private:
-        logan_lite log {"com.proxy.policy"};
+        logan_lite log {"proxy.policy"};
 };
 
 

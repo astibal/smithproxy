@@ -231,8 +231,8 @@ public:
     DECLARE_LOGGING(to_string)
 
 private:
-    logan_lite log {"com.proxy"};
-    logan_lite log_dump {"com.proxy.payload"};
+    logan_lite log {"proxy"};
+    logan_lite log_dump {"proxy.payload"};
 };
 
 class MitmMasterProxy : public ThreadedAcceptorProxy<MitmProxy> {
