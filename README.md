@@ -33,11 +33,13 @@ It uses our C++17 socket proxying library called [*socle*](https://github.com/as
 
 ## TLS features:
 * TLS security checks (OCSP, OCSP stapling, automatic CRL download)
+* custom certificates based on target IP or SNI
 * Certificate Transparency checks for outbound connections
 * HTML replacement browser warnings
 * STARTTLS support for most starttls capable protocols, including HTTP proxy CONNECT
 * Seamless HTTPS redirection to authentication portal
 * Exporting sslkeylog
+* KTLS support (level of acceleration depends on OpenSSL version)
 
 ## Other:
 * Local and LDAP user authentication using builtin web portal (using complementary package)
@@ -47,6 +49,7 @@ It uses our C++17 socket proxying library called [*socle*](https://github.com/as
 * Policies based on FQDN and 2nd level DNS domain
 * both IPv4 and IPv6 are supported
 * detailed debugging messages in CLI if needed
+* various sinkhole options - traffic is captured but not proxied
 
 ## Tools:
 * built-in tools to help with CA and certificate enrollment needed to run smithproxy

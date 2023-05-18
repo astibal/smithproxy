@@ -29,6 +29,22 @@ It should compile on any recent Linux system with C++17 compiler (GCC and Clang 
 
 ## Roadmap for future versions
 
+## What's new in 0.9.32
+- custom, not-mitmed certificates based on target IP address, or SNI (loaded from files)
+  - using `tls_profiles/<profilename>`: `sni_based_cert` and `ip_based_cert`
+- sinkhole options added:  
+  Configure new `features` entry on policy and add:
+  - `sink-left` (traffic from originator is consumed and not proxied)
+  - `sink-right` (traffic from target is consumed and not proxied)
+  - `sink-all` (both above)
+
+  Note all sinkhole filters are intentionally consuming data after traffic writer writes   
+  them to pcap or to remote gre.
+
+- this will be last minor version of smithproxy, next version will be bumped to `1.0.0`  
+  There is no particular reason, proxy is not "experimental" anymore and .32 is already quite  
+  big number.
+
 ## What's new in 0.9.31
 
 - enable KTLS by default (`settings/ssl_use_ktls` config variable)
