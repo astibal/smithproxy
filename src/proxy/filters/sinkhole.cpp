@@ -43,7 +43,7 @@ void SinkholeFilter::proxy(baseHostCX *from, baseHostCX *to, socle::side_t side,
 
     auto sink_that = [this](auto from, auto to, auto side) {
         if(not replacement.empty()) {
-            _dia("sinking %c: %dB with replacement of %dB", from->to_read().size(), socle::from_side(side), replacement.size());
+            _dia("sinking %c: %dB with replacement of %dB", socle::from_side(side), from->to_read().size(), replacement.size());
             auto lc_ = std::scoped_lock(*from->readbuf());
             from->readbuf()->assign(replacement);
         }
