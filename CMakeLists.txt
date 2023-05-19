@@ -243,8 +243,8 @@ else(EXISTS "${PROJECT_SOURCE_DIR}/.git")
 endif(EXISTS "${PROJECT_SOURCE_DIR}/.git")
 
 message(STATUS "Git current smithproxy branch: ${SX_GIT_BRANCH}")
-message(STATUS "Git commit smithrproxy hash: ${SX_GIT_COMMIT_HASH}")
-message(STATUS "Git commit smithrproxy version: ${SX_GIT_VERSION}")
+message(STATUS "Git commit smithproxy hash: ${SX_GIT_COMMIT_HASH}")
+message(STATUS "Git commit smithproxy version: ${SX_GIT_VERSION}")
 
 message(STATUS "Generating smithproxy_version.h")
 
