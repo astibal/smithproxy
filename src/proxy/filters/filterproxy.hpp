@@ -39,15 +39,14 @@
 
 
 
-#ifndef __FILTER_PROXY
- #define __FILTER_PROXY
+#ifndef FILTER_PROXY
+ #define FILTER_PROXY
  
 #include <ctime>
 
-#include <sobject.hpp>
-#include <display.hpp>
-#include <baseproxy.hpp>
-
+#include "sobject.hpp"
+#include "common/display.hpp"
+#include "src/proxy/mitmproxy.hpp"
 
 
 struct FilterResult : public socle::sobject {
@@ -56,57 +55,43 @@ struct FilterResult : public socle::sobject {
     // WANT_MORE_RIGHT - asking for more RIGHT bytes before we can FINISH
     // FINISHED_OK   - filtering has been finished. Don't send anything more. Proxy as needed.
     // FINISHED_DROP - filtering has been finished. Don't send anything more, data considered as harmful, drop parent proxy.
-    typedef enum { NONE=0x0000, WANT_MORE_LEFT=0x0001, WANT_MORE_RIGHT=0x0002, FINISHED_DROP=0x4000, FINISHED_OK=0x8000 } status_flags;
-    int status_ = NONE;
-    
-    
-    bool is_flag(status_flags sf) { return flag_check<int>(&status_,(int)sf); };
-    void set_flag(status_flags sf) { flag_set<int>(&status_,(int)sf); }
-    
-    lockbuffer left_in;   // what you read from left side of proxy (-> filtering will put it in right_out)
-    lockbuffer left_out;  // what you should write to left side of proxy
-    
-    lockbuffer right_in;  // what you read on right side of proxy  (-> filtering will put it in left out)
-    lockbuffer right_out; // what you should write to the right side of proxy
-    
+    using status_flags = enum { NONE=0x0000, WANT_MORE_LEFT=0x0002, WANT_MORE_RIGHT=0x0004, FINISHED_DROP=0x0008, FINISHED_OK=0x8000 } ;
+    uint64_t status_ = NONE;
+
+    bool is_flag(status_flags sf) const { return flag_check<uint64_t>(&status_,(uint64_t )sf); };
+    void set_flag(status_flags sf) { flag_set<uint64_t >(&status_,(uint64_t )sf); }
+
     std::string to_string(int verbosity) const override { static std::string r("FilterResult"); return r; };
     bool ask_destroy() override { return false; };
 };
 
-class MitmProxy;
-
-class FilterProxy : public baseProxy, public socle::sobject {
+class FilterProxy : public socle::sobject {
 public:
     
-    FilterProxy(MitmProxy* parent);
-    virtual ~FilterProxy() { delete result_; };
+    FilterProxy() = default;
+    explicit FilterProxy(MitmProxy* parent) : parent_(parent) {};
+    ~FilterProxy() override = default;
     
     std::string to_string(int verbosity) const override { static std::string r("FilterProxy"); return r; };
-    bool ask_destroy() override { return false; };
-    
-    FilterResult* result() { return result_; }
-    
+    bool ask_destroy() override;
+
+    virtual void proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redirected) {
+        // don't need incomplete type when accessing to_string using base pointer
+    }
+
+    MitmProxy* parent() { return parent_; }
+    MitmProxy const* parent() const { return parent_; }
+    void parent(MitmProxy* p) { parent_ = p; }
+
+    std::unique_ptr<FilterResult>& result() { return result_; }
+
     TYPENAME_OVERRIDE("FilterProxy")
     DECLARE_LOGGING(to_string)
-    
-protected:
-    MitmProxy* parent_{};
-    FilterResult* result_{};
-    
-    
-};
 
-// testing filter which triggers action after defined seconds
-class TestFilter : public FilterProxy {
-public:
-    TestFilter(MitmProxy* parent, int seconds);
-    virtual int handle_sockets_once(baseCom*);
-    
-    
-    time_t trigger_at;
-    int counter = 0;
 private:
-    logan_lite log {"com.proxy"};
+    MitmProxy* parent_ {};
+    std::unique_ptr<FilterResult> result_{};
 };
 
-#endif //__FILTER_PROXY
+
+#endif //FILTER_PROXY

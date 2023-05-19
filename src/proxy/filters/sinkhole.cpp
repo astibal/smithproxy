@@ -37,55 +37,26 @@
     which carries forward this exception.
 */
 
+#include <proxy/filters/sinkhole.hpp>
 
-#include <policy/loadb.hpp>
+void SinkholeFilter::proxy(baseHostCX *from, baseHostCX *to, socle::side_t side, bool redirected) {
 
-template <class HostInfoType>
-HostPool<HostInfoType>::~HostPool() {
-
-    auto lc_ = std::scoped_lock(*this);
-
-    candidates.clear();
-
-    for(auto i: host_data_) {
-        delete i.second();
-    }
-}
-
-template <class HostInfoType>
-bool HostPool<HostInfoType>::insert_new(Host h)  {
-
-    auto lc_ = std::scoped_lock(*this);
-
-    auto i = host_data_.find(h);
-
-    if(i != host_data_.end()) {
-        return false;
-    }
-
-    host_data_[h] = new HostInfoType(h);
-
-    return true;
-}
-
-
-template <class HostInfoType>
-const HostInfoType* HostPool<HostInfoType>::compute() {
-    auto lc_ = std::scoped_lock(*this);
-
-    int i = compute_index();
-    HostInfoType* r = candidates.at(i);
-}
-
-template <class HostInfoType>
-void HostPool<HostInfoType>::refresh() {
-    auto lc_ = std::scoped_lock(*this);
-    
-    candidates.clear();
-    for(auto i: host_data_) {
-        HostInfoType* hit = i.second();
-        if(hit->is_active) {
-            candidates.push_back(hit);
+    auto sink_that = [this](auto from, auto to, auto side) {
+        if(not replacement.empty()) {
+            _dia("sinking %c: %dB with replacement of %dB", from->to_read().size(), socle::from_side(side), replacement.size());
+            auto lc_ = std::scoped_lock(*from->readbuf());
+            from->readbuf()->assign(replacement);
         }
+        else {
+            _dia("sinking %c: %dB", socle::from_side(side), from->to_read().size());
+            auto lc_ = std::scoped_lock(*from->readbuf());
+            from->readbuf()->clear();
+        }
+    };
+
+    if(( side == side_t::LEFT and sink_left ) or (side == side_t::RIGHT and sink_right)) {
+        sink_that(from, to, side);
+        from->idle_delay(30);
+        to->idle_delay(30);
     }
 }

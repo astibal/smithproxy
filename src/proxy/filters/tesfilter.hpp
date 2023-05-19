@@ -37,32 +37,22 @@
     which carries forward this exception.
 */
 
+#ifndef TESTFILTER_HPP
+#define TESTFILTER_HPP
 
-#include <proxy/filterproxy.hpp>
-#include <proxy/mitmproxy.hpp>
+#include <proxy/filters/filterproxy.hpp>
 
-FilterProxy::FilterProxy(MitmProxy* parent) : baseProxy(parent->com()->slave()), parent_(parent) {
-    result_ = new FilterResult();
-}
-
-
-
+// testing filter which triggers action after defined seconds
+class TestFilter : public FilterProxy {
+public:
+    TestFilter(MitmProxy* parent, int seconds);
+    void proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redirected);
 
 
-TestFilter::TestFilter(MitmProxy* parent, int seconds): FilterProxy(parent) {
-    trigger_at = time(nullptr) + seconds;
-}
+    time_t trigger_at;
+    int counter = 0;
+private:
+    static inline logan_lite log {"proxy"};
+};
 
-int TestFilter::handle_sockets_once(baseCom* xcom) {
-    
-    if(time(nullptr) >= trigger_at) {
-        counter++;
-        trigger_at = time(nullptr) + 5;
-
-        auto parent_name = [this](){ if(parent_) return parent_->to_string(iNOT); else return std::string("???"); };
-        
-        _inf("%s: filter triggered event counter %d", parent_name().c_str() ,counter);
-    }
-    
-    return baseProxy::handle_sockets_once(xcom);
-}
+#endif

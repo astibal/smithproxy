@@ -68,6 +68,7 @@ public:
 
     using group_of_ports = std::vector<std::shared_ptr<CfgRange>>;
     using group_of_addresses = std::vector<std::shared_ptr<CfgAddress>>;
+    using group_of_tags = std::vector<std::shared_ptr<CfgString>>;
 
     unsigned int cnt_matches = 0;
 
@@ -81,6 +82,8 @@ public:
 
     group_of_addresses  dst;
     group_of_ports dst_ports;
+
+    group_of_tags features;
 
     int action = POLICY_ACTION_PASS;
     std::string action_name;
@@ -120,7 +123,7 @@ public:
     DECLARE_LOGGING(to_string)
 
     private:
-        logan_lite log {"com.proxy.policy"};
+        logan_lite log {"proxy.policy"};
 };
 
 

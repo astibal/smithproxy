@@ -37,55 +37,20 @@
     which carries forward this exception.
 */
 
+#include <proxy/filters/tesfilter.hpp>
 
-#include <policy/loadb.hpp>
-
-template <class HostInfoType>
-HostPool<HostInfoType>::~HostPool() {
-
-    auto lc_ = std::scoped_lock(*this);
-
-    candidates.clear();
-
-    for(auto i: host_data_) {
-        delete i.second();
-    }
+TestFilter::TestFilter(MitmProxy* parent, int seconds): FilterProxy(parent) {
+    trigger_at = time(nullptr) + seconds;
 }
 
-template <class HostInfoType>
-bool HostPool<HostInfoType>::insert_new(Host h)  {
+void TestFilter::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redirected) {
 
-    auto lc_ = std::scoped_lock(*this);
+    if(time(nullptr) >= trigger_at) {
+        counter++;
+        trigger_at = time(nullptr) + 5;
 
-    auto i = host_data_.find(h);
+        auto parent_name = [this](){ if(parent()) return parent()->to_string(iNOT); else return std::string("???"); };
 
-    if(i != host_data_.end()) {
-        return false;
-    }
-
-    host_data_[h] = new HostInfoType(h);
-
-    return true;
-}
-
-
-template <class HostInfoType>
-const HostInfoType* HostPool<HostInfoType>::compute() {
-    auto lc_ = std::scoped_lock(*this);
-
-    int i = compute_index();
-    HostInfoType* r = candidates.at(i);
-}
-
-template <class HostInfoType>
-void HostPool<HostInfoType>::refresh() {
-    auto lc_ = std::scoped_lock(*this);
-    
-    candidates.clear();
-    for(auto i: host_data_) {
-        HostInfoType* hit = i.second();
-        if(hit->is_active) {
-            candidates.push_back(hit);
-        }
+        _inf("%s: filter triggered event counter %d", parent_name().c_str() ,counter);
     }
 }

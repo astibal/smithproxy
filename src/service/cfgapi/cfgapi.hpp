@@ -203,7 +203,7 @@ public:
 //    static inline bool config_changed_flag = false;
 
     // Each version bump implies a config upgrade - we start on 1000
-    constexpr static inline const int SCHEMA_VERSION  = 1015;
+    constexpr static inline const int SCHEMA_VERSION  = 1016;
 
     CfgFactory() = default;
     CfgFactory(CfgFactory const &) = delete;
@@ -313,6 +313,8 @@ public:
     DB_MAP(std::shared_ptr<CfgElement>, db_prof_alg_dns);
     DB_MAP(std::shared_ptr<CfgElement>, db_prof_script);
 
+    DB_MAP(std::shared_ptr<CfgElement>, db_features);
+
     mp::vector<int> db_udp_quick_ports;
 
 
@@ -370,6 +372,7 @@ public:
 
     std::shared_ptr<CfgRange> lookup_port (const char *name);
     std::shared_ptr<CfgUint8> lookup_proto (const char *name);
+    std::shared_ptr<CfgString> lookup_features (const char *name);
     std::shared_ptr<ProfileDetection> lookup_prof_detection (const char *name);
     std::shared_ptr<ProfileContent> lookup_prof_content (const char *name);
     std::shared_ptr<ProfileTls> lookup_prof_tls (const char *name);
@@ -393,6 +396,7 @@ public:
     int  load_db_address ();
     int  load_db_port ();
     int  load_db_proto ();
+    int  load_db_features ();
     int  load_db_policy ();
     int  load_db_prof_content ();
         int load_db_prof_content_subrules(libconfig::Setting& cur_object, ProfileContent* new_profile);
@@ -474,6 +478,7 @@ public:
     size_t cleanup_db_prof_alg_dns ();
     size_t cleanup_db_prof_script ();
 
+    std::shared_ptr<PolicyRule>policy_rule(int index);
     int policy_match (baseProxy *proxy);
     int policy_match (std::vector<baseHostCX *> &left, std::vector<baseHostCX *> &right);
     int policy_action (int index);
@@ -481,6 +486,7 @@ public:
 
     bool apply_config_change(std::string_view section);
     int policy_apply (baseHostCX *originator, baseProxy *proxy, int matched_policy=-1);
+    void policy_apply_features(std::shared_ptr<PolicyRule> const& policy_rule, MitmProxy *mitm_proxy);
     std::shared_ptr<PolicyRule> lookup_policy(std::size_t i) { if(i < db_policy_list.size()) return db_policy_list.at(i); else return nullptr; }
 
     bool policy_apply_tls (int policy_num, baseCom *xcom);

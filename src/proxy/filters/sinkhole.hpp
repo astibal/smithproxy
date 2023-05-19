@@ -37,55 +37,30 @@
     which carries forward this exception.
 */
 
+#ifndef TESTFILTER_HPP
+#define TESTFILTER_HPP
 
-#include <policy/loadb.hpp>
+#include <proxy/filters/filterproxy.hpp>
 
-template <class HostInfoType>
-HostPool<HostInfoType>::~HostPool() {
+class SinkholeFilter : public FilterProxy {
 
-    auto lc_ = std::scoped_lock(*this);
+public:
+    bool sink_left = false;
+    bool sink_right = false;
+    std::string replacement;
 
-    candidates.clear();
+    SinkholeFilter() = default;
+    // which received data should be sunken? If left, data from left are not sent to the right side
+    SinkholeFilter(MitmProxy* parent, bool sink_left, bool sink_right) : FilterProxy(parent), sink_left(sink_left), sink_right(sink_right) {}
 
-    for(auto i: host_data_) {
-        delete i.second();
-    }
-}
-
-template <class HostInfoType>
-bool HostPool<HostInfoType>::insert_new(Host h)  {
-
-    auto lc_ = std::scoped_lock(*this);
-
-    auto i = host_data_.find(h);
-
-    if(i != host_data_.end()) {
-        return false;
+    std::string to_string(int verbosity) const override {
+        return string_format("Sinkhole-L%d-R%d%s", sink_left, sink_right, replacement.empty() ? "" : "-repl");
     }
 
-    host_data_[h] = new HostInfoType(h);
+    void proxy(baseHostCX *from, baseHostCX *to, socle::side_t side, bool redirected) override;
 
-    return true;
-}
+private:
+    static inline logan_lite log {"proxy.sinkhole"};
+};
 
-
-template <class HostInfoType>
-const HostInfoType* HostPool<HostInfoType>::compute() {
-    auto lc_ = std::scoped_lock(*this);
-
-    int i = compute_index();
-    HostInfoType* r = candidates.at(i);
-}
-
-template <class HostInfoType>
-void HostPool<HostInfoType>::refresh() {
-    auto lc_ = std::scoped_lock(*this);
-    
-    candidates.clear();
-    for(auto i: host_data_) {
-        HostInfoType* hit = i.second();
-        if(hit->is_active) {
-            candidates.push_back(hit);
-        }
-    }
-}
+#endif

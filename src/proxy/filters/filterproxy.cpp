@@ -38,54 +38,14 @@
 */
 
 
-#include <policy/loadb.hpp>
+#include <proxy/filters/filterproxy.hpp>
 
-template <class HostInfoType>
-HostPool<HostInfoType>::~HostPool() {
 
-    auto lc_ = std::scoped_lock(*this);
 
-    candidates.clear();
-
-    for(auto i: host_data_) {
-        delete i.second();
+bool FilterProxy::ask_destroy() {
+    if(parent_) {
+        parent()->state().dead(true); return true;
     }
+    return false;
 }
 
-template <class HostInfoType>
-bool HostPool<HostInfoType>::insert_new(Host h)  {
-
-    auto lc_ = std::scoped_lock(*this);
-
-    auto i = host_data_.find(h);
-
-    if(i != host_data_.end()) {
-        return false;
-    }
-
-    host_data_[h] = new HostInfoType(h);
-
-    return true;
-}
-
-
-template <class HostInfoType>
-const HostInfoType* HostPool<HostInfoType>::compute() {
-    auto lc_ = std::scoped_lock(*this);
-
-    int i = compute_index();
-    HostInfoType* r = candidates.at(i);
-}
-
-template <class HostInfoType>
-void HostPool<HostInfoType>::refresh() {
-    auto lc_ = std::scoped_lock(*this);
-    
-    candidates.clear();
-    for(auto i: host_data_) {
-        HostInfoType* hit = i.second();
-        if(hit->is_active) {
-            candidates.push_back(hit);
-        }
-    }
-}

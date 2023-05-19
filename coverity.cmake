@@ -110,7 +110,7 @@ add_executable(smithproxy
         src/staticcontent.cpp
         src/policy/authfactory6.cpp
         src/smithlog.cpp
-        src/proxy/filterproxy.cpp
+        src/proxy/filters/filterproxy.cpp
         src/service/dnsupd/smithdnsupd.cpp
         src/policy/loadb.cpp
         src/service/core/smithproxy.hpp

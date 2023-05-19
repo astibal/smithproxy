@@ -266,11 +266,14 @@ add_executable(smithproxy
         src/proxy/mitmproxy.cpp
         src/proxy/mitmcom.hpp
         src/proxy/mitmcom.cpp
-        src/proxy/filterproxy.cpp
         src/proxy/ocspinvoker.cpp
         src/proxy/ocspinvoker.hpp
         src/proxy/proxymaker.hpp
         src/proxy/proxymaker.cpp
+
+        src/proxy/filters/filterproxy.cpp
+        src/proxy/filters/sinkhole.cpp
+        src/proxy/filters/testfilter.cpp
 
         src/proxy/socks5/sockshostcx.cpp
         src/proxy/socks5/socksproxy.cpp
