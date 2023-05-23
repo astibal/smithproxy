@@ -1488,7 +1488,7 @@ std::string MitmProxy::replacement_ssl_verify_detail(SSLCom* scom) {
                 ++reason_count;
             }
             if (scom->verify_bitcheck(verify_status_t::VRF_UNKNOWN_ISSUER)) {
-                ss << "<p><h class=\"fg-red\">Reason " << reason_count << ":</h3>" << verify_flag_string(verify_status_t::VRF_UNKNOWN_ISSUER) << ".</p>";
+                ss << "<p><h3 class=\"fg-red\">Reason " << reason_count << ":</h3>" << verify_flag_string(verify_status_t::VRF_UNKNOWN_ISSUER) << ".</p>";
                 is_set = true;
                 ++reason_count;
             }
