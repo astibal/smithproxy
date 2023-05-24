@@ -220,7 +220,7 @@ function setup_tproxy {
         ip6tables -t mangle -N ${SMITH_CHAIN_NAME}
 
         logit " avoiding tproxy for local traffic"
-        for I in `ip a | grep 'inet ' | awk '{ print $2 }' | awk -F/ '{ print $1 }' | grep -v '127\.'`; do
+        for I in `ip a | grep 'inet ' | awk '{ print $2 }' | awk -F/ '{ print $1 }' | grep -v '^127\.'`; do
                 logit " tproxy exception for ${I}"
                 iptables -t mangle -A ${SMITH_CHAIN_NAME} -d ${I} -j ACCEPT
         done
