@@ -150,12 +150,15 @@ int cli_diag_ssl_cache_list(struct cli_def *cli, const char *command, char *argv
         auto lc_ = std::scoped_lock(store->lock());
 
         for (auto const& [ fqdn, cache ]: store->cache().cache()) {
-            SSLFactory::X509_PAIR const* ptr = cache->ptr()->keypair();
+            auto chain = cache->ptr()->entry();
 
             out << string_format("    %s\n", fqdn.c_str());
 
             if(print_refs) {
-                out << string_format("        : keyptr=0x%x certptr=0x%x\n", ptr->first, ptr->second);
+                out << string_format("        : keyptr=0x%x certptr=0x%x, ctxptr=0x%x\n",
+                        chain.chain.key,
+                        chain.chain.cert,
+                        chain.ctx);
             }
 
 #ifndef USE_OPENSSL11
@@ -192,8 +195,8 @@ int cli_diag_ssl_cache_print(struct cli_def *cli, const char *command, char *arg
     {
         auto lc_ = std::scoped_lock(store->lock());
 
-        for (auto const& [ fqdn, cache]: store->cache().cache()) {
-            SSLFactory::X509_PAIR const* ptr = cache->ptr()->keypair();
+        for (auto const& [ fqdn, cache ]: store->cache().cache()) {
+            auto chain = cache->ptr()->entry();
 
             std::regex reg("\\+san:");
             std::string nice_fqdn = std::regex_replace(fqdn, reg, "\n     san: ");
@@ -201,13 +204,16 @@ int cli_diag_ssl_cache_print(struct cli_def *cli, const char *command, char *arg
             out << "\n--------: " << nice_fqdn << "\n";
 
             if(print_refs) {
-                out << string_format("        : keyptr=0x%x certptr=0x%x\n", ptr->first, ptr->second);
+                out << string_format("        : keyptr=0x%x certptr=0x%x ctxptr=0x%x\n",
+                                    chain.chain.key,
+                                    chain.chain.cert,
+                                    chain.ctx);
                 auto counter = cache->count();
                 auto age = cache->age();
                 out << string_format("        : access_counter=%d, age=%d\n", counter, age);
             }
 
-            out << SSLFactory::print_cert(ptr->second);
+            out << SSLFactory::print_cert(chain.chain.cert);
             out << "\n--------";
 
             out << "\n\n";

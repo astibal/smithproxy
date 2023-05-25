@@ -73,7 +73,7 @@ static nlohmann::json json_ssl_cache_print(struct MHD_Connection* connection, st
 
         for (auto const& x: store->cache().cache()) {
             std::string fqdn = x.first;
-            SSLFactory::X509_PAIR const* ptr = x.second->ptr()->keypair();
+            auto chain = x.second->ptr()->entry();
 
             nlohmann::json detail;
 
@@ -91,7 +91,7 @@ static nlohmann::json json_ssl_cache_print(struct MHD_Connection* connection, st
                     };
             }
 
-            detail[fqdn] =  jsonize::from(ptr->second, verbosity);
+            detail[fqdn] =  jsonize::from(chain.chain.cert, verbosity);
             toret.push_back(detail);
         }
     }
