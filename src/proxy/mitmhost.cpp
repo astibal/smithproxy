@@ -310,6 +310,9 @@ void MitmHostCX::on_starttls() {
     new_peer_com->upgrade_client_socket(peer()->socket());
     new_client_com->upgrade_server_socket(socket());
 
+    // allow another upgrade by spoofing mechanism
+    new_client_com->upgraded(false);
+
     CfgFactory::get()->policy_apply_tls(matched_policy(), com());
     CfgFactory::get()->policy_apply_tls(matched_policy(), peercom());
 
