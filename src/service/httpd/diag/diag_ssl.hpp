@@ -51,8 +51,8 @@ static nlohmann::json json_ssl_cache_stats(struct MHD_Connection* conn, std::str
     int n_maxsize = 0;
     {
         std::lock_guard<std::recursive_mutex> l(store->lock());
-        n_cache = store->cache().cache().size();
-        n_maxsize = store->cache().max_size();
+        n_cache = store->cache_mitm().cache().size();
+        n_maxsize = store->cache_mitm().max_size();
     }
 
     nlohmann::json ret = { { "cache_size", n_cache }, { "max_size",  n_maxsize } };
@@ -71,7 +71,7 @@ static nlohmann::json json_ssl_cache_print(struct MHD_Connection* connection, st
     {
         std::lock_guard<std::recursive_mutex> l_(store->lock());
 
-        for (auto const& x: store->cache().cache()) {
+        for (auto const& x: store->cache_mitm().cache()) {
             std::string fqdn = x.first;
             auto chain = x.second->ptr()->entry();
 

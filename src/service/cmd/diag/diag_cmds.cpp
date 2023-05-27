@@ -102,27 +102,34 @@ int cli_diag_ssl_cache_stats(struct cli_def *cli, const char *command, char *arg
 
     debug_cli_params(cli, command, argv, argc);
 
+
+
     SSLFactory* store = SSLCom::factory();
 
+    auto print_cache_stats = [&](auto& cache) {
 
-    size_t n_cache = 0;
-    int n_maxsize = 0;
-    bool ver_bundle = store->stats.ca_verify_use_file;
-    bool sto_bundle = store->stats.ca_store_use_file;
+        size_t n_cache = 0;
+        int n_maxsize = 0;
+        bool ver_bundle = store->stats.ca_verify_use_file;
+        bool sto_bundle = store->stats.ca_store_use_file;
 
-    {
-        auto lc_ = std::scoped_lock(store->lock());
-        n_cache = store->cache().cache().size();
-        n_maxsize = store->cache().max_size();
-    }
+        {
+            auto lc_ = std::scoped_lock(store->lock());
+
+            n_cache = cache.cache().size();
+            n_maxsize = cache.max_size();
+        }
 
 
-    cli_print(cli,"certificate store stats: ");
-    cli_print(cli,"    cache size: %zu ", n_cache);
-    cli_print(cli,"      max size: %d ", n_maxsize);
-    cli_print(cli,"    cert verify from bundle: %d", ver_bundle);
-    cli_print(cli,"    cert store from bundle: %d", sto_bundle);
+        cli_print(cli, "'%s' certificate store stats: ", cache.info.c_str());
+        cli_print(cli, "    cache size: %zu ", n_cache);
+        cli_print(cli, "      max size: %d ", n_maxsize);
+        cli_print(cli, "    cert verify from bundle: %d", ver_bundle);
+        cli_print(cli, "    cert store from bundle: %d", sto_bundle);
+    };
 
+    print_cache_stats(store->cache_mitm());
+    print_cache_stats(store->cache_custom());
 
     return CLI_OK;
 }
@@ -142,15 +149,15 @@ int cli_diag_ssl_cache_list(struct cli_def *cli, const char *command, char *argv
         }
     }
 
-    std::stringstream out;
+    auto print_cache_list = [&] (auto& cache) {
 
-    cli_print(cli,"certificate store entries: ");
+        std::stringstream out;
+        cli_print(cli,"'%s' certificate store entries: ", cache.info.c_str());
 
-    {
         auto lc_ = std::scoped_lock(store->lock());
 
-        for (auto const& [ fqdn, cache ]: store->cache().cache()) {
-            auto chain = cache->ptr()->entry();
+        for (auto const& [ fqdn, inner_cache ]: cache.cache()) {
+            auto chain = inner_cache->ptr()->entry();
 
             out << string_format("    %s\n", fqdn.c_str());
 
@@ -166,10 +173,12 @@ int cli_diag_ssl_cache_list(struct cli_def *cli, const char *command, char *argv
                 ss << string_format("            refcounts: key=%d cert=%d\n",ptr->first->references, ptr->second->references);
 #endif
         }
-    }
+        cli_print(cli, "%s", out.str().c_str());
+    };
 
 
-    cli_print(cli, "%s", out.str().c_str());
+    print_cache_list(store->cache_mitm());
+    print_cache_list(store->cache_custom());
 
     return CLI_OK;
 }
@@ -188,15 +197,15 @@ int cli_diag_ssl_cache_print(struct cli_def *cli, const char *command, char *arg
         }
     }
 
-    std::stringstream out;
+    auto print_cache_entries = [&](auto& cache) {
 
-    cli_print(cli, "certificate store entries: \n");
+        std::stringstream out;
+        cli_print(cli, "'%s' certificate store entries: \n", cache.info.c_str());
 
-    {
         auto lc_ = std::scoped_lock(store->lock());
 
-        for (auto const& [ fqdn, cache ]: store->cache().cache()) {
-            auto chain = cache->ptr()->entry();
+        for (auto const& [ fqdn, inner_cache ]: cache.cache()) {
+            auto chain = inner_cache->ptr()->entry();
 
             std::regex reg("\\+san:");
             std::string nice_fqdn = std::regex_replace(fqdn, reg, "\n     san: ");
@@ -208,8 +217,8 @@ int cli_diag_ssl_cache_print(struct cli_def *cli, const char *command, char *arg
                                     chain.chain.key,
                                     chain.chain.cert,
                                     chain.ctx);
-                auto counter = cache->count();
-                auto age = cache->age();
+                auto counter = inner_cache->count();
+                auto age = inner_cache->age();
                 out << string_format("        : access_counter=%d, age=%d\n", counter, age);
             }
 
@@ -218,9 +227,13 @@ int cli_diag_ssl_cache_print(struct cli_def *cli, const char *command, char *arg
 
             out << "\n\n";
         }
-    }
 
-    cli_print(cli, "%s", out.str().c_str());
+        cli_print(cli, "%s", out.str().c_str());
+    };
+
+    print_cache_entries(store->cache_mitm());
+    print_cache_entries(store->cache_custom());
+
 
     return CLI_OK;
 }
@@ -231,13 +244,14 @@ int cli_diag_ssl_cache_clear(struct cli_def *cli, const char *command, char *arg
     debug_cli_params(cli, command, argv, argc);
 
     auto* store = SSLCom::factory();
-    std::stringstream out;
 
 
-    {
+
+    auto erase_cache = [&](auto& cache) {
+        std::stringstream out;
         auto lc_ = std::scoped_lock(store->lock());
 
-        for (auto const& [ fqdn, cache ]: store->cache().cache()) {
+        for (auto const& [ fqdn, inner_cache ]: cache.cache()) {
 
             out << string_format("removing    %s\n", fqdn.c_str());
 
@@ -252,11 +266,15 @@ int cli_diag_ssl_cache_clear(struct cli_def *cli, const char *command, char *arg
                 }
             }
         }
-        store->cache().clear();
-        store->load_custom_certificates();
-    }
+        cache.clear();
 
-    cli_print(cli, "%s", out.str().c_str());
+        cli_print(cli, "%s", out.str().c_str());
+    };
+
+    erase_cache(store->cache_mitm());
+    erase_cache(store->cache_custom());
+
+    store->load_custom_certificates();
 
     return CLI_OK;
 }
