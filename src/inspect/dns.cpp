@@ -553,10 +553,14 @@ std::optional<size_t> DNS_Packet::load(const buffer *src) {
 
                             if (answer_temp.datalen_ > 0 and i + answer_temp.datalen_ <= src->size()) {
                                 answer_temp.data_.append(src->view(i, answer_temp.datalen_));
+
+                                auto option_type = ntohs(src->get_at<uint16_t>(i+2));
+                                auto option_len = ntohs(src->get_at<uint16_t>(i+4));
+
                                 i += answer_temp.datalen_;
                             }
 
-                            _dia("DNS_Packet::load: additional DNSSEC info[%d]: name: %d, opt: %d, udp: %d, "
+                            _dia("DNS_Packet::load: additional info[%d]: name: %d, opt: %d, udp: %d, "
                                  "hb_rcode: %d, edns0: %d, z: %d, len %d, buflen: %d",
                                  additionals_togo, answer_temp.name_, answer_temp.opt_, answer_temp.udp_size_,
                                  answer_temp.higher_bits_rcode_, answer_temp.edns0_version_, answer_temp.z_,
