@@ -145,6 +145,10 @@ elif [ "${DIST}" = "Debian" ]; then
         if [ "${DEB_MAJ}" = "11" ]; then
             SX_LIBCONFIG_VER="9v5"
             SX_GCC_VER="10"
+        elif [ "${DEB_MAJ}" = "12" ]; then
+            SX_LIBCONFIG_VER="9v5"
+            SX_GCC_VER="12"
+            LIBSSL="libssl3"
         fi
 
     fi
@@ -156,7 +160,7 @@ elif [ "${DIST}" = "Debian" ]; then
     apt update && apt install -y \
     wget curl \
     python3 python3-pip python3-dev \
-    libconfig++${SX_LIBCONFIG_VER} libssl1.1 libunwind8 libmicrohttpd12 \
+    libconfig++${SX_LIBCONFIG_VER} ${LIBSSL} libunwind8 libmicrohttpd12 \
     libconfig-dev libconfig++-dev  libssl-dev libunwind-dev libmicrohttpd-dev libpam-dev git g++-${SX_GCC_VER} cmake make
 
     echo "... installing OS toolchains"
