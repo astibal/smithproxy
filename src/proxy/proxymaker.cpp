@@ -43,6 +43,8 @@
 
 #include <proxy/proxymaker.hpp>
 
+#include <proxy/nbrhood.hpp>
+
 namespace sx::proxymaker {
 
     namespace log {
@@ -167,6 +169,10 @@ namespace sx::proxymaker {
 
             if(policy->profile_routing and not route(proxy, policy->profile_routing))
                 _err("routing failed");
+        }
+
+        if(proxy) {
+            proxy->update_neighbors();
         }
 
         return true;

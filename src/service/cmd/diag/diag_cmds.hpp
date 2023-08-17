@@ -118,6 +118,9 @@ int cli_diag_proxy_tls_list(struct cli_def *cli, const char *command, char *argv
 int cli_diag_proxy_list_active(struct cli_def *cli, const char *command, char *argv[], int argc);
 
 int cli_diag_sig_list(struct cli_def *cli, const char *command, char *argv[], int argc);
+
+int cli_diag_neighbor_list(struct cli_def *cli, const char *command, char *argv[], int argc);
+
 bool register_diags(cli_def* cli, cli_command* diag);
 
 

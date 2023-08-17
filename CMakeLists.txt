@@ -343,7 +343,10 @@ add_executable(smithproxy
         src/ext/nltemplate/nltemplate.cpp
         src/ext/libcli/libcli.cpp
         src/ext/lmhpp/include/lmhttpd.hpp
-        src/ext/hpack/hpack.hpp src/service/core/authpam.cpp)
+        src/ext/hpack/hpack.hpp
+        src/service/core/authpam.cpp
+        src/proxy/nbrhood.hpp
+        src/utils/lru.hpp)
 
 
 add_executable(smithd

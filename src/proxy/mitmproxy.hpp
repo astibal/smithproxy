@@ -136,7 +136,9 @@ public:
 
     int matched_policy() const { return matched_policy_; }
     void matched_policy(int p)  { matched_policy_ = p; }
-    
+
+    void update_neighbors();
+
     inline bool identity_resolved() const { return identity_resolved_; }
     inline void identity_resolved(bool b) { identity_resolved_ = b; }
 

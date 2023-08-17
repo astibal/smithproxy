@@ -46,6 +46,7 @@
 #include <proxy/filters/sinkhole.hpp>
 
 #include <proxy/proxymaker.hpp>
+#include <proxy/nbrhood.hpp>
 
 #include <log/logger.hpp>
 #include <service/cfgapi/cfgapi.hpp>
@@ -371,6 +372,17 @@ bool MitmProxy::apply_id_policies(baseHostCX* cx) {
         );
 
     return true;
+}
+
+void MitmProxy::update_neighbors() {
+    if(auto fl = first_left(); fl) {
+        if(auto lhost = fl->chost(); not lhost.empty()) {
+            auto &nbr = NbrHood::instance();
+
+            Neighbor n(first_left()->chost());
+            nbr.update(n);
+        }
+    }
 }
 
 bool MitmProxy::resolve_identity(baseHostCX* cx, bool insert_guest = false) {

@@ -85,6 +85,8 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
                     p = CfgFactory::get()->db_policy_list.at(matched_policy());
                 }
 
+                update_neighbors();
+
                 const char *resp = verdict ? "accept" : "reject";
                 _dia("socksProxy::on_left_message: policy check result: policy# %d, verdict %s", matched_policy(),
                      resp);

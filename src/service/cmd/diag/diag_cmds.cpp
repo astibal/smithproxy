@@ -61,6 +61,8 @@
 #include <sobject.hpp>
 #include <proxy/mitmproxy.hpp>
 #include <proxy/filters/filterproxy.hpp>
+#include <proxy/nbrhood.hpp>
+
 #include <policy/inspectors.hpp>
 #include <policy/authfactory.hpp>
 
@@ -2184,6 +2186,23 @@ int cli_diag_api_list(struct cli_def *cli, const char *command, char *argv[], in
 }
 
 
+int cli_diag_neighbor_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    std::stringstream ss;
+    {
+        auto& nb = NbrHood::instance();
+        auto _lc = std::scoped_lock(nb.cache().lock());
+
+        ss << "Neighbors seen:\n";
+
+        for(auto const& e: nb.cache().get_map_ul()) {
+            auto delta = time(nullptr) - e.second.first->last_seen;
+            ss << e.first << " last seen: " << uptime_string(delta) << "\n";
+        }
+    }
+    cli_print(cli, "%s", ss.str().c_str());
+    return CLI_OK;
+}
+
 bool register_diags(cli_def* cli, cli_command* diag) {
     auto diag_ssl = cli_register_command(cli, diag, "tls", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "ssl related troubleshooting commands");
     auto diag_ssl_cache = cli_register_command(cli, diag_ssl, "cache", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl certificate cache");
@@ -2283,6 +2302,9 @@ bool register_diags(cli_def* cli, cli_command* diag) {
 
     auto diag_api = cli_register_command(cli,diag,"api",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"http api info");
         cli_register_command(cli,diag_api,"list-keys",cli_diag_api_list,PRIVILEGE_PRIVILEGED, MODE_EXEC,"list API active keys");
+
+    auto diag_neighbor = cli_register_command(cli,diag,"neighbor",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy neighbors diag");
+            cli_register_command(cli,diag_neighbor,"list",cli_diag_neighbor_list,PRIVILEGE_PRIVILEGED, MODE_EXEC,"list active neighbors");
 
     return true;
 }
