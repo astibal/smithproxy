@@ -54,6 +54,7 @@
 #include <service/cmd/diag/diag_cmds.hpp>
 #include <service/httpd/httpd.hpp>
 #include <service/cfgapi/cfgapi.hpp>
+#include <service/tpool.hpp>
 
 #include <sslcom.hpp>
 #include <sslcertstore.hpp>
@@ -2015,7 +2016,7 @@ int cli_diag_sig_list(struct cli_def *cli, const char *command, char *argv[], in
 }
 
 
-int cli_diag_worker_list(struct cli_def *cli, [[maybe_unused]] const char *command, [[maybe_unused]] char *argv[], [[maybe_unused]] int argc) {
+int cli_diag_worker_proxy_list(struct cli_def *cli, [[maybe_unused]] const char *command, [[maybe_unused]] char *argv[], [[maybe_unused]] int argc) {
 
     int verbosity = iINF;
     if(argc > 0) {
@@ -2159,6 +2160,24 @@ int cli_diag_worker_list(struct cli_def *cli, [[maybe_unused]] const char *comma
 
     return CLI_OK;
 }
+
+
+int cli_diag_worker_pool_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    std::stringstream ss;
+
+    auto ts = ThreadPool::instance::get().tasks_size();
+    auto tr = ThreadPool::instance::get().tasks_running();
+    auto wc = ThreadPool::instance::get().worker_count();
+
+    ss << "Utility thread pool stats: \n";
+    ss << "  enqueued tasks: " << ts << ", active workers: " << tr << "/" << wc << "\n";
+
+    cli_print(cli, "%s", ss.str().c_str());
+
+    return CLI_OK;
+}
+
 int cli_diag_api_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
     std::stringstream ss;
@@ -2239,7 +2258,10 @@ bool register_diags(cli_def* cli, cli_command* diag) {
     cli_register_command(cli, diag_sig, "list", cli_diag_sig_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list engine signatures");
 
     auto diag_workers = cli_register_command(cli, diag, "workers", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "worker and threads diagnostics");
-    cli_register_command(cli, diag_workers, "list", cli_diag_worker_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list worker threads");
+        auto diag_workers_proxy = cli_register_command(cli, diag_workers, "proxy", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "proxy worker and threads diagnostics");
+            cli_register_command(cli, diag_workers_proxy, "list", cli_diag_worker_proxy_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,  "list worker threads");
+        auto diag_workers_pool = cli_register_command(cli, diag_workers, "pool", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "misc task worker and threads diagnostics");
+            cli_register_command(cli, diag_workers_pool, "list", cli_diag_worker_pool_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,  "list misc pool worker threads");
 
 
 

@@ -346,7 +346,8 @@ add_executable(smithproxy
         src/ext/hpack/hpack.hpp
         src/service/core/authpam.cpp
         src/proxy/nbrhood.hpp
-        src/utils/lru.hpp)
+        src/utils/lru.hpp
+        src/service/tpool.hpp)
 
 
 add_executable(smithd
