@@ -327,6 +327,7 @@ add_executable(smithproxy
         src/service/httpd/handlers/handlers.cpp
         src/service/httpd/handlers/dispatchers.cpp
         src/service/httpd/jsonize.cpp
+        src/service/http/request.hpp
 
         src/utils/fs.hpp
         src/utils/fs.cpp
@@ -346,8 +347,10 @@ add_executable(smithproxy
         src/ext/hpack/hpack.hpp
         src/service/core/authpam.cpp
         src/proxy/nbrhood.hpp
+
         src/utils/lru.hpp
-        src/service/tpool.hpp)
+        src/service/tpool.hpp
+        )
 
 
 add_executable(smithd
@@ -425,6 +428,7 @@ endif (LIBCONFIGPP_FOUND)
 
 target_link_libraries (smithproxy crypt)
 target_link_libraries (smithproxy nlohmann_json::nlohmann_json)
+target_link_libraries (smithproxy curl)
 
 if((CMAKE_SYSTEM_PROCESSOR MATCHES "arm") OR (CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64"))
     target_link_libraries (smithproxy atomic)
