@@ -43,6 +43,7 @@ build_group.add_argument('--hosts', type=str, nargs='*', help='hosts - localhost
 
 build_group.add_argument('--proxy', type=str, nargs='?', help='proxy to be used by the build')
 
+build_group.add_argument('--branch', type=str, help="smithproxy git branch to use", nargs='?')
 
 misc_group = top_group.add_argument_group()
 misc_group.add_argument('--list', action='store_true')
@@ -223,6 +224,9 @@ if __name__ == '__main__':
 
         if args.user:
             sshuser = args.user
+
+        if args.branch:
+            SRC_BRANCH = args.branch
 
         if args.hosts:
 
