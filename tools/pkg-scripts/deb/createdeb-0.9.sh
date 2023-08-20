@@ -60,7 +60,7 @@ trap ctrl_c INT
 function ctrl_c() {
         echo "Ctrl-C: exiting working directory $CUR_DIR"
         cd $ORIG_DIR
-        exit -1
+        exit 255
 }
 
 
@@ -132,23 +132,28 @@ sync $SO_BRANCH $SX_BRANCH
 cd smithproxy
 
 GIT_DESCR=`git describe --tags`
+
+echo "Git describe: ${GIT_DESCR}"
+
 GIT_TAG=`echo ${GIT_DESCR} | awk -F'-' '{ print $1 }'`
 GIT_PATCH_DIST=`echo ${GIT_DESCR} | awk -F'-' '{ print $2 }'`
 GIT_PATCH=`echo ${GIT_DESCR} | awk -F'-' '{ print $3 }'`
 
 if [ "${GIT_PATCH_DIST}" == "" ]; then
-    GIT_PATCH_DIST="0"
+    echo "Git patch unknown, must abort"
+    exit 255
 fi
+
 cd ..
 
-mv smithproxy smithproxy-${GIT_TAG}
-ln -s smithproxy-${GIT_TAG} smithproxy_src
+mv smithproxy smithproxy-"${GIT_TAG}"
+ln -s smithproxy-"${GIT_TAG}" smithproxy_src
 
 # create tarball for build
-tar cfz smithproxy_${GIT_TAG}.orig.tar.gz --exclude-vcs smithproxy-${GIT_TAG}
+tar cfz smithproxy_"${GIT_TAG}".orig.tar.gz --exclude-vcs smithproxy-"${GIT_TAG}"
 
 # make source tarball
-rm /tmp/smithproxy-src.tar.gz ; cp smithproxy_${GIT_TAG}.orig.tar.gz /tmp/smithproxy-src.tar.gz
+rm /tmp/smithproxy-src.tar.gz ; cp smithproxy_"${GIT_TAG}".orig.tar.gz /tmp/smithproxy-src.tar.gz
 
 cd smithproxy_src
 
@@ -165,8 +170,10 @@ cd $CUR_DIR
 # get major version and guess linux distro
 VER_MAJ=`echo $VER | awk -F. '{ print $1"."$2; }'`
 DEB_DIR="smithproxy-$VER"
+
 DISTRO=`./distro.sh`
 
+echo "Distro detected: ${DISTRO}"
 echo "Major version: $VER_MAJ, debian directory set to $DEB_DIR"
 
 
