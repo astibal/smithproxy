@@ -1,0 +1,21 @@
+name: Build and Package
+
+on:
+  push:
+    branches:
+      - master
+      - 'release/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-22
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Install dependencies
+      run: ./tools/linux-deps.sh
+
+    - name: Build project
+      run: ./tools/linux-build.sh
