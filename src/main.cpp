@@ -76,6 +76,8 @@
 #include <service/core/smithproxy.hpp>
 #include <service/httpd/httpd.hpp>
 
+#include <service/tpool.hpp>
+
 void prepare_queue_logger(loglevel const& lev) {
 
     // set final logger now
@@ -359,6 +361,11 @@ int main(int argc, char *argv[]) {
                     {nullptr, 0, nullptr, 0}
             };
 
+
+    auto& pool = ThreadPool::instance::get();
+    pool.enqueue([](std::atomic_bool const& stop) {
+        return;
+    });
 
     auto this_daemon = DaemonFactory::instance();
     auto const& log = this_daemon->get_log();

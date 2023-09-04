@@ -328,6 +328,7 @@ add_executable(smithproxy
         src/service/httpd/handlers/dispatchers.cpp
         src/service/httpd/jsonize.cpp
         src/service/http/request.hpp
+        src/service/http/async_request.hpp
 
         src/utils/fs.hpp
         src/utils/fs.cpp
@@ -350,7 +351,7 @@ add_executable(smithproxy
 
         src/utils/lru.hpp
         src/service/tpool.hpp
-        )
+)
 
 
 add_executable(smithd

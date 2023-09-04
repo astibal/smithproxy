@@ -203,7 +203,7 @@ public:
 //    static inline bool config_changed_flag = false;
 
     // Each version bump implies a config upgrade - we start on 1000
-    constexpr static inline const int SCHEMA_VERSION  = 1016;
+    constexpr static inline const int SCHEMA_VERSION  = 1017;
 
     CfgFactory() = default;
     CfgFactory(CfgFactory const &) = delete;
@@ -342,6 +342,11 @@ public:
         int tun_ttl {1};
     } capture_remote;
 
+    struct {
+        bool enabled = false;
+        std::string url;
+        bool tls_verify = true;
+    } settings_webhook;
 
     std::vector<AddressInfo> db_nameservers;
 

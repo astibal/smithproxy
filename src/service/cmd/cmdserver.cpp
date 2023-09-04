@@ -61,6 +61,11 @@
 #include <service/core/authpam.hpp>
 
 #include <service/cfgapi/cfgapi.hpp>
+
+#include <service/tpool.hpp>
+#include <service/http/request.hpp>
+#include <service/http/async_request.hpp>
+
 #include <timeops.hpp>
 
 #include <socle.hpp>
@@ -460,6 +465,33 @@ int cli_test_dns_genrequest(struct cli_def *cli, const char *command, char *argv
     } else {
         cli_print(cli,"you need to specify hostname");
     }
+
+    return CLI_OK;
+}
+
+int cli_test_webhook(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    auto fd = fileno(cli->client);
+
+    auto args = args_to_vec(argv, argc);
+    if(args.size() != 1) {
+        cli_print(cli, "missing URL argument (for simple POST json message)");
+        return CLI_OK;
+    }
+    auto const& url = args[0];
+    sx::http::AsyncRequest::emit(url, R"({"key": "value"})", [fd](auto reply) {
+
+        // this is potentially dangerous: cli may not exist, because it's hook called after operation finished
+
+        const long code = reply.has_value() ? reply->first : -1;
+        const std::string msg = reply.has_value() ? reply->second : "request failed";
+
+        // check at least if client socket is still mapped to targets, so cli is valid
+        if (Log::get()->target_profiles().find((uint64_t) fd) != Log::get()->target_profiles().end()) {
+            auto log = string_format("Response: %ld:%s\r\n", code, msg.c_str());
+            [[maybe_unused]] auto wr_ret = ::write(fd, log.c_str(), log.size());
+        }
+    });
 
     return CLI_OK;
 }
@@ -2065,6 +2097,9 @@ void cli_register_static(struct cli_def* cli) {
                     cli_register_command(cli, test_dns, "sendrequest", cli_test_dns_sendrequest, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "generate and send dns request to configured nameserver");
                 cli_register_command(cli, test_dns, "refreshallfqdns", cli_test_dns_refreshallfqdns, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "refresh all configured FQDN address objects against configured nameserver");
 
+            auto test_webhook = cli_register_command(cli, test, "webhook", cli_test_webhook, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "test webhook");
+
+
     auto diag  = cli_register_command(cli, nullptr, "diag", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose commands helping to troubleshoot");
             register_diags(cli, diag);
 
@@ -2113,6 +2148,13 @@ void generate_callbacks() {
             .cmd("edit", cli_conf_edit_settings_http_api)
             .cap("toggle", true)
             .cmd("toggle", cli_generic_toggle_cb);
+
+    register_callback( "settings.webhook",MODE_EDIT_SETTINGS_WEBHOOK)
+            .cap("set", true)
+            .cmd("set", cli_generic_set_cb)
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_settings_webhook);
+
 
     register_callback( "settings.admin",MODE_EDIT_SETTINGS_ADMIN)
             .cap("set", true)

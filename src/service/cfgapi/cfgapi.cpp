@@ -414,6 +414,14 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "added policy.[x].features");
         return true;
     }
+    else if(upgrade_to_num == 1017) {
+        log.event(INF, "added settings.webhook");
+        log.event(INF, "added settings.webhook.enabled");
+        log.event(INF, "added settings.webhook.url");
+        log.event(INF, "added settings.webhook.tls_verify");
+        return true;
+    }
+
 
 
     return false;
@@ -775,6 +783,13 @@ bool CfgFactory::load_settings () {
             sx::webserver::HttpSessions::api_port = 55555;
         }
         load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "pam_login", sx::webserver::HttpSessions::pam_login);
+    }
+
+    if(cfgapi.getRoot()["settings"].exists("webhook")) {
+
+        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "enabled", settings_webhook.enabled);
+        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "url", settings_webhook.url);
+        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "tls_verify", settings_webhook.tls_verify);
     }
 
     return true;
@@ -4770,6 +4785,12 @@ int save_settings(Config& ex) {
 
     http_api_objects.add("port", Setting::TypeInt) = sx::webserver::HttpSessions::api_port;
     http_api_objects.add("pam_login", Setting::TypeBoolean) = (bool)sx::webserver::HttpSessions::pam_login;
+
+
+    Setting& webhook_objects = objects.add("webhook", Setting::TypeGroup);
+    webhook_objects.add("enabled", Setting::TypeBoolean) = CfgFactory::get()->settings_webhook.enabled;
+    webhook_objects.add("url", Setting::TypeString) = CfgFactory::get()->settings_webhook.url;
+    webhook_objects.add("tls_verify", Setting::TypeBoolean) = CfgFactory::get()->settings_webhook.tls_verify;
 
     return 0;
 }
