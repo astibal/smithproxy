@@ -65,4 +65,14 @@ public:
             std::cout << pair.first << " : " << pair.second.first << std::endl;
         }
     }
+
+    void clear_ul() {
+        cache_.clear();
+        lruList.clear();
+    }
+
+    void clear() {
+        auto lc_ = std::scoped_lock(lock_);
+        clear_ul();
+    }
 };

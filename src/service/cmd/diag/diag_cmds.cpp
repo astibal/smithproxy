@@ -2222,6 +2222,20 @@ int cli_diag_neighbor_list(struct cli_def *cli, const char *command, char *argv[
     return CLI_OK;
 }
 
+int cli_diag_neighbor_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
+
+    size_t sz = 0;
+    {
+        auto& nb = NbrHood::instance();
+        auto _lc = std::scoped_lock(nb.cache().lock());
+        sz = nb.cache().get_map_ul().size();
+        nb.cache().clear_ul();
+    }
+    cli_print(cli, "cleared %ld entries", sz);
+    return CLI_OK;
+}
+
+
 bool register_diags(cli_def* cli, cli_command* diag) {
     auto diag_ssl = cli_register_command(cli, diag, "tls", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "ssl related troubleshooting commands");
     auto diag_ssl_cache = cli_register_command(cli, diag_ssl, "cache", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl certificate cache");
@@ -2327,6 +2341,7 @@ bool register_diags(cli_def* cli, cli_command* diag) {
 
     auto diag_neighbor = cli_register_command(cli,diag,"neighbor",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy neighbors diag");
             cli_register_command(cli,diag_neighbor,"list",cli_diag_neighbor_list,PRIVILEGE_PRIVILEGED, MODE_EXEC,"list active neighbors");
+            cli_register_command(cli,diag_neighbor,"clear",cli_diag_neighbor_clear,PRIVILEGE_PRIVILEGED, MODE_EXEC,"clear neighbors database");
 
     return true;
 }

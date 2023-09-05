@@ -81,13 +81,22 @@ namespace sx::http {
         using expected_reply = std::optional<std::pair<long,std::string>>;
         using reply_hook = std::function<void(expected_reply const&)>;
 
-        static bool emit(std::string const& url, std::string const& pay, reply_hook const& hook) {
+        static bool emit_url(std::string const& url, std::string const& pay, reply_hook const& hook) {
             auto &pool = ThreadPool::instance::get();
-            auto ret = pool.enqueue([url, pay, &hook]([[maybe_unused]] std::atomic_bool const &stop_flag) {
+            auto ret = pool.enqueue([url, pay, hook]([[maybe_unused]] std::atomic_bool const &stop_flag) {
 
-                std::string zip;
+                if(url.empty() or pay.empty()) return;
+
+                std::string dns_servers;
+                bool do_verify = true;
                 {
                     auto lc_ = std::scoped_lock(CfgFactory::lock());
+                    auto is_enabled = CfgFactory::get()->settings_webhook.enabled;
+
+                    if(not is_enabled) {
+                        return; // not an error, we just don't use webhooks
+                    }
+
                     auto const &nms = CfgFactory::get()->db_nameservers;
 
                     std::ostringstream oss;
@@ -97,12 +106,17 @@ namespace sx::http {
                             oss << ",";
                         }
                     }
-                    zip = oss.str();
+                    dns_servers = oss.str();
+                    do_verify = CfgFactory::get()->settings_webhook.tls_verify;
                 }
 
-                Request r(Request::DEFAULT, zip);
-                r.set_timeout(config::timeout);
-                auto reply = r.emit(url, pay);
+                Request request(Request::DEFAULT, dns_servers);
+
+                // make custom setup
+                request.set_timeout(config::timeout);
+                if(not do_verify) request.disable_tls_verify();
+
+                auto reply = request.emit(url, pay);
 
                 if(not reply or reply.value().first >= 300) {
                     long code = reply.has_value() ? reply->first : -1;
@@ -116,6 +130,17 @@ namespace sx::http {
 
             return (ret > 0);
         };
+
+        static bool emit(std::string const& pay, reply_hook const& hook) {
+            std::string url;
+            {
+                auto lc_ = std::scoped_lock(CfgFactory::lock());
+                url = CfgFactory::get()->settings_webhook.url;
+            }
+
+            return emit_url(url, pay, hook);
+        }
+
     };
 }
 

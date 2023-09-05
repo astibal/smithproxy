@@ -479,7 +479,7 @@ int cli_test_webhook(struct cli_def *cli, const char *command, char *argv[], int
         return CLI_OK;
     }
     auto const& url = args[0];
-    sx::http::AsyncRequest::emit(url, R"({"key": "value"})", [fd](auto reply) {
+    sx::http::AsyncRequest::emit_url(url, R"({"key": "value"})", [fd](auto reply) {
 
         // this is potentially dangerous: cli may not exist, because it's hook called after operation finished
 

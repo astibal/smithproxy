@@ -41,8 +41,10 @@
 #include <unordered_map>
 #include <memory>
 #include <ctime>
+#include <nlohmann/json.hpp>
 
 #include <utils/lru.hpp>
+#include <service/http/async_request.hpp>
 
 struct Neighbor {
     Neighbor(std::string_view hostname): hostname(hostname), last_seen(time(nullptr)) {}
@@ -70,6 +72,10 @@ public:
             nbr.value()->update();
         }
         else {
+            nlohmann::json const nbr_update = { { "action", "neighbor.new" }, { "address", n.hostname } };
+            sx::http::AsyncRequest::emit(
+                    to_string(nbr_update),
+                    [](auto reply){});
             cache().put_ul(n.hostname, std::make_shared<Neighbor>(n));
         }
     }
