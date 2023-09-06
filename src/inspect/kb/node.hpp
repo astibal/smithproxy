@@ -65,9 +65,10 @@ namespace sx {
         std::unordered_map<K,std::weak_ptr<Node>> elements;
         std::deque<std::pair<K,std::weak_ptr<Node>>> elements_queue;
 
-        static inline size_t max_elements = 1000;
+        static inline size_t max_elements = 100000; // if zero, KB will be populated until all memory is consumed
+        // may be useful sometimes, but needs to be checked by admin!
         static inline size_t cleanup_divisor = 10;  // max_elements/cleanup_divisor = amount of elements triggering cleanup
-                                                    // 10 is arbitrary number made up by wild guess - maybe other is better
+        // 10 is arbitrary number made up - maybe other is better
         static inline std::deque<std::shared_ptr<Node>> queue {};
 
         explicit Node() = default;
@@ -102,8 +103,8 @@ namespace sx {
 
                 // clean-up own elements if there is too many entries
                 // Too many means relative to maximum entries.
-                // 10
-                if(elements_queue.size() > max_elements/cleanup_divisor)
+
+                if(max_elements > 0 and elements_queue.size() > max_elements/cleanup_divisor)
                     while(true) {
                         if(auto const& [ key, last ] = elements_queue.front(); last.use_count() == 0) {
                             elements.erase(key);
