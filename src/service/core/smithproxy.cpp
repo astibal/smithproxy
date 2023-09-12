@@ -49,6 +49,8 @@
 #include <inspect/sxsignature.hpp>
 #include <service/httpd/httpd.hpp>
 
+#include <service/http/webhooks.hpp>
+
 #include <service/cfgapi/cfgapi.hpp>
 
 #ifdef ASAN_LEAKS
@@ -405,12 +407,35 @@ void SmithProxy::run() {
 
     Log::get()->events().insert(INF, "... started");
 
+    const unsigned int webhook_ping_interval = 120;
+    unsigned int seconds = webhook_ping_interval - 10; // speed-up first ping
+
+    instance().hostname = []() {
+        std::array<char,64> h{0};
+        gethostname(h.data(),63);
+        return std::string(h.data());
+    }();
+
     while(true) {
         if(instance().terminate_flag) {
             if(!cfg_daemonize)
                 std::cerr << "shutdown requested" << std::endl;
             break;
         }
+
+        if(seconds >= webhook_ping_interval) {
+
+            {
+                // refresh enabled status
+                auto lc_ = std::scoped_lock(CfgFactory::lock());
+                auto const& fac = CfgFactory::get();
+                sx::http::webhooks::set_enabled( fac->settings_webhook.enabled and not fac->settings_webhook.url.empty());
+            }
+
+            seconds = 0;
+            sx::http::webhooks::ping();
+        }
+        ++seconds;
 
         std::this_thread::sleep_for(std::chrono::seconds(1));
 

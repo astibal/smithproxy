@@ -65,6 +65,7 @@
 #include <inspect/pyinspector.hpp>
 
 #include <service/httpd/httpd.hpp>
+#include <service/http/webhooks.hpp>
 
 using namespace libconfig;
 
@@ -790,6 +791,8 @@ bool CfgFactory::load_settings () {
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "enabled", settings_webhook.enabled);
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "url", settings_webhook.url);
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "tls_verify", settings_webhook.tls_verify);
+
+        sx::http::webhooks::set_enabled(settings_webhook.enabled and not settings_webhook.url.empty());
     }
 
     return true;

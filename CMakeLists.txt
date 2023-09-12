@@ -329,6 +329,8 @@ add_executable(smithproxy
         src/service/httpd/jsonize.cpp
         src/service/http/request.hpp
         src/service/http/async_request.hpp
+        src/service/http/webhooks.hpp
+        src/service/http/webhooks.cpp
 
         src/utils/fs.hpp
         src/utils/fs.cpp

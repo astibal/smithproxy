@@ -37,49 +37,17 @@
     which carries forward this exception.
 */
 
+
+#ifndef SX_HTTP_WEBHOOKS
+#define SX_HTTP_WEBHOOKS
+
 #include <string>
-#include <unordered_map>
-#include <memory>
-#include <ctime>
+#include <atomic>
 
-#include <utils/lru.hpp>
-#include <service/http/webhooks.hpp>
+namespace sx::http::webhooks {
+    void ping();
+    void neighbor_new(std::string const& address_str);
+    void set_enabled(bool val);
+}
 
-struct Neighbor {
-    Neighbor(std::string_view hostname): hostname(hostname), last_seen(time(nullptr)) {}
-
-    std::string hostname;
-    time_t last_seen;
-
-    void update() {
-        last_seen = time(nullptr);
-    }
-};
-
-class NbrHood {
-public:
-    using nbr_t = std::shared_ptr<Neighbor>;
-    using nbr_cache_t = LRUCache<std::string, nbr_t>;
-
-    explicit NbrHood(size_t max_size): nbrs_(max_size) {}
-
-    nbr_cache_t& cache() { return nbrs_; }
-    void update(Neighbor const& n) {
-        auto lc_ = std::scoped_lock(cache().lock());
-
-        if(auto nbr = cache().get_ul(n.hostname); nbr) {
-            nbr.value()->update();
-        }
-        else {
-            cache().put_ul(n.hostname, std::make_shared<Neighbor>(n));
-            sx::http::webhooks::neighbor_new(n.hostname);
-        }
-    }
-
-    static NbrHood& instance() {
-        static NbrHood r(1000);
-        return r;
-    }
-private:
-     nbr_cache_t nbrs_;
-};
+#endif
