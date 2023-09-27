@@ -1102,19 +1102,53 @@ std::string get_connection_details_str(MitmProxy* px, baseHostCX* cx, char side)
 
 
 void MitmProxy::on_error(baseHostCX* cx, char side, const char* side_label) {
+
+    auto _log_closed_on = [&](loglevel const& level, const char* state_str) {
+
+        // don't log already dead connections
+        if(state().dead()) return;
+
+        _if_level(level) {
+            std::stringstream msg;
+            msg << "Connection " << side_label << " " << state_str << "on ";
+
+            if(state().error_on_left_read) msg << "Lr";
+            if(state().error_on_left_write) msg << "Lw";
+            if(state().error_on_right_read) msg << "Rr";
+            if(state().error_on_right_write) msg << "Rw";
+
+            if(cx) {
+                msg << ": "
+                    << get_connection_details_str(this, cx, side);
+            }
+            auto str = msg.str();
+            log.log(level, log.topic(), "%s", str.c_str());
+        }
+    };
+    auto _log_closed = [&](loglevel const& level) {
+        _if_level(level) {
+
+            // don't log already dead connections
+            if(state().dead()) return;
+
+            if(not cx) {
+                _log_closed_on(ERR, "null cx");
+                return;
+            }
+
+            std::stringstream msg;
+            msg << "Connection from " << cx->full_name(side) << " closed: " << get_connection_details_str(this, cx, side);
+            if(! replacement_msg.empty() ) {
+                msg << ", replaced: " << replacement_msg;
+            }
+            auto str = msg.str();
+            log.log(level, log.topic(), "%s", str.c_str());
+        }
+        _if_level(DEB) { _debug_zero_connections(cx); }
+    };
+
     if(cx == nullptr) {
-        std::stringstream msg;
-
-        msg << "Connection closed (null cx) on ";
-
-        if(state().error_on_left_read) msg << "Lr";
-        if(state().error_on_left_write) msg << "Lw";
-        if(state().error_on_right_read) msg << "Rr";
-        if(state().error_on_right_write) msg << "Rw";
-
-        msg << ": "
-            << get_connection_details_str(this, cx, side);
-        _err("%s", msg.str().c_str());
+        _log_closed_on(ERR, "null cx");
 
         state().dead(true);
         return;
@@ -1137,31 +1171,11 @@ void MitmProxy::on_error(baseHostCX* cx, char side, const char* side_label) {
 
                 if (state().dead()) {
                     // status dead is new, since we check dead status at the beginning
-                    std::stringstream msg;
-                    msg << "Connection " << side_label << " half-closed on ";
-
-                    if(state().error_on_left_read) msg << "Lr";
-                    if(state().error_on_left_write) msg << "Lw";
-                    if(state().error_on_right_read) msg << "Rr";
-                    if(state().error_on_right_write) msg << "Rw";
-
-                    msg << ": "
-                        << get_connection_details_str(this, cx, side);
-                    _inf("%s", msg.str().c_str());
+                    _log_closed_on(INF, "half-closed");
 
                 } else {
-                    // on_half_close did not marked it dead, yet
-                    std::stringstream msg;
-
-                    msg << "Connection " << side_label << " half-closing on ";
-                    if(state().error_on_left_read) msg << "Lr";
-                    if(state().error_on_left_write) msg << "Lw";
-                    if(state().error_on_right_read) msg << "Rr";
-                    if(state().error_on_right_write) msg << "Rw";
-
-                    msg << ": "
-                        << get_connection_details_str(this, cx, side);
-                    _dia("%s", msg.str().c_str());
+                    // on_half_close did not mark it dead, yet
+                    _log_closed_on(DIA, "half-closing");
 
                     // provoke write to the peer's socket (could be superfluous)
                     com()->set_write_monitor(cx->peer()->socket());
@@ -1170,45 +1184,35 @@ void MitmProxy::on_error(baseHostCX* cx, char side, const char* side_label) {
 
                 // duplicate code to DEAD before calling us
 
-                std::stringstream msg;
-                msg << "Connection from " << cx->full_name(side) << " closed: " << get_connection_details_str(this, cx, side);
-                if(! replacement_msg.empty() ) {
-                    msg << ", dropped: " << replacement_msg;
-                    _inf("%s", msg.str().c_str()); // log to generic logger
-                }
-                _inf("%s", msg.str().c_str());
+                _if_level(INF) {
+                    std::stringstream msg;
+                    msg << "Connection from " << cx->full_name(side)
+                        << " closed: "
+                        << get_connection_details_str(this, cx, side);
 
+                    if (!replacement_msg.empty()) {
+                        msg << ", dropped: "
+                            << replacement_msg;
+
+                        _inf("%s", msg.str().c_str()); // log to generic logger
+                    }
+                    _inf("%s", msg.str().c_str());
+                }
                 state().dead(true);
             }
         } else {
-            std::stringstream msg;
-            msg << "Connection from " << side_label << " half-closing (peer dead) on ";
-
-            if(state().error_on_left_read) msg << "Lr";
-            if(state().error_on_left_write) msg << "Lw";
-            if(state().error_on_right_read) msg << "Rr";
-            if(state().error_on_right_write) msg << "Rw";
-
-            msg << ": "
-                << get_connection_details_str(this, cx, side);
-            _dia("%s", msg.str().c_str());
-
+            _log_closed_on(DIA, "half-closing, peer dead");
             state().dead(true);
         }
     } else {
         // DEAD before calling us!
+        // maybe even dead or unnecessary code
 
         if(opt_auth_resolve)
             resolve_identity(cx);
 
         if(cx->peer() && cx->peer()->writebuf()->empty()) {
-            std::stringstream msg;
-            msg << "Connection from " << cx->full_name(side) << " closed: " << get_connection_details_str(this, cx, side);
-            if(! replacement_msg.empty() ) {
-                msg << ", replaced: " << replacement_msg;
-            }
-            _inf("%s", msg.str().c_str());
-            if(*log.level() > DEB) _debug_zero_connections(cx);
+            _log_closed(INF);
 
             state().dead(true);
         }
