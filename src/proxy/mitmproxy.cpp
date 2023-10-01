@@ -596,14 +596,14 @@ bool MitmProxy::handle_authentication(MitmHostCX* mh)
 {
     bool redirected = false;
     
-    if(opt_auth_authenticate || opt_auth_resolve) {
+    if(auth_opts.authenticate or auth_opts.resolve) {
     
         resolve_identity(mh);
         
         if(!identity_resolved()) {        
             _deb("handle_authentication: identity check: unknown");
             
-            if(opt_auth_authenticate) {
+            if(auth_opts.authenticate) {
                 if(mh->replacement_type() == MitmHostCX::REPLACETYPE_HTTP) {
             
                     mh->replacement_flag(MitmHostCX::REPLACE_REDIRECT);
@@ -620,7 +620,7 @@ bool MitmProxy::handle_authentication(MitmHostCX* mh)
                 }
             }
         } else {
-            if(auth_block_identity) {
+            if(auth_opts.block_identity) {
                 if(mh->replacement_type() == MitmHostCX::REPLACETYPE_HTTP) {
                     _dia("MitmProxy::handle_authentication: we should block it");
                     mh->replacement_flag(MitmHostCX::REPLACE_BLOCK);
@@ -1208,7 +1208,7 @@ void MitmProxy::on_error(baseHostCX* cx, char side, const char* side_label) {
         // DEAD before calling us!
         // maybe even dead or unnecessary code
 
-        if(opt_auth_resolve)
+        if(auth_opts.resolve)
             resolve_identity(cx);
 
         if(cx->peer() && cx->peer()->writebuf()->empty()) {

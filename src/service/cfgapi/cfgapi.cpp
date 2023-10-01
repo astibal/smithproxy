@@ -2682,8 +2682,8 @@ int CfgFactory::policy_apply (baseHostCX *originator, baseProxy *proxy, int matc
         /* Processing Auth profile */
         if(auto* mitm_proxy = dynamic_cast<MitmProxy*>(proxy); mitm_proxy and pa) {
             // auth is applied on proxy
-            mitm_proxy->opt_auth_authenticate = pa->authenticate;
-            mitm_proxy->opt_auth_resolve = pa->resolve;
+            mitm_proxy->auth_opts.authenticate = pa->authenticate;
+            mitm_proxy->auth_opts.resolve = pa->resolve;
             
             pa_name = pa->element_name().c_str();
 

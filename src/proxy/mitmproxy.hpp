@@ -62,6 +62,7 @@
 #include <proxy/ocspinvoker.hpp>
 #include <inspect/engine/http.hpp>
 
+#include <utils/lazy_ptr.hpp>
 
 struct whitelist_verify_entry {
 };
@@ -108,18 +109,17 @@ public:
     struct Opts_ContentWriter {
         bool write_payload = false;
     };
-    std::unique_ptr<Opts_ContentWriter> writer_opts_;
-    Opts_ContentWriter* writer_opts() {
-        if(not writer_opts_) writer_opts_ = std::make_unique<Opts_ContentWriter>();
-        return writer_opts_.get();
+    lazy_ptr<Opts_ContentWriter> writer_opts_;
+    lazy_ptr<Opts_ContentWriter>& writer_opts() {
+        return writer_opts_;
     }
 
+    struct Opts_Authentication {
+        bool authenticate = false;
+        bool resolve = false;
+        bool block_identity = false;
+    } auth_opts;
 
-    bool opt_auth_authenticate = false;
-    bool opt_auth_resolve = false;
-    bool auth_block_identity = false;
-    
-    
     // Remote filters - use other proxy to filter content of this proxy.
     // Elements are pair of "name" and pointer to the filter proxy 
     std::vector<std::pair<std::string, std::unique_ptr<FilterProxy>>> filters_;

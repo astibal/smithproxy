@@ -352,6 +352,8 @@ add_executable(smithproxy
         src/proxy/nbrhood.hpp
 
         src/utils/lru.hpp
+        src/utils/lazy_ptr.hpp
+        src/utils/singleton.hpp
         src/service/tpool.hpp
 )
 

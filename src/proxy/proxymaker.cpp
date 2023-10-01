@@ -363,7 +363,7 @@ namespace sx::proxymaker {
         auto const& log = log::authorize();
 
         // resolve source information - is there an identity info for that IP?
-        if (proxy->opt_auth_authenticate) {
+        if (proxy->auth_opts.authenticate) {
 
             _deb("proxymaker::authorize[%s]: must be authorized", proxy->to_string(iINF).c_str());
 
@@ -377,7 +377,7 @@ namespace sx::proxymaker {
                 if (authorize_is_bad(proxy.get())) {
                     _dia("proxymaker::authorize[%s]: this identity is not authorized", proxy->to_string(iINF).c_str());
 
-                    proxy->auth_block_identity = true;
+                    proxy->auth_opts.block_identity = true;
                     return false;
                 }
             }
@@ -387,7 +387,7 @@ namespace sx::proxymaker {
                 return false;
             }
 
-        } else if (proxy->opt_auth_resolve) {
+        } else if (proxy->auth_opts.resolve) {
             _deb("proxymaker::authorize[%s]: optional identity check", proxy->to_string(iINF).c_str());
             proxy->resolve_identity();
         }

@@ -263,7 +263,7 @@ bool SocksProxy::socks5_handoff_resolve_identity(MitmHostCX* cx) {
     bool result = true;
 
     // resolve source information - is there an identity info for that IP?
-    if (opt_auth_authenticate || opt_auth_resolve) {
+    if (auth_opts.authenticate or auth_opts.resolve) {
 
         _dia("socks5_handoff_udp: authentication required or optionally resolved");
 
@@ -272,7 +272,7 @@ bool SocksProxy::socks5_handoff_resolve_identity(MitmHostCX* cx) {
         if (!identity_resolved) {
             // identity is unknown!
 
-            if(opt_auth_authenticate) {
+            if(auth_opts.authenticate) {
                 short unsigned int target_port = cx->com()->nonlocal_dst_port();
 
 
@@ -286,7 +286,7 @@ bool SocksProxy::socks5_handoff_resolve_identity(MitmHostCX* cx) {
                 _dia("Connection %s: authentication info optional, continuing.",cx->c_type());
             }
 
-        } else if(opt_auth_authenticate) {
+        } else if(auth_opts.authenticate) {
 
             result = socks5_handoff_authenticate(cx);
 
@@ -346,7 +346,7 @@ bool SocksProxy::socks5_handoff_authenticate(MitmHostCX *cx) {
                 // set bad_auth true, because despite authentication failed, it could be replaced (we can let user know
                 // he is not allowed to proceed
                 bad_auth = false;
-                auth_block_identity = true;
+                auth_opts.block_identity = true;
             }
         }
     }
