@@ -72,7 +72,7 @@ public:
 
     void update_states() override;
     std::string to_string(int verbosity) const override;
-    nlohmann::json to_json() const;
+    nlohmann::json to_json(int verbosity) const override;
 
     void proxy(baseHostCX *from, baseHostCX *to, socle::side_t side, bool redirected) override;
     void update(socle::side_t side, buffer const& buf);

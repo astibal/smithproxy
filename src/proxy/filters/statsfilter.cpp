@@ -99,13 +99,15 @@ std::string StatsFilter::to_string(int verbosity) const {
     return ss.str();
 }
 
-nlohmann::json StatsFilter::to_json() const {
+nlohmann::json StatsFilter::to_json(int verbosity) const {
 
-    auto json_en_l = shannon_entropy.left_scores.to_json();
-    auto json_en_r = shannon_entropy.right_scores.to_json();
-    auto json_ex = exchanges.to_json();
+    auto json_en_l = shannon_entropy.left_scores.to_json(verbosity);
+    auto json_en_r = shannon_entropy.right_scores.to_json(verbosity);
+    auto json_ex = exchanges.to_json(verbosity);
 
     auto json_all = nlohmann::json();
+
+    json_all["info"] = { {"session", connection_label}, { "protocol", connection_protocol } };
     json_all["entropy"] = { { "left", json_en_l }, { "right", json_en_r } };
     json_all["flow"] = json_ex;
 

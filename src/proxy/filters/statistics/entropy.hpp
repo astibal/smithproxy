@@ -29,7 +29,7 @@ struct Entropy {
     void calculate();
 
     std::string to_string(unsigned int verbosity) const;
-    nlohmann::json to_json() const;
+    nlohmann::json to_json(int verbosity) const;
 };
 
 #endif

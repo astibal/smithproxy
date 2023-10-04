@@ -47,7 +47,7 @@ std::string Entropy::to_string(unsigned int verbosity) const {
     return ss.str();
 }
 
-nlohmann::json Entropy::to_json() const {
+nlohmann::json Entropy::to_json(int verbosity) const {
     auto ret = nlohmann::json();
     ret["entropy"] = entropy;
     ret["top_byte"] = top_byte;
@@ -55,10 +55,12 @@ nlohmann::json Entropy::to_json() const {
     ret["top_byte_ratio"] = top_byte_ratio;
     ret["bytes_accounted"] = data_accounted;
 
-    for (size_t i = 0; i < frequencies.size(); ++i) {
-        auto val = frequencies[i];
-        if(val > 0)
-            ret["byte_counts"].push_back({ i, val });
+    if(verbosity > iINF) {
+        for (size_t i = 0; i < frequencies.size(); ++i) {
+            auto val = frequencies[i];
+            if (val > 0)
+                ret["byte_counts"].push_back({i, val});
+        }
     }
     return ret;
 }

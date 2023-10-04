@@ -47,7 +47,7 @@
 #include "sobject.hpp"
 #include "common/display.hpp"
 #include "src/proxy/mitmproxy.hpp"
-
+#include <nlohmann/json.hpp>
 
 struct FilterResult : public socle::sobject {
     // NONE - Send some data
@@ -77,6 +77,8 @@ public:
         // we don't need to override, empty is just fine
     };
     std::string to_string(int verbosity) const override { static std::string r("FilterProxy"); return r; };
+    virtual nlohmann::json to_json(int verbosity) const { return nlohmann::json(); };
+
     bool ask_destroy() override;
 
     virtual void proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redirected) {

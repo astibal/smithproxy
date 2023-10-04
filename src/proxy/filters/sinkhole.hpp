@@ -41,6 +41,7 @@
 #define TESTFILTER_HPP
 
 #include <proxy/filters/filterproxy.hpp>
+#include <nlohmann/json.hpp>
 
 class SinkholeFilter : public FilterProxy {
 
@@ -49,12 +50,26 @@ public:
     bool sink_right = false;
     std::string replacement;
 
+    uint64_t left_sunken = 00L;
+    uint64_t right_sunken = 00L;
+
     SinkholeFilter() = default;
     // which received data should be sunken? If left, data from left are not sent to the right side
     SinkholeFilter(MitmProxy* parent, bool sink_left, bool sink_right) : FilterProxy(parent), sink_left(sink_left), sink_right(sink_right) {}
 
     std::string to_string(int verbosity) const override {
-        return string_format("Sinkhole-L%d-R%d%s", sink_left, sink_right, replacement.empty() ? "" : "-repl");
+        return string_format("Sinkhole-L%d-R%d%s, sunken %ld:%ld", sink_left, sink_right, replacement.empty() ? "" : "-repl", left_sunken, right_sunken);
+    }
+
+    nlohmann::json to_json(int verbosity) const override {
+        auto ret = nlohmann::json();
+        ret["sink_left"] = sink_left;
+        ret["sink_right"] = sink_right;
+        ret["sunken_left"] = left_sunken;
+        ret["sunken_right"] = right_sunken;
+        ret["replacement_size"] = replacement.size();
+
+        return ret;
     }
 
     void proxy(baseHostCX *from, baseHostCX *to, socle::side_t side, bool redirected) override;

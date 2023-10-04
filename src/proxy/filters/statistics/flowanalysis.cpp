@@ -64,7 +64,7 @@ std::string FlowAnalysis::to_string(unsigned int level) const {
     return ss.str();
 }
 
-nlohmann::json FlowAnalysis::to_json() const {
+nlohmann::json FlowAnalysis::to_json(int verbosity) const {
 
     auto ret = nlohmann::json();
 
@@ -83,10 +83,14 @@ nlohmann::json FlowAnalysis::to_json() const {
 
         char side[] = { (char) socle::from_side(delta.data.side), 0x0 };
 
-        ret["deltas"].push_back({
-                                        { "side", side }, {"delta", delta.delta }, { "bytes", delta.data.bytes },
-                                        { "ratio", ratio }
-                                });
+        if(verbosity > iINF) {
+            ret["deltas"].push_back({
+                                            {"side",  side},
+                                            {"delta", delta.delta},
+                                            {"bytes", delta.data.bytes},
+                                            {"ratio", ratio}
+                                    });
+        }
     }
 
     for(auto const& agg: result.aggregated_ratios) {

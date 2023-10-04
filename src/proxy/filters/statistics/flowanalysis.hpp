@@ -61,7 +61,7 @@ struct FlowAnalysis {
     std::map<uint64_t, FlowIntervalData> aggregate(int interval) const;
 
     std::string to_string(unsigned int level) const;
-    nlohmann::json to_json() const;
+    nlohmann::json to_json(int verbosity) const;
 };
 
 template<std::size_t N>

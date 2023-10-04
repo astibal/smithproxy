@@ -41,20 +41,37 @@
 
 void SinkholeFilter::proxy(baseHostCX *from, baseHostCX *to, socle::side_t side, bool redirected) {
 
-    auto sink_that = [this](auto from, auto to, auto side) {
-        if(not replacement.empty()) {
-            _dia("sinking %c: %dB with replacement of %dB", socle::from_side(side), from->to_read().size(), replacement.size());
+    if(not from and not from->readbuf()) return;
+
+    const bool is_left = (side == side_t::LEFT);
+    const bool is_right = (side == side_t::RIGHT);
+    const bool no_repl = replacement.empty();
+
+    auto up_stats = [&](size_t sz){
+        if(is_left) left_sunken += sz;
+        else if(is_right) right_sunken += sz;
+    };
+
+    auto sink_that = [&](auto from, auto to, auto side) {
+
+        size_t sz = 0L;
+         {
             auto lc_ = std::scoped_lock(*from->readbuf());
-            from->readbuf()->assign(replacement);
+            sz = from->readbuf()->size();
+            if(sz > 0L) {
+                no_repl ? from->readbuf()->clear() : from->readbuf()->assign(replacement);
+            }
         }
-        else {
-            _dia("sinking %c: %dB", socle::from_side(side), from->to_read().size());
-            auto lc_ = std::scoped_lock(*from->readbuf());
-            from->readbuf()->clear();
+        up_stats(sz);
+
+        _if_level(DIA) {
+             std::string repl_note;
+             if(not no_repl) repl_note = string_format("with %dB of replacement", replacement.size());
+            _dia("sinking %c: %dB %s", socle::from_side(side), sz, replacement.size(), repl_note.c_str());
         }
     };
 
-    if(( side == side_t::LEFT and sink_left ) or (side == side_t::RIGHT and sink_right)) {
+    if(( is_left and sink_left ) or ( is_right and sink_right)) {
         sink_that(from, to, side);
         from->idle_delay(30);
         to->idle_delay(30);
