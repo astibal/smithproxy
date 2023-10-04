@@ -1761,8 +1761,11 @@ auto get_more_info(sobject_info const* so_info, MitmProxy const* curr_proxy, Mit
 
             if( curr_proxy and not curr_proxy->filters_.empty()) {
                 info_ss << "\n    Filters:";
-                for(auto const& fi: curr_proxy->filters_) {
-                    info_ss << "\n        " << fi.first << ": " << fi.second.get()->to_string(iINF);
+                for(auto& [ name, filter_ptr ]: curr_proxy->filters_) {
+                    if(filter_ptr) {
+                        filter_ptr->update_states();
+                        info_ss << "\n        " << name << ": " << filter_ptr->to_string(verbosity);
+                    }
                 }
             }
             if (lf->engine_ctx.signature) {

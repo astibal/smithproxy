@@ -71,7 +71,11 @@ public:
     FilterProxy() = default;
     explicit FilterProxy(MitmProxy* parent) : parent_(parent) {};
     ~FilterProxy() override = default;
-    
+
+    virtual void update_states() {
+        // some filters need extra non-const steps before calling to_string() const
+        // we don't need to override, empty is just fine
+    };
     std::string to_string(int verbosity) const override { static std::string r("FilterProxy"); return r; };
     bool ask_destroy() override;
 
