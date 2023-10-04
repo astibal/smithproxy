@@ -60,6 +60,7 @@
 #include <proxy/mitmhost.hpp>
 
 #include <proxy/filters/sinkhole.hpp>
+#include <proxy/filters/statsfilter.hpp>
 
 #include <inspect/dnsinspector.hpp>
 #include <inspect/pyinspector.hpp>
@@ -1172,6 +1173,9 @@ int CfgFactory::load_db_features() {
 
     auto sa = std::make_shared<CfgString>("sink-all");
     db_features["sink-all"] = std::move(sa);
+
+    auto statistics = std::make_shared<CfgString>("statistics");
+    db_features["statistics"] = std::move(statistics);
 
     return static_cast<int>(db_features.size());
 }
@@ -2613,17 +2617,33 @@ void CfgFactory::policy_apply_features(std::shared_ptr<PolicyRule> const & polic
 
     // apply feature tags
     if(policy_rule and not policy_rule->features.empty()) {
-        FilterProxy* f = nullptr;
+        FilterProxy* sink_filter = nullptr;
+        FilterProxy* statistics_filter = nullptr;
+
         for(auto const& it: policy_rule->features) {
-            if(it->value() == "sink-left") { if(not f) f = new SinkholeFilter(mitm_proxy, true, false); }
-            if(it->value() == "sink-right") { if(not f) f = new SinkholeFilter(mitm_proxy, false, true); }
-            if(it->value() == "sink-all") { if(not f) f = new SinkholeFilter(mitm_proxy, true, true); }
+            if(not sink_filter) {
+                if (it->value() == "sink-all")  sink_filter = new SinkholeFilter(mitm_proxy, true, true);
+                else if (it->value() == "sink-left") sink_filter = new SinkholeFilter(mitm_proxy, true, false);
+                else if (it->value() == "sink-right") sink_filter = new SinkholeFilter(mitm_proxy, false, true);
+            }
+
+            if(not statistics_filter) {
+                if (it->value() == "statistics") {
+                    statistics_filter = new StatsFilter(mitm_proxy);
+
+                }
+            }
         }
 
-        if(f) {
-            mitm_proxy->add_filter(f->to_string(iINF), f);
+        if(statistics_filter) {
+            mitm_proxy->add_filter("statistics", statistics_filter);
         }
+        if(sink_filter) {
+            mitm_proxy->add_filter("sinkhole", sink_filter);
+        }
+
     }
+
 }
 
 int CfgFactory::policy_apply (baseHostCX *originator, baseProxy *proxy, int matched_policy) {

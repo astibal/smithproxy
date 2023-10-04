@@ -50,12 +50,14 @@
 
 #include <log/logger.hpp>
 #include <service/cfgapi/cfgapi.hpp>
+#include <service/http/webhooks.hpp>
 
 #include <uxcom.hpp>
 #include <staticcontent.hpp>
 #include <policy/authfactory.hpp>
 
 #include <traflog/fsoutput.hpp>
+#include <service/tpool.hpp>
 
 #include <algorithm>
 
@@ -191,6 +193,17 @@ MitmProxy::~MitmProxy() {
         }         
         
         if(tlog()) tlog()->write_left("Connection stop\n");
+    }
+
+
+    if(not filters_.empty() and sx::http::webhooks::is_enabled()) {
+        auto event = nlohmann::json();
+
+        for (auto &[name, filter]: filters_) {
+            filter->update_states();
+            event[name] = filter->to_json(iINF);
+        }
+        sx::http::webhooks::send_action("connection-info", event);
     }
 
     current_sessions()--;
