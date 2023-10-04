@@ -355,6 +355,12 @@ add_executable(smithproxy
         src/utils/lazy_ptr.hpp
         src/utils/singleton.hpp
         src/service/tpool.hpp
+        src/proxy/filters/statsfilter.hpp
+        src/proxy/filters/statsfilter.cpp
+        src/proxy/filters/statistics/entropy.hpp
+        src/proxy/filters/statistics/entropy.cpp
+        src/proxy/filters/statistics/flowanalysis.hpp
+        src/proxy/filters/statistics/flowanalysis.cpp
 )
 
 
