@@ -24,7 +24,7 @@ struct FlowAnalysis {
     size_t count_right = 0; // sum of right bytes in exchanges stored in flow history
 
     size_t _current_index = 0;
-    static inline constexpr size_t max_history = 256;
+    static constexpr size_t max_history = 256;
 
     // negative values are uploads
     std::array<long long, max_history> history;
@@ -34,12 +34,21 @@ struct FlowAnalysis {
         socle::side_t side = socle::side_t::LEFT;
         size_t bytes = 0L;
     };
+    struct FlowIntervalData {
+        uint64_t interval_number = 0;
+        double aggregated_up_ratio = 0.0f;
+        double aggregated_down_ratio = 0.0f;
+        uint64_t aggregated_down_bytes = 0LL;
+        uint64_t aggregated_up_bytes = 0LL;
+    };
     MS_checkpoint<ClickData, max_history> millideltas;
 
+    using aggregated_ratios_t = std::map<uint64_t, FlowAnalysis::FlowIntervalData>;
     struct {
         double skew_all = 0.0f;
         double skew_history = 0.0f;
         std::array<std::optional<double>, max_history> ratios {0};
+        aggregated_ratios_t aggregated_ratios {};
     } result {};
 
     void update(socle::side_t side, const uint8_t* data, size_t len);
@@ -48,6 +57,8 @@ struct FlowAnalysis {
 
     template<std::size_t N>
     std::array<std::optional<double>, N> ratios() const;
+    template<std::size_t N>
+    std::map<uint64_t, FlowIntervalData> aggregate(int interval) const;
 
     std::string to_string(unsigned int level) const;
     nlohmann::json to_json() const;
@@ -83,6 +94,36 @@ inline std::array<std::optional<double>, N> FlowAnalysis::ratios() const {
     }
 
     return normalizedValues;
+}
+
+template<std::size_t N>
+FlowAnalysis::aggregated_ratios_t FlowAnalysis::aggregate(int interval) const {
+    std::map<uint64_t, FlowIntervalData> result_data;
+
+    for (std::size_t i = 0; i < N; ++i) {
+        if(not result.ratios[i].has_value()) continue;
+
+        auto const& time_data = millideltas.get_checkpoints()[i];
+        auto const& ratio = result.ratios[i].value();
+
+        const uint64_t bucket = time_data.delta / interval;
+
+        // Initialize the aggregated data bucket if it doesn't exist
+        if (result_data.find(bucket) == result_data.end()) {
+            result_data[bucket] = { bucket, 0.0f, 0.0f, 0LL, 0LL };
+        }
+
+
+        if(ratio >= 0.0f) {
+            result_data[bucket].aggregated_down_bytes += time_data.data.bytes;
+            result_data[bucket].aggregated_down_ratio += ratio; // agg ratio may exceed 1.0 (or drop bellow -1.0)
+        } else {
+            result_data[bucket].aggregated_up_bytes += time_data.data.bytes;
+            result_data[bucket].aggregated_up_ratio += ratio; // agg ratio may exceed 1.0 (or drop bellow -1.0)
+        }
+    }
+
+    return result_data;
 }
 
 #endif

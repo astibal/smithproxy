@@ -29,12 +29,13 @@ void FlowAnalysis::calculate() {
         auto total = static_cast<double>(left+right);
         auto l = static_cast<long long>(left);
         auto r = static_cast<long long>(right);
-        return (r - l)/total;
+        return static_cast<double>(r - l)/total;
     };
 
     result.skew_all = calculate_skew(count_all_left, count_all_right);
     result.skew_history = calculate_skew(count_left, count_right);
     result.ratios = ratios<max_history>();
+    result.aggregated_ratios = aggregate<max_history>(1000); // aggregate to 1000ms
 }
 
 
@@ -54,6 +55,11 @@ std::string FlowAnalysis::to_string(unsigned int level) const {
             ss << "(" << socle::from_side(delta.data.side) << ", " << delta.delta << "ms, " << delta.data.bytes << "B, ";
             ss << ratio << "r )";
         }
+    }
+    ss << "\r\n    aggregate ratios: ";
+    for(auto const& agg: result.aggregated_ratios) {
+        ss << "[ " << agg.first << "s, " << agg.second.aggregated_up_bytes << "/" << agg.second.aggregated_up_ratio << "upB/R ";
+        ss << agg.second.aggregated_down_bytes << "/" << agg.second.aggregated_down_ratio << "downB/R ] ";
     }
     return ss.str();
 }
@@ -81,6 +87,13 @@ nlohmann::json FlowAnalysis::to_json() const {
                                         { "side", side }, {"delta", delta.delta }, { "bytes", delta.data.bytes },
                                         { "ratio", ratio }
                                 });
+    }
+
+    for(auto const& agg: result.aggregated_ratios) {
+        ret["aggregate_rates"].push_back({
+                     { "interval_index", agg.first }, { "aggBU", agg.second.aggregated_up_bytes }, { "aggRU", agg.second.aggregated_up_ratio },
+                     { "aggBD", agg.second.aggregated_down_bytes }, { "aggRD", agg.second.aggregated_down_ratio },
+        });
     }
     return ret;
 }
