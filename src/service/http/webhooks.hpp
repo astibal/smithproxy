@@ -43,11 +43,15 @@
 
 #include <string>
 #include <atomic>
+#include <nlohmann/json.hpp>
 
 namespace sx::http::webhooks {
     void ping();
-    void neighbor_new(std::string const& address_str);
     void set_enabled(bool val);
+    bool is_enabled();
+
+    void neighbor_new(std::string const& address_str);
+    void send_action(std::string const& action, nlohmann::json const& details);
 }
 
 #endif
