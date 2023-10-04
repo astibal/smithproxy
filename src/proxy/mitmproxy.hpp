@@ -205,6 +205,7 @@ public:
     
     bool ask_destroy() override { state().dead(true); return true; };
     std::string to_string(int verbosity) const override;
+    std::string to_connection_label() const;
     
     int handle_sockets_once(baseCom*) override;
     
@@ -220,8 +221,8 @@ public:
     
     void _debug_zero_connections(baseHostCX* cx);
     
-    MitmHostCX* first_left();
-    MitmHostCX* first_right();
+    MitmHostCX* first_left() const;
+    MitmHostCX* first_right() const;
 
     static std::atomic_uint64_t& current_sessions() { static std::atomic_uint64_t current; return current; };
     static std::atomic_uint64_t& total_sessions() { static std::atomic_uint64_t total; return total; };

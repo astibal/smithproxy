@@ -196,6 +196,18 @@ MitmProxy::~MitmProxy() {
     current_sessions()--;
 }
 
+std::string MitmProxy::to_connection_label() const {
+    auto const* left = first_left();
+    auto const* right = first_right();
+
+    std::stringstream ss;
+    left ? ss << left->name() : ss << "0:0";
+    ss << "+";
+    right ? ss << right->name() : ss << "0:0";
+
+    return ss.str();
+}
+
 std::string MitmProxy::to_string(int verbosity) const {
     std::stringstream r;
     if(verbosity >= INF) r <<  "MitM|";
@@ -1901,27 +1913,27 @@ void MitmProxy::untap() {
     untap_right();
 }
 
-MitmHostCX* MitmProxy::first_left() {
+MitmHostCX* MitmProxy::first_left() const {
     MitmHostCX* ret{};
     
-    if(! ls().empty()) {
-        ret = dynamic_cast<MitmHostCX*>(ls().at(0));
+    if(! left_sockets.empty()) {
+        ret = dynamic_cast<MitmHostCX*>(left_sockets.at(0));
     }
-    else if(! lda().empty()) {
-        ret = dynamic_cast<MitmHostCX*>(lda().at(0));
+    else if(! left_delayed_accepts.empty()) {
+        ret = dynamic_cast<MitmHostCX*>(left_delayed_accepts.at(0));
     }
         
     return ret;
 }
 
-MitmHostCX* MitmProxy::first_right() {
+MitmHostCX* MitmProxy::first_right() const {
     MitmHostCX* ret = nullptr;
     
-    if(! rs().empty()) {
-        ret = dynamic_cast<MitmHostCX*>(rs().at(0));
+    if(! right_sockets.empty()) {
+        ret = dynamic_cast<MitmHostCX*>(right_sockets.at(0));
     }
-    else if(! rda().empty()) {
-            ret = dynamic_cast<MitmHostCX*>(rda().at(0));
+    else if(! right_delayed_accepts.empty()) {
+            ret = dynamic_cast<MitmHostCX*>(right_delayed_accepts.at(0));
     }
 
     return ret;
