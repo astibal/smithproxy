@@ -1167,15 +1167,20 @@ int CfgFactory::load_db_features() {
     _dia("cfgapi_load_db_filters: start");
     auto sl = std::make_shared<CfgString>("sink-left");
     db_features["sink-left"] = std::move(sl);
+    db_features["sink-left"]->element_name() = "sink-left";
 
     auto sr = std::make_shared<CfgString>("sink-right");
     db_features["sink-right"] = std::move(sr);
+    db_features["sink-right"]->element_name() = "sink-right";
 
     auto sa = std::make_shared<CfgString>("sink-all");
     db_features["sink-all"] = std::move(sa);
+    db_features["sink-all"]->element_name() = "sink-all";
+
 
     auto statistics = std::make_shared<CfgString>("statistics");
     db_features["statistics"] = std::move(statistics);
+    db_features["statistics"]->element_name() = "statistics";
 
     return static_cast<int>(db_features.size());
 }
