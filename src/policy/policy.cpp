@@ -50,8 +50,11 @@ std::string PolicyRule::to_string(int verbosity) const {
     if(is_disabled) {
         from << " -- DISABLED -- ";
     }
-    else if(is_degraded) {
-        from << " -- DEGRADED -- ";
+    else if(cfg_err_is_disabled) {
+        from << " -- ERR_DISABLED -- ";
+    }
+    else if(cfg_err_is_degraded) {
+        from << " -- ERR_DEGRADED -- ";
     }
 
 
@@ -321,7 +324,7 @@ bool PolicyRule::match(baseProxy* p) {
     bool rmatch = false;
     bool rpmatch = false;
 
-    if(is_disabled) {
+    if(is_disabled or cfg_err_is_disabled) {
         _dia("PolicyRule::match %s this policy is disabled", p->to_string(iINF).c_str());
         return false;
     }
@@ -390,7 +393,7 @@ bool PolicyRule::match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r)
         rs = r[0]->str();
     }
 
-    if(is_disabled) {
+    if(is_disabled or cfg_err_is_disabled) {
         _dia("PolicyRule::match_lr %s <+> %s - this policy is disabled", ls.c_str(), rs.c_str());
         return false;
     }

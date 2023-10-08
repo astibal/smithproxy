@@ -1618,16 +1618,17 @@ int CfgFactory::load_db_policy () {
             if(not hard_error) {
                 if(soft_error) {
                     _dia("cfgapi_load_policy[#%d]: loaded with a soft error", policy_index);
-                    rule->is_degraded = true;
+                    rule->cfg_err_is_degraded = true;
                 } else {
                     _dia("cfgapi_load_policy[#%d]: ok", policy_index);
                 }
             } else {
-                rule->is_disabled = true;
+                rule->cfg_err_is_disabled = true;
                 _err("cfgapi_load_policy[#%d]: not ok, disabled", policy_index);
 
             }
-            LOAD_ERRORS = (hard_error or soft_error);
+
+            if(hard_error or soft_error) LOAD_ERRORS = true;
 
             db_policy_list.push_back(rule);
             db_policy[string_format("[%d]", policy_index)] = rule;
@@ -1873,7 +1874,7 @@ int CfgFactory::load_db_prof_detection () {
                 _dia("cfgapi_load_obj_profile_detect: '%s': ok", name.c_str());
             } else {
                 _dia("cfgapi_load_obj_profile_detect: '%s': not ok", name.c_str());
-                Log::get()->events().insert(WAR,"CONFIG: detection_profile '%s': unfinished sub-rules", cur_object.getName());
+                Log::get()->events().insert(WAR,"CONFIG: detection_profile '%s': missing 'mode' attribute", cur_object.getName());
                 CfgFactory::LOAD_ERRORS = true;
 
             }
