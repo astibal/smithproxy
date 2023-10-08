@@ -205,6 +205,8 @@ public:
     // Each version bump implies a config upgrade - we start on 1000
     constexpr static inline const int SCHEMA_VERSION  = 1017;
 
+    static inline std::atomic_bool LOAD_ERRORS = false;
+
     CfgFactory() = default;
     CfgFactory(CfgFactory const &) = delete;
     void operator=(const CfgFactory&) = delete;

@@ -50,6 +50,10 @@ std::string PolicyRule::to_string(int verbosity) const {
     if(is_disabled) {
         from << " -- DISABLED -- ";
     }
+    else if(is_degraded) {
+        from << " -- DEGRADED -- ";
+    }
+
 
     switch(proto->value()) {
         case 6:

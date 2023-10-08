@@ -111,7 +111,7 @@ struct CliGlobals {
     };
 
     static thread_local inline bool ct_warning_flag = false;
-
+    static thread_local inline bool cfg_error_flag = false;
 };
 
 auto cli_id() {
@@ -132,7 +132,11 @@ void apply_hostname(cli_def* cli) {
     const bool cfg_change_unsaved = (board->at(cli_id()).seen_current != board->at(cli_id()).seen_saved);
 
 
-    cli_set_hostname(cli, string_format("smithproxy(%s)%s", CliGlobals::hostname().c_str(), cfg_change_unsaved ? "<*>" : "").c_str());
+    cli_set_hostname(cli, string_format("smithproxy(%s)%s%s",
+                                        CliGlobals::hostname().c_str(),
+                                        cfg_change_unsaved ? "<*>" : "",
+                                        CfgFactory::LOAD_ERRORS ? "<!>" : ""
+                                        ).c_str());
 
 }
 
@@ -1114,12 +1118,43 @@ int cli_debug_set(struct cli_def *cli, const char *command, char *argv[], int ar
 int cli_save_config(struct cli_def *cli, const char *command, char *argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
 
+    auto args = args_to_vec(argv, argc);
+    bool having_force = false;
+
+    if(CfgFactory::LOAD_ERRORS) {
+        having_force = std::any_of(args.begin(), args.end(), [](auto const& a) { return a == "force"; });
+        if(not having_force) {
+            cli_print(cli, "\r\n Warning, read carefully: configuration loaded only partially:");
+            cli_print(cli, " ");
+            cli_print(cli, "   Saving current configuration would write only parts loaded, missing those with errors.");
+            cli_print(cli, "   It's advised to fix issues in the config file, then");
+            cli_print(cli, " ");
+            cli_print(cli, "     a) `execute reload`  - or -");
+            cli_print(cli, "     b) restart service, ie. with `execute shutdown`");
+            cli_print(cli, " ");
+            cli_print(cli, "     You may repeat steps above until the issue is resolved.");
+            cli_print(cli, " ");
+            cli_print(cli, "     If you are absolutely sure you want to save current config anyway:");
+            cli_print(cli, "       run command `save config force`");
+            cli_print(cli, " ");
+            cli_print(cli, "       ... you have been warned.");
+
+            return CLI_OK;
+        }
+    }
+
     int n = CfgFactory::get()->save_config();
     if(n < 0) {
-        cli_print(cli, "error writing config file!");
+        cli_print(cli, "%serror writing config file!", having_force ? "enforced: " : "");
     }
     else {
-        cli_print(cli, "config saved successfully.");
+        if(having_force) {
+            cli_print(cli, "\r\nParts with errors and their respective references have been removed.");
+            cli_print(cli, " To reload saved config, issue `execute reload`");
+            cli_print(cli, " ");
+        }
+        cli_print(cli, "%sconfig saved successfully.", having_force ? "enforced: " : "");
+
 
         CfgFactory::board()->save(cli_id());
         CfgFactory::board()->ack_saved(cli_id());
@@ -1134,10 +1169,14 @@ int cli_exec_reload(struct cli_def *cli, const char *command, char *argv[], int 
     debug_cli_params(cli, command, argv, argc);
 
     bool CONFIG_LOADED = SmithProxy::instance().load_config(CfgFactory::get()->config_file, true);
+    CliGlobals::cfg_error_flag = false;
+
     CfgFactory::board()->rollback(cli_id());
 
     if(CONFIG_LOADED) {
-        cli_print(cli, "Configuration file reloaded successfully");
+        auto msg = string_format("Configuration file reloaded%s",
+                                 CfgFactory::LOAD_ERRORS ? " (with some errors)" : "");
+        cli_print(cli, msg.c_str());
 
         CfgFactory::board()->ack_current(cli_id());
         apply_hostname(cli);
@@ -2428,10 +2467,19 @@ void register_regular_callback(cli_def* cli) {
             return CLI_QUIT;
         }
 
+        if(CfgFactory::LOAD_ERRORS and not CliGlobals::cfg_error_flag) {
+            cli_print(cli, "\r\n Warning: There was a problem loading configuration");
+            cli_print(cli,     "    - execute `show event list` to see more details");
+
+            // set as seen in this CLI
+            CliGlobals::cfg_error_flag = true;
+        }
+
         if(not SSLFactory::factory().is_ct_available() and not CliGlobals::ct_warning_flag) {
             cli_print(cli, "\r\n Warning: Certificate Transparency checks not available");
-            cli_print(cli, "          - download it using `sx_download_ctlog` tool and restart service");
+            cli_print(cli,     "     - download it using `sx_download_ctlog` tool and restart service");
 
+            // set as seen in this CLI
             CliGlobals::ct_warning_flag = true;
         }
 

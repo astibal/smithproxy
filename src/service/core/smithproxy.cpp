@@ -692,7 +692,9 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
         if(reload) {
             CfgFactory::get()->cleanup();
         }
+        auto prev_LOAD_ERRORS = CfgFactory::LOAD_ERRORS.load();
 
+        CfgFactory::LOAD_ERRORS = false;
         CfgFactory::get()->load_internal();
 
         CfgFactory::get()->load_db_address();
@@ -797,6 +799,10 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
             if(load_if_exists(CfgFactory::cfg_root()["settings"],"log_console", CfgFactory::get()->log_console)) {
                 Log::get()->dup2_cout(CfgFactory::get()->log_console);
             }
+        }
+
+        if(prev_LOAD_ERRORS and not CfgFactory::LOAD_ERRORS) {
+            Log::get()->events().insert(NOT,"Configuration errors have been resolved.");
         }
     }
     catch(const SettingNotFoundException &nfex) {

@@ -73,6 +73,7 @@ public:
     unsigned int cnt_matches = 0;
 
     bool is_disabled = false;
+    bool is_degraded = false;
     std::string policy_name;
 
     std::shared_ptr<CfgUint8> proto;
