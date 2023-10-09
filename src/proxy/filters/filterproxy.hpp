@@ -72,10 +72,13 @@ public:
     explicit FilterProxy(MitmProxy* parent) : parent_(parent) {};
     ~FilterProxy() override = default;
 
-    virtual void update_states() {
+    virtual bool update_states() {
         // some filters need extra non-const steps before calling to_string() const
         // we don't need to override, empty is just fine
+        // return false if the state is not usable
+        return true;
     };
+
     std::string to_string(int verbosity) const override { static std::string r("FilterProxy"); return r; };
     virtual nlohmann::json to_json(int verbosity) const { return nlohmann::json(); };
 

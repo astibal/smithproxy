@@ -198,12 +198,24 @@ MitmProxy::~MitmProxy() {
 
     if(not filters_.empty() and sx::http::webhooks::is_enabled()) {
         auto event = nlohmann::json();
+        bool got_something = false;
 
         for (auto &[name, filter]: filters_) {
-            filter->update_states();
-            event[name] = filter->to_json(iINF);
+            if(filter->update_states()) {
+                event[name] = filter->to_json(iINF);
+                got_something = true;
+            }
+            else {
+                _dia("filter %s did not profile any useful data for webhook", name.c_str());
+            }
         }
-        sx::http::webhooks::send_action("connection-info", event);
+
+        if(got_something) {
+            sx::http::webhooks::send_action("connection-info", event);
+            _dia("webhook sent");
+        } else {
+            _dia("nothing to sent to webhook");
+        }
     }
 
     current_sessions()--;

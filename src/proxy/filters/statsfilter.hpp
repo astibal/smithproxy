@@ -70,7 +70,7 @@ public:
     }
     ~StatsFilter() override;
 
-    void update_states() override;
+    bool update_states() override;
     std::string to_string(int verbosity) const override;
     nlohmann::json to_json(int verbosity) const override;
 

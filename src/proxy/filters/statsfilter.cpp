@@ -50,8 +50,14 @@ void StatsFilter::finish() {
 }
 
 
-void StatsFilter::update_states() {
+bool StatsFilter::update_states() {
     finish(); // recalculate
+
+    // return false, because we haven't seen any data whatsoever (entropy data show it well)
+    if(shannon_entropy.left_scores.data_accounted + shannon_entropy.right_scores.data_accounted == 0) {
+        return false;
+    }
+    return true;
 }
 
 std::string StatsFilter::to_string(int verbosity) const {
