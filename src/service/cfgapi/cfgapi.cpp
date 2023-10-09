@@ -2731,9 +2731,11 @@ void CfgFactory::policy_apply_features(std::shared_ptr<PolicyRule> const & polic
         }
 
         if(statistics_filter) {
+            _dia("policy_apply_features: added statistics");
             mitm_proxy->add_filter("statistics", statistics_filter);
         }
         if(sink_filter) {
+            _dia("policy_apply_features: added sinkhole");
             mitm_proxy->add_filter("sinkhole", sink_filter);
         }
 
@@ -2793,18 +2795,21 @@ int CfgFactory::policy_apply (baseHostCX *originator, baseProxy *proxy, int matc
             algs_name += p_alg_dns->element_name();
         }
 
+        auto* mitm_proxy = dynamic_cast<MitmProxy*>(proxy);
+        if(mitm_proxy) {
 
-        /* Processing Auth profile */
-        if(auto* mitm_proxy = dynamic_cast<MitmProxy*>(proxy); mitm_proxy and pa) {
-            // auth is applied on proxy
-            mitm_proxy->auth_opts.authenticate = pa->authenticate;
-            mitm_proxy->auth_opts.resolve = pa->resolve;
-            
-            pa_name = pa->element_name().c_str();
+            /* Processing Auth profile */
+            if(pa) {
+                // auth is applied on proxy
+                mitm_proxy->auth_opts.authenticate = pa->authenticate;
+                mitm_proxy->auth_opts.resolve = pa->resolve;
 
-            // now load features, based on a feature tag
+                pa_name = pa->element_name().c_str();
+            }
+
+            /* Processing Features */
             policy_apply_features(rule, mitm_proxy);
-        } 
+        }
         
         // ALGS can operate only on MitmHostCX classes
 
