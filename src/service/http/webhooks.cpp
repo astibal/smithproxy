@@ -35,7 +35,8 @@ namespace sx::http::webhooks {
     void neighbor_new(std::string const& address_str) {
         if(enabled) {
             nlohmann::json const nbr_update = {
-                                                { "action", "new" },
+                                                { "action", "neighbor" },
+                                                { "state", "new" },
                                                 {"source", SmithProxy::instance().hostname },
                                                 {"type", "proxy"},
                                                 { "address", address_str }
