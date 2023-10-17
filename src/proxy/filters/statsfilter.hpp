@@ -66,7 +66,7 @@ public:
     StatsFilter() = delete;
     explicit StatsFilter(MitmProxy* parent) : FilterProxy(parent) {
         if(parent)
-            connection_label = parent->to_connection_label();
+            connection_label = parent->to_connection_label(false);
     }
     ~StatsFilter() override;
 

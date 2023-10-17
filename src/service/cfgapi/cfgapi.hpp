@@ -200,10 +200,9 @@ class CfgFactory : public CfgFactoryBase {
     static inline std::shared_ptr<UpdateBoard> update_board;
 
 public:
-//    static inline bool config_changed_flag = false;
-
     // Each version bump implies a config upgrade - we start on 1000
-    constexpr static inline const int SCHEMA_VERSION  = 1017;
+    // see upgrade_schema() - control config upgrade
+    constexpr static inline const int SCHEMA_VERSION  = 1018;
 
     static inline std::atomic_bool LOAD_ERRORS = false;
 
@@ -348,6 +347,7 @@ public:
         bool enabled = false;
         std::string url;
         bool tls_verify = true;
+        std::string hostid;
     } settings_webhook;
 
     std::vector<AddressInfo> db_nameservers;

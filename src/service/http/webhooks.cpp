@@ -9,6 +9,7 @@
 
 namespace sx::http::webhooks {
     static std::atomic_bool enabled = false;
+    static std::string hostid;
 
     void set_enabled(bool val) {
         enabled = val;
@@ -16,12 +17,19 @@ namespace sx::http::webhooks {
     bool is_enabled() {
         return enabled;
     }
+    void set_hostid(std::string const& ref) {
+        hostid = ref;
+    }
+
+    std::string const& get_hostid() {
+        return hostid.empty() ? SmithProxy::instance().hostname : hostid;
+    }
 
     void ping() {
         if(enabled) {
             nlohmann::json const ping = {
                                           { "action", "ping" },
-                                          {"source", SmithProxy::instance().hostname },
+                                          {"source", get_hostid() },
                                           {"type", "proxy"}
                                         };
             sx::http::AsyncRequest::emit(
@@ -37,7 +45,7 @@ namespace sx::http::webhooks {
             nlohmann::json const nbr_update = {
                                                 { "action", "neighbor" },
                                                 { "state", "new" },
-                                                {"source", SmithProxy::instance().hostname },
+                                                {"source", get_hostid() },
                                                 {"type", "proxy"},
                                                 { "address", address_str }
                                               };
@@ -53,7 +61,7 @@ namespace sx::http::webhooks {
         if(enabled) {
             nlohmann::json msg = {
                     {"action", action},
-                    {"source", SmithProxy::instance().hostname},
+                    {"source", get_hostid() },
                     {"type",   "proxy"}};
 
             msg.push_back({action, details});

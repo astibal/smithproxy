@@ -49,6 +49,7 @@ namespace sx::http::webhooks {
     void ping();
     void set_enabled(bool val);
     bool is_enabled();
+    void set_hostid(std::string const& ref);
 
     void neighbor_new(std::string const& address_str);
     void send_action(std::string const& action, nlohmann::json const& details);

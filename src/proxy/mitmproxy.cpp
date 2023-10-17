@@ -221,17 +221,71 @@ MitmProxy::~MitmProxy() {
     current_sessions()--;
 }
 
-std::string MitmProxy::to_connection_label() const {
+std::string MitmProxy::to_connection_label(bool force_resolve) const {
     auto const* left = first_left();
     auto const* right = first_right();
 
     std::stringstream ss;
-    left ? ss << left->name() : ss << "0:0";
+    left ? ss << left->name(iINF, force_resolve) : ss << "0:0";
     ss << "+";
-    right ? ss << right->name() : ss << "0:0";
+    right ? ss << right->name(iINF, force_resolve) : ss << "0:0";
 
     return ss.str();
 }
+
+
+void MitmProxy::webhook_session_start() const {
+    if(not sx::http::webhooks::is_enabled() or wh_start) return;
+
+    nlohmann::json j;
+    auto cl = to_connection_label();
+    j["id"] = string_format("Proxy-%lX-OID-%lX", StaticContent::boot_random, oid());
+    j["info"] = { {"session", cl } };
+    sx::http::webhooks::send_action("connection-start", j);
+
+    wh_start = true;
+}
+
+std::optional<std::string> MitmProxy::get_application() const {
+
+    auto const* mh = first_left();
+    if(not mh) return std::nullopt;
+
+    std::string connection_protocol;
+    auto app = mh->engine_ctx.application_data;
+
+    if(app) {
+        return app->protocol();
+    }
+
+    return std::nullopt;
+}
+
+void MitmProxy::webhook_session_stop() const {
+    if(not sx::http::webhooks::is_enabled() or wh_stop) return;
+
+    nlohmann::json j;
+    auto cl = to_connection_label();
+
+    uint64_t uB = 0L;
+    uint64_t dB = 0L;
+    auto const* l = first_left();
+    if(l) {
+        uB = l->meter_read_bytes;
+        dB = l->meter_write_bytes;
+    }
+
+    j["id"] = string_format("Proxy-%lX-OID-%lX", StaticContent::boot_random, oid());
+    j["info"] = { {"session", cl },
+                  {"app", get_application().value_or("") },
+                  { "bytes_up", uB },
+                  { "bytes_down", dB }
+    };
+    sx::http::webhooks::send_action("connection-stop", j);
+
+    wh_stop = true;
+}
+
 
 std::string MitmProxy::to_string(int verbosity) const {
     std::stringstream r;
@@ -599,7 +653,8 @@ void MitmProxy::add_filter(std::string const& name, FilterProxy* fp) {
 
 
 int MitmProxy::handle_sockets_once(baseCom* xcom) {
-    
+
+    webhook_session_start();
 
     return baseProxy::handle_sockets_once(xcom);
 }
@@ -1272,6 +1327,8 @@ void MitmProxy::on_error(baseHostCX* cx, char side, const char* side_label) {
                 }
             }
         }
+
+        webhook_session_stop();
     }
 }
 
