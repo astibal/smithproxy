@@ -941,7 +941,7 @@ bool MitmProxy::handle_requirements(baseHostCX* cx) {
 
     bool redirected = false;
 
-    auto* mh = dynamic_cast<MitmHostCX*>(cx);
+    auto* mh = MitmHostCX::from_baseHostCX(cx);
 
     if(mh != nullptr) {
 
@@ -1088,10 +1088,10 @@ std::string get_connection_details_str(MitmProxy* px, baseHostCX* cx, char side)
     std::string flags;
     flags += side;
 
-    auto* mh = dynamic_cast<MitmHostCX*>(cx);
+    auto* mh = MitmHostCX::from_baseHostCX(cx);
 
     if(side == 'R' && cx->peer())
-        mh = dynamic_cast<MitmHostCX*>(cx->peer());
+        mh = MitmHostCX::from_baseHostCX(cx->peer());
 
     if (mh != nullptr && mh->inspection_verdict() == Inspector::CACHED) flags+="C";
 
@@ -1942,10 +1942,12 @@ MitmHostCX* MitmProxy::first_left() const {
     MitmHostCX* ret{};
     
     if(! left_sockets.empty()) {
-        ret = dynamic_cast<MitmHostCX*>(left_sockets.at(0));
+        auto* l = left_sockets.at(0);
+          ret = MitmHostCX::from_baseHostCX(l);
     }
     else if(! left_delayed_accepts.empty()) {
-        ret = dynamic_cast<MitmHostCX*>(left_delayed_accepts.at(0));
+        auto* l = left_delayed_accepts.at(0);
+        ret = MitmHostCX::from_baseHostCX(l);
     }
         
     return ret;
@@ -1955,10 +1957,12 @@ MitmHostCX* MitmProxy::first_right() const {
     MitmHostCX* ret = nullptr;
     
     if(! right_sockets.empty()) {
-        ret = dynamic_cast<MitmHostCX*>(right_sockets.at(0));
+        auto* r = right_sockets.at(0);
+        ret = MitmHostCX::from_baseHostCX(r);
     }
     else if(! right_delayed_accepts.empty()) {
-            ret = dynamic_cast<MitmHostCX*>(right_delayed_accepts.at(0));
+        auto* r = right_delayed_accepts.at(0);
+        ret = MitmHostCX::from_baseHostCX(r);
     }
 
     return ret;

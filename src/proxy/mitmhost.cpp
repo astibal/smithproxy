@@ -70,13 +70,27 @@ std::string MitmHostCX::to_string(int verbosity) const {
 
 
 MitmHostCX::MitmHostCX(baseCom* c, const char* h, const char* p ) : AppHostCX::AppHostCX(c,h,p) {
+    ClassChar = 'M';
     _deb("MitmHostCX: constructor %s:%s", h, p);
     load_signatures();
 }
 
 MitmHostCX::MitmHostCX( baseCom* c, int s ) : AppHostCX::AppHostCX(c,s) {
+    ClassChar = 'M';
     _deb("MitmHostCX: constructor %d", s);
     load_signatures();
+}
+
+MitmHostCX* MitmHostCX::from_baseHostCX(baseHostCX* ptr) {
+    if(not ptr) return nullptr;
+
+    if(ptr->ClassChar == 'M') {
+        return static_cast<MitmHostCX*>(ptr);
+    }
+    else if(auto* mh = dynamic_cast<MitmHostCX*>(ptr) ; mh) {
+        return mh;
+    }
+    return nullptr;
 }
 
 std::size_t MitmHostCX::process_in() {

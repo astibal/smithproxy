@@ -55,7 +55,8 @@ public:
     std::size_t process_out() override;
     void load_signatures();
 
-    
+    static MitmHostCX* from_baseHostCX(baseHostCX* ptr);
+
     std::vector<std::unique_ptr<Inspector>> inspectors_;
     void inspect(char side) override;
     void on_detect(std::shared_ptr<duplexFlowMatch> x_sig, flowMatchState& s, vector_range& r) override;
