@@ -81,6 +81,7 @@ CONFIG_MODE_DEF(cli_conf_edit_routing, MODE_EDIT_ROUTING, "routing")
 CONFIG_MODE_DEF(cli_conf_edit_captures, MODE_EDIT_CAPTURES, "captures")
 CONFIG_MODE_DEF(cli_conf_edit_captures_local, MODE_EDIT_CAPTURES_LOCAL, "local")
 CONFIG_MODE_DEF(cli_conf_edit_captures_remote, MODE_EDIT_CAPTURES_REMOTE, "remote")
+CONFIG_MODE_DEF(cli_conf_edit_captures_options, MODE_EDIT_CAPTURES_OPTIONS, "options")
 
 #ifdef USE_EXPERIMENT
 CONFIG_MODE_DEF(cli_conf_edit_experiment, MODE_EDIT_EXPERIMENT, "experiment")

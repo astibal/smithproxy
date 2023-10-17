@@ -2432,6 +2432,12 @@ void generate_callbacks() {
             .cmd("set", cli_generic_set_cb)
             .cap("edit", true)
             .cmd("edit", cli_conf_edit_captures_remote);
+    register_callback( "captures.options",MODE_EDIT_CAPTURES_OPTIONS)
+            .cap("set", true)
+            .cmd("set", cli_generic_set_cb)
+            .cap("edit", true)
+            .cmd("edit", cli_conf_edit_captures_options);
+
 
 #ifdef USE_EXPERIMENT
     register_callback("experiment", MODE_EDIT_EXPERIMENT)

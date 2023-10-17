@@ -202,7 +202,7 @@ class CfgFactory : public CfgFactoryBase {
 public:
     // Each version bump implies a config upgrade - we start on 1000
     // see upgrade_schema() - control config upgrade
-    constexpr static inline const int SCHEMA_VERSION  = 1018;
+    constexpr static inline const int SCHEMA_VERSION  = 1019;
 
     static inline std::atomic_bool LOAD_ERRORS = false;
 

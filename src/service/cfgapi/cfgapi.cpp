@@ -427,7 +427,11 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "added settings.webhook.hostid");
         return true;
     }
-
+    else if(upgrade_to_num == 1019) {
+        log.event(INF, "added captures.options section");
+        log.event(INF, "added captures.options.calculate_checksums");
+        return true;
+    }
 
     return false;
 }
@@ -896,6 +900,10 @@ bool CfgFactory::load_captures() {
             load_if_exists(remote, "tun_ttl", CfgFactory::get()->capture_remote.tun_ttl);
 
             CfgFactory::gre_export_apply(&traflog::PcapLog::single_instance());
+        }
+        if(captures.exists("options")) {
+            Setting const& remote = captures["options"];
+            load_if_exists(remote, "calculate_checksums", socle::pcap::CONFIG::CALCULATE_CHECKSUMS);
         }
     }
     else {
@@ -4995,6 +5003,14 @@ int CfgFactory::save_captures(Config& ex) const {
     remote.add("tun_type", Setting::TypeString) = CfgFactory::get()->capture_remote.tun_type;
     remote.add("tun_dst", Setting::TypeString) = CfgFactory::get()->capture_remote.tun_dst;
     remote.add("tun_ttl", Setting::TypeInt) = CfgFactory::get()->capture_remote.tun_ttl;
+
+
+    if(not objects.exists("options"))
+        objects.add("options", Setting::TypeGroup);
+
+    auto& options = ex.getRoot()["captures"]["options"];
+    options.add("calculate_checksums", Setting::TypeBoolean) = socle::pcap::CONFIG::CALCULATE_CHECKSUMS;
+
 
     return 1;
 }

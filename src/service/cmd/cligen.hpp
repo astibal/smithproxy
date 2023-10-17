@@ -190,10 +190,11 @@ CONFIG_MODE_DEC(cli_conf_edit_detection_signatures)
 enum edit_routing { MODE_EDIT_ROUTING=0x28000000, };
 CONFIG_MODE_DEC(cli_conf_edit_routing)
 
-enum edit_captures { MODE_EDIT_CAPTURES=0x29000000, MODE_EDIT_CAPTURES_LOCAL=0x29001000, MODE_EDIT_CAPTURES_REMOTE=0x29002000 };
+enum edit_captures { MODE_EDIT_CAPTURES=0x29000000, MODE_EDIT_CAPTURES_LOCAL=0x29001000, MODE_EDIT_CAPTURES_REMOTE=0x29002000, MODE_EDIT_CAPTURES_OPTIONS=0x29004000};
 CONFIG_MODE_DEC(cli_conf_edit_captures)
 CONFIG_MODE_DEC(cli_conf_edit_captures_local)
 CONFIG_MODE_DEC(cli_conf_edit_captures_remote)
+CONFIG_MODE_DEC(cli_conf_edit_captures_options)
 
 #ifdef USE_EXPERIMENT
 enum edit_experiment { MODE_EDIT_EXPERIMENT=0x30000000 };
