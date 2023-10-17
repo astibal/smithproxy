@@ -546,10 +546,14 @@ bool CfgFactory::upgrade_and_save() {
 
         if(our_schema > cfg_schema) {
             for (int cur_schema = cfg_schema + 1; cur_schema <= our_schema ; ++cur_schema) {
-                if (upgrade_schema(cur_schema)) num_touches++;
+                if (upgrade_schema(cur_schema)) {
+                    num_touches++;
+                }
             }
 
             internal["schema"] = SCHEMA_VERSION;
+            CfgFactory::get()->schema_version = SCHEMA_VERSION;
+
 
             if(num_touches) {
                 log.event(NOT, "New configuration schema %d", our_schema);
