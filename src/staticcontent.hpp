@@ -57,6 +57,8 @@ class StaticContent {
 
     logan_lite& log;
 public:
+    // should be populated externally, on start
+    static inline uint32_t boot_random {0};
 
     bool load_files(std::string& dir);
     

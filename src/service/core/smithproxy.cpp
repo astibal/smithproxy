@@ -39,19 +39,18 @@
 
 #include <memory>
 
-#include <service/core/smithproxy.hpp>
+#include <openssl/rand.h>
 
-#include <service/cmd/cmdserver.hpp>
-#include <service/cmd/clistate.hpp>
+#include <staticcontent.hpp>
 
 #include <policy/authfactory.hpp>
 #include <inspect/sigfactory.hpp>
-#include <inspect/sxsignature.hpp>
+
+#include <service/core/smithproxy.hpp>
+#include <service/cmd/cmdserver.hpp>
 #include <service/httpd/httpd.hpp>
-
-#include <service/http/webhooks.hpp>
-
 #include <service/cfgapi/cfgapi.hpp>
+#include "service/http/webhooks.hpp"
 
 #ifdef ASAN_LEAKS
 extern "C" int __lsan_do_recoverable_leak_check();
@@ -415,6 +414,12 @@ void SmithProxy::run() {
         gethostname(h.data(),63);
         return std::string(h.data());
     }();
+
+    // initialize boot-time random
+    auto* boot_random_ptr = &SmithProxy::boot_random;
+    RAND_bytes(reinterpret_cast<unsigned char*>(boot_random_ptr), sizeof(uint32_t));
+    // copy value also to static content, for parts where dependency on smithproxy instance is NOT desirable
+    StaticContent::boot_random = SmithProxy::boot_random;
 
     while(true) {
         if(instance().terminate_flag) {

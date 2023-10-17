@@ -69,6 +69,7 @@ public:
     std::atomic<bool> terminate_flag {false};
     std::atomic<bool> terminated {false};
     std::string hostname {};
+    static inline uint32_t boot_random {};
 
     [[nodiscard]] static bool abort_sleep(unsigned int steps, time_t step=1);
 
