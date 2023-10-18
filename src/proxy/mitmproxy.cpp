@@ -234,7 +234,7 @@ std::string MitmProxy::to_connection_label(bool force_resolve) const {
 }
 
 
-std::string MitmProxy::to_connection_ID(bool force_resolve) const {
+std::string MitmProxy::to_connection_ID() const {
     return string_format("Proxy-%lX-OID-%lX", StaticContent::boot_random, oid());
 }
 

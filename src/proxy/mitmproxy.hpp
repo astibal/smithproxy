@@ -206,7 +206,7 @@ public:
     bool ask_destroy() override { state().dead(true); return true; };
     std::string to_string(int verbosity) const override;
     std::string to_connection_label(bool force_resolve = false) const;
-    std::string to_connection_ID(bool force_resolve = false) const;
+    std::string to_connection_ID() const;
     std::optional<std::string> get_application() const;
 
     mutable bool wh_start = false;
