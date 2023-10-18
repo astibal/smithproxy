@@ -64,7 +64,7 @@ namespace sx::http::webhooks {
                     {"source", get_hostid() },
                     {"type",   "proxy"}};
 
-            msg.push_back({action, details});
+            msg.push_back({"details", details});
             sx::http::AsyncRequest::emit(
                     to_string(msg),
                     [](auto reply) {
