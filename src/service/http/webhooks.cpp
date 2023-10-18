@@ -57,10 +57,11 @@ namespace sx::http::webhooks {
         }
     }
 
-    void send_action(std::string const& action, nlohmann::json const& details) {
+    void send_action(std::string const& action, std::string const& action_id, nlohmann::json const& details) {
         if(enabled) {
             nlohmann::json msg = {
                     {"action", action},
+                    {"id", action_id},
                     {"source", get_hostid() },
                     {"type",   "proxy"}};
 

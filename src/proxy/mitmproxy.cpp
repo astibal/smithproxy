@@ -211,7 +211,7 @@ MitmProxy::~MitmProxy() {
         }
 
         if(got_something) {
-            sx::http::webhooks::send_action("connection-info", event);
+            sx::http::webhooks::send_action("connection-info", to_connection_ID(), event);
             _dia("webhook sent");
         } else {
             _dia("nothing to sent to webhook");
@@ -234,14 +234,17 @@ std::string MitmProxy::to_connection_label(bool force_resolve) const {
 }
 
 
+std::string MitmProxy::to_connection_ID(bool force_resolve) const {
+    return string_format("Proxy-%lX-OID-%lX", StaticContent::boot_random, oid());
+}
+
 void MitmProxy::webhook_session_start() const {
     if(not sx::http::webhooks::is_enabled() or wh_start) return;
 
     nlohmann::json j;
     auto cl = to_connection_label();
-    j["id"] = string_format("Proxy-%lX-OID-%lX", StaticContent::boot_random, oid());
     j["info"] = { {"session", cl } };
-    sx::http::webhooks::send_action("connection-start", j);
+    sx::http::webhooks::send_action("connection-start", to_connection_ID(), j);
 
     wh_start = true;
 }
@@ -275,13 +278,12 @@ void MitmProxy::webhook_session_stop() const {
         dB = l->meter_write_bytes;
     }
 
-    j["id"] = string_format("Proxy-%lX-OID-%lX", StaticContent::boot_random, oid());
     j["info"] = { {"session", cl },
                   {"app", get_application().value_or("") },
                   { "bytes_up", uB },
                   { "bytes_down", dB }
     };
-    sx::http::webhooks::send_action("connection-stop", j);
+    sx::http::webhooks::send_action("connection-stop", to_connection_ID(), j);
 
     wh_stop = true;
 }
