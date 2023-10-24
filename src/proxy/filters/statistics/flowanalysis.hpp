@@ -116,10 +116,10 @@ FlowAnalysis::aggregated_ratios_t FlowAnalysis::aggregate(int interval) const {
 
         if(ratio >= 0.0f) {
             result_data[bucket].aggregated_down_bytes += time_data.data.bytes;
-            result_data[bucket].aggregated_down_ratio += ratio; // agg ratio may exceed 1.0 (or drop bellow -1.0)
+            result_data[bucket].aggregated_down_ratio += ratio; // agg ratio may exceed 1.0 (or drop below -1.0)
         } else {
             result_data[bucket].aggregated_up_bytes += time_data.data.bytes;
-            result_data[bucket].aggregated_up_ratio += ratio; // agg ratio may exceed 1.0 (or drop bellow -1.0)
+            result_data[bucket].aggregated_up_ratio += ratio; // agg ratio may exceed 1.0 (or drop below -1.0)
         }
     }
 

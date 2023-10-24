@@ -150,7 +150,7 @@ DISTRO=`./distro.sh`
 echo "Major version: $VER_MAJ, debian directory set to $DEB_DIR"
 
 
-# try to get passwords from an argument for case script is run interative
+# try to get password from an argument in case script is run interactively
 if [ "${FTP_UPLOAD_PWD}" == "" ]; then
     FTP_UPLOAD_PWD=$1
 fi

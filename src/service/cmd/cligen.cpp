@@ -126,7 +126,7 @@ std::pair<int, std::string> generate_dynamic_groups(struct cli_def *cli, const c
             auto const& this_settings = CfgFactory::cfg_root().lookup(this_setting_path);
             int this_index = this_settings.getIndex();
             int new_mode = static_mode + 500 + this_index;
-            _debug(cli, "new dynmic mode %d", new_mode);
+            _debug(cli, "new dynamic mode %d", new_mode);
 
             CliState::get().callbacks(
                     this_setting_path,

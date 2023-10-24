@@ -451,7 +451,7 @@ void CfgValueHelp::init() {
         .may_be_empty(false)
         .value_filter(VALUE_UINT_RANGE<0,65535>);
 
-    add("address_objects", "adresses and fqdn names");
+    add("address_objects", "addresses and fqdn names");
     add("address_objects.[x].type", "'cidr' or 'fqdn'")
         .may_be_empty(false)
         .value_filter(is_in_vector([]() -> std::vector<std::string> { return { "cidr", "fqdn" }; },"only allowed options"))

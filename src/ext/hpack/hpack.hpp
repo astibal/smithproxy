@@ -569,7 +569,7 @@ namespace HPACK
             if ( idx > m_queue.size() ) {
                 // It's not clear these checks even entirely make sense
                 // the concern was that someone passes in an out-of-bounds
-                // index, but thats because the static and dynamic
+                // index, but that's because the static and dynamic
                 // tables have their indices flattened into one, so we
                 // attempt to address that by subtracting the static
                 // headers index size if we are out of bounds, which

@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 
 FILE_PATH="/etc/smithproxy/ct_log_list.cnf"
-FILE_URL="https://download.smithproxy.org/additionals/ct_log_list.cnf"
+FILE_URL="https://download.smithproxy.org/additional/ct_log_list.cnf"
 
 wget ${FILE_URL} -O ${FILE_PATH}
 

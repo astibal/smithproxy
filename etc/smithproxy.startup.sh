@@ -170,7 +170,7 @@ function tenant_apply {
 function smith_interfaces4 {
     if [[ "${SMITH_INTERFACE}" == '*' ]]; then
         SMITH_INTERFACE=`ip r | grep -o 'dev [a-z0-9]\+' | cut -c5- | sort | uniq | xargs -n1 echo -n "" | cut -c 2-`
-        logit " intefaces:auto(*) - enabling on all interfaces ${SMITH_INTERFACE}"
+        logit " interfaces:auto(*) - enabling on all interfaces ${SMITH_INTERFACE}"
 
     elif [[ "${SMITH_INTERFACE}" == '-' ]]; then
 

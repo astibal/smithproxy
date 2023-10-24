@@ -4,7 +4,7 @@
 It uses our C++17 socket proxying library called [*socle*](https://github.com/astibal/socle). 
 
 > **Note:** Snap and precompiled binary packages are no longer available from Russia Federation and Belarus as a response
-> to their blatant war crimes being commited when invading Ukraine these days.
+> to their blatant war crimes being committed when invading Ukraine these days.
 > For individuals from named countries: there are still sources which can be easily compiled; in the mean time seek more uncensored information!
 
 > Read fresh [**Release Notes**](https://download.smithproxy.org/0.9/Release_Notes.md) to stay tuned!  

@@ -73,7 +73,7 @@ int AuthFactory::shm_ip6_table_refresh()  {
         std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
         
         if(l_ip == 0 && ( ! ip6_map_.empty()) ) {
-            _dia("cfgapi_auth_shm_ip6_table_refresh: zero sized table received, flusing ip map");
+            _dia("cfgapi_auth_shm_ip6_table_refresh: zero sized table received, flushing ip map");
             ip6_map_.clear();
         }
         
