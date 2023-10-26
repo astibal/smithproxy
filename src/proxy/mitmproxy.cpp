@@ -272,17 +272,39 @@ void MitmProxy::webhook_session_stop() const {
 
     uint64_t uB = 0L;
     uint64_t dB = 0L;
+    std::optional<nlohmann::json> l7;
+    std::optional<nlohmann::json> tls;
+
     auto const* l = first_left();
     if(l) {
         uB = l->meter_read_bytes;
         dB = l->meter_write_bytes;
+
+        if(auto app = l->engine_ctx.application_data; app) {
+            l7 =  { { "app", app->protocol() }, { "details", app->requests_all() } };
+        }
+    }
+    auto const* r = first_right();
+    if(r){
+
+        if(auto* scom = dynamic_cast<SSLCom*>(r->com()); scom) {
+            nlohmann::json x;
+            x["sni"] = scom->get_sni();
+            tls = x;
+        }
     }
 
     j["info"] = { {"session", cl },
-                  {"app", get_application().value_or("") },
+                  {"policy", matched_policy() },
                   { "bytes_up", uB },
-                  { "bytes_down", dB }
+                  { "bytes_down", dB },
     };
+
+    if(tls.has_value())  j["info"]["tls"] = tls.value();
+    if(l7.has_value())  j["info"]["l7"] = l7.value();
+
+
+
     sx::http::webhooks::send_action("connection-stop", to_connection_ID(), j);
 
     wh_stop = true;

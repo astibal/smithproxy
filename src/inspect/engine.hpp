@@ -74,6 +74,7 @@ namespace sx::engine {
 
         virtual std::string original_request() { return request(); }; // parent request
         virtual std::string request() { return {}; };
+        virtual std::vector<std::string> requests_all() { return {}; };
         virtual std::string protocol() const = 0;
 
         bool ask_destroy() override { return false; };

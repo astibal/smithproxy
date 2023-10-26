@@ -143,13 +143,23 @@ namespace sx::engine::http {
         }
 
         std::string request () override {
-
-            if (http_data.uri == "/favicon.ico") {
-                _deb("std::string original_request: avoiding favicon.ico");
-                return http_data.host;
-            }
             return http_data.proto + http_data.host + http_data.uri + http_data.params;
         };
+
+        std::vector<std::string> requests_all() override {
+            std::vector<std::string> ret;
+            auto cur = request();
+
+            if(not cur.empty()) ret.push_back(cur);
+            for (auto const& s: http_history) {
+                auto a = app_HttpRequest();
+                a.http_data = s;
+
+                auto r = a.request();
+                if(not r.empty()) ret.push_back(r);
+            }
+            return ret;
+        }
 
         std::string to_string (int verbosity) const override {
             std::stringstream ret;
