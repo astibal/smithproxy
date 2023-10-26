@@ -72,13 +72,31 @@ namespace sx::engine::http {
     struct app_HttpRequest : public ApplicationData {
         ~app_HttpRequest () override = default;
 
-        std::string host;
-        std::string uri;
-        std::string method;
-        std::string params;
-        std::string referer;
-        std::string proto;
-        std::string sub_proto;
+        struct HttpData {
+            std::string host;
+            std::string uri;
+            std::string method;
+            std::string params;
+            std::string referer;
+            std::string proto;
+            std::string sub_proto;
+
+            void clear() {
+                host.clear();
+                method.clear();
+                uri.clear();
+                params.clear();
+                referer.clear();
+                proto.clear();
+            }
+        } http_data;
+
+        std::list<HttpData> http_history;
+        void next() {
+            http_history.push_back(http_data);
+            http_data.clear();
+        }
+
 
         enum class HTTP_VER { HTTP_1, HTTP1_0, HTTP1_1, HTTP2 } version;
 
@@ -99,8 +117,8 @@ namespace sx::engine::http {
         std::string protocol() const override {
             std::stringstream ss;
             ss << http_str(version);
-            if(not sub_proto.empty()) {
-                ss << "/" << sub_proto;
+            if(not http_data.sub_proto.empty()) {
+                ss << "/" << http_data.sub_proto;
             }
 
             return ss.str();
@@ -108,9 +126,9 @@ namespace sx::engine::http {
 
         // this function returns most usable link for visited site from the request.
         std::string original_request () override {
-            if (!referer.empty()) {
-                _deb("std::string original_request: using referer: %s", referer.c_str());
-                return referer;
+            if (!http_data.referer.empty()) {
+                _deb("std::string original_request: using referer: %s", http_data.referer.c_str());
+                return http_data.referer;
             }
 
             _deb("std::string original_request: using request: %s", request().c_str());
@@ -119,11 +137,11 @@ namespace sx::engine::http {
 
         std::string request () override {
 
-            if (uri == "/favicon.ico") {
+            if (http_data.uri == "/favicon.ico") {
                 _deb("std::string original_request: avoiding favicon.ico");
-                return host;
+                return http_data.host;
             }
-            return proto + host + uri + params;
+            return http_data.proto + http_data.host + http_data.uri + http_data.params;
         };
 
         std::string to_string (int verbosity) const override {
@@ -133,12 +151,12 @@ namespace sx::engine::http {
             if(auto up_str = ApplicationData::to_string(verbosity); not up_str.empty()) {
                 ret << up_str << ": ";
             }
-            ret << proto << host << uri << params;
+            ret << http_data.proto << http_data.host << http_data.uri << http_data.params;
 
             if (verbosity > INF) {
 
-                if(not referer.empty()) ret << " via: " << referer;
-                if(not method.empty()) ret << " meth: " << method;
+                if(not http_data.referer.empty()) ret << " via: " << http_data.referer;
+                if(not http_data.method.empty()) ret << " meth: " << http_data.method;
                 ret << " ver: " << http_str(version);
             }
 
@@ -155,9 +173,9 @@ namespace sx::engine::http {
     namespace v1 {
         // request parsing
         void parse_request (EngineCtx &ctx, buffer const* buffer_data_string);
-        void find_referrer (EngineCtx &ctx, std::string_view data);
-        void find_host (EngineCtx &ctx, std::string_view data);
-        void find_method (EngineCtx &ctx, std::string_view data);
+        bool find_referrer (EngineCtx &ctx, std::string_view data);
+        bool find_host (EngineCtx &ctx, std::string_view data);
+        bool find_method (EngineCtx &ctx, std::string_view data);
 
         // execute engine
         void start(EngineCtx &ctx);

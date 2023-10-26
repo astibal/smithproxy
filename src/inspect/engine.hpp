@@ -53,21 +53,43 @@ namespace sx::engine {
     struct ApplicationData: public socle::sobject {
         ~ApplicationData() override = default;
         bool is_ssl = false;
-        std::unordered_map<std::string,std::string> properties;
+
+        using property_map_t = std::unordered_map<std::string,std::string>;
+
+        struct Data {
+            property_map_t properties;
+        } data;
+
+        // indicate values have been added, and are valid (although maybe some are empty)
+        bool is_populated = false;
+
+        // interface to set populated flag
+        void mark_populated() { is_populated = true; }
+        bool populated() const { return is_populated; }
+
+        // set ready for next data (ie. application request)
+        void next() {
+            is_populated = false;
+        }
 
         virtual std::string original_request() { return request(); }; // parent request
-        virtual std::string request() { return std::string(""); };
+        virtual std::string request() { return {}; };
         virtual std::string protocol() const = 0;
 
         bool ask_destroy() override { return false; };
+
+        // properties are values kept across multiple exchanges (suriving `next()`).
+        // They should not be cleared in next() calls by children.
+        property_map_t& properties() { return data.properties; }
+        property_map_t const& properties() const { return data.properties; }
 
         std::string properties_str() const {
             std::stringstream ss;
 
             if (is_ssl) ss << "[ssl=true]";
-            if (not properties.empty()) {
+            if (not data.properties.empty()) {
                 ss << "+";
-                for (auto const &[k, v]: properties) {
+                for (auto const &[k, v]: data.properties) {
                     ss << "[" << k << "=" << v << "]";
                 }
             }
@@ -102,7 +124,7 @@ namespace sx::engine {
             r << proto_name;
             if(not request.empty()) r << ":" << request;
 
-            if(not properties.empty()) {
+            if(not data.properties.empty()) {
                 r << ":" << properties_str();
             }
 
@@ -116,6 +138,14 @@ namespace sx::engine {
     struct EngineCtx {
         MitmHostCX* origin = nullptr;
         std::shared_ptr<duplexFlowMatch> signature;
+
+        struct FlowPos {
+            std::size_t block_seen = 0; // index of flow data
+            std::size_t bytes_in_block_seen = 0;
+            constexpr static inline std::size_t bytes_force_rescan = 256; // if there is only this amount of data, rescan, even if populated
+        };
+        std::optional<FlowPos> flow_seen;
+
         std::size_t flow_pos = 0;
         std::shared_ptr<ApplicationData> application_data;
 
@@ -127,6 +157,49 @@ namespace sx::engine {
         // status
         enum class status_t { START, MAGIC, OK, ERROR };
         status_t status {status_t::START};
+
+        bool new_data_check(std::size_t buffer_size) {
+
+            if(flow_seen.has_value()) {
+                auto const& position = flow_seen.value();
+                if(position.block_seen >= flow_pos) {
+                    // SEEN
+                    auto const populated = application_data->populated();
+                    auto const small_buffer = buffer_size <= EngineCtx::FlowPos::bytes_force_rescan;
+                    auto const block_bytes_seen = buffer_size <= position.bytes_in_block_seen;
+
+                    _dia("start: already seen block, populated=%d, seen_all_data=%d, small_buffer=%d",
+                         populated, block_bytes_seen, small_buffer);
+
+                    if(small_buffer) {
+                        _dia("start: already seen block: small buffer override");
+                        return true;
+                    }
+                    else if (not populated and not block_bytes_seen ){
+                        _dia("start: already seen block: unpopulated and new data");
+                        return true;
+                    }
+                }
+                else {
+                    // position is not seen!
+                    _dia("start: block not seen, continuing");
+                    return true;
+                }
+            } else {
+                _dia("start: initial setup - block not seen, continuing");
+                return true;
+            }
+            return false;
+        }
+
+        void update_seen_block(std::size_t s) {
+            flow_seen = {
+                    .block_seen = flow_pos,
+                    .bytes_in_block_seen = s
+            };
+        }
+
+        logan_lite log {"com.app.engine"};
     };
 
 }

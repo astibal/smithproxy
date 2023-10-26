@@ -1162,9 +1162,9 @@ std::string get_connection_details_str(MitmProxy* px, baseHostCX* cx, char side)
     }
     if(mh && mh->engine_ctx.application_data) {
 
-        auto* http = dynamic_cast<sx::engine::http::app_HttpRequest*>(mh->engine_ctx.application_data.get());
-        if(http) {
-            detail << "app=" << http->proto << http->host << " ";
+        auto* app = dynamic_cast<sx::engine::http::app_HttpRequest*>(mh->engine_ctx.application_data.get());
+        if(app) {
+            detail << "app=" << app->http_data.proto << app->http_data.host << " ";
         }
         else {
             detail << "app=" << mh->engine_ctx.application_data->str() << " ";
@@ -1676,7 +1676,8 @@ std::string MitmProxy::replacement_ssl_verify_detail(SSLCom* scom) {
 std::string MitmProxy::replacement_ssl_page(SSLCom* scom, sx::engine::http::app_HttpRequest const* app_request, std::string const& more_info) {
     std::string repl;
 
-    const std::string block_target_info = "<p><h3 class=\"fg-red\">Requested site:</h3>" + app_request->proto + app_request->host + "</p>";
+    const std::string block_target_info = "<p><h3 class=\"fg-red\">Requested site:</h3>" +
+                                                app_request->http_data.proto + app_request->http_data.host + "</p>";
 
     const std::string block_additinal_info = replacement_ssl_verify_detail(scom) + more_info;
 
@@ -1735,7 +1736,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
                 const std::string key = whitelist_make_key_l4(cx);
                 if (cx->peer()) {
                     block_override << "/override/target=" + key;
-                    if (not app_request->uri.empty()) {
+                    if (not app_request->http_data.uri.empty()) {
                         block_override << "&orig_url=" << find_orig_uri().value_or("/");
                     }
                 }
@@ -1805,7 +1806,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             set_replacement_msg_ssl(scom);
             cx->close_after_write(true);
         } else 
-        if(app_request->uri == "/"){
+        if(app_request->http_data.uri == "/"){
             // PHASE II
             // redir to warning message
             
@@ -1826,7 +1827,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             const std::string redir_pre(R"(<html><head><script>top.location.href=")");
             const std::string redir_suf(R"(";</script></head><body></body></html>)");
 
-            std::string repl = redir_pre + "/SM/IT/HP/RO/XY/warning?q=1&orig_url=" +app_request->uri + redir_suf;
+            std::string repl = redir_pre + "/SM/IT/HP/RO/XY/warning?q=1&orig_url=" +app_request->http_data.uri + redir_suf;
             repl = html()->render_server_response(repl);
             
             cx->to_write(repl);

@@ -14,7 +14,7 @@ namespace sx::engine::http {
 
     namespace v1 {
 
-        void find_referrer (EngineCtx &ctx, std::string_view data) {
+        bool find_referrer (EngineCtx &ctx, std::string_view data) {
             auto const& log = log::http1;
 
             std::smatch m_ref;
@@ -33,25 +33,30 @@ namespace sx::engine::http {
 
                     auto *app_request = dynamic_cast<app_HttpRequest *>(ctx.application_data.get());
                     if (app_request != nullptr) {
-                        app_request->referer = str_temp;
-                        _deb("Referer: %s", ESC(app_request->referer));
+                        app_request->http_data.referer = str_temp;
+                        _deb("Referer: %s", ESC(app_request->http_data.referer));
                     }
+
+                    return true;
                 }
             }
+
+            return false;
         }
 
-        void find_host (EngineCtx &ctx, std::string_view data) {
+        bool find_host (EngineCtx &ctx, std::string_view data) {
             auto const& log = log::http1;
 
             auto ix_host = data.find("Host: ");
 
             // no point to continue
-            if(ix_host == std::string::npos) return;
+            if(ix_host == std::string::npos) return false;
 
             std::string host_start( data.substr(ix_host, std::min(std::size_t(128), data.size() - ix_host)) );
-            std::smatch m_host;
 
-            if (std::regex_search(host_start, m_host, ProtoRex::http_req_host()) and not m_host.empty()) {
+            std::smatch m_host;
+            auto const regex_ret = std::regex_search(host_start, m_host, ProtoRex::http_req_host());
+            if (regex_ret and not m_host.empty()) {
 
                 auto str_temp = m_host[1].str();
 
@@ -59,36 +64,42 @@ namespace sx::engine::http {
                     ctx.application_data = std::make_unique<app_HttpRequest>();
                 }
 
-                auto *app_request = dynamic_cast<app_HttpRequest *>(ctx.application_data.get());
-                if (app_request != nullptr) {
-                    app_request->host = str_temp;
-                    _dia("Host: %s", app_request->host.c_str());
+                if (auto *app_request = dynamic_cast<app_HttpRequest *>(ctx.application_data.get()); app_request) {
+                    app_request->http_data.host = str_temp;
+                    _dia("Host: %s", app_request->http_data.host.c_str());
 
 
                     // NOTE: should be some config variable
                     bool check_inspect_dns_cache = true;
                     if (check_inspect_dns_cache) {
 
-                        auto dc_ = std::scoped_lock(DNS::get().dns_lock());
+                        std::string dns_resp;
+                        auto proto = ctx.origin->com()->l3_proto();
+                        const std::string prefix = (proto == AF_INET6 ? "AAAA:" : "A:");
 
-                        auto dns_resp_a = DNS::get().dns_cache().get("A:" + app_request->host);
-                        auto dns_resp_aaaa = DNS::get().dns_cache().get("AAAA:" + app_request->host);
+                        // get lock and cache pointers
+                        {
+                            auto dc_ = std::scoped_lock(DNS::get().dns_lock());
+                            auto dns_resp_ptr = DNS::get().dns_cache().get(prefix + app_request->http_data.host);
+                            if(dns_resp_ptr) dns_resp = dns_resp_ptr->question_str_0();
+                        }
 
-                        if (dns_resp_a && ctx.origin->com()->l3_proto() == AF_INET) {
-                            _deb("HTTP inspection: Host header matches DNS: %s", ESC(dns_resp_a->question_str_0()));
-                        } else if (dns_resp_aaaa && ctx.origin->com()->l3_proto() == AF_INET6) {
-                            _deb("HTTP inspection: Host header matches IPv6 DNS: %s",
-                                 ESC(dns_resp_aaaa->question_str_0()));
+                        if (not dns_resp.empty()) {
+                            _deb("HTTP inspection: Host header matches DNS: %s", ESC(dns_resp));
                         } else {
                             _war("HTTP inspection: 'Host' header value '%s' DOESN'T match DNS!",
-                                 app_request->host.c_str());
+                                 app_request->http_data.host.c_str());
                         }
                     }
                 }
+
+                return true;
             }
+
+            return false;
         }
 
-        void find_method (EngineCtx &ctx, std::string_view data) {
+        bool find_method (EngineCtx &ctx, std::string_view data) {
             auto const& log = log::http1;
 
             std::string method_start(data.substr(0, std::min(std::size_t(128), data.size())));
@@ -105,25 +116,28 @@ namespace sx::engine::http {
                     auto *app_request = dynamic_cast<app_HttpRequest *>(ctx.application_data.get());
                     if(not app_request) {
                         _err("find_method: incorrect appdata object type");
-                        return;
+                        return false;
                     }
 
-                    app_request->method = m_get[1].str();
-                    _dia("method: %s", ESC(app_request->method));
+                    app_request->http_data.method = m_get[1].str();
+                    _dia("method: %s", ESC(app_request->http_data.method));
 
                     if (msize > 2) {
                         app_request->version = app_HttpRequest::HTTP_VER::HTTP_1;
-                        app_request->uri = m_get[2].str();
-                        _dia("uri: %s", ESC(app_request->uri));
+                        app_request->http_data.uri = m_get[2].str();
+                        _dia("uri: %s", ESC(app_request->http_data.uri));
                     }
 
                     if (msize > 3) {
-                        app_request->params = m_get[3].str();
-                        _dia("params: %s", ESC(app_request->params));
+                        app_request->http_data.params = m_get[3].str();
+                        _dia("params: %s", ESC(app_request->http_data.params));
 
                     }
                 }
+
+                return true;
             }
+            return false;
         }
 
         void parse_request(EngineCtx &ctx, buffer const* buffer_data) {
@@ -131,21 +145,23 @@ namespace sx::engine::http {
 
             auto data = buffer_data->string_view();
 
-            find_method(ctx, data);
-            find_host(ctx, data);
-            find_referrer(ctx, data);
+            bool const have_method = find_method(ctx, data);
+            bool const have_host = find_host(ctx, data);
+            bool const have_referer = find_referrer(ctx, data);
 
 
-            auto engine_http1_set_proto = [&ctx] () {
-                auto *app_request = dynamic_cast<app_HttpRequest *>(ctx.application_data.get());
+            auto *app_request = dynamic_cast<app_HttpRequest *>(ctx.application_data.get());
+
+            auto engine_http1_set_proto = [&ctx,&app_request] () {
+
                 if (app_request != nullptr) {
                     // detect protocol (plain vs ssl)
                     auto const* proto_com = dynamic_cast<SSLCom *>(ctx.origin->com());
                     if (proto_com != nullptr) {
-                        app_request->proto = "https://";
+                        app_request->http_data.proto = "https://";
                         app_request->is_ssl = true;
                     } else {
-                        app_request->proto = "http://";
+                        app_request->http_data.proto = "http://";
                     }
 
 
@@ -156,10 +172,17 @@ namespace sx::engine::http {
             };
 
 
-            engine_http1_set_proto();
+            if(have_method) {
+                engine_http1_set_proto();
+                ctx.origin->replacement_type(MitmHostCX::REPLACETYPE_HTTP);
 
-            ctx.origin->replacement_type(MitmHostCX::REPLACETYPE_HTTP);
+                if(not have_host) _not("http1: 'Host:' not found");
+                if(not have_referer) _deb("http1: 'Referer:' not found");
 
+                if(app_request) {
+                    app_request->is_populated = true;
+                }
+            }
         }
 
         void start (EngineCtx &ctx) {
@@ -173,8 +196,9 @@ namespace sx::engine::http {
             _deb("start: cx.meter_read %ldB, cx.meter_write %ldB", ctx.origin->meter_read_bytes, ctx.origin->meter_write_bytes);
 
             auto const& last_flow_entry = ctx.origin->flow().flow_queue().back();
-            auto const& http_request1_side = last_flow_entry.source();
-            auto const& http_request1_buffer = last_flow_entry.data();
+            auto const& side = last_flow_entry.source();
+            auto const& buffer = last_flow_entry.data();
+            ctx.flow_pos = ctx.origin->flow().flow_queue().size() - 1;
 
             // limit this rather info/convenience regexing to 128 bytes
 
@@ -182,11 +206,14 @@ namespace sx::engine::http {
             // Suspicion is it has to do something with MUSL or alpine platform specific. 256 is good enough to set for general use,
             // as there is nothing dependant on full URI and more can slow box down for not real benefit.
 
+            if(side == 'r') {
 
-            if(http_request1_side == 'r') {
-                _dia("start: flow block index %d, size %dB", ctx.flow_pos, http_request1_buffer->size());
-                std::string buffer_data_string((const char *) http_request1_buffer->data(), http_request1_buffer->size());
-                parse_request(ctx, http_request1_buffer);
+                auto const buf_sz = buffer->size();
+                _dia("start: flow block index %d, size %dB", ctx.flow_pos, buf_sz);
+                if(ctx.new_data_check(buf_sz)) {
+                    ctx.update_seen_block(buf_sz);
+                    parse_request(ctx, buffer);
+                }
             }
 
             _deb("start finished");
@@ -334,7 +361,7 @@ namespace sx::engine::http {
                     if(auto path = stream_state.request_header(":path"); path and path.value() == "/dns-query") {
                         stream_state.sub_app_ = Http2Stream::sub_app_t::DNS;
                     }
-                    else if(auto const& val = app_data->properties["accept"] ; not val.empty()) {
+                    else if(auto const& val = app_data->properties()["accept"] ; not val.empty()) {
                         if(val == "application/dns-message")
                             stream_state.sub_app_ = Http2Stream::sub_app_t::DNS;
                     }
@@ -370,25 +397,20 @@ namespace sx::engine::http {
                     if (hdr == ":authority") {
                         touch_header(":authority", true);
                         if (app_data) {
-                            app_data->host.clear();
-                            app_data->method.clear();
-                            app_data->uri.clear();
-                            app_data->params.clear();
-                            app_data->referer.clear();
-                            app_data->proto.clear();
+                            app_data->http_data.clear();
 
-                            app_data->host = hdr_elem;
+                            app_data->http_data.host = hdr_elem;
                         }
                     } else if (hdr == ":scheme") {
-                        if (app_data) app_data->proto = hdr_elem + "://";
+                        if (app_data) app_data->http_data.proto = hdr_elem + "://";
                     } else if (hdr == ":path") {
-                        if (app_data) app_data->uri = hdr_elem;
+                        if (app_data) app_data->http_data.uri = hdr_elem;
                     } else if (hdr == ":method") {
-                        if (app_data) app_data->method = hdr_elem;
+                        if (app_data) app_data->http_data.method = hdr_elem;
                     }
 
                     // save all left (request) values
-                    app_data->properties[hdr] = hdr_elem;
+                    app_data->properties()[hdr] = hdr_elem;
 
                 }
                 else {
@@ -488,7 +510,7 @@ namespace sx::engine::http {
                                 content_type = stream_state.response_headers_["content-type"].back();
                             }
                             if(content_type.empty())
-                                content_type = ctx.application_data->properties["accept"];
+                                content_type = ctx.application_data->properties()["accept"];
 
                             _dia("subapp detected: DoH+%s", content_type.c_str());
                             _deb("DNS response bytes: \r\n%s", hex_dump(data, 4, 0, true).c_str());
@@ -507,7 +529,7 @@ namespace sx::engine::http {
                                     DNS_Inspector::store(resp);
 
                                     if(auto httpa = std::dynamic_pointer_cast<app_HttpRequest>(ctx.application_data); httpa) {
-                                        httpa->sub_proto = "dns";
+                                        httpa->http_data.sub_proto = "dns";
                                     }
 
                                 }
@@ -640,19 +662,33 @@ namespace sx::engine::http {
             if(not ctx.origin) {
                 return;
             }
+            if (not ctx.application_data) {
+                ctx.application_data = std::make_unique<app_HttpRequest>();
+            }
 
             auto const& log = log::http2;
             auto const& last_flow_entry = ctx.origin->flow().flow_queue().back();
             auto const& side = last_flow_entry.source();
             auto const& h2_buffer= last_flow_entry.data();
+            auto const h2_buffer_sz = h2_buffer->size();
+
+            ctx.flow_pos = ctx.origin->flow().flow_queue().size() - 1;
+
+            if(ctx.new_data_check(h2_buffer_sz)) {
+                ctx.update_seen_block(h2_buffer_sz);
+            }
+            else {
+                _dia("start - engine checked no new data");
+                return;
+            }
 
             _dia("start at flow #%d", ctx.origin->flow().size());
             _dia("flow path: %s", ctx.origin->flow().hr().c_str());
 
             std::size_t starting_index = load_prev_state(ctx);
-            if(starting_index >= h2_buffer->size()) {
+            if(starting_index >= h2_buffer_sz) {
 
-                if(starting_index == h2_buffer->size()) {
+                if(starting_index == h2_buffer_sz) {
                     _deb("there is nothing more to read!");
                 }
                 else {
@@ -668,7 +704,7 @@ namespace sx::engine::http {
             if(side == 'r') {
                 if (ctx.status == EngineCtx::status_t::START) {
                     // eliminate finding magic later in the flow
-                    if (ctx.flow_pos < 5 and h2_buffer->size() >= txt::magic_sz) {
+                    if (ctx.flow_pos < 5 and h2_buffer_sz >= txt::magic_sz) {
                         if_magic = find_magic(starting_buffer);
 
                         // save starting position + size of magic
@@ -681,7 +717,7 @@ namespace sx::engine::http {
                                 ctx.state_data = std::make_any<Http2Connection>();
                         }
 
-                        if (if_magic + 4 > h2_buffer->size()) {
+                        if (if_magic + 4 > h2_buffer_sz) {
                             _err("not enough data to read");
                             return;
                         }

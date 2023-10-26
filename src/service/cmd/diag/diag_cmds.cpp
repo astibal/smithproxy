@@ -1637,8 +1637,8 @@ auto get_tls_info(MitmHostCX const* lf, MitmHostCX const* rg, int sl_flags, int 
                             auto http_app = dynamic_cast<sx::engine::http::app_HttpRequest *>(app);
                             if (http_app) {
 
-                                if (!http_app->host.empty()) {
-                                    if (sni == http_app->host) {
+                                if (!http_app->http_data.host.empty()) {
+                                    if (sni == http_app->http_data.host) {
                                         tls_ss << " -> http host ok";
                                     } else {
                                         tls_ss << " -> http host DOESN'T MATCH";
@@ -1646,7 +1646,7 @@ auto get_tls_info(MitmHostCX const* lf, MitmHostCX const* rg, int sl_flags, int 
                                 }
 
                                 if (verbosity > iINF) {
-                                    tls_ss << "\n  http host: " << http_app->host;
+                                    tls_ss << "\n  http host: " << http_app->http_data.host;
                                 }
                             }
                         }
