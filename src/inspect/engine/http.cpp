@@ -180,7 +180,7 @@ namespace sx::engine::http {
                 if(not have_referer) _deb("http1: 'Referer:' not found");
 
                 if(app_request) {
-                    app_request->is_populated = true;
+                    app_request->mark_populated();
                 }
             }
         }
@@ -404,7 +404,31 @@ namespace sx::engine::http {
                     } else if (hdr == ":scheme") {
                         if (app_data) app_data->http_data.proto = hdr_elem + "://";
                     } else if (hdr == ":path") {
-                        if (app_data) app_data->http_data.uri = hdr_elem;
+                        if (app_data) {
+                            app_data->http_data.uri = hdr_elem;
+
+                            // mark this request as fully populated
+                            app_data->mark_populated();
+                            _dia("Frame<%ld>: %c%c: app data populated", stream_id, arrow, arrow);
+
+
+                            auto load_from_props = [&](auto header, std::string& where) {
+
+                                if(not where.empty()) return;
+
+                                auto it = app_data->properties().find(header);
+                                if(it != app_data->properties().end()) {
+                                     where = it->second;
+                                    _dia("Frame<%ld>: %c%c: '%s' recovered from properties", stream_id, arrow, arrow, header);
+                                }
+
+                            };
+                            // now fix up authority from props
+                            load_from_props(":authority", app_data->http_data.host);
+                            load_from_props(":method", app_data->http_data.method);
+                            load_from_props(":referer", app_data->http_data.referer);
+                        }
+
                     } else if (hdr == ":method") {
                         if (app_data) app_data->http_data.method = hdr_elem;
                     }

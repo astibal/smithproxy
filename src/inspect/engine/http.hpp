@@ -92,9 +92,16 @@ namespace sx::engine::http {
         } http_data;
 
         std::list<HttpData> http_history;
-        void next() {
+        constexpr static inline std::size_t http_history_max = 10000;
+        void next() override {
+            ApplicationData::next();
+
             http_history.push_back(http_data);
             http_data.clear();
+
+            while(http_history.size() > http_history_max) {
+                http_history.pop_front();
+            }
         }
 
 

@@ -55,6 +55,8 @@
 #include <service/httpd/httpd.hpp>
 #include <service/cfgapi/cfgapi.hpp>
 #include <service/tpool.hpp>
+#include <inspect/engine/http.hpp>
+
 
 #include <sslcom.hpp>
 #include <sslcertstore.hpp>
@@ -1784,12 +1786,32 @@ auto get_more_info(sobject_info const* so_info, MitmProxy const* curr_proxy, Mit
             }
 
             if (lf->engine_ctx.application_data) {
-                std::string desc = lf->engine_ctx.application_data->str();
+                auto const app = lf->engine_ctx.application_data;
+                std::string desc = app->str();
                 if (verbosity < DEB && desc.size() > 120) {
                     desc = desc.substr(0, 117);
                     desc += "...";
                 }
                 info_ss << "\n    L7_params: " << desc << "\n";
+
+                if(verbosity > DIA and not app->properties().empty()) {
+                    info_ss << "\n    L7_props:\n";
+                    for(auto const& prop: app->properties()) {
+                        info_ss << "        L7_props: '" << prop.first << "':'" << prop.second << "'\n";
+                    }
+                }
+
+                // try HTTP(s)
+                if(auto http_app = std::dynamic_pointer_cast<sx::engine::http::app_HttpRequest>(app); http_app) {
+                    info_ss << "\n    L7 http current: " <<  http_app->http_data.method << " : " << http_app->request() << "\n";
+                    for(auto const& he: http_app->http_history) {
+
+                        auto tmp = sx::engine::http::app_HttpRequest();
+                        tmp.http_data = he;
+                        info_ss << "        L7 http history: " <<  tmp.http_data.method << " : " << tmp.request() << "\n";
+                    }
+                    info_ss << "\n";
+                }
             } else {
                 info_ss << "\n    L7_params: none\n";
             }

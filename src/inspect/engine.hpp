@@ -68,7 +68,7 @@ namespace sx::engine {
         bool populated() const { return is_populated; }
 
         // set ready for next data (ie. application request)
-        void next() {
+        virtual void next() {
             is_populated = false;
         }
 
@@ -164,7 +164,7 @@ namespace sx::engine {
                 auto const& position = flow_seen.value();
                 if(position.block_seen >= flow_pos) {
                     // SEEN
-                    auto const populated = application_data->populated();
+                    auto const populated = application_data && application_data->populated();
                     auto const small_buffer = buffer_size <= EngineCtx::FlowPos::bytes_force_rescan;
                     auto const block_bytes_seen = buffer_size <= position.bytes_in_block_seen;
 
@@ -181,6 +181,17 @@ namespace sx::engine {
                     }
                 }
                 else {
+                    // UNSEEN, NEW BLOCK
+                    auto const populated = application_data && application_data->populated();
+
+                    if(populated) {
+                        //
+                        _dia("start: block not seen, moving populated data to history list");
+                        application_data->next();
+                    } else {
+                        _dia("start: block not seen, current block not fully populated");
+                    }
+
                     // position is not seen!
                     _dia("start: block not seen, continuing");
                     return true;
