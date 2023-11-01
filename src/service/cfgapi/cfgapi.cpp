@@ -433,6 +433,10 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "added captures.options.calculate_checksums");
         return true;
     }
+    else if(upgrade_to_num == 1020) {
+        log.event(INF, "added policy feature 'access-request'");
+        return true;
+    }
 
     return false;
 }
