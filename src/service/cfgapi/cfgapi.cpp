@@ -61,6 +61,7 @@
 
 #include <proxy/filters/sinkhole.hpp>
 #include <proxy/filters/statsfilter.hpp>
+#include <proxy/filters/access_filter.hpp>
 
 #include <inspect/dnsinspector.hpp>
 #include <inspect/pyinspector.hpp>
@@ -1226,6 +1227,10 @@ int CfgFactory::load_db_features() {
     auto statistics = std::make_shared<CfgString>("statistics");
     db_features["statistics"] = std::move(statistics);
     db_features["statistics"]->element_name() = "statistics";
+
+    auto access_request = std::make_shared<CfgString>("access-request");
+    db_features["access-request"] = std::move(access_request);
+    db_features["access-request"]->element_name() = "access-request";
 
     return static_cast<int>(db_features.size());
 }
@@ -2732,6 +2737,7 @@ void CfgFactory::policy_apply_features(std::shared_ptr<PolicyRule> const & polic
     if(policy_rule and not policy_rule->features.empty()) {
         FilterProxy* sink_filter = nullptr;
         FilterProxy* statistics_filter = nullptr;
+        FilterProxy* access_filter = nullptr;
 
         for(auto const& it: policy_rule->features) {
             if(not sink_filter) {
@@ -2746,8 +2752,18 @@ void CfgFactory::policy_apply_features(std::shared_ptr<PolicyRule> const & polic
 
                 }
             }
+
+            if(not access_filter) {
+                if (it->value() == "access-request") {
+                    access_filter = new AccessFilter(mitm_proxy);
+                }
+            }
         }
 
+        if(access_filter) {
+            _dia("policy_apply_features: added access_filter");
+            mitm_proxy->add_filter("access-request", access_filter);
+        }
         if(statistics_filter) {
             _dia("policy_apply_features: added statistics");
             mitm_proxy->add_filter("statistics", statistics_filter);

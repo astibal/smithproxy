@@ -361,6 +361,8 @@ add_executable(smithproxy
         src/proxy/filters/statistics/entropy.cpp
         src/proxy/filters/statistics/flowanalysis.hpp
         src/proxy/filters/statistics/flowanalysis.cpp
+        src/proxy/filters/access_filter.hpp
+        src/proxy/filters/access_filter.cpp
 )
 
 
