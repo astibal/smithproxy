@@ -44,6 +44,7 @@
 #include <string>
 #include <atomic>
 #include <nlohmann/json.hpp>
+#include <service/http/async_request.hpp>
 
 namespace sx::http::webhooks {
     void ping();
@@ -53,6 +54,7 @@ namespace sx::http::webhooks {
 
     void neighbor_new(std::string const& address_str);
     void send_action(std::string const& action, std::string const& action_id, nlohmann::json const& details);
+    void send_action_wait(std::string const& action, std::string const& action_id, nlohmann::json const& details, sx::http::AsyncRequest::reply_hook hook);
 }
 
 #endif

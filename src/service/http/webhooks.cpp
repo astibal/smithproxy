@@ -73,4 +73,21 @@ namespace sx::http::webhooks {
                     });
         }
     }
+
+    // send action and wait - use hook,
+    void send_action_wait(std::string const& action, std::string const& action_id, nlohmann::json const& details,
+                          sx::http::AsyncRequest::reply_hook hook) {
+        if(enabled) {
+            nlohmann::json msg = {
+                    {"action", action},
+                    {"id", action_id},
+                    {"source", get_hostid() },
+                    {"type",   "proxy"}};
+
+            msg.push_back({"details", details});
+            sx::http::AsyncRequest::emit_wait(
+                    to_string(msg),
+                    hook);
+        }
+    }
 }

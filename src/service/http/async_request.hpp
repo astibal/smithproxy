@@ -81,51 +81,65 @@ namespace sx::http {
         using expected_reply = std::optional<std::pair<long,std::string>>;
         using reply_hook = std::function<void(expected_reply const&)>;
 
+        // synchronous call, use emit_url() to use thread pool
+        static void emit_url_wait(std::string const& url, std::string const& pay, reply_hook const& hook) {
+            if(url.empty() or pay.empty()) return;
+
+            std::string dns_servers;
+            bool do_verify = true;
+            {
+                auto lc_ = std::scoped_lock(CfgFactory::lock());
+                auto is_enabled = CfgFactory::get()->settings_webhook.enabled;
+
+                if(not is_enabled) {
+                    return; // not an error, we just don't use webhooks
+                }
+
+                auto const &nms = CfgFactory::get()->db_nameservers;
+
+                std::ostringstream oss;
+                for (size_t i = 0; i < nms.size(); ++i) {
+                    oss << nms[i].str_host;     // loaded from config, string should always be there
+                    if (i < nms.size() - 1) {
+                        oss << ",";
+                    }
+                }
+                dns_servers = oss.str();
+                do_verify = CfgFactory::get()->settings_webhook.tls_verify;
+            }
+
+            Request request(Request::DEFAULT, dns_servers);
+
+            // make custom setup
+            request.set_timeout(config::timeout);
+            if(not do_verify) request.disable_tls_verify();
+
+            auto reply = request.emit(url, pay);
+
+            if(not reply or reply.value().first >= 300) {
+                long code = reply.has_value() ? reply->first : -1;
+                std::string msg = reply.has_value() ? reply->second : "request failed";
+
+                Log::get()->events().insert(ERR, "error in request '%s': %d:%s", url.c_str(), code, msg.c_str());
+            }
+
+            hook(reply);
+        }
+
+        static void emit_wait(std::string const& pay, reply_hook const& hook) {
+            std::string url;
+            {
+                auto lc_ = std::scoped_lock(CfgFactory::lock());
+                url = CfgFactory::get()->settings_webhook.url;
+            }
+
+            emit_url_wait(url, pay, hook);
+        }
+
         static bool emit_url(std::string const& url, std::string const& pay, reply_hook const& hook) {
             auto &pool = ThreadPool::instance::get();
             auto ret = pool.enqueue([url, pay, hook]([[maybe_unused]] std::atomic_bool const &stop_flag) {
-
-                if(url.empty() or pay.empty()) return;
-
-                std::string dns_servers;
-                bool do_verify = true;
-                {
-                    auto lc_ = std::scoped_lock(CfgFactory::lock());
-                    auto is_enabled = CfgFactory::get()->settings_webhook.enabled;
-
-                    if(not is_enabled) {
-                        return; // not an error, we just don't use webhooks
-                    }
-
-                    auto const &nms = CfgFactory::get()->db_nameservers;
-
-                    std::ostringstream oss;
-                    for (size_t i = 0; i < nms.size(); ++i) {
-                        oss << nms[i].str_host;     // loaded from config, string should always be there
-                        if (i < nms.size() - 1) {
-                            oss << ",";
-                        }
-                    }
-                    dns_servers = oss.str();
-                    do_verify = CfgFactory::get()->settings_webhook.tls_verify;
-                }
-
-                Request request(Request::DEFAULT, dns_servers);
-
-                // make custom setup
-                request.set_timeout(config::timeout);
-                if(not do_verify) request.disable_tls_verify();
-
-                auto reply = request.emit(url, pay);
-
-                if(not reply or reply.value().first >= 300) {
-                    long code = reply.has_value() ? reply->first : -1;
-                    std::string msg = reply.has_value() ? reply->second : "request failed";
-
-                    Log::get()->events().insert(ERR, "error in request '%s': %d:%s", url.c_str(), code, msg.c_str());
-                }
-
-                hook(reply);
+                emit_url_wait(url, pay, hook);
             });
 
             return (ret > 0);
