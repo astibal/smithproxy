@@ -21,6 +21,7 @@ void AccessFilter::update(socle::side_t side, buffer const& buf) {
                     return;
                 }
 
+                access_response = json_obj;
                 bool has_response = json_obj.contains("access-response");
 
                 if(has_response and json_obj["access-response"] == "accept") {
@@ -74,9 +75,8 @@ std::string AccessFilter::to_string(int verbosity) const {
     std::stringstream ss;
     ss << "\r\n === Access-Filter: ===";
 
-    auto connection_str = connection_label;
-
-    ss << "\r\n " << connection_str;
+    ss << "\r\n " << connection_label;
+    ss << "\r\n " << nlohmann::to_string(access_response);
 
     ss << "\r\n === Access-Filter: ===";
     return ss.str();
@@ -85,8 +85,7 @@ std::string AccessFilter::to_string(int verbosity) const {
 nlohmann::json AccessFilter::to_json(int verbosity) const {
 
     auto json_all = nlohmann::json();
-
-    json_all["info"] = { {"session", connection_label}, { "access_response", access_allowed } };
+    json_all["info"] = { {"session", connection_label}, { "access_response", access_response } };
 
     return json_all;
 }

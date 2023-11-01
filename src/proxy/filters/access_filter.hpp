@@ -66,6 +66,7 @@ public:
 
 private:
     bool access_allowed = false;
+    nlohmann::json access_response;
     bool already_applied = false;
 
     static inline logan_lite log {"proxy.accessfilter"};
