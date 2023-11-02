@@ -30,6 +30,7 @@ void AccessFilter::update(socle::side_t side, buffer const& buf) {
                 }
                 else if(has_response and json_obj["access-response"] == "reject") {
                     _dia("AccessFilter: received 'reject' response");
+                    parent()->state().dead(true);
                 }
                 else {
                     _dia("AccessFilter: received unsupported response");
