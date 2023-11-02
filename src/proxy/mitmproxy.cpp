@@ -964,6 +964,15 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
 
                     _deb("MitmProxy::proxy: running filter %s", filter_name.c_str());
                     filter_proxy->proxy(from, to, side, redirected);
+
+                    if(state().dead()) {
+                        _deb("MitmProxy::proxy: filter %s: proxy marked dead", filter_name.c_str());
+
+                        // after marking dead, session is not getting on_error anymore
+                        webhook_session_stop();
+                        shutdown();
+                        return;
+                    }
             }
 
             auto sz = from->to_read().size();
