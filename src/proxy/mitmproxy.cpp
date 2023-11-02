@@ -981,7 +981,7 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
 
 void MitmProxy::on_left_bytes(baseHostCX* cx) {
 
-    if(not cx) return;
+    if(not cx or state().dead()) return;
 
     if(writer_opts()->write_payload) {
 
@@ -1005,13 +1005,21 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
     std::for_each(
             right_sockets.begin(),
             right_sockets.end(),
-            [&](auto* to) { proxy(cx, to, side_t::LEFT, redirected); });
+            [&](auto* to) {
+                if(not state().dead()) {
+                    proxy(cx, to, side_t::LEFT, redirected);
+                }
+            });
 
     // because we have left bytes, let's copy them into all right side sockets!
     std::for_each(
             right_delayed_accepts.begin(),
             right_delayed_accepts.end(),
-            [&](auto* to) { proxy(cx, to, side_t::LEFT, redirected); });
+            [&](auto* to) {
+                if(not state().dead()) {
+                    proxy(cx, to, side_t::LEFT, redirected);
+                }
+            });
 
 }
 
@@ -1041,7 +1049,7 @@ bool MitmProxy::handle_requirements(baseHostCX* cx) {
 
 void MitmProxy::on_right_bytes(baseHostCX* cx) {
 
-    if(not cx) return;
+    if(not cx or state().dead()) return;
 
     if(writer_opts()->write_payload) {
 
@@ -1081,13 +1089,21 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
     std::for_each(
             left_sockets.begin(),
             left_sockets.end(),
-            [&](auto* to) { proxy(cx, to, side_t::RIGHT, redirected); });
+            [&](auto* to) {
+                if(not state().dead()) {
+                    proxy(cx, to, side_t::RIGHT, redirected);
+                }
+            });
 
     // because we have left bytes, let's copy them into all right side sockets!
     std::for_each(
             left_delayed_accepts.begin(),
             left_delayed_accepts.end(),
-            [&](auto* to) { proxy(cx, to, side_t::RIGHT, redirected); });
+            [&](auto* to) {
+                if(not state().dead()) {
+                    proxy(cx, to, side_t::RIGHT, redirected);
+                }
+            });
 
 }
 
