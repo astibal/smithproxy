@@ -276,8 +276,10 @@ void DaemonFactory::uw_btrace_handler(int sig) {
         unw_getcontext(&uc);
         unw_init_local(&cursor, &uc);
 
-        char buf_line[256];
-        int chars = snprintf(buf_line, 255, " ======== Smithproxy exception handler (sig %d) =========\n", sig);
+        constexpr size_t buf_line_sz = 1024;
+        char buf_line[buf_line_sz] = {0};
+
+        int chars = snprintf(buf_line, buf_line_sz, " ======== Smithproxy exception handler (sig %d) =========\n", sig);
 
         int CRLOG = open((const char *) df->crashlog_file, O_CREAT | O_WRONLY | O_APPEND, S_IRUSR | S_IWUSR);
         if (chmod((const char *) df->crashlog_file, 0600) != 0) {
@@ -287,21 +289,30 @@ void DaemonFactory::uw_btrace_handler(int sig) {
 
         writecrash(STDERR_FILENO, buf_line, chars);
         writecrash(CRLOG, buf_line, chars);
+
+        char time_buf[64] = {0};
+        auto now = time(nullptr);
+        ctime_r(&now, time_buf);
+        chars = snprintf(buf_line, buf_line_sz, "Epoch time: %ld, localtime: %s\n", now, time_buf);
+
+        writecrash(STDERR_FILENO, buf_line, chars);
+        writecrash(CRLOG, buf_line, chars);
+
         writecrash(STDERR_FILENO, "Traceback:\n", 11);
         writecrash(CRLOG, "Traceback:\n", 11);
 
         while (unw_step(&cursor) > 0) {
-            memset(buf_line, 0, 256);
+            memset(buf_line, 0, buf_line_sz);
 
-            char buf_fun[256];
-            memset(buf_fun, 0, 256);
+            char buf_fun[buf_line_sz];
+            memset(buf_fun, 0, buf_line_sz);
 
             unw_word_t offset;
             unw_get_proc_name(&cursor, buf_fun, sizeof(buf_fun) - 1, &offset);
             unw_get_reg(&cursor, UNW_REG_IP, &ip);
             unw_get_reg(&cursor, UNW_REG_SP, &sp);
 
-            chars = snprintf(buf_line, 255, "ip = %lx, sp = %lx: (%s+0x%x) [%p]\n", (long) ip, (unsigned long) sp,
+            chars = snprintf(buf_line, buf_line_sz, "ip = %lx, sp = %lx: (%s+0x%x) [%p]\n", (long) ip, (unsigned long) sp,
                              buf_fun, (unsigned int) offset, (void *) ip);
 
             writecrash(CRLOG, buf_line, chars);
@@ -335,6 +346,14 @@ void DaemonFactory::release_crash_handler(int sig) {
             if (CRLOG >= 0) ::close(CRLOG);
             return;
         }
+
+        writecrash(STDERR_FILENO, buf_line, chars);
+        writecrash(CRLOG, buf_line, chars);
+
+        char time_buf[64] = {0};
+        auto now = time(nullptr);
+        ctime_r(&now, time_buf);
+        chars = snprintf(buf_line, 255, "Epoch time: %ld, localtime: %s\n", now, time_buf);
 
         writecrash(STDERR_FILENO, buf_line, chars);
         writecrash(CRLOG, buf_line, chars);
