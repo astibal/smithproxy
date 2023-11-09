@@ -72,7 +72,7 @@ smithproxy(sx-host) (config)# edit ?
 
 ```
 >> CLI is quite powerful, you can do vast majority changes there.  
-Only very limited set of changes require `sx-core@default`.
+Only very limited set of changes require `sx-core@default` restart.
 
 
 ```
@@ -123,7 +123,7 @@ exit
 ```
 
 Content profile `default` is used in pre-installed policies.
-> >**Important note**: only policies matching this content_profile will capture traffic.
+> >**Important note**: only policies using this content_profile will capture traffic.
 
 ```
 configure terminal
@@ -140,13 +140,13 @@ save config
 
 - File locations  
     `/etc/smithproxy/` - all configurations   
-    `/var/smithproxy/` - local capture files (a bit nonstandard directory, sorry)   
+    `/var/smithproxy/` - local capture files (bit nonstandard directory, sorry)   
     `/var/log/smithproxy/` - log files, including `SSLKEYLOG`
     
 
 - Not all traffic routed via `sx-host` is diverted to `smithproxy`.   
-    By default, only interfaces, which don't have _default route associated_ are diverted.  
-    This is controlled by a script `smithproxy.startup.cfg`.      
+    By default, only traffic from interfaces not having _default route associated_ are diverted.  
+    This can be changed in `smithproxy.startup.cfg`. (requires `sx-network@default` restart).      
 ```
 # SMITH_INTERFACE='-'    # '-' : enable on downlink interfaces (without default route applied)
                          # '*' : enable on ALL interfaces
