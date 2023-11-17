@@ -87,13 +87,7 @@ include_directories ("${SMITHD_DIR}")
 add_subdirectory(${SOCLE_DIR} socle_lib)
 add_subdirectory(${SOCLE_COMMON_DIR} socle_common_lib)
 
-include(FetchContent)
-FetchContent_Declare(
-        json
-        URL https://github.com/nlohmann/json/releases/download/v3.11.2/json.tar.xz
-        URL_HASH SHA256=8c4b26bf4b422252e13f332bc5e388ec0ab5c3443d24399acb675e68278d341f
-)
-FetchContent_MakeAvailable(json)
+find_package(nlohmann_json 3.0 REQUIRED)
 
 find_package (LibConfig REQUIRED)
 if (LIBCONFIGPP_FOUND)
