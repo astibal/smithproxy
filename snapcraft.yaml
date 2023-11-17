@@ -128,6 +128,8 @@ apps:
 
   regencert:
     command: usr/bin/sx_regencerts
+    environment:
+      PYTHONPATH: $SNAP/usr/lib/python3/dist-packages:$SNAP/lib/python3.10/site-packages
     plugs:
       - network   # to guess hostname and IP
 
