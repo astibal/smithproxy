@@ -32,14 +32,39 @@ It should compile on any recent Linux system with C++17 compiler (GCC and Clang 
 ## What's new in 0.9.32
 - custom, not-mitmed certificates based on target IP address, or SNI (loaded from files)
   - using `tls_profiles/<profilename>`: `sni_based_cert` and `ip_based_cert`
-- sinkhole options added:  
+  - certificates are located in 
+     ```
+    /etc/smithproxy/certs/default/[ip|sni]/
+                                           key.pem
+                                           fullchain.pem   # preferred 
+    
+                                           cert.pem        # sep. files fallback
+                                           issuer.pem
+                                           issuer2.pem
+    ```   
+
+- Webhook support
+  - configure HTTP(s) target where smithproxy sends connection and other details
+  - config located in `config.settings.webhook`  
+
+  
+- Policy features:  
   Configure new `features` entry on policy and add:
   - `sink-left` (traffic from originator is consumed and not proxied)
   - `sink-right` (traffic from target is consumed and not proxied)
   - `sink-all` (both above)
+  - `statistics` json statistics is sent to webhook, if configured
+  - `access-request` json webhook request, waiting for response to accept or reject the session     
+  
 
   Note all sinkhole filters are intentionally consuming data after traffic writer writes   
-  them to pcap or to remote gre.
+  them to pcap or to remote GRE.
+
+- L7 app data connection history is now maintained (previously only current app request/response)  
+  Now you can see i.e. multiple URL accessed in connection info (`diag proxy session list 7`).
+
+- when capturing traffic to files or GRE explort, L3/L4 checksums are not calculated   
+  anymore by default, saving noticeably CPU cycles.
 
 - this will be last minor version of smithproxy, next version will be bumped to `1.0.0`  
   There is no particular reason, proxy is not "experimental" anymore and .32 is already quite  
