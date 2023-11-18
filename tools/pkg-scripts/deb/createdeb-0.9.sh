@@ -206,13 +206,13 @@ cp -rv debian "${DEB_DIR}"
 echo "Filling changelog based on git log ..."
 
 cd smithproxy_src
-python3 ../gen_debian_changelog.py --tag-prefix 0.9 --repo-url https://github.com/astibal --repo-name smithproxy
+python3 ../gen_changelog.py --tag-prefix 0.9 --repo-url https://github.com/astibal --repo-name smithproxy
 mv CHANGELOG.txt "/tmp/changelog.txt"
 mv CHANGELOG.md  "/tmp/changelog.md"
 cd ..
 
 # keep debian changelog ugly as it's idiotically dogmatic format - I am giving up on this BS
-./gen_changelog.sh smithproxy_src/ > "${DEB_DIR}/debian/changelog"
+./gen_debian_changelog.sh smithproxy_src/ > "${DEB_DIR}/debian/changelog"
 
 echo "cd to ${DEB_DIR}"
 cd "${DEB_DIR}" || exit 255
