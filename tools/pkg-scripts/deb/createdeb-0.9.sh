@@ -194,7 +194,6 @@ fi
 
 UPLOAD_URL="ftp://${FTP_UPLOAD_USER}:${FTP_UPLOAD_PWD}@${FTP_UPLOAD_PATH}"
 
-UPLOAD_STREAMLINE_CHANGELOG="N"
 
 DEBEMAIL="support@smithproxy.org"
 DEBFULLNAME="Smithproxy Support"
@@ -232,25 +231,6 @@ cd "${CUR_DIR}" || exit 255
 echo "Saving changelog"
 cp -f "smithproxy-${VER}/debian/changelog" debian/
 
-if [ "${UPLOAD_STREAMLINE_CHANGELOG}" == "Y" ]; then
-    URL1="${UPLOAD_URL}/${VER_MAJ}/changelog.txt"
-    URL2="${UPLOAD_URL}/${VER_MAJ}/changelog.md"
-    URLD="${UPLOAD_URL}/${VER_MAJ}/changelog.debian.txt"
-    FILE1="/tmp/changelog.txt"
-    FILE2="/tmp/changelog.md"
-    FILED="smithproxy-${VER}/debian/changelog"
-
-    if [ "${FTP_UPLOAD_PWD}" == "" ]; then
-        echo "password was not provided - no uploads"
-    else
-        echo "..uploading also streamline changelog, because this is its first build"
-        safe_upload "${FILE1}" "${URL1}"
-        safe_upload "${FILE2}" "${URL2}"
-        safe_upload "${FILED}" "${URLD}"
-    fi
-fi
-
-
 ##
 ## Final upload of produced files - only new files will be uploaded, and only if password has been provided
 ##
@@ -261,6 +241,11 @@ else
 
     echo "File(s) being uploaded now."
     DEB_FILE=smithproxy${SUFFIX_SHORT}_${VER}-${DEB_CUR}_${ARCH}.deb
+
+    if [ ! -f "${DEB_FILE}" ]; then
+      echo "${DEB_FILE} not found, exiting"
+      exit 255
+    fi
 
     if [ "${GIT_PATCH_DIST}" != "0" ]; then
         DEB_PATH="${UPLOAD_URL}/${VER_MAJ}/${DISTRO}/snapshots/binary-${ARCH}"
@@ -291,27 +276,11 @@ else
         upload /tmp/smithproxy_build/smithproxy_src/Release_Notes.md "${UPLOAD_URL}/${VER_MAJ}/Release_Notes.md"
     fi
 
-    #### LATEST build overwrite - only for snapshots
     if [ "${GIT_PATCH_DIST}" != "0" ]; then
-
-        DEB_FILE_LATEST=smithproxy${SUFFIX_SHORT}_${VER_MAJ}-latest_${ARCH}.deb
-        DEB_URL_LATEST="${DEB_PATH}/$DEB_FILE_LATEST"
-
-        # upload latest (always overwrite, rename it)
-        upload "${DEB_FILE}" "${DEB_URL_LATEST}"
-
-        # upload latest checksum
-        sha256sum "${DEB_FILE}" > "${DEB_FILE_LATEST}.sha256"
-        upload "${DEB_FILE_LATEST}.sha256" "${DEB_URL_LATEST}.sha256"
-
 
         if [ "${MAKE_DEBUG}" == "Y" ]; then
             echo "debug release, skipping complementary files"
         else
-            upload "smithproxy-${VER}/debian/changelog" "${DEB_PATH}/smithproxy_${VER_MAJ}-latest.changelog.debian.txt"
-            upload "/tmp/changelog.txt" "${DEB_PATH}/smithproxy_${VER_MAJ}-latest.changelog.txt"
-            upload "/tmp/changelog.md" "${DEB_PATH}/smithproxy_${VER_MAJ}-latest.changelog.md"
-
             SRC_BALL="${UPLOAD_URL}src/smithproxy_src-${GIT_TAG}-${GIT_PATCH_DIST}.tar.gz"
             safe_upload /tmp/smithproxy-src.tar.gz "${SRC_BALL}"
 
