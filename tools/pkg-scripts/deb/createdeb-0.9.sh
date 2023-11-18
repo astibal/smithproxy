@@ -212,7 +212,7 @@ mv CHANGELOG.md  "/tmp/changelog.md"
 cd ..
 
 # keep debian changelog ugly as it's idiotically dogmatic format - I am giving up on this BS
-./gen_debian_changelog.sh smithproxy_src/ > "${DEB_DIR}/debian/changelog"
+./gen_debian_changelog.sh smithproxy_src > "${DEB_DIR}/debian/changelog"
 
 echo "cd to ${DEB_DIR}"
 cd "${DEB_DIR}" || exit 255

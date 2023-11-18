@@ -21,7 +21,6 @@ function process_component {
     local log_file=$2
 
     if [[ ! -d "$component_path" ]]; then
-        echo "Directory $component_path does not exist."
         return 1
     fi
 
