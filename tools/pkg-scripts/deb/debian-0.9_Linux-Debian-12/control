@@ -24,8 +24,7 @@ Depends: ${shlibs:Depends}, ${misc:Depends},
                             python3-pyroute2,
                             iproute2,
                             telnet
-Description:
- Feature-rich, fast transparent TCP/UDP/TLS proxy.
- Forwarded traffic is diverted to smithproxy where it's processed based
- on policies with feature profiles.
- It can also process local traffic and accepts SOCKS5 requests.
+Description: Fast and transparent TCP/UDP/TLS proxy with CLI and SOCKS5 support
+  Smithproxy is an advanced, feature-rich transparent proxy for
+  TLS, TCP, and UDP traffic. This package provides the core smithproxy
+  daemon and associated tools.

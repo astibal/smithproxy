@@ -16,6 +16,12 @@ SO_LOG="/tmp/so_log"
 components["$SX_LOG"]="Smithproxy"
 components["$SO_LOG"]="Socle library"
 
+
+GIT_DESCR=$(git -C "${SXPATH}" describe --tags)
+
+GIT_TAG=$(echo "${GIT_DESCR}" | awk -F'-' '{ print $1 }')
+GIT_PATCH_DIST=$(echo "${GIT_DESCR}" | awk -F'-' '{ print $2 }')
+
 function process_component {
     local component_path=$1
     local log_file=$2
@@ -40,7 +46,7 @@ function process_component {
 process_component "$SXPATH" "$SX_LOG"
 process_component "$SXPATH/socle" "$SO_LOG"
 
-echo "smithproxy (${versions[$SX_LOG]}) $(lsb_release -cs); urgency=medium"
+echo "smithproxy (${GIT_TAG}-${GIT_PATCH_DIST}) $(lsb_release -cs); urgency=medium"
 echo
 
 for f in "${SX_LOG}" "${SO_LOG}"; do
