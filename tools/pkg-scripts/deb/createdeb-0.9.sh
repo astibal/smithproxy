@@ -249,9 +249,9 @@ else
     DEB_FILE=smithproxy${SUFFIX_SHORT}_${VER}-${DEB_CUR}_${ARCH}.deb
 
     if [ "${GIT_PATCH_DIST}" != "0" ]; then
-        DEB_PATH="${UPLOAD_URL}/${VER_MAJ}/${DISTRO}/snapshots"
+        DEB_PATH="${UPLOAD_URL}/${VER_MAJ}/${DISTRO}/snapshots/binary-${ARCH}"
     else
-        DEB_PATH="${UPLOAD_URL}/${VER_MAJ}/${DISTRO}/release"
+        DEB_PATH="${UPLOAD_URL}/${VER_MAJ}/${DISTRO}/release/binary-${ARCH}"
     fi
 
     DEB_URL="${DEB_PATH}/$DEB_FILE"
