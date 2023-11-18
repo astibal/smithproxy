@@ -45,14 +45,14 @@ echo
 
 for f in "${SX_LOG}" "${SO_LOG}"; do
     echo
-    echo "    ${components[$f]}-${versions[$f]}"
+    echo " ${components[$f]}-${versions[$f]}"
     echo
     awk '{
-        max_length = 75;
+        max_length = 70;
         if (length($0) > max_length)
-            print "    * " substr($0, 1, max_length - 3) "...";
+            print " * " substr($0, 1, max_length - 3) "...";
         else
-            print "    * " $0;
+            print " * " $0;
     }' "$f"
 done
 
