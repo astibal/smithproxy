@@ -42,6 +42,7 @@ fi
 CUR_DIR=/tmp/smithproxy_build
 mkdir ${CUR_DIR}
 cp ./*.sh ${CUR_DIR}
+cp ../../gen_changelog.py ${CUR_DIR}
 cp -r ${DEBIAN_DIR} ${CUR_DIR}/debian
 
 
@@ -204,11 +205,14 @@ cp -rv debian "${DEB_DIR}"
 
 echo "Filling changelog based on git log ..."
 
-# ./gen_changelog.sh smithproxy_src/ > "${DEB_DIR}/debian/changelog"
-python3 ../../gen_changelog.py --tag-prefix 0.9 --repo-url https://github.com/astibal --repo-name smithproxy
-cp CHANGELOG.txt "${DEB_DIR}/debian/changelog"
-cp CHANGELOG.txt "/tmp/"
-cp CHANGELOG.md  "/tmp/"
+cd smithproxy_src
+python3 ../gen_debian_changelog.py --tag-prefix 0.9 --repo-url https://github.com/astibal --repo-name smithproxy
+mv CHANGELOG.txt "/tmp/changelog.txt"
+mv CHANGELOG.md  "/tmp/changelog.md"
+cd ..
+
+# keep debian changelog ugly as it's idiotically dogmatic format - I am giving up on this BS
+./gen_changelog.sh smithproxy_src/ > "${DEB_DIR}/debian/changelog"
 
 echo "cd to ${DEB_DIR}"
 cd "${DEB_DIR}" || exit 255
@@ -231,16 +235,18 @@ cp -f "smithproxy-${VER}/debian/changelog" debian/
 if [ "${UPLOAD_STREAMLINE_CHANGELOG}" == "Y" ]; then
     URL1="${UPLOAD_URL}/${VER_MAJ}/changelog.txt"
     URL2="${UPLOAD_URL}/${VER_MAJ}/changelog.md"
-    # FILE="smithproxy-${VER}/debian/changelog"
-    FILE1="/tmp/CHANGELOG.txt"
-    FILE2="/tmp/CHANGELOG.md"
+    URLD="${UPLOAD_URL}/${VER_MAJ}/changelog.debian.txt"
+    FILE1="/tmp/changelog.txt"
+    FILE2="/tmp/changelog.md"
+    FILED="smithproxy-${VER}/debian/changelog"
 
     if [ "${FTP_UPLOAD_PWD}" == "" ]; then
         echo "password was not provided - no uploads"
     else
         echo "..uploading also streamline changelog, because this is its first build"
-        safe_upload "${FILE1}" "${URL}"
-        safe_upload "${FILE2}" "${URL}"
+        safe_upload "${FILE1}" "${URL1}"
+        safe_upload "${FILE2}" "${URL2}"
+        safe_upload "${FILED}" "${URLD}"
     fi
 fi
 
@@ -276,7 +282,7 @@ else
         echo "debug release, skipping complementary files"
     else
         # overwrite files if thy exist
-        #safe_upload "smithproxy-${VER}/debian/changelog" "${DEB_PATH}/smithproxy_${VER}-${DEB_CUR}.changelog"
+        safe_upload "smithproxy-${VER}/debian/changelog" "${DEB_PATH}/smithproxy_${VER}-${DEB_CUR}.changelog.debian.txt"
         safe_upload "/tmp/changelog.txt" "${DEB_PATH}/smithproxy_${VER}-${DEB_CUR}.changelog.txt"
         safe_upload "/tmp/changelog.md" "${DEB_PATH}/smithproxy_${VER}-${DEB_CUR}.changelog.md"
         #upload README ${DEB_PATH}/README
@@ -302,7 +308,7 @@ else
         if [ "${MAKE_DEBUG}" == "Y" ]; then
             echo "debug release, skipping complementary files"
         else
-            # upload "smithproxy-${VER}/debian/changelog" "${DEB_PATH}/smithproxy_${VER_MAJ}-latest.changelog"
+            upload "smithproxy-${VER}/debian/changelog" "${DEB_PATH}/smithproxy_${VER_MAJ}-latest.changelog.debian.txt"
             upload "/tmp/changelog.txt" "${DEB_PATH}/smithproxy_${VER_MAJ}-latest.changelog.txt"
             upload "/tmp/changelog.md" "${DEB_PATH}/smithproxy_${VER_MAJ}-latest.changelog.md"
 
