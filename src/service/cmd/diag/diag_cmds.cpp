@@ -2260,7 +2260,7 @@ int cli_diag_neighbor_clear(struct cli_def *cli, const char *command, char *argv
         sz = nb.cache().get_map_ul().size();
         nb.cache().clear_ul();
     }
-    cli_print(cli, "cleared %ld entries", sz);
+    cli_print(cli, "cleared %zu entries", sz);
     return CLI_OK;
 }
 
