@@ -98,7 +98,8 @@ def run_build(host, files, arg_http_proxy=None, arg_cleanup=False, arg_user=None
     if arg_cleanup:
         cmd_pre = "docker system prune -a -f\; "
 
-    for dockerfile in files:       
+    for dockerfile in files:
+        print(f"START: {dockerfile} at {host}")
         cmd_base = cmd_pre + "docker build --rm --no-cache --build-arg FTP_UPLOAD_PWD=%s \
                             --build-arg FTP_UPLOAD_USER=%s \
                             --build-arg FTP_UPLOAD_PATH=%s \
@@ -152,7 +153,8 @@ def run_build(host, files, arg_http_proxy=None, arg_cleanup=False, arg_user=None
                 err_msg = "echo \"terminated abruptly: %s\" >> /tmp/builder-%s.log" % (ee, host)
                 subprocess.run(err_msg, shell=True)
                 raise ee
-            
+
+        print(f"FINISHED: {dockerfile} at {host}")
 
 def load_config(fnm):
     

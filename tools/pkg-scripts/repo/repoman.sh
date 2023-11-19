@@ -18,7 +18,7 @@ fi
 
 REPO_KEY="$1"
 
-LINUX_VERSIONS="Linux-Ubuntu-22.04 Linux-Ubuntu-20.04"
+LINUX_VERSIONS="Linux-Ubuntu-22.04 Linux-Ubuntu-20.04 Linux-Debian-12 Linux-Debian-11"
 COMPONENTS="snapshots release"
 
 cd "${REPO_ROOT}"
