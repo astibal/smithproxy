@@ -41,7 +41,7 @@
 
 #include <ext/lmhpp/include/lmhttpd.hpp>
 #include <service/httpd/util.hpp>
-#include <service/httpd/jsonize.hpp>
+#include <service/http/jsonize.hpp>
 
 
 static nlohmann::json json_ssl_cache_stats(struct MHD_Connection* conn, std::string const& meth, std::string const& req) {

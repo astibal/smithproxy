@@ -311,6 +311,8 @@ add_executable(smithproxy
         src/service/dnsupd/smithdnsupd.cpp
         src/service/core/smithproxy.hpp
         src/service/core/smithproxy.cpp
+        src/service/core/smithproxy_objapi.hpp
+        src/service/core/smithproxy_objapi.cpp
         src/service/cmd/cmdserver.cpp
         src/service/cfgapi/cfgvalue.hpp
         src/service/cfgapi/cfgvalue.cpp
@@ -325,7 +327,7 @@ add_executable(smithproxy
         src/service/httpd/httpd.cpp
         src/service/httpd/handlers/handlers.cpp
         src/service/httpd/handlers/dispatchers.cpp
-        src/service/httpd/jsonize.cpp
+        src/service/http/jsonize.cpp
         src/service/http/request.hpp
         src/service/http/async_request.hpp
         src/service/http/webhooks.hpp

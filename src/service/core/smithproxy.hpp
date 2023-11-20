@@ -49,6 +49,8 @@
 #include <service/cfgapi/cfgapi.hpp>
 
 #include <service/core/service.hpp>
+#include <service/core/smithproxy_objapi.hpp>
+
 #include <service/daemon.hpp>
 #include <service/netservice.hpp>
 
@@ -62,8 +64,6 @@ using theReceiver = ThreadedReceiver<MitmUdpProxy>;
 
 using socksAcceptor = ThreadedAcceptor<MitmSocksProxy>;
 using socksReceiver = ThreadedReceiver<MitmSocksUdpProxy>;
-
-
 
 class SmithProxy : public Service {
 
@@ -136,6 +136,8 @@ public:
 
     static bool init_syslog();
     bool load_config(std::string& config_f, bool reload = false);
+
+    ObjAPI API;
 };
 
 

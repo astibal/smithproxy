@@ -41,107 +41,19 @@
 
 #include <ext/lmhpp/include/lmhttpd.hpp>
 #include <service/httpd/util.hpp>
-#include <service/httpd/jsonize.hpp>
-
+#include <service/http/jsonize.hpp>
 
 
 static nlohmann::json json_proxy_session_list(struct MHD_Connection * connection, std::string const& meth, std::string const& req) {
 
-    using nlohmann::json;
+    auto oid = connection_ull_param(connection, "oid", 0ULL);
     using namespace jsonize;
-
-    std::scoped_lock<std::recursive_mutex> l_(socle::sobjectDB::getlock());
-    json ret;
 
     bool flag_active_only = load_json_params<bool>(req, "active").value_or(false);
     bool flag_tlsinfo = load_json_params<bool>(req, "tlsinfo").value_or(false);
     bool flag_verbose = load_json_params<bool>(req, "verbose").value_or(false);
-    auto verbosity = flag_verbose ? iDIA : iINF;
-
-    auto json_single_proxy = [&](MitmProxy* proxy) -> std::optional<nlohmann::json> {
-        if(flag_active_only) {
-            if(proxy->stats().mtr_up.get() == 0L and proxy->stats().mtr_down.get() == 0L)
-                return std::nullopt;
-        }
-
-        if(proxy->lsize() == 0 or proxy->rsize() == 0) {
-            return std::nullopt;
-        }
-
-        auto proxy_detail = jsonize::from(proxy, verbosity);
-
-        if(flag_tlsinfo) {
-            nlohmann::json left;
-            nlohmann::json right;
-
-            if(proxy->first_left()) {
-                left = jsonize::from(proxy->first_left()->com(), verbosity);
-            }
-            if(proxy->first_right()) {
-                right = jsonize::from(proxy->first_right()->com(), verbosity);
-            }
-
-            proxy_detail["tlsinfo"] = { { "left", left },
-                                        { "right", right }
-            };
-        }
-        return proxy_detail;
-    };
 
 
-    auto oid = connection_ull_param(connection, "oid", 0ULL);
-    if(oid != 0ULL) {
-        auto it = socle::sobjectDB::oid_db().find(oid);
-        if(it != socle::sobjectDB::oid_db().end()) {
+    return SmithProxy::instance().API.proxy_session_list_json(oid, flag_active_only, flag_tlsinfo, flag_verbose);
 
-            std::string what = it->second->c_type();
-            if (what == "MitmProxy" || what == "SocksProxy") {
-                auto *proxy = dynamic_cast<MitmProxy *>(it->second.get());
-                if (proxy) {
-                    auto single_ret = json_single_proxy(proxy);
-                    if (single_ret.has_value()) ret.push_back(single_ret.value());
-                    return ret;
-                }
-            }
-        }
-        return nlohmann::json::array();
-    } else {
-
-        auto& sx = SmithProxy::instance();
-
-        auto list_worker = [&json_single_proxy, &ret](const char* title, auto& listener) {
-            for (auto const& acc: listener) {
-                for(auto const& wrk: acc->tasks()) {
-
-                    auto lc_ = std::scoped_lock(wrk.second->proxy_lock());
-
-                    for(auto const& [ p, _ ] : wrk.second->proxies()) {
-                        if(auto* proxy = dynamic_cast<MitmProxy*>(p.get()); p != nullptr) {
-                            auto single_ret = json_single_proxy(proxy);
-                            if (single_ret.has_value()) {
-                                single_ret.value()["origin"] = title;
-                                ret.push_back(single_ret.value());
-                            }
-                        }
-                    }
-                }
-            }
-        };
-
-        list_worker("plain acceptor", sx.plain_proxies);
-        list_worker("tls acceptor", sx.ssl_proxies);
-
-        list_worker("udp receiver", sx.udp_proxies);
-        list_worker("dtls receiver", sx.dtls_proxies);
-
-        list_worker("socks acceptor", sx.socks_proxies);
-
-        list_worker("plain redirect acceptor", sx.redir_plain_proxies);
-        list_worker("dns redirect receiver", sx.redir_udp_proxies);
-        list_worker("tls redirect acceptor", sx.redir_ssl_proxies);
-
-        if (ret.empty()) return nlohmann::json::array();
-
-        return ret;
-    }
 }

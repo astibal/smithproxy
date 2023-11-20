@@ -1,4 +1,4 @@
-#include <service/httpd/jsonize.hpp>
+#include "jsonize.hpp"
 #include <libconfig.h++>
 
 namespace jsonize {
@@ -201,8 +201,7 @@ namespace jsonize {
             right.emplace_back(jsonize::from((MitmHostCX *) nullptr, verbosity));
         }
 
-
-        ret["oid"] = what->oid();
+        ret["oid"] = what->to_connection_ID();
 
         ret["left"] = left;
         ret["right"] = right;

@@ -5,7 +5,7 @@
 
 #include <ext/lmhpp/include/lmhttpd.hpp>
 #include <service/httpd/httpd.hpp>
-#include <service/httpd/jsonize.hpp>
+#include <service/http/jsonize.hpp>
 
 #include <main.hpp>
 #include <service/cfgapi/cfgapi.hpp>

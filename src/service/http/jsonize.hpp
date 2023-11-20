@@ -44,7 +44,7 @@
 #include <openssl/x509.h>
 #include <nlohmann/json.hpp>
 
-#include <proxy/mitmproxy.hpp>
+#include "src/proxy/mitmproxy.hpp"
 #include <libconfig.h++>
 
 namespace jsonize {
