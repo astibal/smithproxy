@@ -30,7 +30,8 @@ namespace sx::http::webhooks {
             nlohmann::json const ping = {
                                           { "action", "ping" },
                                           {"source", get_hostid() },
-                                          {"type", "proxy"}
+                                          {"type", "proxy"},
+                                          {"proxies", SmithProxy::instance().API.proxy_session_connid_list() }
                                         };
             sx::http::AsyncRequest::emit(
                     to_string(ping),

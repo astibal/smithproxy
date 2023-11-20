@@ -12,6 +12,52 @@
 #include <service/http/jsonize.hpp>
 #include <proxy/mitmproxy.hpp>
 
+void ObjAPI::for_each_proxy(std::function<void(MitmProxy*)> callable) {
+    auto const& instance = SmithProxy::instance();
+
+    auto lc_ = std::scoped_lock(socle::sobjectDB::getlock());
+
+
+    auto list_worker = [callable](const char* title, auto& listener) {
+        for (auto const& acc: listener) {
+            for(auto const& wrk: acc->tasks()) {
+
+                auto lc_ = std::scoped_lock(wrk.second->proxy_lock());
+
+                for(auto const& [ p, _ ] : wrk.second->proxies()) {
+                    if(auto* proxy = dynamic_cast<MitmProxy*>(p.get()); p != nullptr) {
+                        callable(proxy);
+                    }
+                }
+            }
+        }
+    };
+
+    list_worker("plain acceptor", instance.plain_proxies);
+    list_worker("tls acceptor", instance.ssl_proxies);
+
+    list_worker("udp receiver", instance.udp_proxies);
+    list_worker("dtls receiver", instance.dtls_proxies);
+
+    list_worker("socks acceptor", instance.socks_proxies);
+
+    list_worker("plain redirect acceptor", instance.redir_plain_proxies);
+    list_worker("dns redirect receiver", instance.redir_udp_proxies);
+    list_worker("tls redirect acceptor", instance.redir_ssl_proxies);
+}
+
+nlohmann::json ObjAPI::proxy_session_connid_list() {
+
+    using nlohmann::json;
+    json ret;
+
+    for_each_proxy([&ret](MitmProxy const* px){
+        if(px) ret.push_back(px->to_connection_ID());
+    });
+
+    return ret;
+}
+
 nlohmann::json ObjAPI::proxy_session_list_json(uint64_t oid, bool active_only, bool tls_info, bool verbose) {
     using nlohmann::json;
     auto const& instance = SmithProxy::instance();
