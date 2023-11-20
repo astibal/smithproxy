@@ -31,6 +31,7 @@ namespace sx::http::webhooks {
                                           { "action", "ping" },
                                           {"source", get_hostid() },
                                           {"type", "proxy"},
+                                          {"instance", SmithProxy::instance().API.instance_OID() },
                                           {"proxies", SmithProxy::instance().API.proxy_session_connid_list() }
                                         };
             sx::http::AsyncRequest::emit(

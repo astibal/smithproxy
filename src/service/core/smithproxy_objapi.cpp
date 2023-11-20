@@ -11,6 +11,7 @@
 #include <service/core/smithproxy_objapi.hpp>
 #include <service/http/jsonize.hpp>
 #include <proxy/mitmproxy.hpp>
+#include <staticcontent.hpp>
 
 void ObjAPI::for_each_proxy(std::function<void(MitmProxy*)> callable) {
     auto const& instance = SmithProxy::instance();
@@ -44,6 +45,11 @@ void ObjAPI::for_each_proxy(std::function<void(MitmProxy*)> callable) {
     list_worker("plain redirect acceptor", instance.redir_plain_proxies);
     list_worker("dns redirect receiver", instance.redir_udp_proxies);
     list_worker("tls redirect acceptor", instance.redir_ssl_proxies);
+}
+
+
+std::string ObjAPI::instance_OID() {
+    return string_format("Proxy-%lX", StaticContent::boot_random);
 }
 
 nlohmann::json ObjAPI::proxy_session_connid_list() {
