@@ -16,9 +16,6 @@
 void ObjAPI::for_each_proxy(std::function<void(MitmProxy*)> callable) {
     auto const& instance = SmithProxy::instance();
 
-    auto lc_ = std::scoped_lock(socle::sobjectDB::getlock());
-
-
     auto list_worker = [callable](const char* title, auto& listener) {
         for (auto const& acc: listener) {
             for(auto const& wrk: acc->tasks()) {
@@ -68,7 +65,6 @@ nlohmann::json ObjAPI::proxy_session_list_json(uint64_t oid, bool active_only, b
     using nlohmann::json;
     auto const& instance = SmithProxy::instance();
 
-    auto lc_ = std::scoped_lock(socle::sobjectDB::getlock());
     json ret;
 
     auto verbosity = verbose ? iDIA : iINF;
@@ -106,6 +102,8 @@ nlohmann::json ObjAPI::proxy_session_list_json(uint64_t oid, bool active_only, b
 
 
     if(oid != 0ULL) {
+        auto lc_ = std::scoped_lock(socle::sobjectDB::getlock());
+
         auto it = socle::sobjectDB::oid_db().find(oid);
         if(it != socle::sobjectDB::oid_db().end()) {
 

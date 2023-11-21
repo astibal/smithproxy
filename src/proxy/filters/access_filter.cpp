@@ -86,7 +86,7 @@ std::string AccessFilter::to_string(int verbosity) const {
 nlohmann::json AccessFilter::to_json(int verbosity) const {
 
     auto json_all = nlohmann::json();
-    json_all["info"] = { {"session", connection_label}, { "access_response", access_response } };
+    json_all["info"] = { {"session", connection_label}, { "access-response", access_response } };
 
     return json_all;
 }
