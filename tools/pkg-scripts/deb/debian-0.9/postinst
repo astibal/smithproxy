@@ -1,5 +1,10 @@
 #!/bin/sh
 
+if [ -f /usr/bin/smithproxy ]; then
+  # this is an upgrade
+  echo "No steps needed on upgrade. Configuration will be migrated automatically by smithproxy on restart."
+fi
+
 python3 -m pip install pyparsing pylibconfig2
 
 if [ ! -d /var/smithproxy/data ]; then

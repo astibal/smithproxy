@@ -24,6 +24,7 @@ Depends: ${shlibs:Depends}, ${misc:Depends},
                             python3-pyroute2,
                             iproute2,
                             telnet
+Suggests: apparmor, apparmor-tools
 Description: Fast and transparent TCP/UDP/TLS proxy with CLI and SOCKS5 support
   Smithproxy is an advanced, feature-rich transparent proxy for
   TLS, TCP, and UDP traffic. This package provides the core smithproxy
