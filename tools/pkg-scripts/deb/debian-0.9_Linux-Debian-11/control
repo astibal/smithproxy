@@ -1,0 +1,31 @@
+Source: smithproxy
+Maintainer: Ales Stibal <astib@mag0.net>
+Section: misc
+Priority: optional
+Standards-Version: 3.9.6
+Build-Depends: cmake, debhelper (>= 10)
+
+Package: smithproxy
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends},
+                            libstdc++6 (>= 8.3.0),
+                            libssl1.1 (>=1.1.1),
+                            libconfig++9v5,
+                            libmicrohttpd12,
+                            libpam0g,
+                            libcurl4,
+                            iptables,
+                            python3,
+                            python3-pip,
+                            python3-setuptools,
+                            python3-wheel,
+                            python3-cryptography,
+                            python3-pyroute2,
+                            iproute2,
+                            telnet
+Suggests: apparmor, apparmor-tools
+Description: Fast and transparent TCP/UDP/TLS proxy with CLI and SOCKS5 support
+  Smithproxy is an advanced, feature-rich transparent proxy for
+  TLS, TCP, and UDP traffic. This package provides the core smithproxy
+  daemon and associated tools.
+
