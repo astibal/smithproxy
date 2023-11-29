@@ -266,7 +266,7 @@ in the future releases.
 * new `diag worker list` CLI command to diagnose new worker architecture
 * new `diag mem udp stats` CLI command to diagnose new UDP flow datagrams (they will become a connection)
 * new config `settings/` area bool variables: `accept_tproxy`, `accept_redirect` and `accept_socks` to fully disable respective worker trees and save some idle CPU cycles + startup script support for these.
-* reworked automatized build system - new binary package builds don't require any intervention and are compiled and uploaded to mag0.net/out/smithproxy repository automatically.
+* reworked automated build system - new binary package builds don't require any intervention and are compiled and uploaded to mag0.net/out/smithproxy repository automatically.
 
 ### Bug fixes
 

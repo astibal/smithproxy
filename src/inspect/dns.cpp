@@ -168,7 +168,7 @@ std::size_t DNSFactory::generate_dns_request(unsigned short id, buffer& b, std::
             // write a len of previous piece
             *len_ptr = piece_sz;
 
-            // mark this byte as lenght field and reset piece size
+            // mark this byte as length field and reset piece size
             len_ptr = &queries[i];
             piece_sz = 0;
         } else {

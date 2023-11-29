@@ -204,7 +204,7 @@ namespace sx::engine::http {
 
             // Actually for unknown reason, sample size 512 (and more) was crashing deep in std::regex on alpine platform.
             // Suspicion is it has to do something with MUSL or alpine platform specific. 256 is good enough to set for general use,
-            // as there is nothing dependant on full URI and more can slow box down for not real benefit.
+            // as there is nothing dependent on full URI and more can slow box down for not real benefit.
 
             if(side == 'r') {
 

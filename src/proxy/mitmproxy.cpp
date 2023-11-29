@@ -1084,7 +1084,7 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
 //            }
 //        } else {
 //
-//            // if com is not SSL, no further ssl attempts are neded (spare dynamic casts)
+//            // if com is not SSL, no further ssl attempts are needed (spare dynamic casts)
 //            ssl_handled = true;
 //        }
 //    }

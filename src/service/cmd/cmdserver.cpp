@@ -2094,9 +2094,9 @@ void cli_register_static(struct cli_def* cli) {
             [[maybe_unused]] auto exec_shutdown = cli_register_command(cli, exec, "shutdown", cli_exec_shutdown, PRIVILEGE_PRIVILEGED, MODE_ANY, "terminate this smithproxy process");
                              auto exec_pcap = cli_register_command(cli, exec, "pcap", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "manage PCAP writer");
                             [[maybe_unused]] auto exec_pcap_rollover = cli_register_command(cli, exec_pcap, "rollover", cli_exec_pcap_rollover, PRIVILEGE_PRIVILEGED, MODE_ANY, "rollover pcap file now");
-                             auto exec_events = cli_register_command(cli, exec, "events", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "mange event messages");
+                             auto exec_events = cli_register_command(cli, exec, "events", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "manage event messages");
                             [[maybe_unused]] auto exec_events_clear = cli_register_command(cli, exec_events, "clear", cli_exec_events_clear, PRIVILEGE_PRIVILEGED, MODE_ANY, "clear event ring buffer");
-                             auto exec_kb = cli_register_command(cli, exec, "kb", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "mange KB");
+                             auto exec_kb = cli_register_command(cli, exec, "kb", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_ANY, "manage KB");
                             [[maybe_unused]] auto exec_kb_print = cli_register_command(cli, exec_kb, "print", cli_exec_kb_print, PRIVILEGE_PRIVILEGED, MODE_ANY, "print all KB entries");
                             [[maybe_unused]] auto exec_kb_clear = cli_register_command(cli, exec_kb, "clear", cli_exec_kb_clear, PRIVILEGE_PRIVILEGED, MODE_ANY, "clear all KB entries");
 

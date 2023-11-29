@@ -2021,7 +2021,7 @@ int cli_diag_sig_list(struct cli_def *cli, const char *command, char *argv[], in
     for(auto const& list: lists)
         for(auto const& [ _, sig]: *list) {
 
-            // print refcnt one less, due to this shared_ptr serving only priting purposes
+            // print refcnt one less, due to this shared_ptr serving only printing purposes
             ss << "Name: '" << sig->name() << "' refcnt: " << sig.use_count() - 1 << "\n";
             ss << "  chain size: " << sig->sig_chain().size() << "\n";
 

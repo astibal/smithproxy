@@ -99,7 +99,7 @@ public:
 
     /// @brief check bytes in the range starting at 'ptr' to 'maxlen', and parse the text as DNS QNAME.
     /// @returns next index behind QNAME data.
-    /// Used to quickly pass the QNAME when parsing DNS packet and follow on to pase next elements.
+    /// Used to quickly pass the QNAME when parsing DNS packet and follow on to parse next elements.
     unsigned int skip_qname(const unsigned char* ptr, unsigned long maxlen, std::string* str_storage = nullptr) const;
     std::string construct_qname(const unsigned char* qname_start, const unsigned char* packet_start, size_t packet_size, unsigned int loop_max=16);
     std::size_t generate_dns_request(unsigned short id, buffer& b, std::string const& h, DNS_Record_Type t);

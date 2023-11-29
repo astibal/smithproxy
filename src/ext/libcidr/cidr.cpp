@@ -483,7 +483,7 @@ namespace cidr {
      * it's wasteful; it quadrules the amount of work needed to be done
      * to compare to v4 blocks, and this function may be useful in fairly
      * performance-sensitive parts of the application.  Sure, an extra 12
-     * uint8_t compares better not be the make-or-break perforamnce point
+     * uint8_t compares better not be the make-or-break performance point
      * for anything real, but why make it harder unnecessarily?
      */
         if (big->proto == CIDR_IPV4) {
@@ -696,7 +696,7 @@ namespace cidr {
             } else if (toret->proto == CIDR_IPV6) {
                 /*
              * This processing happens somewhat similarly to IPV4 above,
-             * the format is simplier, and we need to be a little
+             * the format is simpler, and we need to be a little
              * sneakier about the mask, since it can fall on a half-octet
              * boundary with .ip6.arpa format.
              */
@@ -1324,7 +1324,7 @@ namespace cidr {
                  * At this point, 4 dotted-decimal octets should be
                  * consumed.  i has gone back one step past the : before
                  * the decimal, so addr[i+1] should be the ':' that
-                 * preceeds them.  Verify.
+                 * precedes them.  Verify.
                  */
                     if (nocts != 4 || addr[i + 1] != ':') {
                         cidr_free(toret);
@@ -2356,7 +2356,7 @@ namespace cidr {
                 if (flags & CIDR_NETMASK) {
                     /*
                  * We already wrote how to build the whole v6 form, so
-                 * just call ourselves recurively for this.
+                 * just call ourselves recursively for this.
                  */
                     nmtmp = cidr_alloc();
                     if (nmtmp == nullptr) {

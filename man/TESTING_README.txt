@@ -4,7 +4,7 @@ INSTALLATION
 ============
 
 1. apply content of tpoxy.txt in the router. You can add there as many ports as you want, just bear in mind that redirection to 50080 
-   will run in plaintext only, UNLESS it detects STARTTLS procedure. Traffic redirected to 50043 will start SSL immediatelly.
+   will run in plaintext only, UNLESS it detects STARTTLS procedure. Traffic redirected to 50043 will start SSL immediately.
 2. check your certificates, they should be in certs/ directory under smithproxy $CWD. Smithproxy will complain what's missing.
 3. run ./smithproxy # possibly with --diagnose or --debug flags 
 

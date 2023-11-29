@@ -1070,7 +1070,7 @@ int CfgFactory::load_db_address () {
                 }
             };
 
-            // since 0.9.31 cidr objects have differrent config syntax:
+            // since 0.9.31 cidr objects have different config syntax:
             // OLD = {
             //     type = <int>
             //     cidr = "cidr_string" ; if type = 0
