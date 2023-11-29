@@ -63,12 +63,16 @@ private:
 
 
 class Dictionary {
+    using properties_t = std::vector<std::pair<std::string, std::string> >;
 public:
     const std::string find( const std::string & name ) const;
     void set( const std::string & name, const std::string & value );
 
+    properties_t& get_properties() { return properties; }
+    properties_t const& get_properties() const { return properties; }
+
 protected:
-    std::vector<std::pair<std::string, std::string> > properties;
+     properties_t properties;
 };
 
 
