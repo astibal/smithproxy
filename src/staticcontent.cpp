@@ -50,6 +50,8 @@ bool StaticContent::load_files(std::string& dir) {
 
             auto* t_temp = new Template(loader_file);
             t_temp->load(dir + name + ".txt");
+
+            auto lc_ = std::scoped_lock(lock);
             templates_->set(name,t_temp);
         }
     }
@@ -81,7 +83,7 @@ std::string StaticContent::render_noargs(std::string const& name) {
     return {};
 }
 
-std::string StaticContent::render_server_response(std::string& message, unsigned int code) {
+std::string StaticContent::render_server_response(std::string const& message, unsigned int code) {
     std::stringstream out;
     out << string_format("HTTP/1.1 %3d OK\r\n", code);
     out << "Server: Smithproxy/1.1\r\n";
@@ -95,12 +97,18 @@ std::string StaticContent::render_server_response(std::string& message, unsigned
 }
 
 std::string StaticContent::render_msg_html_page(std::string const& caption, std::string const& meta, std::string const& content, const char* window_width) {
+
     auto t = get("html_page");
+
+    auto lc_ = std::scoped_lock(lock);
+
     t->set("title", caption);
     t->set("meta", meta);
     t->set("message", content);
     t->set("window_width", window_width);
     
     std::string r = t->render();
+    t->get_properties().clear();
+
     return r;
 }

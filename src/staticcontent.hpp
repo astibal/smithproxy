@@ -49,13 +49,14 @@ using namespace ext::nltemplate;
 class StaticContent {
 
     std::unique_ptr<ptr_cache<std::string,Template>> templates_;
-    StaticContent() : log(get_log()) {
+    StaticContent() {
         templates_ = std::make_unique<ptr_cache<std::string,Template>>("content.replacements");
 
     };
     ~StaticContent() = default;
 
-    logan_lite& log;
+    logan_lite& log = get_log();
+    std::mutex lock;
 public:
     // should be populated externally, on start
     static inline uint32_t boot_random {0};
@@ -64,7 +65,7 @@ public:
     
     std::string render_noargs(std::string const& s);
 
-    std::string render_server_response(std::string& message, unsigned int code=200);
+    std::string render_server_response(std::string const& message, unsigned int code=200);
     std::string render_msg_html_page(std::string const& caption, std::string const& meta, std::string const& content,const char* window_width="450px");
     std::shared_ptr<Template> get(std::string const& s);
 
