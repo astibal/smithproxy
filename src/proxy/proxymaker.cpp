@@ -171,7 +171,7 @@ namespace sx::proxymaker {
                 _err("routing failed");
         }
 
-        if(proxy) {
+        if(proxy and not implicit_allow) {
             proxy->update_neighbors();
         }
 
