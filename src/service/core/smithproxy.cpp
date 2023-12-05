@@ -556,22 +556,27 @@ void SmithProxy::join_all() {
     if(cli_thread) {
         if(!cfg_daemonize)
             std::cerr << "terminating cli server thread" << std::endl;
-        cli_thread->join();
+        if(cli_thread->joinable())
+            cli_thread->join();
     }
     if(dns_thread) {
         if(!cfg_daemonize)
             std::cerr << "terminating dns updater thread" << std::endl;
-        dns_thread->join();
+
+        if(dns_thread->joinable())
+            dns_thread->join();
     }
     if(id_thread) {
         if(!cfg_daemonize)
             std::cerr << "terminating identity updater thread" << std::endl;
-        id_thread->join();
+        if(id_thread->joinable())
+            id_thread->join();
     }
     if(api_thread) {
         if(!cfg_daemonize)
             std::cerr << "terminating API updater thread" << std::endl;
-        api_thread->join();
+        if(api_thread->joinable())
+            api_thread->join();
     }
 
     auto ql = std::dynamic_pointer_cast<QueueLogger>(Log::get());
