@@ -29,9 +29,7 @@ std::thread* create_httpd_thread(unsigned short port) {
         server.options().handler_should_terminate = []() -> bool {
                 return SmithProxy::instance().terminate_flag;
             };
-        if( not server.start()) {
-            Log::get()->events().insert(ERR, "failed to start API server");
-        }
+        server.start();
     });
 
 }
