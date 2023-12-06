@@ -2103,7 +2103,16 @@ int cli_diag_worker_proxy_list(struct cli_def *cli, [[maybe_unused]] const char 
 
                 for (std::size_t p_i = 0; p_i < proxies.size(); ++p_i) {
                     auto const& proxy = proxies.at(p_i).first;
+                    auto threaded =  ( proxies.at(p_i).second != nullptr );
+                    auto in_progress = ( proxy->state().in_progress() > 0 );
+
                     out << string_format("\n          `- proxy[%d]: %s", p_i, proxy->str().c_str());
+                    if (threaded or in_progress) {
+                        out << " (";
+                        if(threaded) out << "t";
+                        if(in_progress) out << "i";
+                        out << ")";
+                    }
                 }
                 out << "\n          `- " << speed_str;
             }

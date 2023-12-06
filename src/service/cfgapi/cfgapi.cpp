@@ -437,6 +437,12 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "added policy feature 'access-request'");
         return true;
     }
+    else if(upgrade_to_num == 1021) {
+        log.event(INF, "added settings.tuning.subproxy_thread_spray_bytes_min");
+        log.event(INF, "default settings.tuning.subproxy_thread_spray_min changed 2->5");
+        return true;
+    }
+
 
     return false;
 }
@@ -775,6 +781,7 @@ bool CfgFactory::load_settings () {
 
     if(cfgapi.getRoot()["settings"].exists("tuning")) {
         load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "proxy_thread_spray_min", MasterProxy::subproxy_thread_spray_min);
+        load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "subproxy_thread_spray_bytes_min", MasterProxy::subproxy_thread_spray_bytes_min);
 
         int hostcx_min = 0;
         load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "host_bufsz_min", hostcx_min);
@@ -4945,6 +4952,7 @@ int save_settings(Config& ex) {
 
     Setting& tuning_objects = objects.add("tuning", Setting::TypeGroup);
     tuning_objects.add("proxy_thread_spray_min", Setting::TypeInt) = (int)MasterProxy::subproxy_thread_spray_min;
+    tuning_objects.add("subproxy_thread_spray_bytes_min", Setting::TypeInt) = (int)MasterProxy::subproxy_thread_spray_bytes_min;
     tuning_objects.add("host_bufsz_min", Setting::TypeInt) = (int) baseHostCX::params.buffsize;
     tuning_objects.add("host_bufsz_max_multiplier", Setting::TypeInt) = (int) baseHostCX::params.buffsize_maxmul;
     tuning_objects.add("host_write_full", Setting::TypeInt) = (int) baseHostCX::params.write_full;
