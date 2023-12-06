@@ -921,7 +921,8 @@ void MitmProxy::proxy_dump_packet(side_t sid, buffer& buf) {
             printed_all = true;
             break;
         }  else {
-            auto cur_buf = buf.view(printed, chunk_sz);
+            size_t const actual_chunk_sz = std::min(chunk_sz, buf.size() - printed);
+            auto cur_buf = buf.view(printed, actual_chunk_sz);
 
             _dia("mitmproxy::proxy-%c%s: \r\n%s", from_side(sid),
                  string_format("/%d", counter).c_str(),
@@ -932,6 +933,7 @@ void MitmProxy::proxy_dump_packet(side_t sid, buffer& buf) {
         counter++;
 
     } while(printed < 20480);
+
 
     if(not printed_all) {
         _dia("mitmproxy::proxy-%c: <truncated>", from_side(sid));
