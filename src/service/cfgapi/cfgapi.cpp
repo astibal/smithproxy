@@ -442,6 +442,14 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "default settings.tuning.subproxy_thread_spray_min changed 2->5");
         return true;
     }
+    else if(upgrade_to_num == 1022) {
+        log.event(INF, "added tls_profiles.[x].only_custom_certs");
+        return true;
+    }
+    else if(upgrade_to_num == 1023) {
+        log.event(INF, "added tls_profiles.[x].no_fallback_bypass");
+        return true;
+    }
 
 
     return false;
@@ -2070,6 +2078,8 @@ int CfgFactory::load_db_prof_tls () {
             if( load_if_exists(cur_object, "inspect", new_profile->inspect) ) {
 
                 new_profile->element_name() = name;
+                load_if_exists(cur_object, "no_fallback_bypass", new_profile->no_fallback_bypass);
+
                 load_if_exists(cur_object, "allow_untrusted_issuers", new_profile->allow_untrusted_issuers);
                 load_if_exists(cur_object, "allow_invalid_certs", new_profile->allow_invalid_certs);
                 load_if_exists(cur_object, "allow_self_signed", new_profile->allow_self_signed);
@@ -2090,6 +2100,7 @@ int CfgFactory::load_db_prof_tls () {
                 load_if_exists(cur_object, "failed_certcheck_override_timeout_type", new_profile->failed_certcheck_override_timeout_type);
                 load_if_exists(cur_object, "sni_based_cert", new_profile->mitm_cert_sni_search);
                 load_if_exists(cur_object, "ip_based_cert", new_profile->mitm_cert_ip_search);
+                load_if_exists(cur_object, "only_custom_certs", new_profile->mitm_cert_searched_only);
 
                 if(cur_object.exists("sni_filter_bypass")) {
                         Setting& sni_filter = cur_object["sni_filter_bypass"];
@@ -3196,6 +3207,7 @@ bool CfgFactory::policy_apply_tls (const std::shared_ptr<ProfileTls> &pt, baseCo
         if(sslcom->opt.bypass) {
             sslcom->verify_reset(SSLCom::verify_status_t::VRF_OK);
         }
+        sslcom->opt.no_fallback_bypass = pt->no_fallback_bypass;
 
         sslcom->opt.cert.allow_unknown_issuer = pt->allow_untrusted_issuers;
         sslcom->opt.cert.allow_self_signed_chain = pt->allow_untrusted_issuers;
@@ -3208,6 +3220,7 @@ bool CfgFactory::policy_apply_tls (const std::shared_ptr<ProfileTls> &pt, baseCo
         sslcom->opt.cert.failed_check_override_timeout_type = pt->failed_certcheck_override_timeout_type;
         sslcom->opt.cert.mitm_cert_sni_search = pt->mitm_cert_sni_search;
         sslcom->opt.cert.mitm_cert_ip_search = pt->mitm_cert_ip_search;
+        sslcom->opt.cert.mitm_cert_searched_only = pt->mitm_cert_searched_only;
 
         auto* peer_sslcom = dynamic_cast<SSLCom*>(sslcom->peer());
 
@@ -3215,13 +3228,14 @@ bool CfgFactory::policy_apply_tls (const std::shared_ptr<ProfileTls> &pt, baseCo
                 pt->failed_certcheck_replacement &&
                 should_redirect(pt, peer_sslcom)) {
 
-            _deb("policy_apply_tls: applying profile, repl=%d, repl_ovrd=%d, repl_ovrd_tmo=%d, repl_ovrd_tmo_type=%d, sni_search=%d, ip_search=%d",
+            _deb("policy_apply_tls: applying profile, repl=%d, repl_ovrd=%d, repl_ovrd_tmo=%d, repl_ovrd_tmo_type=%d, sni_search=%d, ip_search=%d, custom_only=%d",
                  pt->failed_certcheck_replacement,
                  pt->failed_certcheck_override,
                  pt->failed_certcheck_override_timeout,
                  pt->failed_certcheck_override_timeout_type,
                  pt->mitm_cert_sni_search,
-                 pt->mitm_cert_ip_search);
+                 pt->mitm_cert_ip_search,
+                 pt->mitm_cert_searched_only);
 
             peer_sslcom->opt.cert.failed_check_replacement = pt->failed_certcheck_replacement;
             peer_sslcom->opt.cert.failed_check_override = pt->failed_certcheck_override;
@@ -3229,6 +3243,7 @@ bool CfgFactory::policy_apply_tls (const std::shared_ptr<ProfileTls> &pt, baseCo
             peer_sslcom->opt.cert.failed_check_override_timeout_type = pt->failed_certcheck_override_timeout_type;
             peer_sslcom->opt.cert.mitm_cert_sni_search = pt->mitm_cert_sni_search;
             peer_sslcom->opt.cert.mitm_cert_ip_search = pt->mitm_cert_ip_search;
+            peer_sslcom->opt.cert.mitm_cert_searched_only = pt->mitm_cert_searched_only;
         }
 
         // set accordingly if general "use_pfs" is specified, more concrete settings come later
@@ -3800,6 +3815,7 @@ bool CfgFactory::new_tls_profile(Setting& ex, std::string const& name) const {
         Setting &item = ex.add(name, Setting::TypeGroup);
 
         item.add("inspect", Setting::TypeBoolean) = false;
+        item.add("no_fallback_bypass", Setting::TypeBoolean) = false;
 
         item.add("use_pfs", Setting::TypeBoolean) = true;
         item.add("left_use_pfs", Setting::TypeBoolean) = true;
@@ -3825,6 +3841,7 @@ bool CfgFactory::new_tls_profile(Setting& ex, std::string const& name) const {
         item.add("failed_certcheck_override_timeout_type", Setting::TypeInt) = 0;
         item.add("sni_based_cert", Setting::TypeBoolean) = true;
         item.add("ip_based_cert", Setting::TypeBoolean) = true;
+        item.add("only_custom_certs", Setting::TypeBoolean) = false;
 
 
         item.add("left_disable_reuse", Setting::TypeBoolean) = false;
@@ -3855,6 +3872,7 @@ int CfgFactory::save_tls_profiles(Config& ex) const {
         Setting& item = objects.add(name, Setting::TypeGroup);
 
         item.add("inspect", Setting::TypeBoolean) = obj->inspect;
+        item.add("no_fallback_bypass", Setting::TypeBoolean) = obj->no_fallback_bypass;
 
         item.add("use_pfs", Setting::TypeBoolean) = obj->use_pfs;
         item.add("left_use_pfs", Setting::TypeBoolean) = obj->left_use_pfs;
@@ -3896,6 +3914,7 @@ int CfgFactory::save_tls_profiles(Config& ex) const {
         item.add("failed_certcheck_override_timeout_type", Setting::TypeInt) = obj->failed_certcheck_override_timeout_type;
         item.add("sni_based_cert", Setting::TypeBoolean) = obj->mitm_cert_sni_search;
         item.add("ip_based_cert", Setting::TypeBoolean) = obj->mitm_cert_ip_search;
+        item.add("only_custom_certs", Setting::TypeBoolean) = obj->mitm_cert_searched_only;
 
 
         item.add("left_disable_reuse", Setting::TypeBoolean) = obj->left_disable_reuse;

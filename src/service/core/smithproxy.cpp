@@ -742,6 +742,9 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
         if(! reload) {
 
 
+            Log::get()->targets().clear();
+            Log::get()->target_names().clear();
+
             //init crashlog file with dafe default
             this_daemon->set_crashlog("/tmp/smithproxy_crash.log");
 

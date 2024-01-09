@@ -178,6 +178,7 @@ class CidrAddress;
 class ProfileTls : public socle::sobject, public CfgElement  {
 public:
     bool inspect = false;
+    bool no_fallback_bypass = false;
     bool allow_untrusted_issuers = false;
     bool allow_invalid_certs = false;
     bool allow_self_signed = false;
@@ -189,6 +190,7 @@ public:
 
     bool mitm_cert_sni_search = true;                   // look in cache for certificates stored with SNI key
     bool mitm_cert_ip_search = true;                   // look in cache for certificates stored with IP key
+    bool mitm_cert_searched_only = false;   // if SNI or IP cert is not found, don't use default spoofed mitm certificate
 
     bool use_pfs = true;         // general switch, more concrete take precedence
     bool left_use_pfs = true;
@@ -237,6 +239,7 @@ public:
                                         !left_disable_reuse, !right_disable_reuse);
         if(verbosity > INF) {
 
+            ret += string_format("\n        disable fallback TLS bypass: %d", no_fallback_bypass);
             ret += string_format("\n        allow untrusted issuers: %d", allow_untrusted_issuers);
             ret += string_format("\n        allow invalid certs: %d", allow_invalid_certs);
             ret += string_format("\n        allow self-signed certs: %d", allow_self_signed);
@@ -246,6 +249,7 @@ public:
             ret += string_format("\n        failed cert check user override timeout type: %d", failed_certcheck_override_timeout_type);
             ret += string_format("\n        look for SNI custom certificates: %d", mitm_cert_sni_search);
             ret += string_format("\n        look for IP custom certificates: %d", mitm_cert_ip_search);
+            ret += string_format("\n        use _only_ custom certificates: %d", mitm_cert_searched_only);
 
             bool sni_out = false;
             if(sni_filter_bypass)
