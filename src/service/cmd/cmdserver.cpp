@@ -333,7 +333,7 @@ void cmd_show_events_list(struct cli_def* cli) {
             ss << (found ? "* " : "  ") << id << ": " << ev << "\r\n";
         }
     }
-    cli_print(cli, ss.str().c_str());
+    cli_print(cli, "%s", ss.str().c_str());
 }
 
 void cmd_show_events_detail(struct cli_def* cli, std::vector<std::string> const& args) {
