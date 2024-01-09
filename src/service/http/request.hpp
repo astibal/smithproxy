@@ -56,9 +56,23 @@ namespace sx::http {
         struct curl_slist *headers;
         std::string responseData;
 
-
-
     public:
+        struct Initializator {
+            Initializator() {
+                curl_global_init(CURL_GLOBAL_DEFAULT);
+            }
+            ~Initializator() {
+                curl_global_cleanup();
+            }
+        };
+
+        static Initializator curl_initializator;
+
+        unsigned int max_attmepts = 5;
+        unsigned int attempts = 0;
+        std::string debug_log;
+        static inline bool DEBUG = false;
+        static inline bool DEBUG_DUMP_OK = false;
 
         struct progress {
 
@@ -100,8 +114,66 @@ namespace sx::http {
                 curl_easy_setopt(curl, CURLOPT_TIMEOUT, seconds);
         }
 
+        static std::string _make_ts() {
+            auto now = std::chrono::system_clock::now();
+            auto itt = std::chrono::system_clock::to_time_t(now);
+            auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
+
+            struct tm result{};
+            gmtime_r(&itt, &result);
+
+            std::ostringstream oss;
+            oss << std::put_time(&result, "%Y-%m-%d--%H:%M:%S"); // Put time using UTC format into the stream.
+            oss << '.' << std::setfill('0') << std::setw(3) << ms.count();
+            std::string timestamp(oss.str());
+
+            return timestamp;
+        }
+
+        static int curl_debug_callback(CURL *handle, curl_infotype type, char *data, size_t size, void *userptr) {
+            // userptr points to your string or any other type of container
+            std::string* debug_info = reinterpret_cast<std::string*>(userptr);
+            switch (type) {
+                case CURLINFO_TEXT:
+                case CURLINFO_HEADER_IN:
+                case CURLINFO_HEADER_OUT:
+                case CURLINFO_DATA_IN:
+                case CURLINFO_DATA_OUT:
+                case CURLINFO_SSL_DATA_IN:
+                case CURLINFO_SSL_DATA_OUT:
+                {
+
+
+                    std::string timestamp = _make_ts();
+
+                    curl_socket_t fd;
+                    CURLcode res = curl_easy_getinfo(handle, CURLINFO_ACTIVESOCKET, &fd);
+                    if (res != CURLE_OK) {
+                        fd = -1;  // or handle the error as appropriate
+                    }
+                    std::string prefix = timestamp + ": socket:" + std::to_string(fd) + ": ";
+                    debug_info->append(prefix);
+                    debug_info->append(data, size);
+                    debug_info->append("\r\n");
+                    break;
+                }
+                case CURLINFO_END:
+                    break;
+            }
+            return 0;  // returning any other value than 0 will abort the operation!
+        }
+
+
+        void setup_debug() {
+            if(DEBUG and curl) {
+                curl_easy_setopt(curl, CURLOPT_DEBUGFUNCTION, curl_debug_callback);
+                curl_easy_setopt(curl, CURLOPT_DEBUGDATA, &debug_log);
+                curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+            }
+        }
+
         Request(IPVersion ip_version = DEFAULT, const std::string &dns_servers = "", const std::string &ca_path = "") {
-            curl_global_init(CURL_GLOBAL_DEFAULT);
+
             curl = curl_easy_init();
 
             if (!curl) {
@@ -145,25 +217,37 @@ namespace sx::http {
         }
 
         ~Request() {
-
-
-            curl_global_cleanup();
+            if(curl)
+                curl_easy_cleanup(curl);
         }
 
         using Reply = std::optional<std::pair<long, std::string>>;
 
         Reply emit(std::string const& url, std::string const& payload) {
-            CURLcode res;
+            CURLcode res = CURLE_OK;
 
             curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
             curl_easy_setopt(curl, CURLOPT_POST, 1L);
             curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload.c_str());
 
-            responseData.clear();
-            res = curl_easy_perform(curl);
+
+            for (; attempts < max_attmepts; ++attempts) {
+                responseData.clear();
+                res = curl_easy_perform(curl);
+
+                if(res == CURLE_OK)
+                    break;
+
+                if(DEBUG) {
+                    auto ts = _make_ts();
+                    auto s = string_format("%s: attempt %d failed.\r\n", ts.c_str(), attempts);
+                    debug_log.append(s);
+                }
+            }
+
 
             if (res != CURLE_OK) {
-                return std::nullopt;
+                return std::make_pair(600, curl_easy_strerror(res));
             }
 
             long responseCode;

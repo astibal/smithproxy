@@ -114,13 +114,25 @@ namespace sx::http {
             request.set_timeout(config::timeout);
             if(not do_verify) request.disable_tls_verify();
 
+            // set debugging explicitly
+            if(Request::DEBUG) {
+                request.setup_debug();
+            }
+
             auto reply = request.emit(url, pay);
 
             if(not reply or reply.value().first >= 300) {
                 long code = reply.has_value() ? reply->first : -1;
                 std::string msg = reply.has_value() ? reply->second : "request failed";
 
-                Log::get()->events().insert(ERR, "error in request '%s': %d:%s", url.c_str(), code, msg.c_str());
+                Log::get()->events().insert(ERR, "error in request '%s' (retries: %d): %d:%s", url.c_str(), request.attempts, code, msg.c_str());
+                if(Request::DEBUG) {
+                    Log::get()->events().insert(ERR, "error payload:\n >>>%s<<<", pay.c_str());
+                    Log::get()->events().insert(ERR, "error trace:\n %s", request.debug_log.c_str());
+                }
+            }
+            else if(Request::DEBUG and Request::DEBUG_DUMP_OK) {
+                Log::get()->events().insert(INF, "OK payload (retries: %d):\n >>>%s<<<", request.attempts, pay.c_str());
             }
 
             hook(reply);
