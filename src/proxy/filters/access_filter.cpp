@@ -5,13 +5,14 @@
 void AccessFilter::update(socle::side_t side, buffer const& buf) {
 
     // update entropy statistics
-    if(side == side_t::LEFT and not already_applied) {
+    if(not already_applied) {
         _deb("AccessFilter[%c]: requesting webhook while received first %d bytes", socle::from_side(side), buf.size());
 
         nlohmann::json pay = { { "session", connection_label },
                                { "policy", parent()->matched_policy() },
-                               { "require", "origin-info" } };
-
+                               { "require", "origin-info" },
+                               { "bytes_side", socle::from_side(side) },
+                               { "bytes_size", buf.size() } };
 
         auto process_reply = [&](auto code, auto response_data) {
             if(code >= 200 and code < 300) {
