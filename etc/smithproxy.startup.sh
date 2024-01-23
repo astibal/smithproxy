@@ -86,6 +86,7 @@ REDIRECT_DNS_PORT='51053'
 REDIRECT_EXEMPT_LAN=0
 REDIRECT_EXEMPT_USERS=""   # could contain multiple users separated by spaces
 
+BYPASS_CONNECTIONS="" # multiple values are semicolon-separated srcip:dstip:dstport tuples
 
 tenant_table="/etc/smithproxy/smithproxy.tenants.cfg"
 tenant_id="default"
@@ -331,6 +332,36 @@ function setup_tproxy {
         logit " done"
         logit
 
+        logit "Removing old tagged rules"
+        iptables -t mangle -L PREROUTING -n -v --line-numbers | egrep "sx_rule" | egrep -o '^[0-9]+' | sort -nr | xargs -n1 iptables -t mangle -D PREROUTING
+        ip6tables -t mangle -L PREROUTING -n -v --line-numbers | egrep "sx_rule" | egrep -o '^[0-9]+' | sort -nr | xargs -n1 ip6tables -t mangle -D PREROUTING
+        logit " done"
+
+
+        logit "Applying explicit bypasses"
+        for TUPLE in ${BYPASS_CONNECTIONS}; do
+            sip=$(echo "${TUPLE}" | awk -F';' '{ print $1 }')
+            dip=$(echo "${TUPLE}" | awk -F';' '{ print $2 }')
+            dport=$(echo "${TUPLE}" | awk -F';' '{ print $3 }')
+
+            logit "  bypass udp/tcp connections ${sip}->${dip}:${dport}"
+
+            # test if IP is IPv6 or IPv4 by ':' presence (should be enough)
+            if [[ $sip == *:* ]]; then
+              ip6tables -t mangle -A PREROUTING -p udp -s "${sip}" -d "${dip}" --dport "${dport}" -m comment --comment "sx_rule" -j ACCEPT
+              ip6tables -t mangle -A PREROUTING -p udp -s "${dip}" --sport "${dport}" -d "${sip}" -m comment --comment "sx_rule" -j ACCEPT
+
+              ip6tables -t mangle -A PREROUTING -p tcp -s "${sip}" -d "${dip}" --dport "${dport}" -m comment --comment "sx_rule" -j ACCEPT
+              ip6tables -t mangle -A PREROUTING -p tcp -s "${dip}" --sport "${dport}" -d "${sip}" -m comment --comment "sx_rule" -j ACCEPT
+            else
+              iptables -t mangle -A PREROUTING -p udp -s "${sip}" -d "${dip}" --dport "${dport}" -m comment --comment "sx_rule" -j ACCEPT
+              iptables -t mangle -A PREROUTING -p udp -s "${dip}" --sport "${dport}" -d "${sip}" -m comment --comment "sx_rule" -j ACCEPT
+
+              iptables -t mangle -A PREROUTING -p tcp -s "${sip}" -d "${dip}" --dport "${dport}" -m comment --comment "sx_rule" -j ACCEPT
+              iptables -t mangle -A PREROUTING -p tcp -s "${dip}" --sport "${dport}" -d "${sip}" -m comment --comment "sx_rule" -j ACCEPT
+            fi
+        done;
+
         logit "Applying chains $DIVERT_CHAIN_NAME and $SMITH_CHAIN_NAME into mangle prerouting"
         iptables -t mangle -A PREROUTING -s ${tenant_range} -p tcp -m socket -j ${DIVERT_CHAIN_NAME}
         iptables -t mangle -A PREROUTING -s ${tenant_range} -p udp -m socket -j ${DIVERT_CHAIN_NAME}
@@ -392,6 +423,12 @@ function setup_tproxy {
         ip6tables -t mangle -L PREROUTING -n -v --line-numbers | egrep "${SMITH_CHAIN_NAME}" | egrep -o '^[0-9]+' | sort -nr | xargs -n1 ip6tables -t mangle -D PREROUTING
         ip6tables -t mangle -L PREROUTING -n -v --line-numbers | egrep "${DIVERT_CHAIN_NAME}" | egrep -o '^[0-9]+' | sort -nr | xargs -n1 ip6tables -t mangle -D PREROUTING
         logit " done"
+
+        logit "Removing tagged rules"
+        iptables -t mangle -L PREROUTING -n -v --line-numbers | egrep "sx_rule" | egrep -o '^[0-9]+' | sort -nr | xargs -n1 iptables -t mangle -D PREROUTING
+        ip6tables -t mangle -L PREROUTING -n -v --line-numbers | egrep "sx_rule" | egrep -o '^[0-9]+' | sort -nr | xargs -n1 ip6tables -t mangle -D PREROUTING
+        logit " done"
+
         logit
 
 
