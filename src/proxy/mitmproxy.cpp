@@ -858,16 +858,19 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
 
                     _dia(" -> client-cert request:  opt_client_cert_action=%d", scom->opt.cert.client_cert_action);
 
-                    if(scom->opt.cert.client_cert_action >= 2) {
+                    if(scom->opt.cert.client_cert_action == 2) {
                         //we should not block
                         _dia(" -> client-cert request: auto-whitelist");
+
+                        auto l4_key = whitelist_make_key_l4(mh);
+                        log.event(INF, "%s connections whitelisted due to client cert bypass option", l4_key.c_str());
 
                         auto lc_ = std::scoped_lock(whitelist_verify().getlock());
                         
                         whitelist_verify_entry v;
-                        whitelist_verify().set(whitelist_make_key_l4(mh), new whitelist_verify_entry_t(v, scom->opt.cert.failed_check_override_timeout));
+                        whitelist_verify().set(l4_key, new whitelist_verify_entry_t(v, scom->opt.cert.failed_check_override_timeout));
                     } else {
-                        _dia(" -> client-cert request: none");
+                        _dia(" -> client-cert request: no action taken");
                     }
 
                 }
