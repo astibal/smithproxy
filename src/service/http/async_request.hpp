@@ -55,6 +55,8 @@ namespace sx::http {
         using std::runtime_error::runtime_error;
     };
 
+    using expected_reply = std::optional<std::pair<long,std::string>>;
+
     class AsyncRequest {
         static inline std::once_flag once_flag;
         static inline std::unique_ptr<AsyncRequest> asr;
@@ -77,8 +79,7 @@ namespace sx::http {
             return *asr;
         }
 
-
-        using expected_reply = std::optional<std::pair<long,std::string>>;
+        using expected_reply = sx::http::expected_reply;
         using reply_hook = std::function<void(expected_reply const&)>;
 
         // synchronous call, use emit_url() to use thread pool
