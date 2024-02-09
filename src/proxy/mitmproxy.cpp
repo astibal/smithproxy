@@ -956,6 +956,7 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
             if(*log_dump.level() >= iDIA)
                 proxy_dump_packet(side, b);
 
+            write_traffic_log(side, from, &b);
             to->to_write(b);
             _dia("mitmproxy::proxy-%c: original %d bytes replaced with %d bytes", from_side(side), from->to_read().size(),
                  b.size());
@@ -981,6 +982,8 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
             }
 
             auto sz = from->to_read().size();
+
+            write_traffic_log(side, from);
             to->to_write(from->to_read());
             auto fastlane = sz > 0 and from->to_read().empty();
 
@@ -993,22 +996,31 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
     }
 };
 
+
+void MitmProxy::write_traffic_log(side_t side, baseHostCX* cx, buffer* custom_buffer) {
+
+    if(writer_opts()->write_payload) {
+        if(not cx) return;
+
+        auto* buffer = custom_buffer;
+        if(not buffer) {
+            buffer = &cx->to_read();
+        }
+
+        toggle_tlog();
+
+        if(! cx->comlog().empty()) {
+            if(tlog()) tlog()->write(side, cx->comlog());
+            cx->comlog().clear();
+        }
+
+        if(tlog()) tlog()->write(side, *buffer);
+    }
+}
+
 void MitmProxy::on_left_bytes(baseHostCX* cx) {
 
     if(not cx or state().dead()) return;
-
-    if(writer_opts()->write_payload) {
-
-        toggle_tlog();
-        
-        if(! cx->comlog().empty()) {
-            if(tlog()) tlog()->write_left(cx->comlog());
-            cx->comlog().clear();
-        }
-        
-        if(tlog()) tlog()->write_left(cx->to_read());
-    }
-    
 
     bool redirected = handle_requirements(cx);
 
@@ -1064,36 +1076,6 @@ bool MitmProxy::handle_requirements(baseHostCX* cx) {
 void MitmProxy::on_right_bytes(baseHostCX* cx) {
 
     if(not cx or state().dead()) return;
-
-    if(writer_opts()->write_payload) {
-
-        toggle_tlog();
-        
-        if(! cx->comlog().empty()) {
-            if(tlog()) tlog()->write_right(cx->comlog());
-            cx->comlog().clear();
-        }
-        
-        if(tlog()) tlog()->write_right(cx->to_read());
-    }
-
-
-//    // enters only if left bytes are not received a therefore not SSL additional tasks
-//    // performed
-//    if(! ssl_handled) {
-//        if(auto* scom = dynamic_cast<SSLCom*>(cx->com()) ; scom) {
-//            if (!ocsp_caller_tried) {
-//                ocsp_caller_tried = true;
-//                ocsp_caller = AsyncOcspInvoker::invoke(*this);
-//                _err("right: ocsp check invoked");
-//            }
-//        } else {
-//
-//            // if com is not SSL, no further ssl attempts are needed (spare dynamic casts)
-//            ssl_handled = true;
-//        }
-//    }
-
 
     bool redirected = handle_requirements(cx->peer());
 
@@ -2087,7 +2069,7 @@ bool MitmMasterProxy::detect_ssl_on_plain_socket(int sock) {
     int ret = false;
     constexpr unsigned int NEW_CX_PEEK_BUFFER_SZ = 10;
     constexpr int time_increment = 2500; // 2.5ms
-    constexpr int time_max = time_increment*5;
+    constexpr int time_max = time_increment*25;
 
     int time_taken = 0;
     
