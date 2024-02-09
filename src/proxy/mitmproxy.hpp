@@ -108,6 +108,13 @@ public:
 
     struct Opts_ContentWriter {
         bool write_payload = false;
+
+        bool webhook_enable = false;
+        bool webhook_lock_traffic = false;
+
+        // if configured, all proxies will lock on this mutex (it's optional)
+        static inline std::mutex webhook_content_lock;
+
     };
     lazy_ptr<Opts_ContentWriter> writer_opts_;
     lazy_ptr<Opts_ContentWriter>& writer_opts() {
@@ -159,9 +166,14 @@ public:
     explicit MitmProxy(baseCom* c);
     ~MitmProxy() override;
 
+    // actual proxy functions manipulating data buffers
     void write_traffic_log(side_t side, baseHostCX* cx, buffer* custom_buffer  = nullptr);
     void proxy_dump_packet(side_t sid, buffer& buf);
     void proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redirected);
+
+    // makes a synchronous API call letting webhook modify the content
+    void content_webhook(baseHostCX* cx, side_t side, buffer& buffer);
+
     // this virtual method is called whenever there are new bytes in any LEFT host context!
     void on_left_bytes(baseHostCX* cx) override;
     void on_right_bytes(baseHostCX* cx) override;
@@ -245,6 +257,7 @@ public:
 private:
     logan_lite log {"proxy"};
     logan_lite log_dump {"proxy.payload"};
+    logan_lite log_content {"proxy.content"};
 };
 
 class MitmMasterProxy : public ThreadedAcceptorProxy<MitmProxy> {

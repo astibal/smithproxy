@@ -61,6 +61,8 @@
 
 #include <algorithm>
 
+#include <socle/common/base64.hpp>
+
 using namespace socle;
 
 MitmProxy::MitmProxy(baseCom* c): baseProxy(c), sobject() {
@@ -943,7 +945,68 @@ void MitmProxy::proxy_dump_packet(side_t sid, buffer& buf) {
     }
 };
 
+static std::string b64_encode(buffer &buffer) {
+    return libbase64::encode<std::string, char, unsigned char, true>(buffer.data(), buffer.size());
+}
 
+static std::string b64_decode(std::string const& encoded) {
+    return libbase64::decode<std::string, char, unsigned char, false>(encoded);
+}
+
+
+
+void MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer) {
+
+    auto& log = log_content;
+
+    if(not sx::http::webhooks::is_enabled()) return;
+    if(not cx or buffer.empty()) return;
+
+    if(not writer_opts()->webhook_enable) return;
+
+    nlohmann::json j;
+    auto cl = to_connection_label();
+    std::string encoded = b64_encode(buffer);
+    j["info"] = {
+        { "session", cl },
+        { "side", string_format("%c", from_side(side)) },
+        { "content", encoded }
+    };
+
+    sx::http::webhooks::send_action_wait("connection-content", to_connection_ID(), j, [&](sx::http::expected_reply r){
+        if(r.has_value()) {
+            auto reply = r.value();
+            _dia("webhook content-replace: response %d", reply.first);
+
+            if(reply.first >= 200 and reply.first < 300) {
+                auto json_obj = nlohmann::json::parse(reply.second, nullptr, false);
+                if(json_obj.is_discarded()) {
+                    _err("MitmProxy::content_webhook: response body is invalid");
+                }
+                else {
+                    if(json_obj.contains("action")) {
+                        if(json_obj["action"] == "discard") {
+                            // data sent to webhook shall be discarded
+                            buffer.size(0);
+                        }
+                        else {
+                            // catch-all code to decode response if present
+                            if(json_obj.contains("content")) {
+                                std::string body = json_obj["content"];
+                                auto decoded = b64_decode(body);
+                                buffer.assign(decoded.data(), decoded.size());
+                                _dia("webhook content-replace: recevied %dB of replacement data", decoded.size());
+                            }
+                            else {
+                                _dia("webhook content-replace: no replacement body received");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
 
 void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redirected) {
 
@@ -952,6 +1015,18 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
     if (!redirected) {
         if (content_rule() != nullptr) {
             buffer b = content_replace_apply(from->to_read());
+
+            if(writer_opts()->webhook_enable) {
+
+                if(writer_opts()->webhook_lock_traffic) {
+                    // traffic with applied webhook with enabled locking will block here
+                    auto lc_ = std::scoped_lock(writer_opts()->webhook_content_lock);
+                    content_webhook(from, side, b);
+                }
+                else {
+                    content_webhook(from, side, b);
+                }
+            }
 
             if(*log_dump.level() >= iDIA)
                 proxy_dump_packet(side, b);

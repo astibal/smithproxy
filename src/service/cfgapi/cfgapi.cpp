@@ -450,6 +450,11 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "added tls_profiles.[x].no_fallback_bypass");
         return true;
     }
+    else if(upgrade_to_num == 1024) {
+        log.event(INF, "added content_profiles.[x].webhook_enable");
+        log.event(INF, "added content_profiles.[x].webhook_lock_traffic");
+        return true;
+    }
 
 
     return false;
@@ -2032,6 +2037,9 @@ int CfgFactory::load_db_prof_content () {
             Log::get()->events().insert(ERR, "CONFIG: content_profile '%s': write_payload not specified", name.c_str());
             CfgFactory::LOAD_ERRORS = true;
         }
+
+        load_if_exists(cur_object, "webhook_enable", new_profile->webhook_enable);
+        load_if_exists(cur_object, "webhook_lock_traffic", new_profile->webhook_lock_traffic);
     }
 
     return num;
@@ -2500,6 +2508,8 @@ bool CfgFactory::prof_content_apply (baseHostCX *originator, baseProxy *new_prox
             _dia("policy_apply: policy content profile[%s]: write payload: %d", pc_name, pc->write_payload);
 
             mitm_proxy->writer_opts()->write_payload = pc->write_payload;
+            mitm_proxy->writer_opts()->webhook_enable = pc->webhook_enable;
+            mitm_proxy->writer_opts()->webhook_lock_traffic = pc->webhook_lock_traffic;
 
             if( ! pc->content_rules.empty() ) {
                 _dia("policy_apply: policy content profile[%s]: applying content rules, size %d", pc_name, pc->content_rules.size());
@@ -3753,6 +3763,9 @@ int CfgFactory::save_content_profiles(Config& ex) const {
         Setting& item = objects.add(name, Setting::TypeGroup);
         item.add("write_payload", Setting::TypeBoolean) = obj->write_payload;
         item.add("write_format", Setting::TypeString) = obj->write_format.to_str();
+
+        item.add("webhook_enable", Setting::TypeBoolean) = obj->webhook_enable;
+        item.add("webhook_lock_traffic", Setting::TypeBoolean) = obj->webhook_lock_traffic;
 
         if(! obj->content_rules.empty() ) {
 

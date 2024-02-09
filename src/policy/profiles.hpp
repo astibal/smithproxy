@@ -154,6 +154,10 @@ public:
     // if true, content of proxy transmission will dumped to file
     bool write_payload = false;
 
+    // content webhook options
+    bool webhook_enable = false;
+    bool webhook_lock_traffic = false;
+
     ContentCaptureFormat write_format;
     std::vector<ProfileContentRule> content_rules;
 
