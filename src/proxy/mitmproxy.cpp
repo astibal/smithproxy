@@ -994,8 +994,15 @@ void MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer) {
                             if(json_obj.contains("content")) {
                                 std::string body = json_obj["content"];
                                 auto decoded = b64_decode(body);
+
+                                _dia("webhook content-replace: received %dB of replacement data", decoded.size());
+                                {
+                                    auto& log = log_content_dump;
+                                    _deb("webhook content-replace: replacement: %s\r\n",
+                                         hex_dump((unsigned char*)decoded.data(), decoded.size(), 4, 0, true).c_str());
+                                }
+
                                 buffer.assign(decoded.data(), decoded.size());
-                                _dia("webhook content-replace: recevied %dB of replacement data", decoded.size());
                             }
                             else {
                                 _dia("webhook content-replace: no replacement body received");
