@@ -1026,6 +1026,24 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
             if(writer_opts()->webhook_enable) {
 
                 if(writer_opts()->webhook_lock_traffic) {
+
+                    if(from->com() and from->com()->l4_proto() == SOCK_STREAM) {
+                        if(from->com()->so_keepalive(from->socket()) == 0) {
+                            _deb("connection 'from' socket set to KEEPALIVE");
+                        }
+                        else {
+                            _err("connection 'from' ERROR socket set to KEEPALIVE");
+                        }
+                    }
+                    if(to->com() and to->com()->l4_proto() == SOCK_STREAM) {
+                        if (to->com()->so_keepalive(to->socket()) == 0) {
+                            _deb("connection 'to' socket set to KEEPALIVE");
+                        }
+                        else {
+                            _err("connection 'to' ERROR socket set to KEEPALIVE");
+                        }
+                    }
+
                     // traffic with applied webhook with enabled locking will block here
                     auto lc_ = std::scoped_lock(writer_opts()->webhook_content_lock);
                     content_webhook(from, side, b);
