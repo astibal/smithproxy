@@ -185,6 +185,8 @@ public:
     void on_error(baseHostCX* cx, char side, const char* side_label);
     void on_left_error(baseHostCX* cx) override;
     void on_right_error(baseHostCX* cx) override;
+
+    bool run_timers() override;
     
     // check authentication status and return true if redirected
     virtual void on_half_close(baseHostCX* cx);

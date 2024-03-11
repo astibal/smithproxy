@@ -1370,49 +1370,50 @@ void MitmProxy::on_error(baseHostCX* cx, char side, const char* side_label) {
         // don't waste time on low-effort delivery stuff, just get rid of it now.
         if(com()->l4_proto() == SOCK_DGRAM) {
             state().dead(true);
-            return;
         }
+        else {
+            // STREAM sockets need a bit of caring if still having a peer
+            if(cx->peer()) {
+                if(! cx->peer()->writebuf()->empty()) {
 
-        if(cx->peer()) {
-            if(! cx->peer()->writebuf()->empty()) {
+                    // do half-closed actions, and mark proxy dead if needed
+                    on_half_close(cx);
 
-                // do half-closed actions, and mark proxy dead if needed
-                on_half_close(cx);
+                    if (state().dead()) {
+                        // status dead is new, since we check dead status at the beginning
+                        _log_closed_on(INF, "half-closed");
 
-                if (state().dead()) {
-                    // status dead is new, since we check dead status at the beginning
-                    _log_closed_on(INF, "half-closed");
+                    } else {
+                        // on_half_close did not mark it dead, yet
+                        _log_closed_on(DIA, "half-closing");
 
+                        // provoke write to the peer's socket (could be superfluous)
+                        com()->set_write_monitor(cx->peer()->socket());
+                    }
                 } else {
-                    // on_half_close did not mark it dead, yet
-                    _log_closed_on(DIA, "half-closing");
 
-                    // provoke write to the peer's socket (could be superfluous)
-                    com()->set_write_monitor(cx->peer()->socket());
+                    // duplicate code to DEAD before calling us
+
+                    _if_level(INF) {
+                        std::stringstream msg;
+                        msg << "Connection from " << cx->full_name(side)
+                            << " closed: "
+                            << get_connection_details_str(this, cx, side);
+
+                        if (!replacement_msg.empty()) {
+                            msg << ", dropped: "
+                                << replacement_msg;
+
+                            _inf("%s", msg.str().c_str()); // log to generic logger
+                        }
+                        _inf("%s", msg.str().c_str());
+                    }
+                    state().dead(true);
                 }
             } else {
-
-                // duplicate code to DEAD before calling us
-
-                _if_level(INF) {
-                    std::stringstream msg;
-                    msg << "Connection from " << cx->full_name(side)
-                        << " closed: "
-                        << get_connection_details_str(this, cx, side);
-
-                    if (!replacement_msg.empty()) {
-                        msg << ", dropped: "
-                            << replacement_msg;
-
-                        _inf("%s", msg.str().c_str()); // log to generic logger
-                    }
-                    _inf("%s", msg.str().c_str());
-                }
+                _log_closed_on(DIA, "half-closing, peer dead");
                 state().dead(true);
             }
-        } else {
-            _log_closed_on(DIA, "half-closing, peer dead");
-            state().dead(true);
         }
     } else {
         // DEAD before calling us!
@@ -1465,6 +1466,28 @@ void MitmProxy::on_right_error(baseHostCX* cx) {
 
 }
 
+bool MitmProxy::run_timers() {
+    auto ret = baseProxy::run_timers();
+
+    // run timers actually crawled children
+    if(ret and state().dead()) {
+        if (writer_opts()->write_payload) {
+            toggle_tlog();
+            if (tlog()) {
+
+                std::stringstream ss;
+                ss << "connection timed out\n";
+                auto msg = ss.str();
+
+                tlog()->write(to_side('L'), msg);
+            }
+        }
+
+        webhook_session_stop();
+    }
+
+    return ret;
+}
 
 
 void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
