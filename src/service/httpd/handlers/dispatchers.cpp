@@ -123,8 +123,8 @@ namespace sx::webserver::dispatchers {
     void controller_add_wh_unregister(lmh::WebServer& server) {
         static Http_Responder webhook_unregister(
                 "POST",
-                "/api/webhook/register",
-                authorized::token_protected<json>(wh_register)
+                "/api/webhook/unregister",
+                authorized::token_protected<json>(wh_unregister)
         );
         webhook_unregister.Content_Type = "application/json";
         server.addController(&webhook_unregister);
