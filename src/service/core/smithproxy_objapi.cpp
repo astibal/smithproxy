@@ -55,11 +55,25 @@ nlohmann::json ObjAPI::proxy_session_connid_list() {
     json ret;
 
     for_each_proxy([&ret](MitmProxy const* px){
-        if(px) ret.push_back(px->to_connection_ID());
+        if(px and px->first_left() and px->first_right()) ret.push_back(px->to_connection_ID());
     });
 
     return ret;
 }
+
+nlohmann::json ObjAPI::proxy_session_connid_list_plus() {
+
+    using nlohmann::json;
+    json ret;
+
+    for_each_proxy([&ret](MitmProxy const* px){
+        if(px and px->first_left() and px->first_right())
+            ret.push_back(string_format("%s=%s", px->to_connection_ID().c_str(), px->to_connection_label().c_str()));
+    });
+
+    return ret;
+}
+
 
 nlohmann::json ObjAPI::proxy_session_list_json(uint64_t oid, bool active_only, bool tls_info, bool verbose) {
     using nlohmann::json;

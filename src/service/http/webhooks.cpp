@@ -36,11 +36,30 @@ namespace sx::http::webhooks {
                                         };
             sx::http::AsyncRequest::emit(
                     to_string(ping),
-                    [](auto reply){
+                    [](auto ){
                         // we don't need any response
                     });
         }
     }
+
+    void ping_plus() {
+        if(enabled) {
+            nlohmann::json const ping = {
+                { "action", "ping" },
+                {"source", get_hostid() },
+                {"type", "proxy"},
+                {"instance", SmithProxy::instance().API.instance_OID() },
+                {"proxies", SmithProxy::instance().API.proxy_session_connid_list() },
+                {"proxies-plus", SmithProxy::instance().API.proxy_session_connid_list_plus() }
+            };
+            sx::http::AsyncRequest::emit(
+                    to_string(ping),
+                    [](auto ){
+                        // we don't need any response
+                    });
+        }
+    }
+
 
     void neighbor_new(std::string const& address_str) {
         if(enabled) {
@@ -68,10 +87,14 @@ namespace sx::http::webhooks {
                     {"type",   "proxy"}};
 
             msg.push_back({"details", details});
+
             sx::http::AsyncRequest::emit(
                     to_string(msg),
-                    [](auto reply) {
-                        // we don't need response
+                    [](sx::http::expected_reply repl) {
+                        // if not OK but ACCEPTED, they don't have enough of information - send it
+                        if(repl.has_value() and repl.value().first == 202) {
+                            ping_plus();
+                        }
                     });
         }
     }

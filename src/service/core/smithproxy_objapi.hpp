@@ -9,6 +9,7 @@ struct ObjAPI {
 
     std::string instance_OID();
     nlohmann::json proxy_session_connid_list();
+    nlohmann::json proxy_session_connid_list_plus(); // list, but append also session label
     nlohmann::json proxy_session_list_json(uint64_t oid, bool active_only, bool tls_info, bool verbose);
 };
 
