@@ -345,8 +345,29 @@ public:
 
     struct {
         bool enabled = false;
-        std::string url;
-        bool tls_verify = true;
+        std::string cfg_url;
+        bool cfg_tls_verify = true;
+
+        bool allow_api_override = false;
+        struct {
+            std::string url;
+            bool tls_verify = true;
+            expiring_int timeout = expiring_int(66,0);
+        } override;
+
+        [[nodiscard]] std::string const& active_url() const {
+            if(allow_api_override and not override.timeout.expired() and not override.url.empty()) {
+                return override.url;
+            }
+            return cfg_url;
+        };
+        [[nodiscard]] bool active_tls_verify() const {
+            if(allow_api_override and not override.timeout.expired() and not override.url.empty()) {
+                return override.tls_verify;
+            }
+            return cfg_tls_verify;
+        };
+
         std::string hostid;
     } settings_webhook;
 

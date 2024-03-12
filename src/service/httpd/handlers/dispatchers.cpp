@@ -9,6 +9,8 @@
 #include <service/httpd/cfg/set.hpp>
 #include <service/httpd/cfg/get.hpp>
 
+#include <service/httpd/wh/whcontrol.hpp>
+
 namespace sx::webserver::dispatchers {
 
     void controller_add_debug_only(lmh::WebServer &server) {
@@ -108,5 +110,26 @@ namespace sx::webserver::dispatchers {
         cfg_uni_get.Content_Type = "application/json";
         server.addController(&cfg_uni_get);
     }
+
+    void controller_add_wh_register(lmh::WebServer& server) {
+        static Http_Responder webhook_register(
+                    "POST",
+                    "/api/webhook/register",
+                    authorized::token_protected<json>(wh_register)
+            );
+        webhook_register.Content_Type = "application/json";
+        server.addController(&webhook_register);
+    }
+    void controller_add_wh_unregister(lmh::WebServer& server) {
+        static Http_Responder webhook_unregister(
+                "POST",
+                "/api/webhook/register",
+                authorized::token_protected<json>(wh_register)
+        );
+        webhook_unregister.Content_Type = "application/json";
+        server.addController(&webhook_unregister);
+    }
+
+
 }
 

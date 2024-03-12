@@ -843,10 +843,10 @@ bool CfgFactory::load_settings () {
     if(cfgapi.getRoot()["settings"].exists("webhook")) {
 
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "enabled", settings_webhook.enabled);
-        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "url", settings_webhook.url);
-        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "tls_verify", settings_webhook.tls_verify);
+        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "url", settings_webhook.cfg_url);
+        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "tls_verify", settings_webhook.cfg_tls_verify);
 
-        sx::http::webhooks::set_enabled(settings_webhook.enabled and not settings_webhook.url.empty());
+        sx::http::webhooks::set_enabled(settings_webhook.enabled and not settings_webhook.cfg_url.empty());
 
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "hostid", settings_webhook.hostid);
         if(not settings_webhook.hostid.empty()) sx::http::webhooks::set_hostid(settings_webhook.hostid);
@@ -5007,8 +5007,8 @@ int save_settings(Config& ex) {
 
     Setting& webhook_objects = objects.add("webhook", Setting::TypeGroup);
     webhook_objects.add("enabled", Setting::TypeBoolean) = CfgFactory::get()->settings_webhook.enabled;
-    webhook_objects.add("url", Setting::TypeString) = CfgFactory::get()->settings_webhook.url;
-    webhook_objects.add("tls_verify", Setting::TypeBoolean) = CfgFactory::get()->settings_webhook.tls_verify;
+    webhook_objects.add("url", Setting::TypeString) = CfgFactory::get()->settings_webhook.cfg_url;
+    webhook_objects.add("tls_verify", Setting::TypeBoolean) = CfgFactory::get()->settings_webhook.cfg_tls_verify;
     webhook_objects.add("hostid", Setting::TypeString) = CfgFactory::get()->settings_webhook.hostid;
 
     return 0;

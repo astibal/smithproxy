@@ -106,7 +106,7 @@ namespace sx::http {
                     }
                 }
                 dns_servers = oss.str();
-                do_verify = CfgFactory::get()->settings_webhook.tls_verify;
+                do_verify = CfgFactory::get()->settings_webhook.active_tls_verify();
             }
 
             Request request(Request::DEFAULT, dns_servers);
@@ -143,7 +143,7 @@ namespace sx::http {
             std::string url;
             {
                 auto lc_ = std::scoped_lock(CfgFactory::lock());
-                url = CfgFactory::get()->settings_webhook.url;
+                url = CfgFactory::get()->settings_webhook.active_url();
             }
 
             emit_url_wait(url, pay, hook);
@@ -162,7 +162,7 @@ namespace sx::http {
             std::string url;
             {
                 auto lc_ = std::scoped_lock(CfgFactory::lock());
-                url = CfgFactory::get()->settings_webhook.url;
+                url = CfgFactory::get()->settings_webhook.active_url();
             }
 
             return emit_url(url, pay, hook);
