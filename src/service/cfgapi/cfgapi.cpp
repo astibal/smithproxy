@@ -455,6 +455,10 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "added content_profiles.[x].webhook_lock_traffic");
         return true;
     }
+    else if(upgrade_to_num == 1025) {
+        log.event(INF, "added settings.webhook.api_override");
+        return true;
+    }
 
 
     return false;
@@ -845,6 +849,7 @@ bool CfgFactory::load_settings () {
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "enabled", settings_webhook.enabled);
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "url", settings_webhook.cfg_url);
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "tls_verify", settings_webhook.cfg_tls_verify);
+        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "api_override", settings_webhook.allow_api_override);
 
         sx::http::webhooks::set_enabled(settings_webhook.enabled and not settings_webhook.cfg_url.empty());
 
@@ -5010,6 +5015,7 @@ int save_settings(Config& ex) {
     webhook_objects.add("url", Setting::TypeString) = CfgFactory::get()->settings_webhook.cfg_url;
     webhook_objects.add("tls_verify", Setting::TypeBoolean) = CfgFactory::get()->settings_webhook.cfg_tls_verify;
     webhook_objects.add("hostid", Setting::TypeString) = CfgFactory::get()->settings_webhook.hostid;
+    webhook_objects.add("api_override", Setting::TypeBoolean) = CfgFactory::get()->settings_webhook.allow_api_override;
 
     return 0;
 }

@@ -53,6 +53,7 @@
 #include <mutex>
 #include <condition_variable>
 
+#include <socle/common/stringformat.hpp>
 #include <socle/common/convert.hpp>
 
 /*

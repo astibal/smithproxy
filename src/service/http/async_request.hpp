@@ -55,7 +55,7 @@ namespace sx::http {
         using std::runtime_error::runtime_error;
     };
 
-    using expected_reply = std::optional<std::pair<long,std::string>>;
+
 
     class AsyncRequest {
         static inline std::once_flag once_flag;
@@ -122,9 +122,9 @@ namespace sx::http {
 
             auto reply = request.emit(url, pay);
 
-            if(not reply or reply.value().first >= 300) {
-                long code = reply.has_value() ? reply->first : -1;
-                std::string msg = reply.has_value() ? reply->second : "request failed";
+            if(not reply or reply.value().response.first >= 300) {
+                long code = reply.has_value() ? reply->response.first : -1;
+                std::string msg = reply.has_value() ? reply->response.second : "request failed";
 
                 Log::get()->events().insert(ERR, "error in request '%s' (retries: %d): %d:%s", url.c_str(), request.attempts, code, msg.c_str());
                 if(Request::DEBUG) {

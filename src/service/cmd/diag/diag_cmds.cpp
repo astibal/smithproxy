@@ -2216,27 +2216,49 @@ int cli_diag_worker_pool_list(struct cli_def *cli, const char *command, char *ar
     return CLI_OK;
 }
 
-int cli_diag_api_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_api_info(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
     std::stringstream ss;
+    ss << "\r\n";
     {
         using namespace sx::webserver;
         auto lc_ = std::scoped_lock(HttpSessions::lock);
 
+        ss << "API keys (local API):\r\n";
         for (auto const& ak: HttpSessions::access_keys) {
             for(auto const& to: ak.second) {
-                ss << "access_token: " << ak.first << " csrf_token: ";
+                ss << "    access_token: " << ak.first << " csrf_token: ";
 
                 auto const& csrf = to.second.stored_optional();
                 if(csrf.has_value()) {
                     auto exp = to.second.expired_at() - time(nullptr);
-                    ss << csrf.value() << " expiring: " << exp << ( exp < 0 ? " *expired*" : "" );
+                    ss << csrf.value() << "     expiring: " << exp << ( exp < 0 ? " *expired*" : "" );
                 }
+                ss << "\r\n";
             }
 
-            ss << "\r\n";
         }
+        ss << "\r\n";
     }
+    {
+        auto lc_ = std::scoped_lock(CfgFactory::lock());
+        auto fac = CfgFactory::get();
+
+        long expire = fac->settings_webhook.override.timeout.expired_at();
+        long now =  time(nullptr);
+
+        ss << "WebHook info (remote API):\r\n";
+        ss << "   feature enabled: " << fac->settings_webhook.enabled << "\r\n";
+        ss << "   override enabled: " << fac->settings_webhook.allow_api_override << "\r\n";
+        ss << "   override to-expiry: " << expire-now <<"s\r\n";
+        ss << "   \r\n";
+        ss << "   Current target: " << fac->settings_webhook.active_url() << "\r\n";
+        ss << "   Current TLS verify: " << fac->settings_webhook.active_tls_verify() << "\r\n";
+        ss << "   \r\n";
+        ss << "   Cfg target: " << fac->settings_webhook.cfg_url << "\r\n";
+        ss << "   Cfg TLS verify: " << fac->settings_webhook.cfg_tls_verify << "\r\n";
+    }
+    ss << "\r\n";
 
     cli_print(cli, "%s", ss.str().c_str());
     return CLI_OK;
@@ -2375,7 +2397,8 @@ bool register_diags(cli_def* cli, cli_command* diag) {
     cli_register_command(cli,diag_writer,"stats",cli_diag_writer_stats,PRIVILEGE_PRIVILEGED, MODE_EXEC,"file writer statistics");
 
     auto diag_api = cli_register_command(cli,diag,"api",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"http api info");
-        cli_register_command(cli,diag_api,"list-keys",cli_diag_api_list,PRIVILEGE_PRIVILEGED, MODE_EXEC,"list API active keys");
+    cli_register_command(cli, diag_api, "info", cli_diag_api_info, PRIVILEGE_PRIVILEGED, MODE_EXEC,
+                         "display API information");
 
     auto diag_neighbor = cli_register_command(cli,diag,"neighbor",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy neighbors diag");
             cli_register_command(cli,diag_neighbor,"list",cli_diag_neighbor_list,PRIVILEGE_PRIVILEGED, MODE_EXEC,"list active neighbors");

@@ -49,8 +49,8 @@ void AccessFilter::update(socle::side_t side, buffer const& buf) {
             if(reply.has_value()) {
                 _dia("AccessFilter: received response");
 
-                auto code = reply.value().first;
-                auto response_data = reply.value().second;
+                auto code = reply.value().response.first;
+                auto response_data = reply.value().response.second;
 
                 process_reply(code, response_data);
             }

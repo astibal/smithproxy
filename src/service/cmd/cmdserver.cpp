@@ -487,8 +487,8 @@ int cli_test_webhook(struct cli_def *cli, const char *command, char *argv[], int
 
         // this is potentially dangerous: cli may not exist, because it's hook called after operation finished
 
-        const long code = reply.has_value() ? reply->first : -1;
-        const std::string msg = reply.has_value() ? reply->second : "request failed";
+        const long code = reply.has_value() ? reply->response.first : -1;
+        const std::string msg = reply.has_value() ? reply->response.second : "request failed";
 
         // check at least if client socket is still mapped to targets, so cli is valid
         if (Log::get()->target_profiles().find((uint64_t) fd) != Log::get()->target_profiles().end()) {

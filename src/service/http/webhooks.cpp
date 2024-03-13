@@ -92,7 +92,7 @@ namespace sx::http::webhooks {
                     to_string(msg),
                     [](sx::http::expected_reply repl) {
                         // if not OK but ACCEPTED, they don't have enough of information - send it
-                        if(repl.has_value() and repl.value().first == 202) {
+                        if(repl.has_value() and repl.value().response.first == 202) {
                             ping_plus();
                         }
                     });

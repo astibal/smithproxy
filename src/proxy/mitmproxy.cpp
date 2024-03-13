@@ -976,10 +976,10 @@ void MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer) {
     sx::http::webhooks::send_action_wait("connection-content", to_connection_ID(), j, [&](sx::http::expected_reply r){
         if(r.has_value()) {
             auto reply = r.value();
-            _dia("webhook content-replace: response %d", reply.first);
+            _dia("webhook content-replace: response %d", reply.response.first);
 
-            if(reply.first >= 200 and reply.first < 300) {
-                auto json_obj = nlohmann::json::parse(reply.second, nullptr, false);
+            if(reply.response.first >= 200 and reply.response.first < 300) {
+                auto json_obj = nlohmann::json::parse(reply.response.second, nullptr, false);
                 if(json_obj.is_discarded()) {
                     _err("MitmProxy::content_webhook: response body is invalid");
                 }

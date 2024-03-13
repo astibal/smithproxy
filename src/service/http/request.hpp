@@ -50,6 +50,14 @@
 
 namespace sx::http {
 
+    struct expected_reply_t {
+        std::string request;
+        std::pair<long,std::string> response;
+    };
+    using expected_reply = std::optional<expected_reply_t>;
+    sx::http::expected_reply make_reply(std::string url, long code, std::string reply);
+
+
     class Request {
     private:
         CURL *curl;
@@ -71,7 +79,7 @@ namespace sx::http {
         unsigned int max_attmepts = 5;
         unsigned int attempts = 0;
         std::string debug_log;
-        static inline bool DEBUG = false;
+        static inline bool DEBUG = true;
         static inline bool DEBUG_DUMP_OK = false;
 
         struct progress {
@@ -221,7 +229,7 @@ namespace sx::http {
                 curl_easy_cleanup(curl);
         }
 
-        using Reply = std::optional<std::pair<long, std::string>>;
+        using Reply = sx::http::expected_reply;
 
         Reply emit(std::string const& url, std::string const& payload) {
             CURLcode res = CURLE_OK;
@@ -247,13 +255,13 @@ namespace sx::http {
 
 
             if (res != CURLE_OK) {
-                return std::make_pair(600, curl_easy_strerror(res));
+                return make_reply(url, 600, curl_easy_strerror(res));
             }
 
             long responseCode;
             curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &responseCode);
 
-            return std::make_pair(responseCode, responseData);
+            return make_reply(url, responseCode, responseData);
         }
     };
 }

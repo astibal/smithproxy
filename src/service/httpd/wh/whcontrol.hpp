@@ -19,7 +19,8 @@ static nlohmann::json wh_register(struct MHD_Connection * connection, std::strin
         auto fac = CfgFactory::get();
 
         if(fac->settings_webhook.allow_api_override) {
-            fac->settings_webhook.override.timeout.extend(60);  // extend by next 60s
+
+            fac->settings_webhook.override.timeout.set_expiry(time(nullptr) + 60);  // extend by next 60s
             fac->settings_webhook.override.url = new_url;
             fac->settings_webhook.override.tls_verify = rande_tls_verify;
             response = "accepted";
