@@ -63,6 +63,7 @@ namespace sx::webserver::authorized {
 
 
                 ret.response = {{"error", "access denied"},};
+                ret.response_code = MHD_HTTP_UNAUTHORIZED;
             }
         };
 

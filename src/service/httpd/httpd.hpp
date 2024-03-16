@@ -195,6 +195,30 @@ struct HttpSessions {
 
         return ret;
     }
+
+    static void cleanup() {
+
+        std::vector<std::string> expired_ak;
+        for (auto& [ apikey, csrf_cache]: access_keys) {
+
+            std::vector<std::string> expired_to;
+            for(auto const& [ key, timing_csrf] : csrf_cache) {
+                auto is_expired = (timing_csrf.expired_at() - time(nullptr)) < 0;
+                if(is_expired) {
+                    expired_to.emplace_back(key);
+                }
+            }
+            for(auto const& xto: expired_to) {
+                csrf_cache.erase(xto);
+            }
+            if(csrf_cache.empty()) {
+                expired_ak.emplace_back(apikey);
+            }
+        }
+        for(auto const& apikey: expired_ak) {
+            access_keys.erase(apikey);
+        }
+    }
 };
 
 std::thread* create_httpd_thread(unsigned short port);

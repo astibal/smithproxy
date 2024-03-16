@@ -4,10 +4,18 @@
 #include <service/http/webhooks.hpp>
 #include <service/http/async_request.hpp>
 
-
+#include <unordered_map>
 
 
 namespace sx::http::webhooks {
+
+
+    static std::unordered_map<std::string, url_stats> _url_stats;
+    static std::mutex _url_stats_lock;
+
+    std::mutex& url_stats_lock() { return  _url_stats_lock; }
+    std::unordered_map<std::string, url_stats>& url_stats_map() { return _url_stats; }
+
     static std::atomic_bool enabled = false;
     static std::string hostid;
 
@@ -25,6 +33,25 @@ namespace sx::http::webhooks {
         return hostid.empty() ? SmithProxy::instance().hostname : hostid;
     }
 
+    struct default_callback {
+
+        void operator() (sx::http::expected_reply rep) const {
+
+            if(rep.has_value()) {
+                auto const& url = rep.value().request;
+                auto lc_ = std::scoped_lock(url_stats_lock());
+                auto& entry = url_stats_map()[url];
+                entry.url = url;
+
+                entry.total_counter++;
+
+                if(auto code = rep.value().response.first; code >= 400) {
+                    entry.error_counter++;
+                }
+            }
+        }
+    };
+
     void ping() {
         if(enabled) {
             nlohmann::json const ping = {
@@ -36,9 +63,7 @@ namespace sx::http::webhooks {
                                         };
             sx::http::AsyncRequest::emit(
                     to_string(ping),
-                    [](auto ){
-                        // we don't need any response
-                    });
+                    default_callback());
         }
     }
 
@@ -54,9 +79,7 @@ namespace sx::http::webhooks {
             };
             sx::http::AsyncRequest::emit(
                     to_string(ping),
-                    [](auto ){
-                        // we don't need any response
-                    });
+                    default_callback());
         }
     }
 
@@ -72,9 +95,7 @@ namespace sx::http::webhooks {
                                               };
             sx::http::AsyncRequest::emit(
                     to_string(nbr_update),
-                    [](auto reply){
-                        // we don't need response
-                    });
+                    default_callback());
         }
     }
 
@@ -95,6 +116,8 @@ namespace sx::http::webhooks {
                         if(repl.has_value() and repl.value().response.first == 202) {
                             ping_plus();
                         }
+                        auto def = default_callback();
+                        def(repl);
                     });
         }
     }

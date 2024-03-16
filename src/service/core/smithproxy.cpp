@@ -439,6 +439,8 @@ void SmithProxy::run() {
 
             seconds = 0;
             sx::http::webhooks::ping();
+            sx::webserver::HttpSessions::cleanup();
+
         }
         ++seconds;
 

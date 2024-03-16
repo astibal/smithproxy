@@ -2257,7 +2257,19 @@ int cli_diag_api_info(struct cli_def *cli, const char *command, char *argv[], in
         ss << "   \r\n";
         ss << "   Cfg target: " << fac->settings_webhook.cfg_url << "\r\n";
         ss << "   Cfg TLS verify: " << fac->settings_webhook.cfg_tls_verify << "\r\n";
+        ss << "\r\n";
     }
+    {
+        ss << "WebHook statistics:\r\n";
+        auto lc_ = std::scoped_lock(sx::http::webhooks::url_stats_lock());
+        for (auto const &[url, stats]: sx::http::webhooks::url_stats_map()) {
+            ss << "   URL: " << url << "\r\n";
+            ss << "      Total requests: " << stats.total_counter << "\r\n";
+            ss << "      Error requests: " << stats.error_counter << "\r\n";
+        }
+    }
+
+
     ss << "\r\n";
 
     cli_print(cli, "%s", ss.str().c_str());

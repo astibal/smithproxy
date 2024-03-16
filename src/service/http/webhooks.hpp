@@ -47,6 +47,16 @@
 #include <service/http/async_request.hpp>
 
 namespace sx::http::webhooks {
+
+    struct url_stats {
+        std::string url;
+        int total_counter = 0;
+        int error_counter = 0;
+    };
+
+    std::mutex& url_stats_lock();
+    std::unordered_map<std::string, url_stats>& url_stats_map();
+
     void ping();
     void set_enabled(bool val);
     bool is_enabled();
