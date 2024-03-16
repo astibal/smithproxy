@@ -43,11 +43,12 @@ namespace sx::http::webhooks {
                 auto& entry = url_stats_map()[url];
                 entry.url = url;
 
-                entry.total_counter++;
-
+                bool is_error = false;
                 if(auto code = rep.value().response.first; code >= 400) {
-                    entry.error_counter++;
+                    is_error = true;
                 }
+
+                entry.update_incr(is_error);
             }
         }
     };

@@ -2264,8 +2264,13 @@ int cli_diag_api_info(struct cli_def *cli, const char *command, char *argv[], in
         auto lc_ = std::scoped_lock(sx::http::webhooks::url_stats_lock());
         for (auto const &[url, stats]: sx::http::webhooks::url_stats_map()) {
             ss << "   URL: " << url << "\r\n";
-            ss << "      Total requests: " << stats.total_counter << "\r\n";
-            ss << "      Error requests: " << stats.error_counter << "\r\n";
+            ss << "      Total requests: " << stats.counter_total() << "\r\n";
+            if(stats.errq().newest().has_value()) {
+                ss << "      Last error: " << stats.errq().newest().value() - time(nullptr) << "s\r\n";
+            }
+            else {
+                ss << "      Last error: \r\n";
+            }
         }
     }
 

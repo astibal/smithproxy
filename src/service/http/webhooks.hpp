@@ -43,15 +43,78 @@
 
 #include <string>
 #include <atomic>
+#include <deque>
+
 #include <nlohmann/json.hpp>
 #include <service/http/async_request.hpp>
 
+
 namespace sx::http::webhooks {
 
+    struct timestampq {
+        explicit timestampq(std::size_t nevents, time_t period): maxlen(nevents), period(period) {};
+        std::deque<time_t> q;
+        std::size_t maxlen{0};
+        time_t period{0};
+
+        void add() {
+            q.push_front(time(nullptr));
+            if(q.size() > maxlen) { q.pop_back(); }
+        };
+
+        bool triggered() const {
+            if(not q.empty()) {
+                auto const &last = q.back();
+                return (time(nullptr) >= last + period);
+            }
+            return false;
+        }
+
+        [[nodiscard]] std::optional<time_t> oldest() const {
+            if(not q.empty()) {
+                return q.back();
+            }
+            return std::nullopt;
+        }
+
+        [[nodiscard]] std::optional<time_t> newest() const {
+            if(not q.empty()) {
+                return q.front();
+            }
+            return std::nullopt;
+        }
+
+    };
+
     struct url_stats {
+        static inline std::size_t max_errors = 10;
+        static inline time_t error_period = 300;
+        static inline int this_expiry = 3600*24;
         std::string url;
-        int total_counter = 0;
-        int error_counter = 0;
+
+        void update_incr(bool iferror) {
+            if (iferror) {
+                errorq.add();
+            }
+            total_counter++;
+            ttl.set_expiry(this_expiry);
+        }
+        [[nodiscard]] bool is_error() const {
+            return errorq.triggered();
+        }
+        [[nodiscard]] bool is_expired() const {
+            return ttl.expired();
+        }
+        [[nodiscard]] std::size_t counter_total() const {
+            return total_counter;
+        }
+        timestampq& errq() { return errorq; }
+        timestampq const& errq() const { return errorq; }
+
+    private:
+        expiring_int ttl = expiring_int(0, this_expiry);
+        std::size_t total_counter = 0;
+        timestampq errorq = timestampq(max_errors, error_period);
     };
 
     std::mutex& url_stats_lock();
