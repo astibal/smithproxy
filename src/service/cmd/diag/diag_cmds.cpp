@@ -2250,7 +2250,7 @@ int cli_diag_api_info(struct cli_def *cli, const char *command, char *argv[], in
         ss << "WebHook info (remote API):\r\n";
         ss << "   feature enabled: " << fac->settings_webhook.enabled << "\r\n";
         ss << "   override enabled: " << fac->settings_webhook.allow_api_override << "\r\n";
-        ss << "   override to-expiry: " << expire-now <<"s\r\n";
+        ss << "   override expires in: " << expire - now <<"s\r\n";
         ss << "   \r\n";
         ss << "   Current target: " << fac->settings_webhook.active_url() << "\r\n";
         ss << "   Current TLS verify: " << fac->settings_webhook.active_tls_verify() << "\r\n";

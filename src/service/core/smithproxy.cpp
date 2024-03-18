@@ -434,7 +434,7 @@ void SmithProxy::run() {
                 // refresh enabled status
                 auto lc_ = std::scoped_lock(CfgFactory::lock());
                 auto const& fac = CfgFactory::get();
-                sx::http::webhooks::set_enabled( fac->settings_webhook.enabled and not fac->settings_webhook.active_url().empty());
+                sx::http::webhooks::set_enabled( fac->settings_webhook.enabled);
             }
 
             seconds = 0;

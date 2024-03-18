@@ -851,7 +851,7 @@ bool CfgFactory::load_settings () {
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "tls_verify", settings_webhook.cfg_tls_verify);
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "api_override", settings_webhook.allow_api_override);
 
-        sx::http::webhooks::set_enabled(settings_webhook.enabled and not settings_webhook.cfg_url.empty());
+        sx::http::webhooks::set_enabled(settings_webhook.enabled);
 
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "hostid", settings_webhook.hostid);
         if(not settings_webhook.hostid.empty()) sx::http::webhooks::set_hostid(settings_webhook.hostid);
