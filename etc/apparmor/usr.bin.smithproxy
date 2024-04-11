@@ -4,6 +4,7 @@
 @{SX_DATA}=/var/local/smithproxy/
 @{SX_DATA2}=/var/smithproxy/
 @{CERTSTORE}=/usr/share/ca-certificates/
+# @{CERTSTORE2}=/etc/letsencrypt/
 
 
 /usr/bin/smithproxy {
@@ -28,6 +29,10 @@
   # read etc
   /etc/smithproxy/** r,
   /etc/smithproxy/*.cfg rw,
+  /etc/smithproxy/certs/**/custom/** rw,
+
+  # rename own threads
+  /proc/@{pid}/task/*/comm rw,
 
   /etc/hosts r,
   /etc/host.conf r,
@@ -36,8 +41,10 @@
 
   # read certificate path
   @{CERTSTORE}/** r,
+  # @{CERTSTORE2}/**/*.pem r,
 
   # write semaphores, shm, pidfiles
+  /dev/shm/sem.* rw,
   /dev/shm/sem.smithproxy* rw,
   /dev/shm/smithproxy* rw,
   /run/smithproxy* rw,
