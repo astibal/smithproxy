@@ -59,7 +59,8 @@ namespace sx::engine::http {
 
             // no point to continue
             if(ix_host == std::string::npos) {
-                app_request->http_data.host = ctx.origin->host();
+                if(ctx.origin and ctx.origin->peer())
+                    app_request->http_data.host = ctx.origin->peer()->host();
                 return false;
             };
 
@@ -101,7 +102,8 @@ namespace sx::engine::http {
                 return true;
             }
             else {
-                app_request->http_data.host = ctx.origin->host();
+                if(ctx.origin and ctx.origin->peer())
+                    app_request->http_data.host = ctx.origin->peer()->host();
             }
 
             return false;
