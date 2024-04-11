@@ -283,7 +283,10 @@ void MitmProxy::webhook_session_stop() const {
         dB = l->meter_write_bytes;
 
         if(auto app = l->engine_ctx.application_data; app) {
-            l7 =  { { "app", app->protocol() }, { "details", app->requests_all() } };
+            l7 =  { { "app", app->protocol() },
+                    { "details", app->requests_all() },
+                    { "signatures", l->matched_signatures() }
+            };
         }
     }
     auto const* r = first_right();

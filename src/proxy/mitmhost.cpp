@@ -262,6 +262,10 @@ void MitmHostCX::on_detect(std::shared_ptr<duplexFlowMatch> x_sig, flowMatchStat
         reported = true;
     }
 
+    matched_signatures_.emplace_back(string_format("%s/%s",
+                                                   sig_sig->sig_category.c_str(),
+                                                   sig_sig->name().c_str()));
+
     if(! reported) {
         // diagnose on "inspect" topic
         _dia("matching signature: cat='%s', name='%s' at %s",

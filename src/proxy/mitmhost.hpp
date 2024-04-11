@@ -69,6 +69,8 @@ public:
     int matched_policy() const { return matched_policy_; }
     void matched_policy(int p) { matched_policy_ = p; }
 
+    std::vector<std::string> const& matched_signatures() const { return matched_signatures_; }
+
     using replacetype_t = enum { REPLACETYPE_NONE=0, REPLACETYPE_HTTP=1 };
     replacetype_t replacement_type() const { return replacement_type_; }
     void replacement_type(replacetype_t r) { replacement_type_ = r; }
@@ -106,6 +108,8 @@ private:
     unsigned int inspect_flow_same_bytes = 0;
     int inspect_verdict = Inspector::OK;
     std::shared_ptr<buffer> inspect_verdict_response;
+
+    std::vector<std::string> matched_signatures_;
 
 public:
     TYPENAME_OVERRIDE("MitmHostCX")
