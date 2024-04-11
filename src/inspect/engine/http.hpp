@@ -143,7 +143,12 @@ namespace sx::engine::http {
         }
 
         std::string request () override {
-            return http_data.proto + http_data.host + http_data.uri + "?" + http_data.params;
+            std::stringstream  ss;
+            ss << http_data.proto << http_data.host << http_data.uri;
+            if(not http_data.params.empty())
+                ss << "?" << http_data.params;
+
+            return ss.str();
         };
 
         std::vector<std::string> requests_all() override {
