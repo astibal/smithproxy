@@ -47,10 +47,21 @@ namespace sx::engine::http {
         bool find_host (EngineCtx &ctx, std::string_view data) {
             auto const& log = log::http1;
 
+            if (not ctx.application_data) {
+                ctx.application_data = std::make_unique<app_HttpRequest>();
+            }
+            auto *app_request = dynamic_cast<app_HttpRequest *>(ctx.application_data.get());
+            if(not app_request) {
+                return false;
+            }
+
             auto ix_host = data.find("Host: ");
 
             // no point to continue
-            if(ix_host == std::string::npos) return false;
+            if(ix_host == std::string::npos) {
+                app_request->http_data.host = ctx.origin->host();
+                return false;
+            };
 
             std::string host_start( data.substr(ix_host, std::min(std::size_t(128), data.size() - ix_host)) );
 
@@ -60,49 +71,37 @@ namespace sx::engine::http {
 
                 auto str_temp = m_host[1].str();
 
-                if (not ctx.application_data) {
-                    ctx.application_data = std::make_unique<app_HttpRequest>();
-                }
-
-                if (auto *app_request = dynamic_cast<app_HttpRequest *>(ctx.application_data.get()); app_request) {
-                    app_request->http_data.host = str_temp;
-                    _dia("Host: %s", app_request->http_data.host.c_str());
+                app_request->http_data.host = str_temp;
+                _dia("Host: %s", app_request->http_data.host.c_str());
 
 
-                    // NOTE: should be some config variable
-                    bool check_inspect_dns_cache = true;
-                    if (check_inspect_dns_cache) {
+                // NOTE: should be some config variable
+                bool check_inspect_dns_cache = true;
+                if (check_inspect_dns_cache) {
 
-                        std::string dns_resp;
-                        auto proto = ctx.origin->com()->l3_proto();
-                        const std::string prefix = (proto == AF_INET6 ? "AAAA:" : "A:");
+                    std::string dns_resp;
+                    auto proto = ctx.origin->com()->l3_proto();
+                    const std::string prefix = (proto == AF_INET6 ? "AAAA:" : "A:");
 
-                        // get lock and cache pointers
-                        {
-                            auto dc_ = std::scoped_lock(DNS::get().dns_lock());
-                            auto dns_resp_ptr = DNS::get().dns_cache().get(prefix + app_request->http_data.host);
-                            if(dns_resp_ptr) dns_resp = dns_resp_ptr->question_str_0();
-                        }
+                    // get lock and cache pointers
+                    {
+                        auto dc_ = std::scoped_lock(DNS::get().dns_lock());
+                        auto dns_resp_ptr = DNS::get().dns_cache().get(prefix + app_request->http_data.host);
+                        if(dns_resp_ptr) dns_resp = dns_resp_ptr->question_str_0();
+                    }
 
-                        if (not dns_resp.empty()) {
-                            _deb("HTTP inspection: Host header matches DNS: %s", ESC(dns_resp));
-                        } else {
-                            _war("HTTP inspection: 'Host' header value '%s' DOESN'T match DNS!",
-                                 app_request->http_data.host.c_str());
-                        }
+                    if (not dns_resp.empty()) {
+                        _deb("HTTP inspection: Host header matches DNS: %s", ESC(dns_resp));
+                    } else {
+                        _war("HTTP inspection: 'Host' header value '%s' DOESN'T match DNS!",
+                             app_request->http_data.host.c_str());
                     }
                 }
 
                 return true;
             }
             else {
-                if (not ctx.application_data) {
-                    ctx.application_data = std::make_unique<app_HttpRequest>();
-                }
-
-                if (auto *app_request = dynamic_cast<app_HttpRequest *>(ctx.application_data.get()); app_request) {
-                    app_request->http_data.host = ctx.origin->host();
-                }
+                app_request->http_data.host = ctx.origin->host();
             }
 
             return false;
