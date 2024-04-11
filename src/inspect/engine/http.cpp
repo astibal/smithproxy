@@ -95,6 +95,15 @@ namespace sx::engine::http {
 
                 return true;
             }
+            else {
+                if (not ctx.application_data) {
+                    ctx.application_data = std::make_unique<app_HttpRequest>();
+                }
+
+                if (auto *app_request = dynamic_cast<app_HttpRequest *>(ctx.application_data.get()); app_request) {
+                    app_request->http_data.host = ctx.origin->host();
+                }
+            }
 
             return false;
         }
@@ -163,7 +172,6 @@ namespace sx::engine::http {
                     } else {
                         app_request->http_data.proto = "http://";
                     }
-
 
                     _inf("http request: %s", ESC(app_request->str()));
                 } else {
