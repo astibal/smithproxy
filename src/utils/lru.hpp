@@ -60,7 +60,7 @@ public:
         cache_[key] = {value, lruList.begin()};
     }
 
-    void display() {
+    void display() const {
         for (auto& pair : cache_) {
             std::cout << pair.first << " : " << pair.second.first << std::endl;
         }

@@ -42,18 +42,83 @@
 #include <memory>
 #include <ctime>
 
+#include <socle/common/timeops.hpp>
+
 #include <utils/lru.hpp>
 #include <service/http/webhooks.hpp>
 
 struct Neighbor {
-    Neighbor(std::string_view hostname): hostname(hostname), last_seen(time(nullptr)) {}
 
-    std::string hostname;
-    time_t last_seen;
+    static constexpr size_t max_timetable_sz = 14;
+
+    explicit Neighbor(std::string_view hostname): hostname(hostname) {
+        last_seen = time(nullptr);
+        timetable.reserve(max_timetable_sz+1);
+    }
+
+    using days_epoch_t = time_t;
+    struct stats_entry_t {
+        days_epoch_t days_epoch = epoch_days(time(nullptr));
+        uint64_t counter = 0LL;
+
+        // update entry with new data (currently only counter, which we know we inreasing by one)
+        void update() {
+            counter++;
+        }
+
+        [[nodiscard]] std::string to_string(int verbosity=iINF) const {
+            std::stringstream ss;
+            auto now_de = epoch_days(time(nullptr));
+            ss << now_de - days_epoch << ":" << counter;
+            return ss.str();
+        }
+
+        [[nodiscard]] nlohmann::json to_json() const {
+            return { {"counter"}, {counter} };
+        }
+    };
+    using stats_lists_t = std::vector<stats_entry_t>;
 
     void update() {
         last_seen = time(nullptr);
+        auto this_de = epoch_days(last_seen);
+
+        if(timetable.empty()) {
+            timetable.emplace_back(stats_entry_t{ .days_epoch = this_de, .counter = 1 });
+        } else {
+            auto cur_de = timetable[0].days_epoch;
+            if(cur_de == this_de) {
+                timetable[0].update();
+            }
+            else {
+                auto nev = stats_entry_t{ .days_epoch = this_de, .counter = 1 };
+                timetable.insert(timetable.begin(), nev);
+
+                if (timetable.size() > max_timetable_sz) {
+                    timetable.pop_back();
+                }
+            }
+        }
     }
+
+    [[nodiscard]] std::string to_string(int verbosity=iINF) const {
+
+        std::stringstream ss;
+        auto delta = time(nullptr) - last_seen;
+        ss << hostname << " last seen: " << uptime_string(delta);
+        if(not timetable.empty()) {
+            ss << " stats:";
+            for (auto const& entry: timetable) {
+                ss << " " << entry.to_string(verbosity);
+            }
+        }
+        return ss.str();
+    }
+
+
+    std::string hostname;
+    time_t last_seen = 0L;
+    stats_lists_t timetable {};
 };
 
 class NbrHood {

@@ -2291,8 +2291,7 @@ int cli_diag_neighbor_list(struct cli_def *cli, const char *command, char *argv[
         ss << "Neighbors seen:\n";
 
         for(auto const& e: nb.cache().get_map_ul()) {
-            auto delta = time(nullptr) - e.second.first->last_seen;
-            ss << e.first << " last seen: " << uptime_string(delta) << "\n";
+            ss << e.second.first->to_string() << "\n";
         }
     }
     cli_print(cli, "%s", ss.str().c_str());
