@@ -5,6 +5,8 @@
 #include <service/httpd/diag/diag_ssl.hpp>
 #include <service/httpd/diag/daig_proxy.hpp>
 
+#include <service/httpd/do/do_comands.hpp>
+
 #include <service/httpd/cfg/add.hpp>
 #include <service/httpd/cfg/set.hpp>
 #include <service/httpd/cfg/get.hpp>
@@ -92,6 +94,17 @@ namespace sx::webserver::dispatchers {
             handler.Content_Type = "application/json";
             server.addController(&handler);
         }
+
+        for(auto const& meth: {"GET", "POST"}) {
+            static Http_Responder handler(
+                    meth,
+                    "/api/do/ssl/custom/reload",
+                    authorized::token_protected<json>(json_do_ssl_custom_reload)
+            );
+            handler.Content_Type = "application/json";
+            server.addController(&handler);
+        }
+
 
     }
 
