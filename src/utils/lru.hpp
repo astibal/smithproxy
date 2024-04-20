@@ -11,12 +11,12 @@ private:
     std::unordered_map<Key, std::pair<Value, typename std::list<Key>::iterator>> cache_;
     std::list<Key> lruList;
 
-    std::mutex lock_;
+    mutable std::mutex lock_;
 public:
     explicit LRUCache(size_t cap) : capacity_(cap) {}
-    std::mutex& lock() { return lock_; }
+    std::mutex& lock() const { return lock_; }
 
-    auto const& get_map_ul() {
+    auto const& get_map_ul() const {
         return cache_;
     }
 
