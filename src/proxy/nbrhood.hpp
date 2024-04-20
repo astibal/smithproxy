@@ -196,15 +196,15 @@ public:
     nbr_cache_t& cache() { return nbrs_; }
     nbr_cache_t const& cache() const { return nbrs_; }
 
-    void update(Neighbor const& n) {
+    void update(std::string const& hostname) {
         auto lc_ = std::scoped_lock(cache().lock());
 
-        if(auto nbr = cache().get_ul(n.hostname); nbr) {
+        if(auto nbr = cache().get_ul(hostname); nbr) {
             nbr.value()->update();
         }
         else {
-            cache().put_ul(n.hostname, std::make_shared<Neighbor>(n));
-            sx::http::webhooks::neighbor_new(n.hostname);
+            cache().put_ul(hostname, std::make_shared<Neighbor>(hostname));
+            sx::http::webhooks::neighbor_new(hostname);
         }
     }
 

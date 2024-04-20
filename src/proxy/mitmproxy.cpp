@@ -499,8 +499,7 @@ void MitmProxy::update_neighbors() {
         if(auto lhost = fl->chost(); not lhost.empty()) {
             auto &nbr = NbrHood::instance();
 
-            Neighbor n(first_left()->chost());
-            nbr.update(n);
+            nbr.update(first_left()->chost());
         }
     }
 }
