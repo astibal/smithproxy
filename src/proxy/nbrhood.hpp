@@ -78,6 +78,11 @@ struct Neighbor {
 
             return { now_de - days_epoch, counter };
         }
+
+        [[nodiscard]] nlohmann::json ser_json_out() const {
+            return { days_epoch, counter };
+        }
+
     };
     using stats_lists_t = std::vector<stats_entry_t>;
 
@@ -102,6 +107,20 @@ struct Neighbor {
             }
         }
     }
+
+    [[nodiscard]] nlohmann::json ser_json_out() const {
+        auto js = nlohmann::json();
+        for(auto const& s: timetable)  {
+            js.push_back(s.ser_json_out());
+        }
+
+        return {
+                { "hostname",  hostname },
+                { "last_seen", last_seen },
+                { "stats", js }
+        };
+    }
+
 
     [[nodiscard]] nlohmann::json to_json() const {
 
@@ -171,6 +190,18 @@ public:
         for(auto const& [ _, nbr]: cache().get_map_ul()) {
             if(filter(*nbr.first))
                 ret.push_back( nbr.first->to_json());
+        }
+
+        return ret;
+    }
+
+    [[nodiscard]] nlohmann::json ser_json_out() const {
+        auto lc_ = std::scoped_lock(cache().lock());
+
+        auto ret = nlohmann::json();
+
+        for(auto const& [ _, nbr]: cache().get_map_ul()) {
+            ret.push_back( nbr.first->ser_json_out());
         }
 
         return ret;

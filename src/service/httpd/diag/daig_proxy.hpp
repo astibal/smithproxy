@@ -61,20 +61,27 @@ static nlohmann::json json_proxy_session_list(struct MHD_Connection * connection
 
 static nlohmann::json json_proxy_neighbor_list(struct MHD_Connection * connection, std::string const& meth, std::string const& req) {
 
-    auto oid = connection_ull_param(connection, "oid", 0ULL);
     using namespace jsonize;
 
-    bool flag_verbose = load_json_params<bool>(req, "verbose").value_or(false);
-    unsigned int last_n_days = load_json_params<unsigned int>(req, "max_days").value_or(365);
+    // take JSON paramenters, but fallback to request params if present
+    // if raw is used, any parameters are ignored (it provides raw data, i.e. to store)
+    bool flag_raw = load_json_params<bool>(req, "raw").value_or(
+            connection_ull_param(connection, "raw", 0ULL));
+    unsigned int last_n_days = load_json_params<unsigned int>(req, "max_days").value_or(
+            connection_ull_param(connection, "max_days", 365ULL));
 
-    return NbrHood::instance().to_json([&](auto const& nbr){
-        if(not nbr.timetable.empty()) {
-            auto now_de = epoch_days(time(nullptr));
-            auto delta = now_de - nbr.timetable[0].days_epoch;
-            if(delta <= last_n_days)
-                return true;
-        }
-        return false;
-    });
-
+    if(not flag_raw) {
+        return NbrHood::instance().to_json([&](auto const &nbr) {
+            if (not nbr.timetable.empty()) {
+                auto now_de = epoch_days(time(nullptr));
+                auto delta = now_de - nbr.timetable[0].days_epoch;
+                if (delta <= last_n_days)
+                    return true;
+            }
+            return false;
+        });
+    }
+    else {
+        return NbrHood::instance().ser_json_out();
+    }
 }
