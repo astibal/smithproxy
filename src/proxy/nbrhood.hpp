@@ -101,6 +101,20 @@ struct Neighbor {
         }
     }
 
+    [[nodiscard]] nlohmann::json to_json() const {
+
+        auto js = nlohmann::json();
+        for(auto const& s: timetable)  {
+            js.push_back(s.to_json());
+        }
+
+        return {
+                { {"hostname"}, { hostname } },
+                { {"last_seen"}, { last_seen} },
+                { {"stats"}, { js } }
+        };
+    }
+
     [[nodiscard]] std::string to_string(int verbosity=iINF) const {
 
         std::stringstream ss;
