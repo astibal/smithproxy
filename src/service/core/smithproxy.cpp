@@ -335,6 +335,10 @@ void SmithProxy::run() {
     std::string friendly_thread_name_redir_udp = string_format("sxy_rdu_%d",CfgFactory::get()->tenant_index);
 
 
+    if(not state_load()) {
+        Log::get()->events().insert(ERR, "state was not fully loaded");
+    }
+
     // cli_loop uses select :(
     cli_thread = std::make_shared<std::thread>([] () {
         CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
@@ -520,6 +524,46 @@ void SmithProxy::state_save_neighbors(std::string const& fnm) const {
         of.close();
     }
 }
+
+
+bool SmithProxy::state_load() {
+    std::string state_dir;
+    std::string tenant_name = "default";
+
+    {
+        auto fac = CfgFactory::get();
+        auto lc_ = std::scoped_lock(fac->lock());
+        state_dir = fac->capture_local.dir;
+        tenant_name = fac->tenant_name;
+    }
+
+    auto nbr_file = string_format("%s/nbr-%s.json", state_dir.c_str(), tenant_name.c_str());
+    bool nbr_loaded = state_load_neighbors(nbr_file);
+
+    if(nbr_loaded) {
+        return true;
+    }
+
+    return false;
+}
+
+bool SmithProxy::state_load_neighbors(std::string const& fnm) {
+
+    auto ifs = std::ifstream(fnm);
+    try {
+        nlohmann::json js = nlohmann::json::parse(ifs);
+        NbrHood::instance().ser_json_in(js);
+
+        Log::get()->events().insert(INF, "neighbors file loaded successfully");
+        return true;
+    }
+    catch(nlohmann::json::exception const& e) {
+        _err("state_load_neighbors: error: %s", e.what());
+        Log::get()->events().insert(ERR, "neighbors file not loaded");
+    }
+    return false;
+}
+
 
 void SmithProxy::join_all() {
 

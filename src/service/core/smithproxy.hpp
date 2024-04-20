@@ -128,7 +128,10 @@ public:
 
     void run() override;
     void state_save() const;
+    bool state_load();
+
     void state_save_neighbors(std::string const& fnm) const;
+    bool state_load_neighbors(std::string const& fnm);
 
     void kill_proxies();
     void stop() override;
