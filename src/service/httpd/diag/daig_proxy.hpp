@@ -65,7 +65,16 @@ static nlohmann::json json_proxy_neighbor_list(struct MHD_Connection * connectio
     using namespace jsonize;
 
     bool flag_verbose = load_json_params<bool>(req, "verbose").value_or(false);
+    unsigned int last_n_days = load_json_params<unsigned int>(req, "max_days").value_or(365);
 
-    return NbrHood::instance().to_json();
+    return NbrHood::instance().to_json([&](auto const& nbr){
+        if(not nbr.timetable.empty()) {
+            auto now_de = epoch_days(time(nullptr));
+            auto delta = now_de - nbr.timetable[0].days_epoch;
+            if(delta <= last_n_days)
+                return true;
+        }
+        return false;
+    });
 
 }

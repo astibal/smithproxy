@@ -160,12 +160,17 @@ public:
     }
 
     [[nodiscard]] nlohmann::json to_json() const {
+        return to_json([](auto const&) { return true;});
+    }
+
+    [[nodiscard]] nlohmann::json to_json(std::function<bool(Neighbor const&)> const& filter) const {
         auto lc_ = std::scoped_lock(cache().lock());
 
         auto ret = nlohmann::json();
 
         for(auto const& [ _, nbr]: cache().get_map_ul()) {
-            ret.push_back( nbr.first->to_json());
+            if(filter(*nbr.first))
+                ret.push_back( nbr.first->to_json());
         }
 
         return ret;
