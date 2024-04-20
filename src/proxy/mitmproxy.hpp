@@ -127,6 +127,10 @@ public:
         bool block_identity = false;
     } auth_opts;
 
+    struct Opts_Accounting {
+        bool details = true;
+    } acct_opts;
+
     // Remote filters - use other proxy to filter content of this proxy.
     // Elements are pair of "name" and pointer to the filter proxy 
     std::vector<std::pair<std::string, std::unique_ptr<FilterProxy>>> filters_;

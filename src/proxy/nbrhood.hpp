@@ -78,18 +78,24 @@ struct Neighbor {
         [[nodiscard]] nlohmann::json to_json() const {
             auto now_de = epoch_days(time(nullptr));
 
-            return { now_de - days_epoch, counter };
+            return { { "relative_days", now_de - days_epoch },
+                     { "counter", counter}
+            };
+
         }
 
         [[nodiscard]] nlohmann::json ser_json_out() const {
-            return { days_epoch, counter };
+            return { { "days_epoch", days_epoch },
+                     { "counter", counter}
+            };
         }
         void ser_json_in(nlohmann::json const& j) {
             try {
-                days_epoch = j.at(0).get<days_epoch_t>();
-                counter = j.at(1).get<uint64_t>();
+                days_epoch = j["days_epoch"];
+                counter = j["counter"];
             }
             catch(nlohmann::json::exception const& e) {
+                Log::get()->events().insert(ERR, "stat_entry::ser_json_in: %s", e.what());
                 _err("stat_entry::ser_json_in: %s", e.what());
             }
         }
@@ -147,6 +153,7 @@ struct Neighbor {
             }
         }
         catch(nlohmann::json::exception const& e) {
+            Log::get()->events().insert(ERR, "neighbor::ser_json_in: %s", e.what());
             _err("neighbor::ser_json_in: %s", e.what());
         }
     }
@@ -206,6 +213,20 @@ public:
             cache().put_ul(hostname, std::make_shared<Neighbor>(hostname));
             sx::http::webhooks::neighbor_new(hostname);
         }
+    }
+
+    bool apply(std::string const& hostname, std::function<bool(Neighbor&)> mod) {
+        auto lc_ = std::scoped_lock(cache().lock());
+
+        if(auto nbr = cache().get_ul(hostname); nbr) {
+            return mod(*nbr.value());
+        }
+        else {
+            auto ptr = std::make_shared<Neighbor>(hostname);
+            cache().put_ul(hostname, ptr);
+            return mod(*ptr);
+        }
+
     }
 
     [[nodiscard]] nlohmann::json to_json() const {

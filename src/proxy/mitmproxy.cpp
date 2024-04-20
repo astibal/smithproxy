@@ -1128,6 +1128,11 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
 
     //update meters
     total_mtr_up().update(cx->to_read().size());
+    if(acct_opts.details) {
+        NbrHood::instance().apply(cx->host(), [](Neighbor& nbr) {
+            return true;
+        });
+    }
 
     // because we have left bytes, let's copy them into all right side sockets!
     std::for_each(
@@ -1183,6 +1188,14 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
 
     // update total meters
     total_mtr_down().update(cx->to_read().size());
+
+    if(acct_opts.details) {
+        if(auto fr = first_left(); fr) {
+            NbrHood::instance().apply(fr->host(), [](Neighbor &nbr) {
+                return true;
+            });
+        }
+    }
 
     std::for_each(
             left_sockets.begin(),
