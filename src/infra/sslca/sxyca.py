@@ -58,7 +58,7 @@ SETTINGS = {
     "clt": {},
     "prt": {},
     "path": "/tmp/",
-    "ttl": 60
+    "ttl": 365
 }
 
 class Options:

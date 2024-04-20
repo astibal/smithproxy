@@ -227,7 +227,7 @@ def check_certificates(etc_dir, assume_yes=True, dry_run=False, enforced=False):
         gen_ca = True
 
 
-    ttl = 60
+    ttl = 365
 
     if gen_ca:
         try:
