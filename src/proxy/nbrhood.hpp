@@ -50,7 +50,6 @@
 struct Neighbor {
 
     static inline logan_lite log = logan_lite("proxy.nbr");
-
     static constexpr size_t max_timetable_sz = 14;
 
     explicit Neighbor(std::string_view hostname): hostname(hostname) {
@@ -63,6 +62,9 @@ struct Neighbor {
         days_epoch_t days_epoch = epoch_days(time(nullptr));
         uint64_t counter = 0LL;
 
+        uint64_t bytes_up {};
+        uint64_t bytes_down {};
+
         // update entry with new data (currently only counter, which we know we are increasing by one)
         void update() {
             counter++;
@@ -72,6 +74,9 @@ struct Neighbor {
             std::stringstream ss;
             auto now_de = epoch_days(time(nullptr));
             ss << now_de - days_epoch << ":" << counter;
+
+            if(bytes_up + bytes_down > 0)
+                ss << "(up:" << bytes_up << ",dw:" << bytes_down << ")";
             return ss.str();
         }
 
@@ -79,20 +84,30 @@ struct Neighbor {
             auto now_de = epoch_days(time(nullptr));
 
             return { { "relative_days", now_de - days_epoch },
-                     { "counter", counter}
+                     { "counter", counter },
+                     { "bytes_up", bytes_up },
+                     { "bytes_down", bytes_down },
             };
 
         }
 
         [[nodiscard]] nlohmann::json ser_json_out() const {
             return { { "days_epoch", days_epoch },
-                     { "counter", counter}
+                     { "counter", counter},
+                     { "bytes_up", bytes_up },
+                     { "bytes_down", bytes_down },
             };
         }
         void ser_json_in(nlohmann::json const& j) {
             try {
                 days_epoch = j["days_epoch"];
                 counter = j["counter"];
+
+                if(j.contains("bytes_up"))
+                    bytes_up = j["bytes_up"];
+
+                if(j.contains("bytes_down"))
+                    bytes_down = j["bytes_down"];
             }
             catch(nlohmann::json::exception const& e) {
                 Log::get()->events().insert(ERR, "stat_entry::ser_json_in: %s", e.what());

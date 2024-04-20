@@ -1129,7 +1129,11 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
     //update meters
     total_mtr_up().update(cx->to_read().size());
     if(acct_opts.details) {
-        NbrHood::instance().apply(cx->host(), [](Neighbor& nbr) {
+        NbrHood::instance().apply(cx->host(), [&cx](Neighbor& nbr) {
+            nbr.last_seen = time(nullptr);
+            if(not nbr.timetable.empty()) {
+                nbr.timetable[0].bytes_up += cx->to_read().size();
+            }
             return true;
         });
     }
@@ -1191,7 +1195,11 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
 
     if(acct_opts.details) {
         if(auto fr = first_left(); fr) {
-            NbrHood::instance().apply(fr->host(), [](Neighbor &nbr) {
+            NbrHood::instance().apply(fr->host(), [&cx](Neighbor &nbr) {
+                nbr.last_seen = time(nullptr);
+                if(not nbr.timetable.empty()) {
+                    nbr.timetable[0].bytes_down += cx->to_read().size();
+                }
                 return true;
             });
         }
