@@ -49,6 +49,8 @@
 
 struct Neighbor {
 
+    static inline logan_lite log = logan_lite("proxy.nbr");
+
     static constexpr size_t max_timetable_sz = 14;
 
     explicit Neighbor(std::string_view hostname): hostname(hostname) {
@@ -61,7 +63,7 @@ struct Neighbor {
         days_epoch_t days_epoch = epoch_days(time(nullptr));
         uint64_t counter = 0LL;
 
-        // update entry with new data (currently only counter, which we know we inreasing by one)
+        // update entry with new data (currently only counter, which we know we are increasing by one)
         void update() {
             counter++;
         }
@@ -81,6 +83,15 @@ struct Neighbor {
 
         [[nodiscard]] nlohmann::json ser_json_out() const {
             return { days_epoch, counter };
+        }
+        void ser_json_in(nlohmann::json const& j) {
+            try {
+                days_epoch = j.at(0).get<days_epoch_t>();
+                counter = j.at(1).get<uint64_t>();
+            }
+            catch(nlohmann::json::exception const& e) {
+                _err("stat_entry::ser_json_in: %s", e.what());
+            }
         }
 
     };
@@ -119,6 +130,25 @@ struct Neighbor {
                 { "last_seen", last_seen },
                 { "stats", js }
         };
+    }
+
+    void ser_json_in(nlohmann::json const& j) {
+
+        try {
+            hostname = j.at("hostname").get<std::string>();
+            last_seen = j.at("last_seen").get<time_t>();
+
+            auto raw_stats = j.at("stats").get<std::vector<nlohmann::json>>();
+            timetable.clear();
+            for (const auto &rs: raw_stats) {
+                Neighbor::stats_entry_t entry;
+                entry.ser_json_in(rs);
+                timetable.push_back(entry);
+            }
+        }
+        catch(nlohmann::json::exception const& e) {
+            _err("neighbor::ser_json_in: %s", e.what());
+        }
     }
 
 
@@ -205,6 +235,25 @@ public:
         }
 
         return ret;
+    }
+
+    void ser_json_in(nlohmann::json const& j) {
+        auto lc_ = std::scoped_lock(cache().lock());
+
+        try {
+            if (!j.is_array())
+                return;
+
+            for (const auto &raw_neighbor: j) {
+                auto nbr = std::make_shared<Neighbor>("");
+                nbr->ser_json_in(raw_neighbor);
+                cache().put_ul(nbr->hostname, nbr);
+            }
+        }
+        catch(nlohmann::json::exception const& e) {
+            auto const& log = Neighbor::log;
+            _err("nbrhood::ser_json_in: %s", e.what());
+        }
     }
 
     static NbrHood& instance() {
