@@ -82,6 +82,17 @@ namespace sx::webserver::dispatchers {
             handler.Content_Type = "application/json";
             server.addController(&handler);
         }
+
+        for(auto const& meth: {"GET", "POST"}) {
+            static Http_Responder handler(
+                    meth,
+                    "/api/diag/proxy/neighbor/list",
+                    authorized::token_protected<json>(json_proxy_neighbor_list)
+            );
+            handler.Content_Type = "application/json";
+            server.addController(&handler);
+        }
+
     }
 
     void controller_add_uni(lmh::WebServer &server) {

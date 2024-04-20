@@ -42,6 +42,7 @@
 #include <ext/lmhpp/include/lmhttpd.hpp>
 #include <service/httpd/util.hpp>
 #include <service/http/jsonize.hpp>
+#include <proxy/nbrhood.hpp>
 
 
 static nlohmann::json json_proxy_session_list(struct MHD_Connection * connection, std::string const& meth, std::string const& req) {
@@ -55,5 +56,16 @@ static nlohmann::json json_proxy_session_list(struct MHD_Connection * connection
 
 
     return SmithProxy::instance().API.proxy_session_list_json(oid, flag_active_only, flag_tlsinfo, flag_verbose);
+
+}
+
+static nlohmann::json json_proxy_neighbor_list(struct MHD_Connection * connection, std::string const& meth, std::string const& req) {
+
+    auto oid = connection_ull_param(connection, "oid", 0ULL);
+    using namespace jsonize;
+
+    bool flag_verbose = load_json_params<bool>(req, "verbose").value_or(false);
+
+    return NbrHood::instance().to_json();
 
 }
