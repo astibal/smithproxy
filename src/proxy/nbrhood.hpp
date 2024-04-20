@@ -74,7 +74,9 @@ struct Neighbor {
         }
 
         [[nodiscard]] nlohmann::json to_json() const {
-            return { {"counter"}, {counter} };
+            auto now_de = epoch_days(time(nullptr));
+
+            return { now_de - days_epoch, counter };
         }
     };
     using stats_lists_t = std::vector<stats_entry_t>;
@@ -109,9 +111,9 @@ struct Neighbor {
         }
 
         return {
-                { {"hostname"}, { hostname } },
-                { {"last_seen"}, { last_seen} },
-                { {"stats"}, { js } }
+                { "hostname",  hostname },
+                { "last_seen", last_seen },
+                { "stats", js }
         };
     }
 
@@ -143,6 +145,8 @@ public:
     explicit NbrHood(size_t max_size): nbrs_(max_size) {}
 
     nbr_cache_t& cache() { return nbrs_; }
+    nbr_cache_t const& cache() const { return nbrs_; }
+
     void update(Neighbor const& n) {
         auto lc_ = std::scoped_lock(cache().lock());
 
@@ -153,6 +157,18 @@ public:
             cache().put_ul(n.hostname, std::make_shared<Neighbor>(n));
             sx::http::webhooks::neighbor_new(n.hostname);
         }
+    }
+
+    [[nodiscard]] nlohmann::json to_json() const {
+        auto lc_ = std::scoped_lock(cache().lock());
+
+        auto ret = nlohmann::json();
+
+        for(auto const& [ _, nbr]: cache().get_map_ul()) {
+            ret.push_back( nbr.first->to_json());
+        }
+
+        return ret;
     }
 
     static NbrHood& instance() {
