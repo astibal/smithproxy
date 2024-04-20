@@ -51,6 +51,7 @@
 #include <service/httpd/httpd.hpp>
 #include <service/cfgapi/cfgapi.hpp>
 #include "service/http/webhooks.hpp"
+#include "proxy/nbrhood.hpp"
 
 #ifdef ASAN_LEAKS
 extern "C" int __lsan_do_recoverable_leak_check();
@@ -441,6 +442,7 @@ void SmithProxy::run() {
             sx::http::webhooks::ping();
             sx::webserver::HttpSessions::cleanup();
 
+            state_save();
         }
         ++seconds;
 
@@ -490,6 +492,32 @@ void SmithProxy::run() {
     }
     else {
         bail_it();
+    }
+}
+
+void SmithProxy::state_save() const {
+
+    std::string state_dir;
+    std::string tenant_name = "default";
+
+    {
+        auto fac = CfgFactory::get();
+        auto lc_ = std::scoped_lock(fac->lock());
+        state_dir = fac->capture_local.dir;
+        tenant_name = fac->tenant_name;
+    }
+
+    auto nbr_file = string_format("%s/nbr-%s.json", state_dir.c_str(), tenant_name.c_str());
+
+    state_save_neighbors(nbr_file);
+}
+
+void SmithProxy::state_save_neighbors(std::string const& fnm) const {
+    auto js = NbrHood::instance().ser_json_out();
+    auto of = std::ofstream(fnm, std::ios::out);
+    if(of.is_open()) {
+        of << js.dump(4);
+        of.close();
     }
 }
 

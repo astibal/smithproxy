@@ -127,6 +127,8 @@ public:
     bool create_listeners();
 
     void run() override;
+    void state_save() const;
+    void state_save_neighbors(std::string const& fnm) const;
 
     void kill_proxies();
     void stop() override;
