@@ -60,10 +60,12 @@ struct Neighbor {
     using days_epoch_t = time_t;
     struct stats_entry_t {
         days_epoch_t days_epoch = epoch_days(time(nullptr));
-        uint64_t counter = 0LL;
+        uint64_t counter = 1LL;
 
-        uint64_t bytes_up {};
-        uint64_t bytes_down {};
+        uint64_t bytes_up {0};
+        uint64_t bytes_down {0};
+
+        std::set<std::string, std::less<std::string>> labels {};
 
         // update entry with new data (currently only counter, which we know we are increasing by one)
         void update() {
@@ -77,27 +79,43 @@ struct Neighbor {
 
             if(bytes_up + bytes_down > 0)
                 ss << "(up:" << bytes_up << ",dw:" << bytes_down << ")";
+            if(not labels.empty()) {
+                ss << "+(";
+                for (auto const &l: labels)
+                    ss << "+" << l;
+                ss << ")";
+            }
             return ss.str();
         }
 
         [[nodiscard]] nlohmann::json to_json() const {
             auto now_de = epoch_days(time(nullptr));
 
-            return { { "relative_days", now_de - days_epoch },
+            nlohmann::json ret = { { "relative_days", now_de - days_epoch },
                      { "counter", counter },
                      { "bytes_up", bytes_up },
                      { "bytes_down", bytes_down },
             };
 
+            for(auto const& l: labels)
+                ret["labels"].push_back(l);
+
+            return ret;
         }
 
         [[nodiscard]] nlohmann::json ser_json_out() const {
-            return { { "days_epoch", days_epoch },
+            nlohmann::json ret = { { "days_epoch", days_epoch },
                      { "counter", counter},
                      { "bytes_up", bytes_up },
                      { "bytes_down", bytes_down },
             };
+
+            for(auto const& l: labels)
+                ret["labels"].push_back(l);
+
+            return ret;
         }
+
         void ser_json_in(nlohmann::json const& j) {
             try {
                 days_epoch = j["days_epoch"];
@@ -108,6 +126,13 @@ struct Neighbor {
 
                 if(j.contains("bytes_down"))
                     bytes_down = j["bytes_down"];
+
+                if(j.contains("labels")) {
+                    labels.clear();
+                    for(auto const& jj: j["labels"]) {
+                        labels.insert(jj.get<std::string>());
+                    }
+                }
             }
             catch(nlohmann::json::exception const& e) {
                 Log::get()->events().insert(ERR, "stat_entry::ser_json_in: %s", e.what());
@@ -123,14 +148,14 @@ struct Neighbor {
         auto this_de = epoch_days(last_seen);
 
         if(timetable.empty()) {
-            timetable.emplace_back(stats_entry_t{ .days_epoch = this_de, .counter = 1 });
+            timetable.emplace_back();
         } else {
             auto cur_de = timetable[0].days_epoch;
             if(cur_de == this_de) {
                 timetable[0].update();
             }
             else {
-                auto nev = stats_entry_t{ .days_epoch = this_de, .counter = 1 };
+                auto nev = stats_entry_t();
                 timetable.insert(timetable.begin(), nev);
 
                 if (timetable.size() > max_timetable_sz) {

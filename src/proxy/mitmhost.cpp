@@ -39,6 +39,7 @@
 
 #include <proxy/mitmhost.hpp>
 #include <proxy/mitmcom.hpp>
+#include <proxy/nbrhood.hpp>
 #include <display.hpp>
 #include <log/logger.hpp>
 #include <service/cfgapi/cfgapi.hpp>
@@ -262,9 +263,17 @@ void MitmHostCX::on_detect(std::shared_ptr<duplexFlowMatch> x_sig, flowMatchStat
         reported = true;
     }
 
-    matched_signatures_.emplace_back(string_format("%s/%s",
-                                                   sig_sig->sig_category.c_str(),
-                                                   sig_sig->name().c_str()));
+    auto sigstring = string_format("%s/%s",
+                                   sig_sig->sig_category.c_str(),
+                                   sig_sig->name().c_str());
+    matched_signatures_.emplace_back(sigstring);
+
+    NbrHood::instance().apply(host(), [&sigstring](Neighbor& nbr) {
+        if(not nbr.timetable.empty()) {
+            nbr.timetable[0].labels.insert(sigstring);
+        }
+        return true;
+    });
 
     if(! reported) {
         // diagnose on "inspect" topic
