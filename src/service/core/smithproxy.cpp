@@ -493,6 +493,9 @@ void SmithProxy::run() {
 
         if (!cfg_daemonize)
             std::cerr << "all master threads terminated" << std::endl;
+
+        state_save();
+        std::cerr << "state saved." << std::endl;
     }
     else {
         bail_it();
