@@ -1,0 +1,11 @@
+#!/usr/bin/env sh
+
+CERT_PATH="/etc/smithproxy/certs/default/portal-cert.pem"
+
+echo "[+] Smithproxy Portal (API and authentication) certificate info: "
+echo
+echo "  Path: ${CERT_PATH}"
+echo
+openssl x509 -in "${CERT_PATH}" -noout -text | grep 'Issuer' -B 1 -A 10 | sed -e 's/^      //'
+openssl x509 -in "${CERT_PATH}" -noout -text | grep 'Subject Alternative Name' -A1 | sed -e 's/^      //'
+

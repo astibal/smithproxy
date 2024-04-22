@@ -142,6 +142,9 @@ apps:
   certinfo-ca:
     command: bin/sx_certinfo_ca
 
+  certinfo-portal:
+    command: bin/sx_certinfo_portal
+
   download-ctlog:
     command: bin/sx_download_ctlog
     plugs:

@@ -189,6 +189,7 @@ directory_setup
 
 if [ "${RUN_CERTINFO}" == "yes" ]; then
   run_docker_cmd "/usr/bin/sx_certinfo_ca"
+  run_docker_cmd "/usr/bin/sx_certinfo_portal"
 fi
 
 if [ "${RUN_CLI}" == "yes" ]; then
