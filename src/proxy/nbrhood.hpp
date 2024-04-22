@@ -250,7 +250,9 @@ public:
             nbr.value()->update();
         }
         else {
-            cache().put_ul(hostname, std::make_shared<Neighbor>(hostname));
+            auto ptr = std::make_shared<Neighbor>(hostname);
+            ptr->update();
+            cache().put_ul(hostname, ptr);
             sx::http::webhooks::neighbor_new(hostname);
         }
     }
