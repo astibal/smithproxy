@@ -4,6 +4,8 @@
 
 void AccessFilter::update(socle::side_t side, buffer const& buf) {
 
+    auto lc_ = std::scoped_lock(update_lock);
+
     // update entropy statistics
     if(not already_applied) {
         _deb("AccessFilter[%c]: requesting webhook while received first %d bytes", socle::from_side(side), buf.size());

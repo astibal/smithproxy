@@ -65,6 +65,9 @@ public:
     void update(socle::side_t side, buffer const& buf);
 
 private:
+
+    std::mutex update_lock;
+
     bool access_allowed = false;
     nlohmann::json access_response;
     bool already_applied = false;
