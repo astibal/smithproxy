@@ -459,6 +459,12 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "added settings.webhook.api_override");
         return true;
     }
+    else if(upgrade_to_num == 1026) {
+        log.event(INF, "added settings.http_api.bind_address");
+        log.event(INF, "added settings.http_api.bind_interface");
+        log.event(INF, "added settings.http_api.allowed_ips");
+        return true;
+    }
 
 
     return false;
@@ -832,6 +838,17 @@ bool CfgFactory::load_settings () {
         load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "key_timeout", sx::webserver::HttpSessions::session_ttl);
         load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "key_extend_on_access", sx::webserver::HttpSessions::extend_on_access);
         load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "loopback_only", sx::webserver::HttpSessions::loopback_only);
+        load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "bind_address", sx::webserver::HttpSessions::bind_address);
+        load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "bind_interface", sx::webserver::HttpSessions::bind_interface);
+
+        if(cfgapi.getRoot()["settings"]["http_api"].exists("allowed_ips")) {
+            sx::webserver::HttpSessions::allowed_ips.clear();
+            const int num = cfgapi.getRoot()["settings"]["http_api"]["allowed_ips"].getLength();
+            for (int i = 0; i < num; i++) {
+                std::string ip = cfgapi.getRoot()["settings"]["http_api"]["allowed_ips"][i];
+                sx::webserver::HttpSessions::allowed_ips.emplace_back(ip);
+            }
+        }
 
         int api_port = 55555;
         load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "port", api_port);
@@ -5005,6 +5022,13 @@ int save_settings(Config& ex) {
     http_api_objects.add("key_timeout", Setting::TypeInt) = (int)sx::webserver::HttpSessions::session_ttl;
     http_api_objects.add("key_extend_on_access", Setting::TypeBoolean) = (bool)sx::webserver::HttpSessions::extend_on_access;
     http_api_objects.add("loopback_only", Setting::TypeBoolean) = (bool)sx::webserver::HttpSessions::loopback_only;
+    http_api_objects.add("bind_address", Setting::TypeString) = sx::webserver::HttpSessions::bind_address;
+    http_api_objects.add("bind_interface", Setting::TypeString) = sx::webserver::HttpSessions::bind_interface;
+
+    Setting& allowed_ips = http_api_objects.add("allowed_ips", Setting::TypeArray);
+    for (auto const& ip: sx::webserver::HttpSessions::allowed_ips) {
+        allowed_ips.add(Setting::TypeString) = ip;
+    }
 
     http_api_objects.add("port", Setting::TypeInt) = sx::webserver::HttpSessions::api_port;
     http_api_objects.add("pam_login", Setting::TypeBoolean) = (bool)sx::webserver::HttpSessions::pam_login;

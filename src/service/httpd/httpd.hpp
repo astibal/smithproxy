@@ -114,6 +114,9 @@ struct HttpSessions {
     static inline uint32_t session_ttl = 3600;
     static inline bool extend_on_access = true;
     static inline bool loopback_only = true;
+    static inline std::string bind_address;
+    static inline std::string bind_interface;
+    static inline std::vector<std::string> allowed_ips;
     static inline int api_port = 55555;
 #ifdef USE_PAM
     static inline bool pam_login = true;

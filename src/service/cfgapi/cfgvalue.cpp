@@ -407,6 +407,21 @@ void CfgValueHelp::init() {
             .help_quick("<number>: port number (default: 55555)")
             .value_filter(VALUE_UINT_RANGE<1024,65535>);
 
+    add("settings.http_api.bind_address", "IPv4 address to bind API port")
+            .help_quick("<ip>: IPv4 address")
+            .value_filter(CfgValue::VALUE_IPADDRESS)
+            .may_be_empty(true);
+
+    add("settings.http_api.bind_interface", "bind API to certain interface for isolation")
+            .help_quick("<string>: network interface name")
+            .value_filter(CfgValue::VALUE_ANY)
+            .may_be_empty(true);
+
+    add("settings.http_api.allowed_ips", "set of IPs which are allowed to access IP (empty means all)")
+            .help_quick("[<string>,...]: string will be converted to IP")
+            .may_be_empty(true);
+
+
 #ifdef USE_PAM
     add("settings.http_api.pam_login", "enable API login using system account")
             .help_quick("<bool>: set to false to disable API login via PAM")

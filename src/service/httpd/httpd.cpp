@@ -15,6 +15,13 @@ std::thread* create_httpd_thread(unsigned short port) {
 
         lmh::WebServer server(port);
         server.options().bind_loopback = HttpSessions::loopback_only;
+        server.options().bind_address = HttpSessions::bind_address;
+        server.options().bind_interface = HttpSessions::bind_interface;
+
+        // keep default fail-open, unless config says otherwise
+        if(! HttpSessions::allowed_ips.empty())
+            server.options().allowed_ips = HttpSessions::allowed_ips;
+
         server.options().certificate = std::make_pair(
                 SSLFactory::factory().config.def_po_key_str,
                 SSLFactory::factory().config.def_po_cert_str);
