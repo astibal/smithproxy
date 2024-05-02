@@ -11,6 +11,7 @@
 #include <service/core/smithproxy_objapi.hpp>
 #include <service/http/jsonize.hpp>
 #include <proxy/mitmproxy.hpp>
+#include <proxy/nbrhood.hpp>
 #include <staticcontent.hpp>
 
 void ObjAPI::for_each_proxy(std::function<void(MitmProxy*)> callable) {
@@ -168,5 +169,50 @@ nlohmann::json ObjAPI::proxy_session_list_json(uint64_t oid, bool active_only, b
         if (ret.empty()) return nlohmann::json::array();
 
         return ret;
+    }
+}
+
+
+nlohmann::json ObjAPI::neighbor_update(std::string const& request) {
+    using namespace jsonize;
+
+    // get a vector of string pairs - pair represents hostname and its tag string
+    using host_tags_vector = std::vector<std::pair<std::string, std::string>>;
+    auto values = load_json_params<host_tags_vector>(request, "update_strings");
+
+    std::size_t updated {0};
+
+    if(values.has_value()) {
+        auto& nbrs = NbrHood::instance().cache();
+        auto lc_ = std::scoped_lock(nbrs.lock());
+
+        for (auto const &[ hostname, update_string ] : values.value()) {
+            auto nbr = nbrs.get_ul(hostname);
+            if(nbr) {
+                nbr.value()->tags_update(update_string);
+                updated++;
+            }
+        }
+    }
+
+    return {
+            { "updated_entries", updated},
+    };
+}
+
+nlohmann::json ObjAPI::neighbor_list(bool flag_raw, unsigned int last_n_days) {
+    if(not flag_raw) {
+        return NbrHood::instance().to_json([&](auto const &nbr) {
+            if (not nbr.timetable.empty()) {
+                auto now_de = epoch_days(time(nullptr));
+                auto delta = now_de - nbr.timetable[0].days_epoch;
+                if (delta <= last_n_days)
+                    return true;
+            }
+            return false;
+        });
+    }
+    else {
+        return NbrHood::instance().ser_json_out();
     }
 }

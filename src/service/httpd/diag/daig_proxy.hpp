@@ -42,7 +42,7 @@
 #include <ext/lmhpp/include/lmhttpd.hpp>
 #include <service/httpd/util.hpp>
 #include <service/http/jsonize.hpp>
-#include <proxy/nbrhood.hpp>
+#include <service/core/smithproxy_objapi.hpp>
 
 
 static nlohmann::json json_proxy_session_list(struct MHD_Connection * connection, std::string const& meth, std::string const& req) {
@@ -55,7 +55,7 @@ static nlohmann::json json_proxy_session_list(struct MHD_Connection * connection
     bool flag_verbose = load_json_params<bool>(req, "verbose").value_or(false);
 
 
-    return SmithProxy::instance().API.proxy_session_list_json(oid, flag_active_only, flag_tlsinfo, flag_verbose);
+    return SmithProxy::api().proxy_session_list_json(oid, flag_active_only, flag_tlsinfo, flag_verbose);
 
 }
 
@@ -70,47 +70,10 @@ static nlohmann::json json_proxy_neighbor_list(struct MHD_Connection * connectio
     unsigned int last_n_days = load_json_params<unsigned int>(req, "max_days").value_or(
             connection_ull_param(connection, "max_days", 365ULL));
 
-    if(not flag_raw) {
-        return NbrHood::instance().to_json([&](auto const &nbr) {
-            if (not nbr.timetable.empty()) {
-                auto now_de = epoch_days(time(nullptr));
-                auto delta = now_de - nbr.timetable[0].days_epoch;
-                if (delta <= last_n_days)
-                    return true;
-            }
-            return false;
-        });
-    }
-    else {
-        return NbrHood::instance().ser_json_out();
-    }
+    return SmithProxy::api().neighbor_list(flag_raw, last_n_days);
 }
 
 
 static nlohmann::json json_proxy_neighbor_update(struct MHD_Connection * connection, std::string const& meth, std::string const& req) {
-
-    using namespace jsonize;
-
-    // get a vector of string pairs - pair represents hostname and its tag string
-    using host_tags_vector = std::vector<std::pair<std::string, std::string>>;
-    auto values = load_json_params<host_tags_vector>(req, "update_strings");
-
-    std::size_t updated {0};
-
-    if(values.has_value()) {
-        auto& nbrs = NbrHood::instance().cache();
-        auto lc_ = std::scoped_lock(nbrs.lock());
-
-        for (auto const &[ hostname, update_string ] : values.value()) {
-            auto nbr = nbrs.get_ul(hostname);
-            if(nbr) {
-                nbr.value()->tags_update(update_string);
-                updated++;
-            }
-        }
-    }
-
-    return {
-        { "updated_entries", updated},
-    };
+    return SmithProxy::api().neighbor_update(req);
 }

@@ -117,6 +117,10 @@ public:
         return sx;
     }
 
+    static ObjAPI& api() {
+        return instance().API;
+    }
+
     static std::thread* create_identity_refresh_thread();
 
     void create_log_writer_thread();
