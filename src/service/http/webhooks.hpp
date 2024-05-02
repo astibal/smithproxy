@@ -121,6 +121,8 @@ namespace sx::http::webhooks {
     std::unordered_map<std::string, url_stats>& url_stats_map();
 
     void ping();
+    void ping_plus();
+    void ping_neighbors();
     void set_enabled(bool val);
     bool is_enabled();
     void set_hostid(std::string const& ref);

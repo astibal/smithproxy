@@ -2393,6 +2393,14 @@ int cli_diag_neighbor_webhook_update_all(struct cli_def *cli, const char *comman
 }
 
 
+int cli_diag_neighbor_webhook_update_ping(struct cli_def *cli, const char *command, char *argv[], int argc)
+{
+    sx::http::webhooks::ping_neighbors();
+
+    return CLI_OK;
+}
+
+
 bool register_diags(cli_def* cli, cli_command* diag) {
     auto diag_ssl = cli_register_command(cli, diag, "tls", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "ssl related troubleshooting commands");
     auto diag_ssl_cache = cli_register_command(cli, diag_ssl, "cache", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl certificate cache");
@@ -2503,6 +2511,7 @@ bool register_diags(cli_def* cli, cli_command* diag) {
             cli_register_command(cli,diag_neighbor,"tag",cli_diag_neighbor_tag,PRIVILEGE_PRIVILEGED, MODE_EXEC,"update a neighbor entry with a tag-string");
             cli_register_command(cli,diag_neighbor,"webhook-update",cli_diag_neighbor_webhook_update,PRIVILEGE_PRIVILEGED, MODE_EXEC,"send single neighbor entry webhook update");
             cli_register_command(cli,diag_neighbor,"webhook-update-all",cli_diag_neighbor_webhook_update_all,PRIVILEGE_PRIVILEGED, MODE_EXEC,"send all neighbor entries webhook update (one msg per entry)");
+            cli_register_command(cli,diag_neighbor,"webhook-update-ping",cli_diag_neighbor_webhook_update_ping,PRIVILEGE_PRIVILEGED, MODE_EXEC,"send all neighbor entries in ping/bulk message");
 
     return true;
 }
