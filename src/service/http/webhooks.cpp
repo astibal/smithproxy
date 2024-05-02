@@ -52,6 +52,8 @@ namespace sx::http::webhooks {
                 }
 
                 entry.update_incr(is_error);
+
+                on_reply(rep);
             }
         }
 
