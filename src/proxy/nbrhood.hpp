@@ -304,6 +304,13 @@ public:
 
     }
 
+    void for_each(std::function<void(Neighbor&)> mod) {
+        auto lc_ = std::scoped_lock(cache().lock());
+        for(auto& item: cache().get_map_ul()) {
+            mod(*item.second.first);
+        }
+    }
+
     [[nodiscard]] nlohmann::json to_json() const {
         return to_json([](auto const&) { return true;});
     }
