@@ -43,6 +43,7 @@
 #include <ctime>
 
 #include <socle/common/timeops.hpp>
+#include <socle/common/stringops.hpp>
 
 #include <utils/lru.hpp>
 #include <service/http/webhooks.hpp>
@@ -174,6 +175,7 @@ struct Neighbor {
         return {
                 { "hostname",  hostname },
                 { "last_seen", last_seen },
+                { "tags", tags_to_string() },
                 { "stats", js }
         };
     }
@@ -183,6 +185,9 @@ struct Neighbor {
         try {
             hostname = j.at("hostname").get<std::string>();
             last_seen = j.at("last_seen").get<time_t>();
+            if(j.contains("tags")) {
+                tags = string_tags(j.at("tags").get<std::string>());
+            }
 
             auto raw_stats = j.at("stats").get<std::vector<nlohmann::json>>();
             timetable.clear();
@@ -208,6 +213,7 @@ struct Neighbor {
 
         return {
                 { "hostname",  hostname },
+                { "tags", tags_to_string() },
                 { "last_seen", last_seen },
                 { "stats", js }
         };
@@ -217,7 +223,11 @@ struct Neighbor {
 
         std::stringstream ss;
         auto delta = time(nullptr) - last_seen;
-        ss << hostname << " last seen: " << uptime_string(delta);
+
+        ss << hostname;
+        if(not tags.empty())
+            ss << " tags: " << tags_to_string();
+        ss << " last seen: " << uptime_string(delta);
         if(not timetable.empty()) {
             ss << " stats:";
             for (auto const& entry: timetable) {
@@ -227,10 +237,17 @@ struct Neighbor {
         return ss.str();
     }
 
+    [[nodiscard]] std::string tags_to_string() const {
+        return std::accumulate(tags.begin(), tags.end(), std::string(),
+                               [](std::string const& a, std::string const& b) {
+                                   return a + (a.length() > 0 ? "+" : "") + b;
+                               });
+    }
 
     std::string hostname;
     time_t last_seen = 0L;
     stats_lists_t timetable {};
+    std::vector<std::string> tags;
 };
 
 class NbrHood {
