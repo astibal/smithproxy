@@ -178,7 +178,7 @@ nlohmann::json ObjAPI::neighbor_update(std::string const& request) {
 
     // get a vector of string pairs - pair represents hostname and its tag string
     using host_tags_vector = std::vector<std::pair<std::string, std::string>>;
-    auto values = load_json_params<host_tags_vector>(request, "update_strings");
+    auto values = load_json_params<host_tags_vector>(request, "hostname_tags");
 
     std::size_t updated {0};
 
