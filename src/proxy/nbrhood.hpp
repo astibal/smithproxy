@@ -237,11 +237,27 @@ struct Neighbor {
         return ss.str();
     }
 
+    // make a single string of tags, separated by `+`
     [[nodiscard]] std::string tags_to_string() const {
         return std::accumulate(tags.begin(), tags.end(), std::string(),
                                [](std::string const& a, std::string const& b) {
                                    return a + (a.length() > 0 ? "+" : "") + b;
                                });
+    }
+
+    // update tags with an update string:
+    // `+` - adds the tag
+    // `-` - removes the tag
+    // `=` - removes all tags
+    //
+    // Examples:
+    // ```
+    // tags_update("+abc"); // adds 'abc' tag
+    // tags_update("-abc"); // removes 'abc' tag
+    // tags_update("=+yyy+xxx") // tags are reset and contain only 'yyy' and 'xxx' tags
+    //```
+    void tags_update(std::string const& update_string) {
+        string_tags_update(tags, update_string);
     }
 
     std::string hostname;
