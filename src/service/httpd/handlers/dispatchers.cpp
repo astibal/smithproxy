@@ -95,6 +95,17 @@ namespace sx::webserver::dispatchers {
             server.addController(&handler);
         }
 
+        for(auto const& meth: {"POST"}) {
+            static Http_Responder handler(
+                    meth,
+                    "/api/diag/proxy/neighbor/update",
+                    authorized::token_protected<json>(json_proxy_neighbor_update)
+            );
+            handler.Content_Type = "application/json";
+            server.addController(&handler);
+        }
+
+
         for(auto const& meth: {"GET", "POST"}) {
             static Http_Responder handler(
                     meth,

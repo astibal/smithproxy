@@ -85,3 +85,32 @@ static nlohmann::json json_proxy_neighbor_list(struct MHD_Connection * connectio
         return NbrHood::instance().ser_json_out();
     }
 }
+
+
+static nlohmann::json json_proxy_neighbor_update(struct MHD_Connection * connection, std::string const& meth, std::string const& req) {
+
+    using namespace jsonize;
+
+    // get a vector of string pairs - pair represents hostname and its tag string
+    using host_tags_vector = std::vector<std::pair<std::string, std::string>>;
+    auto values = load_json_params<host_tags_vector>(req, "update_strings");
+
+    std::size_t updated {0};
+
+    if(values.has_value()) {
+        auto& nbrs = NbrHood::instance().cache();
+        auto lc_ = std::scoped_lock(nbrs.lock());
+
+        for (auto const &[ hostname, update_string ] : values.value()) {
+            auto nbr = nbrs.get_ul(hostname);
+            if(nbr) {
+                nbr.value()->tags_update(update_string);
+                updated++;
+            }
+        }
+    }
+
+    return {
+        { "updated_entries", updated},
+    };
+}

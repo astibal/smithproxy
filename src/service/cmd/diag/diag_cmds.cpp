@@ -2311,6 +2311,38 @@ int cli_diag_neighbor_clear(struct cli_def *cli, const char *command, char *argv
     return CLI_OK;
 }
 
+int cli_diag_neighbor_tag(struct cli_def *cli, const char *command, char *argv[], int argc)
+{
+    auto args = args_to_vec(argv, argc);
+
+    if(args.size() == 2) {
+
+        auto const& hostname = args[0];
+        auto const& update_string = args[1];
+
+        auto &nbrs = NbrHood::instance().cache();
+        auto lc_ = std::scoped_lock(nbrs.lock());
+
+        auto nbr = nbrs.get_ul(hostname);
+        if (nbr) {
+            nbr.value()->tags_update(update_string);
+            cli_print(cli, "Neighbor '%s' updated", hostname.c_str());
+        }
+        else {
+            cli_print(cli, "Neighbor '%s' not found", hostname.c_str());
+        }
+    }
+    else {
+        cli_print(cli, "Usage:");
+        cli_print(cli, "    diag neighbor tag <hostname> <tag_string>");
+        cli_print(cli, "Example:");
+        cli_print(cli, "    diag neighbor tag 1.2.3.4 +tag1+tag2-tag0");
+        cli_print(cli, "    diag neighbor tag 1.2.3.4 =+tag1+tag2");
+    }
+
+    return CLI_OK;
+}
+
 
 bool register_diags(cli_def* cli, cli_command* diag) {
     auto diag_ssl = cli_register_command(cli, diag, "tls", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "ssl related troubleshooting commands");
@@ -2419,6 +2451,7 @@ bool register_diags(cli_def* cli, cli_command* diag) {
     auto diag_neighbor = cli_register_command(cli,diag,"neighbor",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy neighbors diag");
             cli_register_command(cli,diag_neighbor,"list",cli_diag_neighbor_list,PRIVILEGE_PRIVILEGED, MODE_EXEC,"list active neighbors");
             cli_register_command(cli,diag_neighbor,"clear",cli_diag_neighbor_clear,PRIVILEGE_PRIVILEGED, MODE_EXEC,"clear neighbors database");
+            cli_register_command(cli,diag_neighbor,"tag",cli_diag_neighbor_tag,PRIVILEGE_PRIVILEGED, MODE_EXEC,"update a neighbor entry with a tag-string");
 
     return true;
 }
