@@ -277,6 +277,7 @@ public:
     nbr_cache_t const& cache() const { return nbrs_; }
 
     void update(std::string const& hostname) {
+        bool is_new = false;
         {
             auto lc_ = std::scoped_lock(cache().lock());
             if (auto nbr = cache().get_ul(hostname); nbr) {
@@ -285,9 +286,13 @@ public:
                 auto ptr = std::make_shared<Neighbor>(hostname);
                 ptr->update();
                 cache().put_ul(hostname, ptr);
+                is_new = true;
             }
         }
-        sx::http::webhooks::neighbor_new(hostname);
+
+        // send a new neighbor only if we actually create one
+        if(is_new)
+            sx::http::webhooks::neighbor_new(hostname);
     }
 
     bool apply(std::string const& hostname, std::function<bool(Neighbor&)> mod) {
