@@ -1,6 +1,9 @@
 #include <nlohmann/json.hpp>
 
 #include <service/core/smithproxy.hpp>
+#include <proxy/nbrhood.hpp>
+
+
 #include <service/http/webhooks.hpp>
 #include <service/http/async_request.hpp>
 #include <service/http/jsonize.hpp>
@@ -93,30 +96,70 @@ namespace sx::http::webhooks {
         }
     }
 
+    struct neighbor_reply : public default_callback {
+        void on_reply(sx::http::expected_reply const& rep) const override {
+            auto const& body = rep->response.second;
+            if(not body.empty()) {
+                SmithProxy::api().neighbor_update(body);
+            }
+        }
+    };
+
+    void ping_neighbors() {
+        if(enabled) {
+            std::vector<std::string> hostnames;
+
+            NbrHood::instance().for_each([&hostnames](auto const& n) {
+               if(not n.hostname.empty()) hostnames.push_back(n.hostname);
+            });
+
+            nlohmann::json const nbr_ping = {
+                    { "action", "neighbor" },
+                    { "state", "ping" },
+                    {"source", get_hostid() },
+                    {"type", "proxy"},
+                    { "addresses", hostnames }
+            };
+            sx::http::AsyncRequest::emit(
+                    to_string(nbr_ping),
+                    neighbor_reply());
+        }
+    }
 
     void neighbor_new(std::string const& address_str) {
+        neighbor_state(address_str, "new");
+    }
+
+    void neighbor_state(std::string const& address_str, std::string const& state) {
         if(enabled) {
             nlohmann::json const nbr_update = {
                                                 { "action", "neighbor" },
-                                                { "state", "new" },
+                                                { "state", state },
                                                 {"source", get_hostid() },
                                                 {"type", "proxy"},
                                                 { "address", address_str }
                                               };
 
-            struct new_neighbor_reply : public default_callback {
-                void on_reply(sx::http::expected_reply const& rep) const override {
-                    auto const& body = rep->response.second;
-                    if(not body.empty()) {
-                        SmithProxy::api().neighbor_update(body);
-                    }
-                }
-            };
-
 
             sx::http::AsyncRequest::emit(
                     to_string(nbr_update),
-                    new_neighbor_reply());
+                    neighbor_reply());
+        }
+    }
+
+    void neighbor_all(std::vector<std::string> const& address_vec) {
+        if(enabled) {
+            nlohmann::json nbr_update = {
+                    { "action", "neighbor" },
+                    { "state",  "all" },
+                    {"source",  get_hostid() },
+                    {"type",    "proxy"},
+                    {"address", address_vec }
+            };
+
+            sx::http::AsyncRequest::emit(
+                    to_string(nbr_update),
+                    neighbor_reply());
         }
     }
 
@@ -147,6 +190,7 @@ namespace sx::http::webhooks {
                         // if not OK but ACCEPTED, they don't have enough of information - send it
                         if(repl.has_value() and repl.value().response.first == 202) {
                             ping_plus();
+                            ping_neighbors();
                         }
                         auto def = default_callback();
                         def(repl);

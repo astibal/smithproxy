@@ -2343,6 +2343,55 @@ int cli_diag_neighbor_tag(struct cli_def *cli, const char *command, char *argv[]
     return CLI_OK;
 }
 
+int cli_diag_neighbor_webhook_update(struct cli_def *cli, const char *command, char *argv[], int argc)
+{
+    auto args = args_to_vec(argv, argc);
+
+    if(args.size() == 1) {
+
+        auto const& hostname = args[0];
+
+        auto &nbrs = NbrHood::instance().cache();
+        auto lc_ = std::scoped_lock(nbrs.lock());
+
+        auto nbr = nbrs.get_ul(hostname);
+        if (nbr) {
+            sx::http::webhooks::neighbor_state(hostname, "update");
+            cli_print(cli, "Neighbor '%s' update sent", hostname.c_str());
+        }
+        else {
+            cli_print(cli, "Neighbor '%s' not found", hostname.c_str());
+        }
+    }
+    else {
+        cli_print(cli, "Usage:");
+        cli_print(cli, "    diag neighbor webhook-update <hostname>");
+    }
+
+    return CLI_OK;
+}
+
+int cli_diag_neighbor_webhook_update_all(struct cli_def *cli, const char *command, char *argv[], int argc)
+{
+    std::vector<std::string> hostnames;
+
+    {
+        auto& nbrs = NbrHood::instance();
+        nbrs.for_each([&hostnames](auto const& n){
+           if(not n.hostname.empty()) {
+               hostnames.push_back(n.hostname);
+           }
+        });
+    }
+
+    if(not hostnames.empty()) {
+        for(auto const& hostname: hostnames)
+            sx::http::webhooks::neighbor_state(hostname, "update");
+    }
+
+    return CLI_OK;
+}
+
 
 bool register_diags(cli_def* cli, cli_command* diag) {
     auto diag_ssl = cli_register_command(cli, diag, "tls", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "ssl related troubleshooting commands");
@@ -2452,6 +2501,8 @@ bool register_diags(cli_def* cli, cli_command* diag) {
             cli_register_command(cli,diag_neighbor,"list",cli_diag_neighbor_list,PRIVILEGE_PRIVILEGED, MODE_EXEC,"list active neighbors");
             cli_register_command(cli,diag_neighbor,"clear",cli_diag_neighbor_clear,PRIVILEGE_PRIVILEGED, MODE_EXEC,"clear neighbors database");
             cli_register_command(cli,diag_neighbor,"tag",cli_diag_neighbor_tag,PRIVILEGE_PRIVILEGED, MODE_EXEC,"update a neighbor entry with a tag-string");
+            cli_register_command(cli,diag_neighbor,"webhook-update",cli_diag_neighbor_webhook_update,PRIVILEGE_PRIVILEGED, MODE_EXEC,"send single neighbor entry webhook update");
+            cli_register_command(cli,diag_neighbor,"webhook-update-all",cli_diag_neighbor_webhook_update_all,PRIVILEGE_PRIVILEGED, MODE_EXEC,"send all neighbor entries webhook update (one msg per entry)");
 
     return true;
 }

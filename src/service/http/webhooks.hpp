@@ -125,7 +125,9 @@ namespace sx::http::webhooks {
     bool is_enabled();
     void set_hostid(std::string const& ref);
 
+    void neighbor_state(std::string const& address_str, std::string const& state);
     void neighbor_new(std::string const& address_str);
+
     void send_action(std::string const& action, std::string const& action_id, nlohmann::json const& details);
     void send_action_wait(std::string const& action, std::string const& action_id, nlohmann::json const& details, sx::http::AsyncRequest::reply_hook hook);
 }
