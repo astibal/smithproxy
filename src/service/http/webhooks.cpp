@@ -4,6 +4,7 @@
 #include <service/http/webhooks.hpp>
 #include <service/http/async_request.hpp>
 
+
 #include <unordered_map>
 
 
@@ -110,8 +111,19 @@ namespace sx::http::webhooks {
 
             msg.push_back({"details", details});
 
-            sx::http::AsyncRequest::emit(
-                    to_string(msg),
+            std::string msg_str;
+            try {
+                msg_str = to_string(msg);
+            }
+            catch(std::bad_array_new_length const& e) {
+                Log::get()->events().insert(ERR, "webhook::send_action failed: action=%s, id=%s: %s", action.c_str(),
+                                            action_id.c_str(),
+                                            e.what());
+            }
+
+            if(not msg_str.empty()) {
+                sx::http::AsyncRequest::emit(
+                    msg_str,
                     [](sx::http::expected_reply repl) {
                         // if not OK but ACCEPTED, they don't have enough of information - send it
                         if(repl.has_value() and repl.value().response.first == 202) {
@@ -120,6 +132,7 @@ namespace sx::http::webhooks {
                         auto def = default_callback();
                         def(repl);
                     });
+            }
         }
     }
 
