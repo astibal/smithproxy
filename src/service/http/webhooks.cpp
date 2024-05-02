@@ -3,7 +3,7 @@
 #include <service/core/smithproxy.hpp>
 #include <service/http/webhooks.hpp>
 #include <service/http/async_request.hpp>
-
+#include <service/http/jsonize.hpp>
 
 #include <unordered_map>
 
@@ -35,6 +35,8 @@ namespace sx::http::webhooks {
     }
 
     struct default_callback {
+        default_callback() = default;
+        virtual ~default_callback() = default;
 
         void operator() (sx::http::expected_reply rep) const {
 
@@ -52,6 +54,10 @@ namespace sx::http::webhooks {
                 entry.update_incr(is_error);
             }
         }
+
+        virtual void on_reply([[maybe_unused]] sx::http::expected_reply const& rep) const {
+            // this cannot be abstract class, it's used with a no-op response
+        };
     };
 
     void ping() {
@@ -95,9 +101,20 @@ namespace sx::http::webhooks {
                                                 {"type", "proxy"},
                                                 { "address", address_str }
                                               };
+
+            struct new_neighbor_reply : public default_callback {
+                void on_reply(sx::http::expected_reply const& rep) const override {
+                    auto const& body = rep->response.second;
+                    if(not body.empty()) {
+                        SmithProxy::api().neighbor_update(body);
+                    }
+                }
+            };
+
+
             sx::http::AsyncRequest::emit(
                     to_string(nbr_update),
-                    default_callback());
+                    new_neighbor_reply());
         }
     }
 

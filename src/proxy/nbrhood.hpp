@@ -277,17 +277,17 @@ public:
     nbr_cache_t const& cache() const { return nbrs_; }
 
     void update(std::string const& hostname) {
-        auto lc_ = std::scoped_lock(cache().lock());
-
-        if(auto nbr = cache().get_ul(hostname); nbr) {
-            nbr.value()->update();
+        {
+            auto lc_ = std::scoped_lock(cache().lock());
+            if (auto nbr = cache().get_ul(hostname); nbr) {
+                nbr.value()->update();
+            } else {
+                auto ptr = std::make_shared<Neighbor>(hostname);
+                ptr->update();
+                cache().put_ul(hostname, ptr);
+            }
         }
-        else {
-            auto ptr = std::make_shared<Neighbor>(hostname);
-            ptr->update();
-            cache().put_ul(hostname, ptr);
-            sx::http::webhooks::neighbor_new(hostname);
-        }
+        sx::http::webhooks::neighbor_new(hostname);
     }
 
     bool apply(std::string const& hostname, std::function<bool(Neighbor&)> mod) {
