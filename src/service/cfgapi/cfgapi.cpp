@@ -465,7 +465,10 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "added settings.http_api.allowed_ips");
         return true;
     }
-
+    else if(upgrade_to_num == 1027) {
+        log.event(INF, "added settings.webhook.bind_interface");
+        return true;
+    }
 
     return false;
 }
@@ -871,6 +874,7 @@ bool CfgFactory::load_settings () {
         sx::http::webhooks::set_enabled(settings_webhook.enabled);
 
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "hostid", settings_webhook.hostid);
+        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "bind_interface", settings_webhook.bind_interface);
         if(not settings_webhook.hostid.empty()) sx::http::webhooks::set_hostid(settings_webhook.hostid);
     }
 
@@ -5039,6 +5043,7 @@ int save_settings(Config& ex) {
     webhook_objects.add("url", Setting::TypeString) = CfgFactory::get()->settings_webhook.cfg_url;
     webhook_objects.add("tls_verify", Setting::TypeBoolean) = CfgFactory::get()->settings_webhook.cfg_tls_verify;
     webhook_objects.add("hostid", Setting::TypeString) = CfgFactory::get()->settings_webhook.hostid;
+    webhook_objects.add("bind_interface", Setting::TypeString) = CfgFactory::get()->settings_webhook.bind_interface;
     webhook_objects.add("api_override", Setting::TypeBoolean) = CfgFactory::get()->settings_webhook.allow_api_override;
 
     return 0;

@@ -122,6 +122,12 @@ namespace sx::http {
                 curl_easy_setopt(curl, CURLOPT_TIMEOUT, seconds);
         }
 
+        void set_interface(std::string const& intf) {
+            if(curl and not intf.empty()) {
+                curl_easy_setopt(curl, CURLOPT_INTERFACE, intf.c_str());
+            }
+        }
+
         static std::string _make_ts() {
             auto now = std::chrono::system_clock::now();
             auto itt = std::chrono::system_clock::to_time_t(now);

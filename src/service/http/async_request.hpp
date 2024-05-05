@@ -88,6 +88,7 @@ namespace sx::http {
 
             std::string dns_servers;
             bool do_verify = true;
+            std::string bind_if;
             {
                 auto lc_ = std::scoped_lock(CfgFactory::lock());
                 auto is_enabled = CfgFactory::get()->settings_webhook.enabled;
@@ -107,6 +108,7 @@ namespace sx::http {
                 }
                 dns_servers = oss.str();
                 do_verify = CfgFactory::get()->settings_webhook.active_tls_verify();
+                bind_if = CfgFactory::get()->settings_webhook.bind_interface;
             }
 
             Request request(Request::DEFAULT, dns_servers);
@@ -114,6 +116,7 @@ namespace sx::http {
             // make custom setup
             request.set_timeout(config::timeout);
             if(not do_verify) request.disable_tls_verify();
+            if(not bind_if.empty()) request.set_interface(bind_if);
 
             // set debugging explicitly
             if(Request::DEBUG) {
