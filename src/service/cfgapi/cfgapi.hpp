@@ -202,7 +202,7 @@ class CfgFactory : public CfgFactoryBase {
 public:
     // Each version bump implies a config upgrade - we start on 1000
     // see upgrade_schema() - control config upgrade
-    constexpr static inline const int SCHEMA_VERSION  = 1027;
+    constexpr static inline const int SCHEMA_VERSION  = 1028;
 
     static inline std::atomic_bool LOAD_ERRORS = false;
 
@@ -341,6 +341,7 @@ public:
         std::string tun_type = "gre";
         std::string tun_dst = "127.0.0.1";
         int tun_ttl {1};
+        std::string bind_interface;
     } capture_remote;
 
     struct {

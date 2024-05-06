@@ -469,6 +469,10 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "added settings.webhook.bind_interface");
         return true;
     }
+    else if(upgrade_to_num == 1028) {
+        log.event(INF, "added captures.remote.bind_interface");
+        return true;
+    }
 
     return false;
 }
@@ -949,6 +953,7 @@ bool CfgFactory::load_captures() {
             load_if_exists(remote, "tun_type", CfgFactory::get()->capture_remote.tun_type);
             load_if_exists(remote, "tun_dst", CfgFactory::get()->capture_remote.tun_dst);
             load_if_exists(remote, "tun_ttl", CfgFactory::get()->capture_remote.tun_ttl);
+            load_if_exists(remote, "bind_interface", CfgFactory::get()->capture_remote.bind_interface);
 
             CfgFactory::gre_export_apply(&traflog::PcapLog::single_instance());
         }
@@ -2929,8 +2934,13 @@ void CfgFactory::gre_export_apply(traflog::PcapLog* pcaplog) {
 
             auto exp = std::make_shared<traflog::GreExporter>(fam, ip);
             pcaplog->ip_packet_hook = exp;
-            if(cfg->capture_remote.tun_ttl > 0)
+
+            if(cfg->capture_remote.tun_ttl > 0) {
                 exp->ttl(cfg->capture_remote.tun_ttl);
+            }
+            if(not cfg->capture_remote.bind_interface.empty()) {
+                exp->bind_if(cfg->capture_remote.bind_interface);
+            }
 
         } else {
             pcaplog->ip_packet_hook.reset();
@@ -5098,6 +5108,7 @@ int CfgFactory::save_captures(Config& ex) const {
     remote.add("tun_type", Setting::TypeString) = CfgFactory::get()->capture_remote.tun_type;
     remote.add("tun_dst", Setting::TypeString) = CfgFactory::get()->capture_remote.tun_dst;
     remote.add("tun_ttl", Setting::TypeInt) = CfgFactory::get()->capture_remote.tun_ttl;
+    remote.add("bind_interface", Setting::TypeString) = CfgFactory::get()->capture_remote.bind_interface;
 
 
     if(not objects.exists("options"))
