@@ -15,12 +15,15 @@
 
 namespace sx::webserver::dispatchers {
 
-    void controller_add_debug_only(lmh::WebServer &server) {
-#ifndef BUILD_RELEASE
-        static Http_Responder status_ping(
+    void controller_add_status(lmh::WebServer &server) {
+        auto* status_ping = new Http_Responder(
                 "POST",
                 "/api/status/ping",
+#ifndef BUILD_RELEASE
                 authorized::unprotected<json>(
+#else
+                authorized::token_protected<json>(
+#endif
                         []([[maybe_unused]] MHD_Connection *c, [[maybe_unused]] std::string const &meth, [[maybe_unused]] std::string const &req) -> json {
                             time_t uptime = time(nullptr) - SmithProxy::instance().ts_sys_started;
                             return {{"version", SMITH_VERSION},
@@ -29,13 +32,13 @@ namespace sx::webserver::dispatchers {
                                     {"uptime_str", uptime_string(uptime)}};
                         }));
 
-        status_ping.Content_Type = "application/json";
-        server.addController(&status_ping);
-#endif
+        status_ping->Content_Type = "application/json";
+        server.addController(std::shared_ptr<lmh::Controller>(status_ping));
+
     }
 
     void controller_add_commons(lmh::WebServer& server) {
-        static Http_Responder cacert(
+        auto* cacert = new Http_Responder(
                 "GET",
                 "/cacert",
                 authorized::unprotected<std::string>(
@@ -50,121 +53,119 @@ namespace sx::webserver::dispatchers {
                             return pem_ca_cert;
                         }));
 
-        cacert.Content_Type = "application/x-pem-file";
-        server.addController(&cacert);
+        cacert->Content_Type = "application/x-pem-file";
+        server.addController(std::shared_ptr<lmh::Controller>(cacert));
     }
 
 
     void controller_add_diag(lmh::WebServer &server) {
 
         for(auto const& meth: { "GET", "POST"}) {
-            static Http_Responder handler(meth, "/api/diag/ssl/cache/stats",
+            auto* handler = new Http_Responder(meth, "/api/diag/ssl/cache/stats",
                                           authorized::token_protected<json>(json_ssl_cache_stats));
-            handler.Content_Type = "application/json";
-            server.addController(&handler);
+            handler->Content_Type = "application/json";
+            server.addController(std::shared_ptr<lmh::Controller>(handler));
         }
 
         for(auto const& meth: {"GET", "POST"}) {
-            static Http_Responder handler(
+            auto* handler = new Http_Responder(
                     meth,
                     "/api/diag/ssl/cache/print",
                     authorized::token_protected<json>(json_ssl_cache_print)
             );
-            handler.Content_Type = "application/json";
-            server.addController(&handler);
+            handler->Content_Type = "application/json";
+            server.addController(std::shared_ptr<lmh::Controller>(handler));
         }
 
 
         for(auto const& meth: {"GET", "POST"}) {
-            static Http_Responder handler(
+            auto* handler = new Http_Responder(
                     meth,
                     "/api/diag/proxy/session/list",
                     authorized::token_protected<json>(json_proxy_session_list)
             );
-            handler.Content_Type = "application/json";
-            server.addController(&handler);
+            handler->Content_Type = "application/json";
+            server.addController(std::shared_ptr<lmh::Controller>(handler));
         }
 
         for(auto const& meth: {"GET", "POST"}) {
-            static Http_Responder handler(
+            auto* handler = new Http_Responder(
                     meth,
                     "/api/diag/proxy/neighbor/list",
                     authorized::token_protected<json>(json_proxy_neighbor_list)
             );
-            handler.Content_Type = "application/json";
-            server.addController(&handler);
+            handler->Content_Type = "application/json";
+            server.addController(std::shared_ptr<lmh::Controller>(handler));
         }
 
         for(auto const& meth: {"POST"}) {
-            static Http_Responder handler(
+            auto* handler = new Http_Responder(
                     meth,
                     "/api/diag/proxy/neighbor/update",
                     authorized::token_protected<json>(json_proxy_neighbor_update)
             );
-            handler.Content_Type = "application/json";
-            server.addController(&handler);
+            handler->Content_Type = "application/json";
+            server.addController(std::shared_ptr<lmh::Controller>(handler));
         }
 
 
         for(auto const& meth: {"GET", "POST"}) {
-            static Http_Responder handler(
+            auto* handler = new Http_Responder(
                     meth,
                     "/api/do/ssl/custom/reload",
                     authorized::token_protected<json>(json_do_ssl_custom_reload)
             );
-            handler.Content_Type = "application/json";
-            server.addController(&handler);
+            handler->Content_Type = "application/json";
+            server.addController(std::shared_ptr<lmh::Controller>(handler));
         }
 
 
     }
 
     void controller_add_uni(lmh::WebServer &server) {
-        static Http_Responder cfg_uni_add(
+        auto* cfg_uni_add = new Http_Responder(
                 "POST",
                 "/api/config/uni/add",
                 authorized::token_protected<json>(&json_add_section_entry)
         );
-        cfg_uni_add.Content_Type = "application/json";
-        server.addController(&cfg_uni_add);
+        cfg_uni_add->Content_Type = "application/json";
+        server.addController(std::shared_ptr<lmh::Controller>(cfg_uni_add));
 
-        static Http_Responder cfg_uni_set(
+        auto* cfg_uni_set = new Http_Responder(
                 "POST",
                 "/api/config/uni/set",
                 authorized::token_protected<json>(&json_set_section_entry)
         );
-        cfg_uni_set.Content_Type = "application/json";
-        server.addController(&cfg_uni_set);
+        cfg_uni_set->Content_Type = "application/json";
+        server.addController(std::shared_ptr<lmh::Controller>(cfg_uni_set));
 
 
-        static Http_Responder cfg_uni_get(
+        auto* cfg_uni_get = new Http_Responder(
                 "POST",
                 "/api/config/uni/get",
                 authorized::token_protected<json>(&json_get_section_entry)
         );
-        cfg_uni_get.Content_Type = "application/json";
-        server.addController(&cfg_uni_get);
+        cfg_uni_get->Content_Type = "application/json";
+        server.addController(std::shared_ptr<lmh::Controller>(cfg_uni_get));
     }
 
     void controller_add_wh_register(lmh::WebServer& server) {
-        static Http_Responder webhook_register(
+        auto* webhook_register = new Http_Responder(
                     "POST",
                     "/api/webhook/register",
                     authorized::token_protected<json>(wh_register)
             );
-        webhook_register.Content_Type = "application/json";
-        server.addController(&webhook_register);
+        webhook_register->Content_Type = "application/json";
+        server.addController(std::shared_ptr<lmh::Controller>(webhook_register));
     }
     void controller_add_wh_unregister(lmh::WebServer& server) {
-        static Http_Responder webhook_unregister(
+        auto* webhook_unregister = new Http_Responder(
                 "POST",
                 "/api/webhook/unregister",
                 authorized::token_protected<json>(wh_unregister)
         );
-        webhook_unregister.Content_Type = "application/json";
-        server.addController(&webhook_unregister);
+        webhook_unregister->Content_Type = "application/json";
+        server.addController(std::shared_ptr<lmh::Controller>(webhook_unregister));
     }
-
-
 }
 

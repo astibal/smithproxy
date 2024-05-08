@@ -28,7 +28,7 @@ std::thread* create_httpd_thread(unsigned short port) {
 
         dispatchers::controller_add_authorization(server);
 
-        dispatchers::controller_add_debug_only(server);
+        dispatchers::controller_add_status(server);
         dispatchers::controller_add_commons(server);
         dispatchers::controller_add_diag(server);
         dispatchers::controller_add_uni(server);

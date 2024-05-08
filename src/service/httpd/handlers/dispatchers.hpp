@@ -11,7 +11,7 @@
 
 namespace sx::webserver {
     namespace dispatchers {
-        void controller_add_debug_only(lmh::WebServer &server);
+        void controller_add_status(lmh::WebServer &server);
         void controller_add_commons(lmh::WebServer &server);
         void controller_add_diag(lmh::WebServer &server);
         void controller_add_uni(lmh::WebServer &server);

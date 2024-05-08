@@ -76,7 +76,7 @@ namespace sx::webserver {
     void controller_add_authorization(lmh::WebServer &server) {
 
 
-        static Http_Responder authorize_get(
+        auto* authorize_get = new Http_Responder(
                 "GET",
                 "/api/authorize",
                 [](MHD_Connection *conn, std::string const &meth, std::string const &req) -> Http_JsonResponseParams {
@@ -101,8 +101,10 @@ namespace sx::webserver {
                     ret.response_code = MHD_HTTP_FORBIDDEN;
                     return ret;
                 });
+        authorize_get->Content_Type = "application/json";
+        server.addController(std::shared_ptr<lmh::Controller>(authorize_get));
 
-        static Http_Responder authorize(
+        auto* authorize = new Http_Responder(
                 "POST",
                 "/api/authorize",
                 [](MHD_Connection *conn, std::string const &meth, std::string const &req) -> Http_JsonResponseParams {
@@ -141,12 +143,9 @@ namespace sx::webserver {
                     return ret;
                 }
         );
+        authorize->Content_Type = "application/json";
+        server.addController(std::shared_ptr<lmh::Controller>(authorize));
 
-        authorize.Content_Type = "application/json";
-        authorize_get.Content_Type = "application/json";
-
-        server.addController(&authorize);
-        server.addController(&authorize_get);
 
 
         auto split_form_data = [](std::string const& str, unsigned char sep1, unsigned char sep2) {
@@ -165,7 +164,7 @@ namespace sx::webserver {
             return vals;
         };
 
-        static Http_Responder login(
+        auto* login = new Http_Responder(
                 "POST",
                 "/api/login",
                 [&split_form_data](MHD_Connection *conn, std::string const &meth, std::string const &req) -> Http_JsonResponseParams {
@@ -226,8 +225,8 @@ namespace sx::webserver {
                 }
         );
 
-        login.Content_Type = "application/json";
-        server.addController(&login);
+        login->Content_Type = "application/json";
+        server.addController(std::shared_ptr<lmh::Controller>(login));
     }
 }
 }
