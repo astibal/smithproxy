@@ -51,7 +51,7 @@
 struct Neighbor {
 
     static inline logan_lite log = logan_lite("proxy.nbr");
-    static constexpr size_t max_timetable_sz = 14;
+    static inline size_t max_timetable_sz = 30;
 
     explicit Neighbor(std::string_view hostname): hostname(hostname) {
         last_seen = time(nullptr);
@@ -149,17 +149,21 @@ struct Neighbor {
         auto this_de = epoch_days(last_seen);
 
         if(timetable.empty()) {
+            _dia("neighbor update: %s: new timetable entry", hostname.c_str());
             timetable.emplace_back();
         } else {
             auto cur_de = timetable[0].days_epoch;
             if(cur_de == this_de) {
+                _dia("neighbor update: %s: update today timetable", hostname.c_str());
                 timetable[0].update();
             }
             else {
+                _dia("neighbor update: %s: add today timetable", hostname.c_str());
                 auto nev = stats_entry_t();
                 timetable.insert(timetable.begin(), nev);
 
-                if (timetable.size() > max_timetable_sz) {
+                while (timetable.size() > max_timetable_sz) {
+                    _dia("neighbor update: %s: removing excess timetable entry", hostname.c_str());
                     timetable.pop_back();
                 }
             }
