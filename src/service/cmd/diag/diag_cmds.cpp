@@ -2385,8 +2385,7 @@ int cli_diag_neighbor_webhook_update_all(struct cli_def *cli, const char *comman
     }
 
     if(not hostnames.empty()) {
-        for(auto const& hostname: hostnames)
-            sx::http::webhooks::neighbor_state(hostname, "update");
+            sx::http::webhooks::neighbor_state(hostnames, "update");
     }
 
     return CLI_OK;
