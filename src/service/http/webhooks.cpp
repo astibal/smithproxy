@@ -44,23 +44,33 @@ namespace sx::http::webhooks {
         void operator() (sx::http::expected_reply rep) const {
 
             if(rep.has_value()) {
-                auto const& url = rep.value().request;
-                auto lc_ = std::scoped_lock(url_stats_lock());
-                auto& entry = url_stats_map()[url];
-                entry.url = url;
 
-                bool is_error = false;
-                if(auto code = rep.value().response.first; code >= 400) {
-                    is_error = true;
+                auto code = rep.value().response.first;
+                if(code > 0) {
+                    auto const& url = rep.value().request;
+                    auto lc_ = std::scoped_lock(url_stats_lock());
+                    auto& entry = url_stats_map()[url];
+                    entry.url = url;
+
+                    bool is_error = false;
+                    if(code >= 400) {
+                        is_error = true;
+                    }
+
+                    entry.update_incr(is_error);
+                    on_reply(rep);
                 }
-
-                entry.update_incr(is_error);
-
-                on_reply(rep);
+                else {
+                    // this is an initialization hook call!
+                    on_init(rep);
+                }
             }
         }
 
         virtual void on_reply([[maybe_unused]] sx::http::expected_reply const& rep) const {
+            // this cannot be abstract class, it's used with a no-op response
+        };
+        virtual void on_init([[maybe_unused]] sx::http::expected_reply const& rep) const {
             // this cannot be abstract class, it's used with a no-op response
         };
     };
@@ -97,6 +107,14 @@ namespace sx::http::webhooks {
     }
 
     struct neighbor_reply : public default_callback {
+        void on_init(sx::http::expected_reply const& rep) const override {
+            if(rep.has_value()) {
+                auto* ctrl = rep->ctrl;
+                if(ctrl)
+                    ctrl->set_timeout(60);
+            }
+        }
+
         void on_reply(sx::http::expected_reply const& rep) const override {
             auto const& body = rep->response.second;
             if(not body.empty()) {
@@ -126,35 +144,20 @@ namespace sx::http::webhooks {
         }
     }
 
-    void neighbor_new(std::string const& address_str) {
-        neighbor_state(address_str, "new");
-    }
 
     void neighbor_state(std::string const& address_str, std::string const& state) {
-        if(enabled) {
-            nlohmann::json const nbr_update = {
-                                                { "action", "neighbor" },
-                                                { "state", state },
-                                                {"source", get_hostid() },
-                                                {"type", "proxy"},
-                                                { "address", address_str }
-                                              };
-
-
-            sx::http::AsyncRequest::emit(
-                    to_string(nbr_update),
-                    neighbor_reply());
-        }
+        const std::vector<std::string> vec = {address_str,};
+        neighbor_state(vec, state);
     }
 
-    void neighbor_all(std::vector<std::string> const& address_vec) {
+    void neighbor_state(std::vector<std::string> const& address_vec, std::string const& state) {
         if(enabled) {
             nlohmann::json nbr_update = {
                     { "action", "neighbor" },
-                    { "state",  "all" },
+                    { "state",  state },
                     {"source",  get_hostid() },
                     {"type",    "proxy"},
-                    {"address", address_vec }
+                    {"addresses", address_vec }
             };
 
             sx::http::AsyncRequest::emit(
@@ -184,17 +187,17 @@ namespace sx::http::webhooks {
             }
 
             if(not msg_str.empty()) {
-                sx::http::AsyncRequest::emit(
-                    msg_str,
-                    [](sx::http::expected_reply repl) {
-                        // if not OK but ACCEPTED, they don't have enough of information - send it
-                        if(repl.has_value() and repl.value().response.first == 202) {
+
+                struct action_hook : public default_callback {
+                    void on_reply([[maybe_unused]] sx::http::expected_reply const &rep) const override {
+                        if(rep.has_value() and rep.value().response.first == 202) {
                             ping_plus();
                             ping_neighbors();
                         }
-                        auto def = default_callback();
-                        def(repl);
-                    });
+                    }
+                };
+                sx::http::AsyncRequest::emit(msg_str, action_hook());
+
             }
         }
     }

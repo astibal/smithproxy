@@ -128,6 +128,7 @@ namespace sx::http::webhooks {
     void set_hostid(std::string const& ref);
 
     void neighbor_state(std::string const& address_str, std::string const& state);
+    void neighbor_state(std::vector<std::string> const& address_vec, std::string const& state);
     void neighbor_new(std::string const& address_str);
 
     void send_action(std::string const& action, std::string const& action_id, nlohmann::json const& details);

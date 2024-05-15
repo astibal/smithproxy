@@ -154,7 +154,7 @@ struct Neighbor {
         } else {
             auto cur_de = timetable[0].days_epoch;
             if(cur_de == this_de) {
-                _dia("neighbor update: %s: update today timetable", hostname.c_str());
+                _deb("neighbor update: %s: update today timetable", hostname.c_str());
                 timetable[0].update();
             }
             else {
@@ -296,7 +296,7 @@ public:
 
         // send a new neighbor only if we actually create one
         if(is_new)
-            sx::http::webhooks::neighbor_new(hostname);
+            sx::http::webhooks::neighbor_state(hostname, "new");
     }
 
     bool apply(std::string const& hostname, std::function<bool(Neighbor&)> mod) {

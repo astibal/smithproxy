@@ -50,12 +50,14 @@
 
 namespace sx::http {
 
+    class Request;
+
     struct expected_reply_t {
+        Request* ctrl = nullptr;
         std::string request;
-        std::pair<long,std::string> response;
+        std::pair<long,std::string> response {};
     };
     using expected_reply = std::optional<expected_reply_t>;
-    sx::http::expected_reply make_reply(std::string url, long code, std::string reply);
 
 
     class Request {
@@ -110,6 +112,9 @@ namespace sx::http {
             IPV4_ONLY,
             IPV6_ONLY
         };
+
+        sx::http::expected_reply make_reply(std::string url, long code, std::string reply);
+
 
         // this is not good idea, but good to have for testing
         void disable_tls_verify() {

@@ -123,6 +123,9 @@ namespace sx::http {
                 request.setup_debug();
             }
 
+            auto init_hook_arg = request.make_reply(url, -100, "");
+            hook(init_hook_arg);
+
             auto reply = request.emit(url, pay);
 
             if(not reply or reply.value().response.first >= 300) {
