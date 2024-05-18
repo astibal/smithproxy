@@ -202,7 +202,7 @@ class CfgFactory : public CfgFactoryBase {
 public:
     // Each version bump implies a config upgrade - we start on 1000
     // see upgrade_schema() - control config upgrade
-    constexpr static inline const int SCHEMA_VERSION  = 1028;
+    constexpr static inline const int SCHEMA_VERSION  = 1029;
 
     static inline std::atomic_bool LOAD_ERRORS = false;
 
@@ -344,7 +344,7 @@ public:
         std::string bind_interface;
     } capture_remote;
 
-    struct {
+    struct settings_webhook_t {
         bool enabled = false;
         std::string cfg_url;
         bool cfg_tls_verify = true;
@@ -369,8 +369,15 @@ public:
             return cfg_tls_verify;
         };
 
+        static inline int DEFAULT_PING_INTERVAL = 120;
+        static inline int DEFAULT_NBR_UPDATE_INTERVAL = 60*15; // default: 15 minutes tag update interval
+        static inline int DEFAULT_NBR_UPDATE_REFRESH_AGE = 60*5; // default: 5 minutes tag update interval
+
         std::string hostid;
         std::string bind_interface;
+        int ping_interval = DEFAULT_PING_INTERVAL;
+        int nbr_update_interval = DEFAULT_NBR_UPDATE_INTERVAL;
+        int nbr_tag_refresh_age = DEFAULT_NBR_UPDATE_REFRESH_AGE;
     } settings_webhook;
 
     std::vector<AddressInfo> db_nameservers;

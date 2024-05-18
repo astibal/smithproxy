@@ -473,6 +473,12 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "added captures.remote.bind_interface");
         return true;
     }
+    else if(upgrade_to_num == 1029) {
+        log.event(INF, "added settings.webhook.ping_interval");
+        log.event(INF, "added settings.webhook.nbr_update_interval");
+        log.event(INF, "added settings.webhook.nbr_refresh_age");
+        return true;
+    }
 
     return false;
 }
@@ -879,6 +885,10 @@ bool CfgFactory::load_settings () {
 
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "hostid", settings_webhook.hostid);
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "bind_interface", settings_webhook.bind_interface);
+        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "ping_interval", settings_webhook.ping_interval);
+        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "nbr_update_interval", settings_webhook.nbr_update_interval);
+        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "nbr_tag_refresh_age", settings_webhook.nbr_tag_refresh_age);
+
         if(not settings_webhook.hostid.empty()) sx::http::webhooks::set_hostid(settings_webhook.hostid);
     }
 
@@ -5055,7 +5065,9 @@ int save_settings(Config& ex) {
     webhook_objects.add("hostid", Setting::TypeString) = CfgFactory::get()->settings_webhook.hostid;
     webhook_objects.add("bind_interface", Setting::TypeString) = CfgFactory::get()->settings_webhook.bind_interface;
     webhook_objects.add("api_override", Setting::TypeBoolean) = CfgFactory::get()->settings_webhook.allow_api_override;
-
+    webhook_objects.add("ping_interval", Setting::TypeInt) = (int)CfgFactory::get()->settings_webhook.ping_interval;
+    webhook_objects.add("nbr_update_interval", Setting::TypeInt) = CfgFactory::get()->settings_webhook.nbr_update_interval;
+    webhook_objects.add("nbr_tag_refresh_age", Setting::TypeInt) = CfgFactory::get()->settings_webhook.nbr_tag_refresh_age;
     return 0;
 }
 

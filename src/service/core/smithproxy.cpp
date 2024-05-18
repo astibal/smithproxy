@@ -411,8 +411,23 @@ void SmithProxy::run() {
 
     Log::get()->events().insert(INF, "... started");
 
-    const unsigned int webhook_ping_interval = 120;
-    unsigned int seconds = webhook_ping_interval - 10; // speed-up first ping
+    unsigned int webhook_ping_interval = 120;
+    unsigned int webhook_nbr_interval = 120;
+    int webhook_nbr_refresh_age = 300;
+
+
+    auto update_intervals = [&]() {
+        auto lc_ = std::scoped_lock(CfgFactory::lock());
+        webhook_ping_interval = CfgFactory::get()->settings_webhook.ping_interval;
+        webhook_nbr_interval = CfgFactory::get()->settings_webhook.nbr_update_interval;
+        webhook_nbr_refresh_age = CfgFactory::get()->settings_webhook.nbr_tag_refresh_age;
+    };
+    update_intervals();
+
+    unsigned int wh_ping_seconds = webhook_ping_interval - 10; // speed-up first ping
+    unsigned int wh_nbr_seconds = 0;
+
+
 
     instance().hostname = []() {
         std::array<char,64> h{0};
@@ -433,25 +448,50 @@ void SmithProxy::run() {
             break;
         }
 
-        if(seconds >= webhook_ping_interval) {
+        if(sx::http::webhooks::is_enabled()) {
 
-            {
-                // refresh enabled status
-                auto lc_ = std::scoped_lock(CfgFactory::lock());
-                auto const& fac = CfgFactory::get();
-                sx::http::webhooks::set_enabled( fac->settings_webhook.enabled);
+            update_intervals();
+            if (wh_ping_seconds >= webhook_ping_interval) {
+
+                {
+                    // refresh enabled status
+                    auto lc_ = std::scoped_lock(CfgFactory::lock());
+                    auto const &fac = CfgFactory::get();
+                    sx::http::webhooks::set_enabled(fac->settings_webhook.enabled);
+                }
+
+                wh_ping_seconds = 0;
+                sx::http::webhooks::ping();
+                sx::webserver::HttpSessions::cleanup();
+
+                state_save();
             }
+            ++wh_ping_seconds;
 
-            seconds = 0;
-            sx::http::webhooks::ping();
-            sx::webserver::HttpSessions::cleanup();
+            if (wh_nbr_seconds >= webhook_nbr_interval) {
 
-            state_save();
+                std::vector<std::string> hostnames;
+                auto now = time(nullptr);
+
+                {
+                    auto &nbrs = NbrHood::instance();
+                    nbrs.for_each([&hostnames, &now, &webhook_nbr_refresh_age](auto const &n) {
+                        if (not n.hostname.empty()) {
+                            if (now - n.tags_ts() > webhook_nbr_refresh_age)
+                                hostnames.push_back(n.hostname);
+                        }
+                    });
+                }
+
+                if(not hostnames.empty()) {
+                    sx::http::webhooks::neighbor_state(hostnames, "update");
+                }
+                wh_nbr_seconds = 0;
+            }
+            ++wh_nbr_seconds;
+
+            std::this_thread::sleep_for(std::chrono::seconds(1));
         }
-        ++seconds;
-
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-
 #ifdef ASAN_LEAKS
         // See: https://stackoverflow.com/questions/67705427/how-to-use-asan-on-a-long-time-running-server-program
         // More info in:

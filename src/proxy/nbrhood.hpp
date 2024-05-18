@@ -262,12 +262,19 @@ struct Neighbor {
     //```
     void tags_update(std::string const& update_string) {
         string_tags_update(tags, update_string);
+        tags_update_ts = time(nullptr);
+    }
+    [[nodiscard]] time_t tags_ts() const {
+        return tags_update_ts;
     }
 
     std::string hostname;
     time_t last_seen = 0L;
     stats_lists_t timetable {};
+
+private:
     std::vector<std::string> tags;
+    time_t tags_update_ts {0};
 };
 
 class NbrHood {
