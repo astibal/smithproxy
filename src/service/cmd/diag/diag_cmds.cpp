@@ -1803,12 +1803,45 @@ auto get_more_info(sobject_info const* so_info, MitmProxy const* curr_proxy, Mit
 
                 // try HTTP(s)
                 if(auto http_app = std::dynamic_pointer_cast<sx::engine::http::app_HttpRequest>(app); http_app) {
-                    info_ss << "\n    L7 http current: " <<  http_app->http_data.method << " : " << http_app->request() << "\n";
-                    for(auto const& he: http_app->http_history) {
+
+                    if(not http_app->http_data.method.empty()) {
+                        info_ss << "\n    L7 http current: " << http_app->http_data.method;
+                        info_ss << " "<< http_app->request() << "\n";
+                    }
+                    std::string prev_hist_req;
+                    std::size_t prev_hist_cnt = 0L;
+
+                    for(auto it = http_app->http_history.begin(); it != http_app->http_history.end(); it++ ) {
+
+                        auto const& he = *it;
 
                         auto tmp = sx::engine::http::app_HttpRequest();
                         tmp.http_data = he;
-                        info_ss << "        L7 http history: " <<  tmp.http_data.method << " : " << tmp.request() << "\n";
+                        auto cur_req = tmp.request();
+
+                        std::stringstream ss;
+                        ss <<  tmp.http_data.method << " " << cur_req;
+                        auto cur_hist_req = ss.str();
+
+                        if(cur_hist_req == prev_hist_req and std::next(it)  != http_app->http_history.end()) {
+                            prev_hist_cnt++;
+                        }
+                        else {
+                            info_ss << "        L7 http history: ";
+
+
+                            if(prev_hist_cnt > 0) {
+                                info_ss << prev_hist_req;
+                                info_ss << " [" << prev_hist_cnt + 1 << "x]";
+                            }
+                            else {
+                                info_ss << cur_hist_req;
+                            }
+                            info_ss << "\n";
+
+                            prev_hist_req = cur_hist_req;
+                            prev_hist_cnt = 0L;
+                        }
                     }
                     info_ss << "\n";
                 }
