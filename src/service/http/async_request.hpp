@@ -157,8 +157,14 @@ namespace sx::http {
 
         static bool emit_url(std::string const& url, std::string const& pay, reply_hook const& hook) {
             auto &pool = ThreadPool::instance::get();
-            auto ret = pool.enqueue([url, pay, hook]([[maybe_unused]] std::atomic_bool const &stop_flag) {
-                emit_url_wait(url, pay, hook);
+
+            // add extra safety and copy values, to make them copyable in thread lambda capture
+            std::string copy_url(url);
+            std::string copy_pay(pay);
+
+            auto ret = pool.enqueue([copy_url, copy_pay, hook]([[maybe_unused]] std::atomic_bool const &stop_flag) {
+
+                emit_url_wait(copy_url, copy_pay, hook);
             });
 
             return (ret > 0);
