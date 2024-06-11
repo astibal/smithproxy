@@ -376,7 +376,7 @@ public:
     }
 
     static NbrHood& instance() {
-        static NbrHood r(4000);
+        static NbrHood r(8000);
         return r;
     }
 private:
