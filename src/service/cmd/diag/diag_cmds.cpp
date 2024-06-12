@@ -2331,6 +2331,21 @@ int cli_diag_neighbor_list(struct cli_def *cli, const char *command, char *argv[
     return CLI_OK;
 }
 
+int cli_diag_neighbor_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
+    std::stringstream ss;
+    {
+        auto& nb = NbrHood::instance();
+        auto _lc = std::scoped_lock(nb.cache().lock());
+
+        ss << "Neighbors stats:\n";
+        ss << "  cache size: " << nb.cache().get_map_ul().size() << "\r\n";
+        ss << "  cache max entries: " << NbrHood::MAX_CACHE_SZ << "\r\n";
+    }
+
+    cli_print(cli, "%s", ss.str().c_str());
+    return CLI_OK;
+}
+
 int cli_diag_neighbor_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
     size_t sz = 0;
@@ -2539,6 +2554,7 @@ bool register_diags(cli_def* cli, cli_command* diag) {
 
     auto diag_neighbor = cli_register_command(cli,diag,"neighbor",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy neighbors diag");
             cli_register_command(cli,diag_neighbor,"list",cli_diag_neighbor_list,PRIVILEGE_PRIVILEGED, MODE_EXEC,"list active neighbors");
+            cli_register_command(cli,diag_neighbor,"stats",cli_diag_neighbor_stats,PRIVILEGE_PRIVILEGED, MODE_EXEC,"neighbors database stats");
             cli_register_command(cli,diag_neighbor,"clear",cli_diag_neighbor_clear,PRIVILEGE_PRIVILEGED, MODE_EXEC,"clear neighbors database");
             cli_register_command(cli,diag_neighbor,"tag",cli_diag_neighbor_tag,PRIVILEGE_PRIVILEGED, MODE_EXEC,"update a neighbor entry with a tag-string");
             cli_register_command(cli,diag_neighbor,"webhook-update",cli_diag_neighbor_webhook_update,PRIVILEGE_PRIVILEGED, MODE_EXEC,"send single neighbor entry webhook update");

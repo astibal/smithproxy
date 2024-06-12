@@ -279,6 +279,8 @@ private:
 
 class NbrHood {
 public:
+    static size_t inline MAX_CACHE_SZ = 8000;
+
     using nbr_t = std::shared_ptr<Neighbor>;
     using nbr_cache_t = LRUCache<std::string, nbr_t>;
 
@@ -376,7 +378,7 @@ public:
     }
 
     static NbrHood& instance() {
-        static NbrHood r(8000);
+        static NbrHood r(NbrHood::MAX_CACHE_SZ);
         return r;
     }
 private:
