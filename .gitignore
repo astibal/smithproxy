@@ -10,3 +10,4 @@ tools/build-scripts/deb/debian/changelog
 /src/smithproxy_version.h
 /venv/
 /smithproxy.srctrl*
+/build/

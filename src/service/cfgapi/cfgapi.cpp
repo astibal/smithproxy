@@ -479,7 +479,11 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "added settings.webhook.nbr_refresh_age");
         return true;
     }
-
+    else if(upgrade_to_num == 1030) {
+        log.event(INF, "added settings.tuning.open_timeout");
+        log.event(INF, "added settings.tuning.idle_timeout");
+        return true;
+    }
     return false;
 }
 
@@ -830,6 +834,13 @@ bool CfgFactory::load_settings () {
         int hostcx_write_full = 0;
         load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "host_write_full", hostcx_write_full);
         if(hostcx_write_full >= 1024) { baseHostCX::params.write_full = hostcx_write_full; }
+
+        if(int open_timeout = 0; load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "host_open_timeout", open_timeout)) {
+            baseHostCX::params.open_timeout = open_timeout;
+        }
+        if(int idle_timeout = 0; load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "host_idle_timeout", idle_timeout)) {
+            baseHostCX::params.idle_delay = idle_timeout;
+        }
 
     }
 
@@ -5034,6 +5045,8 @@ int save_settings(Config& ex) {
     tuning_objects.add("host_bufsz_min", Setting::TypeInt) = (int) baseHostCX::params.buffsize;
     tuning_objects.add("host_bufsz_max_multiplier", Setting::TypeInt) = (int) baseHostCX::params.buffsize_maxmul;
     tuning_objects.add("host_write_full", Setting::TypeInt) = (int) baseHostCX::params.write_full;
+    tuning_objects.add("host_open_timeout", Setting::TypeInt) = (unsigned short) baseHostCX::params.open_timeout;
+    tuning_objects.add("host_idle_timeout", Setting::TypeInt) = (unsigned short) baseHostCX::params.idle_delay;
 
 
     objects.add("accept_api", Setting::TypeBoolean) = CfgFactory::get()->accept_api;
