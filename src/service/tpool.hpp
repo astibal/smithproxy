@@ -102,7 +102,13 @@ public:
                         this->cv_.wait(lc_, [this] {
                             return this->stop_ || !this->tasks_.empty();
                         });
-                        if (this->stop_ && this->tasks_.empty()) return;
+
+                        // regardless of enqueued tasks, return if stop_ is set!
+                        if (this->stop_) return;
+
+                        if(tasks_.empty()) {
+                            continue;
+                        }
                         task = std::move(this->tasks_.front());
                         this->tasks_.pop();
                     }
@@ -156,14 +162,16 @@ public:
 
         cv_.notify_all();
         for (std::thread& worker : workers_) {
-            worker.join();
+            if(worker.joinable())
+                worker.join();
         }
     }
 
     class instance {
         static inline std::unique_ptr<ThreadPool> pool;
         static inline std::once_flag once_flag;
-        static inline size_t POOL_SIZE = std::thread::hardware_concurrency();
+        static inline size_t POOL_MUL = 2;
+        static inline size_t POOL_SIZE = POOL_MUL * std::thread::hardware_concurrency();
     public:
         static ThreadPool& get() {
             std::call_once(once_flag, []() {
