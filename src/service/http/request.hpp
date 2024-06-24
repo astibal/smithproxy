@@ -127,6 +127,15 @@ namespace sx::http {
                 curl_easy_setopt(curl, CURLOPT_TIMEOUT, seconds);
         }
 
+        void set_stale_detection(long seconds=30) {
+
+            if(curl) {
+                // set also low-speed detection
+                curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, seconds);
+                curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
+            }
+        }
+
         void set_interface(std::string const& intf) {
             if(curl and not intf.empty()) {
                 curl_easy_setopt(curl, CURLOPT_INTERFACE, intf.c_str());
@@ -203,6 +212,9 @@ namespace sx::http {
             headers = curl_slist_append(headers, "Content-Type: application/json");
 
             // Set up common options
+            curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+            curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 10L);
+
             curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
             curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, progress::_write_callback);
             curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseData);

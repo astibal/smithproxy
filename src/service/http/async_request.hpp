@@ -115,6 +115,8 @@ namespace sx::http {
 
             // make custom setup
             request.set_timeout(config::timeout);
+            request.set_stale_detection();
+
             if(not do_verify) request.disable_tls_verify();
             if(not bind_if.empty()) request.set_interface(bind_if);
 

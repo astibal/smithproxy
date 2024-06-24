@@ -110,8 +110,10 @@ namespace sx::http::webhooks {
         void on_init(sx::http::expected_reply const& rep) const override {
             if(rep.has_value()) {
                 auto* ctrl = rep->ctrl;
-                if(ctrl)
+                if(ctrl) {
                     ctrl->set_timeout(60);
+                    ctrl->set_stale_detection(120); // allow some room to fetch data
+                }
             }
         }
 
@@ -168,22 +170,32 @@ namespace sx::http::webhooks {
 
     void send_action(std::string const& action, std::string const& action_id, nlohmann::json const& details) {
         if(enabled) {
-            nlohmann::json msg = {
-                    {"action", action},
-                    {"id", action_id},
-                    {"source", get_hostid() },
-                    {"type",   "proxy"}};
 
-            msg.push_back({"details", details});
 
             std::string msg_str;
             try {
+                nlohmann::json msg = {
+                        {"action", action},
+                        {"id", action_id},
+                        {"source", get_hostid() },
+                        {"type",   "proxy"}};
+
+                msg.push_back({"details", details});
                 msg_str = to_string(msg);
             }
             catch(std::bad_array_new_length const& e) {
-                Log::get()->events().insert(ERR, "webhook::send_action failed: action=%s, id=%s: %s", action.c_str(),
+                Log::get()->events().insert(ERR, "webhook::send_action failed (bad_array_new_length): action=%s, id=%s: %s", action.c_str(),
                                             action_id.c_str(),
                                             e.what());
+            }
+            catch(std::exception const& e) {
+                Log::get()->events().insert(ERR, "webhook::send_action failed(generic exception): action=%s, id=%s: %s", action.c_str(),
+                                            action_id.c_str(),
+                                            e.what());
+            }
+            catch(...) {
+                Log::get()->events().insert(ERR, "webhook::send_action failed(unknown exception): action=%s, id=%s", action.c_str(),
+                                            action_id.c_str());
             }
 
             if(not msg_str.empty()) {
