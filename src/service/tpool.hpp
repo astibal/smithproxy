@@ -86,7 +86,14 @@ private:
 
     std::atomic_uint active = 0;
 
+    struct stats_t {
+        std::atomic_uint std_except = 0;
+        std::atomic_uint unk_except = 0;
+    };
+    stats_t stats_;
+
 public:
+    stats_t const& stats() const { return stats_; }
 
     // advice/recommendation for longer task to schedule their loops to check stop flag (if any)
     static constexpr unsigned long milliseconds = 100;
@@ -114,7 +121,16 @@ public:
                     }
 
                     this->active++;
-                    task(this->stop_);
+                    try {
+                        // RUN THE TASK
+                        task(this->stop_);
+                    }
+                    catch(std::exception const&) {
+                        this->stats_.std_except++;
+                    }
+                    catch(...) {
+                        this->stats_.unk_except++;
+                    }
                     this->active--;
                 }
             });
@@ -139,7 +155,9 @@ public:
 
     void stop() { stop_ = true; }
     void start() { stop_ = false; }
-    [[nodiscard]] bool ready() const { return stop_; }
+    [[nodiscard]] bool is_active() const { return (! stop_); }
+    [[nodiscard]] bool is_stopping() const { return stop_; }
+
     void ready(bool b) { stop_ = b ; }
 
     template<class F>
