@@ -2241,8 +2241,16 @@ int cli_diag_worker_pool_list(struct cli_def *cli, const char *command, char *ar
     auto tr = ThreadPool::instance::get().tasks_running();
     auto wc = ThreadPool::instance::get().worker_count();
 
+    auto uex = ThreadPool::instance::get().stats().unk_except.load();
+    auto sex = ThreadPool::instance::get().stats().std_except.load();
+
+    auto active = ThreadPool::instance::get().is_active();
+
     ss << "Utility thread pool stats: \n";
     ss << "  enqueued tasks: " << ts << ", active workers: " << tr << "/" << wc << "\n";
+    ss << "  standard exceptions: " << sex << ", unknown exceptions: " << uex << "\n";
+    ss << "\n";
+    ss << "  is active: " << active << "\n";
 
     cli_print(cli, "%s", ss.str().c_str());
 
