@@ -1249,18 +1249,15 @@ bool apply_setting(std::string const& section, std::string const& varname, struc
         cli_print(cli, "config apply - unknown config section!");
     }
 
-
     if(! ret) {
         cli_print(cli, "!!! Config was not applied");
         cli_print(cli, " -  saving and reload is necessary to apply your settings.");
     } else {
 
+        Log::get()->events().insert(NOT, "live config changed: %s.%s", section.c_str(), varname.c_str());
 
         CfgFactory::board()->upgrade(cli_id());
-
         apply_hostname(cli);
-        cli_print(cli, " ");
-        cli_print(cli, "Running config applied (not saved to file).");
     }
 
     return ret;
