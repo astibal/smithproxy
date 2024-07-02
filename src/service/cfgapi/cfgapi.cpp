@@ -484,6 +484,11 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "added settings.tuning.idle_timeout");
         return true;
     }
+    else if(upgrade_to_num == 1031) {
+        log.event(INF, "added tls_profile.[x].alerts");
+        return true;
+    }
+
     return false;
 }
 
@@ -2194,7 +2199,23 @@ int CfgFactory::load_db_prof_tls () {
                         }
                 }
                 load_if_exists(cur_object, "sslkeylog", new_profile->sslkeylog);
-                
+
+                std::string alertval;
+                if(load_if_exists(cur_object, "alerts", alertval)) {
+                    if (alertval == "all") {
+                        new_profile->alerts.suppress_common = false;
+                        new_profile->alerts.suppress_all = false;
+                    }
+                    else if (alertval == "unusual") {
+                        new_profile->alerts.suppress_common = true;
+                        new_profile->alerts.suppress_all = false;
+                    }
+                    else if (alertval == "mute" ) {
+                        new_profile->alerts.suppress_common = true;
+                        new_profile->alerts.suppress_all = true;
+                    }
+                }
+
                 db_prof_tls[name] = new_profile;
 
                 _dia("load_db_prof_tls: '%s': ok", name.c_str());
@@ -3339,6 +3360,9 @@ bool CfgFactory::policy_apply_tls (const std::shared_ptr<ProfileTls> &pt, baseCo
 
         sslcom->sslkeylog = pt->sslkeylog;
 
+        sslcom->opt.alerts.suppress_all = pt->alerts.suppress_all;
+        sslcom->opt.alerts.decode_error_in_operational = not pt->alerts.suppress_common; // target is inclusion flag
+
         tls_applied = true;
     } else {
         _deb("CfgFactory::policy_apply_tls[%s]: is not SSL", xcom->shortname().c_str());
@@ -3917,6 +3941,7 @@ bool CfgFactory::new_tls_profile(Setting& ex, std::string const& name) const {
         item.add("left_disable_reuse", Setting::TypeBoolean) = false;
         item.add("right_disable_reuse", Setting::TypeBoolean) = false;
         item.add("sslkeylog", Setting::TypeBoolean) = false;
+        item.add("log", Setting::TypeString) = false;
     }
     catch(libconfig::SettingNameException const& e) {
         _war("cannot add new section %s: %s", name.c_str(), e.what());
@@ -3990,6 +4015,17 @@ int CfgFactory::save_tls_profiles(Config& ex) const {
         item.add("left_disable_reuse", Setting::TypeBoolean) = obj->left_disable_reuse;
         item.add("right_disable_reuse", Setting::TypeBoolean) = obj->right_disable_reuse;
         item.add("sslkeylog", Setting::TypeBoolean) = obj->sslkeylog;
+
+
+        if(obj->alerts.suppress_all) {
+            item.add("alerts", Setting::TypeString) = "mute";
+        }
+        else if(obj->alerts.suppress_common) {
+            item.add("alerts", Setting::TypeString) = "unusual";
+        }
+        else {
+            item.add("alerts", Setting::TypeString) = "all";
+        }
 
         n_saved++;
     }

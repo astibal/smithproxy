@@ -232,6 +232,10 @@ public:
 
     bool sslkeylog = false;                     // disable or enable ssl keylogging on this profile
 
+    struct { ;
+        bool suppress_all = false;
+        bool suppress_common = true;
+    } alerts {};
 
     bool ask_destroy() override { return false; };
     std::string to_string(int verbosity) const override {

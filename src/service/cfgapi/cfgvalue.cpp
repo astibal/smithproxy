@@ -617,6 +617,17 @@ void CfgValueHelp::init() {
             .suggestion_generator(CfgValue::SUGGESTION_BOOL);
 
 
+    add("tls_profiles.[x].alerts", "[all|unusual|mute] - adjust loging into event list")
+            .help_quick(CfgValue::HELP_BOOL)
+            .may_be_empty(false)
+            .value_filter(is_in_vector(
+                    []() -> std::vector<std::string> { return {"all", "unusual", "mute"}; },"[all|unusual|mute]"))
+            .suggestion_generator(
+                    [](std::string const& section, std::string const& variable) -> std::vector<std::string> {
+                        return {"all", "unusual", "mute"};
+                    });
+
+
     init_routing();
     init_captures();
 
