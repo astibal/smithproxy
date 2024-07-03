@@ -2236,6 +2236,9 @@ int cli_diag_worker_proxy_list(struct cli_def *cli, [[maybe_unused]] const char 
 int cli_diag_worker_pool_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
     using namespace  sx::tp;
+    auto args = args_to_vec(argv, argc);
+
+    int verbosity = ( ! args.empty() ) ? safe_val(args[0], iINF) : iINF;
 
     std::stringstream ss;
 
@@ -2257,6 +2260,57 @@ int cli_diag_worker_pool_list(struct cli_def *cli, const char *command, char *ar
     ss << "  standard exceptions: " << sex << ", unknown exceptions: " << uex << "\n";
     ss << "\n";
     ss << "  is active: " << active << "\n";
+
+    if(verbosity > iINF) {
+
+        ss << "\n";
+
+        auto& tp = ThreadPool::instance::get();
+        auto lc_ = std::scoped_lock(tp.get_lock());
+
+
+        {
+            auto const& tasks = tp.get_tasks();
+            auto tsz = tasks.size();
+            if(tsz > 0) {
+                ss << "Queued tasks: \n";
+                for (std::size_t i = 0; i < tsz; ++i) {
+                    auto const &t = tasks[i];
+                    ss << (verbosity < iDEB ? t->info_long() : t->info_detailed()) << "\n";
+                }
+            }
+        }
+        ss << "Running tasks: \n";
+        {
+            auto const& workers = tp.get_workers();
+            auto const& info = tp.get_worker_tasks();
+            size_t pool_running = 0;
+
+            for(size_t i = 0; i < workers.size(); ++i) {
+                auto s = (verbosity < iDEB ? info.info_long[i] : info.info_details[i]);
+                if(not info.is_finished[i])
+                    ++pool_running;
+
+                if(not s.empty()) {
+                    if(not info.is_finished[i] or (info.is_finished[i] and verbosity >iDEB))
+                    ss << "\n[#" << i << (info.is_finished[i] ? " (finished)" : " (running)") << "]: " << s << "\n";
+
+                    if(verbosity > iDEB) {
+                        auto lb = info.log_buffer[i].str();
+                        if(not lb.empty()) {
+                            ss << "[#"  << i << " (log)] \n";
+                            ss << lb << "\n";
+                            ss << "[#"  << i << " (log)] - end\n";
+                        }
+                        else {
+                            ss << "[#"  << i << " (log)] - empty\n";
+                        }
+                    }
+                }
+            }
+            ss << "\n " << pool_running << " worker(s) are busy\n";
+        }
+    }
 
     cli_print(cli, "%s", ss.str().c_str());
 

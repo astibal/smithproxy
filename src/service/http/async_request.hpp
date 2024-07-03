@@ -78,12 +78,36 @@ namespace sx::http {
 
             void execute(std::atomic_bool const& stop_flag) override {
                 emit_url_wait(url, payload, hook);
+                if(log_stream.has_value()) {
+                    std::stringstream& ss = log_stream.value();
+                    ss << "test\n";
+                }
             }
+
+            std::string info_short() const override {
+                return string_format("web request: POST with %dB of data", payload.length()); };
+            std::string info_long() const override {
+                return string_format("web request: POST %s with %dB of data", url.c_str(), payload.length());
+            };
+            std::string info_detailed() const override {
+                std::stringstream ss;
+                ss << string_format("web request details: POST %s with %dB of data\n", url.c_str(), payload.length());
+                ss << "Payload: \n" << hex_dump((unsigned char*)payload.data(), payload.length()) << "\n";
+                ss << "-- \n";
+
+                return ss.str();
+            };
+
+            void set_log_buffer(std::stringstream& ss) override {
+                log_stream = ss;
+            }
+
 
         private:
             std::string url;
             std::string payload;
             reply_hook hook;
+            std::optional<std::reference_wrapper<std::stringstream>> log_stream;
         };
 
         static AsyncRequest& get() {
@@ -180,11 +204,6 @@ namespace sx::http {
             // add extra safety and copy values, to make them copyable in thread lambda capture
             std::string copy_url(url);
             std::string copy_pay(pay);
-
-//            auto ret = pool.enqueue([copy_url, copy_pay, hook]([[maybe_unused]] std::atomic_bool const &stop_flag) {
-//
-//                emit_url_wait(copy_url, copy_pay, hook);
-//            });
 
             auto task = std::make_unique<RequestTask>(copy_url, copy_pay, hook);
             auto ret = pool.enqueue(std::move(task));
