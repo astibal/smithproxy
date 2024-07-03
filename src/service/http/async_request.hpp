@@ -77,10 +77,11 @@ namespace sx::http {
             sx::tp::PoolTask(), url(copy_url), payload(copy_pay), hook(hook) {};
 
             void execute(std::atomic_bool const& stop_flag) override {
-                emit_url_wait(url, payload, hook);
                 if(log_stream.has_value()) {
-                    std::stringstream& ss = log_stream.value();
-                    ss << "test\n";
+                    emit_url_wait_log(url, payload, log_stream.value(), hook);
+                }
+                else {
+                    emit_url_wait(url, payload, hook);
                 }
             }
 
@@ -123,8 +124,14 @@ namespace sx::http {
         }
 
 
-        // synchronous call, use emit_url() to use thread pool
         static void emit_url_wait(std::string const& url, std::string const& pay, reply_hook const& hook) {
+            std::stringstream ss;
+            emit_url_wait_log(url, pay, ss, hook);
+        }
+
+        // synchronous call, use emit_url() to use thread pool
+        static void emit_url_wait_log(std::string const& url, std::string const& pay, std::stringstream& log, reply_hook const& hook) {
+
             if(url.empty() or pay.empty()) return;
 
             std::string dns_servers;
@@ -151,11 +158,14 @@ namespace sx::http {
                 do_verify = CfgFactory::get()->settings_webhook.active_tls_verify();
                 bind_if = CfgFactory::get()->settings_webhook.bind_interface;
             }
+            log << make_ts() << ": init: settings: dns='" << dns_servers << "' vrfy=" << do_verify << " bind_if='" << bind_if << "'\n";
 
             Request request(Request::DEFAULT, dns_servers);
 
             // make custom setup
             request.set_timeout(config::timeout);
+            log << make_ts() << ": init: timeout='" << config::timeout << "\n";
+
             request.set_stale_detection();
 
             if(not do_verify) request.disable_tls_verify();
@@ -163,29 +173,39 @@ namespace sx::http {
 
             // set debugging explicitly
             if(Request::DEBUG) {
-                request.setup_debug();
+                log << make_ts() << ": init: extended debug is enabled\n";
+                request.setup_curl_debug(log);
             }
 
+            log << make_ts() << ": init: init_hook to start\n";
             auto init_hook_arg = request.make_reply(url, -100, "");
             hook(init_hook_arg);
+            log << make_ts() << ": init: init_hook finished\n";
 
+            log << make_ts() << ": work: request emit to start\n";
             auto reply = request.emit(url, pay);
+            log << make_ts() << ": work: request emit finished\n";
 
             if(not reply or reply.value().response.first >= 300) {
                 long code = reply.has_value() ? reply->response.first : -1;
                 std::string msg = reply.has_value() ? reply->response.second : "request failed";
 
                 Log::get()->events().insert(ERR, "error in request '%s' (retries: %d): %d:%s", url.c_str(), request.attempts, code, msg.c_str());
+                log << make_ts() << ": finished: result is error: (code="<< code << ", msg='" << msg << "'\n";
+
+
                 if(Request::DEBUG) {
                     Log::get()->events().insert(ERR, "error payload:\n >>>%s<<<", pay.c_str());
-                    Log::get()->events().insert(ERR, "error trace:\n %s", request.debug_log.c_str());
+                    Log::get()->events().insert(ERR, "error trace:\n %s", log.str().c_str());
                 }
             }
             else if(Request::DEBUG and Request::DEBUG_DUMP_OK) {
-                Log::get()->events().insert(INF, "OK payload (retries: %d):\n >>>%s<<<", request.attempts, pay.c_str());
+                auto const& rp = reply.value().response;
+                log << make_ts() << ": finished: result is OK (code="<< rp.first << ", sz="<< rp.second.size() << "B)\n";
             }
-
+            log << make_ts() << ": finished: hook to start\n";
             hook(reply);
+            log << make_ts() << ": finished: hook finished\n";
         }
 
         static void emit_wait(std::string const& pay, reply_hook const& hook) {

@@ -80,9 +80,9 @@ namespace sx::http {
 
         unsigned int max_attmepts = 5;
         unsigned int attempts = 0;
-        std::string debug_log;
+        std::stringstream* debug_log = nullptr;
         static inline bool DEBUG = true;
-        static inline bool DEBUG_DUMP_OK = false;
+        static inline bool DEBUG_DUMP_OK = true;
 
         struct progress {
 
@@ -142,27 +142,18 @@ namespace sx::http {
             }
         }
 
-        static std::string _make_ts() {
-            auto now = std::chrono::system_clock::now();
-            auto itt = std::chrono::system_clock::to_time_t(now);
-            auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
-
-            struct tm result{};
-            gmtime_r(&itt, &result);
-
-            std::ostringstream oss;
-            oss << std::put_time(&result, "%Y-%m-%d--%H:%M:%S"); // Put time using UTC format into the stream.
-            oss << '.' << std::setfill('0') << std::setw(3) << ms.count();
-            std::string timestamp(oss.str());
-
-            return timestamp;
-        }
 
         static int curl_debug_callback(CURL *handle, curl_infotype type, char *data, size_t size, void *userptr) {
             // userptr points to your string or any other type of container
-            std::string* debug_info = reinterpret_cast<std::string*>(userptr);
+            auto& debug_info = *reinterpret_cast<std::stringstream*>(userptr);
+            std::string timestamp = make_ts();
+
             switch (type) {
                 case CURLINFO_TEXT:
+                    debug_info << timestamp << ": ";
+                    debug_info << std::string(data, size);
+                    break;
+
                 case CURLINFO_HEADER_IN:
                 case CURLINFO_HEADER_OUT:
                 case CURLINFO_DATA_IN:
@@ -170,19 +161,10 @@ namespace sx::http {
                 case CURLINFO_SSL_DATA_IN:
                 case CURLINFO_SSL_DATA_OUT:
                 {
-
-
-                    std::string timestamp = _make_ts();
-
-                    curl_socket_t fd;
-                    CURLcode res = curl_easy_getinfo(handle, CURLINFO_ACTIVESOCKET, &fd);
-                    if (res != CURLE_OK) {
-                        fd = -1;  // or handle the error as appropriate
+                    if(DEBUG_DUMP_OK) {
+                        debug_info << timestamp << ": ";
+                        debug_info << std::string(data, size);
                     }
-                    std::string prefix = timestamp + ": socket:" + std::to_string(fd) + ": ";
-                    debug_info->append(prefix);
-                    debug_info->append(data, size);
-                    debug_info->append("\r\n");
                     break;
                 }
                 case CURLINFO_END:
@@ -191,11 +173,11 @@ namespace sx::http {
             return 0;  // returning any other value than 0 will abort the operation!
         }
 
-
-        void setup_debug() {
+        void setup_curl_debug(std::stringstream& curl_log) {
             if(DEBUG and curl) {
+                debug_log = &curl_log;
                 curl_easy_setopt(curl, CURLOPT_DEBUGFUNCTION, curl_debug_callback);
-                curl_easy_setopt(curl, CURLOPT_DEBUGDATA, &debug_log);
+                curl_easy_setopt(curl, CURLOPT_DEBUGDATA, &curl_log);
                 curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
             }
         }
@@ -266,13 +248,22 @@ namespace sx::http {
                 responseData.clear();
                 res = curl_easy_perform(curl);
 
-                if(res == CURLE_OK)
-                    break;
+                auto do_log = (DEBUG and debug_log);
 
-                if(DEBUG) {
-                    auto ts = _make_ts();
-                    auto s = string_format("%s: attempt %d failed.\r\n", ts.c_str(), attempts);
-                    debug_log.append(s);
+                if(res == CURLE_OK) {
+                    if(do_log) {
+                        auto ts = make_ts();
+                        auto s = string_format("%s: attempt #%d OK.\r\n", ts.c_str(), attempts);
+
+                        *debug_log <<  s;
+                    }
+                    break;
+                }
+                else if(do_log){
+                    auto ts = make_ts();
+                    auto s = string_format("%s: attempt #%d failed.\r\n", ts.c_str(), attempts);
+
+                    *debug_log <<  s;
                 }
             }
 
