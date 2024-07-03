@@ -2235,6 +2235,8 @@ int cli_diag_worker_proxy_list(struct cli_def *cli, [[maybe_unused]] const char 
 
 int cli_diag_worker_pool_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
 
+    using namespace  sx::tp;
+
     std::stringstream ss;
 
     auto ts = ThreadPool::instance::get().tasks_size();
@@ -2244,10 +2246,14 @@ int cli_diag_worker_pool_list(struct cli_def *cli, const char *command, char *ar
     auto uex = ThreadPool::instance::get().stats().unk_except.load();
     auto sex = ThreadPool::instance::get().stats().std_except.load();
 
+    auto te = ThreadPool::instance::get().stats().total_executed.load();
+    auto tf = ThreadPool::instance::get().stats().total_finished.load();
+
     auto active = ThreadPool::instance::get().is_active();
 
     ss << "Utility thread pool stats: \n";
     ss << "  enqueued tasks: " << ts << ", active workers: " << tr << "/" << wc << "\n";
+    ss << "  total tasks executed: " << te << ", total tasks finished: " << tf << "\n";
     ss << "  standard exceptions: " << sex << ", unknown exceptions: " << uex << "\n";
     ss << "\n";
     ss << "  is active: " << active << "\n";

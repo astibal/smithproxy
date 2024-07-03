@@ -362,10 +362,7 @@ int main(int argc, char *argv[]) {
             };
 
 
-    auto& pool = ThreadPool::instance::get();
-    pool.enqueue([](std::atomic_bool const& stop) {
-        return;
-    });
+    auto& pool = sx::tp::ThreadPool::instance::get();
 
     auto this_daemon = DaemonFactory::instance();
     auto const& log = this_daemon->get_log();

@@ -73,13 +73,22 @@
    ```
  */
 
+namespace sx::tp {
+
+class PoolTask {
+public:
+    PoolTask() = default;
+    virtual ~PoolTask() = default;
+    virtual void execute(std::atomic_bool const& stop_flag) { /* must be implemented to support instantiation */ };
+};
+
+
 class ThreadPool {
 private:
 
     // calling functions taking reference
-    using callable = std::function<void(std::atomic_bool const&)>;
     std::vector<std::thread> workers_;
-    std::queue<callable> tasks_;
+    std::queue<std::unique_ptr<PoolTask>> tasks_;
     mutable std::mutex lock_;
     std::condition_variable cv_;
     std::atomic_bool stop_ = false;
@@ -87,23 +96,26 @@ private:
     std::atomic_uint active = 0;
 
     struct stats_t {
+        std::atomic_uint64_t total_executed = 0;
+        std::atomic_uint64_t total_finished = 0;
+
         std::atomic_uint std_except = 0;
         std::atomic_uint unk_except = 0;
     };
     stats_t stats_;
 
 public:
-    stats_t const& stats() const { return stats_; }
+    stats_t const &stats() const { return stats_; }
 
     // advice/recommendation for longer task to schedule their loops to check stop flag (if any)
     static constexpr unsigned long milliseconds = 100;
 
-    explicit ThreadPool(size_t threads)  {
+    explicit ThreadPool(size_t threads) {
 
         for (size_t i = 0; i < threads; ++i) {
             workers_.emplace_back([this] {
                 while (true) {
-                    callable task;
+                    std::unique_ptr<PoolTask> task;
                     {
                         auto lc_ = std::unique_lock(lock_);
                         this->cv_.wait(lc_, [this] {
@@ -113,7 +125,7 @@ public:
                         // regardless of enqueued tasks, return if stop_ is set!
                         if (this->stop_) return;
 
-                        if(tasks_.empty()) {
+                        if (tasks_.empty()) {
                             continue;
                         }
                         task = std::move(this->tasks_.front());
@@ -122,13 +134,17 @@ public:
 
                     this->active++;
                     try {
+
+                        stats_.total_executed++;
                         // RUN THE TASK
-                        task(this->stop_);
+                        task->execute(this->stop_);
+                        stats_.total_finished++;
+
                     }
-                    catch(std::exception const&) {
+                    catch (std::exception const &) {
                         this->stats_.std_except++;
                     }
-                    catch(...) {
+                    catch (...) {
                         this->stats_.unk_except++;
                     }
                     this->active--;
@@ -160,15 +176,15 @@ public:
 
     void ready(bool b) { stop_ = b ; }
 
-    template<class F>
-    ssize_t enqueue(F&& f) {
+
+    ssize_t enqueue(std::unique_ptr<PoolTask>&& f) {
         ssize_t ret = 0;
         {
             auto lc_ = std::unique_lock(lock_);
             if (stop_) {
                 return -1;
             }
-            tasks_.emplace(std::forward<F>(f));
+            tasks_.emplace(std::move(f));
             ret = socle::raw::to_signed_cast<ssize_t>(tasks_.size()).value_or(-1);
         }
         cv_.notify_one();
@@ -204,5 +220,8 @@ public:
         }
     };
 };
+
+}
+
 
 #endif // TPOOL_HPP

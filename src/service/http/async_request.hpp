@@ -67,6 +67,25 @@ namespace sx::http {
             static inline long timeout = 5;
         };
 
+        using expected_reply = sx::http::expected_reply;
+        using reply_hook = std::function<void(expected_reply const&)>;
+
+
+        class RequestTask : public sx::tp::PoolTask {
+        public:
+            RequestTask(std::string const& copy_url, std::string const& copy_pay, reply_hook  hook):
+            sx::tp::PoolTask(), url(copy_url), payload(copy_pay), hook(hook) {};
+
+            void execute(std::atomic_bool const& stop_flag) override {
+                emit_url_wait(url, payload, hook);
+            }
+
+        private:
+            std::string url;
+            std::string payload;
+            reply_hook hook;
+        };
+
         static AsyncRequest& get() {
             std::call_once(once_flag, []() {
                 asr = std::make_unique<AsyncRequest>();
@@ -79,8 +98,6 @@ namespace sx::http {
             return *asr;
         }
 
-        using expected_reply = sx::http::expected_reply;
-        using reply_hook = std::function<void(expected_reply const&)>;
 
         // synchronous call, use emit_url() to use thread pool
         static void emit_url_wait(std::string const& url, std::string const& pay, reply_hook const& hook) {
@@ -158,16 +175,19 @@ namespace sx::http {
         }
 
         static bool emit_url(std::string const& url, std::string const& pay, reply_hook const& hook) {
-            auto &pool = ThreadPool::instance::get();
+            auto &pool = sx::tp::ThreadPool::instance::get();
 
             // add extra safety and copy values, to make them copyable in thread lambda capture
             std::string copy_url(url);
             std::string copy_pay(pay);
 
-            auto ret = pool.enqueue([copy_url, copy_pay, hook]([[maybe_unused]] std::atomic_bool const &stop_flag) {
+//            auto ret = pool.enqueue([copy_url, copy_pay, hook]([[maybe_unused]] std::atomic_bool const &stop_flag) {
+//
+//                emit_url_wait(copy_url, copy_pay, hook);
+//            });
 
-                emit_url_wait(copy_url, copy_pay, hook);
-            });
+            auto task = std::make_unique<RequestTask>(copy_url, copy_pay, hook);
+            auto ret = pool.enqueue(std::move(task));
 
             return (ret > 0);
         };
