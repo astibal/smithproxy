@@ -2295,7 +2295,7 @@ int cli_diag_worker_pool_list(struct cli_def *cli, const char *command, char *ar
                     if(not info.is_finished[i] or (info.is_finished[i] and verbosity >iDEB))
                     ss << "\n[#" << i << (info.is_finished[i] ? " (finished)" : " (running)") << "]: " << s << "\n";
 
-                    if(verbosity > iDEB) {
+                    if(not info.is_finished[i] or verbosity > iDEB) {
                         auto lb = info.log_buffer[i].str();
                         if(not lb.empty()) {
                             ss << "[#"  << i << " (log)] \n";
