@@ -81,8 +81,8 @@ namespace sx::http {
         unsigned int max_attmepts = 5;
         unsigned int attempts = 0;
         std::stringstream* debug_log = nullptr;
-        static inline bool DEBUG = true;
-        static inline bool DEBUG_DUMP_OK = true;
+        static inline bool DEBUG = false;
+        static inline bool DEBUG_DUMP_OK = false;
 
         struct progress {
 

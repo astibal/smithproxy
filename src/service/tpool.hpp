@@ -126,8 +126,6 @@ private:
         };
     };
     worker_tasks_t worker_tasks {};
-    static inline std::atomic_bool collect_tasks_info = true;
-
 
     mutable std::mutex lock_;
     std::condition_variable cv_;
@@ -145,6 +143,8 @@ private:
     stats_t stats_;
 
 public:
+    static inline std::atomic_bool collect_tasks_info = false;
+
     stats_t const &stats() const { return stats_; }
     worker_tasks_t const& get_worker_tasks() const { return worker_tasks; }
 
