@@ -488,6 +488,12 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "added tls_profile.[x].alerts");
         return true;
     }
+    else if(upgrade_to_num == 1032) {
+        log.event(INF, "added settings.tpool_log");
+        log.event(INF, "added settings.webhook.task_debug");
+        log.event(INF, "added settings.webhook.task_debug_dump");
+        return true;
+    }
 
     return false;
 }
@@ -687,6 +693,10 @@ bool CfgFactory::load_settings () {
     load_if_exists(cfgapi.getRoot()["settings"], "udp_workers",num_workers_udp);
     load_if_exists(cfgapi.getRoot()["settings"], "dtls_port",listen_dtls_port_base);  listen_dtls_port = listen_dtls_port_base;
     load_if_exists(cfgapi.getRoot()["settings"], "dtls_workers",num_workers_dtls);
+
+    bool collect_val = false;
+    load_if_exists(cfgapi.getRoot()["settings"], "tpool_log", collect_val);
+    sx::tp::ThreadPool::collect_tasks_info = collect_val;
 
 
     if(cfgapi.getRoot()["settings"].exists("nameservers")) {
@@ -904,6 +914,9 @@ bool CfgFactory::load_settings () {
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "ping_interval", settings_webhook.ping_interval);
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "nbr_update_interval", settings_webhook.nbr_update_interval);
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "nbr_tag_refresh_age", settings_webhook.nbr_tag_refresh_age);
+
+        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "task_debug", sx::http::Request::DEBUG);
+        load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "task_debug_dump", sx::http::Request::DEBUG_DUMP_OK);
 
         if(not settings_webhook.hostid.empty()) sx::http::webhooks::set_hostid(settings_webhook.hostid);
     }
@@ -5027,6 +5040,8 @@ int save_settings(Config& ex) {
     objects.add("dtls_port", Setting::TypeString) = CfgFactory::get()->listen_dtls_port_base;
     objects.add("dtls_workers", Setting::TypeInt) = CfgFactory::get()->num_workers_dtls;
 
+    objects.add("tpool_log", Setting::TypeBoolean) = sx::tp::ThreadPool::collect_tasks_info;
+
     //udp quick ports
     Setting& it_quick  = objects.add("udp_quick_ports", Setting::TypeArray);
     if(CfgFactory::get()->db_udp_quick_ports.empty()) {
@@ -5117,6 +5132,10 @@ int save_settings(Config& ex) {
     webhook_objects.add("ping_interval", Setting::TypeInt) = (int)CfgFactory::get()->settings_webhook.ping_interval;
     webhook_objects.add("nbr_update_interval", Setting::TypeInt) = CfgFactory::get()->settings_webhook.nbr_update_interval;
     webhook_objects.add("nbr_tag_refresh_age", Setting::TypeInt) = CfgFactory::get()->settings_webhook.nbr_tag_refresh_age;
+
+    webhook_objects.add("task_debug", Setting::TypeBoolean) = sx::http::Request::DEBUG;
+    webhook_objects.add("task_debug_dump", Setting::TypeBoolean) = sx::http::Request::DEBUG_DUMP_OK;
+
     return 0;
 }
 

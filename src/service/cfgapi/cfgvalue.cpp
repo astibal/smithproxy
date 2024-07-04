@@ -396,6 +396,11 @@ void CfgValueHelp::init() {
             .may_be_empty(false)
             .value_filter(CfgValue::VALUE_BOOL);
 
+    add("settings.admin", "administration options");
+    add("settings.admin.group", "system group with granted access; empty means root.")
+            .help_quick("<string>: existing group name")
+            .may_be_empty(true);
+
     add("settings.http_api", "API access options");
     add("settings.http_api.keys", "API access keys to retrieve API access tokens");
     add("settings.http_api.key_timeout", "Expiration timeout for session tokens")
@@ -434,11 +439,6 @@ void CfgValueHelp::init() {
             .value_filter(CfgValue::VALUE_BOOL);
 
 
-    add("settings.admin", "administration options");
-    add("settings.admin.group", "system group with granted access; empty means root.")
-            .help_quick("<string>: existing group name")
-            .may_be_empty(true);
-
     add("settings.http_api.key_extend_on_access", "If set, tokens are refreshed when used")
             .help_quick("<bool>: set true to refresh tokens when used (default: true)")
             .may_be_empty(false)
@@ -449,6 +449,61 @@ void CfgValueHelp::init() {
             .may_be_empty(false)
             .value_filter(CfgValue::VALUE_BOOL);
 
+
+    add("settings.webhook.enabled", "enable sending http(s) webhooks updates to compatible service")
+            .help_quick("<bool>: set true to enable (default: false)")
+            .may_be_empty(false)
+            .value_filter(CfgValue::VALUE_BOOL);
+
+    add("settings.webhook.url", "http(s) webhook service URL")
+            .help_quick("<bool>: set true to enable (default: false)")
+            .may_be_empty(false)
+            .value_filter(CfgValue::VALUE_ANY);
+
+    add("settings.webhook.tls_verify", "https webhooks service certificate validity check")
+            .help_quick("<bool>: set false to disable - not recommended (default: true)")
+            .may_be_empty(false)
+            .value_filter(CfgValue::VALUE_BOOL);
+
+    add("settings.webhook.hostid", "webhook identity value override")
+            .help_quick("<string>:  override hostid string to custom value (default: <hostname>)")
+            .may_be_empty(true)
+            .value_filter(CfgValue::VALUE_ANY);
+
+    add("settings.webhook.bind_interface", "bind updates to custom interface (ie. to work with VRFs)")
+            .help_quick("<string>:  interface name (default: <hostname>)")
+            .may_be_empty(true)
+            .value_filter(CfgValue::VALUE_ANY);
+
+    add("settings.webhook.api_override", "override temporarily webhook URL (even empty) via API from your app")
+            .help_quick("<bool>: set true to enable (default: false)")
+            .may_be_empty(false)
+            .value_filter(CfgValue::VALUE_BOOL);
+
+    add("settings.webhook.ping_interval", "send ping + info each <interval> seconds")
+            .help_quick("<int>: set custom value - not recommended (default: 120s)")
+            .may_be_empty(false)
+            .value_filter(CfgValue::VALUE_UINT);
+
+    add("settings.webhook.nbr_update_interval", "send neighbor update each <interval> seconds")
+            .help_quick("<int>: set custom value - not recommended (default: 120s)")
+            .may_be_empty(false)
+            .value_filter(CfgValue::VALUE_UINT);
+
+    add("settings.webhook.nbr_tag_refresh_age", "request neighbor tags update each <interval> seconds")
+            .help_quick("<int>: set custom value - not recommended (default: 180s)")
+            .may_be_empty(false)
+            .value_filter(CfgValue::VALUE_UINT);
+
+    add("settings.webhook.task_debug", "collect debug information for webhook thread tasks")
+            .help_quick("<bool>: set true to enable - (small performance hit) (default: false)")
+            .may_be_empty(false)
+            .value_filter(CfgValue::VALUE_BOOL);
+
+    add("settings.webhook.task_debug_dump", "collect debug dumps for webhook thread tasks")
+            .help_quick("<bool>: set true to enable - (performance hit likely) (default: false)")
+            .may_be_empty(false)
+            .value_filter(CfgValue::VALUE_BOOL);
 
     add("debug.log_data_crc", "calculate received CRC data (helps to identify proxy bugs)");
 
