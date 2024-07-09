@@ -48,6 +48,10 @@ class AccessFilter : public FilterProxy {
 
 public:
 
+    enum state_t {INIT=0, DATA=1} state {INIT};
+    static inline constexpr std::array<const char*,2> state_str = { "init", "data" };
+
+
     std::string connection_label;
 
     AccessFilter() = delete;
@@ -61,6 +65,7 @@ public:
     std::string to_string(int verbosity) const override;
     nlohmann::json to_json(int verbosity) const override;
 
+    void init() override;
     void proxy(baseHostCX *from, baseHostCX *to, socle::side_t side, bool redirected) override;
     void update(socle::side_t side, buffer const& buf);
 

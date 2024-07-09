@@ -2,19 +2,37 @@
 #include <proxy/filters/access_filter.hpp>
 #include <service/http/webhooks.hpp>
 
+void AccessFilter::init() {
+
+    state = state_t::INIT;
+
+    // run update right when the filter is created (likely when connection is being opened)
+    if(not already_applied) {
+        buffer b;
+        _deb("AccessFilter[%c]: requesting webhook on init");
+        update(side_t::LEFT, b);
+    }
+
+    state = state_t::DATA;
+}
+
 void AccessFilter::update(socle::side_t side, buffer const& buf) {
+
+    auto str_state = state_str[state];
 
     auto lc_ = std::scoped_lock(update_lock);
 
     // update entropy statistics
     if(not already_applied) {
-        _deb("AccessFilter[%c]: requesting webhook while received first %d bytes", socle::from_side(side), buf.size());
+        _deb("AccessFilter[%c]: access-request webhook on first %d bytes", socle::from_side(side), buf.size());
 
         nlohmann::json pay = { { "session", connection_label },
                                { "policy", parent()->matched_policy() },
                                { "require", "origin-info" },
-                               { "bytes_side", socle::from_side(side) },
-                               { "bytes_size", buf.size() } };
+                               { "bytes_side", string_format("%c",socle::from_side(side)) },
+                               { "bytes_size", buf.size() },
+                               { "state", str_state }
+                            };
 
         auto process_reply = [&](auto code, auto response_data) {
             if(code >= 200 and code < 300) {

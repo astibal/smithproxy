@@ -88,6 +88,8 @@ public:
         // don't need incomplete type when accessing to_string using base pointer
     }
 
+    virtual void init() { /* not required to override */ }
+
     MitmProxy* parent() { return parent_; }
     MitmProxy const* parent() const { return parent_; }
     void parent(MitmProxy* p) { parent_ = p; }

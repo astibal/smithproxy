@@ -677,6 +677,7 @@ bool MitmProxy::update_auth_ipX_map(baseHostCX* cx) {
 
 void MitmProxy::add_filter(std::string const& name, FilterProxy* fp) {
     filters_.emplace_back(name, fp);
+    fp->init();
 }
 
 
