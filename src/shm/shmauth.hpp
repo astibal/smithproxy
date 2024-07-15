@@ -259,22 +259,9 @@ struct IdentityInfoType : public IdentityInfoBase {
         
         int pos = 0;
         int old_pos = 0;
-        while(true) {
-            pos = groups.find("+",pos);
-            if(pos > old_pos && pos != static_cast<int>(std::string::npos)) {
-                std::string x  = groups.substr(old_pos,pos-old_pos);
-                groups_vec.push_back(x);
-                
-                old_pos = pos + 1;
-                pos++;
-                groups.find('+',pos);
-            } else {
-                std::string x  = groups.substr(old_pos,groups.size()-old_pos);
-                groups_vec.push_back(x);
-                break;
-            }
-        }
-    }    
+
+        groups_vec = string_split(groups, '+');
+    }
 };
 
 
