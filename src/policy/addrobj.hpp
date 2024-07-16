@@ -73,12 +73,20 @@ public:
 
 class CidrAddress : public AddressObject {
 public:
-    explicit CidrAddress(cidr::CIDR* c) : AddressObject(), c_(raw::allocated<cidr::CIDR*>(c)) { }
-    explicit CidrAddress(std::string const& v) : AddressObject(), c_(raw::allocated<cidr::CIDR*>(cidr::cidr_from_str(v.c_str()))) {}
+    struct cidr_deleter {
+        void operator()(cidr::CIDR*c) {
+            _err("cidr freed!");
+            cidr::cidr_free(c);
+        }
+    };
+    using unique_cidr = std::unique_ptr<cidr::CIDR, cidr_deleter>;
 
-    cidr::CIDR* cidr() { return c_.value; }
+    explicit CidrAddress(cidr::CIDR* c) : AddressObject(), c_(c) { }
+    explicit CidrAddress(std::string const& v) : AddressObject(), c_(cidr::cidr_from_str(v.c_str())) {}
+
+    cidr::CIDR* cidr() { return c_.get(); }
     std::string ip(int flags = CIDR_ONLYADDR) const {
-        auto temp = raw::allocated(cidr_to_str(c_.value, flags));
+        auto temp = raw::allocated(cidr_to_str(c_.get(), flags));
         std::string ret = string_format("%s", temp.value);
 
         return ret;
@@ -89,7 +97,7 @@ public:
     bool ask_destroy() override { return false; };
 
     std::string to_string(int verbosity) const override {
-        auto temp = raw::allocated(cidr_to_str(c_.value));
+        auto temp = raw::allocated(cidr_to_str(c_.get()));
 
         std::string ret = string_format("Cidr: %s",temp.value);
 
@@ -101,7 +109,7 @@ public:
     }
     
 private:
-    raw::var<cidr::CIDR*> c_;
+    unique_cidr c_;
 
 TYPENAME_OVERRIDE("CidrAddress")
 };

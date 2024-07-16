@@ -43,7 +43,7 @@
 #include <sstream>
 
 int CidrAddress::contains(cidr::CIDR const* other) const{
-    return cidr_contains(c_.value,other);
+    return cidr_contains(c_.get(),other);
 }
 
 
