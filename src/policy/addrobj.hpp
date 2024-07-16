@@ -75,7 +75,6 @@ class CidrAddress : public AddressObject {
 public:
     struct cidr_deleter {
         void operator()(cidr::CIDR*c) {
-            _err("cidr freed!");
             cidr::cidr_free(c);
         }
     };
