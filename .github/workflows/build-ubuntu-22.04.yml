@@ -17,7 +17,7 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Install dependencies
-      run: ./tools/linux-deps.sh
+      run: sudo ./tools/linux-deps.sh
 
     - name: Build project
-      run: ./tools/linux-build.sh
+      run: sudo ./tools/linux-build.sh
