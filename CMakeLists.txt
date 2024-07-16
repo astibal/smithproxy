@@ -115,9 +115,10 @@ else()
     message(">> libmicrohttpd DISABLED")
 endif()
 
-find_package(PythonLibs 3 REQUIRED)
 
 if("${USE_PYTHON}" STREQUAL "Y")
+    find_package(PythonLibs 3 REQUIRED)
+
     if(PYTHONLIBS_FOUND)
         include_directories(${PYTHON_INCLUDE_DIRS})
         message(">> python includes: " ${PYTHON_INCLUDE_DIRS})

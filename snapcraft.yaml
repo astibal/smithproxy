@@ -1,6 +1,6 @@
 
 name: smithproxy
-version: 0.9.31
+version: 0.9.32
 summary: Fast and featured transparent TCP/UDP/TLS proxy
 description: |
   Smithproxy is fast transparent TCP/UDP/TLS (SSL) proxy. It's highly configurable
@@ -44,6 +44,7 @@ description: |
 
 grade: stable # must be 'stable' to release into candidate/stable channels
 confinement: strict # use 'strict' once you have the right plugs and slots
+license: GPL-3.0 or later
 
 base: core22
 
@@ -75,9 +76,6 @@ layout:
 
   /usr/bin/smithproxy:
     bind-file: $SNAP/usr/bin/smithproxy
-
-  /usr/bin/smithd:
-    bind-file: $SNAP/usr/bin/smithd
 
   /var/log/smithproxy:
     bind: $SNAP_DATA/log
@@ -115,12 +113,6 @@ apps:
       - network-bind
       - network-control
 
-  #  smithd:
-  #    command: usr/bin/smithd
-  #    plugs:
-  #      - network
-  #      - network-bind
-
   cli:
     command: usr/bin/sx_cli
     plugs:
@@ -131,15 +123,14 @@ apps:
     environment:
       PYTHONPATH: $SNAP/usr/lib/python3/dist-packages:$SNAP/lib/python3.10/site-packages
     plugs:
-      - network   # to guess hostname and IP
+      - network
 
-  #  passwd:
-  #    command: usr/bin/sx_passwd
-
-  #  autoportalcert:
-  #    command: usr/bin/sx_autoportalcert
-  #    plugs:
-  #      - network  # to guess hostname and IP
+  autoportalcert:
+     command: usr/bin/sx_autoportalcert
+     environment:
+       PYTHONPATH: $SNAP/usr/lib/python3/dist-packages:$SNAP/lib/python3.10/site-packages
+     plugs:
+       - network
 
   certinfo-ca:
     command: usr/bin/sx_certinfo_ca
@@ -156,7 +147,6 @@ apps:
     command: usr/bin/sx_download_ca_bundle
     plugs:
       - network
-
 
   net:
     command: usr/bin/sx_network
@@ -175,12 +165,9 @@ parts:
 
     source: https://github.com/astibal/smithproxy
     source-type: git
-    source-branch: release-0.9.31
+    source-branch: master
     build-environment:
       - PYTHONPATH: "$SNAPCRAFT_PART_INSTALL/usr/lib/python3/dist-packages"
-
-    #    source: .
-    #    source-type: local
 
     build-packages:
       - g++
@@ -196,6 +183,7 @@ parts:
       - libxslt1-dev
       - libxmlsec1-dev
       - nlohmann-json3-dev
+      - libcurl4-openssl-dev
 
       - python3-distutils
       - telnet
@@ -205,6 +193,7 @@ parts:
       - iptables
       - libconfig++9v5
       - libmicrohttpd12
+      - libcurl4
       - telnet
       - wget
       - python3
