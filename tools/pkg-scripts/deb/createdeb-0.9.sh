@@ -18,8 +18,8 @@ if [ "${HTTP_CHECK_PATH}" == "" ]; then
     HTTP_CHECK_PATH="www.mag0.net/out/smithproxy"
 fi
 
-if [ "${SO_BRANCH}" == "" ]; then
-    SO_BRANCH="master"
+if [ "${SX_BRANCH}" == "" ]; then
+    SX_BRANCH="$1"
 fi
 
 if [ "${SX_BRANCH}" == "" ]; then
@@ -80,8 +80,7 @@ function cleanup () {
 # @param1 - socle branch
 # @param2 - smithproxy branch
 function sync() {
-    SOCLE_BRANCH=$1
-    SMITHPROXY_BRANCH=$2
+    SMITHPROXY_BRANCH=$1
 
     O="$(pwd)"
     cd "${CUR_DIR}" || exit 255
@@ -123,7 +122,7 @@ safe_upload() {
 ## get source !!
 ##
 
-sync $SO_BRANCH $SX_BRANCH
+sync "${SX_BRANCH}"
 
 ##
 ## get proper versions from GIT. We set debian patch-level to distance from
