@@ -3,7 +3,7 @@
 SXPATH=$1
 
 if [[ -z "$SXPATH" || ! -d "$SXPATH" ]]; then
-    echo "Invalid or no path provided."
+    echo "Invalid or no path provided: '${SXPATH}'" >&2
     exit 1
 fi
 
@@ -18,6 +18,11 @@ components["$SO_LOG"]="Socle library"
 
 
 GIT_DESCR=$(git -C "${SXPATH}" describe --tags)
+if [[ "${GIT_DESCR}" =~ ^[0-9] ]]; then
+    echo "gen_debian_changelog: trimming non-version prefix from the git tag" >&2
+    GIT_DESCR=$(echo "${GIT_DESCR}" | sed 's/[^0-9]*//')
+fi
+
 
 GIT_TAG=$(echo "${GIT_DESCR}" | awk -F'-' '{ print $1 }')
 GIT_PATCH_DIST=$(echo "${GIT_DESCR}" | awk -F'-' '{ print $2 }')
@@ -27,6 +32,7 @@ function process_component {
     local log_file=$2
 
     if [[ ! -d "$component_path" ]]; then
+        echo "gen_debian_changelog: component path doesn't exist!" >&2
         return 1
     fi
 
@@ -36,6 +42,7 @@ function process_component {
     # Fetch the latest tag that matches the pattern x.y.z
     local latest_tag=$(git tag --list | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
     if [[ -z "$latest_tag" ]]; then
+      echo "gen_debian_changelog: error - latest tag is ${latest_tag}" >&2
         return 1
     fi
 
