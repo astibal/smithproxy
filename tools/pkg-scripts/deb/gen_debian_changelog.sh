@@ -18,7 +18,7 @@ components["$SO_LOG"]="Socle library"
 
 
 GIT_DESCR=$(git -C "${SXPATH}" describe --tags)
-if [[ "${GIT_DESCR}" =~ ^[0-9] ]]; then
+if [[ "${GIT_DESCR}" =~ ^[^0-9] ]]; then
     echo "gen_debian_changelog: trimming non-version prefix from the git tag" >&2
     GIT_DESCR=$(echo "${GIT_DESCR}" | sed 's/[^0-9]*//')
 fi
@@ -31,12 +31,12 @@ function process_component {
     local component_path=$1
     local log_file=$2
 
-    if [[ ! -d "$component_path" ]]; then
-        echo "gen_debian_changelog: component path doesn't exist!" >&2
+    if [[ ! -d "${component_path}" ]]; then
+        echo "gen_debian_changelog: component path '${component_path}' doesn't exist!" >&2
         return 1
     fi
 
-    cd "$component_path" || return 1
+    cd "${component_path}" || return 1
     git log --pretty=format:%s --oneline --output "${log_file}_pre"
 
     # Fetch the latest tag that matches the pattern x.y.z
@@ -47,7 +47,7 @@ function process_component {
     fi
 
     versions["$log_file"]=$latest_tag
-    fmt -s --prefix="    " < "${log_file}_pre" > "$log_file"
+    fmt -s --prefix="    " < "${log_file}_pre" > "${log_file}"
 }
 
 process_component "$SXPATH" "$SX_LOG"

@@ -18,13 +18,17 @@ if [ "${HTTP_CHECK_PATH}" == "" ]; then
     HTTP_CHECK_PATH="www.mag0.net/out/smithproxy"
 fi
 
-if [ "${SO_BRANCH}" == "" ]; then
-    SO_BRANCH="master"
+if [ "${SX_BRANCH}" == "" ]; then
+    SX_BRANCH="$1"
 fi
-
 if [ "${SX_BRANCH}" == "" ]; then
     SX_BRANCH="master"
 fi
+if [ "${CHANNEL}" == "" ]; then
+    CHANNEL="snapshots"
+fi
+
+echo "createdeb: processing smithproxy branch '${SX_BRANCH}' channel '${CHANNEL}'"
 
 if [ "${CURL_UPLOAD_OPTS}" == "" ]; then
   CURL_UPLOAD_OPTS="--ftp-ssl-control"
@@ -48,7 +52,7 @@ cp -r ${DEBIAN_DIR} ${CUR_DIR}/debian
 
 CUSTOM_DEBIAN_DIR="${DEBIAN_DIR}_$(./distro.sh)"
 if [[ -d "${CUSTOM_DEBIAN_DIR}" ]]; then
-    echo "custom debian directory found, copying files"
+    echo "createdeb: custom debian directory found, copying files"
     cp -rv "${CUSTOM_DEBIAN_DIR}"/* ${CUR_DIR}/debian/
 fi
 
@@ -59,7 +63,7 @@ cd "${CUR_DIR}" || exit 255
 ##
 trap ctrl_c INT
 function ctrl_c() {
-        echo "Ctrl-C: exiting working directory ${CUR_DIR}"
+        echo "createdeb: Ctrl-C: exiting working directory ${CUR_DIR}"
         cd "${ORIG_DIR}" || exit 255
         exit 255
 }
@@ -80,8 +84,7 @@ function cleanup () {
 # @param1 - socle branch
 # @param2 - smithproxy branch
 function sync() {
-    SOCLE_BRANCH=$1
-    SMITHPROXY_BRANCH=$2
+    SMITHPROXY_BRANCH=$1
 
     O="$(pwd)"
     cd "${CUR_DIR}" || exit 255
@@ -98,10 +101,10 @@ upload() {
     URL=$2
 
     if [[ -f ${FILE} ]]; then
-        echo "source ${FILE} exists"
+        echo "createdeb: source ${FILE} exists"
         curl ${CURL_UPLOAD_OPTS} --ftp-create-dirs -T "${FILE}" "$URL"
     else
-        echo "source ${FILE} doesn't exist!"
+        echo "createdeb: source ${FILE} doesn't exist!"
     fi
 }
 
@@ -111,9 +114,9 @@ safe_upload() {
     URL=$2
 
     if curl --output /dev/null --silent --head --fail "${URL}"; then
-      echo "target URL exists: ${URL}, aborting"
+      echo "createdeb: target URL exists: ${URL}, aborting"
     else
-      echo "target URL does not exist: ${URL}, uploading"
+      echo "createdeb: target URL does not exist: ${URL}, uploading"
       upload "${FILE}" "${URL}"
     fi
 }
@@ -123,7 +126,7 @@ safe_upload() {
 ## get source !!
 ##
 
-sync $SO_BRANCH $SX_BRANCH
+sync "${SX_BRANCH}"
 
 ##
 ## get proper versions from GIT. We set debian patch-level to distance from
@@ -134,13 +137,13 @@ cd smithproxy || exit 255
 
 GIT_DESCR=$(git describe --tags)
 
-if [[ "${GIT_DESCR}" =~ ^[0-9] ]]; then
+if [[ "${GIT_DESCR}" =~ ^[^0-9] ]]; then
     echo "createdeb: trimming non-version prefix from the git tag"
     GIT_DESCR=$(echo "${GIT_DESCR}" | sed 's/[^0-9]*//')
 fi
 
 
-echo "Git describe: ${GIT_DESCR}"
+echo "createdeb: git describe: ${GIT_DESCR}"
 
 GIT_TAG=$(echo "${GIT_DESCR}" | awk -F'-' '{ print $1 }')
 
@@ -149,10 +152,10 @@ GIT_PATCH_DIST=$(echo "${GIT_DESCR}" | awk -F'-' '{ print $2 }')
 GIT_PATCH=$(echo "${GIT_DESCR}" | awk -F'-' '{ print $3 }')
 
 if [ "${GIT_PATCH_DIST}" == "" ]; then
-    echo "Git at zero empty - setting to p0"
+    echo "createdeb: git at zero empty - setting to p0"
     GIT_PATCH_DIST="p0"
 elif [ "${GIT_PATCH_DIST}" == "0" ]; then
-    echo "Git at zero patch - setting to p0"
+    echo "createdeb: git at zero patch - setting to p0"
     GIT_PATCH_DIST="p0"
     exit 255
 fi
@@ -175,7 +178,7 @@ DEB_CUR="${GIT_PATCH_DIST}"
 VER="${GIT_TAG}"
 ARCH="$(dpkg --print-architecture)"
 
-echo "Git last version: ${GIT_TAG}, ${GIT_PATCH_DIST} commits ahead. Debian patchlevel set to ${DEB_CUR}"
+echo "createdeb: git last version: ${GIT_TAG}, ${GIT_PATCH_DIST} commits ahead. Debian patchlevel set to ${DEB_CUR}"
 cd "${CUR_DIR}" || exit 255
 
 
@@ -185,15 +188,12 @@ DEB_DIR="smithproxy-$VER"
 
 DISTRO=$(./distro.sh)
 
-echo "Distro detected: ${DISTRO}"
-echo "Major version: $VER_MAJ, debian directory set to $DEB_DIR"
+echo "createdeb: distro detected: ${DISTRO}"
+echo "createdeb: major version: $VER_MAJ, debian directory set to $DEB_DIR"
 
 
-# try to get passwords from an argument for case script is run interactive
-if [ "${FTP_UPLOAD_PWD}" == "" ]; then
-    FTP_UPLOAD_PWD=$1
-fi
-# if password is still unknown, ask for it
+
+# if password is unknown, ask for it
 if [ "${FTP_UPLOAD_PWD}" == "" ]; then
     read -r -s -p "Enter ftp upload password: " FTP_UPLOAD_PWD
 fi
@@ -221,14 +221,14 @@ cd ..
 # keep debian changelog ugly as it's idiotically dogmatic format - I am giving up on this BS
 ./gen_debian_changelog.sh smithproxy_src > "${DEB_DIR}/debian/changelog"
 
-echo "cd to ${DEB_DIR}"
+echo "createdeb: cd to ${DEB_DIR}"
 cd "${DEB_DIR}" || exit 255
 
 
-echo "Creating debian packages..."
+echo "createdeb: creating debian packages..."
 debuild -us -uc -j"$(nproc)"
 
-echo "cd to ${CUR_DIR}"
+echo "createdeb: cd to ${CUR_DIR}"
 cd "${CUR_DIR}" || exit 255
 
 #FIXME: archive contains cmake temp files - archive is too big.
@@ -236,7 +236,7 @@ cd "${CUR_DIR}" || exit 255
 #mkdir archives
 #tar cvfz archives/smithproxy_${VER}-${DEB_CUR}_${DISTRO}_build.tar.gz --exclude-vcs -- smithproxy_${VER}/ smithproxy-${VER}/ socle/
 
-echo "Saving changelog"
+echo "createdeb: saving changelog"
 cp -f "smithproxy-${VER}/debian/changelog" debian/
 
 ##
@@ -244,22 +244,18 @@ cp -f "smithproxy-${VER}/debian/changelog" debian/
 ##
 
 if [ "$FTP_UPLOAD_PWD" == "" ]; then
-    echo "password was not provided - no uploads"
+    echo "createdeb: password was not provided - no uploads"
 else
 
-    echo "File(s) being uploaded now."
+    echo "createdeb: file(s) being uploaded now."
     DEB_FILE=smithproxy${SUFFIX_SHORT}_${VER}-${DEB_CUR}_${ARCH}.deb
 
     if [ ! -f "${DEB_FILE}" ]; then
-      echo "${DEB_FILE} not found, exiting"
+      echo "createdeb: ${DEB_FILE} not found, exiting"
       exit 255
     fi
 
-    if [ "${GIT_PATCH_DIST}" != "0" ]; then
-        DEB_PATH="${UPLOAD_URL}/${VER_MAJ}/${DISTRO}/snapshots/binary-${ARCH}"
-    else
-        DEB_PATH="${UPLOAD_URL}/${VER_MAJ}/${DISTRO}/release/binary-${ARCH}"
-    fi
+    DEB_PATH="${UPLOAD_URL}/${VER_MAJ}/${DISTRO}/${CHANNEL}/binary-${ARCH}"
 
     DEB_URL="${DEB_PATH}/$DEB_FILE"
 
@@ -272,7 +268,7 @@ else
     safe_upload "${DEB_FILE}.sha256" "${DEB_URL}.sha256"
 
     if [ "${MAKE_DEBUG}" == "Y" ]; then
-        echo "debug release, skipping complementary files"
+        echo "createdeb: debug release, skipping complementary files"
     else
         # overwrite files if thy exist
         safe_upload "smithproxy-${VER}/debian/changelog" "${DEB_PATH}/smithproxy_${VER}-${DEB_CUR}.changelog.debian.txt"
@@ -287,7 +283,7 @@ else
     if [ "${GIT_PATCH_DIST}" != "0" ]; then
 
         if [ "${MAKE_DEBUG}" == "Y" ]; then
-            echo "debug release, skipping complementary files"
+            echo "createdeb: debug release, skipping complementary files"
         else
             SRC_BALL="${UPLOAD_URL}src/smithproxy_src-${GIT_TAG}-${GIT_PATCH_DIST}.tar.gz"
             safe_upload /tmp/smithproxy-src.tar.gz "${SRC_BALL}"
@@ -299,9 +295,9 @@ else
             rm /tmp/smithproxy-src.tar.gz.sha256
         fi
     fi
-    echo "Finished."
+    echo "createdeb: finished."
 fi
 
 
-echo "Finished: exiting working directory $CUR_DIR (please clean it up)"
+echo "createdeb: finished: exiting working directory $CUR_DIR (please clean it up)"
 cd "${ORIG_DIR}" || exit 255
