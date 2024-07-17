@@ -29,6 +29,7 @@ FTP_PASS = ""
 FTP_UPLOAD_USER = ""
 FTP_UPLOAD_PATH = ""
 CURL_UPLOAD_OPTS = ""
+CHANNEL = "snapshots"
 
 parser = argparse.ArgumentParser(description='Smithproxy builder')
 
@@ -44,6 +45,8 @@ build_group.add_argument('--hosts', type=str, nargs='*', help='hosts - localhost
 build_group.add_argument('--proxy', type=str, nargs='?', help='proxy to be used by the build')
 
 build_group.add_argument('--branch', type=str, help="smithproxy git branch to use", nargs='?')
+
+build_group.add_argument('--channel', type=str, help="release channel (snapshots/release/...)", nargs='?')
 
 misc_group = top_group.add_argument_group()
 misc_group.add_argument('--list', action='store_true')
@@ -104,7 +107,9 @@ def run_build(host, files, arg_http_proxy=None, arg_cleanup=False, arg_user=None
                             --build-arg FTP_UPLOAD_USER=%s \
                             --build-arg FTP_UPLOAD_PATH=%s \
                             --build-arg SX_BRANCH=%s \
-                            --build-arg CURL_UPLOAD_OPTS=%s " % (FTP_PASS, FTP_UPLOAD_USER, FTP_UPLOAD_PATH, SRC_BRANCH, CURL_UPLOAD_OPTS)
+                            --build-arg CHANNEL=%s \
+                            --build-arg CURL_UPLOAD_OPTS=%s " % (FTP_PASS, FTP_UPLOAD_USER, FTP_UPLOAD_PATH, SRC_BRANCH,
+                                                                 CHANNEL, CURL_UPLOAD_OPTS)
 
         # reset - cmd_pre is run only once
         cmd_pre = ""
@@ -160,7 +165,7 @@ def load_config(fnm):
     
     global SRC_ROOT
     global SRC_REST, SRC_BRANCH, FTP_PASS, FTP_UPLOAD_USER, FTP_UPLOAD_PATH, CURL_UPLOAD_OPTS
-    
+
     try:
         cfg = json.load(open(os.path.expanduser(fnm)))
         
@@ -229,6 +234,9 @@ if __name__ == '__main__':
 
         if args.branch:
             SRC_BRANCH = args.branch
+
+        if args.channel:
+            CHANNEL = args.channel
 
         if args.hosts:
 

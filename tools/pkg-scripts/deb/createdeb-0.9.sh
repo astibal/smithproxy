@@ -21,10 +21,14 @@ fi
 if [ "${SX_BRANCH}" == "" ]; then
     SX_BRANCH="$1"
 fi
-
 if [ "${SX_BRANCH}" == "" ]; then
     SX_BRANCH="master"
 fi
+if [ "${CHANNEL}" == "" ]; then
+    CHANNEL="snapshots"
+fi
+
+echo "createdeb: processing smithproxy branch '${SX_BRANCH}' channel '${CHANNEL}'"
 
 if [ "${CURL_UPLOAD_OPTS}" == "" ]; then
   CURL_UPLOAD_OPTS="--ftp-ssl-control"
@@ -188,11 +192,8 @@ echo "createdeb: distro detected: ${DISTRO}"
 echo "createdeb: major version: $VER_MAJ, debian directory set to $DEB_DIR"
 
 
-# try to get passwords from an argument for case script is run interactive
-if [ "${FTP_UPLOAD_PWD}" == "" ]; then
-    FTP_UPLOAD_PWD=$1
-fi
-# if password is still unknown, ask for it
+
+# if password is unknown, ask for it
 if [ "${FTP_UPLOAD_PWD}" == "" ]; then
     read -r -s -p "Enter ftp upload password: " FTP_UPLOAD_PWD
 fi
@@ -254,11 +255,7 @@ else
       exit 255
     fi
 
-    if [ "${GIT_PATCH_DIST}" != "0" ]; then
-        DEB_PATH="${UPLOAD_URL}/${VER_MAJ}/${DISTRO}/snapshots/binary-${ARCH}"
-    else
-        DEB_PATH="${UPLOAD_URL}/${VER_MAJ}/${DISTRO}/release/binary-${ARCH}"
-    fi
+    DEB_PATH="${UPLOAD_URL}/${VER_MAJ}/${DISTRO}/${CHANNEL}/binary-${ARCH}"
 
     DEB_URL="${DEB_PATH}/$DEB_FILE"
 
