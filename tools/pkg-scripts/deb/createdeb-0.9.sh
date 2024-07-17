@@ -141,8 +141,8 @@ GIT_PATCH_DIST=$(echo "${GIT_DESCR}" | awk -F'-' '{ print $2 }')
 GIT_PATCH=$(echo "${GIT_DESCR}" | awk -F'-' '{ print $3 }')
 
 if [ "${GIT_PATCH_DIST}" == "" ]; then
-    echo "Git patch unknown, must abort"
-    exit 255
+    echo "Git at zero empty - setting to p0"
+    GIT_PATCH_DIST="p0"
 elif [ "${GIT_PATCH_DIST}" == "0" ]; then
     echo "Git at zero patch - setting to p0"
     GIT_PATCH_DIST="p0"
