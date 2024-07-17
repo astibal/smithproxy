@@ -134,13 +134,13 @@ cd smithproxy || exit 255
 
 GIT_DESCR=$(git describe --tags)
 
-if [[ "${GIT_DESCR}" =~ ^[0-9] ]]; then
+if [[ "${GIT_DESCR}" =~ ^[^0-9] ]]; then
     echo "createdeb: trimming non-version prefix from the git tag"
     GIT_DESCR=$(echo "${GIT_DESCR}" | sed 's/[^0-9]*//')
 fi
 
 
-echo "Git describe: ${GIT_DESCR}"
+echo "createdeb: git describe: ${GIT_DESCR}"
 
 GIT_TAG=$(echo "${GIT_DESCR}" | awk -F'-' '{ print $1 }')
 

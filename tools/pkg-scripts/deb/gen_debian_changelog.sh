@@ -18,7 +18,7 @@ components["$SO_LOG"]="Socle library"
 
 
 GIT_DESCR=$(git -C "${SXPATH}" describe --tags)
-if [[ "${GIT_DESCR}" =~ ^[0-9] ]]; then
+if [[ "${GIT_DESCR}" =~ ^[^0-9] ]]; then
     echo "gen_debian_changelog: trimming non-version prefix from the git tag" >&2
     GIT_DESCR=$(echo "${GIT_DESCR}" | sed 's/[^0-9]*//')
 fi
