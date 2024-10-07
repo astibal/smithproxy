@@ -2407,7 +2407,7 @@ int cli_diag_neighbor_stats(struct cli_def *cli, const char *command, char *argv
 
         ss << "Neighbors stats:\n";
         ss << "  cache size: " << nb.cache().get_map_ul().size() << "\r\n";
-        ss << "  cache max entries: " << NbrHood::MAX_CACHE_SZ << "\r\n";
+        ss << "  cache max entries: " << NbrHood::instance().cache().capacity_ul() << "\r\n";
     }
 
     cli_print(cli, "%s", ss.str().c_str());

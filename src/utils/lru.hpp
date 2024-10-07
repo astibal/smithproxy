@@ -42,16 +42,43 @@ public:
         return it->second.first;
     }
 
+    size_t capacity_ul() const {
+        return capacity_;
+    }
+
+    size_t capacity() const {
+        auto lc_ = std::scoped_lock(lock_);
+        return capacity_ul();
+    }
+
+    void set_capacity(size_t new_capacity) {
+        auto lc_ = std::scoped_lock(lock_);
+        set_capacity_ul(new_capacity);
+    }
+
+    void set_capacity_ul(size_t new_capacity) {
+        capacity_ = new_capacity;
+        cleanup_ul();
+    }
+
+    void cleanup_ul() {
+        while(cache_.size() >= capacity_) {
+            if(cache_.size() > 0L) {
+                Key oldestKey = lruList.back();
+                lruList.pop_back();
+                cache_.erase(oldestKey);
+            }
+            else {
+                break;
+            }
+        }
+    }
+
     void put_ul(const Key& key, Value const& value) {
 
-        if (cache_.size() == capacity_) {
-            Key oldestKey = lruList.back();
-            lruList.pop_back();
-            cache_.erase(oldestKey);
-        }
+        cleanup_ul();
 
-        auto it = cache_.find(key);
-        if (it != cache_.end()) {
+        if (auto it = cache_.find(key); it != cache_.end()) {
             lruList.erase(it->second.second);
             cache_.erase(it);
         }
@@ -60,10 +87,15 @@ public:
         cache_[key] = {value, lruList.begin()};
     }
 
-    void display() const {
+    std::string to_string(int verbosity) const {
+        auto lc_ = std::scoped_lock(lock_);
+
+        std::stringstream ss;
         for (auto& pair : cache_) {
-            std::cout << pair.first << " : " << pair.second.first << std::endl;
+            ss << pair.first << " : " << pair.second.first << std::endl;
         }
+
+        return ss.str();
     }
 
     void clear_ul() {

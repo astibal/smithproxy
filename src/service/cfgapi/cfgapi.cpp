@@ -58,6 +58,7 @@
 
 #include <proxy/mitmproxy.hpp>
 #include <proxy/mitmhost.hpp>
+#include <proxy/nbrhood.hpp>
 
 #include <proxy/filters/sinkhole.hpp>
 #include <proxy/filters/statsfilter.hpp>
@@ -494,6 +495,11 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "added settings.webhook.task_debug_dump");
         return true;
     }
+    else if(upgrade_to_num == 1033) {
+        log.event(INF, "added settings.tuning.nbr_cache_size");
+        return true;
+    }
+
 
     return false;
 }
@@ -849,6 +855,14 @@ bool CfgFactory::load_settings () {
         int hostcx_write_full = 0;
         load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "host_write_full", hostcx_write_full);
         if(hostcx_write_full >= 1024) { baseHostCX::params.write_full = hostcx_write_full; }
+
+        int nbr_cache_size = 0;
+        load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "nbr_cache_size", nbr_cache_size);
+        if(nbr_cache_size > 100 and (static_cast<size_t>(nbr_cache_size) != NbrHood::instance().cache().capacity())) {
+            NbrHood::instance().cache().set_capacity(static_cast<size_t>(nbr_cache_size));
+        }
+
+
 
         if(int open_timeout = 0; load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "host_open_timeout", open_timeout)) {
             baseHostCX::params.open_timeout = open_timeout;
@@ -5098,6 +5112,7 @@ int save_settings(Config& ex) {
     tuning_objects.add("host_write_full", Setting::TypeInt) = (int) baseHostCX::params.write_full;
     tuning_objects.add("host_open_timeout", Setting::TypeInt) = (unsigned short) baseHostCX::params.open_timeout;
     tuning_objects.add("host_idle_timeout", Setting::TypeInt) = (unsigned short) baseHostCX::params.idle_delay;
+    tuning_objects.add("nbr_cache_size", Setting::TypeInt) = (int) NbrHood::instance().cache().capacity();
 
 
     objects.add("accept_api", Setting::TypeBoolean) = CfgFactory::get()->accept_api;
