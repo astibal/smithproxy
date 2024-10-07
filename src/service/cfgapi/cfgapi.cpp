@@ -858,7 +858,7 @@ bool CfgFactory::load_settings () {
 
         int nbr_cache_size = 0;
         load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "nbr_cache_size", nbr_cache_size);
-        if(nbr_cache_size > 100 and (static_cast<size_t>(nbr_cache_size) != NbrHood::instance().cache().capacity())) {
+        if( nbr_cache_size > 0 and (static_cast<size_t>(nbr_cache_size) != NbrHood::instance().cache().capacity())) {
             NbrHood::instance().cache().set_capacity(static_cast<size_t>(nbr_cache_size));
         }
 
