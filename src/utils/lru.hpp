@@ -62,7 +62,7 @@ public:
     }
 
     void cleanup_ul() {
-        while(cache_.size() >= capacity_) {
+        while(cache_.size() > capacity_) {
             if(cache_.size() > 0L) {
                 Key oldestKey = lruList.back();
                 lruList.pop_back();
@@ -76,8 +76,6 @@ public:
 
     void put_ul(const Key& key, Value const& value) {
 
-        cleanup_ul();
-
         if (auto it = cache_.find(key); it != cache_.end()) {
             lruList.erase(it->second.second);
             cache_.erase(it);
@@ -85,6 +83,8 @@ public:
 
         lruList.push_front(key);
         cache_[key] = {value, lruList.begin()};
+
+        cleanup_ul();
     }
 
     std::string to_string(int verbosity) const {

@@ -862,8 +862,6 @@ bool CfgFactory::load_settings () {
             NbrHood::instance().cache().set_capacity(static_cast<size_t>(nbr_cache_size));
         }
 
-
-
         if(int open_timeout = 0; load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "host_open_timeout", open_timeout)) {
             baseHostCX::params.open_timeout = open_timeout;
         }
