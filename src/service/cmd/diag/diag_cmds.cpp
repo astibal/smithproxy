@@ -2211,7 +2211,13 @@ int cli_diag_worker_proxy_list(struct cli_def *cli, [[maybe_unused]] const char 
                     stats.workers_busy++;
                 }
             }
+
+            if(idx == 0) {
+                // all acceptors have the same fdqueue create by their parent Listener
+                cli_print(cli, "        Socket queue stats: \n%s", acceptor->stats_str(12).c_str());
+            }
         }
+
     };
 
     list_acceptor("== plain acceptor", sx.plain_proxies, sx.plain_threads, verbosity);
