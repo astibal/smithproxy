@@ -4,6 +4,8 @@
 @{SX_DATA}=/var/local/smithproxy/
 @{SX_DATA2}=/var/smithproxy/
 @{CERTSTORE}=/usr/share/ca-certificates/
+
+# allow reading let's encrypt certificates (don't forget to check the rule below, too!)
 # @{CERTSTORE2}=/etc/letsencrypt/
 
 
@@ -29,7 +31,10 @@
   # read etc
   /etc/smithproxy/** r,
   /etc/smithproxy/*.cfg rw,
-  /etc/smithproxy/certs/**/custom/** rw,
+  /etc/smithproxy/certs/**/ip/** rw,
+  /etc/smithproxy/certs/**/sni/** rw,
+  /etc/smithproxy/certs/**/cc-ip/** rw,
+  /etc/smithproxy/certs/**/cc-sni/** rw,
 
   # rename own threads
   /proc/@{pid}/task/*/comm rw,
