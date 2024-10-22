@@ -1591,7 +1591,12 @@ auto get_tls_info(MitmHostCX const* lf, MitmHostCX const* rg, int sl_flags, int 
 
             if (com && not com->opt.bypass) {
                 auto ssl = com->get_SSL();
-                auto const *session = SSL_get_session(ssl);
+
+                SSL_SESSION *session = nullptr;
+                if(ssl) {
+                    session = SSL_get_session(ssl);
+                }
+
                 if (ssl and session) {
 
                     auto *cipher_str = SSL_CIPHER_get_name(SSL_SESSION_get0_cipher(session));
