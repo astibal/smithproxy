@@ -909,7 +909,7 @@ bool MitmProxy::handle_cached_response(MitmHostCX* mh) {
 }
 
 
-void MitmProxy::proxy_dump_packet(side_t sid, buffer& buf) {
+void MitmProxy::proxy_dump_packet(side_t sid, buffer const& buf) {
     auto const& log = log_dump;
 
     constexpr size_t chunk_sz = 1024;
@@ -958,14 +958,16 @@ static std::string b64_decode(std::string const& encoded) {
 
 
 
-void MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer) {
+bool MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer) {
 
     auto& log = log_content;
 
-    if(not sx::http::webhooks::is_enabled()) return;
-    if(not cx or buffer.empty()) return;
+    if(not sx::http::webhooks::is_enabled()) return false;
+    if(not cx or buffer.empty()) return false;
 
-    if(not writer_opts()->webhook_enable) return;
+    if(not writer_opts()->webhook_enable) return false;
+
+    bool was_modified = false;
 
     nlohmann::json j;
     auto cl = to_connection_label();
@@ -991,6 +993,7 @@ void MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer) {
                         if(json_obj["action"] == "discard") {
                             // data sent to webhook shall be discarded
                             buffer.size(0);
+                            was_modified = true;
                         }
                         else {
                             // catch-all code to decode response if present
@@ -1006,6 +1009,7 @@ void MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer) {
                                 }
 
                                 buffer.assign(decoded.data(), decoded.size());
+                                was_modified = true;
                             }
                             else {
                                 _dia("webhook content-replace: no replacement body received");
@@ -1016,88 +1020,102 @@ void MitmProxy::content_webhook(baseHostCX* cx, side_t side, buffer& buffer) {
             }
         }
     });
+
+    return was_modified;
+}
+
+bool MitmProxy::handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t side) {
+    if(writer_opts()->webhook_lock_traffic) {
+
+        if(from->com() and from->com()->l4_proto() == SOCK_STREAM) {
+            if(from->com()->so_keepalive(from->socket()) == 0) {
+                _deb("connection 'from' socket set to KEEPALIVE");
+            }
+            else {
+                _err("connection 'from' ERROR socket set to KEEPALIVE");
+            }
+        }
+        if(to->com() and to->com()->l4_proto() == SOCK_STREAM) {
+            if (to->com()->so_keepalive(to->socket()) == 0) {
+                _deb("connection 'to' socket set to KEEPALIVE");
+            }
+            else {
+                _err("connection 'to' ERROR socket set to KEEPALIVE");
+            }
+        }
+
+        // traffic with applied webhook with enabled locking will block here
+        auto lc_ = std::scoped_lock(MitmProxy::Opts_ContentWriter::webhook_content_lock);
+        return content_webhook(from, side, from->to_read());
+    }
+    else {
+        return content_webhook(from, side, from->to_read());
+    }
 }
 
 void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redirected) {
 
     if(not to or not from or from->to_read().empty()) return;
 
-    if (!redirected) {
-        if (content_rule() != nullptr) {
-            buffer b = content_replace_apply(from->to_read());
-
-            if(writer_opts()->webhook_enable) {
-
-                if(writer_opts()->webhook_lock_traffic) {
-
-                    if(from->com() and from->com()->l4_proto() == SOCK_STREAM) {
-                        if(from->com()->so_keepalive(from->socket()) == 0) {
-                            _deb("connection 'from' socket set to KEEPALIVE");
-                        }
-                        else {
-                            _err("connection 'from' ERROR socket set to KEEPALIVE");
-                        }
-                    }
-                    if(to->com() and to->com()->l4_proto() == SOCK_STREAM) {
-                        if (to->com()->so_keepalive(to->socket()) == 0) {
-                            _deb("connection 'to' socket set to KEEPALIVE");
-                        }
-                        else {
-                            _err("connection 'to' ERROR socket set to KEEPALIVE");
-                        }
-                    }
-
-                    // traffic with applied webhook with enabled locking will block here
-                    auto lc_ = std::scoped_lock(writer_opts()->webhook_content_lock);
-                    content_webhook(from, side, b);
-                }
-                else {
-                    content_webhook(from, side, b);
-                }
-            }
-
-            if(*log_dump.level() >= iDIA)
-                proxy_dump_packet(side, b);
-
-            write_traffic_log(side, from, &b);
-            to->to_write(b);
-            _dia("mitmproxy::proxy-%c: original %d bytes replaced with %d bytes", from_side(side), from->to_read().size(),
-                 b.size());
-        } else {
-
-            if(*log_dump.level() >= iDIA)
-                proxy_dump_packet(side, from->to_read());
-
-
-            if(not filters_.empty()) for(auto const& [ filter_name, filter_proxy ]: filters_) {
-
-                    _deb("MitmProxy::proxy: running filter %s", filter_name.c_str());
-                    filter_proxy->proxy(from, to, side, redirected);
-
-                    if(state().dead()) {
-                        _deb("MitmProxy::proxy: filter %s: proxy marked dead", filter_name.c_str());
-
-                        // after marking dead, session is not getting on_error anymore
-                        webhook_session_stop();
-                        shutdown();
-                        return;
-                    }
-            }
-
-            auto sz = from->to_read().size();
-
-            write_traffic_log(side, from);
-            to->to_write(from->to_read());
-            auto fastlane = sz > 0 and from->to_read().empty();
-
-            _dia("mitmproxy::proxy-%c: %d copied %s", from_side(side), sz, fastlane ? "(fastlane)": "");
-        }
-    } else {
-
+    if(redirected) {
         // rest of connections should be closed when sending replacement to a client
         to->shutdown();
+        return;
     }
-};
+
+    // 1. content webhook first (potentially modifies from->to_read() buffer
+    if(writer_opts()->webhook_enable) {
+        auto orig_sz = from->to_read().size();
+        if(handle_content_webhook(from, to, side)) {
+            auto sz = from->to_read().size();
+            _dia("mitmproxy::proxy-%c: %dB replaced with %dB (webhook)", from_side(side), orig_sz, sz);
+        }
+    }
+
+    // 2. do filtering (stats, access, etc.)
+    for(auto const& [ filter_name, filter_proxy ]: filters_) {
+
+        _deb("MitmProxy::proxy: running filter %s", filter_name.c_str());
+        filter_proxy->proxy(from, to, side, redirected);
+
+        if(state().dead()) {
+            _deb("MitmProxy::proxy: filter %s: proxy marked dead", filter_name.c_str());
+
+            // after marking dead, session is not getting on_error anymore
+            webhook_session_stop();
+            shutdown();
+            return;
+        }
+    }
+
+    // 3. perform replacement according to config content rules
+    std::optional<buffer> replacement;
+    if (content_rule() != nullptr and not content_rule()->empty()) {
+        replacement = content_replace_apply(from->to_read());
+    }
+    if(*log_dump.level() >= iDIA)
+        proxy_dump_packet(side, replacement.value_or(from->to_read()));
+
+
+    // value_or returns const&
+    if(replacement.has_value()) {
+        to->to_write(replacement.value());
+        write_traffic_log(side, from, &replacement.value());
+
+        auto orig_sz = from->to_read().size();
+        auto sz = replacement.value().size();
+        _dia("mitmproxy::proxy-%c: %dB replaced with %dB (content rule)", from_side(side), orig_sz, sz);
+    }
+    else {
+        to->to_write(from->to_read());
+        write_traffic_log(side, from);
+
+        auto sz = from->to_read().size();
+        auto fastlane = sz > 0 and from->to_read().empty();
+        _dia("mitmproxy::proxy-%c: %dB copied %s", from_side(side), sz, fastlane ? "(fastlane)": "");
+    }
+
+}
 
 
 void MitmProxy::write_traffic_log(side_t side, baseHostCX* cx, buffer* custom_buffer) {
@@ -2041,10 +2059,11 @@ void MitmProxy::init_content_replace() {
     content_rule_ = std::make_unique<std::vector<ProfileContentRule>>();
 }
 
-buffer MitmProxy::content_replace_apply(const buffer &ref) {
+std::optional<buffer> MitmProxy::content_replace_apply(const buffer &ref) {
     const std::string data = ref.str();
     std::string result = data;
-    
+    bool will_replace = false;
+
     int stage = 0;
     for(auto& profile: *content_rule()) {
         
@@ -2053,32 +2072,23 @@ buffer MitmProxy::content_replace_apply(const buffer &ref) {
             const std::string repl = profile.replace;
             
             if(profile.replace_each_nth != 0) {
-
-                // unfortunately std::regex_replace doesn't return if it really replaced something
-                // ... which is no problem if we don't care. But in case we want to replace only 
-                // .... nth occurrence, we have to do extra search to check (requiring one extra regex match).
-                std::smatch sm;
-                const bool is_there = std::regex_search(result,sm,re_match);
-
-                if(is_there) {
-                    profile.replace_each_counter_++;
-                    if(profile.replace_each_counter_ >= profile.replace_each_nth) {
+                if(profile.replace_each_counter_ >= profile.replace_each_nth) {
                         
-                        if(profile.fill_length) {
-                            result = regex_replace_fill(result, profile.match, repl);
-                        } else {
-                            result = std::regex_replace(result, re_match, repl);              
-                        }
-                        profile.replace_each_counter_ = 0;
-                        _dia("Replacing bytes[stage %d]: n-th counter hit", stage);
+                    auto replacement = regex_replace_fill(result, profile.match, repl, profile.fill_length ? " " : nullptr);
+                    if(replacement.has_value()) {
+                        will_replace = true;
+                        result = replacement.value();
                     }
+
+                    profile.replace_each_counter_ = 0;
+                    _dia("Replacing bytes[stage %d]: n-th counter hit", stage);
                 }
                 
             } else {
-                if(profile.fill_length) {
-                    result = regex_replace_fill(result, profile.match, repl);
-                } else {
-                    result = std::regex_replace(result, re_match, repl);              
+                auto replacement = regex_replace_fill(result, profile.match, repl, profile.fill_length ? " " : nullptr);
+                if(replacement.has_value()) {
+                    will_replace = true;
+                    result = replacement.value();
                 }
             }
 
@@ -2090,18 +2100,17 @@ buffer MitmProxy::content_replace_apply(const buffer &ref) {
         
         ++stage;
     }
-    
-    
-    
-    
-    
-    buffer ret_b;
-    ret_b.append(result.c_str(),result.size());
-    
-    _dia("content rewritten: original %d bytes with new %d bytes.", ref.size(), ret_b.size());
-    _dum("Replacing bytes (%d):\n%s\n# with bytes(%d):\n%s", data.size(), hex_dump(ref).c_str(),
-                                                            ret_b.size(),hex_dump(ret_b).c_str());
-    return ret_b;
+
+    if(will_replace) {
+        buffer ret_b;
+        ret_b.append(result.c_str(), result.size());
+
+        _dia("content rewritten: original %d bytes with new %d bytes.", ref.size(), ret_b.size());
+        _dum("Replacing bytes (%d):\n%s\n# with bytes(%d):\n%s", data.size(), hex_dump(ref).c_str(),
+             ret_b.size(), hex_dump(ret_b).c_str());
+        return ret_b;
+    }
+    return std::nullopt;
 }
 
 

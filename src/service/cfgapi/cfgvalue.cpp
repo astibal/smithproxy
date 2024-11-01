@@ -801,7 +801,6 @@ std::pair<std::optional<std::string>, std::string> CfgValueHelp::value_check(std
 
         if(not value_modified.empty()) {
 
-            unsigned int i = 0;
             for(auto this_filter: cli_e->get().value_filter()) {
                 auto retval = std::invoke(this_filter, value_modified);
 
@@ -814,8 +813,6 @@ std::pair<std::optional<std::string>, std::string> CfgValueHelp::value_check(std
                 } else {
                     value_modified = retval.get_value();
                     filter_result.emplace_back(true, retval.get_comment());
-
-                    i++;
                 }
             }
         }

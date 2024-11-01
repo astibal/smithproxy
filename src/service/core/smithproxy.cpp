@@ -86,7 +86,7 @@ std::thread* SmithProxy::create_identity_refresh_thread() {
             return;
         }
 
-        for (unsigned i = 0; ; i++) {
+        for ( [[maybe_unused]] unsigned i = 0; ; i++) {
 
             if(abort_sleep(20)) {
                 _dia("id_thread: terminating");

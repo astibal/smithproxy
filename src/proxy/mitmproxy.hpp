@@ -172,11 +172,12 @@ public:
 
     // actual proxy functions manipulating data buffers
     void write_traffic_log(side_t side, baseHostCX* cx, buffer* custom_buffer  = nullptr);
-    void proxy_dump_packet(side_t sid, buffer& buf);
+    void proxy_dump_packet(side_t sid, buffer const& buf);
     void proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redirected);
 
     // makes a synchronous API call letting webhook modify the content
-    void content_webhook(baseHostCX* cx, side_t side, buffer& buffer);
+    bool content_webhook(baseHostCX* cx, side_t side, buffer& buffer);
+    bool handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t side);
 
     // this virtual method is called whenever there are new bytes in any LEFT host context!
     void on_left_bytes(baseHostCX* cx) override;
@@ -244,7 +245,7 @@ public:
         }
     }
     
-    buffer content_replace_apply(const buffer &ref);
+    std::optional<buffer> content_replace_apply(const buffer &ref);
     
     void _debug_zero_connections(baseHostCX* cx);
     

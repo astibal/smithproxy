@@ -43,6 +43,7 @@
 
 #include <policy/cfgelement.hpp>
 #include <policy/addrobj.hpp>
+#include <regex>
 
 class ProfileDetection : public socle::sobject, public CfgElement {
 
@@ -157,6 +158,22 @@ public:
     // content webhook options
     bool webhook_enable = false;
     bool webhook_lock_traffic = false;
+
+    std::string rules_session_filter;
+    std::optional<std::regex> rules_session_filter_rx;
+
+    bool create_rule_session_filter_rx() {
+        rules_session_filter_rx = std::nullopt;
+        try {
+            rules_session_filter_rx = std::regex(rules_session_filter);
+            return true;
+
+        } catch (std::regex const& e) {
+            auto log =
+            rules_session_filter_rx = std::nullopt;
+        }
+        return false;
+    }
 
     ContentCaptureFormat write_format;
     std::vector<ProfileContentRule> content_rules;

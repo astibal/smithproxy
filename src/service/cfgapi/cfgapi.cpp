@@ -499,6 +499,10 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "added settings.tuning.nbr_cache_size");
         return true;
     }
+    else if(upgrade_to_num == 1034) {
+        log.event(INF, "added content_profile.[x].rules_session_filter");
+        return true;
+    }
 
 
     return false;
@@ -2122,6 +2126,14 @@ int CfgFactory::load_db_prof_content () {
 
         load_if_exists(cur_object, "webhook_enable", new_profile->webhook_enable);
         load_if_exists(cur_object, "webhook_lock_traffic", new_profile->webhook_lock_traffic);
+
+        if(load_if_exists(cur_object, "rules_session_filter", new_profile->rules_session_filter)) {
+            if(not new_profile->rules_session_filter.empty()) {
+                if(not new_profile->create_rule_session_filter_rx()) {
+                    _war("load_db_prof_content: '%s': rules_session_filter not loaded", name.c_str());
+                }
+            }
+        }
     }
 
     return num;
@@ -2609,7 +2621,21 @@ bool CfgFactory::prof_content_apply (baseHostCX *originator, baseProxy *new_prox
             mitm_proxy->writer_opts()->webhook_enable = pc->webhook_enable;
             mitm_proxy->writer_opts()->webhook_lock_traffic = pc->webhook_lock_traffic;
 
-            if( ! pc->content_rules.empty() ) {
+            bool filter_ok = true;
+            if(pc->rules_session_filter_rx.has_value()) {
+                try {
+                    auto px_name = mitm_proxy->to_string(iINF);
+                    filter_ok = std::regex_search(px_name, pc->rules_session_filter_rx.value());
+                    _deb("policy_apply: policy content profile[%s]: rules_session_filter - session name: '%s'", pc_name, px_name.c_str());
+                    _deb("policy_apply: policy content profile[%s]: rules_session_filter - session filter: '%s'", pc_name, pc->rules_session_filter.c_str());
+                    _dia("policy_apply: policy content profile[%s]: rules_session_filter - %s", pc_name, filter_ok ? "matched" : "skipping");
+                }
+                catch(std::regex_error const& e) {
+                    _dia("policy_apply: policy content profile[%s]: rules_session_filter error: %s", pc_name, e.what());
+                }
+            }
+
+            if( ! pc->content_rules.empty() and filter_ok ) {
                 _dia("policy_apply: policy content profile[%s]: applying content rules, size %d", pc_name, pc->content_rules.size());
                 mitm_proxy->init_content_replace();
                 mitm_proxy->content_replace(pc->content_rules);
@@ -3872,6 +3898,7 @@ int CfgFactory::save_content_profiles(Config& ex) const {
 
         item.add("webhook_enable", Setting::TypeBoolean) = obj->webhook_enable;
         item.add("webhook_lock_traffic", Setting::TypeBoolean) = obj->webhook_lock_traffic;
+        item.add("rules_session_filter", Setting::TypeString) = obj->rules_session_filter;
 
         if(! obj->content_rules.empty() ) {
 
