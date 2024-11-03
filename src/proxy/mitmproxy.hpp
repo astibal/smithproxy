@@ -113,7 +113,7 @@ public:
         bool webhook_lock_traffic = false;
 
         // if configured, all proxies will lock on this mutex (it's optional)
-        static inline std::mutex webhook_content_lock;
+        static inline std::timed_mutex webhook_content_lock;
 
     };
     lazy_ptr<Opts_ContentWriter> writer_opts_;

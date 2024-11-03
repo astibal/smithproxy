@@ -62,6 +62,7 @@
 #include <algorithm>
 
 #include <socle/common/base64.hpp>
+#include <socle/timed_guard.hpp>
 
 using namespace socle;
 
@@ -1044,13 +1045,40 @@ bool MitmProxy::handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t 
             }
         }
 
-        // traffic with applied webhook with enabled locking will block here
-        auto lc_ = std::scoped_lock(MitmProxy::Opts_ContentWriter::webhook_content_lock);
-        return content_webhook(from, side, from->to_read());
+        constexpr unsigned max_attempts = 3;
+        constexpr unsigned lock_timeout = 1000;
+        for(unsigned attempt_no = 1; attempt_no < max_attempts; ++attempt_no) {
+
+            // traffic with applied webhook with enabled locking will block here
+            auto lc_ = socle::threads::timed_guard(MitmProxy::Opts_ContentWriter::webhook_content_lock,
+                                                   std::chrono::milliseconds(lock_timeout));
+            if (not lc_.owns_lock()) {
+                _war("[%s]: content_webhook: waiting for other content webhook to finish (attempt %d)",
+                     to_string(iNOT).c_str(), attempt_no);
+                log.event(WAR, "[%s]: content_webhook: waiting for other content webhook to finish (attempt %d)",
+                     to_string(iNOT).c_str(), attempt_no);
+            }
+            else {
+                if(attempt_no > 1) {
+                    _war("[%s]: content_webhook: webhook is ready now (attempt %d)",
+                         to_string(iNOT).c_str(), attempt_no);
+                    log.event(WAR, "[%s]: content_webhook: webhook is ready now (attempt %d)",
+                         to_string(iNOT).c_str(), attempt_no);
+
+                }
+                return content_webhook(from, side, from->to_read());
+            }
+        }
+        _err("[%s]: content_webhook: previous webhook takes too long to complete, content NOT sent to webhook.",
+             to_string(iNOT).c_str());
+        log.event(ERR, "[%s]: content_webhook: previous webhook takes too long to complete, content NOT sent to webhook.",
+             to_string(iNOT).c_str());
+
     }
     else {
         return content_webhook(from, side, from->to_read());
     }
+    return false;
 }
 
 void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redirected) {
