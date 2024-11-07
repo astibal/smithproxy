@@ -297,6 +297,7 @@ add_executable(smithproxy
         src/inspect/dnsinspector.cpp
         src/inspect/dns.cpp
         src/inspect/kb/kb.hpp
+        src/inspect/fp/ja4.hpp
 
         src/inspect/engine/http.hpp
         src/inspect/engine/http.cpp
@@ -406,6 +407,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/utils/tests/str_test.cpp
                 src/inspect/tests/dns_tests.cpp
                 src/inspect/tests/node_tests.cpp
+                src/inspect/tests/ja4_tests.cpp
                 src/ext/libcidr/cidr.cpp
 
                 src/policy/policy.cpp
@@ -430,7 +432,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 socle/common/tests/cast_tests.cpp
                 )
 
-        target_link_libraries(sx_gtests gtest gtest_main socle_lib pthread crypto ssl)
+        target_link_libraries(sx_gtests asan gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries (sx_gtests nlohmann_json::nlohmann_json)
     endif()
 ENDIF()
