@@ -129,7 +129,16 @@ public:
 
     struct Opts_Accounting {
         bool details = true;
+        bool ja4_clienthello = false;
     } acct_opts;
+
+    struct JA4 {
+        size_t max_reads = 10;
+
+        std::string ClientHello;
+        size_t clienthello_counter = 0;
+
+    } ja4;
 
     // Remote filters - use other proxy to filter content of this proxy.
     // Elements are pair of "name" and pointer to the filter proxy 

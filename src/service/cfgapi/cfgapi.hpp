@@ -202,7 +202,7 @@ class CfgFactory : public CfgFactoryBase {
 public:
     // Each version bump implies a config upgrade - we start on 1000
     // see upgrade_schema() - control config upgrade
-    constexpr static inline const int SCHEMA_VERSION  = 1034;
+    constexpr static inline const int SCHEMA_VERSION  = 1035;
 
     static inline std::atomic_bool LOAD_ERRORS = false;
 
@@ -522,21 +522,21 @@ public:
 
 
     bool apply_config_change(std::string_view section);
-    int policy_apply (baseHostCX *originator, baseProxy *proxy, int matched_policy=-1);
+    int policy_apply (baseHostCX *originator, MitmProxy *proxy, int matched_policy=-1);
     void policy_apply_features(std::shared_ptr<PolicyRule> const& policy_rule, MitmProxy *mitm_proxy);
     std::shared_ptr<PolicyRule> lookup_policy(std::size_t i) { if(i < db_policy_list.size()) return db_policy_list.at(i); else return nullptr; }
 
     bool policy_apply_tls (int policy_num, baseCom *xcom);
     bool policy_apply_tls (const std::shared_ptr<ProfileTls> &pt, baseCom *xcom);
 
-    bool prof_content_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileContent> &pc);
-    bool prof_detect_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileDetection> &pd);
+    bool prof_content_apply (baseHostCX *originator, MitmProxy *new_proxy, const std::shared_ptr<ProfileContent> &pc);
+    bool prof_detect_apply (baseHostCX *originator, MitmProxy *new_proxy, const std::shared_ptr<ProfileDetection> &pd);
 
     std::optional<std::vector<std::string>> find_bypass_domain_hosts(std::string const& filter_element, bool wildcards_only);
-    bool prof_tls_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileTls> &ps);
-    bool prof_alg_dns_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileAlgDns>& p_alg_dns);
+    bool prof_tls_apply (baseHostCX *originator, MitmProxy *new_proxy, const std::shared_ptr<ProfileTls> &ps);
+    bool prof_alg_dns_apply (baseHostCX *originator, MitmProxy *new_proxy, const std::shared_ptr<ProfileAlgDns>& p_alg_dns);
     [[maybe_unused]]
-    bool prof_script_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileScript>& p_script);
+    bool prof_script_apply (baseHostCX *originator, MitmProxy *new_proxy, const std::shared_ptr<ProfileScript>& p_script);
 
     static void gre_export_apply(traflog::PcapLog* pcaplog);
 

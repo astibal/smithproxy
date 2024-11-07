@@ -503,6 +503,10 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "added content_profile.[x].rules_session_filter");
         return true;
     }
+    else if(upgrade_to_num == 1035) {
+        log.event(INF, "added content_profile.[x].ja4_tls_ch");
+        return true;
+    }
 
 
     return false;
@@ -2126,6 +2130,7 @@ int CfgFactory::load_db_prof_content () {
 
         load_if_exists(cur_object, "webhook_enable", new_profile->webhook_enable);
         load_if_exists(cur_object, "webhook_lock_traffic", new_profile->webhook_lock_traffic);
+        load_if_exists(cur_object, "ja4_tls_ch", new_profile->ja4_tls_ch);
 
         if(load_if_exists(cur_object, "rules_session_filter", new_profile->rules_session_filter)) {
             if(not new_profile->rules_session_filter.empty()) {
@@ -2603,11 +2608,9 @@ size_t CfgFactory::cleanup_db_prof_auth () {
 }
 
 
-bool CfgFactory::prof_content_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileContent> &pc) {
+bool CfgFactory::prof_content_apply (baseHostCX *originator, MitmProxy *mitm_proxy, const std::shared_ptr<ProfileContent> &pc) {
 
     auto const& log = log::policy();
-
-    auto* mitm_proxy = dynamic_cast<MitmProxy*>(new_proxy);
 
     bool ret = true;
     bool cfg_wrt;
@@ -2620,6 +2623,8 @@ bool CfgFactory::prof_content_apply (baseHostCX *originator, baseProxy *new_prox
             mitm_proxy->writer_opts()->write_payload = pc->write_payload;
             mitm_proxy->writer_opts()->webhook_enable = pc->webhook_enable;
             mitm_proxy->writer_opts()->webhook_lock_traffic = pc->webhook_lock_traffic;
+
+            mitm_proxy->acct_opts.ja4_clienthello = pc->ja4_tls_ch;
 
             bool filter_ok = true;
             if(pc->rules_session_filter_rx.has_value()) {
@@ -2661,7 +2666,7 @@ bool CfgFactory::prof_content_apply (baseHostCX *originator, baseProxy *new_prox
 }
 
 
-bool CfgFactory::prof_detect_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileDetection> &pd) {
+bool CfgFactory::prof_detect_apply (baseHostCX *originator, MitmProxy *mitm_proxy, const std::shared_ptr<ProfileDetection> &pd) {
 
     auto* mitm_originator = dynamic_cast<MitmHostCX*>(originator);
     auto const& log = log::policy();
@@ -2721,7 +2726,7 @@ std::optional<std::vector<std::string>> CfgFactory::find_bypass_domain_hosts(std
     return to_match.empty() ? std::nullopt : std::make_optional(to_match);
 };
 
-bool CfgFactory::prof_tls_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileTls> &ps) {
+bool CfgFactory::prof_tls_apply (baseHostCX *originator, MitmProxy *new_proxy, const std::shared_ptr<ProfileTls> &ps) {
 
     auto const& log = log::policy();
 
@@ -2813,12 +2818,11 @@ bool CfgFactory::prof_tls_apply (baseHostCX *originator, baseProxy *new_proxy, c
     return tls_applied;
 }
 
-bool CfgFactory::prof_alg_dns_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileAlgDns> &p_alg_dns) {
+bool CfgFactory::prof_alg_dns_apply (baseHostCX *originator, MitmProxy *new_proxy, const std::shared_ptr<ProfileAlgDns> &p_alg_dns) {
 
     auto const& log = log::policy();
 
-    auto* mitm_originator = dynamic_cast<AppHostCX*>(originator);
-    auto* mh = dynamic_cast<MitmHostCX*>(mitm_originator);
+    auto* mh = dynamic_cast<MitmHostCX*>(originator);
 
     bool ret = false;
     
@@ -2828,7 +2832,7 @@ bool CfgFactory::prof_alg_dns_apply (baseHostCX *originator, baseProxy *new_prox
             if(DNS_Inspector::dns_prefilter(mh)) {
                 auto* n = new DNS_Inspector();
 
-                _dia("policy_apply: policy dns profile[%s] for %s", p_alg_dns->element_name().c_str(), mitm_originator->full_name('L').c_str());
+                _dia("policy_apply: policy dns profile[%s] for %s", p_alg_dns->element_name().c_str(), mh->full_name('L').c_str());
                 n->opt_match_id = p_alg_dns->match_request_id;
                 n->opt_randomize_id = p_alg_dns->randomize_id;
                 n->opt_cached_responses = p_alg_dns->cached_responses;
@@ -2845,12 +2849,11 @@ bool CfgFactory::prof_alg_dns_apply (baseHostCX *originator, baseProxy *new_prox
 }
 
 
-bool CfgFactory::prof_script_apply (baseHostCX *originator, baseProxy *new_proxy, std::shared_ptr<ProfileScript> const& p_script) {
+bool CfgFactory::prof_script_apply (baseHostCX *originator, MitmProxy *new_proxy, std::shared_ptr<ProfileScript> const& p_script) {
 
     auto const& log = log::policy();
 
-    auto* mitm_originator = dynamic_cast<AppHostCX*>(originator);
-    auto* mh = dynamic_cast<MitmHostCX*>(mitm_originator);
+    auto* mh = dynamic_cast<MitmHostCX*>(originator);
 
     bool ret = false;
 
@@ -2858,7 +2861,7 @@ bool CfgFactory::prof_script_apply (baseHostCX *originator, baseProxy *new_proxy
 
         if(p_script) {
 
-            _dia("policy_apply: policy script profile[%s] for %s", p_script->element_name().c_str(), mitm_originator->full_name('L').c_str());
+            _dia("policy_apply: policy script profile[%s] for %s", p_script->element_name().c_str(), mh->full_name('L').c_str());
 
             if(p_script->script_type == ProfileScript::ST_PYTHON) {
                 #ifdef USE_PYTHON
@@ -2933,7 +2936,7 @@ void CfgFactory::policy_apply_features(std::shared_ptr<PolicyRule> const & polic
 
 }
 
-int CfgFactory::policy_apply (baseHostCX *originator, baseProxy *proxy, int matched_policy) {
+int CfgFactory::policy_apply (baseHostCX *originator, MitmProxy *proxy, int matched_policy) {
 
     auto const& log = log::policy();
 
@@ -3898,6 +3901,7 @@ int CfgFactory::save_content_profiles(Config& ex) const {
 
         item.add("webhook_enable", Setting::TypeBoolean) = obj->webhook_enable;
         item.add("webhook_lock_traffic", Setting::TypeBoolean) = obj->webhook_lock_traffic;
+        item.add("ja4_tls_ch", Setting::TypeBoolean) = obj->ja4_tls_ch;
         item.add("rules_session_filter", Setting::TypeString) = obj->rules_session_filter;
 
         if(! obj->content_rules.empty() ) {

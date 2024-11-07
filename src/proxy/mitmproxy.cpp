@@ -64,6 +64,8 @@
 #include <socle/common/base64.hpp>
 #include <socle/timed_guard.hpp>
 
+#include <inspect/fp/ja4.hpp>
+
 using namespace socle;
 
 MitmProxy::MitmProxy(baseCom* c): baseProxy(c), sobject() {
@@ -304,6 +306,7 @@ void MitmProxy::webhook_session_stop() const {
                   {"policy", matched_policy() },
                   { "bytes_up", uB },
                   { "bytes_down", dB },
+                  { "ja4_ch", ja4.ClientHello },
     };
 
     if(tls.has_value())  j["info"]["tls"] = tls.value();
@@ -791,14 +794,49 @@ bool MitmProxy::is_white_listed(MitmHostCX const* mh, SSLCom* peercom) {
 
 bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
 {
+    // cast only once: in ja4 section, or later in code
+    SSLCom* scom = nullptr;
+
+    // check TLS ClientHello and calculate JA4, if allowed by options
+    if(acct_opts.ja4_clienthello and ja4.ClientHello.empty() and ja4.clienthello_counter < ja4.max_reads) {
+
+        // be ready to read empty CH buffer and retry with max attemtps set
+        ja4.clienthello_counter++;
+        scom = dynamic_cast<SSLCom *>(mh->peercom());
+
+        // we are always left context
+        if (scom && !scom->client_hello_buffer().empty()) {
+            sx::ja4::TLSClientHello ch;
+            auto const &ch_buf = scom->client_hello_buffer();
+
+            // yes, some copying :( - in c++20 is span, but we are still at c++17
+            auto bufvec = std::vector(ch_buf.data() + 5, ch_buf.data() + ch_buf.size());
+            ch.from_buffer(bufvec);
+            ja4.ClientHello = ch.ja4();
+            _dia("JA4: %s (attempt %d)", ja4.ClientHello.c_str(), ja4.clienthello_counter);
+        }
+        else {
+            // dont try next time
+            acct_opts.ja4_clienthello = false;
+            ssl_handled = true;
+        }
+    }
+
     if(ssl_handled) {
         return false;
     }
 
+    // set scom if not set earlier
+    if(! scom) {
+        scom = dynamic_cast<SSLCom *>(mh->peercom());
+        if(! scom) {
+            // spare some cycles and avoid futile next calls
+            // ssl_handled can then be reset manually if needed
+            ssl_handled = true;
+        }
+    }
+
     bool redirected = false;
-
-    auto* scom = dynamic_cast<SSLCom*>(mh->peercom());
-
 
     if(scom && scom->is_verify_status_opt_allowed()) {
 
