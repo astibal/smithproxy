@@ -120,6 +120,128 @@ namespace sx::ja4 {
         }
     }
 
+
+    inline constexpr std::byte to_byte(int value) noexcept {
+        return static_cast<std::byte>(value);
+    }
+
+    template<typename T>
+    inline constexpr T from_byte(std::byte const& r) noexcept {
+        return std::to_integer<T>(r);
+    }
+
+    struct TLSServerHello {
+        int version;
+        bool have_key_share = false;
+        uint16_t cipher_suite;
+        std::vector<uint16_t> extensions;
+
+        int from_buffer(std::vector<uint8_t> data) {
+
+            size_t offset = 4;
+            if(offset >= data.size()) return 1;
+
+            // Parsování verze protokolu TLS
+            version = (data[offset] << 8) | data[offset + 1];
+
+            offset += 2;
+            if(offset >= data.size()) return 2;
+
+            // skip radnom
+            offset += 32;
+            if(offset >= data.size()) return 3;
+
+
+            auto session_id_len = data[offset];
+
+            offset += 1 + session_id_len;
+            if(offset >= data.size()) return 4;
+
+            cipher_suite = (data[offset] << 8) | data[offset + 1];
+
+            offset += 2;
+            if(offset >= data.size()) return 5;
+
+
+            auto compression_method = data[offset];
+            offset += 1;
+            if(offset >= data.size()) return 6;
+
+
+            // extensions
+            if (data.size() > offset) {
+                size_t extensions_length = (data[offset] << 8) | data[offset + 1];
+                offset += 2;
+
+                size_t processed_length = 0;
+
+                while (processed_length < extensions_length) {
+                    uint8_t ext_type = (data[offset] << 8) | data[offset + 1];
+
+                    if(ext_type == 0x33) {
+                        // key_share - tls 1.3
+                        have_key_share = true;
+                    }
+
+                    uint16_t ext_len = (data[offset + 2] << 8) | data[offset + 3];
+                    extensions.push_back(ext_type);
+
+                    offset += 4 + ext_len;
+                    processed_length += 4 + ext_len;
+
+                    if(offset >= data.size()) return 8;
+                }
+            }
+            else {
+                return 7;
+            }
+            return 0;
+        }
+
+        std::string ver() const {
+            int v = (version - 0x300) + 9;
+            if(have_key_share) {
+                v = 13;
+            }
+            std::stringstream ss;
+            ss << v;
+            return ss.str();
+        }
+
+        std::string exn() const {
+            std::stringstream ss;
+            auto base = extensions.size();
+            ss << std::setw(2) << std::setfill('0') << base;
+            return ss.str();
+        }
+
+        std::string ja4(bool raw=false) {
+
+            std::stringstream fingerprint;
+            // t - tcp / q - quic
+            fingerprint << "t" << ver() << exn() << "00" << "_" << util::to_hex_string_2B(cipher_suite) << "_";
+
+            std::stringstream suf;
+            for (size_t i = 0; i < extensions.size(); ++i) {
+                suf << util::to_hex_string_2B(extensions[i]);
+                if (i != extensions.size() - 1) {
+                    suf << ",";
+                }
+            }
+
+            std::string what;
+            if(raw) {
+                what = suf.str();
+            }
+            else {
+                what = util::hash_sha256(suf.str()).value_or("<error>");
+                what = what.substr(0,12);
+            }
+
+            return fingerprint.str()+what;
+        }
+    };
+
     struct TLSClientHello {
         uint16_t version = 0;
         bool have_key_share = false;

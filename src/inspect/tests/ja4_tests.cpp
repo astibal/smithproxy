@@ -12,6 +12,10 @@
 
 using namespace sx::ja4;
 
+
+
+// ClientHello samples
+
 const std::string raw_str_1 = "010002880303b1454f846bd902745d988d870726ef0c313ce90f17984d51557964c3e606fa91200b509f238e6769dd3ad25fe6ed13020e3f7b64738a226fc0158ef2b59ba19b2c0022130113031302c02bc02fcca9cca8c02cc030c00ac009c013c014009c009d002f00350100021d0000000e000c0000096a613464622e636f6d00170000ff01000100000a000e000c001d00170018001901000101000b00020100002300000010000e000c02683208687474702f312e310005000501000000000022000a000804030503060302030033006b0069001d0020cb5494b8b6fffd904f2c18eecc978ae6ef7c9c89d347498dae1b66799176554900170041040bbdc463c55494edca30649e6c48e51261c4d61843e7cf607fffddca1d7cf7d8ae69ced9796f6403565655906bbcd7dffc103db95889d5d6774114b6793c4132002b00050403040303000d0018001604030503060308040805080604010501060102030201002d00020101001c00024001fe0d01190000010003d10020b8cdfd2a9b9924e45471c4ebb24514d71a231a49d8d314fbcb75af0214a2e67c00efd356cf2704ea9bb5e85579856bf473cb9b5ae1657b33929c86f5ee4b57cafcac74ecb8fe201f5d9e883efdd391395639d9e42eafa8eae467601838c23c3e239907da1a6983f4e966e4990ff13f74e0159fe37d60535b76d308caea1e114170ce3e3fd67c14a2f5e3e8fe540895e3d6a66fec86e88d2e403f9ff299681748c664572a7e889fe274ec142b2f5eb9445142c16dd98034f92d47be96ead6b030536ca37506cc44c94fd7d1f1b2178b71d5fc5e5339b1c91cf9db67c82099a0f0168ce228947c600a1cd48ee9d9b481c87f052999431bd4b91d2aac4a7dab3090578a64087a3d7cd9c603c6e75c7d878f9d";
 const char* JA4_r_1 = "t13d1715h2_002f,0035,009c,009d,1301,1302,1303,c009,c00a,c013,c014,c02b,c02c,c02f,c030,cca8,cca9_0005,000a,000b,000d,0017,001c,0022,0023,002b,002d,0033,fe0d,ff01_0403,0503,0603,0804,0805,0806,0401,0501,0601,0203,0201";
 const char* JA4_1 = "t13d1715h2_5b57614c22b0_5c2c66f702b0";
@@ -24,6 +28,11 @@ const std::string raw_str_3 = "010001fc0303e4422635180a6d52305577414519930d2eb4b
 const char* JA4_r_3 = "t13d311200_002f,0033,0035,0039,003c,003d,0067,006b,009c,009d,009e,009f,00ff,1301,1302,1303,c009,c00a,c013,c014,c023,c024,c027,c028,c02b,c02c,c02f,c030,cca8,cca9,ccaa_000a,000b,000d,0015,0016,0017,0023,002b,002d,0031,0033_0403,0503,0603,0807,0808,0809,080a,080b,0804,0805,0806,0401,0501,0601,0303,0301,0302,0402,0502,0602";
 const char* JA4_3 = "t13d311200_e8f1e7e78f70_d339722ba4af";
 
+// ServerHello samples
+
+const std::string raw_sh_str_1 = "0200007603037c0ed417717dfe498249e3705256efdef042869207bfe737e932090361814f4a205218d9ca4347e1542abba88727e5b2d3d2111127ff330b028ed4e2530103a8f4130200002e002b0002030400330024001d00206737ae5fede31b3aa117a98d74ef592a40f8f5dcb703844efa38f2561e735a0c";
+const char* JA4S_r_1 = "t130200_1302_002b,0033";
+const char* JA4S_1 = "t130200_1302_a56c5b993250";
 
 struct Samples {
     using sample = std::tuple<std::string, std::string, std::string>;
@@ -81,6 +90,7 @@ struct Samples {
         }
     }
 
+    template<class JA4like>
     void test_random_base(std::vector<uint8_t> const& original, size_t mem_start, size_t mem_sz, int count=100) const {
 
         if(mem_start > original.size()) return;
@@ -94,7 +104,7 @@ struct Samples {
 
             RAND_bytes(orig_copy.data() + start, static_cast<int>(chunk_sz));
 
-            TLSClientHello ch;
+            JA4like ch;
             auto ret = ch.from_buffer(orig_copy);
             bool parse_ok = ( ret == 0);
 
@@ -124,19 +134,50 @@ TEST(JA4_CH, sample1_fuzzing) {
 
     for (int i = 3; i < 350; ) {
         // original, start index, random length, iterations
-        s.test_random_base(util::hex_string_to_bytes(raw_str_1), i, 1, 6000);
+        s.test_random_base<TLSClientHello>(util::hex_string_to_bytes(raw_str_1), i, 1, 6000);
         i += 1;
     }
 
     for (int i = 3; i < 350; ) {
         // original, start index, random length, iterations
-        s.test_random_base(util::hex_string_to_bytes(raw_str_1), i, 2, 12000);
+        s.test_random_base<TLSClientHello>(util::hex_string_to_bytes(raw_str_1), i, 2, 12000);
         i += 2;
     }
 
     for (int i = 3; i < 350; ) {
         // original, start index, random length, iterations
-        s.test_random_base(util::hex_string_to_bytes(raw_str_1), i, 8, 36000);
+        s.test_random_base<TLSClientHello>(util::hex_string_to_bytes(raw_str_1), i, 8, 36000);
+        i += 8;
+    }
+}
+
+TEST(JA4_SH, sample1) {
+    TLSServerHello sh;
+    std::vector<uint8_t> data = sx::ja4::util::hex_string_to_bytes(raw_sh_str_1);
+    sh.from_buffer(data);
+    auto my_ja4s = sh.ja4();
+    std::cout << my_ja4s;
+    if(my_ja4s == JA4S_1) {
+        std::cout << " => CORRECT\n";
+    }
+    else {
+        std::cout << " => INCORRECT\n";
+    }
+    ASSERT_TRUE(my_ja4s == JA4S_1);
+}
+
+TEST(JA4_SH, sample1_fuzzing) {
+    Samples s;
+
+    for (int i = 3; i < 350; ) {
+        // original, start index, random length, iterations
+        s.test_random_base<TLSServerHello>(util::hex_string_to_bytes(raw_sh_str_1), i, 1, 6000);
+        i += 1;
+    }
+
+    for (int i = 3; i < 350; ) {
+        // original, start index, random length, iterations
+        s.test_random_base<TLSServerHello>(util::hex_string_to_bytes(raw_sh_str_1), i, 8, 36000);
         i += 8;
     }
 }
