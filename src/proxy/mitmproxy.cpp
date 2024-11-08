@@ -307,6 +307,7 @@ void MitmProxy::webhook_session_stop() const {
                   { "bytes_up", uB },
                   { "bytes_down", dB },
                   { "ja4_ch", ja4.ClientHello },
+                  { "ja4_sh", ja4.ServerHello },
     };
 
     if(tls.has_value())  j["info"]["tls"] = tls.value();
