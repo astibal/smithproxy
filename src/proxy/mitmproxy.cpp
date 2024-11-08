@@ -814,6 +814,18 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
             ch.from_buffer(bufvec);
             ja4.ClientHello = ch.ja4();
             _dia("JA4: %s (attempt %d)", ja4.ClientHello.c_str(), ja4.clienthello_counter);
+
+            // we will hijack serverhello here too, but we are OK to test only once
+            if(acct_opts.ja4_serverhello and ja4.ServerHello.empty() and not scom->server_hello_buffer().empty()) {
+                sx::ja4::TLSServerHello sh;
+                auto const &sh_buf = scom->server_hello_buffer();
+
+                // yes, some copying :( - in c++20 is span, but we are still at c++17
+                auto shbufvec = std::vector(sh_buf.data(), sh_buf.data() + sh_buf.size());
+                sh.from_buffer(shbufvec);
+                ja4.ServerHello = sh.ja4();
+                _dia("JA4S: %s", ja4.ServerHello.c_str());
+            }
         }
         else {
             // dont try next time

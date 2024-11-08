@@ -1854,9 +1854,20 @@ auto get_more_info(sobject_info const* so_info, MitmProxy const* curr_proxy, Mit
                 info_ss << "\n    L7_params: none\n";
             }
 
-            if(curr_proxy and ! curr_proxy->ja4.ClientHello.empty()) {
-                info_ss << "\n    JA4_ch: " << curr_proxy->ja4.ClientHello << "\n";
+            if(curr_proxy) {
+                bool pr = false;
+                if(! curr_proxy->ja4.ClientHello.empty()) {
+                    info_ss << "\n    JA4 : " << curr_proxy->ja4.ClientHello << "\n";
+                    pr = true;
+                }
+                if(! curr_proxy->ja4.ServerHello.empty()) {
+                    info_ss << "    JA4S: " << curr_proxy->ja4.ServerHello << "\n";
+                    pr = true;
+                }
+                if(pr)
+                    info_ss << "\n";
             }
+
 
             if (verbosity > INF) {
                 long expiry = -1;

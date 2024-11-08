@@ -507,6 +507,10 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "added content_profile.[x].ja4_tls_ch");
         return true;
     }
+    else if(upgrade_to_num == 1036) {
+        log.event(INF, "added content_profile.[x].ja4_tls_sh");
+        return true;
+    }
 
 
     return false;
@@ -2132,6 +2136,14 @@ int CfgFactory::load_db_prof_content () {
         load_if_exists(cur_object, "webhook_lock_traffic", new_profile->webhook_lock_traffic);
         load_if_exists(cur_object, "ja4_tls_ch", new_profile->ja4_tls_ch);
 
+        load_if_exists(cur_object, "ja4_tls_sh", new_profile->ja4_tls_sh);
+        // I's quite costy (2x dynamic casts) to set this per-connection.
+        // Because we normally don't store TLS ServerHello, we globally enable ServerHello
+        // collection (only) if ANY content profile turns it on!
+        if(new_profile->ja4_tls_sh) {
+            SSLComOptions::server_hello_copy = true;
+        }
+
         if(load_if_exists(cur_object, "rules_session_filter", new_profile->rules_session_filter)) {
             if(not new_profile->rules_session_filter.empty()) {
                 if(not new_profile->create_rule_session_filter_rx()) {
@@ -2625,6 +2637,7 @@ bool CfgFactory::prof_content_apply (baseHostCX *originator, MitmProxy *mitm_pro
             mitm_proxy->writer_opts()->webhook_lock_traffic = pc->webhook_lock_traffic;
 
             mitm_proxy->acct_opts.ja4_clienthello = pc->ja4_tls_ch;
+            mitm_proxy->acct_opts.ja4_serverhello = pc->ja4_tls_sh;
 
             bool filter_ok = true;
             if(pc->rules_session_filter_rx.has_value()) {
@@ -3902,6 +3915,7 @@ int CfgFactory::save_content_profiles(Config& ex) const {
         item.add("webhook_enable", Setting::TypeBoolean) = obj->webhook_enable;
         item.add("webhook_lock_traffic", Setting::TypeBoolean) = obj->webhook_lock_traffic;
         item.add("ja4_tls_ch", Setting::TypeBoolean) = obj->ja4_tls_ch;
+        item.add("ja4_tls_sh", Setting::TypeBoolean) = obj->ja4_tls_sh;
         item.add("rules_session_filter", Setting::TypeString) = obj->rules_session_filter;
 
         if(! obj->content_rules.empty() ) {

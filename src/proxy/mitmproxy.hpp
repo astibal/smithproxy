@@ -130,12 +130,14 @@ public:
     struct Opts_Accounting {
         bool details = true;
         bool ja4_clienthello = false;
+        bool ja4_serverhello = false;
     } acct_opts;
 
     struct JA4 {
         size_t max_reads = 10;
 
         std::string ClientHello;
+        std::string ServerHello;
         size_t clienthello_counter = 0;
 
     } ja4;

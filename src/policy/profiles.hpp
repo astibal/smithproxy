@@ -159,6 +159,7 @@ public:
     bool webhook_enable = false;
     bool webhook_lock_traffic = false;
     bool ja4_tls_ch = false;
+    bool ja4_tls_sh = false;
 
     std::string rules_session_filter;
     std::optional<std::regex> rules_session_filter_rx;
