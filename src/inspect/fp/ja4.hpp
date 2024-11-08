@@ -122,6 +122,7 @@ namespace sx::ja4 {
 
     struct TLSClientHello {
         uint16_t version = 0;
+        bool have_key_share = false;
         bool sni = false;
         std::string alpn = "00";
         std::vector<uint16_t> cipher_suites;
@@ -145,7 +146,12 @@ namespace sx::ja4 {
         }
 
         std::string ver() const {
-            int v = (version - 0x300) + 10;
+            int v = (version - 0x300) + 9;
+
+            if(have_key_share) {
+                v = 13;
+            }
+
             std::stringstream ss;
             ss << v;
             return ss.str();
@@ -383,7 +389,13 @@ namespace sx::ja4 {
                             }
                         }
                     }
-                } else if (!util::is_grease_value(extension_type)) {
+                } else if(extension_type == 0x33) {
+                    // key_share - tls 1.3
+                    have_key_share = true;
+                    extensions.push_back(extension_type);
+
+                }
+                else if (!util::is_grease_value(extension_type)) {
                     extensions.push_back(extension_type);
 
                     if (extension_type == 0x000d) {
