@@ -81,8 +81,11 @@ namespace sx::engine::http {
                 if (check_inspect_dns_cache) {
 
                     std::string dns_resp;
-                    auto proto = ctx.origin->com()->l3_proto();
-                    const std::string prefix = (proto == AF_INET6 ? "AAAA:" : "A:");
+                    std::string prefix = "A:";
+                    if(ctx.origin and ctx.origin->com()) {
+                        auto proto = ctx.origin->com()->l3_proto();
+                        prefix = (proto == AF_INET6 ? "AAAA:" : "A:");
+                    }
 
                     // get lock and cache pointers
                     {
@@ -164,7 +167,7 @@ namespace sx::engine::http {
 
             auto engine_http1_set_proto = [&ctx,&app_request] () {
 
-                if (app_request != nullptr) {
+                if (app_request != nullptr and ctx.origin and ctx.origin->com()) {
                     // detect protocol (plain vs ssl)
                     auto const* proto_com = dynamic_cast<SSLCom *>(ctx.origin->com());
                     if (proto_com != nullptr) {
@@ -183,7 +186,8 @@ namespace sx::engine::http {
 
             if(have_method) {
                 engine_http1_set_proto();
-                ctx.origin->replacement_type(MitmHostCX::REPLACETYPE_HTTP);
+
+                if(ctx.origin) ctx.origin->replacement_type(MitmHostCX::REPLACETYPE_HTTP);
 
                 if(not have_host) _not("http1: 'Host:' not found");
                 if(not have_referer) _deb("http1: 'Referer:' not found");
