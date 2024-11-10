@@ -37,6 +37,8 @@
     which carries forward this exception.
 */
 
+#ifndef JA4_HPP
+#define JA4_HPP
 
 #include <iostream>
 #include <vector>
@@ -55,6 +57,18 @@ namespace sx::ja4 {
     namespace util {
         std::vector<uint8_t> hex_string_to_bytes(const std::string &hex) {
             std::vector<uint8_t> bytes;
+            bytes.reserve(hex.size());
+
+            for (size_t i = 0; i < hex.length(); i += 2) {
+                std::string byteString = hex.substr(i, 2);
+                uint8_t byte = static_cast<uint8_t>(std::stoi(byteString, nullptr, 16));
+                bytes.push_back(byte);
+            }
+            return bytes;
+        }
+
+        std::string hex_string_to_string(const std::string &hex) {
+            std::string bytes;
             bytes.reserve(hex.size());
 
             for (size_t i = 0; i < hex.length(); i += 2) {
@@ -102,6 +116,12 @@ namespace sx::ja4 {
             return ss.str();
         }
 
+        std::string to_dec_2B(size_t w) {
+            std::stringstream ss;
+            ss << std::hex << std::setw(2) << std::setfill('0') << w;
+            return ss.str();
+        }
+
         std::string to_hex_string_2B(uint16_t value) {
             std::stringstream ss;
             ss << std::hex << std::setw(4) << std::setfill('0') << value;
@@ -118,6 +138,70 @@ namespace sx::ja4 {
         bool is_grease_value(uint16_t value) {
             return ((value & 0x0F0F) == 0x0A0A);
         }
+
+        static std::optional<std::string> make_ja4(std::string_view input) {
+
+            size_t u1 = input.find('_');
+            if(u1 == std::string::npos)
+                return std::nullopt;
+
+            size_t u2 = input.find('_', u1 + 1);
+            if(u2 == std::string::npos)
+                return std::nullopt;
+
+            std::string_view pre = input.substr(0, u1);
+            std::string_view cs(input.data() + u1 + 1, u2 - u1 - 1);
+            std::string_view ex_sg(input.data() + u2 + 1, input.size() - u2 - 1);
+
+
+            std::string hash_result1 = util::hash_sha256(cs).value_or("");
+            std::string hash_result2 = util::hash_sha256(ex_sg).value_or("");
+
+            // truncate sha256 hashes to 12B
+            if(hash_result1.size() >= 12 && hash_result2.size() >= 12) {
+                std::stringstream ss;
+                std::string h1 = hash_result1.substr(0, 12);
+                std::string h2 = hash_result2.substr(0, 12);
+
+                ss << pre << "_" << h1 << "_" << h2;
+                return ss.str();
+            }
+            return std::nullopt;
+        }
+
+        std::vector<std::string_view> split_string_view(std::string_view str, std::string_view delimiter,
+                                                        bool first_only,
+                                                        bool stop_on_empty) {
+            std::vector<std::string_view> result;
+            size_t start = 0;
+
+            while (start < str.size()) {
+                size_t end = str.find(delimiter, start);
+
+                if (end == std::string_view::npos) {
+                    result.emplace_back(str.substr(start));
+                    break;
+                }
+
+                const auto part = str.substr(start, end - start);
+                if(stop_on_empty and part.empty()) {
+                    break;
+                }
+                result.emplace_back(part);
+                start = end + delimiter.size();
+
+                if(first_only and result.size() == 2) break;
+            }
+
+            return result;
+        }
+
+        std::string to_lower(std::string_view str) {
+            std::string lower_str(str);
+            std::transform(lower_str.begin(), lower_str.end(), lower_str.begin(),
+                           [](unsigned char c) { return std::tolower(c); });
+            return lower_str;
+        };
     }
 
 
@@ -129,6 +213,250 @@ namespace sx::ja4 {
     inline constexpr T from_byte(std::byte const& r) noexcept {
         return std::to_integer<T>(r);
     }
+
+    struct HTTP {
+        std::string version = "11";
+        std::string cmd;
+        std::string lang = "0000";
+        bool have_cookie = false;
+        bool have_referer = false;
+
+        bool should_parse_cookies = true;
+        std::vector<std::pair<std::string_view, std::string_view>> headers;
+
+        std::vector<std::string_view> cookies;
+        std::vector<std::string> cookies_values;
+
+
+        bool process_header(std::string_view header) {
+            clear();
+
+            // empty cmd implies this was not called
+            if(cmd.empty()) {
+                cmd = util::to_lower(header.substr(0,2));
+            }
+
+            auto parts = util::split_string_view(header, ": ", true, false);
+            if(parts.size() == 2) {
+
+                auto locase = util::to_lower(parts[0]);
+                if(locase == "cookie") {
+                    have_cookie = true;
+                    if(should_parse_cookies) {
+                        auto ck = util::split_string_view(parts[1],"; ", false, true);
+                        for(auto const& cookie_pair: ck) {
+                            auto cs = util::split_string_view(cookie_pair,"=", true, true);
+                            if(cs.size() == 2) {
+                                cookies.push_back(cs[0]);
+                                std::stringstream ss;
+                                ss << cs[0] << "=" << cs[1];
+                                cookies_values.push_back(ss.str());
+                            }
+                        }
+                    }
+
+                    return true;
+                }
+                else if(locase == "referer") {
+                    have_referer = true;
+                    return true;
+                }
+                else if(locase == "accept-language") {
+                    lang.clear();
+                    for(auto c: parts[1]) {
+                        if(isalnum(c)) {
+                            lang += c;
+                        }
+                        else if (c == ',') {
+                            // don't continue into next part
+                            break;
+                        }
+                        else if(lang.size() >= 4)
+                            // we have enough
+                            break;
+                    }
+                    auto fill = 4 - lang.size();
+                    for (size_t i = 0; i < fill ; ++i) {
+                        lang += "0";
+                    }
+
+                    lang = util::to_lower(lang);
+                }
+                headers.emplace_back(parts[0],parts[1]);
+                return true;
+            }
+            return false;
+        }
+
+
+        std::string ja4h_a() const {
+            if(! result_a_raw.empty()) return result_a_raw;
+
+            std::stringstream ss;
+            auto base_count = headers.size();
+            ss << cmd << version << (have_cookie ? 'c' : 'n') << (have_referer ? 'r' : 'n');
+            ss << util::to_dec_2B(base_count) << lang;
+
+            result_a_raw = ss.str();
+            return result_a_raw;
+        }
+
+        std::string ja4h_b_raw() const {
+            if(! result_b_raw.empty()) return result_b_raw;
+
+            std::stringstream suf;
+            for (size_t i = 0; i < headers.size(); ++i) {
+                suf << headers[i].first;
+                if (i != headers.size() - 1) {
+                    suf << ",";
+                }
+            }
+            result_b_raw = suf.str();
+            return result_b_raw;
+        }
+
+        std::string ja4h_c_raw() const {
+            if(! result_c_raw.empty()) return result_c_raw;
+
+            std::stringstream suf;
+
+            auto cookies_copy = cookies;
+            std::sort(cookies_copy.begin(), cookies_copy.end());
+
+            for (size_t i = 0; i < cookies_copy.size(); ++i) {
+                suf << cookies_copy[i];
+                if (i != cookies_copy.size() - 1) {
+                    suf << ",";
+                }
+            }
+            result_c_raw = suf.str();
+            return result_c_raw;
+        }
+
+        std::string ja4h_d_raw() const {
+            if(! result_d_raw.empty()) return result_d_raw;
+
+            std::stringstream suf;
+
+            auto cookies_copy = cookies_values;
+            std::sort(cookies_copy.begin(), cookies_copy.end());
+
+            for (size_t i = 0; i < cookies_copy.size(); ++i) {
+                suf << cookies_copy[i];
+                if (i != cookies_copy.size() - 1) {
+                    suf << ",";
+                }
+            }
+            result_d_raw = suf.str();
+            return result_d_raw;
+        }
+
+        std::string ja4h_b() const {
+            if(! result_b.empty()) return result_b;
+
+            auto r = ja4h_b_raw();
+
+            result_b  = r.empty() ? "000000000000" : util::hash_sha256(r)->substr(0,12);
+            return result_b;
+        }
+
+        std::string ja4h_c() const {
+            if(! result_c.empty()) return result_c;
+
+            auto r = ja4h_c_raw();
+
+            result_c  = r.empty() ? "000000000000" : util::hash_sha256(r)->substr(0,12);
+            return result_c;
+        }
+
+        std::string ja4h_d() const {
+            if(! result_d.empty()) return result_d;
+
+            auto r = ja4h_d_raw();
+
+            result_d  = r.empty() ? "000000000000" : util::hash_sha256(r)->substr(0,12);
+            return result_d;
+        }
+
+        std::string ja4h_ab() const {
+            if(! result_ab.empty()) return result_ab;
+
+            std::stringstream ss;
+            ss << ja4h_a() << "_" << ja4h_b();
+
+            result_ab = ss.str();
+            return result_ab;
+        };
+
+        std::string ja4h() const {
+            if(! result.empty()) return result;
+
+            auto a = ja4h_a();
+            auto b = ja4h_b();
+            auto c = ja4h_c();
+            auto d = ja4h_d();
+
+            std::stringstream ss;
+            ss << a << "_" << b << "_" << c << "_" << d;
+
+            result = ss.str();
+            return result;
+        };
+
+        std::string ja4h_raw() const {
+            if(! result_raw.empty()) return result_raw;
+
+            auto a = ja4h_a();
+            auto b = ja4h_b_raw();
+            auto c = ja4h_c_raw();
+            auto d = ja4h_d_raw();
+
+            std::stringstream ss;
+            ss << a << "_" << b << "_" << c << "_" << d;
+
+            result_ab = ss.str();
+            return result_ab;
+        };
+
+        void from_buffer(std::string_view data) {
+            auto hh = util::split_string_view(data, "\r\n", false, true);
+            for(auto const& header: hh) {
+                if(header.empty()) {
+                    break;
+                }
+                process_header(header);
+            }
+        }
+
+    private:
+        mutable std::string result_a_raw;
+        mutable std::string result_a;
+        mutable std::string result_b_raw;
+        mutable std::string result_b;
+        mutable std::string result_c_raw;
+        mutable std::string result_c;
+        mutable std::string result_d_raw;
+        mutable std::string result_d;
+
+        mutable std::string result_ab;
+        mutable std::string result_raw;
+        mutable std::string result;
+
+        void clear() const {
+            result_a.clear();
+            result_a_raw.clear();
+            result_a.clear();
+            result_b_raw.clear();
+            result_b.clear();
+            result_c_raw.clear();
+            result_c.clear();
+            result_d_raw.clear();
+            result_d.clear();
+
+            result_ab.clear();
+            result.clear();
+        }
+    };
 
     struct TLSServerHello {
         int version;
@@ -215,11 +543,15 @@ namespace sx::ja4 {
             return ss.str();
         }
 
-        std::string ja4(bool raw=false) {
-
+        std::string prefix() const {
             std::stringstream fingerprint;
             // t - tcp / q - quic
-            fingerprint << "t" << ver() << exn() << "00" << "_" << util::to_hex_string_2B(cipher_suite) << "_";
+
+            fingerprint << "t" << ver() << exn() << "00" << "_" << util::to_hex_string_2B(cipher_suite);
+            return fingerprint.str();
+        }
+
+        std::string ext_string() const {
 
             std::stringstream suf;
             for (size_t i = 0; i < extensions.size(); ++i) {
@@ -228,18 +560,33 @@ namespace sx::ja4 {
                     suf << ",";
                 }
             }
+            return suf.str();
+        };
 
-            std::string what;
-            if(raw) {
-                what = suf.str();
-            }
-            else {
-                what = util::hash_sha256(suf.str()).value_or("<error>");
-                what = what.substr(0,12);
-            }
+        std::string const& ja4_raw() {
+            if(! result_r.empty()) return result_r;
 
-            return fingerprint.str()+what;
+            std::stringstream  ja4r;
+            ja4r << prefix() << "_" << ext_string();
+            result_r = ja4r.str();
+            return result_r;
         }
+
+        std::string const& ja4() {
+            if(! result.empty()) return result;
+
+            std::stringstream  ja4;
+            auto hashed = util::hash_sha256(ext_string()).value_or("<error>");
+            hashed = hashed.substr(0,12);
+
+            ja4 << prefix() << "_" << hashed;
+            result = ja4.str();
+            return result;
+        }
+
+    private:
+        mutable std::string result_r;
+        mutable std::string result;
     };
 
     struct TLSClientHello {
@@ -299,7 +646,7 @@ namespace sx::ja4 {
             return ss.str();
         }
 
-        std::string ja4_raw() {
+        std::string const& ja4_raw() {
             if(! results.ja4_raw.empty()) {
                 return results.ja4_raw;
             }
@@ -342,44 +689,13 @@ namespace sx::ja4 {
             return results.ja4_raw;
         }
 
-        std::string ja4() {
+        std::string const& ja4() {
             if(! results.ja4_final.empty())
                 return results.ja4_final;
 
-            results.ja4_final = TLSClientHello::make_ja4(ja4_raw()).value_or("<error>");
+            results.ja4_final = util::make_ja4(ja4_raw()).value_or("<error>");
             return results.ja4_final;
         }
-
-        static std::optional<std::string> make_ja4(std::string const& input) {
-
-            size_t u1 = input.find('_');
-            if(u1 == std::string::npos)
-                return std::nullopt;
-
-            size_t u2 = input.find('_', u1 + 1);
-            if(u2 == std::string::npos)
-                return std::nullopt;
-
-            std::string pre = input.substr(0, u1);
-            std::string_view cs(input.data() + u1 + 1, u2 - u1 - 1);
-            std::string_view ex_sg(input.data() + u2 + 1, input.size() - u2 - 1);
-
-
-            std::string hash_result1 = util::hash_sha256(cs).value_or("");
-            std::string hash_result2 = util::hash_sha256(ex_sg).value_or("");
-
-            // truncate sha256 hashes to 12B
-            if(hash_result1.size() >= 12 and hash_result2.size() >= 12) {
-                std::string h1 = hash_result1.substr(0, 12);
-                std::string h2 = hash_result2.substr(0, 12);
-
-                return pre + "_" + h1 + "_" + h2;
-            }
-            return std::nullopt;
-        }
-
-        enum class parse_status {};
-
 
         // load data from buffer with client hello.
         // NOTE: it assumes ClientHello TLS record, not whole ClientHello packet!
@@ -495,11 +811,11 @@ namespace sx::ja4 {
                                 char fst_val = fst_alpn[0];
                                 char snd_val = fst_alpn[0];
 
-                                if(not fst_alpn.empty()) snd_val = fst_alpn[fst_alpn.size() - 1];
+                                if(! fst_alpn.empty()) snd_val = fst_alpn[fst_alpn.size() - 1];
 
                                 bool is_alnum_1 = isalnum(fst_val);
                                 bool is_alnum_2 = isalnum(snd_val);
-                                if( is_alnum_1 and is_alnum_2) {
+                                if( is_alnum_1 && is_alnum_2) {
                                     alpn = fst_val;
                                     alpn += snd_val;
                                 }
@@ -540,4 +856,4 @@ namespace sx::ja4 {
     };
 }
 
-
+#endif
