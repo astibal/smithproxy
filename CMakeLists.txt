@@ -297,7 +297,7 @@ add_executable(smithproxy
         src/inspect/dnsinspector.cpp
         src/inspect/dns.cpp
         src/inspect/kb/kb.hpp
-        src/inspect/fp/ja4.hpp
+        src/inspect/fp/ja4.cpp
 
         src/inspect/engine/http.hpp
         src/inspect/engine/http.cpp
@@ -426,6 +426,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/inspect/dnsengine.hpp
                 src/policy/inspectors.cpp
                 src/inspect/dnsinspector.cpp
+                src/inspect/fp/ja4.cpp
 
                 socle/common/display.cpp
                 socle/traflog/tests/test_pcapapi.cpp
@@ -443,6 +444,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
 
                 src/inspect/engine.hpp
                 src/inspect/engine/http.cpp
+                src/inspect/fp/ja4.cpp
                 src/inspect/dns.cpp
                 src/inspect/dnsengine.hpp
                 src/policy/inspectors.cpp
