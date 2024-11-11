@@ -539,8 +539,13 @@ namespace sx::engine::http {
                     }
                 }
             }
-            if(ja4h.has_value())
+            if(ja4h.has_value()) {
+                auto meth = my_app_data->http_data.method;
+                if(meth.size() >= 2)
+                    ja4h->cmd = sx::ja4::util::to_lower(meth).substr(0,2);
+
                 my_app_data->http_data.ja4h = ja4h->ja4h();
+            }
 
             detect_app(ctx, side, my_app_data, stream_id, flags, data);
             if(ctx.origin->opt_kb_enabled) {
