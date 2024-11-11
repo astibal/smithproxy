@@ -92,6 +92,7 @@ namespace sx::ja4 {
         std::vector<std::string> cookies_values;
 
 
+        bool process_header_pair(std::pair<std::string_view,std::string_view> header_pair);
         bool process_header(std::string_view header);
 
         std::string ja4h_a() const;

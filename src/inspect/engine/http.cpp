@@ -523,12 +523,25 @@ namespace sx::engine::http {
                 _err("Frame: hpack decode exception: %s", e.what());
             }
 
+            std::optional<sx::ja4::HTTP> ja4h;
+            if(ctx.options.http.ja4h) {
+                ja4h = sx::ja4::HTTP();
+                ja4h->version = "20";
+            }
+
+
             for (auto& [ hdr, vlist ] : dec.headers()) {
                 for(auto const& hdr_elem: vlist) {
                     process_header_entry(ctx, side, my_app_data,
                                          stream_id, flags, data, hdr, hdr_elem);
+                    if(ja4h.has_value()) {
+                        ja4h->process_header_pair(std::make_pair(hdr, hdr_elem));
+                    }
                 }
             }
+            if(ja4h.has_value())
+                my_app_data->http_data.ja4h = ja4h->ja4h();
+
             detect_app(ctx, side, my_app_data, stream_id, flags, data);
             if(ctx.origin->opt_kb_enabled) {
                 fill_kb(ctx, side, my_app_data, stream_id, flags, data);

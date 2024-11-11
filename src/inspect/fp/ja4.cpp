@@ -151,6 +151,56 @@ namespace sx::ja4 {
     }
 
 
+    bool HTTP::process_header_pair(std::pair<std::string_view,std::string_view> header_pair) {
+
+        auto locase = util::to_lower(header_pair.first);
+        if(locase == "cookie") {
+            have_cookie = true;
+            if(should_parse_cookies) {
+                auto ck = util::split_string_view(header_pair.second, "; ", false, true);
+                for(auto const& cookie_pair: ck) {
+                    auto cs = util::split_string_view(cookie_pair,"=", true, true);
+                    if(cs.size() == 2) {
+                        cookies.push_back(cs[0]);
+                        std::stringstream ss;
+                        ss << cs[0] << "=" << cs[1];
+                        cookies_values.push_back(ss.str());
+                    }
+                }
+            }
+
+            return true;
+        }
+        else if(locase == "referer") {
+            have_referer = true;
+            return true;
+        }
+        else if(locase == "accept-language") {
+            lang.clear();
+            for(auto c: header_pair.second) {
+                if(isalnum(c)) {
+                    lang += c;
+                }
+                else if (c == ',') {
+                    // don't continue into next part
+                    break;
+                }
+                else if(lang.size() >= 4)
+                    // we have enough
+                    break;
+            }
+            auto fill = 4 - lang.size();
+            for (size_t i = 0; i < fill ; ++i) {
+                lang += "0";
+            }
+
+            lang = util::to_lower(lang);
+        }
+        headers.emplace_back(header_pair);
+        return true;
+
+    }
+
     bool HTTP::process_header(std::string_view header) {
         clear();
 
@@ -161,52 +211,7 @@ namespace sx::ja4 {
 
         auto parts = util::split_string_view(header, ": ", true, false);
         if(parts.size() == 2) {
-
-            auto locase = util::to_lower(parts[0]);
-            if(locase == "cookie") {
-                have_cookie = true;
-                if(should_parse_cookies) {
-                    auto ck = util::split_string_view(parts[1],"; ", false, true);
-                    for(auto const& cookie_pair: ck) {
-                        auto cs = util::split_string_view(cookie_pair,"=", true, true);
-                        if(cs.size() == 2) {
-                            cookies.push_back(cs[0]);
-                            std::stringstream ss;
-                            ss << cs[0] << "=" << cs[1];
-                            cookies_values.push_back(ss.str());
-                        }
-                    }
-                }
-
-                return true;
-            }
-            else if(locase == "referer") {
-                have_referer = true;
-                return true;
-            }
-            else if(locase == "accept-language") {
-                lang.clear();
-                for(auto c: parts[1]) {
-                    if(isalnum(c)) {
-                        lang += c;
-                    }
-                    else if (c == ',') {
-                        // don't continue into next part
-                        break;
-                    }
-                    else if(lang.size() >= 4)
-                        // we have enough
-                        break;
-                }
-                auto fill = 4 - lang.size();
-                for (size_t i = 0; i < fill ; ++i) {
-                    lang += "0";
-                }
-
-                lang = util::to_lower(lang);
-            }
-            headers.emplace_back(parts[0],parts[1]);
-            return true;
+            return process_header_pair(std::make_pair(parts[0], parts[1]));
         }
         return false;
     }
