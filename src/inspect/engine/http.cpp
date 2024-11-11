@@ -21,7 +21,7 @@ namespace sx::engine::http {
 
             auto ix_ref = data.find("Referer: ");
             if (ix_ref != std::string::npos) {
-                std::string ref_start ( data.substr(ix_ref, std::min(std::size_t(128), data.size() - ix_ref)) );
+                std::string ref_start ( data.substr(ix_ref, std::min(std::size_t(1024), data.size() - ix_ref)) );
                 if (std::regex_search(ref_start, m_ref, ProtoRex::http_req_ref())) {
                     std::string str_temp;
 
@@ -64,7 +64,7 @@ namespace sx::engine::http {
                 return false;
             };
 
-            std::string host_start( data.substr(ix_host, std::min(std::size_t(128), data.size() - ix_host)) );
+            std::string host_start( data.substr(ix_host, std::min(std::size_t(1024), data.size() - ix_host)) );
 
             std::smatch m_host;
             auto const regex_ret = std::regex_search(host_start, m_host, ProtoRex::http_req_host());
@@ -115,7 +115,7 @@ namespace sx::engine::http {
         bool find_method (EngineCtx &ctx, std::string_view data) {
             auto const& log = log::http1;
 
-            std::string method_start(data.substr(0, std::min(std::size_t(128), data.size())));
+            std::string method_start(data.substr(0, std::min(std::size_t(1024), data.size())));
             std::smatch m_get;
 
             if (std::regex_search(method_start, m_get, ProtoRex::http_req_get())) {
