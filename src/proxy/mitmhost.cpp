@@ -291,6 +291,7 @@ void MitmHostCX::on_detect(std::shared_ptr<duplexFlowMatch> x_sig, flowMatchStat
         engine_ctx.origin = this;
         engine_ctx.flow_pos = flow().flow_queue().size() - 1;
         engine_ctx.signature = x_sig;
+        // don't touch engine_ctx.options
     };
 
     if(not sig_sig->sig_engine.empty()) {

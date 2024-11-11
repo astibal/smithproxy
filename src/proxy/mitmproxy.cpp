@@ -290,6 +290,9 @@ void MitmProxy::webhook_session_stop() const {
                     { "details", app->requests_all() },
                     { "signatures", l->matched_signatures() }
             };
+            if(! app->custom_list_name().empty()) {
+                l7.value()[app->custom_list_name()] = app->custom_list();
+            }
         }
     }
     auto const* r = first_right();

@@ -511,6 +511,10 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "added content_profile.[x].ja4_tls_sh");
         return true;
     }
+    else if(upgrade_to_num == 1037) {
+        log.event(INF, "added content_profile.[x].ja4_http");
+        return true;
+    }
 
 
     return false;
@@ -2144,6 +2148,8 @@ int CfgFactory::load_db_prof_content () {
             SSLComOptions::server_hello_copy = true;
         }
 
+        load_if_exists(cur_object, "ja4_http", new_profile->ja4_http);
+
         if(load_if_exists(cur_object, "rules_session_filter", new_profile->rules_session_filter)) {
             if(not new_profile->rules_session_filter.empty()) {
                 if(not new_profile->create_rule_session_filter_rx()) {
@@ -2638,6 +2644,11 @@ bool CfgFactory::prof_content_apply (baseHostCX *originator, MitmProxy *mitm_pro
 
             mitm_proxy->acct_opts.ja4_clienthello = pc->ja4_tls_ch;
             mitm_proxy->acct_opts.ja4_serverhello = pc->ja4_tls_sh;
+            mitm_proxy->acct_opts.ja4_http = pc->ja4_http;
+            auto* mh = MitmHostCX::from_baseHostCX(originator);
+            if(mh) {
+                mh->engine_ctx.options.http.ja4h = true;
+            }
 
             bool filter_ok = true;
             if(pc->rules_session_filter_rx.has_value()) {
@@ -3916,6 +3927,7 @@ int CfgFactory::save_content_profiles(Config& ex) const {
         item.add("webhook_lock_traffic", Setting::TypeBoolean) = obj->webhook_lock_traffic;
         item.add("ja4_tls_ch", Setting::TypeBoolean) = obj->ja4_tls_ch;
         item.add("ja4_tls_sh", Setting::TypeBoolean) = obj->ja4_tls_sh;
+        item.add("ja4_http", Setting::TypeBoolean) = obj->ja4_http;
         item.add("rules_session_filter", Setting::TypeString) = obj->rules_session_filter;
 
         if(! obj->content_rules.empty() ) {

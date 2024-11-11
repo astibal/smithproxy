@@ -131,6 +131,7 @@ public:
         bool details = true;
         bool ja4_clienthello = false;
         bool ja4_serverhello = false;
+        bool ja4_http = false;
     } acct_opts;
 
     struct JA4 {

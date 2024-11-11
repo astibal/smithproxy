@@ -81,6 +81,8 @@ namespace sx::engine::http {
             std::string proto;
             std::string sub_proto;
 
+            std::string ja4h;
+
             void clear() {
                 host.clear();
                 method.clear();
@@ -88,6 +90,7 @@ namespace sx::engine::http {
                 params.clear();
                 referer.clear();
                 proto.clear();
+                ja4h.clear();
             }
         } http_data;
 
@@ -166,6 +169,22 @@ namespace sx::engine::http {
             return ret;
         }
 
+        std::string custom_list_name() override {
+            return "ja4h";
+        }
+
+        std::vector<std::string> custom_list() override {
+            std::vector<std::string> ret;
+            auto cur = http_data.ja4h;
+
+            if(not cur.empty()) ret.push_back(cur);
+            for (auto const& s: http_history) {
+                if(not s.ja4h.empty()) ret.push_back(s.ja4h);
+            }
+            return ret;
+        }
+
+
         std::string to_string (int verbosity) const override {
             std::stringstream ret;
 
@@ -180,6 +199,9 @@ namespace sx::engine::http {
                 if(not http_data.referer.empty()) ret << " via: " << http_data.referer;
                 if(not http_data.method.empty()) ret << " meth: " << http_data.method;
                 ret << " ver: " << http_str(version);
+                if(! http_data.ja4h.empty()) {
+                    ret << " ja4h: " << http_data.ja4h;
+                }
             }
 
             return ret.str();

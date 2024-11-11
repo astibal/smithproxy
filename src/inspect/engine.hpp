@@ -75,6 +75,8 @@ namespace sx::engine {
         virtual std::string original_request() { return request(); }; // parent request
         virtual std::string request() { return {}; };
         virtual std::vector<std::string> requests_all() { return {}; };
+        virtual std::string custom_list_name() { return {}; };
+        virtual std::vector<std::string> custom_list() { return {}; };
         virtual std::string protocol() const = 0;
 
         bool ask_destroy() override { return false; };
@@ -137,6 +139,13 @@ namespace sx::engine {
     };
 
     struct EngineCtx {
+
+        struct {
+            struct {
+                bool ja4h = false;
+            } http;
+        } options;
+
         MitmHostCX* origin = nullptr;
         std::shared_ptr<duplexFlowMatch> signature;
 

@@ -1,6 +1,7 @@
 #include <sslcom.hpp>
 
 #include <inspect/engine/http.hpp>
+#include <inspect/fp/ja4.hpp>
 #include <proxy/mitmhost.hpp>
 
 #ifdef USE_HPACK
@@ -153,38 +154,64 @@ namespace sx::engine::http {
             return false;
         }
 
+        std::vector<std::string_view> split_string_view(std::string_view str, std::string_view delimiter,
+                                                        bool first_only,
+                                                        bool stop_on_empty) {
+            std::vector<std::string_view> result;
+            size_t start = 0;
+
+            while (start < str.size()) {
+                size_t end = str.find(delimiter, start);
+
+                if (end == std::string_view::npos) {
+                    result.emplace_back(str.substr(start));
+                    break;
+                }
+
+                const auto part = str.substr(start, end - start);
+                if(stop_on_empty and part.empty()) {
+                    break;
+                }
+                result.emplace_back(part);
+                start = end + delimiter.size();
+
+                if(first_only and result.size() == 2) break;
+            }
+
+            return result;
+        }
+
         void parse_request(EngineCtx &ctx, buffer const* buffer_data) {
             auto const& log = log::http1;
 
             auto data = buffer_data->string_view();
 
             bool const have_method = find_method(ctx, data);
-            bool const have_host = find_host(ctx, data);
-            bool const have_referer = find_referrer(ctx, data);
-
-
-            auto *app_request = dynamic_cast<app_HttpRequest *>(ctx.application_data.get());
-
-            auto engine_http1_set_proto = [&ctx,&app_request] () {
-
-                if (app_request != nullptr and ctx.origin and ctx.origin->com()) {
-                    // detect protocol (plain vs ssl)
-                    auto const* proto_com = dynamic_cast<SSLCom *>(ctx.origin->com());
-                    if (proto_com != nullptr) {
-                        app_request->http_data.proto = "https://";
-                        app_request->is_ssl = true;
-                    } else {
-                        app_request->http_data.proto = "http://";
-                    }
-
-                    _inf("http request: %s", ESC(app_request->str()));
-                } else {
-                    _err("http request: app_request failed");
-                }
-            };
-
-
             if(have_method) {
+                auto *app_request = dynamic_cast<app_HttpRequest *>(ctx.application_data.get());
+
+                auto engine_http1_set_proto = [&ctx, &app_request] {
+
+                    if (app_request != nullptr and ctx.origin and ctx.origin->com()) {
+                        // detect protocol (plain vs ssl)
+                        auto const* proto_com = dynamic_cast<SSLCom *>(ctx.origin->com());
+                        if (proto_com != nullptr) {
+                            app_request->http_data.proto = "https://";
+                            app_request->is_ssl = true;
+                        } else {
+                            app_request->http_data.proto = "http://";
+                        }
+
+                        _inf("http request: %s", ESC(app_request->str()));
+                    } else {
+                        _err("http request: app_request failed");
+                    }
+                };
+
+
+                bool const have_host = find_host(ctx, data);
+                bool const have_referer = find_referrer(ctx, data);
+
                 engine_http1_set_proto();
 
                 if(ctx.origin) ctx.origin->replacement_type(MitmHostCX::REPLACETYPE_HTTP);
@@ -193,8 +220,20 @@ namespace sx::engine::http {
                 if(not have_referer) _deb("http1: 'Referer:' not found");
 
                 if(app_request) {
+
+                    if(ctx.options.http.ja4h) {
+                        sx::ja4::HTTP h;
+                        h.version = "11";
+                        h.from_buffer(data);
+
+                        app_request->http_data.ja4h = h.ja4h();
+                    }
+
                     app_request->mark_populated();
                 }
+            }
+            else {
+                // probably not HTTP
             }
         }
 

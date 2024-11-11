@@ -1792,7 +1792,7 @@ auto get_more_info(sobject_info const* so_info, MitmProxy const* curr_proxy, Mit
 
             if (lf->engine_ctx.application_data) {
                 auto const app = lf->engine_ctx.application_data;
-                std::string desc = app->str();
+                std::string desc = app->to_string(verbosity);
                 if (verbosity < DEB && desc.size() > 120) {
                     desc = desc.substr(0, 117);
                     desc += "...";
@@ -1812,6 +1812,9 @@ auto get_more_info(sobject_info const* so_info, MitmProxy const* curr_proxy, Mit
                     if(not http_app->http_data.method.empty()) {
                         info_ss << "\n    L7 http current: " << http_app->http_data.method;
                         info_ss << " "<< http_app->request() << "\n";
+                        if(! http_app->http_data.ja4h.empty()) {
+                            info_ss << "        ja4h: "<< http_app->http_data.ja4h << "\n";
+                            }
                     }
                     std::string prev_hist_req;
                     std::size_t prev_hist_cnt = 0L;
@@ -1843,6 +1846,9 @@ auto get_more_info(sobject_info const* so_info, MitmProxy const* curr_proxy, Mit
                                 info_ss << cur_hist_req;
                             }
                             info_ss << "\n";
+                            if(! it->ja4h.empty()) {
+                                info_ss << "            ja4h: "<< it->ja4h << "\n";
+                            }
 
                             prev_hist_req = cur_hist_req;
                             prev_hist_cnt = 0L;
