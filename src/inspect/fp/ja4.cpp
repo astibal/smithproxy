@@ -64,7 +64,7 @@ namespace sx::ja4 {
 
         std::string to_dec_2B(size_t w) {
             std::stringstream ss;
-            ss << std::hex << std::setw(2) << std::setfill('0') << w;
+            ss << std::setw(2) << std::setfill('0') << w;
             return ss.str();
         }
 
