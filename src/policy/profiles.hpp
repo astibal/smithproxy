@@ -159,6 +159,7 @@ public:
     bool webhook_enable = false;
     bool webhook_lock_traffic = false;
     bool ja4_tls_ch = false;
+    bool ja4_tls_ch_ignore_sni = false;
     bool ja4_tls_sh = false;
     bool ja4_http = false;
 

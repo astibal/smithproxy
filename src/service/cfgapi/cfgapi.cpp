@@ -515,6 +515,10 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "added content_profile.[x].ja4_http");
         return true;
     }
+    else if(upgrade_to_num == 1038) {
+        log.event(INF, "added content_profile.[x].ja4_tls_ch_ignore_sni");
+        return true;
+    }
 
 
     return false;
@@ -2139,6 +2143,7 @@ int CfgFactory::load_db_prof_content () {
         load_if_exists(cur_object, "webhook_enable", new_profile->webhook_enable);
         load_if_exists(cur_object, "webhook_lock_traffic", new_profile->webhook_lock_traffic);
         load_if_exists(cur_object, "ja4_tls_ch", new_profile->ja4_tls_ch);
+        load_if_exists(cur_object, "ja4_tls_ch_ignore_sni", new_profile->ja4_tls_ch_ignore_sni);
 
         load_if_exists(cur_object, "ja4_tls_sh", new_profile->ja4_tls_sh);
         // I's quite costy (2x dynamic casts) to set this per-connection.
@@ -2643,6 +2648,7 @@ bool CfgFactory::prof_content_apply (baseHostCX *originator, MitmProxy *mitm_pro
             mitm_proxy->writer_opts()->webhook_lock_traffic = pc->webhook_lock_traffic;
 
             mitm_proxy->acct_opts.ja4_clienthello = pc->ja4_tls_ch;
+            mitm_proxy->acct_opts.ja4_clienthello_ignore_sni = pc->ja4_tls_ch_ignore_sni;
             mitm_proxy->acct_opts.ja4_serverhello = pc->ja4_tls_sh;
             mitm_proxy->acct_opts.ja4_http = pc->ja4_http;
             auto* mh = MitmHostCX::from_baseHostCX(originator);
@@ -3926,6 +3932,7 @@ int CfgFactory::save_content_profiles(Config& ex) const {
         item.add("webhook_enable", Setting::TypeBoolean) = obj->webhook_enable;
         item.add("webhook_lock_traffic", Setting::TypeBoolean) = obj->webhook_lock_traffic;
         item.add("ja4_tls_ch", Setting::TypeBoolean) = obj->ja4_tls_ch;
+        item.add("ja4_tls_ch_ignore_sni", Setting::TypeBoolean) = obj->ja4_tls_ch_ignore_sni;
         item.add("ja4_tls_sh", Setting::TypeBoolean) = obj->ja4_tls_sh;
         item.add("ja4_http", Setting::TypeBoolean) = obj->ja4_http;
         item.add("rules_session_filter", Setting::TypeString) = obj->rules_session_filter;

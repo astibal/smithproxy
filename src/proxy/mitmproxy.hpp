@@ -130,6 +130,7 @@ public:
     struct Opts_Accounting {
         bool details = true;
         bool ja4_clienthello = false;
+        bool ja4_clienthello_ignore_sni = false;
         bool ja4_serverhello = false;
         bool ja4_http = false;
     } acct_opts;

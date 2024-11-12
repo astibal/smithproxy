@@ -310,6 +310,7 @@ void MitmProxy::webhook_session_stop() const {
                   { "bytes_up", uB },
                   { "bytes_down", dB },
                   { "ja4_ch", ja4.ClientHello },
+                  { "ja4_ch_ignore_sni", acct_opts.ja4_clienthello_ignore_sni },
                   { "ja4_sh", ja4.ServerHello },
     };
 
@@ -811,6 +812,7 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
         // we are always left context
         if (scom && !scom->client_hello_buffer().empty()) {
             sx::ja4::TLSClientHello ch;
+            ch.ignore_sni = acct_opts.ja4_clienthello_ignore_sni;
             auto const &ch_buf = scom->client_hello_buffer();
 
             // yes, some copying :( - in c++20 is span, but we are still at c++17
