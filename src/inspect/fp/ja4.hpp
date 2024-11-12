@@ -164,6 +164,19 @@ namespace sx::ja4 {
         uint16_t version = 0;
         bool have_key_share = false;
         bool sni = false;
+        // JA4 NO-SNI extension
+        // --------------------
+        // JA4 has a design flaw, which hampers its fingerprinting power
+        // TLS client program cannot be fingerprinted based on whether or not it sends SNI - it can do both!
+        // if ignore_sni is enabled, following happens:
+        //  1. SNI is not counted into number of extensions
+        //  2. we send 'i' even if it's present
+        //  3. no-op note: SNI extension is excluded in standard JA4_c, so we don't have to do anything with it
+        //
+        //  => this means if `ignore_sni` is set,
+        //  the signature IS NON-STANDARD and even though it's compatible with standard JA4 databases,
+        //  it would probably taint them, because of different approach.
+        bool ignore_sni = false;
         std::string alpn = "00";
         std::vector<uint16_t> cipher_suites;
         std::vector<uint16_t> extensions;

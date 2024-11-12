@@ -517,7 +517,7 @@ namespace sx::ja4 {
         return ss.str();
     }
 
-    std::string TLSClientHello::di() const { return (sni ? "d" : "i"); }
+    std::string TLSClientHello::di() const { return ( (sni && ! ignore_sni) ? "d" : "i"); }
 
     std::string TLSClientHello::cs() const {
         std::stringstream ss;
@@ -531,7 +531,7 @@ namespace sx::ja4 {
 
         // add extensions which are skipped in the list, but present in prefix
         if(alpn != "00") base++;
-        if(sni) base++;
+        if(sni && ! ignore_sni) base++;
 
         ss << base;
         return ss.str();
