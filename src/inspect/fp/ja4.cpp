@@ -548,7 +548,7 @@ namespace sx::ja4 {
         std::sort(extensions.begin(), extensions.end());
 
         // t - tcp / q - quic
-        fingerprint << "t" << ver() << di() << cs() << ex() << alpn << "_";
+        fingerprint << proto << ver() << di() << cs() << ex() << alpn << "_";
 
         // ciphers
         for (size_t i = 0; i < cipher_suites.size(); ++i) {

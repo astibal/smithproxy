@@ -162,6 +162,7 @@ namespace sx::ja4 {
 
     struct TLSClientHello {
         uint16_t version = 0;
+        char proto = 't';
         bool have_key_share = false;
         bool sni = false;
         // JA4 NO-SNI extension
