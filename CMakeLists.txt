@@ -433,6 +433,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 socle/traflog/tests/test_pcapng.cpp
                 socle/tests/test_tls.cpp
                 socle/tests/tests_peering.cpp
+                socle/tests/tests_mempool.cpp
                 socle/common/tests/cache_tests.cpp
                 socle/common/tests/mempool_tests.cpp
                 socle/common/tests/string_tests.cpp
