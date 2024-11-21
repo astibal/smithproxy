@@ -535,7 +535,10 @@ namespace sx::engine::http {
                     process_header_entry(ctx, side, my_app_data,
                                          stream_id, flags, data, hdr, hdr_elem);
                     if(ja4h.has_value()) {
-                        ja4h->process_header_pair(std::make_pair(hdr, hdr_elem));
+                        std::string_view view_to_hdr = hdr;
+                        std::string_view view_to_hdr_elem = hdr_elem;
+
+                        ja4h->process_header_pair(std::make_pair(view_to_hdr, view_to_hdr_elem));
                     }
                 }
             }
