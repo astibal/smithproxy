@@ -519,6 +519,10 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "added content_profile.[x].ja4_tls_ch_ignore_sni");
         return true;
     }
+    else if(upgrade_to_num == 1039) {
+        log.event(INF, "added settings.http_api.allow_api_header (for GET)");
+        return true;
+    }
 
 
     return false;
@@ -911,6 +915,7 @@ bool CfgFactory::load_settings () {
         load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "loopback_only", sx::webserver::HttpSessions::loopback_only);
         load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "bind_address", sx::webserver::HttpSessions::bind_address);
         load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "bind_interface", sx::webserver::HttpSessions::bind_interface);
+        load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "allow_api_header", sx::webserver::HttpSessions::allow_api_header);
 
         if(cfgapi.getRoot()["settings"]["http_api"].exists("allowed_ips")) {
             sx::webserver::HttpSessions::allowed_ips.clear();
@@ -5189,6 +5194,7 @@ int save_settings(Config& ex) {
     http_api_objects.add("loopback_only", Setting::TypeBoolean) = (bool)sx::webserver::HttpSessions::loopback_only;
     http_api_objects.add("bind_address", Setting::TypeString) = sx::webserver::HttpSessions::bind_address;
     http_api_objects.add("bind_interface", Setting::TypeString) = sx::webserver::HttpSessions::bind_interface;
+    http_api_objects.add("allow_api_header", Setting::TypeBoolean) = sx::webserver::HttpSessions::allow_api_header;
 
     Setting& allowed_ips = http_api_objects.add("allowed_ips", Setting::TypeArray);
     for (auto const& ip: sx::webserver::HttpSessions::allowed_ips) {
