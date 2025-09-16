@@ -1191,8 +1191,8 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
         _dia("mitmproxy::proxy-%c: %dB replaced with %dB (content rule)", from_side(side), orig_sz, sz);
     }
     else {
-        to->to_write(from->to_read());
         write_traffic_log(side, from);
+        to->to_write(from->to_read());
 
         auto sz = from->to_read().size();
         auto fastlane = sz > 0 and from->to_read().empty();
