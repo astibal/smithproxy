@@ -78,6 +78,7 @@ TEMP_DTLS_DROP='443'            # DTLS is being used for example by google, and 
 SMITH_DTLS_TPROXY='50443'
 
 DIVERT_FWMARK=1
+DIVERT_FWMASK=1
 DIVERT_IP_RULE=100
 
 REDIRECT_TLS_PORT='51443'
@@ -243,9 +244,9 @@ function setup_tproxy {
             for P in ${SMITH_TCP_PORTS}; do
                 logit "  tproxy port ${IF}/${P}->${SMITH_TCP_TPROXY}"
                 iptables -t mangle -A ${SMITH_CHAIN_NAME} -p tcp -i ${IF} --dport ${P} -j TPROXY \
-                --tproxy-mark 0x1/0x1 --on-port ${SMITH_TCP_TPROXY}
+                --tproxy-mark ${DIVERT_FWMARK}/${DIVERT_FWMASK} --on-port ${SMITH_TCP_TPROXY}
                 ip6tables -t mangle -A ${SMITH_CHAIN_NAME} -p tcp -i ${IF} --dport ${P} -j TPROXY \
-                --tproxy-mark 0x1/0x1 --on-port ${SMITH_TCP_TPROXY}
+                --tproxy-mark ${DIVERT_FWMARK}/${DIVERT_FWMASK} --on-port ${SMITH_TCP_TPROXY}
 
             done;
 
@@ -253,30 +254,30 @@ function setup_tproxy {
             for P in ${SMITH_UDP_PORTS}; do
                 logit "  tproxy port ${IF}/${P}->${SMITH_UDP_TPROXY}"
                 iptables -t mangle -A ${SMITH_CHAIN_NAME} -p udp -i ${IF} --dport ${P} -j TPROXY \
-                --tproxy-mark 0x1/0x1 --on-port ${SMITH_UDP_TPROXY}
+                --tproxy-mark ${DIVERT_FWMARK}/${DIVERT_FWMASK} --on-port ${SMITH_UDP_TPROXY}
                 ip6tables -t mangle -A ${SMITH_CHAIN_NAME} -p udp -i ${IF} --dport ${P} -j TPROXY \
-                --tproxy-mark 0x1/0x1 --on-port ${SMITH_UDP_TPROXY}
+                --tproxy-mark ${DIVERT_FWMARK}/${DIVERT_FWMASK} --on-port ${SMITH_UDP_TPROXY}
             done;
             logit " tproxy for TLS"
             for P in ${SMITH_TLS_PORTS}; do
                 logit "  tproxy port ${IF}/${P}->${SMITH_TLS_TPROXY}"
                 iptables -t mangle -A ${SMITH_CHAIN_NAME} -p tcp -i ${IF} --dport ${P} -j TPROXY \
-                --tproxy-mark 0x1/0x1 --on-port ${SMITH_TLS_TPROXY}
+                --tproxy-mark ${DIVERT_FWMARK}/${DIVERT_FWMASK} --on-port ${SMITH_TLS_TPROXY}
 
                 if [[ ${SMITH_IPV6_UDP_BYPASS} -gt 0 ]]; then
                     logit "  bypassing IPv6 UDP traffic (old kernel?)"
                 else
                     ip6tables -t mangle -A ${SMITH_CHAIN_NAME} -p tcp -i ${IF} --dport ${P} -j TPROXY \
-                    --tproxy-mark 0x1/0x1 --on-port ${SMITH_TLS_TPROXY}
+                    --tproxy-mark ${DIVERT_FWMARK}/${DIVERT_FWMASK} --on-port ${SMITH_TLS_TPROXY}
                 fi
             done;
             logit " tproxy for DTLS"
             for P in ${SMITH_DTLS_PORTS}; do
                 logit "  tproxy port ${IF}/${P}->${SMITH_DTLS_TPROXY}"
                 iptables -t mangle -A ${SMITH_CHAIN_NAME} -p udp -i ${IF} --dport ${P} -j TPROXY \
-                --tproxy-mark 0x1/0x1 --on-port ${SMITH_DTLS_TPROXY}
+                --tproxy-mark ${DIVERT_FWMARK}/${DIVERT_FWMASK} --on-port ${SMITH_DTLS_TPROXY}
                 ip6tables -t mangle -A ${SMITH_CHAIN_NAME} -p udp -i ${IF} --dport ${P} -j TPROXY \
-                --tproxy-mark 0x1/0x1 --on-port ${SMITH_DTLS_TPROXY}
+                --tproxy-mark ${DIVERT_FWMARK}/${DIVERT_FWMASK} --on-port ${SMITH_DTLS_TPROXY}
             done;
             logit " drop DTLS ports (until DTLS inspection is implemented)"
             for P in ${TEMP_DTLS_DROP}; do
@@ -287,16 +288,16 @@ function setup_tproxy {
             if [[ ${SMITH_TCP_PORTS_ALL} -gt 0 ]]; then
                 logit " tproxy for all TCP traffic"
                 iptables -t mangle -A ${SMITH_CHAIN_NAME} -p tcp -i ${IF} -j TPROXY \
-                --tproxy-mark 0x1/0x1 --on-port ${SMITH_TCP_TPROXY}
+                --tproxy-mark ${DIVERT_FWMARK}/${DIVERT_FWMASK} --on-port ${SMITH_TCP_TPROXY}
                 ip6tables -t mangle -A ${SMITH_CHAIN_NAME} -p tcp -i ${IF} -j TPROXY \
-                --tproxy-mark 0x1/0x1 --on-port ${SMITH_TCP_TPROXY}
+                --tproxy-mark ${DIVERT_FWMARK}/${DIVERT_FWMASK} --on-port ${SMITH_TCP_TPROXY}
             fi
             if [[ ${SMITH_UDP_PORTS_ALL} -gt 0 ]]; then
                 logit " tproxy for all TCP traffic"
                 iptables -t mangle -A ${SMITH_CHAIN_NAME} -p udp -i ${IF} -j TPROXY \
-                --tproxy-mark 0x1/0x1 --on-port ${SMITH_UDP_TPROXY}
+                --tproxy-mark ${DIVERT_FWMARK}/${DIVERT_FWMASK} --on-port ${SMITH_UDP_TPROXY}
                 ip6tables -t mangle -A ${SMITH_CHAIN_NAME} -p udp -i ${IF} -j TPROXY \
-                --tproxy-mark 0x1/0x1 --on-port ${SMITH_UDP_TPROXY}
+                --tproxy-mark ${DIVERT_FWMARK}/${DIVERT_FWMASK} --on-port ${SMITH_UDP_TPROXY}
             fi
 
 
@@ -312,13 +313,13 @@ function setup_tproxy {
         logit "Preparing divert chain $DIVERT_CHAIN_NAME"
         iptables -t mangle -F ${DIVERT_CHAIN_NAME}
         iptables -t mangle -N ${DIVERT_CHAIN_NAME}
-        iptables -t mangle -A ${DIVERT_CHAIN_NAME} -j MARK --set-mark ${DIVERT_FWMARK}
+        iptables -t mangle -A ${DIVERT_CHAIN_NAME} -j MARK --set-xmark ${DIVERT_FWMARK}/${DIVERT_FWMASK}
         iptables -t mangle -A ${DIVERT_CHAIN_NAME} -j ACCEPT
 
 
         ip6tables -t mangle -F ${DIVERT_CHAIN_NAME}
         ip6tables -t mangle -N ${DIVERT_CHAIN_NAME}
-        ip6tables -t mangle -A ${DIVERT_CHAIN_NAME} -j MARK --set-mark ${DIVERT_FWMARK}
+        ip6tables -t mangle -A ${DIVERT_CHAIN_NAME} -j MARK --set-xmark ${DIVERT_FWMARK}/${DIVERT_FWMASK}
         ip6tables -t mangle -A ${DIVERT_CHAIN_NAME} -j ACCEPT
 
         logit " done"
@@ -386,10 +387,10 @@ function setup_tproxy {
         logit
 
         logit "Applying local lookup for sockets"
-        ip rule add fwmark ${DIVERT_FWMARK} lookup ${DIVERT_IP_RULE}
+        ip rule add fwmark ${DIVERT_FWMARK}/${DIVERT_FWMASK} lookup ${DIVERT_IP_RULE}
         ip route add local 0.0.0.0/0 dev lo table ${DIVERT_IP_RULE}
 
-        ip -6 rule add fwmark ${DIVERT_FWMARK} lookup ${DIVERT_IP_RULE}
+        ip -6 rule add fwmark ${DIVERT_FWMARK}/${DIVERT_FWMASK} lookup ${DIVERT_IP_RULE}
         ip -6 route add local ::/0 dev lo table ${DIVERT_IP_RULE}
 
         logit " done"
