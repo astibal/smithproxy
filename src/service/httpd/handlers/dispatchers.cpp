@@ -16,25 +16,27 @@
 namespace sx::webserver::dispatchers {
 
     void controller_add_status(lmh::WebServer &server) {
-        auto* status_ping = new Http_Responder(
-                "POST",
-                "/api/status/ping",
-#ifndef BUILD_RELEASE
-                authorized::unprotected<json>(
-#else
-                authorized::token_protected<json>(
-#endif
-                        []([[maybe_unused]] MHD_Connection *c, [[maybe_unused]] std::string const &meth, [[maybe_unused]] std::string const &req) -> json {
-                            time_t uptime = time(nullptr) - SmithProxy::instance().ts_sys_started;
-                            return {{"version", SMITH_VERSION},
-                                    {"status",     "ok"},
-                                    {"uptime",     uptime},
-                                    {"uptime_str", uptime_string(uptime)}};
-                        }));
 
-        status_ping->Content_Type = "application/json";
-        server.addController(std::shared_ptr<lmh::Controller>(status_ping));
+        for(auto const& meth: { "GET", "POST" }) {
+            auto* status_ping = new Http_Responder(
+                    meth,
+                    "/api/status/ping",
+    #ifndef BUILD_RELEASE
+                    authorized::unprotected<json>(
+    #else
+                    authorized::token_protected<json>(
+    #endif
+                            []([[maybe_unused]] MHD_Connection *c, [[maybe_unused]] std::string const &meth, [[maybe_unused]] std::string const &req) -> json {
+                                time_t uptime = time(nullptr) - SmithProxy::instance().ts_sys_started;
+                                return {{"version", SMITH_VERSION},
+                                        {"status",     "ok"},
+                                        {"uptime",     uptime},
+                                        {"uptime_str", uptime_string(uptime)}};
+                            }));
 
+            status_ping->Content_Type = "application/json";
+            server.addController(std::shared_ptr<lmh::Controller>(status_ping));
+        }
     }
 
     void controller_add_commons(lmh::WebServer& server) {

@@ -297,6 +297,7 @@ add_executable(smithproxy
         src/inspect/dnsinspector.cpp
         src/inspect/dns.cpp
         src/inspect/kb/kb.hpp
+        src/inspect/fp/ja4.cpp
 
         src/inspect/engine/http.hpp
         src/inspect/engine/http.cpp
@@ -406,6 +407,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/utils/tests/str_test.cpp
                 src/inspect/tests/dns_tests.cpp
                 src/inspect/tests/node_tests.cpp
+                src/inspect/tests/ja4_tests.cpp
                 src/ext/libcidr/cidr.cpp
 
                 src/policy/policy.cpp
@@ -418,19 +420,42 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/ext/hpack/hpack.hpp
                 src/ext/hpack/hpack_tests.cpp
 
+                src/inspect/engine.hpp
+                src/inspect/engine/http.cpp
+                src/inspect/dns.cpp
+                src/inspect/dnsengine.hpp
+                src/policy/inspectors.cpp
+                src/inspect/dnsinspector.cpp
+                src/inspect/fp/ja4.cpp
+
                 socle/common/display.cpp
                 socle/traflog/tests/test_pcapapi.cpp
                 socle/traflog/tests/test_pcapng.cpp
                 socle/tests/test_tls.cpp
                 socle/tests/tests_peering.cpp
+                socle/tests/tests_mempool.cpp
                 socle/common/tests/cache_tests.cpp
                 socle/common/tests/mempool_tests.cpp
                 socle/common/tests/string_tests.cpp
                 socle/common/tests/inet_tests.cpp
                 socle/common/tests/cast_tests.cpp
                 )
+        add_executable(sx_gtests_http1
+                src/inspect/tests/http1_tests.cpp
+
+                src/inspect/engine.hpp
+                src/inspect/engine/http.cpp
+                src/inspect/fp/ja4.cpp
+                src/inspect/dns.cpp
+                src/inspect/dnsengine.hpp
+                src/policy/inspectors.cpp
+                src/inspect/dnsinspector.cpp
+                src/ext/libcidr/cidr.cpp
+                src/policy/addrobj.cpp
+        )
 
         target_link_libraries(sx_gtests gtest gtest_main socle_lib pthread crypto ssl)
+        target_link_libraries(sx_gtests_http1 gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries (sx_gtests nlohmann_json::nlohmann_json)
     endif()
 ENDIF()

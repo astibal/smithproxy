@@ -1591,7 +1591,12 @@ auto get_tls_info(MitmHostCX const* lf, MitmHostCX const* rg, int sl_flags, int 
 
             if (com && not com->opt.bypass) {
                 auto ssl = com->get_SSL();
-                auto const *session = SSL_get_session(ssl);
+
+                SSL_SESSION *session = nullptr;
+                if(ssl) {
+                    session = SSL_get_session(ssl);
+                }
+
                 if (ssl and session) {
 
                     auto *cipher_str = SSL_CIPHER_get_name(SSL_SESSION_get0_cipher(session));
@@ -1787,7 +1792,7 @@ auto get_more_info(sobject_info const* so_info, MitmProxy const* curr_proxy, Mit
 
             if (lf->engine_ctx.application_data) {
                 auto const app = lf->engine_ctx.application_data;
-                std::string desc = app->str();
+                std::string desc = app->to_string(verbosity);
                 if (verbosity < DEB && desc.size() > 120) {
                     desc = desc.substr(0, 117);
                     desc += "...";
@@ -1807,6 +1812,9 @@ auto get_more_info(sobject_info const* so_info, MitmProxy const* curr_proxy, Mit
                     if(not http_app->http_data.method.empty()) {
                         info_ss << "\n    L7 http current: " << http_app->http_data.method;
                         info_ss << " "<< http_app->request() << "\n";
+                        if(! http_app->http_data.ja4h.empty()) {
+                            info_ss << "        ja4h: "<< http_app->http_data.ja4h << "\n";
+                            }
                     }
                     std::string prev_hist_req;
                     std::size_t prev_hist_cnt = 0L;
@@ -1838,6 +1846,9 @@ auto get_more_info(sobject_info const* so_info, MitmProxy const* curr_proxy, Mit
                                 info_ss << cur_hist_req;
                             }
                             info_ss << "\n";
+                            if(! it->ja4h.empty()) {
+                                info_ss << "            ja4h: "<< it->ja4h << "\n";
+                            }
 
                             prev_hist_req = cur_hist_req;
                             prev_hist_cnt = 0L;
@@ -1847,6 +1858,20 @@ auto get_more_info(sobject_info const* so_info, MitmProxy const* curr_proxy, Mit
                 }
             } else {
                 info_ss << "\n    L7_params: none\n";
+            }
+
+            if(curr_proxy) {
+                bool pr = false;
+                if(! curr_proxy->ja4.ClientHello.empty()) {
+                    info_ss << "\n    JA4 : " << curr_proxy->ja4.ClientHello << "\n";
+                    pr = true;
+                }
+                if(! curr_proxy->ja4.ServerHello.empty()) {
+                    info_ss << "    JA4S: " << curr_proxy->ja4.ServerHello << "\n";
+                    pr = true;
+                }
+                if(pr)
+                    info_ss << "\n";
             }
 
 
@@ -2211,7 +2236,13 @@ int cli_diag_worker_proxy_list(struct cli_def *cli, [[maybe_unused]] const char 
                     stats.workers_busy++;
                 }
             }
+
+            if(idx == 0) {
+                // all acceptors have the same fdqueue create by their parent Listener
+                cli_print(cli, "        Socket queue stats: \n%s", acceptor->stats_str(12).c_str());
+            }
         }
+
     };
 
     list_acceptor("== plain acceptor", sx.plain_proxies, sx.plain_threads, verbosity);
@@ -2407,7 +2438,7 @@ int cli_diag_neighbor_stats(struct cli_def *cli, const char *command, char *argv
 
         ss << "Neighbors stats:\n";
         ss << "  cache size: " << nb.cache().get_map_ul().size() << "\r\n";
-        ss << "  cache max entries: " << NbrHood::MAX_CACHE_SZ << "\r\n";
+        ss << "  cache max entries: " << NbrHood::instance().cache().capacity_ul() << "\r\n";
     }
 
     cli_print(cli, "%s", ss.str().c_str());

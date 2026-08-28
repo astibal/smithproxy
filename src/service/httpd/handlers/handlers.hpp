@@ -58,12 +58,23 @@ namespace sx::webserver::authorized {
                 ret.response = Func(conn, meth, req);
                 ret.response_code = MHD_HTTP_OK;
             } else {
-                Log::get()->events().insert(ERR, "unauthorized API access attempt from %s",
+                Log::get()->events().insert(ERR, "unauthorized API access attempt using tokens from %s",
                                             client_address(conn).c_str());
 
 
                 ret.response = {{"error", "access denied"},};
                 ret.response_code = MHD_HTTP_UNAUTHORIZED;
+            }
+        };
+
+        auto validate_api_key_and_call = [&](auto const& key) {
+            auto it = HttpSessions::api_keys.find(key);
+            if (it != HttpSessions::api_keys.end()) {
+                ret.response = Func(conn, meth, req);
+                ret.response_code = MHD_HTTP_OK;
+            } else {
+                Log::get()->events().insert(ERR, "unauthorized API access attempt using API key header from %s",
+                                            client_address(conn).c_str());
             }
         };
 
@@ -105,6 +116,14 @@ namespace sx::webserver::authorized {
             return std::make_optional<std::pair<std::string, std::string>>(auth_cookie, token_cookie);
         };
 
+        auto extract_api_key = [&]() -> std::optional<std::string> {
+            auto key = MHD_lookup_connection_value(conn, MHD_HEADER_KIND, "X-API-Key");
+            if(key) {
+                return std::string(key);
+            }
+            return std::nullopt;
+        };
+
         if (not req.empty() or meth != "POST") {
             ret.response_code = MHD_HTTP_OK;
 
@@ -113,6 +132,10 @@ namespace sx::webserver::authorized {
             if(auto cookies_headers = extract_cookies_headers(); cookies_headers) {
 
                 validate_and_call(cookies_headers.value().first, cookies_headers.value().second);
+            }
+            else if (auto key = extract_api_key(); key.has_value() and HttpSessions::allow_api_header and meth == "GET") {
+                // API key is fine only for GET requests
+                validate_api_key_and_call(key.value());
             }
             else {
                 try {

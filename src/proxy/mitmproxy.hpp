@@ -113,7 +113,7 @@ public:
         bool webhook_lock_traffic = false;
 
         // if configured, all proxies will lock on this mutex (it's optional)
-        static inline std::mutex webhook_content_lock;
+        static inline std::timed_mutex webhook_content_lock;
 
     };
     lazy_ptr<Opts_ContentWriter> writer_opts_;
@@ -129,7 +129,20 @@ public:
 
     struct Opts_Accounting {
         bool details = true;
+        bool ja4_clienthello = false;
+        bool ja4_clienthello_ignore_sni = false;
+        bool ja4_serverhello = false;
+        bool ja4_http = false;
     } acct_opts;
+
+    struct JA4 {
+        size_t max_reads = 10;
+
+        std::string ClientHello;
+        std::string ServerHello;
+        size_t clienthello_counter = 0;
+
+    } ja4;
 
     // Remote filters - use other proxy to filter content of this proxy.
     // Elements are pair of "name" and pointer to the filter proxy 
@@ -172,11 +185,12 @@ public:
 
     // actual proxy functions manipulating data buffers
     void write_traffic_log(side_t side, baseHostCX* cx, buffer* custom_buffer  = nullptr);
-    void proxy_dump_packet(side_t sid, buffer& buf);
+    void proxy_dump_packet(side_t sid, buffer const& buf);
     void proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redirected);
 
     // makes a synchronous API call letting webhook modify the content
-    void content_webhook(baseHostCX* cx, side_t side, buffer& buffer);
+    bool content_webhook(baseHostCX* cx, side_t side, buffer& buffer);
+    bool handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t side);
 
     // this virtual method is called whenever there are new bytes in any LEFT host context!
     void on_left_bytes(baseHostCX* cx) override;
@@ -244,7 +258,7 @@ public:
         }
     }
     
-    buffer content_replace_apply(const buffer &ref);
+    std::optional<buffer> content_replace_apply(const buffer &ref);
     
     void _debug_zero_connections(baseHostCX* cx);
     

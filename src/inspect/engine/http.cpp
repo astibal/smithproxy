@@ -1,6 +1,7 @@
 #include <sslcom.hpp>
 
 #include <inspect/engine/http.hpp>
+#include <inspect/fp/ja4.hpp>
 #include <proxy/mitmhost.hpp>
 
 #ifdef USE_HPACK
@@ -21,7 +22,7 @@ namespace sx::engine::http {
 
             auto ix_ref = data.find("Referer: ");
             if (ix_ref != std::string::npos) {
-                std::string ref_start ( data.substr(ix_ref, std::min(std::size_t(128), data.size() - ix_ref)) );
+                std::string ref_start ( data.substr(ix_ref, std::min(std::size_t(1024), data.size() - ix_ref)) );
                 if (std::regex_search(ref_start, m_ref, ProtoRex::http_req_ref())) {
                     std::string str_temp;
 
@@ -64,7 +65,7 @@ namespace sx::engine::http {
                 return false;
             };
 
-            std::string host_start( data.substr(ix_host, std::min(std::size_t(128), data.size() - ix_host)) );
+            std::string host_start( data.substr(ix_host, std::min(std::size_t(1024), data.size() - ix_host)) );
 
             std::smatch m_host;
             auto const regex_ret = std::regex_search(host_start, m_host, ProtoRex::http_req_host());
@@ -81,8 +82,11 @@ namespace sx::engine::http {
                 if (check_inspect_dns_cache) {
 
                     std::string dns_resp;
-                    auto proto = ctx.origin->com()->l3_proto();
-                    const std::string prefix = (proto == AF_INET6 ? "AAAA:" : "A:");
+                    std::string prefix = "A:";
+                    if(ctx.origin and ctx.origin->com()) {
+                        auto proto = ctx.origin->com()->l3_proto();
+                        prefix = (proto == AF_INET6 ? "AAAA:" : "A:");
+                    }
 
                     // get lock and cache pointers
                     {
@@ -112,7 +116,7 @@ namespace sx::engine::http {
         bool find_method (EngineCtx &ctx, std::string_view data) {
             auto const& log = log::http1;
 
-            std::string method_start(data.substr(0, std::min(std::size_t(128), data.size())));
+            std::string method_start(data.substr(0, std::min(std::size_t(1024), data.size())));
             std::smatch m_get;
 
             if (std::regex_search(method_start, m_get, ProtoRex::http_req_get())) {
@@ -150,47 +154,86 @@ namespace sx::engine::http {
             return false;
         }
 
+        std::vector<std::string_view> split_string_view(std::string_view str, std::string_view delimiter,
+                                                        bool first_only,
+                                                        bool stop_on_empty) {
+            std::vector<std::string_view> result;
+            size_t start = 0;
+
+            while (start < str.size()) {
+                size_t end = str.find(delimiter, start);
+
+                if (end == std::string_view::npos) {
+                    result.emplace_back(str.substr(start));
+                    break;
+                }
+
+                const auto part = str.substr(start, end - start);
+                if(stop_on_empty and part.empty()) {
+                    break;
+                }
+                result.emplace_back(part);
+                start = end + delimiter.size();
+
+                if(first_only and result.size() == 2) break;
+            }
+
+            return result;
+        }
+
         void parse_request(EngineCtx &ctx, buffer const* buffer_data) {
             auto const& log = log::http1;
 
             auto data = buffer_data->string_view();
 
             bool const have_method = find_method(ctx, data);
-            bool const have_host = find_host(ctx, data);
-            bool const have_referer = find_referrer(ctx, data);
-
-
-            auto *app_request = dynamic_cast<app_HttpRequest *>(ctx.application_data.get());
-
-            auto engine_http1_set_proto = [&ctx,&app_request] () {
-
-                if (app_request != nullptr) {
-                    // detect protocol (plain vs ssl)
-                    auto const* proto_com = dynamic_cast<SSLCom *>(ctx.origin->com());
-                    if (proto_com != nullptr) {
-                        app_request->http_data.proto = "https://";
-                        app_request->is_ssl = true;
-                    } else {
-                        app_request->http_data.proto = "http://";
-                    }
-
-                    _inf("http request: %s", ESC(app_request->str()));
-                } else {
-                    _err("http request: app_request failed");
-                }
-            };
-
-
             if(have_method) {
+                auto *app_request = dynamic_cast<app_HttpRequest *>(ctx.application_data.get());
+
+                auto engine_http1_set_proto = [&ctx, &app_request] {
+
+                    if (app_request != nullptr and ctx.origin and ctx.origin->com()) {
+                        // detect protocol (plain vs ssl)
+                        auto const* proto_com = dynamic_cast<SSLCom *>(ctx.origin->com());
+                        if (proto_com != nullptr) {
+                            app_request->http_data.proto = "https://";
+                            app_request->is_ssl = true;
+                        } else {
+                            app_request->http_data.proto = "http://";
+                        }
+
+                        _inf("http request: %s", ESC(app_request->str()));
+                    } else {
+                        _err("http request: app_request failed");
+                    }
+                };
+
+
+                bool const have_host = find_host(ctx, data);
+                bool const have_referer = find_referrer(ctx, data);
+
                 engine_http1_set_proto();
-                ctx.origin->replacement_type(MitmHostCX::REPLACETYPE_HTTP);
+
+                if(ctx.origin) ctx.origin->replacement_type(MitmHostCX::REPLACETYPE_HTTP);
 
                 if(not have_host) _not("http1: 'Host:' not found");
                 if(not have_referer) _deb("http1: 'Referer:' not found");
 
                 if(app_request) {
+
+                    if(ctx.options.http.ja4h) {
+                        sx::ja4::HTTP h;
+                        h.version = "11";
+                        h.from_buffer(data);
+
+                        app_request->http_data.ja4h = h.ja4h();
+                    }
+
                     app_request->mark_populated();
                 }
+            }
+            else {
+                // probably not HTTP
             }
         }
 
@@ -480,12 +523,33 @@ namespace sx::engine::http {
                 _err("Frame: hpack decode exception: %s", e.what());
             }
 
+            std::optional<sx::ja4::HTTP> ja4h;
+            if(ctx.options.http.ja4h) {
+                ja4h = sx::ja4::HTTP();
+                ja4h->version = "20";
+            }
+
+
             for (auto& [ hdr, vlist ] : dec.headers()) {
                 for(auto const& hdr_elem: vlist) {
                     process_header_entry(ctx, side, my_app_data,
                                          stream_id, flags, data, hdr, hdr_elem);
+                    if(ja4h.has_value()) {
+                        std::string_view view_to_hdr = hdr;
+                        std::string_view view_to_hdr_elem = hdr_elem;
+
+                        ja4h->process_header_pair(std::make_pair(view_to_hdr, view_to_hdr_elem));
+                    }
                 }
             }
+            if(ja4h.has_value()) {
+                auto meth = my_app_data->http_data.method;
+                if(meth.size() >= 2)
+                    ja4h->cmd = sx::ja4::util::to_lower(meth).substr(0,2);
+
+                my_app_data->http_data.ja4h = ja4h->ja4h();
+            }
+
             detect_app(ctx, side, my_app_data, stream_id, flags, data);
             if(ctx.origin->opt_kb_enabled) {
                 fill_kb(ctx, side, my_app_data, stream_id, flags, data);

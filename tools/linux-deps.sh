@@ -94,6 +94,11 @@ if [ "${DIST}" = "Ubuntu" ]; then
         SX_GCC_VER="12"
         LIBSSL="libssl3"
         PIP="pip"
+   elif [ "${REV}" = "24.04" ]; then
+        SX_LIBCONFIG_VER="9v5"
+        SX_GCC_VER="13"
+        LIBSSL="libssl3"
+        PIP="false"
    fi
 
 
@@ -112,7 +117,7 @@ if [ "${DIST}" = "Ubuntu" ]; then
     echo "... installing essentials and libraries"
     apt update && apt install -y \
     wget curl \
-    python3 python3-pip python3-dev \
+    python3 python3-dev \
     libconfig++${SX_LIBCONFIG_VER} ${LIBSSL} libunwind8 libmicrohttpd12 \
     libconfig-dev libconfig++-dev  libssl-dev libunwind-dev libmicrohttpd-dev libcurl4-openssl-dev libpam-dev nlohmann-json3-dev git g++-${SX_GCC_VER} cmake make
 
@@ -121,8 +126,14 @@ if [ "${DIST}" = "Ubuntu" ]; then
     debootstrap devscripts build-essential lintian debhelper vim nano
 
     echo "... installing python libraries"
-    ${PIP} install --upgrade pip
-    ${PIP} install pyparsing  pylibconfig2
+
+    if [ "${PIP}" != "false" ]; then
+      apt install -y python3-pip
+      ${PIP} install --upgrade pip
+      ${PIP} install pyparsing  pylibconfig2
+    else
+      echo "... PIP is not installed"
+    fi
 
 elif [ "${DIST}" = "Debian" ]; then
 

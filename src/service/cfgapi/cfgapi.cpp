@@ -58,6 +58,7 @@
 
 #include <proxy/mitmproxy.hpp>
 #include <proxy/mitmhost.hpp>
+#include <proxy/nbrhood.hpp>
 
 #include <proxy/filters/sinkhole.hpp>
 #include <proxy/filters/statsfilter.hpp>
@@ -494,6 +495,35 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "added settings.webhook.task_debug_dump");
         return true;
     }
+    else if(upgrade_to_num == 1033) {
+        log.event(INF, "added settings.tuning.nbr_cache_size");
+        return true;
+    }
+    else if(upgrade_to_num == 1034) {
+        log.event(INF, "added content_profile.[x].rules_session_filter");
+        return true;
+    }
+    else if(upgrade_to_num == 1035) {
+        log.event(INF, "added content_profile.[x].ja4_tls_ch");
+        return true;
+    }
+    else if(upgrade_to_num == 1036) {
+        log.event(INF, "added content_profile.[x].ja4_tls_sh");
+        return true;
+    }
+    else if(upgrade_to_num == 1037) {
+        log.event(INF, "added content_profile.[x].ja4_http");
+        return true;
+    }
+    else if(upgrade_to_num == 1038) {
+        log.event(INF, "added content_profile.[x].ja4_tls_ch_ignore_sni");
+        return true;
+    }
+    else if(upgrade_to_num == 1039) {
+        log.event(INF, "added settings.http_api.allow_api_header (for GET)");
+        return true;
+    }
+
 
     return false;
 }
@@ -850,6 +880,12 @@ bool CfgFactory::load_settings () {
         load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "host_write_full", hostcx_write_full);
         if(hostcx_write_full >= 1024) { baseHostCX::params.write_full = hostcx_write_full; }
 
+        int nbr_cache_size = 0;
+        load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "nbr_cache_size", nbr_cache_size);
+        if( nbr_cache_size > 0 and (static_cast<size_t>(nbr_cache_size) != NbrHood::instance().cache().capacity())) {
+            NbrHood::instance().cache().set_capacity(static_cast<size_t>(nbr_cache_size));
+        }
+
         if(int open_timeout = 0; load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "host_open_timeout", open_timeout)) {
             baseHostCX::params.open_timeout = open_timeout;
         }
@@ -879,6 +915,7 @@ bool CfgFactory::load_settings () {
         load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "loopback_only", sx::webserver::HttpSessions::loopback_only);
         load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "bind_address", sx::webserver::HttpSessions::bind_address);
         load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "bind_interface", sx::webserver::HttpSessions::bind_interface);
+        load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "allow_api_header", sx::webserver::HttpSessions::allow_api_header);
 
         if(cfgapi.getRoot()["settings"]["http_api"].exists("allowed_ips")) {
             sx::webserver::HttpSessions::allowed_ips.clear();
@@ -2110,6 +2147,26 @@ int CfgFactory::load_db_prof_content () {
 
         load_if_exists(cur_object, "webhook_enable", new_profile->webhook_enable);
         load_if_exists(cur_object, "webhook_lock_traffic", new_profile->webhook_lock_traffic);
+        load_if_exists(cur_object, "ja4_tls_ch", new_profile->ja4_tls_ch);
+        load_if_exists(cur_object, "ja4_tls_ch_ignore_sni", new_profile->ja4_tls_ch_ignore_sni);
+
+        load_if_exists(cur_object, "ja4_tls_sh", new_profile->ja4_tls_sh);
+        // I's quite costy (2x dynamic casts) to set this per-connection.
+        // Because we normally don't store TLS ServerHello, we globally enable ServerHello
+        // collection (only) if ANY content profile turns it on!
+        if(new_profile->ja4_tls_sh) {
+            SSLComOptions::server_hello_copy = true;
+        }
+
+        load_if_exists(cur_object, "ja4_http", new_profile->ja4_http);
+
+        if(load_if_exists(cur_object, "rules_session_filter", new_profile->rules_session_filter)) {
+            if(not new_profile->rules_session_filter.empty()) {
+                if(not new_profile->create_rule_session_filter_rx()) {
+                    _war("load_db_prof_content: '%s': rules_session_filter not loaded", name.c_str());
+                }
+            }
+        }
     }
 
     return num;
@@ -2579,11 +2636,9 @@ size_t CfgFactory::cleanup_db_prof_auth () {
 }
 
 
-bool CfgFactory::prof_content_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileContent> &pc) {
+bool CfgFactory::prof_content_apply (baseHostCX *originator, MitmProxy *mitm_proxy, const std::shared_ptr<ProfileContent> &pc) {
 
     auto const& log = log::policy();
-
-    auto* mitm_proxy = dynamic_cast<MitmProxy*>(new_proxy);
 
     bool ret = true;
     bool cfg_wrt;
@@ -2597,7 +2652,30 @@ bool CfgFactory::prof_content_apply (baseHostCX *originator, baseProxy *new_prox
             mitm_proxy->writer_opts()->webhook_enable = pc->webhook_enable;
             mitm_proxy->writer_opts()->webhook_lock_traffic = pc->webhook_lock_traffic;
 
-            if( ! pc->content_rules.empty() ) {
+            mitm_proxy->acct_opts.ja4_clienthello = pc->ja4_tls_ch;
+            mitm_proxy->acct_opts.ja4_clienthello_ignore_sni = pc->ja4_tls_ch_ignore_sni;
+            mitm_proxy->acct_opts.ja4_serverhello = pc->ja4_tls_sh;
+            mitm_proxy->acct_opts.ja4_http = pc->ja4_http;
+            auto* mh = MitmHostCX::from_baseHostCX(originator);
+            if(mh) {
+                mh->engine_ctx.options.http.ja4h = true;
+            }
+
+            bool filter_ok = true;
+            if(pc->rules_session_filter_rx.has_value()) {
+                try {
+                    auto px_name = mitm_proxy->to_string(iINF);
+                    filter_ok = std::regex_search(px_name, pc->rules_session_filter_rx.value());
+                    _deb("policy_apply: policy content profile[%s]: rules_session_filter - session name: '%s'", pc_name, px_name.c_str());
+                    _deb("policy_apply: policy content profile[%s]: rules_session_filter - session filter: '%s'", pc_name, pc->rules_session_filter.c_str());
+                    _dia("policy_apply: policy content profile[%s]: rules_session_filter - %s", pc_name, filter_ok ? "matched" : "skipping");
+                }
+                catch(std::regex_error const& e) {
+                    _dia("policy_apply: policy content profile[%s]: rules_session_filter error: %s", pc_name, e.what());
+                }
+            }
+
+            if( ! pc->content_rules.empty() and filter_ok ) {
                 _dia("policy_apply: policy content profile[%s]: applying content rules, size %d", pc_name, pc->content_rules.size());
                 mitm_proxy->init_content_replace();
                 mitm_proxy->content_replace(pc->content_rules);
@@ -2623,7 +2701,7 @@ bool CfgFactory::prof_content_apply (baseHostCX *originator, baseProxy *new_prox
 }
 
 
-bool CfgFactory::prof_detect_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileDetection> &pd) {
+bool CfgFactory::prof_detect_apply (baseHostCX *originator, MitmProxy *mitm_proxy, const std::shared_ptr<ProfileDetection> &pd) {
 
     auto* mitm_originator = dynamic_cast<MitmHostCX*>(originator);
     auto const& log = log::policy();
@@ -2683,7 +2761,7 @@ std::optional<std::vector<std::string>> CfgFactory::find_bypass_domain_hosts(std
     return to_match.empty() ? std::nullopt : std::make_optional(to_match);
 };
 
-bool CfgFactory::prof_tls_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileTls> &ps) {
+bool CfgFactory::prof_tls_apply (baseHostCX *originator, MitmProxy *new_proxy, const std::shared_ptr<ProfileTls> &ps) {
 
     auto const& log = log::policy();
 
@@ -2775,12 +2853,11 @@ bool CfgFactory::prof_tls_apply (baseHostCX *originator, baseProxy *new_proxy, c
     return tls_applied;
 }
 
-bool CfgFactory::prof_alg_dns_apply (baseHostCX *originator, baseProxy *new_proxy, const std::shared_ptr<ProfileAlgDns> &p_alg_dns) {
+bool CfgFactory::prof_alg_dns_apply (baseHostCX *originator, MitmProxy *new_proxy, const std::shared_ptr<ProfileAlgDns> &p_alg_dns) {
 
     auto const& log = log::policy();
 
-    auto* mitm_originator = dynamic_cast<AppHostCX*>(originator);
-    auto* mh = dynamic_cast<MitmHostCX*>(mitm_originator);
+    auto* mh = dynamic_cast<MitmHostCX*>(originator);
 
     bool ret = false;
     
@@ -2790,7 +2867,7 @@ bool CfgFactory::prof_alg_dns_apply (baseHostCX *originator, baseProxy *new_prox
             if(DNS_Inspector::dns_prefilter(mh)) {
                 auto* n = new DNS_Inspector();
 
-                _dia("policy_apply: policy dns profile[%s] for %s", p_alg_dns->element_name().c_str(), mitm_originator->full_name('L').c_str());
+                _dia("policy_apply: policy dns profile[%s] for %s", p_alg_dns->element_name().c_str(), mh->full_name('L').c_str());
                 n->opt_match_id = p_alg_dns->match_request_id;
                 n->opt_randomize_id = p_alg_dns->randomize_id;
                 n->opt_cached_responses = p_alg_dns->cached_responses;
@@ -2807,12 +2884,11 @@ bool CfgFactory::prof_alg_dns_apply (baseHostCX *originator, baseProxy *new_prox
 }
 
 
-bool CfgFactory::prof_script_apply (baseHostCX *originator, baseProxy *new_proxy, std::shared_ptr<ProfileScript> const& p_script) {
+bool CfgFactory::prof_script_apply (baseHostCX *originator, MitmProxy *new_proxy, std::shared_ptr<ProfileScript> const& p_script) {
 
     auto const& log = log::policy();
 
-    auto* mitm_originator = dynamic_cast<AppHostCX*>(originator);
-    auto* mh = dynamic_cast<MitmHostCX*>(mitm_originator);
+    auto* mh = dynamic_cast<MitmHostCX*>(originator);
 
     bool ret = false;
 
@@ -2820,7 +2896,7 @@ bool CfgFactory::prof_script_apply (baseHostCX *originator, baseProxy *new_proxy
 
         if(p_script) {
 
-            _dia("policy_apply: policy script profile[%s] for %s", p_script->element_name().c_str(), mitm_originator->full_name('L').c_str());
+            _dia("policy_apply: policy script profile[%s] for %s", p_script->element_name().c_str(), mh->full_name('L').c_str());
 
             if(p_script->script_type == ProfileScript::ST_PYTHON) {
                 #ifdef USE_PYTHON
@@ -2895,7 +2971,7 @@ void CfgFactory::policy_apply_features(std::shared_ptr<PolicyRule> const & polic
 
 }
 
-int CfgFactory::policy_apply (baseHostCX *originator, baseProxy *proxy, int matched_policy) {
+int CfgFactory::policy_apply (baseHostCX *originator, MitmProxy *proxy, int matched_policy) {
 
     auto const& log = log::policy();
 
@@ -3860,6 +3936,11 @@ int CfgFactory::save_content_profiles(Config& ex) const {
 
         item.add("webhook_enable", Setting::TypeBoolean) = obj->webhook_enable;
         item.add("webhook_lock_traffic", Setting::TypeBoolean) = obj->webhook_lock_traffic;
+        item.add("ja4_tls_ch", Setting::TypeBoolean) = obj->ja4_tls_ch;
+        item.add("ja4_tls_ch_ignore_sni", Setting::TypeBoolean) = obj->ja4_tls_ch_ignore_sni;
+        item.add("ja4_tls_sh", Setting::TypeBoolean) = obj->ja4_tls_sh;
+        item.add("ja4_http", Setting::TypeBoolean) = obj->ja4_http;
+        item.add("rules_session_filter", Setting::TypeString) = obj->rules_session_filter;
 
         if(! obj->content_rules.empty() ) {
 
@@ -5098,6 +5179,7 @@ int save_settings(Config& ex) {
     tuning_objects.add("host_write_full", Setting::TypeInt) = (int) baseHostCX::params.write_full;
     tuning_objects.add("host_open_timeout", Setting::TypeInt) = (unsigned short) baseHostCX::params.open_timeout;
     tuning_objects.add("host_idle_timeout", Setting::TypeInt) = (unsigned short) baseHostCX::params.idle_delay;
+    tuning_objects.add("nbr_cache_size", Setting::TypeInt) = (int) NbrHood::instance().cache().capacity();
 
 
     objects.add("accept_api", Setting::TypeBoolean) = CfgFactory::get()->accept_api;
@@ -5112,6 +5194,7 @@ int save_settings(Config& ex) {
     http_api_objects.add("loopback_only", Setting::TypeBoolean) = (bool)sx::webserver::HttpSessions::loopback_only;
     http_api_objects.add("bind_address", Setting::TypeString) = sx::webserver::HttpSessions::bind_address;
     http_api_objects.add("bind_interface", Setting::TypeString) = sx::webserver::HttpSessions::bind_interface;
+    http_api_objects.add("allow_api_header", Setting::TypeBoolean) = sx::webserver::HttpSessions::allow_api_header;
 
     Setting& allowed_ips = http_api_objects.add("allowed_ips", Setting::TypeArray);
     for (auto const& ip: sx::webserver::HttpSessions::allowed_ips) {
