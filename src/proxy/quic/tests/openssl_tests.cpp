@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include "proxy/multiflow/mfflowcom.hpp"
 #include "proxy/quic/openssl.hpp"
 
 #if SMITHPROXY_OPENSSL_QUIC
@@ -134,39 +135,42 @@ TEST(OpenSslQuic, LoopbackHandshakeExposesBidirectionalStream) {
     ASSERT_NE(server, nullptr) << quic::openssl_error_stack();
     ASSERT_TRUE(SSL_is_init_finished(server->native_handle())) << quic::openssl_error_stack();
 
-    quic::openssl_connection client_connection(std::move(client));
-    auto const client_flow = client_connection.open_flow(mf::direction::bidirectional);
+    auto client_connection = std::make_shared<quic::openssl_connection>(std::move(client));
+    std::shared_ptr<quic::openssl_connection> server_connection(std::move(server));
+    auto const client_flow = client_connection->open_flow(mf::direction::bidirectional);
     ASSERT_NE(client_flow.generation, 0U) << quic::openssl_error_stack();
+    mf::MFFlowCom client_com(client_connection, client_flow);
     static constexpr char message[] = "smithproxy-quic";
 
     mf::flow_handle server_flow;
+    std::unique_ptr<mf::MFFlowCom> server_com;
     std::string received;
     bool sent = false;
     auto const stream_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
     while (std::chrono::steady_clock::now() < stream_deadline && received.empty()) {
         if (!sent) {
-            auto const write_result = client_connection.write(client_flow, message, sizeof(message) - 1);
-            ASSERT_TRUE(write_result.status == mf::io_status::ok
-                        || write_result.status == mf::io_status::would_block);
-            sent = write_result.size == sizeof(message) - 1;
+            auto const written = client_com.write(client_com.token(), message, sizeof(message) - 1, 0);
+            ASSERT_GE(written, 0);
+            sent = written == static_cast<ssize_t>(sizeof(message) - 1);
         }
-        client_connection.drain_events();
-        for (auto const& event : server->drain_events()) {
-            if (event.type == mf::event_type::flow_open && event.flow) server_flow = *event.flow;
-        }
-        if (server_flow.generation != 0) {
-            char buffer[64] {};
-            auto const read_result = server->read(server_flow, buffer, sizeof(buffer));
-            if (read_result.status == mf::io_status::ok) {
-                received.assign(buffer, read_result.size);
+        client_connection->drain_events();
+        for (auto const& event : server_connection->drain_events()) {
+            if (event.type == mf::event_type::flow_open && event.flow) {
+                server_flow = *event.flow;
+                server_com = std::make_unique<mf::MFFlowCom>(server_connection, server_flow);
             }
+        }
+        if (server_com) {
+            char buffer[64] {};
+            auto const read_size = server_com->read(server_com->token(), buffer, sizeof(buffer), 0);
+            if (read_size > 0) received.assign(buffer, static_cast<std::size_t>(read_size));
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     EXPECT_EQ(received, message);
 
-    client_connection.close();
-    server->close();
+    client_connection->close();
+    server_connection->close();
     close(client_fd);
     close(server_fd);
 }

@@ -188,6 +188,12 @@ adapter tied to the same connection; the caller must attach a concrete flow
 before I/O. A later cleanup should replace this ambiguous operation with an
 explicit endpoint factory.
 
+The initial adapter is implemented in `src/proxy/multiflow/mfflowcom.*`. It uses
+negative virtual tokens, keeps logical flows out of epoll, maps partial writes
+and backpressure to the existing `baseHostCX` conventions, and provides a local
+peek buffer for legacy inspectors. Its lifecycle is tested against both the
+fake connection and a real OpenSSL QUIC stream.
+
 ## Event and readiness model
 
 Only the physical transport is registered in epoll. Logical flows are scheduled
