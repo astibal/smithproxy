@@ -417,6 +417,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/utils/tenants.cpp
                 src/tests/test_misc.cpp
 
+                src/proxy/multiflow/tests/fake_tests.cpp
+
                 src/ext/hpack/hpack.hpp
                 src/ext/hpack/hpack_tests.cpp
 
@@ -519,4 +521,3 @@ if("${USE_EXPERIMENT}" STREQUAL "Y")
     message(" >> !!! EXPERIMENTS ENABLED !!!" )
     message(" >> - software you built and install contain code which is probably not for general use" )
 endif()
-
