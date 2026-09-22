@@ -4,6 +4,8 @@
 #include <openssl/opensslv.h>
 #include <openssl/ssl.h>
 
+#include <sys/socket.h>
+
 #include <map>
 #include <memory>
 #include <optional>
@@ -51,7 +53,7 @@ unique_ssl_ctx make_openssl_quic_context(bool server);
  */
 class openssl_connection final : public multiflow::connection {
 public:
-    explicit openssl_connection(unique_ssl connection);
+    explicit openssl_connection(unique_ssl connection, int owned_udp_fd = -1);
     ~openssl_connection() override;
 
     openssl_connection(openssl_connection const&) = delete;
@@ -80,6 +82,9 @@ public:
                          const BIO_ADDR* peer, const BIO_ADDR* local);
 
     SSL* native_handle() const { return connection_.get(); }
+    bool handshake_complete() const;
+    bool closed() const { return closed_; }
+    std::string server_name() const;
 
 private:
     struct stream_state;
@@ -102,12 +107,21 @@ private:
               std::uint64_t protocol_error = 0);
 
     unique_ssl connection_;
+    int owned_udp_fd_ = -1;
     std::map<multiflow::flow_id, std::unique_ptr<stream_state>> streams_;
     std::map<event_key, multiflow::event> events_;
     multiflow::flow_id next_internal_id_ = 1;
     multiflow::generation_id next_generation_ = 1;
     bool closed_ = false;
 };
+
+/**
+ * Create a nonblocking outgoing QUIC connection over a newly owned UDP socket.
+ * The returned adapter progresses its handshake from drain_events().
+ */
+std::unique_ptr<openssl_connection> connect_openssl_quic(
+    SSL_CTX* context, const sockaddr* peer, socklen_t peer_size,
+    std::string const& server_name, std::string* error = nullptr);
 
 /**
  * Nonblocking OpenSSL QUIC listener over a caller-owned UDP socket.

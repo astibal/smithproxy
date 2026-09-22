@@ -3,7 +3,13 @@
 #include <openssl/err.h>
 
 #include <array>
+#include <cerrno>
+#include <cstring>
+#include <fcntl.h>
+#include <netinet/in.h>
 #include <sstream>
+#include <sys/socket.h>
+#include <unistd.h>
 #include <utility>
 
 namespace sx::quic {
@@ -43,8 +49,8 @@ struct openssl_connection::stream_state {
     multiflow::direction direction;
 };
 
-openssl_connection::openssl_connection(unique_ssl connection)
-    : connection_(std::move(connection)) {
+openssl_connection::openssl_connection(unique_ssl connection, int owned_udp_fd)
+    : connection_(std::move(connection)), owned_udp_fd_(owned_udp_fd) {
     if (connection_) {
         SSL_set_blocking_mode(connection_.get(), 0);
         SSL_set_default_stream_mode(connection_.get(), SSL_DEFAULT_STREAM_MODE_NONE);
@@ -55,7 +61,21 @@ openssl_connection::openssl_connection(unique_ssl connection)
     }
 }
 
-openssl_connection::~openssl_connection() = default;
+openssl_connection::~openssl_connection() {
+    streams_.clear();
+    connection_.reset();
+    if (owned_udp_fd_ >= 0) ::close(owned_udp_fd_);
+}
+
+bool openssl_connection::handshake_complete() const {
+    return connection_ && SSL_is_init_finished(connection_.get());
+}
+
+std::string openssl_connection::server_name() const {
+    if (!connection_) return {};
+    auto const* name = SSL_get_servername(connection_.get(), TLSEXT_NAMETYPE_host_name);
+    return name ? std::string(name) : std::string {};
+}
 
 multiflow::flow_handle openssl_connection::open_flow(multiflow::direction flow_direction) {
     if (closed_ || !connection_ || flow_direction == multiflow::direction::receive_only) return {};
@@ -190,6 +210,17 @@ std::vector<multiflow::event> openssl_connection::drain_events() {
         return result;
     }
 
+    if (!SSL_is_init_finished(connection_.get())) {
+        auto const result = SSL_do_handshake(connection_.get());
+        if (result != 1) {
+            auto const error = SSL_get_error(connection_.get(), result);
+            if (error != SSL_ERROR_WANT_READ && error != SSL_ERROR_WANT_WRITE) {
+                closed_ = true;
+                emit(multiflow::event_type::connection_close, std::nullopt,
+                     static_cast<std::uint64_t>(error));
+            }
+        }
+    }
     SSL_handle_events(connection_.get());
     while (unique_ssl stream { SSL_accept_stream(connection_.get(), SSL_ACCEPT_STREAM_NO_BLOCK) }) {
         attach_stream(std::move(stream), true);
@@ -215,6 +246,49 @@ bool openssl_connection::inject_datagram(const unsigned char* data, std::size_t 
                                          const BIO_ADDR* peer, const BIO_ADDR* local) {
     return !closed_ && connection_ && data && size != 0
         && SSL_inject_net_dgram(connection_.get(), data, size, peer, local) == 1;
+}
+
+std::unique_ptr<openssl_connection> connect_openssl_quic(
+    SSL_CTX* context, const sockaddr* peer, socklen_t peer_size,
+    std::string const& server_name, std::string* error) {
+    auto fail = [error](std::string message) {
+        if (error) *error = std::move(message);
+        return std::unique_ptr<openssl_connection> {};
+    };
+    if (!context || !peer || peer_size == 0) return fail("invalid QUIC peer");
+
+    auto const fd = ::socket(peer->sa_family, SOCK_DGRAM, IPPROTO_UDP);
+    if (fd < 0) return fail(std::string("socket: ") + std::strerror(errno));
+    auto close_and_fail = [fd, &fail](std::string message) {
+        ::close(fd);
+        return fail(std::move(message));
+    };
+    auto const flags = ::fcntl(fd, F_GETFL, 0);
+    if (flags < 0 || ::fcntl(fd, F_SETFL, flags | O_NONBLOCK) != 0) {
+        return close_and_fail(std::string("O_NONBLOCK: ") + std::strerror(errno));
+    }
+    if (::connect(fd, peer, peer_size) != 0) {
+        return close_and_fail(std::string("connect: ") + std::strerror(errno));
+    }
+
+    unique_ssl ssl(SSL_new(context));
+    if (!ssl) return close_and_fail("SSL_new: " + openssl_error_stack());
+    if (SSL_set_fd(ssl.get(), fd) != 1
+        || SSL_set_blocking_mode(ssl.get(), 0) != 1
+        || (!server_name.empty()
+            && SSL_set_tlsext_host_name(ssl.get(), server_name.c_str()) != 1)) {
+        return close_and_fail("configure outgoing QUIC: " + openssl_error_stack());
+    }
+    static constexpr unsigned char h3[] = { 2, 'h', '3' };
+    if (SSL_set_alpn_protos(ssl.get(), h3, sizeof(h3)) != 0) {
+        return close_and_fail("configure QUIC ALPN: " + openssl_error_stack());
+    }
+
+    auto connection = std::make_unique<openssl_connection>(std::move(ssl), fd);
+    connection->drain_events();
+    if (connection->closed()) return fail("start QUIC handshake: " + openssl_error_stack());
+    if (error) error->clear();
+    return connection;
 }
 
 openssl_connection::stream_state* openssl_connection::find(multiflow::flow_handle flow) {

@@ -73,6 +73,58 @@ TEST(OpenSslQuic, CreatesNonBlockingServerListenerObject) {
     EXPECT_EQ(SSL_get_blocking_mode(listener.get()), 0);
 }
 
+TEST(OpenSslQuic, OutgoingAdapterCompletesHandshake) {
+    auto server_context = quic::make_openssl_quic_context(true);
+    auto client_context = quic::make_openssl_quic_context(false);
+    ASSERT_NE(server_context, nullptr);
+    ASSERT_NE(client_context, nullptr);
+    ASSERT_EQ(SSL_CTX_use_certificate_chain_file(server_context.get(),
+                                                 "etc/certs/default/srv-cert.pem"), 1);
+    ASSERT_EQ(SSL_CTX_use_PrivateKey_file(server_context.get(),
+                                         "etc/certs/default/srv-key.pem", SSL_FILETYPE_PEM), 1);
+    SSL_CTX_set_alpn_select_cb(server_context.get(), select_h3, nullptr);
+    SSL_CTX_set_verify(client_context.get(), SSL_VERIFY_NONE, nullptr);
+
+    auto const server_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    ASSERT_GE(server_fd, 0);
+    ASSERT_TRUE(make_nonblocking(server_fd));
+    sockaddr_in server_address {};
+    server_address.sin_family = AF_INET;
+    server_address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    ASSERT_EQ(bind(server_fd, reinterpret_cast<sockaddr*>(&server_address),
+                   sizeof(server_address)), 0);
+    socklen_t address_size = sizeof(server_address);
+    ASSERT_EQ(getsockname(server_fd, reinterpret_cast<sockaddr*>(&server_address),
+                          &address_size), 0);
+
+    auto listener = quic::openssl_listener::create(server_context.get(), server_fd, true);
+    ASSERT_NE(listener, nullptr) << quic::openssl_error_stack();
+    std::string error;
+    auto client = quic::connect_openssl_quic(
+        client_context.get(), reinterpret_cast<sockaddr*>(&server_address),
+        sizeof(server_address), "localhost", &error);
+    ASSERT_NE(client, nullptr) << error;
+
+    std::unique_ptr<quic::openssl_connection> server;
+    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (std::chrono::steady_clock::now() < deadline
+           && (!client->handshake_complete() || !server || !server->handshake_complete())) {
+        client->drain_events();
+        listener->handle_events();
+        if (!server) server = listener->accept();
+        if (server) server->drain_events();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    EXPECT_TRUE(client->handshake_complete()) << quic::openssl_error_stack();
+    ASSERT_NE(server, nullptr);
+    EXPECT_TRUE(server->handshake_complete()) << quic::openssl_error_stack();
+    EXPECT_EQ(server->server_name(), "localhost");
+    client->close();
+    server->close();
+    close(server_fd);
+}
+
 TEST(OpenSslQuic, LoopbackHandshakeExposesBidirectionalStream) {
     auto server_context = quic::make_openssl_quic_context(true);
     auto client_context = quic::make_openssl_quic_context(false);
