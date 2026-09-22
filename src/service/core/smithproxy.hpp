@@ -53,6 +53,7 @@
 
 #include <service/daemon.hpp>
 #include <service/netservice.hpp>
+#include <service/quic/quicservice.hpp>
 
 #include <smithlog.hpp>
 #include <service/dnsupd/smithdnsupd.hpp>
@@ -90,6 +91,8 @@ public:
     vec_of_acceptors redir_ssl_proxies;
     vec_of_receivers redir_udp_proxies;
 
+    std::vector<std::unique_ptr<sx::quic::listener_service>> quic_services;
+
 
     std::vector<std::shared_ptr<std::thread>> plain_threads;
     std::vector<std::shared_ptr<std::thread>> ssl_threads;
@@ -101,6 +104,7 @@ public:
     std::vector<std::shared_ptr<std::thread>> redir_plain_threads;
     std::vector<std::shared_ptr<std::thread>> redir_ssl_threads;
     std::vector<std::shared_ptr<std::thread>> redir_udp_threads;
+    std::vector<std::shared_ptr<std::thread>> quic_threads;
 
     std::shared_ptr<std::thread> cli_thread;
     std::shared_ptr<std::thread> log_thread;

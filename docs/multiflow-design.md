@@ -434,6 +434,14 @@ v2, parses connection IDs and packet length prefixes, and deliberately stops at
 the protected packet-number boundary. Header protection removal, Initial key
 derivation and CRYPTO frame reassembly are the next protocol layer.
 
+The first daemon-facing listener is now present in `src/service/quic/`. It owns
+an IPv4 UDP socket, enables `IP_TRANSPARENT`, loads the existing Smithproxy
+server certificate, negotiates `h3`, accepts OpenSSL QUIC connections and
+drives their events from one worker-affine loop. It is deliberately disabled by
+default (`quic_workers = -1`). The listener does not yet create an upstream
+connection or attach accepted application streams to `MFProxy`; that boundary
+is the next milestone.
+
 ## Decisions made by this spike
 
 1. One physical connection is **not** represented by one shared `baseCom` in

@@ -163,6 +163,11 @@ void CfgValueHelp::init() {
             .may_be_empty(false)
             .value_filter(VALUE_UINT_RANGE<1024, 65535>);
 
+    add("settings.quic_port", "base divert port for QUIC UDP traffic")
+            .help_quick("<number>: a high port number")
+            .may_be_empty(false)
+            .value_filter(VALUE_UINT_RANGE<1024, 65535>);
+
     add("settings.socks_port", "base SOCKS proxy listening port")
             .help_quick("<number>: a high port number")
             .may_be_empty(false)
@@ -216,6 +221,10 @@ void CfgValueHelp::init() {
             .help_quick("<number> acceptor subordinate worker threads count (max 4xCPU)")
             .may_be_empty(false)
             .value_filter(HW_FILTER);
+
+    add("settings.quic_workers", "experimental QUIC listener thread count")
+            .help_quick("<number>: -1 disabled, 0 or 1 enables one event loop")
+            .may_be_empty(false);
 
     add("settings.socks_workers", "SOCKS proxy traffic thread count")
             .help_quick("<number> acceptor subordinate worker threads count (max 4xCPU)")
