@@ -38,6 +38,8 @@ public:
 private:
     bool open_socket();
     std::shared_ptr<openssl_connection> connect_upstream(std::string const& host);
+    std::shared_ptr<openssl_connection> connect_upstream(
+        datagram_endpoint const& target, std::string const& server_name);
 #if SMITHPROXY_OPENSSL_QUIC
     static int certificate_callback(SSL* ssl, void* argument);
     int prepare_verified_certificate(SSL* downstream);
@@ -77,6 +79,7 @@ private:
         std::chrono::steady_clock::time_point created = std::chrono::steady_clock::now();
     };
     std::map<SSL*, staged_upstream> staged_upstreams_;
+    std::map<std::string, datagram_endpoint> original_destinations_;
 #endif
 };
 

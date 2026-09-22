@@ -49,6 +49,102 @@ struct openssl_connection::stream_state {
     multiflow::direction direction;
 };
 
+struct openssl_listener::observer_state {
+    datagram_observer observer;
+    datagram_endpoint pending_local;
+};
+
+openssl_listener::openssl_listener(std::unique_ptr<observer_state> state,
+                                   unique_ssl listener, bool local_address_enabled)
+    : observer_state_(std::move(state)), listener_(std::move(listener)),
+      local_address_enabled_(local_address_enabled) {}
+
+openssl_listener::~openssl_listener() = default;
+
+namespace {
+
+datagram_endpoint endpoint_from_bio(const BIO_ADDR* address) {
+    datagram_endpoint result;
+    if (!address) return result;
+    auto const family = BIO_ADDR_family(address);
+    if (family == AF_INET) {
+        sockaddr_in value {};
+        value.sin_family = AF_INET;
+        std::size_t size = sizeof(value.sin_addr);
+        if (BIO_ADDR_rawaddress(address, &value.sin_addr, &size) != 1) return {};
+        value.sin_port = BIO_ADDR_rawport(address);
+        std::memcpy(&result.address, &value, sizeof(value));
+        result.size = sizeof(value);
+    } else if (family == AF_INET6) {
+        sockaddr_in6 value {};
+        value.sin6_family = AF_INET6;
+        std::size_t size = sizeof(value.sin6_addr);
+        if (BIO_ADDR_rawaddress(address, &value.sin6_addr, &size) != 1) return {};
+        value.sin6_port = BIO_ADDR_rawport(address);
+        std::memcpy(&result.address, &value, sizeof(value));
+        result.size = sizeof(value);
+    }
+    return result;
+}
+
+datagram_endpoint peek_original_destination(int fd) {
+    datagram_endpoint result;
+    std::array<unsigned char, 1> byte {};
+    std::array<unsigned char, 256> control {};
+    sockaddr_storage peer {};
+    iovec vector { byte.data(), byte.size() };
+    msghdr message {};
+    message.msg_name = &peer;
+    message.msg_namelen = sizeof(peer);
+    message.msg_iov = &vector;
+    message.msg_iovlen = 1;
+    message.msg_control = control.data();
+    message.msg_controllen = control.size();
+    if (::recvmsg(fd, &message, MSG_PEEK | MSG_DONTWAIT) < 0) return result;
+    for (auto* item = CMSG_FIRSTHDR(&message); item; item = CMSG_NXTHDR(&message, item)) {
+        if (item->cmsg_level == SOL_IP && item->cmsg_type == IP_ORIGDSTADDR) {
+            auto const* address = reinterpret_cast<sockaddr_in*>(CMSG_DATA(item));
+            std::memcpy(&result.address, address, sizeof(*address));
+            result.size = sizeof(*address);
+            break;
+        }
+#ifdef IPV6_ORIGDSTADDR
+        if (item->cmsg_level == SOL_IPV6 && item->cmsg_type == IPV6_ORIGDSTADDR) {
+            auto const* address = reinterpret_cast<sockaddr_in6*>(CMSG_DATA(item));
+            std::memcpy(&result.address, address, sizeof(*address));
+            result.size = sizeof(*address);
+            break;
+        }
+#endif
+    }
+    return result;
+}
+
+long observe_datagrams(BIO* bio, int operation, const char* argument,
+                       std::size_t, int, long, int result, std::size_t*) {
+    auto* state = reinterpret_cast<openssl_listener::observer_state*>(
+        BIO_get_callback_arg(bio));
+    if (!state) return result;
+    if (operation == BIO_CB_RECVMMSG) {
+        state->pending_local = peek_original_destination(BIO_get_fd(bio, nullptr));
+    } else if (operation == (BIO_CB_RECVMMSG | BIO_CB_RETURN) && result > 0
+               && state->pending_local.valid() && state->observer) {
+        auto const* arguments = reinterpret_cast<BIO_MMSG_CB_ARGS const*>(argument);
+        if (arguments && arguments->msgs_processed && *arguments->msgs_processed != 0) {
+            auto const peer = endpoint_from_bio(arguments->msg[0].peer);
+            if (peer.valid()) state->observer(peer, state->pending_local);
+        }
+        state->pending_local = {};
+    }
+    return result;
+}
+
+} // namespace
+
+datagram_endpoint endpoint_from_bio_address(const BIO_ADDR* address) {
+    return endpoint_from_bio(address);
+}
+
 openssl_connection::openssl_connection(unique_ssl connection, int owned_udp_fd)
     : connection_(std::move(connection)), owned_udp_fd_(owned_udp_fd) {
     if (connection_) {
@@ -75,6 +171,16 @@ std::string openssl_connection::server_name() const {
     if (!connection_) return {};
     auto const* name = SSL_get_servername(connection_.get(), TLSEXT_NAMETYPE_host_name);
     return name ? std::string(name) : std::string {};
+}
+
+datagram_endpoint openssl_connection::peer_endpoint() const {
+    if (!connection_) return {};
+    BIO_ADDR* address = BIO_ADDR_new();
+    if (!address) return {};
+    auto const success = BIO_dgram_get_peer(SSL_get_rbio(connection_.get()), address);
+    auto result = success > 0 ? endpoint_from_bio_address(address) : datagram_endpoint {};
+    BIO_ADDR_free(address);
+    return result;
 }
 
 multiflow::flow_handle openssl_connection::open_flow(multiflow::direction flow_direction) {
@@ -346,8 +452,14 @@ void openssl_connection::emit(multiflow::event_type type,
 }
 
 std::unique_ptr<openssl_listener> openssl_listener::create(SSL_CTX* context, int udp_fd,
-                                                           bool enable_local_address) {
+                                                           bool enable_local_address,
+                                                           datagram_observer observer) {
     if (!context || udp_fd < 0) return nullptr;
+    if (observer) {
+        int enabled = 1;
+        if (::setsockopt(udp_fd, SOL_IP, IP_RECVORIGDSTADDR,
+                         &enabled, sizeof(enabled)) != 0) return nullptr;
+    }
 
     unique_ssl listener(SSL_new_listener(context, 0));
     if (!listener) return nullptr;
@@ -360,9 +472,17 @@ std::unique_ptr<openssl_listener> openssl_listener::create(SSL_CTX* context, int
         local_address_enabled = read_bio
             && BIO_dgram_set_local_addr_enable(read_bio, 1) == 1;
     }
+    auto observer_state = std::make_unique<openssl_listener::observer_state>();
+    observer_state->observer = std::move(observer);
+    if (observer_state->observer) {
+        auto* read_bio = SSL_get_rbio(listener.get());
+        BIO_set_callback_arg(read_bio, reinterpret_cast<char*>(observer_state.get()));
+        BIO_set_callback_ex(read_bio, observe_datagrams);
+    }
     if (SSL_listen(listener.get()) != 1) return nullptr;
     return std::unique_ptr<openssl_listener>(
-        new openssl_listener(std::move(listener), local_address_enabled));
+        new openssl_listener(std::move(observer_state), std::move(listener),
+                             local_address_enabled));
 }
 
 std::unique_ptr<openssl_connection> openssl_listener::accept() {

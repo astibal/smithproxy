@@ -97,7 +97,12 @@ TEST(OpenSslQuic, OutgoingAdapterCompletesHandshake) {
     ASSERT_EQ(getsockname(server_fd, reinterpret_cast<sockaddr*>(&server_address),
                           &address_size), 0);
 
-    auto listener = quic::openssl_listener::create(server_context.get(), server_fd, true);
+    quic::datagram_endpoint observed_destination;
+    auto listener = quic::openssl_listener::create(
+        server_context.get(), server_fd, true,
+        [&observed_destination](auto const&, auto const& local) {
+            observed_destination = local;
+        });
     ASSERT_NE(listener, nullptr) << quic::openssl_error_stack();
     std::string error;
     auto client = quic::connect_openssl_quic(
@@ -120,6 +125,10 @@ TEST(OpenSslQuic, OutgoingAdapterCompletesHandshake) {
     ASSERT_NE(server, nullptr);
     EXPECT_TRUE(server->handshake_complete()) << quic::openssl_error_stack();
     EXPECT_EQ(server->server_name(), "localhost");
+    ASSERT_TRUE(observed_destination.valid());
+    auto const* observed = reinterpret_cast<sockaddr_in const*>(&observed_destination.address);
+    EXPECT_EQ(observed->sin_family, AF_INET);
+    EXPECT_EQ(observed->sin_port, server_address.sin_port);
     client->close();
     server->close();
     close(server_fd);

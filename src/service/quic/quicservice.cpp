@@ -32,6 +32,12 @@ int select_h3(SSL*, const unsigned char** output, unsigned char* output_size,
         ? SSL_TLSEXT_ERR_OK
         : SSL_TLSEXT_ERR_NOACK;
 }
+
+std::string endpoint_key(datagram_endpoint const& endpoint) {
+    if (!endpoint.valid()) return {};
+    auto const* begin = reinterpret_cast<char const*>(&endpoint.address);
+    return std::string(begin, begin + endpoint.size);
+}
 #endif
 
 } // namespace
@@ -76,6 +82,12 @@ bool listener_service::open_socket() {
     if (transparent_
         && ::setsockopt(udp_fd_, SOL_IP, IP_TRANSPARENT, &enabled, sizeof(enabled)) != 0) {
         fail(std::string("IP_TRANSPARENT: ") + std::strerror(errno));
+        return false;
+    }
+    if (transparent_
+        && ::setsockopt(udp_fd_, SOL_IP, IP_RECVORIGDSTADDR,
+                        &enabled, sizeof(enabled)) != 0) {
+        fail(std::string("IP_RECVORIGDSTADDR: ") + std::strerror(errno));
         return false;
     }
 
@@ -135,7 +147,11 @@ bool listener_service::prepare() {
     }
 
     if (!open_socket()) return false;
-    listener_ = openssl_listener::create(context_.get(), udp_fd_, transparent_);
+    listener_ = openssl_listener::create(
+        context_.get(), udp_fd_, transparent_,
+        [this](datagram_endpoint const& peer, datagram_endpoint const& destination) {
+            original_destinations_[endpoint_key(peer)] = destination;
+        });
     if (!listener_) {
         fail("cannot create OpenSSL QUIC listener: " + openssl_error_stack());
         return false;
@@ -236,7 +252,19 @@ int listener_service::prepare_verified_certificate(SSL* downstream) {
     auto const* raw_name = SSL_get_servername(downstream, TLSEXT_NAMETYPE_host_name);
     if (!raw_name || *raw_name == '\0') return 0;
     std::string const server_name(raw_name);
-    auto upstream = connect_upstream(server_name);
+    datagram_endpoint peer_endpoint;
+    BIO_ADDR* peer_address = BIO_ADDR_new();
+    if (peer_address) {
+        if (BIO_dgram_get_peer(SSL_get_rbio(downstream), peer_address) > 0) {
+            peer_endpoint = endpoint_from_bio_address(peer_address);
+        }
+        BIO_ADDR_free(peer_address);
+    }
+    auto found_destination = original_destinations_.find(endpoint_key(peer_endpoint));
+    if (found_destination == original_destinations_.end()) return 0;
+    auto const destination = found_destination->second;
+    original_destinations_.erase(found_destination);
+    auto upstream = connect_upstream(destination, server_name);
     if (!upstream) return 0;
 
     auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
@@ -317,6 +345,24 @@ std::shared_ptr<openssl_connection> listener_service::connect_upstream(
     return result;
 #else
     (void)host;
+    return nullptr;
+#endif
+}
+
+std::shared_ptr<openssl_connection> listener_service::connect_upstream(
+    datagram_endpoint const& target, std::string const& server_name) {
+#if SMITHPROXY_OPENSSL_QUIC
+    if (!target.valid() || server_name.empty() || !client_context_) return nullptr;
+    std::string error;
+    auto connection = connect_openssl_quic(
+        client_context_.get(), reinterpret_cast<sockaddr const*>(&target.address),
+        target.size, server_name, &error);
+    return connection
+        ? std::shared_ptr<openssl_connection>(std::move(connection))
+        : nullptr;
+#else
+    (void)target;
+    (void)server_name;
     return nullptr;
 #endif
 }

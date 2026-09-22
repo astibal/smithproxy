@@ -455,6 +455,12 @@ handshake. The first implementation performs this lookup synchronously inside
 the listener worker; moving it to an asynchronous certificate job is a future
 scalability improvement, not a change to the trust model.
 
+Transparent routing is taken from Linux `IP_RECVORIGDSTADDR` before OpenSSL
+consumes the Initial datagram. The captured peer-to-destination association is
+used once by the certificate callback to connect directly to the original IP
+and port; SNI is not used for DNS routing in the verified production path. A
+missing association aborts the handshake rather than falling back to SNI.
+
 The listener has a deliberately small lifecycle skeleton: sessions start in
 `handshake`, become `active` only after both handshakes finish, and move to
 `closed` when either connection closes or the ten-second handshake deadline is

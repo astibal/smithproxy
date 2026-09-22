@@ -12,6 +12,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <functional>
 
 #include "proxy/multiflow/multiflow.hpp"
 
@@ -23,6 +24,16 @@
 #endif
 
 namespace sx::quic {
+
+struct datagram_endpoint {
+    sockaddr_storage address {};
+    socklen_t size = 0;
+    bool valid() const { return size != 0; }
+};
+
+using datagram_observer = std::function<void(datagram_endpoint const& peer,
+                                              datagram_endpoint const& local)>;
+datagram_endpoint endpoint_from_bio_address(const BIO_ADDR* address);
 
 constexpr bool openssl_quic_available() {
     return SMITHPROXY_OPENSSL_QUIC != 0;
@@ -82,6 +93,7 @@ public:
                          const BIO_ADDR* peer, const BIO_ADDR* local);
 
     SSL* native_handle() const { return connection_.get(); }
+    datagram_endpoint peer_endpoint() const;
     bool handshake_complete() const;
     bool closed() const { return closed_; }
     std::string server_name() const;
@@ -132,10 +144,12 @@ std::unique_ptr<openssl_connection> connect_openssl_quic(
  */
 class openssl_listener final {
 public:
+    struct observer_state;
     static std::unique_ptr<openssl_listener> create(SSL_CTX* context, int udp_fd,
-                                                     bool enable_local_address = true);
+                                                     bool enable_local_address = true,
+                                                     datagram_observer observer = {});
 
-    ~openssl_listener() = default;
+    ~openssl_listener();
     openssl_listener(openssl_listener const&) = delete;
     openssl_listener& operator=(openssl_listener const&) = delete;
 
@@ -145,9 +159,10 @@ public:
     SSL* native_handle() const { return listener_.get(); }
 
 private:
-    openssl_listener(unique_ssl listener, bool local_address_enabled)
-        : listener_(std::move(listener)), local_address_enabled_(local_address_enabled) {}
+    openssl_listener(std::unique_ptr<observer_state> state, unique_ssl listener,
+                     bool local_address_enabled);
 
+    std::unique_ptr<observer_state> observer_state_;
     unique_ssl listener_;
     bool local_address_enabled_ = false;
 };
