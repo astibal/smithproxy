@@ -130,13 +130,13 @@ MFProxy::pair* MFProxy::find_pair(bool left_side, flow_handle flow) {
 void MFProxy::propagate_fin(pair& current) {
     if (current.left_peer_fin && current.left_to_right.empty()
         && !current.right_finish_sent) {
-        right_->finish(current.right_handle);
-        current.right_finish_sent = true;
+        auto const status = right_->finish(current.right_handle);
+        current.right_finish_sent = status != io_status::would_block;
     }
     if (current.right_peer_fin && current.right_to_left.empty()
         && !current.left_finish_sent) {
-        left_->finish(current.left_handle);
-        current.left_finish_sent = true;
+        auto const status = left_->finish(current.left_handle);
+        current.left_finish_sent = status != io_status::would_block;
     }
     if (current.left_peer_fin && current.right_peer_fin
         && current.left_to_right.empty() && current.right_to_left.empty()) {

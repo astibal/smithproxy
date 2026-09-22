@@ -282,6 +282,60 @@ TEST(OpenSslQuic, LoopbackHandshakeExposesBidirectionalStream) {
     }
     EXPECT_EQ(received, message);
 
+    ASSERT_EQ(client_connection->finish(client_flow), mf::io_status::ok);
+    bool saw_fin = false;
+    auto const fin_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (std::chrono::steady_clock::now() < fin_deadline && !saw_fin) {
+        client_connection->drain_events();
+        char byte = 0;
+        auto const read_result = server_connection->read(server_flow, &byte, sizeof(byte));
+        if (read_result.status == mf::io_status::eof) {
+            for (auto const& event : server_connection->drain_events()) {
+                if (event.type == mf::event_type::peer_fin && event.flow == server_flow) {
+                    saw_fin = true;
+                }
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    EXPECT_TRUE(saw_fin);
+
+    auto const reset_flow = client_connection->open_flow(mf::direction::bidirectional);
+    ASSERT_NE(reset_flow.generation, 0U);
+    static constexpr char reset_payload[] = "reset-me";
+    ASSERT_EQ(client_connection->write(reset_flow, reset_payload,
+                                       sizeof(reset_payload) - 1).status,
+              mf::io_status::ok);
+    mf::flow_handle reset_peer_flow;
+    auto const reset_open_deadline = std::chrono::steady_clock::now()
+        + std::chrono::seconds(3);
+    while (std::chrono::steady_clock::now() < reset_open_deadline
+           && reset_peer_flow.generation == 0) {
+        client_connection->drain_events();
+        for (auto const& event : server_connection->drain_events()) {
+            if (event.type == mf::event_type::flow_open && event.flow) {
+                reset_peer_flow = *event.flow;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    ASSERT_NE(reset_peer_flow.generation, 0U);
+    ASSERT_EQ(client_connection->reset(reset_flow, 0x107), mf::io_status::ok);
+
+    bool saw_reset = false;
+    auto const reset_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (std::chrono::steady_clock::now() < reset_deadline && !saw_reset) {
+        client_connection->drain_events();
+        for (auto const& event : server_connection->drain_events()) {
+            if (event.type == mf::event_type::reset && event.flow == reset_peer_flow
+                && event.protocol_error == 0x107) {
+                saw_reset = true;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    EXPECT_TRUE(saw_reset);
+
     client_connection->close();
     server_connection->close();
     close(client_fd);

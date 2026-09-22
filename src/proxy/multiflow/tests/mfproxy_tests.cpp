@@ -68,6 +68,23 @@ TEST(MFProxy, MirrorsIncomingUnidirectionalFlowAsSendOnly) {
     EXPECT_EQ(std::string(sent.begin(), sent.end()), data);
 }
 
+TEST(MFProxy, MirrorsRightIncomingUnidirectionalFlowAsSendOnly) {
+    auto left = std::make_shared<mf::fake_connection>();
+    auto right = std::make_shared<mf::fake_connection>();
+    mf::MFProxy proxy(left, right);
+    auto const incoming = right->open_flow(mf::direction::receive_only);
+    proxy.pump_once();
+    ASSERT_EQ(proxy.pair_count(), 1U);
+
+    mf::flow_handle const outgoing { 0, 1 };
+    ASSERT_EQ(left->direction_of(outgoing), mf::direction::send_only);
+    std::string const data = "reverse-uni";
+    right->inject_receive(incoming, data.data(), data.size());
+    EXPECT_EQ(proxy.pump_once(), data.size());
+    auto sent = left->consume_send(outgoing);
+    EXPECT_EQ(std::string(sent.begin(), sent.end()), data);
+}
+
 TEST(MFProxy, PropagatesFinOnlyAfterPendingData) {
     auto left = std::make_shared<mf::fake_connection>();
     auto right = std::make_shared<mf::fake_connection>(3);
@@ -84,6 +101,24 @@ TEST(MFProxy, PropagatesFinOnlyAfterPendingData) {
 
     right->consume_send(right_flow);
     EXPECT_EQ(proxy.pump_once(), 3U);
+    EXPECT_TRUE(right->local_finished(right_flow));
+}
+
+TEST(MFProxy, RetriesFinAfterTransportBackpressure) {
+    auto left = std::make_shared<mf::fake_connection>();
+    auto right = std::make_shared<mf::fake_connection>();
+    mf::MFProxy proxy(left, right);
+    auto const left_flow = left->open_flow(mf::direction::bidirectional);
+    proxy.pump_once();
+    mf::flow_handle const right_flow { 0, 1 };
+
+    right->block_finish(right_flow, true);
+    left->inject_peer_fin(left_flow);
+    proxy.pump_once();
+    EXPECT_FALSE(right->local_finished(right_flow));
+
+    right->block_finish(right_flow, false);
+    proxy.pump_once();
     EXPECT_TRUE(right->local_finished(right_flow));
 }
 

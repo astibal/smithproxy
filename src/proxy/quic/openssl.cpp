@@ -47,6 +47,8 @@ struct openssl_connection::stream_state {
     multiflow::flow_handle handle;
     unique_ssl stream;
     multiflow::direction direction;
+    bool read_terminal_reported = false;
+    bool write_terminal_reported = false;
 };
 
 struct openssl_listener::observer_state {
@@ -223,10 +225,20 @@ multiflow::io_result openssl_connection::read(multiflow::flow_handle flow,
     }
     auto const stream_state_value = SSL_get_stream_read_state(state->stream.get());
     if (ssl_error == SSL_ERROR_ZERO_RETURN || stream_state_value == SSL_STREAM_STATE_FINISHED) {
+        if (!state->read_terminal_reported) {
+            state->read_terminal_reported = true;
+            emit(multiflow::event_type::peer_fin, flow);
+        }
         return { 0, multiflow::io_status::eof };
     }
     if (stream_state_value == SSL_STREAM_STATE_RESET_REMOTE
         || stream_state_value == SSL_STREAM_STATE_RESET_LOCAL) {
+        if (!state->read_terminal_reported) {
+            std::uint64_t protocol_error = 0;
+            SSL_get_stream_read_error_code(state->stream.get(), &protocol_error);
+            state->read_terminal_reported = true;
+            emit(multiflow::event_type::reset, flow, protocol_error);
+        }
         return { 0, multiflow::io_status::reset };
     }
     if (stream_state_value == SSL_STREAM_STATE_CONN_CLOSED) {
@@ -257,6 +269,12 @@ multiflow::io_result openssl_connection::write(multiflow::flow_handle flow,
     }
     if (stream_state_value == SSL_STREAM_STATE_RESET_REMOTE
         || stream_state_value == SSL_STREAM_STATE_RESET_LOCAL) {
+        if (!state->write_terminal_reported) {
+            std::uint64_t protocol_error = 0;
+            SSL_get_stream_write_error_code(state->stream.get(), &protocol_error);
+            state->write_terminal_reported = true;
+            emit(multiflow::event_type::reset, flow, protocol_error);
+        }
         return { written_size, multiflow::io_status::reset };
     }
     if (stream_state_value == SSL_STREAM_STATE_CONN_CLOSED) {
@@ -269,8 +287,15 @@ multiflow::io_status openssl_connection::finish(multiflow::flow_handle flow) {
     auto* state = find(flow);
     if (!state) return closed_ ? multiflow::io_status::connection_closed
                                : multiflow::io_status::invalid_handle;
+    if (state->direction == multiflow::direction::receive_only
+        || state->write_terminal_reported) {
+        return multiflow::io_status::ok;
+    }
     auto const result = SSL_stream_conclude(state->stream.get(), 0);
-    if (result == 1) return multiflow::io_status::ok;
+    if (result == 1) {
+        state->write_terminal_reported = true;
+        return multiflow::io_status::ok;
+    }
     auto const error = SSL_get_error(state->stream.get(), result);
     return error == SSL_ERROR_WANT_READ || error == SSL_ERROR_WANT_WRITE
         ? multiflow::io_status::would_block
@@ -284,6 +309,11 @@ multiflow::io_status openssl_connection::reset(multiflow::flow_handle flow,
                                : multiflow::io_status::invalid_handle;
     SSL_STREAM_RESET_ARGS args { protocol_error };
     if (SSL_stream_reset(state->stream.get(), &args, sizeof(args)) == 1) {
+        // The proxy treats reset as terminal for the logical flow. Do not ask
+        // OpenSSL for either half's state after a local reset; some 3.5 builds
+        // cannot safely query the opposite half during reset processing.
+        state->read_terminal_reported = true;
+        state->write_terminal_reported = true;
         emit(multiflow::event_type::reset, flow, protocol_error);
         return multiflow::io_status::ok;
     }
@@ -344,7 +374,27 @@ std::vector<multiflow::event> openssl_connection::drain_events() {
     }
 
     for (auto const& item : streams_) {
-        auto const& state = *item.second;
+        auto& state = *item.second;
+        auto const read_state = state.read_terminal_reported
+            ? SSL_STREAM_STATE_NONE : SSL_get_stream_read_state(state.stream.get());
+        if (read_state == SSL_STREAM_STATE_RESET_REMOTE) {
+            std::uint64_t protocol_error = 0;
+            SSL_get_stream_read_error_code(state.stream.get(), &protocol_error);
+            state.read_terminal_reported = true;
+            state.write_terminal_reported = true;
+            emit(multiflow::event_type::reset, state.handle, protocol_error);
+            continue;
+        }
+        auto const write_state = state.write_terminal_reported
+            ? SSL_STREAM_STATE_NONE : SSL_get_stream_write_state(state.stream.get());
+        if (write_state == SSL_STREAM_STATE_RESET_REMOTE) {
+            std::uint64_t protocol_error = 0;
+            SSL_get_stream_write_error_code(state.stream.get(), &protocol_error);
+            state.write_terminal_reported = true;
+            state.read_terminal_reported = true;
+            emit(multiflow::event_type::reset, state.handle, protocol_error);
+            continue;
+        }
         if (poll_stream(state, SSL_POLL_EVENT_RE)) {
             emit(multiflow::event_type::readable, state.handle);
         }

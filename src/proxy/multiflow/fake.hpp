@@ -82,6 +82,7 @@ public:
         auto* flow = find(handle);
         if (!flow) return closed_ ? io_status::connection_closed : io_status::invalid_handle;
         if (flow->reset) return io_status::reset;
+        if (flow->finish_blocked) return io_status::would_block;
         flow->local_finished = true;
         return io_status::ok;
     }
@@ -168,6 +169,10 @@ public:
         return flow && flow->local_finished;
     }
 
+    void block_finish(flow_handle handle, bool blocked) {
+        if (auto* flow = find(handle)) flow->finish_blocked = blocked;
+    }
+
     std::optional<std::uint64_t> reset_code(flow_handle handle) const {
         auto const* flow = find(handle);
         return flow && flow->reset
@@ -185,6 +190,7 @@ private:
         std::deque<unsigned char> send;
         bool peer_finished = false;
         bool local_finished = false;
+        bool finish_blocked = false;
         bool reset = false;
         std::uint64_t protocol_error = 0;
     };
