@@ -1,0 +1,252 @@
+#include "proxy/quic/openssl.hpp"
+
+#include <openssl/err.h>
+
+#include <array>
+#include <sstream>
+#include <utility>
+
+namespace sx::quic {
+
+std::string openssl_error_stack() {
+    std::ostringstream output;
+    bool first = true;
+    while (auto const error = ERR_get_error()) {
+        std::array<char, 256> message {};
+        ERR_error_string_n(error, message.data(), message.size());
+        if (!first) output << "; ";
+        output << message.data();
+        first = false;
+    }
+    return output.str();
+}
+
+unique_ssl_ctx make_openssl_quic_context(bool server) {
+#if SMITHPROXY_OPENSSL_QUIC
+    return unique_ssl_ctx(SSL_CTX_new(server ? OSSL_QUIC_server_method()
+                                             : OSSL_QUIC_client_method()));
+#else
+    (void)server;
+    return nullptr;
+#endif
+}
+
+#if SMITHPROXY_OPENSSL_QUIC
+
+struct openssl_connection::stream_state {
+    stream_state(multiflow::flow_handle flow_handle, unique_ssl ssl_stream,
+                 multiflow::direction stream_direction)
+        : handle(flow_handle), stream(std::move(ssl_stream)), direction(stream_direction) {}
+
+    multiflow::flow_handle handle;
+    unique_ssl stream;
+    multiflow::direction direction;
+};
+
+openssl_connection::openssl_connection(unique_ssl connection)
+    : connection_(std::move(connection)) {
+    if (connection_) {
+        SSL_set_blocking_mode(connection_.get(), 0);
+        SSL_set_default_stream_mode(connection_.get(), SSL_DEFAULT_STREAM_MODE_NONE);
+        SSL_set_incoming_stream_policy(connection_.get(),
+                                       SSL_INCOMING_STREAM_POLICY_ACCEPT, 0);
+    } else {
+        closed_ = true;
+    }
+}
+
+openssl_connection::~openssl_connection() = default;
+
+multiflow::flow_handle openssl_connection::open_flow(multiflow::direction flow_direction) {
+    if (closed_ || !connection_ || flow_direction == multiflow::direction::receive_only) return {};
+
+    auto const flags = flow_direction == multiflow::direction::send_only
+        ? SSL_STREAM_FLAG_UNI | SSL_STREAM_FLAG_NO_BLOCK
+        : SSL_STREAM_FLAG_NO_BLOCK;
+    unique_ssl stream(SSL_new_stream(connection_.get(), flags));
+    if (!stream) return {};
+    return attach_stream(std::move(stream), false);
+}
+
+bool openssl_connection::contains(multiflow::flow_handle flow) const {
+    return find(flow) != nullptr;
+}
+
+multiflow::io_result openssl_connection::read(multiflow::flow_handle flow,
+                                              void* destination, std::size_t size) {
+    if (closed_) return { 0, multiflow::io_status::connection_closed };
+    auto* state = find(flow);
+    if (!state) return { 0, multiflow::io_status::invalid_handle };
+    if (state->direction == multiflow::direction::send_only) {
+        return { 0, multiflow::io_status::eof };
+    }
+
+    std::size_t read_size = 0;
+    auto const result = SSL_read_ex(state->stream.get(), destination, size, &read_size);
+    if (result == 1) return { read_size, multiflow::io_status::ok };
+
+    auto const ssl_error = SSL_get_error(state->stream.get(), result);
+    if (ssl_error == SSL_ERROR_WANT_READ || ssl_error == SSL_ERROR_WANT_WRITE) {
+        return { 0, multiflow::io_status::would_block };
+    }
+    auto const stream_state_value = SSL_get_stream_read_state(state->stream.get());
+    if (ssl_error == SSL_ERROR_ZERO_RETURN || stream_state_value == SSL_STREAM_STATE_FINISHED) {
+        return { 0, multiflow::io_status::eof };
+    }
+    if (stream_state_value == SSL_STREAM_STATE_RESET_REMOTE
+        || stream_state_value == SSL_STREAM_STATE_RESET_LOCAL) {
+        return { 0, multiflow::io_status::reset };
+    }
+    if (stream_state_value == SSL_STREAM_STATE_CONN_CLOSED) {
+        return { 0, multiflow::io_status::connection_closed };
+    }
+    return { 0, multiflow::io_status::reset };
+}
+
+multiflow::io_result openssl_connection::write(multiflow::flow_handle flow,
+                                               const void* source, std::size_t size) {
+    if (closed_) return { 0, multiflow::io_status::connection_closed };
+    auto* state = find(flow);
+    if (!state) return { 0, multiflow::io_status::invalid_handle };
+    if (state->direction == multiflow::direction::receive_only) {
+        return { 0, multiflow::io_status::eof };
+    }
+
+    std::size_t written_size = 0;
+    auto const result = SSL_write_ex(state->stream.get(), source, size, &written_size);
+    if (result == 1) return { written_size, multiflow::io_status::ok };
+    auto const ssl_error = SSL_get_error(state->stream.get(), result);
+    if (ssl_error == SSL_ERROR_WANT_READ || ssl_error == SSL_ERROR_WANT_WRITE) {
+        return { written_size, multiflow::io_status::would_block };
+    }
+    auto const stream_state_value = SSL_get_stream_write_state(state->stream.get());
+    if (stream_state_value == SSL_STREAM_STATE_FINISHED) {
+        return { written_size, multiflow::io_status::eof };
+    }
+    if (stream_state_value == SSL_STREAM_STATE_RESET_REMOTE
+        || stream_state_value == SSL_STREAM_STATE_RESET_LOCAL) {
+        return { written_size, multiflow::io_status::reset };
+    }
+    if (stream_state_value == SSL_STREAM_STATE_CONN_CLOSED) {
+        return { written_size, multiflow::io_status::connection_closed };
+    }
+    return { written_size, multiflow::io_status::reset };
+}
+
+multiflow::io_status openssl_connection::finish(multiflow::flow_handle flow) {
+    auto* state = find(flow);
+    if (!state) return closed_ ? multiflow::io_status::connection_closed
+                               : multiflow::io_status::invalid_handle;
+    auto const result = SSL_stream_conclude(state->stream.get(), 0);
+    if (result == 1) return multiflow::io_status::ok;
+    auto const error = SSL_get_error(state->stream.get(), result);
+    return error == SSL_ERROR_WANT_READ || error == SSL_ERROR_WANT_WRITE
+        ? multiflow::io_status::would_block
+        : multiflow::io_status::reset;
+}
+
+multiflow::io_status openssl_connection::reset(multiflow::flow_handle flow,
+                                               std::uint64_t protocol_error) {
+    auto* state = find(flow);
+    if (!state) return closed_ ? multiflow::io_status::connection_closed
+                               : multiflow::io_status::invalid_handle;
+    SSL_STREAM_RESET_ARGS args { protocol_error };
+    if (SSL_stream_reset(state->stream.get(), &args, sizeof(args)) == 1) {
+        emit(multiflow::event_type::reset, flow, protocol_error);
+        return multiflow::io_status::ok;
+    }
+    return multiflow::io_status::reset;
+}
+
+void openssl_connection::close(std::uint64_t protocol_error) {
+    if (closed_ || !connection_) return;
+    SSL_SHUTDOWN_EX_ARGS args { protocol_error, nullptr };
+    SSL_shutdown_ex(connection_.get(), SSL_SHUTDOWN_FLAG_NO_BLOCK, &args, sizeof(args));
+    closed_ = true;
+    emit(multiflow::event_type::connection_close, std::nullopt, protocol_error);
+}
+
+bool openssl_connection::readable(multiflow::flow_handle flow) const {
+    auto const* state = find(flow);
+    return state && poll_stream(*state, SSL_POLL_EVENT_RE);
+}
+
+bool openssl_connection::writable(multiflow::flow_handle flow) const {
+    auto const* state = find(flow);
+    return state && poll_stream(*state, SSL_POLL_EVENT_WE);
+}
+
+std::vector<multiflow::event> openssl_connection::drain_events() {
+    std::vector<multiflow::event> result;
+    if (!connection_ || closed_) {
+        for (auto const& pending : events_) result.push_back(pending.second);
+        events_.clear();
+        return result;
+    }
+
+    SSL_handle_events(connection_.get());
+    while (unique_ssl stream { SSL_accept_stream(connection_.get(), SSL_ACCEPT_STREAM_NO_BLOCK) }) {
+        attach_stream(std::move(stream), true);
+    }
+
+    for (auto const& item : streams_) {
+        auto const& state = *item.second;
+        if (poll_stream(state, SSL_POLL_EVENT_RE)) {
+            emit(multiflow::event_type::readable, state.handle);
+        }
+        if (poll_stream(state, SSL_POLL_EVENT_WE)) {
+            emit(multiflow::event_type::writable, state.handle);
+        }
+    }
+
+    result.reserve(events_.size());
+    for (auto const& pending : events_) result.push_back(pending.second);
+    events_.clear();
+    return result;
+}
+
+openssl_connection::stream_state* openssl_connection::find(multiflow::flow_handle flow) {
+    auto found = streams_.find(flow.id);
+    if (found == streams_.end() || found->second->handle.generation != flow.generation) return nullptr;
+    return found->second.get();
+}
+
+openssl_connection::stream_state const* openssl_connection::find(multiflow::flow_handle flow) const {
+    auto found = streams_.find(flow.id);
+    if (found == streams_.end() || found->second->handle.generation != flow.generation) return nullptr;
+    return found->second.get();
+}
+
+multiflow::flow_handle openssl_connection::attach_stream(unique_ssl stream, bool incoming) {
+    auto const stream_type = SSL_get_stream_type(stream.get());
+    auto const stream_direction = stream_type == SSL_STREAM_TYPE_BIDI
+        ? multiflow::direction::bidirectional
+        : (stream_type == SSL_STREAM_TYPE_READ
+            ? multiflow::direction::receive_only
+            : multiflow::direction::send_only);
+    multiflow::flow_handle handle { next_internal_id_++, next_generation_++ };
+    streams_.emplace(handle.id,
+                     std::make_unique<stream_state>(handle, std::move(stream), stream_direction));
+    emit(multiflow::event_type::flow_open, handle);
+    if (!incoming) emit(multiflow::event_type::writable, handle);
+    return handle;
+}
+
+bool openssl_connection::poll_stream(stream_state const& stream, std::uint64_t events) const {
+    SSL_POLL_ITEM item { SSL_as_poll_descriptor(stream.stream.get()), events, 0 };
+    timeval timeout { 0, 0 };
+    std::size_t result_count = 0;
+    if (SSL_poll(&item, 1, sizeof(item), &timeout, 0, &result_count) != 1) return false;
+    return result_count != 0 && (item.revents & events) != 0;
+}
+
+void openssl_connection::emit(multiflow::event_type type,
+                              std::optional<multiflow::flow_handle> flow,
+                              std::uint64_t protocol_error) {
+    event_key key { type, flow ? flow->id : 0 };
+    events_.emplace(key, multiflow::event { type, flow, protocol_error });
+}
+
+#endif // SMITHPROXY_OPENSSL_QUIC
+
+} // namespace sx::quic

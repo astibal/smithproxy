@@ -322,6 +322,29 @@ For HTTP/3, not every QUIC stream is an application flow. QUIC crypto streams,
 HTTP/3 control streams and QPACK encoder/decoder streams remain internal to the
 adapter. Only request streams cross into policy and inspection code.
 
+### OpenSSL QUIC decision
+
+The primary QUIC implementation is OpenSSL 3.5 or newer. OpenSSL owns packet
+protection, handshake, loss recovery, congestion control and QUIC stream state.
+`openssl_connection` adapts its connection and stream `SSL` objects to the
+generic multiflow interface.
+
+```text
+OpenSSL listener SSL
+    +-- connection SSL  <-> openssl_connection
+           +-- stream SSL <-> flow_handle
+           +-- stream SSL <-> flow_handle
+```
+
+Builds against older OpenSSL releases remain possible, but expose only the QUIC
+wire parser and report `openssl_quic_available() == false`. Full server support
+requires `OSSL_QUIC_server_method()`, introduced in OpenSSL 3.5.
+
+The first loopback integration test performs a real QUIC client/server
+handshake, negotiates `h3`, opens a bidirectional stream and transfers data
+through the multiflow adapter. Transparent UDP ingestion via
+`SSL_inject_net_dgram()` remains a separate integration step.
+
 ## Error representation
 
 Do not overload `errno` as the canonical error model. The multiflow core uses a
