@@ -7,6 +7,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <future>
 #include <memory>
 #include <map>
 #include <string>
@@ -50,8 +51,11 @@ private:
 #if SMITHPROXY_OPENSSL_QUIC
     static int certificate_callback(SSL* ssl, void* argument);
     int prepare_verified_certificate(SSL* downstream);
-    bool install_spoofed_certificate(SSL* downstream, X509* upstream,
-                                     std::string const& server_name);
+    struct verified_certificate;
+    verified_certificate verify_and_spoof(datagram_endpoint destination,
+                                           std::string server_name);
+    bool install_verified_certificate(SSL* downstream,
+                                      verified_certificate const& verified);
 #endif
     void fail(std::string message);
 
@@ -89,6 +93,16 @@ private:
         std::chrono::steady_clock::time_point created = std::chrono::steady_clock::now();
     };
     std::map<SSL*, staged_upstream> staged_upstreams_;
+    struct verified_certificate {
+        std::shared_ptr<openssl_connection> connection;
+        std::shared_ptr<X509> certificate;
+        std::shared_ptr<EVP_PKEY> private_key;
+    };
+    struct certificate_job {
+        std::future<verified_certificate> result;
+        std::chrono::steady_clock::time_point created = std::chrono::steady_clock::now();
+    };
+    std::map<SSL*, certificate_job> certificate_jobs_;
     std::map<std::string, datagram_endpoint> original_destinations_;
     void start_draining(session& value, std::chrono::steady_clock::time_point now,
                         std::uint64_t protocol_error = 0);

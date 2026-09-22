@@ -55,6 +55,14 @@ listener_service::~listener_service() {
     stop();
 #if SMITHPROXY_OPENSSL_QUIC
     sessions_.clear();
+    for (auto& job : certificate_jobs_) {
+        try {
+            auto result = job.second.result.get();
+            if (result.connection) result.connection->close();
+        } catch (...) {
+        }
+    }
+    certificate_jobs_.clear();
     staged_upstreams_.clear();
     connection_count_ = 0;
     listener_.reset();
@@ -266,6 +274,14 @@ void listener_service::cleanup_sessions() {
     sessions_.clear();
     for (auto& staged : staged_upstreams_) staged.second.connection->close();
     staged_upstreams_.clear();
+    for (auto& job : certificate_jobs_) {
+        try {
+            auto result = job.second.result.get();
+            if (result.connection) result.connection->close();
+        } catch (...) {
+        }
+    }
+    certificate_jobs_.clear();
     original_destinations_.clear();
     connection_count_ = 0;
 }
@@ -279,6 +295,29 @@ int listener_service::certificate_callback(SSL* ssl, void* argument) {
 int listener_service::prepare_verified_certificate(SSL* downstream) {
     if (!downstream) return 0;
     if (staged_upstreams_.find(downstream) != staged_upstreams_.end()) return 1;
+
+    if (auto found = certificate_jobs_.find(downstream);
+        found != certificate_jobs_.end()) {
+        if (found->second.result.wait_for(std::chrono::milliseconds(0))
+            != std::future_status::ready) {
+            return -1;
+        }
+        verified_certificate verified;
+        try {
+            verified = found->second.result.get();
+        } catch (...) {
+            certificate_jobs_.erase(found);
+            return 0;
+        }
+        certificate_jobs_.erase(found);
+        if (!verified.connection || !install_verified_certificate(downstream, verified)) {
+            if (verified.connection) verified.connection->close(1);
+            return 0;
+        }
+        staged_upstreams_.emplace(
+            downstream, staged_upstream { std::move(verified.connection) });
+        return 1;
+    }
 
     auto const* raw_name = SSL_get_servername(downstream, TLSEXT_NAMETYPE_host_name);
     if (!raw_name || *raw_name == '\0') return 0;
@@ -308,8 +347,24 @@ int listener_service::prepare_verified_certificate(SSL* downstream) {
     // Bare transparent mode therefore requires TPROXY --on-port 0 and a
     // listener bound to the original service port.
     if (destination_port == 0 || destination_port != bound_port_) return 0;
+    try {
+        certificate_jobs_.emplace(
+            downstream,
+            certificate_job { std::async(std::launch::async,
+                [this, destination, server_name]() mutable {
+                    return verify_and_spoof(std::move(destination), std::move(server_name));
+                }) });
+    } catch (...) {
+        return 0;
+    }
+    return -1;
+}
+
+listener_service::verified_certificate listener_service::verify_and_spoof(
+    datagram_endpoint destination, std::string server_name) {
+    verified_certificate verified;
     auto upstream = connect_upstream(destination, server_name);
-    if (!upstream) return 0;
+    if (!upstream) return verified;
 
     auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (!upstream->handshake_complete() && !upstream->closed()
@@ -320,50 +375,60 @@ int listener_service::prepare_verified_certificate(SSL* downstream) {
     if (!upstream->handshake_complete()
         || SSL_get_verify_result(upstream->native_handle()) != X509_V_OK) {
         upstream->close(1);
-        return 0;
+        return verified;
     }
 
     X509* certificate = SSL_get1_peer_certificate(upstream->native_handle());
     if (!certificate) {
         upstream->close(1);
-        return 0;
+        return verified;
     }
-    auto const installed = install_spoofed_certificate(downstream, certificate, server_name);
-    X509_free(certificate);
-    if (!installed) {
+    if (X509_check_host(certificate, server_name.c_str(), server_name.size(), 0, nullptr) != 1) {
+        X509_free(certificate);
         upstream->close(1);
-        return 0;
-    }
-    staged_upstreams_.emplace(downstream, staged_upstream { std::move(upstream) });
-    return 1;
-}
-
-bool listener_service::install_spoofed_certificate(SSL* downstream, X509* upstream,
-                                                   std::string const& server_name) {
-    if (!downstream || !upstream || server_name.empty()) return false;
-    if (X509_check_host(upstream, server_name.c_str(), server_name.size(), 0, nullptr) != 1) {
-        return false;
+        return verified;
     }
 
     SpoofOptions options;
     options.sni = server_name;
     auto& factory = SSLFactory::factory();
-    auto const store_key = SSLFactory::make_store_key(upstream, options);
+    auto const store_key = SSLFactory::make_store_key(certificate, options);
     auto lock = std::scoped_lock(factory.lock());
-    auto install = [downstream](X509* certificate, EVP_PKEY* key) {
-        return certificate && key
-            && SSL_use_certificate(downstream, certificate) == 1
-            && SSL_use_PrivateKey(downstream, key) == 1
-            && SSL_check_private_key(downstream) == 1;
+    auto retain = [&verified](X509* cert, EVP_PKEY* key) {
+        if (!cert || !key || X509_up_ref(cert) != 1) return false;
+        if (EVP_PKEY_up_ref(key) != 1) {
+            X509_free(cert);
+            return false;
+        }
+        verified.certificate = std::shared_ptr<X509>(cert, X509_free);
+        verified.private_key = std::shared_ptr<EVP_PKEY>(key, EVP_PKEY_free);
+        return true;
     };
     auto cached = factory.find_mitm(store_key);
-    if (cached) return install(cached->chain.cert, cached->chain.key);
+    bool ready = cached && retain(cached->chain.cert, cached->chain.key);
+    if (!ready) {
+        auto forged = factory.spoof(certificate, false, nullptr);
+        if (forged && forged->chain.cert && forged->chain.key
+            && retain(forged->chain.cert, forged->chain.key)) {
+            EVP_PKEY_up_ref(forged->chain.key);
+            ready = factory.add_mitm(store_key, *forged);
+        }
+    }
+    X509_free(certificate);
+    if (!ready) {
+        upstream->close(1);
+        return {};
+    }
+    verified.connection = std::move(upstream);
+    return verified;
+}
 
-    auto forged = factory.spoof(upstream, false, nullptr);
-    if (!forged || !forged->chain.cert || !forged->chain.key) return false;
-    if (!install(forged->chain.cert, forged->chain.key)) return false;
-    EVP_PKEY_up_ref(forged->chain.key);
-    return factory.add_mitm(store_key, *forged);
+bool listener_service::install_verified_certificate(
+    SSL* downstream, verified_certificate const& verified) {
+    return downstream && verified.certificate && verified.private_key
+        && SSL_use_certificate(downstream, verified.certificate.get()) == 1
+        && SSL_use_PrivateKey(downstream, verified.private_key.get()) == 1
+        && SSL_check_private_key(downstream) == 1;
 }
 
 std::shared_ptr<openssl_connection> listener_service::connect_upstream(
