@@ -69,6 +69,7 @@ public:
 
     virtual flow_handle open_flow(direction flow_direction) = 0;
     virtual bool contains(flow_handle flow) const = 0;
+    virtual std::optional<direction> direction_of(flow_handle flow) const = 0;
 
     virtual io_result read(flow_handle flow, void* destination, std::size_t size) = 0;
     virtual io_result write(flow_handle flow, const void* source, std::size_t size) = 0;

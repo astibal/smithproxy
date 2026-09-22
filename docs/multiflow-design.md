@@ -241,6 +241,12 @@ is paused. Falling below the low watermark produces one writable event.
 `BaseMFProxy` coordinates connections and creates one ordinary proxy child for
 each application flow. It should not itself copy application bytes.
 
+The initial connection coordinator is implemented as `MFProxy`. It pairs flow
+open events from either endpoint, mirrors bidirectional and unidirectional flow
+directions, owns the two `MFFlowCom` facades and retains unread output across
+destination backpressure. Extraction of its byte pump into existing
+`baseHostCX` filter chains is the next integration step.
+
 ```text
 BaseMFProxy (connection scope)
     |

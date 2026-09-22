@@ -72,6 +72,12 @@ bool openssl_connection::contains(multiflow::flow_handle flow) const {
     return find(flow) != nullptr;
 }
 
+std::optional<multiflow::direction> openssl_connection::direction_of(
+    multiflow::flow_handle flow) const {
+    auto const* state = find(flow);
+    return state ? std::optional<multiflow::direction>(state->direction) : std::nullopt;
+}
+
 multiflow::io_result openssl_connection::read(multiflow::flow_handle flow,
                                               void* destination, std::size_t size) {
     if (closed_) return { 0, multiflow::io_status::connection_closed };

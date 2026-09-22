@@ -59,6 +59,7 @@ public:
 
     multiflow::flow_handle open_flow(multiflow::direction flow_direction) override;
     bool contains(multiflow::flow_handle flow) const override;
+    std::optional<multiflow::direction> direction_of(multiflow::flow_handle flow) const override;
 
     multiflow::io_result read(multiflow::flow_handle flow, void* destination,
                               std::size_t size) override;

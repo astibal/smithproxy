@@ -36,6 +36,11 @@ public:
         return find(handle) != nullptr;
     }
 
+    std::optional<direction> direction_of(flow_handle handle) const override {
+        auto const* flow = find(handle);
+        return flow ? std::optional<direction>(flow->flow_direction) : std::nullopt;
+    }
+
     io_result read(flow_handle handle, void* destination, std::size_t size) override {
         if (closed_) return { 0, io_status::connection_closed };
         auto* flow = find(handle);
