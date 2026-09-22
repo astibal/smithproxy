@@ -119,6 +119,7 @@ private:
     lifecycle_options lifecycle_;                ///< Session timing policy.
     resource_limits limits_;                     ///< Resource-exhaustion policy.
     int udp_fd_ = -1;                            ///< Socket owned by this service.
+    int wake_fd_ = -1;                           ///< eventfd used to interrupt an idle poll.
     std::atomic_bool stopping_ = false;           ///< Cross-thread stop request.
     std::atomic_size_t connection_count_ = 0;     ///< Sessions currently retained by the loop.
 

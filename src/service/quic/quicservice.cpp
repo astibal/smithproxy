@@ -12,6 +12,7 @@
 #include <netdb.h>
 #include <netinet/in.h>
 #include <poll.h>
+#include <sys/eventfd.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #include <sslcertstore.hpp>
@@ -79,6 +80,7 @@ listener_service::~listener_service() {
     listener_.reset();
     context_.reset();
     if (udp_fd_ >= 0) ::close(udp_fd_);
+    if (wake_fd_ >= 0) ::close(wake_fd_);
 #endif
 }
 
@@ -89,6 +91,11 @@ void listener_service::fail(std::string message) {
 
 bool listener_service::open_socket() {
 #if SMITHPROXY_OPENSSL_QUIC
+    wake_fd_ = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    if (wake_fd_ < 0) {
+        fail(std::string("eventfd: ") + std::strerror(errno));
+        return false;
+    }
     udp_fd_ = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (udp_fd_ < 0) {
         fail(std::string("socket: ") + std::strerror(errno));
@@ -189,7 +196,10 @@ void listener_service::run() {
 #if SMITHPROXY_OPENSSL_QUIC
     if (!ready_ && !prepare()) return;
 
-    pollfd descriptor { udp_fd_, POLLIN, 0 };
+    pollfd descriptors[] {
+        { udp_fd_, POLLIN, 0 },
+        { wake_fd_, POLLIN, 0 },
+    };
     auto attach_staged_upstream = [this](session& incoming) {
         if (!incoming.downstream || incoming.upstream) return;
         auto found = staged_upstreams_.find(incoming.downstream->native_handle());
@@ -198,11 +208,24 @@ void listener_service::run() {
         staged_upstreams_.erase(found);
     };
     while (!stopping_) {
-        auto const polled = ::poll(&descriptor, 1, 50);
+        // With no retained work, wait solely for network input or stop().
+        // Active connections still need a bounded tick because OpenSSL QUIC
+        // timers and asynchronous certificate futures are not pollable fds.
+        auto const timeout = sessions_.empty() && certificate_jobs_.empty()
+                && staged_upstreams_.empty()
+            ? -1
+            : 50;
+        auto const polled = ::poll(descriptors, 2, timeout);
         if (polled < 0 && errno != EINTR) {
             fail(std::string("poll: ") + std::strerror(errno));
             break;
         }
+        if (descriptors[1].revents & POLLIN) {
+            eventfd_t wakeups = 0;
+            while (::eventfd_read(wake_fd_, &wakeups) == 0) {
+            }
+        }
+        if (stopping_) break;
 
         // Do not pre-classify this shared UDP socket with MSG_PEEK. OpenSSL may
         // receive a batch after the peek, so a following DTLS datagram could
@@ -552,6 +575,13 @@ std::shared_ptr<openssl_connection> listener_service::connect_upstream(
 
 void listener_service::stop() {
     stopping_ = true;
+#if SMITHPROXY_OPENSSL_QUIC
+    if (wake_fd_ >= 0) {
+        // Nonblocking eventfd may only fail here if it is already saturated;
+        // in that case it is already readable and poll() will still wake.
+        ::eventfd_write(wake_fd_, 1);
+    }
+#endif
 }
 
 } // namespace sx::quic

@@ -5,6 +5,7 @@
 #include "proxy/multiflow/mfflowcom.hpp"
 
 #include <chrono>
+#include <ctime>
 #include <thread>
 
 #if SMITHPROXY_OPENSSL_QUIC
@@ -37,6 +38,36 @@ TEST(QuicListenerService, PreparesAndStopsLoopbackListener) {
     EXPECT_TRUE(service.last_error().empty()) << service.last_error();
     EXPECT_EQ(service.connection_count(), 0U);
 }
+
+#if SMITHPROXY_OPENSSL_QUIC
+TEST(QuicListenerService, IdleListenerSleepsUntilExplicitWakeup) {
+    quic::listener_service service(0,
+                                   "etc/certs/default/srv-cert.pem",
+                                   "etc/certs/default/srv-key.pem",
+                                   false, 443, false);
+    ASSERT_TRUE(service.prepare()) << service.last_error();
+
+    std::chrono::nanoseconds worker_cpu {};
+    std::thread runner([&]() {
+        timespec before {};
+        timespec after {};
+        ASSERT_EQ(clock_gettime(CLOCK_THREAD_CPUTIME_ID, &before), 0);
+        service.run();
+        ASSERT_EQ(clock_gettime(CLOCK_THREAD_CPUTIME_ID, &after), 0);
+        worker_cpu = std::chrono::seconds(after.tv_sec - before.tv_sec)
+            + std::chrono::nanoseconds(after.tv_nsec - before.tv_nsec);
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    auto const stop_started = std::chrono::steady_clock::now();
+    service.stop();
+    runner.join();
+
+    EXPECT_LT(worker_cpu, std::chrono::milliseconds(20));
+    EXPECT_LT(std::chrono::steady_clock::now() - stop_started,
+              std::chrono::milliseconds(100));
+}
+#endif
 
 #if SMITHPROXY_OPENSSL_QUIC
 namespace {
