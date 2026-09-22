@@ -321,10 +321,12 @@ multiflow::io_status openssl_connection::reset(multiflow::flow_handle flow,
 }
 
 void openssl_connection::close(std::uint64_t protocol_error) {
-    if (closed_ || !connection_) return;
+    if (closed_ || closing_ || !connection_) return;
     SSL_SHUTDOWN_EX_ARGS args { protocol_error, nullptr };
-    SSL_shutdown_ex(connection_.get(), SSL_SHUTDOWN_FLAG_NO_BLOCK, &args, sizeof(args));
-    closed_ = true;
+    auto const result = SSL_shutdown_ex(connection_.get(), SSL_SHUTDOWN_FLAG_NO_BLOCK,
+                                        &args, sizeof(args));
+    closing_ = result != 1;
+    closed_ = result == 1;
     emit(multiflow::event_type::connection_close, std::nullopt, protocol_error);
 }
 
@@ -346,7 +348,19 @@ std::vector<multiflow::event> openssl_connection::drain_events() {
         return result;
     }
 
-    if (!SSL_is_init_finished(connection_.get())) {
+    if (closing_) {
+        SSL_SHUTDOWN_EX_ARGS args { 0, nullptr };
+        if (SSL_shutdown_ex(connection_.get(), SSL_SHUTDOWN_FLAG_NO_BLOCK,
+                            &args, sizeof(args)) == 1) {
+            closing_ = false;
+            closed_ = true;
+        } else {
+            SSL_handle_events(connection_.get());
+        }
+        for (auto const& pending : events_) result.push_back(pending.second);
+        events_.clear();
+        return result;
+    } else if (!SSL_is_init_finished(connection_.get())) {
         auto const result = SSL_do_handshake(connection_.get());
         if (result != 1) {
             auto const error = SSL_get_error(connection_.get(), result);
@@ -357,7 +371,7 @@ std::vector<multiflow::event> openssl_connection::drain_events() {
             }
         }
     }
-    SSL_handle_events(connection_.get());
+    if (!closed_) SSL_handle_events(connection_.get());
     SSL_CONN_CLOSE_INFO close_info {};
     if (SSL_get_conn_close_info(connection_.get(), &close_info, sizeof(close_info)) == 1) {
         closed_ = true;

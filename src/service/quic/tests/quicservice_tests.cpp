@@ -35,6 +35,7 @@ TEST(QuicListenerService, PreparesAndStopsLoopbackListener) {
     service.stop();
     runner.join();
     EXPECT_TRUE(service.last_error().empty()) << service.last_error();
+    EXPECT_EQ(service.connection_count(), 0U);
 }
 
 #if SMITHPROXY_OPENSSL_QUIC
@@ -57,7 +58,55 @@ bool nonblocking(int fd) {
 
 } // namespace
 
-TEST(QuicListenerService, ProxiesStreamToSniOrigin) {
+TEST(QuicListenerService, CleansUpHandshakeTimeout) {
+    auto client_context = quic::make_openssl_quic_context(false);
+    ASSERT_NE(client_context, nullptr);
+    SSL_CTX_set_verify(client_context.get(), SSL_VERIFY_NONE, nullptr);
+
+    quic::lifecycle_options lifecycle;
+    lifecycle.handshake_timeout = std::chrono::milliseconds(100);
+    lifecycle.drain_timeout = std::chrono::milliseconds(100);
+    quic::listener_service proxy(0, "etc/certs/default/srv-cert.pem",
+                                 "etc/certs/default/srv-key.pem", false,
+                                 9, false, lifecycle);
+    ASSERT_TRUE(proxy.prepare()) << proxy.last_error();
+    std::thread runner([&proxy]() { proxy.run(); });
+    struct cleanup_guard {
+        quic::listener_service& service;
+        std::thread& runner;
+        ~cleanup_guard() {
+            service.stop();
+            if (runner.joinable()) runner.join();
+        }
+    } cleanup { proxy, runner };
+
+    sockaddr_in proxy_address {};
+    proxy_address.sin_family = AF_INET;
+    proxy_address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    proxy_address.sin_port = htons(proxy.bound_port());
+    std::string error;
+    auto external = quic::connect_openssl_quic(
+        client_context.get(), reinterpret_cast<sockaddr*>(&proxy_address),
+        sizeof(proxy_address), "127.0.0.1", &error);
+    ASSERT_NE(external, nullptr) << error;
+
+    bool accepted = false;
+    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (std::chrono::steady_clock::now() < deadline
+           && (!accepted || proxy.connection_count() != 0)) {
+        external->drain_events();
+        accepted = accepted || proxy.connection_count() != 0;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    EXPECT_TRUE(accepted);
+    EXPECT_EQ(proxy.connection_count(), 0U);
+
+    external->close();
+    proxy.stop();
+    runner.join();
+}
+
+TEST(QuicListenerService, ProxiesStreamAndCleansUpIdleSession) {
     auto origin_context = quic::make_openssl_quic_context(true);
     auto client_context = quic::make_openssl_quic_context(false);
     ASSERT_NE(origin_context, nullptr);
@@ -83,9 +132,12 @@ TEST(QuicListenerService, ProxiesStreamToSniOrigin) {
     auto origin_listener = quic::openssl_listener::create(origin_context.get(), origin_fd, true);
     ASSERT_NE(origin_listener, nullptr);
 
+    quic::lifecycle_options lifecycle;
+    lifecycle.idle_timeout = std::chrono::milliseconds(100);
+    lifecycle.drain_timeout = std::chrono::milliseconds(100);
     quic::listener_service proxy(0, "etc/certs/default/srv-cert.pem",
                                  "etc/certs/default/srv-key.pem", false,
-                                 ntohs(origin_address.sin_port), false);
+                                 ntohs(origin_address.sin_port), false, lifecycle);
     ASSERT_TRUE(proxy.prepare()) << proxy.last_error();
     std::thread proxy_thread([&proxy]() { proxy.run(); });
     struct thread_guard {
@@ -147,7 +199,6 @@ TEST(QuicListenerService, ProxiesStreamToSniOrigin) {
     }
     EXPECT_EQ(received, message);
 
-    external->close();
     auto const close_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     while (std::chrono::steady_clock::now() < close_deadline
            && proxy.connection_count() != 0) {
@@ -155,6 +206,7 @@ TEST(QuicListenerService, ProxiesStreamToSniOrigin) {
     }
     EXPECT_EQ(proxy.connection_count(), 0U);
 
+    external->close();
     proxy.stop();
     proxy_thread.join();
     origin->close();

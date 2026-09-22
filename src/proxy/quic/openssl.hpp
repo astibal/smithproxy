@@ -95,7 +95,7 @@ public:
     SSL* native_handle() const { return connection_.get(); }
     datagram_endpoint peer_endpoint() const;
     bool handshake_complete() const;
-    bool closed() const { return closed_; }
+    bool closed() const { return closing_ || closed_; }
     std::string server_name() const;
 
 private:
@@ -124,6 +124,7 @@ private:
     std::map<event_key, multiflow::event> events_;
     multiflow::flow_id next_internal_id_ = 1;
     multiflow::generation_id next_generation_ = 1;
+    bool closing_ = false;
     bool closed_ = false;
 };
 

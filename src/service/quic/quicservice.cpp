@@ -44,10 +44,12 @@ std::string endpoint_key(datagram_endpoint const& endpoint) {
 
 listener_service::listener_service(std::uint16_t port, std::string certificate,
                                    std::string private_key, bool transparent,
-                                   std::uint16_t upstream_port, bool verify_upstream)
+                                   std::uint16_t upstream_port, bool verify_upstream,
+                                   lifecycle_options lifecycle)
     : port_(port), certificate_(std::move(certificate)),
       private_key_(std::move(private_key)), transparent_(transparent),
-      upstream_port_(upstream_port), verify_upstream_(verify_upstream) {}
+      upstream_port_(upstream_port), verify_upstream_(verify_upstream),
+      lifecycle_(lifecycle) {}
 
 listener_service::~listener_service() {
     stop();
@@ -193,43 +195,46 @@ void listener_service::run() {
             ++connection_count_;
         }
         auto const now = std::chrono::steady_clock::now();
-        static constexpr auto handshake_timeout = std::chrono::seconds(10);
         for (auto& linked : sessions_) {
             if (linked.state == session_state::handshake) {
                 linked.downstream->drain_events();
-                if (linked.downstream->closed() || now - linked.created >= handshake_timeout) {
-                    linked.state = session_state::closed;
+                if (linked.downstream->closed()
+                    || now - linked.created >= lifecycle_.handshake_timeout) {
+                    start_draining(linked, now);
                 } else if (!verify_upstream_ && linked.downstream->handshake_complete()
                            && !linked.upstream) {
                     linked.upstream = connect_upstream(linked.downstream->server_name());
-                    if (!linked.upstream) linked.state = session_state::closed;
+                    if (!linked.upstream) start_draining(linked, now);
                 } else if (linked.upstream) {
                     linked.upstream->drain_events();
                     if (linked.upstream->closed()) {
-                        linked.state = session_state::closed;
+                        start_draining(linked, now);
                     } else if (linked.upstream->handshake_complete()) {
                         linked.proxy = std::make_unique<multiflow::MFProxy>(
                             linked.downstream, linked.upstream);
                         linked.state = session_state::active;
+                        linked.last_activity = now;
                     }
                 }
             } else if (linked.state == session_state::active) {
-                linked.proxy->pump_once();
-                if (linked.downstream->closed() || linked.upstream->closed()) {
-                    linked.state = session_state::closed;
+                if (linked.proxy->pump_once() != 0) linked.last_activity = now;
+                if (linked.downstream->closed() || linked.upstream->closed()
+                    || now - linked.last_activity >= lifecycle_.idle_timeout) {
+                    start_draining(linked, now);
                 }
+            } else {
+                if (linked.downstream) linked.downstream->drain_events();
+                if (linked.upstream) linked.upstream->drain_events();
             }
         }
         auto const before = sessions_.size();
-        sessions_.erase(std::remove_if(sessions_.begin(), sessions_.end(), [](auto& linked) {
-            if (linked.state != session_state::closed) return false;
-            if (linked.downstream) linked.downstream->close();
-            if (linked.upstream) linked.upstream->close();
-            return true;
+        sessions_.erase(std::remove_if(sessions_.begin(), sessions_.end(), [&](auto& linked) {
+            return linked.state == session_state::draining
+                && now - linked.draining_since >= lifecycle_.drain_timeout;
         }), sessions_.end());
         connection_count_ -= before - sessions_.size();
         for (auto iterator = staged_upstreams_.begin(); iterator != staged_upstreams_.end();) {
-            if (now - iterator->second.created < handshake_timeout) {
+            if (now - iterator->second.created < lifecycle_.handshake_timeout) {
                 ++iterator;
                 continue;
             }
@@ -237,8 +242,34 @@ void listener_service::run() {
             iterator = staged_upstreams_.erase(iterator);
         }
     }
+    cleanup_sessions();
 #endif
 }
+
+#if SMITHPROXY_OPENSSL_QUIC
+void listener_service::start_draining(session& value,
+                                      std::chrono::steady_clock::time_point now,
+                                      std::uint64_t protocol_error) {
+    if (value.state == session_state::draining) return;
+    value.state = session_state::draining;
+    value.draining_since = now;
+    value.proxy.reset();
+    if (value.downstream) value.downstream->close(protocol_error);
+    if (value.upstream) value.upstream->close(protocol_error);
+}
+
+void listener_service::cleanup_sessions() {
+    for (auto& linked : sessions_) {
+        if (linked.downstream) linked.downstream->close();
+        if (linked.upstream) linked.upstream->close();
+    }
+    sessions_.clear();
+    for (auto& staged : staged_upstreams_) staged.second.connection->close();
+    staged_upstreams_.clear();
+    original_destinations_.clear();
+    connection_count_ = 0;
+}
+#endif
 
 int listener_service::certificate_callback(SSL* ssl, void* argument) {
     auto* service = static_cast<listener_service*>(argument);
