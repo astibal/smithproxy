@@ -20,7 +20,7 @@ TEST(QuicListenerService, PreparesAndStopsLoopbackListener) {
     quic::listener_service service(0,
                                    "etc/certs/default/srv-cert.pem",
                                    "etc/certs/default/srv-key.pem",
-                                   false);
+                                   false, 443, false);
 
     if (!quic::openssl_quic_available()) {
         EXPECT_FALSE(service.prepare());
@@ -85,7 +85,7 @@ TEST(QuicListenerService, ProxiesStreamToSniOrigin) {
 
     quic::listener_service proxy(0, "etc/certs/default/srv-cert.pem",
                                  "etc/certs/default/srv-key.pem", false,
-                                 ntohs(origin_address.sin_port));
+                                 ntohs(origin_address.sin_port), false);
     ASSERT_TRUE(proxy.prepare()) << proxy.last_error();
     std::thread proxy_thread([&proxy]() { proxy.run(); });
     struct thread_guard {

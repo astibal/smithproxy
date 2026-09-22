@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
+#include <thread>
 #include <utility>
 
 #if SMITHPROXY_OPENSSL_QUIC
@@ -13,6 +14,8 @@
 #include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <sslcertstore.hpp>
+#include <sslmitmcom.hpp>
 #endif
 
 namespace sx::quic {
@@ -35,15 +38,16 @@ int select_h3(SSL*, const unsigned char** output, unsigned char* output_size,
 
 listener_service::listener_service(std::uint16_t port, std::string certificate,
                                    std::string private_key, bool transparent,
-                                   std::uint16_t upstream_port)
+                                   std::uint16_t upstream_port, bool verify_upstream)
     : port_(port), certificate_(std::move(certificate)),
       private_key_(std::move(private_key)), transparent_(transparent),
-      upstream_port_(upstream_port) {}
+      upstream_port_(upstream_port), verify_upstream_(verify_upstream) {}
 
 listener_service::~listener_service() {
     stop();
 #if SMITHPROXY_OPENSSL_QUIC
     sessions_.clear();
+    staged_upstreams_.clear();
     connection_count_ = 0;
     listener_.reset();
     context_.reset();
@@ -119,9 +123,16 @@ bool listener_service::prepare() {
         return false;
     }
     SSL_CTX_set_alpn_select_cb(context_.get(), select_h3, nullptr);
-    // Initial spike behavior, matching the existing QUIC transport test. This
-    // must be replaced by Smithproxy's policy-aware upstream verification.
-    SSL_CTX_set_verify(client_context_.get(), SSL_VERIFY_NONE, nullptr);
+    if (verify_upstream_) {
+        if (!SSLFactory::factory().set_verify_locations(client_context_.get())) {
+            fail("cannot load QUIC upstream trust store");
+            return false;
+        }
+        SSL_CTX_set_verify(client_context_.get(), SSL_VERIFY_PEER, nullptr);
+        SSL_CTX_set_cert_cb(context_.get(), certificate_callback, this);
+    } else {
+        SSL_CTX_set_verify(client_context_.get(), SSL_VERIFY_NONE, nullptr);
+    }
 
     if (!open_socket()) return false;
     listener_ = openssl_listener::create(context_.get(), udp_fd_, transparent_);
@@ -156,6 +167,11 @@ void listener_service::run() {
         while (auto accepted = listener_->accept()) {
             auto connection = std::shared_ptr<openssl_connection>(std::move(accepted));
             session incoming;
+            if (auto found = staged_upstreams_.find(connection->native_handle());
+                found != staged_upstreams_.end()) {
+                incoming.upstream = std::move(found->second.connection);
+                staged_upstreams_.erase(found);
+            }
             incoming.downstream = std::move(connection);
             sessions_.push_back(std::move(incoming));
             ++connection_count_;
@@ -167,7 +183,8 @@ void listener_service::run() {
                 linked.downstream->drain_events();
                 if (linked.downstream->closed() || now - linked.created >= handshake_timeout) {
                     linked.state = session_state::closed;
-                } else if (linked.downstream->handshake_complete() && !linked.upstream) {
+                } else if (!verify_upstream_ && linked.downstream->handshake_complete()
+                           && !linked.upstream) {
                     linked.upstream = connect_upstream(linked.downstream->server_name());
                     if (!linked.upstream) linked.state = session_state::closed;
                 } else if (linked.upstream) {
@@ -195,8 +212,86 @@ void listener_service::run() {
             return true;
         }), sessions_.end());
         connection_count_ -= before - sessions_.size();
+        for (auto iterator = staged_upstreams_.begin(); iterator != staged_upstreams_.end();) {
+            if (now - iterator->second.created < handshake_timeout) {
+                ++iterator;
+                continue;
+            }
+            iterator->second.connection->close();
+            iterator = staged_upstreams_.erase(iterator);
+        }
     }
 #endif
+}
+
+int listener_service::certificate_callback(SSL* ssl, void* argument) {
+    auto* service = static_cast<listener_service*>(argument);
+    return service ? service->prepare_verified_certificate(ssl) : 0;
+}
+
+int listener_service::prepare_verified_certificate(SSL* downstream) {
+    if (!downstream) return 0;
+    if (staged_upstreams_.find(downstream) != staged_upstreams_.end()) return 1;
+
+    auto const* raw_name = SSL_get_servername(downstream, TLSEXT_NAMETYPE_host_name);
+    if (!raw_name || *raw_name == '\0') return 0;
+    std::string const server_name(raw_name);
+    auto upstream = connect_upstream(server_name);
+    if (!upstream) return 0;
+
+    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!upstream->handshake_complete() && !upstream->closed()
+           && std::chrono::steady_clock::now() < deadline) {
+        upstream->drain_events();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    if (!upstream->handshake_complete()
+        || SSL_get_verify_result(upstream->native_handle()) != X509_V_OK) {
+        upstream->close(1);
+        return 0;
+    }
+
+    X509* certificate = SSL_get1_peer_certificate(upstream->native_handle());
+    if (!certificate) {
+        upstream->close(1);
+        return 0;
+    }
+    auto const installed = install_spoofed_certificate(downstream, certificate, server_name);
+    X509_free(certificate);
+    if (!installed) {
+        upstream->close(1);
+        return 0;
+    }
+    staged_upstreams_.emplace(downstream, staged_upstream { std::move(upstream) });
+    return 1;
+}
+
+bool listener_service::install_spoofed_certificate(SSL* downstream, X509* upstream,
+                                                   std::string const& server_name) {
+    if (!downstream || !upstream || server_name.empty()) return false;
+    if (X509_check_host(upstream, server_name.c_str(), server_name.size(), 0, nullptr) != 1) {
+        return false;
+    }
+
+    SpoofOptions options;
+    options.sni = server_name;
+    auto& factory = SSLFactory::factory();
+    auto const store_key = SSLFactory::make_store_key(upstream, options);
+    auto lock = std::scoped_lock(factory.lock());
+    auto install = [downstream](X509* certificate, EVP_PKEY* key) {
+        return certificate && key
+            && SSL_use_certificate(downstream, certificate) == 1
+            && SSL_use_PrivateKey(downstream, key) == 1
+            && SSL_check_private_key(downstream) == 1;
+    };
+    auto cached = factory.find_mitm(store_key);
+    if (cached) return install(cached->chain.cert, cached->chain.key);
+
+    auto forged = factory.spoof(upstream, false, nullptr);
+    if (!forged || !forged->chain.cert || !forged->chain.key) return false;
+    if (!install(forged->chain.cert, forged->chain.key)) return false;
+    EVP_PKEY_up_ref(forged->chain.key);
+    return factory.add_mitm(store_key, *forged);
 }
 
 std::shared_ptr<openssl_connection> listener_service::connect_upstream(

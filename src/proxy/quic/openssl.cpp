@@ -287,7 +287,8 @@ std::unique_ptr<openssl_connection> connect_openssl_quic(
     if (SSL_set_fd(ssl.get(), fd) != 1
         || SSL_set_blocking_mode(ssl.get(), 0) != 1
         || (!server_name.empty()
-            && SSL_set_tlsext_host_name(ssl.get(), server_name.c_str()) != 1)) {
+            && (SSL_set_tlsext_host_name(ssl.get(), server_name.c_str()) != 1
+                || SSL_set1_host(ssl.get(), server_name.c_str()) != 1))) {
         return close_and_fail("configure outgoing QUIC: " + openssl_error_stack());
     }
     static constexpr unsigned char h3[] = { 2, 'h', '3' };

@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -18,7 +19,8 @@ class listener_service final {
 public:
     listener_service(std::uint16_t port, std::string certificate,
                      std::string private_key, bool transparent,
-                     std::uint16_t upstream_port = 443);
+                     std::uint16_t upstream_port = 443,
+                     bool verify_upstream = true);
     ~listener_service();
 
     listener_service(listener_service const&) = delete;
@@ -36,6 +38,12 @@ public:
 private:
     bool open_socket();
     std::shared_ptr<openssl_connection> connect_upstream(std::string const& host);
+#if SMITHPROXY_OPENSSL_QUIC
+    static int certificate_callback(SSL* ssl, void* argument);
+    int prepare_verified_certificate(SSL* downstream);
+    bool install_spoofed_certificate(SSL* downstream, X509* upstream,
+                                     std::string const& server_name);
+#endif
     void fail(std::string message);
 
     std::uint16_t port_;
@@ -44,6 +52,7 @@ private:
     std::string private_key_;
     bool transparent_;
     std::uint16_t upstream_port_;
+    bool verify_upstream_;
     int udp_fd_ = -1;
     std::atomic_bool stopping_ = false;
     std::atomic_size_t connection_count_ = 0;
@@ -63,6 +72,11 @@ private:
         std::unique_ptr<multiflow::MFProxy> proxy;
     };
     std::vector<session> sessions_;
+    struct staged_upstream {
+        std::shared_ptr<openssl_connection> connection;
+        std::chrono::steady_clock::time_point created = std::chrono::steady_clock::now();
+    };
+    std::map<SSL*, staged_upstream> staged_upstreams_;
 #endif
 };
 

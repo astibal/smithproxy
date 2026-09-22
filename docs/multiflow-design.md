@@ -442,9 +442,18 @@ default (`quic_workers = -1`). Once the downstream handshake exposes SNI, the
 listener now resolves that name, creates a nonblocking OpenSSL QUIC connection
 to UDP/443 and attaches both connections to `MFProxy`. The integration test
 passes a real bidirectional stream through downstream QUIC, `MFProxy`, and a
-loopback QUIC origin. Original TPROXY destination-port recovery and
-policy-aware upstream certificate verification remain follow-up work; the
-current upstream context temporarily uses `SSL_VERIFY_NONE`.
+loopback QUIC origin. Original TPROXY destination-port recovery remains
+follow-up work.
+
+The production listener does not mint a certificate from untrusted SNI alone.
+Its certificate callback first opens the upstream QUIC connection, verifies the
+chain with Smithproxy's configured trust store and verifies the peer identity
+against SNI. Only then does it pass the actual upstream leaf certificate to the
+existing `SSLFactory` spoof/cache path and install that derived certificate on
+the downstream handshake. Failure at any of those steps aborts the downstream
+handshake. The first implementation performs this lookup synchronously inside
+the listener worker; moving it to an asynchronous certificate job is a future
+scalability improvement, not a change to the trust model.
 
 The listener has a deliberately small lifecycle skeleton: sessions start in
 `handshake`, become `active` only after both handshakes finish, and move to
