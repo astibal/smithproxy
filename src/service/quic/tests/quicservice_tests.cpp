@@ -58,6 +58,47 @@ bool nonblocking(int fd) {
 
 } // namespace
 
+TEST(QuicListenerService, DiscardsDatagramOutsideQuicWireRange) {
+    quic::listener_service service(0,
+                                   "etc/certs/default/srv-cert.pem",
+                                   "etc/certs/default/srv-key.pem",
+                                   false, 443, false);
+    ASSERT_TRUE(service.prepare()) << service.last_error();
+    std::thread runner([&service]() { service.run(); });
+    struct stop_guard {
+        quic::listener_service& service;
+        std::thread& runner;
+        ~stop_guard() {
+            service.stop();
+            if (runner.joinable()) runner.join();
+        }
+    } cleanup { service, runner };
+
+    auto const sender = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    ASSERT_GE(sender, 0);
+    sockaddr_in destination {};
+    destination.sin_family = AF_INET;
+    destination.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    destination.sin_port = htons(service.bound_port());
+    unsigned char const dtls_handshake[] = { 22, 0xfe, 0xfd, 0, 0, 0 };
+    ASSERT_EQ(sendto(sender, dtls_handshake, sizeof(dtls_handshake), 0,
+                     reinterpret_cast<sockaddr*>(&destination), sizeof(destination)),
+              static_cast<ssize_t>(sizeof(dtls_handshake)));
+    unsigned char const dtls_13_ciphertext[] = { 0x20, 0, 0, 0 };
+    ASSERT_EQ(sendto(sender, dtls_13_ciphertext, sizeof(dtls_13_ciphertext), 0,
+                     reinterpret_cast<sockaddr*>(&destination), sizeof(destination)),
+              static_cast<ssize_t>(sizeof(dtls_13_ciphertext)));
+
+    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (service.diagnostics().discarded_non_quic_datagrams < 2
+           && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    EXPECT_EQ(service.diagnostics().discarded_non_quic_datagrams, 2U);
+    EXPECT_EQ(service.connection_count(), 0U);
+    close(sender);
+}
+
 TEST(QuicListenerService, CleansUpHandshakeTimeout) {
     auto client_context = quic::make_openssl_quic_context(false);
     ASSERT_NE(client_context, nullptr);
