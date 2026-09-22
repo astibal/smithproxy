@@ -63,7 +63,8 @@ public:
                      std::uint16_t upstream_port = 443,
                      bool verify_upstream = true,
                      lifecycle_options lifecycle = {},
-                     resource_limits limits = {});
+                     resource_limits limits = {},
+                     std::string upstream_host = {});
     ~listener_service();
 
     listener_service(listener_service const&) = delete;
@@ -113,6 +114,7 @@ private:
     std::string private_key_;                    ///< Bootstrap/default private key.
     bool transparent_;                           ///< Enable Linux transparent metadata/options.
     std::uint16_t upstream_port_;                ///< Non-transparent test fallback port.
+    std::string upstream_host_;                  ///< Optional explicit non-transparent target.
     bool verify_upstream_;                       ///< Require origin-backed certificate creation.
     lifecycle_options lifecycle_;                ///< Session timing policy.
     resource_limits limits_;                     ///< Resource-exhaustion policy.

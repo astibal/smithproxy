@@ -45,11 +45,12 @@ std::string endpoint_key(datagram_endpoint const& endpoint) {
 listener_service::listener_service(std::uint16_t port, std::string certificate,
                                    std::string private_key, bool transparent,
                                    std::uint16_t upstream_port, bool verify_upstream,
-                                   lifecycle_options lifecycle, resource_limits limits)
+                                   lifecycle_options lifecycle, resource_limits limits,
+                                   std::string upstream_host)
     : port_(port), certificate_(std::move(certificate)),
       private_key_(std::move(private_key)), transparent_(transparent),
-      upstream_port_(upstream_port), verify_upstream_(verify_upstream),
-      lifecycle_(lifecycle), limits_(limits) {}
+      upstream_port_(upstream_port), upstream_host_(std::move(upstream_host)),
+      verify_upstream_(verify_upstream), lifecycle_(lifecycle), limits_(limits) {}
 
 diagnostics_snapshot listener_service::diagnostics() const {
     return {
@@ -189,6 +190,13 @@ void listener_service::run() {
     if (!ready_ && !prepare()) return;
 
     pollfd descriptor { udp_fd_, POLLIN, 0 };
+    auto attach_staged_upstream = [this](session& incoming) {
+        if (!incoming.downstream || incoming.upstream) return;
+        auto found = staged_upstreams_.find(incoming.downstream->native_handle());
+        if (found == staged_upstreams_.end()) return;
+        incoming.upstream = std::move(found->second.connection);
+        staged_upstreams_.erase(found);
+    };
     while (!stopping_) {
         auto const polled = ::poll(&descriptor, 1, 50);
         if (polled < 0 && errno != EINTR) {
@@ -213,12 +221,8 @@ void listener_service::run() {
                 continue;
             }
             session incoming;
-            if (auto found = staged_upstreams_.find(connection->native_handle());
-                found != staged_upstreams_.end()) {
-                incoming.upstream = std::move(found->second.connection);
-                staged_upstreams_.erase(found);
-            }
             incoming.downstream = std::move(connection);
+            attach_staged_upstream(incoming);
             sessions_.push_back(std::move(incoming));
             ++connection_count_;
             ++accepted_sessions_;
@@ -226,7 +230,14 @@ void listener_service::run() {
         auto const now = std::chrono::steady_clock::now();
         for (auto& linked : sessions_) {
             if (linked.state == session_state::handshake) {
-                linked.downstream->drain_events();
+                attach_staged_upstream(linked);
+                // Once the client handshake completes, preserve any early
+                // flow_open events until MFProxy exists. Draining here would
+                // irreversibly discard streams opened while the upstream leg
+                // is still finishing its handshake.
+                if (!linked.downstream->handshake_complete()) {
+                    linked.downstream->drain_events();
+                }
                 if (linked.downstream->closed()) {
                     ++handshake_failures_;
                     start_draining(linked, now);
@@ -374,31 +385,34 @@ int listener_service::prepare_verified_certificate(SSL* downstream) {
     auto const* raw_name = SSL_get_servername(downstream, TLSEXT_NAMETYPE_host_name);
     if (!raw_name || *raw_name == '\0') return 0;
     std::string const server_name(raw_name);
-    datagram_endpoint peer_endpoint;
-    BIO_ADDR* peer_address = BIO_ADDR_new();
-    if (peer_address) {
-        if (BIO_dgram_get_peer(SSL_get_rbio(downstream), peer_address) > 0) {
-            peer_endpoint = endpoint_from_bio_address(peer_address);
+    datagram_endpoint destination;
+    if (transparent_) {
+        datagram_endpoint peer_endpoint;
+        BIO_ADDR* peer_address = BIO_ADDR_new();
+        if (peer_address) {
+            if (BIO_dgram_get_peer(SSL_get_rbio(downstream), peer_address) > 0) {
+                peer_endpoint = endpoint_from_bio_address(peer_address);
+            }
+            BIO_ADDR_free(peer_address);
         }
-        BIO_ADDR_free(peer_address);
+        auto found_destination = original_destinations_.find(endpoint_key(peer_endpoint));
+        if (found_destination == original_destinations_.end()) return 0;
+        destination = found_destination->second;
+        original_destinations_.erase(found_destination);
+        std::uint16_t destination_port = 0;
+        auto const family = destination.address.ss_family;
+        if (family == AF_INET) {
+            destination_port = ntohs(reinterpret_cast<sockaddr_in const*>(
+                &destination.address)->sin_port);
+        } else if (family == AF_INET6) {
+            destination_port = ntohs(reinterpret_cast<sockaddr_in6 const*>(
+                &destination.address)->sin6_port);
+        }
+        // A shared UDP socket cannot select a different source port per datagram.
+        // Bare transparent mode therefore requires TPROXY --on-port 0 and a
+        // listener bound to the original service port.
+        if (destination_port == 0 || destination_port != bound_port_) return 0;
     }
-    auto found_destination = original_destinations_.find(endpoint_key(peer_endpoint));
-    if (found_destination == original_destinations_.end()) return 0;
-    auto const destination = found_destination->second;
-    original_destinations_.erase(found_destination);
-    std::uint16_t destination_port = 0;
-    auto const family = destination.address.ss_family;
-    if (family == AF_INET) {
-        destination_port = ntohs(reinterpret_cast<sockaddr_in const*>(
-            &destination.address)->sin_port);
-    } else if (family == AF_INET6) {
-        destination_port = ntohs(reinterpret_cast<sockaddr_in6 const*>(
-            &destination.address)->sin6_port);
-    }
-    // A shared UDP socket cannot select a different source port per datagram.
-    // Bare transparent mode therefore requires TPROXY --on-port 0 and a
-    // listener bound to the original service port.
-    if (destination_port == 0 || destination_port != bound_port_) return 0;
     if (certificate_jobs_.size() >= limits_.max_certificate_jobs) {
         ++certificate_job_limit_rejections_;
         return 0;
@@ -419,7 +433,9 @@ int listener_service::prepare_verified_certificate(SSL* downstream) {
 listener_service::verified_certificate listener_service::verify_and_spoof(
     datagram_endpoint destination, std::string server_name) {
     verified_certificate verified;
-    auto upstream = connect_upstream(destination, server_name);
+    auto upstream = transparent_
+        ? connect_upstream(destination, server_name)
+        : connect_upstream(server_name);
     if (!upstream) return verified;
 
     auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
@@ -468,10 +484,15 @@ listener_service::verified_certificate listener_service::verify_and_spoof(
     bool ready = cached && retain(cached->chain.cert, cached->chain.key);
     if (!ready) {
         auto forged = factory.spoof(certificate, false, nullptr);
-        if (forged && forged->chain.cert && forged->chain.key
-            && retain(forged->chain.cert, forged->chain.key)) {
-            EVP_PKEY_up_ref(forged->chain.key);
-            ready = factory.add_mitm(store_key, *forged);
+        if (forged && forged->chain.cert && forged->chain.key) {
+            ready = retain(forged->chain.cert, forged->chain.key);
+            // ptr_cache uses allocator state tied to the allocating thread.
+            // Certificate jobs run asynchronously, so publishing a new cache
+            // node here would leave teardown to free it from another thread.
+            // Keep the retained result session-local; existing cache entries
+            // remain readable until cache publication is moved to its owner.
+            X509_free(forged->chain.cert);
+            forged->nullify(); // SSLFactory::spoof() returns def_sr_key as borrowed.
         }
     }
     X509_free(certificate);
@@ -500,7 +521,10 @@ std::shared_ptr<openssl_connection> listener_service::connect_upstream(
     hints.ai_protocol = IPPROTO_UDP;
     addrinfo* addresses = nullptr;
     auto const port = std::to_string(upstream_port_);
-    if (::getaddrinfo(host.c_str(), port.c_str(), &hints, &addresses) != 0) return nullptr;
+    auto const& address_host = upstream_host_.empty() ? host : upstream_host_;
+    if (::getaddrinfo(address_host.c_str(), port.c_str(), &hints, &addresses) != 0) {
+        return nullptr;
+    }
 
     std::shared_ptr<openssl_connection> result;
     for (auto* current = addresses; current && !result; current = current->ai_next) {

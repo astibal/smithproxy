@@ -474,6 +474,18 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_link_libraries(sx_gtests gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries(sx_gtests_http1 gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries (sx_gtests nlohmann_json::nlohmann_json)
+
+        # Focused QUIC integration target. It intentionally avoids the legacy
+        # all-project test sources so QUIC can be built and stressed in isolation.
+        add_executable(quic_testbed
+                src/proxy/multiflow/mfflowcom.cpp
+                src/proxy/multiflow/mfproxy.cpp
+                src/proxy/quic/openssl.cpp
+                src/service/quic/quicservice.cpp
+                src/service/quic/tests/quicservice_tests.cpp
+                src/service/quic/testbed/quic_testbed.cpp
+        )
+        target_link_libraries(quic_testbed gtest socle_lib pthread crypto ssl)
     endif()
 ENDIF()
 

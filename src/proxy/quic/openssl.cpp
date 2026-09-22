@@ -380,7 +380,8 @@ std::vector<multiflow::event> openssl_connection::drain_events() {
         auto const result = SSL_do_handshake(connection_.get());
         if (result != 1) {
             auto const error = SSL_get_error(connection_.get(), result);
-            if (error != SSL_ERROR_WANT_READ && error != SSL_ERROR_WANT_WRITE) {
+            if (error != SSL_ERROR_WANT_READ && error != SSL_ERROR_WANT_WRITE
+                && error != SSL_ERROR_WANT_X509_LOOKUP) {
                 closed_ = true;
                 emit(multiflow::event_type::connection_close, std::nullopt,
                      static_cast<std::uint64_t>(error));
