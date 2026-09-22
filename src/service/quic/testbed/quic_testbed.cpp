@@ -353,6 +353,36 @@ sockaddr_in loopback(std::uint16_t port) {
     return result;
 }
 
+/** Own the service thread and guarantee bounded cleanup on every assertion path. */
+class running_service {
+public:
+    explicit running_service(quic::listener_service& service)
+        : service_(service), thread_([this]() { service_.run(); }) {}
+
+    ~running_service() { stop(); }
+
+    void stop() {
+        service_.stop();
+        if (thread_.joinable()) thread_.join();
+    }
+
+private:
+    quic::listener_service& service_;
+    std::thread thread_;
+};
+
+/** Progress one client until its handshake completes, closes, or times out. */
+bool await_handshake(quic::openssl_connection& connection,
+                     std::chrono::milliseconds timeout = 3s) {
+    auto const deadline = std::chrono::steady_clock::now() + timeout;
+    while (!connection.handshake_complete() && !connection.closed()
+           && std::chrono::steady_clock::now() < deadline) {
+        connection.drain_events();
+        std::this_thread::sleep_for(1ms);
+    }
+    return connection.handshake_complete();
+}
+
 TEST(QuicTestbed, ConcurrentVerifiedMitmSessionsAndStreams) {
     origin_server origin;
     ASSERT_TRUE(origin.ready()) << quic::openssl_error_stack();
@@ -620,6 +650,242 @@ TEST(QuicTestbed, RejectsCertificateJobsBeyondConfiguredLimit) {
     EXPECT_FALSE(client->handshake_complete());
     EXPECT_GE(proxy.diagnostics().certificate_job_limit_rejections, 1U);
     client->close();
+}
+
+TEST(QuicTestbed, ClientRejectsMitmCertificateWithoutTestCaTrust) {
+    origin_server origin;
+    ASSERT_TRUE(origin.ready());
+    quic::listener_service proxy(0, pki_file("srv-cert.pem"), pki_file("srv-key.pem"), false,
+                                 origin.port(), true, {}, {}, "127.0.0.1");
+    ASSERT_TRUE(proxy.prepare()) << proxy.last_error();
+    running_service runner(proxy);
+
+    auto context = quic::make_openssl_quic_context(false);
+    ASSERT_NE(context, nullptr);
+    SSL_CTX_set_verify(context.get(), SSL_VERIFY_PEER, nullptr);
+    auto const address = loopback(proxy.bound_port());
+    std::string error;
+    auto client = quic::connect_openssl_quic(
+        context.get(), reinterpret_cast<sockaddr const*>(&address), sizeof(address),
+        test_sni, &error);
+    ASSERT_NE(client, nullptr) << error;
+
+    EXPECT_FALSE(await_handshake(*client));
+    EXPECT_NE(SSL_get_verify_result(client->native_handle()), X509_V_OK);
+    client->close();
+}
+
+TEST(QuicTestbed, CleansUpClientClosedDuringVerifiedHandshake) {
+    origin_server origin;
+    ASSERT_TRUE(origin.ready());
+    quic::lifecycle_options lifecycle;
+    lifecycle.drain_timeout = 20ms;
+    quic::listener_service proxy(0, pki_file("srv-cert.pem"), pki_file("srv-key.pem"), false,
+                                 origin.port(), true, lifecycle, {}, "127.0.0.1");
+    ASSERT_TRUE(proxy.prepare()) << proxy.last_error();
+    running_service runner(proxy);
+
+    auto context = make_verified_client_context();
+    ASSERT_NE(context, nullptr);
+    auto const address = loopback(proxy.bound_port());
+    std::string error;
+    auto client = quic::connect_openssl_quic(
+        context.get(), reinterpret_cast<sockaddr const*>(&address), sizeof(address),
+        test_sni, &error);
+    ASSERT_NE(client, nullptr) << error;
+
+    auto const accept_deadline = std::chrono::steady_clock::now() + 3s;
+    while (proxy.diagnostics().accepted_sessions == 0
+           && std::chrono::steady_clock::now() < accept_deadline) {
+        client->drain_events();
+        std::this_thread::sleep_for(1ms);
+    }
+    ASSERT_EQ(proxy.diagnostics().accepted_sessions, 1U);
+    client->close(0x10);
+
+    auto const cleanup_deadline = std::chrono::steady_clock::now() + 5s;
+    while (proxy.connection_count() != 0
+           && std::chrono::steady_clock::now() < cleanup_deadline) {
+        client->drain_events();
+        std::this_thread::sleep_for(2ms);
+    }
+    EXPECT_EQ(proxy.connection_count(), 0U);
+    EXPECT_EQ(proxy.diagnostics().completed_sessions, 1U);
+}
+
+TEST(QuicTestbed, RepeatedVerifiedReconnectsReleaseEveryIdleSession) {
+    origin_server origin;
+    ASSERT_TRUE(origin.ready());
+    quic::lifecycle_options lifecycle;
+    lifecycle.idle_timeout = 100ms;
+    lifecycle.drain_timeout = 20ms;
+    quic::listener_service proxy(0, pki_file("srv-cert.pem"), pki_file("srv-key.pem"), false,
+                                 origin.port(), true, lifecycle, {}, "127.0.0.1");
+    ASSERT_TRUE(proxy.prepare()) << proxy.last_error();
+    running_service runner(proxy);
+
+    auto context = make_verified_client_context();
+    ASSERT_NE(context, nullptr);
+    auto const address = loopback(proxy.bound_port());
+    constexpr std::size_t reconnects = 12;
+    for (std::size_t iteration = 0; iteration < reconnects; ++iteration) {
+        std::string error;
+        auto client = quic::connect_openssl_quic(
+            context.get(), reinterpret_cast<sockaddr const*>(&address), sizeof(address),
+            test_sni, &error);
+        ASSERT_NE(client, nullptr) << "iteration=" << iteration << " " << error;
+        ASSERT_TRUE(await_handshake(*client, 5s)) << "iteration=" << iteration;
+        client->close();
+        auto const deadline = std::chrono::steady_clock::now() + 2s;
+        while (proxy.connection_count() != 0
+               && std::chrono::steady_clock::now() < deadline) {
+            client->drain_events();
+            std::this_thread::sleep_for(2ms);
+        }
+        ASSERT_EQ(proxy.connection_count(), 0U) << "iteration=" << iteration;
+    }
+    EXPECT_EQ(proxy.diagnostics().accepted_sessions, reconnects);
+    EXPECT_EQ(proxy.diagnostics().completed_sessions, reconnects);
+    EXPECT_EQ(origin.handshake_count(), reconnects);
+}
+
+TEST(QuicTestbed, EnforcesStreamLimitOnRealQuicConnection) {
+    origin_server origin;
+    ASSERT_TRUE(origin.ready());
+    quic::resource_limits limits;
+    limits.max_streams_per_session = 2;
+    quic::listener_service proxy(0, pki_file("srv-cert.pem"), pki_file("srv-key.pem"), false,
+                                 origin.port(), true, {}, limits, "127.0.0.1");
+    ASSERT_TRUE(proxy.prepare()) << proxy.last_error();
+    running_service runner(proxy);
+
+    auto context = make_verified_client_context();
+    ASSERT_NE(context, nullptr);
+    auto const address = loopback(proxy.bound_port());
+    std::string error;
+    auto client = quic::connect_openssl_quic(
+        context.get(), reinterpret_cast<sockaddr const*>(&address), sizeof(address),
+        test_sni, &error);
+    ASSERT_NE(client, nullptr) << error;
+    ASSERT_TRUE(await_handshake(*client, 5s));
+
+    for (std::size_t index = 0; index < 5; ++index) {
+        auto const flow = client->open_flow(mf::direction::bidirectional);
+        ASSERT_NE(flow.generation, 0U);
+        auto const payload = std::string("limited-") + std::to_string(index);
+        auto const written = client->write(flow, payload.data(), payload.size());
+        ASSERT_EQ(written.status, mf::io_status::ok);
+    }
+    auto const deadline = std::chrono::steady_clock::now() + 3s;
+    while (proxy.diagnostics().stream_limit_rejections < 3
+           && std::chrono::steady_clock::now() < deadline) {
+        client->drain_events();
+        std::this_thread::sleep_for(1ms);
+    }
+    EXPECT_EQ(proxy.diagnostics().stream_limit_rejections, 3U);
+    client->close();
+}
+
+TEST(QuicTestbed, EchoesPayloadsAcrossPacketAndBufferBoundaries) {
+    origin_server origin;
+    ASSERT_TRUE(origin.ready());
+    quic::listener_service proxy(0, pki_file("srv-cert.pem"), pki_file("srv-key.pem"), false,
+                                 origin.port(), true, {}, {}, "127.0.0.1");
+    ASSERT_TRUE(proxy.prepare()) << proxy.last_error();
+    running_service runner(proxy);
+
+    auto context = make_verified_client_context();
+    ASSERT_NE(context, nullptr);
+    auto const address = loopback(proxy.bound_port());
+    std::string error;
+    auto client = quic::connect_openssl_quic(
+        context.get(), reinterpret_cast<sockaddr const*>(&address), sizeof(address),
+        test_sni, &error);
+    ASSERT_NE(client, nullptr) << error;
+    ASSERT_TRUE(await_handshake(*client, 5s));
+
+    std::vector<std::size_t> const sizes { 1, 1199, 1200, 2048, 4097, 16384, 32769 };
+    struct transfer {
+        mf::flow_handle flow;
+        std::string payload;
+        std::size_t sent = 0;
+        std::string received;
+    };
+    std::vector<transfer> transfers;
+    for (auto const size : sizes) {
+        auto const flow = client->open_flow(mf::direction::bidirectional);
+        ASSERT_NE(flow.generation, 0U);
+        std::string payload(size, '\0');
+        for (std::size_t index = 0; index < size; ++index) {
+            payload[index] = static_cast<char>('A' + (index % 23));
+        }
+        transfers.push_back({ flow, std::move(payload), 0, {} });
+    }
+
+    auto const deadline = std::chrono::steady_clock::now() + 10s;
+    while (std::chrono::steady_clock::now() < deadline) {
+        client->drain_events();
+        std::size_t complete = 0;
+        for (auto& transfer : transfers) {
+            if (transfer.sent < transfer.payload.size()) {
+                auto const written = client->write(
+                    transfer.flow, transfer.payload.data() + transfer.sent,
+                    transfer.payload.size() - transfer.sent);
+                transfer.sent += written.size;
+            }
+            unsigned char buffer[4096] {};
+            auto const read = client->read(transfer.flow, buffer, sizeof(buffer));
+            if (read.size != 0) {
+                transfer.received.append(reinterpret_cast<char const*>(buffer), read.size);
+            }
+            if (transfer.received == transfer.payload) ++complete;
+        }
+        if (complete == transfers.size()) break;
+        std::this_thread::sleep_for(1ms);
+    }
+    for (auto const& transfer : transfers) {
+        EXPECT_EQ(transfer.received, transfer.payload)
+            << "payload_size=" << transfer.payload.size();
+    }
+    client->close();
+}
+
+TEST(QuicTestbed, StopClosesLiveVerifiedSessionsPromptly) {
+    origin_server origin;
+    ASSERT_TRUE(origin.ready());
+    quic::listener_service proxy(0, pki_file("srv-cert.pem"), pki_file("srv-key.pem"), false,
+                                 origin.port(), true, {}, {}, "127.0.0.1");
+    ASSERT_TRUE(proxy.prepare()) << proxy.last_error();
+    running_service runner(proxy);
+
+    auto context = make_verified_client_context();
+    ASSERT_NE(context, nullptr);
+    auto const address = loopback(proxy.bound_port());
+    std::vector<std::unique_ptr<quic::openssl_connection>> clients;
+    for (std::size_t index = 0; index < 8; ++index) {
+        std::string error;
+        auto client = quic::connect_openssl_quic(
+            context.get(), reinterpret_cast<sockaddr const*>(&address), sizeof(address),
+            test_sni, &error);
+        ASSERT_NE(client, nullptr) << error;
+        clients.push_back(std::move(client));
+    }
+    auto const deadline = std::chrono::steady_clock::now() + 5s;
+    while (std::chrono::steady_clock::now() < deadline) {
+        std::size_t complete = 0;
+        for (auto& client : clients) {
+            client->drain_events();
+            if (client->handshake_complete()) ++complete;
+        }
+        if (complete == clients.size()) break;
+        std::this_thread::sleep_for(1ms);
+    }
+    ASSERT_EQ(proxy.connection_count(), clients.size());
+
+    auto const started = std::chrono::steady_clock::now();
+    runner.stop();
+    EXPECT_LT(std::chrono::steady_clock::now() - started, 500ms);
+    EXPECT_EQ(proxy.connection_count(), 0U);
 }
 
 } // namespace

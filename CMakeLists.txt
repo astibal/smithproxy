@@ -476,11 +476,18 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_link_libraries (sx_gtests nlohmann_json::nlohmann_json)
 
         # Focused QUIC integration target. It intentionally avoids the legacy
-        # all-project test sources so QUIC can be built and stressed in isolation.
+        # unrelated application tests while keeping the complete MultiFlow,
+        # wire-format, adapter, listener, and end-to-end stack in one runner.
         add_executable(quic_testbed
+                src/proxy/multiflow/tests/fake_tests.cpp
                 src/proxy/multiflow/mfflowcom.cpp
+                src/proxy/multiflow/tests/mfflowcom_tests.cpp
                 src/proxy/multiflow/mfproxy.cpp
+                src/proxy/multiflow/tests/mfproxy_tests.cpp
+                src/proxy/quic/wire.cpp
+                src/proxy/quic/tests/wire_tests.cpp
                 src/proxy/quic/openssl.cpp
+                src/proxy/quic/tests/openssl_tests.cpp
                 src/service/quic/quicservice.cpp
                 src/service/quic/tests/quicservice_tests.cpp
                 src/service/quic/testbed/quic_testbed.cpp
