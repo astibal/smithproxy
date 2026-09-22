@@ -342,8 +342,15 @@ requires `OSSL_QUIC_server_method()`, introduced in OpenSSL 3.5.
 
 The first loopback integration test performs a real QUIC client/server
 handshake, negotiates `h3`, opens a bidirectional stream and transfers data
-through the multiflow adapter. Transparent UDP ingestion via
-`SSL_inject_net_dgram()` remains a separate integration step.
+through the multiflow adapter.
+
+The OpenSSL listener consumes the first Initial packet through its UDP BIO.
+`SSL_inject_net_dgram()` cannot create a connection on a listener; it is usable
+only after an external CID demultiplexer has selected an existing connection.
+For transparent operation, the listener enables per-datagram local addresses on
+the UDP BIO. This preserves the intercepted destination on receive and allows
+the same address to be selected as the reply source where the platform supports
+it. The UDP socket itself remains caller-owned.
 
 ## Error representation
 

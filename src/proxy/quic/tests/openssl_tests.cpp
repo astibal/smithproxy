@@ -106,11 +106,9 @@ TEST(OpenSslQuic, LoopbackHandshakeExposesBidirectionalStream) {
     ASSERT_EQ(connect(client_fd, reinterpret_cast<sockaddr*>(&server_address),
                       sizeof(server_address)), 0);
 
-    quic::unique_ssl listener(SSL_new_listener(server_context.get(), 0));
+    auto listener = quic::openssl_listener::create(server_context.get(), server_fd, true);
     ASSERT_NE(listener, nullptr) << quic::openssl_error_stack();
-    ASSERT_EQ(SSL_set_fd(listener.get(), server_fd), 1);
-    ASSERT_EQ(SSL_set_blocking_mode(listener.get(), 0), 1);
-    ASSERT_EQ(SSL_listen(listener.get()), 1) << quic::openssl_error_stack();
+    EXPECT_TRUE(listener->local_address_enabled());
 
     quic::unique_ssl client(SSL_new(client_context.get()));
     ASSERT_NE(client, nullptr) << quic::openssl_error_stack();
@@ -120,27 +118,23 @@ TEST(OpenSslQuic, LoopbackHandshakeExposesBidirectionalStream) {
     static constexpr unsigned char alpn[] = { 2, 'h', '3' };
     ASSERT_EQ(SSL_set_alpn_protos(client.get(), alpn, sizeof(alpn)), 0);
 
-    quic::unique_ssl server;
+    std::unique_ptr<quic::openssl_connection> server;
     auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
     while (std::chrono::steady_clock::now() < deadline
            && (!SSL_is_init_finished(client.get())
-               || !server || !SSL_is_init_finished(server.get()))) {
+               || !server || !SSL_is_init_finished(server->native_handle()))) {
         SSL_connect(client.get());
-        SSL_handle_events(listener.get());
-        if (!server) {
-            server.reset(SSL_accept_connection(listener.get(), SSL_ACCEPT_CONNECTION_NO_BLOCK));
-            if (server) SSL_set_blocking_mode(server.get(), 0);
-        }
-        if (server) SSL_do_handshake(server.get());
+        listener->handle_events();
+        if (!server) server = listener->accept();
+        if (server) SSL_do_handshake(server->native_handle());
         SSL_handle_events(client.get());
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     ASSERT_TRUE(SSL_is_init_finished(client.get())) << quic::openssl_error_stack();
     ASSERT_NE(server, nullptr) << quic::openssl_error_stack();
-    ASSERT_TRUE(SSL_is_init_finished(server.get())) << quic::openssl_error_stack();
+    ASSERT_TRUE(SSL_is_init_finished(server->native_handle())) << quic::openssl_error_stack();
 
     quic::openssl_connection client_connection(std::move(client));
-    quic::openssl_connection server_connection(std::move(server));
     auto const client_flow = client_connection.open_flow(mf::direction::bidirectional);
     ASSERT_NE(client_flow.generation, 0U) << quic::openssl_error_stack();
     static constexpr char message[] = "smithproxy-quic";
@@ -157,12 +151,12 @@ TEST(OpenSslQuic, LoopbackHandshakeExposesBidirectionalStream) {
             sent = write_result.size == sizeof(message) - 1;
         }
         client_connection.drain_events();
-        for (auto const& event : server_connection.drain_events()) {
+        for (auto const& event : server->drain_events()) {
             if (event.type == mf::event_type::flow_open && event.flow) server_flow = *event.flow;
         }
         if (server_flow.generation != 0) {
             char buffer[64] {};
-            auto const read_result = server_connection.read(server_flow, buffer, sizeof(buffer));
+            auto const read_result = server->read(server_flow, buffer, sizeof(buffer));
             if (read_result.status == mf::io_status::ok) {
                 received.assign(buffer, read_result.size);
             }
@@ -172,7 +166,7 @@ TEST(OpenSslQuic, LoopbackHandshakeExposesBidirectionalStream) {
     EXPECT_EQ(received, message);
 
     client_connection.close();
-    server_connection.close();
+    server->close();
     close(client_fd);
     close(server_fd);
 }

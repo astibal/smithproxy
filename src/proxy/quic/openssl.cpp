@@ -205,6 +205,12 @@ std::vector<multiflow::event> openssl_connection::drain_events() {
     return result;
 }
 
+bool openssl_connection::inject_datagram(const unsigned char* data, std::size_t size,
+                                         const BIO_ADDR* peer, const BIO_ADDR* local) {
+    return !closed_ && connection_ && data && size != 0
+        && SSL_inject_net_dgram(connection_.get(), data, size, peer, local) == 1;
+}
+
 openssl_connection::stream_state* openssl_connection::find(multiflow::flow_handle flow) {
     auto found = streams_.find(flow.id);
     if (found == streams_.end() || found->second->handle.generation != flow.generation) return nullptr;
@@ -245,6 +251,38 @@ void openssl_connection::emit(multiflow::event_type type,
                               std::uint64_t protocol_error) {
     event_key key { type, flow ? flow->id : 0 };
     events_.emplace(key, multiflow::event { type, flow, protocol_error });
+}
+
+std::unique_ptr<openssl_listener> openssl_listener::create(SSL_CTX* context, int udp_fd,
+                                                           bool enable_local_address) {
+    if (!context || udp_fd < 0) return nullptr;
+
+    unique_ssl listener(SSL_new_listener(context, 0));
+    if (!listener) return nullptr;
+    if (SSL_set_fd(listener.get(), udp_fd) != 1) return nullptr;
+    if (SSL_set_blocking_mode(listener.get(), 0) != 1) return nullptr;
+
+    bool local_address_enabled = false;
+    if (enable_local_address) {
+        auto* read_bio = SSL_get_rbio(listener.get());
+        local_address_enabled = read_bio
+            && BIO_dgram_set_local_addr_enable(read_bio, 1) == 1;
+    }
+    if (SSL_listen(listener.get()) != 1) return nullptr;
+    return std::unique_ptr<openssl_listener>(
+        new openssl_listener(std::move(listener), local_address_enabled));
+}
+
+std::unique_ptr<openssl_connection> openssl_listener::accept() {
+    if (!listener_) return nullptr;
+    unique_ssl connection(SSL_accept_connection(listener_.get(),
+                                                SSL_ACCEPT_CONNECTION_NO_BLOCK));
+    if (!connection) return nullptr;
+    return std::make_unique<openssl_connection>(std::move(connection));
+}
+
+bool openssl_listener::handle_events() {
+    return listener_ && SSL_handle_events(listener_.get()) == 1;
 }
 
 #endif // SMITHPROXY_OPENSSL_QUIC

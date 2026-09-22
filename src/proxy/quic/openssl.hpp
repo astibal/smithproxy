@@ -8,6 +8,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "proxy/multiflow/multiflow.hpp"
@@ -73,6 +74,10 @@ public:
     bool writable(multiflow::flow_handle flow) const override;
     std::vector<multiflow::event> drain_events() override;
 
+    /** Feed a datagram after an external CID demultiplexer selected this connection. */
+    bool inject_datagram(const unsigned char* data, std::size_t size,
+                         const BIO_ADDR* peer, const BIO_ADDR* local);
+
     SSL* native_handle() const { return connection_.get(); }
 
 private:
@@ -101,6 +106,35 @@ private:
     multiflow::flow_id next_internal_id_ = 1;
     multiflow::generation_id next_generation_ = 1;
     bool closed_ = false;
+};
+
+/**
+ * Nonblocking OpenSSL QUIC listener over a caller-owned UDP socket.
+ *
+ * The socket stays owned by the caller. When requested and supported by the
+ * platform, its datagram BIO carries the local destination address on receive
+ * and uses it as the source address on send. This is required by TPROXY.
+ */
+class openssl_listener final {
+public:
+    static std::unique_ptr<openssl_listener> create(SSL_CTX* context, int udp_fd,
+                                                     bool enable_local_address = true);
+
+    ~openssl_listener() = default;
+    openssl_listener(openssl_listener const&) = delete;
+    openssl_listener& operator=(openssl_listener const&) = delete;
+
+    std::unique_ptr<openssl_connection> accept();
+    bool handle_events();
+    bool local_address_enabled() const { return local_address_enabled_; }
+    SSL* native_handle() const { return listener_.get(); }
+
+private:
+    openssl_listener(unique_ssl listener, bool local_address_enabled)
+        : listener_(std::move(listener)), local_address_enabled_(local_address_enabled) {}
+
+    unique_ssl listener_;
+    bool local_address_enabled_ = false;
 };
 
 #endif // SMITHPROXY_OPENSSL_QUIC
