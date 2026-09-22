@@ -164,9 +164,9 @@ void CfgValueHelp::init() {
             .value_filter(VALUE_UINT_RANGE<1024, 65535>);
 
     add("settings.quic_port", "base divert port for QUIC UDP traffic")
-            .help_quick("<number>: a high port number")
+            .help_quick("<number>: original QUIC port; use TPROXY --on-port 0")
             .may_be_empty(false)
-            .value_filter(VALUE_UINT_RANGE<1024, 65535>);
+            .value_filter(VALUE_UINT_RANGE<1, 65535>);
 
     add("settings.socks_port", "base SOCKS proxy listening port")
             .help_quick("<number>: a high port number")

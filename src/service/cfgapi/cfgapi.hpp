@@ -237,14 +237,14 @@ public:
     std::string listen_tcp_port_base = "50080";
     std::string listen_tls_port_base = "50443";
     std::string listen_dtls_port_base = "50443";
-    std::string listen_quic_port_base = "50444";
+    std::string listen_quic_port_base = "443";
     std::string listen_udp_port_base = "50080";
     std::string listen_socks_port_base = "1080";
 
     std::string listen_tcp_port = "50080";
     std::string listen_tls_port = "50443";
     std::string listen_dtls_port = "50443";
-    std::string listen_quic_port = "50444";
+    std::string listen_quic_port = "443";
     std::string listen_udp_port = "50080";
     std::string listen_socks_port = "1080";
 

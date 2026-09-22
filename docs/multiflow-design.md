@@ -461,6 +461,13 @@ used once by the certificate callback to connect directly to the original IP
 and port; SNI is not used for DNS routing in the verified production path. A
 missing association aborts the handshake rather than falling back to SNI.
 
+The minimal transparent deployment preserves the UDP port: the QUIC listener
+binds the original service port (443 by default) and the TPROXY rule uses
+`--on-port 0`. A shared UDP socket cannot select another source port for an
+individual reply, so a captured original port different from the bound listener
+port is rejected. Supporting a high divert port requires a future
+per-destination transparent transmit BIO/socket; it is not silently emulated.
+
 The listener has a deliberately small lifecycle skeleton: sessions start in
 `handshake`, become `active` only after both handshakes finish, and move to
 `closed` when either connection closes or the ten-second handshake deadline is

@@ -264,6 +264,19 @@ int listener_service::prepare_verified_certificate(SSL* downstream) {
     if (found_destination == original_destinations_.end()) return 0;
     auto const destination = found_destination->second;
     original_destinations_.erase(found_destination);
+    std::uint16_t destination_port = 0;
+    auto const family = destination.address.ss_family;
+    if (family == AF_INET) {
+        destination_port = ntohs(reinterpret_cast<sockaddr_in const*>(
+            &destination.address)->sin_port);
+    } else if (family == AF_INET6) {
+        destination_port = ntohs(reinterpret_cast<sockaddr_in6 const*>(
+            &destination.address)->sin6_port);
+    }
+    // A shared UDP socket cannot select a different source port per datagram.
+    // Bare transparent mode therefore requires TPROXY --on-port 0 and a
+    // listener bound to the original service port.
+    if (destination_port == 0 || destination_port != bound_port_) return 0;
     auto upstream = connect_upstream(destination, server_name);
     if (!upstream) return 0;
 
