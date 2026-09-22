@@ -68,8 +68,19 @@ origin process:
 tools/quic-interop-test.sh
 ```
 
-The script also reports whether a curl HTTP/3 backend is available. It does not
-claim curl coverage when the installed curl lacks that feature.
+When an HTTP/3-enabled curl is present, the same profile also performs a real
+HTTP/3 request through Smithproxy to a public verified origin. Override the
+binary or origin without editing the script:
+
+```sh
+CURL_HTTP3_BIN=/path/to/curl-h3 \
+QUIC_INTEROP_HTTP3_ORIGIN=cloudflare.com \
+tools/quic-interop-test.sh
+```
+
+The locally built test client is normally discovered at
+`../curl-http3/bin/curl-h3` relative to the repository. The script does not
+claim curl coverage when an HTTP/3 backend is unavailable.
 
 Run the transparent three-network-namespace topology as root:
 

@@ -56,6 +56,8 @@ printf 'subjectAltName=DNS:localhost\nextendedKeyUsage=serverAuth,clientAuth\n' 
 openssl x509 -req -days 1 -in "${TMP_DIR}/srv.csr" \
     -CA "${TMP_DIR}/ca-cert.pem" -CAkey "${TMP_DIR}/ca-key.pem" -CAcreateserial \
     -extfile "${TMP_DIR}/leaf.ext" -out "${TMP_DIR}/srv-cert.pem" >/dev/null 2>&1
+cp "${TMP_DIR}/ca-cert.pem" "${TMP_DIR}/verify-ca.pem"
+cat /etc/ssl/certs/ca-certificates.crt >>"${TMP_DIR}/verify-ca.pem"
 for role in cl portal; do
     cp "${TMP_DIR}/srv-key.pem" "${TMP_DIR}/${role}-key.pem"
     cp "${TMP_DIR}/srv-cert.pem" "${TMP_DIR}/${role}-cert.pem"

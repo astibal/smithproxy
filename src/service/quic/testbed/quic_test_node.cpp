@@ -117,8 +117,10 @@ int run_origin(std::string const& directory, std::string const& address,
 int run_proxy(std::string const& directory, std::uint16_t port) {
     auto& factory = SSLFactory::factory();
     factory.certs_path() = directory + "/";
-    factory.ca_file() = path(directory, "ca-cert.pem");
-    factory.ca_path().clear();
+    auto const combined_ca = path(directory, "verify-ca.pem");
+    factory.ca_file() = access(combined_ca.c_str(), R_OK) == 0
+        ? combined_ca : path(directory, "ca-cert.pem");
+    factory.ca_path() = "/etc/ssl/certs";
     factory.init();
     quic::listener_service service(port, path(directory, "srv-cert.pem"),
                                    path(directory, "srv-key.pem"), true, port, true);
@@ -143,8 +145,10 @@ int run_forward_proxy(std::string const& directory, std::uint16_t listen_port,
                       std::uint16_t upstream_port) {
     auto& factory = SSLFactory::factory();
     factory.certs_path() = directory + "/";
-    factory.ca_file() = path(directory, "ca-cert.pem");
-    factory.ca_path().clear();
+    auto const combined_ca = path(directory, "verify-ca.pem");
+    factory.ca_file() = access(combined_ca.c_str(), R_OK) == 0
+        ? combined_ca : path(directory, "ca-cert.pem");
+    factory.ca_path() = "/etc/ssl/certs";
     factory.init();
     quic::listener_service service(listen_port, path(directory, "srv-cert.pem"),
                                    path(directory, "srv-key.pem"), false,
