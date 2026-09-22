@@ -381,6 +381,12 @@ Create `BaseMFProxy` and pass fake application flows through the existing
 Attach a QUIC library below the proven interface. Initially expose metadata and
 echo flows, then add upstream pairing and HTTP/3 request streams.
 
+The first transport-independent QUIC wire step is now present in
+`src/proxy/quic/wire.*`. It recognizes long-header packet types for QUIC v1 and
+v2, parses connection IDs and packet length prefixes, and deliberately stops at
+the protected packet-number boundary. Header protection removal, Initial key
+derivation and CRYPTO frame reassembly are the next protocol layer.
+
 ## Decisions made by this spike
 
 1. One physical connection is **not** represented by one shared `baseCom` in
