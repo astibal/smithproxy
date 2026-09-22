@@ -86,12 +86,12 @@ public:
 private:
     /** Create, configure, and bind the nonblocking UDP listener socket. */
     bool open_socket();
+#if SMITHPROXY_OPENSSL_QUIC
     /** Test/non-transparent connector which resolves SNI as a host name. */
     std::shared_ptr<openssl_connection> connect_upstream(std::string const& host);
     /** Production connector to the captured original destination. */
     std::shared_ptr<openssl_connection> connect_upstream(
         datagram_endpoint const& target, std::string const& server_name);
-#if SMITHPROXY_OPENSSL_QUIC
     /** OpenSSL trampoline; return -1 while asynchronous preparation is pending. */
     static int certificate_callback(SSL* ssl, void* argument);
     /** Start or collect one origin-verification job for a downstream handshake. */

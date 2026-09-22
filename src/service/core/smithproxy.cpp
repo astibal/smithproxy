@@ -213,23 +213,28 @@ bool SmithProxy::create_listeners() {
             log_listener(udp_frm, udp_proxies);
 
             if (CfgFactory::get()->num_workers_quic >= 0) {
-                if (CfgFactory::get()->num_workers_quic > 1) {
-                    _war("QUIC currently uses one event-loop thread; quic_workers=%d requested",
-                         CfgFactory::get()->num_workers_quic);
+                if (!sx::quic::openssl_quic_available()) {
+                    _war("QUIC listener disabled: linked OpenSSL has no QUIC server support "
+                         "(OpenSSL 3.5+ required)");
+                } else {
+                    if (CfgFactory::get()->num_workers_quic > 1) {
+                        _war("QUIC currently uses one event-loop thread; quic_workers=%d requested",
+                             CfgFactory::get()->num_workers_quic);
+                    }
+                    auto certs_path = SSLFactory::factory().certs_path();
+                    if (!certs_path.empty() && certs_path.back() != '/') certs_path += '/';
+                    auto service = std::make_unique<sx::quic::listener_service>(
+                        static_cast<std::uint16_t>(std::stoi(CfgFactory::get()->listen_quic_port)),
+                        certs_path + SSLFactory::config_t::SR_CERTF,
+                        certs_path + SSLFactory::config_t::SR_KEYF,
+                        true);
+                    if (!service->prepare()) {
+                        _fat("Failed to setup QUIC listener: %s", service->last_error().c_str());
+                        return false;
+                    }
+                    quic_services.emplace_back(std::move(service));
+                    log_listener(quic_frm, quic_services);
                 }
-                auto certs_path = SSLFactory::factory().certs_path();
-                if (!certs_path.empty() && certs_path.back() != '/') certs_path += '/';
-                auto service = std::make_unique<sx::quic::listener_service>(
-                    static_cast<std::uint16_t>(std::stoi(CfgFactory::get()->listen_quic_port)),
-                    certs_path + SSLFactory::config_t::SR_CERTF,
-                    certs_path + SSLFactory::config_t::SR_KEYF,
-                    true);
-                if (!service->prepare()) {
-                    _fat("Failed to setup QUIC listener: %s", service->last_error().c_str());
-                    return false;
-                }
-                quic_services.emplace_back(std::move(service));
-                log_listener(quic_frm, quic_services);
             }
 
 

@@ -332,6 +332,7 @@ void listener_service::cleanup_sessions() {
 }
 #endif
 
+#if SMITHPROXY_OPENSSL_QUIC
 int listener_service::certificate_callback(SSL* ssl, void* argument) {
     auto* service = static_cast<listener_service*>(argument);
     return service ? service->prepare_verified_certificate(ssl) : 0;
@@ -487,7 +488,6 @@ bool listener_service::install_verified_certificate(
 
 std::shared_ptr<openssl_connection> listener_service::connect_upstream(
     std::string const& host) {
-#if SMITHPROXY_OPENSSL_QUIC
     if (host.empty() || !client_context_) return nullptr;
     addrinfo hints {};
     hints.ai_family = AF_UNSPEC;
@@ -506,15 +506,10 @@ std::shared_ptr<openssl_connection> listener_service::connect_upstream(
     }
     ::freeaddrinfo(addresses);
     return result;
-#else
-    (void)host;
-    return nullptr;
-#endif
 }
 
 std::shared_ptr<openssl_connection> listener_service::connect_upstream(
     datagram_endpoint const& target, std::string const& server_name) {
-#if SMITHPROXY_OPENSSL_QUIC
     if (!target.valid() || server_name.empty() || !client_context_) return nullptr;
     std::string error;
     auto connection = connect_openssl_quic(
@@ -523,12 +518,8 @@ std::shared_ptr<openssl_connection> listener_service::connect_upstream(
     return connection
         ? std::shared_ptr<openssl_connection>(std::move(connection))
         : nullptr;
-#else
-    (void)target;
-    (void)server_name;
-    return nullptr;
-#endif
 }
+#endif
 
 void listener_service::stop() {
     stopping_ = true;
