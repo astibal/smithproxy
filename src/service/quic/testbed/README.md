@@ -35,6 +35,8 @@ The scenarios cover:
 - real-transport enforcement of the per-session stream limit;
 - payloads spanning packet and internal-buffer boundaries (1 to 32,769 bytes);
 - prompt service shutdown while multiple verified sessions are live;
+- verified handshakes and stream traffic under deterministic UDP loss,
+  duplication, reordering, delay, and a 1,250-byte MTU ceiling;
 - listener session limits, handshake timeouts, stream forwarding, and cleanup.
 
 For repeatable stress runs, pass regular GoogleTest options through the script:
@@ -49,9 +51,42 @@ tools/quic-testbed.sh \
 The testbed requires an OpenSSL build with QUIC server support. The production
 sources retain their `OPENSSL_NO_QUIC` fallback for older OpenSSL versions.
 
-The complete runner currently contains 43 tests across eight suites. A useful
+The complete runner currently contains 48 tests across nine suites. A useful
 flakiness pass is:
 
 ```sh
 tools/quic-testbed.sh --gtest_repeat=5 --gtest_break_on_failure
 ```
+
+Additional profiles
+-------------------
+
+Run an external OpenSSL QUIC client through the verified proxy to the standalone
+origin process:
+
+```sh
+tools/quic-interop-test.sh
+```
+
+The script also reports whether a curl HTTP/3 backend is available. It does not
+claim curl coverage when the installed curl lacks that feature.
+
+Run the transparent three-network-namespace topology as root:
+
+```sh
+sudo tools/quic-tproxy-test.sh
+```
+
+This profile installs temporary veth links, policy routing, and an iptables
+TPROXY rule. Its cleanup trap removes all namespaces. Without root or
+passwordless sudo it exits with the conventional skip status 77.
+
+Run repeated mixed workloads while sampling RSS, file descriptors, and CPU:
+
+```sh
+QUIC_SOAK_REPEATS=50 tools/quic-soak-test.sh
+```
+
+The default thresholds reject an RSS trend above 32 MiB and an FD spread above
+256. They can be adjusted with `QUIC_SOAK_RSS_GROWTH_LIMIT_KB` and
+`QUIC_SOAK_FD_SPREAD_LIMIT` for slower sanitizer or constrained CI hosts.

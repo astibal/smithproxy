@@ -493,6 +493,15 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/service/quic/testbed/quic_testbed.cpp
         )
         target_link_libraries(quic_testbed gtest socle_lib pthread crypto ssl)
+
+        add_executable(quic_test_node
+                src/proxy/multiflow/mfflowcom.cpp
+                src/proxy/multiflow/mfproxy.cpp
+                src/proxy/quic/openssl.cpp
+                src/service/quic/quicservice.cpp
+                src/service/quic/testbed/quic_test_node.cpp
+        )
+        target_link_libraries(quic_test_node socle_lib pthread crypto ssl)
     endif()
 ENDIF()
 

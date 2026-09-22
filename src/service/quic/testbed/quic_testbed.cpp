@@ -17,6 +17,7 @@
 #include <chrono>
 #include <cstring>
 #include <filesystem>
+#include <deque>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -33,6 +34,8 @@ namespace {
 
 constexpr char test_sni[] = "localhost";
 std::string test_pki_directory;
+
+sockaddr_in loopback(std::uint16_t port);
 
 std::string pki_file(char const* name) {
     return test_pki_directory + "/" + name;
@@ -334,6 +337,142 @@ private:
     std::vector<std::string> observed_alpn_;
 };
 
+/** Deterministic bidirectional UDP relay used to inject transport faults. */
+class udp_fault_relay {
+public:
+    struct profile {
+        std::size_t drop_every = 0;
+        std::size_t duplicate_every = 0;
+        std::size_t reorder_every = 0;
+        std::size_t mtu = 65535;
+        std::chrono::milliseconds delay {};
+    };
+
+    udp_fault_relay(std::uint16_t target_port, profile faults)
+        : faults_(faults) {
+        target_ = loopback(target_port);
+        fd_ = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        if (fd_ < 0 || !make_nonblocking(fd_)) return;
+        auto address = loopback(0);
+        if (bind(fd_, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) return;
+        socklen_t size = sizeof(address);
+        if (getsockname(fd_, reinterpret_cast<sockaddr*>(&address), &size) != 0) return;
+        port_ = ntohs(address.sin_port);
+        ready_ = true;
+        thread_ = std::thread([this]() { run(); });
+    }
+
+    ~udp_fault_relay() {
+        stopping_ = true;
+        if (thread_.joinable()) thread_.join();
+        if (fd_ >= 0) close(fd_);
+    }
+
+    bool ready() const { return ready_; }
+    std::uint16_t port() const { return port_; }
+    std::size_t received() const { return received_; }
+    std::size_t dropped() const { return dropped_; }
+    std::size_t duplicated() const { return duplicated_; }
+    std::size_t reordered() const { return reordered_; }
+    std::size_t mtu_dropped() const { return mtu_dropped_; }
+
+private:
+    struct queued_datagram {
+        std::vector<unsigned char> data;
+        sockaddr_in destination {};
+        std::chrono::steady_clock::time_point due;
+    };
+
+    static bool same_endpoint(sockaddr_in const& lhs, sockaddr_in const& rhs) {
+        return lhs.sin_family == rhs.sin_family
+            && lhs.sin_port == rhs.sin_port
+            && lhs.sin_addr.s_addr == rhs.sin_addr.s_addr;
+    }
+
+    void enqueue(std::vector<unsigned char> const& data, sockaddr_in destination,
+                 std::chrono::milliseconds extra_delay = {}) {
+        queue_.push_back({ data, destination,
+                           std::chrono::steady_clock::now() + faults_.delay + extra_delay });
+    }
+
+    void receive_one() {
+        unsigned char buffer[65536] {};
+        sockaddr_in source {};
+        socklen_t source_size = sizeof(source);
+        auto const count = recvfrom(fd_, buffer, sizeof(buffer), 0,
+                                    reinterpret_cast<sockaddr*>(&source), &source_size);
+        if (count <= 0) return;
+        ++received_;
+        bool const from_target = same_endpoint(source, target_);
+        if (!from_target) client_ = source;
+        if (from_target && client_.sin_port == 0) return;
+        sockaddr_in const destination = from_target ? client_ : target_;
+        auto const size = static_cast<std::size_t>(count);
+        if (size > faults_.mtu) {
+            ++mtu_dropped_;
+            return;
+        }
+        if (faults_.drop_every != 0 && received_ % faults_.drop_every == 0) {
+            ++dropped_;
+            return;
+        }
+        std::vector<unsigned char> data(buffer, buffer + size);
+        if (faults_.reorder_every != 0 && received_ % faults_.reorder_every == 0) {
+            // A delayed selected datagram is overtaken by subsequent traffic.
+            enqueue(data, destination, 15ms);
+            ++reordered_;
+        } else {
+            enqueue(data, destination);
+        }
+        if (faults_.duplicate_every != 0 && received_ % faults_.duplicate_every == 0) {
+            enqueue(data, destination, 1ms);
+            ++duplicated_;
+        }
+    }
+
+    void flush_due() {
+        auto const now = std::chrono::steady_clock::now();
+        for (auto iterator = queue_.begin(); iterator != queue_.end();) {
+            if (iterator->due > now) {
+                ++iterator;
+                continue;
+            }
+            sendto(fd_, iterator->data.data(), iterator->data.size(), 0,
+                   reinterpret_cast<sockaddr*>(&iterator->destination),
+                   sizeof(iterator->destination));
+            iterator = queue_.erase(iterator);
+        }
+    }
+
+    void run() {
+        while (!stopping_) {
+            for (;;) {
+                auto const before = received_.load();
+                receive_one();
+                if (received_.load() == before) break;
+            }
+            flush_due();
+            std::this_thread::sleep_for(1ms);
+        }
+        flush_due();
+    }
+
+    profile faults_;
+    int fd_ = -1;
+    std::uint16_t port_ = 0;
+    bool ready_ = false;
+    sockaddr_in target_ {};
+    sockaddr_in client_ {};
+    std::deque<queued_datagram> queue_;
+    std::atomic_bool stopping_ = false;
+    std::thread thread_;
+    std::atomic_size_t received_ = 0;
+    std::atomic_size_t dropped_ = 0;
+    std::atomic_size_t duplicated_ = 0;
+    std::atomic_size_t reordered_ = 0;
+    std::atomic_size_t mtu_dropped_ = 0;
+};
+
 struct client_flow {
     mf::flow_handle handle;
     std::string expected;
@@ -382,6 +521,90 @@ bool await_handshake(quic::openssl_connection& connection,
     }
     return connection.handshake_complete();
 }
+
+class QuicFaultProfile : public ::testing::TestWithParam<udp_fault_relay::profile> {};
+
+TEST_P(QuicFaultProfile, VerifiedMitmSurvivesUdpImpairment) {
+    origin_server origin;
+    ASSERT_TRUE(origin.ready());
+    quic::listener_service proxy(0, pki_file("srv-cert.pem"), pki_file("srv-key.pem"), false,
+                                 origin.port(), true, {}, {}, "127.0.0.1");
+    ASSERT_TRUE(proxy.prepare()) << proxy.last_error();
+    running_service runner(proxy);
+    udp_fault_relay relay(proxy.bound_port(), GetParam());
+    ASSERT_TRUE(relay.ready());
+
+    auto context = make_verified_client_context();
+    ASSERT_NE(context, nullptr);
+    auto const address = loopback(relay.port());
+    std::string error;
+    auto client = quic::connect_openssl_quic(
+        context.get(), reinterpret_cast<sockaddr const*>(&address), sizeof(address),
+        test_sni, &error);
+    ASSERT_NE(client, nullptr) << error;
+    ASSERT_TRUE(await_handshake(*client, 15s))
+        << "received=" << relay.received()
+        << " dropped=" << relay.dropped()
+        << " duplicated=" << relay.duplicated()
+        << " reordered=" << relay.reordered()
+        << " mtu_dropped=" << relay.mtu_dropped();
+
+    auto const flow = client->open_flow(mf::direction::bidirectional);
+    ASSERT_NE(flow.generation, 0U);
+    std::string payload(8192, '\0');
+    for (std::size_t index = 0; index < payload.size(); ++index) {
+        payload[index] = static_cast<char>('a' + (index % 19));
+    }
+    std::size_t sent = 0;
+    std::string received;
+    auto const deadline = std::chrono::steady_clock::now() + 15s;
+    while (received.size() < payload.size()
+           && std::chrono::steady_clock::now() < deadline) {
+        client->drain_events();
+        if (sent < payload.size()) {
+            auto const written = client->write(flow, payload.data() + sent,
+                                                payload.size() - sent);
+            sent += written.size;
+        }
+        unsigned char buffer[2048] {};
+        auto const read = client->read(flow, buffer, sizeof(buffer));
+        if (read.size != 0) {
+            received.append(reinterpret_cast<char const*>(buffer), read.size);
+        }
+        std::this_thread::sleep_for(1ms);
+    }
+    EXPECT_EQ(received, payload);
+    EXPECT_GT(relay.received(), 0U);
+    if (GetParam().drop_every != 0) {
+        EXPECT_GT(relay.dropped(), 0U);
+    }
+    if (GetParam().duplicate_every != 0) {
+        EXPECT_GT(relay.duplicated(), 0U);
+    }
+    if (GetParam().reorder_every != 0) {
+        EXPECT_GT(relay.reordered(), 0U);
+    }
+    EXPECT_EQ(relay.mtu_dropped(), 0U);
+    client->close();
+}
+
+std::string fault_profile_name(
+    testing::TestParamInfo<udp_fault_relay::profile> const& info) {
+    static constexpr char const* names[] {
+        "PeriodicLoss", "Duplication", "Reordering", "Delay", "Mtu1250"
+    };
+    return names[info.index];
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    UdpNetworkConditions, QuicFaultProfile,
+    ::testing::Values(
+        udp_fault_relay::profile { 13, 0, 0, 65535, 0ms },
+        udp_fault_relay::profile { 0, 5, 0, 65535, 0ms },
+        udp_fault_relay::profile { 0, 0, 4, 65535, 0ms },
+        udp_fault_relay::profile { 0, 0, 0, 65535, 10ms },
+        udp_fault_relay::profile { 0, 0, 0, 1250, 0ms }),
+    fault_profile_name);
 
 TEST(QuicTestbed, ConcurrentVerifiedMitmSessionsAndStreams) {
     origin_server origin;
