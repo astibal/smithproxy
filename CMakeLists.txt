@@ -505,6 +505,50 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
     endif()
 ENDIF()
 
+option(SMITHPROXY_FUZZING "Build Clang libFuzzer targets" OFF)
+if(SMITHPROXY_FUZZING)
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "SMITHPROXY_FUZZING requires Clang/libFuzzer")
+    endif()
+
+    function(smithproxy_fuzzer target)
+        target_compile_options(${target} PRIVATE
+                -fsanitize=fuzzer,address,undefined
+                -fno-omit-frame-pointer)
+        target_link_options(${target} PRIVATE
+                -fsanitize=fuzzer,address,undefined
+                -fno-omit-frame-pointer)
+    endfunction()
+
+    # socle is compiled as a support library for the state-machine harness.
+    # Clang 21 diagnoses its legacy dependent-name spelling as an error under
+    # the repository-wide -Werror policy, while older Clang and GCC accept it.
+    foreach(support_target socle_common_lib socle_lib)
+        if(TARGET ${support_target})
+            target_compile_options(${support_target} PRIVATE
+                    -Wno-error=missing-template-arg-list-after-template-kw)
+        endif()
+    endforeach()
+
+    add_executable(quic_wire_fuzzer
+            src/proxy/quic/wire.cpp
+            src/proxy/quic/fuzz/wire_fuzzer.cpp)
+    smithproxy_fuzzer(quic_wire_fuzzer)
+
+    add_executable(multiflow_fuzzer
+            src/proxy/multiflow/mfflowcom.cpp
+            src/proxy/multiflow/mfproxy.cpp
+            src/proxy/multiflow/fuzz/multiflow_fuzzer.cpp)
+    target_link_libraries(multiflow_fuzzer socle_lib pthread)
+    smithproxy_fuzzer(multiflow_fuzzer)
+
+    add_executable(quic_lifecycle_fuzzer
+            src/proxy/quic/openssl.cpp
+            src/proxy/quic/fuzz/lifecycle_fuzzer.cpp)
+    target_link_libraries(quic_lifecycle_fuzzer socle_lib pthread crypto ssl)
+    smithproxy_fuzzer(quic_lifecycle_fuzzer)
+endif()
+
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}")
 
 if (LIBCONFIGPP_FOUND)
