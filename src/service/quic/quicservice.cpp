@@ -57,7 +57,7 @@ diagnostics_snapshot listener_service::diagnostics() const {
         handshake_timeouts_.load(), handshake_failures_.load(), idle_timeouts_.load(),
         upstream_failures_.load(), alpn_failures_.load(),
         session_limit_rejections_.load(), stream_limit_rejections_.load(),
-        certificate_job_limit_rejections_.load(), discarded_non_quic_datagrams_.load()
+        certificate_job_limit_rejections_.load()
     };
 }
 
@@ -196,32 +196,32 @@ void listener_service::run() {
             break;
         }
 
-        bool safe_for_openssl = true;
-        if (!discard_non_quic_datagrams(safe_for_openssl)) break;
-
-        if (safe_for_openssl) {
-            if (!listener_->handle_events() && !stopping_) {
-                fail("OpenSSL QUIC listener event failure: " + openssl_error_stack());
-                break;
+        // Do not pre-classify this shared UDP socket with MSG_PEEK. OpenSSL may
+        // receive a batch after the peek, so a following DTLS datagram could
+        // still cross that boundary and make the apparent demultiplexing racy.
+        // Supporting QUIC and DTLS on one port requires a dispatcher which owns
+        // recvmsg() and injects only classified QUIC datagrams into OpenSSL.
+        if (!listener_->handle_events() && !stopping_) {
+            fail("OpenSSL QUIC listener event failure: " + openssl_error_stack());
+            break;
+        }
+        while (auto accepted = listener_->accept()) {
+            auto connection = std::shared_ptr<openssl_connection>(std::move(accepted));
+            if (sessions_.size() >= limits_.max_sessions) {
+                ++session_limit_rejections_;
+                connection->close(0x107);
+                continue;
             }
-            while (auto accepted = listener_->accept()) {
-                auto connection = std::shared_ptr<openssl_connection>(std::move(accepted));
-                if (sessions_.size() >= limits_.max_sessions) {
-                    ++session_limit_rejections_;
-                    connection->close(0x107);
-                    continue;
-                }
-                session incoming;
-                if (auto found = staged_upstreams_.find(connection->native_handle());
-                    found != staged_upstreams_.end()) {
-                    incoming.upstream = std::move(found->second.connection);
-                    staged_upstreams_.erase(found);
-                }
-                incoming.downstream = std::move(connection);
-                sessions_.push_back(std::move(incoming));
-                ++connection_count_;
-                ++accepted_sessions_;
+            session incoming;
+            if (auto found = staged_upstreams_.find(connection->native_handle());
+                found != staged_upstreams_.end()) {
+                incoming.upstream = std::move(found->second.connection);
+                staged_upstreams_.erase(found);
             }
+            incoming.downstream = std::move(connection);
+            sessions_.push_back(std::move(incoming));
+            ++connection_count_;
+            ++accepted_sessions_;
         }
         auto const now = std::chrono::steady_clock::now();
         for (auto& linked : sessions_) {
@@ -304,47 +304,6 @@ void listener_service::run() {
 }
 
 #if SMITHPROXY_OPENSSL_QUIC
-bool listener_service::discard_non_quic_datagrams(bool& safe_for_openssl) {
-    safe_for_openssl = true;
-    // QUIC v1/v2 packets accepted by OpenSSL have the invariant fixed bit set.
-    // DTLS uses disjoint first-byte ranges, so it is safe to discard everything
-    // else until a real UDP protocol demultiplexer is introduced.
-    constexpr std::size_t maximum_discards_per_iteration = 64;
-    bool discarded_any = false;
-    for (std::size_t discarded = 0; discarded < maximum_discards_per_iteration;
-         ++discarded) {
-        unsigned char first_byte = 0;
-        auto const peeked = ::recv(udp_fd_, &first_byte, sizeof(first_byte),
-                                   MSG_PEEK | MSG_DONTWAIT);
-        if (peeked < 0) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
-                // Do not hand the socket to OpenSSL after a discard: another
-                // non-QUIC datagram could arrive in the peek/receive gap.
-                safe_for_openssl = !discarded_any;
-                return true;
-            }
-            fail(std::string("QUIC prefilter peek: ") + std::strerror(errno));
-            return false;
-        }
-        if (peeked != 0 && (first_byte & 0x40U) != 0) return true;
-
-        // A short receive consumes the complete UDP datagram and truncates any
-        // remaining payload, avoiding an allocation controlled by the sender.
-        unsigned char sink = 0;
-        if (::recv(udp_fd_, &sink, sizeof(sink), MSG_DONTWAIT) < 0) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) return true;
-            fail(std::string("QUIC prefilter discard: ") + std::strerror(errno));
-            return false;
-        }
-        ++discarded_non_quic_datagrams_;
-        discarded_any = true;
-    }
-    // More unclassified data remains at the head of the socket queue. Skip the
-    // OpenSSL receive pass, but let established-session timers make progress.
-    safe_for_openssl = false;
-    return true;
-}
-
 void listener_service::start_draining(session& value,
                                       std::chrono::steady_clock::time_point now,
                                       std::uint64_t protocol_error) {

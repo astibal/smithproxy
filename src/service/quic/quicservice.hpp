@@ -43,7 +43,6 @@ struct diagnostics_snapshot {
     std::uint64_t session_limit_rejections = 0;
     std::uint64_t stream_limit_rejections = 0;
     std::uint64_t certificate_job_limit_rejections = 0;
-    std::uint64_t discarded_non_quic_datagrams = 0;
 };
 
 /**
@@ -88,8 +87,6 @@ private:
     /** Create, configure, and bind the nonblocking UDP listener socket. */
     bool open_socket();
 #if SMITHPROXY_OPENSSL_QUIC
-    /** Discard non-QUIC datagrams and report whether OpenSSL may read the queue. */
-    bool discard_non_quic_datagrams(bool& safe_for_openssl);
     /** Test/non-transparent connector which resolves SNI as a host name. */
     std::shared_ptr<openssl_connection> connect_upstream(std::string const& host);
     /** Production connector to the captured original destination. */
@@ -135,7 +132,6 @@ private:
     std::atomic_uint64_t session_limit_rejections_ = 0;
     std::atomic_uint64_t stream_limit_rejections_ = 0;
     std::atomic_uint64_t certificate_job_limit_rejections_ = 0;
-    std::atomic_uint64_t discarded_non_quic_datagrams_ = 0;
     bool ready_ = false;                         ///< prepare() completed successfully.
     std::string last_error_;                     ///< Fatal setup/event-loop diagnostic.
 
