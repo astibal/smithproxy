@@ -364,6 +364,7 @@ std::vector<multiflow::event> openssl_connection::drain_events() {
         return result;
     }
 
+    bool const entered_during_handshake = !SSL_is_init_finished(connection_.get());
     if (closing_) {
         SSL_SHUTDOWN_EX_ARGS args { 0, nullptr };
         if (SSL_shutdown_ex(connection_.get(), SSL_SHUTDOWN_FLAG_NO_BLOCK,
@@ -396,6 +397,15 @@ std::vector<multiflow::event> openssl_connection::drain_events() {
              close_info.error_code);
     }
     if (closed_) {
+        for (auto const& pending : events_) result.push_back(pending.second);
+        events_.clear();
+        return result;
+    }
+    // Keep streams queued in OpenSSL when this call crossed the handshake
+    // boundary. Listener code may legitimately discard handshake-progress
+    // events before its MFProxy exists; accepting streams here would make
+    // early application data disappear in that narrow transition window.
+    if (entered_during_handshake) {
         for (auto const& pending : events_) result.push_back(pending.second);
         events_.clear();
         return result;
