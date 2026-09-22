@@ -149,3 +149,35 @@ TEST(MFProxy, PropagatesConnectionClose) {
     EXPECT_EQ(events.front().type, mf::event_type::connection_close);
     EXPECT_EQ(events.front().protocol_error, 23U);
 }
+
+TEST(MFProxy, RejectsFlowsBeyondConfiguredLimit) {
+    auto left = std::make_shared<mf::fake_connection>();
+    auto right = std::make_shared<mf::fake_connection>();
+    mf::MFProxy proxy(left, right, { 1, 1024 });
+    auto const accepted = left->open_flow(mf::direction::bidirectional);
+    proxy.pump_once();
+    auto const rejected = left->open_flow(mf::direction::bidirectional);
+    proxy.pump_once();
+
+    EXPECT_EQ(proxy.pair_count(), 1U);
+    EXPECT_EQ(proxy.limit_rejections(), 1U);
+    ASSERT_TRUE(left->reset_code(rejected));
+    EXPECT_EQ(*left->reset_code(rejected), 0x107U);
+    EXPECT_FALSE(left->reset_code(accepted));
+}
+
+TEST(MFProxy, CapsBufferedChunkPerDirection) {
+    auto left = std::make_shared<mf::fake_connection>();
+    auto right = std::make_shared<mf::fake_connection>();
+    mf::MFProxy proxy(left, right, { 4, 2 });
+    auto const flow = left->open_flow(mf::direction::bidirectional);
+    proxy.pump_once();
+    std::string const payload = "abcd";
+    left->inject_receive(flow, payload.data(), payload.size());
+
+    EXPECT_EQ(proxy.pump_once(), 2U);
+    mf::flow_handle const right_flow { 0, 1 };
+    auto const first = right->consume_send(right_flow);
+    EXPECT_EQ(std::string(first.begin(), first.end()), "ab");
+    EXPECT_EQ(proxy.pump_once(), 2U);
+}

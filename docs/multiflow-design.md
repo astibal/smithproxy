@@ -451,9 +451,11 @@ chain with Smithproxy's configured trust store and verifies the peer identity
 against SNI. Only then does it pass the actual upstream leaf certificate to the
 existing `SSLFactory` spoof/cache path and install that derived certificate on
 the downstream handshake. Failure at any of those steps aborts the downstream
-handshake. The first implementation performs this lookup synchronously inside
-the listener worker; moving it to an asynchronous certificate job is a future
-scalability improvement, not a change to the trust model.
+handshake. Upstream verification and certificate generation run in bounded
+asynchronous jobs. The OpenSSL certificate callback suspends and retries the
+handshake, then installs the prepared certificate in the listener thread. This
+keeps a slow origin from blocking every QUIC session on the worker without
+changing the trust model.
 
 Transparent routing is taken from Linux `IP_RECVORIGDSTADDR` before OpenSSL
 consumes the Initial datagram. The captured peer-to-destination association is
@@ -468,12 +470,16 @@ individual reply, so a captured original port different from the bound listener
 port is rejected. Supporting a high divert port requires a future
 per-destination transparent transmit BIO/socket; it is not silently emulated.
 
-The listener has a deliberately small lifecycle skeleton: sessions start in
-`handshake`, become `active` only after both handshakes finish, and move to
-`closed` when either connection closes or the ten-second handshake deadline is
-reached. Closed sessions are removed from the event loop and both endpoints are
-released. Idle timers, configurable limits and draining policy are intentionally
-not part of this first lifecycle step.
+Sessions move through `handshake`, `active`, and `draining`. Handshake and idle
+timeouts are configurable, and draining keeps the OpenSSL QUIC shutdown alive
+for a bounded period before deterministic cleanup. Downstream and upstream ALPN
+must both be non-empty and equal (`h3` is the currently supported protocol).
+
+The bare service bounds concurrent sessions, certificate jobs, streams per
+session, and buffered bytes per stream direction. A diagnostics snapshot exposes
+current, accepted, and completed sessions plus timeout, upstream, ALPN, and
+individual limit-rejection counters. Defaults are 4096 sessions, 64 certificate
+jobs, 256 streams per session, and 16 KiB per stream direction.
 
 ## Decisions made by this spike
 

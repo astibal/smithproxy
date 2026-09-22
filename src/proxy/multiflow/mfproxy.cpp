@@ -6,8 +6,9 @@
 
 namespace sx::multiflow {
 
-MFProxy::MFProxy(std::shared_ptr<connection> left, std::shared_ptr<connection> right)
-    : left_(std::move(left)), right_(std::move(right)) {}
+MFProxy::MFProxy(std::shared_ptr<connection> left, std::shared_ptr<connection> right,
+                 limits resource_limits)
+    : left_(std::move(left)), right_(std::move(right)), limits_(resource_limits) {}
 
 std::size_t MFProxy::pump_once(std::size_t chunk_size) {
     if (!left_ || !right_ || chunk_size == 0 || closed_) return 0;
@@ -15,6 +16,8 @@ std::size_t MFProxy::pump_once(std::size_t chunk_size) {
     if (closed_) return 0;
     process_events(false, right_->drain_events());
     if (closed_) return 0;
+    chunk_size = std::min(chunk_size, limits_.buffer_per_direction);
+    if (chunk_size == 0) return 0;
 
     std::size_t moved = 0;
     for (auto& item : pairs_) {
@@ -64,6 +67,11 @@ void MFProxy::pair_new_flow(bool from_left, flow_handle source) {
     auto& destination_connection = from_left ? right_ : left_;
     auto const source_direction = source_connection->direction_of(source);
     if (!source_direction) return;
+    if (pairs_.size() >= limits_.max_flows) {
+        source_connection->reset(source, 0x107);
+        ++limit_rejections_;
+        return;
+    }
 
     auto destination_direction = *source_direction;
     if (*source_direction == direction::send_only) destination_direction = direction::receive_only;

@@ -45,11 +45,21 @@ std::string endpoint_key(datagram_endpoint const& endpoint) {
 listener_service::listener_service(std::uint16_t port, std::string certificate,
                                    std::string private_key, bool transparent,
                                    std::uint16_t upstream_port, bool verify_upstream,
-                                   lifecycle_options lifecycle)
+                                   lifecycle_options lifecycle, resource_limits limits)
     : port_(port), certificate_(std::move(certificate)),
       private_key_(std::move(private_key)), transparent_(transparent),
       upstream_port_(upstream_port), verify_upstream_(verify_upstream),
-      lifecycle_(lifecycle) {}
+      lifecycle_(lifecycle), limits_(limits) {}
+
+diagnostics_snapshot listener_service::diagnostics() const {
+    return {
+        connection_count_.load(), accepted_sessions_.load(), completed_sessions_.load(),
+        handshake_timeouts_.load(), handshake_failures_.load(), idle_timeouts_.load(),
+        upstream_failures_.load(), alpn_failures_.load(),
+        session_limit_rejections_.load(), stream_limit_rejections_.load(),
+        certificate_job_limit_rejections_.load()
+    };
+}
 
 listener_service::~listener_service() {
     stop();
@@ -192,6 +202,11 @@ void listener_service::run() {
         }
         while (auto accepted = listener_->accept()) {
             auto connection = std::shared_ptr<openssl_connection>(std::move(accepted));
+            if (sessions_.size() >= limits_.max_sessions) {
+                ++session_limit_rejections_;
+                connection->close(0x107);
+                continue;
+            }
             session incoming;
             if (auto found = staged_upstreams_.find(connection->native_handle());
                 found != staged_upstreams_.end()) {
@@ -201,39 +216,60 @@ void listener_service::run() {
             incoming.downstream = std::move(connection);
             sessions_.push_back(std::move(incoming));
             ++connection_count_;
+            ++accepted_sessions_;
         }
         auto const now = std::chrono::steady_clock::now();
         for (auto& linked : sessions_) {
             if (linked.state == session_state::handshake) {
                 linked.downstream->drain_events();
-                if (linked.downstream->closed()
-                    || now - linked.created >= lifecycle_.handshake_timeout) {
+                if (linked.downstream->closed()) {
+                    ++handshake_failures_;
+                    start_draining(linked, now);
+                } else if (now - linked.created >= lifecycle_.handshake_timeout) {
+                    ++handshake_timeouts_;
                     start_draining(linked, now);
                 } else if (!verify_upstream_ && linked.downstream->handshake_complete()
                            && !linked.upstream) {
                     linked.upstream = connect_upstream(linked.downstream->server_name());
-                    if (!linked.upstream) start_draining(linked, now);
+                    if (!linked.upstream) {
+                        ++upstream_failures_;
+                        start_draining(linked, now);
+                    }
                 } else if (linked.upstream) {
                     linked.upstream->drain_events();
                     if (linked.upstream->closed()) {
+                        ++upstream_failures_;
                         start_draining(linked, now);
                     } else if (linked.upstream->handshake_complete()) {
                         auto const downstream_alpn = linked.downstream->negotiated_alpn();
                         auto const upstream_alpn = linked.upstream->negotiated_alpn();
                         if (downstream_alpn.empty() || downstream_alpn != upstream_alpn) {
+                            ++alpn_failures_;
                             start_draining(linked, now, 1);
                             continue;
                         }
                         linked.proxy = std::make_unique<multiflow::MFProxy>(
-                            linked.downstream, linked.upstream);
+                            linked.downstream, linked.upstream,
+                            multiflow::MFProxy::limits {
+                                limits_.max_streams_per_session,
+                                limits_.stream_buffer_bytes });
                         linked.state = session_state::active;
                         linked.last_activity = now;
                     }
                 }
             } else if (linked.state == session_state::active) {
                 if (linked.proxy->pump_once() != 0) linked.last_activity = now;
+                auto const rejected = linked.proxy->limit_rejections();
+                if (rejected > linked.reported_stream_limit_rejections) {
+                    stream_limit_rejections_ +=
+                        rejected - linked.reported_stream_limit_rejections;
+                    linked.reported_stream_limit_rejections = rejected;
+                }
                 if (linked.downstream->closed() || linked.upstream->closed()
                     || now - linked.last_activity >= lifecycle_.idle_timeout) {
+                    if (!linked.downstream->closed() && !linked.upstream->closed()) {
+                        ++idle_timeouts_;
+                    }
                     start_draining(linked, now);
                 }
             } else {
@@ -247,12 +283,14 @@ void listener_service::run() {
                 && now - linked.draining_since >= lifecycle_.drain_timeout;
         }), sessions_.end());
         connection_count_ -= before - sessions_.size();
+        completed_sessions_ += before - sessions_.size();
         for (auto iterator = staged_upstreams_.begin(); iterator != staged_upstreams_.end();) {
             if (now - iterator->second.created < lifecycle_.handshake_timeout) {
                 ++iterator;
                 continue;
             }
             iterator->second.connection->close();
+            ++upstream_failures_;
             iterator = staged_upstreams_.erase(iterator);
         }
     }
@@ -273,6 +311,7 @@ void listener_service::start_draining(session& value,
 }
 
 void listener_service::cleanup_sessions() {
+    completed_sessions_ += sessions_.size();
     for (auto& linked : sessions_) {
         if (linked.downstream) linked.downstream->close();
         if (linked.upstream) linked.upstream->close();
@@ -317,6 +356,7 @@ int listener_service::prepare_verified_certificate(SSL* downstream) {
         }
         certificate_jobs_.erase(found);
         if (!verified.connection || !install_verified_certificate(downstream, verified)) {
+            ++upstream_failures_;
             if (verified.connection) verified.connection->close(1);
             return 0;
         }
@@ -353,6 +393,10 @@ int listener_service::prepare_verified_certificate(SSL* downstream) {
     // Bare transparent mode therefore requires TPROXY --on-port 0 and a
     // listener bound to the original service port.
     if (destination_port == 0 || destination_port != bound_port_) return 0;
+    if (certificate_jobs_.size() >= limits_.max_certificate_jobs) {
+        ++certificate_job_limit_rejections_;
+        return 0;
+    }
     try {
         certificate_jobs_.emplace(
             downstream,

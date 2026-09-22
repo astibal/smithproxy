@@ -21,6 +21,27 @@ struct lifecycle_options {
     std::chrono::milliseconds drain_timeout { std::chrono::seconds(3) };
 };
 
+struct resource_limits {
+    std::size_t max_sessions = 4096;
+    std::size_t max_streams_per_session = 256;
+    std::size_t stream_buffer_bytes = 16 * 1024;
+    std::size_t max_certificate_jobs = 64;
+};
+
+struct diagnostics_snapshot {
+    std::size_t current_sessions = 0;
+    std::uint64_t accepted_sessions = 0;
+    std::uint64_t completed_sessions = 0;
+    std::uint64_t handshake_timeouts = 0;
+    std::uint64_t handshake_failures = 0;
+    std::uint64_t idle_timeouts = 0;
+    std::uint64_t upstream_failures = 0;
+    std::uint64_t alpn_failures = 0;
+    std::uint64_t session_limit_rejections = 0;
+    std::uint64_t stream_limit_rejections = 0;
+    std::uint64_t certificate_job_limit_rejections = 0;
+};
+
 /** First daemon-facing QUIC listener. One instance owns one UDP socket/event loop. */
 class listener_service final {
 public:
@@ -28,7 +49,8 @@ public:
                      std::string private_key, bool transparent,
                      std::uint16_t upstream_port = 443,
                      bool verify_upstream = true,
-                     lifecycle_options lifecycle = {});
+                     lifecycle_options lifecycle = {},
+                     resource_limits limits = {});
     ~listener_service();
 
     listener_service(listener_service const&) = delete;
@@ -42,6 +64,7 @@ public:
     std::uint16_t bound_port() const { return bound_port_; }
     std::string const& last_error() const { return last_error_; }
     std::size_t connection_count() const { return connection_count_; }
+    diagnostics_snapshot diagnostics() const;
 
 private:
     bool open_socket();
@@ -67,9 +90,20 @@ private:
     std::uint16_t upstream_port_;
     bool verify_upstream_;
     lifecycle_options lifecycle_;
+    resource_limits limits_;
     int udp_fd_ = -1;
     std::atomic_bool stopping_ = false;
     std::atomic_size_t connection_count_ = 0;
+    std::atomic_uint64_t accepted_sessions_ = 0;
+    std::atomic_uint64_t completed_sessions_ = 0;
+    std::atomic_uint64_t handshake_timeouts_ = 0;
+    std::atomic_uint64_t handshake_failures_ = 0;
+    std::atomic_uint64_t idle_timeouts_ = 0;
+    std::atomic_uint64_t upstream_failures_ = 0;
+    std::atomic_uint64_t alpn_failures_ = 0;
+    std::atomic_uint64_t session_limit_rejections_ = 0;
+    std::atomic_uint64_t stream_limit_rejections_ = 0;
+    std::atomic_uint64_t certificate_job_limit_rejections_ = 0;
     bool ready_ = false;
     std::string last_error_;
 
@@ -86,6 +120,7 @@ private:
         std::shared_ptr<openssl_connection> downstream;
         std::shared_ptr<openssl_connection> upstream;
         std::unique_ptr<multiflow::MFProxy> proxy;
+        std::size_t reported_stream_limit_rejections = 0;
     };
     std::vector<session> sessions_;
     struct staged_upstream {

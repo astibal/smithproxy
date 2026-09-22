@@ -10,14 +10,23 @@
 
 namespace sx::multiflow {
 
+struct proxy_limits {
+    std::size_t max_flows = 256;
+    std::size_t buffer_per_direction = 16 * 1024;
+};
+
 /** Connection-level coordinator which pairs and pumps logical flows. */
 class MFProxy {
 public:
-    MFProxy(std::shared_ptr<connection> left, std::shared_ptr<connection> right);
+    using limits = proxy_limits;
+
+    MFProxy(std::shared_ptr<connection> left, std::shared_ptr<connection> right,
+            limits resource_limits = {});
 
     /** Process lifecycle events and move at most one chunk per direction/flow. */
     std::size_t pump_once(std::size_t chunk_size = 16 * 1024);
     std::size_t pair_count() const { return pairs_.size(); }
+    std::size_t limit_rejections() const { return limit_rejections_; }
 
 private:
     struct pair {
@@ -46,6 +55,8 @@ private:
     std::map<flow_id, std::unique_ptr<pair>> pairs_;
     std::set<flow_id> retired_;
     bool closed_ = false;
+    limits limits_;
+    std::size_t limit_rejections_ = 0;
 };
 
 } // namespace sx::multiflow

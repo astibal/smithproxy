@@ -63,12 +63,23 @@ TEST(QuicListenerService, CleansUpHandshakeTimeout) {
     ASSERT_NE(client_context, nullptr);
     SSL_CTX_set_verify(client_context.get(), SSL_VERIFY_NONE, nullptr);
 
+    auto const silent_origin_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    ASSERT_GE(silent_origin_fd, 0);
+    sockaddr_in silent_origin {};
+    silent_origin.sin_family = AF_INET;
+    silent_origin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    ASSERT_EQ(bind(silent_origin_fd, reinterpret_cast<sockaddr*>(&silent_origin),
+                   sizeof(silent_origin)), 0);
+    socklen_t silent_origin_size = sizeof(silent_origin);
+    ASSERT_EQ(getsockname(silent_origin_fd, reinterpret_cast<sockaddr*>(&silent_origin),
+                          &silent_origin_size), 0);
+
     quic::lifecycle_options lifecycle;
     lifecycle.handshake_timeout = std::chrono::milliseconds(100);
     lifecycle.drain_timeout = std::chrono::milliseconds(100);
     quic::listener_service proxy(0, "etc/certs/default/srv-cert.pem",
                                  "etc/certs/default/srv-key.pem", false,
-                                 9, false, lifecycle);
+                                 ntohs(silent_origin.sin_port), false, lifecycle);
     ASSERT_TRUE(proxy.prepare()) << proxy.last_error();
     std::thread runner([&proxy]() { proxy.run(); });
     struct cleanup_guard {
@@ -100,10 +111,59 @@ TEST(QuicListenerService, CleansUpHandshakeTimeout) {
     }
     EXPECT_TRUE(accepted);
     EXPECT_EQ(proxy.connection_count(), 0U);
+    auto const diagnostics = proxy.diagnostics();
+    EXPECT_EQ(diagnostics.accepted_sessions, 1U);
+    EXPECT_EQ(diagnostics.completed_sessions, 1U);
+    EXPECT_EQ(diagnostics.handshake_timeouts, 1U);
 
     external->close();
     proxy.stop();
     runner.join();
+    close(silent_origin_fd);
+}
+
+TEST(QuicListenerService, RejectsSessionsBeyondConfiguredLimit) {
+    auto client_context = quic::make_openssl_quic_context(false);
+    ASSERT_NE(client_context, nullptr);
+    SSL_CTX_set_verify(client_context.get(), SSL_VERIFY_NONE, nullptr);
+
+    quic::resource_limits limits;
+    limits.max_sessions = 0;
+    quic::listener_service proxy(0, "etc/certs/default/srv-cert.pem",
+                                 "etc/certs/default/srv-key.pem", false,
+                                 9, false, {}, limits);
+    ASSERT_TRUE(proxy.prepare()) << proxy.last_error();
+    std::thread runner([&proxy]() { proxy.run(); });
+    struct cleanup_guard {
+        quic::listener_service& service;
+        std::thread& runner;
+        ~cleanup_guard() {
+            service.stop();
+            if (runner.joinable()) runner.join();
+        }
+    } cleanup { proxy, runner };
+
+    sockaddr_in address {};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port = htons(proxy.bound_port());
+    std::string error;
+    auto external = quic::connect_openssl_quic(
+        client_context.get(), reinterpret_cast<sockaddr*>(&address),
+        sizeof(address), "127.0.0.1", &error);
+    ASSERT_NE(external, nullptr) << error;
+
+    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (std::chrono::steady_clock::now() < deadline
+           && proxy.diagnostics().session_limit_rejections == 0) {
+        external->drain_events();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    auto const diagnostics = proxy.diagnostics();
+    EXPECT_EQ(diagnostics.current_sessions, 0U);
+    EXPECT_EQ(diagnostics.accepted_sessions, 0U);
+    EXPECT_EQ(diagnostics.session_limit_rejections, 1U);
+    external->close();
 }
 
 TEST(QuicListenerService, ProxiesStreamAndCleansUpIdleSession) {
@@ -207,6 +267,10 @@ TEST(QuicListenerService, ProxiesStreamAndCleansUpIdleSession) {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     EXPECT_EQ(proxy.connection_count(), 0U);
+    auto const diagnostics = proxy.diagnostics();
+    EXPECT_EQ(diagnostics.accepted_sessions, 1U);
+    EXPECT_EQ(diagnostics.completed_sessions, 1U);
+    EXPECT_EQ(diagnostics.idle_timeouts, 1U);
 
     external->close();
     proxy.stop();
