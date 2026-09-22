@@ -148,7 +148,9 @@ TEST(OpenSslQuic, OutgoingAdapterCompletesHandshake) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     EXPECT_TRUE(!rejected || rejected->closed());
-    if (rejected) EXPECT_FALSE(rejected->handshake_complete());
+    if (rejected) {
+        EXPECT_FALSE(rejected->handshake_complete());
+    }
     if (rejected_server) rejected_server->close();
     client->close();
     server->close();

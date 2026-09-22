@@ -11,12 +11,22 @@
 
 namespace sx::multiflow {
 
-/** A baseCom compatibility facade for one logical multiflow byte stream. */
+/**
+ * Exposes one logical multiflow stream through Smithproxy's baseCom API.
+ *
+ * There is deliberately no operating-system file descriptor per instance.
+ * MFProxy schedules the stream through its owning multiplexed connection, while
+ * legacy consumers can keep using familiar baseCom read/write/status methods.
+ * The connection is weakly referenced so a flow facade cannot prolong the
+ * lifetime of its physical transport.
+ */
 class MFFlowCom final : public baseCom {
 public:
+    /** Bind the facade to one flow owned by the shared physical connection. */
     MFFlowCom(std::shared_ptr<connection> owner, flow_handle flow);
     ~MFFlowCom() override;
 
+    /** Create an unbound facade as required by the baseCom factory contract. */
     baseCom* replicate() override;
 
     int connect(const char*, const char*) override;
@@ -30,6 +40,7 @@ public:
 
     void shutdown(int token) override;
     void close(int token) override;
+    /** Idempotently send FIN for this facade's flow without closing siblings. */
     void cleanup() override;
 
     bool is_connected(int token) override;
@@ -41,8 +52,8 @@ public:
     int translate_socket(int token) const override;
     int poll() override;
 
-    flow_handle flow() const { return flow_; }
-    int token() const { return token_; }
+    flow_handle flow() const { return flow_; } ///< Underlying logical-flow handle.
+    int token() const { return token_; }        ///< Synthetic baseCom socket token.
 
     std::string shortname() const override { return "mf"; }
     std::string to_string(int verbosity) const override;
@@ -50,15 +61,18 @@ public:
     TYPENAME_OVERRIDE("MFFlowCom")
 
 private:
+    /** Translate transport-neutral results to baseCom/errno conventions. */
     ssize_t map_result(io_result result);
+    /** Lock the non-owning connection reference for one operation. */
     std::shared_ptr<connection> lock_connection() const;
+    /** Allocate negative tokens which cannot collide with real descriptors. */
     static int next_token();
 
-    std::weak_ptr<connection> connection_;
-    flow_handle flow_;
-    int token_ = 0;
-    std::deque<unsigned char> peek_buffer_;
-    bool cleaned_up_ = false;
+    std::weak_ptr<connection> connection_;      ///< Non-owning physical transport.
+    flow_handle flow_;                          ///< Stream selected on that transport.
+    int token_ = 0;                             ///< Synthetic identity for baseCom.
+    std::deque<unsigned char> peek_buffer_;     ///< Bytes retained by peek().
+    bool cleaned_up_ = false;                   ///< Guards duplicate FIN transmission.
 };
 
 } // namespace sx::multiflow

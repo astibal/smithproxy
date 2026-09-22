@@ -12,12 +12,14 @@ namespace sx::multiflow {
 using flow_id = std::uint64_t;
 using generation_id = std::uint64_t;
 
+/** Local capabilities of one logical byte stream. */
 enum class direction {
     bidirectional,
     send_only,
     receive_only,
 };
 
+/** Edge-triggered notifications produced by a multiplexed connection. */
 enum class event_type {
     flow_open,
     readable,
@@ -27,6 +29,7 @@ enum class event_type {
     connection_close,
 };
 
+/** Transport-neutral outcome of a flow operation. */
 enum class io_status {
     ok,
     would_block,
@@ -36,6 +39,12 @@ enum class io_status {
     invalid_handle,
 };
 
+/**
+ * Non-owning reference to a logical flow.
+ *
+ * The generation prevents a stale handle from becoming valid if an
+ * implementation ever reuses the numeric flow ID.
+ */
 struct flow_handle {
     flow_id id = 0;
     generation_id generation = 0;
@@ -45,12 +54,14 @@ struct flow_handle {
     }
 };
 
+/** A readiness or lifecycle notification, optionally scoped to one flow. */
 struct event {
     event_type type;
     std::optional<flow_handle> flow;
     std::uint64_t protocol_error = 0;
 };
 
+/** Number of bytes transferred together with the operation's final status. */
 struct io_result {
     std::size_t size = 0;
     io_status status = io_status::ok;
@@ -67,17 +78,25 @@ class connection {
 public:
     virtual ~connection() = default;
 
+    /** Open a locally initiated flow. An empty handle reports refusal. */
     virtual flow_handle open_flow(direction flow_direction) = 0;
+    /** Return whether the handle still belongs to this connection. */
     virtual bool contains(flow_handle flow) const = 0;
+    /** Return the local read/write capabilities of a live flow. */
     virtual std::optional<direction> direction_of(flow_handle flow) const = 0;
 
+    /** Perform nonblocking stream I/O; partial progress is allowed. */
     virtual io_result read(flow_handle flow, void* destination, std::size_t size) = 0;
     virtual io_result write(flow_handle flow, const void* source, std::size_t size) = 0;
 
+    /** Gracefully conclude the local sending half (QUIC FIN semantics). */
     virtual io_status finish(flow_handle flow) = 0;
+    /** Abort a flow and preserve the application protocol error code. */
     virtual io_status reset(flow_handle flow, std::uint64_t protocol_error) = 0;
+    /** Start connection-wide shutdown. */
     virtual void close(std::uint64_t protocol_error = 0) = 0;
 
+    /** Nonblocking readiness hints; callers must still handle would_block. */
     virtual bool readable(flow_handle flow) const = 0;
     virtual bool writable(flow_handle flow) const = 0;
 

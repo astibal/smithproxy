@@ -25,20 +25,24 @@
 
 namespace sx::quic {
 
+/** Address value copied out of an OpenSSL BIO, safe beyond callback lifetime. */
 struct datagram_endpoint {
     sockaddr_storage address {};
     socklen_t size = 0;
     bool valid() const { return size != 0; }
 };
 
+/** Observes the peer and original local destination of an incoming datagram. */
 using datagram_observer = std::function<void(datagram_endpoint const& peer,
                                               datagram_endpoint const& local)>;
+/** Copy an OpenSSL BIO_ADDR into the transport-neutral endpoint value. */
 datagram_endpoint endpoint_from_bio_address(const BIO_ADDR* address);
 
 constexpr bool openssl_quic_available() {
     return SMITHPROXY_OPENSSL_QUIC != 0;
 }
 
+/** Consume the current thread's OpenSSL error queue into a readable string. */
 std::string openssl_error_stack();
 
 struct ssl_deleter {
@@ -64,6 +68,7 @@ unique_ssl_ctx make_openssl_quic_context(bool server);
  */
 class openssl_connection final : public multiflow::connection {
 public:
+    /** Take ownership of a QUIC connection SSL and, optionally, its UDP fd. */
     explicit openssl_connection(unique_ssl connection, int owned_udp_fd = -1);
     ~openssl_connection() override;
 
@@ -86,21 +91,29 @@ public:
 
     bool readable(multiflow::flow_handle flow) const override;
     bool writable(multiflow::flow_handle flow) const override;
+    /** Progress TLS, QUIC timers, stream acceptance, and lifecycle events. */
     std::vector<multiflow::event> drain_events() override;
 
     /** Feed a datagram after an external CID demultiplexer selected this connection. */
     bool inject_datagram(const unsigned char* data, std::size_t size,
                          const BIO_ADDR* peer, const BIO_ADDR* local);
 
-    SSL* native_handle() const { return connection_.get(); }
+    SSL* native_handle() const { return connection_.get(); } ///< Borrowed OpenSSL handle.
+    /** Return the current datagram peer copied from the connection BIO. */
     datagram_endpoint peer_endpoint() const;
+    /** True once TLS 1.3 authentication and QUIC parameter exchange complete. */
     bool handshake_complete() const;
+    /** True once local or remote connection shutdown has begun. */
     bool closed() const { return closing_ || closed_; }
+    /** SNI presented by the client or configured for an outgoing connection. */
     std::string server_name() const;
+    /** Negotiated ALPN, or an empty string before/without negotiation. */
     std::string negotiated_alpn() const;
 
 private:
+    /** Owns the OpenSSL stream object and terminal-event suppression state. */
     struct stream_state;
+    /** Coalescing key: at most one event of each type per flow is pending. */
     struct event_key {
         multiflow::event_type type;
         multiflow::flow_id id;
@@ -111,22 +124,26 @@ private:
         }
     };
 
+    /** Resolve a handle only if both its ID and generation still match. */
     stream_state* find(multiflow::flow_handle flow);
     stream_state const* find(multiflow::flow_handle flow) const;
+    /** Register an OpenSSL stream and publish its flow_open event. */
     multiflow::flow_handle attach_stream(unique_ssl stream, bool incoming);
+    /** Query one stream through OpenSSL's zero-timeout polling API. */
     bool poll_stream(stream_state const& stream, std::uint64_t events) const;
+    /** Queue a de-duplicated event for the next drain_events() call. */
     void emit(multiflow::event_type type,
               std::optional<multiflow::flow_handle> flow,
               std::uint64_t protocol_error = 0);
 
-    unique_ssl connection_;
-    int owned_udp_fd_ = -1;
-    std::map<multiflow::flow_id, std::unique_ptr<stream_state>> streams_;
-    std::map<event_key, multiflow::event> events_;
+    unique_ssl connection_;                     ///< Owned OpenSSL QUIC connection.
+    int owned_udp_fd_ = -1;                     ///< Outgoing socket, or -1 for listener-owned.
+    std::map<multiflow::flow_id, std::unique_ptr<stream_state>> streams_; ///< Live streams.
+    std::map<event_key, multiflow::event> events_; ///< Pending coalesced notifications.
     multiflow::flow_id next_internal_id_ = 1;
     multiflow::generation_id next_generation_ = 1;
-    bool closing_ = false;
-    bool closed_ = false;
+    bool closing_ = false;                      ///< Nonblocking shutdown needs progress.
+    bool closed_ = false;                       ///< Transport reached terminal state.
 };
 
 /**
@@ -136,6 +153,7 @@ private:
 std::unique_ptr<openssl_connection> connect_openssl_quic(
     SSL_CTX* context, const sockaddr* peer, socklen_t peer_size,
     std::string const& server_name, std::string* error = nullptr);
+/** Same connector with an explicit single-protocol ALPN offer. */
 std::unique_ptr<openssl_connection> connect_openssl_quic(
     SSL_CTX* context, const sockaddr* peer, socklen_t peer_size,
     std::string const& server_name, std::string const& alpn,
@@ -150,7 +168,13 @@ std::unique_ptr<openssl_connection> connect_openssl_quic(
  */
 class openssl_listener final {
 public:
+    /** Internal state whose lifetime must cover the BIO receive callback. */
     struct observer_state;
+    /**
+     * Attach a nonblocking OpenSSL QUIC listener to a caller-owned UDP socket.
+     * enable_local_address requests destination-address metadata for transparent
+     * replies; observer receives copied metadata before OpenSSL consumes it.
+     */
     static std::unique_ptr<openssl_listener> create(SSL_CTX* context, int udp_fd,
                                                      bool enable_local_address = true,
                                                      datagram_observer observer = {});
@@ -159,7 +183,9 @@ public:
     openssl_listener(openssl_listener const&) = delete;
     openssl_listener& operator=(openssl_listener const&) = delete;
 
+    /** Dequeue one connection whose OpenSSL listener handshake made it visible. */
     std::unique_ptr<openssl_connection> accept();
+    /** Progress listener packet processing and QUIC timers without blocking. */
     bool handle_events();
     bool local_address_enabled() const { return local_address_enabled_; }
     SSL* native_handle() const { return listener_.get(); }
@@ -168,9 +194,9 @@ private:
     openssl_listener(std::unique_ptr<observer_state> state, unique_ssl listener,
                      bool local_address_enabled);
 
-    std::unique_ptr<observer_state> observer_state_;
-    unique_ssl listener_;
-    bool local_address_enabled_ = false;
+    std::unique_ptr<observer_state> observer_state_; ///< Storage referenced by BIO callback.
+    unique_ssl listener_;                            ///< Owned OpenSSL listener object.
+    bool local_address_enabled_ = false;             ///< BIO supports local-address metadata.
 };
 
 #endif // SMITHPROXY_OPENSSL_QUIC

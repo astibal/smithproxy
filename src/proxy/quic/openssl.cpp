@@ -44,16 +44,18 @@ struct openssl_connection::stream_state {
                  multiflow::direction stream_direction)
         : handle(flow_handle), stream(std::move(ssl_stream)), direction(stream_direction) {}
 
-    multiflow::flow_handle handle;
-    unique_ssl stream;
-    multiflow::direction direction;
+    multiflow::flow_handle handle;       // Stable public identity for this SSL stream.
+    unique_ssl stream;                   // Must be destroyed before the parent connection.
+    multiflow::direction direction;      // Capabilities from this endpoint's perspective.
+    // OpenSSL retains terminal state indefinitely. These flags make FIN/reset
+    // edge-triggered to MFProxy and avoid unsafe repeated state queries.
     bool read_terminal_reported = false;
     bool write_terminal_reported = false;
 };
 
 struct openssl_listener::observer_state {
-    datagram_observer observer;
-    datagram_endpoint pending_local;
+    datagram_observer observer;          // Service callback receiving copied metadata.
+    datagram_endpoint pending_local;     // Destination peeked before OpenSSL consumes data.
 };
 
 openssl_listener::openssl_listener(std::unique_ptr<observer_state> state,
@@ -90,6 +92,8 @@ datagram_endpoint endpoint_from_bio(const BIO_ADDR* address) {
 }
 
 datagram_endpoint peek_original_destination(int fd) {
+    // MSG_PEEK leaves the datagram available to OpenSSL while exposing Linux
+    // TPROXY ancillary data which OpenSSL's public listener API does not return.
     datagram_endpoint result;
     std::array<unsigned char, 1> byte {};
     std::array<unsigned char, 256> control {};
@@ -127,6 +131,9 @@ long observe_datagrams(BIO* bio, int operation, const char* argument,
     auto* state = reinterpret_cast<openssl_listener::observer_state*>(
         BIO_get_callback_arg(bio));
     if (!state) return result;
+    // Pair the pre-receive destination peek with the peer address reported by
+    // OpenSSL after its recvmmsg operation. The copied values outlive the BIO
+    // callback and are later consumed by certificate routing.
     if (operation == BIO_CB_RECVMMSG) {
         state->pending_local = peek_original_destination(BIO_get_fd(bio, nullptr));
     } else if (operation == (BIO_CB_RECVMMSG | BIO_CB_RETURN) && result > 0

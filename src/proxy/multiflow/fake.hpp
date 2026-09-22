@@ -15,7 +15,9 @@ namespace sx::multiflow {
 
 /**
  * Deterministic, in-memory implementation used to prove multiflow lifetime and
- * backpressure semantics before a QUIC library is introduced.
+ * backpressure semantics independently of a network or QUIC library. Production
+ * code does not use this class; tests drive its peer-facing helper methods to
+ * reproduce FIN, reset, and blocked-write transitions exactly.
  */
 class fake_connection final : public connection {
 public:
@@ -123,7 +125,7 @@ public:
         return result;
     }
 
-    // Test-driver operations model events delivered by a peer/transport.
+    /** Append bytes as if they had arrived from the remote endpoint. */
     io_status inject_receive(flow_handle handle, const void* source, std::size_t size) {
         auto* flow = find(handle);
         if (!flow) return closed_ ? io_status::connection_closed : io_status::invalid_handle;
@@ -136,6 +138,7 @@ public:
         return io_status::ok;
     }
 
+    /** Mark the peer's sending half complete and make EOF observable. */
     io_status inject_peer_fin(flow_handle handle) {
         auto* flow = find(handle);
         if (!flow) return closed_ ? io_status::connection_closed : io_status::invalid_handle;
@@ -145,6 +148,7 @@ public:
         return io_status::ok;
     }
 
+    /** Remove bytes queued by local writes, modelling transport transmission. */
     std::vector<unsigned char> consume_send(flow_handle handle,
                                             std::size_t limit = std::numeric_limits<std::size_t>::max()) {
         auto* flow = find(handle);
@@ -164,15 +168,18 @@ public:
         return result;
     }
 
+    /** Return whether finish() concluded the local sending half. */
     bool local_finished(flow_handle handle) const {
         auto const* flow = find(handle);
         return flow && flow->local_finished;
     }
 
+    /** Force finish() to report would_block for retry-path tests. */
     void block_finish(flow_handle handle, bool blocked) {
         if (auto* flow = find(handle)) flow->finish_blocked = blocked;
     }
 
+    /** Return the application error recorded by reset(), if any. */
     std::optional<std::uint64_t> reset_code(flow_handle handle) const {
         auto const* flow = find(handle);
         return flow && flow->reset
@@ -180,6 +187,7 @@ public:
     }
 
 private:
+    /** Complete state of one simulated logical stream. */
     struct flow_state {
         flow_state(flow_handle flow, direction direction_value)
             : handle(flow), flow_direction(direction_value) {}
@@ -195,6 +203,7 @@ private:
         std::uint64_t protocol_error = 0;
     };
 
+    /** Key used to coalesce repeated readiness events until they are drained. */
     struct event_key {
         event_type type;
         flow_id id;
@@ -223,13 +232,13 @@ private:
         events_.emplace(key, event { type, handle, protocol_error });
     }
 
-    std::map<flow_id, flow_state> flows_;
-    std::map<event_key, event> events_;
-    std::size_t send_high_watermark_;
+    std::map<flow_id, flow_state> flows_;       ///< Live simulated streams.
+    std::map<event_key, event> events_;         ///< Pending de-duplicated events.
+    std::size_t send_high_watermark_;           ///< Per-flow write-buffer limit.
     flow_id next_flow_id_ = 0;
     generation_id next_generation_ = 1;
-    bool closed_ = false;
-    std::uint64_t connection_error_ = 0;
+    bool closed_ = false;                       ///< Connection-wide terminal state.
+    std::uint64_t connection_error_ = 0;        ///< Last close application error.
 };
 
 } // namespace sx::multiflow
