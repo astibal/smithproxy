@@ -446,6 +446,13 @@ loopback QUIC origin. Original TPROXY destination-port recovery and
 policy-aware upstream certificate verification remain follow-up work; the
 current upstream context temporarily uses `SSL_VERIFY_NONE`.
 
+The listener has a deliberately small lifecycle skeleton: sessions start in
+`handshake`, become `active` only after both handshakes finish, and move to
+`closed` when either connection closes or the ten-second handshake deadline is
+reached. Closed sessions are removed from the event loop and both endpoints are
+released. Idle timers, configurable limits and draining policy are intentionally
+not part of this first lifecycle step.
+
 ## Decisions made by this spike
 
 1. One physical connection is **not** represented by one shared `baseCom` in

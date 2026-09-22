@@ -147,9 +147,16 @@ TEST(QuicListenerService, ProxiesStreamToSniOrigin) {
     }
     EXPECT_EQ(received, message);
 
+    external->close();
+    auto const close_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (std::chrono::steady_clock::now() < close_deadline
+           && proxy.connection_count() != 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    EXPECT_EQ(proxy.connection_count(), 0U);
+
     proxy.stop();
     proxy_thread.join();
-    external->close();
     origin->close();
     close(origin_fd);
 }

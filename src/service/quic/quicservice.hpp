@@ -5,6 +5,7 @@
 #include "proxy/multiflow/mfproxy.hpp"
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -30,7 +31,7 @@ public:
     bool ready() const { return ready_; }
     std::uint16_t bound_port() const { return bound_port_; }
     std::string const& last_error() const { return last_error_; }
-    std::size_t connection_count() const { return connections_.size(); }
+    std::size_t connection_count() const { return connection_count_; }
 
 private:
     bool open_socket();
@@ -45,6 +46,7 @@ private:
     std::uint16_t upstream_port_;
     int udp_fd_ = -1;
     std::atomic_bool stopping_ = false;
+    std::atomic_size_t connection_count_ = 0;
     bool ready_ = false;
     std::string last_error_;
 
@@ -52,16 +54,15 @@ private:
     unique_ssl_ctx context_;
     unique_ssl_ctx client_context_;
     std::unique_ptr<openssl_listener> listener_;
+    enum class session_state { handshake, active, closed };
     struct session {
+        session_state state = session_state::handshake;
+        std::chrono::steady_clock::time_point created = std::chrono::steady_clock::now();
         std::shared_ptr<openssl_connection> downstream;
         std::shared_ptr<openssl_connection> upstream;
         std::unique_ptr<multiflow::MFProxy> proxy;
     };
-    std::vector<std::shared_ptr<openssl_connection>> pending_;
     std::vector<session> sessions_;
-    std::vector<std::shared_ptr<openssl_connection>> connections_;
-#else
-    std::vector<std::shared_ptr<void>> connections_;
 #endif
 };
 

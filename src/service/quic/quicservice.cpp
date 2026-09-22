@@ -1,5 +1,6 @@
 #include "service/quic/quicservice.hpp"
 
+#include <algorithm>
 #include <cerrno>
 #include <cstring>
 #include <utility>
@@ -42,9 +43,8 @@ listener_service::listener_service(std::uint16_t port, std::string certificate,
 listener_service::~listener_service() {
     stop();
 #if SMITHPROXY_OPENSSL_QUIC
-    connections_.clear();
     sessions_.clear();
-    pending_.clear();
+    connection_count_ = 0;
     listener_.reset();
     context_.reset();
     if (udp_fd_ >= 0) ::close(udp_fd_);
@@ -155,38 +155,46 @@ void listener_service::run() {
         }
         while (auto accepted = listener_->accept()) {
             auto connection = std::shared_ptr<openssl_connection>(std::move(accepted));
-            connections_.push_back(connection);
-            pending_.push_back(std::move(connection));
+            session incoming;
+            incoming.downstream = std::move(connection);
+            sessions_.push_back(std::move(incoming));
+            ++connection_count_;
         }
-        for (auto const& connection : pending_) {
-            connection->drain_events();
-        }
-        for (auto iterator = pending_.begin(); iterator != pending_.end();) {
-            auto const& downstream = *iterator;
-            if (!downstream->handshake_complete()) {
-                ++iterator;
-                continue;
-            }
-            auto upstream = connect_upstream(downstream->server_name());
-            if (upstream) {
-                session linked { downstream, upstream, nullptr };
-                linked.proxy = std::make_unique<multiflow::MFProxy>(linked.downstream,
-                                                                    linked.upstream);
-                sessions_.push_back(std::move(linked));
-            } else {
-                downstream->close(1);
-            }
-            iterator = pending_.erase(iterator);
-        }
+        auto const now = std::chrono::steady_clock::now();
+        static constexpr auto handshake_timeout = std::chrono::seconds(10);
         for (auto& linked : sessions_) {
-            // Do not consume downstream flow-open events until the opposite
-            // connection can actually create the matching stream.
-            if (!linked.upstream->handshake_complete()) {
-                linked.upstream->drain_events();
-                continue;
+            if (linked.state == session_state::handshake) {
+                linked.downstream->drain_events();
+                if (linked.downstream->closed() || now - linked.created >= handshake_timeout) {
+                    linked.state = session_state::closed;
+                } else if (linked.downstream->handshake_complete() && !linked.upstream) {
+                    linked.upstream = connect_upstream(linked.downstream->server_name());
+                    if (!linked.upstream) linked.state = session_state::closed;
+                } else if (linked.upstream) {
+                    linked.upstream->drain_events();
+                    if (linked.upstream->closed()) {
+                        linked.state = session_state::closed;
+                    } else if (linked.upstream->handshake_complete()) {
+                        linked.proxy = std::make_unique<multiflow::MFProxy>(
+                            linked.downstream, linked.upstream);
+                        linked.state = session_state::active;
+                    }
+                }
+            } else if (linked.state == session_state::active) {
+                linked.proxy->pump_once();
+                if (linked.downstream->closed() || linked.upstream->closed()) {
+                    linked.state = session_state::closed;
+                }
             }
-            linked.proxy->pump_once();
         }
+        auto const before = sessions_.size();
+        sessions_.erase(std::remove_if(sessions_.begin(), sessions_.end(), [](auto& linked) {
+            if (linked.state != session_state::closed) return false;
+            if (linked.downstream) linked.downstream->close();
+            if (linked.upstream) linked.upstream->close();
+            return true;
+        }), sessions_.end());
+        connection_count_ -= before - sessions_.size();
     }
 #endif
 }

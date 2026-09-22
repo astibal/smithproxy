@@ -222,6 +222,17 @@ std::vector<multiflow::event> openssl_connection::drain_events() {
         }
     }
     SSL_handle_events(connection_.get());
+    SSL_CONN_CLOSE_INFO close_info {};
+    if (SSL_get_conn_close_info(connection_.get(), &close_info, sizeof(close_info)) == 1) {
+        closed_ = true;
+        emit(multiflow::event_type::connection_close, std::nullopt,
+             close_info.error_code);
+    }
+    if (closed_) {
+        for (auto const& pending : events_) result.push_back(pending.second);
+        events_.clear();
+        return result;
+    }
     while (unique_ssl stream { SSL_accept_stream(connection_.get(), SSL_ACCEPT_STREAM_NO_BLOCK) }) {
         attach_stream(std::move(stream), true);
     }
