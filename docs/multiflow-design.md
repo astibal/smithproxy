@@ -247,6 +247,11 @@ directions, owns the two `MFFlowCom` facades and retains unread output across
 destination backpressure. Extraction of its byte pump into existing
 `baseHostCX` filter chains is the next integration step.
 
+Flow lifecycle propagation is also implemented: peer FIN is delayed until all
+pending bytes have reached the paired flow, RESET keeps its application error
+code and retires the pair, and a connection close terminates the opposite
+connection with the same code.
+
 ```text
 BaseMFProxy (connection scope)
     |

@@ -4,6 +4,7 @@
 #include <deque>
 #include <map>
 #include <memory>
+#include <set>
 
 #include "proxy/multiflow/mfflowcom.hpp"
 
@@ -26,6 +27,10 @@ private:
         std::unique_ptr<MFFlowCom> right;
         std::deque<unsigned char> left_to_right;
         std::deque<unsigned char> right_to_left;
+        bool left_peer_fin = false;
+        bool right_peer_fin = false;
+        bool left_finish_sent = false;
+        bool right_finish_sent = false;
     };
 
     void process_events(bool from_left, std::vector<event> events);
@@ -33,10 +38,14 @@ private:
     std::size_t pump_direction(MFFlowCom& source, MFFlowCom& destination,
                                std::deque<unsigned char>& pending, std::size_t chunk_size);
     bool paired(bool left_side, flow_handle flow) const;
+    pair* find_pair(bool left_side, flow_handle flow);
+    void propagate_fin(pair& current);
 
     std::shared_ptr<connection> left_;
     std::shared_ptr<connection> right_;
     std::map<flow_id, std::unique_ptr<pair>> pairs_;
+    std::set<flow_id> retired_;
+    bool closed_ = false;
 };
 
 } // namespace sx::multiflow

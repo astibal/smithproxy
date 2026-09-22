@@ -10,9 +10,11 @@ MFProxy::MFProxy(std::shared_ptr<connection> left, std::shared_ptr<connection> r
     : left_(std::move(left)), right_(std::move(right)) {}
 
 std::size_t MFProxy::pump_once(std::size_t chunk_size) {
-    if (!left_ || !right_ || chunk_size == 0) return 0;
+    if (!left_ || !right_ || chunk_size == 0 || closed_) return 0;
     process_events(true, left_->drain_events());
+    if (closed_) return 0;
     process_events(false, right_->drain_events());
+    if (closed_) return 0;
 
     std::size_t moved = 0;
     for (auto& item : pairs_) {
@@ -21,15 +23,38 @@ std::size_t MFProxy::pump_once(std::size_t chunk_size) {
                                 current.left_to_right, chunk_size);
         moved += pump_direction(*current.right, *current.left,
                                 current.right_to_left, chunk_size);
+        propagate_fin(current);
     }
+    for (auto id : retired_) pairs_.erase(id);
+    retired_.clear();
     return moved;
 }
 
 void MFProxy::process_events(bool from_left, std::vector<event> events) {
     for (auto const& current : events) {
-        if (current.type == event_type::flow_open && current.flow
-            && !paired(from_left, *current.flow)) {
+        if (current.type == event_type::connection_close) {
+            (from_left ? right_ : left_)->close(current.protocol_error);
+            closed_ = true;
+            continue;
+        }
+        if (!current.flow) continue;
+
+        if (current.type == event_type::flow_open && !paired(from_left, *current.flow)) {
             pair_new_flow(from_left, *current.flow);
+            continue;
+        }
+
+        auto* matched = find_pair(from_left, *current.flow);
+        if (!matched) continue;
+        if (current.type == event_type::peer_fin) {
+            if (from_left) matched->left_peer_fin = true;
+            else matched->right_peer_fin = true;
+        } else if (current.type == event_type::reset) {
+            auto& destination_connection = from_left ? right_ : left_;
+            auto const destination_flow = from_left
+                ? matched->right_handle : matched->left_handle;
+            destination_connection->reset(destination_flow, current.protocol_error);
+            retired_.insert(matched->left_handle.id);
         }
     }
 }
@@ -91,6 +116,32 @@ bool MFProxy::paired(bool left_side, flow_handle flow) const {
         if (candidate == flow) return true;
     }
     return false;
+}
+
+MFProxy::pair* MFProxy::find_pair(bool left_side, flow_handle flow) {
+    for (auto& item : pairs_) {
+        auto& current = *item.second;
+        auto const candidate = left_side ? current.left_handle : current.right_handle;
+        if (candidate == flow) return &current;
+    }
+    return nullptr;
+}
+
+void MFProxy::propagate_fin(pair& current) {
+    if (current.left_peer_fin && current.left_to_right.empty()
+        && !current.right_finish_sent) {
+        right_->finish(current.right_handle);
+        current.right_finish_sent = true;
+    }
+    if (current.right_peer_fin && current.right_to_left.empty()
+        && !current.left_finish_sent) {
+        left_->finish(current.left_handle);
+        current.left_finish_sent = true;
+    }
+    if (current.left_peer_fin && current.right_peer_fin
+        && current.left_to_right.empty() && current.right_to_left.empty()) {
+        retired_.insert(current.left_handle.id);
+    }
 }
 
 } // namespace sx::multiflow

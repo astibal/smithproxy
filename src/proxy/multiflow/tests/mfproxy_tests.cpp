@@ -67,3 +67,50 @@ TEST(MFProxy, MirrorsIncomingUnidirectionalFlowAsSendOnly) {
     auto sent = right->consume_send(outgoing);
     EXPECT_EQ(std::string(sent.begin(), sent.end()), data);
 }
+
+TEST(MFProxy, PropagatesFinOnlyAfterPendingData) {
+    auto left = std::make_shared<mf::fake_connection>();
+    auto right = std::make_shared<mf::fake_connection>(3);
+    mf::MFProxy proxy(left, right);
+    auto const left_flow = left->open_flow(mf::direction::bidirectional);
+    proxy.pump_once();
+    mf::flow_handle const right_flow { 0, 1 };
+
+    std::string const payload = "abcdef";
+    left->inject_receive(left_flow, payload.data(), payload.size());
+    left->inject_peer_fin(left_flow);
+    EXPECT_EQ(proxy.pump_once(), 3U);
+    EXPECT_FALSE(right->local_finished(right_flow));
+
+    right->consume_send(right_flow);
+    EXPECT_EQ(proxy.pump_once(), 3U);
+    EXPECT_TRUE(right->local_finished(right_flow));
+}
+
+TEST(MFProxy, PropagatesResetCodeAndRetiresPair) {
+    auto left = std::make_shared<mf::fake_connection>();
+    auto right = std::make_shared<mf::fake_connection>();
+    mf::MFProxy proxy(left, right);
+    auto const left_flow = left->open_flow(mf::direction::bidirectional);
+    proxy.pump_once();
+    mf::flow_handle const right_flow { 0, 1 };
+
+    left->reset(left_flow, 0x107);
+    proxy.pump_once();
+    ASSERT_TRUE(right->reset_code(right_flow));
+    EXPECT_EQ(*right->reset_code(right_flow), 0x107U);
+    EXPECT_EQ(proxy.pair_count(), 0U);
+}
+
+TEST(MFProxy, PropagatesConnectionClose) {
+    auto left = std::make_shared<mf::fake_connection>();
+    auto right = std::make_shared<mf::fake_connection>();
+    mf::MFProxy proxy(left, right);
+    left->close(23);
+    proxy.pump_once();
+
+    auto const events = right->drain_events();
+    ASSERT_EQ(events.size(), 1U);
+    EXPECT_EQ(events.front().type, mf::event_type::connection_close);
+    EXPECT_EQ(events.front().protocol_error, 23U);
+}

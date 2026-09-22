@@ -163,6 +163,17 @@ public:
         return result;
     }
 
+    bool local_finished(flow_handle handle) const {
+        auto const* flow = find(handle);
+        return flow && flow->local_finished;
+    }
+
+    std::optional<std::uint64_t> reset_code(flow_handle handle) const {
+        auto const* flow = find(handle);
+        return flow && flow->reset
+            ? std::optional<std::uint64_t>(flow->protocol_error) : std::nullopt;
+    }
+
 private:
     struct flow_state {
         flow_state(flow_handle flow, direction direction_value)
