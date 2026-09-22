@@ -172,6 +172,8 @@ TEST(QuicListenerService, ProxiesStreamAndCleansUpIdleSession) {
     ASSERT_TRUE(external->handshake_complete()) << quic::openssl_error_stack();
     ASSERT_NE(origin, nullptr);
     ASSERT_TRUE(origin->handshake_complete()) << quic::openssl_error_stack();
+    EXPECT_EQ(external->negotiated_alpn(), "h3");
+    EXPECT_EQ(origin->negotiated_alpn(), "h3");
 
     auto const flow = external->open_flow(sx::multiflow::direction::bidirectional);
     ASSERT_NE(flow.generation, 0U);

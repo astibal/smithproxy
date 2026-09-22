@@ -175,6 +175,15 @@ std::string openssl_connection::server_name() const {
     return name ? std::string(name) : std::string {};
 }
 
+std::string openssl_connection::negotiated_alpn() const {
+    if (!connection_) return {};
+    const unsigned char* data = nullptr;
+    unsigned int size = 0;
+    SSL_get0_alpn_selected(connection_.get(), &data, &size);
+    return data && size != 0
+        ? std::string(reinterpret_cast<char const*>(data), size) : std::string {};
+}
+
 datagram_endpoint openssl_connection::peer_endpoint() const {
     if (!connection_) return {};
     BIO_ADDR* address = BIO_ADDR_new();
@@ -432,11 +441,19 @@ bool openssl_connection::inject_datagram(const unsigned char* data, std::size_t 
 std::unique_ptr<openssl_connection> connect_openssl_quic(
     SSL_CTX* context, const sockaddr* peer, socklen_t peer_size,
     std::string const& server_name, std::string* error) {
+    return connect_openssl_quic(context, peer, peer_size, server_name, "h3", error);
+}
+
+std::unique_ptr<openssl_connection> connect_openssl_quic(
+    SSL_CTX* context, const sockaddr* peer, socklen_t peer_size,
+    std::string const& server_name, std::string const& alpn, std::string* error) {
     auto fail = [error](std::string message) {
         if (error) *error = std::move(message);
         return std::unique_ptr<openssl_connection> {};
     };
-    if (!context || !peer || peer_size == 0) return fail("invalid QUIC peer");
+    if (!context || !peer || peer_size == 0 || alpn.empty() || alpn.size() > 255) {
+        return fail("invalid QUIC peer or ALPN");
+    }
 
     auto const fd = ::socket(peer->sa_family, SOCK_DGRAM, IPPROTO_UDP);
     if (fd < 0) return fail(std::string("socket: ") + std::strerror(errno));
@@ -461,8 +478,11 @@ std::unique_ptr<openssl_connection> connect_openssl_quic(
                 || SSL_set1_host(ssl.get(), server_name.c_str()) != 1))) {
         return close_and_fail("configure outgoing QUIC: " + openssl_error_stack());
     }
-    static constexpr unsigned char h3[] = { 2, 'h', '3' };
-    if (SSL_set_alpn_protos(ssl.get(), h3, sizeof(h3)) != 0) {
+    std::vector<unsigned char> encoded_alpn;
+    encoded_alpn.reserve(alpn.size() + 1);
+    encoded_alpn.push_back(static_cast<unsigned char>(alpn.size()));
+    encoded_alpn.insert(encoded_alpn.end(), alpn.begin(), alpn.end());
+    if (SSL_set_alpn_protos(ssl.get(), encoded_alpn.data(), encoded_alpn.size()) != 0) {
         return close_and_fail("configure QUIC ALPN: " + openssl_error_stack());
     }
 

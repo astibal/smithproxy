@@ -97,6 +97,7 @@ public:
     bool handshake_complete() const;
     bool closed() const { return closing_ || closed_; }
     std::string server_name() const;
+    std::string negotiated_alpn() const;
 
 private:
     struct stream_state;
@@ -135,6 +136,10 @@ private:
 std::unique_ptr<openssl_connection> connect_openssl_quic(
     SSL_CTX* context, const sockaddr* peer, socklen_t peer_size,
     std::string const& server_name, std::string* error = nullptr);
+std::unique_ptr<openssl_connection> connect_openssl_quic(
+    SSL_CTX* context, const sockaddr* peer, socklen_t peer_size,
+    std::string const& server_name, std::string const& alpn,
+    std::string* error = nullptr);
 
 /**
  * Nonblocking OpenSSL QUIC listener over a caller-owned UDP socket.

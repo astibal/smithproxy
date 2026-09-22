@@ -52,7 +52,7 @@ int select_h3(SSL*, const unsigned char** output, unsigned char* output_size,
                                  supported, sizeof(supported), input, input_size)
             == OPENSSL_NPN_NEGOTIATED
         ? SSL_TLSEXT_ERR_OK
-        : SSL_TLSEXT_ERR_NOACK;
+        : SSL_TLSEXT_ERR_ALERT_FATAL;
 }
 
 bool make_nonblocking(int fd) {
@@ -124,11 +124,32 @@ TEST(OpenSslQuic, OutgoingAdapterCompletesHandshake) {
     EXPECT_TRUE(client->handshake_complete()) << quic::openssl_error_stack();
     ASSERT_NE(server, nullptr);
     EXPECT_TRUE(server->handshake_complete()) << quic::openssl_error_stack();
+    EXPECT_EQ(client->negotiated_alpn(), "h3");
+    EXPECT_EQ(server->negotiated_alpn(), "h3");
     EXPECT_EQ(server->server_name(), "localhost");
     ASSERT_TRUE(observed_destination.valid());
     auto const* observed = reinterpret_cast<sockaddr_in const*>(&observed_destination.address);
     EXPECT_EQ(observed->sin_family, AF_INET);
     EXPECT_EQ(observed->sin_port, server_address.sin_port);
+
+    std::string rejected_error;
+    auto rejected = quic::connect_openssl_quic(
+        client_context.get(), reinterpret_cast<sockaddr*>(&server_address),
+        sizeof(server_address), "localhost", "hq-interop", &rejected_error);
+    std::unique_ptr<quic::openssl_connection> rejected_server;
+    auto const reject_deadline = std::chrono::steady_clock::now()
+        + std::chrono::milliseconds(500);
+    while (rejected && std::chrono::steady_clock::now() < reject_deadline
+           && !rejected->closed() && !rejected->handshake_complete()) {
+        rejected->drain_events();
+        listener->handle_events();
+        if (!rejected_server) rejected_server = listener->accept();
+        if (rejected_server) rejected_server->drain_events();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    EXPECT_TRUE(!rejected || rejected->closed());
+    if (rejected) EXPECT_FALSE(rejected->handshake_complete());
+    if (rejected_server) rejected_server->close();
     client->close();
     server->close();
     close(server_fd);
@@ -181,6 +202,7 @@ TEST(OpenSslQuic, OutgoingAdapterVerifiesChainAndServerName) {
     }
     EXPECT_TRUE(client->handshake_complete()) << quic::openssl_error_stack();
     EXPECT_EQ(SSL_get_verify_result(client->native_handle()), X509_V_OK);
+    EXPECT_EQ(client->negotiated_alpn(), "h3");
     client->close();
     if (server) server->close();
     close(server_fd);
@@ -247,6 +269,7 @@ TEST(OpenSslQuic, LoopbackHandshakeExposesBidirectionalStream) {
     ASSERT_TRUE(SSL_is_init_finished(client.get())) << quic::openssl_error_stack();
     ASSERT_NE(server, nullptr) << quic::openssl_error_stack();
     ASSERT_TRUE(SSL_is_init_finished(server->native_handle())) << quic::openssl_error_stack();
+    EXPECT_EQ(server->negotiated_alpn(), "h3");
 
     auto client_connection = std::make_shared<quic::openssl_connection>(std::move(client));
     std::shared_ptr<quic::openssl_connection> server_connection(std::move(server));

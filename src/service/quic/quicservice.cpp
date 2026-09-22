@@ -30,7 +30,7 @@ int select_h3(SSL*, const unsigned char** output, unsigned char* output_size,
                                  supported, sizeof(supported), input, input_size)
             == OPENSSL_NPN_NEGOTIATED
         ? SSL_TLSEXT_ERR_OK
-        : SSL_TLSEXT_ERR_NOACK;
+        : SSL_TLSEXT_ERR_ALERT_FATAL;
 }
 
 std::string endpoint_key(datagram_endpoint const& endpoint) {
@@ -218,6 +218,12 @@ void listener_service::run() {
                     if (linked.upstream->closed()) {
                         start_draining(linked, now);
                     } else if (linked.upstream->handshake_complete()) {
+                        auto const downstream_alpn = linked.downstream->negotiated_alpn();
+                        auto const upstream_alpn = linked.upstream->negotiated_alpn();
+                        if (downstream_alpn.empty() || downstream_alpn != upstream_alpn) {
+                            start_draining(linked, now, 1);
+                            continue;
+                        }
                         linked.proxy = std::make_unique<multiflow::MFProxy>(
                             linked.downstream, linked.upstream);
                         linked.state = session_state::active;
@@ -374,6 +380,10 @@ listener_service::verified_certificate listener_service::verify_and_spoof(
     }
     if (!upstream->handshake_complete()
         || SSL_get_verify_result(upstream->native_handle()) != X509_V_OK) {
+        upstream->close(1);
+        return verified;
+    }
+    if (upstream->negotiated_alpn() != "h3") {
         upstream->close(1);
         return verified;
     }
