@@ -250,7 +250,7 @@ namespace sx::engine::http {
             auto const& last_flow_entry = ctx.origin->flow().flow_queue().back();
             auto const& side = last_flow_entry.source();
             auto const& buffer = last_flow_entry.data();
-            ctx.flow_pos = ctx.origin->flow().flow_queue().size() - 1;
+            auto flow_pos = ctx.origin->flow().flow_queue().size() - 1;
 
             // limit this rather info/convenience regexing to 128 bytes
 
@@ -261,9 +261,9 @@ namespace sx::engine::http {
             if(side == 'r') {
 
                 auto const buf_sz = buffer->size();
-                _dia("start: flow block index %d, size %dB", ctx.flow_pos, buf_sz);
-                if(ctx.new_data_check(buf_sz)) {
-                    ctx.update_seen_block(buf_sz);
+                _dia("start: flow block index %d, size %dB", flow_pos, buf_sz);
+                if(ctx.new_data_check(flow_pos + 1, buf_sz)) {
+                    ctx.update_seen_block(flow_pos + 1, buf_sz);
                     parse_request(ctx, buffer);
                 }
             }
@@ -645,6 +645,15 @@ namespace sx::engine::http {
             }
         }
 
+        void process_ping(EngineCtx& ctx, side_t side, long stream_id, uint8_t flags, buffer const& data) {
+            if(side == side_t::RIGHT and ctx.origin) {
+
+                auto const& log = log::http2_frames;
+                _deb("ping answer - enable continuous mode");
+
+                ctx.origin->acknowledge_continuous_mode(5000);
+            }
+        }
 
         void process_other(EngineCtx& ctx, side_t side, long stream_id, uint8_t flags, buffer const& data) {
             if(data.empty()) return;
@@ -684,13 +693,13 @@ namespace sx::engine::http {
                 }
 
                 {
-                    _inf("Frame: type = %s, flags = %d, size = %d, stream = %d", frame_type_str(typ), flg, frame_sz,
-                         stream_id);
+                    _inf("Frame: type = %s, flags = %d, size = %d, stream = %d, side = %c", frame_type_str(typ), flg, frame_sz,
+                         stream_id, from_side(side));
 
                     if (flg & 0x20)
                         _inf("Frame prio: stream dep = %X, weight: %d", stream_dep, wgh);
 
-                    _deb("Frame: \r\n%s", hex_dump(frame, 4, 0, true).c_str());
+                    _deb("Frame: \r\n%s", hex_dump(frame.view(0, frame_sz), 4, 0, true).c_str());
 
                     if(frame_sz > 0) {
                         if (typ == 0) {
@@ -699,6 +708,9 @@ namespace sx::engine::http {
                         } else if (typ == 1) {
                             auto data = frame.view(preamble_sz + add_hdr, frame_sz - add_hdr);
                             process_headers(ctx, side, stream_id, flg, data);
+                        } else if(typ == 6) {
+                            auto data = frame.view(preamble_sz + add_hdr, frame_sz - add_hdr);
+                            process_ping(ctx, side, stream_id, flg, data);
                         } else {
                             auto data = frame.view(preamble_sz + add_hdr, frame_sz - add_hdr);
                             process_other(ctx, side, stream_id, flg, data);
@@ -718,7 +730,7 @@ namespace sx::engine::http {
         };
 
 
-        size_t load_prev_state(EngineCtx& ctx) {
+        size_t load_prev_state(EngineCtx& ctx, size_t abs_index) {
             auto const& log = log::http2_state;
 
             std::optional<state_data_t> prev_state;
@@ -736,7 +748,7 @@ namespace sx::engine::http {
             }
 
             if(prev_state) {
-                if(prev_state->first != ctx.origin->flow().size()) {
+                if(prev_state->first != abs_index) {
                     _deb("state: invalid due flow change");
                 } else {
                     _deb("state: valid data pointer found at %d", prev_state->second);
@@ -746,10 +758,10 @@ namespace sx::engine::http {
             return 0L;
         }
 
-        void save_state(EngineCtx& ctx, std::size_t processed) {
+        void save_state(EngineCtx& ctx, std::size_t abs_index, std::size_t processed) {
             auto const& log = log::http2_state;
 
-            ctx.state_info = std::make_any<state_data_t>(ctx.origin->flow().size(), processed);
+            ctx.state_info = std::make_any<state_data_t>(abs_index, processed);
             _deb("state: saving processed bytes in this flow: %d", processed);
         }
 
@@ -764,25 +776,50 @@ namespace sx::engine::http {
             }
 
             auto const& log = log::http2;
-            auto const& last_flow_entry = ctx.origin->flow().flow_queue().back();
+
+
+            auto round = 0;
+            auto pos_size = ctx.origin->flow().pos_size();
+            auto q_size = ctx.origin->flow().flow_queue().size();
+
+            size_t to_see_back_sz = pos_size - ctx.flow_seen->blocks_seen;
+            if(to_see_back_sz > q_size)
+                to_see_back_sz = q_size; // we cannot see anything back
+
+            _dia("start - engine checked new data - want check back %d blocks, queue size: %d, full flow size %d",
+                            to_see_back_sz, q_size, pos_size);
+
+            // we want to see at least one back!
+            if(to_see_back_sz == 0) to_see_back_sz = 1;
+
+            // ctx.flow_pos = ctx.origin->flow().flow_queue().size() - to_see_back_sz;
+            auto flow_pos = q_size - to_see_back_sz; // start with index of last element, unless we have missed blocks
+
+            // yes, label, bitches
+            on_more_blocks:
+
+            _dia("start - current block set to index %d", flow_pos);
+
+
+            auto const& last_flow_entry = ctx.origin->flow().flow_queue().at(flow_pos);
             auto const& side = last_flow_entry.source();
             auto const& h2_buffer= last_flow_entry.data();
             auto const h2_buffer_sz = h2_buffer->size();
 
-            ctx.flow_pos = ctx.origin->flow().flow_queue().size() - 1;
+            auto abs_index = pos_size - q_size + flow_pos;
 
-            if(ctx.new_data_check(h2_buffer_sz)) {
-                ctx.update_seen_block(h2_buffer_sz);
+            if(ctx.new_data_check(abs_index + 1, h2_buffer_sz)) {
+                ctx.update_seen_block(abs_index + 1, h2_buffer_sz);
             }
             else {
                 _dia("start - engine checked no new data");
                 return;
             }
 
-            _dia("start at flow #%d", ctx.origin->flow().size());
+            _dia("start round %d, flow index=%d len=%d, full_len=%d", round, flow_pos, ctx.origin->flow().size(), ctx.origin->flow().pos_size());
             _dia("flow path: %s", ctx.origin->flow().hr().c_str());
 
-            std::size_t starting_index = load_prev_state(ctx);
+            std::size_t starting_index = load_prev_state(ctx, abs_index);
             if(starting_index >= h2_buffer_sz) {
 
                 if(starting_index == h2_buffer_sz) {
@@ -794,19 +831,18 @@ namespace sx::engine::http {
                 return;
             }
 
-
             std::size_t if_magic = 0L;
             auto starting_buffer = h2_buffer->view(starting_index);
 
             if(side == 'r') {
                 if (ctx.status == EngineCtx::status_t::START) {
                     // eliminate finding magic later in the flow
-                    if (ctx.flow_pos < 5 and h2_buffer_sz >= txt::magic_sz) {
+                    if (flow_pos < 5 and h2_buffer_sz >= txt::magic_sz) {
                         if_magic = find_magic(starting_buffer);
 
                         // save starting position + size of magic
                         if (if_magic > 0) {
-                            save_state(ctx, starting_index + if_magic);
+                            save_state(ctx, abs_index, starting_index + if_magic);
                             ctx.status = EngineCtx::status_t::MAGIC;
 
                             auto const* state_data = std::any_cast<Http2Connection>(& ctx.state_data);
@@ -856,7 +892,17 @@ namespace sx::engine::http {
             } while(total < starting_buffer.size() - if_magic);
 
 
-            save_state(ctx, starting_index + if_magic + total);
+            save_state(ctx, abs_index, starting_index + if_magic + total);
+
+            if(flow_pos + 1 < ctx.origin->flow().flow_queue().size()) {
+                // move to next pos if we are not finished and missed more arrived blocks
+                // this usally happens if left and write sides both retrieved data at once
+                flow_pos++;
+                round++;
+                _dia("moving to next flow block: index %d", flow_pos);
+
+                goto on_more_blocks;
+            }
         }
     }
 }
