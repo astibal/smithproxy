@@ -20,6 +20,8 @@ namespace {
 using x509_ptr = std::unique_ptr<X509, decltype(&X509_free)>;
 using pkey_ptr = std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)>;
 using crl_ptr = std::unique_ptr<X509_CRL, decltype(&X509_CRL_free)>;
+using ocsp_response_ptr = std::unique_ptr<OCSP_RESPONSE, decltype(&OCSP_RESPONSE_free)>;
+using x509_store_ptr = std::unique_ptr<X509_STORE, decltype(&X509_STORE_free)>;
 
 x509_ptr load_certificate(const std::filesystem::path& path) {
     FILE* file = fopen(path.c_str(), "r");
@@ -86,6 +88,59 @@ crl_ptr make_crl(X509* issuer, EVP_PKEY* issuer_key, X509* revoked_certificate) 
     if (X509_CRL_sign(crl.get(), issuer_key, EVP_sha256()) <= 0)
         return {nullptr, X509_CRL_free};
     return crl;
+}
+
+struct ocsp_entry {
+    X509* certificate;
+    int status;
+};
+
+ocsp_response_ptr make_ocsp_response(X509* issuer, EVP_PKEY* issuer_key,
+                                     const std::vector<ocsp_entry>& entries,
+                                     int this_update_offset = -60,
+                                     int next_update_offset = 3600) {
+    OCSP_BASICRESP* basic = OCSP_BASICRESP_new();
+    if (!basic)
+        return {nullptr, OCSP_RESPONSE_free};
+
+    bool valid = true;
+    for (const auto& entry : entries) {
+        OCSP_CERTID* id = OCSP_cert_to_id(EVP_sha1(), entry.certificate, issuer);
+        ASN1_TIME* this_update = ASN1_TIME_adj(nullptr, time(nullptr), 0, this_update_offset);
+        ASN1_TIME* next_update = ASN1_TIME_adj(nullptr, time(nullptr), 0, next_update_offset);
+        ASN1_TIME* revoked_at = entry.status == V_OCSP_CERTSTATUS_REVOKED
+                                  ? ASN1_TIME_adj(nullptr, time(nullptr), 0, -120)
+                                  : nullptr;
+        if (!id || !this_update || !next_update ||
+            !OCSP_basic_add1_status(basic, id, entry.status,
+                                    OCSP_REVOKED_STATUS_KEYCOMPROMISE,
+                                    revoked_at, this_update, next_update))
+            valid = false;
+        OCSP_CERTID_free(id);
+        ASN1_TIME_free(this_update);
+        ASN1_TIME_free(next_update);
+        ASN1_TIME_free(revoked_at);
+        if (!valid)
+            break;
+    }
+
+    if (!valid || OCSP_basic_sign(basic, issuer, issuer_key, EVP_sha256(), nullptr, 0) != 1) {
+        OCSP_BASICRESP_free(basic);
+        return {nullptr, OCSP_RESPONSE_free};
+    }
+    OCSP_RESPONSE* response = OCSP_response_create(OCSP_RESPONSE_STATUS_SUCCESSFUL, basic);
+    OCSP_BASICRESP_free(basic);
+    return {response, OCSP_RESPONSE_free};
+}
+
+x509_store_ptr make_test_store(X509* trusted_certificate) {
+    x509_store_ptr store(X509_STORE_new(), X509_STORE_free);
+    if (!store || X509_STORE_add_cert(store.get(), trusted_certificate) != 1)
+        return {nullptr, X509_STORE_free};
+    // The repository fixture was intentionally short-lived in 2020. Pinning
+    // verification inside that validity window tests trust, not wall-clock age.
+    X509_VERIFY_PARAM_set_time(X509_STORE_get0_param(store.get()), 1583000000);
+    return store;
 }
 
 int select_h2(SSL*, const unsigned char** out, unsigned char* out_length,
@@ -330,6 +385,145 @@ TEST_F(TLSIntegration, OCSPUrlsContainOnlyCertificateEntries) {
     EXPECT_EQ(inet::ocsp::ocsp_urls(certificate.get()),
               (std::vector<std::string>{"http://ocsp-one.invalid/status",
                                         "http://ocsp-two.invalid/status"}));
+}
+
+TEST_F(TLSIntegration, OCSPMatchingEntryCannotBeOverriddenByDifferentCertificate) {
+    auto issuer = load_certificate(fixture_path_ / "ca-cert.pem");
+    auto issuer_key = load_private_key(fixture_path_ / "ca-key.pem");
+    auto certificate = upstream_certificate();
+    ASSERT_NE(issuer, nullptr);
+    ASSERT_NE(issuer_key, nullptr);
+    ASSERT_NE(certificate, nullptr);
+
+    x509_ptr different_certificate(X509_dup(certificate.get()), X509_free);
+    ASSERT_NE(different_certificate, nullptr);
+    ASSERT_EQ(ASN1_INTEGER_set(X509_get_serialNumber(different_certificate.get()), 0x123456), 1);
+
+    auto response = make_ocsp_response(
+        issuer.get(), issuer_key.get(),
+        {{certificate.get(), V_OCSP_CERTSTATUS_GOOD},
+         {different_certificate.get(), V_OCSP_CERTSTATUS_REVOKED}});
+    auto store = make_test_store(issuer.get());
+    ASSERT_NE(response, nullptr);
+    ASSERT_NE(store, nullptr);
+
+    const auto result = inet::ocsp::ocsp_verify_response(
+        response.get(), certificate.get(), issuer.get(), store.get());
+    EXPECT_EQ(result.revoked, 0);
+}
+
+using ocsp_parameters = std::tuple<int, int, int, int>;
+
+class OCSPStatusMatrix : public TLSIntegration,
+                         public ::testing::WithParamInterface<ocsp_parameters> {};
+
+TEST_P(OCSPStatusMatrix, ReturnsStatusOnlyForCurrentSignedResponse) {
+    auto issuer = load_certificate(fixture_path_ / "ca-cert.pem");
+    auto issuer_key = load_private_key(fixture_path_ / "ca-key.pem");
+    auto certificate = upstream_certificate();
+    ASSERT_NE(issuer, nullptr);
+    ASSERT_NE(issuer_key, nullptr);
+    ASSERT_NE(certificate, nullptr);
+
+    const auto [status, this_update_offset, next_update_offset, expected] = GetParam();
+    auto response = make_ocsp_response(
+        issuer.get(), issuer_key.get(), {{certificate.get(), status}},
+        this_update_offset, next_update_offset);
+    auto store = make_test_store(issuer.get());
+    ASSERT_NE(response, nullptr);
+    ASSERT_NE(store, nullptr);
+
+    const auto result = inet::ocsp::ocsp_verify_response(
+        response.get(), certificate.get(), issuer.get(), store.get());
+    EXPECT_EQ(result.revoked, expected);
+    EXPECT_GT(result.ttl, 0);
+}
+
+std::string ocsp_status_name(const ::testing::TestParamInfo<ocsp_parameters>& parameter) {
+    switch (parameter.index) {
+        case 0: return "Good";
+        case 1: return "Revoked";
+        case 2: return "Unknown";
+        case 3: return "Expired";
+        case 4: return "Future";
+        default: return "Case" + std::to_string(parameter.index);
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    SignedResponses, OCSPStatusMatrix,
+    ::testing::Values(
+        ocsp_parameters{V_OCSP_CERTSTATUS_GOOD, -60, 3600, 0},
+        ocsp_parameters{V_OCSP_CERTSTATUS_REVOKED, -60, 3600, 1},
+        ocsp_parameters{V_OCSP_CERTSTATUS_UNKNOWN, -60, 3600, -1},
+        ocsp_parameters{V_OCSP_CERTSTATUS_GOOD, -7200, -3600, -1},
+        ocsp_parameters{V_OCSP_CERTSTATUS_GOOD, 3600, 7200, -1}),
+    ocsp_status_name);
+
+TEST_F(TLSIntegration, OCSPResponseForDifferentCertificateIsUnknown) {
+    auto issuer = load_certificate(fixture_path_ / "ca-cert.pem");
+    auto issuer_key = load_private_key(fixture_path_ / "ca-key.pem");
+    auto certificate = upstream_certificate();
+    ASSERT_NE(issuer, nullptr);
+    ASSERT_NE(issuer_key, nullptr);
+    ASSERT_NE(certificate, nullptr);
+    x509_ptr different_certificate(X509_dup(certificate.get()), X509_free);
+    ASSERT_NE(different_certificate, nullptr);
+    ASSERT_EQ(ASN1_INTEGER_set(X509_get_serialNumber(different_certificate.get()), 0x654321), 1);
+
+    auto response = make_ocsp_response(
+        issuer.get(), issuer_key.get(),
+        {{different_certificate.get(), V_OCSP_CERTSTATUS_GOOD}});
+    auto store = make_test_store(issuer.get());
+    ASSERT_NE(response, nullptr);
+    ASSERT_NE(store, nullptr);
+    EXPECT_EQ(inet::ocsp::ocsp_verify_response(
+                  response.get(), certificate.get(), issuer.get(), store.get()).revoked,
+              -1);
+}
+
+TEST_F(TLSIntegration, OCSPRejectsNullAndResponderErrors) {
+    auto issuer = load_certificate(fixture_path_ / "ca-cert.pem");
+    auto certificate = upstream_certificate();
+    ASSERT_NE(issuer, nullptr);
+    ASSERT_NE(certificate, nullptr);
+    EXPECT_EQ(inet::ocsp::ocsp_verify_response(nullptr, certificate.get(), issuer.get()).revoked, -1);
+
+    ocsp_response_ptr error_response(
+        OCSP_response_create(OCSP_RESPONSE_STATUS_TRYLATER, nullptr), OCSP_RESPONSE_free);
+    ASSERT_NE(error_response, nullptr);
+    EXPECT_EQ(inet::ocsp::ocsp_verify_response(
+                  error_response.get(), certificate.get(), issuer.get()).revoked,
+              -1);
+}
+
+TEST_F(TLSIntegration, OCSPRejectsResponseWithWrongSignature) {
+    auto issuer = load_certificate(fixture_path_ / "ca-cert.pem");
+    auto issuer_key = load_private_key(fixture_path_ / "ca-key.pem");
+    auto certificate = upstream_certificate();
+    ASSERT_NE(issuer, nullptr);
+    ASSERT_NE(issuer_key, nullptr);
+    ASSERT_NE(certificate, nullptr);
+
+    auto valid_response = make_ocsp_response(
+        issuer.get(), issuer_key.get(), {{certificate.get(), V_OCSP_CERTSTATUS_GOOD}});
+    ASSERT_NE(valid_response, nullptr);
+    OCSP_BASICRESP* basic = OCSP_response_get1_basic(valid_response.get());
+    ASSERT_NE(basic, nullptr);
+    const ASN1_OCTET_STRING* signature = OCSP_resp_get0_signature(basic);
+    ASSERT_NE(signature, nullptr);
+    ASSERT_GT(ASN1_STRING_length(signature), 0);
+    auto* signature_data = const_cast<unsigned char*>(ASN1_STRING_get0_data(signature));
+    signature_data[0] ^= 0x01;
+    ocsp_response_ptr response(
+        OCSP_response_create(OCSP_RESPONSE_STATUS_SUCCESSFUL, basic), OCSP_RESPONSE_free);
+    OCSP_BASICRESP_free(basic);
+    auto store = make_test_store(issuer.get());
+    ASSERT_NE(response, nullptr);
+    ASSERT_NE(store, nullptr);
+    EXPECT_EQ(inet::ocsp::ocsp_verify_response(
+                  response.get(), certificate.get(), issuer.get(), store.get()).revoked,
+              -1);
 }
 
 using handshake_parameters = std::tuple<int, bool, int, std::size_t>;
