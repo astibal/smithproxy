@@ -489,9 +489,10 @@ void SmithProxy::run() {
                 wh_nbr_seconds = 0;
             }
             ++wh_nbr_seconds;
-
-            std::this_thread::sleep_for(std::chrono::seconds(1));
         }
+
+        // Keep the housekeeping loop paced even when webhooks are disabled.
+        std::this_thread::sleep_for(std::chrono::seconds(1));
 #ifdef ASAN_LEAKS
         // See: https://stackoverflow.com/questions/67705427/how-to-use-asan-on-a-long-time-running-server-program
         // More info in:
@@ -943,5 +944,4 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
 
     return ret;
 }
-
 
