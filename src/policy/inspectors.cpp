@@ -83,7 +83,7 @@ std::vector< std::string > Inspector::split(std::string str, unsigned char delim
         }
     }
     
-    if(empty_back) {
+    if(empty_back && !ret.empty()) {
         ret.pop_back();
     }
     
@@ -118,4 +118,3 @@ std::pair<std::string,std::string> Inspector::split_fqdn_subdomain(std::string& 
         
         return std::pair<std::string,std::string>(topdom,subdom);
 }
-
