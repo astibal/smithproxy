@@ -78,7 +78,7 @@ public:
     baseHostCX* new_cx(int s) override;
     void on_left_new(baseHostCX* just_accepted_cx) override;
 
-    std::string to_string(int lev) const override { static std::string r(string_format("MitmSocksProxy[%s]", baseProxy::to_string(lev).c_str())); return r; };
+    std::string to_string(int lev) const override { return string_format("MitmSocksProxy[%s]", baseProxy::to_string(lev).c_str()); };
 
     TYPENAME_OVERRIDE("MitmSocksProxy")
     DECLARE_LOGGING(to_string)
@@ -95,7 +95,7 @@ public:
     baseHostCX* new_cx(int s) override;
     void on_left_new(baseHostCX* just_accepted_cx) override;
 
-    std::string to_string(int lev) const override { static std::string r(string_format("MitmSocksUdpProxy[%s]", baseProxy::to_string(lev).c_str())); return r; };
+    std::string to_string(int lev) const override { return string_format("MitmSocksUdpProxy[%s]", baseProxy::to_string(lev).c_str()); };
 
     TYPENAME_OVERRIDE("MitmSocksUdpProxy")
 DECLARE_LOGGING(to_string)
