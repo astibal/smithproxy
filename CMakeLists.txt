@@ -460,12 +460,59 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/proxy/tests/startstoptls_test.cpp
         )
 
+        add_executable(tls_testbed
+                tests/tls/tls_testbed.cpp)
+        target_compile_definitions(tls_testbed PRIVATE
+                SMITHPROXY_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+
         target_link_libraries(sx_gtests gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries(sx_gtests_http1 gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries(sx_gtests_startstoptls gtest gtest_main)
+        target_link_libraries(tls_testbed gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries (sx_gtests nlohmann_json::nlohmann_json)
     endif()
 ENDIF()
+
+option(SMITHPROXY_TLS_FUZZING "Build Clang TLS libFuzzer targets" OFF)
+if(SMITHPROXY_TLS_FUZZING)
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "SMITHPROXY_TLS_FUZZING requires Clang/libFuzzer")
+    endif()
+
+    foreach(support_target socle_common_lib socle_lib)
+        if(TARGET ${support_target})
+            target_compile_options(${support_target} PRIVATE
+                    -Wno-error=missing-template-arg-list-after-template-kw
+                    -fsanitize=address,undefined
+                    -fno-omit-frame-pointer)
+        endif()
+    endforeach()
+
+    add_executable(tls_clienthello_fuzzer
+            src/proxy/tls/fuzz/clienthello_fuzzer.cpp)
+    target_compile_options(tls_clienthello_fuzzer PRIVATE
+            -fsanitize=fuzzer,address,undefined
+            -fno-omit-frame-pointer)
+    target_link_options(tls_clienthello_fuzzer PRIVATE
+            -fsanitize=fuzzer,address,undefined
+            -fno-omit-frame-pointer)
+    target_link_libraries(tls_clienthello_fuzzer socle_lib pthread crypto ssl)
+endif()
+
+option(SMITHPROXY_TLS_SANITIZERS "Instrument the TLS testbed with ASan and UBSan" OFF)
+if(SMITHPROXY_TLS_SANITIZERS)
+    if(NOT TARGET tls_testbed)
+        message(FATAL_ERROR "SMITHPROXY_TLS_SANITIZERS requires a Debug build with GTest")
+    endif()
+    foreach(sanitized_target socle_common_lib socle_lib tls_testbed)
+        target_compile_options(${sanitized_target} PRIVATE
+                -fsanitize=address,undefined
+                -fno-omit-frame-pointer)
+    endforeach()
+    target_link_options(tls_testbed PRIVATE
+            -fsanitize=address,undefined
+            -fno-omit-frame-pointer)
+endif()
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}")
 
