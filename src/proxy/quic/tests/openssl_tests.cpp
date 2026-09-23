@@ -308,6 +308,12 @@ TEST(OpenSslQuic, LoopbackHandshakeExposesBidirectionalStream) {
     EXPECT_EQ(received, message);
 
     ASSERT_EQ(client_connection->finish(client_flow), mf::io_status::ok);
+    static constexpr char after_fin[] = "must-not-be-written";
+    auto const rejected_after_fin = client_connection->write(
+        client_flow, after_fin, sizeof(after_fin) - 1);
+    EXPECT_EQ(rejected_after_fin.size, 0U);
+    EXPECT_EQ(rejected_after_fin.status, mf::io_status::eof);
+
     bool saw_fin = false;
     auto const fin_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
     while (std::chrono::steady_clock::now() < fin_deadline && !saw_fin) {

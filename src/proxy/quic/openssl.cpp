@@ -271,6 +271,14 @@ multiflow::io_result openssl_connection::write(multiflow::flow_handle flow,
     if (state->direction == multiflow::direction::receive_only) {
         return { 0, multiflow::io_status::eof };
     }
+    // A successful FIN or reset makes the OpenSSL stream's sending half
+    // terminal. In particular, OpenSSL 3.5 may dereference cleared internal
+    // send-stream state if SSL_get_stream_write_state() follows a rejected
+    // SSL_write_ex() on that terminal stream. Keep the public operation
+    // idempotent and do not re-enter OpenSSL after we reported termination.
+    if (state->write_terminal_reported) {
+        return { 0, multiflow::io_status::eof };
+    }
 
     std::size_t written_size = 0;
     auto const result = SSL_write_ex(state->stream.get(), source, size, &written_size);
