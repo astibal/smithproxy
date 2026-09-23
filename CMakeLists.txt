@@ -483,13 +483,19 @@ if(SMITHPROXY_TLS_FUZZING)
 
     add_executable(tls_clienthello_fuzzer
             src/proxy/tls/fuzz/clienthello_fuzzer.cpp)
-    target_compile_options(tls_clienthello_fuzzer PRIVATE
-            -fsanitize=fuzzer,address,undefined
-            -fno-omit-frame-pointer)
-    target_link_options(tls_clienthello_fuzzer PRIVATE
-            -fsanitize=fuzzer,address,undefined
-            -fno-omit-frame-pointer)
-    target_link_libraries(tls_clienthello_fuzzer socle_lib pthread crypto ssl)
+    add_executable(tls_revocation_fuzzer
+            src/proxy/tls/fuzz/revocation_fuzzer.cpp)
+    target_compile_definitions(tls_revocation_fuzzer PRIVATE
+            SMITHPROXY_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    foreach(fuzz_target tls_clienthello_fuzzer tls_revocation_fuzzer)
+        target_compile_options(${fuzz_target} PRIVATE
+                -fsanitize=fuzzer,address,undefined
+                -fno-omit-frame-pointer)
+        target_link_options(${fuzz_target} PRIVATE
+                -fsanitize=fuzzer,address,undefined
+                -fno-omit-frame-pointer)
+        target_link_libraries(${fuzz_target} socle_lib pthread crypto ssl)
+    endforeach()
 endif()
 
 option(SMITHPROXY_TLS_SANITIZERS "Instrument the TLS testbed with ASan and UBSan" OFF)
