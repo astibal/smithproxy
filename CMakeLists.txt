@@ -460,6 +460,30 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
     endif()
 ENDIF()
 
+option(SMITHPROXY_TLS_FUZZING "Build Clang TLS libFuzzer targets" OFF)
+if(SMITHPROXY_TLS_FUZZING)
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "SMITHPROXY_TLS_FUZZING requires Clang/libFuzzer")
+    endif()
+
+    foreach(support_target socle_common_lib socle_lib)
+        if(TARGET ${support_target})
+            target_compile_options(${support_target} PRIVATE
+                    -Wno-error=missing-template-arg-list-after-template-kw)
+        endif()
+    endforeach()
+
+    add_executable(tls_clienthello_fuzzer
+            src/proxy/tls/fuzz/clienthello_fuzzer.cpp)
+    target_compile_options(tls_clienthello_fuzzer PRIVATE
+            -fsanitize=fuzzer,address,undefined
+            -fno-omit-frame-pointer)
+    target_link_options(tls_clienthello_fuzzer PRIVATE
+            -fsanitize=fuzzer,address,undefined
+            -fno-omit-frame-pointer)
+    target_link_libraries(tls_clienthello_fuzzer socle_lib pthread crypto ssl)
+endif()
+
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}")
 
 if (LIBCONFIGPP_FOUND)
@@ -519,4 +543,3 @@ if("${USE_EXPERIMENT}" STREQUAL "Y")
     message(" >> !!! EXPERIMENTS ENABLED !!!" )
     message(" >> - software you built and install contain code which is probably not for general use" )
 endif()
-
