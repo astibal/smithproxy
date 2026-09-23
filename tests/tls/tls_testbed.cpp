@@ -5,6 +5,7 @@
 #include <openssl/x509v3.h>
 
 #include <sslcertstore.hpp>
+#include <sslcertval.hpp>
 #include <log/logger.hpp>
 
 #include <filesystem>
@@ -17,6 +18,8 @@
 namespace {
 
 using x509_ptr = std::unique_ptr<X509, decltype(&X509_free)>;
+using pkey_ptr = std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)>;
+using crl_ptr = std::unique_ptr<X509_CRL, decltype(&X509_CRL_free)>;
 
 x509_ptr load_certificate(const std::filesystem::path& path) {
     FILE* file = fopen(path.c_str(), "r");
@@ -25,6 +28,64 @@ x509_ptr load_certificate(const std::filesystem::path& path) {
     X509* certificate = PEM_read_X509(file, nullptr, nullptr, nullptr);
     fclose(file);
     return {certificate, X509_free};
+}
+
+pkey_ptr load_private_key(const std::filesystem::path& path) {
+    FILE* file = fopen(path.c_str(), "r");
+    if (!file)
+        return {nullptr, EVP_PKEY_free};
+    EVP_PKEY* key = PEM_read_PrivateKey(file, nullptr, nullptr, nullptr);
+    fclose(file);
+    return {key, EVP_PKEY_free};
+}
+
+pkey_ptr generate_rsa_key() {
+    std::unique_ptr<EVP_PKEY_CTX, decltype(&EVP_PKEY_CTX_free)> context(
+        EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, nullptr), EVP_PKEY_CTX_free);
+    EVP_PKEY* key = nullptr;
+    if (!context || EVP_PKEY_keygen_init(context.get()) <= 0 ||
+        EVP_PKEY_CTX_set_rsa_keygen_bits(context.get(), 2048) <= 0 ||
+        EVP_PKEY_keygen(context.get(), &key) <= 0)
+        return {nullptr, EVP_PKEY_free};
+    return {key, EVP_PKEY_free};
+}
+
+crl_ptr make_crl(X509* issuer, EVP_PKEY* issuer_key, X509* revoked_certificate) {
+    crl_ptr crl(X509_CRL_new(), X509_CRL_free);
+    if (!crl || X509_CRL_set_version(crl.get(), 1) != 1 ||
+        X509_CRL_set_issuer_name(crl.get(), X509_get_subject_name(issuer)) != 1)
+        return {nullptr, X509_CRL_free};
+
+    std::unique_ptr<ASN1_TIME, decltype(&ASN1_TIME_free)> last_update(
+        ASN1_TIME_adj(nullptr, time(nullptr), 0, -60), ASN1_TIME_free);
+    std::unique_ptr<ASN1_TIME, decltype(&ASN1_TIME_free)> next_update(
+        ASN1_TIME_adj(nullptr, time(nullptr), 1, 0), ASN1_TIME_free);
+    if (!last_update || !next_update ||
+        X509_CRL_set1_lastUpdate(crl.get(), last_update.get()) != 1 ||
+        X509_CRL_set1_nextUpdate(crl.get(), next_update.get()) != 1)
+        return {nullptr, X509_CRL_free};
+
+    if (revoked_certificate) {
+        X509_REVOKED* revoked = X509_REVOKED_new();
+        ASN1_INTEGER* serial = ASN1_INTEGER_dup(X509_get0_serialNumber(revoked_certificate));
+        ASN1_TIME* revoked_at = ASN1_TIME_adj(nullptr, time(nullptr), 0, -30);
+        if (!revoked || !serial || !revoked_at ||
+            X509_REVOKED_set_serialNumber(revoked, serial) != 1 ||
+            X509_REVOKED_set_revocationDate(revoked, revoked_at) != 1 ||
+            X509_CRL_add0_revoked(crl.get(), revoked) != 1) {
+            X509_REVOKED_free(revoked);
+            ASN1_INTEGER_free(serial);
+            ASN1_TIME_free(revoked_at);
+            return {nullptr, X509_CRL_free};
+        }
+        ASN1_INTEGER_free(serial);
+        ASN1_TIME_free(revoked_at);
+        X509_CRL_sort(crl.get());
+    }
+
+    if (X509_CRL_sign(crl.get(), issuer_key, EVP_sha256()) <= 0)
+        return {nullptr, X509_CRL_free};
+    return crl;
 }
 
 int select_h2(SSL*, const unsigned char** out, unsigned char* out_length,
@@ -211,6 +272,64 @@ TEST_F(TLSIntegration, SpoofAddsRequestedSAN) {
     EXPECT_NE(std::find(sans.begin(), sans.end(), additional_sans.front()), sans.end());
 
     X509_free(spoofed->chain.cert);
+}
+
+TEST_F(TLSIntegration, CRLReportsRevokedSerial) {
+    auto issuer = load_certificate(fixture_path_ / "ca-cert.pem");
+    auto issuer_key = load_private_key(fixture_path_ / "ca-key.pem");
+    auto certificate = upstream_certificate();
+    ASSERT_NE(issuer, nullptr);
+    ASSERT_NE(issuer_key, nullptr);
+    ASSERT_NE(certificate, nullptr);
+    auto crl = make_crl(issuer.get(), issuer_key.get(), certificate.get());
+    ASSERT_NE(crl, nullptr);
+
+    EXPECT_EQ(inet::crl::crl_is_revoked_by(certificate.get(), issuer.get(), crl.get()), 1);
+}
+
+TEST_F(TLSIntegration, CRLReportsGoodSerial) {
+    auto issuer = load_certificate(fixture_path_ / "ca-cert.pem");
+    auto issuer_key = load_private_key(fixture_path_ / "ca-key.pem");
+    auto certificate = upstream_certificate();
+    ASSERT_NE(issuer, nullptr);
+    ASSERT_NE(issuer_key, nullptr);
+    ASSERT_NE(certificate, nullptr);
+    auto crl = make_crl(issuer.get(), issuer_key.get(), nullptr);
+    ASSERT_NE(crl, nullptr);
+
+    EXPECT_EQ(inet::crl::crl_is_revoked_by(certificate.get(), issuer.get(), crl.get()), 0);
+}
+
+TEST_F(TLSIntegration, CRLRejectsWrongIssuer) {
+    auto issuer = load_certificate(fixture_path_ / "ca-cert.pem");
+    auto wrong_key = generate_rsa_key();
+    auto certificate = upstream_certificate();
+    ASSERT_NE(issuer, nullptr);
+    ASSERT_NE(wrong_key, nullptr);
+    ASSERT_NE(certificate, nullptr);
+    auto crl = make_crl(issuer.get(), wrong_key.get(), certificate.get());
+    ASSERT_NE(crl, nullptr);
+
+    EXPECT_EQ(inet::crl::crl_is_revoked_by(certificate.get(), issuer.get(), crl.get()), -1);
+}
+
+TEST_F(TLSIntegration, OCSPUrlsContainOnlyCertificateEntries) {
+    auto certificate = upstream_certificate();
+    ASSERT_NE(certificate, nullptr);
+    X509V3_CTX context{};
+    X509V3_set_ctx_nodb(&context);
+    X509V3_set_ctx(&context, nullptr, certificate.get(), nullptr, nullptr, 0);
+    X509_EXTENSION* extension = X509V3_EXT_conf_nid(
+        nullptr, &context, NID_info_access,
+        const_cast<char*>("OCSP;URI:http://ocsp-one.invalid/status,"
+                          "OCSP;URI:http://ocsp-two.invalid/status"));
+    ASSERT_NE(extension, nullptr);
+    ASSERT_EQ(X509_add_ext(certificate.get(), extension, -1), 1);
+    X509_EXTENSION_free(extension);
+
+    EXPECT_EQ(inet::ocsp::ocsp_urls(certificate.get()),
+              (std::vector<std::string>{"http://ocsp-one.invalid/status",
+                                        "http://ocsp-two.invalid/status"}));
 }
 
 using handshake_parameters = std::tuple<int, bool, int, std::size_t>;
