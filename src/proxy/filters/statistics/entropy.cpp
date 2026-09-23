@@ -74,6 +74,10 @@ void Entropy::calculate() {
 
     reset_results();
 
+    if (data_accounted == 0) {
+        return;
+    }
+
     for (size_t i = 0; i < frequencies.size(); ++i) {
         auto freq = frequencies[i];
         if (freq > 0) {
