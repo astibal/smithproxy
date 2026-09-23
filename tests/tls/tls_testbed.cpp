@@ -368,6 +368,19 @@ TEST_F(TLSIntegration, CRLRejectsWrongIssuer) {
     EXPECT_EQ(inet::crl::crl_is_revoked_by(certificate.get(), issuer.get(), crl.get()), -1);
 }
 
+TEST_F(TLSIntegration, CRLCacheDropsExpiredEntries) {
+    auto& cache = SSLFactory::factory().crl_cache();
+    cache.clear();
+    auto* entry = SSLFactory::make_expiring_crl(nullptr);
+    entry->set_expiry(time(nullptr) - 1);
+    cache.set("expired-crl", entry);
+
+    EXPECT_EQ(cache.get("expired-crl"), nullptr);
+    EXPECT_EQ(cache.size(), 0U);
+    EXPECT_TRUE(cache.items().empty());
+    cache.clear();
+}
+
 TEST_F(TLSIntegration, OCSPUrlsContainOnlyCertificateEntries) {
     auto certificate = upstream_certificate();
     ASSERT_NE(certificate, nullptr);
