@@ -373,7 +373,7 @@ namespace sx::engine::http {
                 auto host_entry = domain_entry->at<KB_String>(stream_state.hostname().value_or("<?>"));
 
 
-                if (auto path = stream_state.request_header(":path"); hostname.has_value()) {
+                if (auto path = stream_state.request_header(":path"); path.has_value()) {
                     auto path_entry = host_entry->at<KB_String>(path.value());
 
                     if(side == side_t::LEFT) {
