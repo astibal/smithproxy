@@ -489,9 +489,10 @@ void SmithProxy::run() {
                 wh_nbr_seconds = 0;
             }
             ++wh_nbr_seconds;
-
-            std::this_thread::sleep_for(std::chrono::seconds(1));
         }
+
+        // Keep the housekeeping loop paced even when webhooks are disabled.
+        std::this_thread::sleep_for(std::chrono::seconds(1));
 #ifdef ASAN_LEAKS
         // See: https://stackoverflow.com/questions/67705427/how-to-use-asan-on-a-long-time-running-server-program
         // More info in:
@@ -593,6 +594,10 @@ bool SmithProxy::state_load() {
 bool SmithProxy::state_load_neighbors(std::string const& fnm) {
 
     auto ifs = std::ifstream(fnm);
+    if (not ifs || ifs.peek() == std::ifstream::traits_type::eof()) {
+        return false;
+    }
+
     try {
         nlohmann::json js = nlohmann::json::parse(ifs);
         NbrHood::instance().ser_json_in(js);
@@ -943,5 +948,3 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
 
     return ret;
 }
-
-

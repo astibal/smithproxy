@@ -104,8 +104,8 @@ private:
     replacetype_t replacement_type_ = REPLACETYPE_NONE;
     replaceflags_t replacement_flags_ = REPLACE_NONE;
 
-    unsigned int inspect_cur_flow_size = 0;
-    unsigned int inspect_flow_same_bytes = 0;
+    std::size_t inspect_cur_flow_size = 0;
+    std::size_t inspect_flow_same_bytes = 0;
     int inspect_verdict = Inspector::OK;
     std::shared_ptr<buffer> inspect_verdict_response;
 

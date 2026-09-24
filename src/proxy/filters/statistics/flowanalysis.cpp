@@ -27,6 +27,7 @@ void FlowAnalysis::calculate() {
 
     auto calculate_skew = [](auto left, auto right) {
         auto total = static_cast<double>(left+right);
+        if (total == 0.0) return 0.0;
         auto l = static_cast<long long>(left);
         auto r = static_cast<long long>(right);
         return static_cast<double>(r - l)/total;
