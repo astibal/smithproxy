@@ -34,7 +34,10 @@ public:
     std::string text_result() const;
     nlohmann::json json_result() const;
     std::size_t skipped_spread() const noexcept { return skipped_spread_.load(std::memory_order_relaxed); }
+    std::string pending_origins() const;
 
+    void prepare_slot(std::size_t slot, std::string const& origin);
+    void complete_empty_slot(std::size_t slot);
     void collect(MasterProxy& master, std::size_t slot, std::string const& origin);
 
 private:
@@ -42,7 +45,7 @@ private:
 
     SessionList(std::size_t workers, text_renderer renderer);
     SessionList(std::size_t workers, json_renderer renderer);
-    void finish_slot();
+    void finish_slot(std::size_t slot);
 
     static version_type next_version() noexcept;
 
@@ -52,6 +55,8 @@ private:
     json_renderer json_renderer_;
     std::vector<std::string> text_fragments_;
     std::vector<nlohmann::json> json_fragments_;
+    std::vector<std::string> origins_;
+    std::vector<bool> completed_;
     std::atomic_size_t remaining_;
     std::atomic_size_t skipped_spread_{0};
     mutable std::mutex completion_lock_;

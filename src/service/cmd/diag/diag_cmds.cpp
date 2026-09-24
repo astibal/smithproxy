@@ -1982,8 +1982,9 @@ int cli_diag_proxy_session_list_extra (struct cli_def *cli, const char *command,
     auto request = SessionList::text(session_list_worker_count(), std::move(renderer));
     dispatch_session_list(request);
     if (!request->wait_for(std::chrono::seconds(5))) {
-        cli_print(cli, "Session snapshot %llu timed out",
-                  static_cast<unsigned long long>(request->version()));
+        cli_print(cli, "Session snapshot %llu timed out; pending: %s",
+                  static_cast<unsigned long long>(request->version()),
+                  request->pending_origins().c_str());
         return CLI_OK;
     }
 
