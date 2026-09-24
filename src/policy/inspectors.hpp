@@ -54,7 +54,6 @@
 #include <apphostcx.hpp>
 #include <regex>
 
-#include <sessionobject.hpp>
 #include <lockable.hpp>
 
 //
@@ -62,7 +61,7 @@
 ///        Serves as an interface.
 ///
 //
-class Inspector : public socle::session_object, public lockable {
+class Inspector : public lockable {
 public:
     //explicit Inspector() = default;
     explicit Inspector(std::string_view name) : proto_name_(name) {};
@@ -107,7 +106,7 @@ protected:
     int stage = 0;
     
     
-    std::string to_string(int verbosity) const override {
+    virtual std::string to_string(int verbosity) const {
         return string_format("%s: in-progress: %d stage: %d completed: %d result: %d",
                              c_type(),in_progress(), stage, completed(),result());
     };
@@ -118,7 +117,7 @@ protected:
     static std::pair<std::string,std::string> split_fqdn_subdomain(std::string& fqdn);
 
 public:
-    TYPENAME_OVERRIDE("Inspector")
+    TYPENAME_BASE("Inspector")
 };
 
 #endif //INSPECTORS_HPP_

@@ -44,12 +44,11 @@
  
 #include <ctime>
 
-#include <sessionobject.hpp>
 #include "common/display.hpp"
 #include "src/proxy/mitmproxy.hpp"
 #include <nlohmann/json.hpp>
 
-struct FilterResult : public socle::session_object {
+struct FilterResult {
     // NONE - Send some data
     // WANT_MORE_LEFT -  asking for more LEFT bytes before we can FINISH
     // WANT_MORE_RIGHT - asking for more RIGHT bytes before we can FINISH
@@ -61,15 +60,15 @@ struct FilterResult : public socle::session_object {
     bool is_flag(status_flags sf) const { return flag_check<uint64_t>(&status_,(uint64_t )sf); };
     void set_flag(status_flags sf) { flag_set<uint64_t >(&status_,(uint64_t )sf); }
 
-    std::string to_string(int verbosity) const override { static std::string r("FilterResult"); return r; };
+    std::string to_string(int verbosity) const { static std::string r("FilterResult"); return r; };
 };
 
-class FilterProxy : public socle::session_object {
+class FilterProxy {
 public:
     
     FilterProxy() = default;
     explicit FilterProxy(MitmProxy* parent) : parent_(parent) {};
-    ~FilterProxy() override = default;
+    virtual ~FilterProxy() = default;
 
     virtual bool update_states() {
         // some filters need extra non-const steps before calling to_string() const
@@ -78,7 +77,7 @@ public:
         return true;
     };
 
-    std::string to_string(int verbosity) const override { static std::string r("FilterProxy"); return r; };
+    virtual std::string to_string(int verbosity) const { static std::string r("FilterProxy"); return r; };
     virtual nlohmann::json to_json(int verbosity) const { return nlohmann::json(); };
 
     virtual void proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redirected) {
@@ -93,7 +92,7 @@ public:
 
     std::unique_ptr<FilterResult>& result() { return result_; }
 
-    TYPENAME_OVERRIDE("FilterProxy")
+    TYPENAME_BASE("FilterProxy")
     DECLARE_LOGGING(to_string)
 
 private:

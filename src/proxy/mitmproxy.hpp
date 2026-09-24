@@ -42,6 +42,7 @@
  #define MITMPROXY_HPP
 
 #include <atomic>
+#include <ctime>
 
 #include <basecom.hpp>
 #include <hostcx.hpp>
@@ -63,7 +64,6 @@
 #include <inspect/engine/http.hpp>
 
 #include <utils/lazy_ptr.hpp>
-#include <sessionobject.hpp>
 #include <service/core/sessionlist.hpp>
 
 struct whitelist_verify_entry {
@@ -84,7 +84,7 @@ private:
     IOController* master_ = nullptr ;
 };
 
-class MitmProxy : public baseProxy, public socle::session_object, public IOController {
+class MitmProxy : public baseProxy, public IOController {
 
     std::unique_ptr<socle::baseTrafficLogger> tlog_;
     
@@ -96,12 +96,14 @@ class MitmProxy : public baseProxy, public socle::session_object, public IOContr
 
     std::string replacement_msg;
     static inline long half_timeout_ = 5;
+    std::time_t created_at_ = std::time(nullptr);
 public:
     using whitelist_verify_entry_t = expiring<whitelist_verify_entry> ;
     using whitelist_map_t = ptr_cache<std::string,whitelist_verify_entry_t>;
 
     time_t half_holdtimer = 0;
     static long& half_timeout() { ; return half_timeout_; };
+    [[nodiscard]] std::time_t age() const noexcept { return std::time(nullptr) - created_at_; }
 
     static whitelist_map_t& whitelist_verify() {
         static whitelist_map_t m("whitelist_verify", 500, true, whitelist_verify_entry_t::is_expired);

@@ -1759,7 +1759,7 @@ auto get_more_info(MitmProxy const* curr_proxy, MitmHostCX* lf, MitmHostCX* rg, 
     std::stringstream info_ss;
 
     if (verbosity >= DEB && curr_proxy) {
-        info_ss << "    session_object: age: " << curr_proxy->age() << "s";
+        info_ss << "    session: age: " << curr_proxy->age() << "s";
     }
 
     if (verbosity > INF) {

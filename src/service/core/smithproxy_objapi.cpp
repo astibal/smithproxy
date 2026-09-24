@@ -76,7 +76,7 @@ nlohmann::json ObjAPI::proxy_session_connid_list_plus() {
 }
 
 
-nlohmann::json ObjAPI::proxy_session_list_json(uint64_t oid, bool active_only, bool tls_info, bool verbose) {
+nlohmann::json ObjAPI::proxy_session_list_json(bool active_only, bool tls_info, bool verbose) {
     using nlohmann::json;
 
     auto verbosity = verbose ? iDIA : iINF;
@@ -114,8 +114,7 @@ nlohmann::json ObjAPI::proxy_session_list_json(uint64_t oid, bool active_only, b
 
 
     auto request = SessionList::json(session_list_worker_count(),
-        [oid, json_single_proxy](MitmProxy* proxy) -> std::optional<nlohmann::json> {
-            if (oid != 0ULL && proxy->oid() != oid) return std::nullopt;
+        [json_single_proxy](MitmProxy* proxy) -> std::optional<nlohmann::json> {
             return json_single_proxy(proxy);
         });
 

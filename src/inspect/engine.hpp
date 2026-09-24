@@ -43,15 +43,14 @@
 
 #include <any>
 
-#include <sessionobject.hpp>
 #include <inspect/sxsignature.hpp>
 
 class MitmHostCX;
 
 namespace sx::engine {
 
-    struct ApplicationData: public socle::session_object {
-        ~ApplicationData() override = default;
+    struct ApplicationData {
+        virtual ~ApplicationData() = default;
         bool is_ssl = false;
 
         using property_map_t = std::unordered_map<std::string,std::string>;
@@ -97,7 +96,7 @@ namespace sx::engine {
             return ss.str();
         }
 
-        std::string to_string(int verbosity) const override {
+        virtual std::string to_string(int verbosity) const {
 
             if(verbosity >= iDEB) {
                 return properties_str();
@@ -105,8 +104,9 @@ namespace sx::engine {
 
             return {};
         };
+        [[nodiscard]] std::string str() const { return to_string(iINF); }
 
-        TYPENAME_OVERRIDE("ApplicationData")
+        TYPENAME_BASE("ApplicationData")
 
     private:
         logan_lite log {"com.app"};

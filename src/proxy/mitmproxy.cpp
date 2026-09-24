@@ -68,7 +68,7 @@
 
 using namespace socle;
 
-MitmProxy::MitmProxy(baseCom* c): baseProxy(c), session_object() {
+MitmProxy::MitmProxy(baseCom* c): baseProxy(c) {
 
     current_sessions()++;
     total_sessions()++;
@@ -240,7 +240,8 @@ std::string MitmProxy::to_connection_label(bool force_resolve) const {
 
 
 std::string MitmProxy::to_connection_ID() const {
-    return string_format("Proxy-%lX-OID-%lX", StaticContent::boot_random, oid());
+    return string_format("Proxy-%lX-PTR-%lX", StaticContent::boot_random,
+                         reinterpret_cast<std::uintptr_t>(this));
 }
 
 void MitmProxy::webhook_session_start() const {

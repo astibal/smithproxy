@@ -43,9 +43,8 @@
 #include <inspect/engine.hpp>
 #include <apphostcx.hpp>
 #include <policy/inspectors.hpp>
-#include <sessionobject.hpp>
 
-class MitmHostCX : public AppHostCX, public socle::session_object {
+class MitmHostCX : public AppHostCX {
 public:
     ~MitmHostCX() override = default;
     

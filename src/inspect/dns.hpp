@@ -51,7 +51,6 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#include <sessionobject.hpp>
 #include <ptr_cache.hpp>
 #include <buffer.hpp>
 #include <display.hpp>
@@ -214,7 +213,7 @@ struct DNS_DnssecAdditionalInfo {
     buffer   data_;
 };
 
-class DNS_Packet : public socle::session_object {
+class DNS_Packet {
 
 public:
     static constexpr unsigned int DNS_HEADER_SZ = 12;
@@ -242,8 +241,9 @@ public:
     std::vector<unsigned int> answer_ttl_idx; // should be protected;
     time_t      loaded_at = 0;
     
-    std::string to_string(int verbosity) const override;
-    ~DNS_Packet() override = default;
+    virtual std::string to_string(int verbosity) const;
+    [[nodiscard]] std::string str() const { return to_string(iINF); }
+    virtual ~DNS_Packet() = default;
 
     std::optional<size_t> load(const buffer *src); // initialize from memory. if non-zero is returned, there is yet another data and new DNS_packet should be read.
 
@@ -273,7 +273,7 @@ public:
     inline std::vector<DNS_Answer>& additionals() { return additionals_list_; };
     
 
-    TYPENAME_OVERRIDE("DNS_Packet")
+    TYPENAME_BASE("DNS_Packet")
     DECLARE_LOGGING(to_string)
 };
 
