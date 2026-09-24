@@ -1417,6 +1417,9 @@ int CfgFactory::load_db_policy () {
             }
 
             load_if_exists(cur_object, "name", rule->policy_name);
+            rule->element_name() = rule->policy_name.empty()
+                ? string_format("policy-%d", policy_index)
+                : rule->policy_name;
 
             if(load_if_exists(cur_object, "proto", proto)) {
                 auto r = lookup_proto(proto.c_str());

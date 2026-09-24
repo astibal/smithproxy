@@ -62,7 +62,6 @@
 #include <sslcom.hpp>
 #include <sslcertstore.hpp>
 
-#include <sobject.hpp>
 #include <proxy/mitmproxy.hpp>
 #include <proxy/filters/filterproxy.hpp>
 #include <proxy/nbrhood.hpp>
@@ -1068,16 +1067,6 @@ int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *a
 }
 
 
-int cli_diag_mem_objects_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
-
-    debug_cli_params(cli, command, argv, argc);
-
-    cli_print(cli,"Statistics:\n");
-    cli_print(cli,"%s", socle::sobjectDB::str_stats(nullptr).c_str());
-    return CLI_OK;
-
-}
-
 int cli_diag_mem_udp_stats(struct cli_def *cli, const char *command, char **argv, int argc) {
 
     debug_cli_params(cli, command, argv, argc);
@@ -1244,131 +1233,6 @@ int cli_diag_mem_trace_list (struct cli_def *cli, const char *command, char **ar
     cli_print(cli, "memory tracing not enabled.");
 
 #endif
-    return CLI_OK;
-}
-
-
-
-int cli_diag_mem_objects_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
-
-    debug_cli_params(cli, command, argv, argc);
-
-    std::string object_filter;
-    int verbosity = iINF;
-
-    if(argc > 0) {
-        std::string arg1 = argv[0];
-        if(arg1 == "?") {
-            cli_print(cli,"valid parameters:");
-            cli_print(cli,"         <empty> - all entries will be printed out");
-            cli_print(cli,"         0x prefixed string - only object with matching Id will be printed out");
-            cli_print(cli,"         any other string   - only objects with class matching this string will be printed out");
-
-            return CLI_OK;
-        } else {
-            // a1 is param for the lookup
-            if("*" == arg1 || "ALL" == arg1) {
-                object_filter = "";
-            } else {
-                object_filter = arg1;
-            }
-        }
-
-        if(argc > 1) {
-            std::string arg2 = argv[1];
-            verbosity = safe_val(arg2,iINF);
-        }
-    }
-
-
-    std::string ret = socle::sobjectDB::str_list((object_filter.empty()) ? nullptr : object_filter.c_str(), nullptr, verbosity);
-    ret += "\n" + socle::sobjectDB::str_stats((object_filter.empty()) ? nullptr : object_filter.c_str());
-
-
-    cli_print(cli, "Smithproxy objects (filter: %s):\n%s\nFinished.",(object_filter.empty()) ? "ALL" : object_filter.c_str() , ret.c_str());
-    return CLI_OK;
-}
-
-
-int cli_diag_mem_objects_search(struct cli_def *cli, const char *command, char *argv[], int argc) {
-
-    debug_cli_params(cli, command, argv, argc);
-
-    std::string object_filter;
-    int verbosity = iINF;
-
-    if(argc > 0) {
-        std::string arg1 = argv[0];
-        if(arg1 == "?") {
-            cli_print(cli,"valid parameters:");
-            cli_print(cli,"         <empty>     - all entries will be printed out");
-            cli_print(cli,"         any string  - objects with descriptions containing this string will be printed out");
-
-            return CLI_OK;
-        } else {
-            // a1 is param for the lookup
-            if("*" == arg1 || "ALL" == arg1) {
-                object_filter = "";
-            } else {
-                object_filter = arg1;
-            }
-        }
-
-        if(argc > 1) {
-            std::string arg2 = argv[1];
-            verbosity = safe_val(arg2,iINF);
-        }
-    }
-
-
-    std::string r = socle::sobjectDB::str_list(nullptr,nullptr,verbosity,object_filter.c_str());
-
-    cli_print(cli,"Smithproxy objects (filter: %s):\n%s\nFinished.",(object_filter.empty()) ? "ALL" : object_filter.c_str() ,r.c_str());
-    return CLI_OK;
-}
-
-
-
-int cli_diag_mem_objects_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
-
-    debug_cli_params(cli, command, argv, argc);
-
-    std::string address;
-
-    if(argc > 0) {
-        address = argv[0];
-        if(address == "?") {
-            cli_print(cli,"valid parameters:");
-            cli_print(cli,"         <object id>");
-
-            return CLI_OK;
-        } else {
-            unsigned long key = strtol(address.c_str(),nullptr,16);
-            cli_print(cli,"Trying to clear 0x%lx", key);
-
-
-            int ret = -1;
-            {
-                ret = socle::sobjectDB::ask_destroy((void *) key);
-            }
-
-            switch(ret) {
-                case 1:
-                    cli_print(cli,"object agrees to terminate.");
-                    break;
-                case 0:
-                    cli_print(cli,"object doesn't agree to terminate, or doesn't support it.");
-                    break;
-                case -1:
-                    cli_print(cli, "object not found.");
-                    break;
-                default:
-                    cli_print(cli, "unknown result.");
-                    break;
-            }
-        }
-    }
-
     return CLI_OK;
 }
 
@@ -2591,11 +2455,6 @@ bool register_diags(cli_def* cli, cli_command* diag) {
         auto diag_mem_udp = cli_register_command(cli, diag_mem, "udp", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "udp related structures troubleshooting commands");
             cli_register_command(cli, diag_mem_udp, "stats", cli_diag_mem_udp_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "udp structures statistics");
 
-    auto diag_mem_objects = cli_register_command(cli, diag_mem, "objects", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory object troubleshooting commands");
-    cli_register_command(cli, diag_mem_objects, "stats", cli_diag_mem_objects_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory objects statistics");
-    cli_register_command(cli, diag_mem_objects, "list", cli_diag_mem_objects_list, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory objects list");
-    cli_register_command(cli, diag_mem_objects, "search", cli_diag_mem_objects_search, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory objects search");
-    cli_register_command(cli, diag_mem_objects, "clear", cli_diag_mem_objects_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clears memory object");
     auto diag_mem_trace = cli_register_command(cli, diag_mem, "trace", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory tracing commands");
     cli_register_command(cli, diag_mem_trace, "list", cli_diag_mem_trace_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "print out memory allocation traces (arg: number of top entries to print)");
     cli_register_command(cli, diag_mem_trace, "mark", cli_diag_mem_trace_mark, PRIVILEGE_PRIVILEGED, MODE_EXEC, "mark all currently existing allocations as seen.");

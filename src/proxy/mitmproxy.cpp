@@ -353,7 +353,7 @@ std::string MitmProxy::to_string(int verbosity) const {
 
             if(matched_policy() >= 0) {
                 auto p = CfgFactory::get()->db_policy_list.at(matched_policy());
-                r << string_format("\n    PolicyRule oid: 0x%x", p->oid());
+                r << string_format("\n    Policy: %s", p->element_name().c_str());
             }
 
 

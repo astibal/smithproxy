@@ -51,9 +51,8 @@
 #include <policy/addrobj.hpp>
 #include <policy/profiles.hpp>
 
-#include <sobject.hpp>
 
-class PolicyRule : public ProfileList , public CfgElement, public socle::sobject {
+class PolicyRule : public ProfileList, public CfgElement {
 
 public:
 
@@ -92,12 +91,9 @@ public:
     int nat    = POLICY_NAT_NONE;
     std::string nat_name;
 
-    PolicyRule() : ProfileList(),
-                   CfgElement(),
-                   socle::sobject()
-                   {
+    PolicyRule() : ProfileList(), CfgElement() {
                     proto = std::make_shared<CfgUint8>((uint8_t)0);
-                    element_name() = string_format("policy-%d", oid());
+                    element_name() = "policy";
                    };
 
     ~PolicyRule() override = default;
@@ -116,7 +112,6 @@ public:
     bool match_rangegrp_cx(group_of_ports const& ranges,baseHostCX* cx) const;
     bool match_rangegrp_vecx(group_of_ports const& ranges,std::vector<baseHostCX*> const& vecx) const;
 
-    bool ask_destroy() override { return false; }
     std::string to_string(int verbosity) const override;
 
     logan_lite& get_log() { return log; }

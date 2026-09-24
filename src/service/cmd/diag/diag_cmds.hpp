@@ -85,14 +85,10 @@ int cli_diag_identity_ip_clear(struct cli_def *cli, const char *command, char *a
 int cli_diag_writer_stats(struct cli_def *cli, const char *command, char *argv[], int argc);
 
 int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *argv[], int argc);
-int cli_diag_mem_objects_stats(struct cli_def *cli, const char *command, char *argv[], int argc);
 int cli_diag_mem_trace_mark (struct cli_def *cli, const char *command, char **argv, int argc);
 int cli_diag_mem_udp_stats(struct cli_def *cli, const char *command, char **argv, int argc);
 
 int cli_diag_mem_trace_list (struct cli_def *cli, const char *command, char **argv, int argc);
-int cli_diag_mem_objects_list(struct cli_def *cli, const char *command, char *argv[], int argc);
-int cli_diag_mem_objects_search(struct cli_def *cli, const char *command, char *argv[], int argc);
-int cli_diag_mem_objects_clear(struct cli_def *cli, const char *command, char *argv[], int argc);
 
 typedef enum session_list_filter_flags {
         SL_NONE=0x0000,
