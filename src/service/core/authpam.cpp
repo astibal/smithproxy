@@ -69,15 +69,15 @@ namespace sx::auth {
             return false;
         }
 
-        struct passwd pw;
+        struct passwd pw{};
         struct passwd* pwd_ptr = &pw;
-        struct passwd* temp_pwd_ptr;
+        struct passwd* temp_pwd_ptr = nullptr;
 
         char pwd_buffer[200];
         int  pwd_bufsz = sizeof(pwd_buffer);
 
         auto pw_ret = getpwnam_r(username,pwd_ptr,pwd_buffer,pwd_bufsz,&temp_pwd_ptr);
-        if (pw_ret != 0) {
+        if (pw_ret != 0 || temp_pwd_ptr != pwd_ptr) {
             return false;
         }
 
@@ -92,14 +92,14 @@ namespace sx::auth {
 
             struct group  gr{};
             struct group* gr_ptr = &gr;
-            struct group* temp_gr_ptr;
+            struct group* temp_gr_ptr = nullptr;
 
             char grp_buffer[200];
             int grp_bufsz = sizeof(grp_buffer);
 
 
             int gr_result = getgrgid_r(groups[j], gr_ptr, grp_buffer, grp_bufsz, &temp_gr_ptr);
-            if (gr_result == 0) {
+            if (gr_result == 0 && temp_gr_ptr == gr_ptr && gr.gr_name) {
                 auto gr_string = std::string (gr.gr_name);
                 if(gr_string == groupname) {
                     to_ret = true;
