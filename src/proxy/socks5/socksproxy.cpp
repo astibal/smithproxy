@@ -484,3 +484,12 @@ void MitmSocksUdpProxy::on_left_new(baseHostCX* just_accepted_cx) {
     this->add_proxy(new_proxy);
     _deb("MitmSocksUdpProxy::on_left_new: finished");
 }
+int MitmSocksProxy::handle_sockets_once(baseCom* c) {
+    process_session_lists(*this);
+    return ThreadedAcceptorProxy<SocksProxy>::handle_sockets_once(c);
+}
+
+int MitmSocksUdpProxy::handle_sockets_once(baseCom* c) {
+    process_session_lists(*this);
+    return ThreadedReceiverProxy<SocksProxy>::handle_sockets_once(c);
+}

@@ -50,6 +50,7 @@
 #include <traflog/traflog.hpp>
 
 #include <service/core/smithproxy.hpp>
+#include <service/core/sessionlist.hpp>
 #include <service/cmd/cmdserver.hpp>
 #include <service/cmd/diag/diag_cmds.hpp>
 #include <service/httpd/httpd.hpp>
@@ -1753,12 +1754,12 @@ auto get_proxy_title(MitmProxy* proxy, int sl_flags, int verbosity) {
 }
 
 
-auto get_more_info(sobject_info const* so_info, MitmProxy const* curr_proxy, MitmHostCX* lf, MitmHostCX* rg, int verbosity) {
+auto get_more_info(MitmProxy const* curr_proxy, MitmHostCX* lf, MitmHostCX* rg, int verbosity) {
 
     std::stringstream info_ss;
 
-    if (verbosity >= DEB && so_info) {
-        info_ss << so_info->to_string(verbosity);
+    if (verbosity >= DEB && curr_proxy) {
+        info_ss << "    session_object: age: " << curr_proxy->age() << "s";
     }
 
     if (verbosity > INF) {
@@ -1913,32 +1914,11 @@ int cli_diag_proxy_session_list_extra (struct cli_def *cli, const char *command,
         if(args.size() > 1) arg2 = args.at(1);
     }
 
-    std::stringstream out;
-
-    {
-        auto lc_ = std::scoped_lock(socle::sobjectDB::getlock());
-
-        for (auto const& [ so_ptr, so_info]: socle::sobjectDB::db()) {
-
-            std::string prefix;
-            std::string suffix;
-
-
-            if (!so_ptr) continue;
-
-            std::string what = so_ptr->c_type();
-            if ( what == "MitmProxy" || what == "SocksProxy") {
-
-                auto *curr_proxy = dynamic_cast<MitmProxy *>(so_ptr);
-                MitmHostCX *lf = nullptr;
-                MitmHostCX *rg = nullptr;
-
-                if (curr_proxy) {
-                    lf = curr_proxy->first_left();
-                    rg = curr_proxy->first_right();
-                } else {
-                    continue;
-                }
+    auto renderer = [sl_flags, verbosity](MitmProxy* curr_proxy) -> std::optional<std::string> {
+                std::string prefix;
+                std::string suffix;
+                auto* lf = curr_proxy->first_left();
+                auto* rg = curr_proxy->first_right();
 
                 /* apply filters */
 
@@ -1946,7 +1926,7 @@ int cli_diag_proxy_session_list_extra (struct cli_def *cli, const char *command,
 
                 if (flag_check<int>(sl_flags, SL_ACTIVE)) {
                     if(curr_proxy->stats().mtr_down.get() + curr_proxy->stats().mtr_up.get() == 0) {
-                        continue;
+                        return std::nullopt;
                     }
                     do_print = true;
                 }
@@ -1979,7 +1959,7 @@ int cli_diag_proxy_session_list_extra (struct cli_def *cli, const char *command,
                 if (sl_flags == SL_IPS) { do_print = true;  }
 
                 if (!do_print) {
-                    continue;
+                    return std::nullopt;
                 }
 
                 // adjust prefix spacing
@@ -1995,15 +1975,22 @@ int cli_diag_proxy_session_list_extra (struct cli_def *cli, const char *command,
                 std::stringstream cur_obj_ss;
                 cur_obj_ss << prefix << get_proxy_title(curr_proxy, sl_flags, verbosity) << suffix;
 
-                cur_obj_ss << get_more_info(so_info.get(), curr_proxy, lf, rg, verbosity);
+                cur_obj_ss << get_more_info(curr_proxy, lf, rg, verbosity);
+                return cur_obj_ss.str();
+    };
 
-                out << cur_obj_ss.str() << "\n";
-            }
-        }
+    auto request = SessionList::text(session_list_worker_count(), std::move(renderer));
+    dispatch_session_list(request);
+    if (!request->wait_for(std::chrono::seconds(5))) {
+        cli_print(cli, "Session snapshot %llu timed out",
+                  static_cast<unsigned long long>(request->version()));
+        return CLI_OK;
     }
 
-
-    cli_print(cli, "%s", out.str().c_str());
+    cli_print(cli, "%s", request->text_result().c_str());
+    if (request->skipped_spread() > 0) {
+        cli_print(cli, "\n%zu spread sessions omitted", request->skipped_spread());
+    }
 
     if( sl_flags == SL_NONE ) {
         unsigned long l = MitmProxy::total_mtr_up().get();
@@ -2662,4 +2649,3 @@ bool register_diags(cli_def* cli, cli_command* diag) {
 
     return true;
 }
-

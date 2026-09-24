@@ -43,14 +43,14 @@
 
 #include <any>
 
-#include <sobject.hpp>
+#include <sessionobject.hpp>
 #include <inspect/sxsignature.hpp>
 
 class MitmHostCX;
 
 namespace sx::engine {
 
-    struct ApplicationData: public socle::sobject {
+    struct ApplicationData: public socle::session_object {
         ~ApplicationData() override = default;
         bool is_ssl = false;
 
@@ -78,8 +78,6 @@ namespace sx::engine {
         virtual std::string custom_list_name() { return {}; };
         virtual std::vector<std::string> custom_list() { return {}; };
         virtual std::string protocol() const = 0;
-
-        bool ask_destroy() override { return false; };
 
         // properties are values kept across multiple exchanges (suriving `next()`).
         // They should not be cleared in next() calls by children.

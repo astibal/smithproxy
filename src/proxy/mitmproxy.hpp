@@ -63,6 +63,8 @@
 #include <inspect/engine/http.hpp>
 
 #include <utils/lazy_ptr.hpp>
+#include <sessionobject.hpp>
+#include <service/core/sessionlist.hpp>
 
 struct whitelist_verify_entry {
 };
@@ -82,7 +84,7 @@ private:
     IOController* master_ = nullptr ;
 };
 
-class MitmProxy : public baseProxy, public socle::sobject, public IOController {
+class MitmProxy : public baseProxy, public socle::session_object, public IOController {
 
     std::unique_ptr<socle::baseTrafficLogger> tlog_;
     
@@ -236,7 +238,6 @@ public:
     // check if content has been pulled from cache and return true if so
     virtual bool handle_cached_response(MitmHostCX* cx);
     
-    bool ask_destroy() override { state().dead(true); return true; };
     std::string to_string(int verbosity) const override;
     std::string to_connection_label(bool force_resolve = false) const;
     std::string to_connection_ID() const;
@@ -281,7 +282,7 @@ private:
     logan_lite log_content_dump {"proxy.content.dump"};
 };
 
-class MitmMasterProxy : public ThreadedAcceptorProxy<MitmProxy> {
+class MitmMasterProxy : public ThreadedAcceptorProxy<MitmProxy>, public SessionListConsumer {
 public:
     
     MitmMasterProxy(baseCom* c, int worker_id, proxyType t = proxyType::transparent() ) :
@@ -301,12 +302,13 @@ private:
 };
 
 
-class MitmUdpProxy : public ThreadedReceiverProxy<MitmProxy> {
+class MitmUdpProxy : public ThreadedReceiverProxy<MitmProxy>, public SessionListConsumer {
 public:
     MitmUdpProxy(baseCom* c, int worker_id, proxyType t = proxyType::transparent() ):
         ThreadedReceiverProxy< MitmProxy >(c,worker_id, t) {};
     void on_left_new(baseHostCX* just_accepted_cx) override;
     baseHostCX* new_cx(int s) override;
+    int handle_sockets_once(baseCom* c) override;
 
 private:
     logan_lite log {"com.udp.acceptor"};

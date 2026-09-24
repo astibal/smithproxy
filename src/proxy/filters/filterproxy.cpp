@@ -39,13 +39,3 @@
 
 
 #include <proxy/filters/filterproxy.hpp>
-
-
-
-bool FilterProxy::ask_destroy() {
-    if(parent_) {
-        parent()->state().dead(true); return true;
-    }
-    return false;
-}
-

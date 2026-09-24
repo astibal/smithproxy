@@ -43,8 +43,9 @@
 #include <inspect/engine.hpp>
 #include <apphostcx.hpp>
 #include <policy/inspectors.hpp>
+#include <sessionobject.hpp>
 
-class MitmHostCX : public AppHostCX, public socle::sobject {
+class MitmHostCX : public AppHostCX, public socle::session_object {
 public:
     ~MitmHostCX() override = default;
     
@@ -94,7 +95,6 @@ public:
     bool is_dns = false;
     bool is_dns_port = false;
 
-    bool ask_destroy() override;
     std::string to_string(int verbosity) const override;
     auto const& get_log() const { return log; }
     

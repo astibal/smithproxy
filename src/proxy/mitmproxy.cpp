@@ -68,7 +68,7 @@
 
 using namespace socle;
 
-MitmProxy::MitmProxy(baseCom* c): baseProxy(c), sobject() {
+MitmProxy::MitmProxy(baseCom* c): baseProxy(c), session_object() {
 
     current_sessions()++;
     total_sessions()++;
@@ -2456,8 +2456,13 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
 }
 
 int MitmMasterProxy::handle_sockets_once(baseCom* c) {
-    //T__dia("slist",5,this->hr()+"\n===============\n");
+    process_session_lists(*this);
     return ThreadedAcceptorProxy<MitmProxy>::handle_sockets_once(c);
+}
+
+int MitmUdpProxy::handle_sockets_once(baseCom* c) {
+    process_session_lists(*this);
+    return ThreadedReceiverProxy<MitmProxy>::handle_sockets_once(c);
 }
 
 
@@ -2509,4 +2514,3 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
 baseHostCX* MitmUdpProxy::MitmUdpProxy::new_cx(int s) {
     return new MitmHostCX(com()->slave(),s);
 }
-

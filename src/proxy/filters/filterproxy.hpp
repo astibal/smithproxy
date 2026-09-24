@@ -44,12 +44,12 @@
  
 #include <ctime>
 
-#include "sobject.hpp"
+#include <sessionobject.hpp>
 #include "common/display.hpp"
 #include "src/proxy/mitmproxy.hpp"
 #include <nlohmann/json.hpp>
 
-struct FilterResult : public socle::sobject {
+struct FilterResult : public socle::session_object {
     // NONE - Send some data
     // WANT_MORE_LEFT -  asking for more LEFT bytes before we can FINISH
     // WANT_MORE_RIGHT - asking for more RIGHT bytes before we can FINISH
@@ -62,10 +62,9 @@ struct FilterResult : public socle::sobject {
     void set_flag(status_flags sf) { flag_set<uint64_t >(&status_,(uint64_t )sf); }
 
     std::string to_string(int verbosity) const override { static std::string r("FilterResult"); return r; };
-    bool ask_destroy() override { return false; };
 };
 
-class FilterProxy : public socle::sobject {
+class FilterProxy : public socle::session_object {
 public:
     
     FilterProxy() = default;
@@ -81,8 +80,6 @@ public:
 
     std::string to_string(int verbosity) const override { static std::string r("FilterProxy"); return r; };
     virtual nlohmann::json to_json(int verbosity) const { return nlohmann::json(); };
-
-    bool ask_destroy() override;
 
     virtual void proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redirected) {
         // don't need incomplete type when accessing to_string using base pointer

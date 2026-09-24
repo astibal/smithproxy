@@ -8,6 +8,7 @@
 #include <openssl/x509.h>
 
 #include <async/asyncsocket.hpp>
+#include <sessionobject.hpp>
 
 
 
@@ -31,20 +32,15 @@ public:
 
 namespace inet::ocsp {
 
-    class AsyncOCSP : public AsyncSocket<int>, public socle::sobject {
+    class AsyncOCSP : public AsyncSocket<int>, public socle::session_object {
     public:
 
         AsyncOCSP (X509 *cert, X509 *issuer, baseHostCX *cx, callback_t cb) :
                 AsyncSocket(cx, std::move(cb)),
-                socle::sobject(),
+                socle::session_object(),
                 query_(cert, issuer, oid()) {
             log_tracer_("c-tor");
         };
-
-        bool ask_destroy () override {
-            untap();
-            return true;
-        }
 
         #ifdef ASYNC_OCSP_DEBUG
         mutable Tracer tracer;
