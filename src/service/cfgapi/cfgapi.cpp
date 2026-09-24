@@ -933,6 +933,8 @@ bool CfgFactory::load_settings () {
             sx::webserver::HttpSessions::api_port = 55555;
             Log::get()->events().insert(WAR, "CONFIG: settings.http_api.port: invalid port value, using 55555");
             CfgFactory::LOAD_ERRORS = true;
+        } else {
+            sx::webserver::HttpSessions::api_port = api_port;
         }
         load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "pam_login", sx::webserver::HttpSessions::pam_login);
     }
