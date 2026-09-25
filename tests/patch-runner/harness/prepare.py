@@ -57,7 +57,10 @@ text = text.replace('certs_ca_key_password = "smithproxy"','certs_ca_key_passwor
 text = text.replace('accept_redirect = TRUE','accept_redirect = FALSE').replace('accept_socks = TRUE','accept_socks = FALSE')
 text = re.sub(r'(plaintext_workers|ssl_workers|udp_workers) = 0',r'\1 = 1',text)
 if os.environ.get('QUIC_LAB') == '1':
-    text = text.replace('quic_workers = -1', 'quic_workers = 0')
+    # QUIC has no main-thread fallback: zero workers leaves the configured
+    # port without a listener. Keep the isolated H3 lab deterministic with a
+    # single worker; production deployments can scale this independently.
+    text = text.replace('quic_workers = -1', 'quic_workers = 1')
 text = re.sub(r'\s*auth_profile = "resolve";', '', text)
 text = text.replace('nameservers = [ "8.8.8.8", "8.8.4.4" ]','nameservers = [ "198.18.20.2" ]')
 gre_capture_dst = os.environ.get('GRE_CAPTURE_DST')
