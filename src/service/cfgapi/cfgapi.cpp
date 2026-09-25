@@ -1601,10 +1601,10 @@ int CfgFactory::load_db_policy () {
             
             if(load_if_exists(cur_object, "action", action)) {
                 int r_a = PolicyRule::POLICY_ACTION_PASS;
-                if(action == "deny") {
+                if(action == "deny" or action == "reject") {
                     _dia("cfgapi_load_policy[#%d]: action: deny", policy_index);
                     r_a = PolicyRule::POLICY_ACTION_DENY;
-                    rule->action_name = action;
+                    rule->action_name = "deny";
 
                 } else if (action == "accept"){
                     _dia("cfgapi_load_policy[#%d]: action: accept", policy_index);
@@ -3048,6 +3048,7 @@ int CfgFactory::policy_apply (baseHostCX *originator, MitmProxy *proxy, int matc
 
     } else {
         _inf("Connection %s denied: policy=%d", originator->full_name('L').c_str(), policy_num);
+        return -1;
     }
     
     return policy_num;

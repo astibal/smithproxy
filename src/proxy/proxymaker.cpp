@@ -162,8 +162,13 @@ namespace sx::proxymaker {
         dst_cx->matched_policy(policy_num);
         proxy->matched_policy(policy_num);
 
-        // we are done
-        if(policy_num < 0) return true;
+        // A magic-IP redirect is the only intentional implicit pass. A normal
+        // flow without a matching rule is an implicit deny, and a matched deny
+        // rule must stop before authorization, SNAT and connect.
+        if(policy_num == PolicyRule::POLICY_IMPLICIT_PASS) return true;
+        if(policy_num < 0) return false;
+        if(CfgFactory::get()->policy_action(policy_num) != PolicyRule::POLICY_ACTION_PASS)
+            return false;
 
         if( auto policy = CfgFactory::get()->lookup_policy(policy_num); policy) {
 
