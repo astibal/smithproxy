@@ -1,0 +1,5 @@
+from _common import script
+
+query = b"\x40\x02\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x3fshort"
+response = b"\x40\x02\x81\x81\x00\x00\x00\x00\x00\x00\x00\x00"
+PPlayScript = script("udp_dns_truncated_label", [query, response], "cs")
