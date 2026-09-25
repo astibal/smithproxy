@@ -1,7 +1,9 @@
 #include "service/quic/quicservice.hpp"
+#include "service/quic/quiclog.hpp"
 
 #include <algorithm>
 #include <cerrno>
+#include <climits>
 #include <cstring>
 #include <thread>
 #include <utility>
@@ -39,6 +41,44 @@ std::string endpoint_key(datagram_endpoint const& endpoint) {
     auto const* begin = reinterpret_cast<char const*>(&endpoint.address);
     return std::string(begin, begin + endpoint.size);
 }
+
+std::string endpoint_text(datagram_endpoint const& endpoint) {
+    if (!endpoint.valid()) return "-";
+    char host[NI_MAXHOST] {};
+    char service[NI_MAXSERV] {};
+    if (::getnameinfo(reinterpret_cast<sockaddr const*>(&endpoint.address), endpoint.size,
+                      host, sizeof(host), service, sizeof(service),
+                      NI_NUMERICHOST | NI_NUMERICSERV) != 0) return "?";
+    bool const ipv6 = endpoint.address.ss_family == AF_INET6;
+    return std::string(ipv6 ? "[" : "") + host + (ipv6 ? "]:" : ":") + service;
+}
+
+std::pair<std::string, std::string> endpoint_parts(datagram_endpoint const& endpoint) {
+    if (!endpoint.valid()) return {};
+    char host[NI_MAXHOST] {};
+    char service[NI_MAXSERV] {};
+    if (::getnameinfo(reinterpret_cast<sockaddr const*>(&endpoint.address), endpoint.size,
+                      host, sizeof(host), service, sizeof(service),
+                      NI_NUMERICHOST | NI_NUMERICSERV) != 0) return {};
+    return {host, service};
+}
+
+int listener_poll_timeout(SSL* listener, int application_timeout_ms) {
+    timeval timeout {};
+    int infinite = 1;
+    if (!listener || SSL_get_event_timeout(listener, &timeout, &infinite) != 1
+        || infinite) {
+        return application_timeout_ms;
+    }
+    auto const seconds = static_cast<long long>(timeout.tv_sec);
+    auto const microseconds = static_cast<long long>(timeout.tv_usec);
+    auto const openssl_timeout = seconds >= INT_MAX / 1000
+        ? INT_MAX
+        : static_cast<int>(std::min<long long>(
+              INT_MAX, seconds * 1000 + (microseconds + 999) / 1000));
+    return application_timeout_ms < 0
+        ? openssl_timeout : std::min(application_timeout_ms, openssl_timeout);
+}
 #endif
 
 } // namespace
@@ -47,11 +87,15 @@ listener_service::listener_service(std::uint16_t port, std::string certificate,
                                    std::string private_key, bool transparent,
                                    std::uint16_t upstream_port, bool verify_upstream,
                                    lifecycle_options lifecycle, resource_limits limits,
-                                   std::string upstream_host)
+                                   std::string upstream_host,
+                                   flow_proxy_factory proxy_factory)
     : port_(port), certificate_(std::move(certificate)),
       private_key_(std::move(private_key)), transparent_(transparent),
       upstream_port_(upstream_port), upstream_host_(std::move(upstream_host)),
-      verify_upstream_(verify_upstream), lifecycle_(lifecycle), limits_(limits) {}
+      verify_upstream_(verify_upstream), lifecycle_(lifecycle), limits_(limits),
+      proxy_factory_(std::move(proxy_factory)) {
+    (void)log();
+}
 
 diagnostics_snapshot listener_service::diagnostics() const {
     return {
@@ -61,6 +105,11 @@ diagnostics_snapshot listener_service::diagnostics() const {
         session_limit_rejections_.load(), stream_limit_rejections_.load(),
         certificate_job_limit_rejections_.load()
     };
+}
+
+std::vector<session_snapshot> listener_service::session_diagnostics() const {
+    std::lock_guard<std::mutex> lock(snapshots_mutex_);
+    return snapshots_;
 }
 
 listener_service::~listener_service() {
@@ -87,6 +136,7 @@ listener_service::~listener_service() {
 void listener_service::fail(std::string message) {
     last_error_ = std::move(message);
     ready_ = false;
+    log().err("listener failure: %s", last_error_.c_str());
 }
 
 bool listener_service::open_socket() {
@@ -139,6 +189,7 @@ bool listener_service::open_socket() {
         return false;
     }
     bound_port_ = ntohs(address.sin_port);
+    log().dia("socket ready on udp/*:%u transparent=%d", bound_port_, transparent_);
     return true;
 #else
     fail("OpenSSL was built without QUIC server support (requires OpenSSL 3.5+)");
@@ -179,6 +230,8 @@ bool listener_service::prepare() {
         context_.get(), udp_fd_, transparent_,
         [this](datagram_endpoint const& peer, datagram_endpoint const& destination) {
             original_destinations_[endpoint_key(peer)] = destination;
+            log().ext("datagram peer=%s original-destination=%s",
+                      endpoint_text(peer).c_str(), endpoint_text(destination).c_str());
         });
     if (!listener_) {
         fail("cannot create OpenSSL QUIC listener: " + openssl_error_stack());
@@ -186,6 +239,7 @@ bool listener_service::prepare() {
     }
     ready_ = true;
     last_error_.clear();
+    log().inf("listener ready on udp/*:%u verify-upstream=%d", bound_port_, verify_upstream_);
     return true;
 #else
     return open_socket();
@@ -195,26 +249,26 @@ bool listener_service::prepare() {
 void listener_service::run() {
 #if SMITHPROXY_OPENSSL_QUIC
     if (!ready_ && !prepare()) return;
+    log().inf("listener loop started on udp/*:%u", bound_port_);
 
     pollfd descriptors[] {
-        { udp_fd_, POLLIN, 0 },
+        { udp_fd_, 0, 0 },
         { wake_fd_, POLLIN, 0 },
     };
-    auto attach_staged_upstream = [this](session& incoming) {
-        if (!incoming.downstream || incoming.upstream) return;
-        auto found = staged_upstreams_.find(incoming.downstream->native_handle());
-        if (found == staged_upstreams_.end()) return;
-        incoming.upstream = std::move(found->second.connection);
-        staged_upstreams_.erase(found);
-    };
+
     while (!stopping_) {
         // With no retained work, wait solely for network input or stop().
         // Active connections still need a bounded tick because OpenSSL QUIC
         // timers and asynchronous certificate futures are not pollable fds.
-        auto const timeout = sessions_.empty() && certificate_jobs_.empty()
+        auto const application_timeout = sessions_.empty() && certificate_jobs_.empty()
                 && staged_upstreams_.empty()
             ? -1
             : 50;
+        auto* native_listener = listener_->native_handle();
+        descriptors[0].events = listener_->desired_socket_events();
+        auto const timeout = listener_poll_timeout(native_listener, application_timeout);
+        log().dum("poll events=0x%x timeout=%d sessions=%zu cert-jobs=%zu",
+                  descriptors[0].events, timeout, sessions_.size(), certificate_jobs_.size());
         auto const polled = ::poll(descriptors, 2, timeout);
         if (polled < 0 && errno != EINTR) {
             fail(std::string("poll: ") + std::strerror(errno));
@@ -225,6 +279,9 @@ void listener_service::run() {
             while (::eventfd_read(wake_fd_, &wakeups) == 0) {
             }
         }
+        if (descriptors[0].revents != 0) {
+            log().dum("network wake revents=0x%x", descriptors[0].revents);
+        }
         if (stopping_) break;
 
         // Do not pre-classify this shared UDP socket with MSG_PEEK. OpenSSL may
@@ -233,115 +290,296 @@ void listener_service::run() {
         // Supporting QUIC and DTLS on one port requires a dispatcher which owns
         // recvmsg() and injects only classified QUIC datagrams into OpenSSL.
         if (!listener_->handle_events() && !stopping_) {
-            fail("OpenSSL QUIC listener event failure: " + openssl_error_stack());
+            auto detail = listener_->last_error();
+            if (detail.empty()) detail = openssl_error_stack();
+            fail("OpenSSL QUIC listener event failure: " + detail);
             break;
         }
-        while (auto accepted = listener_->accept()) {
-            auto connection = std::shared_ptr<openssl_connection>(std::move(accepted));
-            if (sessions_.size() >= limits_.max_sessions) {
-                ++session_limit_rejections_;
-                connection->close(0x107);
-                continue;
-            }
-            session incoming;
-            incoming.downstream = std::move(connection);
-            attach_staged_upstream(incoming);
-            sessions_.push_back(std::move(incoming));
-            ++connection_count_;
-            ++accepted_sessions_;
-        }
+
+        // Accept first, then advance every retained session exactly once.
+        accept_connections();
         auto const now = std::chrono::steady_clock::now();
         for (auto& linked : sessions_) {
-            if (linked.state == session_state::handshake) {
-                attach_staged_upstream(linked);
-                // Once the client handshake completes, preserve any early
-                // flow_open events until MFProxy exists. Draining here would
-                // irreversibly discard streams opened while the upstream leg
-                // is still finishing its handshake.
-                if (!linked.downstream->handshake_complete()) {
-                    linked.downstream->drain_events();
-                }
-                if (linked.downstream->closed()) {
-                    ++handshake_failures_;
-                    start_draining(linked, now);
-                } else if (now - linked.created >= lifecycle_.handshake_timeout) {
-                    ++handshake_timeouts_;
-                    start_draining(linked, now);
-                } else if (!verify_upstream_ && linked.downstream->handshake_complete()
-                           && !linked.upstream) {
-                    linked.upstream = connect_upstream(linked.downstream->server_name());
-                    if (!linked.upstream) {
-                        ++upstream_failures_;
-                        start_draining(linked, now);
-                    }
-                } else if (linked.upstream) {
-                    linked.upstream->drain_events();
-                    if (linked.upstream->closed()) {
-                        ++upstream_failures_;
-                        start_draining(linked, now);
-                    } else if (linked.upstream->handshake_complete()) {
-                        auto const downstream_alpn = linked.downstream->negotiated_alpn();
-                        auto const upstream_alpn = linked.upstream->negotiated_alpn();
-                        if (downstream_alpn.empty() || downstream_alpn != upstream_alpn) {
-                            ++alpn_failures_;
-                            start_draining(linked, now, 1);
-                            continue;
-                        }
-                        linked.proxy = std::make_unique<multiflow::MFProxy>(
-                            linked.downstream, linked.upstream,
-                            multiflow::MFProxy::limits {
-                                limits_.max_streams_per_session,
-                                limits_.stream_buffer_bytes });
-                        linked.state = session_state::active;
-                        linked.last_activity = now;
-                    }
-                }
-            } else if (linked.state == session_state::active) {
-                if (linked.proxy->pump_once() != 0) linked.last_activity = now;
-                auto const rejected = linked.proxy->limit_rejections();
-                if (rejected > linked.reported_stream_limit_rejections) {
-                    stream_limit_rejections_ +=
-                        rejected - linked.reported_stream_limit_rejections;
-                    linked.reported_stream_limit_rejections = rejected;
-                }
-                if (linked.downstream->closed() || linked.upstream->closed()
-                    || now - linked.last_activity >= lifecycle_.idle_timeout) {
-                    if (!linked.downstream->closed() && !linked.upstream->closed()) {
-                        ++idle_timeouts_;
-                    }
-                    start_draining(linked, now);
-                }
-            } else {
-                if (linked.downstream) linked.downstream->drain_events();
-                if (linked.upstream) linked.upstream->drain_events();
+            progress_session(linked, now);
+            if (!flush_session_output(linked)) {
+                stopping_ = true;
+                break;
             }
         }
-        auto const before = sessions_.size();
-        sessions_.erase(std::remove_if(sessions_.begin(), sessions_.end(), [&](auto& linked) {
-            return linked.state == session_state::draining
-                && now - linked.draining_since >= lifecycle_.drain_timeout;
-        }), sessions_.end());
-        connection_count_ -= before - sessions_.size();
-        completed_sessions_ += before - sessions_.size();
-        for (auto iterator = staged_upstreams_.begin(); iterator != staged_upstreams_.end();) {
-            if (now - iterator->second.created < lifecycle_.handshake_timeout) {
-                ++iterator;
-                continue;
-            }
-            iterator->second.connection->close();
-            ++upstream_failures_;
-            iterator = staged_upstreams_.erase(iterator);
-        }
+
+        // Publish only after removing objects whose grace period has elapsed.
+        reap_expired(now);
+        publish_session_snapshots(now);
     }
     cleanup_sessions();
+    log().inf("listener loop stopped on udp/*:%u", bound_port_);
 #endif
 }
 
 #if SMITHPROXY_OPENSSL_QUIC
+void listener_service::attach_staged_upstream(session& value) {
+    if (!value.downstream || value.upstream) return;
+
+    // The certificate callback knows the transparent tuple before OpenSSL
+    // publishes the accepted connection object. Preserve it across that gap.
+    auto* key = value.downstream->native_handle();
+    if (auto pending = certificate_jobs_.find(key); pending != certificate_jobs_.end()) {
+        value.client_endpoint = pending->second.client;
+        value.target_endpoint = pending->second.destination;
+    }
+
+    auto found = staged_upstreams_.find(key);
+    if (found == staged_upstreams_.end()) return;
+
+    value.upstream = std::move(found->second.connection);
+    if (!value.client_endpoint.valid()) value.client_endpoint = found->second.client;
+    value.target_endpoint = found->second.destination;
+    if (!value.target_endpoint.valid() && value.upstream) {
+        value.target_endpoint = value.upstream->peer_endpoint();
+    }
+    staged_upstreams_.erase(found);
+}
+
+void listener_service::accept_connections() {
+    while (auto accepted = listener_->accept()) {
+        auto connection = std::shared_ptr<openssl_connection>(std::move(accepted));
+
+        // Refuse excess work before allocating session/proxy state.
+        if (sessions_.size() >= limits_.max_sessions) {
+            ++session_limit_rejections_;
+            log().war("session rejected: listener limit %zu reached", limits_.max_sessions);
+            connection->close(0x107);
+            continue;
+        }
+
+        session incoming;
+        incoming.id = next_session_id_++;
+        incoming.downstream = std::move(connection);
+        incoming.client_endpoint = incoming.downstream->peer_endpoint();
+        attach_staged_upstream(incoming);
+
+        sessions_.push_back(std::move(incoming));
+        ++connection_count_;
+        ++accepted_sessions_;
+
+        auto const& value = sessions_.back();
+        log().inf("session %llu accepted from %s",
+                  static_cast<unsigned long long>(value.id),
+                  endpoint_text(value.client_endpoint).c_str());
+    }
+}
+
+void listener_service::progress_session(
+    session& value, std::chrono::steady_clock::time_point now) {
+    switch (value.state) {
+    case session_state::handshake:
+        progress_handshake(value, now);
+        break;
+    case session_state::active:
+        progress_active(value, now);
+        break;
+    case session_state::draining:
+        // QUIC shutdown is nonblocking; both legs still need timer progress.
+        if (value.downstream) value.downstream->drain_events();
+        if (value.upstream) value.upstream->drain_events();
+        break;
+    }
+}
+
+void listener_service::progress_handshake(
+    session& value, std::chrono::steady_clock::time_point now) {
+    attach_staged_upstream(value);
+
+    // Keep progressing ACKs, final handshake flight, and timers under this
+    // session's tuple. progress_transport() deliberately does not dequeue
+    // flow_open, so early application streams remain available to the bridge.
+    value.downstream->progress_transport();
+
+    if (value.downstream->closed()) {
+        ++handshake_failures_;
+        log().war("session %llu downstream handshake failed",
+                  static_cast<unsigned long long>(value.id));
+        start_draining(value, now);
+        return;
+    }
+    if (now - value.created >= lifecycle_.handshake_timeout) {
+        ++handshake_timeouts_;
+        log().war("session %llu handshake timed out",
+                  static_cast<unsigned long long>(value.id));
+        start_draining(value, now);
+        return;
+    }
+
+    // Tests may skip origin verification; production receives its upstream
+    // connection from the certificate job above.
+    if (!verify_upstream_ && value.downstream->handshake_complete() && !value.upstream) {
+        value.upstream = connect_upstream(value.downstream->server_name());
+        if (!value.upstream) {
+            ++upstream_failures_;
+            log().war("session %llu cannot create upstream connection",
+                      static_cast<unsigned long long>(value.id));
+            start_draining(value, now);
+        }
+        return;
+    }
+    if (!value.upstream) return;
+
+    value.upstream->drain_events();
+    if (value.upstream->closed()) {
+        ++upstream_failures_;
+        log().war("session %llu upstream handshake failed",
+                  static_cast<unsigned long long>(value.id));
+        start_draining(value, now);
+        return;
+    }
+    if (!value.upstream->handshake_complete()) return;
+
+    // Both legs must agree on the application protocol before streams can be
+    // paired. This prevents forwarding bytes between incompatible protocols.
+    auto const downstream_alpn = value.downstream->negotiated_alpn();
+    auto const upstream_alpn = value.upstream->negotiated_alpn();
+    if (downstream_alpn.empty() || downstream_alpn != upstream_alpn) {
+        ++alpn_failures_;
+        log().war("session %llu ALPN mismatch downstream='%s' upstream='%s'",
+                  static_cast<unsigned long long>(value.id),
+                  downstream_alpn.c_str(), upstream_alpn.c_str());
+        start_draining(value, now, 1);
+        return;
+    }
+
+    auto const proxy_limits = multiflow::proxy_limits {
+        limits_.max_streams_per_session,
+        limits_.stream_buffer_bytes,
+    };
+    if (proxy_factory_) {
+        auto [source_host, source_port] = endpoint_parts(value.client_endpoint);
+        auto [target_host, target_port] = endpoint_parts(value.target_endpoint);
+        value.proxy = proxy_factory_(
+            value.downstream, value.upstream, proxy_limits,
+            {std::move(source_host), std::move(source_port),
+             std::move(target_host), std::move(target_port),
+             value.target_endpoint.address.ss_family});
+    } else {
+        value.proxy = std::make_unique<multiflow::MFProxy>(
+            value.downstream, value.upstream, proxy_limits);
+    }
+    if (!value.proxy) {
+        ++upstream_failures_;
+        start_draining(value, now);
+        return;
+    }
+
+    value.state = session_state::active;
+    value.last_activity = now;
+    log().inf("session %llu active sni='%s' alpn='%s' target=%s",
+              static_cast<unsigned long long>(value.id),
+              value.downstream->server_name().c_str(),
+              downstream_alpn.c_str(), endpoint_text(value.target_endpoint).c_str());
+}
+
+void listener_service::progress_active(
+    session& value, std::chrono::steady_clock::time_point now) {
+    auto const moved = value.proxy->pump_once();
+    if (moved != 0) {
+        value.last_activity = now;
+        value.forwarded_bytes += moved;
+    }
+
+    // Convert the proxy-local cumulative counter into the service cumulative
+    // counter without counting an old rejection more than once.
+    auto const rejected = value.proxy->limit_rejections();
+    if (rejected > value.reported_stream_limit_rejections) {
+        stream_limit_rejections_ += rejected - value.reported_stream_limit_rejections;
+        value.reported_stream_limit_rejections = rejected;
+    }
+
+    if (!value.downstream->closed() && !value.upstream->closed()
+        && now - value.last_activity < lifecycle_.idle_timeout) {
+        return;
+    }
+    if (!value.downstream->closed() && !value.upstream->closed()) {
+        ++idle_timeouts_;
+        log().dia("session %llu idle timeout", static_cast<unsigned long long>(value.id));
+    }
+    start_draining(value, now);
+}
+
+bool listener_service::flush_session_output(session& value) {
+    if (!value.client_endpoint.valid() || !value.target_endpoint.valid()) return true;
+    if (listener_->flush_output(value.client_endpoint, value.target_endpoint)) return true;
+
+    fail("OpenSSL QUIC connection output failure: " + listener_->last_error());
+    return false;
+}
+
+void listener_service::reap_expired(std::chrono::steady_clock::time_point now) {
+    auto const before = sessions_.size();
+    sessions_.erase(std::remove_if(sessions_.begin(), sessions_.end(), [&](auto& value) {
+        return value.state == session_state::draining
+            && now - value.draining_since >= lifecycle_.drain_timeout;
+    }), sessions_.end());
+
+    auto const removed = before - sessions_.size();
+    connection_count_ -= removed;
+    completed_sessions_ += removed;
+
+    // A verified upstream can outlive a client that disappeared before accept.
+    // Bound that orphan state by the same handshake timeout.
+    for (auto iterator = staged_upstreams_.begin(); iterator != staged_upstreams_.end();) {
+        if (now - iterator->second.created < lifecycle_.handshake_timeout) {
+            ++iterator;
+            continue;
+        }
+        iterator->second.connection->close();
+        ++upstream_failures_;
+        iterator = staged_upstreams_.erase(iterator);
+    }
+}
+
+void listener_service::publish_session_snapshots(
+    std::chrono::steady_clock::time_point now) {
+    std::vector<session_snapshot> result;
+    result.reserve(sessions_.size());
+    for (auto const& linked : sessions_) {
+        session_snapshot item;
+        item.id = linked.id;
+        item.state = linked.state == session_state::handshake ? "handshake"
+                   : linked.state == session_state::active ? "active" : "draining";
+        item.client = endpoint_text(linked.client_endpoint);
+        item.target = endpoint_text(linked.target_endpoint);
+        if (linked.downstream) {
+            item.server_name = linked.downstream->server_name();
+            item.downstream_alpn = linked.downstream->negotiated_alpn();
+        }
+        if (item.target == "-") {
+            auto const& host = upstream_host_.empty() ? item.server_name : upstream_host_;
+            if (!host.empty()) item.target = host + ":" + std::to_string(upstream_port_);
+        }
+        if (linked.upstream) item.upstream_alpn = linked.upstream->negotiated_alpn();
+        item.age_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - linked.created).count();
+        item.idle_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - linked.last_activity).count();
+        item.forwarded_bytes = linked.forwarded_bytes;
+        if (linked.proxy) {
+            item.streams = linked.proxy->pair_count();
+            item.queued_bytes = linked.proxy->queued_bytes();
+            item.stream_limit_rejections = linked.proxy->limit_rejections();
+        }
+        result.push_back(std::move(item));
+    }
+    std::lock_guard<std::mutex> lock(snapshots_mutex_);
+    snapshots_.swap(result);
+}
+
 void listener_service::start_draining(session& value,
                                       std::chrono::steady_clock::time_point now,
                                       std::uint64_t protocol_error) {
     if (value.state == session_state::draining) return;
+    log().dia("session %llu draining protocol-error=%llu forwarded=%llu",
+              static_cast<unsigned long long>(value.id),
+              static_cast<unsigned long long>(protocol_error),
+              static_cast<unsigned long long>(value.forwarded_bytes));
     value.state = session_state::draining;
     value.draining_since = now;
     value.proxy.reset();
@@ -367,6 +605,10 @@ void listener_service::cleanup_sessions() {
     }
     certificate_jobs_.clear();
     original_destinations_.clear();
+    {
+        std::lock_guard<std::mutex> lock(snapshots_mutex_);
+        snapshots_.clear();
+    }
     connection_count_ = 0;
 }
 #endif
@@ -385,43 +627,67 @@ int listener_service::prepare_verified_certificate(SSL* downstream) {
         found != certificate_jobs_.end()) {
         if (found->second.result.wait_for(std::chrono::milliseconds(0))
             != std::future_status::ready) {
+            log().deb("certificate job still pending");
             return -1;
         }
         verified_certificate verified;
         try {
             verified = found->second.result.get();
         } catch (...) {
+            log().err("certificate job raised an exception");
             certificate_jobs_.erase(found);
             return 0;
         }
+        auto const client = found->second.client;
+        auto const destination = found->second.destination;
         certificate_jobs_.erase(found);
         if (!verified.connection || !install_verified_certificate(downstream, verified)) {
             ++upstream_failures_;
+            log().war("verified certificate preparation failed for peer=%s target=%s",
+                      endpoint_text(client).c_str(), endpoint_text(destination).c_str());
             if (verified.connection) verified.connection->close(1);
             return 0;
         }
-        staged_upstreams_.emplace(
-            downstream, staged_upstream { std::move(verified.connection) });
+        staged_upstreams_.emplace(downstream, staged_upstream {
+            std::move(verified.connection), client, destination });
         return 1;
     }
 
     auto const* raw_name = SSL_get_servername(downstream, TLSEXT_NAMETYPE_host_name);
-    if (!raw_name || *raw_name == '\0') return 0;
+    if (!raw_name || *raw_name == '\0') {
+        log().war("downstream handshake rejected: SNI is missing");
+        return 0;
+    }
     std::string const server_name(raw_name);
+    datagram_endpoint peer_endpoint;
+    BIO_ADDR* peer_address = BIO_ADDR_new();
+    if (peer_address) {
+        if (BIO_dgram_get_peer(SSL_get_rbio(downstream), peer_address) > 0) {
+            peer_endpoint = endpoint_from_bio_address(peer_address);
+        }
+        BIO_ADDR_free(peer_address);
+    }
+    // A listener backed by a datagram pair does not copy its per-packet peer
+    // into the accepted connection BIO. The certificate callback is invoked
+    // synchronously while the dispatcher is processing the ClientHello, so
+    // its current tuple is the authoritative metadata for this SSL object.
+    if (!peer_endpoint.valid() && listener_) {
+        peer_endpoint = listener_->current_peer();
+    }
     datagram_endpoint destination;
     if (transparent_) {
-        datagram_endpoint peer_endpoint;
-        BIO_ADDR* peer_address = BIO_ADDR_new();
-        if (peer_address) {
-            if (BIO_dgram_get_peer(SSL_get_rbio(downstream), peer_address) > 0) {
-                peer_endpoint = endpoint_from_bio_address(peer_address);
-            }
-            BIO_ADDR_free(peer_address);
-        }
         auto found_destination = original_destinations_.find(endpoint_key(peer_endpoint));
-        if (found_destination == original_destinations_.end()) return 0;
-        destination = found_destination->second;
-        original_destinations_.erase(found_destination);
+        if (found_destination != original_destinations_.end()) {
+            destination = found_destination->second;
+            original_destinations_.erase(found_destination);
+        } else if (listener_) {
+            destination = listener_->current_local();
+        }
+        if (!destination.valid()) {
+            log().war("downstream handshake rejected: original destination missing for %s",
+                      endpoint_text(peer_endpoint).c_str());
+            return 0;
+        }
         std::uint16_t destination_port = 0;
         auto const family = destination.address.ss_family;
         if (family == AF_INET) {
@@ -434,20 +700,30 @@ int listener_service::prepare_verified_certificate(SSL* downstream) {
         // A shared UDP socket cannot select a different source port per datagram.
         // Bare transparent mode therefore requires TPROXY --on-port 0 and a
         // listener bound to the original service port.
-        if (destination_port == 0 || destination_port != bound_port_) return 0;
+        if (destination_port == 0 || destination_port != bound_port_) {
+            log().war("downstream handshake rejected: destination %s does not match listener port %u",
+                      endpoint_text(destination).c_str(), bound_port_);
+            return 0;
+        }
     }
     if (certificate_jobs_.size() >= limits_.max_certificate_jobs) {
         ++certificate_job_limit_rejections_;
+        log().war("certificate job rejected: listener limit %zu reached",
+                  limits_.max_certificate_jobs);
         return 0;
     }
+    log().deb("starting certificate job sni='%s' peer=%s target=%s",
+              server_name.c_str(), endpoint_text(peer_endpoint).c_str(),
+              endpoint_text(destination).c_str());
     try {
         certificate_jobs_.emplace(
             downstream,
             certificate_job { std::async(std::launch::async,
                 [this, destination, server_name]() mutable {
                     return verify_and_spoof(std::move(destination), std::move(server_name));
-                }) });
+                }), peer_endpoint, destination });
     } catch (...) {
+        log().err("cannot start certificate job sni='%s'", server_name.c_str());
         return 0;
     }
     return -1;
@@ -459,7 +735,11 @@ listener_service::verified_certificate listener_service::verify_and_spoof(
     auto upstream = transparent_
         ? connect_upstream(destination, server_name)
         : connect_upstream(server_name);
-    if (!upstream) return verified;
+    if (!upstream) {
+        log().war("upstream connect failed sni='%s' target=%s", server_name.c_str(),
+                  endpoint_text(destination).c_str());
+        return verified;
+    }
 
     auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (!upstream->handshake_complete() && !upstream->closed()
@@ -469,10 +749,15 @@ listener_service::verified_certificate listener_service::verify_and_spoof(
     }
     if (!upstream->handshake_complete()
         || SSL_get_verify_result(upstream->native_handle()) != X509_V_OK) {
+        log().war("upstream verification failed sni='%s' target=%s verify=%ld",
+                  server_name.c_str(), endpoint_text(destination).c_str(),
+                  SSL_get_verify_result(upstream->native_handle()));
         upstream->close(1);
         return verified;
     }
     if (upstream->negotiated_alpn() != "h3") {
+        log().war("upstream ALPN rejected sni='%s' negotiated='%s'",
+                  server_name.c_str(), upstream->negotiated_alpn().c_str());
         upstream->close(1);
         return verified;
     }
@@ -483,6 +768,7 @@ listener_service::verified_certificate listener_service::verify_and_spoof(
         return verified;
     }
     if (X509_check_host(certificate, server_name.c_str(), server_name.size(), 0, nullptr) != 1) {
+        log().war("upstream identity mismatch sni='%s'", server_name.c_str());
         X509_free(certificate);
         upstream->close(1);
         return verified;
@@ -520,9 +806,12 @@ listener_service::verified_certificate listener_service::verify_and_spoof(
     }
     X509_free(certificate);
     if (!ready) {
+        log().err("certificate spoof failed sni='%s'", server_name.c_str());
         upstream->close(1);
         return {};
     }
+    log().deb("certificate ready sni='%s' target=%s", server_name.c_str(),
+              endpoint_text(destination).c_str());
     verified.connection = std::move(upstream);
     return verified;
 }

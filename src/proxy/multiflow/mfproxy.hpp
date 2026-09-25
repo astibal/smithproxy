@@ -16,6 +16,16 @@ struct proxy_limits {
     std::size_t buffer_per_direction = 16 * 1024; ///< Maximum queued chunk per direction.
 };
 
+/** Common lifecycle surface for direct and Smithproxy-aware flow bridges. */
+class flow_proxy {
+public:
+    virtual ~flow_proxy() = default;
+    virtual std::size_t pump_once(std::size_t chunk_size = 16 * 1024) = 0;
+    virtual std::size_t pair_count() const = 0;
+    virtual std::size_t queued_bytes() const = 0;
+    virtual std::size_t limit_rejections() const = 0;
+};
+
 /**
  * Pairs logical flows from two multiplexed connections and pumps their bytes.
  *
@@ -25,7 +35,7 @@ struct proxy_limits {
  * connections to individual MFFlowCom objects. All methods are worker-affine;
  * the class does not provide internal locking.
  */
-class MFProxy {
+class MFProxy final : public flow_proxy {
 public:
     using limits = proxy_limits;
 
@@ -34,10 +44,12 @@ public:
             limits resource_limits = {});
 
     /** Process lifecycle events and move at most one chunk per direction/flow. */
-    std::size_t pump_once(std::size_t chunk_size = 16 * 1024);
-    std::size_t pair_count() const { return pairs_.size(); } ///< Current paired flows.
+    std::size_t pump_once(std::size_t chunk_size = 16 * 1024) override;
+    std::size_t pair_count() const override { return pairs_.size(); } ///< Current paired flows.
+    /** Bytes retained in both directions by transport backpressure. */
+    std::size_t queued_bytes() const override;
     /** Cumulative streams reset because max_flows was reached. */
-    std::size_t limit_rejections() const { return limit_rejections_; }
+    std::size_t limit_rejections() const override { return limit_rejections_; }
 
 private:
     /** Bidirectional bookkeeping for one left/right flow association. */

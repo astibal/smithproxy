@@ -46,6 +46,8 @@ TPROXY_TABLE=100
 TPROXY_PRIORITY=100
 PLAIN_PORT=50080
 TLS_PORT=50443
+QUIC_PORT=$TLS_PORT
+[[ ${QUIC_LAB:-0} != 1 ]] || QUIC_PORT=0
 INTERNAL_API_PORT=${SMITHPROXY_API_PORT:-55555}
 
 usage() {
@@ -304,6 +306,24 @@ log "4/7  Mark $TPROXY_MARK -> table $TPROXY_TABLE -> local transparent socket"
 # == 5. Traffic interception =====================================================
 INPUT_SET=$(printf '"%s", ' "${INPUTS[@]}")
 INPUT_SET=${INPUT_SET%, }
+NFT_PREROUTING_PRIORITY="mangle"
+QUIC_TPROXY_RULE="udp dport 443 counter tproxy to :$QUIC_PORT meta mark set $TPROXY_MARK accept"
+MARKED_PACKET_RULE=""
+if [[ ${QUIC_LAB:-0} == 1 ]]; then
+    # nftables interprets `tproxy to :0` differently across kernel/userspace
+    # combinations.  The reference QUIC deployment uses iptables TPROXY with
+    # --on-port 0, which explicitly preserves the original UDP service port.
+    # Run nftables afterwards and leave packets already claimed by TPROXY alone,
+    # otherwise the generic UDP rule below would redirect QUIC to :$PLAIN_PORT.
+    NFT_PREROUTING_PRIORITY=-140
+    MARKED_PACKET_RULE="meta mark $TPROXY_MARK return"
+    QUIC_TPROXY_RULE=""
+    for input in "${INPUTS[@]}"; do
+        ip netns exec "$NS" iptables -t mangle -A PREROUTING \
+            -i "$input" -p udp --dport 443 \
+            -j TPROXY --on-port 0 --tproxy-mark "$TPROXY_MARK/1"
+    done
+fi
 ip netns exec "$NS" nft -f - <<NFT
 table ip smithproxy {
     chain forward {
@@ -312,7 +332,11 @@ table ip smithproxy {
         type filter hook forward priority filter; policy drop;
     }
     chain prerouting {
-        type filter hook prerouting priority mangle; policy accept;
+        type filter hook prerouting priority $NFT_PREROUTING_PRIORITY; policy accept;
+
+        # QUIC_LAB's earlier iptables hook has already selected its transparent
+        # socket.  Never let the generic UDP fallback select a second listener.
+        $MARKED_PACKET_RULE
 
         # Deliver subsequent TCP packets to an existing transparent socket.
         meta l4proto tcp socket transparent 1 counter meta mark set $TPROXY_MARK accept
@@ -325,7 +349,7 @@ table ip smithproxy {
 
         # Select TLS/DTLS on port 443 first; other TCP/UDP goes to the plaintext listeners.
         tcp dport 443 counter tproxy to :$TLS_PORT meta mark set $TPROXY_MARK accept
-        udp dport 443 counter tproxy to :$TLS_PORT meta mark set $TPROXY_MARK accept
+        $QUIC_TPROXY_RULE
         meta l4proto tcp counter tproxy to :$PLAIN_PORT meta mark set $TPROXY_MARK accept
         meta l4proto udp counter tproxy to :$PLAIN_PORT meta mark set $TPROXY_MARK accept
     }
@@ -343,14 +367,14 @@ table ip6 smithproxy6 {
         iifname != { $INPUT_SET } return
         fib daddr type local return
         tcp dport 443 counter tproxy to :$TLS_PORT meta mark set $TPROXY_MARK accept
-        udp dport 443 counter tproxy to :$TLS_PORT meta mark set $TPROXY_MARK accept
+        udp dport 443 counter tproxy to :$QUIC_PORT meta mark set $TPROXY_MARK accept
         meta l4proto tcp counter tproxy to :$PLAIN_PORT meta mark set $TPROXY_MARK accept
         meta l4proto udp counter tproxy to :$PLAIN_PORT meta mark set $TPROXY_MARK accept
     }
 }
 NFT6
 fi
-log "5/7  TPROXY active: TCP/UDP :$PLAIN_PORT, TLS/DTLS :$TLS_PORT; forwarding DROP"
+log "5/7  TPROXY active: TCP/UDP :$PLAIN_PORT, TLS/DTLS :$TLS_PORT, QUIC :$QUIC_PORT; forwarding DROP"
 
 # == 6. Proxy process and management path =======================================
 # Upstream hard-codes its PID file under /var/run. A private mount namespace with

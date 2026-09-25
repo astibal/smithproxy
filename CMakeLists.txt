@@ -282,6 +282,7 @@ add_executable(smithproxy
         src/proxy/proxymaker.cpp
         src/proxy/multiflow/mfflowcom.cpp
         src/proxy/multiflow/mfproxy.cpp
+        src/proxy/multiflow/mfmitmproxy.cpp
         src/proxy/quic/wire.cpp
         src/proxy/quic/openssl.cpp
         src/service/quic/quicservice.cpp
@@ -522,6 +523,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
         add_executable(quic_test_node
                 src/proxy/multiflow/mfflowcom.cpp
                 src/proxy/multiflow/mfproxy.cpp
+                src/proxy/quic/wire.cpp
                 src/proxy/quic/openssl.cpp
                 src/service/quic/quicservice.cpp
                 src/service/quic/testbed/quic_test_node.cpp

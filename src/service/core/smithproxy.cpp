@@ -52,6 +52,7 @@
 #include <service/cfgapi/cfgapi.hpp>
 #include "service/http/webhooks.hpp"
 #include "proxy/nbrhood.hpp"
+#include "proxy/multiflow/mfmitmproxy.hpp"
 
 #ifdef ASAN_LEAKS
 extern "C" int __lsan_do_recoverable_leak_check();
@@ -227,7 +228,9 @@ bool SmithProxy::create_listeners() {
                         static_cast<std::uint16_t>(std::stoi(CfgFactory::get()->listen_quic_port)),
                         certs_path + SSLFactory::config_t::SR_CERTF,
                         certs_path + SSLFactory::config_t::SR_KEYF,
-                        true);
+                        true, 443, true, sx::quic::lifecycle_options {},
+                        sx::quic::resource_limits {}, std::string {},
+                        sx::multiflow::make_mitm_flow_proxy);
                     if (!service->prepare()) {
                         _fat("Failed to setup QUIC listener: %s", service->last_error().c_str());
                         return false;

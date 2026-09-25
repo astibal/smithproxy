@@ -137,14 +137,16 @@ ORIGIN_PID=$!
     --api-port "$API_RELAY_PORT" --config-dir "$ROOT/config" --data-dir "$ROOT/data" \
     > "$ROOT/results/runner.log" 2>&1 &
 RUNNER_PID=$!
-for attempt in $(seq 1 60); do
-    if curl --noproxy '*' -ksSf --max-time 1 -H "X-API-Key: $(cat "$ROOT/config/api.key")" \
-        "https://127.0.0.1:$API_RELAY_PORT/api/status/ping" > "$ROOT/results/api.json" 2>/dev/null; then break; fi
-    kill -0 "$RUNNER_PID"
-    sleep 1
-done
-python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["status"] == "ok"' "$ROOT/results/api.json"
-echo 'PASS API: authenticated HTTPS request from host namespace'
+if [[ ${SKIP_API_READY:-0} != 1 ]]; then
+    for attempt in $(seq 1 60); do
+        if curl --noproxy '*' -ksSf --max-time 1 -H "X-API-Key: $(cat "$ROOT/config/api.key")" \
+            "https://127.0.0.1:$API_RELAY_PORT/api/status/ping" > "$ROOT/results/api.json" 2>/dev/null; then break; fi
+        kill -0 "$RUNNER_PID"
+        sleep 1
+    done
+    python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["status"] == "ok"' "$ROOT/results/api.json"
+    echo 'PASS API: authenticated HTTPS request from host namespace'
+fi
 if [[ $RUN_MODE == 1 ]]; then
     setsid socat "TCP4-LISTEN:$CLI_RELAY_PORT,bind=127.0.0.1,reuseaddr,fork" \
         "EXEC:ip netns exec $NS socat STDIO TCP4\:127.0.0.1\:50000" \

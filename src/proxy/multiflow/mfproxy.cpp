@@ -6,6 +6,15 @@
 
 namespace sx::multiflow {
 
+std::size_t MFProxy::queued_bytes() const {
+    std::size_t total = 0;
+    for (auto const& item : pairs_) {
+        total += item.second->left_to_right.size();
+        total += item.second->right_to_left.size();
+    }
+    return total;
+}
+
 MFProxy::MFProxy(std::shared_ptr<connection> left, std::shared_ptr<connection> right,
                  limits resource_limits)
     : left_(std::move(left)), right_(std::move(right)), limits_(resource_limits) {}

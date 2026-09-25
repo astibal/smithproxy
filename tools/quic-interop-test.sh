@@ -9,6 +9,7 @@ PROXY_PORT="${QUIC_INTEROP_PROXY_PORT:-19443}"
 HTTP3_PROXY_PORT="${QUIC_INTEROP_HTTP3_PROXY_PORT:-20443}"
 HTTP3_ORIGIN="${QUIC_INTEROP_HTTP3_ORIGIN:-cloudflare.com}"
 HTTP3_CURL="${CURL_HTTP3_BIN:-${ROOT_DIR}/../curl-http3/bin/curl-h3}"
+PROXY_MODE="${QUIC_INTEROP_PROXY_MODE:-forward}"
 
 if ! openssl s_client -help 2>&1 | grep -q -- '-quic'; then
     echo "SKIP: openssl s_client has no QUIC support" >&2
@@ -59,7 +60,7 @@ done
 "${BUILD_DIR}/quic_test_node" origin "${TMP_DIR}" 127.0.0.1 "${ORIGIN_PORT}" \
     >"${TMP_DIR}/origin.log" 2>&1 &
 ORIGIN_PID=$!
-"${BUILD_DIR}/quic_test_node" forward "${TMP_DIR}" 127.0.0.1 \
+"${BUILD_DIR}/quic_test_node" "${PROXY_MODE}" "${TMP_DIR}" 127.0.0.1 \
     "${PROXY_PORT}" "${ORIGIN_PORT}" >"${TMP_DIR}/proxy.log" 2>&1 &
 PROXY_PID=$!
 for _ in {1..100}; do
@@ -79,6 +80,9 @@ grep -q 'Protocol version: QUICv1' "${TMP_DIR}/client.err"
 grep -q 'PASS origin echo=openssl-quic-interop' "${TMP_DIR}/origin.log"
 
 echo "PASS: external openssl s_client negotiated verified QUIC h3 through Smithproxy"
+if [[ "${PROXY_MODE}" == "forward-diag" ]]; then
+    sed -n '/QUIC|MitM/,+4p' "${TMP_DIR}/proxy.log" | tail -n 5
+fi
 if [[ -x "${HTTP3_CURL}" ]] && "${HTTP3_CURL}" --version | grep -q 'HTTP3'; then
     HTTP3_ORIGIN_ADDRESS="${QUIC_INTEROP_HTTP3_ORIGIN_ADDRESS:-$(getent ahostsv4 "${HTTP3_ORIGIN}" | awk 'NR == 1 { print $1 }')}"
     [[ -n "${HTTP3_ORIGIN_ADDRESS}" ]]

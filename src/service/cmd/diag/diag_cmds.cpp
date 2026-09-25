@@ -1400,6 +1400,42 @@ int cli_diag_proxy_session_list(DiagCli *cli, const char *command, char *argv[],
     return cli_diag_proxy_session_list_extra(cli, command, args, flags);
 }
 
+int cli_diag_proxy_quic_list(DiagCli* cli, [[maybe_unused]] const char *command,
+                             [[maybe_unused]] char *argv[], [[maybe_unused]] int argc) {
+    auto const& services = SmithProxy::instance().quic_services;
+    std::size_t total = 0;
+    for (std::size_t listener = 0; listener < services.size(); ++listener) {
+        auto const& service = services[listener];
+        auto const sessions = service->session_diagnostics();
+        auto const counters = service->diagnostics();
+        cli_print(cli, "QUIC listener[%zu]: udp/*:%u, sessions: %zu, accepted: %llu, completed: %llu",
+                  listener, service->bound_port(), sessions.size(),
+                  static_cast<unsigned long long>(counters.accepted_sessions),
+                  static_cast<unsigned long long>(counters.completed_sessions));
+        for (auto const& session : sessions) {
+            cli_print(cli, "QUIC|MitM|l:<udp_%s> <+> r:<udp_%s>",
+                      session.client.c_str(), session.target.c_str());
+            cli_print(cli, "    id: %llu  state: %s  age: %llums  idle: %llums",
+                      static_cast<unsigned long long>(session.id), session.state.c_str(),
+                      static_cast<unsigned long long>(session.age_ms),
+                      static_cast<unsigned long long>(session.idle_ms));
+            cli_print(cli, "    SNI: %s", session.server_name.empty()
+                      ? "-" : session.server_name.c_str());
+            cli_print(cli, "    ALPN: downstream=%s upstream=%s",
+                      session.downstream_alpn.empty() ? "-" : session.downstream_alpn.c_str(),
+                      session.upstream_alpn.empty() ? "-" : session.upstream_alpn.c_str());
+            cli_print(cli, "    streams: %zu  queued: %zuB  forwarded: %lluB  rejected: %zu",
+                      session.streams, session.queued_bytes,
+                      static_cast<unsigned long long>(session.forwarded_bytes),
+                      session.stream_limit_rejections);
+        }
+        total += sessions.size();
+    }
+    if (services.empty()) cli_print(cli, "No QUIC listeners configured.");
+    cli_print(cli, "QUIC sessions total: %zu", total);
+    return CLI_OK;
+}
+
 
 int cli_diag_proxy_tls_list(DiagCli *cli, const char *command, char *argv[], int argc) {
 
@@ -2655,6 +2691,12 @@ void register_diags(libcli2::Cli& native) {
 
     diag_register_command(cli, diag_proxy_session,"tls-info", cli_diag_proxy_tls_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"connection TLS details");
     diag_register_command(cli, diag_proxy_session,"active", cli_diag_proxy_list_active, PRIVILEGE_PRIVILEGED, MODE_EXEC,"list only sessions active last 5s");
+
+    auto diag_proxy_quic = diag_register_command(cli, diag_proxy, "quic", nullptr,
+                                                 PRIVILEGE_PRIVILEGED, MODE_EXEC,
+                                                 "QUIC proxy commands");
+    diag_register_command(cli, diag_proxy_quic, "list", cli_diag_proxy_quic_list,
+                          PRIVILEGE_PRIVILEGED, MODE_EXEC, "list QUIC proxy sessions");
 
 
     auto diag_proxy_io = diag_register_command(cli,diag_proxy,"io",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy I/O related commands");

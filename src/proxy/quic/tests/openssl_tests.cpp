@@ -9,6 +9,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <thread>
@@ -60,7 +61,80 @@ bool make_nonblocking(int fd) {
     return flags >= 0 && fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0;
 }
 
+quic::datagram_endpoint loopback_endpoint(std::uint16_t port) {
+    sockaddr_in address {};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port = htons(port);
+
+    quic::datagram_endpoint result;
+    std::memcpy(&result.address, &address, sizeof(address));
+    result.size = sizeof(address);
+    return result;
+}
+
 } // namespace
+
+TEST(OpenSslQuicDispatcher, IgnoresZeroLengthConnectionIds) {
+    quic::detail::datagram_route_table routes;
+    routes.remember({}, {loopback_endpoint(10001), loopback_endpoint(443)});
+
+    EXPECT_EQ(routes.size(), 0U);
+
+    // This is a valid v1 Initial prefix with an empty source CID. Learning it
+    // must retain only its non-empty destination CID.
+    std::vector<unsigned char> initial {
+        0xc0, 0x00, 0x00, 0x00, 0x01,
+        0x02, 0xaa, 0xbb,
+        0x00,
+        0x00, 0x01, 0x00,
+    };
+    routes.learn(initial.data(), initial.size(),
+                 {loopback_endpoint(10001), loopback_endpoint(443)});
+    EXPECT_EQ(routes.size(), 1U);
+}
+
+TEST(OpenSslQuicDispatcher, ResolvesOnlyUnambiguousKnownRoutes) {
+    quic::detail::datagram_route_table routes;
+    auto const first = quic::detail::datagram_route {
+        loopback_endpoint(10001), loopback_endpoint(443),
+    };
+    auto const second = quic::detail::datagram_route {
+        loopback_endpoint(10002), loopback_endpoint(443),
+    };
+
+    routes.remember({0xaa}, first);
+    routes.remember({0xaa, 0xbb}, second);
+
+    // Both known CID prefixes match, but they belong to different clients.
+    // Returning no route is the fail-closed behavior that prevents a leak.
+    std::vector<unsigned char> ambiguous {0x40, 0xaa, 0xbb, 0x01};
+    EXPECT_FALSE(routes.resolve(ambiguous.data(), ambiguous.size()));
+
+    std::vector<unsigned char> unknown {0x40, 0xcc, 0xdd, 0x01};
+    EXPECT_FALSE(routes.resolve(unknown.data(), unknown.size()));
+
+    std::vector<unsigned char> known {0x40, 0xaa, 0x01};
+    auto const resolved = routes.resolve(known.data(), known.size());
+    ASSERT_TRUE(resolved);
+    EXPECT_EQ(reinterpret_cast<sockaddr_in const*>(&resolved->peer.address)->sin_port,
+              htons(10001));
+}
+
+TEST(OpenSslQuicDispatcher, EvictsOldRoutesAtItsConfiguredBound) {
+    quic::detail::datagram_route_table routes(2);
+    auto const route = quic::detail::datagram_route {
+        loopback_endpoint(10001), loopback_endpoint(443),
+    };
+
+    routes.remember({0x01}, route);
+    routes.remember({0x02}, route);
+    routes.remember({0x03}, route);
+
+    EXPECT_EQ(routes.size(), 2U);
+    std::vector<unsigned char> evicted {0x40, 0x01, 0x00};
+    EXPECT_FALSE(routes.resolve(evicted.data(), evicted.size()));
+}
 
 TEST(OpenSslQuic, CreatesNonBlockingServerListenerObject) {
     auto context = quic::make_openssl_quic_context(true);
@@ -154,6 +228,79 @@ TEST(OpenSslQuic, OutgoingAdapterCompletesHandshake) {
     if (rejected_server) rejected_server->close();
     client->close();
     server->close();
+    close(server_fd);
+}
+
+TEST(OpenSslQuic, TransparentDispatcherKeepsConcurrentHandshakesIsolated) {
+    auto server_context = quic::make_openssl_quic_context(true);
+    auto client_context = quic::make_openssl_quic_context(false);
+    ASSERT_NE(server_context, nullptr);
+    ASSERT_NE(client_context, nullptr);
+    ASSERT_EQ(SSL_CTX_use_certificate_chain_file(server_context.get(),
+                                                 "etc/certs/default/srv-cert.pem"), 1);
+    ASSERT_EQ(SSL_CTX_use_PrivateKey_file(server_context.get(),
+                                         "etc/certs/default/srv-key.pem", SSL_FILETYPE_PEM), 1);
+    SSL_CTX_set_alpn_select_cb(server_context.get(), select_h3, nullptr);
+    SSL_CTX_set_verify(client_context.get(), SSL_VERIFY_NONE, nullptr);
+
+    auto const server_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    ASSERT_GE(server_fd, 0);
+    ASSERT_TRUE(make_nonblocking(server_fd));
+    sockaddr_in server_address {};
+    server_address.sin_family = AF_INET;
+    server_address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    ASSERT_EQ(bind(server_fd, reinterpret_cast<sockaddr*>(&server_address),
+                   sizeof(server_address)), 0);
+    socklen_t address_size = sizeof(server_address);
+    ASSERT_EQ(getsockname(server_fd, reinterpret_cast<sockaddr*>(&server_address),
+                          &address_size), 0);
+
+    auto listener = quic::openssl_listener::create(server_context.get(), server_fd, true);
+    ASSERT_NE(listener, nullptr) << quic::openssl_error_stack();
+
+    // OpenSSL clients currently send an empty source CID in their first
+    // Initial. Starting them together exercises the scoped tuple fallback and
+    // catches the old failure mode where one client's output reached another.
+    constexpr std::size_t client_count = 8;
+    std::vector<std::unique_ptr<quic::openssl_connection>> clients;
+    for (std::size_t index = 0; index < client_count; ++index) {
+        std::string error;
+        auto client = quic::connect_openssl_quic(
+            client_context.get(), reinterpret_cast<sockaddr*>(&server_address),
+            sizeof(server_address), "client-" + std::to_string(index) + ".test", &error);
+        ASSERT_NE(client, nullptr) << error;
+        clients.push_back(std::move(client));
+    }
+
+    std::vector<std::unique_ptr<quic::openssl_connection>> servers;
+    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < deadline) {
+        for (auto& client : clients) client->drain_events();
+        ASSERT_TRUE(listener->handle_events()) << listener->last_error();
+        while (auto accepted = listener->accept()) servers.push_back(std::move(accepted));
+        for (auto& server : servers) server->drain_events();
+
+        auto const clients_ready = std::all_of(clients.begin(), clients.end(),
+            [](auto const& value) { return value->handshake_complete(); });
+        auto const servers_ready = servers.size() == client_count
+            && std::all_of(servers.begin(), servers.end(),
+                [](auto const& value) { return value->handshake_complete(); });
+        if (clients_ready && servers_ready) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    ASSERT_EQ(servers.size(), client_count);
+    for (auto const& client : clients) {
+        EXPECT_TRUE(client->handshake_complete()) << quic::openssl_error_stack();
+        EXPECT_EQ(client->negotiated_alpn(), "h3");
+    }
+    for (auto const& server : servers) {
+        EXPECT_TRUE(server->handshake_complete()) << quic::openssl_error_stack();
+        EXPECT_EQ(server->negotiated_alpn(), "h3");
+    }
+
+    for (auto& client : clients) client->close();
+    for (auto& server : servers) server->close();
     close(server_fd);
 }
 
@@ -292,6 +439,7 @@ TEST(OpenSslQuic, LoopbackHandshakeExposesBidirectionalStream) {
             sent = written == static_cast<ssize_t>(sizeof(message) - 1);
         }
         client_connection->drain_events();
+        ASSERT_TRUE(listener->handle_events()) << listener->last_error();
         for (auto const& event : server_connection->drain_events()) {
             if (event.type == mf::event_type::flow_open && event.flow) {
                 server_flow = *event.flow;
@@ -318,6 +466,7 @@ TEST(OpenSslQuic, LoopbackHandshakeExposesBidirectionalStream) {
     auto const fin_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
     while (std::chrono::steady_clock::now() < fin_deadline && !saw_fin) {
         client_connection->drain_events();
+        ASSERT_TRUE(listener->handle_events()) << listener->last_error();
         char byte = 0;
         auto const read_result = server_connection->read(server_flow, &byte, sizeof(byte));
         if (read_result.status == mf::io_status::eof) {
@@ -343,6 +492,7 @@ TEST(OpenSslQuic, LoopbackHandshakeExposesBidirectionalStream) {
     while (std::chrono::steady_clock::now() < reset_open_deadline
            && reset_peer_flow.generation == 0) {
         client_connection->drain_events();
+        ASSERT_TRUE(listener->handle_events()) << listener->last_error();
         for (auto const& event : server_connection->drain_events()) {
             if (event.type == mf::event_type::flow_open && event.flow) {
                 reset_peer_flow = *event.flow;
@@ -357,6 +507,7 @@ TEST(OpenSslQuic, LoopbackHandshakeExposesBidirectionalStream) {
     auto const reset_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
     while (std::chrono::steady_clock::now() < reset_deadline && !saw_reset) {
         client_connection->drain_events();
+        ASSERT_TRUE(listener->handle_events()) << listener->last_error();
         for (auto const& event : server_connection->drain_events()) {
             if (event.type == mf::event_type::reset && event.flow == reset_peer_flow
                 && event.protocol_error == 0x107) {

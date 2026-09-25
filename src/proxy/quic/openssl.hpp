@@ -6,13 +6,14 @@
 
 #include <sys/socket.h>
 
+#include <deque>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
 #include <string>
 #include <utility>
 #include <vector>
-#include <functional>
 
 #include "proxy/multiflow/multiflow.hpp"
 
@@ -31,6 +32,46 @@ struct datagram_endpoint {
     socklen_t size = 0;
     bool valid() const { return size != 0; }
 };
+
+#if SMITHPROXY_OPENSSL_QUIC
+namespace detail {
+
+/** The complete UDP tuple needed to return one transparent QUIC datagram. */
+struct datagram_route {
+    datagram_endpoint peer;
+    datagram_endpoint local;
+};
+
+/**
+ * Bounded Connection-ID routing table used between OpenSSL's datagram pair
+ * and the shared transparent UDP socket.
+ *
+ * Long headers teach both source and destination CIDs. Short headers omit the
+ * CID length, so lookup accepts a prefix only when every match resolves to the
+ * same tuple. Empty, unknown, and ambiguous CIDs deliberately have no route;
+ * callers must drop such asynchronous output instead of guessing a client.
+ */
+class datagram_route_table final {
+public:
+    explicit datagram_route_table(std::size_t maximum_routes = 4096)
+        : maximum_routes_(maximum_routes) {}
+
+    void remember(std::vector<std::uint8_t> const& connection_id,
+                  datagram_route const& route);
+    void learn(unsigned char const* data, std::size_t size,
+               datagram_route const& route);
+    std::optional<datagram_route> resolve(
+        unsigned char const* data, std::size_t size) const;
+    std::size_t size() const { return routes_.size(); }
+
+private:
+    std::size_t maximum_routes_;
+    std::map<std::vector<std::uint8_t>, datagram_route> routes_;
+    std::deque<std::vector<std::uint8_t>> insertion_order_;
+};
+
+} // namespace detail
+#endif
 
 /** Observes the peer and original local destination of an incoming datagram. */
 using datagram_observer = std::function<void(datagram_endpoint const& peer,
@@ -91,6 +132,8 @@ public:
 
     bool readable(multiflow::flow_handle flow) const override;
     bool writable(multiflow::flow_handle flow) const override;
+    /** Advance handshake/shutdown/timers without consuming queued flow events. */
+    void progress_transport();
     /** Progress TLS, QUIC timers, stream acceptance, and lifecycle events. */
     std::vector<multiflow::event> drain_events() override;
 
@@ -170,6 +213,8 @@ class openssl_listener final {
 public:
     /** Internal state whose lifetime must cover the BIO receive callback. */
     struct observer_state;
+    /** Socket/BIO queues used by the transparent datagram dispatcher. */
+    struct dispatcher_state;
     /**
      * Attach a nonblocking OpenSSL QUIC listener to a caller-owned UDP socket.
      * enable_local_address requests destination-address metadata for transparent
@@ -187,16 +232,39 @@ public:
     std::unique_ptr<openssl_connection> accept();
     /** Progress listener packet processing and QUIC timers without blocking. */
     bool handle_events();
+    /** Flush output synchronously produced while servicing one known connection. */
+    bool flush_output(datagram_endpoint const& peer, datagram_endpoint const& local);
+    /** Socket readiness required by the dispatcher/direct network BIO. */
+    short desired_socket_events() const;
+    /** Diagnostic for the most recent adapter-level event failure. */
+    std::string const& last_error() const { return last_error_; }
+    /** Tuple of the datagram currently/most recently dispatched to OpenSSL. */
+    datagram_endpoint current_peer() const;
+    datagram_endpoint current_local() const;
     bool local_address_enabled() const { return local_address_enabled_; }
     SSL* native_handle() const { return listener_.get(); }
 
 private:
-    openssl_listener(std::unique_ptr<observer_state> state, unique_ssl listener,
+    openssl_listener(std::unique_ptr<observer_state> observer,
+                     std::unique_ptr<dispatcher_state> dispatcher, unique_ssl listener,
                      bool local_address_enabled);
 
+    /** Store an adapter error together with the current OpenSSL error queue. */
+    bool fail_operation(std::string operation);
+    /** Move already-produced datagrams from the queue to the UDP socket. */
+    bool flush_dispatcher_socket();
+    /** Inject and fully service the oldest queued input datagram. */
+    bool progress_input_packet();
+    /** Read one bounded socket batch so other worker work cannot starve. */
+    bool receive_input_batch();
+    /** Advance timer-generated listener work after the readable batch. */
+    bool progress_listener_timers();
+
     std::unique_ptr<observer_state> observer_state_; ///< Storage referenced by BIO callback.
+    std::unique_ptr<dispatcher_state> dispatcher_state_; ///< Transparent socket pump state.
     unique_ssl listener_;                            ///< Owned OpenSSL listener object.
     bool local_address_enabled_ = false;             ///< BIO supports local-address metadata.
+    std::string last_error_;                         ///< Socket/BIO pump failure detail.
 };
 
 #endif // SMITHPROXY_OPENSSL_QUIC

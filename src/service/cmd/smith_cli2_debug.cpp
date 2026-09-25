@@ -8,6 +8,7 @@
 #include <proxy/mitmproxy.hpp>
 #include <proxy/socks5/socksproxy.hpp>
 #include <service/cfgapi/cfgapi.hpp>
+#include <service/quic/quiclog.hpp>
 
 #include <socle.hpp>
 #include <sslcertstore.hpp>
@@ -82,6 +83,9 @@ std::string proxy_levels() {
 }  // namespace
 
 void register_smithproxy_cli2_debug(libcli2::Cli& cli) {
+    // Register the topic even when QUIC is disabled by the linked OpenSSL.
+    // This keeps `debug set com.quic <level>` stable across installations.
+    (void)sx::quic::log();
     debug_command(cli, "term", "Set logging level for this terminal")
         .handler([](libcli2::Context& context, const libcli2::Invocation& invocation) {
             auto found = Log::get()->target_profiles().find(static_cast<std::uint64_t>(context.io_handle));

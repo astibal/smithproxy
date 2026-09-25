@@ -87,11 +87,15 @@ ip -n "${PROXY_NS}" link set "qpo${SUFFIX}" up
 ip -n "${CLIENT_NS}" route add default via 10.203.1.1
 ip -n "${ORIGIN_NS}" route add default via 10.203.2.1
 ip netns exec "${PROXY_NS}" sysctl -q -w net.ipv4.ip_forward=1
+# A transparent-proxy test must fail closed.  Without this policy a broken
+# TPROXY listener can appear healthy because the kernel forwards QUIC directly
+# between the client and origin namespaces.
+ip netns exec "${PROXY_NS}" iptables -P FORWARD DROP
 ip netns exec "${PROXY_NS}" ip rule add fwmark 1 lookup 100
 ip netns exec "${PROXY_NS}" ip route add local 0.0.0.0/0 dev lo table 100
 ip netns exec "${PROXY_NS}" iptables -t mangle -A PREROUTING \
     -i "qpc${SUFFIX}" -p udp --dport 443 \
-    -j TPROXY --on-port 443 --tproxy-mark 0x1/0x1
+    -j TPROXY --on-port 0 --tproxy-mark 0x1/0x1
 
 ip netns exec "${ORIGIN_NS}" "${BUILD_DIR}/quic_test_node" \
     origin "${TMP_DIR}" 0.0.0.0 443 >"${TMP_DIR}/origin.log" 2>&1 &

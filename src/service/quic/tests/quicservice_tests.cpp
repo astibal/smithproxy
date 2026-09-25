@@ -279,6 +279,7 @@ TEST(QuicListenerService, ProxiesStreamAndCleansUpIdleSession) {
     auto const stream_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
     while (std::chrono::steady_clock::now() < stream_deadline && received.empty()) {
         external->drain_events();
+        ASSERT_TRUE(origin_listener->handle_events()) << origin_listener->last_error();
         for (auto const& event : origin->drain_events()) {
             if (event.type != sx::multiflow::event_type::flow_open || !event.flow) continue;
             origin_flow = *event.flow;
@@ -291,6 +292,23 @@ TEST(QuicListenerService, ProxiesStreamAndCleansUpIdleSession) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     EXPECT_EQ(received, message);
+
+    auto const diagnostics_deadline = std::chrono::steady_clock::now()
+        + std::chrono::seconds(1);
+    std::vector<quic::session_snapshot> snapshots;
+    while (std::chrono::steady_clock::now() < diagnostics_deadline) {
+        snapshots = proxy.session_diagnostics();
+        if (!snapshots.empty() && snapshots.front().streams == 1) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    ASSERT_EQ(snapshots.size(), 1U);
+    EXPECT_EQ(snapshots.front().state, "active");
+    EXPECT_EQ(snapshots.front().server_name, "127.0.0.1");
+    EXPECT_EQ(snapshots.front().downstream_alpn, "h3");
+    EXPECT_EQ(snapshots.front().upstream_alpn, "h3");
+    EXPECT_EQ(snapshots.front().streams, 1U);
+    EXPECT_GT(snapshots.front().forwarded_bytes, 0U);
+    EXPECT_NE(snapshots.front().target, "-");
 
     auto const close_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     while (std::chrono::steady_clock::now() < close_deadline
