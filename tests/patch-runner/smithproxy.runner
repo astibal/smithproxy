@@ -1,0 +1,337 @@
+#!/usr/bin/env bash
+# =============================================================================
+#  SMITHPROXY RUNNER                                      IPv4 / routed prototype
+# =============================================================================
+#
+#  Host namespace                         Data namespace (isolated network stack)
+#  ---------------------------            -------------------------------------
+#  SSH + management stay here             di0 -> nft / TPROXY -> Smithproxy -> do0
+#  API :55556 -------- socat ------------> API :55555
+#
+#  This script prepares networking for an EXISTING Smithproxy binary. The proxy
+#  engine, TLS inspection and policies stay in Smithproxy; the runner sets up its environment.
+#
+#  Requirements:
+#    - root; Bash 4+; iproute2, nftables, socat, util-linux;
+#    - dedicated, initially unconfigured input/output interfaces;
+#    - config-dir contains smithproxy.cfg and a trusted network.conf shell file.
+#
+#  Example (quotes prevent the shell from expanding di* against local files):
+#    sudo env SMITHPROXY_BIN=/opt/smithproxy/bin/smithproxy ./smithproxy.runner \
+#      --in 'di*' --out do0 --config-dir ./config --data-dir ./data
+#
+#  Prototype scope: IPv4, TCP/UDP, one namespace. This is not an L2 bridge.
+#  Cleanup returns interfaces WITHOUT addresses and DOWN; original settings are not restored.
+#  SIGKILL / host failure requires manual cleanup. Graceful shutdown has no timeout.
+# =============================================================================
+set -euo pipefail
+
+# -- Defaults -----------------------------------------------------------
+NS=sx-runner
+IN_PATTERN=di0
+OUT=do0
+TELEMETRY_IF=
+TELEMETRY_CIDR_OVERRIDE=
+TELEMETRY_GATEWAY_OVERRIDE=
+API_BIND=127.0.0.1
+API_PORT=55556
+API_BIND_OVERRIDE=
+API_PORT_OVERRIDE=
+SMITHPROXY_BIN=${SMITHPROXY_BIN:-smithproxy}
+
+# A mark is kernel packet metadata, not an extra byte in the packet payload.
+# These settings apply only inside our namespace; host routes and firewall stay unchanged.
+TPROXY_MARK=1
+TPROXY_TABLE=100
+TPROXY_PRIORITY=100
+PLAIN_PORT=50080
+TLS_PORT=50443
+INTERNAL_API_PORT=${SMITHPROXY_API_PORT:-55555}
+
+usage() {
+    cat <<'HELP'
+Usage:
+  smithproxy.runner --config-dir DIR --data-dir DIR [options]
+
+  --in PATTERN       Input interfaces; shell glob, default: di0
+  --out INTERFACE    Output interface, default: do0
+  --namespace NAME   New data namespace, default: sx-runner
+  --telemetry-net IF Dedicated webhook/syslog/GRE interface
+  --telemetry-cidr C Address for telemetry interface (overrides network.conf)
+  --telemetry-gateway IP  Gateway for explicit telemetry routes
+  --api-bind ADDRESS Host-side API relay address (overrides network.conf)
+  --api-port PORT    Host-side API relay port (overrides network.conf)
+  --config-dir DIR   smithproxy.cfg + network.conf
+  --data-dir DIR     Console logs, private /run and diagnostics
+  -h, --help         Show this help
+
+Environment:
+  SMITHPROXY_BIN     Binary path or command in PATH, default: smithproxy
+
+network.conf (trusted Bash file):
+  INPUT_CIDRS[di0]=198.18.10.1/24
+  OUT_CIDR=198.18.20.1/24
+  GATEWAY=198.18.20.2
+  TELEMETRY_CIDR=10.20.0.2/24
+  TELEMETRY_GATEWAY=10.20.0.1
+  TELEMETRY_ROUTES=(10.20.0.20/32 10.20.0.30/32)
+  API_BIND=127.0.0.1
+  API_PORT=55556
+
+Use dedicated, unconfigured interfaces. Example: --in 'di*'
+When using --telemetry-net, list only explicit telemetry prefixes; do not add a
+second default route. Pin webhook/GRE to that interface in smithproxy.cfg.
+Also configure application log / capture paths in smithproxy.cfg.
+HELP
+}
+
+# Plain text keeps the output readable both in a terminal and in saved logs.
+log() { printf '[runner] %s\n' "$*"; }
+
+# == 1. Configuration and input validation ============================================
+while (($#)); do
+    case "$1" in
+        -h|--help) usage; exit 0 ;;
+        --in|--out|--config-dir|--data-dir|--namespace|--api-bind|--api-port|--telemetry-net|--telemetry-cidr|--telemetry-gateway)
+            if (($# < 2)) || [[ -z $2 || $2 == --* ]]; then
+                printf 'Missing value for %s\n' "$1" >&2
+                exit 2
+            fi
+            ;;
+        *) printf 'Unknown argument: %s\n' "$1" >&2; exit 2 ;;
+    esac
+    case "$1" in
+        --in)         IN_PATTERN=$2 ;;
+        --out)        OUT=$2 ;;
+        --namespace)  NS=$2 ;;
+        --telemetry-net) TELEMETRY_IF=$2 ;;
+        --telemetry-cidr) TELEMETRY_CIDR_OVERRIDE=$2 ;;
+        --telemetry-gateway) TELEMETRY_GATEWAY_OVERRIDE=$2 ;;
+        --api-bind)   API_BIND_OVERRIDE=$2 ;;
+        --api-port)   API_PORT_OVERRIDE=$2 ;;
+        --config-dir) CONFIG_DIR=$(realpath "$2") ;;
+        --data-dir)   DATA_DIR=$(realpath -m "$2") ;;
+    esac
+    shift 2
+done
+: "${CONFIG_DIR:?Specify --config-dir}" "${DATA_DIR:?Specify --data-dir}"
+((EUID == 0)) || { echo 'The runner requires root.' >&2; exit 1; }
+for command in ip nft socat setsid unshare mount sysctl awk cut; do
+    command -v "$command" >/dev/null || { echo "Missing command: $command" >&2; exit 1; }
+done
+SMITHPROXY_BIN=$(command -v "$SMITHPROXY_BIN") || {
+    echo 'Cannot locate SMITHPROXY_BIN; specify a compiled executable, not a source directory.' >&2
+    exit 1
+}
+SMITHPROXY_BIN=$(realpath "$SMITHPROXY_BIN")
+[[ -f $SMITHPROXY_BIN && -x $SMITHPROXY_BIN ]] || {
+    echo "SMITHPROXY_BIN must point to an executable file: $SMITHPROXY_BIN" >&2; exit 1;
+}
+[[ -r $CONFIG_DIR/smithproxy.cfg ]] || {
+    echo "Cannot read configuration: $CONFIG_DIR/smithproxy.cfg" >&2; exit 1;
+}
+
+# Each input has its own CIDR. Using source is intentional: this is trusted code,
+# not a file received through the API. CLI names / options match the original prototype.
+declare -A INPUT_CIDRS
+TELEMETRY_CIDR=
+TELEMETRY_GATEWAY=
+TELEMETRY_ROUTES=()
+source "$CONFIG_DIR/network.conf"
+: "${OUT_CIDR:?Missing OUT_CIDR in network.conf}" "${GATEWAY:?Missing GATEWAY in network.conf}"
+[[ -z $TELEMETRY_CIDR_OVERRIDE ]] || TELEMETRY_CIDR=$TELEMETRY_CIDR_OVERRIDE
+[[ -z $TELEMETRY_GATEWAY_OVERRIDE ]] || TELEMETRY_GATEWAY=$TELEMETRY_GATEWAY_OVERRIDE
+[[ -z $API_BIND_OVERRIDE ]] || API_BIND=$API_BIND_OVERRIDE
+[[ -z $API_PORT_OVERRIDE ]] || API_PORT=$API_PORT_OVERRIDE
+[[ $API_PORT =~ ^[0-9]+$ ]] && ((API_PORT >= 1 && API_PORT <= 65535)) || {
+    echo 'API port must be in range 1..65535.' >&2; exit 2;
+}
+
+# NS is also embedded in the socat command; restrict it to a simple identifier.
+[[ $NS =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$ ]] || { echo 'Invalid namespace name.' >&2; exit 2; }
+mapfile -t INPUTS < <(
+    ip -o link show | awk -F': ' '{print $2}' | cut -d@ -f1 |
+        while read -r dev; do
+            if [[ $dev == $IN_PATTERN ]]; then printf '%s\n' "$dev"; fi
+        done
+)
+((${#INPUTS[@]})) || { echo "No interfaces match: $IN_PATTERN" >&2; exit 2; }
+for dev in "${INPUTS[@]}"; do
+    [[ $dev != "$OUT" && $dev != "$TELEMETRY_IF" ]] || {
+        echo 'Input, output and telemetry interfaces overlap.' >&2; exit 2;
+    }
+    [[ -n ${INPUT_CIDRS[$dev]:-} ]] || { echo "Missing INPUT_CIDRS[$dev]." >&2; exit 2; }
+done
+[[ -z $TELEMETRY_IF || $TELEMETRY_IF != "$OUT" ]] || {
+    echo 'Output and telemetry interfaces overlap.' >&2; exit 2;
+}
+if [[ -n $TELEMETRY_IF ]]; then
+    : "${TELEMETRY_CIDR:?Set TELEMETRY_CIDR or use --telemetry-cidr}"
+    ((${#TELEMETRY_ROUTES[@]})) || {
+        echo 'Set at least one TELEMETRY_ROUTES entry in network.conf.' >&2; exit 2;
+    }
+    : "${TELEMETRY_GATEWAY:?Set TELEMETRY_GATEWAY or use --telemetry-gateway}"
+fi
+INTERFACES=("${INPUTS[@]}" "$OUT")
+[[ -z $TELEMETRY_IF ]] || INTERFACES+=("$TELEMETRY_IF")
+for dev in "${INTERFACES[@]}"; do
+    # Simple interface names can also be safely embedded in the nft configuration.
+    [[ $dev != lo && $dev =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$ ]] || {
+        echo "Unsupported interface: $dev" >&2; exit 2;
+    }
+    ip link show dev "$dev" >/dev/null
+    [[ -z $(ip -o addr show dev "$dev") ]] || {
+        echo "Interface $dev already has addresses; use a dedicated, unconfigured interface." >&2; exit 2;
+    }
+done
+mkdir -p "$DATA_DIR/run"
+HOST_PID=$$                         # Use this PID to move links back to the host netns.
+MOVED=()                            # Only clean up links we have taken ownership of.
+PROXY_PID=
+API_PID=
+
+log "1/7  Config:      $CONFIG_DIR"
+log "     Data:        $DATA_DIR"
+log "     Network:     ${INPUTS[*]} -> [$NS / Smithproxy] -> $OUT"
+[[ -z $TELEMETRY_IF ]] || log "     Telemetry:   $TELEMETRY_IF -> ${TELEMETRY_ROUTES[*]}"
+
+# == 2. Namespace ownership and cleanup ==========================================
+# Never adopt an existing namespace: on a name collision, exit BEFORE registering
+# cleanup, so a namespace owned by someone else is never deleted.
+ip netns add "$NS"
+
+cleanup() {
+    local result=$? move_failed=0
+    trap - EXIT INT TERM
+    # Continue cleanup if a step fails; preserve the original exit status unless cleanup fails.
+    set +e
+    log 'STOP Stopping API relay and proxy; waiting for graceful shutdown.'
+
+    # setsid gave each service its own process group. A negative PID also terminates
+    # socat children, rather than just its listening parent process.
+    [[ -z $API_PID ]]   || kill -- "-$API_PID" 2>/dev/null
+    [[ -z $PROXY_PID ]] || kill -- "-$PROXY_PID" 2>/dev/null
+    [[ -z $PROXY_PID ]] || wait "$PROXY_PID" 2>/dev/null
+    [[ -z $API_PID ]]   || wait "$API_PID" 2>/dev/null
+    rm -f "$DATA_DIR/proxy.pid"
+
+    # Keep packet counters available after the namespace has been removed.
+    ip netns exec "$NS" nft list ruleset > "$DATA_DIR/nft-final.txt" 2>/dev/null
+    for dev in "${MOVED[@]}"; do
+        ip -n "$NS" addr flush dev "$dev"
+        ip -n "$NS" link set "$dev" down
+        ip netns exec "$NS" ip link set "$dev" netns "$HOST_PID" || move_failed=1
+    done
+    if ((move_failed)); then
+        # Do not delete the last namespace handle while a virtual link is still inside.
+        log "ERROR: keeping namespace $NS; at least one interface could not be returned."
+        result=1
+    else
+        ip netns del "$NS" || result=1
+        log 'STOP Interfaces returned without addresses / DOWN; namespace cleanup complete.'
+    fi
+    exit "$result"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+log "2/7  Created namespace: $NS"
+
+# == 3. Moving links, assigning addresses and routing ================================
+for dev in "${INTERFACES[@]}"; do
+    ip link set "$dev" netns "$NS"
+    MOVED+=("$dev")
+done
+ip -n "$NS" link set lo up
+for dev in "${INPUTS[@]}"; do
+    ip -n "$NS" addr add "${INPUT_CIDRS[$dev]}" dev "$dev"
+    ip -n "$NS" link set "$dev" up
+    log "     Input:  $dev = ${INPUT_CIDRS[$dev]}"
+done
+ip -n "$NS" addr add "$OUT_CIDR" dev "$OUT"
+ip -n "$NS" link set "$OUT" up
+ip -n "$NS" route add default via "$GATEWAY" dev "$OUT"
+log "3/7  Output: $OUT = $OUT_CIDR, gateway $GATEWAY (inside $NS only)"
+if [[ -n $TELEMETRY_IF ]]; then
+    ip -n "$NS" addr add "$TELEMETRY_CIDR" dev "$TELEMETRY_IF"
+    ip -n "$NS" link set "$TELEMETRY_IF" up
+    for route in "${TELEMETRY_ROUTES[@]}"; do
+        ip -n "$NS" route add "$route" via "$TELEMETRY_GATEWAY" dev "$TELEMETRY_IF"
+    done
+    log "     Telemetry: $TELEMETRY_IF = $TELEMETRY_CIDR, gateway $TELEMETRY_GATEWAY"
+fi
+
+# == 4. Mark -> local delivery ==============================================
+# Transparent sockets use non-local addresses. Disable reverse-path filtering
+# inside this namespace so the kernel does not reject legitimate transparent traffic.
+ip netns exec "$NS" sysctl -qw net.ipv4.ip_forward=1
+for dev in all default "${INTERFACES[@]}"; do
+    ip netns exec "$NS" sysctl -qw "net.ipv4.conf.$dev.rp_filter=0"
+done
+
+# The special routing table says: "a marked packet is local; deliver it to the proxy".
+# Unmarked outbound proxy connections use the normal default route through do0.
+ip -n "$NS" rule add pref "$TPROXY_PRIORITY" fwmark "$TPROXY_MARK/1" lookup "$TPROXY_TABLE"
+ip -n "$NS" route add local 0.0.0.0/0 dev lo table "$TPROXY_TABLE"
+log "4/7  Mark $TPROXY_MARK -> table $TPROXY_TABLE -> local transparent socket"
+
+# == 5. Traffic interception =====================================================
+INPUT_SET=$(printf '"%s", ' "${INPUTS[@]}")
+INPUT_SET=${INPUT_SET%, }
+ip netns exec "$NS" nft -f - <<NFT
+table ip smithproxy {
+    chain forward {
+        # Block ordinary forwarding around the proxy, even when it is stopped.
+        # This prototype does not forward ICMP or other non-proxied protocols.
+        type filter hook forward priority filter; policy drop;
+    }
+    chain prerouting {
+        type filter hook prerouting priority mangle; policy accept;
+
+        # Deliver subsequent TCP packets to an existing transparent socket.
+        meta l4proto tcp socket transparent 1 counter meta mark set $TPROXY_MARK accept
+
+        # Intercept new flows only from clients, not from the output interface.
+        iifname != { $INPUT_SET } return
+
+        # Traffic to our own addresses belongs to local services, not MITM.
+        fib daddr type local return
+
+        # Select TLS/DTLS on port 443 first; other TCP/UDP goes to the plaintext listeners.
+        tcp dport 443 counter tproxy to :$TLS_PORT meta mark set $TPROXY_MARK accept
+        udp dport 443 counter tproxy to :$TLS_PORT meta mark set $TPROXY_MARK accept
+        meta l4proto tcp counter tproxy to :$PLAIN_PORT meta mark set $TPROXY_MARK accept
+        meta l4proto udp counter tproxy to :$PLAIN_PORT meta mark set $TPROXY_MARK accept
+    }
+}
+NFT
+log "5/7  TPROXY active: TCP/UDP :$PLAIN_PORT, TLS/DTLS :$TLS_PORT; forwarding DROP"
+
+# == 6. Proxy process and management path =======================================
+# Upstream hard-codes its PID file under /var/run. A private mount namespace with
+# its own /run avoids host collisions. A network namespace alone does not isolate files!
+# Pass sh parameters as arguments so paths containing spaces work correctly.
+setsid ip netns exec "$NS" unshare --mount --propagation private \
+    sh -c 'mount --bind "$1" /run && exec "$2" --config-file "$3"' \
+    sh "$DATA_DIR/run" "$SMITHPROXY_BIN" "$CONFIG_DIR/smithproxy.cfg" \
+    > "$DATA_DIR/proxy-console.log" 2>&1 &
+PROXY_PID=$!
+printf '%s\n' "$PROXY_PID" > "$DATA_DIR/proxy.pid"
+
+# The outer socat listens on the host. For each connection it starts an inner socat
+# inside the data namespace, relaying the byte stream to the loopback API. TLS stays
+# end-to-end between the API client and Smithproxy; the relay does not decrypt it.
+setsid socat "TCP4-LISTEN:$API_PORT,bind=$API_BIND,reuseaddr,fork" \
+    "EXEC:ip netns exec $NS socat STDIO TCP4\:127.0.0.1\:$INTERNAL_API_PORT" \
+    > "$DATA_DIR/api-relay.log" 2>&1 &
+API_PID=$!
+log "6/7  Processes started: proxy PID=$PROXY_PID, API relay PID=$API_PID"
+log "     API path: https://$API_BIND:$API_PORT -> $NS / 127.0.0.1:$INTERNAL_API_PORT"
+
+# == 7. Foreground supervision ========================================================
+# This reports process startup, not listener health. Readiness and actual MITM
+# are checked by tests/lab-test.sh. Service logs are written to separate files.
+log "7/7  Runner waiting for proxy. Stop with SIGTERM or Ctrl-C."
+log "     Proxy log: $DATA_DIR/proxy-console.log"
+log "     Relay log: $DATA_DIR/api-relay.log"
+wait "$PROXY_PID"
