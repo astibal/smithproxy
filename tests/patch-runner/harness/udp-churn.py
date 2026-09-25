@@ -32,8 +32,15 @@ def main() -> None:
     parser.add_argument("--interval", type=float, default=3.0)
     parser.add_argument("--settle", type=float, default=12.0)
     parser.add_argument("--timeout", type=float, default=1.0)
-    parser.add_argument("--base-port", type=int, default=20000)
+    parser.add_argument("--min-port", type=int, default=20000)
+    parser.add_argument("--max-port", type=int, default=29999)
     args = parser.parse_args()
+
+    total = args.waves * args.flows
+    if not 1 <= args.min_port <= args.max_port <= 65535:
+        parser.error("port range must satisfy 1 <= MIN <= MAX <= 65535")
+    if total > args.max_port - args.min_port + 1:
+        parser.error(f"port range has fewer than {total} ports")
 
     stop = threading.Event()
     probe_errors: list[str] = []
@@ -61,7 +68,7 @@ def main() -> None:
             for wave in range(args.waves):
                 futures = []
                 for index in range(args.flows):
-                    source_port = args.base_port + wave * args.flows + index
+                    source_port = args.min_port + wave * args.flows + index
                     payload = f"churn-{wave}-{index}".encode()
                     futures.append(pool.submit(exchange, source_port, payload, args.timeout))
 
@@ -80,7 +87,6 @@ def main() -> None:
         stop.set()
         probe_thread.join()
 
-    total = args.waves * args.flows
     elapsed = time.monotonic() - started
     print(
         f"UDP churn: flows={total} probes={probe_count} elapsed={elapsed:.2f}s "

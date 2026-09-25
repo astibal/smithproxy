@@ -13,6 +13,7 @@ tests/patch-runner/test-patch.sh --run --remote root@tt-bs1
 tests/patch-runner/test-patch.sh sanity --suite tls --remote root@tt-bs1
 tests/patch-runner/test-patch.sh sanity --suite policy --remote root@tt-bs1
 tests/patch-runner/test-patch.sh sanity --suite rtt --remote root@tt-bs1
+tests/patch-runner/test-patch.sh full --remote root@tt-bs1 --churn-port-range 20000:29999
 ```
 
 Profiles:
@@ -88,6 +89,11 @@ makes the run fail.
 
 The compatible pplay engine is vendored under `vendor/` with its license so the
 runner does not depend on mutable files outside this repository.
+
+TCP and UDP churn use client source ports `20000:29999` by default, outside the
+usual Linux ephemeral range. Override it with `--churn-port-range MIN:MAX` or
+the `CHURN_MIN_PORT` and `CHURN_MAX_PORT` environment variables. The range must
+be large enough for the configured wave and flow count of each churn test.
 
 ## Capture matrix
 
