@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  SMITHPROXY RUNNER                                      IPv4 / routed prototype
+#  SMITHPROXY RUNNER                              Dual-stack routed test runner
 # =============================================================================
 #
 #  Host namespace                         Data namespace (isolated network stack)
@@ -20,7 +20,7 @@
 #    sudo env SMITHPROXY_BIN=/opt/smithproxy/bin/smithproxy ./smithproxy.runner \
 #      --in 'di*' --out do0 --config-dir ./config --data-dir ./data
 #
-#  Prototype scope: IPv4, TCP/UDP, one namespace. This is not an L2 bridge.
+#  Scope: IPv4 plus optional IPv6, TCP/UDP, one namespace. This is not an L2 bridge.
 #  Cleanup returns interfaces WITHOUT addresses and DOWN; original settings are not restored.
 #  SIGKILL / host failure requires manual cleanup. Graceful shutdown has no timeout.
 # =============================================================================
@@ -70,8 +70,11 @@ Environment:
 
 network.conf (trusted Bash file):
   INPUT_CIDRS[di0]=198.18.10.1/24
+  INPUT_CIDRS6[di0]=fd00:10::1/64
   OUT_CIDR=198.18.20.1/24
   GATEWAY=198.18.20.2
+  OUT_CIDR6=fd00:20::1/64
+  GATEWAY6=fd00:20::2
   TELEMETRY_CIDR=10.20.0.2/24
   TELEMETRY_GATEWAY=10.20.0.1
   TELEMETRY_ROUTES=(10.20.0.20/32 10.20.0.30/32)
