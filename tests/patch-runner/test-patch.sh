@@ -36,8 +36,8 @@ Options:
                      Default: /tmp/patch-runner/<branch>_@_<commit>/
   --build-dir DIR    Use this CMake build directory instead of DIR/build.
   --jobs N           Parallel build jobs. Default: nproc.
-  --tcp-churn-port-range MIN:MAX
-                     Client source-port range for TCP churn (default: 20000:29999).
+  --churn-port-range MIN:MAX
+                     Client source-port range for TCP/UDP churn (default: 20000:29999).
   --skip-build       Use an existing BUILD_DIR/smithproxy. Intended for CMake
                      custom targets, which already depend on smithproxy.
   --quiet            Print only verdict lines. Complete output remains in logs.
@@ -60,8 +60,8 @@ Common environment variables:
   RTT_MAX_LIMIT_MS               General RTT maximum gate (default: 250).
   RTT_HANDSHAKE_P95_LIMIT_MS     Handshake P95 gate (default: 500).
   RTT_HANDSHAKE_MAX_LIMIT_MS     Handshake maximum gate (default: 2000).
-  TCP_CHURN_MIN_PORT             TCP churn source-port minimum (default: 20000).
-  TCP_CHURN_MAX_PORT             TCP churn source-port maximum (default: 29999).
+  CHURN_MIN_PORT                 TCP/UDP churn source-port minimum (default: 20000).
+  CHURN_MAX_PORT                 TCP/UDP churn source-port maximum (default: 29999).
 
 Examples:
   test-patch.sh quick
@@ -72,7 +72,7 @@ Examples:
   test-patch.sh full --remote root@tt-bs1 --env MATCH='h2_generated_*' \
       --env EXCLUDE='h2_generated_003,h2_generated_017'
   test-patch.sh full --remote root@tt-bs1 --jobs 8
-  test-patch.sh full --remote root@tt-bs1 --tcp-churn-port-range 20000:29999
+  test-patch.sh full --remote root@tt-bs1 --churn-port-range 20000:29999
   test-patch.sh benchmark --remote root@tt-bs1
   test-patch.sh --run --remote root@tt-bs1
   test-patch.sh sanity --build-dir /tmp/smithproxy-build --skip-build
@@ -111,7 +111,7 @@ ONLY_SUITE=
 SKIP_BUILD=0
 QUIET=0
 EXTRA_ENV=()
-TCP_CHURN_PORT_RANGE=
+CHURN_PORT_RANGE=
 
 REMOTE=
 WORK_DIR=${PATCH_TEST_DIR:-}
@@ -123,7 +123,7 @@ while (($#)); do
         --build-dir) BUILD_DIR=${2:?missing build directory}; shift 2 ;;
         --jobs) JOBS=${2:?missing job count}; shift 2 ;;
         --suite) ONLY_SUITE=${2:?missing suite}; shift 2 ;;
-        --tcp-churn-port-range) TCP_CHURN_PORT_RANGE=${2:?missing TCP churn port range}; shift 2 ;;
+        --churn-port-range) CHURN_PORT_RANGE=${2:?missing churn port range}; shift 2 ;;
         --env)
             [[ ${2:-} =~ ^[A-Za-z_][A-Za-z0-9_]*=.*$ ]] || {
                 echo "Invalid --env value: ${2:-<missing>} (expected NAME=VALUE)" >&2
@@ -147,18 +147,18 @@ done
 }
 [[ -z $REMOTE || $REMOTE =~ ^[A-Za-z0-9_.@-]+$ ]] || { echo "Invalid remote: $REMOTE" >&2; exit 2; }
 [[ $JOBS =~ ^[1-9][0-9]*$ ]] || { echo "Invalid job count: $JOBS" >&2; exit 2; }
-if [[ -n $TCP_CHURN_PORT_RANGE ]]; then
-    [[ $TCP_CHURN_PORT_RANGE =~ ^([0-9]+):([0-9]+)$ ]] || {
-        echo "Invalid TCP churn port range: $TCP_CHURN_PORT_RANGE (expected MIN:MAX)" >&2
+if [[ -n $CHURN_PORT_RANGE ]]; then
+    [[ $CHURN_PORT_RANGE =~ ^([0-9]+):([0-9]+)$ ]] || {
+        echo "Invalid churn port range: $CHURN_PORT_RANGE (expected MIN:MAX)" >&2
         exit 2
     }
-    TCP_CHURN_MIN_PORT=${BASH_REMATCH[1]}
-    TCP_CHURN_MAX_PORT=${BASH_REMATCH[2]}
-    ((TCP_CHURN_MIN_PORT >= 1 && TCP_CHURN_MIN_PORT <= TCP_CHURN_MAX_PORT && TCP_CHURN_MAX_PORT <= 65535)) || {
-        echo "Invalid TCP churn port range: $TCP_CHURN_PORT_RANGE" >&2
+    CHURN_MIN_PORT=${BASH_REMATCH[1]}
+    CHURN_MAX_PORT=${BASH_REMATCH[2]}
+    ((CHURN_MIN_PORT >= 1 && CHURN_MIN_PORT <= CHURN_MAX_PORT && CHURN_MAX_PORT <= 65535)) || {
+        echo "Invalid churn port range: $CHURN_PORT_RANGE" >&2
         exit 2
     }
-    EXTRA_ENV+=("TCP_CHURN_MIN_PORT=$TCP_CHURN_MIN_PORT" "TCP_CHURN_MAX_PORT=$TCP_CHURN_MAX_PORT")
+    EXTRA_ENV+=("CHURN_MIN_PORT=$CHURN_MIN_PORT" "CHURN_MAX_PORT=$CHURN_MAX_PORT")
 fi
 [[ -z $ONLY_SUITE || $ONLY_SUITE == tls || $ONLY_SUITE == policy || $ONLY_SUITE == rtt || $ONLY_SUITE == session-list ]] || { echo "Unknown suite: $ONLY_SUITE" >&2; exit 2; }
 
@@ -275,7 +275,7 @@ print(*(x.getsockname()[1] for x in s))'
         RTT_HANDSHAKE_P95_LIMIT_MS RTT_HANDSHAKE_MAX_LIMIT_MS \
         SESSION_LIST_CONNECTIONS SESSION_LIST_SAMPLES \
         SESSION_LIST_P95_LIMIT_MS SESSION_LIST_MAX_LIMIT_MS \
-        TCP_CHURN_MIN_PORT TCP_CHURN_MAX_PORT; do
+        CHURN_MIN_PORT CHURN_MAX_PORT; do
         [[ -z ${!variable:-} ]] || LAB_ENV+=("$variable=${!variable}")
     done
     if [[ $PROFILE == benchmark ]]; then
