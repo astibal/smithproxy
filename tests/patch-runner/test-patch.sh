@@ -9,6 +9,7 @@ Smithproxy patch runner
 
 Usage:
   test-patch.sh PROFILE [OPTIONS]
+  test-patch.sh --run [OPTIONS]
   test-patch.sh --help
 
 Profiles:
@@ -19,6 +20,9 @@ Profiles:
   full        Run sanity plus TCP/UDP churn and the complete pplay corpus.
   benchmark   Measure TCP, UDP and TLS latency without PASS/FAIL latency gates.
               Prints aligned absolute and native-delta tables and keeps JSON.
+  --run       Start an interactive isolated lab and keep Smithproxy in the
+              foreground until Ctrl-C. Prints host-side CLI and API access.
+              With --remote, both ports bind to the remote host's loopback.
 
 Options:
   --suite NAME       Run only one virtual sanity suite: tls, policy or rtt.
@@ -65,6 +69,7 @@ Examples:
       --env EXCLUDE='h2_generated_003,h2_generated_017'
   test-patch.sh full --remote root@tt-bs1 --jobs 8
   test-patch.sh benchmark --remote root@tt-bs1
+  test-patch.sh --run --remote root@tt-bs1
   test-patch.sh sanity --build-dir /tmp/smithproxy-build --skip-build
 
 CMake targets:
@@ -91,7 +96,8 @@ fi
 
 ROOT=$(git -C "$HERE" rev-parse --show-toplevel)
 PROFILE=${1:-}
-[[ $PROFILE == quick || $PROFILE == sanity || $PROFILE == full || $PROFILE == benchmark ]] || {
+[[ $PROFILE == --run ]] && PROFILE=run
+[[ $PROFILE == quick || $PROFILE == sanity || $PROFILE == full || $PROFILE == benchmark || $PROFILE == run ]] || {
     usage >&2
     exit 2
 }
@@ -124,8 +130,8 @@ while (($#)); do
         *) echo "Unknown option: $1" >&2; exit 2 ;;
     esac
 done
-[[ $QUIET == 0 || $PROFILE != benchmark ]] || {
-    echo "--quiet is not supported by the non-verdict benchmark profile" >&2
+[[ $QUIET == 0 || ( $PROFILE != benchmark && $PROFILE != run ) ]] || {
+    echo "--quiet is not supported by benchmark or --run" >&2
     exit 2
 }
 [[ -z $ONLY_SUITE || $PROFILE == sanity || $PROFILE == full ]] || {
@@ -204,7 +210,16 @@ else
     DATA_NS=sxp${TAG}d
     IN_IF=sp${TAG}i
     OUT_IF=sp${TAG}o
-    API_PORT=$((56000 + ($$ % 900)))
+    PORT_PICKER='import socket; s=[]
+for _ in range(2):
+    x=socket.socket(); x.bind(("127.0.0.1",0)); s.append(x)
+print(*(x.getsockname()[1] for x in s))'
+    if [[ -n $REMOTE ]]; then
+        printf -v PORT_COMMAND 'python3 -c %q' "$PORT_PICKER"
+        read -r API_PORT CLI_PORT < <(ssh "$REMOTE" "$PORT_COMMAND")
+    else
+        read -r API_PORT CLI_PORT < <(python3 -c "$PORT_PICKER")
+    fi
     LAB_ROOT=$WORK_DIR/labs/$RUN_ID-$TAG
 
     if [[ -n $REMOTE ]]; then
@@ -229,7 +244,7 @@ else
 
     LAB_ENV=(
         "CLIENT_NS=$CLIENT_NS" "SERVER_NS=$SERVER_NS" "DATA_NS=$DATA_NS"
-        "LAB_IN_IF=$IN_IF" "LAB_OUT_IF=$OUT_IF" "LAB_API_PORT=$API_PORT"
+        "LAB_IN_IF=$IN_IF" "LAB_OUT_IF=$OUT_IF" "LAB_API_PORT=$API_PORT" "LAB_CLI_PORT=$CLI_PORT"
         "CAPTURE_TEST=1" "HTTP2_OBSERVABILITY_TEST=1" "CAPTURE_MATRIX_TEST=1" "RTT_TEST=1" "TLS_SUITE_TEST=1" "POLICY_TEST=1"
         "PPLAY_PY=$LAB_ROOT/pplay.py" "PPLAY_SUITE=$LAB_ROOT/corpus"
         "PPLAY_RESULTS_NAME=corpus-all" "PPLAY_SMOKE_TEST=1"
@@ -244,6 +259,11 @@ else
         LAB_ENV+=("CAPTURE_TEST=0" "HTTP2_OBSERVABILITY_TEST=0" "CAPTURE_MATRIX_TEST=0"
             "TLS_SUITE_TEST=0" "POLICY_TEST=0" "RTT_TEST=1" "RTT_REPORT_ONLY=1"
             "RTT_NATIVE_BASELINE=1"
+            "PPLAY_SMOKE_TEST=0" "PPLAY_SUITE_SKIP_RUN=1")
+    fi
+    if [[ $PROFILE == run ]]; then
+        LAB_ENV+=("RUN_MODE=1" "CAPTURE_TEST=0" "HTTP2_OBSERVABILITY_TEST=0"
+            "CAPTURE_MATRIX_TEST=0" "TLS_SUITE_TEST=0" "POLICY_TEST=0" "RTT_TEST=0"
             "PPLAY_SMOKE_TEST=0" "PPLAY_SUITE_SKIP_RUN=1")
     fi
     if [[ -n $ONLY_SUITE ]]; then
@@ -265,16 +285,18 @@ else
     if [[ -n $REMOTE ]]; then
         printf -v ENV_STRING ' %q' "${LAB_ENV[@]}"
         if [[ $REMOTE == root@* ]]; then REMOTE_SUDO=; else REMOTE_SUDO='sudo '; fi
+        SSH_RUN=(ssh)
+        [[ $PROFILE != run ]] || SSH_RUN=(ssh -tt)
         if [[ $PROFILE == benchmark ]]; then
-            ssh "$REMOTE" "${REMOTE_SUDO}env$ENV_STRING '$LAB_ROOT/runner/tests/lab-test.sh' '$LAB_ROOT'" \
+            "${SSH_RUN[@]}" "$REMOTE" "${REMOTE_SUDO}env$ENV_STRING '$LAB_ROOT/runner/tests/lab-test.sh' '$LAB_ROOT'" \
                 > "$REPORT/test.log" 2>&1
             TEST_RC=$?
         elif ((QUIET)); then
-            ssh "$REMOTE" "${REMOTE_SUDO}env$ENV_STRING '$LAB_ROOT/runner/tests/lab-test.sh' '$LAB_ROOT'" \
+            "${SSH_RUN[@]}" "$REMOTE" "${REMOTE_SUDO}env$ENV_STRING '$LAB_ROOT/runner/tests/lab-test.sh' '$LAB_ROOT'" \
                 2>&1 | tee "$REPORT/test.log" | grep -E '(^PASS |^FAIL| (PASS|FAIL|XFAIL|XPASS)$|^RESULT:)'
             TEST_RC=${PIPESTATUS[0]}
         else
-            ssh "$REMOTE" "${REMOTE_SUDO}env$ENV_STRING '$LAB_ROOT/runner/tests/lab-test.sh' '$LAB_ROOT'" \
+            "${SSH_RUN[@]}" "$REMOTE" "${REMOTE_SUDO}env$ENV_STRING '$LAB_ROOT/runner/tests/lab-test.sh' '$LAB_ROOT'" \
                 2>&1 | tee "$REPORT/test.log"
             TEST_RC=${PIPESTATUS[0]}
         fi
@@ -307,7 +329,11 @@ else
     fi
     printf '%s\n' "$LAB_ROOT" > "$REPORT/lab-root.txt"
     echo "Lab retained for inspection: $LAB_ROOT" > "$REPORT/lab-retention.txt"
-    if ((TEST_RC == 0)); then STATUS=PASS; else STATUS=FAIL; fi
+    if [[ $PROFILE == run && ( $TEST_RC == 129 || $TEST_RC == 130 || $TEST_RC == 143 || $TEST_RC == 255 ) ]] \
+        && grep -q 'Smithproxy interactive lab READY' "$REPORT/test.log"; then
+        STATUS=STOPPED
+        TEST_RC=0
+    elif ((TEST_RC == 0)); then STATUS=PASS; else STATUS=FAIL; fi
 fi
 
 TCP_SUMMARY=$(grep -E '^TCP churn:' "$REPORT/test.log" 2>/dev/null | tail -1 || true)

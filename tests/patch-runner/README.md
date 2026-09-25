@@ -9,6 +9,7 @@ tests/patch-runner/test-patch.sh sanity
 tests/patch-runner/test-patch.sh full
 tests/patch-runner/test-patch.sh full --remote root@tt-bs1
 tests/patch-runner/test-patch.sh benchmark --remote root@tt-bs1
+tests/patch-runner/test-patch.sh --run --remote root@tt-bs1
 tests/patch-runner/test-patch.sh sanity --suite tls --remote root@tt-bs1
 tests/patch-runner/test-patch.sh sanity --suite policy --remote root@tt-bs1
 tests/patch-runner/test-patch.sh sanity --suite rtt --remote root@tt-bs1
@@ -23,6 +24,9 @@ Profiles:
 - `benchmark` also repeats the measurements natively inside the origin network
   namespace and reports P50/P95/P99 deltas. This subtracts Python, socket and
   echo-server overhead; the delta includes Smithproxy and its veth data path.
+- `--run`: start the isolated lab without tests, expose random host-loopback CLI
+  and API ports, and keep it in the foreground until Ctrl-C. With `--remote`,
+  both listeners are on the remote host's loopback interface.
 
 `--suite tls|policy|rtt` runs one virtual sanity subsection in the same isolated
 lab. Without `--suite`, every subsection is always included in `sanity` and

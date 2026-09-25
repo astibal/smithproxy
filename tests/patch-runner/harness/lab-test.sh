@@ -10,7 +10,10 @@ NS=${DATA_NS:-sxr-data}
 IN_IF=${LAB_IN_IF:-di0}
 OUT_IF=${LAB_OUT_IF:-do0}
 API_RELAY_PORT=${LAB_API_PORT:-55556}
+CLI_RELAY_PORT=${LAB_CLI_PORT:-55557}
+RUN_MODE=${RUN_MODE:-0}
 RUNNER_PID=
+CLI_RELAY_PID=
 ORIGIN_PID=
 PPLAY_SERVER_PID=
 GRE_COLLECTOR_PID=
@@ -33,6 +36,8 @@ ip netns add "$CLIENT"
 ip netns add "$SERVER"
 cleanup() {
     trap - EXIT
+    [[ -z $CLI_RELAY_PID ]] || kill -- "-$CLI_RELAY_PID" 2>/dev/null || true
+    [[ -z $CLI_RELAY_PID ]] || wait "$CLI_RELAY_PID" 2>/dev/null || true
     [[ -z $RUNNER_PID ]] || kill -TERM "$RUNNER_PID" 2>/dev/null || true
     [[ -z $RUNNER_PID ]] || wait "$RUNNER_PID" 2>/dev/null || true
     [[ -z $ORIGIN_PID ]] || kill "$ORIGIN_PID" 2>/dev/null || true
@@ -69,9 +74,13 @@ PYCOMPARE
     diff -u "$ROOT/results/host-routes-before.json" "$ROOT/results/host-routes-after.json"
     ! ip netns list | grep -Eq "^(${CLIENT}|${SERVER}|${NS})( |$)"
     ! ss -ltnH "sport = :$API_RELAY_PORT" | grep -q .
-    echo 'PASS cleanup: no lab namespaces/API listener; host addresses and routes unchanged'
+    ! ss -ltnH "sport = :$CLI_RELAY_PORT" | grep -q .
+    echo 'PASS cleanup: no lab namespaces/API/CLI listeners; host addresses and routes unchanged'
 }
 trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 ip link add "$IN_IF" type veth peer name eth0 netns "$CLIENT"
 ip link add "$OUT_IF" type veth peer name eth0 netns "$SERVER"
 ip -n "$CLIENT" link set lo up
@@ -121,6 +130,31 @@ for attempt in $(seq 1 60); do
 done
 python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["status"] == "ok"' "$ROOT/results/api.json"
 echo 'PASS API: authenticated HTTPS request from host namespace'
+if [[ $RUN_MODE == 1 ]]; then
+    setsid socat "TCP4-LISTEN:$CLI_RELAY_PORT,bind=127.0.0.1,reuseaddr,fork" \
+        "EXEC:ip netns exec $NS socat STDIO TCP4\:127.0.0.1\:50000" \
+        > "$ROOT/results/cli-relay.log" 2>&1 &
+    CLI_RELAY_PID=$!
+    for attempt in $(seq 1 50); do
+        ss -ltnH "sport = :$CLI_RELAY_PORT" | grep -q . && break
+        kill -0 "$CLI_RELAY_PID"
+        sleep 0.1
+    done
+    ss -ltnH "sport = :$CLI_RELAY_PORT" | grep -q .
+    API_KEY=$(<"$ROOT/config/api.key")
+    echo
+    echo 'Smithproxy interactive lab READY'
+    echo "CLI:    nc 127.0.0.1 $CLI_RELAY_PORT"
+    echo "API:    https://localhost:$API_RELAY_PORT"
+    echo "API key: $API_KEY"
+    echo "CA cert: $ROOT/config/certs/ca-cert.pem"
+    echo "Example: curl --noproxy '*' --cacert '$ROOT/config/certs/ca-cert.pem' -H 'X-API-Key: $API_KEY' 'https://localhost:$API_RELAY_PORT/api/status/ping'"
+    echo "Client namespace: $CLIENT (HTTP origin 198.18.20.2:8080; TLS origin origin.runner.lab:443)"
+    echo 'Press Ctrl-C to stop Smithproxy and remove the lab.'
+    while kill -0 "$RUNNER_PID" 2>/dev/null; do sleep 1; done
+    wait "$RUNNER_PID"
+    exit $?
+fi
 if [[ ${EMPTY_NEIGHBOR_STATE_TEST:-0} == 1 ]]; then
     ! grep -q 'json.exception.parse_error' "$ROOT/data/proxy-console.log"
     echo 'PASS empty neighbor state: no JSON parse error'
