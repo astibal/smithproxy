@@ -2,8 +2,8 @@
 
 #include "config_cli2.hpp"
 
-#include <ext/libcli2/cli.hpp>
-#include <ext/libcli2/fd_transport.hpp>
+#include <service/libcli/cli.hpp>
+#include <service/libcli/fd_transport.hpp>
 
 #include <functional>
 #include <string>

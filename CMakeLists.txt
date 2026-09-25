@@ -255,6 +255,16 @@ configure_file(
 message(STATUS "compiler flags: ${CMAKE_CXX_FLAGS}")
 message(STATUS "compiler debug flags: ${CMAKE_CXX_FLAGS_DEBUG}")
 
+add_library(smithproxy_libcli STATIC
+        src/service/libcli/cli.cpp
+        src/service/libcli/fd_transport.cpp
+        src/service/libcli/line_editor.cpp
+)
+target_include_directories(smithproxy_libcli PUBLIC
+        ${PROJECT_SOURCE_DIR}/src
+        ${PROJECT_SOURCE_DIR}/src/service/libcli
+)
+
 add_executable(smithproxy
 
         src/main.cpp
@@ -348,8 +358,6 @@ add_executable(smithproxy
 
         src/ext/libcidr/cidr.cpp
         src/ext/nltemplate/nltemplate.cpp
-        src/ext/libcli2/cli.cpp
-        src/ext/libcli2/fd_transport.cpp
         src/service/cmd/config_cli2.cpp
         src/service/cmd/config_cli2_schema.cpp
         src/service/cmd/config_cli2_smithproxy.cpp
@@ -427,9 +435,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/ext/hpack/hpack.hpp
                 src/ext/hpack/hpack_tests.cpp
 
-                src/ext/libcli2/cli.cpp
-                src/ext/libcli2/fd_transport.cpp
-                src/ext/libcli2/fd_transport_tests.cpp
+                src/service/libcli/tests/cli_tests.cpp
+                src/service/libcli/tests/fd_transport_tests.cpp
                 src/service/cmd/config_cli2.cpp
                 src/service/cmd/config_cli2_tests.cpp
                 src/service/cmd/config_cli2_schema.cpp
@@ -469,7 +476,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/policy/addrobj.cpp
         )
 
-        target_link_libraries(sx_gtests gtest gtest_main socle_lib pthread crypto ssl crypt)
+        target_link_libraries(sx_gtests gtest gtest_main smithproxy_libcli socle_lib pthread crypto ssl crypt)
         if (LIBCONFIGPP_FOUND)
             target_link_libraries(sx_gtests ${LIBCONFIGPP_LIBRARIES})
         endif()
@@ -495,7 +502,7 @@ if((CMAKE_SYSTEM_PROCESSOR MATCHES "arm") OR (CMAKE_SYSTEM_PROCESSOR STREQUAL "a
     target_link_libraries (smithdc atomic)
 endif()
 
-target_link_libraries(smithproxy socle_lib pthread ssl crypto rt ${UNWIND_LIB})
+target_link_libraries(smithproxy smithproxy_libcli socle_lib pthread ssl crypto rt ${UNWIND_LIB})
 
 if("${USE_LMHPP}" STREQUAL "Y")
     target_link_libraries(smithproxy microhttpd)

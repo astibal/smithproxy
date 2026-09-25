@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ext/libcli2/cli.hpp>
+#include <service/libcli/cli.hpp>
 
 #include <libconfig.h++>
 
