@@ -184,11 +184,11 @@ std::size_t DNSFactory::generate_dns_request(unsigned short id, buffer& b, std::
     unsigned char* trailer = &queries[hostname.size()];
     trailer[0] = 0x00;
 
-    auto* typ = (unsigned short*)&trailer[1];
-    *typ = htons(t);
+    const uint16_t typ = htons(t);
+    ::memcpy(&trailer[1], &typ, sizeof(typ));
 
-    auto* clas = (unsigned short*)&trailer[3];
-    *clas = htons(0x0001);
+    const uint16_t clas = htons(0x0001);
+    ::memcpy(&trailer[3], &clas, sizeof(clas));
 
     return b.size();
 }

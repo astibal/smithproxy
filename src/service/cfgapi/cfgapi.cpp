@@ -48,7 +48,7 @@
 
 
 #include <service/cfgapi/cfgapi.hpp>
-#include <service/cmd/clistate.hpp>
+#include <service/cfgapi/cfgvalue.hpp>
 #include <log/logger.hpp>
 
 #include <policy/policy.hpp>
@@ -3585,9 +3585,11 @@ int CfgFactory::save_address_objects(Config& ex) const {
 
             auto cidr_ptr = std::dynamic_pointer_cast<CidrAddress>(obj->value());
             if(cidr_ptr) {
-                const char* addr = cidr_to_str(cidr_ptr->cidr());
-                s_cidr =  addr;
-                delete[] addr;
+                char* addr = cidr_to_str(cidr_ptr->cidr());
+                if (addr) {
+                    s_cidr = addr;
+                    ::free(addr);
+                }
             }
 
             n_saved++;
@@ -4041,9 +4043,9 @@ bool CfgFactory::new_tls_profile(Setting& ex, std::string const& name) const {
         item.add("left_disable_reuse", Setting::TypeBoolean) = false;
         item.add("right_disable_reuse", Setting::TypeBoolean) = false;
         item.add("sslkeylog", Setting::TypeBoolean) = false;
-        item.add("log", Setting::TypeString) = false;
+        item.add("alerts", Setting::TypeString) = "all";
     }
-    catch(libconfig::SettingNameException const& e) {
+    catch(libconfig::SettingException const& e) {
         _war("cannot add new section %s: %s", name.c_str(), e.what());
         return false;
     }

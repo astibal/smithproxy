@@ -39,7 +39,10 @@
 
 
 #include <cstdlib>
+#include <cstdarg>
+#include <cstdio>
 #include <ctime>
+#include <memory>
 #include <sys/ioctl.h>
 #include <linux/sockios.h>
 #include <unistd.h>
@@ -51,7 +54,6 @@
 
 #include <service/core/smithproxy.hpp>
 #include <service/core/sessionlist.hpp>
-#include <service/cmd/cmdserver.hpp>
 #include <service/cmd/diag/diag_cmds.hpp>
 #include <service/httpd/httpd.hpp>
 #include <service/cfgapi/cfgapi.hpp>
@@ -74,8 +76,89 @@
 
 #include <varmem.hpp>
 
+namespace {
+
+constexpr int CLI_OK = 0;
+constexpr int CLI_ERROR = -1;
+constexpr int PRIVILEGE_UNPRIVILEGED = 0;
+constexpr int PRIVILEGE_PRIVILEGED = 15;
+constexpr int MODE_EXEC = 0;
+
+struct DiagCli {
+    libcli2::Context& context;
+};
+
+using DiagCallback = int (*)(DiagCli*, const char*, char*[], int);
+
+struct DiagNode {
+    std::string path;
+};
+
+struct DiagRegistry {
+    libcli2::Cli& cli;
+    std::vector<std::unique_ptr<DiagNode>> nodes;
+};
+
+int cli_print(DiagCli* cli, const char* format, ...) {
+    va_list arguments;
+    va_start(arguments, format);
+    va_list copy;
+    va_copy(copy, arguments);
+    const int needed = std::vsnprintf(nullptr, 0, format, copy);
+    va_end(copy);
+    if (needed < 0) { va_end(arguments); return CLI_ERROR; }
+    std::vector<char> buffer(static_cast<std::size_t>(needed) + 1);
+    std::vsnprintf(buffer.data(), buffer.size(), format, arguments);
+    va_end(arguments);
+    cli->context.print(std::string_view(buffer.data(), static_cast<std::size_t>(needed)));
+    return CLI_OK;
+}
+
+void debug_cli_params(DiagCli*, const char*, char*[], int) {}
+void debug_cli_params(DiagCli*, const char*, const std::vector<std::string>&) {}
+
+DiagNode* diag_register_command(DiagRegistry* registry, DiagNode* parent, const char* name,
+                               DiagCallback callback, int privilege, int mode, const char* help) {
+    auto node = std::make_unique<DiagNode>();
+    node->path = parent ? parent->path + " " + name : name;
+    auto* result = node.get();
+    registry->nodes.push_back(std::move(node));
+    auto& command = registry->cli.command(result->path).reset_definition().help(help ? help : "")
+        .available_if([privilege, mode](const libcli2::Context& context) {
+            return context.privilege >= privilege && (mode != MODE_EXEC || context.mode == "0");
+        });
+    if (callback) {
+        command.argument({"arguments", "Optional diagnostic arguments", false, true})
+            .handler([callback, path = result->path](libcli2::Context& context, const libcli2::Invocation& invocation) {
+                std::vector<char*> arguments;
+                arguments.reserve(invocation.arguments.size());
+                for (const auto& argument : invocation.arguments)
+                    arguments.push_back(const_cast<char*>(argument.c_str()));
+                DiagCli cli{context};
+                return callback(&cli, path.c_str(), arguments.data(), static_cast<int>(arguments.size()));
+            });
+    }
+    return result;
+}
+
+}  // namespace
+
+enum session_list_filter_flags {
+    SL_NONE = 0x0000,
+    SL_IO_OSBUF_NZ = 0x0001,
+    SL_IO_EMPTY = 0x0002,
+    SL_IO_ALL = 0x0008,
+    SL_ACTIVE = 0x0010,
+    SL_NO_NAMES = 0x0020,
+    SL_IPS = 0x0040,
+    SL_TLS_DETAILS = 0x0100,
+};
+
+int cli_diag_proxy_session_list_extra(DiagCli* cli, const char* command,
+                                      const std::vector<std::string>& args, int sl_flags);
+
 #ifndef USE_OPENSSL11
-int cli_diag_ssl_memcheck_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_ssl_memcheck_list(DiagCli *cli, const char *command, char *argv[], int argc) {
 
     std::string out;
     BIO* b_out = BIO_new_string(&out);
@@ -88,14 +171,14 @@ int cli_diag_ssl_memcheck_list(struct cli_def *cli, const char *command, char *a
 }
 
 
-int cli_diag_ssl_memcheck_enable(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_ssl_memcheck_enable(DiagCli *cli, const char *command, char *argv[], int argc) {
 
     CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ENABLE);
 
     return CLI_OK;
 }
 
-int cli_diag_ssl_memcheck_disable(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_ssl_memcheck_disable(DiagCli *cli, const char *command, char *argv[], int argc) {
 
     CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_DISABLE);
 
@@ -103,13 +186,17 @@ int cli_diag_ssl_memcheck_disable(struct cli_def *cli, const char *command, char
 }
 #endif
 
-int cli_diag_ssl_cache_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_ssl_cache_stats(DiagCli *cli, const char *command, char *argv[], int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
 
 
     SSLFactory* store = SSLCom::factory();
+    if (!store) {
+        cli_print(cli, "TLS certificate store unavailable");
+        return CLI_OK;
+    }
 
     auto print_cache_stats = [&](auto& cache) {
 
@@ -140,11 +227,15 @@ int cli_diag_ssl_cache_stats(struct cli_def *cli, const char *command, char *arg
 }
 
 
-int cli_diag_ssl_cache_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_ssl_cache_list(DiagCli *cli, const char *command, char *argv[], int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
     auto* store = SSLCom::factory();
+    if (!store) {
+        cli_print(cli, "TLS certificate store unavailable");
+        return CLI_OK;
+    }
     bool print_refs = false;
 
     if(argc > 0) {
@@ -162,6 +253,10 @@ int cli_diag_ssl_cache_list(struct cli_def *cli, const char *command, char *argv
         auto lc_ = std::scoped_lock(store->lock());
 
         for (auto const& [ fqdn, inner_cache ]: cache.cache()) {
+            if (!inner_cache || !inner_cache->ptr()) {
+                out << string_format("    %s (empty cache entry)\n", fqdn.c_str());
+                continue;
+            }
             auto chain = inner_cache->ptr()->entry();
 
             out << string_format("    %s\n", fqdn.c_str());
@@ -188,11 +283,15 @@ int cli_diag_ssl_cache_list(struct cli_def *cli, const char *command, char *argv
     return CLI_OK;
 }
 
-int cli_diag_ssl_cache_print(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_ssl_cache_print(DiagCli *cli, const char *command, char *argv[], int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
     SSLFactory *store = SSLCom::factory();
+    if (!store) {
+        cli_print(cli, "TLS certificate store unavailable");
+        return CLI_OK;
+    }
     bool print_refs = false;
 
     if (argc > 0) {
@@ -210,6 +309,10 @@ int cli_diag_ssl_cache_print(struct cli_def *cli, const char *command, char *arg
         auto lc_ = std::scoped_lock(store->lock());
 
         for (auto const& [ fqdn, inner_cache ]: cache.cache()) {
+            if (!inner_cache || !inner_cache->ptr()) {
+                out << "\n--------: " << fqdn << " (empty cache entry)\n";
+                continue;
+            }
             auto chain = inner_cache->ptr()->entry();
 
             std::regex reg("\\+san:");
@@ -227,7 +330,8 @@ int cli_diag_ssl_cache_print(struct cli_def *cli, const char *command, char *arg
                 out << string_format("        : access_counter=%d, age=%d\n", counter, age);
             }
 
-            out << SSLFactory::print_cert(chain.chain.cert);
+            if (chain.chain.cert) out << SSLFactory::print_cert(chain.chain.cert);
+            else out << "certificate unavailable";
             out << "\n--------";
 
             out << "\n\n";
@@ -244,11 +348,15 @@ int cli_diag_ssl_cache_print(struct cli_def *cli, const char *command, char *arg
 }
 
 
-int cli_diag_ssl_cache_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_ssl_cache_clear(DiagCli *cli, const char *command, char *argv[], int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
     auto* store = SSLCom::factory();
+    if (!store) {
+        cli_print(cli, "TLS certificate store unavailable");
+        return CLI_OK;
+    }
 
 
 
@@ -284,7 +392,7 @@ int cli_diag_ssl_cache_clear(struct cli_def *cli, const char *command, char *arg
     return CLI_OK;
 }
 
-int cli_diag_ssl_wl_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_ssl_wl_list(DiagCli *cli, const char *command, char *argv[], int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
@@ -295,7 +403,10 @@ int cli_diag_ssl_wl_list(struct cli_def *cli, const char *command, char *argv[],
 
     for(auto const& [label, entry]: MitmProxy::whitelist_verify().cache()) {
         out += "\n\t" + label;
-
+        if (!entry || !entry->ptr()) {
+            out += " (empty cache entry)";
+            continue;
+        }
         long ttl = entry->ptr()->expired_at() - ::time(nullptr);
 
         out += string_format(" ttl: %d", ttl);
@@ -308,7 +419,7 @@ int cli_diag_ssl_wl_list(struct cli_def *cli, const char *command, char *argv[],
     return CLI_OK;
 }
 
-int cli_diag_ssl_wl_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_ssl_wl_clear(DiagCli *cli, const char *command, char *argv[], int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
@@ -325,7 +436,7 @@ void whitelist_add_entry(std::string const& key, unsigned int timeout) {
     MitmProxy::whitelist_verify().set(key, new MitmProxy::whitelist_verify_entry_t(v, timeout));
 }
 
-int cli_diag_ssl_wl_insert_fingerprint(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_ssl_wl_insert_fingerprint(DiagCli *cli, const char *command, char *argv[], int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
@@ -334,6 +445,10 @@ int cli_diag_ssl_wl_insert_fingerprint(struct cli_def *cli, const char *command,
 
     auto args = args_to_vec(argv,argc);
     if(not args.empty()) { fingerprint = args[0]; }
+    if (fingerprint.empty()) {
+        cli_print(cli, "Usage: diag tls whitelist insert_fingerprint <fingerprint> [timeout]");
+        return CLI_ERROR;
+    }
     if(args.size() > 1) { timeout = safe_val(args[1], 600); }
 
     whitelist_add_entry(fingerprint, timeout);
@@ -341,7 +456,7 @@ int cli_diag_ssl_wl_insert_fingerprint(struct cli_def *cli, const char *command,
     return CLI_OK;
 }
 
-int cli_diag_ssl_wl_insert_l4(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_ssl_wl_insert_l4(DiagCli *cli, const char *command, char *argv[], int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
@@ -350,6 +465,10 @@ int cli_diag_ssl_wl_insert_l4(struct cli_def *cli, const char *command, char *ar
 
     auto args = args_to_vec(argv,argc);
     if(not args.empty()) { l4key = args[0]; }
+    if (l4key.empty()) {
+        cli_print(cli, "Usage: diag tls whitelist insert_l4 <sip:dip:dport> [timeout]");
+        return CLI_ERROR;
+    }
     if(args.size() > 1) { timeout = safe_val(args[1], 600); }
 
     whitelist_add_entry(l4key, timeout);
@@ -358,7 +477,7 @@ int cli_diag_ssl_wl_insert_l4(struct cli_def *cli, const char *command, char *ar
 }
 
 
-int cli_diag_ssl_wl_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_ssl_wl_stats(DiagCli *cli, const char *command, char *argv[], int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
@@ -381,7 +500,7 @@ int cli_diag_ssl_wl_stats(struct cli_def *cli, const char *command, char *argv[]
     return CLI_OK;
 }
 
-int cli_diag_ssl_crl_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_ssl_crl_list(DiagCli *cli, const char *command, char *argv[], int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
@@ -417,7 +536,7 @@ int cli_diag_ssl_crl_list(struct cli_def *cli, const char *command, char *argv[]
     return CLI_OK;
 }
 
-int cli_diag_ssl_crl_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_ssl_crl_stats(DiagCli *cli, const char *command, char *argv[], int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
@@ -441,7 +560,7 @@ int cli_diag_ssl_crl_stats(struct cli_def *cli, const char *command, char *argv[
 
     return CLI_OK;
 }
-int cli_diag_ssl_verify_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_ssl_verify_clear(DiagCli *cli, const char *command, char *argv[], int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
@@ -493,7 +612,7 @@ int cli_diag_ssl_verify_clear(struct cli_def *cli, const char *command, char *ar
 }
 
 
-int cli_diag_ssl_verify_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_ssl_verify_list(DiagCli *cli, const char *command, char *argv[], int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
@@ -529,7 +648,7 @@ int cli_diag_ssl_verify_list(struct cli_def *cli, const char *command, char *arg
     return CLI_OK;
 }
 
-int cli_diag_ssl_verify_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_ssl_verify_stats(DiagCli *cli, const char *command, char *argv[], int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
@@ -556,7 +675,7 @@ int cli_diag_ssl_verify_stats(struct cli_def *cli, const char *command, char *ar
 
 
 
-int cli_diag_ssl_ticket_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_ssl_ticket_list(DiagCli *cli, const char *command, char *argv[], int argc) {
 
 
     auto print_session_ticket = [](SSL_SESSION const* ses, std::string_view label, std::stringstream& out, int lev) {
@@ -629,7 +748,7 @@ int cli_diag_ssl_ticket_list(struct cli_def *cli, const char *command, char *arg
 
         #ifdef USE_OPENSSL11
 
-        if (session_keys->ptr()) {
+        if (session_keys && session_keys->ptr() && session_keys->ptr()->ptr) {
 
             bool printed = false;
 
@@ -672,7 +791,7 @@ int cli_diag_ssl_ticket_list(struct cli_def *cli, const char *command, char *arg
     return CLI_OK;
 }
 
-int cli_diag_ssl_ticket_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_ssl_ticket_stats(DiagCli *cli, const char *command, char *argv[], int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
@@ -700,7 +819,7 @@ int cli_diag_ssl_ticket_stats(struct cli_def *cli, const char *command, char *ar
     return CLI_OK;
 }
 
-int cli_diag_ssl_ticket_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_ssl_ticket_clear(DiagCli *cli, const char *command, char *argv[], int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
@@ -725,7 +844,7 @@ int cli_diag_ssl_ticket_clear(struct cli_def *cli, const char *command, char *ar
 }
 
 
-int cli_diag_ssl_ca_reload(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_ssl_ca_reload(DiagCli *cli, const char *command, char *argv[], int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
@@ -735,7 +854,7 @@ int cli_diag_ssl_ca_reload(struct cli_def *cli, const char *command, char *argv[
 }
 
 
-int cli_diag_dns_cache_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_dns_cache_list(DiagCli *cli, const char *command, char *argv[], int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
@@ -762,7 +881,7 @@ int cli_diag_dns_cache_list(struct cli_def *cli, const char *command, char *argv
     return CLI_OK;
 }
 
-int cli_diag_dns_cache_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_dns_cache_stats(DiagCli *cli, const char *command, char *argv[], int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
@@ -785,7 +904,7 @@ int cli_diag_dns_cache_stats(struct cli_def *cli, const char *command, char *arg
     return CLI_OK;
 }
 
-int cli_diag_dns_cache_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_dns_cache_clear(DiagCli *cli, const char *command, char *argv[], int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
@@ -799,7 +918,7 @@ int cli_diag_dns_cache_clear(struct cli_def *cli, const char *command, char *arg
     return CLI_OK;
 }
 
-int cli_diag_dns_domain_cache_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_dns_domain_cache_list(DiagCli *cli, const char *command, char *argv[], int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
@@ -813,6 +932,10 @@ int cli_diag_dns_domain_cache_list(struct cli_def *cli, const char *command, cha
 
             std::string str;
 
+            if (!cache_main || !cache_main->ptr()) {
+                out << string_format("\n\t%s: \t(empty cache entry)", domain_main.c_str());
+                continue;
+            }
             for (auto const& [ domain, cache]: cache_main->ptr()->cache()) {
                 str += " " + domain;
             }
@@ -826,7 +949,7 @@ int cli_diag_dns_domain_cache_list(struct cli_def *cli, const char *command, cha
     return CLI_OK;
 }
 
-int cli_diag_dns_domain_cache_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_dns_domain_cache_clear(DiagCli *cli, const char *command, char *argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
 
     cli_print(cli, "\n Clearing domain cache:");
@@ -843,7 +966,7 @@ int cli_diag_dns_domain_cache_clear(struct cli_def *cli, const char *command, ch
 
 
 
-int cli_diag_identity_ip_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_identity_ip_list(DiagCli *cli, const char *command, char *argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
 
     cli_print(cli, "\nIPv4 identities:");
@@ -890,7 +1013,7 @@ int cli_diag_identity_ip_list(struct cli_def *cli, const char *command, char *ar
     return CLI_OK;
 }
 
-int cli_diag_identity_ip_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_identity_ip_clear(DiagCli *cli, const char *command, char *argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
 
     cli_print(cli, "\nClearing all identities:");
@@ -900,34 +1023,46 @@ int cli_diag_identity_ip_clear(struct cli_def *cli, const char *command, char *a
         auto lc_ = std::scoped_lock(AuthFactory::get_ip4_lock());
 
         AuthFactory::get_ip4_map().clear();
-        AuthFactory::get().shm_ip4_map.acquire();
-        AuthFactory::get().shm_ip4_map.map_entries().clear();
-        AuthFactory::get().shm_ip4_map.entries().clear();
-        AuthFactory::get().shm_ip4_map.save(true);
-
-
-        AuthFactory::get().shm_ip4_map.seen_version(0);
-        AuthFactory::get().shm_ip4_map.release();
+        auto& shm_map = AuthFactory::get().shm_ip4_map;
+        if (shm_map.attached()) {
+            if (shm_map.acquire() == 0) {
+                shm_map.map_entries().clear();
+                shm_map.entries().clear();
+                shm_map.save(true);
+                shm_map.seen_version(0);
+                shm_map.release();
+            } else {
+                cli_print(cli, "IPv4 identity shared memory is busy; local identities were cleared only");
+            }
+        } else {
+            cli_print(cli, "IPv4 identity shared memory is not active; cleared local identities only");
+        }
     }
 
     {
         auto lc_ = std::scoped_lock(AuthFactory::get_ip6_lock());
 
         AuthFactory::get_ip6_map().clear();
-        AuthFactory::get().shm_ip6_map.acquire();
-        AuthFactory::get().shm_ip6_map.map_entries().clear();
-        AuthFactory::get().shm_ip6_map.entries().clear();
-        AuthFactory::get().shm_ip6_map.save(true);
-
-
-        AuthFactory::get().shm_ip6_map.seen_version(0);
-        AuthFactory::get().shm_ip6_map.release();
+        auto& shm_map = AuthFactory::get().shm_ip6_map;
+        if (shm_map.attached()) {
+            if (shm_map.acquire() == 0) {
+                shm_map.map_entries().clear();
+                shm_map.entries().clear();
+                shm_map.save(true);
+                shm_map.seen_version(0);
+                shm_map.release();
+            } else {
+                cli_print(cli, "IPv6 identity shared memory is busy; local identities were cleared only");
+            }
+        } else {
+            cli_print(cli, "IPv6 identity shared memory is not active; cleared local identities only");
+        }
     }
 
     return CLI_OK;
 }
 
-int cli_diag_writer_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_writer_stats(DiagCli *cli, const char *command, char *argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
 
     auto wrt = socle::threadedPoolFileWriter::instance();
@@ -957,7 +1092,7 @@ int cli_diag_writer_stats(struct cli_def *cli, const char *command, char *argv[]
     return CLI_OK;
 }
 
-int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_mem_buffers_stats(DiagCli *cli, const char *command, char *argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
 
     cli_print(cli,"Memory buffers stats: ");
@@ -1061,13 +1196,12 @@ int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *a
         }
     }
 
-    buffer::alloc_map_unlock();
 #endif
     return CLI_OK;
 }
 
 
-int cli_diag_mem_udp_stats(struct cli_def *cli, const char *command, char **argv, int argc) {
+int cli_diag_mem_udp_stats(DiagCli *cli, const char *command, char **argv, int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
@@ -1091,7 +1225,7 @@ int cli_diag_mem_udp_stats(struct cli_def *cli, const char *command, char **argv
 
 }
 
-int cli_diag_mem_trace_mark (struct cli_def *cli, const char *command, char **argv, int argc) {
+int cli_diag_mem_trace_mark (DiagCli *cli, const char *command, char **argv, int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
@@ -1130,7 +1264,7 @@ using  map_malloc_h = std::map<K, V, std::less<>, mp::malloc::allocator<std::pai
 #endif
 
 
-int cli_diag_mem_trace_list (struct cli_def *cli, const char *command, char **argv, int argc) {
+int cli_diag_mem_trace_list (DiagCli *cli, const char *command, char **argv, int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
@@ -1238,7 +1372,7 @@ int cli_diag_mem_trace_list (struct cli_def *cli, const char *command, char **ar
 
 
 
-int cli_diag_proxy_session_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_proxy_session_list(DiagCli *cli, const char *command, char *argv[], int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
@@ -1267,14 +1401,14 @@ int cli_diag_proxy_session_list(struct cli_def *cli, const char *command, char *
 }
 
 
-int cli_diag_proxy_tls_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_proxy_tls_list(DiagCli *cli, const char *command, char *argv[], int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
     return cli_diag_proxy_session_list_extra(cli, command, args_to_vec(argv, argc), SL_TLS_DETAILS);
 }
 
-int cli_diag_proxy_list_active(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_proxy_list_active(DiagCli *cli, const char *command, char *argv[], int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
@@ -1282,7 +1416,7 @@ int cli_diag_proxy_list_active(struct cli_def *cli, const char *command, char *a
 }
 
 
-int cli_diag_proxy_session_io_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_proxy_session_io_list(DiagCli *cli, const char *command, char *argv[], int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
@@ -1293,7 +1427,7 @@ int cli_diag_proxy_session_io_list(struct cli_def *cli, const char *command, cha
     return cli_diag_proxy_session_list_extra(cli, command, args_to_vec(argv, argc), f);
 }
 
-int cli_diag_proxy_list_nonames(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_proxy_list_nonames(DiagCli *cli, const char *command, char *argv[], int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
@@ -1303,8 +1437,8 @@ int cli_diag_proxy_list_nonames(struct cli_def *cli, const char *command, char *
 
 void print_queue_stats(std::stringstream &ss, int verbosity, MitmHostCX *cx, const char *sm,
                              const char *bg) {
-    int in_pending;
-    int out_pending;
+    int in_pending = 0;
+    int out_pending = 0;
 
     buffer::size_type in_buf;
     buffer::size_type out_buf;
@@ -1312,9 +1446,14 @@ void print_queue_stats(std::stringstream &ss, int verbosity, MitmHostCX *cx, con
     buffer::size_type in_cap;
     buffer::size_type out_cap;
 
-    ::ioctl(cx->socket(), SIOCINQ, &in_pending);
-    ::ioctl(cx->socket(), SIOCOUTQ, &out_pending);
-
+    if (!cx || !cx->readbuf() || !cx->writebuf()) {
+        ss << "     " << sm << "_buffers: unavailable\n";
+        return;
+    }
+    if (cx->real_socket() > 0) {
+        ::ioctl(cx->socket(), SIOCINQ, &in_pending);
+        ::ioctl(cx->socket(), SIOCOUTQ, &out_pending);
+    }
     in_buf = cx->readbuf()->size();
     in_cap  = cx->readbuf()->capacity();
 
@@ -1352,9 +1491,9 @@ auto get_io_info(MitmHostCX* lf, MitmHostCX* rg, int sl_flags) {
             ::ioctl(lf->socket(), SIOCINQ, &l_in_pending);
             ::ioctl(lf->socket(), SIOCOUTQ, &l_out_pending);
         }
-        if (rg && rg->real_socket() > 0 && lf) {
-            ::ioctl(lf->socket(), SIOCINQ, &r_in_pending);
-            ::ioctl(lf->socket(), SIOCOUTQ, &r_out_pending);
+        if (rg && rg->real_socket() > 0) {
+            ::ioctl(rg->socket(), SIOCINQ, &r_in_pending);
+            ::ioctl(rg->socket(), SIOCOUTQ, &r_out_pending);
         }
 
         suffix += " i/o: ";
@@ -1533,7 +1672,10 @@ auto get_tls_info(MitmHostCX const* lf, MitmHostCX const* rg, int sl_flags, int 
                     tls_ss << "\n    sct: " << scts_len << " entries";
 
                     if (scts_len > 0 and verbosity > iDIA) {
-                        const CTLOG_STORE *log_store = SSL_CTX_get0_ctlog_store(SSLFactory::factory().default_tls_client_cx());
+                        auto* default_context = SSLFactory::factory().default_tls_client_cx();
+                        const CTLOG_STORE *log_store = default_context
+                                                           ? SSL_CTX_get0_ctlog_store(default_context)
+                                                           : nullptr;
 
                         for (int i = 0; i < scts_len; i++) {
                             auto sct = sk_SCT_value(scts, i);
@@ -1647,10 +1789,13 @@ auto get_more_info(MitmProxy const* curr_proxy, MitmHostCX* lf, MitmHostCX* rg, 
             if (lf->engine_ctx.signature) {
 
                 auto mysig = std::dynamic_pointer_cast<MyDuplexFlowMatch>(lf->engine_ctx.signature);
-
-                info_ss << "\n    L7_engine: " << mysig->sig_engine;
-                info_ss << "\n    L7_signature: " << mysig->name() << ", group: "
-                        << mysig->sig_group;
+                if (mysig) {
+                    info_ss << "\n    L7_engine: " << mysig->sig_engine;
+                    info_ss << "\n    L7_signature: " << mysig->name() << ", group: "
+                            << mysig->sig_group;
+                } else {
+                    info_ss << "\n    L7_engine: unknown signature type";
+                }
             } else {
                 info_ss << "\n    L7_engine: none";
             }
@@ -1763,7 +1908,7 @@ auto get_more_info(MitmProxy const* curr_proxy, MitmHostCX* lf, MitmHostCX* rg, 
 }
 
 
-int cli_diag_proxy_session_list_extra (struct cli_def *cli, const char *command, std::vector<std::string> const &args,
+int cli_diag_proxy_session_list_extra (DiagCli *cli, const char *command, std::vector<std::string> const &args,
                                        int sl_flags) {
 
     debug_cli_params(cli, command, args);
@@ -1867,7 +2012,7 @@ int cli_diag_proxy_session_list_extra (struct cli_def *cli, const char *command,
 
 }
 
-int cli_diag_proxy_session_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_proxy_session_clear(DiagCli *cli, const char *command, char *argv[], int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
@@ -1877,7 +2022,7 @@ int cli_diag_proxy_session_clear(struct cli_def *cli, const char *command, char 
     return CLI_OK;
 }
 
-int cli_diag_proxy_policy_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_proxy_policy_list(DiagCli *cli, const char *command, char *argv[], int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
@@ -1885,7 +2030,8 @@ int cli_diag_proxy_policy_list(struct cli_def *cli, const char *command, char *a
     int verbosity = 6;
 
     if(argc > 0) {
-        if(argv[0][0] == '?') {
+        const std::string_view first = argv[0] ? argv[0] : "";
+        if(!first.empty() && first.front() == '?') {
 
             cli_print(cli,"specify verbosity, default is 6s");
             return CLI_OK;
@@ -1902,6 +2048,10 @@ int cli_diag_proxy_policy_list(struct cli_def *cli, const char *command, char *a
         std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
 
         for (auto const& it: CfgFactory::get()->db_policy_list) {
+            if (!it) {
+                out << "<empty policy entry>\n\n";
+                continue;
+            }
             out << it->to_string(verbosity);
             out << "\n\n";
         }
@@ -1912,7 +2062,7 @@ int cli_diag_proxy_policy_list(struct cli_def *cli, const char *command, char *a
 }
 
 
-int cli_diag_sig_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_sig_list(DiagCli *cli, const char *command, char *argv[], int argc) {
 
     debug_cli_params(cli, command, argv, argc);
 
@@ -1930,6 +2080,10 @@ int cli_diag_sig_list(struct cli_def *cli, const char *command, char *argv[], in
 
     for(auto const& list: lists)
         for(auto const& [ _, sig]: *list) {
+            if (!sig) {
+                ss << "<empty signature entry>\n\n";
+                continue;
+            }
 
             // print refcnt one less, due to this shared_ptr serving only printing purposes
             ss << "Name: '" << sig->name() << "' refcnt: " << sig.use_count() - 1 << "\n";
@@ -1955,7 +2109,7 @@ int cli_diag_sig_list(struct cli_def *cli, const char *command, char *argv[], in
 }
 
 
-int cli_diag_worker_proxy_list(struct cli_def *cli, [[maybe_unused]] const char *command, [[maybe_unused]] char *argv[], [[maybe_unused]] int argc) {
+int cli_diag_worker_proxy_list(DiagCli *cli, [[maybe_unused]] const char *command, [[maybe_unused]] char *argv[], [[maybe_unused]] int argc) {
 
     int verbosity = iINF;
     if(argc > 0) {
@@ -1969,6 +2123,10 @@ int cli_diag_worker_proxy_list(struct cli_def *cli, [[maybe_unused]] const char 
 
         std::stringstream out;
 
+        if (!wrk.first || !wrk.second) {
+            cli_print(cli, "        `- worker[%zu]: unavailable", index);
+            return false;
+        }
         if(verbosity > iINF) {
             out << string_format("        `- worker[%zu]: %s", index, wrk.second->str().c_str());
             out << ", thread " << std::hex << wrk.first->get_id();
@@ -1997,6 +2155,7 @@ int cli_diag_worker_proxy_list(struct cli_def *cli, [[maybe_unused]] const char 
             // skim proxies for speed stats
             auto lc_ = std::scoped_lock(wrk.second->proxy_lock());
             for (auto& [ proxy, thr ]: proxies) {
+                if (!proxy) continue;
                 up += proxy->stats().mtr_up.get()*8;
                 down += proxy->stats().mtr_down.get()*8;
             }
@@ -2013,6 +2172,10 @@ int cli_diag_worker_proxy_list(struct cli_def *cli, [[maybe_unused]] const char 
 
                 for (std::size_t p_i = 0; p_i < proxies.size(); ++p_i) {
                     auto const& proxy = proxies.at(p_i).first;
+                    if (!proxy) {
+                        out << string_format("\n          `- proxy[%d]: unavailable", p_i);
+                        continue;
+                    }
                     auto threaded =  ( proxies.at(p_i).second != nullptr );
                     auto in_progress = ( proxy->state().in_progress() > 0 );
 
@@ -2068,6 +2231,10 @@ int cli_diag_worker_proxy_list(struct cli_def *cli, [[maybe_unused]] const char 
         for (std::size_t idx = 0; idx < listener.size(); ++idx) {
 
             auto const& acceptor = listener.at(idx);
+            if (!acceptor) {
+                cli_print(cli, "    acceptor[%zu]: unavailable", idx);
+                continue;
+            }
             std::string thread_id;
 
             if(thread_len_ok) {
@@ -2110,13 +2277,14 @@ int cli_diag_worker_proxy_list(struct cli_def *cli, [[maybe_unused]] const char 
     list_acceptor("== dns redirect receiver", sx.redir_udp_proxies, sx.redir_udp_threads, verbosity);
     list_acceptor("== tls redirect acceptor", sx.redir_ssl_proxies, sx.redir_ssl_threads, verbosity);
 
-    cli_print(cli, "\nThreading load: %d total busy workers, %.2f per CPU", stats.workers_busy, stats.workers_busy/(float)std::thread::hardware_concurrency());
+    const auto cpus = std::max(1U, std::thread::hardware_concurrency());
+    cli_print(cli, "\nThreading load: %d total busy workers, %.2f per CPU", stats.workers_busy, stats.workers_busy/(float)cpus);
 
     return CLI_OK;
 }
 
 
-int cli_diag_worker_pool_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_worker_pool_list(DiagCli *cli, const char *command, char *argv[], int argc) {
 
     using namespace  sx::tp;
     auto args = args_to_vec(argv, argc);
@@ -2200,7 +2368,7 @@ int cli_diag_worker_pool_list(struct cli_def *cli, const char *command, char *ar
     return CLI_OK;
 }
 
-int cli_diag_api_info(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_api_info(DiagCli *cli, const char *command, char *argv[], int argc) {
 
     std::stringstream ss;
     ss << "\r\n";
@@ -2266,7 +2434,7 @@ int cli_diag_api_info(struct cli_def *cli, const char *command, char *argv[], in
 }
 
 
-int cli_diag_neighbor_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_neighbor_list(DiagCli *cli, const char *command, char *argv[], int argc) {
     std::stringstream ss;
     {
         auto& nb = NbrHood::instance();
@@ -2275,14 +2443,15 @@ int cli_diag_neighbor_list(struct cli_def *cli, const char *command, char *argv[
         ss << "Neighbors seen:\n";
 
         for(auto const& e: nb.cache().get_map_ul()) {
-            ss << e.second.first->to_string() << "\n";
+            if (e.second.first) ss << e.second.first->to_string() << "\n";
+            else ss << "<empty neighbor entry>\n";
         }
     }
     cli_print(cli, "%s", ss.str().c_str());
     return CLI_OK;
 }
 
-int cli_diag_neighbor_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_neighbor_stats(DiagCli *cli, const char *command, char *argv[], int argc) {
     std::stringstream ss;
     {
         auto& nb = NbrHood::instance();
@@ -2297,7 +2466,7 @@ int cli_diag_neighbor_stats(struct cli_def *cli, const char *command, char *argv
     return CLI_OK;
 }
 
-int cli_diag_neighbor_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
+int cli_diag_neighbor_clear(DiagCli *cli, const char *command, char *argv[], int argc) {
 
     size_t sz = 0;
     {
@@ -2310,7 +2479,7 @@ int cli_diag_neighbor_clear(struct cli_def *cli, const char *command, char *argv
     return CLI_OK;
 }
 
-int cli_diag_neighbor_tag(struct cli_def *cli, const char *command, char *argv[], int argc)
+int cli_diag_neighbor_tag(DiagCli *cli, const char *command, char *argv[], int argc)
 {
     auto args = args_to_vec(argv, argc);
 
@@ -2337,12 +2506,13 @@ int cli_diag_neighbor_tag(struct cli_def *cli, const char *command, char *argv[]
         cli_print(cli, "Example:");
         cli_print(cli, "    diag neighbor tag 1.2.3.4 +tag1+tag2-tag0");
         cli_print(cli, "    diag neighbor tag 1.2.3.4 =+tag1+tag2");
+        return CLI_ERROR;
     }
 
     return CLI_OK;
 }
 
-int cli_diag_neighbor_webhook_update(struct cli_def *cli, const char *command, char *argv[], int argc)
+int cli_diag_neighbor_webhook_update(DiagCli *cli, const char *command, char *argv[], int argc)
 {
     auto args = args_to_vec(argv, argc);
 
@@ -2365,12 +2535,13 @@ int cli_diag_neighbor_webhook_update(struct cli_def *cli, const char *command, c
     else {
         cli_print(cli, "Usage:");
         cli_print(cli, "    diag neighbor webhook-update <hostname>");
+        return CLI_ERROR;
     }
 
     return CLI_OK;
 }
 
-int cli_diag_neighbor_webhook_update_all(struct cli_def *cli, const char *command, char *argv[], int argc)
+int cli_diag_neighbor_webhook_update_all(DiagCli *cli, const char *command, char *argv[], int argc)
 {
     std::vector<std::string> hostnames;
 
@@ -2391,7 +2562,7 @@ int cli_diag_neighbor_webhook_update_all(struct cli_def *cli, const char *comman
 }
 
 
-int cli_diag_neighbor_webhook_update_ping(struct cli_def *cli, const char *command, char *argv[], int argc)
+int cli_diag_neighbor_webhook_update_ping(DiagCli *cli, const char *command, char *argv[], int argc)
 {
     sx::http::webhooks::ping_neighbors();
 
@@ -2399,113 +2570,116 @@ int cli_diag_neighbor_webhook_update_ping(struct cli_def *cli, const char *comma
 }
 
 
-bool register_diags(cli_def* cli, cli_command* diag) {
-    auto diag_ssl = cli_register_command(cli, diag, "tls", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "ssl related troubleshooting commands");
-    auto diag_ssl_cache = cli_register_command(cli, diag_ssl, "cache", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl certificate cache");
-    cli_register_command(cli, diag_ssl_cache, "stats", cli_diag_ssl_cache_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "display ssl cert cache statistics");
-    cli_register_command(cli, diag_ssl_cache, "list", cli_diag_ssl_cache_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all ssl cert cache entries");
-    cli_register_command(cli, diag_ssl_cache, "print", cli_diag_ssl_cache_print, PRIVILEGE_PRIVILEGED, MODE_EXEC, "print all ssl cert cache entries");
-    cli_register_command(cli, diag_ssl_cache, "clear", cli_diag_ssl_cache_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "remove all ssl cert cache entries and reload custom certificates");
+void register_diags(libcli2::Cli& native) {
+    DiagRegistry registry{native, {}};
+    auto* cli = &registry;
+    auto* diag = diag_register_command(cli, nullptr, "diag", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC,
+                                      "diagnose commands helping to troubleshoot");
+    auto diag_ssl = diag_register_command(cli, diag, "tls", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "ssl related troubleshooting commands");
+    auto diag_ssl_cache = diag_register_command(cli, diag_ssl, "cache", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl certificate cache");
+    diag_register_command(cli, diag_ssl_cache, "stats", cli_diag_ssl_cache_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "display ssl cert cache statistics");
+    diag_register_command(cli, diag_ssl_cache, "list", cli_diag_ssl_cache_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all ssl cert cache entries");
+    diag_register_command(cli, diag_ssl_cache, "print", cli_diag_ssl_cache_print, PRIVILEGE_PRIVILEGED, MODE_EXEC, "print all ssl cert cache entries");
+    diag_register_command(cli, diag_ssl_cache, "clear", cli_diag_ssl_cache_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "remove all ssl cert cache entries and reload custom certificates");
 
-    auto diag_ssl_wl = cli_register_command(cli, diag_ssl, "whitelist", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl temporary verification whitelist");
-    cli_register_command(cli, diag_ssl_wl, "list", cli_diag_ssl_wl_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all verification whitelist entries");
-    cli_register_command(cli, diag_ssl_wl, "insert_fingerprint", cli_diag_ssl_wl_insert_fingerprint, PRIVILEGE_PRIVILEGED, MODE_EXEC, "insert end certificate fingerprint to whitelist (lowcase)");
-    cli_register_command(cli, diag_ssl_wl, "insert_l4", cli_diag_ssl_wl_insert_l4, PRIVILEGE_PRIVILEGED, MODE_EXEC, "insert L4 key to whitelist (sip:dip:dport)");
-    cli_register_command(cli, diag_ssl_wl, "clear", cli_diag_ssl_wl_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clear all verification whitelist entries");
-    cli_register_command(cli, diag_ssl_wl, "stats", cli_diag_ssl_wl_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "verification whitelist cache stats");
+    auto diag_ssl_wl = diag_register_command(cli, diag_ssl, "whitelist", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl temporary verification whitelist");
+    diag_register_command(cli, diag_ssl_wl, "list", cli_diag_ssl_wl_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all verification whitelist entries");
+    diag_register_command(cli, diag_ssl_wl, "insert_fingerprint", cli_diag_ssl_wl_insert_fingerprint, PRIVILEGE_PRIVILEGED, MODE_EXEC, "insert end certificate fingerprint to whitelist (lowcase)");
+    diag_register_command(cli, diag_ssl_wl, "insert_l4", cli_diag_ssl_wl_insert_l4, PRIVILEGE_PRIVILEGED, MODE_EXEC, "insert L4 key to whitelist (sip:dip:dport)");
+    diag_register_command(cli, diag_ssl_wl, "clear", cli_diag_ssl_wl_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clear all verification whitelist entries");
+    diag_register_command(cli, diag_ssl_wl, "stats", cli_diag_ssl_wl_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "verification whitelist cache stats");
 
-    auto diag_ssl_crl = cli_register_command(cli, diag_ssl, "crl", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose dynamically downloaded CRLs");
-    cli_register_command(cli, diag_ssl_crl, "list", cli_diag_ssl_crl_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all CRLs");
-    cli_register_command(cli, diag_ssl_crl, "stats", cli_diag_ssl_crl_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "CRLs cache stats");
+    auto diag_ssl_crl = diag_register_command(cli, diag_ssl, "crl", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose dynamically downloaded CRLs");
+    diag_register_command(cli, diag_ssl_crl, "list", cli_diag_ssl_crl_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all CRLs");
+    diag_register_command(cli, diag_ssl_crl, "stats", cli_diag_ssl_crl_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "CRLs cache stats");
 
-    auto diag_ssl_verify = cli_register_command(cli, diag_ssl, "verify", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose certificate verification status cache");
-    cli_register_command(cli, diag_ssl_verify, "list", cli_diag_ssl_verify_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list certificate verification status cache content");
-    cli_register_command(cli, diag_ssl_verify, "stats", cli_diag_ssl_verify_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "certificate verification status cache stats");
-    cli_register_command(cli, diag_ssl_verify, "clear", cli_diag_ssl_verify_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clear certificate verification cache");
+    auto diag_ssl_verify = diag_register_command(cli, diag_ssl, "verify", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose certificate verification status cache");
+    diag_register_command(cli, diag_ssl_verify, "list", cli_diag_ssl_verify_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list certificate verification status cache content");
+    diag_register_command(cli, diag_ssl_verify, "stats", cli_diag_ssl_verify_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "certificate verification status cache stats");
+    diag_register_command(cli, diag_ssl_verify, "clear", cli_diag_ssl_verify_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clear certificate verification cache");
 
-    auto diag_ssl_ticket = cli_register_command(cli, diag_ssl, "ticket", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose abbreviated handshake session/ticket cache");
-    cli_register_command(cli, diag_ssl_ticket, "list", cli_diag_ssl_ticket_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list abbreviated handshake session/ticket cache");
-    cli_register_command(cli, diag_ssl_ticket, "stats", cli_diag_ssl_ticket_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "abbreviated handshake session/ticket cache stats");
-    cli_register_command(cli, diag_ssl_ticket, "clear", cli_diag_ssl_ticket_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clear abbreviated handshake session/ticket cache");
+    auto diag_ssl_ticket = diag_register_command(cli, diag_ssl, "ticket", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose abbreviated handshake session/ticket cache");
+    diag_register_command(cli, diag_ssl_ticket, "list", cli_diag_ssl_ticket_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list abbreviated handshake session/ticket cache");
+    diag_register_command(cli, diag_ssl_ticket, "stats", cli_diag_ssl_ticket_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "abbreviated handshake session/ticket cache stats");
+    diag_register_command(cli, diag_ssl_ticket, "clear", cli_diag_ssl_ticket_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clear abbreviated handshake session/ticket cache");
 
-    auto diag_ssl_ca     = cli_register_command(cli, diag_ssl, "ca", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose SSL signing CA");
-    cli_register_command(cli, diag_ssl_ca, "reload", cli_diag_ssl_ca_reload, PRIVILEGE_PRIVILEGED, MODE_EXEC, "reload signing CA key and certificate");
+    auto diag_ssl_ca     = diag_register_command(cli, diag_ssl, "ca", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose SSL signing CA");
+    diag_register_command(cli, diag_ssl_ca, "reload", cli_diag_ssl_ca_reload, PRIVILEGE_PRIVILEGED, MODE_EXEC, "reload signing CA key and certificate");
 
-    auto diag_sig = cli_register_command(cli, diag, "sig", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "signature engine diagnostics");
-    cli_register_command(cli, diag_sig, "list", cli_diag_sig_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list engine signatures");
+    auto diag_sig = diag_register_command(cli, diag, "sig", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "signature engine diagnostics");
+    diag_register_command(cli, diag_sig, "list", cli_diag_sig_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list engine signatures");
 
-    auto diag_workers = cli_register_command(cli, diag, "workers", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "worker and threads diagnostics");
-        auto diag_workers_proxy = cli_register_command(cli, diag_workers, "proxy", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "proxy worker and threads diagnostics");
-            cli_register_command(cli, diag_workers_proxy, "list", cli_diag_worker_proxy_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,  "list worker threads");
-        auto diag_workers_pool = cli_register_command(cli, diag_workers, "pool", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "misc task worker and threads diagnostics");
-            cli_register_command(cli, diag_workers_pool, "list", cli_diag_worker_pool_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,  "list misc pool worker threads");
+    auto diag_workers = diag_register_command(cli, diag, "workers", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "worker and threads diagnostics");
+        auto diag_workers_proxy = diag_register_command(cli, diag_workers, "proxy", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "proxy worker and threads diagnostics");
+            diag_register_command(cli, diag_workers_proxy, "list", cli_diag_worker_proxy_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,  "list worker threads");
+        auto diag_workers_pool = diag_register_command(cli, diag_workers, "pool", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "misc task worker and threads diagnostics");
+            diag_register_command(cli, diag_workers_pool, "list", cli_diag_worker_pool_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,  "list misc pool worker threads");
 
 
 
 #ifndef USE_OPENSSL11
-        auto diag_ssl_memcheck = cli_register_command(cli, diag_ssl, "memcheck", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose openssl memcheck");
-            cli_register_command(cli, diag_ssl_memcheck, "list", cli_diag_ssl_memcheck_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "print out OpenSSL memcheck status");
-            cli_register_command(cli, diag_ssl_memcheck, "enable", cli_diag_ssl_memcheck_enable, PRIVILEGE_PRIVILEGED, MODE_EXEC, "enable OpenSSL debug collection");
-            cli_register_command(cli, diag_ssl_memcheck, "disable", cli_diag_ssl_memcheck_disable, PRIVILEGE_PRIVILEGED, MODE_EXEC, "disable OpenSSL debug collection");
+        auto diag_ssl_memcheck = diag_register_command(cli, diag_ssl, "memcheck", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose openssl memcheck");
+            diag_register_command(cli, diag_ssl_memcheck, "list", cli_diag_ssl_memcheck_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "print out OpenSSL memcheck status");
+            diag_register_command(cli, diag_ssl_memcheck, "enable", cli_diag_ssl_memcheck_enable, PRIVILEGE_PRIVILEGED, MODE_EXEC, "enable OpenSSL debug collection");
+            diag_register_command(cli, diag_ssl_memcheck, "disable", cli_diag_ssl_memcheck_disable, PRIVILEGE_PRIVILEGED, MODE_EXEC, "disable OpenSSL debug collection");
 #endif
 
-    auto diag_mem = cli_register_command(cli, diag, "mem", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory related troubleshooting commands");
-        auto diag_mem_buffers = cli_register_command(cli, diag_mem, "buffers", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory buffers troubleshooting commands");
-            cli_register_command(cli, diag_mem_buffers, "stats", cli_diag_mem_buffers_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory buffers statistics");
-        auto diag_mem_udp = cli_register_command(cli, diag_mem, "udp", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "udp related structures troubleshooting commands");
-            cli_register_command(cli, diag_mem_udp, "stats", cli_diag_mem_udp_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "udp structures statistics");
+    auto diag_mem = diag_register_command(cli, diag, "mem", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory related troubleshooting commands");
+        auto diag_mem_buffers = diag_register_command(cli, diag_mem, "buffers", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory buffers troubleshooting commands");
+            diag_register_command(cli, diag_mem_buffers, "stats", cli_diag_mem_buffers_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory buffers statistics");
+        auto diag_mem_udp = diag_register_command(cli, diag_mem, "udp", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "udp related structures troubleshooting commands");
+            diag_register_command(cli, diag_mem_udp, "stats", cli_diag_mem_udp_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "udp structures statistics");
 
-    auto diag_mem_trace = cli_register_command(cli, diag_mem, "trace", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory tracing commands");
-    cli_register_command(cli, diag_mem_trace, "list", cli_diag_mem_trace_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "print out memory allocation traces (arg: number of top entries to print)");
-    cli_register_command(cli, diag_mem_trace, "mark", cli_diag_mem_trace_mark, PRIVILEGE_PRIVILEGED, MODE_EXEC, "mark all currently existing allocations as seen.");
+    auto diag_mem_trace = diag_register_command(cli, diag_mem, "trace", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory tracing commands");
+    diag_register_command(cli, diag_mem_trace, "list", cli_diag_mem_trace_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "print out memory allocation traces (arg: number of top entries to print)");
+    diag_register_command(cli, diag_mem_trace, "mark", cli_diag_mem_trace_mark, PRIVILEGE_PRIVILEGED, MODE_EXEC, "mark all currently existing allocations as seen.");
 
-    auto diag_dns = cli_register_command(cli, diag, "dns", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "DNS traffic related troubleshooting commands");
-    auto diag_dns_cache = cli_register_command(cli, diag_dns, "cache", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "DNS traffic cache troubleshooting commands");
-    cli_register_command(cli, diag_dns_cache, "list", cli_diag_dns_cache_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all DNS traffic cache entries");
-    cli_register_command(cli, diag_dns_cache, "stats", cli_diag_dns_cache_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "DNS traffic cache statistics");
-    cli_register_command(cli, diag_dns_cache, "clear", cli_diag_dns_cache_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clear DNS traffic cache");
+    auto diag_dns = diag_register_command(cli, diag, "dns", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "DNS traffic related troubleshooting commands");
+    auto diag_dns_cache = diag_register_command(cli, diag_dns, "cache", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "DNS traffic cache troubleshooting commands");
+    diag_register_command(cli, diag_dns_cache, "list", cli_diag_dns_cache_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "list all DNS traffic cache entries");
+    diag_register_command(cli, diag_dns_cache, "stats", cli_diag_dns_cache_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "DNS traffic cache statistics");
+    diag_register_command(cli, diag_dns_cache, "clear", cli_diag_dns_cache_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clear DNS traffic cache");
 
-    auto diag_dns_domains = cli_register_command(cli, diag_dns, "domain", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "DNS domain cache troubleshooting commands");
-    cli_register_command(cli, diag_dns_domains, "list", cli_diag_dns_domain_cache_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "DNS sub-domain list");
-    cli_register_command(cli, diag_dns_domains, "clear", cli_diag_dns_domain_cache_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clear DNS sub-domain cache");
+    auto diag_dns_domains = diag_register_command(cli, diag_dns, "domain", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "DNS domain cache troubleshooting commands");
+    diag_register_command(cli, diag_dns_domains, "list", cli_diag_dns_domain_cache_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "DNS sub-domain list");
+    diag_register_command(cli, diag_dns_domains, "clear", cli_diag_dns_domain_cache_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clear DNS sub-domain cache");
 
-    auto diag_proxy = cli_register_command(cli, diag, "proxy",nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "proxy related troubleshooting commands");
-    auto diag_proxy_policy = cli_register_command(cli,diag_proxy,"policy",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy policy commands");
-    cli_register_command(cli, diag_proxy_policy,"list",cli_diag_proxy_policy_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy policy list");
+    auto diag_proxy = diag_register_command(cli, diag, "proxy",nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "proxy related troubleshooting commands");
+    auto diag_proxy_policy = diag_register_command(cli,diag_proxy,"policy",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy policy commands");
+    diag_register_command(cli, diag_proxy_policy,"list",cli_diag_proxy_policy_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy policy list");
 
-    auto diag_proxy_session = cli_register_command(cli,diag_proxy,"session",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session commands");
-    cli_register_command(cli, diag_proxy_session,"list", cli_diag_proxy_session_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session list");
-    cli_register_command(cli, diag_proxy_session,"list-nonames", cli_diag_proxy_list_nonames, PRIVILEGE_PRIVILEGED, MODE_EXEC,"list sessions without resolved destination names");
-    cli_register_command(cli, diag_proxy_session,"clear", cli_diag_proxy_session_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session clear");
+    auto diag_proxy_session = diag_register_command(cli,diag_proxy,"session",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session commands");
+    diag_register_command(cli, diag_proxy_session,"list", cli_diag_proxy_session_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session list");
+    diag_register_command(cli, diag_proxy_session,"list-nonames", cli_diag_proxy_list_nonames, PRIVILEGE_PRIVILEGED, MODE_EXEC,"list sessions without resolved destination names");
+    diag_register_command(cli, diag_proxy_session,"clear", cli_diag_proxy_session_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session clear");
 
-    cli_register_command(cli, diag_proxy_session,"tls-info", cli_diag_proxy_tls_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"connection TLS details");
-    cli_register_command(cli, diag_proxy_session,"active", cli_diag_proxy_list_active, PRIVILEGE_PRIVILEGED, MODE_EXEC,"list only sessions active last 5s");
-
-
-    auto diag_proxy_io = cli_register_command(cli,diag_proxy,"io",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy I/O related commands");
-    cli_register_command(cli, diag_proxy_io ,"list",cli_diag_proxy_session_io_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"active proxy sessions");
-
-    auto diag_identity = cli_register_command(cli,diag,"identity",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"identity related commands");
-    auto diag_identity_user = cli_register_command(cli, diag_identity,"user",nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC,"identity commands related to users");
-    cli_register_command(cli, diag_identity_user,"list",cli_diag_identity_ip_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"list all known users");
-    cli_register_command(cli, diag_identity_user,"clear",cli_diag_identity_ip_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC,"CLEAR all known users");
+    diag_register_command(cli, diag_proxy_session,"tls-info", cli_diag_proxy_tls_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"connection TLS details");
+    diag_register_command(cli, diag_proxy_session,"active", cli_diag_proxy_list_active, PRIVILEGE_PRIVILEGED, MODE_EXEC,"list only sessions active last 5s");
 
 
-    auto diag_writer = cli_register_command(cli,diag,"writer",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"file writer diags");
-    cli_register_command(cli,diag_writer,"stats",cli_diag_writer_stats,PRIVILEGE_PRIVILEGED, MODE_EXEC,"file writer statistics");
+    auto diag_proxy_io = diag_register_command(cli,diag_proxy,"io",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy I/O related commands");
+    diag_register_command(cli, diag_proxy_io ,"list",cli_diag_proxy_session_io_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"active proxy sessions");
 
-    auto diag_api = cli_register_command(cli,diag,"api",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"http api info");
-    cli_register_command(cli, diag_api, "info", cli_diag_api_info, PRIVILEGE_PRIVILEGED, MODE_EXEC,
+    auto diag_identity = diag_register_command(cli,diag,"identity",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"identity related commands");
+    auto diag_identity_user = diag_register_command(cli, diag_identity,"user",nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC,"identity commands related to users");
+    diag_register_command(cli, diag_identity_user,"list",cli_diag_identity_ip_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"list all known users");
+    diag_register_command(cli, diag_identity_user,"clear",cli_diag_identity_ip_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC,"CLEAR all known users");
+
+
+    auto diag_writer = diag_register_command(cli,diag,"writer",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"file writer diags");
+    diag_register_command(cli,diag_writer,"stats",cli_diag_writer_stats,PRIVILEGE_PRIVILEGED, MODE_EXEC,"file writer statistics");
+
+    auto diag_api = diag_register_command(cli,diag,"api",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"http api info");
+    diag_register_command(cli, diag_api, "info", cli_diag_api_info, PRIVILEGE_PRIVILEGED, MODE_EXEC,
                          "display API information");
 
-    auto diag_neighbor = cli_register_command(cli,diag,"neighbor",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy neighbors diag");
-            cli_register_command(cli,diag_neighbor,"list",cli_diag_neighbor_list,PRIVILEGE_PRIVILEGED, MODE_EXEC,"list active neighbors");
-            cli_register_command(cli,diag_neighbor,"stats",cli_diag_neighbor_stats,PRIVILEGE_PRIVILEGED, MODE_EXEC,"neighbors database stats");
-            cli_register_command(cli,diag_neighbor,"clear",cli_diag_neighbor_clear,PRIVILEGE_PRIVILEGED, MODE_EXEC,"clear neighbors database");
-            cli_register_command(cli,diag_neighbor,"tag",cli_diag_neighbor_tag,PRIVILEGE_PRIVILEGED, MODE_EXEC,"update a neighbor entry with a tag-string");
-            cli_register_command(cli,diag_neighbor,"webhook-update",cli_diag_neighbor_webhook_update,PRIVILEGE_PRIVILEGED, MODE_EXEC,"send single neighbor entry webhook update");
-            cli_register_command(cli,diag_neighbor,"webhook-update-all",cli_diag_neighbor_webhook_update_all,PRIVILEGE_PRIVILEGED, MODE_EXEC,"send all neighbor entries webhook update (one msg per entry)");
-            cli_register_command(cli,diag_neighbor,"webhook-update-ping",cli_diag_neighbor_webhook_update_ping,PRIVILEGE_PRIVILEGED, MODE_EXEC,"send all neighbor entries in ping/bulk message");
+    auto diag_neighbor = diag_register_command(cli,diag,"neighbor",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy neighbors diag");
+            diag_register_command(cli,diag_neighbor,"list",cli_diag_neighbor_list,PRIVILEGE_PRIVILEGED, MODE_EXEC,"list active neighbors");
+            diag_register_command(cli,diag_neighbor,"stats",cli_diag_neighbor_stats,PRIVILEGE_PRIVILEGED, MODE_EXEC,"neighbors database stats");
+            diag_register_command(cli,diag_neighbor,"clear",cli_diag_neighbor_clear,PRIVILEGE_PRIVILEGED, MODE_EXEC,"clear neighbors database");
+            diag_register_command(cli,diag_neighbor,"tag",cli_diag_neighbor_tag,PRIVILEGE_PRIVILEGED, MODE_EXEC,"update a neighbor entry with a tag-string");
+            diag_register_command(cli,diag_neighbor,"webhook-update",cli_diag_neighbor_webhook_update,PRIVILEGE_PRIVILEGED, MODE_EXEC,"send single neighbor entry webhook update");
+            diag_register_command(cli,diag_neighbor,"webhook-update-all",cli_diag_neighbor_webhook_update_all,PRIVILEGE_PRIVILEGED, MODE_EXEC,"send all neighbor entries webhook update (one msg per entry)");
+            diag_register_command(cli,diag_neighbor,"webhook-update-ping",cli_diag_neighbor_webhook_update_ping,PRIVILEGE_PRIVILEGED, MODE_EXEC,"send all neighbor entries in ping/bulk message");
 
-    return true;
 }
