@@ -67,9 +67,6 @@ TENANT_IDX = "0"
 SMITHPROXY_PATH = '/usr/bin/smithproxy'
 SMITHPROXY_PIDFILE = '/var/run/smithproxy.%s.pid'
 
-SMITHD_PATH = '/usr/bin/smithd'
-SMITHD_PIDFILE = '/var/run/smithd.%s.pid'
-
 SMITHDOG_PIDFILE = '/var/run/smithproxy_dog.%s.pid'
 SMITHDOG_LOGFILE = '/var/log/smithproxy/dog.%s.log'
 
@@ -395,9 +392,6 @@ if __name__ == "__main__":
 
     daemon.exec_info.append(
         ('smithproxy core', SMITHPROXY_PATH, SMITHPROXY_PIDFILE % (TENANT_NAME,), smithproxy_options))
-
-    daemon.exec_info.append(('smithproxy smithd', SMITHD_PATH, SMITHD_PIDFILE % (TENANT_NAME,), smithproxy_options))
-
 
     bend_ = None
     bendbrod_ = None

@@ -76,8 +76,6 @@ layout:
   /usr/bin/smithproxy:
     bind-file: $SNAP/usr/bin/smithproxy
 
-  /usr/bin/smithd:
-    bind-file: $SNAP/usr/bin/smithd
 
   /var/log/smithproxy:
     bind: $SNAP_DATA/log
@@ -115,8 +113,6 @@ apps:
       - network-bind
       - network-control
 
-#  smithd:
-#    command: bin/smithd
 #    plugs:
 #      - network
 #      - network-bind

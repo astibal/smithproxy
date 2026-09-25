@@ -4,7 +4,6 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/helpers.cmake)
 
 SET(SOCLE_DIR "socle")
 SET(SOCLE_COMMON_DIR "socle/common")
-SET(SMITHD_DIR "src/service/smithd")
 
 project(smithproxy CXX)
 
@@ -16,7 +15,6 @@ include_directories ("${SOCLE_COMMON_DIR}")
 include_directories ("${PROJECT_SOURCE_DIR}")
 include_directories ("${PROJECT_SOURCE_DIR}/src/")
 include_directories ("${PROJECT_SOURCE_DIR}/src/ext")
-include_directories ("${SMITHD_DIR}")
 
 add_subdirectory(${SOCLE_DIR} socle_lib)
 add_subdirectory(${SOCLE_COMMON_DIR} socle_common_lib)
