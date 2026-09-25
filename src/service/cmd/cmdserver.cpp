@@ -73,7 +73,6 @@
 #include <sslcertstore.hpp>
 
 #include <main.hpp>
-#include <sobject.hpp>
 
 #include <service/core/smithproxy.hpp>
 #include <proxy/mitmproxy.hpp>
@@ -303,10 +302,6 @@ std::stringstream features;
     const time_t uptime = time(nullptr) - SmithProxy::instance().ts_sys_started;
     cli_print(cli,"Uptime: %s",uptime_string(uptime).c_str());
 
-    {
-        auto lc_ = std::scoped_lock(sobjectDB::getlock());
-        cli_print(cli, "Objects: %lu", static_cast<unsigned long>(socle::sobjectDB::db().size()));
-    }
     const unsigned long l = MitmProxy::total_mtr_up().get();
     const unsigned long r = MitmProxy::total_mtr_down().get();
     cli_print(cli,"Performance: upload %sbps, download %sbps in last 60 seconds",number_suffixed(l*8).c_str(),number_suffixed(r*8).c_str());
@@ -881,28 +876,6 @@ int cli_debug_dns(struct cli_def *cli, const char *command, char *argv[], int ar
         cli_print(cli,"\n");
         cli_print(cli,"valid parameters: %s", CliState::get().debug_levels);
     }
-
-    return CLI_OK;
-}
-
-int cli_debug_sobject(struct cli_def *cli, const char *command, char *argv[], int argc) {
-    debug_cli_params(cli, command, argv, argc);
-
-    bool cur = socle::sobject_info::enable_bt_;
-
-    if(argc != 0) {
-        cli_print(cli, "Current sobject trace flag switched to: %d",cur);
-        return CLI_OK;
-    }
-
-
-    cur = !cur;
-
-    socle::sobject_info::enable_bt_ = cur;
-
-    cli_print(cli, "Current sobject trace flag switched to: %d",cur);
-    if(cur)
-        cli_print(cli, "!!! backtrace logging may affect performance !!!");
 
     return CLI_OK;
 }
@@ -2147,7 +2120,6 @@ void cli_register_static(struct cli_def* cli) {
     cli_register_command(cli, debuk, "dns", cli_debug_dns, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set dns file logging level");
     cli_register_command(cli, debuk, "proxy", cli_debug_proxy, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set proxy file logging level");
     cli_register_command(cli, debuk, "auth", cli_debug_auth, PRIVILEGE_PRIVILEGED, MODE_EXEC, "set authentication file logging level");
-    cli_register_command(cli, debuk, "sobject", cli_debug_sobject, PRIVILEGE_PRIVILEGED, MODE_EXEC, "toggle on/off sobject creation tracing (affect performance)");
     cli_register_command(cli, debuk, "show", cli_debug_show, PRIVILEGE_PRIVILEGED, MODE_EXEC, "show all possible debugs and their settings");
     cli_register_command(cli, debuk, "set", cli_debug_set, PRIVILEGE_PRIVILEGED, MODE_EXEC, "change light logan loglevels");
 }

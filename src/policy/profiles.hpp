@@ -43,9 +43,10 @@
 
 #include <policy/cfgelement.hpp>
 #include <policy/addrobj.hpp>
+#include <common/spointer.hpp>
 #include <regex>
 
-class ProfileDetection : public socle::sobject, public CfgElement {
+class ProfileDetection : public CfgElement {
 
 public:
     /*
@@ -58,7 +59,6 @@ public:
     bool engines_enabled = true;
     bool kb_enabled = true;
 
-    bool ask_destroy() override { return false; };
     std::string to_string(int verbosity) const override {
         return string_format("ProfileDetection: name=%s mode=%d", element_name().c_str(), mode);
     };
@@ -66,7 +66,7 @@ public:
 TYPENAME_OVERRIDE("ProfileDetection")
 };
 
-class ProfileContentRule : public socle::sobject, public CfgElement {
+class ProfileContentRule : public CfgElement {
 
 public:
     std::string match;
@@ -75,7 +75,6 @@ public:
     int replace_each_nth = 0;
     int replace_each_counter_ = 0;
 
-    bool ask_destroy() override { return false; };
     std::string to_string(int verbosity) const override {
         return string_format("ProfileContentRule: matching %s", ESC_(match).c_str());
     }
@@ -150,7 +149,7 @@ struct ContentCaptureFormat {
     std::string to_str() const { return to_str(value); }
 };
 
-class ProfileContent  : public socle::sobject, public CfgElement {
+class ProfileContent : public CfgElement {
 public:
     // if true, content of proxy transmission will dumped to file
     bool write_payload = false;
@@ -182,10 +181,9 @@ public:
     ContentCaptureFormat write_format;
     std::vector<ProfileContentRule> content_rules;
 
-    bool ask_destroy() override { return false; };
     std::string to_string(int verbosity) const override {
         std::string ret = string_format("ProfileContent: name=%s capture=%d", element_name().c_str(), write_payload);
-        if(verbosity > INF) {
+        if(verbosity > iINF) {
             for(auto const& it: content_rules)
                 ret += string_format("\n        match: '%s'", ESC_(it.match).c_str());
         }
@@ -200,7 +198,7 @@ TYPENAME_OVERRIDE("ProfileContent")
 class FqdnAddress;
 class CidrAddress;
 
-class ProfileTls : public socle::sobject, public CfgElement  {
+class ProfileTls : public CfgElement {
 public:
     bool inspect = false;
     bool no_fallback_bypass = false;
@@ -258,7 +256,6 @@ public:
         bool suppress_common = true;
     } alerts {};
 
-    bool ask_destroy() override { return false; };
     std::string to_string(int verbosity) const override {
         std::string ret = string_format("ProfileTls: name=%s inspect=%d ocsp=%d ocsp_stap=%d pfs=%d,%d abr=%d,%d",
                                         element_name().c_str(),
@@ -266,7 +263,7 @@ public:
                                         ocsp_mode, ocsp_stapling_mode,
                                         left_use_pfs, right_use_pfs,
                                         !left_disable_reuse, !right_disable_reuse);
-        if(verbosity > INF) {
+        if(verbosity > iINF) {
 
             ret += string_format("\n        disable fallback TLS bypass: %d", no_fallback_bypass);
             ret += string_format("\n        allow untrusted issuers: %d", allow_untrusted_issuers);

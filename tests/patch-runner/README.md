@@ -13,13 +13,14 @@ tests/patch-runner/test-patch.sh --run --remote root@tt-bs1
 tests/patch-runner/test-patch.sh sanity --suite tls --remote root@tt-bs1
 tests/patch-runner/test-patch.sh sanity --suite policy --remote root@tt-bs1
 tests/patch-runner/test-patch.sh sanity --suite rtt --remote root@tt-bs1
+tests/patch-runner/test-patch.sh sanity --suite session-list --remote root@tt-bs1
 tests/patch-runner/test-patch.sh full --remote root@tt-bs1 --churn-port-range 20000:29999
 ```
 
 Profiles:
 
 - `quick`: production `smithproxy` target only;
-- `sanity`: build plus HTTP/1, HTTP/2, TLS, UDP, RTT, CLI, PCAP and GRE checks;
+- `sanity`: build plus HTTP/1, HTTP/2, TLS, UDP, RTT, loaded session-list, CLI, PCAP and GRE checks;
 - `full`: sanity, TCP/UDP churn and the complete deterministic corpus.
 - `benchmark`: run measuring suites without latency gates and print a table;
 - `benchmark` also repeats the measurements natively inside the origin network
@@ -29,7 +30,7 @@ Profiles:
   and API ports, and keep it in the foreground until Ctrl-C. With `--remote`,
   both listeners are on the remote host's loopback interface.
 
-`--suite tls|policy|rtt` runs one virtual sanity subsection in the same isolated
+`--suite tls|policy|rtt|session-list` runs one virtual sanity subsection in the same isolated
 lab. Without `--suite`, every subsection is always included in `sanity` and
 `full`. Suite implementations and their case definitions live below
 `harness/suites/`.
@@ -129,3 +130,11 @@ P50 exceeds 2 ms. One handshake uses a fresh SNI to measure the cold certificate
 cache path separately; it is reported as `TLS cold total connect` and is not
 part of the warm P50 gate. Benchmark mode records these values without applying
 latency gates.
+
+## Session-list stress
+
+Sanity holds 256 verified TCP sessions open while taking 24 alternating level
+6/8 session-list snapshots over one persistent CLI connection. Every snapshot
+must contain all held sessions and finish without a timeout. The default P95 and
+maximum limits are 1000 ms and 3000 ms; override them with
+`SESSION_LIST_P95_LIMIT_MS` and `SESSION_LIST_MAX_LIMIT_MS`.

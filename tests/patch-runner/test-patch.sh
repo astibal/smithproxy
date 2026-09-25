@@ -25,7 +25,7 @@ Profiles:
               With --remote, both ports bind to the remote host's loopback.
 
 Options:
-  --suite NAME       Run only one virtual sanity suite: tls, policy or rtt.
+  --suite NAME       Run only one virtual sanity suite: tls, policy, rtt or session-list.
                      Use with the sanity or full profile.
   --remote HOST      Run the isolated lab over SSH on [USER@]HOST. A root@
                      target runs directly; other users are invoked via sudo.
@@ -160,7 +160,7 @@ if [[ -n $CHURN_PORT_RANGE ]]; then
     }
     EXTRA_ENV+=("CHURN_MIN_PORT=$CHURN_MIN_PORT" "CHURN_MAX_PORT=$CHURN_MAX_PORT")
 fi
-[[ -z $ONLY_SUITE || $ONLY_SUITE == tls || $ONLY_SUITE == policy || $ONLY_SUITE == rtt ]] || { echo "Unknown suite: $ONLY_SUITE" >&2; exit 2; }
+[[ -z $ONLY_SUITE || $ONLY_SUITE == tls || $ONLY_SUITE == policy || $ONLY_SUITE == rtt || $ONLY_SUITE == session-list ]] || { echo "Unknown suite: $ONLY_SUITE" >&2; exit 2; }
 
 COMMIT=$(git -C "$ROOT" rev-parse HEAD)
 SHORT_COMMIT=${COMMIT:0:8}
@@ -265,7 +265,7 @@ print(*(x.getsockname()[1] for x in s))'
     LAB_ENV=(
         "CLIENT_NS=$CLIENT_NS" "SERVER_NS=$SERVER_NS" "DATA_NS=$DATA_NS"
         "LAB_IN_IF=$IN_IF" "LAB_OUT_IF=$OUT_IF" "LAB_API_PORT=$API_PORT" "LAB_CLI_PORT=$CLI_PORT"
-        "CAPTURE_TEST=1" "HTTP2_OBSERVABILITY_TEST=1" "CAPTURE_MATRIX_TEST=1" "RTT_TEST=1" "TLS_SUITE_TEST=1" "POLICY_TEST=1"
+        "CAPTURE_TEST=1" "HTTP2_OBSERVABILITY_TEST=1" "CAPTURE_MATRIX_TEST=1" "RTT_TEST=1" "TLS_SUITE_TEST=1" "POLICY_TEST=1" "SESSION_LIST_STRESS_TEST=1"
         "PPLAY_PY=$LAB_ROOT/pplay.py" "PPLAY_SUITE=$LAB_ROOT/corpus"
         "PPLAY_RESULTS_NAME=corpus-all" "PPLAY_SMOKE_TEST=1"
     )
@@ -273,26 +273,29 @@ print(*(x.getsockname()[1] for x in s))'
         RTT_TLS_TOTAL_P50_LIMIT_MS RTT_HTTPS_P50_LIMIT_MS \
         RTT_P95_LIMIT_MS RTT_MAX_LIMIT_MS \
         RTT_HANDSHAKE_P95_LIMIT_MS RTT_HANDSHAKE_MAX_LIMIT_MS \
+        SESSION_LIST_CONNECTIONS SESSION_LIST_SAMPLES \
+        SESSION_LIST_P95_LIMIT_MS SESSION_LIST_MAX_LIMIT_MS \
         CHURN_MIN_PORT CHURN_MAX_PORT; do
         [[ -z ${!variable:-} ]] || LAB_ENV+=("$variable=${!variable}")
     done
     if [[ $PROFILE == benchmark ]]; then
         LAB_ENV+=("CAPTURE_TEST=0" "HTTP2_OBSERVABILITY_TEST=0" "CAPTURE_MATRIX_TEST=0"
-            "TLS_SUITE_TEST=0" "POLICY_TEST=0" "RTT_TEST=1" "RTT_REPORT_ONLY=1"
+            "TLS_SUITE_TEST=0" "POLICY_TEST=0" "SESSION_LIST_STRESS_TEST=0" "RTT_TEST=1" "RTT_REPORT_ONLY=1"
             "RTT_NATIVE_BASELINE=1"
             "PPLAY_SMOKE_TEST=0" "PPLAY_SUITE_SKIP_RUN=1")
     fi
     if [[ $PROFILE == run ]]; then
         LAB_ENV+=("RUN_MODE=1" "CAPTURE_TEST=0" "HTTP2_OBSERVABILITY_TEST=0"
-            "CAPTURE_MATRIX_TEST=0" "TLS_SUITE_TEST=0" "POLICY_TEST=0" "RTT_TEST=0"
+            "CAPTURE_MATRIX_TEST=0" "TLS_SUITE_TEST=0" "POLICY_TEST=0" "SESSION_LIST_STRESS_TEST=0" "RTT_TEST=0"
             "PPLAY_SMOKE_TEST=0" "PPLAY_SUITE_SKIP_RUN=1")
     fi
     if [[ -n $ONLY_SUITE ]]; then
-        LAB_ENV+=("CAPTURE_TEST=0" "HTTP2_OBSERVABILITY_TEST=0" "CAPTURE_MATRIX_TEST=0" "RTT_TEST=0" "TLS_SUITE_TEST=0" "POLICY_TEST=0" "PPLAY_SUITE_SKIP_RUN=1")
+        LAB_ENV+=("CAPTURE_TEST=0" "HTTP2_OBSERVABILITY_TEST=0" "CAPTURE_MATRIX_TEST=0" "RTT_TEST=0" "TLS_SUITE_TEST=0" "POLICY_TEST=0" "SESSION_LIST_STRESS_TEST=0" "PPLAY_SUITE_SKIP_RUN=1")
         case "$ONLY_SUITE" in
             tls) LAB_ENV+=("TLS_SUITE_TEST=1") ;;
             policy) LAB_ENV+=("POLICY_TEST=1") ;;
             rtt) LAB_ENV+=("RTT_TEST=1") ;;
+            session-list) LAB_ENV+=("SESSION_LIST_STRESS_TEST=1") ;;
         esac
     fi
     if [[ $PROFILE == full ]]; then

@@ -20,11 +20,13 @@ GRE_COLLECTOR_PID=
 HTTP2_TCPDUMP_PID=
 HTTP2_CLIENT_PID=
 CAPTURE_MATRIX_GRE_PID=
+SESSION_LIST_LOAD_PID=
 CAPTURE_TEST=${CAPTURE_TEST:-0}
 CAPTURE_MATRIX_TEST=${CAPTURE_MATRIX_TEST:-0}
 RTT_TEST=${RTT_TEST:-0}
 TLS_SUITE_TEST=${TLS_SUITE_TEST:-0}
 POLICY_TEST=${POLICY_TEST:-0}
+SESSION_LIST_STRESS_TEST=${SESSION_LIST_STRESS_TEST:-0}
 UDP_CHURN_TEST=${UDP_CHURN_TEST:-0}
 TCP_CHURN_TEST=${TCP_CHURN_TEST:-0}
 CAPTURE_MARKER=smithproxy-gre-pcap-test
@@ -52,6 +54,8 @@ cleanup() {
     [[ -z $HTTP2_CLIENT_PID ]] || wait "$HTTP2_CLIENT_PID" 2>/dev/null || true
     [[ -z $CAPTURE_MATRIX_GRE_PID ]] || kill "$CAPTURE_MATRIX_GRE_PID" 2>/dev/null || true
     [[ -z $CAPTURE_MATRIX_GRE_PID ]] || wait "$CAPTURE_MATRIX_GRE_PID" 2>/dev/null || true
+    [[ -z $SESSION_LIST_LOAD_PID ]] || kill "$SESSION_LIST_LOAD_PID" 2>/dev/null || true
+    [[ -z $SESSION_LIST_LOAD_PID ]] || wait "$SESSION_LIST_LOAD_PID" 2>/dev/null || true
     ip link del "$IN_IF" 2>/dev/null || true
     ip link del "$OUT_IF" 2>/dev/null || true
     ip netns del "$CLIENT"
@@ -190,6 +194,34 @@ for i in range(3):
     print(reply.decode())
 PY
 echo 'PASS UDP: three datagrams and original reply address'
+if [[ $SESSION_LIST_STRESS_TEST == 1 ]]; then
+    SESSION_LIST_READY="$ROOT/results/session-list-load.ready"
+    SESSION_LIST_STOP="$ROOT/results/session-list-load.stop"
+    SESSION_LIST_CONNECTIONS=${SESSION_LIST_CONNECTIONS:-256}
+    rm -f "$SESSION_LIST_READY" "$SESSION_LIST_STOP"
+    ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/session-list-load.py" \
+        --connections "$SESSION_LIST_CONNECTIONS" --ready "$SESSION_LIST_READY" \
+        --stop "$SESSION_LIST_STOP" > "$ROOT/results/session-list-load.log" 2>&1 &
+    SESSION_LIST_LOAD_PID=$!
+    for attempt in $(seq 1 200); do
+        [[ -f $SESSION_LIST_READY ]] && break
+        kill -0 "$SESSION_LIST_LOAD_PID"
+        sleep 0.05
+    done
+    [[ -f $SESSION_LIST_READY ]]
+    ip netns exec "$NS" python3 "$ROOT/runner/tests/session-list-probe.py" \
+        --connections "$SESSION_LIST_CONNECTIONS" \
+        --samples "${SESSION_LIST_SAMPLES:-24}" \
+        --p95-limit-ms "${SESSION_LIST_P95_LIMIT_MS:-1000}" \
+        --max-limit-ms "${SESSION_LIST_MAX_LIMIT_MS:-3000}" \
+        > "$ROOT/results/session-list.json"
+    touch "$SESSION_LIST_STOP"
+    wait "$SESSION_LIST_LOAD_PID"
+    SESSION_LIST_LOAD_PID=
+    python3 "$ROOT/runner/tests/suites/session-list/report.py" \
+        "$ROOT/results/session-list.json"
+    echo 'PASS session list: detailed snapshots remained complete and responsive under load'
+fi
 if [[ $TLS_SUITE_TEST == 1 ]]; then
     ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/suites/tls/run.py" \
         --ca-file "$ROOT/config/certs/ca-cert.pem" > "$ROOT/results/tls-suite.json"

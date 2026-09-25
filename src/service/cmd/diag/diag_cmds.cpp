@@ -50,6 +50,7 @@
 #include <traflog/traflog.hpp>
 
 #include <service/core/smithproxy.hpp>
+#include <service/core/sessionlist.hpp>
 #include <service/cmd/cmdserver.hpp>
 #include <service/cmd/diag/diag_cmds.hpp>
 #include <service/httpd/httpd.hpp>
@@ -61,7 +62,6 @@
 #include <sslcom.hpp>
 #include <sslcertstore.hpp>
 
-#include <sobject.hpp>
 #include <proxy/mitmproxy.hpp>
 #include <proxy/filters/filterproxy.hpp>
 #include <proxy/nbrhood.hpp>
@@ -1067,16 +1067,6 @@ int cli_diag_mem_buffers_stats(struct cli_def *cli, const char *command, char *a
 }
 
 
-int cli_diag_mem_objects_stats(struct cli_def *cli, const char *command, char *argv[], int argc) {
-
-    debug_cli_params(cli, command, argv, argc);
-
-    cli_print(cli,"Statistics:\n");
-    cli_print(cli,"%s", socle::sobjectDB::str_stats(nullptr).c_str());
-    return CLI_OK;
-
-}
-
 int cli_diag_mem_udp_stats(struct cli_def *cli, const char *command, char **argv, int argc) {
 
     debug_cli_params(cli, command, argv, argc);
@@ -1243,131 +1233,6 @@ int cli_diag_mem_trace_list (struct cli_def *cli, const char *command, char **ar
     cli_print(cli, "memory tracing not enabled.");
 
 #endif
-    return CLI_OK;
-}
-
-
-
-int cli_diag_mem_objects_list(struct cli_def *cli, const char *command, char *argv[], int argc) {
-
-    debug_cli_params(cli, command, argv, argc);
-
-    std::string object_filter;
-    int verbosity = iINF;
-
-    if(argc > 0) {
-        std::string arg1 = argv[0];
-        if(arg1 == "?") {
-            cli_print(cli,"valid parameters:");
-            cli_print(cli,"         <empty> - all entries will be printed out");
-            cli_print(cli,"         0x prefixed string - only object with matching Id will be printed out");
-            cli_print(cli,"         any other string   - only objects with class matching this string will be printed out");
-
-            return CLI_OK;
-        } else {
-            // a1 is param for the lookup
-            if("*" == arg1 || "ALL" == arg1) {
-                object_filter = "";
-            } else {
-                object_filter = arg1;
-            }
-        }
-
-        if(argc > 1) {
-            std::string arg2 = argv[1];
-            verbosity = safe_val(arg2,iINF);
-        }
-    }
-
-
-    std::string ret = socle::sobjectDB::str_list((object_filter.empty()) ? nullptr : object_filter.c_str(), nullptr, verbosity);
-    ret += "\n" + socle::sobjectDB::str_stats((object_filter.empty()) ? nullptr : object_filter.c_str());
-
-
-    cli_print(cli, "Smithproxy objects (filter: %s):\n%s\nFinished.",(object_filter.empty()) ? "ALL" : object_filter.c_str() , ret.c_str());
-    return CLI_OK;
-}
-
-
-int cli_diag_mem_objects_search(struct cli_def *cli, const char *command, char *argv[], int argc) {
-
-    debug_cli_params(cli, command, argv, argc);
-
-    std::string object_filter;
-    int verbosity = iINF;
-
-    if(argc > 0) {
-        std::string arg1 = argv[0];
-        if(arg1 == "?") {
-            cli_print(cli,"valid parameters:");
-            cli_print(cli,"         <empty>     - all entries will be printed out");
-            cli_print(cli,"         any string  - objects with descriptions containing this string will be printed out");
-
-            return CLI_OK;
-        } else {
-            // a1 is param for the lookup
-            if("*" == arg1 || "ALL" == arg1) {
-                object_filter = "";
-            } else {
-                object_filter = arg1;
-            }
-        }
-
-        if(argc > 1) {
-            std::string arg2 = argv[1];
-            verbosity = safe_val(arg2,iINF);
-        }
-    }
-
-
-    std::string r = socle::sobjectDB::str_list(nullptr,nullptr,verbosity,object_filter.c_str());
-
-    cli_print(cli,"Smithproxy objects (filter: %s):\n%s\nFinished.",(object_filter.empty()) ? "ALL" : object_filter.c_str() ,r.c_str());
-    return CLI_OK;
-}
-
-
-
-int cli_diag_mem_objects_clear(struct cli_def *cli, const char *command, char *argv[], int argc) {
-
-    debug_cli_params(cli, command, argv, argc);
-
-    std::string address;
-
-    if(argc > 0) {
-        address = argv[0];
-        if(address == "?") {
-            cli_print(cli,"valid parameters:");
-            cli_print(cli,"         <object id>");
-
-            return CLI_OK;
-        } else {
-            unsigned long key = strtol(address.c_str(),nullptr,16);
-            cli_print(cli,"Trying to clear 0x%lx", key);
-
-
-            int ret = -1;
-            {
-                ret = socle::sobjectDB::ask_destroy((void *) key);
-            }
-
-            switch(ret) {
-                case 1:
-                    cli_print(cli,"object agrees to terminate.");
-                    break;
-                case 0:
-                    cli_print(cli,"object doesn't agree to terminate, or doesn't support it.");
-                    break;
-                case -1:
-                    cli_print(cli, "object not found.");
-                    break;
-                default:
-                    cli_print(cli, "unknown result.");
-                    break;
-            }
-        }
-    }
-
     return CLI_OK;
 }
 
@@ -1753,12 +1618,12 @@ auto get_proxy_title(MitmProxy* proxy, int sl_flags, int verbosity) {
 }
 
 
-auto get_more_info(sobject_info const* so_info, MitmProxy const* curr_proxy, MitmHostCX* lf, MitmHostCX* rg, int verbosity) {
+auto get_more_info(MitmProxy const* curr_proxy, MitmHostCX* lf, MitmHostCX* rg, int verbosity) {
 
     std::stringstream info_ss;
 
-    if (verbosity >= DEB && so_info) {
-        info_ss << so_info->to_string(verbosity);
+    if (verbosity >= DEB && curr_proxy) {
+        info_ss << "    session: age: " << curr_proxy->age() << "s";
     }
 
     if (verbosity > INF) {
@@ -1913,32 +1778,11 @@ int cli_diag_proxy_session_list_extra (struct cli_def *cli, const char *command,
         if(args.size() > 1) arg2 = args.at(1);
     }
 
-    std::stringstream out;
-
-    {
-        auto lc_ = std::scoped_lock(socle::sobjectDB::getlock());
-
-        for (auto const& [ so_ptr, so_info]: socle::sobjectDB::db()) {
-
-            std::string prefix;
-            std::string suffix;
-
-
-            if (!so_ptr) continue;
-
-            std::string what = so_ptr->c_type();
-            if ( what == "MitmProxy" || what == "SocksProxy") {
-
-                auto *curr_proxy = dynamic_cast<MitmProxy *>(so_ptr);
-                MitmHostCX *lf = nullptr;
-                MitmHostCX *rg = nullptr;
-
-                if (curr_proxy) {
-                    lf = curr_proxy->first_left();
-                    rg = curr_proxy->first_right();
-                } else {
-                    continue;
-                }
+    auto renderer = [sl_flags, verbosity](MitmProxy* curr_proxy) -> std::optional<std::string> {
+                std::string prefix;
+                std::string suffix;
+                auto* lf = curr_proxy->first_left();
+                auto* rg = curr_proxy->first_right();
 
                 /* apply filters */
 
@@ -1946,7 +1790,7 @@ int cli_diag_proxy_session_list_extra (struct cli_def *cli, const char *command,
 
                 if (flag_check<int>(sl_flags, SL_ACTIVE)) {
                     if(curr_proxy->stats().mtr_down.get() + curr_proxy->stats().mtr_up.get() == 0) {
-                        continue;
+                        return std::nullopt;
                     }
                     do_print = true;
                 }
@@ -1979,7 +1823,7 @@ int cli_diag_proxy_session_list_extra (struct cli_def *cli, const char *command,
                 if (sl_flags == SL_IPS) { do_print = true;  }
 
                 if (!do_print) {
-                    continue;
+                    return std::nullopt;
                 }
 
                 // adjust prefix spacing
@@ -1995,15 +1839,23 @@ int cli_diag_proxy_session_list_extra (struct cli_def *cli, const char *command,
                 std::stringstream cur_obj_ss;
                 cur_obj_ss << prefix << get_proxy_title(curr_proxy, sl_flags, verbosity) << suffix;
 
-                cur_obj_ss << get_more_info(so_info.get(), curr_proxy, lf, rg, verbosity);
+                cur_obj_ss << get_more_info(curr_proxy, lf, rg, verbosity);
+                return cur_obj_ss.str();
+    };
 
-                out << cur_obj_ss.str() << "\n";
-            }
-        }
+    auto request = SessionList::text(session_list_worker_count(), std::move(renderer));
+    dispatch_session_list(request);
+    if (!request->wait_for(std::chrono::seconds(5))) {
+        cli_print(cli, "Session snapshot %llu timed out; pending: %s",
+                  static_cast<unsigned long long>(request->version()),
+                  request->pending_origins().c_str());
+        return CLI_OK;
     }
 
-
-    cli_print(cli, "%s", out.str().c_str());
+    cli_print(cli, "%s", request->text_result().c_str());
+    if (request->skipped_spread() > 0) {
+        cli_print(cli, "\n%zu spread sessions omitted", request->skipped_spread());
+    }
 
     if( sl_flags == SL_NONE ) {
         unsigned long l = MitmProxy::total_mtr_up().get();
@@ -2603,11 +2455,6 @@ bool register_diags(cli_def* cli, cli_command* diag) {
         auto diag_mem_udp = cli_register_command(cli, diag_mem, "udp", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "udp related structures troubleshooting commands");
             cli_register_command(cli, diag_mem_udp, "stats", cli_diag_mem_udp_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "udp structures statistics");
 
-    auto diag_mem_objects = cli_register_command(cli, diag_mem, "objects", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory object troubleshooting commands");
-    cli_register_command(cli, diag_mem_objects, "stats", cli_diag_mem_objects_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory objects statistics");
-    cli_register_command(cli, diag_mem_objects, "list", cli_diag_mem_objects_list, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory objects list");
-    cli_register_command(cli, diag_mem_objects, "search", cli_diag_mem_objects_search, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory objects search");
-    cli_register_command(cli, diag_mem_objects, "clear", cli_diag_mem_objects_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC, "clears memory object");
     auto diag_mem_trace = cli_register_command(cli, diag_mem, "trace", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "memory tracing commands");
     cli_register_command(cli, diag_mem_trace, "list", cli_diag_mem_trace_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "print out memory allocation traces (arg: number of top entries to print)");
     cli_register_command(cli, diag_mem_trace, "mark", cli_diag_mem_trace_mark, PRIVILEGE_PRIVILEGED, MODE_EXEC, "mark all currently existing allocations as seen.");
@@ -2662,4 +2509,3 @@ bool register_diags(cli_def* cli, cli_command* diag) {
 
     return true;
 }
-
