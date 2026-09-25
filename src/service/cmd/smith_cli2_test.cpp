@@ -12,6 +12,7 @@
 
 #include <openssl/rand.h>
 
+#include <cerrno>
 #include <memory>
 #include <mutex>
 #include <sys/socket.h>
@@ -21,6 +22,18 @@
 namespace {
 
 bool exec_mode(const libcli2::Context& context) { return context.mode == "0"; }
+
+void write_all(int fd, std::string_view output) {
+    while (!output.empty()) {
+        const ssize_t written = ::send(fd, output.data(), output.size(), MSG_NOSIGNAL);
+        if (written > 0) {
+            output.remove_prefix(static_cast<std::size_t>(written));
+            continue;
+        }
+        if (written < 0 && errno == EINTR) continue;
+        return;
+    }
+}
 
 unsigned short random_id() {
     unsigned short result = 0;
@@ -127,7 +140,7 @@ void register_smithproxy_cli2_test(libcli2::Cli& cli) {
                 const long code = reply ? reply->response.first : -1;
                 const std::string message = reply ? reply->response.second : "request failed";
                 const std::string output = "Response: " + std::to_string(code) + ":" + message + "\r\n";
-                ::write(fd, output.data(), output.size());
+                write_all(fd, output);
             });
             return 0;
         });
