@@ -154,7 +154,7 @@ def main() -> None:
             require(cli.command_ok("debug set cli 0"), "cli debug now OFF")
             require(cli.command_ok("test dns genrequest example.test"), "DNS generated request:")
             diag_roots = cli.tab("diag ")
-            for root in ("tls", "sig", "workers", "mem", "dns", "proxy", "identity", "writer", "api", "neighbor"):
+            for root in ("tls", "sig", "workers", "mem", "dns", "proxy", "writer", "api", "neighbor"):
                 require(diag_roots, root)
             require(cli.command_ok("diag tls cache stats"), "certificate store")
             require(cli.command_ok("diag tls cache list"), "TLS certificate store unavailable")
@@ -163,7 +163,6 @@ def main() -> None:
             require(cli.command_ok("diag mem buffers stats"), "memory alloc")
             cli.command_ok("diag dns cache stats")
             cli.command_ok("diag proxy policy list")
-            cli.command_ok("diag identity user list")
             require(cli.command_ok("diag writer stats"), "Pending ops:")
             require(cli.command_ok("diag api info"), "API keys")
             cli.command_ok("diag neighbor stats")
@@ -181,7 +180,6 @@ def main() -> None:
                 "diag proxy policy list", "diag proxy session list",
                 "diag proxy session list-nonames", "diag proxy session clear",
                 "diag proxy session tls-info", "diag proxy session active", "diag proxy io list",
-                "diag identity user list", "diag identity user clear",
                 "diag writer stats", "diag api info",
                 "diag neighbor list", "diag neighbor stats", "diag neighbor clear",
                 "diag neighbor webhook-update-all", "diag neighbor webhook-update-ping",

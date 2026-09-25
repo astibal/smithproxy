@@ -326,35 +326,6 @@ void CfgValueHelp::init() {
             .may_be_empty(false)
             .value_filter(VALUE_UINT_RANGE<0LL, LLONG_MAX>); //10M
 
-    // sections
-    add("settings.auth_portal", "** configure authentication portal settings");
-    add("settings.auth_portal.address", "IP of FQDN where user is redirected for authentication")
-    .may_be_empty(false);
-    add("settings.auth_portal.http_port", "port where user is redirected for HTTP authentication")
-            .may_be_empty(false)
-            .value_filter(VALUE_UINT_RANGE<1024,65535>);
-    add("settings.auth_portal.https_port", "port where user is redirected for HTTPS authentication")
-            .may_be_empty(false)
-            .value_filter(VALUE_UINT_RANGE<1024,65535>);
-    add("settings.auth_portal.ssl_key", "key for HTTPS authentication certificate")
-            .may_be_empty(false)
-            .value_filter(CfgValue::VALUE_FILE);
-    add("settings.auth_portal.ssl_cert", "HTTPS authentication certificate file")
-            .may_be_empty(false)
-            .value_filter(CfgValue::VALUE_FILE);
-    add("settings.auth_portal.magic_ip", "Rendezvous IP for client traffic")
-            .may_be_empty(false)
-            .value_filter([](auto const&v){
-                auto ip = CidrAddress(v);
-                if(ip.cidr()) {
-                    if(std::string(cidr_numhost(ip.cidr())) == "1") {
-                        return CfgValue::filter_retval::accept(v);
-                    }
-                }
-                return CfgValue::filter_retval::reject("must me a valid host IP address");
-            });
-
-
     add("settings.tuning", "** tune selected internals");
     add("settings.tuning.proxy_thread_spray_min", "minimum number of worker subproxies to allow subproxy spraying")
             .may_be_empty(false)

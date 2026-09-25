@@ -54,7 +54,6 @@
 
 #include <uxcom.hpp>
 #include <staticcontent.hpp>
-#include <policy/authfactory.hpp>
 
 #include <traflog/fsoutput.hpp>
 #include <service/tpool.hpp>
@@ -335,10 +334,6 @@ std::string MitmProxy::to_string(int verbosity) const {
     if(verbosity >= INF) {
         r << string_format(" policy: %d ", matched_policy());
         
-        if(identity_resolved()) {
-            r << string_format("identity: %s ",identity_->username().c_str());
-        }
-        
         if(verbosity > INF) r << "\n    ";
 
         std::string const sp_str = number_suffixed(stats_.mtr_up.get()*8) + "/" + number_suffixed(stats_.mtr_down.get()*8);
@@ -357,152 +352,12 @@ std::string MitmProxy::to_string(int verbosity) const {
             }
 
 
-            if(identity_resolved()) {
-                r << string_format("\n    User:   %s", identity_->username().c_str());
-                r << string_format("\n    Groups: %s", identity_->groups().c_str());
-            }
         }        
     }
     
     return r.str();
 }
 
-std::optional<std::vector<std::string>> MitmProxy::find_id_groups(baseHostCX const* cx) {
-
-    int af = AF_INET;
-    if(cx->com()) {
-        af = cx->com()->l3_proto();
-    }
-    const std::string str_af = SockOps::family_str(af);
-
-    bool found = false;
-    std::vector<std::string> group_vec;
-
-    auto from_map = [&group_vec](auto const& map, auto const& host) -> bool {
-
-        auto ip = map.find(host);
-        if (ip != map.end()) {
-            auto* id_ptr = &(*ip).second;
-
-            if(id_ptr) {
-                for (auto const &my_id: id_ptr->groups_vec) {
-                    group_vec.emplace_back(my_id);
-                }
-
-                return true;
-            }
-        }
-        return false;
-    };
-
-    if(af == AF_INET or af == 0) {
-        auto lc_ = std::scoped_lock(AuthFactory::get_ip4_lock());
-        found = from_map(AuthFactory::get_ip4_map(), cx->host());
-    }
-    else if(af == AF_INET6) {
-        auto lc_ = std::scoped_lock(AuthFactory::get_ip6_lock());
-        found = from_map(AuthFactory::get_ip6_map(), cx->host());
-    }
-
-    if(found) return group_vec;
-
-    return std::nullopt;
-}
-
-std::shared_ptr<ProfileSubAuth> MitmProxy::find_auth_subprofile(std::vector<std::string> const& groups) {
-
-    auto policy = CfgFactory::get()->db_policy_list.at(matched_policy());
-    auto auth_policy = policy->profile_auth;
-    std::shared_ptr<ProfileSubAuth> to_ret;
-
-    if (auth_policy) {
-        for (auto const &sub_prof: auth_policy->sub_policies) {
-
-            _dia("apply_id_policies: checking identity policy for: %s", sub_prof->element_name().c_str());
-
-            for (auto const &my_id: groups) {
-                _dia("apply_id_policies: identity in policy: %s, match-test real user group '%s'",
-                     sub_prof->element_name().c_str(), my_id.c_str());
-                if (sub_prof->element_name() == my_id) {
-                    _dia("apply_id_policies: .. matched.");
-                    to_ret = sub_prof;
-                    break;
-                }
-            }
-
-            if (to_ret != nullptr) {
-                break;
-            }
-        }
-    }
-
-    return to_ret;
-};
-
-bool MitmProxy::apply_id_policies(baseHostCX* cx) {
-
-    _dia("apply_id_policies: matched policy: %d", matched_policy());
-
-    auto opt_group_vec = find_id_groups(cx);
-
-
-    if( not opt_group_vec.has_value() ) {
-        _deb("apply_id_policies: %d groups not found");
-        return false;
-    }
-
-    _deb("apply_id_policies: %d groups found", opt_group_vec.value().size());
-    auto final_profile = find_auth_subprofile(opt_group_vec.value());
-
-    if (not final_profile) {
-        _deb("apply_id_policies: %d no subprofile found");
-        return false;
-    }
-
-    const char *pc_name = "none";
-    const char *pd_name = "none";
-    const char *pt_name = "none";
-    std::string algs;
-
-    _dia("apply_id_policies: assigning sub-profile %s", final_profile->element_name().c_str());
-    if (final_profile->profile_content != nullptr) {
-        if (CfgFactory::get()->prof_content_apply(cx, this, final_profile->profile_content)) {
-            pc_name = final_profile->profile_content->element_name().c_str();
-            _dia("apply_id_policies: assigning content sub-profile %s",
-                 final_profile->profile_content->element_name().c_str());
-        }
-    }
-    if (final_profile->profile_detection != nullptr) {
-        if (CfgFactory::get()->prof_detect_apply(cx, this, final_profile->profile_detection)) {
-            pd_name = final_profile->profile_detection->element_name().c_str();
-            _dia("apply_id_policies: assigning detection sub-profile %s",
-                 final_profile->profile_detection->element_name().c_str());
-        }
-    }
-    if (final_profile->profile_tls != nullptr) {
-        if (CfgFactory::get()->prof_tls_apply(cx, this, final_profile->profile_tls)) {
-            pt_name = final_profile->profile_tls->element_name().c_str();
-            _dia("apply_id_policies: assigning tls sub-profile %s",
-                 final_profile->profile_tls->element_name().c_str());
-        }
-    }
-    if (final_profile->profile_alg_dns != nullptr) {
-        if (CfgFactory::get()->prof_alg_dns_apply(cx, this, final_profile->profile_alg_dns)) {
-            algs += final_profile->profile_alg_dns->element_name() + " ";
-            _dia("apply_id_policies: assigning tls sub-profile %s",
-                 final_profile->profile_tls->element_name().c_str());
-        }
-    }
-
-    // end of custom sub-profiles
-    _inf("Connection %s: identity-based sub-profile: name=%s cont=%s det=%s tls=%s algs=%s",
-         cx->full_name('L').c_str(),
-         final_profile->element_name().c_str(),
-         pc_name, pd_name, pt_name, algs.c_str()
-        );
-
-    return true;
-}
 
 void MitmProxy::update_neighbors() {
     if(auto fl = first_left(); fl) {
@@ -514,175 +369,6 @@ void MitmProxy::update_neighbors() {
     }
 }
 
-bool MitmProxy::resolve_identity(baseHostCX* cx, bool insert_guest = false) {
-
-    if(not cx) return false;
-    
-    int af = AF_INET;
-    if(cx->com()) {
-        af = cx->com()->l3_proto();
-    }
-    std::string str_af = SockOps::family_str(af);
-
-    bool new_identity = false;
-
-    if(identity_resolved()) {
-        
-        bool update_status = false;
-        if(af == AF_INET || af == 0) update_status = update_auth_ipX_map(cx);
-        if(af == AF_INET6) update_status = update_auth_ipX_map(cx); 
-        
-        if(update_status) {
-            return true;
-        } else {
-            identity_resolved(false);
-        }
-
-        _deb("resolved identity check[%s]: source: %s", str_af.c_str(), cx->host().c_str());
-    } else {
-
-        new_identity = true;
-        _dia("unresolved identity check[%s]: source: %s", str_af.c_str(), cx->host().c_str());
-    }
-
-
-    bool valid_ip_auth = false;
-    std::unique_ptr<shm_logon_info_base> id_ptr;
-
-    if(af == AF_INET || af == 0) {
-
-        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip4_lock());
-        AuthFactory::get().shm_ip4_table_refresh();
-
-        _deb("identity check[%s]: table size: %d", str_af.c_str(), AuthFactory::get_ip4_map().size());
-        auto ip = AuthFactory::get_ip4_map().find(cx->host());
-        if (ip != AuthFactory::get_ip4_map().end()) {
-            shm_logon_info& li = ip->second.last_logon_info;
-            id_ptr.reset(std::move(li.clone()));
-        } else {
-            if (insert_guest) {
-                id_ptr = std::make_unique<shm_logon_info>(cx->host().c_str(),"guest","guest+guests+guests_ipv4");
-            }
-        }
-    }
-    else if(af == AF_INET6) {
-        /* maintain in sync with previous if block */
-
-        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
-        AuthFactory::get().shm_ip6_table_refresh();
-
-        _deb("identity check[%s]: table size: %d", str_af.c_str(), AuthFactory::get_ip6_map().size());
-        auto ip = AuthFactory::get_ip6_map().find(cx->host());
-        if (ip != AuthFactory::get_ip6_map().end()) {
-            shm_logon_info6& li = (*ip).second.last_logon_info;
-            id_ptr.reset(std::move(li.clone()));
-        } else {
-            if (insert_guest) {
-                id_ptr = std::make_unique<shm_logon_info6>(cx->host().c_str(),"guest","guest+guests+guests_ipv6");
-            }
-        }    
-    }
-
-    if(id_ptr) {
-
-        if(new_identity) {
-            _inf("unresolved identity found for %s %s: user: %s groups: %s", str_af.c_str(), cx->host().c_str(),
-                 id_ptr->username().c_str(), id_ptr->groups().c_str());
-        } else {
-            _deb("resolved identity found for %s %s: user: %s groups: %s", str_af.c_str(), cx->host().c_str(),
-                 id_ptr->username().c_str(), id_ptr->groups().c_str());
-
-        }
-
-        // if update_auth_ip_map fails, identity is no longer valid!
-        
-        if(af == AF_INET || af == 0) valid_ip_auth = update_auth_ipX_map(cx);
-        if(af == AF_INET6) valid_ip_auth = update_auth_ipX_map(cx);
-            
-        
-        identity_resolved(valid_ip_auth);
-        if(valid_ip_auth) { 
-            identity(id_ptr.get());
-        }
-        
-        // apply specific identity-based profile. 'li' is still valid, since we still hold the lock
-        // get ptr to identity_info
-
-        if(new_identity) {
-            _dia("resolve_identity[%s]: about to call apply_id_policies on new identity, group: %s", str_af.c_str(),
-                 id_ptr->groups().c_str());
-        } else {
-            _deb("resolve_identity[%s]: about to call apply_id_policies on known identity, group: %s", str_af.c_str(),
-                 id_ptr->groups().c_str());
-        }
-
-        apply_id_policies(cx);
-    }
-
-
-    _dum("identity check[%s]: return %d", str_af.c_str(), valid_ip_auth);
-    return valid_ip_auth;
-}
-
-
-bool MitmProxy::update_auth_ipX_map(baseHostCX* cx) {
-
-    bool ret = false;
-    
-    int af = AF_INET;
-    if(cx->com()) {
-        af = cx->com()->l3_proto();
-    }
-    std::string str_af = SockOps::family_str(af);
-    
-
-    _dum("update_auth_ip_map: start for %s %s", str_af.c_str(), cx->host().c_str());
-    
-    IdentityInfoBase* id_ptr = nullptr;
-    
-    if(af == AF_INET || af == 0) {
-        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip4_lock());
-
-        auto ip = AuthFactory::get_ip4_map().find(cx->host());
-        if (ip != AuthFactory::get_ip4_map().end()) {
-            id_ptr = &(*ip).second;
-        }
-    }
-    else if(af == AF_INET6) {
-        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
-
-        auto ip = AuthFactory::get_ip6_map().find(cx->host());
-        if (ip != AuthFactory::get_ip6_map().end()) {
-            id_ptr = &(*ip).second;
-        }
-    }
-    
-    if(id_ptr != nullptr) {
-        _deb("update_auth_ip_map: user %s from %s %s (groups: %s)",id_ptr->username.c_str(), str_af.c_str(), cx->host().c_str(), id_ptr->groups.c_str());
-
-        id_ptr->last_seen_policy = matched_policy();
-        
-        if (!id_ptr->i_timeout()) {
-            id_ptr->touch();
-            ret = true;
-        } else {
-            _inf("identity timeout: user %s from %s %s (groups: %s)",id_ptr->username.c_str(), str_af.c_str(), cx->host().c_str(), id_ptr->groups.c_str());
-            
-            // erase internal ip map entry
-            if(af == AF_INET || af == 0) {
-                std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip4_lock());
-                AuthFactory::get().ip4_remove(cx->host());
-            }
-            else if(af == AF_INET6) {
-                std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
-                AuthFactory::get().ip6_remove(cx->host());
-            }
-        }
-    }
-    
-    _dum("update_auth_ip_map: finished for %s %s, result %d",str_af.c_str(), cx->host().c_str(),ret);
-    return ret;
-}
 
 
 void MitmProxy::add_filter(std::string const& name, FilterProxy* fp) {
@@ -722,47 +408,6 @@ std::string whitelist_make_key_cert(baseHostCX const* cx) {
     return fg;
 }
 
-
-bool MitmProxy::handle_authentication(MitmHostCX* mh)
-{
-    bool redirected = false;
-    
-    if(auth_opts.authenticate or auth_opts.resolve) {
-    
-        resolve_identity(mh);
-        
-        if(!identity_resolved()) {        
-            _deb("handle_authentication: identity check: unknown");
-            
-            if(auth_opts.authenticate) {
-                if(mh->replacement_type() == MitmHostCX::REPLACETYPE_HTTP) {
-            
-                    mh->replacement_flag(MitmHostCX::REPLACE_REDIRECT);
-                    redirected = true;
-                    handle_replacement_auth(mh);
-                } 
-                else {
-                    // wait, if header won't come in some time, kill the proxy
-                    if(mh->meter_read_bytes > 200) {
-                        // we cannot use replacements and identity is not resolved... what we can do. Shutdown.
-                        _ext("not enough data received to ensure right replacement-aware protocol.");
-                        state().dead(true);
-                    }
-                }
-            }
-        } else {
-            if(auth_opts.block_identity) {
-                if(mh->replacement_type() == MitmHostCX::REPLACETYPE_HTTP) {
-                    _dia("MitmProxy::handle_authentication: we should block it");
-                    mh->replacement_flag(MitmHostCX::REPLACE_BLOCK);
-                    redirected = true;
-                    handle_replacement_auth(mh);
-                }
-            }
-        }
-    }
-    return redirected;
-}
 
 bool MitmProxy::is_white_listed(MitmHostCX const* mh, SSLCom* peercom) {
 
@@ -1273,13 +918,6 @@ bool MitmProxy::handle_requirements(baseHostCX* cx) {
 
     if(mh != nullptr) {
 
-        if((cx->meter_read_bytes < 1024 and cx->meter_write_bytes < 1024)
-           or
-           ((cx->meter_read_count + cx->meter_write_count) % 100 == 0)) {
-            // check authentication
-            redirected = handle_authentication(mh);
-        }
-
         // check com responses
         redirected = handle_com_response_ssl(mh);
 
@@ -1432,20 +1070,15 @@ std::string get_connection_details_str(MitmProxy* px, baseHostCX* cx, char side)
         }
     }
 
-    std::string identity;
     std::string px_flags;
 
     if(px) {
-        if(px->identity_resolved()) {
-            identity = px->identity()->username();
-        }
         if(px->com()) {
             px_flags = px->com()->full_flags_str();
         }
     }
 
-    detail << string_format("user=%s up=%d/%dB dw=%d/%dB flags=%s+%s",
-                            identity.c_str(),
+    detail << string_format("up=%d/%dB dw=%d/%dB flags=%s+%s",
                             cx->meter_read_count, cx->meter_read_bytes,
                             cx->meter_write_count, cx->meter_write_bytes,
                             flags.c_str(),
@@ -1564,9 +1197,6 @@ void MitmProxy::on_error(baseHostCX* cx, char side, const char* side_label) {
         // DEAD before calling us!
         // maybe even dead or unnecessary code
 
-        if(auth_opts.resolve)
-            resolve_identity(cx);
-
         if(cx->peer() && cx->peer()->writebuf()->empty()) {
             _log_closed(INF);
 
@@ -1599,15 +1229,10 @@ void MitmProxy::on_error(baseHostCX* cx, char side, const char* side_label) {
 void MitmProxy::on_left_error(baseHostCX* cx) {
     on_error(cx, 'L', "client");
 
-    if(state().dead())
-        AuthFactory::get().ipX_inc_counters(cx);
 }
 
 void MitmProxy::on_right_error(baseHostCX* cx) {
     on_error(cx, 'R', "server");
-
-    if(state().dead() && cx->peer())
-        AuthFactory::get().ipX_inc_counters(cx->peer());
 
 }
 
@@ -1635,150 +1260,6 @@ bool MitmProxy::run_timers() {
 }
 
 
-void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
-  
-    std::string redir_pre("<html><head><script>top.location.href=\"");
-    std::string redir_suf("\";</script></head><body></body></html>");  
-  
-//     std::string redir_pre("HTTP/1.0 301 Moved Permanently\r\nLocation: ");
-//     std::string redir_suf("\r\n\r\n");  
-  
-    
-    std::string repl;
-    std::string repl_port = AuthFactory::get().options.portal_port_http;
-    std::string repl_proto = "http";
-
-    if(cx->engine_ctx.application_data->is_ssl) {
-        repl_proto = "https";
-        repl_port =AuthFactory::get().options.portal_port_https;
-    }    
-    
-    std::string block_pre("<h2 class=\"fg-red\">Page has been blocked</h2><p>Access has been blocked by smithproxy.</p>"
-                          "<p>To check your user privileges go to status page<p><p> <form action=\"");
-
-    std::string block_post(R"("><input type="submit" value="User Info" class="btn-red"></form>)");
-    
-    if (cx->replacement_flag() == MitmHostCX::REPLACE_REDIRECT) {
-
-        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_token_lock());
-        auto id_token = AuthFactory::get_token_map().find(cx->host());
-        
-        if(id_token != AuthFactory::get_token_map().end()) {
-            _inf("found a cached token for %s",cx->host().c_str());
-            std::pair<unsigned int,std::string>& cache_entry = (*id_token).second;
-            
-            unsigned int now      = time(nullptr);
-            unsigned int token_ts = cache_entry.first;
-            std::string& token_tk = cache_entry.second;
-            
-            if(now - token_ts < AuthFactory::get().options.token_timeout) {
-                _inf("MitmProxy::handle_replacement_auth: cached token %s for request: %s",
-                                token_tk.c_str(), cx->engine_ctx.application_data->str().c_str());
-                
-                if(cx->com()) {
-                    if(cx->com()->l3_proto() == AF_INET) {
-                        repl = redir_pre + repl_proto
-                                + "://"+AuthFactory::get().options.portal_address+":"+repl_port+"/cgi-bin/auth.py?token="
-                                + token_tk + redir_suf;
-
-                    } else if(cx->com()->l3_proto() == AF_INET6) {
-                        repl = redir_pre + repl_proto
-                                + "://"+AuthFactory::get().options.portal_address6+":"+repl_port+"/cgi-bin/auth.py?token="
-                                + token_tk + redir_suf;
-                    } 
-                } 
-                
-                if(repl.empty()) {
-                    // default to IPv4 address
-                    repl = redir_pre + repl_proto
-                            + "://"+AuthFactory::get().options.portal_address+":"+repl_port+"/cgi-bin/auth.py?token="
-                            + token_tk + redir_suf;
-                }
-                
-                repl = html()->render_server_response(repl);
-                
-                cx->to_write(repl);
-                cx->close_after_write(true);
-
-                replacement_msg += "(auth: known token)";
-            } else {
-                _inf("MitmProxy::handle_replacement_auth: expired token %s for request: %s",
-                                token_tk.c_str(), cx->engine_ctx.application_data->str().c_str());
-                goto new_token;
-            }
-        } else {
-        
-            new_token:
-            
-            std::string token_text = cx->engine_ctx.application_data->original_request();
-          
-            for(auto const& i: CfgFactory::get()->policy_prof_auth(cx->matched_policy())->sub_policies) {
-                _dia("MitmProxy::handle_replacement_auth: token: requesting identity %s", i->element_name().c_str());
-                token_text  += " |" + i->element_name();
-            }
-            shm_logon_token tok = shm_logon_token(token_text.c_str());
-            
-            _inf("MitmProxy::handle_replacement_auth: new auth token %s for request: %s",
-                                tok.token().c_str(), cx->engine_ctx.application_data->str().c_str());
-            
-            if(cx->com()) {
-                if(cx->com()->l3_proto() == AF_INET) {
-                    repl = redir_pre + repl_proto
-                            + "://"+AuthFactory::get().options.portal_address+":"+repl_port+"/cgi-bin/auth.py?token="
-                            + tok.token() + redir_suf;
-
-                } else if(cx->com()->l3_proto() == AF_INET6) {
-                    repl = redir_pre + repl_proto
-                            + "://"+AuthFactory::get().options.portal_address6+":"+repl_port+"/cgi-bin/auth.py?token="
-                            + tok.token() + redir_suf;
-                } 
-            } 
-            
-            if(repl.empty()) {
-                // default to IPv4 address
-                _dia("reply fallback to IPv4");
-                repl = redir_pre + repl_proto
-                        + "://"+AuthFactory::get().options.portal_address+":"+repl_port+"/cgi-bin/auth.py?token="
-                        + tok.token() + redir_suf;
-            }
-            
-            repl = html()->render_server_response(repl);
-            
-            cx->to_write(repl);
-            cx->close_after_write(true);
-            replacement_msg += "(auth: new token)";
-
-            AuthFactory::get().shm_token_table_refresh();
-
-            AuthFactory::get().shm_token_map_.entries().push_back(tok);
-            AuthFactory::get().shm_token_map_.acquire();
-            AuthFactory::get().shm_token_map_.save(true);
-            AuthFactory::get().shm_token_map_.release();
-            
-            _dia("MitmProxy::handle_replacement_auth: token table updated");
-            AuthFactory::get_token_map()[cx->host()] = std::pair<unsigned int,std::string>(time(nullptr),tok.token());
-        }
-    } else
-    if (cx->replacement_flag() == MitmHostCX::REPLACE_BLOCK) {
-
-        _dia("MitmProxy::handle_replacement_auth: instructed to replace block");
-        repl = block_pre + repl_proto + "://"+AuthFactory::get().options.portal_address+":"+repl_port + "/cgi-bin/auth.py?a=z" + block_post;
-        
-        std::string cap  = "Page Blocked";
-        std::string meta;
-        repl = html()->render_msg_html_page(cap,meta, repl,"700px");
-        repl = html()->render_server_response(repl);
-        
-        cx->to_write(repl);
-        cx->close_after_write(true);
-
-        replacement_msg += "(auth: blocked)";
-
-    } else
-    if (cx->replacement_flag() == MitmHostCX::REPLACE_NONE) {
-        _dia("MitmProxy::handle_replacement_auth: asked to handle NONE. No-op.");
-    } 
-}
 
 std::string MitmProxy::verify_flag_string(int code) {
 
@@ -2415,19 +1896,6 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
     unsigned short target_port = just_accepted_cx->com()->nonlocal_dst_port();
 
 
-    bool redirected_magic = false;
-    if(target_host == CfgFactory::get()->tenant_magic_ip) {
-        redirected_magic = true;
-        auto redir = sx::proxymaker::to_magic(target_port);
-        target_host = redir.first;
-        target_port = redir.second;
-
-        _dia("Connection from %s redirected from magic IP to %s:%d",
-             just_accepted_cx->name().c_str(),
-             target_host.c_str(), target_port);
-    }
-
-
     auto *target_cx = new MitmHostCX(just_accepted_cx->com()->slave(),
                              target_host.c_str(),
                              string_format("%d",target_port).c_str());
@@ -2435,14 +1903,8 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
     auto new_proxy = sx::proxymaker::make(just_accepted_cx, target_cx);
     auto lcx = logan_context(new_proxy->to_string(iNOT));
 
-    if(not sx::proxymaker::policy(new_proxy, redirected_magic)) {
+    if(not sx::proxymaker::policy(new_proxy, false)) {
         return;
-    }
-
-    if(not sx::proxymaker::authorize(new_proxy)) {
-        if(not sx::proxymaker::is_replaceable(target_port)) {
-            return;
-        }
     }
 
     if(not sx::proxymaker::setup_snat(new_proxy, source_host, source_port)) {
@@ -2482,12 +1944,6 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
 
     if(not sx::proxymaker::policy(new_proxy, false)) {
         return;
-    }
-
-    if(not sx::proxymaker::authorize(new_proxy)) {
-        if(not sx::proxymaker::is_replaceable(target_port)) {
-            return;
-        }
     }
 
     std::string source_host;

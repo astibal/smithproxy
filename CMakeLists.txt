@@ -289,11 +289,8 @@ add_executable(smithproxy
         src/proxy/socks5/socksproxy.cpp
 
         src/policy/policy.cpp
-        src/policy/authfactory.hpp
-        src/policy/authfactory4.cpp
         src/policy/inspectors.cpp
         src/policy/addrobj.cpp
-        src/policy/authfactory6.cpp
         src/policy/loadb.cpp
         src/policy/profiles.hpp
         src/policy/profiles.cpp
@@ -311,9 +308,6 @@ add_executable(smithproxy
 
         src/inspect/engine/http.hpp
         src/inspect/engine/http.cpp
-
-        src/shm/shmauth.cpp
-
 
         src/async/asyncsocket.hpp
         src/async/asyncdns.hpp

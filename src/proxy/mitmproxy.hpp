@@ -57,7 +57,6 @@
 #include <traflog/pcaplog.hpp>
 
 #include <policy/policy.hpp>
-#include <shm/shmauth.hpp>
 
 #include <sslcertval.hpp>
 #include <proxy/ocspinvoker.hpp>
@@ -87,9 +86,6 @@ private:
 class MitmProxy : public baseProxy, public IOController {
 
     std::unique_ptr<socle::baseTrafficLogger> tlog_;
-    
-    bool identity_resolved_ = false;    // meant if attempt has been done, regardless of its result.
-    std::unique_ptr<shm_logon_info_base> identity_;
     
     std::unique_ptr<std::vector<ProfileContentRule>> content_rule_; //save some space and store it as a pointer. Init it only when needed and delete in dtor.
     int matched_policy_ = -1;
@@ -124,12 +120,6 @@ public:
     lazy_ptr<Opts_ContentWriter>& writer_opts() {
         return writer_opts_;
     }
-
-    struct Opts_Authentication {
-        bool authenticate = false;
-        bool resolve = false;
-        bool block_identity = false;
-    } auth_opts;
 
     struct Opts_Accounting {
         bool details = true;
@@ -167,19 +157,6 @@ public:
 
     void update_neighbors();
 
-    inline bool identity_resolved() const { return identity_resolved_; }
-    inline void identity_resolved(bool b) { identity_resolved_ = b; }
-
-    shm_logon_info_base* identity() { return identity_.get(); }
-    inline void identity(shm_logon_info_base const* new_id) { if(new_id) { identity_.reset(new_id->clone()); } }
-
-    bool resolve_identity(bool insert_guest = false) { return resolve_identity(first_left(), insert_guest); }
-    bool resolve_identity(baseHostCX* custom_cx, bool insert_guest);
-    bool update_auth_ipX_map(baseHostCX*);
-    bool apply_id_policies(baseHostCX* cx);
-    std::optional<std::vector<std::string>> find_id_groups(baseHostCX const* cx);
-    std::shared_ptr<ProfileSubAuth> find_auth_subprofile(std::vector<std::string> const& groups);
-
 
     std::unique_ptr<socle::baseTrafficLogger>& tlog() { return tlog_; }
     void toggle_tlog ();
@@ -214,9 +191,6 @@ public:
     virtual void on_half_close(baseHostCX* cx);
 
     bool handle_requirements(baseHostCX* cx);
-    virtual bool handle_authentication(MitmHostCX* cx);
-    virtual void handle_replacement_auth(MitmHostCX* cx);
-
 #ifdef USE_EXPERIMENT
     std::atomic_bool ocsp_caller_tried {false};
     std::unique_ptr<AsyncOcspInvoker> ocsp_caller;

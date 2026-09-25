@@ -25,7 +25,7 @@ BASE_COMMANDS = (
     b"diag tls cache stats", b"diag tls cache list", b"diag tls whitelist list",
     b"diag mem trace list",
     b"diag dns cache list", b"diag proxy policy list", b"diag proxy session list",
-    b"diag workers proxy list", b"diag identity user list", b"diag neighbor list",
+    b"diag workers proxy list", b"diag neighbor list",
     b"test dns genrequest example.test",
 )
 

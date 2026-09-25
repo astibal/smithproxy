@@ -4,7 +4,6 @@
 
 #include <inspect/dns.hpp>
 #include <inspect/dnsinspector.hpp>
-#include <policy/authfactory.hpp>
 #include <proxy/mitmproxy.hpp>
 #include <proxy/socks5/socksproxy.hpp>
 #include <service/cfgapi/cfgapi.hpp>
@@ -142,14 +141,6 @@ void register_smithproxy_cli2_debug(libcli2::Cli& cli) {
                             "\nDNS Packet debug level: " + std::to_string(DNS_Packet::log_level().level()); },
                 [](int value) { DNS_Inspector::log_level().level(value); DNS_Packet::log_level().level(value); },
                 [] { DNS_Inspector::log_level() = CliDebugState::get().orig_dns_insp_loglevel; DNS_Packet::log_level() = CliDebugState::get().orig_dns_packet_loglevel; });
-        });
-
-    debug_command(cli, "auth", "Set authentication logging level")
-        .handler([](libcli2::Context& context, const libcli2::Invocation& invocation) {
-            return level_command(context, invocation,
-                [] { return "Auth debug level: " + std::to_string(AuthFactory::log_level().level()); },
-                [](int value) { AuthFactory::log_level().level(value); },
-                [] { AuthFactory::log_level() = CliDebugState::get().orig_auth_loglevel; });
         });
 
     debug_command(cli, "proxy", "Set proxy logging levels")

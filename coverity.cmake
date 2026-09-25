@@ -102,13 +102,11 @@ add_executable(smithproxy
         src/proxy/socks5/sockshostcx.cpp
         src/proxy/socks5/socksproxy.cpp
         src/cli/cmdserver.cpp
-        src/shm/shmauth.cpp
         src/inspect/dns.cpp
         src/policy/inspectors.cpp
         src/policy/addrobj.cpp
         src/service/netservice.cpp
         src/staticcontent.cpp
-        src/policy/authfactory6.cpp
         src/smithlog.cpp
         src/proxy/filters/filterproxy.cpp
         src/service/dnsupd/smithdnsupd.cpp
@@ -123,8 +121,6 @@ add_executable(smithproxy
         src/service/libcli/fd_transport.cpp
         src/service/libcli/line_editor.cpp
 
-        src/policy/authfactory.hpp
-        src/policy/authfactory4.cpp
         src/inspect/sxsignature.hpp
         src/inspect/pyinspector.hpp
         src/inspect/sigfactory.hpp
