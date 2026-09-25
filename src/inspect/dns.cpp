@@ -272,7 +272,7 @@ std::pair<DNS_Response *, ssize_t> DNSFactory::recv_dns_response(int send_socket
             auto* resp = new DNS_Response();
             auto parsed = resp->load(&recv_buffer);
             _dia("parsed %d bytes",parsed);
-            _dia("DNS response: \n %s",resp->str().c_str());
+            _dia("DNS response: \n %s", resp->to_string(iINF).c_str());
 
             ret = resp;
 

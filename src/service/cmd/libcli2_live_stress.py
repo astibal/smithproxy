@@ -48,7 +48,7 @@ DIAGS = (
     "show status", "diag tls cache stats", "diag tls cache list",
     "diag tls ticket stats", "diag tls verify stats", "diag tls whitelist stats",
     "diag workers proxy list 7", "diag workers pool list", "diag mem buffers stats",
-    "diag mem udp stats", "diag mem objects stats", "diag dns cache stats",
+    "diag mem udp stats", "diag dns cache stats",
     "diag proxy policy list", "diag proxy session list", "diag proxy session tls-info",
     "diag proxy session active", "diag proxy io list", "diag writer stats",
     "diag neighbor stats",

@@ -575,9 +575,9 @@ void CfgValueHelp::init() {
 
     add("policy.[x].action", "action to take with matching traffic")
             .may_be_empty(false)
-            .value_filter(is_in_vector([]() -> std::vector<std::string> { return {"accept", "reject"}; },"accept, or reject"))
+            .value_filter(is_in_vector([]() -> std::vector<std::string> { return {"accept", "deny", "reject"}; },"accept, deny, or legacy reject"))
             .suggestion_generator([](std::string const& section, std::string const& variable) -> std::vector<std::string> {
-                return {"accept", "reject"};
+                return {"accept", "deny"};
             });
 
     add("policy.[x].nat", "nat options")

@@ -175,7 +175,6 @@ def main() -> None:
                 "diag tls ca reload", "diag sig list",
                 "diag workers proxy list", "diag workers pool list",
                 "diag mem buffers stats", "diag mem udp stats",
-                "diag mem objects stats", "diag mem objects list", "diag mem objects search",
                 "diag mem trace list", "diag mem trace mark",
                 "diag dns cache list", "diag dns cache stats", "diag dns cache clear",
                 "diag dns domain list", "diag dns domain clear",
@@ -191,13 +190,11 @@ def main() -> None:
             cli.command_ok("diag tls whitelist insert_fingerprint 00:11 1")
             cli.command_ok("diag tls whitelist insert_l4 127.0.0.1:127.0.0.1:443 1")
             cli.command_ok("diag tls whitelist clear")
-            require(cli.command_ok("diag mem objects clear 0"), "object not found")
             require(cli.command_ok("diag neighbor tag missing +test"), "not found")
             require(cli.command_ok("diag neighbor webhook-update missing"), "not found")
             for diag_command in (
                 "diag tls whitelist insert_fingerprint",
                 "diag tls whitelist insert_l4",
-                "diag mem objects clear",
                 "diag neighbor tag",
                 "diag neighbor webhook-update",
             ):

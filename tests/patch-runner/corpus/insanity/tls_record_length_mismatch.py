@@ -1,0 +1,3 @@
+from _common import script
+
+PPlayScript = script("tls_record_length_mismatch", [b"\x16\x03\x03\xff\xff\x01\x00\x00\x01\x00", b"\x15\x03\x03\x00\x02\x02\x32"], "cs")

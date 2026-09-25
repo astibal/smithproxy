@@ -68,7 +68,7 @@
 
 using namespace socle;
 
-MitmProxy::MitmProxy(baseCom* c): baseProxy(c), sobject() {
+MitmProxy::MitmProxy(baseCom* c): baseProxy(c) {
 
     current_sessions()++;
     total_sessions()++;
@@ -240,7 +240,8 @@ std::string MitmProxy::to_connection_label(bool force_resolve) const {
 
 
 std::string MitmProxy::to_connection_ID() const {
-    return string_format("Proxy-%lX-OID-%lX", StaticContent::boot_random, oid());
+    return string_format("Proxy-%lX-PTR-%lX", StaticContent::boot_random,
+                         reinterpret_cast<std::uintptr_t>(this));
 }
 
 void MitmProxy::webhook_session_start() const {
@@ -352,7 +353,7 @@ std::string MitmProxy::to_string(int verbosity) const {
 
             if(matched_policy() >= 0) {
                 auto p = CfgFactory::get()->db_policy_list.at(matched_policy());
-                r << string_format("\n    PolicyRule oid: 0x%x", p->oid());
+                r << string_format("\n    Policy: %s", p->element_name().c_str());
             }
 
 
@@ -2456,8 +2457,13 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
 }
 
 int MitmMasterProxy::handle_sockets_once(baseCom* c) {
-    //T__dia("slist",5,this->hr()+"\n===============\n");
+    process_session_lists(*this);
     return ThreadedAcceptorProxy<MitmProxy>::handle_sockets_once(c);
+}
+
+int MitmUdpProxy::handle_sockets_once(baseCom* c) {
+    process_session_lists(*this);
+    return ThreadedReceiverProxy<MitmProxy>::handle_sockets_once(c);
 }
 
 
@@ -2509,4 +2515,3 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
 baseHostCX* MitmUdpProxy::MitmUdpProxy::new_cx(int s) {
     return new MitmHostCX(com()->slave(),s);
 }
-

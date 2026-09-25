@@ -43,15 +43,14 @@
 
 #include <any>
 
-#include <sobject.hpp>
 #include <inspect/sxsignature.hpp>
 
 class MitmHostCX;
 
 namespace sx::engine {
 
-    struct ApplicationData: public socle::sobject {
-        ~ApplicationData() override = default;
+    struct ApplicationData {
+        virtual ~ApplicationData() = default;
         bool is_ssl = false;
 
         using property_map_t = std::unordered_map<std::string,std::string>;
@@ -79,8 +78,6 @@ namespace sx::engine {
         virtual std::vector<std::string> custom_list() { return {}; };
         virtual std::string protocol() const = 0;
 
-        bool ask_destroy() override { return false; };
-
         // properties are values kept across multiple exchanges (suriving `next()`).
         // They should not be cleared in next() calls by children.
         property_map_t& properties() { return data.properties; }
@@ -99,7 +96,7 @@ namespace sx::engine {
             return ss.str();
         }
 
-        std::string to_string(int verbosity) const override {
+        virtual std::string to_string(int verbosity) const {
 
             if(verbosity >= iDEB) {
                 return properties_str();
@@ -107,8 +104,9 @@ namespace sx::engine {
 
             return {};
         };
+        [[nodiscard]] std::string str() const { return to_string(iINF); }
 
-        TYPENAME_OVERRIDE("ApplicationData")
+        TYPENAME_BASE("ApplicationData")
 
     private:
         logan_lite log {"com.app"};

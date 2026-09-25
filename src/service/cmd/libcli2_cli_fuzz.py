@@ -23,7 +23,7 @@ BASE_COMMANDS = (
     b"add", b"remove [0]", b"move [0] top", b"set name fuzz", b"toggle src any",
     b"debug show", b"debug term reset", b"debug set cli 0",
     b"diag tls cache stats", b"diag tls cache list", b"diag tls whitelist list",
-    b"diag mem objects list", b"diag mem objects search", b"diag mem trace list",
+    b"diag mem trace list",
     b"diag dns cache list", b"diag proxy policy list", b"diag proxy session list",
     b"diag workers proxy list", b"diag identity user list", b"diag neighbor list",
     b"test dns genrequest example.test",

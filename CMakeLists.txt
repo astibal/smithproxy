@@ -315,6 +315,8 @@ add_executable(smithproxy
         src/service/core/smithproxy.cpp
         src/service/core/smithproxy_objapi.hpp
         src/service/core/smithproxy_objapi.cpp
+        src/service/core/sessionlist.hpp
+        src/service/core/sessionlist.cpp
         src/service/cmd/cmdserver.cpp
         src/service/cfgapi/cfgvalue.hpp
         src/service/cfgapi/cfgvalue.cpp

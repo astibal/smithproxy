@@ -159,15 +159,6 @@ void register_smithproxy_cli2_debug(libcli2::Cli& cli) {
                 [] { baseProxy::log_level() = CliDebugState::get().orig_baseproxy_loglevel; epoll::log_level = CliDebugState::get().orig_epoll_loglevel; MitmMasterProxy::log_level() = CliDebugState::get().orig_mitmmasterproxy_loglevel; MitmHostCX::log_level() = CliDebugState::get().orig_mitmhostcx_loglevel; MitmProxy::log_level() = CliDebugState::get().orig_mitmproxy_loglevel; SocksProxy::log_level() = CliDebugState::get().orig_socksproxy_loglevel; });
         });
 
-    cli.command("debug sobject").reset_definition().help("Toggle sobject creation tracing")
-        .available_if(privileged_exec)
-        .handler([](libcli2::Context& context, const libcli2::Invocation&) {
-            socle::sobject_info::enable_bt_ = !socle::sobject_info::enable_bt_;
-            context.print(std::string("Current sobject trace flag switched to: ") + (socle::sobject_info::enable_bt_ ? "1" : "0"));
-            if (socle::sobject_info::enable_bt_) context.print("!!! backtrace logging may affect performance !!!");
-            return 0;
-        });
-
     cli.command("debug show").reset_definition().help("Show debug settings").available_if(privileged_exec)
         .handler([](libcli2::Context& context, const libcli2::Invocation&) {
             std::ostringstream output;

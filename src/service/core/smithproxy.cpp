@@ -594,6 +594,10 @@ bool SmithProxy::state_load() {
 bool SmithProxy::state_load_neighbors(std::string const& fnm) {
 
     auto ifs = std::ifstream(fnm);
+    if (not ifs || ifs.peek() == std::ifstream::traits_type::eof()) {
+        return false;
+    }
+
     try {
         nlohmann::json js = nlohmann::json::parse(ifs);
         NbrHood::instance().ser_json_in(js);
@@ -944,4 +948,3 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
 
     return ret;
 }
-

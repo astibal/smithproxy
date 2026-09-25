@@ -13,7 +13,6 @@
 #include <traflog/pcaplog.hpp>
 
 #include <display.hpp>
-#include <sobject.hpp>
 #include <timeops.hpp>
 #include <socle.hpp>
 
@@ -107,10 +106,6 @@ std::string status_text() {
     else output << "\nSOCKS acceptors: disabled\n";
 
     output << "\nUptime: " << uptime_string(time(nullptr) - smith.ts_sys_started) << '\n';
-    {
-        const auto lock = std::scoped_lock(socle::sobjectDB::getlock());
-        output << "Objects: " << socle::sobjectDB::db().size() << '\n';
-    }
     const unsigned long upload = MitmProxy::total_mtr_up().get();
     const unsigned long download = MitmProxy::total_mtr_down().get();
     output << "Performance: upload " << number_suffixed(upload * 8) << "bps, download "

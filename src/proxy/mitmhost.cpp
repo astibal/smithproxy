@@ -48,10 +48,6 @@
 #include <inspect/engine/http.hpp>
 #include <inspect/engine.hpp>
 
-bool MitmHostCX::ask_destroy() {
-    error(true);
-    return true;
-}
 std::string MitmHostCX::to_string(int verbosity) const {
 
     std::stringstream ret;
