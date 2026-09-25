@@ -43,5 +43,4 @@ if  [ -f "$(which systemctl)" ]; then
   systemctl enable sx-core@default.service
 else
   echo "... systemd not detected, services not enabled"
-  echo "    legacy rc script can be found in /usr/share/smithproxy"
 fi
