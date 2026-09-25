@@ -4,6 +4,13 @@ set -euo pipefail
 ROOT=${1:-/opt/lab/smithproxy-runner}
 export PATH="$ROOT/bin:$PATH"
 export SMITHPROXY_BIN="$ROOT/bin/smithproxy"
+if [[ ${QUIC_KEYLOG_TEST:-0} == 1 ]]; then
+    # The production binary honours the conventional opt-in keylog variable.
+    # Keep the proof artifact inside this disposable lab and never inherit an
+    # unrelated host path into the isolated Smithproxy process.
+    export SSLKEYLOGFILE="$ROOT/results/quic-downstream.keys"
+    rm -f "$SSLKEYLOGFILE"
+fi
 CLIENT=${CLIENT_NS:-sxr-client}
 SERVER=${SERVER_NS:-sxr-origin}
 NS=${DATA_NS:-sxr-data}

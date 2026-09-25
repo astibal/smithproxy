@@ -6,18 +6,58 @@
 #include <algorithm>
 #include <array>
 #include <cerrno>
+#include <cstdlib>
 #include <cstring>
 #include <deque>
 #include <fcntl.h>
 #include <map>
+#include <mutex>
 #include <netinet/in.h>
 #include <poll.h>
 #include <sstream>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <utility>
 
 namespace sx::quic {
+
+namespace {
+
+#if SMITHPROXY_OPENSSL_QUIC
+std::mutex keylog_lock;
+
+/**
+ * Append one standard NSS key-log record for downstream QUIC decryption.
+ *
+ * SSLKEYLOGFILE is deliberately opt-in: QUIC traffic secrets are as sensitive
+ * as plaintext. Opening the file for each callback keeps rotation and lab
+ * namespaces simple, while the mutex prevents records from multiple listener
+ * contexts being interleaved.
+ */
+void append_quic_keylog_line(const SSL*, const char* line) {
+    auto const* path = std::getenv("SSLKEYLOGFILE");
+    if (!path || *path == '\0' || !line || *line == '\0') return;
+
+    std::lock_guard lock(keylog_lock);
+    auto const fd = ::open(path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0600);
+    if (fd < 0) return;
+    ::fchmod(fd, 0600);
+
+    std::string record(line);
+    record.push_back('\n');
+    std::size_t written = 0;
+    while (written < record.size()) {
+        auto const result = ::write(fd, record.data() + written,
+                                    record.size() - written);
+        if (result <= 0) break;
+        written += static_cast<std::size_t>(result);
+    }
+    ::close(fd);
+}
+#endif
+
+} // namespace
 
 std::string openssl_error_stack() {
     std::ostringstream output;
@@ -34,8 +74,18 @@ std::string openssl_error_stack() {
 
 unique_ssl_ctx make_openssl_quic_context(bool server) {
 #if SMITHPROXY_OPENSSL_QUIC
-    return unique_ssl_ctx(SSL_CTX_new(server ? OSSL_QUIC_server_method()
+    unique_ssl_ctx context(SSL_CTX_new(server ? OSSL_QUIC_server_method()
                                              : OSSL_QUIC_client_method()));
+    // Capture only the intercepted/downstream leg. Upstream secrets describe
+    // a different QUIC connection and are intentionally absent from a client-
+    // side wire capture.
+    if (context && server) {
+        auto const* path = std::getenv("SSLKEYLOGFILE");
+        if (path && *path != '\0') {
+            SSL_CTX_set_keylog_callback(context.get(), append_quic_keylog_line);
+        }
+    }
+    return context;
 #else
     (void)server;
     return nullptr;
