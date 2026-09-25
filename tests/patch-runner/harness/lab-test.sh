@@ -277,7 +277,8 @@ if [[ $TCP_CHURN_TEST == 1 ]]; then
         --interval "${TCP_CHURN_INTERVAL:-0.25}" \
         --settle "${TCP_CHURN_SETTLE:-15}" \
         --timeout "${TCP_CHURN_TIMEOUT:-3}" \
-        --base-port "${TCP_CHURN_BASE_PORT:-32000}" \
+        --min-port "${TCP_CHURN_MIN_PORT:-20000}" \
+        --max-port "${TCP_CHURN_MAX_PORT:-29999}" \
         > "$ROOT/results/tcp-churn.txt"
     cat "$ROOT/results/tcp-churn.txt"
     echo 'PASS TCP churn: persistent flow survived proxy creation and deferred cleanup'
