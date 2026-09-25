@@ -19,7 +19,7 @@ SET(SOCLE_DIR "socle")
 SET(SOCLE_COMMON_DIR "socle/common")
 SET(SMITHD_DIR "src/service/smithd")
 
-project(smithproxy CXX)
+project(smithproxy C CXX)
 
 SET(CMAKE_SOURCE_DIR "src/")
 SET(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}")
@@ -91,6 +91,7 @@ include_directories ("${SMITHD_DIR}")
 
 add_subdirectory(${SOCLE_DIR} socle_lib)
 add_subdirectory(${SOCLE_COMMON_DIR} socle_common_lib)
+add_subdirectory(src/ext/ls-qpack)
 
 find_package(nlohmann_json 3.0 REQUIRED)
 
@@ -284,6 +285,7 @@ add_executable(smithproxy
         src/proxy/multiflow/mfproxy.cpp
         src/proxy/multiflow/mfmitmproxy.cpp
         src/proxy/quic/wire.cpp
+        src/proxy/quic/h3capture.cpp
         src/proxy/quic/openssl.cpp
         src/service/quic/quicservice.cpp
 
@@ -445,6 +447,9 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/proxy/multiflow/tests/mfproxy_tests.cpp
                 src/proxy/quic/wire.cpp
                 src/proxy/quic/tests/wire_tests.cpp
+                src/proxy/quic/h3capture.cpp
+                src/proxy/quic/tests/h3capture_tests.cpp
+                src/proxy/quic/tests/qpack_vendor_tests.cpp
                 src/proxy/quic/openssl.cpp
                 src/proxy/quic/tests/openssl_tests.cpp
                 src/service/quic/quicservice.cpp
@@ -494,7 +499,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/policy/addrobj.cpp
         )
 
-        target_link_libraries(sx_gtests gtest gtest_main smithproxy_libcli socle_lib pthread crypto ssl crypt)
+        target_link_libraries(sx_gtests gtest gtest_main smithproxy_libcli smithproxy_qpack socle_lib pthread crypto ssl crypt)
         if (LIBCONFIGPP_FOUND)
             target_link_libraries(sx_gtests ${LIBCONFIGPP_LIBRARIES})
         endif()
@@ -512,13 +517,16 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/proxy/multiflow/tests/mfproxy_tests.cpp
                 src/proxy/quic/wire.cpp
                 src/proxy/quic/tests/wire_tests.cpp
+                src/proxy/quic/h3capture.cpp
+                src/proxy/quic/tests/h3capture_tests.cpp
+                src/proxy/quic/tests/qpack_vendor_tests.cpp
                 src/proxy/quic/openssl.cpp
                 src/proxy/quic/tests/openssl_tests.cpp
                 src/service/quic/quicservice.cpp
                 src/service/quic/tests/quicservice_tests.cpp
                 src/service/quic/testbed/quic_testbed.cpp
         )
-        target_link_libraries(quic_testbed gtest socle_lib pthread crypto ssl)
+        target_link_libraries(quic_testbed gtest smithproxy_qpack socle_lib pthread crypto ssl)
 
         add_executable(quic_test_node
                 src/proxy/multiflow/mfflowcom.cpp
@@ -593,7 +601,7 @@ if((CMAKE_SYSTEM_PROCESSOR MATCHES "arm") OR (CMAKE_SYSTEM_PROCESSOR STREQUAL "a
     target_link_libraries (smithdc atomic)
 endif()
 
-target_link_libraries(smithproxy smithproxy_libcli socle_lib pthread ssl crypto rt ${UNWIND_LIB})
+target_link_libraries(smithproxy smithproxy_libcli smithproxy_qpack socle_lib pthread ssl crypto rt ${UNWIND_LIB})
 
 if("${USE_LMHPP}" STREQUAL "Y")
     target_link_libraries(smithproxy microhttpd)
