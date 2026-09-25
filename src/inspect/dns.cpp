@@ -184,11 +184,11 @@ std::size_t DNSFactory::generate_dns_request(unsigned short id, buffer& b, std::
     unsigned char* trailer = &queries[hostname.size()];
     trailer[0] = 0x00;
 
-    auto* typ = (unsigned short*)&trailer[1];
-    *typ = htons(t);
+    const uint16_t typ = htons(t);
+    ::memcpy(&trailer[1], &typ, sizeof(typ));
 
-    auto* clas = (unsigned short*)&trailer[3];
-    *clas = htons(0x0001);
+    const uint16_t clas = htons(0x0001);
+    ::memcpy(&trailer[3], &clas, sizeof(clas));
 
     return b.size();
 }
@@ -272,7 +272,7 @@ std::pair<DNS_Response *, ssize_t> DNSFactory::recv_dns_response(int send_socket
             auto* resp = new DNS_Response();
             auto parsed = resp->load(&recv_buffer);
             _dia("parsed %d bytes",parsed);
-            _dia("DNS response: \n %s",resp->str().c_str());
+            _dia("DNS response: \n %s", resp->to_string(iINF).c_str());
 
             ret = resp;
 
@@ -718,4 +718,3 @@ std::vector<std::unique_ptr<CidrAddress>> DNS_Packet::get_a_anwsers() const {
 
     return ret;
 }
-

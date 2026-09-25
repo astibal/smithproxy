@@ -431,6 +431,12 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
+    // Useful for unprivileged runs and process-level integration tests.  Tenant
+    // setup assigns its default pid file, so the explicit override belongs here.
+    if (const char* pid_file = std::getenv("SMITHPROXY_PID_FILE"); pid_file && *pid_file) {
+        this_daemon->pid_file = pid_file;
+    }
+
 
     // be more verbose if check only requested
     if(CfgFactory::get()->config_file_check_only) {

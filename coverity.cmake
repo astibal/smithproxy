@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.14)
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/helpers.cmake)
 
@@ -119,7 +119,9 @@ add_executable(smithproxy
         src/ext/libcidr/cidr.cpp
         src/ext/cxxopts/cxxopts.hpp
         src/ext/nltemplate/nltemplate.cpp
-        src/ext/libcli/libcli.cpp
+        src/service/libcli/cli.cpp
+        src/service/libcli/fd_transport.cpp
+        src/service/libcli/line_editor.cpp
 
         src/policy/authfactory.hpp
         src/policy/authfactory4.cpp

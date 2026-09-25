@@ -43,15 +43,14 @@
 
 #include <any>
 
-#include <sobject.hpp>
 #include <inspect/sxsignature.hpp>
 
 class MitmHostCX;
 
 namespace sx::engine {
 
-    struct ApplicationData: public socle::sobject {
-        ~ApplicationData() override = default;
+    struct ApplicationData {
+        virtual ~ApplicationData() = default;
         bool is_ssl = false;
 
         using property_map_t = std::unordered_map<std::string,std::string>;
@@ -79,8 +78,6 @@ namespace sx::engine {
         virtual std::vector<std::string> custom_list() { return {}; };
         virtual std::string protocol() const = 0;
 
-        bool ask_destroy() override { return false; };
-
         // properties are values kept across multiple exchanges (suriving `next()`).
         // They should not be cleared in next() calls by children.
         property_map_t& properties() { return data.properties; }
@@ -99,7 +96,7 @@ namespace sx::engine {
             return ss.str();
         }
 
-        std::string to_string(int verbosity) const override {
+        virtual std::string to_string(int verbosity) const {
 
             if(verbosity >= iDEB) {
                 return properties_str();
@@ -107,8 +104,9 @@ namespace sx::engine {
 
             return {};
         };
+        [[nodiscard]] std::string str() const { return to_string(iINF); }
 
-        TYPENAME_OVERRIDE("ApplicationData")
+        TYPENAME_BASE("ApplicationData")
 
     private:
         logan_lite log {"com.app"};
@@ -150,13 +148,12 @@ namespace sx::engine {
         std::shared_ptr<duplexFlowMatch> signature;
 
         struct FlowPos {
-            std::size_t block_seen = 0; // index of flow data
-            std::size_t bytes_in_block_seen = 0;
-            constexpr static inline std::size_t bytes_force_rescan = 256; // if there is only this amount of data, rescan, even if populated
+            std::size_t blocks_seen = 0; // flow size seen
+            std::size_t bytes_in_last_block_seen = 0;
+            constexpr static inline std::size_t bytes_force_rescan = 5000; // if there is only this amount of data, rescan, even if populated
         };
         std::optional<FlowPos> flow_seen;
 
-        std::size_t flow_pos = 0;
         std::shared_ptr<ApplicationData> application_data;
 
         // state data to be placed here
@@ -168,15 +165,15 @@ namespace sx::engine {
         enum class status_t { START, MAGIC, OK, ERROR };
         status_t status {status_t::START};
 
-        bool new_data_check(std::size_t buffer_size) {
+        bool new_data_check(size_t current_pos, std::size_t buffer_size) {
 
             if(flow_seen.has_value()) {
                 auto const& position = flow_seen.value();
-                if(position.block_seen >= flow_pos) {
+                if(position.blocks_seen == current_pos) {
                     // SEEN
                     auto const populated = application_data && application_data->populated();
                     auto const small_buffer = buffer_size <= EngineCtx::FlowPos::bytes_force_rescan;
-                    auto const block_bytes_seen = buffer_size <= position.bytes_in_block_seen;
+                    auto const block_bytes_seen = buffer_size <= position.bytes_in_last_block_seen;
 
                     _dia("start: already seen block, populated=%d, seen_all_data=%d, small_buffer=%d",
                          populated, block_bytes_seen, small_buffer);
@@ -213,10 +210,10 @@ namespace sx::engine {
             return false;
         }
 
-        void update_seen_block(std::size_t s) {
+        void update_seen_block(std::size_t abs_pos, std::size_t bytes) {
             flow_seen = {
-                    .block_seen = flow_pos,
-                    .bytes_in_block_seen = s
+                    .blocks_seen = abs_pos,
+                    .bytes_in_last_block_seen = bytes
             };
         }
 

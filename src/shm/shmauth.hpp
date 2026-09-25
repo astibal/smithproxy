@@ -196,6 +196,9 @@ struct shm_logon_token {
     }
     
     shm_logon_token(const char* t, const char* u) {
+        buffer_.size(record_size());
+        buffer_.fill(0);
+
         strncpy((char*)buffer_.data(),t,LOGON_TOKEN_TOKEN_SZ-1);
         strncpy((char*)&buffer_.data()[LOGON_TOKEN_TOKEN_SZ],u,LOGON_TOKEN_URL_SZ-1);
     }

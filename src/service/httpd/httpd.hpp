@@ -76,15 +76,8 @@ namespace sx::webserver {
 
         time_t expired_at() const { return expired_at_; };
 
-        bool operator==(TimedOptional<T> const &ref) {
-            if(value_.has_value() and ref.has_value()) {
-                return value_.value() == ref.value().value();
-            }
-            else if(not value_.has_value() and not ref.has_value()) {
-                return true;
-            }
-
-            return false;
+        bool operator==(TimedOptional<T> const &ref) const {
+            return value_ == ref.value_;
         }
         static T default_value() { return {}; }
 
