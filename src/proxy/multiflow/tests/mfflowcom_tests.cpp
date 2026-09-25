@@ -43,6 +43,21 @@ TEST(MFFlowCom, MapsBackpressureForBaseHostCX) {
     EXPECT_TRUE(com.writable(com.token()));
 }
 
+TEST(MFFlowCom, DefersPeerFinForIndependentHalfClose) {
+    auto connection = std::make_shared<mf::fake_connection>();
+    auto const flow = connection->open_flow(mf::direction::bidirectional);
+    mf::MFFlowCom com(connection, flow);
+    com.defer_read_eof(true);
+    ASSERT_EQ(connection->inject_peer_fin(flow), mf::io_status::ok);
+
+    std::array<char, 1> byte {};
+    errno = 0;
+    EXPECT_EQ(-1, com.read(com.token(), byte.data(), byte.size(), 0));
+    EXPECT_EQ(EAGAIN, errno);
+    EXPECT_FALSE(com.readable(com.token()));
+    EXPECT_TRUE(com.writable(com.token()));
+}
+
 TEST(MFFlowCom, ShutdownFinishesOnlyOwnedFlow) {
     auto connection = std::make_shared<mf::fake_connection>();
     auto const first = connection->open_flow(mf::direction::bidirectional);

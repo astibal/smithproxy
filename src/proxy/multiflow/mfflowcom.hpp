@@ -54,6 +54,11 @@ public:
 
     flow_handle flow() const { return flow_; } ///< Underlying logical-flow handle.
     int token() const { return token_; }        ///< Synthetic baseCom socket token.
+    /**
+     * Keep a peer FIN from looking like a full socket close to legacy proxies.
+     * The multiflow owner then propagates each half-close independently.
+     */
+    void defer_read_eof(bool enabled) { defer_read_eof_ = enabled; }
 
     std::string shortname() const override { return "mf"; }
     std::string to_string(int verbosity) const override;
@@ -73,6 +78,8 @@ private:
     int token_ = 0;                             ///< Synthetic identity for baseCom.
     std::deque<unsigned char> peek_buffer_;     ///< Bytes retained by peek().
     bool cleaned_up_ = false;                   ///< Guards duplicate FIN transmission.
+    bool defer_read_eof_ = false;               ///< Let the owner handle stream half-close.
+    bool peer_eof_ = false;                     ///< Suppress repeated reads after peer FIN.
 };
 
 } // namespace sx::multiflow

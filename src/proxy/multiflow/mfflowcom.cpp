@@ -61,7 +61,17 @@ ssize_t MFFlowCom::read(int, void* destination, size_t size, int) {
         errno = ENOTCONN;
         return -1;
     }
-    return map_result(connection->read(flow_, destination, size));
+    auto const result = connection->read(flow_, destination, size);
+    if (defer_read_eof_ && result.size == 0 && result.status == io_status::eof) {
+        // A QUIC FIN closes only the peer's sending half. Returning zero here
+        // makes the stream-oriented MitmProxy tear down both halves before an
+        // HTTP/3 response can arrive. The multiflow owner consumes the emitted
+        // peer_fin event and forwards FIN after buffered bytes have drained.
+        peer_eof_ = true;
+        errno = EAGAIN;
+        return -1;
+    }
+    return map_result(result);
 }
 
 ssize_t MFFlowCom::peek(int, void* destination, size_t size, int) {
@@ -87,6 +97,12 @@ ssize_t MFFlowCom::peek(int, void* destination, size_t size, int) {
         auto* output = static_cast<unsigned char*>(destination);
         std::copy_n(peek_buffer_.begin(), copied, output);
         return static_cast<ssize_t>(copied);
+    }
+    if (defer_read_eof_ && fill_result.size == 0
+        && fill_result.status == io_status::eof) {
+        peer_eof_ = true;
+        errno = EAGAIN;
+        return -1;
     }
     return map_result(fill_result);
 }
@@ -133,7 +149,8 @@ bool MFFlowCom::com_status() {
 
 bool MFFlowCom::readable(int) {
     auto connection = lock_connection();
-    return !peek_buffer_.empty() || (connection && connection->readable(flow_));
+    return !peek_buffer_.empty()
+        || (!peer_eof_ && connection && connection->readable(flow_));
 }
 
 bool MFFlowCom::writable(int) {

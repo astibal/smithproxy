@@ -121,8 +121,12 @@ private:
         flow_handle left;
         flow_handle right;
         std::unique_ptr<stream_master> master;
+        bool left_expects_fin = true;
+        bool right_expects_fin = true;
         bool left_fin = false;
         bool right_fin = false;
+        bool left_finish_sent = false;
+        bool right_finish_sent = false;
     };
 
     bool paired(bool left_side, flow_handle flow) const {
@@ -197,6 +201,11 @@ private:
         auto* scheduler = &master->scheduler();
         auto* left_com = new MFFlowCom(downstream_, left_handle);
         auto* right_com = new MFFlowCom(upstream_, right_handle);
+        // A multiplexed stream is independently half-closed in each direction.
+        // The stock MitmProxy treats read()==0 as the end of a TCP session, so
+        // the multiflow owner must translate FIN without exposing that EOF early.
+        left_com->defer_read_eof(true);
+        right_com->defer_read_eof(true);
         left_com->master(scheduler);
         right_com->master(scheduler);
         left_com->l3_proto(context_.address_family);
@@ -235,8 +244,19 @@ private:
         }
 
         master->add_proxy(std::move(proxy));
+        auto const left_direction = downstream_->direction_of(left_handle);
+        auto const right_direction = upstream_->direction_of(right_handle);
         pairs_.emplace(left_handle.id, pair {
-            left_handle, right_handle, std::move(master), false, false});
+            left_handle,
+            right_handle,
+            std::move(master),
+            left_direction != direction::send_only,
+            right_direction != direction::send_only,
+            false,
+            false,
+            false,
+            false,
+        });
     }
 
     std::uint64_t total_bytes() const {
@@ -255,8 +275,32 @@ private:
     }
 
     void retire_finished() {
-        for (auto const& [id, current] : pairs_) {
+        for (auto& [id, current] : pairs_) {
             auto lock = std::scoped_lock(current.master->proxy_lock());
+            for (auto const& [proxy, thread] : current.master->proxies()) {
+                (void)thread;
+                auto* mitm = dynamic_cast<MitmProxy*>(proxy.get());
+                if (!mitm) continue;
+
+                auto* left = mitm->first_left();
+                auto* right = mitm->first_right();
+                if (current.left_fin && !current.right_finish_sent
+                    && right && right->writebuf()->empty()) {
+                    auto const result = upstream_->finish(current.right);
+                    current.right_finish_sent = result != io_status::would_block;
+                }
+                if (current.right_fin && !current.left_finish_sent
+                    && left && left->writebuf()->empty()) {
+                    auto const result = downstream_->finish(current.left);
+                    current.left_finish_sent = result != io_status::would_block;
+                }
+
+                auto const left_complete = !current.left_expects_fin
+                    || (current.left_fin && current.right_finish_sent);
+                auto const right_complete = !current.right_expects_fin
+                    || (current.right_fin && current.left_finish_sent);
+                if (left_complete && right_complete) mitm->state().dead(true);
+            }
             // FIN is only a hint: MitmProxy may still hold bytes preceding it
             // in a HostCX write buffer. Its normal lifecycle marks/removes the
             // child only after those bytes have been handled.
