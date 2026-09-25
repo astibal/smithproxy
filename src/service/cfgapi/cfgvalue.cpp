@@ -39,11 +39,8 @@
 #include <algorithm>
 #include <libgen.h>
 
-#include <ext/libcli/libcli.h>
-
 #include <service/cfgapi/cfgvalue.hpp>
 #include <service/cfgapi/cfgapi.hpp>
-#include <service/cmd/cligen.hpp>
 #include <common/log/logan.hpp>
 #include <utils/str.hpp>
 

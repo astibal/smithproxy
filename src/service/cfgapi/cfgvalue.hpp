@@ -56,8 +56,6 @@
 #include <display.hpp>
 
 
-using namespace libcli;
-
 struct CfgValue {
 
     struct filter_retval {

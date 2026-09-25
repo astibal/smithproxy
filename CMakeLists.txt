@@ -318,10 +318,7 @@ add_executable(smithproxy
         src/service/cmd/cmdserver.cpp
         src/service/cfgapi/cfgvalue.hpp
         src/service/cfgapi/cfgvalue.cpp
-        src/service/cmd/cligen.hpp
-        src/service/cmd/cligen.cpp
-        src/service/cmd/clistate.hpp
-        src/service/cmd/clistate.cpp
+        src/service/cmd/cli_debug_state.hpp
         src/service/cmd/diag/diag_cmds.hpp
         src/service/cmd/diag/diag_cmds.cpp
         src/service/core/service.cpp
@@ -349,7 +346,15 @@ add_executable(smithproxy
 
         src/ext/libcidr/cidr.cpp
         src/ext/nltemplate/nltemplate.cpp
-        src/ext/libcli/libcli.cpp
+        src/ext/libcli2/cli.cpp
+        src/ext/libcli2/fd_transport.cpp
+        src/service/cmd/config_cli2.cpp
+        src/service/cmd/config_cli2_schema.cpp
+        src/service/cmd/config_cli2_smithproxy.cpp
+        src/service/cmd/libcli2_socket.cpp
+        src/service/cmd/smith_cli2_commands.cpp
+        src/service/cmd/smith_cli2_debug.cpp
+        src/service/cmd/smith_cli2_test.cpp
         src/ext/lmhpp/include/lmhttpd.hpp
         src/ext/hpack/hpack.hpp
         src/service/core/authpam.cpp
@@ -420,6 +425,14 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/ext/hpack/hpack.hpp
                 src/ext/hpack/hpack_tests.cpp
 
+                src/ext/libcli2/cli.cpp
+                src/ext/libcli2/fd_transport.cpp
+                src/ext/libcli2/fd_transport_tests.cpp
+                src/service/cmd/config_cli2.cpp
+                src/service/cmd/config_cli2_tests.cpp
+                src/service/cmd/config_cli2_schema.cpp
+                src/service/cmd/config_cli2_schema_tests.cpp
+
                 src/inspect/engine.hpp
                 src/inspect/engine/http.cpp
                 src/inspect/dns.cpp
@@ -454,7 +467,10 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/policy/addrobj.cpp
         )
 
-        target_link_libraries(sx_gtests gtest gtest_main socle_lib pthread crypto ssl)
+        target_link_libraries(sx_gtests gtest gtest_main socle_lib pthread crypto ssl crypt)
+        if (LIBCONFIGPP_FOUND)
+            target_link_libraries(sx_gtests ${LIBCONFIGPP_LIBRARIES})
+        endif()
         target_link_libraries(sx_gtests_http1 gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries (sx_gtests nlohmann_json::nlohmann_json)
     endif()
@@ -519,4 +535,3 @@ if("${USE_EXPERIMENT}" STREQUAL "Y")
     message(" >> !!! EXPERIMENTS ENABLED !!!" )
     message(" >> - software you built and install contain code which is probably not for general use" )
 endif()
-

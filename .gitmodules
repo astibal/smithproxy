@@ -3,12 +3,10 @@
 	url = ../socle.git
 	branch = master
 	update = merge
-
-[submodule "src/ext/libcli"]
-	path = src/ext/libcli
-	url = ../libcli
-	branch = main
-
 [submodule "src/ext/lmhpp"]
 	path = src/ext/lmhpp
 	url = ../lmhpp
+[submodule "src/ext/libcli2"]
+	path = src/ext/libcli2
+	url = ../libcli
+	branch = libcli2
