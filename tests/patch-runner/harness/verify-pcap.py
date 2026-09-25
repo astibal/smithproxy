@@ -7,7 +7,9 @@ import sys
 
 data_dir = pathlib.Path(sys.argv[1])
 prefix = sys.argv[2]
-marker = sys.argv[3].encode()
+markers = [value.encode() for value in sys.argv[3:]]
+if not markers:
+    raise SystemExit("specify at least one marker")
 files = sorted(data_dir.glob(f"{prefix}*.pcapng"), key=lambda p: p.stat().st_mtime_ns)
 if not files:
     raise SystemExit(f"no {prefix}*.pcapng found in {data_dir}")
@@ -24,7 +26,7 @@ if endian is None:
 offset = 0
 blocks = 0
 enhanced_packets = 0
-marker_found = False
+markers_found = set()
 while offset < len(data):
     if len(data) - offset < 12:
         raise SystemExit(f"truncated pcapng block header at {offset}: {path}")
@@ -38,13 +40,14 @@ while offset < len(data):
     blocks += 1
     if block_type == 6:
         enhanced_packets += 1
-        marker_found = marker_found or marker in block
+        markers_found.update(marker for marker in markers if marker in block)
     offset += block_len
 
-if enhanced_packets == 0 or not marker_found:
-    raise SystemExit(f"pcapng lacks EPB or marker: packets={enhanced_packets}, file={path}")
+if enhanced_packets == 0 or len(markers_found) != len(markers):
+    missing = [marker.decode() for marker in markers if marker not in markers_found]
+    raise SystemExit(f"pcapng lacks EPB or markers {missing}: packets={enhanced_packets}, file={path}")
 print(json.dumps({
     "file": str(path), "bytes": len(data), "blocks": blocks,
-    "enhanced_packets": enhanced_packets, "marker_found": marker_found,
+    "enhanced_packets": enhanced_packets,
+    "markers_found": [marker.decode() for marker in markers if marker in markers_found],
 }, sort_keys=True))
-

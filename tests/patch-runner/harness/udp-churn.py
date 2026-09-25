@@ -8,18 +8,15 @@ import threading
 import time
 
 
-TARGET = ("198.18.20.2", 9999)
-EXPECTED_PEER = b" peer=198.18.20.1 sport="
-
-
-def exchange(source_port: int, payload: bytes, timeout: float) -> None:
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-        sock.bind(("0.0.0.0", source_port))
+def exchange(family: int, target: tuple, expected_peer: bytes,
+             source_port: int, payload: bytes, timeout: float) -> None:
+    with socket.socket(family, socket.SOCK_DGRAM) as sock:
+        sock.bind(("::" if family == socket.AF_INET6 else "0.0.0.0", source_port))
         sock.settimeout(timeout)
-        sock.sendto(payload, TARGET)
+        sock.sendto(payload, target)
         reply, peer = sock.recvfrom(65535)
-        expected = payload + EXPECTED_PEER
-        if peer != TARGET or not reply.startswith(expected):
+        expected = payload + expected_peer
+        if peer[0:2] != target or not reply.startswith(expected):
             raise RuntimeError(
                 f"port={source_port} peer={peer!r} reply={reply!r} expected_prefix={expected!r}"
             )
@@ -34,7 +31,12 @@ def main() -> None:
     parser.add_argument("--timeout", type=float, default=1.0)
     parser.add_argument("--min-port", type=int, default=20000)
     parser.add_argument("--max-port", type=int, default=29999)
+    parser.add_argument("--host", default="198.18.20.2")
+    parser.add_argument("--expected-peer", default="198.18.20.1")
     args = parser.parse_args()
+    family = socket.AF_INET6 if ":" in args.host else socket.AF_INET
+    target = (args.host, 9999)
+    expected_peer = f" peer={args.expected_peer} sport=".encode()
 
     total = args.waves * args.flows
     if not 1 <= args.min_port <= args.max_port <= 65535:
@@ -51,7 +53,7 @@ def main() -> None:
         sequence = 0
         while not stop.is_set():
             try:
-                exchange(19000, f"probe-{sequence}".encode(), args.timeout)
+                exchange(family, target, expected_peer, 19000, f"probe-{sequence}".encode(), args.timeout)
                 probe_count += 1
             except Exception as exc:  # keep probing so one stall does not hide later ones
                 probe_errors.append(str(exc))
@@ -70,7 +72,8 @@ def main() -> None:
                 for index in range(args.flows):
                     source_port = args.min_port + wave * args.flows + index
                     payload = f"churn-{wave}-{index}".encode()
-                    futures.append(pool.submit(exchange, source_port, payload, args.timeout))
+                    futures.append(pool.submit(exchange, family, target, expected_peer,
+                                               source_port, payload, args.timeout))
 
                 for future in futures:
                     try:
@@ -89,7 +92,7 @@ def main() -> None:
 
     elapsed = time.monotonic() - started
     print(
-        f"UDP churn: flows={total} probes={probe_count} elapsed={elapsed:.2f}s "
+        f"UDP churn: family=IPv{6 if family == socket.AF_INET6 else 4} flows={total} probes={probe_count} elapsed={elapsed:.2f}s "
         f"churn_errors={len(churn_errors)} probe_errors={len(probe_errors)}"
     )
 

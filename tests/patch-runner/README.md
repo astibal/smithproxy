@@ -30,6 +30,11 @@ Profiles:
   and API ports, and keep it in the foreground until Ctrl-C. With `--remote`,
   both listeners are on the remote host's loopback interface.
 
+The isolated lab is dual-stack. Applicable dataplane tests report separate
+`PASS4` and `PASS6` verdicts; either family failing fails the suite. This covers
+HTTP, TLS, TCP/UDP, policy, RTT, churn, pplay, PCAP/GRE capture validation and
+HTTP/2 observability. Management-only checks retain a single `PASS` verdict.
+
 `--suite tls|policy|rtt|session-list` runs one virtual sanity subsection in the same isolated
 lab. Without `--suite`, every subsection is always included in `sanity` and
 `full`. Suite implementations and their case definitions live below
@@ -99,16 +104,16 @@ be large enough for the configured wave and flow count of each churn test.
 ## Capture matrix
 
 Both `sanity` and `full` run a dedicated 30-flow capture matrix (22 TCP and
-8 UDP cases). Every client and server direction has a unique marker and an
+8 UDP cases) once over IPv4 and once over IPv6. Every client and server direction has a unique marker and an
 expected byte length plus SHA-256 digest. After Smithproxy shuts down, the
 validator reconstructs application streams from both local PCAPNG files and
 GRE-encapsulated packets and requires both exports to match the corpus manifest.
 
-The same validation checks IPv4, TCP and UDP lengths and checksums. For the
+The same validation checks IPv4/IPv6, TCP and UDP lengths and checksums. For the
 simulated TCP conversations it additionally verifies contiguous sequence
 numbers, monotonic/non-future ACKs, SYN/FIN sequence consumption and rejects
 payload after FIN or RST. Results are stored in
-`lab-results/capture-matrix/validation.json`.
+`lab-results/capture-matrix/validation4.json` and `validation6.json`.
 
 ## RTT probe
 

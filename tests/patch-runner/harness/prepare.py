@@ -44,6 +44,10 @@ if os.environ.get('POLICY_TEST') == '1':
     { name = "test-named-accept-profile"; proto = "tcp"; src = [ "any" ]; sport = [ "all" ]; dst = [ "any" ]; dport = [ "test_9996" ]; detection_profile = "detect"; content_profile = "default"; action = "accept"; nat = "auto"; routing = "none"; },
     { name = "test-named-deny"; proto = "tcp"; src = [ "any" ]; sport = [ "all" ]; dst = [ "any" ]; dport = [ "test_9997" ]; action = "deny"; nat = "none"; routing = "none"; },
     { name = "test-legacy-reject-alias"; proto = "tcp"; src = [ "any" ]; sport = [ "all" ]; dst = [ "any" ]; dport = [ "test_9995" ]; action = "reject"; nat = "none"; routing = "none"; },
+    { disabled = TRUE; name = "test6-disabled-deny"; proto = "tcp"; src = [ "any6" ]; sport = [ "all" ]; dst = [ "any6" ]; dport = [ "test_9998" ]; action = "deny"; nat = "none"; routing = "none"; },
+    { name = "test6-named-accept-profile"; proto = "tcp"; src = [ "any6" ]; sport = [ "all" ]; dst = [ "any6" ]; dport = [ "test_9996" ]; detection_profile = "detect"; content_profile = "default"; action = "accept"; nat = "auto"; routing = "none"; },
+    { name = "test6-named-deny"; proto = "tcp"; src = [ "any6" ]; sport = [ "all" ]; dst = [ "any6" ]; dport = [ "test_9997" ]; action = "deny"; nat = "none"; routing = "none"; },
+    { name = "test6-legacy-reject-alias"; proto = "tcp"; src = [ "any6" ]; sport = [ "all" ]; dst = [ "any6" ]; dport = [ "test_9995" ]; action = "reject"; nat = "none"; routing = "none"; },
 '''
     text, count = re.subn(r'(policy\s*=\s*\()', r'\1\n' + policy_cases, text, count=1)
     if port_count != 1 or count != 1: raise RuntimeError('cannot inject policy suite objects/rules')
@@ -104,8 +108,11 @@ text = text.replace('settings = {', f'''settings = {{
 (config/'smithproxy.cfg').write_text(text)
 input_if = os.environ.get('LAB_IN_IF', 'di0')
 (config/'network.conf').write_text(f'''INPUT_CIDRS[{input_if}]=198.18.10.1/24
+INPUT_CIDRS6[{input_if}]=fd00:10::1/64
 OUT_CIDR=198.18.20.1/24
 GATEWAY=198.18.20.2
+OUT_CIDR6=fd00:20::1/64
+GATEWAY6=fd00:20::2
 API_BIND=127.0.0.1
 API_PORT=55556
 ''')

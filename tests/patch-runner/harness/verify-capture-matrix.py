@@ -74,9 +74,23 @@ def ipv4_at(packet, offset, issues, label):
     return packet[offset:offset + total]
 
 
+def ipv6_at(packet, offset):
+    if offset + 40 > len(packet) or packet[offset] >> 4 != 6:
+        return None
+    payload_length = struct.unpack_from("!H", packet, offset + 4)[0]
+    total = 40 + payload_length
+    if offset + total > len(packet):
+        raise AssertionError("invalid IPv6 payload length")
+    return packet[offset:offset + total]
+
+
+def ip_at(packet, offset, issues, label):
+    return ipv4_at(packet, offset, issues, label) or ipv6_at(packet, offset)
+
+
 def local_inner(packet, issues):
     for offset in (0, 14, 16):
-        inner = ipv4_at(packet, offset, issues, "PCAPNG")
+        inner = ip_at(packet, offset, issues, "PCAPNG")
         if inner is not None:
             return inner
     return None
@@ -90,16 +104,27 @@ def gre_inner(packet, issues):
     if len(outer) < ihl + 4:
         raise AssertionError("truncated GRE header")
     flags, protocol = struct.unpack_from("!HH", outer, ihl)
-    if flags != 0 or protocol != 0x0800:
+    if flags != 0 or protocol not in (0x0800, 0x86DD):
         return None
-    return ipv4_at(outer, ihl + 4, issues, "GRE inner")
+    return ip_at(outer, ihl + 4, issues, "GRE inner")
 
 
 def transport(inner, issues, label):
-    ihl = (inner[0] & 0x0f) * 4; protocol = inner[9]
-    source = socket.inet_ntoa(inner[12:16]); destination = socket.inet_ntoa(inner[16:20])
-    segment = inner[ihl:]
-    pseudo = inner[12:20] + b"\x00" + bytes((protocol,)) + len(segment).to_bytes(2, "big")
+    family = inner[0] >> 4
+    if family == 4:
+        ihl = (inner[0] & 0x0f) * 4; protocol = inner[9]
+        source = socket.inet_ntop(socket.AF_INET, inner[12:16])
+        destination = socket.inet_ntop(socket.AF_INET, inner[16:20])
+        segment = inner[ihl:]
+        pseudo = inner[12:20] + b"\x00" + bytes((protocol,)) + len(segment).to_bytes(2, "big")
+    elif family == 6:
+        protocol = inner[6]
+        source = socket.inet_ntop(socket.AF_INET6, inner[8:24])
+        destination = socket.inet_ntop(socket.AF_INET6, inner[24:40])
+        segment = inner[40:]
+        pseudo = inner[8:40] + len(segment).to_bytes(4, "big") + b"\x00\x00\x00" + bytes((protocol,))
+    else:
+        return None
     if protocol == 6:
         if len(segment) < 20:
             raise AssertionError("truncated TCP header")
@@ -109,7 +134,7 @@ def transport(inner, issues, label):
             raise AssertionError("invalid TCP data offset")
         if checksum(pseudo + segment) != 0:
             issues.append(f"{label}: invalid TCP checksum")
-        return {"protocol": "tcp", "source": source, "destination": destination,
+        return {"family": family, "protocol": "tcp", "source": source, "destination": destination,
                 "source_port": source_port, "destination_port": destination_port,
                 "sequence": sequence, "acknowledgment": acknowledgment,
                 "flags": segment[13], "payload": segment[header_len:]}
@@ -119,9 +144,11 @@ def transport(inner, issues, label):
         source_port, destination_port, length, udp_sum = struct.unpack_from("!HHHH", segment)
         if length < 8 or length > len(segment):
             raise AssertionError("invalid UDP length")
-        if udp_sum and checksum(pseudo[:10] + length.to_bytes(2, "big") + segment[:length]) != 0:
+        udp_pseudo = (pseudo[:10] + length.to_bytes(2, "big")) if family == 4 else \
+            (inner[8:40] + length.to_bytes(4, "big") + b"\x00\x00\x00" + bytes((protocol,)))
+        if udp_sum and checksum(udp_pseudo + segment[:length]) != 0:
             issues.append(f"{label}: invalid UDP checksum")
-        return {"protocol": "udp", "source": source, "destination": destination,
+        return {"family": family, "protocol": "udp", "source": source, "destination": destination,
                 "source_port": source_port, "destination_port": destination_port,
                 "payload": segment[8:length]}
     return None
@@ -178,13 +205,13 @@ def validate_tcp(packets, selected, issues, label):
     return streams
 
 
-def collect(packet_bytes, unwrap, label):
+def collect(packet_bytes, unwrap, label, family):
     parsed = []; issues = []
     for packet in packet_bytes:
         inner = unwrap(packet, issues)
         if inner is not None:
             item = transport(inner, issues, label)
-            if item is not None:
+            if item is not None and item["family"] == family:
                 parsed.append(item)
     selected = {connection_key(item) for item in parsed if b"CMX" in item["payload"]}
     tcp_streams = validate_tcp(parsed, selected, issues, label)
@@ -210,7 +237,8 @@ def compare(label, streams, expected):
     return observed, errors
 
 
-def main(manifest_name, data_dir_name, prefix, gre_name):
+def main(manifest_name, data_dir_name, prefix, gre_name, family_name="4"):
+    family = int(family_name)
     manifest = json.loads(pathlib.Path(manifest_name).read_text()); expected = manifest["entries"]
     files = sorted(pathlib.Path(data_dir_name).glob(f"{prefix}*.pcapng"))
     if not files:
@@ -219,8 +247,8 @@ def main(manifest_name, data_dir_name, prefix, gre_name):
     for path in files:
         packets, blocks = pcapng_packets(path); local_packets.extend(packets); local_blocks += blocks
     gre_packets = pcap_packets(pathlib.Path(gre_name))
-    local_streams, local_parsed, local_flows, local_issues = collect(local_packets, local_inner, "PCAPNG")
-    gre_streams, gre_parsed, gre_flows, gre_issues = collect(gre_packets, gre_inner, "GRE")
+    local_streams, local_parsed, local_flows, local_issues = collect(local_packets, local_inner, "PCAPNG", family)
+    gre_streams, gre_parsed, gre_flows, gre_issues = collect(gre_packets, gre_inner, "GRE", family)
     local, local_errors = compare("PCAPNG", local_streams, expected)
     gre, gre_errors = compare("GRE", gre_streams, expected)
     content_errors = local_errors + gre_errors
@@ -229,6 +257,7 @@ def main(manifest_name, data_dir_name, prefix, gre_name):
     formal_counts = collections.Counter(local_issues + gre_issues)
     result = {
         "cases": len({entry["case"] for entry in expected}),
+        "ip_family": family,
         "directional_streams": len(expected),
         "local_files": len(files), "local_blocks": local_blocks,
         "local_packets": len(local_parsed), "local_matrix_flows": len(local_flows),

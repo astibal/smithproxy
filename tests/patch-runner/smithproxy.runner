@@ -134,11 +134,19 @@ SMITHPROXY_BIN=$(realpath "$SMITHPROXY_BIN")
 # Each input has its own CIDR. Using source is intentional: this is trusted code,
 # not a file received through the API. CLI names / options match the original prototype.
 declare -A INPUT_CIDRS
+declare -A INPUT_CIDRS6
 TELEMETRY_CIDR=
 TELEMETRY_GATEWAY=
 TELEMETRY_ROUTES=()
+OUT_CIDR6=
+GATEWAY6=
 source "$CONFIG_DIR/network.conf"
 : "${OUT_CIDR:?Missing OUT_CIDR in network.conf}" "${GATEWAY:?Missing GATEWAY in network.conf}"
+IPV6_ENABLED=0
+if [[ -n $OUT_CIDR6 || -n $GATEWAY6 ]]; then
+    : "${OUT_CIDR6:?Missing OUT_CIDR6 in network.conf}" "${GATEWAY6:?Missing GATEWAY6 in network.conf}"
+    IPV6_ENABLED=1
+fi
 [[ -z $TELEMETRY_CIDR_OVERRIDE ]] || TELEMETRY_CIDR=$TELEMETRY_CIDR_OVERRIDE
 [[ -z $TELEMETRY_GATEWAY_OVERRIDE ]] || TELEMETRY_GATEWAY=$TELEMETRY_GATEWAY_OVERRIDE
 [[ -z $API_BIND_OVERRIDE ]] || API_BIND=$API_BIND_OVERRIDE
@@ -161,6 +169,9 @@ for dev in "${INPUTS[@]}"; do
         echo 'Input, output and telemetry interfaces overlap.' >&2; exit 2;
     }
     [[ -n ${INPUT_CIDRS[$dev]:-} ]] || { echo "Missing INPUT_CIDRS[$dev]." >&2; exit 2; }
+    ((IPV6_ENABLED == 0)) || [[ -n ${INPUT_CIDRS6[$dev]:-} ]] || {
+        echo "Missing INPUT_CIDRS6[$dev]." >&2; exit 2;
+    }
 done
 [[ -z $TELEMETRY_IF || $TELEMETRY_IF != "$OUT" ]] || {
     echo 'Output and telemetry interfaces overlap.' >&2; exit 2;
@@ -245,13 +256,24 @@ done
 ip -n "$NS" link set lo up
 for dev in "${INPUTS[@]}"; do
     ip -n "$NS" addr add "${INPUT_CIDRS[$dev]}" dev "$dev"
+    if ((IPV6_ENABLED)); then
+        ip netns exec "$NS" sysctl -qw "net.ipv6.conf.$dev.disable_ipv6=0"
+        ip -n "$NS" -6 addr add "${INPUT_CIDRS6[$dev]}" dev "$dev" nodad
+    fi
     ip -n "$NS" link set "$dev" up
-    log "     Input:  $dev = ${INPUT_CIDRS[$dev]}"
+    log "     Input:  $dev = ${INPUT_CIDRS[$dev]}${INPUT_CIDRS6[$dev]:+ / ${INPUT_CIDRS6[$dev]}}"
 done
 ip -n "$NS" addr add "$OUT_CIDR" dev "$OUT"
+if ((IPV6_ENABLED)); then
+    ip netns exec "$NS" sysctl -qw "net.ipv6.conf.$OUT.disable_ipv6=0"
+    ip -n "$NS" -6 addr add "$OUT_CIDR6" dev "$OUT" nodad
+fi
 ip -n "$NS" link set "$OUT" up
 ip -n "$NS" route add default via "$GATEWAY" dev "$OUT"
-log "3/7  Output: $OUT = $OUT_CIDR, gateway $GATEWAY (inside $NS only)"
+if ((IPV6_ENABLED)); then
+    ip -n "$NS" -6 route add default via "$GATEWAY6" dev "$OUT"
+fi
+log "3/7  Output: $OUT = $OUT_CIDR${OUT_CIDR6:+ / $OUT_CIDR6}, gateway $GATEWAY${GATEWAY6:+ / $GATEWAY6} (inside $NS only)"
 if [[ -n $TELEMETRY_IF ]]; then
     ip -n "$NS" addr add "$TELEMETRY_CIDR" dev "$TELEMETRY_IF"
     ip -n "$NS" link set "$TELEMETRY_IF" up
@@ -273,6 +295,10 @@ done
 # Unmarked outbound proxy connections use the normal default route through do0.
 ip -n "$NS" rule add pref "$TPROXY_PRIORITY" fwmark "$TPROXY_MARK/1" lookup "$TPROXY_TABLE"
 ip -n "$NS" route add local 0.0.0.0/0 dev lo table "$TPROXY_TABLE"
+if ((IPV6_ENABLED)); then
+    ip -n "$NS" -6 rule add pref "$TPROXY_PRIORITY" fwmark "$TPROXY_MARK/1" lookup "$TPROXY_TABLE"
+    ip -n "$NS" -6 route add local ::/0 dev lo table "$TPROXY_TABLE"
+fi
 log "4/7  Mark $TPROXY_MARK -> table $TPROXY_TABLE -> local transparent socket"
 
 # == 5. Traffic interception =====================================================
@@ -305,6 +331,25 @@ table ip smithproxy {
     }
 }
 NFT
+if ((IPV6_ENABLED)); then
+ip netns exec "$NS" nft -f - <<NFT6
+table ip6 smithproxy6 {
+    chain forward {
+        type filter hook forward priority filter; policy drop;
+    }
+    chain prerouting {
+        type filter hook prerouting priority mangle; policy accept;
+        meta l4proto tcp socket transparent 1 counter meta mark set $TPROXY_MARK accept
+        iifname != { $INPUT_SET } return
+        fib daddr type local return
+        tcp dport 443 counter tproxy to :$TLS_PORT meta mark set $TPROXY_MARK accept
+        udp dport 443 counter tproxy to :$TLS_PORT meta mark set $TPROXY_MARK accept
+        meta l4proto tcp counter tproxy to :$PLAIN_PORT meta mark set $TPROXY_MARK accept
+        meta l4proto udp counter tproxy to :$PLAIN_PORT meta mark set $TPROXY_MARK accept
+    }
+}
+NFT6
+fi
 log "5/7  TPROXY active: TCP/UDP :$PLAIN_PORT, TLS/DTLS :$TLS_PORT; forwarding DROP"
 
 # == 6. Proxy process and management path =======================================

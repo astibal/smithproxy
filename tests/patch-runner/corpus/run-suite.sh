@@ -7,6 +7,7 @@ CATEGORY=${1:-all}
 MODE=${MODE:-loopback}
 RESULTS=${RESULTS:-$HERE/results}
 PORT=${PORT:-18080}
+IP_FAMILY=${IP_FAMILY:-4}
 MATCH=${MATCH:-*}
 EXCLUDE=${EXCLUDE:-}
 FUZZ_LEVEL=${FUZZ_LEVEL:-}
@@ -24,17 +25,26 @@ export PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}"
     echo 'Usage: run-suite.sh [all|regular|edge|insanity]' >&2
     exit 2
 }
+[[ $IP_FAMILY == 4 || $IP_FAMILY == 6 ]] || { echo 'IP_FAMILY must be 4 or 6' >&2; exit 2; }
 
 case "$MODE" in
     loopback)
-        SERVER_BIND=127.0.0.1
-        CLIENT_TARGET=127.0.0.1
+        if [[ $IP_FAMILY == 6 ]]; then
+            SERVER_BIND=::1; CLIENT_TARGET=::1
+        else
+            SERVER_BIND=127.0.0.1; CLIENT_TARGET=127.0.0.1
+        fi
         SERVER_EXEC=()
         CLIENT_EXEC=()
         ;;
     runner)
-        SERVER_BIND=${SERVER_BIND:-198.18.20.2}
-        CLIENT_TARGET=${CLIENT_TARGET:-198.18.20.2}
+        if [[ $IP_FAMILY == 6 ]]; then
+            SERVER_BIND=${SERVER_BIND:-fd00:20::2}
+            CLIENT_TARGET=${CLIENT_TARGET:-fd00:20::2}
+        else
+            SERVER_BIND=${SERVER_BIND:-198.18.20.2}
+            CLIENT_TARGET=${CLIENT_TARGET:-198.18.20.2}
+        fi
         SERVER_NS=${SERVER_NS:-sxr-origin}
         CLIENT_NS=${CLIENT_NS:-sxr-client}
         SERVER_EXEC=(ip netns exec "$SERVER_NS")
@@ -45,6 +55,13 @@ case "$MODE" in
         exit 2
         ;;
 esac
+if [[ $IP_FAMILY == 6 ]]; then
+    SERVER_ENDPOINT="[$SERVER_BIND]:$PORT"
+    CLIENT_ENDPOINT="[$CLIENT_TARGET]:$PORT"
+else
+    SERVER_ENDPOINT="$SERVER_BIND:$PORT"
+    CLIENT_ENDPOINT="$CLIENT_TARGET:$PORT"
+fi
 
 mkdir -p "$RESULTS"
 PPLAY_SERVER_PID=
@@ -148,8 +165,6 @@ for fixture in "${CASES[@]}"; do
     fi
     out="$RESULTS/$category/$name"
     mkdir -p "$out"
-    printf '%-10s %-34s ' "$category" "$name"
-
     PROTO_ARGS=()
     SS_ARGS=(-ltnH "sport = :$PORT")
     if [[ $name == udp_* || $name == capture_udp_* ]]; then
@@ -169,7 +184,7 @@ for fixture in "${CASES[@]}"; do
     [[ -z $SOURCE_PORT ]] || CLIENT_SOURCE_ARGS=(--sport "$SOURCE_PORT")
 
     "${CASE_ENV[@]}" "${SERVER_EXEC[@]}" python3 -u "$PPLAY_PY" --script "$fixture" \
-        --server "$SERVER_BIND:$PORT" --auto 0.01 --nostdin --exitoneot \
+        --server "$SERVER_ENDPOINT" --auto 0.01 --nostdin --exitoneot \
         --exitondiff --die-after 15 --nohex --nocolor "${PROTO_ARGS[@]}" "${MUTATION_ARGS[@]}" > "$out/server.log" 2>&1 &
     PPLAY_SERVER_PID=$!
 
@@ -188,7 +203,7 @@ for fixture in "${CASES[@]}"; do
     if $ready; then
         set +e
         "${CASE_ENV[@]}" "${CLIENT_EXEC[@]}" python3 -u "$PPLAY_PY" --script "$fixture" \
-        --client "$CLIENT_TARGET:$PORT" --auto 0.01 --nostdin --exitoneot \
+        --client "$CLIENT_ENDPOINT" --auto 0.01 --nostdin --exitoneot \
             --exitondiff --die-after 15 --nohex --nocolor "${PROTO_ARGS[@]}" "${MUTATION_ARGS[@]}" \
             "${CLIENT_SOURCE_ARGS[@]}" > "$out/client.log" 2>&1
         client_rc=$?
@@ -212,18 +227,18 @@ for fixture in "${CASES[@]}"; do
         && ! grep -q '^# !!!.*DIFFERENT DATA' "$out/client.log" \
         && ! grep -q '^# !!!.*DIFFERENT DATA' "$out/server.log"; then
         if $expected; then
-            echo XPASS
+            printf '%-10s %-34s %s\n' "$category" "$name" "XPASS$IP_FAMILY"
             ((xpassed += 1))
         else
-            echo PASS
+            printf '%-10s %-34s %s\n' "$category" "$name" "PASS$IP_FAMILY"
         fi
         ((passed += 1))
     else
         if $expected; then
-            echo XFAIL
+            printf '%-10s %-34s %s\n' "$category" "$name" "XFAIL$IP_FAMILY"
             ((xfailed += 1))
         else
-            echo FAIL
+            printf '%-10s %-34s %s\n' "$category" "$name" "FAIL$IP_FAMILY"
             ((failed += 1))
         fi
     fi
@@ -239,5 +254,5 @@ for fixture in "${CASES[@]}"; do
     fi
 done
 
-echo "passed=$passed failed=$failed xfailed=$xfailed xpassed=$xpassed results=$RESULTS"
+echo "family=IPv$IP_FAMILY passed=$passed failed=$failed xfailed=$xfailed xpassed=$xpassed results=$RESULTS"
 [[ $failed == 0 ]]

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-import json, socket
+import argparse, json, socket
+p=argparse.ArgumentParser(); p.add_argument('--host',default='198.18.20.2'); a=p.parse_args()
 def tcp(port,expect):
     try:
-        with socket.create_connection(('198.18.20.2',port),timeout=1) as s:
+        with socket.create_connection((a.host,port),timeout=1) as s:
             s.sendall(b'policy-probe'); ok=s.recv(64)==b'policy-probe'
     except OSError: ok=False
     if ok != expect: raise RuntimeError(f'TCP/{port}: expected {expect}, got {ok}')

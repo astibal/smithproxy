@@ -21,6 +21,8 @@ HTTP2_TCPDUMP_PID=
 HTTP2_CLIENT_PID=
 CAPTURE_MATRIX_GRE_PID=
 SESSION_LIST_LOAD_PID=
+PPLAY_SUITE4_PID=
+PPLAY_SUITE6_PID=
 CAPTURE_TEST=${CAPTURE_TEST:-0}
 CAPTURE_MATRIX_TEST=${CAPTURE_MATRIX_TEST:-0}
 RTT_TEST=${RTT_TEST:-0}
@@ -29,7 +31,8 @@ POLICY_TEST=${POLICY_TEST:-0}
 SESSION_LIST_STRESS_TEST=${SESSION_LIST_STRESS_TEST:-0}
 UDP_CHURN_TEST=${UDP_CHURN_TEST:-0}
 TCP_CHURN_TEST=${TCP_CHURN_TEST:-0}
-CAPTURE_MARKER=smithproxy-gre-pcap-test
+CAPTURE_MARKER=smithproxy-gre-pcap-v4
+CAPTURE_MARKER6=smithproxy-gre-pcap-v6
 CAPTURE_PREFIX="lab-capture-${BASHPID}-"
 mkdir -p "$ROOT/results"
 ip -j addr > "$ROOT/results/host-addresses-before.json"
@@ -56,6 +59,10 @@ cleanup() {
     [[ -z $CAPTURE_MATRIX_GRE_PID ]] || wait "$CAPTURE_MATRIX_GRE_PID" 2>/dev/null || true
     [[ -z $SESSION_LIST_LOAD_PID ]] || kill "$SESSION_LIST_LOAD_PID" 2>/dev/null || true
     [[ -z $SESSION_LIST_LOAD_PID ]] || wait "$SESSION_LIST_LOAD_PID" 2>/dev/null || true
+    [[ -z $PPLAY_SUITE4_PID ]] || kill -TERM "$PPLAY_SUITE4_PID" 2>/dev/null || true
+    [[ -z $PPLAY_SUITE6_PID ]] || kill -TERM "$PPLAY_SUITE6_PID" 2>/dev/null || true
+    [[ -z $PPLAY_SUITE4_PID ]] || wait "$PPLAY_SUITE4_PID" 2>/dev/null || true
+    [[ -z $PPLAY_SUITE6_PID ]] || wait "$PPLAY_SUITE6_PID" 2>/dev/null || true
     ip link del "$IN_IF" 2>/dev/null || true
     ip link del "$OUT_IF" 2>/dev/null || true
     ip netns del "$CLIENT"
@@ -90,10 +97,13 @@ ip link add "$OUT_IF" type veth peer name eth0 netns "$SERVER"
 ip -n "$CLIENT" link set lo up
 ip -n "$CLIENT" link set eth0 up
 ip -n "$CLIENT" addr add 198.18.10.2/24 dev eth0
+ip -n "$CLIENT" -6 addr add fd00:10::2/64 dev eth0 nodad
 ip -n "$CLIENT" route add default via 198.18.10.1
+ip -n "$CLIENT" -6 route add default via fd00:10::1
 ip -n "$SERVER" link set lo up
 ip -n "$SERVER" link set eth0 up
 ip -n "$SERVER" addr add 198.18.20.2/24 dev eth0
+ip -n "$SERVER" -6 addr add fd00:20::2/64 dev eth0 nodad
 # No route from origin to client: successful replies prove proxy termination.
 if [[ $CAPTURE_TEST == 1 ]]; then
     export GRE_CAPTURE_DST=198.18.20.2
@@ -111,6 +121,7 @@ if [[ $CAPTURE_TEST == 1 ]]; then
     rm -f "$ROOT/results/gre-ready" "$ROOT/results/gre-capture.json"
     ip netns exec "$SERVER" python3 "$ROOT/runner/tests/gre-collector.py" \
         "$ROOT/results/gre-capture.json" "$ROOT/results/gre-ready" "$CAPTURE_MARKER" \
+        "$CAPTURE_MARKER6" \
         > "$ROOT/results/gre-collector.log" 2>&1 &
     GRE_COLLECTOR_PID=$!
     for attempt in $(seq 1 50); do
@@ -163,37 +174,52 @@ if [[ ${EMPTY_NEIGHBOR_STATE_TEST:-0} == 1 ]]; then
     ! grep -q 'json.exception.parse_error' "$ROOT/data/proxy-console.log"
     echo 'PASS empty neighbor state: no JSON parse error'
 fi
-ip netns exec "$CLIENT" curl --noproxy '*' -fsS --max-time 15 http://198.18.20.2:8080/ > "$ROOT/results/http.txt"
-grep -q 'runner-origin-ok peer=198.18.20.1' "$ROOT/results/http.txt"
-echo 'PASS TCP/HTTP: original destination preserved, egress uses do0'
+ip netns exec "$CLIENT" curl --noproxy '*' -fsS --max-time 15 http://198.18.20.2:8080/ > "$ROOT/results/http4.txt"
+grep -q 'runner-origin-ok peer=198.18.20.1' "$ROOT/results/http4.txt"
+echo 'PASS4 TCP/HTTP: original destination preserved, egress uses do0'
+ip netns exec "$CLIENT" curl --noproxy '*' -gfsS --max-time 15 'http://[fd00:20::2]:8080/' > "$ROOT/results/http6.txt"
+grep -q 'runner-origin-ok peer=fd00:20::1' "$ROOT/results/http6.txt"
+echo 'PASS6 TCP/HTTP: original destination preserved, egress uses do0'
 if [[ $CAPTURE_TEST == 1 ]]; then
     ip netns exec "$CLIENT" curl --noproxy '*' -fsS --max-time 15 \
         -H "X-Capture-Marker: $CAPTURE_MARKER" http://198.18.20.2:8080/ \
-        > "$ROOT/results/capture-http.txt"
+        > "$ROOT/results/capture-http4.txt"
+    ip netns exec "$CLIENT" curl --noproxy '*' -gfsS --max-time 15 \
+        -H "X-Capture-Marker: $CAPTURE_MARKER6" 'http://[fd00:20::2]:8080/' \
+        > "$ROOT/results/capture-http6.txt"
     wait "$GRE_COLLECTOR_PID"
     GRE_COLLECTOR_PID=
-    python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["marker_found"]' \
+    python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["marker_found"] and set(d["inner_protocols"].values()) == {"0x0800", "0x86dd"}' \
         "$ROOT/results/gre-capture.json"
-    echo 'PASS GRE export: received encapsulated flow with expected payload marker'
+    echo 'PASS4 GRE export: received IPv4 inner flow with expected payload marker'
+    echo 'PASS6 GRE export: received IPv6 inner flow with expected payload marker'
 fi
 ip netns exec "$CLIENT" curl --noproxy '*' -fsS --max-time 20 \
     --cacert "$ROOT/config/certs/ca-cert.pem" --resolve origin.runner.lab:443:198.18.20.2 \
     https://origin.runner.lab/ > "$ROOT/results/https.txt"
 grep -q 'runner-origin-ok peer=198.18.20.1' "$ROOT/results/https.txt"
-echo 'PASS TLS: client trusts proxy CA only, origin uses a different CA'
+echo 'PASS4 TLS: client trusts proxy CA only, origin uses a different CA'
+ip netns exec "$CLIENT" curl --noproxy '*' -gfsS --max-time 20 \
+    --cacert "$ROOT/config/certs/ca-cert.pem" --resolve 'origin.runner.lab:443:[fd00:20::2]' \
+    https://origin.runner.lab/ > "$ROOT/results/https6.txt"
+grep -q 'runner-origin-ok peer=fd00:20::1' "$ROOT/results/https6.txt"
+echo 'PASS6 TLS: client trusts proxy CA only, origin uses a different CA'
 ip netns exec "$CLIENT" python3 - <<'PY' > "$ROOT/results/udp.txt"
 import socket
-s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
-s.settimeout(10)
-for i in range(3):
-    payload=b'runner-udp-' + str(i).encode()
-    s.sendto(payload,('198.18.20.2',9999))
-    reply,peer=s.recvfrom(4096)
-    assert peer==('198.18.20.2',9999),peer
-    assert reply.startswith(payload+b' peer=198.18.20.1 sport='),reply
-    print(reply.decode())
+for family, host, expected_peer in ((socket.AF_INET, '198.18.20.2', '198.18.20.1'),
+                                    (socket.AF_INET6, 'fd00:20::2', 'fd00:20::1')):
+    with socket.socket(family,socket.SOCK_DGRAM) as s:
+        s.settimeout(10)
+        for i in range(3):
+            payload=b'runner-udp-' + str(i).encode()
+            s.sendto(payload,(host,9999))
+            reply,peer=s.recvfrom(4096)
+            assert peer[0:2]==(host,9999),peer
+            assert reply.startswith(payload+b' peer='+expected_peer.encode()+b' sport='),reply
+            print(reply.decode())
 PY
-echo 'PASS UDP: three datagrams and original reply address'
+echo 'PASS4 UDP: three datagrams and original reply address'
+echo 'PASS6 UDP: three datagrams and original reply address'
 if [[ $SESSION_LIST_STRESS_TEST == 1 ]]; then
     SESSION_LIST_READY="$ROOT/results/session-list-load.ready"
     SESSION_LIST_STOP="$ROOT/results/session-list-load.stop"
@@ -224,28 +250,45 @@ if [[ $SESSION_LIST_STRESS_TEST == 1 ]]; then
 fi
 if [[ $TLS_SUITE_TEST == 1 ]]; then
     ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/suites/tls/run.py" \
-        --ca-file "$ROOT/config/certs/ca-cert.pem" > "$ROOT/results/tls-suite.json"
-    python3 "$ROOT/runner/tests/suites/tls/report.py" "$ROOT/results/tls-suite.json"
-    echo 'PASS TLS suite: trust, SNI, ALPN and protocol-version matrix'
+        --host 198.18.20.2 --ca-file "$ROOT/config/certs/ca-cert.pem" > "$ROOT/results/tls-suite4.json"
+    python3 "$ROOT/runner/tests/suites/tls/report.py" "$ROOT/results/tls-suite4.json"
+    echo 'PASS4 TLS suite: trust, SNI, ALPN and protocol-version matrix'
+    ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/suites/tls/run.py" \
+        --host fd00:20::2 --ca-file "$ROOT/config/certs/ca-cert.pem" > "$ROOT/results/tls-suite6.json"
+    python3 "$ROOT/runner/tests/suites/tls/report.py" "$ROOT/results/tls-suite6.json"
+    echo 'PASS6 TLS suite: trust, SNI, ALPN and protocol-version matrix'
 fi
 if [[ $POLICY_TEST == 1 ]]; then
     { printf 'enable\r\ndiag proxy policy list 8\r\n'; sleep 1; printf 'quit\r\n'; } | \
         timeout 5 ip netns exec "$NS" nc 127.0.0.1 50000 > "$ROOT/results/policy-list.txt" 2>&1
     set +e
-    ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/suites/policy/run.py" > "$ROOT/results/policy-suite.json"
+    ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/suites/policy/run.py" \
+        --host 198.18.20.2 > "$ROOT/results/policy-suite4.json"
     POLICY_RC=$?
     set -e
     if ((POLICY_RC != 0)); then
         cat "$ROOT/results/policy-list.txt"
         exit "$POLICY_RC"
     fi
-    python3 "$ROOT/runner/tests/suites/policy/report.py" "$ROOT/results/policy-suite.json"
-    echo 'PASS policy suite: precedence, disabled, accept/profile and reject rules'
+    python3 "$ROOT/runner/tests/suites/policy/report.py" "$ROOT/results/policy-suite4.json"
+    echo 'PASS4 policy suite: precedence, disabled, accept/profile and reject rules'
+    set +e
+    ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/suites/policy/run.py" \
+        --host fd00:20::2 > "$ROOT/results/policy-suite6.json"
+    POLICY_RC=$?
+    set -e
+    if ((POLICY_RC != 0)); then
+        cat "$ROOT/results/policy-list.txt"
+        exit "$POLICY_RC"
+    fi
+    python3 "$ROOT/runner/tests/suites/policy/report.py" "$ROOT/results/policy-suite6.json"
+    echo 'PASS6 policy suite: precedence, disabled, accept/profile and reject rules'
 fi
 if [[ $RTT_TEST == 1 ]]; then
     RTT_EXTRA_ARGS=()
     [[ ${RTT_REPORT_ONLY:-0} != 1 ]] || RTT_EXTRA_ARGS+=(--report-only)
     ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/protocol-rtt.py" \
+        --host 198.18.20.2 \
         --ca-file "$ROOT/config/certs/ca-cert.pem" \
         --samples "${RTT_SAMPLES:-200}" \
         --handshake-samples "${RTT_HANDSHAKE_SAMPLES:-40}" \
@@ -260,18 +303,44 @@ if [[ $RTT_TEST == 1 ]]; then
         "${RTT_EXTRA_ARGS[@]}" \
         > "$ROOT/results/tcp-rtt.json"
     python3 "$ROOT/runner/tests/suites/rtt/report.py" "$ROOT/results/tcp-rtt.json"
+    echo 'PASS4 RTT: TCP, UDP and TLS handshakes/round trips validated within limits'
+    ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/protocol-rtt.py" \
+        --host fd00:20::2 \
+        --ca-file "$ROOT/config/certs/ca-cert.pem" \
+        --samples "${RTT_SAMPLES:-200}" \
+        --handshake-samples "${RTT_HANDSHAKE_SAMPLES:-40}" \
+        --warmup "${RTT_WARMUP:-20}" \
+        --rtt-p95-limit-ms "${RTT_P95_LIMIT_MS:-50}" \
+        --rtt-max-limit-ms "${RTT_MAX_LIMIT_MS:-250}" \
+        --handshake-p95-limit-ms "${RTT_HANDSHAKE_P95_LIMIT_MS:-500}" \
+        --handshake-max-limit-ms "${RTT_HANDSHAKE_MAX_LIMIT_MS:-2000}" \
+        --tls-total-p50-limit-ms "${RTT_TLS_TOTAL_P50_LIMIT_MS:-7}" \
+        --https-p50-limit-ms "${RTT_HTTPS_P50_LIMIT_MS:-2}" \
+        --cold-sni cold6-cert-cache.runner.lab \
+        "${RTT_EXTRA_ARGS[@]}" \
+        > "$ROOT/results/tcp-rtt6.json"
+    python3 "$ROOT/runner/tests/suites/rtt/report.py" "$ROOT/results/tcp-rtt6.json"
     if [[ ${RTT_NATIVE_BASELINE:-0} == 1 ]]; then
         ip netns exec "$SERVER" python3 "$ROOT/runner/tests/protocol-rtt.py" \
             --ca-file "$ROOT/config/certs/origin-ca.pem" \
+            --host 198.18.20.2 \
             --samples "${RTT_SAMPLES:-200}" \
             --handshake-samples "${RTT_HANDSHAKE_SAMPLES:-40}" \
             --warmup "${RTT_WARMUP:-20}" \
             --report-only > "$ROOT/results/native-rtt.json"
+        ip netns exec "$SERVER" python3 "$ROOT/runner/tests/protocol-rtt.py" \
+            --host fd00:20::2 \
+            --ca-file "$ROOT/config/certs/origin-ca.pem" \
+            --samples "${RTT_SAMPLES:-200}" \
+            --handshake-samples "${RTT_HANDSHAKE_SAMPLES:-40}" \
+            --warmup "${RTT_WARMUP:-20}" \
+            --report-only > "$ROOT/results/native-rtt6.json"
     fi
-    echo 'PASS RTT: TCP, UDP and TLS handshakes/round trips validated within limits'
+    echo 'PASS6 RTT: TCP, UDP and TLS handshakes/round trips validated within limits'
 fi
 if [[ $TCP_CHURN_TEST == 1 ]]; then
     ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/tcp-churn.py" \
+        --host 198.18.20.2 \
         --waves "${TCP_CHURN_WAVES:-20}" \
         --flows "${TCP_CHURN_FLOWS:-64}" \
         --interval "${TCP_CHURN_INTERVAL:-0.25}" \
@@ -281,10 +350,23 @@ if [[ $TCP_CHURN_TEST == 1 ]]; then
         --max-port "${CHURN_MAX_PORT:-29999}" \
         > "$ROOT/results/tcp-churn.txt"
     cat "$ROOT/results/tcp-churn.txt"
-    echo 'PASS TCP churn: persistent flow survived proxy creation and deferred cleanup'
+    echo 'PASS4 TCP churn: persistent flow survived proxy creation and deferred cleanup'
+    ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/tcp-churn.py" \
+        --host fd00:20::2 \
+        --waves "${TCP_CHURN_WAVES:-20}" \
+        --flows "${TCP_CHURN_FLOWS:-64}" \
+        --interval "${TCP_CHURN_INTERVAL:-0.25}" \
+        --settle "${TCP_CHURN_SETTLE:-15}" \
+        --timeout "${TCP_CHURN_TIMEOUT:-3}" \
+        --min-port "${CHURN_MIN_PORT:-20000}" \
+        --max-port "${CHURN_MAX_PORT:-29999}" \
+        > "$ROOT/results/tcp-churn6.txt"
+    cat "$ROOT/results/tcp-churn6.txt"
+    echo 'PASS6 TCP churn: persistent flow survived proxy creation and deferred cleanup'
 fi
 if [[ $UDP_CHURN_TEST == 1 ]]; then
     ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/udp-churn.py" \
+        --host 198.18.20.2 --expected-peer 198.18.20.1 \
         --waves "${UDP_CHURN_WAVES:-8}" \
         --flows "${UDP_CHURN_FLOWS:-96}" \
         --interval "${UDP_CHURN_INTERVAL:-3}" \
@@ -294,7 +376,19 @@ if [[ $UDP_CHURN_TEST == 1 ]]; then
         --max-port "${CHURN_MAX_PORT:-29999}" \
         > "$ROOT/results/udp-churn.txt"
     cat "$ROOT/results/udp-churn.txt"
-    echo 'PASS UDP churn: continuous traffic survived flow expiry and deferred cleanup'
+    echo 'PASS4 UDP churn: continuous traffic survived flow expiry and deferred cleanup'
+    ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/udp-churn.py" \
+        --host fd00:20::2 --expected-peer fd00:20::1 \
+        --waves "${UDP_CHURN_WAVES:-8}" \
+        --flows "${UDP_CHURN_FLOWS:-96}" \
+        --interval "${UDP_CHURN_INTERVAL:-3}" \
+        --settle "${UDP_CHURN_SETTLE:-12}" \
+        --timeout "${UDP_CHURN_TIMEOUT:-1}" \
+        --min-port "${CHURN_MIN_PORT:-20000}" \
+        --max-port "${CHURN_MAX_PORT:-29999}" \
+        > "$ROOT/results/udp-churn6.txt"
+    cat "$ROOT/results/udp-churn6.txt"
+    echo 'PASS6 UDP churn: continuous traffic survived flow expiry and deferred cleanup'
 fi
 if [[ -n ${PPLAY_PY:-} && ${PPLAY_SMOKE_TEST:-1} == 1 ]]; then
     PPLAY_FIXTURE="$ROOT/runner/tests/pplay/http1_basic_pps.py"
@@ -320,7 +414,29 @@ if [[ -n ${PPLAY_PY:-} && ${PPLAY_SMOKE_TEST:-1} == 1 ]]; then
     grep -q 'END OF TRANSMISSION' "$ROOT/results/pplay-server.log"
     ! grep -q '^# !!!.*DIFFERENT DATA' "$ROOT/results/pplay-client.log"
     ! grep -q '^# !!!.*DIFFERENT DATA' "$ROOT/results/pplay-server.log"
-    echo 'PASS pplay: exact HTTP/1 request and response traversed Smithproxy'
+    echo 'PASS4 pplay: exact HTTP/1 request and response traversed Smithproxy'
+    ip netns exec "$SERVER" python3 -u "$PPLAY_PY" \
+        --script "$PPLAY_FIXTURE" --server '[fd00:20::2]:18080' \
+        --auto 0.05 --nostdin --exitoneot --exitondiff --die-after 20 \
+        --nohex --nocolor > "$ROOT/results/pplay-server6.log" 2>&1 &
+    PPLAY_SERVER_PID=$!
+    for attempt in $(seq 1 50); do
+        if ip netns exec "$SERVER" ss -ltnH 'sport = :18080' | grep -q .; then break; fi
+        kill -0 "$PPLAY_SERVER_PID"
+        sleep 0.1
+    done
+    ip netns exec "$SERVER" ss -ltnH 'sport = :18080' | grep -q .
+    ip netns exec "$CLIENT" python3 -u "$PPLAY_PY" \
+        --script "$PPLAY_FIXTURE" --client '[fd00:20::2]:18080' \
+        --auto 0.05 --nostdin --exitoneot --exitondiff --die-after 20 \
+        --nohex --nocolor > "$ROOT/results/pplay-client6.log" 2>&1
+    wait "$PPLAY_SERVER_PID"
+    PPLAY_SERVER_PID=
+    grep -q 'END OF TRANSMISSION' "$ROOT/results/pplay-client6.log"
+    grep -q 'END OF TRANSMISSION' "$ROOT/results/pplay-server6.log"
+    ! grep -q '^# !!!.*DIFFERENT DATA' "$ROOT/results/pplay-client6.log"
+    ! grep -q '^# !!!.*DIFFERENT DATA' "$ROOT/results/pplay-server6.log"
+    echo 'PASS6 pplay: exact HTTP/1 request and response traversed Smithproxy'
 fi
 if [[ $CAPTURE_MATRIX_TEST == 1 ]]; then
     [[ $CAPTURE_TEST == 1 ]] || { echo 'FAIL: CAPTURE_MATRIX_TEST requires CAPTURE_TEST=1' >&2; exit 1; }
@@ -329,26 +445,40 @@ if [[ $CAPTURE_MATRIX_TEST == 1 ]]; then
         exit 1
     }
     CAPTURE_MATRIX_RESULT="$ROOT/results/capture-matrix"
-    CAPTURE_MATRIX_GRE="$CAPTURE_MATRIX_RESULT/gre.pcap"
+    CAPTURE_MATRIX_GRE4="$CAPTURE_MATRIX_RESULT/gre4.pcap"
+    CAPTURE_MATRIX_GRE6="$CAPTURE_MATRIX_RESULT/gre6.pcap"
     CAPTURE_MATRIX_MANIFEST="$CAPTURE_MATRIX_RESULT/manifest.json"
     rm -rf "$CAPTURE_MATRIX_RESULT"
     mkdir -p "$CAPTURE_MATRIX_RESULT"
     env PYTHONPATH="$PPLAY_SUITE${PYTHONPATH:+:$PYTHONPATH}" \
         python3 "$ROOT/runner/tests/build-capture-manifest.py" \
         "$PPLAY_SUITE" "$CAPTURE_MATRIX_MANIFEST"
-    ip netns exec "$NS" tcpdump -i "$OUT_IF" -U -s 0 -w "$CAPTURE_MATRIX_GRE" 'ip proto 47' \
-        > "$CAPTURE_MATRIX_RESULT/tcpdump.log" 2>&1 &
+    ip netns exec "$NS" tcpdump -i "$OUT_IF" -U -s 0 -w "$CAPTURE_MATRIX_GRE4" 'ip proto 47' \
+        > "$CAPTURE_MATRIX_RESULT/tcpdump4.log" 2>&1 &
     CAPTURE_MATRIX_GRE_PID=$!
     sleep 0.5
-    env PPLAY_PY="$PPLAY_PY" MODE=runner MATCH='capture_*' \
-        RESULTS="$CAPTURE_MATRIX_RESULT/pplay" \
+    env PPLAY_PY="$PPLAY_PY" MODE=runner IP_FAMILY=4 MATCH='capture_*' \
+        RESULTS="$CAPTURE_MATRIX_RESULT/pplay-v4" \
         SMITHPROXY_PID_FILE="$ROOT/data/proxy.pid" \
         CLIENT_NS="$CLIENT" SERVER_NS="$SERVER" \
         "$PPLAY_SUITE/run-suite.sh" all
     kill "$CAPTURE_MATRIX_GRE_PID" 2>/dev/null || true
     wait "$CAPTURE_MATRIX_GRE_PID" 2>/dev/null || true
     CAPTURE_MATRIX_GRE_PID=
-    echo 'PASS capture matrix traffic: 30 corpus flows exported to local PCAPNG and GRE'
+    echo 'PASS4 capture matrix traffic: 30 corpus flows exported to local PCAPNG and GRE'
+    ip netns exec "$NS" tcpdump -i "$OUT_IF" -U -s 0 -w "$CAPTURE_MATRIX_GRE6" 'ip proto 47' \
+        > "$CAPTURE_MATRIX_RESULT/tcpdump6.log" 2>&1 &
+    CAPTURE_MATRIX_GRE_PID=$!
+    sleep 0.5
+    env PPLAY_PY="$PPLAY_PY" MODE=runner IP_FAMILY=6 MATCH='capture_*' \
+        RESULTS="$CAPTURE_MATRIX_RESULT/pplay-v6" \
+        SMITHPROXY_PID_FILE="$ROOT/data/proxy.pid" \
+        CLIENT_NS="$CLIENT" SERVER_NS="$SERVER" \
+        "$PPLAY_SUITE/run-suite.sh" all
+    kill "$CAPTURE_MATRIX_GRE_PID" 2>/dev/null || true
+    wait "$CAPTURE_MATRIX_GRE_PID" 2>/dev/null || true
+    CAPTURE_MATRIX_GRE_PID=
+    echo 'PASS6 capture matrix traffic: 30 corpus flows exported to local PCAPNG and GRE'
 fi
 if [[ ${HTTP2_OBSERVABILITY_TEST:-0} == 1 ]]; then
     [[ ${CAPTURE_TEST:-0} == 1 ]] || { echo 'FAIL: HTTP2_OBSERVABILITY_TEST requires CAPTURE_TEST=1' >&2; exit 1; }
@@ -356,57 +486,54 @@ if [[ ${HTTP2_OBSERVABILITY_TEST:-0} == 1 ]]; then
         echo 'FAIL: HTTP2_OBSERVABILITY_TEST requires PPLAY_PY and PPLAY_SUITE' >&2
         exit 1
     }
-    HTTP2_FIXTURE="$PPLAY_SUITE/regular/http2_many_commands.py"
-    HTTP2_RESULT="$ROOT/results/http2-observability"
-    HTTP2_READY="$HTTP2_RESULT/ready"
-    HTTP2_GRE="$HTTP2_RESULT/gre.pcap"
-    HTTP2_CLI="$HTTP2_RESULT/cli.txt"
-    rm -rf "$HTTP2_RESULT"
-    mkdir -p "$HTTP2_RESULT"
-
-    ip netns exec "$NS" tcpdump -i "$OUT_IF" -U -s 0 -w "$HTTP2_GRE" 'ip proto 47' \
-        > "$HTTP2_RESULT/tcpdump.log" 2>&1 &
-    HTTP2_TCPDUMP_PID=$!
-
-    env PYTHONPATH="$PPLAY_SUITE${PYTHONPATH:+:$PYTHONPATH}" \
-        HTTP2_READY_FILE="$HTTP2_READY" HTTP2_OBSERVE_DELAY=15 \
-        ip netns exec "$SERVER" python3 -u "$PPLAY_PY" \
-        --script "$HTTP2_FIXTURE" --server 198.18.20.2:18080 \
-        --auto 0.05 --nostdin --exitoneot --exitondiff --die-after 40 \
-        --nohex --nocolor > "$HTTP2_RESULT/server.log" 2>&1 &
-    PPLAY_SERVER_PID=$!
-    for attempt in $(seq 1 50); do
-        ip netns exec "$SERVER" ss -ltnH 'sport = :18080' | grep -q . && break
-        kill -0 "$PPLAY_SERVER_PID"
-        sleep 0.1
-    done
-
-    env PYTHONPATH="$PPLAY_SUITE${PYTHONPATH:+:$PYTHONPATH}" \
-        HTTP2_READY_FILE="$HTTP2_READY" HTTP2_OBSERVE_DELAY=15 \
-        ip netns exec "$CLIENT" python3 -u "$PPLAY_PY" \
-        --script "$HTTP2_FIXTURE" --client 198.18.20.2:18080 \
-        --auto 0.05 --nostdin --exitoneot --exitondiff --die-after 40 \
-        --nohex --nocolor > "$HTTP2_RESULT/client.log" 2>&1 &
-    HTTP2_CLIENT_PID=$!
-
-    for attempt in $(seq 1 400); do
-        [[ -f $HTTP2_READY ]] && break
-        kill -0 "$RUNNER_PID"
-        kill -0 "$HTTP2_CLIENT_PID"
-        sleep 0.1
-    done
-    [[ -f $HTTP2_READY ]]
-    { printf 'enable\r\ndiag proxy session list 8\r\n'; sleep 3; printf 'quit\r\n'; } | \
-        timeout 10 ip netns exec "$NS" nc 127.0.0.1 50000 > "$HTTP2_CLI" 2>&1
-
-    wait "$HTTP2_CLIENT_PID"
-    HTTP2_CLIENT_PID=
-    wait "$PPLAY_SERVER_PID"
-    PPLAY_SERVER_PID=
-    kill "$HTTP2_TCPDUMP_PID" 2>/dev/null || true
-    wait "$HTTP2_TCPDUMP_PID" 2>/dev/null || true
-    HTTP2_TCPDUMP_PID=
-    echo 'PASS HTTP/2 observability traffic and CLI snapshot completed'
+    run_http2_observability() {
+        local family=$1 endpoint=$2
+        local result="$ROOT/results/http2-observability-v$family"
+        local ready="$result/ready" gre="$result/gre.pcap" cli="$result/cli.txt"
+        rm -rf "$result"
+        mkdir -p "$result"
+        ip netns exec "$NS" tcpdump -i "$OUT_IF" -U -s 0 -w "$gre" 'ip proto 47' \
+            > "$result/tcpdump.log" 2>&1 &
+        HTTP2_TCPDUMP_PID=$!
+        env PYTHONPATH="$PPLAY_SUITE${PYTHONPATH:+:$PYTHONPATH}" \
+            HTTP2_READY_FILE="$ready" HTTP2_OBSERVE_DELAY=15 \
+            ip netns exec "$SERVER" python3 -u "$PPLAY_PY" \
+            --script "$PPLAY_SUITE/regular/http2_many_commands.py" --server "$endpoint" \
+            --auto 0.05 --nostdin --exitoneot --exitondiff --die-after 40 \
+            --nohex --nocolor > "$result/server.log" 2>&1 &
+        PPLAY_SERVER_PID=$!
+        for attempt in $(seq 1 50); do
+            ip netns exec "$SERVER" ss -ltnH 'sport = :18080' | grep -q . && break
+            kill -0 "$PPLAY_SERVER_PID"
+            sleep 0.1
+        done
+        env PYTHONPATH="$PPLAY_SUITE${PYTHONPATH:+:$PYTHONPATH}" \
+            HTTP2_READY_FILE="$ready" HTTP2_OBSERVE_DELAY=15 \
+            ip netns exec "$CLIENT" python3 -u "$PPLAY_PY" \
+            --script "$PPLAY_SUITE/regular/http2_many_commands.py" --client "$endpoint" \
+            --auto 0.05 --nostdin --exitoneot --exitondiff --die-after 40 \
+            --nohex --nocolor > "$result/client.log" 2>&1 &
+        HTTP2_CLIENT_PID=$!
+        for attempt in $(seq 1 400); do
+            [[ -f $ready ]] && break
+            kill -0 "$RUNNER_PID"
+            kill -0 "$HTTP2_CLIENT_PID"
+            sleep 0.1
+        done
+        [[ -f $ready ]]
+        { printf 'enable\r\ndiag proxy session list 8\r\n'; sleep 3; printf 'quit\r\n'; } | \
+            timeout 10 ip netns exec "$NS" nc 127.0.0.1 50000 > "$cli" 2>&1
+        wait "$HTTP2_CLIENT_PID"; HTTP2_CLIENT_PID=
+        wait "$PPLAY_SERVER_PID"; PPLAY_SERVER_PID=
+        kill "$HTTP2_TCPDUMP_PID" 2>/dev/null || true
+        wait "$HTTP2_TCPDUMP_PID" 2>/dev/null || true
+        HTTP2_TCPDUMP_PID=
+        find "$ROOT/data" -maxdepth 1 -type f -name "$CAPTURE_PREFIX*.pcapng" \
+            -printf '%T@ %f\n' | sort -nr | head -1 | cut -d' ' -f2- > "$result/pcap-file.txt"
+        echo "PASS$family HTTP/2 observability traffic and CLI snapshot completed"
+    }
+    run_http2_observability 4 '198.18.20.2:18080'
+    run_http2_observability 6 '[fd00:20::2]:18080'
 fi
 if [[ -n ${PPLAY_SUITE:-} && ${PPLAY_SUITE_SKIP_RUN:-0} != 1 ]]; then
     [[ -n ${PPLAY_PY:-} ]] || { echo 'FAIL: PPLAY_SUITE requires PPLAY_PY' >&2; exit 1; }
@@ -414,11 +541,28 @@ if [[ -n ${PPLAY_SUITE:-} && ${PPLAY_SUITE_SKIP_RUN:-0} != 1 ]]; then
         echo "FAIL: suite runner is not executable: $PPLAY_SUITE/run-suite.sh" >&2
         exit 1
     }
-    env PPLAY_PY="$PPLAY_PY" MODE=runner RESULTS="$ROOT/results/${PPLAY_RESULTS_NAME:-pplay-suite}" \
+    env PPLAY_PY="$PPLAY_PY" MODE=runner IP_FAMILY=4 RESULTS="$ROOT/results/${PPLAY_RESULTS_NAME:-pplay-suite}-v4" \
         SMITHPROXY_PID_FILE="$ROOT/data/proxy.pid" \
         CLIENT_NS="$CLIENT" SERVER_NS="$SERVER" \
-        "$PPLAY_SUITE/run-suite.sh" "${PPLAY_SUITE_CATEGORY:-all}"
-    echo 'PASS pplay suite through Smithproxy'
+        "$PPLAY_SUITE/run-suite.sh" "${PPLAY_SUITE_CATEGORY:-all}" &
+    PPLAY_SUITE4_PID=$!
+    env PPLAY_PY="$PPLAY_PY" MODE=runner IP_FAMILY=6 RESULTS="$ROOT/results/${PPLAY_RESULTS_NAME:-pplay-suite}-v6" \
+        SMITHPROXY_PID_FILE="$ROOT/data/proxy.pid" \
+        CLIENT_NS="$CLIENT" SERVER_NS="$SERVER" \
+        "$PPLAY_SUITE/run-suite.sh" "${PPLAY_SUITE_CATEGORY:-all}" &
+    PPLAY_SUITE6_PID=$!
+    set +e
+    wait "$PPLAY_SUITE4_PID"; PPLAY_SUITE4_RC=$?
+    wait "$PPLAY_SUITE6_PID"; PPLAY_SUITE6_RC=$?
+    set -e
+    PPLAY_SUITE4_PID=
+    PPLAY_SUITE6_PID=
+    ((PPLAY_SUITE4_RC == 0 && PPLAY_SUITE6_RC == 0)) || {
+        echo "FAIL: pplay suite IPv4 rc=$PPLAY_SUITE4_RC IPv6 rc=$PPLAY_SUITE6_RC" >&2
+        exit 1
+    }
+    echo 'PASS4 pplay suite through Smithproxy'
+    echo 'PASS6 pplay suite through Smithproxy'
 fi
 ip netns exec "$NS" nft list ruleset > "$ROOT/results/nft-active.txt"
 ip -n "$NS" -j route show table all > "$ROOT/results/data-routes.json"
@@ -429,34 +573,49 @@ if ip netns exec "$CLIENT" curl --noproxy '*' -fsS --max-time 2 http://198.18.20
     echo 'FAIL: proxy bypass' >&2
     exit 1
 fi
+echo 'PASS4 no bypass while proxy is stopped'
+if ip netns exec "$CLIENT" curl --noproxy '*' -gfsS --max-time 2 'http://[fd00:20::2]:8080/' >/dev/null 2>&1; then
+    kill -CONT "$(cat "$ROOT/data/proxy.pid")"
+    echo 'FAIL6: proxy bypass' >&2
+    exit 1
+fi
 kill -CONT "$(cat "$ROOT/data/proxy.pid")"
-echo 'PASS no bypass while proxy is stopped'
+echo 'PASS6 no bypass while proxy is stopped'
 kill -TERM "$RUNNER_PID"
 wait "$RUNNER_PID" || test "$?" = 143
 RUNNER_PID=
 if [[ $CAPTURE_TEST == 1 ]]; then
-    python3 "$ROOT/runner/tests/verify-pcap.py" "$ROOT/data" "$CAPTURE_PREFIX" "$CAPTURE_MARKER" \
+    python3 "$ROOT/runner/tests/verify-pcap.py" "$ROOT/data" "$CAPTURE_PREFIX" "$CAPTURE_MARKER" "$CAPTURE_MARKER6" \
         > "$ROOT/results/pcap-validation.json"
-    echo 'PASS PCAP export: valid pcapng blocks contain expected payload marker'
+    echo 'PASS4 PCAP export: valid pcapng contains IPv4 payload marker'
+    echo 'PASS6 PCAP export: valid pcapng contains IPv6 payload marker'
 fi
 if [[ $CAPTURE_MATRIX_TEST == 1 ]]; then
     mkdir -p "$ROOT/results/capture-matrix/local-pcap"
     cp "$ROOT/data/$CAPTURE_PREFIX"*.pcapng "$ROOT/results/capture-matrix/local-pcap/"
     python3 "$ROOT/runner/tests/verify-capture-matrix.py" \
         "$ROOT/results/capture-matrix/manifest.json" "$ROOT/data" "$CAPTURE_PREFIX" \
-        "$ROOT/results/capture-matrix/gre.pcap" \
-        > "$ROOT/results/capture-matrix/validation.json"
-    python3 "$ROOT/runner/tests/suites/capture-report.py" "$ROOT/results/capture-matrix/validation.json"
-    echo 'PASS capture matrix: PCAPNG and GRE payload hashes match; simulated TCP is formally valid'
+        "$ROOT/results/capture-matrix/gre4.pcap" 4 \
+        > "$ROOT/results/capture-matrix/validation4.json"
+    python3 "$ROOT/runner/tests/suites/capture-report.py" "$ROOT/results/capture-matrix/validation4.json"
+    echo 'PASS4 capture matrix: PCAPNG and GRE payload hashes match; simulated TCP is formally valid'
+    python3 "$ROOT/runner/tests/verify-capture-matrix.py" \
+        "$ROOT/results/capture-matrix/manifest.json" "$ROOT/data" "$CAPTURE_PREFIX" \
+        "$ROOT/results/capture-matrix/gre6.pcap" 6 \
+        > "$ROOT/results/capture-matrix/validation6.json"
+    python3 "$ROOT/runner/tests/suites/capture-report.py" "$ROOT/results/capture-matrix/validation6.json"
+    echo 'PASS6 capture matrix: PCAPNG and GRE payload hashes match; simulated TCP is formally valid'
 fi
 if [[ ${HTTP2_OBSERVABILITY_TEST:-0} == 1 ]]; then
-    HTTP2_PCAP=$(find "$ROOT/data" -maxdepth 1 -type f -name "$CAPTURE_PREFIX*.pcapng" \
-        -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-)
-    python3 "$ROOT/runner/tests/verify-http2-observability.py" \
-        "$ROOT/results/http2-observability/cli.txt" "$HTTP2_PCAP" \
-        "$ROOT/results/http2-observability/gre.pcap" \
-        > "$ROOT/results/http2-observability/validation.json"
-    echo 'PASS HTTP/2 observability: CLI, PCAP and GRE contain exactly 12 requests and responses'
+    for family in 4 6; do
+        HTTP2_RESULT="$ROOT/results/http2-observability-v$family"
+        read -r HTTP2_PCAP_NAME < "$HTTP2_RESULT/pcap-file.txt"
+        python3 "$ROOT/runner/tests/verify-http2-observability.py" \
+            "$HTTP2_RESULT/cli.txt" "$ROOT/data/$HTTP2_PCAP_NAME" \
+            "$HTTP2_RESULT/gre.pcap" "$family" \
+            > "$HTTP2_RESULT/validation.json"
+        echo "PASS$family HTTP/2 observability: CLI, PCAP and GRE contain exactly 12 requests and responses"
+    done
 fi
 # Both interfaces must have been returned by runner, before test destroys them.
 ip link show "$IN_IF" > /dev/null

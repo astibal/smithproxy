@@ -15,11 +15,11 @@ Usage:
 Profiles:
   quick       Build the production smithproxy target only. No lab is started.
   sanity      Build and run the standard isolated traffic validation.
-              Includes TLS, policy and RTT suites, HTTP/1, HTTP/2, UDP,
-              PCAP/GRE validation, CLI checks and cleanup verification.
-  full        Run sanity plus TCP/UDP churn and the complete pplay corpus.
+              Runs IPv4 and IPv6 TLS, policy, RTT, HTTP/1, HTTP/2, UDP and
+              PCAP/GRE validation, plus management and cleanup checks.
+  full        Run sanity plus dual-stack TCP/UDP churn and pplay corpus.
   benchmark   Measure TCP, UDP and TLS latency without PASS/FAIL latency gates.
-              Prints aligned absolute and native-delta tables and keeps JSON.
+              Prints IPv4/IPv6 absolute and native-delta tables and keeps JSON.
   --run       Start an interactive isolated lab and keep Smithproxy in the
               foreground until Ctrl-C. Prints host-side CLI and API access.
               With --remote, both ports bind to the remote host's loopback.
@@ -317,7 +317,7 @@ print(*(x.getsockname()[1] for x in s))'
             TEST_RC=$?
         elif ((QUIET)); then
             "${SSH_RUN[@]}" "$REMOTE" "${REMOTE_SUDO}env$ENV_STRING '$LAB_ROOT/runner/tests/lab-test.sh' '$LAB_ROOT'" \
-                2>&1 | tee "$REPORT/test.log" | grep -E '(^PASS |^FAIL| (PASS|FAIL|XFAIL|XPASS)$|^RESULT:)'
+                2>&1 | tee "$REPORT/test.log" | grep --line-buffered -E '(^PASS[46]? |^FAIL[46]?:| (PASS|FAIL|XFAIL|XPASS)[46]?$|^RESULT:)'
             TEST_RC=${PIPESTATUS[0]}
         else
             "${SSH_RUN[@]}" "$REMOTE" "${REMOTE_SUDO}env$ENV_STRING '$LAB_ROOT/runner/tests/lab-test.sh' '$LAB_ROOT'" \
@@ -332,7 +332,7 @@ print(*(x.getsockname()[1] for x in s))'
             TEST_RC=$?
         elif ((QUIET)); then
             "${LOCAL_RUN[@]}" "${LAB_ENV[@]}" "$LAB_ROOT/runner/tests/lab-test.sh" "$LAB_ROOT" \
-                2>&1 | tee "$REPORT/test.log" | grep -E '(^PASS |^FAIL| (PASS|FAIL|XFAIL|XPASS)$|^RESULT:)'
+                2>&1 | tee "$REPORT/test.log" | grep --line-buffered -E '(^PASS[46]? |^FAIL[46]?:| (PASS|FAIL|XFAIL|XPASS)[46]?$|^RESULT:)'
             TEST_RC=${PIPESTATUS[0]}
         else
             "${LOCAL_RUN[@]}" "${LAB_ENV[@]}" "$LAB_ROOT/runner/tests/lab-test.sh" "$LAB_ROOT" \
@@ -360,11 +360,11 @@ print(*(x.getsockname()[1] for x in s))'
     elif ((TEST_RC == 0)); then STATUS=PASS; else STATUS=FAIL; fi
 fi
 
-TCP_SUMMARY=$(grep -E '^TCP churn:' "$REPORT/test.log" 2>/dev/null | tail -1 || true)
-UDP_SUMMARY=$(grep -E '^UDP churn:' "$REPORT/test.log" 2>/dev/null | tail -1 || true)
-CORPUS_SUMMARY=$(grep -E '^passed=' "$REPORT/test.log" 2>/dev/null | tail -1 || true)
-CAPTURE_MATRIX_SUMMARY=$(grep -E '^Capture matrix summary:' "$REPORT/test.log" 2>/dev/null | tail -1 || true)
-RTT_SUMMARY=$(grep -E '^RTT summary:' "$REPORT/test.log" 2>/dev/null | tail -1 || true)
+TCP_SUMMARY=$(grep -E '^TCP churn:' "$REPORT/test.log" 2>/dev/null | tail -2 | paste -sd ';' - || true)
+UDP_SUMMARY=$(grep -E '^UDP churn:' "$REPORT/test.log" 2>/dev/null | tail -2 | paste -sd ';' - || true)
+CORPUS_SUMMARY=$(grep -E '^(family=IPv[46] )?passed=' "$REPORT/test.log" 2>/dev/null | tail -2 | paste -sd ';' - || true)
+CAPTURE_MATRIX_SUMMARY=$(grep -E '^Capture matrix summary:' "$REPORT/test.log" 2>/dev/null | tail -2 | paste -sd ';' - || true)
+RTT_SUMMARY=$(grep -E '^RTT summary:' "$REPORT/test.log" 2>/dev/null | tail -2 | paste -sd ';' - || true)
 
 cat > "$REPORT/summary.md" <<EOF
 # Smithproxy patch test
@@ -403,10 +403,17 @@ EOF
 
 ((QUIET)) || echo
 if [[ $PROFILE == benchmark ]]; then
+    echo 'IPv4'
     python3 "$HERE/harness/suites/rtt/report.py" \
         "$REPORT/lab-results/tcp-rtt.json" "$REPORT/lab-results/native-rtt.json"
+    echo
+    echo 'IPv6'
+    python3 "$HERE/harness/suites/rtt/report.py" \
+        "$REPORT/lab-results/tcp-rtt6.json" "$REPORT/lab-results/native-rtt6.json"
     echo "Raw result: $REPORT/lab-results/tcp-rtt.json"
     echo "Native raw result: $REPORT/lab-results/native-rtt.json"
+    echo "IPv6 raw result: $REPORT/lab-results/tcp-rtt6.json"
+    echo "IPv6 native raw result: $REPORT/lab-results/native-rtt6.json"
     echo "Report: $REPORT"
     exit "$TEST_RC"
 fi

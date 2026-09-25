@@ -8,9 +8,6 @@ import threading
 import time
 
 
-TARGET = ("198.18.20.2", 9998)
-
-
 def receive_exact(sock: socket.socket, size: int) -> bytes:
     chunks = bytearray()
     while len(chunks) < size:
@@ -21,12 +18,12 @@ def receive_exact(sock: socket.socket, size: int) -> bytes:
     return bytes(chunks)
 
 
-def exchange(source_port: int, payload: bytes, timeout: float) -> None:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+def exchange(family: int, target: tuple, source_port: int, payload: bytes, timeout: float) -> None:
+    with socket.socket(family, socket.SOCK_STREAM) as sock:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind(("0.0.0.0", source_port))
+        sock.bind(("::" if family == socket.AF_INET6 else "0.0.0.0", source_port))
         sock.settimeout(timeout)
-        sock.connect(TARGET)
+        sock.connect(target)
         sock.sendall(payload)
         reply = receive_exact(sock, len(payload))
         if reply != payload:
@@ -42,7 +39,10 @@ def main() -> None:
     parser.add_argument("--timeout", type=float, default=3.0)
     parser.add_argument("--min-port", type=int, default=20000)
     parser.add_argument("--max-port", type=int, default=29999)
+    parser.add_argument("--host", default="198.18.20.2")
     args = parser.parse_args()
+    family = socket.AF_INET6 if ":" in args.host else socket.AF_INET
+    target = (args.host, 9998)
 
     total = args.waves * args.flows
     if not 1 <= args.min_port <= args.max_port <= 65535:
@@ -58,7 +58,7 @@ def main() -> None:
         nonlocal probe_count
         sequence = 0
         try:
-            with socket.create_connection(TARGET, timeout=args.timeout) as sock:
+            with socket.create_connection(target, timeout=args.timeout) as sock:
                 sock.settimeout(args.timeout)
                 while not stop.is_set():
                     payload = f"persistent-{sequence:08d}\n".encode()
@@ -84,7 +84,7 @@ def main() -> None:
                 for index in range(args.flows):
                     source_port = args.min_port + wave * args.flows + index
                     payload = f"tcp-churn-{wave}-{index}\n".encode()
-                    futures.append(pool.submit(exchange, source_port, payload, args.timeout))
+                    futures.append(pool.submit(exchange, family, target, source_port, payload, args.timeout))
                 for future in futures:
                     try:
                         future.result()
@@ -98,7 +98,7 @@ def main() -> None:
 
     elapsed = time.monotonic() - started
     print(
-        f"TCP churn: flows={total} probes={probe_count} elapsed={elapsed:.2f}s "
+        f"TCP churn: family=IPv{6 if family == socket.AF_INET6 else 4} flows={total} probes={probe_count} elapsed={elapsed:.2f}s "
         f"churn_errors={len(churn_errors)} probe_errors={len(probe_errors)}"
     )
     if churn_errors or probe_errors:

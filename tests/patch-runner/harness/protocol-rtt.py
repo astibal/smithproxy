@@ -22,6 +22,7 @@ if min(a.samples, a.handshake_samples) < 1 or a.warmup < 0:
     p.error("sample counts must be positive and warmup non-negative")
 
 now = time.perf_counter_ns
+family = socket.AF_INET6 if ':' in a.host else socket.AF_INET
 def elapsed(start): return (now() - start) / 1_000_000
 def recv_exact(s, size):
     data = bytearray()
@@ -60,7 +61,7 @@ with socket.create_connection((a.host,9998),timeout=a.timeout) as s:
         if seq >= a.warmup: tcp_echo.append(value)
 
 udp=[]
-with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as s:
+with socket.socket(family,socket.SOCK_DGRAM) as s:
     s.settimeout(a.timeout); s.connect((a.host,9999))
     for seq in range(a.warmup+a.samples):
         payload=struct.pack("!Q",seq)+b"smithproxy-udp-rtt"; started=now()
@@ -72,12 +73,12 @@ ctx=ssl.create_default_context(cafile=a.ca_file)
 tls_tcp=[]; tls_crypto=[]; tls_total=[]; https=[]; versions=set(); ciphers=set()
 cold_total=[]
 if a.cold_sni:
-    total_started=now(); raw=socket.socket(); raw.settimeout(a.timeout)
+    total_started=now(); raw=socket.socket(family); raw.settimeout(a.timeout)
     raw.connect((a.host,443))
     with ctx.wrap_socket(raw,server_hostname=a.cold_sni,do_handshake_on_connect=False) as s:
         s.do_handshake(); cold_total.append(elapsed(total_started))
 for seq in range(a.handshake_samples):
-    total_started=now(); raw=socket.socket(); raw.settimeout(a.timeout); started=now()
+    total_started=now(); raw=socket.socket(family); raw.settimeout(a.timeout); started=now()
     raw.connect((a.host,443)); tls_tcp.append(elapsed(started))
     with ctx.wrap_socket(raw,server_hostname="origin.runner.lab",do_handshake_on_connect=False) as s:
         started=now(); s.do_handshake(); tls_crypto.append(elapsed(started)); tls_total.append(elapsed(total_started))
