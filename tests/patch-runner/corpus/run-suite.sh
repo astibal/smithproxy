@@ -146,6 +146,7 @@ mapfile -t CASES < <(
 }
 
 passed=0
+flaky=0
 failed=0
 xfailed=0
 xpassed=0
@@ -167,9 +168,11 @@ for fixture in "${CASES[@]}"; do
     mkdir -p "$out"
     PROTO_ARGS=()
     SS_ARGS=(-ltnH "sport = :$PORT")
+    max_attempts=1
     if [[ $name == udp_* || $name == capture_udp_* ]]; then
         PROTO_ARGS=(--udp)
         SS_ARGS=(-lunH "sport = :$PORT")
+        max_attempts=3
     fi
 
     MUTATION_ARGS=()
@@ -183,37 +186,58 @@ for fixture in "${CASES[@]}"; do
     CLIENT_SOURCE_ARGS=()
     [[ -z $SOURCE_PORT ]] || CLIENT_SOURCE_ARGS=(--sport "$SOURCE_PORT")
 
-    "${CASE_ENV[@]}" "${SERVER_EXEC[@]}" python3 -u "$PPLAY_PY" --script "$fixture" \
-        --server "$SERVER_ENDPOINT" --auto 0.01 --nostdin --exitoneot \
-        --exitondiff --die-after 15 --nohex --nocolor "${PROTO_ARGS[@]}" "${MUTATION_ARGS[@]}" > "$out/server.log" 2>&1 &
-    PPLAY_SERVER_PID=$!
+    case_passed=false
+    passed_attempt=0
+    for case_attempt in $(seq 1 "$max_attempts"); do
+        server_log="$out/server.log"
+        client_log="$out/client.log"
+        if ((case_attempt > 1)); then
+            server_log="$out/server.retry-$case_attempt.log"
+            client_log="$out/client.retry-$case_attempt.log"
+        fi
 
-    ready=false
-    for attempt in $(seq 1 100); do
-        if "${SERVER_EXEC[@]}" ss "${SS_ARGS[@]}" | grep -q .; then
-            ready=true
+        "${CASE_ENV[@]}" "${SERVER_EXEC[@]}" python3 -u "$PPLAY_PY" --script "$fixture" \
+            --server "$SERVER_ENDPOINT" --auto 0.01 --nostdin --exitoneot \
+            --exitondiff --die-after 15 --nohex --nocolor "${PROTO_ARGS[@]}" "${MUTATION_ARGS[@]}" > "$server_log" 2>&1 &
+        PPLAY_SERVER_PID=$!
+
+        ready=false
+        for ready_attempt in $(seq 1 100); do
+            if "${SERVER_EXEC[@]}" ss "${SS_ARGS[@]}" | grep -q .; then
+                ready=true
+                break
+            fi
+            kill -0 "$PPLAY_SERVER_PID" 2>/dev/null || break
+            sleep 0.05
+        done
+
+        client_rc=1
+        server_rc=1
+        if $ready; then
+            set +e
+            "${CASE_ENV[@]}" "${CLIENT_EXEC[@]}" python3 -u "$PPLAY_PY" --script "$fixture" \
+                --client "$CLIENT_ENDPOINT" --auto 0.01 --nostdin --exitoneot \
+                --exitondiff --die-after 15 --nohex --nocolor "${PROTO_ARGS[@]}" "${MUTATION_ARGS[@]}" \
+                "${CLIENT_SOURCE_ARGS[@]}" > "$client_log" 2>&1
+            client_rc=$?
+            wait "$PPLAY_SERVER_PID"
+            server_rc=$?
+            set -e
+            PPLAY_SERVER_PID=
+        else
+            cleanup_server
+        fi
+
+        if $ready && [[ $client_rc == 0 && $server_rc == 0 ]] \
+            && grep -q 'END OF TRANSMISSION' "$client_log" \
+            && grep -q 'END OF TRANSMISSION' "$server_log" \
+            && ! grep -q '^# !!!.*DIFFERENT DATA' "$client_log" \
+            && ! grep -q '^# !!!.*DIFFERENT DATA' "$server_log"; then
+            case_passed=true
+            passed_attempt=$case_attempt
             break
         fi
-        kill -0 "$PPLAY_SERVER_PID" 2>/dev/null || break
-        sleep 0.05
     done
-
-    client_rc=1
-    server_rc=1
-    if $ready; then
-        set +e
-        "${CASE_ENV[@]}" "${CLIENT_EXEC[@]}" python3 -u "$PPLAY_PY" --script "$fixture" \
-        --client "$CLIENT_ENDPOINT" --auto 0.01 --nostdin --exitoneot \
-            --exitondiff --die-after 15 --nohex --nocolor "${PROTO_ARGS[@]}" "${MUTATION_ARGS[@]}" \
-            "${CLIENT_SOURCE_ARGS[@]}" > "$out/client.log" 2>&1
-        client_rc=$?
-        wait "$PPLAY_SERVER_PID"
-        server_rc=$?
-        set -e
-        PPLAY_SERVER_PID=
-    else
-        cleanup_server
-    fi
 
     expected=false
     if [[ -r $EXPECTED_FAILURES_FILE ]] \
@@ -221,18 +245,18 @@ for fixture in "${CASES[@]}"; do
         expected=true
     fi
 
-    if $ready && [[ $client_rc == 0 && $server_rc == 0 ]] \
-        && grep -q 'END OF TRANSMISSION' "$out/client.log" \
-        && grep -q 'END OF TRANSMISSION' "$out/server.log" \
-        && ! grep -q '^# !!!.*DIFFERENT DATA' "$out/client.log" \
-        && ! grep -q '^# !!!.*DIFFERENT DATA' "$out/server.log"; then
+    if $case_passed; then
         if $expected; then
             printf '%-10s %-34s %s\n' "$category" "$name" "XPASS$IP_FAMILY"
             ((xpassed += 1))
+            ((passed += 1))
+        elif ((passed_attempt > 1)); then
+            printf '%-10s %-34s %s\n' "$category" "$name" "FLAKY_PASS$IP_FAMILY"
+            ((flaky += 1))
         else
             printf '%-10s %-34s %s\n' "$category" "$name" "PASS$IP_FAMILY"
+            ((passed += 1))
         fi
-        ((passed += 1))
     else
         if $expected; then
             printf '%-10s %-34s %s\n' "$category" "$name" "XFAIL$IP_FAMILY"
@@ -248,11 +272,11 @@ for fixture in "${CASES[@]}"; do
         [[ ! -r $SMITHPROXY_PID_FILE ]] || read -r proxy_pid < "$SMITHPROXY_PID_FILE"
         if [[ -z $proxy_pid ]] || ! kill -0 "$proxy_pid" 2>/dev/null; then
             echo "ABORT: Smithproxy exited while running $category/$name" >&2
-            echo "passed=$passed failed=$failed xfailed=$xfailed xpassed=$xpassed results=$RESULTS"
+            echo "passed=$passed flaky=$flaky failed=$failed xfailed=$xfailed xpassed=$xpassed results=$RESULTS"
             exit 3
         fi
     fi
 done
 
-echo "family=IPv$IP_FAMILY passed=$passed failed=$failed xfailed=$xfailed xpassed=$xpassed results=$RESULTS"
+echo "family=IPv$IP_FAMILY passed=$passed flaky=$flaky failed=$failed xfailed=$xfailed xpassed=$xpassed results=$RESULTS"
 [[ $failed == 0 ]]

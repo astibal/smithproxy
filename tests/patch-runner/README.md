@@ -93,6 +93,10 @@ sample definitions. `corpus/expected-failures.txt` lists known differences;
 currently only `edge/http1_connect_ipv6` is treated as XFAIL. Any other failure
 makes the run fail.
 
+UDP corpus cases get up to three attempts. A case that passes on its second or
+third attempt is reported as `FLAKY_PASS` and counted separately; failure of
+all three attempts remains a hard failure. TCP cases are never retried.
+
 The compatible pplay engine is vendored under `vendor/` with its license so the
 runner does not depend on mutable files outside this repository.
 

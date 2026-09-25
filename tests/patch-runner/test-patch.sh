@@ -317,7 +317,7 @@ print(*(x.getsockname()[1] for x in s))'
             TEST_RC=$?
         elif ((QUIET)); then
             "${SSH_RUN[@]}" "$REMOTE" "${REMOTE_SUDO}env$ENV_STRING '$LAB_ROOT/runner/tests/lab-test.sh' '$LAB_ROOT'" \
-                2>&1 | tee "$REPORT/test.log" | grep --line-buffered -E '(^PASS[46]? |^FAIL[46]?:| (PASS|FAIL|XFAIL|XPASS)[46]?$|^RESULT:)'
+                2>&1 | tee "$REPORT/test.log" | grep --line-buffered -E '(^PASS[46]? |^FAIL[46]?:| (PASS|FLAKY_PASS|FAIL|XFAIL|XPASS)[46]?$|^RESULT:)'
             TEST_RC=${PIPESTATUS[0]}
         else
             "${SSH_RUN[@]}" "$REMOTE" "${REMOTE_SUDO}env$ENV_STRING '$LAB_ROOT/runner/tests/lab-test.sh' '$LAB_ROOT'" \
@@ -332,7 +332,7 @@ print(*(x.getsockname()[1] for x in s))'
             TEST_RC=$?
         elif ((QUIET)); then
             "${LOCAL_RUN[@]}" "${LAB_ENV[@]}" "$LAB_ROOT/runner/tests/lab-test.sh" "$LAB_ROOT" \
-                2>&1 | tee "$REPORT/test.log" | grep --line-buffered -E '(^PASS[46]? |^FAIL[46]?:| (PASS|FAIL|XFAIL|XPASS)[46]?$|^RESULT:)'
+                2>&1 | tee "$REPORT/test.log" | grep --line-buffered -E '(^PASS[46]? |^FAIL[46]?:| (PASS|FLAKY_PASS|FAIL|XFAIL|XPASS)[46]?$|^RESULT:)'
             TEST_RC=${PIPESTATUS[0]}
         else
             "${LOCAL_RUN[@]}" "${LAB_ENV[@]}" "$LAB_ROOT/runner/tests/lab-test.sh" "$LAB_ROOT" \
