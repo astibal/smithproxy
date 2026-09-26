@@ -30,19 +30,27 @@ bool StartStopTls::start(MitmHostCX& client) {
         return false;
     }
 
-    auto* client_master = client.com()->master();
-    auto* peer_master = peer->com()->master();
+    // Both halves of a proxied connection intentionally share one master
+    // transport.  Preserve it before replacing either baseCom: the old peer
+    // transport can own references which become invalid during replacement.
+    auto* master = client.com()->master();
 
     auto* new_client_com = new MySSLMitmCom();
     auto* new_peer_com = new MySSLMitmCom();
     client.com(new_client_com);
     peer->com(new_peer_com);
 
+    // Replacing baseHostCX::com() does not initialize the new transport.
+    // Do it explicitly so STARTTLS also works when no SSL listener happened
+    // to initialize the process-wide TLS factory beforehand.
+    new_client_com->init(&client);
+    new_peer_com->init(peer);
+
     client.peer(peer);
     peer->peer(&client);
 
-    client.com()->master(client_master);
-    peer->com()->master(peer_master);
+    client.com()->master(master);
+    peer->com()->master(master);
 
     // The accepted/client side cannot start its server handshake before the
     // upstream/client side has enough information to spoof the certificate.
