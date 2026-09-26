@@ -48,6 +48,7 @@
 #include <hostcx.hpp>
 
 #include <proxy/socks5/sockshostcx.hpp>
+#include <proxy/trafficcapture.hpp>
 
 #include <baseproxy.hpp>
 #include <threadedacceptor.hpp>
@@ -87,6 +88,7 @@ private:
 class MitmProxy : public baseProxy, public IOController {
 
     std::unique_ptr<socle::baseTrafficLogger> tlog_;
+    std::unique_ptr<sx::traffic_log_adapter> traffic_log_adapter_;
     
     bool identity_resolved_ = false;    // meant if attempt has been done, regardless of its result.
     std::unique_ptr<shm_logon_info_base> identity_;
@@ -182,6 +184,10 @@ public:
 
 
     std::unique_ptr<socle::baseTrafficLogger>& tlog() { return tlog_; }
+    /** Install an optional transport-neutral transformation of capture output. */
+    void traffic_log_adapter(std::unique_ptr<sx::traffic_log_adapter> adapter) {
+        traffic_log_adapter_ = std::move(adapter);
+    }
     void toggle_tlog ();
     
     explicit MitmProxy(baseCom* c);

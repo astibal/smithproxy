@@ -2,7 +2,7 @@
 #define SMITHPROXY_QUICSERVICE_HPP
 
 #include "proxy/quic/openssl.hpp"
-#include "proxy/multiflow/mfproxy.hpp"
+#include "proxy/multiflow/mfmitmproxy.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -17,18 +17,9 @@
 
 namespace sx::quic {
 
-/** Endpoint metadata needed when creating one ordinary proxy per QUIC stream. */
-struct flow_proxy_context {
-    std::string source_host;
-    std::string source_port;
-    std::string target_host;
-    std::string target_port;
-    int address_family = AF_INET;
-};
-
 using flow_proxy_factory = std::function<std::unique_ptr<multiflow::flow_proxy>(
     std::shared_ptr<multiflow::connection>, std::shared_ptr<multiflow::connection>,
-    multiflow::proxy_limits, flow_proxy_context)>;
+    multiflow::proxy_limits, multiflow::flow_proxy_context)>;
 
 /** Time bounds for each externally observable session lifecycle phase. */
 struct lifecycle_options {

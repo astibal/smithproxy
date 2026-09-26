@@ -78,7 +78,7 @@ class mitm_flow_proxy final : public flow_proxy {
 public:
     mitm_flow_proxy(std::shared_ptr<connection> downstream,
                     std::shared_ptr<connection> upstream,
-                    proxy_limits limits, quic::flow_proxy_context context)
+                    proxy_limits limits, flow_proxy_context context)
         : downstream_(std::move(downstream)), upstream_(std::move(upstream)),
           limits_(limits), context_(std::move(context)) {}
 
@@ -201,9 +201,9 @@ private:
         auto* scheduler = &master->scheduler();
         auto* left_com = new MFFlowCom(downstream_, left_handle);
         auto* right_com = new MFFlowCom(upstream_, right_handle);
-        // A multiplexed stream is independently half-closed in each direction.
-        // The stock MitmProxy treats read()==0 as the end of a TCP session, so
-        // the multiflow owner must translate FIN without exposing that EOF early.
+        // A multiplexed flow is independently half-closed in each direction. The
+        // stock MitmProxy treats read()==0 as the end of a TCP session, so the
+        // multiflow owner must translate FIN without exposing that EOF early.
         left_com->defer_read_eof(true);
         right_com->defer_read_eof(true);
         left_com->master(scheduler);
@@ -223,6 +223,14 @@ private:
         right->opening(false);
 
         auto proxy = proxymaker::make(left, right);
+        if (proxy && context_.make_traffic_log_adapter) {
+            // The downstream ID is the stable identity visible to capture
+            // consumers; the paired upstream flow may use a different ID.
+            auto const flow_id = downstream_->wire_flow_id(left_handle)
+                .value_or(left_handle.id);
+            proxy->traffic_log_adapter(
+                context_.make_traffic_log_adapter(flow_id));
+        }
         if (!proxy || !proxymaker::policy(proxy, false)) {
             source_connection->reset(source, 0x10c);
             return;
@@ -313,7 +321,7 @@ private:
     std::shared_ptr<connection> downstream_;
     std::shared_ptr<connection> upstream_;
     proxy_limits limits_;
-    quic::flow_proxy_context context_;
+    flow_proxy_context context_;
     std::map<flow_id, pair> pairs_;
     std::set<flow_id> retired_;
     std::size_t limit_rejections_ = 0;
@@ -324,7 +332,7 @@ private:
 
 std::unique_ptr<flow_proxy> make_mitm_flow_proxy(
     std::shared_ptr<connection> downstream, std::shared_ptr<connection> upstream,
-    proxy_limits limits, quic::flow_proxy_context context) {
+    proxy_limits limits, flow_proxy_context context) {
     return std::make_unique<mitm_flow_proxy>(std::move(downstream), std::move(upstream),
                                              limits, std::move(context));
 }

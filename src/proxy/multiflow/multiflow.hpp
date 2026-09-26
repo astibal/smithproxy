@@ -96,6 +96,11 @@ public:
         return outer_transport::tcp;
     }
 
+    /** Return the transport's externally visible stream ID when it has one. */
+    virtual std::optional<flow_id> wire_flow_id(flow_handle flow) const {
+        return contains(flow) ? std::optional<flow_id>(flow.id) : std::nullopt;
+    }
+
     /** Perform nonblocking stream I/O; partial progress is allowed. */
     virtual io_result read(flow_handle flow, void* destination, std::size_t size) = 0;
     virtual io_result write(flow_handle flow, const void* source, std::size_t size) = 0;
