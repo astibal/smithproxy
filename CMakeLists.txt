@@ -280,6 +280,8 @@ add_executable(smithproxy
 
         src/proxy/socks5/sockshostcx.cpp
         src/proxy/socks5/socksproxy.cpp
+        src/proxy/httpconnect/httpconnect.cpp
+        src/proxy/httpconnect/httpconnectrequest.cpp
 
         src/policy/policy.cpp
         src/policy/authfactory.hpp

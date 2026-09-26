@@ -43,6 +43,7 @@
 
 #include <proxy/mitmproxy.hpp>
 #include <proxy/socks5/socksproxy.hpp>
+#include <proxy/httpconnect/httpconnect.hpp>
 #include <threadedacceptor.hpp>
 #include <threadedreceiver.hpp>
 
@@ -64,6 +65,7 @@ using theReceiver = ThreadedReceiver<MitmUdpProxy>;
 
 using socksAcceptor = ThreadedAcceptor<MitmSocksProxy>;
 using socksReceiver = ThreadedReceiver<MitmSocksUdpProxy>;
+using httpConnectAcceptor = ThreadedAcceptor<MitmHttpConnectProxy>;
 
 class SmithProxy : public Service {
 
@@ -77,6 +79,7 @@ public:
 
     using vec_of_sock5tors = std::vector<std::unique_ptr<socksAcceptor>>;
     using vec_of_sock5vers = std::vector<std::unique_ptr<socksReceiver>>;
+    using vec_of_http_connectors = std::vector<std::unique_ptr<httpConnectAcceptor>>;
 
     vec_of_acceptors plain_proxies;
     vec_of_acceptors ssl_proxies;
@@ -85,6 +88,7 @@ public:
 
     vec_of_sock5tors socks_proxies;
     vec_of_sock5vers socks_udp_proxies;
+    vec_of_http_connectors http_connect_proxies;
 
     vec_of_acceptors redir_plain_proxies;
     vec_of_acceptors redir_ssl_proxies;
@@ -97,6 +101,7 @@ public:
     std::vector<std::shared_ptr<std::thread>> dtls_threads;
     std::vector<std::shared_ptr<std::thread>> socks_threads;
     std::vector<std::shared_ptr<std::thread>> socks_udp_threads;
+    std::vector<std::shared_ptr<std::thread>> http_connect_threads;
 
     std::vector<std::shared_ptr<std::thread>> redir_plain_threads;
     std::vector<std::shared_ptr<std::thread>> redir_ssl_threads;

@@ -163,6 +163,7 @@ bool SmithProxy::create_listeners() {
 
         std::string socks_frm = "socks-tcp";
         std::string socks_udp_frm = "socks-udp";
+        std::string http_connect_frm = "http-connect";
 
         std::string retcp_frm = "redir-tcp";
         std::string retls_frm = "redir-tls";
@@ -251,6 +252,21 @@ bool SmithProxy::create_listeners() {
             }
         }
 
+        if(CfgFactory::get()->accept_http_connect) {
+            http_connect_proxies = NetworkServiceFactory::prepare_listener<httpConnectAcceptor, TCPCom>(
+                    std::stoi(CfgFactory::get()->listen_http_connect_port),
+                    http_connect_frm,
+                    CfgFactory::get()->num_workers_http_connect,
+                    proxyType::proxy());
+
+            log_listener(http_connect_frm, http_connect_proxies);
+            if(http_connect_proxies.empty()
+               && CfgFactory::get()->num_workers_http_connect >= 0) {
+                _fat("Failed to setup HTTP CONNECT proxies. Bailing!");
+                return false;
+            }
+        }
+
         if(CfgFactory::get()->accept_redirect) {
             redir_plain_proxies = NetworkServiceFactory::prepare_listener<theAcceptor, TCPCom>(
                     std::stoi(CfgFactory::get()->listen_tcp_port) + 1000,
@@ -327,6 +343,7 @@ void SmithProxy::run() {
     std::string friendly_thread_name_dls = string_format("sxy_dls_%d",CfgFactory::get()->tenant_index);
     std::string friendly_thread_name_skx = string_format("sxy_skx_%d",CfgFactory::get()->tenant_index);
     std::string friendly_thread_name_sku = string_format("sxy_sku_%d",CfgFactory::get()->tenant_index);
+    std::string friendly_thread_name_hcx = string_format("sxy_hcx_%d",CfgFactory::get()->tenant_index);
     std::string friendly_thread_name_cli = string_format("sxy_cli_%d",CfgFactory::get()->tenant_index);
     std::string friendly_thread_name_own = string_format("sxy_own_%d",CfgFactory::get()->tenant_index);
 
@@ -389,6 +406,11 @@ void SmithProxy::run() {
     if(CfgFactory::get()->accept_socks) {
         launch_proxy_threads(socks_proxies, socks_threads, "SOCKS TCP listener", friendly_thread_name_skx.c_str());
         launch_proxy_threads(socks_udp_proxies, socks_udp_threads, "SOCKS UDP listener", friendly_thread_name_sku.c_str());
+    }
+
+    if(CfgFactory::get()->accept_http_connect) {
+        launch_proxy_threads(http_connect_proxies, http_connect_threads,
+                             "HTTP CONNECT listener", friendly_thread_name_hcx.c_str());
     }
 
     if(CfgFactory::get()->accept_redirect) {
@@ -652,6 +674,11 @@ void SmithProxy::join_all() {
             std::cerr << "terminating udp socks thread" << std::endl;
         join_thread_list(socks_udp_threads);
     }
+    if(! http_connect_threads.empty()) {
+        if(!cfg_daemonize)
+            std::cerr << "terminating HTTP CONNECT thread" << std::endl;
+        join_thread_list(http_connect_threads);
+    }
 
 
     if(! redir_plain_threads.empty()) {
@@ -732,6 +759,7 @@ void SmithProxy::kill_proxies() {
 
     kill_proxies(socks_proxies);
     kill_proxies(socks_udp_proxies);
+    kill_proxies(http_connect_proxies);
 
 
     kill_proxies(redir_plain_proxies);
@@ -943,5 +971,4 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
 
     return ret;
 }
-
 

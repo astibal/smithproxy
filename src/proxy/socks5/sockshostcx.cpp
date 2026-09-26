@@ -377,6 +377,21 @@ socks5_request_error socksServerCX::handle4_connect() {
     return socks5_request_error::NONE;
 }
 
+socks5_request_error socksServerCX::prepare_connect_target(
+        std::string const& target_host, unsigned short target_port) {
+    if(target_host.empty() or target_port == 0) {
+        return socks5_request_error::MALFORMED_DATA;
+    }
+
+    req_cmd = socks5_cmd::CONNECT;
+    req_atype = socks5_atype::FQDN;
+    req_str_addr = target_host;
+    req_port = target_port;
+    state_ = socks5_state::REQ_RECEIVED;
+
+    return handle5_connect_fqdn();
+}
+
 socks5_request_error socksServerCX::socks5_parse_request() {
 
     auto authorize_if_udp = [this](std::string const& server, unsigned short srv_port) -> bool {
@@ -937,4 +952,3 @@ std::size_t socksServerCX::process_out() {
         return writebuf()->size();
     }
 }
-

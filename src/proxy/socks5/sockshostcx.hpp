@@ -205,6 +205,12 @@ public:
     std::size_t process_socks_response();
     std::size_t process_out() override;
 
+protected:
+    // Shared entry point for CONNECT-style frontends.  SOCKS and HTTP CONNECT
+    // differ in framing, but target resolution and handoff are identical.
+    socks5_request_error prepare_connect_target(std::string const& host,
+                                                unsigned short port);
+
 private:
     uint8_t version {0};
     uint8_t req_cmd {0};

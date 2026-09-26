@@ -42,24 +42,17 @@
 
 #include <threadedacceptor.hpp>
 
-#include <proxy/mitmproxy.hpp>
+#include <proxy/explicitproxy.hpp>
 #include <proxy/socks5/sockshostcx.hpp>
 
 
-class SocksProxy : public MitmProxy {
+class SocksProxy : public ExplicitProxy {
 public:
-    using MitmProxy::MitmProxy;
+    using ExplicitProxy::ExplicitProxy;
     ~SocksProxy() override = default;
     void on_left_message(baseHostCX* cx) override;
 
-    //consumes cx and deletes it
-    virtual void socks5_handoff(socksServerCX* cx);
-    bool socks5_handoff_resolve_identity(MitmHostCX* cx);
-    bool socks5_handoff_authenticate(MitmHostCX* cx);
-
     virtual void socks5_handoff_udp(socksServerCX* cx);
-
-    void on_left_bytes(baseHostCX* cx) override;
 
     std::string to_string(int lev) const override;
 

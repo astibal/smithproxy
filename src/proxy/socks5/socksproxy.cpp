@@ -52,6 +52,10 @@
 void SocksProxy::on_left_message(baseHostCX* basecx) {
 
     auto* cx = dynamic_cast<socksServerCX*>(basecx);
+    if(cx != nullptr and cx->com()->l4_proto() != SOCK_DGRAM) {
+        handle_explicit_connect(cx);
+        return;
+    }
     if(cx != nullptr) {
         if(cx->socks_error_ != socks5_request_error_::NONE) {
             if(cx->socks_error_ == socks5_request_error_::MALFORMED_DATA) {
@@ -104,7 +108,7 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
                 _dia("SocksProxy::on_left_message: socksHostCX policy+handoff");
                 cx->state(socks5_state::ZOMBIE);
 
-                cx->com()->l4_proto() != SOCK_DGRAM ? socks5_handoff(cx) : socks5_handoff_udp(cx);
+                cx->com()->l4_proto() != SOCK_DGRAM ? explicit_handoff(cx) : socks5_handoff_udp(cx);
             }
         }
         else if(cx->state_ == socks5_state::HANDOFF) {
@@ -113,13 +117,47 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
 
             // There is nothing to handoff on UDP association connection
             if(cx->com()->l4_proto() != SOCK_DGRAM) {
-                socks5_handoff(cx);
+                explicit_handoff(cx);
             }
         } else {
 
             _war("SocksProxy::on_left_message: unknown message");
         }
     }
+}
+
+void ExplicitProxy::handle_explicit_connect(socksServerCX* cx) {
+    if(cx->socks_error_ != socks5_request_error::NONE) {
+        if(cx->socks_error_ == socks5_request_error::MALFORMED_DATA) {
+            cx->error(true);
+        } else {
+            cx->verdict(socks5_policy::REJECT);
+        }
+        return;
+    }
+
+    if(cx->state_ == socks5_state::WAIT_POLICY) {
+        std::vector<baseHostCX*> left {cx};
+        std::vector<baseHostCX*> right {cx->right.get()};
+
+        bool verdict = false;
+        {
+            auto lock = std::scoped_lock(CfgFactory::lock());
+            matched_policy(CfgFactory::get()->policy_match(left, right));
+            verdict = CfgFactory::get()->policy_action(matched_policy());
+        }
+        update_neighbors();
+        cx->verdict(verdict ? socks5_policy::ACCEPT : socks5_policy::REJECT);
+        return;
+    }
+
+    if(cx->state_ == socks5_state::HANDOFF) {
+        cx->state(socks5_state::ZOMBIE);
+        explicit_handoff(cx);
+        return;
+    }
+
+    _war("ExplicitProxy::handle_explicit_connect: unexpected frontend state");
 }
 
 std::string SocksProxy::to_string(int lev) const  {
@@ -132,7 +170,7 @@ std::string SocksProxy::to_string(int lev) const  {
     return r.str();
 };
 
-void SocksProxy::socks5_handoff(socksServerCX* cx) {
+void ExplicitProxy::explicit_handoff(socksServerCX* cx) {
 
     _deb("SocksProxy::socks5_handoff: start");
     
@@ -178,6 +216,8 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     n_cx->com()->nonlocal_dst_port() = cx->com()->nonlocal_dst_port();
     n_cx->com()->nonlocal_dst_resolved(true);
 
+    // Preserve data received immediately after the frontend handshake (for
+    // example a pipelined TLS ClientHello following an HTTP CONNECT request).
     // get rid of it
     cx->remove_socket();
     if(cx->left) {
@@ -248,7 +288,7 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
         com()->set_monitor(real_socket);
         com()->set_poll_handler(real_socket,this);
 
-        if(not socks5_handoff_resolve_identity(n_cx)) {
+        if(not explicit_handoff_resolve_identity(n_cx)) {
             _deb("deleting proxy %s", c_type());
             state().dead(true);
         }
@@ -258,7 +298,7 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
 }
 
 
-bool SocksProxy::socks5_handoff_resolve_identity(MitmHostCX* cx) {
+bool ExplicitProxy::explicit_handoff_resolve_identity(MitmHostCX* cx) {
 
     bool result = true;
 
@@ -288,7 +328,7 @@ bool SocksProxy::socks5_handoff_resolve_identity(MitmHostCX* cx) {
 
         } else if(auth_opts.authenticate) {
 
-            result = socks5_handoff_authenticate(cx);
+            result = explicit_handoff_authenticate(cx);
 
         }
     } else {
@@ -299,7 +339,7 @@ bool SocksProxy::socks5_handoff_resolve_identity(MitmHostCX* cx) {
 }
 
 
-bool SocksProxy::socks5_handoff_authenticate(MitmHostCX *cx) {
+bool ExplicitProxy::explicit_handoff_authenticate(MitmHostCX *cx) {
 
     bool bad_auth = true;
 
@@ -421,7 +461,7 @@ void SocksProxy::socks5_handoff_udp(socksServerCX* cx) {
         // apply policy and get result
 
 
-        if(not socks5_handoff_resolve_identity(n_cx.get())) {
+        if(not explicit_handoff_resolve_identity(n_cx.get())) {
             _deb("deleting proxy %s", c_type());
             state().dead(true);
         }
@@ -433,7 +473,7 @@ void SocksProxy::socks5_handoff_udp(socksServerCX* cx) {
 
 
 
-void SocksProxy::on_left_bytes(baseHostCX* cx) {
+void ExplicitProxy::on_left_bytes(baseHostCX* cx) {
 
     if(left_sockets.empty() or right_sockets.empty()) {
         _dia("waiting for proxy pair, L: %d, R: %d ", left_sockets.size(), right_sockets.size());
