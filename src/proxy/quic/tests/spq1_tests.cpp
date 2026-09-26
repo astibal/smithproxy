@@ -3,6 +3,7 @@
 #include "proxy/quic/spq1.hpp"
 
 #include <traflog/pcapapi.hpp>
+#include <traflog/pcaplog.hpp>
 #include <algorithm>
 #include <memory>
 #include <utility>
@@ -135,4 +136,32 @@ TEST(Spq1, GreKeyCarriesLowSessionIdentifier) {
     EXPECT_EQ(0x02, bytes[5]);
     EXPECT_EQ(0x03, bytes[6]);
     EXPECT_EQ(0x04, bytes[7]);
+}
+
+TEST(Spq1, AdapterLeavesStreamLoggerUnchanged) {
+    auto packets = std::make_shared<std::vector<captured_packet>>();
+    auto output = std::make_unique<capture_sink>(packets);
+    auto* original = output.get();
+    auto connection = std::make_shared<sx::quic::spq1::connection_context>(8, "h3");
+    sx::quic::spq1::stream_log_adapter adapter({connection, 4});
+
+    auto wrapped = adapter.wrap(std::move(output));
+
+    EXPECT_EQ(original, wrapped.get());
+}
+
+TEST(Spq1, AdapterConfiguresAndWrapsPacketLogger) {
+    auto output = std::make_unique<socle::traflog::PcapLog>(
+        nullptr, "/tmp", "spq1-adapter-test", ".pcap", false);
+    auto* pcap = output.get();
+    auto connection = std::make_shared<sx::quic::spq1::connection_context>(
+        0x1122334455667788ULL, "h3");
+    sx::quic::spq1::stream_log_adapter adapter({connection, 12});
+
+    auto wrapped = adapter.wrap(std::move(output));
+
+    EXPECT_NE(pcap, wrapped.get());
+    EXPECT_EQ(socle::pcap::connection_details::UDP, pcap->details.next_proto);
+    ASSERT_TRUE(pcap->details.gre_key.has_value());
+    EXPECT_EQ(0x55667788U, *pcap->details.gre_key);
 }

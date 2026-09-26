@@ -12,6 +12,7 @@
 #include <buffer.hpp>
 #include <traflog/basetraflog.hpp>
 
+#include "proxy/trafficcapture.hpp"
 #include "proxy/quic/h3capture.hpp"
 
 namespace sx::quic::spq1 {
@@ -76,6 +77,19 @@ private:
     std::uint64_t offsets_[2] {0, 0};
     bool observed_[2] {false, false};
     bool finished_[2] {false, false};
+};
+
+/** Bind one logical stream to packet-capture output without leaking SPQ1 up-stack. */
+class stream_log_adapter final : public sx::traffic_log_adapter {
+public:
+    explicit stream_log_adapter(stream_context context)
+        : context_(std::move(context)) {}
+
+    std::unique_ptr<socle::baseTrafficLogger> wrap(
+        std::unique_ptr<socle::baseTrafficLogger> output) override;
+
+private:
+    stream_context context_;
 };
 
 } // namespace sx::quic::spq1

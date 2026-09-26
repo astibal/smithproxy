@@ -491,6 +491,16 @@ std::optional<multiflow::direction> openssl_connection::direction_of(
     return state ? std::optional<multiflow::direction>(state->direction) : std::nullopt;
 }
 
+std::optional<multiflow::flow_id> openssl_connection::wire_flow_id(
+    multiflow::flow_handle flow) const {
+    auto const* state = find(flow);
+    if (!state) return std::nullopt;
+
+    auto const stream_id = SSL_get_stream_id(state->stream.get());
+    return stream_id < (std::uint64_t{1} << 62)
+        ? std::optional<multiflow::flow_id>(stream_id) : std::nullopt;
+}
+
 multiflow::io_result openssl_connection::read(multiflow::flow_handle flow,
                                               void* destination, std::size_t size) {
     if (closed_) return { 0, multiflow::io_status::connection_closed };

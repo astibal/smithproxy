@@ -5,6 +5,8 @@
 #include <limits>
 #include <stdexcept>
 
+#include <traflog/pcaplog.hpp>
+
 namespace sx::quic::spq1 {
 namespace {
 
@@ -193,6 +195,19 @@ void stream_log::emit(h3_headers_record const& record) {
 
 std::size_t stream_log::side_index(socle::side_t side) {
     return side == socle::side_t::RIGHT ? 1U : 0U;
+}
+
+std::unique_ptr<socle::baseTrafficLogger> stream_log_adapter::wrap(
+    std::unique_ptr<socle::baseTrafficLogger> output) {
+    // SPQ1 is a packet-capture representation. Stream-oriented sinks retain
+    // their normal payload format and pass through unchanged.
+    auto* pcap = dynamic_cast<socle::traflog::PcapLog*>(output.get());
+    if (!pcap || !context_.connection) return output;
+
+    pcap->details.next_proto = socle::pcap::connection_details::UDP;
+    pcap->details.gre_key = static_cast<std::uint32_t>(
+        context_.connection->session_id & 0xFFFFFFFFULL);
+    return std::make_unique<stream_log>(std::move(output), context_);
 }
 
 } // namespace sx::quic::spq1

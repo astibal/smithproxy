@@ -1,4 +1,6 @@
 #include "service/quic/quicservice.hpp"
+
+#include "proxy/quic/spq1.hpp"
 #include "service/quic/quiclog.hpp"
 
 #include <algorithm>
@@ -454,11 +456,20 @@ void listener_service::progress_handshake(
     if (proxy_factory_) {
         auto [source_host, source_port] = endpoint_parts(value.client_endpoint);
         auto [target_host, target_port] = endpoint_parts(value.target_endpoint);
+        auto capture = std::make_shared<spq1::connection_context>(
+            value.id, downstream_alpn);
+        multiflow::flow_proxy_context flow_context {
+            std::move(source_host), std::move(source_port),
+            std::move(target_host), std::move(target_port),
+            value.target_endpoint.address.ss_family,
+            [capture = std::move(capture)](multiflow::flow_id flow) {
+                return std::make_unique<spq1::stream_log_adapter>(
+                    spq1::stream_context {capture, flow});
+            },
+        };
         value.proxy = proxy_factory_(
             value.downstream, value.upstream, proxy_limits,
-            {std::move(source_host), std::move(source_port),
-             std::move(target_host), std::move(target_port),
-             value.target_endpoint.address.ss_family});
+            std::move(flow_context));
     } else {
         value.proxy = std::make_unique<multiflow::MFProxy>(
             value.downstream, value.upstream, proxy_limits);

@@ -122,6 +122,9 @@ public:
     multiflow::outer_transport policy_transport() const override {
         return multiflow::outer_transport::udp;
     }
+    /** Map the internal generation-safe handle to the real QUIC stream ID. */
+    std::optional<multiflow::flow_id> wire_flow_id(
+        multiflow::flow_handle flow) const override;
 
     multiflow::io_result read(multiflow::flow_handle flow, void* destination,
                               std::size_t size) override;
