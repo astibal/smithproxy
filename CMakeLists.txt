@@ -286,6 +286,7 @@ add_executable(smithproxy
         src/proxy/multiflow/mfmitmproxy.cpp
         src/proxy/quic/wire.cpp
         src/proxy/quic/h3capture.cpp
+        src/proxy/quic/spq1.cpp
         src/proxy/quic/openssl.cpp
         src/service/quic/quicservice.cpp
 
@@ -448,7 +449,9 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/proxy/quic/wire.cpp
                 src/proxy/quic/tests/wire_tests.cpp
                 src/proxy/quic/h3capture.cpp
+                src/proxy/quic/spq1.cpp
                 src/proxy/quic/tests/h3capture_tests.cpp
+                src/proxy/quic/tests/spq1_tests.cpp
                 src/proxy/quic/tests/qpack_vendor_tests.cpp
                 src/proxy/quic/openssl.cpp
                 src/proxy/quic/tests/openssl_tests.cpp
@@ -518,7 +521,9 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/proxy/quic/wire.cpp
                 src/proxy/quic/tests/wire_tests.cpp
                 src/proxy/quic/h3capture.cpp
+                src/proxy/quic/spq1.cpp
                 src/proxy/quic/tests/h3capture_tests.cpp
+                src/proxy/quic/tests/spq1_tests.cpp
                 src/proxy/quic/tests/qpack_vendor_tests.cpp
                 src/proxy/quic/openssl.cpp
                 src/proxy/quic/tests/openssl_tests.cpp
