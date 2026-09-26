@@ -855,8 +855,11 @@ bool CfgFactory::load_settings () {
     }
 
     if(cfgapi.getRoot()["settings"].exists("tuning")) {
-        load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "proxy_thread_spray_min", MasterProxy::subproxy_thread_spray_min);
-        load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "subproxy_thread_spray_bytes_min", MasterProxy::subproxy_thread_spray_bytes_min);
+        auto const& tuning = cfgapi.getRoot()["settings"]["tuning"];
+        if(tuning.exists("proxy_thread_spray_min")
+           or tuning.exists("subproxy_thread_spray_bytes_min")) {
+            _war("subproxy thread-spray tuning is deprecated and ignored; sub-proxies now run on their owning worker");
+        }
 
         int hostcx_min = 0;
         load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "host_bufsz_min", hostcx_min);
@@ -5141,8 +5144,6 @@ int save_settings(Config& ex) {
     cli_objects.add("enable_password", Setting::TypeString) = CfgFactory::get()->cli_enable_password;
 
     Setting& tuning_objects = objects.add("tuning", Setting::TypeGroup);
-    tuning_objects.add("proxy_thread_spray_min", Setting::TypeInt) = (int)MasterProxy::subproxy_thread_spray_min;
-    tuning_objects.add("subproxy_thread_spray_bytes_min", Setting::TypeInt) = (int)MasterProxy::subproxy_thread_spray_bytes_min;
     tuning_objects.add("host_bufsz_min", Setting::TypeInt) = (int) baseHostCX::params.buffsize;
     tuning_objects.add("host_bufsz_max_multiplier", Setting::TypeInt) = (int) baseHostCX::params.buffsize_maxmul;
     tuning_objects.add("host_write_full", Setting::TypeInt) = (int) baseHostCX::params.write_full;

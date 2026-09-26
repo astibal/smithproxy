@@ -1902,10 +1902,6 @@ int cli_diag_proxy_session_list_extra (DiagCli *cli, const char *command, std::v
     }
 
     cli_print(cli, "%s", request->text_result().c_str());
-    if (request->skipped_spread() > 0) {
-        cli_print(cli, "\n%zu spread sessions omitted", request->skipped_spread());
-    }
-
     if( sl_flags == SL_NONE ) {
         unsigned long l = MitmProxy::total_mtr_up().get();
         unsigned long r = MitmProxy::total_mtr_down().get();
@@ -2058,7 +2054,7 @@ int cli_diag_worker_proxy_list(DiagCli *cli, [[maybe_unused]] const char *comman
         {
             // skim proxies for speed stats
             auto lc_ = std::scoped_lock(wrk.second->proxy_lock());
-            for (auto& [ proxy, thr ]: proxies) {
+            for (auto const& proxy: proxies) {
                 if (!proxy) continue;
                 up += proxy->stats().mtr_up.get()*8;
                 down += proxy->stats().mtr_down.get()*8;
@@ -2075,21 +2071,12 @@ int cli_diag_worker_proxy_list(DiagCli *cli, [[maybe_unused]] const char *comman
 
 
                 for (std::size_t p_i = 0; p_i < proxies.size(); ++p_i) {
-                    auto const& proxy = proxies.at(p_i).first;
+                    auto const& proxy = proxies.at(p_i);
                     if (!proxy) {
                         out << string_format("\n          `- proxy[%d]: unavailable", p_i);
                         continue;
                     }
-                    auto threaded =  ( proxies.at(p_i).second != nullptr );
-                    auto in_progress = ( proxy->state().in_progress() > 0 );
-
                     out << string_format("\n          `- proxy[%d]: %s", p_i, proxy->str().c_str());
-                    if (threaded or in_progress) {
-                        out << " (";
-                        if(threaded) out << "t";
-                        if(in_progress) out << "i";
-                        out << ")";
-                    }
                 }
                 out << "\n          `- " << speed_str;
             }
