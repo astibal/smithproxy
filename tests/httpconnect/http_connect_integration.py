@@ -113,7 +113,8 @@ class TlsEchoOrigin:
             self.finished.set()
 
 
-def make_config(source, destination, worktree, runtime, listener_port, cli_port):
+def make_config(source, destination, worktree, runtime, listener_port, cli_port,
+                reject_tcp=False):
     config = source.read_text()
     replacements = {
         "accept_tproxy = TRUE;": "accept_tproxy = FALSE;",
@@ -140,6 +141,12 @@ def make_config(source, destination, worktree, runtime, listener_port, cli_port)
         if old not in config:
             raise RuntimeError(f"configuration fixture is missing {old!r}")
         config = config.replace(old, new, 1)
+    if reject_tcp:
+        action = 'action = "accept";'
+        position = config.rfind(action)
+        if position < 0:
+            raise RuntimeError("configuration fixture has no TCP accept policy")
+        config = config[:position] + 'action = "deny";' + config[position + len(action):]
     destination.write_text(config)
 
 
@@ -272,6 +279,41 @@ def run(args):
                 output, _ = process.communicate(timeout=5)
             if sys.exc_info()[0] is not None:
                 print(output, file=sys.stderr)
+
+        reject_config = runtime / "smithproxy-reject.cfg"
+        reject_listener_port = free_port()
+        make_config(worktree / "etc/smithproxy.cfg", reject_config, worktree, runtime,
+                    reject_listener_port, free_port(), reject_tcp=True)
+        reject_process = subprocess.Popen(
+            [str(executable), "--config-file", str(reject_config), "--debug"],
+            cwd=worktree,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        try:
+            wait_for_listener(reject_process, reject_listener_port)
+            with socket.create_connection(
+                    ("127.0.0.1", reject_listener_port), timeout=10) as client:
+                client.settimeout(15)
+                client.sendall(
+                    b"CONNECT 127.0.0.1:443 HTTP/1.1\r\n"
+                    b"Host: 127.0.0.1:443\r\n\r\n")
+                response = recv_until(client, b"\r\n\r\n")
+                if not response.startswith(b"HTTP/1.1 403 Forbidden\r\n"):
+                    raise RuntimeError(
+                        f"rejected policy did not return 403: {response!r}")
+        finally:
+            reject_process.terminate()
+            try:
+                reject_output, _ = reject_process.communicate(timeout=10)
+            except subprocess.TimeoutExpired:
+                reject_process.kill()
+                reject_output, _ = reject_process.communicate(timeout=5)
+            if sys.exc_info()[0] is not None:
+                print(reject_output, file=sys.stderr)
+                for log_file in runtime.glob("messages.*.log"):
+                    print(log_file.read_text(errors="replace"), file=sys.stderr)
 
     print("HTTP CONNECT listener integration: PASS")
 
