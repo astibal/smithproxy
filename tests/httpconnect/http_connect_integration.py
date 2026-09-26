@@ -189,6 +189,30 @@ def check_plain_tunnel(listener_port, target, origin):
         raise RuntimeError(f"unexpected tunneled request for {authority}: {origin.request!r}")
 
 
+def check_fragmented_connect(listener_port):
+    origin = EchoOrigin()
+    origin.start()
+    authority = f"127.0.0.1:{origin.port}"
+    with socket.create_connection(("127.0.0.1", listener_port), timeout=10) as client:
+        client.settimeout(15)
+        for fragment in (
+                f"CONNECT {authority} HTTP/1.1\r\n".encode(),
+                f"Host: {authority}\r\n".encode(),
+                b"X-Test: fragmented\r\n\r\n"):
+            client.sendall(fragment)
+        response = recv_until(client, b"\r\n\r\n")
+        if not response.startswith(b"HTTP/1.1 200 Connection Established\r\n"):
+            raise RuntimeError(f"fragmented CONNECT failed: {response!r}")
+        client.sendall(b"PING\r\n")
+        if recv_until(client, b"PONG\r\n") != b"PONG\r\n":
+            raise RuntimeError("fragmented CONNECT tunnel response mismatch")
+
+    if not origin.finished.wait(5):
+        raise RuntimeError("fragmented CONNECT origin did not finish")
+    if origin.error:
+        raise origin.error
+
+
 def run(args):
     executable = args.smithproxy.resolve()
     worktree = args.source.resolve()
@@ -211,6 +235,7 @@ def run(args):
             wait_for_listener(process, listener_port)
             check_plain_tunnel(listener_port, "127.0.0.1", EchoOrigin())
             check_plain_tunnel(listener_port, "localtest.me", EchoOrigin())
+            check_fragmented_connect(listener_port)
 
             try:
                 check_plain_tunnel(
@@ -257,6 +282,17 @@ def run(args):
                 response = recv_until(client, b"\r\n\r\n")
                 if not response.startswith(b"HTTP/1.1 400 Bad Request\r\n"):
                     raise RuntimeError(f"malformed request was accepted: {response!r}")
+
+            with socket.create_connection(("127.0.0.1", listener_port), timeout=10) as client:
+                client.settimeout(15)
+                client.sendall(
+                    b"CONNECT example.test:443 HTTP/1.1\r\nX-Oversized: "
+                    + b"x" * (16 * 1024))
+                response = recv_until(client, b"\r\n\r\n")
+                if not response.startswith(
+                        b"HTTP/1.1 431 Request Header Fields Too Large\r\n"):
+                    raise RuntimeError(
+                        f"oversized header did not return 431: {response!r}")
 
             unavailable_port = free_port()
             with socket.create_connection(("127.0.0.1", listener_port), timeout=10) as client:

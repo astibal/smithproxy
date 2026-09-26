@@ -4,7 +4,7 @@
 
 namespace {
 
-constexpr std::size_t max_connect_header_size = 16 * 1024;
+constexpr std::size_t max_connect_header_size = 8 * 1024;
 
 } // namespace
 
@@ -27,7 +27,7 @@ std::size_t HttpConnectServerCX::process_in() {
             reinterpret_cast<char const*>(readbuf()->data()), readbuf()->size());
     auto const headers_end = data.find("\r\n\r\n");
     if(headers_end == std::string_view::npos) {
-        if(data.size() > max_connect_header_size) {
+        if(data.size() >= max_connect_header_size) {
             send_error(431, "Request Header Fields Too Large");
             return data.size();
         }
