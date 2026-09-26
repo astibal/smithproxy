@@ -27,6 +27,10 @@ GRE_COLLECTOR_PID=
 HTTP2_TCPDUMP_PID=
 HTTP2_CLIENT_PID=
 CAPTURE_MATRIX_GRE_PID=
+H3_ORIGIN_PID=
+QUIC_CLIENT_PID=
+QUIC_GRE_PID=
+QUIC_NATIVE_PID=
 SESSION_LIST_LOAD_PID=
 PPLAY_SUITE4_PID=
 PPLAY_SUITE6_PID=
@@ -36,6 +40,7 @@ RTT_TEST=${RTT_TEST:-0}
 TLS_SUITE_TEST=${TLS_SUITE_TEST:-0}
 POLICY_TEST=${POLICY_TEST:-0}
 SESSION_LIST_STRESS_TEST=${SESSION_LIST_STRESS_TEST:-0}
+QUIC_TEST=${QUIC_TEST:-0}
 UDP_CHURN_TEST=${UDP_CHURN_TEST:-0}
 TCP_CHURN_TEST=${TCP_CHURN_TEST:-0}
 CAPTURE_MARKER=smithproxy-gre-pcap-v4
@@ -64,6 +69,14 @@ cleanup() {
     [[ -z $HTTP2_CLIENT_PID ]] || wait "$HTTP2_CLIENT_PID" 2>/dev/null || true
     [[ -z $CAPTURE_MATRIX_GRE_PID ]] || kill "$CAPTURE_MATRIX_GRE_PID" 2>/dev/null || true
     [[ -z $CAPTURE_MATRIX_GRE_PID ]] || wait "$CAPTURE_MATRIX_GRE_PID" 2>/dev/null || true
+    [[ -z $QUIC_CLIENT_PID ]] || kill "$QUIC_CLIENT_PID" 2>/dev/null || true
+    [[ -z $QUIC_CLIENT_PID ]] || wait "$QUIC_CLIENT_PID" 2>/dev/null || true
+    [[ -z $QUIC_GRE_PID ]] || kill -INT "$QUIC_GRE_PID" 2>/dev/null || true
+    [[ -z $QUIC_GRE_PID ]] || wait "$QUIC_GRE_PID" 2>/dev/null || true
+    [[ -z $QUIC_NATIVE_PID ]] || kill -INT "$QUIC_NATIVE_PID" 2>/dev/null || true
+    [[ -z $QUIC_NATIVE_PID ]] || wait "$QUIC_NATIVE_PID" 2>/dev/null || true
+    [[ -z $H3_ORIGIN_PID ]] || kill "$H3_ORIGIN_PID" 2>/dev/null || true
+    [[ -z $H3_ORIGIN_PID ]] || wait "$H3_ORIGIN_PID" 2>/dev/null || true
     [[ -z $SESSION_LIST_LOAD_PID ]] || kill "$SESSION_LIST_LOAD_PID" 2>/dev/null || true
     [[ -z $SESSION_LIST_LOAD_PID ]] || wait "$SESSION_LIST_LOAD_PID" 2>/dev/null || true
     [[ -z $PPLAY_SUITE4_PID ]] || kill -TERM "$PPLAY_SUITE4_PID" 2>/dev/null || true
@@ -112,7 +125,10 @@ ip -n "$SERVER" link set eth0 up
 ip -n "$SERVER" addr add 198.18.20.2/24 dev eth0
 ip -n "$SERVER" -6 addr add fd00:20::2/64 dev eth0 nodad
 # No route from origin to client: successful replies prove proxy termination.
-if [[ $CAPTURE_TEST == 1 ]]; then
+if [[ $QUIC_TEST == 1 ]]; then
+    export GRE_CAPTURE_DST=198.18.20.2
+    export CAPTURE_FILE_PREFIX="$CAPTURE_PREFIX"
+elif [[ $CAPTURE_TEST == 1 ]]; then
     export GRE_CAPTURE_DST=198.18.20.2
     export CAPTURE_FILE_PREFIX="$CAPTURE_PREFIX"
     if [[ $CAPTURE_MATRIX_TEST == 1 ]]; then
@@ -140,6 +156,37 @@ if [[ $CAPTURE_TEST == 1 ]]; then
 fi
 ip netns exec "$SERVER" python3 -u "$ROOT/runner/tests/origin.py" "$ROOT/config/certs" > "$ROOT/results/origin.log" 2>&1 &
 ORIGIN_PID=$!
+if [[ $QUIC_TEST == 1 ]]; then
+    [[ -x ${QUIC_CURL_BIN:-} ]] || {
+        echo "FAIL: QUIC_CURL_BIN is not executable: ${QUIC_CURL_BIN:-<unset>}" >&2
+        exit 1
+    }
+    "$QUIC_CURL_BIN" --version | grep -q HTTP3 || {
+        echo "FAIL: QUIC_CURL_BIN lacks HTTP/3 support" >&2
+        exit 1
+    }
+    python3 -c 'import aioquic' || {
+        echo 'FAIL: QUIC runner requires the aioquic Python package' >&2
+        exit 1
+    }
+    command -v tshark >/dev/null
+    command -v tcpdump >/dev/null
+    [[ -r ${SPQ1_DISSECTOR:-} ]] || {
+        echo "FAIL: SPQ1_DISSECTOR is not readable: ${SPQ1_DISSECTOR:-<unset>}" >&2
+        exit 1
+    }
+    ip netns exec "$SERVER" python3 -u "$ROOT/runner/tests/h3-origin.py" \
+        --certificate "$ROOT/config/certs/origin-cert.pem" \
+        --key "$ROOT/config/certs/origin-key.pem" \
+        > "$ROOT/results/h3-origin.log" 2>&1 &
+    H3_ORIGIN_PID=$!
+    for attempt in $(seq 1 100); do
+        grep -q '^READY h3-origin ' "$ROOT/results/h3-origin.log" && break
+        kill -0 "$H3_ORIGIN_PID"
+        sleep 0.05
+    done
+    grep -q '^READY h3-origin ' "$ROOT/results/h3-origin.log"
+fi
 "$ROOT/runner/smithproxy.runner" --in "$IN_IF" --out "$OUT_IF" --namespace "$NS" \
     --api-port "$API_RELAY_PORT" --config-dir "$ROOT/config" --data-dir "$ROOT/data" \
     > "$ROOT/results/runner.log" 2>&1 &
@@ -229,6 +276,60 @@ for family, host, expected_peer in ((socket.AF_INET, '198.18.20.2', '198.18.20.1
 PY
 echo 'PASS4 UDP: three datagrams and original reply address'
 echo 'PASS6 UDP: three datagrams and original reply address'
+if [[ $QUIC_TEST == 1 ]]; then
+    QUIC_RESULT="$ROOT/results/quic-observability"
+    QUIC_GRE="$QUIC_RESULT/gre.pcap"
+    QUIC_NATIVE="$QUIC_RESULT/downstream-native.pcapng"
+    QUIC_CLI="$QUIC_RESULT/cli.txt"
+    rm -rf "$QUIC_RESULT"
+    mkdir -p "$QUIC_RESULT"
+
+    # Capture the encrypted downstream wire image and the independently
+    # generated keyed-GRE plaintext export during the same H3 connection.
+    ip netns exec "$NS" tcpdump -i "$IN_IF" -U -s 0 -w "$QUIC_NATIVE" \
+        'udp port 443' > "$QUIC_RESULT/tcpdump-native.log" 2>&1 &
+    QUIC_NATIVE_PID=$!
+    ip netns exec "$NS" tcpdump -i "$OUT_IF" -U -s 0 -w "$QUIC_GRE" \
+        'ip proto 47' > "$QUIC_RESULT/tcpdump-gre.log" 2>&1 &
+    QUIC_GRE_PID=$!
+    sleep 0.5
+
+    ip netns exec "$CLIENT" "$QUIC_CURL_BIN" --http3-only --parallel --parallel-max 4 \
+        --silent --show-error --max-time 30 --limit-rate 8k \
+        --cacert "$ROOT/config/certs/ca-cert.pem" \
+        --resolve origin.runner.lab:443:198.18.20.2 \
+        --output "$QUIC_RESULT/alpha.txt" 'https://origin.runner.lab/alpha' \
+        --output "$QUIC_RESULT/beta.txt" 'https://origin.runner.lab/beta?item=2' \
+        --output "$QUIC_RESULT/gamma.txt" 'https://origin.runner.lab/gamma/deep' \
+        --output "$QUIC_RESULT/hold.txt" 'https://origin.runner.lab/hold?stream=4' \
+        > "$QUIC_RESULT/curl.log" 2>&1 &
+    QUIC_CLIENT_PID=$!
+    for attempt in $(seq 1 200); do
+        (( $(grep -c '^REQUEST stream=' "$ROOT/results/h3-origin.log" || true) >= 4 )) && break
+        kill -0 "$QUIC_CLIENT_PID"
+        sleep 0.05
+    done
+    (( $(grep -c '^REQUEST stream=' "$ROOT/results/h3-origin.log" || true) >= 4 ))
+
+    { printf 'enable\r\ndiag proxy quic list\r\n'; sleep 1; printf 'quit\r\n'; } | \
+        timeout 8 ip netns exec "$NS" nc 127.0.0.1 50000 > "$QUIC_CLI" 2>&1
+    wait "$QUIC_CLIENT_PID"
+    QUIC_CLIENT_PID=
+    kill -INT "$QUIC_GRE_PID" "$QUIC_NATIVE_PID" 2>/dev/null || true
+    wait "$QUIC_GRE_PID" 2>/dev/null || true
+    wait "$QUIC_NATIVE_PID" 2>/dev/null || true
+    QUIC_GRE_PID=
+    QUIC_NATIVE_PID=
+
+    grep -q 'smithproxy-h3-origin path=/alpha' "$QUIC_RESULT/alpha.txt"
+    grep -q 'smithproxy-h3-origin path=/beta?item=2' "$QUIC_RESULT/beta.txt"
+    grep -q 'smithproxy-h3-origin path=/gamma/deep' "$QUIC_RESULT/gamma.txt"
+    grep -q 'smithproxy-h3-origin path=/hold?stream=4' "$QUIC_RESULT/hold.txt"
+    grep -q 'SNI: origin.runner.lab' "$QUIC_CLI"
+    grep -q 'ALPN: downstream=h3 upstream=h3' "$QUIC_CLI"
+    echo 'PASS4 QUIC/H3 traffic: verified certificate, SNI, ALPN and four multiplexed requests'
+    echo 'PASS4 QUIC diagnostics: active session and streams visible in dedicated CLI'
+fi
 if [[ $SESSION_LIST_STRESS_TEST == 1 ]]; then
     SESSION_LIST_READY="$ROOT/results/session-list-load.ready"
     SESSION_LIST_STOP="$ROOT/results/session-list-load.stop"
@@ -625,6 +726,27 @@ if [[ ${HTTP2_OBSERVABILITY_TEST:-0} == 1 ]]; then
             > "$HTTP2_RESULT/validation.json"
         echo "PASS$family HTTP/2 observability: CLI, PCAP and GRE contain exactly 12 requests and responses"
     done
+fi
+if [[ $QUIC_TEST == 1 ]]; then
+    [[ -s "$ROOT/results/quic-downstream.keys" ]]
+    grep -Eq '_(HANDSHAKE|TRAFFIC)_SECRET ' "$ROOT/results/quic-downstream.keys"
+    python3 "$ROOT/runner/tests/verify-quic-observability.py" \
+        --data-dir "$ROOT/data" --prefix "$CAPTURE_PREFIX" \
+        --gre "$ROOT/results/quic-observability/gre.pcap" \
+        --native "$ROOT/results/quic-observability/downstream-native.pcapng" \
+        --keylog "$ROOT/results/quic-downstream.keys" \
+        --cli "$ROOT/results/quic-observability/cli.txt" \
+        --dissector "$SPQ1_DISSECTOR" \
+        --url 'https://origin.runner.lab/alpha' \
+        --url 'https://origin.runner.lab/beta?item=2' \
+        --url 'https://origin.runner.lab/gamma/deep' \
+        --url 'https://origin.runner.lab/hold?stream=4' \
+        > "$ROOT/results/quic-observability/validation.json"
+    echo 'PASS4 QUIC policy: UDP-only content profile selected for multiplexed streams'
+    echo 'PASS4 QUIC local PCAP: SPQ1 session, stream, ALPN, FIN, payload and H3 fields validated'
+    echo 'PASS4 QUIC GRE: RFC 2890 key matches SPQ1 session and local capture semantics'
+    echo 'PASS4 QUIC native PCAP: SSLKEYLOGFILE decrypts requests, responses and independent streams'
+    echo 'PASS4 QUIC Wireshark: methods, statuses and composite URLs are filterable'
 fi
 # Both interfaces must have been returned by runner, before test destroys them.
 ip link show "$IN_IF" > /dev/null

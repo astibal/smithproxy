@@ -25,7 +25,8 @@ Profiles:
               With --remote, both ports bind to the remote host's loopback.
 
 Options:
-  --suite NAME       Run only one virtual sanity suite: tls, policy, rtt or session-list.
+  --suite NAME       Run only one virtual sanity suite: tls, policy, rtt,
+                     session-list or quic.
                      Use with the sanity or full profile.
   --remote HOST      Run the isolated lab over SSH on [USER@]HOST. A root@
                      target runs directly; other users are invoked via sudo.
@@ -62,11 +63,13 @@ Common environment variables:
   RTT_HANDSHAKE_MAX_LIMIT_MS     Handshake maximum gate (default: 2000).
   CHURN_MIN_PORT                 TCP/UDP churn source-port minimum (default: 20000).
   CHURN_MAX_PORT                 TCP/UDP churn source-port maximum (default: 29999).
+  CURL_HTTP3_PREFIX              curl installation whose bin/curl-h3 supports HTTP/3.
 
 Examples:
   test-patch.sh quick
   test-patch.sh sanity --remote root@tt-bs1
   test-patch.sh sanity --suite policy --remote root@tt-bs1
+  test-patch.sh sanity --suite quic --remote root@tt-px1
   test-patch.sh sanity --quiet --remote root@tt-bs1
   test-patch.sh sanity --remote root@tt-bs1 --env RTT_SAMPLES=500
   test-patch.sh full --remote root@tt-bs1 --env MATCH='h2_generated_*' \
@@ -160,7 +163,7 @@ if [[ -n $CHURN_PORT_RANGE ]]; then
     }
     EXTRA_ENV+=("CHURN_MIN_PORT=$CHURN_MIN_PORT" "CHURN_MAX_PORT=$CHURN_MAX_PORT")
 fi
-[[ -z $ONLY_SUITE || $ONLY_SUITE == tls || $ONLY_SUITE == policy || $ONLY_SUITE == rtt || $ONLY_SUITE == session-list ]] || { echo "Unknown suite: $ONLY_SUITE" >&2; exit 2; }
+[[ -z $ONLY_SUITE || $ONLY_SUITE == tls || $ONLY_SUITE == policy || $ONLY_SUITE == rtt || $ONLY_SUITE == session-list || $ONLY_SUITE == quic ]] || { echo "Unknown suite: $ONLY_SUITE" >&2; exit 2; }
 
 COMMIT=$(git -C "$ROOT" rev-parse HEAD)
 SHORT_COMMIT=${COMMIT:0:8}
@@ -241,6 +244,7 @@ print(*(x.getsockname()[1] for x in s))'
         read -r API_PORT CLI_PORT < <(python3 -c "$PORT_PICKER")
     fi
     LAB_ROOT=$WORK_DIR/labs/$RUN_ID-$TAG
+    QUIC_CURL_PREFIX=${CURL_HTTP3_PREFIX:-$ROOT/../curl-http3}
 
     if [[ -n $REMOTE ]]; then
         ssh "$REMOTE" "mkdir -p '$LAB_ROOT/bin' '$LAB_ROOT/runner/tests' '$LAB_ROOT/corpus' '$LAB_ROOT/src/etc/msg/en'"
@@ -251,6 +255,16 @@ print(*(x.getsockname()[1] for x in s))'
         scp "$HERE/vendor/pplay.py" "$REMOTE:$LAB_ROOT/pplay.py" >/dev/null
         scp "$ROOT/etc/smithproxy.cfg" "$REMOTE:$LAB_ROOT/src/etc/" >/dev/null
         scp -r "$ROOT/etc/msg/en/." "$REMOTE:$LAB_ROOT/src/etc/msg/en/" >/dev/null
+        if [[ $ONLY_SUITE == quic ]]; then
+            [[ -x $QUIC_CURL_PREFIX/bin/curl-h3 ]] || {
+                echo "Missing HTTP/3 curl: $QUIC_CURL_PREFIX/bin/curl-h3" >&2
+                exit 2
+            }
+            ssh "$REMOTE" "mkdir -p '$LAB_ROOT/curl-http3' '$LAB_ROOT/runner/tools'"
+            scp -r "$QUIC_CURL_PREFIX/." "$REMOTE:$LAB_ROOT/curl-http3/" >/dev/null
+            scp "$ROOT/tools/wireshark/spquic.lua" \
+                "$REMOTE:$LAB_ROOT/runner/tools/spquic.lua" >/dev/null
+        fi
     else
         mkdir -p "$LAB_ROOT/bin" "$LAB_ROOT/runner/tests" "$LAB_ROOT/corpus" "$LAB_ROOT/src/etc/msg/en"
         cp "$BINARY" "$LAB_ROOT/bin/smithproxy"
@@ -260,6 +274,15 @@ print(*(x.getsockname()[1] for x in s))'
         cp "$HERE/vendor/pplay.py" "$LAB_ROOT/pplay.py"
         cp "$ROOT/etc/smithproxy.cfg" "$LAB_ROOT/src/etc/"
         cp -a "$ROOT/etc/msg/en/." "$LAB_ROOT/src/etc/msg/en/"
+        if [[ $ONLY_SUITE == quic ]]; then
+            [[ -x $QUIC_CURL_PREFIX/bin/curl-h3 ]] || {
+                echo "Missing HTTP/3 curl: $QUIC_CURL_PREFIX/bin/curl-h3" >&2
+                exit 2
+            }
+            mkdir -p "$LAB_ROOT/curl-http3" "$LAB_ROOT/runner/tools"
+            cp -a "$QUIC_CURL_PREFIX/." "$LAB_ROOT/curl-http3/"
+            cp "$ROOT/tools/wireshark/spquic.lua" "$LAB_ROOT/runner/tools/spquic.lua"
+        fi
     fi
 
     LAB_ENV=(
@@ -296,6 +319,9 @@ print(*(x.getsockname()[1] for x in s))'
             policy) LAB_ENV+=("POLICY_TEST=1") ;;
             rtt) LAB_ENV+=("RTT_TEST=1") ;;
             session-list) LAB_ENV+=("SESSION_LIST_STRESS_TEST=1") ;;
+            quic) LAB_ENV+=("QUIC_TEST=1" "QUIC_LAB=1" "QUIC_KEYLOG_TEST=1"
+                "QUIC_CURL_BIN=$LAB_ROOT/curl-http3/bin/curl-h3"
+                "SPQ1_DISSECTOR=$LAB_ROOT/runner/tools/spquic.lua") ;;
         esac
     fi
     if [[ $PROFILE == full ]]; then

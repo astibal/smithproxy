@@ -14,6 +14,7 @@ tests/patch-runner/test-patch.sh sanity --suite tls --remote root@tt-bs1
 tests/patch-runner/test-patch.sh sanity --suite policy --remote root@tt-bs1
 tests/patch-runner/test-patch.sh sanity --suite rtt --remote root@tt-bs1
 tests/patch-runner/test-patch.sh sanity --suite session-list --remote root@tt-bs1
+tests/patch-runner/test-patch.sh sanity --suite quic --remote root@tt-px1
 tests/patch-runner/test-patch.sh full --remote root@tt-bs1 --churn-port-range 20000:29999
 ```
 
@@ -35,7 +36,7 @@ The isolated lab is dual-stack. Applicable dataplane tests report separate
 HTTP, TLS, TCP/UDP, policy, RTT, churn, pplay, PCAP/GRE capture validation and
 HTTP/2 observability. Management-only checks retain a single `PASS` verdict.
 
-`--suite tls|policy|rtt|session-list` runs one virtual sanity subsection in the same isolated
+`--suite tls|policy|rtt|session-list|quic` runs one virtual sanity subsection in the same isolated
 lab. Without `--suite`, every subsection is always included in `sanity` and
 `full`. Suite implementations and their case definitions live below
 `harness/suites/`.
@@ -85,6 +86,11 @@ root. For remote execution: SSH access and passwordless `sudo`, unless using
 `root@host`. The lab host needs Linux network namespaces,
 iproute2, nftables, socat, tcpdump, tshark, curl, nc, OpenSSL and Python 3.
 The test uses unique namespace, interface, port and `/opt/lab` names per run.
+
+The QUIC suite additionally needs Python `aioquic` on the lab host and an
+HTTP/3-enabled curl installation. Set `CURL_HTTP3_PREFIX` to its prefix; the
+runner copies that small runtime bundle to local or remote lab storage. The
+default is the sibling directory `../curl-http3`.
 
 ## Corpus
 
