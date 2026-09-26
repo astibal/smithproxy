@@ -3,6 +3,7 @@
 import argparse
 import pathlib
 import socket
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -10,9 +11,10 @@ import threading
 import time
 
 
-def free_port():
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
+def free_port(family=socket.AF_INET, address=None):
+    address = address or ("::1" if family == socket.AF_INET6 else "127.0.0.1")
+    with socket.socket(family) as sock:
+        sock.bind((address, 0))
         return sock.getsockname()[1]
 
 
@@ -28,9 +30,19 @@ def recv_until(sock, marker, limit=65536):
     return bytes(data)
 
 
+def system_nameserver():
+    for line in pathlib.Path("/etc/resolv.conf").read_text().splitlines():
+        fields = line.split()
+        if len(fields) == 2 and fields[0] == "nameserver":
+            return fields[1]
+    raise RuntimeError("no nameserver found in /etc/resolv.conf")
+
+
 class EchoOrigin:
-    def __init__(self):
-        self.port = free_port()
+    def __init__(self, family=socket.AF_INET, address=None):
+        self.family = family
+        self.address = address or ("::1" if family == socket.AF_INET6 else "127.0.0.1")
+        self.port = free_port(family, self.address)
         self.ready = threading.Event()
         self.finished = threading.Event()
         self.error = None
@@ -44,9 +56,9 @@ class EchoOrigin:
 
     def run(self):
         try:
-            with socket.socket() as listener:
+            with socket.socket(self.family) as listener:
                 listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                listener.bind(("127.0.0.1", self.port))
+                listener.bind((self.address, self.port))
                 listener.listen(1)
                 listener.settimeout(15)
                 self.ready.set()
@@ -61,6 +73,46 @@ class EchoOrigin:
             self.finished.set()
 
 
+class TlsEchoOrigin:
+    def __init__(self, cert, key):
+        self.port = free_port()
+        self.cert = cert
+        self.key = key
+        self.ready = threading.Event()
+        self.finished = threading.Event()
+        self.error = None
+        self.request = b""
+        self.thread = threading.Thread(target=self.run, daemon=True)
+
+    def start(self):
+        self.thread.start()
+        if not self.ready.wait(5):
+            raise RuntimeError("TLS origin did not start")
+        if self.error:
+            raise self.error
+
+    def run(self):
+        try:
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.load_cert_chain(self.cert, self.key)
+            with socket.socket() as listener:
+                listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                listener.bind(("127.0.0.1", self.port))
+                listener.listen(1)
+                listener.settimeout(15)
+                self.ready.set()
+                connection, _ = listener.accept()
+                with context.wrap_socket(connection, server_side=True) as tls_connection:
+                    tls_connection.settimeout(15)
+                    self.request = recv_until(tls_connection, b"TLS-PING\r\n")
+                    tls_connection.sendall(b"TLS-PONG\r\n")
+        except Exception as exc:
+            self.error = exc
+            self.ready.set()
+        finally:
+            self.finished.set()
+
+
 def make_config(source, destination, worktree, runtime, listener_port, cli_port):
     config = source.read_text()
     replacements = {
@@ -68,6 +120,8 @@ def make_config(source, destination, worktree, runtime, listener_port, cli_port)
         "accept_redirect = TRUE;": "accept_redirect = FALSE;",
         "accept_socks = TRUE;": "accept_socks = FALSE;",
         "accept_http_connect = FALSE;": "accept_http_connect = TRUE;",
+        'nameservers = [ "8.8.8.8", "8.8.4.4" ];':
+            f'nameservers = [ "{system_nameserver()}" ];',
         'http_connect_port = "3128";': f'http_connect_port = "{listener_port}";',
         "http_connect_workers = 0;": "http_connect_workers = 1;",
         'certs_path = "/etc/smithproxy/certs/default/";':
@@ -103,6 +157,31 @@ def wait_for_listener(process, port):
     raise RuntimeError("HTTP CONNECT listener did not become ready")
 
 
+def check_plain_tunnel(listener_port, target, origin):
+    origin.start()
+    authority = f"[{target}]:{origin.port}" if ":" in target else f"{target}:{origin.port}"
+    with socket.create_connection(("127.0.0.1", listener_port), timeout=10) as client:
+        client.settimeout(15)
+        request = (
+            f"CONNECT {authority} HTTP/1.1\r\n"
+            f"Host: {authority}\r\n\r\n"
+        )
+        client.sendall(request.encode())
+        response = recv_until(client, b"\r\n\r\n")
+        if not response.startswith(b"HTTP/1.1 200 Connection Established\r\n"):
+            raise RuntimeError(f"CONNECT to {authority} failed: {response!r}")
+        client.sendall(b"PING\r\n")
+        if recv_until(client, b"PONG\r\n") != b"PONG\r\n":
+            raise RuntimeError(f"tunnel response mismatch for {authority}")
+
+    if not origin.finished.wait(5):
+        raise RuntimeError(f"origin {authority} did not finish")
+    if origin.error:
+        raise origin.error
+    if origin.request != b"PING\r\n":
+        raise RuntimeError(f"unexpected tunneled request for {authority}: {origin.request!r}")
+
+
 def run(args):
     executable = args.smithproxy.resolve()
     worktree = args.source.resolve()
@@ -113,8 +192,6 @@ def run(args):
         make_config(worktree / "etc/smithproxy.cfg", config, worktree, runtime,
                     listener_port, free_port())
 
-        origin = EchoOrigin()
-        origin.start()
         process = subprocess.Popen(
             [str(executable), "--config-file", str(config), "--debug"],
             cwd=worktree,
@@ -125,26 +202,48 @@ def run(args):
         output = ""
         try:
             wait_for_listener(process, listener_port)
+            check_plain_tunnel(listener_port, "127.0.0.1", EchoOrigin())
+            check_plain_tunnel(listener_port, "localtest.me", EchoOrigin())
+
+            try:
+                check_plain_tunnel(
+                    listener_port, "::1", EchoOrigin(socket.AF_INET6))
+                check_plain_tunnel(
+                    listener_port, "ipv6.localtest.me", EchoOrigin(socket.AF_INET6))
+            except OSError as exc:
+                if exc.errno not in (97, 99):
+                    raise
+                print(f"IPv6 loopback unavailable, skipping IPv6 tunnels: {exc}")
+
+            tls_origin = TlsEchoOrigin(
+                worktree / "etc/certs/default/srv-cert.pem",
+                worktree / "etc/certs/default/srv-key.pem")
+            tls_origin.start()
             with socket.create_connection(("127.0.0.1", listener_port), timeout=10) as client:
                 client.settimeout(15)
-                request = (
-                    f"CONNECT 127.0.0.1:{origin.port} HTTP/1.1\r\n"
-                    f"Host: 127.0.0.1:{origin.port}\r\n\r\n"
-                )
-                client.sendall(request.encode())
+                client.sendall((
+                    f"CONNECT 127.0.0.1:{tls_origin.port} HTTP/1.1\r\n"
+                    f"Host: 127.0.0.1:{tls_origin.port}\r\n\r\n").encode())
                 response = recv_until(client, b"\r\n\r\n")
                 if not response.startswith(b"HTTP/1.1 200 Connection Established\r\n"):
-                    raise RuntimeError(f"CONNECT failed: {response!r}")
-                client.sendall(b"PING\r\n")
-                if recv_until(client, b"PONG\r\n") != b"PONG\r\n":
-                    raise RuntimeError("tunnel response mismatch")
+                    raise RuntimeError(f"TLS CONNECT failed: {response!r}")
 
-            if not origin.finished.wait(5):
-                raise RuntimeError("origin did not finish")
-            if origin.error:
-                raise origin.error
-            if origin.request != b"PING\r\n":
-                raise RuntimeError(f"unexpected tunneled request: {origin.request!r}")
+                client_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+                client_context.check_hostname = False
+                client_context.verify_mode = ssl.CERT_NONE
+                with client_context.wrap_socket(
+                        client, server_hostname="localhost") as tls_client:
+                    tls_client.sendall(b"TLS-PING\r\n")
+                    if recv_until(tls_client, b"TLS-PONG\r\n") != b"TLS-PONG\r\n":
+                        raise RuntimeError("TLS tunnel response mismatch")
+
+            if not tls_origin.finished.wait(5):
+                raise RuntimeError("TLS origin did not finish")
+            if tls_origin.error:
+                raise tls_origin.error
+            if tls_origin.request != b"TLS-PING\r\n":
+                raise RuntimeError(
+                    f"unexpected TLS tunneled request: {tls_origin.request!r}")
 
             with socket.create_connection(("127.0.0.1", listener_port), timeout=10) as client:
                 client.sendall(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
