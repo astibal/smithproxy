@@ -8,7 +8,7 @@
 
 class HttpConnectServerCX : public socksServerCX {
 public:
-    using socksServerCX::socksServerCX;
+    HttpConnectServerCX(baseCom* c, unsigned int s);
 
     std::size_t process_in() override;
     std::size_t process_socks_reply() override;

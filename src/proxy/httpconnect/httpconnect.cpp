@@ -8,6 +8,14 @@ constexpr std::size_t max_connect_header_size = 8 * 1024;
 
 } // namespace
 
+HttpConnectServerCX::HttpConnectServerCX(baseCom* c, unsigned int s)
+    : socksServerCX(c, s) {
+    // A zero return from process_in() means that the CONNECT headers are
+    // incomplete. baseHostCX auto-finish would discard that partial input
+    // before the next read, so retain it for incremental parsing.
+    auto_finish(false);
+}
+
 void HttpConnectServerCX::send_error(unsigned int status, std::string_view reason) {
     auto const response = string_format(
             "HTTP/1.1 %u %.*s\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
