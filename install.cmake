@@ -81,6 +81,18 @@ if(UNIX)
 
     install(FILES man/TESTING_README.txt DESTINATION share/smithproxy/docs)
 
+    # Preserve notices for the QPACK code statically linked into smithproxy.
+    install(FILES
+            src/ext/ls-qpack/LICENSE.ls-qpack
+            src/ext/ls-qpack/LICENSE.xxhash
+            DESTINATION share/smithproxy/docs/licenses)
+
+    # Optional dissector for synthetic plaintext QUIC records in PCAP/GRE.
+    install(FILES
+            tools/wireshark/spquic.lua
+            tools/wireshark/README.md
+            DESTINATION share/smithproxy/wireshark)
+
     # install infra/
     file(GLOB infra_py "src/infra/*.py" EXCLUDE "src/infra/smithdog.py")
     install(FILES ${infra_py} DESTINATION share/smithproxy/infra)
