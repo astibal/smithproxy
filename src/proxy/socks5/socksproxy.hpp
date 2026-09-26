@@ -54,8 +54,6 @@ public:
 
     //consumes cx and deletes it
     virtual void socks5_handoff(socksServerCX* cx);
-    bool socks5_handoff_resolve_identity(MitmHostCX* cx);
-    bool socks5_handoff_authenticate(MitmHostCX* cx);
 
     virtual void socks5_handoff_udp(socksServerCX* cx);
 

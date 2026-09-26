@@ -1,0 +1,2866 @@
+diff --git b/CMakeLists.txt a/CMakeLists.txt
+index 5e15ffe..20e9b07 100644
+--- b/CMakeLists.txt
++++ a/CMakeLists.txt
+@@ -289,8 +289,11 @@ add_executable(smithproxy
+         src/proxy/socks5/socksproxy.cpp
+ 
+         src/policy/policy.cpp
++        src/policy/authfactory.hpp
++        src/policy/authfactory4.cpp
+         src/policy/inspectors.cpp
+         src/policy/addrobj.cpp
++        src/policy/authfactory6.cpp
+         src/policy/loadb.cpp
+         src/policy/profiles.hpp
+         src/policy/profiles.cpp
+@@ -309,6 +312,9 @@ add_executable(smithproxy
+         src/inspect/engine/http.hpp
+         src/inspect/engine/http.cpp
+ 
++        src/shm/shmauth.cpp
++
++
+         src/async/asyncsocket.hpp
+         src/async/asyncdns.hpp
+ 
+diff --git b/coverity.cmake a/coverity.cmake
+index 6ee2baa..872624e 100644
+--- b/coverity.cmake
++++ a/coverity.cmake
+@@ -102,11 +102,13 @@ add_executable(smithproxy
+         src/proxy/socks5/sockshostcx.cpp
+         src/proxy/socks5/socksproxy.cpp
+         src/cli/cmdserver.cpp
++        src/shm/shmauth.cpp
+         src/inspect/dns.cpp
+         src/policy/inspectors.cpp
+         src/policy/addrobj.cpp
+         src/service/netservice.cpp
+         src/staticcontent.cpp
++        src/policy/authfactory6.cpp
+         src/smithlog.cpp
+         src/proxy/filters/filterproxy.cpp
+         src/service/dnsupd/smithdnsupd.cpp
+@@ -121,6 +123,8 @@ add_executable(smithproxy
+         src/service/libcli/fd_transport.cpp
+         src/service/libcli/line_editor.cpp
+ 
++        src/policy/authfactory.hpp
++        src/policy/authfactory4.cpp
+         src/inspect/sxsignature.hpp
+         src/inspect/pyinspector.hpp
+         src/inspect/sigfactory.hpp
+diff --git b/etc/apparmor/usr.bin.smithproxy a/etc/apparmor/usr.bin.smithproxy
+index a187473..1c6a15d 100644
+--- b/etc/apparmor/usr.bin.smithproxy
++++ a/etc/apparmor/usr.bin.smithproxy
+@@ -48,7 +48,10 @@
+   @{CERTSTORE}/** r,
+   # @{CERTSTORE2}/**/*.pem r,
+ 
+-  # write pidfiles
++  # write semaphores, shm, pidfiles
++  /dev/shm/sem.* rw,
++  /dev/shm/sem.smithproxy* rw,
++  /dev/shm/smithproxy* rw,
+   /run/smithproxy* rw,
+ 
+   # write logs
+diff --git b/etc/smithproxy.cfg a/etc/smithproxy.cfg
+index 14b39df..34b32ad 100644
+--- b/etc/smithproxy.cfg
++++ a/etc/smithproxy.cfg
+@@ -74,6 +74,15 @@ settings = {
+         port = 50000;
+         enable_password = "";
+     }
++    auth_portal = {                          // WARNING: active authentication will not work without detect profile and some signatures (min www/get|post)!
++        address    = "192.168.254.1";        // when authentication portal should be displayed, redirect will go here (where webfr.py listens)
++        address6   = "[2002:5f8f:81be:2::1]";  // above for IPv6
++        http_port  = "8008";                 // which port webfr.py listens on
++        https_port = "8043";                 // which port ssl webfr.py listens on
++        ssl_key    = "portal-key.pem";	     // relative to settings.certs_path
++        ssl_cert   = "portal-cert.pem";      // relative to settings.certs_path
++        magic_ip   = "1.2.3.4";              // virtual IP which redirects user to correct auth portal (tenant aware)
++    }
+     web_rating = {
+         // wot is not yet implemented
+         wot_key = "57a92fd16754f60359c4d7fb6dd8b5ea7a26039f";  //this is only example API key which will NOT work.
+@@ -271,6 +280,21 @@ tls_profiles = {
+     }
+ }
+ 
++auth_profiles = {
++    login = {
++        authenticate = TRUE;
++        resolve = TRUE;
++        identities = {
++            peoples = {}
++        }
++    }
++    resolve = {
++        authenticate = FALSE;
++        resolve = TRUE;
++    }
++}
++
++
+ alg_dns_profiles = {
+     dns_default = {
+         match_request_id = TRUE;
+@@ -296,6 +320,7 @@ policy = (
+         tls_profile = "default";
+         detection_profile = "detect";
+         content_profile = "default";
++        auth_profile = "resolve";
+         alg_dns_profile = "dns_default";
+         action = "accept";
+         nat = "auto";
+@@ -320,6 +345,7 @@ policy = (
+         tls_profile = "default";
+         detection_profile = "detect";
+         content_profile = "default";
++        auth_profile = "resolve";
+         alg_dns_profile = "dns_default";
+         action = "accept";
+         nat = "auto";
+diff --git b/src/main.cpp a/src/main.cpp
+index 35fe6f0..f2a3a20 100644
+--- b/src/main.cpp
++++ a/src/main.cpp
+@@ -584,6 +584,7 @@ int main(int argc, char *argv[]) {
+     Log::get()->events().insert(INF, "Smithproxy %s%s starting", SMITH_VERSION, SMITH_DEVEL > 0 ? "-dev" : "");
+ 
+     SmithProxy::instance().create_dns_thread();
++    SmithProxy::instance().create_identity_thread();
+ 
+     auto start_api = [&]() {
+         if (CfgFactory::get()->accept_api) {
+diff --git b/src/policy/authfactory.hpp a/src/policy/authfactory.hpp
+new file mode 100644
+index 0000000..da383f2
+--- /dev/null
++++ a/src/policy/authfactory.hpp
+@@ -0,0 +1,154 @@
++/*
++    Smithproxy- transparent proxy with SSL inspection capabilities.
++    Copyright (c) 2014, Ales Stibal <astib@mag0.net>, All rights reserved.
++
++    Smithproxy is free software: you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation, either version 3 of the License, or
++    (at your option) any later version.
++
++    Smithproxy is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with Smithproxy.  If not, see <http://www.gnu.org/licenses/>.
++
++    Linking Smithproxy statically or dynamically with other modules is
++    making a combined work based on Smithproxy. Thus, the terms and
++    conditions of the GNU General Public License cover the whole combination.
++
++    In addition, as a special exception, the copyright holders of Smithproxy
++    give you permission to combine Smithproxy with free software programs
++    or libraries that are released under the GNU LGPL and with code
++    included in the standard release of OpenSSL under the OpenSSL's license
++    (or modified versions of such code, with unchanged license).
++    You may copy and distribute such a system following the terms
++    of the GNU GPL for Smithproxy and the licenses of the other code
++    concerned, provided that you include the source code of that other code
++    when and as the GNU GPL requires distribution of source code.
++
++    Note that people who make modified versions of Smithproxy are not
++    obligated to grant this special exception for their modified versions;
++    it is their choice whether to do so. The GNU General Public License
++    gives permission to release a modified version without this exception;
++    this exception also makes it possible to release a modified version
++    which carries forward this exception.
++*/
++
++#ifndef SMITHPROXY_AUTHFACTORY_HPP
++#define SMITHPROXY_AUTHFACTORY_HPP
++
++#include <string>
++#include <mutex>
++#include <shm/shmauth.hpp>
++
++#include <log/logger.hpp>
++
++class baseHostCX;
++
++struct AuthFactoryOptions {
++    // publicly accessible config values
++    unsigned int token_timeout = 20; // token expires _from_cache_ after this timeout (in seconds).
++    int global_idle_timeout = 600;
++    std::string portal_address = "0.0.0.0";
++    std::string portal_address6 = "[::]";
++    std::string portal_port_http = "8008";
++    std::string portal_port_https = "8043";
++};
++
++class AuthFactory {
++
++    using shared_token_table_t = shared_table<shm_logon_token>;
++    using token_map_t = std::unordered_map<std::string,std::pair<unsigned int,std::string>>;
++
++    using shared_ip4_map_t = shared_logoninfotype_ntoa_map<shm_logon_info,4>;
++    using shared_ip6_map_t = shared_logoninfotype_ntoa_map<shm_logon_info6,16>;
++
++    using ip6_map_t = std::unordered_map<std::string,IdentityInfo6>;
++    using ip4_map_t = std::unordered_map<std::string,IdentityInfo> ;
++
++    mutable std::recursive_mutex token_lock_;
++    mutable std::recursive_mutex ip4_lock_;
++    mutable std::recursive_mutex ip6_lock_;
++
++    AuthFactory() = default;
++    virtual ~AuthFactory() = default;
++
++public:
++
++    AuthFactory& operator=(AuthFactory const&) = delete;
++    AuthFactory(AuthFactory const&) = delete;
++
++    static AuthFactory& get() {
++        static AuthFactory a;
++        return a;
++    };
++
++    AuthFactoryOptions options;
++
++    inline std::recursive_mutex& token_lock () const { return token_lock_; };
++    inline std::recursive_mutex& ip4_lock () const { return ip4_lock_; };
++    inline std::recursive_mutex& ip6_lock () const { return ip6_lock_; };
++
++    static std::recursive_mutex& get_token_lock () { return get().token_lock(); };
++    static std::recursive_mutex& get_ip4_lock () { return get().ip4_lock(); };
++    static std::recursive_mutex& get_ip6_lock () { return get().ip6_lock(); };
++
++    ip4_map_t ip4_map_;
++    shared_ip4_map_t  shm_ip4_map;
++
++    static ip4_map_t& get_ip4_map() { return get().ip4_map_; };
++
++    ip6_map_t ip6_map_;
++    shared_ip6_map_t shm_ip6_map;
++
++    static ip6_map_t& get_ip6_map() { return get().ip6_map_; };
++
++    token_map_t token_map_;
++    shared_token_table_t shm_token_map_;
++
++    static token_map_t& get_token_map() { return get().token_map_; };
++
++
++    std::optional<std::vector<std::string>> ip4_get_groups(std::string const& host);
++    std::optional<std::vector<std::string>> ip6_get_groups(std::string const& host);
++
++    // refresh from shared memory
++    int shm_token_table_refresh ();
++    int shm_ip6_table_refresh ();
++    int shm_ip4_table_refresh ();
++
++
++    void ip4_timeout_check ();
++    void ip6_timeout_check ();
++
++    IdentityInfo *ip4_get (std::string &);
++    IdentityInfo6 *ip6_get (std::string &);
++
++    bool ip4_inc_counters (const std::string &host, unsigned int rx, unsigned int tx);
++    bool ip6_inc_counters (const std::string &host, unsigned int rx, unsigned int tx);
++
++    // lookup by ip -> returns pointer IN the auth_ip_map
++    void ip4_remove (const std::string &host);
++    void ip6_remove (const std::string &ip6_address);
++
++    bool ipX_inc_counters (baseHostCX *cx, unsigned int rx, unsigned int tx);
++    bool ipX_inc_counters (baseHostCX *cx);
++
++
++    std::string to_string([[maybe_unused]] int verbosity) const { return "AuthFactory"; };
++
++    TYPENAME_BASE("AuthFactory")
++    DECLARE_LOGGING(to_string)
++
++    static logan_lite& get_log() {
++        static logan_lite l("auth");
++        return l;
++    }
++
++    logan_lite& log = get_log();
++};
++
++#endif //SMITHPROXY_AUTHFACTORY_HPP
+diff --git b/src/policy/authfactory4.cpp a/src/policy/authfactory4.cpp
+new file mode 100644
+index 0000000..7b4d7bd
+--- /dev/null
++++ a/src/policy/authfactory4.cpp
+@@ -0,0 +1,301 @@
++/*
++    Smithproxy- transparent proxy with SSL inspection capabilities.
++    Copyright (c) 2014, Ales Stibal <astib@mag0.net>, All rights reserved.
++
++    Smithproxy is free software: you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation, either version 3 of the License, or
++    (at your option) any later version.
++
++    Smithproxy is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with Smithproxy.  If not, see <http://www.gnu.org/licenses/>.
++
++    Linking Smithproxy statically or dynamically with other modules is
++    making a combined work based on Smithproxy. Thus, the terms and
++    conditions of the GNU General Public License cover the whole combination.
++
++    In addition, as a special exception, the copyright holders of Smithproxy
++    give you permission to combine Smithproxy with free software programs
++    or libraries that are released under the GNU LGPL and with code
++    included in the standard release of OpenSSL under the OpenSSL's license
++    (or modified versions of such code, with unchanged license).
++    You may copy and distribute such a system following the terms
++    of the GNU GPL for Smithproxy and the licenses of the other code
++    concerned, provided that you include the source code of that other code
++    when and as the GNU GPL requires distribution of source code.
++
++    Note that people who make modified versions of Smithproxy are not
++    obligated to grant this special exception for their modified versions;
++    it is their choice whether to do so. The GNU General Public License
++    gives permission to release a modified version without this exception;
++    this exception also makes it possible to release a modified version
++    which carries forward this exception.
++*/
++
++#include <log/logger.hpp>
++#include <policy/authfactory.hpp>
++#include <service/cfgapi/cfgapi.hpp>
++
++int AuthFactory::shm_ip4_table_refresh()  {
++
++    {
++        std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
++
++        shm_ip4_map.attach( string_format(AUTH_IP_MEM_NAME,
++                                          CfgFactory::get()->tenant_name.c_str()).c_str(),
++                                          AUTH_IP_MEM_SIZE,
++                            string_format(AUTH_IP_SEM_NAME, CfgFactory::get()->tenant_name.c_str()).c_str() );
++    }
++
++    _deb("AuthFactory::shm_ip4_table_refresh: acquiring semaphore");
++    int rc = shm_ip4_map.acquire();
++    _deb("AuthFactory::shm_ip4_table_refresh: semaphore acquired");
++    if(rc) {
++        _war("AuthFactory::shm_ip4_table_refresh: cannot acquire semaphore for token table");
++        return -1;
++    }
++
++    _deb("AuthFactory::shm_ip4_table_refresh: loading table");
++    int l_ip = shm_ip4_map.load();
++
++    _deb("shared memory ip user table loaded");
++    _deb("AuthFactory::shm_ip4_table_refresh: releasing semaphore");
++    shm_ip4_map.release();
++    _deb("AuthFactory::shm_ip4_table_refresh: semaphore released");
++
++    if(l_ip >= 0) {
++        // new data!
++        std::scoped_lock<std::recursive_mutex> l(AuthFactory::get_ip4_lock());
++
++        if(l_ip == 0 && ( ! ip4_map_.empty() )) {
++            _dia("AuthFactory::shm_ip4_table_refresh: zero sized table received, flushing ip map");
++            ip4_map_.clear();
++        }
++
++        _dia("AuthFactory::shm_ip4_table_refresh: new data: version %d, entries %d",shm_ip4_map.header_version(),shm_ip4_map.header_entries());
++        for(auto& rt: shm_ip4_map.entries()) {
++
++            std::string ip = rt.ip();
++
++            auto found = ip4_map_.find(ip);
++            if(found != ip4_map_.end()) {
++                _dia("Updating identity in database: %s",ip.c_str());
++                IdentityInfo& id = (*found).second;
++                id.ip = ip;
++                id.last_logon_info = rt;
++                id.username = rt.username();
++                id.update();
++            } else {
++                IdentityInfo i;
++                i.ip = ip;
++                i.last_logon_info = rt;
++                i.username = rt.username();
++                i.update();
++                ip4_map_[ip] = i;
++                _inf("New identity in database: ip: %s, username: %s, groups: %s ",ip.c_str(),i.username.c_str(),i.groups.c_str());
++            }
++            _deb("AuthFactory::shm_ip4_table_refresh: loaded: %d,%s,%s",ip.c_str(),rt.username().c_str(),rt.groups().c_str());
++        }
++
++        return l_ip;
++    }
++    return 0;
++}
++
++
++std::optional<std::vector<std::string>> AuthFactory::ip4_get_groups(std::string const& host) {
++    std::scoped_lock<std::recursive_mutex> l_(get_ip4_lock());
++
++    auto ip = get_ip4_map().find(host);
++    if (ip != get_ip4_map().end()) {
++        auto* id_ptr = &(*ip).second;
++        if(id_ptr)
++            return id_ptr->groups_vec;
++    }
++
++    return std::nullopt;
++}
++
++std::optional<std::vector<std::string>> AuthFactory::ip6_get_groups(std::string const& host) {
++    std::scoped_lock<std::recursive_mutex> l_(get_ip6_lock());
++
++    auto ip = get_ip6_map().find(host);
++    if (ip != get_ip6_map().end()) {
++        auto* id_ptr = &(*ip).second;
++        if(id_ptr)
++            return id_ptr->groups_vec;
++    }
++
++    return std::nullopt;
++}
++
++
++
++int AuthFactory::shm_token_table_refresh()  {
++
++    {
++        std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
++
++        shm_token_map_.attach(string_format(AUTH_TOKEN_MEM_NAME, CfgFactory::get()->tenant_name.c_str()).c_str(),
++                              AUTH_TOKEN_MEM_SIZE,
++                              string_format(AUTH_TOKEN_SEM_NAME, CfgFactory::get()->tenant_name.c_str()).c_str());
++    }
++
++    _deb("AuthFactory::shm_token_table_refresh: acquiring semaphore");
++    int rc = shm_token_map_.acquire();
++    _deb("AuthFactory::shm_token_table_refresh: semaphore acquired");
++    if(rc) {
++        _war("AuthFactory::shm_token_table_refresh: cannot acquire semaphore for token table");
++        return -1;
++    }
++
++    _deb("AuthFactory::shm_token_table_refresh: loading table");
++    int l_tok = shm_token_map_.load();
++    _deb("shared memory auth token table loaded");
++
++    _deb("AuthFactory::shm_token_table_refresh: releasing semaphore");
++    shm_token_map_.release();
++    _deb("AuthFactory::shm_token_table_refresh: semaphore released");
++
++    if(l_tok > 0) {
++        _dia("new token data: new data: version %d, entries %d, row-size %d",
++             shm_token_map_.header_version(),
++             shm_token_map_.header_entries(),
++             shm_token_map_.header_rowsize());
++        return l_tok;
++    } else {
++        _deb("AuthFactory::shm_token_table_refresh: same data: version %d, entries %d, row-size %d",
++             shm_token_map_.header_version(),
++             shm_token_map_.header_entries(),
++             shm_token_map_.header_rowsize());
++    }
++
++    return 0;
++}
++
++IdentityInfo* AuthFactory::ip4_get(std::string& host) {
++    IdentityInfo* ret = nullptr;
++
++    std::scoped_lock<std::recursive_mutex> l(AuthFactory::get_ip4_lock());
++    auto ip = ip4_map_.find(host);
++
++    if (ip != ip4_map_.end()) {
++        IdentityInfo& id = (*ip).second;
++        ret  = &id;
++    }
++
++    return ret;
++
++}
++
++
++bool  AuthFactory::ip4_inc_counters(const std::string &host, unsigned int rx, unsigned int tx) {
++    bool ret = false;
++
++    std::scoped_lock<std::recursive_mutex> l(AuthFactory::get_ip4_lock());
++    auto ip = ip4_map_.find(host);
++
++    if (ip != ip4_map_.end()) {
++        IdentityInfo& id = (*ip).second;
++        id.rx_bytes += rx;
++        id.tx_bytes += tx;
++        ret = true;
++    }
++
++    return ret;
++}
++
++
++
++// remove IP from AUTH IP MAP and synchronize with SHM AUTH IP TABLE (table which is used to communicate with bend daemon)
++void AuthFactory::ip4_remove(const std::string &host) {
++
++    std::scoped_lock<std::recursive_mutex> l(AuthFactory::get_ip4_lock());
++    auto ip = ip4_map_.find(host);
++
++    if (ip != ip4_map_.end()) {
++        // erase internal ip map entry
++
++        _deb("cfgapi_ip_map_remove: auth ip map - removing: %s",host.c_str());
++        ip4_map_.erase(ip);
++
++        // for debug only: print all shm table entries
++        if(*log.level() >= DUM) {
++            _dum(":: - SHM AUTH IP map - before removal::");
++            for(auto& x_it: shm_ip4_map.map_entries()) {
++                _dum("::  %s::",x_it.first.c_str());
++            }
++        }
++
++        shm_ip4_map.acquire();
++
++        // erase shared ip map entry
++        auto sh_it = shm_ip4_map.map_entries().find(host);
++
++        if(sh_it != shm_ip4_map.map_entries().end()) {
++            _deb("cfgapi_ip_map_remove: shm auth ip table  - removing: %s",host.c_str());
++            shm_ip4_map.map_entries().erase(sh_it);
++
++            if(*log.level() >= DUM) {
++                _dum(":: - SHM AUTH IP map - after removal::");
++                for(auto& x_it: shm_ip4_map.map_entries()) {
++                    _dum("::   %s::",x_it.first.c_str());
++                }
++
++            }
++            shm_ip4_map.save(true);
++        }
++        shm_ip4_map.release();
++    }
++}
++
++
++void AuthFactory::ip4_timeout_check() {
++    _deb("cfgapi_ip_auth_timeout_check: started");
++    std::scoped_lock<std::recursive_mutex> l(AuthFactory::get_ip4_lock());
++
++    std::set<std::string> to_remove;
++
++    for(auto& e: ip4_map_) {
++        const std::string&  ip = e.first;
++        IdentityInfo& id = e.second;
++
++        _deb("cfgapi_ip_auth_timeout_check: %s", ip.c_str());
++        if(id.i_timeout()) {
++            _dia("cfgapi_ip_auth_timeout_check: idle timeout, adding to list %s", ip.c_str());
++            to_remove.insert(ip);
++        }
++    }
++
++    for(auto tr: to_remove) {
++        ip4_remove(tr);
++        _inf("IP address %s identity timed out.", tr.c_str());
++    }
++}
++
++
++bool AuthFactory::ipX_inc_counters(baseHostCX* cx, unsigned int rx, unsigned int tx) {
++    if(cx && cx->com()) {
++        if(cx->com()->l3_proto() == AF_INET6) {
++            return ip6_inc_counters(cx->host(),rx,tx);
++        } else
++        if(cx->com()->l3_proto() == AF_INET || cx->com()->l3_proto() == 0)  {
++            return ip4_inc_counters(cx->host(),rx,tx);
++        }
++    }
++
++    return false;
++}
++
++bool AuthFactory::ipX_inc_counters(baseHostCX* cx) {
++    if(cx) {
++        return ipX_inc_counters(cx,cx->meter_read_bytes,cx->meter_write_bytes);
++    }
++
++    return false;
++}
+diff --git b/src/policy/authfactory6.cpp a/src/policy/authfactory6.cpp
+new file mode 100644
+index 0000000..d4abd13
+--- /dev/null
++++ a/src/policy/authfactory6.cpp
+@@ -0,0 +1,206 @@
++/*
++    Smithproxy- transparent proxy with SSL inspection capabilities.
++    Copyright (c) 2014, Ales Stibal <astib@mag0.net>, All rights reserved.
++
++    Smithproxy is free software: you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation, either version 3 of the License, or
++    (at your option) any later version.
++
++    Smithproxy is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with Smithproxy.  If not, see <http://www.gnu.org/licenses/>.
++
++    Linking Smithproxy statically or dynamically with other modules is
++    making a combined work based on Smithproxy. Thus, the terms and
++    conditions of the GNU General Public License cover the whole combination.
++
++    In addition, as a special exception, the copyright holders of Smithproxy
++    give you permission to combine Smithproxy with free software programs
++    or libraries that are released under the GNU LGPL and with code
++    included in the standard release of OpenSSL under the OpenSSL's license
++    (or modified versions of such code, with unchanged license).
++    You may copy and distribute such a system following the terms
++    of the GNU GPL for Smithproxy and the licenses of the other code
++    concerned, provided that you include the source code of that other code
++    when and as the GNU GPL requires distribution of source code.
++
++    Note that people who make modified versions of Smithproxy are not
++    obligated to grant this special exception for their modified versions;
++    it is their choice whether to do so. The GNU General Public License
++    gives permission to release a modified version without this exception;
++    this exception also makes it possible to release a modified version
++    which carries forward this exception.
++*/
++
++#include <service/cfgapi/cfgapi.hpp>
++#include <policy/authfactory.hpp>
++#include <log/logger.hpp>
++
++int AuthFactory::shm_ip6_table_refresh()  {
++
++    {
++        std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
++
++        shm_ip6_map.attach(string_format(AUTH_IP6_MEM_NAME,
++                                         CfgFactory::get()->tenant_name.c_str()).c_str(),
++                                         AUTH_IP6_MEM_SIZE,
++                           string_format(AUTH_IP6_SEM_NAME, CfgFactory::get()->tenant_name.c_str()).c_str());
++
++    }
++
++    _deb("AuthFactory::shm_ip6_table_refresh: acquiring semaphore");
++    int rc = shm_ip6_map.acquire();
++    _deb("cfgapi_auth_shm_ip6_table_refresh: semaphore acquired");
++    if (rc) {
++        _war("cfgapi_auth_shm_ip6_table_refresh: cannot acquire semaphore for token table");
++        return -1;
++    }
++
++
++    _deb("cfgapi_auth_shm_ip6_table_refresh: loading table");
++    int l_ip = shm_ip6_map.load();
++    _deb("cfgapi_auth_shm_ip6_table_refresh: loading table: done, releasing semaphore");
++    shm_ip6_map.release();
++    _deb("cfgapi_auth_shm_ip6_table_refresh: semaphore released");
++    
++    if(l_ip >= 0) {
++        // new data!
++        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
++        
++        if(l_ip == 0 && ( ! ip6_map_.empty()) ) {
++            _dia("cfgapi_auth_shm_ip6_table_refresh: zero sized table received, flushing ip map");
++            ip6_map_.clear();
++        }
++        
++        _dia("cfgapi_auth_shm_ip6_table_refresh: new data: version %d, entries %d",shm_ip6_map.header_version(),shm_ip6_map.header_entries());
++        for(auto& rt: shm_ip6_map.entries()) {
++            
++            std::string ip = rt.ip();
++            
++            auto found = ip6_map_.find(ip);
++            if(found != ip6_map_.end()) {
++                _dia("Updating identity in database: %s",ip.c_str());
++                IdentityInfo6& id = (*found).second;
++                id.ip = ip;
++                id.last_logon_info = rt;
++                id.username = rt.username();
++                id.update();
++            } else {
++                IdentityInfo6 i;
++                i.ip = ip;
++                i.last_logon_info = rt;
++                i.username = rt.username();
++                i.update();
++                ip6_map_[ip] = i;
++                _inf("New identity in database: ip: %s, username: %s, groups: %s ",ip.c_str(),i.username.c_str(),i.groups.c_str());
++            }
++            _deb("cfgapi_auth_shm_ip6_table_refresh: loaded: %d,%s,%s",ip.c_str(),rt.username().c_str(),rt.groups().c_str());
++        }
++        
++        return l_ip;
++    }
++    return 0;
++}
++
++IdentityInfo6* AuthFactory::ip6_get(std::string& host) {
++    IdentityInfo6* ret = nullptr;
++
++    std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
++    auto ip = ip6_map_.find(host);
++
++    if (ip != ip6_map_.end()) {
++        IdentityInfo6& id = (*ip).second;
++        ret  = &id;
++    }
++
++    return ret;
++}
++
++
++bool  AuthFactory::ip6_inc_counters(const std::string &host, unsigned int rx, unsigned int tx) {
++    bool ret = false;
++
++    std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
++    auto ip = ip6_map_.find(host);
++
++    if (ip != ip6_map_.end()) {
++        IdentityInfo6& id = (*ip).second;
++        id.rx_bytes += rx;
++        id.tx_bytes += tx;
++        ret = true;
++    }
++    
++    return ret;
++}
++
++// remove IP from AUTH IP MAP and synchronize with SHM AUTH IP TABLE (table which is used to communicate with bend daemon)
++void AuthFactory::ip6_remove (const std::string &ip6_address) {
++
++    std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
++    auto ip = ip6_map_.find(ip6_address);
++
++    if (ip != ip6_map_.end()) {
++        // erase internal ip map entry
++
++        _dia("cfgapi_ip_map_remove: auth ip map - removing: %s", ip6_address.c_str());
++        ip6_map_.erase(ip);
++
++        // for debug only: print all shm table entries (optimized-out in Release)
++        _if_deb {
++            _deb(":: - SHM AUTH IP map - before removal::");
++            for(auto& x_it: shm_ip6_map.map_entries()) {
++                _deb("::  %s::",x_it.first.c_str());
++            }
++        }
++        
++        shm_ip6_map.acquire();
++
++        // erase shared ip map entry
++        auto sh_it = shm_ip6_map.map_entries().find(ip6_address);
++
++        if(sh_it != shm_ip6_map.map_entries().end()) {
++            _dia("cfgapi_ip_map_remove: shm auth ip table  - removing: %s", ip6_address.c_str());
++            shm_ip6_map.map_entries().erase(sh_it);
++
++            // optimized-out in Release
++            _if_deb {
++                _deb(":: - SHM AUTH IP map - after removal::");
++                for(auto& x_it: shm_ip6_map.map_entries()) {
++                        _deb("::   %s::",x_it.first.c_str());
++                }                
++                
++            }
++            shm_ip6_map.save(true);
++        }
++        shm_ip6_map.release();
++    }
++}
++
++
++void AuthFactory::ip6_timeout_check() {
++    _deb("cfgapi_ip_auth_timeout_check: started");
++    std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
++    
++    std::set<std::string> to_remove;
++    
++    for(auto& e: ip6_map_) {
++        const std::string&  ip = e.first;
++        IdentityInfo6& id = e.second;
++
++        _dia("cfgapi_ip_auth_timeout_check: %s", ip.c_str());
++        if(id.i_timeout()) {
++            _dia("cfgapi_ip_auth_timeout_check: idle timeout, adding to list %s", ip.c_str());
++            to_remove.insert(ip);
++        }
++    }
++    
++    for(auto tr: to_remove) {
++        ip6_remove(tr);
++        _inf("IP address %s identity timed out.", tr.c_str());
++    }
++}
+diff --git b/src/proxy/mitmproxy.cpp a/src/proxy/mitmproxy.cpp
+index 61230d5..3a082eb 100644
+--- b/src/proxy/mitmproxy.cpp
++++ a/src/proxy/mitmproxy.cpp
+@@ -54,6 +54,7 @@
+ 
+ #include <uxcom.hpp>
+ #include <staticcontent.hpp>
++#include <policy/authfactory.hpp>
+ 
+ #include <traflog/fsoutput.hpp>
+ #include <service/tpool.hpp>
+@@ -334,6 +335,10 @@ std::string MitmProxy::to_string(int verbosity) const {
+     if(verbosity >= INF) {
+         r << string_format(" policy: %d ", matched_policy());
+         
++        if(identity_resolved()) {
++            r << string_format("identity: %s ",identity_->username().c_str());
++        }
++        
+         if(verbosity > INF) r << "\n    ";
+ 
+         std::string const sp_str = number_suffixed(stats_.mtr_up.get()*8) + "/" + number_suffixed(stats_.mtr_down.get()*8);
+@@ -352,12 +357,152 @@ std::string MitmProxy::to_string(int verbosity) const {
+             }
+ 
+ 
++            if(identity_resolved()) {
++                r << string_format("\n    User:   %s", identity_->username().c_str());
++                r << string_format("\n    Groups: %s", identity_->groups().c_str());
++            }
+         }        
+     }
+     
+     return r.str();
+ }
+ 
++std::optional<std::vector<std::string>> MitmProxy::find_id_groups(baseHostCX const* cx) {
++
++    int af = AF_INET;
++    if(cx->com()) {
++        af = cx->com()->l3_proto();
++    }
++    const std::string str_af = SockOps::family_str(af);
++
++    bool found = false;
++    std::vector<std::string> group_vec;
++
++    auto from_map = [&group_vec](auto const& map, auto const& host) -> bool {
++
++        auto ip = map.find(host);
++        if (ip != map.end()) {
++            auto* id_ptr = &(*ip).second;
++
++            if(id_ptr) {
++                for (auto const &my_id: id_ptr->groups_vec) {
++                    group_vec.emplace_back(my_id);
++                }
++
++                return true;
++            }
++        }
++        return false;
++    };
++
++    if(af == AF_INET or af == 0) {
++        auto lc_ = std::scoped_lock(AuthFactory::get_ip4_lock());
++        found = from_map(AuthFactory::get_ip4_map(), cx->host());
++    }
++    else if(af == AF_INET6) {
++        auto lc_ = std::scoped_lock(AuthFactory::get_ip6_lock());
++        found = from_map(AuthFactory::get_ip6_map(), cx->host());
++    }
++
++    if(found) return group_vec;
++
++    return std::nullopt;
++}
++
++std::shared_ptr<ProfileSubAuth> MitmProxy::find_auth_subprofile(std::vector<std::string> const& groups) {
++
++    auto policy = CfgFactory::get()->db_policy_list.at(matched_policy());
++    auto auth_policy = policy->profile_auth;
++    std::shared_ptr<ProfileSubAuth> to_ret;
++
++    if (auth_policy) {
++        for (auto const &sub_prof: auth_policy->sub_policies) {
++
++            _dia("apply_id_policies: checking identity policy for: %s", sub_prof->element_name().c_str());
++
++            for (auto const &my_id: groups) {
++                _dia("apply_id_policies: identity in policy: %s, match-test real user group '%s'",
++                     sub_prof->element_name().c_str(), my_id.c_str());
++                if (sub_prof->element_name() == my_id) {
++                    _dia("apply_id_policies: .. matched.");
++                    to_ret = sub_prof;
++                    break;
++                }
++            }
++
++            if (to_ret != nullptr) {
++                break;
++            }
++        }
++    }
++
++    return to_ret;
++};
++
++bool MitmProxy::apply_id_policies(baseHostCX* cx) {
++
++    _dia("apply_id_policies: matched policy: %d", matched_policy());
++
++    auto opt_group_vec = find_id_groups(cx);
++
++
++    if( not opt_group_vec.has_value() ) {
++        _deb("apply_id_policies: %d groups not found");
++        return false;
++    }
++
++    _deb("apply_id_policies: %d groups found", opt_group_vec.value().size());
++    auto final_profile = find_auth_subprofile(opt_group_vec.value());
++
++    if (not final_profile) {
++        _deb("apply_id_policies: %d no subprofile found");
++        return false;
++    }
++
++    const char *pc_name = "none";
++    const char *pd_name = "none";
++    const char *pt_name = "none";
++    std::string algs;
++
++    _dia("apply_id_policies: assigning sub-profile %s", final_profile->element_name().c_str());
++    if (final_profile->profile_content != nullptr) {
++        if (CfgFactory::get()->prof_content_apply(cx, this, final_profile->profile_content)) {
++            pc_name = final_profile->profile_content->element_name().c_str();
++            _dia("apply_id_policies: assigning content sub-profile %s",
++                 final_profile->profile_content->element_name().c_str());
++        }
++    }
++    if (final_profile->profile_detection != nullptr) {
++        if (CfgFactory::get()->prof_detect_apply(cx, this, final_profile->profile_detection)) {
++            pd_name = final_profile->profile_detection->element_name().c_str();
++            _dia("apply_id_policies: assigning detection sub-profile %s",
++                 final_profile->profile_detection->element_name().c_str());
++        }
++    }
++    if (final_profile->profile_tls != nullptr) {
++        if (CfgFactory::get()->prof_tls_apply(cx, this, final_profile->profile_tls)) {
++            pt_name = final_profile->profile_tls->element_name().c_str();
++            _dia("apply_id_policies: assigning tls sub-profile %s",
++                 final_profile->profile_tls->element_name().c_str());
++        }
++    }
++    if (final_profile->profile_alg_dns != nullptr) {
++        if (CfgFactory::get()->prof_alg_dns_apply(cx, this, final_profile->profile_alg_dns)) {
++            algs += final_profile->profile_alg_dns->element_name() + " ";
++            _dia("apply_id_policies: assigning tls sub-profile %s",
++                 final_profile->profile_tls->element_name().c_str());
++        }
++    }
++
++    // end of custom sub-profiles
++    _inf("Connection %s: identity-based sub-profile: name=%s cont=%s det=%s tls=%s algs=%s",
++         cx->full_name('L').c_str(),
++         final_profile->element_name().c_str(),
++         pc_name, pd_name, pt_name, algs.c_str()
++        );
++
++    return true;
++}
+ 
+ void MitmProxy::update_neighbors() {
+     if(auto fl = first_left(); fl) {
+@@ -369,6 +514,175 @@ void MitmProxy::update_neighbors() {
+     }
+ }
+ 
++bool MitmProxy::resolve_identity(baseHostCX* cx, bool insert_guest = false) {
++
++    if(not cx) return false;
++    
++    int af = AF_INET;
++    if(cx->com()) {
++        af = cx->com()->l3_proto();
++    }
++    std::string str_af = SockOps::family_str(af);
++
++    bool new_identity = false;
++
++    if(identity_resolved()) {
++        
++        bool update_status = false;
++        if(af == AF_INET || af == 0) update_status = update_auth_ipX_map(cx);
++        if(af == AF_INET6) update_status = update_auth_ipX_map(cx); 
++        
++        if(update_status) {
++            return true;
++        } else {
++            identity_resolved(false);
++        }
++
++        _deb("resolved identity check[%s]: source: %s", str_af.c_str(), cx->host().c_str());
++    } else {
++
++        new_identity = true;
++        _dia("unresolved identity check[%s]: source: %s", str_af.c_str(), cx->host().c_str());
++    }
++
++
++    bool valid_ip_auth = false;
++    std::unique_ptr<shm_logon_info_base> id_ptr;
++
++    if(af == AF_INET || af == 0) {
++
++        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip4_lock());
++        AuthFactory::get().shm_ip4_table_refresh();
++
++        _deb("identity check[%s]: table size: %d", str_af.c_str(), AuthFactory::get_ip4_map().size());
++        auto ip = AuthFactory::get_ip4_map().find(cx->host());
++        if (ip != AuthFactory::get_ip4_map().end()) {
++            shm_logon_info& li = ip->second.last_logon_info;
++            id_ptr.reset(std::move(li.clone()));
++        } else {
++            if (insert_guest) {
++                id_ptr = std::make_unique<shm_logon_info>(cx->host().c_str(),"guest","guest+guests+guests_ipv4");
++            }
++        }
++    }
++    else if(af == AF_INET6) {
++        /* maintain in sync with previous if block */
++
++        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
++        AuthFactory::get().shm_ip6_table_refresh();
++
++        _deb("identity check[%s]: table size: %d", str_af.c_str(), AuthFactory::get_ip6_map().size());
++        auto ip = AuthFactory::get_ip6_map().find(cx->host());
++        if (ip != AuthFactory::get_ip6_map().end()) {
++            shm_logon_info6& li = (*ip).second.last_logon_info;
++            id_ptr.reset(std::move(li.clone()));
++        } else {
++            if (insert_guest) {
++                id_ptr = std::make_unique<shm_logon_info6>(cx->host().c_str(),"guest","guest+guests+guests_ipv6");
++            }
++        }    
++    }
++
++    if(id_ptr) {
++
++        if(new_identity) {
++            _inf("unresolved identity found for %s %s: user: %s groups: %s", str_af.c_str(), cx->host().c_str(),
++                 id_ptr->username().c_str(), id_ptr->groups().c_str());
++        } else {
++            _deb("resolved identity found for %s %s: user: %s groups: %s", str_af.c_str(), cx->host().c_str(),
++                 id_ptr->username().c_str(), id_ptr->groups().c_str());
++
++        }
++
++        // if update_auth_ip_map fails, identity is no longer valid!
++        
++        if(af == AF_INET || af == 0) valid_ip_auth = update_auth_ipX_map(cx);
++        if(af == AF_INET6) valid_ip_auth = update_auth_ipX_map(cx);
++            
++        
++        identity_resolved(valid_ip_auth);
++        if(valid_ip_auth) { 
++            identity(id_ptr.get());
++        }
++        
++        // apply specific identity-based profile. 'li' is still valid, since we still hold the lock
++        // get ptr to identity_info
++
++        if(new_identity) {
++            _dia("resolve_identity[%s]: about to call apply_id_policies on new identity, group: %s", str_af.c_str(),
++                 id_ptr->groups().c_str());
++        } else {
++            _deb("resolve_identity[%s]: about to call apply_id_policies on known identity, group: %s", str_af.c_str(),
++                 id_ptr->groups().c_str());
++        }
++
++        apply_id_policies(cx);
++    }
++
++
++    _dum("identity check[%s]: return %d", str_af.c_str(), valid_ip_auth);
++    return valid_ip_auth;
++}
++
++
++bool MitmProxy::update_auth_ipX_map(baseHostCX* cx) {
++
++    bool ret = false;
++    
++    int af = AF_INET;
++    if(cx->com()) {
++        af = cx->com()->l3_proto();
++    }
++    std::string str_af = SockOps::family_str(af);
++    
++
++    _dum("update_auth_ip_map: start for %s %s", str_af.c_str(), cx->host().c_str());
++    
++    IdentityInfoBase* id_ptr = nullptr;
++    
++    if(af == AF_INET || af == 0) {
++        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip4_lock());
++
++        auto ip = AuthFactory::get_ip4_map().find(cx->host());
++        if (ip != AuthFactory::get_ip4_map().end()) {
++            id_ptr = &(*ip).second;
++        }
++    }
++    else if(af == AF_INET6) {
++        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
++
++        auto ip = AuthFactory::get_ip6_map().find(cx->host());
++        if (ip != AuthFactory::get_ip6_map().end()) {
++            id_ptr = &(*ip).second;
++        }
++    }
++    
++    if(id_ptr != nullptr) {
++        _deb("update_auth_ip_map: user %s from %s %s (groups: %s)",id_ptr->username.c_str(), str_af.c_str(), cx->host().c_str(), id_ptr->groups.c_str());
++
++        id_ptr->last_seen_policy = matched_policy();
++        
++        if (!id_ptr->i_timeout()) {
++            id_ptr->touch();
++            ret = true;
++        } else {
++            _inf("identity timeout: user %s from %s %s (groups: %s)",id_ptr->username.c_str(), str_af.c_str(), cx->host().c_str(), id_ptr->groups.c_str());
++            
++            // erase internal ip map entry
++            if(af == AF_INET || af == 0) {
++                std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip4_lock());
++                AuthFactory::get().ip4_remove(cx->host());
++            }
++            else if(af == AF_INET6) {
++                std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_ip6_lock());
++                AuthFactory::get().ip6_remove(cx->host());
++            }
++        }
++    }
++    
++    _dum("update_auth_ip_map: finished for %s %s, result %d",str_af.c_str(), cx->host().c_str(),ret);
++    return ret;
++}
+ 
+ 
+ void MitmProxy::add_filter(std::string const& name, FilterProxy* fp) {
+@@ -409,6 +723,47 @@ std::string whitelist_make_key_cert(baseHostCX const* cx) {
+ }
+ 
+ 
++bool MitmProxy::handle_authentication(MitmHostCX* mh)
++{
++    bool redirected = false;
++    
++    if(auth_opts.authenticate or auth_opts.resolve) {
++    
++        resolve_identity(mh);
++        
++        if(!identity_resolved()) {        
++            _deb("handle_authentication: identity check: unknown");
++            
++            if(auth_opts.authenticate) {
++                if(mh->replacement_type() == MitmHostCX::REPLACETYPE_HTTP) {
++            
++                    mh->replacement_flag(MitmHostCX::REPLACE_REDIRECT);
++                    redirected = true;
++                    handle_replacement_auth(mh);
++                } 
++                else {
++                    // wait, if header won't come in some time, kill the proxy
++                    if(mh->meter_read_bytes > 200) {
++                        // we cannot use replacements and identity is not resolved... what we can do. Shutdown.
++                        _ext("not enough data received to ensure right replacement-aware protocol.");
++                        state().dead(true);
++                    }
++                }
++            }
++        } else {
++            if(auth_opts.block_identity) {
++                if(mh->replacement_type() == MitmHostCX::REPLACETYPE_HTTP) {
++                    _dia("MitmProxy::handle_authentication: we should block it");
++                    mh->replacement_flag(MitmHostCX::REPLACE_BLOCK);
++                    redirected = true;
++                    handle_replacement_auth(mh);
++                }
++            }
++        }
++    }
++    return redirected;
++}
++
+ bool MitmProxy::is_white_listed(MitmHostCX const* mh, SSLCom* peercom) {
+ 
+     auto const* scom = peercom ? peercom : dynamic_cast<SSLCom*>(mh->peercom());
+@@ -918,6 +1273,13 @@ bool MitmProxy::handle_requirements(baseHostCX* cx) {
+ 
+     if(mh != nullptr) {
+ 
++        if((cx->meter_read_bytes < 1024 and cx->meter_write_bytes < 1024)
++           or
++           ((cx->meter_read_count + cx->meter_write_count) % 100 == 0)) {
++            // check authentication
++            redirected = handle_authentication(mh);
++        }
++
+         // check com responses
+         redirected = handle_com_response_ssl(mh);
+ 
+@@ -1070,15 +1432,20 @@ std::string get_connection_details_str(MitmProxy* px, baseHostCX* cx, char side)
+         }
+     }
+ 
++    std::string identity;
+     std::string px_flags;
+ 
+     if(px) {
++        if(px->identity_resolved()) {
++            identity = px->identity()->username();
++        }
+         if(px->com()) {
+             px_flags = px->com()->full_flags_str();
+         }
+     }
+ 
+-    detail << string_format("up=%d/%dB dw=%d/%dB flags=%s+%s",
++    detail << string_format("user=%s up=%d/%dB dw=%d/%dB flags=%s+%s",
++                            identity.c_str(),
+                             cx->meter_read_count, cx->meter_read_bytes,
+                             cx->meter_write_count, cx->meter_write_bytes,
+                             flags.c_str(),
+@@ -1197,6 +1564,9 @@ void MitmProxy::on_error(baseHostCX* cx, char side, const char* side_label) {
+         // DEAD before calling us!
+         // maybe even dead or unnecessary code
+ 
++        if(auth_opts.resolve)
++            resolve_identity(cx);
++
+         if(cx->peer() && cx->peer()->writebuf()->empty()) {
+             _log_closed(INF);
+ 
+@@ -1229,11 +1599,16 @@ void MitmProxy::on_error(baseHostCX* cx, char side, const char* side_label) {
+ void MitmProxy::on_left_error(baseHostCX* cx) {
+     on_error(cx, 'L', "client");
+ 
++    if(state().dead())
++        AuthFactory::get().ipX_inc_counters(cx);
+ }
+ 
+ void MitmProxy::on_right_error(baseHostCX* cx) {
+     on_error(cx, 'R', "server");
+ 
++    if(state().dead() && cx->peer())
++        AuthFactory::get().ipX_inc_counters(cx->peer());
++
+ }
+ 
+ bool MitmProxy::run_timers() {
+@@ -1260,6 +1635,150 @@ bool MitmProxy::run_timers() {
+ }
+ 
+ 
++void MitmProxy::handle_replacement_auth(MitmHostCX* cx) {
++  
++    std::string redir_pre("<html><head><script>top.location.href=\"");
++    std::string redir_suf("\";</script></head><body></body></html>");  
++  
++//     std::string redir_pre("HTTP/1.0 301 Moved Permanently\r\nLocation: ");
++//     std::string redir_suf("\r\n\r\n");  
++  
++    
++    std::string repl;
++    std::string repl_port = AuthFactory::get().options.portal_port_http;
++    std::string repl_proto = "http";
++
++    if(cx->engine_ctx.application_data->is_ssl) {
++        repl_proto = "https";
++        repl_port =AuthFactory::get().options.portal_port_https;
++    }    
++    
++    std::string block_pre("<h2 class=\"fg-red\">Page has been blocked</h2><p>Access has been blocked by smithproxy.</p>"
++                          "<p>To check your user privileges go to status page<p><p> <form action=\"");
++
++    std::string block_post(R"("><input type="submit" value="User Info" class="btn-red"></form>)");
++    
++    if (cx->replacement_flag() == MitmHostCX::REPLACE_REDIRECT) {
++
++        std::scoped_lock<std::recursive_mutex> l_(AuthFactory::get_token_lock());
++        auto id_token = AuthFactory::get_token_map().find(cx->host());
++        
++        if(id_token != AuthFactory::get_token_map().end()) {
++            _inf("found a cached token for %s",cx->host().c_str());
++            std::pair<unsigned int,std::string>& cache_entry = (*id_token).second;
++            
++            unsigned int now      = time(nullptr);
++            unsigned int token_ts = cache_entry.first;
++            std::string& token_tk = cache_entry.second;
++            
++            if(now - token_ts < AuthFactory::get().options.token_timeout) {
++                _inf("MitmProxy::handle_replacement_auth: cached token %s for request: %s",
++                                token_tk.c_str(), cx->engine_ctx.application_data->str().c_str());
++                
++                if(cx->com()) {
++                    if(cx->com()->l3_proto() == AF_INET) {
++                        repl = redir_pre + repl_proto
++                                + "://"+AuthFactory::get().options.portal_address+":"+repl_port+"/cgi-bin/auth.py?token="
++                                + token_tk + redir_suf;
++
++                    } else if(cx->com()->l3_proto() == AF_INET6) {
++                        repl = redir_pre + repl_proto
++                                + "://"+AuthFactory::get().options.portal_address6+":"+repl_port+"/cgi-bin/auth.py?token="
++                                + token_tk + redir_suf;
++                    } 
++                } 
++                
++                if(repl.empty()) {
++                    // default to IPv4 address
++                    repl = redir_pre + repl_proto
++                            + "://"+AuthFactory::get().options.portal_address+":"+repl_port+"/cgi-bin/auth.py?token="
++                            + token_tk + redir_suf;
++                }
++                
++                repl = html()->render_server_response(repl);
++                
++                cx->to_write(repl);
++                cx->close_after_write(true);
++
++                replacement_msg += "(auth: known token)";
++            } else {
++                _inf("MitmProxy::handle_replacement_auth: expired token %s for request: %s",
++                                token_tk.c_str(), cx->engine_ctx.application_data->str().c_str());
++                goto new_token;
++            }
++        } else {
++        
++            new_token:
++            
++            std::string token_text = cx->engine_ctx.application_data->original_request();
++          
++            for(auto const& i: CfgFactory::get()->policy_prof_auth(cx->matched_policy())->sub_policies) {
++                _dia("MitmProxy::handle_replacement_auth: token: requesting identity %s", i->element_name().c_str());
++                token_text  += " |" + i->element_name();
++            }
++            shm_logon_token tok = shm_logon_token(token_text.c_str());
++            
++            _inf("MitmProxy::handle_replacement_auth: new auth token %s for request: %s",
++                                tok.token().c_str(), cx->engine_ctx.application_data->str().c_str());
++            
++            if(cx->com()) {
++                if(cx->com()->l3_proto() == AF_INET) {
++                    repl = redir_pre + repl_proto
++                            + "://"+AuthFactory::get().options.portal_address+":"+repl_port+"/cgi-bin/auth.py?token="
++                            + tok.token() + redir_suf;
++
++                } else if(cx->com()->l3_proto() == AF_INET6) {
++                    repl = redir_pre + repl_proto
++                            + "://"+AuthFactory::get().options.portal_address6+":"+repl_port+"/cgi-bin/auth.py?token="
++                            + tok.token() + redir_suf;
++                } 
++            } 
++            
++            if(repl.empty()) {
++                // default to IPv4 address
++                _dia("reply fallback to IPv4");
++                repl = redir_pre + repl_proto
++                        + "://"+AuthFactory::get().options.portal_address+":"+repl_port+"/cgi-bin/auth.py?token="
++                        + tok.token() + redir_suf;
++            }
++            
++            repl = html()->render_server_response(repl);
++            
++            cx->to_write(repl);
++            cx->close_after_write(true);
++            replacement_msg += "(auth: new token)";
++
++            AuthFactory::get().shm_token_table_refresh();
++
++            AuthFactory::get().shm_token_map_.entries().push_back(tok);
++            AuthFactory::get().shm_token_map_.acquire();
++            AuthFactory::get().shm_token_map_.save(true);
++            AuthFactory::get().shm_token_map_.release();
++            
++            _dia("MitmProxy::handle_replacement_auth: token table updated");
++            AuthFactory::get_token_map()[cx->host()] = std::pair<unsigned int,std::string>(time(nullptr),tok.token());
++        }
++    } else
++    if (cx->replacement_flag() == MitmHostCX::REPLACE_BLOCK) {
++
++        _dia("MitmProxy::handle_replacement_auth: instructed to replace block");
++        repl = block_pre + repl_proto + "://"+AuthFactory::get().options.portal_address+":"+repl_port + "/cgi-bin/auth.py?a=z" + block_post;
++        
++        std::string cap  = "Page Blocked";
++        std::string meta;
++        repl = html()->render_msg_html_page(cap,meta, repl,"700px");
++        repl = html()->render_server_response(repl);
++        
++        cx->to_write(repl);
++        cx->close_after_write(true);
++
++        replacement_msg += "(auth: blocked)";
++
++    } else
++    if (cx->replacement_flag() == MitmHostCX::REPLACE_NONE) {
++        _dia("MitmProxy::handle_replacement_auth: asked to handle NONE. No-op.");
++    } 
++}
+ 
+ std::string MitmProxy::verify_flag_string(int code) {
+ 
+@@ -1896,6 +2415,19 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
+     unsigned short target_port = just_accepted_cx->com()->nonlocal_dst_port();
+ 
+ 
++    bool redirected_magic = false;
++    if(target_host == CfgFactory::get()->tenant_magic_ip) {
++        redirected_magic = true;
++        auto redir = sx::proxymaker::to_magic(target_port);
++        target_host = redir.first;
++        target_port = redir.second;
++
++        _dia("Connection from %s redirected from magic IP to %s:%d",
++             just_accepted_cx->name().c_str(),
++             target_host.c_str(), target_port);
++    }
++
++
+     auto *target_cx = new MitmHostCX(just_accepted_cx->com()->slave(),
+                              target_host.c_str(),
+                              string_format("%d",target_port).c_str());
+@@ -1903,10 +2435,16 @@ void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
+     auto new_proxy = sx::proxymaker::make(just_accepted_cx, target_cx);
+     auto lcx = logan_context(new_proxy->to_string(iNOT));
+ 
+-    if(not sx::proxymaker::policy(new_proxy, false)) {
++    if(not sx::proxymaker::policy(new_proxy, redirected_magic)) {
+         return;
+     }
+ 
++    if(not sx::proxymaker::authorize(new_proxy)) {
++        if(not sx::proxymaker::is_replaceable(target_port)) {
++            return;
++        }
++    }
++
+     if(not sx::proxymaker::setup_snat(new_proxy, source_host, source_port)) {
+         return;
+     }
+@@ -1946,6 +2484,12 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
+         return;
+     }
+ 
++    if(not sx::proxymaker::authorize(new_proxy)) {
++        if(not sx::proxymaker::is_replaceable(target_port)) {
++            return;
++        }
++    }
++
+     std::string source_host;
+     std::string source_port;
+ 
+diff --git b/src/proxy/mitmproxy.hpp a/src/proxy/mitmproxy.hpp
+index 2c8bfc0..b427021 100644
+--- b/src/proxy/mitmproxy.hpp
++++ a/src/proxy/mitmproxy.hpp
+@@ -57,6 +57,7 @@
+ #include <traflog/pcaplog.hpp>
+ 
+ #include <policy/policy.hpp>
++#include <shm/shmauth.hpp>
+ 
+ #include <sslcertval.hpp>
+ #include <proxy/ocspinvoker.hpp>
+@@ -87,6 +88,9 @@ class MitmProxy : public baseProxy, public IOController {
+ 
+     std::unique_ptr<socle::baseTrafficLogger> tlog_;
+     
++    bool identity_resolved_ = false;    // meant if attempt has been done, regardless of its result.
++    std::unique_ptr<shm_logon_info_base> identity_;
++    
+     std::unique_ptr<std::vector<ProfileContentRule>> content_rule_; //save some space and store it as a pointer. Init it only when needed and delete in dtor.
+     int matched_policy_ = -1;
+ 
+@@ -121,6 +125,12 @@ public:
+         return writer_opts_;
+     }
+ 
++    struct Opts_Authentication {
++        bool authenticate = false;
++        bool resolve = false;
++        bool block_identity = false;
++    } auth_opts;
++
+     struct Opts_Accounting {
+         bool details = true;
+         bool ja4_clienthello = false;
+@@ -157,6 +167,19 @@ public:
+ 
+     void update_neighbors();
+ 
++    inline bool identity_resolved() const { return identity_resolved_; }
++    inline void identity_resolved(bool b) { identity_resolved_ = b; }
++
++    shm_logon_info_base* identity() { return identity_.get(); }
++    inline void identity(shm_logon_info_base const* new_id) { if(new_id) { identity_.reset(new_id->clone()); } }
++
++    bool resolve_identity(bool insert_guest = false) { return resolve_identity(first_left(), insert_guest); }
++    bool resolve_identity(baseHostCX* custom_cx, bool insert_guest);
++    bool update_auth_ipX_map(baseHostCX*);
++    bool apply_id_policies(baseHostCX* cx);
++    std::optional<std::vector<std::string>> find_id_groups(baseHostCX const* cx);
++    std::shared_ptr<ProfileSubAuth> find_auth_subprofile(std::vector<std::string> const& groups);
++
+ 
+     std::unique_ptr<socle::baseTrafficLogger>& tlog() { return tlog_; }
+     void toggle_tlog ();
+@@ -191,6 +214,9 @@ public:
+     virtual void on_half_close(baseHostCX* cx);
+ 
+     bool handle_requirements(baseHostCX* cx);
++    virtual bool handle_authentication(MitmHostCX* cx);
++    virtual void handle_replacement_auth(MitmHostCX* cx);
++
+ #ifdef USE_EXPERIMENT
+     std::atomic_bool ocsp_caller_tried {false};
+     std::unique_ptr<AsyncOcspInvoker> ocsp_caller;
+diff --git b/src/proxy/proxymaker.cpp a/src/proxy/proxymaker.cpp
+index 4a29c0a..8d44a7e 100644
+--- b/src/proxy/proxymaker.cpp
++++ a/src/proxy/proxymaker.cpp
+@@ -38,6 +38,7 @@
+ */
+ 
+ #include <service/cfgapi/cfgapi.hpp>
++#include <policy/authfactory.hpp>
+ #include <proxy/mitmproxy.hpp>
+ 
+ #include <proxy/proxymaker.hpp>
+@@ -286,6 +287,119 @@ namespace sx::proxymaker {
+         return true;
+     }
+ 
++    std::pair<std::string, unsigned short> to_magic(unsigned short target_port) {
++
++        std::string redir_host;
++        unsigned short redir_port;
++
++        const unsigned short base = 65000;
++
++        if (target_port == base) {
++            // bend broker magic IP
++            redir_port = base + raw::try_down_cast<unsigned short>(CfgFactory::get()->tenant_index);
++        } else if (target_port != 443) {
++            // auth portal https magic IP
++            redir_port = raw::try_down_cast<unsigned short>(std::stoi(AuthFactory::get().options.portal_port_http));
++        } else {
++            // auth portal plaintext magic IP
++            redir_port = raw::try_down_cast<unsigned short>(std::stoi(AuthFactory::get().options.portal_port_https));
++        }
++        redir_host = "127.0.0.1";
++
++
++        return std::make_pair(redir_host, redir_port);
++    }
++
++
++    bool authorize_is_bad (MitmProxy *proxy) {
++
++        auto *left = proxy->first_left();
++        auto const* right = proxy->first_right();
++        if (not left or not right) return false;
++
++
++        auto const policy = CfgFactory::get()->policy_prof_auth(left->matched_policy());
++        if(not policy) return false;
++
++        auto const& log = log::authorize();
++
++        bool bad_auth = true;
++
++        // investigate L3 protocol
++        int af = AF_INET;
++        if (left->com()) {
++            af = left->com()->l3_proto();
++        }
++        std::string str_af = SockOps::family_str(af);
++
++        // use common base pointer, so we can use all IdentityInfo types
++
++        std::optional<std::vector<std::string>> maybe_groups;
++        if (af == AF_INET or af == 0) {
++            maybe_groups = AuthFactory::get().ip4_get_groups(left->host());
++        } else if (af == AF_INET6) {
++            maybe_groups = AuthFactory::get().ip6_get_groups(left->host());
++        }
++
++        if(not maybe_groups) return bad_auth;
++
++        for (auto const &sub_policy: CfgFactory::get()->policy_prof_auth(left->matched_policy())->sub_policies) {
++            for (auto const &candidate: maybe_groups.value()) {
++                _deb("Connection identities: testing ip identity '%s' against policy '%s'", candidate.c_str(), sub_policy->element_name().c_str());
++                if (candidate == sub_policy->element_name()) {
++                    _dia("Connection identities: ip identity '%s' matches policy '%s'", candidate.c_str(),
++                         sub_policy->element_name().c_str());
++                    bad_auth = false;
++                    break;
++                }
++            }
++
++            // don't iterate if we know we are ok
++            if (not bad_auth)
++                break;
++        }
++
++        return bad_auth;
++    }
++
++
++    bool authorize(std::unique_ptr<MitmProxy>& proxy) {
++
++        auto const& log = log::authorize();
++
++        // resolve source information - is there an identity info for that IP?
++        if (proxy->auth_opts.authenticate) {
++
++            _deb("proxymaker::authorize[%s]: must be authorized", proxy->to_string(iINF).c_str());
++
++            bool res = proxy->resolve_identity();
++
++            if(res) {
++                _dia("proxymaker::authorize[%s]: identity resolved: %s/%s", proxy->to_string(iINF).c_str(),
++                     proxy->identity()->username().c_str(),
++                     proxy->identity()->groups().c_str());
++
++                if (authorize_is_bad(proxy.get())) {
++                    _dia("proxymaker::authorize[%s]: this identity is not authorized", proxy->to_string(iINF).c_str());
++
++                    proxy->auth_opts.block_identity = true;
++                    return false;
++                }
++            }
++            else {
++                _dia("proxymaker::authorize[%s]: identity not resolved", proxy->to_string(iINF).c_str());
++
++                return false;
++            }
++
++        } else if (proxy->auth_opts.resolve) {
++            _deb("proxymaker::authorize[%s]: optional identity check", proxy->to_string(iINF).c_str());
++            proxy->resolve_identity();
++        }
++
++        _deb("proxymaker::authorize[%s]: no identity needed", proxy->to_string(iINF).c_str());
++        return true;
++    }
+ 
+     bool is_replaceable (unsigned short port) {
+         constexpr std::array<unsigned short, 2> ports = {80, 443};
+diff --git b/src/proxy/proxymaker.hpp a/src/proxy/proxymaker.hpp
+index b2c67db..a928060 100644
+--- b/src/proxy/proxymaker.hpp
++++ a/src/proxy/proxymaker.hpp
+@@ -51,10 +51,13 @@ namespace sx::proxymaker {
+     bool policy (std::unique_ptr<MitmProxy> &proxy, bool implicit_allow);
+     bool route_existing(MitmProxy* proxy, std::shared_ptr<ProfileRouting> routing_profile);
+     bool route(std::unique_ptr<MitmProxy> &proxy, std::shared_ptr<ProfileRouting> routing_profile);
++    std::pair<std::string, unsigned short> to_magic(unsigned short target_port);
++    bool authorize_is_bad (MitmProxy *proxy);
+     bool is_replaceable (unsigned short port);
++    bool authorize (std::unique_ptr<MitmProxy> &proxy);
+ 
+     bool setup_snat (std::unique_ptr<MitmProxy> &proxy, std::string const &source_host, std::string const &source_port);
+     bool connect (MasterProxy *owner, std::unique_ptr<MitmProxy> &&new_proxy);
+ }
+ 
+-#endif //PROXYMAKER_HPP
++#endif //PROXYMAKER_HPP
+\ No newline at end of file
+diff --git b/src/proxy/socks5/socksproxy.cpp a/src/proxy/socks5/socksproxy.cpp
+index 47fdfed..47f759d 100644
+--- b/src/proxy/socks5/socksproxy.cpp
++++ a/src/proxy/socks5/socksproxy.cpp
+@@ -44,6 +44,7 @@
+ #include <proxy/socks5/socksproxy.hpp>
+ #include <proxy/mitmhost.hpp>
+ #include <service/cfgapi/cfgapi.hpp>
++#include <policy/authfactory.hpp>
+ 
+ #include <vector>
+ 
+@@ -247,12 +248,111 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
+         com()->set_monitor(real_socket);
+         com()->set_poll_handler(real_socket,this);
+ 
++        if(not socks5_handoff_resolve_identity(n_cx)) {
++            _deb("deleting proxy %s", c_type());
++            state().dead(true);
++        }
+     }
+ 
+     _dia("SocksProxy::socks5_handoff: finished");
+ }
+ 
+ 
++bool SocksProxy::socks5_handoff_resolve_identity(MitmHostCX* cx) {
++
++    bool result = true;
++
++    // resolve source information - is there an identity info for that IP?
++    if (auth_opts.authenticate or auth_opts.resolve) {
++
++        _dia("socks5_handoff_udp: authentication required or optionally resolved");
++
++        bool identity_resolved = resolve_identity(cx, false);
++
++        if (!identity_resolved) {
++            // identity is unknown!
++
++            if(auth_opts.authenticate) {
++                short unsigned int target_port = cx->com()->nonlocal_dst_port();
++
++
++                if (target_port != 80 && target_port != 443) {
++                    result = false;
++                    _inf("Connection %s closed: authorization failed (unknown identity)",
++                         cx->c_type());
++                }
++            }
++            else {
++                _dia("Connection %s: authentication info optional, continuing.",cx->c_type());
++            }
++
++        } else if(auth_opts.authenticate) {
++
++            result = socks5_handoff_authenticate(cx);
++
++        }
++    } else {
++        _dia("Connection %s: authentication info optional, continuing.", cx->c_type());
++    }
++
++    return result;
++}
++
++
++bool SocksProxy::socks5_handoff_authenticate(MitmHostCX *cx) {
++
++    bool bad_auth = true;
++
++    // investigate L3 protocol
++    int af = AF_INET;
++    if (cx->com()) {
++        af = cx->com()->l3_proto();
++    }
++    std::string str_af = SockOps::family_str(af);
++
++
++    std::optional<std::vector<std::string>> groups_vec;
++
++    if (af == AF_INET || af == 0) {
++        groups_vec = AuthFactory::get().ip4_get_groups(cx->host());
++    } else if (af == AF_INET6) {
++        groups_vec = AuthFactory::get().ip6_get_groups(cx->host());
++    }
++
++    if ( groups_vec ) {
++
++        if (CfgFactory::get()->policy_prof_auth(matched_policy()) != nullptr)
++            for (auto const& sub_pol: CfgFactory::get()->policy_prof_auth(matched_policy())->sub_policies) {
++                for (auto const& x: groups_vec.value()) {
++                    _deb("Connection identities: ip identity '%s' against policy '%s'", x.c_str(),
++                         sub_pol->element_name().c_str());
++                    if (x == sub_pol->element_name()) {
++                        _dia("Connection identities: ip identity '%s' matches policy '%s'", x.c_str(),
++                             sub_pol->element_name().c_str());
++                        bad_auth = false;
++                    }
++                }
++            }
++        if (bad_auth) {
++            short unsigned int target_port = cx->com()->nonlocal_dst_port();
++
++
++            if (target_port != 80 && target_port != 443) {
++                _inf("Connection %s closed: authorization failed (non-matching identity criteria)",
++                     cx->c_type());
++            } else {
++                _inf("Connection %s closed: authorization failed (non-matching identity criteria)(with replacement)",
++                     cx->c_type());
++                // set bad_auth true, because despite authentication failed, it could be replaced (we can let user know
++                // he is not allowed to proceed
++                bad_auth = false;
++                auth_opts.block_identity = true;
++            }
++        }
++    }
++
++    return not bad_auth;
++}
+ 
+ void SocksProxy::socks5_handoff_udp(socksServerCX* cx) {
+ 
+@@ -321,6 +421,10 @@ void SocksProxy::socks5_handoff_udp(socksServerCX* cx) {
+         // apply policy and get result
+ 
+ 
++        if(not socks5_handoff_resolve_identity(n_cx.get())) {
++            _deb("deleting proxy %s", c_type());
++            state().dead(true);
++        }
+     }
+ 
+ 
+diff --git b/src/proxy/socks5/socksproxy.hpp a/src/proxy/socks5/socksproxy.hpp
+index 8c072af..4de9791 100644
+--- b/src/proxy/socks5/socksproxy.hpp
++++ a/src/proxy/socks5/socksproxy.hpp
+@@ -54,6 +54,8 @@ public:
+ 
+     //consumes cx and deletes it
+     virtual void socks5_handoff(socksServerCX* cx);
++    bool socks5_handoff_resolve_identity(MitmHostCX* cx);
++    bool socks5_handoff_authenticate(MitmHostCX* cx);
+ 
+     virtual void socks5_handoff_udp(socksServerCX* cx);
+ 
+diff --git b/src/service/cfgapi/cfgapi.cpp a/src/service/cfgapi/cfgapi.cpp
+index 96e612b..0ada5a2 100644
+--- b/src/service/cfgapi/cfgapi.cpp
++++ a/src/service/cfgapi/cfgapi.cpp
+@@ -52,6 +52,7 @@
+ #include <log/logger.hpp>
+ 
+ #include <policy/policy.hpp>
++#include <policy/authfactory.hpp>
+ #include <inspect/sigfactory.hpp>
+ #include <inspect/sxsignature.hpp>
+ 
+@@ -854,6 +855,15 @@ bool CfgFactory::load_settings () {
+         load_if_exists(cfgapi.getRoot()["settings"]["admin"], "group", admin_group);
+     }
+ 
++    if(cfgapi.getRoot()["settings"].exists("auth_portal")) {
++        load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "address", auth_address);
++        load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "http_port", auth_http);
++        load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "https_port", auth_https);
++        load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "ssl_key", auth_sslkey);
++        load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "ssl_cert", auth_sslcert);
++        load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "magic_ip", tenant_magic_ip);
++    }
++
+     if(cfgapi.getRoot()["settings"].exists("tuning")) {
+         load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "proxy_thread_spray_min", MasterProxy::subproxy_thread_spray_min);
+         load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "subproxy_thread_spray_bytes_min", MasterProxy::subproxy_thread_spray_bytes_min);
+@@ -1698,10 +1708,17 @@ int CfgFactory::load_db_policy () {
+                     }
+                 }         
+                 if(load_if_exists(cur_object, "auth_profile", name_auth)) {
+-                    if(not name_auth.empty()) {
+-                        _err("cfgapi_load_policy[#%d]: auth_profile '%s' is no longer supported", policy_index, name_auth.c_str());
++                    auto auth  = lookup_prof_auth(name_auth.c_str());
++                    if(auth) {
++                        auth->usage_add(std::weak_ptr(rule));
++                        _dia("cfgapi_load_policy[#%d]: auth profile %s", policy_index, name_auth.c_str());
++                        rule->profile_auth= auth;
++                    }
++                    else if(not name_auth.empty()) {
++                        _err("cfgapi_load_policy[#%d]: auth profile %s cannot be loaded", policy_index, name_auth.c_str());
+                         soft_error = true;
+-                        war_event(policy_index, string_format("auth_profile removed: '%s'", name_auth.c_str()).c_str());
++
++                        war_event(policy_index, string_format("auth_profile not loaded: '%s'",name_auth.c_str()).c_str());
+                     }
+                 }
+                 if(load_if_exists(cur_object, "alg_dns_profile", name_alg_dns)) {
+@@ -2381,13 +2398,15 @@ int CfgFactory::load_db_prof_auth () {
+ 
+     _dia("load_db_prof_auth: start");
+ 
+-    if(cfgapi.getRoot()["settings"].exists("auth_portal")) {
+-        _war("settings.auth_portal is obsolete and ignored; the legacy captive-auth backend was removed");
+-    }
++    _dia("load_db_prof_auth: portal settings");
++    load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "address", AuthFactory::get().options.portal_address);
++
++    load_if_exists<std::string>(cfgapi.getRoot()["settings"]["auth_portal"], "address6", AuthFactory::get().options.portal_address6);
++    load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "http_port", AuthFactory::get().options.portal_port_http);
++    load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "https_port", AuthFactory::get().options.portal_port_https);
+ 
+     _dia("load_db_prof_auth: profiles");
+     if(cfgapi.getRoot().exists("auth_profiles")) {
+-        _war("auth_profiles is obsolete; entries are retained only for configuration compatibility");
+ 
+         num = cfgapi.getRoot()["auth_profiles"].getLength();
+         _dia("load_db_prof_auth: found %d objects", num);
+@@ -3012,6 +3031,15 @@ int CfgFactory::policy_apply (baseHostCX *originator, MitmProxy *proxy, int matc
+         auto* mitm_proxy = dynamic_cast<MitmProxy*>(proxy);
+         if(mitm_proxy) {
+ 
++            /* Processing Auth profile */
++            if(pa) {
++                // auth is applied on proxy
++                mitm_proxy->auth_opts.authenticate = pa->authenticate;
++                mitm_proxy->auth_opts.resolve = pa->resolve;
++
++                pa_name = pa->element_name().c_str();
++            }
++
+             /* Processing Features */
+             policy_apply_features(rule, mitm_proxy);
+         }
+@@ -3497,6 +3525,9 @@ bool CfgFactory::apply_tenant_config () {
+         ret += apply_tenant_index(listen_dtls_port, tenant_index);
+         ret += apply_tenant_index(listen_udp_port, tenant_index);
+         ret += apply_tenant_index(listen_socks_port, tenant_index);
++        ret += apply_tenant_index(AuthFactory::get().options.portal_port_http, tenant_index);
++        ret += apply_tenant_index(AuthFactory::get().options.portal_port_https, tenant_index);
++
+         CfgFactory::get()->cli_port += tenant_index;
+     }
+ 
+@@ -5140,6 +5171,14 @@ int save_settings(Config& ex) {
+     cli_objects.add("port", Setting::TypeInt) = CfgFactory::get()->cli_port_base;
+     cli_objects.add("enable_password", Setting::TypeString) = CfgFactory::get()->cli_enable_password;
+ 
++    Setting& auth_objects = objects.add("auth_portal", Setting::TypeGroup);
++    auth_objects.add("address", Setting::TypeString) = CfgFactory::get()->auth_address;
++    auth_objects.add("http_port", Setting::TypeString) = CfgFactory::get()->auth_http;
++    auth_objects.add("https_port", Setting::TypeString) = CfgFactory::get()->auth_https;
++    auth_objects.add("ssl_key", Setting::TypeString) = CfgFactory::get()->auth_sslkey;
++    auth_objects.add("ssl_cert", Setting::TypeString) = CfgFactory::get()->auth_sslcert;
++
++
+     Setting& tuning_objects = objects.add("tuning", Setting::TypeGroup);
+     tuning_objects.add("proxy_thread_spray_min", Setting::TypeInt) = (int)MasterProxy::subproxy_thread_spray_min;
+     tuning_objects.add("subproxy_thread_spray_bytes_min", Setting::TypeInt) = (int)MasterProxy::subproxy_thread_spray_bytes_min;
+diff --git b/src/service/cfgapi/cfgapi.hpp a/src/service/cfgapi/cfgapi.hpp
+index 805cfff..8cd1344 100644
+--- b/src/service/cfgapi/cfgapi.hpp
++++ a/src/service/cfgapi/cfgapi.hpp
+@@ -52,6 +52,7 @@
+ #include <sslcom.hpp>
+ #include <traflog/pcaplog.hpp>
+ 
++#include <shm/shmauth.hpp>
+ 
+ 
+ 
+@@ -318,6 +319,14 @@ public:
+     mp::vector<int> db_udp_quick_ports;
+ 
+ 
++    std::string auth_address;
++    std::string auth_http;
++    std::string auth_https;
++    std::string auth_sslkey;
++    std::string auth_sslcert;
++    std::string tenant_magic_ip;
++
++
+     struct {
+         bool enabled = true;
+         std::string dir = "/var/smithproxy/data";
+@@ -614,4 +623,4 @@ bool load_if_exists_atomic(libconfig::Setting const& s, const char* key, T& valr
+     return false;
+ }
+ 
+-#endif
++#endif
+\ No newline at end of file
+diff --git b/src/service/cfgapi/cfgvalue.cpp a/src/service/cfgapi/cfgvalue.cpp
+index 0b110b6..c64ffd5 100644
+--- b/src/service/cfgapi/cfgvalue.cpp
++++ a/src/service/cfgapi/cfgvalue.cpp
+@@ -326,6 +326,35 @@ void CfgValueHelp::init() {
+             .may_be_empty(false)
+             .value_filter(VALUE_UINT_RANGE<0LL, LLONG_MAX>); //10M
+ 
++    // sections
++    add("settings.auth_portal", "** configure authentication portal settings");
++    add("settings.auth_portal.address", "IP of FQDN where user is redirected for authentication")
++    .may_be_empty(false);
++    add("settings.auth_portal.http_port", "port where user is redirected for HTTP authentication")
++            .may_be_empty(false)
++            .value_filter(VALUE_UINT_RANGE<1024,65535>);
++    add("settings.auth_portal.https_port", "port where user is redirected for HTTPS authentication")
++            .may_be_empty(false)
++            .value_filter(VALUE_UINT_RANGE<1024,65535>);
++    add("settings.auth_portal.ssl_key", "key for HTTPS authentication certificate")
++            .may_be_empty(false)
++            .value_filter(CfgValue::VALUE_FILE);
++    add("settings.auth_portal.ssl_cert", "HTTPS authentication certificate file")
++            .may_be_empty(false)
++            .value_filter(CfgValue::VALUE_FILE);
++    add("settings.auth_portal.magic_ip", "Rendezvous IP for client traffic")
++            .may_be_empty(false)
++            .value_filter([](auto const&v){
++                auto ip = CidrAddress(v);
++                if(ip.cidr()) {
++                    if(std::string(cidr_numhost(ip.cidr())) == "1") {
++                        return CfgValue::filter_retval::accept(v);
++                    }
++                }
++                return CfgValue::filter_retval::reject("must me a valid host IP address");
++            });
++
++
+     add("settings.tuning", "** tune selected internals");
+     add("settings.tuning.proxy_thread_spray_min", "minimum number of worker subproxies to allow subproxy spraying")
+             .may_be_empty(false)
+diff --git b/src/service/cmd/cli_debug_state.hpp a/src/service/cmd/cli_debug_state.hpp
+index cc316a4..f046d37 100644
+--- b/src/service/cmd/cli_debug_state.hpp
++++ a/src/service/cmd/cli_debug_state.hpp
+@@ -21,6 +21,7 @@ struct CliDebugState {
+     loglevel orig_mitmmasterproxy_loglevel = NON;
+     loglevel orig_mitmhostcx_loglevel = NON;
+     loglevel orig_socksproxy_loglevel = NON;
++    loglevel orig_auth_loglevel = NON;
+ 
+     static CliDebugState& get() {
+         static thread_local CliDebugState state;
+diff --git b/src/service/cmd/diag/diag_cmds.cpp a/src/service/cmd/diag/diag_cmds.cpp
+index c8b90ce..32adc9d 100644
+--- b/src/service/cmd/diag/diag_cmds.cpp
++++ a/src/service/cmd/diag/diag_cmds.cpp
+@@ -69,6 +69,7 @@
+ #include <proxy/nbrhood.hpp>
+ 
+ #include <policy/inspectors.hpp>
++#include <policy/authfactory.hpp>
+ 
+ #include <inspect/sigfactory.hpp>
+ #include <inspect/sxsignature.hpp>
+@@ -965,6 +966,101 @@ int cli_diag_dns_domain_cache_clear(DiagCli *cli, const char *command, char *arg
+ 
+ 
+ 
++int cli_diag_identity_ip_list(DiagCli *cli, const char *command, char *argv[], int argc) {
++    debug_cli_params(cli, command, argv, argc);
++
++    cli_print(cli, "\nIPv4 identities:");
++    std::stringstream ss4;
++
++    {
++        auto lc_ = std::scoped_lock(AuthFactory::get_ip4_lock());
++
++        for (auto const& [ ip_address, identity]: AuthFactory::get_ip4_map()) {
++
++            ss4 << "\n";
++            ss4 << "    ipv4: " << ip_address << ", user: " << identity.username << ", groups: " << identity.groups << ", rx/tx: ";
++            ss4 << number_suffixed(identity.tx_bytes) << "/" << number_suffixed(identity.rx_bytes);
++
++            ss4 << "\n          uptime: " << std::to_string(identity.uptime()) << ", idle: " << std::to_string(identity.i_time());
++            ss4 << "\n          status: " << std::to_string(!identity.i_timeout()) << ", last policy: ";
++            ss4 <<   std::to_string(identity.last_seen_policy);
++            ss4 << "\n";
++        }
++
++    }
++    cli_print(cli, "%s", ss4.str().c_str());
++
++
++    cli_print(cli, "\nIPv6 identities:");
++    std::stringstream ss6;
++    {
++        auto lc_ = std::scoped_lock(AuthFactory::get_ip6_lock());
++
++        for (auto const& [ ip_address, identity]: AuthFactory::get_ip6_map()) {
++
++            ss6 << "\n";
++            ss6 << "    ipv6: " << ip_address << ", user: " << identity.username << ", groups: " << identity.groups << ", rx/tx: ";
++            ss6 << number_suffixed(identity.tx_bytes) << "/" << number_suffixed(identity.rx_bytes);
++            ss6 << "\n          uptime: " << std::to_string(identity.uptime()) << ", idle: " << std::to_string(identity.i_time());
++            ss6 << "\n          status: " << std::to_string(!identity.i_timeout()) << ", last policy: ";
++            ss6 <<   std::to_string(identity.last_seen_policy);
++            ss6 << "\n";
++
++        }
++    }
++    cli_print(cli, "%s", ss6.str().c_str());
++
++    return CLI_OK;
++}
++
++int cli_diag_identity_ip_clear(DiagCli *cli, const char *command, char *argv[], int argc) {
++    debug_cli_params(cli, command, argv, argc);
++
++    cli_print(cli, "\nClearing all identities:");
++    std::string out;
++
++    {
++        auto lc_ = std::scoped_lock(AuthFactory::get_ip4_lock());
++
++        AuthFactory::get_ip4_map().clear();
++        auto& shm_map = AuthFactory::get().shm_ip4_map;
++        if (shm_map.attached()) {
++            if (shm_map.acquire() == 0) {
++                shm_map.map_entries().clear();
++                shm_map.entries().clear();
++                shm_map.save(true);
++                shm_map.seen_version(0);
++                shm_map.release();
++            } else {
++                cli_print(cli, "IPv4 identity shared memory is busy; local identities were cleared only");
++            }
++        } else {
++            cli_print(cli, "IPv4 identity shared memory is not active; cleared local identities only");
++        }
++    }
++
++    {
++        auto lc_ = std::scoped_lock(AuthFactory::get_ip6_lock());
++
++        AuthFactory::get_ip6_map().clear();
++        auto& shm_map = AuthFactory::get().shm_ip6_map;
++        if (shm_map.attached()) {
++            if (shm_map.acquire() == 0) {
++                shm_map.map_entries().clear();
++                shm_map.entries().clear();
++                shm_map.save(true);
++                shm_map.seen_version(0);
++                shm_map.release();
++            } else {
++                cli_print(cli, "IPv6 identity shared memory is busy; local identities were cleared only");
++            }
++        } else {
++            cli_print(cli, "IPv6 identity shared memory is not active; cleared local identities only");
++        }
++    }
++
++    return CLI_OK;
++}
+ 
+ int cli_diag_writer_stats(DiagCli *cli, const char *command, char *argv[], int argc) {
+     debug_cli_params(cli, command, argv, argc);
+@@ -2564,6 +2660,12 @@ void register_diags(libcli2::Cli& native) {
+     auto diag_proxy_io = diag_register_command(cli,diag_proxy,"io",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy I/O related commands");
+     diag_register_command(cli, diag_proxy_io ,"list",cli_diag_proxy_session_io_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"active proxy sessions");
+ 
++    auto diag_identity = diag_register_command(cli,diag,"identity",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"identity related commands");
++    auto diag_identity_user = diag_register_command(cli, diag_identity,"user",nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC,"identity commands related to users");
++    diag_register_command(cli, diag_identity_user,"list",cli_diag_identity_ip_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"list all known users");
++    diag_register_command(cli, diag_identity_user,"clear",cli_diag_identity_ip_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC,"CLEAR all known users");
++
++
+     auto diag_writer = diag_register_command(cli,diag,"writer",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"file writer diags");
+     diag_register_command(cli,diag_writer,"stats",cli_diag_writer_stats,PRIVILEGE_PRIVILEGED, MODE_EXEC,"file writer statistics");
+ 
+diff --git b/src/service/cmd/libcli2_cli_fuzz.py a/src/service/cmd/libcli2_cli_fuzz.py
+index 5d0b3df..0e57154 100644
+--- b/src/service/cmd/libcli2_cli_fuzz.py
++++ a/src/service/cmd/libcli2_cli_fuzz.py
+@@ -25,7 +25,7 @@ BASE_COMMANDS = (
+     b"diag tls cache stats", b"diag tls cache list", b"diag tls whitelist list",
+     b"diag mem trace list",
+     b"diag dns cache list", b"diag proxy policy list", b"diag proxy session list",
+-    b"diag workers proxy list", b"diag neighbor list",
++    b"diag workers proxy list", b"diag identity user list", b"diag neighbor list",
+     b"test dns genrequest example.test",
+ )
+ 
+diff --git b/src/service/cmd/libcli2_process_e2e.py a/src/service/cmd/libcli2_process_e2e.py
+index c55795f..caea095 100644
+--- b/src/service/cmd/libcli2_process_e2e.py
++++ a/src/service/cmd/libcli2_process_e2e.py
+@@ -154,7 +154,7 @@ def main() -> None:
+             require(cli.command_ok("debug set cli 0"), "cli debug now OFF")
+             require(cli.command_ok("test dns genrequest example.test"), "DNS generated request:")
+             diag_roots = cli.tab("diag ")
+-            for root in ("tls", "sig", "workers", "mem", "dns", "proxy", "writer", "api", "neighbor"):
++            for root in ("tls", "sig", "workers", "mem", "dns", "proxy", "identity", "writer", "api", "neighbor"):
+                 require(diag_roots, root)
+             require(cli.command_ok("diag tls cache stats"), "certificate store")
+             require(cli.command_ok("diag tls cache list"), "TLS certificate store unavailable")
+@@ -163,6 +163,7 @@ def main() -> None:
+             require(cli.command_ok("diag mem buffers stats"), "memory alloc")
+             cli.command_ok("diag dns cache stats")
+             cli.command_ok("diag proxy policy list")
++            cli.command_ok("diag identity user list")
+             require(cli.command_ok("diag writer stats"), "Pending ops:")
+             require(cli.command_ok("diag api info"), "API keys")
+             cli.command_ok("diag neighbor stats")
+@@ -180,6 +181,7 @@ def main() -> None:
+                 "diag proxy policy list", "diag proxy session list",
+                 "diag proxy session list-nonames", "diag proxy session clear",
+                 "diag proxy session tls-info", "diag proxy session active", "diag proxy io list",
++                "diag identity user list", "diag identity user clear",
+                 "diag writer stats", "diag api info",
+                 "diag neighbor list", "diag neighbor stats", "diag neighbor clear",
+                 "diag neighbor webhook-update-all", "diag neighbor webhook-update-ping",
+diff --git b/src/service/cmd/smith_cli2_debug.cpp a/src/service/cmd/smith_cli2_debug.cpp
+index 13d4901..0d31a5c 100644
+--- b/src/service/cmd/smith_cli2_debug.cpp
++++ a/src/service/cmd/smith_cli2_debug.cpp
+@@ -4,6 +4,7 @@
+ 
+ #include <inspect/dns.hpp>
+ #include <inspect/dnsinspector.hpp>
++#include <policy/authfactory.hpp>
+ #include <proxy/mitmproxy.hpp>
+ #include <proxy/socks5/socksproxy.hpp>
+ #include <service/cfgapi/cfgapi.hpp>
+@@ -143,6 +144,14 @@ void register_smithproxy_cli2_debug(libcli2::Cli& cli) {
+                 [] { DNS_Inspector::log_level() = CliDebugState::get().orig_dns_insp_loglevel; DNS_Packet::log_level() = CliDebugState::get().orig_dns_packet_loglevel; });
+         });
+ 
++    debug_command(cli, "auth", "Set authentication logging level")
++        .handler([](libcli2::Context& context, const libcli2::Invocation& invocation) {
++            return level_command(context, invocation,
++                [] { return "Auth debug level: " + std::to_string(AuthFactory::log_level().level()); },
++                [](int value) { AuthFactory::log_level().level(value); },
++                [] { AuthFactory::log_level() = CliDebugState::get().orig_auth_loglevel; });
++        });
++
+     debug_command(cli, "proxy", "Set proxy logging levels")
+         .handler([](libcli2::Context& context, const libcli2::Invocation& invocation) {
+             return level_command(context, invocation, proxy_levels,
+diff --git b/src/service/core/smithproxy.cpp a/src/service/core/smithproxy.cpp
+index 1700b80..52aa46a 100644
+--- b/src/service/core/smithproxy.cpp
++++ a/src/service/core/smithproxy.cpp
+@@ -43,6 +43,7 @@
+ 
+ #include <staticcontent.hpp>
+ 
++#include <policy/authfactory.hpp>
+ #include <inspect/sigfactory.hpp>
+ 
+ #include <service/core/smithproxy.hpp>
+@@ -71,6 +72,46 @@ void SmithProxy::reload() {
+ }
+ 
+ 
++std::thread* SmithProxy::create_identity_refresh_thread() {
++
++
++    auto* id_thread = new std::thread([]() {
++        auto const& log = instance().log;
++
++        // give some time to init shm - don't run immediately
++        // this is workaround for rare(?) race condition when shm is not
++        // initialized yet.
++
++        if (abort_sleep(20) ) {
++            return;
++        }
++
++        for ( [[maybe_unused]] unsigned i = 0; ; i++) {
++
++            if(abort_sleep(20)) {
++                _dia("id_thread: terminating");
++                break;
++            }
++
++            _deb("id_thread: refreshing identities");
++
++            AuthFactory::get().shm_ip4_table_refresh();
++            AuthFactory::get().shm_ip6_table_refresh();
++            AuthFactory::get().shm_token_table_refresh();
++            AuthFactory::get().ip4_timeout_check();
++            AuthFactory::get().ip6_timeout_check();
++
++            _dum("id_thread: finished");
++
++
++        }
++    });
++
++    return id_thread;
++}
++
++
++
+ void SmithProxy::create_log_writer_thread() {
+     // we have to create logger after daemonize is called
+     log_thread  = std::shared_ptr<std::thread>(create_log_writer());
+@@ -89,6 +130,14 @@ void SmithProxy::create_dns_thread() {
+     }
+ }
+ 
++void SmithProxy::create_identity_thread() {
++    id_thread = std::shared_ptr<std::thread>(create_identity_refresh_thread());
++    if(id_thread != nullptr) {
++        pthread_setname_np(id_thread->native_handle(),string_format("sxy_idu_%d",
++                                                                    CfgFactory::get()->tenant_index).c_str());
++    }
++}
++
+ void SmithProxy::create_api_thread() {
+ #ifdef USE_LMHPP
+ 
+@@ -639,6 +688,12 @@ void SmithProxy::join_all() {
+         if(dns_thread->joinable())
+             dns_thread->join();
+     }
++    if(id_thread) {
++        if(!cfg_daemonize)
++            std::cerr << "terminating identity updater thread" << std::endl;
++        if(id_thread->joinable())
++            id_thread->join();
++    }
+     if(api_thread) {
+         if(!cfg_daemonize)
+             std::cerr << "terminating API updater thread" << std::endl;
+diff --git b/src/service/core/smithproxy.hpp a/src/service/core/smithproxy.hpp
+index cd3ade0..9ce513e 100644
+--- b/src/service/core/smithproxy.hpp
++++ a/src/service/core/smithproxy.hpp
+@@ -105,6 +105,8 @@ public:
+     std::shared_ptr<std::thread> cli_thread;
+     std::shared_ptr<std::thread> log_thread;
+     std::shared_ptr<std::thread> dns_thread;
++    std::shared_ptr<std::thread> id_thread;
++
+     std::shared_ptr<std::thread> api_thread;
+ 
+     SmithProxy (SmithProxy const&) = delete;
+@@ -119,8 +121,11 @@ public:
+         return instance().API;
+     }
+ 
++    static std::thread* create_identity_refresh_thread();
++
+     void create_log_writer_thread();
+     void create_dns_thread();
++    void create_identity_thread();
+     void create_api_thread();
+ 
+     bool create_listeners();
+diff --git b/src/service/http/jsonize.cpp a/src/service/http/jsonize.cpp
+index 1908f33..a88be46 100644
+--- b/src/service/http/jsonize.cpp
++++ a/src/service/http/jsonize.cpp
+@@ -215,6 +215,12 @@ namespace jsonize {
+         if (verbosity >= INF) {
+             ret["policy"] = what->matched_policy();
+ 
++            if (what->identity_resolved()) {
++                ret["identity"] = {{"user",   what->identity()->username()},
++                                   {"groups", what->identity()->groups()}
++                };
++            }
++
+             ret["stats"]["speed"] = {
+                     {"up_str",   number_suffixed(what->stats().mtr_up.get() * 8) + "bps"},
+                     {"down_str", number_suffixed(what->stats().mtr_down.get() * 8) + "bps"},
+@@ -356,4 +362,4 @@ namespace jsonize {
+         return ret;
+     }
+ 
+-}
++}
+\ No newline at end of file
+diff --git b/src/service/netservice.hpp a/src/service/netservice.hpp
+index 1087d55..24480c6 100644
+--- b/src/service/netservice.hpp
++++ a/src/service/netservice.hpp
+@@ -44,6 +44,7 @@
+ 
+ #include <threadedacceptor.hpp>
+ #include <threadedreceiver.hpp>
++#include <policy/authfactory.hpp>
+ 
+ 
+ namespace sx {
+diff --git b/src/shm/shmauth.cpp a/src/shm/shmauth.cpp
+new file mode 100644
+index 0000000..5150b26
+--- /dev/null
++++ a/src/shm/shmauth.cpp
+@@ -0,0 +1,51 @@
++/*
++    Smithproxy- transparent proxy with SSL inspection capabilities.
++    Copyright (c) 2014, Ales Stibal <astib@mag0.net>, All rights reserved.
++
++    Smithproxy is free software: you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation, either version 3 of the License, or
++    (at your option) any later version.
++
++    Smithproxy is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with Smithproxy.  If not, see <http://www.gnu.org/licenses/>.
++
++    Linking Smithproxy statically or dynamically with other modules is
++    making a combined work based on Smithproxy. Thus, the terms and
++    conditions of the GNU General Public License cover the whole combination.
++
++    In addition, as a special exception, the copyright holders of Smithproxy
++    give you permission to combine Smithproxy with free software programs
++    or libraries that are released under the GNU LGPL and with code
++    included in the standard release of OpenSSL under the OpenSSL's license
++    (or modified versions of such code, with unchanged license).
++    You may copy and distribute such a system following the terms
++    of the GNU GPL for Smithproxy and the licenses of the other code
++    concerned, provided that you include the source code of that other code
++    when and as the GNU GPL requires distribution of source code.
++
++    Note that people who make modified versions of Smithproxy are not
++    obligated to grant this special exception for their modified versions;
++    it is their choice whether to do so. The GNU General Public License
++    gives permission to release a modified version without this exception;
++    this exception also makes it possible to release a modified version
++    which carries forward this exception.
++*/
++
++
++#include <policy/authfactory.hpp>
++#include <log/logger.hpp>
++#include <service/cfgapi/cfgapi.hpp>
++
++
++IdentityInfoBase::IdentityInfoBase() {
++    idle_timeout = AuthFactory::get().options.global_idle_timeout;
++    created = time(nullptr);
++    last_seen_at = created;
++}
++
+diff --git b/src/shm/shmauth.hpp a/src/shm/shmauth.hpp
+new file mode 100644
+index 0000000..1a0034c
+--- /dev/null
++++ a/src/shm/shmauth.hpp
+@@ -0,0 +1,281 @@
++/*
++    Smithproxy- transparent proxy with SSL inspection capabilities.
++    Copyright (c) 2014, Ales Stibal <astib@mag0.net>, All rights reserved.
++
++    Smithproxy is free software: you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation, either version 3 of the License, or
++    (at your option) any later version.
++
++    Smithproxy is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with Smithproxy.  If not, see <http://www.gnu.org/licenses/>.
++
++    Linking Smithproxy statically or dynamically with other modules is
++    making a combined work based on Smithproxy. Thus, the terms and
++    conditions of the GNU General Public License cover the whole combination.
++
++    In addition, as a special exception, the copyright holders of Smithproxy
++    give you permission to combine Smithproxy with free software programs
++    or libraries that are released under the GNU LGPL and with code
++    included in the standard release of OpenSSL under the OpenSSL's license
++    (or modified versions of such code, with unchanged license).
++    You may copy and distribute such a system following the terms
++    of the GNU GPL for Smithproxy and the licenses of the other code
++    concerned, provided that you include the source code of that other code
++    when and as the GNU GPL requires distribution of source code.
++
++    Note that people who make modified versions of Smithproxy are not
++    obligated to grant this special exception for their modified versions;
++    it is their choice whether to do so. The GNU General Public License
++    gives permission to release a modified version without this exception;
++    this exception also makes it possible to release a modified version
++    which carries forward this exception.
++*/
++
++#ifndef CFGAPI_AUTH_HPP
++  #define CFGAPI_AUTH_HPP
++
++#include <cstring>
++#include <sys/socket.h>
++#include <netinet/in.h>
++#include <arpa/inet.h>
++
++#include <string>
++#include <unordered_map>
++#include <cstdlib>
++#include <ctime>
++#include <random>
++
++#include <buffer.hpp>
++#include <shmtable.hpp>
++
++
++constexpr const char* AUTH_IP_MEM_NAME = "/smithproxy_auth_ok_%s";
++constexpr const std::size_t AUTH_IP_MEM_SIZE = 64*1024*1024;
++constexpr const char* AUTH_IP_SEM_NAME  = "/smithproxy_auth_ok_%s.sem";
++
++constexpr const char* AUTH_IP6_MEM_NAME = "/smithproxy_auth6_ok_%s";
++constexpr const std::size_t AUTH_IP6_MEM_SIZE = 64*1024*1024;
++constexpr const char* AUTH_IP6_SEM_NAME = "/smithproxy_auth6_ok_%s.sem";
++
++
++constexpr const char* AUTH_TOKEN_MEM_NAME = "/smithproxy_auth_token_%s";
++constexpr const std::size_t AUTH_TOKEN_MEM_SIZE = AUTH_IP_MEM_SIZE;
++constexpr const char* AUTH_TOKEN_SEM_NAME = "/smithproxy_auth_token_%s.sem";
++
++constexpr const std::size_t LOGON_INFO_IP_SZ = 4;
++constexpr const std::size_t LOGON_INFO_USERNAME_SZ = 64;
++constexpr const std::size_t LOGON_INFO_GROUPS_SZ = 128;
++
++constexpr const std::size_t LOGON_TOKEN_TOKEN_SZ = 64;
++constexpr const std::size_t LOGON_TOKEN_URL_SZ = 512;
++
++constexpr const std::size_t INFO_HR_OUT_SZ = 256;
++
++
++struct shm_logon_info_base {
++    
++    virtual std::string ip() = 0;
++    virtual std::string username() = 0;
++    virtual std::string groups() = 0;
++    
++    virtual shm_logon_info_base* clone() const = 0;
++    
++    virtual ~shm_logon_info_base() = default;
++};
++
++// structure exchanged with backend daemon
++template <int AddressSize>
++struct shm_logon_info_ : public shm_logon_info_base {
++
++    buffer buffer_;
++    buffer& buf() { return buffer_; }
++    buffer const& buf() const { return buffer_; }
++
++    ~shm_logon_info_() override = default;
++
++    static constexpr unsigned int record_size () {
++        return AddressSize+LOGON_INFO_USERNAME_SZ+LOGON_INFO_GROUPS_SZ;
++    }
++
++    shm_logon_info_() {
++        buffer_.size(record_size());
++        buffer_.fill(0);
++    }
++    
++    int load(unsigned char* b) {
++        buffer_.assign(b,record_size());
++        return buffer_.size();
++    };
++    
++    shm_logon_info_(const char* i,const char* u,const char* g) {
++        buffer_.size(record_size());
++        buffer_.fill(0);
++        
++        if(AddressSize == 4) {
++            inet_pton(AF_INET,i,buffer_.data());
++        }
++        else if (AddressSize == 16) {
++            inet_pton(AF_INET6,i,buffer_.data());
++        }
++        strncpy((char*)&buffer_.data()[AddressSize],u,LOGON_INFO_USERNAME_SZ-1);
++        strncpy((char*)&buffer_.data()[AddressSize+LOGON_INFO_USERNAME_SZ],g,LOGON_INFO_GROUPS_SZ-1);
++    }
++    
++    std::string ip() override {
++        char b[64]; memset(b,0,64);
++        
++        if(AddressSize == 16) {
++            inet_ntop(AF_INET6,buffer_.data(),b,64);
++            return std::string(b);
++        } else {
++            inet_ntop(AF_INET, buffer_.data(), b, 64);
++            return std::string(b);
++        }
++    }
++    
++    std::string username() override {
++        return std::string((const char*)&buffer_.data()[AddressSize]);
++    }
++    
++    std::string groups() override {
++        return std::string((const char*)&buffer_.data()[AddressSize+LOGON_INFO_USERNAME_SZ]);
++    }
++    
++    shm_logon_info_base* clone() const override {
++        auto* n =  new shm_logon_info_<AddressSize>(); //return a clone of this object
++        n->buf() = buf();
++        
++        return n;
++    }
++//     std::string hr() { 
++//         char out[INFO_HR_OUT_SZ]; memset(out,0,INFO_HR_OUT_SZ);
++//         snprintf(out,INFO_HR_OUT_SZ-1,"%s : %16s \t groups: %s\n",inet_ntoa(*(in_addr*)ip),username,groups); 
++//         return std::string(out);
++//     }
++};
++
++using shm_logon_info = shm_logon_info_<4>;
++using shm_logon_info6 = shm_logon_info_<16>;
++
++// structure exchanged with backend daemon
++struct shm_logon_token {
++    
++    buffer buffer_;
++    buffer& buf() { return buffer_; }
++    buffer const& buf() const { return buffer_; }
++
++    [[nodiscard]] std::string token() const { return std::string((const char*)buffer_.data()); };
++    [[nodiscard]] std::string url() const { return std::string((const char*)&buffer_.data()[LOGON_TOKEN_TOKEN_SZ]);};
++
++    static unsigned int record_size() { return LOGON_TOKEN_TOKEN_SZ+LOGON_TOKEN_URL_SZ; }
++    
++    shm_logon_token() {
++        buffer_.size(LOGON_TOKEN_TOKEN_SZ+LOGON_TOKEN_URL_SZ);
++        buffer_.fill(0);
++    }
++    
++    explicit shm_logon_token(const char* u) {
++        buffer_.size(LOGON_TOKEN_TOKEN_SZ+LOGON_TOKEN_URL_SZ);
++        buffer_.fill(0);
++
++        std::default_random_engine generator(time(0)+last_random);
++        std::uniform_int_distribution<int> distribution(0xCABA1A);
++
++        int number = distribution(generator);
++        last_random = number;
++
++        unsigned int r = last_random;
++        snprintf((char*)buffer_.data(),LOGON_TOKEN_TOKEN_SZ,"%d",r);
++        strncpy((char*)&buffer_.data()[LOGON_TOKEN_TOKEN_SZ],u,LOGON_TOKEN_URL_SZ-1);
++    }
++    
++    shm_logon_token(const char* t, const char* u) {
++        buffer_.size(record_size());
++        buffer_.fill(0);
++
++        strncpy((char*)buffer_.data(),t,LOGON_TOKEN_TOKEN_SZ-1);
++        strncpy((char*)&buffer_.data()[LOGON_TOKEN_TOKEN_SZ],u,LOGON_TOKEN_URL_SZ-1);
++    }
++    
++    int load(unsigned char* b) {
++        buffer_.assign(b,LOGON_TOKEN_TOKEN_SZ+LOGON_TOKEN_URL_SZ);
++        
++        return buffer_.size();
++    };    
++    
++    std::string hr() { 
++        return string_format("%s : %16s\n", token().c_str(), url().c_str());
++    };
++private:
++    unsigned int last_random = 0;
++}; 
++ 
++
++//structure kept in the smithproxy to track IP address identity and history
++
++
++
++struct IdentityInfoBase {
++   
++    static unsigned int global_idle_timeout;
++    
++    unsigned int idle_timeout = 0;
++
++    unsigned int created;
++    std::string  ip;
++    std::string  username;
++    std::string  groups;
++    
++    std::vector<std::string> groups_vec;
++    
++    unsigned int rx_bytes = 0;
++    unsigned int tx_bytes = 0;
++    
++    unsigned int last_seen_at;
++    unsigned int last_seen_policy = 0;
++    
++    IdentityInfoBase();
++    virtual ~IdentityInfoBase() = default;
++    
++    inline void touch() { last_seen_at = time(nullptr); }
++    inline bool i_timeout() const { return ( (time(nullptr) - last_seen_at) > idle_timeout ); }
++    inline int i_time() const { return time(nullptr) - last_seen_at; }
++    inline int uptime() const { return time(nullptr) - created; }
++    virtual void update() {};
++};
++
++template <class ShmLogonType>
++struct IdentityInfoType : public IdentityInfoBase {
++    ShmLogonType last_logon_info;
++    
++    IdentityInfoType() : IdentityInfoBase() {}
++
++    void update() override {
++        groups = last_logon_info.groups();
++        groups_vec.clear();
++        
++        int pos = 0;
++        int old_pos = 0;
++
++        groups_vec = string_split(groups, '+');
++    }
++};
++
++
++template<class ShmLogonType,int AddressSize>
++class shared_logoninfotype_ntoa_map : public shared_map<std::string,ShmLogonType> {
++    std::string get_row_key(ShmLogonType* r) override { return r->ip(); }
++};
++
++
++typedef IdentityInfoType<shm_logon_info> IdentityInfo;
++typedef IdentityInfoType<shm_logon_info6> IdentityInfo6;
++
++
++#endif
+diff --git b/src/shm/shmtest.cpp a/src/shm/shmtest.cpp
+new file mode 100644
+index 0000000..651614f
+--- /dev/null
++++ a/src/shm/shmtest.cpp
+@@ -0,0 +1,128 @@
++/*
++    Smithproxy- transparent proxy with SSL inspection capabilities.
++    Copyright (c) 2014, Ales Stibal <astib@mag0.net>, All rights reserved.
++
++    Smithproxy is free software: you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation, either version 3 of the License, or
++    (at your option) any later version.
++
++    Smithproxy is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with Smithproxy.  If not, see <http://www.gnu.org/licenses/>.
++
++    In addition, as a special exception, the copyright holders of Smithproxy
++    give you permission to combine Smithproxy with free software programs
++    or libraries that are released under the GNU LGPL and with code
++    included in the standard release of OpenSSL under the OpenSSL's license
++    (or modified versions of such code, with unchanged license).
++    You may copy and distribute such a system following the terms
++    of the GNU GPL for Smithproxy and the licenses of the other code
++    concerned, provided that you include the source code of that other code
++    when and as the GNU GPL requires distribution of source code.
++
++    Note that people who make modified versions of Smithproxy are not
++    obligated to grant this special exception for their modified versions;
++    it is their choice whether to do so. The GNU General Public License
++    gives permission to release a modified version without this exception;
++    this exception also makes it possible to release a modified version
++    which carries forward this exception.
++*/  
++
++/*
++ *  Compile and link:
++ *  g++ -I. -I ../../../../socle/common/ shmtest.cpp -std=c++11 -o shmtest -pthread -lrt
++ */
++
++#include <cstdio> 
++#include <cerrno> 
++#include <unistd.h> 
++#include <cstring> 
++#include <ctime>
++
++
++#include <semaphore.h>
++#include <sys/types.h>
++#include <sys/mman.h>
++#include <fcntl.h>
++#include <sys/socket.h>
++#include <netinet/in.h>
++#include <arpa/inet.h>
++
++#include <string>
++#include <vector>
++
++#define I_MEM_NAME "/smithproxy_auth_ok"
++#define I_MEM_SIZE 1024*1024
++#define I_SEM_NAME "/smithproxy_auth_ok.sem"
++
++
++#define T_MEM_NAME "/smithproxy_auth_token"
++#define T_MEM_SIZE I_MEM_SIZE
++#define T_SEM_NAME "/smithproxy_auth_token.sem"
++
++#include <shmtable.hpp>
++#include <tools/wportals/bendc/shmtestsuite.hpp>
++#include <shm/shmauth.hpp>
++
++
++shm_logon_info generator_li(int i) {
++    
++    shm_logon_info n;
++    int pid = getpid();            
++    memset(&n,0,sizeof(shm_logon_info));
++    
++    inet_aton("192.168.1.1",(in_addr*)&n.ip);
++    snprintf(n.username,63,"astib_%d_%d",pid,i);
++    strcpy(n.groups,"some_groups");
++    
++    return n;
++}
++
++shm_logon_token generator_to(int i) {
++    shm_logon_token t;
++
++    int pid = getpid();    
++    
++    srand(time(nullptr));
++    int ran = rand();
++    memset(&t,0,sizeof(shm_logon_info));
++
++    snprintf(t.token,63,"%d-%010d",pid,ran);
++    snprintf(t.url,512,"http://www.mag0.net/smithtest/%d/%010d.html",pid,ran);
++    
++    
++    return t;
++}
++
++
++
++void help() {
++    printf("Usage: shmtest <logon|token>\n");
++}
++
++
++int main(int argc, char** argv) {
++    printf("smithproxy shared memory tables analyzer:\n");
++    printf("...\n");    
++
++    
++    if(argc > 1) {
++        std::string a(argv[1]);
++        
++        if(a == "logon") {
++            shared_table<shm_logon_info> b;
++            test_suite<shared_table<shm_logon_info>,shm_logon_info>(b,generator_li,I_MEM_NAME,I_MEM_SIZE,I_SEM_NAME);
++        } 
++        else if (a == "token") {
++            shared_table<shm_logon_token> b;
++            test_suite<shared_table<shm_logon_token>,shm_logon_token>(b,generator_to,T_MEM_NAME,T_MEM_SIZE,T_SEM_NAME);
++        }
++    } 
++
++    help();
++}

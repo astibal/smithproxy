@@ -69,7 +69,6 @@
 #include <proxy/nbrhood.hpp>
 
 #include <policy/inspectors.hpp>
-#include <policy/authfactory.hpp>
 
 #include <inspect/sigfactory.hpp>
 #include <inspect/sxsignature.hpp>
@@ -966,101 +965,6 @@ int cli_diag_dns_domain_cache_clear(DiagCli *cli, const char *command, char *arg
 
 
 
-int cli_diag_identity_ip_list(DiagCli *cli, const char *command, char *argv[], int argc) {
-    debug_cli_params(cli, command, argv, argc);
-
-    cli_print(cli, "\nIPv4 identities:");
-    std::stringstream ss4;
-
-    {
-        auto lc_ = std::scoped_lock(AuthFactory::get_ip4_lock());
-
-        for (auto const& [ ip_address, identity]: AuthFactory::get_ip4_map()) {
-
-            ss4 << "\n";
-            ss4 << "    ipv4: " << ip_address << ", user: " << identity.username << ", groups: " << identity.groups << ", rx/tx: ";
-            ss4 << number_suffixed(identity.tx_bytes) << "/" << number_suffixed(identity.rx_bytes);
-
-            ss4 << "\n          uptime: " << std::to_string(identity.uptime()) << ", idle: " << std::to_string(identity.i_time());
-            ss4 << "\n          status: " << std::to_string(!identity.i_timeout()) << ", last policy: ";
-            ss4 <<   std::to_string(identity.last_seen_policy);
-            ss4 << "\n";
-        }
-
-    }
-    cli_print(cli, "%s", ss4.str().c_str());
-
-
-    cli_print(cli, "\nIPv6 identities:");
-    std::stringstream ss6;
-    {
-        auto lc_ = std::scoped_lock(AuthFactory::get_ip6_lock());
-
-        for (auto const& [ ip_address, identity]: AuthFactory::get_ip6_map()) {
-
-            ss6 << "\n";
-            ss6 << "    ipv6: " << ip_address << ", user: " << identity.username << ", groups: " << identity.groups << ", rx/tx: ";
-            ss6 << number_suffixed(identity.tx_bytes) << "/" << number_suffixed(identity.rx_bytes);
-            ss6 << "\n          uptime: " << std::to_string(identity.uptime()) << ", idle: " << std::to_string(identity.i_time());
-            ss6 << "\n          status: " << std::to_string(!identity.i_timeout()) << ", last policy: ";
-            ss6 <<   std::to_string(identity.last_seen_policy);
-            ss6 << "\n";
-
-        }
-    }
-    cli_print(cli, "%s", ss6.str().c_str());
-
-    return CLI_OK;
-}
-
-int cli_diag_identity_ip_clear(DiagCli *cli, const char *command, char *argv[], int argc) {
-    debug_cli_params(cli, command, argv, argc);
-
-    cli_print(cli, "\nClearing all identities:");
-    std::string out;
-
-    {
-        auto lc_ = std::scoped_lock(AuthFactory::get_ip4_lock());
-
-        AuthFactory::get_ip4_map().clear();
-        auto& shm_map = AuthFactory::get().shm_ip4_map;
-        if (shm_map.attached()) {
-            if (shm_map.acquire() == 0) {
-                shm_map.map_entries().clear();
-                shm_map.entries().clear();
-                shm_map.save(true);
-                shm_map.seen_version(0);
-                shm_map.release();
-            } else {
-                cli_print(cli, "IPv4 identity shared memory is busy; local identities were cleared only");
-            }
-        } else {
-            cli_print(cli, "IPv4 identity shared memory is not active; cleared local identities only");
-        }
-    }
-
-    {
-        auto lc_ = std::scoped_lock(AuthFactory::get_ip6_lock());
-
-        AuthFactory::get_ip6_map().clear();
-        auto& shm_map = AuthFactory::get().shm_ip6_map;
-        if (shm_map.attached()) {
-            if (shm_map.acquire() == 0) {
-                shm_map.map_entries().clear();
-                shm_map.entries().clear();
-                shm_map.save(true);
-                shm_map.seen_version(0);
-                shm_map.release();
-            } else {
-                cli_print(cli, "IPv6 identity shared memory is busy; local identities were cleared only");
-            }
-        } else {
-            cli_print(cli, "IPv6 identity shared memory is not active; cleared local identities only");
-        }
-    }
-
-    return CLI_OK;
-}
 
 int cli_diag_writer_stats(DiagCli *cli, const char *command, char *argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
@@ -1998,10 +1902,6 @@ int cli_diag_proxy_session_list_extra (DiagCli *cli, const char *command, std::v
     }
 
     cli_print(cli, "%s", request->text_result().c_str());
-    if (request->skipped_spread() > 0) {
-        cli_print(cli, "\n%zu spread sessions omitted", request->skipped_spread());
-    }
-
     if( sl_flags == SL_NONE ) {
         unsigned long l = MitmProxy::total_mtr_up().get();
         unsigned long r = MitmProxy::total_mtr_down().get();
@@ -2154,7 +2054,7 @@ int cli_diag_worker_proxy_list(DiagCli *cli, [[maybe_unused]] const char *comman
         {
             // skim proxies for speed stats
             auto lc_ = std::scoped_lock(wrk.second->proxy_lock());
-            for (auto& [ proxy, thr ]: proxies) {
+            for (auto const& proxy: proxies) {
                 if (!proxy) continue;
                 up += proxy->stats().mtr_up.get()*8;
                 down += proxy->stats().mtr_down.get()*8;
@@ -2171,21 +2071,12 @@ int cli_diag_worker_proxy_list(DiagCli *cli, [[maybe_unused]] const char *comman
 
 
                 for (std::size_t p_i = 0; p_i < proxies.size(); ++p_i) {
-                    auto const& proxy = proxies.at(p_i).first;
+                    auto const& proxy = proxies.at(p_i);
                     if (!proxy) {
                         out << string_format("\n          `- proxy[%d]: unavailable", p_i);
                         continue;
                     }
-                    auto threaded =  ( proxies.at(p_i).second != nullptr );
-                    auto in_progress = ( proxy->state().in_progress() > 0 );
-
                     out << string_format("\n          `- proxy[%d]: %s", p_i, proxy->str().c_str());
-                    if (threaded or in_progress) {
-                        out << " (";
-                        if(threaded) out << "t";
-                        if(in_progress) out << "i";
-                        out << ")";
-                    }
                 }
                 out << "\n          `- " << speed_str;
             }
@@ -2659,12 +2550,6 @@ void register_diags(libcli2::Cli& native) {
 
     auto diag_proxy_io = diag_register_command(cli,diag_proxy,"io",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy I/O related commands");
     diag_register_command(cli, diag_proxy_io ,"list",cli_diag_proxy_session_io_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"active proxy sessions");
-
-    auto diag_identity = diag_register_command(cli,diag,"identity",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"identity related commands");
-    auto diag_identity_user = diag_register_command(cli, diag_identity,"user",nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC,"identity commands related to users");
-    diag_register_command(cli, diag_identity_user,"list",cli_diag_identity_ip_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"list all known users");
-    diag_register_command(cli, diag_identity_user,"clear",cli_diag_identity_ip_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC,"CLEAR all known users");
-
 
     auto diag_writer = diag_register_command(cli,diag,"writer",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"file writer diags");
     diag_register_command(cli,diag_writer,"stats",cli_diag_writer_stats,PRIVILEGE_PRIVILEGED, MODE_EXEC,"file writer statistics");

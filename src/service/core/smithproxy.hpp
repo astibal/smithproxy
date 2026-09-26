@@ -105,8 +105,6 @@ public:
     std::shared_ptr<std::thread> cli_thread;
     std::shared_ptr<std::thread> log_thread;
     std::shared_ptr<std::thread> dns_thread;
-    std::shared_ptr<std::thread> id_thread;
-
     std::shared_ptr<std::thread> api_thread;
 
     SmithProxy (SmithProxy const&) = delete;
@@ -121,11 +119,8 @@ public:
         return instance().API;
     }
 
-    static std::thread* create_identity_refresh_thread();
-
     void create_log_writer_thread();
     void create_dns_thread();
-    void create_identity_thread();
     void create_api_thread();
 
     bool create_listeners();

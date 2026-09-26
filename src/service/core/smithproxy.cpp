@@ -43,7 +43,6 @@
 
 #include <staticcontent.hpp>
 
-#include <policy/authfactory.hpp>
 #include <inspect/sigfactory.hpp>
 
 #include <service/core/smithproxy.hpp>
@@ -72,46 +71,6 @@ void SmithProxy::reload() {
 }
 
 
-std::thread* SmithProxy::create_identity_refresh_thread() {
-
-
-    auto* id_thread = new std::thread([]() {
-        auto const& log = instance().log;
-
-        // give some time to init shm - don't run immediately
-        // this is workaround for rare(?) race condition when shm is not
-        // initialized yet.
-
-        if (abort_sleep(20) ) {
-            return;
-        }
-
-        for ( [[maybe_unused]] unsigned i = 0; ; i++) {
-
-            if(abort_sleep(20)) {
-                _dia("id_thread: terminating");
-                break;
-            }
-
-            _deb("id_thread: refreshing identities");
-
-            AuthFactory::get().shm_ip4_table_refresh();
-            AuthFactory::get().shm_ip6_table_refresh();
-            AuthFactory::get().shm_token_table_refresh();
-            AuthFactory::get().ip4_timeout_check();
-            AuthFactory::get().ip6_timeout_check();
-
-            _dum("id_thread: finished");
-
-
-        }
-    });
-
-    return id_thread;
-}
-
-
-
 void SmithProxy::create_log_writer_thread() {
     // we have to create logger after daemonize is called
     log_thread  = std::shared_ptr<std::thread>(create_log_writer());
@@ -127,14 +86,6 @@ void SmithProxy::create_dns_thread() {
     if(dns_thread) {
         pthread_setname_np( dns_thread->native_handle(),
                             string_format("sxy_dns_%d",tenant_index()).c_str());
-    }
-}
-
-void SmithProxy::create_identity_thread() {
-    id_thread = std::shared_ptr<std::thread>(create_identity_refresh_thread());
-    if(id_thread != nullptr) {
-        pthread_setname_np(id_thread->native_handle(),string_format("sxy_idu_%d",
-                                                                    CfgFactory::get()->tenant_index).c_str());
     }
 }
 
@@ -687,12 +638,6 @@ void SmithProxy::join_all() {
 
         if(dns_thread->joinable())
             dns_thread->join();
-    }
-    if(id_thread) {
-        if(!cfg_daemonize)
-            std::cerr << "terminating identity updater thread" << std::endl;
-        if(id_thread->joinable())
-            id_thread->join();
     }
     if(api_thread) {
         if(!cfg_daemonize)

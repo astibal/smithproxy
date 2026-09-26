@@ -52,7 +52,6 @@
 #include <log/logger.hpp>
 
 #include <policy/policy.hpp>
-#include <policy/authfactory.hpp>
 #include <inspect/sigfactory.hpp>
 #include <inspect/sxsignature.hpp>
 
@@ -855,18 +854,12 @@ bool CfgFactory::load_settings () {
         load_if_exists(cfgapi.getRoot()["settings"]["admin"], "group", admin_group);
     }
 
-    if(cfgapi.getRoot()["settings"].exists("auth_portal")) {
-        load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "address", auth_address);
-        load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "http_port", auth_http);
-        load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "https_port", auth_https);
-        load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "ssl_key", auth_sslkey);
-        load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "ssl_cert", auth_sslcert);
-        load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "magic_ip", tenant_magic_ip);
-    }
-
     if(cfgapi.getRoot()["settings"].exists("tuning")) {
-        load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "proxy_thread_spray_min", MasterProxy::subproxy_thread_spray_min);
-        load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "subproxy_thread_spray_bytes_min", MasterProxy::subproxy_thread_spray_bytes_min);
+        auto const& tuning = cfgapi.getRoot()["settings"]["tuning"];
+        if(tuning.exists("proxy_thread_spray_min")
+           or tuning.exists("subproxy_thread_spray_bytes_min")) {
+            _war("subproxy thread-spray tuning is deprecated and ignored; sub-proxies now run on their owning worker");
+        }
 
         int hostcx_min = 0;
         load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "host_bufsz_min", hostcx_min);
@@ -1708,17 +1701,10 @@ int CfgFactory::load_db_policy () {
                     }
                 }         
                 if(load_if_exists(cur_object, "auth_profile", name_auth)) {
-                    auto auth  = lookup_prof_auth(name_auth.c_str());
-                    if(auth) {
-                        auth->usage_add(std::weak_ptr(rule));
-                        _dia("cfgapi_load_policy[#%d]: auth profile %s", policy_index, name_auth.c_str());
-                        rule->profile_auth= auth;
-                    }
-                    else if(not name_auth.empty()) {
-                        _err("cfgapi_load_policy[#%d]: auth profile %s cannot be loaded", policy_index, name_auth.c_str());
+                    if(not name_auth.empty()) {
+                        _err("cfgapi_load_policy[#%d]: auth_profile '%s' is no longer supported", policy_index, name_auth.c_str());
                         soft_error = true;
-
-                        war_event(policy_index, string_format("auth_profile not loaded: '%s'",name_auth.c_str()).c_str());
+                        war_event(policy_index, string_format("auth_profile removed: '%s'", name_auth.c_str()).c_str());
                     }
                 }
                 if(load_if_exists(cur_object, "alg_dns_profile", name_alg_dns)) {
@@ -2398,15 +2384,13 @@ int CfgFactory::load_db_prof_auth () {
 
     _dia("load_db_prof_auth: start");
 
-    _dia("load_db_prof_auth: portal settings");
-    load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "address", AuthFactory::get().options.portal_address);
-
-    load_if_exists<std::string>(cfgapi.getRoot()["settings"]["auth_portal"], "address6", AuthFactory::get().options.portal_address6);
-    load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "http_port", AuthFactory::get().options.portal_port_http);
-    load_if_exists(cfgapi.getRoot()["settings"]["auth_portal"], "https_port", AuthFactory::get().options.portal_port_https);
+    if(cfgapi.getRoot()["settings"].exists("auth_portal")) {
+        _war("settings.auth_portal is obsolete and ignored; the legacy captive-auth backend was removed");
+    }
 
     _dia("load_db_prof_auth: profiles");
     if(cfgapi.getRoot().exists("auth_profiles")) {
+        _war("auth_profiles is obsolete; entries are retained only for configuration compatibility");
 
         num = cfgapi.getRoot()["auth_profiles"].getLength();
         _dia("load_db_prof_auth: found %d objects", num);
@@ -3031,15 +3015,6 @@ int CfgFactory::policy_apply (baseHostCX *originator, MitmProxy *proxy, int matc
         auto* mitm_proxy = dynamic_cast<MitmProxy*>(proxy);
         if(mitm_proxy) {
 
-            /* Processing Auth profile */
-            if(pa) {
-                // auth is applied on proxy
-                mitm_proxy->auth_opts.authenticate = pa->authenticate;
-                mitm_proxy->auth_opts.resolve = pa->resolve;
-
-                pa_name = pa->element_name().c_str();
-            }
-
             /* Processing Features */
             policy_apply_features(rule, mitm_proxy);
         }
@@ -3525,9 +3500,6 @@ bool CfgFactory::apply_tenant_config () {
         ret += apply_tenant_index(listen_dtls_port, tenant_index);
         ret += apply_tenant_index(listen_udp_port, tenant_index);
         ret += apply_tenant_index(listen_socks_port, tenant_index);
-        ret += apply_tenant_index(AuthFactory::get().options.portal_port_http, tenant_index);
-        ret += apply_tenant_index(AuthFactory::get().options.portal_port_https, tenant_index);
-
         CfgFactory::get()->cli_port += tenant_index;
     }
 
@@ -5171,17 +5143,7 @@ int save_settings(Config& ex) {
     cli_objects.add("port", Setting::TypeInt) = CfgFactory::get()->cli_port_base;
     cli_objects.add("enable_password", Setting::TypeString) = CfgFactory::get()->cli_enable_password;
 
-    Setting& auth_objects = objects.add("auth_portal", Setting::TypeGroup);
-    auth_objects.add("address", Setting::TypeString) = CfgFactory::get()->auth_address;
-    auth_objects.add("http_port", Setting::TypeString) = CfgFactory::get()->auth_http;
-    auth_objects.add("https_port", Setting::TypeString) = CfgFactory::get()->auth_https;
-    auth_objects.add("ssl_key", Setting::TypeString) = CfgFactory::get()->auth_sslkey;
-    auth_objects.add("ssl_cert", Setting::TypeString) = CfgFactory::get()->auth_sslcert;
-
-
     Setting& tuning_objects = objects.add("tuning", Setting::TypeGroup);
-    tuning_objects.add("proxy_thread_spray_min", Setting::TypeInt) = (int)MasterProxy::subproxy_thread_spray_min;
-    tuning_objects.add("subproxy_thread_spray_bytes_min", Setting::TypeInt) = (int)MasterProxy::subproxy_thread_spray_bytes_min;
     tuning_objects.add("host_bufsz_min", Setting::TypeInt) = (int) baseHostCX::params.buffsize;
     tuning_objects.add("host_bufsz_max_multiplier", Setting::TypeInt) = (int) baseHostCX::params.buffsize_maxmul;
     tuning_objects.add("host_write_full", Setting::TypeInt) = (int) baseHostCX::params.write_full;

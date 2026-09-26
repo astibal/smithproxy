@@ -584,7 +584,6 @@ int main(int argc, char *argv[]) {
     Log::get()->events().insert(INF, "Smithproxy %s%s starting", SMITH_VERSION, SMITH_DEVEL > 0 ? "-dev" : "");
 
     SmithProxy::instance().create_dns_thread();
-    SmithProxy::instance().create_identity_thread();
 
     auto start_api = [&]() {
         if (CfgFactory::get()->accept_api) {

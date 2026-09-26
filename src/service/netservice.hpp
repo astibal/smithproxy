@@ -44,7 +44,6 @@
 
 #include <threadedacceptor.hpp>
 #include <threadedreceiver.hpp>
-#include <policy/authfactory.hpp>
 
 
 namespace sx {
