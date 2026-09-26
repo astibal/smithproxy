@@ -52,6 +52,9 @@ public:
     int translate_socket(int token) const override;
     int poll() override;
 
+    /** Expose the connection carrier to policy while retaining stream I/O. */
+    int policy_l4_proto() const override;
+
     flow_handle flow() const { return flow_; } ///< Underlying logical-flow handle.
     int token() const { return token_; }        ///< Synthetic baseCom socket token.
     /**

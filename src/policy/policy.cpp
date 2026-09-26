@@ -281,7 +281,10 @@ bool PolicyRule::match_proto_cx(int acl_proto, const baseHostCX *cx) {
     bool ret = false;
 
     if( cx && cx->com()) {
-        auto cx_proto = sock_2_net(cx->com()->l4_proto());
+        // Keep runtime I/O semantics separate from the transport matched by
+        // policy.  This matters for logical streams carried inside QUIC: their
+        // MitmProxy behaves like a stream, while the original flow is UDP.
+        auto cx_proto = sock_2_net(cx->com()->policy_l4_proto());
         if( cx_proto != 0) {
             if(acl_proto == cx_proto) {
                 ret = true;
@@ -444,4 +447,3 @@ bool PolicyRule::match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r)
 
     return false;
 }
-

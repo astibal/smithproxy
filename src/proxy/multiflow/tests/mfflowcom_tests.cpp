@@ -10,6 +10,18 @@
 
 namespace mf = sx::multiflow;
 
+TEST(MFFlowCom, KeepsStreamIoButReportsUdpToPolicy) {
+    auto connection = std::make_shared<mf::fake_connection>(
+        64 * 1024, mf::outer_transport::udp);
+    auto const flow = connection->open_flow(mf::direction::bidirectional);
+    mf::MFFlowCom com(connection, flow);
+
+    // MitmProxy requires stream lifecycle semantics for each QUIC stream. The
+    // policy engine must nevertheless match the enclosing UDP/QUIC flow.
+    EXPECT_EQ(SOCK_STREAM, com.l4_proto());
+    EXPECT_EQ(SOCK_DGRAM, com.policy_l4_proto());
+}
+
 TEST(MFFlowCom, PeekDoesNotConsumeFlowData) {
     auto connection = std::make_shared<mf::fake_connection>();
     auto const flow = connection->open_flow(mf::direction::bidirectional);
@@ -70,4 +82,3 @@ TEST(MFFlowCom, ShutdownFinishesOnlyOwnedFlow) {
     EXPECT_TRUE(second_com.writable(second_com.token()));
     EXPECT_TRUE(connection->contains(second));
 }
-

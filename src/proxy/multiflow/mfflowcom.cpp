@@ -43,6 +43,12 @@ int MFFlowCom::bind(const char*) {
     return -1;
 }
 
+int MFFlowCom::policy_l4_proto() const {
+    auto owner = connection_.lock();
+    return owner && owner->policy_transport() == outer_transport::udp
+        ? SOCK_DGRAM : SOCK_STREAM;
+}
+
 ssize_t MFFlowCom::read(int, void* destination, size_t size, int) {
     if (size == 0) return 0;
 

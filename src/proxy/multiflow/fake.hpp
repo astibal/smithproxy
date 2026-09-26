@@ -21,8 +21,10 @@ namespace sx::multiflow {
  */
 class fake_connection final : public connection {
 public:
-    explicit fake_connection(std::size_t send_high_watermark = 64 * 1024)
-        : send_high_watermark_(send_high_watermark) {}
+    explicit fake_connection(
+        std::size_t send_high_watermark = 64 * 1024,
+        outer_transport transport = outer_transport::tcp)
+        : send_high_watermark_(send_high_watermark), transport_(transport) {}
 
     flow_handle open_flow(direction flow_direction) override {
         flow_handle handle { next_flow_id_, next_generation_++ };
@@ -42,6 +44,8 @@ public:
         auto const* flow = find(handle);
         return flow ? std::optional<direction>(flow->flow_direction) : std::nullopt;
     }
+
+    outer_transport policy_transport() const override { return transport_; }
 
     io_result read(flow_handle handle, void* destination, std::size_t size) override {
         if (closed_) return { 0, io_status::connection_closed };
@@ -235,6 +239,7 @@ private:
     std::map<flow_id, flow_state> flows_;       ///< Live simulated streams.
     std::map<event_key, event> events_;         ///< Pending de-duplicated events.
     std::size_t send_high_watermark_;           ///< Per-flow write-buffer limit.
+    outer_transport transport_;                 ///< Physical carrier seen by policy.
     flow_id next_flow_id_ = 0;
     generation_id next_generation_ = 1;
     bool closed_ = false;                       ///< Connection-wide terminal state.

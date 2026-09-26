@@ -19,6 +19,12 @@ enum class direction {
     receive_only,
 };
 
+/** L4 protocol enclosing a multiplexed connection for policy matching. */
+enum class outer_transport {
+    tcp,
+    udp,
+};
+
 /** Edge-triggered notifications produced by a multiplexed connection. */
 enum class event_type {
     flow_open,
@@ -84,6 +90,11 @@ public:
     virtual bool contains(flow_handle flow) const = 0;
     /** Return the local read/write capabilities of a live flow. */
     virtual std::optional<direction> direction_of(flow_handle flow) const = 0;
+
+    /** Report the physical carrier without changing logical stream I/O. */
+    virtual outer_transport policy_transport() const {
+        return outer_transport::tcp;
+    }
 
     /** Perform nonblocking stream I/O; partial progress is allowed. */
     virtual io_result read(flow_handle flow, void* destination, std::size_t size) = 0;
