@@ -45,3 +45,50 @@ TEST(HttpConnectRequest, RejectsUnsupportedHttpVersionAndTrailingData) {
     EXPECT_FALSE(HttpConnectRequest::parse("CONNECT example.test:443 HTTP/2"));
     EXPECT_FALSE(HttpConnectRequest::parse("CONNECT example.test:443 HTTP/1.1 extra"));
 }
+
+TEST(HttpConnectRequest, AcceptsPortBoundariesAndHttpVersions) {
+    for(auto const line: {
+            "CONNECT example.test:1 HTTP/1.0",
+            "CONNECT example.test:65535 HTTP/1.1",
+            "CONNECT [::1]:1 HTTP/1.0\r\n",
+            "CONNECT [ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff]:65535 HTTP/1.1"}) {
+        EXPECT_TRUE(HttpConnectRequest::parse(line)) << line;
+    }
+}
+
+TEST(HttpConnectRequest, RejectsMalformedRequestLineFraming) {
+    for(auto const line: {
+            "", "CONNECT", "CONNECT ",
+            "connect example.test:443 HTTP/1.1",
+            "CONNECT  example.test:443 HTTP/1.1",
+            "CONNECT\texample.test:443 HTTP/1.1",
+            "CONNECT example.test:443\tHTTP/1.1",
+            "CONNECT example.test:443 HTTP/1.1\n",
+            "CONNECT example.test:443 HTTP/1.1\r",
+            "CONNECT example.test:443 HTTP/1.1\r\nextra"}) {
+        EXPECT_FALSE(HttpConnectRequest::parse(line)) << line;
+    }
+}
+
+TEST(HttpConnectRequest, RejectsMalformedAuthorities) {
+    for(auto const line: {
+            "CONNECT :443 HTTP/1.1",
+            "CONNECT example.test: HTTP/1.1",
+            "CONNECT example.test:+443 HTTP/1.1",
+            "CONNECT example.test:-1 HTTP/1.1",
+            "CONNECT example.test:443x HTTP/1.1",
+            "CONNECT [::1]443 HTTP/1.1",
+            "CONNECT [::1 HTTP/1.1",
+            "CONNECT []:443 HTTP/1.1",
+            "CONNECT [::1]:443:80 HTTP/1.1",
+            "CONNECT example.test:443:80 HTTP/1.1"}) {
+        EXPECT_FALSE(HttpConnectRequest::parse(line)) << line;
+    }
+}
+
+TEST(HttpConnectRequest, DoesNotTruncateEmbeddedNul) {
+    std::string line = "CONNECT example.test:443 HTTP/1.1";
+    line.push_back('\0');
+    line += "ignored";
+    EXPECT_FALSE(HttpConnectRequest::parse(line));
+}
