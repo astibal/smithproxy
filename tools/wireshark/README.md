@@ -25,6 +25,7 @@ sphttp3.method
 sphttp3.scheme
 sphttp3.authority
 sphttp3.path
+sphttp3.url
 sphttp3.status
 sphttp3.header
 ```
@@ -39,3 +40,9 @@ With the default configuration, local captures are stored below
 `/var/smithproxy/data`. Test labs replace this path with their isolated `data`
 directory. Capture creation still requires a matching content profile with
 `write_payload = TRUE` and `captures.local.enabled = true`.
+
+Run the black-box dissector test when `tshark` is installed:
+
+```bash
+python3 tools/wireshark/test_spquic.py
+```

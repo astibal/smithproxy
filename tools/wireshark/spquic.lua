@@ -25,6 +25,7 @@ local f_h3_method = ProtoField.string("sphttp3.method", "Method")
 local f_h3_scheme = ProtoField.string("sphttp3.scheme", "Scheme")
 local f_h3_authority = ProtoField.string("sphttp3.authority", "Authority")
 local f_h3_path = ProtoField.string("sphttp3.path", "Path")
+local f_h3_url = ProtoField.string("sphttp3.url", "URL")
 local f_h3_status = ProtoField.string("sphttp3.status", "Status")
 
 spquic.fields = {
@@ -49,6 +50,7 @@ sphttp3.fields = {
     f_h3_scheme,
     f_h3_authority,
     f_h3_path,
+    f_h3_url,
     f_h3_status,
 }
 
@@ -147,7 +149,8 @@ local function dissect_h3_headers(buffer, offset, root, pinfo)
     local field_count, count_size = read_varint(buffer, offset)
     if not field_count then return extension_end end
     offset = offset + count_size
-    local summary_method, summary_path, summary_status
+    local summary_method, summary_scheme, summary_authority
+    local summary_path, summary_status
 
     for _ = 1, field_count do
         local name_length, name_size = read_varint(buffer, offset)
@@ -167,8 +170,10 @@ local function dissect_h3_headers(buffer, offset, root, pinfo)
         h3:add(f_h3_header, name .. ": " .. value)
         if name == ":method" then
             h3:add(f_h3_method, value); summary_method = value
-        elseif name == ":scheme" then h3:add(f_h3_scheme, value)
-        elseif name == ":authority" then h3:add(f_h3_authority, value)
+        elseif name == ":scheme" then
+            h3:add(f_h3_scheme, value); summary_scheme = value
+        elseif name == ":authority" then
+            h3:add(f_h3_authority, value); summary_authority = value
         elseif name == ":path" then
             h3:add(f_h3_path, value); summary_path = value
         elseif name == ":status" then
@@ -178,6 +183,14 @@ local function dissect_h3_headers(buffer, offset, root, pinfo)
 
     if offset + 3 <= extension_end and buffer(offset, 3):string() == ">>>" then
         h3:add(f_header_end, buffer(offset, 3), ">>>")
+    end
+    if summary_scheme and summary_authority then
+        h3:add(f_h3_url, summary_scheme .. "://" .. summary_authority
+            .. (summary_path or ""))
+    elseif summary_authority then
+        h3:add(f_h3_url, summary_authority .. (summary_path or ""))
+    elseif summary_path then
+        h3:add(f_h3_url, summary_path)
     end
     pinfo.cols.protocol:set("HTTP3/SPQ1")
     if summary_method then
