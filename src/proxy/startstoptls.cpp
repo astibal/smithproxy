@@ -9,17 +9,15 @@
 
 MitmHostCX* StartStopTls::checked_peer(MitmHostCX& client, bool expect_tls) const {
     auto* peer = MitmHostCX::from_baseHostCX(client.peer());
-    if(not peer) {
-        return nullptr;
-    }
+    PairState const state {
+        .has_peer = peer != nullptr,
+        .client_owned = client.parent_proxy() == &owner_,
+        .peer_owned = peer and peer->parent_proxy() == &owner_,
+        .client_tls = dynamic_cast<SSLCom*>(client.com()) != nullptr,
+        .peer_tls = peer and dynamic_cast<SSLCom*>(peer->com()) != nullptr
+    };
 
-    if(client.parent_proxy() != &owner_ or peer->parent_proxy() != &owner_) {
-        return nullptr;
-    }
-
-    auto const client_is_tls = dynamic_cast<SSLCom*>(client.com()) != nullptr;
-    auto const peer_is_tls = dynamic_cast<SSLCom*>(peer->com()) != nullptr;
-    if(client_is_tls != expect_tls or peer_is_tls != expect_tls) {
+    if(validate(state, expect_tls) != PairStatus::Ready) {
         return nullptr;
     }
 

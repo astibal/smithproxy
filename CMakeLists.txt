@@ -456,9 +456,13 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/ext/libcidr/cidr.cpp
                 src/policy/addrobj.cpp
         )
+        add_executable(sx_gtests_startstoptls
+                src/proxy/tests/startstoptls_test.cpp
+        )
 
         target_link_libraries(sx_gtests gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries(sx_gtests_http1 gtest gtest_main socle_lib pthread crypto ssl)
+        target_link_libraries(sx_gtests_startstoptls gtest gtest_main)
         target_link_libraries (sx_gtests nlohmann_json::nlohmann_json)
     endif()
 ENDIF()
