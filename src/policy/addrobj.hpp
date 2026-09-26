@@ -46,14 +46,14 @@
 #include <ext/libcidr/cidr.hpp>
 #include <display.hpp>
 #include <log/logger.hpp>
+#include <log/logan.hpp>
 
-#include <sobject.hpp>
 #include <policy/profiles.hpp>
 #include <policy/cfgelement.hpp>
 #include <ranges.hpp>
 
 
-class AddressObject : public socle::sobject, public CfgElement {
+class AddressObject : public CfgElement {
 public:
     virtual bool match(cidr::CIDR* c) = 0;
 
@@ -93,8 +93,6 @@ public:
 
     int contains(cidr::CIDR const* other) const;
     bool match(cidr::CIDR* c) override { return (contains(c) >= 0); };
-    bool ask_destroy() override { return false; };
-
     std::string to_string(int verbosity) const override {
         auto temp = raw::allocated(cidr_to_str(c_.get()));
 
@@ -122,8 +120,6 @@ public:
     std::shared_ptr<DNS_Response> find_dns_response(int cidr_type) const;
     
     bool match(cidr::CIDR* to_match) override;
-    bool ask_destroy() override { return false; };
-
     std::string to_string(int verbosity) const override;
 
 private:

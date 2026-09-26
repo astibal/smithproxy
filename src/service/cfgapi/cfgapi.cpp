@@ -48,7 +48,7 @@
 
 
 #include <service/cfgapi/cfgapi.hpp>
-#include <service/cmd/clistate.hpp>
+#include <service/cfgapi/cfgvalue.hpp>
 #include <log/logger.hpp>
 
 #include <policy/policy.hpp>
@@ -1417,6 +1417,9 @@ int CfgFactory::load_db_policy () {
             }
 
             load_if_exists(cur_object, "name", rule->policy_name);
+            rule->element_name() = rule->policy_name.empty()
+                ? string_format("policy-%d", policy_index)
+                : rule->policy_name;
 
             if(load_if_exists(cur_object, "proto", proto)) {
                 auto r = lookup_proto(proto.c_str());
@@ -1601,10 +1604,10 @@ int CfgFactory::load_db_policy () {
             
             if(load_if_exists(cur_object, "action", action)) {
                 int r_a = PolicyRule::POLICY_ACTION_PASS;
-                if(action == "deny") {
+                if(action == "deny" or action == "reject") {
                     _dia("cfgapi_load_policy[#%d]: action: deny", policy_index);
                     r_a = PolicyRule::POLICY_ACTION_DENY;
-                    rule->action_name = action;
+                    rule->action_name = "deny";
 
                 } else if (action == "accept"){
                     _dia("cfgapi_load_policy[#%d]: action: accept", policy_index);
@@ -3048,6 +3051,7 @@ int CfgFactory::policy_apply (baseHostCX *originator, MitmProxy *proxy, int matc
 
     } else {
         _inf("Connection %s denied: policy=%d", originator->full_name('L').c_str(), policy_num);
+        return -1;
     }
     
     return policy_num;
@@ -3581,9 +3585,11 @@ int CfgFactory::save_address_objects(Config& ex) const {
 
             auto cidr_ptr = std::dynamic_pointer_cast<CidrAddress>(obj->value());
             if(cidr_ptr) {
-                const char* addr = cidr_to_str(cidr_ptr->cidr());
-                s_cidr =  addr;
-                delete[] addr;
+                char* addr = cidr_to_str(cidr_ptr->cidr());
+                if (addr) {
+                    s_cidr = addr;
+                    ::free(addr);
+                }
             }
 
             n_saved++;
@@ -4037,9 +4043,9 @@ bool CfgFactory::new_tls_profile(Setting& ex, std::string const& name) const {
         item.add("left_disable_reuse", Setting::TypeBoolean) = false;
         item.add("right_disable_reuse", Setting::TypeBoolean) = false;
         item.add("sslkeylog", Setting::TypeBoolean) = false;
-        item.add("log", Setting::TypeString) = false;
+        item.add("alerts", Setting::TypeString) = "all";
     }
-    catch(libconfig::SettingNameException const& e) {
+    catch(libconfig::SettingException const& e) {
         _war("cannot add new section %s: %s", name.c_str(), e.what());
         return false;
     }

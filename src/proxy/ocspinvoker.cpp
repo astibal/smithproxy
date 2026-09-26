@@ -65,7 +65,7 @@ std::unique_ptr<AsyncOcspInvoker> AsyncOcspInvoker::invoke(MitmProxy& proxy) {
                 new_caller->parent_.tap();
 
                 auto const& log = inet::ocsp::OcspFactory::log();
-                _not("deferred OCSP check ID 0x%lx", new_caller->ocsp_->oid());
+                _not("deferred OCSP check started");
 
                 return new_caller;
             } else {

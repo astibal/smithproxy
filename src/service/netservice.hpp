@@ -63,6 +63,16 @@ namespace sx {
 class NetworkServiceFactory {
 public:
 
+    static constexpr unsigned int listener_count(unsigned int detected_cpus,
+                                                  unsigned int core_multiplier,
+                                                  int configured_workers) noexcept {
+        if(configured_workers > 0) {
+            return static_cast<unsigned int>(configured_workers);
+        }
+
+        return std::max(1U, detected_cpus * core_multiplier);
+    }
+
     static logan_lite& log() {
         static logan_lite l("service");
         return l;
@@ -136,8 +146,8 @@ std::vector<std::unique_ptr<Listener>> NetworkServiceFactory::prepare_listener (
     } else {
 
         // how many additional listeners?
-        auto nthreads = std::thread::hardware_concurrency();
-        nthreads *= listener->core_multiplier();
+        auto nthreads = listener_count(std::thread::hardware_concurrency(),
+                                       listener->core_multiplier(), sub_workers);
 
         // attach and push first listener
         attach_listener(listener.get(), sock);
@@ -145,12 +155,7 @@ std::vector<std::unique_ptr<Listener>> NetworkServiceFactory::prepare_listener (
         // move!
         vec_toret.emplace_back(std::move(listener));
 
-        // if option explicitly set, override listener count with it
-        if(sub_workers > 0) {
-            nthreads = sub_workers;
-        }
-
-        for(unsigned int i = 0; i < nthreads - 1 ; i++) {
+        for(unsigned int i = 1; i < nthreads; ++i) {
             std::unique_ptr<Listener> additional_listener(create_listener());
 
             if(additional_listener) {

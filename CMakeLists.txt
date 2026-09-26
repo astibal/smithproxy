@@ -255,6 +255,16 @@ configure_file(
 message(STATUS "compiler flags: ${CMAKE_CXX_FLAGS}")
 message(STATUS "compiler debug flags: ${CMAKE_CXX_FLAGS_DEBUG}")
 
+add_library(smithproxy_libcli STATIC
+        src/service/libcli/cli.cpp
+        src/service/libcli/fd_transport.cpp
+        src/service/libcli/line_editor.cpp
+)
+target_include_directories(smithproxy_libcli PUBLIC
+        ${PROJECT_SOURCE_DIR}/src
+        ${PROJECT_SOURCE_DIR}/src/service/libcli
+)
+
 add_executable(smithproxy
 
         src/main.cpp
@@ -315,13 +325,12 @@ add_executable(smithproxy
         src/service/core/smithproxy.cpp
         src/service/core/smithproxy_objapi.hpp
         src/service/core/smithproxy_objapi.cpp
+        src/service/core/sessionlist.hpp
+        src/service/core/sessionlist.cpp
         src/service/cmd/cmdserver.cpp
         src/service/cfgapi/cfgvalue.hpp
         src/service/cfgapi/cfgvalue.cpp
-        src/service/cmd/cligen.hpp
-        src/service/cmd/cligen.cpp
-        src/service/cmd/clistate.hpp
-        src/service/cmd/clistate.cpp
+        src/service/cmd/cli_debug_state.hpp
         src/service/cmd/diag/diag_cmds.hpp
         src/service/cmd/diag/diag_cmds.cpp
         src/service/core/service.cpp
@@ -349,7 +358,13 @@ add_executable(smithproxy
 
         src/ext/libcidr/cidr.cpp
         src/ext/nltemplate/nltemplate.cpp
-        src/ext/libcli/libcli.cpp
+        src/service/cmd/config_cli2.cpp
+        src/service/cmd/config_cli2_schema.cpp
+        src/service/cmd/config_cli2_smithproxy.cpp
+        src/service/cmd/libcli2_socket.cpp
+        src/service/cmd/smith_cli2_commands.cpp
+        src/service/cmd/smith_cli2_debug.cpp
+        src/service/cmd/smith_cli2_test.cpp
         src/ext/lmhpp/include/lmhttpd.hpp
         src/ext/hpack/hpack.hpp
         src/service/core/authpam.cpp
@@ -420,6 +435,13 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/ext/hpack/hpack.hpp
                 src/ext/hpack/hpack_tests.cpp
 
+                src/service/libcli/tests/cli_tests.cpp
+                src/service/libcli/tests/fd_transport_tests.cpp
+                src/service/cmd/config_cli2.cpp
+                src/service/cmd/config_cli2_tests.cpp
+                src/service/cmd/config_cli2_schema.cpp
+                src/service/cmd/config_cli2_schema_tests.cpp
+
                 src/inspect/engine.hpp
                 src/inspect/engine/http.cpp
                 src/inspect/dns.cpp
@@ -459,7 +481,10 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_compile_definitions(tls_testbed PRIVATE
                 SMITHPROXY_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 
-        target_link_libraries(sx_gtests gtest gtest_main socle_lib pthread crypto ssl)
+        target_link_libraries(sx_gtests gtest gtest_main smithproxy_libcli socle_lib pthread crypto ssl crypt)
+        if (LIBCONFIGPP_FOUND)
+            target_link_libraries(sx_gtests ${LIBCONFIGPP_LIBRARIES})
+        endif()
         target_link_libraries(sx_gtests_http1 gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries(tls_testbed gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries (sx_gtests nlohmann_json::nlohmann_json)
@@ -530,7 +555,7 @@ if((CMAKE_SYSTEM_PROCESSOR MATCHES "arm") OR (CMAKE_SYSTEM_PROCESSOR STREQUAL "a
     target_link_libraries (smithdc atomic)
 endif()
 
-target_link_libraries(smithproxy socle_lib pthread ssl crypto rt ${UNWIND_LIB})
+target_link_libraries(smithproxy smithproxy_libcli socle_lib pthread ssl crypto rt ${UNWIND_LIB})
 
 if("${USE_LMHPP}" STREQUAL "Y")
     target_link_libraries(smithproxy microhttpd)
