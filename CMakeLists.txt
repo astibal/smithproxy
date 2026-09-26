@@ -52,6 +52,7 @@ if("${USE_EXPERIMENT}" STREQUAL "Y")
     add_definitions(-DUSE_EXPERIMENT)
 endif()
 
+
 if("${USE_EXTRA_DEBUG}" STREQUAL "Y")
     message(" >> !!! EXTRA_DEBUG ENABLED !!!" )
     add_definitions(-DEXTRA_DEBUG)
@@ -270,6 +271,8 @@ add_executable(smithproxy
         src/proxy/ocspinvoker.hpp
         src/proxy/proxymaker.hpp
         src/proxy/proxymaker.cpp
+        src/proxy/startstoptls.hpp
+        src/proxy/startstoptls.cpp
 
         src/proxy/filters/filterproxy.cpp
         src/proxy/filters/sinkhole.cpp
@@ -519,4 +522,3 @@ if("${USE_EXPERIMENT}" STREQUAL "Y")
     message(" >> !!! EXPERIMENTS ENABLED !!!" )
     message(" >> - software you built and install contain code which is probably not for general use" )
 endif()
-

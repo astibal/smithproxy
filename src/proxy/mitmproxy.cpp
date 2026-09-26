@@ -68,7 +68,7 @@
 
 using namespace socle;
 
-MitmProxy::MitmProxy(baseCom* c): baseProxy(c), sobject() {
+MitmProxy::MitmProxy(baseCom* c): baseProxy(c), sobject(), start_stop_tls_(*this) {
 
     current_sessions()++;
     total_sessions()++;
@@ -2509,4 +2509,3 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
 baseHostCX* MitmUdpProxy::MitmUdpProxy::new_cx(int s) {
     return new MitmHostCX(com()->slave(),s);
 }
-

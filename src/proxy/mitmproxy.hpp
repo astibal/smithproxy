@@ -47,6 +47,7 @@
 #include <hostcx.hpp>
 
 #include <proxy/socks5/sockshostcx.hpp>
+#include <proxy/startstoptls.hpp>
 
 #include <baseproxy.hpp>
 #include <threadedacceptor.hpp>
@@ -183,6 +184,9 @@ public:
     explicit MitmProxy(baseCom* c);
     ~MitmProxy() override;
 
+    StartStopTls& start_stop_tls() noexcept { return start_stop_tls_; }
+    StartStopTls const& start_stop_tls() const noexcept { return start_stop_tls_; }
+
     // actual proxy functions manipulating data buffers
     void write_traffic_log(side_t side, baseHostCX* cx, buffer* custom_buffer  = nullptr);
     void proxy_dump_packet(side_t sid, buffer const& buf);
@@ -275,6 +279,7 @@ public:
     DECLARE_LOGGING(to_string)
 
 private:
+    StartStopTls start_stop_tls_;
     logan_lite log {"proxy"};
     logan_lite log_dump {"proxy.payload"};
     logan_lite log_content {"proxy.content"};

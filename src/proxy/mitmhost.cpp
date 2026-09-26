@@ -311,45 +311,14 @@ void MitmHostCX::on_detect(std::shared_ptr<duplexFlowMatch> x_sig, flowMatchStat
 }
 
 void MitmHostCX::on_starttls() {
+    auto* owner = dynamic_cast<MitmProxy*>(parent_proxy());
+    if(not owner) {
+        _err("on_starttls: host context has no MitmProxy owner");
+        return;
+    }
 
-    _dia("we should now handover myself to SSL worker");
-
-    // we know this side is client
-    auto master = com()->master();
-
-    auto* new_client_com = new MySSLMitmCom();
-    com(new_client_com);
-
-    auto* new_peer_com = new MySSLMitmCom();
-    peer()->com(new_peer_com);
-
-    peer(peer()); // this will re-init
-    peer()->peer(this);
-
-    com()->master(master);
-    peer()->com()->master(master);
-
-    _dia("peers set");
-
-    // set flag to wait for the peer to finish spoofing
-
-    waiting_for_peercom(true);
-
-    new_peer_com->upgrade_client_socket(peer()->socket());
-    new_client_com->upgrade_server_socket(socket());
-
-    // allow another upgrade by spoofing mechanism
-    new_client_com->upgraded(false);
-
-    CfgFactory::get()->policy_apply_tls(matched_policy(), com());
-    CfgFactory::get()->policy_apply_tls(matched_policy(), peercom());
-
-    comlog().append("\n STARTTLS: plain connection upgraded to SSL/TLS, continuing with inspection.\n\n");
-
-    // mark as opening to not wait for SSL handshake (typically) 1 hour
-    opening(true);
-
-    _dia("on_starttls finished");
+    if(not owner->start_stop_tls().start(*this)) {
+        _err("on_starttls: TLS transition rejected");
+    }
 }
-
 
