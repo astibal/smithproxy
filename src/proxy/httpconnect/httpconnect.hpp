@@ -12,6 +12,8 @@ public:
 
     std::size_t process_in() override;
     std::size_t process_socks_reply() override;
+    std::string_view upstream_success_response() const override;
+    std::string_view upstream_failure_response() const override;
     void pre_write() override;
 
     TYPENAME_OVERRIDE("httpConnectServerCX")

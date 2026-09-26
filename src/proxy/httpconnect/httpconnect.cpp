@@ -52,10 +52,12 @@ std::size_t HttpConnectServerCX::process_in() {
 
 std::size_t HttpConnectServerCX::process_socks_reply() {
     if(verdict_ == socks5_policy::ACCEPT) {
-        static constexpr std::string_view response =
-                "HTTP/1.1 200 Connection Established\r\n"
-                "Proxy-Agent: smithproxy\r\n\r\n";
-        writebuf()->append(response.data(), response.size());
+        // Unlike SOCKS, CONNECT must not report success before the upstream
+        // TCP connection is established. ExplicitProxy sends the response
+        // after the non-blocking connect completes.
+        state(socks5_state::HANDOFF);
+        com()->set_write_monitor(socket());
+        return 0;
     } else {
         static constexpr std::string_view response =
                 "HTTP/1.1 403 Forbidden\r\n"
@@ -67,6 +69,16 @@ std::size_t HttpConnectServerCX::process_socks_reply() {
     state(socks5_state::REQRES_SENT);
     com()->set_write_monitor(socket());
     return writebuf()->size();
+}
+
+std::string_view HttpConnectServerCX::upstream_success_response() const {
+    return "HTTP/1.1 200 Connection Established\r\n"
+           "Proxy-Agent: smithproxy\r\n\r\n";
+}
+
+std::string_view HttpConnectServerCX::upstream_failure_response() const {
+    return "HTTP/1.1 502 Bad Gateway\r\n"
+           "Connection: close\r\nContent-Length: 0\r\n\r\n";
 }
 
 void HttpConnectServerCX::pre_write() {

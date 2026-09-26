@@ -47,6 +47,8 @@
 #include <policy/authfactory.hpp>
 
 #include <vector>
+#include <cerrno>
+#include <sys/socket.h>
 
 
 void SocksProxy::on_left_message(baseHostCX* basecx) {
@@ -190,6 +192,10 @@ void ExplicitProxy::explicit_handoff(socksServerCX* cx) {
     ////// we matched the policy
     
     int s = cx->socket();
+    pending_connect_response_ = cx->upstream_success_response();
+    upstream_failure_response_ = cx->upstream_failure_response();
+    pending_connect_response_offset_ = 0;
+    close_after_connect_response_ = false;
     bool ssl = false;
 
     baseCom* new_com = nullptr;
@@ -295,6 +301,65 @@ void ExplicitProxy::explicit_handoff(socksServerCX* cx) {
     }
 
     _dia("SocksProxy::socks5_handoff: finished");
+}
+
+bool ExplicitProxy::send_pending_connect_response() {
+    if(pending_connect_response_.empty()) {
+        return true;
+    }
+
+    auto* client = first_left();
+    if(client == nullptr || client->socket() <= 0) {
+        state().dead(true);
+        return false;
+    }
+
+    auto const* data = pending_connect_response_.data() + pending_connect_response_offset_;
+    auto const remaining = pending_connect_response_.size() - pending_connect_response_offset_;
+    auto const written = ::send(client->socket(), data, remaining, MSG_NOSIGNAL);
+    if(written < 0) {
+        if(errno == EAGAIN || errno == EWOULDBLOCK) {
+            client->com()->set_write_monitor(client->socket());
+            return true;
+        }
+        state().dead(true);
+        return false;
+    }
+
+    pending_connect_response_offset_ += static_cast<std::size_t>(written);
+    if(pending_connect_response_offset_ != pending_connect_response_.size()) {
+        client->com()->set_write_monitor(client->socket());
+        return true;
+    }
+
+    pending_connect_response_.clear();
+    pending_connect_response_offset_ = 0;
+    if(close_after_connect_response_) {
+        state().dead(true);
+    } else {
+        client->waiting_for_peercom(false);
+        client->com()->set_monitor(client->socket());
+    }
+    return true;
+}
+
+bool ExplicitProxy::handle_cx_write(unsigned char side, baseHostCX* cx) {
+    if(not pending_connect_response_.empty()) {
+        if((side == 'r' || side == 'R') && cx->opening()) {
+            if(cx->is_connected()) {
+                cx->opening(false);
+            } else {
+                pending_connect_response_ = upstream_failure_response_;
+                pending_connect_response_offset_ = 0;
+                close_after_connect_response_ = true;
+            }
+            return send_pending_connect_response();
+        }
+        if(side == 'l' || side == 'L') {
+            return send_pending_connect_response();
+        }
+    }
+    return MitmProxy::handle_cx_write(side, cx);
 }
 
 

@@ -151,6 +151,19 @@ def run(args):
                 response = recv_until(client, b"\r\n\r\n")
                 if not response.startswith(b"HTTP/1.1 400 Bad Request\r\n"):
                     raise RuntimeError(f"malformed request was accepted: {response!r}")
+
+            unavailable_port = free_port()
+            with socket.create_connection(("127.0.0.1", listener_port), timeout=10) as client:
+                client.settimeout(15)
+                request = (
+                    f"CONNECT 127.0.0.1:{unavailable_port} HTTP/1.1\r\n"
+                    f"Host: 127.0.0.1:{unavailable_port}\r\n\r\n"
+                )
+                client.sendall(request.encode())
+                response = recv_until(client, b"\r\n\r\n")
+                if not response.startswith(b"HTTP/1.1 502 Bad Gateway\r\n"):
+                    raise RuntimeError(
+                        f"unavailable upstream did not return 502: {response!r}")
         finally:
             process.terminate()
             try:

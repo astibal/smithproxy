@@ -18,10 +18,18 @@ public:
     bool explicit_handoff_resolve_identity(MitmHostCX* cx);
     bool explicit_handoff_authenticate(MitmHostCX* cx);
     void on_left_bytes(baseHostCX* cx) override;
+    bool handle_cx_write(unsigned char side, baseHostCX* cx) override;
 
     TYPENAME_OVERRIDE("ExplicitProxy")
 
 private:
+    bool send_pending_connect_response();
+
+    std::string pending_connect_response_;
+    std::string upstream_failure_response_;
+    std::size_t pending_connect_response_offset_ = 0;
+    bool close_after_connect_response_ = false;
+
     logan_lite log {"com.explicit.proxy"};
 };
 

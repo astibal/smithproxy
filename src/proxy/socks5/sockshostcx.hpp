@@ -168,6 +168,8 @@ public:
     virtual std::size_t process_socks_reply();
     virtual int process_socks_reply_v4();
     virtual std::size_t process_socks_reply_v5();
+    virtual std::string_view upstream_success_response() const { return {}; }
+    virtual std::string_view upstream_failure_response() const { return {}; }
 
 
     void wait_policy() {
