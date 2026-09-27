@@ -43,10 +43,40 @@
 
 #include <string>
 #include <atomic>
+#include <ctime>
 #include <deque>
+#include <mutex>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+#include <common/ptr_cache.hpp>
 
 #include <nlohmann/json.hpp>
+#ifdef SMITHPROXY_DISABLE_WEBHOOKS
+#include <functional>
+#include <optional>
+namespace sx::http {
+    class Request {
+    public:
+        static inline bool DEBUG = false;
+        static inline bool DEBUG_DUMP_OK = false;
+    };
+    struct expected_reply_t {
+        Request* ctrl = nullptr;
+        std::string request;
+        std::pair<long,std::string> response {};
+    };
+    using expected_reply = std::optional<expected_reply_t>;
+    class AsyncRequest {
+    public:
+        using expected_reply = sx::http::expected_reply;
+        using reply_hook = std::function<void(expected_reply const&)>;
+    };
+}
+#else
 #include <service/http/async_request.hpp>
+#endif
 
 
 namespace sx::http::webhooks {

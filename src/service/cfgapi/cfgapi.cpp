@@ -67,6 +67,7 @@
 #include <inspect/pyinspector.hpp>
 
 #include <service/httpd/httpd.hpp>
+#include <service/tpool.hpp>
 #include <service/http/webhooks.hpp>
 
 using namespace libconfig;

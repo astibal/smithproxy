@@ -5,7 +5,9 @@
 #include <log/logger.hpp>
 #include <policy/addrobj.hpp>
 #include <service/cfgapi/cfgapi.hpp>
+#ifndef SMITHPROXY_DISABLE_WEBHOOKS
 #include <service/http/async_request.hpp>
+#endif
 #include <utils/str.hpp>
 
 #include <socle.hpp>
@@ -128,6 +130,7 @@ void register_smithproxy_cli2_test(libcli2::Cli& cli) {
             return 0;
         });
 
+#ifndef SMITHPROXY_DISABLE_WEBHOOKS
     cli.command("test webhook")
         .reset_definition()
         .help("Send a simple JSON message to a webhook URL")
@@ -144,4 +147,5 @@ void register_smithproxy_cli2_test(libcli2::Cli& cli) {
             });
             return 0;
         });
+#endif
 }

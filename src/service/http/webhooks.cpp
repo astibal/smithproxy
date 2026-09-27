@@ -1,3 +1,4 @@
+#ifndef SMITHPROXY_DISABLE_WEBHOOKS
 #include <nlohmann/json.hpp>
 
 #include <service/core/smithproxy.hpp>
@@ -231,3 +232,27 @@ namespace sx::http::webhooks {
         }
     }
 }
+#else
+
+#include <service/http/webhooks.hpp>
+
+namespace sx::http::webhooks {
+    static std::unordered_map<std::string, url_stats> disabled_url_stats;
+    static std::mutex disabled_url_stats_lock;
+
+    std::mutex& url_stats_lock() { return disabled_url_stats_lock; }
+    std::unordered_map<std::string, url_stats>& url_stats_map() { return disabled_url_stats; }
+    void ping() {}
+    void ping_plus() {}
+    void ping_neighbors() {}
+    void set_enabled(bool) {}
+    bool is_enabled() { return false; }
+    void set_hostid(std::string const&) {}
+    void neighbor_state(std::string const&, std::string const&) {}
+    void neighbor_state(std::vector<std::string> const&, std::string const&) {}
+    void neighbor_new(std::string const&) {}
+    void send_action(std::string const&, std::string const&, nlohmann::json const&) {}
+    void send_action_wait(std::string const&, std::string const&, nlohmann::json const&, sx::http::AsyncRequest::reply_hook) {}
+}
+
+#endif

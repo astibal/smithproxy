@@ -3,6 +3,8 @@
 These runners start one short-lived Smithproxy instance per tenant without
 Kubernetes.  The mem-constrained profile exposes a SOCKS5 interface on port
 1080 and intentionally does not configure TPROXY, routes or nftables.
+Webhook delivery is compiled out of this build profile, so the Smithproxy
+binary does not link `libcurl`.  Configured webhook actions are no-ops.
 
 Both runners default to the measured initial envelope:
 

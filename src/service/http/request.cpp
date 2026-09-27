@@ -1,3 +1,4 @@
+#ifndef SMITHPROXY_DISABLE_WEBHOOKS
 #include <service/tpool.hpp>
 #include <service/core/smithproxy.hpp>
 #include <optional>
@@ -21,3 +22,4 @@ expected_reply Request::make_reply(std::string url, long code, std::string reply
 }
 
 }
+#endif
