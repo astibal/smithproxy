@@ -156,8 +156,13 @@ if [[ ${API_DISABLED_TEST:-0} == 1 ]]; then
         sleep 1
     done
     ip netns exec "$NS" ss -ltnH "sport = :$READY_PORT" | grep -q .
+    if [[ $TPROXY_TEST == 1 ]]; then
+        ip netns exec "$NS" ss -ltnH 'sport = :50443' | grep -q .
+        ip netns exec "$NS" ss -lunH 'sport = :50080' | grep -q .
+        ip netns exec "$NS" ss -lunH 'sport = :50443' | grep -q .
+    fi
     ! ip netns exec "$NS" ss -ltnH "sport = :55555" | grep -q .
-    echo "PASS readiness: constrained listener :$READY_PORT active and HTTP API absent"
+    echo "PASS readiness: constrained listeners active and HTTP API absent"
 else
     for attempt in $(seq 1 60); do
         if curl --noproxy '*' -ksSf --max-time 1 -H "X-API-Key: $(cat "$ROOT/config/api.key")" \
@@ -179,6 +184,9 @@ if [[ $TPROXY_TEST == 1 ]]; then
         http://198.18.20.2:8080/ > "$ROOT/results/tproxy-http.txt"
     grep -q 'runner-origin-ok peer=198.18.20.1' "$ROOT/results/tproxy-http.txt"
     echo 'PASS TPROXY TCP/HTTP: original destination preserved without host firewall changes'
+    ip netns exec "$NS" nft list chain ip smithproxy prerouting | \
+        grep -Eq 'udp dport 443 .*tproxy to :50443'
+    echo 'PASS DTLS route: UDP/443 targets active transparent :50443 listener'
 fi
 if [[ $RUN_MODE == 1 ]]; then
     setsid socat "TCP4-LISTEN:$CLI_RELAY_PORT,bind=127.0.0.1,reuseaddr,fork" \
@@ -230,16 +238,26 @@ if [[ $CAPTURE_TEST == 1 ]]; then
     echo 'PASS4 GRE export: received IPv4 inner flow with expected payload marker'
     echo 'PASS6 GRE export: received IPv6 inner flow with expected payload marker'
 fi
+TLS_TRUST_CA="$ROOT/config/certs/ca-cert.pem"
+[[ $TPROXY_TEST != 1 ]] || TLS_TRUST_CA="$ROOT/config/certs/origin-ca.pem"
 ip netns exec "$CLIENT" curl --noproxy '*' -fsS --max-time 20 \
-    --cacert "$ROOT/config/certs/ca-cert.pem" --resolve origin.runner.lab:443:198.18.20.2 \
+    --cacert "$TLS_TRUST_CA" --resolve origin.runner.lab:443:198.18.20.2 \
     https://origin.runner.lab/ > "$ROOT/results/https.txt"
 grep -q 'runner-origin-ok peer=198.18.20.1' "$ROOT/results/https.txt"
-echo 'PASS4 TLS: client trusts proxy CA only, origin uses a different CA'
+if [[ $TPROXY_TEST == 1 ]]; then
+    echo 'PASS4 TLS route: :443 traversed TLS listener and used proxy egress'
+else
+    echo 'PASS4 TLS: client trusts proxy CA only, origin uses a different CA'
+fi
 ip netns exec "$CLIENT" curl --noproxy '*' -gfsS --max-time 20 \
-    --cacert "$ROOT/config/certs/ca-cert.pem" --resolve 'origin.runner.lab:443:[fd00:20::2]' \
+    --cacert "$TLS_TRUST_CA" --resolve 'origin.runner.lab:443:[fd00:20::2]' \
     https://origin.runner.lab/ > "$ROOT/results/https6.txt"
 grep -q 'runner-origin-ok peer=fd00:20::1' "$ROOT/results/https6.txt"
-echo 'PASS6 TLS: client trusts proxy CA only, origin uses a different CA'
+if [[ $TPROXY_TEST == 1 ]]; then
+    echo 'PASS6 TLS route: :443 traversed TLS listener and used proxy egress'
+else
+    echo 'PASS6 TLS: client trusts proxy CA only, origin uses a different CA'
+fi
 ip netns exec "$CLIENT" python3 - <<'PY' > "$ROOT/results/udp.txt"
 import socket
 for family, host, expected_peer in ((socket.AF_INET, '198.18.20.2', '198.18.20.1'),

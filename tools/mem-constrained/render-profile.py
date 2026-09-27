@@ -21,9 +21,9 @@ PROFILES = {
         "accept_redirect": "FALSE",
         "accept_socks": "FALSE",
         "plaintext_workers": "1",
-        "ssl_workers": "-1",
-        "udp_workers": "-1",
-        "dtls_workers": "-1",
+        "ssl_workers": "1",
+        "udp_workers": "1",
+        "dtls_workers": "1",
         "socks_workers": "-1",
     },
 }

@@ -60,8 +60,8 @@ if os.environ.get('API_DISABLED_TEST') != '1':
 text = text.replace('accept_cli = FALSE','accept_cli = TRUE')
 if os.environ.get('TPROXY_ONLY_TEST') == '1':
     text = text.replace('accept_tproxy = FALSE','accept_tproxy = TRUE').replace('accept_socks = TRUE','accept_socks = FALSE')
-    for key, value in (("plaintext_workers", "1"), ("ssl_workers", "-1"),
-                       ("udp_workers", "-1"), ("dtls_workers", "-1"),
+    for key, value in (("plaintext_workers", "1"), ("ssl_workers", "1"),
+                       ("udp_workers", "1"), ("dtls_workers", "1"),
                        ("socks_workers", "-1")):
         text, count = re.subn(rf'({key}\s*=\s*)-?\d+', rf'\g<1>{value}', text, count=1)
         if count != 1: raise RuntimeError(f'cannot configure {key} for TPROXY profile')

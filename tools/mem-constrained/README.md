@@ -6,7 +6,7 @@ Kubernetes.  The common constrained binary currently has two runtime profiles:
 | Profile | Interface | Network setup | Tested peak RSS |
 |---|---|---|---:|
 | `socks` | SOCKS5 on port 1080 | ordinary host/container networking | 16.3 MiB |
-| `tproxy` | transparent IPv4 TCP on port 50080 | dedicated Linux netns, policy route and nftables | 16.1 MiB |
+| `tproxy` | transparent TCP/TLS/UDP/DTLS | dedicated Linux netns, policy route and nftables | 17.8 MiB |
 
 `http-connect` is reserved for the implementation expected from upstream; it
 is deliberately not emulated here.
@@ -36,9 +36,15 @@ tools/mem-constrained/render-profile.py socks etc/smithproxy.cfg /srv/smithproxy
 tools/mem-constrained/render-profile.py tproxy etc/smithproxy.cfg /srv/smithproxy/tenant-456/smithproxy.cfg
 ```
 
-The TPROXY profile is intentionally TCP/plaintext-only at this stage. TLS,
-UDP and DTLS listeners remain disabled and can later become separate measured
-overlays instead of silently increasing every small instance.
+The TPROXY profile enables one configured listener worker for each routed
+service.  Each listener internally enforces at least two subordinate workers.
+
+```text
+TCP other ports -> plaintext :50080
+TCP destination 443 -> TLS   :50443
+UDP other ports -> UDP       :50080
+UDP destination 443 -> DTLS  :50443
+```
 
 ## SOCKS: direct systemd runner
 
@@ -148,5 +154,15 @@ The minimal transparent path has a separate test:
 tests/patch-runner/test-patch.sh sanity --suite tproxy
 ```
 
-It verifies original-destination transparent HTTP, confirms the API is absent,
-then stops Smithproxy and proves that forwarding cannot bypass the proxy.
+It verifies original-destination HTTP, TLS routing and UDP end-to-end, checks
+all four listener sockets, confirms the UDP/443-to-DTLS rule and confirms
+the API is absent.  The fixture does not yet provide a DTLS origin, so it does
+not claim an application-level DTLS handshake.  Finally it stops Smithproxy
+and proves that forwarding cannot bypass the proxy.
+
+The measured TLS route currently presents the origin certificate (the test
+trusts the origin CA); this proves routing through the TLS listener, not TLS
+resigning.  TLS inspection behavior needs a separate focused test.  Sending an
+invalid payload into the DTLS listener also exposed a pre-existing shutdown
+hang, so the DTLS check deliberately validates the bound listener and routing
+rule without pretending to be a valid DTLS client.
