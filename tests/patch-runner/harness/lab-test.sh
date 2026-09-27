@@ -31,6 +31,7 @@ TLS_SUITE_TEST=${TLS_SUITE_TEST:-0}
 POLICY_TEST=${POLICY_TEST:-0}
 SESSION_LIST_STRESS_TEST=${SESSION_LIST_STRESS_TEST:-0}
 SOCKS_TEST=${SOCKS_TEST:-0}
+TPROXY_TEST=${TPROXY_TEST:-0}
 UDP_CHURN_TEST=${UDP_CHURN_TEST:-0}
 TCP_CHURN_TEST=${TCP_CHURN_TEST:-0}
 CAPTURE_MARKER=smithproxy-gre-pcap-v4
@@ -147,14 +148,16 @@ ORIGIN_PID=$!
     > "$ROOT/results/runner.log" 2>&1 &
 RUNNER_PID=$!
 if [[ ${API_DISABLED_TEST:-0} == 1 ]]; then
+    READY_PORT=1080
+    [[ $TPROXY_TEST != 1 ]] || READY_PORT=50080
     for attempt in $(seq 1 60); do
-        if ip netns exec "$NS" ss -ltnH "sport = :1080" | grep -q .; then break; fi
+        if ip netns exec "$NS" ss -ltnH "sport = :$READY_PORT" | grep -q .; then break; fi
         kill -0 "$RUNNER_PID"
         sleep 1
     done
-    ip netns exec "$NS" ss -ltnH "sport = :1080" | grep -q .
+    ip netns exec "$NS" ss -ltnH "sport = :$READY_PORT" | grep -q .
     ! ip netns exec "$NS" ss -ltnH "sport = :55555" | grep -q .
-    echo 'PASS readiness: SOCKS listener active and HTTP API absent'
+    echo "PASS readiness: constrained listener :$READY_PORT active and HTTP API absent"
 else
     for attempt in $(seq 1 60); do
         if curl --noproxy '*' -ksSf --max-time 1 -H "X-API-Key: $(cat "$ROOT/config/api.key")" \
@@ -170,6 +173,12 @@ if [[ $SOCKS_TEST == 1 ]]; then
         -fsS --max-time 15 http://198.18.20.2:8080/ > "$ROOT/results/socks-http.txt"
     grep -q 'runner-origin-ok peer=198.18.20.1' "$ROOT/results/socks-http.txt"
     echo 'PASS SOCKS5 TCP/HTTP: explicit proxy reached origin without TPROXY'
+fi
+if [[ $TPROXY_TEST == 1 ]]; then
+    ip netns exec "$CLIENT" curl --noproxy '*' -fsS --max-time 15 \
+        http://198.18.20.2:8080/ > "$ROOT/results/tproxy-http.txt"
+    grep -q 'runner-origin-ok peer=198.18.20.1' "$ROOT/results/tproxy-http.txt"
+    echo 'PASS TPROXY TCP/HTTP: original destination preserved without host firewall changes'
 fi
 if [[ $RUN_MODE == 1 ]]; then
     setsid socat "TCP4-LISTEN:$CLI_RELAY_PORT,bind=127.0.0.1,reuseaddr,fork" \

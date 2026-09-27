@@ -27,7 +27,7 @@ Profiles:
               With --remote, both ports bind to the remote host's loopback.
 
 Options:
-  --suite NAME       Run only one suite. Besides tls, policy, rtt, socks and session-list,
+  --suite NAME       Run only one suite. Besides tls, policy, rtt, socks, tproxy and session-list,
                      full-run sections are available: smoke, tls-policy, tcp-churn,
                      udp-churn, capture, corpus-regular, corpus-edge, corpus-insanity.
                      Use with the sanity or full profile.
@@ -172,7 +172,7 @@ if [[ -n $CHURN_PORT_RANGE ]]; then
     EXTRA_ENV+=("CHURN_MIN_PORT=$CHURN_MIN_PORT" "CHURN_MAX_PORT=$CHURN_MAX_PORT")
 fi
 case "$ONLY_SUITE" in
-    ''|tls|policy|rtt|socks|session-list|smoke|tls-policy|tcp-churn|udp-churn|capture|corpus-regular|corpus-edge|corpus-insanity) ;;
+    ''|tls|policy|rtt|socks|tproxy|session-list|smoke|tls-policy|tcp-churn|udp-churn|capture|corpus-regular|corpus-edge|corpus-insanity) ;;
     *) echo "Unknown suite: $ONLY_SUITE" >&2; exit 2 ;;
 esac
 
@@ -470,6 +470,7 @@ print(*(x.getsockname()[1] for x in s))'
             policy) LAB_ENV+=("POLICY_TEST=1") ;;
             rtt) LAB_ENV+=("RTT_TEST=1") ;;
             socks) LAB_ENV+=("BASE_TRAFFIC_TEST=0" "SOCKS_TEST=1" "SOCKS_ONLY_TEST=1" "API_DISABLED_TEST=1") ;;
+            tproxy) LAB_ENV+=("BASE_TRAFFIC_TEST=0" "TPROXY_TEST=1" "TPROXY_ONLY_TEST=1" "API_DISABLED_TEST=1") ;;
             session-list) LAB_ENV+=("SESSION_LIST_STRESS_TEST=1") ;;
             smoke) LAB_ENV+=("PPLAY_SMOKE_TEST=1") ;;
             tls-policy) LAB_ENV+=("BASE_TRAFFIC_TEST=0" "TLS_SUITE_TEST=1" "POLICY_TEST=1" "SESSION_LIST_STRESS_TEST=1") ;;

@@ -58,9 +58,18 @@ text = text.replace('accept_redirect = TRUE','accept_redirect = FALSE')
 if os.environ.get('API_DISABLED_TEST') != '1':
     text = text.replace('accept_api = FALSE','accept_api = TRUE')
 text = text.replace('accept_cli = FALSE','accept_cli = TRUE')
-if os.environ.get('SOCKS_ONLY_TEST') != '1':
+if os.environ.get('TPROXY_ONLY_TEST') == '1':
     text = text.replace('accept_tproxy = FALSE','accept_tproxy = TRUE').replace('accept_socks = TRUE','accept_socks = FALSE')
-if os.environ.get('MEM_CONSTRAINED_TEST') != '1' and os.environ.get('SOCKS_ONLY_TEST') != '1':
+    for key, value in (("plaintext_workers", "1"), ("ssl_workers", "-1"),
+                       ("udp_workers", "-1"), ("dtls_workers", "-1"),
+                       ("socks_workers", "-1")):
+        text, count = re.subn(rf'({key}\s*=\s*)-?\d+', rf'\g<1>{value}', text, count=1)
+        if count != 1: raise RuntimeError(f'cannot configure {key} for TPROXY profile')
+elif os.environ.get('SOCKS_ONLY_TEST') != '1':
+    text = text.replace('accept_tproxy = FALSE','accept_tproxy = TRUE').replace('accept_socks = TRUE','accept_socks = FALSE')
+if (os.environ.get('MEM_CONSTRAINED_TEST') != '1'
+        and os.environ.get('SOCKS_ONLY_TEST') != '1'
+        and os.environ.get('TPROXY_ONLY_TEST') != '1'):
     text = re.sub(r'(plaintext_workers|ssl_workers|udp_workers|dtls_workers) = -?\d+',r'\1 = 1',text)
 text = re.sub(r'\s*auth_profile = "resolve";', '', text)
 text = text.replace('nameservers = [ "8.8.8.8", "8.8.4.4" ]','nameservers = [ "198.18.20.2" ]')

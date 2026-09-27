@@ -1,0 +1,4 @@
+# Trusted root-owned file; sourced by tproxy-netns-runner.sh.
+INPUT_CIDR=192.0.2.1/24
+OUTPUT_CIDR=198.51.100.2/24
+OUTPUT_GATEWAY=198.51.100.1

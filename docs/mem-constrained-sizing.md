@@ -17,6 +17,7 @@ lab with separate client, proxy and origin network namespaces.
 | Explicit SOCKS5 HTTP request, no TPROXY | PASS | 23.4 MiB | 19.1 MiB | 8.5 MiB | 16 |
 | Explicit SOCKS5, webhooks/libcurl compiled out | PASS | 21.0 MiB | 16.7 MiB | 8.0 MiB | 16 |
 | Explicit SOCKS5, webhooks and HTTP API compiled out | PASS | 16.3 MiB | 11.9 MiB | 7.1 MiB | 14 |
+| Minimal TPROXY TCP/HTTP, API absent | PASS | 16.1 MiB | 11.8 MiB | 7.1 MiB | 11 |
 
 The 256-session run adds about 9.1 MiB RSS over idle, or approximately 36 KiB
 per held session.  This is a conservative estimate because the run also takes
@@ -45,6 +46,11 @@ For the current binary and runner-style configuration:
 - expected light SOCKS working set: **12-17 MiB**
 - intended concurrency: up to roughly **256 light TCP/HTTP sessions**
 
+The 256-session result predates the final API/libmicrohttpd removal and applies
+to the common binary architecture, not yet to a repeated load run of each new
+profile.  The 48 MiB hard limit remains intentionally conservative until SOCKS
+and TPROXY each receive their own concurrency curve.
+
 Use a higher limit when enabling TLS interception, payload capture, large
 configuration/policy sets, or large response buffering.  Those paths were not
 part of this measurement.
@@ -69,11 +75,11 @@ Docker `--cpus 1` did not reduce the thread count or resident memory: the C++
 runtime still reported the host's 16 online CPUs for pool sizing.  A Kubernetes
 CPU request/limit alone therefore cannot be relied on to shrink this cost.
 
-The memory-constrained profile now sets the utility pool to five threads and
-runs one plaintext listener with TLS, DTLS, UDP, SOCKS and redirect listeners
-disabled.  The patch-runner API remained enabled for readiness checks, so the
-measured 13 threads still include owner, DNS, CLI, API and HTTP-daemon threads.
-The CONNECT corpus peaked at 24.0 MiB RSS.  The exact same profile held 256
+An earlier minimal HTTP experiment set the utility pool to five threads and
+ran one plaintext listener with TLS, DTLS, UDP, SOCKS and redirect listeners
+disabled.  Its patch-runner API remained enabled for readiness checks, so the
+measured 13 threads included owner, DNS, CLI, API and HTTP-daemon threads.
+That CONNECT corpus peaked at 24.0 MiB RSS.  The exact same profile held 256
 simultaneous sessions with no timeouts and peaked at 32.1 MiB RSS.  Use a
 **32 MiB request / 48 MiB limit** for the first deployment; a 32 MiB hard limit
 is too tight for the measured 256-session peak.
