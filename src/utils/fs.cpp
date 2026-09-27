@@ -92,23 +92,24 @@ namespace sx::fs {
     bool is_basedir(std::string const& v) {
         auto const& log = sx::fs::get_log();
 
-        auto path = sx::mem::unique_mpool_alloc(v.size());
-
         if(is_dir(v) or v.empty()) {
             // it supposed to be a file, not a directory or nothing
             _deb("is_basedir: '%s' is empty or is directory (expecting file path)", v.c_str());
             return false;
         }
 
+        auto path = sx::mem::unique_mpool_alloc(v.size() + 1);
         std::memcpy(path.get(), v.c_str(), v.size());
+        path.get()[v.size()] = '\0';
 
-        for(auto i = v.size() - 1; i <= 0; i--) {
-            if(path.get()[i] == '/') {
-                path.get()[i] = '\x00';
+        for(std::size_t i = v.size(); i > 0; --i) {
+            auto const index = i - 1;
+            if(path.get()[index] == '/') {
+                path.get()[index] = '\0';
                 continue;
             }
 
-            _deb("is_basedir: '%s' removed %d trailing /", v.c_str(), i);
+            _deb("is_basedir: '%s' removed trailing slashes", v.c_str());
             break;
         }
 

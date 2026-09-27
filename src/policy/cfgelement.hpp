@@ -8,8 +8,6 @@
 #include <display.hpp>
 #include <log/logger.hpp>
 
-#include <sobject.hpp>
-#include <policy/profiles.hpp>
 #include <ranges.hpp>
 
 
@@ -21,6 +19,9 @@ class CfgElement {
 
 public:
     virtual ~CfgElement() = default;
+    virtual std::string to_string(int) const { return element_name(); }
+    [[nodiscard]] std::string str() const { return to_string(iINF); }
+    TYPENAME_BASE("CfgElement")
 
     std::string element_name() const { return name_; }
     std::string& element_name() { return name_; }

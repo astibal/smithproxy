@@ -118,7 +118,7 @@ std::string PolicyRule::to_string(int verbosity) const {
             out << "ACCEPT";
             break;
         case POLICY_ACTION_DENY:
-            out << "REJECT";
+            out << "DENY";
             break;
         default:
             out << "???";
@@ -444,5 +444,4 @@ bool PolicyRule::match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r)
 
     return false;
 }
-
 

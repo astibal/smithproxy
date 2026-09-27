@@ -42,6 +42,7 @@
  #define MITMPROXY_HPP
 
 #include <atomic>
+#include <ctime>
 
 #include <basecom.hpp>
 #include <hostcx.hpp>
@@ -56,13 +57,13 @@
 #include <traflog/pcaplog.hpp>
 
 #include <policy/policy.hpp>
-#include <shm/shmauth.hpp>
 
 #include <sslcertval.hpp>
 #include <proxy/ocspinvoker.hpp>
 #include <inspect/engine/http.hpp>
 
 #include <utils/lazy_ptr.hpp>
+#include <service/core/sessionlist.hpp>
 
 struct whitelist_verify_entry {
 };
@@ -82,24 +83,23 @@ private:
     IOController* master_ = nullptr ;
 };
 
-class MitmProxy : public baseProxy, public socle::sobject, public IOController {
+class MitmProxy : public baseProxy, public IOController {
 
     std::unique_ptr<socle::baseTrafficLogger> tlog_;
-    
-    bool identity_resolved_ = false;    // meant if attempt has been done, regardless of its result.
-    std::unique_ptr<shm_logon_info_base> identity_;
     
     std::unique_ptr<std::vector<ProfileContentRule>> content_rule_; //save some space and store it as a pointer. Init it only when needed and delete in dtor.
     int matched_policy_ = -1;
 
     std::string replacement_msg;
     static inline long half_timeout_ = 5;
+    std::time_t created_at_ = std::time(nullptr);
 public:
     using whitelist_verify_entry_t = expiring<whitelist_verify_entry> ;
     using whitelist_map_t = ptr_cache<std::string,whitelist_verify_entry_t>;
 
     time_t half_holdtimer = 0;
     static long& half_timeout() { ; return half_timeout_; };
+    [[nodiscard]] std::time_t age() const noexcept { return std::time(nullptr) - created_at_; }
 
     static whitelist_map_t& whitelist_verify() {
         static whitelist_map_t m("whitelist_verify", 500, true, whitelist_verify_entry_t::is_expired);
@@ -120,12 +120,6 @@ public:
     lazy_ptr<Opts_ContentWriter>& writer_opts() {
         return writer_opts_;
     }
-
-    struct Opts_Authentication {
-        bool authenticate = false;
-        bool resolve = false;
-        bool block_identity = false;
-    } auth_opts;
 
     struct Opts_Accounting {
         bool details = true;
@@ -163,19 +157,6 @@ public:
 
     void update_neighbors();
 
-    inline bool identity_resolved() const { return identity_resolved_; }
-    inline void identity_resolved(bool b) { identity_resolved_ = b; }
-
-    shm_logon_info_base* identity() { return identity_.get(); }
-    inline void identity(shm_logon_info_base const* new_id) { if(new_id) { identity_.reset(new_id->clone()); } }
-
-    bool resolve_identity(bool insert_guest = false) { return resolve_identity(first_left(), insert_guest); }
-    bool resolve_identity(baseHostCX* custom_cx, bool insert_guest);
-    bool update_auth_ipX_map(baseHostCX*);
-    bool apply_id_policies(baseHostCX* cx);
-    std::optional<std::vector<std::string>> find_id_groups(baseHostCX const* cx);
-    std::shared_ptr<ProfileSubAuth> find_auth_subprofile(std::vector<std::string> const& groups);
-
 
     std::unique_ptr<socle::baseTrafficLogger>& tlog() { return tlog_; }
     void toggle_tlog ();
@@ -210,9 +191,6 @@ public:
     virtual void on_half_close(baseHostCX* cx);
 
     bool handle_requirements(baseHostCX* cx);
-    virtual bool handle_authentication(MitmHostCX* cx);
-    virtual void handle_replacement_auth(MitmHostCX* cx);
-
 #ifdef USE_EXPERIMENT
     std::atomic_bool ocsp_caller_tried {false};
     std::unique_ptr<AsyncOcspInvoker> ocsp_caller;
@@ -236,7 +214,6 @@ public:
     // check if content has been pulled from cache and return true if so
     virtual bool handle_cached_response(MitmHostCX* cx);
     
-    bool ask_destroy() override { state().dead(true); return true; };
     std::string to_string(int verbosity) const override;
     std::string to_connection_label(bool force_resolve = false) const;
     std::string to_connection_ID() const;
@@ -281,7 +258,7 @@ private:
     logan_lite log_content_dump {"proxy.content.dump"};
 };
 
-class MitmMasterProxy : public ThreadedAcceptorProxy<MitmProxy> {
+class MitmMasterProxy : public ThreadedAcceptorProxy<MitmProxy>, public SessionListConsumer {
 public:
     
     MitmMasterProxy(baseCom* c, int worker_id, proxyType t = proxyType::transparent() ) :
@@ -301,12 +278,13 @@ private:
 };
 
 
-class MitmUdpProxy : public ThreadedReceiverProxy<MitmProxy> {
+class MitmUdpProxy : public ThreadedReceiverProxy<MitmProxy>, public SessionListConsumer {
 public:
     MitmUdpProxy(baseCom* c, int worker_id, proxyType t = proxyType::transparent() ):
         ThreadedReceiverProxy< MitmProxy >(c,worker_id, t) {};
     void on_left_new(baseHostCX* just_accepted_cx) override;
     baseHostCX* new_cx(int s) override;
+    int handle_sockets_once(baseCom* c) override;
 
 private:
     logan_lite log {"com.udp.acceptor"};

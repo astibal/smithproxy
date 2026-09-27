@@ -52,7 +52,6 @@
 #include <sslcom.hpp>
 #include <traflog/pcaplog.hpp>
 
-#include <shm/shmauth.hpp>
 
 
 
@@ -317,14 +316,6 @@ public:
     DB_MAP(std::shared_ptr<CfgElement>, db_features);
 
     mp::vector<int> db_udp_quick_ports;
-
-
-    std::string auth_address;
-    std::string auth_http;
-    std::string auth_https;
-    std::string auth_sslkey;
-    std::string auth_sslcert;
-    std::string tenant_magic_ip;
 
 
     struct {

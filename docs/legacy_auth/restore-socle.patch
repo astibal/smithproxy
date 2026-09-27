@@ -1,0 +1,460 @@
+diff --git b/common/shmbuffer.hpp a/common/shmbuffer.hpp
+new file mode 100644
+index 0000000..9cfb065
+--- /dev/null
++++ a/common/shmbuffer.hpp
+@@ -0,0 +1,244 @@
++/*
++    Smithproxy- transparent proxy with SSL inspection capabilities.
++    Copyright (c) 2014, Ales Stibal <astib@mag0.net>, All rights reserved.
++
++    Smithproxy is free software: you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation, either version 3 of the License, or
++    (at your option) any later version.
++
++    Smithproxy is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with Smithproxy.  If not, see <http://www.gnu.org/licenses/>.
++    
++*/  
++
++#ifndef SHMBUFFER_HPP
++  #define SHMBUFFER_HPP
++
++#include <semaphore.h>
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <sys/mman.h>
++#include <fcntl.h>
++#include <sys/socket.h>
++#include <netinet/in.h>
++#include <arpa/inet.h>
++#include <unistd.h>
++
++
++// logger.hpp -- this file defines WAR_ and other logging macros.
++// if you want to use this file alone, just replace WAR_ (and possibly others) with printf-like function
++// of your choice.
++#include <log/logan.hpp>
++
++#include <string>
++
++class shared_buffer {
++protected:
++    sem_t* semaphore = nullptr;
++    std::string semaphore_name;
++    std::string memory_name;
++    int         memory_size;
++    int         memory_fd;
++    
++    unsigned char* data_;
++    unsigned int size_;
++    unsigned int capacity_;
++    
++    bool        attached_ = false;
++
++    static logan_lite& get_log() {
++        static logan_lite l("internal.shm");
++        return l;
++    }
++    
++public:
++    shared_buffer(): memory_size(0), memory_fd(-1), data_(nullptr), size_(0), capacity_(0) {}
++
++    unsigned char* data()    { return data_; }
++    [[nodiscard]] unsigned int   size()  const noexcept { return size_; }
++    [[nodiscard]] unsigned int   capacity() const noexcept { return capacity_; }
++
++    [[nodiscard]] bool attached() const noexcept { return attached_; }
++    
++    bool attach(const char* mem_name, const int mem_size, const char* sem_name, bool create_on_error=true) {
++
++        auto const& log = get_log();
++
++        if(attached()) {
++            _deb("already attached shmbuffer, mem=%s, size=%d, sem=%s, create_on_error=%d", mem_name, mem_size, sem_name, create_on_error);
++            return true;
++        } else {
++            _dia("attaching to shmbuffer, mem=%s, size=%d, sem=%s, create_on_error=%d", mem_name, mem_size, sem_name, create_on_error);
++        }
++        
++        semaphore_name = sem_name;
++        memory_name = mem_name;
++        memory_size = mem_size;
++        
++        unsigned char* shared_memory = nullptr;
++        memory_fd  = -1;
++
++        bool will_initialize = false;
++        
++        semaphore = sem_open(semaphore_name.c_str(),O_RDWR,0600);
++        if(semaphore == SEM_FAILED) {
++            semaphore = nullptr;
++            _war("Getting a handle to the semaphore failed; error %d: %s", errno, string_error().c_str());
++            if(create_on_error) {
++                semaphore = sem_open(semaphore_name.c_str(),O_CREAT | O_RDWR,0600);
++                if(semaphore == SEM_FAILED) {
++                    semaphore = nullptr;
++                    _war("Failed to create semaphore as a fallback; error %d: %s", errno, string_error().c_str());
++                    goto fail;
++                }
++
++                if(sem_init(semaphore, 1, 1) != 0) {
++                    _war("Failed to init a new semaphore: error %d: %s", errno, string_error().c_str());
++                    goto fail;
++                }
++
++                int sem_val = 0;
++                if(sem_getvalue(semaphore, &sem_val) < 0) {
++                    _war("Failed to get value from a new semaphore: error %d: %s", errno, string_error().c_str());
++                    goto fail;
++                }
++
++                _dia("semaphore value: %d", sem_val);
++            } else {
++                goto fail;
++            }
++        }
++        
++        memory_fd = shm_open(memory_name.c_str(), O_RDWR, 0600);
++        if(memory_fd  == -1) {
++            _war("Couldn't get a handle to the shared memory; errno is %d", errno);
++            if(create_on_error) {
++                memory_fd = shm_open(memory_name.c_str(), O_CREAT | O_RDWR, 0600);
++                if(memory_fd == -1) {
++                    _war("Failed to create new memory object; errno is %d", errno);
++                    goto fail;
++                }
++
++                _dia("shared mem buffer file %s created", memory_name.c_str());
++
++                if(ftruncate(memory_fd, memory_size) != 0) {
++                    _dia("shared mem buffer file %s cannot be truncated: %s", memory_name.c_str(), string_error().c_str());
++                    goto fail;
++                }
++                will_initialize = true;
++
++            } else {
++                goto fail;
++            }
++        } else {
++            // we opened to be mapped file, check its size
++
++            struct stat st{};
++
++            if(stat(memory_name.c_str(), &st) != 0) {
++                _dia("shared mem buffer file %s cannot stat: %s", memory_name.c_str(), string_error().c_str());
++            }
++            else {
++                if (st.st_size == 0) {
++                    _dia("shared mem buffer file %s empty - resizing", memory_name.c_str());
++                    if (ftruncate(memory_fd, memory_size) != 0) {
++                        _dia("shared mem buffer file %s cannot be truncated: %s", memory_name.c_str(),
++                             string_error().c_str());
++                        goto fail;
++                    }
++                }
++            }
++        }
++
++        shared_memory = (unsigned char*)mmap(nullptr, memory_size, PROT_READ | PROT_WRITE, MAP_SHARED, memory_fd, 0);
++
++        if (shared_memory == MAP_FAILED) {
++            _war("MMapping the shared memory failed; errno is %d", errno);
++            goto fail;
++        }
++        
++
++        if(will_initialize) {
++            _dia("shared mem buffer file %s zeroized", memory_name.c_str());
++            ::memset(shared_memory, 0, mem_size);
++        }
++
++        data_ = shared_memory;
++        capacity_ = mem_size;
++        size_ = capacity_;
++
++        // don't go back here
++        attached_ = true;
++        
++        return true;
++        
++
++        fail:
++        return false;
++    }
++    
++    bool dettach() {
++
++        auto const& log = get_log();
++        bool ret = true;
++        
++        int rc = munmap(data_, (size_t)capacity_);
++        if (rc) {
++            _war("Unmapping the memory failed; errno is %d", errno);
++            ret = false;
++        }        
++        
++        if(memory_fd > 0) {
++            if (close(memory_fd) == -1) {
++                _war("Closing memory's file descriptor failed; errno is %d", errno);
++                ret = false;
++            }
++        }
++        
++        rc = sem_close(semaphore);
++        if (rc) {
++            _war("Closing the semaphore failed; errno is %d", errno);
++            ret = false;
++        }            
++        
++        attached_ = false;
++        return ret;
++    }
++    
++    
++    int release() {
++        auto const& log = get_log();
++        int rc = sem_post(semaphore);
++
++        if(rc) {
++            _war("Releasing the semaphore failed; errno is %d", errno);
++        }
++        
++        return rc;
++    }
++    
++    int acquire() {
++
++        auto const& log = get_log();
++        if(! semaphore) {
++            _war("Acquiring the semaphore failed; semaphore is not initialized");
++            return -1;
++        }
++        int rc = sem_wait(semaphore);
++
++        if(rc) {
++            _war("Acquiring the semaphore failed; errno is %d", errno);
++        }
++        
++        return rc;
++    }
++};
++
++
++#endif
+\ No newline at end of file
+diff --git b/common/shmtable.hpp a/common/shmtable.hpp
+new file mode 100644
+index 0000000..c498633
+--- /dev/null
++++ a/common/shmtable.hpp
+@@ -0,0 +1,203 @@
++/*
++    Smithproxy- transparent proxy with SSL inspection capabilities.
++    Copyright (c) 2014, Ales Stibal <astib@mag0.net>, All rights reserved.
++
++    Smithproxy is free software: you can redistribute it and/or modify
++    it under the terms of the GNU General Public License as published by
++    the Free Software Foundation, either version 3 of the License, or
++    (at your option) any later version.
++
++    Smithproxy is distributed in the hope that it will be useful,
++    but WITHOUT ANY WARRANTY; without even the implied warranty of
++    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++    GNU General Public License for more details.
++
++    You should have received a copy of the GNU General Public License
++    along with Smithproxy.  If not, see <http://www.gnu.org/licenses/>.
++    
++*/  
++
++#ifndef SHMTABLE_HPP
++  #define SHMTABLE_HPP
++
++
++#include <cstring>
++#include <vector>
++#include <unordered_map>
++
++#include <shmbuffer.hpp>
++
++struct shared_table_header {
++    unsigned int version {0};
++    unsigned int entries {0};
++    unsigned int row_size {0};
++};
++
++template<class RowType>
++class shared_table : public shared_buffer {
++
++public:  
++  explicit shared_table(): header_size(sizeof(struct shared_table_header)),
++        row_size(sizeof(RowType)) {
++      cur_data_header.row_size = sizeof(RowType);
++  };
++  virtual ~shared_table() = default;
++  
++  int read_header() {
++      shared_table_header const* bh = (shared_table_header*) data();
++      cur_data_header = *bh;
++      
++      if(sizeof(RowType) != (long unsigned int)header_rowsize()) {
++          return -1;
++      }       
++      
++      return static_cast<int>(bh->version);
++  }
++  [[nodiscard]] unsigned int header_version() const noexcept { return cur_data_header.version; }
++  [[nodiscard]] unsigned int header_entries() const noexcept { return cur_data_header.entries; }
++  [[nodiscard]] unsigned int header_rowsize() const noexcept { return cur_data_header.row_size; }
++  [[maybe_unused]] void reset_seen_version() { seen_version_ = 0; }
++  [[nodiscard]] unsigned int seen_version() const noexcept { return seen_version_; }
++  void seen_version(unsigned int i) { seen_version_ = i; }
++  
++  std::vector<RowType>& entries() { return entries_; }
++
++    virtual int load() {
++
++        if(int rh = read_header(); rh < 0) return rh;
++
++        if(seen_version() < header_version() || ( header_version() == 0 && seen_version() > 0)) {
++
++            if (on_new_version(seen_version(),header_version())) {
++                entries().clear();
++            }
++            seen_version(header_version());
++
++            unsigned char* records = &data()[sizeof(struct shared_table_header)];
++            for (unsigned int n = 0 ; n < header_entries() ; n++) {
++                RowType rec;
++                int sz = rec.load(records);
++
++                if(on_new_entry(&rec)) {
++                    entries().push_back(rec);
++                }
++
++                records+=sz;
++            }
++
++            on_new_finished();
++            return entries().size();
++        }
++
++        return -1;
++    }
++  
++  unsigned int write_header(bool increase_version, int n_entries=-1) {
++      
++      if(increase_version) {
++          seen_version(seen_version()+1);
++          cur_data_header.version++;
++      }
++      cur_data_header.entries = entries().size();
++
++      if(n_entries >= 0) {
++          cur_data_header.entries = n_entries;
++      }
++      cur_data_header.row_size = RowType::record_size();
++      memcpy(data(),&cur_data_header,sizeof(struct shared_table_header));
++     
++      return sizeof(shared_table_header);
++  }
++  
++  virtual int save(bool increase_version) {
++
++      int n_written = 0;
++      unsigned char* curpos = data() + sizeof(struct shared_table_header);
++      for(auto& r: entries()) {
++
++          unsigned int s = on_write_entry(curpos,r);
++          
++          if(s > 0) {
++                curpos += s;
++                n_written++;
++          }
++      }  
++      
++      // we are writing header as the last, since we don't know how many entries we really wrote
++      write_header(increase_version, n_written);
++      
++      return curpos - data();
++  };
++
++  virtual unsigned int on_write_entry(unsigned char* ptr, RowType& r) {
++      memcpy(ptr, r.buf().data(),r.buf().size());
++      return r.buf().size();
++  }
++  
++  // return true if table should be cleared (yes!)
++  virtual bool on_new_version(int o, int n) { return true; }
++  virtual bool on_new_entry(RowType* r) { return true; }
++  virtual void on_new_finished() {
++      // blank to make override possible when data are saved
++  }
++
++
++private:
++    unsigned int version = 0;
++    unsigned int header_size = 0;
++    unsigned int row_size = 0;
++
++    std::vector<RowType> entries_;
++    unsigned int seen_version_ = 0;
++
++    shared_table_header cur_data_header {};
++};
++
++
++
++
++
++
++
++template<class KeyType,class RowType>
++class shared_map : public shared_table<RowType> {
++
++public:
++    shared_map() : shared_table<RowType>() {
++    };
++    virtual ~shared_map() = default;
++
++    virtual bool on_new_version(int o, int n) {
++        map_entries().clear();
++        return shared_table<RowType>::on_new_version(o,n);
++    }
++    virtual bool on_new_entry(RowType* r) {
++        map_entries()[get_row_key(r)] = *r;
++        return true;
++    }
++    virtual unsigned int on_write_entry(unsigned char* ptr, RowType& r) {
++        
++        KeyType row_key = get_row_key(&r);
++        auto iter = map_entries().find(row_key);
++
++        if(iter != map_entries().end()) {
++            // we would the currently written entry in key map. OK.
++            return shared_table<RowType>::on_write_entry(ptr,r);
++        } else {
++            // this original entry is not in keys.. deleted/filtered on load.
++            // don't write it!
++            return 0;
++        }
++    }
++
++    virtual KeyType get_row_key(RowType* r) = 0;
++
++    using map_type = std::unordered_map<KeyType,RowType>;
++    map_type& map_entries() { return map_entries_; };
++
++private:
++    map_type map_entries_;
++};
++
++
++#endif

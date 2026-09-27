@@ -40,7 +40,6 @@
 #ifndef _STATICCONTENT_HPP
  #define _STATICCONTENT_HPP
 
-#include <sobject.hpp>
 #include <ptr_cache.hpp>
 #include <ext/nltemplate/nltemplate.hpp>
 

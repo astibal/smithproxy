@@ -1,6 +1,14 @@
 #include <gtest/gtest.h>
 
 #include <utils/tenants.hpp>
+#include <service/netservice.hpp>
+
+TEST(SxMain, ListenerCountHandlesUnknownHardwareConcurrency) {
+    EXPECT_EQ(NetworkServiceFactory::listener_count(0, 1, 0), 1U);
+    EXPECT_EQ(NetworkServiceFactory::listener_count(0, 4, 0), 1U);
+    EXPECT_EQ(NetworkServiceFactory::listener_count(4, 2, 0), 8U);
+    EXPECT_EQ(NetworkServiceFactory::listener_count(0, 4, 3), 3U);
+}
 
 TEST(SxMain, TenantConfig) {
 

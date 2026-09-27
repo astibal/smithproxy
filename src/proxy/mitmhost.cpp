@@ -48,11 +48,6 @@
 #include <inspect/engine/http.hpp>
 #include <inspect/engine.hpp>
 
-bool MitmHostCX::ask_destroy() {
-    error(true);
-    return true;
-}
-
 std::string MitmHostCX::to_string(int verbosity) const {
 
     std::stringstream ret;
@@ -178,18 +173,20 @@ void MitmHostCX::engine_run(std::string const& name, sx::engine::EngineCtx &e) c
 
 void MitmHostCX::inspect(char side) {
 
-    if(flow().flow_queue().size() > inspect_cur_flow_size) {
-        _deb("MitmHostCX::inspect: flow size change: %d", flow().flow_queue().size());
+    auto const cur_pos = cflow().pos_size();
+
+    if(cur_pos > inspect_cur_flow_size) {
+        _deb("MitmHostCX::inspect: flow size change: %d", cur_pos);
         inspect_flow_same_bytes = 0;
     }
     
-    if(flow().flow_queue().size() > inspect_cur_flow_size ||
-       (flow().flow_queue().size() == inspect_cur_flow_size &&
+    if(cur_pos > inspect_cur_flow_size ||
+       (cur_pos == inspect_cur_flow_size &&
                flow().flow_queue().back().size() > inspect_flow_same_bytes) ) {
 
-        if(flow().flow_queue().size() == inspect_cur_flow_size) {
+        if(cur_pos == inspect_cur_flow_size) {
 
-            _deb("MitmHostCX::inspect: new data in the  same flow size %d", flow().flow_queue().size());
+            _deb("MitmHostCX::inspect: new data in the  same flow size %d", cur_pos);
 
         }
 
@@ -237,7 +234,7 @@ void MitmHostCX::inspect(char side) {
         }
         _deb("MitmHostCX::inspect: inspector loop end.");
         
-        inspect_cur_flow_size = flow().flow_queue().size();
+        inspect_cur_flow_size = cur_pos;
         inspect_flow_same_bytes  = flow().flow_queue().back().size();
     }
 }
@@ -289,7 +286,6 @@ void MitmHostCX::on_detect(std::shared_ptr<duplexFlowMatch> x_sig, flowMatchStat
 
     auto prep_ctx = [&]() {
         engine_ctx.origin = this;
-        engine_ctx.flow_pos = flow().flow_queue().size() - 1;
         engine_ctx.signature = x_sig;
         // don't touch engine_ctx.options
     };
@@ -351,5 +347,3 @@ void MitmHostCX::on_starttls() {
 
     _dia("on_starttls finished");
 }
-
-
