@@ -19,6 +19,7 @@ SET(SOCLE_DIR "socle")
 SET(SOCLE_COMMON_DIR "socle/common")
 
 project(smithproxy CXX)
+include(CTest)
 
 SET(CMAKE_SOURCE_DIR "src/")
 SET(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}")
@@ -304,6 +305,10 @@ add_executable(smithproxy
         src/service/core/smithproxy_objapi.cpp
         src/service/core/sessionlist.hpp
         src/service/core/sessionlist.cpp
+        src/service/reload/file_reload_service.hpp
+        src/service/reload/file_reload_service.cpp
+        src/service/reload/reloadable_resource.hpp
+        src/service/reload/README.md
         src/service/cmd/cmdserver.cpp
         src/service/cfgapi/cfgvalue.hpp
         src/service/cfgapi/cfgvalue.cpp
@@ -426,6 +431,11 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/policy/addrobj.cpp
         )
 
+        add_executable(sx_gtests_reloadable
+                src/service/reload/file_reload_service.cpp
+                src/service/reload/tests/reloadable_resource_test.cpp
+        )
+
         add_executable(tls_testbed
                 tests/tls/tls_testbed.cpp)
         target_compile_definitions(tls_testbed PRIVATE
@@ -436,6 +446,11 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
             target_link_libraries(sx_gtests ${LIBCONFIGPP_LIBRARIES})
         endif()
         target_link_libraries(sx_gtests_http1 gtest gtest_main socle_lib pthread crypto ssl)
+        target_link_libraries(sx_gtests_reloadable gtest gtest_main pthread)
+        if(BUILD_TESTING)
+            add_test(NAME unit.reloadable COMMAND sx_gtests_reloadable)
+            set_tests_properties(unit.reloadable PROPERTIES LABELS "unit;reload")
+        endif()
         target_link_libraries(tls_testbed gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries (sx_gtests nlohmann_json::nlohmann_json)
     endif()
