@@ -362,8 +362,6 @@ int main(int argc, char *argv[]) {
             };
 
 
-    auto& pool = sx::tp::ThreadPool::instance::get();
-
     auto this_daemon = DaemonFactory::instance();
     auto const& log = this_daemon->get_log();
 
@@ -508,6 +506,10 @@ int main(int argc, char *argv[]) {
         CfgFactory::get()->cleanup();
         return EXIT_FAILURE;
     }
+
+    auto& pool = sx::tp::ThreadPool::instance::get(
+            static_cast<size_t>(CfgFactory::get()->tpool_workers));
+    (void)pool;
 
     if(CfgFactory::get()->cfg_mtrace_enable) {
 #ifdef MEM_DEBUG

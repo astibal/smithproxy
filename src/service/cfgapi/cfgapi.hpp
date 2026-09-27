@@ -261,6 +261,7 @@ public:
     int num_workers_dtls = 0;
     int num_workers_udp  = 0;
     int num_workers_socks = 0;
+    int tpool_workers = 5;
 
     int cli_port = 50000;
     int cli_port_base = 50000;

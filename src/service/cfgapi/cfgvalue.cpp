@@ -189,6 +189,9 @@ void CfgValueHelp::init() {
     auto VALUE_ZERO = []() -> int { return 0; };
     auto HW_THREADS = []() -> int { return static_cast<int>(std::thread::hardware_concurrency()); };
     auto HW_FILTER = [&] (std::string const& v) {
+        if(v == "-1") {
+            return CfgValue::filter_retval::accept(v);
+        }
         return VALUE_UINT_RANGE_GEN(VALUE_ZERO, HW_THREADS, v);
     };
 
@@ -218,6 +221,11 @@ void CfgValueHelp::init() {
             .help_quick("<number> acceptor subordinate worker threads count (max 4xCPU)")
             .may_be_empty(false)
             .value_filter(HW_FILTER);
+
+    add("settings.tpool_workers", "utility task pool worker thread count")
+            .help_quick("<number> utility workers (1-256)")
+            .may_be_empty(false)
+            .value_filter(VALUE_UINT_RANGE<1,256>);
 
 
 

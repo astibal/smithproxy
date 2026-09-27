@@ -12,6 +12,8 @@ lab with separate client, proxy and origin network namespaces.
 | Idle, Docker `--cpus 1` | PASS | 25.3 MiB | 20.7 MiB | not recorded | 94 |
 | HTTP CONNECT corpus, IPv4 + IPv6 | PASS (2 expected XFAIL cases) | 25.9 MiB | 21.6 MiB | 11.1 MiB | 94 |
 | 256 simultaneous TCP sessions | PASS | 34.4 MiB | 29.7 MiB | 20.0 MiB | 95 |
+| Minimal HTTP-only CONNECT, utility pool 5 | PASS (2 expected XFAIL cases) | 24.0 MiB | 19.7 MiB | 9.0 MiB | 13 |
+| Minimal HTTP-only, 256 simultaneous TCP sessions | PASS | 32.1 MiB | 27.8 MiB | 17.2 MiB | 14 |
 
 The 256-session run adds about 9.1 MiB RSS over idle, or approximately 36 KiB
 per held session.  This is a conservative estimate because the run also takes
@@ -54,11 +56,19 @@ Docker `--cpus 1` did not reduce the thread count or resident memory: the C++
 runtime still reported the host's 16 online CPUs for pool sizing.  A Kubernetes
 CPU request/limit alone therefore cannot be relied on to shrink this cost.
 
-For a true single-purpose ephemeral HTTP CONNECT instance, the next experiment
-must set `dtls_workers=-1`, make the utility-pool size configurable, and run one
-plaintext listener with TLS, UDP, SOCKS, API and unused background facilities
-disabled.  A target of a **32 MiB limit** looks plausible, but is not yet
-validated by this test.
+The memory-constrained profile now sets the utility pool to five threads and
+runs one plaintext listener with TLS, DTLS, UDP, SOCKS and redirect listeners
+disabled.  The patch-runner API remained enabled for readiness checks, so the
+measured 13 threads still include owner, DNS, CLI, API and HTTP-daemon threads.
+The CONNECT corpus peaked at 24.0 MiB RSS.  The exact same profile held 256
+simultaneous sessions with no timeouts and peaked at 32.1 MiB RSS.  Use a
+**32 MiB request / 48 MiB limit** for the first deployment; a 32 MiB hard limit
+is too tight for the measured 256-session peak.
+
+Disabling TLS exposed a latent STARTTLS-upgrade crash: replacement SSL
+communications were used before their static factory/owner initialization.
+Initializing both replacement communication objects before socket upgrade
+fixed the crash; the minimal IPv4 and IPv6 CONNECT corpus run then completed.
 
 ## Test notes
 

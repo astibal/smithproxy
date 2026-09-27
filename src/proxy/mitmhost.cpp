@@ -315,9 +315,11 @@ void MitmHostCX::on_starttls() {
 
     auto* new_client_com = new MySSLMitmCom();
     com(new_client_com);
+    new_client_com->init(this);
 
     auto* new_peer_com = new MySSLMitmCom();
     peer()->com(new_peer_com);
+    new_peer_com->init(peer());
 
     peer(peer()); // this will re-init
     peer()->peer(this);

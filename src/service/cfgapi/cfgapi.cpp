@@ -722,6 +722,7 @@ bool CfgFactory::load_settings () {
     load_if_exists(cfgapi.getRoot()["settings"], "udp_workers",num_workers_udp);
     load_if_exists(cfgapi.getRoot()["settings"], "dtls_port",listen_dtls_port_base);  listen_dtls_port = listen_dtls_port_base;
     load_if_exists(cfgapi.getRoot()["settings"], "dtls_workers",num_workers_dtls);
+    load_if_exists(cfgapi.getRoot()["settings"], "tpool_workers",tpool_workers);
 
     bool collect_val = false;
     load_if_exists(cfgapi.getRoot()["settings"], "tpool_log", collect_val);
@@ -5100,6 +5101,8 @@ int save_settings(Config& ex) {
 
     objects.add("dtls_port", Setting::TypeString) = CfgFactory::get()->listen_dtls_port_base;
     objects.add("dtls_workers", Setting::TypeInt) = CfgFactory::get()->num_workers_dtls;
+
+    objects.add("tpool_workers", Setting::TypeInt) = CfgFactory::get()->tpool_workers;
 
     objects.add("tpool_log", Setting::TypeBoolean) = sx::tp::ThreadPool::collect_tasks_info;
 

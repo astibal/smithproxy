@@ -55,7 +55,8 @@ text = text.replace('/etc/smithproxy/certs/default/',str(certs)+'/').replace('/e
 text = text.replace('/var/smithproxy/data',str(data)).replace('/var/log/smithproxy/',str(data)+'/')
 text = text.replace('certs_ca_key_password = "smithproxy"','certs_ca_key_password = ""')
 text = text.replace('accept_redirect = TRUE','accept_redirect = FALSE').replace('accept_socks = TRUE','accept_socks = FALSE')
-text = re.sub(r'(plaintext_workers|ssl_workers|udp_workers) = 0',r'\1 = 1',text)
+if os.environ.get('MEM_CONSTRAINED_TEST') != '1':
+    text = re.sub(r'(plaintext_workers|ssl_workers|udp_workers|dtls_workers) = -?\d+',r'\1 = 1',text)
 text = re.sub(r'\s*auth_profile = "resolve";', '', text)
 text = text.replace('nameservers = [ "8.8.8.8", "8.8.4.4" ]','nameservers = [ "198.18.20.2" ]')
 gre_capture_dst = os.environ.get('GRE_CAPTURE_DST')
