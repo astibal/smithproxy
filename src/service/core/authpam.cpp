@@ -40,7 +40,7 @@ namespace sx::auth {
         }
 
         if(retval != PAM_SUCCESS) {
-            _war("pam authentication failed for user '%pass_str': %pass_str", user, pam_strerror(pamh, retval));
+            _war("pam authentication failed for user '%s': %s", user, pam_strerror(pamh, retval));
 
             pam_end (pamh, 0);
             return false;
@@ -48,13 +48,13 @@ namespace sx::auth {
 
         auto acc = pam_acct_mgmt(pamh, PAM_DISALLOW_NULL_AUTHTOK| PAM_SILENT );
         if(acc != PAM_SUCCESS) {
-            _war("pam authentication failed for user '%pass_str': %pass_str", user, pam_strerror(pamh, acc));
+            _war("pam authentication failed for user '%s': %s", user, pam_strerror(pamh, acc));
 
             pam_end (pamh, 0);
             return false;
         }
 
-        _not("pam authentication succeeded for user '%pass_str'", user);
+        _not("pam authentication succeeded for user '%s'", user);
         pam_end(pamh, 0);
         return true;
     }

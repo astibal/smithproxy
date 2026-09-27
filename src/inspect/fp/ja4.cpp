@@ -635,7 +635,8 @@ namespace sx::ja4 {
         offset += 2;
 
         // extract ciphers
-        if (offset + cipher_suite_length > buffer.size()) {
+        if ((cipher_suite_length & 1U) != 0 ||
+            cipher_suite_length > buffer.size() - offset) {
             return 7;
         }
         for (size_t i = 0; i < cipher_suite_length; i += 2) {
@@ -668,25 +669,28 @@ namespace sx::ja4 {
         }
         for (size_t i = 0; i < extensions_length;) {
             //if (offset + i + 4 > buffer.size()) {
-            if (offset + i + 4 > buffer.size()) {
+            if (i > extensions_length || extensions_length - i < 4) {
                 return 12;
             }
             uint16_t extension_type = (buffer[offset + i] << 8) | buffer[offset + i + 1];
             uint16_t extension_len = (buffer[offset + i + 2] << 8) | buffer[offset + i + 3];
 
-            if(offset + i + 4 + extension_len > buffer.size()) {
+            if(extension_len > extensions_length - i - 4) {
                 return 13;
             }
+            const size_t payload = offset + i + 4;
 
             if (extension_type == 00 and extension_len > 0) {
                 sni = true;
             } else if (extension_type == 0x10) {
                 // ALPN
-                [[maybe_unused]] uint16_t alpn_len = (buffer[offset + i + 4] << 8) | buffer[offset + i + 5];
-                if (extension_len >= 6) {
-                    uint8_t fst_alpn_len = buffer[offset + i + 6];
+                if (extension_len >= 3) {
+                    uint16_t alpn_len = (buffer[payload] << 8) | buffer[payload + 1];
+                    if (alpn_len > extension_len - 2 || alpn_len < 1) return 14;
+                    uint8_t fst_alpn_len = buffer[payload + 2];
+                    if (fst_alpn_len > alpn_len - 1) return 14;
 
-                    std::string_view fst_alpn((const char*) &buffer[offset + i + 7], fst_alpn_len);
+                    std::string_view fst_alpn((const char*) &buffer[payload + 3], fst_alpn_len);
                     //may be tested - i.e. `std::string fst_alpn = { 'x', 0x0a };`
                     if(fst_alpn == "h2") {
                         // explicit h2 support
@@ -728,13 +732,14 @@ namespace sx::ja4 {
                 extensions.push_back(extension_type);
 
                 if (extension_type == 0x000d) {
-                    uint16_t hash_len = (buffer[offset + i + 4] << 8) | buffer[offset + i + 5];
-                    if (offset + 4 + 2 + hash_len > buffer.size()) {
+                    if (extension_len < 2) return 14;
+                    uint16_t hash_len = (buffer[payload] << 8) | buffer[payload + 1];
+                    if ((hash_len & 1U) != 0 || hash_len > extension_len - 2) {
                         return 14;
                     }
-                    for (size_t j = 0; j < hash_len;) {
-                        sigalgs.push_back((buffer[offset + i + j + 6] << 8) | buffer[offset + i + j + 7]);
-                        j += 2;
+                    for (size_t j = 0; j < hash_len; j += 2) {
+                        sigalgs.push_back((buffer[payload + 2 + j] << 8) |
+                                          buffer[payload + 3 + j]);
                     }
                 }
             }

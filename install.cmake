@@ -27,13 +27,6 @@ if(UNIX)
             WORLD_READ WORLD_EXECUTE
             RENAME sx_network
             )
-    install(FILES etc/service/initd/smithproxy.init DESTINATION share/smithproxy/service
-            PERMISSIONS
-            OWNER_READ OWNER_WRITE OWNER_EXECUTE
-            GROUP_READ GROUP_EXECUTE
-            WORLD_READ WORLD_EXECUTE
-            )
-
     install(FILES etc/service/systemd/sx-core@.service DESTINATION /usr/lib/systemd/system
             PERMISSIONS
             OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
@@ -82,17 +75,8 @@ if(UNIX)
     install(FILES man/TESTING_README.txt DESTINATION share/smithproxy/docs)
 
     # install infra/
-    file(GLOB infra_py "src/infra/*.py" EXCLUDE "src/infra/smithdog.py")
+    file(GLOB infra_py "src/infra/*.py")
     install(FILES ${infra_py} DESTINATION share/smithproxy/infra)
-
-    file(GLOB infra_exe_py "src/infra/smithdog.py")
-    install(FILES ${infra_exe_py} DESTINATION bin
-            PERMISSIONS
-            OWNER_READ OWNER_WRITE OWNER_EXECUTE
-            GROUP_READ GROUP_EXECUTE
-            WORLD_READ WORLD_EXECUTE
-            RENAME sx_ctl
-            )
 
     install(DIRECTORY src/infra/sslca DESTINATION share/smithproxy/infra)
 
@@ -132,7 +116,6 @@ if(UNIX)
     create_dir("/var/log/smithproxy/")
     create_dir("/var/smithproxy/data/")
 
-    # message: edit defaults and add to init.d to start at boot!
     install(CODE "MESSAGE(\" +----------------------------------------------------------------------------------------+\")")
     install(CODE "MESSAGE(\" | Installation complete!                                                                 |\")")
     install(CODE "MESSAGE(\" +----------------------------------------------------------------------------------------+\")")

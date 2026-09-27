@@ -15,8 +15,6 @@ public:
 
     void explicit_handoff(ExplicitProxyCX* cx);
     void handle_explicit_connect(ExplicitProxyCX* cx);
-    bool explicit_handoff_resolve_identity(MitmHostCX* cx);
-    bool explicit_handoff_authenticate(MitmHostCX* cx);
     void on_left_bytes(baseHostCX* cx) override;
     bool handle_cx_write(unsigned char side, baseHostCX* cx) override;
 

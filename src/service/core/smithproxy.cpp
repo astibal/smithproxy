@@ -43,7 +43,6 @@
 
 #include <staticcontent.hpp>
 
-#include <policy/authfactory.hpp>
 #include <inspect/sigfactory.hpp>
 
 #include <service/core/smithproxy.hpp>
@@ -72,46 +71,6 @@ void SmithProxy::reload() {
 }
 
 
-std::thread* SmithProxy::create_identity_refresh_thread() {
-
-
-    auto* id_thread = new std::thread([]() {
-        auto const& log = instance().log;
-
-        // give some time to init shm - don't run immediately
-        // this is workaround for rare(?) race condition when shm is not
-        // initialized yet.
-
-        if (abort_sleep(20) ) {
-            return;
-        }
-
-        for ( [[maybe_unused]] unsigned i = 0; ; i++) {
-
-            if(abort_sleep(20)) {
-                _dia("id_thread: terminating");
-                break;
-            }
-
-            _deb("id_thread: refreshing identities");
-
-            AuthFactory::get().shm_ip4_table_refresh();
-            AuthFactory::get().shm_ip6_table_refresh();
-            AuthFactory::get().shm_token_table_refresh();
-            AuthFactory::get().ip4_timeout_check();
-            AuthFactory::get().ip6_timeout_check();
-
-            _dum("id_thread: finished");
-
-
-        }
-    });
-
-    return id_thread;
-}
-
-
-
 void SmithProxy::create_log_writer_thread() {
     // we have to create logger after daemonize is called
     log_thread  = std::shared_ptr<std::thread>(create_log_writer());
@@ -127,14 +86,6 @@ void SmithProxy::create_dns_thread() {
     if(dns_thread) {
         pthread_setname_np( dns_thread->native_handle(),
                             string_format("sxy_dns_%d",tenant_index()).c_str());
-    }
-}
-
-void SmithProxy::create_identity_thread() {
-    id_thread = std::shared_ptr<std::thread>(create_identity_refresh_thread());
-    if(id_thread != nullptr) {
-        pthread_setname_np(id_thread->native_handle(),string_format("sxy_idu_%d",
-                                                                    CfgFactory::get()->tenant_index).c_str());
     }
 }
 
@@ -511,9 +462,10 @@ void SmithProxy::run() {
                 wh_nbr_seconds = 0;
             }
             ++wh_nbr_seconds;
-
-            std::this_thread::sleep_for(std::chrono::seconds(1));
         }
+
+        // Keep the housekeeping loop paced even when webhooks are disabled.
+        std::this_thread::sleep_for(std::chrono::seconds(1));
 #ifdef ASAN_LEAKS
         // See: https://stackoverflow.com/questions/67705427/how-to-use-asan-on-a-long-time-running-server-program
         // More info in:
@@ -615,6 +567,10 @@ bool SmithProxy::state_load() {
 bool SmithProxy::state_load_neighbors(std::string const& fnm) {
 
     auto ifs = std::ifstream(fnm);
+    if (not ifs || ifs.peek() == std::ifstream::traits_type::eof()) {
+        return false;
+    }
+
     try {
         nlohmann::json js = nlohmann::json::parse(ifs);
         NbrHood::instance().ser_json_in(js);
@@ -709,12 +665,6 @@ void SmithProxy::join_all() {
 
         if(dns_thread->joinable())
             dns_thread->join();
-    }
-    if(id_thread) {
-        if(!cfg_daemonize)
-            std::cerr << "terminating identity updater thread" << std::endl;
-        if(id_thread->joinable())
-            id_thread->join();
     }
     if(api_thread) {
         if(!cfg_daemonize)
@@ -971,4 +921,3 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
 
     return ret;
 }
-

@@ -17,7 +17,6 @@ ProcessorCount(CPUs)
 
 SET(SOCLE_DIR "socle")
 SET(SOCLE_COMMON_DIR "socle/common")
-SET(SMITHD_DIR "src/service/smithd")
 
 project(smithproxy CXX)
 include(CTest)
@@ -28,7 +27,6 @@ SET(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}")
 set(USE_PYTHON "N")
 set(USE_LMHPP "Y")
 set(USE_UNWIND "Y")
-set(USE_REDIS "N")
 set(USE_PAM "Y")
 
 set(OPT_MEMPOOL_NOEXCEPT "Y")
@@ -89,7 +87,6 @@ include_directories ("${SOCLE_COMMON_DIR}")
 include_directories ("${PROJECT_SOURCE_DIR}")
 include_directories ("${PROJECT_SOURCE_DIR}/src/")
 include_directories ("${PROJECT_SOURCE_DIR}/src/ext")
-include_directories ("${SMITHD_DIR}")
 
 add_subdirectory(${SOCLE_DIR} socle_lib)
 add_subdirectory(${SOCLE_COMMON_DIR} socle_common_lib)
@@ -131,20 +128,6 @@ if("${USE_PYTHON}" STREQUAL "Y")
     endif(PYTHONLIBS_FOUND)
 else()
     message(">> python DISABLED")
-endif()
-
-if("${USE_REDIS}" STREQUAL "Y")
-    message(">> redis option enabled" )
-    find_package (hiredis)
-    if(HIREDIS_FOUND)
-        message(">> redis found" )
-        include_directories(${HIREDIS_INCLUDE_DIR})
-        add_definitions(-DUSE_REDIS)
-    else()
-        message(">> redis not found, DISABLED" )
-    endif()
-else()
-    message(">> redis DISABLED")
 endif()
 
 if("${USE_UNWIND}" STREQUAL "Y")
@@ -257,6 +240,16 @@ configure_file(
 message(STATUS "compiler flags: ${CMAKE_CXX_FLAGS}")
 message(STATUS "compiler debug flags: ${CMAKE_CXX_FLAGS_DEBUG}")
 
+add_library(smithproxy_libcli STATIC
+        src/service/libcli/cli.cpp
+        src/service/libcli/fd_transport.cpp
+        src/service/libcli/line_editor.cpp
+)
+target_include_directories(smithproxy_libcli PUBLIC
+        ${PROJECT_SOURCE_DIR}/src
+        ${PROJECT_SOURCE_DIR}/src/service/libcli
+)
+
 add_executable(smithproxy
 
         src/main.cpp
@@ -285,11 +278,8 @@ add_executable(smithproxy
         src/proxy/httpconnect/httpconnectrequest.cpp
 
         src/policy/policy.cpp
-        src/policy/authfactory.hpp
-        src/policy/authfactory4.cpp
         src/policy/inspectors.cpp
         src/policy/addrobj.cpp
-        src/policy/authfactory6.cpp
         src/policy/loadb.cpp
         src/policy/profiles.hpp
         src/policy/profiles.cpp
@@ -308,9 +298,6 @@ add_executable(smithproxy
         src/inspect/engine/http.hpp
         src/inspect/engine/http.cpp
 
-        src/shm/shmauth.cpp
-
-
         src/async/asyncsocket.hpp
         src/async/asyncdns.hpp
 
@@ -321,13 +308,12 @@ add_executable(smithproxy
         src/service/core/smithproxy.cpp
         src/service/core/smithproxy_objapi.hpp
         src/service/core/smithproxy_objapi.cpp
+        src/service/core/sessionlist.hpp
+        src/service/core/sessionlist.cpp
         src/service/cmd/cmdserver.cpp
         src/service/cfgapi/cfgvalue.hpp
         src/service/cfgapi/cfgvalue.cpp
-        src/service/cmd/cligen.hpp
-        src/service/cmd/cligen.cpp
-        src/service/cmd/clistate.hpp
-        src/service/cmd/clistate.cpp
+        src/service/cmd/cli_debug_state.hpp
         src/service/cmd/diag/diag_cmds.hpp
         src/service/cmd/diag/diag_cmds.cpp
         src/service/core/service.cpp
@@ -355,7 +341,13 @@ add_executable(smithproxy
 
         src/ext/libcidr/cidr.cpp
         src/ext/nltemplate/nltemplate.cpp
-        src/ext/libcli/libcli.cpp
+        src/service/cmd/config_cli2.cpp
+        src/service/cmd/config_cli2_schema.cpp
+        src/service/cmd/config_cli2_smithproxy.cpp
+        src/service/cmd/libcli2_socket.cpp
+        src/service/cmd/smith_cli2_commands.cpp
+        src/service/cmd/smith_cli2_debug.cpp
+        src/service/cmd/smith_cli2_test.cpp
         src/ext/lmhpp/include/lmhttpd.hpp
         src/ext/hpack/hpack.hpp
         src/service/core/authpam.cpp
@@ -375,33 +367,6 @@ add_executable(smithproxy
         src/proxy/filters/access_filter.cpp
 )
 
-
-add_executable(smithd
-        ${SMITHD_DIR}/smithd.cpp
-        ${SMITHD_DIR}/smithdcx.cpp
-
-        src/service/daemon.cpp
-        src/service/netservice.cpp
-        src/smithlog.cpp
-        src/inspect/dns.cpp
-        src/ext/libcidr/cidr.cpp
-        src/policy/addrobj.cpp
-        src/async/asyncocsp.hpp
-        src/utils/fs.hpp
-        src/utils/fs.cpp
-        src/utils/str.hpp
-        src/utils/str.cpp
-        src/utils/mem.hpp
-        src/utils/mem.cpp socle/common/mempool/malloc_allocator.hpp)
-
-add_executable(smithdc
-        ${SMITHD_DIR}/smithdc.cpp
-        ${SMITHD_DIR}/smithdcx.cpp
-        src/smithlog.cpp
-        src/utils/fs.hpp
-        src/utils/fs.cpp
-        src/utils/mem.hpp
-        src/utils/mem.cpp socle/common/mempool/malloc_allocator.hpp)
 
 IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
     find_package(GTest)
@@ -425,6 +390,13 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
 
                 src/ext/hpack/hpack.hpp
                 src/ext/hpack/hpack_tests.cpp
+
+                src/service/libcli/tests/cli_tests.cpp
+                src/service/libcli/tests/fd_transport_tests.cpp
+                src/service/cmd/config_cli2.cpp
+                src/service/cmd/config_cli2_tests.cpp
+                src/service/cmd/config_cli2_schema.cpp
+                src/service/cmd/config_cli2_schema_tests.cpp
 
                 src/inspect/engine.hpp
                 src/inspect/engine/http.cpp
@@ -472,7 +444,10 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_compile_definitions(tls_testbed PRIVATE
                 SMITHPROXY_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 
-        target_link_libraries(sx_gtests gtest gtest_main socle_lib pthread crypto ssl)
+        target_link_libraries(sx_gtests gtest gtest_main smithproxy_libcli socle_lib pthread crypto ssl crypt)
+        if (LIBCONFIGPP_FOUND)
+            target_link_libraries(sx_gtests ${LIBCONFIGPP_LIBRARIES})
+        endif()
         target_link_libraries(sx_gtests_http1 gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries(sx_gtests_startstoptls gtest gtest_main)
         target_link_libraries(sx_gtests_httpconnect gtest gtest_main)
@@ -534,13 +509,19 @@ if(SMITHPROXY_TLS_FUZZING)
 
     add_executable(tls_clienthello_fuzzer
             src/proxy/tls/fuzz/clienthello_fuzzer.cpp)
-    target_compile_options(tls_clienthello_fuzzer PRIVATE
-            -fsanitize=fuzzer,address,undefined
-            -fno-omit-frame-pointer)
-    target_link_options(tls_clienthello_fuzzer PRIVATE
-            -fsanitize=fuzzer,address,undefined
-            -fno-omit-frame-pointer)
-    target_link_libraries(tls_clienthello_fuzzer socle_lib pthread crypto ssl)
+    add_executable(tls_revocation_fuzzer
+            src/proxy/tls/fuzz/revocation_fuzzer.cpp)
+    target_compile_definitions(tls_revocation_fuzzer PRIVATE
+            SMITHPROXY_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    foreach(fuzz_target tls_clienthello_fuzzer tls_revocation_fuzzer)
+        target_compile_options(${fuzz_target} PRIVATE
+                -fsanitize=fuzzer,address,undefined
+                -fno-omit-frame-pointer)
+        target_link_options(${fuzz_target} PRIVATE
+                -fsanitize=fuzzer,address,undefined
+                -fno-omit-frame-pointer)
+        target_link_libraries(${fuzz_target} socle_lib pthread crypto ssl)
+    endforeach()
 endif()
 
 option(SMITHPROXY_TLS_SANITIZERS "Instrument the TLS testbed with ASan and UBSan" OFF)
@@ -571,7 +552,6 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}")
 
 if (LIBCONFIGPP_FOUND)
     target_link_libraries (smithproxy ${LIBCONFIGPP_LIBRARIES})
-    target_link_libraries (smithd ${LIBCONFIGPP_LIBRARIES})
 endif (LIBCONFIGPP_FOUND)
 
 target_link_libraries (smithproxy crypt)
@@ -580,11 +560,9 @@ target_link_libraries (smithproxy curl)
 
 if((CMAKE_SYSTEM_PROCESSOR MATCHES "arm") OR (CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64"))
     target_link_libraries (smithproxy atomic)
-    target_link_libraries (smithd atomic)
-    target_link_libraries (smithdc atomic)
 endif()
 
-target_link_libraries(smithproxy socle_lib pthread ssl crypto rt ${UNWIND_LIB})
+target_link_libraries(smithproxy smithproxy_libcli socle_lib pthread ssl crypto rt ${UNWIND_LIB})
 
 if("${USE_LMHPP}" STREQUAL "Y")
     target_link_libraries(smithproxy microhttpd)
@@ -608,17 +586,9 @@ if("${USE_HTTP2_ENGINE}" STREQUAL "Y")
     # target_link_libraries(smithproxy z)
 endif()
 
-if(HIREDIS_FOUND)
-    target_link_libraries(smithproxy ${HIREDIS_LIBRARIES})
-endif()
-
 if("${OPT_DEBUG_ASAN_LEAKS}" STREQUAL "Y")
     target_link_options(smithproxy PRIVATE -fsanitize=address)
 endif()
-
-target_link_libraries(smithd socle_lib pthread ssl crypto rt ${UNWIND_LIB})
-target_link_libraries(smithdc socle_lib pthread ssl crypto rt ${UNWIND_LIB})
-
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/install.cmake)
 

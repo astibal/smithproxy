@@ -1,0 +1,7 @@
+from _common import script
+
+PPlayScript = script("socks5_handshake", [
+    b"\x05\x02\x00\x02", b"\x05\x00",
+    b"\x05\x01\x00\x03\x0borigin.test\x01\xbb",
+    b"\x05\x00\x00\x01\xc0\x00\x02\x01\xc3\x50",
+], "cscs")
