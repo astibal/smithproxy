@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run on m-tt-bs1 after copying the build into ROOT/bin/smithproxy.
+# Run inside a prepared local or remote patch-runner lab.
 set -euo pipefail
 ROOT=${1:-/opt/lab/smithproxy-runner}
 export PATH="$ROOT/bin:$PATH"
@@ -19,6 +19,7 @@ OUT_IF=${LAB_OUT_IF:-do0}
 API_RELAY_PORT=${LAB_API_PORT:-55556}
 CLI_RELAY_PORT=${LAB_CLI_PORT:-55557}
 RUN_MODE=${RUN_MODE:-0}
+BASE_TRAFFIC_TEST=${BASE_TRAFFIC_TEST:-1}
 RUNNER_PID=
 CLI_RELAY_PID=
 ORIGIN_PID=
@@ -90,19 +91,26 @@ cleanup() {
     ip -j addr > "$ROOT/results/host-addresses-after.json"
     ip -j route > "$ROOT/results/host-routes-after.json"
     python3 - "$ROOT/results" <<'PYCOMPARE'
-import json, pathlib, sys
+import json, pathlib, re, sys
 root = pathlib.Path(sys.argv[1])
-def normalized(name):
+runner_veth = re.compile(r'^sp[0-9a-f]{1,6}[io]$')
+def normalized_addresses(name):
     value = json.loads((root / name).read_text())
+    value = [interface for interface in value
+             if not runner_veth.fullmatch(interface.get('ifname', ''))]
     for interface in value:
         for address in interface['addr_info']:
             # DHCP lease countdown changes naturally while the test is running.
             address.pop('valid_life_time', None)
             address.pop('preferred_life_time', None)
     return value
-assert normalized('host-addresses-before.json') == normalized('host-addresses-after.json')
+def normalized_routes(name):
+    value = json.loads((root / name).read_text())
+    return [route for route in value
+            if not runner_veth.fullmatch(route.get('dev', ''))]
+assert normalized_addresses('host-addresses-before.json') == normalized_addresses('host-addresses-after.json')
+assert normalized_routes('host-routes-before.json') == normalized_routes('host-routes-after.json')
 PYCOMPARE
-    diff -u "$ROOT/results/host-routes-before.json" "$ROOT/results/host-routes-after.json"
     ! ip netns list | grep -Eq "^(${CLIENT}|${SERVER}|${NS})( |$)"
     ! ss -ltnH "sport = :$API_RELAY_PORT" | grep -q .
     ! ss -ltnH "sport = :$CLI_RELAY_PORT" | grep -q .
@@ -230,6 +238,7 @@ if [[ ${EMPTY_NEIGHBOR_STATE_TEST:-0} == 1 ]]; then
     ! grep -q 'json.exception.parse_error' "$ROOT/data/proxy-console.log"
     echo 'PASS empty neighbor state: no JSON parse error'
 fi
+if [[ $BASE_TRAFFIC_TEST == 1 ]]; then
 ip netns exec "$CLIENT" curl --noproxy '*' -fsS --max-time 15 http://198.18.20.2:8080/ > "$ROOT/results/http4.txt"
 grep -q 'runner-origin-ok peer=198.18.20.1' "$ROOT/results/http4.txt"
 echo 'PASS4 TCP/HTTP: original destination preserved, egress uses do0'
@@ -329,6 +338,7 @@ if [[ $QUIC_TEST == 1 ]]; then
     grep -q 'ALPN: downstream=h3 upstream=h3' "$QUIC_CLI"
     echo 'PASS4 QUIC/H3 traffic: verified certificate, SNI, ALPN and four multiplexed requests'
     echo 'PASS4 QUIC diagnostics: active session and streams visible in dedicated CLI'
+fi
 fi
 if [[ $SESSION_LIST_STRESS_TEST == 1 ]]; then
     SESSION_LIST_READY="$ROOT/results/session-list-load.ready"
@@ -569,7 +579,7 @@ if [[ $CAPTURE_MATRIX_TEST == 1 ]]; then
         > "$CAPTURE_MATRIX_RESULT/tcpdump4.log" 2>&1 &
     CAPTURE_MATRIX_GRE_PID=$!
     sleep 0.5
-    env PPLAY_PY="$PPLAY_PY" MODE=runner IP_FAMILY=4 MATCH='capture_*' \
+    env PPLAY_PY="$PPLAY_PY" MODE=runner IP_FAMILY=4 MATCH='capture_*' EXCLUDE= \
         RESULTS="$CAPTURE_MATRIX_RESULT/pplay-v4" \
         SMITHPROXY_PID_FILE="$ROOT/data/proxy.pid" \
         CLIENT_NS="$CLIENT" SERVER_NS="$SERVER" \
@@ -582,7 +592,7 @@ if [[ $CAPTURE_MATRIX_TEST == 1 ]]; then
         > "$CAPTURE_MATRIX_RESULT/tcpdump6.log" 2>&1 &
     CAPTURE_MATRIX_GRE_PID=$!
     sleep 0.5
-    env PPLAY_PY="$PPLAY_PY" MODE=runner IP_FAMILY=6 MATCH='capture_*' \
+    env PPLAY_PY="$PPLAY_PY" MODE=runner IP_FAMILY=6 MATCH='capture_*' EXCLUDE= \
         RESULTS="$CAPTURE_MATRIX_RESULT/pplay-v6" \
         SMITHPROXY_PID_FILE="$ROOT/data/proxy.pid" \
         CLIENT_NS="$CLIENT" SERVER_NS="$SERVER" \
@@ -653,16 +663,16 @@ if [[ -n ${PPLAY_SUITE:-} && ${PPLAY_SUITE_SKIP_RUN:-0} != 1 ]]; then
         echo "FAIL: suite runner is not executable: $PPLAY_SUITE/run-suite.sh" >&2
         exit 1
     }
-
     # The dedicated capture matrix has already run capture_* once while its
     # GRE collectors were active.  Replaying those cases in the general full
     # corpus would append duplicate marker streams only to the local PCAPNG
     # and make its later one-to-one comparison with GRE invalid.
-    PPLAY_CORPUS_EXCLUDE=${EXCLUDE:-}
+    PPLAY_CORPUS_EXCLUDE="${PPLAY_SUITE_EXCLUDE:+${PPLAY_SUITE_EXCLUDE}${EXCLUDE:+,}}${EXCLUDE:-}"
     if [[ $CAPTURE_MATRIX_TEST == 1 ]]; then
         PPLAY_CORPUS_EXCLUDE=${PPLAY_CORPUS_EXCLUDE:+$PPLAY_CORPUS_EXCLUDE,}capture_\*
     fi
     env PPLAY_PY="$PPLAY_PY" MODE=runner IP_FAMILY=4 \
+        ALLOW_EMPTY="${PPLAY_SUITE_ALLOW_EMPTY:-0}" \
         EXCLUDE="$PPLAY_CORPUS_EXCLUDE" \
         RESULTS="$ROOT/results/${PPLAY_RESULTS_NAME:-pplay-suite}-v4" \
         SMITHPROXY_PID_FILE="$ROOT/data/proxy.pid" \
@@ -670,6 +680,7 @@ if [[ -n ${PPLAY_SUITE:-} && ${PPLAY_SUITE_SKIP_RUN:-0} != 1 ]]; then
         "$PPLAY_SUITE/run-suite.sh" "${PPLAY_SUITE_CATEGORY:-all}" &
     PPLAY_SUITE4_PID=$!
     env PPLAY_PY="$PPLAY_PY" MODE=runner IP_FAMILY=6 \
+        ALLOW_EMPTY="${PPLAY_SUITE_ALLOW_EMPTY:-0}" \
         EXCLUDE="$PPLAY_CORPUS_EXCLUDE" \
         RESULTS="$ROOT/results/${PPLAY_RESULTS_NAME:-pplay-suite}-v6" \
         SMITHPROXY_PID_FILE="$ROOT/data/proxy.pid" \

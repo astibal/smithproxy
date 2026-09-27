@@ -4,7 +4,6 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/helpers.cmake)
 
 SET(SOCLE_DIR "socle")
 SET(SOCLE_COMMON_DIR "socle/common")
-SET(SMITHD_DIR "src/service/smithd")
 
 project(smithproxy CXX)
 
@@ -16,7 +15,6 @@ include_directories ("${SOCLE_COMMON_DIR}")
 include_directories ("${PROJECT_SOURCE_DIR}")
 include_directories ("${PROJECT_SOURCE_DIR}/src/")
 include_directories ("${PROJECT_SOURCE_DIR}/src/ext")
-include_directories ("${SMITHD_DIR}")
 
 add_subdirectory(${SOCLE_DIR} socle_lib)
 add_subdirectory(${SOCLE_COMMON_DIR} socle_common_lib)
@@ -102,13 +100,11 @@ add_executable(smithproxy
         src/proxy/socks5/sockshostcx.cpp
         src/proxy/socks5/socksproxy.cpp
         src/cli/cmdserver.cpp
-        src/shm/shmauth.cpp
         src/inspect/dns.cpp
         src/policy/inspectors.cpp
         src/policy/addrobj.cpp
         src/service/netservice.cpp
         src/staticcontent.cpp
-        src/policy/authfactory6.cpp
         src/smithlog.cpp
         src/proxy/filters/filterproxy.cpp
         src/service/dnsupd/smithdnsupd.cpp
@@ -123,8 +119,6 @@ add_executable(smithproxy
         src/service/libcli/fd_transport.cpp
         src/service/libcli/line_editor.cpp
 
-        src/policy/authfactory.hpp
-        src/policy/authfactory4.cpp
         src/inspect/sxsignature.hpp
         src/inspect/pyinspector.hpp
         src/inspect/sigfactory.hpp

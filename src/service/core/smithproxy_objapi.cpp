@@ -23,7 +23,7 @@ void ObjAPI::for_each_proxy(std::function<void(MitmProxy*)> callable) {
 
                 auto lc_ = std::scoped_lock(wrk.second->proxy_lock());
 
-                for(auto const& [ p, _ ] : wrk.second->proxies()) {
+                for(auto const& p : wrk.second->proxies()) {
                     if(auto* proxy = dynamic_cast<MitmProxy*>(p.get()); p != nullptr) {
                         callable(proxy);
                     }

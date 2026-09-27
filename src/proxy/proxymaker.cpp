@@ -38,7 +38,6 @@
 */
 
 #include <service/cfgapi/cfgapi.hpp>
-#include <policy/authfactory.hpp>
 #include <proxy/mitmproxy.hpp>
 
 #include <proxy/proxymaker.hpp>
@@ -287,119 +286,6 @@ namespace sx::proxymaker {
         return true;
     }
 
-    std::pair<std::string, unsigned short> to_magic(unsigned short target_port) {
-
-        std::string redir_host;
-        unsigned short redir_port;
-
-        const unsigned short base = 65000;
-
-        if (target_port == base) {
-            // bend broker magic IP
-            redir_port = base + raw::try_down_cast<unsigned short>(CfgFactory::get()->tenant_index);
-        } else if (target_port != 443) {
-            // auth portal https magic IP
-            redir_port = raw::try_down_cast<unsigned short>(std::stoi(AuthFactory::get().options.portal_port_http));
-        } else {
-            // auth portal plaintext magic IP
-            redir_port = raw::try_down_cast<unsigned short>(std::stoi(AuthFactory::get().options.portal_port_https));
-        }
-        redir_host = "127.0.0.1";
-
-
-        return std::make_pair(redir_host, redir_port);
-    }
-
-
-    bool authorize_is_bad (MitmProxy *proxy) {
-
-        auto *left = proxy->first_left();
-        auto const* right = proxy->first_right();
-        if (not left or not right) return false;
-
-
-        auto const policy = CfgFactory::get()->policy_prof_auth(left->matched_policy());
-        if(not policy) return false;
-
-        auto const& log = log::authorize();
-
-        bool bad_auth = true;
-
-        // investigate L3 protocol
-        int af = AF_INET;
-        if (left->com()) {
-            af = left->com()->l3_proto();
-        }
-        std::string str_af = SockOps::family_str(af);
-
-        // use common base pointer, so we can use all IdentityInfo types
-
-        std::optional<std::vector<std::string>> maybe_groups;
-        if (af == AF_INET or af == 0) {
-            maybe_groups = AuthFactory::get().ip4_get_groups(left->host());
-        } else if (af == AF_INET6) {
-            maybe_groups = AuthFactory::get().ip6_get_groups(left->host());
-        }
-
-        if(not maybe_groups) return bad_auth;
-
-        for (auto const &sub_policy: CfgFactory::get()->policy_prof_auth(left->matched_policy())->sub_policies) {
-            for (auto const &candidate: maybe_groups.value()) {
-                _deb("Connection identities: testing ip identity '%s' against policy '%s'", candidate.c_str(), sub_policy->element_name().c_str());
-                if (candidate == sub_policy->element_name()) {
-                    _dia("Connection identities: ip identity '%s' matches policy '%s'", candidate.c_str(),
-                         sub_policy->element_name().c_str());
-                    bad_auth = false;
-                    break;
-                }
-            }
-
-            // don't iterate if we know we are ok
-            if (not bad_auth)
-                break;
-        }
-
-        return bad_auth;
-    }
-
-
-    bool authorize(std::unique_ptr<MitmProxy>& proxy) {
-
-        auto const& log = log::authorize();
-
-        // resolve source information - is there an identity info for that IP?
-        if (proxy->auth_opts.authenticate) {
-
-            _deb("proxymaker::authorize[%s]: must be authorized", proxy->to_string(iINF).c_str());
-
-            bool res = proxy->resolve_identity();
-
-            if(res) {
-                _dia("proxymaker::authorize[%s]: identity resolved: %s/%s", proxy->to_string(iINF).c_str(),
-                     proxy->identity()->username().c_str(),
-                     proxy->identity()->groups().c_str());
-
-                if (authorize_is_bad(proxy.get())) {
-                    _dia("proxymaker::authorize[%s]: this identity is not authorized", proxy->to_string(iINF).c_str());
-
-                    proxy->auth_opts.block_identity = true;
-                    return false;
-                }
-            }
-            else {
-                _dia("proxymaker::authorize[%s]: identity not resolved", proxy->to_string(iINF).c_str());
-
-                return false;
-            }
-
-        } else if (proxy->auth_opts.resolve) {
-            _deb("proxymaker::authorize[%s]: optional identity check", proxy->to_string(iINF).c_str());
-            proxy->resolve_identity();
-        }
-
-        _deb("proxymaker::authorize[%s]: no identity needed", proxy->to_string(iINF).c_str());
-        return true;
-    }
 
     bool is_replaceable (unsigned short port) {
         constexpr std::array<unsigned short, 2> ports = {80, 443};

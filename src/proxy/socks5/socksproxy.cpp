@@ -44,7 +44,6 @@
 #include <proxy/socks5/socksproxy.hpp>
 #include <proxy/mitmhost.hpp>
 #include <service/cfgapi/cfgapi.hpp>
-#include <policy/authfactory.hpp>
 
 #include <vector>
 
@@ -248,111 +247,12 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
         com()->set_monitor(real_socket);
         com()->set_poll_handler(real_socket,this);
 
-        if(not socks5_handoff_resolve_identity(n_cx)) {
-            _deb("deleting proxy %s", c_type());
-            state().dead(true);
-        }
     }
 
     _dia("SocksProxy::socks5_handoff: finished");
 }
 
 
-bool SocksProxy::socks5_handoff_resolve_identity(MitmHostCX* cx) {
-
-    bool result = true;
-
-    // resolve source information - is there an identity info for that IP?
-    if (auth_opts.authenticate or auth_opts.resolve) {
-
-        _dia("socks5_handoff_udp: authentication required or optionally resolved");
-
-        bool identity_resolved = resolve_identity(cx, false);
-
-        if (!identity_resolved) {
-            // identity is unknown!
-
-            if(auth_opts.authenticate) {
-                short unsigned int target_port = cx->com()->nonlocal_dst_port();
-
-
-                if (target_port != 80 && target_port != 443) {
-                    result = false;
-                    _inf("Connection %s closed: authorization failed (unknown identity)",
-                         cx->c_type());
-                }
-            }
-            else {
-                _dia("Connection %s: authentication info optional, continuing.",cx->c_type());
-            }
-
-        } else if(auth_opts.authenticate) {
-
-            result = socks5_handoff_authenticate(cx);
-
-        }
-    } else {
-        _dia("Connection %s: authentication info optional, continuing.", cx->c_type());
-    }
-
-    return result;
-}
-
-
-bool SocksProxy::socks5_handoff_authenticate(MitmHostCX *cx) {
-
-    bool bad_auth = true;
-
-    // investigate L3 protocol
-    int af = AF_INET;
-    if (cx->com()) {
-        af = cx->com()->l3_proto();
-    }
-    std::string str_af = SockOps::family_str(af);
-
-
-    std::optional<std::vector<std::string>> groups_vec;
-
-    if (af == AF_INET || af == 0) {
-        groups_vec = AuthFactory::get().ip4_get_groups(cx->host());
-    } else if (af == AF_INET6) {
-        groups_vec = AuthFactory::get().ip6_get_groups(cx->host());
-    }
-
-    if ( groups_vec ) {
-
-        if (CfgFactory::get()->policy_prof_auth(matched_policy()) != nullptr)
-            for (auto const& sub_pol: CfgFactory::get()->policy_prof_auth(matched_policy())->sub_policies) {
-                for (auto const& x: groups_vec.value()) {
-                    _deb("Connection identities: ip identity '%s' against policy '%s'", x.c_str(),
-                         sub_pol->element_name().c_str());
-                    if (x == sub_pol->element_name()) {
-                        _dia("Connection identities: ip identity '%s' matches policy '%s'", x.c_str(),
-                             sub_pol->element_name().c_str());
-                        bad_auth = false;
-                    }
-                }
-            }
-        if (bad_auth) {
-            short unsigned int target_port = cx->com()->nonlocal_dst_port();
-
-
-            if (target_port != 80 && target_port != 443) {
-                _inf("Connection %s closed: authorization failed (non-matching identity criteria)",
-                     cx->c_type());
-            } else {
-                _inf("Connection %s closed: authorization failed (non-matching identity criteria)(with replacement)",
-                     cx->c_type());
-                // set bad_auth true, because despite authentication failed, it could be replaced (we can let user know
-                // he is not allowed to proceed
-                bad_auth = false;
-                auth_opts.block_identity = true;
-            }
-        }
-    }
-
-    return not bad_auth;
-}
 
 void SocksProxy::socks5_handoff_udp(socksServerCX* cx) {
 
@@ -421,10 +321,6 @@ void SocksProxy::socks5_handoff_udp(socksServerCX* cx) {
         // apply policy and get result
 
 
-        if(not socks5_handoff_resolve_identity(n_cx.get())) {
-            _deb("deleting proxy %s", c_type());
-            state().dead(true);
-        }
     }
 
 

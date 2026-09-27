@@ -215,12 +215,6 @@ namespace jsonize {
         if (verbosity >= INF) {
             ret["policy"] = what->matched_policy();
 
-            if (what->identity_resolved()) {
-                ret["identity"] = {{"user",   what->identity()->username()},
-                                   {"groups", what->identity()->groups()}
-                };
-            }
-
             ret["stats"]["speed"] = {
                     {"up_str",   number_suffixed(what->stats().mtr_up.get() * 8) + "bps"},
                     {"down_str", number_suffixed(what->stats().mtr_down.get() * 8) + "bps"},

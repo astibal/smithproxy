@@ -21,7 +21,6 @@ struct CliDebugState {
     loglevel orig_mitmmasterproxy_loglevel = NON;
     loglevel orig_mitmhostcx_loglevel = NON;
     loglevel orig_socksproxy_loglevel = NON;
-    loglevel orig_auth_loglevel = NON;
 
     static CliDebugState& get() {
         static thread_local CliDebugState state;

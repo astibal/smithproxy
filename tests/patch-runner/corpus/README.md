@@ -1,85 +1,111 @@
-# PPlay parser suite
+# Deterministic pplay corpus
 
-Deterministic client/server byte streams intended to cross Smithproxy without
-payload modification. The cases test parser behavior; pplay itself only checks
-that both endpoints received the exact expected bytes.
+The corpus defines bounded client/server byte streams that should cross
+Smithproxy without payload modification. Pplay verifies that both endpoints
+receive exactly the scripted bytes.
 
 ```text
-regular/   valid, representative protocol traffic
+regular/   valid representative protocol traffic
 edge/      valid or nearly valid boundary conditions
 insanity/  deliberately malformed but bounded inputs
 ```
 
-The corpus contains 455 conversations: 151 regular, 148 edge and 156 insanity
-cases. They cover HTTP/1 framing and ambiguity, cleartext HTTP/2 frames and HPACK,
-DNS over TCP and UDP, SMTP, IMAP, POP3, FTP, Redis, MQTT, SOCKS, SSH banners,
-WebSocket, Memcached, PostgreSQL, MySQL, AMQP, Telnet, TLS-like records, NTP,
-syslog, STUN, TFTP, SNMP, QUIC-like datagrams and protocol-neutral streams.
+## Inventory
 
-Safety limits are enforced by `_common.py`: at most 256 messages and 256 KiB per
-conversation. The runner is sequential, uses one connection at a time and gives
-each pplay process a 15-second death timer. There are no compression bombs,
-unbounded loops, high connection rates or multi-gigabyte payloads.
+`run-suite.sh all` currently selects 685 cases per address family:
 
-Files named `udp_*.py` are executed as UDP conversations; all other fixtures use
-TCP. UDP cases still use one socket and a small, fixed datagram sequence.
+| Source | Regular | Edge | Insanity | Total |
+|---|---:|---:|---:|---:|
+| Committed fixture files | 51 | 48 | 56 | 155 |
+| `_generated_case.py` parameter sets | 134 | 133 | 133 | 400 |
+| Generated HTTP/2 cases | 40 | 30 | 30 | 100 |
+| Capture matrix cases | 12 | 10 | 8 | 30 |
+| **Total** | **237** | **221** | **227** | **685** |
 
-The current pplay master needs `../runner/pplay-python314.patch` on Python 3.14.
-For two-ended scripted fuzz replay it also needs
-`../runner/pplay-fuzz-server-sync.patch`; without it, the server recreates its
-PPlayScript after `accept()` and loses the fuzzed packet expectations.
+The full patch runner executes 655 ordinary corpus cases per family and sends
+the 30 `capture_*` cases to its dedicated capture section. Thus all 685 remain
+covered without recording the capture flows twice.
 
-## Local pplay self-test
+Coverage includes HTTP/1 framing and ambiguity, cleartext HTTP/2 and HPACK, DNS
+over TCP and UDP, SMTP, IMAP, POP3, FTP, Redis, MQTT, SOCKS, SSH, WebSocket,
+Memcached, PostgreSQL, MySQL, AMQP, Telnet, TLS-like records, NTP, syslog, STUN,
+TFTP, SNMP, QUIC-like datagrams and protocol-neutral streams.
 
-```bash
-PPLAY_PY=/path/to/pplay.py ./run-suite.sh regular
-PPLAY_PY=/path/to/pplay.py ./run-suite.sh all
-PPLAY_PY=/path/to/pplay.py MATCH=http2_prior_knowledge ./run-suite.sh regular
-PPLAY_PY=/path/to/pplay.py MATCH='h2_generated_*' EXCLUDE='*003,*017' ./run-suite.sh all
-```
+Safety limits in `_common.py` cap a conversation at 256 messages and 256 KiB.
+The runner handles one case at a time per address-family worker and gives each
+pplay process a 15-second death timer.
 
-`MATCH` selects cases matching any of its comma-separated shell globs.
-`EXCLUDE` then skips cases matching any of its comma-separated shell globs.
-Both filters operate on the case name without its `.py` suffix and include
-generated and capture-matrix cases.
+Explicit fixtures named `udp_*.py`, generated UDP cases and
+`capture_udp_*` use datagrams. Other cases use TCP. TCP cases get one attempt;
+UDP cases get up to three attempts and report `FLAKY_PASS` when only a retry
+succeeds.
 
-The categories also contain 400 parametrically generated, independently reported
-cases: the original 100 per category plus 100 extended cases split as 34 regular,
-33 edge and 33 insanity.
+## Local self-test
 
-Another 100 `h2_generated_*` cases exercise HTTP/2 multiplexing, DATA framing,
-SETTINGS and control frames, HPACK dynamic-table reuse, CONTINUATION boundaries,
-padding, priority, stream teardown and deliberately malformed state transitions.
-They are split as 40 regular, 30 edge and 30 insanity cases and can be selected
-with `MATCH='h2_generated_*'`. Run the corpus with deterministic byte mutation
-and TCP segmentation using:
+The repository contains the compatible engine at `../vendor/pplay.py`; no
+external checkout or patch is required.
 
 ```bash
-PPLAY_PY=/path/to/pplay.py FUZZ_LEVEL=245 FUZZ_MAGIC=smithproxy-001 SCATTER=1 \
-  ./run-suite.sh all
+PPLAY_PY=../vendor/pplay.py ./run-suite.sh regular
+PPLAY_PY=../vendor/pplay.py ./run-suite.sh all
+PPLAY_PY=../vendor/pplay.py MATCH=http2_prior_knowledge ./run-suite.sh regular
+PPLAY_PY=../vendor/pplay.py MATCH='h2_generated_*' \
+  EXCLUDE='*003,*017' ./run-suite.sh all
 ```
 
-## Through an already running runner lab
+`MATCH` selects case basenames matching any comma-separated shell glob.
+`EXCLUDE` is applied afterwards. Both filters include committed, generated and
+capture cases. A direct invocation with no matches is an error. Section workers
+use `ALLOW_EMPTY=1` because a global full-run filter may legitimately select
+cases from only one category; the parent still fails when all categories are
+empty.
 
-The namespaces `sxr-client` and `sxr-origin` must already exist and Smithproxy
-must be between them:
+Optional deterministic mutation and TCP segmentation:
 
 ```bash
-sudo env PPLAY_PY=/path/to/pplay.py MODE=runner ./run-suite.sh all
+PPLAY_PY=../vendor/pplay.py FUZZ_LEVEL=245 FUZZ_MAGIC=smithproxy-001 \
+  SCATTER=1 ./run-suite.sh all
 ```
 
-Or let the existing lab test create the namespaces and keep Smithproxy running
-while the complete suite executes:
+`FUZZ_MAGIC` is combined with category and case name, so repeated runs are
+reproducible. `SCATTER=1` affects TCP writes; it does not fragment UDP.
+
+## Through Smithproxy
+
+The preferred interface is the patch runner:
 
 ```bash
-sudo env \
-  PPLAY_PY=/path/to/pplay.py \
-  PPLAY_SUITE=/opt/lab/smithproxy-runner/pplay-suite \
-  bash /opt/lab/smithproxy-runner/runner/tests/lab-test.sh
+../test-patch.sh sanity --suite corpus-regular --remote root@tt-px1
+../test-patch.sh full --remote root@tt-px1 --env MATCH='h2_generated_*'
 ```
 
-Set `PPLAY_SUITE_CATEGORY=regular`, `edge` or `insanity` to run one tier.
+For a manually prepared compatible lab, the default namespace names are
+`sxr-client` and `sxr-origin`:
 
-Logs are stored under `results/<category>/<case>/`. A case passes only when both
-sides exit successfully, both reach end-of-transmission and neither reports a
-payload difference.
+```bash
+sudo env PPLAY_PY=../vendor/pplay.py MODE=runner ./run-suite.sh all
+```
+
+Override `CLIENT_NS`, `SERVER_NS`, `IP_FAMILY`, `SERVER_BIND`,
+`CLIENT_TARGET`, `PORT`, or `SOURCE_PORT` when the lab differs. `IP_FAMILY`
+accepts `4` or `6`; the default is `4`.
+
+## Results
+
+Each case writes client/server logs below:
+
+```text
+<results>/<category>/<case>/
+```
+
+Set `RESULTS` to change the root. A case passes only when both sides exit zero,
+both reach end-of-transmission, and neither reports different data. The final
+line is machine-readable:
+
+```text
+family=IPv4 passed=N flaky=N failed=N xfailed=N xpassed=N results=PATH
+```
+
+Expected failures come from `expected-failures.txt` by default. Override its
+path with `EXPECTED_FAILURES_FILE`. An unexpected failure makes the process
+non-zero; XFAIL and `FLAKY_PASS` do not.

@@ -57,17 +57,8 @@ void SessionList::complete_empty_slot(std::size_t slot) {
 void SessionList::collect(MasterProxy& master, std::size_t slot, std::string const& origin) {
     std::stringstream text;
     nlohmann::json json = nlohmann::json::array();
-    std::size_t skipped = 0;
-
-    for (auto const& [base_proxy, thread] : master.proxies()) {
+    for (auto const& base_proxy : master.proxies()) {
         if (!base_proxy) continue;
-
-        // Sprayed proxies execute outside the master worker. Reading their
-        // internals here would reintroduce the race this snapshot avoids.
-        if (thread || base_proxy->state().in_progress()) {
-            ++skipped;
-            continue;
-        }
 
         auto* proxy = dynamic_cast<MitmProxy*>(base_proxy.get());
         if (!proxy) continue;
@@ -82,7 +73,6 @@ void SessionList::collect(MasterProxy& master, std::size_t slot, std::string con
         }
     }
 
-    skipped_spread_.fetch_add(skipped, std::memory_order_relaxed);
     if (kind_ == kind::text) text_fragments_.at(slot) = std::move(text).str();
     else json_fragments_.at(slot) = std::move(json);
     finish_slot(slot);

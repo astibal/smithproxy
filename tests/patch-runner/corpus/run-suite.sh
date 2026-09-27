@@ -10,6 +10,7 @@ PORT=${PORT:-18080}
 IP_FAMILY=${IP_FAMILY:-4}
 MATCH=${MATCH:-*}
 EXCLUDE=${EXCLUDE:-}
+ALLOW_EMPTY=${ALLOW_EMPTY:-0}
 FUZZ_LEVEL=${FUZZ_LEVEL:-}
 FUZZ_MAGIC=${FUZZ_MAGIC:-smithproxy-corpus}
 SCATTER=${SCATTER:-0}
@@ -140,10 +141,14 @@ mapfile -t CASES < <(
         done
     done
 )
-(( ${#CASES[@]} > 0 )) || {
+if (( ${#CASES[@]} == 0 )); then
+    if [[ $ALLOW_EMPTY == 1 ]]; then
+        echo "family=IPv$IP_FAMILY passed=0 flaky=0 failed=0 xfailed=0 xpassed=0 selected=0 results=$RESULTS"
+        exit 0
+    fi
     echo "No cases matched category=$CATEGORY match=$MATCH exclude=${EXCLUDE:-<none>}" >&2
     exit 2
-}
+fi
 
 passed=0
 flaky=0

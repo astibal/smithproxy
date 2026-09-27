@@ -9,7 +9,6 @@
 #include <map>
 #include <mutex>
 #include <set>
-#include <charconv>
 
 namespace sx::multiflow {
 namespace {
@@ -104,8 +103,7 @@ public:
         for (auto const& [id, current] : pairs_) {
             (void)id;
             auto lock = std::scoped_lock(current.master->proxy_lock());
-            for (auto const& [proxy, thread] : current.master->proxies()) {
-                (void)thread;
+            for (auto const& proxy : current.master->proxies()) {
                 auto const* mitm = dynamic_cast<MitmProxy const*>(proxy.get());
                 if (!mitm) continue;
                 if (auto left = mitm->first_left()) result += left->writebuf()->size();
@@ -166,8 +164,7 @@ private:
                 destination->reset(from_left ? match->right : match->left,
                                    current.protocol_error);
                 auto lock = std::scoped_lock(match->master->proxy_lock());
-                for (auto const& [proxy, thread] : match->master->proxies()) {
-                    (void)thread;
+                for (auto const& proxy : match->master->proxies()) {
                     if (proxy) proxy->state().dead(true);
                 }
                 retired_.insert(match->left.id);
@@ -235,17 +232,6 @@ private:
             source_connection->reset(source, 0x10c);
             return;
         }
-        unsigned int parsed_port = 0;
-        auto const* port_begin = context_.target_port.data();
-        auto const* port_end = port_begin + context_.target_port.size();
-        auto const parse_result = std::from_chars(port_begin, port_end, parsed_port);
-        auto const target_port = parse_result.ec == std::errc() && parse_result.ptr == port_end
-                              && parsed_port <= 65535
-            ? static_cast<unsigned short>(parsed_port) : 0;
-        if (!proxymaker::authorize(proxy) && !proxymaker::is_replaceable(target_port)) {
-            source_connection->reset(source, 0x10c);
-            return;
-        }
         if (!proxymaker::setup_snat(proxy, context_.source_host, context_.source_port)) {
             source_connection->reset(source, 0x102);
             return;
@@ -272,8 +258,7 @@ private:
         for (auto const& [id, current] : pairs_) {
             (void)id;
             auto lock = std::scoped_lock(current.master->proxy_lock());
-            for (auto const& [proxy, thread] : current.master->proxies()) {
-                (void)thread;
+            for (auto const& proxy : current.master->proxies()) {
                 if (proxy) {
                     result += proxy->stats().mtr_up.total() + proxy->stats().mtr_down.total();
                 }
@@ -285,8 +270,7 @@ private:
     void retire_finished() {
         for (auto& [id, current] : pairs_) {
             auto lock = std::scoped_lock(current.master->proxy_lock());
-            for (auto const& [proxy, thread] : current.master->proxies()) {
-                (void)thread;
+            for (auto const& proxy : current.master->proxies()) {
                 auto* mitm = dynamic_cast<MitmProxy*>(proxy.get());
                 if (!mitm) continue;
 

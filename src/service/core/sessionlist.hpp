@@ -33,7 +33,6 @@ public:
 
     std::string text_result() const;
     nlohmann::json json_result() const;
-    std::size_t skipped_spread() const noexcept { return skipped_spread_.load(std::memory_order_relaxed); }
     std::string pending_origins() const;
 
     void prepare_slot(std::size_t slot, std::string const& origin);
@@ -58,7 +57,6 @@ private:
     std::vector<std::string> origins_;
     std::vector<bool> completed_;
     std::atomic_size_t remaining_;
-    std::atomic_size_t skipped_spread_{0};
     mutable std::mutex completion_lock_;
     mutable std::condition_variable completion_cv_;
 };
