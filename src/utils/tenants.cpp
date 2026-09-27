@@ -52,7 +52,7 @@ namespace sx::cfg {
         });
 
         if (params.size() >= 3) {
-            if (params[0].at(0) == '#') { return; }
+            if (params[0].empty() || params[0][0] == '#') { return; }
 
             int index = safe_val(params[0], -1);
             if (index == -1) { return; }

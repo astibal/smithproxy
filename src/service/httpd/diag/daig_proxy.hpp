@@ -47,7 +47,6 @@
 
 static nlohmann::json json_proxy_session_list(struct MHD_Connection * connection, std::string const& meth, std::string const& req) {
 
-    auto oid = connection_ull_param(connection, "oid", 0ULL);
     using namespace jsonize;
 
     bool flag_active_only = load_json_params<bool>(req, "active").value_or(false);
@@ -55,7 +54,7 @@ static nlohmann::json json_proxy_session_list(struct MHD_Connection * connection
     bool flag_verbose = load_json_params<bool>(req, "verbose").value_or(false);
 
 
-    return SmithProxy::api().proxy_session_list_json(oid, flag_active_only, flag_tlsinfo, flag_verbose);
+    return SmithProxy::api().proxy_session_list_json(flag_active_only, flag_tlsinfo, flag_verbose);
 
 }
 

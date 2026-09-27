@@ -73,7 +73,9 @@ inline std::array<std::optional<double>, N> FlowAnalysis::ratios() const {
     size_t maxNegativeBytes = 0L;  // Global max for negative values (in terms of magnitude)
     std::array<std::optional<double>, N> normalizedValues = {};
 
-    for (std::size_t i = 0; i < N; ++i) {
+    auto const limit = std::min({N, md.count(), md.get_checkpoints().size()});
+
+    for (std::size_t i = 0; i < limit; ++i) {
         auto const &item = millideltas.get_checkpoints()[i];
         if (item.data.side == socle::side_t::RIGHT) {
             maxPositiveBytes = std::max(maxPositiveBytes, item.data.bytes);
@@ -83,7 +85,7 @@ inline std::array<std::optional<double>, N> FlowAnalysis::ratios() const {
     }
 
     // ratios
-    for (std::size_t i = 0; i < N and i < md.count(); ++i) {
+    for (std::size_t i = 0; i < limit; ++i) {
         auto const &item = millideltas.get_checkpoints()[i];
         if (item.data.side == socle::side_t::RIGHT) {
             normalizedValues[i] = (maxPositiveBytes != 0) ? static_cast<double>(item.data.bytes) / maxPositiveBytes : 0;

@@ -48,10 +48,7 @@
   @{CERTSTORE}/** r,
   # @{CERTSTORE2}/**/*.pem r,
 
-  # write semaphores, shm, pidfiles
-  /dev/shm/sem.* rw,
-  /dev/shm/sem.smithproxy* rw,
-  /dev/shm/smithproxy* rw,
+  # write pidfiles
   /run/smithproxy* rw,
 
   # write logs

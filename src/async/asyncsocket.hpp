@@ -45,7 +45,7 @@
 #include <hostcx.hpp>
 
 
-// simple counter-based ID. There is more robust solution using socle::sobject
+    // simple counter-based ID
 struct WithID {
     WithID() : id(counter()++) {};
 

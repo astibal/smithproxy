@@ -31,26 +31,20 @@ public:
 
 namespace inet::ocsp {
 
-    class AsyncOCSP : public AsyncSocket<int>, public socle::sobject {
+    class AsyncOCSP : public AsyncSocket<int> {
     public:
 
         AsyncOCSP (X509 *cert, X509 *issuer, baseHostCX *cx, callback_t cb) :
                 AsyncSocket(cx, std::move(cb)),
-                socle::sobject(),
-                query_(cert, issuer, oid()) {
+                query_(cert, issuer, reinterpret_cast<std::uintptr_t>(this)) {
             log_tracer_("c-tor");
         };
-
-        bool ask_destroy () override {
-            untap();
-            return true;
-        }
 
         #ifdef ASYNC_OCSP_DEBUG
         mutable Tracer tracer;
         #endif
 
-        std::string to_string (int verbosity = iINF) const override {
+        virtual std::string to_string (int verbosity = iINF) const {
             std::stringstream ss;
 
             ss << "AsyncOcsp [" << socket() << "] socket state: " << query().io().state_str();
@@ -64,7 +58,7 @@ namespace inet::ocsp {
             for(auto const& e: tracer.trace) {
 
                 if(prev_msg != e.second) {
-                    ss << std::endl << "[" <<  string_format("0x%lx", oid()) << "] " << std::dec << e.first - now << "s - " << e.second;
+                    ss << std::endl << "[" << static_cast<void const*>(this) << "] " << std::dec << e.first - now << "s - " << e.second;
 
                     if(prev_counter > 1) {
                         ss << ", repeated " << prev_counter  << " times";
@@ -130,7 +124,7 @@ namespace inet::ocsp {
         int result_state_ = -100;
 
 
-    TYPENAME_OVERRIDE("AsyncOCSP")
+    TYPENAME_BASE("AsyncOCSP")
     };
 }
 #endif //ASYNCOCSP_HPP
