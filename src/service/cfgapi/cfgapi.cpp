@@ -3583,9 +3583,8 @@ int CfgFactory::save_address_objects(Config& ex) const {
 
             auto cidr_ptr = std::dynamic_pointer_cast<CidrAddress>(obj->value());
             if(cidr_ptr) {
-                const char* addr = cidr_to_str(cidr_ptr->cidr());
-                s_cidr =  addr;
-                delete[] addr;
+                auto addr = raw::allocated(cidr_to_str(cidr_ptr->cidr()));
+                s_cidr = addr.value;
             }
 
             n_saved++;
