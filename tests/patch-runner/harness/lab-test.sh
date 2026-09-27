@@ -653,12 +653,25 @@ if [[ -n ${PPLAY_SUITE:-} && ${PPLAY_SUITE_SKIP_RUN:-0} != 1 ]]; then
         echo "FAIL: suite runner is not executable: $PPLAY_SUITE/run-suite.sh" >&2
         exit 1
     }
-    env PPLAY_PY="$PPLAY_PY" MODE=runner IP_FAMILY=4 RESULTS="$ROOT/results/${PPLAY_RESULTS_NAME:-pplay-suite}-v4" \
+
+    # The dedicated capture matrix has already run capture_* once while its
+    # GRE collectors were active.  Replaying those cases in the general full
+    # corpus would append duplicate marker streams only to the local PCAPNG
+    # and make its later one-to-one comparison with GRE invalid.
+    PPLAY_CORPUS_EXCLUDE=${EXCLUDE:-}
+    if [[ $CAPTURE_MATRIX_TEST == 1 ]]; then
+        PPLAY_CORPUS_EXCLUDE=${PPLAY_CORPUS_EXCLUDE:+$PPLAY_CORPUS_EXCLUDE,}capture_\*
+    fi
+    env PPLAY_PY="$PPLAY_PY" MODE=runner IP_FAMILY=4 \
+        EXCLUDE="$PPLAY_CORPUS_EXCLUDE" \
+        RESULTS="$ROOT/results/${PPLAY_RESULTS_NAME:-pplay-suite}-v4" \
         SMITHPROXY_PID_FILE="$ROOT/data/proxy.pid" \
         CLIENT_NS="$CLIENT" SERVER_NS="$SERVER" \
         "$PPLAY_SUITE/run-suite.sh" "${PPLAY_SUITE_CATEGORY:-all}" &
     PPLAY_SUITE4_PID=$!
-    env PPLAY_PY="$PPLAY_PY" MODE=runner IP_FAMILY=6 RESULTS="$ROOT/results/${PPLAY_RESULTS_NAME:-pplay-suite}-v6" \
+    env PPLAY_PY="$PPLAY_PY" MODE=runner IP_FAMILY=6 \
+        EXCLUDE="$PPLAY_CORPUS_EXCLUDE" \
+        RESULTS="$ROOT/results/${PPLAY_RESULTS_NAME:-pplay-suite}-v6" \
         SMITHPROXY_PID_FILE="$ROOT/data/proxy.pid" \
         CLIENT_NS="$CLIENT" SERVER_NS="$SERVER" \
         "$PPLAY_SUITE/run-suite.sh" "${PPLAY_SUITE_CATEGORY:-all}" &
