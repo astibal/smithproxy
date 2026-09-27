@@ -3,6 +3,8 @@
 #include "proxy/quic/spq1.hpp"
 #include "service/quic/quiclog.hpp"
 
+#include <traflog/pcapapi.hpp>
+
 #include <algorithm>
 #include <cerrno>
 #include <climits>
@@ -38,12 +40,6 @@ int select_h3(SSL*, const unsigned char** output, unsigned char* output_size,
         : SSL_TLSEXT_ERR_ALERT_FATAL;
 }
 
-std::string endpoint_key(datagram_endpoint const& endpoint) {
-    if (!endpoint.valid()) return {};
-    auto const* begin = reinterpret_cast<char const*>(&endpoint.address);
-    return std::string(begin, begin + endpoint.size);
-}
-
 std::string endpoint_text(datagram_endpoint const& endpoint) {
     if (!endpoint.valid()) return "-";
     char host[NI_MAXHOST] {};
@@ -63,6 +59,29 @@ std::pair<std::string, std::string> endpoint_parts(datagram_endpoint const& endp
                       host, sizeof(host), service, sizeof(service),
                       NI_NUMERICHOST | NI_NUMERICSERV) != 0) return {};
     return {host, service};
+}
+
+buffer make_udp_packet(datagram_view const& datagram) {
+    if (!datagram.peer.valid() || !datagram.local.valid()
+        || !datagram.data || datagram.size == 0) return buffer();
+
+    auto const& source = datagram.direction == datagram_direction::ingress
+        ? datagram.peer : datagram.local;
+    auto const& destination = datagram.direction == datagram_direction::ingress
+        ? datagram.local : datagram.peer;
+    if (source.address.ss_family != destination.address.ss_family) return buffer();
+
+    socle::pcap::connection_details details {};
+    details.next_proto = socle::pcap::connection_details::UDP;
+    details.source = source.address;
+    details.destination = destination.address;
+
+    buffer packet;
+    auto const* payload = reinterpret_cast<char const*>(datagram.data);
+    socle::pcap::append_IP_header(packet, details, 0, datagram.size);
+    socle::pcap::append_UDP_header(packet, details, 0, payload, datagram.size);
+    packet.append(payload, datagram.size);
+    return packet;
 }
 
 int listener_poll_timeout(SSL* listener, int application_timeout_ms) {
@@ -90,12 +109,13 @@ listener_service::listener_service(std::uint16_t port, std::string certificate,
                                    std::uint16_t upstream_port, bool verify_upstream,
                                    lifecycle_options lifecycle, resource_limits limits,
                                    std::string upstream_host,
-                                   flow_proxy_factory proxy_factory)
+                                   flow_proxy_factory proxy_factory,
+                                   bool capture_native)
     : port_(port), certificate_(std::move(certificate)),
       private_key_(std::move(private_key)), transparent_(transparent),
       upstream_port_(upstream_port), upstream_host_(std::move(upstream_host)),
       verify_upstream_(verify_upstream), lifecycle_(lifecycle), limits_(limits),
-      proxy_factory_(std::move(proxy_factory)) {
+      proxy_factory_(std::move(proxy_factory)), capture_native_(capture_native) {
     (void)log();
 }
 
@@ -216,6 +236,7 @@ bool listener_service::prepare() {
         return false;
     }
     SSL_CTX_set_alpn_select_cb(context_.get(), select_h3, nullptr);
+    SSL_CTX_set_client_hello_cb(context_.get(), client_hello_callback, this);
     if (verify_upstream_) {
         if (!SSLFactory::factory().set_verify_locations(client_context_.get())) {
             fail("cannot load QUIC upstream trust store");
@@ -230,11 +251,7 @@ bool listener_service::prepare() {
     if (!open_socket()) return false;
     listener_ = openssl_listener::create(
         context_.get(), udp_fd_, transparent_,
-        [this](datagram_endpoint const& peer, datagram_endpoint const& destination) {
-            original_destinations_[endpoint_key(peer)] = destination;
-            log().ext("datagram peer=%s original-destination=%s",
-                      endpoint_text(peer).c_str(), endpoint_text(destination).c_str());
-        });
+        [this](datagram_view const& datagram) { observe_datagram(datagram); });
     if (!listener_) {
         fail("cannot create OpenSSL QUIC listener: " + openssl_error_stack());
         return false;
@@ -263,7 +280,8 @@ void listener_service::run() {
         // Active connections still need a bounded tick because OpenSSL QUIC
         // timers and asynchronous certificate futures are not pollable fds.
         auto const application_timeout = sessions_.empty() && certificate_jobs_.empty()
-                && staged_upstreams_.empty()
+                && staged_upstreams_.empty() && pending_captures_.empty()
+                && dispatcher_bindings_.empty()
             ? -1
             : 50;
         auto* native_listener = listener_->native_handle();
@@ -307,6 +325,8 @@ void listener_service::run() {
                 stopping_ = true;
                 break;
             }
+            // Flushing may generate the final handshake/shutdown secrets.
+            publish_capture_secrets(linked);
         }
 
         // Publish only after removing objects whose grace period has elapsed.
@@ -319,6 +339,55 @@ void listener_service::run() {
 }
 
 #if SMITHPROXY_OPENSSL_QUIC
+void listener_service::observe_datagram(datagram_view const& datagram) {
+    if (datagram.direction == datagram_direction::ingress) {
+        log().ext("datagram peer=%s original-destination=%s association=%llu",
+                  endpoint_text(datagram.peer).c_str(), endpoint_text(datagram.local).c_str(),
+                  static_cast<unsigned long long>(datagram.association));
+    }
+    if (!capture_native_ || datagram.association == 0) return;
+
+    std::shared_ptr<sx::session_traffic_log> capture;
+    if (auto route = capture_routes_.find(datagram.association);
+        route != capture_routes_.end()) {
+        capture = route->second.lock();
+        if (!capture) capture_routes_.erase(route);
+    }
+    if (!capture) {
+        auto pending = pending_captures_.find(datagram.association);
+        if (pending == pending_captures_.end()) {
+            if (pending_captures_.size() >= limits_.max_pending_capture_sessions) return;
+            pending = pending_captures_.emplace(
+                datagram.association,
+                pending_capture {
+                    std::make_shared<sx::session_traffic_log>(
+                        limits_.native_capture_buffer_bytes),
+                    std::chrono::steady_clock::now(),
+                }).first;
+        }
+        pending->second.updated = std::chrono::steady_clock::now();
+        capture = pending->second.log;
+        capture_routes_[datagram.association] = capture;
+    }
+
+    auto packet = make_udp_packet(datagram);
+    if (!packet.empty()) {
+        capture->write_packet(datagram.direction == datagram_direction::ingress
+                                  ? socle::side_t::LEFT : socle::side_t::RIGHT,
+                              packet);
+    }
+}
+
+void listener_service::publish_capture_secrets(session& value) {
+    if (!value.capture_log || !value.keylog) return;
+    auto lines = value.keylog->snapshot();
+    while (value.keylog_cursor < lines.size()) {
+        auto const& text = lines[value.keylog_cursor++];
+        buffer line(text.data(), text.size());
+        value.capture_log->write_secret(socle::traffic_secret_format::tls_key_log, line);
+    }
+}
+
 void listener_service::attach_staged_upstream(session& value) {
     if (!value.downstream || value.upstream) return;
 
@@ -350,6 +419,12 @@ void listener_service::accept_connections() {
         if (sessions_.size() >= limits_.max_sessions) {
             ++session_limit_rejections_;
             log().war("session rejected: listener limit %zu reached", limits_.max_sessions);
+            if (auto binding = dispatcher_bindings_.find(connection->native_handle());
+                binding != dispatcher_bindings_.end()) {
+                pending_captures_.erase(binding->second.association);
+                capture_routes_.erase(binding->second.association);
+                dispatcher_bindings_.erase(binding);
+            }
             connection->close(0x107);
             continue;
         }
@@ -359,6 +434,24 @@ void listener_service::accept_connections() {
         incoming.downstream = std::move(connection);
         incoming.keylog = incoming.downstream->keylog();
         incoming.client_endpoint = incoming.downstream->peer_endpoint();
+        auto* ssl = incoming.downstream->native_handle();
+        if (auto binding = dispatcher_bindings_.find(ssl);
+            binding != dispatcher_bindings_.end()) {
+            incoming.capture_association = binding->second.association;
+            dispatcher_bindings_.erase(binding);
+            if (capture_native_) {
+                if (auto pending = pending_captures_.find(incoming.capture_association);
+                    pending != pending_captures_.end()) {
+                    incoming.capture_log = std::move(pending->second.log);
+                    pending_captures_.erase(pending);
+                }
+                if (!incoming.capture_log) {
+                    incoming.capture_log = std::make_shared<sx::session_traffic_log>(
+                        limits_.native_capture_buffer_bytes);
+                }
+                capture_routes_[incoming.capture_association] = incoming.capture_log;
+            }
+        }
         attach_staged_upstream(incoming);
 
         sessions_.push_back(std::move(incoming));
@@ -458,7 +551,7 @@ void listener_service::progress_handshake(
         auto [source_host, source_port] = endpoint_parts(value.client_endpoint);
         auto [target_host, target_port] = endpoint_parts(value.target_endpoint);
         auto capture = std::make_shared<spq1::connection_context>(
-            value.id, downstream_alpn);
+            value.id, downstream_alpn, value.capture_log);
         multiflow::flow_proxy_context flow_context {
             std::move(source_host), std::move(source_port),
             std::move(target_host), std::move(target_port),
@@ -518,7 +611,8 @@ void listener_service::progress_active(
 
 bool listener_service::flush_session_output(session& value) {
     if (!value.client_endpoint.valid() || !value.target_endpoint.valid()) return true;
-    if (listener_->flush_output(value.client_endpoint, value.target_endpoint)) return true;
+    if (listener_->flush_output(value.client_endpoint, value.target_endpoint,
+                                value.capture_association)) return true;
 
     fail("OpenSSL QUIC connection output failure: " + listener_->last_error());
     return false;
@@ -527,8 +621,12 @@ bool listener_service::flush_session_output(session& value) {
 void listener_service::reap_expired(std::chrono::steady_clock::time_point now) {
     auto const before = sessions_.size();
     sessions_.erase(std::remove_if(sessions_.begin(), sessions_.end(), [&](auto& value) {
-        return value.state == session_state::draining
+        auto const expired = value.state == session_state::draining
             && now - value.draining_since >= lifecycle_.drain_timeout;
+        if (expired && value.capture_association != 0) {
+            capture_routes_.erase(value.capture_association);
+        }
+        return expired;
     }), sessions_.end());
 
     auto const removed = before - sessions_.size();
@@ -545,6 +643,37 @@ void listener_service::reap_expired(std::chrono::steady_clock::time_point now) {
         iterator->second.connection->close();
         ++upstream_failures_;
         iterator = staged_upstreams_.erase(iterator);
+    }
+
+    // Failed or abandoned handshakes must not retain their pre-policy packet
+    // journal indefinitely. Live accepted sessions own their journal directly.
+    for (auto iterator = pending_captures_.begin(); iterator != pending_captures_.end();) {
+        if (now - iterator->second.updated < lifecycle_.handshake_timeout) {
+            ++iterator;
+            continue;
+        }
+        capture_routes_.erase(iterator->first);
+        auto const association = iterator->first;
+        for (auto binding = dispatcher_bindings_.begin();
+             binding != dispatcher_bindings_.end();) {
+            if (binding->second.association == association) {
+                binding = dispatcher_bindings_.erase(binding);
+            }
+            else ++binding;
+        }
+        iterator = pending_captures_.erase(iterator);
+    }
+    for (auto iterator = capture_routes_.begin(); iterator != capture_routes_.end();) {
+        if (iterator->second.expired()) iterator = capture_routes_.erase(iterator);
+        else ++iterator;
+    }
+    for (auto iterator = dispatcher_bindings_.begin();
+         iterator != dispatcher_bindings_.end();) {
+        if (now - iterator->second.updated >= lifecycle_.handshake_timeout) {
+            iterator = dispatcher_bindings_.erase(iterator);
+        } else {
+            ++iterator;
+        }
     }
 }
 
@@ -616,7 +745,9 @@ void listener_service::cleanup_sessions() {
         }
     }
     certificate_jobs_.clear();
-    original_destinations_.clear();
+    pending_captures_.clear();
+    capture_routes_.clear();
+    dispatcher_bindings_.clear();
     {
         std::lock_guard<std::mutex> lock(snapshots_mutex_);
         snapshots_.clear();
@@ -626,6 +757,31 @@ void listener_service::cleanup_sessions() {
 #endif
 
 #if SMITHPROXY_OPENSSL_QUIC
+int listener_service::client_hello_callback(SSL* ssl, int*, void* argument) {
+    auto* service = static_cast<listener_service*>(argument);
+    if (service) service->bind_capture_session(ssl);
+    // Association metadata is observational: inability to retain it must
+    // never reject an otherwise valid client handshake.
+    return SSL_CLIENT_HELLO_SUCCESS;
+}
+
+int listener_service::bind_capture_session(SSL* downstream) {
+    if (!downstream || !listener_) return 0;
+    auto const association = listener_->current_association();
+    if (association == 0) {
+        log().war("downstream ClientHello has no QUIC dispatcher association");
+        return 0;
+    }
+    if (dispatcher_bindings_.size() >= limits_.max_sessions
+        && dispatcher_bindings_.find(downstream) == dispatcher_bindings_.end()) {
+        log().war("QUIC dispatcher association limit %zu reached", limits_.max_sessions);
+        return 0;
+    }
+    dispatcher_bindings_[downstream] = dispatcher_binding {
+        association, std::chrono::steady_clock::now()};
+    return 1;
+}
+
 int listener_service::certificate_callback(SSL* ssl, void* argument) {
     auto* service = static_cast<listener_service*>(argument);
     return service ? service->prepare_verified_certificate(ssl) : 0;
@@ -688,13 +844,10 @@ int listener_service::prepare_verified_certificate(SSL* downstream) {
     }
     datagram_endpoint destination;
     if (transparent_) {
-        auto found_destination = original_destinations_.find(endpoint_key(peer_endpoint));
-        if (found_destination != original_destinations_.end()) {
-            destination = found_destination->second;
-            original_destinations_.erase(found_destination);
-        } else if (listener_) {
-            destination = listener_->current_local();
-        }
+        // This first callback is synchronous with the datagram dispatcher.
+        // Reading its active destination avoids a peer-only lookup which could
+        // alias concurrent connections using the same client endpoint.
+        if (listener_) destination = listener_->current_local();
         if (!destination.valid()) {
             log().war("downstream handshake rejected: original destination missing for %s",
                       endpoint_text(peer_endpoint).c_str());

@@ -181,7 +181,9 @@ bool SmithProxy::create_listeners() {
                         certs_path + SSLFactory::config_t::SR_KEYF,
                         true, 443, true, sx::quic::lifecycle_options {},
                         sx::quic::resource_limits {}, std::string {},
-                        sx::multiflow::make_mitm_flow_proxy);
+                        sx::multiflow::make_mitm_flow_proxy,
+                        CfgFactory::get()->capture_local.enabled
+                            || CfgFactory::get()->capture_remote.enabled);
                     if (!service->prepare()) {
                         _fat("Failed to setup QUIC listener: %s", service->last_error().c_str());
                         return false;

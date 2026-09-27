@@ -167,6 +167,7 @@ struct openssl_listener::dispatcher_state {
         std::vector<unsigned char> data;
         datagram_endpoint peer;
         datagram_endpoint local;
+        std::uint64_t association = 0;
     };
     ~dispatcher_state() { BIO_free(application_bio); }
 
@@ -177,6 +178,8 @@ struct openssl_listener::dispatcher_state {
     detail::datagram_route_table routes;  // Bounded CID-to-transparent-tuple map.
     datagram_endpoint active_peer;        // Tuple scoped to one synchronous operation.
     datagram_endpoint active_local;       // Local half paired with active_peer.
+    std::uint64_t active_association = 0; // CID family scoped to the same operation.
+    std::uint64_t next_association = 1;   // Zero means unknown/unroutable.
     bool input_active = false;            // The active tuple is currently safe to use.
 };
 
@@ -288,7 +291,8 @@ std::optional<detail::datagram_route> detail::datagram_route_table::resolve(
             continue;
         }
         if (result && (!same_endpoint(result->peer, route.peer)
-                       || !same_endpoint(result->local, route.local))) {
+                       || !same_endpoint(result->local, route.local)
+                       || result->association != route.association)) {
             return std::nullopt;
         }
         result = route;
@@ -301,7 +305,20 @@ namespace {
 void learn_packet_route(openssl_listener::dispatcher_state& state,
                         openssl_listener::dispatcher_state::packet const& packet) {
     state.routes.learn(packet.data.data(), packet.data.size(),
-                       {packet.peer, packet.local});
+                       {packet.peer, packet.local, packet.association});
+}
+
+void associate_input_packet(openssl_listener::dispatcher_state& state,
+                            openssl_listener::dispatcher_state::packet& packet) {
+    // Only a valid long header can introduce a new CID family. Unknown short
+    // headers and non-QUIC datagrams must never acquire somebody else's state.
+    auto const parsed = parse_header(packet.data.data(), packet.data.size());
+    if (!parsed) return;
+    auto const route = state.routes.resolve(packet.data.data(), packet.data.size());
+    if (!route && parsed.value.form != packet_form::long_header) return;
+    packet.association = route ? route->association : state.next_association++;
+    if (packet.association == 0) packet.association = state.next_association++;
+    learn_packet_route(state, packet);
 }
 
 bool receive_socket_datagram(int fd, openssl_listener::dispatcher_state::packet& packet) {
@@ -373,6 +390,17 @@ bool inject_bio_datagram(BIO* bio, openssl_listener::dispatcher_state::packet co
 
 enum class send_result { sent, blocked, failed };
 
+void observe_datagram(openssl_listener::observer_state const* state,
+                      datagram_direction direction,
+                      openssl_listener::dispatcher_state::packet const& packet) {
+    if (!state || !state->observer) return;
+    state->observer(datagram_view {
+        direction, packet.peer, packet.local,
+        packet.association,
+        packet.data.data(), packet.data.size(),
+    });
+}
+
 send_result send_socket_datagram(int fd,
                                  openssl_listener::dispatcher_state::packet const& packet) {
     if (!packet.peer.valid() || !packet.local.valid()) return send_result::failed;
@@ -441,11 +469,15 @@ bool drain_bio_output(openssl_listener::dispatcher_state& state) {
         auto const route = state.routes.resolve(packet.data.data(), packet.data.size());
         if (!packet.peer.valid() && route) packet.peer = route->peer;
         if (!packet.local.valid() && route) packet.local = route->local;
+        if (route) packet.association = route->association;
         // A client's first Initial may have an empty source CID, leaving a
         // Retry with no routable destination CID. While processing exactly
         // that input datagram, its tuple is unambiguous and safe to use.
         if (!packet.peer.valid() && state.input_active) packet.peer = state.active_peer;
         if (!packet.local.valid() && state.input_active) packet.local = state.active_local;
+        if (packet.association == 0 && state.input_active) {
+            packet.association = state.active_association;
+        }
         if (!packet.peer.valid() || !packet.local.valid()) {
             // An unroutable control packet must be dropped, never sent to an
             // unrelated client. The peer will retransmit if it was relevant.
@@ -457,11 +489,14 @@ bool drain_bio_output(openssl_listener::dispatcher_state& state) {
     return true;
 }
 
-bool flush_socket_output(openssl_listener::dispatcher_state& state) {
+bool flush_socket_output(openssl_listener::dispatcher_state& state,
+                         openssl_listener::observer_state const* observer) {
     while (!state.pending_output.empty()) {
         auto const result = send_socket_datagram(state.socket_fd, state.pending_output.front());
         if (result == send_result::blocked) return true;
         if (result == send_result::failed) return false;
+        observe_datagram(observer, datagram_direction::egress,
+                         state.pending_output.front());
         state.pending_output.pop_front();
     }
     return true;
@@ -1010,7 +1045,7 @@ bool openssl_listener::fail_operation(std::string operation) {
 }
 
 bool openssl_listener::flush_dispatcher_socket() {
-    if (flush_socket_output(*dispatcher_state_)) return true;
+    if (flush_socket_output(*dispatcher_state_, observer_state_.get())) return true;
     last_error_ = std::string("sendmsg: ") + std::strerror(errno);
     return false;
 }
@@ -1025,6 +1060,7 @@ bool openssl_listener::progress_input_packet() {
     // leak output across sessions; this narrow scope cannot cross a packet.
     dispatcher.active_peer = packet.peer;
     dispatcher.active_local = packet.local;
+    dispatcher.active_association = packet.association;
     dispatcher.input_active = true;
     auto clear_active = [&dispatcher]() { dispatcher.input_active = false; };
 
@@ -1065,10 +1101,8 @@ bool openssl_listener::receive_input_batch() {
             return false;
         }
 
-        learn_packet_route(dispatcher, packet);
-        if (observer_state_ && observer_state_->observer) {
-            observer_state_->observer(packet.peer, packet.local);
-        }
+        associate_input_packet(dispatcher, packet);
+        observe_datagram(observer_state_.get(), datagram_direction::ingress, packet);
 
         dispatcher.pending_input.push_back(std::move(packet));
         if (!progress_input_packet()) return false;
@@ -1092,11 +1126,18 @@ bool openssl_listener::progress_listener_timers() {
 
 bool openssl_listener::flush_output(datagram_endpoint const& peer,
                                     datagram_endpoint const& local) {
+    return flush_output(peer, local, 0);
+}
+
+bool openssl_listener::flush_output(datagram_endpoint const& peer,
+                                    datagram_endpoint const& local,
+                                    std::uint64_t association) {
     if (!listener_ || !peer.valid() || !local.valid()) return false;
     if (!dispatcher_state_) return true;
     auto& dispatcher = *dispatcher_state_;
     dispatcher.active_peer = peer;
     dispatcher.active_local = local;
+    dispatcher.active_association = association;
     dispatcher.input_active = true;
     auto const drained = drain_bio_output(dispatcher);
     dispatcher.input_active = false;
@@ -1106,7 +1147,7 @@ bool openssl_listener::flush_output(datagram_endpoint const& peer,
         if (!detail.empty()) last_error_ += ": " + detail;
         return false;
     }
-    if (!flush_socket_output(dispatcher)) {
+    if (!flush_socket_output(dispatcher, observer_state_.get())) {
         last_error_ = std::string("sendmsg: ") + std::strerror(errno);
         return false;
     }
@@ -1130,6 +1171,11 @@ datagram_endpoint openssl_listener::current_peer() const {
 
 datagram_endpoint openssl_listener::current_local() const {
     return dispatcher_state_ ? dispatcher_state_->active_local : datagram_endpoint {};
+}
+
+std::uint64_t openssl_listener::current_association() const {
+    return dispatcher_state_ && dispatcher_state_->input_active
+        ? dispatcher_state_->active_association : 0;
 }
 
 #endif // SMITHPROXY_OPENSSL_QUIC

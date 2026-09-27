@@ -6,6 +6,7 @@
 #include <traflog/pcaplog.hpp>
 #include <algorithm>
 #include <memory>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -163,6 +164,80 @@ TEST(Spq1, ForwardsNativePacketsAndSecretsWithoutTransformation) {
     EXPECT_EQ(secrets->front().format, socle::traffic_secret_format::tls_key_log);
     EXPECT_EQ(std::string(secrets->front().data.begin(), secrets->front().data.end()),
               keylog);
+}
+
+TEST(SessionTrafficLog, ReplaysPrePolicyRecordsAndThenWritesDirectly) {
+    auto packets = std::make_shared<std::vector<captured_packet>>();
+    auto native_packets = std::make_shared<std::vector<captured_packet>>();
+    auto secrets = std::make_shared<std::vector<captured_secret>>();
+    auto journal = std::make_shared<sx::session_traffic_log>(1024);
+    std::string const first = "first-wire-packet";
+    std::string const key = "CLIENT_TRAFFIC_SECRET_0 00 aa";
+    std::string const second = "second-wire-packet";
+
+    buffer first_data(first.data(), first.size());
+    buffer key_data(key.data(), key.size());
+    journal->write_packet(socle::side_t::LEFT, first_data);
+    journal->write_secret(socle::traffic_secret_format::tls_key_log, key_data);
+    EXPECT_GT(journal->pending_bytes(), 0U);
+
+    auto output = std::make_shared<capture_sink>(packets, native_packets, secrets);
+    ASSERT_TRUE(journal->install(output));
+    EXPECT_EQ(journal->pending_bytes(), 0U);
+    buffer second_data(second.data(), second.size());
+    journal->write_packet(socle::side_t::RIGHT, second_data);
+
+    ASSERT_EQ(native_packets->size(), 2U);
+    EXPECT_EQ(std::string(native_packets->at(0).data.begin(),
+                          native_packets->at(0).data.end()), first);
+    EXPECT_EQ(native_packets->at(1).side, socle::side_t::RIGHT);
+    EXPECT_EQ(std::string(native_packets->at(1).data.begin(),
+                          native_packets->at(1).data.end()), second);
+    ASSERT_EQ(secrets->size(), 1U);
+    EXPECT_EQ(std::string(secrets->front().data.begin(), secrets->front().data.end()), key);
+    EXPECT_FALSE(journal->install(output));
+}
+
+TEST(SessionTrafficLog, SecretsEvictPacketsAtTheBound) {
+    auto packets = std::make_shared<std::vector<captured_packet>>();
+    auto native_packets = std::make_shared<std::vector<captured_packet>>();
+    auto secrets = std::make_shared<std::vector<captured_secret>>();
+    sx::session_traffic_log journal(8);
+    std::string const packet = "12345678";
+    std::string const key = "secret";
+    buffer packet_data(packet.data(), packet.size());
+    buffer key_data(key.data(), key.size());
+
+    journal.write_packet(socle::side_t::LEFT, packet_data);
+    journal.write_secret(socle::traffic_secret_format::tls_key_log, key_data);
+    ASSERT_TRUE(journal.install(
+        std::make_shared<capture_sink>(packets, native_packets, secrets)));
+
+    EXPECT_TRUE(native_packets->empty());
+    ASSERT_EQ(secrets->size(), 1U);
+    EXPECT_EQ(journal.dropped_records(), 1U);
+}
+
+TEST(SessionTrafficLog, SerializesConcurrentPublishers) {
+    auto packets = std::make_shared<std::vector<captured_packet>>();
+    auto native_packets = std::make_shared<std::vector<captured_packet>>();
+    sx::session_traffic_log journal(1024);
+    ASSERT_TRUE(journal.install(std::make_shared<capture_sink>(packets, native_packets)));
+
+    std::vector<std::thread> writers;
+    for (unsigned char writer = 0; writer < 4; ++writer) {
+        writers.emplace_back([&journal, writer]() {
+            for (std::size_t item = 0; item < 100; ++item) {
+                unsigned char payload[] {writer, static_cast<unsigned char>(item)};
+                buffer packet(payload, sizeof(payload));
+                journal.write_packet(socle::side_t::LEFT, packet);
+            }
+        });
+    }
+    for (auto& writer : writers) writer.join();
+
+    EXPECT_EQ(native_packets->size(), 400U);
+    EXPECT_EQ(journal.dropped_records(), 0U);
 }
 
 TEST(Spq1, GreKeyCarriesLowSessionIdentifier) {

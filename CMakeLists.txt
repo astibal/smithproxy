@@ -493,11 +493,13 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/proxy/multiflow/mfflowcom.cpp
                 src/proxy/multiflow/mfproxy.cpp
                 src/proxy/quic/wire.cpp
+                src/proxy/quic/h3capture.cpp
+                src/proxy/quic/spq1.cpp
                 src/proxy/quic/openssl.cpp
                 src/service/quic/quicservice.cpp
                 src/service/quic/testbed/quic_test_node.cpp
         )
-        target_link_libraries(quic_test_node socle_lib pthread crypto ssl)
+        target_link_libraries(quic_test_node smithproxy_qpack socle_lib pthread crypto ssl)
     endif()
 ENDIF()
 

@@ -118,6 +118,11 @@ std::vector<unsigned char> encode_h3_headers_packet(
 
 stream_log::stream_log(std::unique_ptr<socle::baseTrafficLogger> output,
                        stream_context context)
+    : stream_log(std::shared_ptr<socle::baseTrafficLogger>(std::move(output)),
+                 std::move(context), shared_output_tag {}) {}
+
+stream_log::stream_log(std::shared_ptr<socle::baseTrafficLogger> output,
+                       stream_context context, shared_output_tag)
     : output_(std::move(output)), context_(std::move(context)) {}
 
 stream_log::~stream_log() {
@@ -216,7 +221,12 @@ std::unique_ptr<socle::baseTrafficLogger> stream_log_adapter::wrap(
     pcap->details.next_proto = socle::pcap::connection_details::UDP;
     pcap->details.gre_key = static_cast<std::uint32_t>(
         context_.connection->session_id & 0xFFFFFFFFULL);
-    return std::make_unique<stream_log>(std::move(output), context_);
+    auto shared_output = std::shared_ptr<socle::baseTrafficLogger>(std::move(output));
+    if (context_.connection->native_log) {
+        context_.connection->native_log->install(shared_output);
+    }
+    return std::unique_ptr<stream_log>(
+        new stream_log(std::move(shared_output), context_, stream_log::shared_output_tag {}));
 }
 
 } // namespace sx::quic::spq1

@@ -34,6 +34,8 @@ struct resource_limits {
     std::size_t max_streams_per_session = 256;    ///< Simultaneously paired flows.
     std::size_t stream_buffer_bytes = 16 * 1024;  ///< Per flow and direction.
     std::size_t max_certificate_jobs = 64;        ///< Concurrent origin verification jobs.
+    std::size_t max_pending_capture_sessions = 64; ///< Unaccepted CID journals.
+    std::size_t native_capture_buffer_bytes = 512 * 1024; ///< Before policy installs a logger.
 };
 
 /** Lock-free copy of cumulative listener counters for logs/metrics/tests. */
@@ -90,7 +92,8 @@ public:
                      lifecycle_options lifecycle = {},
                      resource_limits limits = {},
                      std::string upstream_host = {},
-                     flow_proxy_factory proxy_factory = {});
+                     flow_proxy_factory proxy_factory = {},
+                     bool capture_native = false);
     ~listener_service();
 
     listener_service(listener_service const&) = delete;
@@ -123,6 +126,9 @@ private:
         datagram_endpoint const& target, std::string const& server_name);
     /** OpenSSL trampoline; return -1 while asynchronous preparation is pending. */
     static int certificate_callback(SSL* ssl, void* argument);
+    /** Bind a newly parsed ClientHello to the dispatcher's stable CID family. */
+    static int client_hello_callback(SSL* ssl, int* alert, void* argument);
+    int bind_capture_session(SSL* downstream);
     /** Start or collect one origin-verification job for a downstream handshake. */
     int prepare_verified_certificate(SSL* downstream);
     struct verified_certificate;
@@ -147,6 +153,7 @@ private:
     lifecycle_options lifecycle_;                ///< Session timing policy.
     resource_limits limits_;                     ///< Resource-exhaustion policy.
     flow_proxy_factory proxy_factory_;           ///< Production per-stream proxy strategy.
+    bool capture_native_;                        ///< Buffer downstream wire records for policy.
     int udp_fd_ = -1;                            ///< Socket owned by this service.
     int wake_fd_ = -1;                           ///< eventfd used to interrupt an idle poll.
     std::atomic_bool stopping_ = false;           ///< Cross-thread stop request.
@@ -186,6 +193,9 @@ private:
         std::shared_ptr<openssl_connection> downstream;
         std::shared_ptr<openssl_connection> upstream;
         std::shared_ptr<keylog_store> keylog; ///< Downstream secrets for capture export.
+        std::shared_ptr<sx::session_traffic_log> capture_log; ///< Policy-bound wire journal.
+        std::uint64_t capture_association = 0; ///< Downstream dispatcher CID family.
+        std::size_t keylog_cursor = 0; ///< Number of keylog records already published.
         std::unique_ptr<multiflow::flow_proxy> proxy;
         datagram_endpoint client_endpoint;
         datagram_endpoint target_endpoint;
@@ -215,10 +225,25 @@ private:
         std::chrono::steady_clock::time_point created = std::chrono::steady_clock::now();
     };
     std::map<SSL*, certificate_job> certificate_jobs_; ///< Bounded pending verifications.
-    std::map<std::string, datagram_endpoint> original_destinations_; ///< Peer -> TPROXY target.
+    /** Wire journal created by an Initial before OpenSSL publishes its session. */
+    struct pending_capture {
+        std::shared_ptr<sx::session_traffic_log> log;
+        std::chrono::steady_clock::time_point updated = std::chrono::steady_clock::now();
+    };
+    std::map<std::uint64_t, pending_capture> pending_captures_; ///< CID family -> journal.
+    std::map<std::uint64_t, std::weak_ptr<sx::session_traffic_log>> capture_routes_;
+    struct dispatcher_binding {
+        std::uint64_t association = 0;
+        std::chrono::steady_clock::time_point updated = std::chrono::steady_clock::now();
+    };
+    std::map<SSL*, dispatcher_binding> dispatcher_bindings_; ///< ClientHello until accept.
 
     /** Transfer certificate-worker results to the matching accepted session. */
     void attach_staged_upstream(session& value);
+    /** Record one downstream datagram without exposing QUIC to the logger API. */
+    void observe_datagram(datagram_view const& datagram);
+    /** Publish keylog records added since the previous session-loop pass. */
+    void publish_capture_secrets(session& value);
     /** Accept every connection currently available without blocking the worker. */
     void accept_connections();
     /** Progress one session according to its explicit lifecycle state. */

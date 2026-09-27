@@ -61,6 +61,7 @@ namespace detail {
 struct datagram_route {
     datagram_endpoint peer;
     datagram_endpoint local;
+    std::uint64_t association = 0; ///< Listener-local identity shared by one CID family.
 };
 
 /**
@@ -94,9 +95,21 @@ private:
 } // namespace detail
 #endif
 
-/** Observes the peer and original local destination of an incoming datagram. */
-using datagram_observer = std::function<void(datagram_endpoint const& peer,
-                                              datagram_endpoint const& local)>;
+/** Direction of a datagram relative to the downstream listener socket. */
+enum class datagram_direction { ingress, egress };
+
+/** Borrowed view of one successfully received or transmitted UDP datagram. */
+struct datagram_view {
+    datagram_direction direction = datagram_direction::ingress;
+    datagram_endpoint peer;
+    datagram_endpoint local;
+    std::uint64_t association = 0;
+    unsigned char const* data = nullptr;
+    std::size_t size = 0;
+};
+
+/** Synchronous observer; borrowed payload remains valid only during the call. */
+using datagram_observer = std::function<void(datagram_view const& datagram)>;
 /** Copy an OpenSSL BIO_ADDR into the transport-neutral endpoint value. */
 datagram_endpoint endpoint_from_bio_address(const BIO_ADDR* address);
 
@@ -247,7 +260,8 @@ public:
     /**
      * Attach a nonblocking OpenSSL QUIC listener to a caller-owned UDP socket.
      * enable_local_address requests destination-address metadata for transparent
-     * replies; observer receives copied metadata before OpenSSL consumes it.
+     * replies. In transparent mode the observer sees every successful socket
+     * receive and send, including its complete UDP payload and tuple.
      */
     static std::unique_ptr<openssl_listener> create(SSL_CTX* context, int udp_fd,
                                                      bool enable_local_address = true,
@@ -261,8 +275,10 @@ public:
     std::unique_ptr<openssl_connection> accept();
     /** Progress listener packet processing and QUIC timers without blocking. */
     bool handle_events();
-    /** Flush output synchronously produced while servicing one known connection. */
+    /** Flush output produced by one known connection and preserve its CID identity. */
     bool flush_output(datagram_endpoint const& peer, datagram_endpoint const& local);
+    bool flush_output(datagram_endpoint const& peer, datagram_endpoint const& local,
+                      std::uint64_t association);
     /** Socket readiness required by the dispatcher/direct network BIO. */
     short desired_socket_events() const;
     /** Diagnostic for the most recent adapter-level event failure. */
@@ -270,6 +286,8 @@ public:
     /** Tuple of the datagram currently/most recently dispatched to OpenSSL. */
     datagram_endpoint current_peer() const;
     datagram_endpoint current_local() const;
+    /** Identity of the CID family currently being dispatched to OpenSSL. */
+    std::uint64_t current_association() const;
     bool local_address_enabled() const { return local_address_enabled_; }
     SSL* native_handle() const { return listener_.get(); }
 

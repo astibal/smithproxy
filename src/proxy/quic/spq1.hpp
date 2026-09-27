@@ -19,16 +19,20 @@ namespace sx::quic::spq1 {
 
 /** Shared identity and packet-number space for one exported QUIC connection. */
 struct connection_context {
-    connection_context(std::uint64_t id, std::string protocol)
+    connection_context(std::uint64_t id, std::string protocol,
+                       std::shared_ptr<sx::session_traffic_log> native_log = {})
         : session_id(id), alpn(std::move(protocol)),
           h3_decoder(alpn.rfind("h3", 0) == 0
-              ? std::make_shared<h3_capture_decoder>() : nullptr) {}
+              ? std::make_shared<h3_capture_decoder>() : nullptr),
+          native_log(std::move(native_log)) {}
 
     std::uint64_t session_id = 0;
     std::string alpn;
     std::atomic_uint32_t next_packet_number {1};
     /** Shared across streams because QPACK instructions use dedicated flows. */
     std::shared_ptr<h3_capture_decoder> h3_decoder;
+    /** Encrypted session packets and secrets routed into the selected logger. */
+    std::shared_ptr<sx::session_traffic_log> native_log;
 };
 
 /** Metadata which remains constant for one downstream-visible QUIC stream. */
@@ -70,6 +74,11 @@ public:
     void finish(socle::side_t side);
 
 private:
+    struct shared_output_tag {};
+    stream_log(std::shared_ptr<socle::baseTrafficLogger> output,
+               stream_context context, shared_output_tag);
+    friend class stream_log_adapter;
+
     static constexpr std::size_t max_plaintext_per_packet = 1100;
 
     void emit(socle::side_t side, unsigned char const* data,
@@ -77,7 +86,7 @@ private:
     void emit(h3_headers_record const& record);
     static std::size_t side_index(socle::side_t side);
 
-    std::unique_ptr<socle::baseTrafficLogger> output_;
+    std::shared_ptr<socle::baseTrafficLogger> output_;
     stream_context context_;
     std::uint64_t offsets_[2] {0, 0};
     bool observed_[2] {false, false};

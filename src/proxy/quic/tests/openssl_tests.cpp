@@ -136,6 +136,19 @@ TEST(OpenSslQuicDispatcher, EvictsOldRoutesAtItsConfiguredBound) {
     EXPECT_FALSE(routes.resolve(evicted.data(), evicted.size()));
 }
 
+TEST(OpenSslQuicDispatcher, SeparatesCidFamiliesSharingOneUdpTuple) {
+    quic::detail::datagram_route_table routes;
+    auto const peer = loopback_endpoint(10001);
+    auto const local = loopback_endpoint(443);
+    routes.remember({0xaa}, {peer, local, 11});
+    routes.remember({0xaa, 0xbb}, {peer, local, 12});
+
+    // Short headers do not encode CID length. Even with an identical tuple,
+    // overlapping prefixes from different QUIC sessions are ambiguous.
+    std::vector<unsigned char> packet {0x40, 0xaa, 0xbb, 0x01};
+    EXPECT_FALSE(routes.resolve(packet.data(), packet.size()));
+}
+
 TEST(OpenSslQuic, CreatesNonBlockingServerListenerObject) {
     auto context = quic::make_openssl_quic_context(true);
     ASSERT_NE(context, nullptr) << quic::openssl_error_stack();
@@ -172,10 +185,18 @@ TEST(OpenSslQuic, OutgoingAdapterCompletesHandshake) {
                           &address_size), 0);
 
     quic::datagram_endpoint observed_destination;
+    std::uint64_t ingress_association = 0;
+    std::uint64_t egress_association = 0;
     auto listener = quic::openssl_listener::create(
         server_context.get(), server_fd, true,
-        [&observed_destination](auto const&, auto const& local) {
-            observed_destination = local;
+        [&observed_destination, &ingress_association, &egress_association](
+            quic::datagram_view const& datagram) {
+            if (datagram.direction == quic::datagram_direction::ingress) {
+                observed_destination = datagram.local;
+                if (ingress_association == 0) ingress_association = datagram.association;
+            } else if (egress_association == 0) {
+                egress_association = datagram.association;
+            }
         });
     ASSERT_NE(listener, nullptr) << quic::openssl_error_stack();
     std::string error;
@@ -205,6 +226,8 @@ TEST(OpenSslQuic, OutgoingAdapterCompletesHandshake) {
     auto const* observed = reinterpret_cast<sockaddr_in const*>(&observed_destination.address);
     EXPECT_EQ(observed->sin_family, AF_INET);
     EXPECT_EQ(observed->sin_port, server_address.sin_port);
+    EXPECT_NE(ingress_association, 0U);
+    EXPECT_EQ(egress_association, ingress_association);
 
     std::string rejected_error;
     auto rejected = quic::connect_openssl_quic(
