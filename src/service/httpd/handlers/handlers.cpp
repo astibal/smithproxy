@@ -1,3 +1,4 @@
+#ifdef USE_LMHPP
 #include <thread>
 #include <memory>
 
@@ -230,3 +231,4 @@ namespace sx::webserver {
     }
 }
 }
+#endif

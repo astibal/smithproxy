@@ -469,7 +469,7 @@ print(*(x.getsockname()[1] for x in s))'
             tls) LAB_ENV+=("TLS_SUITE_TEST=1") ;;
             policy) LAB_ENV+=("POLICY_TEST=1") ;;
             rtt) LAB_ENV+=("RTT_TEST=1") ;;
-            socks) LAB_ENV+=("BASE_TRAFFIC_TEST=0" "SOCKS_TEST=1" "SOCKS_ONLY_TEST=1") ;;
+            socks) LAB_ENV+=("BASE_TRAFFIC_TEST=0" "SOCKS_TEST=1" "SOCKS_ONLY_TEST=1" "API_DISABLED_TEST=1") ;;
             session-list) LAB_ENV+=("SESSION_LIST_STRESS_TEST=1") ;;
             smoke) LAB_ENV+=("PPLAY_SMOKE_TEST=1") ;;
             tls-policy) LAB_ENV+=("BASE_TRAFFIC_TEST=0" "TLS_SUITE_TEST=1" "POLICY_TEST=1" "SESSION_LIST_STRESS_TEST=1") ;;

@@ -55,7 +55,9 @@ text = text.replace('/etc/smithproxy/certs/default/',str(certs)+'/').replace('/e
 text = text.replace('/var/smithproxy/data',str(data)).replace('/var/log/smithproxy/',str(data)+'/')
 text = text.replace('certs_ca_key_password = "smithproxy"','certs_ca_key_password = ""')
 text = text.replace('accept_redirect = TRUE','accept_redirect = FALSE')
-text = text.replace('accept_api = FALSE','accept_api = TRUE').replace('accept_cli = FALSE','accept_cli = TRUE')
+if os.environ.get('API_DISABLED_TEST') != '1':
+    text = text.replace('accept_api = FALSE','accept_api = TRUE')
+text = text.replace('accept_cli = FALSE','accept_cli = TRUE')
 if os.environ.get('SOCKS_ONLY_TEST') != '1':
     text = text.replace('accept_tproxy = FALSE','accept_tproxy = TRUE').replace('accept_socks = TRUE','accept_socks = FALSE')
 if os.environ.get('MEM_CONSTRAINED_TEST') != '1' and os.environ.get('SOCKS_ONLY_TEST') != '1':

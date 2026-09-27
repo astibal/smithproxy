@@ -5,8 +5,11 @@ Kubernetes.  The mem-constrained profile exposes a SOCKS5 interface on port
 1080 and intentionally does not configure TPROXY, routes or nftables.
 Webhook delivery is compiled out of this build profile, so the Smithproxy
 binary does not link `libcurl`.  Configured webhook actions are no-ops.
+The HTTP API is also compiled out: the binary does not link `libmicrohttpd` or
+its transitive `libgnutls` dependency and never opens an API listener.
 
-Both runners default to the measured initial envelope:
+Both runners default to a conservative envelope above the measured 16.3 MiB
+peak RSS of the tested SOCKS5 request:
 
 - 40 MiB systemd soft pressure point or 32 MiB Podman reservation,
 - 48 MiB hard memory limit,

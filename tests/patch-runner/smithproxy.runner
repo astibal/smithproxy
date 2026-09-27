@@ -369,12 +369,16 @@ printf '%s\n' "$PROXY_PID" > "$DATA_DIR/proxy.pid"
 # The outer socat listens on the host. For each connection it starts an inner socat
 # inside the data namespace, relaying the byte stream to the loopback API. TLS stays
 # end-to-end between the API client and Smithproxy; the relay does not decrypt it.
-setsid socat "TCP4-LISTEN:$API_PORT,bind=$API_BIND,reuseaddr,fork" \
-    "EXEC:ip netns exec $NS socat STDIO TCP4\:127.0.0.1\:$INTERNAL_API_PORT" \
-    > "$DATA_DIR/api-relay.log" 2>&1 &
-API_PID=$!
-log "6/7  Processes started: proxy PID=$PROXY_PID, API relay PID=$API_PID"
-log "     API path: https://$API_BIND:$API_PORT -> $NS / 127.0.0.1:$INTERNAL_API_PORT"
+if [[ ${API_DISABLED_TEST:-0} != 1 ]]; then
+    setsid socat "TCP4-LISTEN:$API_PORT,bind=$API_BIND,reuseaddr,fork" \
+        "EXEC:ip netns exec $NS socat STDIO TCP4\:127.0.0.1\:$INTERNAL_API_PORT" \
+        > "$DATA_DIR/api-relay.log" 2>&1 &
+    API_PID=$!
+    log "6/7  Processes started: proxy PID=$PROXY_PID, API relay PID=$API_PID"
+    log "     API path: https://$API_BIND:$API_PORT -> $NS / 127.0.0.1:$INTERNAL_API_PORT"
+else
+    log "6/7  Proxy started: PID=$PROXY_PID; API relay disabled"
+fi
 
 # == 7. Foreground supervision ========================================================
 # This reports process startup, not listener health. Readiness and actual MITM

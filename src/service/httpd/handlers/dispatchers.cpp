@@ -1,4 +1,5 @@
 
+#ifdef USE_LMHPP
 #include <service/httpd/handlers/dispatchers.hpp>
 #include <service/httpd/handlers/handlers.hpp>
 
@@ -170,4 +171,4 @@ namespace sx::webserver::dispatchers {
         server.addController(std::shared_ptr<lmh::Controller>(webhook_unregister));
     }
 }
-
+#endif

@@ -146,14 +146,25 @@ ORIGIN_PID=$!
     --api-port "$API_RELAY_PORT" --config-dir "$ROOT/config" --data-dir "$ROOT/data" \
     > "$ROOT/results/runner.log" 2>&1 &
 RUNNER_PID=$!
-for attempt in $(seq 1 60); do
-    if curl --noproxy '*' -ksSf --max-time 1 -H "X-API-Key: $(cat "$ROOT/config/api.key")" \
-        "https://127.0.0.1:$API_RELAY_PORT/api/status/ping" > "$ROOT/results/api.json" 2>/dev/null; then break; fi
-    kill -0 "$RUNNER_PID"
-    sleep 1
-done
-python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["status"] == "ok"' "$ROOT/results/api.json"
-echo 'PASS API: authenticated HTTPS request from host namespace'
+if [[ ${API_DISABLED_TEST:-0} == 1 ]]; then
+    for attempt in $(seq 1 60); do
+        if ip netns exec "$NS" ss -ltnH "sport = :1080" | grep -q .; then break; fi
+        kill -0 "$RUNNER_PID"
+        sleep 1
+    done
+    ip netns exec "$NS" ss -ltnH "sport = :1080" | grep -q .
+    ! ip netns exec "$NS" ss -ltnH "sport = :55555" | grep -q .
+    echo 'PASS readiness: SOCKS listener active and HTTP API absent'
+else
+    for attempt in $(seq 1 60); do
+        if curl --noproxy '*' -ksSf --max-time 1 -H "X-API-Key: $(cat "$ROOT/config/api.key")" \
+            "https://127.0.0.1:$API_RELAY_PORT/api/status/ping" > "$ROOT/results/api.json" 2>/dev/null; then break; fi
+        kill -0 "$RUNNER_PID"
+        sleep 1
+    done
+    python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["status"] == "ok"' "$ROOT/results/api.json"
+    echo 'PASS API: authenticated HTTPS request from host namespace'
+fi
 if [[ $SOCKS_TEST == 1 ]]; then
     ip netns exec "$NS" curl --noproxy '*' --socks5-hostname 127.0.0.1:1080 \
         -fsS --max-time 15 http://198.18.20.2:8080/ > "$ROOT/results/socks-http.txt"

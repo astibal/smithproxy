@@ -46,7 +46,9 @@
 #include <set>
 #include <thread>
 
+#ifdef USE_LMHPP
 #include <ext/lmhpp/include/lmhttpd.hpp>
+#endif
 #include <nlohmann/json.hpp>
 #include <main.hpp>
 #include <common/display.hpp>
@@ -220,6 +222,7 @@ struct HttpSessions {
 
 std::thread* create_httpd_thread(unsigned short port);
 
+#ifdef USE_LMHPP
 struct Http_JsonResponseParams : public lmh::ResponseParams {
     nlohmann::json response;
 };
@@ -300,6 +303,7 @@ public:
     }
 
 };
+#endif
 
 }
 #endif //HTTPD_HPP_
