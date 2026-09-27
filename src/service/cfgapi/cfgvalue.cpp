@@ -183,6 +183,11 @@ void CfgValueHelp::init() {
             .may_be_empty(false)
             .value_filter(CfgValue::VALUE_BOOL);
 
+    add("settings.accept_cli", "whether to start the local management CLI")
+            .help_quick("<bool>: start the CLI listener")
+            .may_be_empty(false)
+            .value_filter(CfgValue::VALUE_BOOL);
+
     //
 
 

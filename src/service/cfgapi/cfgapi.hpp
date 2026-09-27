@@ -253,6 +253,7 @@ public:
     bool accept_redirect = true;
     bool accept_socks = true;
     bool accept_api = true;
+    bool accept_cli = true;
 
     std::string admin_group;
 

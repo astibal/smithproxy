@@ -714,6 +714,7 @@ bool CfgFactory::load_settings () {
     load_if_exists(cfgapi.getRoot()["settings"], "accept_redirect", accept_redirect);
     load_if_exists(cfgapi.getRoot()["settings"], "accept_socks", accept_socks);
     load_if_exists(cfgapi.getRoot()["settings"], "accept_api", accept_api);
+    load_if_exists(cfgapi.getRoot()["settings"], "accept_cli", accept_cli);
     load_if_exists(cfgapi.getRoot()["settings"], "plaintext_port",listen_tcp_port_base); listen_tcp_port = listen_tcp_port_base;
     load_if_exists(cfgapi.getRoot()["settings"], "plaintext_workers",num_workers_tcp);
     load_if_exists(cfgapi.getRoot()["settings"], "ssl_port",listen_tls_port_base); listen_tls_port = listen_tls_port_base;
@@ -5072,6 +5073,7 @@ int save_settings(Config& ex) {
     objects.add("accept_tproxy", Setting::TypeBoolean) = CfgFactory::get()->accept_tproxy;
     objects.add("accept_redirect", Setting::TypeBoolean) = CfgFactory::get()->accept_redirect;
     objects.add("accept_socks", Setting::TypeBoolean) = CfgFactory::get()->accept_socks;
+    objects.add("accept_cli", Setting::TypeBoolean) = CfgFactory::get()->accept_cli;
 
     // nameservers
     Setting& it_ns  = objects.add("nameservers", Setting::TypeArray);

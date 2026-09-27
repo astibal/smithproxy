@@ -291,20 +291,22 @@ void SmithProxy::run() {
     }
 
     // cli_loop uses select :(
-    cli_thread = std::make_shared<std::thread>([] () {
-        CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
+    if(CfgFactory::get()->accept_cli) {
+        cli_thread = std::make_shared<std::thread>([] () {
+            CRYPTO_set_mem_functions( mempool_alloc, mempool_realloc, mempool_free);
 
-        auto this_daemon = DaemonFactory::instance();
-        auto const& log = this_daemon->get_log();
+            auto this_daemon = DaemonFactory::instance();
+            auto const& log = this_daemon->get_log();
 
-        _inf("Starting CLI");
-        DaemonFactory::set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
-        _dia("smithproxy_cli: max file descriptors: %d", this_daemon->get_limit_fd());
+            _inf("Starting CLI");
+            DaemonFactory::set_daemon_signals(SmithProxy::instance().terminate_handler_, SmithProxy::instance().reload_handler_);
+            _dia("smithproxy_cli: max file descriptors: %d", this_daemon->get_limit_fd());
 
-        cli_loop(CfgFactory::get()->cli_port + CfgFactory::get()->tenant_index);
-        _dia("cli workers torn down.");
-    } );
-    pthread_setname_np(cli_thread->native_handle(),friendly_thread_name_cli.c_str());
+            cli_loop(CfgFactory::get()->cli_port + CfgFactory::get()->tenant_index);
+            _dia("cli workers torn down.");
+        } );
+        pthread_setname_np(cli_thread->native_handle(),friendly_thread_name_cli.c_str());
+    }
 
 
     auto launch_proxy_threads = [&](auto &proxies, auto& thread_list, const char* log_friendly, const char* thread_friendly) {

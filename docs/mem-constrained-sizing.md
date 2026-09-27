@@ -14,6 +14,7 @@ lab with separate client, proxy and origin network namespaces.
 | 256 simultaneous TCP sessions | PASS | 34.4 MiB | 29.7 MiB | 20.0 MiB | 95 |
 | Minimal HTTP-only CONNECT, utility pool 5 | PASS (2 expected XFAIL cases) | 24.0 MiB | 19.7 MiB | 9.0 MiB | 13 |
 | Minimal HTTP-only, 256 simultaneous TCP sessions | PASS | 32.1 MiB | 27.8 MiB | 17.2 MiB | 14 |
+| Explicit SOCKS5 HTTP request, no TPROXY | PASS | 23.4 MiB | 19.1 MiB | 8.5 MiB | 16 |
 
 The 256-session run adds about 9.1 MiB RSS over idle, or approximately 36 KiB
 per held session.  This is a conservative estimate because the run also takes

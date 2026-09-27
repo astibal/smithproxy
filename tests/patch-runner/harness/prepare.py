@@ -54,8 +54,11 @@ if os.environ.get('POLICY_TEST') == '1':
 text = text.replace('/etc/smithproxy/certs/default/',str(certs)+'/').replace('/etc/smithproxy/msg/en/',str(source/'etc/msg/en')+'/')
 text = text.replace('/var/smithproxy/data',str(data)).replace('/var/log/smithproxy/',str(data)+'/')
 text = text.replace('certs_ca_key_password = "smithproxy"','certs_ca_key_password = ""')
-text = text.replace('accept_redirect = TRUE','accept_redirect = FALSE').replace('accept_socks = TRUE','accept_socks = FALSE')
-if os.environ.get('MEM_CONSTRAINED_TEST') != '1':
+text = text.replace('accept_redirect = TRUE','accept_redirect = FALSE')
+text = text.replace('accept_api = FALSE','accept_api = TRUE').replace('accept_cli = FALSE','accept_cli = TRUE')
+if os.environ.get('SOCKS_ONLY_TEST') != '1':
+    text = text.replace('accept_tproxy = FALSE','accept_tproxy = TRUE').replace('accept_socks = TRUE','accept_socks = FALSE')
+if os.environ.get('MEM_CONSTRAINED_TEST') != '1' and os.environ.get('SOCKS_ONLY_TEST') != '1':
     text = re.sub(r'(plaintext_workers|ssl_workers|udp_workers|dtls_workers) = -?\d+',r'\1 = 1',text)
 text = re.sub(r'\s*auth_profile = "resolve";', '', text)
 text = text.replace('nameservers = [ "8.8.8.8", "8.8.4.4" ]','nameservers = [ "198.18.20.2" ]')
@@ -97,7 +100,6 @@ if capture_prefix:
     if prefix_count != 1:
         raise RuntimeError('cannot set capture prefix in generated config')
 text = text.replace('settings = {', f'''settings = {{
-    accept_api = TRUE;
     ca_bundle_file = "{certs / 'origin-ca.pem'}";
     http_api = {{
         keys = [ "{api_key}" ];

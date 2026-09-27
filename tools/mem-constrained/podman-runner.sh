@@ -55,13 +55,15 @@ case "$ACTION" in
             --memory "$MEMORY_MAX" --memory-reservation "$MEMORY_RESERVATION" \
             --memory-swap "$MEMORY_MAX" --cpus "$CPUS" --pids-limit "$PIDS_LIMIT" \
             --timeout "$RUNTIME_SECONDS" --stop-timeout 20 --restart=no \
-            --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=8m \
-            --tmpfs /run:rw,noexec,nosuid,nodev,size=4m \
-            --tmpfs /var/smithproxy:rw,noexec,nosuid,nodev,size=16m \
+            --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=8m,mode=1777 \
+            --tmpfs /run:rw,noexec,nosuid,nodev,size=4m,mode=1777 \
+            --tmpfs /var/smithproxy:rw,noexec,nosuid,nodev,size=16m,mode=1777 \
+            --tmpfs /var/log/smithproxy:rw,noexec,nosuid,nodev,size=8m,mode=1777 \
             --cap-drop=ALL --security-opt=no-new-privileges \
             --user "$CONTAINER_USER" --network bridge \
-            --publish "127.0.0.1:$HOST_PORT:50080/tcp" \
+            --publish "127.0.0.1:$HOST_PORT:1080/tcp" \
             --volume "$CONFIG_DIR:/config:ro" \
+            --env SMITHPROXY_PID_FILE=/tmp/smithproxy.pid \
             --entrypoint /usr/bin/smithproxy "$IMAGE" \
             --config-file /config/smithproxy.cfg
         ;;

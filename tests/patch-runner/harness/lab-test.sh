@@ -30,6 +30,7 @@ RTT_TEST=${RTT_TEST:-0}
 TLS_SUITE_TEST=${TLS_SUITE_TEST:-0}
 POLICY_TEST=${POLICY_TEST:-0}
 SESSION_LIST_STRESS_TEST=${SESSION_LIST_STRESS_TEST:-0}
+SOCKS_TEST=${SOCKS_TEST:-0}
 UDP_CHURN_TEST=${UDP_CHURN_TEST:-0}
 TCP_CHURN_TEST=${TCP_CHURN_TEST:-0}
 CAPTURE_MARKER=smithproxy-gre-pcap-v4
@@ -153,6 +154,12 @@ for attempt in $(seq 1 60); do
 done
 python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["status"] == "ok"' "$ROOT/results/api.json"
 echo 'PASS API: authenticated HTTPS request from host namespace'
+if [[ $SOCKS_TEST == 1 ]]; then
+    ip netns exec "$NS" curl --noproxy '*' --socks5-hostname 127.0.0.1:1080 \
+        -fsS --max-time 15 http://198.18.20.2:8080/ > "$ROOT/results/socks-http.txt"
+    grep -q 'runner-origin-ok peer=198.18.20.1' "$ROOT/results/socks-http.txt"
+    echo 'PASS SOCKS5 TCP/HTTP: explicit proxy reached origin without TPROXY'
+fi
 if [[ $RUN_MODE == 1 ]]; then
     setsid socat "TCP4-LISTEN:$CLI_RELAY_PORT,bind=127.0.0.1,reuseaddr,fork" \
         "EXEC:ip netns exec $NS socat STDIO TCP4\:127.0.0.1\:50000" \
