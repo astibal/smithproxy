@@ -16,19 +16,41 @@ struct captured_packet {
     std::vector<unsigned char> data;
 };
 
+struct captured_secret {
+    socle::traffic_secret_format format;
+    std::vector<unsigned char> data;
+};
+
 class capture_sink final : public socle::baseTrafficLogger {
 public:
-    explicit capture_sink(std::shared_ptr<std::vector<captured_packet>> packets)
-        : packets_(std::move(packets)) {}
+    explicit capture_sink(
+        std::shared_ptr<std::vector<captured_packet>> packets,
+        std::shared_ptr<std::vector<captured_packet>> native_packets = {},
+        std::shared_ptr<std::vector<captured_secret>> secrets = {})
+        : packets_(std::move(packets)), native_packets_(std::move(native_packets)),
+          secrets_(std::move(secrets)) {}
 
     void write(socle::side_t side, buffer const& data) override {
         auto const* begin = static_cast<unsigned char const*>(data.data());
         packets_->push_back({side, {begin, begin + data.size()}});
     }
     void write(socle::side_t, std::string const&) override {}
+    void write_packet(socle::side_t side, buffer const& data) override {
+        if (!native_packets_) return;
+        auto const* begin = static_cast<unsigned char const*>(data.data());
+        native_packets_->push_back({side, {begin, begin + data.size()}});
+    }
+    void write_secret(socle::traffic_secret_format format,
+                      buffer const& data) override {
+        if (!secrets_) return;
+        auto const* begin = static_cast<unsigned char const*>(data.data());
+        secrets_->push_back({format, {begin, begin + data.size()}});
+    }
 
 private:
     std::shared_ptr<std::vector<captured_packet>> packets_;
+    std::shared_ptr<std::vector<captured_packet>> native_packets_;
+    std::shared_ptr<std::vector<captured_secret>> secrets_;
 };
 
 } // namespace
@@ -116,6 +138,31 @@ TEST(Spq1, DisabledCaptureDoesNotLeakDestructorFin) {
     }
 
     EXPECT_EQ(1U, packets->size());
+}
+
+TEST(Spq1, ForwardsNativePacketsAndSecretsWithoutTransformation) {
+    auto packets = std::make_shared<std::vector<captured_packet>>();
+    auto native_packets = std::make_shared<std::vector<captured_packet>>();
+    auto secrets = std::make_shared<std::vector<captured_secret>>();
+    auto connection = std::make_shared<sx::quic::spq1::connection_context>(8, "h3");
+    auto sink = std::make_unique<capture_sink>(packets, native_packets, secrets);
+    sx::quic::spq1::stream_log log(std::move(sink), {connection, 4});
+    std::string const packet = "complete-native-packet";
+    std::string const keylog = "CLIENT_HANDSHAKE_TRAFFIC_SECRET 00 aa";
+    buffer packet_data(packet.data(), packet.size());
+    buffer secret_data(keylog.data(), keylog.size());
+
+    log.write_packet(socle::side_t::LEFT, packet_data);
+    log.write_secret(socle::traffic_secret_format::tls_key_log, secret_data);
+
+    EXPECT_TRUE(packets->empty());
+    ASSERT_EQ(native_packets->size(), 1U);
+    EXPECT_EQ(std::string(native_packets->front().data.begin(),
+                          native_packets->front().data.end()), packet);
+    ASSERT_EQ(secrets->size(), 1U);
+    EXPECT_EQ(secrets->front().format, socle::traffic_secret_format::tls_key_log);
+    EXPECT_EQ(std::string(secrets->front().data.begin(), secrets->front().data.end()),
+              keylog);
 }
 
 TEST(Spq1, GreKeyCarriesLowSessionIdentifier) {

@@ -157,6 +157,15 @@ void stream_log::write(socle::side_t side, std::string const& comment) {
     if (output_) output_->write(side, comment);
 }
 
+void stream_log::write_packet(socle::side_t side, buffer const& data) {
+    if (status() && output_) output_->write_packet(side, data);
+}
+
+void stream_log::write_secret(socle::traffic_secret_format format,
+                              buffer const& data) {
+    if (status() && output_) output_->write_secret(format, data);
+}
+
 void stream_log::finish(socle::side_t side) {
     auto const index = side_index(side);
     if (finished_[index]) return;

@@ -62,6 +62,11 @@ public:
 
     void write(socle::side_t side, buffer const& data) override;
     void write(socle::side_t side, std::string const& comment) override;
+    /** Forward native wire packets without applying the SPQ1 transformation. */
+    void write_packet(socle::side_t side, buffer const& data) override;
+    /** Forward session secrets to the capture implementation unchanged. */
+    void write_secret(socle::traffic_secret_format format,
+                      buffer const& data) override;
     void finish(socle::side_t side);
 
 private:
