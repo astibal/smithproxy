@@ -36,19 +36,29 @@ part of this measurement.
 
 ## Main remaining fixed cost
 
-The measured process creates 94 threads even while idle.  The global utility
-thread pool is sized as `2 * std::thread::hardware_concurrency()`, and the lab
-configuration also enables one worker for plaintext, TLS and UDP plus the API,
-CLI, DNS and logging facilities.  Mempool removal therefore does not determine
+The measured process creates 94 threads even while idle.  Its measured thread
+inventory was:
+
+- 48 DTLS threads (`dtls_workers` was left at its CPU-derived default),
+- 32 global utility-pool threads (`2 * hardware_concurrency`),
+- 3 plaintext, 3 TLS and 3 UDP listener/worker threads,
+- one each for owner, DNS, CLI, API and the HTTP daemon.
+
+SOCKS and redirect listeners were disabled.  The runner requested one worker
+for plaintext, TLS and UDP, but the listener implementation enforces at least
+two subordinate workers, producing three threads per listener.  This benchmark
+therefore represents a full and accidentally DTLS-heavy instance, not the
+intended minimal HTTP-only configuration.  Mempool removal does not determine
 the minimum footprint anymore; thread and service configuration does.
 Docker `--cpus 1` did not reduce the thread count or resident memory: the C++
 runtime still reported the host's 16 online CPUs for pool sizing.  A Kubernetes
 CPU request/limit alone therefore cannot be relied on to shrink this cost.
 
 For a true single-purpose ephemeral HTTP CONNECT instance, the next experiment
-should make the utility-pool size configurable and run one plaintext worker
-with TLS, UDP, SOCKS, API and unused background facilities disabled.  A target
-of a **32 MiB limit** looks plausible, but is not yet validated by this test.
+must set `dtls_workers=-1`, make the utility-pool size configurable, and run one
+plaintext listener with TLS, UDP, SOCKS, API and unused background facilities
+disabled.  A target of a **32 MiB limit** looks plausible, but is not yet
+validated by this test.
 
 ## Test notes
 
