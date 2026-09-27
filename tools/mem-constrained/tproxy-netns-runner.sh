@@ -139,7 +139,6 @@ table ip smithproxy_mc {
         iifname != "$IN_IF" return
         fib daddr type local return
         tcp dport 443 tproxy to :50443 meta mark set 1 accept
-        udp dport 443 tproxy to :50443 meta mark set 1 accept
         meta l4proto tcp tproxy to :50080 meta mark set 1 accept
         meta l4proto udp tproxy to :50080 meta mark set 1 accept
     }

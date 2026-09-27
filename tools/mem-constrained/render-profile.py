@@ -15,6 +15,7 @@ PROFILES = {
         "udp_workers": "-1",
         "dtls_workers": "-1",
         "socks_workers": "1",
+        "no_fallback_bypass": "FALSE",
     },
     "tproxy": {
         "accept_tproxy": "TRUE",
@@ -23,8 +24,9 @@ PROFILES = {
         "plaintext_workers": "1",
         "ssl_workers": "1",
         "udp_workers": "1",
-        "dtls_workers": "1",
+        "dtls_workers": "-1",
         "socks_workers": "-1",
+        "no_fallback_bypass": "TRUE",
     },
 }
 

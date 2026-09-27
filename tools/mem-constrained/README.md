@@ -6,7 +6,7 @@ Kubernetes.  The common constrained binary currently has two runtime profiles:
 | Profile | Interface | Network setup | Tested peak RSS |
 |---|---|---|---:|
 | `socks` | SOCKS5 on port 1080 | ordinary host/container networking | 16.3 MiB |
-| `tproxy` | transparent TCP/TLS/UDP/DTLS | dedicated Linux netns, policy route and nftables | 17.8 MiB |
+| `tproxy` | transparent TCP/TLS-MITM/UDP | dedicated Linux netns, policy route and nftables | 17.9 MiB |
 
 `http-connect` is reserved for the implementation expected from upstream; it
 is deliberately not emulated here.
@@ -43,8 +43,12 @@ service.  Each listener internally enforces at least two subordinate workers.
 TCP other ports -> plaintext :50080
 TCP destination 443 -> TLS   :50443
 UDP other ports -> UDP       :50080
-UDP destination 443 -> DTLS  :50443
+UDP destination 443 -> UDP   :50080
 ```
+
+DTLS is unsupported and its listener remains disabled.  TLS uses a hard MITM
+policy: failure to parse or intercept ClientHello must fail closed and must
+never fall back to certificate passthrough.
 
 ## SOCKS: direct systemd runner
 
@@ -154,15 +158,13 @@ The minimal transparent path has a separate test:
 tests/patch-runner/test-patch.sh sanity --suite tproxy
 ```
 
-It verifies original-destination HTTP, TLS routing and UDP end-to-end, checks
-all four listener sockets, confirms the UDP/443-to-DTLS rule and confirms
-the API is absent.  The fixture does not yet provide a DTLS origin, so it does
-not claim an application-level DTLS handshake.  Finally it stops Smithproxy
+It verifies original-destination HTTP, TLS MITM and UDP end-to-end, checks all
+three supported listener sockets and confirms the API is absent.  Its TLS hard
+gate first succeeds with the proxy CA, then proves that the origin CA cannot
+validate the certificate presented to the client.  Finally it stops Smithproxy
 and proves that forwarding cannot bypass the proxy.
 
-The measured TLS route currently presents the origin certificate (the test
-trusts the origin CA); this proves routing through the TLS listener, not TLS
-resigning.  TLS inspection behavior needs a separate focused test.  Sending an
-invalid payload into the DTLS listener also exposed a pre-existing shutdown
-hang, so the DTLS check deliberately validates the bound listener and routing
-rule without pretending to be a valid DTLS client.
+Modern hybrid post-quantum ClientHello records can exceed one Ethernet MTU.
+The TLS parser grows its initial 1500-byte peek buffer to the bounded record
+length declared in the TLS header and waits for the complete record before
+parsing.  This prevents truncated ClientHello data from triggering bypass.

@@ -17,7 +17,7 @@ lab with separate client, proxy and origin network namespaces.
 | Explicit SOCKS5 HTTP request, no TPROXY | PASS | 23.4 MiB | 19.1 MiB | 8.5 MiB | 16 |
 | Explicit SOCKS5, webhooks/libcurl compiled out | PASS | 21.0 MiB | 16.7 MiB | 8.0 MiB | 16 |
 | Explicit SOCKS5, webhooks and HTTP API compiled out | PASS | 16.3 MiB | 11.9 MiB | 7.1 MiB | 14 |
-| Routed TPROXY TCP/TLS/UDP/DTLS, API absent | PASS | 17.8 MiB | 13.3 MiB | 8.6 MiB | 20 |
+| Routed TPROXY TCP/TLS-MITM/UDP, API absent | PASS | 17.9 MiB | 13.3 MiB | 8.3 MiB | 17 |
 
 The 256-session run adds about 9.1 MiB RSS over idle, or approximately 36 KiB
 per held session.  This is a conservative estimate because the run also takes
