@@ -728,6 +728,15 @@ void CfgValueHelp::init_captures () {
                 return r;
             });
 
+    add("captures.remote.gre_format", "select GRE capture record format")
+            .may_be_empty(false)
+            .value_filter(is_in_vector([]() { std::vector<std::string> r {"spq1", "pcapng"}; return r; },
+                                       "SPQ1 plaintext packets or native PCAPNG records"))
+            .suggestion_generator([](std::string const& section, std::string const& variable) {
+                std::vector<std::string> r{"spq1", "pcapng"};
+                return r;
+            });
+
     add("captures.remote.tun_dst", "set tunnel destination IP address")
             .may_be_empty(false)
             .value_filter(CfgValue::VALUE_IPHOST);

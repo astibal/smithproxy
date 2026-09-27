@@ -333,6 +333,8 @@ public:
     struct {
         bool enabled = false;
         std::string tun_type = "gre";
+        // GRE carries either reconstructed plaintext or serialized PCAPNG blocks.
+        std::string gre_format = "spq1";
         std::string tun_dst = "127.0.0.1";
         int tun_ttl {1};
         std::string bind_interface;

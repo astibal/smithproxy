@@ -1024,6 +1024,7 @@ bool CfgFactory::load_captures() {
 
             load_if_exists(remote, "enabled", CfgFactory::get()->capture_remote.enabled);
             load_if_exists(remote, "tun_type", CfgFactory::get()->capture_remote.tun_type);
+            load_if_exists(remote, "gre_format", CfgFactory::get()->capture_remote.gre_format);
             load_if_exists(remote, "tun_dst", CfgFactory::get()->capture_remote.tun_dst);
             load_if_exists(remote, "tun_ttl", CfgFactory::get()->capture_remote.tun_ttl);
             load_if_exists(remote, "bind_interface", CfgFactory::get()->capture_remote.bind_interface);
@@ -3037,6 +3038,7 @@ int CfgFactory::policy_apply (baseHostCX *originator, MitmProxy *proxy, int matc
 
 void CfgFactory::gre_export_apply(traflog::PcapLog* pcaplog) {
 
+    auto const& log = CfgFactoryBase::log::config();
     auto const& cfg = CfgFactory::get();
 
     if(cfg->capture_remote.enabled) {
@@ -3047,7 +3049,22 @@ void CfgFactory::gre_export_apply(traflog::PcapLog* pcaplog) {
             auto fam = c.cidr()->proto;
 
             auto exp = std::make_shared<traflog::GreExporter>(fam, ip);
-            pcaplog->ip_packet_hook = exp;
+
+            // Select either the legacy IP-packet hook or serialized PCAPNG
+            // records here, without exposing QUIC to the capture abstractions.
+            if(cfg->capture_remote.gre_format == "pcapng") {
+                exp->format(traflog::GreExporter::payload_format::pcapng_record);
+                pcaplog->ip_packet_hook.reset();
+                pcaplog->pcapng_record_hook = exp;
+            } else {
+                if(cfg->capture_remote.gre_format != "spq1") {
+                    _war("unknown GRE capture format '%s', using spq1",
+                         cfg->capture_remote.gre_format.c_str());
+                }
+                exp->origin(pcap::connection_details::record_origin::synthetic);
+                pcaplog->pcapng_record_hook.reset();
+                pcaplog->ip_packet_hook = exp;
+            }
 
             if(cfg->capture_remote.tun_ttl > 0) {
                 exp->ttl(cfg->capture_remote.tun_ttl);
@@ -3058,9 +3075,11 @@ void CfgFactory::gre_export_apply(traflog::PcapLog* pcaplog) {
 
         } else {
             pcaplog->ip_packet_hook.reset();
+            pcaplog->pcapng_record_hook.reset();
         }
     } else {
         pcaplog->ip_packet_hook.reset();
+        pcaplog->pcapng_record_hook.reset();
     }
 };
 
@@ -5245,6 +5264,7 @@ int CfgFactory::save_captures(Config& ex) const {
     auto& remote = ex.getRoot()["captures"]["remote"];
     remote.add("enabled", Setting::TypeBoolean) = CfgFactory::get()->capture_remote.enabled;
     remote.add("tun_type", Setting::TypeString) = CfgFactory::get()->capture_remote.tun_type;
+    remote.add("gre_format", Setting::TypeString) = CfgFactory::get()->capture_remote.gre_format;
     remote.add("tun_dst", Setting::TypeString) = CfgFactory::get()->capture_remote.tun_dst;
     remote.add("tun_ttl", Setting::TypeInt) = CfgFactory::get()->capture_remote.tun_ttl;
     remote.add("bind_interface", Setting::TypeString) = CfgFactory::get()->capture_remote.bind_interface;
