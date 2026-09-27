@@ -128,9 +128,9 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
     }
 }
 
-void ExplicitProxy::handle_explicit_connect(socksServerCX* cx) {
-    if(cx->socks_error_ != socks5_request_error::NONE) {
-        if(cx->socks_error_ == socks5_request_error::MALFORMED_DATA) {
+void ExplicitProxy::handle_explicit_connect(ExplicitProxyCX* cx) {
+    if(cx->request_error_ != explicit_request_error::NONE) {
+        if(cx->request_error_ == explicit_request_error::MALFORMED_DATA) {
             cx->error(true);
         } else {
             cx->verdict(socks5_policy::REJECT);
@@ -172,7 +172,7 @@ std::string SocksProxy::to_string(int lev) const  {
     return r.str();
 };
 
-void ExplicitProxy::explicit_handoff(socksServerCX* cx) {
+void ExplicitProxy::explicit_handoff(ExplicitProxyCX* cx) {
 
     _deb("SocksProxy::socks5_handoff: start");
     

@@ -44,14 +44,22 @@
 
 #include <common/numops.hpp>
 
-bool socksServerCX::global_async_dns = true;
+bool ExplicitProxyCX::global_async_dns = true;
 
-socksServerCX::socksServerCX(baseCom* c, unsigned int s) : MitmHostCX(c,s) {
-    state_ = socks5_state::INIT;
+socksServerCX::socksServerCX(baseCom* c, unsigned int s) : ExplicitProxyCX(c,s) {
+}
+
+ExplicitProxyCX::ExplicitProxyCX(baseCom* c, unsigned int s) : MitmHostCX(c,s) {
+    state_ = explicit_state::INIT;
 
     // copy setting from global/static variable - don't allow to change async
     // flag on the background during the object life
-    async_dns = global_async_dns;
+    async_dns_ = global_async_dns;
+}
+
+void ExplicitProxyCX::wait_policy() {
+    state_ = explicit_state::WAIT_POLICY;
+    read_waiting_for_peercom(true);
 }
 
 std::size_t socksServerCX::process_in() {
@@ -159,7 +167,7 @@ std::size_t socksServerCX::process_socks_hello() {
     return 0;
 }
 
-bool socksServerCX::choose_server_ip(std::vector<std::string>& target_ips) {
+bool ExplicitProxyCX::choose_server_ip(std::vector<std::string>& target_ips) {
 
     if(target_ips.empty()) {
         _dia("choose_server_ip: empty");
@@ -183,7 +191,7 @@ bool socksServerCX::choose_server_ip(std::vector<std::string>& target_ips) {
     return true;
 }
 
-bool socksServerCX::process_dns_response(std::shared_ptr<DNS_Response> resp) {
+bool ExplicitProxyCX::process_dns_response(std::shared_ptr<DNS_Response> resp) {
 
     std::vector<std::string> target_ips;
     bool ret = true;
@@ -219,14 +227,14 @@ bool socksServerCX::process_dns_response(std::shared_ptr<DNS_Response> resp) {
 
 
 
-void socksServerCX::setup_dns_async(std::string const& fqdn, DNS_Record_Type type, AddressInfo const& nameserver) {
+void ExplicitProxyCX::setup_dns_async(std::string const& fqdn, DNS_Record_Type type, AddressInfo const& nameserver) {
     int dns_sock = DNSFactory::get().send_dns_request(fqdn, type, nameserver);
     if (dns_sock) {
         _dia("setup_dns_async: request sent: %s", fqdn.c_str());
 
         using std::placeholders::_1;
-        async_dns_query = std::make_unique<AsyncDnsQuery>(this,
-                                            std::bind(&socksServerCX::dns_response_callback, this,
+        async_dns_query_ = std::make_unique<AsyncDnsQuery>(this,
+                                            std::bind(&ExplicitProxyCX::dns_response_callback, this,
                                                       _1));
 
         switch (type) {
@@ -239,7 +247,7 @@ void socksServerCX::setup_dns_async(std::string const& fqdn, DNS_Record_Type typ
                 tested_dns_a = true;
         }
 
-        async_dns_query->tap(dns_sock);
+        async_dns_query_->tap(dns_sock);
         state_ = socks5_state::DNS_QUERY_SENT;
     } else {
         _err("failed to send dns request: %s", fqdn.c_str());
@@ -247,7 +255,7 @@ void socksServerCX::setup_dns_async(std::string const& fqdn, DNS_Record_Type typ
     }
 }
 
-socks5_request_error socksServerCX::handle5_connect_fqdn() {
+explicit_request_error ExplicitProxyCX::resolve_connect_target() {
 
     if(req_str_addr.empty()) return socks5_request_error::MALFORMED_DATA;
 
@@ -301,7 +309,7 @@ socks5_request_error socksServerCX::handle5_connect_fqdn() {
 
         auto const& nameserver = DNS_Setup::choose_dns_server(ipver);
 
-        if(!async_dns) {
+        if(!async_dns_) {
 
             std::shared_ptr<DNS_Response> resp(DNSFactory::get().resolve_dns_s(req_str_addr, A, nameserver));
 
@@ -377,19 +385,17 @@ socks5_request_error socksServerCX::handle4_connect() {
     return socks5_request_error::NONE;
 }
 
-socks5_request_error socksServerCX::prepare_connect_target(
+explicit_request_error ExplicitProxyCX::prepare_connect_target(
         std::string const& target_host, unsigned short target_port) {
     if(target_host.empty() or target_port == 0) {
         return socks5_request_error::MALFORMED_DATA;
     }
 
-    req_cmd = socks5_cmd::CONNECT;
-    req_atype = socks5_atype::FQDN;
     req_str_addr = target_host;
     req_port = target_port;
     state_ = socks5_state::REQ_RECEIVED;
 
-    return handle5_connect_fqdn();
+    return resolve_connect_target();
 }
 
 socks5_request_error socksServerCX::socks5_parse_request() {
@@ -601,7 +607,7 @@ std::size_t socksServerCX::process_socks_request() {
     return readbuf()->size();
 }
 
-bool socksServerCX::setup_target() {
+bool ExplicitProxyCX::setup_target() {
         // prepare a new CX!
 
         // LEFT
@@ -630,7 +636,7 @@ bool socksServerCX::setup_target() {
                 new_com = (com()->l4_proto() == SOCK_DGRAM) ? (baseCom*) new UDPCom() : (baseCom*) new TCPCom();
         }
 
-        auto* n_cx = new socksMitmHostCX(new_com, s);
+        auto* n_cx = new MitmHostCX(new_com, s);
         n_cx->waiting_for_peercom(true);
 
         n_cx->com()->nonlocal_dst(true);
@@ -686,7 +692,7 @@ bool socksServerCX::setup_target() {
         return true;
 }
 
-bool socksServerCX::new_message() const {
+bool ExplicitProxyCX::new_message() const {
     if(state_ == socks5_state::WAIT_POLICY && verdict_ == socks5_policy::PENDING) {
         _dia("new_message: policy pending");
         return true;
@@ -697,14 +703,7 @@ bool socksServerCX::new_message() const {
 }
 
 void socksServerCX::verdict(socks5_policy p) {
-    verdict_ = p;
-    state_ = socks5_state::POLICY_RECEIVED;
-
-    if(verdict_ == socks5_policy::ACCEPT || verdict_ == socks5_policy::REJECT) {
-
-        _dia("verdict: policy received: %d", verdict_);
-
-        if(verdict_ == socks5_policy::ACCEPT and req_cmd == socks5_cmd::UDP_ASSOCIATE) {
+        if(p == socks5_policy::ACCEPT and req_cmd == socks5_cmd::UDP_ASSOCIATE) {
             // create source port associate
 
             auto ass = UDP::db();
@@ -717,8 +716,15 @@ void socksServerCX::verdict(socks5_policy p) {
             auto& udp = get_udp();
             udp->my_assoc = key;
         }
+        ExplicitProxyCX::verdict(p);
+}
 
-        process_socks_reply();
+void ExplicitProxyCX::verdict(explicit_policy p) {
+    verdict_ = p;
+    state_ = explicit_state::POLICY_RECEIVED;
+    if(verdict_ == explicit_policy::ACCEPT || verdict_ == explicit_policy::REJECT) {
+        _dia("verdict: policy received: %d", verdict_);
+        process_proxy_reply();
     }
 }
 
@@ -813,7 +819,7 @@ int socksServerCX::process_socks_reply_v4() {
 
 }
 
-std::size_t socksServerCX::process_socks_reply() {
+std::size_t socksServerCX::process_proxy_reply() {
 
     _dia("process_socks_reply: version %d", version);
 
@@ -836,7 +842,7 @@ std::size_t socksServerCX::process_socks_reply() {
     return 0;
 }
 
-void socksServerCX::pre_write() {
+void ExplicitProxyCX::pre_write() {
     _deb("socksServerCX::pre_write[%s]: writebuf=%d, readbuf=%d",c_type(),writebuf()->size(),readbuf()->size());
     if(state_ == socks5_state::REQRES_SENT ) {
         if(writebuf()->empty()) {
@@ -873,7 +879,7 @@ void socksServerCX::pre_write() {
 }
 
 
-void socksServerCX::dns_response_callback(dns_response_t const& rresp) {
+void ExplicitProxyCX::dns_response_callback(dns_response_t const& rresp) {
 
     auto resp = std::shared_ptr<DNS_Response>(rresp.first);
     int red = rresp.second;
@@ -898,7 +904,7 @@ void socksServerCX::dns_response_callback(dns_response_t const& rresp) {
 }
 
 
-void socksServerCX::handle_event (baseCom *xcom) {
+void ExplicitProxyCX::handle_event (baseCom *xcom) {
 }
 
 std::size_t socksServerCX::process_socks_response() {

@@ -1,17 +1,18 @@
 #ifndef SMITHPROXY_HTTPCONNECT_HPP
 #define SMITHPROXY_HTTPCONNECT_HPP
 
-#include <proxy/socks5/socksproxy.hpp>
+#include <proxy/explicitproxy.hpp>
+#include <proxy/explicitproxycx.hpp>
 #include <proxy/httpconnect/httpconnectrequest.hpp>
 
 #include <string_view>
 
-class HttpConnectServerCX : public socksServerCX {
+class HttpConnectServerCX : public ExplicitProxyCX {
 public:
     HttpConnectServerCX(baseCom* c, unsigned int s);
 
     std::size_t process_in() override;
-    std::size_t process_socks_reply() override;
+    std::size_t process_proxy_reply() override;
     std::string_view upstream_success_response() const override;
     std::string_view upstream_failure_response() const override;
     void pre_write() override;

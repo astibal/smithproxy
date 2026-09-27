@@ -3,18 +3,18 @@
 
 #include <proxy/mitmproxy.hpp>
 
-class socksServerCX;
+class ExplicitProxyCX;
 
 // Common transport handoff for explicit proxy protocols.  Frontends parse
-// their own request and prepare socksServerCX-compatible target state; this
+// their own request and prepare ExplicitProxyCX target state; this
 // class owns the policy/routing/identity transition into a normal MitmProxy.
 class ExplicitProxy : public MitmProxy {
 public:
     using MitmProxy::MitmProxy;
     ~ExplicitProxy() override = default;
 
-    void explicit_handoff(socksServerCX* cx);
-    void handle_explicit_connect(socksServerCX* cx);
+    void explicit_handoff(ExplicitProxyCX* cx);
+    void handle_explicit_connect(ExplicitProxyCX* cx);
     bool explicit_handoff_resolve_identity(MitmHostCX* cx);
     bool explicit_handoff_authenticate(MitmHostCX* cx);
     void on_left_bytes(baseHostCX* cx) override;

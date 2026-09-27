@@ -9,7 +9,7 @@ constexpr std::size_t max_connect_header_size = 8 * 1024;
 } // namespace
 
 HttpConnectServerCX::HttpConnectServerCX(baseCom* c, unsigned int s)
-    : socksServerCX(c, s) {
+    : ExplicitProxyCX(c, s) {
     // A zero return from process_in() means that the CONNECT headers are
     // incomplete. baseHostCX auto-finish would discard that partial input
     // before the next read, so retain it for incremental parsing.
@@ -22,12 +22,12 @@ void HttpConnectServerCX::send_error(unsigned int status, std::string_view reaso
             status, static_cast<int>(reason.size()), reason.data());
     writebuf()->append(response.data(), response.size());
     close_after_reply_ = true;
-    state(socks5_state::REQRES_SENT);
+    state(explicit_state::REQRES_SENT);
     com()->set_write_monitor(socket());
 }
 
 std::size_t HttpConnectServerCX::process_in() {
-    if(state_ != socks5_state::INIT) {
+    if(state_ != explicit_state::INIT) {
         return 0;
     }
 
@@ -50,20 +50,20 @@ std::size_t HttpConnectServerCX::process_in() {
         return request_size;
     }
 
-    socks_error_ = prepare_connect_target(request->host, request->port);
-    if(socks_error_ != socks5_request_error::NONE) {
+    request_error_ = prepare_connect_target(request->host, request->port);
+    if(request_error_ != explicit_request_error::NONE) {
         send_error(502, "Bad Gateway");
     }
 
     return request_size;
 }
 
-std::size_t HttpConnectServerCX::process_socks_reply() {
-    if(verdict_ == socks5_policy::ACCEPT) {
+std::size_t HttpConnectServerCX::process_proxy_reply() {
+    if(verdict_ == explicit_policy::ACCEPT) {
         // Unlike SOCKS, CONNECT must not report success before the upstream
         // TCP connection is established. ExplicitProxy sends the response
         // after the non-blocking connect completes.
-        state(socks5_state::HANDOFF);
+        state(explicit_state::HANDOFF);
         com()->set_write_monitor(socket());
         return 0;
     } else {
@@ -74,7 +74,7 @@ std::size_t HttpConnectServerCX::process_socks_reply() {
         close_after_reply_ = true;
     }
 
-    state(socks5_state::REQRES_SENT);
+    state(explicit_state::REQRES_SENT);
     com()->set_write_monitor(socket());
     return writebuf()->size();
 }
@@ -96,7 +96,7 @@ void HttpConnectServerCX::pre_write() {
         }
         return;
     }
-    socksServerCX::pre_write();
+    ExplicitProxyCX::pre_write();
 }
 
 std::string HttpConnectProxy::to_string(int lev) const {

@@ -49,15 +49,19 @@
 #include <socketinfo.hpp>
 #include <sslmitmcom.hpp>
 #include <async/asyncdns.hpp>
+#include <proxy/explicitproxycx.hpp>
 
 #include <common/numops.hpp>
 
-using socks5_state = enum class socks5_state_ { INIT=1u, HELLO_SENT, WAIT_REQUEST, REQ_RECEIVED, WAIT_POLICY, POLICY_RECEIVED, REQRES_SENT, DNS_QUERY_SENT, DNS_RESP_RECV, DNS_RESP_FAILED, HANDOFF , ZOMBIE };
-using socks5_request_error = enum class socks5_request_error_ { NONE=0, UNSUPPORTED_VERSION, UNSUPPORTED_ATYPE, UNSUPPORTED_METHOD, MALFORMED_DATA, UNAUTHORIZED };
+using socks5_state = explicit_state;
+using socks5_state_ = explicit_state_;
+using socks5_request_error = explicit_request_error;
+using socks5_request_error_ = explicit_request_error_;
+using socks5_policy = explicit_policy;
+using socks5_policy_ = explicit_policy_;
 
 using socks5_cmd = enum socks5_cmd_ { CONNECT=1u, BIND=2u, UDP_ASSOCIATE=3u };
 using socks5_atype = enum class socks5_atype_ { IPV4=1u, FQDN=3u, IPV6=4u };
-using socks5_policy = enum class socks5_policy_ { PENDING, ACCEPT, REJECT };
 
 using socks5_message = enum socks5_message_ { POLICY, UPGRADE };
 
@@ -93,7 +97,7 @@ private:
     logan_lite log {"com.socks.tls"};
 };
 
-class socksServerCX : public MitmHostCX, public epoll_handler {
+class socksServerCX : public ExplicitProxyCX {
 public:
     socksServerCX(baseCom* c, unsigned int s);
     ~socksServerCX() override {
@@ -105,12 +109,6 @@ public:
             ass->clients.erase(udp_->my_assoc);
         }
     }
-
-    bool is_ssl = false;
-    bool tested_dns_a = false;
-    bool tested_dns_aaaa  = false;
-    static inline bool mixed_ip_versions = true; // allow cross-version connections
-    static inline bool prefer_ipv6 = false;       // if set, try IPv6 DNS first (AAAA), then IPv4 (A)
 
     std::size_t process_in() override;
     virtual std::size_t process_socks_hello();
@@ -162,74 +160,25 @@ public:
     socks5_request_error handle4_connect();
     socks5_request_error socks5_parse_request();
     socks5_request_error handle5_connect();
-    socks5_request_error handle5_connect_fqdn();
-
-    virtual bool setup_target();
-    virtual std::size_t process_socks_reply();
+    socks5_request_error handle5_connect_fqdn() { return resolve_connect_target(); }
+    std::size_t process_proxy_reply() override;
     virtual int process_socks_reply_v4();
     virtual std::size_t process_socks_reply_v5();
-    virtual std::string_view upstream_success_response() const { return {}; }
-    virtual std::string_view upstream_failure_response() const { return {}; }
+    void verdict(socks5_policy) override;
 
-
-    void wait_policy() {
-        // peers are now prepared for handover. Owning proxy will wipe this CX (it will be empty)
-        // and if policy allows, left and right will be set (also in proxy owning this cx).
-
-        state_ = socks5_state::WAIT_POLICY;
-        read_waiting_for_peercom(true);
-    }
-
-    void pre_write() override;
-    
-    bool new_message() const override;
-    void verdict(socks5_policy);
-    void state(socks5_state s) { state_ = s; };
-
-    socks5_request_error socks_error_ = socks5_request_error::NONE;
-    socks5_policy verdict_ = socks5_policy::PENDING;
-    socks5_state state_;
-    
-    //before handoff, prepare already new CX. 
-    std::unique_ptr<MitmHostCX> left;
-    std::unique_ptr<MitmHostCX> right;
-
-    void handle_event (baseCom *com) override;
-
-    void setup_dns_async(std::string const& fqdn, DNS_Record_Type type, const AddressInfo &nameserver);
-    using dns_response_t = std::pair<std::shared_ptr<DNS_Response>, ssize_t>;
-    void dns_response_callback(dns_response_t const& resp);
-
-    static bool global_async_dns;
+    // Compatibility names local to SOCKS framing.
+    socks5_request_error& socks_error_ = request_error_;
 
     uint8_t request_command() const noexcept { return req_cmd; }
 
     std::size_t process_socks_response();
     std::size_t process_out() override;
 
-protected:
-    // Shared entry point for CONNECT-style frontends.  SOCKS and HTTP CONNECT
-    // differ in framing, but target resolution and handoff are identical.
-    socks5_request_error prepare_connect_target(std::string const& host,
-                                                unsigned short port);
-
 private:
     uint8_t version {0};
     uint8_t req_cmd {0};
     socks5_atype req_atype {0};
     AddressInfo req_addr {};
-    std::string req_str_addr;
-
-    unsigned short req_port {0};
-    std::size_t req_hdr_size = 0L;
-
-    bool process_dns_response(std::shared_ptr<DNS_Response> resp);
-
-    bool choose_server_ip(std::vector<std::string>& target_ips);
-    bool async_dns = true;
-
-    std::unique_ptr<AsyncDnsQuery> async_dns_query;
-
     std::string to_string(int verbosity) const override { return MitmHostCX::to_string(verbosity); };
 
 public:
