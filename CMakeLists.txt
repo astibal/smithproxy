@@ -310,6 +310,10 @@ add_executable(smithproxy
         src/service/core/smithproxy_objapi.cpp
         src/service/core/sessionlist.hpp
         src/service/core/sessionlist.cpp
+        src/service/reload/file_reload_service.hpp
+        src/service/reload/file_reload_service.cpp
+        src/service/reload/reloadable_resource.hpp
+        src/service/reload/README.md
         src/service/cmd/cmdserver.cpp
         src/service/cfgapi/cfgvalue.hpp
         src/service/cfgapi/cfgvalue.cpp
@@ -439,6 +443,11 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/proxy/httpconnect/httpconnectrequest.cpp
         )
 
+        add_executable(sx_gtests_reloadable
+                src/service/reload/file_reload_service.cpp
+                src/service/reload/tests/reloadable_resource_test.cpp
+        )
+
         add_executable(tls_testbed
                 tests/tls/tls_testbed.cpp)
         target_compile_definitions(tls_testbed PRIVATE
@@ -451,6 +460,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_link_libraries(sx_gtests_http1 gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries(sx_gtests_startstoptls gtest gtest_main)
         target_link_libraries(sx_gtests_httpconnect gtest gtest_main)
+        target_link_libraries(sx_gtests_reloadable gtest gtest_main pthread)
         target_link_libraries(tls_testbed gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries (sx_gtests nlohmann_json::nlohmann_json)
 
@@ -459,10 +469,12 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
             add_test(NAME unit.http1 COMMAND sx_gtests_http1)
             add_test(NAME unit.startstoptls COMMAND sx_gtests_startstoptls)
             add_test(NAME unit.httpconnect COMMAND sx_gtests_httpconnect)
+            add_test(NAME unit.reloadable COMMAND sx_gtests_reloadable)
             add_test(NAME integration.tls_testbed COMMAND tls_testbed)
             set_tests_properties(
-                    unit.core unit.http1 unit.startstoptls unit.httpconnect
+                    unit.core unit.http1 unit.startstoptls unit.httpconnect unit.reloadable
                     PROPERTIES LABELS "unit")
+            set_tests_properties(unit.reloadable PROPERTIES LABELS "unit;reload")
             set_tests_properties(integration.tls_testbed PROPERTIES LABELS "integration;tls")
 
             find_package(Python3 COMPONENTS Interpreter)
@@ -531,7 +543,8 @@ if(SMITHPROXY_TLS_SANITIZERS)
     endif()
     foreach(sanitized_target
             socle_common_lib socle_lib smithproxy tls_testbed
-            sx_gtests sx_gtests_http1 sx_gtests_startstoptls sx_gtests_httpconnect)
+            sx_gtests sx_gtests_http1 sx_gtests_startstoptls sx_gtests_httpconnect
+            sx_gtests_reloadable)
         target_compile_options(${sanitized_target} PRIVATE
                 -fsanitize=address,undefined
                 -fno-omit-frame-pointer)
