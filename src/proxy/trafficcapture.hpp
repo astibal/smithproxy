@@ -36,8 +36,10 @@ public:
  *
  * Wire packets and secrets can arrive before policy creates a logger for the
  * first logical flow. Until then records are retained in order within a fixed
- * byte budget. Installing a logger atomically replays that backlog and turns
- * subsequent publications into direct, serialized logger calls.
+ * byte budget. Installing a logger atomically emits retained secrets first,
+ * replays packets in their original order, and turns subsequent publications
+ * into direct, serialized logger calls. Secrets must precede encrypted PCAPNG
+ * packets because Wireshark does not retroactively apply a later DSB.
  */
 class session_traffic_log final {
 public:
@@ -59,7 +61,12 @@ public:
             pending.swap(pending_);
             pending_bytes_ = 0;
         }
-        for (auto const& item : pending) dispatch(*output_, item);
+        for (auto const& item : pending) {
+            if (item.type == record_type::secret) dispatch(*output_, item);
+        }
+        for (auto const& item : pending) {
+            if (item.type == record_type::packet) dispatch(*output_, item);
+        }
         return true;
     }
 

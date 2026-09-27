@@ -27,9 +27,10 @@ public:
     explicit capture_sink(
         std::shared_ptr<std::vector<captured_packet>> packets,
         std::shared_ptr<std::vector<captured_packet>> native_packets = {},
-        std::shared_ptr<std::vector<captured_secret>> secrets = {})
+        std::shared_ptr<std::vector<captured_secret>> secrets = {},
+        std::shared_ptr<std::vector<std::string>> events = {})
         : packets_(std::move(packets)), native_packets_(std::move(native_packets)),
-          secrets_(std::move(secrets)) {}
+          secrets_(std::move(secrets)), events_(std::move(events)) {}
 
     void write(socle::side_t side, buffer const& data) override {
         auto const* begin = static_cast<unsigned char const*>(data.data());
@@ -38,12 +39,14 @@ public:
     void write(socle::side_t, std::string const&) override {}
     void write_packet(socle::side_t side, buffer const& data) override {
         if (!native_packets_) return;
+        if (events_) events_->push_back("packet");
         auto const* begin = static_cast<unsigned char const*>(data.data());
         native_packets_->push_back({side, {begin, begin + data.size()}});
     }
     void write_secret(socle::traffic_secret_format format,
                       buffer const& data) override {
         if (!secrets_) return;
+        if (events_) events_->push_back("secret");
         auto const* begin = static_cast<unsigned char const*>(data.data());
         secrets_->push_back({format, {begin, begin + data.size()}});
     }
@@ -52,6 +55,7 @@ private:
     std::shared_ptr<std::vector<captured_packet>> packets_;
     std::shared_ptr<std::vector<captured_packet>> native_packets_;
     std::shared_ptr<std::vector<captured_secret>> secrets_;
+    std::shared_ptr<std::vector<std::string>> events_;
 };
 
 } // namespace
@@ -170,6 +174,7 @@ TEST(SessionTrafficLog, ReplaysPrePolicyRecordsAndThenWritesDirectly) {
     auto packets = std::make_shared<std::vector<captured_packet>>();
     auto native_packets = std::make_shared<std::vector<captured_packet>>();
     auto secrets = std::make_shared<std::vector<captured_secret>>();
+    auto events = std::make_shared<std::vector<std::string>>();
     auto journal = std::make_shared<sx::session_traffic_log>(1024);
     std::string const first = "first-wire-packet";
     std::string const key = "CLIENT_TRAFFIC_SECRET_0 00 aa";
@@ -181,7 +186,7 @@ TEST(SessionTrafficLog, ReplaysPrePolicyRecordsAndThenWritesDirectly) {
     journal->write_secret(socle::traffic_secret_format::tls_key_log, key_data);
     EXPECT_GT(journal->pending_bytes(), 0U);
 
-    auto output = std::make_shared<capture_sink>(packets, native_packets, secrets);
+    auto output = std::make_shared<capture_sink>(packets, native_packets, secrets, events);
     ASSERT_TRUE(journal->install(output));
     EXPECT_EQ(journal->pending_bytes(), 0U);
     buffer second_data(second.data(), second.size());
@@ -195,6 +200,7 @@ TEST(SessionTrafficLog, ReplaysPrePolicyRecordsAndThenWritesDirectly) {
                           native_packets->at(1).data.end()), second);
     ASSERT_EQ(secrets->size(), 1U);
     EXPECT_EQ(std::string(secrets->front().data.begin(), secrets->front().data.end()), key);
+    EXPECT_EQ(*events, (std::vector<std::string> {"secret", "packet", "packet"}));
     EXPECT_FALSE(journal->install(output));
 }
 

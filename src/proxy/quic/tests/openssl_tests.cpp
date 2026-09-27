@@ -2,6 +2,11 @@
 
 #include "proxy/multiflow/mfflowcom.hpp"
 #include "proxy/quic/openssl.hpp"
+#include "proxy/trafficcapture.hpp"
+
+#include <traflog/pcapapi.hpp>
+#include <traflog/pcaplog.hpp>
+#include <traflog/threadedpoolwriter.hpp>
 
 #if SMITHPROXY_OPENSSL_QUIC
 #include <arpa/inet.h>
@@ -11,7 +16,9 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
+#include <sstream>
 #include <thread>
 #endif
 
@@ -71,6 +78,53 @@ quic::datagram_endpoint loopback_endpoint(std::uint16_t port) {
     std::memcpy(&result.address, &address, sizeof(address));
     result.size = sizeof(address);
     return result;
+}
+
+buffer complete_udp_packet(quic::datagram_view const& datagram) {
+    auto const& source = datagram.direction == quic::datagram_direction::ingress
+        ? datagram.peer : datagram.local;
+    auto const& destination = datagram.direction == quic::datagram_direction::ingress
+        ? datagram.local : datagram.peer;
+    socle::pcap::connection_details details {};
+    details.next_proto = socle::pcap::connection_details::UDP;
+    details.source = source.address;
+    details.destination = destination.address;
+
+    auto const* payload = reinterpret_cast<char const*>(datagram.data);
+    buffer packet;
+    socle::pcap::append_IP_header(packet, details, 0, datagram.size);
+    socle::pcap::append_UDP_header(packet, details, 0, payload, datagram.size);
+    packet.append(payload, datagram.size);
+    return packet;
+}
+
+bool flush_capture_writer(socle::traflog::PcapLog& capture) {
+    auto* writer = socle::threadedPoolFileWriter::instance();
+    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (std::chrono::steady_clock::now() < deadline) {
+        {
+            std::lock_guard lock(writer->queue_lock());
+            if (writer->queue().empty()) {
+                capture.writer_->flush(capture.FS.filename_full);
+                capture.writer_->close(capture.FS.filename_full);
+                return true;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return false;
+}
+
+std::pair<int, std::string> tshark_quic_stream_data(std::string const& path) {
+    std::string const command = "HOME=/tmp tshark -r '" + path
+        + "' -Y 'quic.stream_data' -T fields -e quic.stream_data 2>/dev/null";
+    auto* pipe = ::popen(command.c_str(), "r");
+    if (!pipe) return {-1, {}};
+
+    std::ostringstream output;
+    char chunk[4096] {};
+    while (std::fgets(chunk, sizeof(chunk), pipe)) output << chunk;
+    return {::pclose(pipe), output.str()};
 }
 
 } // namespace
@@ -380,7 +434,11 @@ TEST(OpenSslQuic, OutgoingAdapterVerifiesChainAndServerName) {
     close(server_fd);
 }
 
-TEST(OpenSslQuic, LoopbackHandshakeExposesBidirectionalStream) {
+TEST(OpenSslQuic, LoopbackStreamProducesSelfDecryptingPcapng) {
+    if (::system("command -v tshark >/dev/null 2>&1") != 0) {
+        GTEST_SKIP() << "tshark is required to verify embedded QUIC secrets";
+    }
+
     auto server_context = quic::make_openssl_quic_context(true);
     auto client_context = quic::make_openssl_quic_context(false);
     ASSERT_NE(server_context, nullptr) << quic::openssl_error_stack();
@@ -414,7 +472,22 @@ TEST(OpenSslQuic, LoopbackHandshakeExposesBidirectionalStream) {
     ASSERT_EQ(connect(client_fd, reinterpret_cast<sockaddr*>(&server_address),
                       sizeof(server_address)), 0);
 
-    auto listener = quic::openssl_listener::create(server_context.get(), server_fd, true);
+    auto const prefix = "smithproxy-quic-native-"
+        + std::to_string(static_cast<unsigned long long>(::getpid())) + "-";
+    auto capture = std::make_shared<socle::traflog::PcapLog>(
+        nullptr, "/tmp", prefix.c_str(), "pcapng", false);
+    auto journal = std::make_shared<sx::session_traffic_log>(1024 * 1024);
+    auto const capture_path = capture->FS.filename_full;
+    ::unlink(capture_path.c_str());
+
+    auto listener = quic::openssl_listener::create(
+        server_context.get(), server_fd, true,
+        [journal](quic::datagram_view const& datagram) {
+            auto packet = complete_udp_packet(datagram);
+            journal->write_packet(datagram.direction == quic::datagram_direction::ingress
+                                      ? socle::side_t::LEFT : socle::side_t::RIGHT,
+                                  packet);
+        });
     ASSERT_NE(listener, nullptr) << quic::openssl_error_stack();
     EXPECT_TRUE(listener->local_address_enabled());
 
@@ -451,6 +524,18 @@ TEST(OpenSslQuic, LoopbackHandshakeExposesBidirectionalStream) {
     EXPECT_TRUE(std::any_of(secrets.begin(), secrets.end(), [](auto const& line) {
         return line.rfind("SERVER_HANDSHAKE_TRAFFIC_SECRET ", 0) == 0;
     }));
+
+    // Queue one complete DSB before attaching PcapLog. The session journal
+    // emits secrets before the buffered handshake packets, matching the
+    // production pre-policy capture path.
+    std::string embedded_keylog;
+    for (auto const& line : secrets) {
+        embedded_keylog.append(line);
+        embedded_keylog.push_back('\n');
+    }
+    buffer secret(embedded_keylog.data(), embedded_keylog.size());
+    journal->write_secret(socle::traffic_secret_format::tls_key_log, secret);
+    ASSERT_TRUE(journal->install(capture));
 
     auto client_connection = std::make_shared<quic::openssl_connection>(std::move(client));
     std::shared_ptr<quic::openssl_connection> server_connection(std::move(server));
@@ -550,9 +635,18 @@ TEST(OpenSslQuic, LoopbackHandshakeExposesBidirectionalStream) {
     }
     EXPECT_TRUE(saw_reset);
 
+    // tshark receives no external keylog file, so finding the encrypted
+    // STREAM marker proves decryption from the PCAPNG DSB itself.
+    ASSERT_TRUE(flush_capture_writer(*capture));
+    auto const [status, stream_data] = tshark_quic_stream_data(capture_path);
+    EXPECT_EQ(status, 0);
+    EXPECT_NE(stream_data.find("736d69746870726f78792d71756963"), std::string::npos)
+        << "tshark did not decrypt the smithproxy-quic STREAM payload";
+
     client_connection->close();
     server_connection->close();
     close(client_fd);
     close(server_fd);
+    if (!::testing::Test::HasFailure()) ::unlink(capture_path.c_str());
 }
 #endif

@@ -379,13 +379,23 @@ void listener_service::observe_datagram(datagram_view const& datagram) {
 }
 
 void listener_service::publish_capture_secrets(session& value) {
-    if (!value.capture_log || !value.keylog) return;
+    if (!value.capture_log || !value.keylog || !value.downstream
+        || !value.downstream->handshake_complete()) return;
     auto lines = value.keylog->snapshot();
-    while (value.keylog_cursor < lines.size()) {
-        auto const& text = lines[value.keylog_cursor++];
-        buffer line(text.data(), text.size());
-        value.capture_log->write_secret(socle::traffic_secret_format::tls_key_log, line);
+    if (value.keylog_cursor >= lines.size()) return;
+
+    // Wireshark treats a TLS-keylog DSB as a self-contained key schedule. The
+    // accepted handshake already has both directions' handshake and 1-RTT
+    // secrets, so publish one complete multi-line block rather than one DSB
+    // per callback line.
+    std::string keylog;
+    for (auto const& line : lines) {
+        keylog.append(line);
+        keylog.push_back('\n');
     }
+    buffer data(keylog.data(), keylog.size());
+    value.capture_log->write_secret(socle::traffic_secret_format::tls_key_log, data);
+    value.keylog_cursor = lines.size();
 }
 
 void listener_service::attach_staged_upstream(session& value) {
