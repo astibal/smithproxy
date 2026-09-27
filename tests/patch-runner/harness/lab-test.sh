@@ -24,10 +24,12 @@ CAPTURE_MATRIX_GRE_PID=
 SESSION_LIST_LOAD_PID=
 PPLAY_SUITE4_PID=
 PPLAY_SUITE6_PID=
+STARTTLS_SERVER_PID=
 CAPTURE_TEST=${CAPTURE_TEST:-0}
 CAPTURE_MATRIX_TEST=${CAPTURE_MATRIX_TEST:-0}
 RTT_TEST=${RTT_TEST:-0}
 TLS_SUITE_TEST=${TLS_SUITE_TEST:-0}
+STARTTLS_SUITE_TEST=${STARTTLS_SUITE_TEST:-0}
 POLICY_TEST=${POLICY_TEST:-0}
 SESSION_LIST_STRESS_TEST=${SESSION_LIST_STRESS_TEST:-0}
 UDP_CHURN_TEST=${UDP_CHURN_TEST:-0}
@@ -64,6 +66,8 @@ cleanup() {
     [[ -z $PPLAY_SUITE6_PID ]] || kill -TERM "$PPLAY_SUITE6_PID" 2>/dev/null || true
     [[ -z $PPLAY_SUITE4_PID ]] || wait "$PPLAY_SUITE4_PID" 2>/dev/null || true
     [[ -z $PPLAY_SUITE6_PID ]] || wait "$PPLAY_SUITE6_PID" 2>/dev/null || true
+    [[ -z $STARTTLS_SERVER_PID ]] || kill "$STARTTLS_SERVER_PID" 2>/dev/null || true
+    [[ -z $STARTTLS_SERVER_PID ]] || wait "$STARTTLS_SERVER_PID" 2>/dev/null || true
     ip link del "$IN_IF" 2>/dev/null || true
     ip link del "$OUT_IF" 2>/dev/null || true
     ip netns del "$CLIENT"
@@ -267,6 +271,38 @@ if [[ $TLS_SUITE_TEST == 1 ]]; then
         --host fd00:20::2 --ca-file "$ROOT/config/certs/ca-cert.pem" > "$ROOT/results/tls-suite6.json"
     python3 "$ROOT/runner/tests/suites/tls/report.py" "$ROOT/results/tls-suite6.json"
     echo 'PASS6 TLS suite: trust, SNI, ALPN and protocol-version matrix'
+fi
+if [[ $STARTTLS_SUITE_TEST == 1 ]]; then
+    STARTTLS_PORT=2525
+    ip netns exec "$SERVER" python3 "$ROOT/runner/tests/suites/starttls/run.py" server \
+        --host 198.18.20.2 --port "$STARTTLS_PORT" \
+        --cert "$ROOT/config/certs/origin-cert.pem" \
+        --key "$ROOT/config/certs/origin-key.pem" \
+        > "$ROOT/results/starttls-server.json" 2> "$ROOT/results/starttls-server.log" &
+    STARTTLS_SERVER_PID=$!
+    for attempt in $(seq 1 50); do
+        ip netns exec "$SERVER" ss -ltnH "sport = :$STARTTLS_PORT" | grep -q . && break
+        kill -0 "$STARTTLS_SERVER_PID"
+        sleep 0.1
+    done
+    ip netns exec "$SERVER" ss -ltnH "sport = :$STARTTLS_PORT" | grep -q .
+    ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/suites/starttls/run.py" client \
+        --host 198.18.20.2 --port "$STARTTLS_PORT" \
+        --ca "$ROOT/config/certs/ca-cert.pem" \
+        > "$ROOT/results/starttls-client.json"
+    wait "$STARTTLS_SERVER_PID"
+    STARTTLS_SERVER_PID=
+    python3 - "$ROOT/results/starttls-client.json" <<'PYSTARTTLS'
+import json, sys
+expected = ["smtp/starttls", "imap/starttls", "pop3/starttls", "ftp/starttls",
+            "xmpp/starttls", "http-proxy/starttls"]
+results = json.load(open(sys.argv[1]))
+assert [item["case"] for item in results] == expected
+assert all(item["issuer"] == "Runner Test CA" for item in results)
+for item in results:
+    print(f'{item["case"]}: PASS ({item["version"]}, {item["cipher"]})')
+PYSTARTTLS
+    echo 'PASS4 STARTTLS suite: all configured signatures upgraded through TLS MITM'
 fi
 if [[ $POLICY_TEST == 1 ]]; then
     { printf 'enable\r\ndiag proxy policy list 8\r\n'; sleep 1; printf 'quit\r\n'; } | \
