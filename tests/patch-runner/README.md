@@ -87,6 +87,10 @@ root. For remote execution: SSH access and passwordless `sudo`, unless using
 iproute2, nftables, socat, tcpdump, tshark, curl, nc, OpenSSL and Python 3.
 The test uses unique namespace, interface, port and `/opt/lab` names per run.
 
+Set `TCP_CHURN_PARALLEL` to cap the number of simultaneous short-lived TCP
+flows. The default is 64; constrained shared labs can use, for example,
+`--env TCP_CHURN_PARALLEL=3`.
+
 The QUIC suite additionally needs Python `aioquic` on the lab host and an
 HTTP/3-enabled curl installation. Set `CURL_HTTP3_PREFIX` to its prefix; the
 runner copies that small runtime bundle to local or remote lab storage. The

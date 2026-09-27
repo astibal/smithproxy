@@ -453,6 +453,7 @@ if [[ $TCP_CHURN_TEST == 1 ]]; then
         --host 198.18.20.2 \
         --waves "${TCP_CHURN_WAVES:-20}" \
         --flows "${TCP_CHURN_FLOWS:-64}" \
+        --parallel "${TCP_CHURN_PARALLEL:-64}" \
         --interval "${TCP_CHURN_INTERVAL:-0.25}" \
         --settle "${TCP_CHURN_SETTLE:-15}" \
         --timeout "${TCP_CHURN_TIMEOUT:-3}" \
@@ -465,6 +466,7 @@ if [[ $TCP_CHURN_TEST == 1 ]]; then
         --host fd00:20::2 \
         --waves "${TCP_CHURN_WAVES:-20}" \
         --flows "${TCP_CHURN_FLOWS:-64}" \
+        --parallel "${TCP_CHURN_PARALLEL:-64}" \
         --interval "${TCP_CHURN_INTERVAL:-0.25}" \
         --settle "${TCP_CHURN_SETTLE:-15}" \
         --timeout "${TCP_CHURN_TIMEOUT:-3}" \

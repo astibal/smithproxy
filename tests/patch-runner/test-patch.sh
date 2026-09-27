@@ -63,6 +63,7 @@ Common environment variables:
   RTT_HANDSHAKE_MAX_LIMIT_MS     Handshake maximum gate (default: 2000).
   CHURN_MIN_PORT                 TCP/UDP churn source-port minimum (default: 20000).
   CHURN_MAX_PORT                 TCP/UDP churn source-port maximum (default: 29999).
+  TCP_CHURN_PARALLEL             Maximum simultaneous TCP churn flows (default: 64).
   CURL_HTTP3_PREFIX              curl installation whose bin/curl-h3 supports HTTP/3.
 
 Examples:
@@ -298,6 +299,7 @@ print(*(x.getsockname()[1] for x in s))'
         RTT_HANDSHAKE_P95_LIMIT_MS RTT_HANDSHAKE_MAX_LIMIT_MS \
         SESSION_LIST_CONNECTIONS SESSION_LIST_SAMPLES \
         SESSION_LIST_P95_LIMIT_MS SESSION_LIST_MAX_LIMIT_MS \
+        TCP_CHURN_PARALLEL \
         CHURN_MIN_PORT CHURN_MAX_PORT; do
         [[ -z ${!variable:-} ]] || LAB_ENV+=("$variable=${!variable}")
     done
