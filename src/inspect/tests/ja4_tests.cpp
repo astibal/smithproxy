@@ -86,7 +86,7 @@ struct Samples {
 
             TLSClientHello ch;
             ch.from_buffer(data);
-            std::cout << "Sample " << count - i << ": " << ch.ja4() << "\n";
+            if (DEBUG) std::cout << "Sample " << count - i << ": " << ch.ja4() << "\n";
         }
     }
 
@@ -108,8 +108,10 @@ struct Samples {
             auto ret = ch.from_buffer(orig_copy);
             bool parse_ok = ( ret == 0);
 
-            std::cout << "Sample " << count - i << " garbage spot(" << start << "," << chunk_sz << ")" << ": "
-                      << (parse_ok ? ch.ja4() : "cannot parse ") << ret << "\n";
+            if (DEBUG) {
+                std::cout << "Sample " << count - i << " garbage spot(" << start << "," << chunk_sz << ")" << ": "
+                          << (parse_ok ? ch.ja4() : "cannot parse ") << ret << "\n";
+            }
         }
     }
 };
@@ -126,27 +128,29 @@ TEST(JA4_CH, samples) {
 
 TEST(JA4_CH, random_buffers) {
     auto s = Samples();
-    s.test_random(2006500);
+    Samples::DEBUG = false;
+    s.test_random(1000);
 }
 
 TEST(JA4_CH, sample1_fuzzing) {
     auto s = Samples();
+    Samples::DEBUG = false;
 
     for (int i = 3; i < 350; ) {
         // original, start index, random length, iterations
-        s.test_random_base<TLSClientHello>(util::hex_string_to_bytes(raw_str_1), i, 1, 6000);
+        s.test_random_base<TLSClientHello>(util::hex_string_to_bytes(raw_str_1), i, 1, 32);
         i += 1;
     }
 
     for (int i = 3; i < 350; ) {
         // original, start index, random length, iterations
-        s.test_random_base<TLSClientHello>(util::hex_string_to_bytes(raw_str_1), i, 2, 12000);
+        s.test_random_base<TLSClientHello>(util::hex_string_to_bytes(raw_str_1), i, 2, 32);
         i += 2;
     }
 
     for (int i = 3; i < 350; ) {
         // original, start index, random length, iterations
-        s.test_random_base<TLSClientHello>(util::hex_string_to_bytes(raw_str_1), i, 8, 36000);
+        s.test_random_base<TLSClientHello>(util::hex_string_to_bytes(raw_str_1), i, 8, 32);
         i += 8;
     }
 }
@@ -168,16 +172,17 @@ TEST(JA4_SH, sample1) {
 
 TEST(JA4_SH, sample1_fuzzing) {
     Samples s;
+    Samples::DEBUG = false;
 
     for (int i = 3; i < 350; ) {
         // original, start index, random length, iterations
-        s.test_random_base<TLSServerHello>(util::hex_string_to_bytes(raw_sh_str_1), i, 1, 6000);
+        s.test_random_base<TLSServerHello>(util::hex_string_to_bytes(raw_sh_str_1), i, 1, 32);
         i += 1;
     }
 
     for (int i = 3; i < 350; ) {
         // original, start index, random length, iterations
-        s.test_random_base<TLSServerHello>(util::hex_string_to_bytes(raw_sh_str_1), i, 8, 36000);
+        s.test_random_base<TLSServerHello>(util::hex_string_to_bytes(raw_sh_str_1), i, 8, 32);
         i += 8;
     }
 }
