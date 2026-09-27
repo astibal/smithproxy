@@ -438,6 +438,23 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_link_libraries(sx_gtests_http1 gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries(tls_testbed gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries (sx_gtests nlohmann_json::nlohmann_json)
+
+        enable_testing()
+        find_package(Python3 COMPONENTS Interpreter REQUIRED)
+        add_test(NAME sx_gtests
+                COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/fixtures/dns_server.py
+                        -- $<TARGET_FILE:sx_gtests> --gtest_color=no)
+        add_test(NAME sx_gtests_http1
+                COMMAND $<TARGET_FILE:sx_gtests_http1> --gtest_color=no)
+        add_test(NAME tls_testbed
+                COMMAND $<TARGET_FILE:tls_testbed> --gtest_color=no)
+        add_test(NAME dns_fixture_selftest
+                COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/fixtures/dns_server.py
+                        --self-test)
+        set_tests_properties(sx_gtests PROPERTIES TIMEOUT 180 LABELS "unit")
+        set_tests_properties(sx_gtests_http1 PROPERTIES TIMEOUT 180 LABELS "unit;slow")
+        set_tests_properties(tls_testbed PROPERTIES TIMEOUT 30 LABELS "unit;tls")
+        set_tests_properties(dns_fixture_selftest PROPERTIES TIMEOUT 10 LABELS "unit;fixture")
     endif()
 ENDIF()
 

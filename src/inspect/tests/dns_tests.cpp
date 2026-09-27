@@ -1,8 +1,21 @@
 #include <inspect/dns.hpp>
 #include <gtest/gtest.h>
 
-constexpr const char* host = "smithproxy.org";
-AddressInfo nameserver(AF_INET, "1.1.1.1", 53);
+constexpr const char* host = "fixture.test";
+
+class DNSFixture : public ::testing::Test {
+protected:
+    AddressInfo nameserver;
+
+    void SetUp() override {
+        const char* port_env = std::getenv("SMITHPROXY_TEST_DNS_PORT");
+        const char* host_env = std::getenv("SMITHPROXY_TEST_DNS_HOST4");
+        if (not port_env or not host_env) {
+            GTEST_SKIP() << "run through tests/fixtures/dns_server.py";
+        }
+        nameserver = AddressInfo(AF_INET, host_env, static_cast<unsigned short>(std::stoi(port_env)));
+    }
+};
 
 const unsigned char  dns_response1[] = {
         0xf3, 0x1a, 0x81, 0x80, 0x00, 0x01, 0x00, 0x02, 0x00, 0x02, 0x00, 0x06, 0x04, 0x70, 0x63, 0x64,
@@ -40,17 +53,20 @@ const unsigned char qname_parse_fail_end1[] = {
 };
 
 
-TEST(DNS_tests, resolvesA) {
+TEST_F(DNSFixture, resolvesA) {
     auto& df = DNSFactory::get();
 
     for(auto const& rect: { DNS_Record_Type::A }) {
         auto resp = df.resolve_dns_s(host, rect, nameserver, 4);
-        ASSERT_TRUE(resp);
+        ASSERT_NE(resp, nullptr);
+        ASSERT_EQ(resp->answers().size(), 1);
+        EXPECT_EQ(resp->answer_str_A(), " ip4: 192.0.2.10");
         std::cout << resp->answer_str_list() << "\n";
+        delete resp;
     }
 }
 
-TEST(DNS_tests, resolvesMore) {
+TEST_F(DNSFixture, resolvesMore) {
     auto& df = DNSFactory::get();
 
     for(auto const& rect: { DNS_Record_Type::A,
@@ -58,12 +74,14 @@ TEST(DNS_tests, resolvesMore) {
                             DNS_Record_Type::NS,
                             DNS_Record_Type::SOA}) {
         auto resp = df.resolve_dns_s(host, rect, nameserver, 4);
-        ASSERT_TRUE(resp);
+        ASSERT_NE(resp, nullptr);
+        ASSERT_EQ(resp->answers().size(), 1);
         std::cout << resp->answer_str_list() << "\n";
+        delete resp;
     }
 }
 
-TEST(DNS_tests, dumpHex) {
+TEST_F(DNSFixture, dumpHex) {
     auto& df = DNSFactory::get();
 
     for(auto const& rect: { DNS_Record_Type::A,
@@ -71,9 +89,32 @@ TEST(DNS_tests, dumpHex) {
                             DNS_Record_Type::NS,
                             DNS_Record_Type::SOA}) {
         auto resp = df.resolve_dns_s(host, rect, nameserver, 4);
-        ASSERT_TRUE(resp);
+        ASSERT_NE(resp, nullptr);
+        ASSERT_EQ(resp->answers().size(), 1);
         std::cout << resp->answer_hex_dump() << "\n";
+        delete resp;
     }
+}
+
+TEST_F(DNSFixture, resolvesNXDomain) {
+    auto* resp = DNSFactory::get().resolve_dns_s("nxdomain.test", DNS_Record_Type::A, nameserver, 4);
+    ASSERT_NE(resp, nullptr);
+    EXPECT_EQ(resp->flags() & 0x000f, 3);
+    EXPECT_TRUE(resp->answers().empty());
+    delete resp;
+}
+
+TEST_F(DNSFixture, resolvesAOverIPv6Transport) {
+    const char* port_env = std::getenv("SMITHPROXY_TEST_DNS_PORT");
+    const char* host_env = std::getenv("SMITHPROXY_TEST_DNS_HOST6");
+    ASSERT_NE(port_env, nullptr);
+    ASSERT_NE(host_env, nullptr);
+    AddressInfo nameserver6(AF_INET6, host_env, static_cast<unsigned short>(std::stoi(port_env)));
+    auto* resp = DNSFactory::get().resolve_dns_s(host, DNS_Record_Type::A, nameserver6, 4);
+    ASSERT_NE(resp, nullptr);
+    ASSERT_EQ(resp->answers().size(), 1);
+    EXPECT_EQ(resp->answer_str_A(), " ip4: 192.0.2.10");
+    delete resp;
 }
 
 TEST(DNS_Packet, load_request1) {
