@@ -420,6 +420,15 @@ TEST(OpenSslQuic, LoopbackHandshakeExposesBidirectionalStream) {
     ASSERT_TRUE(SSL_is_init_finished(server->native_handle())) << quic::openssl_error_stack();
     EXPECT_EQ(server->negotiated_alpn(), "h3");
 
+    // Internal retention must not depend on the optional SSLKEYLOGFILE lab aid.
+    auto const keylog = server->keylog();
+    ASSERT_NE(keylog, nullptr);
+    auto const secrets = keylog->snapshot();
+    EXPECT_FALSE(secrets.empty());
+    EXPECT_TRUE(std::any_of(secrets.begin(), secrets.end(), [](auto const& line) {
+        return line.rfind("SERVER_HANDSHAKE_TRAFFIC_SECRET ", 0) == 0;
+    }));
+
     auto client_connection = std::make_shared<quic::openssl_connection>(std::move(client));
     std::shared_ptr<quic::openssl_connection> server_connection(std::move(server));
     auto const client_flow = client_connection->open_flow(mf::direction::bidirectional);

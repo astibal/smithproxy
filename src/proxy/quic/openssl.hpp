@@ -10,6 +10,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <utility>
@@ -34,6 +35,26 @@ struct datagram_endpoint {
 };
 
 #if SMITHPROXY_OPENSSL_QUIC
+
+/**
+ * Thread-safe collection of NSS key-log records belonging to one QUIC connection.
+ *
+ * The OpenSSL callback can run before the listener publishes the accepted
+ * connection. Keeping the records behind shared ownership lets the service
+ * attach that early state to its session without copying or losing secrets.
+ */
+class keylog_store final {
+public:
+    /** Save one complete NSS key-log line, ignoring empty and duplicate records. */
+    void append(std::string line);
+    /** Return a stable copy suitable for a later capture/export operation. */
+    std::vector<std::string> snapshot() const;
+
+private:
+    mutable std::mutex mutex_;
+    std::vector<std::string> lines_;
+};
+
 namespace detail {
 
 /** The complete UDP tuple needed to return one transparent QUIC datagram. */
@@ -158,6 +179,8 @@ public:
     std::string server_name() const;
     /** Negotiated ALPN, or an empty string before/without negotiation. */
     std::string negotiated_alpn() const;
+    /** Downstream NSS key-log records retained for a future capture exporter. */
+    std::shared_ptr<keylog_store> keylog() const;
 
 private:
     /** Owns the OpenSSL stream object and terminal-event suppression state. */

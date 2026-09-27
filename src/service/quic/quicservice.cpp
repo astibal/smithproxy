@@ -357,6 +357,7 @@ void listener_service::accept_connections() {
         session incoming;
         incoming.id = next_session_id_++;
         incoming.downstream = std::move(connection);
+        incoming.keylog = incoming.downstream->keylog();
         incoming.client_endpoint = incoming.downstream->peer_endpoint();
         attach_staged_upstream(incoming);
 

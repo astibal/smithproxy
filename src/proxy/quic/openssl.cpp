@@ -27,6 +27,35 @@ namespace {
 #if SMITHPROXY_OPENSSL_QUIC
 std::mutex keylog_lock;
 
+/** OpenSSL owns one shared-store handle for the lifetime of each SSL object. */
+void free_keylog_store(void*, void* value, CRYPTO_EX_DATA*, int, long, void*) {
+    delete static_cast<std::shared_ptr<keylog_store>*>(value);
+}
+
+int keylog_store_index() {
+    static int const index = SSL_get_ex_new_index(
+        0, nullptr, nullptr, nullptr, free_keylog_store);
+    return index;
+}
+
+std::shared_ptr<keylog_store> ssl_keylog_store(SSL* ssl, bool create) {
+    if (!ssl) return {};
+
+    auto const index = keylog_store_index();
+    if (index < 0) return {};
+    auto* stored = static_cast<std::shared_ptr<keylog_store>*>(
+        SSL_get_ex_data(ssl, index));
+    if (stored) return *stored;
+    if (!create) return {};
+
+    auto handle = std::make_unique<std::shared_ptr<keylog_store>>(
+        std::make_shared<keylog_store>());
+    auto result = *handle;
+    if (SSL_set_ex_data(ssl, index, handle.get()) != 1) return {};
+    handle.release();
+    return result;
+}
+
 /**
  * Append one standard NSS key-log record for downstream QUIC decryption.
  *
@@ -35,9 +64,17 @@ std::mutex keylog_lock;
  * namespaces simple, while the mutex prevents records from multiple listener
  * contexts being interleaved.
  */
-void append_quic_keylog_line(const SSL*, const char* line) {
+void append_quic_keylog_line(const SSL* ssl, const char* line) {
+    if (!line || *line == '\0') return;
+
+    // Retain secrets independently of SSLKEYLOGFILE. The file is only an
+    // optional lab aid; the in-memory store belongs to the accepted session.
+    if (auto store = ssl_keylog_store(const_cast<SSL*>(ssl), true)) {
+        store->append(line);
+    }
+
     auto const* path = std::getenv("SSLKEYLOGFILE");
-    if (!path || *path == '\0' || !line || *line == '\0') return;
+    if (!path || *path == '\0') return;
 
     std::lock_guard lock(keylog_lock);
     auto const fd = ::open(path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0600);
@@ -59,6 +96,21 @@ void append_quic_keylog_line(const SSL*, const char* line) {
 
 } // namespace
 
+#if SMITHPROXY_OPENSSL_QUIC
+void keylog_store::append(std::string line) {
+    if (line.empty()) return;
+    std::lock_guard lock(mutex_);
+    if (std::find(lines_.begin(), lines_.end(), line) == lines_.end()) {
+        lines_.push_back(std::move(line));
+    }
+}
+
+std::vector<std::string> keylog_store::snapshot() const {
+    std::lock_guard lock(mutex_);
+    return lines_;
+}
+#endif
+
 std::string openssl_error_stack() {
     std::ostringstream output;
     bool first = true;
@@ -77,13 +129,11 @@ unique_ssl_ctx make_openssl_quic_context(bool server) {
     unique_ssl_ctx context(SSL_CTX_new(server ? OSSL_QUIC_server_method()
                                              : OSSL_QUIC_client_method()));
     // Capture only the intercepted/downstream leg. Upstream secrets describe
-    // a different QUIC connection and are intentionally absent from a client-
-    // side wire capture.
+    // a different QUIC connection and must not be mixed into its wire capture.
+    // The callback always runs so production can retain secrets internally;
+    // SSLKEYLOGFILE remains an optional additional test output.
     if (context && server) {
-        auto const* path = std::getenv("SSLKEYLOGFILE");
-        if (path && *path != '\0') {
-            SSL_CTX_set_keylog_callback(context.get(), append_quic_keylog_line);
-        }
+        SSL_CTX_set_keylog_callback(context.get(), append_quic_keylog_line);
     }
     return context;
 #else
@@ -458,6 +508,10 @@ std::string openssl_connection::negotiated_alpn() const {
     SSL_get0_alpn_selected(connection_.get(), &data, &size);
     return data && size != 0
         ? std::string(reinterpret_cast<char const*>(data), size) : std::string {};
+}
+
+std::shared_ptr<keylog_store> openssl_connection::keylog() const {
+    return ssl_keylog_store(connection_.get(), true);
 }
 
 datagram_endpoint openssl_connection::peer_endpoint() const {

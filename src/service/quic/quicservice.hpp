@@ -185,6 +185,7 @@ private:
         std::chrono::steady_clock::time_point draining_since {};
         std::shared_ptr<openssl_connection> downstream;
         std::shared_ptr<openssl_connection> upstream;
+        std::shared_ptr<keylog_store> keylog; ///< Downstream secrets for capture export.
         std::unique_ptr<multiflow::flow_proxy> proxy;
         datagram_endpoint client_endpoint;
         datagram_endpoint target_endpoint;
