@@ -25,12 +25,14 @@ SESSION_LIST_LOAD_PID=
 PPLAY_SUITE4_PID=
 PPLAY_SUITE6_PID=
 STARTTLS_SERVER_PID=
+ROUTING_SERVER_PID=
 CAPTURE_TEST=${CAPTURE_TEST:-0}
 CAPTURE_MATRIX_TEST=${CAPTURE_MATRIX_TEST:-0}
 RTT_TEST=${RTT_TEST:-0}
 TLS_SUITE_TEST=${TLS_SUITE_TEST:-0}
 STARTTLS_SUITE_TEST=${STARTTLS_SUITE_TEST:-0}
 POLICY_TEST=${POLICY_TEST:-0}
+ROUTING_TEST=${ROUTING_TEST:-0}
 SESSION_LIST_STRESS_TEST=${SESSION_LIST_STRESS_TEST:-0}
 UDP_CHURN_TEST=${UDP_CHURN_TEST:-0}
 TCP_CHURN_TEST=${TCP_CHURN_TEST:-0}
@@ -68,6 +70,8 @@ cleanup() {
     [[ -z $PPLAY_SUITE6_PID ]] || wait "$PPLAY_SUITE6_PID" 2>/dev/null || true
     [[ -z $STARTTLS_SERVER_PID ]] || kill "$STARTTLS_SERVER_PID" 2>/dev/null || true
     [[ -z $STARTTLS_SERVER_PID ]] || wait "$STARTTLS_SERVER_PID" 2>/dev/null || true
+    [[ -z $ROUTING_SERVER_PID ]] || kill "$ROUTING_SERVER_PID" 2>/dev/null || true
+    [[ -z $ROUTING_SERVER_PID ]] || wait "$ROUTING_SERVER_PID" 2>/dev/null || true
     ip link del "$IN_IF" 2>/dev/null || true
     ip link del "$OUT_IF" 2>/dev/null || true
     ip netns del "$CLIENT"
@@ -115,7 +119,13 @@ ip -n "$CLIENT" -6 route add default via fd00:10::1
 ip -n "$SERVER" link set lo up
 ip -n "$SERVER" link set eth0 up
 ip -n "$SERVER" addr add 198.18.20.2/24 dev eth0
+if [[ $ROUTING_TEST == 1 ]]; then
+    ip -n "$SERVER" addr add 198.18.20.3/24 dev eth0
+fi
 ip -n "$SERVER" -6 addr add fd00:20::2/64 dev eth0 nodad
+if [[ $ROUTING_TEST == 1 ]]; then
+    ip -n "$SERVER" -6 addr add fd00:20::3/64 dev eth0 nodad
+fi
 # No route from origin to client: successful replies prove proxy termination.
 if [[ $CAPTURE_TEST == 1 ]]; then
     export GRE_CAPTURE_DST=198.18.20.2
@@ -329,6 +339,23 @@ if [[ $POLICY_TEST == 1 ]]; then
     fi
     python3 "$ROOT/runner/tests/suites/policy/report.py" "$ROOT/results/policy-suite6.json"
     echo 'PASS6 policy suite: precedence, disabled, accept/profile and reject rules'
+fi
+if [[ $ROUTING_TEST == 1 ]]; then
+    ip netns exec "$SERVER" python3 -u "$ROOT/runner/tests/suites/routing/run.py" server \
+        > "$ROOT/results/routing-server.log" 2>&1 &
+    ROUTING_SERVER_PID=$!
+    for attempt in $(seq 1 50); do
+        grep -q '^READY$' "$ROOT/results/routing-server.log" 2>/dev/null && break
+        kill -0 "$ROUTING_SERVER_PID"
+        sleep 0.1
+    done
+    grep -q '^READY$' "$ROOT/results/routing-server.log"
+    ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/suites/routing/run.py" client --family 4 \
+        > "$ROOT/results/routing-suite4.json"
+    echo 'PASS4 routing: address/port rewrite, RR/L3/L4, SOCKS5 and opaque CONNECT tunnel'
+    ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/suites/routing/run.py" client --family 6 \
+        > "$ROOT/results/routing-suite6.json"
+    echo 'PASS6 routing: address/port rewrite, RR/L3/L4, SOCKS5 and opaque CONNECT tunnel'
 fi
 if [[ $RTT_TEST == 1 ]]; then
     RTT_EXTRA_ARGS=()
