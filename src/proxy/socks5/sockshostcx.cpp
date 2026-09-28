@@ -437,7 +437,7 @@ socks5_request_error socksServerCX::socks5_parse_request() {
     }
     else if(atype == socks5_atype::IPV4 or atype == socks5_atype::IPV6) {
 
-        req_atype = socks5_atype::IPV4;
+        req_atype = atype;
         state_ = socks5_state::REQ_RECEIVED;
         _dia("handle5_connect: request received, type %d", atype);
 
@@ -515,7 +515,7 @@ socks5_request_error socksServerCX::handle5_connect() {
             return handle5_connect_fqdn();
 
         }
-        else if (req_atype == socks5_atype::IPV4) {
+        else if (req_atype == socks5_atype::IPV4 or req_atype == socks5_atype::IPV6) {
 
             if (not setup_target()) {
                 return socks5_request_error::MALFORMED_DATA;
@@ -729,6 +729,13 @@ std::size_t socksServerCX::process_socks_reply_v5() {
             *((uint16_t*)&response[cur_data_ptr]) = htons(req_port);
             cur_data_ptr += sizeof(uint16_t);
 
+        } else if (req_atype == socks5_atype::IPV6) {
+            std::memcpy(&response[cur_data_ptr], &req_addr.as_v6()->sin6_addr, sizeof(in6_addr));
+            cur_data_ptr += sizeof(in6_addr);
+
+            *((uint16_t*)&response[cur_data_ptr]) = htons(req_port);
+            cur_data_ptr += sizeof(uint16_t);
+
         } else if (req_atype == socks5_atype::FQDN) {
 
             response[cur_data_ptr] = (unsigned char) req_str_addr.size();
@@ -937,4 +944,3 @@ std::size_t socksServerCX::process_out() {
         return writebuf()->size();
     }
 }
-

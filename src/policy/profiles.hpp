@@ -344,7 +344,7 @@ struct ProfileRouting: public CfgElement {
     std::vector<std::string> dnat_ports;
 
     using dnat_lb_method_t = enum class lb_method { LB_RR, LB_L3, LB_L4 };
-    dnat_lb_method_t dnat_lb_method;
+    dnat_lb_method_t dnat_lb_method = dnat_lb_method_t::LB_RR;
 
     // update internal state - run once per one request
     void update();

@@ -44,6 +44,8 @@
 
 #include <proxy/nbrhood.hpp>
 
+#include <arpa/inet.h>
+
 namespace sx::proxymaker {
 
     namespace log {
@@ -198,28 +200,40 @@ namespace sx::proxymaker {
 
         {
             auto l_ = std::scoped_lock(routing_profile->lb_state.lock_);
-            auto candidates = routing_profile->lb_candidates(proxy->com()->l3_proto());
-            if(candidates.empty()) return { std::nullopt, std::nullopt };
-
-            size_t index = 0;
-
-            switch(routing_profile->dnat_lb_method) {
-
-                case ProfileRouting::lb_method::LB_RR:
-                    index = routing_profile->lb_index_rr(candidates.size());
-                    break;
-                case ProfileRouting::lb_method::LB_L3:
-                    index = routing_profile->lb_index_l3(proxy.get(), candidates.size());
-                    break;
-                case ProfileRouting::lb_method::LB_L4:
-                    index = routing_profile->lb_index_l4(proxy.get(), candidates.size());
-                    break;
-                default:
-                    // act as LB_RR
-                    index = routing_profile->lb_index_rr(candidates.size());
+            auto family = proxy->com()->l3_proto();
+            if(auto const* target = proxy->first_right(); target and target->com()) {
+                family = target->com()->l3_proto();
+                in6_addr address6 {};
+                in_addr address4 {};
+                if(inet_pton(AF_INET6, target->host().c_str(), &address6) == 1) {
+                    family = AF_INET6;
+                }
+                else if(inet_pton(AF_INET, target->host().c_str(), &address4) == 1) {
+                    family = AF_INET;
+                }
             }
+            auto candidates = routing_profile->lb_candidates(family);
+            if(not candidates.empty()) {
+                size_t index = 0;
 
-            ip = candidates[index]->ip();
+                switch(routing_profile->dnat_lb_method) {
+
+                    case ProfileRouting::lb_method::LB_RR:
+                        index = routing_profile->lb_index_rr(candidates.size());
+                        break;
+                    case ProfileRouting::lb_method::LB_L3:
+                        index = routing_profile->lb_index_l3(proxy.get(), candidates.size());
+                        break;
+                    case ProfileRouting::lb_method::LB_L4:
+                        index = routing_profile->lb_index_l4(proxy.get(), candidates.size());
+                        break;
+                    default:
+                        // act as LB_RR
+                        index = routing_profile->lb_index_rr(candidates.size());
+                }
+
+                ip = candidates[index]->ip();
+            }
         }
 
         if(not routing_profile->dnat_ports.empty()) {
