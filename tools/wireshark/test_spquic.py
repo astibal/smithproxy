@@ -49,6 +49,40 @@ class Spq1DissectorTest(unittest.TestCase):
             result.stdout.strip().splitlines(),
         )
 
+    @unittest.skipUnless(shutil.which("tshark"), "tshark is not installed")
+    def test_decodes_spq1_after_native_quic_on_same_tuple(self) -> None:
+        """Do not let native QUIC conversation binding hide later SPQ1 records."""
+        with tempfile.TemporaryDirectory(prefix="spq1-mixed-tshark-") as temporary:
+            temporary_path = Path(temporary)
+            capture = temporary_path / "mixed.pcap"
+            dissector = temporary_path / "spquic.lua"
+            shutil.copy2(DISSECTOR, dissector)
+
+            subprocess.run(
+                [sys.executable, str(DEMO_GENERATOR), "--output", str(capture),
+                 "--prepend-native-quic"],
+                check=True,
+                stdout=subprocess.DEVNULL,
+            )
+            result = subprocess.run(
+                [
+                    "tshark",
+                    "-r", str(capture),
+                    "-X", f"lua_script:{dissector}",
+                    "-Y", "sphttp3.url",
+                    "-T", "fields",
+                    "-e", "sphttp3.url",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertEqual(
+            ["https://origin.runner.lab/demo"],
+            result.stdout.strip().splitlines(),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

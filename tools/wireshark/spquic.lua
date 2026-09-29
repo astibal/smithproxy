@@ -267,3 +267,23 @@ spquic:register_heuristic("udp", function(buffer, pinfo, tree)
     spquic.dissector(buffer, pinfo, tree)
     return true
 end)
+
+-- Native QUIC and SPQ1 records may intentionally share one UDP tuple in a
+-- local capture. Once Wireshark binds that conversation to its native QUIC
+-- dissector, UDP heuristics are no longer called for the later plaintext
+-- records. Re-check the UDP payload after normal dissection so mixed captures
+-- remain filterable without Decode As or a synthetic port assignment.
+local udp_payload = Field.new("udp.payload")
+local decoded_spq1_version = Field.new("spquic.version")
+local spquic_post = Proto("spquic_post", "Smithproxy SPQ1 conversation fallback")
+
+function spquic_post.dissector(_, pinfo, tree)
+    if decoded_spq1_version() then return end
+    local payload = udp_payload()
+    if not payload or payload.len < 5 then return end
+    local range = payload.range
+    if range(1, 4):string() ~= "SPQ1" then return end
+    spquic.dissector(range:tvb(), pinfo, tree)
+end
+
+register_postdissector(spquic_post)

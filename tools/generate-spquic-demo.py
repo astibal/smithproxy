@@ -97,6 +97,21 @@ def synthetic_quic_packet(packet_number: int, frame: bytes) -> bytes:
     )
 
 
+def native_quic_initial() -> bytes:
+    """Build a parseable native Initial which pins Wireshark's QUIC conversation."""
+    destination_id = bytes.fromhex("0102030405060708")
+    source_id = bytes.fromhex("1112131415161718")
+    protected_length = 1174  # Four-byte packet number plus protected payload.
+    return (
+        b"\xc3\x00\x00\x00\x01"
+        + bytes((len(destination_id),)) + destination_id
+        + bytes((len(source_id),)) + source_id
+        + b"\x00"  # Empty token.
+        + quic_varint(protected_length)
+        + b"\x00" * protected_length
+    )
+
+
 def ipv4_packet(
     source_ip: bytes,
     destination_ip: bytes,
@@ -162,7 +177,7 @@ def gre_export_packet(inner_ip: bytes, packet_id: int) -> bytes:
     return ethernet + outer_ip
 
 
-def write_demo(output_path: Path) -> None:
+def write_demo(output_path: Path, prepend_native: bool = False) -> None:
     """Write a deterministic SPQ1 request/response capture to output_path."""
     request = b"GET /demo HTTP/3\r\nhost: origin.runner.lab\r\n\r\n"
     response = b"HTTP/3 200\r\ncontent-length: 5\r\n\r\nhello"
@@ -189,6 +204,12 @@ def write_demo(output_path: Path) -> None:
         (SERVER_IP, CLIENT_IP, SERVER_PORT, CLIENT_PORT,
          synthetic_quic_packet(6, stream_frame(STREAM_ID, len(response), b"", True)), 0x4206),
     ]
+    if prepend_native:
+        records.insert(
+            0,
+            (CLIENT_IP, SERVER_IP, CLIENT_PORT, SERVER_PORT,
+             native_quic_initial(), 0x4200),
+        )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     started = int(time.time())
@@ -209,8 +230,12 @@ def main() -> None:
         "--output", type=Path, default=OUTPUT,
         help=f"capture path (default: {OUTPUT})",
     )
+    parser.add_argument(
+        "--prepend-native-quic", action="store_true",
+        help="precede SPQ1 with native QUIC on the same UDP conversation",
+    )
     arguments = parser.parse_args()
-    write_demo(arguments.output)
+    write_demo(arguments.output, arguments.prepend_native_quic)
 
 
 if __name__ == "__main__":
