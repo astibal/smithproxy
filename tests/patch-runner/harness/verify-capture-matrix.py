@@ -163,12 +163,9 @@ def direction_key(item):
     return item["source"], item["source_port"], item["destination"], item["destination_port"]
 
 
-def validate_tcp(packets, selected, issues, label):
+def validate_tcp_session(packets, issues, label):
     next_seq = {}; bases = {}; last_ack = {}; closed = set(); payloads = collections.defaultdict(dict)
     for item in packets:
-        key = connection_key(item)
-        if item["protocol"] != "tcp" or key not in selected:
-            continue
         direction = direction_key(item); reverse = (direction[2], direction[3], direction[0], direction[1])
         seq = item["sequence"]; flags = item["flags"]; payload = item["payload"]
         syn = bool(flags & 0x02); fin = bool(flags & 0x01); rst = bool(flags & 0x04); ack_flag = bool(flags & 0x10)
@@ -205,6 +202,51 @@ def validate_tcp(packets, selected, issues, label):
     return streams
 
 
+def validate_tcp(packets, issues, label):
+    """Validate marker-bearing TCP connections without conflating tuple reuse.
+
+    A client may legitimately reuse the same four-tuple after a connection is
+    closed.  Treating the tuple as the session identity merges different ISNs,
+    produces false sequence errors and concatenates unrelated payloads.  A new
+    initial SYN starts a new generation; only generations carrying a capture
+    marker participate in the matrix validation.
+    """
+    active = {}
+    sessions = []
+
+    for item in packets:
+        if item["protocol"] != "tcp":
+            continue
+
+        key = connection_key(item)
+        initial_syn = bool(item["flags"] & 0x02) and not bool(item["flags"] & 0x10)
+        current = active.get(key)
+        if initial_syn and current:
+            first = current[0]
+            same_syn = (item["sequence"] == first["sequence"]
+                        and direction_key(item) == direction_key(first))
+            if not same_syn:
+                sessions.append(current)
+                current = None
+
+        if current is None:
+            current = []
+            active[key] = current
+        current.append(item)
+
+    sessions.extend(active.values())
+
+    streams = []
+    selected = []
+    for session in sessions:
+        if not any(b"CMX" in item["payload"] for item in session):
+            continue
+        selected.append(connection_key(session[0]))
+        streams.extend(validate_tcp_session(session, issues, label))
+
+    return streams, selected
+
+
 def collect(packet_bytes, unwrap, label, family):
     parsed = []; issues = []
     for packet in packet_bytes:
@@ -213,8 +255,7 @@ def collect(packet_bytes, unwrap, label, family):
             item = transport(inner, issues, label)
             if item is not None and item["family"] == family:
                 parsed.append(item)
-    selected = {connection_key(item) for item in parsed if b"CMX" in item["payload"]}
-    tcp_streams = validate_tcp(parsed, selected, issues, label)
+    tcp_streams, selected = validate_tcp(parsed, issues, label)
     udp_payloads = [item["payload"] for item in parsed if item["protocol"] == "udp" and b"CMX" in item["payload"]]
     return tcp_streams + udp_payloads, parsed, selected, issues
 

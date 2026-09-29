@@ -67,7 +67,7 @@
 
 using namespace socle;
 
-MitmProxy::MitmProxy(baseCom* c): baseProxy(c) {
+MitmProxy::MitmProxy(baseCom* c): baseProxy(c), start_stop_tls_(*this) {
 
     current_sessions()++;
     total_sessions()++;
@@ -89,6 +89,16 @@ void MitmProxy::toggle_tlog () {
     // create traffic logger if it doesn't exist
     if(not tlog_) {
 
+        // A protocol adapter may transform a compatible logger. The core does
+        // not inspect the transport or flow implementation behind that adapter.
+        auto install_logger = [this](
+                std::unique_ptr<socle::baseTrafficLogger> output) {
+            if (traffic_log_adapter_) {
+                output = traffic_log_adapter_->wrap(std::move(output));
+            }
+            tlog_ = std::move(output);
+        };
+
         auto fmt = cfg->capture_local.format;
 
         switch (fmt.value) {
@@ -96,10 +106,10 @@ void MitmProxy::toggle_tlog () {
 
                 auto suf = fmt.to_ext(CfgFactory::get()->capture_local.file_suffix);
 
-                tlog_ = std::make_unique<socle::traflog::SmcapLog>(this,
+                install_logger(std::make_unique<socle::traflog::SmcapLog>(this,
                                                                    CfgFactory::get()->capture_local.dir.c_str(),
                                                                    CfgFactory::get()->capture_local.file_prefix.c_str(),
-                                                                   suf.c_str());
+                                                                   suf.c_str()));
 
                 }
                 break;
@@ -114,7 +124,7 @@ void MitmProxy::toggle_tlog () {
                                                              true);
                 pcaplog->details.ttl = 32;
                 CfgFactory::gre_export_apply(pcaplog.get());
-                tlog_ = std::move(pcaplog);
+                install_logger(std::move(pcaplog));
 
                 }
                 break;
@@ -145,7 +155,7 @@ void MitmProxy::toggle_tlog () {
 
                 CfgFactory::gre_export_apply(n.get());
 
-                tlog_ = std::move(n);
+                install_logger(std::move(n));
 
                 }
                 break;

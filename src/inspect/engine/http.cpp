@@ -781,8 +781,13 @@ namespace sx::engine::http {
             auto round = 0;
             auto pos_size = ctx.origin->flow().pos_size();
             auto q_size = ctx.origin->flow().flow_queue().size();
+            if (q_size == 0) {
+                _deb("start - no flow blocks available");
+                return;
+            }
 
-            size_t to_see_back_sz = pos_size - ctx.flow_seen->blocks_seen;
+            const size_t blocks_seen = ctx.flow_seen ? ctx.flow_seen->blocks_seen : 0;
+            size_t to_see_back_sz = pos_size > blocks_seen ? pos_size - blocks_seen : 0;
             if(to_see_back_sz > q_size)
                 to_see_back_sz = q_size; // we cannot see anything back
 

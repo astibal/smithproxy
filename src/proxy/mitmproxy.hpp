@@ -48,6 +48,8 @@
 #include <hostcx.hpp>
 
 #include <proxy/socks5/sockshostcx.hpp>
+#include <proxy/trafficcapture.hpp>
+#include <proxy/startstoptls.hpp>
 
 #include <baseproxy.hpp>
 #include <threadedacceptor.hpp>
@@ -86,6 +88,7 @@ private:
 class MitmProxy : public baseProxy, public IOController {
 
     std::unique_ptr<socle::baseTrafficLogger> tlog_;
+    std::unique_ptr<sx::traffic_log_adapter> traffic_log_adapter_;
     
     std::unique_ptr<std::vector<ProfileContentRule>> content_rule_; //save some space and store it as a pointer. Init it only when needed and delete in dtor.
     int matched_policy_ = -1;
@@ -159,10 +162,17 @@ public:
 
 
     std::unique_ptr<socle::baseTrafficLogger>& tlog() { return tlog_; }
+    /** Install an optional transport-neutral transformation of capture output. */
+    void traffic_log_adapter(std::unique_ptr<sx::traffic_log_adapter> adapter) {
+        traffic_log_adapter_ = std::move(adapter);
+    }
     void toggle_tlog ();
     
     explicit MitmProxy(baseCom* c);
     ~MitmProxy() override;
+
+    StartStopTls& start_stop_tls() noexcept { return start_stop_tls_; }
+    StartStopTls const& start_stop_tls() const noexcept { return start_stop_tls_; }
 
     // actual proxy functions manipulating data buffers
     void write_traffic_log(side_t side, baseHostCX* cx, buffer* custom_buffer  = nullptr);
@@ -252,6 +262,7 @@ public:
     DECLARE_LOGGING(to_string)
 
 private:
+    StartStopTls start_stop_tls_;
     logan_lite log {"proxy"};
     logan_lite log_dump {"proxy.payload"};
     logan_lite log_content {"proxy.content"};

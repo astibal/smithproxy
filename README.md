@@ -43,7 +43,7 @@ It uses our C++17 socket proxying library called [*socle*](https://github.com/as
 
 ## Other:
 * Local and LDAP user authentication using builtin web portal (using complementary package)
-* SOCKS4/SOCKS5 explicit proxy with DNS hostname support
+* SOCKS4/SOCKS5 and HTTP CONNECT explicit proxies with DNS hostname support
 * Engines: limited HTTP1 and HTTP2 support
 * DNS inspection allows FQDN policy objects, including DoH
 * Policies based on FQDN and 2nd level DNS domain
@@ -57,6 +57,32 @@ It uses our C++17 socket proxying library called [*socle*](https://github.com/as
 * auto-detect inspection interface(s) based on system routing information
 * check [pplay tool](https://pypi.org/project/pplay/): replays captures
   over the network with many cool features
+
+## HTTP CONNECT explicit proxy
+
+The HTTP/1.0 and HTTP/1.1 `CONNECT host:port` listener uses the same policy,
+DNS resolution and TLS/STARTTLS interception path as the SOCKS listener. IPv4,
+IPv6 (`CONNECT [::1]:443`) and FQDN authorities are accepted.
+
+Enable it in `etc/smithproxy.cfg`:
+
+```text
+settings = {
+    accept_http_connect = TRUE;
+    http_connect_port = "3128";
+    http_connect_workers = 0; // automatic worker count; -1 disables workers
+};
+```
+
+The listener returns `200` after the upstream connection succeeds, `400` for
+invalid requests, `403` when policy rejects the connection, `431` when the
+header reaches the 8 KiB limit, and `502` for resolution or upstream connection
+failure. Requests and error responses close the connection where appropriate.
+
+Current limitation: application data sent in the same TCP segment immediately
+after the CONNECT headers can be discarded during the frontend-to-tunnel
+handoff. Clients should wait for `200 Connection Established` before sending
+tunnel data. CONNECT request pipelining is not supported.
 
 ### Support and contacts
   * Discord server: [https://discord.gg/vf4Qwwt](https://discord.gg/vf4Qwwt)  

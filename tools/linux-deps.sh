@@ -1,268 +1,125 @@
 #!/usr/bin/env sh
 
-SX_LIBCONFIG_VER="9v5"
-SX_GCC_VER="8"
+set -eu
 
-
-OS=`uname -s`
-REV=`uname -r`
-MACH=`uname -m`
-DIST="UnknownDist"
-REV="UnknownRev"
-
-LINK_TOOLCHAIN="Y"
-
-# taken from distro.sh in pkg-scripts/deb/
-
-### detect OS
-
-if [ "${OS}" = "SunOS" ] ; then
-	OS=Solaris
-	ARCH=`uname -p`
-	OSSTR="${OS} ${REV}(${ARCH} `uname -v`)"
-elif [ "${OS}" = "AIX" ] ; then
-	OSSTR="${OS} `oslevel` (`oslevel -r`)"
-elif [ "${OS}" = "Linux" ] ; then
-	KERNEL=`uname -r`
-
-
-	if [ -f /etc/fedora-release ] ; then
-		DIST='Fedora'
-		PSEUDONAME=`cat /etc/fedora-release | sed s/.*\(// | sed s/\)//`
-
-		REV=`cat /etc/fedora-release | sed s/.*release\ // | sed s/\ .*//`
-	elif [ -f /etc/redhat-release ] ; then
-		DIST='RedHat'
-		PSEUDONAME=`cat /etc/redhat-release | sed s/.*\(// | sed s/\)//`
-		REV=`cat /etc/redhat-release | sed s/.*release\ // | sed s/\ .*//`
-
-	elif [ -f /etc/SUSE-release ] ; then
-		DIST=`cat /etc/SUSE-release | tr "\n" ' '| sed s/VERSION.*//`
-		REV=`cat /etc/SUSE-release | tr "\n" ' ' | sed s/.*=\ //`
-
-	elif [ -f /etc/mandrake-release ] ; then
-		DIST='Mandrake'
-		PSEUDONAME=`cat /etc/mandrake-release | sed s/.*\(// | sed s/\)//`
-		REV=`cat /etc/mandrake-release | sed s/.*release\ // | sed s/\ .*//`
-
-	elif [ -f /etc/lsb-release ] ; then
-		eval `cat /etc/lsb-release`
-		DIST=$DISTRIB_ID
-		PSEUDONAME=$DISTRIB_CODENAME
-		REV=$DISTRIB_RELEASE
-
-	elif [ -f /etc/debian_version ] ; then
-		DIST="Debian"
-		REV="`cat /etc/debian_version | awk -F"/" '{ print $1 }' | awk -F"." '{ print $1 }'`"
-
-		if [ "${REV}" = "bullseye" ]; then
-		    REV="11.0"
-		fi
-
-    elif [ -f /etc/alpine-release ] ; then
-        DIST="Alpine"
-        MAJ=`cat /etc/alpine-release | tr '_' ' ' | tr '.' ' ' | awk '{ print $1 }' `
-        MIN=`cat /etc/alpine-release | tr '_' ' ' | tr '.' ' ' | awk '{ print $2 }' `
-        REV="${MAJ}.${MIN}"
-
-	elif [ -f /etc/UnitedLinux-release ] ; then
-		DIST="${DIST}[`cat /etc/UnitedLinux-release | tr "\n" ' ' | sed s/VERSION.*//`]"
-	fi
-
-	OSSTR="${OS} ${DIST} ${REV}(${PSEUDONAME} ${KERNEL} ${MACH})"
-
+if [ "$(id -u)" -ne 0 ]; then
+    echo "error: run this script as root (for example: sudo $0)" >&2
+    exit 1
 fi
 
-###
+if [ "$(uname -s)" != "Linux" ]; then
+    echo "error: only Linux is supported by this dependency installer" >&2
+    exit 1
+fi
 
-echo "... OS detected: $DIST version $REV"
+if [ ! -r /etc/os-release ]; then
+    echo "error: cannot identify the distribution (/etc/os-release is missing)" >&2
+    exit 1
+fi
 
-if [ "${DIST}" = "Ubuntu" ]; then
+# ID and ID_LIKE are distro-supplied values from os-release, not user input.
+# shellcheck disable=SC1091
+. /etc/os-release
 
-  PIP="pip3"
+DIST_ID=${ID:-unknown}
+DIST_VERSION=${VERSION_ID:-unknown}
+DIST_LIKE=${ID_LIKE:-}
 
-   LIBSSL="libssl1.1"
-   # specifics
-   if [ "${REV}" = "20.04" ]; then
-        SX_LIBCONFIG_VER="9v5"
-        SX_GCC_VER="9"
-   elif [ "${REV}" = "21.04" ]; then
-        SX_LIBCONFIG_VER="9v5"
-        SX_GCC_VER="11"
-   elif [ "${REV}" = "22.04" ]; then
-        SX_LIBCONFIG_VER="9v5"
-        SX_GCC_VER="12"
-        LIBSSL="libssl3"
-        PIP="pip"
-   elif [ "${REV}" = "24.04" ]; then
-        SX_LIBCONFIG_VER="9v5"
-        SX_GCC_VER="13"
-        LIBSSL="libssl3"
-        PIP="false"
-   fi
+echo "... OS detected: ${DIST_ID} version ${DIST_VERSION}"
 
+is_like() {
+    case " ${DIST_LIKE} " in
+        *" $1 "*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
 
-   # update toolchains to something reasonable
-   if [ "${REV}" = "18.04" ]; then
-        apt update && apt -y install gpg wget ca-certificates software-properties-common
-        wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | gpg --dearmor - | tee /usr/share/keyrings/kitware-archive-keyring.gpg >/dev/null
-        echo 'deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ bionic main' | tee /etc/apt/sources.list.d/kitware.list >/dev/null
-   fi
-
-
-
+install_apt_dependencies() {
     export DEBIAN_FRONTEND=noninteractive
-    apt-get install -y tzdata
 
-    echo "... installing essentials and libraries"
-    apt update && apt install -y \
-    wget curl \
-    python3 python3-dev \
-    libconfig++${SX_LIBCONFIG_VER} ${LIBSSL} libunwind8 libmicrohttpd12 \
-    libconfig-dev libconfig++-dev  libssl-dev libunwind-dev libmicrohttpd-dev libcurl4-openssl-dev libpam-dev nlohmann-json3-dev git g++-${SX_GCC_VER} cmake make
+    apt-get update
+    apt-get install -y --no-install-recommends \
+        ca-certificates wget curl \
+        git g++ cmake make build-essential \
+        python3 python3-dev python3-cryptography python3-pyroute2 python3-pyparsing \
+        libconfig-dev libconfig++-dev \
+        libssl-dev libunwind-dev libmicrohttpd-dev libcurl4-openssl-dev \
+        libpam0g-dev nlohmann-json3-dev \
+        iptables iproute2 telnet \
+        swig libffi-dev libxml2-dev libxslt1-dev xmlsec1
+}
 
-    echo "... installing OS toolchains"
-    apt install -y iptables telnet iproute2 python3-cryptography python3-pyroute2 \
-    debootstrap devscripts build-essential lintian debhelper vim nano
+install_apk_dependencies() {
+    apk add --no-cache \
+        ca-certificates wget curl bash \
+        git g++ cmake make musl-dev linux-headers \
+        python3 python3-dev py3-cryptography py3-pyroute2 \
+        libconfig-dev openssl-dev libunwind-dev libmicrohttpd-dev curl-dev \
+        linux-pam-dev nlohmann-json \
+        iptables iproute2 busybox-extras \
+        swig libffi-dev libxml2-dev libxslt-dev xmlsec-dev
+}
 
-    echo "... installing python libraries"
+install_dnf_dependencies() {
+    # DNF may replace glibc/bash in minimal images. Replacing this process
+    # avoids continuing in an interpreter whose runtime was just upgraded.
+    exec dnf install -y \
+        ca-certificates wget curl-minimal \
+        git gcc-c++ cmake make \
+        python3 python3-devel python3-cryptography python3-pyroute2 python3-pyparsing \
+        libconfig-devel openssl-devel libunwind-devel libmicrohttpd-devel \
+        libcurl-devel pam-devel nlohmann-json-devel \
+        iptables iproute telnet \
+        swig libffi-devel libxml2-devel libxslt-devel xmlsec1-devel
+}
 
-    if [ "${PIP}" != "false" ]; then
-      apt install -y python3-pip
-      ${PIP} install --upgrade pip
-      ${PIP} install pyparsing  pylibconfig2
-    else
-      echo "... PIP is not installed"
-    fi
+install_rhel_dependencies() {
+    # Several build dependencies live in CRB and EPEL on RHEL derivatives.
+    dnf install -y dnf-plugins-core epel-release
+    dnf config-manager --set-enabled crb
+    install_dnf_dependencies
+}
 
-elif [ "${DIST}" = "Debian" ]; then
+install_zypper_dependencies() {
+    zypper --non-interactive refresh
+    zypper --non-interactive install --no-recommends \
+        ca-certificates wget curl \
+        git gcc-c++ cmake make \
+        python3 python3-devel python3-cryptography python3-pyroute2 python3-pyparsing \
+        libconfig-devel libopenssl-devel libunwind-devel libmicrohttpd-devel \
+        libcurl-devel pam-devel nlohmann_json-devel \
+        iptables iproute2 telnet \
+        swig libffi-devel libxml2-devel libxslt-devel xmlsec1-devel
+}
 
-    # detect debian derivatives
-
-    if   [ "${REV}" = "kali" ]; then
-        DEB_MAJ="11"
-        SX_LIBCONFIG_VER="9v5"
-        SX_GCC_VER="9"
-
-    elif [ "${REV}" = "kali-rolling" ]; then
-        DEB_MAJ="11"
-        SX_LIBCONFIG_VER="9v5"
-        SX_GCC_VER="9"
-    else
-        # for vanilla Debians
-
-        DEB_MAJ=`echo $REV | awk -F'.' '{ print $1 }'`
-
-        if [ "${DEB_MAJ}" = "11" ]; then
-            SX_LIBCONFIG_VER="9v5"
-            SX_GCC_VER="10"
-        elif [ "${DEB_MAJ}" = "12" ]; then
-            SX_LIBCONFIG_VER="9v5"
-            SX_GCC_VER="12"
-            LIBSSL="libssl3"
+case "${DIST_ID}" in
+    ubuntu|debian|linuxmint|pop)
+        install_apt_dependencies
+        ;;
+    alpine)
+        install_apk_dependencies
+        ;;
+    fedora)
+        install_dnf_dependencies
+        ;;
+    almalinux|rocky|centos)
+        install_rhel_dependencies
+        ;;
+    opensuse-tumbleweed|opensuse-leap|sles)
+        install_zypper_dependencies
+        ;;
+    *)
+        if is_like debian; then
+            install_apt_dependencies
+        elif is_like fedora; then
+            install_dnf_dependencies
+        elif is_like suse || is_like opensuse; then
+            install_zypper_dependencies
+        else
+            echo "error: unsupported Linux distribution: ${DIST_ID} ${DIST_VERSION}" >&2
+            exit 1
         fi
+        ;;
+esac
 
-    fi
-
-
-    DEBIAN_FRONTEND=noninteractive apt-get install -y tzdata
-
-    echo "... installing essentials and libraries"
-    apt update && apt install -y \
-    wget curl \
-    python3 python3-pip python3-dev \
-    libconfig++${SX_LIBCONFIG_VER} ${LIBSSL} libunwind8 libmicrohttpd12 \
-    libconfig-dev libconfig++-dev  libssl-dev libunwind-dev libmicrohttpd-dev libcurl4-openssl-dev libpam-dev nlohmann-json3-dev git g++-${SX_GCC_VER} cmake make
-
-    echo "... installing OS toolchains"
-    apt install -y iptables telnet iproute2 && \
-    apt install -y swig  \
-    debootstrap devscripts build-essential lintian debhelper vim nano
-    apt install -y libffi-dev
-
-    echo "... installing python libraries"
-    ${PIP} install --upgrade pip
-
-    if [ "${MACH}" = "aarch64" ]; then
-      echo
-    fi
-
-    if [ "${DEB_MAJ}" = "11" ]; then
-        ${PIP} install pyparsing pylibconfig2
-    else
-        ${PIP} install pyparsing pylibconfig2
-    fi
-
-elif [ "${DIST}" = "Alpine" ]; then
-
-    OPW=`pwd`
-
-    cd /tmp
-
-    apk update
-    apk add git bash
-    apk add make gcc musl-dev
-
-    apk add openssl libconfig libconfig-dev libmicrohttpd libmicrohttpd-dev curl-dev linux-pam-dev nlohmann-json
-    apk add cmake g++ python3-dev libexecinfo-dev openssl-dev linux-headers libunwind-dev
-    apk add busybox-extras iptables iproute2
-    apk add libffi-dev libxml2-dev libxslt-dev xmlsec-dev
-
-    apk add py3-pip
-    apk add py3-cryptography
-
-    # add packages unknown to apk from pip3
-    pip3 install --upgrade pip
-    pip3 install wheel
-    pip3 install pyroute2 pyparsing pylibconfig2
-
-    LINK_TOOLCHAIN="N"
-
-    cd ${OPW}
-
-elif [ "${DIST}" = "Fedora" ]; then
-
-    OPW=`pwd`
-    yum update -y
-    yum install -y git openssl-libs openssl-devel libconfig-devel python3-devel libunwind-devel kernel-headers glibc-headers
-    yum install -y libmicrohttpd libmicrohttpd-devel libcurl-devel pam-devel
-    yum install -y nlohmann-json-devel
-
-    yum install -y gcc-c++ cmake make
-    yum install -y telnet iptables iproute
-    yum install -y libffi-devel libxml2-devel swig
-    yum install -y python3-pip
-    pip install --upgrade pip
-    pip install wheel
-    pip install pyroute2 pyparsing pylibconfig2 m2crypto cryptography
-    LINK_TOOLCHAIN="N"
-
-    cd ${OPW}
-else
-    echo "We can't detect your distro."
-    echo "please make sure following development packages are installed to compile smithproxy:"
-    echo "   libconfig++-dev"
-    echo "   libssl-dev"
-    echo "   python-dev"
-    echo "   libmicrohttpd-dev"
-    echo "   libpam-dev"
-    echo "   curl-dev"
-    echo "   libunwind-dev (version8) iff compiled with -DCMAKE_BUILD_TYPE=Debug"
-    echo "   "
-    echo "and following packages to make smithproxy infrastructure work:"
-    echo "   iptables telnet iproute2 python3 swig"
-    echo "   ... python3 packages: pyroute2 pylibconfig2 m2crypto cryptography"
-
-    exit 1;
-fi
-
-
-
-if [ "${LINK_TOOLCHAIN}" = "Y" ]; then
-    echo "... using GCC ${SX_GCC_VER}"
-    ln -sf /usr/bin/g++-${SX_GCC_VER} /usr/bin/g++ && \
-    ln -sf /usr/bin/g++-${SX_GCC_VER} /usr/bin/c++ && \
-    ln -sf /usr/bin/gcc-${SX_GCC_VER} /usr/bin/gcc && \
-    ln -sf /usr/bin/gcc-${SX_GCC_VER} /usr/bin/cc && \
-    ln -sf /usr/bin/gcc-ar-${SX_GCC_VER} /usr/bin/gcc-ar
-fi
+echo "... dependencies installed successfully"

@@ -160,6 +160,11 @@ void CfgValueHelp::init() {
             .may_be_empty(false)
             .value_filter(VALUE_UINT_RANGE<1024, 65535>);
 
+    add("settings.quic_port", "base divert port for QUIC UDP traffic")
+            .help_quick("<number>: original QUIC port; use TPROXY --on-port 0")
+            .may_be_empty(false)
+            .value_filter(VALUE_UINT_RANGE<1, 65535>);
+
     add("settings.socks_port", "base SOCKS proxy listening port")
             .help_quick("<number>: a high port number")
             .may_be_empty(false)
@@ -221,6 +226,10 @@ void CfgValueHelp::init() {
             .help_quick("<number> acceptor subordinate worker threads count (max 4xCPU)")
             .may_be_empty(false)
             .value_filter(HW_FILTER);
+
+    add("settings.quic_workers", "experimental QUIC listener thread count")
+            .help_quick("<number>: -1 disabled, 0 or 1 enables one event loop")
+            .may_be_empty(false);
 
     add("settings.socks_workers", "SOCKS proxy traffic thread count")
             .help_quick("<number> acceptor subordinate worker threads count (max 4xCPU)")
@@ -695,6 +704,12 @@ void CfgValueHelp::init_routing() {
             .suggestion_generator([](std::string const& section, std::string const& variable) {
                 std::vector<std::string> r {"round-robin", "sticky-l3", "sticky-l4" }; return r;
             });
+    add("routing.[x].rewrite_sni", "exact client SNI to rewrite on the outbound TLS connection")
+            .may_be_empty(true)
+            .value_filter(CfgValue::VALUE_ANY);
+    add("routing.[x].rewrite_sni_to", "replacement SNI for the outbound TLS connection")
+            .may_be_empty(true)
+            .value_filter(CfgValue::VALUE_ANY);
 }
 
 void CfgValueHelp::init_captures () {
@@ -729,6 +744,15 @@ void CfgValueHelp::init_captures () {
                                        "tunnel type"))
             .suggestion_generator([](std::string const& section, std::string const& variable) {
                 std::vector<std::string> r{"gre",};
+                return r;
+            });
+
+    add("captures.remote.gre_format", "select GRE capture record format")
+            .may_be_empty(false)
+            .value_filter(is_in_vector([]() { std::vector<std::string> r {"spq1", "pcapng"}; return r; },
+                                       "SPQ1 plaintext packets or native PCAPNG records"))
+            .suggestion_generator([](std::string const& section, std::string const& variable) {
+                std::vector<std::string> r{"spq1", "pcapng"};
                 return r;
             });
 

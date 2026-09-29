@@ -31,6 +31,7 @@ internal_api_port = os.environ.get('SMITHPROXY_API_PORT', '55555')
 if not internal_api_port.isdigit() or not 1025 <= int(internal_api_port) < 65535:
     raise ValueError('SMITHPROXY_API_PORT must be an unprivileged TCP port')
 text = (source/'etc/smithproxy.cfg').read_text()
+quic_test = os.environ.get('QUIC_TEST') == '1'
 if os.environ.get('POLICY_TEST') == '1':
     port_objects = '''
     test_9996 = { start = 9996; end = 9996; };
@@ -51,6 +52,95 @@ if os.environ.get('POLICY_TEST') == '1':
 '''
     text, count = re.subn(r'(policy\s*=\s*\()', r'\1\n' + policy_cases, text, count=1)
     if port_count != 1 or count != 1: raise RuntimeError('cannot inject policy suite objects/rules')
+if quic_test:
+    if os.environ.get('QUIC_LAB') != '1':
+        raise RuntimeError('QUIC_TEST requires QUIC_LAB=1')
+    text, port_count = re.subn(
+        r'(port_objects\s*=\s*\{)',
+        r'\1\n    quic_runner_443 = { start = 443; end = 443; };',
+        text, count=1,
+    )
+    profile = '''
+    quic_runner = {
+        write_payload = TRUE;
+        write_format = "pcap_single";
+        write_limit_client = 0;
+        write_limit_server = 0;
+    }
+'''
+    text, profile_count = re.subn(
+        r'(content_profiles\s*=\s*\{)', r'\1\n' + profile,
+        text, count=1,
+    )
+    rule = '''
+    {
+        name = "runner-quic-udp-capture";
+        proto = "udp";
+        src = [ "any" ];
+        sport = [ "all" ];
+        dst = [ "any" ];
+        dport = [ "quic_runner_443" ];
+        tls_profile = "default";
+        detection_profile = "detect";
+        content_profile = "quic_runner";
+        action = "accept";
+        nat = "auto";
+        routing = "none";
+    },
+'''
+    text, policy_count = re.subn(
+        r'(policy\s*=\s*\()', r'\1\n' + rule,
+        text, count=1,
+    )
+    if port_count != 1 or profile_count != 1 or policy_count != 1:
+        raise RuntimeError('cannot inject QUIC runner policy and capture profile')
+
+if os.environ.get('ROUTING_TEST') == '1':
+    address_objects = '''
+    route_backend4_a = { type = 0; cidr = "198.18.20.2/32"; };
+    route_backend4_b = { type = 0; cidr = "198.18.20.3/32"; };
+    route_backend6_a = { type = 0; cidr = "fd00:20::2/128"; };
+    route_backend6_b = { type = 0; cidr = "fd00:20::3/128"; };
+'''
+    text, address_count = re.subn(r'(address_objects\s*=\s*\{)', r'\1\n' + address_objects, text, count=1)
+    port_objects = '''
+    route_backend_18080 = { start = 18080; end = 18080; };
+    route_backend_18081 = { start = 18081; end = 18081; };
+    route_req_address = { start = 19080; end = 19080; };
+    route_req_port = { start = 19081; end = 19081; };
+    route_req_rr = { start = 19082; end = 19082; };
+    route_req_l3 = { start = 19083; end = 19083; };
+    route_req_l4 = { start = 19100; end = 19115; };
+    route_req_socks = { start = 19200; end = 19200; };
+    route_req_connect = { start = 19300; end = 19300; };
+    route_req_sni = { start = 19443; end = 19443; };
+    route_backend_18443 = { start = 18443; end = 18443; };
+'''
+    text, port_count = re.subn(r'(port_objects\s*=\s*\{)', r'\1\n' + port_objects, text, count=1)
+    routing_profiles = '''
+    test_address = { dnat_address = [ "route_backend4_a", "route_backend6_a" ]; dnat_port = [ ]; dnat_lb_method = "round-robin"; };
+    test_port = { dnat_address = [ ]; dnat_port = [ "route_backend_18080" ]; dnat_lb_method = "round-robin"; };
+    test_rr = { dnat_address = [ "route_backend4_a", "route_backend4_b", "route_backend6_a", "route_backend6_b" ]; dnat_port = [ "route_backend_18080" ]; dnat_lb_method = "round-robin"; };
+    test_l3 = { dnat_address = [ "route_backend4_a", "route_backend4_b", "route_backend6_a", "route_backend6_b" ]; dnat_port = [ "route_backend_18080" ]; dnat_lb_method = "sticky-l3"; };
+    test_l4 = { dnat_address = [ "route_backend4_a", "route_backend4_b", "route_backend6_a", "route_backend6_b" ]; dnat_port = [ "route_backend_18080" ]; dnat_lb_method = "sticky-l4"; };
+    test_socks = { dnat_address = [ "route_backend4_a", "route_backend6_a" ]; dnat_port = [ "route_backend_18080" ]; dnat_lb_method = "round-robin"; };
+    test_connect = { dnat_address = [ "route_backend4_a", "route_backend6_a" ]; dnat_port = [ "route_backend_18081" ]; dnat_lb_method = "round-robin"; };
+    test_sni = { dnat_address = [ "route_backend4_a", "route_backend6_a" ]; dnat_port = [ "route_backend_18443" ]; dnat_lb_method = "round-robin"; rewrite_sni = "client.example"; rewrite_sni_to = "origin.internal"; };
+'''
+    text, routing_count = re.subn(r'(routing\s*=\s*\{)', r'\1\n' + routing_profiles, text, count=1)
+    routing_policies = '''
+    { name = "test-route-address"; proto = "tcp"; src = [ "any", "any6" ]; sport = [ "all" ]; dst = [ "any", "any6" ]; dport = [ "route_req_address" ]; action = "accept"; nat = "auto"; routing = "test_address"; },
+    { name = "test-route-port"; proto = "tcp"; src = [ "any", "any6" ]; sport = [ "all" ]; dst = [ "any", "any6" ]; dport = [ "route_req_port" ]; action = "accept"; nat = "auto"; routing = "test_port"; },
+    { name = "test-route-rr"; proto = "tcp"; src = [ "any", "any6" ]; sport = [ "all" ]; dst = [ "any", "any6" ]; dport = [ "route_req_rr" ]; action = "accept"; nat = "auto"; routing = "test_rr"; },
+    { name = "test-route-l3"; proto = "tcp"; src = [ "any", "any6" ]; sport = [ "all" ]; dst = [ "any", "any6" ]; dport = [ "route_req_l3" ]; action = "accept"; nat = "auto"; routing = "test_l3"; },
+    { name = "test-route-l4"; proto = "tcp"; src = [ "any", "any6" ]; sport = [ "all" ]; dst = [ "any", "any6" ]; dport = [ "route_req_l4" ]; action = "accept"; nat = "auto"; routing = "test_l4"; },
+    { name = "test-route-socks"; proto = "tcp"; src = [ "any", "any6" ]; sport = [ "all" ]; dst = [ "any", "any6" ]; dport = [ "route_req_socks" ]; action = "accept"; nat = "auto"; routing = "test_socks"; },
+    { name = "test-route-connect"; proto = "tcp"; src = [ "any", "any6" ]; sport = [ "all" ]; dst = [ "any", "any6" ]; dport = [ "route_req_connect" ]; action = "accept"; nat = "auto"; routing = "test_connect"; },
+    { name = "test-route-sni"; proto = "tcp"; src = [ "any", "any6" ]; sport = [ "all" ]; dst = [ "any", "any6" ]; dport = [ "route_req_sni" ]; tls_profile = "default"; action = "accept"; nat = "auto"; routing = "test_sni"; },
+'''
+    text, policy_count = re.subn(r'(policy\s*=\s*\()', r'\1\n' + routing_policies, text, count=1)
+    if (address_count, port_count, routing_count, policy_count) != (1, 1, 1, 1):
+        raise RuntimeError('cannot inject routing suite objects/profiles/rules')
 text = text.replace('/etc/smithproxy/certs/default/',str(certs)+'/').replace('/etc/smithproxy/msg/en/',str(source/'etc/msg/en')+'/')
 text = text.replace('/var/smithproxy/data',str(data)).replace('/var/log/smithproxy/',str(data)+'/')
 text = text.replace('certs_ca_key_password = "smithproxy"','certs_ca_key_password = ""')
@@ -72,6 +162,13 @@ if (os.environ.get('MEM_CONSTRAINED_TEST') != '1'
         and os.environ.get('SOCKS_ONLY_TEST') != '1'
         and os.environ.get('TPROXY_ONLY_TEST') != '1'):
     text = re.sub(r'(plaintext_workers|ssl_workers|udp_workers|dtls_workers) = -?\d+',r'\1 = 1',text)
+if os.environ.get('ROUTING_TEST') == '1':
+    text = text.replace('accept_socks = FALSE', 'accept_socks = TRUE')
+if os.environ.get('QUIC_LAB') == '1':
+    # QUIC has no main-thread fallback: zero workers leaves the configured
+    # port without a listener. Keep the isolated H3 lab deterministic with a
+    # single worker; production deployments can scale this independently.
+    text = text.replace('quic_workers = -1', 'quic_workers = 1')
 text = re.sub(r'\s*auth_profile = "resolve";', '', text)
 text = text.replace('nameservers = [ "8.8.8.8", "8.8.4.4" ]','nameservers = [ "198.18.20.2" ]')
 gre_capture_dst = os.environ.get('GRE_CAPTURE_DST')
@@ -79,13 +176,16 @@ if gre_capture_dst:
     if not re.fullmatch(r'[0-9A-Fa-f:.]+', gre_capture_dst):
         raise ValueError('GRE_CAPTURE_DST must be an IP address')
     text, remote_count = re.subn(
-        r'(remote\s*=\s*\{\s*enabled\s*=\s*)false(\s*tun_type\s*=\s*"gre"\s*tun_dst\s*=\s*)"[^"]+"',
+        r'(remote\s*=\s*\{\s*enabled\s*=\s*)false'
+        r'([^{}]*?tun_type\s*=\s*"gre"[^{}]*?tun_dst\s*=\s*)"[^"]+"',
         rf'\g<1>true\g<2>"{gre_capture_dst}"', text, count=1, flags=re.IGNORECASE,
     )
-    text, content_count = re.subn(
-        r'(content_profiles\s*=\s*\{\s*default\s*=\s*\{\s*write_payload\s*=\s*)FALSE',
-        r'\g<1>TRUE', text, count=1, flags=re.IGNORECASE,
-    )
+    content_count = 1
+    if not quic_test:
+        text, content_count = re.subn(
+            r'(content_profiles\s*=\s*\{\s*default\s*=\s*\{\s*write_payload\s*=\s*)FALSE',
+            r'\g<1>TRUE', text, count=1, flags=re.IGNORECASE,
+        )
     checksum_count = udp_profile_count = 1
     if os.environ.get('CAPTURE_CALCULATE_CHECKSUMS') == '1':
         text, checksum_count = re.subn(

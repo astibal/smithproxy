@@ -714,6 +714,7 @@ bool CfgFactory::load_settings () {
     load_if_exists(cfgapi.getRoot()["settings"], "accept_tproxy", accept_tproxy);
     load_if_exists(cfgapi.getRoot()["settings"], "accept_redirect", accept_redirect);
     load_if_exists(cfgapi.getRoot()["settings"], "accept_socks", accept_socks);
+    load_if_exists(cfgapi.getRoot()["settings"], "accept_http_connect", accept_http_connect);
     load_if_exists(cfgapi.getRoot()["settings"], "accept_api", accept_api);
     load_if_exists(cfgapi.getRoot()["settings"], "accept_cli", accept_cli);
     load_if_exists(cfgapi.getRoot()["settings"], "plaintext_port",listen_tcp_port_base); listen_tcp_port = listen_tcp_port_base;
@@ -725,6 +726,8 @@ bool CfgFactory::load_settings () {
     load_if_exists(cfgapi.getRoot()["settings"], "dtls_port",listen_dtls_port_base);  listen_dtls_port = listen_dtls_port_base;
     load_if_exists(cfgapi.getRoot()["settings"], "dtls_workers",num_workers_dtls);
     load_if_exists(cfgapi.getRoot()["settings"], "tpool_workers",tpool_workers);
+    load_if_exists(cfgapi.getRoot()["settings"], "quic_port",listen_quic_port_base); listen_quic_port = listen_quic_port_base;
+    load_if_exists(cfgapi.getRoot()["settings"], "quic_workers",num_workers_quic);
 
     bool collect_val = false;
     load_if_exists(cfgapi.getRoot()["settings"], "tpool_log", collect_val);
@@ -827,6 +830,8 @@ bool CfgFactory::load_settings () {
 
     load_if_exists(cfgapi.getRoot()["settings"], "socks_port",listen_socks_port_base); listen_socks_port = listen_socks_port_base;
     load_if_exists(cfgapi.getRoot()["settings"], "socks_workers",num_workers_socks);
+    load_if_exists(cfgapi.getRoot()["settings"], "http_connect_port",listen_http_connect_port_base); listen_http_connect_port = listen_http_connect_port_base;
+    load_if_exists(cfgapi.getRoot()["settings"], "http_connect_workers",num_workers_http_connect);
 
     if(cfgapi.getRoot().exists("settings")) {
         if(cfgapi.getRoot()["settings"].exists("socks")) {
@@ -1025,6 +1030,7 @@ bool CfgFactory::load_captures() {
 
             load_if_exists(remote, "enabled", CfgFactory::get()->capture_remote.enabled);
             load_if_exists(remote, "tun_type", CfgFactory::get()->capture_remote.tun_type);
+            load_if_exists(remote, "gre_format", CfgFactory::get()->capture_remote.gre_format);
             load_if_exists(remote, "tun_dst", CfgFactory::get()->capture_remote.tun_dst);
             load_if_exists(remote, "tun_ttl", CfgFactory::get()->capture_remote.tun_ttl);
             load_if_exists(remote, "bind_interface", CfgFactory::get()->capture_remote.bind_interface);
@@ -3038,6 +3044,7 @@ int CfgFactory::policy_apply (baseHostCX *originator, MitmProxy *proxy, int matc
 
 void CfgFactory::gre_export_apply(traflog::PcapLog* pcaplog) {
 
+    auto const& log = CfgFactoryBase::log::config();
     auto const& cfg = CfgFactory::get();
 
     if(cfg->capture_remote.enabled) {
@@ -3048,7 +3055,22 @@ void CfgFactory::gre_export_apply(traflog::PcapLog* pcaplog) {
             auto fam = c.cidr()->proto;
 
             auto exp = std::make_shared<traflog::GreExporter>(fam, ip);
-            pcaplog->ip_packet_hook = exp;
+
+            // Select either the legacy IP-packet hook or serialized PCAPNG
+            // records here, without exposing QUIC to the capture abstractions.
+            if(cfg->capture_remote.gre_format == "pcapng") {
+                exp->format(traflog::GreExporter::payload_format::pcapng_record);
+                pcaplog->ip_packet_hook.reset();
+                pcaplog->pcapng_record_hook = exp;
+            } else {
+                if(cfg->capture_remote.gre_format != "spq1") {
+                    _war("unknown GRE capture format '%s', using spq1",
+                         cfg->capture_remote.gre_format.c_str());
+                }
+                exp->origin(pcap::connection_details::record_origin::synthetic);
+                pcaplog->pcapng_record_hook.reset();
+                pcaplog->ip_packet_hook = exp;
+            }
 
             if(cfg->capture_remote.tun_ttl > 0) {
                 exp->ttl(cfg->capture_remote.tun_ttl);
@@ -3059,9 +3081,11 @@ void CfgFactory::gre_export_apply(traflog::PcapLog* pcaplog) {
 
         } else {
             pcaplog->ip_packet_hook.reset();
+            pcaplog->pcapng_record_hook.reset();
         }
     } else {
         pcaplog->ip_packet_hook.reset();
+        pcaplog->pcapng_record_hook.reset();
     }
 };
 
@@ -3501,8 +3525,10 @@ bool CfgFactory::apply_tenant_config () {
         ret += apply_tenant_index(listen_tcp_port, tenant_index);
         ret += apply_tenant_index(listen_tls_port, tenant_index);
         ret += apply_tenant_index(listen_dtls_port, tenant_index);
+        ret += apply_tenant_index(listen_quic_port, tenant_index);
         ret += apply_tenant_index(listen_udp_port, tenant_index);
         ret += apply_tenant_index(listen_socks_port, tenant_index);
+        ret += apply_tenant_index(listen_http_connect_port, tenant_index);
         CfgFactory::get()->cli_port += tenant_index;
     }
 
@@ -3666,6 +3692,9 @@ int CfgFactory::load_db_routing () {
                 }
             }
 
+            load_if_exists(cur_object, "rewrite_sni", new_profile->rewrite_sni);
+            load_if_exists(cur_object, "rewrite_sni_to", new_profile->rewrite_sni_to);
+
             db_routing[name] = new_profile;
             loaded++;
         }
@@ -3706,6 +3735,9 @@ int CfgFactory::save_routing(Config& ex) const {
         else
             lbm = "round-robin";
 
+        routing_item.add("rewrite_sni", Setting::TypeString) = obj->rewrite_sni;
+        routing_item.add("rewrite_sni_to", Setting::TypeString) = obj->rewrite_sni_to;
+
         n_saved++;
     }
 
@@ -3726,6 +3758,8 @@ bool CfgFactory::new_routing(Setting& ex, std::string const& name) const {
         item.add("dnat_port", Setting::TypeArray);
 
         item.add("dnat_lb_method", Setting::TypeString) = "round-robin";
+        item.add("rewrite_sni", Setting::TypeString) = "";
+        item.add("rewrite_sni_to", Setting::TypeString) = "";
     }
     catch(libconfig::SettingNameException const& e) {
         _war("cannot add new section %s.%s: %s", ex.c_str(), name.c_str(), e.what());
@@ -5075,6 +5109,7 @@ int save_settings(Config& ex) {
     objects.add("accept_redirect", Setting::TypeBoolean) = CfgFactory::get()->accept_redirect;
     objects.add("accept_socks", Setting::TypeBoolean) = CfgFactory::get()->accept_socks;
     objects.add("accept_cli", Setting::TypeBoolean) = CfgFactory::get()->accept_cli;
+    objects.add("accept_http_connect", Setting::TypeBoolean) = CfgFactory::get()->accept_http_connect;
 
     // nameservers
     Setting& it_ns  = objects.add("nameservers", Setting::TypeArray);
@@ -5106,6 +5141,8 @@ int save_settings(Config& ex) {
     objects.add("dtls_workers", Setting::TypeInt) = CfgFactory::get()->num_workers_dtls;
 
     objects.add("tpool_workers", Setting::TypeInt) = CfgFactory::get()->tpool_workers;
+    objects.add("quic_port", Setting::TypeString) = CfgFactory::get()->listen_quic_port_base;
+    objects.add("quic_workers", Setting::TypeInt) = CfgFactory::get()->num_workers_quic;
 
     objects.add("tpool_log", Setting::TypeBoolean) = sx::tp::ThreadPool::collect_tasks_info;
 
@@ -5122,6 +5159,8 @@ int save_settings(Config& ex) {
 
     objects.add("socks_port", Setting::TypeString) = CfgFactory::get()->listen_socks_port_base;
     objects.add("socks_workers", Setting::TypeInt) = CfgFactory::get()->num_workers_socks;
+    objects.add("http_connect_port", Setting::TypeString) = CfgFactory::get()->listen_http_connect_port_base;
+    objects.add("http_connect_workers", Setting::TypeInt) = CfgFactory::get()->num_workers_http_connect;
 
     Setting& socks_objects = objects.add("socks", Setting::TypeGroup);
     socks_objects.add("async_dns", Setting::TypeBoolean) = socksServerCX::global_async_dns;
@@ -5245,6 +5284,7 @@ int CfgFactory::save_captures(Config& ex) const {
     auto& remote = ex.getRoot()["captures"]["remote"];
     remote.add("enabled", Setting::TypeBoolean) = CfgFactory::get()->capture_remote.enabled;
     remote.add("tun_type", Setting::TypeString) = CfgFactory::get()->capture_remote.tun_type;
+    remote.add("gre_format", Setting::TypeString) = CfgFactory::get()->capture_remote.gre_format;
     remote.add("tun_dst", Setting::TypeString) = CfgFactory::get()->capture_remote.tun_dst;
     remote.add("tun_ttl", Setting::TypeInt) = CfgFactory::get()->capture_remote.tun_ttl;
     remote.add("bind_interface", Setting::TypeString) = CfgFactory::get()->capture_remote.bind_interface;
