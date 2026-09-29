@@ -536,6 +536,10 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
             set_tests_properties(
                     unit.core unit.http1 unit.startstoptls unit.httpconnect unit.reloadable
                     PROPERTIES LABELS "unit")
+            # Core tests load repository fixtures (including QUIC certificates)
+            # through source-relative paths.
+            set_tests_properties(unit.core PROPERTIES
+                    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
             set_tests_properties(unit.reloadable PROPERTIES LABELS "unit;reload")
             set_tests_properties(integration.tls_testbed PROPERTIES LABELS "integration;tls")
 

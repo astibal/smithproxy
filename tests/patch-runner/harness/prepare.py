@@ -160,7 +160,8 @@ if gre_capture_dst:
     if not re.fullmatch(r'[0-9A-Fa-f:.]+', gre_capture_dst):
         raise ValueError('GRE_CAPTURE_DST must be an IP address')
     text, remote_count = re.subn(
-        r'(remote\s*=\s*\{\s*enabled\s*=\s*)false(\s*tun_type\s*=\s*"gre"\s*tun_dst\s*=\s*)"[^"]+"',
+        r'(remote\s*=\s*\{\s*enabled\s*=\s*)false'
+        r'([^{}]*?tun_type\s*=\s*"gre"[^{}]*?tun_dst\s*=\s*)"[^"]+"',
         rf'\g<1>true\g<2>"{gre_capture_dst}"', text, count=1, flags=re.IGNORECASE,
     )
     content_count = 1
