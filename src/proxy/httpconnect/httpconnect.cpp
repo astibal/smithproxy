@@ -43,6 +43,11 @@ std::size_t HttpConnectServerCX::process_in() {
     }
 
     auto const request_size = headers_end + 4;
+    if(request_size >= max_connect_header_size) {
+        send_error(431, "Request Header Fields Too Large");
+        return request_size;
+    }
+
     auto const line_end = data.find("\r\n");
     auto const request = HttpConnectRequest::parse(data.substr(0, line_end + 2));
     if(not request) {

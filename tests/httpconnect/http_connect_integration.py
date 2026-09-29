@@ -213,6 +213,53 @@ def check_fragmented_connect(listener_port):
         raise origin.error
 
 
+def sized_connect_request(authority, total_size, terminated=True):
+    prefix = f"CONNECT {authority} HTTP/1.1\r\nX-Pad: ".encode()
+    suffix = b"\r\n\r\n" if terminated else b""
+    padding = total_size - len(prefix) - len(suffix)
+    if padding < 0:
+        raise RuntimeError(f"requested header size {total_size} is too small")
+    request = prefix + b"x" * padding + suffix
+    if len(request) != total_size:
+        raise RuntimeError("failed to construct exact-size CONNECT request")
+    return request
+
+
+def check_header_size_boundaries(listener_port):
+    unavailable_port = free_port()
+    authority = f"127.0.0.1:{unavailable_port}"
+
+    # A completed header immediately below the limit is parsed normally.
+    with socket.create_connection(("127.0.0.1", listener_port), timeout=10) as client:
+        client.settimeout(15)
+        client.sendall(sized_connect_request(authority, 8191))
+        response = recv_until(client, b"\r\n\r\n")
+        if not response.startswith(b"HTTP/1.1 502 Bad Gateway\r\n"):
+            raise RuntimeError(f"8191-byte header was not accepted: {response!r}")
+
+    # Reaching the configured 8 KiB limit is rejected, whether the complete
+    # header arrives at once or the still-incomplete buffer grows to the limit.
+    for total_size in (8192, 8193, 16 * 1024):
+        with socket.create_connection(("127.0.0.1", listener_port), timeout=10) as client:
+            client.settimeout(15)
+            client.sendall(sized_connect_request(authority, total_size))
+            response = recv_until(client, b"\r\n\r\n")
+            if not response.startswith(
+                    b"HTTP/1.1 431 Request Header Fields Too Large\r\n"):
+                raise RuntimeError(
+                    f"{total_size}-byte completed header did not return 431: {response!r}")
+
+    with socket.create_connection(("127.0.0.1", listener_port), timeout=10) as client:
+        client.settimeout(15)
+        client.sendall(sized_connect_request(authority, 8191, terminated=False))
+        client.sendall(b"x")
+        response = recv_until(client, b"\r\n\r\n")
+        if not response.startswith(
+                b"HTTP/1.1 431 Request Header Fields Too Large\r\n"):
+            raise RuntimeError(
+                f"8192-byte incomplete header did not return 431: {response!r}")
+
+
 def run(args):
     executable = args.smithproxy.resolve()
     worktree = args.source.resolve()
@@ -283,16 +330,7 @@ def run(args):
                 if not response.startswith(b"HTTP/1.1 400 Bad Request\r\n"):
                     raise RuntimeError(f"malformed request was accepted: {response!r}")
 
-            with socket.create_connection(("127.0.0.1", listener_port), timeout=10) as client:
-                client.settimeout(15)
-                client.sendall(
-                    b"CONNECT example.test:443 HTTP/1.1\r\nX-Oversized: "
-                    + b"x" * (16 * 1024))
-                response = recv_until(client, b"\r\n\r\n")
-                if not response.startswith(
-                        b"HTTP/1.1 431 Request Header Fields Too Large\r\n"):
-                    raise RuntimeError(
-                        f"oversized header did not return 431: {response!r}")
+            check_header_size_boundaries(listener_port)
 
             unavailable_port = free_port()
             with socket.create_connection(("127.0.0.1", listener_port), timeout=10) as client:
