@@ -1123,9 +1123,9 @@ TEST(QuicTestbed, EchoesPayloadsAcrossPacketAndBufferBoundaries) {
     client->close();
 }
 
-TEST(QuicTestbed, FullDuplex100MiBAcrossStaggeredStreams) {
+TEST(QuicTestbed, FullDuplexFiveBy100MiBAcrossStaggeredStreams) {
     constexpr std::size_t stream_count = 5;
-    constexpr std::size_t bytes_per_stream = 20U * 1024U * 1024U;
+    constexpr std::size_t bytes_per_stream = 100U * 1024U * 1024U;
     constexpr std::size_t total_bytes = stream_count * bytes_per_stream;
     constexpr auto stagger = 40ms;
 
