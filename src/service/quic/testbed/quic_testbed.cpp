@@ -1027,7 +1027,9 @@ TEST(QuicTestbed, EchoesPayloadsAcrossPacketAndBufferBoundaries) {
     ASSERT_NE(client, nullptr) << error;
     ASSERT_TRUE(await_handshake(*client, 5s));
 
-    std::vector<std::size_t> const sizes { 1, 1199, 1200, 2048, 4097, 16384, 32769 };
+    std::vector<std::size_t> const sizes {
+        1, 1199, 1200, 2048, 4097, 16384, 32769, 65577, 1024 * 1024 + 41,
+    };
     struct transfer {
         mf::flow_handle flow;
         std::string payload;
