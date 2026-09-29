@@ -193,7 +193,10 @@ TEST(QuicListenerService, RejectsSessionsBeyondConfiguredLimit) {
     auto const diagnostics = proxy.diagnostics();
     EXPECT_EQ(diagnostics.current_sessions, 0U);
     EXPECT_EQ(diagnostics.accepted_sessions, 0U);
-    EXPECT_EQ(diagnostics.session_limit_rejections, 1U);
+    // QUIC retransmission can cause more than one accepted connection attempt
+    // before the client observes rejection. The invariant is that none enter
+    // the bounded session table and at least one rejection is accounted.
+    EXPECT_GE(diagnostics.session_limit_rejections, 1U);
     external->close();
 }
 

@@ -203,17 +203,16 @@ private:
         std::size_t reported_stream_limit_rejections = 0; ///< Counter delta cursor.
     };
     std::vector<session> sessions_;              ///< Worker-owned live/draining sessions.
-    /** Verified upstream waiting for OpenSSL to expose its downstream connection. */
+    /** Verified route waiting for OpenSSL to expose its downstream connection. */
     struct staged_upstream {
-        std::shared_ptr<openssl_connection> connection;
         datagram_endpoint client;
         datagram_endpoint destination;
+        std::string server_name;
         std::chrono::steady_clock::time_point created = std::chrono::steady_clock::now();
     };
     std::map<SSL*, staged_upstream> staged_upstreams_; ///< Key is borrowed downstream SSL.
-    /** Reference-counted output transferred safely from a certificate worker. */
+    /** Immutable certificate material transferred from a certificate worker. */
     struct verified_certificate {
-        std::shared_ptr<openssl_connection> connection;
         std::shared_ptr<X509> certificate;
         std::shared_ptr<EVP_PKEY> private_key;
     };

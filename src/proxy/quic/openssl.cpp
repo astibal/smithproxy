@@ -605,6 +605,10 @@ multiflow::io_result openssl_connection::read(multiflow::flow_handle flow,
 
     auto const ssl_error = SSL_get_error(state->stream.get(), result);
     if (ssl_error == SSL_ERROR_WANT_READ || ssl_error == SSL_ERROR_WANT_WRITE) {
+        // The required network direction need not match the application
+        // operation: a read can need to write an ACK or flow-control frame.
+        // Do not retry inline. The owner polls SSL_net_*_desired(), progresses
+        // the connection on readiness, and then retries this deferred read.
         return { 0, multiflow::io_status::would_block };
     }
     auto const stream_state_value = SSL_get_stream_read_state(state->stream.get());
@@ -653,6 +657,9 @@ multiflow::io_result openssl_connection::write(multiflow::flow_handle flow,
     if (result == 1) return { written_size, multiflow::io_status::ok };
     auto const ssl_error = SSL_get_error(state->stream.get(), result);
     if (ssl_error == SSL_ERROR_WANT_READ || ssl_error == SSL_ERROR_WANT_WRITE) {
+        // A write can need inbound acknowledgements just as it can need socket
+        // capacity. Preserve the unwritten suffix and let the owner's network
+        // poll defer the retry; an immediate loop here would busy-spin.
         return { written_size, multiflow::io_status::would_block };
     }
     auto const stream_state_value = SSL_get_stream_write_state(state->stream.get());

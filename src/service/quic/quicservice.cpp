@@ -100,6 +100,17 @@ int listener_poll_timeout(SSL* listener, int application_timeout_ms) {
     return application_timeout_ms < 0
         ? openssl_timeout : std::min(application_timeout_ms, openssl_timeout);
 }
+
+short connection_poll_events(SSL* connection) {
+    if (!connection) return 0;
+    // QUIC peers can send ACK and flow-control datagrams after the current
+    // OpenSSL call has returned success, so there need not be a contemporaneous
+    // SSL_net_read_desired() hint to arm the future wakeup. Keep input armed;
+    // unlike POLLOUT it cannot continuously fire on an idle UDP socket.
+    short events = POLLIN;
+    if (SSL_net_write_desired(connection) > 0) events |= POLLOUT;
+    return events;
+}
 #endif
 
 } // namespace
@@ -140,8 +151,7 @@ listener_service::~listener_service() {
     sessions_.clear();
     for (auto& job : certificate_jobs_) {
         try {
-            auto result = job.second.result.get();
-            if (result.connection) result.connection->close();
+            (void)job.second.result.get();
         } catch (...) {
         }
     }
@@ -270,11 +280,6 @@ void listener_service::run() {
     if (!ready_ && !prepare()) return;
     log().inf("listener loop started on udp/*:%u", bound_port_);
 
-    pollfd descriptors[] {
-        { udp_fd_, 0, 0 },
-        { wake_fd_, POLLIN, 0 },
-    };
-
     while (!stopping_) {
         // With no retained work, wait solely for network input or stop().
         // Active connections still need a bounded tick because OpenSSL QUIC
@@ -285,11 +290,30 @@ void listener_service::run() {
             ? -1
             : 50;
         auto* native_listener = listener_->native_handle();
-        descriptors[0].events = listener_->desired_socket_events();
-        auto const timeout = listener_poll_timeout(native_listener, application_timeout);
-        log().dum("poll events=0x%x timeout=%d sessions=%zu cert-jobs=%zu",
-                  descriptors[0].events, timeout, sessions_.size(), certificate_jobs_.size());
-        auto const polled = ::poll(descriptors, 2, timeout);
+        auto timeout = listener_poll_timeout(native_listener, application_timeout);
+
+        // Outgoing legs own separate UDP sockets. In particular, WANT_READ
+        // from SSL_write_ex() must wake on an inbound flow-control update;
+        // polling only the shared downstream listener would defer that update
+        // to the coarse application tick and can stall a full QUIC window.
+        std::vector<pollfd> descriptors {
+            { udp_fd_, listener_->desired_socket_events(), 0 },
+            { wake_fd_, POLLIN, 0 },
+        };
+        descriptors.reserve(2 + sessions_.size());
+        for (auto const& value : sessions_) {
+            if (!value.upstream) continue;
+            auto* connection = value.upstream->native_handle();
+            timeout = listener_poll_timeout(connection, timeout);
+            auto const fd = SSL_get_fd(connection);
+            auto const events = connection_poll_events(connection);
+            if (fd >= 0 && events != 0) descriptors.push_back({ fd, events, 0 });
+        }
+
+        log().dum("poll listener-events=0x%x fds=%zu timeout=%d sessions=%zu cert-jobs=%zu",
+                  descriptors[0].events, descriptors.size(), timeout,
+                  sessions_.size(), certificate_jobs_.size());
+        auto const polled = ::poll(descriptors.data(), descriptors.size(), timeout);
         if (polled < 0 && errno != EINTR) {
             fail(std::string("poll: ") + std::strerror(errno));
             break;
@@ -412,13 +436,18 @@ void listener_service::attach_staged_upstream(session& value) {
     auto found = staged_upstreams_.find(key);
     if (found == staged_upstreams_.end()) return;
 
-    value.upstream = std::move(found->second.connection);
     if (!value.client_endpoint.valid()) value.client_endpoint = found->second.client;
     value.target_endpoint = found->second.destination;
-    if (!value.target_endpoint.valid() && value.upstream) {
-        value.target_endpoint = value.upstream->peer_endpoint();
-    }
+    value.upstream = transparent_
+        ? connect_upstream(value.target_endpoint, found->second.server_name)
+        : connect_upstream(found->second.server_name);
     staged_upstreams_.erase(found);
+    if (!value.upstream) {
+        ++upstream_failures_;
+        value.downstream->close(1);
+        return;
+    }
+    if (!value.target_endpoint.valid()) value.target_endpoint = value.upstream->peer_endpoint();
 }
 
 void listener_service::accept_connections() {
@@ -540,6 +569,18 @@ void listener_service::progress_handshake(
     }
     if (!value.upstream->handshake_complete()) return;
 
+    // The certificate probe authenticated the identity used to mint the
+    // downstream certificate. Independently verify the worker-affine
+    // forwarding connection as well; it is a distinct QUIC handshake.
+    if (verify_upstream_
+        && SSL_get_verify_result(value.upstream->native_handle()) != X509_V_OK) {
+        ++upstream_failures_;
+        log().war("session %llu forwarding upstream verification failed",
+                  static_cast<unsigned long long>(value.id));
+        start_draining(value, now, 1);
+        return;
+    }
+
     // Both legs must agree on the application protocol before streams can be
     // paired. This prevents forwarding bytes between incompatible protocols.
     auto const downstream_alpn = value.downstream->negotiated_alpn();
@@ -594,7 +635,17 @@ void listener_service::progress_handshake(
 
 void listener_service::progress_active(
     session& value, std::chrono::steady_clock::time_point now) {
-    auto const moved = value.proxy->pump_once();
+    // One successful stream write can merely enqueue data inside OpenSSL. Run
+    // a bounded follow-up pass so the connection state machine sees that work
+    // before we sleep in poll(). Stop at the first quiescent pass; the cap
+    // preserves fairness when a session continuously has buffered data.
+    constexpr std::size_t maximum_pump_passes = 64;
+    std::size_t moved = 0;
+    for (std::size_t pass = 0; pass < maximum_pump_passes; ++pass) {
+        auto const pass_moved = value.proxy->pump_once();
+        moved += pass_moved;
+        if (pass_moved == 0) break;
+    }
     if (moved != 0) {
         value.last_activity = now;
         value.forwarded_bytes += moved;
@@ -650,7 +701,6 @@ void listener_service::reap_expired(std::chrono::steady_clock::time_point now) {
             ++iterator;
             continue;
         }
-        iterator->second.connection->close();
         ++upstream_failures_;
         iterator = staged_upstreams_.erase(iterator);
     }
@@ -745,12 +795,10 @@ void listener_service::cleanup_sessions() {
         if (linked.upstream) linked.upstream->close();
     }
     sessions_.clear();
-    for (auto& staged : staged_upstreams_) staged.second.connection->close();
     staged_upstreams_.clear();
     for (auto& job : certificate_jobs_) {
         try {
-            auto result = job.second.result.get();
-            if (result.connection) result.connection->close();
+            (void)job.second.result.get();
         } catch (...) {
         }
     }
@@ -819,15 +867,20 @@ int listener_service::prepare_verified_certificate(SSL* downstream) {
         auto const client = found->second.client;
         auto const destination = found->second.destination;
         certificate_jobs_.erase(found);
-        if (!verified.connection || !install_verified_certificate(downstream, verified)) {
+        if (!install_verified_certificate(downstream, verified)) {
             ++upstream_failures_;
             log().war("verified certificate preparation failed for peer=%s target=%s",
                       endpoint_text(client).c_str(), endpoint_text(destination).c_str());
-            if (verified.connection) verified.connection->close(1);
             return 0;
         }
+
+        // Do not create another OpenSSL object reentrantly from this certificate
+        // callback. Save only immutable routing data; accept_connections()
+        // creates the forwarding connection in a normal listener-loop pass.
+        auto const* raw_name = SSL_get_servername(downstream, TLSEXT_NAMETYPE_host_name);
+        std::string const server_name = raw_name ? raw_name : "";
         staged_upstreams_.emplace(downstream, staged_upstream {
-            std::move(verified.connection), client, destination });
+            client, destination, server_name });
         return 1;
     }
 
@@ -987,7 +1040,9 @@ listener_service::verified_certificate listener_service::verify_and_spoof(
     }
     log().deb("certificate ready sni='%s' target=%s", server_name.c_str(),
               endpoint_text(destination).c_str());
-    verified.connection = std::move(upstream);
+    // Do not publish this live QUIC object across the async boundary. Its only
+    // purpose was origin authentication and certificate discovery.
+    upstream->close();
     return verified;
 }
 

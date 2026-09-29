@@ -14,7 +14,9 @@
 
 #include <atomic>
 #include <algorithm>
+#include <array>
 #include <chrono>
+#include <ctime>
 #include <cstring>
 #include <filesystem>
 #include <deque>
@@ -257,6 +259,9 @@ public:
     }
     std::size_t handshake_count() const { return handshake_count_; }
     std::size_t echoed_messages() const { return echoed_messages_; }
+    std::size_t received_bytes() const { return received_bytes_; }
+    std::size_t echoed_bytes() const { return echoed_bytes_; }
+    std::size_t blocked_writes() const { return blocked_writes_; }
 
     std::vector<std::string> observed_sni() const {
         auto lock = std::scoped_lock(observations_lock_);
@@ -269,9 +274,15 @@ public:
     }
 
 private:
+    struct echo_flow_state {
+        mf::flow_handle handle;
+        std::string pending;
+        std::size_t offset = 0;
+    };
+
     struct connection_state {
         std::unique_ptr<quic::openssl_connection> connection;
-        std::vector<mf::flow_handle> flows;
+        std::vector<echo_flow_state> flows;
         bool handshake_recorded = false;
     };
 
@@ -292,28 +303,49 @@ private:
                 }
                 for (auto const& event : events) {
                     if (event.type == mf::event_type::flow_open && event.flow) {
-                        state.flows.push_back(*event.flow);
+                        state.flows.push_back({*event.flow, {}, 0});
                     } else if ((event.type == mf::event_type::reset
                                 || event.type == mf::event_type::peer_fin)
                                && event.flow) {
                         state.flows.erase(
-                            std::remove(state.flows.begin(), state.flows.end(), *event.flow),
+                            std::remove_if(state.flows.begin(), state.flows.end(),
+                                [&](echo_flow_state const& flow) {
+                                    return flow.handle == *event.flow;
+                                }),
                             state.flows.end());
                     }
                 }
-                for (auto const flow : state.flows) {
-                    unsigned char buffer[2048] {};
-                    auto const read = state.connection->read(flow, buffer, sizeof(buffer));
-                    if (read.size == 0) continue;
-                    std::size_t offset = 0;
-                    while (offset < read.size) {
-                        auto const written = state.connection->write(
-                            flow, buffer + offset, read.size - offset);
-                        offset += written.size;
-                        if (written.status == mf::io_status::would_block) break;
-                        if (written.status != mf::io_status::ok) break;
+                for (auto& flow : state.flows) {
+                    // Preserve a complete echo chunk across QUIC flow-control
+                    // backpressure. Reading another chunk before this one is
+                    // writable would silently discard the unwritten suffix.
+                    if (flow.pending.empty()) {
+                        // Match the proxy pump granularity so high-volume tests
+                        // exercise transport flow control rather than millions
+                        // of tiny test-harness calls.
+                        unsigned char buffer[16 * 1024] {};
+                        auto const read = state.connection->read(
+                            flow.handle, buffer, sizeof(buffer));
+                        if (read.size == 0) continue;
+                        flow.pending.assign(
+                            reinterpret_cast<char const*>(buffer), read.size);
+                        flow.offset = 0;
+                        received_bytes_ += read.size;
                     }
-                    if (offset == read.size) ++echoed_messages_;
+
+                    auto const written = state.connection->write(
+                        flow.handle, flow.pending.data() + flow.offset,
+                        flow.pending.size() - flow.offset);
+                    flow.offset += written.size;
+                    echoed_bytes_ += written.size;
+                    if (written.status == mf::io_status::would_block) {
+                        ++blocked_writes_;
+                    }
+                    if (flow.offset == flow.pending.size()) {
+                        flow.pending.clear();
+                        flow.offset = 0;
+                        ++echoed_messages_;
+                    }
                 }
             }
             std::this_thread::sleep_for(1ms);
@@ -332,6 +364,9 @@ private:
     std::vector<unsigned char> certificate_fingerprint_;
     std::atomic_size_t handshake_count_ = 0;
     std::atomic_size_t echoed_messages_ = 0;
+    std::atomic_size_t received_bytes_ = 0;
+    std::atomic_size_t echoed_bytes_ = 0;
+    std::atomic_size_t blocked_writes_ = 0;
     mutable std::mutex observations_lock_;
     std::vector<std::string> observed_sni_;
     std::vector<std::string> observed_alpn_;
@@ -701,7 +736,9 @@ TEST(QuicTestbed, ConcurrentVerifiedMitmSessionsAndStreams) {
         << " upstream_failures=" << handshake_diagnostics.upstream_failures
         << " alpn_failures=" << handshake_diagnostics.alpn_failures
         << " origin_handshakes=" << origin.handshake_count();
-    ASSERT_EQ(origin.handshake_count(), client_count + 1); // Includes direct PKI smoke test.
+    // Each verified session uses one short certificate probe and one
+    // worker-affine forwarding connection. The direct PKI smoke test adds one.
+    constexpr auto expected_origin_handshakes = 2 * client_count + 1;
 
     for (std::size_t client_index = 0; client_index < clients.size(); ++client_index) {
         auto& client = clients[client_index];
@@ -751,8 +788,8 @@ TEST(QuicTestbed, ConcurrentVerifiedMitmSessionsAndStreams) {
     EXPECT_EQ(origin.echoed_messages(), client_count * streams_per_client);
     auto const observed_sni = origin.observed_sni();
     auto const observed_alpn = origin.observed_alpn();
-    ASSERT_EQ(observed_sni.size(), client_count + 1); // Includes direct PKI smoke test.
-    ASSERT_EQ(observed_alpn.size(), client_count + 1);
+    ASSERT_EQ(observed_sni.size(), expected_origin_handshakes);
+    ASSERT_EQ(observed_alpn.size(), expected_origin_handshakes);
     for (auto const& value : observed_sni) EXPECT_EQ(value, test_sni);
     for (auto const& value : observed_alpn) EXPECT_EQ(value, "h3");
 
@@ -969,7 +1006,7 @@ TEST(QuicTestbed, RepeatedVerifiedReconnectsReleaseEveryIdleSession) {
     }
     EXPECT_EQ(proxy.diagnostics().accepted_sessions, reconnects);
     EXPECT_EQ(proxy.diagnostics().completed_sessions, reconnects);
-    EXPECT_EQ(origin.handshake_count(), reconnects);
+    EXPECT_EQ(origin.handshake_count(), 2 * reconnects);
 }
 
 TEST(QuicTestbed, EnforcesStreamLimitOnRealQuicConnection) {
@@ -1047,7 +1084,7 @@ TEST(QuicTestbed, EchoesPayloadsAcrossPacketAndBufferBoundaries) {
         transfers.push_back({ flow, std::move(payload), 0, {} });
     }
 
-    auto const deadline = std::chrono::steady_clock::now() + 10s;
+    auto const deadline = std::chrono::steady_clock::now() + 30s;
     while (std::chrono::steady_clock::now() < deadline) {
         client->drain_events();
         std::size_t complete = 0;
@@ -1058,9 +1095,10 @@ TEST(QuicTestbed, EchoesPayloadsAcrossPacketAndBufferBoundaries) {
                     transfer.payload.size() - transfer.sent);
                 transfer.sent += written.size;
             }
-            unsigned char buffer[4096] {};
-            auto const read = client->read(transfer.flow, buffer, sizeof(buffer));
-            if (read.size != 0) {
+            for (;;) {
+                unsigned char buffer[4096] {};
+                auto const read = client->read(transfer.flow, buffer, sizeof(buffer));
+                if (read.size == 0) break;
                 transfer.received.append(reinterpret_cast<char const*>(buffer), read.size);
             }
             if (transfer.received == transfer.payload) ++complete;
@@ -1068,10 +1106,129 @@ TEST(QuicTestbed, EchoesPayloadsAcrossPacketAndBufferBoundaries) {
         if (complete == transfers.size()) break;
         std::this_thread::sleep_for(1ms);
     }
+    auto const snapshots = proxy.session_diagnostics();
+    auto const forwarded = snapshots.empty() ? 0 : snapshots.front().forwarded_bytes;
     for (auto const& transfer : transfers) {
-        EXPECT_EQ(transfer.received, transfer.payload)
-            << "payload_size=" << transfer.payload.size();
+        EXPECT_EQ(transfer.received.size(), transfer.payload.size())
+            << "payload_size=" << transfer.payload.size()
+            << " sent=" << transfer.sent
+            << " proxy_forwarded=" << forwarded
+            << " origin_received=" << origin.received_bytes()
+            << " origin_echoed=" << origin.echoed_bytes()
+            << " origin_blocked=" << origin.blocked_writes();
+        EXPECT_TRUE(transfer.received == transfer.payload)
+            << "received_size=" << transfer.received.size()
+            << " payload_size=" << transfer.payload.size();
     }
+    client->close();
+}
+
+TEST(QuicTestbed, FullDuplex100MiBAcrossStaggeredStreams) {
+    constexpr std::size_t stream_count = 5;
+    constexpr std::size_t bytes_per_stream = 20U * 1024U * 1024U;
+    constexpr std::size_t total_bytes = stream_count * bytes_per_stream;
+    constexpr auto stagger = 40ms;
+
+    origin_server origin;
+    ASSERT_TRUE(origin.ready());
+    quic::listener_service proxy(0, pki_file("srv-cert.pem"), pki_file("srv-key.pem"), false,
+                                 origin.port(), true, {}, {}, "127.0.0.1");
+    ASSERT_TRUE(proxy.prepare()) << proxy.last_error();
+    running_service runner(proxy);
+
+    auto context = make_verified_client_context();
+    ASSERT_NE(context, nullptr);
+    auto const address = loopback(proxy.bound_port());
+    std::string error;
+    auto client = quic::connect_openssl_quic(
+        context.get(), reinterpret_cast<sockaddr const*>(&address), sizeof(address),
+        test_sni, &error);
+    ASSERT_NE(client, nullptr) << error;
+    ASSERT_TRUE(await_handshake(*client, 5s));
+
+    struct transfer {
+        mf::flow_handle flow;
+        std::chrono::steady_clock::time_point start;
+        std::size_t sent = 0;
+        std::size_t received = 0;
+    };
+    std::vector<transfer> transfers;
+    auto const started = std::chrono::steady_clock::now();
+    for (std::size_t index = 0; index < stream_count; ++index) {
+        auto const flow = client->open_flow(mf::direction::bidirectional);
+        ASSERT_NE(flow.generation, 0U);
+        transfers.push_back({flow, started + stagger * index, 0, 0});
+    }
+
+    auto process_cpu_time = [] {
+        timespec value {};
+        EXPECT_EQ(clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &value), 0);
+        return std::chrono::seconds(value.tv_sec) + std::chrono::nanoseconds(value.tv_nsec);
+    };
+    std::array<unsigned char, 64U * 1024U> zeros {};
+    std::array<unsigned char, 64U * 1024U> received {};
+    bool corrupt = false;
+    auto const cpu_started = process_cpu_time();
+    auto const deadline = started + 120s;
+
+    while (std::chrono::steady_clock::now() < deadline) {
+        client->drain_events();
+        auto const now = std::chrono::steady_clock::now();
+        std::size_t complete = 0;
+        for (auto& transfer : transfers) {
+            if (now >= transfer.start && transfer.sent < bytes_per_stream) {
+                auto const remaining = bytes_per_stream - transfer.sent;
+                auto const write_size = std::min(remaining, zeros.size());
+                auto const written = client->write(
+                    transfer.flow, zeros.data(), write_size);
+                transfer.sent += written.size;
+            }
+
+            auto const read = client->read(
+                transfer.flow, received.data(), received.size());
+            if (read.size != 0) {
+                corrupt = corrupt || std::any_of(
+                    received.begin(), received.begin() + read.size,
+                    [](unsigned char byte) { return byte != 0; });
+                transfer.received += read.size;
+            }
+            if (transfer.sent == bytes_per_stream
+                && transfer.received == bytes_per_stream) {
+                ++complete;
+            }
+        }
+        if (complete == transfers.size()) break;
+        std::this_thread::sleep_for(100us);
+    }
+
+    auto const completed = std::chrono::steady_clock::now();
+    auto const active_cpu = process_cpu_time() - cpu_started;
+    auto const idle_cpu_started = process_cpu_time();
+    std::this_thread::sleep_for(1s);
+    auto const idle_cpu = process_cpu_time() - idle_cpu_started;
+
+    std::size_t sent = 0;
+    std::size_t received_count = 0;
+    for (auto const& transfer : transfers) {
+        sent += transfer.sent;
+        received_count += transfer.received;
+        EXPECT_EQ(transfer.sent, bytes_per_stream);
+        EXPECT_EQ(transfer.received, bytes_per_stream);
+    }
+    EXPECT_EQ(sent, total_bytes);
+    EXPECT_EQ(received_count, total_bytes);
+    EXPECT_EQ(origin.received_bytes(), total_bytes);
+    EXPECT_EQ(origin.echoed_bytes(), total_bytes);
+    EXPECT_FALSE(corrupt);
+    EXPECT_LT(idle_cpu, 250ms) << "idle process CPU after transfer";
+
+    RecordProperty("payload_bytes_each_direction", total_bytes);
+    RecordProperty("wall_time_ms",
+        std::chrono::duration_cast<std::chrono::milliseconds>(completed - started).count());
+    RecordProperty("active_process_cpu_ms",
+        std::chrono::duration_cast<std::chrono::milliseconds>(active_cpu).count());
+    RecordProperty("idle_process_cpu_ms",
+        std::chrono::duration_cast<std::chrono::milliseconds>(idle_cpu).count());
     client->close();
 }
 
