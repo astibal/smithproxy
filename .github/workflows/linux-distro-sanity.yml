@@ -1,0 +1,79 @@
+name: Linux distro sanity
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/linux-distro-sanity.yml'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - 'src/**'
+      - 'socle'
+      - 'tools/linux-*.sh'
+  push:
+    branches:
+      - master
+      - 'release/**'
+    paths:
+      - '.github/workflows/linux-distro-sanity.yml'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - 'src/**'
+      - 'socle'
+      - 'tools/linux-*.sh'
+
+jobs:
+  sanity:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Ubuntu 22.04, slug: ubuntu-22.04 }
+          - { name: Ubuntu 24.04, slug: ubuntu-24.04 }
+          - { name: Ubuntu 26.04, slug: ubuntu-26.04 }
+          - { name: Debian 12, slug: debian-12 }
+          - { name: Debian 13, slug: debian-13 }
+          - { name: Alpine 3.20, slug: alpine-3.20 }
+          - { name: Alpine 3.22, slug: alpine-3.22 }
+          - { name: Fedora 42, slug: fedora-42 }
+          - { name: Fedora 43, slug: fedora-43 }
+          - { name: openSUSE Tumbleweed, slug: opensuse-tumbleweed }
+          - { name: AlmaLinux 9, slug: almalinux-9 }
+          - { name: AlmaLinux 10, slug: almalinux-10 }
+          - { name: Rocky Linux 9, slug: rockylinux-9 }
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build and smoke-test
+        run: BUILD_JOBS=2 tools/test-linux-distros.sh ${{ matrix.slug }}
+
+  sanity-arm64:
+    name: ARM64 / ${{ matrix.name }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Ubuntu 26.04, slug: ubuntu-26.04 }
+          - { name: Debian 13, slug: debian-13 }
+          - { name: Alpine 3.22, slug: alpine-3.22 }
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Verify native ARM64 runner
+        run: test "$(uname -m)" = aarch64
+
+      - name: Build and smoke-test
+        run: DOCKER_PLATFORM=linux/arm64 BUILD_JOBS=2 tools/test-linux-distros.sh ${{ matrix.slug }}

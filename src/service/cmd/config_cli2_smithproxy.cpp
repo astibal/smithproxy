@@ -91,7 +91,8 @@ ConfigCli2Access make_smithproxy_config_access(std::string subscriber_id) {
         std::vector<std::string> current;
         auto toggles = values;
         try {
-            const auto& setting = CfgFactory::cfg_obj().lookup(std::string(path))[std::string(property)];
+            const std::string property_name(property);
+            const auto& setting = CfgFactory::cfg_obj().lookup(std::string(path))[property_name.c_str()];
             for (int i = 0; i < setting.getLength(); ++i) current.emplace_back(static_cast<const char*>(setting[i]));
         } catch (const libconfig::SettingException& exception) {
             error = exception.what();
@@ -143,7 +144,7 @@ ConfigCli2Access make_smithproxy_config_access(std::string subscriber_id) {
         // Planning validates every entry and dependency before the first mutation.
         try {
             for (const int index : plan.indexes_descending) setting.remove(index);
-            for (const auto& name : plan.names) setting.remove(name);
+            for (const auto& name : plan.names) setting.remove(name.c_str());
         } catch (const libconfig::SettingException& exception) {
             error = exception.what();
             return false;
