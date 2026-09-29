@@ -373,63 +373,61 @@ namespace sx::ja4 {
 
 
     int TLSServerHello::from_buffer(std::vector<uint8_t> data) {
+        version = 0;
+        have_key_share = false;
+        cipher_suite = 0;
+        extensions.clear();
+        result_r.clear();
+        result.clear();
 
         size_t offset = 4;
-        if(offset >= data.size()) return 1;
+        if (offset + 2 > data.size()) return 1;
 
         // Parsování verze protokolu TLS
         version = (data[offset] << 8) | data[offset + 1];
 
         offset += 2;
-        if(offset >= data.size()) return 2;
 
-        // skip radnom
+        // skip random
+        if (offset + 32 > data.size()) return 2;
         offset += 32;
-        if(offset >= data.size()) return 3;
 
-
+        if (offset + 1 > data.size()) return 3;
         auto session_id_len = data[offset];
 
-        offset += 1 + session_id_len;
-        if(offset >= data.size()) return 4;
+        offset += 1;
+        if (offset + session_id_len > data.size()) return 4;
+        offset += session_id_len;
 
+        if (offset + 2 > data.size()) return 5;
         cipher_suite = (data[offset] << 8) | data[offset + 1];
 
         offset += 2;
-        if(offset >= data.size()) return 5;
 
-
-        auto compression_method = data[offset];
+        if (offset + 1 > data.size()) return 6;
         offset += 1;
-        if(offset >= data.size()) return 6;
-
 
         // extensions
-        if (data.size() > offset) {
-            size_t extensions_length = (data[offset] << 8) | data[offset + 1];
-            offset += 2;
+        if (offset + 2 > data.size()) return 7;
+        size_t extensions_length = (data[offset] << 8) | data[offset + 1];
+        offset += 2;
+        if (extensions_length > data.size() - offset) return 8;
 
-            size_t processed_length = 0;
+        for (size_t processed_length = 0; processed_length < extensions_length;) {
+            if (extensions_length - processed_length < 4) return 9;
 
-            while (processed_length < extensions_length) {
-                uint8_t ext_type = (data[offset] << 8) | data[offset + 1];
+            const size_t ext_offset = offset + processed_length;
+            uint16_t ext_type = (data[ext_offset] << 8) | data[ext_offset + 1];
+            uint16_t ext_len = (data[ext_offset + 2] << 8) | data[ext_offset + 3];
+            if (ext_len > extensions_length - processed_length - 4) return 10;
 
-                if(ext_type == 0x33) {
-                    // key_share - tls 1.3
-                    have_key_share = true;
-                }
-
-                uint16_t ext_len = (data[offset + 2] << 8) | data[offset + 3];
-                extensions.push_back(ext_type);
-
-                offset += 4 + ext_len;
-                processed_length += 4 + ext_len;
-
-                if(offset >= data.size()) return 8;
+            if(ext_type == 0x33) {
+                // key_share - tls 1.3
+                have_key_share = true;
             }
-        }
-        else {
-            return 7;
+
+            extensions.push_back(ext_type);
+            processed_length += 4 + ext_len;
         }
         return 0;
     }

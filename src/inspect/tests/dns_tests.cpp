@@ -89,7 +89,8 @@ TEST(DNS_Packet, load_request1) {
     ASSERT_TRUE(dr);
 
     auto ret = dr->load(&b);
-    ASSERT_TRUE(ret == 0);
+    ASSERT_TRUE(ret.has_value());
+    ASSERT_EQ(*ret, sizeof(data));
 
     std::cout << dr->question_str_0() << "'\n";
     ASSERT_TRUE(dr->question_str_0() == "A:pcdn.brave.com");
@@ -108,7 +109,8 @@ TEST(DNS_Packet, load_response1) {
     ASSERT_TRUE(dr);
 
     auto ret = dr->load(&b);
-    ASSERT_TRUE(ret == 0);
+    ASSERT_TRUE(ret.has_value());
+    ASSERT_EQ(*ret, sizeof(dns_response1));
 
     std::cout << "returned: " << ret.value_or(-1) << ":\n" << dr->to_string(iDEB) << "\n";
     std::cout << "dump:\n" << dr->answer_hex_dump() << "\n";
@@ -157,6 +159,8 @@ TEST(DNS_Packet, qname_read_after) {
 
 }
 TEST(DNS_Packet, qname_read_before) {
-    auto ret = DNSFactory::get().construct_qname((unsigned char *)&qname_parse_fail_far[-1], (unsigned char *) qname_parse_fail_far, sizeof(qname_parse_fail_far));
+    unsigned char padded[sizeof(qname_parse_fail_far) + 1]{};
+    std::copy(std::begin(qname_parse_fail_far), std::end(qname_parse_fail_far), padded + 1);
+    auto ret = DNSFactory::get().construct_qname(padded, padded + 1, sizeof(qname_parse_fail_far));
     ASSERT_TRUE(ret.empty());
 }

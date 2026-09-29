@@ -1,0 +1,25 @@
+name: Build and Package
+
+on:
+  push:
+    branches:
+      - master
+      - 'release/**'
+
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-26.04
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: 'recursive'
+
+    - name: Install dependencies
+      run: sudo ./tools/linux-deps.sh
+
+    - name: Build project
+      run: sudo ./tools/linux-build.sh
