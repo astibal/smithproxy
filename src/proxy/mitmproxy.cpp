@@ -67,7 +67,7 @@
 
 using namespace socle;
 
-MitmProxy::MitmProxy(baseCom* c): baseProxy(c) {
+MitmProxy::MitmProxy(baseCom* c): baseProxy(c), start_stop_tls_(*this) {
 
     current_sessions()++;
     total_sessions()++;

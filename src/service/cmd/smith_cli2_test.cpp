@@ -78,7 +78,7 @@ std::shared_ptr<DNS_Response> send_dns_request(libcli2::Context& context, const 
     const auto parsed = response->load(&reply);
     context.print("received " + std::to_string(length) + " bytes\n" + hex_dump(reply));
     context.print("DNS response:\n" + response->str());
-    return parsed == 0 ? response : std::shared_ptr<DNS_Response>{};
+    return parsed ? response : std::shared_ptr<DNS_Response>{};
 }
 
 libcli2::Command& hostname_command(libcli2::Cli& cli, std::string_view path, std::string_view help) {

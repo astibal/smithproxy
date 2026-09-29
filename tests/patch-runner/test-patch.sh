@@ -27,8 +27,8 @@ Profiles:
               With --remote, both ports bind to the remote host's loopback.
 
 Options:
-  --suite NAME       Run only one suite. Besides tls, policy, rtt, session-list
-                     and quic,
+  --suite NAME       Run only one suite. Besides tls, starttls, policy, routing,
+                     rtt, session-list and quic,
                      full-run sections are available: smoke, tls-policy, tcp-churn,
                      udp-churn, capture, corpus-regular, corpus-edge, corpus-insanity.
                      Use with the sanity or full profile.
@@ -176,7 +176,7 @@ if [[ -n $CHURN_PORT_RANGE ]]; then
     EXTRA_ENV+=("CHURN_MIN_PORT=$CHURN_MIN_PORT" "CHURN_MAX_PORT=$CHURN_MAX_PORT")
 fi
 case "$ONLY_SUITE" in
-    ''|tls|policy|rtt|session-list|quic|smoke|tls-policy|tcp-churn|udp-churn|capture|corpus-regular|corpus-edge|corpus-insanity) ;;
+    ''|tls|starttls|policy|routing|rtt|session-list|quic|smoke|tls-policy|tcp-churn|udp-churn|capture|corpus-regular|corpus-edge|corpus-insanity) ;;
     *) echo "Unknown suite: $ONLY_SUITE" >&2; exit 2 ;;
 esac
 
@@ -217,7 +217,7 @@ REPORT_HOST=${REMOTE:-local}
 git -C "$ROOT" status --short > "$REPORT/git-status.txt"
 
 run_parallel_full() {
-    local -a sections=(smoke tls-policy rtt tcp-churn udp-churn capture corpus-regular corpus-edge corpus-insanity)
+    local -a sections=(smoke tls-policy routing rtt tcp-churn udp-churn capture corpus-regular corpus-edge corpus-insanity)
     local -a child_common=(sanity --skip-build --build-dir "$BUILD_DIR" --quiet)
     local -a forwarded=()
     local section section_dir output rc_file rc display child_report reason
@@ -463,7 +463,7 @@ print(*(x.getsockname()[1] for x in s))'
     LAB_ENV=(
         "CLIENT_NS=$CLIENT_NS" "SERVER_NS=$SERVER_NS" "DATA_NS=$DATA_NS"
         "LAB_IN_IF=$IN_IF" "LAB_OUT_IF=$OUT_IF" "LAB_API_PORT=$API_PORT" "LAB_CLI_PORT=$CLI_PORT"
-        "CAPTURE_TEST=1" "HTTP2_OBSERVABILITY_TEST=1" "CAPTURE_MATRIX_TEST=1" "RTT_TEST=1" "TLS_SUITE_TEST=1" "POLICY_TEST=1" "SESSION_LIST_STRESS_TEST=1"
+        "CAPTURE_TEST=1" "HTTP2_OBSERVABILITY_TEST=1" "CAPTURE_MATRIX_TEST=1" "RTT_TEST=1" "TLS_SUITE_TEST=1" "STARTTLS_SUITE_TEST=1" "POLICY_TEST=1" "ROUTING_TEST=1" "SESSION_LIST_STRESS_TEST=1"
         "PPLAY_PY=$LAB_ROOT/pplay.py" "PPLAY_SUITE=$LAB_ROOT/corpus"
         "PPLAY_RESULTS_NAME=corpus-all" "PPLAY_SMOKE_TEST=1"
     )
@@ -479,20 +479,22 @@ print(*(x.getsockname()[1] for x in s))'
     done
     if [[ $PROFILE == benchmark ]]; then
         LAB_ENV+=("CAPTURE_TEST=0" "HTTP2_OBSERVABILITY_TEST=0" "CAPTURE_MATRIX_TEST=0"
-            "TLS_SUITE_TEST=0" "POLICY_TEST=0" "SESSION_LIST_STRESS_TEST=0" "RTT_TEST=1" "RTT_REPORT_ONLY=1"
+            "TLS_SUITE_TEST=0" "STARTTLS_SUITE_TEST=0" "POLICY_TEST=0" "ROUTING_TEST=0" "SESSION_LIST_STRESS_TEST=0" "RTT_TEST=1" "RTT_REPORT_ONLY=1"
             "RTT_NATIVE_BASELINE=1"
             "PPLAY_SMOKE_TEST=0" "PPLAY_SUITE_SKIP_RUN=1")
     fi
     if [[ $PROFILE == run ]]; then
         LAB_ENV+=("RUN_MODE=1" "CAPTURE_TEST=0" "HTTP2_OBSERVABILITY_TEST=0"
-            "CAPTURE_MATRIX_TEST=0" "TLS_SUITE_TEST=0" "POLICY_TEST=0" "SESSION_LIST_STRESS_TEST=0" "RTT_TEST=0"
+            "CAPTURE_MATRIX_TEST=0" "TLS_SUITE_TEST=0" "STARTTLS_SUITE_TEST=0" "POLICY_TEST=0" "ROUTING_TEST=0" "SESSION_LIST_STRESS_TEST=0" "RTT_TEST=0"
             "PPLAY_SMOKE_TEST=0" "PPLAY_SUITE_SKIP_RUN=1")
     fi
     if [[ -n $ONLY_SUITE ]]; then
-        LAB_ENV+=("BASE_TRAFFIC_TEST=1" "CAPTURE_TEST=0" "HTTP2_OBSERVABILITY_TEST=0" "CAPTURE_MATRIX_TEST=0" "RTT_TEST=0" "TLS_SUITE_TEST=0" "POLICY_TEST=0" "SESSION_LIST_STRESS_TEST=0" "TCP_CHURN_TEST=0" "UDP_CHURN_TEST=0" "PPLAY_SMOKE_TEST=0" "PPLAY_SUITE_SKIP_RUN=1")
+        LAB_ENV+=("BASE_TRAFFIC_TEST=1" "CAPTURE_TEST=0" "HTTP2_OBSERVABILITY_TEST=0" "CAPTURE_MATRIX_TEST=0" "RTT_TEST=0" "TLS_SUITE_TEST=0" "STARTTLS_SUITE_TEST=0" "POLICY_TEST=0" "ROUTING_TEST=0" "SESSION_LIST_STRESS_TEST=0" "TCP_CHURN_TEST=0" "UDP_CHURN_TEST=0" "PPLAY_SMOKE_TEST=0" "PPLAY_SUITE_SKIP_RUN=1")
         case "$ONLY_SUITE" in
             tls) LAB_ENV+=("TLS_SUITE_TEST=1") ;;
+            starttls) LAB_ENV+=("STARTTLS_SUITE_TEST=1") ;;
             policy) LAB_ENV+=("POLICY_TEST=1") ;;
+            routing) LAB_ENV+=("ROUTING_TEST=1") ;;
             rtt) LAB_ENV+=("RTT_TEST=1") ;;
             session-list) LAB_ENV+=("SESSION_LIST_STRESS_TEST=1") ;;
             quic) LAB_ENV+=("QUIC_TEST=1" "QUIC_LAB=1" "QUIC_KEYLOG_TEST=1"

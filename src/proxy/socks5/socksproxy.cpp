@@ -46,11 +46,17 @@
 #include <service/cfgapi/cfgapi.hpp>
 
 #include <vector>
+#include <cerrno>
+#include <sys/socket.h>
 
 
 void SocksProxy::on_left_message(baseHostCX* basecx) {
 
     auto* cx = dynamic_cast<socksServerCX*>(basecx);
+    if(cx != nullptr and cx->com()->l4_proto() != SOCK_DGRAM) {
+        handle_explicit_connect(cx);
+        return;
+    }
     if(cx != nullptr) {
         if(cx->socks_error_ != socks5_request_error_::NONE) {
             if(cx->socks_error_ == socks5_request_error_::MALFORMED_DATA) {
@@ -103,7 +109,7 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
                 _dia("SocksProxy::on_left_message: socksHostCX policy+handoff");
                 cx->state(socks5_state::ZOMBIE);
 
-                cx->com()->l4_proto() != SOCK_DGRAM ? socks5_handoff(cx) : socks5_handoff_udp(cx);
+                cx->com()->l4_proto() != SOCK_DGRAM ? explicit_handoff(cx) : socks5_handoff_udp(cx);
             }
         }
         else if(cx->state_ == socks5_state::HANDOFF) {
@@ -112,13 +118,47 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
 
             // There is nothing to handoff on UDP association connection
             if(cx->com()->l4_proto() != SOCK_DGRAM) {
-                socks5_handoff(cx);
+                explicit_handoff(cx);
             }
         } else {
 
             _war("SocksProxy::on_left_message: unknown message");
         }
     }
+}
+
+void ExplicitProxy::handle_explicit_connect(ExplicitProxyCX* cx) {
+    if(cx->request_error_ != explicit_request_error::NONE) {
+        if(cx->request_error_ == explicit_request_error::MALFORMED_DATA) {
+            cx->error(true);
+        } else {
+            cx->verdict(socks5_policy::REJECT);
+        }
+        return;
+    }
+
+    if(cx->state_ == socks5_state::WAIT_POLICY) {
+        std::vector<baseHostCX*> left {cx};
+        std::vector<baseHostCX*> right {cx->right.get()};
+
+        bool verdict = false;
+        {
+            auto lock = std::scoped_lock(CfgFactory::lock());
+            matched_policy(CfgFactory::get()->policy_match(left, right));
+            verdict = CfgFactory::get()->policy_action(matched_policy());
+        }
+        update_neighbors();
+        cx->verdict(verdict ? socks5_policy::ACCEPT : socks5_policy::REJECT);
+        return;
+    }
+
+    if(cx->state_ == socks5_state::HANDOFF) {
+        cx->state(socks5_state::ZOMBIE);
+        explicit_handoff(cx);
+        return;
+    }
+
+    _war("ExplicitProxy::handle_explicit_connect: unexpected frontend state");
 }
 
 std::string SocksProxy::to_string(int lev) const  {
@@ -131,7 +171,7 @@ std::string SocksProxy::to_string(int lev) const  {
     return r.str();
 };
 
-void SocksProxy::socks5_handoff(socksServerCX* cx) {
+void ExplicitProxy::explicit_handoff(ExplicitProxyCX* cx) {
 
     _deb("SocksProxy::socks5_handoff: start");
     
@@ -151,6 +191,10 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     ////// we matched the policy
     
     int s = cx->socket();
+    pending_connect_response_ = cx->upstream_success_response();
+    upstream_failure_response_ = cx->upstream_failure_response();
+    pending_connect_response_offset_ = 0;
+    close_after_connect_response_ = false;
     bool ssl = false;
 
     baseCom* new_com = nullptr;
@@ -177,6 +221,8 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     n_cx->com()->nonlocal_dst_port() = cx->com()->nonlocal_dst_port();
     n_cx->com()->nonlocal_dst_resolved(true);
 
+    // Preserve data received immediately after the frontend handshake (for
+    // example a pipelined TLS ClientHello following an HTTP CONNECT request).
     // get rid of it
     cx->remove_socket();
     if(cx->left) {
@@ -252,7 +298,64 @@ void SocksProxy::socks5_handoff(socksServerCX* cx) {
     _dia("SocksProxy::socks5_handoff: finished");
 }
 
+bool ExplicitProxy::send_pending_connect_response() {
+    if(pending_connect_response_.empty()) {
+        return true;
+    }
 
+    auto* client = first_left();
+    if(client == nullptr || client->socket() <= 0) {
+        state().dead(true);
+        return false;
+    }
+
+    auto const* data = pending_connect_response_.data() + pending_connect_response_offset_;
+    auto const remaining = pending_connect_response_.size() - pending_connect_response_offset_;
+    auto const written = ::send(client->socket(), data, remaining, MSG_NOSIGNAL);
+    if(written < 0) {
+        if(errno == EAGAIN || errno == EWOULDBLOCK) {
+            client->com()->set_write_monitor(client->socket());
+            return true;
+        }
+        state().dead(true);
+        return false;
+    }
+
+    pending_connect_response_offset_ += static_cast<std::size_t>(written);
+    if(pending_connect_response_offset_ != pending_connect_response_.size()) {
+        client->com()->set_write_monitor(client->socket());
+        return true;
+    }
+
+    pending_connect_response_.clear();
+    pending_connect_response_offset_ = 0;
+    if(close_after_connect_response_) {
+        state().dead(true);
+    } else {
+        client->waiting_for_peercom(false);
+        client->com()->set_monitor(client->socket());
+    }
+    return true;
+}
+
+bool ExplicitProxy::handle_cx_write(unsigned char side, baseHostCX* cx) {
+    if(not pending_connect_response_.empty()) {
+        if((side == 'r' || side == 'R') && cx->opening()) {
+            if(cx->is_connected()) {
+                cx->opening(false);
+            } else {
+                pending_connect_response_ = upstream_failure_response_;
+                pending_connect_response_offset_ = 0;
+                close_after_connect_response_ = true;
+            }
+            return send_pending_connect_response();
+        }
+        if(side == 'l' || side == 'L') {
+            return send_pending_connect_response();
+        }
+    }
+    return MitmProxy::handle_cx_write(side, cx);
+}
 
 void SocksProxy::socks5_handoff_udp(socksServerCX* cx) {
 
@@ -329,7 +432,7 @@ void SocksProxy::socks5_handoff_udp(socksServerCX* cx) {
 
 
 
-void SocksProxy::on_left_bytes(baseHostCX* cx) {
+void ExplicitProxy::on_left_bytes(baseHostCX* cx) {
 
     if(left_sockets.empty() or right_sockets.empty()) {
         _dia("waiting for proxy pair, L: %d, R: %d ", left_sockets.size(), right_sockets.size());

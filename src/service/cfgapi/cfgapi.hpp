@@ -239,6 +239,7 @@ public:
     std::string listen_quic_port_base = "443";
     std::string listen_udp_port_base = "50080";
     std::string listen_socks_port_base = "1080";
+    std::string listen_http_connect_port_base = "3128";
 
     std::string listen_tcp_port = "50080";
     std::string listen_tls_port = "50443";
@@ -246,6 +247,7 @@ public:
     std::string listen_quic_port = "443";
     std::string listen_udp_port = "50080";
     std::string listen_socks_port = "1080";
+    std::string listen_http_connect_port = "3128";
 
     std::string dir_msg_templates = "/etc/smithproxy/msg/en/";
 
@@ -254,6 +256,7 @@ public:
     bool accept_tproxy = true;
     bool accept_redirect = true;
     bool accept_socks = true;
+    bool accept_http_connect = false;
     bool accept_api = true;
 
     std::string admin_group;
@@ -264,6 +267,7 @@ public:
     int num_workers_quic = -1;
     int num_workers_udp  = 0;
     int num_workers_socks = 0;
+    int num_workers_http_connect = 0;
 
     int cli_port = 50000;
     int cli_port_base = 50000;

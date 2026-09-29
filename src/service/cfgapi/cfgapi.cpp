@@ -713,6 +713,7 @@ bool CfgFactory::load_settings () {
     load_if_exists(cfgapi.getRoot()["settings"], "accept_tproxy", accept_tproxy);
     load_if_exists(cfgapi.getRoot()["settings"], "accept_redirect", accept_redirect);
     load_if_exists(cfgapi.getRoot()["settings"], "accept_socks", accept_socks);
+    load_if_exists(cfgapi.getRoot()["settings"], "accept_http_connect", accept_http_connect);
     load_if_exists(cfgapi.getRoot()["settings"], "accept_api", accept_api);
     load_if_exists(cfgapi.getRoot()["settings"], "plaintext_port",listen_tcp_port_base); listen_tcp_port = listen_tcp_port_base;
     load_if_exists(cfgapi.getRoot()["settings"], "plaintext_workers",num_workers_tcp);
@@ -826,6 +827,8 @@ bool CfgFactory::load_settings () {
 
     load_if_exists(cfgapi.getRoot()["settings"], "socks_port",listen_socks_port_base); listen_socks_port = listen_socks_port_base;
     load_if_exists(cfgapi.getRoot()["settings"], "socks_workers",num_workers_socks);
+    load_if_exists(cfgapi.getRoot()["settings"], "http_connect_port",listen_http_connect_port_base); listen_http_connect_port = listen_http_connect_port_base;
+    load_if_exists(cfgapi.getRoot()["settings"], "http_connect_workers",num_workers_http_connect);
 
     if(cfgapi.getRoot().exists("settings")) {
         if(cfgapi.getRoot()["settings"].exists("socks")) {
@@ -3522,6 +3525,7 @@ bool CfgFactory::apply_tenant_config () {
         ret += apply_tenant_index(listen_quic_port, tenant_index);
         ret += apply_tenant_index(listen_udp_port, tenant_index);
         ret += apply_tenant_index(listen_socks_port, tenant_index);
+        ret += apply_tenant_index(listen_http_connect_port, tenant_index);
         CfgFactory::get()->cli_port += tenant_index;
     }
 
@@ -3685,6 +3689,9 @@ int CfgFactory::load_db_routing () {
                 }
             }
 
+            load_if_exists(cur_object, "rewrite_sni", new_profile->rewrite_sni);
+            load_if_exists(cur_object, "rewrite_sni_to", new_profile->rewrite_sni_to);
+
             db_routing[name] = new_profile;
             loaded++;
         }
@@ -3725,6 +3732,9 @@ int CfgFactory::save_routing(Config& ex) const {
         else
             lbm = "round-robin";
 
+        routing_item.add("rewrite_sni", Setting::TypeString) = obj->rewrite_sni;
+        routing_item.add("rewrite_sni_to", Setting::TypeString) = obj->rewrite_sni_to;
+
         n_saved++;
     }
 
@@ -3745,6 +3755,8 @@ bool CfgFactory::new_routing(Setting& ex, std::string const& name) const {
         item.add("dnat_port", Setting::TypeArray);
 
         item.add("dnat_lb_method", Setting::TypeString) = "round-robin";
+        item.add("rewrite_sni", Setting::TypeString) = "";
+        item.add("rewrite_sni_to", Setting::TypeString) = "";
     }
     catch(libconfig::SettingNameException const& e) {
         _war("cannot add new section %s.%s: %s", ex.c_str(), name.c_str(), e.what());
@@ -5093,6 +5105,7 @@ int save_settings(Config& ex) {
     objects.add("accept_tproxy", Setting::TypeBoolean) = CfgFactory::get()->accept_tproxy;
     objects.add("accept_redirect", Setting::TypeBoolean) = CfgFactory::get()->accept_redirect;
     objects.add("accept_socks", Setting::TypeBoolean) = CfgFactory::get()->accept_socks;
+    objects.add("accept_http_connect", Setting::TypeBoolean) = CfgFactory::get()->accept_http_connect;
 
     // nameservers
     Setting& it_ns  = objects.add("nameservers", Setting::TypeArray);
@@ -5141,6 +5154,8 @@ int save_settings(Config& ex) {
 
     objects.add("socks_port", Setting::TypeString) = CfgFactory::get()->listen_socks_port_base;
     objects.add("socks_workers", Setting::TypeInt) = CfgFactory::get()->num_workers_socks;
+    objects.add("http_connect_port", Setting::TypeString) = CfgFactory::get()->listen_http_connect_port_base;
+    objects.add("http_connect_workers", Setting::TypeInt) = CfgFactory::get()->num_workers_http_connect;
 
     Setting& socks_objects = objects.add("socks", Setting::TypeGroup);
     socks_objects.add("async_dns", Setting::TypeBoolean) = socksServerCX::global_async_dns;

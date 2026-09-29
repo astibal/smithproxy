@@ -691,6 +691,12 @@ void CfgValueHelp::init_routing() {
             .suggestion_generator([](std::string const& section, std::string const& variable) {
                 std::vector<std::string> r {"round-robin", "sticky-l3", "sticky-l4" }; return r;
             });
+    add("routing.[x].rewrite_sni", "exact client SNI to rewrite on the outbound TLS connection")
+            .may_be_empty(true)
+            .value_filter(CfgValue::VALUE_ANY);
+    add("routing.[x].rewrite_sni_to", "replacement SNI for the outbound TLS connection")
+            .may_be_empty(true)
+            .value_filter(CfgValue::VALUE_ANY);
 }
 
 void CfgValueHelp::init_captures () {

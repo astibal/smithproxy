@@ -19,6 +19,7 @@ SET(SOCLE_DIR "socle")
 SET(SOCLE_COMMON_DIR "socle/common")
 
 project(smithproxy C CXX)
+include(CTest)
 
 SET(CMAKE_SOURCE_DIR "src/")
 SET(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}")
@@ -49,6 +50,7 @@ if("${USE_EXPERIMENT}" STREQUAL "Y")
     message(" >> !!! EXPERIMENTS ENABLED !!!" )
     add_definitions(-DUSE_EXPERIMENT)
 endif()
+
 
 if("${USE_EXTRA_DEBUG}" STREQUAL "Y")
     message(" >> !!! EXTRA_DEBUG ENABLED !!!" )
@@ -272,6 +274,8 @@ add_executable(smithproxy
         src/proxy/quic/spq1.cpp
         src/proxy/quic/openssl.cpp
         src/service/quic/quicservice.cpp
+        src/proxy/startstoptls.hpp
+        src/proxy/startstoptls.cpp
 
         src/proxy/filters/filterproxy.cpp
         src/proxy/filters/sinkhole.cpp
@@ -279,6 +283,8 @@ add_executable(smithproxy
 
         src/proxy/socks5/sockshostcx.cpp
         src/proxy/socks5/socksproxy.cpp
+        src/proxy/httpconnect/httpconnect.cpp
+        src/proxy/httpconnect/httpconnectrequest.cpp
 
         src/policy/policy.cpp
         src/policy/inspectors.cpp
@@ -313,6 +319,10 @@ add_executable(smithproxy
         src/service/core/smithproxy_objapi.cpp
         src/service/core/sessionlist.hpp
         src/service/core/sessionlist.cpp
+        src/service/reload/file_reload_service.hpp
+        src/service/reload/file_reload_service.cpp
+        src/service/reload/reloadable_resource.hpp
+        src/service/reload/README.md
         src/service/cmd/cmdserver.cpp
         src/service/cfgapi/cfgvalue.hpp
         src/service/cfgapi/cfgvalue.cpp
@@ -451,6 +461,18 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/ext/libcidr/cidr.cpp
                 src/policy/addrobj.cpp
         )
+        add_executable(sx_gtests_startstoptls
+                src/proxy/tests/startstoptls_test.cpp
+        )
+        add_executable(sx_gtests_httpconnect
+                src/proxy/httpconnect/tests/httpconnectrequest_test.cpp
+                src/proxy/httpconnect/httpconnectrequest.cpp
+        )
+
+        add_executable(sx_gtests_reloadable
+                src/service/reload/file_reload_service.cpp
+                src/service/reload/tests/reloadable_resource_test.cpp
+        )
 
         add_executable(tls_testbed
                 tests/tls/tls_testbed.cpp)
@@ -462,6 +484,9 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
             target_link_libraries(sx_gtests ${LIBCONFIGPP_LIBRARIES})
         endif()
         target_link_libraries(sx_gtests_http1 gtest gtest_main socle_lib pthread crypto ssl)
+        target_link_libraries(sx_gtests_startstoptls gtest gtest_main)
+        target_link_libraries(sx_gtests_httpconnect gtest gtest_main)
+        target_link_libraries(sx_gtests_reloadable gtest gtest_main pthread)
         target_link_libraries(tls_testbed gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries (sx_gtests nlohmann_json::nlohmann_json)
 
@@ -500,6 +525,44 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/service/quic/testbed/quic_test_node.cpp
         )
         target_link_libraries(quic_test_node smithproxy_qpack socle_lib pthread crypto ssl)
+
+        if(BUILD_TESTING)
+            add_test(NAME unit.core COMMAND sx_gtests)
+            add_test(NAME unit.http1 COMMAND sx_gtests_http1)
+            add_test(NAME unit.startstoptls COMMAND sx_gtests_startstoptls)
+            add_test(NAME unit.httpconnect COMMAND sx_gtests_httpconnect)
+            add_test(NAME unit.reloadable COMMAND sx_gtests_reloadable)
+            add_test(NAME integration.tls_testbed COMMAND tls_testbed)
+            set_tests_properties(
+                    unit.core unit.http1 unit.startstoptls unit.httpconnect unit.reloadable
+                    PROPERTIES LABELS "unit")
+            set_tests_properties(unit.reloadable PROPERTIES LABELS "unit;reload")
+            set_tests_properties(integration.tls_testbed PROPERTIES LABELS "integration;tls")
+
+            find_package(Python3 COMPONENTS Interpreter)
+            if(Python3_Interpreter_FOUND)
+                add_test(NAME integration.httpconnect
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/httpconnect/http_connect_integration.py
+                        --smithproxy $<TARGET_FILE:smithproxy>
+                        --source ${PROJECT_SOURCE_DIR})
+                add_test(NAME stress.httpconnect
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/httpconnect/http_connect_stress.py
+                        --smithproxy $<TARGET_FILE:smithproxy>
+                        --source ${PROJECT_SOURCE_DIR}
+                        --connections 32 --concurrency 8 --failures 16)
+                add_test(NAME integration.starttls_socks
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/tls/starttls_socks_integration.py
+                        --smithproxy $<TARGET_FILE:smithproxy>
+                        --source ${PROJECT_SOURCE_DIR}
+                        --protocol all --address ipv4-ip)
+                set_tests_properties(integration.httpconnect integration.starttls_socks
+                        PROPERTIES LABELS "integration")
+                set_tests_properties(stress.httpconnect PROPERTIES LABELS "integration;stress")
+            endif()
+        endif()
     endif()
 ENDIF()
 
@@ -584,14 +647,24 @@ if(SMITHPROXY_TLS_SANITIZERS)
     if(NOT TARGET tls_testbed)
         message(FATAL_ERROR "SMITHPROXY_TLS_SANITIZERS requires a Debug build with GTest")
     endif()
-    foreach(sanitized_target socle_common_lib socle_lib tls_testbed)
+    foreach(sanitized_target
+            socle_common_lib socle_lib smithproxy tls_testbed
+            sx_gtests sx_gtests_http1 sx_gtests_startstoptls sx_gtests_httpconnect
+            sx_gtests_reloadable)
         target_compile_options(${sanitized_target} PRIVATE
                 -fsanitize=address,undefined
                 -fno-omit-frame-pointer)
+        target_link_options(${sanitized_target} PRIVATE
+                -fsanitize=address,undefined
+                -fno-omit-frame-pointer)
     endforeach()
-    target_link_options(tls_testbed PRIVATE
-            -fsanitize=address,undefined
-            -fno-omit-frame-pointer)
+    # LeakSanitizer cannot operate under ptrace-based CI/sandbox runners.
+    # Keep ASan bounds/UAF checks and UBSan enabled there.
+    get_property(sanitized_tests DIRECTORY PROPERTY TESTS)
+    if(sanitized_tests)
+        set_tests_properties(${sanitized_tests}
+                PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
+    endif()
 endif()
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}")
