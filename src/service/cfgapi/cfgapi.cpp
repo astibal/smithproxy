@@ -3663,6 +3663,9 @@ int CfgFactory::load_db_routing () {
                 }
             }
 
+            load_if_exists(cur_object, "rewrite_sni", new_profile->rewrite_sni);
+            load_if_exists(cur_object, "rewrite_sni_to", new_profile->rewrite_sni_to);
+
             db_routing[name] = new_profile;
             loaded++;
         }
@@ -3703,6 +3706,9 @@ int CfgFactory::save_routing(Config& ex) const {
         else
             lbm = "round-robin";
 
+        routing_item.add("rewrite_sni", Setting::TypeString) = obj->rewrite_sni;
+        routing_item.add("rewrite_sni_to", Setting::TypeString) = obj->rewrite_sni_to;
+
         n_saved++;
     }
 
@@ -3723,6 +3729,8 @@ bool CfgFactory::new_routing(Setting& ex, std::string const& name) const {
         item.add("dnat_port", Setting::TypeArray);
 
         item.add("dnat_lb_method", Setting::TypeString) = "round-robin";
+        item.add("rewrite_sni", Setting::TypeString) = "";
+        item.add("rewrite_sni_to", Setting::TypeString) = "";
     }
     catch(libconfig::SettingNameException const& e) {
         _war("cannot add new section %s.%s: %s", ex.c_str(), name.c_str(), e.what());

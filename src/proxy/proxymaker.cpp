@@ -273,12 +273,14 @@ namespace sx::proxymaker {
         routing_profile->update();
 
         auto [ op_ip, op_port ] = get_dnat_target(proxy, routing_profile);
-        if(not op_ip and not op_port) { return false; }
+        auto const has_sni_rewrite = not routing_profile->rewrite_sni.empty()
+                                     and not routing_profile->rewrite_sni_to.empty();
+        if(not op_ip and not op_port and not has_sni_rewrite) { return false; }
 
 
         auto orig_px_name = proxy->to_string(iINF);
 
-        for (auto const *cx: proxy->rs()) {
+        for (auto* cx: proxy->rs()) {
             if (op_ip) {
                 cx->host(op_ip.value());
                 _dia("%s: routing to IP: %s", orig_px_name.c_str(), op_ip->c_str());
@@ -295,6 +297,12 @@ namespace sx::proxymaker {
                     cx->port(op_port.value());
                 }
             }
+
+            cx->configure_sni_rewrite(routing_profile->rewrite_sni, routing_profile->rewrite_sni_to);
+        }
+
+        for(auto* cx: proxy->ls()) {
+            cx->configure_sni_rewrite(routing_profile->rewrite_sni, routing_profile->rewrite_sni_to);
         }
 
         return true;

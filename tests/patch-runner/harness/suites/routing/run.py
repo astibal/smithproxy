@@ -6,11 +6,13 @@ import ipaddress
 import json
 import socket
 import socketserver
+import ssl
 import struct
 import threading
 
 
 BACKEND_PORTS = (18080, 18081, 19080)
+TLS_BACKEND_PORT = 18443
 
 
 def recv_until(sock, marker, limit=65536):
@@ -48,6 +50,7 @@ class Handler(socketserver.BaseRequestHandler):
             "peer_host": str(ipaddress.ip_address(peer_host)),
             "peer_port": peer_port,
             "request": request.decode("ascii", "replace").strip(),
+            "sni": getattr(self.request, "received_sni", None),
         }, sort_keys=True).encode() + b"\n"
         if request.startswith(b"CONNECT "):
             self.request.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n" + result)
@@ -66,11 +69,36 @@ class TCP4Server(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
 
 
-def run_server():
+class TLSServerMixin:
+    def __init__(self, server_address, handler, context):
+        self.tls_context = context
+        super().__init__(server_address, handler)
+
+    def get_request(self):
+        sock, address = super().get_request()
+        return self.tls_context.wrap_socket(sock, server_side=True), address
+
+
+class TLS4Server(TLSServerMixin, TCP4Server):
+    pass
+
+
+class TLS6Server(TLSServerMixin, TCP6Server):
+    pass
+
+
+def run_server(cert, key):
+    tls_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    tls_context.load_cert_chain(cert, key)
+
+    def capture_sni(tls_socket, server_name, _context):
+        tls_socket.received_sni = server_name
+
+    tls_context.set_servername_callback(capture_sni)
     servers = []
-    for family, cls, hosts in (
-        (socket.AF_INET, TCP4Server, ("198.18.20.2", "198.18.20.3")),
-        (socket.AF_INET6, TCP6Server, ("fd00:20::2", "fd00:20::3")),
+    for family, cls, tls_cls, hosts in (
+        (socket.AF_INET, TCP4Server, TLS4Server, ("198.18.20.2", "198.18.20.3")),
+        (socket.AF_INET6, TCP6Server, TLS6Server, ("fd00:20::2", "fd00:20::3")),
     ):
         for host in hosts:
             for port in BACKEND_PORTS:
@@ -78,6 +106,10 @@ def run_server():
                     servers.append(cls((host, port), Handler))
                 except OSError as exc:
                     raise RuntimeError(f"cannot listen on {host}:{port}: {exc}") from exc
+            try:
+                servers.append(tls_cls((host, TLS_BACKEND_PORT), Handler, tls_context))
+            except OSError as exc:
+                raise RuntimeError(f"cannot listen on {host}:{TLS_BACKEND_PORT}: {exc}") from exc
     threads = [threading.Thread(target=server.serve_forever, daemon=True) for server in servers]
     for thread in threads:
         thread.start()
@@ -136,6 +168,18 @@ def connect_request(family, host):
         return result
 
 
+def tls_request(family, host, server_name):
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    with socket.socket(family, socket.SOCK_STREAM) as raw_sock:
+        raw_sock.settimeout(10)
+        with context.wrap_socket(raw_sock, server_hostname=server_name) as sock:
+            sock.connect((host, 19443))
+            sock.sendall(b"sni-rewrite\n")
+            return read_json_line(sock)
+
+
 def test_family(family):
     v6 = family == socket.AF_INET6
     decoy = "fd00:20::9" if v6 else "198.18.20.9"
@@ -172,6 +216,12 @@ def test_family(family):
     assert (connect["local_host"], connect["local_port"]) == (backend_a, 18081), connect
     assert connect["request"].startswith("CONNECT service.example:443 HTTP/1.1"), connect
 
+    rewritten_sni = tls_request(family, decoy, "client.example")
+    assert (rewritten_sni["local_host"], rewritten_sni["local_port"], rewritten_sni["sni"]) == \
+           (backend_a, TLS_BACKEND_PORT, "origin.internal"), rewritten_sni
+    unchanged_sni = tls_request(family, decoy, "other.example")
+    assert unchanged_sni["sni"] == "other.example", unchanged_sni
+
     return {
         "family": 6 if v6 else 4,
         "address_dnat": address,
@@ -181,18 +231,22 @@ def test_family(family):
         "sticky_l4": l4,
         "socks5_dnat": socks,
         "opaque_connect_tunnel": connect,
+        "rewritten_sni": rewritten_sni,
+        "unchanged_sni": unchanged_sni,
     }
 
 
 def main():
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="mode", required=True)
-    sub.add_parser("server")
+    server = sub.add_parser("server")
+    server.add_argument("--cert", required=True)
+    server.add_argument("--key", required=True)
     client = sub.add_parser("client")
     client.add_argument("--family", type=int, choices=(4, 6), required=True)
     args = parser.parse_args()
     if args.mode == "server":
-        run_server()
+        run_server(args.cert, args.key)
     else:
         family = socket.AF_INET if args.family == 4 else socket.AF_INET6
         print(json.dumps(test_family(family), indent=2, sort_keys=True))

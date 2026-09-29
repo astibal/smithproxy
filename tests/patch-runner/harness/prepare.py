@@ -69,6 +69,8 @@ if os.environ.get('ROUTING_TEST') == '1':
     route_req_l4 = { start = 19100; end = 19115; };
     route_req_socks = { start = 19200; end = 19200; };
     route_req_connect = { start = 19300; end = 19300; };
+    route_req_sni = { start = 19443; end = 19443; };
+    route_backend_18443 = { start = 18443; end = 18443; };
 '''
     text, port_count = re.subn(r'(port_objects\s*=\s*\{)', r'\1\n' + port_objects, text, count=1)
     routing_profiles = '''
@@ -79,6 +81,7 @@ if os.environ.get('ROUTING_TEST') == '1':
     test_l4 = { dnat_address = [ "route_backend4_a", "route_backend4_b", "route_backend6_a", "route_backend6_b" ]; dnat_port = [ "route_backend_18080" ]; dnat_lb_method = "sticky-l4"; };
     test_socks = { dnat_address = [ "route_backend4_a", "route_backend6_a" ]; dnat_port = [ "route_backend_18080" ]; dnat_lb_method = "round-robin"; };
     test_connect = { dnat_address = [ "route_backend4_a", "route_backend6_a" ]; dnat_port = [ "route_backend_18081" ]; dnat_lb_method = "round-robin"; };
+    test_sni = { dnat_address = [ "route_backend4_a", "route_backend6_a" ]; dnat_port = [ "route_backend_18443" ]; dnat_lb_method = "round-robin"; rewrite_sni = "client.example"; rewrite_sni_to = "origin.internal"; };
 '''
     text, routing_count = re.subn(r'(routing\s*=\s*\{)', r'\1\n' + routing_profiles, text, count=1)
     routing_policies = '''
@@ -89,6 +92,7 @@ if os.environ.get('ROUTING_TEST') == '1':
     { name = "test-route-l4"; proto = "tcp"; src = [ "any", "any6" ]; sport = [ "all" ]; dst = [ "any", "any6" ]; dport = [ "route_req_l4" ]; action = "accept"; nat = "auto"; routing = "test_l4"; },
     { name = "test-route-socks"; proto = "tcp"; src = [ "any", "any6" ]; sport = [ "all" ]; dst = [ "any", "any6" ]; dport = [ "route_req_socks" ]; action = "accept"; nat = "auto"; routing = "test_socks"; },
     { name = "test-route-connect"; proto = "tcp"; src = [ "any", "any6" ]; sport = [ "all" ]; dst = [ "any", "any6" ]; dport = [ "route_req_connect" ]; action = "accept"; nat = "auto"; routing = "test_connect"; },
+    { name = "test-route-sni"; proto = "tcp"; src = [ "any", "any6" ]; sport = [ "all" ]; dst = [ "any", "any6" ]; dport = [ "route_req_sni" ]; tls_profile = "default"; action = "accept"; nat = "auto"; routing = "test_sni"; },
 '''
     text, policy_count = re.subn(r'(policy\s*=\s*\()', r'\1\n' + routing_policies, text, count=1)
     if (address_count, port_count, routing_count, policy_count) != (1, 1, 1, 1):

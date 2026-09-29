@@ -342,6 +342,7 @@ if [[ $POLICY_TEST == 1 ]]; then
 fi
 if [[ $ROUTING_TEST == 1 ]]; then
     ip netns exec "$SERVER" python3 -u "$ROOT/runner/tests/suites/routing/run.py" server \
+        --cert "$ROOT/config/certs/origin-cert.pem" --key "$ROOT/config/certs/origin-key.pem" \
         > "$ROOT/results/routing-server.log" 2>&1 &
     ROUTING_SERVER_PID=$!
     for attempt in $(seq 1 50); do
@@ -352,10 +353,10 @@ if [[ $ROUTING_TEST == 1 ]]; then
     grep -q '^READY$' "$ROOT/results/routing-server.log"
     ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/suites/routing/run.py" client --family 4 \
         > "$ROOT/results/routing-suite4.json"
-    echo 'PASS4 routing: address/port rewrite, RR/L3/L4, SOCKS5 and opaque CONNECT tunnel'
+    echo 'PASS4 routing: address/port rewrite, RR/L3/L4, SNI rewrite, SOCKS5 and opaque CONNECT tunnel'
     ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/suites/routing/run.py" client --family 6 \
         > "$ROOT/results/routing-suite6.json"
-    echo 'PASS6 routing: address/port rewrite, RR/L3/L4, SOCKS5 and opaque CONNECT tunnel'
+    echo 'PASS6 routing: address/port rewrite, RR/L3/L4, SNI rewrite, SOCKS5 and opaque CONNECT tunnel'
 fi
 if [[ $RTT_TEST == 1 ]]; then
     RTT_EXTRA_ARGS=()
