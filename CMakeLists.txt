@@ -91,7 +91,10 @@ include_directories ("${PROJECT_SOURCE_DIR}/src/ext")
 add_subdirectory(${SOCLE_DIR} socle_lib)
 add_subdirectory(${SOCLE_COMMON_DIR} socle_common_lib)
 
-find_package(nlohmann_json 3.0 REQUIRED)
+add_library(nlohmann_json INTERFACE)
+add_library(nlohmann_json::nlohmann_json ALIAS nlohmann_json)
+target_include_directories(nlohmann_json INTERFACE
+    "${PROJECT_SOURCE_DIR}/third_party/nlohmann/include")
 
 find_package (LibConfig REQUIRED)
 if (LIBCONFIGPP_FOUND)

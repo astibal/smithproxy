@@ -44,7 +44,7 @@ install_apt_dependencies() {
         python3 python3-dev python3-cryptography python3-pyroute2 python3-pyparsing \
         libconfig-dev libconfig++-dev \
         libssl-dev libunwind-dev libmicrohttpd-dev libcurl4-openssl-dev \
-        libpam0g-dev nlohmann-json3-dev \
+        libpam0g-dev \
         iptables iproute2 telnet \
         swig libffi-dev libxml2-dev libxslt1-dev xmlsec1
 }
@@ -55,7 +55,7 @@ install_apk_dependencies() {
         git g++ cmake make musl-dev linux-headers \
         python3 python3-dev py3-cryptography py3-pyroute2 \
         libconfig-dev openssl-dev libunwind-dev libmicrohttpd-dev curl-dev \
-        linux-pam-dev nlohmann-json \
+        linux-pam-dev \
         iptables iproute2 busybox-extras \
         swig libffi-dev libxml2-dev libxslt-dev xmlsec-dev
 }
@@ -68,7 +68,7 @@ install_dnf_dependencies() {
         git gcc-c++ cmake make \
         python3 python3-devel python3-cryptography python3-pyroute2 python3-pyparsing \
         libconfig-devel openssl-devel libunwind-devel libmicrohttpd-devel \
-        libcurl-devel pam-devel nlohmann-json-devel \
+        libcurl-devel pam-devel \
         iptables iproute telnet \
         swig libffi-devel libxml2-devel libxslt-devel xmlsec1-devel
 }
@@ -87,7 +87,7 @@ install_zypper_dependencies() {
         git gcc-c++ cmake make \
         python3 python3-devel python3-cryptography python3-pyroute2 python3-pyparsing \
         libconfig-devel libopenssl-devel libunwind-devel libmicrohttpd-devel \
-        libcurl-devel pam-devel nlohmann_json-devel \
+        libcurl-devel pam-devel \
         iptables iproute2 telnet \
         swig libffi-devel libxml2-devel libxslt-devel xmlsec1-devel
 }
