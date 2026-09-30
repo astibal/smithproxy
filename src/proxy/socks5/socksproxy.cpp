@@ -40,6 +40,7 @@
 #include <tcpcom.hpp>
 
 #include <proxy/proxymaker.hpp>
+#include <proxy/explicitproxyport.hpp>
 #include <proxy/socks5/sockshostcx.hpp>
 #include <proxy/socks5/socksproxy.hpp>
 #include <proxy/mitmhost.hpp>
@@ -248,6 +249,24 @@ void ExplicitProxy::explicit_handoff(ExplicitProxyCX* cx) {
         return;
     }
 
+    bool preserve_source = false;
+    {
+        auto lock = std::scoped_lock(CfgFactory::lock());
+        preserve_source = CfgFactory::get()->db_policy_list.at(matched_policy())->nat
+                          == PolicyRule::POLICY_NAT_NONE;
+    }
+
+    std::optional<unsigned short> source_port;
+    if(preserve_source) {
+        source_port = sx::explicit_proxy::parse_source_port(p);
+        if(not source_port) {
+            _err("ExplicitProxy::explicit_handoff: invalid source endpoint %s:%s",
+                 h.c_str(), p.c_str());
+            state().dead(true);
+            return;
+        }
+    }
+
     auto *target_cx = new MitmHostCX(n_cx->com()->slave(), n_cx->com()->nonlocal_dst_host().c_str(),
                                      string_format("%d",n_cx->com()->nonlocal_dst_port()).c_str()
     );
@@ -257,13 +276,10 @@ void ExplicitProxy::explicit_handoff(ExplicitProxyCX* cx) {
 
 
 
-    {
-        auto lc_ = std::scoped_lock(CfgFactory::lock());
-        if (CfgFactory::get()->db_policy_list.at(matched_policy())->nat == PolicyRule::POLICY_NAT_NONE) {
-            target_cx->com()->nonlocal_src(true);
-            target_cx->com()->nonlocal_src_host() = h;
-            target_cx->com()->nonlocal_src_port() = std::stoi(p);
-        }
+    if(preserve_source) {
+        target_cx->com()->nonlocal_src(true);
+        target_cx->com()->nonlocal_src_host() = h;
+        target_cx->com()->nonlocal_src_port() = *source_port;
     }
 
     n_cx->matched_policy(matched_policy());
@@ -341,9 +357,26 @@ bool ExplicitProxy::send_pending_connect_response() {
 bool ExplicitProxy::handle_cx_write(unsigned char side, baseHostCX* cx) {
     if(not pending_connect_response_.empty()) {
         if((side == 'r' || side == 'R') && cx->opening()) {
-            if(cx->is_connected()) {
+            // This callback is driven by the upstream socket's write event.
+            // Do not call is_connected() here: it performs another zero-time
+            // epoll probe which can miss the event that brought us here and
+            // turn an in-progress connect into a spurious proxy failure.
+            int connect_error = 0;
+            socklen_t connect_error_size = sizeof(connect_error);
+            auto const status = ::getsockopt(cx->socket(), SOL_SOCKET, SO_ERROR,
+                                             &connect_error, &connect_error_size);
+
+            if(status == 0 && connect_error == 0) {
                 cx->opening(false);
+            } else if(status == 0 &&
+                      (connect_error == EINPROGRESS || connect_error == EALREADY ||
+                       connect_error == EWOULDBLOCK)) {
+                // The socket has not completed its non-blocking connect yet.
+                cx->com()->set_write_monitor(cx->socket());
+                return true;
             } else {
+                _dia("ExplicitProxy::handle_cx_write: upstream connect failed: %s",
+                     string_error(status == 0 ? connect_error : errno).c_str());
                 pending_connect_response_ = upstream_failure_response_;
                 pending_connect_response_offset_ = 0;
                 close_after_connect_response_ = true;

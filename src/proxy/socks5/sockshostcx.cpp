@@ -40,6 +40,7 @@
 #include <service/cfgapi/cfgapi.hpp>
 #include <log/logger.hpp>
 #include <proxy/socks5/sockshostcx.hpp>
+#include <proxy/explicitproxyport.hpp>
 #include <inspect/dnsinspector.hpp>
 
 #include <common/numops.hpp>
@@ -668,7 +669,17 @@ bool ExplicitProxyCX::setup_target() {
         // RIGHT
         std::string h;
         std::string p;
-        com()->resolve_socket_src(socket(),&h,&p);
+        if(not com()->resolve_socket_src(socket(),&h,&p)) {
+            _err("ExplicitProxyCX::setup_target: cannot resolve source endpoint");
+            return false;
+        }
+
+        auto const source_port = sx::explicit_proxy::parse_source_port(p);
+        if(not source_port) {
+            _err("ExplicitProxyCX::setup_target: invalid source endpoint %s:%s",
+                 h.c_str(), p.c_str());
+            return false;
+        }
 
         auto *target_cx = new MitmHostCX(com()->slave(), com()->nonlocal_dst_host().c_str(),
                                             string_format("%d",com()->nonlocal_dst_port()).c_str()
@@ -679,7 +690,7 @@ bool ExplicitProxyCX::setup_target() {
         
         target_cx->com()->nonlocal_src(false);
         target_cx->com()->nonlocal_src_host() = h;
-        target_cx->com()->nonlocal_src_port() = raw::down_cast_signed<unsigned short>(std::stoi(p)).value_or(0);
+        target_cx->com()->nonlocal_src_port() = *source_port;
 
 
 

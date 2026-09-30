@@ -118,7 +118,8 @@ def run(args):
             listener_port, integration.free_port())
         process = subprocess.Popen(
             [str(executable), "--config-file", str(config), "--debug"],
-            cwd=worktree, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            cwd=worktree, env=integration.process_env(runtime),
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         try:
             integration.wait_for_listener(process, listener_port)
             with concurrent.futures.ThreadPoolExecutor(max_workers=args.concurrency) as pool:
