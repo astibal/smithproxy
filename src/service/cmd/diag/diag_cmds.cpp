@@ -1863,7 +1863,8 @@ int cli_diag_proxy_session_list_extra (DiagCli *cli, const char *command, std::v
         if(args.size() > 1) arg2 = args.at(1);
     }
 
-    auto renderer = [sl_flags, verbosity](MitmProxy* curr_proxy) -> std::optional<std::string> {
+    const auto decor = cli->context.decor();
+    auto renderer = [sl_flags, verbosity, decor](MitmProxy* curr_proxy) -> std::optional<std::string> {
                 std::string prefix;
                 std::string suffix;
                 auto* lf = curr_proxy->first_left();
@@ -1881,11 +1882,11 @@ int cli_diag_proxy_session_list_extra (DiagCli *cli, const char *command, std::v
                 }
 
                 if(lf and lf->engine_ctx.application_data) {
-                    suffix += string_format(" (%s)", lf->engine_ctx.application_data->protocol().c_str());
+                    suffix += " (" + decor.muted(lf->engine_ctx.application_data->protocol()) + ")";
                 }
                 if(curr_proxy and not curr_proxy->filters_.empty()) {
                     for(auto const& fi: curr_proxy->filters_) {
-                        suffix += string_format(" !%s", fi.first.c_str());
+                        suffix += " " + decor.warning("!" + fi.first);
                     }
                 }
 
@@ -1922,7 +1923,7 @@ int cli_diag_proxy_session_list_extra (DiagCli *cli, const char *command, std::v
                 }
 
                 std::stringstream cur_obj_ss;
-                cur_obj_ss << prefix << get_proxy_title(curr_proxy, sl_flags, verbosity) << suffix;
+                cur_obj_ss << prefix << decor.command(get_proxy_title(curr_proxy, sl_flags, verbosity)) << suffix;
 
                 cur_obj_ss << get_more_info(curr_proxy, lf, rg, verbosity);
                 return cur_obj_ss.str();
@@ -1931,9 +1932,9 @@ int cli_diag_proxy_session_list_extra (DiagCli *cli, const char *command, std::v
     auto request = SessionList::text(session_list_worker_count(), std::move(renderer));
     dispatch_session_list(request);
     if (!request->wait_for(std::chrono::seconds(5))) {
-        cli_print(cli, "Session snapshot %llu timed out; pending: %s",
-                  static_cast<unsigned long long>(request->version()),
-                  request->pending_origins().c_str());
+        cli->context.print(decor.error(string_format("Session snapshot %llu timed out; pending: %s",
+                           static_cast<unsigned long long>(request->version()),
+                           request->pending_origins().c_str())));
         return CLI_OK;
     }
 
@@ -1941,8 +1942,9 @@ int cli_diag_proxy_session_list_extra (DiagCli *cli, const char *command, std::v
     if( sl_flags == SL_NONE ) {
         unsigned long l = MitmProxy::total_mtr_up().get();
         unsigned long r = MitmProxy::total_mtr_down().get();
-        cli_print(cli, "\nProxy performance: upload %sbps, download %sbps in last 60 seconds",
-                  number_suffixed(l * 8).c_str(), number_suffixed(r * 8).c_str());
+        cli->context.print("\n" + decor.heading("Proxy performance:") + " upload " +
+                           decor.success(number_suffixed(l * 8) + "bps") + ", download " +
+                           decor.success(number_suffixed(r * 8) + "bps") + " in last 60 seconds");
     }
     return CLI_OK;
 

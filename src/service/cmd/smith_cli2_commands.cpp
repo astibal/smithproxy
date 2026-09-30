@@ -324,7 +324,7 @@ void register_smithproxy_cli2_commands(libcli2::Cli& cli, std::string subscriber
         .handler([](libcli2::Context& context, const libcli2::Invocation&) {
             Log::get()->events().clear();
             Log::get()->events().insert(CRI, "events cleared by admin");
-            context.print("Events cleared");
+            context.print(context.decor().success("Events cleared"));
             return 0;
         });
 
@@ -356,7 +356,8 @@ void register_smithproxy_cli2_commands(libcli2::Cli& cli, std::string subscriber
                 count = kb->elements.size();
                 kb->elements.clear();
             }
-            context.print("Knowledgebase cleared " + std::to_string(count) + " entries");
+            const auto d = context.decor();
+            context.print(d.success("Knowledgebase cleared") + " " + d.value(std::to_string(count)) + " entries");
             return 0;
         });
 
@@ -378,19 +379,23 @@ void register_smithproxy_cli2_commands(libcli2::Cli& cli, std::string subscriber
         .handler([subscriber_id, refresh_prompt](libcli2::Context& context, const libcli2::Invocation& invocation) {
             const bool force = !invocation.arguments.empty();
             if (CfgFactory::LOAD_ERRORS && !force) {
-                context.print("Warning: configuration loaded only partially; fix it and execute reload, "
-                              "or use 'save config force' to discard invalid parts.");
+                const auto d = context.decor();
+                context.print(d.warning("Warning: configuration loaded only partially") +
+                              "; fix it and execute reload, or use " + d.command("save config force") +
+                              " to discard invalid parts.");
                 return 0;
             }
             const int result = CfgFactory::get()->save_config();
             if (result < 0) {
-                context.print(std::string(force ? "enforced: " : "") + "error writing config file!");
+                context.print(context.decor().error(std::string(force ? "enforced: " : "") +
+                                                    "error writing config file!"));
                 return -1;
             }
             CfgFactory::board()->save(subscriber_id);
             CfgFactory::board()->ack_saved(subscriber_id);
             if (refresh_prompt) refresh_prompt();
-            context.print(std::string(force ? "enforced: " : "") + "config saved successfully.");
+            context.print(context.decor().success(std::string(force ? "enforced: " : "") +
+                                                  "config saved successfully."));
             return 0;
         });
 
@@ -402,13 +407,14 @@ void register_smithproxy_cli2_commands(libcli2::Cli& cli, std::string subscriber
             const bool loaded = SmithProxy::instance().load_config(CfgFactory::get()->config_file, true);
             CfgFactory::board()->rollback(subscriber_id);
             if (!loaded) {
-                context.print("Configuration file reload FAILED");
+                context.print(context.decor().error("Configuration file reload FAILED"));
                 return -1;
             }
             CfgFactory::board()->ack_current(subscriber_id);
             if (refresh_prompt) refresh_prompt();
-            context.print(std::string("Configuration file reloaded") +
-                          (CfgFactory::LOAD_ERRORS ? " (with some errors)" : ""));
+            const auto d = context.decor();
+            context.print(d.success("Configuration file reloaded") +
+                          (CfgFactory::LOAD_ERRORS ? " " + d.warning("(with some errors)") : ""));
             return 0;
         });
 
@@ -417,7 +423,7 @@ void register_smithproxy_cli2_commands(libcli2::Cli& cli, std::string subscriber
         .help("Terminate this Smithproxy process gracefully")
         .available_if(privileged)
         .handler([](libcli2::Context& context, const libcli2::Invocation&) {
-            context.print("\n!!! terminating smithproxy !!!");
+            context.print(context.decor().error("\n!!! terminating smithproxy !!!"));
             SmithProxy::instance().terminate_flag = true;
             return 0;
         });
