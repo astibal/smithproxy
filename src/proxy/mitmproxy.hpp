@@ -48,6 +48,7 @@
 #include <hostcx.hpp>
 
 #include <proxy/socks5/sockshostcx.hpp>
+#include <proxy/trafficcapture.hpp>
 #include <proxy/startstoptls.hpp>
 
 #include <baseproxy.hpp>
@@ -87,6 +88,7 @@ private:
 class MitmProxy : public baseProxy, public IOController {
 
     std::unique_ptr<socle::baseTrafficLogger> tlog_;
+    std::unique_ptr<sx::traffic_log_adapter> traffic_log_adapter_;
     
     std::unique_ptr<std::vector<ProfileContentRule>> content_rule_; //save some space and store it as a pointer. Init it only when needed and delete in dtor.
     int matched_policy_ = -1;
@@ -160,6 +162,10 @@ public:
 
 
     std::unique_ptr<socle::baseTrafficLogger>& tlog() { return tlog_; }
+    /** Install an optional transport-neutral transformation of capture output. */
+    void traffic_log_adapter(std::unique_ptr<sx::traffic_log_adapter> adapter) {
+        traffic_log_adapter_ = std::move(adapter);
+    }
     void toggle_tlog ();
     
     explicit MitmProxy(baseCom* c);

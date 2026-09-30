@@ -51,6 +51,7 @@
 #include <service/cfgapi/cfgapi.hpp>
 #include "service/http/webhooks.hpp"
 #include "proxy/nbrhood.hpp"
+#include "proxy/multiflow/mfmitmproxy.hpp"
 
 #ifdef ASAN_LEAKS
 extern "C" int __lsan_do_recoverable_leak_check();
@@ -111,6 +112,7 @@ bool SmithProxy::create_listeners() {
         std::string tls_frm = "tls";
         std::string dtls_frm = "dtls";
         std::string udp_frm = "udp";
+        std::string quic_frm = "quic";
 
         std::string socks_frm = "socks-tcp";
         std::string socks_udp_frm = "socks-udp";
@@ -162,6 +164,35 @@ bool SmithProxy::create_listeners() {
                     proxyType::transparent());
 
             log_listener(udp_frm, udp_proxies);
+
+            if (CfgFactory::get()->num_workers_quic >= 0) {
+                if (!sx::quic::openssl_quic_available()) {
+                    _war("QUIC listener disabled: linked OpenSSL has no QUIC server support "
+                         "(OpenSSL 3.5+ required)");
+                } else {
+                    if (CfgFactory::get()->num_workers_quic > 1) {
+                        _war("QUIC currently uses one event-loop thread; quic_workers=%d requested",
+                             CfgFactory::get()->num_workers_quic);
+                    }
+                    auto certs_path = SSLFactory::factory().certs_path();
+                    if (!certs_path.empty() && certs_path.back() != '/') certs_path += '/';
+                    auto service = std::make_unique<sx::quic::listener_service>(
+                        static_cast<std::uint16_t>(std::stoi(CfgFactory::get()->listen_quic_port)),
+                        certs_path + SSLFactory::config_t::SR_CERTF,
+                        certs_path + SSLFactory::config_t::SR_KEYF,
+                        true, 443, true, sx::quic::lifecycle_options {},
+                        sx::quic::resource_limits {}, std::string {},
+                        sx::multiflow::make_mitm_flow_proxy,
+                        CfgFactory::get()->capture_local.enabled
+                            || CfgFactory::get()->capture_remote.enabled);
+                    if (!service->prepare()) {
+                        _fat("Failed to setup QUIC listener: %s", service->last_error().c_str());
+                        return false;
+                    }
+                    quic_services.emplace_back(std::move(service));
+                    log_listener(quic_frm, quic_services);
+                }
+            }
 
 
             if ((plain_proxies.empty() && CfgFactory::get()->num_workers_tcp >= 0) ||
@@ -292,6 +323,7 @@ void SmithProxy::run() {
     std::string friendly_thread_name_udp = string_format("sxy_udp_%d",CfgFactory::get()->tenant_index);
     std::string friendly_thread_name_tls = string_format("sxy_tls_%d",CfgFactory::get()->tenant_index);
     std::string friendly_thread_name_dls = string_format("sxy_dls_%d",CfgFactory::get()->tenant_index);
+    std::string friendly_thread_name_quic = string_format("sxy_quic_%d",CfgFactory::get()->tenant_index);
     std::string friendly_thread_name_skx = string_format("sxy_skx_%d",CfgFactory::get()->tenant_index);
     std::string friendly_thread_name_sku = string_format("sxy_sku_%d",CfgFactory::get()->tenant_index);
     std::string friendly_thread_name_hcx = string_format("sxy_hcx_%d",CfgFactory::get()->tenant_index);
@@ -352,6 +384,13 @@ void SmithProxy::run() {
         launch_proxy_threads(ssl_proxies, ssl_threads, "TLS listener", friendly_thread_name_tls.c_str());
         launch_proxy_threads(dtls_proxies, dtls_threads, "DTLS listener", friendly_thread_name_dls.c_str());
         launch_proxy_threads(udp_proxies, udp_threads, "UDP listener", friendly_thread_name_udp.c_str());
+        for (auto& service : quic_services) {
+            _inf("Starting: QUIC listener");
+            auto* service_ptr = service.get();
+            auto thread = std::make_shared<std::thread>([service_ptr]() { service_ptr->run(); });
+            pthread_setname_np(thread->native_handle(), friendly_thread_name_quic.c_str());
+            quic_threads.push_back(std::move(thread));
+        }
     }
 
     if(CfgFactory::get()->accept_socks) {
@@ -620,6 +659,12 @@ void SmithProxy::join_all() {
         join_thread_list(udp_threads);
     }
 
+    if(! quic_threads.empty()) {
+        if(!cfg_daemonize)
+            std::cerr << "terminating quic thread" << std::endl;
+        join_thread_list(quic_threads);
+    }
+
     if(! socks_threads.empty()) {
         if(!cfg_daemonize)
             std::cerr << "terminating tcp socks thread" << std::endl;
@@ -692,6 +737,10 @@ void SmithProxy::kill_proxies() {
 
     baseCom::poll_msec = 50;
     baseCom::rescan_msec = 50;
+
+    for (auto& service : quic_services) {
+        if (service) service->stop();
+    }
 
     auto kill_proxies = [](auto& proxies) {
         for(auto& p: proxies) {

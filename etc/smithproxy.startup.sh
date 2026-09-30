@@ -71,10 +71,12 @@ SMITH_IPV6_UDP_BYPASS=0
 SMITH_TCP_TPROXY='50080'
 SMITH_UDP_PORTS='53'
 SMITH_UDP_TPROXY='50080'
+SMITH_QUIC_PORTS='443'
+SMITH_QUIC_ENABLED=0           # derived from settings.quic_workers below
 SMITH_TLS_PORTS='443 465 636 993 995 10443'
 SMITH_TLS_TPROXY='50443'
 SMITH_DTLS_PORTS=''
-TEMP_DTLS_DROP='443'            # DTLS is being used for example by google, and evades smithproxy if not blocked
+TEMP_DTLS_DROP=''               # optional additional UDP ports to block
 SMITH_DTLS_TPROXY='50443'
 
 DIVERT_FWMARK=1
@@ -146,6 +148,22 @@ function tenant_apply {
 
     if [ -f "/etc/smithproxy/smithproxy.${tenant_id}.cfg" ]; then
         SX_CFG="/etc/smithproxy/smithproxy.${tenant_id}.cfg"
+    fi
+
+    # QUIC interception is deliberately separate from the generic UDP proxy.
+    # A configured QUIC listener gets the original service port via --on-port 0;
+    # otherwise the same ports are dropped so HTTP/3 cannot bypass TLS policy.
+    QUIC_WORKERS=`sed -n 's/^[[:space:]]*quic_workers[[:space:]]*=[[:space:]]*\(-\{0,1\}[0-9][0-9]*\)[[:space:]]*;.*/\1/p' ${SX_CFG} | tail -n1`
+    QUIC_PORT=`sed -n 's/^[[:space:]]*quic_port[[:space:]]*=[[:space:]]*"\{0,1\}\([0-9][0-9]*\)"\{0,1\}[[:space:]]*;.*/\1/p' ${SX_CFG} | tail -n1`
+    if [[ "${QUIC_PORT}" != "" ]]; then
+        SMITH_QUIC_PORTS="${QUIC_PORT}"
+    fi
+    if [[ "${QUIC_WORKERS}" =~ ^[0-9]+$ ]]; then
+        SMITH_QUIC_ENABLED=1
+        logit "QUIC interception enabled for UDP port(s) ${SMITH_QUIC_PORTS}"
+    else
+        SMITH_QUIC_ENABLED=0
+        logit "QUIC listener disabled; UDP port(s) ${SMITH_QUIC_PORTS} will be blocked"
     fi
 
     if [ `cat ${SX_CFG}  | grep -i accept_tproxy | grep -i false > /dev/null ; echo $?` -eq 0 ]; then
@@ -250,6 +268,28 @@ function setup_tproxy {
 
             done;
 
+            if [[ ${SMITH_QUIC_ENABLED} -gt 0 ]]; then
+                logit " tproxy for QUIC"
+                for P in ${SMITH_QUIC_PORTS}; do
+                    logit "  tproxy QUIC port ${IF}/${P}, preserving destination port"
+                    iptables -t mangle -A ${SMITH_CHAIN_NAME} -p udp -i ${IF} --dport ${P} -j TPROXY \
+                    --tproxy-mark ${DIVERT_FWMARK}/${DIVERT_FWMASK} --on-port 0
+                    if [[ ${SMITH_IPV6_UDP_BYPASS} -gt 0 ]]; then
+                        logit "  drop IPv6 QUIC port ${IF}/${P} (IPv6 UDP TPROXY disabled)"
+                        ip6tables -t mangle -A ${SMITH_CHAIN_NAME} -p udp -i ${IF} --dport ${P} -j DROP
+                    else
+                        ip6tables -t mangle -A ${SMITH_CHAIN_NAME} -p udp -i ${IF} --dport ${P} -j TPROXY \
+                        --tproxy-mark ${DIVERT_FWMARK}/${DIVERT_FWMASK} --on-port 0
+                    fi
+                done
+            else
+                logit " block QUIC because its listener is disabled"
+                for P in ${SMITH_QUIC_PORTS}; do
+                    logit "  drop QUIC port ${IF}/${P}"
+                    iptables -t mangle -A ${SMITH_CHAIN_NAME} -p udp -i ${IF} --dport ${P} -j DROP
+                    ip6tables -t mangle -A ${SMITH_CHAIN_NAME} -p udp -i ${IF} --dport ${P} -j DROP
+                done
+            fi
             logit " tproxy for UDP"
             for P in ${SMITH_UDP_PORTS}; do
                 logit "  tproxy port ${IF}/${P}->${SMITH_UDP_TPROXY}"
@@ -279,7 +319,7 @@ function setup_tproxy {
                 ip6tables -t mangle -A ${SMITH_CHAIN_NAME} -p udp -i ${IF} --dport ${P} -j TPROXY \
                 --tproxy-mark ${DIVERT_FWMARK}/${DIVERT_FWMASK} --on-port ${SMITH_DTLS_TPROXY}
             done;
-            logit " drop DTLS ports (until DTLS inspection is implemented)"
+            logit " drop explicitly blocked UDP/DTLS ports"
             for P in ${TEMP_DTLS_DROP}; do
                 logit "  drop port ${IF}/${P}->${TEMP_DTLS_DROP}"
                 iptables -t mangle -A ${SMITH_CHAIN_NAME} -p udp -i ${IF} --dport ${P} -j DROP

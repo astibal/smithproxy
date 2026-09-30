@@ -18,7 +18,7 @@ ProcessorCount(CPUs)
 SET(SOCLE_DIR "socle")
 SET(SOCLE_COMMON_DIR "socle/common")
 
-project(smithproxy CXX)
+project(smithproxy C CXX)
 include(CTest)
 
 SET(CMAKE_SOURCE_DIR "src/")
@@ -90,6 +90,7 @@ include_directories ("${PROJECT_SOURCE_DIR}/src/ext")
 
 add_subdirectory(${SOCLE_DIR} socle_lib)
 add_subdirectory(${SOCLE_COMMON_DIR} socle_common_lib)
+add_subdirectory(src/ext/ls-qpack)
 
 add_library(nlohmann_json INTERFACE)
 add_library(nlohmann_json::nlohmann_json ALIAS nlohmann_json)
@@ -268,6 +269,14 @@ add_executable(smithproxy
         src/proxy/ocspinvoker.hpp
         src/proxy/proxymaker.hpp
         src/proxy/proxymaker.cpp
+        src/proxy/multiflow/mfflowcom.cpp
+        src/proxy/multiflow/mfproxy.cpp
+        src/proxy/multiflow/mfmitmproxy.cpp
+        src/proxy/quic/wire.cpp
+        src/proxy/quic/h3capture.cpp
+        src/proxy/quic/spq1.cpp
+        src/proxy/quic/openssl.cpp
+        src/service/quic/quicservice.cpp
         src/proxy/startstoptls.hpp
         src/proxy/startstoptls.cpp
 
@@ -395,6 +404,23 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/utils/tenants.cpp
                 src/tests/test_misc.cpp
 
+                src/proxy/multiflow/tests/fake_tests.cpp
+                src/proxy/multiflow/mfflowcom.cpp
+                src/proxy/multiflow/tests/mfflowcom_tests.cpp
+                src/proxy/multiflow/mfproxy.cpp
+                src/proxy/multiflow/tests/mfproxy_tests.cpp
+                src/proxy/quic/wire.cpp
+                src/proxy/quic/tests/wire_tests.cpp
+                src/proxy/quic/h3capture.cpp
+                src/proxy/quic/spq1.cpp
+                src/proxy/quic/tests/h3capture_tests.cpp
+                src/proxy/quic/tests/spq1_tests.cpp
+                src/proxy/quic/tests/qpack_vendor_tests.cpp
+                src/proxy/quic/openssl.cpp
+                src/proxy/quic/tests/openssl_tests.cpp
+                src/service/quic/quicservice.cpp
+                src/service/quic/tests/quicservice_tests.cpp
+
                 src/ext/hpack/hpack.hpp
                 src/ext/hpack/hpack_tests.cpp
 
@@ -443,6 +469,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
         )
         add_executable(sx_gtests_httpconnect
                 src/proxy/httpconnect/tests/httpconnectrequest_test.cpp
+                src/proxy/tests/explicitproxyport_test.cpp
                 src/proxy/httpconnect/httpconnectrequest.cpp
         )
 
@@ -456,7 +483,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_compile_definitions(tls_testbed PRIVATE
                 SMITHPROXY_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 
-        target_link_libraries(sx_gtests gtest gtest_main smithproxy_libcli socle_lib pthread crypto ssl crypt)
+        target_link_libraries(sx_gtests gtest gtest_main smithproxy_libcli smithproxy_qpack socle_lib pthread crypto ssl crypt)
         if (LIBCONFIGPP_FOUND)
             target_link_libraries(sx_gtests ${LIBCONFIGPP_LIBRARIES})
         endif()
@@ -466,6 +493,42 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_link_libraries(sx_gtests_reloadable gtest gtest_main pthread)
         target_link_libraries(tls_testbed gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries (sx_gtests nlohmann_json::nlohmann_json)
+
+        # Focused QUIC integration target. It intentionally avoids the legacy
+        # unrelated application tests while keeping the complete MultiFlow,
+        # wire-format, adapter, listener, and end-to-end stack in one runner.
+        add_executable(quic_testbed
+                src/proxy/multiflow/tests/fake_tests.cpp
+                src/proxy/multiflow/mfflowcom.cpp
+                src/proxy/multiflow/tests/mfflowcom_tests.cpp
+                src/proxy/multiflow/mfproxy.cpp
+                src/proxy/multiflow/tests/mfproxy_tests.cpp
+                src/proxy/quic/wire.cpp
+                src/proxy/quic/tests/wire_tests.cpp
+                src/proxy/quic/h3capture.cpp
+                src/proxy/quic/spq1.cpp
+                src/proxy/quic/tests/h3capture_tests.cpp
+                src/proxy/quic/tests/spq1_tests.cpp
+                src/proxy/quic/tests/qpack_vendor_tests.cpp
+                src/proxy/quic/openssl.cpp
+                src/proxy/quic/tests/openssl_tests.cpp
+                src/service/quic/quicservice.cpp
+                src/service/quic/tests/quicservice_tests.cpp
+                src/service/quic/testbed/quic_testbed.cpp
+        )
+        target_link_libraries(quic_testbed gtest smithproxy_qpack socle_lib pthread crypto ssl)
+
+        add_executable(quic_test_node
+                src/proxy/multiflow/mfflowcom.cpp
+                src/proxy/multiflow/mfproxy.cpp
+                src/proxy/quic/wire.cpp
+                src/proxy/quic/h3capture.cpp
+                src/proxy/quic/spq1.cpp
+                src/proxy/quic/openssl.cpp
+                src/service/quic/quicservice.cpp
+                src/service/quic/testbed/quic_test_node.cpp
+        )
+        target_link_libraries(quic_test_node smithproxy_qpack socle_lib pthread crypto ssl)
 
         if(BUILD_TESTING)
             add_test(NAME unit.core COMMAND sx_gtests)
@@ -477,6 +540,10 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
             set_tests_properties(
                     unit.core unit.http1 unit.startstoptls unit.httpconnect unit.reloadable
                     PROPERTIES LABELS "unit")
+            # Core tests load repository fixtures (including QUIC certificates)
+            # through source-relative paths.
+            set_tests_properties(unit.core PROPERTIES
+                    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
             set_tests_properties(unit.reloadable PROPERTIES LABELS "unit;reload")
             set_tests_properties(integration.tls_testbed PROPERTIES LABELS "integration;tls")
 
@@ -506,6 +573,50 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
         endif()
     endif()
 ENDIF()
+
+option(SMITHPROXY_FUZZING "Build Clang libFuzzer targets" OFF)
+if(SMITHPROXY_FUZZING)
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "SMITHPROXY_FUZZING requires Clang/libFuzzer")
+    endif()
+
+    function(smithproxy_fuzzer target)
+        target_compile_options(${target} PRIVATE
+                -fsanitize=fuzzer,address,undefined
+                -fno-omit-frame-pointer)
+        target_link_options(${target} PRIVATE
+                -fsanitize=fuzzer,address,undefined
+                -fno-omit-frame-pointer)
+    endfunction()
+
+    # socle is compiled as a support library for the state-machine harness.
+    # Clang 21 diagnoses its legacy dependent-name spelling as an error under
+    # the repository-wide -Werror policy, while older Clang and GCC accept it.
+    foreach(support_target socle_common_lib socle_lib)
+        if(TARGET ${support_target})
+            target_compile_options(${support_target} PRIVATE
+                    -Wno-error=missing-template-arg-list-after-template-kw)
+        endif()
+    endforeach()
+
+    add_executable(quic_wire_fuzzer
+            src/proxy/quic/wire.cpp
+            src/proxy/quic/fuzz/wire_fuzzer.cpp)
+    smithproxy_fuzzer(quic_wire_fuzzer)
+
+    add_executable(multiflow_fuzzer
+            src/proxy/multiflow/mfflowcom.cpp
+            src/proxy/multiflow/mfproxy.cpp
+            src/proxy/multiflow/fuzz/multiflow_fuzzer.cpp)
+    target_link_libraries(multiflow_fuzzer socle_lib pthread)
+    smithproxy_fuzzer(multiflow_fuzzer)
+
+    add_executable(quic_lifecycle_fuzzer
+            src/proxy/quic/openssl.cpp
+            src/proxy/quic/fuzz/lifecycle_fuzzer.cpp)
+    target_link_libraries(quic_lifecycle_fuzzer socle_lib pthread crypto ssl)
+    smithproxy_fuzzer(quic_lifecycle_fuzzer)
+endif()
 
 option(SMITHPROXY_TLS_FUZZING "Build Clang TLS libFuzzer targets" OFF)
 if(SMITHPROXY_TLS_FUZZING)
@@ -578,7 +689,7 @@ if((CMAKE_SYSTEM_PROCESSOR MATCHES "arm") OR (CMAKE_SYSTEM_PROCESSOR STREQUAL "a
     target_link_libraries (smithproxy atomic)
 endif()
 
-target_link_libraries(smithproxy smithproxy_libcli socle_lib pthread ssl crypto rt ${UNWIND_LIB})
+target_link_libraries(smithproxy smithproxy_libcli smithproxy_qpack socle_lib pthread ssl crypto rt ${UNWIND_LIB})
 
 if("${USE_LMHPP}" STREQUAL "Y")
     target_link_libraries(smithproxy microhttpd)

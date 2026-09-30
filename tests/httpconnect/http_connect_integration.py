@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import os
 import pathlib
 import socket
 import ssl
@@ -36,6 +37,12 @@ def system_nameserver():
         if len(fields) == 2 and fields[0] == "nameserver":
             return fields[1]
     raise RuntimeError("no nameserver found in /etc/resolv.conf")
+
+
+def process_env(runtime, pid_name="smithproxy.pid"):
+    env = os.environ.copy()
+    env["SMITHPROXY_PID_FILE"] = str(runtime / pid_name)
+    return env
 
 
 class EchoOrigin:
@@ -114,7 +121,7 @@ class TlsEchoOrigin:
 
 
 def make_config(source, destination, worktree, runtime, listener_port, cli_port,
-                reject_tcp=False):
+                reject_tcp=False, nat_none=True):
     config = source.read_text()
     replacements = {
         "accept_tproxy = TRUE;": "accept_tproxy = FALSE;",
@@ -147,6 +154,12 @@ def make_config(source, destination, worktree, runtime, listener_port, cli_port,
         if position < 0:
             raise RuntimeError("configuration fixture has no TCP accept policy")
         config = config[:position] + 'action = "deny";' + config[position + len(action):]
+    if nat_none:
+        nat = 'nat = "auto";'
+        position = config.rfind(nat)
+        if position < 0:
+            raise RuntimeError("configuration fixture has no TCP NAT policy")
+        config = config[:position] + 'nat = "none";' + config[position + len(nat):]
     destination.write_text(config)
 
 
@@ -273,6 +286,7 @@ def run(args):
         process = subprocess.Popen(
             [str(executable), "--config-file", str(config), "--debug"],
             cwd=worktree,
+            env=process_env(runtime),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -344,6 +358,11 @@ def run(args):
                 if not response.startswith(b"HTTP/1.1 502 Bad Gateway\r\n"):
                     raise RuntimeError(
                         f"unavailable upstream did not return 502: {response!r}")
+
+            if process.poll() is not None:
+                raise RuntimeError(
+                    f"smithproxy exited after an invalid CONNECT session: {process.returncode}")
+            check_plain_tunnel(listener_port, "127.0.0.1", EchoOrigin())
         finally:
             process.terminate()
             try:
@@ -361,6 +380,7 @@ def run(args):
         reject_process = subprocess.Popen(
             [str(executable), "--config-file", str(reject_config), "--debug"],
             cwd=worktree,
+            env=process_env(runtime, "smithproxy-reject.pid"),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,

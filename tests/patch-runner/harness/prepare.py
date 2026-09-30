@@ -31,6 +31,7 @@ internal_api_port = os.environ.get('SMITHPROXY_API_PORT', '55555')
 if not internal_api_port.isdigit() or not 1025 <= int(internal_api_port) < 65535:
     raise ValueError('SMITHPROXY_API_PORT must be an unprivileged TCP port')
 text = (source/'etc/smithproxy.cfg').read_text()
+quic_test = os.environ.get('QUIC_TEST') == '1'
 if os.environ.get('POLICY_TEST') == '1':
     port_objects = '''
     test_9996 = { start = 9996; end = 9996; };
@@ -51,6 +52,49 @@ if os.environ.get('POLICY_TEST') == '1':
 '''
     text, count = re.subn(r'(policy\s*=\s*\()', r'\1\n' + policy_cases, text, count=1)
     if port_count != 1 or count != 1: raise RuntimeError('cannot inject policy suite objects/rules')
+if quic_test:
+    if os.environ.get('QUIC_LAB') != '1':
+        raise RuntimeError('QUIC_TEST requires QUIC_LAB=1')
+    text, port_count = re.subn(
+        r'(port_objects\s*=\s*\{)',
+        r'\1\n    quic_runner_443 = { start = 443; end = 443; };',
+        text, count=1,
+    )
+    profile = '''
+    quic_runner = {
+        write_payload = TRUE;
+        write_format = "pcap_single";
+        write_limit_client = 0;
+        write_limit_server = 0;
+    }
+'''
+    text, profile_count = re.subn(
+        r'(content_profiles\s*=\s*\{)', r'\1\n' + profile,
+        text, count=1,
+    )
+    rule = '''
+    {
+        name = "runner-quic-udp-capture";
+        proto = "udp";
+        src = [ "any" ];
+        sport = [ "all" ];
+        dst = [ "any" ];
+        dport = [ "quic_runner_443" ];
+        tls_profile = "default";
+        detection_profile = "detect";
+        content_profile = "quic_runner";
+        action = "accept";
+        nat = "auto";
+        routing = "none";
+    },
+'''
+    text, policy_count = re.subn(
+        r'(policy\s*=\s*\()', r'\1\n' + rule,
+        text, count=1,
+    )
+    if port_count != 1 or profile_count != 1 or policy_count != 1:
+        raise RuntimeError('cannot inject QUIC runner policy and capture profile')
+
 if os.environ.get('ROUTING_TEST') == '1':
     address_objects = '''
     route_backend4_a = { type = 0; cidr = "198.18.20.2/32"; };
@@ -104,6 +148,11 @@ text = text.replace('accept_redirect = TRUE','accept_redirect = FALSE').replace(
 if os.environ.get('ROUTING_TEST') == '1':
     text = text.replace('accept_socks = FALSE', 'accept_socks = TRUE')
 text = re.sub(r'(plaintext_workers|ssl_workers|udp_workers) = 0',r'\1 = 1',text)
+if os.environ.get('QUIC_LAB') == '1':
+    # QUIC has no main-thread fallback: zero workers leaves the configured
+    # port without a listener. Keep the isolated H3 lab deterministic with a
+    # single worker; production deployments can scale this independently.
+    text = text.replace('quic_workers = -1', 'quic_workers = 1')
 text = re.sub(r'\s*auth_profile = "resolve";', '', text)
 text = text.replace('nameservers = [ "8.8.8.8", "8.8.4.4" ]','nameservers = [ "198.18.20.2" ]')
 gre_capture_dst = os.environ.get('GRE_CAPTURE_DST')
@@ -111,13 +160,16 @@ if gre_capture_dst:
     if not re.fullmatch(r'[0-9A-Fa-f:.]+', gre_capture_dst):
         raise ValueError('GRE_CAPTURE_DST must be an IP address')
     text, remote_count = re.subn(
-        r'(remote\s*=\s*\{\s*enabled\s*=\s*)false(\s*tun_type\s*=\s*"gre"\s*tun_dst\s*=\s*)"[^"]+"',
+        r'(remote\s*=\s*\{\s*enabled\s*=\s*)false'
+        r'([^{}]*?tun_type\s*=\s*"gre"[^{}]*?tun_dst\s*=\s*)"[^"]+"',
         rf'\g<1>true\g<2>"{gre_capture_dst}"', text, count=1, flags=re.IGNORECASE,
     )
-    text, content_count = re.subn(
-        r'(content_profiles\s*=\s*\{\s*default\s*=\s*\{\s*write_payload\s*=\s*)FALSE',
-        r'\g<1>TRUE', text, count=1, flags=re.IGNORECASE,
-    )
+    content_count = 1
+    if not quic_test:
+        text, content_count = re.subn(
+            r'(content_profiles\s*=\s*\{\s*default\s*=\s*\{\s*write_payload\s*=\s*)FALSE',
+            r'\g<1>TRUE', text, count=1, flags=re.IGNORECASE,
+        )
     checksum_count = udp_profile_count = 1
     if os.environ.get('CAPTURE_CALCULATE_CHECKSUMS') == '1':
         text, checksum_count = re.subn(

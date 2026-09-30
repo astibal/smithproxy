@@ -10,6 +10,7 @@ HTTP request over the upgraded connection.
 
 import argparse
 import dataclasses
+import os
 import pathlib
 import socket
 import ssl
@@ -193,6 +194,12 @@ def make_config(source, destination, worktree, runtime, socks_port, cli_port):
         if old not in config:
             raise RuntimeError(f"configuration fixture is missing {old!r}")
         config = config.replace(old, new, 1)
+
+    nat = 'nat = "auto";'
+    position = config.rfind(nat)
+    if position < 0:
+        raise RuntimeError("configuration fixture has no TCP NAT policy")
+    config = config[:position] + 'nat = "none";' + config[position + len(nat):]
     destination.write_text(config)
 
 
@@ -334,6 +341,7 @@ def run(args):
         process = subprocess.Popen(
             [str(executable), "--config-file", str(config), "--debug"],
             cwd=worktree,
+            env={**os.environ, "SMITHPROXY_PID_FILE": str(runtime / "smithproxy.pid")},
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,

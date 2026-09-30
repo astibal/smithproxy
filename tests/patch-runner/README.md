@@ -17,6 +17,9 @@ tests/patch-runner/test-patch.sh full --remote root@tt-px1 \
 
 # Start a lab for manual API/CLI work; Ctrl-C performs cleanup.
 tests/patch-runner/test-patch.sh --run --remote root@tt-px1
+
+# Run the focused end-to-end QUIC/H3 observability suite.
+tests/patch-runner/test-patch.sh sanity --suite quic --remote root@tt-px1
 ```
 
 Run `tests/patch-runner/test-patch.sh --help` for the authoritative option
@@ -93,7 +96,7 @@ keeping nine binary copies.
 suites remain available:
 
 ```text
-tls  policy  rtt  session-list
+tls  policy  rtt  session-list  quic
 ```
 
 Full-run sections can also be invoked directly:
@@ -105,7 +108,8 @@ corpus-regular  corpus-edge  corpus-insanity
 
 Every selected suite still performs API startup, no-bypass and cleanup checks.
 The four original focused suites (`tls`, `policy`, `rtt`, `session-list`) also
-retain the basic dual-stack HTTP/TLS/UDP smoke around their named check.
+retain the basic dual-stack HTTP/TLS/UDP smoke around their named check. The
+`quic` suite runs its dedicated HTTP/3 origin, diagnostics, PCAP and GRE checks.
 
 Examples:
 
@@ -209,6 +213,7 @@ Frequently useful `--env NAME=VALUE` controls:
 | Variable | Default | Meaning |
 |---|---:|---|
 | `TCP_CHURN_WAVES` / `TCP_CHURN_FLOWS` | `20` / `64` | TCP churn volume |
+| `TCP_CHURN_PARALLEL` | `64` | Maximum simultaneous TCP churn flows |
 | `TCP_CHURN_INTERVAL` / `TCP_CHURN_SETTLE` | `0.25` / `15` s | TCP timing |
 | `TCP_CHURN_TIMEOUT` | `3` s | Per-flow TCP timeout |
 | `UDP_CHURN_WAVES` / `UDP_CHURN_FLOWS` | `8` / `96` | UDP churn volume |
@@ -277,6 +282,11 @@ The lab host must be Linux with root privileges and provide:
 iproute2 (ip, ss)  nftables  socat  util-linux (setsid, unshare, mount)
 tcpdump  curl  netcat  OpenSSL  Python 3  coreutils (timeout)
 ```
+
+The QUIC suite additionally needs Python `aioquic`, `tshark`, and an
+HTTP/3-enabled curl installation. Set `CURL_HTTP3_PREFIX` to its prefix; the
+runner copies that runtime bundle into the isolated lab. The default is the
+sibling directory `../curl-http3`.
 
 The runner creates disposable namespaces and veth pairs but does not install
 host iptables/nftables traffic-redirection rules. Cleanup verifies that its own
