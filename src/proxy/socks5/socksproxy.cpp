@@ -347,10 +347,17 @@ bool ExplicitProxy::send_pending_connect_response() {
     pending_connect_response_offset_ = 0;
     if(close_after_connect_response_) {
         state().dead(true);
-    } else {
+    } else if(dynamic_cast<SSLCom*>(client->com()) == nullptr) {
+        // Plain explicit tunnels have no TLS peer handshake which could
+        // release them later.
         client->waiting_for_peercom(false);
         client->com()->set_monitor(client->socket());
     }
+    // Keep TLS clients paused after a successful CONNECT response.  The
+    // upstream side must first peek the ClientHello, validate the origin
+    // certificate and install the spoofed certificate.  That path releases
+    // the client when the certificate is ready; doing it here lets SSL_accept
+    // race ahead with the default certificate and an untested verify status.
     return true;
 }
 
