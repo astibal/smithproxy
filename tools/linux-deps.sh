@@ -52,7 +52,7 @@ install_apt_dependencies() {
 install_apk_dependencies() {
     apk add --no-cache \
         ca-certificates wget curl bash \
-        git g++ cmake make musl-dev linux-headers \
+        git g++ cmake make musl-dev linux-headers bsd-compat-headers \
         python3 python3-dev py3-cryptography py3-pyroute2 \
         libconfig-dev openssl-dev libunwind-dev libmicrohttpd-dev curl-dev \
         linux-pam-dev \
