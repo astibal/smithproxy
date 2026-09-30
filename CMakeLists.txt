@@ -466,6 +466,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
         )
         add_executable(sx_gtests_httpconnect
                 src/proxy/httpconnect/tests/httpconnectrequest_test.cpp
+                src/proxy/tests/explicitproxyport_test.cpp
                 src/proxy/httpconnect/httpconnectrequest.cpp
         )
 
