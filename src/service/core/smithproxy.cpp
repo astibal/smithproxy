@@ -857,6 +857,7 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
         CfgFactory::get()->load_db_prof_detection();
         CfgFactory::get()->load_db_prof_content();
         CfgFactory::get()->load_db_prof_tls();
+        CfgFactory::get()->load_db_prof_ssh();
         CfgFactory::get()->load_db_prof_alg_dns();
         CfgFactory::get()->load_db_prof_auth();
         CfgFactory::get()->load_db_routing();

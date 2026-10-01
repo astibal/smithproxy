@@ -62,6 +62,9 @@
 #include <proxy/filters/sinkhole.hpp>
 #include <proxy/filters/statsfilter.hpp>
 #include <proxy/filters/access_filter.hpp>
+#ifdef USE_LIBSSH
+#include <proxy/ssh/sshstream.hpp>
+#endif
 
 #include <inspect/dnsinspector.hpp>
 #include <inspect/pyinspector.hpp>
@@ -92,6 +95,9 @@ std::map<std::string, std::shared_ptr<CfgElement>>& CfgFactory::section_db(std::
     }
     else if(section == "tls_profiles" or section == "tls_profiles.[x]") {
         return db_prof_tls;
+    }
+    else if(section == "ssh_profiles" or section == "ssh_profiles.[x]") {
+        return db_prof_ssh;
     }
     else if(section == "alg_dns_profiles" or section == "alg_dns_profiles.[x]") {
         return db_prof_alg_dns;
@@ -249,6 +255,16 @@ std::shared_ptr<ProfileTls> CfgFactory::lookup_prof_tls (const char *name) {
         return std::dynamic_pointer_cast<ProfileTls>(db_prof_tls[name]);
     }    
     
+    return nullptr;
+}
+
+std::shared_ptr<ProfileSsh> CfgFactory::lookup_prof_ssh (const char *name) {
+    std::scoped_lock<std::recursive_mutex> l(lock_);
+
+    if(db_prof_ssh.find(name) != db_prof_ssh.end()) {
+        return std::dynamic_pointer_cast<ProfileSsh>(db_prof_ssh[name]);
+    }
+
     return nullptr;
 }
 
@@ -520,6 +536,14 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
     }
     else if(upgrade_to_num == 1039) {
         log.event(INF, "added settings.http_api.allow_api_header (for GET)");
+        return true;
+    }
+    else if(upgrade_to_num == 1040) {
+        if(not cfgapi.getRoot().exists("ssh_profiles")) {
+            cfgapi.getRoot().add("ssh_profiles", Setting::TypeGroup);
+        }
+        log.event(INF, "added ssh_profiles section");
+        log.event(INF, "added policy.[x].ssh_profile");
         return true;
     }
 
@@ -1658,6 +1682,7 @@ int CfgFactory::load_db_policy () {
                 std::string name_content;
                 std::string name_detection;
                 std::string name_tls;
+                std::string name_ssh;
                 std::string name_auth;
                 std::string name_alg_dns;
                 std::string name_script;
@@ -1711,6 +1736,23 @@ int CfgFactory::load_db_policy () {
                         _err("cfgapi_load_policy[#%d]: auth_profile '%s' is no longer supported", policy_index, name_auth.c_str());
                         soft_error = true;
                         war_event(policy_index, string_format("auth_profile removed: '%s'", name_auth.c_str()).c_str());
+                    }
+                }
+                if(load_if_exists(cur_object, "ssh_profile", name_ssh)) {
+                    auto ssh = lookup_prof_ssh(name_ssh.c_str());
+                    if(ssh) {
+                        ssh->usage_add(std::weak_ptr(rule));
+                        _dia("cfgapi_load_policy[#%d]: ssh profile %s",
+                             policy_index, name_ssh.c_str());
+                        rule->profile_ssh = ssh;
+                    }
+                    else if(!name_ssh.empty()) {
+                        _err("cfgapi_load_policy[#%d]: ssh profile %s cannot be loaded",
+                             policy_index, name_ssh.c_str());
+                        soft_error = true;
+                        war_event(policy_index,
+                                  string_format("ssh_profile not loaded: '%s'",
+                                                name_ssh.c_str()).c_str());
                     }
                 }
                 if(load_if_exists(cur_object, "alg_dns_profile", name_alg_dns)) {
@@ -2295,6 +2337,40 @@ int CfgFactory::load_db_prof_tls () {
     return num;
 }
 
+int CfgFactory::load_db_prof_ssh () {
+    std::scoped_lock<std::recursive_mutex> l(lock_);
+
+    int num = 0;
+    if (!cfgapi.getRoot().exists("ssh_profiles")) {
+        return num;
+    }
+
+    Setting& profiles = cfgapi.getRoot()["ssh_profiles"];
+    num = profiles.getLength();
+    for (int i = 0; i < num; ++i) {
+        Setting& item = profiles[i];
+        if (!item.getName()) continue;
+
+        std::string const name = item.getName();
+        if (name.rfind("__", 0) == 0) continue;
+
+        auto profile = std::make_shared<ProfileSsh>();
+        profile->element_name() = name;
+        if (!load_if_exists(item, "host_key", profile->host_key)
+            || profile->host_key.empty()) {
+            _err("load_db_prof_ssh: '%s': host_key not specified", name.c_str());
+            Log::get()->events().insert(
+                ERR, "CONFIG: ssh_profile '%s': host_key not specified", name.c_str());
+            LOAD_ERRORS = true;
+            continue;
+        }
+
+        db_prof_ssh[name] = profile;
+        _dia("load_db_prof_ssh: '%s': ok", name.c_str());
+    }
+    return num;
+}
+
 int CfgFactory::load_db_prof_alg_dns () {
     std::scoped_lock<std::recursive_mutex> l(lock_);
 
@@ -2599,6 +2675,14 @@ size_t CfgFactory::cleanup_db_prof_tls () {
     db_prof_tls.clear();
     
     return r;
+}
+
+size_t CfgFactory::cleanup_db_prof_ssh () {
+    std::scoped_lock<std::recursive_mutex> l(lock_);
+
+    auto const result = db_prof_ssh.size();
+    db_prof_ssh.clear();
+    return result;
 }
 
 size_t CfgFactory::cleanup_db_prof_alg_dns () {
@@ -3012,6 +3096,23 @@ int CfgFactory::policy_apply (baseHostCX *originator, MitmProxy *proxy, int matc
         if (pt and prof_tls_apply(originator, proxy, pt)) {
             pt_name = pt->element_name().c_str();
         }
+
+        if (rule && rule->profile_ssh) {
+#ifdef USE_LIBSSH
+            auto options = sx::ssh::transport_options{};
+            options.host_key = rule->profile_ssh->host_key;
+            if (!proxy->stage_stream_handler(
+                    std::make_unique<sx::ssh::stream_handler>(std::move(options)))) {
+                _err("Connection %s: cannot stage SSH stream handler",
+                     originator->full_name('L').c_str());
+                return -1;
+            }
+#else
+            _err("Connection %s: SSH profile requested but libssh support is not built",
+                 originator->full_name('L').c_str());
+            return -1;
+#endif
+        }
         
         /* Processing ALG : DNS*/
         if (p_alg_dns and prof_alg_dns_apply(originator, proxy, p_alg_dns)) {
@@ -3272,6 +3373,16 @@ bool CfgFactory::apply_config_change(std::string_view section) {
             ret = CfgFactory::get()->load_db_policy();
         }
     } else
+    if( 0 == section.find("ssh_profiles") ) {
+
+        CfgFactory::get()->cleanup_db_prof_ssh();
+        ret = CfgFactory::get()->load_db_prof_ssh();
+
+        if(ret) {
+            CfgFactory::get()->cleanup_db_policy();
+            ret = CfgFactory::get()->load_db_policy();
+        }
+    } else
     if( 0 == section.find("alg_dns_profiles") ) {
 
         CfgFactory::get()->cleanup_db_prof_alg_dns();
@@ -3476,6 +3587,7 @@ void CfgFactory::cleanup()
     cleanup_db_prof_content();
     cleanup_db_prof_detection();
     cleanup_db_prof_tls();
+    cleanup_db_prof_ssh();
     cleanup_db_prof_auth();
     cleanup_db_prof_alg_dns();
     cleanup_db_prof_script();
@@ -4458,6 +4570,12 @@ bool CfgFactory::_apply_new_entry(std::string const& section, std::string const&
             CfgFactory::get()->load_db_prof_tls();
         }
     }
+    else if(section == "ssh_profiles") {
+        if (CfgFactory::get()->new_ssh_profile(s, entry_name)) {
+            added = true;
+            CfgFactory::get()->load_db_prof_ssh();
+        }
+    }
     else if(section == "alg_dns_profiles") {
         if (CfgFactory::get()->new_alg_dns_profile(s, entry_name)) {
             added = true;
@@ -4963,6 +5081,8 @@ int CfgFactory::save_policy(Config& ex) const {
 
         if(pol->profile_tls)
             item.add("tls_profile", Setting::TypeString) = pol->profile_tls->element_name();
+        if(pol->profile_ssh)
+            item.add("ssh_profile", Setting::TypeString) = pol->profile_ssh->element_name();
         if(pol->profile_detection)
             item.add("detection_profile", Setting::TypeString) = pol->profile_detection->element_name();
         if(pol->profile_content)
@@ -4976,6 +5096,34 @@ int CfgFactory::save_policy(Config& ex) const {
     }
 
     return n_saved;
+}
+
+bool CfgFactory::new_ssh_profile(Setting& section, std::string const& name) const {
+    try {
+        Setting& item = section.add(name, Setting::TypeGroup);
+        item.add("host_key", Setting::TypeString) = "/etc/smithproxy/ssh_host_ed25519_key";
+        return true;
+    }
+    catch(libconfig::SettingException const& e) {
+        _war("cannot add new SSH profile %s: %s", name.c_str(), e.what());
+        return false;
+    }
+}
+
+int CfgFactory::save_ssh_profiles(Config& ex) const {
+    std::scoped_lock<std::recursive_mutex> l_(CfgFactory::lock());
+    Setting& profiles = ex.getRoot().add("ssh_profiles", Setting::TypeGroup);
+
+    int saved = 0;
+    for (auto const& [name, element]: db_prof_ssh) {
+        auto profile = std::dynamic_pointer_cast<ProfileSsh>(element);
+        if (!profile) continue;
+
+        Setting& item = profiles.add(name, Setting::TypeGroup);
+        item.add("host_key", Setting::TypeString) = profile->host_key;
+        ++saved;
+    }
+    return saved;
 }
 
 int save_signatures(Config& ex, const std::string& sigset) {
@@ -5353,6 +5501,9 @@ bool CfgFactory::save_config() const {
 
     n = save_tls_profiles(ex);
     _inf("%d tls_profiles", n);
+
+    n = save_ssh_profiles(ex);
+    _inf("%d ssh_profiles", n);
 
     n = save_alg_dns_profiles(ex);
     _inf("%d alg_dns_profiles", n);

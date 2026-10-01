@@ -157,6 +157,7 @@ std::string PolicyRule::to_string(int verbosity) const {
     };
     print_profile("auth", profile_auth);
     print_profile("tls", profile_tls);
+    print_profile("ssh", profile_ssh);
     print_profile("det", profile_detection);
     print_profile("cont", profile_content);
     print_profile("alg_dns", profile_alg_dns);

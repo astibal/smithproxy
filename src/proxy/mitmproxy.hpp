@@ -91,6 +91,7 @@ class MitmProxy : public baseProxy, public IOController {
     std::unique_ptr<socle::baseTrafficLogger> tlog_;
     std::unique_ptr<sx::traffic_log_adapter> traffic_log_adapter_;
     std::unique_ptr<sx::StreamHandler> stream_handler_;
+    bool stream_handler_attached_ = false;
     
     std::unique_ptr<std::vector<ProfileContentRule>> content_rule_; //save some space and store it as a pointer. Init it only when needed and delete in dtor.
     int matched_policy_ = -1;
@@ -173,7 +174,12 @@ public:
     // Transfer exclusive stream I/O to a protocol-specific handler. The
     // handler is intentionally generic; MitmProxy does not know about SSH,
     // TLS, or any other concrete protocol implementation.
+    bool stage_stream_handler(std::unique_ptr<sx::StreamHandler> handler);
+    bool activate_stream_handler();
     bool adopt_stream_handler(std::unique_ptr<sx::StreamHandler> handler);
+    [[nodiscard]] bool stream_handler_attached() const noexcept {
+        return stream_handler_attached_;
+    }
     [[nodiscard]] sx::StreamHandler* stream_handler() noexcept {
         return stream_handler_.get();
     }
@@ -240,6 +246,7 @@ public:
     std::string to_string(int verbosity) const override;
     std::string to_connection_label(bool force_resolve = false) const;
     std::string to_connection_ID() const;
+    [[nodiscard]] std::string_view session_protocol() const noexcept;
     std::optional<std::string> get_application() const;
 
     mutable bool wh_start = false;

@@ -269,6 +269,7 @@ void register_smithproxy_cli2_commands(libcli2::Cli& cli, std::string subscriber
     section_command(cli, "content_profiles", "Show content profiles");
     section_command(cli, "tls_ca", "Show TLS certificate authorities");
     section_command(cli, "tls_profiles", "Show TLS profiles");
+    section_command(cli, "ssh_profiles", "Show SSH profiles");
     section_command(cli, "alg_dns_profiles", "Show DNS ALG profiles");
     section_command(cli, "auth_profiles", "Show authentication profiles");
     section_command(cli, "starttls_signatures", "Show STARTTLS signatures");

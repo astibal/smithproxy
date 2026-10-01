@@ -203,6 +203,11 @@ namespace jsonize {
 
         ret["oid"] = what->to_connection_ID();
 
+        if (auto const protocol = what->session_protocol(); !protocol.empty()) {
+            for (auto& endpoint : left) endpoint["com"] = protocol;
+            for (auto& endpoint : right) endpoint["com"] = protocol;
+        }
+
         ret["left"] = left;
         ret["right"] = right;
 

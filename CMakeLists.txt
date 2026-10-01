@@ -433,6 +433,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/proxy/quic/tests/openssl_tests.cpp
                 src/proxy/ssh/sshprotocol.cpp
                 src/proxy/ssh/tests/sshprotocol_test.cpp
+                src/proxy/tests/streamhandler_test.cpp
                 src/service/quic/quicservice.cpp
                 src/service/quic/tests/quicservice_tests.cpp
 

@@ -30,7 +30,11 @@ bool stream_handler::attach(MitmProxy& proxy) {
         return false;
     }
 
-    transport_ = std::make_unique<mitm_transport>(options_);
+    auto options = options_;
+    if (options.upstream_host.empty()) {
+        options.upstream_host = right->host();
+    }
+    transport_ = std::make_unique<mitm_transport>(std::move(options));
     if (!transport_->attach(left->real_socket(), right->real_socket())) {
         final_error_ = transport_->error();
         transport_.reset();

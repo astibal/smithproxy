@@ -23,6 +23,7 @@ public:
     void shutdown() noexcept override;
 
     [[nodiscard]] bool committed() const noexcept override { return committed_; }
+    [[nodiscard]] std::string_view session_protocol() const noexcept override { return "ssh"; }
     [[nodiscard]] std::string state() const override;
     [[nodiscard]] std::string error() const override;
 

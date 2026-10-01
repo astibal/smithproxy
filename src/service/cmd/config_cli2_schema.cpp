@@ -36,7 +36,7 @@ std::string root_section(std::string_view path) {
 ConfigCollectionKind collection_kind(std::string_view path) {
     static const std::set<std::string, std::less<>> named = {
         "proto_objects", "port_objects", "address_objects", "detection_profiles", "content_profiles",
-        "tls_ca", "tls_profiles", "alg_dns_profiles", "auth_profiles", "routing",
+        "tls_ca", "tls_profiles", "ssh_profiles", "alg_dns_profiles", "auth_profiles", "routing",
     };
     if (path == "policy" || signature_section(path) || content_rules_section(path) || signature_flow_section(path))
         return ConfigCollectionKind::ordered_objects;

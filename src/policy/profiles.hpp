@@ -306,16 +306,29 @@ struct ProfileAuth;
 struct ProfileAlgDns;
 struct ProfileScript;
 struct ProfileRouting;
+struct ProfileSsh;
 class MitmProxy;
 
 struct ProfileList {
     std::shared_ptr<ProfileContent> profile_content = nullptr;
     std::shared_ptr<ProfileDetection> profile_detection = nullptr;
     std::shared_ptr<ProfileTls> profile_tls = nullptr;
+    std::shared_ptr<ProfileSsh> profile_ssh = nullptr;
     std::shared_ptr<ProfileAuth> profile_auth = nullptr;
     std::shared_ptr<ProfileAlgDns> profile_alg_dns = nullptr;
     std::shared_ptr<ProfileScript> profile_script = nullptr;
     std::shared_ptr<ProfileRouting> profile_routing = nullptr;
+};
+
+struct ProfileSsh : public CfgElement {
+    std::string host_key;
+
+    std::string to_string(int verbosity) const override {
+        return string_format("ProfileSsh: name=%s host_key=%s",
+                             element_name().c_str(), host_key.c_str());
+    }
+
+    TYPENAME_OVERRIDE("ProfileSsh")
 };
 struct ProfileSubAuth : public ProfileList, public CfgElement {
 };

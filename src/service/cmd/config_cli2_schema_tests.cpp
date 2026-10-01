@@ -12,7 +12,7 @@ TEST_P(NamedCollectionClassification, IsNamedObjectCollection) {
 }
 INSTANTIATE_TEST_SUITE_P(AllSmithproxyNamedCollections, NamedCollectionClassification,
     testing::Values("proto_objects", "port_objects", "address_objects", "detection_profiles",
-                    "content_profiles", "tls_ca", "tls_profiles", "alg_dns_profiles",
+                    "content_profiles", "tls_ca", "tls_profiles", "ssh_profiles", "alg_dns_profiles",
                     "auth_profiles", "routing"));
 
 class OrderedCollectionClassification : public testing::TestWithParam<const char*> {};

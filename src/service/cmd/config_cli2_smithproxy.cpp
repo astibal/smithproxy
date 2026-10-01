@@ -33,6 +33,7 @@ bool reload_section(const std::string& section) {
     if (section == "content_profiles") { f->cleanup_db_prof_content(); return f->load_db_prof_content() >= 0; }
     if (section == "tls_ca") { f->cleanup_db_tls_ca(); return f->load_db_tls_ca() >= 0; }
     if (section == "tls_profiles") { f->cleanup_db_prof_tls(); return f->load_db_prof_tls() >= 0; }
+    if (section == "ssh_profiles") { f->cleanup_db_prof_ssh(); return f->load_db_prof_ssh() >= 0; }
     if (section == "alg_dns_profiles") { f->cleanup_db_prof_alg_dns(); return f->load_db_prof_alg_dns() >= 0; }
     if (section == "auth_profiles") { f->cleanup_db_prof_auth(); return f->load_db_prof_auth() >= 0; }
     if (section == "routing") { f->cleanup_db_routing(); return f->load_db_routing() >= 0; }

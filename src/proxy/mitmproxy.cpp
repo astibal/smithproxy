@@ -74,21 +74,34 @@ MitmProxy::MitmProxy(baseCom* c): baseProxy(c), start_stop_tls_(*this) {
     total_sessions()++;
 }
 
-bool MitmProxy::adopt_stream_handler(std::unique_ptr<sx::StreamHandler> handler) {
+bool MitmProxy::stage_stream_handler(std::unique_ptr<sx::StreamHandler> handler) {
     if (!handler || stream_handler_) {
-        return false;
-    }
-
-    tap();
-    if (!handler->attach(*this)) {
-        handler->shutdown();
-        state().dead(true);
-        shutdown();
         return false;
     }
 
     stream_handler_ = std::move(handler);
     return true;
+}
+
+bool MitmProxy::activate_stream_handler() {
+    if (!stream_handler_ || stream_handler_attached_) {
+        return false;
+    }
+
+    tap();
+    if (!stream_handler_->attach(*this)) {
+        stream_handler_->shutdown();
+        state().dead(true);
+        shutdown();
+        return false;
+    }
+
+    stream_handler_attached_ = true;
+    return true;
+}
+
+bool MitmProxy::adopt_stream_handler(std::unique_ptr<sx::StreamHandler> handler) {
+    return stage_stream_handler(std::move(handler)) && activate_stream_handler();
 }
 
 void MitmProxy::toggle_tlog () {
@@ -262,7 +275,11 @@ std::string MitmProxy::to_connection_label(bool force_resolve) const {
     ss << "+";
     right ? ss << right->name(iINF, force_resolve) : ss << "0:0";
 
-    return ss.str();
+    return sx::session_protocol_names(ss.str(), session_protocol());
+}
+
+std::string_view MitmProxy::session_protocol() const noexcept {
+    return stream_handler_ ? stream_handler_->session_protocol() : std::string_view{};
 }
 
 
@@ -383,7 +400,7 @@ std::string MitmProxy::to_string(int verbosity) const {
         }        
     }
     
-    return r.str();
+    return sx::session_protocol_names(r.str(), session_protocol());
 }
 
 
@@ -409,7 +426,17 @@ int MitmProxy::handle_sockets_once(baseCom* xcom) {
 
     webhook_session_start();
 
-    if (stream_handler_ && !state().dead()) {
+    // A policy stages the handler before the non-blocking upstream connect.
+    // Activate it at the first worker cycle where the upstream is connected,
+    // before baseProxy gets an opportunity to consume either SSH banner.
+    if (stream_handler_ && !stream_handler_attached_ && !state().dead()) {
+        auto* right = first_right();
+        if (right && right->is_connected() && !activate_stream_handler()) {
+            return 0;
+        }
+    }
+
+    if (stream_handler_attached_ && !state().dead()) {
         auto const result = stream_handler_->drive();
         using result_t = sx::StreamHandler::result;
 

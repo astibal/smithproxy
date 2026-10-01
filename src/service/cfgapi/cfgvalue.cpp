@@ -576,6 +576,16 @@ void CfgValueHelp::init() {
                 return CfgFactory::get()->keys_of_db_prof_tls();
             });
 
+    add("policy.[x].ssh_profile", "SSH MITM options")
+            .may_be_empty(true)
+            .value_filter(is_in_vector([]() -> std::vector<std::string> { return CfgFactory::get()->keys_of_db_prof_ssh(); },"must be in ssh_profiles"))
+            .suggestion_generator([](std::string const& section, std::string const& variable) -> std::vector<std::string> {
+                return CfgFactory::get()->keys_of_db_prof_ssh();
+            });
+
+    add("ssh_profiles.[x].host_key", "private host key presented by the SSH MITM server")
+            .may_be_empty(false);
+
     add("policy.[x].detection_profile", "detection options")
             .may_be_empty(true)
             .value_filter(is_in_vector([]() -> std::vector<std::string> { return CfgFactory::get()->keys_of_db_prof_detection(); },"must be in detection_profiles"))

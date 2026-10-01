@@ -201,7 +201,7 @@ class CfgFactory : public CfgFactoryBase {
 public:
     // Each version bump implies a config upgrade - we start on 1000
     // see upgrade_schema() - control config upgrade
-    constexpr static inline const int SCHEMA_VERSION  = 1039;
+    constexpr static inline const int SCHEMA_VERSION  = 1040;
 
     static inline std::atomic_bool LOAD_ERRORS = false;
 
@@ -315,6 +315,7 @@ public:
     DB_MAP(std::shared_ptr<CfgElement>, db_prof_detection);
     DB_MAP(std::shared_ptr<CfgElement>, db_prof_content);
     DB_MAP(std::shared_ptr<CfgElement>, db_prof_tls);
+    DB_MAP(std::shared_ptr<CfgElement>, db_prof_ssh);
     DB_MAP(std::shared_ptr<CfgElement>, db_prof_tls_ca);
     DB_MAP(std::shared_ptr<CfgElement>, db_prof_auth);
     DB_MAP(std::shared_ptr<CfgElement>, db_prof_alg_dns);
@@ -413,6 +414,7 @@ public:
     std::shared_ptr<ProfileDetection> lookup_prof_detection (const char *name);
     std::shared_ptr<ProfileContent> lookup_prof_content (const char *name);
     std::shared_ptr<ProfileTls> lookup_prof_tls (const char *name);
+    std::shared_ptr<ProfileSsh> lookup_prof_ssh (const char *name);
     std::shared_ptr<ProfileAuth> lookup_prof_auth (const char *name);
     std::shared_ptr<ProfileAlgDns> lookup_prof_alg_dns (const char *name);
     std::shared_ptr<ProfileScript> lookup_prof_script (const char *name);
@@ -441,6 +443,7 @@ public:
     int  load_db_prof_detection ();
     int  load_db_tls_ca();
     int  load_db_prof_tls ();
+    int  load_db_prof_ssh ();
     int  load_db_prof_auth ();
     int  load_db_prof_alg_dns ();
     int  load_db_routing ();
@@ -483,6 +486,9 @@ public:
     bool new_tls_profile(libconfig::Setting& ex, std::string const& name) const;
     int save_tls_profiles(libconfig::Config& ex) const;
 
+    bool new_ssh_profile(libconfig::Setting& ex, std::string const& name) const;
+    int save_ssh_profiles(libconfig::Config& ex) const;
+
     bool new_alg_dns_profile(libconfig::Setting& ex, std::string const& name) const;
     int save_alg_dns_profiles(libconfig::Config& ex) const;
 
@@ -511,6 +517,7 @@ public:
     size_t cleanup_db_prof_detection ();
     size_t cleanup_db_tls_ca ();
     size_t cleanup_db_prof_tls ();
+    size_t cleanup_db_prof_ssh ();
     size_t cleanup_db_prof_auth ();
     size_t cleanup_db_prof_alg_dns ();
     size_t cleanup_db_prof_script ();
