@@ -92,6 +92,7 @@ public:
     bool upstream_connected();
     parse_status feed_server_identification(std::string_view bytes);
     parse_status feed_client_identification(std::string_view bytes);
+    bool key_exchange_complete();
     void fail(std::string reason);
 
 private:

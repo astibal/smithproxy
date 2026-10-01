@@ -215,6 +215,10 @@ parse_status handshake_fsm::feed_client_identification(std::string_view bytes) {
         client_parser_, status, mitm_state::key_exchange);
 }
 
+bool handshake_fsm::key_exchange_complete() {
+    return move_to(mitm_state::authentication);
+}
+
 void handshake_fsm::fail(std::string reason) {
     error_ = std::move(reason);
     if (state_ != mitm_state::closed) {

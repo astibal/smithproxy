@@ -708,7 +708,14 @@ target_link_libraries(smithproxy smithproxy_libcli smithproxy_qpack socle_lib pt
 
 if(SMITHPROXY_SSH_MITM)
     target_compile_definitions(smithproxy PRIVATE USE_LIBSSH)
+    target_sources(smithproxy PRIVATE src/proxy/ssh/sshmitm.cpp)
     target_link_libraries(smithproxy LibSSH::LibSSH)
+    if(TARGET sx_gtests)
+        target_sources(sx_gtests PRIVATE
+                src/proxy/ssh/sshmitm.cpp
+                src/proxy/ssh/tests/sshmitm_test.cpp)
+        target_link_libraries(sx_gtests LibSSH::LibSSH)
+    endif()
 endif()
 
 if("${USE_LMHPP}" STREQUAL "Y")
