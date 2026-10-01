@@ -48,6 +48,7 @@ inline std::string session_protocol_names(std::string text, std::string_view pro
         std::size_t pos = 0;
         while ((pos = text.find(transport, pos)) != std::string::npos) {
             const bool endpoint_boundary = pos == 0 || text[pos - 1] == ':'
+                                           || text[pos - 1] == '<'
                                            || text[pos - 1] == '+' || text[pos - 1] == ' ';
             if (endpoint_boundary) {
                 text.replace(pos, transport.size(), protocol);
