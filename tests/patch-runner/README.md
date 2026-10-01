@@ -232,6 +232,9 @@ Frequently useful `--env NAME=VALUE` controls:
 | `SESSION_LIST_CONNECTIONS` / `SESSION_LIST_SAMPLES` | `256` / `24` | Loaded CLI probe size |
 | `SESSION_LIST_P95_LIMIT_MS` / `SESSION_LIST_MAX_LIMIT_MS` | `1000` / `3000` | CLI snapshot gates |
 | `TLS_WRITE_CHUNK` | `20480` | Maximum plaintext bytes offered to one `SSL_write()`; intended for comparative transfer tests |
+| `SSL_USE_KTLS` | config default | Request OpenSSL KTLS for focused enabled/disabled comparisons |
+| `KTLS_PROBE_TEST` / `KTLS_EXPECT_ACTIVE` | `0` / `any` | Hold a TLS flow, record both legs' effective BIO KTLS state, optionally require `on` or `off` |
+| `TLS_TEST_VERSION` / `TLS_TEST_CIPHER` | unset | Pin both legs to TLS 1.2/1.3 and, for TLS 1.2, pin the cipher for focused KTLS checks |
 
 `sanity` and `full` enforce all RTT gates. `benchmark` records the same metrics
 without latency failures and additionally measures a native origin-namespace

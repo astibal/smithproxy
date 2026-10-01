@@ -241,6 +241,11 @@ void CfgValueHelp::init() {
             .may_be_empty(false)
             .value_filter(CfgValue::VALUE_BOOL);
 
+    add("settings.ssl_use_ktls", "request kernel TLS record offload")
+            .help_quick("<bool> opt in on hosts with supported TLS hardware offload (default: false)")
+            .may_be_empty(false)
+            .value_filter(CfgValue::VALUE_BOOL);
+
 
     add("settings.ssl_ocsp_status_ttl", "obsoleted - hardcoded TTL for OCSP response validity")
             .may_be_empty(false)

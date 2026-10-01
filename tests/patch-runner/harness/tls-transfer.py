@@ -9,6 +9,14 @@ import tempfile
 import time
 
 
+def process_cpu_seconds(pid):
+    if pid is None:
+        return None
+    fields = pathlib.Path(f"/proc/{pid}/stat").read_text().split()
+    ticks = int(fields[13]) + int(fields[14])
+    return ticks / float(__import__("os").sysconf("SC_CLK_TCK"))
+
+
 def curl_command(args, mode, payload_file, run):
     url = f"https://origin.runner.lab/bulk/{args.bytes}?run={run}"
     command = [
@@ -18,6 +26,11 @@ def curl_command(args, mode, payload_file, run):
         "--resolve", f"origin.runner.lab:443:{args.host}",
         "-H", "Expect:", "-o", "/dev/null",
     ]
+    if args.tls_version:
+        command += [f"--tlsv{args.tls_version}", "--tls-max", args.tls_version]
+    if args.cipher:
+        option = "--tls13-ciphers" if args.tls_version == "1.3" else "--ciphers"
+        command += [option, args.cipher]
     if mode == "upload":
         command += ["--data-binary", f"@{payload_file}"]
     command.append(url)
@@ -26,6 +39,7 @@ def curl_command(args, mode, payload_file, run):
 
 def transfer_once(args, mode, concurrency, payload_file, run):
     command = curl_command(args, mode, payload_file, run)
+    cpu_started = process_cpu_seconds(args.pid)
     started = time.monotonic()
     with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
         results = list(pool.map(
@@ -33,6 +47,8 @@ def transfer_once(args, mode, concurrency, payload_file, run):
                                      stderr=subprocess.PIPE, text=True),
             range(concurrency)))
     elapsed = time.monotonic() - started
+    cpu_elapsed = (process_cpu_seconds(args.pid) - cpu_started
+                   if cpu_started is not None else None)
     failures = [f"flow={index}: {result.stderr.strip()}"
                 for index, result in enumerate(results) if result.returncode]
     if failures:
@@ -40,7 +56,11 @@ def transfer_once(args, mode, concurrency, payload_file, run):
             f"mode={mode} concurrency={concurrency} run={run}: "
             + "; ".join(failures))
     mib = args.bytes * concurrency / (1024 * 1024)
-    return {"seconds": elapsed, "mib_per_second": mib / elapsed}
+    result = {"seconds": elapsed, "mib_per_second": mib / elapsed}
+    if cpu_elapsed is not None:
+        result["proxy_cpu_seconds"] = cpu_elapsed
+        result["proxy_cpu_seconds_per_gib"] = cpu_elapsed / (mib / 1024)
+    return result
 
 
 def main():
@@ -51,6 +71,10 @@ def main():
     parser.add_argument("--repeats", type=int, default=5)
     parser.add_argument("--concurrency", default="1,4,16")
     parser.add_argument("--timeout", type=int, default=120)
+    parser.add_argument("--pid", type=int,
+                        help="Smithproxy PID used for process CPU accounting")
+    parser.add_argument("--tls-version", choices=("1.2", "1.3"))
+    parser.add_argument("--cipher")
     args = parser.parse_args()
     concurrencies = [int(value) for value in args.concurrency.split(",")]
 
@@ -72,14 +96,22 @@ def main():
                 samples = [transfer_once(args, mode, concurrency, payload_file, run)
                            for run in range(args.repeats)]
                 rates = [sample["mib_per_second"] for sample in samples]
-                output["results"].append({
+                result = {
                     "mode": mode,
                     "concurrency": concurrency,
                     "samples": samples,
                     "median_mib_per_second": statistics.median(rates),
                     "min_mib_per_second": min(rates),
                     "max_mib_per_second": max(rates),
-                })
+                }
+                cpu_rates = [sample["proxy_cpu_seconds_per_gib"]
+                             for sample in samples
+                             if "proxy_cpu_seconds_per_gib" in sample]
+                if cpu_rates:
+                    result["median_proxy_cpu_seconds_per_gib"] = statistics.median(cpu_rates)
+                    result["min_proxy_cpu_seconds_per_gib"] = min(cpu_rates)
+                    result["max_proxy_cpu_seconds_per_gib"] = max(cpu_rates)
+                output["results"].append(result)
         print(json.dumps(output, indent=2, sort_keys=True))
 
 

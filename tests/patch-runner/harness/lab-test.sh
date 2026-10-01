@@ -37,12 +37,14 @@ PPLAY_SUITE4_PID=
 PPLAY_SUITE6_PID=
 STARTTLS_SERVER_PID=
 TLS_EVASION_SERVER_PID=
+KTLS_PROBE_PID=
 ROUTING_SERVER_PID=
 CAPTURE_TEST=${CAPTURE_TEST:-0}
 CAPTURE_MATRIX_TEST=${CAPTURE_MATRIX_TEST:-0}
 RTT_TEST=${RTT_TEST:-0}
 TLS_SUITE_TEST=${TLS_SUITE_TEST:-0}
 TLS_TRANSFER_TEST=${TLS_TRANSFER_TEST:-0}
+KTLS_PROBE_TEST=${KTLS_PROBE_TEST:-0}
 STARTTLS_SUITE_TEST=${STARTTLS_SUITE_TEST:-0}
 POLICY_TEST=${POLICY_TEST:-0}
 ROUTING_TEST=${ROUTING_TEST:-0}
@@ -94,6 +96,8 @@ cleanup() {
     [[ -z $STARTTLS_SERVER_PID ]] || wait "$STARTTLS_SERVER_PID" 2>/dev/null || true
     [[ -z $TLS_EVASION_SERVER_PID ]] || kill "$TLS_EVASION_SERVER_PID" 2>/dev/null || true
     [[ -z $TLS_EVASION_SERVER_PID ]] || wait "$TLS_EVASION_SERVER_PID" 2>/dev/null || true
+    [[ -z $KTLS_PROBE_PID ]] || kill "$KTLS_PROBE_PID" 2>/dev/null || true
+    [[ -z $KTLS_PROBE_PID ]] || wait "$KTLS_PROBE_PID" 2>/dev/null || true
     [[ -z $ROUTING_SERVER_PID ]] || kill "$ROUTING_SERVER_PID" 2>/dev/null || true
     [[ -z $ROUTING_SERVER_PID ]] || wait "$ROUTING_SERVER_PID" 2>/dev/null || true
     ip link del "$IN_IF" 2>/dev/null || true
@@ -428,9 +432,47 @@ if [[ $TLS_SUITE_TEST == 1 ]]; then
     python3 "$ROOT/runner/tests/suites/tls/evasion-report.py" "$ROOT/results/tls-evasion6.json"
     echo 'PASS6 TLS MITM evasion: both handshake legs fail closed under timing and transport faults'
 fi
+if [[ $KTLS_PROBE_TEST == 1 ]]; then
+    KTLS_CURL_ARGS=()
+    if [[ -n ${TLS_TEST_VERSION:-} ]]; then
+        KTLS_CURL_ARGS+=("--tlsv${TLS_TEST_VERSION}" --tls-max "$TLS_TEST_VERSION")
+    fi
+    if [[ -n ${TLS_TEST_CIPHER:-} ]]; then
+        if [[ ${TLS_TEST_VERSION:-} == 1.3 ]]; then
+            KTLS_CURL_ARGS+=(--tls13-ciphers "$TLS_TEST_CIPHER")
+        else
+            KTLS_CURL_ARGS+=(--ciphers "$TLS_TEST_CIPHER")
+        fi
+    fi
+    ip netns exec "$CLIENT" curl --noproxy '*' --fail --silent --show-error \
+        --http1.1 --max-time 30 --limit-rate 2M \
+        "${KTLS_CURL_ARGS[@]}" \
+        --cacert "$ROOT/config/certs/ca-cert.pem" \
+        --resolve origin.runner.lab:443:198.18.20.2 \
+        -o /dev/null "https://origin.runner.lab/bulk/${KTLS_PROBE_BYTES:-16777216}?run=ktls-probe" \
+        > "$ROOT/results/ktls-probe-curl.log" 2>&1 &
+    KTLS_PROBE_PID=$!
+    sleep 1
+    kill -0 "$KTLS_PROBE_PID"
+    { printf 'enable\r\ndiag proxy session list tls 8\r\n'; sleep 1; printf 'quit\r\n'; } | \
+        timeout 8 ip netns exec "$NS" nc 127.0.0.1 50000 \
+        > "$ROOT/results/ktls-session.txt" 2>&1
+    wait "$KTLS_PROBE_PID"
+    KTLS_PROBE_PID=
+    python3 "$ROOT/runner/tests/ktls-report.py" \
+        --expect "${KTLS_EXPECT_ACTIVE:-any}" \
+        "$ROOT/results/ktls-session.txt" > "$ROOT/results/ktls.json"
+    cat "$ROOT/results/ktls.json"
+    echo 'PASS4 KTLS probe: runtime BIO offload state captured for both TLS legs'
+fi
 if [[ $TLS_TRANSFER_TEST == 1 ]]; then
+    TLS_TRANSFER_ARGS=()
+    [[ -z ${TLS_TEST_VERSION:-} ]] || TLS_TRANSFER_ARGS+=(--tls-version "$TLS_TEST_VERSION")
+    [[ -z ${TLS_TEST_CIPHER:-} ]] || TLS_TRANSFER_ARGS+=(--cipher "$TLS_TEST_CIPHER")
     ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/tls-transfer.py" \
         --host 198.18.20.2 --ca-file "$ROOT/config/certs/ca-cert.pem" \
+        --pid "$(cat "$ROOT/data/proxy.pid")" \
+        "${TLS_TRANSFER_ARGS[@]}" \
         --bytes "${TLS_TRANSFER_BYTES:-67108864}" \
         --repeats "${TLS_TRANSFER_REPEATS:-5}" \
         --concurrency "${TLS_TRANSFER_CONCURRENCY:-1,4,16}" \

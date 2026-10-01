@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import http.server, socket, socketserver, ssl, threading, pathlib, sys
+import http.server, socket, socketserver, ssl, threading, pathlib, sys, os
 certs = pathlib.Path(sys.argv[1])
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
@@ -53,6 +53,15 @@ def serve_http(address, family, port):
     server = cls((address, port), Handler)
     if port == 443:
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        tls_version = os.environ.get('TLS_TEST_VERSION')
+        if tls_version:
+            version = {'1.2': ssl.TLSVersion.TLSv1_2,
+                       '1.3': ssl.TLSVersion.TLSv1_3}[tls_version]
+            ctx.minimum_version = version
+            ctx.maximum_version = version
+        tls_cipher = os.environ.get('TLS_TEST_CIPHER')
+        if tls_cipher and tls_version != '1.3':
+            ctx.set_ciphers(tls_cipher)
         ctx.set_alpn_protocols(['http/1.1'])
         ctx.load_cert_chain(certs/'origin-cert.pem',certs/'origin-key.pem')
         server.socket = ctx.wrap_socket(server.socket,server_side=True)

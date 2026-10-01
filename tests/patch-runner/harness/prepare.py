@@ -38,6 +38,14 @@ if tls_write_chunk is not None:
     text = text.replace('settings = {', f'''settings = {{
     tuning = {{ tls_write_chunk = {tls_write_chunk}; }};
 ''', 1)
+ssl_use_ktls = os.environ.get('SSL_USE_KTLS')
+if ssl_use_ktls is not None:
+    if ssl_use_ktls not in ('0', '1'):
+        raise ValueError('SSL_USE_KTLS must be 0 or 1')
+    enabled = 'TRUE' if ssl_use_ktls == '1' else 'FALSE'
+    text = text.replace('settings = {', f'''settings = {{
+    ssl_use_ktls = {enabled};
+''', 1)
 quic_test = os.environ.get('QUIC_TEST') == '1'
 if os.environ.get('POLICY_TEST') == '1':
     port_objects = '''
