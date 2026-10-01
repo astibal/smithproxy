@@ -91,9 +91,9 @@ void register_smithproxy_cli2_debug(libcli2::Cli& cli) {
 #ifdef USE_LIBSSH
     // Register these topics before the first SSH session so `debug set` and
     // completion can discover them immediately.
-    (void)sx::ssh::transport_log();
-    (void)sx::ssh::shell_log();
-    (void)sx::ssh::exec_log();
+    (void)sx::ssh::transport_log().level();
+    (void)sx::ssh::shell_log().level();
+    (void)sx::ssh::exec_log().level();
 #endif
     debug_command(cli, "term", "Set logging level for this terminal")
         .handler([](libcli2::Context& context, const libcli2::Invocation& invocation) {

@@ -96,6 +96,15 @@ bool MitmProxy::activate_stream_handler() {
         return false;
     }
 
+    // Keep the original descriptors as readiness notifications. Host contexts
+    // remain io_disabled, while the handler consumes the shared socket stream
+    // through its dup() descriptors.
+    for (auto* cx : {first_left(), first_right()}) {
+        if (!cx) continue;
+        com()->set_poll_handler(cx->socket(), this);
+        com()->set_monitor(cx->socket());
+    }
+
     stream_handler_attached_ = true;
     return true;
 }
@@ -454,6 +463,10 @@ int MitmProxy::handle_sockets_once(baseCom* xcom) {
             shutdown();
             return 0;
         }
+
+        // Exclusive handlers own all stream I/O. The monitored host sockets
+        // only wake this method; baseProxy must never consume their bytes.
+        return 0;
     }
 
     return baseProxy::handle_sockets_once(xcom);

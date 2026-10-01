@@ -3099,13 +3099,26 @@ int CfgFactory::policy_apply (baseHostCX *originator, MitmProxy *proxy, int matc
 
         if (rule && rule->profile_ssh) {
 #ifdef USE_LIBSSH
-            auto options = sx::ssh::transport_options{};
-            options.host_key = rule->profile_ssh->host_key;
-            if (!proxy->stage_stream_handler(
-                    std::make_unique<sx::ssh::stream_handler>(std::move(options)))) {
-                _err("Connection %s: cannot stage SSH stream handler",
-                     originator->full_name('L').c_str());
-                return -1;
+            // SOCKS applies the selected policy to both host contexts of the
+            // same proxy. Staging is therefore intentionally idempotent.
+            if (!proxy->stream_handler()) {
+                xdia(sx::ssh::transport_log())(
+                    "staging SSH stream handler for %s using profile='%s'",
+                    originator->full_name('L').c_str(),
+                    rule->profile_ssh->element_name().c_str());
+                auto options = sx::ssh::transport_options{};
+                options.host_key = rule->profile_ssh->host_key;
+                if (!proxy->stage_stream_handler(
+                        std::make_unique<sx::ssh::stream_handler>(std::move(options)))) {
+                    _err("Connection %s: cannot stage SSH stream handler",
+                         originator->full_name('L').c_str());
+                    return -1;
+                }
+            }
+            else {
+                xdeb(sx::ssh::transport_log())(
+                    "SSH stream handler already staged for %s",
+                    originator->full_name('L').c_str());
             }
 #else
             _err("Connection %s: SSH profile requested but libssh support is not built",
