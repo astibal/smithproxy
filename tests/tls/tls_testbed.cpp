@@ -6,6 +6,7 @@
 
 #include <sslcertstore.hpp>
 #include <sslcertval.hpp>
+#include <sslmitmcom.hpp>
 #include <log/logger.hpp>
 
 #include <atomic>
@@ -362,6 +363,143 @@ TEST_F(TLSIntegration, ControlPathPerformanceTrace) {
     EXPECT_EQ(global_ssl_new_failures, 0);
     EXPECT_EQ(ssl_new_failures, 0);
 
+    auto measure_ssl_configuration = [&](bool groups) {
+        std::atomic<int> failures {0};
+        auto phase_started = clock::now();
+        for (int worker = 0; worker < threads; ++worker) {
+            workers.emplace_back([&, worker] {
+                for (int i = worker; i < iterations * threads; i += threads) {
+                    SSL* ssl = SSL_new(shared_ctx.get());
+                    if (!ssl || SSL_set_cipher_list(ssl, SSLCom::ci_def_filter) != 1 ||
+                        (groups && SSL_set1_groups_list(
+                            ssl, "X25519:P-521:P-384:P-256:ffdhe2048") != 1)) {
+                        ++failures;
+                    }
+                    if (ssl) SSL_free(ssl);
+                }
+            });
+        }
+        for (auto& worker : workers) worker.join();
+        workers.clear();
+        return std::pair {milliseconds(phase_started), failures.load()};
+    };
+
+    const auto [ssl_cipher_ms, ssl_cipher_failures] = measure_ssl_configuration(false);
+    std::cout << "TLS_PERF_STAGE ssl_new_cipher " << ssl_cipher_ms << std::endl;
+    const auto [ssl_cipher_groups_ms, ssl_cipher_groups_failures] =
+        measure_ssl_configuration(true);
+    std::cout << "TLS_PERF_STAGE ssl_new_cipher_groups "
+              << ssl_cipher_groups_ms << std::endl;
+    EXPECT_EQ(ssl_cipher_failures, 0);
+    EXPECT_EQ(ssl_cipher_groups_failures, 0);
+
+    SpoofOptions cache_options;
+    const std::string cache_key = SSLFactory::make_store_key(upstream.get(), cache_options);
+    ASSERT_TRUE(SSLFactory::factory().add_mitm(cache_key, spoofed.value()));
+    std::atomic<int> cache_failures {0};
+    auto cache_started = clock::now();
+    for (int worker = 0; worker < threads; ++worker) {
+        workers.emplace_back([&, worker] {
+            for (int i = worker; i < iterations * threads; i += threads) {
+                if (!SSLFactory::factory().find_mitm(cache_key)) ++cache_failures;
+            }
+        });
+    }
+    for (auto& worker : workers) worker.join();
+    workers.clear();
+    const double cache_hit_ms = milliseconds(cache_started);
+    std::cout << "TLS_PERF_STAGE cert_cache_hit " << cache_hit_ms << std::endl;
+    EXPECT_EQ(cache_failures, 0);
+
+    auto measure_hostname_check = [&](bool native) {
+        std::atomic<int> failures {0};
+        auto phase_started = clock::now();
+        for (int worker = 0; worker < threads; ++worker) {
+            workers.emplace_back([&, worker] {
+                for (int i = worker; i < iterations * threads; i += threads) {
+                    bool matched = false;
+                    if (native) {
+                        matched = X509_check_host(
+                            upstream.get(), "Smithproxy-Server-Certificate", 0,
+                            X509_CHECK_FLAG_ALWAYS_CHECK_SUBJECT, nullptr) == 1;
+                    } else {
+                        auto names = SSLFactory::get_sans(upstream.get());
+                        names.push_back("DNS:" + SSLFactory::print_cn(upstream.get()));
+                        for (auto& name : names) {
+                            if (name.rfind("DNS:", 0) != 0) continue;
+                            name.erase(0, 4);
+                            std::transform(name.begin(), name.end(), name.begin(), ::tolower);
+                            matched = name == "smithproxy-server-certificate";
+                            if (matched) break;
+                        }
+                    }
+                    if (!matched) ++failures;
+                }
+            });
+        }
+        for (auto& worker : workers) worker.join();
+        workers.clear();
+        return std::pair {milliseconds(phase_started), failures.load()};
+    };
+
+    const auto [manual_hostname_ms, manual_hostname_failures] =
+        measure_hostname_check(false);
+    const auto [native_hostname_ms, native_hostname_failures] =
+        measure_hostname_check(true);
+    std::cout << "TLS_PERF_STAGE hostname_manual " << manual_hostname_ms << std::endl;
+    std::cout << "TLS_PERF_STAGE hostname_native " << native_hostname_ms << std::endl;
+    EXPECT_EQ(manual_hostname_failures, 0);
+    EXPECT_EQ(native_hostname_failures, 0);
+
+    auto measure_certificate_retain = [&](bool deep_copy) {
+        std::atomic<int> failures {0};
+        auto phase_started = clock::now();
+        for (int worker = 0; worker < threads; ++worker) {
+            workers.emplace_back([&, worker] {
+                for (int i = worker; i < iterations * threads; i += threads) {
+                    X509* retained = nullptr;
+                    if (deep_copy) {
+                        retained = X509_dup(upstream.get());
+                    } else if (X509_up_ref(upstream.get()) == 1) {
+                        retained = upstream.get();
+                    }
+                    if (!retained) ++failures;
+                    X509_free(retained);
+                }
+            });
+        }
+        for (auto& worker : workers) worker.join();
+        workers.clear();
+        return std::pair {milliseconds(phase_started), failures.load()};
+    };
+
+    const auto [x509_dup_ms, x509_dup_failures] = measure_certificate_retain(true);
+    const auto [x509_ref_ms, x509_ref_failures] = measure_certificate_retain(false);
+    std::cout << "TLS_PERF_STAGE x509_dup " << x509_dup_ms << std::endl;
+    std::cout << "TLS_PERF_STAGE x509_up_ref " << x509_ref_ms << std::endl;
+    EXPECT_EQ(x509_dup_failures, 0);
+    EXPECT_EQ(x509_ref_failures, 0);
+
+    std::atomic<int> csr_failures {0};
+    auto csr_started = clock::now();
+    for (int worker = 0; worker < threads; ++worker) {
+        workers.emplace_back([&, worker] {
+            for (int i = worker; i < iterations * threads; i += threads) {
+                auto csr = SSLFactory::factory().create_csr_from(upstream.get());
+                if (!csr) {
+                    ++csr_failures;
+                } else {
+                    X509_REQ_free(csr.value());
+                }
+            }
+        });
+    }
+    for (auto& worker : workers) worker.join();
+    workers.clear();
+    const double csr_create_ms = milliseconds(csr_started);
+    std::cout << "TLS_PERF_STAGE csr_create " << csr_create_ms << std::endl;
+    EXPECT_EQ(csr_failures, 0);
+
     // Compare the old factory-wide critical section with the keyed locking
     // used by the production MITM path.  Calling the factory directly avoids
     // pulling connection-owned SSLMitmCom state into this microbenchmark.
@@ -409,6 +547,14 @@ TEST_F(TLSIntegration, ControlPathPerformanceTrace) {
               << ",\"memory_handshake_ms\":" << handshake_ms
               << ",\"global_ssl_new_ms\":" << global_ssl_new_ms
               << ",\"ssl_new_ms\":" << ssl_new_ms
+              << ",\"ssl_new_cipher_ms\":" << ssl_cipher_ms
+              << ",\"ssl_new_cipher_groups_ms\":" << ssl_cipher_groups_ms
+              << ",\"cert_cache_hit_ms\":" << cache_hit_ms
+              << ",\"hostname_manual_ms\":" << manual_hostname_ms
+              << ",\"hostname_native_ms\":" << native_hostname_ms
+              << ",\"x509_dup_ms\":" << x509_dup_ms
+              << ",\"x509_up_ref_ms\":" << x509_ref_ms
+              << ",\"csr_create_ms\":" << csr_create_ms
               << ",\"global_spoof_ms\":" << global_spoof_ms
               << ",\"keyed_spoof_ms\":" << keyed_spoof_ms
               << ",\"global_ssl_new_failures\":" << global_ssl_new_failures
@@ -454,6 +600,25 @@ TEST_F(TLSIntegration, SpoofAddsRequestedSAN) {
     ASSERT_TRUE(spoofed.has_value());
     const auto sans = SSLFactory::get_sans(spoofed->chain.cert);
     EXPECT_NE(std::find(sans.begin(), sans.end(), additional_sans.front()), sans.end());
+
+    X509_free(spoofed->chain.cert);
+}
+
+TEST_F(TLSIntegration, SelfSignedSpoofUsesCopiedSubjectAndLocalKey) {
+    auto upstream = upstream_certificate();
+    ASSERT_NE(upstream, nullptr);
+
+    auto spoofed = SSLFactory::factory().spoof(upstream.get(), true);
+    ASSERT_TRUE(spoofed.has_value());
+    ASSERT_NE(spoofed->chain.cert, nullptr);
+    ASSERT_NE(spoofed->chain.key, nullptr);
+
+    EXPECT_EQ(X509_NAME_cmp(X509_get_subject_name(upstream.get()),
+                            X509_get_subject_name(spoofed->chain.cert)), 0);
+    EXPECT_EQ(X509_NAME_cmp(X509_get_subject_name(spoofed->chain.cert),
+                            X509_get_issuer_name(spoofed->chain.cert)), 0);
+    EXPECT_EQ(X509_check_private_key(spoofed->chain.cert, spoofed->chain.key), 1);
+    EXPECT_EQ(X509_verify(spoofed->chain.cert, spoofed->chain.key), 1);
 
     X509_free(spoofed->chain.cert);
 }

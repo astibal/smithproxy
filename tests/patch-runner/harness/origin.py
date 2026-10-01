@@ -3,7 +3,42 @@ import http.server, socket, socketserver, ssl, threading, pathlib, sys
 certs = pathlib.Path(sys.argv[1])
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
+        if self.path.startswith('/bulk/'):
+            size = int(self.path.split('?', 1)[0].removeprefix('/bulk/'))
+            if size < 0 or size > 1024 * 1024 * 1024:
+                self.send_error(400)
+                return
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/octet-stream')
+            self.send_header('Content-Length', str(size))
+            self.end_headers()
+            chunk = b'x' * (64 * 1024)
+            while size:
+                current = min(size, len(chunk))
+                self.wfile.write(chunk[:current])
+                size -= current
+            return
         body = ('runner-origin-ok peer=' + self.client_address[0] + '\n').encode()
+        self.send_response(200)
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+    def do_POST(self):
+        if not self.path.startswith('/bulk/'):
+            self.send_error(404)
+            return
+        expected = int(self.path.split('?', 1)[0].removeprefix('/bulk/'))
+        remaining = int(self.headers.get('Content-Length', '-1'))
+        if remaining != expected or remaining < 0 or remaining > 1024 * 1024 * 1024:
+            self.send_error(400)
+            return
+        while remaining:
+            data = self.rfile.read(min(remaining, 64 * 1024))
+            if not data:
+                self.send_error(400)
+                return
+            remaining -= len(data)
+        body = b'upload-ok\n'
         self.send_response(200)
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()

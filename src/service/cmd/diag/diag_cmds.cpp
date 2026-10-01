@@ -760,7 +760,7 @@ int cli_diag_ssl_ticket_list(DiagCli *cli, const char *command, char *argv[], in
             }
 
             if(printed) {
-                out << string_format(", usage cnt: %d", session_keys->ptr()->cnt_loaded);
+                out << string_format(", usage cnt: %d", session_keys->ptr()->cnt_loaded.load(std::memory_order_relaxed));
                 out << "\n";
             }
 
@@ -778,7 +778,7 @@ int cli_diag_ssl_ticket_list(DiagCli *cli, const char *command, char *argv[], in
                 std::string sessionid = hex_print(session_keys->ptr->session_id, session_keys->ptr->session_id_length);
                 out += string_format("    %s, sessionid: %s\n",key.c_str(),sessionid.c_str());
             }
-            out += string_format("    usage cnt: %d\n",session_keys->cnt_loaded);
+            out += string_format("    usage cnt: %d\n",session_keys->cnt_loaded.load(std::memory_order_relaxed));
         }
         #endif
 

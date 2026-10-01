@@ -353,6 +353,9 @@ void CfgValueHelp::init() {
     add("settings.tuning.host_write_full", "unwritten remote bytes threshold to slower reads")
             .may_be_empty(false)
             .value_filter(VALUE_UINT_RANGE<1024,1024000000>);
+    add("settings.tuning.host_io_batch", "maximum bytes drained by one host I/O dispatch")
+            .may_be_empty(false)
+            .value_filter(VALUE_UINT_RANGE<16384,16777216>);
 
 
 

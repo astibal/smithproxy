@@ -480,6 +480,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
 
         add_executable(tls_testbed
                 tests/tls/tls_testbed.cpp)
+        add_executable(transfer_testbed
+                socle/tests/test_transfer.cpp)
         target_compile_definitions(tls_testbed PRIVATE
                 SMITHPROXY_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 
@@ -492,6 +494,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_link_libraries(sx_gtests_httpconnect gtest gtest_main)
         target_link_libraries(sx_gtests_reloadable gtest gtest_main pthread)
         target_link_libraries(tls_testbed gtest gtest_main socle_lib pthread crypto ssl)
+        target_link_libraries(transfer_testbed gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries (sx_gtests nlohmann_json::nlohmann_json)
 
         # Focused QUIC integration target. It intentionally avoids the legacy
@@ -537,6 +540,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
             add_test(NAME unit.httpconnect COMMAND sx_gtests_httpconnect)
             add_test(NAME unit.reloadable COMMAND sx_gtests_reloadable)
             add_test(NAME integration.tls_testbed COMMAND tls_testbed)
+            add_test(NAME integration.transfer_testbed COMMAND transfer_testbed)
             set_tests_properties(
                     unit.core unit.http1 unit.startstoptls unit.httpconnect unit.reloadable
                     PROPERTIES LABELS "unit")
@@ -656,7 +660,7 @@ if(SMITHPROXY_TLS_SANITIZERS)
         message(FATAL_ERROR "SMITHPROXY_TLS_SANITIZERS requires a Debug build with GTest")
     endif()
     foreach(sanitized_target
-            socle_common_lib socle_lib smithproxy tls_testbed
+            socle_common_lib socle_lib smithproxy tls_testbed transfer_testbed
             sx_gtests sx_gtests_http1 sx_gtests_startstoptls sx_gtests_httpconnect
             sx_gtests_reloadable)
         target_compile_options(${sanitized_target} PRIVATE

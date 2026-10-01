@@ -42,6 +42,7 @@ CAPTURE_TEST=${CAPTURE_TEST:-0}
 CAPTURE_MATRIX_TEST=${CAPTURE_MATRIX_TEST:-0}
 RTT_TEST=${RTT_TEST:-0}
 TLS_SUITE_TEST=${TLS_SUITE_TEST:-0}
+TLS_TRANSFER_TEST=${TLS_TRANSFER_TEST:-0}
 STARTTLS_SUITE_TEST=${STARTTLS_SUITE_TEST:-0}
 POLICY_TEST=${POLICY_TEST:-0}
 ROUTING_TEST=${ROUTING_TEST:-0}
@@ -426,6 +427,16 @@ if [[ $TLS_SUITE_TEST == 1 ]]; then
     TLS_EVASION_SERVER_PID=
     python3 "$ROOT/runner/tests/suites/tls/evasion-report.py" "$ROOT/results/tls-evasion6.json"
     echo 'PASS6 TLS MITM evasion: both handshake legs fail closed under timing and transport faults'
+fi
+if [[ $TLS_TRANSFER_TEST == 1 ]]; then
+    ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/tls-transfer.py" \
+        --host 198.18.20.2 --ca-file "$ROOT/config/certs/ca-cert.pem" \
+        --bytes "${TLS_TRANSFER_BYTES:-67108864}" \
+        --repeats "${TLS_TRANSFER_REPEATS:-5}" \
+        --concurrency "${TLS_TRANSFER_CONCURRENCY:-1,4,16}" \
+        > "$ROOT/results/tls-transfer.json"
+    python3 "$ROOT/runner/tests/tls-transfer-report.py" "$ROOT/results/tls-transfer.json"
+    echo 'PASS4 TLS transfer: bounded-drain bulk download/upload matrix completed'
 fi
 if [[ $STARTTLS_SUITE_TEST == 1 ]]; then
     STARTTLS_PORT=2525

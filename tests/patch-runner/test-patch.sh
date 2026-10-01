@@ -27,7 +27,7 @@ Profiles:
               With --remote, both ports bind to the remote host's loopback.
 
 Options:
-  --suite NAME       Run only one suite. Besides tls, starttls, policy, routing,
+  --suite NAME       Run only one suite. Besides tls, transfer, starttls, policy, routing,
                      rtt, session-list and quic,
                      full-run sections are available: smoke, tls-policy, tcp-churn,
                      udp-churn, capture, corpus-regular, corpus-edge, corpus-insanity.
@@ -179,7 +179,7 @@ if [[ -n $CHURN_PORT_RANGE ]]; then
     EXTRA_ENV+=("CHURN_MIN_PORT=$CHURN_MIN_PORT" "CHURN_MAX_PORT=$CHURN_MAX_PORT")
 fi
 case "$ONLY_SUITE" in
-    ''|tls|starttls|policy|routing|rtt|session-list|quic|smoke|tls-policy|tcp-churn|udp-churn|capture|corpus-regular|corpus-edge|corpus-insanity) ;;
+    ''|tls|transfer|starttls|policy|routing|rtt|session-list|quic|smoke|tls-policy|tcp-churn|udp-churn|capture|corpus-regular|corpus-edge|corpus-insanity) ;;
     *) echo "Unknown suite: $ONLY_SUITE" >&2; exit 2 ;;
 esac
 
@@ -220,7 +220,7 @@ REPORT_HOST=${REMOTE:-local}
 git -C "$ROOT" status --short > "$REPORT/git-status.txt"
 
 run_parallel_full() {
-    local -a sections=(smoke tls-policy routing rtt tcp-churn udp-churn capture corpus-regular corpus-edge corpus-insanity)
+    local -a sections=(smoke tls-policy routing rtt transfer tcp-churn udp-churn capture corpus-regular corpus-edge corpus-insanity)
     local -a child_common=(sanity --skip-build --build-dir "$BUILD_DIR" --quiet)
     local -a forwarded=()
     local section section_dir output rc_file rc display child_report reason
@@ -467,7 +467,7 @@ print(*(x.getsockname()[1] for x in s))'
     LAB_ENV=(
         "CLIENT_NS=$CLIENT_NS" "SERVER_NS=$SERVER_NS" "DATA_NS=$DATA_NS"
         "LAB_IN_IF=$IN_IF" "LAB_OUT_IF=$OUT_IF" "LAB_API_PORT=$API_PORT" "LAB_CLI_PORT=$CLI_PORT"
-        "CAPTURE_TEST=1" "HTTP2_OBSERVABILITY_TEST=1" "CAPTURE_MATRIX_TEST=1" "RTT_TEST=1" "TLS_SUITE_TEST=1" "STARTTLS_SUITE_TEST=1" "POLICY_TEST=1" "ROUTING_TEST=1" "SESSION_LIST_STRESS_TEST=1"
+        "CAPTURE_TEST=1" "HTTP2_OBSERVABILITY_TEST=1" "CAPTURE_MATRIX_TEST=1" "RTT_TEST=1" "TLS_SUITE_TEST=1" "TLS_TRANSFER_TEST=0" "STARTTLS_SUITE_TEST=1" "POLICY_TEST=1" "ROUTING_TEST=1" "SESSION_LIST_STRESS_TEST=1"
         "PPLAY_PY=$LAB_ROOT/pplay.py" "PPLAY_SUITE=$LAB_ROOT/corpus"
         "PPLAY_RESULTS_NAME=corpus-all" "PPLAY_SMOKE_TEST=1"
     )
@@ -479,6 +479,7 @@ print(*(x.getsockname()[1] for x in s))'
         SESSION_LIST_CONNECTIONS SESSION_LIST_SAMPLES \
         SESSION_LIST_P95_LIMIT_MS SESSION_LIST_MAX_LIMIT_MS \
         TCP_CHURN_PARALLEL \
+        TLS_TRANSFER_BYTES TLS_TRANSFER_REPEATS TLS_TRANSFER_CONCURRENCY \
         CHURN_MIN_PORT CHURN_MAX_PORT; do
         [[ -z ${!variable:-} ]] || LAB_ENV+=("$variable=${!variable}")
     done
@@ -494,9 +495,10 @@ print(*(x.getsockname()[1] for x in s))'
             "PPLAY_SMOKE_TEST=0" "PPLAY_SUITE_SKIP_RUN=1")
     fi
     if [[ -n $ONLY_SUITE ]]; then
-        LAB_ENV+=("BASE_TRAFFIC_TEST=1" "CAPTURE_TEST=0" "HTTP2_OBSERVABILITY_TEST=0" "CAPTURE_MATRIX_TEST=0" "RTT_TEST=0" "TLS_SUITE_TEST=0" "STARTTLS_SUITE_TEST=0" "POLICY_TEST=0" "ROUTING_TEST=0" "SESSION_LIST_STRESS_TEST=0" "TCP_CHURN_TEST=0" "UDP_CHURN_TEST=0" "PPLAY_SMOKE_TEST=0" "PPLAY_SUITE_SKIP_RUN=1")
+        LAB_ENV+=("BASE_TRAFFIC_TEST=1" "CAPTURE_TEST=0" "HTTP2_OBSERVABILITY_TEST=0" "CAPTURE_MATRIX_TEST=0" "RTT_TEST=0" "TLS_SUITE_TEST=0" "TLS_TRANSFER_TEST=0" "STARTTLS_SUITE_TEST=0" "POLICY_TEST=0" "ROUTING_TEST=0" "SESSION_LIST_STRESS_TEST=0" "TCP_CHURN_TEST=0" "UDP_CHURN_TEST=0" "PPLAY_SMOKE_TEST=0" "PPLAY_SUITE_SKIP_RUN=1")
         case "$ONLY_SUITE" in
             tls) LAB_ENV+=("TLS_SUITE_TEST=1") ;;
+            transfer) LAB_ENV+=("TLS_TRANSFER_TEST=1") ;;
             starttls) LAB_ENV+=("STARTTLS_SUITE_TEST=1") ;;
             policy) LAB_ENV+=("POLICY_TEST=1") ;;
             routing) LAB_ENV+=("ROUTING_TEST=1") ;;
@@ -534,7 +536,7 @@ print(*(x.getsockname()[1] for x in s))'
             TEST_RC=$?
         elif ((QUIET)); then
             "${SSH_RUN[@]}" "$REMOTE" "${REMOTE_SUDO}env$ENV_STRING '$LAB_ROOT/runner/tests/lab-test.sh' '$LAB_ROOT'" \
-                2>&1 | tee "$REPORT/test.log" | grep --line-buffered -E '(^PASS[46]? |^FAIL[46]?:| (PASS|FLAKY_PASS|FAIL|XFAIL|XPASS)[46]?$|^(TCP churn:|UDP churn:|family=IPv|Capture matrix summary:|RTT summary:|Session-list summary:)|^RESULT:)'
+                2>&1 | tee "$REPORT/test.log" | grep --line-buffered -E '(^PASS[46]? |^FAIL[46]?:| (PASS|FLAKY_PASS|FAIL|XFAIL|XPASS)[46]?$|^(TCP churn:|UDP churn:|TLS transfer:|family=IPv|Capture matrix summary:|RTT summary:|Session-list summary:)|^RESULT:)'
             TEST_RC=${PIPESTATUS[0]}
         else
             "${SSH_RUN[@]}" "$REMOTE" "${REMOTE_SUDO}env$ENV_STRING '$LAB_ROOT/runner/tests/lab-test.sh' '$LAB_ROOT'" \
@@ -549,7 +551,7 @@ print(*(x.getsockname()[1] for x in s))'
             TEST_RC=$?
         elif ((QUIET)); then
             "${LOCAL_RUN[@]}" "${LAB_ENV[@]}" "$LAB_ROOT/runner/tests/lab-test.sh" "$LAB_ROOT" \
-                2>&1 | tee "$REPORT/test.log" | grep --line-buffered -E '(^PASS[46]? |^FAIL[46]?:| (PASS|FLAKY_PASS|FAIL|XFAIL|XPASS)[46]?$|^(TCP churn:|UDP churn:|family=IPv|Capture matrix summary:|RTT summary:|Session-list summary:)|^RESULT:)'
+                2>&1 | tee "$REPORT/test.log" | grep --line-buffered -E '(^PASS[46]? |^FAIL[46]?:| (PASS|FLAKY_PASS|FAIL|XFAIL|XPASS)[46]?$|^(TCP churn:|UDP churn:|TLS transfer:|family=IPv|Capture matrix summary:|RTT summary:|Session-list summary:)|^RESULT:)'
             TEST_RC=${PIPESTATUS[0]}
         else
             "${LOCAL_RUN[@]}" "${LAB_ENV[@]}" "$LAB_ROOT/runner/tests/lab-test.sh" "$LAB_ROOT" \
@@ -584,6 +586,7 @@ UDP_SUMMARY=$(grep -E '^UDP churn:' "$REPORT/test.log" 2>/dev/null | tail -2 | p
 CORPUS_SUMMARY=$(grep -E '^(family=IPv[46] )?passed=' "$REPORT/test.log" 2>/dev/null | tail -2 | paste -sd ';' - || true)
 CAPTURE_MATRIX_SUMMARY=$(grep -E '^Capture matrix summary:' "$REPORT/test.log" 2>/dev/null | tail -2 | paste -sd ';' - || true)
 RTT_SUMMARY=$(grep -E '^RTT summary:' "$REPORT/test.log" 2>/dev/null | tail -2 | paste -sd ';' - || true)
+TLS_TRANSFER_SUMMARY=$(grep -E '^TLS transfer:' "$REPORT/test.log" 2>/dev/null | paste -sd ';' - || true)
 
 FAIL_REASON=
 FAIL_LIKELY=
@@ -640,6 +643,7 @@ cat > "$REPORT/summary.md" <<EOF
 - Corpus: ${CORPUS_SUMMARY:-N/A}
 - Capture matrix: ${CAPTURE_MATRIX_SUMMARY:-N/A}
 - RTT: ${RTT_SUMMARY:-N/A}
+- TLS transfer: ${TLS_TRANSFER_SUMMARY:-N/A}
 - Expected failure: edge/http1_connect_ipv6
 EOF
 if [[ -f $REPORT/sections.md ]]; then
@@ -682,7 +686,8 @@ cat > "$REPORT/summary.json" <<EOF
   "udp_churn": "${UDP_SUMMARY//\"/\\\"}",
   "corpus": "${CORPUS_SUMMARY//\"/\\\"}",
   "capture_matrix": "${CAPTURE_MATRIX_SUMMARY//\"/\\\"}",
-  "rtt": "${RTT_SUMMARY//\"/\\\"}"
+  "rtt": "${RTT_SUMMARY//\"/\\\"}",
+  "tls_transfer": "${TLS_TRANSFER_SUMMARY//\"/\\\"}"
 }
 EOF
 

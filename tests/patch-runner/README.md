@@ -58,6 +58,7 @@ output is their primary interface.
 | Policy precedence/profile matrix | - | yes | yes | - | manual |
 | Loaded CLI session-list probe | - | yes | yes | - | manual |
 | RTT limits and payload validation | - | yes | yes | report only | manual |
+| TLS bulk upload/download matrix | - | focused | yes | - | manual |
 | TCP and UDP churn | - | - | yes | - | manual |
 | Regular/edge/insanity corpus | - | - | yes | - | manual |
 | PCAPNG/GRE capture matrix | - | yes | yes | - | manual |
@@ -74,7 +75,9 @@ passes are these isolated sections started:
 ```text
 smoke
 ├── tls-policy       (TLS, policy and loaded session-list)
+├── routing
 ├── rtt
+├── transfer         (TLS upload/download at 1/4/16 parallel flows)
 ├── tcp-churn
 ├── udp-churn
 ├── capture          (basic capture, capture matrix and HTTP/2 observability)
@@ -88,7 +91,7 @@ the default is `3` (`PATCH_TEST_PARALLEL` provides the environment default).
 Each section owns its namespaces, interfaces, ports, config, data and results.
 The build output is shared without being modified. A remote full run uploads
 `smithproxy` once with mode `0555`, and section labs symlink to it instead of
-keeping nine binary copies.
+keeping a binary copy for every section.
 
 ## Selecting one suite
 
@@ -96,13 +99,13 @@ keeping nine binary copies.
 suites remain available:
 
 ```text
-tls  policy  rtt  session-list  quic
+tls  transfer  starttls  policy  routing  rtt  session-list  quic
 ```
 
 Full-run sections can also be invoked directly:
 
 ```text
-smoke  tls-policy  tcp-churn  udp-churn  capture
+smoke  tls-policy  transfer  tcp-churn  udp-churn  capture
 corpus-regular  corpus-edge  corpus-insanity
 ```
 
