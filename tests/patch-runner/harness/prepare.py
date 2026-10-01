@@ -145,6 +145,8 @@ text = text.replace('/etc/smithproxy/certs/default/',str(certs)+'/').replace('/e
 text = text.replace('/var/smithproxy/data',str(data)).replace('/var/log/smithproxy/',str(data)+'/')
 text = text.replace('certs_ca_key_password = "smithproxy"','certs_ca_key_password = ""')
 text = text.replace('accept_redirect = TRUE','accept_redirect = FALSE').replace('accept_socks = TRUE','accept_socks = FALSE')
+if os.environ.get('TLS_EVASION_TRACE') == '1':
+    text = text.replace('log_level = 6;', 'log_level = 9;', 1)
 if os.environ.get('ROUTING_TEST') == '1':
     text = text.replace('accept_socks = FALSE', 'accept_socks = TRUE')
 text = re.sub(r'(plaintext_workers|ssl_workers|udp_workers) = 0',r'\1 = 1',text)

@@ -36,6 +36,7 @@ SESSION_LIST_LOAD_PID=
 PPLAY_SUITE4_PID=
 PPLAY_SUITE6_PID=
 STARTTLS_SERVER_PID=
+TLS_EVASION_SERVER_PID=
 ROUTING_SERVER_PID=
 CAPTURE_TEST=${CAPTURE_TEST:-0}
 CAPTURE_MATRIX_TEST=${CAPTURE_MATRIX_TEST:-0}
@@ -90,6 +91,8 @@ cleanup() {
     [[ -z $PPLAY_SUITE6_PID ]] || wait "$PPLAY_SUITE6_PID" 2>/dev/null || true
     [[ -z $STARTTLS_SERVER_PID ]] || kill "$STARTTLS_SERVER_PID" 2>/dev/null || true
     [[ -z $STARTTLS_SERVER_PID ]] || wait "$STARTTLS_SERVER_PID" 2>/dev/null || true
+    [[ -z $TLS_EVASION_SERVER_PID ]] || kill "$TLS_EVASION_SERVER_PID" 2>/dev/null || true
+    [[ -z $TLS_EVASION_SERVER_PID ]] || wait "$TLS_EVASION_SERVER_PID" 2>/dev/null || true
     [[ -z $ROUTING_SERVER_PID ]] || kill "$ROUTING_SERVER_PID" 2>/dev/null || true
     [[ -z $ROUTING_SERVER_PID ]] || wait "$ROUTING_SERVER_PID" 2>/dev/null || true
     ip link del "$IN_IF" 2>/dev/null || true
@@ -391,6 +394,38 @@ if [[ $TLS_SUITE_TEST == 1 ]]; then
         --host fd00:20::2 --ca-file "$ROOT/config/certs/ca-cert.pem" > "$ROOT/results/tls-suite6.json"
     python3 "$ROOT/runner/tests/suites/tls/report.py" "$ROOT/results/tls-suite6.json"
     echo 'PASS6 TLS suite: trust, SNI, ALPN and protocol-version matrix'
+    ip netns exec "$SERVER" python3 -u "$ROOT/runner/tests/suites/tls/evasion.py" server \
+        --host 198.18.20.2 > "$ROOT/results/tls-evasion-server.json" 2> "$ROOT/results/tls-evasion-server.log" &
+    TLS_EVASION_SERVER_PID=$!
+    for attempt in $(seq 1 50); do
+        grep -q '^READY$' "$ROOT/results/tls-evasion-server.json" && break
+        kill -0 "$TLS_EVASION_SERVER_PID"
+        sleep 0.1
+    done
+    grep -q '^READY$' "$ROOT/results/tls-evasion-server.json"
+    ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/suites/tls/evasion.py" client \
+        --host 198.18.20.2 --ca-file "$ROOT/config/certs/ca-cert.pem" \
+        > "$ROOT/results/tls-evasion.json"
+    wait "$TLS_EVASION_SERVER_PID"
+    TLS_EVASION_SERVER_PID=
+    python3 "$ROOT/runner/tests/suites/tls/evasion-report.py" "$ROOT/results/tls-evasion.json"
+    echo 'PASS4 TLS MITM evasion: both handshake legs fail closed under timing and transport faults'
+    ip netns exec "$SERVER" python3 -u "$ROOT/runner/tests/suites/tls/evasion.py" server \
+        --host fd00:20::2 > "$ROOT/results/tls-evasion-server6.json" 2> "$ROOT/results/tls-evasion-server6.log" &
+    TLS_EVASION_SERVER_PID=$!
+    for attempt in $(seq 1 50); do
+        grep -q '^READY$' "$ROOT/results/tls-evasion-server6.json" && break
+        kill -0 "$TLS_EVASION_SERVER_PID"
+        sleep 0.1
+    done
+    grep -q '^READY$' "$ROOT/results/tls-evasion-server6.json"
+    ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/suites/tls/evasion.py" client \
+        --host fd00:20::2 --ca-file "$ROOT/config/certs/ca-cert.pem" \
+        > "$ROOT/results/tls-evasion6.json"
+    wait "$TLS_EVASION_SERVER_PID"
+    TLS_EVASION_SERVER_PID=
+    python3 "$ROOT/runner/tests/suites/tls/evasion-report.py" "$ROOT/results/tls-evasion6.json"
+    echo 'PASS6 TLS MITM evasion: both handshake legs fail closed under timing and transport faults'
 fi
 if [[ $STARTTLS_SUITE_TEST == 1 ]]; then
     STARTTLS_PORT=2525
