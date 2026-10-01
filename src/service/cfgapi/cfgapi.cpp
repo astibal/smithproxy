@@ -546,6 +546,18 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "added policy.[x].ssh_profile");
         return true;
     }
+    else if(upgrade_to_num == 1041) {
+        if(cfgapi.getRoot().exists("policy")) {
+            Setting& policies = cfgapi.getRoot()["policy"];
+            for(int i = 0; i < policies.getLength(); ++i) {
+                if(!policies[i].exists("ssh_profile")) {
+                    policies[i].add("ssh_profile", Setting::TypeString) = "";
+                }
+            }
+        }
+        log.event(INF, "materialized policy.[x].ssh_profile");
+        return true;
+    }
 
 
     return false;
@@ -4393,6 +4405,7 @@ bool CfgFactory::new_policy (Setting &ex, const std::string &name) const {
         newpol.add("nat", Setting::TypeString) = "auto";
 
         newpol.add("tls_profile", Setting::TypeString);
+        newpol.add("ssh_profile", Setting::TypeString);
         newpol.add("detection_profile", Setting::TypeString);
         newpol.add("content_profile", Setting::TypeString);
         newpol.add("auth_profile", Setting::TypeString);
@@ -5094,8 +5107,8 @@ int CfgFactory::save_policy(Config& ex) const {
 
         if(pol->profile_tls)
             item.add("tls_profile", Setting::TypeString) = pol->profile_tls->element_name();
-        if(pol->profile_ssh)
-            item.add("ssh_profile", Setting::TypeString) = pol->profile_ssh->element_name();
+        item.add("ssh_profile", Setting::TypeString) =
+            pol->profile_ssh ? pol->profile_ssh->element_name() : "";
         if(pol->profile_detection)
             item.add("detection_profile", Setting::TypeString) = pol->profile_detection->element_name();
         if(pol->profile_content)
