@@ -48,7 +48,14 @@ std::string prompt(const libcli2::Context& context) {
     board->ack_current(cli_id());
     board->ack_saved(cli_id());
     const bool unsaved = board->at(cli_id()).seen_current != board->at(cli_id()).seen_saved;
-    std::string value = d.command("smithproxy") + "(" + d.key(CliGlobals::hostname()) + ")";
+    // Keep the wire-safe ASCII name when colors are disabled. An active palette
+    // implies a modern terminal, so the colored prompt can use U+2300 as the
+    // terminal-sized counterpart of the Smithproxy mark.
+    std::string brand = "smithproxy";
+    if (context.colors_enabled()) {
+        brand = d.command("smithpr") + d.success("\xE2\x8C\x80") + d.command("xy");
+    }
+    std::string value = brand + "(" + d.key(CliGlobals::hostname()) + ")";
     if (unsaved) value += d.warning("<*>");
     if (CfgFactory::LOAD_ERRORS) value += d.error("<!>");
     if (context.mode != "0") {

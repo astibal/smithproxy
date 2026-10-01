@@ -144,7 +144,7 @@ private:
             case Style::value: return "\033[1;38;2;210;255;208m";
             case Style::success: return "\033[38;2;46;255;78m";
             case Style::warning: return "\033[1;38;2;169;255;143m";
-            case Style::error: return "\033[1;4;38;2;220;255;218m";
+            case Style::error: return "\033[1;38;2;220;255;218m";
             case Style::muted: return "\033[2;38;2;62;142;72m";
             case Style::plain: break;
         }
@@ -159,7 +159,7 @@ private:
             case Style::value: return "\033[1;38;2;255;255;255m";
             case Style::success: return "\033[38;2;230;230;230m";
             case Style::warning: return "\033[1;38;2;250;250;250m";
-            case Style::error: return "\033[1;4;38;2;255;255;255m";
+            case Style::error: return "\033[1;38;2;255;255;255m";
             case Style::muted: return "\033[2;38;2;150;150;150m";
             case Style::plain: break;
         }
@@ -174,7 +174,7 @@ private:
             case Style::value: return "\033[1;38;2;255;224;159m";
             case Style::success: return "\033[38;2;255;184;56m";
             case Style::warning: return "\033[1;38;2;255;205;112m";
-            case Style::error: return "\033[1;4;38;2;255;232;184m";
+            case Style::error: return "\033[1;38;2;255;232;184m";
             case Style::muted: return "\033[2;38;2;166;105;25m";
             case Style::plain: break;
         }
@@ -189,7 +189,7 @@ private:
             case Style::value: return "\033[1;38;2;224;252;255m";
             case Style::success: return "\033[38;2;112;232;241m";
             case Style::warning: return "\033[1;38;2;174;245;250m";
-            case Style::error: return "\033[1;4;38;2;235;253;255m";
+            case Style::error: return "\033[1;38;2;235;253;255m";
             case Style::muted: return "\033[2;38;2;73;139;148m";
             case Style::plain: break;
         }

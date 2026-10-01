@@ -28,6 +28,11 @@ struct Context {
         if (write) write(text);
     }
 
+    void print(Style style, std::string_view text) const {
+        const auto value = decor()(style, text);
+        print(value);
+    }
+
     bool colors_enabled() const noexcept {
         return color_mode == ColorMode::on || (color_mode == ColorMode::automatic && color_capable);
     }

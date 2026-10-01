@@ -181,6 +181,7 @@ TEST(Libcli2, DecoratorSupportsNamedColorThemes) {
         EXPECT_EQ(color_theme_name(parsed), name);
         context.color_theme = parsed;
         EXPECT_NE(context.decor().success("OK").find("\033["), std::string::npos);
+        EXPECT_EQ(context.decor().error("FAIL").find(";4;"), std::string::npos);
     }
 
     ColorTheme parsed = ColorTheme::classic;
@@ -194,6 +195,20 @@ TEST(Libcli2, DecoratorSupportsNamedColorThemes) {
     EXPECT_EQ(context.decor().command("show"), "\033[38;2;65;255;99mshow\033[0m");
     context.color_theme = ColorTheme::amber;
     EXPECT_EQ(context.decor().muted("idle"), "\033[2;38;2;166;105;25midle\033[0m");
+}
+
+TEST(Libcli2, HelpUsesDecoratorsWithoutChangingPlainOutput) {
+    Cli cli;
+    cli.command("show session").help("List sessions").argument({"id", "Session id", false});
+    Context context;
+
+    const auto plain = cli.help("show session", context);
+    EXPECT_EQ(plain.find("\033["), std::string::npos);
+
+    context.color_mode = ColorMode::on;
+    const auto colored = cli.help("show session", context);
+    EXPECT_NE(colored.find("\033[36msession\033[0m"), std::string::npos);
+    EXPECT_NE(colored.find("\033[2;37mList sessions\033[0m"), std::string::npos);
 }
 
 }  // namespace

@@ -38,8 +38,10 @@
 */
 
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstdarg>
+#include <cctype>
 #include <cstdio>
 #include <ctime>
 #include <memory>
@@ -98,6 +100,51 @@ struct DiagRegistry {
     std::vector<std::unique_ptr<DiagNode>> nodes;
 };
 
+bool begins_with(std::string_view text, std::string_view prefix) {
+    return text.size() >= prefix.size() && text.substr(0, prefix.size()) == prefix;
+}
+
+std::string decorate_diag_output(const libcli2::Context& context, std::string_view text) {
+    if (!context.colors_enabled() || text.find('\033') != std::string_view::npos) return std::string(text);
+    const auto decor = context.decor();
+    std::string result;
+    std::size_t begin = 0;
+    while (begin <= text.size()) {
+        const auto end = text.find('\n', begin);
+        const auto line = text.substr(begin, end == std::string_view::npos ? text.size() - begin : end - begin);
+        const auto first = line.find_first_not_of(" \t\r");
+        const auto last = line.find_last_not_of(" \t\r");
+        const auto trimmed = first == std::string_view::npos ? std::string_view{} : line.substr(first, last - first + 1);
+        std::string lower(trimmed);
+        std::transform(lower.begin(), lower.end(), lower.begin(),
+                       [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+
+        libcli2::Style style = libcli2::Style::plain;
+        if (!trimmed.empty() && trimmed.back() == ':') style = libcli2::Style::heading;
+        else if (begins_with(lower, "error") || begins_with(lower, "invalid") || begins_with(lower, "cannot") ||
+                 lower.find(" failed") != std::string::npos || lower.find(" unavailable") != std::string::npos ||
+                 lower.find(" timed out") != std::string::npos || lower.find(" not found") != std::string::npos)
+            style = libcli2::Style::error;
+        else if (begins_with(lower, "warning") || lower.find("not available") != std::string::npos ||
+                 lower.find("not enabled") != std::string::npos)
+            style = libcli2::Style::warning;
+        else if (begins_with(lower, "done") || begins_with(lower, "cleared") ||
+                 lower.find(" successfully") != std::string::npos)
+            style = libcli2::Style::success;
+
+        if (style == libcli2::Style::plain || trimmed.empty()) result.append(line);
+        else {
+            result.append(line.substr(0, first));
+            result.append(decor(style, trimmed));
+            result.append(line.substr(last + 1));
+        }
+        if (end == std::string_view::npos) break;
+        result.push_back('\n');
+        begin = end + 1;
+    }
+    return result;
+}
+
 int cli_print(DiagCli* cli, const char* format, ...) {
     va_list arguments;
     va_start(arguments, format);
@@ -109,7 +156,8 @@ int cli_print(DiagCli* cli, const char* format, ...) {
     std::vector<char> buffer(static_cast<std::size_t>(needed) + 1);
     std::vsnprintf(buffer.data(), buffer.size(), format, arguments);
     va_end(arguments);
-    cli->context.print(std::string_view(buffer.data(), static_cast<std::size_t>(needed)));
+    cli->context.print(decorate_diag_output(
+        cli->context, std::string_view(buffer.data(), static_cast<std::size_t>(needed))));
     return CLI_OK;
 }
 
