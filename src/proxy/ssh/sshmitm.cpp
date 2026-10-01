@@ -151,6 +151,7 @@ public:
     explicit impl(transport_options options) : options_(std::move(options)) {}
 
     ~impl() {
+        auto const failed = fsm_.state() == mitm_state::failed;
         if (pending_auth_message_) {
             ssh_message_free(pending_auth_message_);
         }
@@ -168,11 +169,17 @@ public:
             ssh_channel_free(upstream_channel_);
         }
         if (downstream_) {
-            ssh_disconnect(downstream_);
+            // Do not drive an already failed libssh state machine from a
+            // destructor. ssh_free() still releases all session resources.
+            if (!failed && ssh_is_connected(downstream_)) {
+                ssh_disconnect(downstream_);
+            }
             ssh_free(downstream_);
         }
         if (upstream_) {
-            ssh_disconnect(upstream_);
+            if (!failed && ssh_is_connected(upstream_)) {
+                ssh_disconnect(upstream_);
+            }
             ssh_free(upstream_);
         }
         if (bind_) {
@@ -640,26 +647,40 @@ public:
 
     drive_result drive_channel_data() {
         bool progress = false;
-        for (auto const result : {
-                 flush_channel_buffer(upstream_channel_, to_upstream_, false),
-                 flush_channel_buffer(downstream_channel_, to_downstream_, false),
-                 flush_channel_buffer(downstream_channel_, stderr_to_downstream_, true)}) {
+        auto flush = [&progress](ssh_channel channel, std::string& pending,
+                                 bool stderr_stream) {
+            auto const result = flush_channel_buffer(channel, pending, stderr_stream);
             if (result == SSH_ERROR) {
-                set_error("SSH channel write failed");
-                return drive_result::failed;
+                return false;
             }
             progress = progress || result > 0;
+            return true;
+        };
+        if (!flush(upstream_channel_, to_upstream_, false)
+            || !flush(downstream_channel_, to_downstream_, false)
+            || !flush(downstream_channel_, stderr_to_downstream_, true)) {
+            set_error("SSH channel write failed");
+            return drive_result::failed;
         }
 
-        for (auto const result : {
-                 read_channel(downstream_channel_, to_upstream_, false, "client->server", bytes_up_, true),
-                 read_channel(upstream_channel_, to_downstream_, false, "server->client", bytes_down_, false),
-                 read_channel(upstream_channel_, stderr_to_downstream_, true, "server->client", bytes_down_, false)}) {
+        auto read = [this, &progress](ssh_channel channel, std::string& pending,
+                                     bool stderr_stream, char const* direction,
+                                     std::uint64_t& byte_counter, bool upstream_direction) {
+            auto const result = read_channel(channel, pending, stderr_stream, direction,
+                                             byte_counter, upstream_direction);
             if (result == SSH_ERROR) {
-                set_error("SSH channel read failed");
-                return drive_result::failed;
+                return false;
             }
             progress = progress || result > 0;
+            return true;
+        };
+        // Stop immediately on error. Further libssh calls on the same failed
+        // session can invalidate channel state needed by teardown.
+        if (!read(downstream_channel_, to_upstream_, false, "client->server", bytes_up_, true)
+            || !read(upstream_channel_, to_downstream_, false, "server->client", bytes_down_, false)
+            || !read(upstream_channel_, stderr_to_downstream_, true, "server->client", bytes_down_, false)) {
+            set_error("SSH channel read failed");
+            return drive_result::failed;
         }
 
         if (ssh_channel_is_eof(downstream_channel_) && !downstream_eof_forwarded_) {
