@@ -5,6 +5,7 @@
 #ifndef SMITHPROXY_STREAMHANDLER_HPP
 #define SMITHPROXY_STREAMHANDLER_HPP
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 
@@ -37,6 +38,8 @@ public:
     // Protocol name used by session-list presentation. The underlying
     // communication object may still correctly be a TCP socket.
     [[nodiscard]] virtual std::string_view session_protocol() const noexcept = 0;
+    [[nodiscard]] virtual std::uint64_t bytes_up() const noexcept { return 0; }
+    [[nodiscard]] virtual std::uint64_t bytes_down() const noexcept { return 0; }
     [[nodiscard]] virtual std::string state() const = 0;
     [[nodiscard]] virtual std::string error() const = 0;
 };

@@ -387,6 +387,15 @@ std::string MitmProxy::to_string(int verbosity) const {
     
     if(verbosity >= INF) {
         r << string_format(" policy: %d ", matched_policy());
+
+        if(stream_handler_) {
+            r << string_format("%.*s:%s bytes up/dw: %llu/%lluB ",
+                               static_cast<int>(stream_handler_->session_protocol().size()),
+                               stream_handler_->session_protocol().data(),
+                               stream_handler_->state().c_str(),
+                               static_cast<unsigned long long>(stream_handler_->bytes_up()),
+                               static_cast<unsigned long long>(stream_handler_->bytes_down()));
+        }
         
         if(verbosity > INF) r << "\n    ";
 

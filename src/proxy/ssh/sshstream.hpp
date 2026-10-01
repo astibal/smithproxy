@@ -24,6 +24,8 @@ public:
 
     [[nodiscard]] bool committed() const noexcept override { return committed_; }
     [[nodiscard]] std::string_view session_protocol() const noexcept override { return "ssh"; }
+    [[nodiscard]] std::uint64_t bytes_up() const noexcept override;
+    [[nodiscard]] std::uint64_t bytes_down() const noexcept override;
     [[nodiscard]] std::string state() const override;
     [[nodiscard]] std::string error() const override;
 
@@ -33,6 +35,8 @@ private:
     bool committed_ = false;
     std::string final_state_ = "detached";
     std::string final_error_;
+    std::uint64_t final_bytes_up_ = 0;
+    std::uint64_t final_bytes_down_ = 0;
 };
 
 } // namespace sx::ssh

@@ -67,8 +67,18 @@ void stream_handler::shutdown() noexcept {
     if (transport_) {
         final_state_ = state();
         final_error_ = error();
+        final_bytes_up_ = transport_->bytes_up();
+        final_bytes_down_ = transport_->bytes_down();
         transport_.reset();
     }
+}
+
+std::uint64_t stream_handler::bytes_up() const noexcept {
+    return transport_ ? transport_->bytes_up() : final_bytes_up_;
+}
+
+std::uint64_t stream_handler::bytes_down() const noexcept {
+    return transport_ ? transport_->bytes_down() : final_bytes_down_;
 }
 
 std::string stream_handler::state() const {

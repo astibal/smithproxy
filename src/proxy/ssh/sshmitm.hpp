@@ -5,6 +5,7 @@
 #ifndef SMITHPROXY_SSHMITM_HPP
 #define SMITHPROXY_SSHMITM_HPP
 
+#include <cstdint>
 #include <memory>
 #include <string>
 
@@ -67,6 +68,8 @@ public:
     [[nodiscard]] std::string const& error() const noexcept;
     [[nodiscard]] identification const& server_identification() const noexcept;
     [[nodiscard]] identification const& client_identification() const noexcept;
+    [[nodiscard]] std::uint64_t bytes_up() const noexcept;
+    [[nodiscard]] std::uint64_t bytes_down() const noexcept;
 
 private:
     class impl;

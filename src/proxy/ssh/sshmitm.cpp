@@ -614,13 +614,14 @@ public:
     }
 
     int read_channel(ssh_channel channel, std::string& pending, bool stderr_stream,
-                     char const* direction) {
+                     char const* direction, std::uint64_t& byte_counter) {
         if (!pending.empty()) return 0;
         char buffer[32768];
         auto const amount = ssh_channel_read_nonblocking(
             channel, buffer, sizeof(buffer), stderr_stream ? 1 : 0);
         if (amount > 0) {
             pending.assign(buffer, static_cast<std::size_t>(amount));
+            byte_counter += static_cast<std::uint64_t>(amount);
             auto* payload_log = channel_mode_ == channel_mode::shell
                 ? &shell_log()
                 : channel_mode_ == channel_mode::exec ? &exec_log() : nullptr;
@@ -647,9 +648,9 @@ public:
         }
 
         for (auto const result : {
-                 read_channel(downstream_channel_, to_upstream_, false, "client->server"),
-                 read_channel(upstream_channel_, to_downstream_, false, "server->client"),
-                 read_channel(upstream_channel_, stderr_to_downstream_, true, "server->client")}) {
+                 read_channel(downstream_channel_, to_upstream_, false, "client->server", bytes_up_),
+                 read_channel(upstream_channel_, to_downstream_, false, "server->client", bytes_down_),
+                 read_channel(upstream_channel_, stderr_to_downstream_, true, "server->client", bytes_down_)}) {
             if (result == SSH_ERROR) {
                 set_error("SSH channel read failed");
                 return drive_result::failed;
@@ -750,6 +751,8 @@ public:
     bool upstream_eof_forwarded_ = false;
     enum class channel_mode { none, shell, exec };
     channel_mode channel_mode_ = channel_mode::none;
+    std::uint64_t bytes_up_ = 0;
+    std::uint64_t bytes_down_ = 0;
 };
 
 mitm_transport::mitm_transport(transport_options options)
@@ -779,6 +782,14 @@ identification const& mitm_transport::server_identification() const noexcept {
 
 identification const& mitm_transport::client_identification() const noexcept {
     return impl_->fsm_.client_identification();
+}
+
+std::uint64_t mitm_transport::bytes_up() const noexcept {
+    return impl_->bytes_up_;
+}
+
+std::uint64_t mitm_transport::bytes_down() const noexcept {
+    return impl_->bytes_down_;
 }
 
 } // namespace sx::ssh
