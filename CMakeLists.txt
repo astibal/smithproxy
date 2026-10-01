@@ -97,6 +97,13 @@ add_library(nlohmann_json::nlohmann_json ALIAS nlohmann_json)
 target_include_directories(nlohmann_json INTERFACE
     "${PROJECT_SOURCE_DIR}/third_party/nlohmann/include")
 
+# Keep network updates outside the daemon: a failed refresh must not affect the
+# running proxy or its last known-good CT key list.
+add_executable(sx_ctlog tools/ctlog/sx_ctlog.cpp)
+target_compile_features(sx_ctlog PRIVATE cxx_std_17)
+target_compile_options(sx_ctlog PRIVATE -Wall -Wextra -Wpedantic)
+target_link_libraries(sx_ctlog PRIVATE crypto curl nlohmann_json::nlohmann_json)
+
 find_package (LibConfig REQUIRED)
 if (LIBCONFIGPP_FOUND)
     include_directories(${LIBCONFIGPP_INCLUDE_DIRS})

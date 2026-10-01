@@ -1,0 +1,17 @@
+{
+  "version": "test-1",
+  "log_list_timestamp": "2026-10-01T00:00:00Z",
+  "operators": [
+    {
+      "name": "Test operator",
+      "logs": [
+        {
+          "description": "Google 'Argon2026h2' log",
+          "log_id": "1219ENGn9XfCx+lf1wC/+YLJM1pl4dCzAXMXwMjFaXc=",
+          "key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEKjpni/66DIYrSlGK6Rf+e6F2c/28ZUvDJ79N81+gyimAESAyeNZ++TRgjHWg9TVQnKHTSU0T1TtqDupFnSQTIg=="
+        }
+      ],
+      "tiled_logs": []
+    }
+  ]
+}

@@ -1,0 +1,72 @@
+name: Publish signed CT log list
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-ctlog
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out Smithproxy
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y g++ cmake libssl-dev libcurl4-openssl-dev nlohmann-json3-dev
+
+      - name: Build CT updater
+        run: cmake -S tools/ctlog -B build-ctlog && cmake --build build-ctlog --parallel
+
+      - name: Download and normalize Apple's CT policy
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location \
+            --proto '=https' --proto-redir '=https' \
+            https://valid.apple.com/ct/log_list/current_log_list.json \
+            --output apple-log-list.json
+          build-ctlog/sx_ctlog prepare-apple \
+            apple-log-list.json log_list.json \
+            --timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+      - name: Sign normalized list
+        env:
+          CTLOG_SIGNING_KEY_B64: ${{ secrets.CTLOG_SIGNING_KEY_B64 }}
+        run: |
+          set -euo pipefail
+          test -n "$CTLOG_SIGNING_KEY_B64"
+          umask 077
+          printf '%s' "$CTLOG_SIGNING_KEY_B64" | base64 --decode > signing-key.pem
+          openssl dgst -sha256 -sign signing-key.pem -out log_list.sig log_list.json
+          rm -f signing-key.pem
+
+      - name: Verify exactly what will be published
+        run: |
+          set -euo pipefail
+          build-ctlog/sx_ctlog update \
+            --url "file://$PWD/log_list.json" \
+            --signature-url "file://$PWD/log_list.sig" \
+            --signer-key tools/ctlog/smithproxy-ctlog-signer.pem \
+            --cache-dir "$RUNNER_TEMP/ctlog-cache" \
+            --output "$RUNNER_TEMP/ct_log_list.cnf"
+
+      - name: Publish stable release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! gh release view ctlog-latest >/dev/null 2>&1; then
+            gh release create ctlog-latest --target "$GITHUB_SHA" \
+              --title 'Smithproxy CT log list' \
+              --notes 'Automatically filtered from the Apple CT log policy and signed by Smithproxy.'
+          fi
+          gh release upload ctlog-latest --clobber \
+            log_list.json log_list.sig tools/ctlog/smithproxy-ctlog-signer.pem
+

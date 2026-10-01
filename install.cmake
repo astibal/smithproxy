@@ -1,6 +1,6 @@
 if(UNIX)
     SET(CMAKE_INSTALL_PREFIX /usr)
-    install(TARGETS smithproxy DESTINATION bin)
+    install(TARGETS smithproxy sx_ctlog DESTINATION bin)
     install(FILES man/smithproxy.1 DESTINATION share/man/man1)
     install_if_not_exists(etc/smithproxy.cfg /etc/smithproxy)
     install_if_not_exists(etc/users.cfg /etc/smithproxy)
@@ -64,6 +64,9 @@ if(UNIX)
             GROUP_READ GROUP_EXECUTE
             WORLD_READ WORLD_EXECUTE
             )
+
+    install(FILES tools/ctlog/smithproxy-ctlog-signer.pem
+            DESTINATION share/smithproxy/ctlog)
 
     install(FILES tools/sx_download_ca_bundle DESTINATION bin
             PERMISSIONS

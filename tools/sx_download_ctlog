@@ -1,15 +1,13 @@
 #!/usr/bin/env sh
+set -eu
 
-FILE_PATH="/etc/smithproxy/ct_log_list.cnf"
-FILE_URL="https://download.smithproxy.org/additional/ct_log_list.cnf"
+BASE_URL="https://github.com/astibal/smithproxy/releases/download/ctlog-latest"
 
-wget ${FILE_URL} -O ${FILE_PATH}
+sx_ctlog update \
+    --url "${BASE_URL}/log_list.json" \
+    --signature-url "${BASE_URL}/log_list.sig" \
+    --signer-key "/usr/share/smithproxy/ctlog/smithproxy-ctlog-signer.pem" \
+    --cache-dir "/var/cache/smithproxy/ctlog" \
+    --output "/etc/smithproxy/ct_log_list.cnf"
 
-if [ $? -ne 0 ]; then
-    echo "   !!! Sorry, something went wrong..."
-else
-    echo
-    echo "   !!! Smithproxy must be restarted to reload CT logs."
-    echo
-fi
-
+echo "Smithproxy must be restarted to reload CT logs."
