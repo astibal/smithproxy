@@ -20,6 +20,18 @@ SET(SOCLE_COMMON_DIR "socle/common")
 
 project(smithproxy C CXX)
 include(CTest)
+list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}")
+
+option(SMITHPROXY_SSH_MITM "Build the libssh-based SSHv2 MITM" ON)
+if(SMITHPROXY_SSH_MITM)
+    find_package(LibSSH QUIET)
+    if(LibSSH_FOUND)
+        message(STATUS "SSH MITM enabled: ${LIBSSH_LIBRARY}")
+    else()
+        message(WARNING "SSH MITM disabled: libssh development files were not found")
+        set(SMITHPROXY_SSH_MITM OFF)
+    endif()
+endif()
 
 SET(CMAKE_SOURCE_DIR "src/")
 SET(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}")
@@ -265,6 +277,7 @@ add_executable(smithproxy
         src/proxy/mitmproxy.cpp
         src/proxy/mitmcom.hpp
         src/proxy/mitmcom.cpp
+        src/proxy/ssh/sshprotocol.cpp
         src/proxy/ocspinvoker.cpp
         src/proxy/ocspinvoker.hpp
         src/proxy/proxymaker.hpp
@@ -418,6 +431,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/proxy/quic/tests/qpack_vendor_tests.cpp
                 src/proxy/quic/openssl.cpp
                 src/proxy/quic/tests/openssl_tests.cpp
+                src/proxy/ssh/sshprotocol.cpp
+                src/proxy/ssh/tests/sshprotocol_test.cpp
                 src/service/quic/quicservice.cpp
                 src/service/quic/tests/quicservice_tests.cpp
 
@@ -690,6 +705,11 @@ if((CMAKE_SYSTEM_PROCESSOR MATCHES "arm") OR (CMAKE_SYSTEM_PROCESSOR STREQUAL "a
 endif()
 
 target_link_libraries(smithproxy smithproxy_libcli smithproxy_qpack socle_lib pthread ssl crypto rt ${UNWIND_LIB})
+
+if(SMITHPROXY_SSH_MITM)
+    target_compile_definitions(smithproxy PRIVATE USE_LIBSSH)
+    target_link_libraries(smithproxy LibSSH::LibSSH)
+endif()
 
 if("${USE_LMHPP}" STREQUAL "Y")
     target_link_libraries(smithproxy microhttpd)
