@@ -78,28 +78,44 @@ def interactive_shell(channel: paramiko.Channel, username: str) -> None:
     channel.sendall(b"Smithproxy SSH MITM test server\r\n")
     channel.sendall(b"Commands: help, whoami, echo TEXT, exit\r\n")
     pending = bytearray()
+    previous_was_cr = False
+    channel.sendall(b"test-ssh> ")
     while True:
-        channel.sendall(b"test-ssh> ")
-        while b"\n" not in pending:
-            data = channel.recv(4096)
-            if not data:
-                return
-            pending.extend(data)
-        line, _, rest = pending.partition(b"\n")
-        pending = bytearray(rest)
-        command = line.rstrip(b"\r").decode("utf-8", "replace")
-        print(f"shell command={command!r}", flush=True)
-        if command == "exit":
-            channel.sendall(b"bye\r\n")
+        data = channel.recv(4096)
+        if not data:
             return
-        if command in ("help", "?"):
-            channel.sendall(b"help | whoami | echo TEXT | exit\r\n")
-        elif command == "whoami":
-            channel.sendall(username.encode() + b"\r\n")
-        elif command.startswith("echo "):
-            channel.sendall(command[5:].encode() + b"\r\n")
-        elif command:
-            channel.sendall(b"fake server: command not executed\r\n")
+        for value in data:
+            if value in (8, 127):
+                previous_was_cr = False
+                if pending:
+                    pending.pop()
+                    channel.sendall(b"\b \b")
+                continue
+            if value in (10, 13):
+                if value == 10 and previous_was_cr:
+                    previous_was_cr = False
+                    continue
+                previous_was_cr = value == 13
+                channel.sendall(b"\r\n")
+                command = pending.decode("utf-8", "replace")
+                pending.clear()
+                print(f"shell command={command!r}", flush=True)
+                if command == "exit":
+                    channel.sendall(b"bye\r\n")
+                    return
+                if command in ("help", "?"):
+                    channel.sendall(b"help | whoami | echo TEXT | exit\r\n")
+                elif command == "whoami":
+                    channel.sendall(username.encode() + b"\r\n")
+                elif command.startswith("echo "):
+                    channel.sendall(command[5:].encode() + b"\r\n")
+                elif command:
+                    channel.sendall(b"fake server: command not executed\r\n")
+                channel.sendall(b"test-ssh> ")
+                continue
+            previous_was_cr = False
+            pending.append(value)
+            channel.sendall(bytes((value,)))
 
 
 def serve_connection(connection: socket.socket, host_key: paramiko.PKey,
