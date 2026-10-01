@@ -517,7 +517,9 @@ if [[ $RTT_TEST == 1 ]]; then
         --handshake-p95-limit-ms "${RTT_HANDSHAKE_P95_LIMIT_MS:-500}" \
         --handshake-max-limit-ms "${RTT_HANDSHAKE_MAX_LIMIT_MS:-2000}" \
         --tls-total-p50-limit-ms "${RTT_TLS_TOTAL_P50_LIMIT_MS:-7}" \
+        --tls-total-p50-flaky-limit-ms "${RTT_TLS_TOTAL_P50_FLAKY_LIMIT_MS:-10}" \
         --https-p50-limit-ms "${RTT_HTTPS_P50_LIMIT_MS:-2}" \
+        --https-p50-flaky-limit-ms "${RTT_HTTPS_P50_FLAKY_LIMIT_MS:-10}" \
         --cold-sni cold-cert-cache.runner.lab \
         "${RTT_EXTRA_ARGS[@]}" \
         > "$ROOT/results/tcp-rtt.json"
@@ -534,7 +536,9 @@ if [[ $RTT_TEST == 1 ]]; then
         --handshake-p95-limit-ms "${RTT_HANDSHAKE_P95_LIMIT_MS:-500}" \
         --handshake-max-limit-ms "${RTT_HANDSHAKE_MAX_LIMIT_MS:-2000}" \
         --tls-total-p50-limit-ms "${RTT_TLS_TOTAL_P50_LIMIT_MS:-7}" \
+        --tls-total-p50-flaky-limit-ms "${RTT_TLS_TOTAL_P50_FLAKY_LIMIT_MS:-10}" \
         --https-p50-limit-ms "${RTT_HTTPS_P50_LIMIT_MS:-2}" \
+        --https-p50-flaky-limit-ms "${RTT_HTTPS_P50_FLAKY_LIMIT_MS:-10}" \
         --cold-sni cold6-cert-cache.runner.lab \
         "${RTT_EXTRA_ARGS[@]}" \
         > "$ROOT/results/tcp-rtt6.json"

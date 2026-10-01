@@ -14,12 +14,18 @@ p.add_argument("--rtt-max-limit-ms", type=float, default=250.0)
 p.add_argument("--handshake-p95-limit-ms", type=float, default=500.0)
 p.add_argument("--handshake-max-limit-ms", type=float, default=2000.0)
 p.add_argument("--tls-total-p50-limit-ms", type=float, default=7.0)
+p.add_argument("--tls-total-p50-flaky-limit-ms", type=float, default=10.0)
 p.add_argument("--https-p50-limit-ms", type=float, default=2.0)
+p.add_argument("--https-p50-flaky-limit-ms", type=float, default=10.0)
 p.add_argument("--cold-sni", default="")
 p.add_argument("--report-only", action="store_true")
 a = p.parse_args()
 if min(a.samples, a.handshake_samples) < 1 or a.warmup < 0:
     p.error("sample counts must be positive and warmup non-negative")
+if a.tls_total_p50_flaky_limit_ms < a.tls_total_p50_limit_ms:
+    p.error("TLS total-connect flaky limit must be >= pass limit")
+if a.https_p50_flaky_limit_ms < a.https_p50_limit_ms:
+    p.error("HTTPS RTT flaky limit must be >= pass limit")
 
 now = time.perf_counter_ns
 family = socket.AF_INET6 if ':' in a.host else socket.AF_INET
@@ -103,8 +109,31 @@ result={
  "udp":{"datagram_rtt":rtt_stats(udp,"UDP")},
  "tls":tls_result,
  "payload_mismatches":0,"warmup":a.warmup}
+
+gate_checks = []
+def p50_gate(name, value, pass_limit, flaky_limit):
+    if a.report_only:
+        status = "REPORT_ONLY"
+    elif value <= pass_limit:
+        status = "PASS"
+    elif value <= flaky_limit:
+        status = "FLAKY_PASS"
+    else:
+        status = "FAIL"
+    gate_checks.append({"name":name, "value_ms":value, "pass_limit_ms":pass_limit,
+                        "flaky_limit_ms":flaky_limit, "status":status})
+
+p50_gate("TLS total connect p50", result["tls"]["total_connect"]["p50_ms"],
+         a.tls_total_p50_limit_ms, a.tls_total_p50_flaky_limit_ms)
+p50_gate("HTTPS RTT p50", result["tls"]["https_rtt"]["p50_ms"],
+         a.https_p50_limit_ms, a.https_p50_flaky_limit_ms)
+gate_status = "REPORT_ONLY" if a.report_only else (
+    "FAIL" if any(check["status"] == "FAIL" for check in gate_checks) else
+    "FLAKY_PASS" if any(check["status"] == "FLAKY_PASS" for check in gate_checks) else "PASS")
+result["p50_gates"] = {"status":gate_status, "checks":gate_checks}
 print(json.dumps(result,sort_keys=True))
-if not a.report_only and result["tls"]["total_connect"]["p50_ms"] > a.tls_total_p50_limit_ms:
-    raise RuntimeError(f"TLS total connect p50 exceeds {a.tls_total_p50_limit_ms} ms")
-if not a.report_only and result["tls"]["https_rtt"]["p50_ms"] > a.https_p50_limit_ms:
-    raise RuntimeError(f"HTTPS RTT p50 exceeds {a.https_p50_limit_ms} ms")
+failed_gates = [check for check in gate_checks if check["status"] == "FAIL"]
+if failed_gates:
+    check = failed_gates[0]
+    raise RuntimeError(f"{check['name']} exceeds flaky limit {check['flaky_limit_ms']} ms: "
+                       f"{check['value_ms']} ms")

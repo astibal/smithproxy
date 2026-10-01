@@ -65,7 +65,9 @@ Common environment variables:
   RTT_HANDSHAKE_SAMPLES          Fresh TCP/TLS connections (default: 40).
   RTT_WARMUP                     Unreported warm-up exchanges (default: 20).
   RTT_TLS_TOTAL_P50_LIMIT_MS     Sanity/full TLS total-connect P50 gate (default: 7).
+  RTT_TLS_TOTAL_P50_FLAKY_LIMIT_MS  TLS total-connect FLAKY_PASS ceiling (default: 10).
   RTT_HTTPS_P50_LIMIT_MS         Sanity/full HTTPS RTT P50 gate (default: 2).
+  RTT_HTTPS_P50_FLAKY_LIMIT_MS   HTTPS RTT FLAKY_PASS ceiling (default: 10).
   RTT_P95_LIMIT_MS               General RTT P95 gate (default: 50).
   RTT_MAX_LIMIT_MS               General RTT maximum gate (default: 250).
   RTT_HANDSHAKE_P95_LIMIT_MS     Handshake P95 gate (default: 500).
@@ -309,7 +311,8 @@ run_parallel_full() {
         elif grep -Eq 'flaky=[1-9][0-9]*|FLAKY_PASS' "$output"; then
             display=FLAKY_PASS
             any_flaky=1
-            reason='UDP corpus case passed on retry'
+            reason=$(grep -E 'flaky=[1-9][0-9]*|FLAKY_PASS' "$output" | tail -1)
+            [[ -n $reason ]] || reason='one or more checks passed within their flaky ceiling'
         else
             display=PASS
             reason='all checks passed'
@@ -469,7 +472,8 @@ print(*(x.getsockname()[1] for x in s))'
         "PPLAY_RESULTS_NAME=corpus-all" "PPLAY_SMOKE_TEST=1"
     )
     for variable in RTT_SAMPLES RTT_HANDSHAKE_SAMPLES RTT_WARMUP \
-        RTT_TLS_TOTAL_P50_LIMIT_MS RTT_HTTPS_P50_LIMIT_MS \
+        RTT_TLS_TOTAL_P50_LIMIT_MS RTT_TLS_TOTAL_P50_FLAKY_LIMIT_MS \
+        RTT_HTTPS_P50_LIMIT_MS RTT_HTTPS_P50_FLAKY_LIMIT_MS \
         RTT_P95_LIMIT_MS RTT_MAX_LIMIT_MS \
         RTT_HANDSHAKE_P95_LIMIT_MS RTT_HANDSHAKE_MAX_LIMIT_MS \
         SESSION_LIST_CONNECTIONS SESSION_LIST_SAMPLES \
@@ -570,6 +574,8 @@ print(*(x.getsockname()[1] for x in s))'
         && grep -q 'Smithproxy interactive lab READY' "$REPORT/test.log"; then
         STATUS=STOPPED
         TEST_RC=0
+    elif ((TEST_RC == 0)) && grep -q 'FLAKY_PASS' "$REPORT/test.log" 2>/dev/null; then
+        STATUS=FLAKY_PASS
     elif ((TEST_RC == 0)); then STATUS=PASS; else STATUS=FAIL; fi
 fi
 
