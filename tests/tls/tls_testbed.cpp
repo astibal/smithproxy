@@ -8,9 +8,14 @@
 #include <sslcertval.hpp>
 #include <log/logger.hpp>
 
+#include <atomic>
+#include <chrono>
+#include <cstdlib>
 #include <filesystem>
+#include <iostream>
 #include <memory>
 #include <string>
+#include <thread>
 #include <tuple>
 #include <unistd.h>
 #include <vector>
@@ -288,6 +293,130 @@ protected:
 };
 
 std::filesystem::path TLSIntegration::fixture_path_;
+
+TEST_F(TLSIntegration, ControlPathPerformanceTrace) {
+    const char* configured = std::getenv("TLS_PERF_ITERATIONS");
+    if (!configured)
+        GTEST_SKIP() << "set TLS_PERF_ITERATIONS to enable the long trace benchmark";
+
+    const int iterations = std::max(1, std::atoi(configured));
+    const int threads = std::max(1, std::atoi(
+        std::getenv("TLS_PERF_THREADS") ? std::getenv("TLS_PERF_THREADS") : "8"));
+    using clock = std::chrono::steady_clock;
+    auto milliseconds = [](clock::time_point start) {
+        return std::chrono::duration<double, std::milli>(clock::now() - start).count();
+    };
+
+    auto upstream = upstream_certificate();
+    ASSERT_NE(upstream, nullptr);
+    auto spoofed = SSLFactory::factory().spoof(upstream.get());
+    ASSERT_TRUE(spoofed.has_value());
+
+    auto started = clock::now();
+    for (int i = 0; i < iterations; ++i) {
+        const auto result = memory_handshake(spoofed->chain.cert, spoofed->chain.key,
+                                             i & 1 ? TLS1_2_VERSION : TLS1_3_VERSION,
+                                             true, 1, 1);
+        ASSERT_TRUE(result.complete);
+    }
+    const double handshake_ms = milliseconds(started);
+    std::cout << "TLS_PERF_STAGE memory_handshake " << handshake_ms << std::endl;
+
+    std::unique_ptr<SSL_CTX, decltype(&SSL_CTX_free)> shared_ctx(
+        SSL_CTX_new(TLS_server_method()), SSL_CTX_free);
+    ASSERT_NE(shared_ctx, nullptr);
+    ASSERT_EQ(SSL_CTX_use_certificate(shared_ctx.get(), spoofed->chain.cert), 1);
+    ASSERT_EQ(SSL_CTX_use_PrivateKey(shared_ctx.get(), spoofed->chain.key), 1);
+
+    std::vector<std::thread> workers;
+    auto measure_ssl_new = [&](bool global_lock) {
+        std::atomic<int> failures {0};
+        auto phase_started = clock::now();
+        for (int worker = 0; worker < threads; ++worker) {
+            workers.emplace_back([&, worker] {
+                for (int i = worker; i < iterations * threads; i += threads) {
+                    SSL* ssl = nullptr;
+                    if (global_lock) {
+                        auto lock = std::scoped_lock(SSLFactory::factory().lock());
+                        ssl = SSL_new(shared_ctx.get());
+                    } else {
+                        ssl = SSL_new(shared_ctx.get());
+                    }
+                    if (!ssl) {
+                        ++failures;
+                        continue;
+                    }
+                    SSL_free(ssl);
+                }
+            });
+        }
+        for (auto& worker : workers) worker.join();
+        workers.clear();
+        return std::pair {milliseconds(phase_started), failures.load()};
+    };
+
+    const auto [global_ssl_new_ms, global_ssl_new_failures] = measure_ssl_new(true);
+    std::cout << "TLS_PERF_STAGE global_ssl_new " << global_ssl_new_ms << std::endl;
+    const auto [ssl_new_ms, ssl_new_failures] = measure_ssl_new(false);
+    std::cout << "TLS_PERF_STAGE ssl_new " << ssl_new_ms << std::endl;
+    EXPECT_EQ(global_ssl_new_failures, 0);
+    EXPECT_EQ(ssl_new_failures, 0);
+
+    // Compare the old factory-wide critical section with the keyed locking
+    // used by the production MITM path.  Calling the factory directly avoids
+    // pulling connection-owned SSLMitmCom state into this microbenchmark.
+    auto measure_spoof = [&](bool keyed_lock) {
+        std::atomic<int> failures {0};
+        auto phase_started = clock::now();
+        for (int worker = 0; worker < threads; ++worker) {
+            workers.emplace_back([&, worker] {
+                for (int i = worker; i < iterations; i += threads) {
+                    std::vector<std::string> sans {
+                        "DNS:cold-" + std::to_string(i) + ".tls-perf.invalid"
+                    };
+                    const std::string& key = sans.front();
+                    std::optional<CertificateChainCtx> generated;
+                    if (keyed_lock) {
+                        auto lock = std::scoped_lock(SSLFactory::factory().mitm_key_lock(key));
+                        generated = SSLFactory::factory().spoof(upstream.get(), false, &sans);
+                    } else {
+                        auto lock = std::scoped_lock(SSLFactory::factory().lock());
+                        generated = SSLFactory::factory().spoof(upstream.get(), false, &sans);
+                    }
+                    if (!generated) {
+                        ++failures;
+                        continue;
+                    }
+                    X509_free(generated->chain.cert);
+                    generated->chain.cert = nullptr;
+                }
+            });
+        }
+        for (auto& worker : workers) worker.join();
+        workers.clear();
+        return std::pair {milliseconds(phase_started), failures.load()};
+    };
+
+    const auto [global_spoof_ms, global_spoof_failures] = measure_spoof(false);
+    std::cout << "TLS_PERF_STAGE global_spoof " << global_spoof_ms << std::endl;
+    const auto [keyed_spoof_ms, keyed_spoof_failures] = measure_spoof(true);
+    std::cout << "TLS_PERF_STAGE keyed_spoof " << keyed_spoof_ms << std::endl;
+    EXPECT_EQ(global_spoof_failures, 0);
+    EXPECT_EQ(keyed_spoof_failures, 0);
+
+    std::cout << "TLS_PERF {\"iterations\":" << iterations
+              << ",\"threads\":" << threads
+              << ",\"memory_handshake_ms\":" << handshake_ms
+              << ",\"global_ssl_new_ms\":" << global_ssl_new_ms
+              << ",\"ssl_new_ms\":" << ssl_new_ms
+              << ",\"global_spoof_ms\":" << global_spoof_ms
+              << ",\"keyed_spoof_ms\":" << keyed_spoof_ms
+              << ",\"global_ssl_new_failures\":" << global_ssl_new_failures
+              << ",\"ssl_new_failures\":" << ssl_new_failures
+              << ",\"global_spoof_failures\":" << global_spoof_failures
+              << ",\"keyed_spoof_failures\":" << keyed_spoof_failures
+              << "}" << std::endl;
+}
 
 TEST_F(TLSIntegration, SpoofPreservesIdentityAndUsesLocalCA) {
     auto upstream = upstream_certificate();
