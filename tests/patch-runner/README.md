@@ -214,6 +214,7 @@ Frequently useful `--env NAME=VALUE` controls:
 |---|---:|---|
 | `TCP_CHURN_WAVES` / `TCP_CHURN_FLOWS` | `20` / `64` | TCP churn volume |
 | `TCP_CHURN_PARALLEL` | `64` | Maximum simultaneous TCP churn flows |
+| `TCP_CHURN_SYNCHRONIZED` | `0` | Release every TCP wave from one start barrier |
 | `TCP_CHURN_INTERVAL` / `TCP_CHURN_SETTLE` | `0.25` / `15` s | TCP timing |
 | `TCP_CHURN_TIMEOUT` | `3` s | Per-flow TCP timeout |
 | `UDP_CHURN_WAVES` / `UDP_CHURN_FLOWS` | `8` / `96` | UDP churn volume |

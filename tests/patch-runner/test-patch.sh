@@ -73,6 +73,7 @@ Common environment variables:
   CHURN_MIN_PORT                 TCP/UDP churn source-port minimum (default: 20000).
   CHURN_MAX_PORT                 TCP/UDP churn source-port maximum (default: 29999).
   TCP_CHURN_PARALLEL             Maximum simultaneous TCP churn flows (default: 64).
+  TCP_CHURN_SYNCHRONIZED         Release every TCP wave from one barrier (default: 0).
   CURL_HTTP3_PREFIX              curl installation whose bin/curl-h3 supports HTTP/3.
 
 Examples:

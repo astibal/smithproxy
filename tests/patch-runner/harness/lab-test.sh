@@ -558,6 +558,10 @@ if [[ $RTT_TEST == 1 ]]; then
     echo 'PASS6 RTT: TCP, UDP and TLS handshakes/round trips validated within limits'
 fi
 if [[ $TCP_CHURN_TEST == 1 ]]; then
+    TCP_CHURN_EXTRA_ARGS=()
+    if [[ ${TCP_CHURN_SYNCHRONIZED:-0} == 1 ]]; then
+        TCP_CHURN_EXTRA_ARGS+=(--synchronized-start)
+    fi
     ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/tcp-churn.py" \
         --host 198.18.20.2 \
         --waves "${TCP_CHURN_WAVES:-20}" \
@@ -568,6 +572,7 @@ if [[ $TCP_CHURN_TEST == 1 ]]; then
         --timeout "${TCP_CHURN_TIMEOUT:-3}" \
         --min-port "${CHURN_MIN_PORT:-20000}" \
         --max-port "${CHURN_MAX_PORT:-29999}" \
+        "${TCP_CHURN_EXTRA_ARGS[@]}" \
         > "$ROOT/results/tcp-churn.txt"
     cat "$ROOT/results/tcp-churn.txt"
     echo 'PASS4 TCP churn: persistent flow survived proxy creation and deferred cleanup'
@@ -581,6 +586,7 @@ if [[ $TCP_CHURN_TEST == 1 ]]; then
         --timeout "${TCP_CHURN_TIMEOUT:-3}" \
         --min-port "${CHURN_MIN_PORT:-20000}" \
         --max-port "${CHURN_MAX_PORT:-29999}" \
+        "${TCP_CHURN_EXTRA_ARGS[@]}" \
         > "$ROOT/results/tcp-churn6.txt"
     cat "$ROOT/results/tcp-churn6.txt"
     echo 'PASS6 TCP churn: persistent flow survived proxy creation and deferred cleanup'
