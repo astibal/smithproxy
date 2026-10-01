@@ -28,8 +28,10 @@ if(SMITHPROXY_SSH_MITM)
     if(LibSSH_FOUND)
         message(STATUS "SSH MITM enabled: ${LIBSSH_LIBRARY}")
     else()
-        message(WARNING "SSH MITM disabled: libssh development files were not found")
-        set(SMITHPROXY_SSH_MITM OFF)
+        message(FATAL_ERROR
+            "SSH MITM is enabled, but libssh development files were not found. "
+            "Install libssh-dev (Debian/Ubuntu) or configure explicitly with "
+            "-DSMITHPROXY_SSH_MITM=OFF.")
     endif()
 endif()
 
