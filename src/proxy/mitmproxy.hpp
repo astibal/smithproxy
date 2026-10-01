@@ -71,6 +71,7 @@ struct whitelist_verify_entry {
 };
 
 class FilterProxy;
+namespace sx { class StreamHandler; }
 
 
 class IOController {
@@ -89,6 +90,7 @@ class MitmProxy : public baseProxy, public IOController {
 
     std::unique_ptr<socle::baseTrafficLogger> tlog_;
     std::unique_ptr<sx::traffic_log_adapter> traffic_log_adapter_;
+    std::unique_ptr<sx::StreamHandler> stream_handler_;
     
     std::unique_ptr<std::vector<ProfileContentRule>> content_rule_; //save some space and store it as a pointer. Init it only when needed and delete in dtor.
     int matched_policy_ = -1;
@@ -167,6 +169,17 @@ public:
         traffic_log_adapter_ = std::move(adapter);
     }
     void toggle_tlog ();
+
+    // Transfer exclusive stream I/O to a protocol-specific handler. The
+    // handler is intentionally generic; MitmProxy does not know about SSH,
+    // TLS, or any other concrete protocol implementation.
+    bool adopt_stream_handler(std::unique_ptr<sx::StreamHandler> handler);
+    [[nodiscard]] sx::StreamHandler* stream_handler() noexcept {
+        return stream_handler_.get();
+    }
+    [[nodiscard]] sx::StreamHandler const* stream_handler() const noexcept {
+        return stream_handler_.get();
+    }
     
     explicit MitmProxy(baseCom* c);
     ~MitmProxy() override;

@@ -42,6 +42,7 @@
 
 #include <proxy/mitmproxy.hpp>
 #include <proxy/mitmhost.hpp>
+#include <proxy/streamhandler.hpp>
 #include <proxy/filters/filterproxy.hpp>
 #include <proxy/filters/sinkhole.hpp>
 
@@ -71,6 +72,23 @@ MitmProxy::MitmProxy(baseCom* c): baseProxy(c), start_stop_tls_(*this) {
 
     current_sessions()++;
     total_sessions()++;
+}
+
+bool MitmProxy::adopt_stream_handler(std::unique_ptr<sx::StreamHandler> handler) {
+    if (!handler || stream_handler_) {
+        return false;
+    }
+
+    tap();
+    if (!handler->attach(*this)) {
+        handler->shutdown();
+        state().dead(true);
+        shutdown();
+        return false;
+    }
+
+    stream_handler_ = std::move(handler);
+    return true;
 }
 
 void MitmProxy::toggle_tlog () {
@@ -390,6 +408,26 @@ void MitmProxy::add_filter(std::string const& name, FilterProxy* fp) {
 int MitmProxy::handle_sockets_once(baseCom* xcom) {
 
     webhook_session_start();
+
+    if (stream_handler_ && !state().dead()) {
+        auto const result = stream_handler_->drive();
+        using result_t = sx::StreamHandler::result;
+
+        if (result == result_t::finished
+            || result == result_t::blocked
+            || result == result_t::failed) {
+            if (result != result_t::finished) {
+                _war("stream handler %s in state %s: %s",
+                     result == result_t::blocked ? "blocked" : "failed",
+                     stream_handler_->state().c_str(),
+                     stream_handler_->error().c_str());
+            }
+            stream_handler_->shutdown();
+            state().dead(true);
+            shutdown();
+            return 0;
+        }
+    }
 
     return baseProxy::handle_sockets_once(xcom);
 }
