@@ -6,6 +6,7 @@
 #define SMITHPROXY_STREAMHANDLER_HPP
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <string_view>
 
@@ -13,8 +14,12 @@ class MitmProxy;
 
 namespace sx {
 
+enum class stream_direction { upstream, downstream };
+
 class StreamHandler {
 public:
+    using plaintext_observer = std::function<void(stream_direction, std::string_view)>;
+
     enum class result {
         progress,
         wait,
@@ -31,6 +36,8 @@ public:
     virtual bool attach(MitmProxy& proxy) = 0;
     virtual result drive() = 0;
     virtual void shutdown() noexcept = 0;
+    // Reports application bytes after protocol decoding, before re-encoding.
+    virtual void observe_plaintext(plaintext_observer observer) = 0;
 
     // A committed handler owns the stream until close. Raw forwarding must
     // never be restored after this becomes true.

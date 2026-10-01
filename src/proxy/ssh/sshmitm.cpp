@@ -614,7 +614,8 @@ public:
     }
 
     int read_channel(ssh_channel channel, std::string& pending, bool stderr_stream,
-                     char const* direction, std::uint64_t& byte_counter) {
+                     char const* direction, std::uint64_t& byte_counter,
+                     bool upstream_direction) {
         if (!pending.empty()) return 0;
         char buffer[32768];
         auto const amount = ssh_channel_read_nonblocking(
@@ -622,6 +623,9 @@ public:
         if (amount > 0) {
             pending.assign(buffer, static_cast<std::size_t>(amount));
             byte_counter += static_cast<std::uint64_t>(amount);
+            if (options_.plaintext_observer) {
+                options_.plaintext_observer(upstream_direction, pending);
+            }
             auto* payload_log = channel_mode_ == channel_mode::shell
                 ? &shell_log()
                 : channel_mode_ == channel_mode::exec ? &exec_log() : nullptr;
@@ -648,9 +652,9 @@ public:
         }
 
         for (auto const result : {
-                 read_channel(downstream_channel_, to_upstream_, false, "client->server", bytes_up_),
-                 read_channel(upstream_channel_, to_downstream_, false, "server->client", bytes_down_),
-                 read_channel(upstream_channel_, stderr_to_downstream_, true, "server->client", bytes_down_)}) {
+                 read_channel(downstream_channel_, to_upstream_, false, "client->server", bytes_up_, true),
+                 read_channel(upstream_channel_, to_downstream_, false, "server->client", bytes_down_, false),
+                 read_channel(upstream_channel_, stderr_to_downstream_, true, "server->client", bytes_down_, false)}) {
             if (result == SSH_ERROR) {
                 set_error("SSH channel read failed");
                 return drive_result::failed;

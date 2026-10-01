@@ -6,8 +6,10 @@
 #define SMITHPROXY_SSHMITM_HPP
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 
 #include <proxy/ssh/sshprotocol.hpp>
 
@@ -48,6 +50,7 @@ logan_lite& exec_log();
 struct transport_options {
     std::string host_key;
     std::string upstream_host;
+    std::function<void(bool upstream, std::string_view)> plaintext_observer;
 };
 
 class mitm_transport {

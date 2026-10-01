@@ -31,6 +31,12 @@ bool stream_handler::attach(MitmProxy& proxy) {
     }
 
     auto options = options_;
+    options.plaintext_observer = [observer = plaintext_observer_](
+                                     bool upstream, std::string_view plaintext) {
+        if (observer) {
+            observer(upstream ? stream_direction::upstream : stream_direction::downstream, plaintext);
+        }
+    };
     if (options.upstream_host.empty()) {
         options.upstream_host = right->host();
     }
@@ -45,6 +51,10 @@ bool stream_handler::attach(MitmProxy& proxy) {
     // untap and fall back to forwarding a partially processed SSH stream.
     committed_ = true;
     return true;
+}
+
+void stream_handler::observe_plaintext(plaintext_observer observer) {
+    plaintext_observer_ = std::move(observer);
 }
 
 sx::StreamHandler::result stream_handler::drive() {

@@ -2,6 +2,7 @@
 
 #include <array>
 #include <string>
+#include <utility>
 
 #include <sys/socket.h>
 #include <unistd.h>
@@ -46,7 +47,10 @@ TEST(SshMitmTransport, PeeksAndPreservesBothIdentifications) {
     ASSERT_TRUE(client.valid());
     ASSERT_TRUE(server.valid());
 
-    sx::ssh::mitm_transport transport({"unused-before-kex", "server.test"});
+    auto options = sx::ssh::transport_options{};
+    options.host_key = "unused-before-kex";
+    options.upstream_host = "server.test";
+    sx::ssh::mitm_transport transport(std::move(options));
     ASSERT_TRUE(transport.attach(client.proxy_end(), server.proxy_end()));
 
     EXPECT_EQ(transport.drive(), sx::ssh::drive_result::progress);
@@ -70,7 +74,10 @@ TEST(SshMitmTransport, BlocksSshOneBeforeLibsshTakesSocket) {
     ASSERT_TRUE(client.valid());
     ASSERT_TRUE(server.valid());
 
-    sx::ssh::mitm_transport transport({"unused-before-kex", "server.test"});
+    auto options = sx::ssh::transport_options{};
+    options.host_key = "unused-before-kex";
+    options.upstream_host = "server.test";
+    sx::ssh::mitm_transport transport(std::move(options));
     ASSERT_TRUE(transport.attach(client.proxy_end(), server.proxy_end()));
     ASSERT_EQ(transport.drive(), sx::ssh::drive_result::progress);
     ASSERT_EQ(transport.drive(), sx::ssh::drive_result::progress);

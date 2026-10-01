@@ -71,7 +71,10 @@ struct whitelist_verify_entry {
 };
 
 class FilterProxy;
-namespace sx { class StreamHandler; }
+namespace sx {
+class StreamHandler;
+enum class stream_direction;
+}
 
 
 class IOController {
@@ -195,6 +198,7 @@ public:
 
     // actual proxy functions manipulating data buffers
     void write_traffic_log(side_t side, baseHostCX* cx, buffer* custom_buffer  = nullptr);
+    void write_stream_traffic(sx::stream_direction direction, std::string_view plaintext);
     void proxy_dump_packet(side_t sid, buffer const& buf);
     void proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redirected);
 

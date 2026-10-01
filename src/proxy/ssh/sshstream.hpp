@@ -21,6 +21,7 @@ public:
     bool attach(MitmProxy& proxy) override;
     result drive() override;
     void shutdown() noexcept override;
+    void observe_plaintext(plaintext_observer observer) override;
 
     [[nodiscard]] bool committed() const noexcept override { return committed_; }
     [[nodiscard]] std::string_view session_protocol() const noexcept override { return "ssh"; }
@@ -37,6 +38,7 @@ private:
     std::string final_error_;
     std::uint64_t final_bytes_up_ = 0;
     std::uint64_t final_bytes_down_ = 0;
+    plaintext_observer plaintext_observer_;
 };
 
 } // namespace sx::ssh
