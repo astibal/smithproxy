@@ -356,6 +356,9 @@ void CfgValueHelp::init() {
     add("settings.tuning.host_io_batch", "maximum bytes drained by one host I/O dispatch")
             .may_be_empty(false)
             .value_filter(VALUE_UINT_RANGE<16384,16777216>);
+    add("settings.tuning.tls_write_chunk", "maximum plaintext bytes offered to one SSL_write")
+            .may_be_empty(false)
+            .value_filter(VALUE_UINT_RANGE<1024,1048576>);
 
 
 

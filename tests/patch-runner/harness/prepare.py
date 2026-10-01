@@ -31,6 +31,13 @@ internal_api_port = os.environ.get('SMITHPROXY_API_PORT', '55555')
 if not internal_api_port.isdigit() or not 1025 <= int(internal_api_port) < 65535:
     raise ValueError('SMITHPROXY_API_PORT must be an unprivileged TCP port')
 text = (source/'etc/smithproxy.cfg').read_text()
+tls_write_chunk = os.environ.get('TLS_WRITE_CHUNK')
+if tls_write_chunk is not None:
+    if not tls_write_chunk.isdigit() or not 1024 <= int(tls_write_chunk) <= 1048576:
+        raise ValueError('TLS_WRITE_CHUNK must be between 1024 and 1048576')
+    text = text.replace('settings = {', f'''settings = {{
+    tuning = {{ tls_write_chunk = {tls_write_chunk}; }};
+''', 1)
 quic_test = os.environ.get('QUIC_TEST') == '1'
 if os.environ.get('POLICY_TEST') == '1':
     port_objects = '''

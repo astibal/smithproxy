@@ -33,9 +33,12 @@ def transfer_once(args, mode, concurrency, payload_file, run):
                                      stderr=subprocess.PIPE, text=True),
             range(concurrency)))
     elapsed = time.monotonic() - started
-    failures = [result.stderr.strip() for result in results if result.returncode]
+    failures = [f"flow={index}: {result.stderr.strip()}"
+                for index, result in enumerate(results) if result.returncode]
     if failures:
-        raise RuntimeError("; ".join(failures))
+        raise RuntimeError(
+            f"mode={mode} concurrency={concurrency} run={run}: "
+            + "; ".join(failures))
     mib = args.bytes * concurrency / (1024 * 1024)
     return {"seconds": elapsed, "mib_per_second": mib / elapsed}
 
