@@ -22,19 +22,6 @@ project(smithproxy C CXX)
 include(CTest)
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}")
 
-option(SMITHPROXY_SSH_MITM "Build the libssh-based SSHv2 MITM" ON)
-if(SMITHPROXY_SSH_MITM)
-    find_package(LibSSH QUIET)
-    if(LibSSH_FOUND)
-        message(STATUS "SSH MITM enabled: ${LIBSSH_LIBRARY}")
-    else()
-        message(FATAL_ERROR
-            "SSH MITM is enabled, but libssh development files were not found. "
-            "Install libssh-dev (Debian/Ubuntu) or configure explicitly with "
-            "-DSMITHPROXY_SSH_MITM=OFF.")
-    endif()
-endif()
-
 SET(CMAKE_SOURCE_DIR "src/")
 SET(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}")
 
@@ -42,6 +29,18 @@ set(USE_PYTHON "N")
 set(USE_LMHPP "Y")
 set(USE_UNWIND "Y")
 set(USE_PAM "Y")
+set(USE_LIBSSH "Y")
+
+if("${USE_LIBSSH}" STREQUAL "Y")
+    find_package(LibSSH QUIET)
+    if(LibSSH_FOUND)
+        message(STATUS "SSH MITM enabled: ${LIBSSH_LIBRARY}")
+    else()
+        message(FATAL_ERROR
+            "SSH MITM is enabled, but libssh development files were not found. "
+            "Install libssh-dev (Debian/Ubuntu) or set USE_LIBSSH to N.")
+    endif()
+endif()
 
 set(OPT_MEMPOOL_NOEXCEPT "Y")
 set(OPT_MEMPOOL_DISABLE "N")
@@ -709,7 +708,7 @@ endif()
 
 target_link_libraries(smithproxy smithproxy_libcli smithproxy_qpack socle_lib pthread ssl crypto rt ${UNWIND_LIB})
 
-if(SMITHPROXY_SSH_MITM)
+if("${USE_LIBSSH}" STREQUAL "Y")
     target_compile_definitions(smithproxy PRIVATE USE_LIBSSH)
     target_sources(smithproxy PRIVATE
             src/proxy/ssh/sshmitm.cpp
