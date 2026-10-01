@@ -6,6 +6,9 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <libssh/libssh.h>
+#include <log/logan.hpp>
+
 #include <proxy/ssh/sshmitm.hpp>
 
 namespace {
@@ -76,4 +79,33 @@ TEST(SshMitmTransport, BlocksSshOneBeforeLibsshTakesSocket) {
     EXPECT_EQ(transport.drive(), sx::ssh::drive_result::blocked);
     EXPECT_EQ(transport.state(), sx::ssh::mitm_state::blocked);
     EXPECT_EQ(transport.error(), "SSH protocol version 1 is blocked");
+}
+
+TEST(SshMitmTransport, InitiallySupportsOnlyPasswordAuthentication) {
+    EXPECT_EQ(sx::ssh::classify_authentication_method(SSH_AUTH_METHOD_PASSWORD),
+              sx::ssh::authentication_method::password);
+    EXPECT_EQ(sx::ssh::classify_authentication_method(SSH_AUTH_METHOD_PUBLICKEY),
+              sx::ssh::authentication_method::unsupported);
+    EXPECT_EQ(sx::ssh::classify_authentication_method(SSH_AUTH_METHOD_INTERACTIVE),
+              sx::ssh::authentication_method::unsupported);
+}
+
+TEST(SshMitmTransport, ClassifiesSupportedSessionChannelRequests) {
+    using sx::ssh::channel_request_kind;
+    EXPECT_EQ(sx::ssh::classify_channel_request(SSH_CHANNEL_REQUEST_PTY),
+              channel_request_kind::pty);
+    EXPECT_EQ(sx::ssh::classify_channel_request(SSH_CHANNEL_REQUEST_SHELL),
+              channel_request_kind::shell);
+    EXPECT_EQ(sx::ssh::classify_channel_request(SSH_CHANNEL_REQUEST_EXEC),
+              channel_request_kind::exec);
+    EXPECT_EQ(sx::ssh::classify_channel_request(SSH_CHANNEL_REQUEST_SUBSYSTEM),
+              channel_request_kind::subsystem);
+    EXPECT_EQ(sx::ssh::classify_channel_request(SSH_CHANNEL_REQUEST_X11),
+              channel_request_kind::unsupported);
+}
+
+TEST(SshMitmTransport, RegistersSeparateTransportAndPayloadLoggers) {
+    EXPECT_EQ(sx::ssh::transport_log().topic(), "com.ssh");
+    EXPECT_EQ(sx::ssh::shell_log().topic(), "com.ssh.shell");
+    EXPECT_EQ(sx::ssh::exec_log().topic(), "com.ssh.exec");
 }

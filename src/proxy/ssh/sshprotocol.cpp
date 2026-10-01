@@ -219,6 +219,18 @@ bool handshake_fsm::key_exchange_complete() {
     return move_to(mitm_state::authentication);
 }
 
+bool handshake_fsm::authentication_complete() {
+    return move_to(mitm_state::channels);
+}
+
+bool handshake_fsm::begin_closing() {
+    return move_to(mitm_state::closing);
+}
+
+bool handshake_fsm::close_complete() {
+    return move_to(mitm_state::closed);
+}
+
 void handshake_fsm::fail(std::string reason) {
     error_ = std::move(reason);
     if (state_ != mitm_state::closed) {

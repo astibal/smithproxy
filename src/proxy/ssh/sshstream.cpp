@@ -56,7 +56,7 @@ sx::StreamHandler::result stream_handler::drive() {
     switch (transport_->drive()) {
         case drive_result::progress:             return result::progress;
         case drive_result::again:                return result::wait;
-        case drive_result::authentication_ready: return result::progress;
+        case drive_result::finished:             return result::finished;
         case drive_result::blocked:              return result::blocked;
         case drive_result::failed:               return result::failed;
     }

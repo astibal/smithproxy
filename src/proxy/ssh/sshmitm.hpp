@@ -10,15 +10,39 @@
 
 #include <proxy/ssh/sshprotocol.hpp>
 
+class logan_lite;
+
 namespace sx::ssh {
 
 enum class drive_result {
     progress,
     again,
-    authentication_ready,
+    finished,
     blocked,
     failed,
 };
+
+enum class authentication_method {
+    unsupported,
+    password,
+};
+
+[[nodiscard]] authentication_method classify_authentication_method(int subtype) noexcept;
+
+enum class channel_request_kind {
+    unsupported,
+    pty,
+    shell,
+    exec,
+    subsystem,
+    environment,
+    window_change,
+};
+
+[[nodiscard]] channel_request_kind classify_channel_request(int subtype) noexcept;
+logan_lite& transport_log();
+logan_lite& shell_log();
+logan_lite& exec_log();
 
 struct transport_options {
     std::string host_key;

@@ -82,3 +82,19 @@ TEST(SshMitmState, BlocksProtocolOneBeforeKeyExchange) {
     EXPECT_EQ(fsm.state(), mitm_state::blocked);
     EXPECT_EQ(fsm.error(), "SSH protocol version 1 is blocked");
 }
+
+TEST(SshMitmState, EntersChannelsOnlyAfterAuthentication) {
+    handshake_fsm fsm;
+    ASSERT_TRUE(fsm.begin_upstream_connect());
+    ASSERT_TRUE(fsm.upstream_connected());
+    ASSERT_EQ(fsm.feed_server_identification("SSH-2.0-server\r\n"), parse_status::complete);
+    ASSERT_EQ(fsm.feed_client_identification("SSH-2.0-client\r\n"), parse_status::complete);
+    ASSERT_TRUE(fsm.key_exchange_complete());
+
+    EXPECT_EQ(fsm.state(), mitm_state::authentication);
+    EXPECT_TRUE(fsm.authentication_complete());
+    EXPECT_EQ(fsm.state(), mitm_state::channels);
+    EXPECT_TRUE(fsm.begin_closing());
+    EXPECT_TRUE(fsm.close_complete());
+    EXPECT_EQ(fsm.state(), mitm_state::closed);
+}
