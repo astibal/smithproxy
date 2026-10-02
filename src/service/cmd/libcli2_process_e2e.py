@@ -179,7 +179,8 @@ def main() -> None:
                 "diag dns domain list", "diag dns domain clear",
                 "diag proxy policy list", "diag proxy session list",
                 "diag proxy session list-nonames", "diag proxy session clear",
-                "diag proxy session tls-info", "diag proxy session active", "diag proxy io list",
+                "diag proxy session tls-info", "diag proxy session ssh-info",
+                "diag proxy session active", "diag proxy io list",
                 "diag writer stats", "diag api info",
                 "diag neighbor list", "diag neighbor stats", "diag neighbor clear",
                 "diag neighbor webhook-update-all", "diag neighbor webhook-update-ping",
@@ -238,6 +239,23 @@ def main() -> None:
             cli.command_ok("set inspect true")
             cli.command_ok("end")
             cli.command_ok("remove libcli2_e2e_tls")
+            cli.command_ok("end")
+
+            cli.command_ok("edit ssh_profiles")
+            cli.command_ok("add libcli2_e2e_ssh")
+            cli.command_ok("edit libcli2_e2e_ssh")
+            require(cli.command_ok("set shell reject"), "config:/ssh_profiles.libcli2_e2e_ssh")
+            cli.command_ok("set exec pass")
+            cli.command_ok("set subsystem reject")
+            cli.command_ok("set pty pass")
+            cli.command_ok("set environment reject")
+            cli.command_ok("set local_forward pass")
+            cli.command_ok("set remote_forward reject")
+            cli.command_ok("set x11 reject")
+            cli.command_ok("set agent reject")
+            cli.command_ok("end")
+            require(cli.command_ok("show config ssh_profiles"), "libcli2_e2e_ssh")
+            cli.command_ok("remove libcli2_e2e_ssh")
             cli.command_ok("end")
 
             blocked = cli.command("edit address_objects")

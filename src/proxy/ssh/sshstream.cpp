@@ -88,6 +88,7 @@ void stream_handler::shutdown() noexcept {
         final_error_ = error();
         final_bytes_up_ = transport_->bytes_up();
         final_bytes_down_ = transport_->bytes_down();
+        final_diagnostics_ = transport_->diagnostics();
         transport_.reset();
     }
 }
@@ -106,6 +107,10 @@ std::string stream_handler::state() const {
 
 std::string stream_handler::error() const {
     return transport_ ? transport_->error() : final_error_;
+}
+
+std::string stream_handler::diagnostics() const {
+    return transport_ ? transport_->diagnostics() : final_diagnostics_;
 }
 
 } // namespace sx::ssh

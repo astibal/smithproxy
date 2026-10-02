@@ -57,6 +57,20 @@ channel_request_kind classify_channel_request(int subtype) noexcept {
     }
 }
 
+char const* channel_request_name(channel_request_kind kind) noexcept {
+    switch (kind) {
+        case channel_request_kind::pty:           return "pty";
+        case channel_request_kind::shell:         return "shell";
+        case channel_request_kind::exec:          return "exec";
+        case channel_request_kind::subsystem:     return "subsystem";
+        case channel_request_kind::environment:   return "environment";
+        case channel_request_kind::window_change: return "window-change";
+        case channel_request_kind::x11:           return "x11";
+        case channel_request_kind::unsupported:   return "unsupported";
+    }
+    return "unsupported";
+}
+
 namespace {
 
 constexpr std::size_t peek_buffer_size = 8192;
@@ -508,6 +522,7 @@ public:
                 ssh_message_free(message);
                 xdia(transport_log())("upstream password authentication accepted for user='%s'",
                                       pending_username_.c_str());
+                authenticated_username_ = pending_username_;
                 pending_username_.clear();
                 if (!fsm_.authentication_complete()) {
                     error_ = fsm_.error();
@@ -850,8 +865,8 @@ public:
                 xdia(transport_log())("rejecting SSH channel request subtype=%d by profile/support",
                                       ssh_message_subtype(message));
                 emit_event(true, string_format(
-                    "ssh event=channel-request subtype=%d action=reject",
-                    ssh_message_subtype(message)));
+                    "ssh event=channel-request type=%s subtype=%d action=reject",
+                    channel_request_name(kind), ssh_message_subtype(message)));
                 return reject_message(message, false);
             }
             pending_request_channel_ = found->get();
@@ -870,6 +885,7 @@ public:
                 channel->mode = channel_mode::shell;
                 channel->expects_exit_state = true;
                 xdia(transport_log())("interactive shell requested");
+                emit_event(true, "ssh event=shell action=pass");
             } else if (kind == channel_request_kind::exec) {
                 channel->mode = channel_mode::exec;
                 channel->expects_exit_state = true;
@@ -888,13 +904,22 @@ public:
                 auto const* name = ssh_message_channel_request_env_name(message);
                 auto const* value = ssh_message_channel_request_env_value(message);
                 xdeb(transport_log())("environment %s='%s'", name ? name : "", value ? value : "");
+                emit_event(true, string_format(
+                    "ssh event=environment name=\"%s\" value=\"%s\" action=pass",
+                    name ? ESC_(name).c_str() : "", value ? ESC_(value).c_str() : ""));
             } else if (kind == channel_request_kind::pty) {
                 auto const request = message_pty_request(message);
                 xdeb(transport_log())("pty term='%s' size=%dx%d", request.terminal.c_str(),
                                       request.columns, request.rows);
+                emit_event(true, string_format(
+                    "ssh event=pty term=\"%s\" columns=%d rows=%d action=pass",
+                    ESC_(request.terminal).c_str(), request.columns, request.rows));
             } else if (kind == channel_request_kind::window_change) {
                 auto const request = message_pty_request(message);
                 xdeb(transport_log())("pty resize=%dx%d", request.columns, request.rows);
+                emit_event(true, string_format(
+                    "ssh event=window-change columns=%d rows=%d action=pass",
+                    request.columns, request.rows));
             }
             if (ssh_message_channel_request_reply_success(message) != SSH_OK) {
                 ssh_message_free(message);
@@ -1209,6 +1234,7 @@ public:
     ssh_message pending_auth_message_ = nullptr;
     std::string pending_username_;
     std::string pending_password_;
+    std::string authenticated_username_;
     ssh_message pending_open_message_ = nullptr;
     ssh_message pending_channel_message_ = nullptr;
     ssh_message pending_global_message_ = nullptr;
@@ -1224,6 +1250,29 @@ public:
     std::vector<std::unique_ptr<channel_pair>> retired_channels_;
     std::uint64_t bytes_up_ = 0;
     std::uint64_t bytes_down_ = 0;
+
+public:
+    [[nodiscard]] std::string diagnostics() const {
+        std::size_t session_channels = 0;
+        std::size_t forwarding_channels = 0;
+        for (auto const& channel : channels_) {
+            if (channel->type == SSH_CHANNEL_SESSION) ++session_channels;
+            else ++forwarding_channels;
+        }
+        std::stringstream out;
+        out << "profile=" << (options_.profile_name.empty() ? "-" : options_.profile_name)
+            << " user=\"" << ESC_(authenticated_username_) << '"'
+            << " client_banner=\"" << ESC_(fsm_.client_identification().raw) << '"'
+            << " server_banner=\"" << ESC_(fsm_.server_identification().raw) << '"'
+            << " channels=" << channels_.size()
+            << " session=" << session_channels
+            << " forwarding=" << forwarding_channels
+            << " retired=" << retired_channels_.size()
+            << " opening=" << (opening_channel_ ? 1 : 0)
+            << " queued_server=" << server_open_channels_.size();
+        if (!error_.empty()) out << " error=\"" << ESC_(error_) << '"';
+        return out.str();
+    }
 };
 
 mitm_transport::mitm_transport(transport_options options)
@@ -1261,6 +1310,10 @@ std::uint64_t mitm_transport::bytes_up() const noexcept {
 
 std::uint64_t mitm_transport::bytes_down() const noexcept {
     return impl_->bytes_down_;
+}
+
+std::string mitm_transport::diagnostics() const {
+    return impl_->diagnostics();
 }
 
 } // namespace sx::ssh

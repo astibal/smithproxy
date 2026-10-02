@@ -51,6 +51,8 @@ public:
     [[nodiscard]] virtual std::uint64_t bytes_down() const noexcept { return 0; }
     [[nodiscard]] virtual std::string state() const = 0;
     [[nodiscard]] virtual std::string error() const = 0;
+    // Protocol-specific, human-readable session details for diagnostics.
+    [[nodiscard]] virtual std::string diagnostics() const { return {}; }
 };
 
 inline std::string session_protocol_names(std::string text, std::string_view protocol) {

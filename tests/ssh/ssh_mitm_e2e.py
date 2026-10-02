@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end password/exec test through Smithproxy's SOCKS listener."""
+"""End-to-end SSHv2 feature test through Smithproxy's SOCKS listener."""
 
 from __future__ import annotations
 
@@ -29,6 +29,9 @@ X11_PAYLOAD = b"ssh-x11-e2e"
 X11_REPLY = b"ssh-x11-reply"
 AGENT_PAYLOAD = b"ssh-agent-e2e"
 AGENT_REPLY = b"ssh-agent-reply"
+SHELL_PAYLOAD = b"shell-e2e\n"
+SHELL_REPLY = b"shell-reply: shell-e2e\n"
+SUBSYSTEM_REPLY = b"subsystem-reply\n"
 
 
 def free_port() -> int:
@@ -54,6 +57,10 @@ class TestServer(paramiko.ServerInterface):
         self.remote_forward_cancelled = threading.Event()
         self.x11_requested = threading.Event()
         self.agent_requested = threading.Event()
+        self.shell_requested = threading.Event()
+        self.subsystem_requested = threading.Event()
+        self.pty_requested = threading.Event()
+        self.environment_requested = threading.Event()
 
     def get_allowed_auths(self, username: str) -> str:
         return "password"
@@ -80,6 +87,45 @@ class TestServer(paramiko.ServerInterface):
             channel.sendall(reply)
             channel.send_exit_status(0)
             channel.shutdown_write()
+            channel.close()
+
+        threading.Thread(target=answer, daemon=True).start()
+        return True
+
+    def check_channel_pty_request(self, channel: paramiko.Channel, term: bytes,
+                                  width: int, height: int, pixelwidth: int,
+                                  pixelheight: int, modes: bytes) -> bool:
+        self.pty_requested.set()
+        return True
+
+    def check_channel_env_request(self, channel: paramiko.Channel,
+                                  name: bytes, value: bytes) -> bool:
+        if name == b"SMITHPROXY_E2E" and value == b"yes":
+            self.environment_requested.set()
+            return True
+        return False
+
+    def check_channel_shell_request(self, channel: paramiko.Channel) -> bool:
+        self.shell_requested.set()
+
+        def answer() -> None:
+            channel.sendall(b"shell-reply: " + channel.recv(65536))
+            channel.send_exit_status(0)
+            channel.close()
+
+        threading.Thread(target=answer, daemon=True).start()
+        return True
+
+    def check_channel_subsystem_request(self, channel: paramiko.Channel,
+                                        name: str) -> bool:
+        if name != "smithproxy-test":
+            return False
+        self.subsystem_requested.set()
+
+        def answer() -> None:
+            time.sleep(0.2)
+            channel.sendall(SUBSYSTEM_REPLY)
+            channel.send_exit_status(0)
             channel.close()
 
         threading.Thread(target=answer, daemon=True).start()
@@ -133,7 +179,9 @@ def run_server(listener: socket.socket, host_key: paramiko.PKey,
             transport.start_server(server=server)
             print("e2e server: SSH transport started", flush=True)
             direct_threads: list[threading.Thread] = []
-            for _ in range(5 if expect_direct else 4):
+            # Two exec, shell, subsystem, X11-control and agent-control
+            # sessions, plus the optional direct-tcpip channel.
+            for _ in range(7 if expect_direct else 6):
                 channel = transport.accept(15)
                 if channel is None:
                     raise AssertionError("test SSH server did not receive all channels")
@@ -160,6 +208,12 @@ def run_server(listener: socket.socket, host_key: paramiko.PKey,
                     raise AssertionError("test SSH server did not receive forwarding cancellation")
             if not feature_requests_done.wait(15):
                 raise AssertionError("client did not finish feature requests")
+            for event, name in ((server.shell_requested, "shell"),
+                                (server.subsystem_requested, "subsystem"),
+                                (server.pty_requested, "pty"),
+                                (server.environment_requested, "environment")):
+                if not event.wait(15):
+                    raise AssertionError(f"test SSH server did not receive {name} request")
             if expect_x11:
                 if not server.x11_requested.wait(15):
                     raise AssertionError("test SSH server did not receive X11 request")
@@ -282,13 +336,17 @@ def print_session_list(port: int) -> None:
             cli.recv(65536)
         except TimeoutError:
             pass
-        cli.sendall(b"diag proxy session list 8\r\n")
+        cli.sendall(b"diag proxy session ssh-info 8\r\n")
         time.sleep(0.3)
         try:
             response = cli.recv(65536)
         except TimeoutError:
             response = b""
         print(f"--- session list ---\n{response.decode('utf-8', 'replace')}", flush=True)
+        for marker in (b"ssh:channels", b"stream: profile=e2e",
+                       b"client_banner=", b"server_banner=", b"channels="):
+            if marker not in response:
+                raise AssertionError(f"SSH session diagnostics missing {marker!r}")
 
 
 def assert_capture_annotations(capture_dir: Path, expected: tuple[bytes, ...]) -> None:
@@ -440,6 +498,21 @@ def main() -> None:
                     raise AssertionError("exec channel returned a non-zero exit status")
                 received.append(bytes(output))
 
+            shell = client.open_session(timeout=15)
+            shell.update_environment({"SMITHPROXY_E2E": "yes"})
+            shell.get_pty(term="xterm", width=100, height=40)
+            shell.invoke_shell()
+            shell.sendall(SHELL_PAYLOAD)
+            if shell.recv(len(SHELL_REPLY)) != SHELL_REPLY:
+                raise AssertionError("unexpected interactive shell response")
+            shell.close()
+
+            subsystem = client.open_session(timeout=15)
+            subsystem.invoke_subsystem("smithproxy-test")
+            if subsystem.recv(len(SUBSYSTEM_REPLY)) != SUBSYSTEM_REPLY:
+                raise AssertionError("unexpected subsystem response")
+            subsystem.close()
+
             forwarded_reply = b""
             try:
                 forwarded = client.open_channel(
@@ -545,6 +618,8 @@ def main() -> None:
             process.terminate()
             process.wait(timeout=25)
             annotations = [b"ssh event=channel-open", b"ssh event=exec",
+                           b"ssh event=shell", b"ssh event=subsystem",
+                           b"ssh event=pty", b"ssh event=environment",
                            b"ssh event=relay"]
             if args.reject_remote_forward:
                 annotations.append(b"ssh event=remote-forward action=reject")
@@ -554,7 +629,7 @@ def main() -> None:
             if args.reject_local_forward:
                 annotations.append(b"type=direct-tcpip action=reject")
             if args.reject_x11:
-                annotations.append(b"ssh event=channel-request subtype=7 action=reject")
+                annotations.append(b"type=x11 subtype=7 action=reject")
             else:
                 annotations.append(b"ssh event=channel-open type=x11 action=pass")
             if args.reject_agent:
@@ -571,7 +646,7 @@ def main() -> None:
             elif args.reject_local_forward:
                 print("PASS: local_forward=reject blocked direct-tcpip; remote forward passed")
             else:
-                print("PASS: exec, TCP, X11 and agent channels traversed one SSH MITM transport")
+                print("PASS: commands, PTY, subsystem, TCP, X11 and agent traversed one SSH MITM transport")
         except BaseException:
             process.terminate()
             try:

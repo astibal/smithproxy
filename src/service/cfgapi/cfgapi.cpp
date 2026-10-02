@@ -3178,6 +3178,7 @@ int CfgFactory::policy_apply (baseHostCX *originator, MitmProxy *proxy, int matc
                     originator->full_name('L').c_str(),
                     rule->profile_ssh->element_name().c_str());
                 auto options = sx::ssh::transport_options{};
+                options.profile_name = rule->profile_ssh->element_name();
                 options.host_key = rule->profile_ssh->host_key;
                 options.features.shell = rule->profile_ssh->shell;
                 options.features.exec = rule->profile_ssh->exec;

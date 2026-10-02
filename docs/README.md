@@ -4,3 +4,7 @@ For help visit:
   * Documentation: [https://smithproxy.readthedocs.org](https://smithproxy.readthedocs.org)  
   * Discord server: [https://discord.gg/vf4Qwwt](https://discord.gg/vf4Qwwt)  
   * email support: `<support@smithproxy.org>`  
+
+Feature documentation:
+
+  * [SSH MITM configuration and diagnostics](ssh-mitm.md)

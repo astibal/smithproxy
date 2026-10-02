@@ -44,6 +44,7 @@ enum class channel_request_kind {
 };
 
 [[nodiscard]] channel_request_kind classify_channel_request(int subtype) noexcept;
+[[nodiscard]] char const* channel_request_name(channel_request_kind kind) noexcept;
 logan_lite& transport_log();
 logan_lite& shell_log();
 logan_lite& exec_log();
@@ -60,6 +61,7 @@ struct transport_options {
         bool x11 = true;
         bool agent = true;
     } features;
+    std::string profile_name;
     std::string host_key;
     std::string upstream_host;
     std::function<void(bool upstream, std::string_view)> plaintext_observer;
@@ -86,6 +88,7 @@ public:
     [[nodiscard]] identification const& client_identification() const noexcept;
     [[nodiscard]] std::uint64_t bytes_up() const noexcept;
     [[nodiscard]] std::uint64_t bytes_down() const noexcept;
+    [[nodiscard]] std::string diagnostics() const;
 
 private:
     class impl;

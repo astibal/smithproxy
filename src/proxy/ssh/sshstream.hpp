@@ -30,6 +30,7 @@ public:
     [[nodiscard]] std::uint64_t bytes_down() const noexcept override;
     [[nodiscard]] std::string state() const override;
     [[nodiscard]] std::string error() const override;
+    [[nodiscard]] std::string diagnostics() const override;
 
 private:
     transport_options options_;
@@ -39,6 +40,7 @@ private:
     std::string final_error_;
     std::uint64_t final_bytes_up_ = 0;
     std::uint64_t final_bytes_down_ = 0;
+    std::string final_diagnostics_;
     plaintext_observer plaintext_observer_;
     event_observer event_observer_;
 };

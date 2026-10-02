@@ -65,6 +65,7 @@
 #include <sslcertstore.hpp>
 
 #include <proxy/mitmproxy.hpp>
+#include <proxy/streamhandler.hpp>
 #include <proxy/filters/filterproxy.hpp>
 #include <proxy/nbrhood.hpp>
 
@@ -151,6 +152,7 @@ enum session_list_filter_flags {
     SL_NO_NAMES = 0x0020,
     SL_IPS = 0x0040,
     SL_TLS_DETAILS = 0x0100,
+    SL_SSH_DETAILS = 0x0200,
 };
 
 int cli_diag_proxy_session_list_extra(DiagCli* cli, const char* command,
@@ -1296,6 +1298,7 @@ int cli_diag_proxy_session_list(DiagCli *cli, const char *command, char *argv[],
         }
         else if(arg == "nonames")  flags = flag_set<int>(flags, SL_NO_NAMES);
         else if(arg == "ips")  flags = flag_set<int>(flags, SL_IPS);
+        else if(arg == "ssh")  flags = flag_set<int>(flags, SL_SSH_DETAILS);
         else {
             args.emplace_back(arg);
         }
@@ -1346,6 +1349,13 @@ int cli_diag_proxy_tls_list(DiagCli *cli, const char *command, char *argv[], int
     debug_cli_params(cli, command, argv, argc);
 
     return cli_diag_proxy_session_list_extra(cli, command, args_to_vec(argv, argc), SL_TLS_DETAILS);
+}
+
+int cli_diag_proxy_ssh_list(DiagCli *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+    auto args = args_to_vec(argv, argc);
+    if (args.empty()) args.emplace_back(std::to_string(iDEB));
+    return cli_diag_proxy_session_list_extra(cli, command, args, SL_SSH_DETAILS);
 }
 
 int cli_diag_proxy_list_active(DiagCli *cli, const char *command, char *argv[], int argc) {
@@ -1710,6 +1720,11 @@ auto get_more_info(MitmProxy const* curr_proxy, MitmHostCX* lf, MitmHostCX* rg, 
 
     if (verbosity > INF) {
 
+        if (curr_proxy && curr_proxy->stream_handler()) {
+            auto const details = curr_proxy->stream_handler()->diagnostics();
+            if (!details.empty()) info_ss << "\n    stream: " << details << "\n";
+        }
+
         if (lf) {
             if (verbosity > INF) info_ss << "\n    ";
 
@@ -1901,6 +1916,12 @@ int cli_diag_proxy_session_list_extra (DiagCli *cli, const char *command, std::v
                 do_print |= std::get<0>(tls_info);
                 prefix += std::get<1>(tls_info);
                 suffix += std::get<2>(tls_info);
+
+                if (flag_check<int>(sl_flags, SL_SSH_DETAILS)) {
+                    auto const protocol = curr_proxy->session_protocol();
+                    if (protocol != "ssh") return std::nullopt;
+                    do_print = true;
+                }
 
 
                 if (sl_flags == SL_NONE) { do_print = true;  }
@@ -2581,6 +2602,7 @@ void register_diags(libcli2::Cli& native) {
     diag_register_command(cli, diag_proxy_session,"clear", cli_diag_proxy_session_clear, PRIVILEGE_PRIVILEGED, MODE_EXEC,"proxy session clear");
 
     diag_register_command(cli, diag_proxy_session,"tls-info", cli_diag_proxy_tls_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"connection TLS details");
+    diag_register_command(cli, diag_proxy_session,"ssh-info", cli_diag_proxy_ssh_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,"connection SSH MITM details");
     diag_register_command(cli, diag_proxy_session,"active", cli_diag_proxy_list_active, PRIVILEGE_PRIVILEGED, MODE_EXEC,"list only sessions active last 5s");
 
     auto diag_proxy_quic = diag_register_command(cli, diag_proxy, "quic", nullptr,

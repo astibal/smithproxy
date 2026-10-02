@@ -109,6 +109,13 @@ TEST(SshMitmTransport, ClassifiesSupportedSessionChannelRequests) {
               channel_request_kind::subsystem);
     EXPECT_EQ(sx::ssh::classify_channel_request(SSH_CHANNEL_REQUEST_X11),
               channel_request_kind::x11);
+    EXPECT_STREQ(sx::ssh::channel_request_name(channel_request_kind::pty), "pty");
+    EXPECT_STREQ(sx::ssh::channel_request_name(channel_request_kind::shell), "shell");
+    EXPECT_STREQ(sx::ssh::channel_request_name(channel_request_kind::exec), "exec");
+    EXPECT_STREQ(sx::ssh::channel_request_name(channel_request_kind::subsystem), "subsystem");
+    EXPECT_STREQ(sx::ssh::channel_request_name(channel_request_kind::environment), "environment");
+    EXPECT_STREQ(sx::ssh::channel_request_name(channel_request_kind::window_change), "window-change");
+    EXPECT_STREQ(sx::ssh::channel_request_name(channel_request_kind::x11), "x11");
 }
 
 TEST(SshMitmTransport, RegistersSeparateTransportAndPayloadLoggers) {
