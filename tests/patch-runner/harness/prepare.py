@@ -165,6 +165,11 @@ if os.environ.get('TLS_EVASION_TRACE') == '1':
 if os.environ.get('ROUTING_TEST') == '1':
     text = text.replace('accept_socks = FALSE', 'accept_socks = TRUE')
 text = re.sub(r'(plaintext_workers|ssl_workers|udp_workers) = 0',r'\1 = 1',text)
+# Keep one lab lightweight enough for deliberate high-concurrency runs.  DTLS
+# has a hardware-concurrency default even though the sample config omits the
+# key; without an explicit override P16 creates hundreds of idle listeners.
+if 'dtls_workers' not in text:
+    text = text.replace('ssl_workers = 1;', 'ssl_workers = 1;\n    dtls_workers = 1;', 1)
 if os.environ.get('QUIC_LAB') == '1':
     # QUIC has no main-thread fallback: zero workers leaves the configured
     # port without a listener. Keep the isolated H3 lab deterministic with a

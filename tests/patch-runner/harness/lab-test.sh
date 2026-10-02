@@ -4,6 +4,9 @@ set -euo pipefail
 ROOT=${1:-/opt/lab/smithproxy-runner}
 export PATH="$ROOT/bin:$PATH"
 export SMITHPROXY_BIN="$ROOT/bin/smithproxy"
+if [[ -n ${QUIC_PYTHONPATH:-} ]]; then
+    export PYTHONPATH="$QUIC_PYTHONPATH${PYTHONPATH:+:$PYTHONPATH}"
+fi
 if [[ ${QUIC_KEYLOG_TEST:-0} == 1 ]]; then
     # The production binary honours the conventional opt-in keylog variable.
     # Keep the proof artifact inside this disposable lab and never inherit an
@@ -37,6 +40,7 @@ PPLAY_SUITE4_PID=
 PPLAY_SUITE6_PID=
 STARTTLS_SERVER_PID=
 TLS_EVASION_SERVER_PID=
+TLS_AUTODETECT_SERVER_PID=
 KTLS_PROBE_PID=
 ROUTING_SERVER_PID=
 CAPTURE_TEST=${CAPTURE_TEST:-0}
@@ -96,6 +100,8 @@ cleanup() {
     [[ -z $STARTTLS_SERVER_PID ]] || wait "$STARTTLS_SERVER_PID" 2>/dev/null || true
     [[ -z $TLS_EVASION_SERVER_PID ]] || kill "$TLS_EVASION_SERVER_PID" 2>/dev/null || true
     [[ -z $TLS_EVASION_SERVER_PID ]] || wait "$TLS_EVASION_SERVER_PID" 2>/dev/null || true
+    [[ -z $TLS_AUTODETECT_SERVER_PID ]] || kill "$TLS_AUTODETECT_SERVER_PID" 2>/dev/null || true
+    [[ -z $TLS_AUTODETECT_SERVER_PID ]] || wait "$TLS_AUTODETECT_SERVER_PID" 2>/dev/null || true
     [[ -z $KTLS_PROBE_PID ]] || kill "$KTLS_PROBE_PID" 2>/dev/null || true
     [[ -z $KTLS_PROBE_PID ]] || wait "$KTLS_PROBE_PID" 2>/dev/null || true
     [[ -z $ROUTING_SERVER_PID ]] || kill "$ROUTING_SERVER_PID" 2>/dev/null || true
@@ -130,6 +136,11 @@ def normalized_addresses(value):
     value = [interface for interface in value
              if interface.get('ifname', '') not in transient_interfaces]
     for interface in value:
+        # Privacy addresses are rotated and expire independently of the lab.
+        # They are host state, but not state that the patch runner owns or can
+        # restore, so exclude them from the leak check.
+        interface['addr_info'] = [address for address in interface['addr_info']
+                                  if not address.get('temporary')]
         for address in interface['addr_info']:
             # DHCP lease countdown changes naturally while the test is running.
             address.pop('valid_life_time', None)
@@ -406,6 +417,29 @@ if [[ $SESSION_LIST_STRESS_TEST == 1 ]]; then
     echo 'PASS session list: detailed snapshots remained complete and responsive under load'
 fi
 if [[ $TLS_SUITE_TEST == 1 ]]; then
+    run_tls_autodetect_test() {
+        local family=$1 host=$2 suffix=
+        [[ $family == 4 ]] || suffix=6
+        ip netns exec "$SERVER" python3 -u "$ROOT/runner/tests/suites/tls/autodetect.py" server \
+            --host "$host" > "$ROOT/results/tls-autodetect-server${suffix}.json" &
+        TLS_AUTODETECT_SERVER_PID=$!
+        for attempt in $(seq 1 50); do
+            grep -q '^READY$' "$ROOT/results/tls-autodetect-server${suffix}.json" && break
+            kill -0 "$TLS_AUTODETECT_SERVER_PID"
+            sleep 0.1
+        done
+        grep -q '^READY$' "$ROOT/results/tls-autodetect-server${suffix}.json"
+        ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/suites/tls/autodetect.py" client \
+            --host "$host" > "$ROOT/results/tls-autodetect${suffix}.json"
+        wait "$TLS_AUTODETECT_SERVER_PID"
+        TLS_AUTODETECT_SERVER_PID=
+        python3 "$ROOT/runner/tests/suites/tls/autodetect.py" report \
+            --client-result "$ROOT/results/tls-autodetect${suffix}.json" \
+            --server-result "$ROOT/results/tls-autodetect-server${suffix}.json"
+        echo "PASS$family TLS autodetect: fragmented TLS-like traffic did not bypass inspection"
+    }
+    run_tls_autodetect_test 4 198.18.20.2
+    run_tls_autodetect_test 6 fd00:20::2
     ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/suites/tls/run.py" \
         --host 198.18.20.2 --ca-file "$ROOT/config/certs/ca-cert.pem" > "$ROOT/results/tls-suite4.json"
     python3 "$ROOT/runner/tests/suites/tls/report.py" "$ROOT/results/tls-suite4.json"
@@ -850,7 +884,11 @@ if [[ -n ${PPLAY_SUITE:-} && ${PPLAY_SUITE_SKIP_RUN:-0} != 1 ]]; then
     fi
     env PPLAY_PY="$PPLAY_PY" MODE=runner IP_FAMILY=4 \
         ALLOW_EMPTY="${PPLAY_SUITE_ALLOW_EMPTY:-0}" \
+        MATCH="${PPLAY_SUITE_MATCH:-${MATCH:-*}}" \
         EXCLUDE="$PPLAY_CORPUS_EXCLUDE" \
+        FUZZ_LEVEL="${FUZZ_LEVEL:-}" FUZZ_SEEDS="${FUZZ_SEEDS:-}" \
+        FUZZ_AREA="${PPLAY_FUZZ_AREA:-}" \
+        SCATTER="${FUZZ_SCATTER:-0}" \
         RESULTS="$ROOT/results/${PPLAY_RESULTS_NAME:-pplay-suite}-v4" \
         SMITHPROXY_PID_FILE="$ROOT/data/proxy.pid" \
         CLIENT_NS="$CLIENT" SERVER_NS="$SERVER" \
@@ -858,7 +896,11 @@ if [[ -n ${PPLAY_SUITE:-} && ${PPLAY_SUITE_SKIP_RUN:-0} != 1 ]]; then
     PPLAY_SUITE4_PID=$!
     env PPLAY_PY="$PPLAY_PY" MODE=runner IP_FAMILY=6 \
         ALLOW_EMPTY="${PPLAY_SUITE_ALLOW_EMPTY:-0}" \
+        MATCH="${PPLAY_SUITE_MATCH:-${MATCH:-*}}" \
         EXCLUDE="$PPLAY_CORPUS_EXCLUDE" \
+        FUZZ_LEVEL="${FUZZ_LEVEL:-}" FUZZ_SEEDS="${FUZZ_SEEDS:-}" \
+        FUZZ_AREA="${PPLAY_FUZZ_AREA:-}" \
+        SCATTER="${FUZZ_SCATTER:-0}" \
         RESULTS="$ROOT/results/${PPLAY_RESULTS_NAME:-pplay-suite}-v6" \
         SMITHPROXY_PID_FILE="$ROOT/data/proxy.pid" \
         CLIENT_NS="$CLIENT" SERVER_NS="$SERVER" \

@@ -1,5 +1,7 @@
 # How to obtain help
 
+Repository testing policy: [TESTING_POLICY.md](TESTING_POLICY.md).
+
 For help visit: 
   * Documentation: [https://smithproxy.readthedocs.org](https://smithproxy.readthedocs.org)  
   * Discord server: [https://discord.gg/vf4Qwwt](https://discord.gg/vf4Qwwt)  

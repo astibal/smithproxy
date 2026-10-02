@@ -1,0 +1,8 @@
+# Smithproxy fuzz seeds
+#
+# Successful fuzz-dyn runs append one tab-separated row.  `regression` seeds
+# are always replayed; `covered` seeds participate in the bounded rotating
+# sample selected by tests/patch-runner/fuzz-seeds.py.
+#
+# date	seed	generator	status
+2026-10-02	smithproxy-baseline-v1	v1	regression

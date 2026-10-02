@@ -39,6 +39,9 @@
 
 #include <regex>
 #include <ctime>
+#include <cerrno>
+#include <chrono>
+#include <thread>
 
 #include <proxy/mitmproxy.hpp>
 #include <proxy/mitmhost.hpp>
@@ -1797,42 +1800,46 @@ MitmHostCX* MitmProxy::first_right() const {
 
 
 bool MitmMasterProxy::detect_ssl_on_plain_socket(int sock) {
-    
-    int ret = false;
     constexpr unsigned int NEW_CX_PEEK_BUFFER_SZ = 10;
-    constexpr int time_increment = 2500; // 2.5ms
-    constexpr int time_max = time_increment*25;
+    constexpr auto retry_interval = std::chrono::microseconds(500);
+    constexpr auto detection_timeout = std::chrono::microseconds(12500);
 
-    int time_taken = 0;
-    
-    if (sock > 0) {
+    if (sock < 0) return false;
 
-        again:
-        char peek_buffer[NEW_CX_PEEK_BUFFER_SZ];
+    const auto deadline = std::chrono::steady_clock::now() + detection_timeout;
+    while (true) {
+        unsigned char peek_buffer[NEW_CX_PEEK_BUFFER_SZ]{};
+        const auto bytes = ::recv(sock, peek_buffer, NEW_CX_PEEK_BUFFER_SZ,
+                                  MSG_PEEK | MSG_DONTWAIT);
 
-        auto b = ::recv(sock, peek_buffer, NEW_CX_PEEK_BUFFER_SZ, MSG_PEEK | MSG_DONTWAIT);
-        
-        if(b > 6) {
-            if (peek_buffer[0] == 0x16 && peek_buffer[1] == 0x03 && ( peek_buffer[5] == 0x00 || peek_buffer[5] == 0x01 || peek_buffer[5] == 0x02 )) {
+        // A TLS handshake record needs the five-byte record header and the
+        // first handshake byte.  Do not let fragmentation around accept()
+        // decide whether the same flow is inspected or passed as plaintext.
+        if (bytes >= 6) {
+            const bool handshake_record = peek_buffer[0] == 0x16 && peek_buffer[1] == 0x03;
+            const bool hello = peek_buffer[5] == 0x00 || peek_buffer[5] == 0x01 ||
+                               peek_buffer[5] == 0x02;
+            if (handshake_record && hello) {
                 _inf("detect_ssl_on_plain_socket: SSL detected on socket %d", sock);
-                ret = true;
+                return true;
             }
-        } else {
-            if(ssl_autodetect_harder && time_taken < time_max) {
-                struct timespec t{};
-                t.tv_sec = 0;
-                t.tv_nsec = time_increment;
-                
-                ::nanosleep(&t,nullptr);
-                time_taken += time_increment;
-                _dia("detect_ssl_on_plain_socket: SSL strict detection on socket %d: delayed by %dnsec", sock, time_increment);
-
-                goto again;
-            }
+            return false;
         }
+
+        // recv()==0 is an orderly close.  Retrying it only stalls the accept
+        // worker and cannot produce more bytes.
+        if (bytes == 0 || !ssl_autodetect_harder ||
+                std::chrono::steady_clock::now() >= deadline) {
+            return false;
+        }
+        if (bytes < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+            return false;
+        }
+
+        std::this_thread::sleep_for(retry_interval);
+        _dia("detect_ssl_on_plain_socket: SSL strict detection on socket %d: delayed by %lldusec",
+             sock, static_cast<long long>(retry_interval.count()));
     }
-    
-    return ret;
 }
 
 baseHostCX* MitmMasterProxy::new_cx(int s) {
