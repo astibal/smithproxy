@@ -43,7 +43,7 @@ install_apt_dependencies() {
         git g++ cmake make build-essential \
         python3 python3-dev python3-cryptography python3-pyroute2 python3-pyparsing \
         libconfig-dev libconfig++-dev \
-        libssl-dev libunwind-dev libmicrohttpd-dev libcurl4-openssl-dev \
+        libssl-dev libssh-4 libssh-dev libunwind-dev libmicrohttpd-dev libcurl4-openssl-dev \
         libpam0g-dev \
         iptables iproute2 telnet \
         swig libffi-dev libxml2-dev libxslt1-dev xmlsec1
@@ -54,7 +54,7 @@ install_apk_dependencies() {
         ca-certificates wget curl bash \
         git g++ cmake make musl-dev linux-headers bsd-compat-headers \
         python3 python3-dev py3-cryptography py3-pyroute2 \
-        libconfig-dev openssl-dev libunwind-dev libmicrohttpd-dev curl-dev \
+        libconfig-dev openssl-dev libssh libssh-dev libunwind-dev libmicrohttpd-dev curl-dev \
         linux-pam-dev \
         iptables iproute2 busybox-extras \
         swig libffi-dev libxml2-dev libxslt-dev xmlsec-dev
@@ -67,7 +67,7 @@ install_dnf_dependencies() {
         ca-certificates wget curl-minimal \
         git gcc-c++ cmake make \
         python3 python3-devel python3-cryptography python3-pyroute2 python3-pyparsing \
-        libconfig-devel openssl-devel libunwind-devel libmicrohttpd-devel \
+        libconfig-devel openssl-devel libssh libssh-devel libunwind-devel libmicrohttpd-devel \
         libcurl-devel pam-devel \
         iptables iproute telnet \
         swig libffi-devel libxml2-devel libxslt-devel xmlsec1-devel
@@ -86,7 +86,7 @@ install_zypper_dependencies() {
         ca-certificates wget curl \
         git gcc-c++ cmake make \
         python3 python3-devel python3-cryptography python3-pyroute2 python3-pyparsing \
-        libconfig-devel libopenssl-devel libunwind-devel libmicrohttpd-devel \
+        libconfig-devel libopenssl-devel libssh libssh-devel libunwind-devel libmicrohttpd-devel \
         libcurl-devel pam-devel \
         iptables iproute2 telnet \
         swig libffi-devel libxml2-devel libxslt-devel xmlsec1-devel

@@ -3,7 +3,7 @@ Maintainer: Ales Stibal <astib@mag0.net>
 Section: misc
 Priority: optional
 Standards-Version: 3.9.6
-Build-Depends: cmake, debhelper (>= 10)
+Build-Depends: cmake, debhelper (>= 10), libssh-dev
 
 Package: smithproxy-dbg
 Architecture: any
@@ -29,4 +29,3 @@ Description: Fast and transparent TCP/UDP/TLS proxy with CLI and SOCKS5 support
   Smithproxy is an advanced, feature-rich transparent proxy for
   TLS, TCP, and UDP traffic. This package provides the core smithproxy
   daemon and associated tools.
-
