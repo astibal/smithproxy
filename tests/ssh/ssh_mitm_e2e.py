@@ -25,6 +25,10 @@ REPLIES = (b"smithproxy-ssh-e2e-1\n", b"smithproxy-ssh-e2e-2\n")
 FORWARD_PAYLOAD = b"ssh-direct-tcpip-e2e"
 REMOTE_FORWARD_PAYLOAD = b"ssh-forwarded-tcpip-e2e"
 REMOTE_FORWARD_REPLY = b"ssh-forwarded-tcpip-reply"
+X11_PAYLOAD = b"ssh-x11-e2e"
+X11_REPLY = b"ssh-x11-reply"
+AGENT_PAYLOAD = b"ssh-agent-e2e"
+AGENT_REPLY = b"ssh-agent-reply"
 
 
 def free_port() -> int:
@@ -48,6 +52,8 @@ class TestServer(paramiko.ServerInterface):
         self.remote_forward: tuple[str, int] | None = None
         self.remote_forward_ready = threading.Event()
         self.remote_forward_cancelled = threading.Event()
+        self.x11_requested = threading.Event()
+        self.agent_requested = threading.Event()
 
     def get_allowed_auths(self, username: str) -> str:
         return "password"
@@ -92,6 +98,16 @@ class TestServer(paramiko.ServerInterface):
     def cancel_port_forward_request(self, address: str, port: int) -> None:
         self.remote_forward_cancelled.set()
 
+    def check_channel_x11_request(self, channel: paramiko.Channel,
+                                  single_connection: bool, auth_protocol: str,
+                                  auth_cookie: str, screen_number: int) -> bool:
+        self.x11_requested.set()
+        return True
+
+    def check_channel_forward_agent_request(self, channel: paramiko.Channel) -> bool:
+        self.agent_requested.set()
+        return True
+
 
 def relay_direct(channel: paramiko.Channel, destination: tuple[str, int]) -> None:
     with socket.create_connection(destination, timeout=10) as target:
@@ -103,7 +119,9 @@ def relay_direct(channel: paramiko.Channel, destination: tuple[str, int]) -> Non
 
 def run_server(listener: socket.socket, host_key: paramiko.PKey,
                ready: threading.Event, errors: list[BaseException],
-               expect_direct: bool, expect_remote: bool) -> None:
+               expect_direct: bool, expect_remote: bool,
+               expect_x11: bool, expect_agent: bool,
+               feature_requests_done: threading.Event) -> None:
     try:
         ready.set()
         connection, _ = listener.accept()
@@ -115,7 +133,7 @@ def run_server(listener: socket.socket, host_key: paramiko.PKey,
             transport.start_server(server=server)
             print("e2e server: SSH transport started", flush=True)
             direct_threads: list[threading.Thread] = []
-            for _ in range(3 if expect_direct else 2):
+            for _ in range(5 if expect_direct else 4):
                 channel = transport.accept(15)
                 if channel is None:
                     raise AssertionError("test SSH server did not receive all channels")
@@ -140,6 +158,28 @@ def run_server(listener: socket.socket, host_key: paramiko.PKey,
                 remote.close()
                 if not server.remote_forward_cancelled.wait(15):
                     raise AssertionError("test SSH server did not receive forwarding cancellation")
+            if not feature_requests_done.wait(15):
+                raise AssertionError("client did not finish feature requests")
+            if expect_x11:
+                if not server.x11_requested.wait(15):
+                    raise AssertionError("test SSH server did not receive X11 request")
+                x11 = transport.open_x11_channel(("203.0.113.11", 6010))
+                x11.sendall(X11_PAYLOAD)
+                if x11.recv(len(X11_REPLY)) != X11_REPLY:
+                    raise AssertionError("unexpected X11 response")
+                x11.close()
+            elif server.x11_requested.wait(0.5):
+                raise AssertionError("x11=reject reached the upstream server")
+            if expect_agent:
+                if not server.agent_requested.wait(15):
+                    raise AssertionError("test SSH server did not receive agent request")
+                agent = transport.open_forward_agent_channel()
+                agent.sendall(AGENT_PAYLOAD)
+                if agent.recv(len(AGENT_REPLY)) != AGENT_REPLY:
+                    raise AssertionError("unexpected agent response")
+                agent.close()
+            elif server.agent_requested.wait(0.5):
+                raise AssertionError("agent=reject reached the upstream server")
             command_deadline = time.monotonic() + 15
             while len(server.commands) < len(COMMANDS) \
                     and time.monotonic() < command_deadline:
@@ -272,6 +312,8 @@ def main() -> None:
     parser.add_argument("--source", type=Path, default=Path(__file__).resolve().parents[2])
     parser.add_argument("--reject-local-forward", action="store_true")
     parser.add_argument("--reject-remote-forward", action="store_true")
+    parser.add_argument("--reject-x11", action="store_true")
+    parser.add_argument("--reject-agent", action="store_true")
     args = parser.parse_args()
     source = args.source.resolve()
 
@@ -320,7 +362,9 @@ def main() -> None:
             r"ssh_profiles\s*=\s*\{\s*\}",
             f'ssh_profiles = {{ e2e = {{ host_key = "{mitm_key}"; '
             f'local_forward = "{"reject" if args.reject_local_forward else "pass"}"; '
-            f'remote_forward = "{"reject" if args.reject_remote_forward else "pass"}"; }} }}',
+            f'remote_forward = "{"reject" if args.reject_remote_forward else "pass"}"; '
+            f'x11 = "{"reject" if args.reject_x11 else "pass"}"; '
+            f'agent = "{"reject" if args.reject_agent else "pass"}"; }} }}',
             text, count=1)
         text = text.replace(
             "content_profiles = {",
@@ -352,12 +396,16 @@ def main() -> None:
         config.write_text(text)
 
         ready = threading.Event()
+        feature_requests_done = threading.Event()
         server_errors: list[BaseException] = []
         server_thread = threading.Thread(
             target=run_server,
             args=(listener, server_key, ready, server_errors,
                   not args.reject_local_forward,
-                  not args.reject_remote_forward), daemon=True)
+                  not args.reject_remote_forward,
+                  not args.reject_x11,
+                  not args.reject_agent,
+                  feature_requests_done), daemon=True)
         server_thread.start()
         echo_thread = None
         if not args.reject_local_forward:
@@ -408,6 +456,47 @@ def main() -> None:
                 forwarded.shutdown_write()
                 forwarded.close()
 
+            x11_relay_done = threading.Event()
+            agent_relay_done = threading.Event()
+
+            def answer_feature(channel: paramiko.Channel, payload: bytes,
+                               reply: bytes, done: threading.Event) -> None:
+                try:
+                    if channel.recv(len(payload)) != payload:
+                        raise AssertionError("unexpected server-initiated feature payload")
+                    channel.sendall(reply)
+                    channel.close()
+                except BaseException as error:
+                    server_errors.append(error)
+                finally:
+                    done.set()
+
+            def x11_handler(channel: paramiko.Channel, origin: tuple[str, int]) -> None:
+                threading.Thread(target=answer_feature,
+                    args=(channel, X11_PAYLOAD, X11_REPLY, x11_relay_done),
+                    daemon=True).start()
+
+            def agent_handler(channel: paramiko.Channel) -> None:
+                threading.Thread(target=answer_feature,
+                    args=(channel, AGENT_PAYLOAD, AGENT_REPLY, agent_relay_done),
+                    daemon=True).start()
+
+            x11_feature_channel = client.open_session(timeout=15)
+            try:
+                x11_feature_channel.request_x11(
+                    auth_protocol="MIT-MAGIC-COOKIE-1",
+                    auth_cookie="00112233445566778899aabbccddeeff",
+                    handler=x11_handler)
+            except paramiko.SSHException:
+                if not args.reject_x11:
+                    raise
+            else:
+                if args.reject_x11:
+                    raise AssertionError("x11=reject accepted X11 request")
+            agent_feature_channel = client.open_session(timeout=15)
+            agent_feature_channel.request_forward_agent(agent_handler)
+            feature_requests_done.set()
+
             try:
                 remote_port = client.request_port_forward("127.0.0.1", 40000)
             except paramiko.SSHException:
@@ -426,6 +515,16 @@ def main() -> None:
                 remote.sendall(REMOTE_FORWARD_REPLY)
                 remote.close()
                 client.cancel_port_forward("127.0.0.1", remote_port)
+            if not args.reject_x11 and not x11_relay_done.wait(15):
+                raise AssertionError("client did not receive X11 channel")
+            if not args.reject_agent and not agent_relay_done.wait(15):
+                raise AssertionError("client did not receive agent channel")
+            if args.reject_x11 and x11_relay_done.wait(0.5):
+                raise AssertionError("x11=reject relayed an X11 channel")
+            if args.reject_agent and agent_relay_done.wait(0.5):
+                raise AssertionError("agent=reject relayed an agent channel")
+            x11_feature_channel.close()
+            agent_feature_channel.close()
             time.sleep(1)
             print_session_list(cli_port)
             client.close()
@@ -454,13 +553,25 @@ def main() -> None:
                 annotations.append(b"type=forwarded-tcpip")
             if args.reject_local_forward:
                 annotations.append(b"type=direct-tcpip action=reject")
+            if args.reject_x11:
+                annotations.append(b"ssh event=channel-request subtype=7 action=reject")
+            else:
+                annotations.append(b"ssh event=channel-open type=x11 action=pass")
+            if args.reject_agent:
+                annotations.append(b"ssh event=channel-request type=auth-agent action=reject")
+            else:
+                annotations.append(b"ssh event=channel-open type=auth-agent action=pass")
             assert_capture_annotations(tmp, tuple(annotations))
-            if args.reject_remote_forward:
+            if args.reject_x11:
+                print("PASS: x11=reject blocked X11 while agent forwarding passed")
+            elif args.reject_agent:
+                print("PASS: agent=reject blocked agent while X11 forwarding passed")
+            elif args.reject_remote_forward:
                 print("PASS: remote_forward=reject blocked tcpip-forward without breaking exec")
             elif args.reject_local_forward:
                 print("PASS: local_forward=reject blocked direct-tcpip; remote forward passed")
             else:
-                print("PASS: exec, direct-tcpip and forwarded-tcpip traversed one SSH MITM transport")
+                print("PASS: exec, TCP, X11 and agent channels traversed one SSH MITM transport")
         except BaseException:
             process.terminate()
             try:
