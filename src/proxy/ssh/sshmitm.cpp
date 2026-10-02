@@ -6,6 +6,7 @@
 
 #include <cerrno>
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <utility>
 
@@ -683,6 +684,37 @@ public:
             return drive_result::failed;
         }
 
+        if (!upstream_exit_forwarded_) {
+            std::uint32_t exit_code = 0;
+            char* exit_signal = nullptr;
+            int core_dumped = 0;
+            auto const result = ssh_channel_get_exit_state(
+                upstream_channel_, &exit_code, &exit_signal, &core_dumped);
+            if (result == SSH_OK) {
+                int forward_result;
+                if (exit_signal) {
+                    forward_result = ssh_channel_request_send_exit_signal(
+                        downstream_channel_, exit_signal, core_dumped, "", "");
+                } else {
+                    forward_result = ssh_channel_request_send_exit_status(
+                        downstream_channel_, static_cast<int>(exit_code));
+                }
+                std::free(exit_signal);
+                if (forward_result != SSH_OK) {
+                    set_error("cannot forward upstream SSH exit state");
+                    return drive_result::failed;
+                }
+                upstream_exit_forwarded_ = true;
+                progress = true;
+            } else {
+                std::free(exit_signal);
+                if (result != SSH_AGAIN) {
+                    set_error(libssh_error(upstream_, "cannot read upstream SSH exit state"));
+                    return drive_result::failed;
+                }
+            }
+        }
+
         if (ssh_channel_is_eof(downstream_channel_) && !downstream_eof_forwarded_) {
             if (ssh_channel_send_eof(upstream_channel_) == SSH_ERROR) {
                 set_error("cannot forward downstream SSH EOF");
@@ -774,6 +806,7 @@ public:
     std::string stderr_to_downstream_;
     bool downstream_eof_forwarded_ = false;
     bool upstream_eof_forwarded_ = false;
+    bool upstream_exit_forwarded_ = false;
     enum class channel_mode { none, shell, exec };
     channel_mode channel_mode_ = channel_mode::none;
     std::uint64_t bytes_up_ = 0;
