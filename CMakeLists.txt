@@ -32,6 +32,7 @@ set(USE_PAM "Y")
 set(OPT_MEMPOOL_NOEXCEPT "Y")
 set(OPT_MEMPOOL_DISABLE "Y")
 set(OPT_WEBHOOKS_DISABLE "Y")
+add_compile_definitions(MEM_CONSTRAINED)
 set(OPT_DEBUG_ASAN_LEAKS "N")
 set(OPT_DEBUG_ASAN_THREADS "N")
 set(OPT_DEBUG_ASAN_UB "N")
@@ -260,9 +261,10 @@ target_include_directories(smithproxy_libcli PUBLIC
         ${PROJECT_SOURCE_DIR}/src/service/libcli
 )
 
-add_executable(smithproxy
+add_executable(smithproxy-mem-constrained
 
         src/main.cpp
+        src/buildprofile.cpp
         src/smithlog.cpp
         src/service/cfgapi/cfgapi.cpp
         src/staticcontent.cpp
@@ -389,7 +391,6 @@ add_executable(smithproxy
         src/proxy/filters/access_filter.cpp
 )
 
-
 IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
     find_package(GTest)
     if(GTEST_FOUND)
@@ -408,6 +409,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/policy/tests/policy_test.cpp
 
                 src/utils/tenants.cpp
+                src/tests/buildprofile_test.cpp
                 src/tests/test_misc.cpp
 
                 src/proxy/multiflow/tests/fake_tests.cpp
@@ -558,18 +560,18 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 add_test(NAME integration.httpconnect
                         COMMAND ${Python3_EXECUTABLE}
                         ${PROJECT_SOURCE_DIR}/tests/httpconnect/http_connect_integration.py
-                        --smithproxy $<TARGET_FILE:smithproxy>
+                        --smithproxy $<TARGET_FILE:smithproxy-mem-constrained>
                         --source ${PROJECT_SOURCE_DIR})
                 add_test(NAME stress.httpconnect
                         COMMAND ${Python3_EXECUTABLE}
                         ${PROJECT_SOURCE_DIR}/tests/httpconnect/http_connect_stress.py
-                        --smithproxy $<TARGET_FILE:smithproxy>
+                        --smithproxy $<TARGET_FILE:smithproxy-mem-constrained>
                         --source ${PROJECT_SOURCE_DIR}
                         --connections 32 --concurrency 8 --failures 16)
                 add_test(NAME integration.starttls_socks
                         COMMAND ${Python3_EXECUTABLE}
                         ${PROJECT_SOURCE_DIR}/tests/tls/starttls_socks_integration.py
-                        --smithproxy $<TARGET_FILE:smithproxy>
+                        --smithproxy $<TARGET_FILE:smithproxy-mem-constrained>
                         --source ${PROJECT_SOURCE_DIR}
                         --protocol all --address ipv4-ip)
                 set_tests_properties(integration.httpconnect integration.starttls_socks
@@ -662,7 +664,7 @@ if(SMITHPROXY_TLS_SANITIZERS)
         message(FATAL_ERROR "SMITHPROXY_TLS_SANITIZERS requires a Debug build with GTest")
     endif()
     foreach(sanitized_target
-            socle_common_lib socle_lib smithproxy tls_testbed
+            socle_common_lib socle_lib smithproxy-mem-constrained tls_testbed
             sx_gtests sx_gtests_http1 sx_gtests_startstoptls sx_gtests_httpconnect
             sx_gtests_reloadable)
         target_compile_options(${sanitized_target} PRIVATE
@@ -684,35 +686,35 @@ endif()
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}")
 
 if (LIBCONFIGPP_FOUND)
-    target_link_libraries (smithproxy ${LIBCONFIGPP_LIBRARIES})
+    target_link_libraries (smithproxy-mem-constrained ${LIBCONFIGPP_LIBRARIES})
 endif (LIBCONFIGPP_FOUND)
 
-target_link_libraries (smithproxy crypt)
-target_link_libraries (smithproxy nlohmann_json::nlohmann_json)
+target_link_libraries (smithproxy-mem-constrained crypt)
+target_link_libraries (smithproxy-mem-constrained nlohmann_json::nlohmann_json)
 if(NOT "${OPT_WEBHOOKS_DISABLE}" STREQUAL "Y")
-    target_link_libraries (smithproxy curl)
+    target_link_libraries (smithproxy-mem-constrained curl)
 endif()
 
 if((CMAKE_SYSTEM_PROCESSOR MATCHES "arm") OR (CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64"))
-    target_link_libraries (smithproxy atomic)
+    target_link_libraries (smithproxy-mem-constrained atomic)
 endif()
 
-target_link_libraries(smithproxy smithproxy_libcli smithproxy_qpack socle_lib pthread ssl crypto rt ${UNWIND_LIB})
+target_link_libraries(smithproxy-mem-constrained smithproxy_libcli smithproxy_qpack socle_lib pthread ssl crypto rt ${UNWIND_LIB})
 
 if("${USE_LMHPP}" STREQUAL "Y")
-    target_link_libraries(smithproxy microhttpd)
+    target_link_libraries(smithproxy-mem-constrained microhttpd)
 else()
     message(">> libmicrohttpd not used")
 endif()
 
 if("${USE_PAM}" STREQUAL "Y")
-    target_link_libraries(smithproxy pam)
+    target_link_libraries(smithproxy-mem-constrained pam)
 else()
     message(">> PAM not used")
 endif()
 
 if("${USE_PYTHON}" STREQUAL "Y")
-    target_link_libraries(smithproxy ${PYTHON_LIBRARIES})
+    target_link_libraries(smithproxy-mem-constrained ${PYTHON_LIBRARIES})
 else()
     message(">> python not used")
 endif()
@@ -722,7 +724,7 @@ if("${USE_HTTP2_ENGINE}" STREQUAL "Y")
 endif()
 
 if("${OPT_DEBUG_ASAN_LEAKS}" STREQUAL "Y")
-    target_link_options(smithproxy PRIVATE -fsanitize=address)
+    target_link_options(smithproxy-mem-constrained PRIVATE -fsanitize=address)
 endif()
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/install.cmake)

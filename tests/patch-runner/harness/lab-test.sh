@@ -216,8 +216,8 @@ fi
     > "$ROOT/results/runner.log" 2>&1 &
 RUNNER_PID=$!
 if [[ ${API_DISABLED_TEST:-0} == 1 ]]; then
-    READY_PORT=1080
-    [[ $TPROXY_TEST != 1 ]] || READY_PORT=50080
+    READY_PORT=50080
+    [[ ${SOCKS_ONLY_TEST:-0} != 1 ]] || READY_PORT=1080
     for attempt in $(seq 1 60); do
         if ip netns exec "$NS" ss -ltnH "sport = :$READY_PORT" | grep -q .; then break; fi
         kill -0 "$RUNNER_PID"

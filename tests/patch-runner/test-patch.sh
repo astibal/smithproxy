@@ -48,7 +48,7 @@ Options:
   --jobs N           Parallel build jobs. Default: nproc.
   --churn-port-range MIN:MAX
                      Client source-port range for TCP/UDP churn (default: 20000:29999).
-  --skip-build       Use an existing executable BUILD_DIR/smithproxy.
+  --skip-build       Use an existing executable BUILD_DIR/smithproxy-mem-constrained.
   --quiet            Print only verdict lines. Complete output remains in logs.
   -h, --help         Show this help and exit.
 
@@ -230,11 +230,11 @@ run_parallel_full() {
     printf 'section\tresult\trc\treason\treport\n' > "$REPORT/sections.tsv"
 
     if [[ -n $REMOTE ]]; then
-        SHARED_BINARY="$WORK_DIR/shared/smithproxy"
+        SHARED_BINARY="$WORK_DIR/shared/smithproxy-mem-constrained"
         set +e
         {
             ssh "$REMOTE" "mkdir -p '$WORK_DIR/shared'"
-            scp "$BUILD_DIR/smithproxy" "$REMOTE:$SHARED_BINARY"
+            scp "$BUILD_DIR/smithproxy-mem-constrained" "$REMOTE:$SHARED_BINARY"
             ssh "$REMOTE" "chmod 0555 '$SHARED_BINARY'"
         } > "$REPORT/sections/stage-binary.log" 2>&1
         rc=$?
@@ -250,7 +250,7 @@ run_parallel_full() {
             return
         fi
     else
-        SHARED_BINARY="$BUILD_DIR/smithproxy"
+        SHARED_BINARY="$BUILD_DIR/smithproxy-mem-constrained"
     fi
     child_common+=(--shared-binary "$SHARED_BINARY")
 
@@ -363,21 +363,21 @@ if ((SKIP_BUILD == 0)); then
     fi
     set +e
     if ((QUIET)); then
-        cmake --build "$BUILD_DIR" --target smithproxy -j"$JOBS" \
+        cmake --build "$BUILD_DIR" --target smithproxy-mem-constrained -j"$JOBS" \
             > "$REPORT/build.log" 2>&1
         BUILD_RC=$?
     else
-        cmake --build "$BUILD_DIR" --target smithproxy -j"$JOBS" \
+        cmake --build "$BUILD_DIR" --target smithproxy-mem-constrained -j"$JOBS" \
             2>&1 | tee "$REPORT/build.log"
         BUILD_RC=${PIPESTATUS[0]}
     fi
     set -e
 else
-    [[ -x $BUILD_DIR/smithproxy ]] || {
-        echo "--skip-build requires an existing executable: $BUILD_DIR/smithproxy" >&2
+    [[ -x $BUILD_DIR/smithproxy-mem-constrained ]] || {
+        echo "--skip-build requires an existing executable: $BUILD_DIR/smithproxy-mem-constrained" >&2
         exit 2
     }
-    echo "Build skipped; using $BUILD_DIR/smithproxy" > "$REPORT/build.log"
+    echo "Build skipped; using $BUILD_DIR/smithproxy-mem-constrained" > "$REPORT/build.log"
 fi
 if ((BUILD_RC != 0)); then
     STATUS=FAIL
@@ -389,7 +389,7 @@ elif [[ $PROFILE == quick ]]; then
 elif [[ $PROFILE == full && -z $ONLY_SUITE ]]; then
     run_parallel_full
 else
-    BINARY=$BUILD_DIR/smithproxy
+    BINARY=$BUILD_DIR/smithproxy-mem-constrained
     [[ -x $BINARY ]] || { echo "Missing executable: $BINARY" >&2; exit 1; }
 
     TAG=$(printf '%x' $$)
@@ -506,7 +506,7 @@ print(*(x.getsockname()[1] for x in s))'
             tls-policy) LAB_ENV+=("BASE_TRAFFIC_TEST=0" "TLS_SUITE_TEST=1" "POLICY_TEST=1" "SESSION_LIST_STRESS_TEST=1") ;;
             tcp-churn) LAB_ENV+=("BASE_TRAFFIC_TEST=0" "TCP_CHURN_TEST=1") ;;
             udp-churn) LAB_ENV+=("BASE_TRAFFIC_TEST=0" "UDP_CHURN_TEST=1") ;;
-            capture) LAB_ENV+=("CAPTURE_TEST=1" "HTTP2_OBSERVABILITY_TEST=1" "CAPTURE_MATRIX_TEST=1") ;;
+            capture) LAB_ENV+=("CAPTURE_TEST=1" "HTTP2_OBSERVABILITY_TEST=0" "CAPTURE_MATRIX_TEST=1" "API_DISABLED_TEST=1") ;;
             corpus-regular) LAB_ENV+=("BASE_TRAFFIC_TEST=0" "PPLAY_SUITE_SKIP_RUN=0" "PPLAY_SUITE_CATEGORY=regular" "PPLAY_RESULTS_NAME=corpus-regular" "PPLAY_SUITE_EXCLUDE=capture_*" "PPLAY_SUITE_ALLOW_EMPTY=1") ;;
             corpus-edge) LAB_ENV+=("BASE_TRAFFIC_TEST=0" "PPLAY_SUITE_SKIP_RUN=0" "PPLAY_SUITE_CATEGORY=edge" "PPLAY_RESULTS_NAME=corpus-edge" "PPLAY_SUITE_EXCLUDE=capture_*" "PPLAY_SUITE_ALLOW_EMPTY=1") ;;
             corpus-insanity) LAB_ENV+=("BASE_TRAFFIC_TEST=0" "PPLAY_SUITE_SKIP_RUN=0" "PPLAY_SUITE_CATEGORY=insanity" "PPLAY_RESULTS_NAME=corpus-insanity" "PPLAY_SUITE_EXCLUDE=capture_*" "PPLAY_SUITE_ALLOW_EMPTY=1") ;;

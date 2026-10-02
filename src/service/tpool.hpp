@@ -275,6 +275,10 @@ public:
         static inline size_t POOL_MUL = 2;
         static inline size_t POOL_SIZE = POOL_MUL * std::thread::hardware_concurrency();
     public:
+        static size_t automatic_size() noexcept {
+            return POOL_SIZE;
+        }
+
         static ThreadPool& get(size_t requested_workers = POOL_SIZE) {
             std::call_once(once_flag, [requested_workers]() {
                 pool = std::make_unique<ThreadPool>(std::max<size_t>(requested_workers, 1));

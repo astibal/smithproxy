@@ -69,6 +69,7 @@
 
 #include <service/cfgapi/cfgapi.hpp>
 #include <utils/tenants.hpp>
+#include <buildprofile.hpp>
 #include <service/daemon.hpp>
 #include <staticcontent.hpp>
 #include <smithlog.hpp>
@@ -319,6 +320,8 @@ void print_help() {
 
 int main(int argc, char *argv[]) {
 
+    sx::build_profile::initialize_process();
+
     memPool::pool();
 
     {
@@ -508,7 +511,9 @@ int main(int argc, char *argv[]) {
     }
 
     auto& pool = sx::tp::ThreadPool::instance::get(
-            static_cast<size_t>(CfgFactory::get()->tpool_workers));
+            sx::build_profile::configured_utility_workers(
+                    static_cast<size_t>(CfgFactory::get()->tpool_workers),
+                    sx::tp::ThreadPool::instance::automatic_size()));
     (void)pool;
 
     if(CfgFactory::get()->cfg_mtrace_enable) {

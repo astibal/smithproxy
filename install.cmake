@@ -1,6 +1,6 @@
 if(UNIX)
     SET(CMAKE_INSTALL_PREFIX /usr)
-    install(TARGETS smithproxy DESTINATION bin)
+    install(TARGETS smithproxy-mem-constrained DESTINATION bin)
     install(FILES man/smithproxy.1 DESTINATION share/man/man1)
     install_if_not_exists(etc/smithproxy.cfg /etc/smithproxy)
     install_if_not_exists(etc/users.cfg /etc/smithproxy)
