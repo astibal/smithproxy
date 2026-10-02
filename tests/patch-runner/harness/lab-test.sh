@@ -110,10 +110,25 @@ cleanup() {
 import json, pathlib, re, sys
 root = pathlib.Path(sys.argv[1])
 runner_veth = re.compile(r'^sp[0-9a-f]{1,6}[io]$')
-def normalized_addresses(name):
-    value = json.loads((root / name).read_text())
+
+def addresses(name):
+    return json.loads((root / name).read_text())
+
+before_addresses = addresses('host-addresses-before.json')
+after_addresses = addresses('host-addresses-after.json')
+# Network-namespace veth endpoints are transient host state.  Other parallel
+# labs, containers, or the test controller may create/remove them between our
+# two snapshots, so comparing them would make cleanup verification racy.
+transient_interfaces = {
+    interface.get('ifname', '')
+    for interface in before_addresses + after_addresses
+    if 'link_netnsid' in interface
+    or runner_veth.fullmatch(interface.get('ifname', ''))
+}
+
+def normalized_addresses(value):
     value = [interface for interface in value
-             if not runner_veth.fullmatch(interface.get('ifname', ''))]
+             if interface.get('ifname', '') not in transient_interfaces]
     for interface in value:
         for address in interface['addr_info']:
             # DHCP lease countdown changes naturally while the test is running.
@@ -123,8 +138,8 @@ def normalized_addresses(name):
 def normalized_routes(name):
     value = json.loads((root / name).read_text())
     return [route for route in value
-            if not runner_veth.fullmatch(route.get('dev', ''))]
-assert normalized_addresses('host-addresses-before.json') == normalized_addresses('host-addresses-after.json')
+            if route.get('dev', '') not in transient_interfaces]
+assert normalized_addresses(before_addresses) == normalized_addresses(after_addresses)
 assert normalized_routes('host-routes-before.json') == normalized_routes('host-routes-after.json')
 PYCOMPARE
     ! ip netns list | grep -Eq "^(${CLIENT}|${SERVER}|${NS})( |$)"

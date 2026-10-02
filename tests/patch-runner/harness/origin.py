@@ -45,11 +45,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
     def log_message(self, fmt, *args):
         print(fmt % args, flush=True)
-class HTTPServer6(http.server.ThreadingHTTPServer):
+class HTTPServer(http.server.ThreadingHTTPServer):
+    # Transfer and churn suites intentionally release large connection waves.
+    # socketserver defaults to a listen backlog of just five, which drops SYNs
+    # before Smithproxy can exercise its TLS state machine.
+    request_queue_size = 128
+
+class HTTPServer6(HTTPServer):
     address_family = socket.AF_INET6
 
 def serve_http(address, family, port):
-    cls = HTTPServer6 if family == socket.AF_INET6 else http.server.ThreadingHTTPServer
+    cls = HTTPServer6 if family == socket.AF_INET6 else HTTPServer
     server = cls((address, port), Handler)
     if port == 443:
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
