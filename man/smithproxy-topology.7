@@ -1,0 +1,310 @@
+.\" Render with: groff -man -Tutf8 smithproxy-topology.7
+.TH SMITHPROXY-TOPOLOGY 7 "OCT 2026" "Smithproxy" "Miscellaneous Information Manual"
+.SH NAME
+smithproxy-topology \- deployment patterns for Smithproxy traffic interception
+.SH DESCRIPTION
+Smithproxy can be placed inline as a transparent router, run on the observed
+host, or serve explicit proxy clients. The correct design depends on who owns
+routing, whether original addresses must be preserved, and whether applications
+can be configured to use a proxy.
+.PP
+The principal choices are:
+.nf
+    routed traffic       -> TPROXY
+    local host traffic   -> REDIRECT
+    proxy-aware clients  -> SOCKS4/5 or HTTP CONNECT
+    isolated workloads   -> namespace/container routing to TPROXY
+.fi
+.PP
+Linux packet diversion only delivers traffic to Smithproxy. Forward and return
+routes, loop prevention, certificate trust and policy remain separate parts of
+the deployment.
+.SH INLINE ROUTER WITH TPROXY
+The preferred transparent topology places Smithproxy on the routed path between
+clients and their destinations:
+.nf
+    client network
+          |
+          v
+    +------------------------+
+    | Linux router           |
+    | mangle/TPROXY          |
+    | Smithproxy listeners   |
+    +------------------------+
+          |
+          v
+    upstream network
+.fi
+.PP
+TPROXY preserves the original destination without rewriting it in the NAT
+table. Policy routing delivers marked packets locally to the configured
+Smithproxy TCP, TLS, UDP or QUIC listener.
+.PP
+The host must have IP forwarding enabled and routes toward both client and
+upstream networks. When a policy preserves the original client source address,
+the server return path must traverse the same Smithproxy host. Otherwise the
+server can reply directly to the client, bypassing the second proxy leg and
+breaking the connection.
+.SS Advantages
+.IP \(bu 2
+No proxy configuration is required in client applications.
+.IP \(bu 2
+The original destination is available to policy and routing.
+.IP \(bu 2
+TCP and UDP can be intercepted, including a separate QUIC path.
+.IP \(bu 2
+One router can cover multiple client networks.
+.SS Risks
+.IP \(bu 2
+Asymmetric routing causes hard-to-diagnose timeouts.
+.IP \(bu 2
+Broad diversion rules can intercept management traffic or Smithproxy's own
+upstream connections.
+.IP \(bu 2
+Transparent source addresses require additional routing and kernel support.
+.SH SAME-HOST REDIRECT
+REDIRECT is suitable when the application and Smithproxy run in the same
+network namespace:
+.nf
+    +--------------------------------+
+    | one Linux host                 |
+    |                                |
+    | application -> OUTPUT/REDIRECT |
+    |                    |           |
+    |                    v           |
+    |                Smithproxy      |
+    +--------------------------------+
+.fi
+.PP
+Rules in the NAT OUTPUT path redirect selected local TCP connections to the
+Smithproxy REDIRECT listeners. Exclude the Smithproxy service identity, marks or
+other distinguishing properties so that its upstream connections are not
+redirected back into itself.
+.PP
+TCP original destinations can be recovered. General local UDP destinations are
+not retained by REDIRECT, so same-host UDP interception is primarily useful for
+DNS sent to a configured resolver. Use TPROXY in a separate namespace or routed
+topology when arbitrary UDP destinations matter.
+.SH EXPLICIT SOCKS PROXY
+Applications can connect directly to the Smithproxy SOCKS listener:
+.nf
+    application -- SOCKS4/5 --> Smithproxy --> destination
+.fi
+.PP
+SOCKS avoids kernel interception rules and asymmetric routing. SOCKS5 clients
+can supply a hostname, allowing Smithproxy to resolve it and apply name-aware
+policy. Applications should enable proxy-side DNS resolution when they must not
+resolve names locally.
+.PP
+The upstream connection originates from the Smithproxy host. Explicit clients
+do not obtain transparent source-address preservation. UDP ASSOCIATE support is
+more limited than ordinary TCP CONNECT use and should be tested with the target
+client.
+.SH EXPLICIT HTTP CONNECT
+HTTP/1.0 and HTTP/1.1 clients can request a tunnel through the configured
+CONNECT listener:
+.nf
+    application -- CONNECT host:port --> Smithproxy --> destination
+.fi
+.PP
+After the tunnel is established, TLS detection and policy processing follow the
+normal TCP path. IPv4, bracketed IPv6 and hostname authorities are accepted.
+Clients must wait for the successful CONNECT response before sending tunneled
+application data; request pipelining is not supported.
+.PP
+CONNECT is convenient for browsers and tools with an HTTP proxy setting. SOCKS
+is more general for non-HTTP TCP applications.
+.SH NETWORK NAMESPACES
+Namespaces provide a clean transparent lab or single-host deployment without
+REDIRECT limitations:
+.nf
+    +-------------------+       veth       +-------------------+
+    | workload netns    |------------------| proxy/root netns  |
+    | default via veth  |                  | TPROXY + policy   |
+    +-------------------+                  | Smithproxy        |
+                                           +-------------------+
+.fi
+.PP
+Give the workload namespace a default route through its veth peer. Apply TPROXY
+rules on the receiving interface in the proxy namespace and add the required
+packet-mark policy route to the local table. This preserves TCP and UDP original
+destinations while keeping Smithproxy's upstream sockets outside the intercepted
+namespace.
+.PP
+Namespaces are useful for integration tests because routes, firewall state,
+DNS and captures can be created and destroyed without changing the host's main
+network. They also make it easier to prove that the client has no bypass path.
+.SH DOCKER AND OTHER CONTAINERS
+Container traffic can be routed through Smithproxy in several ways.
+.SS Smithproxy on the host
+Run application containers on a bridge whose egress reaches host firewall
+rules. Divert packets arriving from that bridge to host Smithproxy TPROXY
+listeners. Bridge netfilter settings determine whether bridged traffic visits
+the expected iptables/nftables hooks; verify them instead of assuming the host
+rules see every packet.
+.SS Smithproxy container with host networking
+A Smithproxy container using host networking can bind the host listener ports
+and share the host routing/firewall setup. It needs the capabilities and mounted
+configuration, certificates, logs and capture directories required by the
+deployment. Host networking reduces namespace isolation and should be treated
+as privileged infrastructure.
+.SS Dedicated gateway container or namespace
+Place Smithproxy in a gateway namespace/container and set application
+containers' default route to it. This resembles the inline TPROXY topology and
+keeps interception rules scoped to the gateway. Container orchestrators may
+recreate interfaces and routes, so apply rules after the relevant network is
+present and make setup idempotent.
+.PP
+Avoid relying only on container DNS settings when the goal is enforcement; an
+application can connect to an address directly unless routing and egress policy
+also require the gateway.
+.SH KUBERNETES AND ORCHESTRATORS
+Smithproxy can be used as a node-level gateway or as a dedicated routed proxy
+for selected workloads. A generic sidecar is not automatically transparent:
+the pod network namespace still needs REDIRECT or TPROXY rules and loop
+exclusions.
+.PP
+Account for the CNI plugin, service NAT, network policy, pod churn and health
+checks. Preserve a management path which is not intercepted. Validate source
+and destination addresses after every NAT layer before writing Smithproxy
+policy around them.
+.SH QUIC AND UDP
+Generic UDP and QUIC use different Smithproxy listeners. QUIC interception must
+preserve the original destination port and is normally installed with TPROXY
+using an unchanged on-port value. When the experimental QUIC listener is
+disabled, blocking UDP on configured QUIC service ports prevents HTTP/3 from
+bypassing TCP/TLS inspection.
+.PP
+Test DNS, generic UDP and QUIC independently. A working TCP topology does not
+prove that packet marks, local routes and firewall hooks are correct for UDP.
+.SH IPV4 AND IPV6
+Build equivalent interception and policy-routing paths for both address
+families. An IPv4-only rule set can leave IPv6 as an uninspected bypass. Confirm
+that listener binding, local routes, forwarding, return routes and policy
+objects cover both families.
+.PP
+If a feature or kernel path is not available for one family, block or route that
+traffic deliberately rather than allowing silent fallback outside Smithproxy.
+.SH LOOP PREVENTION
+Never send Smithproxy's upstream connection back to the same interception rule.
+Common exclusions use one or more of:
+.IP \(bu 2
+the Smithproxy service user or cgroup;
+.IP \(bu 2
+a firewall mark set before upstream routing;
+.IP \(bu 2
+the listener port and ingress interface;
+.IP \(bu 2
+a separate network namespace or routing table.
+.PP
+A loop often appears as repeated local connections, rapidly increasing session
+counts or timeouts without packets leaving the host.
+.SH EXAMPLES
+.SS Application using SOCKS5 with proxy-side DNS
+.nf
+    curl --socks5-hostname proxy.example:1080 https://example.net/
+.fi
+.PP
+The hostname is sent to Smithproxy instead of being resolved by curl. This is a
+quick way to test explicit policy and TLS inspection without changing routing.
+.SS Application using HTTP CONNECT
+.nf
+    curl --proxy http://proxy.example:3128 https://example.net/
+.fi
+.PP
+The client opens a CONNECT tunnel and then performs TLS through it. The client
+must trust the Smithproxy CA when the matching policy enables TLS inspection.
+.SS Routed namespace lab
+.nf
+    ip netns add app
+    ip link add app-veth type veth peer name proxy-veth
+    ip link set app-veth netns app
+    ip address add 192.0.2.1/30 dev proxy-veth
+    ip link set proxy-veth up
+    ip netns exec app ip address add 192.0.2.2/30 dev app-veth
+    ip netns exec app ip link set app-veth up
+    ip netns exec app ip link set lo up
+    ip netns exec app ip route add default via 192.0.2.1
+.fi
+.PP
+Apply Smithproxy TPROXY and packet-mark policy-routing rules to traffic arriving
+on
+.B proxy-veth .
+The exact firewall commands depend on the configured listener ports and whether
+iptables or nftables owns the host rules. Remove the namespace after testing.
+.SS Container gateway
+.nf
+    application containers -> bridge/veth -> gateway namespace
+                                      TPROXY -> Smithproxy
+                                              -> upstream route
+.fi
+.PP
+Set the application network's default route to the gateway, then verify that
+bridge traffic reaches the intended firewall hooks. Keep Smithproxy's upstream
+interface outside the intercepted bridge to avoid a loop.
+.SH CERTIFICATE AND HOST-KEY TRUST
+Routing traffic through Smithproxy is not enough for TLS or SSH MITM. TLS
+clients must trust the Smithproxy CA. SSH clients must accept the host key
+presented by the configured SSH profile. Deploy trust material through managed
+client configuration; do not solve trust errors by globally disabling
+verification.
+.SH MANAGEMENT PLANE
+Keep SSH administration of the proxy host, routing protocols, monitoring, CLI
+and HTTP API access outside broad interception rules. Use a dedicated interface,
+address range, namespace or explicit early bypass rule. Test management access
+before applying persistent firewall changes remotely.
+.SH TROUBLESHOOTING
+Check the topology from the outside inward:
+.IP 1. 3
+Does the client route the packet through the intended host or namespace?
+.IP 2. 3
+Does the expected firewall hook count the packet?
+.IP 3. 3
+Does the packet receive the expected mark and local policy route?
+.IP 4. 3
+Is the corresponding Smithproxy listener active?
+.IP 5. 3
+Which policy rule and profiles match the session?
+.IP 6. 3
+Does the upstream socket leave through the correct route without looping?
+.IP 7. 3
+Does return traffic traverse Smithproxy?
+.PP
+Useful commands include:
+.nf
+    show status
+    diag proxy session list
+    diag proxy policy list
+    diag proxy quic list
+    ip rule show
+    ip route show table all
+    ip -6 rule show
+    ip -6 route show table all
+.fi
+.SH DEPLOYMENT CHECKLIST
+.IP \(bu 2
+Choose TPROXY, REDIRECT or an explicit proxy intentionally.
+.IP \(bu 2
+Exclude management and Smithproxy-originated traffic.
+.IP \(bu 2
+Verify forward and return routes before enabling transparent source addresses.
+.IP \(bu 2
+Cover both IPv4 and IPv6 or block the unused family.
+.IP \(bu 2
+Handle QUIC explicitly rather than allowing accidental HTTP/3 bypass.
+.IP \(bu 2
+Deploy TLS CA and SSH host-key trust to intended clients.
+.IP \(bu 2
+Start with a narrow test policy and inspect live sessions before expanding it.
+.SH TESTING POLICY
+Since October 2026, Smithproxy follows a strict documented testing policy with
+commit-specific reports under
+.IR docs/test-reports/ .
+Topology validation should record the ingress mode, address families, firewall
+path, forward and return routes, expected bypasses and tested failure cases.
+.SH SEE ALSO
+.BR smithproxy (1),
+.BR smithproxy.cfg (5),
+.BR smithproxy-mitm (7),
+.BR smithproxy-policy (7),
+.BR smithproxy-capture (7)

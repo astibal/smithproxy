@@ -1,0 +1,271 @@
+.\" Render with: groff -man -Tutf8 smithproxy-mitm.7
+.TH SMITHPROXY-MITM 7 "OCT 2026" "Smithproxy" "Miscellaneous Information Manual"
+.SH NAME
+smithproxy-mitm \- Smithproxy interception and inspection model
+.SH DESCRIPTION
+Smithproxy is a policy-driven man-in-the-middle proxy. For an accepted
+connection it maintains two independent transport legs: one facing the client
+and one facing the upstream server. Data is inspected and relayed between them
+according to the matching policy and its profiles.
+.PP
+The short model is:
+.nf
+    client <== left leg ==> Smithproxy <== right leg ==> server
+.fi
+.PP
+For plaintext traffic Smithproxy relays application bytes directly. For TLS,
+SSH or QUIC MITM it terminates encryption on both legs, processes plaintext in
+the middle and establishes separate cryptographic sessions toward each peer.
+The client therefore authenticates Smithproxy, not the original server key.
+.SH CONNECTION MODEL
+The two legs have separate sockets, handshakes, buffers, error states and
+cryptographic parameters. A single logical session joins them for policy,
+accounting, capture and diagnostics.
+.PP
+Smithproxy can accept traffic through:
+.TP
+.B TPROXY
+Routed Linux traffic intercepted while retaining the original destination.
+Policies may preserve the original client source address upstream when routing
+and kernel configuration allow it.
+.TP
+.B REDIRECT
+Traffic originated on the Smithproxy host. TCP destinations can be recovered;
+local UDP interception is primarily useful for DNS because REDIRECT does not
+retain a general original UDP destination.
+.TP
+.B SOCKS4/SOCKS5
+Explicit proxy connections. Client-supplied addresses or hostnames are passed
+through the normal policy and inspection path.
+.TP
+.B HTTP CONNECT
+Explicit HTTP tunnel requests. After a successful upstream connection, the
+tunnel follows the same TLS detection, policy and relay path as other TCP
+connections.
+.SH POLICY SELECTION
+Traffic is matched against the ordered
+.B policy
+list. Match fields refer to named protocol, address and port objects. The first
+matching rule supplies the action, NAT behavior, routing entry and inspection
+profiles.
+.PP
+Profiles separate the decision to accept a connection from the way it is
+inspected. Relevant assignments include:
+.TP
+.B tls_profile
+TLS interception, certificate validation and TLS behavior.
+.TP
+.B ssh_profile
+SSHv2 MITM behavior on builds with libssh support.
+.TP
+.B detection_profile
+Protocol engines and metadata collection.
+.TP
+.B content_profile
+Capture and content processing.
+.TP
+.B alg_dns_profile
+DNS transaction processing.
+.PP
+A connection accepted without an inspection profile can still be forwarded as
+opaque TCP or UDP. Denied traffic is not connected upstream.
+.SH TLS MITM
+When TLS inspection is selected, Smithproxy behaves as a TLS server toward the
+client and as a TLS client toward the upstream server:
+.nf
+    TLS client == TLS A ==> Smithproxy == TLS B ==> TLS server
+                         plaintext
+.fi
+.PP
+TLS A and TLS B have independent keys and session state. Smithproxy reads the
+ClientHello, including SNI where available, connects upstream, evaluates the
+server certificate and presents a replacement certificate to the client. The
+replacement is signed by the configured Smithproxy CA or selected from custom
+certificate material.
+.PP
+Clients performing normal certificate validation must trust the Smithproxy CA.
+Certificate pinning, private trust stores and applications which do not use the
+system trust store can reject the replacement certificate even when the CA is
+installed system-wide.
+.SS Certificate selection
+The certificate shown downstream can be generated from upstream identity data
+and cached for reuse. Configuration can also select certificates by SNI or
+destination address. Protect the CA private key: possession of that key permits
+impersonation to every client which trusts the CA.
+.SS Upstream validation
+The right leg validates the actual upstream certificate according to its TLS
+profile and configured CA bundle. Profiles control handling of untrusted
+issuers, invalid or self-signed certificates, OCSP, stapling, CRLs and optional
+Certificate Transparency data.
+.PP
+An upstream validation failure can close the connection or produce a configured
+warning response on suitable HTTP traffic. Permissive validation options reduce
+security and should be limited to policies which require them.
+.SS Detection and bypass
+Known TLS listener ports can be directed to the TLS acceptor. TLS autodetection
+can also recognize ClientHello traffic on unusual ports. A policy with a TLS
+profile whose inspection is disabled forwards TLS without terminating it.
+.PP
+SNI-based bypass is a policy decision, not a cryptographic guarantee. DNS cache
+and domain-tree assistance can associate an address with configured names; stale
+or ambiguous DNS data must be considered when designing bypass rules.
+.SH STARTTLS
+STARTTLS begins as plaintext and upgrades an existing application connection to
+TLS after a protocol-specific request and response. Smithproxy uses configured
+STARTTLS signatures to recognize the transition, then inserts the TLS MITM path
+without replacing the underlying logical session.
+.PP
+Detection depends on seeing a supported and correctly ordered protocol exchange.
+Unknown extensions, encrypted negotiation or traffic which does not match a
+signature remains plaintext or opaque according to policy.
+.SH SSH MITM
+SSH can always be carried as opaque TCP. Builds with libssh support can perform
+SSHv2 MITM when a matching policy assigns an
+.B ssh_profile .
+Smithproxy presents the profile's host key downstream and opens a separate SSH
+session upstream.
+.PP
+The initial SSH MITM path supports password-authenticated session channels.
+Features not handled by the SSH layer remain opaque or unsupported. SSHv1 is
+not accepted by the MITM path. Clients will observe the Smithproxy host key, so
+known-host verification must be deployed deliberately rather than disabled
+without review.
+.SH QUIC AND HTTP/3 MITM
+QUIC carries TLS and multiplexed application streams over UDP. Smithproxy uses a
+separate transparent QUIC listener rather than the generic UDP proxy. Full MITM
+operation requires OpenSSL 3.5 or newer with QUIC server support and explicit
+.B quic_port
+and
+.B quic_workers
+configuration.
+.PP
+The listener terminates downstream QUIC, negotiates HTTP/3 and creates an
+upstream QUIC connection. Individual bidirectional streams are relayed inside a
+single connection. HTTP/3 header decoding uses QPACK state associated with that
+connection.
+.PP
+QUIC interception is experimental. The supplied network script can block
+configured QUIC ports when the listener is disabled, preventing clients from
+silently bypassing a TLS inspection policy by switching from TCP/TLS to HTTP/3.
+Inspect runtime state with:
+.nf
+    diag proxy quic list
+.fi
+.SH CAPTURE
+Capture occurs after decryption where an inspection layer exposes plaintext.
+Consequently a capture may contain application data which was encrypted on both
+external legs.
+.TP
+.B SMCap and per-connection PCAP
+Write connection data to individual local files.
+.TP
+.B PCAP single
+Append sessions to a rotating local PCAP file.
+.TP
+.B GRE/SPQ1
+Export plaintext packets to a remote collector.
+.TP
+.B GRE/PCAPNG
+Export native PCAPNG records, including format-specific metadata and TLS secret
+records where available.
+.TP
+.B SSLKEYLOG
+Write TLS traffic secrets for compatible analyzers. This can permit later
+decryption of separately captured wire traffic.
+.PP
+Opaque pass-through protocols remain encrypted in captures. Capture selection
+is controlled by the matching content profile and global capture destination
+settings.
+.SH ROUTING AND IDENTITY
+The upstream connection is a new connection. With
+.B nat = auto
+it normally uses an address belonging to the Smithproxy host. Transparent source
+handling can preserve the original source address, but requires correct policy
+routing so return traffic reaches Smithproxy rather than the client directly.
+.PP
+A routing profile can rewrite the destination, select among multiple targets
+and rewrite an exact outbound TLS SNI value. Such changes affect the right leg;
+they do not alter what the original client requested on the left leg.
+.SH EXAMPLES
+.SS Inspect HTTPS for one client network
+.nf
+    policy = (
+        {
+            proto = "tcp";
+            src = [ "managed_clients" ];
+            dst = [ "any", "any6" ];
+            sport = [ "all" ]; dport = [ "https" ];
+            action = "accept"; nat = "auto";
+            tls_profile = "default";
+            detection_profile = "detect";
+            content_profile = "metadata_only";
+            routing = "none";
+        }
+    );
+.fi
+.PP
+The managed clients must trust the CA configured by the selected TLS profile.
+The content profile independently decides whether payload is written.
+.SS Bypass a pinned destination
+.nf
+    tls_profiles = {
+        inspect = { inspect = TRUE; };
+        bypass = { inspect = FALSE; };
+    };
+
+    policy = (
+        { proto = "tcp"; dst = [ "pinned_service" ];
+          dport = [ "https" ]; tls_profile = "bypass"; ... },
+        { proto = "tcp"; dst = [ "any", "any6" ];
+          dport = [ "https" ]; tls_profile = "inspect"; ... }
+    );
+.fi
+.PP
+The narrow bypass must precede the broad inspection rule. Fill all required
+policy fields represented by the ellipses; they are omitted only for clarity.
+.SS Compare opaque and inspected captures
+Capture the same test request on the client-facing interface and through a
+content profile attached to the inspected session. The wire capture contains
+TLS records; the Smithproxy capture can contain HTTP data. These are different
+views of two independent TLS legs, not duplicate packet streams.
+.SH FAILURE BEHAVIOR
+The two-leg model creates failure points which do not exist in a simple packet
+forwarder: upstream connection, certificate generation, cryptographic handshake,
+certificate validation, protocol parsing and capture/export can fail
+independently.
+.PP
+Use the event list, connection history, live session diagnostics and component
+debug topics to identify the failing stage. Avoid enabling high-volume payload
+or extreme debug logging permanently on production traffic.
+.SH TESTING POLICY
+Since October 2026, Smithproxy records successful clean-tree validation as
+commit-specific reports under
+.IR docs/test-reports/ .
+MITM changes are expected to document the exercised protocol and negative paths;
+a single successful request is not sufficient evidence for the complete path.
+.SH SECURITY CONSIDERATIONS
+MITM inspection changes the end-to-end trust model. Deploy the Smithproxy CA and
+SSH host keys only to intended clients. Restrict access to private keys, CLI and
+API credentials, captures, SSLKEYLOG output and decrypted debug logs.
+.PP
+Inspection should be explicitly scoped by policy. A broad catch-all TLS or SSH
+MITM rule can expose credentials and private content, break pinned applications
+and create regulatory or privacy obligations. Bypass rules should be narrow,
+auditable and tested for fail-open or fail-closed behavior.
+.SH LIMITATIONS
+Protocol support depends on build options and dependency versions. TLS and SSH
+MITM cannot transparently defeat application pinning. QUIC/HTTP/3 is
+experimental. Unknown application protocols can be transported and captured,
+but are not automatically understood merely because their transport is
+decrypted.
+.SH SEE ALSO
+.BR smithproxy (1),
+.BR smithproxy.cfg (5),
+.BR smithproxy-policy (7),
+.BR smithproxy-capture (7),
+.BR smithproxy-topology (7)
+.PP
+Current documentation:
+.nf
+    https://smithproxy.readthedocs.io/en/latest/
+.fi
