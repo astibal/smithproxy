@@ -586,6 +586,20 @@ void CfgValueHelp::init() {
     add("ssh_profiles.[x].host_key", "private host key presented by the SSH MITM server")
             .may_be_empty(false);
 
+    for(auto const* feature : {"shell", "exec", "subsystem", "pty", "environment",
+                               "local_forward", "remote_forward", "x11", "agent"}) {
+        add(std::string("ssh_profiles.[x].") + feature,
+            "pass or reject this SSH feature")
+                .may_be_empty(false)
+                .value_filter(is_in_vector(
+                    []() { return std::vector<std::string>{"pass", "reject"}; },
+                    "pass or reject"))
+                .suggestion_generator(
+                    [](std::string const&, std::string const&) {
+                        return std::vector<std::string>{"pass", "reject"};
+                    });
+    }
+
     add("policy.[x].detection_profile", "detection options")
             .may_be_empty(true)
             .value_filter(is_in_vector([]() -> std::vector<std::string> { return CfgFactory::get()->keys_of_db_prof_detection(); },"must be in detection_profiles"))

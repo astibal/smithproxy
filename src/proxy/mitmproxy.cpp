@@ -93,6 +93,10 @@ bool MitmProxy::activate_stream_handler() {
         [this](sx::stream_direction direction, std::string_view plaintext) {
             write_stream_traffic(direction, plaintext);
         });
+    stream_handler_->observe_events(
+        [this](sx::stream_direction direction, std::string_view event) {
+            write_stream_event(direction, event);
+        });
     if (!stream_handler_->attach(*this)) {
         stream_handler_->shutdown();
         state().dead(true);
@@ -994,6 +998,16 @@ void MitmProxy::write_stream_traffic(sx::stream_direction direction,
     tlog()->write(direction == sx::stream_direction::upstream
                       ? side_t::LEFT : side_t::RIGHT,
                   payload);
+}
+
+void MitmProxy::write_stream_event(sx::stream_direction direction,
+                                   std::string_view event) {
+    if(!writer_opts()->write_payload || event.empty()) return;
+    toggle_tlog();
+    if(!tlog()) return;
+    tlog()->write_annotation(direction == sx::stream_direction::upstream
+                                 ? side_t::LEFT : side_t::RIGHT,
+                             std::string(event));
 }
 
 void MitmProxy::on_left_bytes(baseHostCX* cx) {

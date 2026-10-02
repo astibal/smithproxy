@@ -108,7 +108,7 @@ TEST(SshMitmTransport, ClassifiesSupportedSessionChannelRequests) {
     EXPECT_EQ(sx::ssh::classify_channel_request(SSH_CHANNEL_REQUEST_SUBSYSTEM),
               channel_request_kind::subsystem);
     EXPECT_EQ(sx::ssh::classify_channel_request(SSH_CHANNEL_REQUEST_X11),
-              channel_request_kind::unsupported);
+              channel_request_kind::x11);
 }
 
 TEST(SshMitmTransport, RegistersSeparateTransportAndPayloadLoggers) {

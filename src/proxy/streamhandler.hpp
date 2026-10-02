@@ -19,6 +19,7 @@ enum class stream_direction { upstream, downstream };
 class StreamHandler {
 public:
     using plaintext_observer = std::function<void(stream_direction, std::string_view)>;
+    using event_observer = std::function<void(stream_direction, std::string_view)>;
 
     enum class result {
         progress,
@@ -38,6 +39,7 @@ public:
     virtual void shutdown() noexcept = 0;
     // Reports application bytes after protocol decoding, before re-encoding.
     virtual void observe_plaintext(plaintext_observer observer) = 0;
+    virtual void observe_events(event_observer observer) = 0;
 
     // A committed handler owns the stream until close. Raw forwarding must
     // never be restored after this becomes true.

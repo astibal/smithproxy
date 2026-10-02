@@ -570,6 +570,22 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "renamed captures.remote.gre_format 'spq1' to 'traffic'");
         return true;
     }
+    else if(upgrade_to_num == 1043) {
+        if(cfgapi.getRoot().exists("ssh_profiles")) {
+            Setting& profiles = cfgapi.getRoot()["ssh_profiles"];
+            for(int i = 0; i < profiles.getLength(); ++i) {
+                for(auto const* feature : {"shell", "exec", "subsystem", "pty",
+                                           "environment", "local_forward",
+                                           "remote_forward", "x11", "agent"}) {
+                    if(!profiles[i].exists(feature)) {
+                        profiles[i].add(feature, Setting::TypeString) = "pass";
+                    }
+                }
+            }
+        }
+        log.event(INF, "added per-feature SSH profile actions");
+        return true;
+    }
 
 
     return false;
@@ -2393,6 +2409,33 @@ int CfgFactory::load_db_prof_ssh () {
             continue;
         }
 
+        auto load_action = [&](char const* key, bool& destination) {
+            std::string action = "pass";
+            load_if_exists(item, key, action);
+            action = string_tolower(action);
+            if(action == "pass") {
+                destination = true;
+            } else if(action == "reject") {
+                destination = false;
+            } else {
+                _err("load_db_prof_ssh: '%s': invalid %s action '%s'",
+                     name.c_str(), key, action.c_str());
+                Log::get()->events().insert(
+                    ERR, "CONFIG: ssh_profile '%s': %s must be pass or reject",
+                    name.c_str(), key);
+                LOAD_ERRORS = true;
+            }
+        };
+        load_action("shell", profile->shell);
+        load_action("exec", profile->exec);
+        load_action("subsystem", profile->subsystem);
+        load_action("pty", profile->pty);
+        load_action("environment", profile->environment);
+        load_action("local_forward", profile->local_forward);
+        load_action("remote_forward", profile->remote_forward);
+        load_action("x11", profile->x11);
+        load_action("agent", profile->agent);
+
         db_prof_ssh[name] = profile;
         _dia("load_db_prof_ssh: '%s': ok", name.c_str());
     }
@@ -3136,6 +3179,15 @@ int CfgFactory::policy_apply (baseHostCX *originator, MitmProxy *proxy, int matc
                     rule->profile_ssh->element_name().c_str());
                 auto options = sx::ssh::transport_options{};
                 options.host_key = rule->profile_ssh->host_key;
+                options.features.shell = rule->profile_ssh->shell;
+                options.features.exec = rule->profile_ssh->exec;
+                options.features.subsystem = rule->profile_ssh->subsystem;
+                options.features.pty = rule->profile_ssh->pty;
+                options.features.environment = rule->profile_ssh->environment;
+                options.features.local_forward = rule->profile_ssh->local_forward;
+                options.features.remote_forward = rule->profile_ssh->remote_forward;
+                options.features.x11 = rule->profile_ssh->x11;
+                options.features.agent = rule->profile_ssh->agent;
                 if (!proxy->stage_stream_handler(
                         std::make_unique<sx::ssh::stream_handler>(std::move(options)))) {
                     _err("Connection %s: cannot stage SSH stream handler",
@@ -5144,6 +5196,11 @@ bool CfgFactory::new_ssh_profile(Setting& section, std::string const& name) cons
     try {
         Setting& item = section.add(name, Setting::TypeGroup);
         item.add("host_key", Setting::TypeString) = "/etc/smithproxy/ssh_host_ed25519_key";
+        for(auto const* feature : {"shell", "exec", "subsystem", "pty",
+                                   "environment", "local_forward",
+                                   "remote_forward", "x11", "agent"}) {
+            item.add(feature, Setting::TypeString) = "pass";
+        }
         return true;
     }
     catch(libconfig::SettingException const& e) {
@@ -5163,6 +5220,18 @@ int CfgFactory::save_ssh_profiles(Config& ex) const {
 
         Setting& item = profiles.add(name, Setting::TypeGroup);
         item.add("host_key", Setting::TypeString) = profile->host_key;
+        auto save_action = [&](char const* key, bool pass) {
+            item.add(key, Setting::TypeString) = pass ? "pass" : "reject";
+        };
+        save_action("shell", profile->shell);
+        save_action("exec", profile->exec);
+        save_action("subsystem", profile->subsystem);
+        save_action("pty", profile->pty);
+        save_action("environment", profile->environment);
+        save_action("local_forward", profile->local_forward);
+        save_action("remote_forward", profile->remote_forward);
+        save_action("x11", profile->x11);
+        save_action("agent", profile->agent);
         ++saved;
     }
     return saved;

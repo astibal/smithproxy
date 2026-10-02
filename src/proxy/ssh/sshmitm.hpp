@@ -40,6 +40,7 @@ enum class channel_request_kind {
     subsystem,
     environment,
     window_change,
+    x11,
 };
 
 [[nodiscard]] channel_request_kind classify_channel_request(int subtype) noexcept;
@@ -48,9 +49,21 @@ logan_lite& shell_log();
 logan_lite& exec_log();
 
 struct transport_options {
+    struct feature_policy {
+        bool shell = true;
+        bool exec = true;
+        bool subsystem = true;
+        bool pty = true;
+        bool environment = true;
+        bool local_forward = true;
+        bool remote_forward = true;
+        bool x11 = true;
+        bool agent = true;
+    } features;
     std::string host_key;
     std::string upstream_host;
     std::function<void(bool upstream, std::string_view)> plaintext_observer;
+    std::function<void(bool upstream, std::string_view)> event_observer;
 };
 
 class mitm_transport {

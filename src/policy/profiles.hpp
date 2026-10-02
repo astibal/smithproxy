@@ -322,10 +322,22 @@ struct ProfileList {
 
 struct ProfileSsh : public CfgElement {
     std::string host_key;
+    bool shell = true;
+    bool exec = true;
+    bool subsystem = true;
+    bool pty = true;
+    bool environment = true;
+    bool local_forward = true;
+    bool remote_forward = true;
+    bool x11 = true;
+    bool agent = true;
 
     std::string to_string(int verbosity) const override {
-        return string_format("ProfileSsh: name=%s host_key=%s",
-                             element_name().c_str(), host_key.c_str());
+        return string_format(
+            "ProfileSsh: name=%s host_key=%s shell=%d exec=%d subsystem=%d "
+            "pty=%d environment=%d local_forward=%d remote_forward=%d x11=%d agent=%d",
+            element_name().c_str(), host_key.c_str(), shell, exec, subsystem,
+            pty, environment, local_forward, remote_forward, x11, agent);
     }
 
     TYPENAME_OVERRIDE("ProfileSsh")

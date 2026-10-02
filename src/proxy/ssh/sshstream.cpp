@@ -37,6 +37,11 @@ bool stream_handler::attach(MitmProxy& proxy) {
             observer(upstream ? stream_direction::upstream : stream_direction::downstream, plaintext);
         }
     };
+    options.event_observer = [observer = event_observer_](
+                                 bool upstream, std::string_view event) {
+        if (observer) observer(upstream ? stream_direction::upstream
+                                        : stream_direction::downstream, event);
+    };
     if (options.upstream_host.empty()) {
         options.upstream_host = right->host();
     }
@@ -55,6 +60,10 @@ bool stream_handler::attach(MitmProxy& proxy) {
 
 void stream_handler::observe_plaintext(plaintext_observer observer) {
     plaintext_observer_ = std::move(observer);
+}
+
+void stream_handler::observe_events(event_observer observer) {
+    event_observer_ = std::move(observer);
 }
 
 sx::StreamHandler::result stream_handler::drive() {

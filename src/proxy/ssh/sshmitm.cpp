@@ -9,11 +9,13 @@
 #include <cstdlib>
 #include <cstring>
 #include <utility>
+#include <vector>
 
 #include <sys/socket.h>
 #include <unistd.h>
 
 #include <libssh/libssh.h>
+#include <libssh/callbacks.h>
 #include <libssh/server.h>
 
 #include <display.hpp>
@@ -50,6 +52,7 @@ channel_request_kind classify_channel_request(int subtype) noexcept {
         case SSH_CHANNEL_REQUEST_SUBSYSTEM:     return channel_request_kind::subsystem;
         case SSH_CHANNEL_REQUEST_ENV:           return channel_request_kind::environment;
         case SSH_CHANNEL_REQUEST_WINDOW_CHANGE: return channel_request_kind::window_change;
+        case SSH_CHANNEL_REQUEST_X11:           return channel_request_kind::x11;
         default:                                return channel_request_kind::unsupported;
     }
 }
@@ -148,6 +151,53 @@ pty_request message_pty_request(ssh_message message) {
 } // namespace
 
 class mitm_transport::impl {
+    enum class channel_mode { none, shell, exec };
+    struct channel_pair {
+        ssh_channel downstream = nullptr;
+        ssh_channel upstream = nullptr;
+        int type = SSH_CHANNEL_UNKNOWN;
+        std::string to_upstream;
+        std::string to_downstream;
+        std::string stderr_to_downstream;
+        bool downstream_eof_forwarded = false;
+        bool upstream_eof_forwarded = false;
+        bool upstream_exit_forwarded = false;
+        bool closing = false;
+        channel_mode mode = channel_mode::none;
+        std::string destination_address;
+        int destination_port = 0;
+        std::string originator_address;
+        int originator_port = 0;
+
+        ~channel_pair() {
+            if (downstream) ssh_channel_free(downstream);
+            if (upstream) ssh_channel_free(upstream);
+        }
+    };
+
+    static ssh_channel accept_forwarded_tcpip(
+            ssh_session session, char const* destination_address, int destination_port,
+            char const* originator_address, int originator_port, void* userdata) {
+        auto& self = *static_cast<impl*>(userdata);
+        if (!self.options_.features.remote_forward) return nullptr;
+        return self.queue_server_channel(session, SSH_CHANNEL_FORWARDED_TCPIP,
+            destination_address, destination_port, originator_address, originator_port);
+    }
+
+    static ssh_channel accept_x11(ssh_session session, char const* originator_address,
+                                  int originator_port, void* userdata) {
+        auto& self = *static_cast<impl*>(userdata);
+        if (!self.options_.features.x11) return nullptr;
+        return self.queue_server_channel(session, SSH_CHANNEL_X11, "", 0,
+                                         originator_address, originator_port);
+    }
+
+    static ssh_channel accept_agent(ssh_session session, void* userdata) {
+        auto& self = *static_cast<impl*>(userdata);
+        if (!self.options_.features.agent) return nullptr;
+        return self.queue_server_channel(session, SSH_CHANNEL_AUTH_AGENT, "", 0, "", 0);
+    }
+
 public:
     explicit impl(transport_options options) : options_(std::move(options)) {}
 
@@ -160,15 +210,16 @@ public:
         if (pending_channel_message_) {
             ssh_message_free(pending_channel_message_);
         }
+        if (pending_global_message_) {
+            ssh_message_free(pending_global_message_);
+        }
         if (pending_open_message_) {
             ssh_message_free(pending_open_message_);
         }
-        if (downstream_channel_) {
-            ssh_channel_free(downstream_channel_);
-        }
-        if (upstream_channel_) {
-            ssh_channel_free(upstream_channel_);
-        }
+        channels_.clear();
+        retired_channels_.clear();
+        server_open_channels_.clear();
+        opening_channel_.reset();
         if (downstream_) {
             // Do not drive an already failed libssh state machine from a
             // destructor. ssh_free() still releases all session resources.
@@ -346,6 +397,16 @@ public:
 
         ssh_set_blocking(upstream_, 0);
         ssh_set_blocking(downstream_, 0);
+        ssh_callbacks_init(&upstream_callbacks_);
+        upstream_callbacks_.userdata = this;
+        upstream_callbacks_.channel_open_request_forwarded_tcpip_function =
+            &impl::accept_forwarded_tcpip;
+        upstream_callbacks_.channel_open_request_x11_function = &impl::accept_x11;
+        upstream_callbacks_.channel_open_request_auth_agent_function = &impl::accept_agent;
+        if (ssh_set_callbacks(upstream_, &upstream_callbacks_) != SSH_OK) {
+            set_error(libssh_error(upstream_, "cannot install upstream SSH callbacks"));
+            return false;
+        }
         ssh_set_auth_methods(downstream_, SSH_AUTH_METHOD_PASSWORD);
         if (ssh_bind_accept_fd(bind_, downstream_, client_fd_) != SSH_OK) {
             set_error(libssh_error(bind_, "cannot attach downstream SSH socket"));
@@ -485,73 +546,249 @@ public:
         return drive_authentication();
     }
 
-    drive_result drive_channel_open() {
+    ssh_channel queue_server_channel(
+            ssh_session session, int type, char const* destination_address,
+            int destination_port, char const* originator_address, int originator_port) {
+        auto channel = std::make_unique<channel_pair>();
+        channel->upstream = ssh_channel_new(session);
+        if (!channel->upstream) return nullptr;
+        ssh_channel_set_blocking(channel->upstream, 0);
+        channel->type = type;
+        channel->destination_address = destination_address ? destination_address : "";
+        channel->destination_port = destination_port;
+        channel->originator_address = originator_address ? originator_address : "";
+        channel->originator_port = originator_port;
+        auto* accepted = channel->upstream;
+        server_open_channels_.push_back(std::move(channel));
+        return accepted;
+    }
+
+    drive_result drive_server_channel_open() {
+        if (server_open_channels_.empty()) return drive_result::again;
+        auto& channel = *server_open_channels_.front();
+        if (!channel.downstream) {
+            channel.downstream = ssh_channel_new(downstream_);
+            if (!channel.downstream) {
+                set_error(libssh_error(downstream_, "cannot allocate downstream SSH channel"));
+                return drive_result::failed;
+            }
+            ssh_channel_set_blocking(channel.downstream, 0);
+        }
+
+        int result = SSH_ERROR;
+        char const* type_name = "unknown";
+        if (channel.type == SSH_CHANNEL_FORWARDED_TCPIP) {
+            type_name = "forwarded-tcpip";
+            result = ssh_channel_open_reverse_forward(
+                channel.downstream, channel.destination_address.c_str(),
+                channel.destination_port, channel.originator_address.c_str(),
+                channel.originator_port);
+        } else if (channel.type == SSH_CHANNEL_X11) {
+            type_name = "x11";
+            result = ssh_channel_open_x11(channel.downstream,
+                                          channel.originator_address.c_str(),
+                                          channel.originator_port);
+        } else if (channel.type == SSH_CHANNEL_AUTH_AGENT) {
+            type_name = "auth-agent";
+            result = ssh_channel_open_auth_agent(channel.downstream);
+        }
+        if (result == SSH_AGAIN) return drive_result::again;
+        if (result != SSH_OK) {
+            set_error(libssh_error(downstream_, "cannot open downstream SSH relay channel"));
+            return drive_result::failed;
+        }
+
+        emit_event(false, string_format("ssh event=channel-open type=%s action=pass",
+                                        type_name));
+        channels_.push_back(std::move(server_open_channels_.front()));
+        server_open_channels_.erase(server_open_channels_.begin());
+        return drive_result::progress;
+    }
+
+    drive_result drive_channel_open(ssh_message supplied_message = nullptr) {
         if (!pending_open_message_) {
-            auto* message = ssh_message_get(downstream_);
+            auto* message = supplied_message ? supplied_message : ssh_message_get(downstream_);
             if (!message) return drive_result::again;
 
-            if (ssh_message_type(message) != SSH_REQUEST_CHANNEL_OPEN
-                || ssh_message_subtype(message) != SSH_CHANNEL_SESSION
-                || downstream_channel_ || upstream_channel_) {
+            if (ssh_message_type(message) != SSH_REQUEST_CHANNEL_OPEN) {
                 return reject_message(message, false);
             }
 
-            upstream_channel_ = ssh_channel_new(upstream_);
-            if (!upstream_channel_) {
+            auto const type = ssh_message_subtype(message);
+            if(type != SSH_CHANNEL_SESSION && type != SSH_CHANNEL_DIRECT_TCPIP) {
+                return reject_message(message, false);
+            }
+            if(type == SSH_CHANNEL_DIRECT_TCPIP && !options_.features.local_forward) {
+                xdia(transport_log())("rejecting local TCP forwarding by SSH profile");
+                emit_event(true, "ssh event=channel-open type=direct-tcpip action=reject");
+                return reject_message(message, false);
+            }
+
+            opening_channel_ = std::make_unique<channel_pair>();
+            opening_channel_->upstream = ssh_channel_new(upstream_);
+            if (!opening_channel_->upstream) {
                 set_error(libssh_error(upstream_, "cannot allocate upstream SSH channel"));
                 ssh_message_free(message);
+                opening_channel_.reset();
                 return drive_result::failed;
             }
-            ssh_channel_set_blocking(upstream_channel_, 0);
+            ssh_channel_set_blocking(opening_channel_->upstream, 0);
             pending_open_message_ = message;
+            opening_channel_->type = type;
         }
 
-        auto const result = ssh_channel_open_session(upstream_channel_);
+        int result = SSH_ERROR;
+        if(opening_channel_->type == SSH_CHANNEL_SESSION) {
+            result = ssh_channel_open_session(opening_channel_->upstream);
+        } else if(opening_channel_->type == SSH_CHANNEL_DIRECT_TCPIP) {
+            auto const* destination = ssh_message_channel_request_open_destination(
+                pending_open_message_);
+            auto const* originator = ssh_message_channel_request_open_originator(
+                pending_open_message_);
+            result = destination && originator
+                ? ssh_channel_open_forward(
+                    opening_channel_->upstream, destination,
+                    ssh_message_channel_request_open_destination_port(pending_open_message_),
+                    originator,
+                    ssh_message_channel_request_open_originator_port(pending_open_message_))
+                : SSH_ERROR;
+        }
         if (result == SSH_AGAIN) return drive_result::again;
         if (result != SSH_OK) {
             auto* message = std::exchange(pending_open_message_, nullptr);
             reject_message(message, false);
+            opening_channel_.reset();
             set_error(libssh_error(upstream_, "cannot open upstream SSH session channel"));
             return drive_result::failed;
         }
 
         auto* message = std::exchange(pending_open_message_, nullptr);
-        downstream_channel_ = ssh_message_channel_request_open_reply_accept(message);
+        opening_channel_->downstream = ssh_message_channel_request_open_reply_accept(message);
         ssh_message_free(message);
-        if (!downstream_channel_) {
+        if (!opening_channel_->downstream) {
             set_error(libssh_error(downstream_, "cannot accept downstream SSH session channel"));
+            opening_channel_.reset();
             return drive_result::failed;
         }
-        ssh_channel_set_blocking(downstream_channel_, 0);
-        xdia(transport_log())("session channel opened on both SSH legs");
+        ssh_channel_set_blocking(opening_channel_->downstream, 0);
+        xdia(transport_log())("%s channel opened on both SSH legs",
+                              opening_channel_->type == SSH_CHANNEL_SESSION
+                                  ? "session" : "direct-tcpip");
+        emit_event(true, string_format("ssh event=channel-open type=%s action=pass",
+                   opening_channel_->type == SSH_CHANNEL_SESSION ? "session" : "direct-tcpip"));
+        channels_.push_back(std::move(opening_channel_));
         return drive_result::progress;
     }
 
-    int forward_channel_request(ssh_message message) {
+    bool feature_allowed(channel_request_kind kind) const {
+        switch(kind) {
+            case channel_request_kind::shell:         return options_.features.shell;
+            case channel_request_kind::exec:          return options_.features.exec;
+            case channel_request_kind::subsystem:     return options_.features.subsystem;
+            case channel_request_kind::pty:           return options_.features.pty;
+            case channel_request_kind::environment:   return options_.features.environment;
+            case channel_request_kind::x11:           return options_.features.x11;
+            case channel_request_kind::window_change: return options_.features.pty;
+            case channel_request_kind::unsupported:   return false;
+        }
+        return false;
+    }
+
+    drive_result drive_global_request(ssh_message supplied_message = nullptr) {
+        if (!pending_global_message_) {
+            auto* message = supplied_message ? supplied_message : ssh_message_get(downstream_);
+            if (!message) return drive_result::again;
+            if (ssh_message_type(message) != SSH_REQUEST_GLOBAL) {
+                return reject_message(message, false);
+            }
+            auto const subtype = ssh_message_subtype(message);
+            if (!options_.features.remote_forward
+                || (subtype != SSH_GLOBAL_REQUEST_TCPIP_FORWARD
+                    && subtype != SSH_GLOBAL_REQUEST_CANCEL_TCPIP_FORWARD)) {
+                xdia(transport_log())("rejecting SSH global request subtype=%d by profile/support",
+                                      subtype);
+                emit_event(true, string_format(
+                    "ssh event=remote-forward action=reject subtype=%d", subtype));
+                return reject_message(message, false);
+            }
+            auto const* address = ssh_message_global_request_address(message);
+            if (!address) return reject_message(message, false);
+            pending_global_address_ = address;
+            pending_global_port_ = ssh_message_global_request_port(message);
+            pending_global_subtype_ = subtype;
+            pending_global_message_ = message;
+        }
+
+        int bound_port = pending_global_port_;
+        auto const result = pending_global_subtype_ == SSH_GLOBAL_REQUEST_TCPIP_FORWARD
+            ? ssh_channel_listen_forward(upstream_, pending_global_address_.c_str(),
+                                         pending_global_port_, &bound_port)
+            : ssh_channel_cancel_forward(upstream_, pending_global_address_.c_str(),
+                                         pending_global_port_);
+        if (result == SSH_AGAIN) return drive_result::again;
+
+        auto* message = std::exchange(pending_global_message_, nullptr);
+        if (result != SSH_OK) {
+            pending_global_address_.clear();
+            return reject_message(message, false);
+        }
+        auto const action = pending_global_subtype_ == SSH_GLOBAL_REQUEST_TCPIP_FORWARD
+            ? "listen" : "cancel";
+        if (ssh_message_global_request_reply_success(
+                message, static_cast<std::uint16_t>(bound_port)) != SSH_OK) {
+            ssh_message_free(message);
+            set_error(libssh_error(downstream_, "cannot confirm downstream global request"));
+            return drive_result::failed;
+        }
+        emit_event(true, string_format(
+            "ssh event=remote-forward action=%s address=\"%s\" port=%d bound_port=%d",
+            action, ESC_(pending_global_address_).c_str(), pending_global_port_, bound_port));
+        ssh_message_free(message);
+        pending_global_address_.clear();
+        return drive_result::progress;
+    }
+
+    int forward_channel_request(channel_pair& channel, ssh_message message) {
         switch (classify_channel_request(ssh_message_subtype(message))) {
             case channel_request_kind::pty: {
                 auto const request = message_pty_request(message);
-                return ssh_channel_request_pty_size(upstream_channel_, request.terminal.c_str(),
+                return ssh_channel_request_pty_size(channel.upstream, request.terminal.c_str(),
                                                     request.columns, request.rows);
             }
             case channel_request_kind::shell:
-                return ssh_channel_request_shell(upstream_channel_);
+                return ssh_channel_request_shell(channel.upstream);
             case channel_request_kind::exec: {
                 auto const* command = ssh_message_channel_request_command(message);
-                return command ? ssh_channel_request_exec(upstream_channel_, command) : SSH_ERROR;
+                return command ? ssh_channel_request_exec(channel.upstream, command) : SSH_ERROR;
             }
             case channel_request_kind::subsystem: {
                 auto const* subsystem = ssh_message_channel_request_subsystem(message);
-                return subsystem ? ssh_channel_request_subsystem(upstream_channel_, subsystem) : SSH_ERROR;
+                return subsystem ? ssh_channel_request_subsystem(channel.upstream, subsystem) : SSH_ERROR;
             }
             case channel_request_kind::environment: {
                 auto const* name = ssh_message_channel_request_env_name(message);
                 auto const* value = ssh_message_channel_request_env_value(message);
-                return name && value ? ssh_channel_request_env(upstream_channel_, name, value) : SSH_ERROR;
+                return name && value ? ssh_channel_request_env(channel.upstream, name, value) : SSH_ERROR;
             }
             case channel_request_kind::window_change: {
                 auto const request = message_pty_request(message);
-                return ssh_channel_change_pty_size(upstream_channel_, request.columns, request.rows);
+                return ssh_channel_change_pty_size(channel.upstream, request.columns, request.rows);
+            }
+            case channel_request_kind::x11: {
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+                auto const single = ssh_message_channel_request_x11_single_connection(message);
+                auto const* protocol = ssh_message_channel_request_x11_auth_protocol(message);
+                auto const* cookie = ssh_message_channel_request_x11_auth_cookie(message);
+                auto const screen = ssh_message_channel_request_x11_screen_number(message);
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+                return protocol && cookie
+                    ? ssh_channel_request_x11(channel.upstream, single, protocol, cookie, screen)
+                    : SSH_ERROR;
             }
             case channel_request_kind::unsupported:
                 return SSH_ERROR;
@@ -563,32 +800,54 @@ public:
         if (!pending_channel_message_) {
             auto* message = ssh_message_get(downstream_);
             if (!message) return drive_result::again;
-            if (ssh_message_type(message) != SSH_REQUEST_CHANNEL
-                || ssh_message_channel_request_channel(message) != downstream_channel_
-                || classify_channel_request(ssh_message_subtype(message))
-                       == channel_request_kind::unsupported) {
+
+            if (ssh_message_type(message) == SSH_REQUEST_CHANNEL_OPEN) {
+                return drive_channel_open(message);
+            }
+            if (ssh_message_type(message) == SSH_REQUEST_GLOBAL) {
+                return drive_global_request(message);
+            }
+            auto const kind = classify_channel_request(ssh_message_subtype(message));
+            auto* requested = ssh_message_type(message) == SSH_REQUEST_CHANNEL
+                ? ssh_message_channel_request_channel(message) : nullptr;
+            auto const found = std::find_if(channels_.begin(), channels_.end(),
+                [requested](auto const& pair) { return pair->downstream == requested; });
+            if (found == channels_.end() || (*found)->type != SSH_CHANNEL_SESSION
+                || !feature_allowed(kind)) {
+                xdia(transport_log())("rejecting SSH channel request subtype=%d by profile/support",
+                                      ssh_message_subtype(message));
+                emit_event(true, string_format(
+                    "ssh event=channel-request subtype=%d action=reject",
+                    ssh_message_subtype(message)));
                 return reject_message(message, false);
             }
+            pending_request_channel_ = found->get();
             pending_channel_message_ = message;
         }
 
-        auto const result = forward_channel_request(pending_channel_message_);
+        auto const result = forward_channel_request(*pending_request_channel_,
+                                                    pending_channel_message_);
         if (result == SSH_AGAIN) return drive_result::again;
 
         auto* message = std::exchange(pending_channel_message_, nullptr);
+        auto* channel = std::exchange(pending_request_channel_, nullptr);
         if (result == SSH_OK) {
             auto const kind = classify_channel_request(ssh_message_subtype(message));
             if (kind == channel_request_kind::shell) {
-                channel_mode_ = channel_mode::shell;
+                channel->mode = channel_mode::shell;
                 xdia(transport_log())("interactive shell requested");
             } else if (kind == channel_request_kind::exec) {
-                channel_mode_ = channel_mode::exec;
+                channel->mode = channel_mode::exec;
                 auto const* command = ssh_message_channel_request_command(message);
                 xdeb(exec_log())("request command='%s'", command ? command : "");
+                emit_event(true, string_format("ssh event=exec command=\"%s\" action=pass",
+                                               command ? ESC_(command).c_str() : ""));
             } else if (kind == channel_request_kind::subsystem) {
-                channel_mode_ = channel_mode::exec;
+                channel->mode = channel_mode::exec;
                 auto const* subsystem = ssh_message_channel_request_subsystem(message);
                 xdeb(exec_log())("request subsystem='%s'", subsystem ? subsystem : "");
+                emit_event(true, string_format("ssh event=subsystem name=\"%s\" action=pass",
+                                               subsystem ? ESC_(subsystem).c_str() : ""));
             } else if (kind == channel_request_kind::environment) {
                 auto const* name = ssh_message_channel_request_env_name(message);
                 auto const* value = ssh_message_channel_request_env_value(message);
@@ -623,7 +882,7 @@ public:
 
     int read_channel(ssh_channel channel, std::string& pending, bool stderr_stream,
                      char const* direction, std::uint64_t& byte_counter,
-                     bool upstream_direction) {
+                     bool upstream_direction, channel_mode mode) {
         if (!pending.empty()) return 0;
         char buffer[32768];
         auto const amount = ssh_channel_read_nonblocking(
@@ -634,9 +893,12 @@ public:
             if (options_.plaintext_observer) {
                 options_.plaintext_observer(upstream_direction, pending);
             }
-            auto* payload_log = channel_mode_ == channel_mode::shell
+            emit_event(upstream_direction,
+                       string_format("ssh event=relay direction=%s bytes=%d",
+                                     upstream_direction ? "up" : "down", amount));
+            auto* payload_log = mode == channel_mode::shell
                 ? &shell_log()
-                : channel_mode_ == channel_mode::exec ? &exec_log() : nullptr;
+                : mode == channel_mode::exec ? &exec_log() : nullptr;
             if (payload_log && *payload_log->level() >= DEB) {
                 payload_log->deb("%s%s %dB: %s", direction,
                                  stderr_stream ? " stderr" : "",
@@ -646,8 +908,27 @@ public:
         return amount;
     }
 
-    drive_result drive_channel_data() {
+    drive_result drive_channel_data(channel_pair& channel) {
         bool progress = false;
+        if (channel.closing) {
+            if (!ssh_channel_is_closed(channel.upstream)) {
+                auto const result = ssh_channel_close(channel.upstream);
+                if (result == SSH_ERROR) {
+                    set_error("cannot close upstream SSH channel");
+                    return drive_result::failed;
+                }
+                progress = progress || result == SSH_OK;
+            }
+            if (!ssh_channel_is_closed(channel.downstream)) {
+                auto const result = ssh_channel_close(channel.downstream);
+                if (result == SSH_ERROR) {
+                    set_error("cannot close downstream SSH channel");
+                    return drive_result::failed;
+                }
+                progress = progress || result == SSH_OK;
+            }
+            return progress ? drive_result::progress : drive_result::again;
+        }
         auto flush = [&progress](ssh_channel channel, std::string& pending,
                                  bool stderr_stream) {
             auto const result = flush_channel_buffer(channel, pending, stderr_stream);
@@ -657,18 +938,20 @@ public:
             progress = progress || result > 0;
             return true;
         };
-        if (!flush(upstream_channel_, to_upstream_, false)
-            || !flush(downstream_channel_, to_downstream_, false)
-            || !flush(downstream_channel_, stderr_to_downstream_, true)) {
+        if (!flush(channel.upstream, channel.to_upstream, false)
+            || !flush(channel.downstream, channel.to_downstream, false)
+            || (channel.type == SSH_CHANNEL_SESSION
+                && !flush(channel.downstream, channel.stderr_to_downstream, true))) {
             set_error("SSH channel write failed");
             return drive_result::failed;
         }
 
         auto read = [this, &progress](ssh_channel channel, std::string& pending,
                                      bool stderr_stream, char const* direction,
-                                     std::uint64_t& byte_counter, bool upstream_direction) {
+                                     std::uint64_t& byte_counter, bool upstream_direction,
+                                     channel_mode mode) {
             auto const result = read_channel(channel, pending, stderr_stream, direction,
-                                             byte_counter, upstream_direction);
+                                             byte_counter, upstream_direction, mode);
             if (result == SSH_ERROR) {
                 return false;
             }
@@ -677,34 +960,36 @@ public:
         };
         // Stop immediately on error. Further libssh calls on the same failed
         // session can invalidate channel state needed by teardown.
-        if (!read(downstream_channel_, to_upstream_, false, "client->server", bytes_up_, true)
-            || !read(upstream_channel_, to_downstream_, false, "server->client", bytes_down_, false)
-            || !read(upstream_channel_, stderr_to_downstream_, true, "server->client", bytes_down_, false)) {
+        if (!read(channel.downstream, channel.to_upstream, false, "client->server", bytes_up_, true, channel.mode)
+            || !read(channel.upstream, channel.to_downstream, false, "server->client", bytes_down_, false, channel.mode)
+            || (channel.type == SSH_CHANNEL_SESSION
+                && !read(channel.upstream, channel.stderr_to_downstream, true,
+                         "server->client", bytes_down_, false, channel.mode))) {
             set_error("SSH channel read failed");
             return drive_result::failed;
         }
 
-        if (!upstream_exit_forwarded_) {
+        if (channel.type == SSH_CHANNEL_SESSION && !channel.upstream_exit_forwarded) {
             std::uint32_t exit_code = 0;
             char* exit_signal = nullptr;
             int core_dumped = 0;
             auto const result = ssh_channel_get_exit_state(
-                upstream_channel_, &exit_code, &exit_signal, &core_dumped);
+                channel.upstream, &exit_code, &exit_signal, &core_dumped);
             if (result == SSH_OK) {
                 int forward_result;
                 if (exit_signal) {
                     forward_result = ssh_channel_request_send_exit_signal(
-                        downstream_channel_, exit_signal, core_dumped, "", "");
+                        channel.downstream, exit_signal, core_dumped, "", "");
                 } else {
                     forward_result = ssh_channel_request_send_exit_status(
-                        downstream_channel_, static_cast<int>(exit_code));
+                        channel.downstream, static_cast<int>(exit_code));
                 }
                 std::free(exit_signal);
                 if (forward_result != SSH_OK) {
                     set_error("cannot forward upstream SSH exit state");
                     return drive_result::failed;
                 }
-                upstream_exit_forwarded_ = true;
+                channel.upstream_exit_forwarded = true;
                 progress = true;
             } else {
                 std::free(exit_signal);
@@ -715,26 +1000,89 @@ public:
             }
         }
 
-        if (ssh_channel_is_eof(downstream_channel_) && !downstream_eof_forwarded_) {
-            if (ssh_channel_send_eof(upstream_channel_) == SSH_ERROR) {
+        if (ssh_channel_is_eof(channel.downstream) && !channel.downstream_eof_forwarded) {
+            if (ssh_channel_send_eof(channel.upstream) == SSH_ERROR) {
                 set_error("cannot forward downstream SSH EOF");
                 return drive_result::failed;
             }
-            downstream_eof_forwarded_ = true;
+            channel.downstream_eof_forwarded = true;
             progress = true;
         }
-        if (ssh_channel_is_eof(upstream_channel_) && !upstream_eof_forwarded_
-            && to_downstream_.empty() && stderr_to_downstream_.empty()) {
-            if (ssh_channel_send_eof(downstream_channel_) == SSH_ERROR) {
+        if (ssh_channel_is_eof(channel.upstream) && !channel.upstream_eof_forwarded
+            && channel.to_downstream.empty() && channel.stderr_to_downstream.empty()) {
+            if (ssh_channel_send_eof(channel.downstream) == SSH_ERROR) {
                 set_error("cannot forward upstream SSH EOF");
                 return drive_result::failed;
             }
-            upstream_eof_forwarded_ = true;
+            channel.upstream_eof_forwarded = true;
             progress = true;
         }
 
-        if ((ssh_channel_is_closed(upstream_channel_) || ssh_channel_is_closed(downstream_channel_))
-            && to_upstream_.empty() && to_downstream_.empty() && stderr_to_downstream_.empty()) {
+        auto const drained = channel.to_upstream.empty()
+            && channel.to_downstream.empty() && channel.stderr_to_downstream.empty();
+        auto const completion_forwarded = channel.upstream_eof_forwarded
+            && (channel.type != SSH_CHANNEL_SESSION || channel.upstream_exit_forwarded);
+        if (drained && completion_forwarded) {
+            channel.closing = true;
+            progress = true;
+        }
+
+        return progress ? drive_result::progress : drive_result::again;
+    }
+
+    drive_result drive_channels() {
+        bool progress = false;
+
+        auto const queued_before_callbacks = server_open_channels_.size();
+        auto const callback_result = ssh_execute_message_callbacks(upstream_);
+        if (callback_result == SSH_ERROR) {
+            set_error(libssh_error(upstream_, "cannot process upstream SSH callbacks"));
+            return drive_result::failed;
+        }
+        progress = server_open_channels_.size() != queued_before_callbacks;
+
+        if (!server_open_channels_.empty()) {
+            auto const server_open_result = drive_server_channel_open();
+            if (server_open_result == drive_result::failed) return server_open_result;
+            progress = progress || server_open_result == drive_result::progress;
+        } else if (pending_global_message_) {
+            auto const global_result = drive_global_request();
+            if (global_result == drive_result::failed) return global_result;
+            progress = progress || global_result == drive_result::progress;
+        } else if (pending_open_message_) {
+            auto const open_result = drive_channel_open();
+            if (open_result == drive_result::failed) return open_result;
+            progress = progress || open_result == drive_result::progress;
+        } else {
+            auto const request_result = drive_channel_request();
+            if (request_result == drive_result::failed) return request_result;
+            progress = progress || request_result == drive_result::progress;
+        }
+
+        for (auto& channel : channels_) {
+            auto const data_result = drive_channel_data(*channel);
+            if (data_result == drive_result::failed) return data_result;
+            progress = progress || data_result == drive_result::progress;
+        }
+
+        for (auto iterator = channels_.begin(); iterator != channels_.end();) {
+            auto const& channel = *iterator;
+            auto const drained = channel->to_upstream.empty()
+                && channel->to_downstream.empty()
+                && channel->stderr_to_downstream.empty();
+            auto const closed = ssh_channel_is_closed(channel->upstream)
+                && ssh_channel_is_closed(channel->downstream);
+            if (drained && closed) {
+                emit_event(false, "ssh event=channel-close");
+                retired_channels_.push_back(std::move(*iterator));
+                iterator = channels_.erase(iterator);
+                progress = true;
+            } else {
+                ++iterator;
+            }
+        }
+
+        if (!ssh_is_connected(downstream_) || !ssh_is_connected(upstream_)) {
             if (!fsm_.begin_closing()) {
                 error_ = fsm_.error();
                 return drive_result::failed;
@@ -744,33 +1092,27 @@ public:
         return progress ? drive_result::progress : drive_result::again;
     }
 
-    drive_result drive_channels() {
-        if (!downstream_channel_) return drive_channel_open();
-
-        auto const request_result = drive_channel_request();
-        if (request_result == drive_result::failed) return request_result;
-        auto const data_result = drive_channel_data();
-        if (data_result == drive_result::failed || data_result == drive_result::progress) {
-            return data_result;
-        }
-        return request_result;
-    }
-
     drive_result drive_closing() {
-        if (upstream_channel_ && !ssh_channel_is_closed(upstream_channel_)) {
-            auto const result = ssh_channel_close(upstream_channel_);
-            if (result == SSH_AGAIN) return drive_result::again;
-        }
-        if (downstream_channel_ && !ssh_channel_is_closed(downstream_channel_)) {
-            auto const result = ssh_channel_close(downstream_channel_);
-            if (result == SSH_AGAIN) return drive_result::again;
+        for (auto& channel : channels_) {
+            if (channel->upstream && !ssh_channel_is_closed(channel->upstream)) {
+                auto const result = ssh_channel_close(channel->upstream);
+                if (result == SSH_AGAIN) return drive_result::again;
+            }
+            if (channel->downstream && !ssh_channel_is_closed(channel->downstream)) {
+                auto const result = ssh_channel_close(channel->downstream);
+                if (result == SSH_AGAIN) return drive_result::again;
+            }
         }
         if (!fsm_.close_complete()) {
             error_ = fsm_.error();
             return drive_result::failed;
         }
-        xdia(transport_log())("SSH session channel closed");
+        xdia(transport_log())("SSH transport closed");
         return drive_result::finished;
+    }
+
+    void emit_event(bool upstream, std::string const& event) const {
+        if(options_.event_observer) options_.event_observer(upstream, event);
     }
 
     void set_error(std::string error) {
@@ -791,6 +1133,7 @@ public:
     ssh_bind bind_ = nullptr;
     ssh_session downstream_ = nullptr;
     ssh_session upstream_ = nullptr;
+    ssh_callbacks_struct upstream_callbacks_{};
     bool initialized_ = false;
     bool downstream_kex_done_ = false;
     bool upstream_kex_done_ = false;
@@ -799,16 +1142,17 @@ public:
     std::string pending_password_;
     ssh_message pending_open_message_ = nullptr;
     ssh_message pending_channel_message_ = nullptr;
-    ssh_channel downstream_channel_ = nullptr;
-    ssh_channel upstream_channel_ = nullptr;
-    std::string to_upstream_;
-    std::string to_downstream_;
-    std::string stderr_to_downstream_;
-    bool downstream_eof_forwarded_ = false;
-    bool upstream_eof_forwarded_ = false;
-    bool upstream_exit_forwarded_ = false;
-    enum class channel_mode { none, shell, exec };
-    channel_mode channel_mode_ = channel_mode::none;
+    ssh_message pending_global_message_ = nullptr;
+    std::string pending_global_address_;
+    int pending_global_port_ = 0;
+    int pending_global_subtype_ = SSH_GLOBAL_REQUEST_UNKNOWN;
+    channel_pair* pending_request_channel_ = nullptr;
+    std::unique_ptr<channel_pair> opening_channel_;
+    std::vector<std::unique_ptr<channel_pair>> channels_;
+    std::vector<std::unique_ptr<channel_pair>> server_open_channels_;
+    // libssh may retain internal references while processing another channel
+    // on the same session. Release closed channel handles at session teardown.
+    std::vector<std::unique_ptr<channel_pair>> retired_channels_;
     std::uint64_t bytes_up_ = 0;
     std::uint64_t bytes_down_ = 0;
 };
