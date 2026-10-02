@@ -558,6 +558,18 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "materialized policy.[x].ssh_profile");
         return true;
     }
+    else if(upgrade_to_num == 1042) {
+        if(cfgapi.getRoot().exists("captures") &&
+           cfgapi.getRoot()["captures"].exists("remote")) {
+            Setting& remote = cfgapi.getRoot()["captures"]["remote"];
+            if(remote.exists("gre_format") &&
+               std::string(static_cast<char const*>(remote["gre_format"])) == "spq1") {
+                remote["gre_format"] = "traffic";
+            }
+        }
+        log.event(INF, "renamed captures.remote.gre_format 'spq1' to 'traffic'");
+        return true;
+    }
 
 
     return false;
@@ -1064,6 +1076,10 @@ bool CfgFactory::load_captures() {
             load_if_exists(remote, "enabled", CfgFactory::get()->capture_remote.enabled);
             load_if_exists(remote, "tun_type", CfgFactory::get()->capture_remote.tun_type);
             load_if_exists(remote, "gre_format", CfgFactory::get()->capture_remote.gre_format);
+            if(CfgFactory::get()->capture_remote.gre_format == "spq1") {
+                _war("GRE capture format 'spq1' is deprecated; use 'traffic'");
+                CfgFactory::get()->capture_remote.gre_format = "traffic";
+            }
             load_if_exists(remote, "tun_dst", CfgFactory::get()->capture_remote.tun_dst);
             load_if_exists(remote, "tun_ttl", CfgFactory::get()->capture_remote.tun_ttl);
             load_if_exists(remote, "bind_interface", CfgFactory::get()->capture_remote.bind_interface);
@@ -3186,8 +3202,8 @@ void CfgFactory::gre_export_apply(traflog::PcapLog* pcaplog) {
                 pcaplog->ip_packet_hook.reset();
                 pcaplog->pcapng_record_hook = exp;
             } else {
-                if(cfg->capture_remote.gre_format != "spq1") {
-                    _war("unknown GRE capture format '%s', using spq1",
+                if(cfg->capture_remote.gre_format != "traffic") {
+                    _war("unknown GRE capture format '%s', using traffic",
                          cfg->capture_remote.gre_format.c_str());
                 }
                 exp->origin(pcap::connection_details::record_origin::synthetic);

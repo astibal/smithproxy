@@ -746,10 +746,10 @@ void CfgValueHelp::init_captures () {
 
     add("captures.remote.gre_format", "select GRE capture record format")
             .may_be_empty(false)
-            .value_filter(is_in_vector([]() { std::vector<std::string> r {"spq1", "pcapng"}; return r; },
-                                       "SPQ1 plaintext packets or native PCAPNG records"))
+            .value_filter(is_in_vector([]() { std::vector<std::string> r {"traffic", "pcapng"}; return r; },
+                                       "plaintext traffic packets or native PCAPNG records"))
             .suggestion_generator([](std::string const& section, std::string const& variable) {
-                std::vector<std::string> r{"spq1", "pcapng"};
+                std::vector<std::string> r{"traffic", "pcapng"};
                 return r;
             });
 

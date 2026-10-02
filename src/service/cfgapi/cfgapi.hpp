@@ -201,7 +201,7 @@ class CfgFactory : public CfgFactoryBase {
 public:
     // Each version bump implies a config upgrade - we start on 1000
     // see upgrade_schema() - control config upgrade
-    constexpr static inline const int SCHEMA_VERSION  = 1041;
+    constexpr static inline const int SCHEMA_VERSION  = 1042;
 
     static inline std::atomic_bool LOAD_ERRORS = false;
 
@@ -339,7 +339,7 @@ public:
         bool enabled = false;
         std::string tun_type = "gre";
         // GRE carries either reconstructed plaintext or serialized PCAPNG blocks.
-        std::string gre_format = "spq1";
+        std::string gre_format = "traffic";
         std::string tun_dst = "127.0.0.1";
         int tun_ttl {1};
         std::string bind_interface;
