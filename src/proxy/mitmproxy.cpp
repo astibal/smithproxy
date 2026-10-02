@@ -185,9 +185,14 @@ void MitmProxy::toggle_tlog () {
                                                          suf.c_str(), false);
 
                     single.FS.generate_filename_single("smithproxy", true);
-
-                    CfgFactory::gre_export_apply(&single);
                 });
+
+                // PCAP_SINGLE synthesizes packets through the shared logger,
+                // so its remote exporter must reflect the current config too.
+                // Applying this only during call_once leaves GRE detached when
+                // capture settings are enabled or changed later.
+                CfgFactory::gre_export_apply(
+                    &socle::traflog::PcapLog::single_instance());
 
                 auto suf = fmt.to_ext(CfgFactory::get()->capture_local.file_suffix);
                 auto n = std::make_unique<socle::traflog::PcapLog>(this, CfgFactory::get()->capture_local.dir.c_str(),
