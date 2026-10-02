@@ -464,8 +464,16 @@ int MitmProxy::handle_sockets_once(baseCom* xcom) {
     }
 
     if (stream_handler_attached_ && !state().dead()) {
-        auto const result = stream_handler_->drive();
         using result_t = sx::StreamHandler::result;
+        result_t result;
+
+        // A handler reports progress when it changed state or consumed data
+        // and can immediately do more work without another readiness event.
+        // Drain such work now; waiting for a fresh epoll wakeup adds visible
+        // latency and can deadlock protocols whose peer waits for our reply.
+        do {
+            result = stream_handler_->drive();
+        } while (result == result_t::progress && !state().dead());
 
         if (result == result_t::finished
             || result == result_t::blocked

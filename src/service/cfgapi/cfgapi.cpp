@@ -3085,7 +3085,7 @@ int CfgFactory::policy_apply (baseHostCX *originator, MitmProxy *proxy, int matc
     auto lc_ = std::scoped_lock(lock_);
     
     int policy_num = matched_policy;
-    if(policy_num < 1) {
+    if(policy_num < 0) {
         policy_num = policy_match(proxy);
     }
     if(auto verdict = policy_action(policy_num); verdict == PolicyRule::POLICY_ACTION_PASS) {
