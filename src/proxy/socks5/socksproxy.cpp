@@ -347,19 +347,43 @@ bool ExplicitProxy::send_pending_connect_response() {
     pending_connect_response_offset_ = 0;
     if(close_after_connect_response_) {
         state().dead(true);
-    } else {
+    } else if(dynamic_cast<SSLCom*>(client->com()) == nullptr) {
+        // Plain explicit tunnels have no TLS peer handshake which could
+        // release them later.
         client->waiting_for_peercom(false);
         client->com()->set_monitor(client->socket());
     }
+    // Keep TLS clients paused after a successful CONNECT response.  The
+    // upstream side must first peek the ClientHello, validate the origin
+    // certificate and install the spoofed certificate.  That path releases
+    // the client when the certificate is ready; doing it here lets SSL_accept
+    // race ahead with the default certificate and an untested verify status.
     return true;
 }
 
 bool ExplicitProxy::handle_cx_write(unsigned char side, baseHostCX* cx) {
     if(not pending_connect_response_.empty()) {
         if((side == 'r' || side == 'R') && cx->opening()) {
-            if(cx->is_connected()) {
+            // This callback is driven by the upstream socket's write event.
+            // Do not call is_connected() here: it performs another zero-time
+            // epoll probe which can miss the event that brought us here and
+            // turn an in-progress connect into a spurious proxy failure.
+            int connect_error = 0;
+            socklen_t connect_error_size = sizeof(connect_error);
+            auto const status = ::getsockopt(cx->socket(), SOL_SOCKET, SO_ERROR,
+                                             &connect_error, &connect_error_size);
+
+            if(status == 0 && connect_error == 0) {
                 cx->opening(false);
+            } else if(status == 0 &&
+                      (connect_error == EINPROGRESS || connect_error == EALREADY ||
+                       connect_error == EWOULDBLOCK)) {
+                // The socket has not completed its non-blocking connect yet.
+                cx->com()->set_write_monitor(cx->socket());
+                return true;
             } else {
+                _dia("ExplicitProxy::handle_cx_write: upstream connect failed: %s",
+                     string_error(status == 0 ? connect_error : errno).c_str());
                 pending_connect_response_ = upstream_failure_response_;
                 pending_connect_response_offset_ = 0;
                 close_after_connect_response_ = true;

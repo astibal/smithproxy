@@ -309,8 +309,8 @@ def run(args):
                 print(f"IPv6 loopback unavailable, skipping IPv6 tunnels: {exc}")
 
             tls_origin = TlsEchoOrigin(
-                worktree / "etc/certs/default/srv-cert.pem",
-                worktree / "etc/certs/default/srv-key.pem")
+                worktree / "etc/certs/default/portal-cert.pem",
+                worktree / "etc/certs/default/portal-key.pem")
             tls_origin.start()
             with socket.create_connection(("127.0.0.1", listener_port), timeout=10) as client:
                 client.settimeout(15)
@@ -326,6 +326,12 @@ def run(args):
                 client_context.verify_mode = ssl.CERT_NONE
                 with client_context.wrap_socket(
                         client, server_hostname="localhost") as tls_client:
+                    presented_cert = tls_client.getpeercert(binary_form=True)
+                    default_cert = ssl.PEM_cert_to_DER_cert(
+                        (worktree / "etc/certs/default/srv-cert.pem").read_text())
+                    if presented_cert == default_cert:
+                        raise RuntimeError(
+                            "TLS CONNECT returned the default server certificate")
                     tls_client.sendall(b"TLS-PING\r\n")
                     if recv_until(tls_client, b"TLS-PONG\r\n") != b"TLS-PONG\r\n":
                         raise RuntimeError("TLS tunnel response mismatch")

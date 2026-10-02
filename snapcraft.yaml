@@ -182,7 +182,6 @@ parts:
       - libxml2-dev
       - libxslt1-dev
       - libxmlsec1-dev
-      - nlohmann-json3-dev
       - libcurl4-openssl-dev
 
       - python3-distutils

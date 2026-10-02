@@ -58,6 +58,7 @@ output is their primary interface.
 | Policy precedence/profile matrix | - | yes | yes | - | manual |
 | Loaded CLI session-list probe | - | yes | yes | - | manual |
 | RTT limits and payload validation | - | yes | yes | report only | manual |
+| TLS bulk upload/download matrix | - | focused | yes | - | manual |
 | TCP and UDP churn | - | - | yes | - | manual |
 | Regular/edge/insanity corpus | - | - | yes | - | manual |
 | PCAPNG/GRE capture matrix | - | yes | yes | - | manual |
@@ -74,7 +75,9 @@ passes are these isolated sections started:
 ```text
 smoke
 ├── tls-policy       (TLS, policy and loaded session-list)
+├── routing
 ├── rtt
+├── transfer         (TLS upload/download at 1/4/16 parallel flows)
 ├── tcp-churn
 ├── udp-churn
 ├── capture          (basic capture, capture matrix and HTTP/2 observability)
@@ -88,7 +91,7 @@ the default is `3` (`PATCH_TEST_PARALLEL` provides the environment default).
 Each section owns its namespaces, interfaces, ports, config, data and results.
 The build output is shared without being modified. A remote full run uploads
 `smithproxy` once with mode `0555`, and section labs symlink to it instead of
-keeping nine binary copies.
+keeping a binary copy for every section.
 
 ## Selecting one suite
 
@@ -96,13 +99,13 @@ keeping nine binary copies.
 suites remain available:
 
 ```text
-tls  policy  rtt  session-list  quic
+tls  transfer  starttls  policy  routing  rtt  session-list  quic
 ```
 
 Full-run sections can also be invoked directly:
 
 ```text
-smoke  tls-policy  tcp-churn  udp-churn  capture
+smoke  tls-policy  transfer  tcp-churn  udp-churn  capture
 corpus-regular  corpus-edge  corpus-insanity
 ```
 
@@ -214,6 +217,7 @@ Frequently useful `--env NAME=VALUE` controls:
 |---|---:|---|
 | `TCP_CHURN_WAVES` / `TCP_CHURN_FLOWS` | `20` / `64` | TCP churn volume |
 | `TCP_CHURN_PARALLEL` | `64` | Maximum simultaneous TCP churn flows |
+| `TCP_CHURN_SYNCHRONIZED` | `0` | Release every TCP wave from one start barrier |
 | `TCP_CHURN_INTERVAL` / `TCP_CHURN_SETTLE` | `0.25` / `15` s | TCP timing |
 | `TCP_CHURN_TIMEOUT` | `3` s | Per-flow TCP timeout |
 | `UDP_CHURN_WAVES` / `UDP_CHURN_FLOWS` | `8` / `96` | UDP churn volume |
@@ -223,9 +227,14 @@ Frequently useful `--env NAME=VALUE` controls:
 | `RTT_WARMUP` | `20` | Unreported warm-up exchanges |
 | `RTT_P95_LIMIT_MS` / `RTT_MAX_LIMIT_MS` | `50` / `250` | TCP/UDP RTT gates |
 | `RTT_HANDSHAKE_P95_LIMIT_MS` / `RTT_HANDSHAKE_MAX_LIMIT_MS` | `500` / `2000` | Connect, TLS and HTTPS gates |
-| `RTT_TLS_TOTAL_P50_LIMIT_MS` / `RTT_HTTPS_P50_LIMIT_MS` | `7` / `2` | Additional TLS/HTTPS P50 gates |
+| `RTT_TLS_TOTAL_P50_LIMIT_MS` / `RTT_HTTPS_P50_LIMIT_MS` | `7` / `2` | TLS/HTTPS P50 PASS gates |
+| `RTT_TLS_TOTAL_P50_FLAKY_LIMIT_MS` / `RTT_HTTPS_P50_FLAKY_LIMIT_MS` | `10` / `10` | TLS/HTTPS P50 FLAKY_PASS ceilings |
 | `SESSION_LIST_CONNECTIONS` / `SESSION_LIST_SAMPLES` | `256` / `24` | Loaded CLI probe size |
 | `SESSION_LIST_P95_LIMIT_MS` / `SESSION_LIST_MAX_LIMIT_MS` | `1000` / `3000` | CLI snapshot gates |
+| `TLS_WRITE_CHUNK` | `20480` | Maximum plaintext bytes offered to one `SSL_write()`; intended for comparative transfer tests |
+| `SSL_USE_KTLS` | config default | Request OpenSSL KTLS for focused enabled/disabled comparisons |
+| `KTLS_PROBE_TEST` / `KTLS_EXPECT_ACTIVE` | `0` / `any` | Hold a TLS flow, record both legs' effective BIO KTLS state, optionally require `on` or `off` |
+| `TLS_TEST_VERSION` / `TLS_TEST_CIPHER` | unset | Pin both legs to TLS 1.2/1.3 and, for TLS 1.2, pin the cipher for focused KTLS checks |
 
 `sanity` and `full` enforce all RTT gates. `benchmark` records the same metrics
 without latency failures and additionally measures a native origin-namespace

@@ -172,11 +172,11 @@ for fixture in "${CASES[@]}"; do
     out="$RESULTS/$category/$name"
     mkdir -p "$out"
     PROTO_ARGS=()
-    SS_ARGS=(-ltnH "sport = :$PORT")
+    SS_ARGS=(-"$IP_FAMILY" -ltnH "sport = :$PORT")
     max_attempts=1
     if [[ $name == udp_* || $name == capture_udp_* ]]; then
         PROTO_ARGS=(--udp)
-        SS_ARGS=(-lunH "sport = :$PORT")
+        SS_ARGS=(-"$IP_FAMILY" -lunH "sport = :$PORT")
         max_attempts=3
     fi
 
