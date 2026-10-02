@@ -58,7 +58,7 @@ output is their primary interface.
 | Build `smithproxy` | yes | yes | yes | yes | yes | yes | yes |
 | Authenticated API startup | - | yes | yes | every shard | every shard | yes | yes |
 | IPv4/IPv6 functional layers | - | yes | yes | smoke gate | smoke gate | yes | manual |
-| TLS/policy/RTT/transfer/churn | - | focused | yes | - | - | report only | manual |
+| TLS/policy/RTT/transfer/throughput/churn | - | focused | yes | - | - | report only | manual |
 | Corpus and capture observability | - | focused | yes | - | - | - | manual |
 | Bounded deterministic `fuzz.*` | - | focused | yes | yes | - | - | manual |
 | New-seed `fuzz.*` exploration | - | - | - | - | yes | - | manual |
@@ -68,13 +68,14 @@ Applicable dataplane checks produce separate `PASS4` and `PASS6` verdicts. A
 failure in either address family fails its section. Management-only checks use
 one verdict.
 
-`sanity` runs in one lab. `full` first runs a serial smoke gate, then an
-exclusive RTT phase. Only after RTT are the remaining isolated sections
-started:
+`sanity` runs in one lab. `full` first runs a serial smoke gate, then exclusive
+RTT and TLS throughput phases. Only after both measurement phases are the
+remaining isolated sections started:
 
 ```text
 smoke
 ├── rtt              (exclusive; no competing load workers)
+├── tls-throughput   (exclusive; IPv4/IPv6 download/upload measurement)
 └── parallel phase
     ├── tls-policy   (TLS, policy and loaded session-list)
     ├── routing
@@ -89,7 +90,13 @@ smoke
     └── fuzz.<area>  (one independently scheduled shard per protocol)
 ```
 
-`--parallel N` controls concurrent post-smoke workers on each target; the
+TLS throughput measures end-to-end TLS download and upload at 1, 4 and 16
+concurrent flows. Throughput has no numeric pass threshold: a completed and
+integrity-checked transfer is `PASS`, while TLS, HTTP, process or transfer
+failure remains a hard `FAIL`. Its exclusive slot keeps unrelated section load
+out of the reported numbers.
+
+`--parallel N` controls concurrent parallel-phase workers on each target; the
 default is `3` (`PATCH_TEST_PARALLEL` provides the environment default). A
 completed slot is refilled immediately instead of waiting for a batch.
 Each section owns its namespaces, interfaces, ports, config, data and results.
@@ -104,13 +111,13 @@ connection storm. Section labs symlink the staged `smithproxy` binary.
 suites remain available:
 
 ```text
-tls  transfer  starttls  policy  routing  rtt  session-list  quic
+tls  transfer  tls-throughput  starttls  policy  routing  rtt  session-list  quic
 ```
 
 Full-run sections can also be invoked directly:
 
 ```text
-smoke  tls-policy  routing  rtt  transfer  quic  tcp-churn  udp-churn  capture
+smoke  tls-policy  routing  rtt  transfer  tls-throughput  quic  tcp-churn  udp-churn  capture
 corpus-regular  corpus-edge  corpus-insanity
 fuzz.h1  fuzz.h2  fuzz.h2.insanity  fuzz.tls  fuzz.socks5  fuzz.dns  ...
 ```
@@ -124,6 +131,7 @@ Examples:
 
 ```bash
 tests/patch-runner/test-patch.sh sanity --suite policy --remote root@tt-px1
+tests/patch-runner/test-patch.sh sanity --suite tls-throughput --remote root@tt-px1
 tests/patch-runner/test-patch.sh sanity --suite capture --remote root@tt-px1
 tests/patch-runner/test-patch.sh sanity --suite corpus-edge \
     --remote root@tt-px1 --env MATCH='h2_generated_*'
@@ -270,6 +278,9 @@ Frequently useful `--env NAME=VALUE` controls:
 | `RTT_HANDSHAKE_P95_LIMIT_MS` / `RTT_HANDSHAKE_MAX_LIMIT_MS` | `500` / `2000` | Connect, TLS and HTTPS gates |
 | `RTT_TLS_TOTAL_P50_LIMIT_MS` / `RTT_HTTPS_P50_LIMIT_MS` | `7` / `2` | TLS/HTTPS P50 PASS gates |
 | `RTT_TLS_TOTAL_P50_FLAKY_LIMIT_MS` / `RTT_HTTPS_P50_FLAKY_LIMIT_MS` | `10` / `10` | TLS/HTTPS P50 FLAKY_PASS ceilings |
+| `TLS_THROUGHPUT_BYTES` | `67108864` | Bytes transferred by each throughput flow |
+| `TLS_THROUGHPUT_REPEATS` | `3` | Samples per direction and concurrency |
+| `TLS_THROUGHPUT_CONCURRENCY` | `1,4,16` | Concurrent flows measured by the exclusive throughput phase |
 | `SESSION_LIST_CONNECTIONS` / `SESSION_LIST_SAMPLES` | `256` / `24` | Loaded CLI probe size |
 | `SESSION_LIST_P95_LIMIT_MS` / `SESSION_LIST_MAX_LIMIT_MS` | `1000` / `3000` | CLI snapshot gates |
 | `TLS_WRITE_CHUNK` | `20480` | Maximum plaintext bytes offered to one `SSL_write()`; intended for comparative transfer tests |

@@ -836,11 +836,13 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
     if (content_rule() != nullptr and not content_rule()->empty()) {
         replacement = content_replace_apply(from->to_read());
     }
-    if(*log_dump.level() >= iDIA)
-        proxy_dump_packet(side, replacement.value_or(from->to_read()));
+    if(*log_dump.level() >= iDIA) {
+        // std::optional::value_or() returns a value. Using it here used to
+        // copy the complete plaintext buffer solely for a diagnostic dump.
+        auto const& dump_buffer = replacement ? *replacement : from->to_read();
+        proxy_dump_packet(side, dump_buffer);
+    }
 
-
-    // value_or returns const&
     if(replacement.has_value()) {
         to->to_write(replacement.value());
         write_traffic_log(side, from, &replacement.value());

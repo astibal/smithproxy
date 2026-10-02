@@ -48,6 +48,7 @@ CAPTURE_MATRIX_TEST=${CAPTURE_MATRIX_TEST:-0}
 RTT_TEST=${RTT_TEST:-0}
 TLS_SUITE_TEST=${TLS_SUITE_TEST:-0}
 TLS_TRANSFER_TEST=${TLS_TRANSFER_TEST:-0}
+TLS_THROUGHPUT_TEST=${TLS_THROUGHPUT_TEST:-0}
 KTLS_PROBE_TEST=${KTLS_PROBE_TEST:-0}
 STARTTLS_SUITE_TEST=${STARTTLS_SUITE_TEST:-0}
 POLICY_TEST=${POLICY_TEST:-0}
@@ -528,6 +529,27 @@ if [[ $TLS_TRANSFER_TEST == 1 ]]; then
         > "$ROOT/results/tls-transfer.json"
     python3 "$ROOT/runner/tests/tls-transfer-report.py" "$ROOT/results/tls-transfer.json"
     echo 'PASS4 TLS transfer: bounded-drain bulk download/upload matrix completed'
+fi
+if [[ $TLS_THROUGHPUT_TEST == 1 ]]; then
+    TLS_THROUGHPUT_ARGS=()
+    [[ -z ${TLS_TEST_VERSION:-} ]] || TLS_THROUGHPUT_ARGS+=(--tls-version "$TLS_TEST_VERSION")
+    [[ -z ${TLS_TEST_CIPHER:-} ]] || TLS_THROUGHPUT_ARGS+=(--cipher "$TLS_TEST_CIPHER")
+    run_tls_throughput() {
+        local family=$1 host=$2
+        ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/tls-transfer.py" \
+            --host "$host" --ca-file "$ROOT/config/certs/ca-cert.pem" \
+            --pid "$(cat "$ROOT/data/proxy.pid")" \
+            "${TLS_THROUGHPUT_ARGS[@]}" \
+            --bytes "${TLS_THROUGHPUT_BYTES:-67108864}" \
+            --repeats "${TLS_THROUGHPUT_REPEATS:-3}" \
+            --concurrency "${TLS_THROUGHPUT_CONCURRENCY:-1,4,16}" \
+            > "$ROOT/results/tls-throughput-v$family.json"
+        python3 "$ROOT/runner/tests/tls-transfer-report.py" \
+            --label 'TLS throughput' "$ROOT/results/tls-throughput-v$family.json"
+        echo "PASS$family TLS throughput: E2E download/upload measured without a performance gate"
+    }
+    run_tls_throughput 4 198.18.20.2
+    run_tls_throughput 6 fd00:20::2
 fi
 if [[ $STARTTLS_SUITE_TEST == 1 ]]; then
     STARTTLS_PORT=2525

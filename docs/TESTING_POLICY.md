@@ -37,8 +37,9 @@ fresh targets must not depend on a host-installed `aioquic` package.
 
 Every section owns its namespaces, interfaces, ports, config, traffic and
 result directory. The smoke gate runs first. RTT runs alone after smoke so its
-latency verdict is not polluted by the deliberate load phase. Functional,
-corpus and fuzz sections then consume the configured worker pool.
+latency verdict is not polluted by deliberate load. End-to-end TLS throughput
+then runs alone for comparable IPv4/IPv6 download and upload measurements.
+Functional, corpus and fuzz sections then consume the configured worker pool.
 
 Cleanup verification compares stable host addresses and routes before and
 after each section. Patch-runner veths and OS-managed temporary IPv6 privacy
@@ -62,6 +63,11 @@ control but remains visibly distinct from `PASS` in reports and history.
 The coordinator must always wait for every scheduled worker and aggregate every
 section result, including when the final worker makes the active-worker count
 zero. Missing section results or an incomplete aggregate report fail the run.
+
+TLS throughput is measurement-only: it has no minimum MiB/s gate. `PASS` means
+that every configured TLS/HTTP transfer completed correctly; handshake,
+process, protocol or transfer-integrity failure is still a hard `FAIL`. Reports
+must retain per-family, per-direction and per-concurrency throughput values.
 
 `--parallel` is a stress and throughput control, not a promise that arbitrary
 load is free. Host exhaustion is still a failed run until the limiting layer is

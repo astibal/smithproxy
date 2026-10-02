@@ -19,11 +19,12 @@ def process_cpu_seconds(pid):
 
 def curl_command(args, mode, payload_file, run):
     url = f"https://origin.runner.lab/bulk/{args.bytes}?run={run}"
+    resolved_host = f"[{args.host}]" if ":" in args.host else args.host
     command = [
         "curl", "--noproxy", "*", "--fail", "--silent", "--show-error",
         "--http1.1", "--max-time", str(args.timeout),
         "--cacert", args.ca_file,
-        "--resolve", f"origin.runner.lab:443:{args.host}",
+        "--resolve", f"origin.runner.lab:443:{resolved_host}",
         "-H", "Expect:", "-o", "/dev/null",
     ]
     if args.tls_version:
@@ -89,7 +90,9 @@ def main():
         transfer_once(args, "download", 1, payload_file, "warmup-download")
         transfer_once(args, "upload", 1, payload_file, "warmup-upload")
 
-        output = {"bytes_per_flow": args.bytes, "repeats": args.repeats,
+        output = {"host": args.host,
+                  "address_family": "IPv6" if ":" in args.host else "IPv4",
+                  "bytes_per_flow": args.bytes, "repeats": args.repeats,
                   "concurrency": concurrencies, "results": []}
         for concurrency in concurrencies:
             for mode in ("download", "upload"):
