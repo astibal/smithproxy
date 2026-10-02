@@ -63,6 +63,7 @@ output is their primary interface.
 | Regular/edge/insanity corpus | - | - | yes | - | manual |
 | PCAPNG/GRE capture matrix | - | yes | yes | - | manual |
 | HTTP/2 CLI/PCAP/GRE observability | - | yes | yes | - | manual |
+| QUIC/H3 CLI/PCAP/GRE observability | - | focused | yes | - | manual |
 | No-bypass and cleanup checks | - | yes | every section | yes | on exit |
 
 Applicable dataplane checks produce separate `PASS4` and `PASS6` verdicts. A
@@ -78,6 +79,7 @@ smoke
 ├── routing
 ├── rtt
 ├── transfer         (TLS upload/download at 1/4/16 parallel flows)
+├── quic             (HTTP/3, CLI diagnostics, native PCAP and GRE)
 ├── tcp-churn
 ├── udp-churn
 ├── capture          (basic capture, capture matrix and HTTP/2 observability)
@@ -105,7 +107,7 @@ tls  transfer  starttls  policy  routing  rtt  session-list  quic
 Full-run sections can also be invoked directly:
 
 ```text
-smoke  tls-policy  transfer  tcp-churn  udp-churn  capture
+smoke  tls-policy  routing  rtt  transfer  quic  tcp-churn  udp-churn  capture
 corpus-regular  corpus-edge  corpus-insanity
 ```
 

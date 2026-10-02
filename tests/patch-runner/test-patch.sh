@@ -19,7 +19,8 @@ Profiles:
               Runs IPv4 and IPv6 TLS, policy, RTT, HTTP/1, HTTP/2, UDP and
               PCAP/GRE validation, plus management and cleanup checks.
   full        Build once, run a smoke gate, then isolated parallel sections for
-              TLS/policy/CLI, RTT, churn, capture/HTTP2 and all corpus categories.
+              TLS/policy/CLI, RTT, churn, capture/HTTP2, QUIC/H3 and all corpus
+              categories.
   benchmark   Measure TCP, UDP and TLS latency without PASS/FAIL latency gates.
               Prints IPv4/IPv6 absolute and native-delta tables and keeps JSON.
   --run       Start an interactive isolated lab and keep Smithproxy in the
@@ -29,8 +30,9 @@ Profiles:
 Options:
   --suite NAME       Run only one suite. Besides tls, transfer, starttls, policy, routing,
                      rtt, session-list and quic,
-                     full-run sections are available: smoke, tls-policy, tcp-churn,
-                     udp-churn, capture, corpus-regular, corpus-edge, corpus-insanity.
+                     full-run sections are available: smoke, tls-policy, routing,
+                     rtt, transfer, quic, tcp-churn, udp-churn, capture,
+                     corpus-regular, corpus-edge and corpus-insanity.
                      Use with the sanity or full profile.
   --remote HOST      Run the isolated lab over SSH on [USER@]HOST. A root@
                      target runs directly; other users are invoked via sudo.
@@ -220,7 +222,7 @@ REPORT_HOST=${REMOTE:-local}
 git -C "$ROOT" status --short > "$REPORT/git-status.txt"
 
 run_parallel_full() {
-    local -a sections=(smoke tls-policy routing rtt transfer tcp-churn udp-churn capture corpus-regular corpus-edge corpus-insanity)
+    local -a sections=(smoke tls-policy routing rtt transfer quic tcp-churn udp-churn capture corpus-regular corpus-edge corpus-insanity)
     local -a child_common=(sanity --skip-build --build-dir "$BUILD_DIR" --quiet)
     local -a forwarded=()
     local section section_dir output rc_file rc display child_report reason
@@ -269,7 +271,7 @@ run_parallel_full() {
         echo "SECTION DONE: $name rc=$child_rc"
     }
 
-    # A cheap end-to-end smoke gate avoids launching eight expensive labs for
+    # A cheap end-to-end smoke gate avoids launching expensive labs for
     # a binary that cannot start or pass basic dual-stack traffic.
     echo 'SECTION START: smoke'
     run_one_section smoke
