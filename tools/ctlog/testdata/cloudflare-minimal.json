@@ -1,0 +1,20 @@
+{
+  "success": true,
+  "errors": [],
+  "messages": [],
+  "result": {
+    "certificateLogs": [
+      {
+        "api": "RFC6962",
+        "description": "Google 'Argon2026h2' log",
+        "endExclusive": "2027-01-01T00:00:00Z",
+        "operator": "Google",
+        "slug": "argon2026h2",
+        "startInclusive": "2026-07-01T00:00:00Z",
+        "state": "USABLE",
+        "stateTimestamp": "2024-09-30T22:19:27Z",
+        "url": "https://ct.googleapis.com/logs/us1/argon2026h2/"
+      }
+    ]
+  }
+}

@@ -2,6 +2,55 @@
 
 `sx_ctlog` builds the OpenSSL `ct_log_list.cnf` consumed by Smithproxy.
 
+## Trust model
+
+```text
+Apple CT policy ─┐
+                 ├─ C++ publisher ─ policy filter ─ Smithproxy signature
+Cloudflare Radar ┘                                      │
+                                                       GitHub
+                                                         │
+embedded Smithproxy public key ─ C++ updater ─ OpenSSL ct_log_list.cnf
+```
+
+Apple provides keys and policy state. Cloudflare Radar independently
+corroborates log URL, API type and state. The publisher fails closed on a
+discrepancy, retains only `qualified`, `usable`, `readonly` and `retired`, and
+excludes `pending`, `rejected` and unknown states.
+
+The Smithproxy RSA-3072 signature does not claim that either upstream is
+infallible. It authenticates the exact policy result selected by Smithproxy, so
+GitHub and intermediate caches can be treated as untrusted transport. The
+private key exists only on the publisher; clients receive a pinned public key.
+
+## Local publisher
+
+Set a read-only Cloudflare Radar API token without putting it on the command
+line, then run:
+
+```sh
+export CLOUDFLARE_API_TOKEN='...'
+
+sx_ctlog publish \
+  --apple-url https://valid.apple.com/ct/log_list/current_log_list.json \
+  --cloudflare-url https://api.cloudflare.com/client/v4/radar/ct/logs \
+  --signer-key ~/.config/smithproxy/ctlog/signing-key.pem \
+  --output-dir ./publish
+```
+
+Alternatively use `--cloudflare-token-file FILE`. The output directory gets:
+
+```text
+log_list.json       normalized Smithproxy policy
+log_list.sig        detached RSA/SHA-256 signature
+ct_log_list.cnf     OpenSSL-compatible list
+policy-report.json  provenance, hashes, state counts and cross-check result
+```
+
+The GitHub workflow runs this same C++ publisher and uploads those files to a
+stable `ctlog-latest` release. It needs `CTLOG_SIGNING_KEY_B64` and
+`CLOUDFLARE_API_TOKEN` repository secrets.
+
 ## Signed automatic update
 
 ```sh
@@ -56,6 +105,7 @@ The main Smithproxy build produces and installs `sx_ctlog`. Standalone build:
 ```sh
 cmake -S tools/ctlog -B build-ctlog
 cmake --build build-ctlog
+ctest --test-dir build-ctlog --output-on-failure
 ```
 
 OpenSSL's CONF format stores only descriptions and verification keys. It does

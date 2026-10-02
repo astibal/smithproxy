@@ -12,3 +12,9 @@ find_package(nlohmann_json 3.0 REQUIRED)
 add_executable(sx_ctlog sx_ctlog.cpp)
 target_link_libraries(sx_ctlog PRIVATE OpenSSL::Crypto CURL::libcurl nlohmann_json::nlohmann_json)
 target_compile_options(sx_ctlog PRIVATE -Wall -Wextra -Wpedantic)
+
+include(CTest)
+if(BUILD_TESTING)
+    add_test(NAME sx_ctlog_end_to_end
+             COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/test.sh $<TARGET_FILE:sx_ctlog>)
+endif()

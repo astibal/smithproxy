@@ -25,37 +25,33 @@ jobs:
       - name: Build CT updater
         run: cmake -S tools/ctlog -B build-ctlog && cmake --build build-ctlog --parallel
 
-      - name: Download and normalize Apple's CT policy
-        run: |
-          set -euo pipefail
-          curl --fail --silent --show-error --location \
-            --proto '=https' --proto-redir '=https' \
-            https://valid.apple.com/ct/log_list/current_log_list.json \
-            --output apple-log-list.json
-          build-ctlog/sx_ctlog prepare-apple \
-            apple-log-list.json log_list.json \
-            --timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-
-      - name: Sign normalized list
+      - name: Cross-check, apply policy, and sign
         env:
           CTLOG_SIGNING_KEY_B64: ${{ secrets.CTLOG_SIGNING_KEY_B64 }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           set -euo pipefail
           test -n "$CTLOG_SIGNING_KEY_B64"
+          test -n "$CLOUDFLARE_API_TOKEN"
           umask 077
           printf '%s' "$CTLOG_SIGNING_KEY_B64" | base64 --decode > signing-key.pem
-          openssl dgst -sha256 -sign signing-key.pem -out log_list.sig log_list.json
-          rm -f signing-key.pem
+          trap 'rm -f signing-key.pem' EXIT
+          build-ctlog/sx_ctlog publish \
+            --apple-url https://valid.apple.com/ct/log_list/current_log_list.json \
+            --cloudflare-url https://api.cloudflare.com/client/v4/radar/ct/logs \
+            --signer-key signing-key.pem \
+            --output-dir publish
 
       - name: Verify exactly what will be published
         run: |
           set -euo pipefail
           build-ctlog/sx_ctlog update \
-            --url "file://$PWD/log_list.json" \
-            --signature-url "file://$PWD/log_list.sig" \
+            --url "file://$PWD/publish/log_list.json" \
+            --signature-url "file://$PWD/publish/log_list.sig" \
             --signer-key tools/ctlog/smithproxy-ctlog-signer.pem \
             --cache-dir "$RUNNER_TEMP/ctlog-cache" \
             --output "$RUNNER_TEMP/ct_log_list.cnf"
+          cmp publish/ct_log_list.cnf "$RUNNER_TEMP/ct_log_list.cnf"
 
       - name: Publish stable release assets
         env:
@@ -68,5 +64,6 @@ jobs:
               --notes 'Automatically filtered from the Apple CT log policy and signed by Smithproxy.'
           fi
           gh release upload ctlog-latest --clobber \
-            log_list.json log_list.sig tools/ctlog/smithproxy-ctlog-signer.pem
-
+            publish/log_list.json publish/log_list.sig \
+            publish/ct_log_list.cnf publish/policy-report.json \
+            tools/ctlog/smithproxy-ctlog-signer.pem
