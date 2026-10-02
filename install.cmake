@@ -2,6 +2,13 @@ if(UNIX)
     SET(CMAKE_INSTALL_PREFIX /usr)
     install(TARGETS smithproxy DESTINATION bin)
     install(FILES man/smithproxy.1 DESTINATION share/man/man1)
+    install(FILES man/smithproxy.cfg.5 DESTINATION share/man/man5)
+    install(FILES man/smithproxy-mitm.7 DESTINATION share/man/man7)
+    install(FILES
+            man/smithproxy-policy.7
+            man/smithproxy-capture.7
+            man/smithproxy-topology.7
+            DESTINATION share/man/man7)
     install_if_not_exists(etc/smithproxy.cfg /etc/smithproxy)
     install_if_not_exists(etc/users.cfg /etc/smithproxy)
     install_if_not_exists(etc/users.key /etc/smithproxy)
