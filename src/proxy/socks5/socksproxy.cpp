@@ -397,6 +397,26 @@ bool ExplicitProxy::handle_cx_write(unsigned char side, baseHostCX* cx) {
     return MitmProxy::handle_cx_write(side, cx);
 }
 
+bool ExplicitProxy::handle_cx_write_once(unsigned char side, baseCom* xcom, baseHostCX* basecx) {
+    if(not MitmProxy::handle_cx_write_once(side, xcom, basecx)) {
+        return false;
+    }
+
+    auto* cx = dynamic_cast<ExplicitProxyCX*>(basecx);
+    bool const frontend = side == 'l' || side == 'L' || side == 'x' || side == 'X';
+    if(frontend && cx != nullptr && cx->state_ == explicit_state::REQRES_SENT &&
+       cx->writebuf()->empty()) {
+        // baseHostCX::pre_write() runs before the bytes are removed from the
+        // write buffer.  Re-evaluate the explicit protocol state after the
+        // flush, otherwise a client waiting for the target banner may leave
+        // the frontend stuck in REQRES_SENT with no further socket event.
+        cx->pre_write();
+        return handle_cx_events(side, cx);
+    }
+
+    return true;
+}
+
 void SocksProxy::socks5_handoff_udp(socksServerCX* cx) {
 
     _deb("SocksProxy::socks5_handoff_udp: start");

@@ -17,6 +17,7 @@ public:
     void handle_explicit_connect(ExplicitProxyCX* cx);
     void on_left_bytes(baseHostCX* cx) override;
     bool handle_cx_write(unsigned char side, baseHostCX* cx) override;
+    bool handle_cx_write_once(unsigned char side, baseCom* xcom, baseHostCX* cx) override;
 
     TYPENAME_OVERRIDE("ExplicitProxy")
 
