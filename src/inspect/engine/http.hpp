@@ -293,7 +293,7 @@ namespace sx::engine::http {
                         domain_ss << *it;
 
                         ++it;
-                        if (tld_counter > 0 and it != dns_split.rend())
+                        if (tld_counter < 2 and it != dns_split.rend())
                             domain_ss << ".";
                     }
 

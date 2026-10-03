@@ -1,4 +1,5 @@
 #include <iostream>
+#include <array>
 #include <vector>
 #include <cstdint>
 #include <optional>
@@ -86,6 +87,25 @@ struct {
 using namespace sx::engine::http;
 using namespace sx::ja4;
 
+namespace sx::engine::http::v2 {
+    const char* frame_type_str(uint8_t type);
+    std::size_t find_magic(buffer& frame);
+    std::optional<uint32_t> find_frame_sz(buffer const& frame);
+    void process_header_entry(EngineCtx& ctx, socle::side_t side,
+                              std::shared_ptr<app_HttpRequest> const& app_data,
+                              long stream_id, uint8_t flags, buffer const& data,
+                              std::string const& header, std::string const& value);
+    void process_data(EngineCtx& ctx, socle::side_t side, long stream_id,
+                      uint8_t flags, buffer const& data);
+    void process_ping(EngineCtx& ctx, socle::side_t side, long stream_id,
+                      uint8_t flags, buffer const& data);
+    void process_other(EngineCtx& ctx, socle::side_t side, long stream_id,
+                       uint8_t flags, buffer const& data);
+    std::size_t process_frame(EngineCtx& ctx, socle::side_t side, buffer& frame);
+    std::size_t load_prev_state(EngineCtx& ctx, std::size_t absolute_index);
+    void save_state(EngineCtx& ctx, std::size_t absolute_index, std::size_t processed);
+}
+
 std::shared_ptr<app_HttpRequest> parse(std::string data) {
     sx::engine::EngineCtx ctx;
 
@@ -172,4 +192,185 @@ TEST(HTTP1, benchmark) {
 
 TEST(HTTP1, sample1) {
     test();
+}
+
+TEST(HTTP1, ParsesMethodsParametersHeadersAndInvalidInput) {
+    sx::engine::EngineCtx ctx;
+    EXPECT_TRUE(v1::find_method(ctx, "PATCH /items/42?dry=yes HTTP/1.1\r\n"));
+    auto app = std::dynamic_pointer_cast<app_HttpRequest>(ctx.application_data);
+    ASSERT_TRUE(app);
+    EXPECT_EQ(app->http_data.method, "PATCH");
+    EXPECT_EQ(app->http_data.uri, "/items/42");
+    EXPECT_EQ(app->http_data.params, "dry=yes");
+
+    EXPECT_TRUE(v1::find_host(ctx, "Host: example.test:8443\r\n"));
+    EXPECT_EQ(app->http_data.host, "example.test:8443");
+    EXPECT_TRUE(v1::find_referrer(ctx, "Referer: https://ref.example/path\r\n"));
+    EXPECT_EQ(app->http_data.referer, "https://ref.example/path");
+
+    EXPECT_FALSE(v1::find_method(ctx, "BREW /coffee HTTP/1.1\r\n"));
+    EXPECT_FALSE(v1::find_host(ctx, "host: lowercase.example\r\n"));
+    EXPECT_FALSE(v1::find_referrer(ctx, "referrer: misspelled\r\n"));
+}
+
+TEST(HTTP1, ApplicationDataMaintainsHistoryAndPresentation) {
+    app_HttpRequest app;
+    app.version = app_HttpRequest::HTTP_VER::HTTP1_1;
+    app.http_data = {
+        .host = "first.example",
+        .uri = "/one",
+        .method = "GET",
+        .params = "a=1",
+        .referer = "https://ref.example/",
+        .proto = "https://",
+        .sub_proto = "dns",
+        .ja4h = "fingerprint-one",
+    };
+    app.mark_populated();
+    EXPECT_EQ(app.protocol(), "http1.1/dns");
+    EXPECT_EQ(app.request(), "https://first.example/one?a=1");
+    EXPECT_EQ(app.original_request(), "https://ref.example/");
+    EXPECT_NE(app.to_string(iDEB).find("fingerprint-one"), std::string::npos);
+
+    app.next();
+    EXPECT_FALSE(app.populated());
+    EXPECT_TRUE(app.http_data.host.empty());
+    app.http_data.proto = "http://";
+    app.http_data.host = "second.example";
+    app.http_data.uri = "/two";
+    app.http_data.ja4h = "fingerprint-two";
+
+    auto const requests = app.requests_all();
+    ASSERT_EQ(requests.size(), 2U);
+    EXPECT_EQ(requests[0], "http://second.example/two");
+    EXPECT_EQ(requests[1], "https://first.example/one?a=1");
+    auto const fingerprints = app.custom_list();
+    ASSERT_EQ(fingerprints.size(), 2U);
+    EXPECT_EQ(fingerprints[0], "fingerprint-two");
+    EXPECT_EQ(fingerprints[1], "fingerprint-one");
+    EXPECT_EQ(app.custom_list_name(), "ja4h");
+}
+
+TEST(HTTP2, StreamHeadersDeriveHostnameAndRegistrableSuffix) {
+    v2::Http2Stream stream;
+    EXPECT_FALSE(stream.request_header(":authority").has_value());
+    EXPECT_FALSE(stream.domain().has_value());
+    stream.request_headers_[":authority"] = {"api.service.example"};
+    stream.request_headers_[":path"] = {"/old", "/current"};
+    EXPECT_EQ(stream.request_header(":path"), "/current");
+    EXPECT_EQ(stream.domain(), "example.service");
+    EXPECT_EQ(stream.hostname(), "api.service.example");
+    EXPECT_FALSE(stream.response_header(":status").has_value());
+}
+
+TEST(HTTP2, FrameHelpersHandleKnownUnknownAndIncompleteFrames) {
+    EXPECT_STREQ(v2::frame_type_str(0), "data");
+    EXPECT_STREQ(v2::frame_type_str(1), "headers");
+    EXPECT_STREQ(v2::frame_type_str(2), "priority");
+    EXPECT_STREQ(v2::frame_type_str(3), "rst-stream");
+    EXPECT_STREQ(v2::frame_type_str(4), "settings");
+    EXPECT_STREQ(v2::frame_type_str(5), "push-promise");
+    EXPECT_STREQ(v2::frame_type_str(6), "ping");
+    EXPECT_STREQ(v2::frame_type_str(7), "goaway");
+    EXPECT_STREQ(v2::frame_type_str(8), "window-update");
+    EXPECT_STREQ(v2::frame_type_str(9), "continuation");
+    EXPECT_STREQ(v2::frame_type_str(10), "altsvc");
+    EXPECT_STREQ(v2::frame_type_str(12), "origin");
+    EXPECT_STREQ(v2::frame_type_str(16), "priority-update");
+    EXPECT_STREQ(v2::frame_type_str(255), "unknown");
+
+    buffer magic;
+    magic.assign(v2::txt::magic, v2::txt::magic_sz);
+    EXPECT_EQ(v2::find_magic(magic), v2::txt::magic_sz);
+    buffer non_magic;
+    std::string const other(v2::txt::magic_sz, 'x');
+    non_magic.assign(other.data(), other.size());
+    EXPECT_EQ(v2::find_magic(non_magic), 0U);
+
+    buffer short_frame;
+    std::array<unsigned char, 3> short_bytes{0, 0, 1};
+    short_frame.assign(short_bytes.data(), short_bytes.size());
+    EXPECT_EQ(v2::find_frame_sz(short_frame), 0U);
+
+    sx::engine::EngineCtx ctx;
+    buffer empty;
+    EXPECT_EQ(v2::process_frame(ctx, socle::side_t::LEFT, empty), 0U);
+    std::array<unsigned char, 9> zero_settings{0, 0, 0, 4, 0, 0, 0, 0, 0};
+    buffer complete;
+    complete.assign(zero_settings.data(), zero_settings.size());
+    EXPECT_EQ(v2::find_frame_sz(complete), 0U);
+    EXPECT_EQ(v2::process_frame(ctx, socle::side_t::LEFT, complete), 9U);
+    std::array<unsigned char, 9> incomplete_data{0, 0, 3, 0, 0, 0, 0, 0, 1};
+    buffer incomplete;
+    incomplete.assign(incomplete_data.data(), incomplete_data.size());
+    EXPECT_EQ(v2::process_frame(ctx, socle::side_t::LEFT, incomplete), 0U);
+}
+
+TEST(HTTP2, HeaderProcessingTracksBothDirectionsAndDetectsDns) {
+    sx::engine::EngineCtx ctx;
+    ctx.state_data = std::make_any<v2::Http2Connection>();
+    auto app = std::make_shared<app_HttpRequest>();
+    buffer empty;
+
+    v2::process_header_entry(ctx, socle::side_t::LEFT, app, 7, 0, empty,
+                             ":method", "POST");
+    v2::process_header_entry(ctx, socle::side_t::LEFT, app, 7, 0, empty,
+                             ":authority", "resolver.example");
+    app->properties()[":referer"] = "https://ref.example/";
+    v2::process_header_entry(ctx, socle::side_t::LEFT, app, 7, 0, empty,
+                             "accept", "application/dns-message");
+    v2::process_header_entry(ctx, socle::side_t::LEFT, app, 7, 0, empty,
+                             ":path", "/dns-query");
+    EXPECT_TRUE(app->populated());
+    EXPECT_EQ(app->http_data.method, "POST");
+    EXPECT_EQ(app->http_data.host, "resolver.example");
+    EXPECT_EQ(app->http_data.uri, "/dns-query");
+    EXPECT_EQ(app->http_data.referer, "https://ref.example/");
+
+    v2::process_header_entry(ctx, socle::side_t::RIGHT, app, 7, 0, empty,
+                             "content-encoding", "gzip");
+    v2::process_header_entry(ctx, socle::side_t::RIGHT, app, 7, 0, empty,
+                             ":status", "200");
+    auto* connection = std::any_cast<v2::Http2Connection>(&ctx.state_data);
+    ASSERT_NE(connection, nullptr);
+    auto& stream = connection->streams[7];
+    EXPECT_EQ(stream.request_header(":path"), "/dns-query");
+    EXPECT_EQ(stream.response_header(":status"), "200");
+    EXPECT_EQ(stream.content_encoding_, v2::Http2Stream::content_type_t::GZIP);
+
+    buffer payload;
+    payload.assign("body", 4);
+    v2::process_data(ctx, socle::side_t::LEFT, 7, 0, payload);
+    v2::process_ping(ctx, socle::side_t::LEFT, 0, 0, payload);
+    v2::process_other(ctx, socle::side_t::LEFT, 0, 0, empty);
+    v2::process_other(ctx, socle::side_t::LEFT, 0, 0, payload);
+}
+
+TEST(HTTP2, StateHelpersRejectMissingOriginButPersistState) {
+    sx::engine::EngineCtx ctx;
+    EXPECT_EQ(v2::load_prev_state(ctx, 4), 0U);
+    v2::save_state(ctx, 4, 99);
+    auto const saved = std::any_cast<v2::state_data_t>(ctx.state_info);
+    EXPECT_EQ(saved.first, 4U);
+    EXPECT_EQ(saved.second, 99U);
+    EXPECT_EQ(v2::load_prev_state(ctx, 4), 0U);
+}
+
+TEST(EngineCtx, SeenDataPolicyDistinguishesSmallGrowingAndNewBlocks) {
+    sx::engine::EngineCtx ctx;
+    EXPECT_TRUE(ctx.new_data_check(1, 100));
+    ctx.update_seen_block(1, 100);
+    EXPECT_TRUE(ctx.new_data_check(1, 100));
+
+    ctx.application_data = std::make_shared<sx::engine::CustomApplicationData>("test");
+    ctx.application_data->mark_populated();
+    ctx.update_seen_block(1, 6000);
+    EXPECT_FALSE(ctx.new_data_check(1, 6000));
+    EXPECT_TRUE(ctx.new_data_check(2, 10));
+    EXPECT_FALSE(ctx.application_data->populated());
+
+    ctx.update_seen_block(2, 6000);
+    EXPECT_TRUE(ctx.new_data_check(2, 7000));
+    ctx.update_seen_block(2, 7000);
+    EXPECT_FALSE(ctx.new_data_check(2, 7000));
 }
