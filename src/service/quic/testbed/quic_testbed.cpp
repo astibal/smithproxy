@@ -290,7 +290,20 @@ private:
         while (!stopping_) {
             listener_->handle_events();
             while (auto accepted = listener_->accept()) {
-                connections_.push_back({ std::move(accepted), {}, false });
+                // OpenSSL publishes a listener connection only after its
+                // handshake. Record that fact before retaining the object:
+                // a short-lived certificate-probe connection may already be
+                // closed by the peer before the next server tick.
+                bool const handshake_recorded = accepted->handshake_complete();
+                if (handshake_recorded) {
+                    ++handshake_count_;
+                    auto lock = std::scoped_lock(observations_lock_);
+                    observed_sni_.push_back(accepted->server_name());
+                    observed_alpn_.push_back(accepted->negotiated_alpn());
+                }
+                connections_.push_back({
+                    std::move(accepted), {}, handshake_recorded
+                });
             }
             for (auto& state : connections_) {
                 auto events = state.connection->drain_events();
