@@ -100,6 +100,11 @@ def require(output: str, needle: str) -> None:
         raise AssertionError(f"expected {needle!r} in:\n{output}")
 
 
+def reject(output: str, needle: str) -> None:
+    if needle in output:
+        raise AssertionError(f"unexpected {needle!r} in:\n{output}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("binary", type=Path)
@@ -162,9 +167,9 @@ def main() -> None:
             for root in ("tls", "sig", "workers", "mem", "dns", "proxy", "writer", "api", "neighbor"):
                 require(diag_roots, root)
             require(cli.command_ok("diag tls cache stats"), "certificate store")
-            require(cli.command_ok("diag tls cache list"), "TLS certificate store unavailable")
-            require(cli.command_ok("diag tls cache print"), "TLS certificate store unavailable")
-            require(cli.command_ok("diag tls cache clear"), "TLS certificate store unavailable")
+            require(cli.command_ok("diag tls cache list"), "'pki.cert.mitm' certificate store entries")
+            require(cli.command_ok("diag tls cache print"), "'pki.cert.mitm' certificate store entries")
+            reject(cli.command_ok("diag tls cache clear"), "TLS certificate store unavailable")
             require(cli.command_ok("diag mem buffers stats"), "memory alloc")
             cli.command_ok("diag dns cache stats")
             cli.command_ok("diag proxy policy list")
