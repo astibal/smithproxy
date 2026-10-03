@@ -7,6 +7,7 @@
 #include <nlohmann/json.hpp>
 #include <array>
 #include <optional>
+#include <stdexcept>
 
 #include <utils/checkpoints.hpp>
 #include <vars.hpp>
@@ -100,6 +101,9 @@ inline std::array<std::optional<double>, N> FlowAnalysis::ratios() const {
 
 template<std::size_t N>
 FlowAnalysis::aggregated_ratios_t FlowAnalysis::aggregate(int interval) const {
+    if(interval <= 0) {
+        throw std::invalid_argument("aggregation interval must be positive");
+    }
     std::map<uint64_t, FlowIntervalData> result_data;
 
     for (std::size_t i = 0; i < N; ++i) {
