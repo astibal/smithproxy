@@ -63,73 +63,60 @@ const char* DNSFactory::dns_record_type_str(int a) {
 
 
 unsigned int DNSFactory::skip_qname(const unsigned char* ptr, unsigned long maxlen, std::string* str_storage) const {
-    unsigned int xi = 0;
-
+    if(ptr == nullptr || maxlen == 0) return 0;
     _deb("skip_qname:\r\n%s",hex_dump(ptr, static_cast<int>(maxlen), 4, 0, true).c_str());
 
+    unsigned int pos = 0;
+    while(pos < maxlen) {
+        const uint8_t label_len = ptr[pos];
+        if(label_len == 0) return pos + 1;
 
-    if(ptr[xi] == 0) {
-        xi++;
-        _deb("zero label");
-    }
-    else if(ptr[xi] < 0xC0) {
-        std::string lab;
-        for(; xi < maxlen; ++xi) {
-            uint8_t c = ptr[xi];
-            if (c == 0) break;
-            lab += c;
+        if((label_len & 0xc0U) == 0xc0U) {
+            return pos + 2 <= maxlen ? pos + 2 : 0;
         }
-        ++xi;
+        if((label_len & 0xc0U) != 0 || label_len > 63 || pos + 1 + label_len >= maxlen) {
+            return 0;
+        }
 
-        if(str_storage) str_storage->append(lab);
-
-        _deb("plain label: %s",ESC(lab));
-    } else {
-        uint8_t label = ptr[++xi];
-        _deb("ref label: %d",label);
-        ++xi;
+        if(str_storage) {
+            if(!str_storage->empty()) str_storage->push_back('.');
+            str_storage->append(reinterpret_cast<const char*>(ptr + pos + 1), label_len);
+        }
+        pos += 1 + label_len;
     }
-
-    return xi;
+    return 0;
 }
 
 
 std::string DNSFactory::construct_qname(const unsigned char* qname_start, const unsigned char* packet_start, size_t packet_size, unsigned int loopmax) {
-    std::string to_ret;
-    unsigned int part_size = 0;
+    if(qname_start == nullptr || packet_start == nullptr || packet_size == 0 || loopmax == 0 ||
+       qname_start < packet_start || qname_start >= packet_start + packet_size) return {};
 
-    if(loopmax == 0 or qname_start >= packet_start + packet_size or qname_start < packet_start or qname_start[0] == 0) {
-        return to_ret;
-    }
-    else if(qname_start[0] < 0xC0) {
-        part_size = qname_start[0];
+    std::string result;
+    size_t pos = static_cast<size_t>(qname_start - packet_start);
 
-        // sanitize part size - make it to stay in packet_size boundary
-        auto remaining_data =  packet_start + packet_size - (qname_start + 1 + part_size);
-        if(remaining_data < 0) {
-            part_size = packet_start + packet_size - (qname_start + 1);
-            remaining_data = 0;
+    for(unsigned int steps = 0; steps < loopmax; ++steps) {
+        if(pos >= packet_size) return {};
+        const uint8_t label_len = packet_start[pos];
+
+        if(label_len == 0) return result;
+
+        if((label_len & 0xc0U) == 0xc0U) {
+            if(pos + 1 >= packet_size) return {};
+            const size_t target = (static_cast<size_t>(label_len & 0x3fU) << 8U) |
+                                  packet_start[pos + 1];
+            if(target >= packet_size) return {};
+            pos = target;
+            continue;
         }
 
-        to_ret.assign(reinterpret_cast<const char*>(&qname_start[1]), part_size);
-        if(remaining_data > 0) {
-            auto ret = construct_qname(qname_start + 1 + part_size, packet_start, packet_size, loopmax - 1 );
-            if(not ret.empty()) {
-                to_ret += "." + ret;
-            }
-        }
-
-    } else {
-        // compressed entry
-        auto step_index = qname_start[0] - 0xC0;  // remove pointer bits
-        auto data_index = qname_start[1] + step_index;
-        auto ret =construct_qname(packet_start + data_index, packet_start, packet_size, loopmax - 1);
-        if(not ret.empty()) {
-            to_ret += ret;
-        }
+        if((label_len & 0xc0U) != 0 || label_len > 63 || pos + 1 + label_len >= packet_size) return {};
+        if(!result.empty()) result.push_back('.');
+        result.append(reinterpret_cast<const char*>(packet_start + pos + 1), label_len);
+        pos += 1 + label_len;
     }
 
-    return to_ret;
+    return {};
 }
 
 std::size_t DNSFactory::generate_dns_request(unsigned short id, buffer& b, std::string const& h, DNS_Record_Type t) {
@@ -433,22 +420,34 @@ std::optional<size_t> DNS_Packet::load(const buffer *src) {
 
                 for (unsigned int i = mem_counter; i < src->size() && answers_togo > 0;) {
                     DNS_Answer answer_temp;
-                    //answer_temp.name_ = ntohs(src->get_at<unsigned short>(i));
-                    answer_temp.qname_ = DNSFactory::get().construct_qname(src->data() + mem_counter, src->data(), src->size());
-                    answer_temp.type_ = ntohs(src->get_at<unsigned short>(i + 2));
-                    answer_temp.class_ = ntohs(src->get_at<unsigned short>(i + 4));
-                    answer_ttl_idx.push_back(i + 6);
-                    answer_temp.ttl_ = ntohl(src->get_at<uint32_t>(i + 6));
-                    answer_temp.datalen_ = ntohs(src->get_at<uint32_t>(i + 10));
-                    if (answer_temp.datalen_ > 0 and i + DNS_HEADER_SZ + answer_temp.datalen_ <= src->size()) {
-                        answer_temp.data_.append(src->view(i + DNS_HEADER_SZ, answer_temp.datalen_));
+                    const auto qname_len = DNSFactory::get().skip_qname(src->data() + i, src->size() - i);
+                    if(qname_len == 0) {
+                        failure = true;
+                        break;
+                    }
+                    const size_t fields = i + qname_len;
+                    if(fields + 10 > src->size()) {
+                        failure = true;
+                        break;
+                    }
+
+                    answer_temp.qname_ = DNSFactory::get().construct_qname(src->data() + i, src->data(), src->size());
+                    answer_temp.type_ = ntohs(src->get_at<unsigned short>(fields));
+                    answer_temp.class_ = ntohs(src->get_at<unsigned short>(fields + 2));
+                    answer_ttl_idx.push_back(fields + 4);
+                    answer_temp.ttl_ = ntohl(src->get_at<uint32_t>(fields + 4));
+                    answer_temp.datalen_ = ntohs(src->get_at<uint16_t>(fields + 8));
+                    const size_t record_end = fields + 10 + answer_temp.datalen_;
+                    if (record_end <= src->size()) {
+                        if(answer_temp.datalen_ > 0)
+                            answer_temp.data_.append(src->view(fields + 10, answer_temp.datalen_));
                     } else {
                         _err("DNS_Packet::load: answer[%d]: malformed packet: data boundary check failed", answers_togo);
+                        failure = true;
+                        break;
                     }
-                    int inc = DNS_HEADER_SZ + answer_temp.datalen_;
-
-                    mem_counter += inc;
-                    i += inc;
+                    mem_counter = record_end;
+                    i = record_end;
 
                     _dia("DNS_Packet::load: answer[%d]: name: %d, type: %d, class: %d, ttl: %d, len: %d, buflen: %d",
                          answers_togo,
@@ -468,6 +467,11 @@ std::optional<size_t> DNS_Packet::load(const buffer *src) {
                     DNS_Answer answer_temp;
 
                     auto xi = DNSFactory::get().skip_qname(src->data() + i, src->size() - i);
+
+                    if(xi == 0) {
+                        failure = true;
+                        break;
+                    }
 
                     //unsigned short pre_type = ntohs(src->get_at<unsigned short>(i+1));
                     unsigned short pre_type = ntohs(src->get_at<unsigned short>(i + xi));
@@ -490,7 +494,11 @@ std::optional<size_t> DNS_Packet::load(const buffer *src) {
                              answer_temp.datalen_);
 
                         // i is incremented already by size of QNAME, 8 is size of prev fields
-                        if (answer_temp.datalen_ > 0 and i + 8 + answer_temp.datalen_ <= src->size())
+                        if(i + 8 + answer_temp.datalen_ > src->size()) {
+                            failure = true;
+                            break;
+                        }
+                        if(answer_temp.datalen_ > 0)
                             answer_temp.data_.append(src->view(i + 8, answer_temp.datalen_));
 
                         i += ( 8 + answer_temp.datalen_);
@@ -521,6 +529,11 @@ std::optional<size_t> DNS_Packet::load(const buffer *src) {
 
 
                     auto xi = DNSFactory::get().skip_qname(src->data() + i, src->size() - i);
+
+                    if(xi == 0) {
+                        failure = true;
+                        break;
+                    }
 
 
                     //unsigned short pre_type = ntohs(src->get_at<unsigned short>(i+1));
@@ -591,7 +604,11 @@ std::optional<size_t> DNS_Packet::load(const buffer *src) {
                         i += 2;
 
                         // i is incremented already by size of QNAME and all fields
-                        if (answer_temp.datalen_ > 0 and i + answer_temp.datalen_ <= src->size()) {
+                        if(i + answer_temp.datalen_ > src->size()) {
+                            failure = true;
+                            break;
+                        }
+                        if (answer_temp.datalen_ > 0) {
                             answer_temp.data_.append(src->view(i, answer_temp.datalen_));
                             i += answer_temp.datalen_;
                         }
@@ -623,7 +640,8 @@ std::optional<size_t> DNS_Packet::load(const buffer *src) {
                 additionals_ = additionals_list_.size();
             }
 
-            if (questions_togo == 0 && answers_togo == 0 && authorities_togo == 0 /*&& additionals_togo == 0*/) {
+            if (!failure && questions_togo == 0 && answers_togo == 0 && authorities_togo == 0 &&
+                additionals_togo == 0) {
                 _dia("DNS_Packet::load: finished mem_counter=%d buffer_size=%d", mem_counter, src->size());
 
                 return mem_counter;
