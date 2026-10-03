@@ -86,11 +86,31 @@ namespace inet::ocsp {
 
             if (query_.run()) {
 
+                const int query_socket = query_.io().socket();
+                if (!owner() || !owner()->com() || query_socket <= 0) {
+                    result_ = inet::ocsp::OcspQuery::RET_CONNFAIL;
+                    result_state_ = inet::ocsp::OcspQuery::ST_FINISHED;
+                    log_tracer_("update-invalid-socket");
+                    return task_state_t::ERROR;
+                }
+
+                // The BIO owns the descriptor. AsyncSocket only registers it
+                // with the event loop; closing it here as well would race BIO
+                // teardown and could close an unrelated recycled descriptor.
+                if (socket() != query_socket
+                    || observed_connection_generation_ != query_.connection_generation()) {
+                    if (socket() > 0)
+                        AsyncSocket::untap();
+                    AsyncSocket::tap(query_socket, false);
+                    query_.io().com_ = owner()->com();
+                    observed_connection_generation_ = query_.connection_generation();
+                }
+
                 // reflect state to monitor socket
                 if (query_.state() < inet::ocsp::OcspQuery::ST_REQ_SENT) {
-                    owner()->com()->set_write_monitor(socket());
+                    owner()->com()->set_write_monitor(query_socket);
                 } else {
-                    owner()->com()->set_monitor(socket());
+                    owner()->com()->set_monitor(query_socket);
                 }
 
                 log_tracer_("update");
@@ -104,6 +124,12 @@ namespace inet::ocsp {
             return task_state_t::FINISHED;
         }
 
+        task_state_t start() {
+            auto const next = update();
+            this->state(next);
+            return next;
+        }
+
         int const& yield () const override {
             log_tracer_("yield");
             return result_;
@@ -112,14 +138,18 @@ namespace inet::ocsp {
         static const char* yield_str(int y) { return inet::ocsp::OcspQuery::yield_str(y); }
 
         virtual void tap () {
-            log_tracer_("tap");
-            AsyncSocket::tap(query_.io().socket());
-            query_.io().com_ = owner()->com();
+            const int query_socket = query_.io().socket();
+            if (owner() && owner()->com() && query_socket > 0) {
+                log_tracer_("tap");
+                AsyncSocket::tap(query_socket, false);
+                query_.io().com_ = owner()->com();
+            }
         }
 
         inet::ocsp::OcspQuery const& query() const { return query_; }
     private:
         inet::ocsp::OcspQuery query_;
+        std::uint64_t observed_connection_generation_ = 0;
         int result_ = -100;
         int result_state_ = -100;
 

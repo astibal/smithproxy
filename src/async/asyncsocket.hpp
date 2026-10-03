@@ -99,8 +99,8 @@ public:
         untap();
     }
 
-    void tap(int fd) {
-        socket_.set(fd, this, owner_->com(), true);
+    void tap(int fd, bool owner = true) {
+        socket_.set(fd, this, owner_->com(), owner);
         socket_.opening();
 
         this->state(task_state_t::RUNNING);

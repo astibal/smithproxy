@@ -60,8 +60,12 @@ std::unique_ptr<AsyncOcspInvoker> AsyncOcspInvoker::invoke(MitmProxy& proxy) {
                         scom->target_issuer(),
                         mh,
                         [capture0 = new_caller.get()](auto&& PH1) -> void { capture0->ssl_ocsp_callback(PH1); });
-                new_caller->ocsp_->update();
-                new_caller->ocsp_->tap();
+                auto const state = new_caller->ocsp_->start();
+                if (state != inet::ocsp::AsyncOCSP::task_state_t::RUNNING) {
+                    auto const& log = inet::ocsp::OcspFactory::log();
+                    _dia("deferred OCSP check completed before registration");
+                    return nullptr;
+                }
                 new_caller->parent_.tap();
 
                 auto const& log = inet::ocsp::OcspFactory::log();

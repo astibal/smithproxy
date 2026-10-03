@@ -55,7 +55,9 @@ public:
 
     void ssl_ocsp_callback(int response);
 
-    [[nodiscard]] bool is_finished() const { return ocsp_->state() == inet::ocsp::AsyncOCSP::task_state_t::FINISHED; }
+    [[nodiscard]] bool is_finished() const {
+        return !ocsp_ || ocsp_->state() >= inet::ocsp::AsyncOCSP::task_state_t::FINISHED;
+    }
     std::unique_ptr<inet::ocsp::AsyncOCSP>& ocsp() { return ocsp_; };
 private:
 

@@ -8,6 +8,7 @@
 #include <sslcertval.hpp>
 #include <sslmitmcom.hpp>
 #include <log/logger.hpp>
+#include <async/asyncocsp.hpp>
 
 #include <atomic>
 #include <array>
@@ -944,6 +945,21 @@ TEST_F(TLSIntegration, OCSPQueryWithoutResponderFinishesImmediately) {
     EXPECT_FALSE(query.run());
 }
 
+TEST_F(TLSIntegration, AsyncOCSPWithoutResponderNeverRegistersSocketZero) {
+    auto issuer = load_certificate(fixture_path_ / "ca-cert.pem");
+    auto certificate = upstream_certificate();
+    ASSERT_NE(issuer, nullptr);
+    ASSERT_NE(certificate, nullptr);
+    ASSERT_TRUE(inet::ocsp::ocsp_urls(certificate.get()).empty());
+
+    inet::ocsp::AsyncOCSP task(certificate.get(), issuer.get(), nullptr, nullptr);
+    EXPECT_EQ(task.start(), inet::ocsp::AsyncOCSP::task_state_t::FINISHED);
+    EXPECT_EQ(task.state(), inet::ocsp::AsyncOCSP::task_state_t::FINISHED);
+    EXPECT_EQ(task.yield(), inet::ocsp::OcspQuery::RET_NOOCSP_TARGETS);
+    EXPECT_EQ(task.socket(), 0);
+    EXPECT_EQ(task.query().connection_generation(), 0U);
+}
+
 TEST_F(TLSIntegration, OCSPRequestPreparationValidatesIssuer) {
     auto issuer = load_certificate(fixture_path_ / "ca-cert.pem");
     auto certificate = upstream_certificate();
@@ -1048,6 +1064,7 @@ TEST_F(TLSIntegration, OCSPQueryExhaustsFailedNonblockingTarget) {
     EXPECT_FALSE(query.run());
     EXPECT_EQ(query.state(), inet::ocsp::OcspQuery::ST_FINISHED);
     EXPECT_EQ(query.yield(), inet::ocsp::OcspQuery::RET_CONNFAIL);
+    EXPECT_EQ(query.connection_generation(), 1U);
 }
 
 TEST_F(TLSIntegration, CRLDerParsersRoundTripAndRejectEmptyInput) {
