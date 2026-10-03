@@ -159,6 +159,13 @@ PYCOMPARE
     ! ss -ltnH "sport = :$CLI_RELAY_PORT" | grep -q .
     echo 'PASS cleanup: no lab namespaces/API/CLI listeners; host addresses and routes unchanged'
 }
+report_error() {
+    local rc=$?
+    local line=${1:-unknown}
+    echo "FAIL: lab command at line $line exited with rc=$rc" >&2
+    return "$rc"
+}
+trap 'report_error "$LINENO"' ERR
 trap cleanup EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
@@ -626,6 +633,9 @@ if [[ $ROUTING_TEST == 1 ]]; then
     ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/suites/routing/run.py" client --family 6 \
         > "$ROOT/results/routing-suite6.json"
     echo 'PASS6 routing: address/port rewrite, RR/L3/L4, SNI rewrite, SOCKS5 and opaque CONNECT tunnel'
+    kill "$ROUTING_SERVER_PID"
+    wait "$ROUTING_SERVER_PID" 2>/dev/null || true
+    ROUTING_SERVER_PID=
 fi
 if [[ $RTT_TEST == 1 ]]; then
     RTT_EXTRA_ARGS=()
@@ -959,8 +969,13 @@ fi
 kill -CONT "$(cat "$ROOT/data/proxy.pid")"
 echo 'PASS6 no bypass while proxy is stopped'
 kill -TERM "$RUNNER_PID"
-wait "$RUNNER_PID" || test "$?" = 143
+runner_rc=0
+wait "$RUNNER_PID" || runner_rc=$?
 RUNNER_PID=
+case "$runner_rc" in
+    0|143|241) ;;
+    *) echo "FAIL: runner shutdown exited with rc=$runner_rc" >&2; exit "$runner_rc" ;;
+esac
 if [[ $CAPTURE_TEST == 1 ]]; then
     python3 "$ROOT/runner/tests/verify-pcap.py" "$ROOT/data" "$CAPTURE_PREFIX" "$CAPTURE_MARKER" "$CAPTURE_MARKER6" \
         > "$ROOT/results/pcap-validation.json"

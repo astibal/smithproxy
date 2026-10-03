@@ -364,7 +364,12 @@ def run(args):
         finally:
             process.terminate()
             try:
-                output, _ = process.communicate(timeout=10)
+                # Smithproxy drains worker threads and logging queues on
+                # SIGTERM.  Ten seconds was short enough to turn otherwise
+                # successful integration runs into SIGKILL teardown, losing
+                # sanitizer diagnostics and gcov counters from the exercised
+                # SOCKS/MITM paths.
+                output, _ = process.communicate(timeout=60)
             except subprocess.TimeoutExpired:
                 process.kill()
                 output, _ = process.communicate(timeout=5)

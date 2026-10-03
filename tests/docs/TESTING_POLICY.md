@@ -53,8 +53,9 @@ all runner-owned namespaces, interfaces and listeners remain mandatory gates.
 - `native` is the unified CTest-backed layer for C++ unit/integration
   executables, Python process tests and patch-runner self-tests. Its default
   selection is hermetic and mandatory in `full`.
-- `coverage` runs the default native selection under GCC/gcov and emits line
-  coverage in text, JSON and browsable HTML forms.
+- `coverage` runs the default native selection and a local dataplane `sanity`
+  pass under GCC/gcov, then emits combined line coverage in text, JSON and
+  browsable HTML forms. The dataplane pass requires local root privileges.
 - `sanity` is a bounded functional and dataplane validation.
 - `full` is the mandatory comprehensive gate. It contains the functional,
   native, performance, churn, capture, corpus and deterministic `fuzz.*`
@@ -86,8 +87,15 @@ explicitly; this is isolation, not deletion of coverage.
 Line coverage counts executable product lines below `src/` and `socle/` while
 excluding test, testbed, fuzz and third-party sources. It is initially a
 measurement, not a PASS threshold. Adopt or raise a coverage gate only in a
-reviewed policy change backed by a stable baseline; a successful test with
-missing or unreadable gcov data is always an infrastructure failure.
+reviewed policy change backed by a stable baseline; missing/unreadable notes
+or an unreadable data file which does exist is always an infrastructure failure.
+The built `.gcno` inventory defines the denominator. A built object without a
+matching `.gcda` is counted as zero coverage; it must never disappear from the
+report merely because no test executed it.
+Coverage test executables run serially by default because gcov magnifies the
+runtime and resource use of the mempool and large QUIC tests. Explicit
+`PATCH_TEST_CTEST_JOBS` may override this for controlled stress experiments;
+build parallelism remains controlled independently by `--jobs`.
 
 `--parallel` is a stress and throughput control, not a promise that arbitrary
 load is free. Host exhaustion is still a failed run until the limiting layer is

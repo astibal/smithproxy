@@ -135,7 +135,9 @@ def run(args):
         finally:
             process.terminate()
             try:
-                output, _ = process.communicate(timeout=10)
+                # Allow the proxy to drain worker/logging threads.  A forced
+                # SIGKILL loses sanitizer diagnostics and gcov counters.
+                output, _ = process.communicate(timeout=60)
             except subprocess.TimeoutExpired:
                 process.kill()
                 output, _ = process.communicate(timeout=5)

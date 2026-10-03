@@ -171,6 +171,8 @@ instrumentation. Its line percentage is initially measurement-only: missing
 coverage does not fail a patch until a reviewed baseline and threshold are
 adopted. Reports are written below `<report>/native/coverage/` as
 `summary.txt`, `coverage.json`, `index.html` and annotated per-file HTML.
+The report denominator comes from all built `.gcno` files, so a product object
+which was never executed remains visible at 0% instead of inflating the total.
 
 `sanity` runs in one lab. `full` first runs the native gate on its coordinator,
 then a serial smoke gate, followed by exclusive

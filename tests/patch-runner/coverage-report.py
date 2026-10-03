@@ -30,9 +30,14 @@ def is_product_source(path: pathlib.Path, root: pathlib.Path) -> bool:
 
 def load_gcov(build: pathlib.Path, root: pathlib.Path) -> dict[pathlib.Path, dict[int, int]]:
     coverage: dict[pathlib.Path, dict[int, int]] = {}
-    objects = sorted(build.rglob("*.gcda"))
+    # Notes files define the executable-line universe. Data files only exist
+    # after an object has run; using them as the inventory silently drops
+    # completely unexecuted objects and inflates the global percentage.
+    notes = sorted(build.rglob("*.gcno"))
+    objects = [note.with_suffix(".gcda") if note.with_suffix(".gcda").exists() else note
+               for note in notes]
     if not objects:
-        raise RuntimeError(f"no gcda files found below {build}")
+        raise RuntimeError(f"no gcno files found below {build}")
     with tempfile.TemporaryDirectory(prefix="smithproxy-gcov-") as temporary:
         work = pathlib.Path(temporary)
         for index, data_file in enumerate(objects):

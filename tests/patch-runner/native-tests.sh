@@ -49,6 +49,18 @@ done
 [[ $JOBS =~ ^[1-9][0-9]*$ ]] || { echo 'jobs must be positive' >&2; exit 2; }
 [[ -f $ROOT/CMakeLists.txt ]] || { echo "Not a Smithproxy source root: $ROOT" >&2; exit 2; }
 
+CTEST_JOBS=${PATCH_TEST_CTEST_JOBS:-$JOBS}
+if ((COVERAGE)) && [[ -z ${PATCH_TEST_CTEST_JOBS:-} ]]; then
+    # gcov makes the core mempool and large QUIC executables dramatically
+    # slower. Running them concurrently has caused resource-driven crashes and
+    # timing failures which disappear in isolation.
+    CTEST_JOBS=1
+fi
+[[ $CTEST_JOBS =~ ^[1-9][0-9]*$ ]] || {
+    echo 'PATCH_TEST_CTEST_JOBS must be positive' >&2
+    exit 2
+}
+
 mkdir -p "$BUILD_DIR" "$REPORT_DIR"
 cmake -S "$ROOT" -B "$BUILD_DIR" \
     -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
@@ -68,7 +80,7 @@ exclude_labels=()
 ((INCLUDE_BENCHMARKS)) || exclude_labels+=(benchmark)
 ((INCLUDE_EXTENDED)) || exclude_labels+=(extended)
 ((INCLUDE_PLATFORM)) || exclude_labels+=(platform)
-ctest_args=(--test-dir "$BUILD_DIR" --output-on-failure -j"$JOBS"
+ctest_args=(--test-dir "$BUILD_DIR" --output-on-failure -j"$CTEST_JOBS"
     --output-junit "$REPORT_DIR/junit.xml")
 if ((${#exclude_labels[@]})); then
     label_regex=$(IFS='|'; echo "${exclude_labels[*]}")

@@ -16,7 +16,7 @@ tests/patch-runner/test-patch.sh sanity --remote root@test-runner
 # Normal comprehensive gate (recommended concurrency)
 tests/patch-runner/test-patch.sh full --remote root@test-runner --parallel 3
 
-# Line coverage: text, JSON and HTML
+# Combined native + local dataplane line coverage (requires sudo/root)
 tests/patch-runner/test-patch.sh coverage --local --jobs 8
 
 # Deterministic fuzz regression layer / new exploratory seed
@@ -38,6 +38,7 @@ Useful additions:
 --include-external  public-network and privileged native tests
 --include-extended  long QUIC soak tests
 --include-platform  Docker distribution matrix
+PATCH_TEST_CTEST_JOBS=N  deliberately parallelize gcov test executables
 ```
 
 Find results:

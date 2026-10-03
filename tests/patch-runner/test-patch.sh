@@ -22,8 +22,8 @@ Profiles:
               native tests, TLS/policy/CLI, RTT, churn, capture/HTTP2, QUIC/H3,
               all corpus categories and deterministic protocol fuzz sections.
   native      Run the hermetic CTest, integration and runner self-test layer.
-  coverage    Run the native layer with GCC line instrumentation and emit
-              text, JSON and browsable HTML coverage reports.
+  coverage    Run the native layer and local dataplane sanity with GCC line
+              instrumentation; emit text, JSON and browsable HTML reports.
   fuzz        Run the mandatory bounded deterministic protocol fuzz sections.
   fuzz-dyn    Run every protocol fuzz section with one new seed. On complete
               success, append that seed to tests/docs/covered-seeds.
@@ -72,6 +72,8 @@ Common environment variables:
   PATCH_TEST_BUILD_DIR           Default build directory.
   PATCH_TEST_RESULTS_DIR         Store reports under this directory.
   PATCH_TEST_JOBS                Default build parallelism.
+  PATCH_TEST_CTEST_JOBS          Native test parallelism. Coverage defaults to
+                                 1 to avoid gcov-induced resource contention.
   PATCH_TEST_PARALLEL            Default full-section concurrency (default: 3).
   MATCH                           Comma-separated corpus case-name globs
                                   to include (default: *).
@@ -703,6 +705,25 @@ elif [[ $PROFILE == native || $PROFILE == coverage ]]; then
         > "$REPORT/test.log" 2>&1
     TEST_RC=$?
     set -e
+    if [[ $PROFILE == coverage && $TEST_RC == 0 ]]; then
+        {
+            echo
+            echo '===== instrumented local dataplane sanity ====='
+        } >> "$REPORT/test.log"
+        set +e
+        "$HERE/test-patch.sh" sanity --local --worker --quiet --skip-build \
+            --build-dir "$WORK_DIR/coverage-build" \
+            --dir "$WORK_DIR/coverage-dataplane" \
+            >> "$REPORT/test.log" 2>&1
+        TEST_RC=$?
+        set -e
+        if ((TEST_RC == 0)); then
+            python3 "$HERE/coverage-report.py" \
+                --source-root "$ROOT" --build-dir "$WORK_DIR/coverage-build" \
+                --output-dir "$REPORT/native/coverage" \
+                >> "$REPORT/test.log" 2>&1
+        fi
+    fi
     if ((TEST_RC == 0)); then
         STATUS=PASS
         cat "$REPORT/test.log"
@@ -1087,7 +1108,7 @@ if ((INTERNAL_WORKER == 0 && TEST_RC == 0)); then
         case "$PROFILE" in
             quick) RUN_COVERAGE='build:smithproxy' ;;
             native) RUN_COVERAGE='native:ctest,integration,quic,selftests' ;;
-            coverage) RUN_COVERAGE='coverage:native,gcov,line-html' ;;
+            coverage) RUN_COVERAGE='coverage:native,dataplane-sanity,gcov,line-html' ;;
             sanity) RUN_COVERAGE='sanity:dual-stack,tls,policy,rtt,http1,http2,udp,capture,cleanup' ;;
             benchmark) RUN_COVERAGE='benchmark:tcp,udp,tls' ;;
             run) RUN_COVERAGE='interactive-lab' ;;

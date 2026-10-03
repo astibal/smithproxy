@@ -347,6 +347,7 @@ add_executable(smithproxy
         src/service/httpd/handlers/handlers.cpp
         src/service/httpd/handlers/dispatchers.cpp
         src/service/http/jsonize.cpp
+        src/service/http/jsonize_config.cpp
         src/service/http/request.hpp
         src/service/http/request.cpp
         src/service/http/async_request.hpp
@@ -427,6 +428,10 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/proxy/quic/tests/qpack_vendor_tests.cpp
                 src/proxy/quic/openssl.cpp
                 src/proxy/quic/tests/openssl_tests.cpp
+                src/proxy/socks5/socks5_protocol_tests.cpp
+                src/proxy/filters/statistics/entropy.cpp
+                src/proxy/filters/statistics/flowanalysis.cpp
+                src/proxy/filters/statistics/statistics_tests.cpp
                 src/service/quic/quicservice.cpp
                 src/service/quic/tests/quicservice_tests.cpp
 
@@ -439,6 +444,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/service/cmd/config_cli2_tests.cpp
                 src/service/cmd/config_cli2_schema.cpp
                 src/service/cmd/config_cli2_schema_tests.cpp
+                src/service/http/jsonize_tests.cpp
+                src/service/http/jsonize_config.cpp
 
                 src/inspect/engine.hpp
                 src/inspect/engine/http.cpp
@@ -454,10 +461,17 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 socle/tests/test_tls.cpp
                 socle/tests/tests_peering.cpp
                 socle/tests/tests_mempool.cpp
+                socle/tests/socketinfo_tests.cpp
+                socle/tests/transport_lifecycle_tests.cpp
                 socle/common/tests/cache_tests.cpp
                 socle/common/tests/mempool_tests.cpp
+                socle/common/tests/buffer_tests.cpp
+                socle/common/tests/base64_tests.cpp
                 socle/common/tests/string_tests.cpp
                 socle/common/tests/inet_tests.cpp
+                socle/common/tests/timeops_tests.cpp
+                socle/common/tests/ltventry_tests.cpp
+                socle/common/tests/biostring_tests.cpp
                 socle/common/tests/cast_tests.cpp
                 )
         add_executable(sx_gtests_http1
@@ -544,7 +558,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
 
         if(BUILD_TESTING)
             add_test(NAME unit.core COMMAND sx_gtests
-                    --gtest_filter=-InetTest.*:PcapExperiments.*)
+                    --gtest_filter=-InetTest.*:PcapExperiments.*:DNS_tests.*)
             add_test(NAME unit.http1 COMMAND sx_gtests_http1 --gtest_filter=-HTTP1.benchmark)
             add_test(NAME unit.startstoptls COMMAND sx_gtests_startstoptls)
             add_test(NAME unit.httpconnect COMMAND sx_gtests_httpconnect)
@@ -556,6 +570,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
             add_test(NAME external.inet COMMAND sx_gtests --gtest_filter=InetTest.*)
             add_test(NAME external.pcap_experiments COMMAND sx_gtests
                     --gtest_filter=PcapExperiments.*)
+            add_test(NAME external.dns COMMAND sx_gtests
+                    --gtest_filter=DNS_tests.*)
             add_test(NAME extended.quic_soak COMMAND ${CMAKE_COMMAND} -E env
                     QUIC_TESTBED_BUILD_DIR=${CMAKE_BINARY_DIR}
                     ${PROJECT_SOURCE_DIR}/tools/quic-soak-test.sh)
@@ -574,7 +590,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                     integration.tls_testbed integration.transfer_testbed integration.quic_testbed
                     PROPERTIES LABELS "native;integration")
             set_tests_properties(benchmark.http1 PROPERTIES LABELS "benchmark")
-            set_tests_properties(external.inet external.pcap_experiments
+            set_tests_properties(external.inet external.pcap_experiments external.dns
                     PROPERTIES LABELS "external;privileged")
             set_tests_properties(external.quic_interop
                     PROPERTIES LABELS "external;quic" SKIP_RETURN_CODE 77
@@ -589,11 +605,11 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
             # Core tests load repository fixtures (including QUIC certificates)
             # through source-relative paths.
             set_tests_properties(unit.core integration.quic_testbed
-                    external.inet external.pcap_experiments PROPERTIES
+                    external.inet external.pcap_experiments external.dns PROPERTIES
                     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
-            set_tests_properties(unit.core PROPERTIES TIMEOUT 300)
+            set_tests_properties(unit.core PROPERTIES TIMEOUT 600)
             set_tests_properties(integration.quic_testbed PROPERTIES TIMEOUT 180)
-            set_tests_properties(external.inet external.pcap_experiments
+            set_tests_properties(external.inet external.pcap_experiments external.dns
                     PROPERTIES TIMEOUT 180)
             set_tests_properties(unit.reloadable PROPERTIES LABELS "native;unit;reload")
             set_tests_properties(integration.tls_testbed PROPERTIES LABELS "native;integration;tls")
@@ -618,6 +634,16 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                         --smithproxy $<TARGET_FILE:smithproxy>
                         --source ${PROJECT_SOURCE_DIR}
                         --protocol all --address ipv4-ip)
+                add_test(NAME integration.socks5_udp
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/socks5/socks5_udp_integration.py
+                        --smithproxy $<TARGET_FILE:smithproxy>
+                        --source ${PROJECT_SOURCE_DIR})
+                add_test(NAME integration.http_api
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/httpapi/http_api_integration.py
+                        --smithproxy $<TARGET_FILE:smithproxy>
+                        --source ${PROJECT_SOURCE_DIR})
                 add_test(NAME integration.libcli2_process
                         COMMAND ${Python3_EXECUTABLE}
                         ${PROJECT_SOURCE_DIR}/src/service/cmd/libcli2_process_e2e.py
@@ -634,12 +660,12 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                         COMMAND ${Python3_EXECUTABLE}
                         ${PROJECT_SOURCE_DIR}/tools/wireshark/test_spquic.py)
                 set_tests_properties(
-                        integration.httpconnect integration.starttls_socks
+                        integration.httpconnect integration.starttls_socks integration.socks5_udp integration.http_api
                         integration.libcli2_process integration.wireshark_spq1
                         PROPERTIES LABELS "native;integration")
                 set_tests_properties(stress.httpconnect PROPERTIES LABELS "native;integration;stress")
                 set_tests_properties(
-                        integration.httpconnect stress.httpconnect integration.starttls_socks
+                        integration.httpconnect stress.httpconnect integration.starttls_socks integration.socks5_udp integration.http_api
                         integration.libcli2_process PROPERTIES TIMEOUT 120)
                 set_tests_properties(
                         unit.patch_runner_fuzz_areas unit.patch_runner_fuzz_seeds
@@ -741,6 +767,12 @@ if(SMITHPROXY_TLS_SANITIZERS)
                 -fsanitize=address,undefined
                 -fno-omit-frame-pointer)
     endforeach()
+    # sx_gtests deliberately links inspector helpers without the full
+    # MitmHostCX implementation. UBSan's vptr instrumentation would add an
+    # otherwise unused RTTI reference and make this reduced unit target fail
+    # to link. ASan and all other UBSan checks stay enabled.
+    target_compile_options(sx_gtests PRIVATE -fno-sanitize=vptr)
+    target_link_options(sx_gtests PRIVATE -fno-sanitize=vptr)
     # LeakSanitizer cannot operate under ptrace-based CI/sandbox runners.
     # Keep ASan bounds/UAF checks and UBSan enabled there.
     get_property(sanitized_tests DIRECTORY PROPERTY TESTS)
