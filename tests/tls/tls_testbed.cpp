@@ -10,9 +10,12 @@
 #include <log/logger.hpp>
 
 #include <atomic>
+#include <array>
 #include <chrono>
+#include <cerrno>
 #include <cstdlib>
 #include <filesystem>
+#include <fcntl.h>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -294,6 +297,128 @@ protected:
 };
 
 std::filesystem::path TLSIntegration::fixture_path_;
+
+class SocketPair {
+public:
+    SocketPair() {
+        if (::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0, fds_.data()) != 0)
+            fds_ = {-1, -1};
+    }
+    ~SocketPair() {
+        for (auto fd : fds_) {
+            if (fd >= 0) ::close(fd);
+        }
+    }
+    bool valid() const { return fds_[0] >= 0 && fds_[1] >= 0; }
+    int first() const { return fds_[0]; }
+    int second() const { return fds_[1]; }
+    int release_first() {
+        const int fd = fds_[0];
+        fds_[0] = -1;
+        return fd;
+    }
+private:
+    std::array<int, 2> fds_ {-1, -1};
+};
+
+struct ssl_ptr_deleter {
+    void operator()(SSL* value) const { SSL_free(value); }
+};
+
+TEST_F(TLSIntegration, SSLComNonblockingHandshakeBidirectionalDataAndCloseNotify) {
+    SocketPair sockets;
+    ASSERT_TRUE(sockets.valid());
+
+    auto* transport = new SSLCom();
+    baseHostCX server(transport, sockets.release_first());
+    server.opening(false);
+    server.on_accept_socket(server.socket());
+    ASSERT_FALSE(transport->error());
+
+    std::unique_ptr<SSL_CTX, decltype(&SSL_CTX_free)> client_ctx(
+        SSL_CTX_new(TLS_client_method()), SSL_CTX_free);
+    ASSERT_NE(client_ctx, nullptr);
+    SSL_CTX_set_verify(client_ctx.get(), SSL_VERIFY_NONE, nullptr);
+    std::unique_ptr<SSL, ssl_ptr_deleter> client(SSL_new(client_ctx.get()));
+    ASSERT_NE(client, nullptr);
+    ASSERT_EQ(SSL_set_fd(client.get(), sockets.second()), 1);
+    SSL_set_connect_state(client.get());
+    ASSERT_EQ(SSL_set_tlsext_host_name(client.get(), "tls-state.test"), 1);
+
+    bool client_ready = false;
+    for (int round = 0; round < 1000 &&
+                            !(client_ready && transport->com_status()); ++round) {
+        if (!client_ready) {
+            const int result = SSL_connect(client.get());
+            if (result == 1) {
+                client_ready = true;
+            } else {
+                const int error = SSL_get_error(client.get(), result);
+                ASSERT_TRUE(error == SSL_ERROR_WANT_READ || error == SSL_ERROR_WANT_WRITE)
+                    << "client handshake error=" << error;
+            }
+        }
+        const int result = server.read();
+        ASSERT_FALSE(server.error()) << "server handshake read=" << result;
+    }
+    ASSERT_TRUE(client_ready);
+    ASSERT_TRUE(transport->com_status());
+    EXPECT_GT(transport->counters.prof_accept_cnt, 1U);
+    EXPECT_EQ(transport->counters.prof_accept_ok, 1U);
+
+    const std::string request = "request-through-sslcom";
+    ASSERT_EQ(SSL_write(client.get(), request.data(), request.size()),
+              static_cast<int>(request.size()));
+    for (int round = 0; round < 1000 && server.readbuf()->size() < request.size(); ++round) {
+        const int result = server.read();
+        ASSERT_GE(result, -1);
+        ASSERT_FALSE(server.error());
+    }
+    ASSERT_EQ(server.readbuf()->size(), request.size());
+    EXPECT_EQ(std::string(reinterpret_cast<char const*>(server.readbuf()->data()),
+                          server.readbuf()->size()), request);
+
+    const std::string response = "response-through-sslcom";
+    server.writebuf()->append(response.data(), response.size());
+    ASSERT_EQ(server.write(), static_cast<int>(response.size()));
+    std::array<char, 64> received {};
+    int received_size = -1;
+    for (int round = 0; round < 1000 && received_size <= 0; ++round) {
+        received_size = SSL_read(client.get(), received.data(), received.size());
+        if (received_size <= 0) {
+            const int error = SSL_get_error(client.get(), received_size);
+            ASSERT_TRUE(error == SSL_ERROR_WANT_READ || error == SSL_ERROR_WANT_WRITE)
+                << "client read error=" << error;
+            server.write();
+        }
+    }
+    ASSERT_EQ(received_size, static_cast<int>(response.size()));
+    EXPECT_EQ(std::string(received.data(), received_size), response);
+
+    const int shutdown_result = SSL_shutdown(client.get());
+    ASSERT_TRUE(shutdown_result == 0 || shutdown_result == 1);
+    for (int round = 0; round < 1000 && !server.error(); ++round)
+        server.read();
+    EXPECT_TRUE(server.error());
+}
+
+TEST_F(TLSIntegration, SSLComRejectsMalformedHandshakeWithoutRetryLoop) {
+    SocketPair sockets;
+    ASSERT_TRUE(sockets.valid());
+    static constexpr std::array<unsigned char, 9> malformed {
+        0x16, 0x03, 0x03, 0x00, 0x04, 0xff, 0x00, 0x00, 0x00};
+    ASSERT_EQ(::send(sockets.second(), malformed.data(), malformed.size(), MSG_NOSIGNAL),
+              static_cast<ssize_t>(malformed.size()));
+
+    auto* transport = new SSLCom();
+    baseHostCX server(transport, sockets.release_first());
+    server.opening(false);
+    server.on_accept_socket(server.socket());
+
+    EXPECT_TRUE(transport->error());
+    EXPECT_EQ(transport->counters.prof_accept_cnt, 1U);
+    EXPECT_LE(server.read(), 0);
+}
 
 TEST_F(TLSIntegration, ControlPathPerformanceTrace) {
     const char* configured = std::getenv("TLS_PERF_ITERATIONS");
@@ -802,6 +927,85 @@ TEST_F(TLSIntegration, OCSPRejectsNullAndResponderErrors) {
     EXPECT_EQ(inet::ocsp::ocsp_verify_response(
                   error_response.get(), certificate.get(), issuer.get()).revoked,
               -1);
+}
+
+TEST_F(TLSIntegration, OCSPQueryWithoutResponderFinishesImmediately) {
+    auto issuer = load_certificate(fixture_path_ / "ca-cert.pem");
+    auto certificate = upstream_certificate();
+    ASSERT_NE(issuer, nullptr);
+    ASSERT_NE(certificate, nullptr);
+    ASSERT_TRUE(inet::ocsp::ocsp_urls(certificate.get()).empty());
+
+    inet::ocsp::OcspQuery query(certificate.get(), issuer.get(), 42);
+    EXPECT_FALSE(query.run());
+    EXPECT_EQ(query.state(), inet::ocsp::OcspQuery::ST_FINISHED);
+    EXPECT_EQ(query.yield(), inet::ocsp::OcspQuery::RET_NOOCSP_TARGETS);
+    // A terminal query stays terminal and must not restart networking.
+    EXPECT_FALSE(query.run());
+}
+
+TEST_F(TLSIntegration, OCSPRequestPreparationValidatesIssuer) {
+    auto issuer = load_certificate(fixture_path_ / "ca-cert.pem");
+    auto certificate = upstream_certificate();
+    ASSERT_NE(issuer, nullptr);
+    ASSERT_NE(certificate, nullptr);
+
+    OCSP_REQUEST* request = nullptr;
+    STACK_OF(OCSP_CERTID)* ids = sk_OCSP_CERTID_new_null();
+    ASSERT_NE(ids, nullptr);
+    EXPECT_EQ(inet::ocsp::ocsp_prepare_request(
+                  &request, certificate.get(), EVP_sha1(), nullptr, ids), 0);
+    EXPECT_EQ(request, nullptr);
+    EXPECT_EQ(inet::ocsp::ocsp_prepare_request(
+                  &request, certificate.get(), EVP_sha1(), issuer.get(), ids), 1);
+    ASSERT_NE(request, nullptr);
+    EXPECT_EQ(sk_OCSP_CERTID_num(ids), 1);
+
+    sk_OCSP_CERTID_free(ids);
+    OCSP_REQUEST_free(request);
+}
+
+TEST_F(TLSIntegration, CRLDerParsersRoundTripAndRejectEmptyInput) {
+    auto issuer = load_certificate(fixture_path_ / "ca-cert.pem");
+    auto issuer_key = load_private_key(fixture_path_ / "ca-key.pem");
+    auto certificate = upstream_certificate();
+    ASSERT_NE(issuer, nullptr);
+    ASSERT_NE(issuer_key, nullptr);
+    ASSERT_NE(certificate, nullptr);
+    auto crl = make_crl(issuer.get(), issuer_key.get(), certificate.get());
+    ASSERT_NE(crl, nullptr);
+
+    const int encoded_size = i2d_X509_CRL(crl.get(), nullptr);
+    ASSERT_GT(encoded_size, 0);
+    std::vector<unsigned char> encoded(static_cast<std::size_t>(encoded_size));
+    unsigned char* output = encoded.data();
+    ASSERT_EQ(i2d_X509_CRL(crl.get(), &output), encoded_size);
+
+    buffer encoded_buffer;
+    encoded_buffer.append(encoded.data(), encoded.size());
+    crl_ptr parsed_buffer(inet::crl::crl_from_bytes(encoded_buffer), X509_CRL_free);
+    ASSERT_NE(parsed_buffer, nullptr);
+    EXPECT_EQ(inet::crl::crl_is_revoked_by(
+                  certificate.get(), issuer.get(), parsed_buffer.get()), 1);
+
+    const auto der_path = fixture_path_ / "roundtrip.crl.der";
+    FILE* file = fopen(der_path.c_str(), "wb");
+    ASSERT_NE(file, nullptr);
+    ASSERT_EQ(fwrite(encoded.data(), 1, encoded.size(), file), encoded.size());
+    ASSERT_EQ(fclose(file), 0);
+    crl_ptr parsed_file(inet::crl::crl_from_file(der_path.c_str()), X509_CRL_free);
+    ASSERT_NE(parsed_file, nullptr);
+    EXPECT_EQ(inet::crl::crl_is_revoked_by(
+                  certificate.get(), issuer.get(), parsed_file.get()), 1);
+
+    buffer empty;
+    EXPECT_EQ(inet::crl::crl_from_bytes(empty), nullptr);
+    EXPECT_EQ(inet::crl::crl_from_bytes(static_cast<const char*>(nullptr)), nullptr);
+    EXPECT_EQ(inet::crl::crl_from_file(nullptr), nullptr);
+    EXPECT_EQ(inet::crl::crl_is_revoked_by(nullptr, issuer.get(), crl.get()), -1);
+    EXPECT_EQ(inet::crl::crl_verify_trust(nullptr, issuer.get(), crl.get(), {}), 0);
+    EXPECT_TRUE(inet::crl::crl_urls(nullptr).empty());
+    EXPECT_TRUE(inet::ocsp::ocsp_urls(nullptr).empty());
 }
 
 TEST_F(TLSIntegration, OCSPRejectsResponseWithWrongSignature) {
