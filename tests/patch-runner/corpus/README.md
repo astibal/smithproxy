@@ -79,8 +79,8 @@ cases are assigned once across the areas defined by the patch runner.
 The preferred interface is the patch runner:
 
 ```bash
-../test-patch.sh sanity --suite corpus-regular --remote root@tt-px1
-../test-patch.sh full --remote root@tt-px1 --env MATCH='h2_generated_*'
+../test-patch.sh sanity --suite corpus-regular --remote root@test-runner-1
+../test-patch.sh full --remote root@test-runner-1 --env MATCH='h2_generated_*'
 ```
 
 For a manually prepared compatible lab, the default namespace names are

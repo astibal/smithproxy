@@ -17,9 +17,9 @@ There is no implicit target. Every invocation must name at least one target:
 
 ```sh
 tests/patch-runner/test-patch.sh sanity --local
-tests/patch-runner/test-patch.sh full --remote root@tt-bs1
+tests/patch-runner/test-patch.sh full --remote root@test-runner-1
 tests/patch-runner/test-patch.sh full --local \
-  --remote root@tt-bs1 --remote root@tt-bs2
+  --remote root@test-runner-1 --remote root@test-runner-2
 ```
 
 `--local` adds the current host to the worker pool. `--remote HOST` is
@@ -111,7 +111,7 @@ exact static or dynamic run rather than generating a replacement seed.
 
 ## Seed lifecycle and bounded replay
 
-Successful `fuzz-dyn` runs append a unique seed to `docs/covered-seeds` only
+Successful `fuzz-dyn` runs append a unique seed to `tests/docs/covered-seeds` only
 after every scheduled fuzz area passes. The coordinator performs this write
 once; workers never update the registry. Failed dynamic seeds remain in the
 run report and are not recorded as covered. A `FLAKY_PASS` is recorded in the
@@ -136,13 +136,15 @@ changing the meaning of existing seeds.
 ## Persistent run history
 
 Every successful top-level patch-runner invocation appends one concise row to
-`docs/patch-run-history`. The row records UTC time, commit and dirty state,
-result, profile, explicit targets, effective coverage and report path.
+`tests/docs/patch-run-history`. The row records UTC time, commit and dirty state,
+result, profile, anonymized target order (`local`, `remote-1`, `remote-2`, ...),
+effective coverage and report path. Local reports retain the actual targets for
+diagnostics; committed history must not publish internal hostnames.
 Internal section workers do not append rows; their results are aggregated into
 the parent entry.
 
 The runner never commits or pushes these files. Changes to
-`docs/covered-seeds` and `docs/patch-run-history` stay in the working tree and
+`tests/docs/covered-seeds` and `tests/docs/patch-run-history` stay in the working tree and
 are included in the next normal commit to the current branch.
 
 Failed runs are retained in their ordinary report directories with a

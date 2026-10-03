@@ -23,7 +23,7 @@ Profiles:
               categories, followed by deterministic protocol fuzz sections.
   fuzz        Run the mandatory bounded deterministic protocol fuzz sections.
   fuzz-dyn    Run every protocol fuzz section with one new seed. On complete
-              success, append that seed to docs/covered-seeds.
+              success, append that seed to tests/docs/covered-seeds.
   benchmark   Measure TCP, UDP and TLS latency without PASS/FAIL latency gates.
               Prints IPv4/IPv6 absolute and native-delta tables and keeps JSON.
   --run       Start an interactive isolated lab and keep Smithproxy in the
@@ -97,22 +97,22 @@ Common environment variables:
 Examples:
   test-patch.sh quick --local
   test-patch.sh sanity --local
-  test-patch.sh sanity --remote root@tt-bs1
-  test-patch.sh sanity --suite policy --remote root@tt-bs1
-  test-patch.sh sanity --suite tls-throughput --remote root@tt-bs1
-  test-patch.sh sanity --suite quic --remote root@tt-px1
-  test-patch.sh sanity --quiet --remote root@tt-bs1
-  test-patch.sh sanity --remote root@tt-bs1 --env RTT_SAMPLES=500
-  test-patch.sh full --remote root@tt-bs1 --env MATCH='h2_generated_*' \
+  test-patch.sh sanity --remote root@test-runner-1
+  test-patch.sh sanity --suite policy --remote root@test-runner-1
+  test-patch.sh sanity --suite tls-throughput --remote root@test-runner-1
+  test-patch.sh sanity --suite quic --remote root@test-runner-1
+  test-patch.sh sanity --quiet --remote root@test-runner-1
+  test-patch.sh sanity --remote root@test-runner-1 --env RTT_SAMPLES=500
+  test-patch.sh full --remote root@test-runner-1 --env MATCH='h2_generated_*' \
       --env EXCLUDE='h2_generated_003,h2_generated_017'
-  test-patch.sh full --remote root@tt-bs1 --jobs 8
-  test-patch.sh full --remote root@tt-bs1 --unique=udp-flaky-results
-  test-patch.sh full --remote root@tt-bs1 --unique --parallel 3
-  test-patch.sh full --local --remote root@tt-bs1 --remote root@tt-bs2
-  test-patch.sh fuzz-dyn --remote root@tt-bs1 --remote root@tt-bs2
-  test-patch.sh full --remote root@tt-bs1 --churn-port-range 20000:29999
-  test-patch.sh benchmark --remote root@tt-bs1
-  test-patch.sh --run --remote root@tt-bs1
+  test-patch.sh full --remote root@test-runner-1 --jobs 8
+  test-patch.sh full --remote root@test-runner-1 --unique=udp-flaky-results
+  test-patch.sh full --remote root@test-runner-1 --unique --parallel 3
+  test-patch.sh full --local --remote root@test-runner-1 --remote root@test-runner-2
+  test-patch.sh fuzz-dyn --remote root@test-runner-1 --remote root@test-runner-2
+  test-patch.sh full --remote root@test-runner-1 --churn-port-range 20000:29999
+  test-patch.sh benchmark --remote root@test-runner-1
+  test-patch.sh --run --remote root@test-runner-1
   test-patch.sh sanity --local --build-dir /tmp/smithproxy-build --skip-build
 
 Reports:
@@ -293,7 +293,7 @@ else
     DIRTY=false
 fi
 REPORT_HOST=$(IFS=,; echo "${TARGETS[*]}")
-FUZZ_SEED_REGISTRY=$ROOT/docs/covered-seeds
+FUZZ_SEED_REGISTRY=$ROOT/tests/docs/covered-seeds
 FUZZ_GENERATOR_VERSION=v1
 FUZZ_DYNAMIC_SEED=
 if [[ $PROFILE == fuzz-dyn ]]; then
@@ -362,7 +362,7 @@ run_distributed_sections() {
 
     mkdir -p "$REPORT/sections" "$REPORT/targets" "$WORK_DIR/sections" \
         "$bundle_local/tests" "$bundle_local/etc/msg" "$bundle_local/tools/wireshark" \
-        "$bundle_local/docs" "$bundle_local/build" "$manifest_dir"
+        "$bundle_local/tests/docs" "$bundle_local/build" "$manifest_dir"
     : > "$REPORT/test.log"
     printf 'section\ttarget\tresult\trc\treason\treport\n' > "$REPORT/sections.tsv"
 
@@ -370,7 +370,7 @@ run_distributed_sections() {
     cp "$ROOT/etc/smithproxy.cfg" "$bundle_local/etc/"
     cp -a "$ROOT/etc/msg/en" "$bundle_local/etc/msg/"
     cp "$ROOT/tools/wireshark/spquic.lua" "$bundle_local/tools/wireshark/"
-    cp "$FUZZ_SEED_REGISTRY" "$bundle_local/docs/covered-seeds"
+    cp "$FUZZ_SEED_REGISTRY" "$bundle_local/tests/docs/covered-seeds"
     cp "$BUILD_DIR/smithproxy" "$bundle_local/build/smithproxy"
     chmod 0555 "$bundle_local/build/smithproxy"
     if [[ $PROFILE == full ]]; then
@@ -999,17 +999,28 @@ if ((INTERNAL_WORKER == 0 && TEST_RC == 0)); then
     HISTORY_COMMIT=${COMMIT:0:12}
     [[ $DIRTY == false ]] || HISTORY_COMMIT="$HISTORY_COMMIT+dirty"
     HISTORY_TIME=$(date -u +%FT%TZ)
-    exec 9>>"$ROOT/docs/patch-run-history"
+    HISTORY_TARGETS=()
+    HISTORY_REMOTE_INDEX=0
+    for target in "${TARGETS[@]}"; do
+        if [[ $target == local ]]; then
+            HISTORY_TARGETS+=(local)
+        else
+            ((HISTORY_REMOTE_INDEX += 1))
+            HISTORY_TARGETS+=("remote-$HISTORY_REMOTE_INDEX")
+        fi
+    done
+    HISTORY_HOST=$(IFS=,; echo "${HISTORY_TARGETS[*]}")
+    exec 9>>"$ROOT/tests/docs/patch-run-history"
     flock -x 9
     printf '| %s | `%s` | %s | `%s%s` | `%s` | %s | `%s` |\n' \
         "$HISTORY_TIME" "$HISTORY_COMMIT" "$STATUS" "$PROFILE" "${ONLY_SUITE:+/$ONLY_SUITE}" \
-        "$REPORT_HOST" "$RUN_COVERAGE" "$REPORT" >&9
+        "$HISTORY_HOST" "$RUN_COVERAGE" "$REPORT" >&9
     HISTORY_RECORDED=1
     flock -u 9
     exec 9>&-
 fi
 ((SEED_RECORDED == 0)) || echo "Covered seed recorded: $FUZZ_DYNAMIC_SEED"
-((HISTORY_RECORDED == 0)) || echo "Successful run recorded: $ROOT/docs/patch-run-history"
+((HISTORY_RECORDED == 0)) || echo "Successful run recorded: $ROOT/tests/docs/patch-run-history"
 
 ((QUIET)) || echo
 if [[ $PROFILE == benchmark ]]; then

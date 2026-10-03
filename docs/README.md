@@ -1,6 +1,6 @@
 # How to obtain help
 
-Repository testing policy: [TESTING_POLICY.md](TESTING_POLICY.md).
+Repository testing policy: [TESTING_POLICY.md](../tests/docs/TESTING_POLICY.md).
 
 For help visit: 
   * Documentation: [https://smithproxy.readthedocs.org](https://smithproxy.readthedocs.org)  

@@ -1,29 +1,103 @@
 # Smithproxy patch runner
 
 The normative coverage, target, fuzz-seed and result-recording rules live in
-[`docs/TESTING_POLICY.md`](../../docs/TESTING_POLICY.md).
+[`tests/docs/TESTING_POLICY.md`](../docs/TESTING_POLICY.md).
 
 `test-patch.sh` builds the current checkout and can exercise the resulting
 Smithproxy binary in disposable, dual-stack Linux network labs. Labs can run
 locally or over SSH.
 
+## Repository map
+
+Run all commands from the Smithproxy repository root. The runner is
+self-contained in the source tree:
+
+```text
+tests/patch-runner/
+├── test-patch.sh          main command-line entry point
+├── remote-scheduler.sh    target-local worker pool for full/fuzz runs
+├── fuzz-seeds.py          bounded regression/recent/archive seed selection
+├── harness/               network lab, origins, probes and validators
+├── corpus/
+│   ├── regular/           ordinary protocol conversations
+│   ├── edge/              boundary and malformed conversations
+│   ├── insanity/          deliberately hostile conversations
+│   └── run-suite.sh       corpus and mutation runner
+└── vendor/                pinned test-only dependencies such as pplay
+
+tests/tls/tls_testbed.cpp   in-process C++ TLS integration testbed
+tests/docs/TESTING_POLICY.md normative coverage and result policy
+tests/docs/covered-seeds     successful dynamic and pinned regression seeds
+tests/docs/patch-run-history successful top-level invocation history
+```
+
+`tests/docs/TESTING_POLICY.md` is the source of truth when changing coverage,
+scheduling, pass criteria, result recording or seed lifecycle. Keep this README
+as the operator guide and avoid duplicating it in a separate quick-start file.
+
+## Operator quick start
+
+There is no implicit execution target. Every command must name `--local` or at
+least one `--remote [USER@]HOST` target. The runner tests the current working
+tree, including uncommitted changes; reports mark such builds as `+dirty`.
+
 ```bash
-# Build only.
+# Authoritative command-line help.
+tests/patch-runner/test-patch.sh --help
+
+# Build the production smithproxy target only.
 tests/patch-runner/test-patch.sh quick --local
 
-# One comprehensive lab, without the large corpus or churn tests.
-tests/patch-runner/test-patch.sh sanity --remote root@tt-px1
+# Bounded functional validation on one remote Linux target.
+tests/patch-runner/test-patch.sh sanity --remote root@test-runner-1
+
+# Recommended comprehensive correctness gate: modest section parallelism,
+# predictable work directory and no unrelated host-load experiment.
+tests/patch-runner/test-patch.sh full --remote root@test-runner-1 \
+    --parallel 3 --jobs 8 --dir /tmp/patch-runner/manual-full-p3
 
 # Build once, then run three workers on each of two targets.
-tests/patch-runner/test-patch.sh full --remote root@tt-px1 \
-    --remote root@tt-px2 --unique=distributed-full --parallel 3
+tests/patch-runner/test-patch.sh full --remote root@test-runner-1 \
+    --remote root@test-runner-2 --unique=distributed-full --parallel 3
 
 # Start a lab for manual API/CLI work; Ctrl-C performs cleanup.
-tests/patch-runner/test-patch.sh --run --remote root@tt-px1
+tests/patch-runner/test-patch.sh --run --remote root@test-runner-1
 
 # Run the focused end-to-end QUIC/H3 observability suite.
-tests/patch-runner/test-patch.sh sanity --suite quic --remote root@tt-px1
+tests/patch-runner/test-patch.sh sanity --suite quic --remote root@test-runner-1
 ```
+
+For a long foreground run, use `screen` or another terminal multiplexer:
+
+```bash
+screen -S smithproxy-full
+tests/patch-runner/test-patch.sh full --remote root@test-runner-1 \
+    --parallel 3 --dir /tmp/patch-runner/manual-full-p3
+# Detach with Ctrl-A D; return with: screen -r smithproxy-full
+```
+
+The default work root is `/tmp/patch-runner/<branch>_@_<commit>/`. Prefer an
+explicit `--dir` for long runs so reports and live logs have a predictable
+location. Useful first checks are:
+
+```bash
+tail -f /tmp/patch-runner/manual-full-p3/results/*/test.log
+cat /tmp/patch-runner/manual-full-p3/results/*/summary.txt
+cat /tmp/patch-runner/manual-full-p3/results/*/sections.tsv
+df -h /tmp
+```
+
+Remote lab directories and heavy capture artifacts are deliberately retained
+for diagnosis. Monitor free space before long runs and remove only explicitly
+identified, no-longer-needed work roots.
+
+`--parallel N` controls how many independent sections run simultaneously on
+each target. It is a scheduler/load control, not a controlled contention test
+of one Smithproxy instance. Use moderate parallelism (normally `3`) for the
+correctness gate. Model accept, handshake, transfer or cache contention with a
+focused workload that ramps identical flows against one instance and measures
+control probes between them; do not infer a product bottleneck merely by
+running every unrelated section at once.
 
 Run `tests/patch-runner/test-patch.sh --help` for the authoritative option
 syntax.
@@ -130,11 +204,11 @@ retain the basic dual-stack HTTP/TLS/UDP smoke around their named check. The
 Examples:
 
 ```bash
-tests/patch-runner/test-patch.sh sanity --suite policy --remote root@tt-px1
-tests/patch-runner/test-patch.sh sanity --suite tls-throughput --remote root@tt-px1
-tests/patch-runner/test-patch.sh sanity --suite capture --remote root@tt-px1
+tests/patch-runner/test-patch.sh sanity --suite policy --remote root@test-runner-1
+tests/patch-runner/test-patch.sh sanity --suite tls-throughput --remote root@test-runner-1
+tests/patch-runner/test-patch.sh sanity --suite capture --remote root@test-runner-1
 tests/patch-runner/test-patch.sh sanity --suite corpus-edge \
-    --remote root@tt-px1 --env MATCH='h2_generated_*'
+    --remote root@test-runner-1 --env MATCH='h2_generated_*'
 ```
 
 ## Fuzz layers and seeds
@@ -145,14 +219,14 @@ alone, and optional `fuzz-dyn` runs every area with one newly generated seed:
 ```bash
 tests/patch-runner/test-patch.sh fuzz --local --parallel 3
 tests/patch-runner/test-patch.sh fuzz-dyn \
-    --remote root@tt-bs1 --remote root@tt-bs2 --parallel 4
+    --remote root@test-runner-1 --remote root@test-runner-2 --parallel 4
 tests/patch-runner/test-patch.sh fuzz --suite fuzz.h2 --local \
     --seed 0123456789abcdef
 ```
 
 The areas are independent `fuzz.<protocol>` sections. The seed selection and
-lifecycle rules are defined in `docs/TESTING_POLICY.md`. Successful complete
-dynamic runs append their seed to `docs/covered-seeds`; failed or partially
+lifecycle rules are defined in `tests/docs/TESTING_POLICY.md`. Successful complete
+dynamic runs append their seed to `tests/docs/covered-seeds`; failed or partially
 completed runs only retain the seed in their report.
 Dynamic reproduction commands include the generated seed explicitly.
 
@@ -221,7 +295,7 @@ The committed corpus lives in `corpus/regular`, `corpus/edge` and
 Filter case basenames with comma-separated shell globs:
 
 ```bash
-tests/patch-runner/test-patch.sh full --remote root@tt-px1 \
+tests/patch-runner/test-patch.sh full --remote root@test-runner-1 \
     --env MATCH='h2_generated_*' \
     --env EXCLUDE='h2_generated_003,h2_generated_017'
 ```
@@ -333,9 +407,11 @@ reproduction command. `--quiet` suppresses normal detail but still prints the
 result, failed reason, section table and report path.
 
 Every successful top-level invocation also appends a concise entry to
-`docs/patch-run-history`, including the tested commit/dirty state, explicit
-targets and effective section coverage. Internal workers do not write history.
-The runner never commits or pushes either history or seed-registry changes.
+`tests/docs/patch-run-history`, including the tested commit/dirty state, anonymized
+target order (`local`, `remote-1`, `remote-2`, ...), and effective section
+coverage. The run-local report retains actual targets for diagnostics. Internal
+workers do not write history. The runner never commits or pushes either history
+or seed-registry changes.
 
 ## Requirements
 
