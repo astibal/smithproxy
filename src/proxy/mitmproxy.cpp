@@ -1950,6 +1950,20 @@ int MitmUdpProxy::handle_sockets_once(baseCom* c) {
 
 void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
 {
+    std::string source_host;
+    std::string source_port;
+
+    // Resolve before proxymaker::make transfers the context into a child
+    // proxy. Deleting it after that transfer leaves the unique_ptr with a
+    // dangling left context and causes a second delete during unwind.
+    if(not just_accepted_cx->com()->resolve_socket_src(
+            just_accepted_cx->socket(), &source_host, &source_port)) {
+        _err("on_left_new: cannot resolve socket source");
+        just_accepted_cx->shutdown();
+        delete just_accepted_cx;
+        return;
+    }
+
     std::string target_host = just_accepted_cx->com()->nonlocal_dst_host();
     unsigned short target_port = just_accepted_cx->com()->nonlocal_dst_port();
 
@@ -1962,17 +1976,6 @@ void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
     auto lcx = logan_context(new_proxy->to_string(iNOT));
 
     if(not sx::proxymaker::policy(new_proxy, false)) {
-        return;
-    }
-
-    std::string source_host;
-    std::string source_port;
-
-    if(not just_accepted_cx->com()->resolve_socket_src(just_accepted_cx->socket(), &source_host, &source_port)) {
-        _err("on_left_new: cannot resolve socket source");
-
-        just_accepted_cx->shutdown();
-        delete just_accepted_cx;
         return;
     }
 

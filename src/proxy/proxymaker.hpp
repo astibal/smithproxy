@@ -50,6 +50,7 @@ namespace sx::proxymaker {
     std::unique_ptr<MitmProxy> make (baseHostCX *left, baseHostCX *right);
     bool policy (std::unique_ptr<MitmProxy> &proxy, bool implicit_allow);
     bool route_existing(MitmProxy* proxy, std::shared_ptr<ProfileRouting> routing_profile);
+    bool route(MitmProxy* proxy, std::shared_ptr<ProfileRouting> routing_profile);
     bool route(std::unique_ptr<MitmProxy> &proxy, std::shared_ptr<ProfileRouting> routing_profile);
     bool is_replaceable (unsigned short port);
 

@@ -429,6 +429,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/proxy/quic/openssl.cpp
                 src/proxy/quic/tests/openssl_tests.cpp
                 src/proxy/socks5/socks5_protocol_tests.cpp
+                src/proxy/tests/proxymaker_utils_tests.cpp
                 src/proxy/filters/statistics/entropy.cpp
                 src/proxy/filters/statistics/flowanalysis.cpp
                 src/proxy/filters/statistics/statistics_tests.cpp
