@@ -2,6 +2,8 @@
 
 The normative coverage, target, fuzz-seed and result-recording rules live in
 [`tests/docs/TESTING_POLICY.md`](../docs/TESTING_POLICY.md).
+For everyday commands, use the short
+[`tests/docs/TESTING_CHEATSHEET.md`](../docs/TESTING_CHEATSHEET.md).
 
 `test-patch.sh` builds the current checkout and can exercise the resulting
 Smithproxy binary in disposable, dual-stack Linux network labs. Labs can run
