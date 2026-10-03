@@ -965,6 +965,91 @@ TEST_F(TLSIntegration, OCSPRequestPreparationValidatesIssuer) {
     OCSP_REQUEST_free(request);
 }
 
+TEST_F(TLSIntegration, OCSPRequestPreparationRejectsIncompleteInputs) {
+    auto issuer = load_certificate(fixture_path_ / "ca-cert.pem");
+    auto certificate = upstream_certificate();
+    ASSERT_NE(issuer, nullptr);
+    ASSERT_NE(certificate, nullptr);
+
+    OCSP_REQUEST* request = nullptr;
+    STACK_OF(OCSP_CERTID)* ids = sk_OCSP_CERTID_new_null();
+    ASSERT_NE(ids, nullptr);
+    EXPECT_EQ(inet::ocsp::ocsp_prepare_request(
+                  nullptr, certificate.get(), EVP_sha1(), issuer.get(), ids), 0);
+    EXPECT_EQ(inet::ocsp::ocsp_prepare_request(
+                  &request, nullptr, EVP_sha1(), issuer.get(), ids), 0);
+    EXPECT_EQ(inet::ocsp::ocsp_prepare_request(
+                  &request, certificate.get(), nullptr, issuer.get(), ids), 0);
+    EXPECT_EQ(inet::ocsp::ocsp_prepare_request(
+                  &request, certificate.get(), EVP_sha1(), issuer.get(), nullptr), 0);
+    EXPECT_EQ(request, nullptr);
+    EXPECT_EQ(sk_OCSP_CERTID_num(ids), 0);
+    EXPECT_EQ(inet::ocsp::ocsp_check_bytes(nullptr, "issuer"), -1);
+    EXPECT_EQ(inet::ocsp::ocsp_check_bytes("certificate", nullptr), -1);
+
+    sk_OCSP_CERTID_free(ids);
+}
+
+TEST_F(TLSIntegration, OCSPQueryRejectsMissingCertificates) {
+    auto issuer = load_certificate(fixture_path_ / "ca-cert.pem");
+    auto certificate = upstream_certificate();
+    ASSERT_NE(issuer, nullptr);
+    ASSERT_NE(certificate, nullptr);
+
+    inet::ocsp::OcspQuery missing_certificate(nullptr, issuer.get(), 43);
+    EXPECT_FALSE(missing_certificate.run());
+    EXPECT_EQ(missing_certificate.state(), inet::ocsp::OcspQuery::ST_FINISHED);
+    EXPECT_EQ(missing_certificate.yield(), inet::ocsp::OcspQuery::RET_UNKNOWN);
+
+    inet::ocsp::OcspQuery missing_issuer(certificate.get(), nullptr, 44);
+    EXPECT_FALSE(missing_issuer.run());
+    EXPECT_EQ(missing_issuer.state(), inet::ocsp::OcspQuery::ST_FINISHED);
+    EXPECT_EQ(missing_issuer.yield(), inet::ocsp::OcspQuery::RET_UNKNOWN);
+}
+
+TEST_F(TLSIntegration, OCSPQueryExhaustsFailedNonblockingTarget) {
+    auto issuer = load_certificate(fixture_path_ / "ca-cert.pem");
+    auto issuer_key = load_private_key(fixture_path_ / "ca-key.pem");
+    auto certificate = upstream_certificate();
+    ASSERT_NE(issuer, nullptr);
+    ASSERT_NE(issuer_key, nullptr);
+    ASSERT_NE(certificate, nullptr);
+
+    X509V3_CTX context{};
+    X509V3_set_ctx_nodb(&context);
+    X509V3_set_ctx(&context, issuer.get(), certificate.get(), nullptr, nullptr, 0);
+    X509_EXTENSION* extension = X509V3_EXT_conf_nid(
+        nullptr, &context, NID_info_access,
+        const_cast<char*>("OCSP;URI:http://127.0.0.1:1/status"));
+    ASSERT_NE(extension, nullptr);
+    ASSERT_EQ(X509_add_ext(certificate.get(), extension, -1), 1);
+    X509_EXTENSION_free(extension);
+    ASSERT_GT(X509_sign(certificate.get(), issuer_key.get(), EVP_sha256()), 0);
+    ASSERT_EQ(inet::ocsp::ocsp_urls(certificate.get()),
+              (std::vector<std::string>{"http://127.0.0.1:1/status"}));
+    char* parsed_host = nullptr;
+    char* parsed_port = nullptr;
+    char* parsed_path = nullptr;
+    int parsed_ssl = -1;
+    ASSERT_EQ(OCSP_parse_url("http://127.0.0.1:1/status", &parsed_host,
+                             &parsed_port, &parsed_path, &parsed_ssl), 1);
+    OPENSSL_free(parsed_host);
+    OPENSSL_free(parsed_port);
+    OPENSSL_free(parsed_path);
+    x509_ptr duplicate(X509_dup(certificate.get()), X509_free);
+    ASSERT_NE(duplicate, nullptr);
+    ASSERT_EQ(inet::ocsp::ocsp_urls(duplicate.get()),
+              (std::vector<std::string>{"http://127.0.0.1:1/status"}));
+
+    inet::ocsp::OcspQuery query(certificate.get(), issuer.get(), 45);
+    query.timeout_connect = -1;
+    // A hard nonblocking connect failure exhausts the configured target in
+    // the same drive; it must not expose a stale descriptor or UNKNOWN result.
+    EXPECT_FALSE(query.run());
+    EXPECT_EQ(query.state(), inet::ocsp::OcspQuery::ST_FINISHED);
+    EXPECT_EQ(query.yield(), inet::ocsp::OcspQuery::RET_CONNFAIL);
+}
+
 TEST_F(TLSIntegration, CRLDerParsersRoundTripAndRejectEmptyInput) {
     auto issuer = load_certificate(fixture_path_ / "ca-cert.pem");
     auto issuer_key = load_private_key(fixture_path_ / "ca-key.pem");
