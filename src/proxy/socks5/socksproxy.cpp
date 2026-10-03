@@ -54,7 +54,12 @@
 void SocksProxy::on_left_message(baseHostCX* basecx) {
 
     auto* cx = dynamic_cast<socksServerCX*>(basecx);
-    if(cx != nullptr and cx->com()->l4_proto() != SOCK_DGRAM) {
+    // The UDP_ASSOCIATE control channel is itself TCP.  Dispatching solely by
+    // the carrier protocol sends it through the generic CONNECT path, whose
+    // policy match expects a prepared right-hand context and can dereference
+    // a null entry.  Keep SOCKS-specific commands in the SOCKS state machine.
+    if(cx != nullptr && cx->com()->l4_proto() != SOCK_DGRAM &&
+       cx->request_command() != socks5_cmd::UDP_ASSOCIATE) {
         handle_explicit_connect(cx);
         return;
     }
@@ -117,8 +122,10 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
             _dia("SocksProxy::on_left_message: socksHostCX handoff msg received");
             cx->state(socks5_state::ZOMBIE);
 
-            // There is nothing to handoff on UDP association connection
-            if(cx->com()->l4_proto() != SOCK_DGRAM) {
+            // UDP_ASSOCIATE keeps its TCP control connection only as the
+            // lifetime/authorization anchor; there is no stream to hand off.
+            if(cx->request_command() != socks5_cmd::UDP_ASSOCIATE &&
+               cx->com()->l4_proto() != SOCK_DGRAM) {
                 explicit_handoff(cx);
             }
         } else {
