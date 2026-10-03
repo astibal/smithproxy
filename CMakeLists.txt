@@ -21,6 +21,15 @@ SET(SOCLE_COMMON_DIR "socle/common")
 project(smithproxy C CXX)
 include(CTest)
 
+option(SMITHPROXY_COVERAGE "Instrument Smithproxy tests for GCC line coverage" OFF)
+if(SMITHPROXY_COVERAGE)
+    if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        message(FATAL_ERROR "SMITHPROXY_COVERAGE currently requires GCC/gcov")
+    endif()
+    add_compile_options(-O0 -g --coverage)
+    add_link_options(--coverage)
+endif()
+
 SET(CMAKE_SOURCE_DIR "src/")
 SET(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}")
 
@@ -534,22 +543,61 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_link_libraries(quic_test_node smithproxy_qpack socle_lib pthread crypto ssl)
 
         if(BUILD_TESTING)
-            add_test(NAME unit.core COMMAND sx_gtests)
-            add_test(NAME unit.http1 COMMAND sx_gtests_http1)
+            add_test(NAME unit.core COMMAND sx_gtests
+                    --gtest_filter=-InetTest.*:PcapExperiments.*)
+            add_test(NAME unit.http1 COMMAND sx_gtests_http1 --gtest_filter=-HTTP1.benchmark)
             add_test(NAME unit.startstoptls COMMAND sx_gtests_startstoptls)
             add_test(NAME unit.httpconnect COMMAND sx_gtests_httpconnect)
             add_test(NAME unit.reloadable COMMAND sx_gtests_reloadable)
             add_test(NAME integration.tls_testbed COMMAND tls_testbed)
             add_test(NAME integration.transfer_testbed COMMAND transfer_testbed)
+            add_test(NAME integration.quic_testbed COMMAND quic_testbed)
+            add_test(NAME benchmark.http1 COMMAND sx_gtests_http1 --gtest_filter=HTTP1.benchmark)
+            add_test(NAME external.inet COMMAND sx_gtests --gtest_filter=InetTest.*)
+            add_test(NAME external.pcap_experiments COMMAND sx_gtests
+                    --gtest_filter=PcapExperiments.*)
+            add_test(NAME extended.quic_soak COMMAND ${CMAKE_COMMAND} -E env
+                    QUIC_TESTBED_BUILD_DIR=${CMAKE_BINARY_DIR}
+                    ${PROJECT_SOURCE_DIR}/tools/quic-soak-test.sh)
+            add_test(NAME external.quic_interop COMMAND ${CMAKE_COMMAND} -E env
+                    QUIC_TESTBED_BUILD_DIR=${CMAKE_BINARY_DIR}
+                    ${PROJECT_SOURCE_DIR}/tools/quic-interop-test.sh)
+            add_test(NAME privileged.quic_tproxy COMMAND ${CMAKE_COMMAND} -E env
+                    QUIC_TESTBED_BUILD_DIR=${CMAKE_BINARY_DIR}
+                    ${PROJECT_SOURCE_DIR}/tools/quic-tproxy-test.sh)
+            add_test(NAME platform.linux_distros
+                    COMMAND ${PROJECT_SOURCE_DIR}/tools/test-linux-distros.sh)
             set_tests_properties(
                     unit.core unit.http1 unit.startstoptls unit.httpconnect unit.reloadable
-                    PROPERTIES LABELS "unit")
+                    PROPERTIES LABELS "native;unit")
+            set_tests_properties(
+                    integration.tls_testbed integration.transfer_testbed integration.quic_testbed
+                    PROPERTIES LABELS "native;integration")
+            set_tests_properties(benchmark.http1 PROPERTIES LABELS "benchmark")
+            set_tests_properties(external.inet external.pcap_experiments
+                    PROPERTIES LABELS "external;privileged")
+            set_tests_properties(external.quic_interop
+                    PROPERTIES LABELS "external;quic" SKIP_RETURN_CODE 77
+                    TIMEOUT 300 RUN_SERIAL TRUE)
+            set_tests_properties(privileged.quic_tproxy
+                    PROPERTIES LABELS "privileged;quic" SKIP_RETURN_CODE 77
+                    TIMEOUT 300 RUN_SERIAL TRUE)
+            set_tests_properties(extended.quic_soak
+                    PROPERTIES LABELS "extended;quic;soak" TIMEOUT 1800 RUN_SERIAL TRUE)
+            set_tests_properties(platform.linux_distros
+                    PROPERTIES LABELS "platform" TIMEOUT 14400 RUN_SERIAL TRUE)
             # Core tests load repository fixtures (including QUIC certificates)
             # through source-relative paths.
-            set_tests_properties(unit.core PROPERTIES
+            set_tests_properties(unit.core integration.quic_testbed
+                    external.inet external.pcap_experiments PROPERTIES
                     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
-            set_tests_properties(unit.reloadable PROPERTIES LABELS "unit;reload")
-            set_tests_properties(integration.tls_testbed PROPERTIES LABELS "integration;tls")
+            set_tests_properties(unit.core PROPERTIES TIMEOUT 300)
+            set_tests_properties(integration.quic_testbed PROPERTIES TIMEOUT 180)
+            set_tests_properties(external.inet external.pcap_experiments
+                    PROPERTIES TIMEOUT 180)
+            set_tests_properties(unit.reloadable PROPERTIES LABELS "native;unit;reload")
+            set_tests_properties(integration.tls_testbed PROPERTIES LABELS "native;integration;tls")
+            set_tests_properties(integration.quic_testbed PROPERTIES LABELS "native;integration;quic")
 
             find_package(Python3 COMPONENTS Interpreter)
             if(Python3_Interpreter_FOUND)
@@ -570,9 +618,32 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                         --smithproxy $<TARGET_FILE:smithproxy>
                         --source ${PROJECT_SOURCE_DIR}
                         --protocol all --address ipv4-ip)
-                set_tests_properties(integration.httpconnect integration.starttls_socks
-                        PROPERTIES LABELS "integration")
-                set_tests_properties(stress.httpconnect PROPERTIES LABELS "integration;stress")
+                add_test(NAME integration.libcli2_process
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/src/service/cmd/libcli2_process_e2e.py
+                        $<TARGET_FILE:smithproxy> --source ${PROJECT_SOURCE_DIR})
+                add_test(NAME unit.patch_runner_fuzz_areas
+                        COMMAND ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-fuzz-areas.sh)
+                add_test(NAME unit.patch_runner_fuzz_seeds
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-fuzz-seeds.py)
+                add_test(NAME unit.patch_runner_pplay
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-pplay-fuzz.py)
+                add_test(NAME integration.wireshark_spq1
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tools/wireshark/test_spquic.py)
+                set_tests_properties(
+                        integration.httpconnect integration.starttls_socks
+                        integration.libcli2_process integration.wireshark_spq1
+                        PROPERTIES LABELS "native;integration")
+                set_tests_properties(stress.httpconnect PROPERTIES LABELS "native;integration;stress")
+                set_tests_properties(
+                        integration.httpconnect stress.httpconnect integration.starttls_socks
+                        integration.libcli2_process PROPERTIES TIMEOUT 120)
+                set_tests_properties(
+                        unit.patch_runner_fuzz_areas unit.patch_runner_fuzz_seeds
+                        unit.patch_runner_pplay PROPERTIES LABELS "native;unit")
             endif()
         endif()
     endif()

@@ -19,8 +19,11 @@ Profiles:
               Runs IPv4 and IPv6 TLS, policy, RTT, HTTP/1, HTTP/2, UDP and
               PCAP/GRE validation, plus management and cleanup checks.
   full        Build once, run a smoke gate, then isolated parallel sections for
-              TLS/policy/CLI, RTT, churn, capture/HTTP2, QUIC/H3 and all corpus
-              categories, followed by deterministic protocol fuzz sections.
+              native tests, TLS/policy/CLI, RTT, churn, capture/HTTP2, QUIC/H3,
+              all corpus categories and deterministic protocol fuzz sections.
+  native      Run the hermetic CTest, integration and runner self-test layer.
+  coverage    Run the native layer with GCC line instrumentation and emit
+              text, JSON and browsable HTML coverage reports.
   fuzz        Run the mandatory bounded deterministic protocol fuzz sections.
   fuzz-dyn    Run every protocol fuzz section with one new seed. On complete
               success, append that seed to tests/docs/covered-seeds.
@@ -55,6 +58,11 @@ Options:
   --jobs N           Parallel build jobs. Default: nproc.
   --churn-port-range MIN:MAX
                      Client source-port range for TCP/UDP churn (default: 20000:29999).
+  --include-external Include public-network and privileged native tests.
+  --include-benchmarks
+                     Include benchmark-shaped tests in native/coverage profiles.
+  --include-extended Include long-running soak tests in native/coverage profiles.
+  --include-platform Include the Docker distro matrix in native/coverage profiles.
   --skip-build       Use an existing executable BUILD_DIR/smithproxy.
   --quiet            Print only verdict lines. Complete output remains in logs.
   -h, --help         Show this help and exit.
@@ -96,6 +104,8 @@ Common environment variables:
 
 Examples:
   test-patch.sh quick --local
+  test-patch.sh native --local
+  test-patch.sh coverage --local --jobs 8
   test-patch.sh sanity --local
   test-patch.sh sanity --remote root@test-runner-1
   test-patch.sh sanity --suite policy --remote root@test-runner-1
@@ -136,7 +146,7 @@ else
 fi
 PROFILE=${1:-}
 [[ $PROFILE == --run ]] && PROFILE=run
-[[ $PROFILE == quick || $PROFILE == sanity || $PROFILE == full || $PROFILE == fuzz || $PROFILE == fuzz-dyn || $PROFILE == benchmark || $PROFILE == run ]] || {
+[[ $PROFILE == quick || $PROFILE == sanity || $PROFILE == full || $PROFILE == native || $PROFILE == coverage || $PROFILE == fuzz || $PROFILE == fuzz-dyn || $PROFILE == benchmark || $PROFILE == run ]] || {
     usage >&2
     exit 2
 }
@@ -144,6 +154,10 @@ shift
 ONLY_SUITE=
 SKIP_BUILD=0
 QUIET=0
+INCLUDE_EXTERNAL=0
+INCLUDE_BENCHMARKS=0
+INCLUDE_EXTENDED=0
+INCLUDE_PLATFORM=0
 UNIQUE_LABEL=
 EXTRA_ENV=()
 CHURN_PORT_RANGE=
@@ -170,6 +184,10 @@ while (($#)); do
         --unique) UNIQUE_LABEL=$(date -I); shift ;;
         --unique=*) UNIQUE_LABEL=${1#--unique=}; shift ;;
         --churn-port-range) CHURN_PORT_RANGE=${2:?missing churn port range}; shift 2 ;;
+        --include-external) INCLUDE_EXTERNAL=1; shift ;;
+        --include-benchmarks) INCLUDE_BENCHMARKS=1; shift ;;
+        --include-extended) INCLUDE_EXTENDED=1; shift ;;
+        --include-platform) INCLUDE_PLATFORM=1; shift ;;
         --env)
             [[ ${2:-} =~ ^[A-Za-z_][A-Za-z0-9_]*=.*$ ]] || {
                 echo "Invalid --env value: ${2:-<missing>} (expected NAME=VALUE)" >&2
@@ -203,6 +221,16 @@ if [[ -n $ONLY_SUITE || ( $PROFILE != full && $PROFILE != fuzz && $PROFILE != fu
     ((${#TARGETS[@]} == 1)) || { echo "$PROFILE${ONLY_SUITE:+ --suite $ONLY_SUITE} requires exactly one target" >&2; exit 2; }
 fi
 [[ $PROFILE != quick || ${TARGETS[0]} == local ]] || { echo 'quick builds locally and requires --local' >&2; exit 2; }
+if [[ $PROFILE == native || $PROFILE == coverage ]]; then
+    [[ ${TARGETS[0]} == local ]] || { echo "$PROFILE runs on the coordinator and requires --local" >&2; exit 2; }
+    ((SKIP_BUILD == 0)) || { echo "--skip-build is not supported by $PROFILE" >&2; exit 2; }
+fi
+if ((INCLUDE_EXTERNAL || INCLUDE_BENCHMARKS || INCLUDE_EXTENDED || INCLUDE_PLATFORM)); then
+    [[ $PROFILE == native || $PROFILE == coverage ]] || {
+        echo '--include-* test layers require native or coverage' >&2
+        exit 2
+    }
+fi
 if ((${#TARGETS[@]} == 1)) && [[ ${TARGETS[0]} != local ]]; then
     REMOTE=${TARGETS[0]}
 fi
@@ -335,6 +363,34 @@ else
     printf 'staged runner bundle; coordinator dirty=%s\n' "$DIRTY" > "$REPORT/git-status.txt"
 fi
 
+run_native_tests() {
+    local coverage=${1:-0}
+    local native_build=$WORK_DIR/native-build
+    local native_report=$REPORT/native
+    local -a native_args=(--root "$ROOT" --build-dir "$native_build"
+        --report-dir "$native_report" --jobs "$JOBS")
+    ((coverage == 0)) || {
+        native_build=$WORK_DIR/coverage-build
+        native_args=(--root "$ROOT" --build-dir "$native_build"
+            --report-dir "$native_report" --jobs "$JOBS" --coverage)
+    }
+    ((INCLUDE_EXTERNAL == 0)) || native_args+=(--include-external)
+    ((INCLUDE_BENCHMARKS == 0)) || native_args+=(--include-benchmarks)
+    ((INCLUDE_EXTENDED == 0)) || native_args+=(--include-extended)
+    ((INCLUDE_PLATFORM == 0)) || native_args+=(--include-platform)
+    "$HERE/native-tests.sh" "${native_args[@]}"
+}
+
+write_sections_markdown() {
+    {
+        echo '| Section | Target | Result | Reason |'
+        echo '|---|---|---:|---|'
+        tail -n +2 "$REPORT/sections.tsv" | while IFS=$'\t' read -r section target display rc reason child_report; do
+            printf '| %s | %s | %s | %s |\n' "$section" "$target" "$display" "$reason"
+        done
+    } > "$REPORT/sections.md"
+}
+
 run_distributed_sections() {
     local -a sections=(smoke) functional=(tls-policy routing transfer quic tcp-churn udp-churn capture corpus-regular corpus-edge corpus-insanity)
     local -a fuzz_sections=() main_sections=() batch_pids=()
@@ -365,6 +421,30 @@ run_distributed_sections() {
         "$bundle_local/tests/docs" "$bundle_local/build" "$manifest_dir"
     : > "$REPORT/test.log"
     printf 'section\ttarget\tresult\trc\treason\treport\n' > "$REPORT/sections.tsv"
+
+    if [[ $PROFILE == full ]]; then
+        echo 'SECTION START: native target=local-coordinator'
+        set +e
+        run_native_tests 0 > "$REPORT/sections/native.log" 2>&1
+        rc=$?
+        set -e
+        if ((rc != 0)); then
+            reason=$(grep -E '(^FAIL|failure|FAILED|[Ee]rror)' "$REPORT/sections/native.log" | tail -1 || true)
+            [[ -n $reason ]] || reason="native tests exited with rc=$rc"
+            printf 'native\tlocal-coordinator\tFAIL\t%s\t%s\t%s\n' \
+                "$rc" "$reason" "$REPORT/native" >> "$REPORT/sections.tsv"
+            { echo '===== section: native target=local-coordinator (FAIL) ====='; cat "$REPORT/sections/native.log"; } >> "$REPORT/test.log"
+            echo "SECTION DONE: native target=local-coordinator rc=$rc"
+            write_sections_markdown
+            STATUS=FAIL
+            TEST_RC=1
+            return
+        fi
+        printf 'native\tlocal-coordinator\tPASS\t0\tall checks passed\t%s\n' \
+            "$REPORT/native" >> "$REPORT/sections.tsv"
+        { echo '===== section: native target=local-coordinator (PASS) ====='; cat "$REPORT/sections/native.log"; echo; } >> "$REPORT/test.log"
+        echo 'SECTION DONE: native target=local-coordinator rc=0'
+    fi
 
     cp -a "$HERE" "$bundle_local/tests/patch-runner"
     cp "$ROOT/etc/smithproxy.cfg" "$bundle_local/etc/"
@@ -570,13 +650,7 @@ run_distributed_sections() {
             printf 'corpus-selection\t-\tFAIL\t2\tno corpus case matched MATCH/EXCLUDE\t-\n' >> "$REPORT/sections.tsv"
         fi
     fi
-    {
-        echo '| Section | Target | Result | Reason |'
-        echo '|---|---|---:|---|'
-        tail -n +2 "$REPORT/sections.tsv" | while IFS=$'\t' read -r section target display rc reason child_report; do
-            printf '| %s | %s | %s | %s |\n' "$section" "$target" "$display" "$reason"
-        done
-    } > "$REPORT/sections.md"
+    write_sections_markdown
     if ((any_fail)); then STATUS=FAIL; TEST_RC=1
     elif ((any_flaky)); then STATUS=FLAKY_PASS; TEST_RC=0
     else STATUS=PASS; TEST_RC=0
@@ -584,7 +658,9 @@ run_distributed_sections() {
 }
 
 BUILD_RC=0
-if ((SKIP_BUILD == 0)); then
+if [[ $PROFILE == native || $PROFILE == coverage ]]; then
+    echo "Build and test execution delegated to native-tests.sh" > "$REPORT/build.log"
+elif ((SKIP_BUILD == 0)); then
     if [[ ! -f $BUILD_DIR/CMakeCache.txt ]]; then
         if ((QUIET)); then
             cmake -S "$ROOT" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=RelWithDebInfo \
@@ -619,6 +695,21 @@ if ((BUILD_RC != 0)); then
 elif [[ $PROFILE == quick ]]; then
     STATUS=PASS
     TEST_RC=0
+elif [[ $PROFILE == native || $PROFILE == coverage ]]; then
+    native_coverage=0
+    [[ $PROFILE != coverage ]] || native_coverage=1
+    set +e
+    run_native_tests "$native_coverage" \
+        > "$REPORT/test.log" 2>&1
+    TEST_RC=$?
+    set -e
+    if ((TEST_RC == 0)); then
+        STATUS=PASS
+        cat "$REPORT/test.log"
+    else
+        STATUS=FAIL
+        tail -80 "$REPORT/test.log" >&2
+    fi
 elif [[ ( $PROFILE == full || $PROFILE == fuzz || $PROFILE == fuzz-dyn ) && -z $ONLY_SUITE ]]; then
     run_distributed_sections
 else
@@ -896,6 +987,10 @@ if [[ -n $FAIL_REASON ]]; then
     } > "$REPORT/failure.txt"
 fi
 
+LINE_COVERAGE=N/A
+if [[ -f $REPORT/native/coverage/summary.txt ]]; then
+    LINE_COVERAGE=$(sed -n 's/^line coverage: //p' "$REPORT/native/coverage/summary.txt" | head -1)
+fi
 cat > "$REPORT/summary.md" <<EOF
 # Smithproxy patch test
 
@@ -907,6 +1002,7 @@ cat > "$REPORT/summary.md" <<EOF
 - Host: $REPORT_HOST
 - Build directory: $BUILD_DIR
 - Build: $([[ $BUILD_RC == 0 ]] && echo PASS || echo FAIL)
+- Line coverage: $LINE_COVERAGE
 - TCP churn: ${TCP_SUMMARY:-N/A}
 - UDP churn: ${UDP_SUMMARY:-N/A}
 - Corpus: ${CORPUS_SUMMARY:-N/A}
@@ -933,6 +1029,7 @@ printf '\n## Reproduction\n\n```sh\n%s\n```\n' "$REPRO" >> "$REPORT/summary.md"
     echo "profile: $PROFILE"
     echo "commit: $COMMIT"
     echo "host: $REPORT_HOST"
+    echo "line coverage: $LINE_COVERAGE"
     [[ -z $FAIL_REASON ]] || echo "reason: $FAIL_REASON"
     [[ -z $FAIL_LIKELY ]] || echo "likely: $FAIL_LIKELY"
     echo "reproduce: $REPRO"
@@ -963,7 +1060,8 @@ cat > "$REPORT/summary.json" <<EOF
   "capture_matrix": "${CAPTURE_MATRIX_SUMMARY//\"/\\\"}",
   "rtt": "${RTT_SUMMARY//\"/\\\"}",
   "tls_transfer": "${TLS_TRANSFER_SUMMARY//\"/\\\"}",
-  "tls_throughput": "${TLS_THROUGHPUT_SUMMARY//\"/\\\"}"
+  "tls_throughput": "${TLS_THROUGHPUT_SUMMARY//\"/\\\"}",
+  "line_coverage": "${LINE_COVERAGE//\"/\\\"}"
 }
 EOF
 
@@ -988,6 +1086,8 @@ if ((INTERNAL_WORKER == 0 && TEST_RC == 0)); then
     else
         case "$PROFILE" in
             quick) RUN_COVERAGE='build:smithproxy' ;;
+            native) RUN_COVERAGE='native:ctest,integration,quic,selftests' ;;
+            coverage) RUN_COVERAGE='coverage:native,gcov,line-html' ;;
             sanity) RUN_COVERAGE='sanity:dual-stack,tls,policy,rtt,http1,http2,udp,capture,cleanup' ;;
             benchmark) RUN_COVERAGE='benchmark:tcp,udp,tls' ;;
             run) RUN_COVERAGE='interactive-lab' ;;

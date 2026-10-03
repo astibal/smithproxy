@@ -8,7 +8,7 @@ import random
 import socket
 import time
 
-from libcli2_process_e2e import Cli, TELNET, require
+from libcli2_process_e2e import ANSI, Cli, TELNET, require
 
 
 class RemoteCli(Cli):
@@ -37,7 +37,8 @@ class RemoteCli(Cli):
                 break
             chunks.extend(part)
         self.transcript.extend(chunks)
-        return TELNET.sub(b"", chunks).decode("utf-8", "replace")
+        decoded = TELNET.sub(b"", chunks).decode("utf-8", "replace")
+        return ANSI.sub("", decoded)
 
     def command(self, line: str) -> str:
         self.command_count += 1

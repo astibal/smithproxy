@@ -50,9 +50,15 @@ all runner-owned namespaces, interfaces and listeners remain mandatory gates.
 ## Test layers
 
 - `quick` verifies that the production target builds.
+- `native` is the unified CTest-backed layer for C++ unit/integration
+  executables, Python process tests and patch-runner self-tests. Its default
+  selection is hermetic and mandatory in `full`.
+- `coverage` runs the default native selection under GCC/gcov and emits line
+  coverage in text, JSON and browsable HTML forms.
 - `sanity` is a bounded functional and dataplane validation.
 - `full` is the mandatory comprehensive gate. It contains the functional,
-  performance, churn, capture, corpus and deterministic `fuzz.*` sections.
+  native, performance, churn, capture, corpus and deterministic `fuzz.*`
+  sections. The native gate completes before remote lab sections begin.
 - `benchmark` records latency without enforcing latency gates.
 - `fuzz` runs only the mandatory deterministic fuzz sections.
 - `fuzz-dyn` is optional exploration with one newly generated seed.
@@ -68,6 +74,20 @@ TLS throughput is measurement-only: it has no minimum MiB/s gate. `PASS` means
 that every configured TLS/HTTP transfer completed correctly; handshake,
 process, protocol or transfer-integrity failure is still a hard `FAIL`. Reports
 must retain per-family, per-direction and per-concurrency throughput values.
+
+Repository tests must be registered in CTest instead of requiring knowledge of
+another ad-hoc command. Tests which intentionally require public network
+access, root-only TUN/RAW facilities, or benchmark-scale work stay registered
+but carry `external`, `privileged`, or `benchmark` labels. Long-running soak
+and container distribution checks carry `extended` and `platform`. These
+labels are excluded from the hermetic native/full gate and can be selected
+explicitly; this is isolation, not deletion of coverage.
+
+Line coverage counts executable product lines below `src/` and `socle/` while
+excluding test, testbed, fuzz and third-party sources. It is initially a
+measurement, not a PASS threshold. Adopt or raise a coverage gate only in a
+reviewed policy change backed by a stable baseline; a successful test with
+missing or unreadable gcov data is always an infrastructure failure.
 
 `--parallel` is a stress and throughput control, not a promise that arbitrary
 load is free. Host exhaustion is still a failed run until the limiting layer is

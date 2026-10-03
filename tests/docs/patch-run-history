@@ -24,3 +24,4 @@ parallel workers are represented by the parent row and its coverage column.
 | 2026-10-02T17:53:59Z | `999f792b23e8+dirty` | PASS | `sanity/rtt` | `remote-1` | rtt | `/tmp/patch-runner/tls-performance_@_999f792b_handshake-strings-after300b/results/20261002T175333Z-999f792b-sanity-rtt` |
 | 2026-10-02T17:57:22Z | `999f792b23e8+dirty` | PASS | `sanity/rtt` | `remote-1` | rtt | `/tmp/patch-runner/tls-performance_@_999f792b_handshake-strings-final/results/20261002T175655Z-999f792b-sanity-rtt` |
 | 2026-10-02T17:58:12Z | `999f792b23e8+dirty` | PASS | `sanity/rtt` | `remote-1` | rtt | `/tmp/patch-runner/tls-performance_@_999f792b_handshake-strings-final2/results/20261002T175745Z-999f792b-sanity-rtt` |
+| 2026-10-03T11:04:10Z | `819dca0b0d85+dirty` | PASS | `coverage` | `local` | coverage:native,gcov,line-html | `/tmp/smithproxy-coverage-wrapper/results/20261003T110015Z-819dca0b-coverage` |

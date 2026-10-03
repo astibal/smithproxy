@@ -15,6 +15,8 @@ self-contained in the source tree:
 ```text
 tests/patch-runner/
 ├── test-patch.sh          main command-line entry point
+├── native-tests.sh        CTest build/run driver used by native/full/coverage
+├── coverage-report.py     gcov JSON to text, JSON and HTML line reports
 ├── remote-scheduler.sh    target-local worker pool for full/fuzz runs
 ├── fuzz-seeds.py          bounded regression/recent/archive seed selection
 ├── harness/               network lab, origins, probes and validators
@@ -47,6 +49,12 @@ tests/patch-runner/test-patch.sh --help
 
 # Build the production smithproxy target only.
 tests/patch-runner/test-patch.sh quick --local
+
+# Run the repository-native C++, Python and runner self-tests.
+tests/patch-runner/test-patch.sh native --local
+
+# Run the same native layer with GCC line coverage.
+tests/patch-runner/test-patch.sh coverage --local --jobs 8
 
 # Bounded functional validation on one remote Linux target.
 tests/patch-runner/test-patch.sh sanity --remote root@test-runner-1
@@ -118,6 +126,10 @@ syntax.
 | `--shared-binary PATH` | Reuse an absolute executable path on the lab host |
 | `--jobs N` | Build parallelism; default `nproc` |
 | `--churn-port-range MIN:MAX` | TCP/UDP churn source-port range |
+| `--include-external` | Add public-network and privileged native tests |
+| `--include-benchmarks` | Add benchmark-shaped native tests |
+| `--include-extended` | Add long-running soak tests |
+| `--include-platform` | Add the Docker Linux distribution matrix |
 | `--skip-build` | Require and reuse `BUILD_DIR/smithproxy` |
 | `--quiet` | Print verdicts, failures and report paths instead of full logs |
 | `-h`, `--help` | Print built-in help |
@@ -127,30 +139,48 @@ output is their primary interface.
 
 ## Profiles and coverage
 
-| Check | `quick` | `sanity` | `full` | `fuzz` | `fuzz-dyn` | `benchmark` | `--run` |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| Build `smithproxy` | yes | yes | yes | yes | yes | yes | yes |
-| Authenticated API startup | - | yes | yes | every shard | every shard | yes | yes |
-| IPv4/IPv6 functional layers | - | yes | yes | smoke gate | smoke gate | yes | manual |
-| TLS/policy/RTT/transfer/throughput/churn | - | focused | yes | - | - | report only | manual |
-| Corpus and capture observability | - | focused | yes | - | - | - | manual |
-| Bounded deterministic `fuzz.*` | - | focused | yes | yes | - | - | manual |
-| New-seed `fuzz.*` exploration | - | - | - | - | yes | - | manual |
-| No-bypass and cleanup checks | - | yes | every section | every shard | every shard | yes | on exit |
+| Check | `quick` | `native` | `coverage` | `sanity` | `full` | `fuzz` | `fuzz-dyn` | `benchmark` | `--run` |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| Build `smithproxy` | yes | yes | yes | yes | yes | yes | yes | yes | yes |
+| C++/Python native and runner self-tests | - | yes | yes | - | gate | - | - | - | - |
+| GCC line report | - | - | yes | - | - | - | - | - | - |
+| Authenticated API startup | - | - | - | yes | yes | every shard | every shard | yes | yes |
+| IPv4/IPv6 functional layers | - | - | - | yes | yes | smoke gate | smoke gate | yes | manual |
+| TLS/policy/RTT/transfer/throughput/churn | - | - | - | focused | yes | - | - | report only | manual |
+| Corpus and capture observability | - | - | - | focused | yes | - | - | - | manual |
+| Bounded deterministic `fuzz.*` | - | - | - | focused | yes | yes | - | - | manual |
+| New-seed `fuzz.*` exploration | - | - | - | - | - | - | yes | - | manual |
+| No-bypass and cleanup checks | - | - | - | yes | every section | every shard | every shard | yes | on exit |
 
 Applicable dataplane checks produce separate `PASS4` and `PASS6` verdicts. A
 failure in either address family fails its section. Management-only checks use
 one verdict.
 
-`sanity` runs in one lab. `full` first runs a serial smoke gate, then exclusive
+`native` is the single CTest-backed entry point for the repository's C++
+executables, Python integration checks and patch-runner self-tests. Hermetic
+tests are mandatory. Tests needing the public network or elevated TUN/RAW
+access remain registered under the `external` label, and expensive benchmarks
+under `benchmark`. QUIC soak and the Docker distribution matrix are registered
+as `extended` and `platform`. Opt in with the matching `--include-*` option;
+CTest labels remain available for direct selection.
+
+`coverage` runs the same mandatory native selection with GCC/gcov
+instrumentation. Its line percentage is initially measurement-only: missing
+coverage does not fail a patch until a reviewed baseline and threshold are
+adopted. Reports are written below `<report>/native/coverage/` as
+`summary.txt`, `coverage.json`, `index.html` and annotated per-file HTML.
+
+`sanity` runs in one lab. `full` first runs the native gate on its coordinator,
+then a serial smoke gate, followed by exclusive
 RTT and TLS throughput phases. Only after both measurement phases are the
 remaining isolated sections started:
 
 ```text
-smoke
-├── rtt              (exclusive; no competing load workers)
-├── tls-throughput   (exclusive; IPv4/IPv6 download/upload measurement)
-└── parallel phase
+native (coordinator gate)
+  -> smoke
+  -> rtt              (exclusive; no competing load workers)
+  -> tls-throughput   (exclusive; IPv4/IPv6 download/upload measurement)
+  -> parallel phase
     ├── tls-policy   (TLS, policy and loaded session-list)
     ├── routing
     ├── transfer     (TLS upload/download at 1/4/16 parallel flows)
@@ -415,7 +445,9 @@ or seed-registry changes.
 
 ## Requirements
 
-The build side needs Bash, Git, CMake and a configured C++ toolchain. Remote
+The build side needs Bash, Git, CMake and a configured C++ toolchain. `native`
+also needs GTest and Python 3; `coverage` currently requires GCC and `gcov`.
+Remote
 operation additionally needs SSH and SCP.
 
 The lab host must be Linux with root privileges and provide:

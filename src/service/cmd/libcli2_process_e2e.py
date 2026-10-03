@@ -15,6 +15,7 @@ import time
 
 
 TELNET = re.compile(rb"\xff[\xfb-\xfe].")
+ANSI = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
 
 
 class Cli:
@@ -37,7 +38,11 @@ class Cli:
                 break
             chunks.extend(part)
         self.transcript.extend(chunks)
-        return TELNET.sub(b"", chunks).decode("utf-8", "replace")
+        decoded = TELNET.sub(b"", chunks).decode("utf-8", "replace")
+        # The CLI deliberately colors prompts and selected values.  Assertions
+        # operate on semantic output, not terminal presentation; otherwise an
+        # escape inserted between two words can make a correct response fail.
+        return ANSI.sub("", decoded)
 
     def command(self, line: str) -> str:
         self.sock.sendall(line.encode() + b"\r\n")
