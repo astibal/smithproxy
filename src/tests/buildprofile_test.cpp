@@ -1,4 +1,5 @@
 #include <buildprofile.hpp>
+#include <sslcertstore.hpp>
 
 #include <gtest/gtest.h>
 
@@ -14,6 +15,10 @@ TEST(BuildProfile, ConstrainedValuesArePartOfTheExecutable) {
     EXPECT_EQ(sx::build_profile::utility_workers, 5U);
     EXPECT_FALSE(sx::build_profile::cli_enabled);
     EXPECT_EQ(sx::build_profile::configured_utility_workers(128U, 32U), 5U);
+    EXPECT_EQ(SSLFactory::config_t::CERTSTORE_CACHE_SIZE, 64U);
+    EXPECT_EQ(SSLFactory::config_t::VERIFY_CACHE_SIZE, 64U);
+    EXPECT_EQ(SSLFactory::config_t::SESSION_CACHE_SIZE, 32U);
+    EXPECT_EQ(SSLFactory::config_t::CRL_CACHE_SIZE, 16U);
 }
 
 TEST(BuildProfile, HeapTrimRequiresAQuietWindowAndCooldown) {
