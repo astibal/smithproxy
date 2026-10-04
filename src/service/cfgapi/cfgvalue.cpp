@@ -597,6 +597,16 @@ void CfgValueHelp::init() {
     add("ssh_profiles.[x].host_key", "private host key presented by the SSH MITM server")
             .may_be_empty(false);
 
+    add("ssh_profiles.[x].hostkey_policy", "upstream SSH host key verification policy")
+            .may_be_empty(false)
+            .value_filter(is_in_vector(
+                []() { return std::vector<std::string>{"insecure", "accept-new", "strict"}; },
+                "insecure, accept-new, or strict"))
+            .suggestion_generator(
+                [](std::string const&, std::string const&) {
+                    return std::vector<std::string>{"insecure", "accept-new", "strict"};
+                });
+
     for(auto const* feature : {"shell", "exec", "subsystem", "pty", "environment",
                                "local_forward", "remote_forward", "x11", "agent"}) {
         add(std::string("ssh_profiles.[x].") + feature,

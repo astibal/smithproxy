@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 
@@ -29,6 +30,24 @@ enum class authentication_method {
     unsupported,
     password,
 };
+
+enum class hostkey_policy {
+    insecure,
+    accept_new,
+    strict,
+};
+
+enum class hostkey_decision {
+    accept,
+    learn,
+    reject,
+};
+
+inline constexpr char trusted_hostkeys_path[] = "/var/smithproxy/data/ssh_trusted_keys";
+
+[[nodiscard]] char const* hostkey_policy_name(hostkey_policy policy) noexcept;
+[[nodiscard]] hostkey_decision decide_hostkey(hostkey_policy policy, int known_state) noexcept;
+std::mutex& trusted_hostkeys_mutex();
 
 [[nodiscard]] authentication_method classify_authentication_method(int subtype) noexcept;
 
@@ -62,8 +81,11 @@ struct transport_options {
         bool agent = true;
     } features;
     std::string profile_name;
+    hostkey_policy hostkeys = hostkey_policy::insecure;
+    std::string trusted_hostkeys = trusted_hostkeys_path;
     std::string host_key;
     std::string upstream_host;
+    unsigned int upstream_port = 22;
     std::function<void(bool upstream, std::string_view)> plaintext_observer;
     std::function<void(bool upstream, std::string_view)> event_observer;
 };

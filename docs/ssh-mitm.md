@@ -19,6 +19,7 @@ Configure a profile and assign it to a TCP policy:
 ssh_profiles = {
     default = {
         host_key = "/etc/smithproxy/ssh_host_ed25519_key";
+        hostkey_policy = "accept-new";
         shell = "pass";
         exec = "pass";
         subsystem = "pass";
@@ -60,6 +61,16 @@ Every feature value is either `pass` or `reject`:
 The default created by the CLI passes all features. Restrict X11 and agent
 forwarding explicitly when they are not needed.
 
+Upstream server keys are stored in
+`/var/smithproxy/data/ssh_trusted_keys`. `hostkey_policy` supports:
+
+- `insecure`: do not verify the upstream key (legacy behavior)
+- `accept-new`: trust an unseen key on first use, reject a changed key
+- `strict`: accept only a key already present in the trust store
+
+The CLI-created profile defaults to `accept-new`; profiles migrated from an
+older configuration retain `insecure` to avoid changing existing traffic.
+
 ## CLI configuration
 
 ```text
@@ -68,6 +79,7 @@ edit ssh_profiles
 add inspected
 edit inspected
 set host_key /etc/smithproxy/ssh_host_ed25519_key
+set hostkey_policy accept-new
 set shell pass
 set exec pass
 set subsystem pass
@@ -83,6 +95,14 @@ set ssh_profile inspected
 end
 save config
 execute reload
+```
+
+Manage the same OpenSSH-format trust store from exec mode:
+
+```text
+execute ssh key list
+execute ssh key add <host> <port> <key-type> <base64-key>
+execute ssh key remove <host> <port>
 ```
 
 Use `show config ssh_profiles` to inspect the saved profiles. Runtime commands:

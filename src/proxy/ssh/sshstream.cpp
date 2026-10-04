@@ -45,6 +45,12 @@ bool stream_handler::attach(MitmProxy& proxy) {
     if (options.upstream_host.empty()) {
         options.upstream_host = right->host();
     }
+    try {
+        options.upstream_port = static_cast<unsigned int>(std::stoul(right->port()));
+    } catch (std::exception const&) {
+        final_error_ = "SSH upstream port is invalid: " + right->port();
+        return false;
+    }
     transport_ = std::make_unique<mitm_transport>(std::move(options));
     if (!transport_->attach(left->real_socket(), right->real_socket())) {
         final_error_ = transport_->error();

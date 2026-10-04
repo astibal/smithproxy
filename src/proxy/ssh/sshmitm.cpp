@@ -8,10 +8,12 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <utility>
 #include <vector>
 
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <libssh/libssh.h>
@@ -42,6 +44,31 @@ authentication_method classify_authentication_method(int subtype) noexcept {
     return subtype == SSH_AUTH_METHOD_PASSWORD
         ? authentication_method::password
         : authentication_method::unsupported;
+}
+
+char const* hostkey_policy_name(hostkey_policy policy) noexcept {
+    switch (policy) {
+        case hostkey_policy::insecure:   return "insecure";
+        case hostkey_policy::accept_new: return "accept-new";
+        case hostkey_policy::strict:     return "strict";
+    }
+    return "insecure";
+}
+
+hostkey_decision decide_hostkey(hostkey_policy policy, int known_state) noexcept {
+    if (policy == hostkey_policy::insecure) return hostkey_decision::accept;
+    if (known_state == SSH_KNOWN_HOSTS_OK) return hostkey_decision::accept;
+    if (policy == hostkey_policy::accept_new
+        && (known_state == SSH_KNOWN_HOSTS_UNKNOWN
+            || known_state == SSH_KNOWN_HOSTS_NOT_FOUND)) {
+        return hostkey_decision::learn;
+    }
+    return hostkey_decision::reject;
+}
+
+std::mutex& trusted_hostkeys_mutex() {
+    static std::mutex instance;
+    return instance;
 }
 
 channel_request_kind classify_channel_request(int subtype) noexcept {
@@ -422,6 +449,17 @@ public:
             set_error(libssh_error(upstream_, "cannot set upstream SSH host"));
             return false;
         }
+        if (ssh_options_set(upstream_, SSH_OPTIONS_PORT,
+                            &options_.upstream_port) != SSH_OK) {
+            set_error(libssh_error(upstream_, "cannot set upstream SSH port"));
+            return false;
+        }
+        if (options_.hostkeys != hostkey_policy::insecure
+            && ssh_options_set(upstream_, SSH_OPTIONS_KNOWNHOSTS,
+                               options_.trusted_hostkeys.c_str()) != SSH_OK) {
+            set_error(libssh_error(upstream_, "cannot configure SSH trusted host keys"));
+            return false;
+        }
         if (ssh_options_set(upstream_, SSH_OPTIONS_FD, &upstream_fd_) != SSH_OK) {
             set_error(libssh_error(upstream_, "cannot attach upstream SSH socket"));
             return false;
@@ -454,6 +492,77 @@ public:
         return true;
     }
 
+    static char const* known_host_state_name(int state) noexcept {
+        switch (state) {
+            case SSH_KNOWN_HOSTS_ERROR:     return "error";
+            case SSH_KNOWN_HOSTS_NOT_FOUND: return "not-found";
+            case SSH_KNOWN_HOSTS_UNKNOWN:   return "unknown";
+            case SSH_KNOWN_HOSTS_OK:        return "match";
+            case SSH_KNOWN_HOSTS_CHANGED:   return "changed";
+            case SSH_KNOWN_HOSTS_OTHER:     return "other-key-type";
+        }
+        return "invalid";
+    }
+
+    bool verify_upstream_hostkey() {
+        if (options_.hostkeys == hostkey_policy::insecure) {
+            xwar(transport_log())("upstream SSH host key verification disabled for %s:%u",
+                                  options_.upstream_host.c_str(), options_.upstream_port);
+            emit_event(false,
+                "ssh event=hostkey policy=insecure action=accept verification=disabled");
+            return true;
+        }
+
+        auto const lock = std::scoped_lock(trusted_hostkeys_mutex());
+        auto const state = ssh_session_is_known_server(upstream_);
+        auto const decision = decide_hostkey(options_.hostkeys, state);
+        if (decision == hostkey_decision::learn) {
+            std::error_code filesystem_error;
+            auto const trusted_keys = std::filesystem::path(options_.trusted_hostkeys);
+            std::filesystem::create_directories(trusted_keys.parent_path(), filesystem_error);
+            if (filesystem_error) {
+                set_error("cannot create SSH trusted-key directory: " + filesystem_error.message());
+                return false;
+            }
+            if (ssh_session_update_known_hosts(upstream_) != SSH_OK) {
+                auto const operation =
+                    "cannot save upstream SSH host key to " + options_.trusted_hostkeys;
+                set_error(libssh_error(upstream_, operation.c_str()));
+                emit_event(false, string_format(
+                    "ssh event=hostkey policy=%s state=%s action=error store=\"%s\"",
+                    hostkey_policy_name(options_.hostkeys), known_host_state_name(state),
+                    ESC_(options_.trusted_hostkeys).c_str()));
+                return false;
+            }
+            if (::chmod(options_.trusted_hostkeys.c_str(), S_IRUSR | S_IWUSR) != 0) {
+                set_error("cannot secure SSH trusted-key file: " + std::string(std::strerror(errno)));
+                return false;
+            }
+            emit_event(false, string_format(
+                "ssh event=hostkey policy=accept-new state=%s action=learn store=\"%s\"",
+                known_host_state_name(state), ESC_(options_.trusted_hostkeys).c_str()));
+            xdia(transport_log())("learned upstream SSH host key for %s:%u in %s",
+                                  options_.upstream_host.c_str(), options_.upstream_port,
+                                  options_.trusted_hostkeys.c_str());
+            return true;
+        }
+        if (decision == hostkey_decision::reject) {
+            emit_event(false, string_format(
+                "ssh event=hostkey policy=%s state=%s action=reject store=\"%s\"",
+                hostkey_policy_name(options_.hostkeys), known_host_state_name(state),
+                ESC_(options_.trusted_hostkeys).c_str()));
+            set_error(string_format(
+                "upstream SSH host key rejected by %s policy: %s",
+                hostkey_policy_name(options_.hostkeys), known_host_state_name(state)));
+            return false;
+        }
+
+        emit_event(false, string_format(
+            "ssh event=hostkey policy=%s state=match action=accept",
+            hostkey_policy_name(options_.hostkeys)));
+        return true;
+    }
+
     drive_result drive_key_exchange() {
         if (!initialized_ && !initialize_sessions()) {
             return drive_result::failed;
@@ -462,6 +571,7 @@ public:
         if (!upstream_kex_done_) {
             auto const result = ssh_connect(upstream_);
             if (result == SSH_OK) {
+                if (!verify_upstream_hostkey()) return drive_result::failed;
                 upstream_kex_done_ = true;
             } else if (result != SSH_AGAIN) {
                 set_error(libssh_error(upstream_, "upstream SSH key exchange failed"));
@@ -1266,6 +1376,7 @@ public:
         }
         std::stringstream out;
         out << "profile=" << (options_.profile_name.empty() ? "-" : options_.profile_name)
+            << " hostkey_policy=" << hostkey_policy_name(options_.hostkeys)
             << " user=\"" << ESC_(authenticated_username_) << '"'
             << " client_banner=\"" << ESC_(fsm_.client_identification().raw) << '"'
             << " server_banner=\"" << ESC_(fsm_.server_identification().raw) << '"'

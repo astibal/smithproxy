@@ -419,6 +419,7 @@ def main() -> None:
         text = re.sub(
             r"ssh_profiles\s*=\s*\{\s*\}",
             f'ssh_profiles = {{ e2e = {{ host_key = "{mitm_key}"; '
+            f'hostkey_policy = "insecure"; '
             f'local_forward = "{"reject" if args.reject_local_forward else "pass"}"; '
             f'remote_forward = "{"reject" if args.reject_remote_forward else "pass"}"; '
             f'x11 = "{"reject" if args.reject_x11 else "pass"}"; '

@@ -586,6 +586,20 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "added per-feature SSH profile actions");
         return true;
     }
+    else if(upgrade_to_num == 1044) {
+        if(cfgapi.getRoot().exists("ssh_profiles")) {
+            Setting& profiles = cfgapi.getRoot()["ssh_profiles"];
+            for(int i = 0; i < profiles.getLength(); ++i) {
+                if(!profiles[i].exists("hostkey_policy")) {
+                    // Preserve the behavior of profiles created before host
+                    // key verification became configurable.
+                    profiles[i].add("hostkey_policy", Setting::TypeString) = "insecure";
+                }
+            }
+        }
+        log.event(INF, "added SSH upstream host-key policy");
+        return true;
+    }
 
 
     return false;
@@ -2418,6 +2432,19 @@ int CfgFactory::load_db_prof_ssh () {
             LOAD_ERRORS = true;
             continue;
         }
+        load_if_exists(item, "hostkey_policy", profile->hostkey_policy);
+        profile->hostkey_policy = string_tolower(profile->hostkey_policy);
+        if(profile->hostkey_policy != "insecure"
+           && profile->hostkey_policy != "accept-new"
+           && profile->hostkey_policy != "strict") {
+            _err("load_db_prof_ssh: '%s': invalid hostkey_policy '%s'",
+                 name.c_str(), profile->hostkey_policy.c_str());
+            Log::get()->events().insert(
+                ERR, "CONFIG: ssh_profile '%s': hostkey_policy must be insecure, accept-new, or strict",
+                name.c_str());
+            LOAD_ERRORS = true;
+            continue;
+        }
 
         auto load_action = [&](char const* key, bool& destination) {
             std::string action = "pass";
@@ -3190,6 +3217,11 @@ int CfgFactory::policy_apply (baseHostCX *originator, MitmProxy *proxy, int matc
                 auto options = sx::ssh::transport_options{};
                 options.profile_name = rule->profile_ssh->element_name();
                 options.host_key = rule->profile_ssh->host_key;
+                options.hostkeys = rule->profile_ssh->hostkey_policy == "strict"
+                    ? sx::ssh::hostkey_policy::strict
+                    : rule->profile_ssh->hostkey_policy == "accept-new"
+                        ? sx::ssh::hostkey_policy::accept_new
+                        : sx::ssh::hostkey_policy::insecure;
                 options.features.shell = rule->profile_ssh->shell;
                 options.features.exec = rule->profile_ssh->exec;
                 options.features.subsystem = rule->profile_ssh->subsystem;
@@ -5207,6 +5239,7 @@ bool CfgFactory::new_ssh_profile(Setting& section, std::string const& name) cons
     try {
         Setting& item = section.add(name, Setting::TypeGroup);
         item.add("host_key", Setting::TypeString) = "/etc/smithproxy/ssh_host_ed25519_key";
+        item.add("hostkey_policy", Setting::TypeString) = "accept-new";
         for(auto const* feature : {"shell", "exec", "subsystem", "pty",
                                    "environment", "local_forward",
                                    "remote_forward", "x11", "agent"}) {
@@ -5231,6 +5264,7 @@ int CfgFactory::save_ssh_profiles(Config& ex) const {
 
         Setting& item = profiles.add(name, Setting::TypeGroup);
         item.add("host_key", Setting::TypeString) = profile->host_key;
+        item.add("hostkey_policy", Setting::TypeString) = profile->hostkey_policy;
         auto save_action = [&](char const* key, bool pass) {
             item.add(key, Setting::TypeString) = pass ? "pass" : "reject";
         };

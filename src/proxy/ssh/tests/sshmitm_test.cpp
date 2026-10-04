@@ -97,6 +97,30 @@ TEST(SshMitmTransport, InitiallySupportsOnlyPasswordAuthentication) {
               sx::ssh::authentication_method::unsupported);
 }
 
+TEST(SshMitmTransport, AppliesUpstreamHostKeyPolicies) {
+    using sx::ssh::hostkey_decision;
+    using sx::ssh::hostkey_policy;
+
+    EXPECT_EQ(sx::ssh::decide_hostkey(hostkey_policy::insecure, SSH_KNOWN_HOSTS_CHANGED),
+              hostkey_decision::accept);
+    EXPECT_EQ(sx::ssh::decide_hostkey(hostkey_policy::accept_new, SSH_KNOWN_HOSTS_OK),
+              hostkey_decision::accept);
+    EXPECT_EQ(sx::ssh::decide_hostkey(hostkey_policy::accept_new, SSH_KNOWN_HOSTS_UNKNOWN),
+              hostkey_decision::learn);
+    EXPECT_EQ(sx::ssh::decide_hostkey(hostkey_policy::accept_new, SSH_KNOWN_HOSTS_NOT_FOUND),
+              hostkey_decision::learn);
+    EXPECT_EQ(sx::ssh::decide_hostkey(hostkey_policy::accept_new, SSH_KNOWN_HOSTS_CHANGED),
+              hostkey_decision::reject);
+    EXPECT_EQ(sx::ssh::decide_hostkey(hostkey_policy::accept_new, SSH_KNOWN_HOSTS_OTHER),
+              hostkey_decision::reject);
+    EXPECT_EQ(sx::ssh::decide_hostkey(hostkey_policy::strict, SSH_KNOWN_HOSTS_OK),
+              hostkey_decision::accept);
+    EXPECT_EQ(sx::ssh::decide_hostkey(hostkey_policy::strict, SSH_KNOWN_HOSTS_UNKNOWN),
+              hostkey_decision::reject);
+    EXPECT_EQ(sx::ssh::decide_hostkey(hostkey_policy::strict, SSH_KNOWN_HOSTS_ERROR),
+              hostkey_decision::reject);
+}
+
 TEST(SshMitmTransport, ClassifiesSupportedSessionChannelRequests) {
     using sx::ssh::channel_request_kind;
     EXPECT_EQ(sx::ssh::classify_channel_request(SSH_CHANNEL_REQUEST_PTY),

@@ -9,6 +9,9 @@
 #include <inspect/kb/kb.hpp>
 #include <log/logger.hpp>
 #include <proxy/mitmproxy.hpp>
+#ifdef USE_LIBSSH
+#include <proxy/ssh/sshmitm.hpp>
+#endif
 #include <service/core/smithproxy.hpp>
 #include <traflog/pcaplog.hpp>
 
@@ -23,19 +26,98 @@
 #include <libconfig.h++>
 
 #include <charconv>
+#include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <filesystem>
+#include <fstream>
 #include <mutex>
 #include <sstream>
 #include <string_view>
 #include <thread>
+#include <vector>
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace {
 
 bool privileged(const libcli2::Context& context) { return context.privilege >= 15; }
 bool exec_mode(const libcli2::Context& context) { return context.mode == "0"; }
 bool privileged_exec(const libcli2::Context& context) { return privileged(context) && exec_mode(context); }
+
+#ifdef USE_LIBSSH
+bool valid_ssh_key_type(std::string_view value) {
+    return value.rfind("ssh-", 0) == 0 || value.rfind("ecdsa-sha2-", 0) == 0
+        || value.rfind("sk-", 0) == 0;
+}
+
+bool valid_ssh_key_data(std::string_view value) {
+    return !value.empty() && std::all_of(value.begin(), value.end(), [](unsigned char ch) {
+        return std::isalnum(ch) || ch == '+' || ch == '/' || ch == '=';
+    });
+}
+
+bool parse_port(std::string_view value, unsigned int& port) {
+    port = 0;
+    auto const result = std::from_chars(value.data(), value.data() + value.size(), port);
+    return result.ec == std::errc{} && result.ptr == value.data() + value.size()
+        && port > 0 && port <= 65535;
+}
+
+std::string known_host_name(std::string_view host, unsigned int port) {
+    return port == 22 ? std::string(host)
+                      : "[" + std::string(host) + "]:" + std::to_string(port);
+}
+
+std::vector<std::string> read_trusted_keys() {
+    std::vector<std::string> lines;
+    std::ifstream input(sx::ssh::trusted_hostkeys_path);
+    for (std::string line; std::getline(input, line);) {
+        if (!line.empty()) lines.push_back(std::move(line));
+    }
+    return lines;
+}
+
+bool write_trusted_keys(std::vector<std::string> const& lines, std::string& error) {
+    namespace fs = std::filesystem;
+    fs::path const target(sx::ssh::trusted_hostkeys_path);
+    std::error_code ec;
+    fs::create_directories(target.parent_path(), ec);
+    if (ec) {
+        error = "cannot create trusted-key directory: " + ec.message();
+        return false;
+    }
+    auto const temporary = target.string() + ".tmp." + std::to_string(::getpid());
+    {
+        std::ofstream output(temporary, std::ios::trunc);
+        if (!output) {
+            error = "cannot create temporary trusted-key file";
+            return false;
+        }
+        for (auto const& line : lines) output << line << '\n';
+        output.flush();
+        if (!output) {
+            error = "cannot write temporary trusted-key file";
+            ::unlink(temporary.c_str());
+            return false;
+        }
+    }
+    if (::chmod(temporary.c_str(), S_IRUSR | S_IWUSR) != 0) {
+        error = "cannot secure temporary trusted-key file";
+        ::unlink(temporary.c_str());
+        return false;
+    }
+    fs::rename(temporary, target, ec);
+    if (ec) {
+        error = "cannot replace trusted-key file: " + ec.message();
+        ::unlink(temporary.c_str());
+        return false;
+    }
+    return true;
+}
+#endif
 
 std::string status_text(const libcli2::Decorator& decor) {
     std::ostringstream output;
@@ -331,6 +413,98 @@ void register_smithproxy_cli2_commands(libcli2::Cli& cli, std::string subscriber
             context.print(context.decor().success("Events cleared"));
             return 0;
         });
+
+#ifdef USE_LIBSSH
+    cli.command("execute ssh key list")
+        .reset_definition()
+        .help("List trusted upstream SSH host keys")
+        .available_if(privileged_exec)
+        .handler([](libcli2::Context& context, const libcli2::Invocation&) {
+            auto const lock = std::scoped_lock(sx::ssh::trusted_hostkeys_mutex());
+            auto const lines = read_trusted_keys();
+            if (lines.empty()) context.print("No trusted SSH host keys.");
+            else {
+                std::ostringstream output;
+                output << "Trusted SSH host keys (" << sx::ssh::trusted_hostkeys_path << "):\n";
+                for (auto const& line : lines) output << "  " << line << '\n';
+                context.print(output.str());
+            }
+            return 0;
+        });
+
+    cli.command("execute ssh key add")
+        .reset_definition()
+        .help("Trust an upstream SSH host key")
+        .available_if(privileged_exec)
+        .argument({"host", "SSH server hostname or address", true, false, {},
+                   [](std::string_view value) {
+                       return !value.empty() && value.find_first_of(" \t[]") == std::string_view::npos;
+                   }})
+        .argument({"port", "SSH server port", true, false, {},
+                   [](std::string_view value) { unsigned int port; return parse_port(value, port); }})
+        .argument({"key-type", "OpenSSH key type, for example ssh-ed25519", true, false, {},
+                   valid_ssh_key_type})
+        .argument({"base64-key", "OpenSSH base64 public key", true, false, {},
+                   valid_ssh_key_data})
+        .handler([](libcli2::Context& context, const libcli2::Invocation& invocation) {
+            if (invocation.arguments.size() != 4) return -1;
+            unsigned int port = 0;
+            if (!parse_port(invocation.arguments[1], port)) return -1;
+            auto const host = known_host_name(invocation.arguments[0], port);
+            auto const line = host + " " + invocation.arguments[2] + " " + invocation.arguments[3];
+            auto const lock = std::scoped_lock(sx::ssh::trusted_hostkeys_mutex());
+            auto lines = read_trusted_keys();
+            if (std::find(lines.begin(), lines.end(), line) != lines.end()) {
+                context.print("SSH host key already trusted: " + host);
+                return 0;
+            }
+            lines.push_back(line);
+            std::string error;
+            if (!write_trusted_keys(lines, error)) {
+                context.print(libcli2::Style::error, error);
+                return -1;
+            }
+            context.print("SSH host key trusted: " + host);
+            Log::get()->events().insert(INF, "SSH trusted key added for %s", host.c_str());
+            return 0;
+        });
+
+    cli.command("execute ssh key remove")
+        .reset_definition()
+        .help("Remove all trusted SSH keys for one host and port")
+        .available_if(privileged_exec)
+        .argument({"host", "SSH server hostname or address", true, false, {},
+                   [](std::string_view value) {
+                       return !value.empty() && value.find_first_of(" \t[]") == std::string_view::npos;
+                   }})
+        .argument({"port", "SSH server port", true, false, {},
+                   [](std::string_view value) { unsigned int port; return parse_port(value, port); }})
+        .handler([](libcli2::Context& context, const libcli2::Invocation& invocation) {
+            if (invocation.arguments.size() != 2) return -1;
+            unsigned int port = 0;
+            if (!parse_port(invocation.arguments[1], port)) return -1;
+            auto const host = known_host_name(invocation.arguments[0], port);
+            auto const prefix = host + " ";
+            auto const lock = std::scoped_lock(sx::ssh::trusted_hostkeys_mutex());
+            auto lines = read_trusted_keys();
+            auto const old_size = lines.size();
+            lines.erase(std::remove_if(lines.begin(), lines.end(), [&](std::string const& line) {
+                return line.rfind(prefix, 0) == 0;
+            }), lines.end());
+            if (lines.size() == old_size) {
+                context.print(libcli2::Style::warning, "No trusted SSH key found for " + host);
+                return 0;
+            }
+            std::string error;
+            if (!write_trusted_keys(lines, error)) {
+                context.print(libcli2::Style::error, error);
+                return -1;
+            }
+            context.print("SSH trusted keys removed: " + host);
+            Log::get()->events().insert(INF, "SSH trusted keys removed for %s", host.c_str());
+            return 0;
+        });
+#endif
 
     cli.command("execute kb print")
         .reset_definition()
