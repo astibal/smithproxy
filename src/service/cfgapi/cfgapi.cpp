@@ -44,6 +44,7 @@
 #include <vector>
 
 #include <socle.hpp>
+#include <buildprofile.hpp>
 #include <main.hpp>
 
 
@@ -883,8 +884,10 @@ bool CfgFactory::load_settings () {
 
         int nbr_cache_size = 0;
         load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "nbr_cache_size", nbr_cache_size);
-        if( nbr_cache_size > 0 and (static_cast<size_t>(nbr_cache_size) != NbrHood::instance().cache().capacity())) {
-            NbrHood::instance().cache().set_capacity(static_cast<size_t>(nbr_cache_size));
+        const auto effective_nbr_cache_size = sx::build_profile::configured_neighbor_cache_size(
+            nbr_cache_size > 0 ? static_cast<std::size_t>(nbr_cache_size) : 0U);
+        if(effective_nbr_cache_size != NbrHood::instance().cache().capacity()) {
+            NbrHood::instance().cache().set_capacity(effective_nbr_cache_size);
         }
 
         if(int open_timeout = 0; load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "host_open_timeout", open_timeout)) {

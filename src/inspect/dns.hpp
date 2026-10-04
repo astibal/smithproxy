@@ -58,6 +58,7 @@
 #include <ext/libcidr/cidr.hpp>
 #include <policy/addrobj.hpp>
 #include <socketinfo.hpp>
+#include <buildprofile.hpp>
 #include <inspect/dns.hpp>
 
 
@@ -326,7 +327,7 @@ private:
 class DNS {
 
 public:
-    constexpr static const unsigned int cache_size = 2000;
+    constexpr static const unsigned int cache_size = sx::build_profile::dns_cache_size;
     constexpr static const unsigned int sub_ttl = 3600;
     constexpr static const unsigned int top_ttl = 28000;
 

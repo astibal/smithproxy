@@ -7,14 +7,20 @@ namespace {
 
 static_assert(sx::build_profile::mem_constrained);
 static_assert(sx::build_profile::utility_workers == 5U);
+static_assert(sx::build_profile::neighbor_cache_size == 100U);
+static_assert(sx::build_profile::dns_cache_size == 100U);
 static_assert(!sx::build_profile::cli_enabled);
 static_assert(sx::build_profile::configured_utility_workers(128U, 32U) == 5U);
+static_assert(sx::build_profile::configured_neighbor_cache_size(8000U) == 100U);
 
 TEST(BuildProfile, ConstrainedValuesArePartOfTheExecutable) {
     EXPECT_TRUE(sx::build_profile::mem_constrained);
     EXPECT_EQ(sx::build_profile::utility_workers, 5U);
+    EXPECT_EQ(sx::build_profile::neighbor_cache_size, 100U);
+    EXPECT_EQ(sx::build_profile::dns_cache_size, 100U);
     EXPECT_FALSE(sx::build_profile::cli_enabled);
     EXPECT_EQ(sx::build_profile::configured_utility_workers(128U, 32U), 5U);
+    EXPECT_EQ(sx::build_profile::configured_neighbor_cache_size(8000U), 100U);
     EXPECT_EQ(SSLFactory::config_t::CERTSTORE_CACHE_SIZE, 64U);
     EXPECT_EQ(SSLFactory::config_t::VERIFY_CACHE_SIZE, 64U);
     EXPECT_EQ(SSLFactory::config_t::SESSION_CACHE_SIZE, 32U);

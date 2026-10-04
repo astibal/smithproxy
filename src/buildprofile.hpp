@@ -15,6 +15,8 @@ inline constexpr bool mem_constrained = false;
 // Constrained executables deliberately ignore configuration attempts to grow
 // the helper pool. Protocol listener counts remain profile-specific.
 inline constexpr std::size_t utility_workers = mem_constrained ? 5U : 0U;
+inline constexpr std::size_t neighbor_cache_size = mem_constrained ? 100U : 8000U;
+inline constexpr std::size_t dns_cache_size = mem_constrained ? 100U : 2000U;
 inline constexpr bool cli_enabled = !mem_constrained;
 inline constexpr bool heap_trim_enabled = mem_constrained;
 inline constexpr auto heap_trim_quiet_period = std::chrono::seconds{10};
@@ -26,6 +28,13 @@ constexpr std::size_t configured_utility_workers(std::size_t configured,
         return utility_workers;
     }
     return configured == 0 ? automatic : configured;
+}
+
+constexpr std::size_t configured_neighbor_cache_size(std::size_t configured) noexcept {
+    if constexpr (mem_constrained) {
+        return neighbor_cache_size;
+    }
+    return configured == 0 ? neighbor_cache_size : configured;
 }
 
 class heap_trim_schedule {

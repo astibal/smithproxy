@@ -43,6 +43,7 @@
 #include <ctime>
 
 #include <socle/common/timeops.hpp>
+#include <buildprofile.hpp>
 #include <socle/common/stringops.hpp>
 
 #include <utils/lru.hpp>
@@ -279,7 +280,7 @@ private:
 
 class NbrHood {
 public:
-    static size_t inline DEFAULT_MAX_CACHE_SZ = 8000;
+    static constexpr std::size_t DEFAULT_MAX_CACHE_SZ = sx::build_profile::neighbor_cache_size;
 
     using nbr_t = std::shared_ptr<Neighbor>;
     using nbr_cache_t = LRUCache<std::string, nbr_t>;
