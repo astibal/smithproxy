@@ -458,6 +458,15 @@ void SmithProxy::run() {
     // copy value also to static content, for parts where dependency on smithproxy instance is NOT desirable
     StaticContent::boot_random = SmithProxy::boot_random;
 
+    auto started_session_count = [this]() {
+        auto total = MitmProxy::total_sessions().load(std::memory_order_relaxed);
+        for (auto const& service : quic_services) {
+            if (service) total += service->diagnostics().accepted_sessions;
+        }
+        return total;
+    };
+    sx::build_profile::heap_trim_schedule heap_trim(started_session_count());
+
     while(true) {
         if(instance().terminate_flag) {
             if(!cfg_daemonize)
@@ -506,6 +515,10 @@ void SmithProxy::run() {
                 wh_nbr_seconds = 0;
             }
             ++wh_nbr_seconds;
+        }
+
+        if (heap_trim.observe(started_session_count())) {
+            sx::build_profile::trim_heap();
         }
 
         // Keep the housekeeping loop paced even when webhooks are disabled.

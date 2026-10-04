@@ -15,4 +15,13 @@ void initialize_process() noexcept {
     }
 }
 
+bool trim_heap() noexcept {
+    if constexpr (heap_trim_enabled) {
+#if defined(__GLIBC__)
+        return malloc_trim(0) != 0;
+#endif
+    }
+    return false;
+}
+
 } // namespace sx::build_profile
