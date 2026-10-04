@@ -467,6 +467,8 @@ print(*(x.getsockname()[1] for x in s))'
         "PPLAY_PY=$LAB_ROOT/pplay.py" "PPLAY_SUITE=$LAB_ROOT/corpus"
         "PPLAY_RESULTS_NAME=corpus-all" "PPLAY_SMOKE_TEST=1"
     )
+    LAB_ENV+=("LAB_WORK_DIR=$LAB_ROOT/work" "LAB_LOG_DIR=$LAB_ROOT/logs"
+        "LAB_CAPTURE_DIR=$LAB_ROOT/captures")
     for variable in RTT_SAMPLES RTT_HANDSHAKE_SAMPLES RTT_WARMUP \
         RTT_TLS_TOTAL_P50_LIMIT_MS RTT_HTTPS_P50_LIMIT_MS \
         RTT_P95_LIMIT_MS RTT_MAX_LIMIT_MS \

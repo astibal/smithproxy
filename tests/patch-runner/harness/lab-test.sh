@@ -52,6 +52,16 @@ CAPTURE_MARKER=smithproxy-gre-pcap-v4
 CAPTURE_MARKER6=smithproxy-gre-pcap-v6
 CAPTURE_PREFIX="lab-capture-${BASHPID}-"
 mkdir -p "$ROOT/results"
+DATA_DIR="$ROOT/data"
+LOG_DIR=${LAB_LOG_DIR:-$DATA_DIR}
+CAPTURE_DIR=${LAB_CAPTURE_DIR:-$DATA_DIR}
+if [[ -n ${RUNNER_ROOTFS:-} ]]; then
+    WORK_DIR=${LAB_WORK_DIR:-$ROOT/work}
+    mkdir -p "$WORK_DIR" "$LOG_DIR" "$CAPTURE_DIR"
+    [[ -e $ROOT/config || -L $ROOT/config ]] || ln -s "${WORK_DIR#$ROOT/}" "$ROOT/config"
+else
+    WORK_DIR=${LAB_WORK_DIR:-$ROOT}
+fi
 ip -j addr > "$ROOT/results/host-addresses-before.json"
 ip -j route > "$ROOT/results/host-routes-before.json"
 ip netns add "$CLIENT"
@@ -160,7 +170,7 @@ elif [[ $CAPTURE_TEST == 1 ]]; then
 fi
 python3 "$ROOT/runner/tests/prepare.py" "$ROOT"
 if [[ ${EMPTY_NEIGHBOR_STATE_TEST:-0} == 1 ]]; then
-    : > "$ROOT/data/nbr-default.json"
+    : > "$DATA_DIR/nbr-default.json"
 fi
 if [[ $CAPTURE_TEST == 1 ]]; then
     rm -f "$ROOT/results/gre-ready" "$ROOT/results/gre-capture.json"
@@ -209,8 +219,10 @@ if [[ $QUIC_TEST == 1 ]]; then
     done
     grep -q '^READY h3-origin ' "$ROOT/results/h3-origin.log"
 fi
-"$ROOT/runner/smithproxy.runner" --in "$IN_IF" --out "$OUT_IF" --namespace "$NS" \
-    --api-port "$API_RELAY_PORT" --config-dir "$ROOT/config" --data-dir "$ROOT/data" \
+RUNNER_ARGS=(--in "$IN_IF" --out "$OUT_IF" --namespace "$NS"
+    --api-port "$API_RELAY_PORT" --config-dir "$ROOT/config" --data-dir "$DATA_DIR")
+[[ -z ${RUNNER_ROOTFS:-} ]] || RUNNER_ARGS+=(--rootfs "$RUNNER_ROOTFS")
+"$ROOT/runner/smithproxy.runner" "${RUNNER_ARGS[@]}" \
     > "$ROOT/results/runner.log" 2>&1 &
 RUNNER_PID=$!
 if [[ ${SKIP_API_READY:-0} != 1 ]]; then
@@ -222,6 +234,25 @@ if [[ ${SKIP_API_READY:-0} != 1 ]]; then
     done
     python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["status"] == "ok"' "$ROOT/results/api.json"
     echo 'PASS API: authenticated HTTPS request from host namespace'
+fi
+if [[ -n ${RUNNER_ROOTFS:-} ]]; then
+    ROOTFS_CONFIG_MARKER="# rootfs-rw-probe-$BASHPID"
+    printf '\n%s\n' "$ROOTFS_CONFIG_MARKER" >> "$ROOT/config/smithproxy.cfg"
+    grep -qF "$ROOTFS_CONFIG_MARKER" "$ROOT/config/smithproxy.cfg"
+    ip netns exec "$NS" python3 "$ROOT/runner/tests/rootfs-write-probe.py" \
+        > "$ROOT/results/rootfs-config-write.log"
+    ! grep -qF "$ROOTFS_CONFIG_MARKER" "$ROOT/config/smithproxy.cfg"
+    grep -q 'config saved successfully' "$ROOT/results/rootfs-config-write.log"
+    echo 'PASS rootfs save config: Smithproxy persisted its live configuration'
+    [[ $(realpath "$ROOT/config") == $(realpath "$WORK_DIR") ]]
+    echo 'PASS rootfs RW work: saved configuration is persistent under the work mount'
+
+    for attempt in $(seq 1 50); do
+        find "$LOG_DIR" -maxdepth 1 -type f -name 'messages.*.log' -size +0c -print -quit | grep -q . && break
+        sleep 0.1
+    done
+    find "$LOG_DIR" -maxdepth 1 -type f -name 'messages.*.log' -size +0c -print -quit | grep -q .
+    echo 'PASS rootfs RW logs: Smithproxy wrote its application log through the workspace bind mount'
 fi
 if [[ $RUN_MODE == 1 ]]; then
     setsid socat "TCP4-LISTEN:$CLI_RELAY_PORT,bind=127.0.0.1,reuseaddr,fork" \
@@ -249,7 +280,7 @@ if [[ $RUN_MODE == 1 ]]; then
     exit $?
 fi
 if [[ ${EMPTY_NEIGHBOR_STATE_TEST:-0} == 1 ]]; then
-    ! grep -q 'json.exception.parse_error' "$ROOT/data/proxy-console.log"
+    ! grep -q 'json.exception.parse_error' "$DATA_DIR/proxy-console.log"
     echo 'PASS empty neighbor state: no JSON parse error'
 fi
 if [[ $BASE_TRAFFIC_TEST == 1 ]]; then
@@ -714,7 +745,7 @@ if [[ ${HTTP2_OBSERVABILITY_TEST:-0} == 1 ]]; then
         kill "$HTTP2_TCPDUMP_PID" 2>/dev/null || true
         wait "$HTTP2_TCPDUMP_PID" 2>/dev/null || true
         HTTP2_TCPDUMP_PID=
-        find "$ROOT/data" -maxdepth 1 -type f -name "$CAPTURE_PREFIX*.pcapng" \
+        find "$CAPTURE_DIR" -maxdepth 1 -type f -name "$CAPTURE_PREFIX*.pcapng" \
             -printf '%T@ %f\n' | sort -nr | head -1 | cut -d' ' -f2- > "$result/pcap-file.txt"
         echo "PASS$family HTTP/2 observability traffic and CLI snapshot completed"
     }
@@ -785,22 +816,22 @@ kill -TERM "$RUNNER_PID"
 wait "$RUNNER_PID" || test "$?" = 143
 RUNNER_PID=
 if [[ $CAPTURE_TEST == 1 ]]; then
-    python3 "$ROOT/runner/tests/verify-pcap.py" "$ROOT/data" "$CAPTURE_PREFIX" "$CAPTURE_MARKER" "$CAPTURE_MARKER6" \
+    python3 "$ROOT/runner/tests/verify-pcap.py" "$CAPTURE_DIR" "$CAPTURE_PREFIX" "$CAPTURE_MARKER" "$CAPTURE_MARKER6" \
         > "$ROOT/results/pcap-validation.json"
     echo 'PASS4 PCAP export: valid pcapng contains IPv4 payload marker'
     echo 'PASS6 PCAP export: valid pcapng contains IPv6 payload marker'
 fi
 if [[ $CAPTURE_MATRIX_TEST == 1 ]]; then
     mkdir -p "$ROOT/results/capture-matrix/local-pcap"
-    cp "$ROOT/data/$CAPTURE_PREFIX"*.pcapng "$ROOT/results/capture-matrix/local-pcap/"
+    cp "$CAPTURE_DIR/$CAPTURE_PREFIX"*.pcapng "$ROOT/results/capture-matrix/local-pcap/"
     python3 "$ROOT/runner/tests/verify-capture-matrix.py" \
-        "$ROOT/results/capture-matrix/manifest.json" "$ROOT/data" "$CAPTURE_PREFIX" \
+        "$ROOT/results/capture-matrix/manifest.json" "$CAPTURE_DIR" "$CAPTURE_PREFIX" \
         "$ROOT/results/capture-matrix/gre4.pcap" 4 \
         > "$ROOT/results/capture-matrix/validation4.json"
     python3 "$ROOT/runner/tests/suites/capture-report.py" "$ROOT/results/capture-matrix/validation4.json"
     echo 'PASS4 capture matrix: PCAPNG and GRE payload hashes match; simulated TCP is formally valid'
     python3 "$ROOT/runner/tests/verify-capture-matrix.py" \
-        "$ROOT/results/capture-matrix/manifest.json" "$ROOT/data" "$CAPTURE_PREFIX" \
+        "$ROOT/results/capture-matrix/manifest.json" "$CAPTURE_DIR" "$CAPTURE_PREFIX" \
         "$ROOT/results/capture-matrix/gre6.pcap" 6 \
         > "$ROOT/results/capture-matrix/validation6.json"
     python3 "$ROOT/runner/tests/suites/capture-report.py" "$ROOT/results/capture-matrix/validation6.json"
@@ -811,7 +842,7 @@ if [[ ${HTTP2_OBSERVABILITY_TEST:-0} == 1 ]]; then
         HTTP2_RESULT="$ROOT/results/http2-observability-v$family"
         read -r HTTP2_PCAP_NAME < "$HTTP2_RESULT/pcap-file.txt"
         python3 "$ROOT/runner/tests/verify-http2-observability.py" \
-            "$HTTP2_RESULT/cli.txt" "$ROOT/data/$HTTP2_PCAP_NAME" \
+            "$HTTP2_RESULT/cli.txt" "$CAPTURE_DIR/$HTTP2_PCAP_NAME" \
             "$HTTP2_RESULT/gre.pcap" "$family" \
             > "$HTTP2_RESULT/validation.json"
         echo "PASS$family HTTP/2 observability: CLI, PCAP and GRE contain exactly 12 requests and responses"
@@ -821,7 +852,7 @@ if [[ $QUIC_TEST == 1 ]]; then
     [[ -s "$ROOT/results/quic-downstream.keys" ]]
     grep -Eq '_(HANDSHAKE|TRAFFIC)_SECRET ' "$ROOT/results/quic-downstream.keys"
     python3 "$ROOT/runner/tests/verify-quic-observability.py" \
-        --data-dir "$ROOT/data" --prefix "$CAPTURE_PREFIX" \
+        --data-dir "$CAPTURE_DIR" --prefix "$CAPTURE_PREFIX" \
         --gre "$ROOT/results/quic-observability/gre.pcap" \
         --native "$ROOT/results/quic-observability/downstream-native.pcapng" \
         --keylog "$ROOT/results/quic-downstream.keys" \

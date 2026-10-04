@@ -38,6 +38,8 @@ API_PORT=55556
 API_BIND_OVERRIDE=
 API_PORT_OVERRIDE=
 SMITHPROXY_BIN=${SMITHPROXY_BIN:-smithproxy}
+ROOTFS=
+BUILD_ROOTFS=
 
 # A mark is kernel packet metadata, not an extra byte in the packet payload.
 # These settings apply only inside our namespace; host routes and firewall stay unchanged.
@@ -65,10 +67,20 @@ Usage:
   --api-port PORT    Host-side API relay port (overrides network.conf)
   --config-dir DIR   smithproxy.cfg + network.conf
   --data-dir DIR     Console logs, private /run and diagnostics
+  --rootfs DIR       Run Smithproxy in this prepared root filesystem
+  --build-rootfs DIR Build a root filesystem for SMITHPROXY_BIN and exit
   -h, --help         Show this help
 
 Environment:
   SMITHPROXY_BIN     Binary path or command in PATH, default: smithproxy
+
+Rootfs lifecycle:
+  SMITHPROXY_BIN=./build/smithproxy smithproxy.runner --build-rootfs ./rootfs
+  smithproxy.runner ... --rootfs ./rootfs
+
+The runner, API relay, networking and cleanup remain on the host. Only the
+Smithproxy process enters the rootfs. The immutable base is used as an overlay
+lower layer with a private transient upper layer.
 
 network.conf (trusted Bash file):
   INPUT_CIDRS[di0]=198.18.10.1/24
@@ -93,11 +105,67 @@ HELP
 # Plain text keeps the output readable both in a terminal and in saved logs.
 log() { printf '[runner] %s\n' "$*"; }
 
+copy_rootfs_file() {
+    local source=$1 rootfs=$2 destination
+    [[ -e $source ]] || return 0
+    destination=$rootfs$source
+    mkdir -p "$(dirname "$destination")"
+    cp -L --preserve=mode,timestamps "$source" "$destination"
+}
+
+build_rootfs() {
+    local rootfs=$1 binary=$2 ldd_output dependency
+    if [[ -e $rootfs && (! -d $rootfs || -n $(find "$rootfs" -mindepth 1 -print -quit)) ]]; then
+        echo "Rootfs output must be absent or empty: $rootfs" >&2
+        return 2
+    fi
+    mkdir -p "$rootfs"/{usr/bin,etc,proc,dev,run,tmp,var/log/smithproxy,var/smithproxy/data}
+    install -m 0555 "$binary" "$rootfs/usr/bin/smithproxy"
+
+    ldd_output=$(ldd "$binary" 2>&1) || {
+        [[ $ldd_output == *"not a dynamic executable"* || $ldd_output == *"statically linked"* ]] || {
+            printf '%s\n' "$ldd_output" >&2
+            return 1
+        }
+    }
+    [[ $ldd_output != *"not found"* ]] || {
+        printf 'Unresolved rootfs dependency:\n%s\n' "$ldd_output" >&2
+        return 1
+    }
+    while IFS= read -r dependency; do
+        [[ -n $dependency ]] && copy_rootfs_file "$dependency" "$rootfs"
+    done < <(awk '{ for (i=1; i<=NF; i++) if ($i ~ /^\//) print $i }' <<<"$ldd_output" | sort -u)
+
+    # NSS modules are loaded dynamically and therefore do not necessarily
+    # appear in ldd output. Keep hostname and local-account lookup functional.
+    while IFS= read -r dependency; do
+        copy_rootfs_file "$dependency" "$rootfs"
+    done < <(find /lib /usr/lib -type f \
+        \( -name 'libnss_files.so.2' -o -name 'libnss_dns.so.2' -o -name 'libnss_resolve.so.2' \) \
+        2>/dev/null | sort -u)
+
+    for dependency in /etc/nsswitch.conf /etc/hosts /etc/services /etc/protocols /etc/resolv.conf; do
+        copy_rootfs_file "$dependency" "$rootfs"
+    done
+    if [[ -d /etc/ssl/certs ]]; then
+        mkdir -p "$rootfs/etc/ssl"
+        cp -aL /etc/ssl/certs "$rootfs/etc/ssl/"
+    fi
+    chmod 1777 "$rootfs/tmp"
+    {
+        printf 'format=smithproxy-rootfs-v1\n'
+        printf 'binary_sha256=%s\n' "$(sha256sum "$binary" | awk '{print $1}')"
+        printf 'created_utc=%s\n' "$(date -u +%FT%TZ)"
+    } > "$rootfs/rootfs.manifest"
+    log "Rootfs created: $rootfs"
+    log "Binary: /usr/bin/smithproxy ($(du -sh "$rootfs" | awk '{print $1}'))"
+}
+
 # == 1. Configuration and input validation ============================================
 while (($#)); do
     case "$1" in
         -h|--help) usage; exit 0 ;;
-        --in|--out|--config-dir|--data-dir|--namespace|--api-bind|--api-port|--telemetry-net|--telemetry-cidr|--telemetry-gateway)
+        --in|--out|--config-dir|--data-dir|--namespace|--api-bind|--api-port|--telemetry-net|--telemetry-cidr|--telemetry-gateway|--rootfs|--build-rootfs)
             if (($# < 2)) || [[ -z $2 || $2 == --* ]]; then
                 printf 'Missing value for %s\n' "$1" >&2
                 exit 2
@@ -116,13 +184,10 @@ while (($#)); do
         --api-port)   API_PORT_OVERRIDE=$2 ;;
         --config-dir) CONFIG_DIR=$(realpath "$2") ;;
         --data-dir)   DATA_DIR=$(realpath -m "$2") ;;
+        --rootfs)     ROOTFS=$(realpath "$2") ;;
+        --build-rootfs) BUILD_ROOTFS=$(realpath -m "$2") ;;
     esac
     shift 2
-done
-: "${CONFIG_DIR:?Specify --config-dir}" "${DATA_DIR:?Specify --data-dir}"
-((EUID == 0)) || { echo 'The runner requires root.' >&2; exit 1; }
-for command in ip nft socat setsid unshare mount sysctl awk cut; do
-    command -v "$command" >/dev/null || { echo "Missing command: $command" >&2; exit 1; }
 done
 SMITHPROXY_BIN=$(command -v "$SMITHPROXY_BIN") || {
     echo 'Cannot locate SMITHPROXY_BIN; specify a compiled executable, not a source directory.' >&2
@@ -132,6 +197,25 @@ SMITHPROXY_BIN=$(realpath "$SMITHPROXY_BIN")
 [[ -f $SMITHPROXY_BIN && -x $SMITHPROXY_BIN ]] || {
     echo "SMITHPROXY_BIN must point to an executable file: $SMITHPROXY_BIN" >&2; exit 1;
 }
+if [[ -n $BUILD_ROOTFS ]]; then
+    [[ -z $ROOTFS ]] || { echo '--build-rootfs and --rootfs are mutually exclusive.' >&2; exit 2; }
+    for command in ldd find install cp sha256sum; do
+        command -v "$command" >/dev/null || { echo "Missing command: $command" >&2; exit 1; }
+    done
+    build_rootfs "$BUILD_ROOTFS" "$SMITHPROXY_BIN"
+    exit
+fi
+: "${CONFIG_DIR:?Specify --config-dir}" "${DATA_DIR:?Specify --data-dir}"
+((EUID == 0)) || { echo 'The runner requires root.' >&2; exit 1; }
+for command in ip nft socat setsid unshare mount sysctl awk cut; do
+    command -v "$command" >/dev/null || { echo "Missing command: $command" >&2; exit 1; }
+done
+if [[ -n $ROOTFS ]]; then
+    [[ -d $ROOTFS && -x $ROOTFS/usr/bin/smithproxy && -r $ROOTFS/rootfs.manifest ]] || {
+        echo "Invalid Smithproxy rootfs: $ROOTFS" >&2; exit 2;
+    }
+    command -v chroot >/dev/null || { echo 'Missing command: chroot' >&2; exit 1; }
+fi
 [[ -r $CONFIG_DIR/smithproxy.cfg ]] || {
     echo "Cannot read configuration: $CONFIG_DIR/smithproxy.cfg" >&2; exit 1;
 }
@@ -205,10 +289,12 @@ HOST_PID=$$                         # Use this PID to move links back to the hos
 MOVED=()                            # Only clean up links we have taken ownership of.
 PROXY_PID=
 API_PID=
+ROOTFS_RUNTIME=
 
 log "1/7  Config:      $CONFIG_DIR"
 log "     Data:        $DATA_DIR"
 log "     Network:     ${INPUTS[*]} -> [$NS / Smithproxy] -> $OUT"
+[[ -z $ROOTFS ]] || log "     Rootfs:      $ROOTFS"
 [[ -z $TELEMETRY_IF ]] || log "     Telemetry:   $TELEMETRY_IF -> ${TELEMETRY_ROUTES[*]}"
 
 # == 2. Namespace ownership and cleanup ==========================================
@@ -230,6 +316,7 @@ cleanup() {
     [[ -z $PROXY_PID ]] || wait "$PROXY_PID" 2>/dev/null
     [[ -z $API_PID ]]   || wait "$API_PID" 2>/dev/null
     rm -f "$DATA_DIR/proxy.pid"
+    [[ -z $ROOTFS_RUNTIME ]] || rm -rf -- "$ROOTFS_RUNTIME"
 
     # Keep packet counters available after the namespace has been removed.
     ip netns exec "$NS" nft list ruleset > "$DATA_DIR/nft-final.txt" 2>/dev/null
@@ -383,10 +470,32 @@ log "5/7  TPROXY active: TCP/UDP :$PLAIN_PORT, TLS/DTLS :$TLS_PORT, QUIC :$QUIC_
 # Upstream hard-codes its PID file under /var/run. A private mount namespace with
 # its own /run avoids host collisions. A network namespace alone does not isolate files!
 # Pass sh parameters as arguments so paths containing spaces work correctly.
-setsid ip netns exec "$NS" unshare --mount --propagation private \
-    sh -c 'mount --bind "$1" /run && exec "$2" --config-file "$3"' \
-    sh "$DATA_DIR/run" "$SMITHPROXY_BIN" "$CONFIG_DIR/smithproxy.cfg" \
-    > "$DATA_DIR/proxy-console.log" 2>&1 &
+if [[ -z $ROOTFS ]]; then
+    setsid ip netns exec "$NS" unshare --mount --propagation private \
+        sh -c 'mount --bind "$1" /run && exec "$2" --config-file "$3"' \
+        sh "$DATA_DIR/run" "$SMITHPROXY_BIN" "$CONFIG_DIR/smithproxy.cfg" \
+        > "$DATA_DIR/proxy-console.log" 2>&1 &
+else
+    ROOTFS_WORKSPACE=$(dirname "$CONFIG_DIR")
+    ROOTFS_RUNTIME=$(mktemp -d /run/smithproxy-rootfs.XXXXXX)
+    mkdir -p "$ROOTFS_RUNTIME"/{upper,work,merged}
+    setsid ip netns exec "$NS" unshare --mount --propagation private \
+        sh -c '
+            set -eu
+            data=$1; rootfs=$2; workspace=$3; config=$4; runtime=$5
+            upper=$runtime/upper; work=$runtime/work; merged=$runtime/merged
+            mount -t overlay overlay -o "lowerdir=$rootfs,upperdir=$upper,workdir=$work" "$merged"
+            mkdir -p "$merged$workspace" "$merged$data" "$merged/run" "$merged/proc" "$merged/dev"
+            mount --bind "$workspace" "$merged$workspace"
+            mount --bind "$data" "$merged$data"
+            mount --bind "$data/run" "$merged/run"
+            mount -t proc proc "$merged/proc"
+            mount --rbind /dev "$merged/dev"
+            mount --make-rslave "$merged/dev"
+            exec chroot "$merged" /usr/bin/smithproxy --config-file "$config/smithproxy.cfg"
+        ' sh "$DATA_DIR" "$ROOTFS" "$ROOTFS_WORKSPACE" "$CONFIG_DIR" "$ROOTFS_RUNTIME" \
+        > "$DATA_DIR/proxy-console.log" 2>&1 &
+fi
 PROXY_PID=$!
 printf '%s\n' "$PROXY_PID" > "$DATA_DIR/proxy.pid"
 

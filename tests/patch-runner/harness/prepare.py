@@ -8,9 +8,13 @@ root = pathlib.Path(sys.argv[1]).resolve()
 source = root / 'src'
 config = root / 'config'
 data = root / 'data'
+logs = pathlib.Path(os.environ.get('LAB_LOG_DIR', data)).resolve()
+captures = pathlib.Path(os.environ.get('LAB_CAPTURE_DIR', data)).resolve()
 certs = config / 'certs'
 certs.mkdir(parents=True, exist_ok=True)
 data.mkdir(exist_ok=True)
+logs.mkdir(parents=True, exist_ok=True)
+captures.mkdir(parents=True, exist_ok=True)
 def openssl(*args):
     subprocess.run(['openssl', *map(str, args)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 openssl('req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '2', '-subj', '/CN=Runner Test CA', '-keyout', certs/'ca-key.pem', '-out', certs/'ca-cert.pem', '-addext', 'basicConstraints=critical,CA:TRUE', '-addext', 'keyUsage=critical,keyCertSign,cRLSign')
@@ -142,7 +146,7 @@ if os.environ.get('ROUTING_TEST') == '1':
     if (address_count, port_count, routing_count, policy_count) != (1, 1, 1, 1):
         raise RuntimeError('cannot inject routing suite objects/profiles/rules')
 text = text.replace('/etc/smithproxy/certs/default/',str(certs)+'/').replace('/etc/smithproxy/msg/en/',str(source/'etc/msg/en')+'/')
-text = text.replace('/var/smithproxy/data',str(data)).replace('/var/log/smithproxy/',str(data)+'/')
+text = text.replace('/var/smithproxy/data', str(captures)).replace('/var/log/smithproxy/', str(logs) + '/')
 text = text.replace('certs_ca_key_password = "smithproxy"','certs_ca_key_password = ""')
 text = text.replace('accept_redirect = TRUE','accept_redirect = FALSE').replace('accept_socks = TRUE','accept_socks = FALSE')
 if os.environ.get('ROUTING_TEST') == '1':

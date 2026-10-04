@@ -43,6 +43,36 @@ syntax.
 | `--quiet` | Print verdicts, failures and report paths instead of full logs |
 | `-h`, `--help` | Print built-in help |
 
+## Optional root filesystem
+
+The network runner can build and consume a minimal Smithproxy root filesystem
+without changing its network, API relay or lifecycle behavior:
+
+```bash
+SMITHPROXY_BIN=build-full/smithproxy \
+  tests/patch-runner/smithproxy.runner --build-rootfs /tmp/smithproxy-rootfs
+
+sudo SMITHPROXY_BIN=build-full/smithproxy tests/patch-runner/smithproxy.runner \
+  --in 'di*' --out do0 --config-dir ./config --data-dir ./data \
+  --rootfs /tmp/smithproxy-rootfs
+```
+
+`--build-rootfs DIR` is a separate build action and exits after producing the
+artifact. It copies the selected binary, its dynamic-library closure, NSS
+modules and the system CA store. The ordinary runner never installs packages or
+builds a rootfs during startup.
+
+With `--rootfs DIR`, only Smithproxy enters the filesystem. The runner, network
+namespace setup, nftables policy, host-side API relay and cleanup remain
+unchanged. The prepared rootfs is an immutable overlay lower layer; temporary
+writes stay in a private runtime overlay, while the existing lab workspace and
+data directory are bind-mounted read-write at their original absolute paths.
+The rootfs tests verify writable storage explicitly: Smithproxy saves its live
+configuration under `work`, writes application logs under `logs`, and the
+capture suite writes and validates real PCAPNG files under `captures`. These
+paths remain host-visible and persistent; the rest of the rootfs overlay is
+discarded with the process.
+
 `--quiet` is intentionally unavailable for `benchmark` and `--run`, whose live
 output is their primary interface.
 
