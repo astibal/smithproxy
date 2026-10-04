@@ -78,6 +78,13 @@ def run(args):
         if "accept_api = FALSE;" not in text:
             raise RuntimeError("generated fixture does not disable accept_api")
         text = text.replace("accept_api = FALSE;", api_settings, 1)
+        text = text.replace(
+            "settings = {",
+            "settings = {\n"
+            "    webhook = { enabled = true; url = \"https://configured.invalid/\"; "
+            "tls_verify = false; api_override = true; };",
+            1,
+        )
         # This scenario isolates the control plane; SOCKS transport coverage
         # belongs to its own tests and would unnecessarily reserve TCP+UDP.
         text = text.replace("accept_socks = TRUE;", "accept_socks = FALSE;", 1)
@@ -107,7 +114,13 @@ def run(args):
             assert status == 200
             authorization = json.loads(payload)
             assert authorization["auth_token"] and authorization["csrf_token"]
-            assert len([value for name, value in headers if name.lower() == "set-cookie"]) == 2
+            cookie_values = [value for name, value in headers if name.lower() == "set-cookie"]
+            assert len(cookie_values) == 2
+            auth_headers = {
+                "Content-Type": "application/json",
+                "Cookie": "; ".join(value.split(";", 1)[0] for value in cookie_values),
+                "csrf_token": authorization["csrf_token"],
+            }
 
             status, _, payload = api_request(api_port, "GET", "/cacert")
             assert status == 200 and b"BEGIN CERTIFICATE" in payload
@@ -117,6 +130,29 @@ def run(args):
                 headers={"X-API-Key": api_key})
             assert status == 200
             assert isinstance(json.loads(payload), dict)
+
+            status, _, payload = api_request(
+                api_port, "POST", "/api/webhook/register",
+                body=json.dumps({"params": {"rande_url": ""}}),
+                headers=auth_headers)
+            document = json.loads(payload)
+            assert status == 200 and document.get("status") == "rejected", (status, document)
+
+            status, _, payload = api_request(
+                api_port, "POST", "/api/webhook/register",
+                body=json.dumps({"params": {
+                    "rande_url": "https://override.invalid/",
+                    "rande_tls_verify": True,
+                }}),
+                headers=auth_headers)
+            document = json.loads(payload)
+            assert status == 200 and document.get("status") == "accepted", (status, document)
+
+            status, _, payload = api_request(
+                api_port, "POST", "/api/webhook/unregister", body="{}",
+                headers=auth_headers)
+            document = json.loads(payload)
+            assert status == 200 and document.get("status") == "unregistered", (status, document)
 
             status, _, payload = api_request(
                 api_port, "POST", "/api/status/ping", body="{}",

@@ -2286,6 +2286,8 @@ int cli_diag_worker_pool_list(DiagCli *cli, const char *command, char *argv[], i
     ss << "  enqueued tasks: " << ts << ", active workers: " << tr << "/" << wc << "\n";
     ss << "  total tasks executed: " << te << ", total tasks finished: " << tf << "\n";
     ss << "  standard exceptions: " << sex << ", unknown exceptions: " << uex << "\n";
+    ss << "  webhook requests pending: " << sx::http::AsyncRequest::pending_requests.load()
+       << ", dropped: " << sx::http::AsyncRequest::dropped_requests.load() << "\n";
     ss << "\n";
     ss << "  is active: " << active << "\n";
 
@@ -2395,7 +2397,7 @@ int cli_diag_api_info(DiagCli *cli, const char *command, char *argv[], int argc)
             ss << "   URL: " << url << "\r\n";
             ss << "      Total requests: " << stats.counter_total() << "\r\n";
             if(stats.errq().newest().has_value()) {
-                ss << "      Last error: " << stats.errq().newest().value() - time(nullptr) << "s\r\n";
+                ss << "      Last error: " << time(nullptr) - stats.errq().newest().value() << "s ago\r\n";
             }
             else {
                 ss << "      Last error: \r\n";

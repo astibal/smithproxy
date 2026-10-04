@@ -965,7 +965,7 @@ bool CfgFactory::load_settings () {
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "task_debug", sx::http::Request::DEBUG);
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "task_debug_dump", sx::http::Request::DEBUG_DUMP_OK);
 
-        if(not settings_webhook.hostid.empty()) sx::http::webhooks::set_hostid(settings_webhook.hostid);
+        sx::http::webhooks::set_hostid(settings_webhook.hostid);
     }
 
     return true;

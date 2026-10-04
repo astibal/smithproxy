@@ -41,6 +41,7 @@
 #define __SMITHLOG_HPP__
 
 #include <queue>
+#include <atomic>
 #include <mutex>
 #include <map>
 #include <string>
@@ -65,7 +66,7 @@ public:
     unsigned int max_len = 1000;
     bool debug_queue = false;
 
-    bool sig_terminate = false;
+    std::atomic_bool sig_terminate {false};
 protected:
 
     std::queue<log_entry> logs_;

@@ -41,6 +41,8 @@
 #include <smithlog.hpp>
 #include <unistd.h>
 
+#include <optional>
+
 using namespace socle;
 
 QueueLogger::QueueLogger(): LogMux(), lockable() {
@@ -52,7 +54,8 @@ size_t QueueLogger::write_log(loglevel l, std::string& sss) {
 
 
     if(debug_queue) {
-        logs_.push(log_entry(l, string_format("[logger=0x%x qsize=%d]", this, logs_.size()) + sss));
+        logs_.push(log_entry(l, string_format("[logger=%p qsize=%zu]",
+                                             static_cast<void*>(this), logs_.size()) + sss));
     } else {
         logs_.push(log_entry(l, sss));
     }
@@ -60,7 +63,7 @@ size_t QueueLogger::write_log(loglevel l, std::string& sss) {
 
     // set warning condition
     if(warned  == 0 && logs_.size() >= max_len - max_len/10 ) {
-        auto msg = string_format("logger queue filling up: %d/%d", logs_.size(), max_len);
+        auto msg = string_format("logger queue filling up: %zu/%u", logs_.size(), max_len);
         LogMux::write_log(log::level::ERR, msg);
         warned++;
     }
@@ -101,27 +104,29 @@ void QueueLogger::run_queue(std::shared_ptr<QueueLogger> log_src) {
         return;
     }
 
-    while (!log_src->sig_terminate) {
-
-        if(! log_src->logs_.empty()) {
-
-            auto lc_ = std::scoped_lock(*log_src.get());
-
-            log_entry e = log_src->logs_.front(); log_src->logs_.pop();
-
-            //copy elements and unlock before write_log.
-            loglevel l = e.first;
-            std::string msg = e.second;
-
-
-            if(log_src->debug_queue) {
-                auto ss = string_format("logsrc=0x%x [%d]| ", log_src.get(), log_src->logs_.size());
-                msg = ss + msg;
+    while (!log_src->sig_terminate.load(std::memory_order_acquire)) {
+        std::optional<log_entry> entry;
+        std::size_t queued = 0;
+        {
+            auto lock = std::scoped_lock(*log_src);
+            if (!log_src->logs_.empty()) {
+                entry = std::move(log_src->logs_.front());
+                log_src->logs_.pop();
+                queued = log_src->logs_.size();
             }
-            log_src->write_disk(l, msg);
-            
+        }
+
+        if (entry) {
+            auto& [level, message] = *entry;
+            if(log_src->debug_queue) {
+                message = string_format("logsrc=%p [%zu]| ",
+                                        static_cast<void*>(log_src.get()), queued) + message;
+            }
+            // write_disk takes the logger lock itself. Never call it while the
+            // queue lock above is held: lockable uses a non-recursive mutex.
+            log_src->write_disk(level, message);
         } else {
-            usleep(1000); // wait 10ms if there is nothing to read
+            usleep(1000); // wait 1ms if there is nothing to read
         }
     }
 }

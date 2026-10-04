@@ -1,8 +1,40 @@
 #include "cli.hpp"
+#include "line_editor.hpp"
 
 #include <gtest/gtest.h>
 
+#include <sstream>
+
 namespace libcli2 {
+namespace {
+
+struct ScopedStreamBuffer {
+    explicit ScopedStreamBuffer(std::ostream& stream, std::streambuf* replacement)
+        : stream(stream), original(stream.rdbuf(replacement)) {}
+    ~ScopedStreamBuffer() { stream.rdbuf(original); }
+
+    std::ostream& stream;
+    std::streambuf* original;
+};
+
+}  // namespace
+
+struct LineEditorTestAccess {
+    static bool apply_completion(LineEditor& editor, std::string& line,
+                                 std::size_t& cursor, bool list_if_ambiguous) {
+        return editor.apply_completion(line, cursor, list_if_ambiguous);
+    }
+
+    static void redraw(LineEditor const& editor, std::string_view prompt,
+                       std::string_view line, std::size_t cursor) {
+        editor.redraw(prompt, line, cursor);
+    }
+
+    static std::vector<std::string> const& history(LineEditor const& editor) {
+        return editor.history_;
+    }
+};
+
 namespace {
 
 TEST(Libcli2, ExecutesUniquePrefixesAndParsesQuotedArguments) {
@@ -209,6 +241,82 @@ TEST(Libcli2, HelpUsesDecoratorsWithoutChangingPlainOutput) {
     const auto colored = cli.help("show session", context);
     EXPECT_NE(colored.find("\033[36msession\033[0m"), std::string::npos);
     EXPECT_NE(colored.find("\033[2;37mList sessions\033[0m"), std::string::npos);
+}
+
+TEST(LineEditor, HistorySuppressesEmptyAndAdjacentDuplicatesAndRemainsBounded) {
+    Cli cli;
+    Context context;
+    LineEditor editor(cli, context);
+
+    editor.add_history("");
+    editor.add_history("show status");
+    editor.add_history("show status");
+    for (int i = 0; i < 260; ++i)
+        editor.add_history("command-" + std::to_string(i));
+
+    auto const& history = LineEditorTestAccess::history(editor);
+    ASSERT_EQ(history.size(), 256U);
+    EXPECT_EQ(history.front(), "command-4");
+    EXPECT_EQ(history.back(), "command-259");
+}
+
+TEST(LineEditor, AppliesUniqueAndCommonPrefixCompletions) {
+    Cli cli;
+    cli.command("show session").handler([](Context&, const Invocation&) { return 0; });
+    cli.command("show settings").handler([](Context&, const Invocation&) { return 0; });
+    Context context;
+    LineEditor editor(cli, context);
+
+    std::string command = "sh";
+    std::size_t cursor = command.size();
+    EXPECT_TRUE(LineEditorTestAccess::apply_completion(editor, command, cursor, false));
+    EXPECT_EQ(command, "show ");
+    EXPECT_EQ(cursor, command.size());
+
+    command = "show s";
+    cursor = command.size();
+    EXPECT_TRUE(LineEditorTestAccess::apply_completion(editor, command, cursor, false));
+    EXPECT_EQ(command, "show se");
+    EXPECT_EQ(cursor, command.size());
+}
+
+TEST(LineEditor, ListsAmbiguousAndMissingCandidatesWithoutChangingInput) {
+    Cli cli;
+    cli.command("show session").help("Session details").handler(
+        [](Context&, const Invocation&) { return 0; });
+    cli.command("show settings").help("Configuration").handler(
+        [](Context&, const Invocation&) { return 0; });
+    Context context;
+    LineEditor editor(cli, context);
+
+    std::ostringstream output;
+    ScopedStreamBuffer capture(std::cout, output.rdbuf());
+
+    std::string command = "show se";
+    std::size_t cursor = command.size();
+    EXPECT_TRUE(LineEditorTestAccess::apply_completion(editor, command, cursor, true));
+    EXPECT_EQ(command, "show se");
+    EXPECT_NE(output.str().find("session"), std::string::npos);
+    EXPECT_NE(output.str().find("settings"), std::string::npos);
+
+    output.str({});
+    output.clear();
+    command = "unknown";
+    cursor = command.size();
+    EXPECT_FALSE(LineEditorTestAccess::apply_completion(editor, command, cursor, false));
+    EXPECT_TRUE(LineEditorTestAccess::apply_completion(editor, command, cursor, true));
+    EXPECT_NE(output.str().find("(no matches)"), std::string::npos);
+}
+
+TEST(LineEditor, RedrawRestoresCursorPosition) {
+    Cli cli;
+    Context context;
+    LineEditor editor(cli, context);
+    std::ostringstream output;
+    ScopedStreamBuffer capture(std::cout, output.rdbuf());
+
+    LineEditorTestAccess::redraw(editor, "# ", "status", 3);
+    EXPECT_EQ(output.str(), "\r\033[2K# status\033[3D");
 }
 
 }  // namespace

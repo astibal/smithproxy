@@ -65,7 +65,19 @@ namespace sx::http {
 
         struct config {
             static inline long timeout = 5;
+            static inline size_t max_pending = 256;
         };
+
+        struct request_settings {
+            bool enabled = false;
+            std::string url;
+            std::string dns_servers;
+            bool verify_tls = true;
+            std::string bind_interface;
+        };
+
+        static inline std::atomic_size_t pending_requests = 0;
+        static inline std::atomic_uint64_t dropped_requests = 0;
 
         using expected_reply = sx::http::expected_reply;
         using reply_hook = std::function<void(expected_reply const&)>;
@@ -73,26 +85,35 @@ namespace sx::http {
 
         class RequestTask : public sx::tp::PoolTask {
         public:
-            RequestTask(std::string const& copy_url, std::string const& copy_pay, reply_hook  hook):
-            sx::tp::PoolTask(), url(copy_url), payload(copy_pay), hook(hook) {};
+            RequestTask(request_settings settings, std::string copy_pay,
+                        reply_hook hook, bool counted = false):
+            sx::tp::PoolTask(), settings(std::move(settings)), payload(std::move(copy_pay)), hook(std::move(hook)),
+            counted(counted) {};
+
+            ~RequestTask() override {
+                if (counted)
+                    pending_requests.fetch_sub(1, std::memory_order_relaxed);
+            }
 
             void execute(std::atomic_bool const& stop_flag) override {
+                if (stop_flag) return;
                 if(log_stream.has_value()) {
-                    emit_url_wait_log(url, payload, log_stream.value(), hook);
+                    emit_url_wait_log(settings, payload, log_stream.value(), hook);
                 }
                 else {
-                    emit_url_wait(url, payload, hook);
+                    std::stringstream log;
+                    emit_url_wait_log(settings, payload, log, hook);
                 }
             }
 
             std::string info_short() const override {
                 return string_format("web request: POST with %dB of data", payload.length()); };
             std::string info_long() const override {
-                return string_format("web request: POST %s with %dB of data", url.c_str(), payload.length());
+                return string_format("web request: POST %s with %dB of data", settings.url.c_str(), payload.length());
             };
             std::string info_detailed() const override {
                 std::stringstream ss;
-                ss << string_format("web request details: POST %s with %dB of data\n", url.c_str(), payload.length());
+                ss << string_format("web request details: POST %s with %dB of data\n", settings.url.c_str(), payload.length());
                 ss << "Payload: \n" << hex_dump((unsigned char*)payload.data(), payload.length()) << "\n";
                 ss << "-- \n";
 
@@ -103,12 +124,15 @@ namespace sx::http {
                 log_stream = ss;
             }
 
+            void count_pending() { counted = true; }
+
 
         private:
-            std::string url;
+            request_settings settings;
             std::string payload;
             reply_hook hook;
             std::optional<std::reference_wrapper<std::stringstream>> log_stream;
+            bool counted = false;
         };
 
         static AsyncRequest& get() {
@@ -123,44 +147,81 @@ namespace sx::http {
             return *asr;
         }
 
+        static request_settings settings_snapshot() {
+            request_settings settings;
+            auto lc_ = std::scoped_lock(CfgFactory::lock());
+            auto const& factory = CfgFactory::get();
+            settings.enabled = factory->settings_webhook.enabled;
+            settings.url = factory->settings_webhook.active_url();
+            settings.verify_tls = factory->settings_webhook.active_tls_verify();
+            settings.bind_interface = factory->settings_webhook.bind_interface;
+            std::ostringstream dns;
+            for (size_t i = 0; i < factory->db_nameservers.size(); ++i) {
+                dns << factory->db_nameservers[i].str_host;
+                if (i + 1 < factory->db_nameservers.size()) dns << ',';
+            }
+            settings.dns_servers = dns.str();
+            return settings;
+        }
+
+        static void invoke_hook(reply_hook const& hook, expected_reply const& reply) noexcept {
+            try {
+                hook(reply);
+            }
+            catch (std::exception const& error) {
+                Log::get()->events().insert(ERR, "webhook callback failed: %s", error.what());
+            }
+            catch (...) {
+                Log::get()->events().insert(ERR, "webhook callback failed: unknown exception");
+            }
+        }
+
 
         static void emit_url_wait(std::string const& url, std::string const& pay, reply_hook const& hook) {
             std::stringstream ss;
-            emit_url_wait_log(url, pay, ss, hook);
+            auto settings = settings_snapshot();
+            settings.url = url;
+            emit_url_wait_log(settings, pay, ss, hook);
         }
 
         // synchronous call, use emit_url() to use thread pool
         static void emit_url_wait_log(std::string const& url, std::string const& pay, std::stringstream& log, reply_hook const& hook) {
+            auto settings = settings_snapshot();
+            settings.url = url;
+            emit_url_wait_log(settings, pay, log, hook);
+        }
 
-            if(url.empty() or pay.empty()) return;
+        static void emit_url_wait_log(request_settings const& settings, std::string const& pay,
+                                      std::stringstream& log, reply_hook const& hook) {
 
-            std::string dns_servers;
-            bool do_verify = true;
-            std::string bind_if;
-            {
-                auto lc_ = std::scoped_lock(CfgFactory::lock());
-                auto is_enabled = CfgFactory::get()->settings_webhook.enabled;
+            if (!hook) return;
+            auto fail = [&hook, &settings](std::string message) {
+                expected_reply_t result;
+                result.request = settings.url;
+                result.response = {600, std::move(message)};
+                invoke_hook(hook, expected_reply{std::move(result)});
+            };
 
-                if(not is_enabled) {
-                    return; // not an error, we just don't use webhooks
-                }
-
-                auto const &nms = CfgFactory::get()->db_nameservers;
-
-                std::ostringstream oss;
-                for (size_t i = 0; i < nms.size(); ++i) {
-                    oss << nms[i].str_host;     // loaded from config, string should always be there
-                    if (i < nms.size() - 1) {
-                        oss << ",";
-                    }
-                }
-                dns_servers = oss.str();
-                do_verify = CfgFactory::get()->settings_webhook.active_tls_verify();
-                bind_if = CfgFactory::get()->settings_webhook.bind_interface;
+            if(settings.url.empty()) {
+                fail("webhook URL is empty");
+                return;
             }
-            log << make_ts() << ": init: settings: dns='" << dns_servers << "' vrfy=" << do_verify << " bind_if='" << bind_if << "'\n";
+            if(pay.empty()) {
+                fail("webhook payload is empty");
+                return;
+            }
 
-            Request request(Request::DEFAULT, dns_servers);
+            if(!settings.enabled) {
+                fail("webhooks are disabled");
+                return;
+            }
+
+            try {
+            log << make_ts() << ": init: settings: dns='" << settings.dns_servers
+                << "' vrfy=" << settings.verify_tls << " bind_if='"
+                << settings.bind_interface << "'\n";
+
+            Request request(Request::DEFAULT, settings.dns_servers);
 
             // make custom setup
             request.set_timeout(config::timeout);
@@ -168,8 +229,8 @@ namespace sx::http {
 
             request.set_stale_detection();
 
-            if(not do_verify) request.disable_tls_verify();
-            if(not bind_if.empty()) request.set_interface(bind_if);
+            if(not settings.verify_tls) request.disable_tls_verify();
+            if(not settings.bind_interface.empty()) request.set_interface(settings.bind_interface);
 
             // set debugging explicitly
             if(Request::DEBUG) {
@@ -178,19 +239,19 @@ namespace sx::http {
             }
 
             log << make_ts() << ": init: init_hook to start\n";
-            auto init_hook_arg = request.make_reply(url, -100, "");
-            hook(init_hook_arg);
+            auto init_hook_arg = request.make_reply(settings.url, -100, "");
+            invoke_hook(hook, init_hook_arg);
             log << make_ts() << ": init: init_hook finished\n";
 
             log << make_ts() << ": work: request emit to start\n";
-            auto reply = request.emit(url, pay);
+            auto reply = request.emit(settings.url, pay);
             log << make_ts() << ": work: request emit finished\n";
 
             if(not reply or reply.value().response.first >= 300) {
                 long code = reply.has_value() ? reply->response.first : -1;
                 std::string msg = reply.has_value() ? reply->response.second : "request failed";
 
-                Log::get()->events().insert(ERR, "error in request '%s' (retries: %d): %d:%s", url.c_str(), request.attempts, code, msg.c_str());
+                Log::get()->events().insert(ERR, "error in request '%s' (attempts: %d): %d:%s", settings.url.c_str(), request.attempts, code, msg.c_str());
                 log << make_ts() << ": finished: result is error: (code="<< code << ", msg='" << msg << "'\n";
 
 
@@ -204,41 +265,56 @@ namespace sx::http {
                 log << make_ts() << ": finished: result is OK (code="<< rp.first << ", sz="<< rp.second.size() << "B)\n";
             }
             log << make_ts() << ": finished: hook to start\n";
-            hook(reply);
+            invoke_hook(hook, reply);
             log << make_ts() << ": finished: hook finished\n";
+            }
+            catch (std::exception const& error) {
+                Log::get()->events().insert(ERR, "webhook request failed before completion: %s", error.what());
+                fail(std::string("webhook request failed: ") + error.what());
+            }
+            catch (...) {
+                Log::get()->events().insert(ERR, "webhook request failed before completion: unknown exception");
+                fail("webhook request failed: unknown exception");
+            }
         }
 
         static void emit_wait(std::string const& pay, reply_hook const& hook) {
-            std::string url;
-            {
-                auto lc_ = std::scoped_lock(CfgFactory::lock());
-                url = CfgFactory::get()->settings_webhook.active_url();
-            }
-
-            emit_url_wait(url, pay, hook);
+            std::stringstream log;
+            emit_url_wait_log(settings_snapshot(), pay, log, hook);
         }
 
-        static bool emit_url(std::string const& url, std::string const& pay, reply_hook const& hook) {
+        static bool enqueue(request_settings settings, std::string const& pay, reply_hook const& hook) {
+            if (!settings.enabled || settings.url.empty() || pay.empty() || !hook
+                || SmithProxy::instance().terminate_flag)
+                return false;
+
+            auto task = std::make_unique<RequestTask>(std::move(settings), pay, hook);
+
+            size_t pending = pending_requests.load(std::memory_order_relaxed);
+            do {
+                if (pending >= config::max_pending) {
+                    dropped_requests.fetch_add(1, std::memory_order_relaxed);
+                    return false;
+                }
+            } while (!pending_requests.compare_exchange_weak(
+                pending, pending + 1, std::memory_order_relaxed));
+            task->count_pending();
+
             auto &pool = sx::tp::ThreadPool::instance::get();
-
-            // add extra safety and copy values, to make them copyable in thread lambda capture
-            std::string copy_url(url);
-            std::string copy_pay(pay);
-
-            auto task = std::make_unique<RequestTask>(copy_url, copy_pay, hook);
             auto ret = pool.enqueue(std::move(task));
+            if (ret <= 0)
+                dropped_requests.fetch_add(1, std::memory_order_relaxed);
+            return ret > 0;
+        };
 
-            return (ret > 0);
+        static bool emit_url(std::string const& url, std::string const& pay, reply_hook const& hook) {
+            auto settings = settings_snapshot();
+            settings.url = url;
+            return enqueue(std::move(settings), pay, hook);
         };
 
         static bool emit(std::string const& pay, reply_hook const& hook) {
-            std::string url;
-            {
-                auto lc_ = std::scoped_lock(CfgFactory::lock());
-                url = CfgFactory::get()->settings_webhook.active_url();
-            }
-
-            return emit_url(url, pay, hook);
+            return enqueue(settings_snapshot(), pay, hook);
         }
 
     };

@@ -9,6 +9,8 @@
 
 namespace libcli2 {
 
+struct LineEditorTestAccess;
+
 class LineEditor {
 public:
     LineEditor(const Cli& cli, const Context& context);
@@ -17,6 +19,8 @@ public:
     void add_history(std::string line);
 
 private:
+    friend struct LineEditorTestAccess;
+
     void redraw(std::string_view prompt, std::string_view line, std::size_t cursor) const;
     void show_candidates(const CompletionResult& completion) const;
     bool apply_completion(std::string& line, std::size_t& cursor, bool list_if_ambiguous) const;

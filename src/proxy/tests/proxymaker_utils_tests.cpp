@@ -33,8 +33,10 @@ struct FakeCom {
 struct FakeHost {
     int fd = -1;
     int connect_result = -1;
+    FakeCom* transport = nullptr;
     int socket() const { return fd; }
     int connect() { return connect_result; }
+    FakeCom* com() const { return transport; }
 };
 
 struct FakeProxy {
@@ -42,8 +44,8 @@ struct FakeProxy {
     FakeHost* left = nullptr;
     FakeHost* right = nullptr;
     ~FakeProxy() { ++destructed; }
-    FakeHost* first_left() { return left; }
-    FakeHost* first_right() { return right; }
+    FakeHost* first_left() const { return left; }
+    FakeHost* first_right() const { return right; }
 };
 
 struct FakeOwner {
@@ -59,8 +61,8 @@ struct FakeOwner {
 TEST(ProxyMakerUtils, RejectsFailedUpstreamBeforeRegisteringHandlers) {
     FakeProxy::destructed = 0;
     FakeCom transport;
-    FakeHost left{11, -1};
-    FakeHost right{-1, -1};
+    FakeHost left{11, -1, &transport};
+    FakeHost right{-1, -1, &transport};
     FakeOwner owner{&transport};
     auto proxy = std::make_unique<FakeProxy>();
     proxy->left = &left;
@@ -78,8 +80,8 @@ TEST(ProxyMakerUtils, RejectsFailedUpstreamBeforeRegisteringHandlers) {
 TEST(ProxyMakerUtils, RegistersBothSocketsBeforeTransferringOwnership) {
     FakeProxy::destructed = 0;
     FakeCom transport;
-    FakeHost left{11, -1};
-    FakeHost right{-1, 12};
+    FakeHost left{11, -1, &transport};
+    FakeHost right{-1, 12, &transport};
     FakeOwner owner{&transport};
     auto proxy = std::make_unique<FakeProxy>();
     auto* identity = proxy.get();
@@ -93,4 +95,20 @@ TEST(ProxyMakerUtils, RegistersBothSocketsBeforeTransferringOwnership) {
     EXPECT_EQ(transport.handlers.at(11), identity);
     EXPECT_EQ(transport.handlers.at(12), identity);
     EXPECT_EQ(FakeProxy::destructed, 0);
+}
+
+TEST(ProxyMakerUtils, RejectsMissingEndpointTransportsBeforeProxySetup) {
+    FakeCom transport;
+    FakeHost valid{11, -1, &transport};
+    FakeHost missing_transport{12, -1, nullptr};
+
+    EXPECT_FALSE(sx::proxymaker::valid_host_pair<FakeHost>(nullptr, &valid));
+    EXPECT_FALSE(sx::proxymaker::valid_host_pair<FakeHost>(&valid, nullptr));
+    EXPECT_FALSE(sx::proxymaker::valid_host_pair(&valid, &missing_transport));
+    EXPECT_TRUE(sx::proxymaker::valid_host_pair(&valid, &valid));
+
+    FakeProxy proxy{&valid, &missing_transport};
+    EXPECT_FALSE(sx::proxymaker::valid_proxy_endpoints(&proxy));
+    proxy.right = &valid;
+    EXPECT_TRUE(sx::proxymaker::valid_proxy_endpoints(&proxy));
 }

@@ -43,13 +43,36 @@
 
 #include <string>
 #include <atomic>
+#include <cstdint>
 #include <deque>
+#include <mutex>
+#include <unordered_map>
 
 #include <nlohmann/json.hpp>
 #include <service/http/async_request.hpp>
 
 
 namespace sx::http::webhooks {
+
+    struct refresh_gate {
+        explicit refresh_gate(std::int64_t interval): interval(interval) {}
+
+        bool acquire(std::int64_t now) {
+            auto expected = next_allowed.load(std::memory_order_relaxed);
+            while (now >= expected) {
+                if (next_allowed.compare_exchange_weak(
+                        expected, now + interval,
+                        std::memory_order_relaxed,
+                        std::memory_order_relaxed))
+                    return true;
+            }
+            return false;
+        }
+
+    private:
+        const std::int64_t interval;
+        std::atomic_int64_t next_allowed {0};
+    };
 
     struct timestampq {
         explicit timestampq(std::size_t nevents, time_t period): maxlen(nevents), period(period) {};
@@ -63,11 +86,8 @@ namespace sx::http::webhooks {
         };
 
         bool triggered() const {
-            if(not q.empty()) {
-                auto const &last = q.back();
-                return (time(nullptr) >= last + period);
-            }
-            return false;
+            if(maxlen == 0 || q.size() < maxlen) return false;
+            return q.front() >= q.back() && q.front() - q.back() <= period;
         }
 
         [[nodiscard]] std::optional<time_t> oldest() const {
@@ -97,7 +117,7 @@ namespace sx::http::webhooks {
                 errorq.add();
             }
             total_counter++;
-            ttl.set_expiry(this_expiry);
+            ttl.set_expiry(time(nullptr) + this_expiry);
         }
         [[nodiscard]] bool is_error() const {
             return errorq.triggered();
@@ -126,6 +146,7 @@ namespace sx::http::webhooks {
     void set_enabled(bool val);
     bool is_enabled();
     void set_hostid(std::string const& ref);
+    std::string get_hostid();
 
     void neighbor_state(std::string const& address_str, std::string const& state);
     void neighbor_state(std::vector<std::string> const& address_vec, std::string const& state);

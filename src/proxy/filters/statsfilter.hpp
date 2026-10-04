@@ -64,6 +64,7 @@ public:
     std::string _connection_protocol_last;
 
     StatsFilter() = delete;
+    explicit StatsFilter(std::nullptr_t) : FilterProxy(nullptr) {}
     explicit StatsFilter(MitmProxy* parent) : FilterProxy(parent) {
         if(parent)
             connection_label = parent->to_connection_label(false);

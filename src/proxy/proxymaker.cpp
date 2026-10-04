@@ -87,7 +87,7 @@ namespace sx::proxymaker {
 
     std::unique_ptr<MitmProxy> make (baseHostCX *left, baseHostCX *right) {
 
-        if(not left or not right) return nullptr;
+        if(not valid_host_pair(left, right)) return nullptr;
 
         auto new_proxy = std::make_unique<MitmProxy>(left->com()->slave());
 
@@ -124,10 +124,9 @@ namespace sx::proxymaker {
 
         auto const& log = log::policy();
 
-        if(!proxy) return false;
+        if(!valid_proxy_endpoints(proxy.get())) return false;
         auto *src_cx = proxy->first_left();
         auto *dst_cx = proxy->first_right();
-        if(!src_cx || !dst_cx || !src_cx->com() || !dst_cx->com()) return false;
 
         auto bypass_cx = [] (baseHostCX const* cx) {
             auto *scom = dynamic_cast<SSLCom *>(cx->com());
@@ -193,7 +192,7 @@ namespace sx::proxymaker {
 
         {
             auto l_ = std::scoped_lock(routing_profile->lb_state.lock_);
-            auto family = proxy->com()->l3_proto();
+            auto family = proxy->com() ? proxy->com()->l3_proto() : AF_INET;
             if(auto const* target = proxy->first_right(); target and target->com()) {
                 family = target->com()->l3_proto();
                 in6_addr address6 {};
@@ -260,7 +259,7 @@ namespace sx::proxymaker {
 
     bool route(MitmProxy* proxy, std::shared_ptr<ProfileRouting> routing_profile) {
 
-        if(not routing_profile or not proxy) { return false; }
+        if(not routing_profile or not valid_proxy_endpoints(proxy)) { return false; }
 
         auto const& log = log::routing();
 
@@ -312,11 +311,10 @@ namespace sx::proxymaker {
 
     bool setup_snat (std::unique_ptr<MitmProxy> &proxy, std::string const &source_host, std::string const &source_port) {
 
-        if (not proxy) return false;
+        if (not valid_proxy_endpoints(proxy.get())) return false;
 
         auto const* source_cx = proxy->first_left();
         auto const* target_cx = proxy->first_right();
-        if (not target_cx or not source_cx) return false;
 
         bool enforce_nat = proxy->matched_policy() == PolicyRule::POLICY_IMPLICIT_PASS;
 

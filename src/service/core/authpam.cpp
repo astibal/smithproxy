@@ -7,31 +7,57 @@
 #include <pwd.h>
 #include <grp.h>
 
+#include <cerrno>
+#include <cstdlib>
+#include <cstring>
+#include <vector>
+
 namespace sx::auth {
     static int conv (int num_msg, pam_message const ** msg, pam_response ** resp, void * appdata_ptr) {
+        if (num_msg <= 0 || msg == nullptr || resp == nullptr || appdata_ptr == nullptr)
+            return PAM_CONV_ERR;
 
-        pam_response* reply = (pam_response*) malloc(sizeof(pam_response));
+        auto* replies = static_cast<pam_response*>(calloc(static_cast<size_t>(num_msg),
+                                                          sizeof(pam_response)));
+        if (replies == nullptr) return PAM_BUF_ERR;
 
-        reply->resp = (char *) appdata_ptr;
-        reply->resp_retcode = 0;
-        *resp = reply;
+        auto const* password = static_cast<char const*>(appdata_ptr);
+        for (int i = 0; i < num_msg; ++i) {
+            if (msg[i] == nullptr) {
+                free(replies);
+                return PAM_CONV_ERR;
+            }
+            switch (msg[i]->msg_style) {
+                case PAM_PROMPT_ECHO_OFF:
+                    replies[i].resp = strdup(password);
+                    if (replies[i].resp == nullptr) {
+                        for (int j = 0; j < i; ++j) free(replies[j].resp);
+                        free(replies);
+                        return PAM_BUF_ERR;
+                    }
+                    break;
+                case PAM_ERROR_MSG:
+                case PAM_TEXT_INFO:
+                    break;
+                default:
+                    for (int j = 0; j < i; ++j) free(replies[j].resp);
+                    free(replies);
+                    return PAM_CONV_ERR;
+            }
+        }
 
+        *resp = replies;
         return PAM_SUCCESS;
     }
 
 
     bool pam_auth_user_pass (const char* user, const char*  pass) {
 
+        if (user == nullptr || pass == nullptr || *user == '\0') return false;
+
         auto& log = log::auth();
 
-        std::string pass_str(pass);
-        auto sz = pass_str.size() + 1;
-        auto mem = ::malloc(sz);
-
-        std::memset(mem, 0, sz);
-        std::memcpy(mem, pass_str.data(), pass_str.size());
-
-        struct pam_conv pamc = { conv, (void*) mem };
+        struct pam_conv pamc = { conv, const_cast<char*>(pass) };
         pam_handle_t * pamh = nullptr;
         int retval = PAM_ABORT;
 
@@ -40,9 +66,10 @@ namespace sx::auth {
         }
 
         if(retval != PAM_SUCCESS) {
-            _war("pam authentication failed for user '%s': %s", user, pam_strerror(pamh, retval));
+            auto const* error = pamh == nullptr ? "pam_start failed" : pam_strerror(pamh, retval);
+            _war("pam authentication failed for user '%s': %s", user, error);
 
-            pam_end (pamh, 0);
+            if (pamh != nullptr) pam_end(pamh, retval);
             return false;
         }
 
@@ -50,7 +77,7 @@ namespace sx::auth {
         if(acc != PAM_SUCCESS) {
             _war("pam authentication failed for user '%s': %s", user, pam_strerror(pamh, acc));
 
-            pam_end (pamh, 0);
+            pam_end(pamh, acc);
             return false;
         }
 
@@ -61,50 +88,36 @@ namespace sx::auth {
 
     bool unix_is_group_member(const char* username, const char* groupname) {
 
-        int ngroups = 64;
-        auto *groups = (gid_t*) malloc(sizeof(gid_t) * ngroups);
-        raw::guard grp_mem([&](){ free(groups); });
+        if (username == nullptr || groupname == nullptr ||
+            *username == '\0' || *groupname == '\0') return false;
 
-        if (groups == nullptr) {
-            return false;
-        }
+        struct passwd pw{};
+        struct passwd* pwd_result = nullptr;
+        auto pwd_size = sysconf(_SC_GETPW_R_SIZE_MAX);
+        std::vector<char> pwd_buffer(pwd_size > 0 ? static_cast<size_t>(pwd_size) : 16384U);
+        auto pw_ret = getpwnam_r(username, &pw, pwd_buffer.data(), pwd_buffer.size(), &pwd_result);
+        if (pw_ret != 0 || pwd_result == nullptr) return false;
 
-        struct passwd pw;
-        struct passwd* pwd_ptr = &pw;
-        struct passwd* temp_pwd_ptr;
+        struct group target_group{};
+        struct group* group_result = nullptr;
+        auto group_size = sysconf(_SC_GETGR_R_SIZE_MAX);
+        std::vector<char> group_buffer(group_size > 0 ? static_cast<size_t>(group_size) : 16384U);
+        auto group_ret = getgrnam_r(groupname, &target_group, group_buffer.data(),
+                                    group_buffer.size(), &group_result);
+        if (group_ret != 0 || group_result == nullptr) return false;
 
-        char pwd_buffer[200];
-        int  pwd_bufsz = sizeof(pwd_buffer);
+        int ngroups = 0;
+        (void)getgrouplist(username, pw.pw_gid, nullptr, &ngroups);
+        if (ngroups <= 0) return false;
 
-        auto pw_ret = getpwnam_r(username,pwd_ptr,pwd_buffer,pwd_bufsz,&temp_pwd_ptr);
-        if (pw_ret != 0) {
-            return false;
-        }
-
-        if (getgrouplist(username, pw.pw_gid, groups, &ngroups) == -1) {
-            return false;
-        }
+        std::vector<gid_t> groups(static_cast<size_t>(ngroups));
+        if (getgrouplist(username, pw.pw_gid, groups.data(), &ngroups) == -1) return false;
 
         bool to_ret = false;
 
         // iterate all groups to avoid side channel
         for (int j = 0; j < ngroups; j++) {
-
-            struct group  gr{};
-            struct group* gr_ptr = &gr;
-            struct group* temp_gr_ptr;
-
-            char grp_buffer[200];
-            int grp_bufsz = sizeof(grp_buffer);
-
-
-            int gr_result = getgrgid_r(groups[j], gr_ptr, grp_buffer, grp_bufsz, &temp_gr_ptr);
-            if (gr_result == 0) {
-                auto gr_string = std::string (gr.gr_name);
-                if(gr_string == groupname) {
-                    to_ret = true;
-                }
-            }
+            if (groups[static_cast<size_t>(j)] == target_group.gr_gid) to_ret = true;
         }
 
         return to_ret;

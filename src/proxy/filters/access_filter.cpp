@@ -1,5 +1,6 @@
 
 #include <proxy/filters/access_filter.hpp>
+#include <proxy/filters/access_filter_decision.hpp>
 #include <service/http/webhooks.hpp>
 
 void AccessFilter::init() {
@@ -24,6 +25,12 @@ void AccessFilter::update(socle::side_t side, buffer const& buf) {
 
     // update entropy statistics
     if(not already_applied) {
+        if (!parent()) {
+            _err("AccessFilter: missing parent proxy, allowing connection");
+            already_applied = true;
+            return;
+        }
+
         _deb("AccessFilter[%c]: access-request webhook on first %d bytes", socle::from_side(side), buf.size());
 
         nlohmann::json pay = { { "session", connection_label },
@@ -34,31 +41,27 @@ void AccessFilter::update(socle::side_t side, buffer const& buf) {
                                { "state", str_state }
                             };
 
-        auto process_reply = [&](auto code, auto response_data) {
-            if(code >= 200 and code < 300) {
-                auto json_obj = nlohmann::json::parse(response_data, nullptr, false);
-                if(json_obj.is_discarded()) {
-                    _err("AccessFilter: received data are not JSON");
-                    return;
-                }
+        auto process_reply = [&](auto code, auto const& response_data) {
+            auto result = sx::proxy::parse_access_response(code, response_data);
+            if (!result.response.is_discarded() && !result.response.is_null()) {
+                access_response = std::move(result.response);
+            }
 
-                access_response = json_obj;
-                bool has_response = json_obj.contains("access-response");
-
-                if(has_response and json_obj["access-response"] == "accept") {
+            switch (result.decision) {
+                case sx::proxy::access_decision::accept:
                     _dia("AccessFilter: received 'accept' response");
                     access_allowed = true;
-                }
-                else if(has_response and json_obj["access-response"] == "reject") {
+                    break;
+                case sx::proxy::access_decision::reject:
                     _dia("AccessFilter: received 'reject' response");
                     parent()->state().dead(true);
-                }
-                else {
+                    break;
+                case sx::proxy::access_decision::fail_open_invalid_response:
                     _dia("AccessFilter: received unsupported response");
-                }
-            }
-            else {
-                _err("AccessFilter: fail-open - requiring 2xx code and json response with result");
+                    break;
+                case sx::proxy::access_decision::fail_open_transport:
+                    _err("AccessFilter: fail-open - requiring 2xx code and json response with result");
+                    break;
             }
         };
 
@@ -115,5 +118,4 @@ nlohmann::json AccessFilter::to_json(int verbosity) const {
 AccessFilter::~AccessFilter() {
     // there used to be useful code here
 }
-
 

@@ -331,6 +331,7 @@ add_executable(smithproxy
         src/service/core/smithproxy_objapi.cpp
         src/service/core/sessionlist.hpp
         src/service/core/sessionlist.cpp
+        src/service/core/sessionlist_state.cpp
         src/service/reload/file_reload_service.hpp
         src/service/reload/file_reload_service.cpp
         src/service/reload/reloadable_resource.hpp
@@ -347,6 +348,7 @@ add_executable(smithproxy
         src/service/httpd/handlers/handlers.cpp
         src/service/httpd/handlers/dispatchers.cpp
         src/service/http/jsonize.cpp
+        src/service/http/jsonize_x509.cpp
         src/service/http/jsonize_config.cpp
         src/service/http/request.hpp
         src/service/http/request.cpp
@@ -400,8 +402,17 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
         add_executable(sx_gtests
                 src/inspect/dns.cpp
                 src/utils/str.cpp
+                src/utils/fs.cpp
+                src/utils/mem.cpp
+                src/staticcontent.cpp
+                src/ext/nltemplate/nltemplate.cpp
+                src/smithlog.cpp
+                src/service/core/authpam.cpp
 
                 src/utils/tests/str_test.cpp
+                src/utils/tests/fs_test.cpp
+                src/tests/staticcontent_tests.cpp
+                src/ext/nltemplate/nltemplate_tests.cpp
                 src/inspect/tests/dns_tests.cpp
                 src/inspect/tests/node_tests.cpp
                 src/inspect/tests/ja4_tests.cpp
@@ -433,6 +444,11 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/proxy/filters/statistics/entropy.cpp
                 src/proxy/filters/statistics/flowanalysis.cpp
                 src/proxy/filters/statistics/statistics_tests.cpp
+                src/proxy/filters/access_filter_tests.cpp
+                src/proxy/filters/sinkhole.cpp
+                src/proxy/filters/sinkhole_tests.cpp
+                src/proxy/filters/statsfilter.cpp
+                src/proxy/filters/statsfilter_tests.cpp
                 src/service/quic/quicservice.cpp
                 src/service/quic/tests/quicservice_tests.cpp
 
@@ -446,7 +462,15 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/service/cmd/config_cli2_schema.cpp
                 src/service/cmd/config_cli2_schema_tests.cpp
                 src/service/http/jsonize_tests.cpp
+                src/service/http/jsonize_x509.cpp
                 src/service/http/jsonize_config.cpp
+                src/service/http/webhooks_tests.cpp
+                src/service/core/sessionlist_state.cpp
+                src/service/core/sessionlist_tests.cpp
+                src/service/cfgapi/cfgvalue_tests.cpp
+                src/tests/smithlog_tests.cpp
+                src/service/core/authpam_tests.cpp
+                src/proxy/nbrhood_tests.cpp
 
                 src/inspect/engine.hpp
                 src/inspect/engine/http.cpp
@@ -510,6 +534,9 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 SMITHPROXY_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 
         target_link_libraries(sx_gtests gtest gtest_main smithproxy_libcli smithproxy_qpack socle_lib pthread crypto ssl crypt)
+        if("${USE_PAM}" STREQUAL "Y")
+            target_link_libraries(sx_gtests pam)
+        endif()
         if (LIBCONFIGPP_FOUND)
             target_link_libraries(sx_gtests ${LIBCONFIGPP_LIBRARIES})
         endif()

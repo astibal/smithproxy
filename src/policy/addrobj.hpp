@@ -85,7 +85,11 @@ public:
 
     cidr::CIDR* cidr() { return c_.get(); }
     std::string ip(int flags = CIDR_ONLYADDR) const {
+        if (!c_)
+            return {};
         auto temp = raw::allocated(cidr_to_str(c_.get(), flags));
+        if (!temp.value)
+            return {};
         std::string ret = string_format("%s", temp.value);
 
         return ret;
@@ -94,7 +98,11 @@ public:
     int contains(cidr::CIDR const* other) const;
     bool match(cidr::CIDR* c) override { return (contains(c) >= 0); };
     std::string to_string(int verbosity) const override {
+        if (!c_)
+            return "Cidr: invalid";
         auto temp = raw::allocated(cidr_to_str(c_.get()));
+        if (!temp.value)
+            return "Cidr: invalid";
 
         std::string ret = string_format("Cidr: %s",temp.value);
 

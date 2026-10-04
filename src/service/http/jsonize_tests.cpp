@@ -2,6 +2,8 @@
 
 #include <service/http/jsonize.hpp>
 
+#include <memory>
+
 TEST(Jsonize, LoadsTypedParametersAndRejectsMissingOrMalformedValues) {
     auto const request = R"({"params":{"name":"alpha","count":42,"enabled":true}})";
     EXPECT_EQ(jsonize::load_json_params<std::string>(request, "name"), "alpha");
@@ -48,4 +50,42 @@ TEST(Jsonize, ConvertsNestedLibconfigIncludingScalarLists) {
     EXPECT_EQ(converted["list"][2], "0");
     EXPECT_EQ(converted["list"][3]["nested"], "value");
     EXPECT_EQ(converted["group"]["child"], "9");
+}
+
+TEST(Jsonize, RejectsNullCertificateAndSerializesSparseCertificateSafely) {
+    EXPECT_TRUE(jsonize::from(static_cast<X509 const*>(nullptr), iINF).empty());
+
+    std::unique_ptr<X509, decltype(&X509_free)> certificate(X509_new(), X509_free);
+    ASSERT_NE(certificate, nullptr);
+    ASSERT_NE(X509_gmtime_adj(X509_getm_notBefore(certificate.get()), 0), nullptr);
+    ASSERT_NE(X509_gmtime_adj(X509_getm_notAfter(certificate.get()), 3600), nullptr);
+
+    auto const serialized = jsonize::from(certificate.get(), iINF);
+    EXPECT_EQ(serialized["cn"], "");
+    EXPECT_EQ(serialized["subject"], "");
+    EXPECT_EQ(serialized["issuer"], "");
+    EXPECT_FALSE(serialized["valid_from"].get<std::string>().empty());
+    EXPECT_FALSE(serialized["valid_to"].get<std::string>().empty());
+    EXPECT_FALSE(serialized.contains("sigalg"));
+    EXPECT_FALSE(serialized.contains("extensions"));
+}
+
+TEST(Jsonize, SerializesCertificateNamesAndVerboseMetadata) {
+    std::unique_ptr<X509, decltype(&X509_free)> certificate(X509_new(), X509_free);
+    ASSERT_NE(certificate, nullptr);
+    ASSERT_NE(X509_gmtime_adj(X509_getm_notBefore(certificate.get()), 0), nullptr);
+    ASSERT_NE(X509_gmtime_adj(X509_getm_notAfter(certificate.get()), 3600), nullptr);
+
+    auto* subject = X509_get_subject_name(certificate.get());
+    ASSERT_NE(subject, nullptr);
+    ASSERT_EQ(X509_NAME_add_entry_by_txt(subject, "CN", MBSTRING_ASC,
+                                         reinterpret_cast<unsigned char const*>("example.test"),
+                                         -1, -1, 0), 1);
+    ASSERT_EQ(X509_set_issuer_name(certificate.get(), subject), 1);
+
+    auto const serialized = jsonize::from(certificate.get(), iDIA);
+    EXPECT_EQ(serialized["cn"], "example.test");
+    EXPECT_EQ(serialized["subject"], "/CN=example.test");
+    EXPECT_EQ(serialized["issuer"], "/CN=example.test");
+    EXPECT_TRUE(serialized.contains("extensions"));
 }

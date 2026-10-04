@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import http.server
 import os
 from pathlib import Path
 import re
@@ -11,11 +12,45 @@ import shutil
 import socket
 import subprocess
 import tempfile
+import threading
 import time
 
 
 TELNET = re.compile(rb"\xff[\xfb-\xfe].")
 ANSI = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
+
+
+class WebhookHandler(http.server.BaseHTTPRequestHandler):
+    requests: list[tuple[str, bytes]] = []
+    stall_started = threading.Event()
+    release_stall = threading.Event()
+
+    def do_POST(self) -> None:
+        length = int(self.headers.get("Content-Length", "0"))
+        self.__class__.requests.append((self.path, self.rfile.read(length)))
+        if self.path == "/drop":
+            self.close_connection = True
+            self.connection.shutdown(socket.SHUT_RDWR)
+            self.connection.close()
+            return
+        if self.path == "/stall":
+            self.__class__.stall_started.set()
+            self.__class__.release_stall.wait(timeout=15)
+        code = 503 if self.path == "/failure" else 202
+        if self.path == "/large":
+            body = b"X" * (8 * 1024 * 1024 + 1)
+        else:
+            body = b"rejected" if code == 503 else b"accepted"
+        self.send_response(code)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        try:
+            self.wfile.write(body)
+        except BrokenPipeError:
+            pass
+
+    def log_message(self, format: str, *args: object) -> None:
+        pass
 
 
 class Cli:
@@ -56,6 +91,15 @@ class Cli:
         if "% command handler failed" in output:
             raise AssertionError(f"command failed: {line}\n{output}")
         return output
+
+    def wait_for(self, needle: str, timeout: float = 5.0) -> str:
+        deadline = time.monotonic() + timeout
+        output = ""
+        while time.monotonic() < deadline:
+            output += self.read(0.05)
+            if needle in output:
+                return output
+        raise AssertionError(f"timed out waiting for {needle!r} in:\n{output}")
 
     def command_failed(self, line: str) -> str:
         output = self.command(line)
@@ -114,6 +158,11 @@ def main() -> None:
     args = parser.parse_args()
     source = args.source.resolve()
 
+    webhook = http.server.ThreadingHTTPServer(("127.0.0.1", 0), WebhookHandler)
+    webhook_thread = threading.Thread(target=webhook.serve_forever, daemon=True)
+    webhook_thread.start()
+    webhook_port = webhook.server_address[1]
+
     with tempfile.TemporaryDirectory(prefix="smithproxy-libcli2-e2e-") as tmp_name:
         tmp = Path(tmp_name)
         config = tmp / "smithproxy.cfg"
@@ -132,6 +181,14 @@ def main() -> None:
         ):
             text = replace_setting(text, name, value)
         text = text.replace("settings = {", "settings = {\n    accept_api = FALSE;", 1)
+        text = text.replace(
+            "settings = {",
+            "settings = {\n"
+            "    webhook = { enabled = true; "
+            f'url = "http://127.0.0.1:{webhook_port}/default"; '
+            "tls_verify = false; };",
+            1,
+        )
         text = re.sub(r"(?m)^(\s*port\s*=\s*)50000;", rf"\g<1>{args.port};", text, count=1)
         config.write_text(text)
 
@@ -163,6 +220,49 @@ def main() -> None:
             cli.command_ok("debug term reset")
             require(cli.command_ok("debug set cli 0"), "cli debug now OFF")
             require(cli.command_ok("test dns genrequest example.test"), "DNS generated request:")
+            output = cli.command_ok(
+                f"test webhook http://127.0.0.1:{webhook_port}/success")
+            if "Response: 202:accepted" not in output:
+                output += cli.wait_for("Response: 202:accepted")
+            require(output, "Response: 202:accepted")
+            reject(output, "Response: -100:")
+            output = cli.command_ok(
+                f"test webhook http://127.0.0.1:{webhook_port}/failure")
+            if "Response: 503:rejected" not in output:
+                output += cli.wait_for("Response: 503:rejected")
+            require(output, "Response: 503:rejected")
+            reject(output, "Response: -100:")
+            test_requests = [entry for entry in WebhookHandler.requests
+                             if entry[0] in {"/success", "/failure"}]
+            if test_requests != [
+                    ("/success", b'{"key": "value"}'),
+                    ("/failure", b'{"key": "value"}')]:
+                raise AssertionError(f"unexpected webhook payloads: {WebhookHandler.requests!r}")
+
+            with socket.socket() as unused:
+                unused.bind(("127.0.0.1", 0))
+                unavailable_port = unused.getsockname()[1]
+            output = cli.command_ok(
+                f"test webhook http://127.0.0.1:{unavailable_port}/unavailable")
+            if "Response: 600:" not in output:
+                output += cli.wait_for("Response: 600:")
+            require(output, "Response: 600:")
+            reject(output, "Response: -100:")
+
+            output = cli.command_ok(
+                f"test webhook http://127.0.0.1:{webhook_port}/drop")
+            if "Response: 600:" not in output:
+                output += cli.wait_for("Response: 600:")
+            require(output, "Response: 600:")
+            if [path for path, _ in WebhookHandler.requests].count("/drop") != 1:
+                raise AssertionError("ambiguous POST failure was retried")
+
+            output = cli.command_ok(
+                f"test webhook http://127.0.0.1:{webhook_port}/large")
+            if "Response: 600:webhook response exceeds configured limit" not in output:
+                output += cli.wait_for(
+                    "Response: 600:webhook response exceeds configured limit")
+            require(output, "Response: 600:webhook response exceeds configured limit")
             diag_roots = cli.tab("diag ")
             for root in ("tls", "sig", "workers", "mem", "dns", "proxy", "writer", "api", "neighbor"):
                 require(diag_roots, root)
@@ -268,7 +368,14 @@ def main() -> None:
             require(cli.command_ok("save config"), "config saved successfully")
             require(cli.command_ok("execute reload"), "Configuration file reloaded")
             require(cli.command_ok("show status"), "Total sessions:")
+            cli.command_ok(f"test webhook http://127.0.0.1:{webhook_port}/stall")
+            if not WebhookHandler.stall_started.wait(timeout=3):
+                raise AssertionError("stalled webhook request did not start")
+            shutdown_started = time.monotonic()
             require(cli.command_ok("execute shutdown"), "terminating smithproxy")
+            process.wait(timeout=4)
+            if time.monotonic() - shutdown_started >= 4:
+                raise AssertionError("active webhook delayed Smithproxy shutdown")
             print("PASS: real socket show/debug/test/save/reload/shutdown + config mutations")
         finally:
             if cli is not None:
@@ -284,6 +391,10 @@ def main() -> None:
                 if tail:
                     print("--- smithproxy output ---")
                     print(tail[-4000:])
+            WebhookHandler.release_stall.set()
+            webhook.shutdown()
+            webhook.server_close()
+            webhook_thread.join(timeout=5)
 
 
 if __name__ == "__main__":

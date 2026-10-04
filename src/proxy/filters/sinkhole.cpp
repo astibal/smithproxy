@@ -41,7 +41,7 @@
 
 void SinkholeFilter::proxy(baseHostCX *from, baseHostCX *to, socle::side_t side, bool redirected) {
 
-    if(not from and not from->readbuf()) return;
+    if(not from or not to or not from->readbuf()) return;
 
     const bool is_left = (side == side_t::LEFT);
     const bool is_right = (side == side_t::RIGHT);
@@ -67,7 +67,7 @@ void SinkholeFilter::proxy(baseHostCX *from, baseHostCX *to, socle::side_t side,
         _if_level(DIA) {
              std::string repl_note;
              if(not no_repl) repl_note = string_format("with %dB of replacement", replacement.size());
-            _dia("sinking %c: %dB %s", socle::from_side(side), sz, replacement.size(), repl_note.c_str());
+            _dia("sinking %c: %zuB %s", socle::from_side(side), sz, repl_note.c_str());
         }
     };
 

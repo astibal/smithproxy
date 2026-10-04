@@ -39,20 +39,24 @@
 
 #include <staticcontent.hpp>
 
+#include <vector>
+
 bool StaticContent::load_files(std::string& dir) {
     bool ret = true;
     
     try {
-        LoaderFile loader_file;
+        std::vector<std::pair<std::string, std::unique_ptr<Template>>> loaded;
 
         for(const std::string name: { "test", "html_page", "html_img_warning"} ) {
             _dia("StaticContent::load_files: loading template %s", name.c_str());
 
-            auto* t_temp = new Template(loader_file);
+            auto t_temp = std::make_unique<Template>(loader_file_);
             t_temp->load(dir + name + ".txt");
-
-            auto lc_ = std::scoped_lock(lock);
-            templates_->set(name,t_temp);
+            loaded.emplace_back(name, std::move(t_temp));
+        }
+        auto lc_ = std::scoped_lock(lock);
+        for (auto& [name, value] : loaded) {
+            templates_->set(name, value.release());
         }
     }
     catch(std::exception& e) {
@@ -99,6 +103,8 @@ std::string StaticContent::render_server_response(std::string const& message, un
 std::string StaticContent::render_msg_html_page(std::string const& caption, std::string const& meta, std::string const& content, const char* window_width) {
 
     auto t = get("html_page");
+    if (!t)
+        return {};
 
     auto lc_ = std::scoped_lock(lock);
 

@@ -38,6 +38,7 @@
 */
 
 #include <memory>
+#include <algorithm>
 
 #include <openssl/rand.h>
 
@@ -430,13 +431,17 @@ void SmithProxy::run() {
 
     auto update_intervals = [&]() {
         auto lc_ = std::scoped_lock(CfgFactory::lock());
-        webhook_ping_interval = CfgFactory::get()->settings_webhook.ping_interval;
-        webhook_nbr_interval = CfgFactory::get()->settings_webhook.nbr_update_interval;
-        webhook_nbr_refresh_age = CfgFactory::get()->settings_webhook.nbr_tag_refresh_age;
+        webhook_ping_interval = static_cast<unsigned int>(
+            std::max(1, CfgFactory::get()->settings_webhook.ping_interval));
+        webhook_nbr_interval = static_cast<unsigned int>(
+            std::max(1, CfgFactory::get()->settings_webhook.nbr_update_interval));
+        webhook_nbr_refresh_age = std::max(
+            0, CfgFactory::get()->settings_webhook.nbr_tag_refresh_age);
     };
     update_intervals();
 
-    unsigned int wh_ping_seconds = webhook_ping_interval - 10; // speed-up first ping
+    unsigned int wh_ping_seconds = webhook_ping_interval > 10
+                                   ? webhook_ping_interval - 10 : 0; // speed-up first ping
     unsigned int wh_nbr_seconds = 0;
 
 
@@ -522,6 +527,9 @@ void SmithProxy::run() {
 
     auto bail_it = [this]{
         kill_proxies();
+        // Webhook tasks can still be using configuration, logging and proxy
+        // state. Stop and join them before those services are torn down.
+        sx::tp::ThreadPool::instance::shutdown_if_created();
         terminated = true;
 
         instance().join_all();

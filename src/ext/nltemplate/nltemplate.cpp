@@ -29,6 +29,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <stdlib.h>
 #include <fstream>
 #include <sstream>
+#include <stdexcept>
 
 #include "nltemplate.hpp"
 
@@ -60,7 +61,9 @@ static inline bool alphanum( const char c ) {
 }
 
 
-static inline long match_var( const char *text, string & result ) {
+static inline long match_var( const char *text, size_t remaining, string & result ) {
+    if (remaining < 3)
+        return -1;
     if (text[ 0 ] != '{' ||
         text[ 1 ] != '{' ||
         text[ 2 ] != ' ' )
@@ -69,21 +72,20 @@ static inline long match_var( const char *text, string & result ) {
     }
     
     const char *var = text + 3;
-    const char *cursor = var;
-    
-    while ( *cursor ) {
-        if (cursor[ 0 ] == ' ' &&
-            cursor[ 1 ] == '}' &&
-            cursor[ 2 ] == '}' )
+    size_t cursor = 3;
+
+    while (cursor < remaining) {
+        if (cursor + 2 < remaining && text[cursor] == ' ' &&
+            text[cursor + 1] == '}' && text[cursor + 2] == '}' )
         {
-            result = string( var, cursor - var );
-            return cursor + 3 - text;
+            result = string(var, text + cursor - var);
+            return static_cast<long>(cursor + 3);
         }
-        
-        if ( !alphanum( *cursor ) ) {
+
+        if ( !alphanum(text[cursor]) ) {
             return -1;
         }
-        
+
         cursor++;
     }
     
@@ -91,7 +93,10 @@ static inline long match_var( const char *text, string & result ) {
 }
 
 
-static inline long match_tag_with_param( const char *tag, const char *text, string & result ) {
+static inline long match_tag_with_param( const char *tag, const char *text,
+                                         size_t remaining, string & result ) {
+    if (remaining < 3)
+        return -1;
     if (text[ 0 ] != '{' ||
         text[ 1 ] != '%' ||
         text[ 2 ] != ' ')
@@ -99,31 +104,31 @@ static inline long match_tag_with_param( const char *tag, const char *text, stri
         return -1;
     }
 
-    long taglen = strlen( tag );
+    size_t taglen = strlen( tag );
+    if (remaining < 3 + taglen + 1)
+        return -1;
     if ( strncmp( text + 3, tag, taglen ) != 0 ) {
         return -1;
     }
 
-    const char *param = text + 3 + taglen;
-    
-    if ( *param != ' ' ) {
+    size_t param = 3 + taglen;
+
+    if (text[param] != ' ' ) {
         return -1;
     }
-    
+
     param++;
+    size_t cursor = param;
 
-    const char *cursor = param;
-
-    while ( *cursor ) {
-        if (cursor[ 0 ] == ' ' &&
-            cursor[ 1 ] == '%' &&
-            cursor[ 2 ] == '}' )
+    while (cursor < remaining) {
+        if (cursor + 2 < remaining && text[cursor] == ' ' &&
+            text[cursor + 1] == '%' && text[cursor + 2] == '}' )
         {
-            result = string( param, cursor - param );
-            return cursor + 3 - text;
+            result = string(text + param, text + cursor);
+            return static_cast<long>(cursor + 3);
         }
 
-        if ( !alphanum( *cursor ) ) {
+        if ( !alphanum(text[cursor]) ) {
             return -1;
         }
         
@@ -165,17 +170,20 @@ Token Tokenizer::next() {
     
 a:
     if ( pos < len ) {
-        long m = match_tag_with_param( s_block, text_ptr + pos, peek.value );
+        const auto remaining = static_cast<size_t>(len - pos);
+        long m = match_tag_with_param( s_block, text_ptr + pos, remaining, peek.value );
         if ( m > 0 ) {
             peek.type = TOKEN_BLOCK;
             pos += m;
-        } else if ( !strncmp( s_endblock, text_ptr + pos, s_endblock_len ) ) {
+        } else if (remaining >= static_cast<size_t>(s_endblock_len) &&
+                   !strncmp( s_endblock, text_ptr + pos, s_endblock_len ) ) {
             peek.type = TOKEN_ENDBLOCK;
             pos += s_endblock_len;
-        } else if ( ( m = match_tag_with_param( s_include, text_ptr + pos, peek.value ) ) > 0 ) {
+        } else if ( ( m = match_tag_with_param(
+                           s_include, text_ptr + pos, remaining, peek.value ) ) > 0 ) {
             peek.type = TOKEN_INCLUDE;
             pos += m;
-        } else if ( ( m = match_var( text_ptr + pos, peek.value ) ) > 0 ) {
+        } else if ( ( m = match_var( text_ptr + pos, remaining, peek.value ) ) > 0 ) {
             peek.type = TOKEN_VAR;
             pos += m;
         } else {
@@ -395,11 +403,13 @@ Template::Template( Loader & loader ) : Block( "main" ), loader( loader ) {
 
 
 void Template::load_recursive( const string & name, vector<Tokenizer> & files, vector<Node*> & nodes ) {
+    if (files.size() >= 64)
+        throw runtime_error("Template include depth exceeded while loading " + name);
     auto loaded = loader.load( name );
     if ( !loaded.valid ) {
-        // TODO pass loaded.error somewhere..
-        return;
+        throw runtime_error(loaded.error);
     }
+    const auto initial_node_depth = nodes.size();
     files.emplace_back( loaded.data );
     
     bool done = false;
@@ -416,6 +426,8 @@ void Template::load_recursive( const string & name, vector<Tokenizer> & files, v
             }
                 break;
             case TOKEN_ENDBLOCK:
+                if (nodes.size() <= initial_node_depth)
+                    throw runtime_error("Unmatched endblock in template " + name);
                 nodes.pop_back();
                 break;
             case TOKEN_VAR:
@@ -429,6 +441,9 @@ void Template::load_recursive( const string & name, vector<Tokenizer> & files, v
                 break;
         }
     }
+
+    if (nodes.size() != initial_node_depth)
+        throw runtime_error("Unclosed block in template " + name);
     
     files.pop_back();
 }

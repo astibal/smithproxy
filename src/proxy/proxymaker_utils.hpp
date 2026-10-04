@@ -8,6 +8,18 @@
 
 namespace sx::proxymaker {
 
+template<class Host>
+bool valid_host_pair(Host const* left, Host const* right) {
+    return left != nullptr && right != nullptr &&
+           left->com() != nullptr && right->com() != nullptr;
+}
+
+template<class Proxy>
+bool valid_proxy_endpoints(Proxy const* proxy) {
+    return proxy != nullptr &&
+           valid_host_pair(proxy->first_left(), proxy->first_right());
+}
+
 inline std::optional<unsigned short> parse_source_port(std::string_view text) {
     if(text.empty()) return std::nullopt;
     unsigned int value = 0;

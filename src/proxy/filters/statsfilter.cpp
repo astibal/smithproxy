@@ -31,6 +31,7 @@ void StatsFilter::update(socle::side_t side, buffer const& buf) {
 }
 
 void StatsFilter::proxy(baseHostCX *from, baseHostCX *to, socle::side_t side, bool redirected) {
+    if (!from) return;
     update(side, from->to_read());
 }
 
@@ -82,7 +83,7 @@ std::string StatsFilter::to_string(int verbosity) const {
 
     ss << string_format("\r\n  %s: entropy: LE: %f, RE %f", connection_str.c_str(), LE, RE);
     if(LE < 3.0f or RE < 3.0f) {
-        ss << string_format("\r\n    LOW entropy: LE: %f, RE %f", connection_str.c_str(), LE, RE);
+        ss << string_format("\r\n    LOW entropy: LE: %f, RE %f", LE, RE);
         ss << string_format("\r\n      l-dom byte: dec(%d), ratio(%.3f)", LE_D, LE_DR);
         ss << string_format("\r\n      r-dom byte: dec(%d), ratio(%.3f)", RE_D, RE_DR);
     }
@@ -123,5 +124,4 @@ nlohmann::json StatsFilter::to_json(int verbosity) const {
 StatsFilter::~StatsFilter() {
     // there used to be useful code here
 }
-
 

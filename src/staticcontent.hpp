@@ -47,6 +47,7 @@ using namespace ext::nltemplate;
 
 class StaticContent {
 
+    LoaderFile loader_file_;
     std::unique_ptr<ptr_cache<std::string,Template>> templates_;
     StaticContent() {
         templates_ = std::make_unique<ptr_cache<std::string,Template>>("content.replacements");
