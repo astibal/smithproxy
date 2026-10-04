@@ -487,3 +487,58 @@ TEST(Hpack, Test9) {
     decode_print(vec);
 
 }
+
+TEST(HPack, RejectsTruncatedInteger) {
+    std::vector<uint8_t> data{0x7f};
+    HPACK::decoder_t decoder;
+
+    EXPECT_THROW(decoder.decode(data), std::invalid_argument);
+}
+
+TEST(HPack, RejectsOverflowingInteger) {
+    std::vector<uint8_t> data{0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00};
+    HPACK::decoder_t decoder;
+
+    EXPECT_THROW(decoder.decode(data), std::invalid_argument);
+}
+
+TEST(HPack, RejectsStringPastInput) {
+    std::vector<uint8_t> data{0x00, 0x05, 'x'};
+    HPACK::decoder_t decoder;
+
+    EXPECT_THROW(decoder.decode(data), std::invalid_argument);
+}
+
+TEST(HPack, RejectsMissingLiteralValue) {
+    std::vector<uint8_t> data{0x00, 0x00};
+    HPACK::decoder_t decoder;
+
+    EXPECT_THROW(decoder.decode(data), std::invalid_argument);
+}
+
+TEST(HPack, AcceptsEmptyLiteralNameAndValue) {
+    std::vector<uint8_t> data{0x00, 0x00, 0x00};
+    HPACK::decoder_t decoder;
+
+    EXPECT_TRUE(decoder.decode(data));
+}
+
+TEST(HPack, RejectsMalformedGeneratedHeaderBlock) {
+    std::vector<uint8_t> data{
+        0xff, 0xff, 0x00, 0x01, 0x00,
+        'i', 'n', 's', 'a', 'n', 'i', 't', 'y', '-', '0', '0', '3'
+    };
+    HPACK::decoder_t decoder;
+
+    EXPECT_THROW(decoder.decode(data), std::invalid_argument);
+}
+
+TEST(HPack, RejectsNullStringInputsBeforeDereference) {
+    HPACK::ringtable_t table;
+    HPACK::huffman_encoder_t huffman;
+    HPACK::encoder_t encoder;
+
+    EXPECT_THROW(table.add(nullptr, "value"), std::runtime_error);
+    EXPECT_THROW(huffman.encode(nullptr), std::invalid_argument);
+    EXPECT_THROW(encoder.add(nullptr, "value"), std::invalid_argument);
+}

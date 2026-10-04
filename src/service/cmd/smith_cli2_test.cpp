@@ -47,17 +47,18 @@ std::shared_ptr<DNS_Response> send_dns_request(libcli2::Context& context, const 
                                                DNS_Record_Type type, const AddressInfo& nameserver) {
     buffer request(1024);
     const int generated = DNSFactory::get().generate_dns_request(random_id(), request, hostname, type);
-    context.print("DNS generated request:\n" + hex_dump(request) + ", " + std::to_string(generated) + "B");
+    context.print(context.decor().heading("DNS generated request:") + "\n" + hex_dump(request) + ", " +
+                  context.decor().value(std::to_string(generated) + "B"));
 
     const int fd = ::socket(nameserver.family, SOCK_DGRAM, IPPROTO_UDP);
     if (fd < 0 || ::connect(fd, reinterpret_cast<const sockaddr*>(nameserver.as_ss()), sizeof(sockaddr_storage)) != 0) {
         if (fd >= 0) ::close(fd);
-        context.print("cannot connect socket");
+        context.print(libcli2::Style::error, "cannot connect socket");
         return {};
     }
     if (::send(fd, request.data(), request.size(), 0) < 0) {
         ::close(fd);
-        context.print("cannot send DNS request");
+        context.print(libcli2::Style::error, "cannot send DNS request");
         return {};
     }
     epoll poller;
@@ -65,21 +66,22 @@ std::shared_ptr<DNS_Response> send_dns_request(libcli2::Context& context, const 
     poller.add(fd, EPOLLIN);
     if (poller.wait(4000) < 1) {
         ::close(fd);
-        context.print("timeout, or an error occurred.");
+        context.print(libcli2::Style::error, "timeout, or an error occurred.");
         return {};
     }
     buffer reply(1500);
     const auto length = ::recv(fd, reply.data(), reply.capacity(), 0);
     ::close(fd);
     if (length <= 0) {
-        context.print("recv() returned " + std::to_string(length));
+        context.print(context.decor().error("recv() returned ") + context.decor().value(std::to_string(length)));
         return {};
     }
     reply.size(length);
     auto response = std::make_shared<DNS_Response>();
     const auto parsed = response->load(&reply);
-    context.print("received " + std::to_string(length) + " bytes\n" + hex_dump(reply));
-    context.print("DNS response:\n" + response->str());
+    context.print(context.decor().success("received ") + context.decor().value(std::to_string(length)) +
+                  " bytes\n" + hex_dump(reply));
+    context.print(context.decor().heading("DNS response:") + "\n" + response->str());
     return parsed ? response : std::shared_ptr<DNS_Response>{};
 }
 
@@ -96,7 +98,8 @@ void register_smithproxy_cli2_test(libcli2::Cli& cli) {
             buffer request(1024);
             const int generated = DNSFactory::get().generate_dns_request(random_id(), request,
                                                                           invocation.arguments.front(), A);
-            context.print("DNS generated request:\n" + hex_dump(request) + ", " + std::to_string(generated) + "B");
+            context.print(context.decor().heading("DNS generated request:") + "\n" + hex_dump(request) + ", " +
+                          context.decor().value(std::to_string(generated) + "B"));
             return 0;
         });
 
@@ -104,7 +107,8 @@ void register_smithproxy_cli2_test(libcli2::Cli& cli) {
         .handler([](libcli2::Context& context, const libcli2::Invocation& invocation) {
             const auto response = send_dns_request(context, invocation.arguments.front(), A,
                                                     DNS_Setup::choose_dns_server(0));
-            if (response && DNS_Inspector::store(response)) context.print("Entry successfully stored in cache.");
+            if (response && DNS_Inspector::store(response))
+                context.print(libcli2::Style::success, "Entry successfully stored in cache.");
             return response ? 0 : -1;
         });
 
@@ -124,7 +128,8 @@ void register_smithproxy_cli2_test(libcli2::Cli& cli) {
             for (const auto& name : names) {
                 for (const auto type : {A, AAAA}) {
                     const auto response = send_dns_request(context, name, type, nameserver);
-                    if (response && DNS_Inspector::store(response)) context.print("Entry successfully stored in cache.");
+                    if (response && DNS_Inspector::store(response))
+                        context.print(libcli2::Style::success, "Entry successfully stored in cache.");
                 }
             }
             return 0;

@@ -169,7 +169,7 @@ void ConfigCli2Session::register_commands(libcli2::Cli& cli) {
         .handler([](libcli2::Context& context, const libcli2::Invocation& call) {
             auto& state = session(context);
             if (!state.enter_path(call.arguments)) {
-                context.print("unknown configuration section");
+                context.print(libcli2::Style::error, "unknown configuration section");
                 return -1;
             }
             return 0;
@@ -193,7 +193,7 @@ void ConfigCli2Session::register_commands(libcli2::Cli& cli) {
             std::vector<std::string> values(call.arguments.begin() + 1, call.arguments.end());
             std::string error;
             if (!state.access_.set(state.path(), call.arguments.front(), values, error)) {
-                context.print(error.empty() ? "cannot set value" : error);
+                context.print(libcli2::Style::error, error.empty() ? "cannot set value" : error);
                 return -1;
             }
             return 0;
@@ -217,7 +217,7 @@ void ConfigCli2Session::register_commands(libcli2::Cli& cli) {
             std::vector<std::string> values(call.arguments.begin() + 1, call.arguments.end());
             std::string error;
             if (!state.access_.toggle(state.path(), call.arguments.front(), values, error)) {
-                context.print(error.empty() ? "cannot toggle value" : error);
+                context.print(libcli2::Style::error, error.empty() ? "cannot toggle value" : error);
                 return -1;
             }
             return 0;
@@ -240,7 +240,7 @@ void ConfigCli2Session::register_commands(libcli2::Cli& cli) {
             auto& state = session(context);
             std::string error;
             if (!state.access_.add || !state.access_.add(state.path(), call.arguments, error)) {
-                context.print(error.empty() ? "cannot add entry" : error);
+                context.print(libcli2::Style::error, error.empty() ? "cannot add entry" : error);
                 return -1;
             }
             return 0;
@@ -262,7 +262,7 @@ void ConfigCli2Session::register_commands(libcli2::Cli& cli) {
             auto& state = session(context);
             std::string error;
             if (!state.access_.remove || !state.access_.remove(state.path(), call.arguments, error)) {
-                context.print(error.empty() ? "cannot remove entry" : error);
+                context.print(libcli2::Style::error, error.empty() ? "cannot remove entry" : error);
                 return -1;
             }
             return 0;
@@ -299,13 +299,14 @@ void ConfigCli2Session::register_commands(libcli2::Cli& cli) {
             const auto& operation = call.arguments[1];
             const bool needs_target = operation == "before" || operation == "after";
             if (needs_target != (call.arguments.size() == 3)) {
-                context.print(needs_target ? "before/after requires a target" : "unexpected move target");
+                context.print(libcli2::Style::error,
+                              needs_target ? "before/after requires a target" : "unexpected move target");
                 return -1;
             }
             std::string error;
             const std::string_view target = call.arguments.size() == 3 ? call.arguments[2] : std::string_view{};
             if (!state.access_.move(state.path(), call.arguments[0], operation, target, error)) {
-                context.print(error.empty() ? "cannot move entry" : error);
+                context.print(libcli2::Style::error, error.empty() ? "cannot move entry" : error);
                 return -1;
             }
             return 0;
@@ -316,7 +317,7 @@ void ConfigCli2Session::register_commands(libcli2::Cli& cli) {
         .available_if([](const libcli2::Context& context) { return session(context).active(); })
         .handler([](libcli2::Context& context, const libcli2::Invocation&) {
             const auto value = session(context).path();
-            context.print(value.empty() ? "/" : value);
+            context.print(libcli2::Style::value, value.empty() ? "/" : value);
             return 0;
         });
 

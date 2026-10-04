@@ -8,6 +8,8 @@
 #include <utility>
 #include <vector>
 
+#include "style.hpp"
+
 namespace libcli2 {
 
 struct Context {
@@ -18,10 +20,24 @@ struct Context {
     void* user_data = nullptr;
     int io_handle = -1;
     Writer write;
+    ColorMode color_mode = ColorMode::off;
+    ColorTheme color_theme = ColorTheme::classic;
+    bool color_capable = false;
 
     void print(std::string_view text) const {
         if (write) write(text);
     }
+
+    void print(Style style, std::string_view text) const {
+        const auto value = decor()(style, text);
+        print(value);
+    }
+
+    bool colors_enabled() const noexcept {
+        return color_mode == ColorMode::on || (color_mode == ColorMode::automatic && color_capable);
+    }
+
+    Decorator decor() const noexcept { return Decorator(colors_enabled(), color_theme); }
 };
 
 struct Invocation {

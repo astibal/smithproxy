@@ -1,8 +1,8 @@
 [submodule "socle"]
 	path = socle
-	url = ../socle.git
+	url = git@github.com:astibal/socle.git
 	branch = master
-	update = merge
+	update = checkout
 [submodule "src/ext/lmhpp"]
 	path = src/ext/lmhpp
 	url = ../lmhpp

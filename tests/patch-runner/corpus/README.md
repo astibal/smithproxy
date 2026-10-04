@@ -1,8 +1,9 @@
 # Deterministic pplay corpus
 
-The corpus defines bounded client/server byte streams that should cross
-Smithproxy without payload modification. Pplay verifies that both endpoints
-receive exactly the scripted bytes.
+The corpus defines bounded client/server byte streams. Pplay normally verifies
+that both endpoints receive exactly the scripted bytes. Recognizable malformed
+TLS may instead be rejected immediately and fail-closed; the dedicated TLS
+autodetection matrix proves that it cannot reach the origin as plaintext.
 
 ```text
 regular/   valid representative protocol traffic
@@ -69,14 +70,17 @@ PPLAY_PY=../vendor/pplay.py FUZZ_LEVEL=245 FUZZ_MAGIC=smithproxy-001 \
 
 `FUZZ_MAGIC` is combined with category and case name, so repeated runs are
 reproducible. `SCATTER=1` affects TCP writes; it does not fragment UDP.
+`FUZZ_SEEDS` accepts a comma-separated list and replays the selected corpus once
+per seed. `FUZZ_AREA` selects exactly one protocol shard; all 655 non-capture
+cases are assigned once across the areas defined by the patch runner.
 
 ## Through Smithproxy
 
 The preferred interface is the patch runner:
 
 ```bash
-../test-patch.sh sanity --suite corpus-regular --remote root@tt-px1
-../test-patch.sh full --remote root@tt-px1 --env MATCH='h2_generated_*'
+../test-patch.sh sanity --suite corpus-regular --remote root@test-runner-1
+../test-patch.sh full --remote root@test-runner-1 --env MATCH='h2_generated_*'
 ```
 
 For a manually prepared compatible lab, the default namespace names are

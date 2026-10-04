@@ -104,7 +104,11 @@ private:
     }
 
     static void dispatch(socle::baseTrafficLogger& output, record const& item) {
-        buffer data(item.data.data(), item.data.size());
+        // dispatch() is synchronous and item owns the vector for the entire
+        // call. Present it as a non-owning buffer instead of copying every
+        // captured packet a second time solely to satisfy the logger API.
+        buffer data(const_cast<unsigned char*>(item.data.data()),
+                    item.data.size(), item.data.size(), false);
         if (item.type == record_type::packet) output.write_packet(item.side, data);
         else output.write_secret(item.secret_format, data);
     }

@@ -1,26 +1,103 @@
 # Smithproxy patch runner
 
+The normative coverage, target, fuzz-seed and result-recording rules live in
+[`tests/docs/TESTING_POLICY.md`](../docs/TESTING_POLICY.md).
+
 `test-patch.sh` builds the current checkout and can exercise the resulting
 Smithproxy binary in disposable, dual-stack Linux network labs. Labs can run
 locally or over SSH.
 
+## Repository map
+
+Run all commands from the Smithproxy repository root. The runner is
+self-contained in the source tree:
+
+```text
+tests/patch-runner/
+├── test-patch.sh          main command-line entry point
+├── remote-scheduler.sh    target-local worker pool for full/fuzz runs
+├── fuzz-seeds.py          bounded regression/recent/archive seed selection
+├── harness/               network lab, origins, probes and validators
+├── corpus/
+│   ├── regular/           ordinary protocol conversations
+│   ├── edge/              boundary and malformed conversations
+│   ├── insanity/          deliberately hostile conversations
+│   └── run-suite.sh       corpus and mutation runner
+└── vendor/                pinned test-only dependencies such as pplay
+
+tests/tls/tls_testbed.cpp   in-process C++ TLS integration testbed
+tests/docs/TESTING_POLICY.md normative coverage and result policy
+tests/docs/covered-seeds     successful dynamic and pinned regression seeds
+tests/docs/patch-run-history successful top-level invocation history
+```
+
+`tests/docs/TESTING_POLICY.md` is the source of truth when changing coverage,
+scheduling, pass criteria, result recording or seed lifecycle. Keep this README
+as the operator guide and avoid duplicating it in a separate quick-start file.
+
+## Operator quick start
+
+There is no implicit execution target. Every command must name `--local` or at
+least one `--remote [USER@]HOST` target. The runner tests the current working
+tree, including uncommitted changes; reports mark such builds as `+dirty`.
+
 ```bash
-# Build only.
-tests/patch-runner/test-patch.sh quick
+# Authoritative command-line help.
+tests/patch-runner/test-patch.sh --help
 
-# One comprehensive lab, without the large corpus or churn tests.
-tests/patch-runner/test-patch.sh sanity --remote root@tt-px1
+# Build the production smithproxy target only.
+tests/patch-runner/test-patch.sh quick --local
 
-# Build once, then run isolated sections with at most three concurrent labs.
-tests/patch-runner/test-patch.sh full --remote root@tt-px1 \
-    --unique=udp-flaky-results --parallel 3
+# Bounded functional validation on one remote Linux target.
+tests/patch-runner/test-patch.sh sanity --remote root@test-runner-1
+
+# Recommended comprehensive correctness gate: modest section parallelism,
+# predictable work directory and no unrelated host-load experiment.
+tests/patch-runner/test-patch.sh full --remote root@test-runner-1 \
+    --parallel 3 --jobs 8 --dir /tmp/patch-runner/manual-full-p3
+
+# Build once, then run three workers on each of two targets.
+tests/patch-runner/test-patch.sh full --remote root@test-runner-1 \
+    --remote root@test-runner-2 --unique=distributed-full --parallel 3
 
 # Start a lab for manual API/CLI work; Ctrl-C performs cleanup.
-tests/patch-runner/test-patch.sh --run --remote root@tt-px1
+tests/patch-runner/test-patch.sh --run --remote root@test-runner-1
 
 # Run the focused end-to-end QUIC/H3 observability suite.
-tests/patch-runner/test-patch.sh sanity --suite quic --remote root@tt-px1
+tests/patch-runner/test-patch.sh sanity --suite quic --remote root@test-runner-1
 ```
+
+For a long foreground run, use `screen` or another terminal multiplexer:
+
+```bash
+screen -S smithproxy-full
+tests/patch-runner/test-patch.sh full --remote root@test-runner-1 \
+    --parallel 3 --dir /tmp/patch-runner/manual-full-p3
+# Detach with Ctrl-A D; return with: screen -r smithproxy-full
+```
+
+The default work root is `/tmp/patch-runner/<branch>_@_<commit>/`. Prefer an
+explicit `--dir` for long runs so reports and live logs have a predictable
+location. Useful first checks are:
+
+```bash
+tail -f /tmp/patch-runner/manual-full-p3/results/*/test.log
+cat /tmp/patch-runner/manual-full-p3/results/*/summary.txt
+cat /tmp/patch-runner/manual-full-p3/results/*/sections.tsv
+df -h /tmp
+```
+
+Remote lab directories and heavy capture artifacts are deliberately retained
+for diagnosis. Monitor free space before long runs and remove only explicitly
+identified, no-longer-needed work roots.
+
+`--parallel N` controls how many independent sections run simultaneously on
+each target. It is a scheduler/load control, not a controlled contention test
+of one Smithproxy instance. Use moderate parallelism (normally `3`) for the
+correctness gate. Model accept, handshake, transfer or cache contention with a
+focused workload that ramps identical flows against one instance and measures
+control probes between them; do not infer a product bottleneck merely by
+running every unrelated section at once.
 
 Run `tests/patch-runner/test-patch.sh --help` for the authoritative option
 syntax.
@@ -30,11 +107,13 @@ syntax.
 | Option | Meaning |
 |---|---|
 | `--suite NAME` | Run one focused suite or full-run section |
-| `--remote [USER@]HOST` | Create the lab over SSH instead of locally |
+| `--local` | Add the current machine as an explicit target |
+| `--remote [USER@]HOST` | Add an SSH target; repeatable for distributed profiles |
 | `--env NAME=VALUE` | Override a lab variable; repeatable |
 | `--dir DIR` | Override the work-root base |
 | `--unique` / `--unique=TAG` | Atomically claim a suffixed work root |
-| `--parallel N` | Maximum concurrent post-smoke full sections |
+| `--parallel N` | Concurrent section workers per target |
+| `--seed SEED` | Replay one exact fuzz seed |
 | `--build-dir DIR` | Select a CMake build directory |
 | `--shared-binary PATH` | Reuse an absolute executable path on the lab host |
 | `--jobs N` | Build parallelism; default `nproc` |
@@ -48,62 +127,73 @@ output is their primary interface.
 
 ## Profiles and coverage
 
-| Check | `quick` | `sanity` | `full` | `benchmark` | `--run` |
-|---|:---:|:---:|:---:|:---:|:---:|
-| Build `smithproxy` | yes | yes | yes | yes | yes |
-| Authenticated API startup | - | yes | yes | yes | yes |
-| IPv4/IPv6 HTTP, TLS and UDP smoke | - | yes | yes | yes | manual |
-| Exact pplay HTTP/1 smoke | - | yes | yes | - | manual |
-| TLS protocol/trust/SNI matrix | - | yes | yes | - | manual |
-| Policy precedence/profile matrix | - | yes | yes | - | manual |
-| Loaded CLI session-list probe | - | yes | yes | - | manual |
-| RTT limits and payload validation | - | yes | yes | report only | manual |
-| TCP and UDP churn | - | - | yes | - | manual |
-| Regular/edge/insanity corpus | - | - | yes | - | manual |
-| PCAPNG/GRE capture matrix | - | yes | yes | - | manual |
-| HTTP/2 CLI/PCAP/GRE observability | - | yes | yes | - | manual |
-| No-bypass and cleanup checks | - | yes | every section | yes | on exit |
+| Check | `quick` | `sanity` | `full` | `fuzz` | `fuzz-dyn` | `benchmark` | `--run` |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| Build `smithproxy` | yes | yes | yes | yes | yes | yes | yes |
+| Authenticated API startup | - | yes | yes | every shard | every shard | yes | yes |
+| IPv4/IPv6 functional layers | - | yes | yes | smoke gate | smoke gate | yes | manual |
+| TLS/policy/RTT/transfer/throughput/churn | - | focused | yes | - | - | report only | manual |
+| Corpus and capture observability | - | focused | yes | - | - | - | manual |
+| Bounded deterministic `fuzz.*` | - | focused | yes | yes | - | - | manual |
+| New-seed `fuzz.*` exploration | - | - | - | - | yes | - | manual |
+| No-bypass and cleanup checks | - | yes | every section | every shard | every shard | yes | on exit |
 
 Applicable dataplane checks produce separate `PASS4` and `PASS6` verdicts. A
 failure in either address family fails its section. Management-only checks use
 one verdict.
 
-`sanity` runs in one lab. `full` first runs a serial smoke gate; only when it
-passes are these isolated sections started:
+`sanity` runs in one lab. `full` first runs a serial smoke gate, then exclusive
+RTT and TLS throughput phases. Only after both measurement phases are the
+remaining isolated sections started:
 
 ```text
 smoke
-├── tls-policy       (TLS, policy and loaded session-list)
-├── rtt
-├── tcp-churn
-├── udp-churn
-├── capture          (basic capture, capture matrix and HTTP/2 observability)
-├── corpus-regular
-├── corpus-edge
-└── corpus-insanity
+├── rtt              (exclusive; no competing load workers)
+├── tls-throughput   (exclusive; IPv4/IPv6 download/upload measurement)
+└── parallel phase
+    ├── tls-policy   (TLS, policy and loaded session-list)
+    ├── routing
+    ├── transfer     (TLS upload/download at 1/4/16 parallel flows)
+    ├── quic         (HTTP/3, CLI diagnostics, native PCAP and GRE)
+    ├── tcp-churn
+    ├── udp-churn
+    ├── capture      (basic capture, capture matrix and HTTP/2 observability)
+    ├── corpus-regular
+    ├── corpus-edge
+    ├── corpus-insanity
+    └── fuzz.<area>  (one independently scheduled shard per protocol)
 ```
 
-`--parallel N` controls the maximum number of concurrent post-smoke sections;
-the default is `3` (`PATCH_TEST_PARALLEL` provides the environment default).
+TLS throughput measures end-to-end TLS download and upload at 1, 4 and 16
+concurrent flows. Throughput has no numeric pass threshold: a completed and
+integrity-checked transfer is `PASS`, while TLS, HTTP, process or transfer
+failure remains a hard `FAIL`. Its exclusive slot keeps unrelated section load
+out of the reported numbers.
+
+`--parallel N` controls concurrent parallel-phase workers on each target; the
+default is `3` (`PATCH_TEST_PARALLEL` provides the environment default). A
+completed slot is refilled immediately instead of waiting for a batch.
 Each section owns its namespaces, interfaces, ports, config, data and results.
-The build output is shared without being modified. A remote full run uploads
-`smithproxy` once with mode `0555`, and section labs symlink to it instead of
-keeping nine binary copies.
+The build output is shared without being modified. Distributed runs upload one
+self-contained bundle per remote target. A target-local scheduler owns its
+worker pool and returns one archive per phase, so P16 does not create an SSH
+connection storm. Section labs symlink the staged `smithproxy` binary.
 
 ## Selecting one suite
 
-`--suite NAME` is accepted with `sanity` and `full`. The original focused
+`--suite NAME` is accepted with `sanity`, `full`, `fuzz` and `fuzz-dyn`. The original focused
 suites remain available:
 
 ```text
-tls  policy  rtt  session-list  quic
+tls  transfer  tls-throughput  starttls  policy  routing  rtt  session-list  quic
 ```
 
 Full-run sections can also be invoked directly:
 
 ```text
-smoke  tls-policy  tcp-churn  udp-churn  capture
+smoke  tls-policy  routing  rtt  transfer  tls-throughput  quic  tcp-churn  udp-churn  capture
 corpus-regular  corpus-edge  corpus-insanity
+fuzz.h1  fuzz.h2  fuzz.h2.insanity  fuzz.tls  fuzz.socks5  fuzz.dns  ...
 ```
 
 Every selected suite still performs API startup, no-bypass and cleanup checks.
@@ -114,11 +204,40 @@ retain the basic dual-stack HTTP/TLS/UDP smoke around their named check. The
 Examples:
 
 ```bash
-tests/patch-runner/test-patch.sh sanity --suite policy --remote root@tt-px1
-tests/patch-runner/test-patch.sh sanity --suite capture --remote root@tt-px1
+tests/patch-runner/test-patch.sh sanity --suite policy --remote root@test-runner-1
+tests/patch-runner/test-patch.sh sanity --suite tls-throughput --remote root@test-runner-1
+tests/patch-runner/test-patch.sh sanity --suite capture --remote root@test-runner-1
 tests/patch-runner/test-patch.sh sanity --suite corpus-edge \
-    --remote root@tt-px1 --env MATCH='h2_generated_*'
+    --remote root@test-runner-1 --env MATCH='h2_generated_*'
 ```
+
+## Fuzz layers and seeds
+
+`full` includes the mandatory deterministic fuzz layer. `fuzz` runs that layer
+alone, and optional `fuzz-dyn` runs every area with one newly generated seed:
+
+```bash
+tests/patch-runner/test-patch.sh fuzz --local --parallel 3
+tests/patch-runner/test-patch.sh fuzz-dyn \
+    --remote root@test-runner-1 --remote root@test-runner-2 --parallel 4
+tests/patch-runner/test-patch.sh fuzz --suite fuzz.h2 --local \
+    --seed 0123456789abcdef
+```
+
+The areas are independent `fuzz.<protocol>` sections. The seed selection and
+lifecycle rules are defined in `tests/docs/TESTING_POLICY.md`. Successful complete
+dynamic runs append their seed to `tests/docs/covered-seeds`; failed or partially
+completed runs only retain the seed in their report.
+Dynamic reproduction commands include the generated seed explicitly.
+
+Mandatory replay always includes regression seeds, then adds bounded recent
+and rotating archive samples. Tune the cost with `FUZZ_RECENT_SEEDS`,
+`FUZZ_ARCHIVE_SEEDS`, `FUZZ_ROTATION_DAYS` and `FUZZ_SEED_MIN_AGE_DAYS`.
+`FUZZ_LEVEL` defaults to `245`; TCP fuzz shards also enable deterministic write
+scattering.
+The distributed profiles split the large H1 and H2 areas into
+`regular`/`edge`/`insanity` scheduler subshards; an unsuffixed focused suite
+still runs the complete protocol area.
 
 ## Work directories and concurrent invocations
 
@@ -155,10 +274,11 @@ lab; full mode supplies it automatically.
 
 ## Remote and interactive operation
 
-Without `--remote`, privileged lab setup runs locally through `sudo` unless the
-caller is already root. With `--remote [USER@]HOST`, scripts and inputs are
-copied over SSH. `root@host` runs directly; another user requires passwordless
-remote `sudo`.
+There is no implicit execution target. Use `--local` for local privileged setup
+(through `sudo` unless already root), or one or more `--remote [USER@]HOST`
+arguments. `root@host` runs directly; another user requires passwordless remote
+`sudo`. Focused and interactive runs require exactly one target; distributed
+profiles accept a mixed local/remote worker pool.
 
 `--run` starts Smithproxy plus the origin services, publishes random API and
 CLI ports on the selected host's loopback interface, prints connection details,
@@ -175,7 +295,7 @@ The committed corpus lives in `corpus/regular`, `corpus/edge` and
 Filter case basenames with comma-separated shell globs:
 
 ```bash
-tests/patch-runner/test-patch.sh full --remote root@tt-px1 \
+tests/patch-runner/test-patch.sh full --remote root@test-runner-1 \
     --env MATCH='h2_generated_*' \
     --env EXCLUDE='h2_generated_003,h2_generated_017'
 ```
@@ -197,6 +317,12 @@ A `FLAKY_PASS` is propagated to the full-run section table and overall result,
 but the process exits successfully. The compatible pplay engine and its license
 are vendored under `vendor/`; no external pplay checkout is used.
 
+For TLS-area corpus and `fuzz.tls`, exact traversal and an immediate two-sided
+`PASS*_SAFE_REJECT` are both valid for malformed inputs. A separate TLS
+autodetect regression matrix verifies that fragmented recognizable TLS prefixes
+cannot reach the plaintext origin; timeout, crash and one-sided teardown remain
+hard failures.
+
 The 30 `capture_*` cases are excluded from the ordinary corpus workers and run
 only by the dedicated capture matrix. This prevents duplicate stream tuples in
 PCAPNG/GRE validation while preserving coverage of all cases.
@@ -214,6 +340,7 @@ Frequently useful `--env NAME=VALUE` controls:
 |---|---:|---|
 | `TCP_CHURN_WAVES` / `TCP_CHURN_FLOWS` | `20` / `64` | TCP churn volume |
 | `TCP_CHURN_PARALLEL` | `64` | Maximum simultaneous TCP churn flows |
+| `TCP_CHURN_SYNCHRONIZED` | `0` | Release every TCP wave from one start barrier |
 | `TCP_CHURN_INTERVAL` / `TCP_CHURN_SETTLE` | `0.25` / `15` s | TCP timing |
 | `TCP_CHURN_TIMEOUT` | `3` s | Per-flow TCP timeout |
 | `UDP_CHURN_WAVES` / `UDP_CHURN_FLOWS` | `8` / `96` | UDP churn volume |
@@ -223,9 +350,17 @@ Frequently useful `--env NAME=VALUE` controls:
 | `RTT_WARMUP` | `20` | Unreported warm-up exchanges |
 | `RTT_P95_LIMIT_MS` / `RTT_MAX_LIMIT_MS` | `50` / `250` | TCP/UDP RTT gates |
 | `RTT_HANDSHAKE_P95_LIMIT_MS` / `RTT_HANDSHAKE_MAX_LIMIT_MS` | `500` / `2000` | Connect, TLS and HTTPS gates |
-| `RTT_TLS_TOTAL_P50_LIMIT_MS` / `RTT_HTTPS_P50_LIMIT_MS` | `7` / `2` | Additional TLS/HTTPS P50 gates |
+| `RTT_TLS_TOTAL_P50_LIMIT_MS` / `RTT_HTTPS_P50_LIMIT_MS` | `7` / `2` | TLS/HTTPS P50 PASS gates |
+| `RTT_TLS_TOTAL_P50_FLAKY_LIMIT_MS` / `RTT_HTTPS_P50_FLAKY_LIMIT_MS` | `10` / `10` | TLS/HTTPS P50 FLAKY_PASS ceilings |
+| `TLS_THROUGHPUT_BYTES` | `67108864` | Bytes transferred by each throughput flow |
+| `TLS_THROUGHPUT_REPEATS` | `3` | Samples per direction and concurrency |
+| `TLS_THROUGHPUT_CONCURRENCY` | `1,4,16` | Concurrent flows measured by the exclusive throughput phase |
 | `SESSION_LIST_CONNECTIONS` / `SESSION_LIST_SAMPLES` | `256` / `24` | Loaded CLI probe size |
 | `SESSION_LIST_P95_LIMIT_MS` / `SESSION_LIST_MAX_LIMIT_MS` | `1000` / `3000` | CLI snapshot gates |
+| `TLS_WRITE_CHUNK` | `20480` | Maximum plaintext bytes offered to one `SSL_write()`; intended for comparative transfer tests |
+| `SSL_USE_KTLS` | config default | Request OpenSSL KTLS for focused enabled/disabled comparisons |
+| `KTLS_PROBE_TEST` / `KTLS_EXPECT_ACTIVE` | `0` / `any` | Hold a TLS flow, record both legs' effective BIO KTLS state, optionally require `on` or `off` |
+| `TLS_TEST_VERSION` / `TLS_TEST_CIPHER` | unset | Pin both legs to TLS 1.2/1.3 and, for TLS 1.2, pin the cipher for focused KTLS checks |
 
 `sanity` and `full` enforce all RTT gates. `benchmark` records the same metrics
 without latency failures and additionally measures a native origin-namespace
@@ -271,6 +406,13 @@ explanation (`likely:`), includes the report path, and records a shell-escaped
 reproduction command. `--quiet` suppresses normal detail but still prints the
 result, failed reason, section table and report path.
 
+Every successful top-level invocation also appends a concise entry to
+`tests/docs/patch-run-history`, including the tested commit/dirty state, anonymized
+target order (`local`, `remote-1`, `remote-2`, ...), and effective section
+coverage. The run-local report retains actual targets for diagnostics. Internal
+workers do not write history. The runner never commits or pushes either history
+or seed-registry changes.
+
 ## Requirements
 
 The build side needs Bash, Git, CMake and a configured C++ toolchain. Remote
@@ -283,10 +425,17 @@ iproute2 (ip, ss)  nftables  socat  util-linux (setsid, unshare, mount)
 tcpdump  curl  netcat  OpenSSL  Python 3  coreutils (timeout)
 ```
 
-The QUIC suite additionally needs Python `aioquic`, `tshark`, and an
-HTTP/3-enabled curl installation. Set `CURL_HTTP3_PREFIX` to its prefix; the
-runner copies that runtime bundle into the isolated lab. The default is the
-sibling directory `../curl-http3`.
+The QUIC suite additionally needs `tshark`, an HTTP/3-enabled curl installation
+and the prepared Python QUIC runtime. The coordinator copies both runtime
+bundles to remote targets; `aioquic` is not required to be installed on the
+lab host. Defaults are the sibling directories `../curl-http3` and
+`../quic-python`. Prepare the pinned Python bundle once with:
+
+```bash
+tests/patch-runner/prepare-quic-runtime.sh
+```
+
+Override the locations with `CURL_HTTP3_PREFIX` and `QUIC_PYTHON_PREFIX`.
 
 The runner creates disposable namespaces and veth pairs but does not install
 host iptables/nftables traffic-redirection rules. Cleanup verifies that its own

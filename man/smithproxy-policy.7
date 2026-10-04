@@ -1,0 +1,235 @@
+.\" Render with: groff -man -Tutf8 smithproxy-policy.7
+.TH SMITHPROXY-POLICY 7 "OCT 2026" "Smithproxy" "Miscellaneous Information Manual"
+.SH NAME
+smithproxy-policy \- Smithproxy traffic matching and policy processing
+.SH DESCRIPTION
+Smithproxy policy is an ordered list of traffic rules. Each connection is
+classified by named protocol, address and port objects. The first matching rule
+selects an action and the profiles used for inspection, capture, DNS handling
+and routing.
+.PP
+The short model is:
+.nf
+    connection metadata
+            |
+            v
+    ordered policy match ---> action
+            |
+            +-- TLS / SSH / detection / content / DNS profiles
+            `-- NAT and routing profile
+.fi
+.SH MATCH OBJECTS
+Rules refer to named objects rather than embedding most values directly.
+.TP
+.B proto_objects
+Map names to IP protocol numbers. Typical objects are TCP (6) and UDP (17).
+.TP
+.B address_objects
+Contain IPv4/IPv6 CIDR ranges or FQDN values. FQDN matching depends on DNS data
+known to Smithproxy and should not be treated as cryptographic identity.
+.TP
+.B port_objects
+Contain inclusive port ranges from 0 through 65535.
+.PP
+An array in a rule matches any referenced object in that field. IPv4 and IPv6
+catch-all objects are normally listed together when a rule should cover both
+families.
+.SH ORDER AND DEFAULTS
+Rules are evaluated in configuration order. Put specific exceptions before
+broad catch-all rules. Reordering rules can change both access decisions and
+inspection behavior without changing any object or profile.
+.PP
+Every deployed policy should end in an intentional catch-all decision. Do not
+rely on an undocumented implicit result when no rule matches. Review the active
+policy in the CLI after configuration loading or schema upgrades.
+.SH RULE FIELDS
+.TP
+.B proto
+Name from
+.BR proto_objects .
+.TP
+.B src, dst
+Arrays of source and destination address-object names.
+.TP
+.B sport, dport
+Arrays of source and destination port-object names.
+.TP
+.B action
+.B accept
+continues proxy processing;
+.B deny
+blocks the connection.
+.B reject
+is retained for legacy configuration compatibility.
+.TP
+.B nat
+.B auto
+uses translated upstream addressing.
+.B none
+requests transparent source handling where supported by the ingress mode,
+kernel and routing configuration.
+.TP
+.B features
+Optional feature tags recognized by the running build.
+.TP
+.B routing
+Name of a routing entry, or
+.BR none .
+.SH PROFILE ASSIGNMENT
+An accepted rule can attach named profiles. Empty profile names disable that
+layer for the rule.
+.TP
+.B tls_profile
+Controls TLS interception, certificate selection and validation. A bypass TLS
+profile can explicitly pass encrypted TLS without terminating it.
+.TP
+.B ssh_profile
+Enables SSHv2 MITM behavior on builds with libssh support.
+.TP
+.B detection_profile
+Controls application engines and knowledge-base metadata collection.
+.TP
+.B content_profile
+Controls payload capture, byte limits and content processing.
+.TP
+.B alg_dns_profile
+Controls DNS request/response association, ID handling and caching.
+.PP
+Profiles are independent building blocks. For example, an accepted connection
+can use TLS inspection without payload capture, or capture opaque TCP without a
+protocol detection engine.
+.SH ROUTING
+Routing profiles affect the upstream leg after policy selection. They can:
+.IP \(bu 2
+rewrite the destination address and port;
+.IP \(bu 2
+select among multiple targets using round-robin, sticky-L3 or sticky-L4;
+.IP \(bu 2
+rewrite an exact outbound TLS SNI value.
+.PP
+Routing does not rewrite the metadata originally observed on the client-facing
+leg. Diagnostics should therefore distinguish requested and effective upstream
+destinations.
+.SH TRANSPARENCY AND NAT
+With
+.B nat = auto
+the upstream socket normally uses a Smithproxy host address. With transparent
+source handling, the upstream leg can use the original client address. This
+requires Linux transparent-socket support and policy routing which returns
+server traffic to Smithproxy.
+.PP
+Incorrect transparent routing commonly produces a successful client-side
+accept followed by an upstream timeout or asymmetric return path. Test routing
+independently from TLS or content inspection.
+.SH DNS AND FQDN MATCHING
+FQDN policy objects use names learned through DNS inspection and caches. A
+single address can serve multiple names, and cached data can become stale.
+TLS SNI or HTTP host metadata can provide additional context but does not turn
+an address rule into proof of application identity.
+.PP
+Place security-critical name rules behind appropriate certificate validation
+and define an explicit fallback for connections whose name is unknown.
+.SH EXAMPLES
+.SS Specific accept followed by default deny
+.nf
+    address_objects = {
+        clients = { type = "cidr"; value = "192.0.2.0/24"; };
+        any4 = { type = "cidr"; value = "0.0.0.0/0"; };
+    };
+    port_objects = {
+        https = { start = 443; end = 443; };
+        all = { start = 0; end = 65535; };
+    };
+
+    policy = (
+        {
+            proto = "tcp";
+            src = [ "clients" ]; dst = [ "any4" ];
+            sport = [ "all" ]; dport = [ "https" ];
+            action = "accept"; nat = "auto";
+            tls_profile = "default";
+            detection_profile = "detect";
+            content_profile = "metadata_only";
+            routing = "none";
+        },
+        {
+            proto = "tcp";
+            src = [ "any4" ]; dst = [ "any4" ];
+            sport = [ "all" ]; dport = [ "all" ];
+            action = "deny"; nat = "auto"; routing = "none";
+        }
+    );
+.fi
+.PP
+The HTTPS rule matches first. Other TCP traffic reaches the final deny rule.
+Equivalent IPv6 objects must be included when IPv6 is allowed.
+.SS TLS bypass before general inspection
+.nf
+    policy = (
+        { proto = "tcp"; dst = [ "software_updates" ];
+          dport = [ "https" ]; action = "accept";
+          tls_profile = "bypass"; nat = "auto"; routing = "none"; ... },
+        { proto = "tcp"; dst = [ "any", "any6" ];
+          dport = [ "https" ]; action = "accept";
+          tls_profile = "default"; nat = "auto"; routing = "none"; ... }
+    );
+.fi
+.PP
+If these rules are reversed, the broad rule wins and the intended bypass is
+never used. Ellipses represent required match fields omitted for readability.
+.SS Route one service to an alternate upstream
+.nf
+    routing = {
+        maintenance = {
+            dnat_address = [ "maintenance_hosts" ];
+            dnat_port = [ "https" ];
+            dnat_lb_method = "sticky-l3";
+        };
+    };
+
+    policy = (
+        { proto = "tcp"; dst = [ "public_service" ];
+          dport = [ "https" ]; action = "accept";
+          nat = "auto"; routing = "maintenance"; ... }
+    );
+.fi
+.PP
+Client-visible destination metadata remains the original service; the routing
+profile selects the effective destination of the upstream leg.
+.SH CLI WORKFLOW
+Useful commands include:
+.nf
+    show config policy
+    show config policy <index>
+    show config objects
+    diag proxy policy list
+    configure terminal
+    edit policy
+    edit [0]
+    save config
+    execute reload
+.fi
+.PP
+Use contextual completion for object and profile names. After changes, verify
+both the configured policy and a live session: a syntactically valid rule can
+still match more or less traffic than intended.
+.SH TESTING POLICY
+Since October 2026, Smithproxy uses a strict documented validation policy with
+commit-specific reports under
+.IR docs/test-reports/ .
+Policy results should include positive matches, adjacent non-matches, ordering
+conflicts and reload behavior rather than only the intended happy path.
+.SH SECURITY CONSIDERATIONS
+Policy order is security-sensitive. A broad accept rule above a deny or bypass
+exception makes the lower rule unreachable. Conversely, a broad MITM rule can
+decrypt traffic that should remain private or break pinned applications.
+.PP
+Keep policy changes reviewable: use descriptive object/profile names, avoid
+overlapping ranges where possible, document intentional bypasses and validate
+representative IPv4, IPv6, explicit-proxy and transparent flows.
+.SH SEE ALSO
+.BR smithproxy (1),
+.BR smithproxy.cfg (5),
+.BR smithproxy-mitm (7),
+.BR smithproxy-capture (7),
+.BR smithproxy-topology (7)

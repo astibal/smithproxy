@@ -43,19 +43,27 @@ struct CliGlobals {
 };
 
 std::string prompt(const libcli2::Context& context) {
+    const auto d = context.decor();
     auto board = CfgFactory::board();
     board->ack_current(cli_id());
     board->ack_saved(cli_id());
     const bool unsaved = board->at(cli_id()).seen_current != board->at(cli_id()).seen_saved;
-    std::string value = "smithproxy(" + CliGlobals::hostname() + ")";
-    if (unsaved) value += "<*>";
-    if (CfgFactory::LOAD_ERRORS) value += "<!>";
+    // Keep the wire-safe ASCII name when colors are disabled. An active palette
+    // implies a modern terminal, so the colored prompt can use U+2300 as the
+    // terminal-sized counterpart of the Smithproxy mark.
+    std::string brand = "smithproxy";
+    if (context.colors_enabled()) {
+        brand = d.command("smithpr") + d.success("\xE2\x8C\x80") + d.command("xy");
+    }
+    std::string value = brand + "(" + d.key(CliGlobals::hostname()) + ")";
+    if (unsaved) value += d.warning("<*>");
+    if (CfgFactory::LOAD_ERRORS) value += d.error("<!>");
     if (context.mode != "0") {
         const auto* config = static_cast<const ConfigCli2Session*>(context.user_data);
         const auto path = config ? config->path() : std::string{};
-        value += path.empty() ? "(config:/)" : "(config:/" + path + ")";
+        value += d.command(path.empty() ? "(config:/)" : "(config:/" + path + ")");
     }
-    value += context.privilege >= 15 ? "# " : "> ";
+    value += context.privilege >= 15 ? d.warning("# ") : d.muted("> ");
     return value;
 }
 
@@ -83,17 +91,19 @@ int regular(libcli2::Context& context) {
         }
     }
     if (SmithProxy::instance().terminate_flag) {
-        context.print("\n !!!   Shutdown   !!!");
+        context.print(context.decor().error("\n !!!   Shutdown   !!!"));
         return 1;
     }
     if (CfgFactory::LOAD_ERRORS && !CliGlobals::cfg_error_flag) {
-        context.print("Warning: There was a problem loading configuration\n"
-                      "    - execute `show event list` to see more details");
+        const auto d = context.decor();
+        context.print(d.warning("Warning: There was a problem loading configuration") + "\n    - execute " +
+                      d.command("show event list") + " to see more details");
         CliGlobals::cfg_error_flag = true;
     }
     if (!SSLFactory::factory().is_ct_available() && !CliGlobals::ct_warning_flag) {
-        context.print("Warning: Certificate Transparency checks not available\n"
-                      "    - download it using `sx_download_ctlog` tool and restart service");
+        const auto d = context.decor();
+        context.print(d.warning("Warning: Certificate Transparency checks not available") + "\n    - download it using " +
+                      d.command("sx_download_ctlog") + " and restart service");
         CliGlobals::ct_warning_flag = true;
     }
     return 0;

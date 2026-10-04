@@ -1,0 +1,240 @@
+.\" Render with: groff -man -Tutf8 smithproxy-capture.7
+.TH SMITHPROXY-CAPTURE 7 "OCT 2026" "Smithproxy" "Miscellaneous Information Manual"
+.SH NAME
+smithproxy-capture \- Smithproxy local and remote traffic capture
+.SH DESCRIPTION
+Smithproxy can record traffic locally or export it to a remote collector. When
+a protocol is terminated by a MITM layer, capture can contain plaintext even
+though the traffic is encrypted on both external network legs.
+.PP
+Capture requires two decisions:
+.nf
+    content profile:  which connections and how many bytes
+    capture target:   where and in which format records are written
+.fi
+.PP
+The matching policy assigns the content profile. The global
+.B captures
+section configures local files and remote GRE emission.
+.SH CAPTURE POINT
+For plaintext TCP or UDP, recorded bytes correspond to relayed application
+payload. For inspected TLS, SSH or QUIC, the relevant MITM layer can expose
+decrypted application data and protocol metadata to capture.
+.PP
+Pass-through TLS, opaque SSH and unsupported encrypted protocols remain
+encrypted. Capture does not imply that Smithproxy understands the application
+protocol carried by the bytes.
+.SH CONTENT PROFILE
+A
+.B content_profile
+is assigned by policy. Important fields include:
+.TP
+.B write_payload
+Enable payload capture for matching connections.
+.TP
+.B write_format
+Select
+.BR smcap ,
+.BR pcap
+or
+.BR pcap_single .
+.TP
+.B write_limit_client, write_limit_server
+Limit recorded bytes in each direction. Zero means the configured unlimited
+behavior; confirm limits in the active configuration before production use.
+.TP
+.B content_rules
+Optional payload matching and replacement rules. Replacement changes relayed
+traffic and is not merely a capture filter.
+.SH LOCAL CAPTURE
+The
+.B captures.local
+group controls local output:
+.nf
+    captures = {
+        local = {
+            enabled = TRUE;
+            dir = "/var/smithproxy/data";
+            file_prefix = "";
+            file_suffix = "";
+            format = "pcap_single";
+            pcap_quota = 100;
+        };
+    };
+.fi
+.TP
+.B smcap
+Per-connection Smithproxy text capture with payload and connection context.
+It is useful for inspection and replay tooling but is not a standard packet
+capture format.
+.TP
+.B pcap
+One standard PCAP file per captured connection.
+.TP
+.B pcap_single
+Append records from multiple sessions to a shared rotating PCAP. The
+.B pcap_quota
+value is the rollover size in MiB; zero disables quota-based rollover.
+.PP
+The default local directory is
+.IR /var/smithproxy/data .
+Ensure the service user can write it and that rotation/retention matches the
+traffic volume.
+.SH REMOTE GRE EXPORT
+The
+.B captures.remote
+group exports capture records in GRE:
+.nf
+    captures = {
+        remote = {
+            enabled = TRUE;
+            tun_type = "gre";
+            gre_format = "spq1";
+            tun_dst = "192.0.2.50";
+            tun_ttl = 1;
+        };
+    };
+.fi
+.TP
+.B tun_dst
+Collector IP address.
+.TP
+.B tun_ttl
+Outer-packet TTL. A small value helps prevent decrypted capture export from
+leaving the intended network boundary.
+.TP
+.B spq1
+Smithproxy plaintext packet export. QUIC-related SPQ1 records can use the
+supplied Wireshark dissector under
+.IR /usr/share/smithproxy/wireshark/ .
+.TP
+.B pcapng
+Native PCAPNG record export. It can carry Enhanced Packet Blocks and Decryption
+Secrets Blocks where the protocol path supplies them.
+.PP
+GRE provides encapsulation, not confidentiality or peer authentication. Protect
+the path with network isolation or an appropriate secure tunnel when records
+cross an untrusted network.
+.SH TLS KEY LOG
+Smithproxy can write TLS traffic secrets in SSLKEYLOG-compatible form to the
+path configured by
+.BR settings.sslkeylog_file .
+The matching TLS profile must enable key export.
+.PP
+SSLKEYLOG material can decrypt compatible packet captures. Treat it as sensitive
+as plaintext capture and delete it according to the same retention policy.
+.SH QUIC AND HTTP/3
+QUIC multiplexes streams inside one UDP connection. Smithproxy's experimental
+QUIC listener can export plaintext stream data and decoded HTTP/3 header
+metadata. Native PCAPNG export can associate packet records and TLS secrets;
+SPQ1 provides Smithproxy-specific plaintext QUIC records for analysis.
+.PP
+QUIC capture availability depends on OpenSSL QUIC support, listener state and
+the negotiated protocol. Generic UDP capture cannot recover QUIC plaintext by
+itself.
+.SH DIRECTION AND METADATA
+Smithproxy tracks client-to-server and server-to-client byte directions on the
+logical session. Capture records can also include addresses, ports, timestamps,
+connection identifiers and protocol-specific metadata depending on format.
+.PP
+Because MITM creates two real network connections, synthetic plaintext records
+do not necessarily reproduce the packet sizes, sequence numbers, timing or
+ciphertext visible on either physical leg.
+.SH ROTATION AND STORAGE
+Estimate storage from application payload volume, not encrypted wire size alone.
+Content limits, global enable switches, PCAP quota and external retention should
+be configured together. Monitor free space and capture errors; disk failure
+must not be allowed to surprise an inspection host.
+.PP
+The CLI command
+.nf
+    execute pcap rollover
+.fi
+forces rollover of the shared PCAP file.
+.SH EXAMPLES
+.SS Capture selected HTTPS sessions locally
+.nf
+    captures = {
+        local = {
+            enabled = TRUE;
+            dir = "/var/smithproxy/data";
+            format = "pcap_single";
+            pcap_quota = 250;
+        };
+        remote = { enabled = FALSE; };
+    };
+
+    content_profiles = {
+        audit = {
+            write_payload = TRUE;
+            write_format = "pcap_single";
+            write_limit_client = 1048576;
+            write_limit_server = 4194304;
+        };
+    };
+.fi
+.PP
+Assign
+.B content_profile = "audit"
+only to the intended HTTPS policy. The example caps capture per direction while
+the shared file rotates at approximately 250 MiB.
+.SS Export native records to a collector
+.nf
+    captures = {
+        local = { enabled = FALSE; };
+        remote = {
+            enabled = TRUE;
+            tun_type = "gre";
+            gre_format = "pcapng";
+            tun_dst = "192.0.2.50";
+            tun_ttl = 1;
+        };
+    };
+.fi
+.PP
+Permit GRE between the proxy and collector and capture the tunnel endpoint
+there. This example provides no encryption; keep the path inside a controlled
+network or protect it separately.
+.SS Export TLS secrets without broad payload capture
+Enable SSLKEYLOG in a narrow TLS profile and assign it only to a diagnostic
+policy. Capture encrypted packets on the wire and load the resulting key log in
+Wireshark. Disable the diagnostic policy and remove the secrets after use.
+.SH ANALYSIS
+Standard PCAP and PCAPNG files can be opened in Wireshark or tshark. SMCap is
+consumed by Smithproxy-oriented tooling such as pplay. Remote GRE export can be
+captured on the collector and decoded according to its selected record format.
+.PP
+When troubleshooting, compare:
+.IP \(bu 2
+the original wire capture before Smithproxy;
+.IP \(bu 2
+the plaintext Smithproxy capture;
+.IP \(bu 2
+the upstream wire capture after Smithproxy.
+.PP
+These represent different connections and answer different questions.
+.SH TESTING POLICY
+Since October 2026, successful clean-tree capture validation can be retained as
+a commit-specific report under
+.IR docs/test-reports/ .
+The documented result should identify the format and verify both expected
+plaintext visibility and the absence of payload from excluded policies.
+.SH SECURITY AND PRIVACY
+Captures can contain credentials, cookies, personal data, private keys in
+application payloads and complete user activity. Limit capture policies to the
+minimum required traffic and byte range. Restrict filesystem permissions,
+collector access, backups and retention.
+.PP
+Do not assume that omitting payload makes all metadata harmless. DNS names,
+addresses, SNI, HTTP headers, timing and session identifiers can remain
+sensitive.
+.SH FAILURE BEHAVIOR
+Capture/export failure and traffic forwarding are separate concerns. Verify the
+desired fail-open or fail-closed behavior for the deployed version and monitor
+logs rather than assuming successful forwarding means successful capture.
+.SH SEE ALSO
+.BR smithproxy (1),
+.BR smithproxy.cfg (5),
+.BR smithproxy-mitm (7),
+.BR smithproxy-policy (7),
+.BR smithproxy-topology (7)

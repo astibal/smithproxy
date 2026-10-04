@@ -37,6 +37,15 @@ print(f"\nTLS: {', '.join(data['tls']['versions'])}; certificate verified; "
 print(f"RTT summary: TLS-total-P50={data['tls']['total_connect']['p50_ms']:.3f}ms; "
       f"HTTPS-P50={data['tls']['https_rtt']['p50_ms']:.3f}ms")
 
+gates = data.get("p50_gates", {})
+if gates.get("status") == "FLAKY_PASS":
+    details = "; ".join(
+        f"{check['name']}={check['value_ms']:.3f}ms "
+        f"(pass {check['pass_limit_ms']:.3f}ms, flaky {check['flaky_limit_ms']:.3f}ms)"
+        for check in gates.get("checks", []) if check.get("status") == "FLAKY_PASS"
+    )
+    print(f"FLAKY_PASS RTT: {details}")
+
 if native:
     print("\nProxy overhead against native origin-namespace connection")
     delta_header = (f"{'Metric':<{name_width}}  {'Native P50':>10}  {'Proxy P50':>10}  {'Delta P50':>10}  "

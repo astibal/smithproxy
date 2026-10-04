@@ -30,6 +30,9 @@ It should compile on any recent Linux system with C++17 compiler (GCC and Clang 
 ## Roadmap for future versions
 
 ## What's new in 0.9.32
+- KTLS is now opt-in (`settings/ssl_use_ktls`, default `false`). Smithproxy's
+  inspected data path cannot use `SSL_sendfile()`, and software KTLS was slower
+  than OpenSSL userspace crypto on hosts without TLS-capable NIC offload.
 - custom, not-mitmed certificates based on target IP address, or SNI (loaded from files)
   - using `tls_profiles/<profilename>`: `sni_based_cert` and `ip_based_cert`
   - certificates are located in 
