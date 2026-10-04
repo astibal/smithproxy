@@ -1,5 +1,11 @@
 # Test reports
 
+Since October 2026, Smithproxy uses these reports as the durable record of its
+strict testing policy. A report identifies the exact tested commit and records
+the validation profile, section results, selected metrics and reproduction
+command. It is evidence for that commit and profile, not a blanket guarantee for
+other builds or environments.
+
 This directory contains concise reports produced by the Smithproxy patch
 runner. Reports are grouped by year and named after the UTC test date, tested
 commit and profile:

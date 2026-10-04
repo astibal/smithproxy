@@ -37,17 +37,17 @@ bool privileged(const libcli2::Context& context) { return context.privilege >= 1
 bool exec_mode(const libcli2::Context& context) { return context.mode == "0"; }
 bool privileged_exec(const libcli2::Context& context) { return privileged(context) && exec_mode(context); }
 
-std::string status_text() {
+std::string status_text(const libcli2::Decorator& decor) {
     std::ostringstream output;
-    output << "Version: " << SMITH_VERSION << (SMITH_DEVEL ? " (dev)" : "") << '\n';
-    output << "Socle: " << SOCLE_VERSION << (SOCLE_DEVEL ? " (dev)" : "") << '\n';
+    output << decor.key("Version:") << ' ' << decor.value(SMITH_VERSION) << (SMITH_DEVEL ? decor.warning(" (dev)") : "") << '\n';
+    output << decor.key("Socle:") << ' ' << decor.value(SOCLE_VERSION) << (SOCLE_DEVEL ? decor.warning(" (dev)") : "") << '\n';
 #if (SMITH_DEVEL > 0) || (SOCLE_DEVEL > 0)
     output << "Smithproxy source info: " << SX_GIT_VERSION << '\n';
     output << "                branch: " << SX_GIT_BRANCH << " commit: " << SX_GIT_COMMIT_HASH << '\n';
     output << " Socle lib source info: " << SOCLE_GIT_VERSION << '\n';
     output << "                branch: " << SOCLE_GIT_BRANCH << " commit: " << SOCLE_GIT_COMMIT_HASH << '\n';
 #endif
-    output << "Built with: ";
+    output << decor.key("Built with:") << ' ';
 #ifndef BUILD_RELEASE
     output << "DEBUG ";
 #endif
@@ -84,37 +84,37 @@ std::string status_text() {
            << ", dtls:" << proxy_type(smith.dtls_proxies) << '\n';
 
     const auto acceptors = [&](std::string_view title, std::string_view protocol, const auto& proxies) {
-        output << "\n" << title << ":\n  " << protocol << ": " << proxies.size()
+        output << "\n" << decor.heading(std::string(title) + ":") << "\n  " << protocol << ": " << proxies.size()
                << " workers: " << proxies.size() * static_cast<std::size_t>(tasks(proxies)) << '\n';
     };
     if (CfgFactory::get()->accept_tproxy) {
-        output << "\nTproxy acceptors:\n";
+        output << "\n" << decor.heading("Tproxy acceptors:") << "\n";
         output << "  TCP: " << smith.plain_proxies.size() << " workers: " << smith.plain_proxies.size() * tasks(smith.plain_proxies) << '\n';
         output << "  UDP: " << smith.udp_proxies.size() << " workers: " << smith.udp_proxies.size() * tasks(smith.udp_proxies) << '\n';
         output << "  TLS: " << smith.ssl_proxies.size() << " workers: " << smith.ssl_proxies.size() * tasks(smith.ssl_proxies) << '\n';
         output << "  DTLS: " << smith.dtls_proxies.size() << " workers: " << smith.dtls_proxies.size() * tasks(smith.dtls_proxies) << '\n';
     }
     if (CfgFactory::get()->accept_redirect) {
-        output << "\nRedirect acceptors:\n";
+        output << "\n" << decor.heading("Redirect acceptors:") << "\n";
         output << "  TCP: " << smith.redir_plain_proxies.size() << " workers: " << smith.redir_plain_proxies.size() * tasks(smith.redir_plain_proxies) << '\n';
         output << "  UDP: " << smith.redir_udp_proxies.size() << " workers: " << smith.redir_udp_proxies.size() * tasks(smith.redir_udp_proxies) << '\n';
         output << "  TLS: " << smith.redir_ssl_proxies.size() << " workers: " << smith.redir_ssl_proxies.size() * tasks(smith.redir_ssl_proxies) << '\n';
     } else {
-        output << "\nRedirect acceptors: disabled\n";
+        output << "\n" << decor.heading("Redirect acceptors:") << ' ' << decor.muted("disabled") << "\n";
     }
     if (CfgFactory::get()->accept_socks) acceptors("Socks acceptors", "TCP", smith.socks_proxies);
-    else output << "\nSOCKS acceptors: disabled\n";
+    else output << "\n" << decor.heading("SOCKS acceptors:") << ' ' << decor.muted("disabled") << "\n";
 
-    output << "\nUptime: " << uptime_string(time(nullptr) - smith.ts_sys_started) << '\n';
+    output << "\n" << decor.key("Uptime:") << ' ' << decor.value(uptime_string(time(nullptr) - smith.ts_sys_started)) << '\n';
     const unsigned long upload = MitmProxy::total_mtr_up().get();
     const unsigned long download = MitmProxy::total_mtr_down().get();
-    output << "Performance: upload " << number_suffixed(upload * 8) << "bps, download "
-           << number_suffixed(download * 8) << "bps in last 60 seconds\n";
+    output << decor.key("Performance:") << " upload " << decor.success(number_suffixed(upload * 8) + "bps")
+           << ", download " << decor.success(number_suffixed(download * 8) + "bps") << " in last 60 seconds\n";
     const unsigned long total = MitmProxy::total_mtr_up().total() + MitmProxy::total_mtr_down().total();
     output << "Transferred: " << number_suffixed(total) << " bytes\n";
     output << "Total sessions: " << MitmProxy::total_sessions().load() << '\n';
     if (CfgFactory::board()->version_saved() < CfgFactory::board()->version_current())
-        output << "\n*** Configuration changes NOT saved ***\n";
+        output << "\n" << decor.warning("*** Configuration changes NOT saved ***") << "\n";
     return output.str();
 }
 
@@ -212,7 +212,7 @@ void register_smithproxy_cli2_commands(libcli2::Cli& cli, std::string subscriber
             const auto* config = static_cast<const ConfigCli2Session*>(context.user_data);
             context.print(render_current_config(config ? config->path() : std::string{}));
         } else {
-            context.print(status_text());
+            context.print(status_text(context.decor()));
         }
         return 0;
     };
@@ -290,7 +290,9 @@ void register_smithproxy_cli2_commands(libcli2::Cli& cli, std::string subscriber
             const auto lock = std::scoped_lock(events.events_lock());
             for (const auto& [id, event] : events.entries()) {
                 const bool has_detail = events.event_details().find(id) != events.event_details().end();
-                output << (has_detail ? "* " : "  ") << id << ": " << event << '\n';
+                const auto d = context.decor();
+                output << (has_detail ? d.warning("* ") : "  ") << d.key(std::to_string(id) + ":")
+                       << ' ' << event << '\n';
             }
             context.print(output.str());
             return 0;
@@ -312,9 +314,10 @@ void register_smithproxy_cli2_commands(libcli2::Cli& cli, std::string subscriber
             auto& events = Log::get()->events();
             const auto lock = std::scoped_lock(events.events_lock());
             const auto found = events.event_details().find(id);
-            context.print(found == events.event_details().end()
-                              ? "no details for this event id " + std::to_string(id)
-                              : found->second);
+            if (found == events.event_details().end())
+                context.print(libcli2::Style::warning, "no details for this event id " + std::to_string(id));
+            else
+                context.print(found->second);
             return 0;
         });
 
@@ -325,7 +328,7 @@ void register_smithproxy_cli2_commands(libcli2::Cli& cli, std::string subscriber
         .handler([](libcli2::Context& context, const libcli2::Invocation&) {
             Log::get()->events().clear();
             Log::get()->events().insert(CRI, "events cleared by admin");
-            context.print("Events cleared");
+            context.print(context.decor().success("Events cleared"));
             return 0;
         });
 
@@ -340,7 +343,7 @@ void register_smithproxy_cli2_commands(libcli2::Cli& cli, std::string subscriber
                 const auto lock = std::scoped_lock(sx::KB::lock());
                 dump = kb->to_json().dump(4);
             }
-            context.print("Knowledgebase dump:");
+            context.print(libcli2::Style::heading, "Knowledgebase dump:");
             context.print(dump);
             return 0;
         });
@@ -357,7 +360,8 @@ void register_smithproxy_cli2_commands(libcli2::Cli& cli, std::string subscriber
                 count = kb->elements.size();
                 kb->elements.clear();
             }
-            context.print("Knowledgebase cleared " + std::to_string(count) + " entries");
+            const auto d = context.decor();
+            context.print(d.success("Knowledgebase cleared") + " " + d.value(std::to_string(count)) + " entries");
             return 0;
         });
 
@@ -379,19 +383,23 @@ void register_smithproxy_cli2_commands(libcli2::Cli& cli, std::string subscriber
         .handler([subscriber_id, refresh_prompt](libcli2::Context& context, const libcli2::Invocation& invocation) {
             const bool force = !invocation.arguments.empty();
             if (CfgFactory::LOAD_ERRORS && !force) {
-                context.print("Warning: configuration loaded only partially; fix it and execute reload, "
-                              "or use 'save config force' to discard invalid parts.");
+                const auto d = context.decor();
+                context.print(d.warning("Warning: configuration loaded only partially") +
+                              "; fix it and execute reload, or use " + d.command("save config force") +
+                              " to discard invalid parts.");
                 return 0;
             }
             const int result = CfgFactory::get()->save_config();
             if (result < 0) {
-                context.print(std::string(force ? "enforced: " : "") + "error writing config file!");
+                context.print(context.decor().error(std::string(force ? "enforced: " : "") +
+                                                    "error writing config file!"));
                 return -1;
             }
             CfgFactory::board()->save(subscriber_id);
             CfgFactory::board()->ack_saved(subscriber_id);
             if (refresh_prompt) refresh_prompt();
-            context.print(std::string(force ? "enforced: " : "") + "config saved successfully.");
+            context.print(context.decor().success(std::string(force ? "enforced: " : "") +
+                                                  "config saved successfully."));
             return 0;
         });
 
@@ -403,13 +411,14 @@ void register_smithproxy_cli2_commands(libcli2::Cli& cli, std::string subscriber
             const bool loaded = SmithProxy::instance().load_config(CfgFactory::get()->config_file, true);
             CfgFactory::board()->rollback(subscriber_id);
             if (!loaded) {
-                context.print("Configuration file reload FAILED");
+                context.print(context.decor().error("Configuration file reload FAILED"));
                 return -1;
             }
             CfgFactory::board()->ack_current(subscriber_id);
             if (refresh_prompt) refresh_prompt();
-            context.print(std::string("Configuration file reloaded") +
-                          (CfgFactory::LOAD_ERRORS ? " (with some errors)" : ""));
+            const auto d = context.decor();
+            context.print(d.success("Configuration file reloaded") +
+                          (CfgFactory::LOAD_ERRORS ? " " + d.warning("(with some errors)") : ""));
             return 0;
         });
 
@@ -418,7 +427,7 @@ void register_smithproxy_cli2_commands(libcli2::Cli& cli, std::string subscriber
         .help("Terminate this Smithproxy process gracefully")
         .available_if(privileged)
         .handler([](libcli2::Context& context, const libcli2::Invocation&) {
-            context.print("\n!!! terminating smithproxy !!!");
+            context.print(context.decor().error("\n!!! terminating smithproxy !!!"));
             SmithProxy::instance().terminate_flag = true;
             return 0;
         });

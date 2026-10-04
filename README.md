@@ -3,6 +3,10 @@
  written in C++17.  
 It uses our C++17 socket proxying library called [*socle*](https://github.com/astibal/socle). 
 
+## Testing policy
+
+Since October 2026, Smithproxy development follows a strict, documented testing policy. Successful clean-tree validation runs can be published as commit-specific reports recording the test profile, executed sections, results, selected metrics and reproduction command. The report format and publishing rules live in [`docs/test-reports/`](docs/test-reports/); failed or dirty runs do not produce a passing report.
+
 > **Note:** Snap and precompiled binary packages are no longer available from Russia Federation and Belarus as a response
 > to their blatant war crimes being committed when invading Ukraine these days.
 > For individuals from named countries: there are still sources which can be easily compiled; in the mean time seek more uncensored information!

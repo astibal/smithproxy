@@ -288,23 +288,28 @@ std::string Cli::help(std::string_view path, const Context& context) const {
         current = matches.front();
     }
 
+    const auto decor = context.decor();
     std::ostringstream output;
     if (current != root_.get()) {
-        output << current->name_;
-        for (const auto& argument : current->arguments_)
-            output << ' ' << (argument.required ? '<' : '[') << argument.name << (argument.required ? '>' : ']');
-        if (!current->help_.empty()) output << "\n  " << current->help_;
+        output << decor.command(current->name_);
+        for (const auto& argument : current->arguments_) {
+            const std::string rendered = std::string(argument.required ? "<" : "[") + argument.name +
+                                         (argument.required ? ">" : "]");
+            output << ' ' << decor.key(rendered);
+        }
+        if (!current->help_.empty()) output << "\n  " << decor.muted(current->help_);
         output << '\n';
         for (const auto& argument : current->arguments_) {
             if (argument.help.empty()) continue;
-            output << "  " << (argument.required ? '<' : '[') << argument.name
-                   << (argument.required ? '>' : ']') << "\t" << argument.help << '\n';
+            const std::string rendered = std::string(argument.required ? "<" : "[") + argument.name +
+                                         (argument.required ? ">" : "]");
+            output << "  " << decor.key(rendered) << "\t" << decor.muted(argument.help) << '\n';
         }
     }
     for (const auto& child : current->children_) {
         if (!child->available(context)) continue;
-        output << "  " << child->name_;
-        if (!child->help_.empty()) output << "\t" << child->help_;
+        output << "  " << decor.command(child->name_);
+        if (!child->help_.empty()) output << "\t" << decor.muted(child->help_);
         output << '\n';
     }
     return output.str();

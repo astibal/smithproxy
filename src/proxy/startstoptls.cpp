@@ -52,19 +52,30 @@ bool StartStopTls::start(MitmHostCX& client) {
     client.com()->master(master);
     peer->com()->master(master);
 
+    // TLS policy must be complete before either side can enter SSL_connect or
+    // SSL_accept.  Applying it afterwards made STARTTLS behaviour depend on
+    // whether the upstream handshake completed synchronously.
+    if(not CfgFactory::get()->policy_apply_tls(client.matched_policy(), client.com()) or
+       not CfgFactory::get()->policy_apply_tls(client.matched_policy(), client.peercom())) {
+        client.error(true);
+        peer->error(true);
+        return false;
+    }
+
     // The accepted/client side cannot start its server handshake before the
     // upstream/client side has enough information to spoof the certificate.
     client.waiting_for_peercom(true);
 
-    new_peer_com->upgrade_client_socket(peer->socket());
-    new_client_com->upgrade_server_socket(client.socket());
+    if(new_peer_com->upgrade_client_socket(peer->socket()) < 0 or
+       new_client_com->upgrade_server_socket(client.socket()) < 0) {
+        client.error(true);
+        peer->error(true);
+        return false;
+    }
 
     // Preserve the existing STARTTLS behaviour: spoofing may initialize the
     // accepted side once more after the upstream hello is available.
     new_client_com->upgraded(false);
-
-    CfgFactory::get()->policy_apply_tls(client.matched_policy(), client.com());
-    CfgFactory::get()->policy_apply_tls(client.matched_policy(), client.peercom());
 
     client.comlog().append(
             "\n STARTTLS: plain connection upgraded to SSL/TLS, continuing with inspection.\n\n");

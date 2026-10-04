@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Measure repeated detailed session-list snapshots over one CLI connection."""
-import argparse, json, socket, statistics, time
+import argparse, json, re, socket, statistics, time
+
+ANSI_ESCAPE = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]")
+MAX_RESPONSE_BYTES = 64 * 1024 * 1024
 
 def percentile(values, fraction):
     ordered = sorted(values)
@@ -16,20 +19,33 @@ def main():
     a = p.parse_args()
     sock = socket.create_connection(("127.0.0.1", 50000), timeout=a.timeout)
     sock.settimeout(a.timeout)
-    def prompt(marker):
+    def prompt(*markers):
         data = bytearray()
-        while not data.endswith(marker):
+        deadline = time.monotonic() + a.timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("CLI prompt deadline exceeded")
+            sock.settimeout(remaining)
             chunk = sock.recv(65536)
             if not chunk: raise RuntimeError("CLI closed before prompt")
             data.extend(chunk)
-        return bytes(data)
+            if len(data) > MAX_RESPONSE_BYTES:
+                raise RuntimeError("CLI response exceeded 64 MiB")
+            plain = ANSI_ESCAPE.sub(b"", data)
+            if any(plain.endswith(marker) for marker in markers):
+                return bytes(data)
     prompt(b")> "); sock.sendall(b"enable\r\n"); prompt(b")# ")
     rows = []
     for sample in range(a.samples):
         level = 6 if sample % 2 == 0 else 8
         started = time.perf_counter_ns()
         sock.sendall(f"diag proxy session list {level}\r\n".encode())
-        output = prompt(b")# ")
+        # A decorated prompt contains ANSI sequences between ')' and the
+        # privilege marker.  Accept either prompt here and validate the
+        # command by its session rows; an unprivileged rejection therefore
+        # still fails deterministically instead of waiting forever.
+        output = prompt(b")# ", b")> ")
         elapsed = (time.perf_counter_ns() - started) / 1_000_000
         sessions = output.count(b"MitM|")
         if b"timed out" in output: raise RuntimeError(f"snapshot {sample + 1}: timeout")

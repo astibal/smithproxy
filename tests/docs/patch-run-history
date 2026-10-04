@@ -1,0 +1,26 @@
+# Smithproxy patch-runner history
+
+Every successful top-level patch-runner invocation appends one row. Internal
+parallel workers are represented by the parent row and its coverage column.
+
+| UTC time | Commit | Result | Profile | Target(s) | Coverage | Report |
+|---|---|---|---|---|---|---|
+| 2026-10-02T08:31:17Z | `07a3e18ca671+dirty` | PASS | `quick` | `local` | build:smithproxy | `/tmp/patch-runner/tls-performance_@_07a3e18c_history-selftest/results/20261002T083117Z-07a3e18c-quick` |
+| 2026-10-02T08:36:23Z | `07a3e18ca671+dirty` | PASS | `sanity/fuzz.socks5` | `local` | fuzz.socks5 | `/tmp/patch-runner/tls-performance_@_07a3e18c_fuzz-socks5-fixed/results/20261002T083552Z-07a3e18c-sanity-fuzz.socks5` |
+| 2026-10-02T09:06:37Z | `07a3e18ca671+dirty` | PASS | `quick` | `local` | build:smithproxy | `/tmp/patch-runner/tls-performance_@_07a3e18c_history-lock-selftest/results/20261002T090637Z-07a3e18c-quick` |
+| 2026-10-02T09:52:17Z | `07a3e18ca671+dirty` | PASS | `sanity/fuzz.h2` | `local` | fuzz.h2;seeds=smithproxy-baseline-v1 | `/tmp/patch-runner/tls-performance_@_07a3e18c_fuzz-h2-many-sync-fixed/results/20261002T095135Z-07a3e18c-sanity-fuzz.h2` |
+| 2026-10-02T09:53:22Z | `07a3e18ca671+dirty` | PASS | `sanity/fuzz.tls` | `local` | fuzz.tls;seeds=smithproxy-baseline-v1 | `/tmp/patch-runner/tls-performance_@_07a3e18c_fuzz-tls-sync-fixed/results/20261002T095245Z-07a3e18c-sanity-fuzz.tls` |
+| 2026-10-02T12:38:07Z | `07a3e18ca671+dirty` | PASS | `sanity/tls-policy` | `remote-1` | tls-policy | `/tmp/patch-runner/tls-autodetect-fix-p1/results/20261002T123710Z-07a3e18c-sanity-tls-policy` |
+| 2026-10-02T12:38:46Z | `07a3e18ca671+dirty` | PASS | `fuzz/fuzz.tls` | `remote-1` | fuzz.tls;seeds=smithproxy-baseline-v1 | `/tmp/patch-runner/tls-fuzz-oracle-p1/results/20261002T123819Z-07a3e18c-fuzz-fuzz.tls` |
+| 2026-10-02T13:03:30Z | `07a3e18ca671+dirty` | PASS | `sanity/quic` | `remote-1` | quic | `/tmp/patch-runner/quic-portable-runtime-fix-v2/results/20261002T130259Z-07a3e18c-sanity-quic` |
+| 2026-10-02T13:12:58Z | `07a3e18ca671+dirty` | PASS | `sanity/corpus-insanity` | `remote-1` | corpus-insanity | `/tmp/patch-runner/tls-corpus-insanity-oracle-fix-v2/results/20261002T130351Z-07a3e18c-sanity-corpus-insanity` |
+| 2026-10-02T13:27:09Z | `07a3e18ca671+dirty` | PASS | `full` | `remote-1` | smoke=PASS,rtt=PASS,tls-policy=PASS,routing=PASS,transfer=PASS,quic=PASS,tcp-churn=PASS,udp-churn=PASS,capture=PASS,corpus-regular=PASS,corpus-edge=PASS,corpus-insanity=PASS,fuzz.h1.regular=PASS,fuzz.h1.edge=PASS,fuzz.h1.insanity=PASS,fuzz.h2.regular=PASS,fuzz.h2.edge=PASS,fuzz.h2.insanity=PASS,fuzz.tls=PASS,fuzz.socks5=PASS,fuzz.dns=PASS,fuzz.quic=PASS,fuzz.redis=PASS,fuzz.mqtt=PASS,fuzz.smtp=PASS,fuzz.imap=PASS,fuzz.pop3=PASS,fuzz.ftp=PASS,fuzz.ssh=PASS,fuzz.websocket=PASS,fuzz.memcached=PASS,fuzz.postgresql=PASS,fuzz.mysql=PASS,fuzz.amqp=PASS,fuzz.telnet=PASS,fuzz.ntp=PASS,fuzz.syslog=PASS,fuzz.stun=PASS,fuzz.tftp=PASS,fuzz.snmp=PASS,fuzz.raw=PASS;seeds=smithproxy-baseline-v1 | `/tmp/patch-runner/tls-full-p16-final/results/20261002T131551Z-07a3e18c-full` |
+| 2026-10-02T15:12:49Z | `8d566fa46259` | PASS | `quick` | `local` | build:smithproxy | `/tmp/patch-runner/master-merge-quick/results/20261002T151213Z-8d566fa4-quick` |
+| 2026-10-02T15:25:00Z | `3d4054a39396+dirty` | PASS | `sanity/tls-throughput` | `remote-1` | tls-throughput | `/tmp/patch-runner/tls-throughput-e2e-smoke/results/20261002T152437Z-3d4054a3-sanity-tls-throughput` |
+| 2026-10-02T15:26:19Z | `3d4054a39396+dirty` | PASS | `sanity/tls-throughput` | `remote-1` | tls-throughput | `/tmp/patch-runner/tls-throughput-e2e-default_default/results/20261002T152515Z-3d4054a3-sanity-tls-throughput` |
+| 2026-10-02T17:04:00Z | `3d4054a39396+dirty` | PASS | `sanity/tls-throughput` | `remote-1` | tls-throughput | `/tmp/patch-runner/tls-throughput-copy-profile_perf/results/20261002T170322Z-3d4054a3-sanity-tls-throughput` |
+| 2026-10-02T17:14:15Z | `3d4054a39396+dirty` | PASS | `sanity/capture` | `remote-1` | capture | `/tmp/patch-runner/capture-copy-elision_e2e/results/20261002T171034Z-3d4054a3-sanity-capture` |
+| 2026-10-02T17:48:53Z | `999f792b23e8+dirty` | PASS | `sanity/rtt` | `remote-1` | rtt | `/tmp/patch-runner/tls-performance_@_999f792b_handshake-strings-after300/results/20261002T174829Z-999f792b-sanity-rtt` |
+| 2026-10-02T17:53:59Z | `999f792b23e8+dirty` | PASS | `sanity/rtt` | `remote-1` | rtt | `/tmp/patch-runner/tls-performance_@_999f792b_handshake-strings-after300b/results/20261002T175333Z-999f792b-sanity-rtt` |
+| 2026-10-02T17:57:22Z | `999f792b23e8+dirty` | PASS | `sanity/rtt` | `remote-1` | rtt | `/tmp/patch-runner/tls-performance_@_999f792b_handshake-strings-final/results/20261002T175655Z-999f792b-sanity-rtt` |
+| 2026-10-02T17:58:12Z | `999f792b23e8+dirty` | PASS | `sanity/rtt` | `remote-1` | rtt | `/tmp/patch-runner/tls-performance_@_999f792b_handshake-strings-final2/results/20261002T175745Z-999f792b-sanity-rtt` |

@@ -31,6 +31,21 @@ internal_api_port = os.environ.get('SMITHPROXY_API_PORT', '55555')
 if not internal_api_port.isdigit() or not 1025 <= int(internal_api_port) < 65535:
     raise ValueError('SMITHPROXY_API_PORT must be an unprivileged TCP port')
 text = (source/'etc/smithproxy.cfg').read_text()
+tls_write_chunk = os.environ.get('TLS_WRITE_CHUNK')
+if tls_write_chunk is not None:
+    if not tls_write_chunk.isdigit() or not 1024 <= int(tls_write_chunk) <= 1048576:
+        raise ValueError('TLS_WRITE_CHUNK must be between 1024 and 1048576')
+    text = text.replace('settings = {', f'''settings = {{
+    tuning = {{ tls_write_chunk = {tls_write_chunk}; }};
+''', 1)
+ssl_use_ktls = os.environ.get('SSL_USE_KTLS')
+if ssl_use_ktls is not None:
+    if ssl_use_ktls not in ('0', '1'):
+        raise ValueError('SSL_USE_KTLS must be 0 or 1')
+    enabled = 'TRUE' if ssl_use_ktls == '1' else 'FALSE'
+    text = text.replace('settings = {', f'''settings = {{
+    ssl_use_ktls = {enabled};
+''', 1)
 quic_test = os.environ.get('QUIC_TEST') == '1'
 if os.environ.get('POLICY_TEST') == '1':
     port_objects = '''
@@ -145,9 +160,16 @@ text = text.replace('/etc/smithproxy/certs/default/',str(certs)+'/').replace('/e
 text = text.replace('/var/smithproxy/data',str(data)).replace('/var/log/smithproxy/',str(data)+'/')
 text = text.replace('certs_ca_key_password = "smithproxy"','certs_ca_key_password = ""')
 text = text.replace('accept_redirect = TRUE','accept_redirect = FALSE').replace('accept_socks = TRUE','accept_socks = FALSE')
+if os.environ.get('TLS_EVASION_TRACE') == '1':
+    text = text.replace('log_level = 6;', 'log_level = 9;', 1)
 if os.environ.get('ROUTING_TEST') == '1':
     text = text.replace('accept_socks = FALSE', 'accept_socks = TRUE')
 text = re.sub(r'(plaintext_workers|ssl_workers|udp_workers) = 0',r'\1 = 1',text)
+# Keep one lab lightweight enough for deliberate high-concurrency runs.  DTLS
+# has a hardware-concurrency default even though the sample config omits the
+# key; without an explicit override P16 creates hundreds of idle listeners.
+if 'dtls_workers' not in text:
+    text = text.replace('ssl_workers = 1;', 'ssl_workers = 1;\n    dtls_workers = 1;', 1)
 if os.environ.get('QUIC_LAB') == '1':
     # QUIC has no main-thread fallback: zero workers leaves the configured
     # port without a listener. Keep the isolated H3 lab deterministic with a

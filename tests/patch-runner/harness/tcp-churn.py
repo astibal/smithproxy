@@ -20,7 +20,16 @@ def receive_exact(sock: socket.socket, size: int) -> bytes:
     return bytes(chunks)
 
 
-def exchange(family: int, target: tuple, source_port: int, payload: bytes, timeout: float) -> None:
+def exchange(
+    family: int,
+    target: tuple,
+    source_port: int,
+    payload: bytes,
+    timeout: float,
+    start_barrier: threading.Barrier | None = None,
+) -> None:
+    if start_barrier is not None:
+        start_barrier.wait()
     with socket.socket(family, socket.SOCK_STREAM) as sock:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(("::" if family == socket.AF_INET6 else "0.0.0.0", source_port))
@@ -83,6 +92,11 @@ def main() -> None:
     parser.add_argument("--control-port", type=int, default=9998)
     parser.add_argument("--event-log")
     parser.add_argument("--failure-hold", type=float, default=0.0)
+    parser.add_argument(
+        "--synchronized-start",
+        action="store_true",
+        help="release every connection in a wave from one barrier",
+    )
     args = parser.parse_args()
     family = socket.AF_INET6 if ":" in args.host else socket.AF_INET
     target = (args.host, args.port)
@@ -94,6 +108,8 @@ def main() -> None:
         parser.error(f"port range has fewer than {total} ports")
     if args.parallel < 1:
         parser.error("parallel must be at least one")
+    if args.synchronized_start and args.parallel < args.flows:
+        parser.error("synchronized start requires parallel >= flows")
 
     if not 1 <= args.port <= 65535 or not 1 <= args.control_port <= 65535:
         parser.error("target ports must be in range 1..65535")
@@ -197,11 +213,24 @@ def main() -> None:
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.parallel) as pool:
             for wave in range(args.waves):
+                start_barrier = threading.Barrier(args.flows + 1) if args.synchronized_start else None
                 futures = []
                 for index in range(args.flows):
                     source_port = args.min_port + wave * args.flows + index
                     payload = f"tcp-churn-{wave}-{index}\n".encode()
-                    futures.append(pool.submit(exchange, family, target, source_port, payload, args.timeout))
+                    futures.append(
+                        pool.submit(
+                            exchange,
+                            family,
+                            target,
+                            source_port,
+                            payload,
+                            args.timeout,
+                            start_barrier,
+                        )
+                    )
+                if start_barrier is not None:
+                    start_barrier.wait()
                 for future in futures:
                     try:
                         future.result()

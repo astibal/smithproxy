@@ -1,0 +1,359 @@
+.\" Render with: groff -man -Tutf8 smithproxy.cfg.5
+.TH SMITHPROXY.CFG 5 "OCT 2026" "Smithproxy" "File Formats"
+.SH NAME
+smithproxy.cfg \- Smithproxy service configuration
+.SH SYNOPSIS
+.I /etc/smithproxy/smithproxy.cfg
+.SH DESCRIPTION
+.B smithproxy.cfg
+is the main Smithproxy configuration file. It defines listeners, logging,
+administrative interfaces, named match objects, inspection profiles, capture
+targets, routing rules and the ordered traffic policy.
+.PP
+The file uses libconfig syntax. Validate a file without starting listeners:
+.nf
+    smithproxy --config-file /path/to/smithproxy.cfg --config-check-only
+.fi
+.PP
+The interactive CLI can inspect and modify supported settings. Use
+.B save config
+to persist the active configuration. Direct edits should be validated before
+reloading or restarting the service.
+.SH SYNTAX
+Assignments use
+.B name = value;
+syntax. Groups use braces, arrays use square brackets and ordered lists use
+parentheses:
+.nf
+    group = {
+        enabled = TRUE;
+        names = [ "one", "two" ];
+        rules = ( { name = "first"; }, { name = "second"; } );
+    };
+.fi
+.PP
+Values may be strings, integers, floating-point numbers or booleans. Smithproxy
+configuration commonly uses
+.B TRUE
+and
+.B FALSE .
+Line comments start with
+.B //
+or
+.BR # ;
+block comments use
+.B /* ... */ .
+Object and profile names are referenced as strings from other sections.
+.SH TOP-LEVEL SECTIONS
+.TP
+.B settings
+Listener ports and workers, interception modes, certificate paths, logging,
+CLI, SOCKS, HTTP API, webhook and runtime tuning settings.
+.TP
+.B debug
+Initial component log levels and expensive diagnostic switches.
+.TP
+.B address_objects
+Named CIDR or FQDN objects used by policy and routing.
+.TP
+.B port_objects
+Named inclusive TCP/UDP port ranges.
+.TP
+.B proto_objects
+Named IP protocol numbers, normally TCP (6) and UDP (17).
+.TP
+.B policy
+Ordered traffic rules. The first matching rule supplies the action and assigned
+profiles.
+.TP
+.B tls_profiles
+TLS interception, certificate validation and TLS behavior.
+.TP
+.B content_profiles
+Capture selection, byte limits and optional content replacement rules.
+.TP
+.B detection_profiles
+Protocol engines and knowledge-base collection.
+.TP
+.B alg_dns_profiles
+DNS transaction matching, ID randomization and response caching.
+.TP
+.B ssh_profiles
+SSH MITM host keys for builds with libssh support.
+.TP
+.B routing
+Destination rewriting, load balancing and outbound SNI rewriting.
+.TP
+.B captures
+Global local-file and remote-GRE capture destinations.
+.TP
+.BR starttls_signatures , " detection_signatures"
+Protocol and payload signatures used by STARTTLS and detection engines.
+.SH SETTINGS
+Important listener keys include:
+.TP
+.B accept_tproxy, accept_redirect, accept_socks, accept_http_connect
+Enable transparent TPROXY, local REDIRECT, explicit SOCKS and HTTP CONNECT
+input.
+.TP
+.B plaintext_port, ssl_port, udp_port, dtls_port, socks_port, http_connect_port
+Base listener ports. Linux interception rules must agree with these values.
+.TP
+.B plaintext_workers, ssl_workers, udp_workers, dtls_workers, socks_workers, http_connect_workers
+Worker counts for the corresponding listeners. Consult the shipped example for
+the meaning of automatic and disabled values.
+.TP
+.B quic_port, quic_workers
+Experimental transparent QUIC listener. It is disabled by default and full
+operation requires OpenSSL QUIC server support.
+.TP
+.B ssl_autodetect, ssl_autodetect_harder
+Detect TLS ClientHello traffic on ports not explicitly classified as TLS.
+.TP
+.B certs_path, certs_ca_key_password
+TLS resigning CA directory and private-key password.
+.TP
+.B ca_bundle_file, ca_bundle_path
+Trust anchors used to validate upstream TLS certificates.
+.TP
+.B sslkeylog_file
+Destination template for exported TLS key material.
+.TP
+.B log_file, log_level, log_console
+File and console logging configuration.
+.TP
+.B settings.cli.port, settings.cli.enable_password
+Interactive CLI base port and privileged-mode password.
+.TP
+.B settings.http_api
+HTTP API keys, token lifetime, bind address/interface, port and access
+restrictions. The API should normally remain loopback-only.
+.TP
+.B settings.webhook
+Webhook enablement, destination URL, TLS verification, identity and refresh
+intervals.
+.SH MATCH OBJECTS
+Address objects contain a type and value:
+.nf
+    address_objects = {
+        office = { type = "cidr"; value = "192.0.2.0/24"; };
+        service = { type = "fqdn"; value = "example.net"; };
+    };
+.fi
+.PP
+Port and protocol objects are numeric:
+.nf
+    port_objects = {
+        web = { start = 80; end = 443; };
+    };
+    proto_objects = {
+        tcp = { id = 6; };
+        udp = { id = 17; };
+    };
+.fi
+.SH POLICY
+The policy is an ordered list. A rule matches named protocol, source/destination
+address and source/destination port objects. It can assign inspection and
+routing profiles:
+.nf
+    policy = (
+        {
+            proto = "tcp";
+            src = [ "any", "any6" ];
+            sport = [ "all" ];
+            dst = [ "any", "any6" ];
+            dport = [ "web" ];
+            action = "accept";
+            nat = "auto";
+            tls_profile = "default";
+            detection_profile = "detect";
+            content_profile = "default";
+            routing = "none";
+        }
+    );
+.fi
+.TP
+.B action
+.B accept
+permits the connection;
+.B deny
+blocks it.
+.B reject
+is accepted for legacy compatibility.
+.TP
+.B nat
+.B auto
+uses translated upstream addressing;
+.B none
+requests transparent source handling where supported by the traffic path.
+.TP
+.B features
+Optional per-connection feature tags supported by the running build.
+.TP
+.B tls_profile, detection_profile, content_profile, alg_dns_profile, ssh_profile
+Names of profiles applied to the matching connection. Empty values disable the
+corresponding profile.
+.TP
+.B routing
+Name of a routing entry, or
+.B none .
+.SH CAPTURE
+The global capture block controls destinations:
+.nf
+    captures = {
+        local = {
+            enabled = TRUE;
+            dir = "/var/smithproxy/data";
+            format = "pcap_single";
+            pcap_quota = 100;
+        };
+        remote = {
+            enabled = FALSE;
+            tun_type = "gre";
+            gre_format = "spq1";
+            tun_dst = "127.0.0.1";
+            tun_ttl = 1;
+        };
+    };
+.fi
+.PP
+Local formats are
+.BR smcap ,
+.BR pcap
+and
+.BR pcap_single .
+The single-PCAP quota is expressed in MiB; zero disables rollover. Remote GRE
+format is
+.B spq1
+for plaintext packet export or
+.B pcapng
+for native PCAPNG records.
+.PP
+Actual capture is selected per connection by its content profile. Protect
+captures and SSLKEYLOG files: they may contain decrypted application data or
+traffic secrets.
+.SH ROUTING
+A routing entry may set
+.BR dnat_address ,
+.BR dnat_port
+and
+.BR dnat_lb_method .
+Load-balancing methods are
+.BR round-robin ,
+.BR sticky-l3
+and
+.BR sticky-l4 .
+The
+.B rewrite_sni
+and
+.B rewrite_sni_to
+pair rewrites an exact client SNI value on the outbound TLS connection.
+.SH TLS AND SSH PROFILES
+A TLS profile controls interception, upstream certificate validation, OCSP,
+stapling, PFS/session reuse, custom certificates, event verbosity and SSLKEYLOG
+selection. An
+.B inspect = FALSE
+profile passes TLS without decrypting it.
+.PP
+On builds with libssh support, assigning an SSH profile enables SSHv2 MITM for
+the matching policy. The profile's
+.B host_key
+is the private host key presented to downstream clients.
+.SH CLI WORKFLOW
+The following commands provide a safer alternative to blind file edits:
+.nf
+    show config full
+    show config policy [index]
+    show config objects
+    configure terminal
+    edit <section> [entry]
+    set <property> <value>
+    add <entry>
+    remove <entry>
+    save config
+    execute reload
+.fi
+.PP
+Command availability depends on the current configuration mode and privilege
+level. Use contextual help and completion for the schema supported by the
+running binary.
+.SH EXAMPLES
+.SS Validate a candidate file
+.nf
+    cp /etc/smithproxy/smithproxy.cfg /tmp/smithproxy-test.cfg
+    $EDITOR /tmp/smithproxy-test.cfg
+    smithproxy -c /tmp/smithproxy-test.cfg -o
+.fi
+.PP
+This checks parsing and schema loading without starting listeners. It does not
+prove that firewall rules, routes, certificates or remote services are correct.
+Smithproxy's documented testing policy, maintained since October 2026, requires
+broader clean-tree validation for publishable commit-specific results.
+.SS Enable explicit proxy listeners
+.nf
+    settings = {
+        accept_socks = TRUE;
+        socks_port = "1080";
+        socks_workers = 0;
+
+        accept_http_connect = TRUE;
+        http_connect_port = "3128";
+        http_connect_workers = 0;
+    };
+.fi
+.PP
+Restrict reachability with host firewall rules. Listener enablement does not add
+authentication or network access controls by itself.
+.SS Create and use a routing profile
+.nf
+    address_objects = {
+        upstreams = { type = "cidr"; value = "192.0.2.20/32"; };
+    };
+    port_objects = {
+        upstream_tls = { start = 8443; end = 8443; };
+    };
+    routing = {
+        alternate = {
+            dnat_address = [ "upstreams" ];
+            dnat_port = [ "upstream_tls" ];
+            dnat_lb_method = "round-robin";
+        };
+    };
+.fi
+.PP
+Assign
+.B routing = "alternate"
+only to the intended policy rules; routing profiles do nothing until referenced.
+.SH FILES
+.TP
+.I /etc/smithproxy/smithproxy.cfg
+Main configuration.
+.TP
+.I /etc/smithproxy/smithproxy.startup.cfg
+Linux interception and service startup settings; not part of the libconfig tree.
+.TP
+.I /etc/smithproxy/users.cfg
+Optional authentication configuration.
+.TP
+.I /etc/smithproxy/certs/default/
+Default TLS CA and endpoint certificates.
+.TP
+.I /var/smithproxy/data/
+Default local capture directory.
+.SH SECURITY
+Do not expose the CLI or HTTP API without access controls. Protect private keys,
+API keys, enable passwords, packet captures and TLS key logs. Validate changes
+before reload; an invalid listener or routing configuration can interrupt or
+bypass inspection.
+.SH SEE ALSO
+.BR smithproxy (1),
+.BR smithproxy-mitm (7),
+.BR smithproxy-policy (7),
+.BR smithproxy-capture (7),
+.BR smithproxy-topology (7),
+.BR libconfig (5)
+.PP
+Current documentation:
+.nf
+    https://smithproxy.readthedocs.io/en/latest/configuration/
+.fi

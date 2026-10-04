@@ -16,7 +16,7 @@ Usage:
 
 Examples:
   publish-report.sh full --remote root@test-host --parallel 3
-  publish-report.sh sanity --force
+  publish-report.sh sanity --local --force
 
 The report is written to:
   docs/test-reports/YYYY/YYYY-MM-DD-<commit>-<profile>.md
@@ -40,7 +40,7 @@ for argument in "$@"; do
 done
 
 PROFILE=${RUNNER_ARGS[0]:-}
-[[ $PROFILE =~ ^(quick|sanity|full|benchmark)$ ]] || {
+[[ $PROFILE =~ ^(quick|sanity|full|fuzz|fuzz-dyn|benchmark)$ ]] || {
     echo "Unsupported report profile: ${PROFILE:-<missing>}" >&2
     usage >&2
     exit 2
@@ -147,12 +147,13 @@ lines = [
 ]
 
 if sections:
-    lines += ["", "## Sections", "", "| Section | Result | Reason |",
-              "|---|---:|---|"]
+    lines += ["", "## Sections", "", "| Section | Target | Result | Reason |",
+              "|---|---|---:|---|"]
     for section in sections:
         reason = section.get("reason", "").replace("|", "\\|")
         lines.append(
-            f"| {section.get('section', '')} | {section.get('result', '')} | {reason} |")
+            f"| {section.get('section', '')} | {section.get('target', '')} | "
+            f"{section.get('result', '')} | {reason} |")
 
 metrics = []
 for key in ("tcp_churn", "udp_churn", "corpus", "capture_matrix", "rtt"):

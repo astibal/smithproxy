@@ -64,7 +64,7 @@ int level_command(libcli2::Context& context, const libcli2::Invocation& invocati
     }
     int value = -1;
     if (!level(invocation.arguments.front(), value)) {
-        context.print("logging level must be 0..10 or reset");
+        context.print(libcli2::Style::error, "logging level must be 0..10 or reset");
         return -1;
     }
     set(value);
@@ -106,7 +106,9 @@ void register_smithproxy_cli2_debug(libcli2::Cli& cli) {
                 if (!level(invocation.arguments.front(), value)) return -1;
                 found->second->level_.level(value);
             }
-            context.print("this terminal logging level changed to " + std::to_string(found->second->level_.level()));
+            const auto d = context.decor();
+            context.print(d.success("this terminal logging level changed to ") +
+                          d.value(std::to_string(found->second->level_.level())));
             return 0;
         });
 
@@ -119,7 +121,9 @@ void register_smithproxy_cli2_debug(libcli2::Cli& cli) {
                 if (!level(invocation.arguments.front(), value)) return -1;
                 Log::get()->level(loglevel(value, 0));
             }
-            context.print("internal logging level changed to " + std::to_string(Log::get()->level().level()));
+            const auto d = context.decor();
+            context.print(d.success("internal logging level changed to ") +
+                          d.value(std::to_string(Log::get()->level().level())));
             return 0;
         });
 
@@ -134,7 +138,8 @@ void register_smithproxy_cli2_debug(libcli2::Cli& cli) {
                 const auto found = Log::get()->target_profiles().find(key);
                 if (found != Log::get()->target_profiles().end() && found->second) found->second->level_.level(value);
             }
-            context.print("log file logging level changed to " + std::to_string(value));
+            const auto d = context.decor();
+            context.print(d.success("log file logging level changed to ") + d.value(std::to_string(value)));
             return 0;
         });
 
@@ -187,26 +192,36 @@ void register_smithproxy_cli2_debug(libcli2::Cli& cli) {
             const auto& name = invocation.arguments[0];
             if (name == "cli") {
                 if (invocation.arguments.size() > 1) { int value = 0; if (!level(invocation.arguments[1], value)) return -1; CliDebugState::get().cli_debug_flag = value > 0; }
-                context.print(std::string("cli debug now ") + (CliDebugState::get().cli_debug_flag ? "ON" : "OFF"));
+                const auto d = context.decor();
+                context.print(d.success("cli debug now ") +
+                              d.value(CliDebugState::get().cli_debug_flag ? "ON" : "OFF"));
                 return 0;
             }
             if (name == "filter") {
                 const std::string value = invocation.arguments.size() > 1 ? invocation.arguments[1] : "";
                 logan_lite::context_filter.active(false); logan_lite::context_filter.set(value); logan_lite::context_filter.active(!value.empty());
-                context.print(value.empty() ? "Logging context filter deactivated" : "Logging context filter set to: '" + value + "'");
+                const auto d = context.decor();
+                context.print(value.empty() ? d.muted("Logging context filter deactivated")
+                                            : d.success("Logging context filter set to: ") + d.value("'" + value + "'"));
                 return 0;
             }
             int value = -1;
             if (invocation.arguments.size() > 1 && !level(invocation.arguments[1], value)) return -1;
             if (name == "all" || name == "*") {
                 for (const auto& [topic, entry] : logger->topic_db_) if (value >= 0) entry->level(value);
-                context.print(value >= 0 ? "all lightweight logger levels changed" : "all lightweight logger levels queried");
+                context.print(value >= 0 ? context.decor().success("all lightweight logger levels changed")
+                                         : context.decor().muted("all lightweight logger levels queried"));
                 return 0;
             }
             const auto found = logger->topic_db_.find(name);
-            if (found == logger->topic_db_.end()) { context.print("variable not recognized"); return -1; }
+            if (found == logger->topic_db_.end()) {
+                context.print(libcli2::Style::error, "variable not recognized");
+                return -1;
+            }
             if (value >= 0) found->second->level(value);
-            context.print("debug level: " + name + ": " + std::to_string(found->second->level()));
+            const auto d = context.decor();
+            context.print(d.key("debug level: ") + d.command(name) + ": " +
+                          d.value(std::to_string(found->second->level())));
             return 0;
         });
 }

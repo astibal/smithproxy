@@ -990,10 +990,46 @@ public:
             }
             return progress ? drive_result::progress : drive_result::again;
         }
+
+        // Exit status/signal is channel metadata, not payload. A fast peer may
+        // mark the channel closed in the same dispatch that delivers it, so
+        // collect and forward the metadata before the generic closed-channel
+        // path below can retire the pair.
+        if (channel.expects_exit_state && !channel.upstream_exit_forwarded) {
+            std::uint32_t exit_code = 0;
+            char* exit_signal = nullptr;
+            int core_dumped = 0;
+            auto const result = ssh_channel_get_exit_state(
+                channel.upstream, &exit_code, &exit_signal, &core_dumped);
+            if (result == SSH_OK) {
+                int forward_result;
+                if (exit_signal) {
+                    forward_result = ssh_channel_request_send_exit_signal(
+                        channel.downstream, exit_signal, core_dumped, "", "");
+                } else {
+                    forward_result = ssh_channel_request_send_exit_status(
+                        channel.downstream, static_cast<int>(exit_code));
+                }
+                std::free(exit_signal);
+                if (forward_result != SSH_OK) {
+                    set_error("cannot forward upstream SSH exit state");
+                    return drive_result::failed;
+                }
+                channel.upstream_exit_forwarded = true;
+                progress = true;
+            } else {
+                std::free(exit_signal);
+                if (result != SSH_AGAIN) {
+                    set_error(libssh_error(upstream_, "cannot read upstream SSH exit state"));
+                    return drive_result::failed;
+                }
+            }
+        }
         if ((ssh_channel_is_closed(channel.downstream)
              || ssh_channel_is_closed(channel.upstream))
             && channel.to_upstream.empty() && channel.to_downstream.empty()
-            && channel.stderr_to_downstream.empty()) {
+            && channel.stderr_to_downstream.empty()
+            && (!channel.expects_exit_state || channel.upstream_exit_forwarded)) {
             channel.closing = true;
             return drive_result::progress;
         }
@@ -1035,37 +1071,6 @@ public:
                          "server->client", bytes_down_, false, channel.mode))) {
             set_error("SSH channel read failed");
             return drive_result::failed;
-        }
-
-        if (channel.expects_exit_state && !channel.upstream_exit_forwarded) {
-            std::uint32_t exit_code = 0;
-            char* exit_signal = nullptr;
-            int core_dumped = 0;
-            auto const result = ssh_channel_get_exit_state(
-                channel.upstream, &exit_code, &exit_signal, &core_dumped);
-            if (result == SSH_OK) {
-                int forward_result;
-                if (exit_signal) {
-                    forward_result = ssh_channel_request_send_exit_signal(
-                        channel.downstream, exit_signal, core_dumped, "", "");
-                } else {
-                    forward_result = ssh_channel_request_send_exit_status(
-                        channel.downstream, static_cast<int>(exit_code));
-                }
-                std::free(exit_signal);
-                if (forward_result != SSH_OK) {
-                    set_error("cannot forward upstream SSH exit state");
-                    return drive_result::failed;
-                }
-                channel.upstream_exit_forwarded = true;
-                progress = true;
-            } else {
-                std::free(exit_signal);
-                if (result != SSH_AGAIN) {
-                    set_error(libssh_error(upstream_, "cannot read upstream SSH exit state"));
-                    return drive_result::failed;
-                }
-            }
         }
 
         if (ssh_channel_is_eof(channel.downstream) && !channel.downstream_eof_forwarded) {
