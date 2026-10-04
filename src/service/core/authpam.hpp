@@ -3,12 +3,12 @@
 #ifndef AUHTPAM_HPP_
 #define AUHTPAM_HPP_
 
+#ifdef USE_PAM
+
 #include <security/pam_appl.h>
 #include <security/pam_misc.h>
 
 #include <log/logan.hpp>
-
-#ifdef USE_PAM
 
 namespace sx::auth {
 

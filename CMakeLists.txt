@@ -27,7 +27,7 @@ SET(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}")
 set(USE_PYTHON "N")
 set(USE_LMHPP "N")
 set(USE_UNWIND "Y")
-set(USE_PAM "Y")
+set(USE_PAM "N")
 
 set(OPT_MEMPOOL_NOEXCEPT "Y")
 set(OPT_MEMPOOL_DISABLE "Y")
@@ -84,6 +84,9 @@ endif()
 if("${USE_PAM}" STREQUAL "Y")
     message(" >> Using PAM authentication" )
     add_definitions(-DUSE_PAM)
+    set(SMITHPROXY_PAM_SOURCES src/service/core/authpam.cpp)
+else()
+    set(SMITHPROXY_PAM_SOURCES)
 endif()
 
 
@@ -374,7 +377,7 @@ add_executable(smithproxy-mem-constrained
         src/service/cmd/smith_cli2_test.cpp
         src/ext/lmhpp/include/lmhttpd.hpp
         src/ext/hpack/hpack.hpp
-        src/service/core/authpam.cpp
+        ${SMITHPROXY_PAM_SOURCES}
         src/proxy/nbrhood.hpp
 
         src/utils/lru.hpp
