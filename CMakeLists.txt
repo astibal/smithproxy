@@ -394,6 +394,23 @@ add_executable(smithproxy-mem-constrained
         src/proxy/filters/access_filter.cpp
 )
 
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    foreach(memory_optimized_target
+            smithproxy-mem-constrained
+            smithproxy_libcli
+            smithproxy_qpack
+            socle_common_lib
+            socle_lib)
+        target_compile_options(${memory_optimized_target} PRIVATE
+                -Os
+                -fno-unroll-loops
+                -ffunction-sections
+                -fdata-sections)
+    endforeach()
+    target_link_options(smithproxy-mem-constrained PRIVATE
+            -Wl,--gc-sections)
+endif()
+
 IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
     find_package(GTest)
     if(GTEST_FOUND)
