@@ -51,6 +51,15 @@
 #include <policy/addrobj.hpp>
 #include <policy/profiles.hpp>
 
+namespace sx::policy {
+
+template<class Matcher>
+int preserve_explicit_match(int matched_policy, Matcher&& matcher) {
+    return matched_policy >= 0 ? matched_policy : matcher();
+}
+
+}
+
 
 class PolicyRule : public ProfileList, public CfgElement {
 

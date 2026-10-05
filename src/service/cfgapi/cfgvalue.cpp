@@ -189,6 +189,16 @@ void CfgValueHelp::init() {
             .may_be_empty(false)
             .value_filter(CfgValue::VALUE_BOOL);
 
+    add("settings.policy_fail_open", "allow traffic when no policy rule matches")
+            .help_quick("<bool>: legacy no-match allow; default false (deny)")
+            .may_be_empty(false)
+            .value_filter(CfgValue::VALUE_BOOL);
+
+    add("settings.policy_access_request_fail_open", "allow traffic without a positive access-request webhook response")
+            .help_quick("<bool>: legacy webhook failure allow; default false (deny)")
+            .may_be_empty(false)
+            .value_filter(CfgValue::VALUE_BOOL);
+
     //
 
 

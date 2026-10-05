@@ -8,6 +8,16 @@ def tcp(port,expect):
     except OSError: ok=False
     if ok != expect: raise RuntimeError(f'TCP/{port}: expected {expect}, got {ok}')
     return {'accepted':ok}
-cases={'disabled_rule_falls_through':tcp(9998,True),'named_accept_profile':tcp(9996,True),
-       'named_deny':tcp(9997,False),'legacy_reject_alias':tcp(9995,False)}
+cases={
+    'missing_profile_falls_to_deny':tcp(9989,False),
+    'source_mismatch_falls_to_deny':tcp(9990,False),
+    'port_mismatch_falls_to_deny':tcp(9991,False),
+    'protocol_mismatch_falls_to_accept':tcp(9992,True),
+    'disabled_accept_falls_to_deny':tcp(9993,False),
+    'first_match_precedence':tcp(9994,False),
+    'legacy_reject_alias':tcp(9995,False),
+    'named_accept_profile':tcp(9996,True),
+    'named_deny':tcp(9997,False),
+    'disabled_deny_falls_to_accept':tcp(9998,True),
+}
 print(json.dumps({'cases':cases,'passed':len(cases)},sort_keys=True))

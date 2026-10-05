@@ -184,3 +184,11 @@ Any change to runner behavior covered here must update this file in the same
 commit. Prefer bounded, reproducible coverage over unbounded work. Never weaken
 a gate merely to make a flaky or overloaded environment green; isolate the
 environmental cause or record an explicit `FLAKY_PASS` threshold instead.
+# Authorization failure policy
+
+Policy tests assume fail-closed defaults. No matching rule is a deny, and an
+`access-request` feature requires an explicit successful `accept` response.
+Legacy availability-first behavior is opt-in through
+`settings.policy_fail_open` and
+`settings.policy_access_request_fail_open`; tests of those switches must also
+prove that explicit deny/reject decisions remain authoritative.

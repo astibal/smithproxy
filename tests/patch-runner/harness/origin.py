@@ -92,7 +92,7 @@ class EchoServer6(EchoServer):
     address_family = socket.AF_INET6
 
 for address, cls in [('198.18.20.2', EchoServer), ('fd00:20::2', EchoServer6)]:
-    for port in (9995, 9996, 9997, 9998):
+    for port in range(9989, 9999):
         server = cls((address, port), EchoHandler)
         threading.Thread(target=server.serve_forever, daemon=True).start()
 

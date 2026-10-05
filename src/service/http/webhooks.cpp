@@ -231,7 +231,7 @@ namespace sx::http::webhooks {
     }
 
     // send action and wait - use hook,
-    void send_action_wait(std::string const& action, std::string const& action_id, nlohmann::json const& details,
+    bool send_action_wait(std::string const& action, std::string const& action_id, nlohmann::json const& details,
                           sx::http::AsyncRequest::reply_hook hook) {
         if(enabled and hook) {
             nlohmann::json msg = {
@@ -248,6 +248,8 @@ namespace sx::http::webhooks {
                         // not a webhook response for synchronous callers.
                         if(!reply || reply->response.first > 0) hook(reply);
                     });
+            return true;
         }
+        return false;
     }
 }

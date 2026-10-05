@@ -55,7 +55,8 @@ public:
     std::string connection_label;
 
     AccessFilter() = delete;
-    explicit AccessFilter(MitmProxy* parent) : FilterProxy(parent) {
+    explicit AccessFilter(MitmProxy* parent, bool fail_open = false)
+        : FilterProxy(parent), fail_open_(fail_open) {
         if(parent)
             connection_label = parent->to_connection_label(false);
     }
@@ -76,6 +77,7 @@ private:
     bool access_allowed = false;
     nlohmann::json access_response;
     bool already_applied = false;
+    bool fail_open_ = false;
 
     static inline logan_lite log {"proxy.accessfilter"};
 };

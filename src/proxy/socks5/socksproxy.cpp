@@ -89,10 +89,15 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
                 auto lc_ = std::scoped_lock(CfgFactory::lock());
 
                 matched_policy(CfgFactory::get()->policy_match(l, r));
-                verdict = CfgFactory::get()->policy_action(matched_policy());
+                if(matched_policy() < 0 and CfgFactory::get()->policy_fail_open) {
+                    matched_policy(PolicyRule::POLICY_IMPLICIT_PASS);
+                }
+                verdict = matched_policy() == PolicyRule::POLICY_IMPLICIT_PASS or
+                          CfgFactory::get()->policy_action(matched_policy());
 
                 std::shared_ptr<PolicyRule> p;
-                if (matched_policy() >= 0) {
+                if (matched_policy() >= 0 and
+                    matched_policy() < static_cast<int>(CfgFactory::get()->db_policy_list.size())) {
                     p = CfgFactory::get()->db_policy_list.at(matched_policy());
                 }
 
@@ -153,7 +158,11 @@ void ExplicitProxy::handle_explicit_connect(ExplicitProxyCX* cx) {
         {
             auto lock = std::scoped_lock(CfgFactory::lock());
             matched_policy(CfgFactory::get()->policy_match(left, right));
-            verdict = CfgFactory::get()->policy_action(matched_policy());
+            if(matched_policy() < 0 and CfgFactory::get()->policy_fail_open) {
+                matched_policy(PolicyRule::POLICY_IMPLICIT_PASS);
+            }
+            verdict = matched_policy() == PolicyRule::POLICY_IMPLICIT_PASS or
+                      CfgFactory::get()->policy_action(matched_policy());
         }
         update_neighbors();
         cx->verdict(verdict ? socks5_policy::ACCEPT : socks5_policy::REJECT);
@@ -183,12 +192,14 @@ void ExplicitProxy::explicit_handoff(ExplicitProxyCX* cx) {
 
     _deb("SocksProxy::socks5_handoff: start");
     
+    auto const implicit_pass = matched_policy() == PolicyRule::POLICY_IMPLICIT_PASS;
     if(matched_policy() < 0) {
         _dia("SocksProxy::sock5_handoff: matching policy: %d: dropping.",matched_policy());
         state().dead(true);
         return;
     } 
-    else if(matched_policy() >= (signed int)CfgFactory::get()->db_policy_list.size()) {
+    else if(not implicit_pass and
+            matched_policy() >= (signed int)CfgFactory::get()->db_policy_list.size()) {
         _dia("SocksProxy::sock5_handoff: matching policy out of policy index table: %d/%d: dropping.",
                                          matched_policy(),
                                          CfgFactory::get()->db_policy_list.size());
@@ -259,8 +270,9 @@ void ExplicitProxy::explicit_handoff(ExplicitProxyCX* cx) {
     bool preserve_source = false;
     {
         auto lock = std::scoped_lock(CfgFactory::lock());
-        preserve_source = CfgFactory::get()->db_policy_list.at(matched_policy())->nat
-                          == PolicyRule::POLICY_NAT_NONE;
+        preserve_source = not implicit_pass and
+                          CfgFactory::get()->db_policy_list.at(matched_policy())->nat
+                              == PolicyRule::POLICY_NAT_NONE;
     }
 
     std::optional<unsigned short> source_port;
@@ -300,12 +312,19 @@ void ExplicitProxy::explicit_handoff(ExplicitProxyCX* cx) {
 
     if( auto policy = CfgFactory::get()->lookup_policy(matched_policy()); policy) {
 
-        if(policy->profile_routing and not sx::proxymaker::route_existing(this, policy->profile_routing))
+        if(policy->profile_routing and not sx::proxymaker::route_existing(this, policy->profile_routing)) {
             _err("SocksProxy::socks5_handoff: routing failed");
+            state().dead(true);
+            return;
+        }
     }
 
-    if ((CfgFactory::get()->policy_apply(n_cx, this, matched_policy()) < 0) or
-        (CfgFactory::get()->policy_apply(target_cx, this, matched_policy()) < 0)) {
+    // policy_apply() configures the client-side inspector and applies the TLS
+    // profile to the originator plus every target context.  Applying it again
+    // to target_cx would duplicate filters/webhooks and incorrectly enable the
+    // client-side detection engine on the server side.
+    if (not implicit_pass and
+        CfgFactory::get()->policy_apply(n_cx, this, matched_policy()) < 0) {
 
         _inf("SocksProxy::socks5_handoff: session failed policy application on contexts");
         state().dead(true);
@@ -408,12 +427,14 @@ void SocksProxy::socks5_handoff_udp(socksServerCX* cx) {
 
     _deb("SocksProxy::socks5_handoff_udp: start");
 
+    auto const implicit_pass = matched_policy() == PolicyRule::POLICY_IMPLICIT_PASS;
     if(matched_policy() < 0) {
         _dia("SocksProxy::socks5_handoff_udp: matching policy: %d: dropping.",matched_policy());
         state().dead(true);
         return;
     }
-    else if(matched_policy() >= (signed int)CfgFactory::get()->db_policy_list.size()) {
+    else if(not implicit_pass and
+            matched_policy() >= (signed int)CfgFactory::get()->db_policy_list.size()) {
         _dia("SocksProxy::socks5_handoff_udp: matching policy out of policy index table: %d/%d: dropping.",
              matched_policy(),
              CfgFactory::get()->db_policy_list.size());
@@ -440,7 +461,8 @@ void SocksProxy::socks5_handoff_udp(socksServerCX* cx) {
 
     {
         auto lc_ = std::scoped_lock(CfgFactory::lock());
-        if (CfgFactory::get()->db_policy_list.at(matched_policy())->nat == PolicyRule::POLICY_NAT_NONE) {
+        if (not implicit_pass and
+            CfgFactory::get()->db_policy_list.at(matched_policy())->nat == PolicyRule::POLICY_NAT_NONE) {
             target_cx->com()->nonlocal_src(true);
         }
     }
@@ -452,11 +474,15 @@ void SocksProxy::socks5_handoff_udp(socksServerCX* cx) {
 
     if( auto policy = CfgFactory::get()->lookup_policy(matched_policy()); policy) {
 
-        if(policy->profile_routing and not sx::proxymaker::route_existing(this, policy->profile_routing))
+        if(policy->profile_routing and not sx::proxymaker::route_existing(this, policy->profile_routing)) {
             _err("SocksProxy::socks5_handoff_udp: routing failed");
+            state().dead(true);
+            return;
+        }
     }
 
-    if (CfgFactory::get()->policy_apply(n_cx.get(), this, matched_policy()) < 0) {
+    if (not implicit_pass and
+        CfgFactory::get()->policy_apply(n_cx.get(), this, matched_policy()) < 0) {
         // strange, but it can happen if the sockets is closed between policy match and this profile application
         // mark dead.
         _inf("SocksProxy::socks5_handoff_udp: session failed policy application");

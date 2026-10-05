@@ -199,7 +199,7 @@ std::shared_ptr<CfgRange> CfgFactory::lookup_port (const char *name) {
         return std::dynamic_pointer_cast<CfgRange>(db_port[name]);
     }    
     
-    return std::make_shared<CfgRange>(NULLRANGE);
+    return nullptr;
 }
 
 std::shared_ptr<CfgString> CfgFactory::lookup_features (const char *name) {
@@ -522,6 +522,12 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "added settings.http_api.allow_api_header (for GET)");
         return true;
     }
+    else if(upgrade_to_num == 1040) {
+        log.event(INF, "added settings.policy_fail_open (default false)");
+        log.event(INF, "added settings.policy_access_request_fail_open (default false)");
+        log.event(NOT, "policy and access-request failures now default to fail-closed");
+        return true;
+    }
 
 
     return false;
@@ -715,6 +721,8 @@ bool CfgFactory::load_settings () {
     load_if_exists(cfgapi.getRoot()["settings"], "accept_socks", accept_socks);
     load_if_exists(cfgapi.getRoot()["settings"], "accept_http_connect", accept_http_connect);
     load_if_exists(cfgapi.getRoot()["settings"], "accept_api", accept_api);
+    load_if_exists(cfgapi.getRoot()["settings"], "policy_fail_open", policy_fail_open);
+    load_if_exists(cfgapi.getRoot()["settings"], "policy_access_request_fail_open", policy_access_request_fail_open);
     load_if_exists(cfgapi.getRoot()["settings"], "plaintext_port",listen_tcp_port_base); listen_tcp_port = listen_tcp_port_base;
     load_if_exists(cfgapi.getRoot()["settings"], "plaintext_workers",num_workers_tcp);
     load_if_exists(cfgapi.getRoot()["settings"], "ssl_port",listen_tls_port_base); listen_tls_port = listen_tls_port_base;
@@ -1271,7 +1279,16 @@ int CfgFactory::load_db_port () {
             
             if( load_if_exists(cur_object, "start", a) &&
                     load_if_exists(cur_object, "end", b)   ) {
-                
+
+                if(a < 0 or a > 65535 or b < 0 or b > 65535) {
+                    _err("cfgapi_load_ports: '%s': values must be in 0..65535", name.c_str());
+                    Log::get()->events().insert(WAR,
+                        "CONFIG: port: '%s': range %d-%d is outside 0..65535",
+                        name.c_str(), a, b);
+                    CfgFactory::LOAD_ERRORS = true;
+                    continue;
+                }
+
                 if(a <= b) {
                     auto cf = std::make_shared<CfgRange>(std::pair(a, b));
                     cf->element_name() = name;
@@ -1778,13 +1795,17 @@ int CfgFactory::load_db_policy () {
 
             if(not hard_error) {
                 if(soft_error) {
-                    _dia("cfgapi_load_policy[#%d]: loaded with a soft error", policy_index);
+                    _dia("cfgapi_load_policy[#%d]: enforcement error, forcing deny", policy_index);
                     rule->cfg_err_is_degraded = true;
+                    rule->action = PolicyRule::POLICY_ACTION_DENY;
+                    rule->action_name = "deny";
                 } else {
                     _dia("cfgapi_load_policy[#%d]: ok", policy_index);
                 }
             } else {
                 rule->cfg_err_is_disabled = true;
+                rule->action = PolicyRule::POLICY_ACTION_DENY;
+                rule->action_name = "deny";
                 _err("cfgapi_load_policy[#%d]: not ok, disabled", policy_index);
 
             }
@@ -1867,11 +1888,16 @@ int CfgFactory::policy_action (int index) {
     std::scoped_lock<std::recursive_mutex> l(lock_);
     
     if(index < 0) {
-        return -1;
+        return policy_fail_open ? PolicyRule::POLICY_ACTION_PASS
+                                : PolicyRule::POLICY_ACTION_DENY;
     }
     
     if(index < (signed int)db_policy_list.size()) {
-        return db_policy_list.at(index)->action;
+        auto const& rule = db_policy_list.at(index);
+        if(rule->cfg_err_is_disabled or rule->cfg_err_is_degraded) {
+            return PolicyRule::POLICY_ACTION_DENY;
+        }
+        return rule->action;
     } else {
         _dia("cfg_obj_policy_action[#%d]: out of bounds, deny", index);
         return PolicyRule::POLICY_ACTION_DENY;
@@ -2770,17 +2796,17 @@ bool CfgFactory::prof_tls_apply (baseHostCX *originator, MitmProxy *new_proxy, c
 
     auto const& log = log::policy();
 
+    if(not new_proxy or not originator) {
+        _err("CfgFactory::prof_tls_apply: proxy or originator is null");
+        return false;
+    }
+
     if(not ps) {
         _err("CfgFactory::prof_tls_apply[%s]: profile is null", new_proxy->to_string(iINF).c_str());
         return false;
     }
 
     bool tls_applied = false;
-
-    if(not new_proxy or not originator) {
-        _err("CfgFactory::prof_tls_apply[%s]: proxy or originator is null", new_proxy->to_string(iINF).c_str());
-        return false;
-    }
 
     if( not policy_apply_tls(ps, originator->com())) {
         _err("CfgFactory::prof_tls_apply[%s]: cannot apply on originator cx", new_proxy->to_string(iINF).c_str());
@@ -2792,6 +2818,11 @@ bool CfgFactory::prof_tls_apply (baseHostCX *originator, MitmProxy *new_proxy, c
     _dia("CfgFactory::prof_tls_apply[%s]: profile %s, originator %s", new_proxy->to_string(iINF).c_str(), ps->element_name().c_str(), originator->full_name('L').c_str());
 
     for( auto* cx: new_proxy->rs()) {
+        if(not cx or not cx->com()) {
+            _err("CfgFactory::prof_tls_apply[%s]: target context is incomplete",
+                 new_proxy->to_string(iINF).c_str());
+            return false;
+        }
         baseCom* xcom = cx->com();
         _dia("CfgFactory::prof_tls_apply[%s]: profile %s, target %s", new_proxy->to_string(iINF).c_str(), ps->element_name().c_str(), cx->full_name('R').c_str());
 
@@ -2954,7 +2985,8 @@ void CfgFactory::policy_apply_features(std::shared_ptr<PolicyRule> const & polic
 
             if(not access_filter) {
                 if (it->value() == "access-request") {
-                    access_filter = new AccessFilter(mitm_proxy);
+                    access_filter = new AccessFilter(
+                        mitm_proxy, policy_access_request_fail_open);
                 }
             }
         }
@@ -2981,19 +3013,32 @@ int CfgFactory::policy_apply (baseHostCX *originator, MitmProxy *proxy, int matc
     auto const& log = log::policy();
 
     auto lc_ = std::scoped_lock(lock_);
-    
-    int policy_num = matched_policy;
-    if(policy_num < 1) {
-        policy_num = policy_match(proxy);
+
+    if(not originator or not proxy) {
+        _err("policy_apply: missing originator or proxy");
+        return -1;
+    }
+
+    int policy_num = sx::policy::preserve_explicit_match(
+        matched_policy, [&] { return policy_match(proxy); });
+    if(policy_num < 0 and policy_fail_open) {
+        _war("Connection %s accepted without a policy match: settings.policy_fail_open=true",
+             originator->full_name('L').c_str());
+        return PolicyRule::POLICY_IMPLICIT_PASS;
     }
     if(auto verdict = policy_action(policy_num); verdict == PolicyRule::POLICY_ACTION_PASS) {
         auto rule = policy_rule(policy_num);
+        if(not rule) {
+            _err("policy_apply: matched policy %d disappeared before application", policy_num);
+            return -1;
+        }
 
         auto pc = policy_prof_content(policy_num);
         auto pd = policy_prof_detection(policy_num);
         auto pt = policy_prof_tls(policy_num);
         auto pa = policy_prof_auth(policy_num);
         auto p_alg_dns = policy_prof_alg_dns(policy_num);
+        auto p_script = policy_prof_script(policy_num);
 
 
         const char *pc_name = "none";
@@ -3007,19 +3052,35 @@ int CfgFactory::policy_apply (baseHostCX *originator, MitmProxy *proxy, int matc
 
         /* Processing content profile */
         if (pc) {
-            if (prof_content_apply(originator, proxy, pc)) {
-                pc_name = pc->element_name().c_str();
+            if (not prof_content_apply(originator, proxy, pc)) {
+                _err("policy_apply: configured content profile failed");
+                return -1;
             }
+            pc_name = pc->element_name().c_str();
         }
         
         
         /* Processing detection profile */
-        if (pd and prof_detect_apply(originator, proxy, pd)) {
+        if (pd and not prof_detect_apply(originator, proxy, pd)) {
+            _err("policy_apply: configured detection profile failed");
+            return -1;
+        }
+        if(pd) {
             pd_name = pd->element_name().c_str();
         }
         
         /* Processing TLS profile*/
-        if (pt and prof_tls_apply(originator, proxy, pt)) {
+        if (pt and not prof_tls_apply(originator, proxy, pt)) {
+            _err("policy_apply: configured TLS profile failed");
+            return -1;
+        }
+
+        /* Processing script profile */
+        if (p_script and not prof_script_apply(originator, proxy, p_script)) {
+            _err("policy_apply: configured script profile failed");
+            return -1;
+        }
+        if(pt) {
             pt_name = pt->element_name().c_str();
         }
         
@@ -3033,6 +3094,11 @@ int CfgFactory::policy_apply (baseHostCX *originator, MitmProxy *proxy, int matc
 
             /* Processing Features */
             policy_apply_features(rule, mitm_proxy);
+            if(mitm_proxy->state().dead()) {
+                _inf("Connection %s rejected by policy feature during initialization",
+                     originator->full_name('L').c_str());
+                return -1;
+            }
         }
         
         // ALGS can operate only on MitmHostCX classes
@@ -5116,6 +5182,8 @@ int save_settings(Config& ex) {
     objects.add("accept_redirect", Setting::TypeBoolean) = CfgFactory::get()->accept_redirect;
     objects.add("accept_socks", Setting::TypeBoolean) = CfgFactory::get()->accept_socks;
     objects.add("accept_http_connect", Setting::TypeBoolean) = CfgFactory::get()->accept_http_connect;
+    objects.add("policy_fail_open", Setting::TypeBoolean) = CfgFactory::get()->policy_fail_open;
+    objects.add("policy_access_request_fail_open", Setting::TypeBoolean) = CfgFactory::get()->policy_access_request_fail_open;
 
     // nameservers
     Setting& it_ns  = objects.add("nameservers", Setting::TypeArray);

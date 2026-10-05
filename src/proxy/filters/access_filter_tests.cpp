@@ -14,21 +14,28 @@ TEST(AccessFilterDecision, AcceptsOnlyExactSupportedDecisions) {
               access_decision::reject);
 
     EXPECT_EQ(parse_access_response(200, R"({"access-response":"Accept"})").decision,
-              access_decision::fail_open_invalid_response);
+              access_decision::fail_closed_invalid_response);
     EXPECT_EQ(parse_access_response(200, R"({"access-response":true})").decision,
-              access_decision::fail_open_invalid_response);
+              access_decision::fail_closed_invalid_response);
     EXPECT_EQ(parse_access_response(200, R"({})").decision,
-              access_decision::fail_open_invalid_response);
+              access_decision::fail_closed_invalid_response);
 }
 
-TEST(AccessFilterDecision, MalformedAndNonSuccessRepliesFailOpen) {
+TEST(AccessFilterDecision, MalformedAndNonSuccessRepliesFailClosedByDefault) {
     EXPECT_EQ(parse_access_response(200, "not json").decision,
-              access_decision::fail_open_invalid_response);
+              access_decision::fail_closed_invalid_response);
     EXPECT_EQ(parse_access_response(200, "[]").decision,
-              access_decision::fail_open_invalid_response);
+              access_decision::fail_closed_invalid_response);
     EXPECT_EQ(parse_access_response(199, R"({"access-response":"reject"})").decision,
-              access_decision::fail_open_transport);
+              access_decision::fail_closed_transport);
     EXPECT_EQ(parse_access_response(300, R"({"access-response":"reject"})").decision,
+              access_decision::fail_closed_transport);
+}
+
+TEST(AccessFilterDecision, LegacyFailOpenMustBeExplicit) {
+    EXPECT_EQ(parse_access_response(200, "not json", true).decision,
+              access_decision::fail_open_invalid_response);
+    EXPECT_EQ(parse_access_response(503, "unavailable", true).decision,
               access_decision::fail_open_transport);
 }
 
