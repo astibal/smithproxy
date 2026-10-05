@@ -27,13 +27,23 @@ openssl pkey -in "$TMP_DIR/private.pem" -pubout \
 cmp "$TMP_DIR/publish/ct_log_list.cnf" "$TMP_DIR/client.cnf"
 
 sed 's/"USABLE"/"RETIRED"/' "$SOURCE_DIR/testdata/cloudflare-minimal.json" \
+    > "$TMP_DIR/cloudflare-state-mismatch.json"
+"$SX_CTLOG" publish \
+    --apple-url "file://$SOURCE_DIR/testdata/apple-minimal.json" \
+    --cloudflare-url "file://$TMP_DIR/cloudflare-state-mismatch.json" \
+    --signer-key "$TMP_DIR/private.pem" \
+    --output-dir "$TMP_DIR/state-warning"
+grep -q 'policy state differs (Apple USABLE, Cloudflare RETIRED)' \
+    "$TMP_DIR/state-warning/policy-report.json"
+
+sed 's/"RFC6962"/"STATIC"/' "$SOURCE_DIR/testdata/cloudflare-minimal.json" \
     > "$TMP_DIR/cloudflare-mismatch.json"
 if "$SX_CTLOG" publish \
     --apple-url "file://$SOURCE_DIR/testdata/apple-minimal.json" \
     --cloudflare-url "file://$TMP_DIR/cloudflare-mismatch.json" \
     --signer-key "$TMP_DIR/private.pem" \
     --output-dir "$TMP_DIR/rejected"; then
-    echo "cross-check mismatch was unexpectedly accepted" >&2
+    echo "hard cross-check mismatch was unexpectedly accepted" >&2
     exit 1
 fi
 

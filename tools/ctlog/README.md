@@ -13,10 +13,13 @@ Cloudflare Radar ┘                                      │
 embedded Smithproxy public key ─ C++ updater ─ OpenSSL ct_log_list.cnf
 ```
 
-Apple provides keys and policy state. Cloudflare Radar independently
-corroborates log URL, API type and state. The publisher fails closed on a
-discrepancy, retains only `qualified`, `usable`, `readonly` and `retired`, and
-excludes `pending`, `rejected` and unknown states.
+Apple provides keys and the authoritative policy state. Cloudflare Radar
+independently corroborates log URL and API type. The publisher fails closed on
+an identity discrepancy. Lifecycle state differences are retained as audit
+warnings because Apple and Cloudflare apply separate CT policies and may update
+at different times. The publisher retains only Apple's `qualified`, `usable`,
+`readonly` and `retired` logs, and excludes `pending`, `rejected` and unknown
+states.
 
 The Smithproxy RSA-3072 signature does not claim that either upstream is
 infallible. It authenticates the exact policy result selected by Smithproxy, so

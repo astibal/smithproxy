@@ -608,9 +608,10 @@ json crosscheck_cloudflare(const json& normalized, const json& cloudflare)
                     matches = false;
                 }
                 if (radar.value("state", "") != apple_state(log)) {
-                    report["errors"].push_back(log.value("description", "unknown") +
-                                                ": state differs from Cloudflare Radar");
-                    matches = false;
+                    report["warnings"].push_back(
+                        log.value("description", "unknown") +
+                        ": policy state differs (Apple " + apple_state(log) +
+                        ", Cloudflare " + radar.value("state", "UNKNOWN") + ")");
                 }
                 if (radar.contains("operator") && radar.at("operator").is_string() &&
                     radar.at("operator").get<std::string>() != op.value("name", "")) {
