@@ -15,7 +15,7 @@ CLOUDFLARE_URL=${CTLOG_CLOUDFLARE_URL:-"https://api.cloudflare.com/client/v4/rad
 
 require_file() {
     if [ ! -r "$1" ]; then
-        echo "Chybi citelny soubor: $1" >&2
+        echo "Required file is missing or unreadable: $1" >&2
         exit 1
     fi
 }
@@ -24,14 +24,14 @@ require_file "$TOKEN_FILE"
 require_file "$PRIVATE_KEY"
 require_file "$PUBLIC_KEY"
 
-echo "[1/4] Sestavuji sx_ctlog"
+echo "[1/4] Building sx_ctlog"
 cmake -S "$SCRIPT_DIR" -B "$BUILD_DIR"
 cmake --build "$BUILD_DIR"
 
-echo "[2/4] Spoustim testy"
+echo "[2/4] Running tests"
 ctest --test-dir "$BUILD_DIR" --output-on-failure
 
-echo "[3/4] Stahuji, kontroluji a podepisuji CT log list"
+echo "[3/4] Downloading, cross-checking, and signing the CT log list"
 "$BUILD_DIR/sx_ctlog" publish \
     --apple-url "$APPLE_URL" \
     --cloudflare-url "$CLOUDFLARE_URL" \
@@ -39,14 +39,14 @@ echo "[3/4] Stahuji, kontroluji a podepisuji CT log list"
     --signer-key "$PRIVATE_KEY" \
     --output-dir "$OUTPUT_DIR"
 
-echo "[4/4] Overuji vysledny podpis"
+echo "[4/4] Verifying the resulting signature"
 openssl dgst -sha256 \
     -verify "$PUBLIC_KEY" \
     -signature "$OUTPUT_DIR/log_list.sig" \
     "$OUTPUT_DIR/log_list.json"
 
 echo
-echo "Hotovo. Vystupy:"
+echo "Done. Generated artifacts:"
 for artifact in ct_log_list.cnf log_list.json log_list.sig policy-report.json; do
     printf '  %s\n' "$OUTPUT_DIR/$artifact"
 done
