@@ -8,6 +8,26 @@
 
 using namespace cidr;
 
+TEST(ProfileTlsTest, ClientCertificateActionNamesFailClosed) {
+    EXPECT_EQ(ProfileTls::normalized_client_cert_action(0), 0);
+    EXPECT_EQ(ProfileTls::normalized_client_cert_action(1), 1);
+    EXPECT_EQ(ProfileTls::normalized_client_cert_action(2), 2);
+    EXPECT_EQ(ProfileTls::normalized_client_cert_action(3), 3);
+    EXPECT_EQ(ProfileTls::normalized_client_cert_action(-1), 0);
+    EXPECT_EQ(ProfileTls::normalized_client_cert_action(4), 0);
+
+    EXPECT_EQ(ProfileTls::client_cert_action_name(0), "block_or_replacement");
+    EXPECT_EQ(ProfileTls::client_cert_action_name(1), "empty_client_cert");
+    EXPECT_EQ(ProfileTls::client_cert_action_name(2), "tls_bypass");
+    EXPECT_EQ(ProfileTls::client_cert_action_name(3), "use_configured");
+    EXPECT_EQ(ProfileTls::client_cert_action_name(999), "block_or_replacement");
+    EXPECT_EQ(ProfileTls::client_cert_action_value("block_or_replacement"), 0);
+    EXPECT_EQ(ProfileTls::client_cert_action_value("empty_client_cert"), 1);
+    EXPECT_EQ(ProfileTls::client_cert_action_value("tls_bypass"), 2);
+    EXPECT_EQ(ProfileTls::client_cert_action_value("use_configured"), 3);
+    EXPECT_EQ(ProfileTls::client_cert_action_value("invalid"), 0);
+}
+
 TEST(PolicyTest, match_addrgrp_cx) {
     PolicyRule p;
     auto h = baseHostCX(new TCPCom(), "192.168.1.1", "80");

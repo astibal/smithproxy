@@ -528,6 +528,11 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(NOT, "policy and access-request failures now default to fail-closed");
         return true;
     }
+    else if(upgrade_to_num == 1041) {
+        log.event(INF, "tls_profile.[x].client_cert_action now uses named values");
+        log.event(INF, "numeric client certificate actions will be saved as strings");
+        return true;
+    }
 
 
     return false;
@@ -2266,6 +2271,31 @@ int CfgFactory::load_db_prof_tls () {
                 load_if_exists(cur_object, "failed_certcheck_override", new_profile->failed_certcheck_override);
                 load_if_exists(cur_object, "failed_certcheck_override_timeout", new_profile->failed_certcheck_override_timeout);
                 load_if_exists(cur_object, "failed_certcheck_override_timeout_type", new_profile->failed_certcheck_override_timeout_type);
+                if(cur_object.exists("client_cert_action")) {
+                    auto& action = cur_object["client_cert_action"];
+                    if(action.getType() == Setting::TypeString) {
+                        std::string const configured = static_cast<const char*>(action);
+                        new_profile->client_cert_action =
+                            ProfileTls::client_cert_action_value(configured);
+                        if(ProfileTls::client_cert_action_name(new_profile->client_cert_action) !=
+                           configured) {
+                            _err("TLS profile '%s': invalid client_cert_action '%s'; failing closed",
+                                 name.c_str(), configured.c_str());
+                        }
+                    } else if(action.getType() == Setting::TypeInt) {
+                        int const legacy_action = action;
+                        new_profile->client_cert_action =
+                            ProfileTls::normalized_client_cert_action(legacy_action);
+                        if(new_profile->client_cert_action != legacy_action) {
+                            _err("TLS profile '%s': invalid legacy client_cert_action %d; failing closed",
+                                 name.c_str(), legacy_action);
+                        }
+                    } else {
+                        _err("TLS profile '%s': invalid client_cert_action type; failing closed",
+                             name.c_str());
+                        new_profile->client_cert_action = 0;
+                    }
+                }
                 load_if_exists(cur_object, "sni_based_cert", new_profile->mitm_cert_sni_search);
                 load_if_exists(cur_object, "ip_based_cert", new_profile->mitm_cert_ip_search);
                 load_if_exists(cur_object, "only_custom_certs", new_profile->mitm_cert_searched_only);
@@ -3476,6 +3506,7 @@ bool CfgFactory::policy_apply_tls (const std::shared_ptr<ProfileTls> &pt, baseCo
         sslcom->opt.cert.failed_check_override = pt->failed_certcheck_override;
         sslcom->opt.cert.failed_check_override_timeout = pt->failed_certcheck_override_timeout;
         sslcom->opt.cert.failed_check_override_timeout_type = pt->failed_certcheck_override_timeout_type;
+        sslcom->opt.cert.client_cert_action = pt->client_cert_action;
         sslcom->opt.cert.mitm_cert_sni_search = pt->mitm_cert_sni_search;
         sslcom->opt.cert.mitm_cert_ip_search = pt->mitm_cert_ip_search;
         sslcom->opt.cert.mitm_cert_searched_only = pt->mitm_cert_searched_only;
@@ -3499,6 +3530,7 @@ bool CfgFactory::policy_apply_tls (const std::shared_ptr<ProfileTls> &pt, baseCo
             peer_sslcom->opt.cert.failed_check_override = pt->failed_certcheck_override;
             peer_sslcom->opt.cert.failed_check_override_timeout = pt->failed_certcheck_override_timeout;
             peer_sslcom->opt.cert.failed_check_override_timeout_type = pt->failed_certcheck_override_timeout_type;
+            peer_sslcom->opt.cert.client_cert_action = pt->client_cert_action;
             peer_sslcom->opt.cert.mitm_cert_sni_search = pt->mitm_cert_sni_search;
             peer_sslcom->opt.cert.mitm_cert_ip_search = pt->mitm_cert_ip_search;
             peer_sslcom->opt.cert.mitm_cert_searched_only = pt->mitm_cert_searched_only;
@@ -4117,6 +4149,7 @@ bool CfgFactory::new_tls_profile(Setting& ex, std::string const& name) const {
         item.add("failed_certcheck_override", Setting::TypeBoolean) = true;
         item.add("failed_certcheck_override_timeout", Setting::TypeInt) = 600;
         item.add("failed_certcheck_override_timeout_type", Setting::TypeInt) = 0;
+        item.add("client_cert_action", Setting::TypeString) = "use_configured";
         item.add("sni_based_cert", Setting::TypeBoolean) = true;
         item.add("ip_based_cert", Setting::TypeBoolean) = true;
         item.add("only_custom_certs", Setting::TypeBoolean) = false;
@@ -4191,6 +4224,8 @@ int CfgFactory::save_tls_profiles(Config& ex) const {
         item.add("failed_certcheck_override", Setting::TypeBoolean) = obj->failed_certcheck_override;
         item.add("failed_certcheck_override_timeout", Setting::TypeInt) = obj->failed_certcheck_override_timeout;
         item.add("failed_certcheck_override_timeout_type", Setting::TypeInt) = obj->failed_certcheck_override_timeout_type;
+        item.add("client_cert_action", Setting::TypeString) =
+            ProfileTls::client_cert_action_name(obj->client_cert_action).data();
         item.add("sni_based_cert", Setting::TypeBoolean) = obj->mitm_cert_sni_search;
         item.add("ip_based_cert", Setting::TypeBoolean) = obj->mitm_cert_ip_search;
         item.add("only_custom_certs", Setting::TypeBoolean) = obj->mitm_cert_searched_only;

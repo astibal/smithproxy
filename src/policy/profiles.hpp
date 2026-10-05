@@ -200,6 +200,28 @@ class CidrAddress;
 
 class ProfileTls : public CfgElement {
 public:
+    static constexpr std::string_view client_cert_action_name(int action) {
+        switch(action) {
+            case 0: return "block_or_replacement";
+            case 1: return "empty_client_cert";
+            case 2: return "tls_bypass";
+            case 3: return "use_configured";
+            default: return "block_or_replacement";
+        }
+    }
+
+    static constexpr int client_cert_action_value(std::string_view action) {
+        if(action == "block_or_replacement") return 0;
+        if(action == "empty_client_cert") return 1;
+        if(action == "tls_bypass") return 2;
+        if(action == "use_configured") return 3;
+        return 0;
+    }
+
+    static constexpr int normalized_client_cert_action(int action) {
+        return action >= 0 && action <= 3 ? action : 0;
+    }
+
     bool inspect = false;
     bool no_fallback_bypass = false;
     bool allow_untrusted_issuers = false;
@@ -210,6 +232,9 @@ public:
     int  failed_certcheck_override_timeout = 600;       // if failed ssl override is active, this is the timeout.
     int  failed_certcheck_override_timeout_type = 0;    // 0 - just expire after the timeout
     // 1 - reset timeout on traffic (aka idle timer)
+    // Stored as a named string in configuration; the integer is the runtime
+    // representation used by the OpenSSL callback.
+    int client_cert_action = 3;
 
     bool mitm_cert_sni_search = true;                   // look in cache for certificates stored with SNI key
     bool mitm_cert_ip_search = true;                   // look in cache for certificates stored with IP key
@@ -273,6 +298,8 @@ public:
             ret += string_format("\n        failed cert check allow user override: %d", failed_certcheck_override);
             ret += string_format("\n        failed cert check user override timeout: %d", failed_certcheck_override_timeout);
             ret += string_format("\n        failed cert check user override timeout type: %d", failed_certcheck_override_timeout_type);
+            ret += string_format("\n        client certificate action: %s",
+                                 client_cert_action_name(client_cert_action).data());
             ret += string_format("\n        look for SNI custom certificates: %d", mitm_cert_sni_search);
             ret += string_format("\n        look for IP custom certificates: %d", mitm_cert_ip_search);
             ret += string_format("\n        use _only_ custom certificates: %d", mitm_cert_searched_only);
