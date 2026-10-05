@@ -28,6 +28,18 @@ private key exists only on the publisher; clients receive a pinned public key.
 
 ## Local publisher
 
+The complete local build, test, publish and signature verification can be run
+with one command:
+
+```sh
+./tools/ctlog/publish-local.sh
+```
+
+It uses the signing key and Cloudflare token from
+`~/.config/smithproxy/ctlog/` and writes the result to
+`/tmp/smithproxy-ct-publish`. These paths can be overridden with
+`CTLOG_SIGNING_KEY`, `CTLOG_CLOUDFLARE_TOKEN_FILE` and `CTLOG_OUTPUT_DIR`.
+
 Set a read-only Cloudflare Radar API token without putting it on the command
 line, then run:
 
