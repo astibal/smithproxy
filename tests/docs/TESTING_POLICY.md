@@ -178,6 +178,24 @@ are included in the next normal commit to the current branch.
 Failed runs are retained in their ordinary report directories with a
 reproduction command and are not written to the successful-run history.
 
+## Planned research labs
+
+- [ ] Add an isolated, explicitly non-production split-engine TLS lab in which
+  one running Smithproxy can use a pinned older OpenSSL release on a selected
+  TLS leg while retaining the current OpenSSL on the other leg. The preferred
+  in-process experiment is a narrow opaque C ABI shim built against the legacy
+  headers and loaded into a separate glibc link-map namespace with `dlmopen()`;
+  no legacy `SSL*`, `SSL_CTX*`, OpenSSL callbacks or allocators may cross that
+  boundary. Ordinary `dlopen()`/`RTLD_DEEPBIND` and a merely renamed SONAME are
+  not sufficient isolation. Retain a helper-process implementation as the
+  safer fallback and reference result. Run the controlled matrix in both
+  directions (legacy client-facing/current origin-facing and the reverse),
+  covering protocol bounds, static RSA, DHE/ECDHE, SHA-1, RC4, AES-128 and
+  session resumption. Every profile switch must prove both its positive and
+  negative case. Keep the lab offline except for its private test network, use
+  generated disposable keys, record the exact OpenSSL/build image version,
+  and never ship or enable this build as a production artifact.
+
 ## Changing this policy
 
 Any change to runner behavior covered here must update this file in the same

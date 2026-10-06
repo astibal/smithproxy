@@ -14,6 +14,11 @@ import tempfile
 
 
 def is_product_source(path: pathlib.Path, root: pathlib.Path) -> bool:
+    # Incremental builds may retain .gcno/.gcda files after their source was
+    # renamed or removed. Such stale notes describe no current product line
+    # and must not make an otherwise valid coverage run fail.
+    if not path.is_file():
+        return False
     try:
         relative = path.resolve().relative_to(root)
     except ValueError:
@@ -23,9 +28,65 @@ def is_product_source(path: pathlib.Path, root: pathlib.Path) -> bool:
     parts = relative.parts
     if not parts or parts[0] not in {"src", "socle"}:
         return False
-    if parts[:2] == ("src", "ext"):
+    if relative.stem.endswith("_tests"):
+        return False
+    # HPACK is maintained as Smithproxy product code despite living below
+    # src/ext.  Keep third-party protocol implementations (for example
+    # ls-qpack and xxhash) outside the product denominator.
+    if parts[:2] == ("src", "ext") and parts[:3] != ("src", "ext", "hpack"):
         return False
     return not any(part in {"tests", "testbed", "fuzz", "third_party"} for part in parts)
+
+
+def code_line_numbers(path: pathlib.Path) -> set[int]:
+    """Return lines containing C/C++ tokens, excluding whitespace/comments.
+
+    GCC can attribute inline/template cleanup regions to blank and comment-only
+    header lines.  Those are useful implementation details in gcov JSON, but
+    they are not source lines and must not inflate the report denominator.
+    """
+    code_lines: set[int] = set()
+    in_block_comment = False
+    for number, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+        index = 0
+        has_code = False
+        quote: str | None = None
+        while index < len(line):
+            if in_block_comment:
+                end = line.find("*/", index)
+                if end < 0:
+                    break
+                in_block_comment = False
+                index = end + 2
+                continue
+            char = line[index]
+            following = line[index:index + 2]
+            if quote:
+                has_code = True
+                if char == "\\":
+                    index += 2
+                    continue
+                if char == quote:
+                    quote = None
+                index += 1
+                continue
+            if following == "//":
+                break
+            if following == "/*":
+                in_block_comment = True
+                index += 2
+                continue
+            if char in {'"', "'"}:
+                quote = char
+                has_code = True
+            elif not char.isspace():
+                has_code = True
+            index += 1
+        if has_code:
+            # Preprocessor directives describe the build, not runtime lines.
+            if not line.lstrip().startswith("#"):
+                code_lines.add(number)
+    return code_lines
 
 
 def load_gcov(build: pathlib.Path, root: pathlib.Path) -> dict[pathlib.Path, dict[int, int]]:
@@ -85,7 +146,11 @@ def write_reports(coverage: dict[pathlib.Path, dict[int, int]], root: pathlib.Pa
     detail_dir.mkdir(exist_ok=True)
 
     for source_path in sorted(coverage):
-        line_counts = coverage[source_path]
+        source_code = code_line_numbers(source_path)
+        line_counts = {
+            number: count for number, count in coverage[source_path].items()
+            if number in source_code
+        }
         executable = len(line_counts)
         covered = sum(count > 0 for count in line_counts.values())
         total_lines += executable

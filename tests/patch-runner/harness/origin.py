@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-import http.server, socket, socketserver, ssl, threading, pathlib, sys, os
+import http.server, socket, socketserver, ssl, threading, pathlib, sys, os, time
 certs = pathlib.Path(sys.argv[1])
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
+        if self.path == '/delayed-half-close':
+            time.sleep(0.25)
         if self.path.startswith('/bulk/'):
             size = int(self.path.split('?', 1)[0].removeprefix('/bulk/'))
             if size < 0 or size > 1024 * 1024 * 1024:

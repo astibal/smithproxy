@@ -72,6 +72,8 @@ Common environment variables:
   PATCH_TEST_BUILD_DIR           Default build directory.
   PATCH_TEST_RESULTS_DIR         Store reports under this directory.
   PATCH_TEST_JOBS                Default build parallelism.
+  PATCH_TEST_BUILD_TYPE          CMake build type (default: RelWithDebInfo;
+                                 use Debug for compiled-in trace logging).
   PATCH_TEST_CTEST_JOBS          Native test parallelism. Coverage defaults to
                                  1 to avoid gcov-induced resource contention.
   PATCH_TEST_PARALLEL            Default full-section concurrency (default: 3).
@@ -171,6 +173,7 @@ REMOTE=
 SHARED_BINARY=
 WORK_DIR=${PATCH_TEST_DIR:-}
 JOBS=${PATCH_TEST_JOBS:-$(nproc)}
+BUILD_TYPE=${PATCH_TEST_BUILD_TYPE:-RelWithDebInfo}
 PARALLEL=${PATCH_TEST_PARALLEL:-3}
 while (($#)); do
     case "$1" in
@@ -238,6 +241,10 @@ if ((${#TARGETS[@]} == 1)) && [[ ${TARGETS[0]} != local ]]; then
 fi
 [[ -z $SHARED_BINARY || $SHARED_BINARY == /* ]] || { echo "Shared binary must be an absolute path: $SHARED_BINARY" >&2; exit 2; }
 [[ $JOBS =~ ^[1-9][0-9]*$ ]] || { echo "Invalid job count: $JOBS" >&2; exit 2; }
+[[ $BUILD_TYPE == Debug || $BUILD_TYPE == Release || $BUILD_TYPE == RelWithDebInfo || $BUILD_TYPE == MinSizeRel ]] || {
+    echo "Invalid PATCH_TEST_BUILD_TYPE: $BUILD_TYPE" >&2
+    exit 2
+}
 [[ $PARALLEL =~ ^[1-9][0-9]*$ ]] || { echo "Invalid parallelism: $PARALLEL" >&2; exit 2; }
 [[ -z $REQUESTED_FUZZ_SEED || $REQUESTED_FUZZ_SEED =~ ^[A-Za-z0-9._-]+$ ]] || { echo "Invalid fuzz seed: $REQUESTED_FUZZ_SEED" >&2; exit 2; }
 if [[ -n $CHURN_PORT_RANGE ]]; then
@@ -665,10 +672,10 @@ if [[ $PROFILE == native || $PROFILE == coverage ]]; then
 elif ((SKIP_BUILD == 0)); then
     if [[ ! -f $BUILD_DIR/CMakeCache.txt ]]; then
         if ((QUIET)); then
-            cmake -S "$ROOT" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            cmake -S "$ROOT" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
                 > "$REPORT/configure.log" 2>&1
         else
-            cmake -S "$ROOT" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            cmake -S "$ROOT" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
                 2>&1 | tee "$REPORT/configure.log"
         fi
     fi
