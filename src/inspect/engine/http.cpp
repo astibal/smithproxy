@@ -274,6 +274,107 @@ namespace sx::engine::http {
 
     namespace v2 {
 
+        namespace {
+            constexpr std::size_t default_max_frame_size = 16384;
+
+            bool append_frame(std::string& output, uint8_t type, uint8_t flags,
+                              uint32_t stream_id, std::string_view payload) {
+                if(payload.size() > 0x00ffffffU || stream_id > 0x7fffffffU) {
+                    return false;
+                }
+
+                output.push_back(static_cast<char>((payload.size() >> 16) & 0xff));
+                output.push_back(static_cast<char>((payload.size() >> 8) & 0xff));
+                output.push_back(static_cast<char>(payload.size() & 0xff));
+                output.push_back(static_cast<char>(type));
+                output.push_back(static_cast<char>(flags));
+                output.push_back(static_cast<char>((stream_id >> 24) & 0x7f));
+                output.push_back(static_cast<char>((stream_id >> 16) & 0xff));
+                output.push_back(static_cast<char>((stream_id >> 8) & 0xff));
+                output.push_back(static_cast<char>(stream_id & 0xff));
+                output.append(payload.data(), payload.size());
+                return true;
+            }
+
+            void append_u32(std::string& output, uint32_t value) {
+                output.push_back(static_cast<char>((value >> 24) & 0xff));
+                output.push_back(static_cast<char>((value >> 16) & 0xff));
+                output.push_back(static_cast<char>((value >> 8) & 0xff));
+                output.push_back(static_cast<char>(value & 0xff));
+            }
+        }
+
+        std::optional<std::string> make_response(long stream_id,
+                                                 std::string_view body,
+                                                 unsigned status,
+                                                 bool head_only) {
+#ifdef USE_HPACK
+            if(stream_id <= 0 || stream_id > 0x7fffffffL || (stream_id & 1) == 0 ||
+               status < 100 || status > 999) {
+                return std::nullopt;
+            }
+
+            HPACK::encoder_t encoder;
+            encoder.add(":status", std::to_string(status), false);
+            encoder.add("content-type", "text/html; charset=utf-8", false);
+            encoder.add("content-length", std::to_string(body.size()), false);
+            encoder.add("cache-control", "no-store", false);
+
+            auto const& encoded = encoder.data();
+            std::string output = make_server_preamble();
+            auto const wire_body_size = head_only ? 0 : body.size();
+            output.reserve(9 + encoded.size() + wire_body_size +
+                           9 * ((wire_body_size + default_max_frame_size - 1) /
+                                default_max_frame_size));
+            auto const header_flags = static_cast<uint8_t>(
+                0x04 | (body.empty() || head_only ? 0x01 : 0));
+            std::string_view header_block(
+                reinterpret_cast<char const*>(encoded.data()), encoded.size());
+            if(!append_frame(output, 1, header_flags, static_cast<uint32_t>(stream_id),
+                             header_block)) {
+                return std::nullopt;
+            }
+
+            std::size_t offset = 0;
+            while(!head_only && offset < body.size()) {
+                auto const length = std::min(default_max_frame_size, body.size() - offset);
+                auto const final = offset + length == body.size();
+                if(!append_frame(output, 0, final ? 0x01 : 0x00,
+                                 static_cast<uint32_t>(stream_id), body.substr(offset, length))) {
+                    return std::nullopt;
+                }
+                offset += length;
+            }
+            return output;
+#else
+            (void)stream_id;
+            (void)body;
+            (void)status;
+            (void)head_only;
+            return std::nullopt;
+#endif
+        }
+
+        std::string make_server_preamble() {
+            std::string output;
+            append_frame(output, 4, 0, 0, {}); // server SETTINGS
+            append_frame(output, 4, 1, 0, {}); // acknowledge client SETTINGS
+            return output;
+        }
+
+        std::string make_goaway(uint32_t last_stream_id, uint32_t error_code,
+                                std::string_view debug_data) {
+            std::string payload;
+            payload.reserve(8 + debug_data.size());
+            append_u32(payload, last_stream_id & 0x7fffffffU);
+            append_u32(payload, error_code);
+            payload.append(debug_data.data(), debug_data.size());
+
+            std::string output;
+            append_frame(output, 7, 0, 0, payload);
+            return output;
+        }
+
         const char* frame_type_str(uint8_t t) {
             switch (t) {
                 case 16:
@@ -505,7 +606,14 @@ namespace sx::engine::http {
 
             auto const& log = log::http2_headers;
 
-            HPACK::decoder_t dec;
+            auto* connection = std::any_cast<Http2Connection>(&ctx.state_data);
+            if (!connection) {
+                ctx.state_data = std::make_any<Http2Connection>();
+                connection = std::any_cast<Http2Connection>(&ctx.state_data);
+            }
+            auto& dec = side == side_t::LEFT
+                        ? *connection->request_decoder
+                        : *connection->response_decoder;
             auto data_string = std::string((const char*)data.data(), data.size());
             auto vec = std::vector<uint8_t>(data_string.begin(), data_string.end());
 
@@ -518,9 +626,11 @@ namespace sx::engine::http {
             try {
                 if (not dec.decode(vec)) {
                     _err("Frame: hpack decode error");
+                    return;
                 }
             } catch (std::exception const& e) {
                 _err("Frame: hpack decode exception: %s", e.what());
+                return;
             }
 
             std::optional<sx::ja4::HTTP> ja4h;
@@ -551,7 +661,13 @@ namespace sx::engine::http {
             }
 
             detect_app(ctx, side, my_app_data, stream_id, flags, data);
-            if(ctx.origin->opt_kb_enabled) {
+            if(side == side_t::LEFT) {
+                connection->latest_request_stream_id = stream_id;
+                if(ctx.origin) {
+                    ctx.origin->replacement_type(MitmHostCX::REPLACETYPE_HTTP2);
+                }
+            }
+            if(ctx.origin && ctx.origin->opt_kb_enabled) {
                 fill_kb(ctx, side, my_app_data, stream_id, flags, data);
             }
 #endif
@@ -661,6 +777,7 @@ namespace sx::engine::http {
 
         std::size_t process_frame(EngineCtx& ctx, side_t side, buffer& frame) {
             constexpr size_t preamble_sz = 9L;
+            constexpr uint8_t flag_end_headers = 0x04;
             if(frame.size() < preamble_sz) return 0L;
 
             auto const& log = log::http2_frames;
@@ -672,47 +789,111 @@ namespace sx::engine::http {
             auto frame_sz = frame_sz_opt.value();
 
             std::size_t cur_off = 3L;
-            size_t add_hdr = 0;
-
             if (frame_sz + preamble_sz <= frame.size()) {
                 auto typ = frame.get_at<uint8_t>(cur_off);   cur_off += sizeof(uint8_t);
 
                 auto flg = frame.get_at<uint8_t>(cur_off);   cur_off += sizeof(uint8_t);
-                auto stream_id = (long) ntohl(frame.get_at<uint32_t>(cur_off)); cur_off += sizeof(uint32_t);
+                auto stream_id = static_cast<long>(
+                    ntohl(frame.get_at<uint32_t>(cur_off)) & 0x7fffffffU);
+                cur_off += sizeof(uint32_t);
 
                 // end of preamble
 
                 uint32_t stream_dep = 0L;
                 uint8_t wgh = 0;
+                std::size_t payload_offset = preamble_sz;
+                std::size_t payload_size = frame_sz;
+                std::size_t padding_size = 0;
 
-                if(flg & 0x20) {
-                    stream_dep = frame.get_at<uint32_t>(cur_off); cur_off += sizeof(uint32_t);
-                    wgh = frame.get_at<uint8_t>(cur_off);   cur_off += sizeof(uint8_t);
-
-                    add_hdr += 5;
+                if ((typ == 0 || typ == 1) && (flg & 0x08)) {
+                    if (payload_size < 1)
+                        return preamble_sz + frame_sz;
+                    padding_size = frame.get_at<uint8_t>(payload_offset++);
+                    --payload_size;
                 }
+
+                if(typ == 1 && (flg & 0x20)) {
+                    if (payload_size < 5)
+                        return preamble_sz + frame_sz;
+                    stream_dep = ntohl(frame.get_at<uint32_t>(payload_offset));
+                    payload_offset += sizeof(uint32_t);
+                    wgh = frame.get_at<uint8_t>(payload_offset++);
+                    payload_size -= 5;
+                }
+
+                if (padding_size > payload_size)
+                    return preamble_sz + frame_sz;
+                payload_size -= padding_size;
 
                 {
                     _inf("Frame: type = %s, flags = %d, size = %d, stream = %d, side = %c", frame_type_str(typ), flg, frame_sz,
                          stream_id, from_side(side));
 
-                    if (flg & 0x20)
+                    if (typ == 1 && (flg & 0x20))
                         _inf("Frame prio: stream dep = %X, weight: %d", stream_dep, wgh);
 
                     _deb("Frame: \r\n%s", hex_dump(frame.view(0, frame_sz), 4, 0, true).c_str());
 
-                    if(frame_sz > 0) {
+                    // A header block must be followed by CONTINUATION frames
+                    // without any interleaved frame in the same direction.
+                    if (typ != 9) {
+                        if (auto* connection = std::any_cast<Http2Connection>(&ctx.state_data)) {
+                            auto& pending = side == side_t::LEFT
+                                            ? connection->request_headers_pending
+                                            : connection->response_headers_pending;
+                            if (pending.active()) {
+                                _err("non-CONTINUATION frame received while header block is pending");
+                                pending.clear();
+                            }
+                        }
+                    }
+
+                    if(frame_sz > 0 || typ == 1 || typ == 9) {
                         if (typ == 0) {
-                            auto data = frame.view(preamble_sz + add_hdr, frame_sz - add_hdr);
+                            auto data = frame.view(payload_offset, payload_size);
                             process_data(ctx, side, stream_id, flg, data);
-                        } else if (typ == 1) {
-                            auto data = frame.view(preamble_sz + add_hdr, frame_sz - add_hdr);
-                            process_headers(ctx, side, stream_id, flg, data);
+                        } else if (typ == 1 || typ == 9) {
+                            auto data = frame.view(payload_offset, payload_size);
+                            auto* connection = std::any_cast<Http2Connection>(&ctx.state_data);
+                            if (!connection) {
+                                ctx.state_data = std::make_any<Http2Connection>();
+                                connection = std::any_cast<Http2Connection>(&ctx.state_data);
+                            }
+                            auto& pending = side == side_t::LEFT
+                                            ? connection->request_headers_pending
+                                            : connection->response_headers_pending;
+
+                            if (typ == 1) {
+                                if (flg & flag_end_headers) {
+                                    process_headers(ctx, side, stream_id, flg, data);
+                                } else {
+                                    pending.stream_id = stream_id;
+                                    pending.bytes.clear();
+                                    if (!data.empty()) {
+                                        auto* begin = static_cast<unsigned char*>(data.data());
+                                        pending.bytes.assign(begin, begin + data.size());
+                                    }
+                                }
+                            } else if (!pending.active() || pending.stream_id != stream_id) {
+                                _err("unexpected CONTINUATION stream");
+                                pending.clear();
+                            } else {
+                                if (!data.empty()) {
+                                    auto* begin = static_cast<unsigned char*>(data.data());
+                                    pending.bytes.insert(pending.bytes.end(), begin, begin + data.size());
+                                }
+                                if (flg & flag_end_headers) {
+                                    buffer complete_headers;
+                                    complete_headers.assign(pending.bytes.data(), pending.bytes.size());
+                                    pending.clear();
+                                    process_headers(ctx, side, stream_id, flg, complete_headers);
+                                }
+                            }
                         } else if(typ == 6) {
-                            auto data = frame.view(preamble_sz + add_hdr, frame_sz - add_hdr);
+                            auto data = frame.view(payload_offset, payload_size);
                             process_ping(ctx, side, stream_id, flg, data);
                         } else {
-                            auto data = frame.view(preamble_sz + add_hdr, frame_sz - add_hdr);
+                            auto data = frame.view(payload_offset, payload_size);
                             process_other(ctx, side, stream_id, flg, data);
                         }
                     }

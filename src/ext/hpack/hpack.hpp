@@ -428,13 +428,16 @@ namespace HPACK
         {
             std::stringstream	dst;
             huffman_node_t*		current(m_root);
+            uint8_t pending_bits = 0;
+            bool pending_all_ones = true;
 
-            if ( src.length() > std::numeric_limits< unsigned int >::max() )
-                throw std::invalid_argument("HPACK::huffman_tree_t::decode(): Overly long input string");
-
-            for ( unsigned int idx = 0; idx < src.size(); idx++ ) {
+            for ( std::size_t idx = 0; idx < src.size(); idx++ ) {
                 for ( int8_t j = 7; j >= 0; j-- ) {
-                    if ( ( src[ idx ] & ( 1 << j ) ) != 0 ) {
+                    const bool bit = ( src[ idx ] & ( 1 << j ) ) != 0;
+                    ++pending_bits;
+                    pending_all_ones = pending_all_ones && bit;
+
+                    if ( bit ) {
                         if ( nullptr == current->right() )
                             throw hpack_error("HPACK::huffman_tree_t::decode(): Internal state error (right == nullptr)");
                         current = current->right();
@@ -448,14 +451,21 @@ namespace HPACK
                     if ( current->code() >= 0 ) {
                         uint16_t code = current->code();
 
-                        if ( 257 == code )
-                            dst << static_cast< uint8_t >( ( ( code & 0xFF00u ) >> 8u ) & 0xFF );
+                        if ( 256 == code )
+                            throw hpack_error("HPACK::huffman_tree_t::decode(): EOS symbol in encoded string");
 
                         dst << static_cast< uint8_t >( code & 0xFFu );
                         current = m_root;
+                        pending_bits = 0;
+                        pending_all_ones = true;
                     }
                 }
             }
+
+            // RFC 7541 section 5.2: padding is at most seven bits and is the
+            // most-significant prefix of EOS, i.e. all ones.
+            if ( current != m_root && (pending_bits > 7 || !pending_all_ones) )
+                throw hpack_error("HPACK::huffman_tree_t::decode(): Invalid Huffman padding");
 
             return dst.str();
         }
@@ -472,6 +482,19 @@ namespace HPACK
         explicit ringtable_t(uint64_t m) : m_max(m) {}
         virtual ~ringtable_t() = default;
 
+        void swap(ringtable_t& other) noexcept {
+            std::swap(m_max, other.m_max);
+            m_queue.swap(other.m_queue);
+        }
+
+        [[nodiscard]] static uint64_t entry_size(header_t const& h) {
+            const uint64_t name_size = h.first.size();
+            const uint64_t value_size = h.second.size();
+            if (name_size > std::numeric_limits<uint64_t>::max() - value_size - 32)
+                throw std::runtime_error("HPACK::ringtable_t::entry_size(): Additive integer overflow encountered");
+            return name_size + value_size + 32;
+        }
+
         void
         max(uint64_t m)
         {
@@ -484,7 +507,7 @@ namespace HPACK
                 m_queue.clear();
             }
             else {
-                while (length() >= m_max) {
+                while (!m_queue.empty() && length() > m_max) {
                     m_queue.pop_back();
                 }
             }
@@ -498,50 +521,25 @@ namespace HPACK
 
             uint64_t size = 0L;
 
-            for ( auto& h : m_queue ) {
-                uint64_t nl(h.first.length());
-                uint64_t vl(h.second.length());
-                uint64_t tl(0);
-
-                // In practice it should basically never occur
-                // that either of these exceptions are thrown and
-                // its probably safe to remove the checks in most instances
-                if ( vl > std::numeric_limits< uint64_t >::max() ||
-                     nl > std::numeric_limits< uint64_t >::max() - vl )
+            for ( auto const& h : m_queue ) {
+                const auto item_size = entry_size(h);
+                if ( item_size > std::numeric_limits< uint64_t >::max() - size )
                     throw std::runtime_error("HPACK::ringtable_t::length() Additive integer overflow encountered");
-
-                tl = nl + vl;
-
-                if ( tl > std::numeric_limits< uint64_t >::max() - size )
-                    throw std::runtime_error("HPACK::ringtable_t::length() Additive integer overflow encountered");
-
-                size += tl;
-
+                size += item_size;
             }
 
             return size;
         }
 
         void add(const header_t&  h) {
-
-            // In practice, it should be basically implausible to trip these exceptions because
-            // you would need 2^(sizeof(uint64_t)*8) bytes of memory to be in use, which in itself
-            // will likely fail long before then. In other words its probably safe to remove
-            // these checks for the foreseeable future, but I left them in because technically I
-            // should check even if it's an absurd condition.
-
-            if ( h.first.length() > std::numeric_limits< uint64_t >::max() - h.second.length() )
-                throw std::runtime_error("HPACK::ringtable_t::add(): Additive integer overflow encountered.");
-
-            // Again the RFC dictates when we resize the queue.
-
-            if(m_max == 0) {
+            const auto item_size = entry_size(h);
+            if (item_size > m_max) {
                 m_queue.clear();
-            } else {
-                while (length() >= m_max) {
-                    m_queue.pop_back();
-                }
+                return;
             }
+
+            while (!m_queue.empty() && item_size > m_max - length())
+                m_queue.pop_back();
 
             m_queue.push_front(h);
         }
@@ -588,12 +586,6 @@ namespace HPACK
         }
 
         bool find(header_t const& h, int64_t& index) const {
-
-
-            if ( static_cast<std::size_t>(index) > std::numeric_limits< std::size_t >::max() ) {
-                throw std::invalid_argument("HPACK::ringtable_t::find(): Invalid/overlarge index which results in truncation");
-            }
-
             index = -1;
 
             for ( std::size_t idx = 0; idx < m_queue.size(); idx++ ) {
@@ -713,6 +705,7 @@ namespace HPACK
         header_map_type	m_headers;
         ringtable_t		m_dynamic;
         huffman_tree_t	m_huffman;
+        uint64_t            m_maximum_table_size;
 
 
     public:
@@ -786,7 +779,7 @@ namespace HPACK
 
             \param max the maximum size of the dynamic table; unbounded and allowed to exceed RFC sizes
         */
-        decoder_t(int64_t max = 4096) : m_dynamic(max) { }
+        explicit decoder_t(uint64_t max = 4096) : m_dynamic(max), m_maximum_table_size(max) { }
 
 
         /*!
@@ -833,32 +826,34 @@ namespace HPACK
         */
         bool decode(std::vector< uint8_t >& data) {
 
-
+            m_headers.clear();
             if ( data.empty() )
                 return false;
 
             auto itr = data.begin();
             auto end = data.end();
+            header_map_type decoded_headers;
+            ringtable_t decoded_dynamic = m_dynamic;
+            bool allow_table_update = true;
 
-
-
-            for(size_t loop = 0; end - itr > 0 and loop < 100; ++loop) {
+            while (itr != end) {
 
                 auto byte_value = *itr;
 
                 if ( 0x20 == ( byte_value & 0xE0 ) ) { // 6.3 Dynamic Table update
+                    if (!allow_table_update)
+                        return false;
+
                     uint32_t size(0);
 
                     decode_integer(itr, end, size, 5);
 
-                    if ( size > m_dynamic.max() ) {
-                        // decoding error
+                    if ( size > m_maximum_table_size )
+                        return false;
 
-                        // report error - dynamic update too big
-                    }
-
-                    m_dynamic.max(size);
+                    decoded_dynamic.max(size);
                 } else if ( ( byte_value & 0x80 ) ) { // 6.1 Indexed Header Field Representation
+                    allow_table_update = false;
                     uint32_t index(0);
 
                     decode_integer(itr, end, index, 7);
@@ -870,40 +865,44 @@ namespace HPACK
                         return false;
                     }
 
-                    auto const* hdr_ptr = m_dynamic.get_header(index);
+                    auto const* hdr_ptr = decoded_dynamic.get_header(index);
                     if(hdr_ptr) {
-                        m_headers[hdr_ptr->first].emplace_back(hdr_ptr->second);
+                        decoded_headers[hdr_ptr->first].emplace_back(hdr_ptr->second);
                     } else {
-                        // report error - index not found
+                        return false;
                     }
-                } else if(end - itr > 0){
+                } else {
+                    allow_table_update = false;
 
                     uint32_t index(0);
                     std::string n;
+                    const bool incremental = 0x40 == ( byte_value & 0xC0 );
 
-                    if ( 0x40 == ( byte_value & 0xC0 ) ) // 6.2.1 Literal Header Field with Incremental Indexing
+                    if ( incremental ) // 6.2.1 Literal Header Field with Incremental Indexing
                         decode_integer(itr, end, index, 6);
                     else // 6.2.2 Literal Header Field without Indexing
                         decode_integer(itr, end, index, 4);
 
                     if ( 0 != index ) {
-                        auto const* h = m_dynamic.get_header(index);
+                        auto const* h = decoded_dynamic.get_header(index);
                         if(h) {
                             n = h->first;
                         } else {
-                            //report index error
+                            return false;
                         }
                     } else {
                         n = parse_string(itr, end);
                     }
 
                     auto val = parse_string(itr, end);
-                    m_headers[ n ].emplace_back(val);
-                } else {
-                    break;
+                    decoded_headers[ n ].emplace_back(val);
+                    if (incremental)
+                        decoded_dynamic.add(n, val);
                 }
             }
 
+            m_dynamic.swap(decoded_dynamic);
+            m_headers = std::move(decoded_headers);
             return true;
         }
 
@@ -1086,16 +1085,16 @@ namespace HPACK
             int64_t					index(0);
             std::vector< uint8_t >	buf(0), huffbuff(0);
 
-            if ( false == never_indexed && true == find(h, index) ) {
+            const bool exact_match = find(h, index);
+            if ( false == never_indexed && exact_match ) {
                 encode_integer(buf, static_cast< uint32_t >(index), 7);
 
                 buf.front() |= INDEXED_BIT_PATTERN;
                 m_buf.insert(m_buf.end(), buf.begin(), buf.end());
                 buf.clear();
-            } else if ( false == never_indexed && -1 != index ) {
-                m_dynamic.add(h.first, h.second);
-
+            } else if ( -1 != index ) {
                 if ( false == never_indexed ) {
+                    m_dynamic.add(h.first, h.second);
                     encode_integer(buf, static_cast< uint32_t >(index), 6);
                     buf.front() |= LITERAL_INDEXED_BIT_PATTERN;
                     m_buf.insert(m_buf.end(), buf.begin(), buf.end());
@@ -1112,6 +1111,7 @@ namespace HPACK
                 else {
                     buf.clear();
                     encode_integer(buf, h.second.length(), 7);
+                    m_buf.insert(m_buf.end(), buf.begin(), buf.end());
                     m_buf.insert(m_buf.end(), h.second.begin(), h.second.end());
                 }
             } else {
