@@ -75,6 +75,13 @@ public:
     int replace_each_nth = 0;
     int replace_each_counter_ = 0;
 
+    bool replacement_due() {
+        if (replace_each_nth <= 1) return true;
+        if (++replace_each_counter_ < replace_each_nth) return false;
+        replace_each_counter_ = 0;
+        return true;
+    }
+
     std::string to_string(int verbosity) const override {
         return string_format("ProfileContentRule: matching %s", ESC_(match).c_str());
     }
@@ -171,8 +178,7 @@ public:
             rules_session_filter_rx = std::regex(rules_session_filter);
             return true;
 
-        } catch (std::regex const& e) {
-            auto log =
+        } catch (std::regex_error const&) {
             rules_session_filter_rx = std::nullopt;
         }
         return false;
@@ -224,6 +230,8 @@ public:
 
     bool inspect = false;
     bool no_fallback_bypass = false;
+    int client_hello_timeout = 3000;
+    int handshake_timeout = 10000;
     bool allow_untrusted_issuers = false;
     bool allow_invalid_certs = false;
     bool allow_self_signed = false;
@@ -291,6 +299,8 @@ public:
         if(verbosity > iINF) {
 
             ret += string_format("\n        disable fallback TLS bypass: %d", no_fallback_bypass);
+            ret += string_format("\n        ClientHello timeout: %d ms", client_hello_timeout);
+            ret += string_format("\n        TLS handshake timeout: %d ms", handshake_timeout);
             ret += string_format("\n        allow untrusted issuers: %d", allow_untrusted_issuers);
             ret += string_format("\n        allow invalid certs: %d", allow_invalid_certs);
             ret += string_format("\n        allow self-signed certs: %d", allow_self_signed);
@@ -383,17 +393,18 @@ struct ProfileRouting: public CfgElement {
 
     // helper to get index based on RR scheme
     size_t lb_index_rr(size_t sz) const;
-    size_t lb_index_l3 (MitmProxy* proxy, size_t sz) const;
-    size_t lb_index_l4(MitmProxy* proxy, size_t sz) const;
+    size_t lb_index_l3 (MitmProxy const* proxy, size_t sz) const;
+    size_t lb_index_l4(MitmProxy const* proxy, size_t sz) const;
 
     struct LbState {
         constexpr static time_t refresh_interval = 5;
 
-        std::mutex lock_;
+        mutable std::mutex lock_;
 
-        std::atomic_long rr_counter = 0;
+        mutable std::atomic_size_t rr_counter = 0;
 
         time_t last_refresh = 0;
+        bool refresh_in_progress = false;
         std::vector<std::shared_ptr<CidrAddress>> candidates_v4;
         std::vector<std::shared_ptr<CidrAddress>> candidates_v6;
         bool expand_candidates(std::vector<std::string> const& addresses);

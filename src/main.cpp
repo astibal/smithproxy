@@ -588,7 +588,7 @@ int main(int argc, char *argv[]) {
     auto start_api = [&]() {
         if (CfgFactory::get()->accept_api) {
 
-            if (not sx::webserver::HttpSessions::api_keys.empty()) {
+            if (sx::webserver::HttpSessions::has_api_keys()) {
                 SmithProxy::instance().create_api_thread();
             } else {
                 Log::get()->events().insert(ERR, "cannot start API server: key not set");
