@@ -519,7 +519,7 @@ namespace sx::engine::http {
                 if (not dec.decode(vec)) {
                     _err("Frame: hpack decode error");
                 }
-            } catch (std::invalid_argument const& e) {
+            } catch (std::exception const& e) {
                 _err("Frame: hpack decode exception: %s", e.what());
             }
 

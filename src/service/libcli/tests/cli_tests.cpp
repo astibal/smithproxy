@@ -144,5 +144,72 @@ TEST(Libcli2, ResetDefinitionReplacesImportedCommandMetadata) {
     EXPECT_NE(cli.help("show config", context).find("native"), std::string::npos);
 }
 
+TEST(Libcli2, DecoratorIsPlainByDefault) {
+    Context context;
+    const auto decor = context.decor();
+
+    EXPECT_FALSE(decor.enabled());
+    EXPECT_EQ(decor.error("FAILED"), "FAILED");
+    EXPECT_EQ(decor.command("show status"), "show status");
+}
+
+TEST(Libcli2, DecoratorUsesSemanticAnsiStylesWhenEnabled) {
+    Context context;
+    context.color_capable = true;
+    context.color_mode = ColorMode::automatic;
+    const auto decor = context.decor();
+
+    EXPECT_TRUE(decor.enabled());
+    EXPECT_EQ(decor.success("OK"), "\033[32mOK\033[0m");
+    EXPECT_EQ(decor.error("FAILED"), "\033[1;31mFAILED\033[0m");
+    EXPECT_EQ(decor.key("policy"), "\033[2;36mpolicy\033[0m");
+
+    context.color_mode = ColorMode::off;
+    EXPECT_EQ(context.decor().warning("warning"), "warning");
+    context.color_mode = ColorMode::on;
+    EXPECT_EQ(context.decor().warning("warning"), "\033[33mwarning\033[0m");
+}
+
+TEST(Libcli2, DecoratorSupportsNamedColorThemes) {
+    Context context;
+    context.color_capable = true;
+    context.color_mode = ColorMode::automatic;
+
+    for (const auto name : color_theme_names) {
+        ColorTheme parsed = ColorTheme::classic;
+        ASSERT_TRUE(parse_color_theme(name, parsed));
+        EXPECT_EQ(color_theme_name(parsed), name);
+        context.color_theme = parsed;
+        EXPECT_NE(context.decor().success("OK").find("\033["), std::string::npos);
+        EXPECT_EQ(context.decor().error("FAIL").find(";4;"), std::string::npos);
+    }
+
+    ColorTheme parsed = ColorTheme::classic;
+    EXPECT_FALSE(parse_color_theme("unknown", parsed));
+
+    context.color_theme = ColorTheme::nord;
+    EXPECT_EQ(context.decor().success("OK"), "\033[38;2;163;190;140mOK\033[0m");
+    context.color_theme = ColorTheme::monokai;
+    EXPECT_EQ(context.decor().error("FAIL"), "\033[1;38;2;249;38;114mFAIL\033[0m");
+    context.color_theme = ColorTheme::matrix;
+    EXPECT_EQ(context.decor().command("show"), "\033[38;2;65;255;99mshow\033[0m");
+    context.color_theme = ColorTheme::amber;
+    EXPECT_EQ(context.decor().muted("idle"), "\033[2;38;2;166;105;25midle\033[0m");
+}
+
+TEST(Libcli2, HelpUsesDecoratorsWithoutChangingPlainOutput) {
+    Cli cli;
+    cli.command("show session").help("List sessions").argument({"id", "Session id", false});
+    Context context;
+
+    const auto plain = cli.help("show session", context);
+    EXPECT_EQ(plain.find("\033["), std::string::npos);
+
+    context.color_mode = ColorMode::on;
+    const auto colored = cli.help("show session", context);
+    EXPECT_NE(colored.find("\033[36msession\033[0m"), std::string::npos);
+    EXPECT_NE(colored.find("\033[2;37mList sessions\033[0m"), std::string::npos);
+}
+
 }  // namespace
 }  // namespace libcli2

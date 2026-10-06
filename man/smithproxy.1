@@ -1,209 +1,249 @@
-.\" Process this file with
-.\" groff -man -Tascii smithproxy.1
-.\"
-.TH SMITHPROXY 1 "APR 2014" Linux "User Manuals"
+.\" Render with: groff -man -Tutf8 smithproxy.1
+.TH SMITHPROXY 1 "OCT 2026" "Smithproxy" "User Commands"
 .SH NAME
-.B smithproxy 
-\- agent Smith's favorite mitm proxy
+smithproxy \- policy-driven TCP, UDP and TLS inspection proxy
 .SH SYNOPSIS
-
-.B Service operation:
-
-.br
-Smithproxy is designed to run as a system service. Please see system service named
 .B smithproxy
-for more information.
-.br
-Config files needed to run service:
+.RB [ \-D ]
+.RB [ \-c " file" ]
+.RB [ \-o ]
+.RB [ \-\-debug | \-\-diagnose | \-\-dump | \-\-extreme ]
+.PP
+.B smithproxy
+.RB [ \-h | \-v ]
+.SH DESCRIPTION
+Smithproxy is a Linux traffic proxy and inspection service written in C++17.
+It accepts transparent TPROXY and REDIRECT traffic as well as explicit SOCKS4,
+SOCKS5 and HTTP CONNECT clients. TCP, UDP and TLS connections are matched
+against ordered policies which select routing, TLS, DNS, content and detection
+profiles.
+.PP
+TLS inspection terminates the client-side connection and creates a separate
+upstream connection. Generated server certificates are signed by a configured
+Smithproxy CA. Clients must trust that CA when TLS interception is enabled.
+.PP
+Smithproxy is normally started by the system service. Runtime configuration,
+diagnostics, session inspection and configuration editing are available through
+the interactive CLI.
+.SH OPTIONS
+.TP
+.BR \-c " file, " \-\-config-file " file"
+Load the specified configuration file instead of
+.IR /etc/smithproxy/smithproxy.cfg .
+.TP
+.BR \-o ", " \-\-config-check-only
+Load and validate the configuration, print diagnostics and exit without
+starting proxy listeners.
+.TP
+.BR \-D ", " \-\-daemonize
+Fork into the background. File logging must be configured. A service manager
+is preferred for normal deployments.
+.TP
+.B \-\-debug
+Enable debug-level startup logging.
+.TP
+.B \-\-diagnose
+Enable diagnostic startup logging.
+.TP
+.B \-\-dump
+Enable verbose dump-level startup logging.
+.TP
+.B \-\-extreme
+Enable the most verbose startup logging.
+.TP
+.BR \-v ", " \-\-version
+Print the Smithproxy and Socle versions, then exit.
+.TP
+.BR \-h ", " \-\-help
+Print command-line help and exit.
+.SH TRAFFIC MODES
+.TP
+.B Transparent routed traffic
+Linux TPROXY rules divert routed TCP, UDP and TLS traffic to Smithproxy while
+preserving the original destination. Policies may also preserve the original
+source address on the upstream connection when routing permits it.
+.TP
+.B Locally originated traffic
+REDIRECT rules can divert traffic created on the Smithproxy host. Original UDP
+destinations are not available through this mode; local UDP handling is
+therefore primarily intended for DNS.
+.TP
+.B Explicit proxy
+SOCKS4/SOCKS5 and HTTP CONNECT listeners accept explicit client connections.
+Hostnames supplied by the client are resolved by Smithproxy and pass through
+the same policy and inspection path as transparent traffic.
+.SH CONFIGURATION
+The main configuration is a libconfig file. The default path is:
 .nf
-
-   /etc/smithproxy/
-
-         smithproxy.startup.cfg -- service and interface options
-         smithproxy.cfg         -- smithproxy service configuration
-         users.cfg              -- auth portal configuration (optional)
-
-         # advanced configuration:
-
-         smithproxy.tenants.cfg -- OPTIONAL:
-                                   if present, smithproxy multi-tenancy
-                                   is enabled. Each line consists of:
-
-                         <index>;<name>;<ip4-range>;<ip6-range>; comments
-
-                         Note: all features are supported with multi-tenancy
-                                      enabled
-
+    /etc/smithproxy/smithproxy.cfg
 .fi
-
-.B Command line operation (this is usually what your DON'T want):
-
+.PP
+Most settings can be inspected and edited in the interactive CLI. Use
+.B save config
+to persist the active configuration. Smithproxy can create a backup and upgrade
+older configuration schemas while loading them; review service logs after an
+upgrade.
+.PP
+Network interception itself is prepared by the installed startup scripts and
+their settings in:
 .nf
-    smithproxy [--conf <non-default-config>] [--daemonize]
+    /etc/smithproxy/smithproxy.startup.cfg
 .fi
-
-.SH Introduction
-.B Smithproxy
-is capturing, plain-text or SSL man-in-the-middle proxy for Linux iptables TPROXY target.
-It supports SSL certificate spoofing - cloning the original certificate including
-Subject and SAN, signing it with its own CA certificate.
-.br
-Smitproxy can also proxy UDP plaintext traffic, understands DNS.
-It also acts as SOCKS5 proxy, if you prefer.
-
-.br
-It works the way that it terminates traffic intended to be forwarded on itself, and 
-originating new session to the traffic target. Those sessions are then proxied by
-copying bytes from one socket to another.
-
-.B "Diagram"
+.SH INTERACTIVE CLI
+Run
+.B sx_cli
+to connect to the local command server. The wrapper reads the configured CLI
+port and uses a telnet client:
 .nf
-    Normally without any mitm proxy:
-    
-      Client (conn A) ----> (Linux Router) -----X target server 
+    sx_cli
 .fi
-
+.PP
+The CLI supports command completion, contextual help, configuration modes,
+runtime diagnostics and privilege levels. The default base port is 50000 when
+the wrapper cannot read one from the configuration.
+.SS Prompt
+With an active color palette, the prompt uses U+2300 DIAMETER SIGN as a
+terminal-sized form of the Smithproxy mark:
 .nf
-    Intercepted with smithproxy using TPROXY:
-    
-      Client (conn A) ----> (Linux Router).-----X target server
-                                |         | 
-                               TPROXY     (conn B) 
-                                |         ^
-                                `---X smithproxy
-
+    smithpr\[u2300]xy(hostname)>
+    smithpr\[u2300]xy(hostname)#
 .fi
-
-Despite conn A and B are in fact different connections in OS level,
-.B they have the same source IP and ports.
-.br
-That's why you want to check
-and verify routing is correct up from smithproxy, since the traffic back
-to real Client's IP must find the way.
-If you don't need or want transparent addresses, you can run them off in policy
-in config file by enabling nat setting.
-
-
-.br
-
-.B "SSL/TLS:"
-.br
-Certificate spoofing uses default server certificate's private and public keys; 
-certificates produced this way are cached for further use.
-
-.br
-When would use SSL inspection (enabled by default), certificate warning messages
-will appear. This is because target servers' SSL certificates are resigned by 
-internal CA. 
-
-.B "SSL: How to avoid certificate warnings"
-.br
-You may want to install this ca root certificate "/etc/smithproxy/certs/ca-cert.pem"
-file) into your 'Trusted Root CA' certificate store.
-.br
-.B "WARNING:"
-in such a case you will unconditionally trust all certificates it resigned!
-
-.SH CONFIG FILE
-As you see, there are not much options for the command line. This is because 
-we utilize quite large config file, which should be however very well readable and
-self-explaining.
-.br
-Config file is usually located in 
-.B "/etc/smithproxy/smithproxy.cfg"
-, however you may override it with 
-.B "--conf"
-command line option.
-
-.SH USAGE
-You will typically run smithproxy as a system service. Please use config files to
-control smithproxy behavior.
-
-To troubleshoot smithproxy, use
-.B smithproxy_cli
-rich CLI and debugging features.
-   
-.SH OUTPUT
-.IP Logging
-Standard logging is set to errors only. Use CLI tool to set file logging level, or change loglevel in config file.
-
-.IP "Capture directory"
-Captures are organized in the structure:
+.PP
+The hash prompt indicates privileged mode. Configuration mode, unsaved changes
+and configuration-load errors are appended when applicable. With colors
+disabled, the prompt uses the ASCII form:
 .nf
-   <write_payload_dir>/
-      [source IP]/
-         [date of capture]/
-               <connection_id>.smcap -- capture file
+    smithproxy(hostname)>
 .fi
-
-This structure is automatically created, so you don't need to worry
-to just delete it if your tests are over, or you are running out of disk space.
-
-.IP "Capture file format - smcap"
-Capture file is text file, similar to `hexdump -C' output. You can however find
-several notes in there; for example if the traffic was SSL, smithproxy logs also original server's certificate.
-
-.B Pplay
-is the tool I wrote to replay it, or use it as data source for your python program (ie. for further analysis).
-.B pplay
-can be also used to replay it into pcap (with various limitations).
-
-You can simply install it with:
+.SS Terminal colors
+ANSI styling and the palette are controlled per CLI session:
 .nf
-pip install pplay
+    terminal color auto [style]
+    terminal color on [style]
+    terminal color off
 .fi
-
-.SH PERFORMANCE on decent machine
-Smithproxy is considerably fast. Using it in transparent mode, you barely recognize it's there.
-It handles gigabits of plaintext traffic, and hundreds megabits of TLS traffic on normal PC.
-
-Bottleneck is typically disk IO as it is dumping packets to files. This is however asynchronous,
-so you won't see disk IO as biggest issue. It's CPU which needs to format dumped .smcap files.
-
-.SH LIMITATIONS
-  No limitations detected.
-
-
+.PP
+.B auto
+uses the capability selected by the CLI frontend,
+.B on
+forces ANSI styling, and
+.B off
+removes ANSI sequences and the Unicode prompt mark. Available styles are:
+.nf
+    classic solarized monokai nord gruvbox
+    matrix monochrome amber ice
+.fi
+.PP
+Use
+.B terminal color off
+with older telnet clients, missing terminal fonts, log capture or machine
+parsing. Modern UTF-8 terminals and xterm.js display the branded prompt.
+.SH CAPTURE AND OBSERVABILITY
+Policies and content profiles can write per-connection SMCap or PCAP files, or
+append traffic to a rotating single PCAP. Remote capture export uses GRE and
+can carry plaintext SPQ1 packets or native PCAPNG records, depending on the
+configured GRE format.
+.PP
+TLS key material can be written in SSLKEYLOG format. Smithproxy also exposes
+live sessions, connection history, performance counters and event diagnostics
+through the CLI. Optional webhooks report connection lifecycle events and can
+participate in policy decisions. An authenticated HTTP API can expose selected
+configuration operations when enabled at build time and configured with a key.
+.SH PROTOCOL SUPPORT
+Smithproxy handles IPv4 and IPv6 TCP/UDP traffic, TLS and STARTTLS, DNS and DoH,
+HTTP/1, HTTP/2, SOCKS4/SOCKS5 and HTTP CONNECT.
+.PP
+TLS validation features include OCSP, CRL handling and optional Certificate
+Transparency checks. SSLKEYLOG and KTLS support depend on the linked OpenSSL
+version and build configuration.
+.SS QUIC and HTTP/3
+Transparent QUIC interception is experimental and disabled by default. Full
+listener support requires OpenSSL 3.5 or newer with QUIC server APIs. Enable it
+explicitly with the
+.B quic_port
+and
+.B quic_workers
+settings and configure the corresponding TPROXY rules. The listener negotiates
+HTTP/3, proxies bidirectional QUIC streams and can expose decoded HTTP/3 headers
+in native capture output. Inspect active listeners and sessions with:
+.nf
+    diag proxy quic list
+.fi
+.PP
+The supplied network startup script treats configured QUIC ports separately
+from generic UDP. When QUIC interception is disabled, it can block those ports
+to prevent HTTP/3 from bypassing the TLS inspection policy.
+.SS SSH
+SSH can pass through Smithproxy as ordinary TCP traffic. Builds with libssh
+support can also perform SSHv2 man-in-the-middle inspection when a policy assigns
+an
+.B ssh_profile .
+The initial implementation supports password-authenticated session channels;
+other SSH features may remain opaque or unsupported.
 .SH FILES
-.nf 
-/etc/smithproxy/*
-               -- config files
-
-/etc/smithproxy/certs/defaults/
-  ca-cert.pem  -- Spoofing CA certificate, issuer for spoofing server 
-                  connection certificate
-                  - this file should be loaded to Trusted Root CA to
-                     get rid of browser certificate warnings
-  ca-key.pem   -- Spoofing CA private key, signing spoofed server
-                  certificate
-  cl-cert.pem  -- Default server-side connection certificate 
-  cl-key.pem   -- Default server-side connection private key
-  srv-cert.pem -- Default client-side connection certificate 
-  srv-key.pem  -- Default client-side connection private key
-  
-/var/local/smithproxy/data/
-               -- Directory containing packet captures.
-
-/usr/share/smithproxy/
-               -- Smithproxy infrastructure python modules
-
-/usr/share/smithproxy/www
-               -- Smithproxy portal services
+.TP
+.I /etc/smithproxy/smithproxy.cfg
+Main service configuration.
+.TP
+.I /etc/smithproxy/smithproxy.startup.cfg
+Startup and Linux interception settings.
+.TP
+.I /etc/smithproxy/users.cfg
+Optional authentication configuration.
+.TP
+.I /etc/smithproxy/certs/default/
+Default CA, client and server keys and certificates.
+.TP
+.I /var/log/smithproxy/
+Service logs and optional TLS key log.
+.TP
+.I /var/smithproxy/data/
+Default local capture directory.
+.TP
+.I /usr/share/smithproxy/
+Installed helper modules, tools, documentation and integration files.
+.SH SECURITY
+Transparent interception normally requires root privileges or equivalent Linux
+capabilities and routing configuration. A Smithproxy CA private key permits TLS
+impersonation for clients which trust that CA; protect the key and restrict
+access to the CLI, API, captures and TLS key logs.
+.SH LIMITATIONS
+Transparent interception relies on Linux networking facilities. Features such
+as HTTP/2, HTTP/3, SSH MITM, KTLS, PAM, the HTTP API and some capture formats
+may be conditional on build options or dependency versions. SSH MITM requires
+libssh development files at build time. Consult the current online documentation
+for scenario-specific constraints.
+.SH DOCUMENTATION
+.nf
+    https://smithproxy.readthedocs.io/en/latest/
+    https://www.smithproxy.org/
+    https://github.com/astibal/smithproxy
 .fi
-.RS
-
+.SH TESTING POLICY
+Since October 2026, Smithproxy development follows a strict, documented testing
+policy. Successful validation of a clean checkout can be published as a
+commit-specific report containing the test profile, section results, selected
+metrics and reproduction command. Reports and their publication rules are kept
+under
+.IR docs/test-reports/
+in the source repository. A report applies to its recorded commit and profile;
+it is not a blanket guarantee for other builds or environments.
 .SH BUGS
-.br
-There are almost certainly some bugs. Please feel free to log an issue on github,
-or come over to our discord server.
-
-.SH COPYLEFT
-This software is released under GNU GPL license (version 2 or later). 
-The underlying Socle library taking care of all that proxying/spoofing is 
-licensed with LGPL version 2 or later.
-
+Report reproducible issues at:
+.nf
+    https://github.com/astibal/smithproxy/issues
+.fi
+.SH LICENSE
+Smithproxy is distributed under the GNU General Public License, version 3 or
+later, with the linking exceptions stated in the source headers. See the
+.I LICENSE
+file supplied with the source distribution. Socle is distributed separately
+under its own license terms.
 .SH AUTHOR
-.B "Ales Stibal" 
-<astibal@mag0.net>, (c) 2014
-.br
-
+Ales Stibal <astib@mag0.net>
+.SH SEE ALSO
+.BR smithproxy.cfg (5),
+.BR smithproxy-mitm (7),
+.BR smithproxy-policy (7),
+.BR smithproxy-capture (7),
+.BR smithproxy-topology (7)

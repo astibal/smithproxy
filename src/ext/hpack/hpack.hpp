@@ -554,13 +554,11 @@ namespace HPACK
         }
 
         void add(const char* n, const char* v) {
-
-            std::string name(n);
-            std::string value(v);
-
             if ( nullptr == n || nullptr == v )
                 throw std::runtime_error("HPACK::ringtable_t::add(): Invalid nullptr parameter(s)");
 
+            std::string name(n);
+            std::string value(v);
             add(name, value);
         }
 
@@ -692,11 +690,10 @@ namespace HPACK
         std::vector< uint8_t >
         encode(const char* ptr)
         {
-            std::string str(ptr);
-
             if ( nullptr == ptr )
                 throw std::invalid_argument("HPACK::huffman_encoder_t::encode(): Invalid nullptr parameter");
 
+            std::string str(ptr);
             return encode(str);
         }
     };
@@ -723,11 +720,14 @@ namespace HPACK
         void decode_integer(dec_vec_itr_t& beg, dec_vec_itr_t& end, uint32_t& dst, uint8_t N) {
             dec_vec_itr_t&  current(beg);
 
-            auto mask = (1 << N) - 1;
+            if (current == end || N == 0 || N > 8)
+                throw std::invalid_argument("HPACK::decoder_t::decode_integer(): Truncated or invalid integer");
 
-            auto I = *current & mask;
+            auto mask = (uint32_t{1} << N) - 1;
 
-            if(I < std::pow(2,N)-1 ) {
+            uint32_t I = *current & mask;
+
+            if(I < mask) {
                 dst=I;
                 beg++;
                 return;
@@ -736,8 +736,15 @@ namespace HPACK
             uint8_t  M = 0;
             uint8_t B = 0;
             do {
-                B = *(++current);
-                I += ((B & 0x7F) * std::pow(2, M));
+                if (++current == end)
+                    throw std::invalid_argument("HPACK::decoder_t::decode_integer(): Truncated integer");
+
+                B = *current;
+                auto const chunk = static_cast<uint32_t>(B & 0x7F);
+                if (M >= 32 || chunk > ((std::numeric_limits<uint32_t>::max() - I) >> M))
+                    throw std::invalid_argument("HPACK::decoder_t::decode_integer(): Integer overflow");
+
+                I += chunk << M;
                 M += 7;
 
             } while( ( B & 0x80 ) == 0x80);
@@ -748,18 +755,21 @@ namespace HPACK
 
         std::string parse_string(dec_vec_itr_t& itr, dec_vec_itr_t& end) {
 
+            if (itr == end)
+                throw std::invalid_argument("HPACK::decoder_t::parse_string(): Missing string length");
+
             unsigned int	len = 0;
             bool			huff(( *itr & 0x80 ) == 0x80 ? true : false);
 
             decode_integer(itr, end, len, 7);
 
+            if (static_cast<std::size_t>(len) > static_cast<std::size_t>(end - itr))
+                throw std::invalid_argument("HPACK::decoder_t::parse_string(): String exceeds input");
+
 #ifdef DEBUG_VARS
             std::string deb1(itr, itr+len);
             std::string deb2 = hex_print(deb1.data(), deb1.size());
 #endif
-            if ( itr >= end )
-                throw std::invalid_argument("HPACK::decoder_t::parse_string(): Attempted to parse string when already at end of input");
-
             std::string dst(itr, itr+len);
             itr += len;
 
@@ -1056,11 +1066,10 @@ namespace HPACK
         */
 
         void add(const char* n, const char* v, bool huffman = true, bool never_indexed = false) {
-            header_t h(n, v);
-
             if ( nullptr == n || nullptr == v )
                 throw std::invalid_argument("HPACK::encoder_t::add(): Invalid nullptr parameter.");
 
+            header_t h(n, v);
             add(h, huffman, never_indexed);
         }
 

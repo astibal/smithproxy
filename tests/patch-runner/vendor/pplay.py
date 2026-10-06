@@ -834,6 +834,7 @@ class Repeater:
         self.is_sctp = False
 
         self.fuzz = False
+        self.fuzz_magic = None
         self.scatter = False
 
         # our peer (ip,port)
@@ -1047,6 +1048,10 @@ class Repeater:
         if not self.fuzz or not Features.fuzz_prng or not self.scripter:
             debuk("not refuzzing, no prng or fuzz is not set")
             return
+
+        # Script-backed servers recreate PPlayScript after every accept().
+        # Restart the stream so client and server derive identical mutations.
+        Features.fuzz_prng = BytesGenerator(self.fuzz_magic, use_hash=hashlib.sha256())
 
         new_data = []
 
@@ -1861,6 +1866,8 @@ class Repeater:
                     if g_script_module:
                         self.scripter = g_script_module.PPlayScript(self, self.scripter_args)
                         self.load_scripter_defaults()
+                        if self.fuzz:
+                            self.scripter_refuzz()
 
                     self.packet_loop()
                 except KeyboardInterrupt as e:
@@ -2589,6 +2596,7 @@ class Repeater:
                 magic = args.fuzz_magic[0]
 
             Features.fuzz_prng = BytesGenerator(magic, use_hash=hashlib.sha256())
+            self.fuzz_magic = magic
             try:
                 Features.fuzz_level = int(args.fuzz[0])
 

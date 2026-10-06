@@ -118,11 +118,12 @@ private:
         write_all(transport_, output);
     }
     void show_items(const std::vector<libcli2::CompletionItem>& items) const {
+        const auto d = context_.decor();
         std::string output = "\r\n";
-        if (items.empty()) output += "  (no matches)\r\n";
+        if (items.empty()) output += "  " + d.warning("(no matches)") + "\r\n";
         for (const auto& item : items) {
-            output += "  " + item.value;
-            if (!item.description.empty()) output += "\t" + item.description;
+            output += "  " + d.command(item.value);
+            if (!item.description.empty()) output += "\t" + d.muted(item.description);
             output += "\r\n";
         }
         write_all(transport_, output);
@@ -169,6 +170,8 @@ int libcli2_socket_loop(libcli2::FdTransport& transport, Libcli2SocketOptions op
     libcli2::Context context;
     context.mode = "0";
     context.io_handle = transport.output_fd();
+    context.color_mode = libcli2::ColorMode::automatic;
+    context.color_capable = true;
     context.write = [&transport](std::string_view text) {
         std::string wire;
         for (char ch : text) wire += ch == '\n' ? "\r\n" : std::string(1, ch);
@@ -192,9 +195,49 @@ int libcli2_socket_loop(libcli2::FdTransport& transport, Libcli2SocketOptions op
             if (!config.active()) return 1;
             config.reset(); value.mode = "0"; return 0;
         });
+    cli.command("terminal color")
+        .help("Set ANSI color output and optional color theme")
+        .argument({"mode", "auto, on or off", true, false,
+                   [](const libcli2::Context&, std::string_view prefix) {
+                       std::vector<libcli2::CompletionItem> result;
+                       for (const auto value : {"auto", "on", "off"})
+                           if (std::string_view(value).substr(0, prefix.size()) == prefix) result.push_back({value, {}});
+                       return result;
+                   },
+                   [](std::string_view value) { return value == "auto" || value == "on" || value == "off"; }})
+        .argument({"style", "classic, solarized, monokai, nord, gruvbox, matrix, monochrome, amber or ice", false, false, {},
+                   [](std::string_view value) {
+                       libcli2::ColorTheme unused;
+                       return libcli2::parse_color_theme(value, unused);
+                   },
+                   [](const libcli2::CompletionRequest& request) {
+                       if (request.arguments.empty() || request.arguments.front() == "off")
+                           return std::vector<libcli2::CompletionItem>{};
+                       std::vector<libcli2::CompletionItem> result;
+                       for (const auto name : libcli2::color_theme_names)
+                           if (name.substr(0, request.prefix.size()) == request.prefix)
+                               result.push_back({std::string(name), {}});
+                       return result;
+                   }})
+        .handler([](libcli2::Context& value, const libcli2::Invocation& call) {
+            const auto mode = call.arguments.front();
+            if (mode == "off" && call.arguments.size() > 1) {
+                value.print(value.decor().error("terminal color off does not accept a style"));
+                return -1;
+            }
+            if (mode == "auto") value.color_mode = libcli2::ColorMode::automatic;
+            else if (mode == "on") value.color_mode = libcli2::ColorMode::on;
+            else value.color_mode = libcli2::ColorMode::off;
+            if (call.arguments.size() > 1) libcli2::parse_color_theme(call.arguments[1], value.color_theme);
+            const auto d = value.decor();
+            std::string output = d.success("terminal colors: ") + d.value(mode);
+            if (mode != "off") output += ", style: " + d.value(libcli2::color_theme_name(value.color_theme));
+            value.print(output);
+            return 0;
+        });
     if (options.register_commands) options.register_commands(cli);
     SocketEditor editor(transport, cli, context, options.regular);
-    if (!options.banner.empty()) write_all(transport, options.banner + "\r\n");
+    if (!options.banner.empty()) write_all(transport, context.decor().heading(options.banner) + "\r\n");
 
     if (options.authenticate) {
         bool accepted = false;
@@ -202,7 +245,7 @@ int libcli2_socket_loop(libcli2::FdTransport& transport, Libcli2SocketOptions op
             std::string username, password;
             if (!editor.read_line("Username: ", username) || !editor.read_line("Password: ", password, false)) return -1;
             accepted = options.authenticate(username, password) == 0;
-            if (!accepted) write_all(transport, "Access denied\r\n");
+            if (!accepted) write_all(transport, context.decor().error("Access denied") + "\r\n");
         }
         if (!accepted) return -1;
         if (options.privilege_after_auth) context.privilege = 15;
@@ -221,17 +264,18 @@ int libcli2_socket_loop(libcli2::FdTransport& transport, Libcli2SocketOptions op
                 std::string password;
                 if (!editor.read_line("Password: ", password, false)) break;
                 if (password == options.enable_password) context.privilege = 15;
-                else write_all(transport, "Access denied\r\n");
+                else write_all(transport, context.decor().error("Access denied") + "\r\n");
             }
             continue;
         }
         const auto result = cli.execute(line, context);
         if (result.handler_status == 1) break;
         if (result.status != libcli2::ExecuteStatus::ok && result.status != libcli2::ExecuteStatus::empty) {
-            write_all(transport, "% " + result.message + "\r\n");
+            write_all(transport, context.decor().error("% " + result.message) + "\r\n");
             if (!result.candidates.empty()) {
-                std::string candidates = "  candidates:";
-                for (const auto& candidate : result.candidates) candidates += " " + candidate;
+                const auto d = context.decor();
+                std::string candidates = d.muted("  candidates:");
+                for (const auto& candidate : result.candidates) candidates += " " + d.command(candidate);
                 write_all(transport, candidates + "\r\n");
             }
         }

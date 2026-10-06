@@ -878,6 +878,16 @@ bool CfgFactory::load_settings () {
         load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "host_write_full", hostcx_write_full);
         if(hostcx_write_full >= 1024) { baseHostCX::params.write_full = hostcx_write_full; }
 
+        int hostcx_io_batch = 0;
+        load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "host_io_batch", hostcx_io_batch);
+        if(hostcx_io_batch >= 16384) { baseHostCX::params.io_batch = hostcx_io_batch; }
+
+        int tls_write_chunk = 0;
+        load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "tls_write_chunk", tls_write_chunk);
+        if(tls_write_chunk >= 1024 && tls_write_chunk <= 1048576) {
+            SSLComOptions::write_chunk = static_cast<std::size_t>(tls_write_chunk);
+        }
+
         int nbr_cache_size = 0;
         load_if_exists(cfgapi.getRoot()["settings"]["tuning"], "nbr_cache_size", nbr_cache_size);
         if( nbr_cache_size > 0 and (static_cast<size_t>(nbr_cache_size) != NbrHood::instance().cache().capacity())) {
@@ -5187,6 +5197,8 @@ int save_settings(Config& ex) {
     tuning_objects.add("host_bufsz_min", Setting::TypeInt) = (int) baseHostCX::params.buffsize;
     tuning_objects.add("host_bufsz_max_multiplier", Setting::TypeInt) = (int) baseHostCX::params.buffsize_maxmul;
     tuning_objects.add("host_write_full", Setting::TypeInt) = (int) baseHostCX::params.write_full;
+    tuning_objects.add("host_io_batch", Setting::TypeInt) = (int) baseHostCX::params.io_batch;
+    tuning_objects.add("tls_write_chunk", Setting::TypeInt) = (int) SSLComOptions::write_chunk.load();
     tuning_objects.add("host_open_timeout", Setting::TypeInt) = (unsigned short) baseHostCX::params.open_timeout;
     tuning_objects.add("host_idle_timeout", Setting::TypeInt) = (unsigned short) baseHostCX::params.idle_delay;
     tuning_objects.add("nbr_cache_size", Setting::TypeInt) = (int) NbrHood::instance().cache().capacity();

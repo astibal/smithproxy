@@ -4,6 +4,9 @@ set -euo pipefail
 ROOT=${1:-/opt/lab/smithproxy-runner}
 export PATH="$ROOT/bin:$PATH"
 export SMITHPROXY_BIN="$ROOT/bin/smithproxy"
+if [[ -n ${QUIC_PYTHONPATH:-} ]]; then
+    export PYTHONPATH="$QUIC_PYTHONPATH${PYTHONPATH:+:$PYTHONPATH}"
+fi
 if [[ ${QUIC_KEYLOG_TEST:-0} == 1 ]]; then
     # The production binary honours the conventional opt-in keylog variable.
     # Keep the proof artifact inside this disposable lab and never inherit an
@@ -36,11 +39,17 @@ SESSION_LIST_LOAD_PID=
 PPLAY_SUITE4_PID=
 PPLAY_SUITE6_PID=
 STARTTLS_SERVER_PID=
+TLS_EVASION_SERVER_PID=
+TLS_AUTODETECT_SERVER_PID=
+KTLS_PROBE_PID=
 ROUTING_SERVER_PID=
 CAPTURE_TEST=${CAPTURE_TEST:-0}
 CAPTURE_MATRIX_TEST=${CAPTURE_MATRIX_TEST:-0}
 RTT_TEST=${RTT_TEST:-0}
 TLS_SUITE_TEST=${TLS_SUITE_TEST:-0}
+TLS_TRANSFER_TEST=${TLS_TRANSFER_TEST:-0}
+TLS_THROUGHPUT_TEST=${TLS_THROUGHPUT_TEST:-0}
+KTLS_PROBE_TEST=${KTLS_PROBE_TEST:-0}
 STARTTLS_SUITE_TEST=${STARTTLS_SUITE_TEST:-0}
 POLICY_TEST=${POLICY_TEST:-0}
 ROUTING_TEST=${ROUTING_TEST:-0}
@@ -90,6 +99,12 @@ cleanup() {
     [[ -z $PPLAY_SUITE6_PID ]] || wait "$PPLAY_SUITE6_PID" 2>/dev/null || true
     [[ -z $STARTTLS_SERVER_PID ]] || kill "$STARTTLS_SERVER_PID" 2>/dev/null || true
     [[ -z $STARTTLS_SERVER_PID ]] || wait "$STARTTLS_SERVER_PID" 2>/dev/null || true
+    [[ -z $TLS_EVASION_SERVER_PID ]] || kill "$TLS_EVASION_SERVER_PID" 2>/dev/null || true
+    [[ -z $TLS_EVASION_SERVER_PID ]] || wait "$TLS_EVASION_SERVER_PID" 2>/dev/null || true
+    [[ -z $TLS_AUTODETECT_SERVER_PID ]] || kill "$TLS_AUTODETECT_SERVER_PID" 2>/dev/null || true
+    [[ -z $TLS_AUTODETECT_SERVER_PID ]] || wait "$TLS_AUTODETECT_SERVER_PID" 2>/dev/null || true
+    [[ -z $KTLS_PROBE_PID ]] || kill "$KTLS_PROBE_PID" 2>/dev/null || true
+    [[ -z $KTLS_PROBE_PID ]] || wait "$KTLS_PROBE_PID" 2>/dev/null || true
     [[ -z $ROUTING_SERVER_PID ]] || kill "$ROUTING_SERVER_PID" 2>/dev/null || true
     [[ -z $ROUTING_SERVER_PID ]] || wait "$ROUTING_SERVER_PID" 2>/dev/null || true
     ip link del "$IN_IF" 2>/dev/null || true
@@ -102,11 +117,31 @@ cleanup() {
 import json, pathlib, re, sys
 root = pathlib.Path(sys.argv[1])
 runner_veth = re.compile(r'^sp[0-9a-f]{1,6}[io]$')
-def normalized_addresses(name):
-    value = json.loads((root / name).read_text())
+
+def addresses(name):
+    return json.loads((root / name).read_text())
+
+before_addresses = addresses('host-addresses-before.json')
+after_addresses = addresses('host-addresses-after.json')
+# Network-namespace veth endpoints are transient host state.  Other parallel
+# labs, containers, or the test controller may create/remove them between our
+# two snapshots, so comparing them would make cleanup verification racy.
+transient_interfaces = {
+    interface.get('ifname', '')
+    for interface in before_addresses + after_addresses
+    if 'link_netnsid' in interface
+    or runner_veth.fullmatch(interface.get('ifname', ''))
+}
+
+def normalized_addresses(value):
     value = [interface for interface in value
-             if not runner_veth.fullmatch(interface.get('ifname', ''))]
+             if interface.get('ifname', '') not in transient_interfaces]
     for interface in value:
+        # Privacy addresses are rotated and expire independently of the lab.
+        # They are host state, but not state that the patch runner owns or can
+        # restore, so exclude them from the leak check.
+        interface['addr_info'] = [address for address in interface['addr_info']
+                                  if not address.get('temporary')]
         for address in interface['addr_info']:
             # DHCP lease countdown changes naturally while the test is running.
             address.pop('valid_life_time', None)
@@ -115,8 +150,8 @@ def normalized_addresses(name):
 def normalized_routes(name):
     value = json.loads((root / name).read_text())
     return [route for route in value
-            if not runner_veth.fullmatch(route.get('dev', ''))]
-assert normalized_addresses('host-addresses-before.json') == normalized_addresses('host-addresses-after.json')
+            if route.get('dev', '') not in transient_interfaces]
+assert normalized_addresses(before_addresses) == normalized_addresses(after_addresses)
 assert normalized_routes('host-routes-before.json') == normalized_routes('host-routes-after.json')
 PYCOMPARE
     ! ip netns list | grep -Eq "^(${CLIENT}|${SERVER}|${NS})( |$)"
@@ -383,6 +418,29 @@ if [[ $SESSION_LIST_STRESS_TEST == 1 ]]; then
     echo 'PASS session list: detailed snapshots remained complete and responsive under load'
 fi
 if [[ $TLS_SUITE_TEST == 1 ]]; then
+    run_tls_autodetect_test() {
+        local family=$1 host=$2 suffix=
+        [[ $family == 4 ]] || suffix=6
+        ip netns exec "$SERVER" python3 -u "$ROOT/runner/tests/suites/tls/autodetect.py" server \
+            --host "$host" > "$ROOT/results/tls-autodetect-server${suffix}.json" &
+        TLS_AUTODETECT_SERVER_PID=$!
+        for attempt in $(seq 1 50); do
+            grep -q '^READY$' "$ROOT/results/tls-autodetect-server${suffix}.json" && break
+            kill -0 "$TLS_AUTODETECT_SERVER_PID"
+            sleep 0.1
+        done
+        grep -q '^READY$' "$ROOT/results/tls-autodetect-server${suffix}.json"
+        ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/suites/tls/autodetect.py" client \
+            --host "$host" > "$ROOT/results/tls-autodetect${suffix}.json"
+        wait "$TLS_AUTODETECT_SERVER_PID"
+        TLS_AUTODETECT_SERVER_PID=
+        python3 "$ROOT/runner/tests/suites/tls/autodetect.py" report \
+            --client-result "$ROOT/results/tls-autodetect${suffix}.json" \
+            --server-result "$ROOT/results/tls-autodetect-server${suffix}.json"
+        echo "PASS$family TLS autodetect: fragmented TLS-like traffic did not bypass inspection"
+    }
+    run_tls_autodetect_test 4 198.18.20.2
+    run_tls_autodetect_test 6 fd00:20::2
     ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/suites/tls/run.py" \
         --host 198.18.20.2 --ca-file "$ROOT/config/certs/ca-cert.pem" > "$ROOT/results/tls-suite4.json"
     python3 "$ROOT/runner/tests/suites/tls/report.py" "$ROOT/results/tls-suite4.json"
@@ -391,6 +449,107 @@ if [[ $TLS_SUITE_TEST == 1 ]]; then
         --host fd00:20::2 --ca-file "$ROOT/config/certs/ca-cert.pem" > "$ROOT/results/tls-suite6.json"
     python3 "$ROOT/runner/tests/suites/tls/report.py" "$ROOT/results/tls-suite6.json"
     echo 'PASS6 TLS suite: trust, SNI, ALPN and protocol-version matrix'
+    ip netns exec "$SERVER" python3 -u "$ROOT/runner/tests/suites/tls/evasion.py" server \
+        --host 198.18.20.2 > "$ROOT/results/tls-evasion-server.json" 2> "$ROOT/results/tls-evasion-server.log" &
+    TLS_EVASION_SERVER_PID=$!
+    for attempt in $(seq 1 50); do
+        grep -q '^READY$' "$ROOT/results/tls-evasion-server.json" && break
+        kill -0 "$TLS_EVASION_SERVER_PID"
+        sleep 0.1
+    done
+    grep -q '^READY$' "$ROOT/results/tls-evasion-server.json"
+    ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/suites/tls/evasion.py" client \
+        --host 198.18.20.2 --ca-file "$ROOT/config/certs/ca-cert.pem" \
+        > "$ROOT/results/tls-evasion.json"
+    wait "$TLS_EVASION_SERVER_PID"
+    TLS_EVASION_SERVER_PID=
+    python3 "$ROOT/runner/tests/suites/tls/evasion-report.py" "$ROOT/results/tls-evasion.json"
+    echo 'PASS4 TLS MITM evasion: both handshake legs fail closed under timing and transport faults'
+    ip netns exec "$SERVER" python3 -u "$ROOT/runner/tests/suites/tls/evasion.py" server \
+        --host fd00:20::2 > "$ROOT/results/tls-evasion-server6.json" 2> "$ROOT/results/tls-evasion-server6.log" &
+    TLS_EVASION_SERVER_PID=$!
+    for attempt in $(seq 1 50); do
+        grep -q '^READY$' "$ROOT/results/tls-evasion-server6.json" && break
+        kill -0 "$TLS_EVASION_SERVER_PID"
+        sleep 0.1
+    done
+    grep -q '^READY$' "$ROOT/results/tls-evasion-server6.json"
+    ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/suites/tls/evasion.py" client \
+        --host fd00:20::2 --ca-file "$ROOT/config/certs/ca-cert.pem" \
+        > "$ROOT/results/tls-evasion6.json"
+    wait "$TLS_EVASION_SERVER_PID"
+    TLS_EVASION_SERVER_PID=
+    python3 "$ROOT/runner/tests/suites/tls/evasion-report.py" "$ROOT/results/tls-evasion6.json"
+    echo 'PASS6 TLS MITM evasion: both handshake legs fail closed under timing and transport faults'
+fi
+if [[ $KTLS_PROBE_TEST == 1 ]]; then
+    KTLS_CURL_ARGS=()
+    if [[ -n ${TLS_TEST_VERSION:-} ]]; then
+        KTLS_CURL_ARGS+=("--tlsv${TLS_TEST_VERSION}" --tls-max "$TLS_TEST_VERSION")
+    fi
+    if [[ -n ${TLS_TEST_CIPHER:-} ]]; then
+        if [[ ${TLS_TEST_VERSION:-} == 1.3 ]]; then
+            KTLS_CURL_ARGS+=(--tls13-ciphers "$TLS_TEST_CIPHER")
+        else
+            KTLS_CURL_ARGS+=(--ciphers "$TLS_TEST_CIPHER")
+        fi
+    fi
+    ip netns exec "$CLIENT" curl --noproxy '*' --fail --silent --show-error \
+        --http1.1 --max-time 30 --limit-rate 2M \
+        "${KTLS_CURL_ARGS[@]}" \
+        --cacert "$ROOT/config/certs/ca-cert.pem" \
+        --resolve origin.runner.lab:443:198.18.20.2 \
+        -o /dev/null "https://origin.runner.lab/bulk/${KTLS_PROBE_BYTES:-16777216}?run=ktls-probe" \
+        > "$ROOT/results/ktls-probe-curl.log" 2>&1 &
+    KTLS_PROBE_PID=$!
+    sleep 1
+    kill -0 "$KTLS_PROBE_PID"
+    { printf 'enable\r\ndiag proxy session list tls 8\r\n'; sleep 1; printf 'quit\r\n'; } | \
+        timeout 8 ip netns exec "$NS" nc 127.0.0.1 50000 \
+        > "$ROOT/results/ktls-session.txt" 2>&1
+    wait "$KTLS_PROBE_PID"
+    KTLS_PROBE_PID=
+    python3 "$ROOT/runner/tests/ktls-report.py" \
+        --expect "${KTLS_EXPECT_ACTIVE:-any}" \
+        "$ROOT/results/ktls-session.txt" > "$ROOT/results/ktls.json"
+    cat "$ROOT/results/ktls.json"
+    echo 'PASS4 KTLS probe: runtime BIO offload state captured for both TLS legs'
+fi
+if [[ $TLS_TRANSFER_TEST == 1 ]]; then
+    TLS_TRANSFER_ARGS=()
+    [[ -z ${TLS_TEST_VERSION:-} ]] || TLS_TRANSFER_ARGS+=(--tls-version "$TLS_TEST_VERSION")
+    [[ -z ${TLS_TEST_CIPHER:-} ]] || TLS_TRANSFER_ARGS+=(--cipher "$TLS_TEST_CIPHER")
+    ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/tls-transfer.py" \
+        --host 198.18.20.2 --ca-file "$ROOT/config/certs/ca-cert.pem" \
+        --pid "$(cat "$ROOT/data/proxy.pid")" \
+        "${TLS_TRANSFER_ARGS[@]}" \
+        --bytes "${TLS_TRANSFER_BYTES:-67108864}" \
+        --repeats "${TLS_TRANSFER_REPEATS:-5}" \
+        --concurrency "${TLS_TRANSFER_CONCURRENCY:-1,4,16}" \
+        > "$ROOT/results/tls-transfer.json"
+    python3 "$ROOT/runner/tests/tls-transfer-report.py" "$ROOT/results/tls-transfer.json"
+    echo 'PASS4 TLS transfer: bounded-drain bulk download/upload matrix completed'
+fi
+if [[ $TLS_THROUGHPUT_TEST == 1 ]]; then
+    TLS_THROUGHPUT_ARGS=()
+    [[ -z ${TLS_TEST_VERSION:-} ]] || TLS_THROUGHPUT_ARGS+=(--tls-version "$TLS_TEST_VERSION")
+    [[ -z ${TLS_TEST_CIPHER:-} ]] || TLS_THROUGHPUT_ARGS+=(--cipher "$TLS_TEST_CIPHER")
+    run_tls_throughput() {
+        local family=$1 host=$2
+        ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/tls-transfer.py" \
+            --host "$host" --ca-file "$ROOT/config/certs/ca-cert.pem" \
+            --pid "$(cat "$ROOT/data/proxy.pid")" \
+            "${TLS_THROUGHPUT_ARGS[@]}" \
+            --bytes "${TLS_THROUGHPUT_BYTES:-67108864}" \
+            --repeats "${TLS_THROUGHPUT_REPEATS:-3}" \
+            --concurrency "${TLS_THROUGHPUT_CONCURRENCY:-1,4,16}" \
+            > "$ROOT/results/tls-throughput-v$family.json"
+        python3 "$ROOT/runner/tests/tls-transfer-report.py" \
+            --label 'TLS throughput' "$ROOT/results/tls-throughput-v$family.json"
+        echo "PASS$family TLS throughput: E2E download/upload measured without a performance gate"
+    }
+    run_tls_throughput 4 198.18.20.2
+    run_tls_throughput 6 fd00:20::2
 fi
 if [[ $STARTTLS_SUITE_TEST == 1 ]]; then
     STARTTLS_PORT=2525
@@ -482,7 +641,9 @@ if [[ $RTT_TEST == 1 ]]; then
         --handshake-p95-limit-ms "${RTT_HANDSHAKE_P95_LIMIT_MS:-500}" \
         --handshake-max-limit-ms "${RTT_HANDSHAKE_MAX_LIMIT_MS:-2000}" \
         --tls-total-p50-limit-ms "${RTT_TLS_TOTAL_P50_LIMIT_MS:-7}" \
+        --tls-total-p50-flaky-limit-ms "${RTT_TLS_TOTAL_P50_FLAKY_LIMIT_MS:-10}" \
         --https-p50-limit-ms "${RTT_HTTPS_P50_LIMIT_MS:-2}" \
+        --https-p50-flaky-limit-ms "${RTT_HTTPS_P50_FLAKY_LIMIT_MS:-10}" \
         --cold-sni cold-cert-cache.runner.lab \
         "${RTT_EXTRA_ARGS[@]}" \
         > "$ROOT/results/tcp-rtt.json"
@@ -499,7 +660,9 @@ if [[ $RTT_TEST == 1 ]]; then
         --handshake-p95-limit-ms "${RTT_HANDSHAKE_P95_LIMIT_MS:-500}" \
         --handshake-max-limit-ms "${RTT_HANDSHAKE_MAX_LIMIT_MS:-2000}" \
         --tls-total-p50-limit-ms "${RTT_TLS_TOTAL_P50_LIMIT_MS:-7}" \
+        --tls-total-p50-flaky-limit-ms "${RTT_TLS_TOTAL_P50_FLAKY_LIMIT_MS:-10}" \
         --https-p50-limit-ms "${RTT_HTTPS_P50_LIMIT_MS:-2}" \
+        --https-p50-flaky-limit-ms "${RTT_HTTPS_P50_FLAKY_LIMIT_MS:-10}" \
         --cold-sni cold6-cert-cache.runner.lab \
         "${RTT_EXTRA_ARGS[@]}" \
         > "$ROOT/results/tcp-rtt6.json"
@@ -523,6 +686,10 @@ if [[ $RTT_TEST == 1 ]]; then
     echo 'PASS6 RTT: TCP, UDP and TLS handshakes/round trips validated within limits'
 fi
 if [[ $TCP_CHURN_TEST == 1 ]]; then
+    TCP_CHURN_EXTRA_ARGS=()
+    if [[ ${TCP_CHURN_SYNCHRONIZED:-0} == 1 ]]; then
+        TCP_CHURN_EXTRA_ARGS+=(--synchronized-start)
+    fi
     ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/tcp-churn.py" \
         --host 198.18.20.2 \
         --waves "${TCP_CHURN_WAVES:-20}" \
@@ -533,6 +700,7 @@ if [[ $TCP_CHURN_TEST == 1 ]]; then
         --timeout "${TCP_CHURN_TIMEOUT:-3}" \
         --min-port "${CHURN_MIN_PORT:-20000}" \
         --max-port "${CHURN_MAX_PORT:-29999}" \
+        "${TCP_CHURN_EXTRA_ARGS[@]}" \
         > "$ROOT/results/tcp-churn.txt"
     cat "$ROOT/results/tcp-churn.txt"
     echo 'PASS4 TCP churn: persistent flow survived proxy creation and deferred cleanup'
@@ -546,6 +714,7 @@ if [[ $TCP_CHURN_TEST == 1 ]]; then
         --timeout "${TCP_CHURN_TIMEOUT:-3}" \
         --min-port "${CHURN_MIN_PORT:-20000}" \
         --max-port "${CHURN_MAX_PORT:-29999}" \
+        "${TCP_CHURN_EXTRA_ARGS[@]}" \
         > "$ROOT/results/tcp-churn6.txt"
     cat "$ROOT/results/tcp-churn6.txt"
     echo 'PASS6 TCP churn: persistent flow survived proxy creation and deferred cleanup'
@@ -737,7 +906,11 @@ if [[ -n ${PPLAY_SUITE:-} && ${PPLAY_SUITE_SKIP_RUN:-0} != 1 ]]; then
     fi
     env PPLAY_PY="$PPLAY_PY" MODE=runner IP_FAMILY=4 \
         ALLOW_EMPTY="${PPLAY_SUITE_ALLOW_EMPTY:-0}" \
+        MATCH="${PPLAY_SUITE_MATCH:-${MATCH:-*}}" \
         EXCLUDE="$PPLAY_CORPUS_EXCLUDE" \
+        FUZZ_LEVEL="${FUZZ_LEVEL:-}" FUZZ_SEEDS="${FUZZ_SEEDS:-}" \
+        FUZZ_AREA="${PPLAY_FUZZ_AREA:-}" \
+        SCATTER="${FUZZ_SCATTER:-0}" \
         RESULTS="$ROOT/results/${PPLAY_RESULTS_NAME:-pplay-suite}-v4" \
         SMITHPROXY_PID_FILE="$ROOT/data/proxy.pid" \
         CLIENT_NS="$CLIENT" SERVER_NS="$SERVER" \
@@ -745,7 +918,11 @@ if [[ -n ${PPLAY_SUITE:-} && ${PPLAY_SUITE_SKIP_RUN:-0} != 1 ]]; then
     PPLAY_SUITE4_PID=$!
     env PPLAY_PY="$PPLAY_PY" MODE=runner IP_FAMILY=6 \
         ALLOW_EMPTY="${PPLAY_SUITE_ALLOW_EMPTY:-0}" \
+        MATCH="${PPLAY_SUITE_MATCH:-${MATCH:-*}}" \
         EXCLUDE="$PPLAY_CORPUS_EXCLUDE" \
+        FUZZ_LEVEL="${FUZZ_LEVEL:-}" FUZZ_SEEDS="${FUZZ_SEEDS:-}" \
+        FUZZ_AREA="${PPLAY_FUZZ_AREA:-}" \
+        SCATTER="${FUZZ_SCATTER:-0}" \
         RESULTS="$ROOT/results/${PPLAY_RESULTS_NAME:-pplay-suite}-v6" \
         SMITHPROXY_PID_FILE="$ROOT/data/proxy.pid" \
         CLIENT_NS="$CLIENT" SERVER_NS="$SERVER" \
