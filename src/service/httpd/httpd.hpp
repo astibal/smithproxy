@@ -141,14 +141,15 @@ struct HttpSessions {
 
                 auto& val = var_it->second;
 
-                if(val.optional().has_value()) {
+                auto current = val.optional();
+                if(current.has_value()) {
 
                     if (extend_on_access) {
                         // access element by reference
                         val.extend(session_ttl);
                     }
 
-                    return val.optional().value();
+                    return current.value();
                 }
                 else {
                     // erase empty var (invalidates iterator!)
@@ -193,15 +194,36 @@ struct HttpSessions {
         return ret;
     }
 
+    static bool has_api_key(std::string const& key) {
+        auto lc_ = std::scoped_lock(lock);
+        return api_keys.find(key) != api_keys.end();
+    }
+
+    static bool has_api_keys() {
+        auto lc_ = std::scoped_lock(lock);
+        return !api_keys.empty();
+    }
+
+    static std::set<std::string> api_keys_snapshot() {
+        auto lc_ = std::scoped_lock(lock);
+        return api_keys;
+    }
+
+    static void replace_api_keys(std::set<std::string> keys) {
+        auto lc_ = std::scoped_lock(lock);
+        api_keys = std::move(keys);
+    }
+
     static void cleanup() {
+
+        auto lc_ = std::scoped_lock(lock);
 
         std::vector<std::string> expired_ak;
         for (auto& [ apikey, csrf_cache]: access_keys) {
 
             std::vector<std::string> expired_to;
             for(auto const& [ key, timing_csrf] : csrf_cache) {
-                auto is_expired = (timing_csrf.expired_at() - time(nullptr)) < 0;
-                if(is_expired) {
+                if(timing_csrf.expired()) {
                     expired_to.emplace_back(key);
                 }
             }
@@ -283,7 +305,10 @@ public:
 
         auto ret = responder(connection, meth, request_data);
 
-        if(ret.response_code == MHD_HTTP_OK) {
+        // MHD_YES is used above to request another upload callback.  Every
+        // real HTTP response, including an error, must carry the responder's
+        // body and headers.
+        if(ret.response_code >= 100) {
 
             auto ct = std::make_pair("Content-Type", Content_Type);
             ret.headers.emplace_back(std::move(ct));

@@ -43,6 +43,7 @@
 #include <csignal>
 
 #include <cstdio>
+#include <cerrno>
 #include <fcntl.h>
 #include <unistd.h>
 
@@ -90,15 +91,8 @@ int DaemonFactory::daemonize () {
 
         // if daemonizing, write pid file only from slave (master will be shut down)
 
-        struct stat st{};
-        if(stat(pid_file.c_str(), &st) == 0) {
-            _err("There seems to be smithproxy already running in the system");
-
-            return -10;
-        } else {
-            if(not write_pidfile()) {
-                return -2;
-            }
+        if(not write_pidfile()) {
+            return -2;
         }
     }
 
@@ -140,25 +134,44 @@ int DaemonFactory::daemonize () {
 }
 
 bool DaemonFactory::write_pidfile() {
-    FILE* pf = fopen(pid_file.c_str(), "w");
-
-    if(pf) {
-        int written = fprintf(pf, "%d", getpid());
-        fclose(pf);
-
-        if(written > 0) {
-            pid_file_owned = true;
-            return true;
-        } else {
-            std::cerr << "cannot write into pid file" << std::endl;
-            _err("cannot write into pid file");
-        }
-
-    } else {
-        std::cerr << "cannot open pid file" << std::endl;
-        _err("cannot open pid file");
+    const int fd = ::open(pid_file.c_str(), O_WRONLY | O_CREAT | O_EXCL |
+            O_CLOEXEC | O_NOFOLLOW, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    if(fd < 0) {
+        std::cerr << "cannot claim pid file: " << string_error() << std::endl;
+        _err("cannot claim pid file: %s", string_error().c_str());
+        return false;
     }
 
+    const std::string pid = std::to_string(getpid());
+    size_t offset = 0;
+    int failure_errno = 0;
+    while(offset < pid.size()) {
+        const ssize_t written = ::write(fd, pid.data() + offset, pid.size() - offset);
+        if(written > 0) {
+            offset += static_cast<size_t>(written);
+            continue;
+        }
+        if(written < 0 && errno == EINTR) {
+            continue;
+        }
+        failure_errno = written == 0 ? EIO : errno;
+        break;
+    }
+
+    const bool complete = offset == pid.size();
+    const bool closed = ::close(fd) == 0;
+    if(complete && closed) {
+        pid_file_owned = true;
+        return true;
+    }
+
+    if(complete && !closed) {
+        failure_errno = errno;
+    }
+    ::unlink(pid_file.c_str());
+    errno = failure_errno == 0 ? EIO : failure_errno;
+    std::cerr << "cannot write pid file: " << string_error() << std::endl;
+    _err("cannot write pid file: %s", string_error().c_str());
     return false;
 }
 
@@ -227,36 +240,50 @@ void DaemonFactory::set_signal(int SIG, signal_handler_t sig_handler) {
 
 void DaemonFactory::set_crashlog(const char* file) {
     memset((void*)crashlog_file,0,LOG_FILENAME_SZ);
-    strncpy((char*)crashlog_file,file,LOG_FILENAME_SZ-1);
+    if(file != nullptr) {
+        strncpy((char*)crashlog_file,file,LOG_FILENAME_SZ-1);
+    }
 }
 
 void writecrash(int fd, const char* msg, size_t len)  {
 
-    if(len <= 0 or fd <= 0) {
+    if(len == 0 || fd < 0 || msg == nullptr) {
         return;
     }
-
-   unsigned int written = 0;
-   int rep = 0;
 
    auto pos = msg;
    auto rest = len;
 
-   do {
+   while(rest > 0) {
        auto curw = ::write(fd, pos, rest);
-
-       if(curw == static_cast<ssize_t>(rest)) {
-           break;
-       }
-       else if(curw > 0) {
-           written += curw;
+       if(curw > 0) {
            pos = &pos[curw];
            rest -= static_cast<size_t>(curw);
+           continue;
        }
-
-       rep++;
-   } while(written < len && rep < 10);
+       if(curw < 0 && errno == EINTR) {
+           continue;
+       }
+       break;
+   }
 }
+
+namespace {
+
+int open_crashlog(const char* path) {
+    const int fd = ::open(path, O_CREAT | O_WRONLY | O_APPEND | O_CLOEXEC | O_NOFOLLOW,
+            S_IRUSR | S_IWUSR);
+    if(fd < 0) {
+        return -1;
+    }
+    if(::fchmod(fd, S_IRUSR | S_IWUSR) != 0) {
+        ::close(fd);
+        return -1;
+    }
+    return fd;
+}
+
+} // namespace
 
 
 #ifndef BUILD_RELEASE
@@ -281,9 +308,8 @@ void DaemonFactory::uw_btrace_handler(int sig) {
 
         int chars = snprintf(buf_line, buf_line_sz, " ======== Smithproxy exception handler (sig %d) =========\n", sig);
 
-        int CRLOG = open((const char *) df->crashlog_file, O_CREAT | O_WRONLY | O_APPEND, S_IRUSR | S_IWUSR);
-        if (chmod((const char *) df->crashlog_file, 0600) != 0) {
-            if (CRLOG >= 0) { ::close(CRLOG); }
+        int CRLOG = open_crashlog((const char *) df->crashlog_file);
+        if (CRLOG < 0) {
             return;
         }
 
@@ -340,10 +366,8 @@ void DaemonFactory::release_crash_handler(int sig) {
         char buf_line[256];
         int chars = snprintf(buf_line, 255, " Error handler: signal %d received, aborting\n", sig);
 
-        int CRLOG = open((const char *) df->crashlog_file, O_CREAT | O_WRONLY | O_APPEND, S_IRUSR | S_IWUSR);
-
-        if (chmod((const char *) df->crashlog_file, 0600) != 0) {
-            if (CRLOG >= 0) ::close(CRLOG);
+        int CRLOG = open_crashlog((const char *) df->crashlog_file);
+        if (CRLOG < 0) {
             return;
         }
 
@@ -415,4 +439,3 @@ std::string& DaemonFactory::class_name() const {
 std::string DaemonFactory::hr() const {
     return string_format("pidfile=(%s)", pid_file.c_str());
 }
-

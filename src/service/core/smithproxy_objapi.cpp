@@ -8,6 +8,7 @@
 
 #include <service/core/smithproxy.hpp>
 #include <service/core/smithproxy_objapi.hpp>
+#include <service/core/smithproxy_objapi_utils.hpp>
 #include <service/core/sessionlist.hpp>
 #include <service/http/jsonize.hpp>
 #include <proxy/mitmproxy.hpp>
@@ -15,6 +16,7 @@
 #include <staticcontent.hpp>
 
 void ObjAPI::for_each_proxy(std::function<void(MitmProxy*)> callable) {
+    if (!callable) return;
     auto const& instance = SmithProxy::instance();
 
     auto list_worker = [callable](const char* title, auto& listener) {
@@ -24,7 +26,7 @@ void ObjAPI::for_each_proxy(std::function<void(MitmProxy*)> callable) {
                 auto lc_ = std::scoped_lock(wrk.second->proxy_lock());
 
                 for(auto const& p : wrk.second->proxies()) {
-                    if(auto* proxy = dynamic_cast<MitmProxy*>(p.get()); p != nullptr) {
+                    if(auto* proxy = dynamic_cast<MitmProxy*>(p.get()); proxy != nullptr) {
                         callable(proxy);
                     }
                 }
@@ -53,7 +55,7 @@ std::string ObjAPI::instance_OID() {
 nlohmann::json ObjAPI::proxy_session_connid_list() {
 
     using nlohmann::json;
-    json ret;
+    json ret = json::array();
 
     for_each_proxy([&ret](MitmProxy const* px){
         if(px and px->first_left() and px->first_right()) ret.push_back(px->to_connection_ID());
@@ -65,7 +67,7 @@ nlohmann::json ObjAPI::proxy_session_connid_list() {
 nlohmann::json ObjAPI::proxy_session_connid_list_plus() {
 
     using nlohmann::json;
-    json ret;
+    json ret = json::array();
 
     for_each_proxy([&ret](MitmProxy const* px){
         if(px and px->first_left() and px->first_right())
@@ -156,8 +158,8 @@ nlohmann::json ObjAPI::neighbor_list(bool flag_raw, unsigned int last_n_days) {
         return NbrHood::instance().to_json([&](auto const &nbr) {
             if (not nbr.timetable.empty()) {
                 auto now_de = epoch_days(time(nullptr));
-                auto delta = now_de - nbr.timetable[0].days_epoch;
-                if (delta <= last_n_days)
+                if (sx::objapi::day_is_within_age(
+                        now_de, nbr.timetable[0].days_epoch, last_n_days))
                     return true;
             }
             return false;

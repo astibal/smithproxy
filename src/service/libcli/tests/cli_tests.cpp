@@ -3,7 +3,11 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
+#include <fcntl.h>
 #include <sstream>
+#include <thread>
+#include <unistd.h>
 
 namespace libcli2 {
 namespace {
@@ -16,6 +20,74 @@ struct ScopedStreamBuffer {
     std::ostream& stream;
     std::streambuf* original;
 };
+
+struct ScopedInputBuffer {
+    explicit ScopedInputBuffer(std::istream& stream, std::streambuf* replacement)
+        : stream(stream), original(stream.rdbuf(replacement)) {
+        stream.clear();
+    }
+    ~ScopedInputBuffer() {
+        stream.rdbuf(original);
+        stream.clear();
+    }
+
+    std::istream& stream;
+    std::streambuf* original;
+};
+
+struct ScopedStdinFd {
+    ScopedStdinFd() : saved(::dup(STDIN_FILENO)) {}
+    ~ScopedStdinFd() {
+        if (saved >= 0) {
+            ::dup2(saved, STDIN_FILENO);
+            ::close(saved);
+        }
+    }
+
+    bool replace_with(int fd) const { return ::dup2(fd, STDIN_FILENO) >= 0; }
+    int saved = -1;
+};
+
+std::optional<std::string> read_from_pseudoterminal(
+    LineEditor& editor, std::string_view input) {
+    const int master = ::posix_openpt(O_RDWR | O_NOCTTY);
+    if (master < 0 || ::grantpt(master) != 0 || ::unlockpt(master) != 0) {
+        if (master >= 0) ::close(master);
+        return std::nullopt;
+    }
+    const char* slave_name = ::ptsname(master);
+    if (!slave_name) {
+        ::close(master);
+        return std::nullopt;
+    }
+    const int slave = ::open(slave_name, O_RDWR | O_NOCTTY);
+    if (slave < 0) {
+        ::close(master);
+        return std::nullopt;
+    }
+
+    ScopedStdinFd stdin_guard;
+    if (stdin_guard.saved < 0 || !stdin_guard.replace_with(slave)) {
+        ::close(slave);
+        ::close(master);
+        return std::nullopt;
+    }
+    ::close(slave);
+    std::thread writer([master, bytes = std::string(input)] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        std::size_t offset = 0;
+        while (offset < bytes.size()) {
+            const auto written = ::write(master, bytes.data() + offset,
+                                         bytes.size() - offset);
+            if (written <= 0) break;
+            offset += static_cast<std::size_t>(written);
+        }
+    });
+    auto result = editor.read_line("tty> ");
+    writer.join();
+    ::close(master);
+    return result;
+}
 
 }  // namespace
 
@@ -243,6 +315,39 @@ TEST(Libcli2, HelpUsesDecoratorsWithoutChangingPlainOutput) {
     EXPECT_NE(colored.find("\033[2;37mList sessions\033[0m"), std::string::npos);
 }
 
+TEST(Libcli2, EveryColorThemeDecoratesEverySemanticStyle) {
+    constexpr std::array styles {
+        Style::heading, Style::command, Style::key, Style::value,
+        Style::success, Style::warning, Style::error, Style::muted,
+    };
+
+    for (std::size_t theme_index = 0; theme_index < color_theme_names.size();
+         ++theme_index) {
+        auto const theme = static_cast<ColorTheme>(theme_index);
+        ColorTheme parsed = ColorTheme::classic;
+        ASSERT_TRUE(parse_color_theme(color_theme_name(theme), parsed));
+        EXPECT_EQ(parsed, theme);
+
+        Decorator decorator(true, theme);
+        EXPECT_TRUE(decorator.enabled());
+        for (auto const style : styles) {
+            auto const rendered = decorator(style, "sample");
+            EXPECT_NE(rendered.find("\033["), std::string::npos);
+            EXPECT_NE(rendered.find("sample"), std::string::npos);
+            EXPECT_EQ(rendered.substr(rendered.size() - 4), "\033[0m");
+        }
+        EXPECT_EQ(decorator(Style::plain, "sample"), "sample");
+    }
+
+    ColorTheme unchanged = ColorTheme::ice;
+    EXPECT_FALSE(parse_color_theme("not-a-theme", unchanged));
+    EXPECT_EQ(unchanged, ColorTheme::ice);
+    Decorator disabled(false, ColorTheme::matrix);
+    EXPECT_FALSE(disabled.enabled());
+    EXPECT_EQ(disabled(Style::error, "sample"), "sample");
+    EXPECT_EQ(Decorator(true, ColorTheme::classic)(Style::error, ""), "");
+}
+
 TEST(LineEditor, HistorySuppressesEmptyAndAdjacentDuplicatesAndRemainsBounded) {
     Cli cli;
     Context context;
@@ -317,6 +422,54 @@ TEST(LineEditor, RedrawRestoresCursorPosition) {
 
     LineEditorTestAccess::redraw(editor, "# ", "status", 3);
     EXPECT_EQ(output.str(), "\r\033[2K# status\033[3D");
+}
+
+TEST(LineEditor, NonTerminalInputReturnsLinesAndCleanEof) {
+    Cli cli;
+    Context context;
+    LineEditor editor(cli, context);
+    std::istringstream input("show status\n\n");
+    std::ostringstream output;
+    ScopedInputBuffer replace_input(std::cin, input.rdbuf());
+    ScopedStreamBuffer replace_output(std::cout, output.rdbuf());
+
+    ASSERT_EQ(editor.read_line("first> "), std::optional<std::string>("show status"));
+    ASSERT_EQ(editor.read_line("second> "), std::optional<std::string>(""));
+    EXPECT_FALSE(editor.read_line("eof> ").has_value());
+    EXPECT_EQ(LineEditorTestAccess::history(editor),
+              (std::vector<std::string>{"show status"}));
+    EXPECT_EQ(output.str(), "first> second> eof> ");
+}
+
+TEST(LineEditor, TerminalEditingCoversControlKeysHistoryCompletionAndEof) {
+    Cli cli;
+    cli.command("show session").help("Session details").handler(
+        [](Context&, const Invocation&) { return 0; });
+    cli.command("show settings").help("Configuration").handler(
+        [](Context&, const Invocation&) { return 0; });
+    Context context;
+    LineEditor editor(cli, context);
+    editor.add_history("history");
+    std::ostringstream output;
+    ScopedStreamBuffer replace_output(std::cout, output.rdbuf());
+
+    auto edited = read_from_pseudoterminal(
+        editor, "ab\x01X\033[C\033[D\x05\x7f\x15show s\t?\n");
+    ASSERT_TRUE(edited.has_value());
+    EXPECT_EQ(*edited, "show se");
+
+    auto restored = read_from_pseudoterminal(
+        editor, "draft\033[A\033[B\x04\n");
+    ASSERT_TRUE(restored.has_value());
+    EXPECT_EQ(*restored, "draft");
+
+    auto unknown = read_from_pseudoterminal(editor, "unknown?\n");
+    ASSERT_TRUE(unknown.has_value());
+    EXPECT_EQ(*unknown, "unknown");
+
+    EXPECT_FALSE(read_from_pseudoterminal(editor, "\x04").has_value());
+    EXPECT_NE(output.str().find("session"), std::string::npos);
+    EXPECT_NE(output.str().find("(no matches)"), std::string::npos);
 }
 
 }  // namespace

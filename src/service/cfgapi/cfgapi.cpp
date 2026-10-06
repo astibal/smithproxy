@@ -111,9 +111,9 @@ std::map<std::string, std::shared_ptr<CfgElement>>& CfgFactory::section_db(std::
 }
 
 bool CfgFactory::cfgapi_init(const char* fnm) {
-    
+
     std::scoped_lock<std::recursive_mutex> l(lock_);
-    
+
     _dia("Reading config file");
     
     // Read the file. If there is an error, report it and exit.
@@ -364,10 +364,9 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         unsigned char rand_pool[16];
         RAND_bytes(rand_pool, 16);
 
-        if(sx::webserver::HttpSessions::api_keys.empty()) {
-
-            auto lc_ = std::scoped_lock(sx::webserver::HttpSessions::lock);
-            sx::webserver::HttpSessions::api_keys.emplace(hex_print(rand_pool, 16));
+        if(not sx::webserver::HttpSessions::has_api_keys()) {
+            sx::webserver::HttpSessions::replace_api_keys(
+                    {hex_print(rand_pool, 16)});
             log.event(INF, "new API key generated");
         }
 
@@ -531,6 +530,11 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
     else if(upgrade_to_num == 1041) {
         log.event(INF, "tls_profile.[x].client_cert_action now uses named values");
         log.event(INF, "numeric client certificate actions will be saved as strings");
+        return true;
+    }
+    else if(upgrade_to_num == 1042) {
+        log.event(INF, "added tls_profiles.[x].client_hello_timeout (milliseconds)");
+        log.event(INF, "added tls_profiles.[x].handshake_timeout (milliseconds)");
         return true;
     }
 
@@ -917,12 +921,7 @@ bool CfgFactory::load_settings () {
     }
 
     if(cfgapi.getRoot()["settings"].exists("http_api")) {
-        auto& key_storage = sx::webserver::HttpSessions::api_keys;
-
-        if(not key_storage.empty()) {
-            _deb("load_settings: clearing existing entries in: api keys");
-            key_storage.clear();
-        }
+        std::set<std::string> key_storage;
 
         if(cfgapi.getRoot()["settings"]["http_api"].exists("keys")) {
             const int num = cfgapi.getRoot()["settings"]["http_api"]["keys"].getLength();
@@ -931,6 +930,7 @@ bool CfgFactory::load_settings () {
                 key_storage.emplace(key);
             }
         }
+        sx::webserver::HttpSessions::replace_api_keys(std::move(key_storage));
         load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "key_timeout", sx::webserver::HttpSessions::session_ttl);
         load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "key_extend_on_access", sx::webserver::HttpSessions::extend_on_access);
         load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "loopback_only", sx::webserver::HttpSessions::loopback_only);
@@ -2252,6 +2252,18 @@ int CfgFactory::load_db_prof_tls () {
 
                 new_profile->element_name() = name;
                 load_if_exists(cur_object, "no_fallback_bypass", new_profile->no_fallback_bypass);
+                load_if_exists(cur_object, "client_hello_timeout", new_profile->client_hello_timeout);
+                load_if_exists(cur_object, "handshake_timeout", new_profile->handshake_timeout);
+                if(new_profile->client_hello_timeout <= 0) {
+                    _err("TLS profile '%s': invalid client_hello_timeout; using 3000 ms",
+                         name.c_str());
+                    new_profile->client_hello_timeout = 3000;
+                }
+                if(new_profile->handshake_timeout <= 0) {
+                    _err("TLS profile '%s': invalid handshake_timeout; using 10000 ms",
+                         name.c_str());
+                    new_profile->handshake_timeout = 10000;
+                }
 
                 load_if_exists(cur_object, "allow_untrusted_issuers", new_profile->allow_untrusted_issuers);
                 load_if_exists(cur_object, "allow_invalid_certs", new_profile->allow_invalid_certs);
@@ -3496,6 +3508,8 @@ bool CfgFactory::policy_apply_tls (const std::shared_ptr<ProfileTls> &pt, baseCo
             sslcom->verify_reset(SSLCom::verify_status_t::VRF_OK);
         }
         sslcom->opt.no_fallback_bypass = pt->no_fallback_bypass;
+        sslcom->opt.client_hello_timeout = pt->client_hello_timeout;
+        sslcom->opt.handshake_timeout = pt->handshake_timeout;
 
         sslcom->opt.cert.allow_unknown_issuer = pt->allow_untrusted_issuers;
         sslcom->opt.cert.allow_self_signed_chain = pt->allow_untrusted_issuers;
@@ -4126,6 +4140,8 @@ bool CfgFactory::new_tls_profile(Setting& ex, std::string const& name) const {
 
         item.add("inspect", Setting::TypeBoolean) = false;
         item.add("no_fallback_bypass", Setting::TypeBoolean) = false;
+        item.add("client_hello_timeout", Setting::TypeInt) = 3000;
+        item.add("handshake_timeout", Setting::TypeInt) = 10000;
 
         item.add("use_pfs", Setting::TypeBoolean) = true;
         item.add("left_use_pfs", Setting::TypeBoolean) = true;
@@ -4185,6 +4201,8 @@ int CfgFactory::save_tls_profiles(Config& ex) const {
 
         item.add("inspect", Setting::TypeBoolean) = obj->inspect;
         item.add("no_fallback_bypass", Setting::TypeBoolean) = obj->no_fallback_bypass;
+        item.add("client_hello_timeout", Setting::TypeInt) = obj->client_hello_timeout;
+        item.add("handshake_timeout", Setting::TypeInt) = obj->handshake_timeout;
 
         item.add("use_pfs", Setting::TypeBoolean) = obj->use_pfs;
         item.add("left_use_pfs", Setting::TypeBoolean) = obj->left_use_pfs;
@@ -5311,7 +5329,7 @@ int save_settings(Config& ex) {
     Setting& http_api_objects = objects.add("http_api", Setting::TypeGroup);
 
     Setting& keys = http_api_objects.add("keys", Setting::TypeArray);
-    for(auto const& k: sx::webserver::HttpSessions::api_keys) {
+    for(auto const& k: sx::webserver::HttpSessions::api_keys_snapshot()) {
         keys.add(Setting::TypeString) = k;
     }
     http_api_objects.add("key_timeout", Setting::TypeInt) = (int)sx::webserver::HttpSessions::session_ttl;
