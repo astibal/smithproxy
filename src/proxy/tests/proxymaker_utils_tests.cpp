@@ -259,6 +259,8 @@ TEST(MitmProxyReplacement, RejectsExternalMalformedAndControlTargets) {
     EXPECT_FALSE(sx::mitmproxy::decode_relative_target("%2F%2Fevil.test").has_value());
     EXPECT_FALSE(sx::mitmproxy::decode_relative_target("%2F%5Cevil.test").has_value());
     EXPECT_FALSE(sx::mitmproxy::decode_relative_target("/\\evil.test").has_value());
+    EXPECT_FALSE(sx::mitmproxy::decode_relative_target("%2Fsafe%3Burl%3D%2F%2Fevil.test").has_value());
+    EXPECT_FALSE(sx::mitmproxy::decode_relative_target("%2Fsafe%2Curl%3D%2F%2Fevil.test").has_value());
     EXPECT_FALSE(sx::mitmproxy::decode_relative_target("%2Fok%0D%0AX-Test%3Ayes").has_value());
     EXPECT_FALSE(sx::mitmproxy::decode_relative_target("%2").has_value());
     EXPECT_FALSE(sx::mitmproxy::decode_relative_target("%GG").has_value());
@@ -266,38 +268,52 @@ TEST(MitmProxyReplacement, RejectsExternalMalformedAndControlTargets) {
 
 TEST(MitmProxyReplacement, MatchesOnlyBoundInternalActionRoutes) {
     using route = sx::mitmproxy::replacement_route;
-    auto const key = "192.0.2.10:expired.example:443";
 
     EXPECT_EQ(sx::mitmproxy::classify_replacement_route(
-                  "/SM/IT/HP/RO/XY/warning?q=1", key),
+                  "/SM/IT/HP/RO/XY/warning?q=1"),
               route::warning);
     EXPECT_EQ(sx::mitmproxy::classify_replacement_route(
-                  "/SM/IT/HP/RO/XY/override/target=192.0.2.10:expired.example:443&orig_url=%2F", key),
+                  "GET /SM/IT/HP/RO/XY/warning?q=1 HTTP/1.1"),
+              route::warning);
+    EXPECT_EQ(sx::mitmproxy::classify_replacement_route(
+                  "/SM/IT/HP/RO/XY/override/0123456789abcdef0123456789abcdef"),
               route::override_action);
+    EXPECT_EQ(sx::mitmproxy::classify_replacement_route(
+                  "GET /SM/IT/HP/RO/XY/override/0123456789abcdef0123456789abcdef HTTP/1.1"),
+              route::override_action);
+    EXPECT_EQ(sx::mitmproxy::override_token_from_route(
+                  "/SM/IT/HP/RO/XY/override/0123456789abcdef0123456789abcdef"),
+              "0123456789abcdef0123456789abcdef");
 
     EXPECT_EQ(sx::mitmproxy::classify_replacement_route(
-                  "/ordinary/path?/SM/IT/HP/RO/XY/override", key),
+                  "/ordinary/path?/SM/IT/HP/RO/XY/override"),
               route::none);
     EXPECT_EQ(sx::mitmproxy::classify_replacement_route(
-                  "/SM/IT/HP/RO/XY/override-pretend/target=192.0.2.10:expired.example:443", key),
+                  "/SM/IT/HP/RO/XY/override-pretend?token=x"),
               route::none);
     EXPECT_EQ(sx::mitmproxy::classify_replacement_route(
-                  "/SM/IT/HP/RO/XY/override/target=192.0.2.10:other.example:443", key),
+                  "/SM/IT/HP/RO/XY/override/not-hex"),
               route::none);
     EXPECT_EQ(sx::mitmproxy::classify_replacement_route(
-                  "/SM/IT/HP/RO/XY/override/target=192.0.2.10:expired.example:443", {}),
+                  "/SM/IT/HP/RO/XY/override/target=legacy"),
               route::none);
     EXPECT_EQ(sx::mitmproxy::classify_replacement_route(
-                  "/SM/IT/HP/RO/XY/warning-room", key),
+                  "/SM/IT/HP/RO/XY/warning-room"),
               route::none);
 
     auto const request =
-        "/SM/IT/HP/RO/XY/override/target=192.0.2.10:expired.example:443"
-        "&token=0123456789abcdef&orig_url=%2Fsafe";
+        "/SM/IT/HP/RO/XY/override/0123456789abcdef0123456789abcdef"
+        "?token=0123456789abcdef&orig_url=%2Fsafe";
     EXPECT_EQ(sx::mitmproxy::replacement_parameter(request, "token"),
+              "0123456789abcdef");
+    EXPECT_EQ(sx::mitmproxy::replacement_parameter(
+                  "GET " + std::string(request) + " HTTP/1.1", "token"),
               "0123456789abcdef");
     EXPECT_EQ(sx::mitmproxy::replacement_parameter(request, "orig_url"),
               "%2Fsafe");
+    EXPECT_EQ(sx::mitmproxy::query_parameter(
+                  "q=1&orig_url=%2Fprotected%3Fx%3D1", "orig_url"),
+              "%2Fprotected%3Fx%3D1");
     EXPECT_FALSE(sx::mitmproxy::replacement_parameter(request, "missing"));
 
     EXPECT_TRUE(sx::mitmproxy::override_token_matches(
@@ -334,6 +350,32 @@ TEST(MitmProxyReplacement, OverrideChallengeExpiresAndIsConsumedExactlyOnce) {
     for(auto& contender: contenders) contender.join();
     EXPECT_EQ(accepted.load(), 1U);
     EXPECT_FALSE(challenges.consume("target", token, 101));
+
+    challenges.issue("same-target", token, 200, 120);
+    challenges.issue("same-target", "fedcba9876543210fedcba9876543210", 200, 120);
+    EXPECT_TRUE(challenges.consume("same-target", token, 201));
+    EXPECT_TRUE(challenges.consume(
+        "same-target", "fedcba9876543210fedcba9876543210", 201));
+}
+
+TEST(MitmProxyReplacement, OverrideTimeoutCannotWrapToUnsignedLifetime) {
+    EXPECT_FALSE(sx::mitmproxy::override_ttl_seconds(-1));
+    EXPECT_FALSE(sx::mitmproxy::override_ttl_seconds(0));
+    EXPECT_EQ(sx::mitmproxy::override_ttl_seconds(1), 1U);
+    EXPECT_EQ(sx::mitmproxy::override_ttl_seconds(600), 600U);
+}
+
+TEST(MitmProxyReplacement, BrowserOverrideScopeIncludesNormalizedClientSni) {
+    auto const l4 = "192.0.2.10:203.0.113.20:443";
+    auto const first = sx::mitmproxy::override_scope_key(l4, "Bad-A.Example.");
+
+    EXPECT_EQ(first, sx::mitmproxy::override_scope_key(l4, "bad-a.example"));
+    EXPECT_NE(first, sx::mitmproxy::override_scope_key(l4, "bad-b.example"));
+    EXPECT_NE(first, sx::mitmproxy::override_scope_key(l4, ""));
+    EXPECT_NE(first, sx::mitmproxy::override_scope_key(
+                         "192.0.2.10:203.0.113.21:443", "bad-a.example"));
+    EXPECT_NE(sx::mitmproxy::override_scope_key("a:b", "c"),
+              sx::mitmproxy::override_scope_key("a", "b:c"));
 }
 
 TEST(MitmProxyReplacement, ParsesOnlyCompleteFirstAlpnProtocol) {

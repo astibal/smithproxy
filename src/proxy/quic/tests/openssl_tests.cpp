@@ -3,6 +3,7 @@
 #include "proxy/multiflow/mfflowcom.hpp"
 #include "proxy/quic/openssl.hpp"
 #include "proxy/trafficcapture.hpp"
+#include <sslcertstore.hpp>
 
 #include <traflog/pcapapi.hpp>
 #include <traflog/pcaplog.hpp>
@@ -43,6 +44,11 @@ TEST(OpenSslQuic, CreatesClientAndServerContextsWhenAvailable) {
 #if SMITHPROXY_OPENSSL_QUIC
         EXPECT_EQ(SSL_CTX_get_ssl_method(client.get()), OSSL_QUIC_client_method());
         EXPECT_EQ(SSL_CTX_get_ssl_method(server.get()), OSSL_QUIC_server_method());
+        ASSERT_NE(SSLFactory::factory().trust_store(), nullptr);
+        EXPECT_EQ(SSL_CTX_get_cert_store(client.get()),
+                  SSLFactory::factory().trust_store());
+        EXPECT_EQ(SSL_CTX_get_cert_store(server.get()),
+                  SSLFactory::factory().trust_store());
 #endif
     } else {
         EXPECT_EQ(client, nullptr);

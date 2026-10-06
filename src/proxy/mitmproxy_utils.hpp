@@ -1,6 +1,8 @@
 #ifndef MITMPROXY_UTILS_HPP
 #define MITMPROXY_UTILS_HPP
 
+#include <algorithm>
+#include <cctype>
 #include <cstddef>
 #include <ctime>
 #include <optional>
@@ -29,11 +31,59 @@ enum class replacement_route {
     override_action
 };
 
-inline replacement_route classify_replacement_route(std::string_view request_target,
-                                                      std::string_view expected_target) {
+inline std::string_view replacement_request_target(std::string_view request) {
+    if(request.empty() || request.front() == '/') return request;
+    auto const first_space = request.find(' ');
+    if(first_space == std::string_view::npos || first_space == 0) return {};
+    auto const begin = first_space + 1;
+    auto const end = request.find(' ', begin);
+    if(end == std::string_view::npos || end == begin) return {};
+    auto const version = request.substr(end + 1);
+    if(version.substr(0, 5) != "HTTP/") return {};
+    return request.substr(begin, end - begin);
+}
+
+inline std::optional<std::string_view> override_token_from_route(
+        std::string_view request_target) {
+    request_target = replacement_request_target(request_target);
+    static constexpr std::string_view prefix = "/SM/IT/HP/RO/XY/override/";
+    if(request_target.size() != prefix.size() + 32 ||
+       request_target.substr(0, prefix.size()) != prefix) {
+        return std::nullopt;
+    }
+    auto const token = request_target.substr(prefix.size());
+    if(!std::all_of(token.begin(), token.end(), [](unsigned char ch) {
+           return std::isxdigit(ch) != 0;
+       })) {
+        return std::nullopt;
+    }
+    return token;
+}
+
+inline std::optional<unsigned> override_ttl_seconds(int configured_seconds) {
+    if(configured_seconds <= 0) return std::nullopt;
+    return static_cast<unsigned>(configured_seconds);
+}
+
+inline std::string override_scope_key(std::string_view l4_key,
+                                      std::string_view client_sni) {
+    std::string normalized_sni(client_sni);
+    std::transform(normalized_sni.begin(), normalized_sni.end(),
+                   normalized_sni.begin(), [](unsigned char ch) {
+                       return static_cast<char>(std::tolower(ch));
+                   });
+    if(!normalized_sni.empty() && normalized_sni.back() == '.') {
+        normalized_sni.pop_back();
+    }
+
+    return "override|" + std::to_string(l4_key.size()) + ":" +
+           std::string(l4_key) + "|" + std::to_string(normalized_sni.size()) +
+           ":" + normalized_sni;
+}
+
+inline replacement_route classify_replacement_route(std::string_view request_target) {
+    request_target = replacement_request_target(request_target);
     static constexpr std::string_view warning = "/SM/IT/HP/RO/XY/warning";
-    static constexpr std::string_view override_prefix =
-        "/SM/IT/HP/RO/XY/override/target=";
 
     if(request_target == warning ||
        (request_target.size() > warning.size() &&
@@ -42,21 +92,15 @@ inline replacement_route classify_replacement_route(std::string_view request_tar
         return replacement_route::warning;
     }
 
-    if(expected_target.empty() || request_target.size() <= override_prefix.size() ||
-       request_target.substr(0, override_prefix.size()) != override_prefix) {
-        return replacement_route::none;
+    if(override_token_from_route(request_target)) {
+        return replacement_route::override_action;
     }
-
-    auto const value = request_target.substr(override_prefix.size());
-    auto const separator = value.find_first_of("&?");
-    auto const supplied_target = value.substr(0, separator);
-    return supplied_target == expected_target
-           ? replacement_route::override_action
-           : replacement_route::none;
+    return replacement_route::none;
 }
 
 inline std::optional<std::string_view> replacement_parameter(
         std::string_view request_target, std::string_view name) {
+    request_target = replacement_request_target(request_target);
     if(name.empty()) return std::nullopt;
 
     std::size_t begin = 0;
@@ -73,6 +117,24 @@ inline std::optional<std::string_view> replacement_parameter(
         }
         if(end == std::string_view::npos) return std::nullopt;
         begin = end;
+    }
+    return std::nullopt;
+}
+
+inline std::optional<std::string_view> query_parameter(
+        std::string_view query, std::string_view name) {
+    if(name.empty()) return std::nullopt;
+    std::size_t begin = 0;
+    while(begin <= query.size()) {
+        auto const end = query.find('&', begin);
+        auto const item = query.substr(
+            begin, end == std::string_view::npos ? std::string_view::npos : end - begin);
+        if(item.size() > name.size() && item.substr(0, name.size()) == name &&
+           item[name.size()] == '=') {
+            return item.substr(name.size() + 1);
+        }
+        if(end == std::string_view::npos) return std::nullopt;
+        begin = end + 1;
     }
     return std::nullopt;
 }
@@ -101,31 +163,32 @@ public:
                unsigned lifetime_seconds) {
         std::scoped_lock lock(mutex_);
         remove_expired(now);
-        if(entries_.size() >= capacity_ && entries_.find(key) == entries_.end()) {
+        if(entries_.size() >= capacity_ && entries_.find(token) == entries_.end()) {
             entries_.erase(entries_.begin());
         }
-        entries_[std::move(key)] = {
-            std::move(token), now + static_cast<std::time_t>(lifetime_seconds)};
+        entries_[token] = {
+            std::move(key), now + static_cast<std::time_t>(lifetime_seconds)};
     }
 
     bool consume(std::string const& key,
                  std::optional<std::string_view> supplied,
                  std::time_t now) {
         std::scoped_lock lock(mutex_);
-        auto const found = entries_.find(key);
+        if(!supplied || supplied->size() != 32) return false;
+        auto const found = entries_.find(std::string(*supplied));
         if(found == entries_.end()) return false;
         if(found->second.expires_at <= now) {
             entries_.erase(found);
             return false;
         }
-        if(!override_token_matches(found->second.token, supplied)) return false;
+        if(found->second.scope != key) return false;
         entries_.erase(found);
         return true;
     }
 
 private:
     struct entry {
-        std::string token;
+        std::string scope;
         std::time_t expires_at;
     };
 
@@ -233,7 +296,10 @@ inline std::optional<std::string> decode_relative_target(std::string_view input)
             value = static_cast<unsigned char>((high << 4) | low);
             i += 2;
         }
-        if(value < 0x20 || value == 0x7f || value == '\\') return std::nullopt;
+        if(value < 0x20 || value == 0x7f || value == '\\' ||
+           value == ';' || value == ',') {
+            return std::nullopt;
+        }
         output.push_back(static_cast<char>(value));
     }
 

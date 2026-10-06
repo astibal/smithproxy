@@ -6,6 +6,9 @@ UndefinedBehaviorSanitizer catches alignment, integer, and other language-level
 undefined behavior.
 
 `tls_revocation_fuzzer` starts from valid, locally signed OCSP and CRL objects.
+OCSP mutations exercise both direct response verification and the production
+TLS stapling envelope (`SSL_set_tlsext_status_ocsp_resp()` through
+`check_revocation_stapling()`).
 Fuzz input mutates their DER representation before it is parsed and verified.
 It also has a raw-input mode for malformed ASN.1 coverage.
 

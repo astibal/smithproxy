@@ -5,6 +5,7 @@
 #include <buffer.hpp>
 #include <log/logger.hpp>
 #include <sslcertval.hpp>
+#include <sslcom.hpp>
 
 #include <cstdint>
 #include <cstdio>
@@ -20,6 +21,23 @@ using openssl_ptr = std::unique_ptr<T, decltype(Free)>;
 using x509_ptr = openssl_ptr<X509, X509_free>;
 using pkey_ptr = openssl_ptr<EVP_PKEY, EVP_PKEY_free>;
 using store_ptr = openssl_ptr<X509_STORE, X509_STORE_free>;
+using ssl_ctx_ptr = openssl_ptr<SSL_CTX, SSL_CTX_free>;
+using ssl_ptr = openssl_ptr<SSL, SSL_free>;
+
+class fuzz_ssl_com final : public SSLCom {
+public:
+    bool set_peer_chain(X509* certificate, X509* issuer) {
+        if (!certificate || !issuer || X509_up_ref(certificate) != 1)
+            return false;
+        if (X509_up_ref(issuer) != 1) {
+            X509_free(certificate);
+            return false;
+        }
+        sslcom_target_cert = certificate;
+        sslcom_target_issuer = issuer;
+        return true;
+    }
+};
 
 x509_ptr load_certificate(const std::filesystem::path& path) {
     FILE* file = fopen(path.c_str(), "r");
@@ -64,6 +82,7 @@ struct fixture {
     x509_ptr certificate{nullptr, X509_free};
     pkey_ptr issuer_key{nullptr, EVP_PKEY_free};
     store_ptr store{nullptr, X509_STORE_free};
+    ssl_ctx_ptr context{nullptr, SSL_CTX_free};
     std::vector<uint8_t> ocsp_good;
     std::vector<uint8_t> ocsp_mixed;
     std::vector<uint8_t> crl_revoked;
@@ -80,6 +99,14 @@ struct fixture {
         store.reset(X509_STORE_new());
         if (!store || X509_STORE_add_cert(store.get(), issuer.get()) != 1) {
             store.reset();
+            return;
+        }
+        context.reset(SSL_CTX_new(TLS_method()));
+        auto& factory = SSLFactory::factory();
+        factory.ca_file() = (pki / "ca-cert.pem").string();
+        factory.ca_path().clear();
+        if (!context || !factory.load_trust_store()) {
+            context.reset();
             return;
         }
         X509_VERIFY_PARAM_set_time(X509_STORE_get0_param(store.get()), 1583000000);
@@ -200,6 +227,31 @@ void exercise_crl(const std::vector<uint8_t>& encoded, fixture& f) {
     X509_CRL_free(crl);
 }
 
+void exercise_stapling(const std::vector<uint8_t>& encoded, fixture& f) {
+    if (encoded.empty() || !f.context)
+        return;
+    ssl_ptr ssl(SSL_new(f.context.get()), SSL_free);
+    if (!ssl)
+        return;
+    auto* body = static_cast<unsigned char*>(OPENSSL_malloc(encoded.size()));
+    if (!body)
+        return;
+    std::memcpy(body, encoded.data(), encoded.size());
+    if (SSL_set_tlsext_status_ocsp_resp(
+            ssl.get(), body, static_cast<int>(encoded.size())) != 1) {
+        OPENSSL_free(body);
+        return;
+    }
+
+    fuzz_ssl_com connection;
+    if (!connection.set_peer_chain(f.certificate.get(), f.issuer.get()))
+        return;
+    connection.opt.ocsp.stapling_enabled = true;
+    connection.opt.ocsp.stapling_mode = 2;
+    (void)SSLCom::check_revocation_stapling(
+        "revocation-fuzzer", &connection, ssl.get());
+}
+
 } // namespace
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, std::size_t size) {
@@ -209,14 +261,17 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, std::size_t size) {
     if (!f.issuer || !f.certificate || !f.issuer_key || !f.store)
         return 0;
 
-    switch (data[0] % 4) {
+    switch (data[0] % 6) {
         case 0: exercise_ocsp(mutate(f.ocsp_good, data, size), f); break;
         case 1: exercise_ocsp(mutate(f.ocsp_mixed, data, size), f); break;
         case 2: exercise_crl(mutate(f.crl_revoked, data, size), f); break;
+        case 3: exercise_stapling(mutate(f.ocsp_good, data, size), f); break;
+        case 4: exercise_stapling(mutate(f.ocsp_mixed, data, size), f); break;
         default: {
             std::vector<uint8_t> raw(data + 1, data + size);
             exercise_ocsp(raw, f);
             exercise_crl(raw, f);
+            exercise_stapling(raw, f);
             break;
         }
     }

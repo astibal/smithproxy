@@ -274,8 +274,6 @@ add_executable(smithproxy
         src/proxy/mitmproxy.cpp
         src/proxy/mitmcom.hpp
         src/proxy/mitmcom.cpp
-        src/proxy/ocspinvoker.cpp
-        src/proxy/ocspinvoker.hpp
         src/proxy/proxymaker.hpp
         src/proxy/proxymaker.cpp
         src/proxy/multiflow/mfflowcom.cpp
@@ -304,6 +302,7 @@ add_executable(smithproxy
         src/policy/loadb.cpp
         src/policy/profiles.hpp
         src/policy/profiles.cpp
+        src/policy/profile_routing_state.cpp
         src/policy/cfgelement.hpp
 
         src/inspect/sxsignature.hpp
@@ -407,6 +406,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/staticcontent.cpp
                 src/ext/nltemplate/nltemplate.cpp
                 src/smithlog.cpp
+                src/service/daemon.cpp
+                src/service/netservice.cpp
                 src/service/core/authpam.cpp
 
                 src/utils/tests/str_test.cpp
@@ -419,8 +420,11 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/ext/libcidr/cidr.cpp
 
                 src/policy/policy.cpp
+                src/policy/profile_routing_state.cpp
                 src/policy/tests/addrobj_test.cpp
                 src/policy/tests/policy_test.cpp
+                src/policy/tests/profile_routing_test.cpp
+                src/policy/tests/profile_types_test.cpp
 
                 src/utils/tenants.cpp
                 src/tests/test_misc.cpp
@@ -440,6 +444,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/proxy/quic/openssl.cpp
                 src/proxy/quic/tests/openssl_tests.cpp
                 src/proxy/socks5/socks5_protocol_tests.cpp
+                src/proxy/tests/explicitproxy_dns_state_tests.cpp
                 src/proxy/tests/proxymaker_utils_tests.cpp
                 src/proxy/filters/statistics/entropy.cpp
                 src/proxy/filters/statistics/flowanalysis.cpp
@@ -467,9 +472,13 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/service/http/webhooks_tests.cpp
                 src/service/core/sessionlist_state.cpp
                 src/service/core/sessionlist_tests.cpp
+                src/service/core/smithproxy_objapi_tests.cpp
                 src/service/cfgapi/cfgvalue_tests.cpp
                 src/tests/smithlog_tests.cpp
                 src/service/core/authpam_tests.cpp
+                src/service/daemon_tests.cpp
+                src/service/netservice_tests.cpp
+                src/service/httpd/httpd_tests.cpp
                 src/proxy/nbrhood_tests.cpp
 
                 src/inspect/engine.hpp
@@ -533,7 +542,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_compile_definitions(tls_testbed PRIVATE
                 SMITHPROXY_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 
-        target_link_libraries(sx_gtests gtest gtest_main smithproxy_libcli smithproxy_qpack socle_lib pthread crypto ssl crypt)
+        target_link_libraries(sx_gtests gtest gtest_main smithproxy_libcli smithproxy_qpack socle_lib pthread crypto ssl crypt ${UNWIND_LIB})
         if("${USE_PAM}" STREQUAL "Y")
             target_link_libraries(sx_gtests pam)
         endif()
@@ -676,11 +685,23 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                         COMMAND ${Python3_EXECUTABLE}
                         ${PROJECT_SOURCE_DIR}/src/service/cmd/libcli2_process_e2e.py
                         $<TARGET_FILE:smithproxy> --source ${PROJECT_SOURCE_DIR})
+                add_test(NAME integration.main_process
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/src/main_process_e2e.py
+                        $<TARGET_FILE:smithproxy> --source ${PROJECT_SOURCE_DIR})
+                add_test(NAME integration.redirect
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/transparent/redirect_integration.py
+                        --smithproxy $<TARGET_FILE:smithproxy>
+                        --source ${PROJECT_SOURCE_DIR})
                 add_test(NAME unit.patch_runner_fuzz_areas
                         COMMAND ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-fuzz-areas.sh)
                 add_test(NAME unit.patch_runner_fuzz_seeds
                         COMMAND ${Python3_EXECUTABLE}
                         ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-fuzz-seeds.py)
+                add_test(NAME unit.patch_runner_coverage_report
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-coverage-report.py)
                 add_test(NAME unit.patch_runner_pplay
                         COMMAND ${Python3_EXECUTABLE}
                         ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-pplay-fuzz.py)
@@ -689,12 +710,12 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                         ${PROJECT_SOURCE_DIR}/tools/wireshark/test_spquic.py)
                 set_tests_properties(
                         integration.httpconnect integration.starttls_socks integration.socks5_udp integration.http_api
-                        integration.libcli2_process integration.wireshark_spq1
+                        integration.libcli2_process integration.main_process integration.redirect integration.wireshark_spq1
                         PROPERTIES LABELS "native;integration")
                 set_tests_properties(stress.httpconnect PROPERTIES LABELS "native;integration;stress")
                 set_tests_properties(
                         integration.httpconnect stress.httpconnect integration.starttls_socks integration.socks5_udp integration.http_api
-                        integration.libcli2_process PROPERTIES TIMEOUT 120)
+                        integration.libcli2_process integration.main_process integration.redirect PROPERTIES TIMEOUT 120)
                 set_tests_properties(
                         unit.patch_runner_fuzz_areas unit.patch_runner_fuzz_seeds
                         unit.patch_runner_pplay PROPERTIES LABELS "native;unit")

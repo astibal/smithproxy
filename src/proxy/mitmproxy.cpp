@@ -423,6 +423,21 @@ std::string whitelist_make_key_cert(baseHostCX const* cx) {
     return fg;
 }
 
+std::string whitelist_make_key_override(baseHostCX const* cx,
+                                        SSLCom const* peercom) {
+    auto const l4_key = whitelist_make_key_l4(cx);
+    if(l4_key.empty() || l4_key == "?" || !peercom) return {};
+
+    auto const* client_com = dynamic_cast<SSLCom const*>(cx->com());
+    if(!client_com) return {};
+    return sx::mitmproxy::override_scope_key(l4_key, client_com->get_sni());
+}
+
+sx::mitmproxy::override_challenge_store& MitmProxy::override_challenges() {
+    static sx::mitmproxy::override_challenge_store challenges(500);
+    return challenges;
+}
+
 
 bool MitmProxy::is_white_listed(MitmHostCX const* mh, SSLCom* peercom) {
 
@@ -436,8 +451,21 @@ bool MitmProxy::is_white_listed(MitmHostCX const* mh, SSLCom* peercom) {
 
         // !!! wh might be already invalid here, unlocked !!!
         if (wh_entry != nullptr) {
+            if(wh_entry->value().single_use) {
+                whitelist_verify().erase(key);
+                _dia("whitelist_verify[%s]: consumed single-use entry", key.c_str());
+                return true;
+            }
             if (scom->opt.cert.failed_check_override_timeout_type == 1) {
-                wh_entry->expired_at() = ::time(nullptr) + scom->opt.cert.failed_check_override_timeout;
+                auto const ttl = sx::mitmproxy::override_ttl_seconds(
+                    scom->opt.cert.failed_check_override_timeout);
+                if(!ttl) {
+                    whitelist_verify().erase(key);
+                    _war("whitelist_verify[%s]: invalid sliding timeout %d",
+                         key.c_str(), scom->opt.cert.failed_check_override_timeout);
+                    return false;
+                }
+                wh_entry->expired_at() = ::time(nullptr) + *ttl;
                 _dia("whitelist_verify[%s]: timeout reset to %d", key.c_str(),
                      scom->opt.cert.failed_check_override_timeout);
             }
@@ -447,7 +475,13 @@ bool MitmProxy::is_white_listed(MitmHostCX const* mh, SSLCom* peercom) {
         return false;
     };
 
-    //look for whitelisted entry
+    // Browser-created overrides are scoped to the original client SNI. The
+    // legacy L4 and certificate keys remain intentionally broad for explicit
+    // operator CLI entries and client-certificate bypass.
+    std::string key_override = whitelist_make_key_override(mh, scom);
+    if (!key_override.empty() && find_it(key_override)) return true;
+
+    // Look for operator/client-certificate whitelist entries.
     std::string key_l4 = whitelist_make_key_l4(mh);
     if ((not key_l4.empty()) and key_l4 != "?" and find_it(key_l4)) return true;
 
@@ -533,6 +567,7 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
               scom->opt.cert.client_cert_action)
         : sx::mitmproxy::client_certificate_action::none;
     std::optional<bool> client_cert_was_whitelisted;
+    bool client_cert_bypass_failed = false;
 
     if(scom && client_cert_action ==
                    sx::mitmproxy::client_certificate_action::whitelist_next) {
@@ -541,24 +576,42 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
         // newly-created entry forgive an unrelated verification error on the
         // current connection.
         client_cert_was_whitelisted = is_white_listed(mh, scom);
-        if(!*client_cert_was_whitelisted) {
-            auto const l4_key = whitelist_make_key_l4(mh);
+        auto const ttl = sx::mitmproxy::override_ttl_seconds(
+            scom->opt.cert.failed_check_override_timeout);
+        auto const l4_key = whitelist_make_key_l4(mh);
+        auto const valid_l4_key = !l4_key.empty() && l4_key != "?";
+        if(!*client_cert_was_whitelisted && ttl && valid_l4_key) {
             log.event(INF, "%s connections whitelisted due to client cert bypass option",
                       l4_key.c_str());
             auto lc_ = std::scoped_lock(whitelist_verify().getlock());
             whitelist_verify_entry entry;
+            entry.single_use = true;
             whitelist_verify().set(
                 l4_key,
                 new whitelist_verify_entry_t(
-                    entry, scom->opt.cert.failed_check_override_timeout));
+                    entry, *ttl));
+        } else if(!*client_cert_was_whitelisted && (!ttl || !valid_l4_key)) {
+            client_cert_bypass_failed = true;
+            _war("client certificate bypass rejected: timeout=%d key=%s",
+                 scom->opt.cert.failed_check_override_timeout,
+                 l4_key.empty() ? "<empty>" : l4_key.c_str());
         }
     }
 
     if(scom && scom->is_verify_status_opt_allowed() &&
-       client_cert_action != sx::mitmproxy::client_certificate_action::block) {
+       client_cert_action != sx::mitmproxy::client_certificate_action::block &&
+       !client_cert_bypass_failed) {
 
         // exceptions are satisfied and we can continue with proxying, regardless of other options
 
+        ssl_handled = true;
+        return false;
+    }
+
+    if(scom && client_cert_bypass_failed &&
+       !scom->opt.cert.failed_check_replacement) {
+        _war("client certificate bypass could not be prepared; closing fail-closed");
+        state().dead(true);
         ssl_handled = true;
         return false;
     }
@@ -570,7 +623,8 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
             static_cast<unsigned>(SSLCom::verify_status_t::VRF_OK),
             static_cast<unsigned>(SSLCom::verify_status_t::VRF_CLIENT_CERT_RQ));
         auto const client_certificate_block =
-            client_cert_action == sx::mitmproxy::client_certificate_action::block;
+            client_cert_action == sx::mitmproxy::client_certificate_action::block ||
+            client_cert_bypass_failed;
 
         if(verification_failed || client_certificate_block) {
 
@@ -1582,8 +1636,8 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
         log.event(INF, "[%s]: HTTP replacement active", socle::com::ssl::connection_name(scom, true).c_str());
 
         auto find_orig_uri = [&]() -> std::optional<std::string> {
-            auto const encoded = sx::mitmproxy::replacement_parameter(
-                app_request->request(), "orig_url");
+            auto const encoded = sx::mitmproxy::query_parameter(
+                app_request->http_data.params, "orig_url");
             return encoded ? sx::mitmproxy::decode_relative_target(*encoded)
                            : std::nullopt;
         };
@@ -1593,6 +1647,13 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             std::stringstream block_override;
 
             if (scom->opt.cert.failed_check_override) {
+                auto const whitelist_ttl = sx::mitmproxy::override_ttl_seconds(
+                    scom->opt.cert.failed_check_override_timeout);
+                if(!whitelist_ttl) {
+                    _err("cannot offer TLS override with invalid timeout %d",
+                         scom->opt.cert.failed_check_override_timeout);
+                    return {};
+                }
                 unsigned char random_bytes[16];
                 if(RAND_bytes(random_bytes, sizeof(random_bytes)) != 1) {
                     _err("cannot generate TLS override challenge");
@@ -1607,27 +1668,33 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
                     token.push_back(hex[byte & 0x0f]);
                 }
 
-                block_override << R"(<form action="/SM/IT/HP/RO/XY)";
-
-                const std::string key = whitelist_make_key_l4(cx);
-                if (cx->peer()) {
-                    block_override << "/override/target=" + key;
-                    block_override << "&token=" + token;
-                    if (not app_request->http_data.uri.empty()) {
-                        block_override << "&orig_url="
-                                       << sx::mitmproxy::query_encode(find_orig_uri().value_or("/"));
-                    }
+                const std::string challenge_key =
+                    whitelist_make_key_override(cx, scom);
+                if(!cx->peer() || challenge_key.empty()) {
+                    _err("cannot offer TLS override without client TLS identity");
+                    return {};
                 }
-                block_override << R"("><input type="submit" value="Override" class="btn-red"></form>)";
+                block_override
+                    << R"(<form action="/SM/IT/HP/RO/XY/override/)"
+                    << token << R"(" method="get">)";
+                if (not app_request->http_data.uri.empty()) {
+                    block_override
+                        << R"(<input type="hidden" name="orig_url" value=")"
+                        << sx::mitmproxy::html_escape(find_orig_uri().value_or("/"))
+                        << R"(">)";
+                }
+                block_override
+                    << R"(<input type="submit" value="Override" class="btn-red"></form>)";
 
-                override_challenges().issue(key, token, std::time(nullptr), 120);
+                override_challenges().issue(
+                    challenge_key, token, std::time(nullptr), 120);
             }
 
             return block_override.str();
         };
 
         auto const replacement_route = sx::mitmproxy::classify_replacement_route(
-            app_request->request(), whitelist_make_key_l4(cx));
+            app_request->http_data.uri);
 
         if(replacement_route == sx::mitmproxy::replacement_route::override_action) {
             
@@ -1639,9 +1706,9 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             
                 _dia("ssl_override: ph4 - asked for verify override for %s", whitelist_make_key_l4(cx).c_str());
                 
-                const auto supplied_token = sx::mitmproxy::replacement_parameter(
-                    app_request->request(), "token");
-                const auto challenge_key = whitelist_make_key_l4(cx);
+                const auto supplied_token = sx::mitmproxy::override_token_from_route(
+                    app_request->http_data.uri);
+                const auto challenge_key = whitelist_make_key_override(cx, scom);
                 const bool challenge_valid = override_challenges().consume(
                     challenge_key, supplied_token, std::time(nullptr));
 
@@ -1665,8 +1732,18 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
 
                 {
                     auto lc_ = std::scoped_lock(whitelist_verify().getlock());
-                    whitelist_verify().set(whitelist_make_key_l4(cx),
-                                           new whitelist_verify_entry_t({}, scom->opt.cert.failed_check_override_timeout));
+                    auto const ttl = sx::mitmproxy::override_ttl_seconds(
+                        scom->opt.cert.failed_check_override_timeout);
+                    if(!ttl) {
+                        std::string error("<html><head></head><body><p>Failed to override</p><p>Override timeout is invalid.</p></body></html>");
+                        write_replacement_response(cx, error, 403);
+                        cx->close_after_write(true);
+                        set_replacement_msg_ssl(scom);
+                        replacement_msg += "(ssl: invalid override timeout)";
+                        return;
+                    }
+                    whitelist_verify().set(challenge_key,
+                                           new whitelist_verify_entry_t({}, *ttl));
                 }
                 
                 write_replacement_response(cx, override_applied);
@@ -1722,9 +1799,13 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             
             const std::string redir_pre(R"(<html><head><script>top.location.href=")");
             const std::string redir_suf(R"(";</script></head><body></body></html>)");
+            std::string original_target = app_request->http_data.uri;
+            if(!app_request->http_data.params.empty()) {
+                original_target += "?" + app_request->http_data.params;
+            }
 
             std::string repl = redir_pre + "/SM/IT/HP/RO/XY/warning?q=1&orig_url=" +
-                               sx::mitmproxy::query_encode(app_request->http_data.uri) + redir_suf;
+                               sx::mitmproxy::query_encode(original_target) + redir_suf;
             write_replacement_response(cx, repl, 403);
             cx->close_after_write(true);
             set_replacement_msg_ssl(scom);

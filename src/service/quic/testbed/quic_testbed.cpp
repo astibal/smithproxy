@@ -935,6 +935,12 @@ TEST(QuicTestbed, ClientRejectsMitmCertificateWithoutTestCaTrust) {
 
     auto context = quic::make_openssl_quic_context(false);
     ASSERT_NE(context, nullptr);
+    // Production contexts intentionally share the factory store. This
+    // negative OpenSSL test needs an explicitly isolated empty store so CA
+    // additions made by earlier verified-client cases cannot leak into it.
+    X509_STORE* empty_store = X509_STORE_new();
+    ASSERT_NE(empty_store, nullptr);
+    SSL_CTX_set_cert_store(context.get(), empty_store); // transfers ownership
     SSL_CTX_set_verify(context.get(), SSL_VERIFY_PEER, nullptr);
     auto const address = loopback(proxy.bound_port());
     std::string error;

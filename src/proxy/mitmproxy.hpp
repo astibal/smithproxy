@@ -68,6 +68,7 @@
 #include <service/core/sessionlist.hpp>
 
 struct whitelist_verify_entry {
+    bool single_use = false;
 };
 
 class FilterProxy;
@@ -109,10 +110,7 @@ public:
         return m;
     }
 
-    static sx::mitmproxy::override_challenge_store& override_challenges() {
-        static sx::mitmproxy::override_challenge_store m(500);
-        return m;
-    }
+    static sx::mitmproxy::override_challenge_store& override_challenges();
 
     struct Opts_ContentWriter {
         bool write_payload = false;
@@ -308,5 +306,6 @@ private:
 
 std::string whitelist_make_key_l4(baseHostCX const* cx);
 std::string whitelist_make_key_cert(baseHostCX const* cx);
+std::string whitelist_make_key_override(baseHostCX const* cx, SSLCom const* peercom);
 
 #endif //MITMPROXY_HPP

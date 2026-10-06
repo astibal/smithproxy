@@ -496,7 +496,15 @@ int cli_diag_ssl_wl_insert_fingerprint(DiagCli *cli, const char *command, char *
         cli_print(cli, "Usage: diag tls whitelist insert_fingerprint <fingerprint> [timeout]");
         return CLI_ERROR;
     }
-    if(args.size() > 1) { timeout = safe_val(args[1], 600); }
+    if(args.size() > 1) {
+        auto const parsed = sx::mitmproxy::override_ttl_seconds(
+            safe_val(args[1], -1));
+        if(!parsed) {
+            cli_print(cli, "Timeout must be a positive number of seconds");
+            return CLI_ERROR;
+        }
+        timeout = *parsed;
+    }
 
     whitelist_add_entry(fingerprint, timeout);
 
@@ -516,7 +524,15 @@ int cli_diag_ssl_wl_insert_l4(DiagCli *cli, const char *command, char *argv[], i
         cli_print(cli, "Usage: diag tls whitelist insert_l4 <sip:dip:dport> [timeout]");
         return CLI_ERROR;
     }
-    if(args.size() > 1) { timeout = safe_val(args[1], 600); }
+    if(args.size() > 1) {
+        auto const parsed = sx::mitmproxy::override_ttl_seconds(
+            safe_val(args[1], -1));
+        if(!parsed) {
+            cli_print(cli, "Timeout must be a positive number of seconds");
+            return CLI_ERROR;
+        }
+        timeout = *parsed;
+    }
 
     whitelist_add_entry(l4key, timeout);
 
