@@ -387,7 +387,8 @@ bool ExplicitProxy::send_pending_connect_response() {
     return true;
 }
 
-bool ExplicitProxy::handle_cx_write(unsigned char side, baseHostCX* cx) {
+bool ExplicitProxy::handle_cx_write(unsigned char side, baseHostCX* cx,
+                                    bool cross_direction_retry) {
     if(not pending_connect_response_.empty()) {
         if((side == 'r' || side == 'R') && cx->opening()) {
             // This callback is driven by the upstream socket's write event.
@@ -420,7 +421,7 @@ bool ExplicitProxy::handle_cx_write(unsigned char side, baseHostCX* cx) {
             return send_pending_connect_response();
         }
     }
-    return MitmProxy::handle_cx_write(side, cx);
+    return MitmProxy::handle_cx_write(side, cx, cross_direction_retry);
 }
 
 void SocksProxy::socks5_handoff_udp(socksServerCX* cx) {
@@ -524,17 +525,20 @@ baseHostCX* MitmSocksProxy::new_cx(int s) {
     return r; 
 }
 
-void MitmSocksProxy::on_left_new(baseHostCX* just_accepted_cx) {
+void MitmSocksProxy::on_left_new(std::unique_ptr<baseHostCX> accepted_cx) {
 
-    auto* new_proxy = new SocksProxy(com()->slave());
+    if(not accepted_cx) return;
+
+    auto new_proxy = std::make_unique<SocksProxy>(com()->slave());
     // let's add this just_accepted_cx into new_proxy
     std::string h;
     std::string p;
-    just_accepted_cx->name();
-    just_accepted_cx->com()->resolve_socket_src(just_accepted_cx->socket(),&h,&p);
+    accepted_cx->name();
+    accepted_cx->com()->resolve_socket_src(accepted_cx->socket(),&h,&p);
 
-    new_proxy->ladd(just_accepted_cx);
-    this->add_proxy(new_proxy);
+    new_proxy->ladd(accepted_cx.get());
+    accepted_cx.release();
+    this->add_proxy(std::move(new_proxy));
     _deb("MitmSocksProxy::on_left_new: finished");
 }
 
@@ -543,17 +547,20 @@ baseHostCX* MitmSocksUdpProxy::new_cx(int s) {
     return r;
 }
 
-void MitmSocksUdpProxy::on_left_new(baseHostCX* just_accepted_cx) {
+void MitmSocksUdpProxy::on_left_new(std::unique_ptr<baseHostCX> accepted_cx) {
 
-    auto* new_proxy = new SocksProxy(com()->slave());
+    if(not accepted_cx) return;
+
+    auto new_proxy = std::make_unique<SocksProxy>(com()->slave());
     // let's add this just_accepted_cx into new_proxy
     std::string h;
     std::string p;
-    just_accepted_cx->name();
-    just_accepted_cx->com()->resolve_socket_src(just_accepted_cx->socket(),&h,&p);
+    accepted_cx->name();
+    accepted_cx->com()->resolve_socket_src(accepted_cx->socket(),&h,&p);
 
-    new_proxy->ladd(just_accepted_cx);
-    this->add_proxy(new_proxy);
+    new_proxy->ladd(accepted_cx.get());
+    accepted_cx.release();
+    this->add_proxy(std::move(new_proxy));
     _deb("MitmSocksUdpProxy::on_left_new: finished");
 }
 int MitmSocksProxy::handle_sockets_once(baseCom* c) {

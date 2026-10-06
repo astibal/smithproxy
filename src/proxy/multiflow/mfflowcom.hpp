@@ -50,6 +50,7 @@ public:
     bool in_readset(int token) override;
     bool in_writeset(int token) override;
     int translate_socket(int token) const override;
+    bool descriptor_valid(int token) const override;
     int poll() override;
 
     /** Expose the connection carrier to policy while retaining stream I/O. */

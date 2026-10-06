@@ -15,6 +15,9 @@ TEST(MFFlowCom, KeepsStreamIoButReportsUdpToPolicy) {
         64 * 1024, mf::outer_transport::udp);
     auto const flow = connection->open_flow(mf::direction::bidirectional);
     mf::MFFlowCom com(connection, flow);
+    EXPECT_TRUE(com.descriptor_valid(com.token()));
+    EXPECT_FALSE(com.descriptor_valid(-1));
+    EXPECT_FALSE(com.descriptor_valid(0));
 
     // MitmProxy requires stream lifecycle semantics for each QUIC stream. The
     // policy engine must nevertheless match the enclosing UDP/QUIC flow.

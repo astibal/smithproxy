@@ -48,7 +48,7 @@ public:
         : ThreadedAcceptorProxy<HttpConnectProxy>(c, worker_id, t) {}
 
     baseHostCX* new_cx(int s) override;
-    void on_left_new(baseHostCX* just_accepted_cx) override;
+    void on_left_new(std::unique_ptr<baseHostCX> accepted_cx) override;
 
     TYPENAME_OVERRIDE("MitmHttpConnectProxy")
 

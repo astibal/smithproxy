@@ -40,7 +40,7 @@ bool connect_owned_proxy(Owner* owner, std::unique_ptr<Proxy>&& proxy) {
     if(left == nullptr || right == nullptr || owner_com == nullptr) return false;
 
     const int right_socket = right->connect();
-    if(right_socket <= 0) return false;
+    if(right->com() == nullptr || !right->com()->descriptor_valid(right_socket)) return false;
 
     owner_com->set_monitor(right_socket);
     owner_com->set_poll_handler(left->socket(), proxy.get());

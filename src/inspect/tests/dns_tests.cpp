@@ -384,6 +384,78 @@ TEST(DNS_Inspector, rejects_response_without_matching_request) {
     EXPECT_TRUE(host.writebuf()->empty());
 }
 
+TEST(DNSFactory, CorrelatesReceivedDatagramsWithRequestTransactionId) {
+    int sockets[2] {-1, -1};
+    ASSERT_EQ(socketpair(AF_UNIX, SOCK_DGRAM, 0, sockets), 0);
+
+    buffer response;
+    DNSFactory::get().generate_dns_request(0x1234, response, "example.test", A);
+    response.set_at<uint16_t>(2, htons(0x8180));
+
+    ASSERT_EQ(send(sockets[0], response.data(), response.size(), 0),
+              static_cast<ssize_t>(response.size()));
+    auto mismatched = DNSFactory::get().recv_dns_response(
+        sockets[1], 0, 0x4321, "example.test", A);
+    EXPECT_EQ(mismatched.first, nullptr);
+    EXPECT_GT(mismatched.second, 0);
+
+    ASSERT_EQ(send(sockets[0], response.data(), response.size(), 0),
+              static_cast<ssize_t>(response.size()));
+    auto matched = DNSFactory::get().recv_dns_response(
+        sockets[1], 0, 0x1234, "EXAMPLE.TEST.", A);
+    std::unique_ptr<DNS_Response> parsed(matched.first);
+    ASSERT_NE(parsed, nullptr);
+    EXPECT_EQ(parsed->id(), 0x1234);
+
+    response.set_at<uint16_t>(2, htons(0x0100));
+    ASSERT_EQ(send(sockets[0], response.data(), response.size(), 0),
+              static_cast<ssize_t>(response.size()));
+    auto not_a_response = DNSFactory::get().recv_dns_response(
+        sockets[1], 0, 0x1234, "example.test", A);
+    EXPECT_EQ(not_a_response.first, nullptr);
+    EXPECT_GT(not_a_response.second, 0);
+
+    response.set_at<uint16_t>(2, htons(0x8180));
+    ASSERT_EQ(send(sockets[0], response.data(), response.size(), 0),
+              static_cast<ssize_t>(response.size()));
+    auto wrong_name = DNSFactory::get().recv_dns_response(
+        sockets[1], 0, 0x1234, "other.test", A);
+    EXPECT_EQ(wrong_name.first, nullptr);
+    EXPECT_GT(wrong_name.second, 0);
+
+    ASSERT_EQ(send(sockets[0], response.data(), response.size(), 0),
+              static_cast<ssize_t>(response.size()));
+    auto wrong_type = DNSFactory::get().recv_dns_response(
+        sockets[1], 0, 0x1234, "example.test", AAAA);
+    EXPECT_EQ(wrong_type.first, nullptr);
+    EXPECT_GT(wrong_type.second, 0);
+
+    close(sockets[0]);
+    close(sockets[1]);
+}
+
+TEST(DNSFactory, RequestBuilderEnforcesDnsNameBoundsAndNormalizesRootDot) {
+    auto& factory = DNSFactory::get();
+    buffer plain;
+    buffer rooted;
+    ASSERT_GT(factory.generate_dns_request(0x1234, plain, "example.test", A), 0U);
+    ASSERT_GT(factory.generate_dns_request(0x1234, rooted, "example.test.", A), 0U);
+    EXPECT_EQ(plain, rooted);
+
+    buffer invalid;
+    EXPECT_EQ(factory.generate_dns_request(1, invalid, "", A), 0U);
+    EXPECT_TRUE(invalid.empty());
+    EXPECT_EQ(factory.generate_dns_request(1, invalid, ".example", A), 0U);
+    EXPECT_EQ(factory.generate_dns_request(1, invalid, "example..test", A), 0U);
+    EXPECT_EQ(factory.generate_dns_request(1, invalid, std::string(64, 'a') + ".test", A), 0U);
+    EXPECT_EQ(factory.generate_dns_request(1, invalid, std::string(254, 'a'), A), 0U);
+
+    auto const maximum = std::string(63, 'a') + "." + std::string(63, 'b') + "."
+                       + std::string(63, 'c') + "." + std::string(61, 'd');
+    EXPECT_EQ(maximum.size(), 253U);
+    EXPECT_GT(factory.generate_dns_request(1, invalid, maximum, AAAA), 0U);
+}
+
 TEST(DNS_Inspector, waits_for_complete_tcp_frames_and_parses_each_length_prefix) {
     auto* com = new DNSInspectorTestCom();
     com->l4_proto(SOCK_STREAM);

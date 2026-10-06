@@ -237,12 +237,13 @@ bool ExplicitProxyCX::process_dns_response(std::shared_ptr<DNS_Response> resp) {
 
 
 void ExplicitProxyCX::setup_dns_async(std::string const& fqdn, DNS_Record_Type type, AddressInfo const& nameserver) {
-    int dns_sock = DNSFactory::get().send_dns_request(fqdn, type, nameserver);
-    if (dns_sock) {
+    uint16_t request_id = 0;
+    int dns_sock = DNSFactory::get().send_dns_request(fqdn, type, nameserver, &request_id);
+    if (sx::explicit_proxy::valid_dns_socket(dns_sock)) {
         _dia("setup_dns_async: request sent: %s", fqdn.c_str());
 
         using std::placeholders::_1;
-        async_dns_query_ = std::make_unique<AsyncDnsQuery>(this,
+        async_dns_query_ = std::make_unique<AsyncDnsQuery>(this, request_id, fqdn, type,
                                             std::bind(&ExplicitProxyCX::dns_response_callback, this,
                                                       _1));
 
@@ -260,7 +261,9 @@ void ExplicitProxyCX::setup_dns_async(std::string const& fqdn, DNS_Record_Type t
         state_ = socks5_state::DNS_QUERY_SENT;
     } else {
         _err("failed to send dns request: %s", fqdn.c_str());
-        error(true);
+        state_ = socks5_state::DNS_RESP_FAILED;
+        com()->set_monitor(socket());
+        com()->set_write_monitor(socket());
     }
 }
 
@@ -888,28 +891,21 @@ void ExplicitProxyCX::pre_write() {
         }
     }
     else if(state_ == socks5_state::DNS_RESP_FAILED) {
-
-        if(mixed_ip_versions)  {
-            if (not tested_dns_aaaa) {
-                _dia("socksServerCX::pre_write[%s]: trying DNS AAAA query", c_type());
-
-                tested_dns_aaaa = true;
-
-                auto const& nameserver = DNS_Setup::choose_dns_server(AF_INET6);
-                setup_dns_async(req_str_addr, AAAA, nameserver);
-            }
-            else if(not tested_dns_a) {
-                _dia("socksServerCX::pre_write[%s]: trying DNS A query", c_type());
-
-                tested_dns_a = true;
-
-                auto const& nameserver = DNS_Setup::choose_dns_server(AF_INET);
-                setup_dns_async(req_str_addr, A, nameserver);
-            }
-
-        } else {
+        auto const retry = sx::explicit_proxy::next_dns_retry(
+            mixed_ip_versions, tested_dns_a, tested_dns_aaaa);
+        if (!retry) {
             _deb("socksServerCX::pre_write[%s]: dns failed", c_type());
             error(true);
+        } else if (*retry == AAAA) {
+            _dia("socksServerCX::pre_write[%s]: trying DNS AAAA query", c_type());
+            tested_dns_aaaa = true;
+            auto const& nameserver = DNS_Setup::choose_dns_server(AF_INET6);
+            setup_dns_async(req_str_addr, AAAA, nameserver);
+        } else {
+            _dia("socksServerCX::pre_write[%s]: trying DNS A query", c_type());
+            tested_dns_a = true;
+            auto const& nameserver = DNS_Setup::choose_dns_server(AF_INET);
+            setup_dns_async(req_str_addr, A, nameserver);
         }
     }
 }
@@ -923,7 +919,7 @@ void ExplicitProxyCX::dns_response_callback(dns_response_t const& rresp) {
 
     if(red <= 0) {
         _deb("handle_event: socket read returned %d",red);
-        error(true);
+        state_ = socks5_state::DNS_RESP_FAILED;
     } else {
         _deb("handle_event: OK - socket read returned %d",red);
         if(process_dns_response(resp)) {

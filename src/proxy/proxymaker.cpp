@@ -85,7 +85,11 @@ namespace sx::proxymaker {
         }
     }
 
-    std::unique_ptr<MitmProxy> make (baseHostCX *left, baseHostCX *right) {
+    std::unique_ptr<MitmProxy> make(std::unique_ptr<baseHostCX> left_owner,
+                                    std::unique_ptr<baseHostCX> right_owner) {
+
+        auto* left = left_owner.get();
+        auto* right = right_owner.get();
 
         if(not valid_host_pair(left, right)) return nullptr;
 
@@ -104,6 +108,7 @@ namespace sx::proxymaker {
             _deb("MitmMasterProxy::on_left_new: ladd the new cx (unpaused)");
             new_proxy->ladd(left);
         }
+        left_owner.release();
 
         auto entangle = [] (baseHostCX *l, baseHostCX *r) {
             r->com()->l3_proto(l->com()->l3_proto());
@@ -115,6 +120,7 @@ namespace sx::proxymaker {
 
         // almost done, just add this target_cx to right side of new proxy
         new_proxy->radd(right);
+        right_owner.release();
 
 
         return new_proxy;
@@ -191,7 +197,6 @@ namespace sx::proxymaker {
 
 
         {
-            auto l_ = std::scoped_lock(routing_profile->lb_state.lock_);
             auto family = proxy->com() ? proxy->com()->l3_proto() : AF_INET;
             if(auto const* target = proxy->first_right(); target and target->com()) {
                 family = target->com()->l3_proto();
@@ -214,10 +219,10 @@ namespace sx::proxymaker {
                         index = routing_profile->lb_index_rr(candidates.size());
                         break;
                     case ProfileRouting::lb_method::LB_L3:
-                        index = routing_profile->lb_index_l3(const_cast<MitmProxy*>(proxy), candidates.size());
+                        index = routing_profile->lb_index_l3(proxy, candidates.size());
                         break;
                     case ProfileRouting::lb_method::LB_L4:
-                        index = routing_profile->lb_index_l4(const_cast<MitmProxy*>(proxy), candidates.size());
+                        index = routing_profile->lb_index_l4(proxy, candidates.size());
                         break;
                     default:
                         // act as LB_RR

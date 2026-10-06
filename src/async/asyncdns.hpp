@@ -47,14 +47,20 @@ using dns_response_t = std::pair<std::shared_ptr<DNS_Response>, ssize_t>;
 
 class AsyncDnsQuery : public AsyncSocket<dns_response_t>, WithID {
 public:
-    explicit AsyncDnsQuery(baseHostCX* owner, callback_t callback = nullptr):
+    explicit AsyncDnsQuery(baseHostCX* owner, uint16_t request_id,
+                           std::string hostname, DNS_Record_Type type,
+                           callback_t callback = nullptr):
             AsyncSocket(owner, std::move(callback)),
+            request_id_(request_id),
+            hostname_(std::move(hostname)),
+            type_(type),
             log(get_log())
             {}
 
 
     task_state_t update() override {
-        auto raw_response = DNSFactory::get().recv_dns_response(socket(),0);
+        auto raw_response = DNSFactory::get().recv_dns_response(
+            socket(), 0, request_id_, hostname_, type_);
         response.first.reset(raw_response.first);
         response.second = raw_response.second;
 
@@ -73,6 +79,9 @@ public:
 
 private:
     dns_response_t response {nullptr, -1};
+    uint16_t request_id_ = 0;
+    std::string hostname_;
+    DNS_Record_Type type_ = UNKNOWN;
     logan_lite& log;
     logan_lite& get_log() { static auto l = logan_lite("com.dns.async"); return l; }
 };

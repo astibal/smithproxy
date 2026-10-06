@@ -210,8 +210,8 @@ private:
         scheduler->attach(left_com->token(), downstream_, left_handle);
         scheduler->attach(right_com->token(), upstream_, right_handle);
 
-        auto* left = new MitmHostCX(left_com, left_com->token());
-        auto* right = new MitmHostCX(right_com, right_com->token());
+        auto left = std::make_unique<MitmHostCX>(left_com, left_com->token());
+        auto right = std::make_unique<MitmHostCX>(right_com, right_com->token());
         left->host(context_.source_host);
         left->port(context_.source_port);
         right->host(context_.target_host);
@@ -219,7 +219,7 @@ private:
         left->opening(false);
         right->opening(false);
 
-        auto proxy = proxymaker::make(left, right);
+        auto proxy = proxymaker::make(std::move(left), std::move(right));
         if (proxy && context_.make_traffic_log_adapter) {
             // The downstream ID is the stable identity visible to capture
             // consumers; the paired upstream flow may use a different ID.

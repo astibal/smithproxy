@@ -4,6 +4,22 @@
 #include <proxy/mitmhost.hpp>
 #include <async/asyncdns.hpp>
 #include <socketinfo.hpp>
+#include <optional>
+
+namespace sx::explicit_proxy {
+    inline bool valid_dns_socket(int fd) { return fd > 0; }
+
+    inline std::optional<DNS_Record_Type> next_dns_retry(
+            bool mixed_ip_versions, bool tested_a, bool tested_aaaa) {
+        if (!mixed_ip_versions)
+            return std::nullopt;
+        if (!tested_aaaa)
+            return AAAA;
+        if (!tested_a)
+            return A;
+        return std::nullopt;
+    }
+}
 
 using explicit_state = enum class explicit_state_ {
     INIT = 1u, HELLO_SENT, WAIT_REQUEST, REQ_RECEIVED, WAIT_POLICY,
