@@ -50,9 +50,16 @@ all runner-owned namespaces, interfaces and listeners remain mandatory gates.
 ## Test layers
 
 - `quick` verifies that the production target builds.
+- `native` is the unified CTest-backed layer for C++ unit/integration
+  executables, Python process tests and patch-runner self-tests. Its default
+  selection is hermetic and mandatory in `full`.
+- `coverage` runs the default native selection and a local dataplane `sanity`
+  pass under GCC/gcov, then emits combined line coverage in text, JSON and
+  browsable HTML forms. The dataplane pass requires local root privileges.
 - `sanity` is a bounded functional and dataplane validation.
 - `full` is the mandatory comprehensive gate. It contains the functional,
-  performance, churn, capture, corpus and deterministic `fuzz.*` sections.
+  native, performance, churn, capture, corpus and deterministic `fuzz.*`
+  sections. The native gate completes before remote lab sections begin.
 - `benchmark` records latency without enforcing latency gates.
 - `fuzz` runs only the mandatory deterministic fuzz sections.
 - `fuzz-dyn` is optional exploration with one newly generated seed.
@@ -68,6 +75,27 @@ TLS throughput is measurement-only: it has no minimum MiB/s gate. `PASS` means
 that every configured TLS/HTTP transfer completed correctly; handshake,
 process, protocol or transfer-integrity failure is still a hard `FAIL`. Reports
 must retain per-family, per-direction and per-concurrency throughput values.
+
+Repository tests must be registered in CTest instead of requiring knowledge of
+another ad-hoc command. Tests which intentionally require public network
+access, root-only TUN/RAW facilities, or benchmark-scale work stay registered
+but carry `external`, `privileged`, or `benchmark` labels. Long-running soak
+and container distribution checks carry `extended` and `platform`. These
+labels are excluded from the hermetic native/full gate and can be selected
+explicitly; this is isolation, not deletion of coverage.
+
+Line coverage counts executable product lines below `src/` and `socle/` while
+excluding test, testbed, fuzz and third-party sources. It is initially a
+measurement, not a PASS threshold. Adopt or raise a coverage gate only in a
+reviewed policy change backed by a stable baseline; missing/unreadable notes
+or an unreadable data file which does exist is always an infrastructure failure.
+The built `.gcno` inventory defines the denominator. A built object without a
+matching `.gcda` is counted as zero coverage; it must never disappear from the
+report merely because no test executed it.
+Coverage test executables run serially by default because gcov magnifies the
+runtime and resource use of the mempool and large QUIC tests. Explicit
+`PATCH_TEST_CTEST_JOBS` may override this for controlled stress experiments;
+build parallelism remains controlled independently by `--jobs`.
 
 `--parallel` is a stress and throughput control, not a promise that arbitrary
 load is free. Host exhaustion is still a failed run until the limiting layer is
@@ -150,9 +178,35 @@ are included in the next normal commit to the current branch.
 Failed runs are retained in their ordinary report directories with a
 reproduction command and are not written to the successful-run history.
 
+## Planned research labs
+
+- [ ] Add an isolated, explicitly non-production split-engine TLS lab in which
+  one running Smithproxy can use a pinned older OpenSSL release on a selected
+  TLS leg while retaining the current OpenSSL on the other leg. The preferred
+  in-process experiment is a narrow opaque C ABI shim built against the legacy
+  headers and loaded into a separate glibc link-map namespace with `dlmopen()`;
+  no legacy `SSL*`, `SSL_CTX*`, OpenSSL callbacks or allocators may cross that
+  boundary. Ordinary `dlopen()`/`RTLD_DEEPBIND` and a merely renamed SONAME are
+  not sufficient isolation. Retain a helper-process implementation as the
+  safer fallback and reference result. Run the controlled matrix in both
+  directions (legacy client-facing/current origin-facing and the reverse),
+  covering protocol bounds, static RSA, DHE/ECDHE, SHA-1, RC4, AES-128 and
+  session resumption. Every profile switch must prove both its positive and
+  negative case. Keep the lab offline except for its private test network, use
+  generated disposable keys, record the exact OpenSSL/build image version,
+  and never ship or enable this build as a production artifact.
+
 ## Changing this policy
 
 Any change to runner behavior covered here must update this file in the same
 commit. Prefer bounded, reproducible coverage over unbounded work. Never weaken
 a gate merely to make a flaky or overloaded environment green; isolate the
 environmental cause or record an explicit `FLAKY_PASS` threshold instead.
+# Authorization failure policy
+
+Policy tests assume fail-closed defaults. No matching rule is a deny, and an
+`access-request` feature requires an explicit successful `accept` response.
+Legacy availability-first behavior is opt-in through
+`settings.policy_fail_open` and
+`settings.policy_access_request_fail_open`; tests of those switches must also
+prove that explicit deny/reject decisions remain authoritative.

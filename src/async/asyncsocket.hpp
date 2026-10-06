@@ -66,7 +66,9 @@ public:
     virtual R const& yield() const = 0;
     virtual task_state_t update() = 0;
     bool finished() {
-        return update() >= task_state_t::FINISHED;
+        auto const next = update();
+        state(next);
+        return next >= task_state_t::FINISHED;
     }
 
     static const char* task_state_str(task_state_t const& e) {
@@ -99,17 +101,26 @@ public:
         untap();
     }
 
-    void tap(int fd) {
-        socket_.set(fd, this, owner_->com(), true);
+    bool tap(int fd, bool owner = true) {
+        if (!owner_ || !owner_->com() || !owner_->com()->descriptor_valid(fd))
+            return false;
+
+        socket_.set(fd, this, owner_->com(), owner);
         socket_.opening();
 
         this->state(task_state_t::RUNNING);
+        return true;
     }
 
-    void untap() {
+    void untap(bool reset_state = true) {
         socket_.closing();
+        // A non-owning registration does not close the descriptor, but it must
+        // still forget it.  The actual owner may close and recycle that fd
+        // before this task is destroyed.
+        socket_.set(0, nullptr, nullptr, false);
 
-        this->state(task_state_t::INIT);
+        if (reset_state)
+            this->state(task_state_t::INIT);
     }
     task_state_t update() override = 0;
     R const& yield() const override = 0;
@@ -118,6 +129,7 @@ public:
 
         if(com->in_idleset(socket_.socket_)) {
             this->state(task_state_t::TIMEOUT);
+            on_timeout();
         }
             // add more termination expressions
         else {
@@ -126,7 +138,9 @@ public:
 
 
         if(IAsyncTask<R>::state() >= task_state_t::FINISHED) {
-            untap();
+            // Keep the terminal state observable after unregistering so users
+            // can retire completed tasks without losing their final result.
+            untap(false);
             if(callback_) {
                 callback_(yield());
             }
@@ -141,6 +155,10 @@ public:
 
     [[nodiscard]] inline int socket() const { return socket_.socket_; }
     [[nodiscard]] inline baseHostCX* owner() const { return owner_; }
+protected:
+    // Derived tasks can translate an event-loop timeout into their result
+    // type before the common completion callback observes yield().
+    virtual void on_timeout() {}
 private:
     baseHostCX* owner_;
     callback_t callback_;

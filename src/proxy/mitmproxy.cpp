@@ -42,10 +42,12 @@
 #include <cerrno>
 #include <chrono>
 #include <thread>
+#include <openssl/rand.h>
 
 #include <proxy/mitmproxy.hpp>
 #include <proxy/mitmhost.hpp>
 #include <proxy/streamhandler.hpp>
+#include <proxy/mitmproxy_utils.hpp>
 #include <proxy/filters/filterproxy.hpp>
 #include <proxy/filters/sinkhole.hpp>
 
@@ -529,6 +531,21 @@ std::string whitelist_make_key_cert(baseHostCX const* cx) {
     return fg;
 }
 
+std::string whitelist_make_key_override(baseHostCX const* cx,
+                                        SSLCom const* peercom) {
+    auto const l4_key = whitelist_make_key_l4(cx);
+    if(l4_key.empty() || l4_key == "?" || !peercom) return {};
+
+    auto const* client_com = dynamic_cast<SSLCom const*>(cx->com());
+    if(!client_com) return {};
+    return sx::mitmproxy::override_scope_key(l4_key, client_com->get_sni());
+}
+
+sx::mitmproxy::override_challenge_store& MitmProxy::override_challenges() {
+    static sx::mitmproxy::override_challenge_store challenges(500);
+    return challenges;
+}
+
 
 bool MitmProxy::is_white_listed(MitmHostCX const* mh, SSLCom* peercom) {
 
@@ -542,8 +559,21 @@ bool MitmProxy::is_white_listed(MitmHostCX const* mh, SSLCom* peercom) {
 
         // !!! wh might be already invalid here, unlocked !!!
         if (wh_entry != nullptr) {
+            if(wh_entry->value().single_use) {
+                whitelist_verify().erase(key);
+                _dia("whitelist_verify[%s]: consumed single-use entry", key.c_str());
+                return true;
+            }
             if (scom->opt.cert.failed_check_override_timeout_type == 1) {
-                wh_entry->expired_at() = ::time(nullptr) + scom->opt.cert.failed_check_override_timeout;
+                auto const ttl = sx::mitmproxy::override_ttl_seconds(
+                    scom->opt.cert.failed_check_override_timeout);
+                if(!ttl) {
+                    whitelist_verify().erase(key);
+                    _war("whitelist_verify[%s]: invalid sliding timeout %d",
+                         key.c_str(), scom->opt.cert.failed_check_override_timeout);
+                    return false;
+                }
+                wh_entry->expired_at() = ::time(nullptr) + *ttl;
                 _dia("whitelist_verify[%s]: timeout reset to %d", key.c_str(),
                      scom->opt.cert.failed_check_override_timeout);
             }
@@ -553,7 +583,13 @@ bool MitmProxy::is_white_listed(MitmHostCX const* mh, SSLCom* peercom) {
         return false;
     };
 
-    //look for whitelisted entry
+    // Browser-created overrides are scoped to the original client SNI. The
+    // legacy L4 and certificate keys remain intentionally broad for explicit
+    // operator CLI entries and client-certificate bypass.
+    std::string key_override = whitelist_make_key_override(mh, scom);
+    if (!key_override.empty() && find_it(key_override)) return true;
+
+    // Look for operator/client-certificate whitelist entries.
     std::string key_l4 = whitelist_make_key_l4(mh);
     if ((not key_l4.empty()) and key_l4 != "?" and find_it(key_l4)) return true;
 
@@ -572,21 +608,32 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
     // check TLS ClientHello and calculate JA4, if allowed by options
     if(acct_opts.ja4_clienthello and ja4.ClientHello.empty() and ja4.clienthello_counter < ja4.max_reads) {
 
-        // be ready to read empty CH buffer and retry with max attemtps set
+        // An empty or incomplete capture is independent of the certificate
+        // decision below.  Keep retrying JA4 without marking all TLS response
+        // handling complete.
         ja4.clienthello_counter++;
         scom = dynamic_cast<SSLCom *>(mh->peercom());
+        auto const capture_action = sx::mitmproxy::hello_capture_next(
+            scom != nullptr,
+            scom ? scom->client_hello_buffer().size() : 0,
+            5,
+            ja4.clienthello_counter,
+            ja4.max_reads);
 
         // we are always left context
-        if (scom && !scom->client_hello_buffer().empty()) {
+        if (capture_action == sx::mitmproxy::hello_capture_action::parse) {
             sx::ja4::TLSClientHello ch;
             ch.ignore_sni = acct_opts.ja4_clienthello_ignore_sni;
             auto const &ch_buf = scom->client_hello_buffer();
 
             // yes, some copying :( - in c++20 is span, but we are still at c++17
             auto bufvec = std::vector(ch_buf.data() + 5, ch_buf.data() + ch_buf.size());
-            ch.from_buffer(bufvec);
-            ja4.ClientHello = ch.ja4();
-            _dia("JA4: %s (attempt %d)", ja4.ClientHello.c_str(), ja4.clienthello_counter);
+            if(ch.from_buffer(bufvec) == 0) {
+                ja4.ClientHello = ch.ja4();
+                _dia("JA4: %s (attempt %d)", ja4.ClientHello.c_str(), ja4.clienthello_counter);
+            } else if(ja4.clienthello_counter >= ja4.max_reads) {
+                acct_opts.ja4_clienthello = false;
+            }
 
             // we will hijack serverhello here too, but we are OK to test only once
             if(acct_opts.ja4_serverhello and ja4.ServerHello.empty() and not scom->server_hello_buffer().empty()) {
@@ -595,15 +642,14 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
 
                 // yes, some copying :( - in c++20 is span, but we are still at c++17
                 auto shbufvec = std::vector(sh_buf.data(), sh_buf.data() + sh_buf.size());
-                sh.from_buffer(shbufvec);
-                ja4.ServerHello = sh.ja4();
-                _dia("JA4S: %s", ja4.ServerHello.c_str());
+                if(sh.from_buffer(shbufvec) == 0) {
+                    ja4.ServerHello = sh.ja4();
+                    _dia("JA4S: %s", ja4.ServerHello.c_str());
+                }
             }
         }
-        else {
-            // dont try next time
+        else if(capture_action == sx::mitmproxy::hello_capture_action::disable) {
             acct_opts.ja4_clienthello = false;
-            ssl_handled = true;
         }
     }
 
@@ -623,7 +669,46 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
 
     bool redirected = false;
 
-    if(scom && scom->is_verify_status_opt_allowed()) {
+    auto const client_cert_action = scom
+        ? sx::mitmproxy::client_certificate_next(
+              scom->verify_bitcheck(SSLCom::verify_status_t::VRF_CLIENT_CERT_RQ),
+              scom->opt.cert.client_cert_action)
+        : sx::mitmproxy::client_certificate_action::none;
+    std::optional<bool> client_cert_was_whitelisted;
+    bool client_cert_bypass_failed = false;
+
+    if(scom && client_cert_action ==
+                   sx::mitmproxy::client_certificate_action::whitelist_next) {
+        // Action 2 means that the *next* connection bypasses interception so
+        // the client can present its certificate directly. Do not let the
+        // newly-created entry forgive an unrelated verification error on the
+        // current connection.
+        client_cert_was_whitelisted = is_white_listed(mh, scom);
+        auto const ttl = sx::mitmproxy::override_ttl_seconds(
+            scom->opt.cert.failed_check_override_timeout);
+        auto const l4_key = whitelist_make_key_l4(mh);
+        auto const valid_l4_key = !l4_key.empty() && l4_key != "?";
+        if(!*client_cert_was_whitelisted && ttl && valid_l4_key) {
+            log.event(INF, "%s connections whitelisted due to client cert bypass option",
+                      l4_key.c_str());
+            auto lc_ = std::scoped_lock(whitelist_verify().getlock());
+            whitelist_verify_entry entry;
+            entry.single_use = true;
+            whitelist_verify().set(
+                l4_key,
+                new whitelist_verify_entry_t(
+                    entry, *ttl));
+        } else if(!*client_cert_was_whitelisted && (!ttl || !valid_l4_key)) {
+            client_cert_bypass_failed = true;
+            _war("client certificate bypass rejected: timeout=%d key=%s",
+                 scom->opt.cert.failed_check_override_timeout,
+                 l4_key.empty() ? "<empty>" : l4_key.c_str());
+        }
+    }
+
+    if(scom && scom->is_verify_status_opt_allowed() &&
+       client_cert_action != sx::mitmproxy::client_certificate_action::block &&
+       !client_cert_bypass_failed) {
 
         // exceptions are satisfied and we can continue with proxying, regardless of other options
 
@@ -631,79 +716,71 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
         return false;
     }
 
+    if(scom && client_cert_bypass_failed &&
+       !scom->opt.cert.failed_check_replacement) {
+        _war("client certificate bypass could not be prepared; closing fail-closed");
+        state().dead(true);
+        ssl_handled = true;
+        return false;
+    }
+
     if(scom && scom->opt.cert.failed_check_replacement) {
 
-        if(!(
-            scom->verify_get() == SSLCom::verify_status_t::VRF_OK
-             ||
-            scom->verify_get() == ( SSLCom::verify_status_t::VRF_OK | SSLCom::verify_status_t::VRF_CLIENT_CERT_RQ )
-            )) {
+        auto const verification_failed = sx::mitmproxy::tls_verification_failed(
+            static_cast<unsigned>(scom->verify_get()),
+            static_cast<unsigned>(SSLCom::verify_status_t::VRF_OK),
+            static_cast<unsigned>(SSLCom::verify_status_t::VRF_CLIENT_CERT_RQ));
+        auto const client_certificate_block =
+            client_cert_action == sx::mitmproxy::client_certificate_action::block ||
+            client_cert_bypass_failed;
 
-            if(tlog()) tlog()->write_left("original TLS peer verification failed");
+        if(verification_failed || client_certificate_block) {
 
-            bool whitelist_found = is_white_listed(mh, scom);
+            if(tlog()) tlog()->write_left(
+                client_certificate_block
+                    ? "TLS peer requested a client certificate"
+                    : "original TLS peer verification failed");
+
+            bool const whitelist_found = client_cert_was_whitelisted
+                ? *client_cert_was_whitelisted
+                : is_white_listed(mh, scom);
 
             if(not whitelist_found) {
                 _dia("relaxed cert-check: peer sslcom verify not OK, not in whitelist");
 
+                // Prefer the application parser, but ALPN is already
+                // authoritative before the first request bytes arrive.
                 if(mh->replacement_type() == MitmHostCX::REPLACETYPE_NONE) {
-
-                    // _dia(" -> replacement: none - letting go");
-                    // ok - it might happen signature is not yet triggered (and replacement message should happened).
-                    // there are 2 options:
-                    // a) block the connection
-                    // b) reset the connection
-
-                    // certainly there is NO F***ING WAY to letting it go.
-
-                    bool nice_redirect = false;
-
-                    if(first_right()) {
-                        if ("443" == first_right()->port()) {
-                            nice_redirect = true;
+                    auto* client_ssl = dynamic_cast<SSLCom*>(mh->com());
+                    SSLCom* peer_ssl = dynamic_cast<SSLCom*>(scom->peer());
+                    std::string negotiated_alpn;
+                    for(auto* candidate: {scom, peer_ssl, client_ssl}) {
+                        if(candidate && negotiated_alpn.empty()) {
+                            negotiated_alpn = candidate->negotiated_alpn();
                         }
                     }
-
-                    if(! nice_redirect) {
-                        _war("certificate not OK on unknown protocol and port - dropping proxy");
-                        state().dead(true);
-                    }
-                    else {
-                        _war("certificate not OK on known port - assuming http");
-                        mh->replacement_type(MitmHostCX::REPLACETYPE_HTTP);
-                        mh->replacement_flag(MitmHostCX::REPLACE_BLOCK);
-                        redirected = true;
-                        handle_replacement_ssl(mh);
+                    if(negotiated_alpn == "h2") {
+                        mh->replacement_type(MitmHostCX::REPLACETYPE_HTTP2);
+                    } else if(negotiated_alpn == "http/1.1" || negotiated_alpn == "http/1.0") {
+                        mh->replacement_type(MitmHostCX::REPLACETYPE_HTTP1);
                     }
                 }
-                else if(mh->replacement_type() == MitmHostCX::REPLACETYPE_HTTP) {
-                    _dia(" -> replacement: HTTP - redirecting");
+
+                if(mh->replacement_type() == MitmHostCX::REPLACETYPE_NONE) {
+                    _war("certificate not OK; deferring replacement until client protocol is known");
+                    tls_replacement_pending = true;
+                    redirected = true;
+                }
+                else if(mh->replacement_type() == MitmHostCX::REPLACETYPE_HTTP1 ||
+                        mh->replacement_type() == MitmHostCX::REPLACETYPE_HTTP2) {
+                    _dia(" -> replacement: HTTP/%d - redirecting",
+                         mh->replacement_type() == MitmHostCX::REPLACETYPE_HTTP2 ? 2 : 1);
                     mh->replacement_flag(MitmHostCX::REPLACE_BLOCK);
+                    tls_replacement_pending = false;
                     redirected = true;
                     handle_replacement_ssl(mh);
                     
-                } 
-                else if(scom->verify_bitcheck(SSLCom::verify_status_t::VRF_CLIENT_CERT_RQ) && scom->opt.cert.client_cert_action > 0) {
-
-                    _dia(" -> client-cert request:  opt_client_cert_action=%d", scom->opt.cert.client_cert_action);
-
-                    if(scom->opt.cert.client_cert_action == 2) {
-                        //we should not block
-                        _dia(" -> client-cert request: auto-whitelist");
-
-                        auto l4_key = whitelist_make_key_l4(mh);
-                        log.event(INF, "%s connections whitelisted due to client cert bypass option", l4_key.c_str());
-
-                        auto lc_ = std::scoped_lock(whitelist_verify().getlock());
-                        
-                        whitelist_verify_entry v;
-                        whitelist_verify().set(l4_key, new whitelist_verify_entry_t(v, scom->opt.cert.failed_check_override_timeout));
-                    } else {
-                        _dia(" -> client-cert request: no action taken");
-                    }
-
-                }
-                else {
+                } else {
                     _dia(" -> replacement unknown: killing proxy");
                     state().dead(true);
                 }
@@ -711,7 +788,9 @@ bool MitmProxy::handle_com_response_ssl(MitmHostCX* mh)
         }
     }
 
-    ssl_handled = true;
+    if(!tls_replacement_pending) {
+        ssl_handled = true;
+    }
 
     return redirected;
 }
@@ -904,13 +983,25 @@ bool MitmProxy::handle_content_webhook(baseHostCX* from, baseHostCX* to, side_t 
     return false;
 }
 
-void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redirected) {
+void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redirected,
+                      bool consume_source) {
 
     if(not to or not from or from->to_read().empty()) return;
 
     if(redirected) {
-        // rest of connections should be closed when sending replacement to a client
-        to->shutdown();
+        if(tls_replacement_pending) {
+            // Upstream application data must not reach the client after a
+            // failed certificate decision. Keep the client leg alive until
+            // its first application frame identifies the response protocol.
+            from->to_read().clear();
+            return;
+        }
+        // The replacement is queued on the client (left) context. When this
+        // decision was triggered by upstream bytes, `to` is that client and
+        // shutting it down discards our own queued response. Always retire
+        // the upstream context and let the client drain its write queue.
+        auto* upstream = side == side_t::RIGHT ? from : to;
+        upstream->shutdown();
         return;
     }
 
@@ -961,7 +1052,7 @@ void MitmProxy::proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redire
     }
     else {
         write_traffic_log(side, from);
-        to->to_write(from->to_read());
+        to->to_write(from->to_read(), consume_source);
 
         auto sz = from->to_read().size();
         auto fastlane = sz > 0 and from->to_read().empty();
@@ -1021,6 +1112,17 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
 
     bool redirected = handle_requirements(cx);
 
+    if(tls_replacement_pending) {
+        auto* mh = MitmHostCX::from_baseHostCX(cx);
+        if(mh && mh->replacement_type() == MitmHostCX::REPLACETYPE_NONE) {
+            _war("certificate not OK on non-HTTP TLS protocol - dropping proxy");
+            tls_replacement_pending = false;
+            ssl_handled = true;
+            state().dead(true);
+            return;
+        }
+    }
+
     //update meters
     total_mtr_up().update(cx->to_read().size());
     if(acct_opts.details) {
@@ -1033,13 +1135,18 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
         });
     }
 
-    // because we have left bytes, let's copy them into all right side sockets!
+    auto destinations_remaining = right_sockets.size() + right_delayed_accepts.size();
+
+    // Preserve the source for every destination except the final one. The
+    // final transfer may retain the zero-copy fastlane swap.
     std::for_each(
             right_sockets.begin(),
             right_sockets.end(),
             [&](auto* to) {
                 if(not state().dead()) {
-                    proxy(cx, to, side_t::LEFT, redirected);
+                    proxy(cx, to, side_t::LEFT, redirected,
+                          destinations_remaining == 1);
+                    --destinations_remaining;
                 }
             });
 
@@ -1049,7 +1156,9 @@ void MitmProxy::on_left_bytes(baseHostCX* cx) {
             right_delayed_accepts.end(),
             [&](auto* to) {
                 if(not state().dead()) {
-                    proxy(cx, to, side_t::LEFT, redirected);
+                    proxy(cx, to, side_t::LEFT, redirected,
+                          destinations_remaining == 1);
+                    --destinations_remaining;
                 }
             });
 
@@ -1093,12 +1202,16 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
         }
     }
 
+    auto destinations_remaining = left_sockets.size() + left_delayed_accepts.size();
+
     std::for_each(
             left_sockets.begin(),
             left_sockets.end(),
             [&](auto* to) {
                 if(not state().dead()) {
-                    proxy(cx, to, side_t::RIGHT, redirected);
+                    proxy(cx, to, side_t::RIGHT, redirected,
+                          destinations_remaining == 1);
+                    --destinations_remaining;
                 }
             });
 
@@ -1108,7 +1221,9 @@ void MitmProxy::on_right_bytes(baseHostCX* cx) {
             left_delayed_accepts.end(),
             [&](auto* to) {
                 if(not state().dead()) {
-                    proxy(cx, to, side_t::RIGHT, redirected);
+                    proxy(cx, to, side_t::RIGHT, redirected,
+                          destinations_remaining == 1);
+                    --destinations_remaining;
                 }
             });
 
@@ -1153,8 +1268,8 @@ void MitmProxy::_debug_zero_connections(baseHostCX* cx) {
 
 
 void MitmProxy::on_half_close(baseHostCX* cx) {
-    if(cx->peer() && cx->peercom() && cx->peercom()) {
-        // we have existing peer with non-zero write queue - set hold timer 
+    if(sx::mitmproxy::half_close_peer_can_drain(cx)) {
+        // We have a live peer with a non-zero write queue: set hold timer.
         if(half_holdtimer > 0) {
             
             // we count timer already!
@@ -1295,6 +1410,23 @@ void MitmProxy::on_error(baseHostCX* cx, char side, const char* side_label) {
         if(com()->l4_proto() == SOCK_DGRAM) {
             state().dead(true);
         }
+        else if(cx->read_eof()) {
+            auto* peer = cx->peer();
+            if(peer && peer->com() && peer->com()->descriptor_valid(peer->socket())) {
+                // A peer may close only its sending half after a complete
+                // request and continue waiting for a delayed response. Keep
+                // both remaining directions alive for the bounded grace
+                // period even when the request queue has already drained.
+                if(half_holdtimer == 0) half_holdtimer = ::time(nullptr);
+                _log_closed_on(DIA, "half-closing");
+                if(!peer->writebuf()->empty()) {
+                    com()->set_write_monitor(peer->socket());
+                }
+            } else {
+                _log_closed_on(DIA, "half-closing, peer dead");
+                state().dead(true);
+            }
+        }
         else {
             // STREAM sockets need a bit of caring if still having a peer
             if(cx->peer()) {
@@ -1385,6 +1517,13 @@ void MitmProxy::on_right_error(baseHostCX* cx) {
 bool MitmProxy::run_timers() {
     auto ret = baseProxy::run_timers();
 
+    if(ret && !state().dead() &&
+       sx::mitmproxy::half_close_grace_expired(
+           half_holdtimer, half_timeout(), std::time(nullptr))) {
+        _dia("half-close drain grace expired; closing proxy");
+        state().dead(true);
+    }
+
     // run timers actually crawled children
     if(ret and state().dead()) {
         if (writer_opts()->write_payload) {
@@ -1432,8 +1571,10 @@ std::string MitmProxy::verify_flag_string(int code) {
             return "It was not possible to obtain certificate status";
         case verify_status_t::VRF_CT_MISSING:
             return "Certificate Transparency info is missing";
+        case verify_status_t::VRF_CT_FAILED:
+            return "Certificate Transparency verification failed";
         default:
-            return string_format("code 0x04%x", code);
+            return string_format("code 0x%04x", code);
     }
 }
 
@@ -1449,7 +1590,7 @@ std::string MitmProxy::verify_flag_string_extended(int code) {
         case verify_status_t::VRF_OTHER_CT_FAILED:
             return "Unable to verify Certificate Transparency tag.";
         default:
-            return string_format("extended code 0x04%x", code);
+            return string_format("extended code 0x%04x", code);
     }
 }
 
@@ -1479,6 +1620,18 @@ void MitmProxy::set_replacement_msg_ssl(SSLCom* scom) {
         if(scom->verify_bitcheck(verify_status_t::VRF_HOSTNAME_FAILED)) {
             ss << "(ssl:" << verify_flag_string(verify_status_t::VRF_HOSTNAME_FAILED) << ")";
         }
+        if(scom->verify_bitcheck(verify_status_t::VRF_INVALID)) {
+            ss << "(ssl:" << verify_flag_string(verify_status_t::VRF_INVALID) << ")";
+        }
+        if(scom->verify_bitcheck(verify_status_t::VRF_ALLFAILED)) {
+            ss << "(ssl:" << verify_flag_string(verify_status_t::VRF_ALLFAILED) << ")";
+        }
+        if(scom->verify_bitcheck(verify_status_t::VRF_CT_MISSING)) {
+            ss << "(ssl:" << verify_flag_string(verify_status_t::VRF_CT_MISSING) << ")";
+        }
+        if(scom->verify_bitcheck(verify_status_t::VRF_CT_FAILED)) {
+            ss << "(ssl:" << verify_flag_string(verify_status_t::VRF_CT_FAILED) << ")";
+        }
         if(scom->verify_bitcheck(verify_status_t::VRF_EXTENDED_INFO)) {
 
             for(auto const& ei: scom->verify_extended_info()) {
@@ -1494,90 +1647,48 @@ std::string MitmProxy::replacement_ssl_verify_detail(SSLCom* scom) {
     using verify_status_t = SSLCom::verify_status_t;
 
     std::stringstream ss;
-    if(scom) {
-        if (scom->verify_get() != verify_status_t::VRF_OK) {
-            bool is_set = false;
-            int reason_count = 1;
+    if(!scom) return {};
 
-            if (scom->verify_bitcheck(verify_status_t::VRF_SELF_SIGNED)) {
-                ss << "<p><h3 class=\"fg-red\">Reason " << reason_count << ":</h3> " << verify_flag_string(verify_status_t::VRF_SELF_SIGNED) << ".</p>";
-                is_set = true;
-                ++reason_count;
-            }
-            if (scom->verify_bitcheck(verify_status_t::VRF_SELF_SIGNED_CHAIN)) {
-                ss << "<p><h3 class=\"fg-red\">Reason " << reason_count << ":</h3> " << verify_flag_string(verify_status_t::VRF_SELF_SIGNED_CHAIN)
-                   << ".</p>";
-                is_set = true;
-                ++reason_count;
-            }
-            if (scom->verify_bitcheck(verify_status_t::VRF_UNKNOWN_ISSUER)) {
-                ss << "<p><h3 class=\"fg-red\">Reason " << reason_count << ":</h3>" << verify_flag_string(verify_status_t::VRF_UNKNOWN_ISSUER) << ".</p>";
-                is_set = true;
-                ++reason_count;
-            }
-            if (scom->verify_bitcheck(verify_status_t::VRF_CLIENT_CERT_RQ)) {
-                ss << "<p><h3 class=\"fg-red\">Reason " << reason_count << ":</h3>" << verify_flag_string(verify_status_t::VRF_CLIENT_CERT_RQ) << ".<p>";
-                is_set = true;
-                ++reason_count;
-            }
-            if (scom->verify_bitcheck(verify_status_t::VRF_REVOKED)) {
-                ss << "<p><h3 class=\"fg-red\">Reason " << reason_count << ":</h3>" << verify_flag_string(verify_status_t::VRF_REVOKED) <<
-                       ". "
-                       "This is a serious issue, it's highly recommended to not continue "
-                       "to this page.</p>";
-                is_set = true;
-                ++reason_count;
-            }
-            if (scom->verify_bitcheck(verify_status_t::VRF_CT_MISSING)) {
-                ss << "<p><h3 class=\"fg-red\">Reason " << reason_count << ":</h3>" << verify_flag_string(verify_status_t::VRF_CT_MISSING) <<
-                   ". "
-                   "This is a serious issue if your target is a public internet service. In such a case it's highly recommended to not continue."
-                   "</p>";
-                is_set = true;
-                ++reason_count;
-            }
-            if (scom->verify_bitcheck(verify_status_t::VRF_CT_FAILED)) {
-                ss << "<p><h3 class=\"fg-red\">Reason " << reason_count << ":</h3>" << verify_flag_string(verify_status_t::VRF_CT_MISSING) <<
-                   ". "
-                   "This is a serious issue if your target is a public internet service. Don't continue unless you really know what you are doing. "
-                   "</p>";
-                is_set = true;
-                ++reason_count;
-            }
+    int reason_count = 1;
+    auto add_reason = [&](std::string const& detail, bool critical = false) {
+        ss << "<section class=\"reason" << (critical ? " reason-critical" : "")
+           << "\"><h3>Reason " << reason_count++ << "</h3><p>"
+           << sx::mitmproxy::html_escape(detail) << "</p></section>";
+    };
 
-            if (scom->verify_bitcheck(verify_status_t::VRF_INVALID)) {
-                ss << "<p><h3 class=\"fg-red\">Reason " << reason_count << ":</h3>" << verify_flag_string(verify_status_t::VRF_INVALID) << ".</p>";
-                is_set = true;
-                ++reason_count;
-            }
-            if (scom->verify_bitcheck(verify_status_t::VRF_HOSTNAME_FAILED)) {
-                ss << "<p><h3 class=\"fg-red\">Reason " << reason_count << ":</h3>" << verify_flag_string(verify_status_t::VRF_HOSTNAME_FAILED) << ".</p>";
-                is_set = true;
-                ++reason_count;
-            }
-            if (scom->verify_bitcheck(verify_status_t::VRF_ALLFAILED)) {
-                ss << "<p><h3 class=\"fg-red\">Reason " << reason_count << ":</h3>" << verify_flag_string(verify_status_t::VRF_ALLFAILED) << ".</p>";
-                is_set = true;
-                ++reason_count;
-            }
-            if(scom->verify_bitcheck(verify_status_t::VRF_EXTENDED_INFO)) {
-                for (auto const &ei: scom->verify_extended_info()) {
-                    ss << "<p><h3 class=\"fg-red\">Reason " << reason_count << ":</h3>" << verify_flag_string_extended(ei) << ".</p>";
-                    is_set = true;
-                    ++reason_count;
-                }
-            }
-
-            if (!is_set) {
-                ss << string_format(
-                        "<p><h3 class=\"fg-red\">Reason:</h3>Oops, no detailed problem description (code: 0x%x)</p>",
-                        scom->verify_get());
-            }
-        } else {
-            ss << string_format(
-                    "<p><h3 class=\"fg-red\">Reason:</h3>Oops, no detailed problem description (code: 0x%x)</p>",
-                    scom->verify_get());
+    if(scom->verify_get() != verify_status_t::VRF_OK) {
+        if(scom->verify_bitcheck(verify_status_t::VRF_SELF_SIGNED))
+            add_reason(verify_flag_string(verify_status_t::VRF_SELF_SIGNED) + ".");
+        if(scom->verify_bitcheck(verify_status_t::VRF_SELF_SIGNED_CHAIN))
+            add_reason(verify_flag_string(verify_status_t::VRF_SELF_SIGNED_CHAIN) + ".");
+        if(scom->verify_bitcheck(verify_status_t::VRF_UNKNOWN_ISSUER))
+            add_reason(verify_flag_string(verify_status_t::VRF_UNKNOWN_ISSUER) + ".");
+        if(scom->verify_bitcheck(verify_status_t::VRF_CLIENT_CERT_RQ))
+            add_reason(verify_flag_string(verify_status_t::VRF_CLIENT_CERT_RQ) + ".");
+        if(scom->verify_bitcheck(verify_status_t::VRF_REVOKED))
+            add_reason(verify_flag_string(verify_status_t::VRF_REVOKED) +
+                       ". The certificate has been revoked. Do not continue.", true);
+        if(scom->verify_bitcheck(verify_status_t::VRF_CT_MISSING))
+            add_reason(verify_flag_string(verify_status_t::VRF_CT_MISSING) +
+                       ". For a public service, do not continue unless this is expected.", true);
+        if(scom->verify_bitcheck(verify_status_t::VRF_CT_FAILED))
+            add_reason(verify_flag_string(verify_status_t::VRF_CT_FAILED) +
+                       ". Do not continue unless you understand the risk.", true);
+        if(scom->verify_bitcheck(verify_status_t::VRF_INVALID))
+            add_reason(verify_flag_string(verify_status_t::VRF_INVALID) + ".");
+        if(scom->verify_bitcheck(verify_status_t::VRF_HOSTNAME_FAILED))
+            add_reason(verify_flag_string(verify_status_t::VRF_HOSTNAME_FAILED) + ".");
+        if(scom->verify_bitcheck(verify_status_t::VRF_ALLFAILED))
+            add_reason(verify_flag_string(verify_status_t::VRF_ALLFAILED) + ".", true);
+        if(scom->verify_bitcheck(verify_status_t::VRF_EXTENDED_INFO)) {
+            for(auto const& ei: scom->verify_extended_info())
+                add_reason(verify_flag_string_extended(ei));
         }
+    }
+
+    if(reason_count == 1) {
+        add_reason(string_format("No detailed problem description is available (code 0x%x).",
+                                 scom->verify_get()));
     }
 
     return ss.str();
@@ -1585,22 +1696,53 @@ std::string MitmProxy::replacement_ssl_verify_detail(SSLCom* scom) {
 
 
 std::string MitmProxy::replacement_ssl_page(SSLCom* scom, sx::engine::http::app_HttpRequest const* app_request, std::string const& more_info) {
-    std::string repl;
+    // TODO: enrich this page with a structured summary of the original peer
+    // certificate and the exact failed checks. Keep that reporting work
+    // separate from protocol-correct replacement handling.
 
-    const std::string block_target_info = "<p><h3 class=\"fg-red\">Requested site:</h3>" +
-                                                app_request->http_data.proto + app_request->http_data.host + "</p>";
+    if(!app_request) return {};
 
-    const std::string block_additinal_info = replacement_ssl_verify_detail(scom) + more_info;
+    return html()->render_tls_replacement(
+        sx::mitmproxy::html_escape(app_request->http_data.proto +
+                                   app_request->http_data.host),
+        replacement_ssl_verify_detail(scom), more_info);
+}
 
-    const std::string cap = "TLS security warning";
-    const std::string meta;
-    const std::string war_img = html()->render_noargs("html_img_warning");
-    const std::string msg = string_format("<h2 class=\"fg-red\">%s TLS security warning</h2>%s",war_img.c_str(),(block_target_info + block_additinal_info).c_str());
+bool MitmProxy::write_replacement_response(MitmHostCX* cx,
+                                           std::string const& body,
+                                           unsigned status) {
+    if(!cx) return false;
 
-    repl = html()->render_msg_html_page(cap, meta, msg,"700px");
-    repl = html()->render_server_response(repl);
+    auto* app_request = dynamic_cast<sx::engine::http::app_HttpRequest*>(
+        cx->engine_ctx.application_data.get());
+    bool const head_only = app_request && app_request->http_data.method == "HEAD";
 
-    return repl;
+    if(cx->replacement_type() == MitmHostCX::REPLACETYPE_HTTP2) {
+        auto* connection = std::any_cast<sx::engine::http::v2::Http2Connection>(
+            &cx->engine_ctx.state_data);
+        auto const stream_id = connection ? connection->latest_request_stream_id : -1;
+        if(stream_id > 0) {
+            auto response = sx::engine::http::v2::make_response(
+                stream_id, body, status, head_only);
+            if(!response) return false;
+            response->append(sx::engine::http::v2::make_goaway(
+                static_cast<uint32_t>(stream_id), 0));
+            cx->to_write(*response);
+        } else {
+            auto goaway = sx::engine::http::v2::make_server_preamble();
+            goaway.append(sx::engine::http::v2::make_goaway(
+                0, 0x0c, "TLS certificate rejected"));
+            cx->to_write(goaway);
+        }
+        return true;
+    }
+
+    if(cx->replacement_type() == MitmHostCX::REPLACETYPE_HTTP1) {
+        cx->to_write(html()->render_server_response(body, status, head_only));
+        return true;
+    }
+
+    return false;
 }
 
 void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
@@ -1610,9 +1752,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
     auto* scom = dynamic_cast<SSLCom*>(cx->peercom());
     if(!scom) {
         std::string error("<html><head></head><body><p>Internal error</p><p>com object is not ssl-type</p></body></html>");
-        error = html()->render_server_response(error);
-        
-        cx->to_write(error);
+        write_replacement_response(cx, error, 500);
         cx->close_after_write(true);
         set_replacement_msg_ssl(scom);
 
@@ -1627,14 +1767,10 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
         log.event(INF, "[%s]: HTTP replacement active", socle::com::ssl::connection_name(scom, true).c_str());
 
         auto find_orig_uri = [&]() -> std::optional<std::string> {
-            auto request = app_request->request();
-            auto a = request.find("orig_url");
-            if(a != std::string::npos) {
-                //len of "orig_url=" is 9
-                return request.substr(a+9, std::string::npos);
-            }
-
-            return std::nullopt;
+            auto const encoded = sx::mitmproxy::query_parameter(
+                app_request->http_data.params, "orig_url");
+            return encoded ? sx::mitmproxy::decode_relative_target(*encoded)
+                           : std::nullopt;
         };
 
 
@@ -1642,22 +1778,56 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             std::stringstream block_override;
 
             if (scom->opt.cert.failed_check_override) {
-                block_override << R"(<form action="/SM/IT/HP/RO/XY)";
-
-                const std::string key = whitelist_make_key_l4(cx);
-                if (cx->peer()) {
-                    block_override << "/override/target=" + key;
-                    if (not app_request->http_data.uri.empty()) {
-                        block_override << "&orig_url=" << find_orig_uri().value_or("/");
-                    }
+                auto const whitelist_ttl = sx::mitmproxy::override_ttl_seconds(
+                    scom->opt.cert.failed_check_override_timeout);
+                if(!whitelist_ttl) {
+                    _err("cannot offer TLS override with invalid timeout %d",
+                         scom->opt.cert.failed_check_override_timeout);
+                    return {};
                 }
-                block_override << R"("><input type="submit" value="Override" class="btn-red"></form>)";
+                unsigned char random_bytes[16];
+                if(RAND_bytes(random_bytes, sizeof(random_bytes)) != 1) {
+                    _err("cannot generate TLS override challenge");
+                    return {};
+                }
+
+                static constexpr char hex[] = "0123456789abcdef";
+                std::string token;
+                token.reserve(sizeof(random_bytes) * 2);
+                for(auto byte: random_bytes) {
+                    token.push_back(hex[byte >> 4]);
+                    token.push_back(hex[byte & 0x0f]);
+                }
+
+                const std::string challenge_key =
+                    whitelist_make_key_override(cx, scom);
+                if(!cx->peer() || challenge_key.empty()) {
+                    _err("cannot offer TLS override without client TLS identity");
+                    return {};
+                }
+                block_override
+                    << R"(<form action="/SM/IT/HP/RO/XY/override/)"
+                    << token << R"(" method="get">)";
+                if (not app_request->http_data.uri.empty()) {
+                    block_override
+                        << R"(<input type="hidden" name="orig_url" value=")"
+                        << sx::mitmproxy::html_escape(find_orig_uri().value_or("/"))
+                        << R"(">)";
+                }
+                block_override
+                    << R"(<input type="submit" value="Override" class="btn-red"></form>)";
+
+                override_challenges().issue(
+                    challenge_key, token, std::time(nullptr), 120);
             }
 
             return block_override.str();
         };
 
-        if(app_request->request().find("/SM/IT/HP/RO/XY/override") != std::string::npos) {
+        auto const replacement_route = sx::mitmproxy::classify_replacement_route(
+            app_request->http_data.uri);
+
+        if(replacement_route == sx::mitmproxy::replacement_route::override_action) {
             
             // PHASE IV.
             // perform override action
@@ -1667,21 +1837,47 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             
                 _dia("ssl_override: ph4 - asked for verify override for %s", whitelist_make_key_l4(cx).c_str());
                 
+                const auto supplied_token = sx::mitmproxy::override_token_from_route(
+                    app_request->http_data.uri);
+                const auto challenge_key = whitelist_make_key_override(cx, scom);
+                const bool challenge_valid = override_challenges().consume(
+                    challenge_key, supplied_token, std::time(nullptr));
+
+                if(!challenge_valid) {
+                    std::string error("<html><head></head><body><p>Failed to override</p><p>Action is invalid or expired.</p></body></html>");
+                    write_replacement_response(cx, error, 403);
+                    cx->close_after_write(true);
+                    set_replacement_msg_ssl(scom);
+                    replacement_msg += "(ssl: invalid override challenge)";
+                    _war("Connection from %s: rejected invalid TLS override challenge",
+                         cx->full_name('L').c_str());
+                    return;
+                }
+
                 const std::string orig_url = find_orig_uri().value_or("/");
+                const std::string escaped_orig_url = sx::mitmproxy::html_escape(orig_url);
 
                 std::string override_applied = string_format(
                         R"(<html><head><meta http-equiv="Refresh" content="0; url=%s"></head><body><!-- applied, redirecting back to %s --></body></html>)",
-                                                            orig_url.c_str(),orig_url.c_str());
+                                                            escaped_orig_url.c_str(), escaped_orig_url.c_str());
 
                 {
                     auto lc_ = std::scoped_lock(whitelist_verify().getlock());
-                    whitelist_verify().set(whitelist_make_key_l4(cx),
-                                           new whitelist_verify_entry_t({}, scom->opt.cert.failed_check_override_timeout));
+                    auto const ttl = sx::mitmproxy::override_ttl_seconds(
+                        scom->opt.cert.failed_check_override_timeout);
+                    if(!ttl) {
+                        std::string error("<html><head></head><body><p>Failed to override</p><p>Override timeout is invalid.</p></body></html>");
+                        write_replacement_response(cx, error, 403);
+                        cx->close_after_write(true);
+                        set_replacement_msg_ssl(scom);
+                        replacement_msg += "(ssl: invalid override timeout)";
+                        return;
+                    }
+                    whitelist_verify().set(challenge_key,
+                                           new whitelist_verify_entry_t({}, *ttl));
                 }
                 
-                override_applied = html()->render_server_response(override_applied);
-                
-                cx->to_write(override_applied);
+                write_replacement_response(cx, override_applied);
                 cx->close_after_write(true);
                 set_replacement_msg_ssl(scom);
                 replacement_msg += "(ssl: override)";
@@ -1693,9 +1889,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             } else {
                 // override is not enabled, but client somehow reached this (attack?)
                 std::string error("<html><head></head><body><p>Failed to override</p><p>Action is denied.</p></body></html>");
-                error = html()->render_server_response(error);
-
-                cx->to_write(error);
+                write_replacement_response(cx, error, 403);
                 cx->close_after_write(true);
                 set_replacement_msg_ssl(scom);
                 replacement_msg += "(ssl: override disabled)";
@@ -1704,7 +1898,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             }
             
         } else 
-        if(app_request->request().find("/SM/IT/HP/RO/XY/warning") != std::string::npos){
+        if(replacement_route == sx::mitmproxy::replacement_route::warning){
             
             // PHASE III.
             // display warning and button which will trigger override
@@ -1713,7 +1907,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             
             const std::string repl = replacement_ssl_page(scom, app_request, generate_block_override());
 
-            cx->to_write(repl);
+            write_replacement_response(cx, repl, 403);
             set_replacement_msg_ssl(scom);
             cx->close_after_write(true);
         } else 
@@ -1724,8 +1918,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             _dia("ssl_override: ph2 - redir to warning replacement for  %s", whitelist_make_key_l4(cx).c_str());
             
             std::string repl = R"(<html><head><meta http-equiv="Refresh" content="0; url=/SM/IT/HP/RO/XY/warning?q=1"></head><body></body></html>)";
-            repl = html()->render_server_response(repl);
-            cx->to_write(repl);
+            write_replacement_response(cx, repl, 403);
             cx->close_after_write(true);
             set_replacement_msg_ssl(scom);
         }   
@@ -1737,11 +1930,14 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
             
             const std::string redir_pre(R"(<html><head><script>top.location.href=")");
             const std::string redir_suf(R"(";</script></head><body></body></html>)");
+            std::string original_target = app_request->http_data.uri;
+            if(!app_request->http_data.params.empty()) {
+                original_target += "?" + app_request->http_data.params;
+            }
 
-            std::string repl = redir_pre + "/SM/IT/HP/RO/XY/warning?q=1&orig_url=" +app_request->http_data.uri + redir_suf;
-            repl = html()->render_server_response(repl);
-            
-            cx->to_write(repl);
+            std::string repl = redir_pre + "/SM/IT/HP/RO/XY/warning?q=1&orig_url=" +
+                               sx::mitmproxy::query_encode(original_target) + redir_suf;
+            write_replacement_response(cx, repl, 403);
             cx->close_after_write(true);
             set_replacement_msg_ssl(scom);
         }
@@ -1758,9 +1954,7 @@ void MitmProxy::handle_replacement_ssl(MitmHostCX* cx) {
 
 
         std::string repl = redir_pre + "/" + redir_suf;
-        repl = html()->render_server_response(repl);
-
-        cx->to_write(repl);
+        write_replacement_response(cx, repl, 403);
         cx->close_after_write(true);
         set_replacement_msg_ssl(scom);
         replacement_msg += "(ssl: enforced)";
@@ -1783,25 +1977,14 @@ std::optional<buffer> MitmProxy::content_replace_apply(const buffer &ref) {
             const std::regex re_match(profile.match.c_str());
             const std::string repl = profile.replace;
             
-            if(profile.replace_each_nth != 0) {
-                if(profile.replace_each_counter_ >= profile.replace_each_nth) {
-                        
-                    auto replacement = regex_replace_fill(result, profile.match, repl, profile.fill_length ? " " : nullptr);
-                    if(replacement.has_value()) {
-                        will_replace = true;
-                        result = replacement.value();
-                    }
-
-                    profile.replace_each_counter_ = 0;
-                    _dia("Replacing bytes[stage %d]: n-th counter hit", stage);
-                }
-                
-            } else {
+            if(profile.replacement_due()) {
                 auto replacement = regex_replace_fill(result, profile.match, repl, profile.fill_length ? " " : nullptr);
                 if(replacement.has_value()) {
                     will_replace = true;
                     result = replacement.value();
                 }
+                if (profile.replace_each_nth > 1)
+                    _dia("Replacing bytes[stage %d]: n-th counter hit", stage);
             }
 
             _dia("Replacing bytes[stage %d]:",stage);
@@ -2019,38 +2202,45 @@ baseHostCX* MitmMasterProxy::new_cx(int s) {
     return r; 
 }
 
-void MitmMasterProxy::on_left_new(baseHostCX* just_accepted_cx) {
+void MitmMasterProxy::on_left_new(std::unique_ptr<baseHostCX> accepted_cx) {
     // ok, we just accepted socket, created context for it (using new_cx) and we probably need ... 
     // to create child proxy and attach this cx to it.
 
-    if(! just_accepted_cx->com()->nonlocal_dst_resolved()) {
+    if(not accepted_cx || not accepted_cx->com()) {
+        _err("on_left_new: missing accepted connection or transport");
+        return;
+    }
+
+    if(! accepted_cx->com()->nonlocal_dst_resolved()) {
         _err("on_left_new: cannot resolve socket destination");
-        just_accepted_cx->shutdown();
-        delete just_accepted_cx;
+        accepted_cx->shutdown();
         return;
     }
 
     std::string source_host;
     std::string source_port;
 
-    if(not just_accepted_cx->com()->resolve_socket_src(just_accepted_cx->socket(), &source_host, &source_port)) {
+    if(not accepted_cx->com()->resolve_socket_src(accepted_cx->socket(), &source_host, &source_port)) {
         _err("on_left_new: cannot resolve socket source");
 
-        just_accepted_cx->shutdown();
-        delete just_accepted_cx;
+        accepted_cx->shutdown();
         return;
     }
 
 
-    std::string target_host = just_accepted_cx->com()->nonlocal_dst_host();
-    unsigned short target_port = just_accepted_cx->com()->nonlocal_dst_port();
+    std::string target_host = accepted_cx->com()->nonlocal_dst_host();
+    unsigned short target_port = accepted_cx->com()->nonlocal_dst_port();
 
 
-    auto *target_cx = new MitmHostCX(just_accepted_cx->com()->slave(),
-                             target_host.c_str(),
-                             string_format("%d",target_port).c_str());
+    auto target_cx = std::make_unique<MitmHostCX>(accepted_cx->com()->slave(),
+                                                  target_host.c_str(),
+                                                  string_format("%d",target_port).c_str());
 
-    auto new_proxy = sx::proxymaker::make(just_accepted_cx, target_cx);
+    auto new_proxy = sx::proxymaker::make(std::move(accepted_cx), std::move(target_cx));
+    if(not new_proxy) {
+        _err("on_left_new: cannot create child proxy");
+        return;
+    }
     auto lcx = logan_context(new_proxy->to_string(iNOT));
 
     if(not sx::proxymaker::policy(new_proxy, false)) {
@@ -2079,31 +2269,42 @@ int MitmUdpProxy::handle_sockets_once(baseCom* c) {
 }
 
 
-void MitmUdpProxy::on_left_new(baseHostCX* just_accepted_cx)
+void MitmUdpProxy::on_left_new(std::unique_ptr<baseHostCX> accepted_cx)
 {
-    std::string target_host = just_accepted_cx->com()->nonlocal_dst_host();
-    unsigned short target_port = just_accepted_cx->com()->nonlocal_dst_port();
-
-    auto *target_cx = new MitmHostCX(just_accepted_cx->com()->slave(),
-                                     target_host.c_str(),
-                                     string_format("%d",target_port).c_str());
-
-    auto new_proxy = sx::proxymaker::make(just_accepted_cx, target_cx);
-
-    auto lcx = logan_context(new_proxy->to_string(iNOT));
-
-    if(not sx::proxymaker::policy(new_proxy, false)) {
+    if(not accepted_cx || not accepted_cx->com()) {
+        _err("on_left_new: missing accepted datagram connection or transport");
         return;
     }
 
     std::string source_host;
     std::string source_port;
 
-    if(not just_accepted_cx->com()->resolve_socket_src(just_accepted_cx->socket(), &source_host, &source_port)) {
+    // Resolve before proxymaker::make transfers the context into a child
+    // proxy. Deleting it after that transfer leaves the unique_ptr with a
+    // dangling left context and causes a second delete during unwind.
+    if(not accepted_cx->com()->resolve_socket_src(
+            accepted_cx->socket(), &source_host, &source_port)) {
         _err("on_left_new: cannot resolve socket source");
+        accepted_cx->shutdown();
+        return;
+    }
 
-        just_accepted_cx->shutdown();
-        delete just_accepted_cx;
+    std::string target_host = accepted_cx->com()->nonlocal_dst_host();
+    unsigned short target_port = accepted_cx->com()->nonlocal_dst_port();
+
+    auto target_cx = std::make_unique<MitmHostCX>(accepted_cx->com()->slave(),
+                                                  target_host.c_str(),
+                                                  string_format("%d",target_port).c_str());
+
+    auto new_proxy = sx::proxymaker::make(std::move(accepted_cx), std::move(target_cx));
+    if(not new_proxy) {
+        _err("on_left_new: cannot create child datagram proxy");
+        return;
+    }
+
+    auto lcx = logan_context(new_proxy->to_string(iNOT));
+
+    if(not sx::proxymaker::policy(new_proxy, false)) {
         return;
     }
 

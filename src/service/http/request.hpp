@@ -43,6 +43,10 @@
 
 #include <iostream>
 #include <string>
+#include <algorithm>
+#include <chrono>
+#include <limits>
+#include <thread>
 #include <curl/curl.h>
 #include <optional>
 #include <service/core/smithproxy.hpp>
@@ -65,6 +69,14 @@ namespace sx::http {
         CURL *curl;
         struct curl_slist *headers;
         std::string responseData;
+        long timeout_seconds_ = 5;
+        size_t max_response_size_ = 8U * 1024U * 1024U;
+
+        struct write_context_t {
+            std::string* output = nullptr;
+            size_t max_size = 0;
+            bool overflow = false;
+        } write_context {&responseData, max_response_size_, false};
 
     public:
         struct Initializator {
@@ -78,7 +90,7 @@ namespace sx::http {
 
         static Initializator curl_initializator;
 
-        unsigned int max_attmepts = 5;
+        unsigned int max_attempts = 2;
         unsigned int attempts = 0;
         std::stringstream* debug_log = nullptr;
         static inline bool DEBUG = false;
@@ -94,8 +106,19 @@ namespace sx::http {
             static inline thread_local progress_t data {nullptr, 0};
 
             static size_t _write_callback(void *contents, size_t size, size_t nmemb, void *userp) {
-                ((std::string *) userp)->append((char *) contents, size * nmemb);
-                return size * nmemb;
+                auto* context = static_cast<write_context_t*>(userp);
+                if (!context || !context->output ||
+                    (size != 0 && nmemb > std::numeric_limits<size_t>::max() / size)) {
+                    return 0;
+                }
+                const size_t bytes = size * nmemb;
+                if (bytes > context->max_size - std::min(context->max_size,
+                                                          context->output->size())) {
+                    context->overflow = true;
+                    return 0;
+                }
+                context->output->append(static_cast<char*>(contents), bytes);
+                return bytes;
             }
 
             static int callback(void *clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t ultotal,
@@ -118,13 +141,22 @@ namespace sx::http {
 
         // this is not good idea, but good to have for testing
         void disable_tls_verify() {
-            if(curl)
+            if(curl) {
                 curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+                curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+            }
         }
 
         void set_timeout(long seconds) {
-            if(curl)
+            if(curl && seconds > 0) {
+                timeout_seconds_ = seconds;
                 curl_easy_setopt(curl, CURLOPT_TIMEOUT, seconds);
+            }
+        }
+
+        void set_max_response_size(size_t bytes) {
+            max_response_size_ = bytes;
+            write_context.max_size = bytes;
         }
 
         void set_stale_detection(long seconds=30) {
@@ -192,6 +224,24 @@ namespace sx::http {
 
             headers = nullptr;
             headers = curl_slist_append(headers, "Content-Type: application/json");
+            if (!headers) {
+                curl_easy_cleanup(curl);
+                curl = nullptr;
+                throw std::runtime_error("Failed to initialize CURL headers.");
+            }
+            // Large POSTs otherwise use Expect: 100-continue. Webhook peers
+            // and HTTP intermediaries often do not answer the interim request,
+            // adding a visible delay before cURL sends the body.
+            if (auto* updated = curl_slist_append(headers, "Expect:")) {
+                headers = updated;
+            }
+            else {
+                curl_slist_free_all(headers);
+                headers = nullptr;
+                curl_easy_cleanup(curl);
+                curl = nullptr;
+                throw std::runtime_error("Failed to initialize CURL headers.");
+            }
 
             // Set up common options
             curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
@@ -199,12 +249,13 @@ namespace sx::http {
 
             curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
             curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, progress::_write_callback);
-            curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseData);
+            curl_easy_setopt(curl, CURLOPT_WRITEDATA, &write_context);
             curl_easy_setopt(curl, CURLOPT_COOKIEFILE, "");
 
             // Enable the progress function
             curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &progress::data);
             curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, progress::callback);
+            curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
 
             // IP version handling
             switch (ip_version) {
@@ -232,20 +283,40 @@ namespace sx::http {
         ~Request() {
             if(curl)
                 curl_easy_cleanup(curl);
+            if(headers)
+                curl_slist_free_all(headers);
         }
+
+        Request(Request const&) = delete;
+        Request& operator=(Request const&) = delete;
+        Request(Request&&) = delete;
+        Request& operator=(Request&&) = delete;
 
         using Reply = sx::http::expected_reply;
 
         Reply emit(std::string const& url, std::string const& payload) {
-            CURLcode res = CURLE_OK;
+            CURLcode res = CURLE_FAILED_INIT;
 
             curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
             curl_easy_setopt(curl, CURLOPT_POST, 1L);
             curl_easy_setopt(curl, CURLOPT_POSTFIELDS, payload.c_str());
+            curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE_LARGE,
+                             static_cast<curl_off_t>(payload.size()));
 
-
-            for (; attempts < max_attmepts; ++attempts) {
+            attempts = 0;
+            const auto deadline = std::chrono::steady_clock::now()
+                                  + std::chrono::seconds(timeout_seconds_);
+            while (attempts < max_attempts) {
+                const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    deadline - std::chrono::steady_clock::now()).count();
+                if (remaining <= 0) {
+                    res = CURLE_OPERATION_TIMEDOUT;
+                    break;
+                }
+                curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, std::max<long long>(1, remaining));
                 responseData.clear();
+                write_context.overflow = false;
+                ++attempts;
                 res = curl_easy_perform(curl);
 
                 auto do_log = (DEBUG and debug_log);
@@ -265,10 +336,18 @@ namespace sx::http {
 
                     *debug_log <<  s;
                 }
+
+                const bool safe_to_retry = res == CURLE_COULDNT_RESOLVE_PROXY
+                                           || res == CURLE_COULDNT_RESOLVE_HOST
+                                           || res == CURLE_COULDNT_CONNECT;
+                if (!safe_to_retry || attempts >= max_attempts) break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
             }
 
 
             if (res != CURLE_OK) {
+                if (write_context.overflow)
+                    return make_reply(url, 600, "webhook response exceeds configured limit");
                 return make_reply(url, 600, curl_easy_strerror(res));
             }
 

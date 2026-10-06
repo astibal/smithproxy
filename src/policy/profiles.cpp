@@ -6,19 +6,10 @@
 
 void ProfileRouting::update() {
     lb_state.expand_candidates(dnat_addresses);
-    lb_state.rr_counter++;
-}
-
-std::vector<std::shared_ptr<CidrAddress>> ProfileRouting::lb_candidates(int family) const {
-    return family == CIDR_IPV6 ? lb_state.candidates_v6 : lb_state.candidates_v4;
-}
-
-size_t ProfileRouting::lb_index_rr(size_t sz) const {
-    return sz == 0 ? 0 : lb_state.rr_counter % sz;
 }
 
 
-static uint32_t crc32_proxy_key(MitmProxy* proxy, bool add_port) {
+static uint32_t crc32_proxy_key(MitmProxy const* proxy, bool add_port) {
     std::stringstream ss;
 
     if(auto const* l = proxy->first_left(); l) {
@@ -36,22 +27,29 @@ static uint32_t crc32_proxy_key(MitmProxy* proxy, bool add_port) {
     return socle::tools::crc32::compute(0, key.data(), key.size());
 }
 
-size_t ProfileRouting::lb_index_l3 (MitmProxy* proxy, size_t sz) const {
+size_t ProfileRouting::lb_index_l3 (MitmProxy const* proxy, size_t sz) const {
 
-    return sz == 0 ? 0 : crc32_proxy_key(proxy, false) % sz;
+    return sz == 0 || !proxy ? 0 : crc32_proxy_key(proxy, false) % sz;
 }
 
-size_t ProfileRouting::lb_index_l4(MitmProxy* proxy, size_t sz) const {
+size_t ProfileRouting::lb_index_l4(MitmProxy const* proxy, size_t sz) const {
 
-    return sz == 0 ? 0 : crc32_proxy_key(proxy, proxy) % sz;
+    return sz == 0 || !proxy ? 0 : crc32_proxy_key(proxy, true) % sz;
 }
 
 
 bool ProfileRouting::LbState::expand_candidates(std::vector<std::string> const& addresses) {
 
-    if(auto now = time(nullptr); now - last_refresh > refresh_interval) {
-        last_refresh = now;
+    const auto now = time(nullptr);
+    {
+        auto l_ = std::scoped_lock(lock_);
+        if (refresh_in_progress || now - last_refresh <= refresh_interval) {
+            return false;
+        }
+        refresh_in_progress = true;
+    }
 
+    try {
         // get a fresh, expanded list of all IP addresses
         const std::vector<std::shared_ptr<CidrAddress>> update4 = CfgFactory::get()->expand_to_cidr(addresses, AF_INET);
         const std::vector<std::shared_ptr<CidrAddress>> update6 = CfgFactory::get()->expand_to_cidr(addresses, AF_INET6);
@@ -59,7 +57,14 @@ bool ProfileRouting::LbState::expand_candidates(std::vector<std::string> const& 
         auto l_ = std::scoped_lock(lock_);
         candidates_v4 = update4;
         candidates_v6 = update6;
+        last_refresh = now;
+        refresh_in_progress = false;
+    }
+    catch (...) {
+        auto l_ = std::scoped_lock(lock_);
+        refresh_in_progress = false;
+        throw;
     }
 
-    return false;
+    return true;
 }

@@ -177,6 +177,11 @@ int MFFlowCom::translate_socket(int) const {
     return -1;
 }
 
+bool MFFlowCom::descriptor_valid(int token) const {
+    auto connection = lock_connection();
+    return token < 0 && token == token_ && connection && connection->contains(flow_);
+}
+
 int MFFlowCom::poll() {
     return 0;
 }

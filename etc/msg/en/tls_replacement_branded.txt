@@ -1,0 +1,3 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><meta name="theme-color" content="#07110f"><title>TLS security warning</title><style>
+:root{--bg:#07110f;--bg2:#091511;--panel:#0c1916;--ink:#eef7f2;--muted:#93aaa0;--line:rgba(179,214,198,.16);--accent:#83f28f;--target:#63e6d7;--danger:#ff786f;--danger-ink:#190604;--danger-bg:rgba(255,120,111,.09);--glow:rgba(31,199,123,.13);--card-shadow:rgba(0,0,0,.38)}
+{% include tls_replacement_common.txt %}

@@ -126,17 +126,24 @@ after_addresses = addresses('host-addresses-after.json')
 # Network-namespace veth endpoints are transient host state.  Other parallel
 # labs, containers, or the test controller may create/remove them between our
 # two snapshots, so comparing them would make cleanup verification racy.
+before_names = {interface.get('ifname', '') for interface in before_addresses}
+after_names = {interface.get('ifname', '') for interface in after_addresses}
 transient_interfaces = {
     interface.get('ifname', '')
     for interface in before_addresses + after_addresses
     if 'link_netnsid' in interface
     or runner_veth.fullmatch(interface.get('ifname', ''))
 }
+transient_interfaces.update(before_names ^ after_names)
 
 def normalized_addresses(value):
     value = [interface for interface in value
              if interface.get('ifname', '') not in transient_interfaces]
     for interface in value:
+        # Carrier/operational state may change when an unrelated VM or
+        # container joins a pre-existing host bridge during a long run.
+        interface.pop('flags', None)
+        interface.pop('operstate', None)
         # Privacy addresses are rotated and expire independently of the lab.
         # They are host state, but not state that the patch runner owns or can
         # restore, so exclude them from the leak check.
@@ -149,16 +156,29 @@ def normalized_addresses(value):
     return value
 def normalized_routes(name):
     value = json.loads((root / name).read_text())
-    return [route for route in value
-            if route.get('dev', '') not in transient_interfaces]
+    value = [route for route in value
+             if route.get('dev', '') not in transient_interfaces]
+    for route in value:
+        # `linkdown` follows carrier state and is not route ownership.
+        route.pop('flags', None)
+    return value
 assert normalized_addresses(before_addresses) == normalized_addresses(after_addresses)
 assert normalized_routes('host-routes-before.json') == normalized_routes('host-routes-after.json')
 PYCOMPARE
+    ! ip link show "$IN_IF" >/dev/null 2>&1
+    ! ip link show "$OUT_IF" >/dev/null 2>&1
     ! ip netns list | grep -Eq "^(${CLIENT}|${SERVER}|${NS})( |$)"
     ! ss -ltnH "sport = :$API_RELAY_PORT" | grep -q .
     ! ss -ltnH "sport = :$CLI_RELAY_PORT" | grep -q .
     echo 'PASS cleanup: no lab namespaces/API/CLI listeners; host addresses and routes unchanged'
 }
+report_error() {
+    local rc=$?
+    local line=${1:-unknown}
+    echo "FAIL: lab command at line $line exited with rc=$rc" >&2
+    return "$rc"
+}
+trap 'report_error "$LINENO"' ERR
 trap cleanup EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
@@ -291,6 +311,25 @@ if [[ $BASE_TRAFFIC_TEST == 1 ]]; then
 ip netns exec "$CLIENT" curl --noproxy '*' -fsS --max-time 15 http://198.18.20.2:8080/ > "$ROOT/results/http4.txt"
 grep -q 'runner-origin-ok peer=198.18.20.1' "$ROOT/results/http4.txt"
 echo 'PASS4 TCP/HTTP: original destination preserved, egress uses do0'
+ip netns exec "$CLIENT" python3 - <<'PY' > "$ROOT/results/http-half-close.txt"
+import socket
+
+request = (b'GET /delayed-half-close HTTP/1.1\r\n'
+           b'Host: 198.18.20.2\r\nConnection: close\r\n\r\n')
+with socket.create_connection(('198.18.20.2', 8080), timeout=10) as connection:
+    connection.sendall(request)
+    connection.shutdown(socket.SHUT_WR)
+    response = bytearray()
+    while True:
+        chunk = connection.recv(65536)
+        if not chunk:
+            break
+        response.extend(chunk)
+assert b'HTTP/1.0 200 OK' in response, response[:200]
+assert b'runner-origin-ok peer=198.18.20.1' in response, response[-200:]
+print('half-close response bytes=' + str(len(response)))
+PY
+echo 'PASS4 TCP half-close: delayed response survived client SHUT_WR'
 ip netns exec "$CLIENT" curl --noproxy '*' -gfsS --max-time 15 'http://[fd00:20::2]:8080/' > "$ROOT/results/http6.txt"
 grep -q 'runner-origin-ok peer=fd00:20::1' "$ROOT/results/http6.txt"
 echo 'PASS6 TCP/HTTP: original destination preserved, egress uses do0'
@@ -596,7 +635,7 @@ if [[ $POLICY_TEST == 1 ]]; then
         exit "$POLICY_RC"
     fi
     python3 "$ROOT/runner/tests/suites/policy/report.py" "$ROOT/results/policy-suite4.json"
-    echo 'PASS4 policy suite: precedence, disabled, accept/profile and reject rules'
+    echo 'PASS4 policy suite: precedence, source/port/protocol, disabled, profiles and deny rules'
     set +e
     ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/suites/policy/run.py" \
         --host fd00:20::2 > "$ROOT/results/policy-suite6.json"
@@ -607,7 +646,7 @@ if [[ $POLICY_TEST == 1 ]]; then
         exit "$POLICY_RC"
     fi
     python3 "$ROOT/runner/tests/suites/policy/report.py" "$ROOT/results/policy-suite6.json"
-    echo 'PASS6 policy suite: precedence, disabled, accept/profile and reject rules'
+    echo 'PASS6 policy suite: precedence, source/port/protocol, disabled, profiles and deny rules'
 fi
 if [[ $ROUTING_TEST == 1 ]]; then
     ip netns exec "$SERVER" python3 -u "$ROOT/runner/tests/suites/routing/run.py" server \
@@ -626,6 +665,9 @@ if [[ $ROUTING_TEST == 1 ]]; then
     ip netns exec "$CLIENT" python3 "$ROOT/runner/tests/suites/routing/run.py" client --family 6 \
         > "$ROOT/results/routing-suite6.json"
     echo 'PASS6 routing: address/port rewrite, RR/L3/L4, SNI rewrite, SOCKS5 and opaque CONNECT tunnel'
+    kill "$ROUTING_SERVER_PID"
+    wait "$ROUTING_SERVER_PID" 2>/dev/null || true
+    ROUTING_SERVER_PID=
 fi
 if [[ $RTT_TEST == 1 ]]; then
     RTT_EXTRA_ARGS=()
@@ -959,8 +1001,13 @@ fi
 kill -CONT "$(cat "$ROOT/data/proxy.pid")"
 echo 'PASS6 no bypass while proxy is stopped'
 kill -TERM "$RUNNER_PID"
-wait "$RUNNER_PID" || test "$?" = 143
+runner_rc=0
+wait "$RUNNER_PID" || runner_rc=$?
 RUNNER_PID=
+case "$runner_rc" in
+    0|143|241) ;;
+    *) echo "FAIL: runner shutdown exited with rc=$runner_rc" >&2; exit "$runner_rc" ;;
+esac
 if [[ $CAPTURE_TEST == 1 ]]; then
     python3 "$ROOT/runner/tests/verify-pcap.py" "$ROOT/data" "$CAPTURE_PREFIX" "$CAPTURE_MARKER" "$CAPTURE_MARKER6" \
         > "$ROOT/results/pcap-validation.json"

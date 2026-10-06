@@ -45,6 +45,7 @@
 #include <mutex>
 #include <unordered_map>
 #include <optional>
+#include <string_view>
 #include <ctime>
 
 #include <sys/socket.h>
@@ -105,12 +106,17 @@ public:
 
     // send DNS request out to network. Return socket FD, or non-positive on error.
     // you want to call this for async request
-    int send_dns_request (std::string const &hostname, DNS_Record_Type t, AddressInfo const& nameserver);
+    int send_dns_request (std::string const &hostname, DNS_Record_Type t,
+                          AddressInfo const& nameserver, uint16_t* request_id = nullptr);
 
     // @returns: response and return from receive - well. I don't like it this way either,
     // but we can't actually return nullptr, since it could be legit return value on non-blocking socket
     // you want to call this for async receive - ideally if socket is in readset.
-    std::pair<DNS_Response*, ssize_t> recv_dns_response(int send_socket, unsigned int timeout_sec=2);
+    std::pair<DNS_Response*, ssize_t> recv_dns_response(
+        int send_socket, unsigned int timeout_sec = 2,
+        std::optional<uint16_t> expected_id = std::nullopt,
+        std::string_view expected_hostname = {},
+        DNS_Record_Type expected_type = UNKNOWN);
 
 
     // this is easiest way to resolve. Just do the thing, with blocking ... and waiting.
@@ -268,6 +274,7 @@ public:
     std::vector<std::unique_ptr<CidrAddress>> get_a_anwsers() const;
 
     inline std::vector<DNS_Question>& questions() { return questions_list_; };
+    inline std::vector<DNS_Question> const& questions() const { return questions_list_; };
     inline std::vector<DNS_Answer>& answers() { return answers_list_; };
     inline std::vector<DNS_Answer>& authorities() { return authorities_list_; };
     inline std::vector<DNS_Answer>& additionals() { return additionals_list_; };

@@ -1,9 +1,11 @@
 
 #pragma once
 
+#include <functional>
 #include <nlohmann/json.hpp>
+#include <string>
 
-class MitmMproxy;
+class MitmProxy;
 struct ObjAPI {
     void for_each_proxy(std::function<void(MitmProxy*)> callable);
 

@@ -40,6 +40,7 @@
 #include <service/cfgapi/cfgapi.hpp>
 #include <log/logger.hpp>
 #include <proxy/socks5/sockshostcx.hpp>
+#include <proxy/socks5/socks5_protocol.hpp>
 #include <proxy/explicitproxyport.hpp>
 #include <inspect/dnsinspector.hpp>
 
@@ -86,29 +87,36 @@ std::size_t socksServerCX::process_in() {
 
 std::size_t socksServerCX::process_socks_udp_request() {
     buffer const *b = readbuf();
-    if (b->size() < 4) {
-        // minimal size of "client hello" is 3 bytes
+    const auto header_status = sx::socks5::inspect_udp_header(b->data(), b->size());
+    if(header_status == sx::socks5::udp_header_status::incomplete) {
         return 0;
     }
-
-    [[maybe_unused]]    uint16_t reserved = b->get_at<uint8_t>(0);
-    [[maybe_unused]]    uint8_t fragment = b->get_at<uint8_t>(2);
+    if(header_status != sx::socks5::udp_header_status::ready) {
+        socks_error_ = socks5_request_error::MALFORMED_DATA;
+        error(true);
+        return b->size();
+    }
 
     req_cmd = socks5_cmd::CONNECT;
     req_atype = static_cast<socks5_atype>( b->get_at<uint8_t>(3));
 
     try {
-        _dia("process_socks_udp_request: request size %d, fragment %d, atype %d", b->size(), fragment, req_atype);
+        _dia("process_socks_udp_request: request size %d, fragment %d, atype %d",
+             b->size(), b->get_at<uint8_t>(2), req_atype);
         auto err = handle5_connect();
 
         if(err != socks5_request_error::NONE) {
-            _dia("process_socks_udp_request: ok");
-            return 0;
+            _dia("process_socks_udp_request: request error %d", err);
+            socks_error_ = err;
+            error(true);
+            return b->size();
         }
     }
     catch(std::out_of_range const&) {
         _dia("process_socks_udp_request: error");
-        return 0;
+        socks_error_ = socks5_request_error::MALFORMED_DATA;
+        error(true);
+        return b->size();
     }
 
     // there is actually no response sent in UDP proxy case
@@ -229,12 +237,13 @@ bool ExplicitProxyCX::process_dns_response(std::shared_ptr<DNS_Response> resp) {
 
 
 void ExplicitProxyCX::setup_dns_async(std::string const& fqdn, DNS_Record_Type type, AddressInfo const& nameserver) {
-    int dns_sock = DNSFactory::get().send_dns_request(fqdn, type, nameserver);
-    if (dns_sock) {
+    uint16_t request_id = 0;
+    int dns_sock = DNSFactory::get().send_dns_request(fqdn, type, nameserver, &request_id);
+    if (sx::explicit_proxy::valid_dns_socket(dns_sock)) {
         _dia("setup_dns_async: request sent: %s", fqdn.c_str());
 
         using std::placeholders::_1;
-        async_dns_query_ = std::make_unique<AsyncDnsQuery>(this,
+        async_dns_query_ = std::make_unique<AsyncDnsQuery>(this, request_id, fqdn, type,
                                             std::bind(&ExplicitProxyCX::dns_response_callback, this,
                                                       _1));
 
@@ -252,7 +261,9 @@ void ExplicitProxyCX::setup_dns_async(std::string const& fqdn, DNS_Record_Type t
         state_ = socks5_state::DNS_QUERY_SENT;
     } else {
         _err("failed to send dns request: %s", fqdn.c_str());
-        error(true);
+        state_ = socks5_state::DNS_RESP_FAILED;
+        com()->set_monitor(socket());
+        com()->set_write_monitor(socket());
     }
 }
 
@@ -522,9 +533,9 @@ socks5_request_error socksServerCX::handle5_connect() {
 
         auto key = string_format("%s:%s", host().c_str(), port().c_str());
         if(ass->clients.find(key) == ass->clients.end()) {
-            return socks5_request_error::UNAUTHORIZED;
             error(true);
             _not("handle5_connect: UDP client not properly associated");
+            return socks5_request_error::UNAUTHORIZED;
         }
         else {
             _dia("handle5_connect: UDP client association found");
@@ -789,7 +800,17 @@ std::size_t socksServerCX::process_socks_reply_v5() {
         *((uint32_t*)&response[cur_data_ptr]) = 0U;
         cur_data_ptr += sizeof(uint32_t);
 
-        *((uint16_t*)&response[cur_data_ptr]) = htons(1080);
+        std::string relay_port_text;
+        const bool relay_resolved = com()->resolve_socket_dst(
+            socket(), nullptr, &relay_port_text);
+        const auto relay_port = relay_resolved
+            ? sx::explicit_proxy::parse_source_port(relay_port_text)
+            : std::nullopt;
+        if(!relay_port) {
+            _err("process_socks_reply_v5: cannot resolve UDP relay port");
+            response[1] = 1; // general SOCKS server failure
+        }
+        *((uint16_t*)&response[cur_data_ptr]) = htons(relay_port.value_or(0));
         cur_data_ptr += sizeof(uint16_t);
     }
 
@@ -870,28 +891,21 @@ void ExplicitProxyCX::pre_write() {
         }
     }
     else if(state_ == socks5_state::DNS_RESP_FAILED) {
-
-        if(mixed_ip_versions)  {
-            if (not tested_dns_aaaa) {
-                _dia("socksServerCX::pre_write[%s]: trying DNS AAAA query", c_type());
-
-                tested_dns_aaaa = true;
-
-                auto const& nameserver = DNS_Setup::choose_dns_server(AF_INET6);
-                setup_dns_async(req_str_addr, AAAA, nameserver);
-            }
-            else if(not tested_dns_a) {
-                _dia("socksServerCX::pre_write[%s]: trying DNS A query", c_type());
-
-                tested_dns_a = true;
-
-                auto const& nameserver = DNS_Setup::choose_dns_server(AF_INET);
-                setup_dns_async(req_str_addr, A, nameserver);
-            }
-
-        } else {
+        auto const retry = sx::explicit_proxy::next_dns_retry(
+            mixed_ip_versions, tested_dns_a, tested_dns_aaaa);
+        if (!retry) {
             _deb("socksServerCX::pre_write[%s]: dns failed", c_type());
             error(true);
+        } else if (*retry == AAAA) {
+            _dia("socksServerCX::pre_write[%s]: trying DNS AAAA query", c_type());
+            tested_dns_aaaa = true;
+            auto const& nameserver = DNS_Setup::choose_dns_server(AF_INET6);
+            setup_dns_async(req_str_addr, AAAA, nameserver);
+        } else {
+            _dia("socksServerCX::pre_write[%s]: trying DNS A query", c_type());
+            tested_dns_a = true;
+            auto const& nameserver = DNS_Setup::choose_dns_server(AF_INET);
+            setup_dns_async(req_str_addr, A, nameserver);
         }
     }
 }
@@ -905,7 +919,7 @@ void ExplicitProxyCX::dns_response_callback(dns_response_t const& rresp) {
 
     if(red <= 0) {
         _deb("handle_event: socket read returned %d",red);
-        error(true);
+        state_ = socks5_state::DNS_RESP_FAILED;
     } else {
         _deb("handle_event: OK - socket read returned %d",red);
         if(process_dns_response(resp)) {

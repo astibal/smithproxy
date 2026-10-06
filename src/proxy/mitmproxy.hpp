@@ -59,15 +59,16 @@
 #include <traflog/pcaplog.hpp>
 
 #include <policy/policy.hpp>
+#include <proxy/mitmproxy_utils.hpp>
 
 #include <sslcertval.hpp>
-#include <proxy/ocspinvoker.hpp>
 #include <inspect/engine/http.hpp>
 
 #include <utils/lazy_ptr.hpp>
 #include <service/core/sessionlist.hpp>
 
 struct whitelist_verify_entry {
+    bool single_use = false;
 };
 
 class FilterProxy;
@@ -114,6 +115,8 @@ public:
         static whitelist_map_t m("whitelist_verify", 500, true, whitelist_verify_entry_t::is_expired);
         return m;
     }
+
+    static sx::mitmproxy::override_challenge_store& override_challenges();
 
     struct Opts_ContentWriter {
         bool write_payload = false;
@@ -201,7 +204,8 @@ public:
     void write_stream_traffic(sx::stream_direction direction, std::string_view plaintext);
     void write_stream_event(sx::stream_direction direction, std::string_view event);
     void proxy_dump_packet(side_t sid, buffer const& buf);
-    void proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redirected);
+    void proxy(baseHostCX* from, baseHostCX* to, side_t side, bool redirected,
+               bool consume_source = true);
 
     // makes a synchronous API call letting webhook modify the content
     bool content_webhook(baseHostCX* cx, side_t side, buffer& buffer);
@@ -225,18 +229,16 @@ public:
     virtual void on_half_close(baseHostCX* cx);
 
     bool handle_requirements(baseHostCX* cx);
-#ifdef USE_EXPERIMENT
-    std::atomic_bool ocsp_caller_tried {false};
-    std::unique_ptr<AsyncOcspInvoker> ocsp_caller;
-#endif
-
     //
     bool ssl_handled = false;
+    bool tls_replacement_pending = false;
     // only once: check sslcom response and return true if redirected, set ssl_handled
 
     bool is_white_listed(MitmHostCX const* mh, SSLCom* peercom = nullptr);
     virtual bool handle_com_response_ssl(MitmHostCX* cx);
     virtual void handle_replacement_ssl(MitmHostCX* cx);
+    bool write_replacement_response(MitmHostCX* cx, std::string const& body,
+                                    unsigned status = 200);
 
     static std::string verify_flag_string(int code);
     static std::string verify_flag_string_extended(int code);
@@ -301,7 +303,7 @@ public:
         ThreadedAcceptorProxy< MitmProxy >(c,worker_id, t) {};
     
     baseHostCX* new_cx(int s) override;
-    void on_left_new(baseHostCX* just_accepted_cx) override;
+    void on_left_new(std::unique_ptr<baseHostCX> accepted_cx) override;
     int handle_sockets_once(baseCom* c) override;
     
     static inline bool ssl_autodetect = false;
@@ -318,7 +320,7 @@ class MitmUdpProxy : public ThreadedReceiverProxy<MitmProxy>, public SessionList
 public:
     MitmUdpProxy(baseCom* c, int worker_id, proxyType t = proxyType::transparent() ):
         ThreadedReceiverProxy< MitmProxy >(c,worker_id, t) {};
-    void on_left_new(baseHostCX* just_accepted_cx) override;
+    void on_left_new(std::unique_ptr<baseHostCX> accepted_cx) override;
     baseHostCX* new_cx(int s) override;
     int handle_sockets_once(baseCom* c) override;
 
@@ -329,5 +331,6 @@ private:
 
 std::string whitelist_make_key_l4(baseHostCX const* cx);
 std::string whitelist_make_key_cert(baseHostCX const* cx);
+std::string whitelist_make_key_override(baseHostCX const* cx, SSLCom const* peercom);
 
 #endif //MITMPROXY_HPP

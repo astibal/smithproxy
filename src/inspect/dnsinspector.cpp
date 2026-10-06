@@ -78,16 +78,31 @@ void DNS_Inspector::update(AppHostCX* cx) {
     auto shallow_xbuf = last_flow_entry.data()->view();
 
     unsigned int mem_pos = 0;
-    unsigned int red = 0;
+    size_t red = 0;
 
-    if(is_tcp) {
-        unsigned short data_size = ntohs(shallow_xbuf.get_at<unsigned short>(0));
-        if(shallow_xbuf.size() < data_size) {
-            _dia("DNS_Inspector::update[%s]: not enough DNS data in TCP stream: expected %d, but having %d. Waiting to more.", cx->c_type(), data_size, shallow_xbuf.size());
-            return;
+    auto next_packet = [&]() -> std::optional<buffer> {
+        if (red >= shallow_xbuf.size())
+            return std::nullopt;
+
+        if (!is_tcp)
+            return shallow_xbuf.view(red, shallow_xbuf.size() - red);
+
+        const size_t remaining = shallow_xbuf.size() - red;
+        if (remaining < sizeof(uint16_t)) {
+            _dia("DNS_Inspector::update[%s]: incomplete DNS/TCP length prefix", cx->c_type());
+            return std::nullopt;
         }
-        red += 2;
-    }
+
+        const auto data_size = ntohs(shallow_xbuf.get_at<uint16_t>(red));
+        if (remaining - sizeof(uint16_t) < data_size) {
+            _dia("DNS_Inspector::update[%s]: not enough DNS data in TCP stream: expected %d, but having %d. Waiting for more.",
+                 cx->c_type(), data_size, remaining - sizeof(uint16_t));
+            return std::nullopt;
+        }
+
+        red += sizeof(uint16_t);
+        return shallow_xbuf.view(red, data_size);
+    };
 
     auto mem_len = shallow_xbuf.size();
     if(last_flow_entry.source() == 'r') {
@@ -97,7 +112,10 @@ void DNS_Inspector::update(AppHostCX* cx) {
 
             ptr = std::make_shared<DNS_Request>();
 
-            buffer cur_buf = shallow_xbuf.view(red, shallow_xbuf.size() - red);
+            auto packet = next_packet();
+            if (!packet)
+                break;
+            buffer cur_buf = std::move(*packet);
             auto load_status = ptr->load(&cur_buf);
 
             if(not load_status) {
@@ -106,7 +124,11 @@ void DNS_Inspector::update(AppHostCX* cx) {
 
             auto cur_red = load_status.value();
 
-            // because of non-standard return value from above load(), we need to adjust red bytes manually
+            // A TCP length prefix defines exactly one DNS message. Trailing data belongs
+            // to the next prefixed frame, not to this parser invocation.
+            if (is_tcp && cur_red != cur_buf.size())
+                break;
+
             if (cur_red == 0) { cur_red = cur_buf.size(); }
 
             _dia("DNS_Inspector::update[%s]: red  %d, load returned %d", cx->c_type(), red, cur_red);
@@ -114,7 +136,7 @@ void DNS_Inspector::update(AppHostCX* cx) {
 
             // on success write to requests_
 
-            red += cur_red;
+            red += is_tcp ? cur_buf.size() : cur_red;
 
             if (requests_[ptr->id()] != nullptr) {
                 _not("DNS_Inspector::update[%s]: detected re-sent request", cx->c_type());
@@ -133,6 +155,11 @@ void DNS_Inspector::update(AppHostCX* cx) {
             _dia("DNS_Inspector::update[%s]: finishing reading from buffers: red=%d, buffer_size=%d", cx->c_type(),
                  red, shallow_xbuf.size());
 
+            // A verdict belongs to one request. Never let a previous cached
+            // response leak into a cache miss, an expired entry, or another
+            // record type on a persistent TCP connection.
+            verdict(OK);
+            cached_response.reset();
 
             if (opt_cached_responses && (ptr->question_type_0() == A || ptr->question_type_0() == AAAA)) {
                 auto lc_ = std::scoped_lock(DNS::get_dns_lock());
@@ -153,7 +180,7 @@ void DNS_Inspector::update(AppHostCX* cx) {
                         for (auto idx: cached_entry->answer_ttl_idx) {
                             uint32_t ttl = ntohl(cached_entry->cached_packet->get_at<uint32_t>(idx));
                             _deb("cached response ttl byte index %d value %d", idx, ttl);
-                            if (now > static_cast<time_t>(ttl) + cached_entry->loaded_at) {
+                            if (now >= static_cast<time_t>(ttl) + cached_entry->loaded_at) {
                                 _deb("  %ds -- expired", now - (ttl + cached_entry->loaded_at));
                                 ttl_check = false;
                             } else {
@@ -185,20 +212,6 @@ void DNS_Inspector::update(AppHostCX* cx) {
                 } else {
                     _dia("DNS answer for %s is not in cache - reverting to non-cached result",
                          ptr->question_str_0().c_str());
-                    verdict(OK);
-                    if (cached_response) {
-                        _dia("DNS answer for %s is not in cache - resetting previous response",
-                             ptr->question_str_0().c_str());
-                        cached_response.reset();
-                    }
-
-                }
-            } else {
-                if(cached_response) {
-                    _dia("DNS answer for non-A request %s - clearing cached response",
-                         ptr->question_str_0().c_str());
-                    cached_response.reset();
-                    verdict(OK);
                 }
             }
         }
@@ -213,7 +226,10 @@ void DNS_Inspector::update(AppHostCX* cx) {
             ptr = std::make_shared<DNS_Response>();
             auto ptr_response = std::dynamic_pointer_cast<DNS_Response>(ptr);
 
-            buffer cur_buf = shallow_xbuf.view(red, shallow_xbuf.size() - red);
+            auto packet = next_packet();
+            if (!packet)
+                break;
+            buffer cur_buf = std::move(*packet);
 
             auto load_status = ptr->load(&cur_buf);
 
@@ -222,6 +238,9 @@ void DNS_Inspector::update(AppHostCX* cx) {
             }
 
             auto cur_red = load_status.value();
+
+            if (is_tcp && cur_red != cur_buf.size())
+                break;
 
             if (opt_cached_responses and ptr_response) {
 
@@ -237,7 +256,7 @@ void DNS_Inspector::update(AppHostCX* cx) {
             }
 
             mem_pos += cur_red;
-            red = cur_red;
+            red += is_tcp ? cur_buf.size() : cur_red;
 
             _dia("DNS_Inspector::update[%s]: loaded new response (at %d size %d out of %d)", cx->c_type(), red,
                  mem_pos, mem_len);
@@ -371,16 +390,14 @@ void DNS_Inspector::apply_verdict(AppHostCX* cx) {
     //TODO: dirty, make more generic
     if(cached_response  != nullptr) {
         _deb("DNS_Inspector::apply_verdict: mangling response id=%d",cached_response_id);
-        *((uint16_t*)cached_response->data()) = htons(cached_response_id);
+        cached_response->set_at<uint16_t>(0, htons(cached_response_id));
 
         for(auto i: cached_response_ttl_idx) {
             uint32_t orig_ttl = ntohl(cached_response->get_at<uint32_t>(i));
             uint32_t new_ttl = orig_ttl - cached_response_decrement;
             _deb("DNS_Inspector::apply_verdict: mangling original ttl %d to %d at index %d",orig_ttl,new_ttl,i);
 
-            uint8_t* ptr = cached_response->data();
-            auto* ptr_ttl  = reinterpret_cast<uint32_t*>(&ptr[i]);
-            *ptr_ttl = htonl(new_ttl);
+            cached_response->set_at<uint32_t>(i, htonl(new_ttl));
 
         }
 

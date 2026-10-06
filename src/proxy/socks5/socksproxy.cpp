@@ -54,7 +54,12 @@
 void SocksProxy::on_left_message(baseHostCX* basecx) {
 
     auto* cx = dynamic_cast<socksServerCX*>(basecx);
-    if(cx != nullptr and cx->com()->l4_proto() != SOCK_DGRAM) {
+    // The UDP_ASSOCIATE control channel is itself TCP.  Dispatching solely by
+    // the carrier protocol sends it through the generic CONNECT path, whose
+    // policy match expects a prepared right-hand context and can dereference
+    // a null entry.  Keep SOCKS-specific commands in the SOCKS state machine.
+    if(cx != nullptr && cx->com()->l4_proto() != SOCK_DGRAM &&
+       cx->request_command() != socks5_cmd::UDP_ASSOCIATE) {
         handle_explicit_connect(cx);
         return;
     }
@@ -84,10 +89,15 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
                 auto lc_ = std::scoped_lock(CfgFactory::lock());
 
                 matched_policy(CfgFactory::get()->policy_match(l, r));
-                verdict = CfgFactory::get()->policy_action(matched_policy());
+                if(matched_policy() < 0 and CfgFactory::get()->policy_fail_open) {
+                    matched_policy(PolicyRule::POLICY_IMPLICIT_PASS);
+                }
+                verdict = matched_policy() == PolicyRule::POLICY_IMPLICIT_PASS or
+                          CfgFactory::get()->policy_action(matched_policy());
 
                 std::shared_ptr<PolicyRule> p;
-                if (matched_policy() >= 0) {
+                if (matched_policy() >= 0 and
+                    matched_policy() < static_cast<int>(CfgFactory::get()->db_policy_list.size())) {
                     p = CfgFactory::get()->db_policy_list.at(matched_policy());
                 }
 
@@ -117,8 +127,10 @@ void SocksProxy::on_left_message(baseHostCX* basecx) {
             _dia("SocksProxy::on_left_message: socksHostCX handoff msg received");
             cx->state(socks5_state::ZOMBIE);
 
-            // There is nothing to handoff on UDP association connection
-            if(cx->com()->l4_proto() != SOCK_DGRAM) {
+            // UDP_ASSOCIATE keeps its TCP control connection only as the
+            // lifetime/authorization anchor; there is no stream to hand off.
+            if(cx->request_command() != socks5_cmd::UDP_ASSOCIATE &&
+               cx->com()->l4_proto() != SOCK_DGRAM) {
                 explicit_handoff(cx);
             }
         } else {
@@ -146,7 +158,11 @@ void ExplicitProxy::handle_explicit_connect(ExplicitProxyCX* cx) {
         {
             auto lock = std::scoped_lock(CfgFactory::lock());
             matched_policy(CfgFactory::get()->policy_match(left, right));
-            verdict = CfgFactory::get()->policy_action(matched_policy());
+            if(matched_policy() < 0 and CfgFactory::get()->policy_fail_open) {
+                matched_policy(PolicyRule::POLICY_IMPLICIT_PASS);
+            }
+            verdict = matched_policy() == PolicyRule::POLICY_IMPLICIT_PASS or
+                      CfgFactory::get()->policy_action(matched_policy());
         }
         update_neighbors();
         cx->verdict(verdict ? socks5_policy::ACCEPT : socks5_policy::REJECT);
@@ -176,12 +192,14 @@ void ExplicitProxy::explicit_handoff(ExplicitProxyCX* cx) {
 
     _deb("SocksProxy::socks5_handoff: start");
     
+    auto const implicit_pass = matched_policy() == PolicyRule::POLICY_IMPLICIT_PASS;
     if(matched_policy() < 0) {
         _dia("SocksProxy::sock5_handoff: matching policy: %d: dropping.",matched_policy());
         state().dead(true);
         return;
     } 
-    else if(matched_policy() >= (signed int)CfgFactory::get()->db_policy_list.size()) {
+    else if(not implicit_pass and
+            matched_policy() >= (signed int)CfgFactory::get()->db_policy_list.size()) {
         _dia("SocksProxy::sock5_handoff: matching policy out of policy index table: %d/%d: dropping.",
                                          matched_policy(),
                                          CfgFactory::get()->db_policy_list.size());
@@ -252,8 +270,9 @@ void ExplicitProxy::explicit_handoff(ExplicitProxyCX* cx) {
     bool preserve_source = false;
     {
         auto lock = std::scoped_lock(CfgFactory::lock());
-        preserve_source = CfgFactory::get()->db_policy_list.at(matched_policy())->nat
-                          == PolicyRule::POLICY_NAT_NONE;
+        preserve_source = not implicit_pass and
+                          CfgFactory::get()->db_policy_list.at(matched_policy())->nat
+                              == PolicyRule::POLICY_NAT_NONE;
     }
 
     std::optional<unsigned short> source_port;
@@ -293,12 +312,19 @@ void ExplicitProxy::explicit_handoff(ExplicitProxyCX* cx) {
 
     if( auto policy = CfgFactory::get()->lookup_policy(matched_policy()); policy) {
 
-        if(policy->profile_routing and not sx::proxymaker::route_existing(this, policy->profile_routing))
+        if(policy->profile_routing and not sx::proxymaker::route_existing(this, policy->profile_routing)) {
             _err("SocksProxy::socks5_handoff: routing failed");
+            state().dead(true);
+            return;
+        }
     }
 
-    if ((CfgFactory::get()->policy_apply(n_cx, this, matched_policy()) < 0) or
-        (CfgFactory::get()->policy_apply(target_cx, this, matched_policy()) < 0)) {
+    // policy_apply() configures the client-side inspector and applies the TLS
+    // profile to the originator plus every target context.  Applying it again
+    // to target_cx would duplicate filters/webhooks and incorrectly enable the
+    // client-side detection engine on the server side.
+    if (not implicit_pass and
+        CfgFactory::get()->policy_apply(n_cx, this, matched_policy()) < 0) {
 
         _inf("SocksProxy::socks5_handoff: session failed policy application on contexts");
         state().dead(true);
@@ -361,7 +387,8 @@ bool ExplicitProxy::send_pending_connect_response() {
     return true;
 }
 
-bool ExplicitProxy::handle_cx_write(unsigned char side, baseHostCX* cx) {
+bool ExplicitProxy::handle_cx_write(unsigned char side, baseHostCX* cx,
+                                    bool cross_direction_retry) {
     if(not pending_connect_response_.empty()) {
         if((side == 'r' || side == 'R') && cx->opening()) {
             // This callback is driven by the upstream socket's write event.
@@ -394,7 +421,7 @@ bool ExplicitProxy::handle_cx_write(unsigned char side, baseHostCX* cx) {
             return send_pending_connect_response();
         }
     }
-    return MitmProxy::handle_cx_write(side, cx);
+    return MitmProxy::handle_cx_write(side, cx, cross_direction_retry);
 }
 
 bool ExplicitProxy::handle_cx_write_once(unsigned char side, baseCom* xcom, baseHostCX* basecx) {
@@ -421,12 +448,14 @@ void SocksProxy::socks5_handoff_udp(socksServerCX* cx) {
 
     _deb("SocksProxy::socks5_handoff_udp: start");
 
+    auto const implicit_pass = matched_policy() == PolicyRule::POLICY_IMPLICIT_PASS;
     if(matched_policy() < 0) {
         _dia("SocksProxy::socks5_handoff_udp: matching policy: %d: dropping.",matched_policy());
         state().dead(true);
         return;
     }
-    else if(matched_policy() >= (signed int)CfgFactory::get()->db_policy_list.size()) {
+    else if(not implicit_pass and
+            matched_policy() >= (signed int)CfgFactory::get()->db_policy_list.size()) {
         _dia("SocksProxy::socks5_handoff_udp: matching policy out of policy index table: %d/%d: dropping.",
              matched_policy(),
              CfgFactory::get()->db_policy_list.size());
@@ -453,7 +482,8 @@ void SocksProxy::socks5_handoff_udp(socksServerCX* cx) {
 
     {
         auto lc_ = std::scoped_lock(CfgFactory::lock());
-        if (CfgFactory::get()->db_policy_list.at(matched_policy())->nat == PolicyRule::POLICY_NAT_NONE) {
+        if (not implicit_pass and
+            CfgFactory::get()->db_policy_list.at(matched_policy())->nat == PolicyRule::POLICY_NAT_NONE) {
             target_cx->com()->nonlocal_src(true);
         }
     }
@@ -465,11 +495,15 @@ void SocksProxy::socks5_handoff_udp(socksServerCX* cx) {
 
     if( auto policy = CfgFactory::get()->lookup_policy(matched_policy()); policy) {
 
-        if(policy->profile_routing and not sx::proxymaker::route_existing(this, policy->profile_routing))
+        if(policy->profile_routing and not sx::proxymaker::route_existing(this, policy->profile_routing)) {
             _err("SocksProxy::socks5_handoff_udp: routing failed");
+            state().dead(true);
+            return;
+        }
     }
 
-    if (CfgFactory::get()->policy_apply(n_cx.get(), this, matched_policy()) < 0) {
+    if (not implicit_pass and
+        CfgFactory::get()->policy_apply(n_cx.get(), this, matched_policy()) < 0) {
         // strange, but it can happen if the sockets is closed between policy match and this profile application
         // mark dead.
         _inf("SocksProxy::socks5_handoff_udp: session failed policy application");
@@ -511,17 +545,20 @@ baseHostCX* MitmSocksProxy::new_cx(int s) {
     return r; 
 }
 
-void MitmSocksProxy::on_left_new(baseHostCX* just_accepted_cx) {
+void MitmSocksProxy::on_left_new(std::unique_ptr<baseHostCX> accepted_cx) {
 
-    auto* new_proxy = new SocksProxy(com()->slave());
+    if(not accepted_cx) return;
+
+    auto new_proxy = std::make_unique<SocksProxy>(com()->slave());
     // let's add this just_accepted_cx into new_proxy
     std::string h;
     std::string p;
-    just_accepted_cx->name();
-    just_accepted_cx->com()->resolve_socket_src(just_accepted_cx->socket(),&h,&p);
+    accepted_cx->name();
+    accepted_cx->com()->resolve_socket_src(accepted_cx->socket(),&h,&p);
 
-    new_proxy->ladd(just_accepted_cx);
-    this->add_proxy(new_proxy);
+    new_proxy->ladd(accepted_cx.get());
+    accepted_cx.release();
+    this->add_proxy(std::move(new_proxy));
     _deb("MitmSocksProxy::on_left_new: finished");
 }
 
@@ -530,17 +567,20 @@ baseHostCX* MitmSocksUdpProxy::new_cx(int s) {
     return r;
 }
 
-void MitmSocksUdpProxy::on_left_new(baseHostCX* just_accepted_cx) {
+void MitmSocksUdpProxy::on_left_new(std::unique_ptr<baseHostCX> accepted_cx) {
 
-    auto* new_proxy = new SocksProxy(com()->slave());
+    if(not accepted_cx) return;
+
+    auto new_proxy = std::make_unique<SocksProxy>(com()->slave());
     // let's add this just_accepted_cx into new_proxy
     std::string h;
     std::string p;
-    just_accepted_cx->name();
-    just_accepted_cx->com()->resolve_socket_src(just_accepted_cx->socket(),&h,&p);
+    accepted_cx->name();
+    accepted_cx->com()->resolve_socket_src(accepted_cx->socket(),&h,&p);
 
-    new_proxy->ladd(just_accepted_cx);
-    this->add_proxy(new_proxy);
+    new_proxy->ladd(accepted_cx.get());
+    accepted_cx.release();
+    this->add_proxy(std::move(new_proxy));
     _deb("MitmSocksUdpProxy::on_left_new: finished");
 }
 int MitmSocksProxy::handle_sockets_once(baseCom* c) {

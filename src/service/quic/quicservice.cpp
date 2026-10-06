@@ -248,10 +248,6 @@ bool listener_service::prepare() {
     SSL_CTX_set_alpn_select_cb(context_.get(), select_h3, nullptr);
     SSL_CTX_set_client_hello_cb(context_.get(), client_hello_callback, this);
     if (verify_upstream_) {
-        if (!SSLFactory::factory().set_verify_locations(client_context_.get())) {
-            fail("cannot load QUIC upstream trust store");
-            return false;
-        }
         SSL_CTX_set_verify(client_context_.get(), SSL_VERIFY_PEER, nullptr);
         SSL_CTX_set_cert_cb(context_.get(), certificate_callback, this);
     } else {

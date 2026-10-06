@@ -129,10 +129,6 @@ std::vector<std::unique_ptr<Listener>> NetworkServiceFactory::prepare_listener (
     // bind with master proxy (.. and create child proxies for new connections)
     int sock = listener->bind(port, 'L');
 
-    locks::fd().insert(sock);
-
-    auto l_ = std::scoped_lock(*locks::fd().lock(sock));
-
     if (sock < 0) {
         std::stringstream ss;
         ss << "error binding " << friendly_name << " on port/path: " << port;
@@ -143,6 +139,8 @@ std::vector<std::unique_ptr<Listener>> NetworkServiceFactory::prepare_listener (
 
         throw sx::netservice_cannot_bind(err.c_str());
     } else {
+        locks::fd().insert(sock);
+        auto l_ = std::scoped_lock(*locks::fd().lock(sock));
 
         // how many additional listeners?
         auto nthreads = listener_count(std::thread::hardware_concurrency(),

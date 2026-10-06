@@ -290,7 +290,20 @@ private:
         while (!stopping_) {
             listener_->handle_events();
             while (auto accepted = listener_->accept()) {
-                connections_.push_back({ std::move(accepted), {}, false });
+                // OpenSSL publishes a listener connection only after its
+                // handshake. Record that fact before retaining the object:
+                // a short-lived certificate-probe connection may already be
+                // closed by the peer before the next server tick.
+                bool const handshake_recorded = accepted->handshake_complete();
+                if (handshake_recorded) {
+                    ++handshake_count_;
+                    auto lock = std::scoped_lock(observations_lock_);
+                    observed_sni_.push_back(accepted->server_name());
+                    observed_alpn_.push_back(accepted->negotiated_alpn());
+                }
+                connections_.push_back({
+                    std::move(accepted), {}, handshake_recorded
+                });
             }
             for (auto& state : connections_) {
                 auto events = state.connection->drain_events();
@@ -922,6 +935,12 @@ TEST(QuicTestbed, ClientRejectsMitmCertificateWithoutTestCaTrust) {
 
     auto context = quic::make_openssl_quic_context(false);
     ASSERT_NE(context, nullptr);
+    // Production contexts intentionally share the factory store. This
+    // negative OpenSSL test needs an explicitly isolated empty store so CA
+    // additions made by earlier verified-client cases cannot leak into it.
+    X509_STORE* empty_store = X509_STORE_new();
+    ASSERT_NE(empty_store, nullptr);
+    SSL_CTX_set_cert_store(context.get(), empty_store); // transfers ownership
     SSL_CTX_set_verify(context.get(), SSL_VERIFY_PEER, nullptr);
     auto const address = loopback(proxy.bound_port());
     std::string error;

@@ -1,5 +1,6 @@
 #include "proxy/quic/openssl.hpp"
 #include "proxy/quic/wire.hpp"
+#include <sslcertstore.hpp>
 
 #include <openssl/err.h>
 
@@ -128,6 +129,9 @@ unique_ssl_ctx make_openssl_quic_context(bool server) {
 #if SMITHPROXY_OPENSSL_QUIC
     unique_ssl_ctx context(SSL_CTX_new(server ? OSSL_QUIC_server_method()
                                              : OSSL_QUIC_client_method()));
+    if (context && !SSLFactory::factory().set_verify_locations(context.get())) {
+        return nullptr;
+    }
     // Capture only the intercepted/downstream leg. Upstream secrets describe
     // a different QUIC connection and must not be mixed into its wire capture.
     // The callback always runs so production can retain secrets internally;

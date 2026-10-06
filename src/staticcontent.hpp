@@ -47,6 +47,14 @@ using namespace ext::nltemplate;
 
 class StaticContent {
 
+    class ConfinedLoader final : public Loader {
+        std::string root_;
+    public:
+        void root(std::string value) { root_ = std::move(value); }
+        Result load(std::string const& name) override;
+    };
+
+    ConfinedLoader loader_file_;
     std::unique_ptr<ptr_cache<std::string,Template>> templates_;
     StaticContent() {
         templates_ = std::make_unique<ptr_cache<std::string,Template>>("content.replacements");
@@ -64,8 +72,12 @@ public:
     
     std::string render_noargs(std::string const& s);
 
-    std::string render_server_response(std::string const& message, unsigned int code=200);
+    std::string render_server_response(std::string const& message, unsigned int code=200,
+                                       bool head_only=false);
     std::string render_msg_html_page(std::string const& caption, std::string const& meta, std::string const& content,const char* window_width="450px");
+    std::string render_tls_replacement(std::string const& target,
+                                       std::string const& reasons,
+                                       std::string const& action);
     std::shared_ptr<Template> get(std::string const& s);
 
     static StaticContent* get() {

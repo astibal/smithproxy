@@ -41,6 +41,7 @@
 #include <unordered_map>
 #include <memory>
 #include <ctime>
+#include <cstdio>
 
 #include <socle/common/timeops.hpp>
 #include <socle/common/stringops.hpp>
@@ -117,27 +118,30 @@ struct Neighbor {
             return ret;
         }
 
-        void ser_json_in(nlohmann::json const& j) {
+        bool ser_json_in(nlohmann::json const& j) {
             try {
-                days_epoch = j["days_epoch"];
-                counter = j["counter"];
-
-                if(j.contains("bytes_up"))
-                    bytes_up = j["bytes_up"];
-
-                if(j.contains("bytes_down"))
-                    bytes_down = j["bytes_down"];
+                auto parsed_days_epoch = j.at("days_epoch").get<days_epoch_t>();
+                auto parsed_counter = j.at("counter").get<uint64_t>();
+                auto parsed_bytes_up = j.value("bytes_up", uint64_t{0});
+                auto parsed_bytes_down = j.value("bytes_down", uint64_t{0});
+                std::set<std::string, std::less<std::string>> parsed_labels;
 
                 if(j.contains("labels")) {
-                    labels.clear();
-                    for(auto const& jj: j["labels"]) {
-                        labels.insert(jj.get<std::string>());
+                    for(auto const& label: j.at("labels")) {
+                        parsed_labels.insert(label.get<std::string>());
                     }
                 }
+
+                days_epoch = parsed_days_epoch;
+                counter = parsed_counter;
+                bytes_up = parsed_bytes_up;
+                bytes_down = parsed_bytes_down;
+                labels = std::move(parsed_labels);
+                return true;
             }
             catch(nlohmann::json::exception const& e) {
-                Log::get()->events().insert(ERR, "stat_entry::ser_json_in: %s", e.what());
-                _err("stat_entry::ser_json_in: %s", e.what());
+                std::fprintf(stderr, "stat_entry::ser_json_in: %s\n", e.what());
+                return false;
             }
         }
 
@@ -171,7 +175,7 @@ struct Neighbor {
     }
 
     [[nodiscard]] nlohmann::json ser_json_out() const {
-        auto js = nlohmann::json();
+        auto js = nlohmann::json::array();
         for(auto const& s: timetable)  {
             js.push_back(s.ser_json_out());
         }
@@ -184,33 +188,43 @@ struct Neighbor {
         };
     }
 
-    void ser_json_in(nlohmann::json const& j) {
+    bool ser_json_in(nlohmann::json const& j) {
 
         try {
-            hostname = j.at("hostname").get<std::string>();
-            last_seen = j.at("last_seen").get<time_t>();
+            auto parsed_hostname = j.at("hostname").get<std::string>();
+            auto parsed_last_seen = j.at("last_seen").get<time_t>();
+            if (parsed_hostname.empty()) return false;
+            std::vector<std::string> parsed_tags;
             if(j.contains("tags")) {
-                tags = string_tags(j.at("tags").get<std::string>());
+                parsed_tags = string_tags(j.at("tags").get<std::string>());
             }
 
             auto raw_stats = j.at("stats").get<std::vector<nlohmann::json>>();
-            timetable.clear();
-            for (const auto &rs: raw_stats) {
+            stats_lists_t parsed_timetable;
+            parsed_timetable.reserve(std::min(raw_stats.size(), max_timetable_sz));
+            for (auto const& rs: raw_stats) {
+                if (parsed_timetable.size() >= max_timetable_sz) break;
                 Neighbor::stats_entry_t entry;
-                entry.ser_json_in(rs);
-                timetable.push_back(entry);
+                if (!entry.ser_json_in(rs)) return false;
+                parsed_timetable.push_back(std::move(entry));
             }
+
+            hostname = std::move(parsed_hostname);
+            last_seen = parsed_last_seen;
+            tags = std::move(parsed_tags);
+            timetable = std::move(parsed_timetable);
+            return true;
         }
         catch(nlohmann::json::exception const& e) {
-            Log::get()->events().insert(ERR, "neighbor::ser_json_in: %s", e.what());
-            _err("neighbor::ser_json_in: %s", e.what());
+            std::fprintf(stderr, "neighbor::ser_json_in: %s\n", e.what());
+            return false;
         }
     }
 
 
     [[nodiscard]] nlohmann::json to_json() const {
 
-        auto js = nlohmann::json();
+        auto js = nlohmann::json::array();
         for(auto const& s: timetable)  {
             js.push_back(s.to_json());
         }
@@ -336,7 +350,7 @@ public:
     [[nodiscard]] nlohmann::json to_json(std::function<bool(Neighbor const&)> const& filter) const {
         auto lc_ = std::scoped_lock(cache().lock());
 
-        auto ret = nlohmann::json();
+        auto ret = nlohmann::json::array();
 
         for(auto const& [ _, nbr]: cache().get_map_ul()) {
             if(filter(*nbr.first))
@@ -349,7 +363,7 @@ public:
     [[nodiscard]] nlohmann::json ser_json_out() const {
         auto lc_ = std::scoped_lock(cache().lock());
 
-        auto ret = nlohmann::json();
+        auto ret = nlohmann::json::array();
 
         for(auto const& [ _, nbr]: cache().get_map_ul()) {
             ret.push_back( nbr.first->ser_json_out());
@@ -367,13 +381,12 @@ public:
 
             for (const auto &raw_neighbor: j) {
                 auto nbr = std::make_shared<Neighbor>("");
-                nbr->ser_json_in(raw_neighbor);
-                cache().put_ul(nbr->hostname, nbr);
+                if (nbr->ser_json_in(raw_neighbor))
+                    cache().put_ul(nbr->hostname, nbr);
             }
         }
         catch(nlohmann::json::exception const& e) {
-            auto const& log = Neighbor::log;
-            _err("nbrhood::ser_json_in: %s", e.what());
+            std::fprintf(stderr, "nbrhood::ser_json_in: %s\n", e.what());
         }
     }
 

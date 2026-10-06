@@ -43,6 +43,8 @@
 #include <sstream>
 
 int CidrAddress::contains(cidr::CIDR const* other) const{
+    if (!c_ || !other)
+        return -1;
     return cidr_contains(c_.get(),other);
 }
 
@@ -95,6 +97,8 @@ std::shared_ptr<DNS_Response> FqdnAddress::find_dns_response(int cidr_type) cons
 }
 
 bool FqdnAddress::match(cidr::CIDR* to_match) {
+    if (!to_match)
+        return false;
     bool ret = false;
 
     if(auto r = find_dns_response(to_match->proto); r != nullptr) {

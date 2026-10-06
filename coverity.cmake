@@ -134,8 +134,7 @@ add_executable(smithproxy
         src/service/core/service.hpp
         src/cli/diag/diag_cmds.hpp
         src/cli/diag/diag_cmds.cpp
-        src/proxy/ocspinvoker.cpp
-        src/proxy/ocspinvoker.hpp)
+        )
 
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}")

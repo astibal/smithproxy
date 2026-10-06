@@ -123,9 +123,12 @@ baseHostCX* MitmHttpConnectProxy::new_cx(int s) {
     return new HttpConnectServerCX(com()->slave(), s);
 }
 
-void MitmHttpConnectProxy::on_left_new(baseHostCX* just_accepted_cx) {
-    auto* proxy = new HttpConnectProxy(com()->slave());
-    just_accepted_cx->name();
-    proxy->ladd(just_accepted_cx);
-    add_proxy(proxy);
+void MitmHttpConnectProxy::on_left_new(std::unique_ptr<baseHostCX> accepted_cx) {
+    if(not accepted_cx) return;
+
+    auto proxy = std::make_unique<HttpConnectProxy>(com()->slave());
+    accepted_cx->name();
+    proxy->ladd(accepted_cx.get());
+    accepted_cx.release();
+    add_proxy(std::move(proxy));
 }

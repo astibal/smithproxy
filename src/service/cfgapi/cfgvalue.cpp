@@ -60,9 +60,10 @@ CfgValue::filter_retval VALUE_UINT_RANGE_GEN(std::function<long long()> callable
 
     auto err = string_format("value must be a non-negative number in range <%ld,%ld>", intA, intB);
 
-    long long port_value = safe_val(v);
+    auto const parsed = CfgValue::parse_nonnegative_integer(v);
 
-    if(may_val.has_value() and port_value >= 0LL) {
+    if(may_val.has_value() and parsed.has_value()) {
+        auto const port_value = *parsed;
         if(port_value < intA or port_value > intB)
             return CfgValue::filter_retval::reject(err);
         else
@@ -185,6 +186,16 @@ void CfgValueHelp::init() {
 
     add("settings.accept_socks", "whether to accept incoming connections via SOCKS")
             .help_quick("<bool>: set to 'true' to disable socks acceptor (default: false)")
+            .may_be_empty(false)
+            .value_filter(CfgValue::VALUE_BOOL);
+
+    add("settings.policy_fail_open", "allow traffic when no policy rule matches")
+            .help_quick("<bool>: legacy no-match allow; default false (deny)")
+            .may_be_empty(false)
+            .value_filter(CfgValue::VALUE_BOOL);
+
+    add("settings.policy_access_request_fail_open", "allow traffic without a positive access-request webhook response")
+            .help_quick("<bool>: legacy webhook failure allow; default false (deny)")
             .may_be_empty(false)
             .value_filter(CfgValue::VALUE_BOOL);
 

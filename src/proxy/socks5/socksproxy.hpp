@@ -69,7 +69,7 @@ public:
 
     MitmSocksProxy(baseCom* c, int worker_id, proxyType t = proxyType::proxy()) : ThreadedAcceptorProxy<SocksProxy>(c,worker_id, t) {};
     baseHostCX* new_cx(int s) override;
-    void on_left_new(baseHostCX* just_accepted_cx) override;
+    void on_left_new(std::unique_ptr<baseHostCX> accepted_cx) override;
     int handle_sockets_once(baseCom* c) override;
 
     std::string to_string(int lev) const override { return string_format("MitmSocksProxy[%s]", baseProxy::to_string(lev).c_str()); };
@@ -87,7 +87,7 @@ public:
 
     MitmSocksUdpProxy(baseCom* c, int worker_id, proxyType t = proxyType::proxy()) : ThreadedReceiverProxy<SocksProxy>(c,worker_id, t) {};
     baseHostCX* new_cx(int s) override;
-    void on_left_new(baseHostCX* just_accepted_cx) override;
+    void on_left_new(std::unique_ptr<baseHostCX> accepted_cx) override;
     int handle_sockets_once(baseCom* c) override;
 
     std::string to_string(int lev) const override { return string_format("MitmSocksUdpProxy[%s]", baseProxy::to_string(lev).c_str()); };

@@ -9,6 +9,7 @@
 #include <service/http/jsonize.hpp>
 
 #include <unordered_map>
+#include <chrono>
 
 
 namespace sx::http::webhooks {
@@ -22,18 +23,23 @@ namespace sx::http::webhooks {
 
     static std::atomic_bool enabled = false;
     static std::string hostid;
+    static std::mutex hostid_lock;
+    static std::uint64_t stats_updates = 0;
+    static refresh_gate accepted_refresh_gate(1);
 
     void set_enabled(bool val) {
-        enabled = val;
+        enabled.store(val, std::memory_order_release);
     }
     bool is_enabled() {
-        return enabled;
+        return enabled.load(std::memory_order_acquire);
     }
     void set_hostid(std::string const& ref) {
+        auto lock = std::scoped_lock(hostid_lock);
         hostid = ref;
     }
 
-    std::string const& get_hostid() {
+    std::string get_hostid() {
+        auto lock = std::scoped_lock(hostid_lock);
         return hostid.empty() ? SmithProxy::instance().hostname : hostid;
     }
 
@@ -48,16 +54,19 @@ namespace sx::http::webhooks {
                 auto code = rep.value().response.first;
                 if(code > 0) {
                     auto const& url = rep.value().request;
-                    auto lc_ = std::scoped_lock(url_stats_lock());
-                    auto& entry = url_stats_map()[url];
-                    entry.url = url;
-
-                    bool is_error = false;
-                    if(code >= 400) {
-                        is_error = true;
+                    {
+                        auto lc_ = std::scoped_lock(url_stats_lock());
+                        auto& stats = url_stats_map();
+                        if (++stats_updates % 64 == 0) {
+                            for (auto it = stats.begin(); it != stats.end();) {
+                                if (it->second.is_expired()) it = stats.erase(it);
+                                else ++it;
+                            }
+                        }
+                        auto& entry = stats[url];
+                        entry.url = url;
+                        entry.update_incr(code >= 300);
                     }
-
-                    entry.update_incr(is_error);
                     on_reply(rep);
                 }
                 else {
@@ -112,12 +121,16 @@ namespace sx::http::webhooks {
                 auto* ctrl = rep->ctrl;
                 if(ctrl) {
                     ctrl->set_timeout(60);
-                    ctrl->set_stale_detection(120); // allow some room to fetch data
+                    // This transfer has a 60 s total deadline. Detect a peer
+                    // that stops making progress before that deadline rather
+                    // than configuring an unreachable 120 s low-speed timer.
+                    ctrl->set_stale_detection(30);
                 }
             }
         }
 
         void on_reply(sx::http::expected_reply const& rep) const override {
+            if(rep->response.first < 200 || rep->response.first >= 300) return;
             auto const& body = rep->response.second;
             if(not body.empty()) {
                 SmithProxy::api().neighbor_update(body);
@@ -202,7 +215,10 @@ namespace sx::http::webhooks {
 
                 struct action_hook : public default_callback {
                     void on_reply([[maybe_unused]] sx::http::expected_reply const &rep) const override {
-                        if(rep.has_value() and rep.value().response.first == 202) {
+                        const auto now = std::chrono::duration_cast<std::chrono::seconds>(
+                            std::chrono::steady_clock::now().time_since_epoch()).count();
+                        if(rep.has_value() and rep.value().response.first == 202
+                           and accepted_refresh_gate.acquire(now)) {
                             ping_plus();
                             ping_neighbors();
                         }
@@ -215,9 +231,9 @@ namespace sx::http::webhooks {
     }
 
     // send action and wait - use hook,
-    void send_action_wait(std::string const& action, std::string const& action_id, nlohmann::json const& details,
+    bool send_action_wait(std::string const& action, std::string const& action_id, nlohmann::json const& details,
                           sx::http::AsyncRequest::reply_hook hook) {
-        if(enabled) {
+        if(enabled and hook) {
             nlohmann::json msg = {
                     {"action", action},
                     {"id", action_id},
@@ -227,7 +243,13 @@ namespace sx::http::webhooks {
             msg.push_back({"details", details});
             sx::http::AsyncRequest::emit_wait(
                     to_string(msg),
-                    hook);
+                    [hook = std::move(hook)](sx::http::expected_reply const& reply) {
+                        // The negative status is an internal Request setup hook,
+                        // not a webhook response for synchronous callers.
+                        if(!reply || reply->response.first > 0) hook(reply);
+                    });
+            return true;
         }
+        return false;
     }
 }

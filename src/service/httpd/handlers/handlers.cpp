@@ -30,7 +30,7 @@ namespace sx::webserver {
         using samesite_t = HttpSessions::cookie_samesite;
 
         std::stringstream ss;
-        ss << string_format("%s=%s; Max-Age:%d",
+        ss << string_format("%s=%s; Max-Age=%u; Secure; HttpOnly; Path=/",
                             HttpSessions::COOKIE_AUTH_TOKEN,
                             token.c_str(), HttpSessions::session_ttl);
 
@@ -44,9 +44,15 @@ namespace sx::webserver {
 
     std::string create_token_cookie_val(std::string const& token){
         std::stringstream ss;
-        ss << string_format("__Host-%s=%s; Secure; Path=/",
+        ss << string_format("__Host-%s=%s; Max-Age=%u; Secure; Path=/",
                             HttpSessions::HEADER_CSRF_TOKEN,
                             token.c_str(), HttpSessions::session_ttl);
+
+        if(HttpSessions::COOKIE_SAMESITE != HttpSessions::cookie_samesite::None) {
+            ss << "; SameSite=";
+            ss << (HttpSessions::COOKIE_SAMESITE == HttpSessions::cookie_samesite::Lax
+                   ? "Lax" : "Strict");
+        }
 
 
         return ss.str();
@@ -59,6 +65,7 @@ namespace sx::webserver {
 
         response.response = {{"auth_token", auth_token},
                         {"csrf_token", csrf_token}};
+        response.response_code = MHD_HTTP_OK;
 
         response.headers.emplace_back("Set-Cookie", create_auth_cookie_val(auth_token));
         response.headers.emplace_back("Set-Cookie", create_token_cookie_val(csrf_token));
@@ -86,18 +93,15 @@ namespace sx::webserver {
                     auto key = MHD_lookup_connection_value(conn, MHD_GET_ARGUMENT_KIND, "key");
                     bool found = false;
                     if (key) {
-                        auto lc_ = std::scoped_lock(HttpSessions::lock);
-                        found = (HttpSessions::api_keys.find(key) !=
-                                 HttpSessions::api_keys.end());
+                        found = HttpSessions::has_api_key(key);
                     }
 
                     if (found) {
                         authorize_response(ret);
-
-                        ret.response_code = MHD_HTTP_OK;
                         return ret;
                     }
 
+                    ret.response = {{"error", "access denied"}};
                     ret.response_code = MHD_HTTP_FORBIDDEN;
                     return ret;
                 });
@@ -110,34 +114,28 @@ namespace sx::webserver {
                 [](MHD_Connection *conn, std::string const &meth, std::string const &req) -> Http_JsonResponseParams {
 
                     Http_JsonResponseParams ret;
-                    ret.response_code = MHD_YES;
+                    ret.response = {{"error", "access denied"}};
+                    ret.response_code = MHD_HTTP_UNAUTHORIZED;
 
                     if (not req.empty()) {
 
                         try {
                             json jreq = json::parse(req);
                             bool found = false;
-                            {
-                                auto lc_ = std::scoped_lock(HttpSessions::lock);
-                                found = (HttpSessions::api_keys.find(jreq["access_key"].get<std::string>()) !=
-                                         HttpSessions::api_keys.end());
-                            }
+                            found = HttpSessions::has_api_key(
+                                    jreq["access_key"].get<std::string>());
                             if (found) {
                                 authorize_response(ret);
                             } else {
                                 Log::get()->events().insert(ERR, "unauthorized API access attempt from %s",
                                                             authorized::client_address(conn).c_str());
-
-                                ret.response = {{"error", "access denied"},};
                             }
                         }
                         catch (nlohmann::json::exception const &) {
 
                             Log::get()->events().insert(ERR, "malformed API request from %s",
                                                         authorized::client_address(conn).c_str());
-                            ret.response = {{"error", "access denied"},};
                         }
-                        ret.response_code = MHD_HTTP_OK;
                     }
 
                     return ret;
@@ -167,10 +165,11 @@ namespace sx::webserver {
         auto* login = new Http_Responder(
                 "POST",
                 "/api/login",
-                [&split_form_data](MHD_Connection *conn, std::string const &meth, std::string const &req) -> Http_JsonResponseParams {
+                [split_form_data](MHD_Connection *conn, std::string const &meth, std::string const &req) -> Http_JsonResponseParams {
 
                     Http_JsonResponseParams ret;
-                    ret.response_code = MHD_YES;
+                    ret.response = {{"error", "access denied"}};
+                    ret.response_code = MHD_HTTP_UNAUTHORIZED;
 
                     [[maybe_unused]] bool pam_enabled = HttpSessions::pam_login;
                     std::string admin_group;
@@ -198,8 +197,6 @@ namespace sx::webserver {
                                 authorize_response(ret);
                             }
                             else {
-                                ret.response_code = MHD_HTTP_UNAUTHORIZED;
-                                ret.response = {{"error", "access denied"},};
                                 Log::get()->events().insert(ERR, "unauthorized access attempt from %s as user %s (not '%s' group member)",
                                                             authorized::client_address(conn).c_str(),
                                                             u.c_str(),
@@ -210,15 +207,11 @@ namespace sx::webserver {
                         catch(std::out_of_range const& e) {
                             Log::get()->events().insert(ERR, "unauthorized access attempt from %s",
                                                         authorized::client_address(conn).c_str());
-
-                            ret.response = {{"error", "access denied"},};
                         }
 
 #ifndef USE_PAM
                         Log::get()->events().insert(ERR, "PAM not available: API handler /api/login not supported");
 #endif
-
-                        ret.response_code = MHD_HTTP_OK;
                     }
 
                     return ret;

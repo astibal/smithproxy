@@ -48,7 +48,18 @@ if ssl_use_ktls is not None:
 ''', 1)
 quic_test = os.environ.get('QUIC_TEST') == '1'
 if os.environ.get('POLICY_TEST') == '1':
+    policy_address_objects = '''
+    test_nonmatching4 = { type = 0; cidr = "203.0.113.254/32"; };
+    test_nonmatching6 = { type = 0; cidr = "2001:db8:ffff::1/128"; };
+'''
+    text, address_count = re.subn(r'(address_objects\s*=\s*\{)', r'\1\n' + policy_address_objects, text, count=1)
     port_objects = '''
+    test_9989 = { start = 9989; end = 9989; };
+    test_9990 = { start = 9990; end = 9990; };
+    test_9991 = { start = 9991; end = 9991; };
+    test_9992 = { start = 9992; end = 9992; };
+    test_9993 = { start = 9993; end = 9993; };
+    test_9994 = { start = 9994; end = 9994; };
     test_9996 = { start = 9996; end = 9996; };
     test_9997 = { start = 9997; end = 9997; };
     test_9998 = { start = 9998; end = 9998; };
@@ -56,6 +67,18 @@ if os.environ.get('POLICY_TEST') == '1':
 '''
     text, port_count = re.subn(r'(port_objects\s*=\s*\{)', r'\1\n' + port_objects, text, count=1)
     policy_cases = '''
+    { name = "test-missing-tls-profile-must-disable"; proto = "tcp"; src = [ "any" ]; sport = [ "all" ]; dst = [ "any" ]; dport = [ "test_9989" ]; tls_profile = "definitely_missing_runner_tls"; action = "accept"; nat = "auto"; routing = "none"; },
+    { name = "test-after-missing-profile-deny"; proto = "tcp"; src = [ "any" ]; sport = [ "all" ]; dst = [ "any" ]; dport = [ "test_9989" ]; action = "deny"; nat = "none"; routing = "none"; },
+    { name = "test-precedence-first-deny"; proto = "tcp"; src = [ "any" ]; sport = [ "all" ]; dst = [ "any" ]; dport = [ "test_9994" ]; action = "deny"; nat = "none"; routing = "none"; },
+    { name = "test-precedence-late-accept"; proto = "tcp"; src = [ "any" ]; sport = [ "all" ]; dst = [ "any" ]; dport = [ "test_9994" ]; action = "accept"; nat = "auto"; routing = "none"; },
+    { disabled = TRUE; name = "test-disabled-accept"; proto = "tcp"; src = [ "any" ]; sport = [ "all" ]; dst = [ "any" ]; dport = [ "test_9993" ]; action = "accept"; nat = "auto"; routing = "none"; },
+    { name = "test-after-disabled-deny"; proto = "tcp"; src = [ "any" ]; sport = [ "all" ]; dst = [ "any" ]; dport = [ "test_9993" ]; action = "deny"; nat = "none"; routing = "none"; },
+    { name = "test-protocol-mismatch-udp-deny"; proto = "udp"; src = [ "any" ]; sport = [ "all" ]; dst = [ "any" ]; dport = [ "test_9992" ]; action = "deny"; nat = "none"; routing = "none"; },
+    { name = "test-protocol-match-tcp-accept"; proto = "tcp"; src = [ "any" ]; sport = [ "all" ]; dst = [ "any" ]; dport = [ "test_9992" ]; action = "accept"; nat = "auto"; routing = "none"; },
+    { name = "test-port-mismatch-accept"; proto = "tcp"; src = [ "any" ]; sport = [ "all" ]; dst = [ "any" ]; dport = [ "test_9992" ]; action = "accept"; nat = "auto"; routing = "none"; },
+    { name = "test-after-port-mismatch-deny"; proto = "tcp"; src = [ "any" ]; sport = [ "all" ]; dst = [ "any" ]; dport = [ "test_9991" ]; action = "deny"; nat = "none"; routing = "none"; },
+    { name = "test-source-mismatch4-accept"; proto = "tcp"; src = [ "test_nonmatching4" ]; sport = [ "all" ]; dst = [ "any" ]; dport = [ "test_9990" ]; action = "accept"; nat = "auto"; routing = "none"; },
+    { name = "test-after-source-mismatch4-deny"; proto = "tcp"; src = [ "any" ]; sport = [ "all" ]; dst = [ "any" ]; dport = [ "test_9990" ]; action = "deny"; nat = "none"; routing = "none"; },
     { disabled = TRUE; name = "test-disabled-deny"; proto = "tcp"; src = [ "any" ]; sport = [ "all" ]; dst = [ "any" ]; dport = [ "test_9998" ]; action = "deny"; nat = "none"; routing = "none"; },
     { name = "test-named-accept-profile"; proto = "tcp"; src = [ "any" ]; sport = [ "all" ]; dst = [ "any" ]; dport = [ "test_9996" ]; detection_profile = "detect"; content_profile = "default"; action = "accept"; nat = "auto"; routing = "none"; },
     { name = "test-named-deny"; proto = "tcp"; src = [ "any" ]; sport = [ "all" ]; dst = [ "any" ]; dport = [ "test_9997" ]; action = "deny"; nat = "none"; routing = "none"; },
@@ -64,9 +87,21 @@ if os.environ.get('POLICY_TEST') == '1':
     { name = "test6-named-accept-profile"; proto = "tcp"; src = [ "any6" ]; sport = [ "all" ]; dst = [ "any6" ]; dport = [ "test_9996" ]; detection_profile = "detect"; content_profile = "default"; action = "accept"; nat = "auto"; routing = "none"; },
     { name = "test6-named-deny"; proto = "tcp"; src = [ "any6" ]; sport = [ "all" ]; dst = [ "any6" ]; dport = [ "test_9997" ]; action = "deny"; nat = "none"; routing = "none"; },
     { name = "test6-legacy-reject-alias"; proto = "tcp"; src = [ "any6" ]; sport = [ "all" ]; dst = [ "any6" ]; dport = [ "test_9995" ]; action = "reject"; nat = "none"; routing = "none"; },
+    { name = "test6-precedence-first-deny"; proto = "tcp"; src = [ "any6" ]; sport = [ "all" ]; dst = [ "any6" ]; dport = [ "test_9994" ]; action = "deny"; nat = "none"; routing = "none"; },
+    { name = "test6-precedence-late-accept"; proto = "tcp"; src = [ "any6" ]; sport = [ "all" ]; dst = [ "any6" ]; dport = [ "test_9994" ]; action = "accept"; nat = "auto"; routing = "none"; },
+    { disabled = TRUE; name = "test6-disabled-accept"; proto = "tcp"; src = [ "any6" ]; sport = [ "all" ]; dst = [ "any6" ]; dport = [ "test_9993" ]; action = "accept"; nat = "auto"; routing = "none"; },
+    { name = "test6-after-disabled-deny"; proto = "tcp"; src = [ "any6" ]; sport = [ "all" ]; dst = [ "any6" ]; dport = [ "test_9993" ]; action = "deny"; nat = "none"; routing = "none"; },
+    { name = "test6-protocol-mismatch-udp-deny"; proto = "udp"; src = [ "any6" ]; sport = [ "all" ]; dst = [ "any6" ]; dport = [ "test_9992" ]; action = "deny"; nat = "none"; routing = "none"; },
+    { name = "test6-protocol-match-tcp-accept"; proto = "tcp"; src = [ "any6" ]; sport = [ "all" ]; dst = [ "any6" ]; dport = [ "test_9992" ]; action = "accept"; nat = "auto"; routing = "none"; },
+    { name = "test6-port-mismatch-accept"; proto = "tcp"; src = [ "any6" ]; sport = [ "all" ]; dst = [ "any6" ]; dport = [ "test_9992" ]; action = "accept"; nat = "auto"; routing = "none"; },
+    { name = "test6-after-port-mismatch-deny"; proto = "tcp"; src = [ "any6" ]; sport = [ "all" ]; dst = [ "any6" ]; dport = [ "test_9991" ]; action = "deny"; nat = "none"; routing = "none"; },
+    { name = "test6-source-mismatch-accept"; proto = "tcp"; src = [ "test_nonmatching6" ]; sport = [ "all" ]; dst = [ "any6" ]; dport = [ "test_9990" ]; action = "accept"; nat = "auto"; routing = "none"; },
+    { name = "test6-after-source-mismatch-deny"; proto = "tcp"; src = [ "any6" ]; sport = [ "all" ]; dst = [ "any6" ]; dport = [ "test_9990" ]; action = "deny"; nat = "none"; routing = "none"; },
+    { name = "test6-missing-tls-profile-must-disable"; proto = "tcp"; src = [ "any6" ]; sport = [ "all" ]; dst = [ "any6" ]; dport = [ "test_9989" ]; tls_profile = "definitely_missing_runner_tls"; action = "accept"; nat = "auto"; routing = "none"; },
+    { name = "test6-after-missing-profile-deny"; proto = "tcp"; src = [ "any6" ]; sport = [ "all" ]; dst = [ "any6" ]; dport = [ "test_9989" ]; action = "deny"; nat = "none"; routing = "none"; },
 '''
     text, count = re.subn(r'(policy\s*=\s*\()', r'\1\n' + policy_cases, text, count=1)
-    if port_count != 1 or count != 1: raise RuntimeError('cannot inject policy suite objects/rules')
+    if address_count != 1 or port_count != 1 or count != 1: raise RuntimeError('cannot inject policy suite objects/rules')
 if quic_test:
     if os.environ.get('QUIC_LAB') != '1':
         raise RuntimeError('QUIC_TEST requires QUIC_LAB=1')
@@ -161,7 +196,17 @@ text = text.replace('/var/smithproxy/data',str(data)).replace('/var/log/smithpro
 text = text.replace('certs_ca_key_password = "smithproxy"','certs_ca_key_password = ""')
 text = text.replace('accept_redirect = TRUE','accept_redirect = FALSE').replace('accept_socks = TRUE','accept_socks = FALSE')
 if os.environ.get('TLS_EVASION_TRACE') == '1':
-    text = text.replace('log_level = 6;', 'log_level = 9;', 1)
+    # The shipped configuration has existed with and without a trailing
+    # semicolon. Match the stable assignment itself so trace mode cannot
+    # silently leave the ordinary INFO level enabled.
+    text, trace_level_count = re.subn(r'log_level\s*=\s*6', 'log_level = 9', text, count=1)
+    if trace_level_count != 1:
+        raise RuntimeError('cannot enable trace log level in generated configuration')
+    text, trace_component_count = re.subn(
+        r'(?m)^(\s*)//proxy\s*=\s*\d+;',
+        r'\1proxy = 10;\n\1epoll = 10;', text, count=1)
+    if trace_component_count != 1:
+        raise RuntimeError('cannot enable proxy/epoll component trace levels')
 if os.environ.get('ROUTING_TEST') == '1':
     text = text.replace('accept_socks = FALSE', 'accept_socks = TRUE')
 text = re.sub(r'(plaintext_workers|ssl_workers|udp_workers) = 0',r'\1 = 1',text)

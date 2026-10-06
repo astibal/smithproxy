@@ -16,13 +16,13 @@ void Entropy::update(const uint8_t *data, size_t len) {
             frequencies[data[i]]++;
             ++data_accounted;
         }
-        else if (i % then_each == 0 and then_counter < then_max_count) {
+        else if (then_counter >= then_max_count) {
+            break;
+        }
+        else if (i % then_each == 0) {
             ++then_counter;
             frequencies[data[i]]++;
             ++data_accounted;
-        }
-        else {
-            break;
         }
     }
 }

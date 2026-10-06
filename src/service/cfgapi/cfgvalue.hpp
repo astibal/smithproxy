@@ -47,6 +47,7 @@
 #include <list>
 #include <functional>
 #include <any>
+#include <charconv>
 #include <optional>
 #include <memory>
 
@@ -96,7 +97,9 @@ struct CfgValue {
             name_ = ref.name_;
             help_ = ref.help_;
             help_quick_ = ref.help_quick_;
+            may_be_empty_ = ref.may_be_empty_;
             value_filter_ = ref.value_filter_;
+            gen_suggestions_ = ref.gen_suggestions_;
         }
         return *this;
     };
@@ -141,17 +144,25 @@ struct CfgValue {
 
     static inline std::function<value_filter_fn> VALUE_ANY = [](std::string const& v) -> filter_retval { return filter_retval::accept(v); };
 
+    static std::optional<long long> parse_nonnegative_integer(std::string const& value) {
+        if (value.empty()) return std::nullopt;
+        long long parsed = -1;
+        auto const result = std::from_chars(value.data(), value.data() + value.size(), parsed);
+        if (result.ec != std::errc{} || result.ptr != value.data() + value.size() || parsed < 0)
+            return std::nullopt;
+        return parsed;
+    }
+
     static inline std::function<value_filter_fn> VALUE_UINT = [](std::string const& v) -> filter_retval {
-        auto nv = safe_val(v);
-        if(nv >= 0)
+        if(parse_nonnegative_integer(v))
             return filter_retval::accept(v);
         else
             return filter_retval::reject("value must be non-negative integer");
     };
 
     static inline std::function<value_filter_fn> VALUE_UINT_NZ = [](std::string const& v) -> filter_retval {
-        auto nv = safe_val(v);
-        if(nv > 0)
+        auto const parsed = parse_nonnegative_integer(v);
+        if(parsed && *parsed > 0)
             return filter_retval::accept(v);
         else
             return filter_retval::reject("value must be greater than zero");

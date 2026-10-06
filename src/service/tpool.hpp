@@ -52,6 +52,7 @@
 #include <functional>
 #include <mutex>
 #include <condition_variable>
+#include <algorithm>
 
 #include <socle/common/stringformat.hpp>
 #include <socle/common/convert.hpp>
@@ -152,10 +153,9 @@ public:
     static constexpr unsigned long milliseconds = 100;
 
     explicit ThreadPool(size_t threads) {
+        worker_tasks.init(threads);
 
         for (size_t thread_idx = 0; thread_idx < threads; ++thread_idx) {
-            worker_tasks.init(threads);
-
             workers_.emplace_back([this, thread_idx] {
                 while (true) {
                     std::unique_ptr<PoolTask> task;
@@ -237,7 +237,10 @@ public:
         return active;
     }
 
-    void stop() { stop_ = true; }
+    void stop() {
+        stop_ = true;
+        cv_.notify_all();
+    }
     void start() { stop_ = false; }
     [[nodiscard]] bool is_active() const { return (! stop_); }
     [[nodiscard]] bool is_stopping() const { return stop_; }
@@ -259,9 +262,12 @@ public:
         return ret;
     }
 
-    ~ThreadPool() {
-        stop_ = true;
-
+    void shutdown() {
+        stop();
+        {
+            auto lock = std::scoped_lock(lock_);
+            tasks_.clear();
+        }
         cv_.notify_all();
         for (std::thread& worker : workers_) {
             if(worker.joinable())
@@ -269,11 +275,18 @@ public:
         }
     }
 
+    ~ThreadPool() {
+        shutdown();
+    }
+
     class instance {
         static inline std::unique_ptr<ThreadPool> pool;
         static inline std::once_flag once_flag;
         static inline size_t POOL_MUL = 2;
-        static inline size_t POOL_SIZE = POOL_MUL * std::thread::hardware_concurrency();
+        // This pool currently carries webhook requests. Do not turn a large
+        // machine into an unbounded burst of simultaneous outbound requests.
+        static inline size_t POOL_SIZE = std::clamp<size_t>(
+            POOL_MUL * std::max(1U, std::thread::hardware_concurrency()), 2, 32);
     public:
         static ThreadPool& get() {
             std::call_once(once_flag, []() {
@@ -285,6 +298,10 @@ public:
             }
 
             return *pool;
+        }
+
+        static void shutdown_if_created() {
+            if(pool) pool->shutdown();
         }
     };
 };

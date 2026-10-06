@@ -51,6 +51,8 @@ namespace sx::webserver::authorized {
     Http_JsonResponseParams token_protected<T>::operator()(MHD_Connection *conn, std::string const& meth, std::string const &req) const {
 
         Http_JsonResponseParams ret;
+        ret.response = {{"error", "access denied"}};
+        ret.response_code = MHD_HTTP_UNAUTHORIZED;
 
         auto validate_and_call = [&](auto const& key, auto const& token) {
             if (HttpSessions::validate_tokens(key, token)
@@ -68,8 +70,7 @@ namespace sx::webserver::authorized {
         };
 
         auto validate_api_key_and_call = [&](auto const& key) {
-            auto it = HttpSessions::api_keys.find(key);
-            if (it != HttpSessions::api_keys.end()) {
+            if (HttpSessions::has_api_key(key)) {
                 ret.response = Func(conn, meth, req);
                 ret.response_code = MHD_HTTP_OK;
             } else {
@@ -125,8 +126,6 @@ namespace sx::webserver::authorized {
         };
 
         if (not req.empty() or meth != "POST") {
-            ret.response_code = MHD_HTTP_OK;
-
             // authenticate using cookies & headers if both set
 
             if(auto cookies_headers = extract_cookies_headers(); cookies_headers) {
@@ -147,8 +146,6 @@ namespace sx::webserver::authorized {
                 }
                 catch (json::exception const &) {
                     Log::get()->events().insert(ERR, "malformed API request from %s", client_address(conn).c_str());
-
-                    ret.response = {{"error", "access denied"},};
                 }
             }
         }
@@ -173,6 +170,10 @@ namespace sx::webserver::authorized {
                 ret.response = {{"error", "unknown parameters"},};
             }
 
+        }
+        else if(meth == "POST") {
+            ret.response = Func(conn, meth, req);
+            ret.response_code = MHD_HTTP_OK;
         }
         else if(meth != "POST") {
             // we don't require json in other methods

@@ -24,6 +24,7 @@ TMP_DIR="$(mktemp -d /tmp/smithproxy-quic-interop-XXXXXX)"
 ORIGIN_PID=""
 PROXY_PID=""
 HTTP3_PROXY_PID=""
+CLIENT_PID=""
 cleanup() {
     status=$?
     if [[ "${status}" -ne 0 ]]; then
@@ -35,6 +36,7 @@ cleanup() {
     [[ -z "${ORIGIN_PID}" ]] || kill "${ORIGIN_PID}" 2>/dev/null || true
     [[ -z "${PROXY_PID}" ]] || kill "${PROXY_PID}" 2>/dev/null || true
     [[ -z "${HTTP3_PROXY_PID}" ]] || kill "${HTTP3_PROXY_PID}" 2>/dev/null || true
+    [[ -z "${CLIENT_PID}" ]] || kill "${CLIENT_PID}" 2>/dev/null || true
     rm -rf -- "${TMP_DIR}"
     return "${status}"
 }
@@ -71,13 +73,26 @@ done
 grep -q 'READY origin' "${TMP_DIR}/origin.log"
 grep -q 'READY forward' "${TMP_DIR}/proxy.log"
 
-printf 'openssl-quic-interop\n' | timeout 15 openssl s_client -quic \
+printf 'openssl-quic-interop\n' >"${TMP_DIR}/client.in"
+# QUIC application data is asynchronous. Keep s_client alive after input EOF
+# until the origin confirms receipt; otherwise s_client can tear down the
+# stream immediately after a successful handshake and race the first write.
+openssl s_client -quic -ign_eof \
     -connect "127.0.0.1:${PROXY_PORT}" -servername localhost -alpn h3 \
     -CAfile "${TMP_DIR}/ca-cert.pem" -verify_return_error -brief \
-    >"${TMP_DIR}/client.out" 2>"${TMP_DIR}/client.err"
+    <"${TMP_DIR}/client.in" >"${TMP_DIR}/client.out" 2>"${TMP_DIR}/client.err" &
+CLIENT_PID=$!
+for _ in {1..100}; do
+    grep -q 'PASS origin echo=openssl-quic-interop' "${TMP_DIR}/origin.log" && break
+    kill -0 "${CLIENT_PID}" 2>/dev/null || break
+    sleep 0.05
+done
 grep -q 'Verification: OK' "${TMP_DIR}/client.err"
 grep -q 'Protocol version: QUICv1' "${TMP_DIR}/client.err"
 grep -q 'PASS origin echo=openssl-quic-interop' "${TMP_DIR}/origin.log"
+kill "${CLIENT_PID}" 2>/dev/null || true
+wait "${CLIENT_PID}" 2>/dev/null || true
+CLIENT_PID=""
 
 echo "PASS: external openssl s_client negotiated verified QUIC h3 through Smithproxy"
 if [[ "${PROXY_MODE}" == "forward-diag" ]]; then

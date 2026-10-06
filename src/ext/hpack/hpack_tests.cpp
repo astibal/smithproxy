@@ -530,7 +530,7 @@ TEST(HPack, RejectsMalformedGeneratedHeaderBlock) {
     };
     HPACK::decoder_t decoder;
 
-    EXPECT_THROW(decoder.decode(data), std::invalid_argument);
+    EXPECT_FALSE(decoder.decode(data));
 }
 
 TEST(HPack, RejectsNullStringInputsBeforeDereference) {
@@ -541,4 +541,181 @@ TEST(HPack, RejectsNullStringInputsBeforeDereference) {
     EXPECT_THROW(table.add(nullptr, "value"), std::runtime_error);
     EXPECT_THROW(huffman.encode(nullptr), std::invalid_argument);
     EXPECT_THROW(encoder.add(nullptr, "value"), std::invalid_argument);
+}
+
+TEST(HPack, NonHuffmanKnownNamesRoundTripWithoutLosingBoundaries) {
+    HPACK::encoder_t encoder;
+    encoder.add(":method", "POST", false);
+    encoder.add(":authority", "resolver.example", false);
+    encoder.add(":path", "/dns-query", false);
+    encoder.add("content-encoding", "gzip", false);
+
+    HPACK::decoder_t decoder;
+    ASSERT_TRUE(decoder.decode(encoder.data()));
+    ASSERT_EQ(decoder.headers().at(":method").back(), "POST");
+    ASSERT_EQ(decoder.headers().at(":authority").back(), "resolver.example");
+    ASSERT_EQ(decoder.headers().at(":path").back(), "/dns-query");
+    ASSERT_EQ(decoder.headers().at("content-encoding").back(), "gzip");
+}
+
+TEST(HPack, DynamicTableUsesRfcEntrySizeAndEvictionRules) {
+    HPACK::ringtable_t table(34);
+    table.add("a", "b");
+    EXPECT_EQ(table.length(), 34u);
+    EXPECT_EQ(table.entries_count(), 1u);
+
+    // An exactly full table remains valid; a new 34-byte entry evicts it.
+    table.max(34);
+    EXPECT_EQ(table.entries_count(), 1u);
+    table.add("c", "d");
+    ASSERT_EQ(table.entries_count(), 1u);
+    ASSERT_NE(table.get_header(HPACK::predefined_headers.size()), nullptr);
+    EXPECT_EQ(table.get_header(HPACK::predefined_headers.size())->first, "c");
+
+    table.max(33);
+    EXPECT_EQ(table.entries_count(), 0u);
+    table.add("oversized", "entry");
+    EXPECT_EQ(table.entries_count(), 0u);
+}
+
+TEST(HPack, DecoderMaintainsDynamicTableAcrossHeaderBlocks) {
+    HPACK::decoder_t decoder;
+    std::vector<uint8_t> literal{0x40, 0x01, 'x', 0x01, 'y'};
+    ASSERT_TRUE(decoder.decode(literal));
+    ASSERT_EQ(decoder.headers().at("x").back(), "y");
+
+    // Static table has indices 1..61; the newest dynamic entry is 62.
+    std::vector<uint8_t> indexed{0xbe};
+    ASSERT_TRUE(decoder.decode(indexed));
+    ASSERT_EQ(decoder.headers().size(), 1u);
+    EXPECT_EQ(decoder.headers().at("x").back(), "y");
+}
+
+TEST(HPack, FailedBlockDoesNotPartiallyChangeConnectionTable) {
+    HPACK::decoder_t decoder;
+    std::vector<uint8_t> literal{0x40, 0x01, 'x', 0x01, 'y'};
+    ASSERT_TRUE(decoder.decode(literal));
+
+    // A legal clear followed by an invalid dynamic reference fails as one
+    // block; neither operation may become visible to the connection state.
+    std::vector<uint8_t> malformed{0x20, 0xbe};
+    EXPECT_FALSE(decoder.decode(malformed));
+
+    std::vector<uint8_t> indexed{0xbe};
+    ASSERT_TRUE(decoder.decode(indexed));
+    EXPECT_EQ(decoder.headers().at("x").back(), "y");
+}
+
+TEST(HPack, DecoderRejectsInvalidIndexesAndTableUpdates) {
+    HPACK::decoder_t decoder(16);
+    std::vector<uint8_t> oversized_update{0x31};
+    EXPECT_FALSE(decoder.decode(oversized_update));
+
+    std::vector<uint8_t> late_update{0x82, 0x20};
+    EXPECT_FALSE(decoder.decode(late_update));
+
+    std::vector<uint8_t> missing_dynamic_index{0xbe};
+    EXPECT_FALSE(decoder.decode(missing_dynamic_index));
+
+    std::vector<uint8_t> missing_literal_name{0x0f, 0x2f, 0x00};
+    EXPECT_FALSE(decoder.decode(missing_literal_name));
+}
+
+TEST(HPack, DecoderDoesNotSilentlyTruncateLargeHeaderBlocks) {
+    std::vector<uint8_t> data(101, 0x82); // indexed :method GET
+    HPACK::decoder_t decoder;
+    ASSERT_TRUE(decoder.decode(data));
+    ASSERT_EQ(decoder.headers().at(":method").size(), 101u);
+}
+
+TEST(HPack, HuffmanRoundTripsOctetsAndRejectsEosAndLongPadding) {
+    std::string source;
+    for (unsigned int value = 0; value <= 255; ++value)
+        source.push_back(static_cast<char>(value));
+
+    HPACK::huffman_encoder_t encoder;
+    auto encoded = encoder.encode(source);
+    HPACK::huffman_tree_t decoder;
+    ASSERT_EQ(decoder.decode(std::string(encoded.begin(), encoded.end())), source);
+
+    const std::string eos{"\xff\xff\xff\xfc", 4};
+    EXPECT_THROW(decoder.decode(eos), HPACK::hpack_error);
+    const std::string eight_padding_bits{"\xff", 1};
+    EXPECT_THROW(decoder.decode(eight_padding_bits), HPACK::hpack_error);
+}
+
+TEST(HPack, NeverIndexedKnownNameAndLongHuffmanValueRoundTrip) {
+    const std::string value(512, 'z');
+    HPACK::encoder_t encoder;
+    encoder.add("authorization", value, true, true);
+
+    ASSERT_FALSE(encoder.data().empty());
+    EXPECT_EQ(encoder.data().front() & 0xf0, 0x10);
+
+    HPACK::decoder_t decoder;
+    ASSERT_TRUE(decoder.decode(encoder.data()));
+    EXPECT_EQ(decoder.headers().at("authorization").back(), value);
+}
+
+TEST(HPack, EncoderCoversNewAndDynamicNamesWithBothStringModes) {
+    HPACK::encoder_t encoder;
+    EXPECT_EQ(encoder.max_table_size(), 4096u);
+    encoder.max_table_size(1024);
+    EXPECT_EQ(encoder.max_table_size(), 1024u);
+
+    encoder.add("x-huffman", "first", true);
+    encoder.add("x-huffman", "first", true); // exact dynamic reference
+    encoder.add("x-plain", "second", false);
+    encoder.add("x-secret", "third", false, true);
+
+    HPACK::decoder_t decoder;
+    ASSERT_TRUE(decoder.decode(encoder.data()));
+    EXPECT_EQ(decoder.headers().at("x-huffman").size(), 2u);
+    EXPECT_EQ(decoder.headers().at("x-plain").back(), "second");
+    EXPECT_EQ(decoder.headers().at("x-secret").back(), "third");
+}
+
+TEST(HPack, PublicOverloadsAndRingLookupRespectBoundaries) {
+    HPACK::ringtable_t table;
+    table.add("name", "value");
+    int64_t index = -1;
+    EXPECT_TRUE(table.find(HPACK::header_t("name", "value"), index));
+    EXPECT_EQ(index, static_cast<int64_t>(HPACK::predefined_headers.size()));
+    EXPECT_FALSE(table.find(HPACK::header_t("name", "other"), index));
+    EXPECT_EQ(index, static_cast<int64_t>(HPACK::predefined_headers.size()));
+    EXPECT_FALSE(table.find(HPACK::header_t("missing", "value"), index));
+    EXPECT_EQ(index, -1);
+    EXPECT_EQ(table.at(0).first, "name");
+    EXPECT_EQ(table.at(HPACK::predefined_headers.size()).first, "name");
+    EXPECT_THROW(table.at(HPACK::predefined_headers.size() - 1), std::invalid_argument);
+    EXPECT_THROW(table.at(HPACK::predefined_headers.size() + 2), std::invalid_argument);
+    EXPECT_EQ(table.get_header(9999), nullptr);
+    EXPECT_THROW(table.add("name", nullptr), std::runtime_error);
+    table.max(0);
+    EXPECT_EQ(table.entries_count(), 0u);
+
+    HPACK::huffman_encoder_t huffman;
+    std::vector<uint8_t> octets{'o', 'k'};
+    EXPECT_FALSE(huffman.encode(octets).empty());
+    EXPECT_FALSE(huffman.encode("ok").empty());
+
+    HPACK::decoder_t decoder;
+    EXPECT_FALSE(decoder.decode(std::string{}));
+    EXPECT_THROW(decoder.decode(nullptr), std::invalid_argument);
+    EXPECT_TRUE(decoder.decode(std::string{"\x82", 1}));
+    EXPECT_TRUE(decoder.decode("\x82"));
+
+    HPACK::hpack_error error("expected");
+    EXPECT_STREQ(error.what(), "expected");
+}
+
+TEST(HPack, IntegerDecoderRejectsInvalidPrefixWidths) {
+    HPACK::decoder_t decoder;
+    std::vector<uint8_t> data{0};
+    auto begin = data.begin();
+    auto end = data.end();
+    uint32_t value = 0;
+    EXPECT_THROW(decoder.decode_integer(begin, end, value, 0), std::invalid_argument);
+    begin = data.begin();
+    EXPECT_THROW(decoder.decode_integer(begin, end, value, 9), std::invalid_argument);
 }

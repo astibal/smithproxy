@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Black-box tests for the SPQ1 Wireshark dissector."""
 
+import os
 import shutil
 import subprocess
 import sys
@@ -15,6 +16,10 @@ DEMO_GENERATOR = TOOLS / "generate-spquic-demo.py"
 
 
 class Spq1DissectorTest(unittest.TestCase):
+    @unittest.skipIf(
+        os.geteuid() == 0,
+        "tshark disables user Lua dissectors when running as superuser",
+    )
     @unittest.skipUnless(shutil.which("tshark"), "tshark is not installed")
     def test_composes_request_url(self) -> None:
         """Combine H3 pseudo-headers into one stable, filterable URL field."""
@@ -49,6 +54,10 @@ class Spq1DissectorTest(unittest.TestCase):
             result.stdout.strip().splitlines(),
         )
 
+    @unittest.skipIf(
+        os.geteuid() == 0,
+        "tshark disables user Lua dissectors when running as superuser",
+    )
     @unittest.skipUnless(shutil.which("tshark"), "tshark is not installed")
     def test_decodes_spq1_after_native_quic_on_same_tuple(self) -> None:
         """Do not let native QUIC conversation binding hide later SPQ1 records."""

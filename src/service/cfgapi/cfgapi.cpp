@@ -117,9 +117,9 @@ std::map<std::string, std::shared_ptr<CfgElement>>& CfgFactory::section_db(std::
 }
 
 bool CfgFactory::cfgapi_init(const char* fnm) {
-    
+
     std::scoped_lock<std::recursive_mutex> l(lock_);
-    
+
     _dia("Reading config file");
     
     // Read the file. If there is an error, report it and exit.
@@ -205,7 +205,7 @@ std::shared_ptr<CfgRange> CfgFactory::lookup_port (const char *name) {
         return std::dynamic_pointer_cast<CfgRange>(db_port[name]);
     }    
     
-    return std::make_shared<CfgRange>(NULLRANGE);
+    return nullptr;
 }
 
 std::shared_ptr<CfgString> CfgFactory::lookup_features (const char *name) {
@@ -380,10 +380,9 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         unsigned char rand_pool[16];
         RAND_bytes(rand_pool, 16);
 
-        if(sx::webserver::HttpSessions::api_keys.empty()) {
-
-            auto lc_ = std::scoped_lock(sx::webserver::HttpSessions::lock);
-            sx::webserver::HttpSessions::api_keys.emplace(hex_print(rand_pool, 16));
+        if(not sx::webserver::HttpSessions::has_api_keys()) {
+            sx::webserver::HttpSessions::replace_api_keys(
+                    {hex_print(rand_pool, 16)});
             log.event(INF, "new API key generated");
         }
 
@@ -539,6 +538,22 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         return true;
     }
     else if(upgrade_to_num == 1040) {
+        log.event(INF, "added settings.policy_fail_open (default false)");
+        log.event(INF, "added settings.policy_access_request_fail_open (default false)");
+        log.event(NOT, "policy and access-request failures now default to fail-closed");
+        return true;
+    }
+    else if(upgrade_to_num == 1041) {
+        log.event(INF, "tls_profile.[x].client_cert_action now uses named values");
+        log.event(INF, "numeric client certificate actions will be saved as strings");
+        return true;
+    }
+    else if(upgrade_to_num == 1042) {
+        log.event(INF, "added tls_profiles.[x].client_hello_timeout (milliseconds)");
+        log.event(INF, "added tls_profiles.[x].handshake_timeout (milliseconds)");
+        return true;
+    }
+    else if(upgrade_to_num == 1043) {
         if(not cfgapi.getRoot().exists("ssh_profiles")) {
             cfgapi.getRoot().add("ssh_profiles", Setting::TypeGroup);
         }
@@ -546,7 +561,7 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "added policy.[x].ssh_profile");
         return true;
     }
-    else if(upgrade_to_num == 1041) {
+    else if(upgrade_to_num == 1044) {
         if(cfgapi.getRoot().exists("policy")) {
             Setting& policies = cfgapi.getRoot()["policy"];
             for(int i = 0; i < policies.getLength(); ++i) {
@@ -558,7 +573,7 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "materialized policy.[x].ssh_profile");
         return true;
     }
-    else if(upgrade_to_num == 1042) {
+    else if(upgrade_to_num == 1045) {
         if(cfgapi.getRoot().exists("captures") &&
            cfgapi.getRoot()["captures"].exists("remote")) {
             Setting& remote = cfgapi.getRoot()["captures"]["remote"];
@@ -570,7 +585,7 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "renamed captures.remote.gre_format 'spq1' to 'traffic'");
         return true;
     }
-    else if(upgrade_to_num == 1043) {
+    else if(upgrade_to_num == 1046) {
         if(cfgapi.getRoot().exists("ssh_profiles")) {
             Setting& profiles = cfgapi.getRoot()["ssh_profiles"];
             for(int i = 0; i < profiles.getLength(); ++i) {
@@ -586,7 +601,7 @@ bool CfgFactory::upgrade_schema(int upgrade_to_num) {
         log.event(INF, "added per-feature SSH profile actions");
         return true;
     }
-    else if(upgrade_to_num == 1044) {
+    else if(upgrade_to_num == 1047) {
         if(cfgapi.getRoot().exists("ssh_profiles")) {
             Setting& profiles = cfgapi.getRoot()["ssh_profiles"];
             for(int i = 0; i < profiles.getLength(); ++i) {
@@ -793,6 +808,8 @@ bool CfgFactory::load_settings () {
     load_if_exists(cfgapi.getRoot()["settings"], "accept_socks", accept_socks);
     load_if_exists(cfgapi.getRoot()["settings"], "accept_http_connect", accept_http_connect);
     load_if_exists(cfgapi.getRoot()["settings"], "accept_api", accept_api);
+    load_if_exists(cfgapi.getRoot()["settings"], "policy_fail_open", policy_fail_open);
+    load_if_exists(cfgapi.getRoot()["settings"], "policy_access_request_fail_open", policy_access_request_fail_open);
     load_if_exists(cfgapi.getRoot()["settings"], "plaintext_port",listen_tcp_port_base); listen_tcp_port = listen_tcp_port_base;
     load_if_exists(cfgapi.getRoot()["settings"], "plaintext_workers",num_workers_tcp);
     load_if_exists(cfgapi.getRoot()["settings"], "ssl_port",listen_tls_port_base); listen_tls_port = listen_tls_port_base;
@@ -982,12 +999,7 @@ bool CfgFactory::load_settings () {
     }
 
     if(cfgapi.getRoot()["settings"].exists("http_api")) {
-        auto& key_storage = sx::webserver::HttpSessions::api_keys;
-
-        if(not key_storage.empty()) {
-            _deb("load_settings: clearing existing entries in: api keys");
-            key_storage.clear();
-        }
+        std::set<std::string> key_storage;
 
         if(cfgapi.getRoot()["settings"]["http_api"].exists("keys")) {
             const int num = cfgapi.getRoot()["settings"]["http_api"]["keys"].getLength();
@@ -996,6 +1008,7 @@ bool CfgFactory::load_settings () {
                 key_storage.emplace(key);
             }
         }
+        sx::webserver::HttpSessions::replace_api_keys(std::move(key_storage));
         load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "key_timeout", sx::webserver::HttpSessions::session_ttl);
         load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "key_extend_on_access", sx::webserver::HttpSessions::extend_on_access);
         load_if_exists(cfgapi.getRoot()["settings"]["http_api"], "loopback_only", sx::webserver::HttpSessions::loopback_only);
@@ -1043,7 +1056,7 @@ bool CfgFactory::load_settings () {
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "task_debug", sx::http::Request::DEBUG);
         load_if_exists(cfgapi.getRoot()["settings"]["webhook"], "task_debug_dump", sx::http::Request::DEBUG_DUMP_OK);
 
-        if(not settings_webhook.hostid.empty()) sx::http::webhooks::set_hostid(settings_webhook.hostid);
+        sx::http::webhooks::set_hostid(settings_webhook.hostid);
     }
 
     return true;
@@ -1353,7 +1366,16 @@ int CfgFactory::load_db_port () {
             
             if( load_if_exists(cur_object, "start", a) &&
                     load_if_exists(cur_object, "end", b)   ) {
-                
+
+                if(a < 0 or a > 65535 or b < 0 or b > 65535) {
+                    _err("cfgapi_load_ports: '%s': values must be in 0..65535", name.c_str());
+                    Log::get()->events().insert(WAR,
+                        "CONFIG: port: '%s': range %d-%d is outside 0..65535",
+                        name.c_str(), a, b);
+                    CfgFactory::LOAD_ERRORS = true;
+                    continue;
+                }
+
                 if(a <= b) {
                     auto cf = std::make_shared<CfgRange>(std::pair(a, b));
                     cf->element_name() = name;
@@ -1878,13 +1900,17 @@ int CfgFactory::load_db_policy () {
 
             if(not hard_error) {
                 if(soft_error) {
-                    _dia("cfgapi_load_policy[#%d]: loaded with a soft error", policy_index);
+                    _dia("cfgapi_load_policy[#%d]: enforcement error, forcing deny", policy_index);
                     rule->cfg_err_is_degraded = true;
+                    rule->action = PolicyRule::POLICY_ACTION_DENY;
+                    rule->action_name = "deny";
                 } else {
                     _dia("cfgapi_load_policy[#%d]: ok", policy_index);
                 }
             } else {
                 rule->cfg_err_is_disabled = true;
+                rule->action = PolicyRule::POLICY_ACTION_DENY;
+                rule->action_name = "deny";
                 _err("cfgapi_load_policy[#%d]: not ok, disabled", policy_index);
 
             }
@@ -1967,11 +1993,16 @@ int CfgFactory::policy_action (int index) {
     std::scoped_lock<std::recursive_mutex> l(lock_);
     
     if(index < 0) {
-        return -1;
+        return policy_fail_open ? PolicyRule::POLICY_ACTION_PASS
+                                : PolicyRule::POLICY_ACTION_DENY;
     }
     
     if(index < (signed int)db_policy_list.size()) {
-        return db_policy_list.at(index)->action;
+        auto const& rule = db_policy_list.at(index);
+        if(rule->cfg_err_is_disabled or rule->cfg_err_is_degraded) {
+            return PolicyRule::POLICY_ACTION_DENY;
+        }
+        return rule->action;
     } else {
         _dia("cfg_obj_policy_action[#%d]: out of bounds, deny", index);
         return PolicyRule::POLICY_ACTION_DENY;
@@ -2321,6 +2352,18 @@ int CfgFactory::load_db_prof_tls () {
 
                 new_profile->element_name() = name;
                 load_if_exists(cur_object, "no_fallback_bypass", new_profile->no_fallback_bypass);
+                load_if_exists(cur_object, "client_hello_timeout", new_profile->client_hello_timeout);
+                load_if_exists(cur_object, "handshake_timeout", new_profile->handshake_timeout);
+                if(new_profile->client_hello_timeout <= 0) {
+                    _err("TLS profile '%s': invalid client_hello_timeout; using 3000 ms",
+                         name.c_str());
+                    new_profile->client_hello_timeout = 3000;
+                }
+                if(new_profile->handshake_timeout <= 0) {
+                    _err("TLS profile '%s': invalid handshake_timeout; using 10000 ms",
+                         name.c_str());
+                    new_profile->handshake_timeout = 10000;
+                }
 
                 load_if_exists(cur_object, "allow_untrusted_issuers", new_profile->allow_untrusted_issuers);
                 load_if_exists(cur_object, "allow_invalid_certs", new_profile->allow_invalid_certs);
@@ -2340,6 +2383,31 @@ int CfgFactory::load_db_prof_tls () {
                 load_if_exists(cur_object, "failed_certcheck_override", new_profile->failed_certcheck_override);
                 load_if_exists(cur_object, "failed_certcheck_override_timeout", new_profile->failed_certcheck_override_timeout);
                 load_if_exists(cur_object, "failed_certcheck_override_timeout_type", new_profile->failed_certcheck_override_timeout_type);
+                if(cur_object.exists("client_cert_action")) {
+                    auto& action = cur_object["client_cert_action"];
+                    if(action.getType() == Setting::TypeString) {
+                        std::string const configured = static_cast<const char*>(action);
+                        new_profile->client_cert_action =
+                            ProfileTls::client_cert_action_value(configured);
+                        if(ProfileTls::client_cert_action_name(new_profile->client_cert_action) !=
+                           configured) {
+                            _err("TLS profile '%s': invalid client_cert_action '%s'; failing closed",
+                                 name.c_str(), configured.c_str());
+                        }
+                    } else if(action.getType() == Setting::TypeInt) {
+                        int const legacy_action = action;
+                        new_profile->client_cert_action =
+                            ProfileTls::normalized_client_cert_action(legacy_action);
+                        if(new_profile->client_cert_action != legacy_action) {
+                            _err("TLS profile '%s': invalid legacy client_cert_action %d; failing closed",
+                                 name.c_str(), legacy_action);
+                        }
+                    } else {
+                        _err("TLS profile '%s': invalid client_cert_action type; failing closed",
+                             name.c_str());
+                        new_profile->client_cert_action = 0;
+                    }
+                }
                 load_if_exists(cur_object, "sni_based_cert", new_profile->mitm_cert_sni_search);
                 load_if_exists(cur_object, "ip_based_cert", new_profile->mitm_cert_ip_search);
                 load_if_exists(cur_object, "only_custom_certs", new_profile->mitm_cert_searched_only);
@@ -2952,17 +3020,17 @@ bool CfgFactory::prof_tls_apply (baseHostCX *originator, MitmProxy *new_proxy, c
 
     auto const& log = log::policy();
 
+    if(not new_proxy or not originator) {
+        _err("CfgFactory::prof_tls_apply: proxy or originator is null");
+        return false;
+    }
+
     if(not ps) {
         _err("CfgFactory::prof_tls_apply[%s]: profile is null", new_proxy->to_string(iINF).c_str());
         return false;
     }
 
     bool tls_applied = false;
-
-    if(not new_proxy or not originator) {
-        _err("CfgFactory::prof_tls_apply[%s]: proxy or originator is null", new_proxy->to_string(iINF).c_str());
-        return false;
-    }
 
     if( not policy_apply_tls(ps, originator->com())) {
         _err("CfgFactory::prof_tls_apply[%s]: cannot apply on originator cx", new_proxy->to_string(iINF).c_str());
@@ -2974,6 +3042,11 @@ bool CfgFactory::prof_tls_apply (baseHostCX *originator, MitmProxy *new_proxy, c
     _dia("CfgFactory::prof_tls_apply[%s]: profile %s, originator %s", new_proxy->to_string(iINF).c_str(), ps->element_name().c_str(), originator->full_name('L').c_str());
 
     for( auto* cx: new_proxy->rs()) {
+        if(not cx or not cx->com()) {
+            _err("CfgFactory::prof_tls_apply[%s]: target context is incomplete",
+                 new_proxy->to_string(iINF).c_str());
+            return false;
+        }
         baseCom* xcom = cx->com();
         _dia("CfgFactory::prof_tls_apply[%s]: profile %s, target %s", new_proxy->to_string(iINF).c_str(), ps->element_name().c_str(), cx->full_name('R').c_str());
 
@@ -3136,7 +3209,8 @@ void CfgFactory::policy_apply_features(std::shared_ptr<PolicyRule> const & polic
 
             if(not access_filter) {
                 if (it->value() == "access-request") {
-                    access_filter = new AccessFilter(mitm_proxy);
+                    access_filter = new AccessFilter(
+                        mitm_proxy, policy_access_request_fail_open);
                 }
             }
         }
@@ -3163,19 +3237,32 @@ int CfgFactory::policy_apply (baseHostCX *originator, MitmProxy *proxy, int matc
     auto const& log = log::policy();
 
     auto lc_ = std::scoped_lock(lock_);
-    
-    int policy_num = matched_policy;
-    if(policy_num < 0) {
-        policy_num = policy_match(proxy);
+
+    if(not originator or not proxy) {
+        _err("policy_apply: missing originator or proxy");
+        return -1;
+    }
+
+    int policy_num = sx::policy::preserve_explicit_match(
+        matched_policy, [&] { return policy_match(proxy); });
+    if(policy_num < 0 and policy_fail_open) {
+        _war("Connection %s accepted without a policy match: settings.policy_fail_open=true",
+             originator->full_name('L').c_str());
+        return PolicyRule::POLICY_IMPLICIT_PASS;
     }
     if(auto verdict = policy_action(policy_num); verdict == PolicyRule::POLICY_ACTION_PASS) {
         auto rule = policy_rule(policy_num);
+        if(not rule) {
+            _err("policy_apply: matched policy %d disappeared before application", policy_num);
+            return -1;
+        }
 
         auto pc = policy_prof_content(policy_num);
         auto pd = policy_prof_detection(policy_num);
         auto pt = policy_prof_tls(policy_num);
         auto pa = policy_prof_auth(policy_num);
         auto p_alg_dns = policy_prof_alg_dns(policy_num);
+        auto p_script = policy_prof_script(policy_num);
 
 
         const char *pc_name = "none";
@@ -3189,19 +3276,35 @@ int CfgFactory::policy_apply (baseHostCX *originator, MitmProxy *proxy, int matc
 
         /* Processing content profile */
         if (pc) {
-            if (prof_content_apply(originator, proxy, pc)) {
-                pc_name = pc->element_name().c_str();
+            if (not prof_content_apply(originator, proxy, pc)) {
+                _err("policy_apply: configured content profile failed");
+                return -1;
             }
+            pc_name = pc->element_name().c_str();
         }
         
         
         /* Processing detection profile */
-        if (pd and prof_detect_apply(originator, proxy, pd)) {
+        if (pd and not prof_detect_apply(originator, proxy, pd)) {
+            _err("policy_apply: configured detection profile failed");
+            return -1;
+        }
+        if(pd) {
             pd_name = pd->element_name().c_str();
         }
         
         /* Processing TLS profile*/
-        if (pt and prof_tls_apply(originator, proxy, pt)) {
+        if (pt and not prof_tls_apply(originator, proxy, pt)) {
+            _err("policy_apply: configured TLS profile failed");
+            return -1;
+        }
+
+        /* Processing script profile */
+        if (p_script and not prof_script_apply(originator, proxy, p_script)) {
+            _err("policy_apply: configured script profile failed");
+            return -1;
+        }
+        if(pt) {
             pt_name = pt->element_name().c_str();
         }
 
@@ -3260,6 +3363,11 @@ int CfgFactory::policy_apply (baseHostCX *originator, MitmProxy *proxy, int matc
 
             /* Processing Features */
             policy_apply_features(rule, mitm_proxy);
+            if(mitm_proxy->state().dead()) {
+                _inf("Connection %s rejected by policy feature during initialization",
+                     originator->full_name('L').c_str());
+                return -1;
+            }
         }
         
         // ALGS can operate only on MitmHostCX classes
@@ -3637,6 +3745,8 @@ bool CfgFactory::policy_apply_tls (const std::shared_ptr<ProfileTls> &pt, baseCo
             sslcom->verify_reset(SSLCom::verify_status_t::VRF_OK);
         }
         sslcom->opt.no_fallback_bypass = pt->no_fallback_bypass;
+        sslcom->opt.client_hello_timeout = pt->client_hello_timeout;
+        sslcom->opt.handshake_timeout = pt->handshake_timeout;
 
         sslcom->opt.cert.allow_unknown_issuer = pt->allow_untrusted_issuers;
         sslcom->opt.cert.allow_self_signed_chain = pt->allow_untrusted_issuers;
@@ -3647,6 +3757,7 @@ bool CfgFactory::policy_apply_tls (const std::shared_ptr<ProfileTls> &pt, baseCo
         sslcom->opt.cert.failed_check_override = pt->failed_certcheck_override;
         sslcom->opt.cert.failed_check_override_timeout = pt->failed_certcheck_override_timeout;
         sslcom->opt.cert.failed_check_override_timeout_type = pt->failed_certcheck_override_timeout_type;
+        sslcom->opt.cert.client_cert_action = pt->client_cert_action;
         sslcom->opt.cert.mitm_cert_sni_search = pt->mitm_cert_sni_search;
         sslcom->opt.cert.mitm_cert_ip_search = pt->mitm_cert_ip_search;
         sslcom->opt.cert.mitm_cert_searched_only = pt->mitm_cert_searched_only;
@@ -3670,6 +3781,7 @@ bool CfgFactory::policy_apply_tls (const std::shared_ptr<ProfileTls> &pt, baseCo
             peer_sslcom->opt.cert.failed_check_override = pt->failed_certcheck_override;
             peer_sslcom->opt.cert.failed_check_override_timeout = pt->failed_certcheck_override_timeout;
             peer_sslcom->opt.cert.failed_check_override_timeout_type = pt->failed_certcheck_override_timeout_type;
+            peer_sslcom->opt.cert.client_cert_action = pt->client_cert_action;
             peer_sslcom->opt.cert.mitm_cert_sni_search = pt->mitm_cert_sni_search;
             peer_sslcom->opt.cert.mitm_cert_ip_search = pt->mitm_cert_ip_search;
             peer_sslcom->opt.cert.mitm_cert_searched_only = pt->mitm_cert_searched_only;
@@ -4266,6 +4378,8 @@ bool CfgFactory::new_tls_profile(Setting& ex, std::string const& name) const {
 
         item.add("inspect", Setting::TypeBoolean) = false;
         item.add("no_fallback_bypass", Setting::TypeBoolean) = false;
+        item.add("client_hello_timeout", Setting::TypeInt) = 3000;
+        item.add("handshake_timeout", Setting::TypeInt) = 10000;
 
         item.add("use_pfs", Setting::TypeBoolean) = true;
         item.add("left_use_pfs", Setting::TypeBoolean) = true;
@@ -4289,6 +4403,7 @@ bool CfgFactory::new_tls_profile(Setting& ex, std::string const& name) const {
         item.add("failed_certcheck_override", Setting::TypeBoolean) = true;
         item.add("failed_certcheck_override_timeout", Setting::TypeInt) = 600;
         item.add("failed_certcheck_override_timeout_type", Setting::TypeInt) = 0;
+        item.add("client_cert_action", Setting::TypeString) = "use_configured";
         item.add("sni_based_cert", Setting::TypeBoolean) = true;
         item.add("ip_based_cert", Setting::TypeBoolean) = true;
         item.add("only_custom_certs", Setting::TypeBoolean) = false;
@@ -4324,6 +4439,8 @@ int CfgFactory::save_tls_profiles(Config& ex) const {
 
         item.add("inspect", Setting::TypeBoolean) = obj->inspect;
         item.add("no_fallback_bypass", Setting::TypeBoolean) = obj->no_fallback_bypass;
+        item.add("client_hello_timeout", Setting::TypeInt) = obj->client_hello_timeout;
+        item.add("handshake_timeout", Setting::TypeInt) = obj->handshake_timeout;
 
         item.add("use_pfs", Setting::TypeBoolean) = obj->use_pfs;
         item.add("left_use_pfs", Setting::TypeBoolean) = obj->left_use_pfs;
@@ -4363,6 +4480,8 @@ int CfgFactory::save_tls_profiles(Config& ex) const {
         item.add("failed_certcheck_override", Setting::TypeBoolean) = obj->failed_certcheck_override;
         item.add("failed_certcheck_override_timeout", Setting::TypeInt) = obj->failed_certcheck_override_timeout;
         item.add("failed_certcheck_override_timeout_type", Setting::TypeInt) = obj->failed_certcheck_override_timeout_type;
+        item.add("client_cert_action", Setting::TypeString) =
+            ProfileTls::client_cert_action_name(obj->client_cert_action).data();
         item.add("sni_based_cert", Setting::TypeBoolean) = obj->mitm_cert_sni_search;
         item.add("ip_based_cert", Setting::TypeBoolean) = obj->mitm_cert_ip_search;
         item.add("only_custom_certs", Setting::TypeBoolean) = obj->mitm_cert_searched_only;
@@ -5410,6 +5529,8 @@ int save_settings(Config& ex) {
     objects.add("accept_redirect", Setting::TypeBoolean) = CfgFactory::get()->accept_redirect;
     objects.add("accept_socks", Setting::TypeBoolean) = CfgFactory::get()->accept_socks;
     objects.add("accept_http_connect", Setting::TypeBoolean) = CfgFactory::get()->accept_http_connect;
+    objects.add("policy_fail_open", Setting::TypeBoolean) = CfgFactory::get()->policy_fail_open;
+    objects.add("policy_access_request_fail_open", Setting::TypeBoolean) = CfgFactory::get()->policy_access_request_fail_open;
 
     // nameservers
     Setting& it_ns  = objects.add("nameservers", Setting::TypeArray);
@@ -5502,7 +5623,7 @@ int save_settings(Config& ex) {
     Setting& http_api_objects = objects.add("http_api", Setting::TypeGroup);
 
     Setting& keys = http_api_objects.add("keys", Setting::TypeArray);
-    for(auto const& k: sx::webserver::HttpSessions::api_keys) {
+    for(auto const& k: sx::webserver::HttpSessions::api_keys_snapshot()) {
         keys.add(Setting::TypeString) = k;
     }
     http_api_objects.add("key_timeout", Setting::TypeInt) = (int)sx::webserver::HttpSessions::session_ttl;

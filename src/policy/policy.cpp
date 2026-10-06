@@ -40,6 +40,8 @@
 #include <vars.hpp>
 #include <policy/policy.hpp>
 
+#include <optional>
+
 using namespace socle;
 
 std::string PolicyRule::to_string(int verbosity) const {
@@ -177,21 +179,30 @@ std::string PolicyRule::to_string(int verbosity) const {
 
 bool PolicyRule::match_addrgrp_cx(group_of_addresses const& sources, baseHostCX* cx) const {
     bool match = false;
+
+    if(not cx) return false;
     
      if(sources.empty()) {
          return true;
     }
 
-    auto l = CidrAddress(cx->host());
+    std::optional<CidrAddress> address;
+    try {
+        address.emplace(cx->host());
+    } catch(std::exception const&) {
+        return false;
+    }
 
     for(auto const& comp: sources) {
 
-        if(comp->value()->match(l.cidr())) {
-            _deb("PolicyRule::match_addrgrp_cx: comparing %s with rule %s: matched", l.ip().c_str(), comp->value()->str().c_str());
+        if(not comp or not comp->value()) continue;
+
+        if(comp->value()->match(address->cidr())) {
+            _deb("PolicyRule::match_addrgrp_cx: comparing %s with rule %s: matched", address->ip().c_str(), comp->value()->str().c_str());
             match = true;
             break;
         } else {
-            _deb("PolicyRule::match_addrgrp_cx: comparing %s with rule %s: not matched", l.ip().c_str(), comp->value()->str().c_str());
+            _deb("PolicyRule::match_addrgrp_cx: comparing %s with rule %s: not matched", address->ip().c_str(), comp->value()->str().c_str());
         }
     }
 
@@ -200,6 +211,8 @@ bool PolicyRule::match_addrgrp_cx(group_of_addresses const& sources, baseHostCX*
 
 bool PolicyRule::match_rangegrp_cx(group_of_ports const& ranges, baseHostCX* cx) const {
     bool match = false;
+
+    if(not cx) return false;
     
     if(ranges.empty()) {
         return  true;
@@ -210,6 +223,8 @@ bool PolicyRule::match_rangegrp_cx(group_of_ports const& ranges, baseHostCX* cx)
     if(p < 0) return false;
 
     for(auto const& comp: ranges) {
+
+        if(not comp) continue;
 
         if((p >= comp->value().first) && (p <= comp->value().second)) {
             _deb("PolicyRule::match_rangergrp_cx: comparing %d with %s: matched", p, rangetos(comp->value()).c_str());
@@ -224,46 +239,38 @@ bool PolicyRule::match_rangegrp_cx(group_of_ports const& ranges, baseHostCX* cx)
 }
 
 bool PolicyRule::match_rangegrp_vecx(group_of_ports const& ranges, std::vector<baseHostCX*> const& vecx) const {
-    bool match = false;
-
     if(vecx.empty()) return true;
 
     int idx = -1;
     for(auto cx: vecx) {
         ++idx;
 
-        match = match_rangegrp_cx(ranges, cx);
-        if(match) {
-            _deb("PolicyRule::match_rangegrp_vecx: %s matched (item idx %d)", cx->c_type(), idx);
-            break;
-        } else {
-            _deb("PolicyRule::match_rangegrp_vecx: %s not matched", cx->c_type());
+        if(not match_rangegrp_cx(ranges, cx)) {
+            _deb("PolicyRule::match_rangegrp_vecx: item idx %d not matched", idx);
+            return false;
         }
+        _deb("PolicyRule::match_rangegrp_vecx: item idx %d matched", idx);
     }
-    
-    return match;
+
+    return true;
 }
 
 
 bool PolicyRule::match_addrgrp_vecx(group_of_addresses const& sources, std::vector<baseHostCX*> const& vecx)  const{
-    bool match = false;
-
     if(vecx.empty()) return true;
 
     int idx = -1;
     for(auto cx: vecx) {
         ++idx;
 
-        match = match_addrgrp_cx(sources, cx);
-        if(match) {
-            _deb("PolicyRule::match_addrgrp_vecx: %s matched (item idx %d)", cx->c_type(), idx);
-            break;
-        } else {
-            _deb("PolicyRule::match_addrgrp_vecx: %s not matched", cx->c_type());
+        if(not match_addrgrp_cx(sources, cx)) {
+            _deb("PolicyRule::match_addrgrp_vecx: item idx %d not matched", idx);
+            return false;
         }
+        _deb("PolicyRule::match_addrgrp_vecx: item idx %d matched", idx);
     }
-    
-    return match;
+
+    return true;
 }
 
 int PolicyRule::sock_2_net(int sock_type) const {
@@ -290,8 +297,6 @@ bool PolicyRule::match_proto_cx(int acl_proto, const baseHostCX *cx) {
             if(acl_proto == cx_proto) {
                 ret = true;
             }
-        } else {
-            throw std::logic_error("traffic cx cannot be matched due to unknown L4 protocol");
         }
     }
     return ret;
@@ -328,18 +333,36 @@ bool PolicyRule::match(baseProxy* p) {
     bool rmatch = false;
     bool rpmatch = false;
 
-    if(is_disabled or cfg_err_is_disabled) {
+    if(not p) {
+        _err("PolicyRule::match: p is nullptr");
+        return false;
+    }
+
+    if(is_disabled) {
         _dia("PolicyRule::match %s this policy is disabled", p->to_string(iINF).c_str());
         return false;
     }
 
-    if(p != nullptr) {
+    // Its intended scope cannot be reconstructed safely.  Stop selection at
+    // this rule; policy_action() forces configuration errors to deny.
+    if(cfg_err_is_disabled) return true;
+
+    if((p->ls().empty() && p->lda().empty()) ||
+       (p->rs().empty() && p->rda().empty())) {
+        _err("PolicyRule::match: proxy has an incomplete endpoint set");
+        return false;
+    }
+
+    {
 
         // compare if policy has proto match
         bool proto_match = false;
 
-        if(proto->value() != 0) {
-            proto_match = match_proto_vecx(proto->value(), p->ls()) && match_proto_vecx(proto->value(), p->lda());
+        if(proto && proto->value() != 0) {
+            proto_match = match_proto_vecx(proto->value(), p->ls()) &&
+                          match_proto_vecx(proto->value(), p->lda()) &&
+                          match_proto_vecx(proto->value(), p->rs()) &&
+                          match_proto_vecx(proto->value(), p->rda());
 
         } else {
             // proto 0 means we don't care
@@ -373,8 +396,6 @@ bool PolicyRule::match(baseProxy* p) {
             _dia("PolicyRule::match %s FAILED: %d-%d:%d->%d:%d", p->to_string(iINF).c_str(), proto->value(), lmatch, lpmatch, rmatch, rpmatch);
         }
 
-    } else {
-        _err("PolicyRule::match: p is nullptr");
     }
 
     return false;
@@ -397,16 +418,24 @@ bool PolicyRule::match(std::vector<baseHostCX*>& l, std::vector<baseHostCX*>& r)
         rs = r[0]->str();
     }
 
-    if(is_disabled or cfg_err_is_disabled) {
+    if(l.empty() or r.empty()) {
+        _dia("PolicyRule::match_lr: incomplete endpoint set");
+        return false;
+    }
+
+    if(is_disabled) {
         _dia("PolicyRule::match_lr %s <+> %s - this policy is disabled", ls.c_str(), rs.c_str());
         return false;
     }
 
+    if(cfg_err_is_disabled) return true;
+
     // compare if policy has proto match
     bool proto_match = false;
 
-    if(proto->value() != 0) {
-        proto_match = match_proto_vecx(proto->value(), l);
+    if(proto && proto->value() != 0) {
+        proto_match = match_proto_vecx(proto->value(), l) &&
+                      match_proto_vecx(proto->value(), r);
 
     } else {
         // proto 0 means we don't care

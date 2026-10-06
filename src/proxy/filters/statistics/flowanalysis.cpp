@@ -9,10 +9,10 @@ void FlowAnalysis::update(socle::side_t side, buffer const& buf) {
 
 void FlowAnalysis::update(socle::side_t side, const uint8_t *data, size_t len) {
 
+    if(len == 0) return;
+
     count_all += len;
     side == socle::side_t::LEFT ? count_all_left+=len : count_all_right+=len;
-
-    auto slen = static_cast<int>(len);
 
     if(_current_index < max_history) {
 

@@ -43,6 +43,9 @@
 #include <regex>
 
 #include <inspect/engine.hpp>
+#ifdef USE_HPACK
+#include <ext/hpack/hpack.hpp>
+#endif
 
 namespace sx::engine::http {
 
@@ -228,6 +231,15 @@ namespace sx::engine::http {
     namespace v2 {
         using state_data_t = std::pair<size_t, size_t>;
 
+        std::optional<std::string> make_response(long stream_id,
+                                                 std::string_view body,
+                                                 unsigned status = 200,
+                                                 bool head_only = false);
+        std::string make_server_preamble();
+        std::string make_goaway(uint32_t last_stream_id,
+                                uint32_t error_code,
+                                std::string_view debug_data = {});
+
         struct txt {
             static constexpr const char* magic = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
             static constexpr const size_t magic_sz = 24;
@@ -293,7 +305,7 @@ namespace sx::engine::http {
                         domain_ss << *it;
 
                         ++it;
-                        if (tld_counter > 0 and it != dns_split.rend())
+                        if (tld_counter < 2 and it != dns_split.rend())
                             domain_ss << ".";
                     }
 
@@ -315,8 +327,23 @@ namespace sx::engine::http {
         };
 
         struct Http2Connection {
+            struct PendingHeaderBlock {
+                long stream_id = -1;
+                std::vector<unsigned char> bytes;
+
+                [[nodiscard]] bool active() const noexcept { return stream_id >= 0; }
+                void clear() { stream_id = -1; bytes.clear(); }
+            };
+
             // map
             mp::map<long,Http2Stream> streams;
+            long latest_request_stream_id = -1;
+            PendingHeaderBlock request_headers_pending;
+            PendingHeaderBlock response_headers_pending;
+#ifdef USE_HPACK
+            std::shared_ptr<HPACK::decoder_t> request_decoder = std::make_shared<HPACK::decoder_t>();
+            std::shared_ptr<HPACK::decoder_t> response_decoder = std::make_shared<HPACK::decoder_t>();
+#endif
         };
     }
 

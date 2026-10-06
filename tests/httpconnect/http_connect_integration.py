@@ -372,7 +372,7 @@ def run(args):
         finally:
             process.terminate()
             try:
-                output, _ = process.communicate(timeout=10)
+                output, _ = process.communicate(timeout=60)
             except subprocess.TimeoutExpired:
                 process.kill()
                 output, _ = process.communicate(timeout=5)
@@ -406,7 +406,7 @@ def run(args):
         finally:
             reject_process.terminate()
             try:
-                reject_output, _ = reject_process.communicate(timeout=10)
+                reject_output, _ = reject_process.communicate(timeout=60)
             except subprocess.TimeoutExpired:
                 reject_process.kill()
                 reject_output, _ = reject_process.communicate(timeout=5)

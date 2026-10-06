@@ -71,7 +71,12 @@ public:
 
     std::vector<std::string> const& matched_signatures() const { return matched_signatures_; }
 
-    using replacetype_t = enum { REPLACETYPE_NONE=0, REPLACETYPE_HTTP=1 };
+    using replacetype_t = enum {
+        REPLACETYPE_NONE = 0,
+        REPLACETYPE_HTTP1 = 1,
+        REPLACETYPE_HTTP = REPLACETYPE_HTTP1, // compatibility with older callers
+        REPLACETYPE_HTTP2 = 2
+    };
     replacetype_t replacement_type() const { return replacement_type_; }
     void replacement_type(replacetype_t r) { replacement_type_ = r; }
     
