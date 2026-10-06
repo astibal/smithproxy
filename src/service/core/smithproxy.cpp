@@ -887,6 +887,10 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
         CfgFactory::get()->load_signatures(CfgFactory::cfg_obj(), "detection_signatures", SigFactory::get().signature_tree());
 
         CfgFactory::get()->load_settings();
+        if(reload && !html()->load_files(CfgFactory::get()->dir_msg_templates)) {
+            _err("Cannot reload messages from '%s'; keeping the previous complete template set",
+                 CfgFactory::get()->dir_msg_templates.c_str());
+        }
         CfgFactory::get()->load_captures();
         CfgFactory::get()->load_debug();
 

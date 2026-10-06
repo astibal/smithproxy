@@ -1,139 +1,16 @@
-        <html>
-        <head>
-                <title> {{ title }} </title>
-                <META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=utf-8">
-                {{ meta }}
-                <style media="screen" type="text/css">
-                    * {
-                    box-sizing: border-box;
-                    }
-                    
-                    *:focus {
-                    outline: none;
-                    }
-                    body {
-                    font-family: sans-serif;
-                    background-color: #48617B;
-                    padding: 30px;
-                    color: #333;
-                    }
-                    .windowlet {
-                    margin: 20px auto;
-                    width: {{ window_width }};
-                    }
-                    .windowlet-screen {
-                    background-color: #FFF;
-                    padding: 20px;
-                    border-radius: 5px
-                    }
-                    
-                    h2 {
-                     font-family: sans-serif;
-                     color: #999;
-                     vertical-align: middle;
-                    }
-
-                    h3 {
-                     font-family: sans-serif;
-                     color: #777;
-                     vertical-align: middle;
-                    }
-                    
-                    .app-title {
-                    text-align: center;
-                    color: #777;
-                    }
-                    
-                    .windowlet-form {
-                    text-align: center;
-                    }
-                    .control-group {
-                    margin-bottom: 10px;
-                    }
-                    
-                    input {
-                    text-align: center;
-                    background-color: #ECF0F1;
-                    border: 2px solid transparent;
-                    border-radius: 3px;
-                    font-size: 14px;
-                    font-weight: 150;
-                    padding: 3px 3px;
-                    /*width: 250px;*/
-                    transition: border .5s;
-                    }
-                    
-                    input:focus {
-                    border: 2px solid #3498DB;
-                    box-shadow: none;
-                    }
-                    
-                    .btn {
-                    border: 2px solid transparent;
-                    background: #3498DB;
-                    color: #ffffff;
-                    font-size: 14px;
-                    line-height: 25px;
-                    padding: 5px 8px;
-                    text-decoration: none;
-                    text-shadow: none;
-                    border-radius: 3px;
-                    box-shadow: none;
-                    transition: 0.25s;
-                    display: block;
-                    <!-- width: 250px; -->
-                    margin: 0 auto;
-                    }
-                    
-                    .btn-red {
-                    border: 2px solid transparent;
-                    background: #DB3333;
-                    color: #ffffff;
-                    font-size: 14px;
-                    line-height: 25px;
-                    padding: 5px 8px;
-                    text-decoration: none;
-                    text-shadow: none;
-                    border-radius: 3px;
-                    box-shadow: none;
-                    transition: 0.25s;
-                    display: block;
-                    <!-- width: 250px; -->
-                    margin: 0 auto;
-                    }
-                    
-                    .fg-red {
-                      color: #DB3333;
-                    }
-
-                    .bg-red {
-                      background: #DB3333;
-                    }
-                    
-                    .btn:hover {
-                    background-color: #2980B9;
-                    }
-
-                    .btn-red:hover {
-                    background-color: #FD3333;
-                    }
-
-                    
-                    .windowlet-link {
-                    font-size: 11px;
-                    color: #444;
-                    display: block;
-                    margin-top: 12px;
-                    }
-            </style>    
-                
-        </head>
-        <body>
-        <div class="windowlet">
-        <div class="windowlet-screen">
-<!--        <div class="app-title">        -->
-        {{ message }}
-        </div>
-        </div>
-        </body> 
-</html> 
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{ title }}</title>
+  {{ meta }}
+  <style>
+    *{box-sizing:border-box}body{margin:0;padding:2rem;background:#f4f6f5;color:#17201c;font-family:system-ui,sans-serif;line-height:1.5}
+    main{width:min({{ window_width }},100%);margin:auto;padding:2rem;border:1px solid #ccd5d0;background:#fff}
+    .btn,.btn-red{display:inline-block;padding:.65rem 1rem;border:0;background:#187a48;color:#fff;font:inherit;font-weight:700}.btn-red{background:#b63737}
+    .fg-red{color:#a72626}
+  </style>
+</head>
+<body><main>{{ message }}</main></body>
+</html>

@@ -39,22 +39,91 @@
 
 #include <staticcontent.hpp>
 
+#include <array>
+#include <cerrno>
+#include <cstring>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <vector>
+
+Loader::Result StaticContent::ConfinedLoader::load(std::string const& name) {
+    constexpr std::size_t max_template_size = 1024U * 1024U;
+    if(root_.empty() || name.empty() || name == "." || name == ".." ||
+       name.find('/') != std::string::npos ||
+       name.find('\\') != std::string::npos) {
+        return {false, {}, "Unsafe template name " + name};
+    }
+
+    const int directory = ::open(root_.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC |
+                                                O_NOFOLLOW);
+    if(directory < 0) {
+        return {false, {}, "Could not securely open template directory " + root_ +
+                           ": " + std::strerror(errno)};
+    }
+
+    struct stat directory_stat {};
+    if(::fstat(directory, &directory_stat) != 0 || !S_ISDIR(directory_stat.st_mode)) {
+        const int saved_errno = errno;
+        ::close(directory);
+        return {false, {}, "Template root is not a directory: " +
+                           std::string(std::strerror(saved_errno))};
+    }
+
+    const int file = ::openat(directory, name.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    const int open_errno = errno;
+    ::close(directory);
+    if(file < 0) {
+        return {false, {}, "Could not securely open template " + name +
+                           ": " + std::strerror(open_errno)};
+    }
+
+    struct stat file_stat {};
+    if(::fstat(file, &file_stat) != 0 || !S_ISREG(file_stat.st_mode) ||
+       file_stat.st_size < 0 ||
+       static_cast<std::uintmax_t>(file_stat.st_size) > max_template_size) {
+        ::close(file);
+        return {false, {}, "Template is not a bounded regular file: " + name};
+    }
+
+    std::string content;
+    content.reserve(static_cast<std::size_t>(file_stat.st_size));
+    std::array<char, 8192> block {};
+    while(true) {
+        const auto count = ::read(file, block.data(), block.size());
+        if(count == 0) break;
+        if(count < 0) {
+            const int read_errno = errno;
+            ::close(file);
+            return {false, {}, "Could not read template " + name +
+                               ": " + std::strerror(read_errno)};
+        }
+        if(content.size() + static_cast<std::size_t>(count) > max_template_size) {
+            ::close(file);
+            return {false, {}, "Template grew beyond its size limit: " + name};
+        }
+        content.append(block.data(), static_cast<std::size_t>(count));
+    }
+    ::close(file);
+    return {true, std::move(content), {}};
+}
 
 bool StaticContent::load_files(std::string& dir) {
     bool ret = true;
     
     try {
+        auto lc_ = std::scoped_lock(lock);
+        loader_file_.root(dir);
         std::vector<std::pair<std::string, std::unique_ptr<Template>>> loaded;
 
-        for(const std::string name: { "test", "html_page", "html_img_warning"} ) {
+        for(const std::string name: { "test", "html_page", "html_img_warning",
+                                      "tls_replacement"} ) {
             _dia("StaticContent::load_files: loading template %s", name.c_str());
 
             auto t_temp = std::make_unique<Template>(loader_file_);
-            t_temp->load(dir + name + ".txt");
+            t_temp->load(name + ".txt");
             loaded.emplace_back(name, std::move(t_temp));
         }
-        auto lc_ = std::scoped_lock(lock);
         for (auto& [name, value] : loaded) {
             templates_->set(name, value.release());
         }
@@ -65,6 +134,21 @@ bool StaticContent::load_files(std::string& dir) {
     }
     
     return ret;
+}
+
+std::string StaticContent::render_tls_replacement(
+        std::string const& target, std::string const& reasons,
+        std::string const& action) {
+    auto t = get("tls_replacement");
+    if(!t) return {};
+
+    auto lc_ = std::scoped_lock(lock);
+    t->set("target", target);
+    t->set("reasons", reasons);
+    t->set("action", action);
+    auto result = t->render();
+    t->get_properties().clear();
+    return result;
 }
 
 std::shared_ptr<Template> StaticContent::get(std::string const& name) {
@@ -87,15 +171,31 @@ std::string StaticContent::render_noargs(std::string const& name) {
     return {};
 }
 
-std::string StaticContent::render_server_response(std::string const& message, unsigned int code) {
+std::string StaticContent::render_server_response(std::string const& message, unsigned int code,
+                                                  bool head_only) {
+    auto const reason = [code]() -> std::string_view {
+        switch(code) {
+            case 200: return "OK";
+            case 302: return "Found";
+            case 400: return "Bad Request";
+            case 403: return "Forbidden";
+            case 404: return "Not Found";
+            case 500: return "Internal Server Error";
+            case 502: return "Bad Gateway";
+            case 503: return "Service Unavailable";
+            default: return "Unknown";
+        }
+    }();
     std::stringstream out;
-    out << string_format("HTTP/1.1 %3d OK\r\n", code);
+    out << "HTTP/1.1 " << code << ' ' << reason << "\r\n";
     out << "Server: Smithproxy/1.1\r\n";
-    out << "Content-Type: text/html\r\n";
+    out << "Content-Type: text/html; charset=utf-8\r\n";
     out << "Content-Length: " + std::to_string(message.length()); out << "\r\n";
+    out << "Cache-Control: no-store\r\n";
+    out << "Connection: close\r\n";
     
     out << "\r\n";
-    out << message;
+    if(!head_only) out << message;
     
     return out.str();
 }
