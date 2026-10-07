@@ -347,12 +347,12 @@ if [[ $CAPTURE_TEST == 1 ]]; then
     echo 'PASS4 GRE export: received IPv4 inner flow with expected payload marker'
     echo 'PASS6 GRE export: received IPv6 inner flow with expected payload marker'
 fi
-ip netns exec "$CLIENT" curl --noproxy '*' -fsS --max-time 20 \
+ip netns exec "$CLIENT" curl --noproxy '*' --fail-with-body -sS --max-time 20 \
     --cacert "$ROOT/config/certs/ca-cert.pem" --resolve origin.runner.lab:443:198.18.20.2 \
     https://origin.runner.lab/ > "$ROOT/results/https.txt"
 grep -q 'runner-origin-ok peer=198.18.20.1' "$ROOT/results/https.txt"
 echo 'PASS4 TLS: client trusts proxy CA only, origin uses a different CA'
-ip netns exec "$CLIENT" curl --noproxy '*' -gfsS --max-time 20 \
+ip netns exec "$CLIENT" curl --noproxy '*' -g --fail-with-body -sS --max-time 20 \
     --cacert "$ROOT/config/certs/ca-cert.pem" --resolve 'origin.runner.lab:443:[fd00:20::2]' \
     https://origin.runner.lab/ > "$ROOT/results/https6.txt"
 grep -q 'runner-origin-ok peer=fd00:20::1' "$ROOT/results/https6.txt"

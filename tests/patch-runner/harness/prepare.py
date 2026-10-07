@@ -31,6 +31,19 @@ internal_api_port = os.environ.get('SMITHPROXY_API_PORT', '55555')
 if not internal_api_port.isdigit() or not 1025 <= int(internal_api_port) < 65535:
     raise ValueError('SMITHPROXY_API_PORT must be an unprivileged TCP port')
 text = (source/'etc/smithproxy.cfg').read_text()
+# The base dataplane probes isolate MITM trust and transport behavior. Their
+# disposable origin certificate intentionally has neither public SCTs nor an
+# OCSP responder; dedicated TLS tests cover those policies separately.
+text, lab_ocsp_count = re.subn(
+    r'(tls_profiles\s*=\s*\{\s*default\s*=\s*\{.*?ocsp_stapling\s*=\s*)TRUE',
+    r'\g<1>FALSE', text, count=1, flags=re.DOTALL,
+)
+text, lab_ct_count = re.subn(
+    r'(tls_profiles\s*=\s*\{\s*default\s*=\s*\{)',
+    r'\1\n        ct_enable = FALSE;', text, count=1,
+)
+if lab_ocsp_count != 1 or lab_ct_count != 1:
+    raise RuntimeError('cannot isolate base lab TLS profile from CT/OCSP checks')
 tls_write_chunk = os.environ.get('TLS_WRITE_CHUNK')
 if tls_write_chunk is not None:
     if not tls_write_chunk.isdigit() or not 1024 <= int(tls_write_chunk) <= 1048576:
