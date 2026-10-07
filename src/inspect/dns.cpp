@@ -44,6 +44,7 @@
 
 #include <epoll.hpp>
 #include <socketinfo.hpp>
+#include <privileged_socket.hpp>
 #include <inspect/dns.hpp>
 #include <log/logger.hpp>
 
@@ -229,7 +230,7 @@ int DNSFactory::send_dns_request(std::string const& hostname, DNS_Record_Type t,
     _dum("DNS generated request: size %zub\n%s", req_sz, hex_dump(b).c_str());
 
     // create UDP socket
-    auto sock = raw::unique<int>(::socket(nameserver.family, SOCK_DGRAM, IPPROTO_UDP), raw::deleter::close);
+    auto sock = raw::unique<int>(socle::socket(nameserver.family, SOCK_DGRAM, IPPROTO_UDP), raw::deleter::close);
 
 
     if(sock.value >= 0) {

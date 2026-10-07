@@ -384,8 +384,13 @@ log "5/7  TPROXY active: TCP/UDP :$PLAIN_PORT, TLS/DTLS :$TLS_PORT, QUIC :$QUIC_
 # its own /run avoids host collisions. A network namespace alone does not isolate files!
 # Pass sh parameters as arguments so paths containing spaces work correctly.
 setsid ip netns exec "$NS" unshare --mount --propagation private \
-    sh -c 'mount --bind "$1" /run && exec "$2" --config-file "$3"' \
+    sh -c 'mount --bind "$1" /run
+        if [ -n "$4" ]; then
+            exec "$2" --config-file "$3" --run-as "$4"
+        fi
+        exec "$2" --config-file "$3"' \
     sh "$DATA_DIR/run" "$SMITHPROXY_BIN" "$CONFIG_DIR/smithproxy.cfg" \
+    "${SMITHPROXY_RUN_AS_ARGUMENT:-}" \
     > "$DATA_DIR/proxy-console.log" 2>&1 &
 PROXY_PID=$!
 printf '%s\n' "$PROXY_PID" > "$DATA_DIR/proxy.pid"

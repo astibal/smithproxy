@@ -46,8 +46,13 @@
 
 
 #include <cstdlib>
+#include <cerrno>
+#include <cstring>
+#include <grp.h>
+#include <pwd.h>
 #include <sys/stat.h>
 #include <sys/resource.h>
+#include <unistd.h>
 
 #include <ostream>
 
@@ -56,6 +61,7 @@
 #include <openssl/crypto.h>
 
 #include <socle.hpp>
+#include <privileged_socket.hpp>
 
 #include <log/logger.hpp>
 
@@ -77,6 +83,85 @@
 #include <service/httpd/httpd.hpp>
 
 #include <service/tpool.hpp>
+
+namespace {
+
+int drop_process_identity(const std::string& run_as, const std::string& pid_file) {
+    if(geteuid() != 0) {
+        errno = EPERM;
+        return -1;
+    }
+
+    long buffer_size = sysconf(_SC_GETPW_R_SIZE_MAX);
+    if(buffer_size < 0) {
+        buffer_size = 16384;
+    }
+    std::vector<char> buffer(static_cast<size_t>(buffer_size));
+    passwd entry{};
+    passwd* result = nullptr;
+    const int lookup_rc = getpwnam_r(run_as.c_str(), &entry, buffer.data(), buffer.size(), &result);
+    if(lookup_rc != 0 || result == nullptr) {
+        errno = lookup_rc != 0 ? lookup_rc : ENOENT;
+        return -1;
+    }
+    if(entry.pw_uid == 0) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    // The core removes its own PID file during orderly shutdown.  Its runtime
+    // directory must already be writable by the selected service account.
+    if(chown(pid_file.c_str(), entry.pw_uid, entry.pw_gid) != 0) {
+        return -1;
+    }
+
+    if(initgroups(entry.pw_name, entry.pw_gid) != 0 ||
+       setgid(entry.pw_gid) != 0 ||
+       setuid(entry.pw_uid) != 0) {
+        return -1;
+    }
+    if(geteuid() != entry.pw_uid || getegid() != entry.pw_gid) {
+        errno = EPERM;
+        return -1;
+    }
+
+    return 0;
+}
+
+std::optional<std::string> resolve_run_as(const std::optional<std::string>& command_line_user) {
+    if(command_line_user) return command_line_user;
+    if(const char* environment_user = std::getenv("SMITHPROXY_RUN_AS");
+       environment_user != nullptr && *environment_user != '\0') {
+        return std::string(environment_user);
+    }
+    return std::nullopt;
+}
+
+int prepare_privilege_separation(const std::string& pid_file,
+                                 const std::optional<std::string>& run_as) {
+    auto const& log = DaemonFactory::instance()->get_log();
+
+    if(socle::privsep::start_local_helper() != 0) {
+        _fat("cannot start privileged socket helper: %s", string_error().c_str());
+        return -1;
+    }
+
+    if(run_as && drop_process_identity(*run_as, pid_file) != 0) {
+        const int saved_errno = errno;
+        _fat("cannot drop Smithproxy core identity: %s", string_error(saved_errno).c_str());
+        socle::privsep::stop_local_helper();
+        errno = saved_errno;
+        return -1;
+    }
+
+    if(run_as) {
+        _not("privilege separation: core identity changed to %s (uid=%u gid=%u)",
+             run_as->c_str(), static_cast<unsigned>(geteuid()), static_cast<unsigned>(getegid()));
+    }
+    return 0;
+}
+
+}
 
 void prepare_queue_logger(loglevel const& lev) {
 
@@ -308,6 +393,7 @@ void print_help() {
     std::cerr << "    --version, -v                :  print version and exit with 0" << std::endl;
     std::cerr << "    --config-file, -c <filename> :  specify/override configuration file" << std::endl;
     std::cerr << "    --config-check-only, -o      :  perform configuration file check" << std::endl;
+    std::cerr << "    --run-as <user>              :  drop core identity after starting privileged helper" << std::endl;
     std::cerr << std::endl;
     std::cerr << "  Notes:" << std::endl;
     std::cerr << std::endl;
@@ -340,6 +426,7 @@ int main(int argc, char *argv[]) {
     }
 
 
+    constexpr int option_run_as = 1000;
     static struct option long_options[] =
             {
                     /* These options set a flag. */
@@ -352,6 +439,7 @@ int main(int argc, char *argv[]) {
                     {"config-check-only", no_argument, nullptr, 'o'},
                     {"daemonize", no_argument, nullptr, 'D'},
                     {"version", no_argument, nullptr, 'v'},
+                    {"run-as", required_argument, nullptr, option_run_as},
 
                     // multi-tenancy support: listening ports will be shifted by number 'i', while 't' controls logging, pidfile, etc.
                     // both, or none of them have to be set
@@ -370,6 +458,7 @@ int main(int argc, char *argv[]) {
     CfgFactory::get()->config_file = "/etc/smithproxy/smithproxy.cfg";
     bool is_custom_config_file = false;
     bool is_dup2cout = false;
+    std::optional<std::string> command_line_run_as;
 
     while(true) {
     /* getopt_long stores the option index here. */
@@ -409,6 +498,14 @@ int main(int argc, char *argv[]) {
             case 'v':
                 std::cout << SMITH_VERSION << "+" << SOCLE_VERSION << std::endl;
                 return EXIT_SUCCESS;
+
+            case option_run_as:
+                if(optarg == nullptr || *optarg == '\0') {
+                    std::cerr << "--run-as requires a non-empty user name" << std::endl;
+                    return EXIT_FAILURE;
+                }
+                command_line_run_as = optarg;
+                break;
                 
                 
             default:
@@ -572,6 +669,13 @@ int main(int argc, char *argv[]) {
         // also - there is no harm to write PIDfile even for foreground programs
         this_daemon->write_pidfile();
     }
+
+    const auto run_as = resolve_run_as(command_line_run_as);
+    if(prepare_privilege_separation(this_daemon->pid_file, run_as) != 0) {
+        CfgFactory::get()->cleanup();
+        return EXIT_FAILURE;
+    }
+
     // openssl mem debugs
     prepare_mem_debugs();
 
@@ -615,7 +719,9 @@ int main(int argc, char *argv[]) {
     }
 
     do_cleanup();
-
+    if(socle::privsep::stop_local_helper() != 0) {
+        _err("privileged socket helper did not stop cleanly: %s", string_error().c_str());
+    }
     // Don't do crashdumps on exit in Release builds
     #ifdef BUILD_RELEASE
     DaemonFactory::generate_crashlog = false;

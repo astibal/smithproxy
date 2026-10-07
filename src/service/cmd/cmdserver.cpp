@@ -13,6 +13,7 @@
 #include <log/logger.hpp>
 #include <proxy/mitmproxy.hpp>
 #include <socle.hpp>
+#include <privileged_socket.hpp>
 #include <sslcom.hpp>
 #include <sslcertstore.hpp>
 #include <utils/str.hpp>
@@ -163,17 +164,17 @@ void cli_loop(unsigned short port) {
     static auto log = logan::create("service");
     sockaddr_in address{};
     int reuse = 1;
-    const int server = socket(AF_INET, SOCK_STREAM, 0);
-    setsockopt(server, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+    const int server = socle::socket(AF_INET, SOCK_STREAM, 0);
+    socle::setsockopt(server, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     address.sin_port = htons(port);
-    while (bind(server, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
+    while (socle::bind(server, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
         if (SmithProxy::instance().terminate_flag) { close(server); return; }
         _err("cli main thread - cannot bind %d port: %s", port, string_error().c_str());
         sleep(1);
     }
-    listen(server, 50);
+    socle::listen(server, 50);
     epoll poller;
     if (poller.init() <= 0) { _err("cli main thread: Can't initialize epoll"); close(server); return; }
     poller.add(server, EPOLLIN);

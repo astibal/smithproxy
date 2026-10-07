@@ -43,6 +43,7 @@
 #include <openssl/rand.h>
 
 #include <staticcontent.hpp>
+#include <privileged_socket.hpp>
 
 #include <inspect/sigfactory.hpp>
 
@@ -802,7 +803,7 @@ bool SmithProxy::init_syslog() {
     ai.pack();
 
     // create UDP socket
-    int syslog_socket = socket(ai.family, SOCK_DGRAM, IPPROTO_UDP);
+    int syslog_socket = socle::socket(ai.family, SOCK_DGRAM, IPPROTO_UDP);
 
     if(0 != ::connect(syslog_socket,(sockaddr*) ai.as_ss(),sizeof(sockaddr_storage))) {
         _err("cannot connect syslog socket %d: %s", syslog_socket, string_error().c_str());
