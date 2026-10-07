@@ -19,7 +19,13 @@ openssl('req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '2', '-subj', 
 for name, hostname, ca in [('srv','runner.lab','ca'), ('cl','runner.lab','ca'), ('portal','localhost','ca'), ('origin','origin.runner.lab','origin-ca')]:
     openssl('req','-new','-newkey','rsa:2048','-nodes','-subj',f'/CN={hostname}', '-keyout',certs/f'{name}-key.pem','-out',certs/f'{name}.csr')
     ext = certs / f'{name}.ext'
-    ext.write_text(f'subjectAltName=DNS:{hostname}\nbasicConstraints=CA:FALSE\n')
+    sans = [f'DNS:{hostname}']
+    # The routing suite deliberately rewrites client.example to this origin
+    # identity. Keep that test about routing/SNI, not an unrelated certificate
+    # mismatch which fail-close correctly rejects.
+    if name == 'origin':
+        sans.extend(('DNS:origin.internal', 'DNS:other.example'))
+    ext.write_text(f'subjectAltName={",".join(sans)}\nbasicConstraints=CA:FALSE\n')
     ca_cert = 'ca-cert.pem' if ca == 'ca' else 'origin-ca.pem'
     openssl('x509','-req','-in',certs/f'{name}.csr','-CA',certs/ca_cert,'-CAkey',certs/f'{ca}-key.pem','-CAcreateserial','-days','2','-extfile',ext,'-out',certs/f'{name}-cert.pem')
     (certs/f'{name}-key.pem').chmod(0o600)

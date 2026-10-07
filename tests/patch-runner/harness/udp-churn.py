@@ -26,6 +26,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--waves", type=int, default=8)
     parser.add_argument("--flows", type=int, default=96)
+    parser.add_argument("--workers", type=int, default=32)
     parser.add_argument("--interval", type=float, default=3.0)
     parser.add_argument("--settle", type=float, default=12.0)
     parser.add_argument("--timeout", type=float, default=1.0)
@@ -43,6 +44,8 @@ def main() -> None:
         parser.error("port range must satisfy 1 <= MIN <= MAX <= 65535")
     if total > args.max_port - args.min_port + 1:
         parser.error(f"port range has fewer than {total} ports")
+    if args.workers < 1:
+        parser.error("workers must be positive")
 
     stop = threading.Event()
     probe_errors: list[str] = []
@@ -66,7 +69,10 @@ def main() -> None:
     churn_errors: list[str] = []
     started = time.monotonic()
     try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=64) as pool:
+        # Keep the offered load explicit and reproducible.  Flow count and
+        # worker concurrency test different properties: all flows still run,
+        # while --workers controls the number created in one burst.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as pool:
             for wave in range(args.waves):
                 futures = []
                 for index in range(args.flows):

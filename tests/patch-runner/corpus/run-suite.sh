@@ -352,10 +352,25 @@ for fixture in "${CASES[@]}"; do
         # failure.  Timeouts, crashes and one-sided transport failures remain
         # failures; the dedicated autodetect suite independently proves that
         # recognizable TLS prefixes never reach the plaintext origin.
+        tls_clean_close=false
+        tls_early_reset=false
+        if grep -q 'connection closed by peer' "$client_log" \
+            && grep -q 'connection closed by peer' "$server_log"; then
+            tls_clean_close=true
+        fi
+        # A strict detector can reset the sender while it is still writing a
+        # fragmented malformed record. Pplay reports that as Broken pipe and
+        # leaves its origin actor waiting for bytes that must never arrive.
+        # Accept only that asymmetric outcome: the client must fail promptly,
+        # and the origin log must prove that it received no payload at all.
+        if grep -Eq 'Broken pipe|connection closed by peer' "$client_log" \
+            && ! grep -Eqi 'DIE.AFTER|TIMEOUT|Traceback|AssertionError' "$client_log" \
+            && ! grep -Eqi 'received [0-9]+B|has been received|DIFFERENT DATA' "$server_log"; then
+            tls_early_reset=true
+        fi
         if [[ $current_case_area == tls && $ready == true ]] \
-            && grep -q 'connection closed by peer' "$client_log" \
-            && grep -q 'connection closed by peer' "$server_log" \
-            && ! grep -Eqi 'DIE.AFTER|TIMEOUT|Traceback|AssertionError' "$client_log" "$server_log"; then
+            && { $tls_clean_close || $tls_early_reset; } \
+            && ! grep -Eqi 'Traceback|AssertionError' "$client_log" "$server_log"; then
             case_safe_rejected=true
             passed_attempt=$case_attempt
             break

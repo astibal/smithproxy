@@ -14,7 +14,10 @@ for number, stream_id in enumerate(range(1, 24, 2), 1):
     packets.append(request)
     roles.append("c")
 
-    response = h2_headers(stream_id, hpack_response()) + h2_data(
+    # The response body closes the stream.  HEADERS must therefore carry
+    # END_HEADERS only; setting END_STREAM here and then sending DATA is an
+    # RFC 7540 stream-state violation which the strict inspector rejects.
+    response = h2_headers(stream_id, hpack_response(), flags=0x04) + h2_data(
         stream_id, f"response-{number:02d}".encode()
     )
     if number == 1:

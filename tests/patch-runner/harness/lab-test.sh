@@ -766,6 +766,7 @@ if [[ $UDP_CHURN_TEST == 1 ]]; then
         --host 198.18.20.2 --expected-peer 198.18.20.1 \
         --waves "${UDP_CHURN_WAVES:-8}" \
         --flows "${UDP_CHURN_FLOWS:-96}" \
+        --workers "${UDP_CHURN_WORKERS:-32}" \
         --interval "${UDP_CHURN_INTERVAL:-3}" \
         --settle "${UDP_CHURN_SETTLE:-12}" \
         --timeout "${UDP_CHURN_TIMEOUT:-1}" \
@@ -778,6 +779,7 @@ if [[ $UDP_CHURN_TEST == 1 ]]; then
         --host fd00:20::2 --expected-peer fd00:20::1 \
         --waves "${UDP_CHURN_WAVES:-8}" \
         --flows "${UDP_CHURN_FLOWS:-96}" \
+        --workers "${UDP_CHURN_WORKERS:-32}" \
         --interval "${UDP_CHURN_INTERVAL:-3}" \
         --settle "${UDP_CHURN_SETTLE:-12}" \
         --timeout "${UDP_CHURN_TIMEOUT:-1}" \
