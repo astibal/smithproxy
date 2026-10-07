@@ -23,6 +23,7 @@ API_RELAY_PORT=${LAB_API_PORT:-55556}
 CLI_RELAY_PORT=${LAB_CLI_PORT:-55557}
 RUN_MODE=${RUN_MODE:-0}
 BASE_TRAFFIC_TEST=${BASE_TRAFFIC_TEST:-1}
+PRIVSEP_TEST=${PRIVSEP_TEST:-0}
 RUNNER_PID=
 CLI_RELAY_PID=
 ORIGIN_PID=
@@ -264,6 +265,13 @@ if [[ $QUIC_TEST == 1 ]]; then
     done
     grep -q '^READY h3-origin ' "$ROOT/results/h3-origin.log"
 fi
+if [[ $PRIVSEP_TEST == 1 ]]; then
+    # The core must be able to update its ordinary runtime state after dropping
+    # identity.  The runner and privileged helper remain root.
+    getent passwd nobody >/dev/null
+    mkdir -p "$ROOT/data/run"
+    chown -R nobody "$ROOT/config" "$ROOT/data"
+fi
 "$ROOT/runner/smithproxy.runner" --in "$IN_IF" --out "$OUT_IF" --namespace "$NS" \
     --api-port "$API_RELAY_PORT" --config-dir "$ROOT/config" --data-dir "$ROOT/data" \
     > "$ROOT/results/runner.log" 2>&1 &
@@ -306,6 +314,51 @@ fi
 if [[ ${EMPTY_NEIGHBOR_STATE_TEST:-0} == 1 ]]; then
     ! grep -q 'json.exception.parse_error' "$ROOT/data/proxy-console.log"
     echo 'PASS empty neighbor state: no JSON parse error'
+fi
+if [[ $PRIVSEP_TEST == 1 ]]; then
+    for attempt in $(seq 1 100); do
+        [[ -s "$ROOT/data/proxy.pid" ]] && break
+        kill -0 "$RUNNER_PID"
+        sleep 0.1
+    done
+    [[ -s "$ROOT/data/proxy.pid" ]]
+    proxy_pid=$(<"$ROOT/data/proxy.pid")
+    kill -0 "$proxy_pid"
+    nobody_uid=$(getent passwd nobody | cut -d: -f3)
+    [[ -n $nobody_uid && $nobody_uid != 0 ]]
+
+    for attempt in $(seq 1 50); do
+        helper_pids=$(<"/proc/$proxy_pid/task/$proxy_pid/children")
+        [[ -n $helper_pids ]] && break
+        kill -0 "$proxy_pid"
+        sleep 0.1
+    done
+    read -r helper_pid extra_helper <<<"$helper_pids"
+    [[ -n $helper_pid && -z ${extra_helper:-} ]]
+    core_uid=$(awk '/^Uid:/ { print $2 }' "/proc/$proxy_pid/status")
+    helper_uid=$(awk '/^Uid:/ { print $2 }' "/proc/$helper_pid/status")
+    [[ $core_uid == "$nobody_uid" ]]
+    [[ $helper_uid == 0 ]]
+    echo "PASS privsep identity: core uid=$core_uid, helper pid=$helper_pid uid=$helper_uid"
+
+    { printf 'enable\r\ndiag priv stats\r\n'; sleep 1; printf 'quit\r\n'; } | \
+        timeout 8 ip netns exec "$NS" nc 127.0.0.1 50000 > "$ROOT/results/privsep-stats.txt" 2>&1
+    grep -q 'user: nobody' "$ROOT/results/privsep-stats.txt"
+    grep -q "uid: $nobody_uid" "$ROOT/results/privsep-stats.txt"
+    grep -q 'Privileged helper stats:' "$ROOT/results/privsep-stats.txt"
+    grep -Eq 'setsockopt: [1-9][0-9]*' "$ROOT/results/privsep-stats.txt"
+    grep -Eq 'max_ops_per_drain: [1-9][0-9]*' "$ROOT/results/privsep-stats.txt"
+    echo 'PASS privsep CLI stats: effective user and helper counters exported'
+
+    ip netns exec "$CLIENT" curl --noproxy '*' -fsS --max-time 15 \
+        http://198.18.20.2:8080/ > "$ROOT/results/privsep-http4.txt"
+    grep -q 'runner-origin-ok peer=198.18.20.1' "$ROOT/results/privsep-http4.txt"
+    echo 'PASS4 privsep TCP/HTTP: unprivileged core uses transparent listener'
+
+    ip netns exec "$CLIENT" curl --noproxy '*' -gfsS --max-time 15 \
+        'http://[fd00:20::2]:8080/' > "$ROOT/results/privsep-http6.txt"
+    grep -q 'runner-origin-ok peer=fd00:20::1' "$ROOT/results/privsep-http6.txt"
+    echo 'PASS6 privsep TCP/HTTP: unprivileged core uses transparent listener'
 fi
 if [[ $BASE_TRAFFIC_TEST == 1 ]]; then
 ip netns exec "$CLIENT" curl --noproxy '*' -fsS --max-time 15 http://198.18.20.2:8080/ > "$ROOT/results/http4.txt"

@@ -1,6 +1,7 @@
 #include "proxy/quic/openssl.hpp"
 #include "proxy/quic/wire.hpp"
 #include <sslcertstore.hpp>
+#include <privileged_socket.hpp>
 
 #include <openssl/err.h>
 
@@ -868,7 +869,7 @@ std::unique_ptr<openssl_connection> connect_openssl_quic(
         return fail("invalid QUIC peer or ALPN");
     }
 
-    auto const fd = ::socket(peer->sa_family, SOCK_DGRAM, IPPROTO_UDP);
+    auto const fd = socle::socket(peer->sa_family, SOCK_DGRAM, IPPROTO_UDP);
     if (fd < 0) return fail(std::string("socket: ") + std::strerror(errno));
     auto close_and_fail = [fd, &fail](std::string message) {
         ::close(fd);
@@ -958,7 +959,7 @@ std::unique_ptr<openssl_listener> openssl_listener::create(SSL_CTX* context, int
     // accidentally create a transparent listener without tuple metadata.
     if (enable_local_address) {
         int enabled = 1;
-        if (::setsockopt(udp_fd, SOL_IP, IP_RECVORIGDSTADDR,
+        if (socle::setsockopt(udp_fd, SOL_IP, IP_RECVORIGDSTADDR,
                          &enabled, sizeof(enabled)) != 0) return nullptr;
     }
 

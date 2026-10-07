@@ -45,6 +45,7 @@
 #include <cstdio>
 #include <ctime>
 #include <memory>
+#include <pwd.h>
 #include <sys/ioctl.h>
 #include <linux/sockios.h>
 #include <unistd.h>
@@ -164,6 +165,17 @@ int cli_print(DiagCli* cli, const char* format, ...) {
 
 void debug_cli_params(DiagCli*, const char*, char*[], int) {}
 void debug_cli_params(DiagCli*, const char*, const std::vector<std::string>&) {}
+
+std::string effective_user_name(uid_t uid) {
+    long buffer_size = ::sysconf(_SC_GETPW_R_SIZE_MAX);
+    if(buffer_size < 0) buffer_size = 16384;
+    std::vector<char> buffer(static_cast<std::size_t>(buffer_size));
+    passwd entry{};
+    passwd* result = nullptr;
+    const int rc = ::getpwuid_r(uid, &entry, buffer.data(), buffer.size(), &result);
+    if(rc != 0 || result == nullptr) return "unknown";
+    return entry.pw_name;
+}
 
 DiagNode* diag_register_command(DiagRegistry* registry, DiagNode* parent, const char* name,
                                DiagCallback callback, int privilege, int mode, const char* help) {
@@ -1059,6 +1071,62 @@ int cli_diag_writer_stats(DiagCli *cli, const char *command, char *argv[], int a
 
     cli_print(cli, "%s", out.str().c_str());
 
+    return CLI_OK;
+}
+
+int cli_diag_priv_stats(DiagCli* cli, const char* command, char* argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+
+    const uid_t uid = ::geteuid();
+    const gid_t gid = ::getegid();
+    socle::privsep::Stats stats{};
+    if(socle::privileged_stats(stats) != 0) {
+        const int saved_errno = errno;
+        cli_print(cli,
+                  "Effective identity:\n"
+                  "  user: %s\n"
+                  "  uid: %u\n"
+                  "  gid: %u\n"
+                  "Privileged helper stats unavailable: %s",
+                  effective_user_name(uid).c_str(), static_cast<unsigned>(uid),
+                  static_cast<unsigned>(gid), string_error(saved_errno).c_str());
+        return CLI_ERROR;
+    }
+
+    cli_print(cli,
+              "Effective identity:\n"
+              "  user: %s\n"
+              "  uid: %u\n"
+              "  gid: %u\n"
+              "Privileged helper stats:\n"
+              "  ping: %llu\n"
+              "  socket: %llu\n"
+              "  setsockopt: %llu\n"
+              "  bind: %llu\n"
+              "  listen: %llu\n"
+              "  stats: %llu\n"
+              "  unknown_opcode: %llu\n"
+              "  total_errors: %llu\n"
+              "  operation_errors: %llu\n"
+              "  protocol_errors: %llu\n"
+              "  transport_errors: %llu\n"
+              "  drains: %llu\n"
+              "  max_ops_per_drain: %llu",
+              effective_user_name(uid).c_str(), static_cast<unsigned>(uid),
+              static_cast<unsigned>(gid),
+              static_cast<unsigned long long>(stats.ping),
+              static_cast<unsigned long long>(stats.socket),
+              static_cast<unsigned long long>(stats.setsockopt),
+              static_cast<unsigned long long>(stats.bind),
+              static_cast<unsigned long long>(stats.listen),
+              static_cast<unsigned long long>(stats.stats),
+              static_cast<unsigned long long>(stats.unknown_opcode),
+              static_cast<unsigned long long>(stats.errors),
+              static_cast<unsigned long long>(stats.operation_errors),
+              static_cast<unsigned long long>(stats.protocol_errors),
+              static_cast<unsigned long long>(stats.transport_errors),
+              static_cast<unsigned long long>(stats.drains),
+              static_cast<unsigned long long>(stats.max_ops_per_drain));
     return CLI_OK;
 }
 
@@ -2591,6 +2659,10 @@ void register_diags(libcli2::Cli& native) {
     auto* cli = &registry;
     auto* diag = diag_register_command(cli, nullptr, "diag", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC,
                                       "diagnose commands helping to troubleshoot");
+    auto diag_priv = diag_register_command(cli, diag, "priv", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC,
+                                           "privileged helper diagnostics");
+    diag_register_command(cli, diag_priv, "stats", cli_diag_priv_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC,
+                          "display effective identity and privileged helper statistics");
     auto diag_ssl = diag_register_command(cli, diag, "tls", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "ssl related troubleshooting commands");
     auto diag_ssl_cache = diag_register_command(cli, diag_ssl, "cache", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl certificate cache");
     diag_register_command(cli, diag_ssl_cache, "stats", cli_diag_ssl_cache_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "display ssl cert cache statistics");

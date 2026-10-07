@@ -4,6 +4,7 @@
 #include "service/quic/quiclog.hpp"
 
 #include <traflog/pcapapi.hpp>
+#include <privileged_socket.hpp>
 
 #include <algorithm>
 #include <cerrno>
@@ -178,24 +179,24 @@ bool listener_service::open_socket() {
         fail(std::string("eventfd: ") + std::strerror(errno));
         return false;
     }
-    udp_fd_ = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    udp_fd_ = socle::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (udp_fd_ < 0) {
         fail(std::string("socket: ") + std::strerror(errno));
         return false;
     }
 
     int enabled = 1;
-    if (::setsockopt(udp_fd_, SOL_SOCKET, SO_REUSEADDR, &enabled, sizeof(enabled)) != 0) {
+    if (socle::setsockopt(udp_fd_, SOL_SOCKET, SO_REUSEADDR, &enabled, sizeof(enabled)) != 0) {
         fail(std::string("SO_REUSEADDR: ") + std::strerror(errno));
         return false;
     }
     if (transparent_
-        && ::setsockopt(udp_fd_, SOL_IP, IP_TRANSPARENT, &enabled, sizeof(enabled)) != 0) {
+        && socle::setsockopt(udp_fd_, SOL_IP, IP_TRANSPARENT, &enabled, sizeof(enabled)) != 0) {
         fail(std::string("IP_TRANSPARENT: ") + std::strerror(errno));
         return false;
     }
     if (transparent_
-        && ::setsockopt(udp_fd_, SOL_IP, IP_RECVORIGDSTADDR,
+        && socle::setsockopt(udp_fd_, SOL_IP, IP_RECVORIGDSTADDR,
                         &enabled, sizeof(enabled)) != 0) {
         fail(std::string("IP_RECVORIGDSTADDR: ") + std::strerror(errno));
         return false;
@@ -211,7 +212,7 @@ bool listener_service::open_socket() {
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = htonl(INADDR_ANY);
     address.sin_port = htons(port_);
-    if (::bind(udp_fd_, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
+    if (socle::bind(udp_fd_, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
         fail(std::string("bind: ") + std::strerror(errno));
         return false;
     }

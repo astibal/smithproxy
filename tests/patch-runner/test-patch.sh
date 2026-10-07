@@ -37,7 +37,7 @@ Options:
   --suite NAME       Run only one suite. Besides tls, transfer, tls-throughput,
                      starttls, policy, routing,
                      rtt, session-list and quic,
-                     full-run sections are available: smoke, tls-policy, routing,
+                     full-run sections are available: smoke, privsep, tls-policy, routing,
                      rtt, transfer, tls-throughput, quic, tcp-churn, udp-churn, capture,
                      corpus-regular, corpus-edge, corpus-insanity and fuzz.AREA.
                      Use with sanity, full, fuzz or fuzz-dyn.
@@ -262,7 +262,7 @@ if [[ -n $CHURN_PORT_RANGE ]]; then
 fi
 FUZZ_AREAS=(h1 h2 tls socks5 dns quic redis mqtt smtp imap pop3 ftp ssh websocket memcached postgresql mysql amqp telnet ntp syslog stun tftp snmp raw)
 case "$ONLY_SUITE" in
-    ''|tls|transfer|tls-throughput|starttls|policy|routing|rtt|session-list|quic|smoke|tls-policy|tcp-churn|udp-churn|capture|corpus-regular|corpus-edge|corpus-insanity) ;;
+    ''|tls|transfer|tls-throughput|starttls|policy|routing|rtt|session-list|quic|smoke|privsep|tls-policy|tcp-churn|udp-churn|capture|corpus-regular|corpus-edge|corpus-insanity) ;;
     fuzz.*)
         fuzz_spec=${ONLY_SUITE#fuzz.}
         fuzz_area=${fuzz_spec%%.*}
@@ -871,6 +871,8 @@ print(*(x.getsockname()[1] for x in s))'
                 "QUIC_PYTHONPATH=$QUIC_PYTHONPATH"
                 "SPQ1_DISSECTOR=$LAB_ROOT/runner/tools/spquic.lua") ;;
             smoke) LAB_ENV+=("PPLAY_SMOKE_TEST=1") ;;
+            privsep) LAB_ENV+=("BASE_TRAFFIC_TEST=0" "PRIVSEP_TEST=1"
+                "SMITHPROXY_RUN_AS=root" "SMITHPROXY_RUN_AS_ARGUMENT=nobody" "SKIP_API_READY=1") ;;
             tls-policy) LAB_ENV+=("BASE_TRAFFIC_TEST=0" "TLS_SUITE_TEST=1" "POLICY_TEST=1" "SESSION_LIST_STRESS_TEST=1") ;;
             tcp-churn) LAB_ENV+=("BASE_TRAFFIC_TEST=0" "TCP_CHURN_TEST=1") ;;
             udp-churn) LAB_ENV+=("BASE_TRAFFIC_TEST=0" "UDP_CHURN_TEST=1") ;;

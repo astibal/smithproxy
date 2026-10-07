@@ -552,6 +552,10 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/service/reload/tests/reloadable_resource_test.cpp
         )
 
+        add_executable(sx_gtests_privsep
+                socle/tests/privileged_socket_tests.cpp
+        )
+
         add_executable(tls_testbed
                 tests/tls/tls_testbed.cpp)
         add_executable(transfer_testbed
@@ -570,6 +574,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_link_libraries(sx_gtests_startstoptls gtest gtest_main)
         target_link_libraries(sx_gtests_httpconnect gtest gtest_main)
         target_link_libraries(sx_gtests_reloadable gtest gtest_main pthread)
+        target_link_libraries(sx_gtests_privsep gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries(tls_testbed gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries(transfer_testbed gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries (sx_gtests nlohmann_json::nlohmann_json)
@@ -617,6 +622,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
             add_test(NAME unit.startstoptls COMMAND sx_gtests_startstoptls)
             add_test(NAME unit.httpconnect COMMAND sx_gtests_httpconnect)
             add_test(NAME unit.reloadable COMMAND sx_gtests_reloadable)
+            add_test(NAME unit.privsep COMMAND sx_gtests_privsep)
             add_test(NAME integration.tls_testbed COMMAND tls_testbed)
             add_test(NAME integration.transfer_testbed COMMAND transfer_testbed)
             add_test(NAME integration.quic_testbed COMMAND quic_testbed)
