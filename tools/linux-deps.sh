@@ -86,7 +86,7 @@ install_zypper_dependencies() {
         ca-certificates wget curl \
         git gcc-c++ cmake make \
         python3 python3-devel python3-cryptography python3-pyroute2 python3-pyparsing \
-        libconfig-devel libopenssl-devel libssh libssh-devel libunwind-devel libmicrohttpd-devel \
+        libconfig-devel libopenssl-devel libssh-devel libunwind-devel libmicrohttpd-devel \
         libcurl-devel pam-devel \
         iptables iproute2 telnet \
         swig libffi-devel libxml2-devel libxslt-devel xmlsec1-devel
