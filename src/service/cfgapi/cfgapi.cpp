@@ -41,6 +41,8 @@
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 
+#include <cstdio>
+#include <cstdlib>
 #include <vector>
 
 #include <socle.hpp>
@@ -49,6 +51,7 @@
 
 #include <service/cfgapi/cfgapi.hpp>
 #include <service/cfgapi/cfgvalue.hpp>
+#include <service/privileged_file.hpp>
 #include <log/logger.hpp>
 
 #include <policy/policy.hpp>
@@ -124,7 +127,9 @@ bool CfgFactory::cfgapi_init(const char* fnm) {
     
     // Read the file. If there is an error, report it and exit.
     try {
-        cfgapi.readFile(fnm);
+        std::string content;
+        if(sx::privsep::files::config_read(fnm, content) != 0) throw FileIOException();
+        cfgapi.readString(content);
     }
     catch(const FileIOException &fioex)
     {
@@ -649,8 +654,20 @@ bool CfgFactory::upgrade_to_0_9_23 () {
 
 bool CfgFactory::upgrade_and_save() {
 
+    auto serialize = [](const Config& config, std::string& output) -> bool {
+        char* data = nullptr;
+        std::size_t size = 0;
+        FILE* stream = ::open_memstream(&data, &size);
+        if(stream == nullptr) return false;
+        config.write(stream);
+        const bool ok = ::fclose(stream) == 0;
+        if(ok) output.assign(data, size);
+        ::free(data);
+        return ok;
+    };
 
-    auto backup = [this](std::string const& prev_ver) {
+
+    auto backup = [this, &serialize](std::string const& prev_ver) {
         try {
             std::stringstream ss;
             ss << CfgFactory::get()->config_file;
@@ -663,7 +680,12 @@ bool CfgFactory::upgrade_and_save() {
             #endif
 
             cfgapi.setTabWidth(4);
-            cfgapi.writeFile(ss.str().c_str());
+            std::string content;
+            if(!serialize(cfgapi, content)
+               || sx::privsep::files::config_backup(CfgFactory::get()->config_file,
+                                                     prev_ver, content) != 0) {
+                throw FileIOException();
+            }
         }
         catch(ConfigException const& e) {
             _err("error writing config file backup %s", e.what());
@@ -5811,7 +5833,19 @@ bool CfgFactory::save_config() const {
     }
 
     try {
-        ex.writeFile(CfgFactory::get()->config_file.c_str());
+        char* data = nullptr;
+        std::size_t size = 0;
+        FILE* stream = ::open_memstream(&data, &size);
+        if(stream == nullptr) throw FileIOException();
+        ex.write(stream);
+        const bool serialized = ::fclose(stream) == 0;
+        std::string content;
+        if(serialized) content.assign(data, size);
+        ::free(data);
+        if(!serialized || sx::privsep::files::config_write(CfgFactory::get()->config_file,
+                                                           content) != 0) {
+            throw FileIOException();
+        }
         log.event(NOT, "Configuration saved");
 
         return true;

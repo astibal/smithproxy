@@ -267,10 +267,14 @@ if [[ $QUIC_TEST == 1 ]]; then
 fi
 if [[ $PRIVSEP_TEST == 1 ]]; then
     # The core must be able to update its ordinary runtime state after dropping
-    # identity.  The runner and privileged helper remain root.
+    # identity.  The config and PID targets deliberately remain root-only;
+    # PCAPs and other runtime data remain owned by the unprivileged core.
     getent passwd nobody >/dev/null
     mkdir -p "$ROOT/data/run"
     chown -R nobody "$ROOT/config" "$ROOT/data"
+    chown root:root "$ROOT/config/smithproxy.cfg" "$ROOT/data/run"
+    chmod 0600 "$ROOT/config/smithproxy.cfg"
+    chmod 0755 "$ROOT/data/run"
 fi
 "$ROOT/runner/smithproxy.runner" --in "$IN_IF" --out "$OUT_IF" --namespace "$NS" \
     --api-port "$API_RELAY_PORT" --config-dir "$ROOT/config" --data-dir "$ROOT/data" \
@@ -333,22 +337,34 @@ if [[ $PRIVSEP_TEST == 1 ]]; then
         kill -0 "$proxy_pid"
         sleep 0.1
     done
-    read -r helper_pid extra_helper <<<"$helper_pids"
-    [[ -n $helper_pid && -z ${extra_helper:-} ]]
+    read -ra helpers <<<"$helper_pids"
+    [[ ${#helpers[@]} == 2 ]]
     core_uid=$(awk '/^Uid:/ { print $2 }' "/proc/$proxy_pid/status")
-    helper_uid=$(awk '/^Uid:/ { print $2 }' "/proc/$helper_pid/status")
     [[ $core_uid == "$nobody_uid" ]]
-    [[ $helper_uid == 0 ]]
-    echo "PASS privsep identity: core uid=$core_uid, helper pid=$helper_pid uid=$helper_uid"
+    for helper_pid in "${helpers[@]}"; do
+        helper_uid=$(awk '/^Uid:/ { print $2 }' "/proc/$helper_pid/status")
+        [[ $helper_uid == 0 ]]
+    done
+    echo "PASS privsep identity: core uid=$core_uid, two root helpers=${helpers[*]}"
 
-    { printf 'enable\r\ndiag priv stats\r\n'; sleep 1; printf 'quit\r\n'; } | \
+    internal_pid="$ROOT/data/run/smithproxy.default.pid"
+    [[ -s $internal_pid ]]
+    [[ $(stat -c %u "$internal_pid") == 0 ]]
+    [[ $(stat -c %a "$internal_pid") == 644 ]]
+    echo 'PASS privsep PID: root helper created the private PID file'
+
+    { printf 'enable\r\ndiag priv stats\r\nsave config\r\nexecute reload\r\n'; sleep 1; printf 'quit\r\n'; } | \
         timeout 8 ip netns exec "$NS" nc 127.0.0.1 50000 > "$ROOT/results/privsep-stats.txt" 2>&1
     grep -q 'user: nobody' "$ROOT/results/privsep-stats.txt"
     grep -q "uid: $nobody_uid" "$ROOT/results/privsep-stats.txt"
     grep -q 'Privileged helper stats:' "$ROOT/results/privsep-stats.txt"
     grep -Eq 'setsockopt: [1-9][0-9]*' "$ROOT/results/privsep-stats.txt"
     grep -Eq 'max_ops_per_drain: [1-9][0-9]*' "$ROOT/results/privsep-stats.txt"
-    echo 'PASS privsep CLI stats: effective user and helper counters exported'
+    grep -q 'config saved successfully' "$ROOT/results/privsep-stats.txt"
+    grep -q 'Configuration file reloaded' "$ROOT/results/privsep-stats.txt"
+    [[ $(stat -c %u "$ROOT/config/smithproxy.cfg") == 0 ]]
+    [[ $(stat -c %a "$ROOT/config/smithproxy.cfg") == 600 ]]
+    echo 'PASS privsep CLI/config: stats plus root-only save and reload'
 
     ip netns exec "$CLIENT" curl --noproxy '*' -fsS --max-time 15 \
         http://198.18.20.2:8080/ > "$ROOT/results/privsep-http4.txt"
@@ -1063,6 +1079,10 @@ case "$runner_rc" in
     0|143|241) ;;
     *) echo "FAIL: runner shutdown exited with rc=$runner_rc" >&2; exit "$runner_rc" ;;
 esac
+if [[ $PRIVSEP_TEST == 1 ]]; then
+    [[ ! -e "$ROOT/data/run/smithproxy.default.pid" ]]
+    echo 'PASS privsep PID cleanup: helper removed its owned PID file'
+fi
 if [[ $CAPTURE_TEST == 1 ]]; then
     python3 "$ROOT/runner/tests/verify-pcap.py" "$ROOT/data" "$CAPTURE_PREFIX" "$CAPTURE_MARKER" "$CAPTURE_MARKER6" \
         > "$ROOT/results/pcap-validation.json"

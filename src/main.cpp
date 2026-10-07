@@ -76,6 +76,7 @@
 #include <service/cfgapi/cfgapi.hpp>
 #include <utils/tenants.hpp>
 #include <service/daemon.hpp>
+#include <service/privileged_file.hpp>
 #include <staticcontent.hpp>
 #include <smithlog.hpp>
 
@@ -86,7 +87,7 @@
 
 namespace {
 
-int drop_process_identity(const std::string& run_as, const std::string& pid_file) {
+int drop_process_identity(const std::string& run_as) {
     if(geteuid() != 0) {
         errno = EPERM;
         return -1;
@@ -106,12 +107,6 @@ int drop_process_identity(const std::string& run_as, const std::string& pid_file
     }
     if(entry.pw_uid == 0) {
         errno = EINVAL;
-        return -1;
-    }
-
-    // The core removes its own PID file during orderly shutdown.  Its runtime
-    // directory must already be writable by the selected service account.
-    if(chown(pid_file.c_str(), entry.pw_uid, entry.pw_gid) != 0) {
         return -1;
     }
 
@@ -137,19 +132,33 @@ std::optional<std::string> resolve_run_as(const std::optional<std::string>& comm
     return std::nullopt;
 }
 
-int prepare_privilege_separation(const std::string& pid_file,
+int prepare_privilege_separation(DaemonFactory& daemon, const std::string& config_file,
                                  const std::optional<std::string>& run_as) {
     auto const& log = DaemonFactory::instance()->get_log();
 
-    if(socle::privsep::start_local_helper() != 0) {
-        _fat("cannot start privileged socket helper: %s", string_error().c_str());
+    if(sx::privsep::files::start_local_helper({config_file, daemon.pid_file}) != 0) {
+        _fat("cannot start privileged file helper: %s", string_error().c_str());
         return -1;
     }
 
-    if(run_as && drop_process_identity(*run_as, pid_file) != 0) {
+    if(socle::privsep::start_local_helper() != 0) {
+        _fat("cannot start privileged socket helper: %s", string_error().c_str());
+        sx::privsep::files::stop_local_helper();
+        return -1;
+    }
+
+    if(!daemon.write_pidfile()) {
+        socle::privsep::stop_local_helper();
+        sx::privsep::files::stop_local_helper();
+        return -1;
+    }
+
+    if(run_as && drop_process_identity(*run_as) != 0) {
         const int saved_errno = errno;
         _fat("cannot drop Smithproxy core identity: %s", string_error(saved_errno).c_str());
+        daemon.unlink_pidfile();
         socle::privsep::stop_local_helper();
+        sx::privsep::files::stop_local_helper();
         errno = saved_errno;
         return -1;
     }
@@ -664,14 +673,10 @@ int main(int argc, char *argv[]) {
             return EXIT_FAILURE;
         }
 
-    } else {
-        // this is necessary for systemd which doesn't favor forked daemons
-        // also - there is no harm to write PIDfile even for foreground programs
-        this_daemon->write_pidfile();
     }
 
     const auto run_as = resolve_run_as(command_line_run_as);
-    if(prepare_privilege_separation(this_daemon->pid_file, run_as) != 0) {
+    if(prepare_privilege_separation(*this_daemon, CfgFactory::get()->config_file, run_as) != 0) {
         CfgFactory::get()->cleanup();
         return EXIT_FAILURE;
     }
@@ -719,8 +724,15 @@ int main(int argc, char *argv[]) {
     }
 
     do_cleanup();
+    this_daemon->unlink_pidfile();
+    // The socket helper is forked after the file helper and therefore inherits
+    // a copy of the file-helper control descriptor.  Stop it first so the file
+    // helper can observe EOF, perform PID cleanup and exit.
     if(socle::privsep::stop_local_helper() != 0) {
         _err("privileged socket helper did not stop cleanly: %s", string_error().c_str());
+    }
+    if(sx::privsep::files::stop_local_helper() != 0) {
+        _err("privileged file helper did not stop cleanly: %s", string_error().c_str());
     }
     // Don't do crashdumps on exit in Release builds
     #ifdef BUILD_RELEASE

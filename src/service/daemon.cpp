@@ -51,6 +51,7 @@
 
 #include <log/logger.hpp>
 #include <service/daemon.hpp>
+#include <service/privileged_file.hpp>
 #include <display.hpp>
 
 #ifndef BUILD_RELEASE
@@ -87,13 +88,6 @@ int DaemonFactory::daemonize () {
             _dia("daemonize: exiting from master");
 
             return 0;
-    } else {
-
-        // if daemonizing, write pid file only from slave (master will be shut down)
-
-        if(not write_pidfile()) {
-            return -2;
-        }
     }
 
     /* Change the file mode mask */
@@ -134,51 +128,19 @@ int DaemonFactory::daemonize () {
 }
 
 bool DaemonFactory::write_pidfile() {
-    const int fd = ::open(pid_file.c_str(), O_WRONLY | O_CREAT | O_EXCL |
-            O_CLOEXEC | O_NOFOLLOW, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-    if(fd < 0) {
+    if(sx::privsep::files::pid_write(pid_file, ::getpid()) != 0) {
         std::cerr << "cannot claim pid file: " << string_error() << std::endl;
         _err("cannot claim pid file: %s", string_error().c_str());
         return false;
     }
-
-    const std::string pid = std::to_string(getpid());
-    size_t offset = 0;
-    int failure_errno = 0;
-    while(offset < pid.size()) {
-        const ssize_t written = ::write(fd, pid.data() + offset, pid.size() - offset);
-        if(written > 0) {
-            offset += static_cast<size_t>(written);
-            continue;
-        }
-        if(written < 0 && errno == EINTR) {
-            continue;
-        }
-        failure_errno = written == 0 ? EIO : errno;
-        break;
-    }
-
-    const bool complete = offset == pid.size();
-    const bool closed = ::close(fd) == 0;
-    if(complete && closed) {
-        pid_file_owned = true;
-        return true;
-    }
-
-    if(complete && !closed) {
-        failure_errno = errno;
-    }
-    ::unlink(pid_file.c_str());
-    errno = failure_errno == 0 ? EIO : failure_errno;
-    std::cerr << "cannot write pid file: " << string_error() << std::endl;
-    _err("cannot write pid file: %s", string_error().c_str());
-    return false;
+    pid_file_owned = true;
+    return true;
 }
 
 void DaemonFactory::unlink_pidfile(bool force) {
 
     if(pid_file_owned || force) {
-        if(unlink(pid_file.c_str()) != 0) {
+        if(sx::privsep::files::pid_remove(pid_file) != 0 && errno != ENOENT) {
             _err("cannot unlink pidfile: %s", string_error().c_str());
         } else {
             // success
@@ -188,9 +150,8 @@ void DaemonFactory::unlink_pidfile(bool force) {
 }
 
 bool DaemonFactory::exists_pidfile() const {
-    struct stat st{};
-    int result = stat(pid_file.c_str(), &st);
-    return result == 0;
+    bool exists = false;
+    return sx::privsep::files::pid_exists(pid_file, exists) == 0 && exists;
 }
 
 rlim_t DaemonFactory::get_limit_fd() {
@@ -350,7 +311,6 @@ void DaemonFactory::uw_btrace_handler(int sig) {
         if (CRLOG >= 0) close(CRLOG);
     }
 
-    df->unlink_pidfile();
     _exit(-1);
 }
 #endif // USE_UNWIND
@@ -389,8 +349,6 @@ void DaemonFactory::release_crash_handler(int sig) {
         }
         if (CRLOG >= 0) close(CRLOG);
     }
-
-    df->unlink_pidfile();
 
 #ifndef MEMPOOL_DISABLE
     memPool::bailing = true;

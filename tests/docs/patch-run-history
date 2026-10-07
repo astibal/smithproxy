@@ -52,3 +52,5 @@ parallel workers are represented by the parent row and its coverage column.
 | 2026-10-05T07:38:38Z | `c8f61c5a9519+dirty` | PASS | `sanity/policy` | `local` | policy | `/tmp/patch-runner/test-framework-coverage_@_c8f61c5a/results/20261005T073733Z-c8f61c5a-sanity-policy` |
 | 2026-10-05T08:25:37Z | `c8f61c5a9519+dirty` | PASS | `sanity/policy` | `local` | policy | `/tmp/patch-runner/test-framework-coverage_@_c8f61c5a/results/20261005T082334Z-c8f61c5a-sanity-policy` |
 | 2026-10-07T11:01:31Z | `c9bf975a09c7+dirty` | PASS | `sanity/smoke` | `local` | smoke | `/tmp/patch-runner/tls403-master-hotfix/results/20261007T110109Z-c9bf975a-sanity-smoke` |
+| 2026-10-07T21:16:31Z | `f7139767f585+dirty` | PASS | `sanity/privsep` | `local` | privsep | `/home/astib/Documents/ChatGPT/Smithproxy/test-runs/privsep-files/root-run/results/20261007T211319Z-f7139767-sanity-privsep` |
+| 2026-10-07T21:25:50Z | `f7139767f585+dirty` | PASS | `sanity/privsep` | `local` | privsep | `/home/astib/Documents/ChatGPT/Smithproxy/test-runs/privsep-files/root-run/results/20261007T212442Z-f7139767-sanity-privsep` |
