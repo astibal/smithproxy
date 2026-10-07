@@ -165,10 +165,12 @@ namespace {
 
 struct FakeDrainCom {
     std::vector<int> valid_descriptors;
+    bool pending = false;
     bool descriptor_valid(int descriptor) const {
         return std::find(valid_descriptors.begin(), valid_descriptors.end(), descriptor)
                != valid_descriptors.end();
     }
+    bool write_event_pending() const { return pending; }
 };
 
 struct FakeDrainBuffer {
@@ -214,6 +216,26 @@ TEST(MitmProxyLifecycle, HalfCloseAcceptsTransportValidatedVirtualPeer) {
     source.other = &peer;
 
     EXPECT_TRUE(sx::mitmproxy::half_close_peer_can_drain(&source));
+}
+
+TEST(MitmProxyLifecycle, UpstreamHalfCloseFinishesOnlyAfterPeerDrain) {
+    FakeDrainCom transport{{12}};
+    FakeDrainHost source{11, &transport, {}, nullptr};
+    FakeDrainHost peer{12, &transport, {}, nullptr};
+    source.other = &peer;
+
+    EXPECT_TRUE(sx::mitmproxy::half_close_peer_drained(&source));
+
+    peer.pending.is_empty = false;
+    EXPECT_FALSE(sx::mitmproxy::half_close_peer_drained(&source));
+
+    peer.pending.is_empty = true;
+    transport.pending = true;
+    EXPECT_FALSE(sx::mitmproxy::half_close_peer_drained(&source));
+
+    transport.pending = false;
+    peer.descriptor = 13;
+    EXPECT_FALSE(sx::mitmproxy::half_close_peer_drained(&source));
 }
 
 TEST(MitmProxyLifecycle, HalfCloseGraceExpiresWithoutAnotherSocketError) {

@@ -333,6 +333,22 @@ bool half_close_peer_can_drain(Host* cx) {
            !peer->writebuf()->empty();
 }
 
+// Once an upstream EOF has been observed, the downstream side only needs to
+// stay alive while application or transport output is still queued.
+template<class Host>
+bool half_close_peer_drained(Host* cx) {
+    if(cx == nullptr) return false;
+
+    auto* peer = cx->peer();
+    if(peer == nullptr || peer->com() == nullptr || peer->writebuf() == nullptr) {
+        return false;
+    }
+
+    return peer->com()->descriptor_valid(peer->socket()) &&
+           peer->writebuf()->empty() &&
+           !peer->com()->write_event_pending();
+}
+
 } // namespace sx::mitmproxy
 
 #endif // MITMPROXY_UTILS_HPP

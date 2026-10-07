@@ -504,7 +504,22 @@ int MitmProxy::handle_sockets_once(baseCom* xcom) {
         return 0;
     }
 
-    return baseProxy::handle_sockets_once(xcom);
+    auto const handled = baseProxy::handle_sockets_once(xcom);
+
+    // baseProxy drains writes after reads.  Re-check here so an origin EOF
+    // observed in this very cycle can close immediately after its response
+    // was written, without waiting for the next periodic timer tick.
+    if(!state().dead()) {
+        for(auto* upstream : rs()) {
+            if(upstream && upstream->read_eof() &&
+               sx::mitmproxy::half_close_peer_drained(upstream)) {
+                state().dead(true);
+                break;
+            }
+        }
+    }
+
+    return handled;
 }
 
 
@@ -1516,6 +1531,18 @@ void MitmProxy::on_right_error(baseHostCX* cx) {
 
 bool MitmProxy::run_timers() {
     auto ret = baseProxy::run_timers();
+
+    // Client half-close keeps the upstream request alive. Origin EOF is the
+    // reverse direction: close as soon as its final response has drained.
+    if(ret && !state().dead()) {
+        for(auto* upstream : rs()) {
+            if(upstream && upstream->read_eof() &&
+               sx::mitmproxy::half_close_peer_drained(upstream)) {
+                state().dead(true);
+                break;
+            }
+        }
+    }
 
     if(ret && !state().dead() &&
        sx::mitmproxy::half_close_grace_expired(
