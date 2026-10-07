@@ -17,6 +17,7 @@
 #include <unistd.h>
 
 #include <libssh/libssh.h>
+#include <libssh/libssh_version.h>
 #include <libssh/callbacks.h>
 #include <libssh/server.h>
 
@@ -469,8 +470,10 @@ public:
         ssh_set_blocking(downstream_, 0);
         ssh_callbacks_init(&upstream_callbacks_);
         upstream_callbacks_.userdata = this;
+#if LIBSSH_VERSION_INT >= SSH_VERSION_INT(0, 11, 0)
         upstream_callbacks_.channel_open_request_forwarded_tcpip_function =
             &impl::accept_forwarded_tcpip;
+#endif
         upstream_callbacks_.channel_open_request_x11_function = &impl::accept_x11;
         upstream_callbacks_.channel_open_request_auth_agent_function = &impl::accept_agent;
         if (ssh_set_callbacks(upstream_, &upstream_callbacks_) != SSH_OK) {
@@ -1107,6 +1110,7 @@ public:
         // path below can retire the pair.
         if (channel.expects_exit_state && !channel.upstream_exit_forwarded) {
             std::uint32_t exit_code = 0;
+#if LIBSSH_VERSION_INT >= SSH_VERSION_INT(0, 11, 0)
             char* exit_signal = nullptr;
             int core_dumped = 0;
             auto const result = ssh_channel_get_exit_state(
@@ -1134,6 +1138,23 @@ public:
                     return drive_result::failed;
                 }
             }
+#else
+            // libssh 0.10 has no non-blocking exit-state API. Query its
+            // status only after EOF/close, when no more channel metadata can
+            // arrive. Exit signals cannot be forwarded by this older API.
+            if (ssh_channel_is_eof(channel.upstream)
+                || ssh_channel_is_closed(channel.upstream)) {
+                auto const result = ssh_channel_get_exit_status(channel.upstream);
+                if (result >= 0
+                    && ssh_channel_request_send_exit_status(
+                           channel.downstream, result) != SSH_OK) {
+                    set_error("cannot forward upstream SSH exit status");
+                    return drive_result::failed;
+                }
+                channel.upstream_exit_forwarded = true;
+                progress = true;
+            }
+#endif
         }
         if ((ssh_channel_is_closed(channel.downstream)
              || ssh_channel_is_closed(channel.upstream))

@@ -66,6 +66,7 @@
 
 #include <sslcom.hpp>
 #include <sslcertstore.hpp>
+#include <privileged_socket.hpp>
 
 #include <proxy/mitmproxy.hpp>
 #include <proxy/streamhandler.hpp>
