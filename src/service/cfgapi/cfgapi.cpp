@@ -52,6 +52,7 @@
 #include <service/cfgapi/cfgapi.hpp>
 #include <service/cfgapi/cfgvalue.hpp>
 #include <service/privileged_file.hpp>
+#include <service/gre_broker.hpp>
 #include <log/logger.hpp>
 
 #include <policy/policy.hpp>
@@ -3419,6 +3420,9 @@ void CfgFactory::gre_export_apply(traflog::PcapLog* pcaplog) {
             auto fam = c.cidr()->proto;
 
             auto exp = std::make_shared<traflog::GreExporter>(fam, ip);
+            if(auto comm_transport = sx::comm::gre::transport()) {
+                exp->transport(std::move(comm_transport));
+            }
 
             // Select either the legacy IP-packet hook or serialized PCAPNG
             // records here, without exposing QUIC to the capture abstractions.

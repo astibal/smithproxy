@@ -336,7 +336,9 @@ add_executable(smithproxy
         src/async/asyncdns.hpp
 
         src/service/daemon.cpp
+        src/service/comm.cpp
         src/service/privileged_file.cpp
+        src/service/gre_broker.cpp
         src/service/netservice.cpp
         src/service/dnsupd/smithdnsupd.cpp
         src/service/core/smithproxy.hpp
@@ -422,7 +424,9 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/ext/nltemplate/nltemplate.cpp
                 src/smithlog.cpp
                 src/service/daemon.cpp
+                src/service/comm.cpp
                 src/service/privileged_file.cpp
+                src/service/gre_broker.cpp
                 src/service/netservice.cpp
                 src/service/core/authpam.cpp
 
@@ -559,7 +563,9 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
         )
 
         add_executable(sx_gtests_file_privsep
+                src/service/comm.cpp
                 src/service/privileged_file.cpp
+                src/service/tests/comm_tests.cpp
                 src/service/tests/privileged_file_tests.cpp
         )
 

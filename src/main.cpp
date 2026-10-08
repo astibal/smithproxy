@@ -77,6 +77,7 @@
 #include <utils/tenants.hpp>
 #include <service/daemon.hpp>
 #include <service/privileged_file.hpp>
+#include <service/gre_broker.hpp>
 #include <staticcontent.hpp>
 #include <smithlog.hpp>
 
@@ -147,7 +148,26 @@ int prepare_privilege_separation(DaemonFactory& daemon, const std::string& confi
         return -1;
     }
 
+    const auto& remote = CfgFactory::get()->capture_remote;
+    if(remote.enabled && !remote.tun_dst.empty()) {
+        CidrAddress destination(remote.tun_dst);
+        sx::comm::gre::Profile profile{
+            destination.cidr()->proto, destination.ip(), remote.tun_ttl,
+            remote.bind_interface
+        };
+        if(sx::comm::gre::start_local_broker(std::move(profile)) != 0) {
+            _fat("cannot start local GRE broker: %s", string_error().c_str());
+            socle::privsep::stop_local_helper();
+            sx::privsep::files::stop_local_helper();
+            return -1;
+        }
+        // The initial config load predates helper startup; replace the
+        // singleton's direct transport now. Per-session loggers are newer.
+        CfgFactory::gre_export_apply(&traflog::PcapLog::single_instance());
+    }
+
     if(!daemon.write_pidfile()) {
+        sx::comm::gre::stop_local_broker();
         socle::privsep::stop_local_helper();
         sx::privsep::files::stop_local_helper();
         return -1;
@@ -157,6 +177,7 @@ int prepare_privilege_separation(DaemonFactory& daemon, const std::string& confi
         const int saved_errno = errno;
         _fat("cannot drop Smithproxy core identity: %s", string_error(saved_errno).c_str());
         daemon.unlink_pidfile();
+        sx::comm::gre::stop_local_broker();
         socle::privsep::stop_local_helper();
         sx::privsep::files::stop_local_helper();
         errno = saved_errno;
@@ -728,6 +749,9 @@ int main(int argc, char *argv[]) {
     // The socket helper is forked after the file helper and therefore inherits
     // a copy of the file-helper control descriptor.  Stop it first so the file
     // helper can observe EOF, perform PID cleanup and exit.
+    if(sx::comm::gre::stop_local_broker() != 0) {
+        _err("cannot stop local GRE broker: %s", string_error().c_str());
+    }
     if(socle::privsep::stop_local_helper() != 0) {
         _err("privileged socket helper did not stop cleanly: %s", string_error().c_str());
     }
