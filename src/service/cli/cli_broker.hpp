@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -17,6 +18,7 @@ struct BrokerConfig {
     std::string preamble;
     std::vector<std::string> allowed_ips{"*"};
     std::string bind_interface;
+    std::size_t max_active_sessions = 256;
 };
 
 struct Stats {

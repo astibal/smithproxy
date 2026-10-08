@@ -47,7 +47,7 @@ int start_internal_broker(Profile profile) {
         sx::comm::stream::BrokerServer server({std::move(profile.listen_address),
                                                profile.listen_port, path, {},
                                                std::move(profile.allowed_ips),
-                                               std::move(profile.bind_interface)}, shared_stats);
+                                               std::move(profile.bind_interface), 256}, shared_stats);
         ::_exit(server.run() == 0 ? EXIT_SUCCESS : EXIT_FAILURE);
     }
     broker_pid = child;

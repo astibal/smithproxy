@@ -147,6 +147,9 @@ int Server::serve_once() {
     running_ = true;
     socle::privsep::Message request;
     const int received = channel_.receive(request);
+    // SOCK_SEQPACKET discarded the complete offending datagram. A malformed
+    // or ancillary-truncated packet must not let a client terminate the broker.
+    if(received < 0 && (errno == EMSGSIZE || errno == EPROTO)) return 1;
     if(received <= 0) return received;
     const int result = dispatch(request);
     if(request.fd >= 0) ::close(request.fd);

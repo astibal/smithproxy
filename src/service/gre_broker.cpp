@@ -83,10 +83,16 @@ int listen_seqpacket(const std::string& path) {
     if(unix_address(path, address, length) != 0) return -1;
     const int fd = ::socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
     if(fd < 0) return -1;
-    if(::bind(fd, reinterpret_cast<sockaddr*>(&address), length) != 0
-       || ::listen(fd, 16) != 0) {
+    if(::bind(fd, reinterpret_cast<sockaddr*>(&address), length) != 0) {
         const int saved = errno;
         ::close(fd);
+        errno = saved;
+        return -1;
+    }
+    if(::chmod(path.c_str(), S_IRUSR | S_IWUSR) != 0 || ::listen(fd, 16) != 0) {
+        const int saved = errno;
+        ::close(fd);
+        ::unlink(path.c_str());
         errno = saved;
         return -1;
     }

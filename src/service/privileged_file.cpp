@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <cctype>
 #include <charconv>
@@ -130,9 +131,10 @@ int atomic_replace_from_fd(const std::string& path, int source) {
         const int saved = errno; ::close(directory); errno = saved; return -1;
     }
 
-    static std::uint64_t sequence = 0;
+    static std::atomic<std::uint64_t> sequence{0};
     const std::string temporary = "." + target.filename().string() + ".tmp."
-        + std::to_string(::getpid()) + "." + std::to_string(++sequence);
+        + std::to_string(::getpid()) + "."
+        + std::to_string(sequence.fetch_add(1, std::memory_order_relaxed) + 1);
     const int output = ::openat(directory, temporary.c_str(),
                                 O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, mode);
     if(output < 0) { const int saved = errno; ::close(directory); errno = saved; return -1; }
@@ -232,16 +234,13 @@ private:
         struct stat created{};
         if(result == 0 && ::fstat(fd, &created) != 0) saved = errno;
         const bool valid_inode = result == 0 && S_ISREG(created.st_mode);
-        if(::close(fd) != 0 && result == 0) {
-            saved = errno;
-            ::unlink(target_.c_str());
-            return error_reply(saved);
-        }
         if(result != 0 || !valid_inode) {
+            ::close(fd);
             ::unlink(target_.c_str());
             return error_reply(result != 0 ? saved : EIO);
         }
         owned_ = true;
+        owned_fd_ = fd;
         device_ = created.st_dev;
         inode_ = created.st_ino;
         return {};
@@ -254,12 +253,12 @@ private:
         if(::lstat(target_.c_str(), &current) != 0) {
             if(errno != ENOENT) return error_reply(errno);
         } else if(current.st_dev != device_ || current.st_ino != inode_) {
-            owned_ = false;
+            release_ownership();
             return error_reply(ESTALE);
         } else if(::unlink(target_.c_str()) != 0) {
             return error_reply(errno);
         }
-        owned_ = false;
+        release_ownership();
         return {};
     }
 
@@ -270,11 +269,18 @@ private:
            && current.st_dev == device_ && current.st_ino == inode_) {
             ::unlink(target_.c_str());
         }
+        release_ownership();
+    }
+
+    void release_ownership() noexcept {
+        if(owned_fd_ >= 0) ::close(owned_fd_);
+        owned_fd_ = -1;
         owned_ = false;
     }
 
     std::string target_;
     bool owned_ = false;
+    int owned_fd_ = -1;
     dev_t device_ = 0;
     ino_t inode_ = 0;
 };

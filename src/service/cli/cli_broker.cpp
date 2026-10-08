@@ -5,12 +5,14 @@
 #include <cerrno>
 #include <cstring>
 #include <mutex>
+#include <memory>
 #include <poll.h>
 #include <signal.h>
 #include <string_view>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <thread>
@@ -54,8 +56,16 @@ int make_unix_listener(const std::string& path) {
     if(unix_address(path, address, length) != 0) return -1;
     const int fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
     if(fd < 0) return -1;
-    if(::bind(fd, reinterpret_cast<sockaddr*>(&address), length) != 0 || ::listen(fd, 50) != 0) {
+    if(::bind(fd, reinterpret_cast<sockaddr*>(&address), length) != 0) {
         const int saved = errno; ::close(fd); errno = saved; return -1;
+    }
+    if(path.front() != '@' && ::chmod(path.c_str(), S_IRUSR | S_IWUSR) != 0) {
+        const int saved = errno; ::close(fd); ::unlink(path.c_str()); errno = saved; return -1;
+    }
+    if(::listen(fd, 50) != 0) {
+        const int saved = errno; ::close(fd);
+        if(path.front() != '@') ::unlink(path.c_str());
+        errno = saved; return -1;
     }
     return fd;
 }
@@ -207,8 +217,28 @@ int BrokerServer::run() {
     ::sigaction(SIGTERM, &action, nullptr);
     const int listener = make_tcp_listener(config_);
     if(listener < 0) return -1;
-    std::vector<std::thread> sessions;
+    struct Session {
+        std::thread worker;
+        std::shared_ptr<std::atomic<bool>> done;
+    };
+    std::vector<Session> sessions;
+    try {
+        sessions.reserve(config_.max_active_sessions);
+    } catch(...) {
+        ::close(listener);
+        errno = ENOMEM;
+        return -1;
+    }
+    std::atomic<std::uint64_t> active_sessions{0};
     while(!broker_stop.load(std::memory_order_relaxed)) {
+        for(auto it = sessions.begin(); it != sessions.end();) {
+            if(it->done->load(std::memory_order_acquire)) {
+                if(it->worker.joinable()) it->worker.join();
+                it = sessions.erase(it);
+            } else {
+                ++it;
+            }
+        }
         pollfd descriptor{listener, POLLIN, 0};
         int ready;
         do { ready = ::poll(&descriptor, 1, 250); } while(ready < 0 && errno == EINTR);
@@ -232,31 +262,52 @@ int BrokerServer::run() {
             if(stats_) stats_->rejected.fetch_add(1);
             ::close(client); continue;
         }
+        if(active_sessions.load(std::memory_order_relaxed) >= config_.max_active_sessions) {
+            if(stats_) stats_->rejected.fetch_add(1);
+            ::close(client); continue;
+        }
+        active_sessions.fetch_add(1, std::memory_order_relaxed);
         if(stats_) {
             const auto active = stats_->active.fetch_add(1) + 1;
             auto peak = stats_->peak_active.load();
             while(active > peak && !stats_->peak_active.compare_exchange_weak(peak, active)) {}
         }
-        sessions.emplace_back([client, path = config_.comm_path, preamble = config_.preamble,
-                               stats = stats_] {
-            const int core = connect_unix(path);
-            int relay_result = 0;
-            if(core >= 0
-               && (preamble.empty()
-                   || write_all(core, preamble.data(), preamble.size()) == 0))
-                relay_result = DuplexRelay{}.run(client, core, broker_stop, stats);
-            else if(stats) stats->core_connect_errors.fetch_add(1);
-            if(core >= 0) ::close(core);
+        try {
+            auto done = std::make_shared<std::atomic<bool>>(false);
+            Session session;
+            session.done = done;
+            session.worker = std::thread([client, path = config_.comm_path,
+                                          preamble = config_.preamble, stats = stats_, done,
+                                          &active_sessions] {
+                const int core = connect_unix(path);
+                int relay_result = 0;
+                if(core >= 0
+                   && (preamble.empty()
+                       || write_all(core, preamble.data(), preamble.size()) == 0))
+                    relay_result = DuplexRelay{}.run(client, core, broker_stop, stats);
+                else if(stats) stats->core_connect_errors.fetch_add(1);
+                if(core >= 0) ::close(core);
+                ::close(client);
+                if(stats) {
+                    if(relay_result != 0) stats->relay_errors.fetch_add(1);
+                    stats->active.fetch_sub(1);
+                    stats->completed.fetch_add(1);
+                }
+                active_sessions.fetch_sub(1, std::memory_order_relaxed);
+                done->store(true, std::memory_order_release);
+            });
+            sessions.emplace_back(std::move(session));
+        } catch(...) {
             ::close(client);
-            if(stats) {
-                if(relay_result != 0) stats->relay_errors.fetch_add(1);
-                stats->active.fetch_sub(1);
-                stats->completed.fetch_add(1);
+            active_sessions.fetch_sub(1, std::memory_order_relaxed);
+            if(stats_) {
+                stats_->active.fetch_sub(1);
+                stats_->rejected.fetch_add(1);
             }
-        });
+        }
     }
     ::close(listener);
-    for(auto& session: sessions) if(session.joinable()) session.join();
+    for(auto& session: sessions) if(session.worker.joinable()) session.worker.join();
     return 0;
 }
 
@@ -283,7 +334,7 @@ int start_internal_broker(std::uint16_t port) {
     }
     if(child == 0) {
         ::close(core_listener);
-        CliBrokerServer server({"127.0.0.1", port, path, handshake(), {"*"}, {}}, shared_stats);
+        CliBrokerServer server({"127.0.0.1", port, path, handshake(), {"*"}, {}, 256}, shared_stats);
         ::_exit(server.run() == 0 ? EXIT_SUCCESS : EXIT_FAILURE);
     }
     broker_pid = child;
