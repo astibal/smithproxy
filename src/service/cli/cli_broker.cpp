@@ -10,6 +10,7 @@
 #include <string_view>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <sys/mman.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <thread>
@@ -29,6 +30,7 @@ std::atomic<bool> broker_stopping{false};
 std::atomic<int> broker_wait_status{0};
 std::thread broker_monitor;
 std::function<void()> internal_failure_handler;
+sx::comm::stream::SharedStats* shared_stats = nullptr;
 
 int unix_address(const std::string& path, sockaddr_un& address, socklen_t& length) {
     if(path.empty()) { errno = EINVAL; return -1; }
@@ -81,7 +83,7 @@ int write_all(int fd, const char* data, std::size_t size) {
     return 0;
 }
 
-int make_tcp_listener(const sx::comm::cli::BrokerConfig& config) {
+int make_tcp_listener(const sx::comm::stream::BrokerConfig& config) {
     sockaddr_in address{};
     address.sin_family = AF_INET;
     address.sin_port = htons(config.listen_port);
@@ -91,8 +93,15 @@ int make_tcp_listener(const sx::comm::cli::BrokerConfig& config) {
     const int fd = ::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
     if(fd < 0) return -1;
     int reuse = 1;
-    if(::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) != 0
-       || ::bind(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0
+    if(::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) != 0) {
+        const int saved = errno; ::close(fd); errno = saved; return -1;
+    }
+    if(!config.bind_interface.empty()
+       && ::setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, config.bind_interface.c_str(),
+                       static_cast<socklen_t>(config.bind_interface.size())) != 0) {
+        const int saved = errno; ::close(fd); errno = saved; return -1;
+    }
+    if(::bind(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0
        || ::listen(fd, 50) != 0) {
         const int saved = errno; ::close(fd); errno = saved; return -1;
     }
@@ -103,9 +112,47 @@ void request_stop(int) { broker_stop.store(true, std::memory_order_relaxed); }
 
 } // namespace
 
-namespace sx::comm::cli {
+namespace sx::comm::stream {
 
-int DuplexRelay::run(int left, int right, const std::atomic<bool>& stop) const {
+class SharedStats {
+public:
+    std::atomic<std::uint64_t> accepted{0};
+    std::atomic<std::uint64_t> rejected{0};
+    std::atomic<std::uint64_t> core_connect_errors{0};
+    std::atomic<std::uint64_t> active{0};
+    std::atomic<std::uint64_t> peak_active{0};
+    std::atomic<std::uint64_t> completed{0};
+    std::atomic<std::uint64_t> relay_errors{0};
+    std::atomic<std::uint64_t> bytes_to_core{0};
+    std::atomic<std::uint64_t> bytes_from_core{0};
+};
+
+SharedStats* create_shared_stats() {
+    void* memory = ::mmap(nullptr, sizeof(SharedStats), PROT_READ | PROT_WRITE,
+                          MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    if(memory == MAP_FAILED) return nullptr;
+    return new(memory) SharedStats();
+}
+
+void destroy_shared_stats(SharedStats* stats) {
+    if(!stats) return;
+    stats->~SharedStats();
+    ::munmap(stats, sizeof(SharedStats));
+}
+
+Stats snapshot(const SharedStats* stats) noexcept {
+    if(!stats) return {};
+    return {stats->accepted.load(), stats->rejected.load(),
+            stats->core_connect_errors.load(), stats->active.load(),
+            stats->peak_active.load(), stats->completed.load(),
+            stats->relay_errors.load(), stats->bytes_to_core.load(),
+            stats->bytes_from_core.load()};
+}
+
+int create_unix_listener(const std::string& path) { return make_unix_listener(path); }
+
+int DuplexRelay::run(int left, int right, const std::atomic<bool>& stop,
+                     SharedStats* stats) const {
     struct Direction { int source; int destination; std::array<char, 65536> data{}; std::size_t size = 0; std::size_t offset = 0; bool eof = false; };
     Direction directions[2]{{left, right}, {right, left}};
     for(int fd: {left, right}) {
@@ -137,7 +184,13 @@ int DuplexRelay::run(int left, int right, const std::atomic<bool>& stop) const {
             if((descriptors[1U - i].revents & POLLOUT) && direction.size > direction.offset) {
                 const auto count = ::send(direction.destination, direction.data.data() + direction.offset,
                                           direction.size - direction.offset, MSG_NOSIGNAL);
-                if(count > 0) direction.offset += static_cast<std::size_t>(count);
+                if(count > 0) {
+                    direction.offset += static_cast<std::size_t>(count);
+                    if(stats) {
+                        auto& counter = i == 0 ? stats->bytes_to_core : stats->bytes_from_core;
+                        counter.fetch_add(static_cast<std::uint64_t>(count));
+                    }
+                }
                 else if(count < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) return -1;
             }
         }
@@ -145,7 +198,7 @@ int DuplexRelay::run(int left, int right, const std::atomic<bool>& stop) const {
     return 0;
 }
 
-int CliBrokerServer::run() {
+int BrokerServer::run() {
     broker_stop.store(false, std::memory_order_relaxed);
     struct sigaction action{};
     action.sa_handler = request_stop;
@@ -161,14 +214,45 @@ int CliBrokerServer::run() {
         do { ready = ::poll(&descriptor, 1, 250); } while(ready < 0 && errno == EINTR);
         if(ready < 0) { ::close(listener); return -1; }
         if(ready == 0 || !(descriptor.revents & POLLIN)) continue;
-        const int client = ::accept4(listener, nullptr, nullptr, SOCK_CLOEXEC);
+        sockaddr_in peer{};
+        socklen_t peer_size = sizeof(peer);
+        const int client = ::accept4(listener, reinterpret_cast<sockaddr*>(&peer), &peer_size,
+                                     SOCK_CLOEXEC);
         if(client < 0) continue;
-        sessions.emplace_back([client, path = config_.comm_path] {
+        if(stats_) stats_->accepted.fetch_add(1);
+        std::array<char, INET_ADDRSTRLEN> peer_text{};
+        const char* converted = ::inet_ntop(AF_INET, &peer.sin_addr,
+                                            peer_text.data(), peer_text.size());
+        const std::string peer_ip = converted ? converted : std::string{};
+        const bool allowed = std::any_of(config_.allowed_ips.begin(), config_.allowed_ips.end(),
+            [&peer_ip](const std::string& value) {
+                return value == "*" || value == "all" || value == peer_ip;
+            });
+        if(!allowed) {
+            if(stats_) stats_->rejected.fetch_add(1);
+            ::close(client); continue;
+        }
+        if(stats_) {
+            const auto active = stats_->active.fetch_add(1) + 1;
+            auto peak = stats_->peak_active.load();
+            while(active > peak && !stats_->peak_active.compare_exchange_weak(peak, active)) {}
+        }
+        sessions.emplace_back([client, path = config_.comm_path, preamble = config_.preamble,
+                               stats = stats_] {
             const int core = connect_unix(path);
-            if(core >= 0 && write_all(core, cli_handshake.data(), cli_handshake.size()) == 0)
-                DuplexRelay{}.run(client, core, broker_stop);
+            int relay_result = 0;
+            if(core >= 0
+               && (preamble.empty()
+                   || write_all(core, preamble.data(), preamble.size()) == 0))
+                relay_result = DuplexRelay{}.run(client, core, broker_stop, stats);
+            else if(stats) stats->core_connect_errors.fetch_add(1);
             if(core >= 0) ::close(core);
             ::close(client);
+            if(stats) {
+                if(relay_result != 0) stats->relay_errors.fetch_add(1);
+                stats->active.fetch_sub(1);
+                stats->completed.fetch_add(1);
+            }
         });
     }
     ::close(listener);
@@ -176,17 +260,30 @@ int CliBrokerServer::run() {
     return 0;
 }
 
+} // namespace sx::comm::stream
+
+namespace sx::comm::cli {
+
+std::string handshake() { return {cli_handshake.data(), cli_handshake.size()}; }
+
 int start_internal_broker(std::uint16_t port) {
     std::lock_guard lock(state_mutex);
     if(core_listener >= 0 || broker_pid > 0) { errno = EALREADY; return -1; }
+    shared_stats = sx::comm::stream::create_shared_stats();
+    if(!shared_stats) return -1;
     const std::string path = "@smithproxy-cli-" + std::to_string(::getpid());
-    core_listener = make_unix_listener(path);
-    if(core_listener < 0) return -1;
+    core_listener = sx::comm::stream::create_unix_listener(path);
+    if(core_listener < 0) { sx::comm::stream::destroy_shared_stats(shared_stats); shared_stats = nullptr; return -1; }
     const pid_t child = ::fork();
-    if(child < 0) { const int saved = errno; ::close(core_listener); core_listener = -1; errno = saved; return -1; }
+    if(child < 0) {
+        const int saved = errno;
+        ::close(core_listener); core_listener = -1;
+        sx::comm::stream::destroy_shared_stats(shared_stats); shared_stats = nullptr;
+        errno = saved; return -1;
+    }
     if(child == 0) {
         ::close(core_listener);
-        CliBrokerServer server({"127.0.0.1", port, path});
+        CliBrokerServer server({"127.0.0.1", port, path, handshake(), {"*"}, {}}, shared_stats);
         ::_exit(server.run() == 0 ? EXIT_SUCCESS : EXIT_FAILURE);
     }
     broker_pid = child;
@@ -209,7 +306,7 @@ int start_internal_broker(std::uint16_t port) {
 int prepare_external_ingress(const std::string& path) {
     std::lock_guard lock(state_mutex);
     if(core_listener >= 0 || broker_pid > 0) { errno = EALREADY; return -1; }
-    core_listener = make_unix_listener(path);
+    core_listener = sx::comm::stream::create_unix_listener(path);
     if(core_listener < 0) return -1;
     owned_path = path;
     return 0;
@@ -251,6 +348,8 @@ int stop_broker() {
     {
         std::lock_guard lock(state_mutex);
         broker_pid = -1;
+        sx::comm::stream::destroy_shared_stats(shared_stats);
+        shared_stats = nullptr;
     }
     if(child <= 0) return 0;
     return status >= 0 && WIFEXITED(status) && WEXITSTATUS(status) == EXIT_SUCCESS ? 0 : -1;
@@ -262,5 +361,13 @@ void set_internal_failure_handler(std::function<void()> handler) {
     std::lock_guard lock(state_mutex);
     internal_failure_handler = std::move(handler);
 }
+
+sx::comm::stream::Stats stats() noexcept {
+    std::lock_guard lock(state_mutex);
+    return sx::comm::stream::snapshot(shared_stats);
+}
+
+bool uses_external_broker() noexcept { std::lock_guard lock(state_mutex); return !owned_path.empty(); }
+std::string external_path() { std::lock_guard lock(state_mutex); return owned_path; }
 
 } // namespace sx::comm::cli

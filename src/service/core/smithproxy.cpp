@@ -48,6 +48,7 @@
 #include <inspect/sigfactory.hpp>
 
 #include <service/core/smithproxy.hpp>
+#include <service/api/api_broker.hpp>
 #include <service/cmd/cmdserver.hpp>
 #include <service/cli/cli_broker.hpp>
 #include <service/httpd/httpd.hpp>
@@ -95,8 +96,15 @@ void SmithProxy::create_dns_thread() {
 
 void SmithProxy::create_api_thread() {
 #ifdef USE_LMHPP
-
-    api_thread = std::shared_ptr<std::thread>(sx::webserver::create_httpd_thread(sx::webserver::HttpSessions::api_port + tenant_index()));
+    const int listener = sx::comm::api::ingress_fd();
+    if(listener < 0) {
+        Log::get()->events().insert(CRI, "cannot obtain API communication listener: %s",
+                                    string_error().c_str());
+        terminate_flag = true;
+        return;
+    }
+    api_thread = std::shared_ptr<std::thread>(sx::webserver::create_httpd_thread(
+        sx::webserver::HttpSessions::api_port + tenant_index(), listener));
     if(api_thread) {
         pthread_setname_np( api_thread->native_handle(),
                             string_format("sxy_api_%d",tenant_index()).c_str());

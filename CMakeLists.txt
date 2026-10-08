@@ -340,6 +340,7 @@ add_executable(smithproxy
         src/service/privileged_file.cpp
         src/service/gre_broker.cpp
         src/service/cli/cli_broker.cpp
+        src/service/api/api_broker.cpp
         src/service/netservice.cpp
         src/service/dnsupd/smithdnsupd.cpp
         src/service/core/smithproxy.hpp
@@ -426,6 +427,13 @@ add_executable(smithproxy-cli-broker
 )
 target_include_directories(smithproxy-cli-broker PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(smithproxy-cli-broker pthread)
+
+add_executable(smithproxy-api-broker
+        src/service/api/api_broker_main.cpp
+        src/service/cli/cli_broker.cpp
+)
+target_include_directories(smithproxy-api-broker PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(smithproxy-api-broker pthread)
 
 
 IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -595,6 +603,11 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/service/cli/cli_broker.cpp
                 src/service/tests/cli_broker_tests.cpp
         )
+        add_executable(sx_gtests_api_broker
+                src/service/cli/cli_broker.cpp
+                src/service/api/api_broker.cpp
+                src/service/tests/api_broker_tests.cpp
+        )
 
         add_executable(tls_testbed
                 tests/tls/tls_testbed.cpp)
@@ -618,6 +631,10 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_link_libraries(sx_gtests_file_privsep gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries(sx_gtests_gre_broker gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries(sx_gtests_cli_broker gtest gtest_main pthread)
+        target_link_libraries(sx_gtests_api_broker gtest gtest_main pthread)
+        if("${USE_LMHPP}" STREQUAL "Y")
+            target_link_libraries(sx_gtests_api_broker microhttpd)
+        endif()
         target_link_libraries(tls_testbed gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries(transfer_testbed gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries (sx_gtests nlohmann_json::nlohmann_json)
@@ -667,6 +684,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
             add_test(NAME unit.reloadable COMMAND sx_gtests_reloadable)
             add_test(NAME unit.privsep COMMAND sx_gtests_privsep)
             add_test(NAME unit.file_privsep COMMAND sx_gtests_file_privsep)
+            add_test(NAME unit.api_broker COMMAND sx_gtests_api_broker)
             add_test(NAME integration.tls_testbed COMMAND tls_testbed)
             add_test(NAME integration.transfer_testbed COMMAND transfer_testbed)
             add_test(NAME integration.quic_testbed COMMAND quic_testbed)

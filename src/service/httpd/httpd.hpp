@@ -240,7 +240,7 @@ struct HttpSessions {
     }
 };
 
-std::thread* create_httpd_thread(unsigned short port);
+std::thread* create_httpd_thread(unsigned short port, int listener_fd = -1);
 
 struct Http_JsonResponseParams : public lmh::ResponseParams {
     nlohmann::json response;

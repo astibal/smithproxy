@@ -66,6 +66,16 @@ TEST(CliBrokerTest, InternalBrokerRelaysBothDirections) {
     ASSERT_EQ(::send(core, "server", 6, MSG_NOSIGNAL), 6);
     ASSERT_EQ(::read(tcp, data.data(), data.size()), 6);
     EXPECT_EQ(std::string_view(data.data(), 6), "server");
+    for(unsigned attempt = 0; attempt < 100; ++attempt) {
+        const auto current = sx::comm::cli::stats();
+        if(current.bytes_to_core == 6 && current.bytes_from_core == 6) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    const auto stats = sx::comm::cli::stats();
+    EXPECT_EQ(stats.accepted, 1);
+    EXPECT_EQ(stats.peak_active, 1);
+    EXPECT_EQ(stats.bytes_to_core, 6);
+    EXPECT_EQ(stats.bytes_from_core, 6);
 
     ::close(core);
     ::close(listener);
@@ -99,7 +109,8 @@ TEST(CliBrokerTest, ExternalBrokerUsesFilesystemCommSocket) {
     const pid_t child = ::fork();
     ASSERT_GE(child, 0);
     if(child == 0) {
-        sx::comm::cli::CliBrokerServer server({"127.0.0.1", port, path});
+        sx::comm::cli::CliBrokerServer server(
+            {"127.0.0.1", port, path, sx::comm::cli::handshake(), {"*"}, {}});
         ::_exit(server.run() == 0 ? EXIT_SUCCESS : EXIT_FAILURE);
     }
     const int tcp = connect_loopback(port);
