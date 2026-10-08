@@ -338,14 +338,16 @@ if [[ $PRIVSEP_TEST == 1 ]]; then
         sleep 0.1
     done
     read -ra helpers <<<"$helper_pids"
-    [[ ${#helpers[@]} == 2 ]]
+    # File and socket privilege helpers plus the internal CLI broker are
+    # mandatory. API and GRE brokers add children when enabled by the profile.
+    [[ ${#helpers[@]} -ge 3 ]]
     core_uid=$(awk '/^Uid:/ { print $2 }' "/proc/$proxy_pid/status")
     [[ $core_uid == "$nobody_uid" ]]
     for helper_pid in "${helpers[@]}"; do
         helper_uid=$(awk '/^Uid:/ { print $2 }' "/proc/$helper_pid/status")
         [[ $helper_uid == 0 ]]
     done
-    echo "PASS privsep identity: core uid=$core_uid, two root helpers=${helpers[*]}"
+    echo "PASS privsep identity: core uid=$core_uid, root helpers/brokers=${helpers[*]}"
 
     internal_pid="$ROOT/data/run/smithproxy.default.pid"
     [[ -s $internal_pid ]]
@@ -353,13 +355,16 @@ if [[ $PRIVSEP_TEST == 1 ]]; then
     [[ $(stat -c %a "$internal_pid") == 644 ]]
     echo 'PASS privsep PID: root helper created the private PID file'
 
-    { printf 'enable\r\ndiag priv stats\r\nsave config\r\nexecute reload\r\n'; sleep 1; printf 'quit\r\n'; } | \
+    { printf 'enable\r\ndiag priv stats\r\ndiag workers comm cli stats\r\nsave config\r\nexecute reload\r\n'; sleep 1; printf 'quit\r\n'; } | \
         timeout 8 ip netns exec "$NS" nc 127.0.0.1 50000 > "$ROOT/results/privsep-stats.txt" 2>&1
     grep -q 'user: nobody' "$ROOT/results/privsep-stats.txt"
     grep -q "uid: $nobody_uid" "$ROOT/results/privsep-stats.txt"
     grep -q 'Privileged helper stats:' "$ROOT/results/privsep-stats.txt"
     grep -Eq 'setsockopt: [1-9][0-9]*' "$ROOT/results/privsep-stats.txt"
     grep -Eq 'max_ops_per_drain: [1-9][0-9]*' "$ROOT/results/privsep-stats.txt"
+    grep -q 'CLI communication worker:' "$ROOT/results/privsep-stats.txt"
+    grep -q 'mode: internal' "$ROOT/results/privsep-stats.txt"
+    grep -Eq 'accepted: [1-9][0-9]*' "$ROOT/results/privsep-stats.txt"
     grep -q 'config saved successfully' "$ROOT/results/privsep-stats.txt"
     grep -q 'Configuration file reloaded' "$ROOT/results/privsep-stats.txt"
     [[ $(stat -c %u "$ROOT/config/smithproxy.cfg") == 0 ]]

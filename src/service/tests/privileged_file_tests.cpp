@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <filesystem>
 #include <fstream>
@@ -11,6 +13,7 @@
 
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/mman.h>
 #include <unistd.h>
 
 #include <service/privileged_file.hpp>
@@ -42,7 +45,7 @@ public:
 class PrivilegedFileTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        char pattern[] = "/tmp/smithproxy-file-privsep-XXXXXX";
+        char pattern[] = "./smithproxy-file-privsep-test-XXXXXX";
         const char* created = ::mkdtemp(pattern);
         ASSERT_NE(created, nullptr);
         root_ = created;
@@ -121,6 +124,31 @@ TEST_F(PrivilegedFileTest, ConfigSizeIsBounded) {
     EXPECT_FALSE(std::filesystem::exists(targets_.config));
 }
 
+TEST_F(PrivilegedFileTest, ConcurrentAtomicReplacementNeverMixesPayloadsOrLeavesTemps) {
+    constexpr unsigned writer_count = 8;
+    constexpr unsigned writes_per_writer = 10;
+    std::vector<std::string> payloads;
+    for(unsigned writer = 0; writer < writer_count; ++writer)
+        payloads.emplace_back(4096, static_cast<char>('A' + writer));
+    std::atomic<unsigned> failures{0};
+    std::vector<std::thread> writers;
+    for(unsigned writer = 0; writer < writer_count; ++writer) {
+        writers.emplace_back([&, writer] {
+            for(unsigned iteration = 0; iteration < writes_per_writer; ++iteration) {
+                if(sx::privsep::files::write_file_atomic(targets_.config, payloads[writer]) != 0)
+                    failures.fetch_add(1);
+            }
+        });
+    }
+    for(auto& writer: writers) writer.join();
+    EXPECT_EQ(failures.load(), 0U);
+    std::string result;
+    ASSERT_EQ(sx::privsep::files::read_file(targets_.config, result), 0);
+    EXPECT_NE(std::find(payloads.begin(), payloads.end(), result), payloads.end());
+    for(const auto& entry: std::filesystem::directory_iterator(root_))
+        EXPECT_EQ(entry.path().filename().string().find(".tmp."), std::string::npos);
+}
+
 TEST_F(PrivilegedFileTest, BackupSuffixIsRestrictedAndComputedByHelper) {
     EXPECT_EQ(sx::privsep::files::write_backup_atomic(targets_.config, "1.2.3", "backup"), 0);
     std::string content;
@@ -174,13 +202,13 @@ TEST_F(PrivilegedFileTest, RegisteredVirtualOperationExtendsProtocolWithoutDispa
     EXPECT_EQ(response.payload, "handled:alpha");
     EXPECT_EQ(client->request(201, "beta", -1, response), 0);
     EXPECT_EQ(response.payload, "handled:beta");
-    EXPECT_EQ(operation->calls, 2);
-    EXPECT_EQ(operation->last_opcode, 201);
 
     // Client destruction closes the channel; one shared capability receives
     // one shutdown callback even when it owns several opcodes.
     client.reset();
     helper.join();
+    EXPECT_EQ(operation->calls, 2);
+    EXPECT_EQ(operation->last_opcode, 201);
     EXPECT_EQ(operation->shutdowns, 1);
 }
 
@@ -321,6 +349,8 @@ TEST_F(PrivilegedFileTest, CleanupDoesNotRemoveReplacementAtPidPath) {
         std::ofstream replacement(targets_.pid);
         ASSERT_TRUE(replacement.good());
         replacement << "replacement";
+        replacement.close();
+        ASSERT_TRUE(replacement.good());
     }
     client.reset();
     helper.join();
@@ -341,6 +371,86 @@ TEST_F(PrivilegedFileTest, FacadeRejectsPathsOutsideInstalledAllowlist) {
     EXPECT_EQ(sx::privsep::files::config_read((root_ / "other.cfg").string(), content), -1);
     EXPECT_EQ(errno, EACCES);
     EXPECT_EQ(sx::privsep::files::stop_local_helper(), 0);
+}
+
+TEST_F(PrivilegedFileTest, MalformedOperationsDoNotPoisonFollowingRequests) {
+    ASSERT_EQ(sx::privsep::files::write_file_atomic(targets_.config, "original"), 0);
+    int channels[2] = {-1, -1};
+    ASSERT_EQ(socle::privsep::make_channel_pair(channels), 0);
+    sx::privsep::files::Server server(channels[1], targets_);
+    std::thread helper([&server] { EXPECT_EQ(server.run(), 0); });
+    {
+        sx::privsep::files::Client client(channels[0], std::chrono::seconds(1));
+        ::close(channels[0]);
+        ::close(channels[1]);
+        sx::privsep::files::Reply response;
+        errno = 0;
+        EXPECT_EQ(client.request(static_cast<std::uint8_t>(sx::privsep::files::Opcode::ConfigWrite),
+                                 "unexpected-payload", -1, response), -1);
+        EXPECT_EQ(errno, EINVAL);
+        errno = 0;
+        EXPECT_EQ(client.request(static_cast<std::uint8_t>(sx::privsep::files::Opcode::PidWrite),
+                                 std::string("12\0injected", 11), -1, response), -1);
+        EXPECT_EQ(errno, EINVAL);
+        EXPECT_EQ(client.ping(), 0);
+        std::string content;
+        EXPECT_EQ(client.config_read(content), 0);
+        EXPECT_EQ(content, "original");
+    }
+    helper.join();
+}
+
+TEST_F(PrivilegedFileTest, OversizedDescriptorContentDoesNotReplaceConfig) {
+    ASSERT_EQ(sx::privsep::files::write_file_atomic(targets_.config, "original"), 0);
+    int channels[2] = {-1, -1};
+    ASSERT_EQ(socle::privsep::make_channel_pair(channels), 0);
+    sx::privsep::files::Server server(channels[1], targets_);
+    std::thread helper([&server] { EXPECT_EQ(server.run(), 0); });
+    {
+        sx::privsep::files::Client client(channels[0], std::chrono::seconds(2));
+        ::close(channels[0]);
+        ::close(channels[1]);
+        const int content = ::memfd_create("oversized-config", MFD_CLOEXEC);
+        ASSERT_GE(content, 0);
+        ASSERT_EQ(::ftruncate(content, 16U * 1024U * 1024U + 1U), 0);
+        sx::privsep::files::Reply response;
+        errno = 0;
+        EXPECT_EQ(client.request(static_cast<std::uint8_t>(sx::privsep::files::Opcode::ConfigWrite),
+                                 {}, content, response), -1);
+        EXPECT_EQ(errno, EFBIG);
+        ::close(content);
+        EXPECT_EQ(client.ping(), 0);
+        std::string current;
+        EXPECT_EQ(client.config_read(current), 0);
+        EXPECT_EQ(current, "original");
+    }
+    helper.join();
+}
+
+TEST_F(PrivilegedFileTest, NonSeekableDescriptorCannotReplaceConfig) {
+    ASSERT_EQ(sx::privsep::files::write_file_atomic(targets_.config, "original"), 0);
+    int channels[2] = {-1, -1};
+    ASSERT_EQ(socle::privsep::make_channel_pair(channels), 0);
+    sx::privsep::files::Server server(channels[1], targets_);
+    std::thread helper([&server] { EXPECT_EQ(server.run(), 0); });
+    {
+        sx::privsep::files::Client client(channels[0], std::chrono::seconds(1));
+        ::close(channels[0]);
+        ::close(channels[1]);
+        int pipefd[2] = {-1, -1};
+        ASSERT_EQ(::pipe2(pipefd, O_CLOEXEC), 0);
+        sx::privsep::files::Reply response;
+        errno = 0;
+        EXPECT_EQ(client.request(static_cast<std::uint8_t>(sx::privsep::files::Opcode::ConfigWrite),
+                                 {}, pipefd[0], response), -1);
+        EXPECT_EQ(errno, ESPIPE);
+        ::close(pipefd[0]);
+        ::close(pipefd[1]);
+        std::string current;
+        EXPECT_EQ(client.config_read(current), 0);
+        EXPECT_EQ(current, "original");
+    }
+    helper.join();
 }
 
 } // namespace

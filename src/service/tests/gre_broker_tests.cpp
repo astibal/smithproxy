@@ -41,6 +41,9 @@ TEST(GreBrokerTest, ExternalClientConnectsAndBrokerRemovesOwnedSocket) {
     const pid_t child = start_broker(path);
     ASSERT_GE(child, 0);
     ASSERT_TRUE(wait_for_path(path, true));
+    EXPECT_EQ(std::filesystem::status(path).permissions()
+                  & (std::filesystem::perms::group_all | std::filesystem::perms::others_all),
+              std::filesystem::perms::none);
     ASSERT_EQ(sx::comm::gre::connect_external_broker(path), 0);
     ASSERT_NE(sx::comm::gre::transport(), nullptr);
     buffer invalid_frame;

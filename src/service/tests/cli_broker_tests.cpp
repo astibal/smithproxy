@@ -105,12 +105,15 @@ TEST(CliBrokerTest, ExternalBrokerUsesFilesystemCommSocket) {
     const auto port = unused_loopback_port();
     ASSERT_NE(port, 0);
     ASSERT_EQ(sx::comm::cli::prepare_external_ingress(path), 0);
+    EXPECT_EQ(std::filesystem::status(path).permissions()
+                  & (std::filesystem::perms::group_all | std::filesystem::perms::others_all),
+              std::filesystem::perms::none);
 
     const pid_t child = ::fork();
     ASSERT_GE(child, 0);
     if(child == 0) {
         sx::comm::cli::CliBrokerServer server(
-            {"127.0.0.1", port, path, sx::comm::cli::handshake(), {"*"}, {}});
+            {"127.0.0.1", port, path, sx::comm::cli::handshake(), {"*"}, {}, 256});
         ::_exit(server.run() == 0 ? EXIT_SUCCESS : EXIT_FAILURE);
     }
     const int tcp = connect_loopback(port);
