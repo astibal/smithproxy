@@ -43,6 +43,13 @@ TEST(GreBrokerTest, ExternalClientConnectsAndBrokerRemovesOwnedSocket) {
     ASSERT_TRUE(wait_for_path(path, true));
     ASSERT_EQ(sx::comm::gre::connect_external_broker(path), 0);
     ASSERT_NE(sx::comm::gre::transport(), nullptr);
+    buffer invalid_frame;
+    ASSERT_TRUE(sx::comm::gre::transport()->submit(invalid_frame));
+    sx::comm::gre::Stats broker_stats;
+    ASSERT_EQ(sx::comm::gre::broker_stats(broker_stats), 0);
+    EXPECT_EQ(broker_stats.received, 1U);
+    EXPECT_EQ(broker_stats.exported, 0U);
+    EXPECT_EQ(broker_stats.errors, 1U);
     EXPECT_EQ(sx::comm::gre::stop_local_broker(), 0);
 
     ASSERT_EQ(::kill(child, SIGTERM), 0);
@@ -86,6 +93,8 @@ TEST(GreBrokerTest, ExternalTransportReconnectsAfterBrokerRestart) {
     const auto reconnected = sx::comm::gre::stats();
     EXPECT_TRUE(reconnected.connected);
     EXPECT_GE(reconnected.reconnects, 1U);
+    sx::comm::gre::Stats broker_stats;
+    EXPECT_EQ(sx::comm::gre::broker_stats(broker_stats), 0);
 
     EXPECT_EQ(sx::comm::gre::stop_local_broker(), 0);
     ASSERT_EQ(::kill(child, SIGTERM), 0);

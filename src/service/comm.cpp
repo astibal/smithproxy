@@ -85,8 +85,13 @@ int Client::request(std::uint8_t opcode, const std::string& request_payload, int
     if(broken_) { errno = ECONNRESET; return -1; }
     const auto wire_request = frame(opcode, 0, request_payload);
     socle::privsep::Message wire_response;
-    if(channel_.send(wire_request, passed_fd) != 0 || wait_readable() != 0
-       || channel_.receive(wire_response) <= 0 || !valid_frame(wire_response)
+    if(channel_.send(wire_request, passed_fd) != 0) {
+        if(errno == EAGAIN || errno == EWOULDBLOCK || errno == ENOBUFS) return -1;
+        const int saved = errno == 0 ? EIO : errno;
+        break_channel(); errno = saved; return -1;
+    }
+    if(wait_readable() != 0 || channel_.receive(wire_response) <= 0
+       || !valid_frame(wire_response)
        || (wire_response.data[3] != std::byte{opcode}
            && wire_response.data[3] != std::byte{0})) {
         if(wire_response.fd >= 0) ::close(wire_response.fd);

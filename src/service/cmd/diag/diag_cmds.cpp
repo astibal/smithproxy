@@ -45,6 +45,7 @@
 #include <cstdio>
 #include <ctime>
 #include <memory>
+#include <sstream>
 #include <pwd.h>
 #include <sys/ioctl.h>
 #include <linux/sockios.h>
@@ -61,6 +62,7 @@
 #include <service/httpd/httpd.hpp>
 #include <service/cfgapi/cfgapi.hpp>
 #include <service/tpool.hpp>
+#include <service/gre_broker.hpp>
 #include <inspect/engine/http.hpp>
 
 
@@ -1128,6 +1130,44 @@ int cli_diag_priv_stats(DiagCli* cli, const char* command, char* argv[], int arg
               static_cast<unsigned long long>(stats.transport_errors),
               static_cast<unsigned long long>(stats.drains),
               static_cast<unsigned long long>(stats.max_ops_per_drain));
+    return CLI_OK;
+}
+
+int cli_diag_workers_comm_gre_stats(DiagCli* cli, const char* command,
+                                    char* argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+    using sx::comm::gre::Mode;
+    const auto mode = sx::comm::gre::mode();
+    const auto local = sx::comm::gre::stats();
+    const char* mode_name = mode == Mode::internal ? "internal"
+        : mode == Mode::external ? "external" : "disabled";
+    std::ostringstream output;
+    output << "GRE communication worker:\n"
+           << "  mode: " << mode_name << "\n";
+    if(mode == Mode::internal) output << "  pid: " << sx::comm::gre::owned_broker_pid() << "\n";
+    if(mode == Mode::external) output << "  socket: " << sx::comm::gre::external_path() << "\n";
+    output << "  connected: " << (local.connected ? "yes" : "no") << "\n"
+           << "  submitted: " << local.submitted << "\n"
+           << "  dropped: " << local.dropped << "\n"
+           << "  reconnects: " << local.reconnects;
+
+    if(mode == Mode::disabled) {
+        cli_print(cli, "%s", output.str().c_str());
+        return CLI_OK;
+    }
+
+    sx::comm::gre::Stats broker;
+    if(sx::comm::gre::broker_stats(broker) != 0) {
+        const int saved_errno = errno;
+        output << "\nGRE broker stats unavailable: " << string_error(saved_errno);
+        cli_print(cli, "%s", output.str().c_str());
+        return CLI_ERROR;
+    }
+    output << "\nGRE broker:\n"
+           << "  received: " << broker.received << "\n"
+           << "  exported: " << broker.exported << "\n"
+           << "  errors: " << broker.errors;
+    cli_print(cli, "%s", output.str().c_str());
     return CLI_OK;
 }
 
@@ -2703,6 +2743,9 @@ void register_diags(libcli2::Cli& native) {
             diag_register_command(cli, diag_workers_proxy, "list", cli_diag_worker_proxy_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,  "list worker threads");
         auto diag_workers_pool = diag_register_command(cli, diag_workers, "pool", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "misc task worker and threads diagnostics");
             diag_register_command(cli, diag_workers_pool, "list", cli_diag_worker_pool_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,  "list misc pool worker threads");
+        auto diag_workers_comm = diag_register_command(cli, diag_workers, "comm", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "communication worker diagnostics");
+            auto diag_workers_comm_gre = diag_register_command(cli, diag_workers_comm, "gre", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "GRE communication worker diagnostics");
+                diag_register_command(cli, diag_workers_comm_gre, "stats", cli_diag_workers_comm_gre_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display GRE transport and broker statistics");
 
 
 
