@@ -63,6 +63,8 @@
 #include <service/cfgapi/cfgapi.hpp>
 #include <service/tpool.hpp>
 #include <service/gre_broker.hpp>
+#include <service/cli/cli_broker.hpp>
+#include <service/api/api_broker.hpp>
 #include <inspect/engine/http.hpp>
 
 
@@ -1167,6 +1169,58 @@ int cli_diag_workers_comm_gre_stats(DiagCli* cli, const char* command,
            << "  received: " << broker.received << "\n"
            << "  exported: " << broker.exported << "\n"
            << "  errors: " << broker.errors;
+    cli_print(cli, "%s", output.str().c_str());
+    return CLI_OK;
+}
+
+void append_stream_broker_stats(std::ostringstream& output,
+                                const sx::comm::stream::Stats& stats) {
+    output << "  accepted: " << stats.accepted << "\n"
+           << "  rejected: " << stats.rejected << "\n"
+           << "  core connect errors: " << stats.core_connect_errors << "\n"
+           << "  active: " << stats.active << "\n"
+           << "  peak active: " << stats.peak_active << "\n"
+           << "  completed: " << stats.completed << "\n"
+           << "  relay errors: " << stats.relay_errors << "\n"
+           << "  bytes to core: " << stats.bytes_to_core << "\n"
+           << "  bytes from core: " << stats.bytes_from_core;
+}
+
+int cli_diag_workers_comm_cli_stats(DiagCli* cli, const char* command,
+                                    char* argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+    const bool external = sx::comm::cli::uses_external_broker();
+    std::ostringstream output;
+    output << "CLI communication worker:\n"
+           << "  mode: " << (external ? "external" : "internal") << "\n";
+    if(external) {
+        output << "  socket: " << sx::comm::cli::external_path()
+               << "\n  broker stats: unavailable (external process)";
+    } else {
+        output << "  pid: " << sx::comm::cli::internal_broker_pid() << "\n";
+        append_stream_broker_stats(output, sx::comm::cli::stats());
+    }
+    cli_print(cli, "%s", output.str().c_str());
+    return CLI_OK;
+}
+
+int cli_diag_workers_comm_api_stats(DiagCli* cli, const char* command,
+                                    char* argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+    const bool external = sx::comm::api::uses_external_broker();
+    const auto pid = sx::comm::api::internal_broker_pid();
+    std::ostringstream output;
+    output << "API communication worker:\n";
+    if(external) {
+        output << "  mode: external\n"
+               << "  socket: " << sx::comm::api::external_path()
+               << "\n  broker stats: unavailable (external process)";
+    } else if(pid > 0) {
+        output << "  mode: internal\n  pid: " << pid << "\n";
+        append_stream_broker_stats(output, sx::comm::api::stats());
+    } else {
+        output << "  mode: disabled";
+    }
     cli_print(cli, "%s", output.str().c_str());
     return CLI_OK;
 }
@@ -2746,6 +2800,10 @@ void register_diags(libcli2::Cli& native) {
         auto diag_workers_comm = diag_register_command(cli, diag_workers, "comm", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "communication worker diagnostics");
             auto diag_workers_comm_gre = diag_register_command(cli, diag_workers_comm, "gre", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "GRE communication worker diagnostics");
                 diag_register_command(cli, diag_workers_comm_gre, "stats", cli_diag_workers_comm_gre_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display GRE transport and broker statistics");
+            auto diag_workers_comm_cli = diag_register_command(cli, diag_workers_comm, "cli", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "CLI communication worker diagnostics");
+                diag_register_command(cli, diag_workers_comm_cli, "stats", cli_diag_workers_comm_cli_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display CLI broker statistics");
+            auto diag_workers_comm_api = diag_register_command(cli, diag_workers_comm, "api", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "API communication worker diagnostics");
+                diag_register_command(cli, diag_workers_comm_api, "stats", cli_diag_workers_comm_api_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display API broker statistics");
 
 
 
