@@ -134,7 +134,8 @@ std::optional<std::string> resolve_run_as(const std::optional<std::string>& comm
 }
 
 int prepare_privilege_separation(DaemonFactory& daemon, const std::string& config_file,
-                                 const std::optional<std::string>& run_as) {
+                                 const std::optional<std::string>& run_as,
+                                 const std::optional<std::string>& comm_gre) {
     auto const& log = DaemonFactory::instance()->get_log();
 
     if(sx::privsep::files::start_local_helper({config_file, daemon.pid_file}) != 0) {
@@ -155,8 +156,11 @@ int prepare_privilege_separation(DaemonFactory& daemon, const std::string& confi
             destination.cidr()->proto, destination.ip(), remote.tun_ttl,
             remote.bind_interface
         };
-        if(sx::comm::gre::start_local_broker(std::move(profile)) != 0) {
-            _fat("cannot start local GRE broker: %s", string_error().c_str());
+        const int broker_result = comm_gre
+            ? sx::comm::gre::connect_external_broker(*comm_gre)
+            : sx::comm::gre::start_local_broker(std::move(profile));
+        if(broker_result != 0) {
+            _fat("cannot initialize GRE broker: %s", string_error().c_str());
             socle::privsep::stop_local_helper();
             sx::privsep::files::stop_local_helper();
             return -1;
@@ -424,6 +428,7 @@ void print_help() {
     std::cerr << "    --config-file, -c <filename> :  specify/override configuration file" << std::endl;
     std::cerr << "    --config-check-only, -o      :  perform configuration file check" << std::endl;
     std::cerr << "    --run-as <user>              :  drop core identity after starting privileged helper" << std::endl;
+    std::cerr << "    --comm-gre <path>            :  use an external GRE comm broker" << std::endl;
     std::cerr << std::endl;
     std::cerr << "  Notes:" << std::endl;
     std::cerr << std::endl;
@@ -457,6 +462,7 @@ int main(int argc, char *argv[]) {
 
 
     constexpr int option_run_as = 1000;
+    constexpr int option_comm_gre = 1001;
     static struct option long_options[] =
             {
                     /* These options set a flag. */
@@ -470,6 +476,7 @@ int main(int argc, char *argv[]) {
                     {"daemonize", no_argument, nullptr, 'D'},
                     {"version", no_argument, nullptr, 'v'},
                     {"run-as", required_argument, nullptr, option_run_as},
+                    {"comm-gre", required_argument, nullptr, option_comm_gre},
 
                     // multi-tenancy support: listening ports will be shifted by number 'i', while 't' controls logging, pidfile, etc.
                     // both, or none of them have to be set
@@ -489,6 +496,7 @@ int main(int argc, char *argv[]) {
     bool is_custom_config_file = false;
     bool is_dup2cout = false;
     std::optional<std::string> command_line_run_as;
+    std::optional<std::string> command_line_comm_gre;
 
     while(true) {
     /* getopt_long stores the option index here. */
@@ -535,6 +543,14 @@ int main(int argc, char *argv[]) {
                     return EXIT_FAILURE;
                 }
                 command_line_run_as = optarg;
+                break;
+
+            case option_comm_gre:
+                if(optarg == nullptr || *optarg == '\0') {
+                    std::cerr << "--comm-gre requires a non-empty Unix socket path" << std::endl;
+                    return EXIT_FAILURE;
+                }
+                command_line_comm_gre = optarg;
                 break;
                 
                 
@@ -697,7 +713,8 @@ int main(int argc, char *argv[]) {
     }
 
     const auto run_as = resolve_run_as(command_line_run_as);
-    if(prepare_privilege_separation(*this_daemon, CfgFactory::get()->config_file, run_as) != 0) {
+    if(prepare_privilege_separation(*this_daemon, CfgFactory::get()->config_file, run_as,
+                                    command_line_comm_gre) != 0) {
         CfgFactory::get()->cleanup();
         return EXIT_FAILURE;
     }

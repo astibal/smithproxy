@@ -23,7 +23,9 @@ struct Stats {
 };
 
 int start_local_broker(Profile profile);
+int connect_external_broker(const std::string& path);
 int stop_local_broker();
+int run_standalone_broker(const std::string& path, Profile profile);
 std::shared_ptr<socle::traflog::GreTransport> transport();
 Stats stats() noexcept;
 

@@ -411,6 +411,14 @@ add_executable(smithproxy
         src/proxy/filters/access_filter.cpp
 )
 
+add_executable(smithproxy-gre-broker
+        src/service/gre_broker_main.cpp
+        src/service/gre_broker.cpp
+        src/service/comm.cpp
+)
+target_include_directories(smithproxy-gre-broker PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(smithproxy-gre-broker socle_lib pthread ssl crypto)
+
 
 IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
     find_package(GTest)
@@ -569,6 +577,12 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/service/tests/privileged_file_tests.cpp
         )
 
+        add_executable(sx_gtests_gre_broker
+                src/service/comm.cpp
+                src/service/gre_broker.cpp
+                src/service/tests/gre_broker_tests.cpp
+        )
+
         add_executable(tls_testbed
                 tests/tls/tls_testbed.cpp)
         add_executable(transfer_testbed
@@ -589,6 +603,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_link_libraries(sx_gtests_reloadable gtest gtest_main pthread)
         target_link_libraries(sx_gtests_privsep gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries(sx_gtests_file_privsep gtest gtest_main socle_lib pthread crypto ssl)
+        target_link_libraries(sx_gtests_gre_broker gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries(tls_testbed gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries(transfer_testbed gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries (sx_gtests nlohmann_json::nlohmann_json)

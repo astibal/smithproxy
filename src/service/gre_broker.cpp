@@ -4,10 +4,15 @@
 
 #include <atomic>
 #include <cerrno>
+#include <cstddef>
+#include <cstring>
 #include <memory>
 #include <mutex>
 #include <signal.h>
 #include <sys/mman.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/un.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -26,6 +31,50 @@ std::mutex state_mutex;
 std::shared_ptr<SharedStats> shared_stats;
 std::shared_ptr<socle::traflog::GreTransport> installed_transport;
 pid_t broker_pid = -1;
+volatile sig_atomic_t stop_requested = 0;
+
+int unix_address(const std::string& path, sockaddr_un& address, socklen_t& length) {
+    if(path.empty() || path.size() >= sizeof(address.sun_path)) {
+        errno = path.empty() ? EINVAL : ENAMETOOLONG;
+        return -1;
+    }
+    address = {};
+    address.sun_family = AF_UNIX;
+    std::memcpy(address.sun_path, path.c_str(), path.size() + 1);
+    length = static_cast<socklen_t>(offsetof(sockaddr_un, sun_path) + path.size() + 1);
+    return 0;
+}
+
+int connect_seqpacket(const std::string& path) {
+    sockaddr_un address{};
+    socklen_t length = 0;
+    if(unix_address(path, address, length) != 0) return -1;
+    const int fd = ::socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
+    if(fd < 0) return -1;
+    if(::connect(fd, reinterpret_cast<sockaddr*>(&address), length) != 0) {
+        const int saved = errno;
+        ::close(fd);
+        errno = saved;
+        return -1;
+    }
+    return fd;
+}
+
+int listen_seqpacket(const std::string& path) {
+    sockaddr_un address{};
+    socklen_t length = 0;
+    if(unix_address(path, address, length) != 0) return -1;
+    const int fd = ::socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
+    if(fd < 0) return -1;
+    if(::bind(fd, reinterpret_cast<sockaddr*>(&address), length) != 0
+       || ::listen(fd, 16) != 0) {
+        const int saved = errno;
+        ::close(fd);
+        errno = saved;
+        return -1;
+    }
+    return fd;
+}
 
 std::shared_ptr<SharedStats> make_shared_stats() {
     void* memory = ::mmap(nullptr, sizeof(SharedStats), PROT_READ | PROT_WRITE,
@@ -86,18 +135,23 @@ private:
     std::shared_ptr<SharedStats> counters_;
 };
 
+int serve_connection(int fd, const sx::comm::gre::Profile& profile,
+                     const std::shared_ptr<SharedStats>& counters) {
+    sx::comm::Server server(fd);
+    if(server.register_operation(gre_frame_opcode,
+                                 std::make_shared<ExportOperation>(profile, counters)) != 0) {
+        return -1;
+    }
+    return server.run();
+}
+
 [[noreturn]] void broker_entry(int fd, sx::comm::gre::Profile profile,
                                std::shared_ptr<SharedStats> counters) {
     if(::setpgid(0, 0) != 0) ::_exit(EXIT_FAILURE);
-    sx::comm::Server server(fd);
-    if(server.register_operation(gre_frame_opcode,
-                                 std::make_shared<ExportOperation>(std::move(profile),
-                                                                   std::move(counters))) != 0) {
-        ::_exit(EXIT_FAILURE);
-    }
-    ::close(fd);
-    ::_exit(server.run() == 0 ? EXIT_SUCCESS : EXIT_FAILURE);
+    ::_exit(serve_connection(fd, profile, counters) == 0 ? EXIT_SUCCESS : EXIT_FAILURE);
 }
+
+void request_stop(int) { stop_requested = 1; }
 
 } // namespace
 
@@ -125,6 +179,19 @@ int start_local_broker(Profile profile) {
     return 0;
 }
 
+int connect_external_broker(const std::string& path) {
+    std::lock_guard lock(state_mutex);
+    if(broker_pid > 0 || installed_transport) { errno = EALREADY; return -1; }
+    const int fd = connect_seqpacket(path);
+    if(fd < 0) return -1;
+    auto counters = std::make_shared<SharedStats>();
+    auto sink = std::make_shared<SocketTransport>(fd, counters);
+    ::close(fd);
+    shared_stats = std::move(counters);
+    installed_transport = std::move(sink);
+    return 0;
+}
+
 int stop_local_broker() {
     std::lock_guard lock(state_mutex);
     installed_transport.reset();
@@ -135,6 +202,37 @@ int stop_local_broker() {
     do { result = ::waitpid(broker_pid, &status, 0); } while(result < 0 && errno == EINTR);
     broker_pid = -1;
     return result >= 0 && WIFEXITED(status) && WEXITSTATUS(status) == EXIT_SUCCESS ? 0 : -1;
+}
+
+int run_standalone_broker(const std::string& path, Profile profile) {
+    if(profile.destination.empty()) { errno = EINVAL; return -1; }
+    const int listener = listen_seqpacket(path);
+    if(listener < 0) return -1;
+
+    struct sigaction action{};
+    action.sa_handler = request_stop;
+    ::sigemptyset(&action.sa_mask);
+    ::sigaction(SIGINT, &action, nullptr);
+    ::sigaction(SIGTERM, &action, nullptr);
+
+    auto counters = std::make_shared<SharedStats>();
+    int result = 0;
+    while(!stop_requested) {
+        const int client = ::accept4(listener, nullptr, nullptr, SOCK_CLOEXEC);
+        if(client < 0) {
+            if(errno == EINTR) continue;
+            result = -1;
+            break;
+        }
+        if(serve_connection(client, profile, counters) < 0 && errno != ECONNRESET) result = -1;
+        ::close(client);
+        if(result != 0) break;
+    }
+    const int saved = errno;
+    ::close(listener);
+    ::unlink(path.c_str());
+    errno = saved;
+    return result;
 }
 
 std::shared_ptr<socle::traflog::GreTransport> transport() {
