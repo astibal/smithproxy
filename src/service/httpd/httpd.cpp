@@ -34,6 +34,7 @@ std::thread* create_httpd_thread(unsigned short port) {
         dispatchers::controller_add_uni(server);
         dispatchers::controller_add_wh_register(server);
         dispatchers::controller_add_wh_unregister(server);
+        dispatchers::controller_add_wh_v2(server);
 
         server.options().handler_should_terminate = []() -> bool {
                 return SmithProxy::instance().terminate_flag;

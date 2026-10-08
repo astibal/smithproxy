@@ -64,8 +64,9 @@ attach an authorization header.
 ## Legacy coexistence
 
 The legacy register/unregister endpoints continue to operate only on an
-anonymous legacy override. They must return `409` while an owned v2 lease is
-active, rather than clobbering it. A v2 acquisition likewise returns `409`
+anonymous legacy override. For wire compatibility they return their existing
+`200` response with a rejected status while an owned v2 lease is active,
+rather than clobbering it. A v2 acquisition returns `409`
 while a non-expired legacy override is active. After expiry either API may
 acquire the singleton slot.
 

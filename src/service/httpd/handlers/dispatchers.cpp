@@ -169,5 +169,18 @@ namespace sx::webserver::dispatchers {
         webhook_unregister->Content_Type = "application/json";
         server.addController(std::shared_ptr<lmh::Controller>(webhook_unregister));
     }
-}
 
+    void controller_add_wh_v2(lmh::WebServer& server) {
+        auto* lease = new Http_Responder(
+                "POST", "/api/v2/webhook/lease",
+                authorized::token_protected<Http_JsonResponseParams>(wh_lease_v2));
+        lease->Content_Type = "application/json";
+        server.addController(std::shared_ptr<lmh::Controller>(lease));
+
+        auto* release = new Http_Responder(
+                "POST", "/api/v2/webhook/lease/release",
+                authorized::token_protected<Http_JsonResponseParams>(wh_lease_release_v2));
+        release->Content_Type = "application/json";
+        server.addController(std::shared_ptr<lmh::Controller>(release));
+    }
+}
