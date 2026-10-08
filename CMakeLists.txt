@@ -339,6 +339,7 @@ add_executable(smithproxy
         src/service/comm.cpp
         src/service/privileged_file.cpp
         src/service/gre_broker.cpp
+        src/service/cli/cli_broker.cpp
         src/service/netservice.cpp
         src/service/dnsupd/smithdnsupd.cpp
         src/service/core/smithproxy.hpp
@@ -419,6 +420,13 @@ add_executable(smithproxy-gre-broker
 target_include_directories(smithproxy-gre-broker PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(smithproxy-gre-broker socle_lib pthread ssl crypto)
 
+add_executable(smithproxy-cli-broker
+        src/service/cli/cli_broker_main.cpp
+        src/service/cli/cli_broker.cpp
+)
+target_include_directories(smithproxy-cli-broker PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(smithproxy-cli-broker pthread)
+
 
 IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
     find_package(GTest)
@@ -435,6 +443,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/service/comm.cpp
                 src/service/privileged_file.cpp
                 src/service/gre_broker.cpp
+                src/service/cli/cli_broker.cpp
                 src/service/netservice.cpp
                 src/service/core/authpam.cpp
 
@@ -582,6 +591,10 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/service/gre_broker.cpp
                 src/service/tests/gre_broker_tests.cpp
         )
+        add_executable(sx_gtests_cli_broker
+                src/service/cli/cli_broker.cpp
+                src/service/tests/cli_broker_tests.cpp
+        )
 
         add_executable(tls_testbed
                 tests/tls/tls_testbed.cpp)
@@ -604,6 +617,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_link_libraries(sx_gtests_privsep gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries(sx_gtests_file_privsep gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries(sx_gtests_gre_broker gtest gtest_main socle_lib pthread crypto ssl)
+        target_link_libraries(sx_gtests_cli_broker gtest gtest_main pthread)
         target_link_libraries(tls_testbed gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries(transfer_testbed gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries (sx_gtests nlohmann_json::nlohmann_json)

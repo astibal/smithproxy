@@ -78,6 +78,7 @@
 #include <service/daemon.hpp>
 #include <service/privileged_file.hpp>
 #include <service/gre_broker.hpp>
+#include <service/cli/cli_broker.hpp>
 #include <staticcontent.hpp>
 #include <smithlog.hpp>
 
@@ -89,6 +90,7 @@
 namespace {
 
 std::atomic<bool> gre_broker_failed{false};
+std::atomic<bool> cli_broker_failed{false};
 
 int drop_process_identity(const std::string& run_as) {
     if(geteuid() != 0) {
@@ -137,7 +139,8 @@ std::optional<std::string> resolve_run_as(const std::optional<std::string>& comm
 
 int prepare_privilege_separation(DaemonFactory& daemon, const std::string& config_file,
                                  const std::optional<std::string>& run_as,
-                                 const std::optional<std::string>& comm_gre) {
+                                 const std::optional<std::string>& comm_gre,
+                                 const std::optional<std::string>& comm_cli) {
     auto const& log = DaemonFactory::instance()->get_log();
 
     if(sx::privsep::files::start_local_helper({config_file, daemon.pid_file}) != 0) {
@@ -147,6 +150,18 @@ int prepare_privilege_separation(DaemonFactory& daemon, const std::string& confi
 
     if(socle::privsep::start_local_helper() != 0) {
         _fat("cannot start privileged socket helper: %s", string_error().c_str());
+        sx::privsep::files::stop_local_helper();
+        return -1;
+    }
+
+    const int cli_result = comm_cli
+        ? sx::comm::cli::prepare_external_ingress(*comm_cli)
+        : sx::comm::cli::start_internal_broker(
+            static_cast<std::uint16_t>(CfgFactory::get()->cli_port
+                                       + CfgFactory::get()->tenant_index));
+    if(cli_result != 0) {
+        _fat("cannot initialize CLI broker: %s", string_error().c_str());
+        socle::privsep::stop_local_helper();
         sx::privsep::files::stop_local_helper();
         return -1;
     }
@@ -163,6 +178,7 @@ int prepare_privilege_separation(DaemonFactory& daemon, const std::string& confi
             : sx::comm::gre::start_local_broker(std::move(profile));
         if(broker_result != 0) {
             _fat("cannot initialize GRE broker: %s", string_error().c_str());
+            sx::comm::cli::stop_broker();
             socle::privsep::stop_local_helper();
             sx::privsep::files::stop_local_helper();
             return -1;
@@ -174,6 +190,7 @@ int prepare_privilege_separation(DaemonFactory& daemon, const std::string& confi
 
     if(!daemon.write_pidfile()) {
         sx::comm::gre::stop_local_broker();
+        sx::comm::cli::stop_broker();
         socle::privsep::stop_local_helper();
         sx::privsep::files::stop_local_helper();
         return -1;
@@ -184,6 +201,7 @@ int prepare_privilege_separation(DaemonFactory& daemon, const std::string& confi
         _fat("cannot drop Smithproxy core identity: %s", string_error(saved_errno).c_str());
         daemon.unlink_pidfile();
         sx::comm::gre::stop_local_broker();
+        sx::comm::cli::stop_broker();
         socle::privsep::stop_local_helper();
         sx::privsep::files::stop_local_helper();
         errno = saved_errno;
@@ -431,6 +449,7 @@ void print_help() {
     std::cerr << "    --config-check-only, -o      :  perform configuration file check" << std::endl;
     std::cerr << "    --run-as <user>              :  drop core identity after starting privileged helper" << std::endl;
     std::cerr << "    --comm-gre <path>            :  use an external GRE comm broker" << std::endl;
+    std::cerr << "    --comm-cli <path>            :  use an external CLI comm broker" << std::endl;
     std::cerr << std::endl;
     std::cerr << "  Notes:" << std::endl;
     std::cerr << std::endl;
@@ -465,6 +484,7 @@ int main(int argc, char *argv[]) {
 
     constexpr int option_run_as = 1000;
     constexpr int option_comm_gre = 1001;
+    constexpr int option_comm_cli = 1002;
     static struct option long_options[] =
             {
                     /* These options set a flag. */
@@ -479,6 +499,7 @@ int main(int argc, char *argv[]) {
                     {"version", no_argument, nullptr, 'v'},
                     {"run-as", required_argument, nullptr, option_run_as},
                     {"comm-gre", required_argument, nullptr, option_comm_gre},
+                    {"comm-cli", required_argument, nullptr, option_comm_cli},
 
                     // multi-tenancy support: listening ports will be shifted by number 'i', while 't' controls logging, pidfile, etc.
                     // both, or none of them have to be set
@@ -499,6 +520,7 @@ int main(int argc, char *argv[]) {
     bool is_dup2cout = false;
     std::optional<std::string> command_line_run_as;
     std::optional<std::string> command_line_comm_gre;
+    std::optional<std::string> command_line_comm_cli;
 
     while(true) {
     /* getopt_long stores the option index here. */
@@ -553,6 +575,14 @@ int main(int argc, char *argv[]) {
                     return EXIT_FAILURE;
                 }
                 command_line_comm_gre = optarg;
+                break;
+
+            case option_comm_cli:
+                if(optarg == nullptr || *optarg == '\0') {
+                    std::cerr << "--comm-cli requires a non-empty Unix socket path" << std::endl;
+                    return EXIT_FAILURE;
+                }
+                command_line_comm_cli = optarg;
                 break;
                 
                 
@@ -720,10 +750,16 @@ int main(int argc, char *argv[]) {
             CRI, "internal GRE broker terminated unexpectedly; shutting down Smithproxy");
         SmithProxy::instance().terminate_flag = true;
     });
+    sx::comm::cli::set_internal_failure_handler([] {
+        cli_broker_failed.store(true, std::memory_order_relaxed);
+        Log::get()->events().insert(
+            CRI, "internal CLI broker terminated unexpectedly; shutting down Smithproxy");
+        SmithProxy::instance().terminate_flag = true;
+    });
 
     const auto run_as = resolve_run_as(command_line_run_as);
     if(prepare_privilege_separation(*this_daemon, CfgFactory::get()->config_file, run_as,
-                                    command_line_comm_gre) != 0) {
+                                    command_line_comm_gre, command_line_comm_cli) != 0) {
         CfgFactory::get()->cleanup();
         return EXIT_FAILURE;
     }
@@ -778,6 +814,9 @@ int main(int argc, char *argv[]) {
     if(sx::comm::gre::stop_local_broker() != 0) {
         _err("cannot stop local GRE broker: %s", string_error().c_str());
     }
+    if(sx::comm::cli::stop_broker() != 0) {
+        _err("CLI broker did not stop cleanly: %s", string_error().c_str());
+    }
     if(socle::privsep::stop_local_helper() != 0) {
         _err("privileged socket helper did not stop cleanly: %s", string_error().c_str());
     }
@@ -789,7 +828,8 @@ int main(int argc, char *argv[]) {
     DaemonFactory::generate_crashlog = false;
     #endif
 
-    return gre_broker_failed.load(std::memory_order_relaxed)
+    return (gre_broker_failed.load(std::memory_order_relaxed)
+            || cli_broker_failed.load(std::memory_order_relaxed))
         ? EXIT_FAILURE : EXIT_SUCCESS;
 }
 
