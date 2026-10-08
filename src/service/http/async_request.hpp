@@ -47,6 +47,7 @@
 #include <service/tpool.hpp>
 #include <service/cfgapi/cfgapi.hpp>
 #include <service/http/request.hpp>
+#include <service/webhook/webhook_broker.hpp>
 #include <log/logger.hpp>
 
 namespace sx::http {
@@ -74,6 +75,7 @@ namespace sx::http {
             std::string dns_servers;
             bool verify_tls = true;
             std::string bind_interface;
+            std::string unix_socket_path;
         };
 
         static inline std::atomic_size_t pending_requests = 0;
@@ -155,6 +157,7 @@ namespace sx::http {
             settings.url = factory->settings_webhook.active_url();
             settings.verify_tls = factory->settings_webhook.active_tls_verify();
             settings.bind_interface = factory->settings_webhook.bind_interface;
+            settings.unix_socket_path = sx::comm::webhook::transport_path();
             std::ostringstream dns;
             for (size_t i = 0; i < factory->db_nameservers.size(); ++i) {
                 dns << factory->db_nameservers[i].str_host;
@@ -219,7 +222,8 @@ namespace sx::http {
             try {
             log << make_ts() << ": init: settings: dns='" << settings.dns_servers
                 << "' vrfy=" << settings.verify_tls << " bind_if='"
-                << settings.bind_interface << "'\n";
+                << settings.bind_interface << "' unix_socket='"
+                << settings.unix_socket_path << "'\n";
 
             Request request(Request::DEFAULT, settings.dns_servers);
 
@@ -230,7 +234,12 @@ namespace sx::http {
             request.set_stale_detection();
 
             if(not settings.verify_tls) request.disable_tls_verify();
-            if(not settings.bind_interface.empty()) request.set_interface(settings.bind_interface);
+            if(not settings.unix_socket_path.empty()) {
+                if(!request.set_unix_socket_path(settings.unix_socket_path))
+                    throw AsyncRequestException("failed to configure webhook Unix transport");
+            }
+            else if(not settings.bind_interface.empty())
+                request.set_interface(settings.bind_interface);
 
             // set debugging explicitly
             if(Request::DEBUG) {

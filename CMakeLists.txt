@@ -341,6 +341,8 @@ add_executable(smithproxy
         src/service/gre_broker.cpp
         src/service/cli/cli_broker.cpp
         src/service/api/api_broker.cpp
+        src/service/stream/tcp_relay.cpp
+        src/service/webhook/webhook_broker.cpp
         src/service/netservice.cpp
         src/service/dnsupd/smithdnsupd.cpp
         src/service/core/smithproxy.hpp
@@ -434,6 +436,15 @@ add_executable(smithproxy-api-broker
 )
 target_include_directories(smithproxy-api-broker PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(smithproxy-api-broker pthread)
+
+add_executable(smithproxy-webhook-broker
+        src/service/webhook/webhook_broker_main.cpp
+        src/service/webhook/webhook_broker.cpp
+        src/service/stream/tcp_relay.cpp
+        src/service/cli/cli_broker.cpp
+)
+target_include_directories(smithproxy-webhook-broker PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(smithproxy-webhook-broker pthread)
 
 
 IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -608,6 +619,14 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 src/service/api/api_broker.cpp
                 src/service/tests/api_broker_tests.cpp
         )
+        add_executable(sx_gtests_webhook_broker
+                src/service/cli/cli_broker.cpp
+                src/service/stream/tcp_relay.cpp
+                src/service/webhook/webhook_broker.cpp
+                src/service/tests/webhook_broker_tests.cpp
+        )
+        target_compile_definitions(sx_gtests_webhook_broker PRIVATE
+                SMITHPROXY_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 
         add_executable(tls_testbed
                 tests/tls/tls_testbed.cpp)
@@ -632,6 +651,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_link_libraries(sx_gtests_gre_broker gtest gtest_main socle_lib pthread crypto ssl)
         target_link_libraries(sx_gtests_cli_broker gtest gtest_main pthread)
         target_link_libraries(sx_gtests_api_broker gtest gtest_main pthread)
+        target_link_libraries(sx_gtests_webhook_broker gtest gtest_main pthread curl crypto ssl)
         if("${USE_LMHPP}" STREQUAL "Y")
             target_link_libraries(sx_gtests_api_broker microhttpd)
         endif()
@@ -687,6 +707,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
             add_test(NAME unit.gre_broker COMMAND sx_gtests_gre_broker)
             add_test(NAME unit.cli_broker COMMAND sx_gtests_cli_broker)
             add_test(NAME unit.api_broker COMMAND sx_gtests_api_broker)
+            add_test(NAME unit.webhook_broker COMMAND sx_gtests_webhook_broker)
             add_test(NAME integration.tls_testbed COMMAND tls_testbed)
             add_test(NAME integration.transfer_testbed COMMAND transfer_testbed)
             add_test(NAME integration.quic_testbed COMMAND quic_testbed)
@@ -712,6 +733,7 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                     PROPERTIES LABELS "native;unit")
             set_tests_properties(
                     unit.privsep unit.file_privsep unit.gre_broker unit.cli_broker unit.api_broker
+                    unit.webhook_broker
                     PROPERTIES LABELS "native;unit;security;privsep")
             set_tests_properties(
                     integration.tls_testbed integration.transfer_testbed integration.quic_testbed

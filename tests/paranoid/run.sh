@@ -64,6 +64,7 @@ targets=(
     sx_gtests_gre_broker
     sx_gtests_cli_broker
     sx_gtests_api_broker
+    sx_gtests_webhook_broker
 )
 
 configure_build() {

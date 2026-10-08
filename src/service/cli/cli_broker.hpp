@@ -38,7 +38,10 @@ class SharedStats;
 class DuplexRelay {
 public:
     int run(int left, int right, const std::atomic<bool>& stop,
-            SharedStats* stats = nullptr) const;
+            SharedStats* stats = nullptr,
+            std::atomic<std::uint64_t>* bytes_left_to_right = nullptr,
+            std::atomic<std::uint64_t>* bytes_right_to_left = nullptr,
+            int idle_timeout_ms = 0) const;
 };
 
 class BrokerServer {

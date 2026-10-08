@@ -65,6 +65,8 @@
 #include <service/gre_broker.hpp>
 #include <service/cli/cli_broker.hpp>
 #include <service/api/api_broker.hpp>
+#include <service/webhook/webhook_broker.hpp>
+#include <service/http/async_request.hpp>
 #include <inspect/engine/http.hpp>
 
 
@@ -1221,6 +1223,26 @@ int cli_diag_workers_comm_api_stats(DiagCli* cli, const char* command,
     } else {
         output << "  mode: disabled";
     }
+    cli_print(cli, "%s", output.str().c_str());
+    return CLI_OK;
+}
+
+int cli_diag_workers_comm_webhook_stats(DiagCli* cli, const char* command,
+                                        char* argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+    std::ostringstream output;
+    output << "Webhook communication worker:\n";
+    if(sx::comm::webhook::enabled()) {
+        output << "  mode: external\n"
+               << "  socket: " << sx::comm::webhook::transport_path() << "\n"
+               << "  broker stats: unavailable (external process)\n";
+    } else {
+        output << "  mode: direct\n";
+    }
+    output << "  pending requests: "
+           << sx::http::AsyncRequest::pending_requests.load(std::memory_order_relaxed) << "\n"
+           << "  dropped requests: "
+           << sx::http::AsyncRequest::dropped_requests.load(std::memory_order_relaxed);
     cli_print(cli, "%s", output.str().c_str());
     return CLI_OK;
 }
@@ -2804,6 +2826,8 @@ void register_diags(libcli2::Cli& native) {
                 diag_register_command(cli, diag_workers_comm_cli, "stats", cli_diag_workers_comm_cli_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display CLI broker statistics");
             auto diag_workers_comm_api = diag_register_command(cli, diag_workers_comm, "api", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "API communication worker diagnostics");
                 diag_register_command(cli, diag_workers_comm_api, "stats", cli_diag_workers_comm_api_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display API broker statistics");
+            auto diag_workers_comm_webhook = diag_register_command(cli, diag_workers_comm, "webhook", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "webhook communication worker diagnostics");
+                diag_register_command(cli, diag_workers_comm_webhook, "stats", cli_diag_workers_comm_webhook_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display webhook transport statistics");
 
 
 

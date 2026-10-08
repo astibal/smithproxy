@@ -11,4 +11,4 @@ tools/build-scripts/deb/debian/changelog
 /venv/
 /smithproxy.srctrl*
 /build/
-/test-runs/paranoid*/
+/test-runs/*paranoid*/

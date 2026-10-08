@@ -4,6 +4,7 @@
 #include <array>
 #include <cerrno>
 #include <cstring>
+#include <chrono>
 #include <mutex>
 #include <memory>
 #include <poll.h>
@@ -162,14 +163,24 @@ Stats snapshot(const SharedStats* stats) noexcept {
 int create_unix_listener(const std::string& path) { return make_unix_listener(path); }
 
 int DuplexRelay::run(int left, int right, const std::atomic<bool>& stop,
-                     SharedStats* stats) const {
+                     SharedStats* stats,
+                     std::atomic<std::uint64_t>* bytes_left_to_right,
+                     std::atomic<std::uint64_t>* bytes_right_to_left,
+                     int idle_timeout_ms) const {
     struct Direction { int source; int destination; std::array<char, 65536> data{}; std::size_t size = 0; std::size_t offset = 0; bool eof = false; };
     Direction directions[2]{{left, right}, {right, left}};
+    auto last_activity = std::chrono::steady_clock::now();
     for(int fd: {left, right}) {
         const int flags = ::fcntl(fd, F_GETFL);
         if(flags < 0 || ::fcntl(fd, F_SETFL, flags | O_NONBLOCK) != 0) return -1;
     }
     while(!stop.load(std::memory_order_relaxed)) {
+        if(idle_timeout_ms > 0
+           && std::chrono::steady_clock::now() - last_activity
+               >= std::chrono::milliseconds(idle_timeout_ms)) {
+            errno = ETIMEDOUT;
+            return -1;
+        }
         if(directions[0].eof && directions[1].eof
            && directions[0].size == directions[0].offset
            && directions[1].size == directions[1].offset) return 0;
@@ -187,7 +198,11 @@ int DuplexRelay::run(int left, int right, const std::atomic<bool>& stop,
             if((descriptors[i].revents & (POLLIN | POLLHUP)) && !direction.eof
                && direction.size == direction.offset) {
                 const auto count = ::read(direction.source, direction.data.data(), direction.data.size());
-                if(count > 0) { direction.size = static_cast<std::size_t>(count); direction.offset = 0; }
+                if(count > 0) {
+                    direction.size = static_cast<std::size_t>(count);
+                    direction.offset = 0;
+                    last_activity = std::chrono::steady_clock::now();
+                }
                 else if(count == 0) { direction.eof = true; ::shutdown(direction.destination, SHUT_WR); }
                 else if(errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) return -1;
             }
@@ -195,11 +210,14 @@ int DuplexRelay::run(int left, int right, const std::atomic<bool>& stop,
                 const auto count = ::send(direction.destination, direction.data.data() + direction.offset,
                                           direction.size - direction.offset, MSG_NOSIGNAL);
                 if(count > 0) {
+                    last_activity = std::chrono::steady_clock::now();
                     direction.offset += static_cast<std::size_t>(count);
                     if(stats) {
                         auto& counter = i == 0 ? stats->bytes_to_core : stats->bytes_from_core;
                         counter.fetch_add(static_cast<std::uint64_t>(count));
                     }
+                    auto* direct_counter = i == 0 ? bytes_left_to_right : bytes_right_to_left;
+                    if(direct_counter) direct_counter->fetch_add(static_cast<std::uint64_t>(count));
                 }
                 else if(count < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) return -1;
             }
