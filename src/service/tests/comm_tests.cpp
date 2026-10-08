@@ -4,7 +4,6 @@
 #include <array>
 #include <cstddef>
 #include <cstring>
-#include <random>
 #include <thread>
 #include <vector>
 #include <fcntl.h>
@@ -12,6 +11,7 @@
 #include <unistd.h>
 
 #include <gtest/gtest.h>
+#include <tests/security/hostile_peer.hpp>
 
 namespace {
 
@@ -123,18 +123,12 @@ TEST(CommTest, DeterministicMalformedFrameCorpusDoesNotPoisonChannel) {
     ASSERT_EQ(server.register_operation(42, operation), 0);
     std::thread helper([&server] { EXPECT_EQ(server.run(), 0); });
 
-    std::mt19937 generator(0x53434f4dU);
-    std::uniform_int_distribution<std::size_t> size_distribution(1, 4096);
-    std::uniform_int_distribution<unsigned> byte_distribution(0, 255);
-    for(unsigned iteration = 0; iteration < 512; ++iteration) {
-        std::vector<std::byte> frame(size_distribution(generator));
-        for(auto& byte: frame)
-            byte = std::byte{static_cast<unsigned char>(byte_distribution(generator))};
-        frame[0] = std::byte{'X'};
-        ASSERT_EQ(::send(channels[0], frame.data(), frame.size(), MSG_NOSIGNAL),
-                  static_cast<ssize_t>(frame.size()));
-        std::array<std::byte, 128> response{};
-        ASSERT_GT(::recv(channels[0], response.data(), response.size(), 0), 0);
+    const auto descriptors_before = socle::test::hostile::open_fd_count();
+    const auto corpus = socle::test::hostile::frame_corpus(
+        {0x53434f4dU, 512, 4096});
+    for(const auto& frame: corpus) {
+        ASSERT_EQ(socle::test::hostile::send_and_drain(channels[0], frame),
+                  socle::test::hostile::DrainResult::Reply);
     }
     {
         sx::comm::Client client(channels[0], std::chrono::seconds(1));
@@ -147,6 +141,10 @@ TEST(CommTest, DeterministicMalformedFrameCorpusDoesNotPoisonChannel) {
         EXPECT_EQ(operation->payload, "after-corpus");
     }
     helper.join();
+    const auto descriptors_after = socle::test::hostile::open_fd_count();
+    if(descriptors_before != 0 && descriptors_after != 0) {
+        EXPECT_EQ(descriptors_after, descriptors_before - 2U);
+    }
 }
 
 } // namespace

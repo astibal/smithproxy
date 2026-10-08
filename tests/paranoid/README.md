@@ -58,6 +58,12 @@ TSan.
 - Concurrent atomic replacement and PID ownership/replacement races.
 - Broker recovery expectations and Unix socket permission checks.
 
+`socle/tests/security/hostile_peer.hpp` provides the reusable deterministic
+frame corpus, send/drain transport driver and Linux FD-count invariant. Both
+the socket privilege helper and Smithproxy communication server use the same
+harness. New opcode protocols should reuse it and prove that a valid probe
+still succeeds after the complete hostile corpus.
+
 ## Lab-only follow-up
 
 Process killing, UID/capability transitions, `RLIMIT_NOFILE` exhaustion and
