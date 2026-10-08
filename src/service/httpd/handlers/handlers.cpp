@@ -63,6 +63,12 @@ namespace sx::webserver {
         auto auth_token = HttpSessions::generate_auth_token();
         auto csrf_token = HttpSessions::generate_csrf_token();
 
+        if(auth_token.empty() or csrf_token.empty()) {
+            response.response = {{"error", "token generation failed"}};
+            response.response_code = MHD_HTTP_INTERNAL_SERVER_ERROR;
+            return;
+        }
+
         response.response = {{"auth_token", auth_token},
                         {"csrf_token", csrf_token}};
         response.response_code = MHD_HTTP_OK;

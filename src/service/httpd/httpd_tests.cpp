@@ -54,4 +54,23 @@ TEST_F(HttpSessionsTest, ValidValuesAndApiKeySnapshotsRoundTrip) {
               (std::set<std::string>{"one", "two"}));
 }
 
+TEST_F(HttpSessionsTest, InvalidCsrfDoesNotDestroyOtherwiseValidSession) {
+    {
+        auto lock = std::scoped_lock(HttpSessions::lock);
+        HttpSessions::access_keys["auth"]["csrf_token"] = TimedOptional<std::string>("token", 60);
+    }
+
+    EXPECT_FALSE(HttpSessions::validate_tokens("auth", "wrong"));
+    EXPECT_TRUE(HttpSessions::validate_tokens("auth", "token"));
+}
+
+TEST_F(HttpSessionsTest, GeneratedTokensAreNonEmptyAndIndependent) {
+    auto const auth = HttpSessions::generate_auth_token();
+    auto const csrf = HttpSessions::generate_csrf_token();
+
+    EXPECT_EQ(auth.size(), 32U);
+    EXPECT_EQ(csrf.size(), 32U);
+    EXPECT_NE(auth, csrf);
+}
+
 } // namespace

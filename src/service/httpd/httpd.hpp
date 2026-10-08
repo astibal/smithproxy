@@ -52,6 +52,7 @@
 #include <common/display.hpp>
 
 #include <openssl/rand.h>
+#include <openssl/crypto.h>
 
 namespace sx::webserver {
 
@@ -167,13 +168,13 @@ struct HttpSessions {
 
     static std::string generate_auth_token() {
         unsigned char rand_pool[16];
-        RAND_bytes(rand_pool, 16);
+        if(RAND_priv_bytes(rand_pool, sizeof(rand_pool)) != 1) return {};
         return hex_print(rand_pool, 16);
     }
 
     static std::string generate_csrf_token() {
         unsigned char rand_pool[16];
-        RAND_bytes(rand_pool, 16);
+        if(RAND_priv_bytes(rand_pool, sizeof(rand_pool)) != 1) return {};
         return hex_print(rand_pool, 16);
     }
 
@@ -183,15 +184,8 @@ struct HttpSessions {
         if(auth_token.empty() or csrf_token.empty()) return false;
 
         auto db_csrf_token = table_value(auth_token, "csrf_token");
-        bool ret = ( csrf_token == db_csrf_token );
-
-        if(not ret) {
-            auto lc_ = std::scoped_lock(lock);
-            //eventually erase this auth_token
-            access_keys.erase(auth_token);
-        }
-
-        return ret;
+        if(db_csrf_token.empty() or db_csrf_token.size() != csrf_token.size()) return false;
+        return CRYPTO_memcmp(csrf_token.data(), db_csrf_token.data(), csrf_token.size()) == 0;
     }
 
     static bool has_api_key(std::string const& key) {
