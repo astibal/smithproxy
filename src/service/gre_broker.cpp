@@ -2,18 +2,24 @@
 
 #include <service/comm.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <cerrno>
+#include <chrono>
 #include <cstddef>
+#include <condition_variable>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <mutex>
+#include <poll.h>
 #include <signal.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <sys/wait.h>
+#include <thread>
 #include <unistd.h>
 
 namespace {
@@ -25,12 +31,18 @@ struct SharedStats {
     std::atomic<std::uint64_t> dropped{0};
     std::atomic<std::uint64_t> exported{0};
     std::atomic<std::uint64_t> errors{0};
+    std::atomic<std::uint64_t> reconnects{0};
+    std::atomic<bool> connected{false};
 };
 
 std::mutex state_mutex;
 std::shared_ptr<SharedStats> shared_stats;
 std::shared_ptr<socle::traflog::GreTransport> installed_transport;
 pid_t broker_pid = -1;
+std::thread broker_monitor;
+std::atomic<bool> broker_stopping{false};
+std::atomic<int> broker_wait_status{0};
+std::function<void()> internal_failure_handler;
 volatile sig_atomic_t stop_requested = 0;
 
 int unix_address(const std::string& path, sockaddr_un& address, socklen_t& length) {
@@ -105,6 +117,113 @@ private:
     std::shared_ptr<SharedStats> counters_;
 };
 
+class ReconnectingTransport final : public socle::traflog::GreTransport {
+public:
+    ReconnectingTransport(std::string path, int fd, std::shared_ptr<SharedStats> counters)
+        : path_(std::move(path)), counters_(std::move(counters)), client_(make_client(fd)),
+          worker_([this] { reconnect_loop(); }) {
+        counters_->connected.store(true, std::memory_order_relaxed);
+    }
+
+    ~ReconnectingTransport() override {
+        {
+            std::lock_guard lock(mutex_);
+            stopping_ = true;
+            client_.reset();
+        }
+        condition_.notify_one();
+        if(worker_.joinable()) worker_.join();
+        counters_->connected.store(false, std::memory_order_relaxed);
+    }
+
+    bool submit(buffer const& frame) override {
+        counters_->submitted.fetch_add(1, std::memory_order_relaxed);
+        std::shared_ptr<sx::comm::Client> client;
+        {
+            std::lock_guard lock(mutex_);
+            client = client_;
+        }
+        if(client) {
+            const std::string payload(reinterpret_cast<const char*>(frame.data()), frame.size());
+            if(client->notify(gre_frame_opcode, payload) == 0) return true;
+            disconnect(client);
+        }
+        counters_->dropped.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+
+private:
+    static std::shared_ptr<sx::comm::Client> make_client(int fd) {
+        auto client = std::make_shared<sx::comm::Client>(fd);
+        if(client->set_nonblocking() != 0) return {};
+        return client;
+    }
+
+    void disconnect(const std::shared_ptr<sx::comm::Client>& expected) {
+        {
+            std::lock_guard lock(mutex_);
+            if(client_ != expected) return;
+            client_.reset();
+            counters_->connected.store(false, std::memory_order_relaxed);
+        }
+        condition_.notify_one();
+    }
+
+    void reconnect_loop() {
+        constexpr std::chrono::milliseconds delays[] = {
+            std::chrono::milliseconds(100), std::chrono::milliseconds(500),
+            std::chrono::seconds(1), std::chrono::seconds(5)
+        };
+        std::size_t delay = 0;
+        for(;;) {
+            std::shared_ptr<sx::comm::Client> current;
+            {
+                std::unique_lock lock(mutex_);
+                if(stopping_) return;
+                current = client_;
+                if(!current) {
+                    condition_.wait_for(lock, delays[delay], [this] { return stopping_; });
+                    if(stopping_) return;
+                }
+            }
+
+            if(current) {
+                pollfd descriptor{current->native_handle(), POLLHUP | POLLERR, 0};
+                const int result = ::poll(&descriptor, 1, 250);
+                if(result > 0 && (descriptor.revents & (POLLHUP | POLLERR | POLLNVAL))) {
+                    disconnect(current);
+                }
+                continue;
+            }
+
+            const int fd = connect_seqpacket(path_);
+            if(fd < 0) {
+                delay = std::min(delay + 1, std::size_t{3});
+                continue;
+            }
+            auto replacement = make_client(fd);
+            ::close(fd);
+            if(!replacement) continue;
+            {
+                std::lock_guard lock(mutex_);
+                if(stopping_) return;
+                client_ = std::move(replacement);
+                counters_->connected.store(true, std::memory_order_relaxed);
+                counters_->reconnects.fetch_add(1, std::memory_order_relaxed);
+            }
+            delay = 0;
+        }
+    }
+
+    std::string path_;
+    std::shared_ptr<SharedStats> counters_;
+    std::mutex mutex_;
+    std::condition_variable condition_;
+    std::shared_ptr<sx::comm::Client> client_;
+    bool stopping_ = false;
+    std::thread worker_;
+};
+
 class ExportOperation final : public sx::comm::Operation {
 public:
     ExportOperation(sx::comm::gre::Profile profile, std::shared_ptr<SharedStats> counters)
@@ -136,13 +255,14 @@ private:
 };
 
 int serve_connection(int fd, const sx::comm::gre::Profile& profile,
-                     const std::shared_ptr<SharedStats>& counters) {
+                     const std::shared_ptr<SharedStats>& counters,
+                     const std::function<bool()>& stop = {}) {
     sx::comm::Server server(fd);
     if(server.register_operation(gre_frame_opcode,
                                  std::make_shared<ExportOperation>(profile, counters)) != 0) {
         return -1;
     }
-    return server.run();
+    return stop ? server.run_until(stop) : server.run();
 }
 
 [[noreturn]] void broker_entry(int fd, sx::comm::gre::Profile profile,
@@ -174,8 +294,23 @@ int start_local_broker(Profile profile) {
     auto sink = std::make_shared<SocketTransport>(channels[0], counters);
     ::close(channels[0]);
     shared_stats = std::move(counters);
+    shared_stats->connected.store(true, std::memory_order_relaxed);
     installed_transport = std::move(sink);
     broker_pid = child;
+    broker_stopping.store(false, std::memory_order_relaxed);
+    broker_monitor = std::thread([child] {
+        int status = 0;
+        pid_t result;
+        do { result = ::waitpid(child, &status, 0); } while(result < 0 && errno == EINTR);
+        broker_wait_status.store(result == child ? status : -1, std::memory_order_relaxed);
+        std::function<void()> handler;
+        {
+            std::lock_guard lock(state_mutex);
+            if(shared_stats) shared_stats->connected.store(false, std::memory_order_relaxed);
+            if(!broker_stopping.load(std::memory_order_relaxed)) handler = internal_failure_handler;
+        }
+        if(handler) handler();
+    });
     return 0;
 }
 
@@ -185,7 +320,7 @@ int connect_external_broker(const std::string& path) {
     const int fd = connect_seqpacket(path);
     if(fd < 0) return -1;
     auto counters = std::make_shared<SharedStats>();
-    auto sink = std::make_shared<SocketTransport>(fd, counters);
+    auto sink = std::make_shared<ReconnectingTransport>(path, fd, counters);
     ::close(fd);
     shared_stats = std::move(counters);
     installed_transport = std::move(sink);
@@ -193,15 +328,24 @@ int connect_external_broker(const std::string& path) {
 }
 
 int stop_local_broker() {
-    std::lock_guard lock(state_mutex);
-    installed_transport.reset();
-    shared_stats.reset();
-    if(broker_pid <= 0) return 0;
-    int status = 0;
-    pid_t result;
-    do { result = ::waitpid(broker_pid, &status, 0); } while(result < 0 && errno == EINTR);
-    broker_pid = -1;
-    return result >= 0 && WIFEXITED(status) && WEXITSTATUS(status) == EXIT_SUCCESS ? 0 : -1;
+    std::shared_ptr<socle::traflog::GreTransport> transport_to_close;
+    bool owned = false;
+    {
+        std::lock_guard lock(state_mutex);
+        broker_stopping.store(true, std::memory_order_relaxed);
+        transport_to_close = std::move(installed_transport);
+        owned = broker_pid > 0;
+    }
+    transport_to_close.reset();
+    if(broker_monitor.joinable()) broker_monitor.join();
+    const int status = broker_wait_status.load(std::memory_order_relaxed);
+    {
+        std::lock_guard lock(state_mutex);
+        shared_stats.reset();
+        broker_pid = -1;
+    }
+    if(!owned) return 0;
+    return status >= 0 && WIFEXITED(status) && WEXITSTATUS(status) == EXIT_SUCCESS ? 0 : -1;
 }
 
 int run_standalone_broker(const std::string& path, Profile profile) {
@@ -224,7 +368,8 @@ int run_standalone_broker(const std::string& path, Profile profile) {
             result = -1;
             break;
         }
-        if(serve_connection(client, profile, counters) < 0 && errno != ECONNRESET) result = -1;
+        if(serve_connection(client, profile, counters, [] { return stop_requested != 0; }) < 0
+           && errno != ECONNRESET) result = -1;
         ::close(client);
         if(result != 0) break;
     }
@@ -246,7 +391,19 @@ Stats stats() noexcept {
     return {shared_stats->submitted.load(std::memory_order_relaxed),
             shared_stats->dropped.load(std::memory_order_relaxed),
             shared_stats->exported.load(std::memory_order_relaxed),
-            shared_stats->errors.load(std::memory_order_relaxed)};
+            shared_stats->errors.load(std::memory_order_relaxed),
+            shared_stats->reconnects.load(std::memory_order_relaxed),
+            shared_stats->connected.load(std::memory_order_relaxed)};
+}
+
+void set_internal_failure_handler(std::function<void()> handler) {
+    std::lock_guard lock(state_mutex);
+    internal_failure_handler = std::move(handler);
+}
+
+pid_t owned_broker_pid() noexcept {
+    std::lock_guard lock(state_mutex);
+    return broker_pid;
 }
 
 } // namespace sx::comm::gre

@@ -88,6 +88,8 @@
 
 namespace {
 
+std::atomic<bool> gre_broker_failed{false};
+
 int drop_process_identity(const std::string& run_as) {
     if(geteuid() != 0) {
         errno = EPERM;
@@ -712,6 +714,13 @@ int main(int argc, char *argv[]) {
 
     }
 
+    sx::comm::gre::set_internal_failure_handler([] {
+        gre_broker_failed.store(true, std::memory_order_relaxed);
+        Log::get()->events().insert(
+            CRI, "internal GRE broker terminated unexpectedly; shutting down Smithproxy");
+        SmithProxy::instance().terminate_flag = true;
+    });
+
     const auto run_as = resolve_run_as(command_line_run_as);
     if(prepare_privilege_separation(*this_daemon, CfgFactory::get()->config_file, run_as,
                                     command_line_comm_gre) != 0) {
@@ -780,7 +789,8 @@ int main(int argc, char *argv[]) {
     DaemonFactory::generate_crashlog = false;
     #endif
 
-    return EXIT_SUCCESS;
+    return gre_broker_failed.load(std::memory_order_relaxed)
+        ? EXIT_FAILURE : EXIT_SUCCESS;
 }
 
 

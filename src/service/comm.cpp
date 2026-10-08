@@ -155,6 +155,28 @@ int Server::run() {
     }
 }
 
+int Server::run_until(const std::function<bool()>& stop,
+                      std::chrono::milliseconds poll_interval) {
+    if(!stop || poll_interval.count() < 1) { errno = EINVAL; return -1; }
+    while(!stop()) {
+        pollfd descriptor{channel_.fd(), POLLIN, 0};
+        const int timeout = static_cast<int>(
+            std::min<std::int64_t>(poll_interval.count(), INT_MAX));
+        int ready;
+        do { ready = ::poll(&descriptor, 1, timeout); } while(ready < 0 && errno == EINTR);
+        if(ready < 0) return -1;
+        if(ready == 0) continue;
+        if((descriptor.revents & (POLLIN | POLLHUP | POLLERR)) == 0) {
+            errno = EIO;
+            return -1;
+        }
+        const int result = serve_once();
+        if(result <= 0) { shutdown_operations(); return result; }
+    }
+    shutdown_operations();
+    return 0;
+}
+
 void Server::shutdown_operations() noexcept {
     if(shutdown_complete_) return;
     std::unordered_set<Operation*> invoked;

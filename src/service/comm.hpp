@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -41,6 +42,7 @@ public:
     // turns the channel into a blocking dataplane dependency.
     int notify(std::uint8_t opcode, const std::string& payload, int passed_fd = -1);
     int set_nonblocking();
+    [[nodiscard]] int native_handle() const noexcept { return channel_.fd(); }
 
 private:
     int wait_readable() const;
@@ -58,6 +60,8 @@ public:
     virtual ~Server();
 
     int run();
+    int run_until(const std::function<bool()>& stop,
+                  std::chrono::milliseconds poll_interval = std::chrono::milliseconds(250));
     int serve_once();
     int register_operation(std::uint8_t opcode, std::shared_ptr<Operation> operation);
 
