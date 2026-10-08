@@ -684,6 +684,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
             add_test(NAME unit.reloadable COMMAND sx_gtests_reloadable)
             add_test(NAME unit.privsep COMMAND sx_gtests_privsep)
             add_test(NAME unit.file_privsep COMMAND sx_gtests_file_privsep)
+            add_test(NAME unit.gre_broker COMMAND sx_gtests_gre_broker)
+            add_test(NAME unit.cli_broker COMMAND sx_gtests_cli_broker)
             add_test(NAME unit.api_broker COMMAND sx_gtests_api_broker)
             add_test(NAME integration.tls_testbed COMMAND tls_testbed)
             add_test(NAME integration.transfer_testbed COMMAND transfer_testbed)
@@ -708,6 +710,9 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
             set_tests_properties(
                     unit.core unit.http1 unit.startstoptls unit.httpconnect unit.reloadable
                     PROPERTIES LABELS "native;unit")
+            set_tests_properties(
+                    unit.privsep unit.file_privsep unit.gre_broker unit.cli_broker unit.api_broker
+                    PROPERTIES LABELS "native;unit;security;privsep")
             set_tests_properties(
                     integration.tls_testbed integration.transfer_testbed integration.quic_testbed
                     PROPERTIES LABELS "native;integration")
