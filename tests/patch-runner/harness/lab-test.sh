@@ -355,7 +355,7 @@ if [[ $PRIVSEP_TEST == 1 ]]; then
     [[ $(stat -c %a "$internal_pid") == 644 ]]
     echo 'PASS privsep PID: root helper created the private PID file'
 
-    { printf 'enable\r\ndiag priv stats\r\ndiag priv comm cli stats\r\nsave config\r\nexecute reload\r\n'; sleep 1; printf 'quit\r\n'; } | \
+    { printf 'enable\r\ndiag sys priv stats\r\ndiag sys cli stats\r\nsave config\r\nexecute reload\r\n'; sleep 1; printf 'quit\r\n'; } | \
         timeout 8 ip netns exec "$NS" nc 127.0.0.1 50000 > "$ROOT/results/privsep-stats.txt" 2>&1
     grep -q 'user: nobody' "$ROOT/results/privsep-stats.txt"
     grep -q "uid: $nobody_uid" "$ROOT/results/privsep-stats.txt"
