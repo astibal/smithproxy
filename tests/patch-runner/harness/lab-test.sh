@@ -341,13 +341,49 @@ if [[ $PRIVSEP_TEST == 1 ]]; then
     # File and socket privilege helpers plus the internal CLI broker are
     # mandatory. API and GRE brokers add children when enabled by the profile.
     [[ ${#helpers[@]} -ge 3 ]]
-    core_uid=$(awk '/^Uid:/ { print $2 }' "/proc/$proxy_pid/status")
+    core_uid=
+    for attempt in $(seq 1 100); do
+        core_uid=$(awk '/^Uid:/ { print $2 }' "/proc/$proxy_pid/status")
+        [[ $core_uid == "$nobody_uid" ]] && break
+        kill -0 "$proxy_pid"
+        sleep 0.05
+    done
     [[ $core_uid == "$nobody_uid" ]]
+    core_netns=$(readlink "/proc/$proxy_pid/ns/net")
+    core_netns_id=$(stat -Lc '%d:%i' "/proc/$proxy_pid/ns/net")
+    named_netns_id=$(stat -Lc '%d:%i' "/run/netns/$NS")
+    host_netns_id=$(stat -Lc '%d:%i' /proc/self/ns/net)
+    [[ $core_netns_id == "$named_netns_id" ]]
+    [[ $core_netns_id != "$host_netns_id" ]]
+
+    mapfile -t namespace_interfaces < <(
+        ip -n "$NS" -o link show | awk -F': ' '{ print $2 }' | cut -d@ -f1 | sort
+    )
+    mapfile -t expected_interfaces < <(printf '%s\n' lo "$IN_IF" "$OUT_IF" | sort)
+    [[ ${namespace_interfaces[*]} == "${expected_interfaces[*]}" ]]
+
+    mapfile -t core_capabilities < <(
+        awk '/^Cap(Inh|Prm|Eff|Amb):/ { print $1, $2 }' "/proc/$proxy_pid/status"
+    )
+    [[ ${#core_capabilities[@]} -eq 4 ]]
+    for capability_record in "${core_capabilities[@]}"; do
+        read -r capability value <<<"$capability_record"
+        [[ $value == 0000000000000000 ]]
+    done
+
     for helper_pid in "${helpers[@]}"; do
         helper_uid=$(awk '/^Uid:/ { print $2 }' "/proc/$helper_pid/status")
         [[ $helper_uid == 0 ]]
+        [[ $(stat -Lc '%d:%i' "/proc/$helper_pid/ns/net") == "$core_netns_id" ]]
     done
     echo "PASS privsep identity: core uid=$core_uid, root helpers/brokers=${helpers[*]}"
+    echo "PASS privsep capabilities: unprivileged core has no inheritable, permitted, effective or ambient capabilities"
+
+    if timeout 1 ip netns exec "$NS" nc -z 127.0.0.1 "$API_RELAY_PORT" >/dev/null 2>&1; then
+        echo 'FAIL: closed Smithproxy namespace reached the host-side API relay' >&2
+        exit 1
+    fi
+    echo "PASS privsep closed namespace: netns=$core_netns interfaces=${namespace_interfaces[*]}; host loopback is unreachable"
 
     internal_pid="$ROOT/data/run/smithproxy.default.pid"
     [[ -s $internal_pid ]]
