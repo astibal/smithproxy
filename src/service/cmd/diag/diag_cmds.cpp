@@ -1137,8 +1137,8 @@ int cli_diag_priv_stats(DiagCli* cli, const char* command, char* argv[], int arg
     return CLI_OK;
 }
 
-int cli_diag_workers_comm_gre_stats(DiagCli* cli, const char* command,
-                                    char* argv[], int argc) {
+int cli_diag_priv_comm_gre_stats(DiagCli* cli, const char* command,
+                                 char* argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
     using sx::comm::gre::Mode;
     const auto mode = sx::comm::gre::mode();
@@ -1188,8 +1188,8 @@ void append_stream_broker_stats(std::ostringstream& output,
            << "  bytes from core: " << stats.bytes_from_core;
 }
 
-int cli_diag_workers_comm_cli_stats(DiagCli* cli, const char* command,
-                                    char* argv[], int argc) {
+int cli_diag_priv_comm_cli_stats(DiagCli* cli, const char* command,
+                                 char* argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
     const bool external = sx::comm::cli::uses_external_broker();
     std::ostringstream output;
@@ -1206,8 +1206,8 @@ int cli_diag_workers_comm_cli_stats(DiagCli* cli, const char* command,
     return CLI_OK;
 }
 
-int cli_diag_workers_comm_api_stats(DiagCli* cli, const char* command,
-                                    char* argv[], int argc) {
+int cli_diag_priv_comm_api_stats(DiagCli* cli, const char* command,
+                                 char* argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
     const bool external = sx::comm::api::uses_external_broker();
     const auto pid = sx::comm::api::internal_broker_pid();
@@ -1227,8 +1227,8 @@ int cli_diag_workers_comm_api_stats(DiagCli* cli, const char* command,
     return CLI_OK;
 }
 
-int cli_diag_workers_comm_webhook_stats(DiagCli* cli, const char* command,
-                                        char* argv[], int argc) {
+int cli_diag_priv_comm_webhook_stats(DiagCli* cli, const char* command,
+                                     char* argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
     std::ostringstream output;
     output << "Webhook communication worker:\n";
@@ -2780,6 +2780,15 @@ void register_diags(libcli2::Cli& native) {
                                            "privileged helper diagnostics");
     diag_register_command(cli, diag_priv, "stats", cli_diag_priv_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC,
                           "display effective identity and privileged helper statistics");
+    auto diag_priv_comm = diag_register_command(cli, diag_priv, "comm", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "communication broker diagnostics");
+        auto diag_priv_comm_gre = diag_register_command(cli, diag_priv_comm, "gre", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "GRE communication broker diagnostics");
+            diag_register_command(cli, diag_priv_comm_gre, "stats", cli_diag_priv_comm_gre_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display GRE transport and broker statistics");
+        auto diag_priv_comm_cli = diag_register_command(cli, diag_priv_comm, "cli", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "CLI communication broker diagnostics");
+            diag_register_command(cli, diag_priv_comm_cli, "stats", cli_diag_priv_comm_cli_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display CLI broker statistics");
+        auto diag_priv_comm_api = diag_register_command(cli, diag_priv_comm, "api", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "API communication broker diagnostics");
+            diag_register_command(cli, diag_priv_comm_api, "stats", cli_diag_priv_comm_api_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display API broker statistics");
+        auto diag_priv_comm_webhook = diag_register_command(cli, diag_priv_comm, "webhook", nullptr, PRIVILEGE_PRIVILEGED, MODE_EXEC, "webhook communication broker diagnostics");
+            diag_register_command(cli, diag_priv_comm_webhook, "stats", cli_diag_priv_comm_webhook_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display webhook transport statistics");
     auto diag_ssl = diag_register_command(cli, diag, "tls", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "ssl related troubleshooting commands");
     auto diag_ssl_cache = diag_register_command(cli, diag_ssl, "cache", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose ssl certificate cache");
     diag_register_command(cli, diag_ssl_cache, "stats", cli_diag_ssl_cache_stats, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "display ssl cert cache statistics");
@@ -2819,18 +2828,6 @@ void register_diags(libcli2::Cli& native) {
             diag_register_command(cli, diag_workers_proxy, "list", cli_diag_worker_proxy_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,  "list worker threads");
         auto diag_workers_pool = diag_register_command(cli, diag_workers, "pool", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "misc task worker and threads diagnostics");
             diag_register_command(cli, diag_workers_pool, "list", cli_diag_worker_pool_list, PRIVILEGE_PRIVILEGED, MODE_EXEC,  "list misc pool worker threads");
-        auto diag_workers_comm = diag_register_command(cli, diag_workers, "comm", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "communication worker diagnostics");
-            auto diag_workers_comm_gre = diag_register_command(cli, diag_workers_comm, "gre", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "GRE communication worker diagnostics");
-                diag_register_command(cli, diag_workers_comm_gre, "stats", cli_diag_workers_comm_gre_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display GRE transport and broker statistics");
-            auto diag_workers_comm_cli = diag_register_command(cli, diag_workers_comm, "cli", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "CLI communication worker diagnostics");
-                diag_register_command(cli, diag_workers_comm_cli, "stats", cli_diag_workers_comm_cli_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display CLI broker statistics");
-            auto diag_workers_comm_api = diag_register_command(cli, diag_workers_comm, "api", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "API communication worker diagnostics");
-                diag_register_command(cli, diag_workers_comm_api, "stats", cli_diag_workers_comm_api_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display API broker statistics");
-            auto diag_workers_comm_webhook = diag_register_command(cli, diag_workers_comm, "webhook", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "webhook communication worker diagnostics");
-                diag_register_command(cli, diag_workers_comm_webhook, "stats", cli_diag_workers_comm_webhook_stats, PRIVILEGE_PRIVILEGED, MODE_EXEC, "display webhook transport statistics");
-
-
-
 #ifndef USE_OPENSSL11
         auto diag_ssl_memcheck = diag_register_command(cli, diag_ssl, "memcheck", nullptr, PRIVILEGE_UNPRIVILEGED, MODE_EXEC, "diagnose openssl memcheck");
             diag_register_command(cli, diag_ssl_memcheck, "list", cli_diag_ssl_memcheck_list, PRIVILEGE_PRIVILEGED, MODE_EXEC, "print out OpenSSL memcheck status");
