@@ -207,7 +207,10 @@ class mitm_transport::impl {
         bool upstream_exit_forwarded = false;
         bool closing = false;
         channel_mode mode = channel_mode::none;
+        ssh_channel_callbacks_struct upstream_callbacks{};
         ssh_channel_callbacks_struct downstream_callbacks{};
+        bool downstream_eof_received = false;
+        bool upstream_eof_received = false;
         bool agent_request_pending = false;
         bool agent_request_forwarded = false;
         bool expects_exit_state = false;
@@ -221,6 +224,14 @@ class mitm_transport::impl {
             if (upstream) ssh_channel_free(upstream);
         }
     };
+
+    static void receive_downstream_eof(ssh_session, ssh_channel, void* userdata) {
+        static_cast<channel_pair*>(userdata)->downstream_eof_received = true;
+    }
+
+    static void receive_upstream_eof(ssh_session, ssh_channel, void* userdata) {
+        static_cast<channel_pair*>(userdata)->upstream_eof_received = true;
+    }
 
     static void receive_agent_request(ssh_session, ssh_channel, void* userdata) {
         auto& channel = *static_cast<channel_pair*>(userdata);
@@ -696,9 +707,18 @@ public:
             ssh_session session, int type, char const* destination_address,
             int destination_port, char const* originator_address, int originator_port) {
         auto channel = std::make_unique<channel_pair>();
+        channel->owner = this;
         channel->upstream = ssh_channel_new(session);
         if (!channel->upstream) return nullptr;
         ssh_channel_set_blocking(channel->upstream, 0);
+        ssh_callbacks_init(&channel->upstream_callbacks);
+        channel->upstream_callbacks.userdata = channel.get();
+        channel->upstream_callbacks.channel_eof_function = &impl::receive_upstream_eof;
+        channel->upstream_callbacks.channel_close_function = &impl::receive_upstream_eof;
+        if (ssh_set_channel_callbacks(channel->upstream,
+                                      &channel->upstream_callbacks) != SSH_OK) {
+            return nullptr;
+        }
         channel->type = type;
         channel->destination_address = destination_address ? destination_address : "";
         channel->destination_port = destination_port;
@@ -719,6 +739,16 @@ public:
                 return drive_result::failed;
             }
             ssh_channel_set_blocking(channel.downstream, 0);
+            ssh_callbacks_init(&channel.downstream_callbacks);
+            channel.downstream_callbacks.userdata = &channel;
+            channel.downstream_callbacks.channel_eof_function = &impl::receive_downstream_eof;
+            channel.downstream_callbacks.channel_close_function = &impl::receive_downstream_eof;
+            if (ssh_set_channel_callbacks(channel.downstream,
+                                          &channel.downstream_callbacks) != SSH_OK) {
+                set_error(libssh_error(downstream_,
+                    "cannot install downstream SSH channel callbacks"));
+                return drive_result::failed;
+            }
         }
 
         int result = SSH_ERROR;
@@ -780,6 +810,21 @@ public:
                 return drive_result::failed;
             }
             ssh_channel_set_blocking(opening_channel_->upstream, 0);
+            ssh_callbacks_init(&opening_channel_->upstream_callbacks);
+            opening_channel_->upstream_callbacks.userdata = opening_channel_.get();
+            opening_channel_->upstream_callbacks.channel_eof_function =
+                &impl::receive_upstream_eof;
+            opening_channel_->upstream_callbacks.channel_close_function =
+                &impl::receive_upstream_eof;
+            if (ssh_set_channel_callbacks(
+                    opening_channel_->upstream,
+                    &opening_channel_->upstream_callbacks) != SSH_OK) {
+                set_error(libssh_error(upstream_,
+                    "cannot install upstream SSH channel callbacks"));
+                ssh_message_free(message);
+                opening_channel_.reset();
+                return drive_result::failed;
+            }
             pending_open_message_ = message;
             opening_channel_->type = type;
         }
@@ -818,19 +863,23 @@ public:
             return drive_result::failed;
         }
         ssh_channel_set_blocking(opening_channel_->downstream, 0);
+        ssh_callbacks_init(&opening_channel_->downstream_callbacks);
+        opening_channel_->downstream_callbacks.userdata = opening_channel_.get();
+        opening_channel_->downstream_callbacks.channel_eof_function =
+            &impl::receive_downstream_eof;
+        opening_channel_->downstream_callbacks.channel_close_function =
+            &impl::receive_downstream_eof;
         if (opening_channel_->type == SSH_CHANNEL_SESSION) {
-            ssh_callbacks_init(&opening_channel_->downstream_callbacks);
-            opening_channel_->downstream_callbacks.userdata = opening_channel_.get();
             opening_channel_->downstream_callbacks.channel_auth_agent_req_function =
                 &impl::receive_agent_request;
-            if (ssh_set_channel_callbacks(
-                    opening_channel_->downstream,
-                    &opening_channel_->downstream_callbacks) != SSH_OK) {
-                set_error(libssh_error(downstream_,
-                    "cannot install downstream SSH channel callbacks"));
-                opening_channel_.reset();
-                return drive_result::failed;
-            }
+        }
+        if (ssh_set_channel_callbacks(
+                opening_channel_->downstream,
+                &opening_channel_->downstream_callbacks) != SSH_OK) {
+            set_error(libssh_error(downstream_,
+                "cannot install downstream SSH channel callbacks"));
+            opening_channel_.reset();
+            return drive_result::failed;
         }
         xdia(transport_log())("%s channel opened on both SSH legs",
                               opening_channel_->type == SSH_CHANNEL_SESSION
@@ -1142,8 +1191,7 @@ public:
             // libssh 0.10 has no non-blocking exit-state API. Query its
             // status only after EOF/close, when no more channel metadata can
             // arrive. Exit signals cannot be forwarded by this older API.
-            if (ssh_channel_is_eof(channel.upstream)
-                || ssh_channel_is_closed(channel.upstream)) {
+            if (channel.upstream_eof_received) {
                 auto const result = ssh_channel_get_exit_status(channel.upstream);
                 if (result >= 0
                     && ssh_channel_request_send_exit_status(
@@ -1156,14 +1204,10 @@ public:
             }
 #endif
         }
-        if ((ssh_channel_is_closed(channel.downstream)
-             || ssh_channel_is_closed(channel.upstream))
-            && channel.to_upstream.empty() && channel.to_downstream.empty()
-            && channel.stderr_to_downstream.empty()
-            && (!channel.expects_exit_state || channel.upstream_exit_forwarded)) {
-            channel.closing = true;
-            return drive_result::progress;
-        }
+        // Do not collapse a directional EOF/close into a full-duplex close.
+        // The peer may still send its response after our writer half-closes.
+        // Drain both directions and retire the pair through the EOF checks
+        // below instead.
         auto flush = [&progress](ssh_channel channel, std::string& pending,
                                  bool stderr_stream) {
             auto const result = flush_channel_buffer(channel, pending, stderr_stream);
@@ -1204,7 +1248,8 @@ public:
             return drive_result::failed;
         }
 
-        if (ssh_channel_is_eof(channel.downstream) && !channel.downstream_eof_forwarded) {
+        if (channel.downstream_eof_received && !channel.downstream_eof_forwarded
+            && channel.to_upstream.empty()) {
             if (ssh_channel_send_eof(channel.upstream) == SSH_ERROR) {
                 set_error("cannot forward downstream SSH EOF");
                 return drive_result::failed;
@@ -1212,7 +1257,7 @@ public:
             channel.downstream_eof_forwarded = true;
             progress = true;
         }
-        if (ssh_channel_is_eof(channel.upstream) && !channel.upstream_eof_forwarded
+        if (channel.upstream_eof_received && !channel.upstream_eof_forwarded
             && channel.to_downstream.empty() && channel.stderr_to_downstream.empty()) {
             if (ssh_channel_send_eof(channel.downstream) == SSH_ERROR) {
                 set_error("cannot forward upstream SSH EOF");
@@ -1302,7 +1347,7 @@ public:
                 && channel->stderr_to_downstream.empty();
             auto const closed = ssh_channel_is_closed(channel->upstream)
                 && ssh_channel_is_closed(channel->downstream);
-            if (drained && closed) {
+            if (channel->closing && drained && closed) {
                 emit_event(false, "ssh event=channel-close");
                 retired_channels_.push_back(std::move(*iterator));
                 iterator = channels_.erase(iterator);
