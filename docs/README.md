@@ -9,4 +9,5 @@ For help visit:
 
 Feature documentation:
 
+  * [Automatic PCAPNG capture metadata and diagnostics](capture-metadata.md)
   * [SSH MITM configuration and diagnostics](ssh-mitm.md)

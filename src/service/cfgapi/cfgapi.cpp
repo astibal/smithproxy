@@ -2939,12 +2939,10 @@ bool CfgFactory::prof_content_apply (baseHostCX *originator, MitmProxy *mitm_pro
             mitm_proxy->acct_opts.ja4_clienthello_ignore_sni = pc->ja4_tls_ch_ignore_sni;
             mitm_proxy->acct_opts.ja4_serverhello = pc->ja4_tls_sh;
             mitm_proxy->acct_opts.ja4_http = pc->ja4_http;
-            const bool auto_metadata = pc->write_payload
-                                       and (capture_automation.metadata
-                                            or capture_automation.statistics);
+            const bool auto_metadata = capture_automation.metadata_enabled(pc->write_payload);
             mitm_proxy->writer_opts()->auto_metadata = auto_metadata;
-            mitm_proxy->writer_opts()->auto_statistics = pc->write_payload
-                                                         and capture_automation.statistics;
+            mitm_proxy->writer_opts()->auto_statistics =
+                capture_automation.statistics_enabled(pc->write_payload);
             mitm_proxy->acct_opts.ja4_clienthello |= auto_metadata;
             mitm_proxy->acct_opts.ja4_serverhello |= auto_metadata;
             mitm_proxy->acct_opts.ja4_http |= auto_metadata;
@@ -2976,10 +2974,10 @@ bool CfgFactory::prof_content_apply (baseHostCX *originator, MitmProxy *mitm_pro
         else if(load_if_exists(cfgapi.getRoot()["settings"], "default_write_payload", cfg_wrt)) {
             _dia("policy_apply: global content profile: %d", cfg_wrt);
             mitm_proxy->writer_opts()->write_payload = cfg_wrt;
-            const bool auto_metadata = cfg_wrt and (capture_automation.metadata
-                                                     or capture_automation.statistics);
+            const bool auto_metadata = capture_automation.metadata_enabled(cfg_wrt);
             mitm_proxy->writer_opts()->auto_metadata = auto_metadata;
-            mitm_proxy->writer_opts()->auto_statistics = cfg_wrt and capture_automation.statistics;
+            mitm_proxy->writer_opts()->auto_statistics =
+                capture_automation.statistics_enabled(cfg_wrt);
             mitm_proxy->acct_opts.ja4_clienthello |= auto_metadata;
             mitm_proxy->acct_opts.ja4_serverhello |= auto_metadata;
             mitm_proxy->acct_opts.ja4_http |= auto_metadata;

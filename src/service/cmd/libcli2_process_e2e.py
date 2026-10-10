@@ -412,7 +412,7 @@ auth_profiles = {
                     "Response: 600:webhook response exceeds configured limit")
             require(output, "Response: 600:webhook response exceeds configured limit")
             diag_roots = cli.tab("diag ")
-            for root in ("tls", "sig", "workers", "mem", "dns", "proxy", "writer", "api", "neighbor"):
+            for root in ("tls", "sig", "workers", "mem", "dns", "proxy", "writer", "capture", "api", "neighbor"):
                 require(diag_roots, root)
             require(cli.command_ok("diag tls cache stats"), "certificate store")
             require(cli.command_ok("diag tls cache list"), "'pki.cert.mitm' certificate store entries")
@@ -422,6 +422,8 @@ auth_profiles = {
             cli.command_ok("diag dns cache stats")
             cli.command_ok("diag proxy policy list")
             require(cli.command_ok("diag writer stats"), "Pending ops:")
+            require(cli.command_ok("diag capture status"), "Capture enrichment:")
+            require(cli.command_ok("diag capture schemas"), "smithproxy.tls.v1")
             require(cli.command_ok("diag api info"), "API keys")
             cli.command_ok("diag neighbor stats")
 
@@ -466,7 +468,7 @@ auth_profiles = {
                 "diag proxy session active", "diag proxy io list",
                 "diag proxy session list active tls io-all nonames ips 8 ignored",
                 "diag proxy quic list",
-                "diag writer stats", "diag api info",
+                "diag writer stats", "diag capture status", "diag capture schemas", "diag api info",
                 "diag neighbor list", "diag neighbor stats", "diag neighbor clear",
                 "diag neighbor webhook-update-all", "diag neighbor webhook-update-ping",
             ):

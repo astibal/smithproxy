@@ -1075,6 +1075,49 @@ int cli_diag_writer_stats(DiagCli *cli, const char *command, char *argv[], int a
     return CLI_OK;
 }
 
+int cli_diag_capture_status(DiagCli *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+
+    auto const config = CfgFactory::get();
+    auto const stats = MitmProxy::capture_diagnostics();
+    cli_print(cli,
+              "Capture enrichment:\n"
+              "  auto metadata: %s\n"
+              "  auto statistics: %s%s\n"
+              "  local capture: %s\n"
+              "  remote capture: %s (%s)\n"
+              "Blocks written:\n"
+              "  SXME: %llu\n"
+              "  SXST: %llu\n"
+              "  SXTL: %llu\n"
+              "TLS snapshots:\n"
+              "  L ready: %llu\n"
+              "  R ready: %llu\n",
+              config->capture_automation.metadata ? "enabled" : "disabled",
+              config->capture_automation.statistics ? "enabled" : "disabled",
+              config->capture_automation.statistics ? " (implies metadata)" : "",
+              config->capture_local.enabled ? "enabled" : "disabled",
+              config->capture_remote.enabled ? "enabled" : "disabled",
+              config->capture_remote.gre_format.c_str(),
+              static_cast<unsigned long long>(stats.sxme_written),
+              static_cast<unsigned long long>(stats.sxst_written),
+              static_cast<unsigned long long>(stats.sxtl_written),
+              static_cast<unsigned long long>(stats.tls_left_ready),
+              static_cast<unsigned long long>(stats.tls_right_ready));
+    return CLI_OK;
+}
+
+int cli_diag_capture_schemas(DiagCli *cli, const char *command, char *argv[], int argc) {
+    debug_cli_params(cli, command, argv, argc);
+    return cli_print(cli,
+                     "Capture metadata schemas:\n"
+                     "  PEN: 67005\n"
+                     "  block: 0x40000BAD (PCAPNG non-copyable Custom Block)\n"
+                     "  SXME type=1 version=1 schema=smithproxy.metadata.v1\n"
+                     "  SXST type=1 version=1 schema=smithproxy.statistics.v1\n"
+                     "  SXTL type=1 version=1 schema=smithproxy.tls.v1\n");
+}
+
 int cli_diag_priv_stats(DiagCli* cli, const char* command, char* argv[], int argc) {
     debug_cli_params(cli, command, argv, argc);
 
@@ -2758,6 +2801,16 @@ void register_diags(libcli2::Cli& native) {
 
     auto diag_writer = diag_register_command(cli,diag,"writer",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"file writer diags");
     diag_register_command(cli,diag_writer,"stats",cli_diag_writer_stats,PRIVILEGE_PRIVILEGED, MODE_EXEC,"file writer statistics");
+
+    auto diag_capture = diag_register_command(cli, diag, "capture", nullptr,
+                                              PRIVILEGE_PRIVILEGED, MODE_EXEC,
+                                              "capture metadata diagnostics");
+    diag_register_command(cli, diag_capture, "status", cli_diag_capture_status,
+                          PRIVILEGE_PRIVILEGED, MODE_EXEC,
+                          "display capture enrichment configuration and counters");
+    diag_register_command(cli, diag_capture, "schemas", cli_diag_capture_schemas,
+                          PRIVILEGE_PRIVILEGED, MODE_EXEC,
+                          "display registered capture metadata schemas");
 
     auto diag_api = diag_register_command(cli,diag,"api",nullptr,PRIVILEGE_PRIVILEGED, MODE_EXEC,"http api info");
     diag_register_command(cli, diag_api, "info", cli_diag_api_info, PRIVILEGE_PRIVILEGED, MODE_EXEC,

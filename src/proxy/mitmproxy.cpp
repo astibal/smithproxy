@@ -43,11 +43,10 @@
 #include <chrono>
 #include <thread>
 #include <memory>
-#include <openssl/evp.h>
 #include <openssl/rand.h>
-#include <openssl/x509.h>
 
 #include <proxy/mitmproxy.hpp>
+#include <proxy/capture_enrichment.hpp>
 #include <proxy/mitmhost.hpp>
 #include <proxy/streamhandler.hpp>
 #include <proxy/mitmproxy_utils.hpp>
@@ -77,38 +76,22 @@
 
 using namespace socle;
 
+namespace sx::capture {
+
 namespace {
 
-std::string x509_common_name(X509_NAME* name) {
-    if(!name) return {};
-    std::array<char, 512> value{};
-    return X509_NAME_get_text_by_NID(
-               name, NID_commonName, value.data(), value.size() - 1) < 0
-           ? std::string{} : std::string(value.data());
-}
-
-nlohmann::json capture_peer_certificate(SSL* ssl) {
+nlohmann::json peer_certificate_from_ssl(SSL* ssl) {
     nlohmann::json result;
     if(!ssl) return result;
 
     std::unique_ptr<X509, decltype(&X509_free)> certificate(
         SSL_get_peer_certificate(ssl), X509_free);
-    if(!certificate) return result;
-
-    std::array<unsigned char, EVP_MAX_MD_SIZE> digest{};
-    unsigned int digest_size = 0;
-    if(X509_digest(certificate.get(), EVP_sha256(), digest.data(), &digest_size) == 1) {
-        result["sha256"] = hex_print(digest.data(), digest_size);
-    }
-
-    auto subject_cn = x509_common_name(X509_get_subject_name(certificate.get()));
-    auto issuer_cn = x509_common_name(X509_get_issuer_name(certificate.get()));
-    if(!subject_cn.empty()) result["subject_cn"] = std::move(subject_cn);
-    if(!issuer_cn.empty()) result["issuer_cn"] = std::move(issuer_cn);
-    return result;
+    return certificate ? peer_certificate(certificate.get()) : result;
 }
 
-nlohmann::json capture_tls_leg(SSLCom const& com, bool include_verify) {
+} // namespace
+
+nlohmann::json tls_leg(SSLCom const& com, bool include_verify) {
     nlohmann::json result = {
         {"role", com.is_server() ? "server" : "client"},
         {"state", "ready"},
@@ -142,7 +125,7 @@ nlohmann::json capture_tls_leg(SSLCom const& com, bool include_verify) {
     }
     result["session_reused"] = SSL_session_reused(ssl) == 1;
 
-    auto certificate = capture_peer_certificate(ssl);
+    auto certificate = peer_certificate_from_ssl(ssl);
     if(!certificate.empty()) result["peer_certificate"] = std::move(certificate);
 
     if(include_verify) {
@@ -165,7 +148,7 @@ nlohmann::json capture_tls_leg(SSLCom const& com, bool include_verify) {
     return result;
 }
 
-} // namespace
+} // namespace sx::capture
 
 MitmProxy::MitmProxy(baseCom* c): baseProxy(c), start_stop_tls_(*this) {
 
@@ -396,6 +379,49 @@ nlohmann::json MitmProxy::capture_identity() const {
     };
 }
 
+std::atomic_uint64_t& MitmProxy::capture_sxme_written() {
+    static std::atomic_uint64_t value{};
+    return value;
+}
+
+std::atomic_uint64_t& MitmProxy::capture_sxst_written() {
+    static std::atomic_uint64_t value{};
+    return value;
+}
+
+std::atomic_uint64_t& MitmProxy::capture_sxtl_written() {
+    static std::atomic_uint64_t value{};
+    return value;
+}
+
+std::atomic_uint64_t& MitmProxy::capture_tls_left_ready() {
+    static std::atomic_uint64_t value{};
+    return value;
+}
+
+std::atomic_uint64_t& MitmProxy::capture_tls_right_ready() {
+    static std::atomic_uint64_t value{};
+    return value;
+}
+
+MitmProxy::CaptureDiagnostics MitmProxy::capture_diagnostics() noexcept {
+    return {
+        capture_sxme_written().load(),
+        capture_sxst_written().load(),
+        capture_sxtl_written().load(),
+        capture_tls_left_ready().load(),
+        capture_tls_right_ready().load(),
+    };
+}
+
+void MitmProxy::reset_capture_diagnostics() noexcept {
+    capture_sxme_written() = 0;
+    capture_sxst_written() = 0;
+    capture_sxtl_written() = 0;
+    capture_tls_left_ready() = 0;
+    capture_tls_right_ready() = 0;
+}
+
 void MitmProxy::write_capture_block(std::array<uint8_t, 4> name_space,
                                     nlohmann::json payload) {
     if(!tlog()) return;
@@ -408,7 +434,15 @@ void MitmProxy::write_capture_block(std::array<uint8_t, 4> name_space,
     block.version = 1;
     block.payload = std::make_shared<buffer>(text.data(), text.size());
     buffer serialized;
-    if(block.append(serialized) != 0U) tlog()->write_metadata(serialized);
+    if(block.append(serialized) == 0U) return;
+    tlog()->write_metadata(serialized);
+    if(name_space == std::array<uint8_t, 4>{'S', 'X', 'M', 'E'}) {
+        capture_sxme_written()++;
+    } else if(name_space == std::array<uint8_t, 4>{'S', 'X', 'S', 'T'}) {
+        capture_sxst_written()++;
+    } else if(name_space == std::array<uint8_t, 4>{'S', 'X', 'T', 'L'}) {
+        capture_sxtl_written()++;
+    }
 }
 
 void MitmProxy::observe_tls_ready() {
@@ -422,19 +456,23 @@ void MitmProxy::observe_tls_ready() {
         if(!tls || tls->opt.bypass || !tls->get_SSL()) return std::nullopt;
         if(tls->sslcom_op_state != SSLCom::sslcom_op_state_t::READY
            && !SSL_is_init_finished(tls->get_SSL())) return std::nullopt;
-        return capture_tls_leg(*tls, include_verify);
+        return sx::capture::tls_leg(*tls, include_verify);
     };
 
-    if(!capture_tls_left_) capture_tls_left_ = observe(first_left(), false);
-    if(!capture_tls_right_) capture_tls_right_ = observe(first_right(), true);
+    if(!capture_tls_left_) {
+        capture_tls_left_ = observe(first_left(), false);
+        if(capture_tls_left_) capture_tls_left_ready()++;
+    }
+    if(!capture_tls_right_) {
+        capture_tls_right_ = observe(first_right(), true);
+        if(capture_tls_right_) capture_tls_right_ready()++;
+    }
     if(!capture_tls_left_ || !capture_tls_right_ || !tlog()) return;
 
-    auto tls = capture_identity();
-    tls["schema"] = "smithproxy.tls.v1";
-    tls["transport"] = session_protocol().empty()
-                       ? "tcp" : std::string(session_protocol());
-    tls["L"] = std::move(*capture_tls_left_);
-    tls["R"] = std::move(*capture_tls_right_);
+    auto tls = sx::capture::tls_payload(
+        capture_identity(),
+        session_protocol().empty() ? "tcp" : std::string(session_protocol()),
+        std::move(*capture_tls_left_), std::move(*capture_tls_right_));
     write_capture_block({'S', 'X', 'T', 'L'}, std::move(tls));
     capture_tls_written_ = true;
 }

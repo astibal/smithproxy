@@ -352,6 +352,13 @@ public:
         bool metadata = false;
         // Entropy and flow/exchange analysis; implies metadata.
         bool statistics = false;
+
+        [[nodiscard]] bool metadata_enabled(bool write_payload) const noexcept {
+            return write_payload && (metadata || statistics);
+        }
+        [[nodiscard]] bool statistics_enabled(bool write_payload) const noexcept {
+            return write_payload && statistics;
+        }
     } capture_automation;
 
     struct settings_webhook_t {

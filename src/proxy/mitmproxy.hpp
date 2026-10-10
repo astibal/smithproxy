@@ -115,6 +115,17 @@ class MitmProxy : public baseProxy, public IOController {
     std::optional<nlohmann::json> capture_tls_right_;
     bool capture_tls_written_ = false;
 public:
+    struct CaptureDiagnostics {
+        uint64_t sxme_written = 0;
+        uint64_t sxst_written = 0;
+        uint64_t sxtl_written = 0;
+        uint64_t tls_left_ready = 0;
+        uint64_t tls_right_ready = 0;
+    };
+
+    [[nodiscard]] static CaptureDiagnostics capture_diagnostics() noexcept;
+    static void reset_capture_diagnostics() noexcept;
+
     using whitelist_verify_entry_t = expiring<whitelist_verify_entry> ;
     using whitelist_map_t = ptr_cache<std::string,whitelist_verify_entry_t>;
 
@@ -302,6 +313,12 @@ public:
     DECLARE_LOGGING(to_string)
 
 private:
+    static std::atomic_uint64_t& capture_sxme_written();
+    static std::atomic_uint64_t& capture_sxst_written();
+    static std::atomic_uint64_t& capture_sxtl_written();
+    static std::atomic_uint64_t& capture_tls_left_ready();
+    static std::atomic_uint64_t& capture_tls_right_ready();
+
     StartStopTls start_stop_tls_;
     logan_lite log {"proxy"};
     logan_lite log_dump {"proxy.payload"};
