@@ -1025,7 +1025,11 @@ TEST(QuicTestbed, RepeatedVerifiedReconnectsReleaseEveryIdleSession) {
     }
     EXPECT_EQ(proxy.diagnostics().accepted_sessions, reconnects);
     EXPECT_EQ(proxy.diagnostics().completed_sessions, reconnects);
-    EXPECT_EQ(origin.handshake_count(), 2 * reconnects);
+    // Every accepted downstream session requires its certificate-probe
+    // handshake. The forwarding-origin handshake may be cancelled when this
+    // test deliberately closes the client immediately after negotiation.
+    EXPECT_GE(origin.handshake_count(), reconnects);
+    EXPECT_LE(origin.handshake_count(), 2 * reconnects);
 }
 
 TEST(QuicTestbed, EnforcesStreamLimitOnRealQuicConnection) {

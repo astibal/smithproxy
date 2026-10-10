@@ -47,6 +47,7 @@
 #include <optional>
 #include <string_view>
 #include <ctime>
+#include <cctype>
 
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -58,6 +59,19 @@
 #include <log/logger.hpp>
 #include <ext/libcidr/cidr.hpp>
 #include <policy/addrobj.hpp>
+
+inline std::string dns_cache_key(std::string_view record_type,
+                                 std::string_view hostname) {
+    while(!hostname.empty() && hostname.back() == '.') hostname.remove_suffix(1);
+    std::string result;
+    result.reserve(record_type.size() + 1 + hostname.size());
+    result.append(record_type);
+    result.push_back(':');
+    for(unsigned char ch: hostname) {
+        result.push_back(static_cast<char>(std::tolower(ch)));
+    }
+    return result;
+}
 #include <socketinfo.hpp>
 #include <inspect/dns.hpp>
 
@@ -146,6 +160,10 @@ struct DNS_Question {
 
 struct DNS_Answer {
     std::string qname_;
+    // Canonical target for name-bearing RDATA (currently CNAME). Keeping the
+    // decoded name allows policy users to validate an answer chain instead of
+    // trusting every address record present in the answer section.
+    std::string rdata_name_;
     uint16_t name_ = 0;
     uint16_t type_ = 0;
     uint16_t class_ = 0;
@@ -265,6 +283,12 @@ public:
         } 
         return std::string("? "); 
     };
+    std::string cache_key_0() const {
+        if(questions_list_.empty()) return {};
+        return dns_cache_key(
+            DNSFactory::dns_record_type_str(question_type_0()),
+            questions_list_.front().rec_str);
+    }
     uint16_t question_type_0() const { if( ! questions_list_.empty() ) { return questions_list_.at(0).rec_type; } return 0; };
     uint16_t question_class_0() const { if( ! questions_list_.empty() ) { return questions_list_.at(0).rec_class; } return 0; };
     

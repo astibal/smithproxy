@@ -212,7 +212,8 @@ TEST(HTTP1, ParsesMethodsParametersHeadersAndInvalidInput) {
     EXPECT_EQ(app->http_data.referer, "https://ref.example/path");
 
     EXPECT_FALSE(v1::find_method(ctx, "BREW /coffee HTTP/1.1\r\n"));
-    EXPECT_FALSE(v1::find_host(ctx, "host: lowercase.example\r\n"));
+    EXPECT_TRUE(v1::find_host(ctx, "host: lowercase.example\r\n"));
+    EXPECT_EQ(app->http_data.host, "lowercase.example");
     EXPECT_FALSE(v1::find_referrer(ctx, "referrer: misspelled\r\n"));
 }
 
@@ -496,7 +497,10 @@ TEST(HTTP2, ReassemblesContinuationOnlyOnTheMatchingStream) {
 
     sx::engine::EngineCtx ctx;
     HPACK::encoder_t encoder;
+    encoder.add(":method", "GET", false);
+    encoder.add(":scheme", "https", false);
     encoder.add(":authority", "continued.example", false);
+    encoder.add(":path", "/", false);
     ASSERT_GT(encoder.data().size(), 2u);
     const auto middle = encoder.data().begin() + encoder.data().size() / 2;
     std::vector<uint8_t> first(encoder.data().begin(), middle);
@@ -526,12 +530,15 @@ TEST(HTTP2, ReassemblesContinuationOnlyOnTheMatchingStream) {
     v2::process_frame(ctx, socle::side_t::LEFT, stale_continuation);
     EXPECT_EQ(connection->streams.count(31), 0u);
 
-    headers = frame(1, 0, 31, first);
-    v2::process_frame(ctx, socle::side_t::LEFT, headers);
-    auto continuation = frame(9, 0x04, 31, second);
-    EXPECT_EQ(v2::process_frame(ctx, socle::side_t::LEFT, continuation), continuation.size());
-    EXPECT_FALSE(connection->request_headers_pending.active());
-    EXPECT_EQ(connection->streams[31].request_header(":authority"), "continued.example");
+    sx::engine::EngineCtx valid_ctx;
+    headers = frame(1, 0, 37, first);
+    v2::process_frame(valid_ctx, socle::side_t::LEFT, headers);
+    auto continuation = frame(9, 0x04, 37, second);
+    EXPECT_EQ(v2::process_frame(valid_ctx, socle::side_t::LEFT, continuation), continuation.size());
+    auto* valid_connection = std::any_cast<v2::Http2Connection>(&valid_ctx.state_data);
+    ASSERT_NE(valid_connection, nullptr);
+    EXPECT_FALSE(valid_connection->request_headers_pending.active());
+    EXPECT_EQ(valid_connection->streams[37].request_header(":authority"), "continued.example");
 }
 
 TEST(HTTP2, RemovesHeadersPaddingBeforeHpackDecode) {

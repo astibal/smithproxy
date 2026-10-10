@@ -39,6 +39,22 @@
 
 #include <inspect/dnsinspector.hpp>
 
+#include <cctype>
+
+namespace {
+bool dns_names_equal(std::string_view left, std::string_view right) {
+    while(!left.empty() && left.back() == '.') left.remove_suffix(1);
+    while(!right.empty() && right.back() == '.') right.remove_suffix(1);
+    if(left.size() != right.size()) return false;
+    for(std::size_t i = 0; i < left.size(); ++i) {
+        const auto l = static_cast<unsigned char>(left[i]);
+        const auto r = static_cast<unsigned char>(right[i]);
+        if(std::tolower(l) != std::tolower(r)) return false;
+    }
+    return true;
+}
+}
+
 
 bool DNS_Inspector::dns_prefilter(AppHostCX *cx) {
     auto port = cx->com()->nonlocal_dst_port();
@@ -108,7 +124,15 @@ void DNS_Inspector::update(AppHostCX* cx) {
     if(last_flow_entry.source() == 'r') {
 
         stage = 0;
-        for (unsigned int it = 0; red < shallow_xbuf.size() && it < 10; it++) {
+        std::size_t messages = 0;
+        while(red < shallow_xbuf.size()) {
+            if(messages >= maximum_outstanding_requests + 1) {
+                _war("DNS_Inspector::update[%s]: too many messages in one input block",
+                     cx->c_type());
+                cx->writebuf()->clear();
+                cx->error(true);
+                break;
+            }
 
             ptr = std::make_shared<DNS_Request>();
 
@@ -124,12 +148,14 @@ void DNS_Inspector::update(AppHostCX* cx) {
 
             auto cur_red = load_status.value();
 
-            // A TCP length prefix defines exactly one DNS message. Trailing data belongs
-            // to the next prefixed frame, not to this parser invocation.
-            if (is_tcp && cur_red != cur_buf.size())
+            // A TCP length prefix and a UDP datagram each define exactly one
+            // DNS message. Never reinterpret trailing UDP bytes as another
+            // transaction: the receiving resolver may ignore them entirely.
+            if (cur_red != cur_buf.size())
                 break;
 
             if (cur_red == 0) { cur_red = cur_buf.size(); }
+            ++messages;
 
             _dia("DNS_Inspector::update[%s]: red  %d, load returned %d", cx->c_type(), red, cur_red);
             _deb("DNS_Inspector::update[%s]: flow: %s", cx->c_type(), cx->flow().hr().c_str());
@@ -138,14 +164,21 @@ void DNS_Inspector::update(AppHostCX* cx) {
 
             red += is_tcp ? cur_buf.size() : cur_red;
 
-            if (requests_[ptr->id()] != nullptr) {
+            auto const request_id = ptr->id();
+            auto existing = requests_.find(request_id);
+            if (existing != requests_.end()) {
                 _not("DNS_Inspector::update[%s]: detected re-sent request", cx->c_type());
-                requests_.erase(ptr->id());
+                requests_.erase(existing);
+            } else if(requests_.size() >= maximum_outstanding_requests) {
+                _war("DNS_Inspector::update[%s]: too many outstanding requests", cx->c_type());
+                cx->writebuf()->clear();
+                cx->error(true);
+                break;
             }
 
             _dia("DNS_Inspector::update[%s]: adding key 0x%x red=%d, buffer_size=%d, ptr=0x%x", cx->c_type(),
-                 ptr->id(), red, cur_buf.size(), ptr.get());
-            requests_[ptr->id()] = std::dynamic_pointer_cast<DNS_Request>(ptr);
+                 request_id, red, cur_buf.size(), ptr.get());
+            requests_.emplace(request_id, std::dynamic_pointer_cast<DNS_Request>(ptr));
 
             _deb("DNS_Inspector::update[%s]: this 0x%x, requests size %d", cx->c_type(), this,
                  requests_.size());
@@ -161,15 +194,43 @@ void DNS_Inspector::update(AppHostCX* cx) {
             verdict(OK);
             cached_response.reset();
 
-            if (opt_cached_responses && (ptr->question_type_0() == A || ptr->question_type_0() == AAAA)) {
+            // The cache key describes exactly one question (type + name).
+            // Reusing it for a multi-question transaction would return a
+            // packet whose question section differs from the client's query.
+            if (opt_cached_responses && ptr->questions().size() == 1 &&
+                ptr->question_class_0() == 1 &&
+                (ptr->question_type_0() == A || ptr->question_type_0() == AAAA)) {
                 auto lc_ = std::scoped_lock(DNS::get_dns_lock());
 
-                auto cached_entry = DNS::get_dns_cache().get(ptr->question_str_0());
+                auto cached_entry = DNS::get_dns_cache().get(ptr->cache_key_0());
                 if (cached_entry != nullptr) {
                     _dia("DNS answer for %s is already in the cache", cached_entry->question_str_0().c_str());
 
+                    // The canonical cache identity intentionally ignores DNS
+                    // case, but a cached wire response must echo the current
+                    // query's spelling for clients using 0x20 case entropy.
+                    // Forward a differently-cased query to the resolver; its
+                    // response will replace this same bounded cache slot.
+                    if(cached_entry->questions().size() != 1 ||
+                       cached_entry->questions().front().rec_str !=
+                           ptr->questions().front().rec_str) {
+                        _dia("cached DNS response has incompatible question spelling");
+                        cached_entry.reset();
+                    }
 
-                    if (cached_entry->cached_packet != nullptr) {
+                    // RD, CD and the query-side AD signal affect resolver
+                    // validation/response semantics but are intentionally not
+                    // part of the compact policy-cache key. A wire response
+                    // may only be reused when those controls match.
+                    constexpr uint16_t cache_control_flags = 0x0130U;
+                    if(cached_entry &&
+                       (cached_entry->flags() & cache_control_flags) !=
+                       (ptr->flags() & cache_control_flags)) {
+                        _dia("cached DNS response has incompatible query controls");
+                        cached_entry.reset();
+                    }
+
+                    if (cached_entry && cached_entry->cached_packet != nullptr) {
 
                         // do TTL check
                         _dia("cached entry TTL check");
@@ -219,9 +280,18 @@ void DNS_Inspector::update(AppHostCX* cx) {
     else if (last_flow_entry.source() == 'w') {
 
         stage = 1;
-        for (unsigned int it = 0; red < shallow_xbuf.size() && it < 10; it++) {
+        std::size_t messages = 0;
+        while(red < shallow_xbuf.size()) {
+            if(messages >= maximum_outstanding_requests + 1) {
+                _war("DNS_Inspector::update[%s]: too many messages in one output block",
+                     cx->c_type());
+                cx->writebuf()->clear();
+                cx->error(true);
+                break;
+            }
             if (ptr) {
-                _err("DNS_Inspector::update[%s]: deleting response ptr from previous loop:%d", cx->c_type(), it - 1);
+                _dia("DNS_Inspector::update[%s]: replacing parsed response object",
+                     cx->c_type());
             }
             ptr = std::make_shared<DNS_Response>();
             auto ptr_response = std::dynamic_pointer_cast<DNS_Response>(ptr);
@@ -238,8 +308,9 @@ void DNS_Inspector::update(AppHostCX* cx) {
             }
 
             auto cur_red = load_status.value();
+            ++messages;
 
-            if (is_tcp && cur_red != cur_buf.size())
+            if (cur_red != cur_buf.size())
                 break;
 
             if (opt_cached_responses and ptr_response) {
@@ -261,12 +332,14 @@ void DNS_Inspector::update(AppHostCX* cx) {
             _dia("DNS_Inspector::update[%s]: loaded new response (at %d size %d out of %d)", cx->c_type(), red,
                  mem_pos, mem_len);
             if (!validate_response(ptr_response)) {
-                // invalid, delete
-
+                // Do not forward the mismatched message. A UDP flow must stay
+                // usable for the legitimate reply which may still follow;
+                // for DNS/TCP we cannot remove one framed response from the
+                // already queued stream safely, so retire that connection.
                 cx->writebuf()->clear();
-                cx->error(true);
-                _war("DNS inspection: cannot find corresponding DNS request id 0x%x: dropping connection.",
-                     ptr->id());
+                if(is_tcp) cx->error(true);
+                _war("DNS inspection: response id 0x%x has no matching question: dropping %s.",
+                     ptr->id(), is_tcp ? "connection" : "datagram");
             } else {
                 // DNS response is valid
                 responses_++;
@@ -298,21 +371,30 @@ void DNS_Inspector::update(AppHostCX* cx) {
 
 bool DNS_Inspector::store(std::shared_ptr<DNS_Response> ptr) {
 
-    bool is_a_record = true;
+    if(!ptr) return false;
+    // cache_key_0() is deliberately a compact single-question cache key. Do
+    // not alias distinct multi-question transactions through that key.
+    if(ptr->questions().size() != 1) return false;
+    // TC means that this wire response is only a prefix. The client may retry
+    // over TCP, but the partial address set must never become policy/cache
+    // authority in the meantime.
+    if((ptr->flags() & 0x0200U) != 0 || (ptr->flags() & 0x000fU) != 0)
+        return false;
+
+    const bool is_a_record = !ptr->get_a_anwsers().empty();
 
     std::string ip = ptr->answer_str_A();
-    if(! ip.empty()) {
+    if(is_a_record && !ip.empty()) {
         _not("DNS inspection: %s is at%s",ptr->question_str_0().c_str(),ip.c_str()); //ip is already prepended with " "
     }
     else {
         _dia("DNS inspection: non-A response for %s",ptr->question_str_0().c_str());
-        is_a_record = false;
     }
     _dia("DNS response: %s",ptr->str().c_str());
 
 
     if(is_a_record) {
-        std::string question = ptr->question_str_0();
+        std::string question = ptr->cache_key_0();
 
         {
             auto lc_ = std::scoped_lock(DNS::get_dns_lock());
@@ -362,18 +444,44 @@ bool DNS_Inspector::store(std::shared_ptr<DNS_Response> ptr) {
 }
 
 bool DNS_Inspector::validate_response(std::shared_ptr<DNS_Response> ptr) {
+    if(!ptr) return false;
 
-    unsigned int id = ptr->id();
-    auto req = find_request(id);
-    if(req) {
-        _dia("DNS_Inspector::validate_response: request 0x%x found",id);
-        return true;
-
-    } else {
-        _dia("DNS_Inspector::validate_response: request 0x%x not found",id);
-        _err("validating DNS response for %s failed.",ptr->str().c_str());
+    const auto id = ptr->id();
+    auto request_it = requests_.find(id);
+    if(request_it == requests_.end() || !request_it->second) {
+        _dia("DNS_Inspector::validate_response: request 0x%x not found", id);
+        _err("validating DNS response for %s failed.", ptr->str().c_str());
         return false;
     }
+
+    // A transaction ID alone is not a request identity: it is only 16 bits
+    // and may be guessed, reused or collide. Bind the reply to the complete
+    // question before consuming the outstanding transaction.  A mismatched
+    // datagram must not make the later legitimate reply look unsolicited.
+    auto const& request = request_it->second;
+    auto const& expected = request->questions();
+    auto const& received = ptr->questions();
+    bool valid = (ptr->flags() & 0x8000U) != 0 &&
+                 (ptr->flags() & 0x7800U) == (request->flags() & 0x7800U) &&
+                 expected.size() == received.size() && !expected.empty();
+    if(valid) {
+        for(std::size_t i = 0; i < expected.size(); ++i) {
+            if(expected[i].rec_type != received[i].rec_type ||
+               expected[i].rec_class != received[i].rec_class ||
+               !dns_names_equal(expected[i].rec_str, received[i].rec_str)) {
+                valid = false;
+                break;
+            }
+        }
+    }
+
+    if(!valid) {
+        _war("DNS response 0x%x does not match its outstanding question", id);
+        return false;
+    }
+    requests_.erase(request_it);
+    _dia("DNS_Inspector::validate_response: request 0x%x matched", id);
+    return true;
 }
 
 std::string DNS_Inspector::to_string(int verbosity) const {
@@ -401,9 +509,32 @@ void DNS_Inspector::apply_verdict(AppHostCX* cx) {
 
         }
 
+        auto write_or_queue_tail = [cx](unsigned char* data,
+                                        std::size_t size) {
+            const auto written = cx->io_write(data, size, MSG_NOSIGNAL);
+            if(written < 0) {
+                if(errno == EAGAIN || errno == EWOULDBLOCK) {
+                    cx->writebuf()->append(data, size);
+                } else {
+                    cx->error(true);
+                }
+                return written;
+            }
+            const auto consumed = std::min(
+                static_cast<std::size_t>(written), size);
+            if(consumed < size) {
+                // TCP writes may make positive partial progress. Preserve the
+                // unsent suffix in the ordinary output queue so the proxy's
+                // next writable dispatch completes this response in order.
+                cx->writebuf()->append(data + consumed, size - consumed);
+            }
+            return written;
+        };
+
         if(! is_tcp) {
             _deb("udp encapsulation");
-            int w = cx->io_write(cached_response->data(), cached_response->size(), MSG_NOSIGNAL);
+            int w = write_or_queue_tail(
+                cached_response->data(), cached_response->size());
 
             _dia("DNS_Inspector::apply_verdict: %d bytes written of cached response size %d", w, cached_response->size());
         } else {
@@ -413,7 +544,7 @@ void DNS_Inspector::apply_verdict(AppHostCX* cx) {
             buffer b;
             b.append(&len,sizeof(uint16_t));
             b.append(cached_response->data(),cached_response->size());
-            int w = cx->io_write(b.data(), b.size(), MSG_NOSIGNAL);
+            int w = write_or_queue_tail(b.data(), b.size());
 
             _dia("DNS_Inspector::apply_verdict: %d bytes written of cached response size %d",w,b.size());
         }

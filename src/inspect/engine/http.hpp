@@ -40,7 +40,12 @@
 #ifndef HTTP1ENGINE_HPP
 #define  HTTP1ENGINE_HPP
 
+#include <array>
 #include <regex>
+#include <deque>
+#include <limits>
+#include <unordered_map>
+#include <unordered_set>
 
 #include <inspect/engine.hpp>
 #ifdef USE_HPACK
@@ -268,6 +273,20 @@ namespace sx::engine::http {
             value_list_t request_headers_;
             value_list_t response_headers_;
             std::optional<GunZip> gzip;
+            bool request_ended_ = false;
+            bool response_ended_ = false;
+            bool request_invalid_ = false;
+            bool response_invalid_ = false;
+            std::optional<std::uint64_t> request_content_length_;
+            std::uint64_t request_body_bytes_ = 0;
+            std::int64_t request_flow_window_ = 65535;
+            std::optional<std::uint64_t> response_content_length_;
+            std::uint64_t response_body_bytes_ = 0;
+            std::int64_t response_flow_window_ = 65535;
+            bool response_body_forbidden_ = false;
+            bool response_final_headers_ = false;
+            buffer doh_response_body_{0};
+            bool doh_response_finished_ = false;
 
             std::string domain_;
             std::string hostname_;
@@ -329,17 +348,61 @@ namespace sx::engine::http {
         struct Http2Connection {
             struct PendingHeaderBlock {
                 long stream_id = -1;
+                uint32_t promised_stream_id = 0;
+                uint8_t initial_flags = 0;
+                bool decode_only = false;
                 std::vector<unsigned char> bytes;
 
                 [[nodiscard]] bool active() const noexcept { return stream_id >= 0; }
-                void clear() { stream_id = -1; bytes.clear(); }
+                void clear() {
+                    stream_id = -1;
+                    promised_stream_id = 0;
+                    initial_flags = 0;
+                    decode_only = false;
+                    bytes.clear();
+                }
             };
 
             // map
             mp::map<long,Http2Stream> streams;
             long latest_request_stream_id = -1;
+            uint32_t highest_client_stream_id = 0;
+            uint32_t highest_promised_stream_id = 0;
+            std::unordered_set<uint32_t> promised_streams;
+            std::unordered_set<uint32_t> active_promised_streams;
+            std::unordered_map<uint32_t, std::int64_t> promised_flow_windows;
+            std::unordered_set<uint32_t> refused_promised_streams;
+            std::unordered_set<uint32_t> refused_client_streams;
+            std::optional<uint32_t> server_goaway_last_stream_id;
+            std::optional<uint32_t> client_goaway_last_stream_id;
+            bool server_push_enabled = true;
+            bool extended_connect_enabled = false;
+            uint32_t max_client_streams = std::numeric_limits<uint32_t>::max();
+            uint32_t max_server_streams = std::numeric_limits<uint32_t>::max();
+            std::int64_t client_connection_window = 65535;
+            std::int64_t server_connection_window = 65535;
+            std::int64_t client_initial_stream_window = 65535;
+            std::int64_t server_initial_stream_window = 65535;
+            uint64_t left_settings_awaiting_ack = 0;
+            uint64_t right_settings_awaiting_ack = 0;
+#ifdef USE_HPACK
+            std::deque<std::vector<uint32_t>> left_header_table_settings_pending;
+            std::deque<std::vector<uint32_t>> right_header_table_settings_pending;
+#endif
+            uint32_t left_max_frame_size = 16384;
+            uint32_t right_max_frame_size = 16384;
+            bool connection_invalid = false;
+            bool client_preface_complete = false;
+            bool left_first_frame_seen = false;
+            bool left_first_frame_is_settings = false;
+            bool right_first_frame_seen = false;
+            bool right_first_frame_is_settings = false;
             PendingHeaderBlock request_headers_pending;
             PendingHeaderBlock response_headers_pending;
+            std::vector<unsigned char> client_preface_pending;
+            std::vector<unsigned char> left_frame_pending;
+            std::vector<unsigned char> right_frame_pending;
+            std::deque<std::array<unsigned char, 8>> client_pings_pending;
 #ifdef USE_HPACK
             std::shared_ptr<HPACK::decoder_t> request_decoder = std::make_shared<HPACK::decoder_t>();
             std::shared_ptr<HPACK::decoder_t> response_decoder = std::make_shared<HPACK::decoder_t>();

@@ -676,7 +676,13 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
             set_tests_properties(unit.core integration.quic_testbed
                     external.inet external.pcap_experiments external.dns PROPERTIES
                     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
-            set_tests_properties(unit.core PROPERTIES TIMEOUT 600)
+            if(SMITHPROXY_COVERAGE)
+                # The TLS/revocation corpus is intentionally broad and gcov
+                # makes it several times slower than the normal unit run.
+                set_tests_properties(unit.core PROPERTIES TIMEOUT 1800)
+            else()
+                set_tests_properties(unit.core PROPERTIES TIMEOUT 600)
+            endif()
             set_tests_properties(integration.quic_testbed PROPERTIES TIMEOUT 180)
             set_tests_properties(external.inet external.pcap_experiments external.dns
                     PROPERTIES TIMEOUT 180)
@@ -686,6 +692,21 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
 
             find_package(Python3 COMPONENTS Interpreter)
             if(Python3_Interpreter_FOUND)
+                if(USE_LIBSSH)
+                    execute_process(
+                            COMMAND ${Python3_EXECUTABLE} -c "import paramiko"
+                            RESULT_VARIABLE PARAMIKO_IMPORT_RESULT
+                            OUTPUT_QUIET ERROR_QUIET)
+                    if(PARAMIKO_IMPORT_RESULT EQUAL 0)
+                        add_test(NAME integration.ssh_mitm
+                                COMMAND ${Python3_EXECUTABLE}
+                                ${PROJECT_SOURCE_DIR}/tests/ssh/ssh_mitm_e2e.py
+                                $<TARGET_FILE:smithproxy>
+                                --source ${PROJECT_SOURCE_DIR})
+                        set_tests_properties(integration.ssh_mitm PROPERTIES
+                                LABELS "native;integration;ssh" TIMEOUT 180)
+                    endif()
+                endif()
                 add_test(NAME integration.httpconnect
                         COMMAND ${Python3_EXECUTABLE}
                         ${PROJECT_SOURCE_DIR}/tests/httpconnect/http_connect_integration.py
@@ -737,6 +758,11 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                 add_test(NAME unit.patch_runner_pplay
                         COMMAND ${Python3_EXECUTABLE}
                         ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-pplay-fuzz.py)
+                add_test(NAME unit.patch_runner_session_list_probe
+                        COMMAND ${Python3_EXECUTABLE}
+                        ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-session-list-probe.py)
+                add_test(NAME unit.patch_runner_native_parallel
+                        COMMAND ${PROJECT_SOURCE_DIR}/tests/patch-runner/test-native-parallel.sh)
                 add_test(NAME integration.wireshark_spq1
                         COMMAND ${Python3_EXECUTABLE}
                         ${PROJECT_SOURCE_DIR}/tools/wireshark/test_spquic.py)
@@ -750,7 +776,8 @@ IF (CMAKE_BUILD_TYPE STREQUAL "Debug")
                         integration.libcli2_process integration.main_process integration.redirect PROPERTIES TIMEOUT 120)
                 set_tests_properties(
                         unit.patch_runner_fuzz_areas unit.patch_runner_fuzz_seeds
-                        unit.patch_runner_pplay PROPERTIES LABELS "native;unit")
+                        unit.patch_runner_pplay unit.patch_runner_native_parallel
+                        PROPERTIES LABELS "native;unit")
             endif()
         endif()
     endif()
@@ -795,6 +822,7 @@ if(SMITHPROXY_FUZZING)
 
     add_executable(quic_lifecycle_fuzzer
             src/proxy/quic/openssl.cpp
+            src/proxy/quic/wire.cpp
             src/proxy/quic/fuzz/lifecycle_fuzzer.cpp)
     target_link_libraries(quic_lifecycle_fuzzer socle_lib pthread crypto ssl)
     smithproxy_fuzzer(quic_lifecycle_fuzzer)
@@ -848,12 +876,14 @@ if(SMITHPROXY_TLS_SANITIZERS)
                 -fsanitize=address,undefined
                 -fno-omit-frame-pointer)
     endforeach()
-    # sx_gtests deliberately links inspector helpers without the full
+    # These reduced unit targets deliberately link inspector helpers without the full
     # MitmHostCX implementation. UBSan's vptr instrumentation would add an
     # otherwise unused RTTI reference and make this reduced unit target fail
     # to link. ASan and all other UBSan checks stay enabled.
-    target_compile_options(sx_gtests PRIVATE -fno-sanitize=vptr)
-    target_link_options(sx_gtests PRIVATE -fno-sanitize=vptr)
+    foreach(reduced_inspector_target sx_gtests sx_gtests_http1)
+        target_compile_options(${reduced_inspector_target} PRIVATE -fno-sanitize=vptr)
+        target_link_options(${reduced_inspector_target} PRIVATE -fno-sanitize=vptr)
+    endforeach()
     # LeakSanitizer cannot operate under ptrace-based CI/sandbox runners.
     # Keep ASan bounds/UAF checks and UBSan enabled there.
     get_property(sanitized_tests DIRECTORY PROPERTY TESTS)
@@ -895,6 +925,9 @@ endif()
 
 if("${USE_LMHPP}" STREQUAL "Y")
     target_link_libraries(smithproxy microhttpd)
+    if(TARGET sx_gtests)
+        target_link_libraries(sx_gtests microhttpd)
+    endif()
 else()
     message(">> libmicrohttpd not used")
 endif()

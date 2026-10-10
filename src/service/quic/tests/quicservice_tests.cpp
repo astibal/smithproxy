@@ -3,6 +3,7 @@
 #include "service/quic/quicservice.hpp"
 
 #include "proxy/multiflow/mfflowcom.hpp"
+#include <sslcertstore.hpp>
 
 #include <chrono>
 #include <ctime>
@@ -17,7 +18,33 @@
 
 namespace quic = sx::quic;
 
-TEST(QuicListenerService, PreparesAndStopsLoopbackListener) {
+class QuicListenerService : public ::testing::Test {
+protected:
+    static inline std::string saved_ca_file;
+    static inline std::string saved_ca_path;
+    static inline bool saved_initialized = false;
+
+    static void SetUpTestSuite() {
+        auto& factory = SSLFactory::factory();
+        saved_ca_file = factory.ca_file();
+        saved_ca_path = factory.ca_path();
+        saved_initialized = factory.is_initialized.load();
+        factory.destroy();
+        factory.ca_file() = "etc/certs/default/ca-cert.pem";
+        factory.ca_path().clear();
+        ASSERT_TRUE(factory.load_trust_store());
+    }
+
+    static void TearDownTestSuite() {
+        auto& factory = SSLFactory::factory();
+        factory.destroy();
+        factory.ca_file() = saved_ca_file;
+        factory.ca_path() = saved_ca_path;
+        if (saved_initialized) factory.init();
+    }
+};
+
+TEST_F(QuicListenerService, PreparesAndStopsLoopbackListener) {
     quic::listener_service service(0,
                                    "etc/certs/default/srv-cert.pem",
                                    "etc/certs/default/srv-key.pem",
@@ -40,7 +67,7 @@ TEST(QuicListenerService, PreparesAndStopsLoopbackListener) {
 }
 
 #if SMITHPROXY_OPENSSL_QUIC
-TEST(QuicListenerService, IdleListenerSleepsUntilExplicitWakeup) {
+TEST_F(QuicListenerService, IdleListenerSleepsUntilExplicitWakeup) {
     quic::listener_service service(0,
                                    "etc/certs/default/srv-cert.pem",
                                    "etc/certs/default/srv-key.pem",
@@ -89,7 +116,7 @@ bool nonblocking(int fd) {
 
 } // namespace
 
-TEST(QuicListenerService, CleansUpHandshakeTimeout) {
+TEST_F(QuicListenerService, CleansUpHandshakeTimeout) {
     auto client_context = quic::make_openssl_quic_context(false);
     ASSERT_NE(client_context, nullptr);
     SSL_CTX_set_verify(client_context.get(), SSL_VERIFY_NONE, nullptr);
@@ -153,7 +180,7 @@ TEST(QuicListenerService, CleansUpHandshakeTimeout) {
     close(silent_origin_fd);
 }
 
-TEST(QuicListenerService, RejectsSessionsBeyondConfiguredLimit) {
+TEST_F(QuicListenerService, RejectsSessionsBeyondConfiguredLimit) {
     auto client_context = quic::make_openssl_quic_context(false);
     ASSERT_NE(client_context, nullptr);
     SSL_CTX_set_verify(client_context.get(), SSL_VERIFY_NONE, nullptr);
@@ -200,7 +227,7 @@ TEST(QuicListenerService, RejectsSessionsBeyondConfiguredLimit) {
     external->close();
 }
 
-TEST(QuicListenerService, ProxiesStreamAndCleansUpIdleSession) {
+TEST_F(QuicListenerService, ProxiesStreamAndCleansUpIdleSession) {
     auto origin_context = quic::make_openssl_quic_context(true);
     auto client_context = quic::make_openssl_quic_context(false);
     ASSERT_NE(origin_context, nullptr);

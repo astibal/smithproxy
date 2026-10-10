@@ -26,7 +26,33 @@
 namespace quic = sx::quic;
 namespace mf = sx::multiflow;
 
-TEST(OpenSslQuic, CapabilityMatchesBuildVersion) {
+class OpenSslQuic : public ::testing::Test {
+protected:
+    static inline std::string saved_ca_file;
+    static inline std::string saved_ca_path;
+    static inline bool saved_initialized = false;
+
+    static void SetUpTestSuite() {
+        auto& factory = SSLFactory::factory();
+        saved_ca_file = factory.ca_file();
+        saved_ca_path = factory.ca_path();
+        saved_initialized = factory.is_initialized.load();
+        factory.destroy();
+        factory.ca_file() = "etc/certs/default/ca-cert.pem";
+        factory.ca_path().clear();
+        ASSERT_TRUE(factory.load_trust_store());
+    }
+
+    static void TearDownTestSuite() {
+        auto& factory = SSLFactory::factory();
+        factory.destroy();
+        factory.ca_file() = saved_ca_file;
+        factory.ca_path() = saved_ca_path;
+        if (saved_initialized) factory.init();
+    }
+};
+
+TEST_F(OpenSslQuic, CapabilityMatchesBuildVersion) {
 #if OPENSSL_VERSION_NUMBER >= 0x30500000L && !defined(OPENSSL_NO_QUIC)
     EXPECT_TRUE(quic::openssl_quic_available());
 #else
@@ -34,7 +60,7 @@ TEST(OpenSslQuic, CapabilityMatchesBuildVersion) {
 #endif
 }
 
-TEST(OpenSslQuic, CreatesClientAndServerContextsWhenAvailable) {
+TEST_F(OpenSslQuic, CreatesClientAndServerContextsWhenAvailable) {
     auto client = quic::make_openssl_quic_context(false);
     auto server = quic::make_openssl_quic_context(true);
 
@@ -209,7 +235,7 @@ TEST(OpenSslQuicDispatcher, SeparatesCidFamiliesSharingOneUdpTuple) {
     EXPECT_FALSE(routes.resolve(packet.data(), packet.size()));
 }
 
-TEST(OpenSslQuic, CreatesNonBlockingServerListenerObject) {
+TEST_F(OpenSslQuic, CreatesNonBlockingServerListenerObject) {
     auto context = quic::make_openssl_quic_context(true);
     ASSERT_NE(context, nullptr) << quic::openssl_error_stack();
 
@@ -220,7 +246,7 @@ TEST(OpenSslQuic, CreatesNonBlockingServerListenerObject) {
     EXPECT_EQ(SSL_get_blocking_mode(listener.get()), 0);
 }
 
-TEST(OpenSslQuic, OutgoingAdapterCompletesHandshake) {
+TEST_F(OpenSslQuic, OutgoingAdapterCompletesHandshake) {
     auto server_context = quic::make_openssl_quic_context(true);
     auto client_context = quic::make_openssl_quic_context(false);
     ASSERT_NE(server_context, nullptr);
@@ -314,7 +340,7 @@ TEST(OpenSslQuic, OutgoingAdapterCompletesHandshake) {
     close(server_fd);
 }
 
-TEST(OpenSslQuic, TransparentDispatcherKeepsConcurrentHandshakesIsolated) {
+TEST_F(OpenSslQuic, TransparentDispatcherKeepsConcurrentHandshakesIsolated) {
     auto server_context = quic::make_openssl_quic_context(true);
     auto client_context = quic::make_openssl_quic_context(false);
     ASSERT_NE(server_context, nullptr);
@@ -387,7 +413,7 @@ TEST(OpenSslQuic, TransparentDispatcherKeepsConcurrentHandshakesIsolated) {
     close(server_fd);
 }
 
-TEST(OpenSslQuic, OutgoingAdapterVerifiesChainAndServerName) {
+TEST_F(OpenSslQuic, OutgoingAdapterVerifiesChainAndServerName) {
     auto server_context = quic::make_openssl_quic_context(true);
     auto client_context = quic::make_openssl_quic_context(false);
     ASSERT_NE(server_context, nullptr);
@@ -440,7 +466,7 @@ TEST(OpenSslQuic, OutgoingAdapterVerifiesChainAndServerName) {
     close(server_fd);
 }
 
-TEST(OpenSslQuic, LoopbackStreamProducesSelfDecryptingPcapng) {
+TEST_F(OpenSslQuic, LoopbackStreamProducesSelfDecryptingPcapng) {
     if (::system("command -v tshark >/dev/null 2>&1") != 0) {
         GTEST_SKIP() << "tshark is required to verify embedded QUIC secrets";
     }

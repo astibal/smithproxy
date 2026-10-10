@@ -68,6 +68,7 @@ public:
     std::shared_ptr<buffer> verdict_response() override { return cached_response; };
 private:
     static inline logan_lite log {"com.dns" };
+    static constexpr std::size_t maximum_outstanding_requests = 1024;
 
     bool is_tcp = false;
 

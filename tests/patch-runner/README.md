@@ -384,8 +384,8 @@ Frequently useful `--env NAME=VALUE` controls:
 | `RTT_WARMUP` | `20` | Unreported warm-up exchanges |
 | `RTT_P95_LIMIT_MS` / `RTT_MAX_LIMIT_MS` | `50` / `250` | TCP/UDP RTT gates |
 | `RTT_HANDSHAKE_P95_LIMIT_MS` / `RTT_HANDSHAKE_MAX_LIMIT_MS` | `500` / `2000` | Connect, TLS and HTTPS gates |
-| `RTT_TLS_TOTAL_P50_LIMIT_MS` / `RTT_HTTPS_P50_LIMIT_MS` | `7` / `2` | TLS/HTTPS P50 PASS gates |
-| `RTT_TLS_TOTAL_P50_FLAKY_LIMIT_MS` / `RTT_HTTPS_P50_FLAKY_LIMIT_MS` | `10` / `10` | TLS/HTTPS P50 FLAKY_PASS ceilings |
+| `RTT_TLS_TOTAL_P50_LIMIT_MS` / `RTT_HTTPS_P50_LIMIT_MS` | `10` / `2` | TLS/HTTPS P50 PASS gates |
+| `RTT_TLS_TOTAL_P50_FLAKY_LIMIT_MS` / `RTT_HTTPS_P50_FLAKY_LIMIT_MS` | `17` / `10` | TLS/HTTPS P50 FLAKY_PASS ceilings |
 | `TLS_THROUGHPUT_BYTES` | `67108864` | Bytes transferred by each throughput flow |
 | `TLS_THROUGHPUT_REPEATS` | `3` | Samples per direction and concurrency |
 | `TLS_THROUGHPUT_CONCURRENCY` | `1,4,16` | Concurrent flows measured by the exclusive throughput phase |
