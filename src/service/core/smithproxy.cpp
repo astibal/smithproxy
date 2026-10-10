@@ -815,16 +815,26 @@ bool SmithProxy::init_syslog() {
 
     AddressInfo ai;
     ai.str_host = CfgFactory::get()->syslog_server;
-    ai.port = htons(raw::down_cast_signed<unsigned short>(CfgFactory::get()->syslog_port).value_or(514));
+    ai.port = raw::down_cast_signed<unsigned short>(CfgFactory::get()->syslog_port).value_or(514);
     ai.family = CfgFactory::get()->syslog_family == 6 ? AF_INET6 : AF_INET;
-    ai.pack();
+    if(!ai.pack()) {
+        _err("cannot parse syslog server address '%s'", CfgFactory::get()->syslog_server.c_str());
+        return false;
+    }
 
     // create UDP socket
-    int syslog_socket = socle::socket(ai.family, SOCK_DGRAM, IPPROTO_UDP);
+    int syslog_socket = socle::socket(ai.family,
+                                      SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP);
+    if(syslog_socket < 0) {
+        _err("cannot create syslog socket: %s", string_error().c_str());
+        return false;
+    }
 
-    if(0 != ::connect(syslog_socket,(sockaddr*) ai.as_ss(),sizeof(sockaddr_storage))) {
+    const socklen_t address_size = ai.family == AF_INET ? sizeof(sockaddr_in) : sizeof(sockaddr_in6);
+    if(0 != ::connect(syslog_socket, reinterpret_cast<sockaddr*>(ai.as_ss()), address_size)) {
         _err("cannot connect syslog socket %d: %s", syslog_socket, string_error().c_str());
         ::close(syslog_socket);
+        return false;
     } else {
 
         Log::get()->remote_targets(string_format("syslog-udp%d-%d", CfgFactory::get()->syslog_family, syslog_socket),
@@ -885,6 +895,7 @@ bool SmithProxy::load_config(std::string& config_f, bool reload) {
         CfgFactory::get()->load_db_prof_tls();
         CfgFactory::get()->load_db_prof_ssh();
         CfgFactory::get()->load_db_prof_alg_dns();
+        CfgFactory::get()->load_db_prof_script();
         CfgFactory::get()->load_db_prof_auth();
         CfgFactory::get()->load_db_routing();
 

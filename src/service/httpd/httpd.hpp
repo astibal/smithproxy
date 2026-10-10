@@ -52,6 +52,7 @@
 #include <common/display.hpp>
 
 #include <openssl/rand.h>
+#include <openssl/crypto.h>
 
 namespace sx::webserver {
 
@@ -167,13 +168,13 @@ struct HttpSessions {
 
     static std::string generate_auth_token() {
         unsigned char rand_pool[16];
-        RAND_bytes(rand_pool, 16);
+        if(RAND_bytes(rand_pool, sizeof(rand_pool)) != 1) return {};
         return hex_print(rand_pool, 16);
     }
 
     static std::string generate_csrf_token() {
         unsigned char rand_pool[16];
-        RAND_bytes(rand_pool, 16);
+        if(RAND_bytes(rand_pool, sizeof(rand_pool)) != 1) return {};
         return hex_print(rand_pool, 16);
     }
 
@@ -183,7 +184,9 @@ struct HttpSessions {
         if(auth_token.empty() or csrf_token.empty()) return false;
 
         auto db_csrf_token = table_value(auth_token, "csrf_token");
-        bool ret = ( csrf_token == db_csrf_token );
+        bool ret = csrf_token.size() == db_csrf_token.size() &&
+                   CRYPTO_memcmp(csrf_token.data(), db_csrf_token.data(),
+                                 csrf_token.size()) == 0;
 
         if(not ret) {
             auto lc_ = std::scoped_lock(lock);
@@ -202,6 +205,16 @@ struct HttpSessions {
     static bool has_api_keys() {
         auto lc_ = std::scoped_lock(lock);
         return !api_keys.empty();
+    }
+
+    static bool api_header_allowed() {
+        auto lc_ = std::scoped_lock(lock);
+        return allow_api_header;
+    }
+
+    static bool pam_login_enabled() {
+        auto lc_ = std::scoped_lock(lock);
+        return pam_login;
     }
 
     static std::set<std::string> api_keys_snapshot() {

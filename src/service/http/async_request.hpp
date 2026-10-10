@@ -98,7 +98,12 @@ namespace sx::http {
             void execute(std::atomic_bool const& stop_flag) override {
                 if (stop_flag) return;
                 if(log_stream.has_value()) {
-                    emit_url_wait_log(settings, payload, log_stream.value(), hook);
+                    std::stringstream private_log;
+                    emit_url_wait_log(settings, payload, private_log, hook);
+                    // The worker marks this task finished under the pool lock
+                    // immediately after execute() returns. Diagnostics read
+                    // the published buffer only after observing that flag.
+                    log_stream->get().str(private_log.str());
                 }
                 else {
                     std::stringstream log;

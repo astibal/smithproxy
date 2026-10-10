@@ -46,6 +46,8 @@ TEST(UtilityThreadPool, AllocatesOneMetadataSlotPerWorker) {
     EXPECT_EQ(info.info_details.size(), 3U);
     EXPECT_EQ(info.log_buffer.size(), 3U);
     EXPECT_EQ(info.is_finished.size(), 3U);
+    EXPECT_TRUE(std::all_of(info.is_finished.begin(), info.is_finished.end(),
+                            [](bool finished) { return finished; }));
 }
 
 TEST(WebhookRefreshGate, CoalescesAcceptedResponseBursts) {

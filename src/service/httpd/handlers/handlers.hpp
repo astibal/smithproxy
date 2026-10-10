@@ -132,7 +132,7 @@ namespace sx::webserver::authorized {
 
                 validate_and_call(cookies_headers.value().first, cookies_headers.value().second);
             }
-            else if (auto key = extract_api_key(); key.has_value() and HttpSessions::allow_api_header and meth == "GET") {
+            else if (auto key = extract_api_key(); key.has_value() and HttpSessions::api_header_allowed() and meth == "GET") {
                 // API key is fine only for GET requests
                 validate_api_key_and_call(key.value());
             }
