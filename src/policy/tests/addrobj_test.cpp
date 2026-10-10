@@ -89,5 +89,11 @@ TEST(FqdnAddressTest, MatchesCachedAddressAnswers) {
     EXPECT_EQ(address.find_dns_response(CIDR_IPV4), response);
     EXPECT_NE(address.to_string(iDEB).find("cached A"), std::string::npos);
 
+    // The cache container can outlive an individual DNS RR. Policy matching
+    // must not keep authorizing the stale address for that entire lifetime.
+    response->loaded_at = time(nullptr) - 61;
+    EXPECT_FALSE(address.match(matching.get()));
+    EXPECT_TRUE(response->get_a_anwsers().empty());
+
     DNS::get_dns_cache().clear();
 }
